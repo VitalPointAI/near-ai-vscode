@@ -4,7 +4,7 @@ import * as vscode from 'vscode';
 import { describePlan, type MemberDecision, type UpdateDecisions } from '../agent/teamUpdate';
 import { TeamLibrary } from '../agent/teams';
 import { runInProgress, whenIdle } from './runActivity';
-import { PartialUpdateError, RunStartedError, TeamChangedError, TeamUpdater, UpdateNotices, type TeamUpdatePreview } from './teamUpdates';
+import { PartialUpdateError, resolveTeamFile, RunStartedError, TeamChangedError, TeamPathError, TeamUpdater, UpdateNotices, type TeamUpdatePreview } from './teamUpdates';
 
 // "NEAR AI: Update Team…" and the one-time "Team update available" notice. Nothing is written
 // without a preview and a confirmation, never while a run is in progress, and every update can be
@@ -78,6 +78,17 @@ export async function updateTeam(library: TeamLibrary, requested?: string): Prom
     const pick = await vscode.window.showQuickPick(previews.map((preview) => ({ label: preview.name, description: `${preview.plan.template.label} template ${preview.plan.template.fromVersion ? `v${preview.plan.template.fromVersion}` : '(no version recorded)'} → v${preview.plan.template.toVersion}${preview.plan.upToDate ? ' · up to date' : ''}`, detail: preview.file, file: preview.file })), { title: 'Update which team?' });
     if (!pick) return;
     file = pick.file;
+  }
+  // The command takes a path from anyone who can run commands: only a real team file in an allowed place is read or written.
+  const roots = (vscode.workspace.workspaceFolders ?? []).map((folder) => folder.uri.fsPath);
+  {
+    try {
+      file = await resolveTeamFile(library, file, roots);
+    } catch (error) {
+      if (!(error instanceof TeamPathError)) throw error;
+      // A missing file is reported below, with the other reasons a listed team can no longer be updated.
+      if (!/does not exist\.$/.test(error.message)) { void vscode.window.showErrorMessage(error.message); return; }
+    }
   }
   // The file may have been edited (or deleted) since the picker or the studio card listed it.
   let preview: TeamUpdatePreview | undefined;

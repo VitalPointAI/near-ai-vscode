@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -12,7 +12,7 @@ const errors: Array<{ message: string; items: string[] }> = [];
 const opened: string[] = [];
 let errorAnswer: string | undefined;
 const vscodeStub = {
-  workspace: { workspaceFolders: [], getConfiguration: () => ({ get: (_key: string, fallback: unknown) => fallback }), fs: { stat: async () => ({}) }, openTextDocument: async () => ({}) },
+  workspace: { workspaceFolders: [] as Array<{ uri: { fsPath: string } }>, getConfiguration: () => ({ get: (_key: string, fallback: unknown) => fallback }), fs: { stat: async () => ({}) }, openTextDocument: async () => ({}) },
   window: {
     showErrorMessage: async (message: string, ...items: string[]) => { errors.push({ message, items }); return errorAnswer; },
     showInformationMessage: async () => undefined,
@@ -35,7 +35,8 @@ test('Update Team on a file that no longer parses, or no longer exists, says so 
   const { updateTeam } = load();
   const base = await mkdtemp(path.join(tmpdir(), 'near-ai-update-cmd-'));
   const library = new TeamLibrary(path.join(base, 'global'));
-  const broken = path.join(base, 'broken.md');
+  await mkdir(library.directory, { recursive: true });
+  const broken = path.join(library.directory, 'broken.md');
   // A research team (so Update Team recognises it) whose name was deleted after it was listed.
   await writeFile(broken, '---\ndescription: no name\n---\n\n## investigator\n\nFind.\n\n## source-verifier\n\nCheck.\n\n## analyst\n\nWeigh.\n');
   errorAnswer = 'Open team file';
@@ -45,8 +46,49 @@ test('Update Team on a file that no longer parses, or no longer exists, says so 
   assert.deepEqual(errors[0].items, ['Open team file']);
   assert.deepEqual(opened, [broken], 'the file opens so it can be fixed');
   errorAnswer = undefined;
-  await updateTeam(library, path.join(base, 'gone.md'));
+  await updateTeam(library, path.join(library.directory, 'gone.md'));
   assert.equal(errors.length, 2);
   assert.match(errors[1].message, /^gone\.md was not updated because it no longer exists\./);
   assert.deepEqual(errors[1].items, [], 'nothing to open');
+});
+
+test('Update Team writes only a project team file or a team in the library, never a path it is handed elsewhere', async () => {
+  const { updateTeam } = load();
+  const { resolveTeamFile } = require('../services/teamUpdates') as typeof import('../services/teamUpdates');
+  const base = await mkdtemp(path.join(tmpdir(), 'near-ai-update-path-'));
+  const library = new TeamLibrary(path.join(base, 'global'));
+  await mkdir(path.join(library.directory, '.versions'), { recursive: true });
+  const root = path.join(base, 'project');
+  await mkdir(path.join(root, '.planning', '.near-ai'), { recursive: true });
+  const team = await readFile(path.join(__dirname, '..', '..', 'test', 'fixtures', 'teams', 'wearable-research-team.md'), 'utf8');
+  const projectFile = path.join(root, '.planning', '.near-ai', 'team.md');
+  const libraryFile = path.join(library.directory, 'researchx.md');
+  const outside = path.join(path.dirname(library.directory), 'outside.md');
+  for (const file of [projectFile, libraryFile, outside, path.join(library.directory, '.versions', 'old.md'), path.join(root, '.planning', '.near-ai', 'other.md')]) await writeFile(file, team);
+  await symlink(outside, path.join(library.directory, 'linked.md'));
+  // Allowed: the project team file (when its project is open) and a team directly in the library.
+  assert.equal(await resolveTeamFile(library, projectFile, [root]), projectFile);
+  assert.equal(await resolveTeamFile(library, libraryFile, [root]), libraryFile);
+  assert.equal(await resolveTeamFile(library, path.join(library.directory, '.versions', '..', 'researchx.md'), []), libraryFile, 'a path that normalises into the library is fine');
+  // Refused: outside both, traversal out of the library, a symlink in the library, the version history, another file, and a project not open.
+  const refused: Array<[string, string[], RegExp]> = [
+    [outside, [root], /is neither\.$/],
+    [path.join(library.directory, '..', 'outside.md'), [root], /is neither\.$/],
+    [path.join(library.directory, 'linked.md'), [root], /is a symbolic link\.$/],
+    [path.join(library.directory, '.versions', 'old.md'), [root], /is neither\.$/],
+    [path.join(root, '.planning', '.near-ai', 'other.md'), [root], /is neither\.$/],
+    [projectFile, [], /is neither\.$/],
+    [path.join(base, 'missing.md'), [root], /does not exist\.$/]
+  ];
+  for (const [file, roots, reason] of refused) await assert.rejects(() => resolveTeamFile(library, file, roots), (error: Error) => error.name === 'TeamPathError' && /^Update Team only changes a project's \.planning\/\.near-ai\/team\.md or a team in your team library; /.test(error.message) && reason.test(error.message), file);
+  // Through the command: a traversal argument is refused with the message, and nothing is written.
+  errors.length = 0;
+  vscodeStub.workspace.workspaceFolders = [{ uri: { fsPath: root } }];
+  await updateTeam(library, path.join(library.directory, '..', 'outside.md'));
+  assert.equal(errors.length, 1);
+  assert.match(errors[0].message, /^Update Team only changes .* is neither\.$/);
+  await updateTeam(library, path.join(library.directory, 'linked.md'));
+  assert.match(errors[1].message, /is a symbolic link\.$/);
+  assert.equal(await readFile(outside, 'utf8'), team, 'the file outside is untouched');
+  vscodeStub.workspace.workspaceFolders = [];
 });

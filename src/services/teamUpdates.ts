@@ -1,4 +1,4 @@
-import { readFile, writeFile } from 'node:fs/promises';
+import { lstat, readFile, realpath, writeFile } from 'node:fs/promises';
 import * as path from 'node:path';
 import { applyGuidanceUpdate, applyTeamUpdate, planGuidanceUpdate, planTeamUpdate, type GuidancePlan, type TeamUpdatePlan, type UpdateDecisions } from '../agent/teamUpdate';
 import { parseTeam, TeamLibrary } from '../agent/teams';
@@ -165,4 +165,36 @@ export class UpdateNotices {
     all[path.resolve(file)] = { ...all[path.resolve(file)], dontAsk: true };
     await this.store.update(NOTICES_KEY, all);
   }
+}
+
+/** Where Update Team may write: a project's own team file, or a team file directly in the team library. */
+export class TeamPathError extends Error {
+  public constructor(requested: string, reason: string) {
+    super(`Update Team only changes a project's .planning/.near-ai/team.md or a team in your team library; ${requested} ${reason}.`);
+    this.name = 'TeamPathError';
+  }
+}
+
+/**
+ * Checks a requested team file before Update Team reads or writes it, and returns its real path. Allowed: `.planning/.near-ai/team.md` under one
+ * of `roots`, or a `.md` file directly in the library folder (not in its archive or version history). The file must exist and must not be a
+ * symlink, and its folder is compared by real path, so neither `..` nor a link can point the write anywhere else.
+ */
+export async function resolveTeamFile(library: TeamLibrary, requested: string, roots: string[]): Promise<string> {
+  if (typeof requested !== 'string' || !requested.trim() || requested.includes('\0')) throw new TeamPathError(String(requested), 'is not a file path');
+  const absolute = path.resolve(requested);
+  const info = await lstat(absolute).catch(() => undefined);
+  if (!info) throw new TeamPathError(requested, 'does not exist');
+  if (info.isSymbolicLink()) throw new TeamPathError(requested, 'is a symbolic link');
+  if (!info.isFile()) throw new TeamPathError(requested, 'is not a file');
+  const folder = await realpath(path.dirname(absolute));
+  const name = path.basename(absolute);
+  const real = path.join(folder, name);
+  const libraryFolder = await realpath(library.directory).catch(() => undefined);
+  if (libraryFolder && folder === libraryFolder && name.endsWith('.md')) return real;
+  for (const root of roots) {
+    const projectFolder = await realpath(path.join(root, '.planning', '.near-ai')).catch(() => undefined);
+    if (projectFolder && folder === projectFolder && name === 'team.md') return real;
+  }
+  throw new TeamPathError(requested, 'is neither');
 }
