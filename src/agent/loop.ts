@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { beginRun } from './runActivity';
 import { readFile, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import * as path from 'node:path';
@@ -293,6 +294,16 @@ export class AgentRun {
   }
 
   public async run(messages: AgentMessage[], signal: AbortSignal): Promise<RunResult> {
+    // Every agent loop counts as a run in progress, so nothing (Update Team) rewrites a team under it.
+    const endRun = beginRun();
+    try {
+      return await this.loop(messages, signal);
+    } finally {
+      endRun();
+    }
+  }
+
+  private async loop(messages: AgentMessage[], signal: AbortSignal): Promise<RunResult> {
     let transcript = [...messages];
     const usage: UsageMetadata[] = [];
     const maxTurns = this.options.maxTurns ?? 60;

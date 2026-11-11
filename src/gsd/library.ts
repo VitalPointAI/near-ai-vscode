@@ -26,6 +26,8 @@ export interface GsdAgent {
   tools: string[];
   /** A tier ("opus", "sonnet", "haiku", "inherit") or a model ID, when the definition sets one. */
   model?: string;
+  /** `private`: this agent runs only on a model in a NEAR TEE or on this machine (a team member's `privacy: private` line). */
+  privacy?: 'private';
   body: string;
   file: string;
 }
@@ -213,6 +215,40 @@ export function roleModelFor(role: string, roleModels: Record<string, string>): 
   if (typeof roleModels[role] === 'string') return roleModels[role];
   const matches = Object.entries(roleModels).filter(([pattern, value]) => pattern.includes('*') && typeof value === 'string' && new RegExp(`^${pattern.split('*').map((part) => part.replace(/[.+?^${}()|[\]\\]/g, '\\$&')).join('.*')}$`).test(role));
   return matches.sort((a, b) => b[0].length - a[0].length)[0]?.[1];
+}
+
+/** The tier a model line names (deep, standard, or fast), or undefined for a model ID or "inherit". */
+export function tierOf(value: string | undefined): 'deep' | 'standard' | 'fast' | undefined {
+  const tier = (value ?? '').trim().toLowerCase();
+  if (tier.includes('opus') || tier.includes('fable') || tier === 'deep' || tier === 'quality') return 'deep';
+  if (tier.includes('haiku') || tier === 'fast' || tier === 'budget') return 'fast';
+  if (tier.includes('sonnet') || tier === 'standard' || tier === 'balanced') return 'standard';
+  return undefined;
+}
+
+/** What private-model resolution needs to know about a model from the catalog. */
+export interface PrivacyCandidate { id: string; privacyBoundary?: string; outputPricePerMillion?: number; contextLength?: number; outputModalities?: string[] }
+
+const isPrivateModel = (model: PrivacyCandidate | undefined) => model?.privacyBoundary === 'tee' || model?.privacyBoundary === 'local';
+const canChat = (model: PrivacyCandidate) => !/(?:embed|rerank|whisper|tts|speech|moderation)/i.test(model.id) && (!model.outputModalities || model.outputModalities.includes('text'));
+
+/**
+ * The model for an agent that must stay private (`privacy: private`): one that runs in a NEAR TEE
+ * or on this machine, never one forwarded to an outside provider. The wanted model when it is
+ * private; otherwise the most capable private model for the agent's tier, trying the configured
+ * tier models first from that tier upwards in capability (deep, then standard, then fast for a
+ * deep agent) and then any other private chat model, the highest priced (a proxy for capability)
+ * with the longest context first. Undefined when no private model is available: the caller must
+ * then refuse to run the agent rather than fall back to a forwarded model.
+ */
+export function privateModelFor(wanted: string, tier: 'deep' | 'standard' | 'fast' | undefined, tiers: { deep: string; standard: string; fast: string }, catalog: PrivacyCandidate[]): string | undefined {
+  const byId = new Map(catalog.map((model) => [model.id, model]));
+  if (isPrivateModel(byId.get(wanted))) return wanted;
+  const order = tier === 'fast' ? [tiers.fast, tiers.standard, tiers.deep] : tier === 'standard' ? [tiers.standard, tiers.deep, tiers.fast] : [tiers.deep, tiers.standard, tiers.fast];
+  const configured = order.find((id) => isPrivateModel(byId.get(id)));
+  if (configured) return configured;
+  return catalog.filter((model) => isPrivateModel(model) && canChat(model))
+    .sort((a, b) => (b.outputPricePerMillion ?? 0) - (a.outputPricePerMillion ?? 0) || (b.contextLength ?? 0) - (a.contextLength ?? 0) || a.id.localeCompare(b.id))[0]?.id;
 }
 
 export function modelForTier(value: string | undefined, tiers: { deep: string; standard: string; fast: string }, current: string): string {

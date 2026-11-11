@@ -17,10 +17,10 @@ import { SecurityAccess, securityTool } from '../agent/securityTool';
 import { AgentTool, CORE_TOOLS, Todo, ToolContext } from '../agent/tools';
 import type { CyberRunAccess } from './cyberRun';
 import { TaskBoard } from '../agent/taskBoard';
-import { displayPath } from '../agent/workspace';
+import { displayPath, ToolError } from '../agent/workspace';
 import { AgentWorktree, createAgentWorktree, finishAgentWorktree, worktreeReport } from '../agent/worktree';
 import type { ActionPolicy } from '../domain/policy';
-import { expandPrompt, GsdAgent, GsdSkill, modelForTier, roleModelFor } from '../gsd/library';
+import { expandPrompt, GsdAgent, GsdSkill, modelForTier, PrivacyCandidate, privateModelFor, roleModelFor, tierOf } from '../gsd/library';
 import { trustedPreambles } from '../gsd/preamble';
 import { gsdTools, Question } from '../gsd/tools';
 import type { ActivityFeed, AgentBoundary } from './agentActivity';
@@ -76,6 +76,13 @@ export interface AgentTurnRequest {
   /** NEAR models for GSD's model tiers; a tier model the provider lacks falls back to `model`. */
   tiers?: ModelTiers;
   availableModels?: string[];
+  /** The catalog entries of availableModels, with where each runs; a `privacy: private` team member is resolved against it. */
+  modelCatalog?: PrivacyCandidate[];
+  /**
+   * Which client `client` is: NEAR AI Cloud (`attestation` true only for NEAR's own endpoint, where a TEE model's attestation can be
+   * checked) or a local runtime. A private member runs only on a model of this route's own private kind; without it, none runs.
+   */
+  route?: PrivateRoute;
   /** The model's context window in tokens, from the catalog. */
   contextWindows?: Record<string, number | undefined>;
   maxParallelAgents?: number;
@@ -186,6 +193,24 @@ const minutesSince = (at: number) => { const seconds = Math.max(0, Math.round((D
  * and sub-agents (foreground or background, with pause/stop and a concurrency limit), manages the
  * context window, and keeps each run's file checkpoints so the user can revert it.
  */
+/** The client a run sends every request through: NEAR AI Cloud (with or without checkable attestation) or a local runtime. */
+export interface PrivateRoute { kind: 'near' | 'local'; attestation: boolean }
+
+/** Whether a `privacy: private` member may run on this catalog entry over this route. Anything unknown is refused. */
+export function routeAllows(route: PrivateRoute | undefined, model: { privacyBoundary?: string } | undefined): boolean {
+  if (!route || !model) return false;
+  if (route.kind === 'local') return model.privacyBoundary === 'local';
+  return route.kind === 'near' && route.attestation && model.privacyBoundary === 'tee';
+}
+
+function privateRefusal(label: string, tier: string | undefined, route: PrivateRoute | undefined): string {
+  const fix = `To let ${label} use any model instead, change its line to privacy: any.`;
+  if (!route) return `${label} must run on a private model (its team file says privacy: private), but this run did not say which route it uses, so no model can be confirmed private. ${fix}`;
+  if (route.kind === 'local') return `${label} must run on a private model (its team file says privacy: private). This run uses your local runtime, and none of its models are offered to this run. Add a local model, or start the run on a local model, then run again. ${fix}`;
+  if (!route.attestation) return `${label} must run on a private model (its team file says privacy: private), but this run's endpoint is not NEAR AI Cloud, so a TEE model's attestation cannot be checked. Use NEAR AI Cloud, or start the run on a local model, then run again. ${fix}`;
+  return `${label} must run on a private model (its team file says privacy: private), and none of the models this run may use runs in a NEAR TEE or on this machine. Choose a NEAR TEE model for the ${tier ?? 'deep'} tier (setting nearAi.agent.${tier ?? 'deep'}Model), or add a local model, then run again. ${fix}`;
+}
+
 export class AgentConversation {
   private messages: AgentMessage[] = [];
   private readonly verifiable = new Map<string, { model: string; evidence: ResponseEvidence; client: NearAiClient }>();
@@ -704,7 +729,19 @@ export class AgentConversation {
         const teamMember = Boolean(spawn.agent && (!gsd || !spawn.agent.file.startsWith(gsd.home)));
         const roleModel = spawn.agent && !(teamMember && spawn.agent.model) ? roleModelFor(label, request.roleModels ?? {}) : undefined;
         const wanted = modelForTier(roleModel ?? spawn.model ?? spawn.agent?.model, tiers, request.model);
-        const model = !request.availableModels || request.availableModels.includes(wanted) ? wanted : request.model;
+        let model = !request.availableModels || request.availableModels.includes(wanted) ? wanted : request.model;
+        // A member that must stay private runs on a TEE or local model, or not at all: it never falls back to a forwarded model.
+        if (spawn.agent?.privacy === 'private') {
+          const tier = tierOf(roleModel ?? spawn.model ?? spawn.agent.model);
+          const offered = (request.modelCatalog ?? []).filter((candidate) => !request.availableModels || request.availableModels.includes(candidate.id) || candidate.id === request.model);
+          // Fail closed on the route: every sub-agent is sent through this run's one client, so a model is eligible only if it is private on
+          // that client. A local catalog entry is never sent to the NEAR client (NEAR would serve or forward it), and a TEE entry only goes to
+          // NEAR's own endpoint, where its attestation can be checked; never to a local runtime or another endpoint claiming TEE.
+          const candidates = offered.filter((candidate) => routeAllows(request.route, candidate));
+          const chosen = privateModelFor(model, tier, tiers, candidates);
+          if (!chosen || !routeAllows(request.route, candidates.find((candidate) => candidate.id === chosen))) throw new ToolError(privateRefusal(label, tier, request.route));
+          model = chosen;
+        }
         const agentBody = spawn.agent ? (gsd ? await expandPrompt(spawn.agent.body, { home: gsd.home, root: this.root }) : spawn.agent.body) : undefined;
         // Each sub-agent's Remember/Recall also reach its own private memory.
         const privateMemory = memoryFor({ kind: 'private-agent', id: `agent-${label}`.slice(0, 80) }, `${runId}-${label}`.slice(0, 100));

@@ -154,6 +154,11 @@
         "category": "NEAR AI"
       },
       {
+        "command": "nearAi.updateTeam",
+        "title": "Update Team…",
+        "category": "NEAR AI"
+      },
+      {
         "command": "nearAi.newProfile",
         "title": "Set Up a New Profile…",
         "category": "NEAR AI"
@@ -451,6 +456,11 @@
             ":(){"
           ],
           "description": "Shell commands the agent is never allowed to run, matched as substrings, whatever the action policy."
+        },
+        "nearAi.teams.updateNotifications": {
+          "type": "boolean",
+          "default": true,
+          "description": "Say once when a team made from a built-in project type (a project team or one of your teams) has a newer template. Update Team previews every change and asks before writing."
         },
         "nearAi.agent.deepModel": {
           "type": "string",

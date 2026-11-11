@@ -210,6 +210,20 @@ reason (accepted risk, deferred, disregarded), and verification and release
 notes list the items not fixed. In these projects `/gsd-execute-phase`,
 `/gsd-verify-work`, and `/gsd-autonomous` include the red-team step.
 
+A research team works in a fixed order: investigator, source verifier,
+analyst, writer, red team, editor. Each member has one output file
+(`TEAM-FINDINGS.md`, `SOURCE-CHECK.md`, `TEAM-ANALYSIS.md`, the report,
+`RED-TEAM.md`, `EDITORIAL-REVIEW.md`) and a stated definition of done, and all
+of them write for the audience and style in `.planning/STYLE.md`. The editor
+is the release gate: it checks the report for coherence and comprehension,
+professional quality, and that every note's verified source says what the
+sentence claims, makes copy edits itself, sends factual problems back, and
+signs off with SIGN-OFF or NOT READY. Nothing is released without SIGN-OFF,
+and the delivered report carries its sources as real endnotes or footnotes
+(CreateDocument and CreatePdf). The presales reviewer and the writing editor
+are release gates in the same way. A project set up before this keeps its own
+team file; run **NEAR AI: Update Team…** to pick up the new roles.
+
 In a software project, the **DevOps** member sets up a protected way of
 working: a CI workflow on every pull request (tests, a secret scan, and a
 dependency audit), required checks and a review before anything reaches the
@@ -431,7 +445,23 @@ until it runs out aren't shown.
 
 - **Agent teams.** A team is a Markdown file you edit in VS Code: one
   `## member` section per member, with optional `role:`, `model:` (a model ID
-  or deep/standard/fast), and `tools:` lines. Run one with `/team:<name> <task>`
+  or deep/standard/fast), `privacy:`, and `tools:` lines. `privacy: private`
+  keeps a member on a private model, one that runs in a NEAR TEE or on this
+  machine: it gets the private model the run may use that is most capable
+  for its tier, and if there is none the member does not run and the lead is
+  told why, so its work is never sent to a forwarded model. To choose that
+  model, set `nearAi.agent.deepModel` (or the standard or fast tier the
+  member names) to a model whose picker label reads "Private · runs in NEAR
+  TEE", or to a local model; if the configured tier model is forwarded, the
+  next private tier model is used (deep, then standard, then fast for a deep
+  member), then the most capable other private model. `privacy: any`, or no
+  line, lets the member use any model the run may use. The extension always
+  writes `privacy:` as the member's last line before its instructions, so an
+  older version that does not know it still reads the member's tools
+  correctly; if you write it by hand, put it after `tools:` too.
+  New research teams have `privacy: private` on every member (and presales
+  teams on their reviewer), so client material stays on private models;
+  change a member's line to `privacy: any` to relax it. Run one with `/team:<name> <task>`
   or **Manage Agent Teams**; a lead agent delegates to the members as
   sub-agents, each limited to its own tools. Saving a team file records a
   version. Teams can be duplicated, archived, restored, imported, and deleted.
@@ -444,6 +474,26 @@ until it runs out aren't shown.
   leaving the builder or the editor with unsaved changes asks first (Discard
   changes, or Save draft / Save); closing the tab keeps the unsaved team as a
   draft and says so the next time the studio opens.
+- **Update Team.** A team made from a built-in project type records where it
+  came from in its frontmatter (`template`, `templateVersion`, and a
+  `templateBase` list with a fingerprint of each member as generated), so it
+  can pick up improved built-in roles later. **NEAR AI: Update Team…** (or
+  **Update team…** on the team's card in Team Studio) previews the change
+  member by member before anything is written: a member you never changed is
+  replaced with the current definition; a member you changed is shown as a
+  diff and you choose to take the new one, keep yours, or keep yours and add
+  only what is new (a `privacy:` line, new tools, and new Output and Done-when
+  sections), and a member you kept is not asked about again until its
+  built-in definition changes; members you added are left alone; members no longer built in are
+  kept and flagged; and new built-in members are offered. A project team's
+  `AGENTS.md` guidance is updated the same way when the extension wrote it.
+  Teams made before stamps existed are recognised by their member names, and
+  a member that matches any released version exactly is treated as unchanged.
+  The file is backed up to the team's version history first, and the result
+  has an **Undo**. When a team is out of date you are told once per version
+  ("Team update available", with Review, Later, and Don't ask for this team);
+  turn this off with `nearAi.teams.updateNotifications`. Nothing is updated
+  while a run is in progress; the update is offered when it ends.
 - **Attachments.** Attach images, audio, documents, and text files to a
   message. Images are read by the chosen model if it reads images, otherwise
   by a vision model (`nearAi.agent.visionModel`); audio is transcribed with
@@ -455,6 +505,37 @@ until it runs out aren't shown.
   supplied images into SVG with VectorizeImage, render SVG to PNG, and build
   PowerPoint decks (.pptx) with CreatePresentation. All of this runs on your
   machine.
+- **PDF and Word documents.** Agents deliver a finished report as a PDF with
+  CreatePdf or as a Word document with CreateDocument, from Markdown they
+  pass inline or from a `.md` file in the workspace (`source_path`). Both take
+  headings 1-4, paragraphs, bold, italic, inline code, links, bullet and
+  numbered lists (nested by indentation), block quotes, code blocks, pipe
+  tables, and images on their own line (PNG, JPEG, or SVG in the workspace,
+  relative to the Markdown file), and notes: cite with `[^id]` in the text
+  and define each note once as `[^id]: Title, publisher, date. https://...`.
+  Notes are numbered in order of first citation; a citation with no
+  definition, a definition nothing cites, or a repeated definition stops the
+  tool with an error naming the note, so no citation is dropped silently.
+  Options: `title`, `author`, `page_size` (A4 or Letter), `date`, and `notes`
+  (`endnotes`, the default, or `footnotes`). In the Word file the notes are
+  real Word endnotes or footnotes, numbered and linked by Word; in the PDF
+  they are superscript numbers that link to a Notes section at the end, or to
+  the foot of the page that cites them, and the URLs in them are clickable. The PDF has bookmarks from the headings,
+  numbered pages, clickable links, and its title and author in its
+  properties; the Word file uses Word's own Heading 1-4 styles, so the
+  Navigation pane and a table of contents work, with real tables, lists,
+  links, and pictures. Both are written on your machine with no library, and
+  the same input gives the same bytes: no date is written unless you pass one.
+  Like every write, they stay inside the workspace, ask first where a write
+  is protected, and **Revert** removes them. The PDF uses the standard PDF
+  fonts (Helvetica and Courier), which cover Western European text;
+  characters outside them are written as `?` and listed in the tool's result,
+  so use CreateDocument for other scripts. Web images are not downloaded:
+  save the image into the workspace first.
+  Every team member that can build decks can also make these documents: a
+  `tools:` line that lists `CreatePresentation` also grants `CreatePdf` and
+  `CreateDocument` when the team is loaded, so existing team files gain them
+  without being edited.
 - **Image generation.** When the provider lists an image model, the agent can
   create PNGs in your workspace with its GenerateImage tool. It asks first and
   shows the price, and **Revert** removes the file.
@@ -584,6 +665,7 @@ Read the full [security and trust report](SECURITY.md).
 | `nearAi.agent.allowCommands` | `git status`, `git diff`, `ls`, … | Commands that run without asking, matched by their leading words (`git push` covers `git push origin main`, but never `--force` or a URL). The approval card's **Always allow** adds entries. In `auto`, each part of a chained command is matched on its own; in other modes, anything with `;`, `\|`, `>`, or `$( )` asks. |
 | `nearAi.agent.denyCommands` | `rm -rf /`, `git push --force`, … | Commands the agent may never run. |
 | `nearAi.agent.deepModel` / `standardModel` / `fastModel` | Kimi K3 / GLM 5.3 / Qwen3.6-35B-A3B | Models for Open-GSD's sub-agent tiers (opus / sonnet / haiku). By default only research, synthesis, and mapping roles use the fast tier; GSD's `budget` and `adaptive` model profiles also send checkers and the test-writing auditor there. |
+| `nearAi.teams.updateNotifications` | `true` | Say once per version when a team made from a built-in project type has a newer template (**NEAR AI: Update Team…**). |
 | `nearAi.agent.safetyModel` | the fast tier | With `auto`, the model that checks commands the rules cannot decide. Used only when it runs privately (TEE or local); otherwise those commands ask. |
 | `nearAi.agent.maxParallelAgents` | `8` | Sub-agents that may run at once. |
 | `nearAi.agent.maxTurns` | `60` | Model turns per run before it pauses for you; **Continue** in the chat carries on. |

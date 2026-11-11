@@ -43,7 +43,8 @@ const TOOL_CAPABILITY: Array<[RegExp, string]> = [
   [/^(WebSearch|WebFetch)$/, 'Use the web'],
   [/^(TodoWrite|Task|Agent)$/, 'Plan and coordinate'],
   [/^(Remember|Recall)$/, 'Keep and use memory'],
-  [/^(VectorizeImage|RenderSvg|CreatePresentation|GenerateImage)$/, 'Make media']
+  [/^(VectorizeImage|RenderSvg|CreatePresentation|GenerateImage)$/, 'Make media'],
+  [/^(CreatePdf|CreateDocument)$/, 'Deliver documents']
 ];
 
 function capabilitiesOf(member: TeamMember): string[] {
