@@ -86,6 +86,44 @@ test('a window\'s own change is announced once, never again by its own check, an
   }
 });
 
+test('temporary files a crashed window left beside the shared file are removed at start-up, and a fresh one is kept', async () => {
+  const { utimes } = await import('node:fs/promises');
+  const storage = await mkdtemp(path.join(tmpdir(), 'near-ai-stop-'));
+  const stale = path.join(storage, 'emergency-stop.json.1234.tmp');
+  const fresh = path.join(storage, 'emergency-stop.json.5678.tmp');
+  await writeFile(stale, '{}');
+  await writeFile(fresh, '{}');
+  const old = new Date(Date.now() - 5 * 60_000);
+  await utimes(stale, old, old);
+  const stub = stubVscode();
+  const subscriptions: Array<{ dispose(): void }> = [];
+  try {
+    freshWindow().initEmergencyStop({ subscriptions, globalState: memento(), globalStorageUri: { fsPath: storage } } as never);
+    const { readdir } = await import('node:fs/promises');
+    assert.deepEqual((await readdir(storage)).sort(), ['emergency-stop.json.5678.tmp']);
+  } finally {
+    for (const subscription of subscriptions) subscription.dispose();
+    stub.restore();
+  }
+});
+
+test('the shared file wins over this window\'s stale global state: a resume in another window is not undone here', async () => {
+  const storage = await mkdtemp(path.join(tmpdir(), 'near-ai-stop-'));
+  await writeFile(path.join(storage, 'emergency-stop.json'), JSON.stringify({ engaged: false }));
+  const stub = stubVscode();
+  const subscriptions: Array<{ dispose(): void }> = [];
+  try {
+    const state = memento();
+    await state.update('nearAi.emergencyStop', true);
+    const one = freshWindow();
+    one.initEmergencyStop({ subscriptions, globalState: state, globalStorageUri: { fsPath: storage } } as never);
+    assert.equal(one.isEmergencyStopped(), false);
+  } finally {
+    for (const subscription of subscriptions) subscription.dispose();
+    stub.restore();
+  }
+});
+
 test('a stop recorded before the shared file existed still holds after a reload', async () => {
   const storage = await mkdtemp(path.join(tmpdir(), 'near-ai-stop-'));
   const stub = stubVscode();

@@ -414,7 +414,9 @@ interface OpenTeam { id: string; file: string; text: string; base: string }
  * library team found by its slug comes first, then a library team by name, and the project team only when nothing in the library matches.
  */
 export function optimiseTarget<T extends { file: string; project: boolean; team?: { name: string } }>(entries: readonly T[], teamName: string, file?: string): T | undefined {
-  if (file) return entries.find((entry) => path.resolve(entry.file) === path.resolve(file));
+  // On Windows the same file can be reached through a differently-cased path (`c:\\` against `C:\\`), so the comparison ignores case there.
+  const same = (one: string, two: string) => (process.platform === 'win32' ? path.resolve(one).toLowerCase() === path.resolve(two).toLowerCase() : path.resolve(one) === path.resolve(two));
+  if (file) return entries.find((entry) => same(entry.file, file));
   const library = entries.filter((entry) => !entry.project);
   return library.find((entry) => path.basename(entry.file, '.md') === slugify(teamName))
     ?? library.find((entry) => entry.team?.name === teamName)

@@ -13,7 +13,8 @@
   that folder in its worktree.
 - **The emergency stop reaches every open window.** Pressing it in one window stopped only that window's
   runs; others kept running and showed no stop. Other windows now stop within a few seconds and show the
-  status-bar item, and resuming works the same way.
+  status-bar item, and resuming works the same way. This covers the windows on one machine; a window
+  connected to a remote machine or a container keeps its own stop.
 - **Smaller fixes:** when the context is nearly full and summarizing cannot free space (the recent
   messages hold most of it), the chat now says so once instead of carrying on silently; when the shell
   ends while a process it started still holds the output open, the Bash result says later output was not
@@ -113,7 +114,10 @@ the button writes. A chart shows the score over time, by task type, so you can s
   written. Testing a team's roles always sets the models in the team you acted on, even when your
   project team and one of your own teams share a name. And when a team's knowledge graph file cannot be
   opened (its permissions, or another program holding it), the agent is told it is left as it is and
-  cannot be added to until it opens again, instead of being invited to start afresh.
+  cannot be added to until it opens again, instead of being invited to start afresh. A fact can no longer
+  be dated in the future, and a fact first recorded without a grade takes the first grade it is given (after
+  that a grade only falls). An agent working in a subfolder of a repository (a monorepo package, or its own
+  isolated copy of one) is told it is in a git repository, so it commits as asked.
 
 - **A team's knowledge graph accumulates, and learns.** Nothing a team learned is silently dropped to enforce a size: the graph has no ceiling, because a
   ceiling that dropped the oldest entries made a team forget what it had learned. (The Learn tool still accepts at most 40 actors, 60 relations, and 12 facts per
