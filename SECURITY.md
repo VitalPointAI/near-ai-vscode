@@ -129,6 +129,38 @@ the target is usually your own machine or network. Its own rules different:
 Sub-agents, model tiers and image generation only use models on the same route
 as the one you picked (local or cloud) that are at least as private. A run on a
 TEE model never hands work to a forwarded model, and a local run stays local.
+A team member with `privacy: private` in its team file goes further: it runs
+only on a model in a NEAR TEE or on this machine, even when the chat's own
+model is forwarded. The model must also be private on the run's own route:
+a run on NEAR AI Cloud uses only TEE models, and only on NEAR's own endpoint,
+where attestation can be checked (never a local catalog entry, and never a
+different endpoint that claims TEE); a run on a local runtime uses only its
+local models. If the run has no such model, or its route is unknown, that
+member does not run and the lead is told why; its work is never sent to a
+forwarded model instead. New
+research teams set this on every member, and new presales teams on their
+reviewer; `privacy: any` turns it off for a member.
+
+### Document tools and team roles
+
+CreatePdf and CreateDocument write a `.pdf` or `.docx` from Markdown on this
+machine, with no library and no network: images must already be files in the
+workspace (web addresses are refused), and the source and images are read only
+from the workspace, with the same credential-file check as Read. They are
+ordinary workspace writes, so they ask first under `approve-risky`, writes into
+`.git/` or `.planning/.near-ai/` always ask, and **Revert** removes the file.
+The research team's editor now has Write and Edit (for copy edits to the
+report) and the research red team has Bash (to try deliberate breakages of the
+project's checks in a scratch copy). Neither gets anything that runs without
+asking: their edits and commands go through the same approval policy as every
+other agent's. That policy is the only limit: nothing confines the red team's
+writes to `.planning/`, and Bash can reach anywhere the policy allows.
+
+**Update Team** rewrites a team file (and, for a project, the extension's own
+block in `AGENTS.md`) only from the **NEAR AI: Update Team…** command or the
+Team Studio button, after a preview and a confirmation, never while a run is in
+progress, and never from an agent. It copies the file into the team's version
+history first and offers **Undo**.
 API keys are bound to the endpoint they were saved for, in SecretStorage, so
 editing the project's profile file cannot redirect a key.
 

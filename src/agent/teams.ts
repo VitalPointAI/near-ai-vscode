@@ -20,12 +20,33 @@ export interface TeamMember {
    * without it still runs and still draws, as a lead with its members. A member naming one that does not exist is drawn at the top, never dropped.
    */
   reportsTo?: string;
+  /**
+   * `private`: the member runs only on a private model, one in a NEAR TEE or on this machine, never one forwarded to an outside provider. From a
+   * `privacy: private` line; `privacy: any` (or no line) lets it use any model the run may use. A run fails for this member, rather than falling
+   * back to a forwarded model, when no private model is available.
+   */
+  privacy?: 'private';
 }
 export interface TeamDefinition { slug: string; name: string; description: string; members: TeamMember[]; file: string }
 
 const MEMBER_NAME = /^[a-z0-9][a-z0-9-]{0,39}$/;
 /** The tools a member gets when its section has no `tools:` line. */
-export const DEFAULT_TOOLS = ['Read', 'Glob', 'Grep', 'Edit', 'Write', 'Bash', 'TodoWrite', 'Remember', 'Recall', 'VectorizeImage', 'RenderSvg', 'CreatePresentation'];
+export const DEFAULT_TOOLS = ['Read', 'Glob', 'Grep', 'Edit', 'Write', 'Bash', 'TodoWrite', 'Remember', 'Recall', 'VectorizeImage', 'RenderSvg', 'CreatePresentation', 'CreatePdf', 'CreateDocument'];
+
+/**
+ * The document-output family: a member that can make one kind of deliverable can make all of them.
+ * Team files written before CreatePdf and CreateDocument existed list their tools explicitly, and
+ * their writers list CreatePresentation. So that those teams can deliver a PDF or Word file
+ * without anyone editing their team.md, a member whose tools include CreatePresentation also gets
+ * CreatePdf and CreateDocument when the file is loaded. The file on disk is never rewritten.
+ */
+export const DOCUMENT_OUTPUT_TOOLS = ['CreatePresentation', 'CreatePdf', 'CreateDocument'];
+
+/** A member's tools with the document-output compatibility rule applied (see DOCUMENT_OUTPUT_TOOLS). */
+export function resolveMemberTools(tools: string[]): string[] {
+  if (!tools.includes('CreatePresentation')) return tools;
+  return [...tools, ...DOCUMENT_OUTPUT_TOOLS.filter((tool) => !tools.includes(tool))];
+}
 const MAX_VERSIONS = 20;
 
 export function slugify(value: string): string {
@@ -65,7 +86,9 @@ export function parseTeam(text: string, file: string): TeamDefinition {
     const fields: Record<string, string> = {};
     let index = 0;
     while (index < rest.length) {
-      const field = /^(role|model|tools|reports-to):\s*(.*)$/i.exec(rest[index].trim());
+      // `privacy:` counts as a setting only with a one-word value: an existing member's instructions may open with a sentence such as "Privacy: handle
+      // client data carefully", which must stay instructions rather than fail as an unknown privacy value and make the whole team unloadable.
+      const field = /^(role|model|tools|reports-to):\s*(.*)$/i.exec(rest[index].trim()) ?? /^(privacy):\s*(\S*)\s*$/i.exec(rest[index].trim());
       if (!field) { if (rest[index].trim()) break; index += 1; continue; }
       fields[field[1].toLowerCase()] = field[2].trim();
       index += 1;
@@ -73,21 +96,33 @@ export function parseTeam(text: string, file: string): TeamDefinition {
     const instructions = rest.slice(index).join('\n').trim();
     if (!instructions) throw new Error(`Member ${memberName} needs instructions under its heading.`);
     const reportsTo = fields['reports-to'] ? slugify(fields['reports-to']) : undefined;
-    members.push({ name: memberName, ...(fields.role ? { role: fields.role } : {}), ...(fields.model ? { model: fields.model } : {}), ...(reportsTo ? { reportsTo } : {}), tools: fields.tools ? fields.tools.split(',').map((tool) => tool.trim()).filter(Boolean) : DEFAULT_TOOLS, instructions });
+    const privacy = parsePrivacy(fields.privacy, memberName);
+    members.push({ name: memberName, ...(fields.role ? { role: fields.role } : {}), ...(fields.model ? { model: fields.model } : {}), ...(reportsTo ? { reportsTo } : {}), ...(privacy ? { privacy } : {}), tools: fields.tools ? resolveMemberTools(fields.tools.split(',').map((tool) => tool.trim()).filter(Boolean)) : DEFAULT_TOOLS, instructions });
   }
   if (!members.length) throw new Error('Add at least one member as a "## member-name" section.');
   if (members.length > 12) throw new Error('A team can have at most 12 members.');
   return { slug: slugify(path.basename(file, '.md')), name, description: typeof data.description === 'string' ? data.description : '', members, file };
 }
 
+/** A member's `privacy:` line: private (also tee or local) or any (also default or cloud, the same as no line). */
+export function parsePrivacy(value: string | undefined, member: string): 'private' | undefined {
+  const privacy = (value ?? '').trim().toLowerCase();
+  if (!privacy || privacy === 'any' || privacy === 'default' || privacy === 'cloud') return undefined;
+  if (privacy === 'private' || privacy === 'tee' || privacy === 'local') return 'private';
+  throw new Error(`Member ${member} has "privacy: ${value}"; use privacy: private (a NEAR TEE or local model only) or privacy: any.`);
+}
+
 export function renderTeam(name: string, description: string, members: Array<Omit<TeamMember, 'tools'> & { tools?: string[] }>): string {
-  const lines = ['---', `name: ${name}`, `description: ${description}`, '---', '', '<!-- Each "## name" section is a team member. Optional lines: role, model (a NEAR model ID or deep/standard/fast), tools (comma-separated), reports-to (another member). Then the member\'s instructions. Save to create a new version. -->', ''];
+  const lines = ['---', `name: ${name}`, `description: ${description}`, '---', '', '<!-- Each "## name" section is a team member. Optional lines: role, model (a NEAR model ID or deep/standard/fast), tools (comma-separated), reports-to (another member), and last, privacy (private: a NEAR TEE or local model only; any: whatever the run may use). Then the member\'s instructions. Save to create a new version. -->', ''];
   for (const member of members) {
     lines.push(`## ${member.name}`);
     if (member.role) lines.push(`role: ${member.role}`);
     if (member.model) lines.push(`model: ${member.model}`);
     if (member.reportsTo) lines.push(`reports-to: ${member.reportsTo}`);
     if (member.tools?.length) lines.push(`tools: ${member.tools.join(', ')}`);
+    // privacy is always the last metadata line: a build from before it existed reads role, model, and tools correctly and takes this line as
+    // the first line of the instructions, rather than stopping before tools and giving the member the default tools.
+    if (member.privacy) lines.push(`privacy: ${member.privacy}`);
     lines.push('', member.instructions, '');
   }
   return lines.join('\n');
@@ -108,6 +143,7 @@ export function teamAgents(team: TeamDefinition): GsdAgent[] {
     description: member.role ?? member.name,
     tools: member.tools,
     model: member.model,
+    ...(member.privacy ? { privacy: member.privacy } : {}),
     body: `You are ${member.name}${member.role ? `, the ${member.role},` : ''} on the "${team.name}" team.\n\n${member.instructions}`,
     file: team.file
   }));
@@ -202,6 +238,15 @@ export class TeamLibrary {
     const versions = (await readdir(dir)).sort();
     for (const old of versions.slice(0, Math.max(0, versions.length - MAX_VERSIONS))) await rm(path.join(dir, old), { force: true });
     return Math.min(versions.length, MAX_VERSIONS);
+  }
+
+  /** Copies any file (for example a project's AGENTS.md before Update Team changes it) into this team's backup folder; returns the copy's path. */
+  public async backup(teamFile: string, file: string, label: string): Promise<string> {
+    const dir = path.join(this.directory, '.versions', `${this.versionKey(teamFile)}-${label}`);
+    await mkdir(dir, { recursive: true });
+    const target = path.join(dir, `${new Date().toISOString().replace(/[:.]/g, '-')}${path.extname(file) || '.md'}`);
+    await copyFile(file, target);
+    return target;
   }
 
   public async versions(file: string): Promise<string[]> {

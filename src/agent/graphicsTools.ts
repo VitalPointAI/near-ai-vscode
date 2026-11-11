@@ -1,10 +1,15 @@
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import * as path from 'node:path';
+import { DocImage, prepareImage } from './docImages';
+import { Block, imageReferences, Note, parseDocument, parseMarkdown } from './docMarkdown';
+import { createDocx } from './docxWriter';
 import { createPresentation, DeckSpec, renderSvg, SlideSpec, TraceDetail, vectorize } from './graphics';
+import { createPdf, NoteStyle, PageSize, pdfDate } from './pdfWriter';
 import { AgentTool, protectedWrite, sensitiveRead, ToolContext } from './tools';
 import { displayPath, resolveInWorkspace, ToolError } from './workspace';
 
-// Graphics tools for the agent: trace an image into SVG, render SVG to PNG, and build .pptx decks.
+// Graphics and document tools for the agent: trace an image into SVG, render SVG to PNG, and build
+// .pptx decks, .pdf files, and .docx documents.
 // Everything runs on this machine; files are read from and written into the workspace only.
 
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
@@ -135,4 +140,136 @@ export const presentationTool: AgentTool<{ output: string; deck: DeckSpec }> = {
   }
 };
 
-export const GRAPHICS_TOOLS: AgentTool<any>[] = [vectorizeTool, renderSvgTool, presentationTool];
+// ---- PDF and Word documents from Markdown -------------------------------------------------------
+
+const MAX_MARKDOWN_BYTES = 5 * 1024 * 1024;
+const MAX_DOCUMENT_IMAGES = 200;
+
+export interface DocumentInput { output: string; title: string; author?: string; date?: string; pageSize: PageSize; notes: NoteStyle; markdown?: string; source?: string }
+
+const MARKDOWN_HELP = 'Markdown supported: # to #### headings, paragraphs, **bold**, *italic*, `code`, [links](https://...), - and 1. lists (indent to nest), > quotes, ``` code blocks, | pipe | tables |, --- rules, ![caption](path.png) images on their own line, and notes: cite with [^id] in the text and define each once as a line "[^id]: Title, publisher, date. https://..." (numbered in order of first citation; a missing, unused, or repeated definition is an error) (PNG, JPEG, or SVG in the workspace; paths are relative to source_path\'s folder, or the workspace root for inline markdown).';
+
+const documentParameters = (extension: string) => ({
+  type: 'object',
+  properties: {
+    output_path: { type: 'string', description: `Where to save the ${extension}.` },
+    title: { type: 'string', description: 'Document title, stored in its properties.' },
+    author: { type: 'string' },
+    page_size: { type: 'string', enum: ['A4', 'Letter'], description: 'Default A4.' },
+    notes: { type: 'string', enum: ['endnotes', 'footnotes'], description: 'Where [^id] notes go: endnotes (default; a Notes section at the end) or footnotes (at the foot of the page that cites them).' },
+    date: { type: 'string', description: 'Optional creation date (YYYY-MM-DD). Without it no date is written, so the same input always gives the same file.' },
+    markdown: { type: 'string', description: 'The content as Markdown. Give this or source_path, not both.' },
+    source_path: { type: 'string', description: 'A Markdown file in the workspace to convert (for example the report you wrote). Give this or markdown, not both.' }
+  },
+  required: ['output_path', 'title'],
+  additionalProperties: false
+});
+
+function parseDocumentInput(raw: Record<string, unknown>, pattern: RegExp, label: string): DocumentInput {
+  const pageSize = raw.page_size === undefined || raw.page_size === null || raw.page_size === '' ? 'A4' : raw.page_size;
+  if (pageSize !== 'A4' && pageSize !== 'Letter') throw new ToolError('page_size must be A4 or Letter.');
+  const notes = raw.notes === undefined || raw.notes === null || raw.notes === '' ? 'endnotes' : raw.notes;
+  if (notes !== 'endnotes' && notes !== 'footnotes') throw new ToolError('notes must be endnotes or footnotes.');
+  const markdown = raw.markdown === undefined || raw.markdown === null ? undefined : raw.markdown;
+  if (markdown !== undefined && typeof markdown !== 'string') throw new ToolError('Parameter "markdown" must be a string.');
+  const source = text(raw, 'source_path', false);
+  if ((markdown !== undefined) === (source !== undefined)) throw new ToolError('Give the content as either markdown or source_path (one of them, not both).');
+  if (markdown !== undefined && Buffer.byteLength(markdown) > MAX_MARKDOWN_BYTES) throw new ToolError(`markdown is over ${MAX_MARKDOWN_BYTES / 1024 / 1024} MB.`);
+  if (source !== undefined) withExtension(source, /\.(md|markdown|txt)$/i, '.md, .markdown, or .txt');
+  const title = text(raw, 'title')!.slice(0, 500);
+  const date = text(raw, 'date', false);
+  if (date) pdfDate(date);
+  return { output: withExtension(text(raw, 'output_path')!, pattern, label), title, author: text(raw, 'author', false)?.slice(0, 300), ...(date ? { date } : {}), pageSize, notes, ...(markdown !== undefined ? { markdown } : {}), ...(source !== undefined ? { source } : {}) };
+}
+
+async function documentSource(input: DocumentInput, context: ToolContext): Promise<{ markdown: string; base: string }> {
+  if (input.markdown !== undefined) return { markdown: input.markdown, base: '' };
+  const absolute = await resolveInWorkspace(context.root, input.source!, context.readOnlyRoots);
+  const info = await stat(absolute).catch(() => { throw new ToolError(`${input.source} does not exist.`); });
+  if (!info.isFile()) throw new ToolError(`${input.source} is not a file.`);
+  if (info.size > MAX_MARKDOWN_BYTES) throw new ToolError(`${input.source} is over ${MAX_MARKDOWN_BYTES / 1024 / 1024} MB.`);
+  context.readFiles.add(absolute);
+  return { markdown: await readFile(absolute, 'utf8'), base: path.posix.dirname(input.source!.replace(/\\/g, '/')) };
+}
+
+/** The workspace path of an image the Markdown refers to; web and data URLs are refused (nothing is downloaded). */
+function imagePath(src: string, base: string): string {
+  if (/^[a-z][a-z0-9+.-]*:/i.test(src) || src.startsWith('//')) throw new ToolError(`Image ${src} is not a workspace file. Save the image into the workspace (for example with WebFetch or GenerateImage) and refer to its path.`);
+  let decoded = src;
+  try { decoded = decodeURI(src); } catch { /* keep it as written */ }
+  return base && base !== '.' ? path.posix.join(base, decoded) : decoded;
+}
+
+async function loadDocument(input: DocumentInput, context: ToolContext): Promise<{ blocks: Block[]; notes: Note[]; images: Map<string, DocImage> }> {
+  const { markdown, base } = await documentSource(input, context);
+  const { blocks, notes } = parseDocument(markdown);
+  if (!blocks.length) throw new ToolError('The document has no content.');
+  const references = imageReferences(blocks);
+  if (references.length > MAX_DOCUMENT_IMAGES) throw new ToolError(`A document can have at most ${MAX_DOCUMENT_IMAGES} different images.`);
+  const images = new Map<string, DocImage>();
+  for (const src of references) {
+    const file = imagePath(src, base);
+    images.set(src, await prepareImage((await readImage(context, file)).bytes, path.posix.basename(file)));
+  }
+  return { blocks, notes, images };
+}
+
+/** The files a document reads (its source and its images), for the sensitive-read check. */
+async function documentReads(input: DocumentInput, context: ToolContext): Promise<string[]> {
+  try {
+    const { markdown, base } = await documentSource(input, context);
+    return [...(input.source ? [input.source] : []), ...imageReferences(parseMarkdown(markdown)).map((src) => { try { return imagePath(src, base); } catch { return undefined; } }).filter((file): file is string => Boolean(file))];
+  } catch {
+    return input.source ? [input.source] : [];
+  }
+}
+
+async function documentPreview(input: DocumentInput, context: ToolContext, kind: string) {
+  let summary = '';
+  try {
+    const { markdown } = await documentSource(input, context);
+    const { blocks, notes } = parseDocument(markdown);
+    const count = (kindOf: Block['kind']) => blocks.filter((block) => block.kind === kindOf).length;
+    summary = `: ${count('heading')} headings, ${count('table')} tables, ${imageReferences(blocks).length} images${notes.length ? `, ${notes.length} ${input.notes}` : ''}`;
+  } catch { /* the run reports the problem */ }
+  return { kind: 'note' as const, text: `Create ${kind} ${input.output} ("${input.title}", ${input.pageSize}) from ${input.source ?? 'the given Markdown'}${summary}.` };
+}
+
+const kb = (bytes: Buffer) => `${Math.max(1, Math.round(bytes.length / 1024))} KB`;
+
+export const pdfTool: AgentTool<DocumentInput> = {
+  name: 'CreatePdf',
+  description: `Create a PDF from Markdown (inline, or a .md file in the workspace), for example to deliver a finished report. Headings become PDF bookmarks, pages are numbered, tables and images are laid out to fit, and the same input always gives the same file. Text uses the standard PDF fonts (Helvetica), which cover Western European languages; other characters are replaced and listed in the result (use CreateDocument for other scripts). ${MARKDOWN_HELP}`,
+  parameters: documentParameters('.pdf'),
+  capability: 'workspaceWrite',
+  parse: (raw) => parseDocumentInput(raw, /\.pdf$/i, '.pdf'),
+  title: (input) => `Create ${input.output}`,
+  sensitive: async (input, context) => writeReason(context, input.output, await documentReads(input, context)),
+  preview: (input, context) => documentPreview(input, context, 'PDF'),
+  async run(input, context) {
+    const { blocks, notes, images } = await loadDocument(input, context);
+    const result = createPdf({ title: input.title, author: input.author, date: input.date, pageSize: input.pageSize, blocks, images, notes, noteStyle: input.notes });
+    const saved = await save(context, input.output, result.bytes);
+    const missing = result.substituted.length ? ` ${result.substituted.length} character${result.substituted.length === 1 ? '' : 's'} not in the standard PDF fonts ${result.substituted.length === 1 ? 'was' : 'were'} written as "?": ${result.substituted.slice(0, 20).map((char) => `${char} (U+${char.codePointAt(0)!.toString(16).toUpperCase().padStart(4, '0')})`).join(', ')}. Replace ${result.substituted.length === 1 ? 'it' : 'them'} in the Markdown, or deliver with CreateDocument, which keeps every character.` : '';
+    return `Saved ${saved}: ${result.pages} pages, ${result.headings} bookmarks, ${result.images} images, ${result.notes} ${input.notes}, ${kb(result.bytes)}.${missing}`;
+  }
+};
+
+export const documentTool: AgentTool<DocumentInput> = {
+  name: 'CreateDocument',
+  description: `Create a Word document (.docx) from Markdown (inline, or a .md file in the workspace), for example to deliver a report people will edit. Headings use Word's Heading 1-4 styles (so the Navigation pane and a table of contents work), and tables, lists, links, and pictures are real Word objects. Every Unicode character is kept. ${MARKDOWN_HELP}`,
+  parameters: documentParameters('.docx'),
+  capability: 'workspaceWrite',
+  parse: (raw) => parseDocumentInput(raw, /\.docx$/i, '.docx'),
+  title: (input) => `Create ${input.output}`,
+  sensitive: async (input, context) => writeReason(context, input.output, await documentReads(input, context)),
+  preview: (input, context) => documentPreview(input, context, 'Word document'),
+  async run(input, context) {
+    const { blocks, notes, images } = await loadDocument(input, context);
+    const result = createDocx({ title: input.title, author: input.author, date: input.date, pageSize: input.pageSize, blocks, images, notes, noteStyle: input.notes });
+    const saved = await save(context, input.output, result.bytes);
+    return `Saved ${saved}: ${result.headings} headings, ${result.tables} tables, ${result.images} images, ${result.notes} ${input.notes}, ${kb(result.bytes)}.`;
+  }
+};
+
+export const GRAPHICS_TOOLS: AgentTool<any>[] = [vectorizeTool, renderSvgTool, presentationTool, pdfTool, documentTool];
