@@ -1,6 +1,12 @@
 # Changelog
 
-## Unreleased
+## 0.4.19
+
+This release is about runs that finish, and reports worth reading. Long research runs no longer
+sit for hours on approvals nobody is there to give, a reload no longer ends a run, and a stalled
+model reply fails over to a backup. Research teams now deliver finished reports as PDF or Word
+files, teams keep and grow their own knowledge graph, and each role can run on the model that
+tested best for it.
 
 - **Sub-agents no longer stall on approvals nobody is there to give.** Measured on two research
   projects, sub-agents waited 15 minutes at a time on cards for their own checks (106 and 135 such
