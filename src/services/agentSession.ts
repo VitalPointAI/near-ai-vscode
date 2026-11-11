@@ -573,7 +573,7 @@ export class AgentConversation {
   private systemPrompt(request: AgentTurnRequest, root: string, agentTool: boolean): string {
     // Every run is told where scratch work goes (0.4.18): inside the project, ignored by git, and emptied when the run ends. It goes before the
     // Open-GSD note so a workflow's own instructions read as the more specific direction.
-    const base = `${agentSystemPrompt({ security: Boolean(request.security), agentTool, root, platform: `${process.platform} ${process.arch}`, date: new Date().toISOString().slice(0, 10), isGitRepo: existsSync(path.join(root, '.git')), model: request.model })}${projectInstructions(root)}\n\n${SCRATCH_INSTRUCTIONS}\n\n${WAITING_INSTRUCTIONS}${request.team ? `\n\n${KNOWLEDGE_INSTRUCTIONS}` : ''}`;
+    const base = `${agentSystemPrompt({ security: Boolean(request.security), agentTool, root, platform: `${process.platform} ${process.arch}`, date: new Date().toISOString().slice(0, 10), isGitRepo: insideGitRepo(root), model: request.model })}${projectInstructions(root)}\n\n${SCRATCH_INSTRUCTIONS}\n\n${WAITING_INSTRUCTIONS}${request.team ? `\n\n${KNOWLEDGE_INSTRUCTIONS}` : ''}`;
     if (!request.gsd) return base;
     return `${base}\n\n# Open-GSD\nOpen-GSD is installed at ${request.gsd.home} (read-only to you). Its skills, agents, workflows, templates, and references live there; read them with Read when instructions point to them. Run gsd-tools as the workflows show; CLAUDE_CONFIG_DIR is already set in your shell. ${agentTool ? 'When a workflow says to spawn an agent, use the Agent tool with that subagent_type (run_in_background works). When the agent does an item on your task list, pass that item\'s exact content as the Agent call\'s task: the list then shows it in progress and marks it completed (or back to pending) when the agent ends, even while other agents still run. Background agents\' reports arrive as messages on their own: once you have nothing else to do, end your turn to wait for them. Never wait with sleep or by polling for output files.' : 'You have no Agent tool here: when a workflow says to spawn an agent, do that part of the work yourself.'} When it says to ask the user, use AskUserQuestion.`;
   }
@@ -1183,4 +1183,15 @@ export function stopNotice(result: Pick<RunResult, 'outcome' | 'stop'>): string 
   }
   if (result.outcome === 'max-turns') return result.stop?.kind === 'turn-limit' ? `Stopped after reaching the turn limit (${result.stop.turns} turns).` : 'Stopped after reaching the turn limit.';
   return undefined;
+}
+
+/**
+ * Whether a folder is inside a git checkout: its own .git, or one in a parent folder. A workspace opened at a monorepo subfolder, and an isolated
+ * agent's copy of that subfolder inside its worktree, have no .git of their own, yet they are in a repository and the agent may commit there.
+ */
+function insideGitRepo(root: string): boolean {
+  for (let dir = path.resolve(root); ; dir = path.dirname(dir)) {
+    if (existsSync(path.join(dir, '.git'))) return true;
+    if (path.dirname(dir) === dir) return false;
+  }
 }

@@ -394,11 +394,12 @@ test('with one parallel slot, a sub-agent that starts a BACKGROUND agent finishe
   };
   try {
     await conversation.send(request(client as never, nested, { maxParallelAgents: 1 }));
+    // Asserted before dispose: the main run waits for its background agents before send returns, so the planner has run by now.
+    assert.match(String(posted.find((message) => message.type === 'tool-end' && message.callId === 'p1')?.output), /lead started the planner/);
+    assert.equal(counters.planner, 1, 'the background planner ran once the lead had freed the slot');
   } finally {
     conversation.dispose();
   }
-  assert.match(String(posted.find((message) => message.type === 'tool-end' && message.callId === 'p1')?.output), /lead started the planner/);
-  assert.equal(counters.planner, 1, 'the background planner ran once the lead had freed the slot');
 });
 
 test('at the critical threshold when summarizing cannot free space, the user is told once', async () => {

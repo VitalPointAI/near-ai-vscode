@@ -1159,6 +1159,21 @@ test('the role tests rewrite the team the person acted on, never a library team 
   h.close();
 });
 
+test('the wizard runs the role tests on the file it just created, not on whichever team shares the name', async () => {
+  const h = await harness();
+  const calls: Array<{ team: string; file?: string }> = [];
+  (h.deps as unknown as Record<string, unknown>).optimiseTeam = async (_members: unknown[], team: string, options?: { file?: string }) => {
+    calls.push({ team, ...(options?.file ? { file: options.file } : {}) });
+    return { applied: 0, text: `${team}: nothing changed.` };
+  };
+  await h.send({ type: 'ready' });
+  await h.send({ type: 'create', draft: draft(), target: 'user' });
+  await h.settle();
+  assert.equal(calls.length, 1);
+  assert.equal(path.resolve(calls[0]!.file ?? ''), path.resolve(path.join(h.library.directory, 'web-team.md')), 'the created file is the one tested');
+  h.close();
+});
+
 test('optimise-all says so when there is nothing to test, and does not ask a pointless question', async () => {
   const h = await harness();
   (h.deps as unknown as Record<string, unknown>).optimiseTeam = async () => ({ applied: 0, text: 'unused' });

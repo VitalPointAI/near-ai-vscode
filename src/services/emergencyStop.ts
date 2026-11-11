@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events';
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 
@@ -49,6 +49,20 @@ function writeShared(engaged: boolean): void {
   renameSync(temporary, sharedFile);
 }
 
+/** Removes temporary files a crashed window left beside the shared file (older than a minute, so a write in progress elsewhere is never touched). */
+function sweepTemporaries(): void {
+  if (!sharedFile) return;
+  const dir = path.dirname(sharedFile);
+  const prefix = `${path.basename(sharedFile)}.`;
+  try {
+    for (const name of readdirSync(dir)) {
+      if (!name.startsWith(prefix) || !name.endsWith('.tmp')) continue;
+      const file = path.join(dir, name);
+      try { if (Date.now() - statSync(file).mtimeMs > 60_000) unlinkSync(file); } catch { /* gone already, or in use */ }
+    }
+  } catch { /* no folder yet */ }
+}
+
 /** Stored in global state and in the shared file, so a stop survives reloads until the user resumes and reaches every open window. */
 export function initEmergencyStop(context: vscode.ExtensionContext): void {
   memento = context.globalState;
@@ -59,7 +73,9 @@ export function initEmergencyStop(context: vscode.ExtensionContext): void {
   item.command = 'nearAi.resume';
   item.backgroundColor = new vscode.ThemeColor('statusBarItem.errorBackground');
   const sync = (engaged: boolean) => { if (engaged) item.show(); else item.hide(); };
-  // The shared file is the newest word from any window; global state covers a machine that stopped before the file existed.
+  sweepTemporaries();
+  // The shared file is the newest word from any window, so it wins over global state when both exist: this window's copy of global state can be stale
+  // (another window resumed, and VS Code does not promise to refresh it here). Global state covers a machine that stopped before the file existed.
   const shared = readShared();
   current = shared ?? memento.get<boolean>(STATE_KEY, false) ?? false;
   // A stop recorded only in global state (before the shared file existed) is written out, so the other open windows learn of it too.
