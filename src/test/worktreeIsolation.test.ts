@@ -87,6 +87,41 @@ test('isolation="worktree" runs each agent on its own branch in its own director
   assert.ok(systems.every((system) => /isolated git worktree at .* on branch worktree-agent-/.test(system)), 'each agent is told where it works');
 });
 
+test('isolation="worktree" in a workspace opened at a subfolder of the repository starts the agent in that subfolder of the worktree', async () => {
+  const { root: repo, storage, gsd } = await repository();
+  const root = path.join(repo, 'packages', 'app');
+  await mkdir(root, { recursive: true });
+  await writeFile(path.join(root, 'package.json'), '{}\n');
+  await git(repo, 'add', '.');
+  await git(repo, 'commit', '-qm', 'app');
+  let system = '';
+  const near = {
+    async *streamCompletion(_model: string, messages: AgentMessage[]): AsyncGenerator<CompletionEvent> {
+      const last = messages.at(-1)!;
+      if (String(messages[0]?.content).startsWith('You are the executor.')) {
+        system = String(messages[0]?.content);
+        if (last.role === 'user') { yield done({ role: 'assistant', content: null, tool_calls: [call('b1', 'Bash', { command: 'git rev-parse --show-prefix && ls' })] }); return; }
+        yield done({ role: 'assistant', content: `ran in: ${String(last.content).trim()}` });
+        return;
+      }
+      if (!messages.some((message) => message.role === 'tool')) { yield done({ role: 'assistant', content: null, tool_calls: [call('a1', 'Agent', { subagent_type: 'gsd-executor', prompt: 'where', isolation: 'worktree' })] }); return; }
+      yield done({ role: 'assistant', content: 'ok' });
+    },
+    async actualCostsUsd() { return undefined; }
+  };
+  const posted: Array<Record<string, unknown>> = [];
+  const conversation = new AgentConversation(root, (message) => posted.push(message), path.join(storage, 'checkpoints'));
+  try {
+    await conversation.send({ text: 'go', client: near as never, model: 'm', privacy: 'Private', policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES, gsd });
+  } finally {
+    conversation.dispose();
+  }
+  const output = String(posted.find((message) => message.type === 'tool-end' && message.callId === 'a1')?.output);
+  assert.match(output, /ran in: packages\/app\/\npackage\.json/, `the agent's shell starts in the worktree's packages/app: ${output}`);
+  assert.match(system, /in its copy of the workspace folder, \S+packages[\\/]app\./, 'the agent is told which folder it works in');
+  assert.match(system, /Git repository: yes/, 'a subfolder of a worktree is inside a repository, so the agent is not told it is not one');
+});
+
 test('isolation="worktree" outside a git repository is refused with a clear reason', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'near-ai-wt-nogit-'));
   const { gsd, storage } = await repository();
