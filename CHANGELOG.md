@@ -3,7 +3,7 @@
 ## Unreleased
 
 - **Sub-agents no longer stall on approvals nobody is there to give.** Measured on two research
-  projects, sub-agents waited 15 minutes at a time on cards for their own checks (105 and 134 such
+  projects, sub-agents waited 15 minutes at a time on cards for their own checks (106 and 135 such
   waits), and two long runs died after about three hours of them. In Auto and Edits auto, a sub-agent
   now runs commands the safety rules call safe (reads, read-only git, tests, lint, type checks, builds,
   and writes inside its own folder or worktree) and clean verification scripts inside the project

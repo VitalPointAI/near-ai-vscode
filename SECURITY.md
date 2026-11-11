@@ -108,15 +108,21 @@ is usually there to answer one and runs used to wait hours on their own checks
 - a verification script run by `bash`, `sh`, `node` or `python3`, when the
   script resolves (symlinks followed) inside the project, is named like a check
   (verify, check, gate, lint, test, typecheck, validate, audit) or is named in
-  the sub-agent's task, is under 256 KiB, and its text names no network program
-  or URL, starts no other program and evaluates no code, deletes or discards
-  nothing, publishes or pushes nothing, names no credential, environment
-  variable or home-directory path, and names no absolute path outside the
-  project, and names no `..` path segment in any form (`../`, `/..`, a quoted
-  `'..'` or `".."`, `join('..', …)`, or `..` as an argument) and no other way to
-  climb out (`os.pardir`, `chdir`, nested `dirname`, `.parent.parent`). Each
-  line of a shell script must also not be risky to
-  the rules.
+  the sub-agent's task, is under 256 KiB, and **no agent of the current run
+  wrote or changed it** (or any file it loads). That last rule is the boundary:
+  such a script is the project's own code, which the rules already trust the
+  way they trust `npm test`. A script any agent writes or edits during the run
+  asks, whatever its text says, because no reading of a script's text can be
+  complete. The one exception is a verifier NEAR AI scaffolded whose text still
+  matches the hash it recorded (below).
+
+  On top of that, the script's text is screened for obvious mistakes: a network
+  program or URL, starting another program or evaluating code, deleting or
+  discarding files, publishing or pushing, a credential, an environment
+  variable or home-directory path (`~/`, `$HOME`, `expanduser`, …), an absolute
+  path outside the project, a `..` segment or another way to climb out, and
+  shell lines the rules call risky. This screen is a safety net against
+  accidents, not the security boundary, and it is not complete.
 
   Its arguments follow the same rules: an argument (or the value of a
   `--name=value` option) that has a `..` segment, is an absolute path, starts
@@ -141,18 +147,22 @@ is usually there to answer one and runs used to wait hours on their own checks
   written (a file agents cannot change without asking); a scaffolded file that
   differs in any way asks. You may edit a scaffolded verifier, but it asks until
   you run **NEAR AI: Trust Research Verifiers**, which lists the changed files
-  and records their new hashes only after you confirm. When the run has read outside content, any file of
-  the closure changed after the moment any agent of the run first read it
-  makes the script ask, however late the agent running the script started.
+  and records their new hashes only after you confirm.
+
+  "The current run" is one message's run with all its sub-agents. A script an
+  agent wrote in an earlier run of the conversation, and that you have not
+  looked at since, counts as the project's own in a later run; review what an
+  earlier run wrote under `scripts/` before leaving a new run unattended.
 
 Everything else asks exactly as before, including for sub-agents: a push, a
 delete outside the project, publishing, any command that can reach the
 network, and any credential path. The deny list, the emergency stop, the
 outside-content holds and credential-path checks are applied first and are
-never overridden. `approve-risky` and the main conversation are unchanged.
+never overridden. In `approve-risky` and the other modes, and in the main
+conversation, nothing above runs without a card.
 
-A sub-agent's approval card waits `nearAi.agent.subagentApprovalWaitSeconds`
-(20 s by default). If nobody answers, the action does **not** run: the
+In every approval mode, `approve-risky` included, a sub-agent's approval card
+waits `nearAi.agent.subagentApprovalWaitSeconds` (20 s by default). If nobody answers, the action does **not** run: the
 sub-agent is told it is awaiting approval and carries on with other work, and
 the card stays queued (until the run ends, or a day at most). Allowing it later
 allows that exact command, or edits, for the rest of the run and tells the lead

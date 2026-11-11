@@ -252,6 +252,8 @@ export class AgentConversation {
   /** Estimated cost and tokens of the current run, across the agent and its sub-agents. */
   /** The current run's auto-mode safety check, shared with its sub-agents. */
   private runSafety: SafetyModelCheck | undefined;
+  /** When the current run started: a script any of its agents wrote since then never runs without a card. */
+  private currentRunStartedAt = 0;
   /** The current run's main agent id, for the activity feed's idle time (PERF-07). */
   private mainAgentId: string | undefined;
   private spend = { costUsd: 0, tokens: 0, totalTokens: 0, cachedTokens: 0, stopped: false };
@@ -332,6 +334,8 @@ export class AgentConversation {
     await this.runMarkers?.start({ conversationId, runId, model: request.model });
     const mainId = `main-${runId}`;
     this.mainAgentId = mainId;
+    // Every agent of this run judges a script's provenance from this moment: anything written since asks (review of PR 34).
+    this.currentRunStartedAt = Date.now();
     const boundary = runBoundary(request);
     this.activity?.agentStarted({ agentId: mainId, agent: request.skill ? `/${request.skill.name}` : request.team ? `team:${request.team.slug}` : 'agent', runId, model: request.model, conversationId: this.conversationId, ...(boundary ? { boundary } : {}) }, prompt, freshConversation ? String(this.messages[0].content) : undefined);
     this.post({ type: 'assistant-start', model: request.model, privacy: request.privacy });
@@ -821,7 +825,7 @@ export class AgentConversation {
             this.activity?.agentStarted({ agentId: agent.id, agent: label, runId, model, parentId: `main-${runId}`, conversationId: this.conversationId, ...(boundary ? { boundary } : {}) }, spawn.prompt, system);
             const child = new AgentRun({
               client: request.client, model, tools, context: agentContext, policy: request.policy, rules: request.rules, grants, safety: this.runSafety, maxTurns: request.maxTurns, maxOutputTokens: request.maxOutputTokens,
-              ...(request.unattendedAutoApprove !== false ? { unattended: { planScripts: scriptsNamedIn(spawn.prompt) } } : {}),
+              ...(request.unattendedAutoApprove !== false ? { unattended: { planScripts: scriptsNamedIn(spawn.prompt), runStartedAt: this.currentRunStartedAt } } : {}),
               // PERF-03: the sub-agent's backup is the run's backup, or the chat's own model when the backup is what it already runs on.
               ...(request.modelStallMs ? { stallMs: request.modelStallMs, backupModel: [request.backupModel, request.model].find((candidate) => candidate && candidate !== model) } : {}),
               beforeTool: (signal) => this.whileRunPaused(signal),
@@ -833,6 +837,8 @@ export class AgentConversation {
               },
               // PERF-01: nobody may be watching a sub-agent, so its card waits only briefly; unanswered, the call returns "awaiting approval", the card
               // stays queued, and a later answer is passed to the lead (an allow grants that exact command for the rest of the run).
+              // In every mode, deliberately (review of PR 34): the short wait never runs anything. The card stays queued for the person, the action
+              // happens only if they allow it, and the sub-agent works on meanwhile instead of holding the run.
               requestApproval: (approval) => this.askApproval({ ...approval, callId: `${agent.id}:${approval.callId}`, title: `${label} › ${approval.title}` }, agent.abort.signal, label, agent.id, {
                 waitMs: this.subagentApprovalWaitMs,
                 onLate: (reply) => this.lateApproval(label, approval, reply, grants)

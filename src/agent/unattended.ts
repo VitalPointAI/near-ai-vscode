@@ -15,7 +15,8 @@ import { VERIFIER_FILES, VERIFIER_MANIFEST } from '../gsd/verifierScaffold';
 //      agent's own root, which is its git worktree when it has one): the same verdict auto mode acts on, now also in mostly-autonomous;
 //   2. a verification script run by an interpreter (bash, sh, node, python3), when the script sits inside the agent's root, is named like a check or is
 //      named by the plan, and its text passes the static content check below.
-// Never: a `risky` verdict (push, publish, delete outside, credential paths), a network command, a script outside the root, a script the run itself
+// Never: a `risky` verdict (push, publish, delete outside, credential paths), a network command, a script outside the root, any script file an agent
+// of this run wrote or changed (the boundary: a script runs unattended only as the project's own code), a script the run itself
 // wrote after reading outside content, or a script whose text mentions the network, deletion, publishing, credentials, subprocesses or a path outside
 // the root.
 
@@ -51,7 +52,7 @@ const FORBIDDEN_CONTENT: Array<[RegExp, string]> = [
   [/\brm\s+-|\brm\s+[^\s|;&]+|\brmdir\b|\bunlink|\brmSync\b|\brm\s*\(|\bshutil\.rmtree|\bos\.remove|\s-delete\b|\bshred\b|\btruncate\b|\bgit\s+(?:reset|clean|checkout|restore)\b/, 'it deletes or discards files'],
   [/\bgit\s+push\b|\bnpm\s+publish\b|\bpnpm\s+publish\b|\byarn\s+publish\b|\bvsce\b|\bovsx\b|\btwine\b|\bgh\s+(?:release|pr|api)\b|\bdocker\s+push\b|\bcargo\s+publish\b/, 'it publishes or pushes'],
   [/\.ssh\b|\.aws\b|\.gnupg|near-credentials|\.npmrc|\.netrc|\.pypirc|\bid_(?:rsa|ed25519|ecdsa|dsa)\b|\.(?:pem|p12|pfx|keystore|kbkey)\b|\bcredentials?\b|(?:^|[^\w])\.env\b|process\.env|os\.environ|getenv|\$\{?[A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|API_?KEY)/i, 'it names a credential or the environment'],
-  [/(?:^|[\s'"`=(,])~\//, 'it names a path in a home directory'],
+  [/(?:^|[\s'"`=(,])~\/|\$\{?HOME\b|\bexpanduser\b|\bPath\.home\b|\bhomedir\b|(?:^|[;&|]\s*)cd\s*(?:$|[;&|])/m, 'it names a path in a home directory'],
   // Review of PR 34: any `..` path segment in any form (`../`, `/..`, `'..'`, `".."`, `join('..', 'x')`, a bare `..` argument), not only `../`. A run of
   // three dots (a spread or an ellipsis) and a dot inside a name (`a..b`) are not segments. Ways to climb without writing `..` ask too.
   [/(?<![.\w])\.\.(?![.\w])/, 'it names a path above its own folder'],
@@ -245,6 +246,10 @@ async function checkClosure(entry: string, realRoot: string, context: CommandCon
     const text = await readFile(file, 'utf8');
     const recorded = manifest[shown] ?? (VERIFIER_FILES[shown] !== undefined ? contentHash(VERIFIER_FILES[shown]) : undefined);
     if (recorded !== undefined && contentHash(text) !== recorded) return `${shown} is a scaffolded verifier that has changed since it was scaffolded`;
+    // The boundary (review of PR 34): a script is the project's own code, trusted as `npm test` already is, only if no agent of this run wrote it. No
+    // check of a script's text can be complete (a shell script can reach a path in endless ways), so a file written or changed since the run started
+    // always asks, whatever it contains. The only exception is a scaffolded verifier whose text is exactly what NEAR AI wrote and recorded.
+    if (recorded === undefined && context.runStartedAt !== undefined && info.mtimeMs >= context.runStartedAt - 1_000) return `${shown} was written or changed during this run, so it is not the project's own check yet`;
     const forbidden = forbiddenScriptContent(text, realRoot);
     if (forbidden) return `${shown}: ${forbidden}`;
     if (SHELL_FILE.test(file) || /^#!.*\b(?:ba)?sh\b/.test(text)) {

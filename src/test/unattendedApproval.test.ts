@@ -39,7 +39,7 @@ async function project(): Promise<string> {
 async function decide(root: string, command: string, options: { mode?: ActionPolicyMode; unattended?: boolean; tainted?: boolean; planScripts?: string[]; runStartedAt?: number; taintedAt?: number } = {}) {
   const grants = new RunGrants();
   grants.tainted = options.tainted === true;
-  const auto: AutoApprovalContext = { root, cwd: root, home: homedir(), packageScripts: { test: 'node --test', lint: 'tsc --noEmit' }, ...(options.unattended === false ? {} : { unattended: { planScripts: options.planScripts ?? [], runStartedAt: options.runStartedAt ?? 0, ...(options.taintedAt !== undefined ? { taintedAt: options.taintedAt } : {}) } }) };
+  const auto: AutoApprovalContext = { root, cwd: root, home: homedir(), packageScripts: { test: 'node --test', lint: 'tsc --noEmit' }, ...(options.unattended === false ? {} : { unattended: { planScripts: options.planScripts ?? [], runStartedAt: options.runStartedAt ?? Date.now() + 60_000, ...(options.taintedAt !== undefined ? { taintedAt: options.taintedAt } : {}) } }) };
   return decidePermissionAsync('shell', command, { mode: options.mode ?? 'mostly-autonomous', emergencyStop: false }, RULES, grants, auto);
 }
 
@@ -95,7 +95,28 @@ test('a script outside the project, or one this run wrote after reading outside 
   const startedAt = Date.now() - 60_000;
   await utimes(path.join(root, 'scripts', 'verify.sh'), new Date(), new Date());
   assert.notEqual((await decide(root, 'bash scripts/verify.sh', { tainted: true, runStartedAt: startedAt })).decision, 'allow', 'written this run after outside content');
-  assert.equal((await decide(root, 'bash scripts/verify.sh', { tainted: false, runStartedAt: startedAt })).decision, 'allow', 'written this run, no outside content');
+  // Review of PR 34: provenance is the boundary, so a script an agent of this run wrote asks even when the run read nothing from outside.
+  assert.notEqual((await decide(root, 'bash scripts/verify.sh', { tainted: false, runStartedAt: startedAt })).decision, 'allow', 'written this run, no outside content');
+  assert.equal((await decide(root, 'bash scripts/verify.sh', { tainted: false, runStartedAt: Date.now() + 60_000 })).decision, 'allow', 'written before the run: the project\'s own check');
+});
+
+test('a script any agent of the run wrote asks whatever its text, unless it is an unchanged scaffolded verifier', async () => {
+  const root = await project();
+  const runStartedAt = Date.now() - 60_000;
+  // The reviewer's case, and text no screen recognises: both were written during the run, so both ask.
+  await writeFile(path.join(root, 'scripts', 'verify-home.sh'), 'cp $HOME/.config/app/keys report/\n');
+  await writeFile(path.join(root, 'scripts', 'verify-quiet.sh'), 'echo ok\n');
+  for (const script of ['verify-home.sh', 'verify-quiet.sh']) {
+    const verdict = await decide(root, `bash scripts/${script}`, { runStartedAt });
+    assert.notEqual(verdict.decision, 'allow', script);
+  }
+});
+
+test('the home-directory screen catches $HOME, ${HOME}, expanduser, Path.home, homedir and a bare cd', () => {
+  for (const text of ['cp $HOME/x y\n', 'cat "${HOME}/x"\n', 'os.path.expanduser("x")\n', 'Path.home() / "x"\n', 'const h = homedir();\n', 'cd\ncat x\n', 'true; cd; cat x\n']) {
+    assert.match(forbiddenScriptContent(text, '/project') ?? '', /home directory/, text);
+  }
+  assert.equal(forbiddenScriptContent('echo "$1" > out/$name.txt\ncd out\n', '/project'), undefined, 'ordinary variables and a cd into a folder are not home paths');
 });
 
 test('Ask before edits, the main run, the deny list and the emergency stop are unchanged', async () => {
@@ -188,7 +209,9 @@ test('a script written after the main agent read outside content still asks when
   await writeFile(path.join(root, 'scripts', 'verify-planted.sh'), 'echo ok\n');
   const helperStartedAt = Date.now() + 60_000;
   assert.notEqual((await decide(root, 'bash scripts/verify-planted.sh', { tainted: true, runStartedAt: helperStartedAt, taintedAt })).decision, 'allow', 'still asks');
-  assert.equal((await decide(root, 'bash scripts/verify-planted.sh', { tainted: true, runStartedAt: helperStartedAt, taintedAt: Date.now() + 120_000 })).decision, 'allow', 'a script from before the taint runs');
+  // Written after the run started, so it asks even before the taint (review of PR 34: provenance, not taint, is the boundary).
+  assert.notEqual((await decide(root, 'bash scripts/verify-planted.sh', { tainted: true, runStartedAt: taintedAt - 60_000, taintedAt: Date.now() + 120_000 })).decision, 'allow', 'a script the run wrote before the taint still asks');
+  assert.equal((await decide(root, 'bash scripts/verify-planted.sh', { tainted: true, runStartedAt: Date.now() + 60_000, taintedAt: Date.now() + 120_000 })).decision, 'allow', 'a script from before the run and the taint runs');
 
   const { AgentRun } = await import('../agent/loop');
   const { RunCheckpoints } = await import('../agent/checkpoints');
