@@ -55,6 +55,10 @@ test('the plan-checker is skipped only when every named plan lists content files
   assert.equal(await planCheckSkip(named('02-01-PLAN.md', '02-02-PLAN.md'), root), undefined, 'a plan that changes a verifier is checked');
   assert.equal(await planCheckSkip(named('02-03-PLAN.md'), root), undefined, 'a plan without files_modified is checked');
   assert.equal(await planCheckSkip(named('02-04-PLAN.md'), root), undefined, 'a plan that changes CI is checked');
+  await writeFile(path.join(dir, '02-05-PLAN.md'), plan(['report/x.md', 'src/agent/permissions.ts']));
+  await writeFile(path.join(dir, '02-06-PLAN.md'), plan(['report/x.md', 'notes/config.json']));
+  assert.equal(await planCheckSkip(named('02-05-PLAN.md'), root), undefined, 'a plan that changes source code is checked, gate-named or not');
+  assert.equal(await planCheckSkip(named('02-06-PLAN.md'), root), undefined, 'anything that is not plainly a document, data or image file is checked');
   assert.equal(await planCheckSkip('Check the phase plans.', root), undefined, 'no named plan: checked');
   assert.equal(await planCheckSkip(named('02-09-PLAN.md'), root), undefined, 'an unreadable plan: checked');
   assert.equal(await planCheckSkip(`Check ${path.join(tmpdir(), 'elsewhere-01-PLAN.md')}`, root), undefined, 'a plan outside the project: checked');

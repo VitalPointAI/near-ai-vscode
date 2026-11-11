@@ -75,6 +75,13 @@ export async function researchProfileActive(root: string): Promise<boolean> {
 /** A path that is a gate or verifier: verification scripts, gate scripts, tests, CI workflows, and the GSD verification documents' own checkers. */
 const GATE_PATH = /(?:^|\/)(?:scripts\/(?:verify|gates?|checks?)\/|\.github\/workflows\/|tests?\/|__tests__\/)|(?:^|[\/._-])(?:verify|verifier|gate|gates|check|checker|lint|test|tests|spec)(?:[\/._-]|$)/i;
 
+/**
+ * A file a content-only plan may change: a document, data or image file, and never a gate (review of PR 34: deciding "content" by ruling out known gate
+ * paths let a plan that rewrites any source file, such as the approval code, count as content). Anything that is not plainly content is not.
+ */
+const CONTENT_FILE = /\.(?:md|markdown|txt|csv|tsv|bib|ris|png|jpe?g|gif|webp|pdf|docx|xlsx|pptx|odt)$/i;
+export const isContentFile = (file: string): boolean => { const normalized = file.replace(/\\/g, '/'); return CONTENT_FILE.test(normalized) && !GATE_PATH.test(normalized); };
+
 /** The files_modified list of a PLAN.md, or undefined when it has none (then the plan is checked as usual). */
 export function filesModified(plan: string): string[] | undefined {
   const frontmatter = /^---\r?\n([\s\S]*?)\r?\n---/.exec(plan)?.[1];
@@ -127,9 +134,9 @@ export async function workingTreeChanges(root: string): Promise<string[] | undef
 /**
  * The report a skipped plan-checker returns, or undefined when it must run (review of PR 34: the plan's own files_modified list, written by the same
  * agent, is not evidence on its own). The check is skipped only when ALL of these hold, and the report lists the evidence:
- *   - the prompt names at least one plan, each readable inside the project, each with a files_modified list naming no gate or verifier;
+ *   - the prompt names at least one plan, each readable inside the project, each with a files_modified list of content files only (isContentFile);
  *   - the plan's whole text names no gate or verifier path (an undeclared edit described in a task is caught here);
- *   - the actual changes so far, the files this run wrote and every uncommitted change git reports, touch no gate or verifier.
+ *   - the actual changes so far, the files this run wrote and every uncommitted change git reports, are all content files.
  * When git cannot report the working tree (not a repository, git missing), the evidence is unavailable and the checker runs.
  */
 export async function planCheckSkip(prompt: string, root: string, writtenByRun: string[] = []): Promise<string | undefined> {
@@ -148,7 +155,7 @@ export async function planCheckSkip(prompt: string, root: string, writtenByRun: 
     }
     const files = filesModified(text);
     if (!files?.length) return undefined;
-    if (files.some((file) => GATE_PATH.test(file.replace(/\\/g, '/')))) return undefined;
+    if (!files.every(isContentFile)) return undefined;
     // Every path the plan's text mentions, not only the declared list.
     // A command that only RUNS a verifier (`node scripts/verify/verify-all.mjs`, `npm test`) is not an edit, so run commands are left out first.
     const prose = frontmatterless(text).replace(/\b(?:node|bash|sh|python3?|npx|npm\s+run|npm)\s+\S+/g, ' ');
@@ -160,7 +167,7 @@ export async function planCheckSkip(prompt: string, root: string, writtenByRun: 
   if (uncommitted === undefined) return undefined;
   const written = writtenByRun.map((file) => path.relative(realRoot, path.resolve(file)).split(path.sep).join('/')).filter((file) => file && !file.startsWith('..'));
   const changed = [...new Set([...uncommitted, ...written])];
-  if (changed.some((file) => GATE_PATH.test(file.replace(/\\/g, '/')))) return undefined;
+  if (!changed.every(isContentFile)) return undefined;
   const list = (items: string[]) => {
     const named = items.map((item) => (SEVERITY_WORD.test(item) ? '(one file, name not shown)' : item));
     return named.length ? `${named.slice(0, 8).join(', ')}${named.length > 8 ? `, and ${named.length - 8} more` : ''}` : 'none';
@@ -172,7 +179,7 @@ The marker above only lets Open-GSD's workflow carry on without stopping to ask;
 
 Evidence for the skip:
 - Plans: ${list(named)}.
-- Files the plans declare (files_modified): ${list([...new Set(declared)])}; none is a gate, verifier, test or CI file.
+- Files the plans declare (files_modified): ${list([...new Set(declared)])}; every one is a document, data or image file, and none is a gate, verifier, test or CI file.
 - The plans' text names no gate or verifier path.
 - Files this run has written so far: ${list(written)}.
 - Uncommitted changes git reports: ${list(uncommitted)}.

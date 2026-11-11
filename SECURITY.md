@@ -109,7 +109,12 @@ is usually there to answer one and runs used to wait hours on their own checks
   script resolves (symlinks followed) inside the project, is named like a check
   (verify, check, gate, lint, test, typecheck, validate, audit) or is named in
   the sub-agent's task, is under 256 KiB, and **no agent of the current run
-  wrote or changed it** (or any file it loads). That last rule is the boundary:
+  wrote or changed it** (or any file it loads). "Changed" is judged by the
+  file's change time as well as its modified time, because an agent can set a
+  modified time back but not a change time; a file with recent times still
+  counts when its bytes equal its committed copy at the commit the project was
+  on when the run started (as in a worktree checked out during the run). That
+  last rule is the boundary:
   such a script is the project's own code, which the rules already trust the
   way they trust `npm test`. A script any agent writes or edits during the run
   asks, whatever its text says, because no reading of a script's text can be
@@ -177,10 +182,13 @@ conversation's own approvals still wait for you (`nearAi.agent.approvalTimeoutMi
 
 In a research or writing project (`nearAi.gsd.researchProfile`, on by
 default), Open-GSD's plan checker is not run for a plan that changes content
-only. A plan counts as content-only when its `files_modified` list and its
-text name no gate, verifier, test or CI file, and when nothing this run wrote
-and no uncommitted change git reports touches one; without git, the checker
-runs. The checker's place in the workflow is then filled by a reply that
+only. A plan counts as content-only when every file its `files_modified`
+list names, every file this run wrote, and every uncommitted change git
+reports is a document, data or image file (`.md`, `.txt`, `.csv`, `.tsv`,
+`.bib`, `.ris`, images, `.pdf`, `.docx`, `.xlsx`, `.pptx`, `.odt`) and none is
+a gate, verifier, test or CI file, and its text names no gate or verifier
+either. Any source, script or configuration file means the checker runs, and
+so does a project without git. The checker's place in the workflow is then filled by a reply that
 starts with `## VERIFICATION PASSED`, because Open-GSD continues only on that
 marker or `## ISSUES FOUND` and otherwise stops to ask you. The next line
 always reads "PLAN CHECK SKIPPED (content-only plan): the plan checker was NOT

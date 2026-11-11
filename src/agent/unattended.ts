@@ -1,3 +1,4 @@
+import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFile, realpath, stat } from 'node:fs/promises';
 import * as path from 'node:path';
@@ -28,6 +29,8 @@ export interface UnattendedScope {
   runStartedAt?: number;
   /** When the run (any of its agents) first read outside content (ms); a file changed after it asks. Falls back to runStartedAt when unknown. */
   taintedAt?: number;
+  /** The commit the project was on when the run started: a file whose bytes equal its copy there existed before the run, whatever its times say. */
+  baseCommit?: string;
 }
 
 export interface UnattendedVerdict { allow: boolean; reason: string }
@@ -116,7 +119,7 @@ export async function argumentProblem(args: string[], cwd: string, root: string)
     for (const value of values) {
       if (!PLAIN_WORD.test(value) && value !== '') return `its argument ${arg} is not plain text`;
       if (/[$~*?[\]{}`]/.test(value)) return `its argument ${arg} is expanded by the shell`;
-      if (value.split(/[\/]/).includes('..')) return `its argument ${arg} names a parent folder`;
+      if (value.split(/[\\/]/).includes('..')) return `its argument ${arg} names a parent folder`;
       if (path.isAbsolute(value) || /^[A-Za-z]:[\\/]/.test(value)) return `its argument ${arg} is an absolute path`;
       if (value.startsWith('-') || !value) continue;
       // Any other word is judged as a path from the folder the script runs in: it must stay inside the project.
@@ -211,6 +214,16 @@ export function dependenciesOf(file: string, text: string, shellCwd = path.dirna
   return { relative, builtins, invocations };
 }
 
+/** Whether a file's bytes equal its copy at `commit` (resolved from the file's own folder, so a worktree's copy is compared with the same commit). */
+function committedBefore(file: string, text: string, commit: string | undefined): Promise<boolean> {
+  if (!commit || !/^[0-9a-f]{40,64}$/.test(commit)) return Promise.resolve(false);
+  return new Promise((resolve) => {
+    execFile('git', ['cat-file', 'blob', `${commit}:./${path.basename(file)}`], { cwd: path.dirname(file), timeout: 10_000, maxBuffer: MAX_SCRIPT_BYTES + 1024, encoding: 'buffer', env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } }, (error, stdout) => {
+      resolve(!error && Buffer.isBuffer(stdout) && stdout.equals(Buffer.from(text, 'utf8')));
+    });
+  });
+}
+
 /** The scaffold's recorded hashes (.planning/.near-ai/verifiers.json), by project-relative path; empty when there is none. */
 async function scaffoldManifest(root: string): Promise<Record<string, string>> {
   try {
@@ -241,15 +254,21 @@ async function checkClosure(entry: string, realRoot: string, context: CommandCon
     if (done.size + onPath.size >= MAX_CLOSURE_FILES) return 'it loads too many files to check';
     const info = await stat(file);
     if (!info.isFile() || info.size > MAX_SCRIPT_BYTES) return `${shown} is not a small regular file`;
-    const since = context.taintedAt ?? context.runStartedAt;
-    if (tainted && since !== undefined && info.mtimeMs >= since - 1_000) return `${shown} changed after this run read outside content`;
     const text = await readFile(file, 'utf8');
     const recorded = manifest[shown] ?? (VERIFIER_FILES[shown] !== undefined ? contentHash(VERIFIER_FILES[shown]) : undefined);
     if (recorded !== undefined && contentHash(text) !== recorded) return `${shown} is a scaffolded verifier that has changed since it was scaffolded`;
     // The boundary (review of PR 34): a script is the project's own code, trusted as `npm test` already is, only if no agent of this run wrote it. No
     // check of a script's text can be complete (a shell script can reach a path in endless ways), so a file written or changed since the run started
-    // always asks, whatever it contains. The only exception is a scaffolded verifier whose text is exactly what NEAR AI wrote and recorded.
-    if (recorded === undefined && context.runStartedAt !== undefined && info.mtimeMs >= context.runStartedAt - 1_000) return `${shown} was written or changed during this run, so it is not the project's own check yet`;
+    // always asks, whatever it contains. "Since" uses the change time as well as the modified time: an agent can set a file's modified time back
+    // (`touch -d`, `cp -p`), but not its change time. A file with recent times still counts as the project's own when its bytes equal its committed
+    // copy at the commit the run started on (a worktree checked out during the run), which no agent can alter after the fact. The only other
+    // exception is a scaffolded verifier whose text is exactly what NEAR AI wrote and recorded.
+    const touched = Math.max(info.mtimeMs, info.ctimeMs);
+    const since = context.taintedAt ?? context.runStartedAt;
+    const fresh = (moment: number | undefined) => moment !== undefined && touched >= moment - 1_000;
+    if (recorded === undefined && (fresh(context.runStartedAt) || (tainted && fresh(since))) && !(await committedBefore(file, text, context.baseCommit))) {
+      return fresh(context.runStartedAt) ? `${shown} was written or changed during this run, so it is not the project's own check yet` : `${shown} changed after this run read outside content`;
+    }
     const forbidden = forbiddenScriptContent(text, realRoot);
     if (forbidden) return `${shown}: ${forbidden}`;
     if (SHELL_FILE.test(file) || /^#!.*\b(?:ba)?sh\b/.test(text)) {

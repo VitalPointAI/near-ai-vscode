@@ -1,3 +1,4 @@
+import { execFile } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import * as path from 'node:path';
@@ -28,6 +29,7 @@ import type { ActivityStore } from './activityStore';
 import { saveHandoff } from './handoff';
 import { homeFolder, teamLibraryDir } from '../domain/teamStorage';
 import { SCRATCH_INSTRUCTIONS } from '../domain/scratch';
+import { AGENT_DEFAULTS } from '../domain/agentDefaults';
 import { WAITING_INSTRUCTIONS, checkNowMessage, isCheckNow } from '../domain/checkNow';
 import { cleanScratch } from './scratch';
 import { scriptsNamedIn } from '../agent/unattended';
@@ -185,6 +187,10 @@ export function steeringContent(text: string): string {
   return `<user-message-during-run>\n${text}\n</user-message-during-run>\nThe user sent this while you were working. It is new direction: it takes precedence over your current plan, so adjust what you are doing (or stop and answer) and say briefly how you changed course.`;
 }
 
+/** The workspace's HEAD commit, or undefined when it is not a git repository (or git is missing). */
+const headCommit = (root: string): Promise<string | undefined> => new Promise((resolve) => {
+  execFile('git', ['rev-parse', '--verify', '--quiet', 'HEAD'], { cwd: root, timeout: 10_000, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } }, (error, stdout) => resolve(error ? undefined : String(stdout).trim() || undefined));
+});
 const minutesSince = (at: number) => { const seconds = Math.max(0, Math.round((Date.now() - at) / 1000)); return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)} min`; };
 
 /**
@@ -254,6 +260,8 @@ export class AgentConversation {
   private runSafety: SafetyModelCheck | undefined;
   /** When the current run started: a script any of its agents wrote since then never runs without a card. */
   private currentRunStartedAt = 0;
+  /** The commit the workspace was on when the current run started, if it is a git repository. */
+  private currentBaseCommit: string | undefined;
   /** The current run's main agent id, for the activity feed's idle time (PERF-07). */
   private mainAgentId: string | undefined;
   private spend = { costUsd: 0, tokens: 0, totalTokens: 0, cachedTokens: 0, stopped: false };
@@ -336,6 +344,7 @@ export class AgentConversation {
     this.mainAgentId = mainId;
     // Every agent of this run judges a script's provenance from this moment: anything written since asks (review of PR 34).
     this.currentRunStartedAt = Date.now();
+    this.currentBaseCommit = await headCommit(this.root);
     const boundary = runBoundary(request);
     this.activity?.agentStarted({ agentId: mainId, agent: request.skill ? `/${request.skill.name}` : request.team ? `team:${request.team.slug}` : 'agent', runId, model: request.model, conversationId: this.conversationId, ...(boundary ? { boundary } : {}) }, prompt, freshConversation ? String(this.messages[0].content) : undefined);
     this.post({ type: 'assistant-start', model: request.model, privacy: request.privacy });
@@ -759,7 +768,7 @@ export class AgentConversation {
         const parent = spawn.background ? runSignal : callSignal;
         const onParentAbort = () => agent.abort.abort();
         parent.addEventListener('abort', onParentAbort, { once: true });
-        const limit = request.maxParallelAgents ?? 4;
+        const limit = request.maxParallelAgents ?? AGENT_DEFAULTS.maxParallelAgents;
         const slot = { held: false, nested: 0, worktree: spawn.isolation === 'worktree', worktreeHeld: false };
         // A foreground agent this agent starts needs a slot from the same pool, so this agent hands its own slot back while it waits for that child
         // and takes one again before its next turn. Otherwise a parent holding the last slot would wait for ever on a child that waits for that slot.
@@ -825,7 +834,7 @@ export class AgentConversation {
             this.activity?.agentStarted({ agentId: agent.id, agent: label, runId, model, parentId: `main-${runId}`, conversationId: this.conversationId, ...(boundary ? { boundary } : {}) }, spawn.prompt, system);
             const child = new AgentRun({
               client: request.client, model, tools, context: agentContext, policy: request.policy, rules: request.rules, grants, safety: this.runSafety, maxTurns: request.maxTurns, maxOutputTokens: request.maxOutputTokens,
-              ...(request.unattendedAutoApprove !== false ? { unattended: { planScripts: scriptsNamedIn(spawn.prompt), runStartedAt: this.currentRunStartedAt } } : {}),
+              ...(request.unattendedAutoApprove !== false ? { unattended: { planScripts: scriptsNamedIn(spawn.prompt), runStartedAt: this.currentRunStartedAt, ...(this.currentBaseCommit ? { baseCommit: this.currentBaseCommit } : {}) } } : {}),
               // PERF-03: the sub-agent's backup is the run's backup, or the chat's own model when the backup is what it already runs on.
               ...(request.modelStallMs ? { stallMs: request.modelStallMs, backupModel: [request.backupModel, request.model].find((candidate) => candidate && candidate !== model) } : {}),
               beforeTool: (signal) => this.whileRunPaused(signal),

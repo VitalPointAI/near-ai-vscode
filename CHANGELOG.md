@@ -34,8 +34,8 @@
   itself with a notice (`nearAi.agent.autoResumeAfterReload`). Its state is now saved after every
   finished tool call, so it keeps every finished step's result and does not run it again.
 - **A research profile for Open-GSD.** Research and writing projects plan coarser phases, use quick
-  mode for content edits, and send only plans that change a gate or verifier to the plan-checker
-  (`nearAi.gsd.researchProfile`), judged from the plan and from the actual changes. A skipped check
+  mode for content edits, and skip the plan-checker only for plans that change nothing but
+  document, data and image files (`nearAi.gsd.researchProfile`), judged from the plan and from the actual changes. A skipped check
   replies with Open-GSD's pass marker so the run does not stop to ask, and says on the next line that the
   checker was not run. They also get three verifier scripts in `scripts/verify/`: citation
   resolution, figure recompute, and an internal-path leak check, which agents run without asking.

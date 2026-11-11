@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { mkdir, mkdtemp, utimes, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { AutoApprovalContext, decidePermissionAsync, DEFAULT_RULES, PermissionRules, RunGrants } from '../agent/permissions';
-import { forbiddenScriptContent, scriptInvocation, scriptsNamedIn, unattendedDecision } from '../agent/unattended';
+import { argumentProblem, forbiddenScriptContent, scriptInvocation, scriptsNamedIn, unattendedDecision } from '../agent/unattended';
 import type { ActionPolicyMode } from '../domain/policy';
 
 // PERF-01: a sub-agent nobody watches runs its own safe and verification commands without a card, and nothing that the approval policy promises will ask
@@ -36,10 +37,10 @@ async function project(): Promise<string> {
   return root;
 }
 
-async function decide(root: string, command: string, options: { mode?: ActionPolicyMode; unattended?: boolean; tainted?: boolean; planScripts?: string[]; runStartedAt?: number; taintedAt?: number } = {}) {
+async function decide(root: string, command: string, options: { mode?: ActionPolicyMode; unattended?: boolean; tainted?: boolean; planScripts?: string[]; runStartedAt?: number; taintedAt?: number; baseCommit?: string } = {}) {
   const grants = new RunGrants();
   grants.tainted = options.tainted === true;
-  const auto: AutoApprovalContext = { root, cwd: root, home: homedir(), packageScripts: { test: 'node --test', lint: 'tsc --noEmit' }, ...(options.unattended === false ? {} : { unattended: { planScripts: options.planScripts ?? [], runStartedAt: options.runStartedAt ?? Date.now() + 60_000, ...(options.taintedAt !== undefined ? { taintedAt: options.taintedAt } : {}) } }) };
+  const auto: AutoApprovalContext = { root, cwd: root, home: homedir(), packageScripts: { test: 'node --test', lint: 'tsc --noEmit' }, ...(options.unattended === false ? {} : { unattended: { planScripts: options.planScripts ?? [], runStartedAt: options.runStartedAt ?? Date.now() + 60_000, ...(options.taintedAt !== undefined ? { taintedAt: options.taintedAt } : {}), ...(options.baseCommit ? { baseCommit: options.baseCommit } : {}) } }) };
   return decidePermissionAsync('shell', command, { mode: options.mode ?? 'mostly-autonomous', emergencyStop: false }, RULES, grants, auto);
 }
 
@@ -110,6 +111,36 @@ test('a script any agent of the run wrote asks whatever its text, unless it is a
     const verdict = await decide(root, `bash scripts/${script}`, { runStartedAt });
     assert.notEqual(verdict.decision, 'allow', script);
   }
+});
+
+test('a script whose modified time an agent set back still asks: the change time decides', async () => {
+  const root = await project();
+  const runStartedAt = Date.now() - 5_000;
+  // `touch -d` / `cp -p`: the modified time says last year, but the file was written now, so its change time is now.
+  await writeFile(path.join(root, 'scripts', 'verify-backdated.sh'), 'echo ok\n');
+  await utimes(path.join(root, 'scripts', 'verify-backdated.sh'), new Date('2025-01-01'), new Date('2025-01-01'));
+  assert.notEqual((await decide(root, 'bash scripts/verify-backdated.sh', { runStartedAt })).decision, 'allow');
+});
+
+test('a script with recent times that matches its copy in the commit the run started on is the project\'s own (a worktree made during the run)', async () => {
+  const root = await project();
+  const git = (...args: string[]) => spawnSync('git', args, { cwd: root, encoding: 'utf8' });
+  git('init', '-q'); git('-c', 'user.email=t@t', '-c', 'user.name=t', 'add', '-A'); git('-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-qm', 'base');
+  const baseCommit = git('rev-parse', 'HEAD').stdout.trim();
+  const runStartedAt = Date.now() - 5_000;
+  // Rewritten with identical bytes (as a checkout would), so its times are recent.
+  await writeFile(path.join(root, 'scripts', 'verify.sh'), '#!/usr/bin/env bash\nset -euo pipefail\ngrep -c "cite" report.md\ntest -f report.md\necho ok\n');
+  assert.equal((await decide(root, 'bash scripts/verify.sh', { runStartedAt, baseCommit })).decision, 'allow', 'same bytes as the start commit');
+  assert.notEqual((await decide(root, 'bash scripts/verify.sh', { runStartedAt })).decision, 'allow', 'without the start commit, recent times ask');
+  await writeFile(path.join(root, 'scripts', 'verify.sh'), '#!/usr/bin/env bash\necho changed\n');
+  assert.notEqual((await decide(root, 'bash scripts/verify.sh', { runStartedAt, baseCommit })).decision, 'allow', 'changed since the start commit');
+  await writeFile(path.join(root, 'scripts', 'verify-new.sh'), 'echo ok\n');
+  assert.notEqual((await decide(root, 'bash scripts/verify-new.sh', { runStartedAt, baseCommit })).decision, 'allow', 'not in the start commit');
+});
+
+test('an argument with a Windows-style parent segment is a parent folder, not only text that fails the plain-word test', async () => {
+  const root = await project();
+  assert.match(String(await argumentProblem(['..\\x'], root, root)), /parent folder|not plain text/);
 });
 
 test('the home-directory screen catches $HOME, ${HOME}, expanduser, Path.home, homedir and a bare cd', () => {
