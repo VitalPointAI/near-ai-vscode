@@ -205,3 +205,26 @@ test('a run trimmed from the history stays gone when an older store that still h
   const ids = (await new ActivityStore(root, { maxSessions: 2 }).list()).map((session) => session.sessionId);
   assert.deepEqual(ids, ['session-newest-001', 'session-middle-001'], 'the trimmed run was not brought back by the older copy');
 });
+
+// Review of PR 34 asked whether a failed write loses its changes. It does not: every save writes the whole ledger held in memory, so the next one
+// carries them. This pins that.
+test('a failed write keeps its changes for the next save', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'near-ai-activity-retry-'));
+  const fs = await import('node:fs/promises');
+  let fail = true;
+  const store = new ActivityStore(root, { fileSystem: {
+    mkdir: async (directory, options) => { await fs.mkdir(directory, options); },
+    readFile: (file, encoding) => fs.readFile(file, encoding),
+    rename: async (from, to) => { if (fail) throw new Error('disk full'); await fs.rename(from, to); },
+    writeFile: (file, data, encoding) => fs.writeFile(file, data, encoding)
+  } });
+  await assert.rejects(store.start({ project: 'P', sessionId: 'session-retry-0001' }), /disk full/);
+  fail = false;
+  await store.flush();
+  // Any later save carries the change the failed one could not write.
+  await assert.rejects(store.append('session-missing-0001', { status: 'running', summary: 'x' }));
+  const other = await store.start({ project: 'P', sessionId: 'session-other-0001' });
+  assert.ok(other);
+  const reopened = new ActivityStore(root);
+  assert.ok(await reopened.get('session-retry-0001'), 'the session from the failed write reached the file with the next save');
+});

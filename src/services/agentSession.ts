@@ -1,10 +1,11 @@
+import { execFile } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import * as path from 'node:path';
 import { RunCheckpoints } from '../agent/checkpoints';
-import { compactConversation, contextStatus, DEFAULT_CONTEXT_WINDOW, DEFAULT_THRESHOLDS, estimateTokens, trimOldToolResults } from '../agent/context';
-import { AgentEvent, AgentRun, AgentRunError, ApprovalReply, ApprovalRequest, RunInput, RunOutcome, RunResult } from '../agent/loop';
-import { countersOf } from './activityOverview';
+import { compactConversation, contextAction, contextStatus, DEFAULT_COMPACT_AT_TOKENS, DEFAULT_CONTEXT_WINDOW, DEFAULT_THRESHOLDS, estimateTokens, trimOldToolResults } from '../agent/context';
+import { AgentEvent, AgentRun, AgentRunError, ApprovalReply, ApprovalRequest, AWAITING_APPROVAL_PREFIX, RunInput, RunOutcome, RunResult } from '../agent/loop';
+import { countersOf, runSplitOf } from './activityOverview';
 import { PermissionRules, RunGrants } from '../agent/permissions';
 import { SafetyModelCheck } from '../agent/safetyModel';
 import { ShellSession } from '../agent/shell';
@@ -28,8 +29,11 @@ import type { ActivityStore } from './activityStore';
 import { saveHandoff } from './handoff';
 import { homeFolder, teamLibraryDir } from '../domain/teamStorage';
 import { SCRATCH_INSTRUCTIONS } from '../domain/scratch';
+import { AGENT_DEFAULTS } from '../domain/agentDefaults';
 import { WAITING_INSTRUCTIONS, checkNowMessage, isCheckNow } from '../domain/checkNow';
 import { cleanScratch } from './scratch';
+import { scriptsNamedIn } from '../agent/unattended';
+import { planCheckSkip, researchProfileActive } from '../gsd/researchProfile';
 import type { AgentMessage, ModelInfo, NearAiClient, UsageMetadata } from './nearAiClient';
 import { TranscriptStore } from './transcripts';
 import type { RunEnd, RunMarkers } from './runMarkers';
@@ -123,6 +127,14 @@ export interface AgentTurnRequest {
   riskSwitches?: { outsideWorkspace: boolean; installs: boolean };
   /** Saves an approval card's "always allow" entry to the workspace allow list. */
   rememberAllowRule?(rule: string): void | Promise<void>;
+  /** PERF-06: the research profile's plan-checker gate (nearAi.gsd.researchProfile, default on). */
+  researchProfile?: boolean;
+  /** PERF-03: how long a model turn may stream nothing (before its first token, or between chunks) before it is retried on `backupModel` (0: off). */
+  modelStallMs?: number;
+  /** PERF-03: the model a stalled turn is retried on (at least as private as the chat's model). */
+  backupModel?: string;
+  /** PERF-01: sub-agents' safe and verification commands run without a card in auto and mostly-autonomous (nearAi.agent.unattendedAutoApprove, default on). */
+  unattendedAutoApprove?: boolean;
   /** Model or tier per agent role (nearAi.agent.roleModels); a team member's own model line wins. */
   roleModels?: Record<string, string>;
   /** The run's ID, when the host already tagged spend for it (attachments read before the run). */
@@ -175,6 +187,10 @@ export function steeringContent(text: string): string {
   return `<user-message-during-run>\n${text}\n</user-message-during-run>\nThe user sent this while you were working. It is new direction: it takes precedence over your current plan, so adjust what you are doing (or stop and answer) and say briefly how you changed course.`;
 }
 
+/** The workspace's HEAD commit, or undefined when it is not a git repository (or git is missing). */
+const headCommit = (root: string): Promise<string | undefined> => new Promise((resolve) => {
+  execFile('git', ['rev-parse', '--verify', '--quiet', 'HEAD'], { cwd: root, timeout: 10_000, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } }, (error, stdout) => resolve(error ? undefined : String(stdout).trim() || undefined));
+});
 const minutesSince = (at: number) => { const seconds = Math.max(0, Math.round((Date.now() - at) / 1000)); return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)} min`; };
 
 /**
@@ -242,6 +258,12 @@ export class AgentConversation {
   /** Estimated cost and tokens of the current run, across the agent and its sub-agents. */
   /** The current run's auto-mode safety check, shared with its sub-agents. */
   private runSafety: SafetyModelCheck | undefined;
+  /** When the current run started: a script any of its agents wrote since then never runs without a card. */
+  private currentRunStartedAt = 0;
+  /** The commit the workspace was on when the current run started, if it is a git repository. */
+  private currentBaseCommit: string | undefined;
+  /** The current run's main agent id, for the activity feed's idle time (PERF-07). */
+  private mainAgentId: string | undefined;
   private spend = { costUsd: 0, tokens: 0, totalTokens: 0, cachedTokens: 0, stopped: false };
   /** The current run's ID and the key's spend ledger: run cost, the run budget, and progress lines read it. */
   private runSpendSource: { runId: string; account: SpendAccount } | undefined;
@@ -319,6 +341,10 @@ export class AgentConversation {
     let ended: RunEnd = 'failed';
     await this.runMarkers?.start({ conversationId, runId, model: request.model });
     const mainId = `main-${runId}`;
+    this.mainAgentId = mainId;
+    // Every agent of this run judges a script's provenance from this moment: anything written since asks (review of PR 34).
+    this.currentRunStartedAt = Date.now();
+    this.currentBaseCommit = await headCommit(this.root);
     const boundary = runBoundary(request);
     this.activity?.agentStarted({ agentId: mainId, agent: request.skill ? `/${request.skill.name}` : request.team ? `team:${request.team.slug}` : 'agent', runId, model: request.model, conversationId: this.conversationId, ...(boundary ? { boundary } : {}) }, prompt, freshConversation ? String(this.messages[0].content) : undefined);
     this.post({ type: 'assistant-start', model: request.model, privacy: request.privacy });
@@ -347,8 +373,12 @@ export class AgentConversation {
       ...(request.riskSwitches ? { riskSwitches: request.riskSwitches } : {}),
       maxTurns: request.maxTurns,
       maxOutputTokens: request.maxOutputTokens,
+      ...(request.modelStallMs ? { stallMs: request.modelStallMs } : {}),
+      ...(request.backupModel ? { backupModel: request.backupModel } : {}),
+      beforeTool: (signal) => this.whileRunPaused(signal),
       beforeTurn: async (transcript, lastUsage, signal) => {
         this.enforceBudget(request, abort);
+        await this.whileRunPaused(signal);
         const pending = this.drainNotifications();
         const managed = await this.manageContext(pending.length ? [...transcript, ...pending] : transcript, lastUsage, request, signal, true);
         const next = managed ?? (pending.length ? [...transcript, ...pending] : undefined);
@@ -356,6 +386,8 @@ export class AgentConversation {
         return next;
       },
       afterAnswer: async (_transcript, signal) => this.waitForBackground(signal),
+      // PERF-05: the state is saved after every finished call too, not only before each model turn, so a reload mid-batch keeps the finished results.
+      onProgress: (transcript) => this.saveRunState(request.model, runId, transcript),
       input: this.steeringInput,
       requestApproval: (approval) => this.askApproval(approval, abort.signal, undefined, mainId),
       rememberAllowRule: request.rememberAllowRule,
@@ -378,12 +410,14 @@ export class AgentConversation {
         result = await withSpendTag({ kind: 'main', runId, conversationId: this.conversationId, agentId: mainId }, () => run.run(this.messages, abort.signal));
       } catch (error) {
         this.activity?.agentEnded(mainId, 'failed', error instanceof Error ? error.message : String(error));
+        await this.recordRunSplit(request, mainId, extraUsage);
         await this.persistAgent(request, mainId, 'failed');
         // Keep what the run did, so the next message continues from there.
         if (error instanceof AgentRunError) { this.messages = error.messages; await this.saveTranscript(request.model); throw error.cause; }
         throw error;
       }
       this.activity?.agentEnded(mainId, result.outcome);
+      await this.recordRunSplit(request, mainId, [...result.usage, ...extraUsage]);
       // The run's scratch folder is emptied when it ends (0.4.18), so a long session does not grow one. It never fails a run.
       await cleanScratch(this.root).catch(() => 0);
       ended = result.outcome;
@@ -483,7 +517,7 @@ export class AgentConversation {
     }
     if (action === 'stop') agent.abort.abort();
     else if (action === 'pause') agent.paused = true;
-    else { agent.paused = false; agent.resume?.(); agent.resume = undefined; }
+    else { agent.paused = false; agent.resume?.(); agent.resume = undefined; this.resumeRun(); }
     if (action !== 'stop') this.activity?.setPaused(agentId, action === 'pause');
     this.postAgents();
     return true;
@@ -496,6 +530,8 @@ export class AgentConversation {
   }
 
   private halt(): void {
+    this.resumeRun(false);
+    this.approvalTimeoutStreaks.clear();
     this.abort?.abort();
     this.abort = undefined;
     for (const agent of this.agents.values()) agent.abort.abort();
@@ -507,6 +543,7 @@ export class AgentConversation {
    * its transcript before its next model request; a retry wait ends early for it.
    */
   public steer(id: string, text: string, options: { interrupt?: boolean } = {}): void {
+    this.resumeRun();
     this.steering.push({ id, text });
     this.post({ type: 'steer-state', id, state: 'queued' });
     // 0.4.18: a message the person asked to interrupt with cuts the turn in flight; one that did not waits for the next safe point as before.
@@ -565,7 +602,8 @@ export class AgentConversation {
     const transcript = await this.transcripts?.load(id);
     if (!transcript) return undefined;
     this.reset();
-    this.messages = transcript.messages;
+    // PERF-05: a run saved mid-batch has calls without results; they get a placeholder so the transcript is valid and nothing finished is redone.
+    this.messages = repairTranscript(transcript.messages);
     this.display = new Map(transcript.display ?? []);
     this.conversationId = transcript.id;
     this.title = transcript.title;
@@ -600,7 +638,7 @@ export class AgentConversation {
     // Open-GSD note so a workflow's own instructions read as the more specific direction.
     const base = `${agentSystemPrompt({ security: Boolean(request.security), agentTool, root, platform: `${process.platform} ${process.arch}`, date: new Date().toISOString().slice(0, 10), isGitRepo: insideGitRepo(root), model: request.model })}${projectInstructions(root)}\n\n${SCRATCH_INSTRUCTIONS}\n\n${WAITING_INSTRUCTIONS}${request.team ? `\n\n${KNOWLEDGE_INSTRUCTIONS}` : ''}`;
     if (!request.gsd) return base;
-    return `${base}\n\n# Open-GSD\nOpen-GSD is installed at ${request.gsd.home} (read-only to you). Its skills, agents, workflows, templates, and references live there; read them with Read when instructions point to them. Run gsd-tools as the workflows show; CLAUDE_CONFIG_DIR is already set in your shell. ${agentTool ? 'When a workflow says to spawn an agent, use the Agent tool with that subagent_type (run_in_background works). When the agent does an item on your task list, pass that item\'s exact content as the Agent call\'s task: the list then shows it in progress and marks it completed (or back to pending) when the agent ends, even while other agents still run. Background agents\' reports arrive as messages on their own: once you have nothing else to do, end your turn to wait for them. Never wait with sleep or by polling for output files.' : 'You have no Agent tool here: when a workflow says to spawn an agent, do that part of the work yourself.'} When it says to ask the user, use AskUserQuestion.`;
+    return `${base}\n\n# Open-GSD\nOpen-GSD is installed at ${request.gsd.home} (read-only to you). Its skills, agents, workflows, templates, and references live there; read them with Read when instructions point to them. Run gsd-tools as the workflows show; CLAUDE_CONFIG_DIR is already set in your shell. ${agentTool ? 'When a workflow says to spawn an agent, use the Agent tool with that subagent_type (run_in_background works). Run each plan, task and research workstream as its own sub-agent with a fresh context, and ask it to end with a short summary (what changed, how it was verified, what is still open) rather than its working notes: your context stays small, which keeps every later turn fast. When the agent does an item on your task list, pass that item\'s exact content as the Agent call\'s task: the list then shows it in progress and marks it completed (or back to pending) when the agent ends, even while other agents still run. Background agents\' reports arrive as messages on their own: once you have nothing else to do, end your turn to wait for them. Never wait with sleep or by polling for output files.' : 'You have no Agent tool here: when a workflow says to spawn an agent, do that part of the work yourself.'} When it says to ask the user, use AskUserQuestion.`;
   }
 
   private shellFor(env: NodeJS.ProcessEnv): ShellSession {
@@ -625,13 +663,15 @@ export class AgentConversation {
     const used = Math.max(reported ?? 0, estimateTokens(transcript));
     const status = contextStatus(used, window, DEFAULT_THRESHOLDS);
     if (mainRun) this.post({ type: 'context', remainingPercent: status.remainingPercent, level: status.level });
-    if (status.remainingPercent > 40) return undefined;
+    // PERF-02: also an absolute threshold (nearAi.agent.compactAtTokens), so a large window does not mean a large, slow, expensive transcript.
+    const action = contextAction(used, window, this.compactAtTokens, DEFAULT_THRESHOLDS);
+    if (action === 'none') return undefined;
     let next = trimOldToolResults(transcript);
-    if (status.level === 'warning' && mainRun && !this.contextWarned) {
+    if (action === 'warn' && mainRun && !this.contextWarned) {
       this.contextWarned = true;
       this.post({ type: 'notice', text: `Context is ${100 - status.remainingPercent}% full. Older tool output is being trimmed; at ${100 - DEFAULT_THRESHOLDS.criticalRemaining}% the conversation is summarized automatically.` });
     }
-    if (status.level !== 'critical') return next;
+    if (action !== 'compact') return next;
     try {
       // Nothing older than the recent messages to summarize: trimming is all that applies, and no summary is announced. The user is told once
       // that the context is nearly full, since the recent messages themselves hold most of it and the run may soon hit the model's limit.
@@ -685,6 +725,18 @@ export class AgentConversation {
       ask: (questions, askSignal) => this.askQuestions(questions, askSignal),
       spawn: async (spawn, callSignal) => {
         const label = spawn.agent?.name ?? spawn.type;
+        // PERF-06: in a research-profile project the plan-checker runs only for plans that change a gate or verifier; for content-only plans it returns
+        // a VERIFICATION PASSED report saying it was skipped, so the workflow carries on without a model pass.
+        if (/plan-checker/i.test(label) && request.researchProfile !== false && await researchProfileActive(this.root)) {
+          const skipped = await planCheckSkip(spawn.prompt, this.root, context.checkpoints.changedFiles).catch(() => undefined);
+          if (skipped) {
+            void record({ status: 'completed', kind: 'agent', agentRole: label, action: spawn.description, summary: `Sub-agent ${label} skipped by the research profile.` });
+            this.post({ type: 'notice', text: `${label} skipped: the research profile checks only plans that change a gate or verifier, and these plans change content only.` });
+            if (!spawn.background) return skipped;
+            this.notifications.push({ role: 'user', content: `<agent-notification id="${label}-skipped" agent="${label}" status="finished">\n${skipped}\n</agent-notification>` });
+            return `Started ${label} in the background. Its report will arrive in a later message.`;
+          }
+        }
         const tiers = request.tiers ?? { deep: request.model, standard: request.model, fast: request.model };
         // A team member's own model line wins; then the role's configured model; then the tier the workflow asked for.
         const teamMember = Boolean(spawn.agent && (!gsd || !spawn.agent.file.startsWith(gsd.home)));
@@ -716,8 +768,8 @@ export class AgentConversation {
         const parent = spawn.background ? runSignal : callSignal;
         const onParentAbort = () => agent.abort.abort();
         parent.addEventListener('abort', onParentAbort, { once: true });
-        const limit = request.maxParallelAgents ?? 4;
-        const slot = { held: false, nested: 0 };
+        const limit = request.maxParallelAgents ?? AGENT_DEFAULTS.maxParallelAgents;
+        const slot = { held: false, nested: 0, worktree: spawn.isolation === 'worktree', worktreeHeld: false };
         // A foreground agent this agent starts needs a slot from the same pool, so this agent hands its own slot back while it waits for that child
         // and takes one again before its next turn. Otherwise a parent holding the last slot would wait for ever on a child that waits for that slot.
         const yieldingSlot = (tool: AgentTool<any>): AgentTool<any> => ({
@@ -726,6 +778,7 @@ export class AgentConversation {
             if ((input as { background?: boolean }).background) return tool.run(input, toolContext);
             slot.nested += 1;
             if (slot.nested === 1 && slot.held) { slot.held = false; this.releaseSlot(); }
+            if (slot.nested === 1 && slot.worktreeHeld) { slot.worktreeHeld = false; this.worktreeSlots.release(); }
             try {
               return await tool.run(input, toolContext);
             } finally {
@@ -739,6 +792,12 @@ export class AgentConversation {
                 // Another foreground child started while this one waited for the slot: it needs the slot more.
                 if (slot.nested > 0) { slot.held = false; this.releaseSlot(); }
               }
+              // Then its worktree slot, the same way (PERF-04 with #36).
+              while (slot.worktree && slot.nested === 0 && slot.held && !slot.worktreeHeld && !agent.abort.signal.aborted) {
+                try { await this.worktreeSlots.acquire(this.maxParallelWorktrees, agent.abort.signal); } catch { break; }
+                slot.worktreeHeld = true;
+                if (slot.nested > 0) { slot.worktreeHeld = false; this.worktreeSlots.release(); }
+              }
             }
           }
         });
@@ -746,6 +805,11 @@ export class AgentConversation {
         const execute = async (): Promise<string> => {
           await this.acquireSlot(limit, agent.abort.signal);
           slot.held = true;
+          // PERF-04: agents in their own worktree also take a worktree slot (nearAi.agent.maxParallelWorktrees), since each one checks out and builds.
+          // Like the agent slot (#36), it is handed back while the agent waits for a foreground helper, so a worktree cap of 1 cannot deadlock either.
+          if (slot.worktree) {
+            try { await this.worktreeSlots.acquire(this.maxParallelWorktrees, agent.abort.signal); slot.worktreeHeld = true; } catch (error) { slot.held = false; this.releaseSlot(); throw error; }
+          }
           let shell: ShellSession | undefined;
           let worktree: AgentWorktree | undefined;
           let worktreeState: 'removed' | 'kept' | undefined;
@@ -770,12 +834,24 @@ export class AgentConversation {
             this.activity?.agentStarted({ agentId: agent.id, agent: label, runId, model, parentId: `main-${runId}`, conversationId: this.conversationId, ...(boundary ? { boundary } : {}) }, spawn.prompt, system);
             const child = new AgentRun({
               client: request.client, model, tools, context: agentContext, policy: request.policy, rules: request.rules, grants, safety: this.runSafety, maxTurns: request.maxTurns, maxOutputTokens: request.maxOutputTokens,
+              ...(request.unattendedAutoApprove !== false ? { unattended: { planScripts: scriptsNamedIn(spawn.prompt), runStartedAt: this.currentRunStartedAt, ...(this.currentBaseCommit ? { baseCommit: this.currentBaseCommit } : {}) } } : {}),
+              // PERF-03: the sub-agent's backup is the run's backup, or the chat's own model when the backup is what it already runs on.
+              ...(request.modelStallMs ? { stallMs: request.modelStallMs, backupModel: [request.backupModel, request.model].find((candidate) => candidate && candidate !== model) } : {}),
+              beforeTool: (signal) => this.whileRunPaused(signal),
               beforeTurn: async (transcript, lastUsage, signal) => {
                 if (this.abort) this.enforceBudget(request, this.abort);
+                await this.whileRunPaused(signal);
                 while (agent.paused && !signal.aborted) await new Promise<void>((resolve) => { agent.resume = resolve; signal.addEventListener('abort', () => resolve(), { once: true }); });
                 return this.manageContext(transcript, lastUsage, { ...request, model }, signal, false);
               },
-              requestApproval: (approval) => this.askApproval({ ...approval, callId: `${agent.id}:${approval.callId}`, title: `${label} › ${approval.title}` }, agent.abort.signal, label, agent.id),
+              // PERF-01: nobody may be watching a sub-agent, so its card waits only briefly; unanswered, the call returns "awaiting approval", the card
+              // stays queued, and a later answer is passed to the lead (an allow grants that exact command for the rest of the run).
+              // In every mode, deliberately (review of PR 34): the short wait never runs anything. The card stays queued for the person, the action
+              // happens only if they allow it, and the sub-agent works on meanwhile instead of holding the run.
+              requestApproval: (approval) => this.askApproval({ ...approval, callId: `${agent.id}:${approval.callId}`, title: `${label} › ${approval.title}` }, agent.abort.signal, label, agent.id, {
+                waitMs: this.subagentApprovalWaitMs,
+                onLate: (reply) => this.lateApproval(label, approval, reply, grants)
+              }),
               rememberAllowRule: request.rememberAllowRule,
               emit: (event) => {
                 this.track(agent.id, event);
@@ -802,7 +878,7 @@ export class AgentConversation {
             if (result.outcome === 'cancelled') return `${label} was stopped before it finished.${isolated}${note}`;
             // A sub-agent stopped short says so, so the lead does not take a partial report as finished work.
             const short = stopNotice(result);
-            return `${typeof report === 'string' && report.trim() ? report : `${label} finished without a written report.`}${short ? `\n\n${label} did not finish. ${short}` : ''}${isolated}${note}`;
+            return `${typeof report === 'string' && report.trim() ? boundedReport(report, label) : `${label} finished without a written report.`}${short ? `\n\n${label} did not finish. ${short}` : ''}${isolated}${note}`;
           } catch (error) {
             if (todo) this.moveTask(todo, 'pending');
             this.activity?.agentEnded(agent.id, 'failed', error instanceof Error ? error.message : String(error));
@@ -816,6 +892,7 @@ export class AgentConversation {
             if (worktree && !worktreeState) await finishAgentWorktree(worktree).catch(() => undefined);
             parent.removeEventListener('abort', onParentAbort);
             this.agents.delete(agent.id);
+            if (slot.worktreeHeld) { slot.worktreeHeld = false; this.worktreeSlots.release(); }
             if (slot.held) { slot.held = false; this.releaseSlot(); }
             this.postAgents();
           }
@@ -857,7 +934,10 @@ export class AgentConversation {
     this.post({ type: 'notice', text: `Waiting for ${this.background.size} background agent${this.background.size === 1 ? '' : 's'} to finish…` });
     // A message from the user wakes the agent too.
     let unsubscribe: (() => void) | undefined;
+    const mainId = this.mainAgentId;
+    if (mainId) this.activity?.waitingForAgents(mainId, true);
     await Promise.race([...this.background, new Promise<void>((resolve) => { signal.addEventListener('abort', () => resolve(), { once: true }); unsubscribe = this.steeringInput.subscribe(() => resolve()); })]);
+    if (mainId) this.activity?.waitingForAgents(mainId, false);
     unsubscribe?.();
     return signal.aborted ? undefined : [...this.drainNotifications(), ...this.steeringInput.take()];
   }
@@ -866,7 +946,7 @@ export class AgentConversation {
   private async acquireSlot(limit: number, signal: AbortSignal): Promise<void> {
     while (this.slotsInUse >= Math.max(1, limit)) {
       if (signal.aborted) throw new DOMException('The operation was aborted.', 'AbortError');
-      await new Promise<void>((resolve) => { this.slotWaiters.push(resolve); signal.addEventListener('abort', () => resolve(), { once: true }); });
+      await waitOrAbort(signal, (wake) => this.slotWaiters.push(wake));
     }
     if (signal.aborted) throw new DOMException('The operation was aborted.', 'AbortError');
     this.slotsInUse += 1;
@@ -1003,6 +1083,14 @@ export class AgentConversation {
     abort.abort();
   }
 
+  /** PERF-07: the run's wall time split and its whole token use, saved in its session when the main agent ends. */
+  private async recordRunSplit(request: AgentTurnRequest, mainId: string, usage: UsageMetadata[]): Promise<void> {
+    const stat = this.activity?.agentStat(mainId);
+    if (!stat || !request.activity) return;
+    const total = sumUsage(usage);
+    await request.activity.store.setRunSplit(request.activity.sessionId, runSplitOf(stat, { inputTokens: total.inputTokens ?? 0, cachedInputTokens: total.cachedInputTokens ?? 0, outputTokens: total.outputTokens ?? 0 })).catch(() => undefined);
+  }
+
   /**
    * Saves an ended agent's counters (no content) in its run's session in the project's activity
    * history, so the overview survives reloads; `outcome` is given for the run's main agent.
@@ -1029,13 +1117,22 @@ export class AgentConversation {
 
   private forward(event: AgentEvent, model: string, record: Record_): void {
     if (event.type === 'text') this.post({ type: 'assistant-delta', text: event.text });
-    else if (event.type === 'tool-start') { this.post({ type: 'tool-start', callId: event.callId, tool: event.tool, title: event.title }); void record({ status: 'running', kind: 'tool', tool: event.tool, summary: event.title.slice(0, 200) }); }
-    else if (event.type === 'tool-end') { this.post({ type: 'tool-end', callId: event.callId, ok: event.ok, output: event.output }); void record({ status: event.ok ? 'completed' : 'failed', kind: 'tool', summary: event.ok ? 'Tool call finished.' : 'Tool call failed or was declined.' }); }
+    else if (event.type === 'tool-start') { this.toolStarts.set(event.callId, { tool: event.tool, at: Date.now() }); this.post({ type: 'tool-start', callId: event.callId, tool: event.tool, title: event.title }); void record({ status: 'running', kind: 'tool', tool: event.tool, summary: event.title.slice(0, 200) }); }
+    else if (event.type === 'tool-end') {
+      // PERF-07: the end names its tool and how long it ran, so a report can tell an approval timeout from a slow command without pairing events.
+      const started = this.toolStarts.get(event.callId);
+      this.toolStarts.delete(event.callId);
+      this.post({ type: 'tool-end', callId: event.callId, ok: event.ok, output: event.output });
+      void record({ status: event.ok ? 'completed' : 'failed', kind: 'tool', ...(started ? { tool: started.tool, durationMs: Date.now() - started.at } : {}), ...(event.output.startsWith(AWAITING_APPROVAL_PREFIX) ? { errorCode: 'approval-pending' } : {}), summary: event.ok ? 'Tool call finished.' : 'Tool call failed or was declined.' });
+    }
     else if (event.type === 'todos') this.post({ type: 'todos', todos: event.todos });
     else if (event.type === 'retry') { this.post({ type: 'assistant-retry', discard: event.discardText, text: retryNotice(event) }); void record({ status: 'running', kind: 'model', model, summary: `Model turn failed; retrying (attempt ${event.attempt + 1}).` }); }
     else if (event.type === 'turn') this.tally(event.usage);
-    if (event.type === 'turn') void record({ status: 'completed', kind: 'model', model, requestId: event.usage.requestId, summary: 'Model turn completed.', estimatedCostUsd: event.usage.estimatedCostUsd, inputTokens: event.usage.inputTokens, outputTokens: event.usage.outputTokens, durationMs: event.usage.latencyMs });
+    if (event.type === 'turn') void record({ status: 'completed', kind: 'model', model: event.model || model, requestId: event.usage.requestId, summary: 'Model turn completed.', estimatedCostUsd: event.usage.estimatedCostUsd, inputTokens: event.usage.inputTokens, cachedInputTokens: event.usage.cachedInputTokens, cacheHit: (event.usage.cachedInputTokens ?? 0) > 0, outputTokens: event.usage.outputTokens, durationMs: event.usage.latencyMs });
   }
+
+  /** Start time and tool of each call in flight, by call id, so its end event records both (PERF-07). */
+  private readonly toolStarts = new Map<string, { tool: string; at: number }>();
 
   /** How long an approval may wait before the run is paused on it (and declined a day after that); 0 waits indefinitely. */
   public approvalTimeoutMs = 15 * 60_000;
@@ -1058,7 +1155,88 @@ export class AgentConversation {
     this.onWaitingChange?.(this.waiting.size);
   }
 
-  private askApproval(request: ApprovalRequest, signal: AbortSignal, agent?: string, agentId?: string): Promise<ApprovalReply> {
+  /** PERF-04: sub-agents that may run in their own git worktree at once (nearAi.agent.maxParallelWorktrees), within maxParallelAgents. */
+  public maxParallelWorktrees = 4;
+  private readonly worktreeSlots = new Slots();
+
+  /** PERF-02: compact a transcript at this many tokens whatever the window (nearAi.agent.compactAtTokens; 0 uses only the window's thresholds). */
+  public compactAtTokens = DEFAULT_COMPACT_AT_TOKENS;
+
+  /** PERF-01: how long a sub-agent's approval card waits before the call returns "awaiting approval" (nearAi.agent.subagentApprovalWaitSeconds). */
+  public subagentApprovalWaitMs = 20_000;
+  /** PERF-01: consecutive "awaiting approval" outcomes that pause the run (nearAi.agent.approvalTimeoutsBeforePause; 0 never pauses). */
+  public approvalTimeoutsBeforePause = 3;
+  /**
+   * Consecutive "awaiting approval" outcomes, per agent (agent review of PR 34): one agent's answered approval does not reset another agent's count,
+   * so an agent that keeps stalling is caught even while its siblings' approvals are being answered.
+   */
+  private readonly approvalTimeoutStreaks = new Map<string, number>();
+  private runPause: { wait: Promise<void>; release: () => void; limit: ReturnType<typeof setTimeout> } | undefined;
+  /** How long a run may stay paused for unanswered approvals before it is stopped (review of PR 34: the same day the main approval path allows). */
+  public runPauseLimitMs = 24 * 60 * 60_000;
+
+  /** Holds every agent of the run before its next model turn while the run is paused for unanswered approvals. */
+  private async whileRunPaused(signal: AbortSignal): Promise<void> {
+    while (this.runPause && !signal.aborted) {
+      const { wait } = this.runPause;
+      await waitOrAbort(signal, (wake) => { void wait.then(wake); });
+    }
+  }
+
+  /** Pauses the run after too many approvals in a row went unanswered, so it stops working around decisions nobody made. */
+  private pauseRun(streak: number): void {
+    if (this.runPause) return;
+    let release = () => {};
+    const wait = new Promise<void>((resolve) => { release = resolve; });
+    // A pause has an end: after runPauseLimitMs with nobody back, the run is stopped cleanly and its work kept, rather than held open for ever.
+    const limit = setTimeout(() => {
+      if (this.runPause?.wait !== wait) return;
+      this.resumeRun(false);
+      this.post({ type: 'notice', text: `Stopped the run: it was paused for ${Math.round(this.runPauseLimitMs / 3_600_000) || 1} hour${Math.round(this.runPauseLimitMs / 3_600_000) === 1 ? '' : 's'} on approvals nobody answered. Everything it did is kept; send a message to continue.` });
+      this.halt();
+    }, this.runPauseLimitMs);
+    limit.unref?.();
+    this.runPause = { wait, release, limit };
+    for (const id of [this.mainAgentId, ...this.agents.keys()]) if (id) this.activity?.setPaused(id, true);
+    this.post({ type: 'notice', text: `Paused: ${streak} approvals in a row went unanswered for one agent, so the run stopped before its next step instead of carrying on without them. Answer a waiting approval, press Resume on an agent, or send a message to carry on.` });
+  }
+
+  /**
+   * The person is back (the window regained focus, or they used the chat): a run paused for unanswered approvals carries on, and its cards are still
+   * there for them to answer (review of PR 34).
+   */
+  public userActive(): void { this.resumeRun(); }
+
+  /** Ends a pause; `announce` false when the run is ending anyway. */
+  private resumeRun(announce = true): void {
+    const pause = this.runPause;
+    if (!pause) return;
+    this.runPause = undefined;
+    clearTimeout(pause.limit);
+    this.approvalTimeoutStreaks.clear();
+    for (const id of [this.mainAgentId, ...this.agents.keys()]) if (id) this.activity?.setPaused(id, false);
+    pause.release();
+    if (announce) this.post({ type: 'notice', text: 'Resumed.' });
+  }
+
+  /** A queued sub-agent approval answered after the agent moved on: an allow grants that exact command for the run, and the lead is told either way. */
+  private lateApproval(label: string, approval: ApprovalRequest, reply: ApprovalReply, grants: RunGrants): void {
+    const allowed = reply.decision === 'allow' || reply.decision === 'allow-run' || reply.decision === 'allow-always';
+    // The grant recorded on the card when it was made (review of PR 34: the subject line was not always set, so an allow could grant nothing while the
+    // lead was told it was allowed). The lead hears "allowed for the run" only when a grant really took effect.
+    const command = approval.grant?.command;
+    let granted = false;
+    if (allowed && command) { grants.commands.add(command); granted = grants.commands.has(command); }
+    if (allowed && approval.grant?.edits) { grants.edits = true; granted = true; }
+    const what = command ? `\`${command.slice(0, 300)}\`` : `"${approval.title.slice(0, 200)}"`;
+    this.notifications.push({ role: 'user', content: allowed && granted
+      ? `<approval-update agent="${label}" decision="allowed">\nThe user approved ${what}, which ${label} had queued. It is now allowed for the rest of this run: run it, or have an agent run it, if it is still needed.\n</approval-update>`
+      : allowed
+        ? `<approval-update agent="${label}" decision="approved-once">\nThe user approved ${what}, which ${label} had queued, but this kind of action asks every time, so nothing was allowed for the rest of the run. If it is still needed, run it again: it will ask again.\n</approval-update>`
+        : `<approval-update agent="${label}" decision="declined">\nThe user declined ${what}, which ${label} had queued.${reply.feedback ? ` Their note: ${reply.feedback}` : ''} Do not run it; adjust instead.\n</approval-update>` });
+  }
+
+  private askApproval(request: ApprovalRequest, signal: AbortSignal, agent?: string, agentId?: string, unattended?: { waitMs: number; onLate(reply: ApprovalReply): void }): Promise<ApprovalReply> {
     if (signal.aborted) return Promise.resolve({ decision: 'deny' });
     if (agentId) this.activity?.approvalAsked(agentId);
     return new Promise((resolve) => {
@@ -1066,16 +1244,43 @@ export class AgentConversation {
       let parkLimit: ReturnType<typeof setTimeout> | undefined;
       // A day past the first timeout, which is long enough that nobody is surprised and short enough that an abandoned run does not live for ever.
       const parkLimitMs = 24 * 60 * 60_000;
+      /** Set once the call has returned "awaiting approval": a later answer goes to `onLate`, not to the finished call. */
+      let returned = false;
       const settle = (reply: ApprovalReply, cancelled = false) => {
         if (timer) clearTimeout(timer);
         if (parkLimit) clearTimeout(parkLimit);
         this.closePrompt(request.callId, cancelled);
+        if (!cancelled) { this.approvalTimeoutStreaks.delete(agentId ?? 'main'); this.resumeRun(); }
+        if (returned) {
+          if (!cancelled) unattended?.onLate(reply);
+          return;
+        }
         if (agentId) this.activity?.approvalSettled(agentId, cancelled ? 'cancelled' : reply.decision === 'deny' ? 'declined' : 'allowed');
         resolve(reply);
       };
       this.approvals.set(request.callId, settle);
-      signal.addEventListener('abort', () => { if (this.approvals.delete(request.callId)) settle({ decision: 'deny' }, true); }, { once: true });
-      if (this.approvalTimeoutMs > 0) {
+      signal.addEventListener('abort', () => {
+        if (!this.approvals.delete(request.callId)) return;
+        // A card parked after "awaiting approval" belongs to an agent that has now been stopped: it is removed (review of PR 34), so it cannot linger for
+        // a day or grant anything to a run that no longer wants it. A later answer for it finds nothing and does nothing.
+        if (returned) { if (parkLimit) clearTimeout(parkLimit); this.closePrompt(request.callId, true); return; }
+        settle({ decision: 'deny' }, true);
+      }, { once: true });
+      if (unattended) {
+        // PERF-01: the sub-agent goes back to work after a short wait; its card stays open (until the run ends, or a day at most).
+        timer = setTimeout(() => {
+          if (!this.approvals.has(request.callId)) return;
+          returned = true;
+          if (agentId) this.activity?.approvalTimedOut(agentId);
+          const streak = (this.approvalTimeoutStreaks.get(agentId ?? 'main') ?? 0) + 1;
+          this.approvalTimeoutStreaks.set(agentId ?? 'main', streak);
+          // Paused before the call returns, so the agent's next call in the same batch already waits (agent review of PR 34).
+          if (this.approvalTimeoutsBeforePause > 0 && streak >= this.approvalTimeoutsBeforePause) this.pauseRun(streak);
+          resolve({ decision: 'pending' });
+          parkLimit = setTimeout(() => { if (this.approvals.delete(request.callId)) this.closePrompt(request.callId, true); }, parkLimitMs);
+          parkLimit.unref?.();
+        }, Math.max(0, unattended.waitMs));
+      } else if (this.approvalTimeoutMs > 0) {
         timer = setTimeout(() => {
           // 0.4.19 (owner, 2026-11-07: "stop the idling"): the wait no longer ends by declining an action nobody saw. Measured on the owner's own runs,
           // 35 waits hit this timeout exactly and 49 more ran long, which is up to 752 minutes of a run parked on a question. Declining made the run work
@@ -1131,6 +1336,40 @@ export class AgentConversation {
   }
 }
 
+/**
+ * Waits until `register`'s wake function is called or the signal aborts, whichever comes first, and removes its abort listener either way (review of
+ * PR 34: a listener added per wait and never removed piled up on a long run's signal).
+ */
+export function waitOrAbort(signal: AbortSignal, register: (wake: () => void) => void): Promise<void> {
+  if (signal.aborted) return Promise.resolve();
+  return new Promise<void>((resolve) => {
+    const done = () => { signal.removeEventListener('abort', done); resolve(); };
+    signal.addEventListener('abort', done, { once: true });
+    register(done);
+  });
+}
+
+/** A counting limit whose waiters wake in turn; a waiter whose signal aborts stops waiting and takes nothing. */
+export class Slots {
+  private used = 0;
+  private waiters: Array<() => void> = [];
+  public get inUse(): number { return this.used; }
+  public async acquire(limit: number, signal: AbortSignal): Promise<void> {
+    while (this.used >= Math.max(1, limit)) {
+      if (signal.aborted) throw new DOMException('The operation was aborted.', 'AbortError');
+      await waitOrAbort(signal, (wake) => this.waiters.push(wake));
+    }
+    if (signal.aborted) throw new DOMException('The operation was aborted.', 'AbortError');
+    this.used += 1;
+  }
+  public release(): void {
+    this.used = Math.max(0, this.used - 1);
+    const waiters = this.waiters;
+    this.waiters = [];
+    for (const wake of waiters) wake();
+  }
+}
+
 /** The memory actor the runner writes as; the host registers it as trusted when it creates the memory service. */
 export const AGENT_MEMORY_ACTOR = 'near-ai-agent';
 
@@ -1150,6 +1389,37 @@ export function roleFor(label: string): AgentRole | undefined {
 export function findSkill(skills: GsdSkill[], name: string): GsdSkill | undefined {
   const wanted = name.replace(/^\//, '').trim();
   return skills.find((skill) => skill.name === wanted) ?? skills.find((skill) => skill.name === `gsd-${wanted}` || skill.name.replace(/:/g, '-') === wanted);
+}
+
+/** The result a resumed transcript gives a tool call whose result was never saved (the run was cut off while it ran, or before it started). */
+export const MISSING_RESULT = 'No result was recorded: the run was cut off while this call was running (or before it started). It may or may not have taken effect. Check (the files, git status, or what it would have changed) before repeating it.';
+
+/**
+ * PERF-05: a saved transcript made valid to continue from. Every assistant tool call gets exactly one result; one that has none (the run was cut off
+ * mid-batch) gets MISSING_RESULT, placed after the results that were saved. Results that were saved are kept as they are, so a resumed run sees every
+ * finished call's real output and has no reason to run it again. A transcript that needs no repair is returned unchanged.
+ */
+export function repairTranscript(messages: AgentMessage[]): AgentMessage[] {
+  const repaired: AgentMessage[] = [];
+  let changed = false;
+  for (let index = 0; index < messages.length; index += 1) {
+    const message = messages[index];
+    repaired.push(message);
+    if (message.role !== 'assistant' || !message.tool_calls?.length) continue;
+    const answered = new Set<string>();
+    while (index + 1 < messages.length && messages[index + 1].role === 'tool') {
+      const result = messages[index + 1] as Extract<AgentMessage, { role: 'tool' }>;
+      answered.add(result.tool_call_id);
+      repaired.push(result);
+      index += 1;
+    }
+    for (const call of message.tool_calls) {
+      if (answered.has(call.id)) continue;
+      changed = true;
+      repaired.push({ role: 'tool', tool_call_id: call.id, content: MISSING_RESULT });
+    }
+  }
+  return changed ? repaired : messages;
 }
 
 /** The user-visible turns of a saved conversation: what the user typed and what the agent answered. */
@@ -1209,6 +1479,15 @@ function sumUsage(turns: UsageMetadata[]): UsageMetadata {
   add('outputTokens');
   add('estimatedCostUsd');
   return total;
+}
+
+/** PERF-02: the most of a sub-agent's report its lead takes into its own context. */
+export const MAX_REPORT_CHARS = 12_000;
+
+/** A sub-agent's report, cut to MAX_REPORT_CHARS with a note, so a long report does not fill the lead's context (the lead wants a summary, not a transcript). */
+export function boundedReport(report: string, label: string): string {
+  if (report.length <= MAX_REPORT_CHARS) return report;
+  return `${report.slice(0, MAX_REPORT_CHARS)}\n\n[${label}'s report was cut to ${MAX_REPORT_CHARS.toLocaleString('en-US')} of ${report.length.toLocaleString('en-US')} characters to keep your context small. Anything it wrote to files is there in full; ask it for a shorter summary if you need the rest.]`;
 }
 
 /** The sentence for a run that stopped before the model finished, or undefined when it finished (or was cancelled). */

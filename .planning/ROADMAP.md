@@ -19,7 +19,7 @@ Work here ships as 0.4.x releases: a `hotfix/0.4.N` branch from `main`, then the
 | 0.4.4 | 2026-10-29 | Conversations, steering, accurate spend, Agent Activity overview, Tools directory |
 | 0.4.5 | 2026-10-29 | Team Studio; stalled replies retried and reported; reporting token in Settings |
 
-Next phases are added here (integer numbering continues from 25) when 0.4.x work is planned with GSD.
+Next phases are added here (integer numbering continues from 26) when 0.4.x work is planned with GSD.
 
 ### Phase 25: Cybersecurity harness with a target picker, offensive and defensive scans
 
@@ -39,3 +39,26 @@ Next phases are added here (integer numbering continues from 25) when 0.4.x work
 
 Plans:
 - [ ] TBD (run /gsd-plan-phase 25 to break down)
+
+### Phase 26: Performance: faster agent and research runs
+
+**Goal**: Research projects and agent runs in general finish in hours, not days: no run stalls on an approval nobody is there to give, context stays small and cacheable, slow model calls fail over to a backup, independent work runs in parallel, a reload resumes the run, research projects get a lighter GSD profile with cheap deterministic verifiers, and every run records where its time went.
+**Depends on**: Nothing (builds on the shipped 0.4.x agent runtime, approval policy, activity history and Open-GSD integration)
+**Requirements**: PERF-01 … PERF-07
+**Evidence (before)**: two research projects' `.planning/.near-ai/activity.json`: 26 and 13 Bash calls hung exactly 15 minutes on an unanswered approval (two runs died after about 3 h of these); median model call sent about 190k input tokens for about 285 output tokens with no cache hits recorded; model call p90 56–123 s, max about 14 min; every role ran on Flash models; one tool call per model turn; a VS Code reload killed 4.4 h and 0.6 h runs. Full baseline in `26-VERIFICATION.md`.
+**Success Criteria** (what must be TRUE):
+  1. A sub-agent's read-only, test, lint, typecheck, gate-script and in-worktree write commands run without a card in Auto and Edits-auto modes, while a push, a delete outside the worktree, publishing and a credential path still ask; an approval nobody answers returns "awaiting approval" to the agent within the short sub-agent wait and stays queued, and three in a row pause the run with a message. (PERF-01)
+  2. Context is compacted at about 70k tokens by default, large files are read in ranges, sub-agents hand back bounded summaries, the request prefix is byte-stable across turns (tested), and cached input tokens appear in the activity log. (PERF-02)
+  3. A model call that passes its deadline (120 s by default) is retried on the backup model, and planner, verifier, analyst, editor and red-team roles resolve to the deep tier while fetch and extract roles resolve to fast. (PERF-03)
+  4. Web tools and read-only shell commands run concurrently, fan-out across worktrees is capped by a setting, and the system prompt tells agents to batch independent calls. (PERF-04)
+  5. After a reload, a cut-off run resumes by itself with a notice (switchable), and completed tool calls are not repeated. (PERF-05)
+  6. Research and writing projects get a research GSD profile (coarse phases, quick mode for content edits, the plan-checker only for plans that change gates or verifiers) and a scaffold of deterministic verifier scripts. (PERF-06)
+  7. The activity log is bounded by size rather than 100 events, each run records wall time split into model, tool, approval and idle time with input, cached and output tokens, and a report command prints the breakdown; the before baseline is in VERIFICATION. (PERF-07)
+**Plans:** 5 plans (complete 2026-11-10; verification in 26-VERIFICATION.md)
+
+Plans:
+- [x] 26-01-PLAN.md — Measurement: size-bounded activity log, per-run time and token split, run report command and the before baseline (PERF-07)
+- [x] 26-02-PLAN.md — Approvals without stalls: unattended auto-approval classes, non-blocking sub-agent approvals, pause after three timeouts (PERF-01)
+- [x] 26-03-PLAN.md — Context and models: compaction threshold, ranged reads, bounded reports, cache-stable prefix, model deadline with backup, tier routing (PERF-02, PERF-03)
+- [x] 26-04-PLAN.md — Parallelism and reloads: read-only shell pool, worktree fan-out cap, batching instruction, auto-resume without repeats (PERF-04, PERF-05)
+- [x] 26-05-PLAN.md — Research GSD profile and verifier scaffold, docs, verification (PERF-06)

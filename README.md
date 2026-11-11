@@ -297,6 +297,33 @@ details** saves the prompts, replies, and tool calls still kept in memory (for
 `nearAi.activity.retentionMinutes`, 60, and up to `nearAi.activity.maxMegabytes`,
 8 MB; secrets masked) as Markdown or JSON, for debugging.
 
+**NEAR AI: Show Run Performance Report** opens, for this project, where its runs'
+time went (model wait, tools and sub-agents, approval wait, idle), tokens in,
+cached and out, model latency (p50, p90, max), input tokens per call, unanswered
+approvals, and runs a reload cut off, with one row per run. From a terminal,
+`npm run report:runs -- path/to/.planning/.near-ai/activity.json` prints the
+same report for any project. The activity history keeps a run's events up to
+256 KiB per run rather than its last 100 events.
+
+**NEAR AI: Set Up Research Verifiers** applies the research profile to an
+existing project: a block in AGENTS.md, coarse phases, and three scripts in
+`scripts/verify/` (citation resolution, figure recompute from
+`report/figures.json`, and an internal-path leak check) plus `verify-all.mjs`.
+They read files only, so agents run them without asking; existing files are
+never overwritten. You may edit them, but an edited verifier no longer matches
+the hash recorded when it was scaffolded, so agents ask before running it until
+you run **NEAR AI: Trust Research Verifiers**, which lists what changed and asks
+before recording the new versions.
+
+In a research project the plan checker is skipped only for plans that change
+nothing but document, data and image files (judged from the plan and from what
+has actually changed, using git); a plan that touches any source, script,
+configuration, gate, test or CI file is checked. For a content-only plan the checker's reply starts with
+Open-GSD's `## VERIFICATION PASSED` marker so the workflow carries on without
+asking, and its next line says "PLAN CHECK SKIPPED (content-only plan): the plan
+checker was NOT run" with the evidence: the marker means "carry on", not
+"checked". See SECURITY.md, "Plan checks the research profile skips".
+
 **NEAR AI: Export Usage and Activity** (also on the Agent Activity page and in
 the Tools tab) saves usage for an organization, a project, or everything, over
 today, the last 7 or 30 days, or custom dates, as CSV or JSON: one row per run
@@ -641,8 +668,19 @@ Read the full [security and trust report](SECURITY.md).
 | `nearAi.agent.deepModel` / `standardModel` / `fastModel` | Kimi K3 / GLM 5.3 / Qwen3.6-35B-A3B | Models for Open-GSD's sub-agent tiers (opus / sonnet / haiku). By default only research, synthesis, and mapping roles use the fast tier; GSD's `budget` and `adaptive` model profiles also send checkers and the test-writing auditor there. |
 | `nearAi.teams.updateNotifications` | `true` | Say once per version when a team made from a built-in project type has a newer template (**NEAR AI: Update Team…**). |
 | `nearAi.agent.safetyModel` | the fast tier | With `auto`, the model that checks commands the rules cannot decide. Used only when it runs privately (TEE or local); otherwise those commands ask. |
-| `nearAi.agent.maxParallelAgents` | `4` | Sub-agents that may run at once. |
+| `nearAi.agent.maxParallelAgents` | `8` | Sub-agents that may run at once. |
 | `nearAi.agent.maxTurns` | `60` | Model turns per run before it pauses for you; **Continue** in the chat carries on. |
+| `nearAi.agent.unattendedAutoApprove` | `true` | In Auto and Edits auto, sub-agents run commands the safety rules call safe and verification scripts inside the project that no agent of the run wrote or changed without a card; pushes, deletes outside the project, publishing, network commands and credential paths still ask. See SECURITY.md, "Sub-agents nobody is watching". |
+| `nearAi.agent.subagentApprovalWaitSeconds` | `20` | How long a sub-agent's approval card waits before the sub-agent is told "awaiting approval" and carries on; the card stays queued, and allowing it later allows that command for the run. |
+| `nearAi.agent.approvalTimeoutsBeforePause` | `3` | Unanswered approvals in a row that pause the whole run with a message (0 never pauses). |
+| `nearAi.agent.approvalTimeoutMinutes` | `15` | How long an approval in the main conversation waits before the run shows as paused on that step (it keeps waiting, up to a day). |
+| `nearAi.agent.compactAtTokens` | `70000` | Summarize a conversation's earlier history at this many tokens whatever the model's window (old tool output is trimmed from 80% of it). 0 uses only the window thresholds. |
+| `nearAi.agent.modelStallSeconds` | `120` | A reply that sends nothing for this long (before its first token, or between chunks) is retried once on the backup model; a reply that keeps streaming is never cut (30-minute ceiling per reply). 0 turns it off. |
+| `nearAi.agent.backupModel` | standard tier, then deep | The model a stalled reply is retried on; only a model at least as private as the chat's. |
+| `nearAi.agent.maxParallelWorktrees` | `4` | Sub-agents that may work in their own git worktree at once (within `maxParallelAgents`). |
+| `nearAi.agent.autoResumeAfterReload` | `true` | A run a reload cut off in the last 12 hours carries on by itself, with a notice; finished steps are not run again. |
+| `nearAi.agent.roleModels` | research, mapping, fetch and extract roles → fast; planner, plan-checker, verifier, analyst, editor, red-team → deep | Model or tier per agent role, by name or `*` pattern; a team member's own `model:` line wins. |
+| `nearAi.gsd.researchProfile` | `true` | Research and writing projects use the research profile for Open-GSD: coarse phases, quick mode for content edits, verifier scripts in `scripts/verify/`, and the plan-checker only for plans that change a gate or verifier. |
 | `nearAi.agent.saveTranscripts` | `true` | Keep conversations on this machine so History can resume them. |
 | `nearAi.baseUrl` | NEAR AI Cloud | OpenAI-compatible endpoint (HTTPS, or HTTP on localhost). |
 | `nearAi.privacyMode` | `standard` | `tee-only` blocks models NEAR forwards to other providers. |

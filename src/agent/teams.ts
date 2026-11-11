@@ -161,6 +161,7 @@ ${team.members.map((member) => `- ${member.name}${member.role ? ` (${member.role
 - Then collect the reports, resolve what conflicts, and integrate. If a part's result changes what another part needs, run that second part afterwards and say why it had to wait.
 - Give every member a complete, self-contained prompt: it sees nothing of this conversation. Name the exact output you want back from it.
 - Do the coordination yourself; do not do the members' work for them.
+- When two or more members that change files run at the same time in a git repository, start each with \`isolation: "worktree"\` so they cannot overwrite each other; each reports its branch for you to merge. Members that only read or research need no worktree.
 
 Finish with a short summary of what each member did, what ran at the same time, and the outcome.
 

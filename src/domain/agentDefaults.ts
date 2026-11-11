@@ -9,5 +9,18 @@ export const AGENT_DEFAULTS = {
   maxRunCostUsd: 5,
   maxRunTokens: 4_000_000,
   maxOutputTokens: 32_000,
-  approvalTimeoutMinutes: 15
+  approvalTimeoutMinutes: 15,
+  /** PERF-01: how long a sub-agent's approval card waits before the call returns "awaiting approval". */
+  subagentApprovalWaitSeconds: 20,
+  /** PERF-01: consecutive unanswered approvals that pause the run (0 never pauses). */
+  approvalTimeoutsBeforePause: 3,
+  unattendedAutoApprove: true,
+  /** PERF-02: compact a transcript at this many tokens whatever the model's window. */
+  compactAtTokens: 70_000,
+  /** PERF-03: a model turn that streams nothing for this many seconds (first token, or between chunks) is retried once on the backup model. */
+  modelStallSeconds: 120,
+  /** PERF-04: sub-agents in their own git worktree at once. */
+  maxParallelWorktrees: 4,
+  /** PERF-05: resume a run a reload cut off. */
+  autoResumeAfterReload: true
 } as const;

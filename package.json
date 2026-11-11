@@ -174,6 +174,21 @@
         "category": "NEAR AI"
       },
       {
+        "command": "nearAi.showRunReport",
+        "title": "Show Run Performance Report",
+        "category": "NEAR AI"
+      },
+      {
+        "command": "nearAi.setupResearchVerifiers",
+        "title": "Set Up Research Verifiers",
+        "category": "NEAR AI"
+      },
+      {
+        "command": "nearAi.trustResearchVerifiers",
+        "title": "Trust Research Verifiers",
+        "category": "NEAR AI"
+      },
+      {
         "command": "nearAi.openAgentActivity",
         "title": "Open Agent Activity",
         "category": "NEAR AI",
@@ -474,6 +489,23 @@
           "maximum": 16,
           "description": "How many sub-agents may run at the same time. A research team of nine workstreams finishes in about the time of one workstream when this is 8 or more; the earlier default of 4, with agents that worked one part at a time, left most runs with a single request in flight."
         },
+        "nearAi.agent.maxParallelWorktrees": {
+          "type": "number",
+          "default": 4,
+          "minimum": 1,
+          "maximum": 16,
+          "description": "How many sub-agents may work in their own git worktree at the same time (each checks out the project and may build it). Counts within nearAi.agent.maxParallelAgents."
+        },
+        "nearAi.agent.autoResumeAfterReload": {
+          "type": "boolean",
+          "default": true,
+          "description": "When VS Code reloads (or code-server restarts) in the middle of an agent run, carry the run on by itself from its last saved step, with a notice in its conversation. Steps that had finished are not run again. Runs cut off more than 12 hours ago are left for you to resume."
+        },
+        "nearAi.gsd.researchProfile": {
+          "type": "boolean",
+          "default": true,
+          "description": "Research and writing projects use NEAR AI's research profile for Open-GSD: coarse phases, quick mode for content edits, deterministic verifier scripts in scripts/verify/, and the plan-checker only for plans that change a gate or verifier (a content-only plan's check is skipped with a note). Off: every plan is checked."
+        },
         "nearAi.agent.maxTurns": {
           "type": "number",
           "default": 60,
@@ -579,7 +611,45 @@
           "default": 15,
           "minimum": 0,
           "maximum": 1440,
-          "description": "How long an action waits for your approval before the run is paused on that step. Nothing runs while it is paused; answering whenever you are back carries on from exactly there. If nobody answers for a further day, the action is declined and the run released. 0 waits indefinitely, with no pause and no decline."
+          "description": "How long an action in the main conversation waits for your approval before the run is paused on that step. Nothing runs while it is paused; answering whenever you are back carries on from exactly there. If nobody answers for a further day, the action is declined and the run released. 0 waits indefinitely, with no pause and no decline. Sub-agents wait nearAi.agent.subagentApprovalWaitSeconds instead and then carry on."
+        },
+        "nearAi.agent.unattendedAutoApprove": {
+          "type": "boolean",
+          "default": true,
+          "description": "In the Auto and Edits auto approval modes, sub-agents run without a card: commands the safety rules call safe (reads, read-only git, tests, lint, type checks, builds, and writes inside the sub-agent's own folder or worktree) and verification scripts inside the project that are named like a check (verify, check, gate, lint, test, typecheck, validate, audit) or named by the plan, when no agent of the run wrote or changed them (a script an agent writes during the run always asks) and they contain nothing that reaches the network, deletes, publishes, starts other programs, or touches credentials. Pushes, deletes outside the project, publishing, network commands and credential paths still ask. Ask before edits is never affected."
+        },
+        "nearAi.agent.subagentApprovalWaitSeconds": {
+          "type": "number",
+          "default": 20,
+          "minimum": 0,
+          "maximum": 3600,
+          "description": "How long a sub-agent's approval card waits for an answer before the sub-agent is told \"awaiting approval\" and carries on with other work. The card stays queued; approving it later allows that exact command for the rest of the run and tells the lead agent. The main conversation's own approvals use nearAi.agent.approvalTimeoutMinutes."
+        },
+        "nearAi.agent.approvalTimeoutsBeforePause": {
+          "type": "number",
+          "default": 3,
+          "minimum": 0,
+          "maximum": 50,
+          "description": "Pause the whole run after this many approvals in a row go unanswered, with a message, instead of letting it carry on without them. Answering an approval, pressing Resume on an agent, or sending a message carries on. 0 never pauses."
+        },
+        "nearAi.agent.compactAtTokens": {
+          "type": "number",
+          "default": 70000,
+          "minimum": 0,
+          "maximum": 10000000,
+          "description": "Summarize a conversation's earlier history once it reaches this many tokens, whatever the model's context window, and trim old tool output from 80% of it. Smaller transcripts make every turn faster and cheaper. 0 uses only the window-based thresholds."
+        },
+        "nearAi.agent.modelStallSeconds": {
+          "type": "number",
+          "default": 120,
+          "minimum": 0,
+          "maximum": 3600,
+          "description": "A model reply that sends nothing for this many seconds, before its first token or between chunks, is cut and retried once on the backup model (nearAi.agent.backupModel). A reply that keeps streaming is never cut, however long it takes (a 30-minute ceiling still applies to one reply). Without a backup model the reply keeps waiting. 0 turns it off."
+        },
+        "nearAi.agent.backupModel": {
+          "type": "string",
+          "default": "",
+          "description": "The model a stalled reply (nearAi.agent.modelStallSeconds) is retried on. Empty uses the standard tier, then the deep tier. Only a model at least as private as the chat's model is used."
         },
         "nearAi.agent.maxOutputTokens": {
           "type": "number",
@@ -597,9 +667,17 @@
             "gsd-*-researcher": "fast",
             "gsd-research-synthesizer": "fast",
             "gsd-codebase-mapper": "fast",
-            "gsd-pattern-mapper": "fast"
+            "gsd-pattern-mapper": "fast",
+            "*planner*": "deep",
+            "*plan-checker*": "deep",
+            "*verifier*": "deep",
+            "*analyst*": "deep",
+            "*editor*": "deep",
+            "*red-team*": "deep",
+            "*fetch*": "fast",
+            "*extract*": "fast"
           },
-          "markdownDescription": "Model for each agent role: a tier (`deep`, `standard`, `fast`) or a NEAR model ID, by agent name or a `*` pattern. Research and mapping roles read large inputs in parallel, so they default to the cheaper fast tier (GLM 5.3 Flash). A team member's own `model:` line wins, and an agent never uses a model less private than the chat's."
+          "markdownDescription": "Model for each agent role: a tier (`deep`, `standard`, `fast`) or a NEAR model ID, by agent name or a `*` pattern. Research and mapping roles read large inputs in parallel, so they default to the cheaper fast tier; bulk fetch and extract roles do too. Planner, plan-checker, verifier, analyst, editor and red-team roles default to the deep tier, because their judgement decides the outcome. A team member's own `model:` line wins, and an agent never uses a model less private than the chat's."
         }
       }
     },
@@ -699,6 +777,7 @@
     "lint": "tsc -p tsconfig.json --noEmit",
     "test": "npm run compile && node --test dist/test/*.test.js scripts/test/*.test.mjs",
     "report:spend": "node scripts/spend-report.mjs",
+    "report:runs": "node scripts/run-report.mjs",
     "experiment": "node scripts/ab-task.mjs",
     "compare:models": "npm run compile && node scripts/compare-models.mjs",
     "package": "npm run compile && npm run sbom && vsce package --no-dependencies --allow-missing-repository --no-rewrite-relative-links",

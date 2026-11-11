@@ -152,3 +152,31 @@ test('SlashCommand loads the named skill with its arguments, as workflows use it
   assert.match(await slash.run(input, {} as never), /Plan phase with: 1 --auto/);
   assert.throws(() => slash.parse({ command: '' }), /must look like/);
 });
+
+// Merge with #36: a worktree agent that starts a foreground worktree helper hands back its worktree slot too, so a cap of one cannot deadlock.
+test('with one agent slot and one worktree slot, a worktree agent that starts a foreground worktree helper does not wait for ever', { timeout: 30_000 }, async () => {
+  const { root, storage, gsd } = await repository();
+  const nested: GsdContext = { ...gsd, agents: [{ name: 'gsd-lead', description: 'Leads', tools: ['Read', 'Agent'], body: 'You are the lead.', file: path.join(gsd.home, 'agents', 'gsd-lead.md') }, ...gsd.agents] };
+  const counters = { parent: 0, lead: 0, executor: 0 };
+  const near = {
+    async *streamCompletion(_model: string, messages: AgentMessage[]): AsyncGenerator<CompletionEvent> {
+      const system = String(messages[0]?.content);
+      const who = system.startsWith('You are the lead.') ? 'lead' : system.startsWith('You are the executor.') ? 'executor' : 'parent';
+      const turn = counters[who]++;
+      if (who === 'parent') { yield done(turn === 0 ? { role: 'assistant', content: null, tool_calls: [call('p1', 'Agent', { subagent_type: 'gsd-lead', prompt: 'lead it', isolation: 'worktree' })] } : { role: 'assistant', content: 'all done' }); return; }
+      if (who === 'lead') { yield done(turn === 0 ? { role: 'assistant', content: null, tool_calls: [call('l1', 'Agent', { subagent_type: 'gsd-executor', prompt: 'noop', isolation: 'worktree' })] } : { role: 'assistant', content: `lead report: ${String(messages.at(-1)?.content).slice(0, 40)}` }); return; }
+      yield done({ role: 'assistant', content: 'executor report' });
+    },
+    async actualCostsUsd() { return undefined; }
+  };
+  const posted: Array<Record<string, unknown>> = [];
+  const conversation = new AgentConversation(root, (message) => posted.push(message), path.join(storage, 'checkpoints'));
+  conversation.maxParallelWorktrees = 1;
+  try {
+    await conversation.send({ text: 'execute', client: near as never, model: 'm', privacy: 'Private', policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES, gsd: nested, maxParallelAgents: 1 });
+  } finally {
+    conversation.dispose();
+  }
+  assert.match(String(posted.find((message) => message.type === 'tool-end' && message.callId === 'p1')?.output), /lead report: executor report/);
+  assert.deepEqual(counters, { parent: 2, lead: 2, executor: 1 });
+});

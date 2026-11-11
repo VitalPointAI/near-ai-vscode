@@ -28,6 +28,28 @@ export function contextStatus(usedTokens: number, window: number, thresholds = D
   return { usedTokens, window, remainingPercent, level: level === 'critical' ? 'critical' : level === 'warning' ? 'warning' : 'normal' };
 }
 
+/**
+ * PERF-02: compaction at an absolute size as well as a share of the window. Measured on two research projects, the median request carried about 190k
+ * input tokens to produce about 285 output tokens: a window-relative threshold on a 1M-token model lets a transcript grow far past what the work needs,
+ * and every turn pays for all of it. Whichever threshold comes first wins.
+ */
+export const DEFAULT_COMPACT_AT_TOKENS = 70_000;
+
+export type ContextAction = 'none' | 'trim' | 'warn' | 'compact';
+
+/**
+ * What to do with a transcript of `used` tokens: trim old tool output from 60 % of the window or 80 % of `compactAt`, warn at Open-GSD's warning level,
+ * and compact (summarize) at its critical level or at `compactAt` tokens. `compactAt` 0 keeps only the window-relative thresholds.
+ */
+export function contextAction(used: number, window: number, compactAt = DEFAULT_COMPACT_AT_TOKENS, thresholds = DEFAULT_THRESHOLDS): ContextAction {
+  const status = contextStatus(used, window, thresholds);
+  const absolute = compactAt > 0;
+  if (status.level === 'critical' || (absolute && used >= compactAt)) return 'compact';
+  if (status.level === 'warning') return 'warn';
+  if (status.remainingPercent <= 40 || (absolute && used >= 0.8 * compactAt)) return 'trim';
+  return 'none';
+}
+
 /** Trimming advances in steps of this many tool results, so the conversation's start changes rarely. */
 const TRIM_STEP = 10;
 

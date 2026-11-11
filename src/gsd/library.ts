@@ -192,8 +192,23 @@ export const DEFAULT_ROLE_MODELS: Record<string, string> = {
   'gsd-*-researcher': 'fast',
   'gsd-research-synthesizer': 'fast',
   'gsd-codebase-mapper': 'fast',
-  'gsd-pattern-mapper': 'fast'
+  'gsd-pattern-mapper': 'fast',
+  // PERF-03: judgement roles get the deep tier, bulk fetching and extraction the fast tier. These are the routing defaults only: a team member's own
+  // model line still wins, so the tiers a project type gives its members decide those.
+  '*planner*': 'deep',
+  '*plan-checker*': 'deep',
+  '*verifier*': 'deep',
+  '*analyst*': 'deep',
+  '*editor*': 'deep',
+  '*red-team*': 'deep',
+  '*fetch*': 'fast',
+  '*extract*': 'fast'
 };
+
+/** PERF-03: the tier routing gives a role by default (deep, standard or fast), or undefined when the role follows its own definition. */
+export function defaultRoleTier(role: string): string | undefined {
+  return roleModelFor(role, DEFAULT_ROLE_MODELS);
+}
 
 /** The model or tier configured for an agent role: an exact name first, then the longest matching * pattern. */
 export function roleModelFor(role: string, roleModels: Record<string, string>): string | undefined {

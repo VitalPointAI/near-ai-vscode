@@ -2,7 +2,7 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { redactSecrets } from '../domain/redaction';
-import { ActivityApprovalSummary, ActivityEvent, ActivityLedger, ActivitySessionSummary, ActivityStatus, addSessionStats, AttributionSnapshot, emptyAgentCounts, normalizeAttribution, normalizeSessionStats, RunOutcomeLabel, runningCost, sessionOutcome, SessionStats, summarizeAgentCounts } from '../domain/activity';
+import { ActivityApprovalSummary, ActivityEvent, ActivityLedger, ActivitySessionSummary, ActivityStatus, addSessionStats, AttributionSnapshot, emptyAgentCounts, normalizeAttribution, normalizeRunSplit, normalizeSessionStats, RunOutcomeLabel, RunSplit, runningCost, sessionOutcome, SessionStats, summarizeAgentCounts } from '../domain/activity';
 import { redactForDisplay } from './agentActivity';
 import type { UsageMetadata } from './nearAiClient';
 
@@ -23,10 +23,18 @@ const SESSION_ID = /^session-[a-z0-9-]{8,80}$/;
 const RUN_ID = /^run-[a-z0-9-]{6,80}$/;
 const CONVERSATION_ID = /^conv-[a-z0-9-]{6,60}$/;
 /**
+ * PERF-07: a session's events are bounded by size, not by a count of 100. A long research run used to keep only its last 100 events, so most of its
+ * history was gone before anyone could measure it. The ceiling of 5 000 events only guards against a pathological run of tiny events.
+ */
+export const DEFAULT_MAX_EVENTS_PER_SESSION = 5_000;
+export const DEFAULT_MAX_EVENT_BYTES_PER_SESSION = 256 * 1024;
+/**
  * maxSessions bounds how many runs the history (and the Agent Activity overview) keeps; only the
  * newest `maxSessionsWithEvents` keep their event lists, so the file stays small.
  */
-export interface ActivityStoreOptions { clock?: () => string; fileSystem?: ActivityFileSystem; maxSessions?: number; maxEventsPerSession?: number; maxSessionsWithEvents?: number; }
+export interface ActivityStoreOptions { clock?: () => string; fileSystem?: ActivityFileSystem; maxSessions?: number; maxEventsPerSession?: number; maxEventBytesPerSession?: number; maxSessionsWithEvents?: number; maxFileBytes?: number; }
+/** The most the whole file may hold; past it, the oldest sessions' events are dropped (their summaries and counters stay). */
+export const DEFAULT_MAX_FILE_BYTES = 4 * 1024 * 1024;
 /** `title` must already be redacted and short (runTitleFor); it is stored as given, re-redacted on load. */
 export interface StartSessionInput { sessionId?: string; project: string; phase?: string; plans?: string[]; model?: string; summary?: string; attribution?: AttributionSnapshot; runId?: string; conversationId?: string; title?: string; }
 export interface ActivityUpdate {
@@ -49,6 +57,7 @@ export interface ActivityUpdate {
   estimatedCostUsd?: number;
   actualCostUsd?: number;
   inputTokens?: number;
+  cachedInputTokens?: number;
   outputTokens?: number;
   durationMs?: number;
   approvalRequired?: boolean;
@@ -60,21 +69,43 @@ export class ActivityStore {
   private readonly clock: () => string;
   private readonly maxSessions: number;
   private readonly maxEventsPerSession: number;
+  private readonly maxEventBytesPerSession: number;
   private readonly maxSessionsWithEvents: number;
   private ledger: ActivityLedger = { version: STORE_VERSION, sessions: [] };
   private loaded = false;
-  private writeQueue: Promise<void> = Promise.resolve();
+  private readonly maxFileBytes: number;
+  /** The write in flight (or done), and the one queued behind it that every change made meanwhile joins (see persist). */
+  private flushing: Promise<void> = Promise.resolve();
+  private queued: Promise<void> | undefined;
+  private dirty = false;
+  /** Full-file writes so far, for tests and diagnostics. */
+  public writes = 0;
   public constructor(private readonly workspaceRoot: string, options: ActivityStoreOptions = {}) {
     this.clock = options.clock ?? (() => new Date().toISOString());
     this.fileSystem = options.fileSystem ?? defaultFileSystem;
     this.maxSessions = Math.max(1, Math.min(1_000, options.maxSessions ?? 300));
-    this.maxEventsPerSession = Math.max(1, Math.min(500, options.maxEventsPerSession ?? 100));
+    this.maxEventsPerSession = Math.max(1, Math.min(20_000, options.maxEventsPerSession ?? DEFAULT_MAX_EVENTS_PER_SESSION));
+    this.maxEventBytesPerSession = Math.max(1_024, Math.min(16 * 1024 * 1024, options.maxEventBytesPerSession ?? DEFAULT_MAX_EVENT_BYTES_PER_SESSION));
     this.maxSessionsWithEvents = Math.max(1, Math.min(100, options.maxSessionsWithEvents ?? 30));
+    this.maxFileBytes = Math.max(16 * 1024, Math.min(64 * 1024 * 1024, options.maxFileBytes ?? DEFAULT_MAX_FILE_BYTES));
   }
   public get filePath(): string { return path.join(this.workspaceRoot, '.planning', '.near-ai', 'activity.json'); }
   public async list(): Promise<ActivitySessionSummary[]> { await this.load(); return this.ledger.sessions.map(cloneSession); }
   /** Reads the file again (another store instance, or another window, wrote it). For readers only. */
-  public async reload(): Promise<void> { await this.writeQueue.catch(() => undefined); this.loaded = false; await this.load(); }
+  public async reload(): Promise<void> { await this.flush(); this.loaded = false; await this.load(); }
+  /** Waits until every change made so far is on disk. */
+  public async flush(): Promise<void> {
+    while (this.inFlight.size) await Promise.allSettled([...this.inFlight]);
+    await (this.queued ?? this.flushing).catch(() => undefined);
+  }
+  /** Changes still being made (an append that has not reached persist yet), so flush() also waits for ones nobody awaited. */
+  private readonly inFlight = new Set<Promise<unknown>>();
+  private track<T>(work: Promise<T>): Promise<T> {
+    this.inFlight.add(work);
+    const done = () => { this.inFlight.delete(work); };
+    work.then(done, done);
+    return work;
+  }
   public async get(sessionId: string): Promise<ActivitySessionSummary | undefined> {
     if (!SESSION_ID.test(sessionId)) return undefined;
     await this.load();
@@ -93,16 +124,17 @@ export class ActivityStore {
     await this.persist();
     return input.summary ? this.append(sessionId, { status: 'running', summary: input.summary, kind: 'session' }) : cloneSession(session);
   }
-  public async append(sessionId: string, update: ActivityUpdate): Promise<ActivitySessionSummary> {
+  public append(sessionId: string, update: ActivityUpdate): Promise<ActivitySessionSummary> { return this.track(this.appendNow(sessionId, update)); }
+  private async appendNow(sessionId: string, update: ActivityUpdate): Promise<ActivitySessionSummary> {
     await this.load();
     const session = this.ledger.sessions.find((candidate) => candidate.sessionId === sessionId);
     if (!session) throw new Error('Activity session was not found.');
     const kind = update.kind ?? 'session';
-    const event: ActivityEvent = { id: `${sessionId}-${session.events.length + 1}`, sessionId, timestamp: this.clock(), attribution: clone(session.attribution), kind, status: update.status, summary: operationalSummary(kind, update.summary), phase: safeText(update.phase ?? session.phase, 120), agentId: safeText(update.agentId, 120), agentRole: safeText(update.agentRole, 120), model: safeText(update.model, 160), tool: safeText(update.tool, 120), action: safeText(update.action, 120), route: safeText(update.route, 160), requestId: safeText(update.requestId, 160), cacheHit: update.cacheHit === true, agentCount: safeInteger(update.agentCount), attempt: safeInteger(update.attempt), retry: update.retry === true, estimatedCostUsd: safeNumber(update.estimatedCostUsd), actualCostUsd: safeNumber(update.actualCostUsd), inputTokens: safeInteger(update.inputTokens), outputTokens: safeInteger(update.outputTokens), durationMs: safeInteger(update.durationMs), approvalRequired: update.approvalRequired === true, errorCode: safeText(update.errorCode, 80) };
+    const event: ActivityEvent = { id: `${sessionId}-${session.events.length + 1}`, sessionId, timestamp: this.clock(), attribution: clone(session.attribution), kind, status: update.status, summary: operationalSummary(kind, update.summary), phase: safeText(update.phase ?? session.phase, 120), agentId: safeText(update.agentId, 120), agentRole: safeText(update.agentRole, 120), model: safeText(update.model, 160), tool: safeText(update.tool, 120), action: safeText(update.action, 120), route: safeText(update.route, 160), requestId: safeText(update.requestId, 160), cacheHit: update.cacheHit === true, agentCount: safeInteger(update.agentCount), attempt: safeInteger(update.attempt), retry: update.retry === true, estimatedCostUsd: safeNumber(update.estimatedCostUsd), actualCostUsd: safeNumber(update.actualCostUsd), inputTokens: safeInteger(update.inputTokens), cachedInputTokens: safeInteger(update.cachedInputTokens), outputTokens: safeInteger(update.outputTokens), durationMs: safeInteger(update.durationMs), approvalRequired: update.approvalRequired === true, errorCode: safeText(update.errorCode, 80) };
     // The run's cost adds up its requests (0.4.19 review: each event used to replace it, so a run showed only its last turn's cost).
     session.estimatedCostUsd = runningCost(session.estimatedCostUsd, event.estimatedCostUsd, event.requestId, session.events, 'estimatedCostUsd');
     session.actualCostUsd = runningCost(session.actualCostUsd, event.actualCostUsd, event.requestId, session.events, 'actualCostUsd');
-    session.events = [...session.events, event].slice(-this.maxEventsPerSession); session.updatedAt = event.timestamp;
+    session.events = boundEvents([...session.events, event], this.maxEventsPerSession, this.maxEventBytesPerSession); session.updatedAt = event.timestamp;
     if (event.phase) session.phase = event.phase; if (update.plan) session.plans = uniqueSafeText([...session.plans, update.plan], 120); if (event.model) session.models = uniqueSafeText([...session.models, event.model], 160);
     if (event.kind === 'agent') session.agents = summarizeAgentCounts(session.events);
     if (event.kind === 'approval') { session.approvals.required += event.approvalRequired ? 1 : 0; if (event.status === 'completed') session.approvals.approved += 1; session.approvals.pending = Math.max(0, session.approvals.required - session.approvals.approved); }
@@ -120,6 +152,15 @@ export class ActivityStore {
     if (!session) return undefined;
     session.stats = addSessionStats(session.stats, delta);
     if (end) { session.endedAt = this.clock(); session.runOutcome = end.outcome; }
+    await this.persist();
+    return cloneSession(session);
+  }
+  /** PERF-07: records where the run's wall time went, once, when its main agent ends. */
+  public async setRunSplit(sessionId: string, split: RunSplit): Promise<ActivitySessionSummary | undefined> {
+    await this.load();
+    const session = this.ledger.sessions.find((candidate) => candidate.sessionId === sessionId);
+    if (!session) return undefined;
+    session.run = normalizeRunSplit(split);
     await this.persist();
     return cloneSession(session);
   }
@@ -150,28 +191,62 @@ export class ActivityStore {
     this.ledger = { version: STORE_VERSION, sessions: await this.readSessions() };
   }
   private async readSessions(): Promise<ActivitySessionSummary[]> {
-    try { const parsed = JSON.parse(await this.fileSystem.readFile(this.filePath, 'utf8')) as Partial<ActivityLedger>; if (parsed.version !== STORE_VERSION || !Array.isArray(parsed.sessions)) throw new Error('Unsupported activity ledger.'); return parsed.sessions.map(normalizeSession).filter((value): value is ActivitySessionSummary => Boolean(value)).slice(0, this.maxSessions); } catch { return []; }
+    try { const parsed = JSON.parse(await this.fileSystem.readFile(this.filePath, 'utf8')) as Partial<ActivityLedger>; if (parsed.version !== STORE_VERSION || !Array.isArray(parsed.sessions)) throw new Error('Unsupported activity ledger.'); return parsed.sessions.map((session) => normalizeSession(session, this.maxEventsPerSession, this.maxEventBytesPerSession)).filter((value): value is ActivitySessionSummary => Boolean(value)).slice(0, this.maxSessions); } catch { return []; }
   }
   /**
-   * Writes the history, merged with what is on disk now. Several stores share one file (the sidebar chat keeps one for the whole window, the chat view
-   * makes one per request, other windows have their own), so writing only this store's copy would erase the runs the others recorded since it loaded
-   * (0.4.19 review). Runs are matched by session id, and the copy updated last wins.
+   * Saves the ledger. Writes are coalesced (agent review of PR 34): every change made while a write is in flight joins ONE queued write, which builds
+   * its payload when it starts, so a burst of appends costs at most two full-file writes instead of one each. Every caller's promise resolves only
+   * after a write that includes its change, so nothing is lost; flush() waits for all of them.
    */
-  private async persist(): Promise<void> {
-    const directory = path.dirname(this.filePath); const temporary = `${this.filePath}.tmp-${process.pid}-${randomBytes(4).toString('hex')}`;
-    this.writeQueue = this.writeQueue.catch(() => undefined).then(async () => {
-      const ours = new Map(this.ledger.sessions.map((session) => [session.sessionId, session]));
-      for (const theirs of await this.readSessions()) {
-        const mine = ours.get(theirs.sessionId);
-        if (!mine || theirs.updatedAt > mine.updatedAt) ours.set(theirs.sessionId, theirs);
-      }
-      this.ledger.sessions = [...ours.values()].sort((a, b) => b.startedAt.localeCompare(a.startedAt)).slice(0, this.maxSessions);
-      for (const session of this.ledger.sessions.slice(this.maxSessionsWithEvents)) if (session.events.length) session.events = [];
-      const payload = `${JSON.stringify(this.ledger)}\n`;
-      await this.fileSystem.mkdir(directory, { recursive: true }); await this.fileSystem.writeFile(temporary, payload, 'utf8'); await this.fileSystem.rename(temporary, this.filePath);
-    });
-    await this.writeQueue;
+  private persist(): Promise<void> {
+    this.dirty = true;
+    if (!this.queued) {
+      const next = this.flushing.catch(() => undefined).then(() => { this.queued = undefined; return this.writeNow(); });
+      this.queued = next;
+      this.flushing = next.catch(() => undefined);
+    }
+    return this.queued;
   }
+
+  /**
+   * One write of the history, merged with what is on disk now. Several stores share one file (the sidebar chat keeps one for the whole window, the chat
+   * view makes one per request, other windows have their own), so writing only this store's copy would erase the runs the others recorded since it
+   * loaded (0.4.19 review). Runs are matched by session id, and the copy updated last wins. Then the per-session and whole-file bounds apply.
+   */
+  private async writeNow(): Promise<void> {
+    if (!this.dirty) return;
+    this.dirty = false;
+    const ours = new Map(this.ledger.sessions.map((session) => [session.sessionId, session]));
+    for (const theirs of await this.readSessions()) {
+      const mine = ours.get(theirs.sessionId);
+      const kept = !mine || theirs.updatedAt > mine.updatedAt ? theirs : mine;
+      // A run's split is written once, when its main agent ends, without moving updatedAt: whichever copy has it gives it to the one kept (PR 34).
+      const split = kept.run ?? (kept === theirs ? mine?.run : theirs.run);
+      ours.set(theirs.sessionId, split ? { ...kept, run: split } : kept);
+    }
+    this.ledger.sessions = [...ours.values()].sort((a, b) => b.startedAt.localeCompare(a.startedAt)).slice(0, this.maxSessions);
+    for (const session of this.ledger.sessions.slice(this.maxSessionsWithEvents)) if (session.events.length) session.events = [];
+    let payload = `${JSON.stringify(this.ledger)}\n`;
+    // The whole file is bounded too: the oldest sessions give up their events first; their summaries and counters stay.
+    for (let index = this.ledger.sessions.length - 1; index >= 1 && Buffer.byteLength(payload, 'utf8') > this.maxFileBytes; index -= 1) {
+      if (!this.ledger.sessions[index].events.length) continue;
+      this.ledger.sessions[index].events = [];
+      payload = `${JSON.stringify(this.ledger)}\n`;
+    }
+    // Still over: the newest session keeps its newest events, as many as fit.
+    const newest = this.ledger.sessions[0];
+    if (newest && Buffer.byteLength(payload, 'utf8') > this.maxFileBytes) {
+      const events = newest.events;
+      newest.events = [];
+      const base = Buffer.byteLength(JSON.stringify(this.ledger), 'utf8');
+      newest.events = boundEvents(events, this.maxEventsPerSession, Math.max(1_024, this.maxFileBytes - base - 4 * 1_024));
+      payload = `${JSON.stringify(this.ledger)}\n`;
+    }
+    const directory = path.dirname(this.filePath); const temporary = `${this.filePath}.tmp-${process.pid}-${randomBytes(4).toString('hex')}`;
+    this.writes += 1;
+    await this.fileSystem.mkdir(directory, { recursive: true }); await this.fileSystem.writeFile(temporary, payload, 'utf8'); await this.fileSystem.rename(temporary, this.filePath);
+  }
+
 }
 const interrupted = new Map<string, Promise<number>>();
 /**
@@ -185,7 +260,20 @@ export function closeInterruptedRuns(workspaceRoot: string): Promise<number> {
   return done;
 }
 const RUN_OUTCOMES: RunOutcomeLabel[] = ['completed', 'max-turns', 'stuck', 'cancelled', 'failed'];
-function runFields(input: { runId?: unknown; conversationId?: unknown; title?: unknown; endedAt?: unknown; runOutcome?: unknown; stats?: unknown }): Partial<ActivitySessionSummary> {
+/** The newest events that fit both the count ceiling and the byte bound (each event's JSON size), oldest dropped first. */
+export function boundEvents(events: ActivityEvent[], maxEvents = DEFAULT_MAX_EVENTS_PER_SESSION, maxBytes = DEFAULT_MAX_EVENT_BYTES_PER_SESSION): ActivityEvent[] {
+  const kept = events.slice(-maxEvents);
+  let bytes = 0;
+  let from = kept.length;
+  while (from > 0) {
+    const size = Buffer.byteLength(JSON.stringify(kept[from - 1]), 'utf8');
+    if (bytes + size > maxBytes && from < kept.length) break;
+    bytes += size;
+    from -= 1;
+  }
+  return from === 0 ? kept : kept.slice(from);
+}
+function runFields(input: { runId?: unknown; conversationId?: unknown; title?: unknown; endedAt?: unknown; runOutcome?: unknown; stats?: unknown; run?: unknown }): Partial<ActivitySessionSummary> {
   const fields: Partial<ActivitySessionSummary> = {};
   if (typeof input.runId === 'string' && RUN_ID.test(input.runId)) fields.runId = input.runId;
   if (typeof input.conversationId === 'string' && CONVERSATION_ID.test(input.conversationId)) fields.conversationId = input.conversationId;
@@ -194,6 +282,8 @@ function runFields(input: { runId?: unknown; conversationId?: unknown; title?: u
   if (typeof input.endedAt === 'string') fields.endedAt = input.endedAt.slice(0, 40);
   if (RUN_OUTCOMES.includes(input.runOutcome as RunOutcomeLabel)) fields.runOutcome = input.runOutcome as RunOutcomeLabel;
   if (input.stats !== undefined) fields.stats = normalizeSessionStats(input.stats);
+  const run = normalizeRunSplit(input.run);
+  if (run) fields.run = run;
   return fields;
 }
 function emptyApprovals(): ActivityApprovalSummary { return { required: 0, approved: 0, pending: 0 }; }
@@ -212,16 +302,17 @@ function uniqueSafeText(values: string[], max: number): string[] { return [...ne
 function safeNumber(value: number | undefined): number | undefined { return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined; }
 function safeInteger(value: number | undefined): number | undefined { return safeNumber(value) === undefined ? undefined : Math.floor(value as number); }
 function cloneSession(session: ActivitySessionSummary): ActivitySessionSummary { return JSON.parse(JSON.stringify(session)) as ActivitySessionSummary; }
-function normalizeSession(value: unknown): ActivitySessionSummary | undefined {
+function normalizeSession(value: unknown, maxEvents = DEFAULT_MAX_EVENTS_PER_SESSION, maxBytes = DEFAULT_MAX_EVENT_BYTES_PER_SESSION): ActivitySessionSummary | undefined {
   if (!value || typeof value !== 'object') return undefined; const session = value as Partial<ActivitySessionSummary>; if (typeof session.sessionId !== 'string' || !SESSION_ID.test(session.sessionId)) return undefined;
   const project = safeText(session.project, 160) ?? 'Unknown project';
   const attribution = normalizeAttribution(session.attribution, project);
   const sessionId = session.sessionId;
-  const events = Array.isArray(session.events) ? session.events.filter((event): event is ActivityEvent => Boolean(event && typeof event === 'object')).slice(-100).map((event) => normalizeEvent(event, sessionId, attribution)) : [];
-  return { version: STORE_VERSION, sessionId, project, attribution, phase: safeText(session.phase, 120), plans: uniqueSafeText(Array.isArray(session.plans) ? session.plans.filter((item): item is string => typeof item === 'string') : [], 120), agents: { ...emptyAgentCounts(), ...(session.agents ?? {}) }, models: uniqueSafeText(Array.isArray(session.models) ? session.models.filter((item): item is string => typeof item === 'string') : [], 160), estimatedCostUsd: safeNumber(session.estimatedCostUsd), actualCostUsd: safeNumber(session.actualCostUsd), approvals: { ...emptyApprovals(), ...(session.approvals ?? {}) }, startedAt: typeof session.startedAt === 'string' ? session.startedAt : new Date(0).toISOString(), updatedAt: typeof session.updatedAt === 'string' ? session.updatedAt : new Date(0).toISOString(), outcome: session.outcome === 'completed' || session.outcome === 'failed' || session.outcome === 'cancelled' || session.outcome === 'setup-blocked' ? session.outcome : 'running', continuationAvailable: session.continuationAvailable !== false, context: { userTurns: session.context?.userTurns ?? 0, assistantTurns: session.context?.assistantTurns ?? 0, lastEvent: safeText(session.context?.lastEvent, 240) }, events, ...runFields(session) };
+  const events = Array.isArray(session.events) ? session.events.filter((event): event is ActivityEvent => Boolean(event && typeof event === 'object')).map((event) => normalizeEvent(event, sessionId, attribution)) : [];
+  const bounded = boundEvents(events, maxEvents, maxBytes);
+  return { version: STORE_VERSION, sessionId, project, attribution, phase: safeText(session.phase, 120), plans: uniqueSafeText(Array.isArray(session.plans) ? session.plans.filter((item): item is string => typeof item === 'string') : [], 120), agents: { ...emptyAgentCounts(), ...(session.agents ?? {}) }, models: uniqueSafeText(Array.isArray(session.models) ? session.models.filter((item): item is string => typeof item === 'string') : [], 160), estimatedCostUsd: safeNumber(session.estimatedCostUsd), actualCostUsd: safeNumber(session.actualCostUsd), approvals: { ...emptyApprovals(), ...(session.approvals ?? {}) }, startedAt: typeof session.startedAt === 'string' ? session.startedAt : new Date(0).toISOString(), updatedAt: typeof session.updatedAt === 'string' ? session.updatedAt : new Date(0).toISOString(), outcome: session.outcome === 'completed' || session.outcome === 'failed' || session.outcome === 'cancelled' || session.outcome === 'setup-blocked' ? session.outcome : 'running', continuationAvailable: session.continuationAvailable !== false, context: { userTurns: session.context?.userTurns ?? 0, assistantTurns: session.context?.assistantTurns ?? 0, lastEvent: safeText(session.context?.lastEvent, 240) }, events: bounded, ...runFields(session) };
 }
 
 function normalizeEvent(value: ActivityEvent, sessionId: string, attribution: AttributionSnapshot): ActivityEvent {
-  return { ...value, id: safeText(value.id, 120) ?? `${sessionId}-legacy`, sessionId, timestamp: typeof value.timestamp === 'string' ? value.timestamp.slice(0, 40) : new Date(0).toISOString(), attribution: clone(attribution), summary: operationalSummary(value.kind, value.summary), requestId: safeText(value.requestId, 160), cacheHit: value.cacheHit === true, phase: safeText(value.phase, 120), agentId: safeText(value.agentId, 120), agentRole: safeText(value.agentRole, 120), model: safeText(value.model, 160), route: safeText(value.route, 160), action: safeText(value.action, 120), tool: safeText(value.tool, 120), agentCount: safeInteger(value.agentCount), attempt: safeInteger(value.attempt), retry: value.retry === true, estimatedCostUsd: safeNumber(value.estimatedCostUsd), actualCostUsd: safeNumber(value.actualCostUsd), inputTokens: safeInteger(value.inputTokens), outputTokens: safeInteger(value.outputTokens), durationMs: safeInteger(value.durationMs), approvalRequired: value.approvalRequired === true, errorCode: safeText(value.errorCode, 80) };
+  return { ...value, id: safeText(value.id, 120) ?? `${sessionId}-legacy`, sessionId, timestamp: typeof value.timestamp === 'string' ? value.timestamp.slice(0, 40) : new Date(0).toISOString(), attribution: clone(attribution), summary: operationalSummary(value.kind, value.summary), requestId: safeText(value.requestId, 160), cacheHit: value.cacheHit === true, phase: safeText(value.phase, 120), agentId: safeText(value.agentId, 120), agentRole: safeText(value.agentRole, 120), model: safeText(value.model, 160), route: safeText(value.route, 160), action: safeText(value.action, 120), tool: safeText(value.tool, 120), agentCount: safeInteger(value.agentCount), attempt: safeInteger(value.attempt), retry: value.retry === true, estimatedCostUsd: safeNumber(value.estimatedCostUsd), actualCostUsd: safeNumber(value.actualCostUsd), inputTokens: safeInteger(value.inputTokens), cachedInputTokens: safeInteger(value.cachedInputTokens), outputTokens: safeInteger(value.outputTokens), durationMs: safeInteger(value.durationMs), approvalRequired: value.approvalRequired === true, errorCode: safeText(value.errorCode, 80) };
 }
 function clone<T>(value: T): T { return JSON.parse(JSON.stringify(value)) as T; }

@@ -3,6 +3,7 @@ import { classifyCommand, downloadSegments, CommandContext } from './commandSafe
 import { NETWORK_COMMAND } from './untrusted';
 import { riskAllowed } from '../domain/riskSwitches';
 import type { CommandSafetyCheck } from './safetyModel';
+import { unattendedDecision, UnattendedScope } from './unattended';
 
 /** `reason` on an allow names the grant that let it run (the engagement grant names its
  * engagement); `reason` on an ask says why it was not run automatically and the card shows it. */
@@ -17,6 +18,11 @@ export interface AutoApprovalContext extends CommandContext {
   riskSwitches?: { outsideWorkspace: boolean; installs: boolean };
   /** 0.4.17: the tool that is asking marked itself autoSafe (WebSearch, WebFetch), so Auto may run it without a question. */
   autoSafeTool?: boolean;
+  /**
+   * PERF-01: set for a sub-agent nobody is watching (and nearAi.agent.unattendedAutoApprove on). In auto and mostly-autonomous, a command that would ask
+   * runs when src/agent/unattended.ts allows it: one the rules call safe, or a clean verification script inside the agent's root.
+   */
+  unattended?: UnattendedScope;
 }
 
 export interface PermissionRules {
@@ -119,7 +125,17 @@ export class RunGrants {
   /** Allow-list entries added from an approval card ("always allow …") during this run. */
   public readonly allowRules = new Set<string>();
   /** Set once the run reads outside content; some actions then always ask. */
-  public tainted = false;
+  private wasTainted = false;
+  /**
+   * When any agent of the run first read outside content (ms), shared with every sub-agent through these grants (review of PR 34): a script changed
+   * after this moment may have been shaped by that content, whichever agent wrote it and whenever the agent running it started.
+   */
+  public taintedAt: number | undefined;
+  public get tainted(): boolean { return this.wasTainted; }
+  public set tainted(value: boolean) {
+    if (value && !this.wasTainted) this.taintedAt = Date.now();
+    this.wasTainted = value;
+  }
   /**
    * The engagement-wide grant for intrusive cyber steps (D-04): granted once for a run, and each
    * step must still name that engagement and an in-scope target. Undefined for every other run, so
@@ -217,6 +233,12 @@ export async function decidePermissionAsync(capability: ActionCapability, comman
   // only the whole command let it run unprompted (0.4.19 review).
   if (grants.tainted && downloadSegments(command ?? '').length) {
     return { decision: 'ask', reason: 'This run read outside content, and this command contains a download whose URL that content may have chosen, which can carry data out in the path, the query or a header. Approve it only if you expected it.' };
+  }
+  // PERF-01: an unattended sub-agent's safe and verification commands. Only an "ask" is upgraded, and only after the deny list, the emergency stop and
+  // the tainted-download hold above have had their say; approve-risky (the person asked to approve every command) and the main run are untouched.
+  if (auto?.unattended && decided.decision === 'ask' && (policy.mode === 'auto' || policy.mode === 'mostly-autonomous') && !(grants.tainted && CARRIES_DATA.test(command ?? ''))) {
+    const verdict = await unattendedDecision(command ?? '', { ...withAllowList(auto, [...rules.allowCommands, ...grants.allowRules]), ...auto.unattended }, grants.tainted);
+    if (verdict.allow) return { decision: 'allow', reason: `Unattended sub-agent: ${verdict.reason}.` };
   }
   if (policy.mode !== 'auto' || !auto) return decided;
   if (decided.decision !== 'ask') return decided;

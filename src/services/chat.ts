@@ -42,13 +42,16 @@ import { ContextGraphMemory } from './contextGraphMemory';
 import { homeFolder, teamLibraryDir, whenTeamsMoved } from '../domain/teamStorage';
 import { rememberedRuleNotice } from '../domain/allowRuleNotice';
 import { syncAutoAdvance } from './autoAdvanceConfig';
-import { cutOffNotice, resumePrompt, RunMarker, RunMarkers } from './runMarkers';
+import { autoResumeChoice, autoResumeNotice, cutOffNotice, resumePrompt, RunMarker, RunMarkers, shouldAutoResume } from './runMarkers';
 import { WaitingNotices } from './waitingNotices';
 import { latestOnly, PROJECT_TEAM_WATCH_PATHS, projectHasTeam, SETUP_NUDGE_DISMISSED_KEY, shouldShowSetupNudge } from './setupSteps';
 
 /** Chat model and safety model pairs already told that auto approve has no private safety model. */
 const warnedSafetyModels = new Set<string>();
 
+
+/** Chat messages that only a person's own action sends (review of PR 34: one releases a run paused on unanswered approvals). */
+const USER_ACTIONS: ReadonlySet<string> = new Set(['send', 'steer', 'approval-reply', 'questions-reply', 'agent-control', 'continue-run', 'switch-conversation', 'resume-interrupted']);
 export interface ChatHost {
   webview: vscode.Webview;
   onDidDispose: vscode.Event<void>;
@@ -343,7 +346,27 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     sendSummary(true);
   })();
 
+  // PERF-05: a run a reload cut off carries on by itself (newest first, a few at most), with a notice, unless nearAi.agent.autoResumeAfterReload is off.
+  void ready.then(async () => {
+    const enabled = vscode.workspace.getConfiguration('nearAi').get<boolean>('agent.autoResumeAfterReload', AGENT_DEFAULTS.autoResumeAfterReload) !== false;
+    // With the emergency stop on (pressed here or in another window), nothing resumes by itself: the cut-off runs keep their Resume button.
+    const emergencyStopped = isEmergencyStopped();
+    const chosen = new Set(autoResumeChoice(tabs.flatMap((tab) => (tab.interrupted ? [tab.interrupted] : [])), { enabled, emergencyStopped }));
+    if (emergencyStopped && enabled) for (const tab of tabs) if (tab.interrupted && shouldAutoResume(tab.interrupted, true)) { const text = 'Not resumed automatically: the emergency stop is on. Run "NEAR AI: Resume", then press Resume here.'; tab.log.add({ type: 'notice', text }); tab.post({ type: 'notice', text }); }
+    const due = tabs.filter((tab) => tab.interrupted && chosen.has(tab.interrupted));
+    for (const tab of due) {
+      if (isEmergencyStopped()) break;
+      if (disposed || !tab.interrupted) continue;
+      const text = autoResumeNotice(tab.interrupted);
+      tab.log.add({ type: 'notice', text });
+      tab.post({ type: 'notice', text });
+      void settleInterrupted(tab, 'resumed').catch(() => undefined);
+    }
+  }).catch(() => undefined);
+
   const handle = async (message: ChatWebviewMessage, tab: ChatTab): Promise<void> => {
+    // A person acting in the chat releases a run paused on unanswered approvals; Stop below still stops it.
+    if (message.type !== 'stop' && USER_ACTIONS.has(message.type)) tab.agent?.userActive();
     if (message.type === 'stop') {
       const was = isRunning(tab);
       const outcome = tab.outcome;
@@ -624,11 +647,16 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
         warnedSafetyModels.add(`${model}|${readSafetyModel()}`);
         tab.post({ type: 'notice', text: `Auto approve: ${readSafetyModel()} is not available as a private (TEE) model here, so commands the rules cannot decide will ask you.` });
       }
+      // PERF-03: a turn that streams nothing for too long is retried once on a backup model, chosen only among models at least as private as the chat's.
+      const stallSeconds = vscode.workspace.getConfiguration('nearAi').get<unknown>('agent.modelStallSeconds', AGENT_DEFAULTS.modelStallSeconds);
+      const modelStallMs = Math.max(0, Math.min(3_600, typeof stallSeconds === 'number' && Number.isFinite(stallSeconds) ? stallSeconds : AGENT_DEFAULTS.modelStallSeconds)) * 1_000;
+      const configuredBackup = String(vscode.workspace.getConfiguration('nearAi').get<unknown>('agent.backupModel', '') ?? '').trim();
+      const backupModel = [configuredBackup, readModelTiers().standard, readModelTiers().deep].find((candidate) => candidate && candidate !== model && delegable.some((option) => option.id === candidate));
       if (stopped()) { await state.activity.append(session.sessionId, { status: 'cancelled', summary: 'Stopped before the run started.' }); return; }
       // Update Team waits for this to end before it offers to rewrite a team.
       const endRun = beginRun();
       try {
-        await agent.send({ text, skill, gsd, team, attachments, memory: { store: state.memory, projectScope: { kind: 'project', id: projectIdForWorkspace(root) } }, imageModel: route.local ? undefined : imageModel, reputation: new ReputationStore(root), tiers: readModelTiers(), roleModels: readRoleModels(), safetyModel, safetyFallbackModel, riskSwitches: readRiskSwitches(), rememberAllowRule: (rule) => rememberAllowRule(rule, tab), availableModels: delegable.map((candidate) => candidate.id), modelCatalog: delegable, route: privateRouteFor(active.provider, route.local), contextWindows: Object.fromEntries(active.models.map((candidate) => [candidate.id, candidate.contextLength])), maxParallelAgents: limits.maxParallelAgents, maxTurns: limits.maxTurns, client: route.client, model, privacy: modelPrivacyLabel(modelInfo), policy: settings.actionPolicy, rules: readAgentRules(), activity: { store: state.activity, sessionId: session.sessionId }, local: route.local, security: securityAccess(context, root), webSearch: await webSearchProvider(context.secrets), budget: runBudget, mcpTools: mcp.tools, maxOutputTokens: Math.max(1_000, Math.min(1_000_000, Number(vscode.workspace.getConfiguration('nearAi').get<number>('agent.maxOutputTokens', AGENT_DEFAULTS.maxOutputTokens)) || AGENT_DEFAULTS.maxOutputTokens)), shellEnvAllow: vscode.workspace.getConfiguration('nearAi').get<string[]>('agent.shellEnvAllow', []).filter((name) => typeof name === 'string'), runId, ...(redTeamStep ? { skillAddendum: redTeamStep.addendum, projectAgents: redTeamStep.agents } : {}) });
+        await agent.send({ modelStallMs, ...(backupModel ? { backupModel } : {}), text, skill, gsd, team, attachments, memory: { store: state.memory, projectScope: { kind: 'project', id: projectIdForWorkspace(root) } }, imageModel: route.local ? undefined : imageModel, reputation: new ReputationStore(root), tiers: readModelTiers(), roleModels: readRoleModels(), safetyModel, safetyFallbackModel, riskSwitches: readRiskSwitches(), rememberAllowRule: (rule) => rememberAllowRule(rule, tab), unattendedAutoApprove: vscode.workspace.getConfiguration('nearAi').get<boolean>('agent.unattendedAutoApprove', AGENT_DEFAULTS.unattendedAutoApprove) !== false, researchProfile: vscode.workspace.getConfiguration('nearAi').get<boolean>('gsd.researchProfile', true) !== false, availableModels: delegable.map((candidate) => candidate.id), modelCatalog: delegable, route: privateRouteFor(active.provider, route.local), contextWindows: Object.fromEntries(active.models.map((candidate) => [candidate.id, candidate.contextLength])), maxParallelAgents: limits.maxParallelAgents, maxTurns: limits.maxTurns, client: route.client, model, privacy: modelPrivacyLabel(modelInfo), policy: settings.actionPolicy, rules: readAgentRules(), activity: { store: state.activity, sessionId: session.sessionId }, local: route.local, security: securityAccess(context, root), webSearch: await webSearchProvider(context.secrets), budget: runBudget, mcpTools: mcp.tools, maxOutputTokens: Math.max(1_000, Math.min(1_000_000, Number(vscode.workspace.getConfiguration('nearAi').get<number>('agent.maxOutputTokens', AGENT_DEFAULTS.maxOutputTokens)) || AGENT_DEFAULTS.maxOutputTokens)), shellEnvAllow: vscode.workspace.getConfiguration('nearAi').get<string[]>('agent.shellEnvAllow', []).filter((name) => typeof name === 'string'), runId, ...(redTeamStep ? { skillAddendum: redTeamStep.addendum, projectAgents: redTeamStep.agents } : {}) });
       } finally {
         endRun();
       }
@@ -801,7 +829,15 @@ function conversationFor(context: vscode.ExtensionContext, root: string, panel: 
   conversation.runMarkers = runMarkersFor(context, root);
   const minutes = vscode.workspace.getConfiguration('nearAi').get<number>('agent.approvalTimeoutMinutes', AGENT_DEFAULTS.approvalTimeoutMinutes);
   conversation.approvalTimeoutMs = Math.max(0, Math.min(1_440, typeof minutes === 'number' && Number.isFinite(minutes) ? minutes : AGENT_DEFAULTS.approvalTimeoutMinutes)) * 60_000;
+  // PERF-01: a sub-agent's card waits briefly, then the call returns "awaiting approval"; enough of those in a row pause the run.
+  const bounded = (key: string, fallback: number, min: number, max: number) => { const value = vscode.workspace.getConfiguration('nearAi').get<unknown>(key, fallback); return typeof value === 'number' && Number.isFinite(value) ? Math.min(max, Math.max(min, value)) : fallback; };
+  conversation.subagentApprovalWaitMs = bounded('agent.subagentApprovalWaitSeconds', AGENT_DEFAULTS.subagentApprovalWaitSeconds, 0, 3_600) * 1_000;
+  conversation.approvalTimeoutsBeforePause = Math.floor(bounded('agent.approvalTimeoutsBeforePause', AGENT_DEFAULTS.approvalTimeoutsBeforePause, 0, 50));
+  conversation.compactAtTokens = Math.floor(bounded('agent.compactAtTokens', AGENT_DEFAULTS.compactAtTokens, 0, 10_000_000));
+  conversation.maxParallelWorktrees = Math.floor(bounded('agent.maxParallelWorktrees', AGENT_DEFAULTS.maxParallelWorktrees, 1, 16));
   const focusRegained = () => {
+    // The person is back: a run paused on unanswered approvals carries on (its cards stay for them to answer).
+    conversation.userActive();
     const prompts = conversation.waitingPrompts();
     const fresh = new Set(notices.focusRegained(waitingIds()));
     for (const prompt of prompts) if (fresh.has(promptIdOf(prompt) ?? '')) announce(prompt);

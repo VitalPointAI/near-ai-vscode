@@ -95,6 +95,107 @@ read outside the repository, or delete refs. These always ask, even after
   command;
 - writing into `.planning/.near-ai/`.
 
+### Sub-agents nobody is watching
+
+In the `auto` and `mostly-autonomous` policies, a sub-agent (an agent another
+agent started) runs two more kinds of command without a card, because nobody
+is usually there to answer one and runs used to wait hours on their own checks
+(`nearAi.agent.unattendedAutoApprove`, on by default):
+
+- a command the fixed safety rules call safe: reads, read-only git (`status`,
+  `log`, `diff`, `show`), tests, lint, type checks, builds, and writes inside
+  the sub-agent's own folder, which is its git worktree when it has one;
+- a verification script run by `bash`, `sh`, `node` or `python3`, when the
+  script resolves (symlinks followed) inside the project, is named like a check
+  (verify, check, gate, lint, test, typecheck, validate, audit) or is named in
+  the sub-agent's task, is under 256 KiB, and **no agent of the current run
+  wrote or changed it** (or any file it loads). "Changed" is judged by the
+  file's change time as well as its modified time, because an agent can set a
+  modified time back but not a change time; a file with recent times still
+  counts when its bytes equal its committed copy at the commit the project was
+  on when the run started (as in a worktree checked out during the run). That
+  last rule is the boundary:
+  such a script is the project's own code, which the rules already trust the
+  way they trust `npm test`. A script any agent writes or edits during the run
+  asks, whatever its text says, because no reading of a script's text can be
+  complete. The one exception is a verifier NEAR AI scaffolded whose text still
+  matches the hash it recorded (below).
+
+  On top of that, the script's text is screened for obvious mistakes: a network
+  program or URL, starting another program or evaluating code, deleting or
+  discarding files, publishing or pushing, a credential, an environment
+  variable or home-directory path (`~/`, `$HOME`, `expanduser`, …), an absolute
+  path outside the project, a `..` segment or another way to climb out, and
+  shell lines the rules call risky. This screen is a safety net against
+  accidents, not the security boundary, and it is not complete.
+
+  Its arguments follow the same rules: an argument (or the value of a
+  `--name=value` option) that has a `..` segment, is an absolute path, starts
+  with `~`, expands a variable or a glob, or resolves outside the project
+  (symbolic links followed) makes the command ask; so does any argument that is
+  not plain text. A script another script runs is held to the same argument
+  rules.
+
+  These rules apply to the script's whole closure, not just the file named on
+  the command line: every relative `import`, `export … from`, `require()` and
+  `import()` in a JavaScript file, and every script a shell script runs, is
+  resolved and checked the same way, recursively (at most 50 files). The only
+  other things a script may load are the built-ins `node:fs`,
+  `node:fs/promises`, `node:path`, `node:url`, `node:util` and `node:assert`
+  (and, for Python, a short list of standard modules with no process or
+  network access). Anything else asks: a load that does not resolve to a file
+  inside the project, a non-relative package, an `import()` or `require()`
+  whose argument is not one string literal, a Python relative import or
+  `importlib`, an invocation a shell line makes that cannot be followed, and an
+  import cycle. The verifier scripts NEAR AI scaffolds are also compared with
+  the SHA-256 recorded in `.planning/.near-ai/verifiers.json` when they were
+  written (a file agents cannot change without asking); a scaffolded file that
+  differs in any way asks. You may edit a scaffolded verifier, but it asks until
+  you run **NEAR AI: Trust Research Verifiers**, which lists the changed files
+  and records their new hashes only after you confirm.
+
+  "The current run" is one message's run with all its sub-agents. A script an
+  agent wrote in an earlier run of the conversation, and that you have not
+  looked at since, counts as the project's own in a later run; review what an
+  earlier run wrote under `scripts/` before leaving a new run unattended.
+
+Everything else asks exactly as before, including for sub-agents: a push, a
+delete outside the project, publishing, any command that can reach the
+network, and any credential path. The deny list, the emergency stop, the
+outside-content holds and credential-path checks are applied first and are
+never overridden. In `approve-risky` and the other modes, and in the main
+conversation, nothing above runs without a card.
+
+In every approval mode, `approve-risky` included, a sub-agent's approval card
+waits `nearAi.agent.subagentApprovalWaitSeconds` (20 s by default). If nobody answers, the action does **not** run: the
+sub-agent is told it is awaiting approval and carries on with other work, and
+the card stays queued (until the run ends, or a day at most). Allowing it later
+allows that exact command, or edits, for the rest of the run and tells the lead
+agent; declining tells the lead not to run it. After
+`nearAi.agent.approvalTimeoutsBeforePause` (3) unanswered approvals in a row,
+every agent of the run pauses before its next model turn with a message;
+answering an approval, Resume, a new message, or coming back to the window
+carries on, and after a day with nobody back the run is stopped, its work kept. The main
+conversation's own approvals still wait for you (`nearAi.agent.approvalTimeoutMinutes`).
+
+### Plan checks the research profile skips
+
+In a research or writing project (`nearAi.gsd.researchProfile`, on by
+default), Open-GSD's plan checker is not run for a plan that changes content
+only. A plan counts as content-only when every file its `files_modified`
+list names, every file this run wrote, and every uncommitted change git
+reports is a document, data or image file (`.md`, `.txt`, `.csv`, `.tsv`,
+`.bib`, `.ris`, images, `.pdf`, `.docx`, `.xlsx`, `.pptx`, `.odt`) and none is
+a gate, verifier, test or CI file, and its text names no gate or verifier
+either. Any source, script or configuration file means the checker runs, and
+so does a project without git. The checker's place in the workflow is then filled by a reply that
+starts with `## VERIFICATION PASSED`, because Open-GSD continues only on that
+marker or `## ISSUES FOUND` and otherwise stops to ask you. The next line
+always reads "PLAN CHECK SKIPPED (content-only plan): the plan checker was NOT
+run, so these plans were not verified", followed by the evidence. In this
+case the marker means only "carry on"; nothing was checked. Set
+`nearAi.gsd.researchProfile` to `false` to have every plan checked.
+
 Search results leave out credential-looking files unless you search one
 directly. WebFetch follows redirects itself, requires https at every hop, and
 refuses hosts that resolve to loopback, private, link-local or metadata

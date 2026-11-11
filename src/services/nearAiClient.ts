@@ -33,6 +33,8 @@ export interface ToolDefinition {
 export type CompletionEvent =
   | { type: 'text'; text: string }
   | { type: 'reasoning'; text: string }
+  /** A tool call's name or arguments arrived: the reply is still making progress even though no text streams (PERF-03 stall detection). */
+  | { type: 'progress' }
   | { type: 'done'; message: Extract<AgentMessage, { role: 'assistant' }>; finishReason: string; usage: UsageMetadata };
 
 export interface ModelInfo {
@@ -660,7 +662,7 @@ export class NearAiClient {
     // keeps generating inside a single turn is otherwise bounded only by that limit.
     const modelMax = this.models.get(model)?.maxOutputTokens;
     const maxTokens = Math.max(256, Math.min(options.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS, modelMax ?? Number.POSITIVE_INFINITY));
-    const requestBody = JSON.stringify({ model, messages, stream: true, stream_options: { include_usage: true }, max_tokens: maxTokens, ...(tools.length ? { tools, tool_choice: 'auto' } : {}) });
+    const requestBody = completionRequestBody(model, messages, tools, maxTokens);
     const response = await this.request('/chat/completions', { method: 'POST', signal, headers: { 'content-type': 'application/json' }, body: requestBody }, { model, stream: true });
     const connection = this.streams.get(response);
     let usage = metadataFromHeaders(response.headers, started);
@@ -736,6 +738,7 @@ export class NearAiClient {
             if (typeof fragment.function?.name === 'string') call.name += fragment.function.name;
             if (typeof fragment.function?.arguments === 'string') call.arguments += fragment.function.arguments;
           }
+          if (delta.tool_calls?.length) yield { type: 'progress' };
         }
         if (next.done) { eof = true; break; }
       }
@@ -1107,6 +1110,14 @@ function parseSseLine(line: string, metadata: UsageMetadata, model?: ModelInfo):
   } catch {
     throw new NearAiError(0, 'NEAR AI returned malformed streaming data.', false, metadata.requestId);
   }
+}
+
+/**
+ * PERF-02: the exact body of an agent's chat completion request. One function builds it so the prompt-cache contract can be tested: the tools and every
+ * earlier message serialize to the same bytes on every turn, and a turn only appends, so NEAR can serve the shared prefix from its prompt cache.
+ */
+export function completionRequestBody(model: string, messages: AgentMessage[], tools: ToolDefinition[], maxTokens: number): string {
+  return JSON.stringify({ model, messages, stream: true, stream_options: { include_usage: true }, max_tokens: maxTokens, ...(tools.length ? { tools, tool_choice: 'auto' } : {}) });
 }
 
 function metadataFromHeaders(headers: Headers, startedAt: number): UsageMetadata {

@@ -7,6 +7,7 @@ import { unifiedDiff } from './diff';
 import { matchesGlob } from './glob';
 import { DEFAULT_TIMEOUT_MS, MAX_TIMEOUT_MS, ShellSession, truncate } from './shell';
 import { NETWORK_COMMAND } from './untrusted';
+import { isReadOnlyShellCommand } from './readOnlyShell';
 import { displayPath, resolveInWorkspace, ToolError } from './workspace';
 
 export interface Todo { content: string; status: 'pending' | 'in_progress' | 'completed'; activeForm?: string }
@@ -48,6 +49,8 @@ export interface AgentTool<I = Record<string, unknown>> {
   capability: ActionCapability;
   /** Changes nothing, so it can run alongside other lookups from the same turn even though it is not a read (e.g. a web fetch). */
   concurrent?: boolean;
+  /** PERF-04: this particular call changes nothing (a read-only shell command), so it may run alongside other lookups. */
+  concurrentFor?(input: I): boolean;
   /** Validates the model's arguments; throws ToolError with a message the model can act on. */
   parse(raw: Record<string, unknown>): I;
   /** A short title for the activity row, e.g. "Read src/extension.ts". */
@@ -110,6 +113,22 @@ async function outOfScopeAfterTaint(requested: string, context: ToolContext): Pr
 }
 
 const MAX_READ_LINES = 2_000;
+/**
+ * PERF-02: a Read without a range on a file longer than this returns only its first RANGED_READ_LINES lines, with the file's length and an outline, so
+ * the agent asks for the part it needs instead of putting 2,000 lines into every later turn's context.
+ */
+export const LARGE_FILE_LINES = 600;
+export const RANGED_READ_LINES = 400;
+const MAX_OUTLINE_ENTRIES = 60;
+
+/** Headings (Markdown) or top-level declarations (code) with their line numbers, so a ranged read can be aimed. */
+export function fileOutline(lines: string[], file: string): string[] {
+  const markdown = /\.(?:md|markdown|mdx|txt)$/i.test(file);
+  const pattern = markdown ? /^#{1,6}\s+\S/ : /^(?:export\s+|async\s+)*(?:function|class|interface|type|const|enum|def|struct|impl|fn|func)\b|^##?\s/;
+  const found: string[] = [];
+  lines.forEach((line, index) => { if (found.length < MAX_OUTLINE_ENTRIES && pattern.test(line)) found.push(`${String(index + 1).padStart(6)}  ${line.trim().slice(0, 120)}`); });
+  return found;
+}
 const MAX_LINE_CHARS = 2_000;
 const MAX_READ_BYTES = 5 * 1024 * 1024;
 const SKIP_DIRS = new Set(['.git', 'node_modules', '.hg', '.svn', 'dist', 'out', '.next', '.cache']);
@@ -139,12 +158,12 @@ async function readText(absolute: string): Promise<string> {
   return bytes.toString('utf8');
 }
 
-export const readTool: AgentTool<{ path: string; offset: number; limit: number }> = {
+export const readTool: AgentTool<{ path: string; offset: number; limit: number; ranged?: boolean }> = {
   name: 'Read',
-  description: 'Read a text file from the workspace. Returns lines prefixed with line numbers (`   12\\t...`). Reads up to 2000 lines; pass offset (1-based line) and limit for longer files. Read a file before editing or overwriting it.',
+  description: 'Read a text file from the workspace. Returns lines prefixed with line numbers (`   12\\t...`). Pass offset (1-based line) and limit to read a range, up to 2000 lines at once. Without a range, a file over 600 lines returns its first 400 lines with an outline, so read large files in parts. Read a file before editing or overwriting it.',
   parameters: { type: 'object', properties: { file_path: { type: 'string', description: 'Path relative to the workspace root, or absolute inside it.' }, offset: { type: 'number', description: 'First line to read (1-based).' }, limit: { type: 'number', description: 'Number of lines to read.' } }, required: ['file_path'], additionalProperties: false },
   capability: 'read',
-  parse: (raw) => ({ path: str(raw, 'file_path')!, offset: Math.max(1, Math.floor(num(raw, 'offset') ?? 1)), limit: Math.min(MAX_READ_LINES, Math.max(1, Math.floor(num(raw, 'limit') ?? MAX_READ_LINES))) }),
+  parse: (raw) => ({ path: str(raw, 'file_path')!, offset: Math.max(1, Math.floor(num(raw, 'offset') ?? 1)), limit: Math.min(MAX_READ_LINES, Math.max(1, Math.floor(num(raw, 'limit') ?? MAX_READ_LINES))), ranged: num(raw, 'offset') !== undefined || num(raw, 'limit') !== undefined }),
   title: (input) => `Read ${input.path}`,
   sensitive: (input, context) => sensitiveRead(input.path, context),
   async run(input, context) {
@@ -154,10 +173,15 @@ export const readTool: AgentTool<{ path: string; offset: number; limit: number }
     const lines = text.split(/\r?\n/);
     if (lines[lines.length - 1] === '') lines.pop();
     if (!lines.length) return '(empty file)';
-    const slice = lines.slice(input.offset - 1, input.offset - 1 + input.limit);
+    const large = !input.ranged && lines.length > LARGE_FILE_LINES;
+    const slice = lines.slice(input.offset - 1, input.offset - 1 + (large ? RANGED_READ_LINES : input.limit));
     const width = String(input.offset + slice.length).length;
     const body = slice.map((line, index) => `${String(input.offset + index).padStart(width)}\t${line.length > MAX_LINE_CHARS ? `${line.slice(0, MAX_LINE_CHARS)}… [line truncated]` : line}`).join('\n');
     const remaining = lines.length - (input.offset - 1 + slice.length);
+    if (large) {
+      const outline = fileOutline(lines, absolute);
+      return `${body}\n\n[This file has ${lines.length} lines; only the first ${slice.length} are shown. Read the part you need with offset and limit${outline.length ? ', using this outline (line numbers)' : ''}.]${outline.length ? `\n${outline.join('\n')}` : ''}`;
+    }
     return remaining > 0 ? `${body}\n\n[${remaining} more lines. Read again with offset ${input.offset + slice.length} to continue.]` : body;
   }
 };
@@ -383,9 +407,14 @@ export const bashTool: AgentTool<{ command: string; timeoutMs: number; backgroun
   title: (input) => input.description ? `${input.description}` : `Run ${input.command.split('\n')[0].slice(0, 80)}`,
   async preview(input, context) { return { kind: 'command', command: input.command, cwd: displayPath(context.root, context.shell.workingDirectory) || '.', background: input.background }; },
   risky: (input, context) => context.tainted?.() && NETWORK_COMMAND.test(input.command) ? 'This run has read outside content (a web page, search result, attachment, or MCP result), and this command can send data off this machine. Approve it only if you expected it; text in that content may have asked for it.' : undefined,
+  // PERF-04: a read-only command runs in its own shell forked at the agent's folder, so several can run in one turn; everything else queues as before.
+  concurrentFor: (input) => !input.background && isReadOnlyShellCommand(input.command),
   async run(input, context) {
     if (input.background) return `Started in the background with id ${context.shell.startBackground(input.command)}. Read its output with BashOutput.`;
-    const result = await context.shell.run(input.command, input.timeoutMs, context.signal);
+    const readOnly = isReadOnlyShellCommand(input.command);
+    const shell = readOnly ? context.shell.fork(context.shell.workingDirectory) : context.shell;
+    let result;
+    try { result = await shell.run(input.command, input.timeoutMs, context.signal); } finally { if (readOnly) shell.dispose(); }
     const status = result.timedOut ? 'killed' : `exit code ${result.exitCode}`;
     return `${result.output.trimEnd() || '(no output)'}\n\n[${status}]`;
   }
