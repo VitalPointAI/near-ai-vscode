@@ -440,3 +440,23 @@ test('a footnote too long for any page is an error naming it, not a note pushed 
     assert.equal(pageOf('The cited line.'), pageOf('A note of moderate length.'));
   });
 });
+
+test('a Word document makes only web and mail links live, like the PDF: a script, file or network-share target stays text', () => {
+  const blocks = parseMarkdown('[web](https://example.com/a) [mail](mailto:a@example.com) [js](javascript:alert(1)) [file](file:///etc/passwd) [share](\\\\host\\share)\n');
+  const zip = readZip(createDocx({ title: 'Links', blocks, images: new Map() }).bytes, 'links.docx');
+  const rels = zip.get('word/_rels/document.xml.rels')!().toString('utf8');
+  assert.match(rels, /Target="https:\/\/example\.com\/a" TargetMode="External"/);
+  assert.match(rels, /Target="mailto:a@example\.com" TargetMode="External"/);
+  assert.doesNotMatch(rels, /javascript:|file:|host/i, 'no relationship for an unsafe target');
+  const document = zip.get('word/document.xml')!().toString('utf8');
+  for (const text of ['js', 'file', 'share']) assert.match(document, new RegExp(`<w:t xml:space="preserve">${text}</w:t>`), `${text} is kept as text`);
+});
+
+test('a member whose instructions open with a "Privacy: ..." sentence still loads, and a one-word privacy typo is still reported', () => {
+  const team = (line: string) => `---\nname: T\ndescription: d\n---\n\n## writer\nrole: writer\n${line}\nWrite things.\n`;
+  const loaded = parseTeam(team('Privacy: handle client data carefully.'), 't.md');
+  assert.equal(loaded.members[0]!.privacy, undefined);
+  assert.match(loaded.members[0]!.instructions, /^Privacy: handle client data carefully\.\nWrite things\./);
+  assert.equal(parseTeam(team('privacy: private'), 't.md').members[0]!.privacy, 'private');
+  assert.throws(() => parseTeam(team('privacy: privat'), 't.md'), /privacy: privat/);
+});

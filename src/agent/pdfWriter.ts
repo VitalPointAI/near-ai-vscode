@@ -89,7 +89,7 @@ const rgb = (color: Color, stroke = false) => `${color.map(num).join(' ')} ${str
 const escapeString = (bytes: string) => bytes.replace(/[\\()]/g, (char) => `\\${char}`).replace(/[\r\n]/g, ' ');
 const fontFor = (bold?: boolean, italic?: boolean): FontKey => (bold && italic ? 'F4' : bold ? 'F2' : italic ? 'F3' : 'F1');
 /** A web or mail link for an annotation, re-encoded consistently; a target that is not valid percent-encoding (a stray %) is used as written. */
-const linkable = (target: string | undefined) => {
+export const linkable = (target: string | undefined) => {
   if (!target || !/^(https?:|mailto:)/i.test(target)) return undefined;
   try { return encodeURI(decodeURI(target)); } catch { return target; }
 };

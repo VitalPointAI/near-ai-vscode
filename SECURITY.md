@@ -153,8 +153,8 @@ The research team's editor now has Write and Edit (for copy edits to the
 report) and the research red team has Bash (to try deliberate breakages of the
 project's checks in a scratch copy). Neither gets anything that runs without
 asking: their edits and commands go through the same approval policy as every
-other agent's, and the red team's writes are kept to `.planning/` like other
-research roles.
+other agent's. That policy is the only limit: nothing confines the red team's
+writes to `.planning/`, and Bash can reach anywhere the policy allows.
 
 **Update Team** rewrites a team file (and, for a project, the extension's own
 block in `AGENTS.md`) only from the **NEAR AI: Update Team…** command or the

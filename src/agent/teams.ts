@@ -86,7 +86,9 @@ export function parseTeam(text: string, file: string): TeamDefinition {
     const fields: Record<string, string> = {};
     let index = 0;
     while (index < rest.length) {
-      const field = /^(role|model|tools|reports-to|privacy):\s*(.*)$/i.exec(rest[index].trim());
+      // `privacy:` counts as a setting only with a one-word value: an existing member's instructions may open with a sentence such as "Privacy: handle
+      // client data carefully", which must stay instructions rather than fail as an unknown privacy value and make the whole team unloadable.
+      const field = /^(role|model|tools|reports-to):\s*(.*)$/i.exec(rest[index].trim()) ?? /^(privacy):\s*(\S*)\s*$/i.exec(rest[index].trim());
       if (!field) { if (rest[index].trim()) break; index += 1; continue; }
       fields[field[1].toLowerCase()] = field[2].trim();
       index += 1;

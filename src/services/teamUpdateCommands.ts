@@ -157,8 +157,13 @@ export async function offerTeamUpdates(library: TeamLibrary, notices: UpdateNoti
     await notices.offered(file, preview.plan.template.toVersion);
     const from = preview.plan.template.fromVersion ? `v${preview.plan.template.fromVersion}` : 'an earlier version';
     void vscode.window.showInformationMessage(`Team update available for "${preview.name}" (${preview.plan.template.id} template ${from} → v${preview.plan.template.toVersion}).`, 'Review', 'Later', "Don't ask for this team").then(async (choice) => {
-      if (choice === 'Review') await updateTeam(library, file);
-      if (choice === "Don't ask for this team") await notices.dontAsk(file);
+      // A failure here would otherwise be an unhandled rejection the person never sees.
+      try {
+        if (choice === 'Review') await updateTeam(library, file);
+        if (choice === "Don't ask for this team") await notices.dontAsk(file);
+      } catch (error) {
+        void vscode.window.showErrorMessage(`The team update for "${preview.name}" could not be shown. ${(error as Error).message}`);
+      }
     });
     return;
   }

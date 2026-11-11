@@ -1,6 +1,6 @@
 import { DocImage } from './docImages';
 import { Block, Inline, ListItem, Note } from './docMarkdown';
-import { pdfDate, type DocumentSpec } from './pdfWriter';
+import { linkable, pdfDate, type DocumentSpec } from './pdfWriter';
 import { ToolError } from './workspace';
 import { writeZip } from './zip';
 
@@ -78,10 +78,14 @@ class DocumentBuilder {
       const element = `<w:r>${properties ? `<w:rPr>${properties}</w:rPr>` : ''}${body}</w:r>`;
       if (!run.link) return element;
       if (run.link.startsWith('#')) return `<w:hyperlink w:anchor="${xml(run.link.slice(1))}">${element}</w:hyperlink>`;
+      // The same allow-list as the PDF: only web and mail links become live. A `javascript:`, `file:` or `\\host\share` target stays as text, so a
+      // document an agent wrote from a hostile page cannot carry a link that runs or reaches a network share when clicked.
+      const target = linkable(run.link);
+      if (!target) return element;
       const known = this.links.get(rels) ?? new Map<string, string>();
       this.links.set(rels, known);
-      let id = known.get(run.link);
-      if (!id) { id = this.rel(`${REL}/hyperlink`, run.link, true, rels); known.set(run.link, id); }
+      let id = known.get(target);
+      if (!id) { id = this.rel(`${REL}/hyperlink`, target, true, rels); known.set(target, id); }
       return `<w:hyperlink r:id="${id}">${element}</w:hyperlink>`;
     }).join('');
   }
