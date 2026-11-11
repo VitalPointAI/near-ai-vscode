@@ -616,7 +616,7 @@
         "nearAi.agent.unattendedAutoApprove": {
           "type": "boolean",
           "default": true,
-          "description": "In the Auto and Edits auto approval modes, sub-agents run without a card: commands the safety rules call safe (reads, read-only git, tests, lint, type checks, builds, and writes inside the sub-agent's own folder or worktree) and verification scripts inside the project that are named like a check (verify, check, gate, lint, test, typecheck, validate, audit) or named by the plan and contain nothing that reaches the network, deletes, publishes, starts other programs, or touches credentials. Pushes, deletes outside the project, publishing, network commands and credential paths still ask. Ask before edits is never affected."
+          "description": "In the Auto and Edits auto approval modes, sub-agents run without a card: commands the safety rules call safe (reads, read-only git, tests, lint, type checks, builds, and writes inside the sub-agent's own folder or worktree) and verification scripts inside the project that are named like a check (verify, check, gate, lint, test, typecheck, validate, audit) or named by the plan, when no agent of the run wrote or changed them (a script an agent writes during the run always asks) and they contain nothing that reaches the network, deletes, publishes, starts other programs, or touches credentials. Pushes, deletes outside the project, publishing, network commands and credential paths still ask. Ask before edits is never affected."
         },
         "nearAi.agent.subagentApprovalWaitSeconds": {
           "type": "number",

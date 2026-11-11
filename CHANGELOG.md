@@ -6,8 +6,8 @@
   projects, sub-agents waited 15 minutes at a time on cards for their own checks (106 and 135 such
   waits), and two long runs died after about three hours of them. In Auto and Edits auto, a sub-agent
   now runs commands the safety rules call safe (reads, read-only git, tests, lint, type checks, builds,
-  and writes inside its own folder or worktree) and clean verification scripts inside the project
-  without a card (`nearAi.agent.unattendedAutoApprove`). Pushes, deletes outside the project,
+  and writes inside its own folder or worktree) and verification scripts inside the project that no
+  agent of the run wrote or changed, without a card (`nearAi.agent.unattendedAutoApprove`). Pushes, deletes outside the project,
   publishing, network commands and credential paths still ask, and Ask before edits is unchanged. A
   sub-agent's card now waits 20 seconds (`nearAi.agent.subagentApprovalWaitSeconds`); then the
   sub-agent is told it is awaiting approval and carries on, and the card stays queued. Allowing it

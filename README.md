@@ -669,7 +669,7 @@ Read the full [security and trust report](SECURITY.md).
 | `nearAi.agent.safetyModel` | the fast tier | With `auto`, the model that checks commands the rules cannot decide. Used only when it runs privately (TEE or local); otherwise those commands ask. |
 | `nearAi.agent.maxParallelAgents` | `8` | Sub-agents that may run at once. |
 | `nearAi.agent.maxTurns` | `60` | Model turns per run before it pauses for you; **Continue** in the chat carries on. |
-| `nearAi.agent.unattendedAutoApprove` | `true` | In Auto and Edits auto, sub-agents run commands the safety rules call safe and clean verification scripts inside the project without a card; pushes, deletes outside the project, publishing, network commands and credential paths still ask. See SECURITY.md, "Sub-agents nobody is watching". |
+| `nearAi.agent.unattendedAutoApprove` | `true` | In Auto and Edits auto, sub-agents run commands the safety rules call safe and verification scripts inside the project that no agent of the run wrote or changed without a card; pushes, deletes outside the project, publishing, network commands and credential paths still ask. See SECURITY.md, "Sub-agents nobody is watching". |
 | `nearAi.agent.subagentApprovalWaitSeconds` | `20` | How long a sub-agent's approval card waits before the sub-agent is told "awaiting approval" and carries on; the card stays queued, and allowing it later allows that command for the run. |
 | `nearAi.agent.approvalTimeoutsBeforePause` | `3` | Unanswered approvals in a row that pause the whole run with a message (0 never pauses). |
 | `nearAi.agent.approvalTimeoutMinutes` | `15` | How long an approval in the main conversation waits before the run shows as paused on that step (it keeps waiting, up to a day). |
