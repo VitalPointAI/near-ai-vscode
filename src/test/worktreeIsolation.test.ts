@@ -119,6 +119,7 @@ test('isolation="worktree" in a workspace opened at a subfolder of the repositor
   const output = String(posted.find((message) => message.type === 'tool-end' && message.callId === 'a1')?.output);
   assert.match(output, /ran in: packages\/app\/\npackage\.json/, `the agent's shell starts in the worktree's packages/app: ${output}`);
   assert.match(system, /in its copy of the workspace folder, \S+packages[\\/]app\./, 'the agent is told which folder it works in');
+  assert.match(system, /Git repository: yes/, 'a subfolder of a worktree is inside a repository, so the agent is not told it is not one');
 });
 
 test('isolation="worktree" outside a git repository is refused with a clear reason', async () => {
