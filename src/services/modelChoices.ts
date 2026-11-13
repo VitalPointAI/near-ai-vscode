@@ -1,6 +1,9 @@
 // Model choices that follow the project (D-06, SYNC-06). "Apply recommended" and applying one role used to write the person's user settings, which no other
 // interface or computer ever sees. They are now kept in the project's state home (choices.json), and every reader of a model setting resolves in this
-// order: an explicit workspace or folder value, then the project choice, then the user value, then the default.
+// order: an explicit workspace or folder value, then the project choice, then the user value, then the default. The one exception is
+// nearAi.agent.roleModels, which resolves role by role (resolveRoleModels), so a choice for one role never freezes the others.
+//
+// A choice the person clears is kept as a cleared entry (value null, with its time), not deleted, so another computer's older copy cannot bring it back.
 //
 // No vscode here, so the tests run on plain node. The project choice is only a model id; the privacy and TEE-only checks still apply to the resolved
 // model when something is sent. Nothing is ever copied from the user's settings into the project without a click (importOffer only lists).
@@ -25,8 +28,12 @@ export type ProjectChoiceSetting = typeof PROJECT_CHOICE_SETTINGS[number];
 export type ChoiceValue = string | Record<string, string>;
 
 export interface ChoiceEntry { value: ChoiceValue; at: string; writer: string }
+/** An entry as stored and synced: a value, or null for a choice that was cleared (kept so the clear syncs). */
+export interface StoredChoice { value: ChoiceValue | null; at: string; writer: string }
+/** The choices that are in effect: cleared entries are not here. */
 export type ProjectChoiceValues = Partial<Record<ProjectChoiceSetting, ChoiceEntry>>;
-export interface ProjectChoices { version: 1; values: ProjectChoiceValues; importDeclined?: boolean }
+export type StoredChoiceValues = Partial<Record<ProjectChoiceSetting, StoredChoice>>;
+export interface ProjectChoices { version: 1; values: StoredChoiceValues; importDeclined?: boolean }
 
 /** The parts of vscode's `inspect()` result that matter here. */
 export interface InspectedSetting<T = unknown> { defaultValue?: T; globalValue?: T; workspaceValue?: T; workspaceFolderValue?: T }
@@ -72,52 +79,77 @@ function parseChoices(text: string): ProjectChoices {
   try { parsed = JSON.parse(text); } catch { return empty; }
   const file = parsed as { version?: unknown; values?: unknown; importDeclined?: unknown } | null;
   if (!file || typeof file !== 'object' || file.version !== 1 || !file.values || typeof file.values !== 'object' || Array.isArray(file.values)) return empty;
-  const values: ProjectChoiceValues = {};
+  const values: StoredChoiceValues = {};
   for (const [name, raw] of Object.entries(file.values as Record<string, unknown>)) {
     if (!SETTINGS.has(name)) continue;
     const setting = name as ProjectChoiceSetting;
     const entry = raw as { value?: unknown; at?: unknown; writer?: unknown } | null;
-    if (!entry || typeof entry !== 'object') continue;
+    if (!entry || typeof entry !== 'object' || typeof entry.at !== 'string') continue;
+    const writer = typeof entry.writer === 'string' ? entry.writer : '';
+    if (entry.value === null) {
+      if (!Number.isNaN(Date.parse(entry.at))) values[setting] = { value: null, at: entry.at, writer };
+      continue;
+    }
     const value = cleanValue(setting, entry.value);
-    if (value === undefined || typeof entry.at !== 'string') continue;
-    values[setting] = { value, at: entry.at, writer: typeof entry.writer === 'string' ? entry.writer : '' };
+    if (value === undefined) continue;
+    values[setting] = { value, at: entry.at, writer };
   }
   return { version: 1, values, ...(file.importDeclined === true ? { importDeclined: true } : {}) };
 }
 
-const cache = new Map<string, { stamp: string; choices: ProjectChoices }>();
+/** How long the settings readers trust the last look at the choices file before asking the file system again. */
+export const CHOICES_STAT_TTL_MS = 1000;
+
+/** The test seams and the cache window of a read. `ttlMs` 0 (the default) looks at the file every time. */
+export interface ReadOptions { ttlMs?: number; status?: (file: string) => { isFile(): boolean; size: number; mtimeMs: number; ino: number }; now?: () => number }
+
+const cache = new Map<string, { stamp: string; choices: ProjectChoices; checkedAt: number }>();
 
 /**
  * The whole choices file, read synchronously (the settings readers are synchronous). Cached by the file's modification time, size and inode, since every
- * write replaces the file. A missing, oversized or invalid file is an empty result; nothing is created.
+ * write replaces the file; with a `ttlMs` the file's status is not even asked for again inside that window (every write in this process clears it, so a
+ * change made here is seen at once). A missing, oversized or invalid file is an empty result; nothing is created. Cleared entries are included.
  */
-export function readChoicesFileSync(root: string | undefined): ProjectChoices {
+export function readChoicesFileSync(root: string | undefined, options: ReadOptions = {}): ProjectChoices {
   if (!root) return { version: 1, values: {} };
   const file = stateHomeFor(root).paths.choices;
+  const ttl = options.ttlMs ?? 0;
+  const clock = options.now ?? Date.now;
+  const cached = cache.get(file);
+  if (ttl > 0 && cached && clock() - cached.checkedAt >= 0 && clock() - cached.checkedAt < ttl) return cached.choices;
+  const empty = (): ProjectChoices => {
+    const choices: ProjectChoices = { version: 1, values: {} };
+    if (ttl > 0) cache.set(file, { stamp: '', choices, checkedAt: clock() }); else cache.delete(file);
+    return choices;
+  };
   try {
-    const info = statSync(file);
-    if (!info.isFile() || info.size > MAX_FILE_BYTES) return { version: 1, values: {} };
+    const info = (options.status ?? statSync)(file);
+    if (!info.isFile() || info.size > MAX_FILE_BYTES) return empty();
     const stamp = `${info.mtimeMs}:${info.size}:${info.ino}`;
-    const cached = cache.get(file);
-    if (cached?.stamp === stamp) return cached.choices;
+    if (cached?.stamp === stamp) { cache.set(file, { ...cached, checkedAt: clock() }); return cached.choices; }
     const choices = parseChoices(readFileSync(file, 'utf8'));
-    cache.set(file, { stamp, choices });
+    cache.set(file, { stamp, choices, checkedAt: clock() });
     return choices;
   } catch {
-    cache.delete(file);
-    return { version: 1, values: {} };
+    return empty();
   }
 }
 
-/** The project's choices by setting; empty when the project has none. */
-export function readProjectChoicesSync(root: string | undefined): ProjectChoiceValues {
-  return readChoicesFileSync(root).values;
+/** The project's choices in effect by setting; empty when the project has none. A cleared choice is not one. */
+export function readProjectChoicesSync(root: string | undefined, options: ReadOptions = {}): ProjectChoiceValues {
+  const values: ProjectChoiceValues = {};
+  for (const [setting, entry] of Object.entries(readChoicesFileSync(root, options).values)) {
+    if (entry && entry.value !== null) values[setting as ProjectChoiceSetting] = { value: entry.value, at: entry.at, writer: entry.writer };
+  }
+  return values;
 }
 
-/** The project's choice for one setting (either name form), or undefined. */
-export function projectChoiceFor(root: string | undefined, setting: string): ChoiceValue | undefined {
+const resolving = (options: ReadOptions): ReadOptions => ({ ttlMs: CHOICES_STAT_TTL_MS, ...options });
+
+/** The project's choice for one setting (either name form), or undefined. Read with the status cache: this is what every settings reader calls. */
+export function projectChoiceFor(root: string | undefined, setting: string, options: ReadOptions = {}): ChoiceValue | undefined {
   const name = choiceSettingName(setting);
-  return name ? readProjectChoicesSync(root)[name]?.value : undefined;
+  return name ? readProjectChoicesSync(root, resolving(options))[name]?.value : undefined;
 }
 
 /**
@@ -131,18 +163,34 @@ export function resolveSetting<T>(inspected: InspectedSetting<T> | undefined, pr
   return fallback;
 }
 
+/**
+ * nearAi.agent.roleModels, role by role: the defaults, then the user's value, then the project's choice, then the workspace value, then the folder value.
+ * A role a later layer does not name keeps the earlier layer's model, so a choice made for one role never freezes the others. Empty or non-string
+ * entries are ignored.
+ */
+export function resolveRoleModels(inspected: InspectedSetting | undefined, projectRoles: unknown, fallback: Record<string, string>): Record<string, string> {
+  const resolved: Record<string, string> = {};
+  for (const layer of [inspected?.defaultValue ?? fallback, inspected?.globalValue, projectRoles, inspected?.workspaceValue, inspected?.workspaceFolderValue]) {
+    if (!layer || typeof layer !== 'object' || Array.isArray(layer)) continue;
+    for (const [role, model] of Object.entries(layer as Record<string, unknown>)) {
+      if (typeof model === 'string' && model.trim() && role.trim()) resolved[role.trim()] = model.trim();
+    }
+  }
+  return resolved;
+}
+
 /** Where applying a model writes: the workspace when it already sets the value explicitly, otherwise the project's choices. Never user settings. */
 export function planApply(inspected: InspectedSetting | undefined): 'workspace' | 'project' {
   return inspected?.workspaceValue !== undefined || inspected?.workspaceFolderValue !== undefined ? 'workspace' : 'project';
 }
 
 /** The settings whose value right now comes from the project's choice: it has one, and the workspace does not set the value explicitly. */
-export function choicesInEffect(root: string | undefined, inspect: (setting: string) => InspectedSetting | undefined): ProjectChoiceSetting[] {
-  const values = readProjectChoicesSync(root);
+export function choicesInEffect(root: string | undefined, inspect: (setting: string) => InspectedSetting | undefined, options: ReadOptions = {}): ProjectChoiceSetting[] {
+  const values = readProjectChoicesSync(root, resolving(options));
   return PROJECT_CHOICE_SETTINGS.filter((setting) => values[setting] !== undefined && planApply(inspect(setting.slice('nearAi.'.length))) === 'project');
 }
 
-function later(a: ChoiceEntry, b: ChoiceEntry): boolean {
+function later(a: StoredChoice, b: StoredChoice): boolean {
   return a.at > b.at || (a.at === b.at && a.writer > b.writer);
 }
 
@@ -179,7 +227,7 @@ async function readFresh(root: string): Promise<ProjectChoices> {
 async function replace(root: string, choices: ProjectChoices): Promise<void> {
   const home = stateHomeFor(root);
   await mkdir(home.dir, { recursive: true, mode: 0o700 });
-  await writeFileAtomic(home.paths.choices, `${JSON.stringify(choices, null, 2)}\n`, { mode: 0o600 });
+  try { await writeFileAtomic(home.paths.choices, `${JSON.stringify(choices, null, 2)}\n`, { mode: 0o600 }); } finally { cache.delete(home.paths.choices); }
 }
 
 /**
@@ -195,7 +243,7 @@ export async function writeProjectChoice(root: string, setting: string, value: C
     const current = await readFresh(root);
     const existing = current.values[name];
     if (existing && sameValue(existing.value, clean)) return false;
-    const entry: ChoiceEntry = { value: clean, at: new Date().toISOString(), writer };
+    const entry: StoredChoice = { value: clean, at: new Date().toISOString(), writer };
     if (existing && later(existing, entry)) return false;
     await replace(root, { ...current, values: { ...current.values, [name]: entry } });
     return true;
@@ -206,11 +254,11 @@ export async function writeProjectChoice(root: string, setting: string, value: C
  * Merges choices that came from another computer into the project's file, keeping for each setting the later (at, writer) of the two and the entry's own
  * time and writer (an apply stamps nothing new). Returns whether the file changed. Unknown settings and malformed values are ignored.
  */
-export async function mergeProjectChoices(root: string, incoming: Record<string, ChoiceEntry>): Promise<boolean> {
-  const wanted: Array<[ProjectChoiceSetting, ChoiceEntry]> = [];
+export async function mergeProjectChoices(root: string, incoming: Record<string, StoredChoice>): Promise<boolean> {
+  const wanted: Array<[ProjectChoiceSetting, StoredChoice]> = [];
   for (const [name, entry] of Object.entries(incoming)) {
     const setting = choiceSettingName(name);
-    const value = setting ? cleanValue(setting, entry?.value) : undefined;
+    const value = setting ? (entry?.value === null ? null : cleanValue(setting, entry?.value)) : undefined;
     if (!setting || value === undefined || typeof entry.at !== 'string' || Number.isNaN(Date.parse(entry.at))) continue;
     wanted.push([setting, { value, at: entry.at, writer: typeof entry.writer === 'string' ? entry.writer : '' }]);
   }
@@ -231,16 +279,21 @@ export async function mergeProjectChoices(root: string, incoming: Record<string,
   });
 }
 
-/** Removes the project's choice for one setting (an undo of a first-time choice); true when there was one. Other settings are kept. */
-export async function removeProjectChoice(root: string, setting: string, _writer: string): Promise<boolean> {
+/**
+ * Clears the project's choice for one setting (the undo of a first-time choice, and "Use my settings"); true when there was one. The entry is kept as a
+ * cleared entry with its time, so the clear syncs and another computer's older copy cannot bring the choice back. Other settings are kept.
+ */
+export async function removeProjectChoice(root: string, setting: string, writer: string): Promise<boolean> {
   const name = requireSetting(setting);
   if (!(await stateHomeFor(root).exists())) return false;
   return serialised(root, async () => {
     const current = await readFresh(root);
-    if (!current.values[name]) return false;
-    const values = { ...current.values };
-    delete values[name];
-    await replace(root, { ...current, values });
+    const existing = current.values[name];
+    if (!existing || existing.value === null) return false;
+    // A deliberate clear is later than the choice it clears, even inside one millisecond.
+    const now = new Date();
+    const at = now.toISOString() > existing.at ? now.toISOString() : new Date(Date.parse(existing.at) + 1).toISOString();
+    await replace(root, { ...current, values: { ...current.values, [name]: { value: null, at, writer } } });
     return true;
   });
 }

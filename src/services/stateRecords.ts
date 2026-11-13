@@ -9,7 +9,7 @@ import { mergeRecordSets } from '../domain/state/merge';
 import { makeRecord, revOf, type RecordKind, type StateRecord } from '../domain/state/records';
 import type { ObjectEntry } from '../domain/state/objects';
 import { unionEntries, type ThreadEntry } from '../domain/state/threadEntries';
-import { mergeProjectChoices, readChoicesFileSync, type ChoiceEntry } from './modelChoices';
+import { mergeProjectChoices, readChoicesFileSync, type StoredChoice } from './modelChoices';
 import { parseRunMarker, type RunMarker, type RunState } from './runMarkers';
 import { mergeSpendLines, parseSpendLines, spendFileText } from './spendMirror';
 import { writeFileAtomic, type ProjectStateHome } from './stateHome';
@@ -498,12 +498,12 @@ async function applyComparisons(home: ProjectStateHome, records: readonly StateR
 }
 
 async function applyChoices(home: ProjectStateHome, records: readonly StateRecord[]): Promise<number> {
-  const incoming: Record<string, ChoiceEntry> = {};
+  const incoming: Record<string, StoredChoice> = {};
   for (const record of records) {
     if (record.kind !== 'choice' || !isObject(record.body)) continue;
     const { value, at, writer } = record.body;
     if (typeof at !== 'string') continue;
-    incoming[record.id] = { value: value as ChoiceEntry['value'], at, writer: typeof writer === 'string' ? writer : '' };
+    incoming[record.id] = { value: value as StoredChoice['value'], at, writer: typeof writer === 'string' ? writer : '' };
   }
   return Object.keys(incoming).length && await mergeProjectChoices(home.root, incoming) ? 1 : 0;
 }

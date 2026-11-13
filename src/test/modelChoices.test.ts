@@ -1,11 +1,14 @@
 import assert from 'node:assert/strict';
+import { statSync } from 'node:fs';
 import { mkdtemp, readdir, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { comparisonStoreFor, ComparisonStore } from '../benchmark/store';
 import type { ResultRow, SavedRun } from '../benchmark/results';
-import { declineImport, importOffer, PROJECT_CHOICE_SETTINGS, planApply, projectChoiceFor, projectUndoFor, readChoicesFileSync, readProjectChoicesSync, removeProjectChoice, resolveSetting, undoProjectChoice, writeProjectChoice, type ProjectUndo } from '../services/modelChoices';
+import { choicesInEffect, CHOICES_STAT_TTL_MS, declineImport, importOffer, mergeProjectChoices, PROJECT_CHOICE_SETTINGS, planApply, projectChoiceFor, projectUndoFor, readChoicesFileSync, readProjectChoicesSync, removeProjectChoice, resolveRoleModels, resolveSetting, undoProjectChoice, writeProjectChoice, type ProjectUndo } from '../services/modelChoices';
+import { roleUpdate, type RoleOption } from '../services/modelRoles';
+import { DEFAULT_ROLE_MODELS } from '../gsd/library';
 import { stateHomeFor } from '../services/stateHome';
 import { tempProject } from './helpers/stateFixtures';
 
@@ -171,7 +174,7 @@ test('the settings readers use the project choice unless the workspace sets the 
     assert.equal(settings.readSafetyModel(tiers), 'project-safety');
     assert.equal(settings.readAgentModels().visionModel, 'project-vision');
     assert.equal(settings.readAgentModels().imageModel, 'black-forest-labs/FLUX.2-klein-4B', 'nothing set anywhere: the default');
-    assert.deepEqual(settings.readRoleModels(), { 'gsd-planner': 'project-planner' });
+    assert.deepEqual(settings.readRoleModels(), { ...DEFAULT_ROLE_MODELS, 'gsd-planner': 'project-planner' }, 'role by role: the project names one role, the rest keep the defaults');
   } finally {
     nodeModule._load = originalLoad;
   }
@@ -204,7 +207,7 @@ test('planApply: the workspace when it sets the value explicitly (workspace or f
   assert.equal(planApply(undefined), 'project');
 });
 
-test('applying then undoing: a previous project choice comes back, a first-time choice is removed, and no user setting is involved', async () => {
+test('applying then undoing: a previous project choice comes back, a first-time choice is cleared, and no user setting is involved', async () => {
   const root = await tempProject();
   const setting = 'nearAi.agent.deepModel';
   // First time: there was no project choice, so undo removes it.
@@ -221,8 +224,9 @@ test('applying then undoing: a previous project choice comes back, a first-time 
   assert.equal(projectChoiceFor(root, setting), 'm-1', 'undo restores exactly what was there');
   await undoProjectChoice(first, 'edA.1');
   assert.equal(projectChoiceFor(root, setting), undefined, 'undoing a first-time choice removes it');
-  const file = JSON.parse(await readFile(stateHomeFor(root).paths.choices, 'utf8')) as { values: Record<string, unknown> };
-  assert.deepEqual(file.values, {}, 'choices.json no longer has that setting');
+  // Plan 27-33: the undo is kept as a cleared entry, so another computer's older copy cannot bring the choice back.
+  const file = JSON.parse(await readFile(stateHomeFor(root).paths.choices, 'utf8')) as { values: Record<string, { value: unknown }> };
+  assert.deepEqual(Object.entries(file.values).map(([name, entry]) => [name, entry.value]), [['nearAi.agent.deepModel', null]], 'choices.json keeps a cleared entry for that setting');
 });
 
 test('undoing a role map unwinds several changes in reverse order and keeps other settings', async () => {
@@ -305,4 +309,85 @@ test("'Use for this project' writes each offered value, and then there is nothin
   for (const candidate of offer) await writeProjectChoice(root, candidate.setting, candidate.value, 'edA.1');
   assert.equal(projectChoiceFor(root, 'defaultModel'), 'user-main');
   assert.deepEqual(importOffer(inspected, readChoicesFileSync(root)), []);
+});
+
+// ---- one role writes one role (plan 27-33, Task 1) ----
+
+const plannerOption = { id: 'role:gsd-planner', label: 'Planner (gsd-planner)', group: 'Agent roles', setting: 'agent.roleModels' } as RoleOption;
+const verifierOption = { id: 'role:gsd-verifier', label: 'Verifier (gsd-verifier)', group: 'Agent roles', setting: 'agent.roleModels' } as RoleOption;
+const executorOption = { id: 'role:gsd-executor', label: 'Executor (gsd-executor)', group: 'Agent roles', setting: 'agent.roleModels' } as RoleOption;
+
+test('tracer: putting a model into one role writes only that role into the project, and the others keep following the user setting', async () => {
+  const root = await tempProject();
+  const user = { 'gsd-executor': 'user-y' };
+  const inspect = (globalValue: Record<string, string>) => ({ defaultValue: DEFAULT_ROLE_MODELS, globalValue });
+  // The apply starts from the project's own layer (empty), never from the resolved roles.
+  const layer = (projectChoiceFor(root, 'agent.roleModels') ?? {}) as Record<string, string>;
+  const update = roleUpdate(plannerOption, 'model-x', layer);
+  assert.deepEqual(update, { setting: 'agent.roleModels', value: { 'gsd-planner': 'model-x' } });
+  assert.equal(await writeProjectChoice(root, 'nearAi.agent.roleModels', update.value as Record<string, string>, 'edA.1'), true);
+  assert.deepEqual(projectChoiceFor(root, 'agent.roleModels'), { 'gsd-planner': 'model-x' }, 'exactly the one role');
+  const resolved = resolveRoleModels(inspect(user), projectChoiceFor(root, 'agent.roleModels'), DEFAULT_ROLE_MODELS);
+  assert.equal(resolved['gsd-planner'], 'model-x');
+  assert.equal(resolved['gsd-executor'], 'user-y');
+  for (const [role, model] of Object.entries(DEFAULT_ROLE_MODELS)) if (role !== 'gsd-planner' && role !== 'gsd-executor') assert.equal(resolved[role], model, `${role} keeps its default`);
+  // The person changes their own setting later: it still takes effect for the roles the project did not choose.
+  assert.equal(resolveRoleModels(inspect({ 'gsd-executor': 'user-z' }), projectChoiceFor(root, 'agent.roleModels'), DEFAULT_ROLE_MODELS)['gsd-executor'], 'user-z');
+});
+
+test('when the workspace already sets roleModels, the apply extends only the workspace value and nothing goes to the project', async () => {
+  const root = await tempProject();
+  const workspaceValue = { 'gsd-verifier': 'model-w' };
+  assert.equal(planApply({ workspaceValue }), 'workspace');
+  assert.deepEqual(roleUpdate(plannerOption, 'model-x', workspaceValue), { setting: 'agent.roleModels', value: { 'gsd-verifier': 'model-w', 'gsd-planner': 'model-x' } });
+  assert.equal(projectChoiceFor(root, 'agent.roleModels'), undefined, 'nothing was written to the project');
+  assert.equal(await stateHomeFor(root).exists(), false);
+});
+
+test('apply recommended for three roles writes a project roleModels holding only those roles, plus what the project had chosen before', async () => {
+  const root = await tempProject();
+  await writeProjectChoice(root, 'nearAi.agent.roleModels', { 'gsd-debugger': 'earlier' }, 'edA.1');
+  let layer = { ...(projectChoiceFor(root, 'agent.roleModels') as Record<string, string>) };
+  for (const [option, model] of [[plannerOption, 'm-1'], [verifierOption, 'm-2'], [executorOption, 'm-3']] as const) {
+    const update = roleUpdate(option, model, layer);
+    assert.equal(await writeProjectChoice(root, 'nearAi.agent.roleModels', update.value as Record<string, string>, 'edA.1'), true);
+    layer = { ...(update.value as Record<string, string>) };
+  }
+  assert.deepEqual(projectChoiceFor(root, 'agent.roleModels'), { 'gsd-debugger': 'earlier', 'gsd-planner': 'm-1', 'gsd-verifier': 'm-2', 'gsd-executor': 'm-3' });
+});
+
+test('resolveRoleModels resolves role by role: default, user, project, workspace, folder; empty and non-string entries are ignored', () => {
+  const resolved = resolveRoleModels(
+    { defaultValue: { a: 'd-a', b: 'd-b', c: 'd-c', d: 'd-d', e: 'd-e' }, globalValue: { b: 'u-b', c: 'u-c', d: 'u-d', e: 'u-e' }, workspaceValue: { d: 'w-d', e: 'w-e' }, workspaceFolderValue: { e: 'f-e' } },
+    { c: 'p-c', d: 'p-d', e: 'p-e' },
+    { never: 'used' }
+  );
+  assert.deepEqual(resolved, { a: 'd-a', b: 'u-b', c: 'p-c', d: 'w-d', e: 'f-e' });
+  assert.deepEqual(resolveRoleModels({ globalValue: { a: '  ', b: 5, c: null, d: ' ok ', '': 'x' } as never }, undefined, { z: 'fallback' }), { z: 'fallback', d: 'ok' }, 'the fallback stands in when there is no default; junk is dropped');
+  assert.deepEqual(resolveRoleModels({ globalValue: 'not an object' as never, workspaceValue: ['x'] as never }, 'nope', {}), {});
+  assert.deepEqual(resolveRoleModels(undefined, undefined, { a: 'x' }), { a: 'x' });
+});
+
+test('the settings readers stat choices.json at most once a second, and a write or a clear here is seen at once', async () => {
+  const root = await tempProject();
+  await writeProjectChoice(root, 'nearAi.agent.fastModel', 'm-fast', 'edA.1');
+  const file = stateHomeFor(root).paths.choices;
+  let stats = 0;
+  let clock = 1_000_000;
+  const options = { status: (path: string) => { stats += 1; return statSync(path); }, now: () => clock };
+  for (let n = 0; n < 50; n += 1) for (const setting of PROJECT_CHOICE_SETTINGS) projectChoiceFor(root, setting, options);
+  assert.equal(stats, 1, '450 resolutions inside one second looked at the file once');
+  assert.equal(projectChoiceFor(root, 'agent.fastModel', options), 'm-fast');
+  clock += CHOICES_STAT_TTL_MS + 1;
+  projectChoiceFor(root, 'agent.fastModel', options);
+  assert.equal(stats, 2, 'after the window it looks again');
+  // A write in this process is seen at once, with no wait for the window.
+  assert.equal(await writeProjectChoice(root, 'nearAi.agent.fastModel', 'm-newer', 'edA.1'), true);
+  assert.equal(projectChoiceFor(root, 'agent.fastModel', options), 'm-newer');
+  assert.equal(await removeProjectChoice(root, 'nearAi.agent.fastModel', 'edA.1'), true);
+  assert.equal(projectChoiceFor(root, 'agent.fastModel', options), undefined);
+  assert.deepEqual(choicesInEffect(root, () => ({}), options), []);
+  assert.equal(await mergeProjectChoices(root, { 'nearAi.defaultModel': { value: 'm-merged', at: '2999-01-01T00:00:00.000Z', writer: 'edB.1' } }), true);
+  assert.equal(projectChoiceFor(root, 'defaultModel', options), 'm-merged');
+  assert.ok(file.endsWith('choices.json'));
 });

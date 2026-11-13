@@ -13,7 +13,7 @@ import type { AuthService } from './auth';
 import { providerErrorMessage } from './chatBridge';
 import { isEmergencyStopped, onDidChangeEmergencyStop } from './emergencyStop';
 import { catalogEntries, comparisonPageHtml, defaultSelection, estimateView, historyEntries, leaderboardRows, recommendationView, retestView, parseComparisonMessage, reportView, selectionProblem, taskSetsView, type PageState, type Selection } from './modelComparisonPage';
-import { declineImport, importOffer, PROJECT_CHOICE_SETTINGS, planApply, projectUndoFor, readChoicesFileSync, undoProjectChoice, writeProjectChoice, type ChoiceValue, type ProjectUndo } from './modelChoices';
+import { declineImport, importOffer, PROJECT_CHOICE_SETTINGS, planApply, projectChoiceFor, projectUndoFor, readChoicesFileSync, undoProjectChoice, writeProjectChoice, type ChoiceValue, type ProjectUndo } from './modelChoices';
 import { privacyWarning, roleAppliedText, roleOptions, roleUpdate, type RoleOption } from './modelRoles';
 import type { ModelInfo, UsageMetadata } from './nearAiClient';
 import { activeProvider, clientFor, type ActiveProvider } from './providerCache';
@@ -45,6 +45,16 @@ type UndoEntry = { setting: string; previous: unknown; target: vscode.Configurat
 const undo = new Map<string, UndoEntry[]>();
 
 const projectRootOf = () => vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+
+/**
+ * The roles of the layer a role is written to: the project's own roleModels choice, or the workspace value when the workspace sets it. Only that layer is
+ * extended, so every other role keeps following the person's settings and the defaults (REVIEW: writing the resolved roles froze them all).
+ */
+function layerRolesFor(where: 'workspace' | 'project', inspected: { workspaceValue?: unknown } | undefined, root: string | undefined): Record<string, string> {
+  const value = where === 'workspace' ? inspected?.workspaceValue : projectChoiceFor(root, 'agent.roleModels');
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  return Object.fromEntries(Object.entries(value as Record<string, unknown>).filter((entry): entry is [string, string] => typeof entry[1] === 'string' && entry[1].trim().length > 0));
+}
 
 /** The project's state home first (so a comparison made in another editor shows here), then this editor's own folder (D-06). */
 const storeFor = (context: vscode.ExtensionContext) => comparisonStoreFor(context.globalStorageUri.fsPath, vscode.workspace.workspaceFolders?.[0]?.uri.fsPath);
@@ -297,7 +307,7 @@ async function applyRole(context: vscode.ExtensionContext, auth: AuthService, mo
   // D-06: written to the workspace only when it already sets the value explicitly; otherwise it becomes the project's choice, which every interface and
   // computer reads. The person's user settings are never written from here.
   const where = planApply(inspected);
-  const update = roleUpdate(option, model, readRoleModels());
+  const update = roleUpdate(option, model, option.id.startsWith('role:') ? layerRolesFor(where, inspected, projectRootOf()) : {});
   const token = randomBytes(8).toString('hex');
   if (where === 'workspace') {
     await configuration.update(update.setting, update.value, vscode.ConfigurationTarget.Workspace);
@@ -336,8 +346,9 @@ async function applyRecommended(context: vscode.ExtensionContext, auth: AuthServ
   const applied: string[] = [];
   const skipped: string[] = [];
   const undoEntries: UndoEntry[] = [];
-  const roleModels = readRoleModels();
   const root = projectRootOf();
+  // The roles of the layer being written, extended as each role is applied (every role goes to the same layer).
+  let layerRoles: Record<string, string> | undefined;
   let wroteProject = false;
   for (const choice of choices) {
     // 0.4.19 review: the cyber recommendation is NOT the chat model. Mapping it to `main` rewrote the ordinary chat model with an abliterated one
@@ -350,7 +361,8 @@ async function applyRecommended(context: vscode.ExtensionContext, auth: AuthServ
     if (!option || !entry || entry.blocked) { skipped.push(`${'tier' in choice ? choice.tier : choice.role} (${choice.model})`); continue; }
     const inspected = configuration.inspect(option.setting);
     const where = planApply(inspected);
-    const update = roleUpdate(option, choice.model, roleModels);
+    if (option.id.startsWith('role:')) layerRoles ??= layerRolesFor(where, inspected, root);
+    const update = roleUpdate(option, choice.model, option.id.startsWith('role:') ? layerRoles ?? {} : {});
     if (where === 'project' && !root) { skipped.push(`${'tier' in choice ? choice.tier : choice.role} (no project folder is open)`); continue; }
     // The undo entry is recorded BEFORE the write, so a write that throws half way leaves every change that did happen undoable (0.4.19 review: entries were
     // collected after the loop, so a failure left changes applied with no way back).
@@ -362,7 +374,7 @@ async function applyRecommended(context: vscode.ExtensionContext, auth: AuthServ
       if (where === 'workspace') await configuration.update(update.setting, update.value, vscode.ConfigurationTarget.Workspace);
       else if (await writeProjectChoice(root!, update.setting, update.value as ChoiceValue, editorWriter(context.globalState))) wroteProject = true;
       else { undoEntries.splice(undoEntries.indexOf(undoEntry), 1); continue; }
-      if (update.setting === 'agent.roleModels') Object.assign(roleModels, update.value as Record<string, string>);
+      if (update.setting === 'agent.roleModels') layerRoles = { ...(update.value as Record<string, string>) };
       applied.push(`${option.label} to ${choice.model}`);
     } catch (error) {
       // This one did not happen after all, so it is not undone; the ones already written still are.

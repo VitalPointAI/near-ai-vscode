@@ -70,10 +70,13 @@ export function privacyWarning(candidate: RolePrivacy, option: RoleOption): stri
   return `${option.label} now uses a private model (${option.current}). This model ${candidate === 'forwarded' ? 'is forwarded outside NEAR’s TEE, so what that role sees is not private' : 'has unknown privacy'}.`;
 }
 
-/** The setting to write to give `option` the model; roleModels keeps every other role as it is. */
-export function roleUpdate(option: RoleOption, model: string, roleModels: Record<string, string>): { setting: string; value: string | Record<string, string> } {
+/**
+ * The setting to write to give `option` the model. For an agent role, `layerRoles` is the roles of the layer being written (the project's own choice, or
+ * the workspace value), never the resolved roles of every layer: the role is added to that layer and every other role keeps following the person's settings.
+ */
+export function roleUpdate(option: RoleOption, model: string, layerRoles: Record<string, string>): { setting: string; value: string | Record<string, string> } {
   if (!option.id.startsWith('role:')) return { setting: option.setting, value: model };
-  return { setting: option.setting, value: { ...roleModels, [option.id.slice(5)]: model } };
+  return { setting: option.setting, value: { ...layerRoles, [option.id.slice(5)]: model } };
 }
 
 /** The confirmation after applying one model: a project choice (the usual case) or an explicit workspace setting. */

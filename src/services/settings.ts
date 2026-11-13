@@ -6,7 +6,7 @@ import { ActionPolicyMode } from '../domain/policy';
 import { clampLiveConversations, LIVE_CONVERSATIONS_DEFAULT } from '../domain/state/retention';
 import { isEmergencyStopped } from './emergencyStop';
 import { DEFAULT_RULES, PermissionRules } from '../agent/permissions';
-import { projectChoiceFor, resolveSetting, type InspectedSetting } from './modelChoices';
+import { projectChoiceFor, resolveRoleModels, resolveSetting, type InspectedSetting } from './modelChoices';
 
 const POLICY_MODES: ActionPolicyMode[] = ['approve-risky', 'mostly-autonomous', 'auto', 'fully-autonomous'];
 
@@ -57,13 +57,10 @@ export function readAgentRules(): PermissionRules {
 }
 
 /** NEAR models for Open-GSD's model tiers (opus → deep, sonnet → standard, haiku → fast). */
-/** Model or tier per agent role, defaulting research and mapping roles to the fast tier. */
+/** Model or tier per agent role, defaulting research and mapping roles to the fast tier. Resolved role by role: default, user, the project's choice, workspace, folder. */
 export function readRoleModels(): Record<string, string> {
   const configuration = vscode.workspace.getConfiguration('nearAi');
-  const projectRoles = projectChoiceFor(projectRoot(), 'agent.roleModels');
-  const value = resolveSetting(inspectedSetting(configuration, 'agent.roleModels'), typeof projectRoles === 'object' ? projectRoles : undefined, configuration.get<unknown>('agent.roleModels', DEFAULT_ROLE_MODELS));
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return { ...DEFAULT_ROLE_MODELS };
-  return Object.fromEntries(Object.entries(value as Record<string, unknown>).filter((entry): entry is [string, string] => typeof entry[1] === 'string' && entry[1].trim().length > 0).map(([role, model]) => [role.trim(), model.trim()]));
+  return resolveRoleModels(inspectedSetting(configuration, 'agent.roleModels'), projectChoiceFor(projectRoot(), 'agent.roleModels'), DEFAULT_ROLE_MODELS);
 }
 
 export function readModelTiers(): { deep: string; standard: string; fast: string } {
