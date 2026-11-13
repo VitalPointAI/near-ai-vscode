@@ -1,11 +1,11 @@
 // The separate "push your code" offer (D-14): the file list, the secret check by file name and by content, the person's click for every step, and
 // no force. Real git, local bare repositories only; nothing contacts GitHub.
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
-import { isSecretFileName, planCodePush, pushProjectCode, scanHistory } from '../services/codePushCheck';
+import { isSecretFileName, planCodePush, pushProjectCode, scanHistory, SHARED_PROJECT_FILES } from '../services/codePushCheck';
 import type { CodePushSummary, CodePushUi } from '../services/codePushCheck';
 import { bareRemote, fixtureGit, hermeticRunner, tempDirectory } from './helpers/gitFixtures';
 
@@ -213,6 +213,100 @@ test('NEAR AI per-person records stay on this computer: left off the list, named
   const status = fixtureGit(dir, ['status', '--porcelain']);
   assert.ok(status.includes(`?? ${NEAR_AI}/auth-profiles.json`) && status.includes(`?? ${NEAR_AI}/activity.json`), status);
   assert.equal(existsSync(path.join(dir, '.gitignore')), false, 'nothing was written to .gitignore for them');
+});
+
+/** Every .ts file under src/ except the tests. */
+function sourceFiles(directory: string): string[] {
+  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const full = path.join(directory, entry.name);
+    if (entry.isDirectory()) return entry.name === 'test' ? [] : sourceFiles(full);
+    return entry.name.endsWith('.ts') ? [full] : [];
+  });
+}
+
+/** The first name after .planning/.near-ai/ in each place the extension's source names a file there, in both forms. */
+function namesTheExtensionWrites(): Set<string> {
+  const names = new Set<string>();
+  for (const file of sourceFiles(path.join(ROOT, 'src'))) {
+    const text = readFileSync(file, 'utf8');
+    for (const match of text.matchAll(/'\.planning',\s*'\.near-ai',\s*'([^']+)'/g)) names.add(match[1]!);
+    for (const match of text.matchAll(/\.planning\/\.near-ai\/([A-Za-z0-9][A-Za-z0-9._-]*)/g)) names.add(match[1]!);
+  }
+  return names;
+}
+
+test('the allowlist is in step with the source: no stale entry, and every other file the extension writes there is held back', async () => {
+  const written = namesTheExtensionWrites();
+  assert.ok(written.size >= 10, `found the names in the source: ${[...written].join(', ')}`);
+  for (const shared of SHARED_PROJECT_FILES) assert.ok(written.has(shared), `${shared} is on the allowlist but the extension no longer writes it`);
+  const others = [...written].filter((name) => !SHARED_PROJECT_FILES.includes(name));
+  assert.ok(others.includes('auth-profiles.json') && others.includes('activity.json'));
+  const files: Record<string, string> = { 'a.txt': 'a\n' };
+  for (const name of others) files[`${NEAR_AI}/${name.includes('.') ? name : `${name}/x.bin`}`] = 'record\n';
+  const { dir } = await project(files);
+  const plan = await planCodePush(dir, hermeticRunner());
+  for (const name of others) {
+    const held = plan.heldBack.some((file) => file === `${NEAR_AI}/${name}` || file.startsWith(`${NEAR_AI}/${name}/`));
+    assert.ok(held, `${name} is not held back`);
+  }
+  assert.deepEqual(plan.files, ['a.txt']);
+});
+
+test('a file NEAR AI does not know yet, and a nested one, are held back (the allowlist fails closed)', async () => {
+  const { dir } = await project({
+    [`${NEAR_AI}/new-ledger.json`]: '{}\n',
+    [`${NEAR_AI}/multimodal/x.bin`]: 'bytes\n',
+    [`${NEAR_AI}/sub/team.md`]: '# not the shared one\n',
+    [`${NEAR_AI}/team.md`]: '# Team\n'
+  });
+  const plan = await planCodePush(dir, hermeticRunner());
+  assert.deepEqual(plan.heldBack, [`${NEAR_AI}/multimodal/x.bin`, `${NEAR_AI}/new-ledger.json`, `${NEAR_AI}/sub/team.md`]);
+  assert.deepEqual(plan.files, [`${NEAR_AI}/team.md`]);
+});
+
+test('a file named like a shared one elsewhere, or beside a look-alike folder, is ordinary code', async () => {
+  const { dir } = await project({
+    'docs/team.md': '# docs\n',
+    '.planning/team.md': '# planning\n',
+    '.planning/auth-profiles.json': '{}\n',
+    '.planning/.near-ai-old/x.json': '{}\n'
+  });
+  const plan = await planCodePush(dir, hermeticRunner());
+  assert.deepEqual(plan.heldBack, []);
+  assert.deepEqual(plan.files, ['.planning/.near-ai-old/x.json', '.planning/auth-profiles.json', '.planning/team.md', 'docs/team.md']);
+});
+
+test('a NEAR AI record git already tracks: a public repository is blocked with advice to remove it from git, nothing is committed or pushed', async () => {
+  const { dir, bare } = await project({ 'a.txt': 'a\n', [`${NEAR_AI}/auth-profiles.json`]: '{"organization":"Acme"}\n' }, { commit: [`${NEAR_AI}/auth-profiles.json`] });
+  const ui = new FakeUi({ push: true });
+  const before = fixtureGit(dir, ['rev-list', '--all', '--count']).trim();
+  const result = await pushProjectCode(dir, 'origin', hermeticRunner(), { ui, visibility: 'public' });
+  assert.equal(result.status, 'blocked');
+  assert.ok(result.message.includes(`${NEAR_AI}/auth-profiles.json`), result.message);
+  assert.match(result.message, /git rm --cached/);
+  assert.match(result.message, /^[A-Z][^\n]*\.$/, 'one plain sentence');
+  assert.equal(ui.summaries.length, 0);
+  assert.equal(fixtureGit(dir, ['rev-list', '--all', '--count']).trim(), before, 'nothing was committed');
+  assert.equal(fixtureGit(bare, ['for-each-ref']).trim(), '');
+});
+
+test('a NEAR AI record git already tracks on a private or unknown repository is named in the summary as going up; declining pushes nothing, accepting pushes', async () => {
+  for (const visibility of ['private', 'unknown'] as const) {
+    const declined = await project({ 'a.txt': 'a\n', [`${NEAR_AI}/auth-profiles.json`]: '{"organization":"Acme"}\n' }, { commit: [`${NEAR_AI}/auth-profiles.json`] });
+    const noUi = new FakeUi({ push: false });
+    const stopped = await pushProjectCode(declined.dir, 'origin', hermeticRunner(), { ui: noUi, visibility });
+    assert.equal(stopped.status, 'declined');
+    const note = noUi.summaries[0]?.notes.find((text) => text.includes('already saved in git'));
+    assert.ok(note && note.includes('auth-profiles.json'), noUi.summaries[0]?.notes.join('|'));
+    assert.ok(noUi.summaries[0]?.files.includes(`${NEAR_AI}/auth-profiles.json`), 'it is on the list because it goes up');
+    assert.equal(fixtureGit(declined.bare, ['for-each-ref']).trim(), '');
+
+    const accepted = await project({ 'a.txt': 'a\n', [`${NEAR_AI}/auth-profiles.json`]: '{"organization":"Acme"}\n' }, { commit: [`${NEAR_AI}/auth-profiles.json`] });
+    const yesUi = new FakeUi({ push: true });
+    const pushed = await pushProjectCode(accepted.dir, 'origin', hermeticRunner(), { ui: yesUi, visibility });
+    assert.equal(pushed.status, 'pushed', pushed.message);
+    assert.ok(fixtureGit(accepted.bare, ['ls-tree', '-r', '--name-only', 'main']).includes('auth-profiles.json'));
+  }
 });
 
 const IDENTITY = ['-c', 'user.name=Pat Person', '-c', 'user.email=pat@example.test'];
