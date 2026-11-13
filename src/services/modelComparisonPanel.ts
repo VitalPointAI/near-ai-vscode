@@ -6,7 +6,7 @@ import * as vscode from 'vscode';
 import { layoutProbeAsset, registerLayoutProbe, sharedMedia } from './layoutProbe';
 import { estimateComparisonCost, latestResults, performanceTrend, planComparison, reusedRows, runIdFor, savedModel, type SavedRun } from '../benchmark/results';
 import { runComparison } from '../benchmark/runner';
-import { ComparisonStore } from '../benchmark/store';
+import { comparisonStoreFor } from '../benchmark/store';
 import { loadBenchmarkTasks, tasksFor, type BenchmarkTask } from '../benchmark/tasks';
 import { spendAccountOf } from './agentSession';
 import type { AuthService } from './auth';
@@ -40,7 +40,8 @@ let tasksLoaded: Promise<BenchmarkTask[]> | undefined;
  */
 const undo = new Map<string, Array<{ setting: string; previous: unknown; target: vscode.ConfigurationTarget; label: string }>>();
 
-const storeFor = (context: vscode.ExtensionContext) => new ComparisonStore(path.join(context.globalStorageUri.fsPath, 'evals'));
+/** The project's state home first (so a comparison made in another editor shows here), then this editor's own folder (D-06). */
+const storeFor = (context: vscode.ExtensionContext) => comparisonStoreFor(context.globalStorageUri.fsPath, vscode.workspace.workspaceFolders?.[0]?.uri.fsPath);
 const benchmarkTasks = () => (tasksLoaded ??= loadBenchmarkTasks().catch((error: unknown) => { tasksLoaded = undefined; throw error; }));
 
 export function registerModelComparison(context: vscode.ExtensionContext, auth: AuthService): void {

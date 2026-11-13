@@ -9,7 +9,7 @@ import { slugify, TeamLibrary } from '../agent/teams';
 import { AuthService } from './auth';
 import { attachTeamStudio, optimiseTarget, StudioTarget, teamStudioHtml, versionLabel } from './teamStudioPage';
 import { ChatPrefill, gatherDirectoryInput } from './toolsPage';
-import { ComparisonStore } from '../benchmark/store';
+import { comparisonStoreFor } from '../benchmark/store';
 import { loadBenchmarkTasks } from '../benchmark/tasks';
 import { leaderboardRows, suggestForTeam } from './modelComparisonPage';
 import { builderPrompt, parseProposal, TEAM_BUILDER_PROMPT } from '../agent/teamBuilder';
@@ -52,7 +52,7 @@ async function optimisationSetup(auth: AuthService, context: vscode.ExtensionCon
   if (!active) return undefined;
   const tiers = readModelTiers();
   const tasks = await loadBenchmarkTasks();
-  const runs = await new ComparisonStore(path.join(context.globalStorageUri.fsPath, 'evals')).list();
+  const runs = await comparisonStoreFor(context.globalStorageUri.fsPath, vscode.workspace.workspaceFolders?.[0]?.uri.fsPath).list();
   const board = leaderboardRows(runs, tasks, active.models, [], Date.now());
   // 0.4.19 review: the three tier models were listed FIRST and the list then sliced to three, so the two best measured models were never tested, while the
   // comment claimed they were. The measured models now come first, and the tier models fill the remaining places.
@@ -179,7 +179,7 @@ export async function openTeamStudio(context: vscode.ExtensionContext, auth: Aut
     onStop: (listener) => onDidChangeEmergencyStop((engaged) => { if (engaged) listener(); }),
     suggestModels: async (members) => {
       const tasks = await loadBenchmarkTasks();
-      const runs = await new ComparisonStore(path.join(context.globalStorageUri.fsPath, 'evals')).list();
+      const runs = await comparisonStoreFor(context.globalStorageUri.fsPath, vscode.workspace.workspaceFolders?.[0]?.uri.fsPath).list();
       if (!runs.length) return [];
       // The catalogue is only needed for prices and privacy, and a failure there must not block the suggestion.
       const active = await activeProvider(vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '', auth).catch(() => undefined);
