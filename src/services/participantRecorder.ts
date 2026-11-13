@@ -83,8 +83,21 @@ function threadIdOf(turn: ParticipantTurnLike): string | undefined {
   return isThreadId(id) ? id : undefined;
 }
 
+/** One entry still to be chained into a thread: its role and body. */
+export interface SeedItem { role: ThreadRole; body: unknown }
+
+/** The notice kept after a reply that was cut off, cancelled or failed. */
+export const PARTICIPANT_STOPPED_NOTICE = 'The reply stopped before it finished.';
+
+/** The earlier turns of a session that began before this version recorded anything, as entries. */
+export function seedEntries(_turns: readonly ParticipantTurnLike[]): SeedItem[] {
+  return [];
+}
+
 export interface ResolvedThread {
   threadId: string;
+  /** Set only for a session that began before turns were recorded: its earlier turns, to be stored once with the next turn. */
+  seed?: SeedItem[];
 }
 
 /**
@@ -106,6 +119,12 @@ export interface ParticipantTurnInput {
   /** The reply exactly as streamed. */
   reply: string;
   model: string;
+  /** The reply was cut off, cancelled or failed: a notice says so after what was streamed. */
+  stopped?: boolean;
+  /** A /gsd-* command typed in the Chat view, as its bare name (`plan-phase`): kept as a notice, not as a message the model sees. */
+  command?: string;
+  /** From resolveParticipantThread: stored first when the thread has nothing yet. */
+  seed?: SeedItem[];
   now?: () => Date;
 }
 

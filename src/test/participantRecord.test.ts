@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
+import { stat } from 'node:fs/promises';
 import test from 'node:test';
 import type { ThreadEntry } from '../domain/state/threadEntries';
-import { recordParticipantTurn, resolveParticipantThread, ResponseRecorder, type ParticipantTurnLike, type ResponseStreamLike } from '../services/participantRecorder';
+import { entriesToMessages } from '../domain/state/threadView';
+import { isThreadId, PARTICIPANT_STOPPED_NOTICE, recordParticipantTurn, resolveParticipantThread, ResponseRecorder, seedEntries, type ParticipantTurnLike, type ResponseStreamLike } from '../services/participantRecorder';
 import { stateHomeFor } from '../services/stateHome';
 import { stateKeysFor } from '../services/stateKeys';
 import { ThreadStore } from '../services/threadStore';
@@ -78,4 +80,192 @@ test('the thread id rides in the newest reply, so the next turn continues the sa
   assert.deepEqual(main.map(textOf), ['One', 'Answer one', 'Two', 'Answer two']);
   assert.equal((await store.index()).filter((item) => item.origin === 'chat-view').length, 1, 'both turns are one thread');
   assert.equal((await store.meta(first.threadId))?.turns, 2);
+});
+
+/** A whole exchange as VS Code's history holds it afterwards. */
+function exchange(prompt: string, answer: string, threadId?: string): ParticipantTurnLike[] {
+  return [request(prompt), reply(answer, threadId ? { threadId } : {})];
+}
+
+/** Loads a module that imports vscode, with the part of it these tests read. `config` and `folders` are changed by each test. */
+const config: Record<string, unknown> = {};
+const folders: Array<{ uri: { fsPath: string } }> = [];
+interface CapturedHandler { (request: unknown, context: unknown, stream: unknown, token: unknown): Promise<{ metadata: { command?: string; threadId?: string } }> }
+let participantHandler: CapturedHandler | undefined;
+function withVscodeStub<T>(load: () => T): T {
+  const nodeModule = require('node:module') as { _load: (request: string, parent: unknown, isMain: boolean) => unknown };
+  const originalLoad = nodeModule._load;
+  const vscodeStub = {
+    MarkdownString: FakeMarkdown,
+    Uri: { joinPath: (base: { path: string }, ...parts: string[]) => ({ path: [base.path, ...parts].join('/'), toString() { return this.path; } }) },
+    workspace: {
+      get workspaceFolders() { return folders.length ? folders : undefined; },
+      getConfiguration: () => ({ get: (key: string, fallback: unknown) => (key in config ? config[key] : fallback), inspect: () => undefined })
+    },
+    window: {},
+    chat: { createChatParticipant: (_id: string, handler: CapturedHandler) => { participantHandler = handler; return {}; } }
+  };
+  nodeModule._load = (request, parent, isMain) => request === 'vscode' ? vscodeStub : originalLoad(request, parent, isMain);
+  try { return load(); } finally { nodeModule._load = originalLoad; }
+}
+
+const chatParticipant = withVscodeStub(() => require('../services/chatParticipant') as typeof import('../services/chatParticipant'));
+
+test('thirty turns are all stored while the model is shown only the last twenty', async () => {
+  const root = await tempProject();
+  const store = storeFor(root);
+  const history: ParticipantTurnLike[] = [];
+  let threadId = '';
+  for (let turn = 1; turn <= 30; turn += 1) {
+    const resolved = await resolveParticipantThread(history, store);
+    threadId = resolved.threadId;
+    await recordParticipantTurn(store, { threadId, writer: 'edA.1', prompt: `Question ${turn}`, reply: `Answer ${turn}`, model: 'm', ...(resolved.seed ? { seed: resolved.seed } : {}) });
+    history.push(...exchange(`Question ${turn}`, `Answer ${turn}`, threadId));
+  }
+  const entries = await store.entries(threadId);
+  assert.equal(entries.length, 60, 'every prompt and every reply is in the log');
+  const main = (await store.lines(threadId)).main;
+  assert.deepEqual(main.map(textOf).slice(0, 2), ['Question 1', 'Answer 1']);
+  assert.deepEqual(main.map(textOf).slice(-2), ['Question 30', 'Answer 30']);
+  assert.equal((await store.meta(threadId))?.turns, 30);
+  assert.equal(chatParticipant.historyFromChatContext(history as never).length, 20, 'the model window is unchanged: it limits what the model sees, not what is stored');
+});
+
+test('a session that began before turns were recorded is seeded once, from the full history, and not again', async () => {
+  const root = await tempProject();
+  const store = storeFor(root);
+  const earlier = [...exchange('First', 'Reply 1'), ...exchange('Second', 'Reply 2'), ...exchange('Third', 'Reply 3'), ...exchange('Fourth', 'Reply 4')];
+  const history: ParticipantTurnLike[] = [{ participant: 'someoneElse', prompt: 'not ours' }, ...earlier];
+  assert.equal(seedEntries(history).length, 8, 'the other participant is left out, the eight turns of this one are kept');
+
+  const resolved = await resolveParticipantThread(history, store);
+  assert.equal(resolved.seed?.length, 8);
+  await recordParticipantTurn(store, { threadId: resolved.threadId, writer: 'edA.1', prompt: 'Fifth', reply: 'Reply 5', model: 'm', seed: resolved.seed });
+  const main = (await store.lines(resolved.threadId)).main;
+  assert.deepEqual(main.map(textOf), ['First', 'Reply 1', 'Second', 'Reply 2', 'Third', 'Reply 3', 'Fourth', 'Reply 4', 'Fifth', 'Reply 5']);
+  assert.equal((await store.meta(resolved.threadId))?.title, 'First', 'the thread is titled by the first prompt of the session');
+
+  // The reply now carries the thread id: the next turn continues the thread and seeds nothing.
+  const next = await resolveParticipantThread([...history, request('Fifth'), reply('Reply 5', { threadId: resolved.threadId })], store);
+  assert.equal(next.threadId, resolved.threadId);
+  assert.equal(next.seed, undefined);
+});
+
+test('seeding turns a command into a notice that does not feed the model', () => {
+  const seed = seedEntries([request('3', 'plan-phase'), reply('Started `/gsd-plan-phase 3` in the NEAR AI view.', { command: 'plan-phase' }), ...exchange('Hi', 'Hello')]);
+  assert.deepEqual(seed.map((item) => item.role), ['notice', 'user', 'assistant']);
+  assert.equal((seed[0].body as { forContext: boolean }).forContext, false);
+  assert.match((seed[0].body as { text: string }).text, /\/gsd-plan-phase 3/);
+});
+
+test('a reply without metadata joins a thread only on an exact tail match, and otherwise starts a new thread', async () => {
+  const root = await tempProject();
+  const store = storeFor(root);
+  const { threadId } = await resolveParticipantThread([], store);
+  await recordParticipantTurn(store, { threadId, writer: 'edA.1', prompt: 'One', reply: 'Answer one with a footer *m · 12 tokens · $0.0001*', model: 'm' });
+  const before = (await store.entries(threadId)).length;
+
+  // The same exchange, restored without its metadata: it is the thread's tail, so it continues that thread.
+  const matched = await resolveParticipantThread(exchange('One', 'Answer one with a footer *m · 12 tokens · $0.0001*'), store);
+  assert.equal(matched.threadId, threadId);
+  assert.equal(matched.seed, undefined, 'the thread already holds these turns');
+
+  // One character different: not the same exchange, so a new thread, and the existing one is untouched.
+  const near = await resolveParticipantThread(exchange('One', 'Answer one with a footer *m · 12 tokens · $0.0002*'), store);
+  assert.notEqual(near.threadId, threadId);
+  await recordParticipantTurn(store, { threadId: near.threadId, writer: 'edA.1', prompt: 'Two', reply: 'Answer two', model: 'm', ...(near.seed ? { seed: near.seed } : {}) });
+  assert.equal((await store.entries(threadId)).length, before, 'no entry was added to or changed in the existing thread');
+  assert.equal((await store.index()).filter((item) => item.origin === 'chat-view').length, 2);
+
+  // The same reply under a different prompt is not the tail either.
+  const otherPrompt = await resolveParticipantThread(exchange('Something else', 'Answer one with a footer *m · 12 tokens · $0.0001*'), store);
+  assert.notEqual(otherPrompt.threadId, threadId);
+});
+
+test('a metadata value that is not a thread id is never used', async () => {
+  const root = await tempProject();
+  const store = storeFor(root);
+  for (const bad of ['../../etc/passwd', 'conv-../x', 'conv-', 'x', 42, null, { id: 'conv-abcdef' }]) {
+    const resolved = await resolveParticipantThread([request('Hi'), reply('Hello', { threadId: bad })], store);
+    assert.match(resolved.threadId, /^conv-[a-z0-9-]{6,60}$/, `a fresh id replaces ${JSON.stringify(bad)}`);
+    assert.notEqual(resolved.threadId, bad);
+  }
+  assert.equal(isThreadId('conv-abc123'), true);
+  assert.equal(isThreadId('conv-ABC123'), false);
+  assert.equal(isThreadId('conv-abc/../123'), false);
+});
+
+test('a cancelled or failed reply is stored with what was streamed and a notice, and the notice does not feed the model', async () => {
+  const root = await tempProject();
+  const store = storeFor(root);
+  const { threadId } = await resolveParticipantThread([], store);
+  await recordParticipantTurn(store, { threadId, writer: 'edA.1', prompt: 'Tell me a story', reply: 'Once upon a', model: 'm', stopped: true });
+  await recordParticipantTurn(store, { threadId, writer: 'edA.1', prompt: 'Try again', reply: '', model: 'm', stopped: true });
+  const main = (await store.lines(threadId)).main;
+  assert.deepEqual(main.map((entry) => entry.role), ['user', 'assistant', 'notice', 'user', 'notice']);
+  assert.equal(textOf(main[1]), 'Once upon a');
+  assert.equal(textOf(main[2]), PARTICIPANT_STOPPED_NOTICE);
+  assert.equal(PARTICIPANT_STOPPED_NOTICE, 'The reply stopped before it finished.');
+  assert.equal((main[2].body as { forContext: boolean }).forContext, false);
+  assert.deepEqual(entriesToMessages(main).map((message) => message.role), ['user', 'assistant', 'user'], 'notices are not model messages');
+});
+
+test('a /gsd command turn is one notice that does not feed the model', async () => {
+  const root = await tempProject();
+  const store = storeFor(root);
+  const { threadId } = await resolveParticipantThread([], store);
+  await recordParticipantTurn(store, { threadId, writer: 'edA.1', prompt: '3', reply: 'Started `/gsd-plan-phase 3` in the **NEAR AI** view.', model: '', command: 'plan-phase' });
+  const main = (await store.lines(threadId)).main;
+  assert.equal(main.length, 1);
+  assert.equal(main[0].role, 'notice');
+  assert.equal((main[0].body as { forContext: boolean }).forContext, false);
+  assert.match(textOf(main[0]), /\/gsd-plan-phase 3/);
+  assert.deepEqual(entriesToMessages(main), []);
+});
+
+/** What the handler is given for one request, and what it streamed. */
+async function ask(root: string, text: { prompt: string; command?: string }, history: unknown[] = [], cancelled = false): Promise<{ result: { metadata: { command?: string; threadId?: string } }; markdown: string; buttons: Array<{ command: string; arguments?: unknown[]; title: string }> }> {
+  const markdown: string[] = [];
+  const buttons: Array<{ command: string; arguments?: unknown[]; title: string }> = [];
+  const stream = { markdown: (value: string | { value: string }) => { markdown.push(typeof value === 'string' ? value : value.value); }, button: (button: never) => { buttons.push(button); }, progress: () => undefined };
+  folders.splice(0, folders.length, { uri: { fsPath: root } });
+  const secrets = sharedSecrets.get(root) ?? new MemorySecrets();
+  sharedSecrets.set(root, secrets);
+  const context = { extensionUri: { path: '/ext' }, secrets, globalState: { get: () => undefined, update: async () => undefined }, subscriptions: [] as unknown[] };
+  const started: string[] = [];
+  chatParticipant.registerChatParticipant(context as never, {} as never, async (command) => { started.push(command); });
+  assert.ok(participantHandler, 'the participant is registered');
+  const token = { isCancellationRequested: cancelled, onCancellationRequested: () => ({ dispose: () => undefined }) };
+  const result = await participantHandler!({ ...text, command: text.command }, { history }, stream, token);
+  return { result, markdown: markdown.join(''), buttons };
+}
+const sharedSecrets = new Map<string, MemorySecrets>();
+
+test('the participant records a /gsd command turn, returns its thread id and offers the button that opens it in the panel', async () => {
+  const root = await tempProject();
+  const { result, markdown, buttons } = await ask(root, { prompt: '', command: 'progress' });
+  assert.equal(result.metadata.command, 'progress');
+  assert.match(result.metadata.threadId ?? '', /^conv-[a-z0-9-]{6,60}$/);
+  assert.match(markdown, /Started `\/gsd-progress`/);
+  const open = buttons.find((button) => button.command === 'nearAi.openThread');
+  assert.deepEqual(open?.arguments, [result.metadata.threadId]);
+  assert.equal(open?.title, 'Open this chat in the NEAR AI panel');
+  const store = storeFor(root, sharedSecrets.get(root));
+  const main = (await store.lines(result.metadata.threadId!)).main;
+  assert.deepEqual(main.map((entry) => entry.role), ['notice']);
+  assert.equal((await store.meta(result.metadata.threadId!))?.origin, 'chat-view');
+});
+
+test('with nearAi.agent.saveTranscripts off nothing is recorded, no thread id is returned and nothing is created in the project', async () => {
+  const root = await tempProject();
+  config['agent.saveTranscripts'] = false;
+  try {
+    const { result, markdown, buttons } = await ask(root, { prompt: '', command: 'progress' });
+    assert.match(markdown, /Started `\/gsd-progress`/, 'the reply itself is unchanged');
+    assert.equal(result.metadata.threadId, undefined);
+    assert.equal(buttons.some((button) => button.command === 'nearAi.openThread'), false);
+    await assert.rejects(stat(stateHomeFor(root).paths.dir), /ENOENT/, 'the state home was not created');
+  } finally {
+    delete config['agent.saveTranscripts'];
+  }
 });
