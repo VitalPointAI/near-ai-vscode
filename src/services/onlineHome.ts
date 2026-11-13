@@ -35,8 +35,29 @@ export interface OnlineHomeUi {
   pickVisibility(notes: Readonly<Record<Visibility, string>>): Promise<Visibility | undefined>;
   /** `problem` is the reason the last name did not work. */
   askName(suggested: string, problem?: string): Promise<string | undefined>;
+  /** Offered when GitHub sign-in is not available in this editor and gh is installed and signed in: 'gh' or 'url' (paste an empty repository's address). */
+  pickFallback(choices: { gh: boolean }): Promise<'gh' | 'url' | undefined>;
+  /** The address of an existing, empty repository. `problem` is the reason the last one did not work. */
+  askRepoUrl(problem?: string): Promise<string | undefined>;
   /** Called when the flow is over, so a progress display can close. */
   done?(): void;
+}
+
+/** The GitHub command line, when it is installed and signed in. `token` is the one `gh auth token` prints, held in memory only. */
+export interface GhCli {
+  available(): Promise<boolean>;
+  signedIn(): Promise<boolean>;
+  /** Creates an empty repository under the signed-in account (never with a source or a push). Throws GitHubApiError. */
+  createRepo(name: string, visibility: Visibility): Promise<{ owner: string; name: string }>;
+  token(): Promise<string | undefined>;
+}
+
+export type GhExec = (args: string[], timeoutMs?: number) => Promise<{ code: number; stdout: string; stderr: string }>;
+
+/** gh run with array arguments, a timeout and prompts disabled. */
+export function systemGhCli(exec?: GhExec): GhCli {
+  void exec;
+  throw new Error('not implemented');
 }
 
 /** What the turn-on flow gets once the remote exists: the remote's name and address, and a git runner that signs in to GitHub for this call only. */
@@ -48,6 +69,8 @@ export interface OnlineHomeInput {
   ui: OnlineHomeUi;
   auth: GitHubAuth;
   fetchFn?: FetchLike;
+  /** The GitHub command line, used when GitHub sign-in is not available in this editor. */
+  gh?: GhCli;
   /** The runner for every git call except the person's own code push. Defaults to the sync runner. */
   git?: GitRunner;
   /** The plan-15 turn-on flow: shows the recovery code and pushes the sync branch. Return false when it did not finish. */
