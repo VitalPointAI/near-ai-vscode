@@ -20,7 +20,7 @@ import { shownSpendAccount, showSpendAccount, SpendAccount } from './spendAccoun
 import { withSpendTag } from './spendLedger';
 import { ProfileStore } from './profileStore';
 import { readAgentLimits, readAgentModels, readAgentRules, readModelTiers, readRiskSwitches, readRoleModels, readSafetyModel, readSettings, shouldAutoInstallGsd, readRunBudget } from './settings';
-import { sharedTranscriptKey, TranscriptStore } from './transcripts';
+import { threadStoreFor } from './threadStore';
 import { copyAttachmentIntoProject, prepareAttachments, stageAttachment, StagedAttachment } from '../agent/attachments';
 import { TeamDefinition, TeamLibrary, teamAgents } from '../agent/teams';
 import type { GsdAgent } from '../gsd/library';
@@ -823,7 +823,9 @@ function runMarkersFor(context: vscode.ExtensionContext, root: string): RunMarke
 
 function conversationFor(context: vscode.ExtensionContext, root: string, panel: ChatHost, post: (message: Record<string, unknown>) => void, title: () => string): { agent: AgentConversation; focusRegained: () => void } {
   const storage = context.globalStorageUri.fsPath;
-  const transcripts = readAgentLimits().saveTranscripts ? new TranscriptStore(storage, root, sharedTranscriptKey(context.secrets)) : undefined;
+  // Conversations live in the project's state home, so every editor on this computer lists and reopens the same ones (SYNC-01). The state home and its
+  // key are created on the first save, never by opening the folder.
+  const transcripts = readAgentLimits().saveTranscripts ? threadStoreFor(root, context.secrets, editorWriter(context.globalState as MementoLike | undefined), () => vscode.workspace.getConfiguration('nearAi').get<boolean>('sync.keepKeyInProject', true)) : undefined;
   // An agent held for approval or an answer waits; say so when nobody may be looking: the chat is
   // hidden, or the window (in code-server, its browser tab) is in the background. Once per prompt.
   const notices = new WaitingNotices();

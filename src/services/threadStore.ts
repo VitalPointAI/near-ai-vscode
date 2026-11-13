@@ -435,14 +435,18 @@ export class ThreadStore implements ConversationStore {
 
 const stores = new WeakMap<object, Map<string, ThreadStore>>();
 
+/** A host that gives no secret storage keeps the data key only in the project's key file: nothing is read from or kept in a device copy. */
+const NO_SECRETS: SecretsLike = { get: async () => undefined, store: async () => undefined, delete: async () => undefined };
+
 /** One ThreadStore per project folder and secret store, built from that folder's state home and keys. Making it touches nothing on disk. */
-export function threadStoreFor(root: string, secrets: SecretsLike, writer: string, keepKeyInProject?: () => boolean): ThreadStore {
+export function threadStoreFor(root: string, secrets: SecretsLike | undefined, writer: string, keepKeyInProject?: () => boolean): ThreadStore {
   const resolved = path.resolve(root);
-  let byRoot = stores.get(secrets);
-  if (!byRoot) { byRoot = new Map(); stores.set(secrets, byRoot); }
+  const owner = secrets ?? NO_SECRETS;
+  let byRoot = stores.get(owner);
+  if (!byRoot) { byRoot = new Map(); stores.set(owner, byRoot); }
   let store = byRoot.get(resolved);
   if (!store) {
-    store = new ThreadStore(stateHomeFor(resolved), stateKeysFor(resolved, secrets, keepKeyInProject), { writer });
+    store = new ThreadStore(stateHomeFor(resolved), stateKeysFor(resolved, owner, keepKeyInProject), { writer });
     byRoot.set(resolved, store);
   }
   return store;

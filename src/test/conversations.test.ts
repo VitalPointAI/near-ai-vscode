@@ -10,7 +10,7 @@ import { ProfileStore } from '../services/profileStore';
 import { deriveProfileId } from '../domain/auth';
 import { ActivityStore, closeInterruptedRuns } from '../services/activityStore';
 import { historyPage } from '../services/activityOverview';
-import { TranscriptStore } from '../services/transcripts';
+import { threadStoreFor } from '../services/threadStore';
 import { RunMarkers } from '../services/runMarkers';
 import { editorWriter, stateHomeFor, writerEditor } from '../services/stateHome';
 import { ConversationLog, conversationStatus, conversationTitle, MAX_OPEN_CONVERSATIONS, parseSavedConversations, savedConversations } from '../services/conversations';
@@ -499,7 +499,7 @@ test('sidebar: closing a running conversation asks, stops it, and keeps its tran
     gate.release('keep going');
     await runA;
     assert.equal(near.requests.length, 1, 'it was stopped');
-    const saved = await new TranscriptStore(path.join(root, '.global'), root, (await import('../services/transcripts')).transcriptKey(shared.secrets)).list();
+    const saved = await threadStoreFor(root, shared.secrets as never, 'testseed.1').list();
     assert.ok(saved.some((transcript) => transcript.id === a && transcript.title === 'keep going'), 'its transcript stays in history');
 
     // A stale message for the closed conversation goes nowhere.
@@ -543,7 +543,7 @@ test('sidebar: at most eight conversations are open; a blank one is reused rathe
 test('sidebar: a reload reopens the conversation list, and a run it cut off shows as stopped in the chat and in Agent Activity history', async () => {
   const { root, auth, shared } = await projectWithProfile();
   // What the previous extension host left: two open conversations, one of them mid-run.
-  const transcripts = new TranscriptStore(path.join(root, '.global'), root, (await import('../services/transcripts')).transcriptKey(shared.secrets));
+  const transcripts = threadStoreFor(root, shared.secrets as never, 'testseed.1');
   const cut = 'conv-cut000-0a0b0c0d';
   const done = 'conv-done00-0e0f1a1b';
   await transcripts.save({ id: cut, title: 'Migrate the database', model: MODEL, updatedAt: new Date().toISOString(), turns: 1, messages: [{ role: 'system', content: 'system' }, { role: 'user', content: 'Migrate the database' }] });
@@ -766,7 +766,7 @@ test('sidebar: Dismiss settles a cut-off run without running anything; a cut-off
   const { root, auth, shared } = await projectWithProfile();
   const cut = 'conv-dism00-0a0b0c0d';
   const lost = 'conv-lost00-0a0b0c0d';
-  const transcripts = new TranscriptStore(path.join(root, '.global'), root, (await import('../services/transcripts')).transcriptKey(shared.secrets));
+  const transcripts = threadStoreFor(root, shared.secrets as never, 'testseed.1');
   await transcripts.save({ id: cut, title: 'Write the report', model: MODEL, updatedAt: new Date().toISOString(), turns: 1, messages: [{ role: 'system', content: 'system' }, { role: 'user', content: 'Write the report' }] });
   const dead = new RunMarkers('', root, { dir: stateHomeFor(root).paths.runs, pid: 2_147_483_646, writer: `${writerEditor(editorWriter())}.deadhost0` });
   await dead.start({ conversationId: cut, runId: 'run-1-dddddd', model: MODEL });

@@ -10,7 +10,7 @@ import { AgentConversation, type AgentTurnRequest, type GsdContext } from '../se
 import type { AgentMessage, CompletionEvent, ToolCall } from '../services/nearAiClient';
 import { stateHomeFor } from '../services/stateHome';
 import { StateKeys, stateKeysFor } from '../services/stateKeys';
-import { ThreadStore } from '../services/threadStore';
+import { ThreadStore, threadStoreFor } from '../services/threadStore';
 import { TranscriptStore, type Transcript } from '../services/transcripts';
 import { MemorySecrets, tempProject } from './helpers/stateFixtures';
 
@@ -283,5 +283,58 @@ test('a thread continued on another computer reopens with the continuation in it
     assert.equal(lines.branches.length, 0, 'the new message continues the main line');
     assert.equal(lines.main.at(-2)?.role, 'user');
     assert.equal((lines.main.at(-2)?.body as { text: string }).text, 'Continue here');
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+// ---- Task 3: the panel and the history list share one thread store per project ---------------------------------------------------------------
+
+test('a second editor on the same host lists and reopens the conversation the first editor saved', async () => {
+  const root = await tempProject();
+  try {
+    const editorA = storeFor(root, new MemorySecrets(), 'edA.1');
+    const { messages, display } = longConversation(6);
+    await editorA.captureTranscript(transcriptOf(messages, THREAD, display), display, new WeakSet());
+    await editorA.save(transcriptOf(messages, THREAD, display));
+
+    // Editor B has its own, empty SecretStorage: it shares nothing with A but the project folder, and reads the key file in the state home.
+    const editorB = storeFor(root, new MemorySecrets(), 'edB.1');
+    const listed = await editorB.list();
+    assert.deepEqual(listed.map((item) => [item.id, item.title, item.turns, item.locked]), [[THREAD, 'A long conversation', 6, undefined]]);
+    assert.deepEqual(await editorB.lines(THREAD), await editorA.lines(THREAD));
+    assert.equal((await editorB.lines(THREAD)).main.length, 24);
+    assert.equal((await editorB.load(THREAD))?.messages.length, messages.length, 'and the saved context opens too');
+    const reopened = await new AgentConversation(root, () => undefined, stateHomeFor(root).paths.checkpoints, undefined, editorB).restore(THREAD);
+    assert.equal(reopened?.filter((turn) => turn.role === 'user').length, 6);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('the shared store is one per project, and looking at a project writes nothing', async () => {
+  const root = await tempProject();
+  try {
+    const secrets = new MemorySecrets();
+    const first = threadStoreFor(root, secrets, 'edA.1');
+    assert.equal(threadStoreFor(root, secrets, 'edA.1'), first, 'one store per folder and secret store');
+    assert.equal(threadStoreFor(root, new MemorySecrets(), 'edB.1') === first, false, 'another editor has its own');
+    assert.deepEqual(await first.list(), []);
+    assert.deepEqual(await first.index(), []);
+    assert.deepEqual(await first.entries(THREAD), []);
+    assert.deepEqual(await readdir(root), [], 'listing an untouched project creates nothing in it');
+    await first.captureTranscript(transcriptOf([{ role: 'system', content: 'only the system prompt' }]), new Map(), new WeakSet());
+    assert.deepEqual(await readdir(root), [], 'a conversation with nothing to record does not create the state home');
+    const { messages, display } = longConversation(1);
+    await first.captureTranscript(transcriptOf(messages, THREAD, display), display, new WeakSet());
+    assert.ok((await readdir(root)).includes('.near-ai'), 'the first message creates it');
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('a host with no secret storage still keeps conversations, through the key file in the state home', async () => {
+  const root = await tempProject();
+  try {
+    const store = threadStoreFor(root, undefined, 'edA.1');
+    const { messages, display } = longConversation(2);
+    await store.captureTranscript(transcriptOf(messages, THREAD, display), display, new WeakSet());
+    await store.save(transcriptOf(messages, THREAD, display));
+    assert.equal((await store.lines(THREAD)).main.filter((entry) => entry.role === 'user').length, 2);
+    assert.equal((await storeFor(root, new MemorySecrets(), 'edB.1').list()).length, 1);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
