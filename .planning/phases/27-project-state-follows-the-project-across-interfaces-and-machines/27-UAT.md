@@ -1,24 +1,25 @@
 ---
-status: testing
+status: diagnosed
 phase: 27-project-state-follows-the-project-across-interfaces-and-machines
 source: [27-VERIFICATION.md, 27-16-PLAN.md Task 2]
 started: 2026-11-13T18:04:20Z
-updated: 2026-11-13T18:21:02Z
+updated: 2026-11-13T18:33:07Z
 ---
 
 ## Current Test
 
-number: 1
-name: Same chats in code-server and desktop VS Code
+number: 8
+name: Your own old chats open in both real editors
 expected: |
-  With the 27-16 Task 1 VSIX installed in both, "NEAR AI: Show Chat History" lists the same chats (the code-server week and the desktop chats); a long chat shows every message from the top and tool steps open to their output.
-awaiting: user response
+  After the gap fixes, install the fixed VSIX in code-server and desktop VS Code; Show Chat History lists both editors' old chats and they open in full.
+awaiting: gap fixes, then the owner
 
 ## Tests
 
 ### 1. Same chats in code-server and desktop VS Code
 expected: both history lists match, full messages, tool steps open
-result: [pending]
+result: pass
+source: automated (real VS Code 1.146 extension host, two user-data-dirs on one project: B lists A's chat, reopens every message, the tool card opens to its stored output). The owner's own old chats are encrypted with keys held only in each real editor, so that half is test 8.
 
 ### 2. Compare Models follows the project
 expected: the 2026-11-12 comparison is listed in desktop without re-running; the import offer works either way
@@ -29,11 +30,15 @@ source: automated (uat-a migrate.js)
 
 ### 3. Pick up where you left off, no spend
 expected: after a message in code-server and a desktop reload, the card shows that chat, run state and GSD next step; Open chat makes no new request or spend
-result: [pending]
+result: pass
+source: automated (B shows the card with last chat, finished run, phase and next step /gsd-plan-phase 1; Open chat reopened it and the mock model server saw no new request; readable in dark, light and high contrast)
 
 ### 4. Sync control visible and accessible; same-host key
 expected: "Sync off · Turn on" next to the profile in both editors, reachable with Tab, readable in light/dark/high-contrast; desktop chats with sync off without re-entering the key
-result: [pending]
+result: issue
+reported: "Automated in a real VS Code window: the control is a real button with an accessible name, reachable with Tab, visible focus ring and good contrast in all three themes, and the same-host key works with no prompt and no plaintext on disk. Defects: (1) at the default side bar width (290 px) the label is cut to \"Sync off · Turn…\" and the profile chip shows only \"S.\" (media/chat/chat.css:359 #sync flex:none max-width:45% leaves the profile chip all the shrinking); attention and no-home labels are cut too. (2) In a folder with no remote the control opens as \"Sync off · Turn on\", never \"No online home · Set up\" (currentSyncStatus stays off until sync is turned on: src/services/chat.ts:161, src/services/syncCommands.ts:47; no-home only set after a failed turn-on/sync, src/services/syncFlows.ts:516,696). (3) Needs attention shows only \"Needs attention\" on the control; the plain error is only in the tooltip/aria-label (src/domain/state/syncStatus.ts:62-64), while D-16 says the error is shown on the control. (4) Minor: pick-up card time is 12-hour (media/chat/pickup.js:37) while the control is 24-hour; toast says \"Could not reach your git host…\" but the control says \"Couldn't reach…\"; the sync invitation sits above \"Connect NEAR AI to start\" with no spacing, before any profile exists."
+severity: major
+source: automated (uat-b screenshots W-1, C-6, B-7)
 
 ### 5. Turn on sync and restore with the recovery code
 expected: consent screen, then the 52-character code once; a second clone restores chats, runs, comparisons, model choices and the NEAR AI key after Enter Recovery Code
@@ -52,12 +57,16 @@ expected: near-ai/state holds only manifest.json and random .bin names, commits 
 result: pass
 source: automated (near-ai/state holds only manifest.json and 32-hex .bin files; commits by near-ai-state <state@near-ai.invalid> with the constant message; master untouched by sync; mirror-clone scan found no seeded plaintext in any sync object)
 
+### 8. Your own old chats open in both real editors
+expected: after installing the fixed VSIX in code-server and desktop VS Code, "NEAR AI: Show Chat History" in each lists the code-server week and the desktop chats, and they open with every message (needs each editor's own transcript key, which only the real editors hold)
+result: [pending]
+
 ## Summary
 
-total: 7
-passed: 2
-issues: 2
-pending: 3
+total: 8
+passed: 4
+issues: 3
+pending: 1
 skipped: 0
 blocked: 0
 
@@ -97,4 +106,40 @@ blocked: 0
   severity: minor
   test: 6
   artifacts: [src/services/codePushCheck.ts]
+  missing: []
+
+- gap_id: G-27-4a
+  truth: "The sync control and the profile chip are readable at the default side bar width, in every state"
+  status: failed
+  reason: "Automated: at 290 px the control reads 'Sync off · Turn…' and the profile chip 'S.'; 'Needs attenti…' and 'No online ho…' are cut"
+  severity: major
+  test: 4
+  artifacts: [media/chat/chat.css, media/chat/sync.js]
+  missing: []
+
+- gap_id: G-27-4b
+  truth: "In a project with no online home the control reads 'No online home · Set up' as soon as the panel opens"
+  status: failed
+  reason: "Automated: a no-remote workspace opens with 'Sync off · Turn on'; no-home appears only after a failed turn-on or sync"
+  severity: major
+  test: 4
+  artifacts: [src/services/chat.ts, src/services/syncCommands.ts, src/services/syncFlows.ts]
+  missing: []
+
+- gap_id: G-27-4c
+  truth: "A sync error is shown in plain words on the control itself, not only in a tooltip"
+  status: failed
+  reason: "Automated: the control shows only 'Needs attention'; the sentence is in title/aria-label and a one-time toast"
+  severity: minor
+  test: 4
+  artifacts: [src/domain/state/syncStatus.ts, media/chat/sync.js]
+  missing: []
+
+- gap_id: G-27-4d
+  truth: "Times and wording are consistent, and the first-run screen asks to connect NEAR AI before offering sync"
+  status: failed
+  reason: "Automated: 12-hour time on the card vs 24-hour on the control; 'Could not' vs 'Couldn't' for the same error; the sync invitation sits above 'Connect NEAR AI to start' with no spacing before a profile exists"
+  severity: cosmetic
+  test: 4
+  artifacts: [media/chat/pickup.js, src/domain/state/syncStatus.ts, src/services/syncFlows.ts, media/chat/chat.css]
   missing: []
