@@ -5,9 +5,9 @@ milestone_name: Messaging relay — Teams and Signal
 current_phase: 27
 current_phase_name: Project state follows the project across interfaces and machines (0.4.20)
 status: planning
-stopped_at: Completed 27-17-PLAN.md
-last_updated: "2026-11-13T15:13:15.333Z"
-state_head: a97800e90220a0d66b6884ac5518bcf2355d1ca6
+stopped_at: Completed 27-06-PLAN.md
+last_updated: "2026-11-13T15:27:50.215Z"
+state_head: 50442f92f4e9dca475581ac27659d1810026f78c
 progress:
   total_phases: 9
   completed_phases: 0
@@ -76,8 +76,8 @@ None yet.
 
 ## Session
 
-**Last session:** 2026-11-13T15:13:15.316Z
-**Stopped at:** Completed 27-17-PLAN.md
+**Last session:** 2026-11-13T15:27:50.197Z
+**Stopped at:** Completed 27-06-PLAN.md
 **Resume file:** None
 
 ## Performance Metrics
@@ -92,6 +92,7 @@ None yet.
 | Phase 27 P11 | 9 min | 3 tasks | 8 files |
 | Phase 27 P05 | 10 min | 3 tasks | 9 files |
 | Phase 27 P17 | 11 min | 3 tasks | 7 files |
+| Phase 27 P06 | 20 min | 3 tasks | 14 files |
 
 ## Decisions
 
@@ -116,3 +117,6 @@ None yet.
 - [Phase 27]: 27-05: the history list and panel read only the state home; sessions saved under an editor's globalStorage stay unlisted until plan 10's migration — The old transcript store stays only for its key helpers; migration re-seals old transcripts under the project data key
 - [Phase 27]: 27-17: the online-home flow keeps the GitHub token in one local variable (API Authorization header, or a runner wrapper adding GIT_CONFIG_* to the git child environment for https://github.com/ only) and saves only step, method, repo and startedAt; progress step is the last one finished and resume checks getRepo before it would ever create
 - [Phase 27]: 27-17: the person's own code push uses a separate plain git runner (their hooks and config) behind a file list and secret check, and is its own question after the sync step; a folder inside another repository and a pasted address with a password or token are refused
+- [Phase 27]: 27-06: the conversation log pins reopened-thread transcript entries when it trims live output, so no history is cut off
+- [Phase 27]: 27-06: tool steps are paired with results by nearest earlier call id, and a tool card loads its output (textContent in a pre) only when first opened
+- [Phase 27]: 27-06: a reopened thread reaches the page in batches of 200 and is drawn 50 per animation frame; later host messages queue behind it
