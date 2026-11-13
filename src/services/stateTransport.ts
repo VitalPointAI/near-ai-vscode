@@ -287,7 +287,9 @@ export class StateTransport {
         if (!OID.test(blob)) throw new StateRefusedError('unsupported-format');
         lines.push(Buffer.from(`100644 blob ${blob}\t${file.name}\0`, 'utf8'));
       }
-      const tree = gitText(mustSucceed(await this.mirrorGit(['mktree', '-z'], { input: Buffer.concat(lines) }), 'building the state tree'));
+      // --missing: an unchanged object carried by its blob id may be one this computer never downloaded (an archived thread kept only online); the
+      // remote already holds it, which is exactly why it is carried by id.
+      const tree = gitText(mustSucceed(await this.mirrorGit(['mktree', '-z', '--missing'], { input: Buffer.concat(lines) }), 'building the state tree'));
       const args = ['commit-tree', tree, ...(parent === undefined ? [] : ['-p', parent]), '-m', STATE_COMMIT_MESSAGE];
       return gitText(mustSucceed(await this.mirrorGit(args, { env: { ...STATE_IDENTITY_ENV } }), 'making the sync commit'));
     });
