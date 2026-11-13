@@ -5,11 +5,15 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
-import { syncControlModel, syncStatusMessage, type SyncControlModel } from '../domain/state/syncStatus';
+import { shouldShowSyncPrompt, SYNC_PROMPT_TEXT, syncControlModel, syncStatusMessage, type SyncControlModel } from '../domain/state/syncStatus';
 import { parseChatWebviewMessage } from '../services/chatBridge';
-import { syncPanelMessage } from '../services/syncPanel';
+import { syncPanelMessage, SYNC_PROMPT_DISMISSED_KEY } from '../services/syncPanel';
+import { pickupCardModel } from '../services/pickupCard';
+import type { PickupModel } from '../domain/state/pickup';
+import type { MementoLike } from '../services/stateHome';
 import type { SyncStatus } from '../services/syncFlows';
 import { FakeDocument, FakeNode } from './helpers/fakeDom';
+import { tempProject } from './helpers/stateFixtures';
 
 const ROOT = path.join(__dirname, '..', '..');
 const read = (...parts: string[]): string => readFileSync(path.join(ROOT, ...parts), 'utf8');
@@ -201,4 +205,120 @@ test('the sync chip is styled by state with theme variables only, with a visible
   assert.ok(css.includes('vscode-high-contrast'), 'a high-contrast rule');
   assert.ok(rules.some((line) => line.includes('vscode-high-contrast') && line.includes('--vscode-contrastBorder')), 'a border in high contrast');
   for (const line of rules) assert.doesNotMatch(line, /#[0-9a-fA-F]{3,8}\b(?!\w)|rgba?\(|hsla?\(/, `no hard-coded colour: ${line}`);
+});
+
+interface PickupKit {
+  renderPickupCard(doc: FakeDocument, container: FakeNode, model: PickupModel | undefined, post: (message: unknown) => void, afterDismiss?: () => void): FakeNode | undefined;
+}
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const pickup = require(path.join(ROOT, 'media', 'chat', 'pickup.js')) as PickupKit;
+
+class Memory implements MementoLike {
+  public readonly values = new Map<string, unknown>();
+  public get<T>(key: string): T | undefined { return this.values.get(key) as T | undefined; }
+  public update(key: string, value: unknown): Promise<void> { this.values.set(key, value); return Promise.resolve(); }
+}
+
+const WRITER = 'aaaaaaaa1111.hosta00001';
+const deps = (state: Memory, syncStatus?: SyncStatus) => ({ workspaceState: state, writer: WRITER, threads: { index: () => Promise.resolve([]) }, ...(syncStatus ? { syncStatus } : {}) });
+
+function welcomeWithCard(model: Partial<PickupModel>): { doc: FakeDocument; welcome: FakeNode; card: FakeNode | undefined; posts: unknown[] } {
+  const doc = new FakeDocument();
+  const welcome = doc.createElement('section');
+  welcome.id = 'welcome';
+  doc.body.append(welcome);
+  const posts: unknown[] = [];
+  const card = pickup.renderPickupCard(doc, welcome, { show: false, pointerAt: '', ...model }, (message) => posts.push(message));
+  return { doc, welcome, card, posts };
+}
+
+test('while the pull on open runs the card says "Checking for updates…", and the chat is not blocked; it is worked out again when the status leaves syncing', async () => {
+  const root = await tempProject();
+  const state = new Memory();
+  const checking = await pickupCardModel(deps(state, { state: 'syncing', reason: 'open' }), root);
+  assert.equal(checking.checking, true);
+  const { card, welcome, doc } = welcomeWithCard(checking);
+  assert.ok(card, 'the card shows although there is nothing to pick up yet');
+  assert.ok(card!.all((node) => node.textContent === 'Checking for updates…').length === 1);
+  assert.equal(card!.all((node) => node.tagName === 'button').length, 1, 'only "Not now": nothing to open yet');
+  // A later render with the finished model replaces it: no checking line, no card when there is nothing to show.
+  const synced = await pickupCardModel(deps(state, { state: 'synced', at: AT }), root);
+  assert.equal(synced.checking, undefined);
+  assert.equal(pickup.renderPickupCard(doc, welcome, synced, () => undefined), undefined, 'the card is gone when there is nothing to pick up');
+  assert.equal(doc.getElementById('pickup-card'), undefined);
+  const manual = await pickupCardModel(deps(state, { state: 'syncing', reason: 'manual' }), root);
+  assert.equal(manual.checking, undefined, 'only the pull on open is "Checking for updates…"');
+  assert.equal((await pickupCardModel(deps(state), root)).checking, undefined, 'no sync status, no word about sync');
+  for (const source of ['composer', 'send', 'input']) assert.doesNotMatch(read('media', 'chat', 'pickup.js'), new RegExp(`${source}\\.disabled`), 'the chat stays usable');
+});
+
+test('the card model carries the invitation before sync is on, never once it is on, and never after it was dismissed for this project', async () => {
+  const root = await tempProject();
+  const state = new Memory();
+  assert.equal((await pickupCardModel(deps(state, { state: 'off' }), root)).syncPrompt, true);
+  for (const status of STATUSES.map((entry) => entry[1]).filter((entry) => entry.state !== 'off')) {
+    assert.equal((await pickupCardModel(deps(state, status), root)).syncPrompt, undefined, status.state);
+  }
+  await state.update(SYNC_PROMPT_DISMISSED_KEY, true);
+  assert.equal((await pickupCardModel(deps(state, { state: 'off' }), root)).syncPrompt, undefined, 'never again once dismissed');
+  assert.equal(syncPanelMessage({ state: 'off' }, state, NOW).prompt, false, 'the first-run invitation follows the same flag');
+});
+
+test('a pick-up card with the invitation has the line, a Turn on sync button and a dismiss button, and without it neither', () => {
+  const { card, posts } = welcomeWithCard({ show: true, pointerAt: '2026-11-13T10:05:00.000Z', lastChat: { id: 'conv-abc123def', title: 'Fix it', at: '2026-11-13T10:00:00.000Z' }, syncPrompt: true });
+  assert.ok(card!.all((node) => node.textContent === 'Keep this project on your other machines').length === 1);
+  const turnOn = card!.all((node) => node.tagName === 'button' && node.textContent === 'Turn on sync')[0];
+  const dismiss = card!.all((node) => node.tagName === 'button' && node.textContent === SYNC_PROMPT_TEXT.dismiss)[0];
+  assert.ok(turnOn && dismiss);
+  turnOn.click();
+  dismiss.click();
+  assert.deepEqual(posts, [{ type: 'sync-control', action: 'turn-on' }, { type: 'sync-control', action: 'dismiss-prompt' }]);
+  const plain = welcomeWithCard({ show: true, pointerAt: '2026-11-13T10:05:00.000Z', lastChat: { id: 'conv-abc123def', title: 'Fix it', at: '2026-11-13T10:00:00.000Z' } });
+  assert.equal(plain.card!.all((node) => node.textContent === 'Keep this project on your other machines').length, 0);
+  assert.equal(plain.card!.all((node) => node.textContent === 'Turn on sync').length, 0);
+});
+
+test('dismissing is remembered in workspace state, and neither the control nor the invitation opens a dialog by itself', () => {
+  const host = read('src', 'services', 'chat.ts');
+  assert.match(host, /SYNC_PROMPT_DISMISSED_KEY/);
+  assert.equal(SYNC_PROMPT_DISMISSED_KEY, 'nearAi.sync.promptDismissed');
+  const script = read('media', 'chat', 'chat.js');
+  assert.match(script, /case 'sync-status':/);
+  assert.match(script, /renderSyncPrompt\(document, welcome/);
+  const pickupHost = read('src', 'services', 'chat.ts');
+  assert.match(pickupHost, /syncStatus: currentSyncStatus\(/, 'the card model follows the sync status');
+  assert.match(pickupHost, /model\.checking/, 'the card is re-posted while it is checking');
+  assert.match(pickupHost, /void pickup\.send\(\)/, 'and worked out again when the status changes');
+});
+
+test('Settings has a link that turns sync on, next to the key-file setting', () => {
+  const properties = (JSON.parse(read('package.json')) as { contributes: { configuration: { properties: Record<string, { description?: string; markdownDescription?: string }> } } }).contributes.configuration.properties;
+  const setting = properties['nearAi.sync.keepKeyInProject'];
+  assert.match(String(setting.markdownDescription), /\(command:nearAi\.sync\.turnOn\)/);
+  assert.ok(String(setting.description).length > 0, 'the plain description stays');
+  assert.equal(shouldShowSyncPrompt({ syncOn: false, dismissed: false }), true);
+});
+
+// ---- Task 3: the first-run invitation ----
+
+test('the first-run invitation has the line, a Turn on sync button and a way to say no, once, and goes when not wanted', () => {
+  const doc = new FakeDocument();
+  const welcome = doc.createElement('section');
+  welcome.id = 'welcome';
+  doc.body.append(welcome);
+  const posts: unknown[] = [];
+  const node = kit.renderSyncPrompt(doc, welcome, (message) => posts.push(message), true)!;
+  assert.equal(welcome.children[0], node);
+  assert.ok(node.all((child) => child.textContent === SYNC_PROMPT_TEXT.line).length === 1);
+  const buttons = node.all((child) => child.tagName === 'button');
+  assert.deepEqual(buttons.map((button) => [button.textContent, button.type]), [[SYNC_PROMPT_TEXT.turnOn, 'button'], [SYNC_PROMPT_TEXT.dismiss, 'button']]);
+  assert.equal(kit.renderSyncPrompt(doc, welcome, () => undefined, true), node, 'idempotent by id');
+  assert.equal(doc.body.all((child) => child.id === 'sync-prompt').length, 1);
+  buttons[0].click();
+  assert.deepEqual(posts, [{ type: 'sync-control', action: 'turn-on' }]);
+  assert.equal(kit.renderSyncPrompt(doc, welcome, () => undefined, false), undefined);
+  assert.equal(doc.getElementById('sync-prompt'), undefined, 'removed when not wanted');
+  kit.renderSyncPrompt(doc, welcome, () => undefined, true);
+  doc.getElementById('sync-prompt')!.all((child) => child.tagName === 'button')[1].click();
+  assert.equal(doc.getElementById('sync-prompt'), undefined, 'dismissing hides it at once');
 });
