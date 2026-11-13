@@ -6,6 +6,7 @@
 - **v0.4.0 A working core and a native NEAR agent runner**: Phases 7-12 (SHIPPED)
 - **0.4.x line**: ongoing releases on top of v0.4.0 (current; 0.4.5 published 2026-10-29)
 - **v0.5.0 Trusted-source knowledge base**: PAUSED 2026-10-29 and moving to a separate project. Its roadmap, requirements, research and Phase 13 plans are archived in `.planning/milestones/v0.5.0-paused/`; the Phase 13 code lives on the local branch `gsd/phase-13-sovereignty-gate-post-quantum-cryptography-and-the-encrypted`.
+- **v0.7.0 Messaging relay — Teams and Signal**: Phases 68-76 (in planning; requirements defined 2026-11-13)
 
 ## 0.4.x line
 
@@ -62,3 +63,178 @@ Plans:
 - [x] 26-03-PLAN.md — Context and models: compaction threshold, ranged reads, bounded reports, cache-stable prefix, model deadline with backup, tier routing (PERF-02, PERF-03)
 - [x] 26-04-PLAN.md — Parallelism and reloads: read-only shell pool, worktree fan-out cap, batching instruction, auto-resume without repeats (PERF-04, PERF-05)
 - [x] 26-05-PLAN.md — Research GSD profile and verifier scaffold, docs, verification (PERF-06)
+
+
+## Milestone v0.7.0: Messaging relay — Teams and Signal
+
+**Milestone goal:** A person in a Microsoft Teams group chat or a Signal group asks the team for something, the answer arrives where they already are, and nobody involved opens VS Code. The group sees only the finished result; the working thread stays private to whoever asked.
+
+**Phase numbering:** v0.7.0 starts at Phase 68. Branch-shipped phases end at 26; the unmerged `feat/team-fix-pass` branch already claims Phases 60-67 for v0.6.0 — starting at 68 keeps every phase id globally unique whichever lands first. Requirements were defined 2026-11-13 in `.planning/REQUIREMENTS.md`; research lives in `.planning/research/` (STACK, FEATURES, ARCHITECTURE, PITFALLS, SUMMARY).
+
+> **Naming trap.** This milestone is the *messaging* relay at `relay/`: receive a chat message, drive an existing agent team, post the result back. It is **not** the paused v0.5.0 ciphertext sync relay (whose RELAY-01/02 are archived in `.planning/milestones/v0.5.0-paused/`) and **not** the planned `relayTransport.ts` board sync on the unmerged Team Mode branch. The RELAY-01/02 ids are reused here deliberately and are scoped as "v0.7.0 RELAY-01/02" in REQUIREMENTS.md traceability; the ids themselves are not renamed.
+
+Build order follows the trust boundary: foundation → inbound authenticity (adversarial tests before any happy path — 6 of 8 pitfalls are High and sit here) → identity/tenant registry → Teams 1:1 vertical slice (deliberately not groups first) → budgets once the run registry exists → command surface and lifecycle hardening → group discipline → Signal → ops and release.
+
+### Phase 68: Relay foundation
+**Goal**: An operator runs the relay as their own host-side service — its own workspace, its own state directory, its own hardened container — before any chat traffic is accepted.
+**Depends on**: Nothing in this milestone (builds on the shipped harness and extension)
+**Requirements**: RELAY-01, RELAY-02, RELAY-03, RELAY-04
+**Success Criteria** (what must be TRUE):
+  1. A clean checkout installs the relay workspace on Node 26.13.1 with `engines` pinned so an older runtime refuses to start, its lockfile separate from the extension's, and exactly one new runtime dependency (`jose`) — while the extension keeps its existing Node target and zero-dependency bundle untouched. (RELAY-01)
+  2. `GET /healthz` on a running relay reports version, uptime, whether the Teams verifier and the Signal sidecar are operational, and the count of in-flight runs, observable without reading logs. (RELAY-02)
+  3. Killing the relay with queued messages and in-flight run records and restarting it loses nothing: all state (run records, conversation bindings, tenant registry, pending approvals, message queues) lives in one git-ignored directory readable only by the relay's OS user. (RELAY-03)
+  4. The relay ships as a container image built without a shell or package manager, and every secret (bot secret, tenant API keys, Signal registration material) is read at startup from an operator-supplied source and never appears in the image, the state directory listing, or a log line. (RELAY-04)
+**Research flags**: (1) `node:sqlite` is RC in Node 26 — name the JSON-file-per-tenant fallback for registry/state now so storage choices in later phases stay honest. (2) Pin the exact `signal-cli-rest-api` sidecar version in the container definition this early; verify the image's bundled signal-cli age at integration time (Phase 75).
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 68 to break down)
+
+### Phase 69: Inbound authenticity and allowlisting
+**Goal**: Nothing forged, replayed, expired, emulator-shaped or unallowlisted ever reaches a model — the trust boundary is proven by adversarial tests before any happy-path handler exists.
+**Depends on**: Phase 68
+**Requirements**: AUTH-01, AUTH-02, AUTH-03, AUTH-04, AUTH-05, AUTH-06
+**Success Criteria** (what must be TRUE):
+  1. Every adversarial case — forged signature, tampered body, expired token, wrong issuer/audience, mismatched `serviceUrl`, replayed request, emulator-shaped token without the development flag — is rejected with 403 before anything runs, the verifier also checking clock skew, and the suite is part of the build and fails the build if any case is accepted. (AUTH-01, AUTH-02, AUTH-05)
+  2. A signal that the same message arrived twice (platform retry, reconnect resend, edited event) starts exactly one run — signature validity alone is never treated as replay safety; verification is always paired with the dedupe ledger. (AUTH-03)
+  3. A message from a tenant or group that is not allowlisted is rejected in the channel with a plain explanation and never reaches a model. (AUTH-04)
+  4. The inbound path acknowledges within about a second and does the work afterwards, so a slow agent never makes the platform retry. (AUTH-06)
+**Research flags**: PITFALLS ranks 6 of 8 pitfalls High and on this boundary — adversarial tests land here, before the vertical slice, not after.
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 69 to break down)
+
+### Phase 70: Identity, tenants and requesters
+**Goal**: Every message binds to a tenant and a requester from the verified envelope alone, and isolation between tenants is a tested property, not an intention.
+**Depends on**: Phase 69
+**Requirements**: IDNT-01, IDNT-02, IDNT-03, IDNT-04
+**Success Criteria** (what must be TRUE):
+  1. Each inbound message binds to a tenant from the verified envelope alone, never from message text, and a message that cannot be bound is refused rather than guessed. (IDNT-01)
+  2. Each request is attributed to the person who sent it via a channel identity recorded on first sight, and that binding survives a restart. (IDNT-02)
+  3. A test proves a result and its working thread can only ever reach the tenant, conversation and requester that produced them — an answer generated for one tenant cannot be delivered to another. (IDNT-03)
+  4. Each tenant has an isolated workspace directory and uses only its own API key: a run can neither read another tenant's files nor bill another tenant's key. (IDNT-04)
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 70 to break down)
+
+### Phase 71: Teams 1:1 vertical slice
+**Goal**: A person asks a question in a private Teams chat and the existing agent team answers — composed headlessly, streamed live, under the tenant's own bot identity. First end-to-end value, deliberately before any group work.
+**Depends on**: Phase 70
+**Requirements**: RUNL-01, RUNL-03, TEAM-01, TEAM-02, TEAM-03, TEAM-04
+**Success Criteria** (what must be TRUE):
+  1. The relay runs a team headlessly by composing the existing agent engine, tools, team library, model client, checkpoints and run markers unchanged, with the extension itself not modified. (RUNL-01)
+  2. A customer's administrator installs the bot as an external app without it joining their organisation; it works in 1:1 and group chats inside a threaded conversation, is addressed by direct message in a 1:1 and by mention in a group, and greets on first encounter once per thread rather than on every membership event. (TEAM-01, TEAM-02)
+  3. A person asks a question in a 1:1 chat and receives the team's finished answer in that same chat, with progress visible while it runs. (RUNL-03)
+  4. Progress streams live into the private 1:1 thread and, where the platform permits it, into the group thread; when in-group streaming is not available the bot posts discrete updates instead of failing. (TEAM-03)
+  5. The bot presents the team's own name, avatar and personality as configured for that tenant, not a generic bot identity. (TEAM-04)
+**Research flags**: (1) Headless harness composition has never been done — the first runner-child boot is a spike with its fallback documented before group work starts. (2) Teams in-group streaming is undocumented (FEATURES): spike it here; the accepted fallback is ack + discrete updates in-group ("post-don't-stream"), which TEAM-03 already permits.
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 71 to break down)
+
+### Phase 72: Budgets and spend ledger
+**Goal**: Spend is metered where runs happen and capped before the surface grows: a tenant's cap always applies, a conversation's cap defaults to unlimited, and every recorded total reconciles with the extension's ledger.
+**Depends on**: Phase 71 (the run registry now exists — budgets attach to real runs)
+**Requirements**: BUDG-01, BUDG-02, BUDG-03
+**Success Criteria** (what must be TRUE):
+  1. A tenant's spend is capped and a run that would exceed the cap is refused before it is billed, with a plain in-channel explanation instead of silence. (BUDG-01)
+  2. A per-conversation cap exists and defaults to unlimited, so a busy group can be clamped without every group needing configuration at onboarding. (BUDG-02)
+  3. Every run's spend is recorded against its tenant, conversation and requester in an append-only ledger, and the totals in chat match the extension's ledger for the same key. (BUDG-03)
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 72 to break down)
+
+### Phase 73: Command surface and run lifecycle
+**Goal**: Runs are controllable from plain text with honest lifecycle semantics: queued when busy, resumed or honestly reported when interrupted, approvable without stalling, steerable mid-run, cancellable with an honest receipt — and every state answerable through six commands that mean the same thing in both channels.
+**Depends on**: Phase 72 (`cost` reports against the ledger this phase builds on)
+**Requirements**: RUNL-02, RUNL-04, RUNL-05, RUNL-06, RUNL-07, CMND-01, CMND-02, CMND-03
+**Success Criteria** (what must be TRUE):
+  1. Concurrent runs are capped globally, and overflow waits in a durable queue rather than being dropped or failing. (RUNL-02)
+  2. A run interrupted by a restart resumes automatically inside the existing window, or reports in-channel that it died; a run never disappears silently and its record is never left in an unknown state. (RUNL-04)
+  3. When the run needs approval, the requester gets a durable request in their private chat; answering it continues the run, and leaving it unanswered lets the run proceed as non-blocking and later denied on expiry, instead of stalling. (RUNL-05)
+  4. A person can send a follow-up while a run is working and it reaches the run or waits durably in its queue, and can cancel a run from plain text with no buttons, receiving an honest confirmation that names the partial artifacts if anything had completed. (RUNL-06, RUNL-07)
+  5. `help`, `status`, `cancel`, `cost`, `pause` and `resume` work as text with identical meaning in both channels and each answers with the run it refers to; `status` reports elapsed time, current step and spend so far; `cost` reports spend against the tenant's and the group's budget in the same terms the extension shows. (CMND-01, CMND-02, CMND-03)
+**Reuse pointers**: durable restart lives in `src/services/runMarkers.ts` (not `runActivity.ts`), constrained by `AUTO_RESUME_WITHIN_MS`=12h and `MAX_AUTO_RESUMES`=3; `src/agent/` has zero `vscode` imports and is the reuse surface; `src/services/chat.ts` is UI-bound — the relay must NOT import it.
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 73 to break down)
+
+### Phase 74: Group-chat discipline
+**Goal**: In groups the bot is a good citizen: an acknowledgement and the finished result, in the right thread, and nothing else — with group text treated as untrusted input and documents and files flowing both ways without leaking the working thread.
+**Depends on**: Phase 73 (follow-up queues and threading semantics already exist)
+**Requirements**: GRP-01, GRP-02, GRP-03, GRP-04, GRP-05
+**Success Criteria** (what must be TRUE):
+  1. A group chat receives an acknowledgement and the finished result and nothing else: the working thread, tool output and internal narration stay in the requester's private chat. (GRP-01)
+  2. Replies in a threaded channel land in the thread that caused them, and follow-ups in the group reuse the same thread. (GRP-02)
+  3. Group text is treated as untrusted input: members' words cannot redirect where results go, reveal the private working thread, or widen what the run may do. (GRP-03)
+  4. Document results (PDF, DOCX) are delivered as signed, expiring links so delivery does not depend on the customer tenant's file-storage provisioning. (GRP-04)
+  5. A person can drag a file into the chat and have the run use it as input, with the same result-only discipline holding for what comes back. (GRP-05)
+**Research flags**: Proactive 1:1 messaging after a group @mention depends on the bot install scope — the highest derail risk in the milestone; if the scope blocks it, the documented fallback (everything in-group, result-only) is recorded here and carried into Phase 76's known limitations.
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 74 to break down)
+
+### Phase 75: Signal channel
+**Goal**: The same disciplined experience works over Signal through a supervised, version-pinned sidecar, with its own allowlist and its own registration-material safety net.
+**Depends on**: Phase 74 (Teams semantics are the reference Signal parity is measured against)
+**Requirements**: SGNL-01, SGNL-02, SGNL-03, SGNL-04
+**Success Criteria** (what must be TRUE):
+  1. The relay speaks Signal through a supervised sidecar running a pinned version that is never auto-upgraded, sharing credentials over a socket restricted to the relay's OS user. (SGNL-01)
+  2. A group on the relay's Signal number can be allowlisted, and messages from groups that are not allowlisted are rejected. (SGNL-02)
+  3. Every text command, acknowledgement, result and document attachment works in Signal with the same semantics as Teams, using quoted replies in place of threads. (SGNL-03)
+  4. An onboarding path exists for provisioning the relay's number, backing up its registration material, and recovering it, because losing that material means losing the number. (SGNL-04)
+**Research flags**: Pin the exact signal-cli version (locked decision, carried from Phase 68's container definition) and verify the sidecar image's bundled signal-cli age before integrating.
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 75 to break down)
+
+### Phase 76: Ops, onboarding and release
+**Goal**: A customer's admin and an operator can install, deploy and operate the relay without the core team in the room, the threat model is written down, and CI keeps the trust boundary closed after release.
+**Depends on**: Phase 75 (all surfaces exist to be documented and defended)
+**Requirements**: OPS-01, OPS-02, OPS-03, OPS-04, OPS-05
+**Success Criteria** (what must be TRUE):
+  1. A customer's administrator can install the bot into their tenant by following a written package of steps, including what to verify and how to upgrade. (OPS-01)
+  2. An operator can deploy the relay on their own host by following a written playbook covering the reverse proxy, redirect-URI validation, key provisioning and backup. (OPS-02)
+  3. A threat model documents each surface, what authenticates it, and the failure it prevents, and names the accepted residual risks — including the Phase 74 proactive-message fallback decision if install scope forced it. (OPS-03)
+  4. An append-only activity log lets an operator replay a run and answer a customer's "what happened here?" without access to the customer's chat. (OPS-04)
+  5. The adversarial suite and the tenant-isolation test run in CI, so a future change cannot quietly reopen a closed pitfall. (OPS-05)
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 76 to break down)
+
+### v0.7.0 coverage
+
+| Phase | Requirements | Count |
+|-------|--------------|-------|
+| 68 Relay foundation | RELAY-01, RELAY-02, RELAY-03, RELAY-04 | 4 |
+| 69 Inbound authenticity and allowlisting | AUTH-01 … AUTH-06 | 6 |
+| 70 Identity, tenants and requesters | IDNT-01 … IDNT-04 | 4 |
+| 71 Teams 1:1 vertical slice | RUNL-01, RUNL-03, TEAM-01 … TEAM-04 | 6 |
+| 72 Budgets and spend ledger | BUDG-01, BUDG-02, BUDG-03 | 3 |
+| 73 Command surface and run lifecycle | RUNL-02, RUNL-04 … RUNL-07, CMND-01 … CMND-03 | 8 |
+| 74 Group-chat discipline | GRP-01 … GRP-05 | 5 |
+| 75 Signal channel | SGNL-01 … SGNL-04 | 4 |
+| 76 Ops, onboarding and release | OPS-01 … OPS-05 | 5 |
+| **Total** | | **45** |
+
+## Progress
+
+| Phase | Plans Complete | Status | Completed |
+|-------|----------------|--------|-----------|
+| 68. Relay foundation | 0/TBD | Not started | - |
+| 69. Inbound authenticity and allowlisting | 0/TBD | Not started | - |
+| 70. Identity, tenants and requesters | 0/TBD | Not started | - |
+| 71. Teams 1:1 vertical slice | 0/TBD | Not started | - |
+| 72. Budgets and spend ledger | 0/TBD | Not started | - |
+| 73. Command surface and run lifecycle | 0/TBD | Not started | - |
+| 74. Group-chat discipline | 0/TBD | Not started | - |
+| 75. Signal channel | 0/TBD | Not started | - |
+| 76. Ops, onboarding and release | 0/TBD | Not started | - |

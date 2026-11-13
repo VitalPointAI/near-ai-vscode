@@ -86,8 +86,53 @@
 
 | Requirement | Phase |
 |-------------|-------|
-| *Filled by the roadmap* | |
+| RELAY-01 | Phase 68 — Relay foundation *(v0.7.0 RELAY-01: messaging relay workspace — see the naming-trap note at the top of this milestone; not the archived v0.5.0 ciphertext-sync RELAY-01)* |
+| RELAY-02 | Phase 68 — Relay foundation *(v0.7.0 RELAY-02: health check; same naming note)* |
+| RELAY-03 | Phase 68 — Relay foundation |
+| RELAY-04 | Phase 68 — Relay foundation |
+| AUTH-01 | Phase 69 — Inbound authenticity and allowlisting |
+| AUTH-02 | Phase 69 — Inbound authenticity and allowlisting |
+| AUTH-03 | Phase 69 — Inbound authenticity and allowlisting |
+| AUTH-04 | Phase 69 — Inbound authenticity and allowlisting |
+| AUTH-05 | Phase 69 — Inbound authenticity and allowlisting |
+| AUTH-06 | Phase 69 — Inbound authenticity and allowlisting |
+| IDNT-01 | Phase 70 — Identity, tenants and requesters |
+| IDNT-02 | Phase 70 — Identity, tenants and requesters |
+| IDNT-03 | Phase 70 — Identity, tenants and requesters |
+| IDNT-04 | Phase 70 — Identity, tenants and requesters |
+| RUNL-01 | Phase 71 — Teams 1:1 vertical slice (headless composition of the agent engine) |
+| RUNL-02 | Phase 73 — Command surface and run lifecycle |
+| RUNL-03 | Phase 71 — Teams 1:1 vertical slice |
+| RUNL-04 | Phase 73 — Command surface and run lifecycle |
+| RUNL-05 | Phase 73 — Command surface and run lifecycle |
+| RUNL-06 | Phase 73 — Command surface and run lifecycle |
+| RUNL-07 | Phase 73 — Command surface and run lifecycle |
+| CMND-01 | Phase 73 — Command surface and run lifecycle |
+| CMND-02 | Phase 73 — Command surface and run lifecycle |
+| CMND-03 | Phase 73 — Command surface and run lifecycle |
+| GRP-01 | Phase 74 — Group-chat discipline |
+| GRP-02 | Phase 74 — Group-chat discipline |
+| GRP-03 | Phase 74 — Group-chat discipline |
+| GRP-04 | Phase 74 — Group-chat discipline |
+| GRP-05 | Phase 74 — Group-chat discipline |
+| BUDG-01 | Phase 72 — Budgets and spend ledger |
+| BUDG-02 | Phase 72 — Budgets and spend ledger |
+| BUDG-03 | Phase 72 — Budgets and spend ledger |
+| TEAM-01 | Phase 71 — Teams 1:1 vertical slice |
+| TEAM-02 | Phase 71 — Teams 1:1 vertical slice |
+| TEAM-03 | Phase 71 — Teams 1:1 vertical slice (in-group streaming spike + fallback) |
+| TEAM-04 | Phase 71 — Teams 1:1 vertical slice |
+| SGNL-01 | Phase 75 — Signal channel |
+| SGNL-02 | Phase 75 — Signal channel |
+| SGNL-03 | Phase 75 — Signal channel |
+| SGNL-04 | Phase 75 — Signal channel |
+| OPS-01 | Phase 76 — Ops, onboarding and release |
+| OPS-02 | Phase 76 — Ops, onboarding and release |
+| OPS-03 | Phase 76 — Ops, onboarding and release |
+| OPS-04 | Phase 76 — Ops, onboarding and release |
+| OPS-05 | Phase 76 — Ops, onboarding and release |
 
+Coverage: 45 of 45 v0.7.0 requirements mapped, each to exactly one phase.
 ## Phase 25 requirements: Cybersecurity harness
 
 **Defined:** 2026-10-30
