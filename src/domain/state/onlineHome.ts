@@ -63,14 +63,16 @@ export interface OnlineHomeFacts {
 }
 
 /**
- * Where a setup carries on. A saved repository that still exists is never created again: the next step is adding it as a remote, then the sync
+ * Where a setup carries on, given the last step it finished. A saved repository that still exists is never created again: the next step is adding it as a remote, then the sync
  * branch. Without a saved repository (or when GitHub no longer has it) the person starts again at signing in, and is asked public or private again.
  */
 export function nextOnlineHomeStep(progress: OnlineHomeProgress | undefined, facts: OnlineHomeFacts): OnlineHomeStep {
   if (!facts.isRepo) return 'init';
   if (!progress?.repo || !facts.repoExists) return 'signin';
   if (!facts.hasRemote) return 'remote';
-  return progress.step === 'offer-code' || progress.step === 'done' ? progress.step : 'sync';
+  // `step` is the last one finished: once the sync branch is pushed, the turn-on flow is not run a second time.
+  if (progress.step === 'done') return 'done';
+  return progress.step === 'sync' || progress.step === 'offer-code' ? 'offer-code' : 'sync';
 }
 
 export type GitHubErrorKind = 'name-taken' | 'permission' | 'offline' | 'not-found' | 'other';

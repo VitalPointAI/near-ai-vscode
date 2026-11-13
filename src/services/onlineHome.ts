@@ -4,17 +4,19 @@
 // repository. The GitHub token is only ever held in memory: it reaches the GitHub API as an Authorization header and git only through the child
 // process environment, never in arguments, files, settings, logs or messages. No vscode here: the editor-facing parts are in onlineHomeVscode.ts, so
 // tests run on plain node with fakes for GitHub, sign-in and gh.
+import { execFile } from 'node:child_process';
 import { mkdir, readFile, realpath } from 'node:fs/promises';
 import * as path from 'node:path';
 import { redactSecrets } from '../domain/redaction';
-import { ONLINE_HOME_STEPS, VISIBILITY_NOTES, expectedCloneUrl, repoNameFromFolder, validateLogin, validateRepoName } from '../domain/state/onlineHome';
-import type { OnlineHomeMethod, OnlineHomeProgress, OnlineHomeRepo, OnlineHomeStep, Visibility } from '../domain/state/onlineHome';
-import { createUserRepo } from './githubApi';
+import { GITHUB_MESSAGES, ONLINE_HOME_STEPS, VISIBILITY_NOTES, expectedCloneUrl, nextOnlineHomeStep, repoNameFromFolder, validateLogin, validateRepoName } from '../domain/state/onlineHome';
+import type { GitHubErrorKind, OnlineHomeMethod, OnlineHomeProgress, OnlineHomeRepo, OnlineHomeStep, Visibility } from '../domain/state/onlineHome';
+import { GitHubApiError, createUserRepo, getRepo } from './githubApi';
 import type { FetchLike } from './githubApi';
 import { GitNotFoundError, gitText, redactGitMessage, runStateGit } from './stateGit';
 import type { GitRunner } from './stateGit';
 import { stateHomeFor, writeFileAtomic } from './stateHome';
 import type { ProjectStateHome } from './stateHome';
+import { classifyGitFailure, validateRemote } from './stateTransport';
 
 const PROGRESS_FILE = 'online-home.json';
 
@@ -53,12 +55,6 @@ export interface GhCli {
 }
 
 export type GhExec = (args: string[], timeoutMs?: number) => Promise<{ code: number; stdout: string; stderr: string }>;
-
-/** gh run with array arguments, a timeout and prompts disabled. */
-export function systemGhCli(exec?: GhExec): GhCli {
-  void exec;
-  throw new Error('not implemented');
-}
 
 /** What the turn-on flow gets once the remote exists: the remote's name and address, and a git runner that signs in to GitHub for this call only. */
 export interface OnlineHomeRemote { name: string; url: string; git: GitRunner }
@@ -99,16 +95,71 @@ export function withGitHubAuth(runner: GitRunner, token: string): GitRunner {
   });
 }
 
+const GH_TIMEOUT_MS = 30_000;
+
+const defaultGhExec: GhExec = (args, timeoutMs = GH_TIMEOUT_MS) => new Promise((resolve) => {
+  execFile('gh', args, {
+    env: { ...process.env, GH_PROMPT_DISABLED: '1', GH_NO_UPDATE_NOTIFIER: '1', NO_COLOR: '1' },
+    timeout: timeoutMs,
+    maxBuffer: 1024 * 1024,
+    windowsHide: true
+  }, (error, stdout, stderr) => {
+    const code = error === null ? 0 : typeof (error as NodeJS.ErrnoException).code === 'number' ? (error as unknown as { code: number }).code : 127;
+    resolve({ code, stdout: String(stdout), stderr: String(stderr) });
+  });
+});
+
+function ghErrorKind(stderr: string): GitHubErrorKind {
+  if (/already exists/i.test(stderr)) return 'name-taken';
+  if (/\b40[13]\b|not logged in|not authenticated|not accessible|permission|scope|SAML/i.test(stderr)) return 'permission';
+  if (/could not resolve host|no such host|network|timed? ?out|connection (?:refused|reset)|dial tcp/i.test(stderr)) return 'offline';
+  return 'other';
+}
+
+/**
+ * gh run with array arguments, a timeout and prompts switched off. The repository is made with `gh repo create <name> --private|--public` and nothing
+ * else: no source, no push, no clone. The token comes from `gh auth token` into memory only, and is used for git exactly like the VS Code one.
+ */
+export function systemGhCli(exec: GhExec = defaultGhExec): GhCli {
+  return {
+    available: async () => (await exec(['--version'])).code === 0,
+    signedIn: async () => (await exec(['auth', 'status'])).code === 0,
+    token: async () => {
+      const printed = await exec(['auth', 'token']);
+      const value = printed.stdout.trim();
+      return printed.code === 0 && value !== '' ? value : undefined;
+    },
+    createRepo: async (name, visibility) => {
+      if (!validateRepoName(name)) throw new GitHubApiError('other');
+      const made = await exec(['repo', 'create', name, visibility === 'private' ? '--private' : '--public']);
+      if (made.code !== 0) throw new GitHubApiError(ghErrorKind(made.stderr));
+      const match = /https:\/\/github\.com\/([A-Za-z0-9-]{1,39})\/([A-Za-z0-9._-]{1,100}?)(?:\.git)?(?:\s|$)/.exec(made.stdout);
+      let owner = match?.[1];
+      if (owner === undefined || match?.[2]?.toLowerCase() !== name.toLowerCase()) {
+        const login = await exec(['api', 'user', '--jq', '.login']);
+        owner = login.code === 0 ? login.stdout.trim() : undefined;
+      }
+      if (owner === undefined || !validateLogin(owner)) throw new GitHubApiError('other');
+      return { owner, name };
+    }
+  };
+}
+
 function progressFile(home: ProjectStateHome): string {
   return path.join(home.paths.sync, PROGRESS_FILE);
 }
 
 const METHODS: readonly OnlineHomeMethod[] = ['vscode', 'gh', 'url'];
 
-function parseRepo(value: unknown): OnlineHomeRepo | undefined {
+function parseRepo(value: unknown, method: OnlineHomeMethod): OnlineHomeRepo | undefined {
   if (typeof value !== 'object' || value === null) return undefined;
   const repo = value as Record<string, unknown>;
   if (typeof repo.owner !== 'string' || typeof repo.name !== 'string' || typeof repo.url !== 'string') return undefined;
+  if (method === 'url') {
+    // A pasted address: only what the paste check would accept, and nothing it says about the repository is trusted.
+    if (repo.visibility !== 'unknown' || repo.owner.length > 39 || repo.name.length > 100 || pastedAddressProblem(repo.url) !== undefined) return undefined;
+    return { owner: repo.owner, name: repo.name, url: repo.url, visibility: 'unknown' };
+  }
   if (repo.visibility !== 'public' && repo.visibility !== 'private') return undefined;
   if (!validateLogin(repo.owner) || !validateRepoName(repo.name) || repo.url !== expectedCloneUrl(repo.owner, repo.name)) return undefined;
   return { owner: repo.owner, name: repo.name, url: repo.url, visibility: repo.visibility };
@@ -124,7 +175,7 @@ export async function readProgress(home: ProjectStateHome): Promise<OnlineHomePr
   const method = METHODS.find((candidate) => candidate === record.method);
   if (!step || !method || typeof record.startedAt !== 'string' || record.startedAt.length > 40) return undefined;
   if (record.repo === undefined) return { step, method, startedAt: record.startedAt };
-  const repo = parseRepo(record.repo);
+  const repo = parseRepo(record.repo, method);
   return repo ? { step, method, repo, startedAt: record.startedAt } : undefined;
 }
 
@@ -136,11 +187,34 @@ export async function writeProgress(home: ProjectStateHome, progress: OnlineHome
   await writeFileAtomic(progressFile(home), `${JSON.stringify(record, null, 2)}\n`);
 }
 
-const NOT_ALLOWED = 'GitHub did not allow creating the repository. Sign in again and allow repository access.';
+const NOT_ALLOWED = GITHUB_MESSAGES.permission;
+const NOT_AVAILABLE = 'GitHub sign-in is not available in this editor.';
 const NO_GIT = 'Git is not installed, so an online home cannot be set up. Everything still works on this computer.';
+const NESTED = "This folder is inside another git repository, so it cannot get its own online home here. Open that repository's folder instead.";
+const NOT_EMPTY = 'That repository is not empty. Paste the address of a new, empty repository.';
+const BAD_ADDRESS = 'That address cannot be used. Paste the address of a repository, for example https://github.com/you/project.git.';
+const HAS_SECRET = 'Paste the address without a password or token in it.';
+const BAD_NAME = 'That name cannot be used. Use letters, numbers, dots, dashes and underscores.';
+const NOTHING_CREATED = 'Nothing was created on GitHub.';
+const MAX_TRIES = 5;
 
 function clean(text: string): string {
   return redactSecrets(redactGitMessage(text));
+}
+
+/** Why a pasted address cannot be used, or undefined when it can. A password or token in the address would end up in the project's git settings. */
+function pastedAddressProblem(value: string): string | undefined {
+  const checked = validateRemote(value, []);
+  if (!('kind' in checked) || checked.kind !== 'url') return BAD_ADDRESS;
+  if (/^(?:https|ssh):\/\//i.test(value)) {
+    try {
+      const parsed = new URL(value);
+      if (parsed.password !== '' || (parsed.protocol === 'https:' && parsed.username !== '')) return HAS_SECRET;
+    } catch {
+      return BAD_ADDRESS;
+    }
+  }
+  return undefined;
 }
 
 async function sameFolder(a: string, b: string): Promise<boolean> {
@@ -148,72 +222,185 @@ async function sameFolder(a: string, b: string): Promise<boolean> {
   return first === second;
 }
 
-/** The project's remote names; a name that does not exist yet is chosen for the new one. */
-async function remoteNames(git: GitRunner, root: string): Promise<string[]> {
-  const listed = await git(['-C', root, 'remote']);
-  return listed.code === 0 ? gitText(listed).split('\n').map((line) => line.trim()).filter((line) => line !== '') : [];
+/** 'repo' when the folder is a repository of its own, 'nested' when it sits inside someone else's, 'none' when there is no repository. */
+async function inspectFolder(git: GitRunner, root: string): Promise<'repo' | 'nested' | 'none'> {
+  const top = await git(['-C', root, 'rev-parse', '--show-toplevel']);
+  if (top.code !== 0) return 'none';
+  return await sameFolder(gitText(top), root) ? 'repo' : 'nested';
 }
+
+/** The project's remotes and their addresses exactly as written in its own git settings (a rewrite rule is not applied). */
+async function remoteEntries(git: GitRunner, root: string): Promise<Array<{ name: string; url: string }>> {
+  const listed = await git(['-C', root, 'config', '--get-regexp', '^remote\\..*\\.url$']);
+  if (listed.code !== 0) return [];
+  const entries: Array<{ name: string; url: string }> = [];
+  for (const line of gitText(listed).split('\n')) {
+    const match = /^remote\.(.+)\.url (.*)$/.exec(line.trim());
+    if (match) entries.push({ name: match[1] as string, url: match[2] as string });
+  }
+  return entries;
+}
+
+type Fresh = { repo: OnlineHomeRepo; method: OnlineHomeMethod; token?: string };
 
 export async function onlineHomeFlow(input: OnlineHomeInput): Promise<OnlineHomeResult> {
   const { ui, root } = input;
   const base = input.git ?? runStateGit;
   const say = (text: string): void => ui.progress(clean(text));
   const tell = (text: string): void => ui.message(clean(text));
+  const stop = (status: 'cancelled' | 'failed', message: string): OnlineHomeResult => { tell(message); return { status, message: clean(message) }; };
   try {
     if (!(await ui.confirmStart())) return { status: 'declined' };
     const home = input.home ?? stateHomeFor(root);
     await home.ensure();
     const saved = await readProgress(home);
     const startedAt = saved?.startedAt ?? new Date().toISOString();
-    const method: OnlineHomeMethod = 'vscode';
+    let method: OnlineHomeMethod = saved?.method ?? 'vscode';
     let repo: OnlineHomeRepo | undefined = saved?.repo;
+    let token: string | undefined;
     const save = async (step: OnlineHomeStep): Promise<void> => {
       await writeProgress(home, { step, method, repo, startedAt });
       await input.onStep?.(step);
     };
 
-    // 1. A repository of its own.
-    const top = await base(['-C', root, 'rev-parse', '--show-toplevel']);
-    const isRepo = top.code === 0 && await sameFolder(gitText(top), root);
-    if (!isRepo) {
+    // A repository of its own.
+    const folder = await inspectFolder(base, root);
+    if (folder === 'nested') return stop('failed', NESTED);
+    if (folder === 'none') {
       say('Setting up git in this folder…');
       const made = await base(['-C', root, 'init', '-q']);
-      if (made.code !== 0) { tell('Git could not set up this folder. Nothing was created on GitHub.'); return { status: 'failed', message: 'Git could not set up this folder.' }; }
+      if (made.code !== 0) return stop('failed', 'Git could not set up this folder. Nothing was created on GitHub.');
       await save('init');
     }
 
-    // 2. Sign in, ask public or private, create the repository.
-    say('Signing in to GitHub…');
-    const token = await input.auth.token();
-    if (token === undefined) { tell(NOT_ALLOWED); return { status: 'cancelled', message: NOT_ALLOWED }; }
-    await save('signin');
-    const visibility = await ui.pickVisibility(VISIBILITY_NOTES);
-    if (visibility === undefined) return { status: 'cancelled', message: 'Nothing was created on GitHub.' };
-    await save('visibility');
-    const name = (await ui.askName(repoNameFromFolder(path.basename(root))))?.trim();
-    if (name === undefined || !validateRepoName(name)) return { status: 'cancelled', message: 'Nothing was created on GitHub.' };
-    say(`Creating your ${visibility} repository "${name}" on GitHub…`);
-    const created = await createUserRepo(token, { name, private: visibility === 'private' }, input.fetchFn);
-    repo = { owner: created.owner, name: created.name, url: created.url, visibility: created.visibility };
-    await save('create');
+    // A saved setup: is its repository still there, and is it already a remote?
+    let repoExists = false;
+    if (repo) {
+      if (method === 'url') repoExists = true;
+      else {
+        token = method === 'gh' ? await input.gh?.token() : await input.auth.available() ? await input.auth.token() : undefined;
+        if (token === undefined) repoExists = true;
+        else {
+          try { repoExists = (await getRepo(token, repo.owner, repo.name, input.fetchFn)) !== undefined; } catch (error) {
+            if (error instanceof GitHubApiError) return stop('failed', error.message);
+            throw error;
+          }
+        }
+      }
+    }
+    const hasRemote = repo !== undefined && (await remoteEntries(base, root)).some((entry) => entry.url === repo?.url);
+    const step = nextOnlineHomeStep(saved, { isRepo: true, hasRemote, repoExists });
+    if (step === 'done' && repo) {
+      tell('This project already has an online home.');
+      return { status: 'done', remote: { name: (await remoteEntries(base, root)).find((entry) => entry.url === repo?.url)?.name ?? 'origin', url: repo.url } };
+    }
 
-    // 3. Add it as the project's remote.
-    say('Adding it to this project…');
-    const taken = await remoteNames(base, root);
-    const remoteName = taken.includes('origin') ? 'near-ai-home' : 'origin';
-    const added = await base(['-C', root, 'remote', 'add', remoteName, repo.url]);
-    if (added.code !== 0) { tell('Git could not add the online repository to this project. Run the setup again to retry.'); return { status: 'failed', message: 'Git could not add the online repository.' }; }
-    await save('remote');
+    // Sign in, ask public or private (or take a pasted address), create the repository.
+    if (step === 'init' || step === 'signin' || step === 'visibility' || step === 'create') {
+      repo = undefined;
+      const fresh = await createFresh();
+      if ('status' in fresh) return fresh;
+      repo = fresh.repo;
+      method = fresh.method;
+      token = fresh.token;
+      await save('create');
+    }
+    const current = repo as OnlineHomeRepo;
 
-    // 4. The turn-on flow pushes the encrypted sync branch.
-    say('Saving your encrypted project state there…');
-    const finished = await input.afterRemote({ name: remoteName, url: repo.url, git: withGitHubAuth(base, token) });
-    if (finished === false) return { status: 'sync-incomplete', remote: { name: remoteName, url: repo.url }, message: 'The online repository is set up, but syncing is not turned on yet.' };
-    await save('sync');
+    // Add it as the project's remote.
+    let entry = (await remoteEntries(base, root)).find((candidate) => candidate.url === current.url);
+    if (!entry) {
+      say('Adding it to this project…');
+      const taken = (await remoteEntries(base, root)).map((candidate) => candidate.name);
+      const name = ['origin', 'near-ai-home'].find((candidate) => !taken.includes(candidate));
+      if (name === undefined) return stop('failed', 'This project already has remotes named origin and near-ai-home, so the online repository was not added. Remove one and run the setup again.');
+      const added = await base(['-C', root, 'remote', 'add', name, current.url]);
+      if (added.code !== 0) return stop('failed', 'Git could not add the online repository to this project. Run the setup again to retry.');
+      entry = { name, url: current.url };
+      await save('remote');
+    }
+    const remote = { name: entry.name, url: current.url };
+
+    // The turn-on flow pushes the encrypted sync branch.
+    if (step !== 'offer-code') {
+      say('Saving your encrypted project state there…');
+      const finished = await input.afterRemote({ name: remote.name, url: remote.url, git: token === undefined ? base : withGitHubAuth(base, token) });
+      if (finished === false) return { status: 'sync-incomplete', remote, message: 'The online repository is set up, but syncing is not turned on yet.' };
+      await save('sync');
+    }
     await save('done');
-    return { status: 'done', remote: { name: remoteName, url: repo.url } };
+    return { status: 'done', remote };
+
+    async function createFresh(): Promise<Fresh | OnlineHomeResult> {
+      let chosen: OnlineHomeMethod;
+      let secret: string | undefined;
+      if (await input.auth.available()) {
+        chosen = 'vscode';
+        say('Signing in to GitHub…');
+        secret = await input.auth.token();
+        if (secret === undefined) return stop('cancelled', NOT_ALLOWED);
+      } else {
+        tell(NOT_AVAILABLE);
+        const ghReady = input.gh !== undefined && await input.gh.available() && await input.gh.signedIn();
+        const choice = ghReady ? await ui.pickFallback({ gh: true }) : 'url';
+        if (choice === undefined) return { status: 'cancelled', message: NOTHING_CREATED };
+        chosen = choice;
+        if (choice === 'gh') {
+          secret = await input.gh?.token();
+          if (secret === undefined) return stop('failed', NOT_ALLOWED);
+        }
+      }
+      method = chosen;
+      repo = undefined;
+      await save('signin');
+      return chosen === 'url' ? pasteAddress() : createRepository(chosen, secret as string);
+    }
+
+    async function createRepository(chosen: 'vscode' | 'gh', secret: string): Promise<Fresh | OnlineHomeResult> {
+      const visibility = await ui.pickVisibility(VISIBILITY_NOTES);
+      if (visibility === undefined) return { status: 'cancelled', message: NOTHING_CREATED };
+      await save('visibility');
+      let suggested = repoNameFromFolder(path.basename(root));
+      let problem: string | undefined;
+      for (let attempt = 0; attempt < MAX_TRIES; attempt += 1) {
+        const answer = (await ui.askName(suggested, problem))?.trim();
+        if (answer === undefined) return { status: 'cancelled', message: NOTHING_CREATED };
+        if (!validateRepoName(answer)) { problem = BAD_NAME; suggested = repoNameFromFolder(answer); continue; }
+        say(`Creating your ${visibility} repository "${answer}" on GitHub…`);
+        try {
+          const made = chosen === 'gh' && input.gh
+            ? await input.gh.createRepo(answer, visibility)
+            : await createUserRepo(secret, { name: answer, private: visibility === 'private' }, input.fetchFn);
+          if (!validateLogin(made.owner) || !validateRepoName(made.name)) return stop('failed', GITHUB_MESSAGES.other);
+          return { repo: { owner: made.owner, name: made.name, url: expectedCloneUrl(made.owner, made.name), visibility }, method: chosen, token: secret };
+        } catch (error) {
+          if (!(error instanceof GitHubApiError)) throw error;
+          if (error.kind !== 'name-taken') return stop('failed', error.message);
+          problem = error.message;
+          suggested = answer;
+        }
+      }
+      return stop('cancelled', `${NOTHING_CREATED} Try again with a different name.`);
+    }
+
+    async function pasteAddress(): Promise<Fresh | OnlineHomeResult> {
+      let problem: string | undefined;
+      for (let attempt = 0; attempt < MAX_TRIES; attempt += 1) {
+        const pasted = (await ui.askRepoUrl(problem))?.trim();
+        if (pasted === undefined) return { status: 'cancelled', message: 'Nothing was changed.' };
+        problem = pastedAddressProblem(pasted);
+        if (problem !== undefined) continue;
+        // The repository must be empty: its sync branch is the first thing in it, and nothing of someone else's is mixed in.
+        const listed = await base(['-C', root, 'ls-remote', pasted]);
+        if (listed.code !== 0) { problem = classifyGitFailure(listed).message; continue; }
+        if (gitText(listed) !== '') { problem = NOT_EMPTY; continue; }
+        const named = /^https:\/\/github\.com\/([A-Za-z0-9-]{1,39})\/([A-Za-z0-9._-]{1,100}?)(?:\.git)?\/?$/.exec(pasted);
+        return { repo: { owner: named?.[1] ?? '', name: named?.[2] ?? '', url: pasted, visibility: 'unknown' }, method: 'url' };
+      }
+      return stop('cancelled', 'Nothing was changed. Try again with the address of a new, empty repository.');
+    }
   } catch (error) {
-    if (error instanceof GitNotFoundError) { tell(NO_GIT); return { status: 'failed', message: NO_GIT }; }
+    if (error instanceof GitNotFoundError) return stop('failed', NO_GIT);
     throw error;
   } finally {
     ui.done?.();

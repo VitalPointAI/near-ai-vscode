@@ -71,8 +71,9 @@ class FakeUi implements OnlineHomeUi {
   }
 }
 
-function fakeAuth(token: string | undefined = FAKE_TOKEN, available = true): GitHubAuth & { tokenCalls: number } {
-  const auth = { tokenCalls: 0, available: () => Promise.resolve(available), token: () => { auth.tokenCalls += 1; return Promise.resolve(token); } };
+/** `null` stands for a person who closed the sign-in without allowing it. */
+function fakeAuth(token: string | null = FAKE_TOKEN, available = true): GitHubAuth & { tokenCalls: number } {
+  const auth = { tokenCalls: 0, available: () => Promise.resolve(available), token: () => { auth.tokenCalls += 1; return Promise.resolve(token ?? undefined); } };
   return auth;
 }
 
@@ -280,7 +281,7 @@ test('GitHub answers become one plain sentence each: a taken name asks for anoth
   // Refused permission, both from the API and from the person closing the sign-in.
   for (const [dir, fetchFn, auth] of [
     [await projectFolder('refused'), (() => Promise.resolve({ status: 403, text: () => Promise.resolve('{"message":"Resource not accessible"}') })) as FetchLike, fakeAuth()],
-    [await projectFolder('closed'), undefined, fakeAuth(undefined)]
+    [await projectFolder('closed'), undefined, fakeAuth(null)]
   ] as const) {
     const refusedUi = new FakeUi();
     const refused = await onlineHomeFlow({ root: dir, ui: refusedUi, auth, fetchFn, git: spyGit().git, afterRemote: () => Promise.resolve(true) });
