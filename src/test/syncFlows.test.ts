@@ -14,7 +14,7 @@ import { StateKeys } from '../services/stateKeys';
 import { archiveThread } from '../services/threadArchive';
 import {
   BLUR_IDLE_MS, COALESCE_MS, DEACTIVATE_PUSH_MS, PUSH_BATCH_MS, RETURN_PULL_AFTER_MS, SYNC_INTERVAL_DEFAULT, SyncScheduler, clampSyncInterval, enterCodeFlow, keepKeyFlow,
-  afterRemoteFor, localHomeState, newCodeFlow, readSyncSettings, resolveRemote, tokenRunner, turnOffFlow, turnOnFlow, type SyncClock, type SyncRequest
+  afterRemoteFor, localHomeState, newCodeFlow, readSyncSettings, resolveRemote, statusSentence, tokenRunner, turnOffFlow, turnOnFlow, type SyncClock, type SyncRequest
 } from '../services/syncFlows';
 import type { SyncOutcome } from '../services/stateSync';
 import type { GitRunner } from '../services/stateGit';
@@ -576,7 +576,7 @@ test('offline failures back off 1, 2, 4 ... up to 30 minutes and a success reset
   h.scheduler.runEnded();
   await h.clock.advance(COALESCE_MS);
   assert.equal(h.calls.length, 1);
-  assert.deepEqual(h.scheduler.status(), { state: 'attention', message: "Couldn't reach your git host, will retry." });
+  assert.deepEqual(h.scheduler.status(), { state: 'attention', message: OFFLINE.failure?.message }, 'the control reads the transport\'s own sentence, the one the toast shows');
   const gaps: number[] = [];
   for (let attempt = 0; attempt < 7; attempt += 1) {
     const last = h.calls.at(-1)?.at as number;
@@ -630,9 +630,10 @@ test('the status says what happened in one plain sentence, never a URL with cred
   assert.ok(!/alice|s3cr3t/.test(refused.message ?? ''), 'no credentials in the status');
   assert.match(refused.message ?? '', /could not be opened/);
 
-  h.outcome(async () => ({ kind: 'failed', message: 'Git asked for a sign-in this editor cannot show.', failure: { kind: 'auth', message: 'x' } }));
-  await h.scheduler.syncNow();
-  assert.deepEqual(h.scheduler.status(), { state: 'attention', message: 'Sync needs you to sign in. Choose Sync Project Now.' });
+  h.outcome(async () => ({ kind: 'failed', message: 'Git asked for a sign-in this editor cannot show.', failure: { kind: 'auth', message: 'Git asked for a sign-in this editor cannot show.' } }));
+  h.scheduler.runEnded();
+  await h.clock.advance(COALESCE_MS);
+  assert.deepEqual(h.scheduler.status(), { state: 'attention', message: 'Sync needs you to sign in. Choose Sync Project Now.' }, 'an automatic sync points at the click');
 
   h.outcome(async () => ({ kind: 'failed', message: 'This project has no online home yet.', failure: { kind: 'no-remote', message: 'This project has no online home yet.' } }));
   await h.scheduler.syncNow();
@@ -796,4 +797,56 @@ test('the check runs at activation, after the online-home, turn-on and turn-off 
   }
   assert.match(chat, /chat-ready'\) \{[^\n]*refreshSyncHome/, 'on chat-ready');
   assert.match(chat, /refreshSyncHome\(/, 'and on panel set-up');
+});
+
+// ---- plan 27-24: one sentence per failure, in the toast and on the control (G-27-4d) ---------------------------------------------------------
+
+const FAILURE_SENTENCES = {
+  offline: 'Could not reach your git host. Your work here is safe; sync will try again.',
+  rejected: 'Another computer saved changes first. Sync will combine them with yours and try again.',
+  auth: 'Git asked for a sign-in this editor cannot show. Run git fetch once in a terminal in this project so your credential helper can save it.',
+  policy: 'Your git host did not accept the sync branch.',
+  'git-missing': 'Git is not installed, so sync is off. Everything still works on this computer.',
+  'invalid-remote': 'That address cannot be used for sync.'
+} as const;
+const failureOutcome = (kind: keyof typeof FAILURE_SENTENCES): SyncOutcome => ({ kind: 'failed', message: FAILURE_SENTENCES[kind], failure: { kind, message: FAILURE_SENTENCES[kind] } });
+
+test('statusSentence is the transport\'s sentence for every failure, except a sign-in missing on an automatic sync, and the outcome\'s own message otherwise', () => {
+  for (const kind of Object.keys(FAILURE_SENTENCES) as Array<keyof typeof FAILURE_SENTENCES>) {
+    const outcome = failureOutcome(kind);
+    assert.equal(statusSentence(outcome, true), FAILURE_SENTENCES[kind], `${kind}, a click`);
+    assert.equal(statusSentence(outcome, false), kind === 'auth' ? 'Sync needs you to sign in. Choose Sync Project Now.' : FAILURE_SENTENCES[kind], `${kind}, automatic`);
+  }
+  assert.equal(statusSentence({ kind: 'refused', message: 'The copy online could not be opened. Nothing was changed.' }, false), 'The copy online could not be opened. Nothing was changed.');
+  assert.equal(statusSentence({ kind: 'synced', message: OK.message }, true), OK.message);
+});
+
+test('after each failure kind the control carries exactly the sentence the toast shows, for a click and for an automatic sync', async () => {
+  for (const kind of Object.keys(FAILURE_SENTENCES) as Array<keyof typeof FAILURE_SENTENCES>) {
+    const outcome = failureOutcome(kind);
+    const click = harness({ interval: 0 });
+    click.outcome(async () => outcome);
+    await click.scheduler.syncNow();
+    assert.deepEqual(click.scheduler.status(), { state: 'attention', message: statusSentence(outcome, true) }, `${kind}: a click`);
+
+    const automatic = harness({ interval: 0 });
+    automatic.outcome(async () => outcome);
+    automatic.scheduler.runEnded();
+    await automatic.clock.advance(COALESCE_MS);
+    assert.deepEqual(automatic.scheduler.status(), { state: 'attention', message: statusSentence(outcome, false) }, `${kind}: automatic`);
+  }
+  const none = harness({ interval: 0 });
+  none.outcome(async () => ({ kind: 'failed', message: 'This project has no online home yet.', failure: { kind: 'no-remote', message: 'This project has no online home yet.' } }));
+  await none.scheduler.syncNow();
+  assert.equal(none.scheduler.status().state, 'no-home', 'a missing remote is still its own state');
+});
+
+test('the sentence a person reads is worded once: no "Couldn\'t" in the sync sources, and Sync Project Now builds its warning with statusSentence', () => {
+  const src = path.join(__dirname, '..', '..', 'src', 'services');
+  for (const file of ['syncFlows.ts', 'stateTransport.ts']) assert.ok(!readFileSync(path.join(src, file), 'utf8').includes("Couldn't"), `${file} has no second wording`);
+  const commands = readFileSync(path.join(src, 'syncCommands.ts'), 'utf8');
+  const start = commands.indexOf("'nearAi.sync.now'");
+  const block = commands.slice(start, commands.indexOf('registerCommand', start + 10));
+  assert.match(block, /statusSentence\(outcome, true\)/);
+  assert.ok(!/showWarningMessage\(outcome\.message\)/.test(block), 'the toast does not use the outcome\'s raw message');
 });
