@@ -12,7 +12,7 @@ import { StateRefusedError } from '../domain/state/keys';
 import { generateRecoveryCode, parseRecoveryCode } from '../domain/state/recoveryCode';
 import { withGitHubAuth, type OnlineHomeRemote, type OnlineHomeResult } from './onlineHome';
 import { redactSecrets } from '../domain/redaction';
-import { runStateGit, gitText, redactGitMessage, type GitRunner } from './stateGit';
+import { runStateGit, gitText, redactGitMessage, TIMED_OUT_CODE, type GitRunner } from './stateGit';
 import { ProjectStateHome } from './stateHome';
 import type { StateKeys } from './stateKeys';
 import type { RunMarker, RunState } from './runMarkers';
@@ -96,6 +96,22 @@ export async function readSyncSettings(home: ProjectStateHome): Promise<SyncSett
 async function writeSyncSettings(home: ProjectStateHome, change: Partial<SyncSettings>): Promise<void> {
   const meta = await home.ensure();
   await home.updateMeta({ sync: { ...(meta.sync ?? {}), ...change } });
+}
+
+/**
+ * Whether the project has an online home, from a local check only (D-16, D-14): git's own list of the project's remotes. Nothing is fetched, nothing contacts
+ * a network, nothing is written. A folder that is not a repository, or has no remote, is 'no-home'; 'unknown' when git is missing or the check did not finish,
+ * so the control keeps what it says and the turn-on flow explains.
+ */
+export async function localHomeState(root: string, git: GitRunner = runStateGit): Promise<'home' | 'no-home' | 'unknown'> {
+  try {
+    const listed = await git(['-C', root, 'remote']);
+    if (listed.code === TIMED_OUT_CODE) return 'unknown';
+    const names = listed.code === 0 ? gitText(listed).split('\n').map((line) => line.trim()).filter((line) => line !== '') : [];
+    return names.length > 0 ? 'home' : 'no-home';
+  } catch {
+    return 'unknown';
+  }
 }
 
 export type RemoteChoice = { kind: 'remote'; name: string } | { kind: 'none' } | { kind: 'cancelled' };
@@ -515,6 +531,19 @@ export class SyncScheduler {
   /** The project has no remote (or lost it): the control says so and offers the online-home setup. */
   public setNoHome(): void {
     this.publish({ state: 'no-home', message: 'This project has no online home yet.' });
+  }
+
+  /**
+   * What a local look at the project's remotes found (localHomeState), for as long as sync is off: no remote reads "No online home · Set up", a remote reads
+   * "Sync off · Turn on". Ignored while sync is on (the scheduler's own outcomes say the state then), and silent when the answer is the same as before.
+   */
+  public setHomeKnown(hasHome: boolean): void {
+    if (this.on) return;
+    if (hasHome) {
+      if (this.current.state === 'no-home') this.publish({ state: 'off' });
+      return;
+    }
+    if (this.current.state !== 'no-home') this.setNoHome();
   }
 
   /** Called when the project opens: with sync on, a pull starts at once and is not waited for. */

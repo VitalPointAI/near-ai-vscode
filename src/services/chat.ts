@@ -25,7 +25,7 @@ import { threadStoreFor } from './threadStore';
 import { applyRetention, protectedThreadIds } from './threadArchive';
 import { onRunEnded, runEnded, runStarted } from './runEndHooks';
 import { handlePickupAction, markPickupSeen, pickupCardModel, writePickupPointer } from './pickupCard';
-import { currentSyncStatus, onSyncStatus } from './syncCommands';
+import { currentSyncStatus, onSyncStatus, refreshSyncHome } from './syncCommands';
 import { redactSyncText, SYNC_PROMPT_DISMISSED_KEY, syncPanelMessage } from './syncPanel';
 import { copyAttachmentIntoProject, prepareAttachments, stageAttachment, StagedAttachment } from '../agent/attachments';
 import { TeamDefinition, TeamLibrary, teamAgents } from '../agent/teams';
@@ -159,6 +159,11 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     const root = workspaceRoot();
     if (disposed) return;
     void panel.webview.postMessage(syncPanelMessage(root ? currentSyncStatus(root) : { state: 'off' }, context.workspaceState as MementoLike | undefined));
+  };
+  // The local look at the project's remotes (nothing fetched, nothing written): whatever it changes reaches the control through the listener below.
+  const refreshSyncHomeHere = (): void => {
+    const root = workspaceRoot();
+    if (root && !disposed) void refreshSyncHome(root).catch(() => undefined);
   };
   const syncWatch = onSyncStatus((root) => {
     const current = workspaceRoot();
@@ -489,7 +494,7 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
       return;
     }
     // A (re)loaded view shows the conversation on screen again, with the prompts still waiting pinned.
-    if (message.type === 'chat-ready') { show(onScreen()); sendSyncStatus(); return; }
+    if (message.type === 'chat-ready') { show(onScreen()); sendSyncStatus(); refreshSyncHomeHere(); return; }
     if (message.type === 'switch-conversation') { const target = tabs.find((candidate) => candidate.id === message.id); if (target) show(target); return; }
     if (message.type === 'close-conversation') { await closeConversation(message.id); return; }
     if (message.type === 'new-chat') { await newConversation(); return; }
@@ -871,6 +876,7 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
   await sendProfileStatus(panel, auth);
   await setupNudge.refresh();
   sendSyncStatus();
+  refreshSyncHomeHere();
   await pickup.send();
   await loadModels(panel, auth);
 }

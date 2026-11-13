@@ -60,6 +60,14 @@ function projectTests(): Array<[string, () => Promise<void>]> {
       await vscode.commands.executeCommand('nearAiChatView.focus');
       await observer.next('fromView', (message) => message.type === 'load-models');
     }],
+    ['a project with no online home opens with "No online home · Set up" on the sync control, without a click (G-27-4b)', async () => {
+      // The temporary project has no git repository, so the local check of its remotes finds no home. The page is told as soon as the panel is open.
+      const status = await observer.next('toView', (message) => message.type === 'sync-status' && (message.model as { state?: string } | undefined)?.state === 'no-home');
+      const model = status.model as { label: string; action: string };
+      assert.equal(model.label, 'No online home · Set up');
+      assert.equal(model.action, 'set-up-home');
+      assert.equal(existsSync(path.join(workspace, '.git')), false, 'the check wrote no repository into the folder');
+    }],
     ['a local profile lists the runtime\'s models in the picker', async () => {
       server = await fakeModelServer();
       const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}/v1`;

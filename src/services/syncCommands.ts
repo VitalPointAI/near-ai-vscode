@@ -16,7 +16,7 @@ import { stateKeysFor } from './stateKeys';
 import { profileSyncHooks } from './stateRestore';
 import type { SyncOutcome } from './stateSync';
 import {
-  SyncScheduler, afterRemoteFor, buildStateSync, enterCodeFlow, keepKeyFlow, newCodeFlow, readSyncSettings, resolveRemote, tokenRunner, turnOffFlow, turnOnFlow,
+  SyncScheduler, afterRemoteFor, buildStateSync, enterCodeFlow, keepKeyFlow, localHomeState, newCodeFlow, readSyncSettings, resolveRemote, tokenRunner, turnOffFlow, turnOnFlow,
   type SyncEnv, type SyncParts, type SyncStatus, type SyncUi
 } from './syncFlows';
 import { threadStoreFor } from './threadStore';
@@ -49,6 +49,19 @@ export function currentSyncStatus(root: string): SyncStatus {
 /** Editor closing: one bounded sync attempt for every project, never relied on and never failing the close. */
 export async function flushSyncOnClose(): Promise<void> {
   await Promise.all([...runtimes.values()].map((runtime) => runtime.scheduler.flushOnClose().catch(() => undefined)));
+}
+
+/**
+ * While sync is off, works out from a local look at the project's remotes whether it has an online home, and tells the control (D-16: "No online home ·
+ * Set up" from the moment the panel opens). Nothing is fetched, no network is contacted and nothing is written. With sync on the scheduler's own state
+ * stands; before the editor has set sync up for this project it does nothing.
+ */
+export async function refreshSyncHome(root: string): Promise<void> {
+  const runtime = runtimes.get(path.resolve(root));
+  if (!runtime || runtime.scheduler.isEnabled()) return;
+  const found = await localHomeState(runtime.root, runtime.parts.git);
+  if (found === 'unknown' || runtime.scheduler.isEnabled()) return;
+  runtime.scheduler.setHomeKnown(found === 'home');
 }
 
 const settings = (): vscode.WorkspaceConfiguration => vscode.workspace.getConfiguration('nearAi');
@@ -175,6 +188,7 @@ export function registerSyncCommands(context: vscode.ExtensionContext, auth: Aut
     vscode.commands.registerCommand('nearAi.sync.turnOn', withRuntime(async (runtime) => {
       const result = await turnOnFlow({ env: runtime.env, ui, onlineHome: onlineHome(runtime) });
       note(runtime, result.status, result.message);
+      await refreshSyncHome(runtime.root);
     })),
     vscode.commands.registerCommand('nearAi.sync.now', withRuntime(async (runtime) => {
       if (!runtime.scheduler.isEnabled()) {
@@ -190,10 +204,14 @@ export function registerSyncCommands(context: vscode.ExtensionContext, auth: Aut
       note(runtime, result.status, result.message);
     })),
     vscode.commands.registerCommand('nearAi.sync.newRecoveryCode', withRuntime((runtime) => newCodeFlow({ env: runtime.env, ui }))),
-    vscode.commands.registerCommand('nearAi.sync.turnOff', withRuntime((runtime) => turnOffFlow({ env: runtime.env, ui }))),
+    vscode.commands.registerCommand('nearAi.sync.turnOff', withRuntime(async (runtime) => {
+      await turnOffFlow({ env: runtime.env, ui });
+      await refreshSyncHome(runtime.root);
+    })),
     vscode.commands.registerCommand('nearAi.sync.onlineHome', withRuntime(async (runtime) => {
       const result = await onlineHome(runtime)(afterRemoteFor(runtime.env, ui));
       if (result.status === 'done') note(runtime, 'on', 'Your project is encrypted and saved on your git host.');
+      await refreshSyncHome(runtime.root);
     })),
     // The key file setting: changing it runs the flow that makes the change safe; a flow that did not finish puts the setting back.
     vscode.workspace.onDidChangeConfiguration((event) => {
@@ -213,6 +231,7 @@ export function registerSyncCommands(context: vscode.ExtensionContext, auth: Aut
   void readSyncSettings(runtime.env.home).then((found) => {
     runtime.scheduler.setEnabled(found.enabled);
     runtime.scheduler.start();
+    return refreshSyncHome(root);
   }).catch(() => undefined);
   void offerOnlineHomeAtStart(context, root, () => vscode.commands.executeCommand('nearAi.sync.onlineHome')).catch(() => undefined);
 }
