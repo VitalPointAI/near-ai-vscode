@@ -59,7 +59,7 @@ Plans:
   4. Turning sync on shows a high-entropy recovery code once (never stored or logged); on a second machine with the same project cloned, entering it restores chats, runs, comparisons, model choices and the NEAR AI key without re-entering the key, through an encrypted bundle on a dedicated branch of the project's own git remote (never `main`); a leak test proves no plaintext transcript, key or prompt reaches the remote. (SYNC-04, SYNC-05)
   5. Opening the project on a different interface or machine shows a "Pick up where you left off" card (last chat, last run state, current GSD phase and next step); one click reopens it and nothing re-runs or spends money. (SYNC-07)
   6. All git work for sync is done by the extension and reported in plain words; conflicts from two machines merge per record with no lost entries (tested). 0.4.20 ships through the release PR with CHANGELOG and README updated. (SYNC-05, SYNC-08)
-**Plans:** 24/25 plans executed (11 waves; gap closure 27-19 to 27-25 from 27-UAT.md runs before 27-16)
+**Plans:** 24/36 plans executed (11 waves; gap closure 27-19 to 27-25 from 27-UAT.md, then 27-26 to 27-36 from the PR #40 review 27-REVIEW.md in 5 waves, all before 27-16)
 
 Plans:
 - [x] 27-01-PLAN.md — Wire format and crypto core: recovery code, scrypt wrap, padded AEAD objects, sealed manifest, every refusal (owner confirms the contract first)
@@ -86,6 +86,17 @@ Plans:
 - [x] 27-23-PLAN.md — Gap G-27-6b (and 6a repair with a click): "Put This Project's Code Online", setup re-run offers the push; README and SECURITY
 - [x] 27-24-PLAN.md — Gaps G-27-4b, G-27-4d: "No online home · Set up" on panel open; one sentence per sync failure
 - [x] 27-25-PLAN.md — Gap G-27-4d: one time formatter for card and control; invitation after connecting NEAR AI
+- [ ] 27-26-PLAN.md — Review B1 (git): sync's mirror and hooks out of the project; planted hook and mirror config run nothing
+- [ ] 27-27-PLAN.md — Review B1 (where state goes): sync switch, remote choice and online-home progress in each editor's storage; guarded legacy adoption
+- [ ] 27-28-PLAN.md — Review B1 (keys), m3: key files trusted only when private, untracked and checked; tracked state folder refused; meta.json lock; key cache by state id
+- [ ] 27-29-PLAN.md — Review B1 (agent), checkpoints, m1: one shared protected-path rule for .near-ai and *.git; state folder reads ask; Revert bounded to the workspace
+- [ ] 27-30-PLAN.md — Review B2, B3, state.json, new-code message: one sync owner and lock per root, wrap generations, reset rule tied to the remote tip
+- [ ] 27-31-PLAN.md — Review join findings: refuse while runs are live, lock across copy and swap, catch-up, keep what was not carried
+- [ ] 27-32-PLAN.md — Review task list: text matching before the item number; no reminder after a closing question
+- [ ] 27-33-PLAN.md — Review model choices: one role writes one role; visible clear and descriptions; cleared choices sync; status cache
+- [ ] 27-34-PLAN.md — Review run liveness: hold sends to a conversation running elsewhere and follow it; migrated markers; activity re-check; migration back-off
+- [ ] 27-35-PLAN.md — Review minors: hidden chat view drains; Chat-view footer kept as a notice; hex digests not redacted; repo names never gh options
+- [ ] 27-36-PLAN.md — Review docs and the one full gate: README, SECURITY.md, CHANGELOG honest and complete; full review dispositions
 - [ ] 27-16-PLAN.md — Phase gate, owner check on the real host, README/SECURITY, feature PR and release 0.4.20
 
 ## Milestone v0.7.0: Messaging relay — Teams and Signal
