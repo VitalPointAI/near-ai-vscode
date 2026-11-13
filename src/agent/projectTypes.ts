@@ -1,5 +1,6 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import * as path from 'node:path';
+import { RESEARCH_CITATION_STYLE } from './researchIntegrity';
 import { guidanceFingerprint } from './teamFingerprints';
 import { TEMPLATE_HISTORY } from './teamTemplateHistory';
 import { renderTeam, TeamMember } from './teams';
@@ -47,8 +48,7 @@ const RESEARCH_FIRST = 'First read .planning/STYLE.md (audience, purpose, tone, 
 /** The workflow order, which the lead follows and the guidance repeats. */
 export const RESEARCH_WORKFLOW = 'investigator → source-verifier → analyst → writer → plagiarism-checker → red-team → editor';
 
-/** The citation standard every research team uses unless a recorded owner decision in STYLE.md names another. */
-export const RESEARCH_CITATION_STYLE = 'the Chicago Manual of Style, 18th edition, notes and bibliography';
+export { RESEARCH_CITATION_STYLE };
 
 const INVESTIGATOR = [
   RESEARCH_FIRST,

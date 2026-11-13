@@ -275,6 +275,8 @@
       for (const output of proposal.proposal.outputs) list.append(el('li', '', output.name + ': ' + output.format + ' (from ' + output.from + ')'));
       box.append(list);
     }
+    // What the builder added on its own (the plagiarism checker on a research team), said before the person accepts.
+    for (const note of proposal.proposal.notes || []) box.append(el('p', 'hint', note));
     if (proposal.problems && proposal.problems.length) {
       const notes = el('ul', 'issues');
       for (const problem of proposal.problems) notes.append(issueLine({ message: problem }, 'warning'));

@@ -8,6 +8,7 @@
 //
 // Pure apart from reading nothing: no I/O, no clock. The benchmark runs it through the extension's own agent loop, so what is measured is the model plus
 // the role's real tools.
+import { RESEARCH_MEMBER } from '../agent/researchIntegrity';
 import type { TaskKind } from './tasks';
 
 export interface RoleTask {
@@ -169,7 +170,7 @@ export const TOKEN = 'sk-live-4f9a2b7c1d8e3f6a';
 // work, so its score means something, and `fallbackRoleTask` says plainly that it was guessed rather than written for the role.
 const KIND_BY_NAME: Array<[RegExp, TaskKind]> = [
   [/plan|architect|roadmap|analyst|strateg/i, 'planning'],
-  [/research|writer|editor|analyst|sourc|investigat/i, 'research'],
+  [new RegExp(`writer|editor|analyst|plagiar|${RESEARCH_MEMBER.source}`, 'i'), 'research'],
   [/execut|implement|build|worker|fix|dev/i, 'coding'],
   [/review|test|verif|debug|audit|secur|red-?team|critic/i, 'coding'],
   [/coordin|lead|manager|orchestrat/i, 'planning']
