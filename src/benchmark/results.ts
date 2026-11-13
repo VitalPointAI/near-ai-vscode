@@ -69,6 +69,15 @@ export interface SavedRun {
 /** `reuse`: run only what has no saved result for the current task version; `rerun`: run everything. */
 export type RunMode = 'reuse' | 'rerun';
 
+const RUN_MODES: readonly string[] = ['reuse', 'rerun'];
+
+/**
+ * Mode values an older build wrote, each with the current mode it meant. `parseSavedRun` maps through this table before it validates, so every reader of a
+ * saved comparison (the store, the editor-storage migration, the sync records) accepts an older file and the next renamed value is added here and nowhere else.
+ * No key may also be a current mode, so the table can never shadow one.
+ */
+export const LEGACY_RUN_MODES: Readonly<Record<string, RunMode>> = Object.freeze({ run: 'rerun' });
+
 export function privacyOf(model: Pick<ModelInfo, 'privacyBoundary'> | undefined): SavedModel['privacy'] {
   return model?.privacyBoundary === 'tee' ? 'tee' : model?.privacyBoundary === 'local' ? 'local' : model?.privacyBoundary === 'cloud' ? 'forwarded' : 'unknown';
 }
@@ -602,7 +611,8 @@ export function parseSavedRun(text: string): SavedRun | undefined {
   if (!value || typeof value !== 'object') return undefined;
   const run = value as Record<string, unknown>;
   if (run.format !== RUN_FORMAT || run.version !== 1 || !isString(run.id) || !RUN_ID.test(run.id) || !isString(run.startedAt)) return undefined;
-  if (!['running', 'completed', 'cancelled', 'stopped'].includes(run.status as string) || !['full', 'short'].includes(run.taskSet as string) || !['reuse', 'rerun'].includes(run.mode as string) || !isNumber(run.runsPerTask)) return undefined;
+  const mode = typeof run.mode === 'string' && Object.hasOwn(LEGACY_RUN_MODES, run.mode) ? LEGACY_RUN_MODES[run.mode] : run.mode;
+  if (!['running', 'completed', 'cancelled', 'stopped'].includes(run.status as string) || !['full', 'short'].includes(run.taskSet as string) || typeof mode !== 'string' || !RUN_MODES.includes(mode) || !isNumber(run.runsPerTask)) return undefined;
   const models = Array.isArray(run.models) ? run.models.filter((model): model is SavedModel => Boolean(model) && isString((model as SavedModel).id) && ['tee', 'local', 'forwarded', 'unknown'].includes((model as SavedModel).privacy) && isString((model as SavedModel).catalogVersion)) : [];
   const tasks = Array.isArray(run.tasks) ? run.tasks.filter((entry): entry is SavedRun['tasks'][number] => Boolean(entry) && isString((entry as { id: unknown }).id) && TASK_KINDS.includes((entry as { kind: TaskKind }).kind) && isString((entry as { version: unknown }).version)) : [];
   const rows = Array.isArray(run.rows) ? run.rows.map(parseRow).filter((row): row is ResultRow => Boolean(row)) : [];
@@ -610,7 +620,7 @@ export function parseSavedRun(text: string): SavedRun | undefined {
     format: RUN_FORMAT, version: 1, id: run.id, startedAt: run.startedAt, ...(isString(run.finishedAt) ? { finishedAt: run.finishedAt } : {}),
     // A run still marked running was cut off (VS Code closed): it is shown as stopped.
     status: run.status === 'running' ? 'stopped' : run.status as SavedRun['status'], ...(isString(run.stopReason) ? { stopReason: run.stopReason } : run.status === 'running' ? { stopReason: 'VS Code closed before it finished.' } : {}),
-    taskSet: run.taskSet as TaskSetId, mode: run.mode as RunMode, runsPerTask: run.runsPerTask, models: models.map((model) => ({ id: model.id, privacy: model.privacy, ...(isString(model.forwardedTo) ? { forwardedTo: model.forwardedTo } : {}), catalogVersion: model.catalogVersion })),
+    taskSet: run.taskSet as TaskSetId, mode: mode as RunMode, runsPerTask: run.runsPerTask, models: models.map((model) => ({ id: model.id, privacy: model.privacy, ...(isString(model.forwardedTo) ? { forwardedTo: model.forwardedTo } : {}), catalogVersion: model.catalogVersion })),
     tasks: tasks.map((entry) => ({ id: entry.id, kind: entry.kind, version: entry.version })), rows
   };
 }
