@@ -5,9 +5,9 @@ milestone_name: Messaging relay — Teams and Signal
 current_phase: 27
 current_phase_name: Project state follows the project across interfaces and machines (0.4.20)
 status: planning
-stopped_at: Completed 27-06-PLAN.md
-last_updated: "2026-11-13T15:27:50.215Z"
-state_head: 50442f92f4e9dca475581ac27659d1810026f78c
+stopped_at: Completed 27-07-PLAN.md
+last_updated: "2026-11-13T15:39:27.011Z"
+state_head: 342cf873b111e7804cc87c83d8d1469fc1c01484
 progress:
   total_phases: 9
   completed_phases: 0
@@ -76,8 +76,8 @@ None yet.
 
 ## Session
 
-**Last session:** 2026-11-13T15:27:50.197Z
-**Stopped at:** Completed 27-06-PLAN.md
+**Last session:** 2026-11-13T15:39:26.993Z
+**Stopped at:** Completed 27-07-PLAN.md
 **Resume file:** None
 
 ## Performance Metrics
@@ -93,6 +93,7 @@ None yet.
 | Phase 27 P05 | 10 min | 3 tasks | 9 files |
 | Phase 27 P17 | 11 min | 3 tasks | 7 files |
 | Phase 27 P06 | 20 min | 3 tasks | 14 files |
+| Phase 27 P07 | 10 min | 3 tasks | 9 files |
 
 ## Decisions
 
@@ -120,3 +121,5 @@ None yet.
 - [Phase 27]: 27-06: the conversation log pins reopened-thread transcript entries when it trims live output, so no history is cut off
 - [Phase 27]: 27-06: tool steps are paired with results by nearest earlier call id, and a tool card loads its output (textContent in a pre) only when first opened
 - [Phase 27]: 27-06: a reopened thread reaches the page in batches of 200 and is drawn 50 per animation frame; later host messages queue behind it
+- [Phase 27]: 27-07: reopening an archived thread touches it (lastUsedAt = now) so it ranks first; restores asked for by the rank rule or crash recovery keep its own last-use time
+- [Phase 27]: 27-07: archive removal of live files is refused when log size, context.enc or meta.enc changed since the snapshot; retention also restores archived threads the rank rule puts live
