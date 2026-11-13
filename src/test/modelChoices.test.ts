@@ -391,3 +391,66 @@ test('the settings readers stat choices.json at most once a second, and a write 
   assert.equal(projectChoiceFor(root, 'defaultModel', options), 'm-merged');
   assert.ok(file.endsWith('choices.json'));
 });
+
+// ---- a cleared choice stays cleared (plan 27-33, Task 2) ----
+
+test('removeProjectChoice keeps a cleared entry: no choice, the user value shows through, and the import offer does not offer it again', async () => {
+  const root = await tempProject();
+  await writeProjectChoice(root, 'nearAi.agent.deepModel', 'm-deep', 'edA.1');
+  await writeProjectChoice(root, 'nearAi.agent.fastModel', 'm-fast', 'edA.1');
+  assert.equal(await removeProjectChoice(root, 'nearAi.agent.deepModel', 'edB.1'), true);
+  assert.equal(projectChoiceFor(root, 'agent.deepModel'), undefined);
+  assert.equal(readProjectChoicesSync(root)['nearAi.agent.deepModel'], undefined);
+  assert.equal(projectChoiceFor(root, 'agent.fastModel'), 'm-fast', 'another setting is untouched');
+  const stored = readChoicesFileSync(root).values['nearAi.agent.deepModel'];
+  assert.equal(stored?.value, null);
+  assert.equal(stored?.writer, 'edB.1');
+  assert.ok(Number.isFinite(Date.parse(stored?.at ?? '')));
+  assert.deepEqual(choicesInEffect(root, () => ({})), ['nearAi.agent.fastModel'], 'a cleared choice is not in effect');
+  assert.equal(resolveSetting({ globalValue: 'user-deep' }, projectChoiceFor(root, 'agent.deepModel') as string | undefined, 'def'), 'user-deep');
+  const inspected = { 'nearAi.agent.deepModel': { globalValue: 'user-deep', defaultValue: 'd' } };
+  assert.deepEqual(importOffer(inspected, readChoicesFileSync(root)), [], 'the import offer does not offer a setting the person cleared');
+  assert.equal(await removeProjectChoice(root, 'nearAi.agent.deepModel', 'edB.1'), false, 'clearing what is already cleared changes nothing');
+});
+
+test('merging: a newer cleared entry beats an older choice from another computer, and a newer choice replaces an older cleared entry', async () => {
+  const root = await tempProject();
+  await mergeProjectChoices(root, { 'nearAi.agent.deepModel': { value: null, at: '2026-11-12T10:00:00.000Z', writer: 'edA.1' } });
+  assert.equal(readChoicesFileSync(root).values['nearAi.agent.deepModel']?.value, null);
+  assert.equal(await mergeProjectChoices(root, { 'nearAi.agent.deepModel': { value: 'old', at: '2026-11-12T09:00:00.000Z', writer: 'edB.1' } }), false, 'the older choice does not undo the clear');
+  assert.equal(projectChoiceFor(root, 'agent.deepModel'), undefined);
+  assert.equal(await mergeProjectChoices(root, { 'nearAi.agent.deepModel': { value: null, at: '2026-11-12T10:00:00.000Z', writer: 'edA.1' } }), false, 'the same cleared entry again changes nothing');
+  assert.equal(await mergeProjectChoices(root, { 'nearAi.agent.deepModel': { value: 'newer', at: '2026-11-12T11:00:00.000Z', writer: 'edB.1' } }), true);
+  assert.equal(projectChoiceFor(root, 'agent.deepModel'), 'newer');
+  assert.equal(await mergeProjectChoices(root, { 'nearAi.agent.deepModel': { value: null, at: '2026-11-12T12:00:00.000Z', writer: 'edA.1' } }), true, 'a later clear wins over the choice');
+  assert.equal(projectChoiceFor(root, 'agent.deepModel'), undefined);
+  assert.equal(await mergeProjectChoices(root, { 'nearAi.agent.fastModel': { value: null, at: 'not a time', writer: 'x' } }), false, 'a cleared entry needs a valid time');
+});
+
+test('undoing a first-time choice leaves a cleared entry; writing after a clear is a choice again', async () => {
+  const root = await tempProject();
+  const first = projectUndoFor(root, 'nearAi.agent.fastModel');
+  await writeProjectChoice(root, 'nearAi.agent.fastModel', 'm-1', 'edA.1');
+  await undoProjectChoice(first, 'edA.1');
+  assert.equal(projectChoiceFor(root, 'agent.fastModel'), undefined);
+  assert.equal(readChoicesFileSync(root).values['nearAi.agent.fastModel']?.value, null);
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  assert.equal(await writeProjectChoice(root, 'nearAi.agent.fastModel', 'm-1', 'edA.1'), true, 'the same model after a clear is a change');
+  assert.equal(projectChoiceFor(root, 'agent.fastModel'), 'm-1');
+});
+
+test('a clear is later than the choice it clears even inside one millisecond, and a choices file from an earlier build reads as before', async () => {
+  const root = await tempProject();
+  await stateHomeFor(root).ensure();
+  const future = new Date(Date.now() + 60_000).toISOString();
+  await writeFile(stateHomeFor(root).paths.choices, JSON.stringify({ version: 1, values: { 'nearAi.agent.deepModel': { value: 'm-deep', at: future, writer: 'edA.1' }, 'nearAi.agent.roleModels': { value: { a: 'x' }, at: future, writer: 'edA.1' } } }));
+  assert.equal(projectChoiceFor(root, 'agent.deepModel'), 'm-deep');
+  assert.deepEqual(projectChoiceFor(root, 'agent.roleModels'), { a: 'x' });
+  assert.equal(await removeProjectChoice(root, 'nearAi.agent.deepModel', 'edB.1'), true);
+  const cleared = readChoicesFileSync(root).values['nearAi.agent.deepModel'];
+  assert.ok((cleared?.at ?? '') > future, 'the clear is stamped after the entry it clears');
+  assert.deepEqual(projectChoiceFor(root, 'agent.roleModels'), { a: 'x' });
+  // A cleared entry with a missing time, or a non-null junk value, is ignored like any other bad entry.
+  await writeFile(stateHomeFor(root).paths.choices, JSON.stringify({ version: 1, values: { 'nearAi.agent.deepModel': { value: null }, 'nearAi.agent.fastModel': { value: null, at: 'x' } } }));
+  assert.deepEqual(readChoicesFileSync(root).values, {});
+});

@@ -6,7 +6,7 @@ import { RunCheckpoints } from '../agent/checkpoints';
 import { ComparisonStore } from '../benchmark/store';
 import { RUN_FORMAT, type SavedRun } from '../benchmark/results';
 import { generateRecoveryCode, parseRecoveryCode } from '../domain/state/recoveryCode';
-import { readProjectChoicesSync, writeProjectChoice } from '../services/modelChoices';
+import { readChoicesFileSync, readProjectChoicesSync, removeProjectChoice, undoProjectChoice, projectUndoFor, writeProjectChoice } from '../services/modelChoices';
 import { CHECKPOINT_SYNC_BYTES, CHECKPOINT_SYNC_RUNS, SYNCED_KINDS } from '../services/stateRecords';
 import { MAX_PUSH_ATTEMPTS } from '../services/stateSync';
 import { bareRemote, fixtureGit } from './helpers/gitFixtures';
@@ -205,6 +205,36 @@ test('comparisons, model choices and the pick-up pointer sync, and the newer cho
   assert.equal(readProjectChoicesSync(a.root)['nearAi.defaultModel']?.value, 'near/chosen-on-b', 'the later choice wins');
   assert.equal(readProjectChoicesSync(a.root)['nearAi.agent.deepModel']?.value, 'near/deep-a', 'another setting is untouched');
   assert.equal((await b.sync.sync()).pushed, false);
+});
+
+test('a project choice cleared or undone on one computer stays cleared on both, and a further sync changes nothing', async () => {
+  const { a, b } = await pair();
+  await writeProjectChoice(a.root, 'nearAi.defaultModel', 'near/chosen-on-a', a.writer);
+  await writeProjectChoice(a.root, 'nearAi.agent.deepModel', 'near/deep-a', a.writer);
+  assert.equal((await a.sync.sync()).kind, 'synced');
+  assert.equal((await b.sync.sync()).kind, 'synced');
+  assert.equal(readProjectChoicesSync(b.root)['nearAi.defaultModel']?.value, 'near/chosen-on-a');
+  await later();
+  assert.equal(await removeProjectChoice(a.root, 'nearAi.defaultModel', a.writer), true);
+  // The undo of a first-time choice is a clear too: B must not get the choice back from A's older copy.
+  const first = projectUndoFor(a.root, 'nearAi.agent.deepModel');
+  await undoProjectChoice({ ...first, previous: undefined }, a.writer);
+  assert.equal((await a.sync.sync()).kind, 'synced');
+  assert.equal((await b.sync.sync()).kind, 'synced');
+  assert.equal((await a.sync.sync()).kind, 'synced');
+  for (const machineOf of [a, b]) {
+    assert.equal(readProjectChoicesSync(machineOf.root)['nearAi.defaultModel'], undefined, `${machineOf.name}: cleared`);
+    assert.equal(readProjectChoicesSync(machineOf.root)['nearAi.agent.deepModel'], undefined, `${machineOf.name}: undone`);
+    assert.equal(readChoicesFileSync(machineOf.root).values['nearAi.defaultModel']?.value, null, `${machineOf.name}: kept as a cleared entry`);
+  }
+  assert.equal((await a.sync.sync()).pushed, false);
+  assert.equal((await b.sync.sync()).pushed, false);
+  // Choosing again on B, later than the clear, comes back to A.
+  await later();
+  await writeProjectChoice(b.root, 'nearAi.defaultModel', 'near/again-on-b', b.writer);
+  assert.equal((await b.sync.sync()).kind, 'synced');
+  assert.equal((await a.sync.sync()).kind, 'synced');
+  assert.equal(readProjectChoicesSync(a.root)['nearAi.defaultModel']?.value, 'near/again-on-b');
 });
 
 test('spend lines from both computers are united by id and version, and nothing is lost', async () => {
