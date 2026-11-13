@@ -5,9 +5,9 @@ milestone_name: Messaging relay — Teams and Signal
 current_phase: 27
 current_phase_name: Project state follows the project across interfaces and machines (0.4.20)
 status: planning
-stopped_at: Completed 27-03-PLAN.md
-last_updated: "2026-11-13T14:10:19.702Z"
-state_head: e8f62ff3b2a22dd245f3ba724463ab234cfc2fe0
+stopped_at: Completed 27-04-PLAN.md
+last_updated: "2026-11-13T14:21:13.729Z"
+state_head: 81ef1f510795aa4aba1ea0b244846562ccd48720
 progress:
   total_phases: 9
   completed_phases: 0
@@ -76,8 +76,8 @@ None yet.
 
 ## Session
 
-**Last session:** 2026-11-13T14:10:19.686Z
-**Stopped at:** Completed 27-03-PLAN.md
+**Last session:** 2026-11-13T14:21:13.713Z
+**Stopped at:** Completed 27-04-PLAN.md
 **Resume file:** None
 
 ## Performance Metrics
@@ -87,6 +87,7 @@ None yet.
 | Phase 27 P02 | 13 min | 3 tasks | 12 files |
 | Phase 27 P01 | 8 min | 3 tasks | 7 files |
 | Phase 27 P03 | 11min | 3 tasks | 15 files |
+| Phase 27 P04 | 11 min | 3 tasks | 12 files |
 
 ## Decisions
 
@@ -97,3 +98,6 @@ None yet.
 - [Phase 27]: 27-03: exclusive create is temp file plus hard link (wx fallback), so a reader never sees a partial key or meta file; ensure() repairs a missing inner .gitignore
 - [Phase 27]: 27-03: a SecretStorage data key is trusted only against meta.keyCheck; transcriptKey() is the writer path, dataKey() the non-creating reader path
 - [Phase 27]: 27-03: the sealed NEAR AI key copy is asked once per scope per host, released only to its sealed endpoint; no sync remote setting declared (D-09)
+- [Phase 27]: 27-04: run liveness across editors by writer id plus 30 s heartbeat; the pid is trusted only for the same editor, any other editor's run is live while its marker is under 3 minutes old — A pid from another editor lives in another pid namespace (code-server container); trusting it caused double spend
+- [Phase 27]: 27-04: only this editor's cut-off markers reach autoResumeChoice; another editor's cut-off run keeps its Resume button (SYNC-07); markers written to the old per-extension storage by 0.4.19 are no longer read — Spending money on a foreign run always takes the person's click (D-03)
+- [Phase 27]: 27-04: checkpoints are format 2 (root-relative inside the project, absolute and marked outside), a relative path that is absolute or climbs out is refused on load; sub-agent worktrees stay in the editor's own storage — Checkpoints must be portable between editors and machines without a revert ever writing outside the project (T-27-17)

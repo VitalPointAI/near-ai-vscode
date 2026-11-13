@@ -59,13 +59,13 @@ Plans:
   4. Turning sync on shows a high-entropy recovery code once (never stored or logged); on a second machine with the same project cloned, entering it restores chats, runs, comparisons, model choices and the NEAR AI key without re-entering the key, through an encrypted bundle on a dedicated branch of the project's own git remote (never `main`); a leak test proves no plaintext transcript, key or prompt reaches the remote. (SYNC-04, SYNC-05)
   5. Opening the project on a different interface or machine shows a "Pick up where you left off" card (last chat, last run state, current GSD phase and next step); one click reopens it and nothing re-runs or spends money. (SYNC-07)
   6. All git work for sync is done by the extension and reported in plain words; conflicts from two machines merge per record with no lost entries (tested). 0.4.20 ships through the release PR with CHANGELOG and README updated. (SYNC-05, SYNC-08)
-**Plans:** 3/18 plans executed (11 waves)
+**Plans:** 4/18 plans executed (11 waves)
 
 Plans:
 - [x] 27-01-PLAN.md — Wire format and crypto core: recovery code, scrypt wrap, padded AEAD objects, sealed manifest, every refusal (owner confirms the contract first)
 - [x] 27-02-PLAN.md — Merge laws: records, forks, tombstones, append-only thread entries, property tests; random temp names in shared writers
 - [x] 27-03-PLAN.md — Project state home and shared data key on one host (D-04, D-10), new settings, sealed NEAR AI key copy for a second editor (D-15)
-- [ ] 27-04-PLAN.md — Run liveness across editors (writer + heartbeat), markers, checkpoints and activity in the state home
+- [x] 27-04-PLAN.md — Run liveness across editors (writer + heartbeat), markers, checkpoints and activity in the state home
 - [ ] 27-05-PLAN.md — Full thread history captured before compaction; shared ThreadStore; no pruning (D-07, D-12, D-13)
 - [ ] 27-06-PLAN.md — Reopen with every message: tool-step cards, chunked rendering, history list from the index
 - [ ] 27-07-PLAN.md — 5 live conversations, crash-safe archive, reopen makes live (D-08)
@@ -267,7 +267,7 @@ Plans:
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 27. Project state follows the project (0.4.20) | 3/18 | Context gathered | - |
+| 27. Project state follows the project (0.4.20) | 4/18 | Context gathered | - |
 | 68. Relay foundation | 0/TBD | Not started | - |
 | 69. Inbound authenticity and allowlisting | 0/TBD | Not started | - |
 | 70. Identity, tenants and requesters | 0/TBD | Not started | - |
