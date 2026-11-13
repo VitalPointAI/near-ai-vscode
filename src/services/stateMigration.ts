@@ -6,11 +6,19 @@
 // It is safe to run any number of times and in any order of editors: a second run finds everything present and writes nothing; editor A then B and B
 // then A leave the same state. An item that cannot be read yet (a transcript sealed with a key this editor does not have) is counted as locked and tried
 // again the next time the editor starts. No vscode here, so the tests run on plain node.
-import { readFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { mkdir, readFile, readdir, stat } from 'node:fs/promises';
 import * as path from 'node:path';
+import { ComparisonStore } from '../benchmark/store';
+import { parseSavedRun, RUN_ID, serializeRun, type SavedRun } from '../benchmark/results';
+import { LIVE_CONVERSATIONS_DEFAULT } from '../domain/state/retention';
 import { messagesToEntries } from '../domain/state/threadCapture';
 import type { ThreadEntry } from '../domain/state/threadEntries';
-import { ProjectStateHome } from './stateHome';
+import { ActivityStore } from './activityStore';
+import { parseRunMarker, type RunMarker } from './runMarkers';
+import { mirrorProjectSpend } from './spendMirror';
+import { ProjectStateHome, writeFileAtomic } from './stateHome';
+import { applyRetention } from './threadArchive';
 import type { ImportedThread, ThreadStore } from './threadStore';
 import { projectFolderHash, TranscriptStore, type Transcript } from './transcripts';
 
@@ -108,8 +116,14 @@ async function migrateTranscripts(sources: MigrationSources, threads: ThreadStor
         if (await isSealed(path.join(folder, `${id}.json`))) { report.threads.locked += 1; report.lockedIds.push(id); } else report.threads.skipped += 1;
         return;
       }
-      const transcript = await old.load(id);
-      const imported = transcript ? importedThread(transcript, sources.writer) : undefined;
+      let imported: { thread: ImportedThread } | undefined;
+      try {
+        const transcript = await old.load(id);
+        imported = transcript ? importedThread(transcript, sources.writer) : undefined;
+      } catch {
+        // A file that opens but holds something that is not a conversation (a message with no text, say) is not a conversation.
+        imported = undefined;
+      }
       if (!imported) { report.threads.skipped += 1; return; }
       const outcome = await threads.importThread(id, imported.thread);
       report.threads[outcome] += 1;
@@ -155,12 +169,179 @@ function importedThread(transcript: Transcript, writer: string): { thread: Impor
   };
 }
 
+// ---- run markers ----------------------------------------------------------------------------------------------------------------------
+
+const MARKER_TIME = (marker: RunMarker): number => Date.parse(marker.endedAt ?? marker.activeAt);
+
+/** Whether `candidate` is later than `current`: by last sign of life or end, an ended marker over an open one at the same time, then by text, so the choice never depends on order. */
+function markerLater(candidate: RunMarker, current: RunMarker): boolean {
+  const a = MARKER_TIME(candidate);
+  const b = MARKER_TIME(current);
+  if (a !== b) return a > b;
+  if (Boolean(candidate.endedAt) !== Boolean(current.endedAt)) return Boolean(candidate.endedAt);
+  return JSON.stringify(candidate) > JSON.stringify(current);
+}
+
+/** Copies the editor's run markers for the project, so a run that was in flight when the editor was upgraded can still be offered for resume. */
+async function migrateMarkers(sources: MigrationSources, home: ProjectStateHome, prepare: () => Promise<void>, report: MigrationReport, options: MigrationOptions): Promise<void> {
+  const folder = path.join(sources.globalStorageDir, 'runs', projectFolderHash(sources.root));
+  for (const name of (await readdir(folder).catch(() => [] as string[])).filter((item) => item.endsWith('.json')).sort()) {
+    const id = name.slice(0, -5);
+    if (!ID.test(id)) continue;
+    try {
+      const marker = parseRunMarker(JSON.parse(await readFile(path.join(folder, name), 'utf8')), id);
+      if (!marker) report.skipped += 1;
+      else {
+        const target = path.join(home.paths.runs, name);
+        const existing = await readFile(target, 'utf8').then((content) => parseRunMarker(JSON.parse(content), id), () => undefined);
+        if (!existing || markerLater(marker, existing)) {
+          await prepare();
+          await mkdir(home.paths.runs, { recursive: true, mode: 0o700 });
+          await writeFileAtomic(target, `${JSON.stringify(marker)}\n`);
+          report.markers += 1;
+        }
+      }
+    } catch {
+      report.skipped += 1;
+    }
+    await options.afterItem?.({ kind: 'marker', id });
+  }
+}
+
+// ---- checkpoints ----------------------------------------------------------------------------------------------------------------------
+
+type SavedSnapshot = ({ rel: string } | { abs: string; outside: true }) & { original: string | null };
+
+const CHECKPOINT_FILE = /^([A-Za-z0-9][A-Za-z0-9._-]{3,80})\.json$/;
+
+function insideRoot(root: string, file: string): string | undefined {
+  const relative = path.relative(root, file);
+  return relative && !relative.startsWith('..') && !path.isAbsolute(relative) ? relative.split(path.sep).join('/') : undefined;
+}
+
+/** A relative path from a saved checkpoint, only when it stays inside the project. */
+function safeRelative(rel: unknown): string | undefined {
+  if (typeof rel !== 'string' || !rel || rel.includes('\0') || path.isAbsolute(rel) || /^[A-Za-z]:/.test(rel) || rel.split(/[\\/]/).includes('..')) return undefined;
+  return rel;
+}
+
+/** The snapshots of a saved checkpoint in either format, as format 2 entries; a malformed item is dropped. */
+function snapshotsOf(value: unknown, root: string): SavedSnapshot[] {
+  const found: SavedSnapshot[] = [];
+  const original = (item: unknown): string | null | undefined => (item === null || typeof item === 'string' ? item : undefined);
+  if (Array.isArray(value)) {
+    for (const item of value as Array<Record<string, unknown>>) {
+      const content = original(item?.original);
+      if (!item || typeof item.path !== 'string' || !path.isAbsolute(item.path) || content === undefined) continue;
+      const rel = insideRoot(root, item.path);
+      found.push(rel ? { rel, original: content } : { abs: item.path, outside: true, original: content });
+    }
+    return found;
+  }
+  const saved = value as { format?: unknown; snapshots?: unknown } | null;
+  if (!saved || saved.format !== 2 || !Array.isArray(saved.snapshots)) return found;
+  for (const item of saved.snapshots as Array<Record<string, unknown>>) {
+    const content = original(item?.original);
+    if (!item || content === undefined) continue;
+    if (item.outside === true && typeof item.abs === 'string' && path.isAbsolute(item.abs)) { found.push({ abs: item.abs, outside: true, original: content }); continue; }
+    const rel = safeRelative(item.rel);
+    if (rel) found.push({ rel, original: content });
+  }
+  return found;
+}
+
+/**
+ * Copies this project's checkpoints. The editor keeps one flat folder for every project, so a run belongs to this project when its id is in the
+ * project's activity history or one of its saved files is inside the project. Another project's checkpoints are not copied, and one already in the
+ * state home is left as it is (a run id is never reused).
+ */
+async function migrateCheckpoints(sources: MigrationSources, home: ProjectStateHome, prepare: () => Promise<void>, report: MigrationReport, options: MigrationOptions): Promise<void> {
+  const folder = path.join(sources.globalStorageDir, 'checkpoints');
+  const names = (await readdir(folder).catch(() => [] as string[])).filter((name) => CHECKPOINT_FILE.test(name)).sort();
+  if (!names.length) return;
+  const root = path.resolve(sources.root);
+  const projectRuns = new Set((await new ActivityStore(root).list().catch(() => [])).flatMap((session) => (session.runId ? [session.runId] : [])));
+  for (const name of names) {
+    const runId = name.slice(0, -5);
+    const target = path.join(home.paths.checkpoints, name);
+    if (!(await stat(target).catch(() => undefined))) {
+      try {
+        const snapshots = snapshotsOf(JSON.parse(await readFile(path.join(folder, name), 'utf8')), root);
+        const mine = projectRuns.has(runId) || snapshots.some((snapshot) => 'rel' in snapshot);
+        if (mine && snapshots.length) {
+          await prepare();
+          await mkdir(home.paths.checkpoints, { recursive: true, mode: 0o700 });
+          await writeFileAtomic(target, JSON.stringify({ format: 2, snapshots }));
+          report.checkpoints += 1;
+        } else if (mine) report.skipped += 1;
+      } catch {
+        report.skipped += 1;
+      }
+    }
+    await options.afterItem?.({ kind: 'checkpoint', id: runId });
+  }
+}
+
+// ---- comparisons ----------------------------------------------------------------------------------------------------------------------
+
+/** Whether the editor's copy of a comparison should replace the one in the state home: the later finished, then the greater text, so order never matters. */
+function runPreferred(candidate: SavedRun, current: SavedRun): boolean {
+  const a = candidate.finishedAt ?? candidate.startedAt;
+  const b = current.finishedAt ?? current.startedAt;
+  if (a !== b) return a > b;
+  return serializeRun(candidate) > serializeRun(current);
+}
+
+/** Copies the editor's saved model comparisons (they are not per project) into the state home's comparisons folder, so Compare Models shows them in every editor. */
+async function migrateComparisons(sources: MigrationSources, home: ProjectStateHome, prepare: () => Promise<void>, report: MigrationReport, options: MigrationOptions): Promise<void> {
+  const folder = path.join(sources.globalStorageDir, 'evals');
+  const names = (await readdir(folder).catch(() => [] as string[])).filter((name) => name.endsWith('.json') && RUN_ID.test(name.slice(0, -5))).sort();
+  if (!names.length) return;
+  const destination = new ComparisonStore(home.paths.comparisons, async () => { await prepare(); });
+  for (const name of names) {
+    const id = name.slice(0, -5);
+    try {
+      const run = parseSavedRun(await readFile(path.join(folder, name), 'utf8'));
+      if (!run || run.id !== id) report.skipped += 1;
+      else {
+        const existing = await destination.load(id);
+        if (!existing || (runPreferred(run, existing) && serializeRun(run) !== serializeRun(existing))) { await destination.save(run); report.comparisons += 1; }
+      }
+    } catch {
+      report.skipped += 1;
+    }
+    await options.afterItem?.({ kind: 'comparison', id });
+  }
+}
+
+// ---- the run -------------------------------------------------------------------------------------------------------------------------
+
 /**
  * Merges this editor's storage for the project into the state home. Reads `sources.globalStorageDir` and writes only below the state home.
- * An editor with no storage for the project (or none at all) changes nothing and creates nothing.
+ * An editor with no storage for the project (or none at all) changes nothing and creates nothing. Team Mode, cyber, the runtime and the emergency
+ * stop in that storage are not part of a project's state and are not looked at.
  */
-export async function migrateEditorStorage(sources: MigrationSources, _home: ProjectStateHome, threads: ThreadStore, options: MigrationOptions = {}): Promise<MigrationReport> {
+export async function migrateEditorStorage(sources: MigrationSources, home: ProjectStateHome, threads: ThreadStore, options: MigrationOptions = {}): Promise<MigrationReport> {
   const report = emptyReport();
+  let prepared: Promise<unknown> | undefined;
+  const prepare = async (): Promise<void> => { prepared ??= home.ensure(); await prepared; };
   await migrateTranscripts(sources, threads, report, options);
+  await migrateMarkers(sources, home, prepare, report, options);
+  await migrateCheckpoints(sources, home, prepare, report, options);
+  await migrateComparisons(sources, home, prepare, report, options);
+  report.spendLines = await mirrorProjectSpend({ ledgerRoot: path.join(sources.globalStorageDir, 'spend'), projectScopeId: sources.projectScopeId, home }).catch(() => 0);
+
+  // The 5-live rule over everything now merged: the older conversations are archived, never deleted.
+  try {
+    const result = await applyRetention(threads, options.liveConversations ?? LIVE_CONVERSATIONS_DEFAULT, options.protectedIds?.() ?? []);
+    report.archived = result.archived.length;
+  } catch { /* a conversation that could not be archived stays live; the next run tries again */ }
+
+  // Recorded only as a hint of when this editor's storage was last merged; nothing depends on it, so losing it costs nothing.
+  if (changesIn(report) > 0 && report.threads.locked === 0 && await home.exists()) {
+    const key = createHash('sha256').update(path.resolve(sources.globalStorageDir)).digest('hex').slice(0, 12);
+    const meta = await home.readMeta().catch(() => undefined);
+    if (meta && !(meta.migrated && key in meta.migrated)) await home.updateMeta({ migrated: { ...(meta.migrated ?? {}), [key]: (options.now?.() ?? new Date()).toISOString() } }).catch(() => undefined);
+  }
   return report;
 }

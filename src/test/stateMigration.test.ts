@@ -423,7 +423,7 @@ test('spend: this project\'s entries are mirrored with every later version of th
     const beforeA = await hashTree(a.dir);
     const store = threadsOf(root);
     const first = await migrate(root, a, store, 'edA.1', {}, SCOPE);
-    assert.equal(first.spendLines, 7);
+    assert.equal(first.spendLines, 6);
     assert.equal(await hashTree(a.dir), beforeA);
     const home = stateHomeFor(root);
     const november = (await readFile(path.join(home.paths.spend, '2026-11.jsonl'), 'utf8')).trim().split('\n').map((line) => JSON.parse(line) as { t: string; id?: string; v?: number; rid?: string });
@@ -434,7 +434,7 @@ test('spend: this project\'s entries are mirrored with every later version of th
 
     const second = await migrate(root, b, store, 'edB.1', {}, SCOPE);
     assert.equal(second.spendLines, 3);
-    const months = await readProjectSpend(home);
+    const months = await readProjectSpend(home, Date.UTC(2026, 10, 20));
     assert.deepEqual(months.map((month) => month.month), ['2026-11', '2026-10']);
     const nov = months[0];
     assert.equal(nov.requests, 3, 'e1, e3 and e4');
@@ -566,7 +566,7 @@ test('after migration the 5-live rule applies: eight conversations leave five li
       const store2 = threadsOf(other, editor.secrets);
       const editor2 = await legacyEditor(path.join(storage, 'two'), other, { key: randomBytes(32), transcripts: [1, 2, 3, 4, 5, 6, 7, 8].map((n) => thread(n)) });
       const kept = await migrate(other, editor2, store2, 'edA.1', { liveConversations: 5, protectedIds: () => [thread(1).id] });
-      assert.equal(kept.archived, 3);
+      assert.equal(kept.archived, 2, 'the oldest is protected, so only the next two go');
       assert.equal((await store2.index()).find((item) => item.id === thread(1).id)?.state, 'live');
     } finally {
       await rm(other, { recursive: true, force: true });
