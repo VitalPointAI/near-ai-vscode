@@ -55,6 +55,9 @@ const solves: Array<[string, Record<string, string>]> = [
     'edited.md': '# Proposal\n\nThe system processes a request in 1.4 seconds, from the September benchmark. It is SOC 2 Type II compliant. The contract award is expected in November.\n',
     'changes.md': 'Corrected the processing time to 1.4 seconds, replaced the unsupported "fully compliant with all applicable regulations" with the SOC 2 Type II certification the sources support, and softened the award date to expected.\n'
   }],
+  ['plagiarism-checker', {
+    'INTEGRITY-CHECK.md': '# Integrity check of draft.md\n\n1. Verbatim: "Engineers designed the barrier to withstand a one-in-two-hundred-year flood event while allowing river traffic to pass freely during normal conditions" is copied word for word from sources/s1-agency.md, unquoted and with no note. Fix: quote it with a note, or rewrite it in your own words and cite it.\n2. Note [^2] is a bare URL, not a Chicago 18 note: it needs the author, title, site, date, and URL, and the source must be checked. Fix: write the full note.\n\nNOT CLEAN\n'
+  }],
   ['red-team', {
     'attacks.md': '1. A input with no unit, such as "30", makes the regex return null and the function throws, so a request for parseDuration with "30" returns a 500.\n2. An unknown unit, such as "30x", multiplies by undefined and returns NaN, so a query parameter can return NaN to the caller.\n'
   }]

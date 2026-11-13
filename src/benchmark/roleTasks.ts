@@ -14,7 +14,7 @@ import type { TaskKind } from './tasks';
 export interface RoleTask {
   /** Set when this task was borrowed for another role: the role whose task it really is, so the grader knows which output the task asks for. */
   borrowedFrom?: string;
-  /** The role id the studio uses: planner, implementer, reviewer, tester, security, researcher, analyst, writer, editor, red-team. */
+  /** The role id the studio uses: planner, implementer, reviewer, tester, security, researcher, analyst, writer, editor, red-team, plagiarism-checker. */
   role: string;
   label: string;
   kind: TaskKind;
@@ -83,6 +83,11 @@ const WRITER_MATERIAL = {
 const DOC_DRAFT = {
   'draft.md': `# Proposal\n\nThe system will process every request in under a second. It is fully compliant with all applicable regulations. We expect the contract to be awarded in November.\n`
 };
+
+// The plagiarism checker's task: a short draft with one sentence lifted word for word from the source and left unquoted and uncited, and one note
+// that is a bare URL rather than a Chicago 18 note.
+const INTEGRITY_SOURCE = '# Environment Agency: Riverside Flood Barrier (2020)\n\nThe Riverside flood barrier was completed in 2019 at a cost of 48 million pounds. Engineers designed the barrier to withstand a one-in-two-hundred-year flood event while allowing river traffic to pass freely during normal conditions.\n';
+const INTEGRITY_DRAFT = '# Brief\n\nThe Riverside barrier opened in 2019 and cost 48 million pounds.[^1] Engineers designed the barrier to withstand a one-in-two-hundred-year flood event while allowing river traffic to pass freely during normal conditions. Residents had pressed for flood defences since the floods of 2007.[^2]\n\n[^1]: Environment Agency, *Riverside Flood Barrier* (Environment Agency, 2020), 1.\n[^2]: https://example.org/floods\n';
 
 const RED_TEAM_CODE = `export function parseDuration(text) {
   const match = /(\\d+)([smh])/.exec(text);
@@ -161,6 +166,12 @@ export const TOKEN = 'sk-live-4f9a2b7c1d8e3f6a';
     role: 'red-team', label: 'Attack a function', kind: 'coding',
     files: { 'duration.js': RED_TEAM_CODE, 'README.md': '# parseDuration\nTurns "30m" or "2h" into seconds. Input comes from a URL query parameter.\n' },
     prompt: 'Attack duration.js like an adversary. Write attacks.md: each way it breaks or can be abused, numbered, with the input that triggers it and why it matters. Do not edit duration.js.',
+    maxTurns: 12, timeoutMs: 6 * 60_000
+  },
+  {
+    role: 'plagiarism-checker', label: 'Check a draft for plagiarism and citations', kind: 'research',
+    files: { 'draft.md': INTEGRITY_DRAFT, 'sources/s1-agency.md': INTEGRITY_SOURCE },
+    prompt: 'Check draft.md for plagiarism against sources/s1-agency.md, and check its notes against the Chicago Manual of Style, 18th edition, notes and bibliography form. Write INTEGRITY-CHECK.md: each problem as a numbered item naming the passage or the note id, what is wrong, and the fix; then a final line that is exactly CLEAN or NOT CLEAN. Do not edit draft.md.',
     maxTurns: 12, timeoutMs: 6 * 60_000
   }
 ];

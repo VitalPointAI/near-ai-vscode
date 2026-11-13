@@ -159,3 +159,12 @@ test('a role that name-drops without doing the work fails the checks it used to 
   const noInput = await folder({ ...redFiles, 'attacks.md': '1. It can crash.\n2. It can return undefined.\n' });
   assert.ok(gradeRoleAnswer('red-team', noInput, redFiles).misses.includes('shows a triggering input'), 'no input at all fails');
 });
+
+test('the plagiarism-check task separates a run that finds the lift and the bad note from one that passes the draft', async () => {
+  const task = roleTaskFor('plagiarism-checker')!;
+  assert.match(task.prompt, /Chicago Manual of Style, 18th edition[\s\S]*INTEGRITY-CHECK\.md[\s\S]*exactly CLEAN or NOT CLEAN/);
+  const careless = await folder({ ...task.files, 'INTEGRITY-CHECK.md': 'I read the draft and it looks well sourced and original throughout.\n\nCLEAN\n' });
+  const grade = gradeRoleAnswer('plagiarism-checker', careless, task.files, task.kind, task.role);
+  assert.ok(grade.misses.includes('finds the copied sentence') && grade.misses.includes('ends in NOT CLEAN'), grade.misses.join(', '));
+  assert.deepEqual(roleOutputs('plagiarism-checker'), ['INTEGRITY-CHECK.md']);
+});
