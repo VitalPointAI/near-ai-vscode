@@ -1,4 +1,92 @@
-# Requirements: Near AI for VSCode — 0.4.x line
+# Requirements: Near AI for VSCode
+
+## Milestone v0.7.0: Messaging relay — Teams and Signal
+
+**Defined:** 2026-11-13
+**Core value:** A person in a Microsoft Teams group chat or a Signal group asks the team for something, the answer arrives where they already are, and nobody involved opens VS Code. The group sees only the finished result; the working thread stays private to whoever asked.
+
+> **What "relay" means here.** The new messaging relay at `relay/` — receive a chat message, drive an existing agent team, post the result back. **Not** the paused v0.5.0 ciphertext sync relay (RELAY-01/02, archived in `.planning/milestones/v0.5.0-paused/`) and **not** the planned `relayTransport.ts` board sync on the unmerged Team Mode branch. Those are separate, deliberate, unrelated work.
+
+### Relay foundation
+
+- [ ] **RELAY-01**: The relay runs as its own workspace with its own lockfile and exactly one runtime dependency (`jose`), on Node 26.13.1 (a release carrying all current security fixes, with `engines` pinned so an older runtime refuses to start), while the extension keeps its existing Node target and zero-dependency bundle; the two never share a lockfile.
+- [ ] **RELAY-02**: The relay answers a health check that reports version, uptime, whether the Teams verifier and the Signal sidecar are operational, and the count of in-flight runs, so an operator knows the box is alive without reading logs.
+- [ ] **RELAY-03**: All relay state (run records, conversation bindings, tenant registry, pending approvals, message queues) lives in a single state directory that is git-ignored and readable only by the relay's OS user, and a restart loses no queued message or in-flight run record.
+- [ ] **RELAY-04**: The relay ships as a container image built without a shell or package manager, and every secret it needs (bot secret, tenant API keys, Signal registration material) is read at startup from an operator-supplied source and never appears in the image, the state directory listing, or a log line.
+
+### Inbound authenticity and allowlisting
+
+- [ ] **AUTH-01**: Every inbound request is authenticated before anything else happens — the token's signature, issuer, audience, expiry, clock skew and its `serviceUrl` claim match the running bot's configuration — and any failure returns 403 without running anything.
+- [ ] **AUTH-02**: The verifier accepts bot-emulator traffic only when a development flag is set, and a release build cannot be configured into an unverified mode.
+- [ ] **AUTH-03**: A signal that the same message arrived twice (platform retry, reconnect resend, edited event) starts exactly one run; signature validity alone is not treated as replay safety, so verification is always paired with the dedupe ledger.
+- [ ] **AUTH-04**: A message from a tenant or group that is not allowlisted is rejected in the channel with a plain explanation and never reaches a model.
+- [ ] **AUTH-05**: A suite of adversarial requests (forged signature, tampered body, expired token, wrong issuer/audience, mismatched serviceUrl, replayed request, emulator-shaped token) is part of the build and fails the build if any of them is accepted.
+- [ ] **AUTH-06**: The inbound path acknowledges within about a second and does the work afterwards, so a slow agent never makes the platform retry.
+
+### Identity, tenants and requesters
+
+- [ ] **IDNT-01**: Each inbound message binds to a tenant from the verified envelope alone, never from message text, and a message that cannot be bound is refused rather than guessed.
+- [ ] **IDNT-02**: Each request is attributed to the person who sent it, by a channel identity recorded on first sight, and that binding survives a restart.
+- [ ] **IDNT-03**: A result and its working thread can only ever reach the tenant, conversation and requester that produced them; a test proves an answer generated for one tenant cannot be delivered to another.
+- [ ] **IDNT-04**: Each tenant has an isolated workspace directory and uses only its own API key, so a run can neither read another tenant's files nor bill another tenant's key.
+
+### Runner pool and run lifecycle
+
+- [ ] **RUNL-01**: The relay runs a team headlessly by composing the existing agent engine, tools, team library, model client, checkpoints and run markers unchanged, with the extension itself not modified.
+- [ ] **RUNL-02**: Concurrent runs are capped globally, and overflow waits in a durable queue rather than being dropped or failing.
+- [ ] **RUNL-03**: A person can ask a question in a 1:1 chat and receive the team's finished answer in that same chat, with progress visible while it runs.
+- [ ] **RUNL-04**: A run interrupted by a restart resumes automatically inside the existing window, or reports in-channel that it died; a run never disappears silently and its record is never left in an unknown state.
+- [ ] **RUNL-05**: When the run needs approval, the requester gets a durable request in their private chat; answering it continues the run, and leaving it unanswered lets the run proceed as non-blocking and later denied on expiry, instead of stalling.
+- [ ] **RUNL-06**: A person can send a follow-up while a run is working, and it reaches the run or waits durably in its queue.
+- [ ] **RUNL-07**: A person can cancel a run from plain text with no buttons available, and receives an honest confirmation that names the partial artifacts if anything had completed.
+
+### Text command surface
+
+- [ ] **CMND-01**: `help`, `status`, `cancel`, `cost`, `pause` and `resume` work as text with identical meaning in both channels, and each answers with the run it refers to.
+- [ ] **CMND-02**: `status` reports elapsed time, current step and spend so far for a run.
+- [ ] **CMND-03**: `cost` reports spend against the tenant's and the group's budget in the same terms the extension shows.
+
+### Group-chat discipline
+
+- [ ] **GRP-01**: A group chat receives an acknowledgement and the finished result and nothing else; the working thread, tool output and internal narration stay in the requester's private chat.
+- [ ] **GRP-02**: Replies in a threaded channel land in the thread that caused them, and follow-ups in the group reuse the same thread.
+- [ ] **GRP-03**: Group text is treated as untrusted input: members' words cannot redirect where results go, reveal the private working thread, or widen what the run may do.
+- [ ] **GRP-04**: Document results (PDF, DOCX) are delivered as signed, expiring links so delivery does not depend on the customer tenant's file-storage provisioning.
+- [ ] **GRP-05**: A person can drag a file into the chat and have the run use it as input, with the same result-only discipline holding for what comes back.
+
+### Budgets and spend
+
+- [ ] **BUDG-01**: A tenant's spend is capped and a run that would exceed the cap is refused before it is billed, with a plain in-channel explanation instead of silence.
+- [ ] **BUDG-02**: A per-conversation cap exists and defaults to unlimited, so a busy group can be clamped without every group needing configuration at onboarding.
+- [ ] **BUDG-03**: Every run's spend is recorded against its tenant, conversation and requester in an append-only ledger, and the totals in chat match the extension's ledger for the same key.
+
+### Teams channel
+
+- [ ] **TEAM-01**: The bot is an external app that a customer's administrator installs without it joining their organisation, and it works in both 1:1 and group chats inside a threaded conversation.
+- [ ] **TEAM-02**: The bot is addressed by mention in a group and by direct message in a 1:1, and a greeting on first encounter happens once per thread rather than on every membership event.
+- [ ] **TEAM-03**: Progress is streamed live into the private 1:1 thread and, where the platform permits it, into the group thread; when in-group streaming is not available the bot posts discrete updates instead of failing.
+- [ ] **TEAM-04**: The bot presents the team's own name, avatar and personality as configured for that tenant, not a generic bot identity.
+
+### Signal channel
+
+- [ ] **SGNL-01**: The relay speaks Signal through a supervised sidecar running a pinned version that is never auto-upgraded, sharing credentials over a socket restricted to the relay's OS user.
+- [ ] **SGNL-02**: A group on the relay's Signal number can be allowlisted, and messages from groups that are not allowlisted are rejected.
+- [ ] **SGNL-03**: Every text command, acknowledgement, result and document attachment works in Signal with the same semantics as Teams, using quoted replies in place of threads.
+- [ ] **SGNL-04**: An onboarding path exists for provisioning the relay's number, backing up its registration material, and recovering it, because losing that material means losing the number.
+
+### Operations, onboarding and release
+
+- [ ] **OPS-01**: A customer's administrator can install the bot into their tenant by following a written package of steps, including what to verify and how to upgrade.
+- [ ] **OPS-02**: An operator can deploy the relay on their own host by following a written playbook covering the reverse proxy, redirect-URI validation, key provisioning and backup.
+- [ ] **OPS-03**: A threat model documents each surface, what authenticates it, and the failure it prevents, and names the accepted residual risks.
+- [ ] **OPS-04**: An append-only activity log lets an operator replay a run and answer a customer's "what happened here?" without access to the customer's chat.
+- [ ] **OPS-05**: The adversarial suite and the tenant-isolation test run in CI, so a future change cannot quietly reopen a closed pitfall.
+
+### Traceability
+
+| Requirement | Phase |
+|-------------|-------|
+| *Filled by the roadmap* | |
 
 ## Phase 25 requirements: Cybersecurity harness
 

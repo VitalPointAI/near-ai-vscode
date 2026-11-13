@@ -33,7 +33,26 @@ The first milestone includes onboarding, both API-key and NEAR sign-in authentic
 - Open-GSD updates must be constrained to the official stable package/channel and must use the upstream installer/update contract rather than copying managed files blindly.
 - The MVP should favor a safe approval policy over unrestricted autonomy; autonomy can be expanded through explicit settings and budgets.
 
-## Current Line: 0.4.x
+## Current Milestone: v0.7.0 Messaging relay — Teams and Signal
+
+**Goal:** Agents become reachable from Microsoft Teams, and a relay means end users need no VS Code. A person asks a team for something in a Teams group or a Signal group; the answer arrives where they already are. The group sees only the finished result — the working thread stays private to whoever asked.
+
+**Why now:** The v0.4.x line is shipped and stable (0.4.19 released), and the extension's run engine was audited this milestone: `src/agent/` has zero `vscode` imports, so the harness can be hosted headlessly with no refactor. The relay therefore composes existing modules rather than rewriting them, and the extension itself is not modified.
+
+**Decided up front:**
+- The relay is a new workspace at `relay/` in this repo, owner-hosted and multi-tenant.
+- Runtime is Node **26.13.1** (current security release) for the relay only; the extension keeps Node 24 and its zero-runtime-dependency bundle.
+- Exactly one new runtime dependency: **`jose`**, for Bot Framework JWT/JWKS verification. No HTTP framework, no Bot Framework SDK.
+- Signal goes through a pinned `signal-cli-rest-api` sidecar, not a reimplemented protocol client.
+- Group visibility is **result-only**; work detail stays in the DM/thread.
+- The bot is an **external app** — it never joins the customer's Microsoft organisation.
+- Phase numbering starts at **68** because milestone v0.6.0 (Team Mode, phases 60–67) is already claimed on the unmerged `feat/team-fix-pass` branch.
+
+**Naming trap:** this milestone's "relay" is the *messaging* relay. It is not the paused v0.5.0 ciphertext sync relay (RELAY-01/02) and not the planned `relayTransport.ts` board sync from Team Mode.
+
+**Research:** `.planning/research/SUMMARY.md` (with STACK/FEATURES/ARCHITECTURE/PITFALLS alongside it). Requirements: `.planning/REQUIREMENTS.md` §Milestone v0.7.0.
+
+## Previous Line: 0.4.x
 
 **Goal:** Keep extending and hardening the v0.4.0 release: the native NEAR agent runner, its chat, approvals, spend tracking, teams and tooling. Each change ships as a 0.4.x release.
 
