@@ -11,10 +11,11 @@
 | Project git remote via system git (near-ai/state branch only) | INTEGRATE | |
 | GitHub REST API: create a repository for the signed-in user (POST /user/repos) | INTEGRATE | |
 | GitHub REST API: read a repository and the signed-in login (resume and checks) | INTEGRATE | |
+| GitHub REST API: set the default branch (PATCH /repos/{owner}/{repo}) | INTEGRATE | |
 | VS Code GitHub authentication provider (getSession github, repo scope) | INTEGRATE | |
 | gh CLI fallback (gh auth token, gh repo create) | INTEGRATE | |
 | Push of the person's own code branch after the secret check | INTEGRATE | |
 | NEAR AI Cloud API | OPT-OUT | Unchanged by this phase; its key is only carried as sealed data |
 | GitLab and self-hosted git host APIs | OPT-OUT | Deferred by D-09 and D-14 to the later private-remote setting |
-| GitHub repository deletion or settings changes | OPT-OUT | Never done by the extension; a person makes those changes on GitHub |
+| GitHub repository deletion and other settings changes | OPT-OUT | Never done by the extension; only the default branch moves, away from near-ai/state, after the person's code push |
 | Third-party sync or storage services | OPT-OUT | Not used: the bundle travels only through the project's own git remote |

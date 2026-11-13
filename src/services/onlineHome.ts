@@ -231,6 +231,22 @@ function pastedAddressProblem(value: string): string | undefined {
   return undefined;
 }
 
+const REMOTE_READ_TIMEOUT_MS = 60_000;
+
+/**
+ * The branch the online repository shows first, read with git alone (no API): `ls-remote --symref <remote> HEAD`. Undefined means "cannot tell" (the
+ * command failed, printed no symbolic HEAD, or named something that is not a safe branch name); it is not an error.
+ */
+export async function remoteDefaultBranch(root: string, remote: string, git: GitRunner): Promise<string | undefined> {
+  const listed = await git(['-C', root, 'ls-remote', '--symref', remote, 'HEAD'], { timeoutMs: REMOTE_READ_TIMEOUT_MS });
+  if (listed.code !== 0) return undefined;
+  for (const line of gitText(listed).split('\n')) {
+    const match = /^ref: refs\/heads\/(\S+)\tHEAD$/.exec(line.trim());
+    if (match && isSafeBranchName(match[1])) return match[1];
+  }
+  return undefined;
+}
+
 /** The sentence told when GitHub did not move the default branch. It speaks of the default branch, not of creating a repository. */
 function defaultBranchFailure(branch: string): string {
   return `Your code is online, but GitHub did not change the default branch, so ${STATE_BRANCH} is still shown first. Choose ${branch} as the default branch in the repository's settings on GitHub.`;
@@ -266,7 +282,11 @@ export async function defaultBranchAfterPush(input: { root: string; remote: stri
     const moved = await moveDefaultBranch({ token: input.token, owner: input.owner, name: input.name, to: branch, fetchFn: input.fetchFn });
     return moved.result === 'unchanged' ? undefined : moved.message;
   }
-  return undefined;
+  // No token, or no GitHub account and name (a pasted address): nothing is sent to any API. The person is told which setting to change, unless the
+  // online repository already shows another branch first.
+  const shown = await remoteDefaultBranch(input.root, input.remote, input.git);
+  if (shown !== undefined && shown !== STATE_BRANCH) return undefined;
+  return `To show your code first, make ${branch} the default branch in the online repository's settings (on GitHub: Settings, then Default branch).`;
 }
 
 async function sameFolder(a: string, b: string): Promise<boolean> {

@@ -10,7 +10,7 @@ import type { Visibility } from '../domain/state/onlineHome';
 import { GitHubApiError, getRepo, isSafeBranchName, setDefaultBranch } from '../services/githubApi';
 import type { FetchLike } from '../services/githubApi';
 import type { CodePushSummary } from '../services/codePushCheck';
-import { moveDefaultBranch, onlineHomeFlow, readProgress, systemGhCli } from '../services/onlineHome';
+import { moveDefaultBranch, onlineHomeFlow, readProgress, remoteDefaultBranch, systemGhCli } from '../services/onlineHome';
 import type { CodePushOffer, GhCli, GhExec, GitHubAuth, OnlineHomeUi } from '../services/onlineHome';
 import { stateHomeFor } from '../services/stateHome';
 import type { GitRunner } from '../services/stateGit';
@@ -781,4 +781,18 @@ test('a default-branch change GitHub refuses or cannot reach is told in one plai
     assertOnlyOurRefs(run.bare, run.dir, true);
     assertNoDangerousPush(run.spy.calls);
   }
+});
+
+test('remoteDefaultBranch reads the symbolic HEAD with git alone, and anything it cannot read means "cannot tell"', async () => {
+  const answer = (code: number, text: string): GitRunner => () => Promise.resolve({ code, stdout: Buffer.from(text), stderr: '' });
+  const oid = 'a'.repeat(40);
+  assert.equal(await remoteDefaultBranch('/x', 'origin', answer(0, `ref: refs/heads/main\tHEAD\n${oid}\tHEAD\n`)), 'main');
+  assert.equal(await remoteDefaultBranch('/x', 'origin', answer(0, `ref: refs/heads/near-ai/state\tHEAD\n${oid}\tHEAD\n`)), DEFAULT_STATE_BRANCH);
+  for (const text of ['', `${oid}\tHEAD\n`, 'ref: refs/heads/-x\tHEAD\n', 'ref: refs/heads/a..b\tHEAD\n', 'ref: refs/tags/v1\tHEAD\n']) {
+    assert.equal(await remoteDefaultBranch('/x', 'origin', answer(0, text)), undefined, JSON.stringify(text));
+  }
+  assert.equal(await remoteDefaultBranch('/x', 'origin', answer(128, `ref: refs/heads/main\tHEAD\n`)), undefined);
+  const seen: string[][] = [];
+  await remoteDefaultBranch('/x', 'origin', (args) => { seen.push(args); return Promise.resolve({ code: 1, stdout: Buffer.alloc(0), stderr: '' }); });
+  assert.deepEqual(seen, [['-C', '/x', 'ls-remote', '--symref', 'origin', 'HEAD']]);
 });
