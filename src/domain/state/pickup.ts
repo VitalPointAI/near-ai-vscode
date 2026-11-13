@@ -97,3 +97,8 @@ export function derivePickup(input: PickupInput): PickupModel {
     ...(input.phase ? { phase: input.phase } : {})
   };
 }
+
+/** The next step of GSD's loop for a phase, from the files in its folder (RED stub: not implemented yet). */
+export function nextGsdStep(_phaseNumber: number, _phaseFiles: readonly string[], _totalPhases: number | null): NextStep {
+  return { command: '', text: '' };
+}

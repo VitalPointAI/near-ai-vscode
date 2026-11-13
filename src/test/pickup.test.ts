@@ -2,10 +2,10 @@
 // It only reopens that chat. It never resumes a run, never sends a model request, and so never spends money.
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { readdir, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
-import { derivePickup, type PickupModel, type PickupPointer, type PickupThread } from '../domain/state/pickup';
+import { derivePickup, nextGsdStep, type PickupModel, type PickupPointer, type PickupThread } from '../domain/state/pickup';
 import { parseChatWebviewMessage } from '../services/chatBridge';
 import { handlePickupAction, markPickupSeen, PICKUP_SEEN_KEY, pickupCardModel, readPickupPointer, writePickupPointer } from '../services/pickupCard';
 import { stateHomeFor, type MementoLike } from '../services/stateHome';
@@ -209,4 +209,83 @@ test('the card handler opens the chat and nothing else', async () => {
   await handlePickupAction({ action: 'open', id: CHAT }, host);
   await handlePickupAction({ action: 'later' }, host);
   assert.deepEqual(calls, [`open:${CHAT}`, 'seen']);
+});
+
+// ---- the GSD phase and its next step ----
+
+test('the next step follows the files in the phase folder', () => {
+  const next = (files: string[], total: number | null = 5) => nextGsdStep(3, files, total).command;
+  assert.equal(next([]), '/gsd-discuss-phase 3', 'no folder yet');
+  assert.equal(next(['03-RESEARCH.md']), '/gsd-discuss-phase 3', 'no CONTEXT');
+  assert.equal(next(['03-CONTEXT.md']), '/gsd-plan-phase 3');
+  assert.equal(next(['03-CONTEXT.md', '03-01-PLAN.md']), '/gsd-execute-phase 3', 'a plan without its summary');
+  assert.equal(next(['03-CONTEXT.md', '03-01-PLAN.md', '03-01-SUMMARY.md', '03-02-PLAN.md']), '/gsd-execute-phase 3', 'one of two plans summarised');
+  assert.equal(next(['03-CONTEXT.md', '03-01-PLAN.md', '03-01-SUMMARY.md', '03-02-PLAN.md', '03-02-SUMMARY.md']), '/gsd-verify-work 3');
+  assert.equal(next(['03-CONTEXT.md', '03-01-PLAN.md', '03-01-SUMMARY.md', '03-VERIFICATION.md']), '/gsd-discuss-phase 4');
+  assert.equal(next(['03-CONTEXT.md', '03-01-PLAN.md', '03-01-SUMMARY.md', '03-UAT.md']), '/gsd-discuss-phase 4');
+  assert.equal(nextGsdStep(5, ['05-CONTEXT.md', '05-01-PLAN.md', '05-01-SUMMARY.md', '05-VERIFICATION.md'], 5).command, '/gsd-complete-milestone', 'the last phase is done');
+  assert.equal(nextGsdStep(3, ['03-CONTEXT.md'], 5).text, 'Next step: run /gsd-plan-phase 3 in the chat');
+});
+
+async function planning(root: string, options: { current?: number | string; heading?: string; folders?: Record<string, string[]> } = {}): Promise<void> {
+  const dir = path.join(root, '.planning');
+  await mkdir(path.join(dir, 'phases'), { recursive: true });
+  await writeFile(path.join(dir, 'STATE.md'), `---\ncurrent_phase: ${options.current ?? 3}\ntotal_phases: 5\nstatus: executing\n---\n`);
+  await writeFile(path.join(dir, 'ROADMAP.md'), `# Roadmap\n\n${options.heading ?? '### Phase 3: Build the sharing step'}\n\nGoal.\n`);
+  for (const [folder, files] of Object.entries(options.folders ?? {})) {
+    await mkdir(path.join(dir, 'phases', folder), { recursive: true });
+    for (const file of files) await writeFile(path.join(dir, 'phases', folder, file), '# x\n');
+  }
+}
+
+const depsFor = () => ({ workspaceState: new Memory(), writer: EDITOR_A, threads: { index: () => Promise.resolve([thread()]) } });
+
+test('the card names the current phase and its next step from the planning folder', async () => {
+  const cases: Array<[string[], string]> = [
+    [[], '/gsd-discuss-phase 3'],
+    [['03-RESEARCH.md'], '/gsd-discuss-phase 3'],
+    [['03-CONTEXT.md'], '/gsd-plan-phase 3'],
+    [['03-CONTEXT.md', '03-01-PLAN.md'], '/gsd-execute-phase 3'],
+    [['03-CONTEXT.md', '03-01-PLAN.md', '03-01-SUMMARY.md'], '/gsd-verify-work 3'],
+    [['03-CONTEXT.md', '03-01-PLAN.md', '03-01-SUMMARY.md', '03-VERIFICATION.md'], '/gsd-discuss-phase 4']
+  ];
+  for (const [files, command] of cases) {
+    const root = await tempProject();
+    await planning(root, { folders: { '03-build-the-sharing-step': files, '03.1-an-inserted-phase': ['03.1-CONTEXT.md'], '04-later': ['04-CONTEXT.md'] } });
+    await writePickupPointer(root, pointer());
+    const model = await pickupCardModel(depsFor(), root);
+    assert.equal(model.phase?.number, 3);
+    assert.equal(model.phase?.name, 'Build the sharing step');
+    assert.equal(model.phase?.nextStep.command, command, files.join(','));
+    assert.equal(model.phase?.nextStep.text, `Next step: run /${command.slice(1)} in the chat`);
+  }
+});
+
+test('an unpadded phase folder is found too, and no .planning folder means no phase line', async () => {
+  const root = await tempProject();
+  await planning(root, { folders: { '3-sharing': ['3-CONTEXT.md'] } });
+  assert.equal((await pickupCardModel(depsFor(), root)).phase?.nextStep.command, '/gsd-plan-phase 3');
+  const bare = await tempProject();
+  await writePickupPointer(bare, pointer());
+  const model = await pickupCardModel(depsFor(), bare);
+  assert.equal(model.show, true);
+  assert.equal(model.phase, undefined);
+  assert.equal(model.lastChat?.title, 'Fix the login bug', 'the chat line is still there');
+  // A STATE.md with no current phase gives no phase line either.
+  const noPhase = await tempProject();
+  await mkdir(path.join(noPhase, '.planning'), { recursive: true });
+  await writeFile(path.join(noPhase, '.planning', 'STATE.md'), 'status: ready\n');
+  assert.equal((await pickupCardModel(depsFor(), noPhase)).phase, undefined);
+});
+
+test('the card shows the next step as text and only ever posts the two card messages', () => {
+  const { doc, welcome } = emptyChat();
+  const posts: unknown[] = [];
+  const card = kit.renderPickupCard(doc, welcome, shown({ phase: { number: 3, name: 'Build the sharing step', nextStep: { command: '/gsd-plan-phase 3', text: 'Next step: run /gsd-plan-phase 3 in the chat' } } }), (message) => posts.push(message))!;
+  const lines = card.all((node) => node.tagName === 'p').map((node) => node.textContent);
+  assert.ok(lines.includes('Phase 3: Build the sharing step'));
+  assert.ok(lines.includes('Next step: run /gsd-plan-phase 3 in the chat'));
+  for (const button of card.all((node) => node.tagName === 'button')) button.click();
+  assert.deepEqual(posts.map((message) => (message as { action: string }).action), ['open', 'later']);
+  assert.doesNotMatch(JSON.stringify(posts), /gsd-/, 'the command is never posted, so it is never run');
 });
