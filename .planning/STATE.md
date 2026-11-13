@@ -5,9 +5,9 @@ milestone_name: Messaging relay — Teams and Signal
 current_phase: 27
 current_phase_name: Project state follows the project across interfaces and machines (0.4.20)
 status: planning
-stopped_at: Completed 27-11-PLAN.md
-last_updated: "2026-11-13T14:43:30.317Z"
-state_head: 28aafaa83baf3682639ae023b29a2961e9d9d5b5
+stopped_at: Completed 27-05-PLAN.md
+last_updated: "2026-11-13T14:56:32.577Z"
+state_head: 0ca452d6337763ecb0d27dd472187f9126f963f2
 progress:
   total_phases: 9
   completed_phases: 0
@@ -76,8 +76,8 @@ None yet.
 
 ## Session
 
-**Last session:** 2026-11-13T14:43:30.298Z
-**Stopped at:** Completed 27-11-PLAN.md
+**Last session:** 2026-11-13T14:56:32.560Z
+**Stopped at:** Completed 27-05-PLAN.md
 **Resume file:** None
 
 ## Performance Metrics
@@ -90,6 +90,7 @@ None yet.
 | Phase 27 P04 | 11 min | 3 tasks | 12 files |
 | Phase 27 P09 | 28min | 3 tasks | 11 files |
 | Phase 27 P11 | 9 min | 3 tasks | 8 files |
+| Phase 27 P05 | 10 min | 3 tasks | 9 files |
 
 ## Decisions
 
@@ -109,3 +110,6 @@ None yet.
 - [Phase 27]: Remote-facing StateTransport methods return Outcome<T> with a SyncFailure of one plain sentence; local reads throw StateRefusedError; MirrorBusyError propagates for the caller to word
 - [Phase 27]: Remote addresses are validated when typed and again when a configured name resolves, so a hostile repository remote such as ext:: is refused
 - [Phase 27]: Inherited GIT_DIR, GIT_WORK_TREE, GIT_INDEX_FILE, GIT_OBJECT_DIRECTORY, GIT_CONFIG*, GIT_AUTHOR_* and GIT_COMMITTER_* are stripped inside runStateGit before options.env is applied
+- [Phase 27]: 27-05: new thread entries chain from the entry the conversation last wrote or was opened at (ThreadStore.cover), not the log's global main-line tip, so a continuation made elsewhere becomes a branch — Chaining from the global tip would adopt another editor's concurrent entries into this conversation's lineage; an un-covered store re-chains from the start and entry ids dedupe
+- [Phase 27]: 27-05: the thread log is captured before manageContext and on every save; a capture failure never stops a run, and managed messages are marked logged only when their originals were captured — The log must hold the untrimmed originals (D-07) without ever making a model run depend on disk writes
+- [Phase 27]: 27-05: the history list and panel read only the state home; sessions saved under an editor's globalStorage stay unlisted until plan 10's migration — The old transcript store stays only for its key helpers; migration re-seals old transcripts under the project data key
