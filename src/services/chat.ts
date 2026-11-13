@@ -51,9 +51,17 @@ import { rememberedRuleNotice } from '../domain/allowRuleNotice';
 import { syncAutoAdvance } from './autoAdvanceConfig';
 import { editorWriter, type MementoLike, stateHomeFor } from './stateHome';
 import { ensureMigrated } from './stateMigration';
-import { autoResumeChoice, autoResumeNotice, cutOffNotice, ownEditorMarkers, resumePrompt, RunMarker, RunMarkers, shouldAutoResume } from './runMarkers';
+import { autoResumeChoice, autoResumeNotice, cutOffNotice, HEARTBEAT_MS, ownEditorMarkers, resumePrompt, RunMarker, RunMarkers, shouldAutoResume } from './runMarkers';
 import { WaitingNotices } from './waitingNotices';
 import { latestOnly, PROJECT_TEAM_WATCH_PATHS, projectHasTeam, SETUP_NUDGE_DISMISSED_KEY, shouldShowSetupNudge } from './setupSteps';
+
+/** What the chat says when a message, Resume or Continue reaches a conversation that another editor is running right now. */
+export const RUNNING_ELSEWHERE_HOLD = 'This conversation is running in another editor right now. Wait for it to finish there, or start a new conversation here.';
+
+/** How often a conversation shown as running in another editor checks whether that run is still live; the same beat the run keeps. */
+let followElsewhereMs = HEARTBEAT_MS;
+/** Test seam: how often a conversation running elsewhere is checked again. */
+export function setFollowElsewhereMs(ms: number | undefined): void { followElsewhereMs = ms ?? HEARTBEAT_MS; }
 
 /** Chat model and safety model pairs already told that auto approve has no private safety model. */
 const warnedSafetyModels = new Set<string>();
@@ -253,8 +261,46 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     void panel.webview.postMessage({ type: 'conversation-shown', id: tab.id, busy: isRunning(tab) });
     sendSummary(true);
   };
+  /** The tabs showing "running in another editor", each with its check timer. */
+  const following = new Map<ChatTab, NodeJS.Timeout>();
+  const stopFollowing = (tab: ChatTab): void => {
+    const timer = following.get(tab);
+    if (timer) clearInterval(timer);
+    following.delete(tab);
+  };
+  const stopAllFollowing = (): void => { for (const tab of [...following.keys()]) stopFollowing(tab); };
+  context.subscriptions.push({ dispose: stopAllFollowing });
+  /**
+   * While a reopened conversation shows "running in another editor", checks every followElsewhereMs whether that run is still live; once it is not,
+   * the conversation is reloaded so its newest steps show, with Resume when the run was cut off.
+   */
+  const followElsewhere = (tab: ChatTab, root: string): void => {
+    stopFollowing(tab);
+    let checking = false;
+    const timer = setInterval(() => {
+      if (disposed || !tabs.includes(tab) || tab.closing || isRunning(tab)) { stopFollowing(tab); return; }
+      if (checking) return;
+      checking = true;
+      void (async () => {
+        if (await runMarkersFor(context, root).liveElsewhere(tab.id).catch(() => false)) return;
+        stopFollowing(tab);
+        if (disposed || !tabs.includes(tab) || tab.closing || isRunning(tab)) return;
+        if (!(await restoreInto(tab, tab.id, root, 'The run in the other editor has ended. Its newest steps are shown.').catch(() => false))) return;
+        if (tab.id === activeId) show(tab); else sendSummary(true);
+      })().finally(() => { checking = false; });
+    }, followElsewhereMs);
+    timer.unref?.();
+    following.set(tab, timer);
+  };
+  /** True (after saying so) when the conversation is running in another editor: nothing may run it, resume it or end its marker from here. */
+  const heldElsewhere = async (tab: ChatTab, root: string | undefined): Promise<boolean> => {
+    if (!root || !(await runMarkersFor(context, root).liveElsewhere(tab.id).catch(() => false))) return false;
+    tab.post({ type: 'notice', text: RUNNING_ELSEWHERE_HOLD });
+    return true;
+  };
   /** Opens a saved conversation's transcript into `tab`; false when it is no longer saved. */
   const restoreInto = async (tab: ChatTab, id: string, root: string, note: string): Promise<boolean> => {
+    stopFollowing(tab);
     const agent = ensureAgent(tab, root);
     const view = await agent.restore(id);
     if (!view) return false;
@@ -280,6 +326,7 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     } else if (await markers.liveElsewhere(tab.id).catch(() => false)) {
       // Another editor is running it right now (D-03): it is not cut off, so it is neither marked interrupted nor ever resumed from here.
       tab.log.add({ type: 'notice', text: 'This conversation is running in another editor right now. Its newest steps appear here when that run saves them.' });
+      followElsewhere(tab, root);
     }
     return true;
   };
@@ -288,6 +335,7 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     const cut = tab.interrupted;
     const root = workspaceRoot();
     if (!cut || !root) return;
+    if (await heldElsewhere(tab, root)) return;
     tab.interrupted = undefined;
     tab.log.drop('run-interrupted');
     await runMarkersFor(context, root).settle(tab.id, outcome).catch(() => undefined);
@@ -301,6 +349,7 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
   /** Continue after a run stopped short: sends "Continue." as if the user typed it; nothing continues without the click. */
   const continueStopped = async (tab: ChatTab): Promise<void> => {
     if (!tab.continuable || isRunning(tab) || tab.closing) return;
+    if (await heldElsewhere(tab, workspaceRoot())) return;
     tab.continuable = false;
     tab.log.update('run-stopped', { continuable: false });
     const text = 'Continue.';
@@ -336,6 +385,7 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     const index = tabs.indexOf(tab);
     if (index === -1) return;
     tabs.splice(index, 1);
+    stopFollowing(tab);
     tab.closing = true;
     tab.stops += 1;
     tab.agent?.stop();
@@ -630,6 +680,8 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     const stops = tab.stops;
     /** Stopped (or closed) while this turn was still being prepared: its run never starts. */
     const stopped = () => tab.closing || tab.stops !== stops;
+    // A conversation another editor is running right now is not run from here too: nothing is requested, saved or logged, and the chat says why.
+    if (await heldElsewhere(tab, workspaceRoot())) return;
     // What the user sent stays in the conversation's log (the view showed it as they sent it), and names a new conversation.
     const typed = message.type === 'send' ? message.text : `/${message.command}${message.args ? ` ${message.args}` : ''}`;
     if (!(message.type === 'send' && message.overrideToken)) {
@@ -851,7 +903,7 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
   const windowWatch = typeof vscode.window.onDidChangeWindowState === 'function' ? vscode.window.onDidChangeWindowState((window) => { if (window.focused) for (const tab of tabs) tab.focusRegained?.(); }) : undefined;
   // The "no team yet" card goes away as soon as Team Studio (or anyone) saves the project's team.
   const teamWatch = watchProjectTeam(() => { if (!disposed) void setupNudge.refresh(); });
-  panel.onDidDispose(() => { disposed = true; openTabSources.delete(openTabs); retentionWatch.dispose(); pickupWatch.dispose(); syncWatch.dispose(); for (const tab of tabs) tab.agent?.dispose(); policyWatch.dispose(); tokenWatch.dispose(); windowWatch?.dispose(); teamWatch?.dispose(); state.spendWatch?.dispose(); if (state.spendTimer) clearTimeout(state.spendTimer); }, undefined, context.subscriptions);
+  panel.onDidDispose(() => { disposed = true; stopAllFollowing(); openTabSources.delete(openTabs); retentionWatch.dispose(); pickupWatch.dispose(); syncWatch.dispose(); for (const tab of tabs) tab.agent?.dispose(); policyWatch.dispose(); tokenWatch.dispose(); windowWatch?.dispose(); teamWatch?.dispose(); state.spendWatch?.dispose(); if (state.spendTimer) clearTimeout(state.spendTimer); }, undefined, context.subscriptions);
   // The emergency stop stops every conversation's run; the composer's Stop stops only the one on screen.
   onDidChangeEmergencyStop(async (engaged) => {
     sendPolicyState(panel);
@@ -951,6 +1003,9 @@ function runMarkersFor(context: vscode.ExtensionContext, root: string): RunMarke
     const storage = context.globalStorageUri.fsPath;
     store = new RunMarkers(storage, root, { dir: home.paths.runs, writer: editorWriter(context.globalState as MementoLike | undefined), beforeWrite: () => home.ensure() });
     runMarkerStores.set(key, store);
+    // The heartbeats stop when the extension deactivates; the markers stay as they are.
+    const made = store;
+    context.subscriptions?.push({ dispose: () => made.dispose() });
   }
   return store;
 }
