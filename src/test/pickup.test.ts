@@ -264,6 +264,7 @@ test('the card names the current phase and its next step from the planning folde
 test('an unpadded phase folder is found too, and no .planning folder means no phase line', async () => {
   const root = await tempProject();
   await planning(root, { folders: { '3-sharing': ['3-CONTEXT.md'] } });
+  await writePickupPointer(root, pointer());
   assert.equal((await pickupCardModel(depsFor(), root)).phase?.nextStep.command, '/gsd-plan-phase 3');
   const bare = await tempProject();
   await writePickupPointer(bare, pointer());
@@ -275,6 +276,7 @@ test('an unpadded phase folder is found too, and no .planning folder means no ph
   const noPhase = await tempProject();
   await mkdir(path.join(noPhase, '.planning'), { recursive: true });
   await writeFile(path.join(noPhase, '.planning', 'STATE.md'), 'status: ready\n');
+  await writePickupPointer(noPhase, pointer());
   assert.equal((await pickupCardModel(depsFor(), noPhase)).phase, undefined);
 });
 

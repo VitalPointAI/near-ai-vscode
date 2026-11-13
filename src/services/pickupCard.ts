@@ -3,8 +3,10 @@
 //
 // Reading never creates anything (opening a folder writes nothing). The card's one click reopens the chat through the history path and does nothing else:
 // no Resume, no auto-resume, no model request, so nothing re-runs and nothing is spent.
-import { readFile } from 'node:fs/promises';
-import { derivePickup, parsePickupPointer, type PickupModel, type PickupPointer, type PickupThread } from '../domain/state/pickup';
+import { readdir, readFile } from 'node:fs/promises';
+import * as path from 'node:path';
+import { parseGsdPlanningState } from '../domain/gsdStatus';
+import { derivePickup, nextGsdStep, parsePickupPointer, type PickupModel, type PickupPhase, type PickupPointer, type PickupThread } from '../domain/state/pickup';
 import { stateHomeFor, writeFileAtomic, type MementoLike } from './stateHome';
 
 /** The workspaceState key that remembers the newest pointer this editor has seen or dismissed. */
@@ -42,12 +44,38 @@ export async function markPickupSeen(state: MementoLike | undefined, at: string)
   await state.update(PICKUP_SEEN_KEY, at);
 }
 
+/** Phase names are shown as text; a very long heading is cut. */
+const MAX_PHASE_NAME = 120;
+
+/**
+ * The project's current GSD phase and what to do next, from .planning (STATE.md for the phase, ROADMAP.md for its name, the phase folder for its files).
+ * Undefined when there is no .planning folder or no current phase. Reads only; the next step is text, never run.
+ */
+export async function readPickupPhase(root: string): Promise<PickupPhase | undefined> {
+  const planning = path.join(root, '.planning');
+  const state = await readFile(path.join(planning, 'STATE.md'), 'utf8').catch(() => undefined);
+  if (state === undefined) return undefined;
+  const roadmap = await readFile(path.join(planning, 'ROADMAP.md'), 'utf8').catch(() => '');
+  const parsed = parseGsdPlanningState(state, roadmap);
+  const number = parsed.currentPhase;
+  if (number === null || !Number.isSafeInteger(number) || number < 0) return undefined;
+  // The folder is the phase number (two digits or more, or unpadded) and a dash; 03.1-x is another phase (an inserted one), not phase 3.
+  const folderName = new RegExp(`^0*${number}-`);
+  const phasesDir = path.join(planning, 'phases');
+  const folder = (await readdir(phasesDir).catch(() => [] as string[])).filter((name) => folderName.test(name)).sort()[0];
+  const files = folder ? await readdir(path.join(phasesDir, folder)).catch(() => [] as string[]) : [];
+  const heading = roadmap.match(new RegExp(`^#{2,4}[ \\t]*Phase[ \\t]+0*${number}[ \\t]*:[ \\t]*(.+?)[ \\t]*$`, 'm'))?.[1];
+  const name = heading ? heading.slice(0, MAX_PHASE_NAME) : undefined;
+  return { number, ...(name ? { name } : {}), nextStep: nextGsdStep(number, files, parsed.totalPhases) };
+}
+
 /** What the card says now. Reads only. */
 export async function pickupCardModel(deps: PickupDeps, root: string): Promise<PickupModel> {
   const pointer = await readPickupPointer(root);
   const seen = deps.workspaceState?.get<string>(PICKUP_SEEN_KEY);
   const index = pointer ? await deps.threads.index().catch(() => [] as readonly PickupThread[]) : [];
-  return derivePickup({ pointer, thisWriter: deps.writer, lastSeenAt: typeof seen === 'string' ? seen : undefined, index });
+  const phase = pointer ? await readPickupPhase(root).catch(() => undefined) : undefined;
+  return derivePickup({ pointer, thisWriter: deps.writer, lastSeenAt: typeof seen === 'string' ? seen : undefined, index, ...(phase ? { phase } : {}) });
 }
 
 /** The card's messages from the page. */

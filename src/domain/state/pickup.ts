@@ -98,7 +98,24 @@ export function derivePickup(input: PickupInput): PickupModel {
   };
 }
 
-/** The next step of GSD's loop for a phase, from the files in its folder (RED stub: not implemented yet). */
-export function nextGsdStep(_phaseNumber: number, _phaseFiles: readonly string[], _totalPhases: number | null): NextStep {
-  return { command: '', text: '' };
+const PLAN = /-PLAN\.md$/;
+const SUMMARY = /-SUMMARY\.md$/;
+const CONTEXT = /-CONTEXT\.md$/;
+const CHECKED = /-(VERIFICATION|UAT)\.md$/;
+
+/**
+ * The next step of GSD's loop, from the files in the phase folder (research A8): no CONTEXT is discuss; CONTEXT without a PLAN is plan; a PLAN without its
+ * SUMMARY is execute; every plan summarised but not verified is verify; otherwise the next phase's discuss. When there is no later phase the milestone
+ * can be completed. It is text for the person to act on, never a command the extension runs.
+ */
+export function nextGsdStep(phaseNumber: number, phaseFiles: readonly string[], totalPhases: number | null): NextStep {
+  const step = (command: string, number: number): NextStep => ({ command: `${command} ${number}`, text: `Next step: run ${command} ${number} in the chat` });
+  const plans = phaseFiles.filter((file) => PLAN.test(file));
+  const summarised = new Set(phaseFiles.filter((file) => SUMMARY.test(file)).map((file) => file.replace(SUMMARY, '')));
+  if (!phaseFiles.some((file) => CONTEXT.test(file))) return step('/gsd-discuss-phase', phaseNumber);
+  if (!plans.length) return step('/gsd-plan-phase', phaseNumber);
+  if (plans.some((file) => !summarised.has(file.replace(PLAN, '')))) return step('/gsd-execute-phase', phaseNumber);
+  if (!phaseFiles.some((file) => CHECKED.test(file))) return step('/gsd-verify-work', phaseNumber);
+  if (totalPhases !== null && phaseNumber >= totalPhases) return { command: '/gsd-complete-milestone', text: 'Next step: every phase is verified; run /gsd-complete-milestone in the chat' };
+  return step('/gsd-discuss-phase', phaseNumber + 1);
 }
