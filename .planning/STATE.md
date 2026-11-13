@@ -5,9 +5,9 @@ milestone_name: Messaging relay — Teams and Signal
 current_phase: 27
 current_phase_name: Project state follows the project across interfaces and machines (0.4.20)
 status: planning
-stopped_at: Completed 27-08-PLAN.md
-last_updated: "2026-11-13T15:50:23.582Z"
-state_head: c0ae9d18879ba1aa5149473b4864106814455a10
+stopped_at: Completed 27-10-PLAN.md
+last_updated: "2026-11-13T16:07:06.036Z"
+state_head: 1e63c8c20e3d6f1a339e43b77d7b5c11928889ae
 progress:
   total_phases: 9
   completed_phases: 0
@@ -76,8 +76,8 @@ None yet.
 
 ## Session
 
-**Last session:** 2026-11-13T15:50:23.563Z
-**Stopped at:** Completed 27-08-PLAN.md
+**Last session:** 2026-11-13T16:07:06.017Z
+**Stopped at:** Completed 27-10-PLAN.md
 **Resume file:** None
 
 ## Performance Metrics
@@ -95,6 +95,7 @@ None yet.
 | Phase 27 P06 | 20 min | 3 tasks | 14 files |
 | Phase 27 P07 | 10 min | 3 tasks | 9 files |
 | Phase 27 P08 | 6 min | 2 tasks | 6 files |
+| Phase 27 P10 | 16 min | 3 tasks | 10 files |
 
 ## Decisions
 
@@ -127,3 +128,7 @@ None yet.
 - [Phase 27]: 27-08: a prompt that never reached the model (no folder, no profile, held back by the outbound guard) is not stored; a pre-0.4.20 session's one-time seed is stored even then
 - [Phase 27]: 27-08: Chat view thread tail match also requires the preceding user text to equal the newest prompt and only considers a live newest chat-view thread; otherwise a new thread starts
 - [Phase 27]: 27-08: a thread with a log and no saved context is reopened by building its context from the log main line; a run adds the panel system prompt when history has none
+- [Phase 27]: Each record kind merges by its own id and rule (thread entries by union, markers by last sign of life, checkpoints and comparisons when absent or later, spend by entry id and version), so a rerun writes nothing and editor order does not matter
+- [Phase 27]: Spend lines are selected by entry id, not by the project tag on each line, and unionLog is keyed by (entry id, version): later versions of a ledger entry carry no project tag and the first line holds the entry's time and path
+- [Phase 27]: The old transcript key is read from SecretStorage without creating one; a sealed transcript with no key is counted locked and retried at the next start; the source folder is opened read-only
+- [Phase 27]: Migration runs at activation only for a NEAR AI project, otherwise on the first chat send, history list or Compare Models open, and before saved tabs reopen; it logs counts only
