@@ -355,6 +355,16 @@ footer { padding: 6px 12px 8px; }
 }
 .chip:hover { background: var(--vscode-toolbar-hoverBackground); color: var(--vscode-foreground); }
 .chip[data-state="missing"], .chip[data-state="attention"] { color: var(--vscode-textLink-foreground); }
+/* The sync control (D-16): a chip beside the profile chip. Every colour is a theme variable, so it reads in light, dark and high-contrast themes. */
+#sync { flex: none; max-width: 45%; color: var(--vscode-foreground); background: var(--vscode-button-secondaryBackground, transparent); }
+#sync:hover { background: var(--vscode-button-secondaryHoverBackground, var(--vscode-toolbar-hoverBackground)); }
+#sync:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 1px; }
+#sync[data-state="synced"] { color: var(--vscode-descriptionForeground); background: transparent; }
+#sync[data-state="syncing"] { color: var(--vscode-descriptionForeground); background: transparent; cursor: progress; }
+#sync[data-state="attention"] { color: var(--vscode-errorForeground); background: transparent; border: 1px solid var(--vscode-inputValidation-warningBorder, var(--vscode-errorForeground)); }
+#sync[data-state="no-home"] { color: var(--vscode-textLink-foreground); background: transparent; }
+body.vscode-high-contrast #sync, body.vscode-high-contrast-light #sync { border: 1px solid var(--vscode-contrastBorder, var(--vscode-focusBorder)); background: transparent; color: var(--vscode-foreground); }
+body.vscode-high-contrast #sync:hover, body.vscode-high-contrast-light #sync:hover { outline: 1px dashed var(--vscode-contrastActiveBorder, var(--vscode-focusBorder)); }
 /* Send and Stop never shrink, so both fit beside the pickers at narrow widths. */
 .composer .bar .icon-button { flex: none; }
 #stop[hidden] { display: none; }
