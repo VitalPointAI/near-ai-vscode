@@ -1,7 +1,7 @@
 // The separate "push your code" offer (D-14): the file list, the secret check by file name and by content, the person's click for every step, and
 // no force. Real git, local bare repositories only; nothing contacts GitHub.
 import assert from 'node:assert/strict';
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
@@ -185,6 +185,34 @@ test('a push the online repository refuses is reported in one plain sentence and
   assert.match(result.message, /^[A-Z][^\n]*\.$/);
   assert.equal(fixtureGit(bare, ['rev-parse', 'main']), tip);
   assert.equal(calls.some((args) => args.some((arg) => /^--force|^-f$|--force-with-lease/.test(arg) || (arg.startsWith('+') && arg.length > 1))), false);
+});
+
+const NEAR_AI = '.planning/.near-ai';
+
+test('NEAR AI per-person records stay on this computer: left off the list, named in the summary, never staged, .gitignore untouched', async () => {
+  const { dir, bare } = await project({
+    'a.txt': 'a\n',
+    [`${NEAR_AI}/auth-profiles.json`]: '{"profiles":[{"organization":"Acme","endpoint":"https://x.example.test"}]}\n',
+    [`${NEAR_AI}/activity.json`]: '[]\n',
+    [`${NEAR_AI}/team.md`]: '# Team\n',
+    [`${NEAR_AI}/project.json`]: '{"type":"app"}\n'
+  });
+  const plan = await planCodePush(dir, hermeticRunner());
+  assert.deepEqual(plan.heldBack, [`${NEAR_AI}/activity.json`, `${NEAR_AI}/auth-profiles.json`]);
+  assert.ok(plan.files.includes(`${NEAR_AI}/team.md`) && plan.files.includes(`${NEAR_AI}/project.json`));
+  assert.equal(plan.files.some((file) => file.endsWith('auth-profiles.json') || file.endsWith('activity.json')), false);
+
+  const ui = new FakeUi({ push: true });
+  const result = await pushProjectCode(dir, 'origin', hermeticRunner(), { ui, visibility: 'public' });
+  assert.equal(result.status, 'pushed', result.message);
+  const note = ui.summaries[0]?.notes.find((text) => text.includes('stay on this computer'));
+  assert.ok(note, 'the summary names what stays behind');
+  assert.ok(note.includes('auth-profiles.json') && note.includes('activity.json'), note);
+  assert.equal(ui.summaries[0]?.files.some((file) => file.endsWith('auth-profiles.json')), false);
+  assert.deepEqual(fixtureGit(bare, ['ls-tree', '-r', '--name-only', 'main']).trim().split('\n'), ['.planning/.near-ai/project.json', '.planning/.near-ai/team.md', 'a.txt']);
+  const status = fixtureGit(dir, ['status', '--porcelain']);
+  assert.ok(status.includes(`?? ${NEAR_AI}/auth-profiles.json`) && status.includes(`?? ${NEAR_AI}/activity.json`), status);
+  assert.equal(existsSync(path.join(dir, '.gitignore')), false, 'nothing was written to .gitignore for them');
 });
 
 const IDENTITY = ['-c', 'user.name=Pat Person', '-c', 'user.email=pat@example.test'];

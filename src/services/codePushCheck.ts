@@ -41,8 +41,10 @@ export interface CodePushBlock {
 }
 
 export interface CodePushPlan {
-  /** Every file that would go up: tracked, plus untracked and not ignored. Never anything in the NEAR AI state folder. */
+  /** Every file that would go up: tracked, plus untracked and not ignored. Never anything in the NEAR AI state folder, and no untracked NEAR AI record. */
   files: string[];
+  /** NEAR AI's own records (account, runs, costs) that git does not track: left off the list and kept on this computer. Paths from the project root, sorted. */
+  heldBack: string[];
   blocked: CodePushBlock[];
   /** Files that could not be read as text (binary or very large), so they were not checked for secrets. */
   unchecked: string[];
@@ -99,6 +101,14 @@ export interface CodePushResult { status: CodePushStatus; message: string }
 export interface CodePushOptions { ui: CodePushUi; visibility: Visibility | 'unknown'; historyLimits?: Partial<HistoryLimits> }
 
 const STATE_FOLDER = '.near-ai/state/';
+/** NEAR AI's folder inside the project. Per-person and per-run records live here next to the project's shared configuration (G-27-6c). */
+export const NEAR_AI_PROJECT_FOLDER = '.planning/.near-ai/';
+/**
+ * The only files in NEAR_AI_PROJECT_FOLDER that describe the project for everyone working on it, so they go up with the code. Everything else there (the
+ * person's organization and profiles, activity, audit, costs, resume points, generated media, reputation, per-machine state), and any file a later release
+ * adds, stays on this computer: the list fails closed. A test keeps it in step with the files the extension writes.
+ */
+export const SHARED_PROJECT_FILES: readonly string[] = ['team.md', 'project.json', 'verifiers.json'];
 const NAME_REASON = 'The file name looks like a password, key or credential file.';
 const PUBLIC_LINE = 'Everyone will be able to see these files.';
 const REMOTE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
@@ -140,16 +150,25 @@ function gitReason(stderr: string): string {
   return line === '' ? '' : ` Git said: ${line.slice(0, 200)}`;
 }
 
+/** True for a path under NEAR AI's project folder that is not exactly one of the shared configuration files. The folder is matched as an exact prefix. */
+function isNearAiPrivateRecord(file: string): boolean {
+  if (!file.startsWith(NEAR_AI_PROJECT_FOLDER)) return false;
+  return !SHARED_PROJECT_FILES.includes(file.slice(NEAR_AI_PROJECT_FOLDER.length));
+}
+
 /**
  * What would go up and what must not. Git decides the list (tracked plus untracked and not ignored), the state folder is left out whatever git says,
- * and each file is checked by name and then by content. A blocked file is reported once, with the first reason found.
+ * NEAR AI's own records in the project folder are held back unless they are shared configuration, and each file is checked by name and then by content.
+ * A blocked file is reported once, with the first reason found.
  */
 export async function planCodePush(root: string, git: GitRunner): Promise<CodePushPlan> {
   const tracked = await git(['-C', root, 'ls-files', '-z', '--cached']);
   const others = await git(['-C', root, 'ls-files', '-z', '--others', '--exclude-standard']);
   if (tracked.code !== 0 || others.code !== 0) throw new Error('Git could not list this project\'s files.');
   const trackedFiles = new Set(nulList(tracked.stdout));
-  const files = [...new Set([...trackedFiles, ...nulList(others.stdout)])].filter((file) => trackedFiles.has(file) || !file.startsWith(STATE_FOLDER)).sort();
+  const listed = [...new Set([...trackedFiles, ...nulList(others.stdout)])].filter((file) => trackedFiles.has(file) || !file.startsWith(STATE_FOLDER)).sort();
+  const heldBack = listed.filter((file) => !trackedFiles.has(file) && isNearAiPrivateRecord(file));
+  const files = listed.filter((file) => !heldBack.includes(file));
   const blocked = new Map<string, CodePushBlock>();
   const block = (file: string, reason: string): void => {
     if (!blocked.has(file)) blocked.set(file, { file, reason, ...(trackedFiles.has(file) ? { tracked: true } : {}) });
@@ -173,7 +192,7 @@ export async function planCodePush(root: string, git: GitRunner): Promise<CodePu
     const at = lines.findIndex((line) => line.length <= 4_000 && tokenShape.test(line));
     if (at >= 0) block(candidate.relative, `It looks like it holds a secret: a key or token (line ${at + 1}).`);
   }
-  return { files, blocked: [...blocked.values()].sort((a, b) => a.file.localeCompare(b.file)), unchecked };
+  return { files, heldBack, blocked: [...blocked.values()].sort((a, b) => a.file.localeCompare(b.file)), unchecked };
 }
 
 const SHORT_ID = 7;
@@ -349,6 +368,19 @@ async function addToGitignore(root: string, files: readonly string[]): Promise<v
   await appendFile(target, `${prefix}${files.map(ignoreLine).join('\n')}\n`);
 }
 
+const MAX_NAMES_LISTED = 10;
+
+/** File names relative to NEAR AI's folder, at most ten, then "and N more". */
+function namesInFolder(files: readonly string[]): string {
+  const names = files.map((file) => file.slice(NEAR_AI_PROJECT_FOLDER.length));
+  const shown = names.slice(0, MAX_NAMES_LISTED).join(', ');
+  return names.length > MAX_NAMES_LISTED ? `${shown} and ${names.length - MAX_NAMES_LISTED} more` : shown;
+}
+
+function heldBackNote(files: readonly string[]): string {
+  return `These NEAR AI files hold your own account and run records and stay on this computer: ${namesInFolder(files)}.`;
+}
+
 function blockedMessage(blocked: readonly CodePushBlock[]): string {
   const lines = blocked.map((entry) => `- ${entry.file}: ${entry.reason}`);
   const tracked = blocked.filter((entry) => entry.tracked).map((entry) => entry.file);
@@ -399,6 +431,7 @@ export async function pushProjectCode(root: string, remote: string, git: GitRunn
   if (options.visibility === 'public') notes.push(PUBLIC_LINE);
   if (!history.complete) notes.push('The history of this project was not fully checked for secrets, and you chose to go on.');
   if (history.unchecked.length > 0) notes.push(`${history.unchecked.length} ${history.unchecked.length === 1 ? 'file' : 'files'} in earlier commits ${history.unchecked.length === 1 ? 'is' : 'are'} too large or not text, so ${history.unchecked.length === 1 ? 'it was' : 'they were'} not checked for secrets.`);
+  if (plan.heldBack.length > 0) notes.push(heldBackNote(plan.heldBack));
   if (plan.unchecked.length > 0) notes.push(`${plan.unchecked.length} ${plan.unchecked.length === 1 ? 'file is' : 'files are'} too large or not text, so ${plan.unchecked.length === 1 ? 'it was' : 'they were'} not checked for secrets.`);
   if (!await ui.confirmPush({ branch, remote, visibility: options.visibility, files: plan.files, notes })) {
     return { status: 'declined', message: 'Your code was not pushed. Syncing is not affected.' };
