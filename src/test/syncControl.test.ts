@@ -430,3 +430,67 @@ test('chat.css shows the detail as a full-row, wrapping line in a theme colour',
   assert.doesNotMatch(rule, /white-space:\s*nowrap/);
   assert.doesNotMatch(rule, /#[0-9a-fA-F]{3,8}\b(?!\w)|rgba?\(|hsla?\(/, 'no hard-coded colour');
 });
+
+// ---- Plan 27-22 (G-27-4a): fast guards for the layout rules, so a later edit to chat.css or a longer label fails without a real window ----
+
+/** chat.css without comments, split into its top-level text and its @media blocks (query and body). */
+function splitCss(source: string): { top: string; media: Array<{ query: string; body: string }> } {
+  const css = source.replace(/\/\*[\s\S]*?\*\//g, '');
+  const media: Array<{ query: string; body: string }> = [];
+  let top = '';
+  let at = 0;
+  while (at < css.length) {
+    const start = css.indexOf('@media', at);
+    if (start < 0) { top += css.slice(at); break; }
+    top += css.slice(at, start);
+    const open = css.indexOf('{', start);
+    let depth = 1;
+    let end = open + 1;
+    while (depth > 0 && end < css.length) { if (css[end] === '{') depth += 1; else if (css[end] === '}') depth -= 1; end += 1; }
+    media.push({ query: css.slice(start + 6, open).trim(), body: css.slice(open + 1, end - 1) });
+    at = end;
+  }
+  return { top, media };
+}
+
+/** Every `selector { declarations }` in a stylesheet text. */
+function rulesOf(text: string): Array<{ selector: string; body: string }> {
+  return [...text.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map((match) => ({ selector: match[1].trim(), body: match[2] }));
+}
+
+test('label budget: every label of every state, with the longest time text, fits a 220 px row at the chip font (at most 26 characters)', () => {
+  const times = [AT, new Date(2026, 8, 30, 12, 59).toISOString(), new Date(2026, 11, 28, 23, 59).toISOString(), new Date(2026, 4, 28, 10, 8).toISOString()];
+  const labels = [
+    ...STATUSES.map(([, status]) => syncControlModel(status, NOW).label),
+    ...times.map((at) => syncControlModel({ state: 'synced', at }, NOW).label)
+  ];
+  for (const label of labels) assert.ok(label.length <= 26, `"${label}" is ${label.length} characters`);
+  assert.ok(Math.max(...labels.map((label) => label.length)) >= 22, 'the budget is measured against the longest real label, not a short one');
+});
+
+test('chat.css guard: the bar wraps at every width, profile and sync never shrink or get capped below the row, the row break and the detail line are full-row', () => {
+  const { top, media } = splitCss(read('media', 'chat', 'chat.css'));
+  const all = [...rulesOf(top), ...media.flatMap((block) => rulesOf(block.body))];
+  // The bar wraps outside any media query, so it wraps at every width.
+  const bar = rulesOf(top).find((rule) => rule.selector === '.composer .bar');
+  assert.ok(bar && /flex-wrap:\s*wrap/.test(bar.body), 'the composer bar wraps outside any media query');
+  // #profile and #sync: no shrinking, and no max-width below the full row, in any rule that names them.
+  const chips = all.filter((rule) => rule.selector.split(',').some((part) => /#(profile|sync)(?![\w-])/.test(part)));
+  assert.ok(chips.length >= 2);
+  for (const rule of chips) {
+    for (const cap of rule.body.matchAll(/max-width:\s*([^;]+);?/g)) assert.equal(cap[1].trim(), '100%', `${rule.selector} caps its width at ${cap[1].trim()}`);
+  }
+  const both = chips.find((rule) => /#profile/.test(rule.selector) && /#sync(?![\w-])/.test(rule.selector));
+  assert.ok(both && (/flex:\s*none/.test(both.body) || /flex-shrink:\s*0/.test(both.body)), 'profile and sync have flex none');
+  assert.match(both.body, /max-width:\s*100%/);
+  assert.match(both.body, /white-space:\s*normal/, 'a chip too wide for a row wraps its words instead of being cut');
+  // The row break is a full-row item in a max-width query of at least 480 px, and hidden above it.
+  const rowBreakBlocks = media.filter((block) => rulesOf(block.body).some((rule) => /\.bar-break/.test(rule.selector) && /flex-basis:\s*100%/.test(rule.body)));
+  assert.ok(rowBreakBlocks.length >= 1, 'a bar-break rule with flex-basis 100% in a media query');
+  for (const block of rowBreakBlocks) assert.ok(Number(block.query.match(/max-width:\s*(\d+)px/)?.[1] ?? 0) >= 480, `the row break holds up to at least 480px: ${block.query}`);
+  const base = rulesOf(top).find((rule) => /\.bar-break/.test(rule.selector));
+  assert.ok(base && /display:\s*none/.test(base.body), 'above that width the pickers share the first row when they fit');
+  // The detail line takes a full row.
+  const detail = rulesOf(top).find((rule) => rule.selector === '.sync-detail');
+  assert.ok(detail && (/flex-basis:\s*100%/.test(detail.body) || /flex:\s*0 0 100%/.test(detail.body)), 'the detail line is a full-row item');
+});
