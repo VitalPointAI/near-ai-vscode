@@ -14,7 +14,7 @@ import { parseRunMarker, type RunMarker, type RunState } from './runMarkers';
 import { mergeSpendLines, parseSpendLines, spendFileText } from './spendMirror';
 import { writeFileAtomic, type ProjectStateHome } from './stateHome';
 import { archiveParts, readArchive } from './threadArchive';
-import { validEntry, type ThreadMeta, type ThreadStore } from './threadStore';
+import { mergeMeta, validEntry, type ThreadMeta, type ThreadStore } from './threadStore';
 import type { Transcript } from './transcripts';
 
 /** The only record kinds that are collected, sent or applied. A tombstone is allowed when it deletes one of these. */
@@ -178,8 +178,8 @@ async function collectThreads(threads: ThreadStore, build: Builder, writer: stri
         const delta = await threads.archiveDeltaEntries(item.id);
         entries = unionEntries(bundle.entries, delta);
         // The archive's own meta is as old as the archive: a use on another computer, applied to the index, is what makes this thread newer.
-        const used = [bundle.meta.lastUsedAt, item.lastUsedAt, delta.at(-1)?.at ?? ''].reduce((a, b) => (a >= b ? a : b));
-        meta = { ...bundle.meta, lastUsedAt: used };
+        const merged = mergeMeta(bundle.meta, item);
+        meta = { ...merged, lastUsedAt: [merged.lastUsedAt, delta.at(-1)?.at ?? ''].reduce((a, b) => (a >= b ? a : b)) };
         context = bundle.context;
         cold = { parts: await archiveParts(threads, item.id), ids: new Set(bundle.entries.map((entry) => entry.id)) };
       } else {
@@ -539,6 +539,7 @@ export async function applyMerged(home: ProjectStateHome, threads: ThreadStore, 
   const contexts = groupById(merged.records, 'thread-context');
   const ids = new Set<string>([...Object.keys(merged.entries), ...metas.keys(), ...contexts.keys(), ...Object.keys(merged.cold ?? {})]);
   let applied = 0;
+  const archivedIds = new Set(await threads.archivedIds());
   for (const id of [...ids].sort()) {
     if (!THREAD_ID.test(id)) continue;
     const entries = (merged.entries[id] ?? []).map((entry) => validEntry(entry, id)).filter((entry): entry is ThreadEntry => entry !== undefined);
@@ -546,10 +547,20 @@ export async function applyMerged(home: ProjectStateHome, threads: ThreadStore, 
     const incomingContext = contexts.has(id) ? parseContext(contexts.get(id)?.body, id) : undefined;
     const known = local.threads[id]?.meta;
     const listed = merged.cold?.[id];
-    // A thread kept whole online that this computer does not hold at all is listed as archived from the index; its content is fetched when it is opened.
-    if (listed && !local.threads[id] && !entries.length) {
-      const newest = incomingMeta && incomingMeta.lastUsedAt > listed.meta.lastUsedAt ? incomingMeta : listed.meta;
-      await threads.noteArchivedMeta(id, newest, { entries: listed.entries, tip: listed.tip, ...(listed.turns !== undefined ? { turns: listed.turns } : {}) });
+    // A thread whose content is in an archive folder, or kept whole only online and not held here at all, is not opened: what arrived for it waits in the
+    // archive's delta file (the next open unites it with the archive), and its last use in the index is raised, which ranks it live. Nothing is decompressed
+    // and nothing in the archive is rewritten.
+    const heldHere = local.threads[id];
+    if (heldHere?.archived || (!heldHere && (listed || archivedIds.has(id)))) {
+      const have = new Set([...(heldHere?.entries ?? []), ...(heldHere ? [] : await threads.archiveDeltaEntries(id))].map((entry) => entry.id));
+      const missing = entries.filter((entry) => !have.has(entry.id));
+      if (missing.length) await threads.appendArchiveDelta(id, missing);
+      const newest = [known, incomingMeta, listed?.meta].reduce<PortableMeta | undefined>((best, meta) => (meta && (!best || meta.lastUsedAt > best.lastUsedAt) ? meta : best), undefined);
+      if (newest) {
+        const last = missing.at(-1)?.at;
+        await threads.noteArchivedMeta(id, last && last > newest.lastUsedAt ? { ...newest, lastUsedAt: last } : newest, listed ? { entries: listed.entries, tip: listed.tip, ...(listed.turns !== undefined ? { turns: listed.turns } : {}) } : {});
+      }
+      if (missing.length || newest) applied += 1;
       continue;
     }
     const first = entries[0]?.at ?? EPOCH;

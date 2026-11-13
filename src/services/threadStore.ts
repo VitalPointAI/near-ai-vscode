@@ -465,6 +465,12 @@ export class ThreadStore implements ConversationStore {
     return dataKey && meta ? { dataKey, stateId: meta.stateId } : undefined;
   }
 
+  /** A thread's line in the index cache as it is, or undefined: for an archived thread, what other computers have said about it since it was archived. */
+  public async indexedMeta(id: string): Promise<ThreadMeta | undefined> {
+    const material = await this.readMaterial();
+    return material ? (await this.readIndex(material)).find((item) => item.id === id) : undefined;
+  }
+
   /** The ids of the threads that have an archive (a complete parts.json), in no particular order. */
   public async archivedIds(): Promise<string[]> {
     const found: string[] = [];

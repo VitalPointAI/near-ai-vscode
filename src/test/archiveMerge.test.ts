@@ -80,6 +80,10 @@ test('archived on A and continued on B: A keeps B\'s new entries next to the arc
   assert.ok(latest > '', 'B used the thread');
   assert.ok((archivedItem?.lastUsedAt ?? '') >= latest, 'the thread\'s last use on A is at least B\'s: the merged one');
 
+  // Nothing keeps ping-ponging between the two: a second sync on each side pushes nothing.
+  assert.equal((await a.sync.sync()).pushed, false, 'A has nothing more to say');
+  assert.equal((await b.sync.sync()).pushed, false, 'and neither has B');
+
   // Ranked by that, the thread is live again on A and the lowest-ranked live thread is archived in its place.
   const retained = await applyRetention(a.threads, 5, []);
   assert.deepEqual(retained.restored, [thread]);

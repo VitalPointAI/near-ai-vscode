@@ -13,7 +13,7 @@ import { rankThreads } from '../domain/state/retention';
 import { threadTip, unionEntries, type ThreadEntry } from '../domain/state/threadEntries';
 import type { RunState } from './runMarkers';
 import { writeFileAtomic } from './stateHome';
-import { validEntry, validMeta, type ThreadMeta, type ThreadStore } from './threadStore';
+import { mergeMeta, validEntry, validMeta, type ThreadMeta, type ThreadStore } from './threadStore';
 import type { Transcript } from './transcripts';
 
 /** What an archive holds of one thread. */
@@ -142,8 +142,14 @@ export function archiveThread(store: ThreadStore, id: string): Promise<boolean> 
 async function unarchiveNow(store: ThreadStore, id: string, touch: boolean): Promise<boolean> {
   if (!(await stat(path.join(store.archiveDirOf(id), 'parts.json')).catch(() => undefined))?.isFile()) return false;
   const bundle = await readArchive(store, id);
-  const entries = unionEntries(bundle.entries, await store.archiveDeltaEntries(id));
-  const live = await store.restoreLive(id, { ...bundle, entries }, touch);
+  const delta = await store.archiveDeltaEntries(id);
+  const entries = unionEntries(bundle.entries, delta);
+  // The archive's meta is as old as the archive. A use of the thread on another computer is in the index (and in the entries beside the archive), and the
+  // thread comes back no older than that.
+  const indexed = await store.indexedMeta(id);
+  const merged = indexed ? mergeMeta(bundle.meta, indexed) : bundle.meta;
+  const meta = { ...merged, lastUsedAt: [merged.lastUsedAt, delta.at(-1)?.at ?? ''].reduce((a, b) => (a >= b ? a : b)) };
+  const live = await store.restoreLive(id, { ...bundle, entries, meta }, touch);
   if (entries.some((entry) => !live.has(entry.id))) throw new Error('The conversation could not be restored completely, so its archive was kept.');
   await rm(store.archiveDirOf(id), { recursive: true, force: true });
   return true;
