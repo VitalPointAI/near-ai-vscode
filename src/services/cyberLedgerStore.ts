@@ -1,5 +1,5 @@
 import { appendFile, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import * as path from 'node:path';
 import type { Finding } from '../domain/cyber';
 import type { LedgerEntry, LedgerFields } from '../domain/cyberLedger';
@@ -144,7 +144,7 @@ export class CyberEvidenceStore {
     const hash = createHashOf(bytes);
     const file = this.blobPath(runId, hash);
     await mkdir(path.dirname(file), { recursive: true });
-    const temporary = `${file}.${process.pid}.tmp`;
+    const temporary = `${file}.${randomBytes(8).toString('hex')}.tmp`;
     await writeFile(temporary, bytes);
     await rename(temporary, file);
     return hash;

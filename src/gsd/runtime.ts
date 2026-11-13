@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
 import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import * as path from 'node:path';
 import { compareVersions } from '../domain/version';
@@ -101,7 +102,7 @@ export class GsdRuntime {
 
   private async point(version: string): Promise<void> {
     await mkdir(this.root, { recursive: true });
-    const temporary = path.join(this.root, `current.json.${process.pid}.tmp`);
+    const temporary = path.join(this.root, `current.json.${randomBytes(8).toString('hex')}.tmp`);
     await writeFile(temporary, JSON.stringify({ version, activatedAt: new Date().toISOString() }), 'utf8');
     await rename(temporary, path.join(this.root, 'current.json'));
   }

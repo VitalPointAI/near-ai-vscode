@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { mkdirSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import * as path from 'node:path';
@@ -44,7 +45,7 @@ function readShared(): boolean | undefined {
 function writeShared(engaged: boolean): void {
   if (!sharedFile) return;
   mkdirSync(path.dirname(sharedFile), { recursive: true });
-  const temporary = `${sharedFile}.${process.pid}.tmp`;
+  const temporary = `${sharedFile}.${randomBytes(8).toString('hex')}.tmp`;
   writeFileSync(temporary, JSON.stringify({ engaged, at: new Date().toISOString() }));
   renameSync(temporary, sharedFile);
 }
