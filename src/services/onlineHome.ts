@@ -48,6 +48,11 @@ export interface OnlineHomeUi {
   askRepoUrl(problem?: string): Promise<string | undefined>;
   /** The separate offer to put the person's own code online. Without it the flow never offers. */
   codePush?: CodePushOffer;
+  /**
+   * Asked once on a re-run when the person's branch is online and the repository still shows the sync branch first: make `branch` the default? Only the
+   * person's yes moves it. Without this method the default is never changed on a re-run.
+   */
+  confirmDefaultBranch?(branch: string): Promise<boolean>;
   /** Called when the flow is over, so a progress display can close. */
   done?(): void;
 }
@@ -286,7 +291,68 @@ export async function defaultBranchAfterPush(input: { root: string; remote: stri
   // online repository already shows another branch first.
   const shown = await remoteDefaultBranch(input.root, input.remote, input.git);
   if (shown !== undefined && shown !== STATE_BRANCH) return undefined;
+  return settingsSentence(branch);
+}
+
+/** Said when this flow cannot (or may not) change the default itself: which setting the person changes. */
+function settingsSentence(branch: string): string {
   return `To show your code first, make ${branch} the default branch in the online repository's settings (on GitHub: Settings, then Default branch).`;
+}
+
+/**
+ * For a project whose own branch is already online: when the repository still shows the sync branch first, `ask` is put to the person and only their yes
+ * makes `branch` the default (one PATCH, through moveDefaultBranch, which never moves anything but near-ai/state). A default the person chose is never
+ * asked about. Without a token or a GitHub account and name (a pasted address) nothing is sent to the API and the setting is named instead, when the
+ * remote shows the sync branch first. This never pushes, creates or deletes a ref. Returns a sentence to tell, or nothing.
+ */
+export async function repairDefaultBranch(input: {
+  root: string; remote: string; git: GitRunner; branch: string; token?: string; owner?: string; name?: string; ask?: (branch: string) => Promise<boolean>; fetchFn?: FetchLike;
+}): Promise<string | undefined> {
+  if (!isSafeBranchName(input.branch) || input.branch === STATE_BRANCH) return undefined;
+  if (input.token !== undefined && input.owner !== undefined && input.owner !== '' && input.name !== undefined && input.name !== '') {
+    let current: string | undefined;
+    try { current = (await getRepo(input.token, input.owner, input.name, input.fetchFn))?.defaultBranch; } catch (error) {
+      if (error instanceof GitHubApiError) return undefined;
+      throw error;
+    }
+    if (current !== STATE_BRANCH || input.ask === undefined || !(await input.ask(input.branch))) return undefined;
+    const moved = await moveDefaultBranch({ token: input.token, owner: input.owner, name: input.name, to: input.branch, fetchFn: input.fetchFn });
+    return moved.result === 'unchanged' ? undefined : moved.message;
+  }
+  return await remoteDefaultBranch(input.root, input.remote, input.git) === STATE_BRANCH ? settingsSentence(input.branch) : undefined;
+}
+
+const CODE_LATER = 'Your code stays on this computer. The online repository holds only NEAR AI\'s encrypted sync branch until you put your code online, which "NEAR AI: Put This Project\'s Code Online" does whenever you choose.';
+const ALREADY_HOME = 'This project already has an online home.';
+const HOME_HAS_CODE = 'This project\'s online home has its code.';
+const REMOTE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+
+/** Offers the person's own code, and when they accept runs the checked push and then looks at the default branch. Declining names the way back. */
+async function offerAndPushCode(input: {
+  root: string; remote: string; git: GitRunner; offer: CodePushOffer; repo: OnlineHomeRepo; token?: string; fetchFn?: FetchLike; say(text: string): void; tell(text: string): void;
+}): Promise<void> {
+  if (!await input.offer.offer()) { input.tell(CODE_LATER); return; }
+  input.say('Checking which files would go up…');
+  const pushed = await pushProjectCode(input.root, input.remote, input.git, { ui: input.offer, visibility: input.repo.visibility });
+  input.tell(pushed.message);
+  // The default branch is looked at only after the person's own code reached the repository, never before and never for any other outcome.
+  if (pushed.status === 'pushed') {
+    const sentence = await defaultBranchAfterPush({ root: input.root, remote: input.remote, git: input.git, token: input.token, owner: input.repo.owner, name: input.repo.name, fetchFn: input.fetchFn });
+    if (sentence !== undefined) input.tell(sentence);
+  } else if (pushed.status === 'declined') {
+    input.tell(CODE_LATER);
+  }
+}
+
+/** Whether the person's current branch is on the online repository: one ls-remote of that branch. Undefined means cannot tell (no branch, or the remote cannot be read). */
+async function branchOnRemote(root: string, remote: string, git: GitRunner): Promise<{ branch: string; online: boolean } | undefined> {
+  if (!REMOTE_NAME.test(remote)) return undefined;
+  const read = await git(['-C', root, 'symbolic-ref', '--short', '-q', 'HEAD']);
+  const branch = read.code === 0 ? gitText(read) : '';
+  if (!isSafeBranchName(branch)) return undefined;
+  const listed = await git(['-C', root, 'ls-remote', '--heads', remote, `refs/heads/${branch}`], { timeoutMs: REMOTE_READ_TIMEOUT_MS });
+  if (listed.code !== 0) return undefined;
+  return { branch, online: gitText(listed).split('\n').some((line) => line.trim().split(/\s+/)[1] === `refs/heads/${branch}`) };
 }
 
 async function sameFolder(a: string, b: string): Promise<boolean> {
@@ -363,8 +429,23 @@ export async function onlineHomeFlow(input: OnlineHomeInput): Promise<OnlineHome
     const hasRemote = repo !== undefined && (await remoteEntries(base, root)).some((entry) => entry.url === repo?.url);
     const step = nextOnlineHomeStep(saved, { isRepo: true, hasRemote, repoExists });
     if (step === 'done' && repo) {
-      tell('This project already has an online home.');
-      return { status: 'done', remote: { name: (await remoteEntries(base, root)).find((entry) => entry.url === repo?.url)?.name ?? 'origin', url: repo.url } };
+      const done = { name: (await remoteEntries(base, root)).find((entry) => entry.url === repo?.url)?.name ?? 'origin', url: repo.url };
+      // The setup was finished before: nothing is created and the turn-on flow is not run again. What is left is the person's own code and, with their
+      // click, the default branch an earlier version left on the sync branch.
+      const codeGit = (input.personGit ?? runPersonGit);
+      const signed = token === undefined ? codeGit : withGitHubAuth(codeGit, token);
+      const where = await branchOnRemote(root, done.name, signed);
+      if (where === undefined || (!where.online && !ui.codePush)) tell(ALREADY_HOME);
+      else if (!where.online && ui.codePush) {
+        await offerAndPushCode({ root, remote: done.name, git: signed, offer: ui.codePush, repo, token, fetchFn: input.fetchFn, say, tell });
+      } else {
+        tell(HOME_HAS_CODE);
+        const sentence = await repairDefaultBranch({
+          root, remote: done.name, git: signed, branch: where.branch, token, owner: repo.owner, name: repo.name, ask: ui.confirmDefaultBranch?.bind(ui), fetchFn: input.fetchFn
+        });
+        if (sentence !== undefined) tell(sentence);
+      }
+      return { status: 'done', remote: done };
     }
 
     // Sign in, ask public or private (or take a pasted address), create the repository.
@@ -401,18 +482,11 @@ export async function onlineHomeFlow(input: OnlineHomeInput): Promise<OnlineHome
       await save('sync');
     }
 
-    // Only now, and as its own question: the person's own code. Declining leaves sync working.
-    if (ui.codePush && await ui.codePush.offer()) {
-      say('Checking which files would go up…');
+    // Only now, and as its own question: the person's own code. Declining leaves sync working and names the way back.
+    if (ui.codePush) {
       const personGit = input.personGit ?? runPersonGit;
       const codeGit = token === undefined ? personGit : withGitHubAuth(personGit, token);
-      const pushed = await pushProjectCode(root, remote.name, codeGit, { ui: ui.codePush, visibility: current.visibility });
-      tell(pushed.message);
-      // The default branch is looked at only after the person's own code reached the repository, never before and never for any other outcome.
-      if (pushed.status === 'pushed') {
-        const sentence = await defaultBranchAfterPush({ root, remote: remote.name, git: codeGit, token, owner: current.owner, name: current.name, fetchFn: input.fetchFn });
-        if (sentence !== undefined) tell(sentence);
-      }
+      await offerAndPushCode({ root, remote: remote.name, git: codeGit, offer: ui.codePush, repo: current, token, fetchFn: input.fetchFn, say, tell });
     }
     await save('offer-code');
     await save('done');

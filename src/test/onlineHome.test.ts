@@ -8,7 +8,7 @@ import test from 'node:test';
 import { VISIBILITY_NOTES } from '../domain/state/onlineHome';
 import { GitHubApiError, getRepo, isSafeBranchName, setDefaultBranch } from '../services/githubApi';
 import type { FetchLike } from '../services/githubApi';
-import { moveDefaultBranch, onlineHomeFlow, readProgress, remoteDefaultBranch, systemGhCli } from '../services/onlineHome';
+import { moveDefaultBranch, onlineHomeFlow, readProgress, remoteDefaultBranch, repairDefaultBranch, systemGhCli } from '../services/onlineHome';
 import type { GhExec } from '../services/onlineHome';
 import { stateHomeFor } from '../services/stateHome';
 import type { GitRunner } from '../services/stateGit';
@@ -583,7 +583,7 @@ test('remoteDefaultBranch reads the symbolic HEAD with git alone, and anything i
 // ---- running the setup again: the code offer, the way back after a decline, and the click-confirmed default branch (G-27-6a, G-27-6b) ----
 
 const COMMAND_NAME = "Put This Project's Code Online";
-const HAS_CODE = /online home has this project's code/;
+const HAS_CODE = /online home has its code/;
 const SETTINGS = (branch: string): string => `make ${branch} the default branch in the online repository's settings`;
 
 /** The same project's setup run a second time on the same fakes: nothing is created, and what the run did is returned for inspection. */
@@ -776,4 +776,43 @@ test('the re-run reads the remote with one ls-remote of the person\'s branch, le
   assert.equal(detachedOffer.summaries.length, 0);
   assert.deepEqual(detachedUi.messages, ['This project already has an online home.']);
   assert.equal(patches(run).length, 0);
+});
+
+test('repairDefaultBranch asks only when the default is near-ai/state, moves only on a yes, never pushes, and sends nothing to the API without a token and a GitHub name', async () => {
+  const spy = spyGit();
+  const common = { root: '/not-used', remote: 'origin', git: spy.git, token: FAKE_TOKEN, owner: 'me', name: 'demo' };
+  for (const [current, answer, patchCount] of [[DEFAULT_STATE_BRANCH, true, 1], [DEFAULT_STATE_BRANCH, false, 0], ['develop', true, 0], ['main', true, 0], [undefined, true, 0]] as const) {
+    const github = fakeGitHub({ existing: ['demo'], defaultBranch: current });
+    const asked: string[] = [];
+    const told = await repairDefaultBranch({ ...common, branch: 'main', ask: (branch) => { asked.push(branch); return Promise.resolve(answer); }, fetchFn: github.fetchFn });
+    assert.deepEqual(asked, current === DEFAULT_STATE_BRANCH ? ['main'] : [], String(current));
+    assert.equal(github.calls.filter((call) => call.method === 'PATCH').length, patchCount, String(current));
+    assert.equal(told !== undefined, patchCount === 1, String(told));
+  }
+  // No question available: no change. The sync branch itself is never the branch to move to.
+  const quiet = fakeGitHub({ existing: ['demo'], defaultBranch: DEFAULT_STATE_BRANCH });
+  assert.equal(await repairDefaultBranch({ ...common, branch: 'main', fetchFn: quiet.fetchFn }), undefined);
+  assert.equal(await repairDefaultBranch({ ...common, branch: DEFAULT_STATE_BRANCH, ask: () => Promise.resolve(true), fetchFn: quiet.fetchFn }), undefined);
+  assert.equal(quiet.calls.filter((call) => call.method === 'PATCH').length, 0);
+  // GitHub that cannot be read: nothing is asked and nothing is changed.
+  const offline = await repairDefaultBranch({ ...common, branch: 'main', ask: () => Promise.reject(new Error('asked')), fetchFn: () => Promise.reject(new TypeError('fetch failed')) });
+  assert.equal(offline, undefined);
+  assert.equal(spy.calls.some((args) => args.includes('push')), false);
+
+  // Without a token (or a GitHub account and name) no request is made; the setting is named only when the remote shows the sync branch first.
+  const bare = bareRemote({ withMain: false });
+  const dir = await projectFolder('repair-paste');
+  initWithMapping(dir, { 'https://github.com/me/pasted.git': bare });
+  fixtureGit(dir, ['remote', 'add', 'origin', 'https://github.com/me/pasted.git']);
+  const never: FetchLike = () => Promise.reject(new Error('no request expected'));
+  fixtureGit(bare, ['symbolic-ref', 'HEAD', STATE_REF]);
+  fixtureGit(dir, ['checkout', '-q', '-b', 'work']);
+  fixtureGit(dir, ['commit', '-q', '--allow-empty', '-m', 'one']);
+  fixtureGit(dir, ['push', '-q', 'origin', 'work']);
+  fixtureGit(bare, ['update-ref', STATE_REF, 'refs/heads/work']);
+  const pasted = { root: dir, remote: 'origin', git: spy.git, branch: 'work', ask: () => Promise.reject(new Error('asked')), fetchFn: never };
+  assert.match(await repairDefaultBranch(pasted) ?? '', /make work the default branch in the online repository's settings/);
+  assert.match(await repairDefaultBranch({ ...pasted, owner: 'me', name: 'pasted' }) ?? '', /make work the default branch/);
+  fixtureGit(bare, ['symbolic-ref', 'HEAD', 'refs/heads/work']);
+  assert.equal(await repairDefaultBranch(pasted), undefined);
 });

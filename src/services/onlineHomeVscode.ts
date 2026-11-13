@@ -144,6 +144,14 @@ export function vscodeOnlineHomeUi(): OnlineHomeUi {
       ignoreFocusOut: true
     })),
     codePush: codePushOffer(),
+    confirmDefaultBranch: async (branch) => {
+      const make = `Make ${branch} the default`;
+      return await vscode.window.showInformationMessage(
+        `GitHub shows NEAR AI's encrypted sync branch first in this repository. Show ${branch} first instead?`,
+        make,
+        NOT_NOW
+      ) === make;
+    },
     done: () => { ended = true; end?.(); }
   };
 }
