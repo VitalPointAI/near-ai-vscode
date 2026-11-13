@@ -1,16 +1,17 @@
 import assert from 'node:assert/strict';
-import { readdir, readFile, rm, stat } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, stat } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { compactConversation, trimOldToolResults } from '../agent/context';
 import { DEFAULT_RULES } from '../agent/permissions';
-import { contentKey, COMPACTION_ACK } from '../domain/state/threadCapture';
-import { AgentConversation, type AgentTurnRequest } from '../services/agentSession';
+import { contentKey, COMPACTION_ACK, messagesToEntries } from '../domain/state/threadCapture';
+import { AgentConversation, type AgentTurnRequest, type GsdContext } from '../services/agentSession';
 import type { AgentMessage, CompletionEvent, ToolCall } from '../services/nearAiClient';
 import { stateHomeFor } from '../services/stateHome';
-import { stateKeysFor } from '../services/stateKeys';
+import { StateKeys, stateKeysFor } from '../services/stateKeys';
 import { ThreadStore } from '../services/threadStore';
-import type { Transcript } from '../services/transcripts';
+import { TranscriptStore, type Transcript } from '../services/transcripts';
 import { MemorySecrets, tempProject } from './helpers/stateFixtures';
 
 // Phase 27, plan 05 (SYNC-01, D-07): every thread keeps its full conversation in an append-only log in the state home, captured before the model's
@@ -149,5 +150,138 @@ test('the log and the context hold no plaintext on disk', async () => {
     const dir = path.join(stateHomeFor(root).paths.threads, THREAD);
     for (const name of await readdir(dir)) assert.doesNotMatch(await readFile(path.join(dir, name), 'utf8'), /Question|Answer|result \d/, `${name} is sealed`);
     assert.equal(((await stat(path.join(dir, 'log.jsonl'))).mode & 0o777), 0o600, 'the log is owner-only');
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+// ---- Task 2: no pruning, locked listing, D-12 and D-13 end to end, context rebuilt after a continuation elsewhere --------------------------
+
+const sampleTranscript = (id: string): Transcript => ({ id, title: `Conversation ${id}`, model: 'm', updatedAt: new Date().toISOString(), turns: 1, messages: [{ role: 'system', content: 's' }, { role: 'user', content: `hello ${id}` }] });
+
+test('saving never deletes a conversation: sixty are kept by the thread store and by the old transcript store', async () => {
+  const root = await tempProject();
+  try {
+    const store = storeFor(root);
+    const old = new TranscriptStore(path.join(root, '.old'), root, async () => Buffer.alloc(32, 7));
+    for (let index = 0; index < 60; index += 1) {
+      const transcript = sampleTranscript(`conv-${String(index).padStart(6, '0')}`);
+      await store.save(transcript);
+      await old.save(transcript);
+    }
+    assert.equal((await store.list()).length, 60);
+    assert.equal((await old.list()).length, 60, 'the old store no longer prunes beyond fifty');
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('a conversation this device cannot open is listed as locked, never dropped', async () => {
+  const root = await tempProject();
+  try {
+    const old = new TranscriptStore(path.join(root, '.old'), root, async () => Buffer.alloc(32, 7));
+    await old.save(sampleTranscript('conv-locked-1'));
+    await old.save(sampleTranscript('conv-locked-2'));
+    const another = await new TranscriptStore(path.join(root, '.old'), root, async () => Buffer.alloc(32, 9)).list();
+    assert.deepEqual(another.map((item) => [item.id, item.locked]).sort(), [['conv-locked-1', true], ['conv-locked-2', true]], 'a file sealed with another key is listed as locked');
+    assert.deepEqual((await old.list()).map((item) => item.locked), [undefined, undefined], 'with the right key they open');
+
+    const store = storeFor(root);
+    await store.save(sampleTranscript('conv-thread-a1'));
+    await store.save(sampleTranscript('conv-thread-b2'));
+    // The key file is not used and this editor has no copy of the key: the project's chats are locked here.
+    const home = stateHomeFor(root);
+    const locked = new ThreadStore(home, new StateKeys(home, new MemorySecrets(), () => false), { writer: 'edB.1' });
+    const listed = await locked.list();
+    assert.deepEqual(listed.map((item) => [item.id, item.locked, item.title]).sort(), [['conv-thread-a1', true, ''], ['conv-thread-b2', true, '']]);
+    assert.equal(await locked.load('conv-thread-a1'), undefined, 'and it does not open');
+    assert.deepEqual(await locked.entries('conv-thread-a1'), []);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('D-12: a 3 MiB tool result is stored shortened with its size, and nothing else is shortened', async () => {
+  const root = await tempProject();
+  try {
+    const store = storeFor(root);
+    const huge = 'y'.repeat(3 * 1024 * 1024);
+    const middle = 'z'.repeat(1_500_000);
+    const messages: AgentMessage[] = [
+      { role: 'system', content: 's' }, { role: 'user', content: 'read two big files' },
+      { role: 'assistant', content: null, tool_calls: [call('big', 'Read', { file_path: 'huge.log' }), call('mid', 'Read', { file_path: 'mid.log' })] },
+      { role: 'tool', tool_call_id: 'big', content: huge }, { role: 'tool', tool_call_id: 'mid', content: middle }, { role: 'assistant', content: 'Read both.' }
+    ];
+    await store.captureTranscript(transcriptOf(messages), new Map(), new WeakSet());
+    const results = (await store.lines(THREAD)).main.filter((entry) => entry.role === 'tool-result').map((entry) => entry.body as { callId: string; output: string; shortenedBytes?: number });
+    const big = results.find((result) => result.callId === 'big')!;
+    assert.equal(big.shortenedBytes, 3_145_728);
+    assert.equal(Buffer.byteLength(big.output), 2 * 1024 * 1024, 'stored at the 2 MiB cap');
+    const mid = results.find((result) => result.callId === 'mid')!;
+    assert.equal(mid.output, middle, 'a smaller result is stored whole');
+    assert.equal(mid.shortenedBytes, undefined);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('D-13: a sub-agent adds no entries of its own; its report is the lead agent\'s tool result', async () => {
+  const root = await tempProject();
+  const gsdHome = await mkdtemp(path.join(tmpdir(), 'near-ai-thread-gsd-'));
+  try {
+    await mkdir(path.join(gsdHome, 'gsd-core'), { recursive: true });
+    const gsd: GsdContext = { home: gsdHome, skills: [], agents: [{ name: 'gsd-planner', description: 'Plans', tools: ['Read'], body: 'You are the planner.', file: path.join(gsdHome, 'agents', 'gsd-planner.md') }], shellEnv: {} };
+    const parent: Array<{ text?: string; calls?: ToolCall[] }> = [{ calls: [call('a1', 'Agent', { subagent_type: 'gsd-planner', description: 'Draft a plan', prompt: 'Plan it carefully.' })] }, { text: 'The planner is done.' }];
+    let lead = 0;
+    const client = {
+      async *streamCompletion(_model: string, messages: AgentMessage[]): AsyncGenerator<CompletionEvent> {
+        if (String(messages[0]?.content ?? '').startsWith('You are the planner.')) { yield { type: 'done', message: { role: 'assistant', content: 'PLAN-REPORT ready' }, finishReason: 'stop', usage }; return; }
+        const step = parent[lead++] ?? { text: 'done' };
+        yield { type: 'done', message: { role: 'assistant', content: step.text ?? null, ...(step.calls ? { tool_calls: step.calls } : {}) }, finishReason: step.calls ? 'tool_calls' : 'stop', usage };
+      },
+      async actualCostsUsd() { return undefined; }
+    };
+    const store = storeFor(root);
+    const conversation = new AgentConversation(root, () => undefined, stateHomeFor(root).paths.checkpoints, undefined, store);
+    await conversation.send({ text: 'Plan the work', client: client as never, model: 'm', privacy: 'Private', policy: { mode: 'approve-risky', emergencyStop: false }, rules: DEFAULT_RULES, gsd });
+    const entries = (await store.lines(conversation.id)).main;
+    assert.deepEqual(entries.map((entry) => entry.role), ['user', 'tool-call', 'tool-result', 'assistant'], 'only the lead agent\'s own steps');
+    assert.match(String((entries[2].body as { output: string }).output), /PLAN-REPORT ready/, 'the sub-agent\'s report is the lead\'s tool result');
+    assert.doesNotMatch(JSON.stringify(entries.map((entry) => entry.body)).replace(/Plan it carefully\./g, ''), /You are the planner/, 'the sub-agent\'s own prompt and turns are not logged');
+    assert.equal((await store.entries(conversation.id)).length, 4);
+  } finally { await rm(root, { recursive: true, force: true }); await rm(gsdHome, { recursive: true, force: true }); }
+});
+
+test('a thread continued on another computer reopens with the continuation in its working context, and nothing is lost', async () => {
+  const root = await tempProject();
+  try {
+    const editorA = storeFor(root, new MemorySecrets(), 'edA.1');
+    const { messages, display } = longConversation(4);
+    await editorA.captureTranscript(transcriptOf(messages, THREAD, display), display, new WeakSet());
+    await editorA.save(transcriptOf(messages, THREAD, display));
+    const before = (await editorA.entries(THREAD)).length;
+
+    // Another editor continues the same thread from its tip, after the context was saved.
+    const editorB = storeFor(root, new MemorySecrets(), 'edB.1');
+    const tip = (await editorB.lines(THREAD)).main.at(-1)!.id;
+    const elsewhere: AgentMessage[] = [{ role: 'user', content: 'Asked on the other computer' }, { role: 'assistant', content: 'Answered on the other computer' }];
+    await editorB.appendEntries(THREAD, messagesToEntries(elsewhere, new Map(), tip, { thread: THREAD, writer: 'edB.1' }));
+
+    const seen: AgentMessage[][] = [];
+    const client = {
+      async *streamCompletion(_model: string, sent: AgentMessage[]): AsyncGenerator<CompletionEvent> {
+        seen.push(structuredClone(sent));
+        yield { type: 'done', message: { role: 'assistant', content: 'And now this.' }, finishReason: 'stop', usage };
+      },
+      async actualCostsUsd() { return undefined; }
+    };
+    const reopened = new AgentConversation(root, () => undefined, stateHomeFor(root).paths.checkpoints, undefined, storeFor(root, new MemorySecrets(), 'edC.1'));
+    const turns = await reopened.restore(THREAD);
+    assert.deepEqual(turns?.filter((turn) => turn.role === 'user').map((turn) => turn.text).slice(-2), ['Question 4', 'Asked on the other computer']);
+    await reopened.send({ text: 'Continue here', client: client as never, model: 'm', privacy: 'Private', policy: { mode: 'approve-risky', emergencyStop: false }, rules: DEFAULT_RULES });
+    const context = seen[0].map((message) => message.content).join('\n');
+    assert.match(context, /Asked on the other computer/, 'the other computer\'s question is in the context the model continues from');
+    assert.match(context, /Answered on the other computer/);
+    assert.match(context, /Question 1/, 'and so is the earlier history');
+    assert.equal(seen[0][0].role, 'system', 'the system prompt stays first');
+
+    const store = storeFor(root, new MemorySecrets(), 'edD.1');
+    const lines = await store.lines(THREAD);
+    assert.equal((await store.entries(THREAD)).length, before + 2 + 2, 'two entries from the other computer and two new ones; none lost');
+    assert.equal(lines.branches.length, 0, 'the new message continues the main line');
+    assert.equal(lines.main.at(-2)?.role, 'user');
+    assert.equal((lines.main.at(-2)?.body as { text: string }).text, 'Continue here');
   } finally { await rm(root, { recursive: true, force: true }); }
 });
