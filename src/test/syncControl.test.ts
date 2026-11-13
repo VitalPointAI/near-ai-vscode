@@ -377,11 +377,23 @@ test('Settings has a link that turns sync on, next to the key-file setting', () 
 
 // ---- Task 3: the first-run invitation ----
 
-test('the first-run invitation has the line, a Turn on sync button and a way to say no, once, and goes when not wanted', () => {
+/** The first-run screen as panelView.ts lays it out: the connect panel (shown until a profile works) and the ready area (hidden until then). */
+function firstRun(): { doc: FakeDocument; welcome: FakeNode; connect: FakeNode; ready: FakeNode } {
   const doc = new FakeDocument();
   const welcome = doc.createElement('section');
   welcome.id = 'welcome';
+  const connect = doc.createElement('div');
+  connect.id = 'welcome-connect';
+  const ready = doc.createElement('div');
+  ready.id = 'welcome-ready';
+  ready.hidden = true;
+  welcome.append(connect, ready);
   doc.body.append(welcome);
+  return { doc, welcome, connect, ready };
+}
+
+test('the first-run invitation has the line, a Turn on sync button and a way to say no, once, and goes when not wanted', () => {
+  const { doc, ready: welcome } = firstRun();
   const posts: unknown[] = [];
   const node = kit.renderSyncPrompt(doc, welcome, (message) => posts.push(message), true)!;
   assert.equal(welcome.children[0], node);
@@ -400,7 +412,8 @@ test('the first-run invitation has the line, a Turn on sync button and a way to 
 });
 
 test('the first-run invitation steps aside while the pick-up card carries one, and comes back when the card goes', () => {
-  const { doc, welcome, posts } = welcomeWithCard({});
+  const { doc, ready: welcome } = firstRun();
+  const posts: unknown[] = [];
   kit.renderSyncPrompt(doc, welcome, (message) => posts.push(message), true);
   assert.equal(doc.body.all((node) => node.textContent === SYNC_PROMPT_TEXT.line).length, 1);
   const model: Partial<PickupModel> = { show: true, pointerAt: '2026-11-13T10:05:00.000Z', syncPrompt: true };
@@ -410,6 +423,54 @@ test('the first-run invitation steps aside while the pick-up card carries one, a
   card.all((node) => node.tagName === 'button' && node.textContent === 'Not now')[0].click();
   assert.ok(doc.getElementById('sync-prompt'), 'back on the first-run screen once the card is gone');
   assert.equal(doc.body.all((node) => node.textContent === SYNC_PROMPT_TEXT.line).length, 1);
+});
+
+// ---- Plan 27-25 (G-27-4d, first run): connect NEAR AI first; the invitation follows once a profile works ----
+
+test('the sync-status case puts the invitation in the ready area, and the pick-up card line stays as it was', () => {
+  const script = read('media', 'chat', 'chat.js');
+  assert.equal((script.match(/renderSyncPrompt\(document, welcomeReady/g) ?? []).length, 1);
+  assert.doesNotMatch(script, /renderSyncPrompt\(document, welcome,/);
+  assert.match(script, /case 'pickup-card': pickupKit\.renderPickupCard\(document, welcomeReady, m\.model, post, \(\) => input\.focus\(\)\); break;/);
+  assert.match(script, /const welcomeReady = \$\('welcome-ready'\) \|\| welcome;/, 'it falls back to the whole welcome section when there is no ready area');
+});
+
+test('the invitation lives inside the ready area: not in the connect panel, not shown until a profile works, once when it does', () => {
+  const { doc, welcome, connect, ready } = firstRun();
+  const node = kit.renderSyncPrompt(doc, ready, () => undefined, true)!;
+  assert.equal(node.parent, ready);
+  assert.equal(connect.all((child) => child.id === 'sync-prompt').length, 0, 'nothing of it in the connect panel');
+  assert.equal(welcome.children[0], connect, 'the connect panel is still the first thing on the screen');
+  const shown = (element: FakeNode): boolean => { for (let at: FakeNode | undefined = element; at; at = at.parent) if (at.hidden) return false; return true; };
+  assert.equal(shown(node), false, 'hidden with the ready area while only the connect panel shows');
+  ready.hidden = false;
+  connect.hidden = true;
+  assert.equal(shown(node), true);
+  assert.equal(doc.body.all((child) => child.id === 'sync-prompt').length, 1, 'exactly once');
+  kit.renderSyncPrompt(doc, ready, () => undefined, true);
+  assert.equal(doc.body.all((child) => child.id === 'sync-prompt').length, 1, 'still once after another status');
+});
+
+test('chat.css gives the invitation room and a box like the setup nudge, in theme variables only', () => {
+  const css = read('media', 'chat', 'chat.css').replace(/\/\*[\s\S]*?\*\//g, '');
+  const rule = rulesOf(css).find((entry) => entry.selector.split(',').some((part) => part.trim() === '.sync-prompt'));
+  assert.ok(rule, 'a .sync-prompt rule');
+  const margins = [...rule.body.matchAll(/margin(?:-(top|bottom))?:\s*([^;]+);/g)];
+  assert.ok(margins.length > 0, 'it sets margins');
+  const px = (value: string): number[] => [...value.matchAll(/(-?\d+(?:\.\d+)?)px/g)].map((match) => Number(match[1]));
+  const all = margins.find((entry) => !entry[1]);
+  if (all) {
+    const parts = px(all[2]);
+    const [top, , bottom] = parts.length === 1 ? [parts[0], parts[0], parts[0]] : parts.length === 2 ? [parts[0], parts[1], parts[0]] : parts;
+    assert.ok(top >= 8 && bottom >= 8, `top ${top}px and bottom ${bottom}px`);
+  } else {
+    assert.ok(Math.min(...px(margins.find((entry) => entry[1] === 'top')![2])) >= 8, 'top margin');
+    assert.ok(Math.min(...px(margins.find((entry) => entry[1] === 'bottom')![2])) >= 8, 'bottom margin');
+  }
+  assert.match(rule.body, /padding:/);
+  assert.match(rule.body, /border:[^;]*var\(--vscode-/);
+  assert.match(rule.body, /background:[^;]*var\(--vscode-/);
+  assert.doesNotMatch(rule.body, /#[0-9a-fA-F]{3,8}\b(?!\w)|rgba?\(|hsla?\(/, 'no hard-coded colour');
 });
 
 // ---- Plan 27-22 (G-27-4c): the plain sentence of a problem is visible text under the control, not only the tooltip ----
