@@ -1158,11 +1158,28 @@
     node.append(el('span', '', item.text || ''));
     return node;
   }
-  function scheduleHistory() {
-    if (!historyFrame) historyFrame = requestAnimationFrame(drawHistory);
+  // A hidden webview never runs an animation frame, so the queue waits on a frame only while the view is visible and on a timer otherwise. Without
+  // that, a reopened conversation and every approval, question and live event behind it stalled until the person looked at the view (T-27-138).
+  let historyTimer = 0;
+  function viewVisible() {
+    return typeof requestAnimationFrame === 'function' && document.visibilityState === 'visible';
   }
+  function scheduleHistory() {
+    if (historyFrame || historyTimer) return;
+    if (viewVisible()) historyFrame = requestAnimationFrame(drawHistory);
+    else historyTimer = setTimeout(drawHistory, 0);
+  }
+  function cancelHistoryWork() {
+    if (historyFrame) { cancelAnimationFrame(historyFrame); historyFrame = 0; }
+    if (historyTimer) { clearTimeout(historyTimer); historyTimer = 0; }
+  }
+  // Hidden with a frame pending: that frame will not come, so the rest of the queue moves to a timer.
+  document.addEventListener('visibilitychange', () => {
+    if (historyFrame && document.visibilityState !== 'visible') { cancelAnimationFrame(historyFrame); historyFrame = 0; scheduleHistory(); }
+  });
   function drawHistory() {
     historyFrame = 0;
+    historyTimer = 0;
     const fragment = document.createDocumentFragment();
     let drawn = 0;
     while (historyQueue.length && drawn < HISTORY_SLICE) {
@@ -1197,7 +1214,7 @@
   }
   function dropHistory() {
     historyQueue.length = 0;
-    if (historyFrame) { cancelAnimationFrame(historyFrame); historyFrame = 0; }
+    cancelHistoryWork();
   }
   // Opening a tool step asks the host for its stored output, once; the answer is shown as text, never as markup (T-27-25).
   transcript.addEventListener('toggle', (event) => {
