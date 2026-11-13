@@ -16,7 +16,7 @@ import { stateKeysFor } from './stateKeys';
 import { profileSyncHooks } from './stateRestore';
 import type { SyncOutcome } from './stateSync';
 import {
-  SyncScheduler, afterRemoteFor, buildStateSync, enterCodeFlow, keepKeyFlow, localHomeState, newCodeFlow, readSyncSettings, resolveRemote, statusSentence, tokenRunner, turnOffFlow, turnOnFlow,
+  SyncScheduler, afterRemoteFor, buildStateSync, enterCodeFlow, keepKeyFlow, localHomeState, newCodeFlow, readSyncSettings, removeOldInProjectSyncFolders, resolveRemote, statusSentence, tokenRunner, turnOffFlow, turnOnFlow,
   type SyncEnv, type SyncParts, type SyncStatus, type SyncUi
 } from './syncFlows';
 import { threadStoreFor } from './threadStore';
@@ -132,6 +132,8 @@ function runtimeFor(context: vscode.ExtensionContext, auth: AuthService, root: s
   const markers = new RunMarkers(context.globalStorageUri.fsPath, resolved, { dir: home.paths.runs, writer });
   const parts: SyncParts = {
     root: resolved, home, keys, threads, writer, git: runStateGit,
+    // The private mirror lives in this editor's own storage, never inside the project (REVIEW B1).
+    mirrorRoot: path.join(context.globalStorageUri.fsPath, 'sync-mirrors'),
     isIdle: () => runsInFlight(resolved) === 0,
     runState: (marker) => markers.runState(marker),
     profiles: profileSyncHooks(resolved, auth, keys, home)
@@ -228,6 +230,8 @@ export function registerSyncCommands(context: vscode.ExtensionContext, auth: Aut
   const root = workspaceRoot();
   if (!root) return;
   const runtime = runtimeFor(context, auth, root);
+  // What earlier dev builds kept inside the project (the sync mirror and hooks folder) is removed once; it never creates the state home.
+  void removeOldInProjectSyncFolders(runtime.env.home);
   void readSyncSettings(runtime.env.home).then((found) => {
     runtime.scheduler.setEnabled(found.enabled);
     runtime.scheduler.start();
