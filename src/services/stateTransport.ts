@@ -1,10 +1,11 @@
 // Git transport for project sync (D-01, D-09, SYNC-05). The encrypted state lives on one dedicated branch of the project's own remote. All work happens
-// in a private bare mirror inside the project's state home, so the person's working tree, index, HEAD, branches and remote-tracking branches are never
+// in a private bare mirror outside the project folder (the editor's own storage), so the person's working tree, index, HEAD, branches and remote-tracking branches are never
 // touched: this module reads the person's repository only to learn the remote's address (`ls-remote --get-url`, `remote`) and writes nothing to it.
 // Commits are built with plumbing (hash-object, mktree, commit-tree) under one anonymous identity, and pushed to refs/heads/near-ai/state without any
 // force option: a push that loses a race reports 'rejected' and the caller fetches, merges and tries again. Every git call goes through the injected
 // GitRunner, which switches off hooks, signing, helper transports and fsmonitor. Shaped after the Team transport (unmerged branch, copied, never
 // imported). This module never imports vscode.
+import { realpathSync } from 'node:fs';
 import { mkdir, stat } from 'node:fs/promises';
 import * as path from 'node:path';
 import { StateRefusedError } from '../domain/state/keys';
@@ -107,13 +108,36 @@ export interface StateTransportOptions {
   root: string;
   /** A remote name of the project's repository, or an address. The setting that chooses it is deferred (D-09); the constructor default is the only place a name is assumed. */
   remote?: string;
-  /** <state home>/sync/mirror.git, created on first use. */
+  /** A private folder outside the project (the editor's own storage), created on first use. */
   mirrorDir: string;
   /** An empty folder git is pointed at for hooks. */
   hooksDir: string;
   /** The injectable seam; a wrapper such as a token-adding runner goes here. */
   git?: GitRunner;
   lock?: Partial<MirrorLockOptions>;
+}
+
+const OUTSIDE_PROJECT = "Sync's private folders must be outside the project folder. Nothing was changed.";
+
+/** The real path of a folder that may not exist yet: the nearest existing ancestor with its symbolic links resolved, then the rest as written. */
+function resolveThroughExisting(target: string): string {
+  const rest: string[] = [];
+  let current = path.resolve(target);
+  for (;;) {
+    try {
+      return path.join(realpathSync(current), ...rest);
+    } catch {
+      const parent = path.dirname(current);
+      if (parent === current) return path.join(current, ...rest);
+      rest.unshift(path.basename(current));
+      current = parent;
+    }
+  }
+}
+
+function isInsideOrEqual(folder: string, root: string): boolean {
+  const relative = path.relative(root, folder);
+  return relative === '' || (relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
 }
 
 export class StateTransport {
@@ -130,6 +154,11 @@ export class StateTransport {
   private addressLearnt = false;
 
   public constructor(options: StateTransportOptions) {
+    // Nothing inside the project folder may decide what git runs (REVIEW B1): the mirror and the hooks folder must not be in it, links resolved.
+    const realRoot = resolveThroughExisting(options.root);
+    if (isInsideOrEqual(resolveThroughExisting(options.mirrorDir), realRoot) || isInsideOrEqual(resolveThroughExisting(options.hooksDir), realRoot)) {
+      throw new Error(OUTSIDE_PROJECT);
+    }
     this.root = options.root;
     this.remote = options.remote ?? 'origin';
     this.mirrorDir = options.mirrorDir;
@@ -143,7 +172,7 @@ export class StateTransport {
   }
 
   private mirrorGit(args: string[], extra: { env?: Record<string, string>; input?: Buffer | string; timeoutMs?: number; maxStdoutBytes?: number } = {}): Promise<GitResult> {
-    // An address with a password or token in it is written to the mirror without it (the mirror's config sits in the project folder); git is given the
+    // An address with a password or token in it is written to the mirror without it (the address is written to the mirror's config); git is given the
     // credentialed form for this call only, as a rewrite of the plain address, in its environment.
     const credentialed = this.credentials?.credentialed;
     const env = credentialed ? addGitConfigEnv(extra.env, `url.${credentialed}.insteadOf`, (this.credentials as SplitAddress).clean) : extra.env;

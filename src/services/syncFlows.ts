@@ -5,14 +5,16 @@
 //
 // The recovery code lives in local variables of the flow that made it and is dropped when that flow ends: it is passed to the person's screen (the only
 // place it is ever passed), never written to a file, a setting, a log, globalState or an error, and never sent anywhere.
-import { mkdtemp, rm } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { mkdtempSync } from 'node:fs';
+import { lstat, mkdtemp, rm, unlink } from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { StateRefusedError } from '../domain/state/keys';
 import { generateRecoveryCode, parseRecoveryCode } from '../domain/state/recoveryCode';
 import { withGitHubAuth, type OnlineHomeRemote, type OnlineHomeResult } from './onlineHome';
 import { redactSecrets } from '../domain/redaction';
-import { runStateGit, gitText, redactGitMessage, TIMED_OUT_CODE, type GitRunner } from './stateGit';
+import { runStateGit, gitText, privateHooksDir, redactGitMessage, TIMED_OUT_CODE, type GitRunner } from './stateGit';
 import { ProjectStateHome } from './stateHome';
 import type { StateKeys } from './stateKeys';
 import type { RunMarker, RunState } from './runMarkers';
@@ -145,21 +147,53 @@ export interface SyncParts {
   writer: string;
   /** The base git runner. Default: the sync runner. A token-adding wrapper goes around it per call. */
   git?: GitRunner;
+  /** The editor's own folder for sync mirrors (outside every project). Without one, a private temporary folder made once per process is used. */
+  mirrorRoot?: string;
   isIdle?: () => boolean;
   runState?: (marker: RunMarker) => RunState;
   profiles?: { profileSource: ProfileSource; secretSource: SecretSource; applyProfiles: (records: StateRecord[]) => Promise<void> };
   extra?: Partial<StateSyncOptions>;
 }
 
-/** One StateSync over its own StateTransport. The private mirror is in the state home unless `mirror` says otherwise. */
+/** The folder name of one project's mirror under the mirror root: the first 16 hex characters of the sha256 of the resolved project path. */
+export function mirrorFolderName(root: string): string {
+  return createHash('sha256').update(path.resolve(root)).digest('hex').slice(0, 16);
+}
+
+let processMirrorRoot: string | undefined;
+
+/** Where mirrors go when no editor storage is given: one private temporary folder per process (owner-only, random name, outside every project). */
+export function defaultMirrorRoot(): string {
+  processMirrorRoot ??= mkdtempSync(path.join(os.tmpdir(), 'near-ai-sync-mirrors-'));
+  return processMirrorRoot;
+}
+
+/** One StateSync over its own StateTransport. The private mirror lives outside the project (REVIEW B1) unless `mirror` says otherwise. */
 export function buildStateSync(parts: SyncParts, input: { remote: string; git?: GitRunner; mirror?: { mirrorDir: string; hooksDir: string } }): StateSync {
-  const mirror = input.mirror ?? { mirrorDir: path.join(parts.home.paths.sync, 'mirror.git'), hooksDir: path.join(parts.home.paths.sync, 'hooks') };
+  const mirror = input.mirror ?? { mirrorDir: path.join(parts.mirrorRoot ?? defaultMirrorRoot(), mirrorFolderName(parts.root), 'mirror.git'), hooksDir: privateHooksDir() };
   const transport = new StateTransport({ root: parts.root, remote: input.remote, mirrorDir: mirror.mirrorDir, hooksDir: mirror.hooksDir, git: input.git ?? parts.git ?? runStateGit });
   return new StateSync({
     root: parts.root, home: parts.home, keys: parts.keys, threads: parts.threads, transport, remote: input.remote, writer: parts.writer,
     ...(parts.isIdle ? { isIdle: parts.isIdle } : {}), ...(parts.runState ? { runState: parts.runState } : {}),
     ...(parts.profiles ?? {}), ...(input.mirror ? { registerColdFetcher: false } : {}), ...(parts.extra ?? {})
   });
+}
+
+/**
+ * Removes what earlier dev builds kept inside the project: the private mirror and the hooks folder in .near-ai/state/sync/. They were only a cache and an
+ * empty folder. A symbolic link is unlinked and never followed; anything else in that folder is left alone. Creates nothing; a failure is tried again later.
+ */
+export async function removeOldInProjectSyncFolders(home: ProjectStateHome): Promise<void> {
+  try {
+    if (!(await home.exists())) return;
+    for (const name of ['mirror.git', 'hooks']) {
+      const target = path.join(home.paths.sync, name);
+      const info = await lstat(target).catch(() => undefined);
+      if (!info) continue;
+      if (info.isSymbolicLink()) await unlink(target);
+      else if (info.isDirectory()) await rm(target, { recursive: true, force: true });
+    }
+  } catch { /* tried again at the next activation */ }
 }
 
 // ---- turning sync on --------------------------------------------------------------------------------------------------------------------
@@ -272,7 +306,7 @@ export async function enterCodeFlow(input: EnterCodeInput): Promise<EnterCodeRes
     const scratch = await mkdtemp(path.join(os.tmpdir(), 'near-ai-unlock-'));
     let opening: Awaited<ReturnType<StateSync['openRemote']>>;
     try {
-      opening = await env.makeSync({ remote: found.name, mirror: { mirrorDir: path.join(scratch, 'mirror.git'), hooksDir: path.join(scratch, 'hooks') } }).openRemote(bytes);
+      opening = await env.makeSync({ remote: found.name, mirror: { mirrorDir: path.join(scratch, 'mirror.git'), hooksDir: privateHooksDir() } }).openRemote(bytes);
     } finally {
       await rm(scratch, { recursive: true, force: true }).catch(() => undefined);
     }

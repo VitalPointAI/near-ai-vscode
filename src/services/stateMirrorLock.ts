@@ -1,6 +1,6 @@
-// One operation at a time on the sync mirror, across processes (D-09, SYNC-05). Every window of one editor, and every editor on one host (desktop, a
-// code-server tab, a terminal), keeps the project's sync mirror in the same folder, <project>/.near-ai/state/sync/mirror.git, so two windows open on
-// one project are two processes on one mirror. A fetch or a push reads and moves the mirror's refs in several git steps, and without this lock the
+// One operation at a time on the sync mirror, across processes (D-09, SYNC-05). Every window of one editor keeps the project's sync mirror in the same
+// folder, <the editor's storage>/sync-mirrors/<project key>/mirror.git (outside the project, REVIEW B1), so two windows open on
+// one project are two processes on one mirror. Two different editors have two mirrors, which is safe: the remote's own checks keep it correct. A fetch or a push reads and moves the mirror's refs in several git steps, and without this lock the
 // steps of two processes interleave.
 // The lock is a file created exclusively inside the mirror folder, so every path that names the folder finds the same file. The holder refreshes
 // the file's time while it works. A waiter takes the lock over when the holder's process has ended (same computer) or the holder has not refreshed

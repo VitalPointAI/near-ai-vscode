@@ -4,6 +4,7 @@
 // pick up their identity. Shaped after the Team transport's runGit (unmerged branch, copied, never imported). No vscode import.
 import { spawn } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
+import { lstat, mkdir, readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import { redactSecrets } from '../domain/redaction';
@@ -83,10 +84,34 @@ export class GitIdentityMissingError extends Error {
 
 let defaultHooksDir: string | undefined;
 
-/** A private, empty folder (random name, owner-only) that stands in when a caller gives no hooks folder. */
-function emptyHooksDir(): string {
+/**
+ * A private, empty folder (random name, owner-only, outside every project) that this process points git's hooks at. It is made once per process and is the
+ * only hooks folder sync uses: nothing inside a project folder may decide what git runs (REVIEW B1).
+ */
+export function privateHooksDir(): string {
   defaultHooksDir ??= mkdtempSync(path.join(tmpdir(), 'near-ai-no-hooks-'));
   return defaultHooksDir;
+}
+
+/** Raised before git starts when the hooks folder it would use is not an empty real directory. */
+export class GitHooksFolderError extends Error {
+  public constructor() {
+    super("Sync's private hooks folder is not empty, so git was not started.");
+    this.name = 'GitHooksFolderError';
+  }
+}
+
+/** The hooks folder must be a real directory (not a symbolic link) with nothing in it, so no script can be found there. A missing one is made. */
+async function assertEmptyHooksFolder(folder: string): Promise<void> {
+  let info = await lstat(folder).catch((error: NodeJS.ErrnoException) => (error.code === 'ENOENT' ? undefined : null));
+  if (info === null) throw new GitHooksFolderError();
+  if (info === undefined) {
+    await mkdir(folder, { recursive: true, mode: 0o700 }).catch(() => undefined);
+    info = await lstat(folder).catch(() => null);
+  }
+  if (!info || !info.isDirectory() || info.isSymbolicLink()) throw new GitHooksFolderError();
+  const entries = await readdir(folder).catch(() => ['?']);
+  if (entries.length > 0) throw new GitHooksFolderError();
 }
 
 function strippedEnvironment(base: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
@@ -112,7 +137,12 @@ function killTree(pid: number | undefined, ownGroup: boolean, fallback: () => vo
   }
 }
 
-export const runStateGit: GitRunner = (args, options = {}) => new Promise<GitResult>((resolve, reject) => {
+export const runStateGit: GitRunner = async (args, options = {}) => {
+  await assertEmptyHooksFolder(options.hooksDir ?? privateHooksDir());
+  return spawnGit(args, options);
+};
+
+const spawnGit: GitRunner = (args, options = {}) => new Promise<GitResult>((resolve, reject) => {
   // A commit made without the override would record the person's own name and email, so it is never started (Pitfall 19).
   if (args.includes('commit-tree') && !carriesIdentity(options.env)) {
     reject(new GitIdentityMissingError());
@@ -120,7 +150,7 @@ export const runStateGit: GitRunner = (args, options = {}) => new Promise<GitRes
   }
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const env: NodeJS.ProcessEnv = { ...strippedEnvironment(process.env), GIT_TERMINAL_PROMPT: '0', LC_ALL: 'C', GCM_INTERACTIVE: 'never', ...options.env };
-  const fullArgs = [...SAFE_GIT_CONFIG(options.hooksDir ?? emptyHooksDir()), ...args];
+  const fullArgs = [...SAFE_GIT_CONFIG(options.hooksDir ?? privateHooksDir()), ...args];
   const hasInput = options.input !== undefined;
   // On POSIX git runs in its own process group so a timeout can stop its helpers (git-remote-https, ssh) as well as git itself.
   const ownGroup = process.platform !== 'win32';

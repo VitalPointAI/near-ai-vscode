@@ -1,4 +1,4 @@
-// Plan 27-13's security carry-forward: the sync mirror's config sits in the project folder, so an address with a password or token in it must never be
+// Plan 27-13's security carry-forward: the sync mirror's config holds the remote's address, so an address with a password or token in it must never be
 // written there. Credentials reach git only through the environment of each call, as a rewrite of the plain address. Local bare repositories and a fake
 // runner only: the runner stands in for the host by pointing the plain address at a local bare repository.
 import assert from 'node:assert/strict';
@@ -6,10 +6,13 @@ import { readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
 import { addGitConfigEnv, splitAddress, type GitRunner } from '../services/stateGit';
-import { enterCodeFlow, turnOnFlow } from '../services/syncFlows';
+import { defaultMirrorRoot, enterCodeFlow, mirrorFolderName, turnOnFlow } from '../services/syncFlows';
 import { bareRemote, computer, fakeUi, fixtureGit, setUpProfile } from './helpers/flowFixtures';
 import { hermeticRunner } from './helpers/gitFixtures';
 import { SIX_TURNS, chain } from './helpers/syncFixtures';
+
+/** Where a computer's sync mirror is: outside the project, under the per-process mirror folder. */
+const mirrorOf = (c: { root: string }): string => path.join(defaultMirrorRoot(), mirrorFolderName(c.root), 'mirror.git');
 
 const PASSWORD = 's3cr3t-pass-7f31';
 const CLEAN = 'https://git.example.test/team/project.git';
@@ -97,9 +100,10 @@ test('after turn-on, sync and unlock with a credentialed remote, no mirror, stat
   assert.deepEqual(watched.argumentLeaks, [], 'no git argument carried the userinfo');
 
   // The mirror's config holds the plain address.
-  const config = await readFile(path.join(a.home.paths.sync, 'mirror.git', 'config'), 'utf8');
+  const config = await readFile(path.join(mirrorOf(a), 'config'), 'utf8');
   assert.ok(config.includes(`url = ${CLEAN}`), 'the mirror points at the plain address');
-  const scanned = await assertNoUserinfo(a.home.dir) + await assertNoUserinfo(b.home.dir);
+  // The mirrors now live outside the project, so they are scanned where they are, as well as the state folders.
+  const scanned = await assertNoUserinfo(a.home.dir) + await assertNoUserinfo(b.home.dir) + await assertNoUserinfo(path.dirname(mirrorOf(a))) + await assertNoUserinfo(path.dirname(mirrorOf(b)));
   assert.ok(scanned > 20, `the scan covered the state folders (${scanned} files)`);
 });
 
@@ -110,7 +114,7 @@ test('a mirror configured by an earlier version with the userinfo in it is clean
   fixtureGit(a.root, ['remote', 'set-url', 'origin', CREDENTIALED]);
   await setUpProfile(a);
   assert.equal((await turnOnFlow({ env: a.env, ui: fakeUi().ui })).status, 'on');
-  const mirror = path.join(a.home.paths.sync, 'mirror.git');
+  const mirror = mirrorOf(a);
   fixtureGit(mirror, ['config', 'remote.state.url', CREDENTIALED]);
   assert.ok((await readFile(path.join(mirror, 'config'), 'utf8')).includes(PASSWORD), 'the old config held it');
   // A fresh process (a new transport) writes the plain address again.
