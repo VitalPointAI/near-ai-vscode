@@ -124,7 +124,7 @@ test('removing the key file is refused until a recovery wrap exists, and no key 
     const key = await a.keys.ensureDataKey();
     await assert.rejects(() => a.keys.removeLocalKeyFile(), (error: Error) => !error.message.includes(key.toString('base64')));
     assert.equal(await a.keys.hasRecoveryWrap(), false);
-    await writeFile(path.join(stateFolder(root), 'keys', 'recovery.json'), '{}');
+    await writeFile(path.join(stateFolder(root), 'keys', 'recovery.json'), '{}', { mode: 0o600 });
     await a.keys.removeLocalKeyFile();
     assert.equal(await stat(path.join(stateFolder(root), 'keys', 'local.key')).then(() => true, () => false), false);
     // The device copy keeps this editor open.

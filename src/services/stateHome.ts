@@ -4,15 +4,18 @@
 // Opening a folder creates nothing. Only ensure(), called from a person's action, creates the folder, and it writes the inner .gitignore
 // first, so no later file can ever be staged. No vscode here, so tests run on plain node.
 import { createHash, randomBytes } from 'node:crypto';
-import { chmod, link, mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { chmod, link, lstat, mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { stateFolder } from '../domain/scratch';
 import { newStateId, type SealedBlob } from '../domain/state/keys';
+import { runStateGit, type GitRunner } from './stateGit';
 
 export const STATE_FORMAT = 1 as const;
 const STATE_ID = /^[a-z0-9]{16,40}$/;
 const GITIGNORE_TEXT = '*\n';
+/** How long an answer to "is the state folder tracked by git" is reused, so a busy editor does not start git for every read. */
+export const STATE_TRACKED_CHECK_MS = 30_000;
 
 export interface StateMeta {
   format: typeof STATE_FORMAT;
@@ -136,10 +139,37 @@ export async function createExclusive(target: string, data: string | Buffer, mod
   }
 }
 
+/**
+ * Why a file may not be trusted as this user's private file, or undefined when it may. A link, anything that is not a regular file and a parent folder
+ * that is a link are refused everywhere. On POSIX the file and its folder must also belong to the user running the editor, and the file must have no
+ * group or other permission bits (a file written by this extension is mode 0600, so another editor of the same user passes). A short reason, never a path.
+ */
+export async function privateFileProblem(file: string): Promise<string | undefined> {
+  let info;
+  let parent;
+  try {
+    info = await lstat(file);
+    parent = await lstat(path.dirname(file));
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'ENOENT' ? 'missing' : 'unreadable';
+  }
+  if (info.isSymbolicLink()) return 'a link';
+  if (!info.isFile()) return 'not a regular file';
+  if (parent.isSymbolicLink() || !parent.isDirectory()) return 'its folder is a link';
+  if (typeof process.getuid === 'function') {
+    const me = process.getuid();
+    if (info.uid !== me) return 'owned by someone else';
+    if (parent.uid !== me) return 'its folder is owned by someone else';
+    if ((info.mode & 0o077) !== 0) return 'readable by others';
+  }
+  return undefined;
+}
+
 export class ProjectStateHome {
   public readonly dir: string;
   public readonly paths: StatePaths;
   private metaQueue: Promise<unknown> = Promise.resolve();
+  private tracked: { at: number; value: boolean } | undefined;
 
   /** `dir` is for a copy built beside the real state home (a join, plan 15); every path is then inside it. */
   public constructor(public readonly root: string, dir?: string) {
@@ -164,6 +194,25 @@ export class ProjectStateHome {
       pickup: at('pickup.json'),
       sync: at('sync')
     };
+  }
+
+  /**
+   * True when git tracks anything in the project's state or locks folder (a clone or pull with force-added files). The extension never stages these
+   * folders, so a tracked one came from outside and no key is read from it. Git that is missing, a folder that is not a repository, or a failure all
+   * count as not tracked. The answer is reused for STATE_TRACKED_CHECK_MS.
+   */
+  public async trackedByGit(git: GitRunner = runStateGit): Promise<boolean> {
+    const now = Date.now();
+    if (this.tracked && now - this.tracked.at < STATE_TRACKED_CHECK_MS) return this.tracked.value;
+    let value = false;
+    try {
+      const result = await git(['-C', this.root, 'ls-files', '-z', '--cached', '--', '.near-ai/state', '.near-ai/locks'], { cwd: this.root, timeoutMs: 10_000 });
+      value = result.code === 0 && result.stdout.length > 0;
+    } catch {
+      value = false;
+    }
+    this.tracked = { at: Date.now(), value };
+    return value;
   }
 
   /** Whether the state home has been created. Looks only at meta.json and never creates anything. */

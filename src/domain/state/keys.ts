@@ -6,7 +6,7 @@
 // Pure: no vscode, no files, no git. Every refusal is one StateRefusedError with a plain sentence that never carries a key, the code or a file name.
 import { createCipheriv, createDecipheriv, hkdfSync, randomBytes, scrypt } from 'node:crypto';
 
-export type StateRefusalReason = 'wrong-code-or-damaged' | 'tampered' | 'truncated' | 'rolled-back' | 'missing-object' | 'unsupported-format';
+export type StateRefusalReason = 'wrong-code-or-damaged' | 'tampered' | 'truncated' | 'rolled-back' | 'missing-object' | 'unsupported-format' | 'foreign-folder';
 
 const REFUSAL_MESSAGES: Readonly<Record<StateRefusalReason, string>> = {
   'wrong-code-or-damaged': 'That recovery code is not right, or the saved state is damaged. Nothing was changed.',
@@ -14,7 +14,8 @@ const REFUSAL_MESSAGES: Readonly<Record<StateRefusalReason, string>> = {
   truncated: 'Part of the saved state is cut short, so it was not opened. Nothing was changed.',
   'rolled-back': 'The saved state is older than one this computer has already seen, so it was not used. Nothing was changed.',
   'missing-object': 'Part of the saved state is missing, so it was not opened. Nothing was changed.',
-  'unsupported-format': 'The saved state is in a format this version cannot read. Nothing was changed.'
+  'unsupported-format': 'The saved state is in a format this version cannot read. Nothing was changed.',
+  'foreign-folder': "This project's saved-state folder is part of the project's files in git, so NEAR AI does not use it. Chats still work, but they are not saved until the folder is taken out of the repository. Nothing was changed."
 };
 
 export class StateRefusedError extends Error {
