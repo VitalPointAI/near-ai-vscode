@@ -5,9 +5,9 @@ milestone_name: Messaging relay — Teams and Signal
 current_phase: 27
 current_phase_name: Project state follows the project across interfaces and machines (0.4.20)
 status: planning
-stopped_at: Completed 27-13-PLAN.md
-last_updated: "2026-11-13T16:55:41.114Z"
-state_head: 5b065c535bf7841a59f9344e0cd40c621058ed5f
+stopped_at: Completed 27-14-PLAN.md
+last_updated: "2026-11-13T17:07:00.599Z"
+state_head: 74ce0131a8ab52528f1223b2f0f2f5cca74f2ce9
 progress:
   total_phases: 9
   completed_phases: 0
@@ -76,8 +76,8 @@ None yet.
 
 ## Session
 
-**Last session:** 2026-11-13T16:55:41.092Z
-**Stopped at:** Completed 27-13-PLAN.md
+**Last session:** 2026-11-13T17:07:00.579Z
+**Stopped at:** Completed 27-14-PLAN.md
 **Resume file:** None
 
 ## Performance Metrics
@@ -98,6 +98,7 @@ None yet.
 | Phase 27 P10 | 16 min | 3 tasks | 10 files |
 | Phase 27 P12 | 70min | 3 tasks | 12 files |
 | Phase 27 P13 | 65min | 3 tasks | 11 files |
+| Phase 27 P14 | 40min | 3 tasks | 13 files |
 
 ## Decisions
 
@@ -143,3 +144,4 @@ None yet.
 - [Phase 27]: Hot consolidation is built from the old hot objects, kept only if it holds every entry and record they held plus what the push sends; cold objects are never consolidated away; the 200-object rule is replaced by 20 hot objects or twice the live size
 - [Phase 27]: Size limits stop new uploads and never delete: a warning from 500 MB, no new cold object from 1 GiB or 3500 listed objects, and the message says how many conversations stay on this computer only
 - [Phase 27]: An archive that cannot be opened is explained in plain words and opens nothing; every write to that thread is refused, so an empty view is never saved over it; the archive files are not touched
+- [Phase 27]: 27-14: the pick-up card shows only for a pointer from another editor newer than the last seen; its click calls only openSaved (never resume, auto-resume or a model request); a run marker carries waitingSince while a prompt is open
