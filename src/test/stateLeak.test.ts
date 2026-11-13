@@ -9,7 +9,7 @@ import { RunCheckpoints } from '../agent/checkpoints';
 import { generateRecoveryCode } from '../domain/state/recoveryCode';
 import { writeProjectChoice } from '../services/modelChoices';
 import { SENTINEL_EMAIL, SENTINEL_NAME, bareRemote, fixtureGit, hermeticRunner, mirrorPaths, remoteCommits, scanRemote, sealedFiles, userRepo } from './helpers/gitFixtures';
-import { SIX_TURNS, chain, machine, writeMarker } from './helpers/syncFixtures';
+import { SIX_TURNS, chain, machine, remotePayloads, writeMarker } from './helpers/syncFixtures';
 
 const PROMPT = 'SENTINEL_PROMPT_7f3a';
 const API_KEY = 'sk-test-SENTINEL-KEY';
@@ -98,6 +98,11 @@ test('a real sync of a state home seeded with threads, choices, markers, spend a
     TITLE, PROMPT_TEXT, TOOL_OUTPUT, CHOICE_MODEL, SPEND_MODEL, CHECKPOINT_TEXT, Buffer.from(CHECKPOINT_TEXT).toString('base64'), 'conv-', 'run-', 'leakcheck', 'ent-leak',
     'near-ai-state-sync', 'nearAi.defaultModel', SENTINEL_NAME, SENTINEL_EMAIL, code, code.replaceAll('-', ''), dataKey.toString('base64'), dataKey.toString('hex'), dataKey, bytes
   ];
+  // Positive control: every seeded value really was inside what was sent, so the scan below proves it was sealed rather than never present.
+  const sealed = JSON.stringify(await remotePayloads(remoteDir, a));
+  for (const seeded of [TITLE, PROMPT_TEXT, TOOL_OUTPUT, CHOICE_MODEL, SPEND_MODEL, Buffer.from(CHECKPOINT_TEXT).toString('base64'), 'conv-leakcheck1', 'run-500-abcdef']) {
+    assert.ok(sealed.includes(seeded), `${seeded} was part of what was sent`);
+  }
   const scan = fixtureGit(remoteDir, ['for-each-ref', '--format=%(refname)']).trim();
   assert.equal(scan, 'refs/heads/near-ai/state');
   const found = scanRemote(remoteDir, sentinels);

@@ -202,6 +202,35 @@ export async function writeProjectChoice(root: string, setting: string, value: C
   });
 }
 
+/**
+ * Merges choices that came from another computer into the project's file, keeping for each setting the later (at, writer) of the two and the entry's own
+ * time and writer (an apply stamps nothing new). Returns whether the file changed. Unknown settings and malformed values are ignored.
+ */
+export async function mergeProjectChoices(root: string, incoming: Record<string, ChoiceEntry>): Promise<boolean> {
+  const wanted: Array<[ProjectChoiceSetting, ChoiceEntry]> = [];
+  for (const [name, entry] of Object.entries(incoming)) {
+    const setting = choiceSettingName(name);
+    const value = setting ? cleanValue(setting, entry?.value) : undefined;
+    if (!setting || value === undefined || typeof entry.at !== 'string' || Number.isNaN(Date.parse(entry.at))) continue;
+    wanted.push([setting, { value, at: entry.at, writer: typeof entry.writer === 'string' ? entry.writer : '' }]);
+  }
+  if (!wanted.length) return false;
+  await stateHomeFor(root).ensure();
+  return serialised(root, async () => {
+    const current = await readFresh(root);
+    const values = { ...current.values };
+    let changed = false;
+    for (const [setting, entry] of wanted) {
+      const existing = values[setting];
+      if (existing && (later(existing, entry) || (existing.at === entry.at && existing.writer === entry.writer && sameValue(existing.value, entry.value)))) continue;
+      values[setting] = entry;
+      changed = true;
+    }
+    if (changed) await replace(root, { ...current, values });
+    return changed;
+  });
+}
+
 /** Removes the project's choice for one setting (an undo of a first-time choice); true when there was one. Other settings are kept. */
 export async function removeProjectChoice(root: string, setting: string, _writer: string): Promise<boolean> {
   const name = requireSetting(setting);

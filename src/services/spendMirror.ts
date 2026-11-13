@@ -56,6 +56,21 @@ function tag(line: Line): Tagged {
   return { id: `a#${canonicalJson(line)}`, v: 0, line };
 }
 
+/** The ledger lines of a month file that are well formed (an entry version or a settled cost); torn or foreign lines are left out. */
+export function parseSpendLines(text: string): Array<Record<string, unknown>> {
+  return parseLines(text);
+}
+
+/** Two sets of ledger lines united the way the mirror unites them: every version of an entry is kept, a settled cost once per distinct content, in one fixed order. */
+export function mergeSpendLines(a: ReadonlyArray<Record<string, unknown>>, b: ReadonlyArray<Record<string, unknown>>): Array<Record<string, unknown>> {
+  return unionLog(a.map(tag), b.map(tag)).map((item) => item.line);
+}
+
+/** The month file's text for a set of lines (the mirror's own form: canonical JSON, one line each). */
+export function spendFileText(lines: ReadonlyArray<Record<string, unknown>>): string {
+  return text(lines.map(tag));
+}
+
 const text = (lines: readonly Tagged[]): string => (lines.length ? `${lines.map((item) => canonicalJson(item.line)).join('\n')}\n` : '');
 
 /** The ledger files of every key identity, grouped by month. */

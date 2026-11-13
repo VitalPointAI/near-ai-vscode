@@ -4,8 +4,7 @@
 // local is changed when verification fails. The transport owns the mirror lock; this module never holds it around a transport call. No vscode.
 import * as path from 'node:path';
 import { readFile } from 'node:fs/promises';
-import { StateRefusedError, deriveKek, unwrapDataKey, type KdfRecord, type SealedBlob } from '../domain/state/keys';
-import { mergeRecordSets } from '../domain/state/merge';
+import { StateRefusedError, aadFor, deriveKek, open as openSealed, seal, subKey, unwrapDataKey, type KdfRecord, type SealedBlob } from '../domain/state/keys';
 import {
   openManifest, openObject, readManifestHeader, sealObject, buildManifest,
   type ManifestHeader, type ObjectEntry, type OpenPart, type SealedPart
@@ -13,11 +12,12 @@ import {
 import { parseRecord, type StateRecord } from '../domain/state/records';
 import { threadTip, unionEntries, type ThreadEntry } from '../domain/state/threadEntries';
 import type { RunMarker, RunState } from './runMarkers';
+import { rm } from 'node:fs/promises';
 import { ProjectStateHome, writeFileAtomic } from './stateHome';
 import type { StateKeys } from './stateKeys';
 import { MirrorBusyError } from './stateMirrorLock';
 import {
-  THREAD_ID, collectLocal, applyMerged, isSyncedRecord, mergeAll, parsePortableMeta, recordKey,
+  THREAD_ID, applyMerged, collectLocal, foldHeads, headMapOf, isSyncedRecord, mergeAll, parsePortableMeta, recordKey, withoutBody,
   type HotPayload, type IndexPayload, type LocalSnapshot, type PortableMeta, type ProfileSource, type SecretSource
 } from './stateRecords';
 import type { StateFile, StateFileRef, StateTransport, SyncFailure } from './stateTransport';
@@ -113,11 +113,6 @@ function parseState(text: string): SyncState {
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-/** A record without its body: all a later sync needs to know what the remote holds. A tombstone keeps the body that names its target. */
-function withoutBody(record: StateRecord): StateRecord {
-  return record.kind === 'tombstone' ? record : { ...record, body: null };
 }
 
 /** The parts of a manifest's object list that make up each object, in order. */
@@ -321,11 +316,13 @@ export class StateSync {
 
       // Everything is read and verified before the first local write.
       const remote = tip ? await this.loadRemote(tip, dataKey, meta.stateId, state) : undefined;
-      const local = await collectLocal(home, threads, this.collectOptions());
+      const local = await collectLocal(home, threads, this.collectOptions(state));
       const incoming = remote?.records ?? [];
       const merged = mergeAll(local.records, incoming);
       const localKeys = new Set(local.records.map(recordKey));
-      await applyMerged(home, threads, { entries: remote?.entries ?? {}, records: merged.filter((record) => !localKeys.has(recordKey(record))) }, local);
+      const toApply = merged.filter((record) => !localKeys.has(recordKey(record)));
+      await applyMerged(home, threads, { entries: remote?.entries ?? {}, records: toApply }, local, this.options.runState ? { runState: this.options.runState } : {});
+      await this.handleProfiles(toApply, dataKey, meta.stateId);
 
       if (remote) this.learnRemote(state, remote);
       await this.writeState(state);
@@ -350,9 +347,37 @@ export class StateSync {
     }
   }
 
-  private collectOptions() {
+  private pendingPath(): string {
+    return path.join(this.options.home.paths.sync, 'records.enc');
+  }
+
+  /**
+   * Profile and secret records that arrived are handed to applyProfiles (plan 15) when this sync has it. Without it they are kept, sealed under the data
+   * key, in sync/records.enc, and applied by the first sync that does have it; the sync never touches profiles or keys itself.
+   */
+  private async handleProfiles(received: readonly StateRecord[], dataKey: Buffer, stateId: string): Promise<void> {
+    const wanted = received.filter((record) => record.kind === 'profile' || record.kind === 'secret');
+    const key = subKey(dataKey, 'transcripts');
+    const aad = aadFor(stateId, 'sync-records');
+    let stored: StateRecord[] = [];
+    try {
+      const value = JSON.parse(openSealed(key, JSON.parse(await readFile(this.pendingPath(), 'utf8')) as SealedBlob, aad).toString('utf8')) as unknown;
+      if (Array.isArray(value)) stored = value.map((item) => parseRecord(item)).filter((record): record is StateRecord => record !== undefined);
+    } catch { stored = []; }
+    if (!wanted.length && !stored.length) return;
+    const all = mergeAll(stored, wanted);
+    if (this.options.applyProfiles) {
+      await this.options.applyProfiles(all);
+      await rm(this.pendingPath(), { force: true });
+      return;
+    }
+    await this.options.home.ensureFolder(this.options.home.paths.sync);
+    await writeFileAtomic(this.pendingPath(), JSON.stringify(seal(key, Buffer.from(JSON.stringify(all), 'utf8'), aad)));
+  }
+
+  private collectOptions(state: SyncState) {
     const { writer, profileSource, secretSource, runState } = this.options;
-    return { writer, ...(profileSource ? { profileSource } : {}), ...(secretSource ? { secretSource } : {}), ...(runState ? { runState } : {}) };
+    return { writer, heads: headMapOf(state.heads), ...(profileSource ? { profileSource } : {}), ...(secretSource ? { secretSource } : {}), ...(runState ? { runState } : {}) };
   }
 
   /** What this computer now knows the remote holds, after reading and applying it. */
@@ -361,7 +386,7 @@ export class StateSync {
     const listed = new Set(groupObjects(remote.objects).map((group) => (group[0] as ObjectEntry).file));
     state.readObjects = [...new Set([...state.readObjects.filter((name) => listed.has(name)), ...remote.newObjects])];
     for (const [id, list] of Object.entries(remote.entries)) state.pushed[id] = [...new Set([...(state.pushed[id] ?? []), ...list.map((entry) => entry.id)])];
-    state.heads = mergeRecordSets(state.heads, remote.records.map(withoutBody));
+    state.heads = foldHeads(state.heads, remote.records);
   }
 
   private whatRemoteLacks(local: LocalSnapshot, merged: readonly StateRecord[], remote: RemoteBundle | undefined, state: SyncState): SendSet {
@@ -422,7 +447,7 @@ export class StateSync {
     state.lastSeenSeq = Math.max(state.lastSeenSeq, built.seq);
     const send = built.sent;
     for (const [id, list] of Object.entries(send.entries)) state.pushed[id] = [...new Set([...(state.pushed[id] ?? []), ...list.map((entry) => entry.id)])];
-    state.heads = mergeRecordSets(state.heads, send.records.map(withoutBody));
+    state.heads = foldHeads(state.heads, send.records);
     const listed = new Set(groupObjects(built.objects).map((group) => (group[0] as ObjectEntry).file));
     state.readObjects = [...new Set([...state.readObjects, ...(built.hotFiles.length ? [built.hotFiles[0] as string] : [])])].filter((name) => listed.has(name));
   }
