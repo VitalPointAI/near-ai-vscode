@@ -17,6 +17,8 @@ export interface LayoutReport {
   offenders: string[];
   /** Boxes that scroll sideways themselves, other than code, diffs and the chat's own tab strip and tables. */
   scrollers: string[];
+  /** Controls marked data-must-read whose text does not fit (cut to an ellipsis or clipped): what a person must read whole, but cannot. */
+  clipped: string[];
 }
 
 export function layoutProbeEnabled(): boolean {
