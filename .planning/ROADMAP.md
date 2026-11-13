@@ -64,7 +64,6 @@ Plans:
 - [x] 26-04-PLAN.md — Parallelism and reloads: read-only shell pool, worktree fan-out cap, batching instruction, auto-resume without repeats (PERF-04, PERF-05)
 - [x] 26-05-PLAN.md — Research GSD profile and verifier scaffold, docs, verification (PERF-06)
 
-
 ## Milestone v0.7.0: Messaging relay — Teams and Signal
 
 **Milestone goal:** A person in a Microsoft Teams group chat or a Signal group asks the team for something, the answer arrives where they already are, and nobody involved opens VS Code. The group sees only the finished result; the working thread stays private to whoever asked.

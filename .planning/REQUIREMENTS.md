@@ -133,6 +133,7 @@
 | OPS-05 | Phase 76 — Ops, onboarding and release |
 
 Coverage: 45 of 45 v0.7.0 requirements mapped, each to exactly one phase.
+
 ## Phase 25 requirements: Cybersecurity harness
 
 **Defined:** 2026-10-30
