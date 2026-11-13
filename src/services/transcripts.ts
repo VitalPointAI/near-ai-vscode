@@ -5,8 +5,26 @@ import type { AgentMessage } from './nearAiClient';
 
 const MAX_TRANSCRIPTS = 50;
 
-export interface TranscriptSummary { id: string; title: string; model: string; updatedAt: string; turns: number }
-export interface Transcript extends TranscriptSummary { messages: AgentMessage[]; /** [hash of the message the model saw, what the user typed] */ display?: Array<[string, string]> }
+export interface TranscriptSummary {
+  id: string; title: string; model: string; updatedAt: string; turns: number;
+  /** The conversation exists but this device cannot open it (its key is not here); it is listed so it never seems to have vanished. */
+  locked?: boolean;
+}
+export interface Transcript extends TranscriptSummary {
+  messages: AgentMessage[];
+  /** [hash of the message the model saw, what the user typed] */
+  display?: Array<[string, string]>;
+  /** The entry of the thread log that ends what `messages` covers; set by the thread store, so a context a person continued elsewhere is noticed. */
+  basedOnTip?: string;
+}
+
+/** What a conversation needs from its store: save it (at the end of a run, or part-way through), load it, and list the saved ones. */
+export interface ConversationStore {
+  save(transcript: Transcript): Promise<void>;
+  checkpoint(transcript: Transcript): Promise<void>;
+  load(id: string): Promise<Transcript | undefined>;
+  list(): Promise<TranscriptSummary[]>;
+}
 
 type Envelope = { enc: 'aes-256-gcm'; iv: string; tag: string; data: string };
 
@@ -39,7 +57,7 @@ export function transcriptKey(secrets: { get(key: string): Thenable<string | und
  * and encrypted with AES-256-GCM when a key is given (the extension always gives one). Files
  * saved before encryption are re-saved encrypted when read.
  */
-export class TranscriptStore {
+export class TranscriptStore implements ConversationStore {
   private readonly dir: string;
 
   public constructor(storageDir: string, root: string, private readonly key?: () => Promise<Buffer>) {

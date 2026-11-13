@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { createHash, randomBytes } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import * as path from 'node:path';
 import { RunCheckpoints } from '../agent/checkpoints';
@@ -35,7 +35,10 @@ import { cleanScratch } from './scratch';
 import { scriptsNamedIn } from '../agent/unattended';
 import { planCheckSkip, researchProfileActive } from '../gsd/researchProfile';
 import type { AgentMessage, ModelInfo, NearAiClient, UsageMetadata } from './nearAiClient';
-import { TranscriptStore } from './transcripts';
+import { contentKey, commandForm } from '../domain/state/threadCapture';
+import { entriesToMessages, entriesToTurns } from '../domain/state/threadView';
+import { ThreadStore } from './threadStore';
+import type { ConversationStore, Transcript } from './transcripts';
 import type { RunEnd, RunMarkers } from './runMarkers';
 import { NOT_CHECKED_IN_EDITOR, type ResponseEvidence, type VerificationResult } from './attestation';
 import { PreparedAttachments } from '../agent/attachments';
@@ -222,6 +225,8 @@ export class AgentConversation {
   private readonly verifiable = new Map<string, { model: string; evidence: ResponseEvidence; client: NearAiClient }>();
   /** What the user typed, keyed by a hash of the message the model saw (survives compaction). */
   private display = new Map<string, string>();
+  /** Messages already written to the thread log (D-07). A message is logged once, before the model's context can replace it with a trimmed copy or a summary. */
+  private readonly logged = new WeakSet<AgentMessage>();
   private conversationId = newConversationId();
   private title = '';
   private shell: ShellSession | undefined;
@@ -273,7 +278,7 @@ export class AgentConversation {
     private readonly post: (message: Record<string, unknown>) => void,
     private readonly checkpointDir: string,
     private readonly ripgrepPath?: string,
-    private readonly transcripts?: TranscriptStore,
+    private readonly transcripts?: ConversationStore,
     private readonly activity?: ActivityFeed
   ) {}
 
@@ -385,8 +390,12 @@ export class AgentConversation {
         this.enforceBudget(request, abort);
         await this.whileRunPaused(signal);
         const pending = this.drainNotifications();
-        const managed = await this.manageContext(pending.length ? [...transcript, ...pending] : transcript, lastUsage, request, signal, true);
-        const next = managed ?? (pending.length ? [...transcript, ...pending] : undefined);
+        const input = pending.length ? [...transcript, ...pending] : transcript;
+        // D-07: the originals go into the thread log first; managing the context may replace them with trimmed copies or a summary.
+        const captured = await this.captureThread(request.model, input);
+        const managed = await this.manageContext(input, lastUsage, request, signal, true);
+        const next = managed ?? (pending.length ? input : undefined);
+        if (captured) for (const message of next ?? transcript) this.logged.add(message);
         await this.saveRunState(request.model, runId, next ?? transcript);
         return next;
       },
@@ -612,7 +621,23 @@ export class AgentConversation {
     this.display = new Map(transcript.display ?? []);
     this.conversationId = transcript.id;
     this.title = transcript.title;
-    return visibleTurns(transcript.messages, this.display);
+    const store = this.transcripts;
+    let turns: Array<{ role: 'user' | 'assistant'; text: string; tools: number }> | undefined;
+    if (store instanceof ThreadStore) {
+      // D-07: the view comes from the thread log, which holds every message. The saved context is what the model continues from, unless the thread was
+      // continued somewhere else since (the log's main line ends at another entry): then the context is rebuilt from the log, so nothing that was said is missing.
+      const lines = await store.lines(id).catch(() => undefined);
+      const tip = lines?.main.at(-1)?.id ?? '';
+      if (lines && tip && transcript.basedOnTip !== tip) {
+        const system = this.messages[0]?.role === 'system' ? [this.messages[0]] : [];
+        this.messages = [...system, ...entriesToMessages(lines.main)];
+        store.cover(id, tip);
+      }
+      if (lines?.main.length) turns = entriesToTurns(lines);
+    }
+    // What was just loaded is already in the log (or is the model's own text); it is never written again.
+    for (const message of this.messages) this.logged.add(message);
+    return turns ?? visibleTurns(transcript.messages, this.display);
   }
 
   public reset(): void {
@@ -1030,9 +1055,24 @@ export class AgentConversation {
     this.heartbeats = 0;
   }
 
+  private transcriptOf(model: string, messages: AgentMessage[]): Transcript {
+    return { id: this.conversationId, title: this.title || 'Conversation', model, updatedAt: new Date().toISOString(), turns: messages.filter((message) => message.role === 'user').length, messages, display: [...this.display.entries()].filter(([key]) => messages.some((message) => message.role === 'user' && contentKey(message.content) === key)) };
+  }
+
+  /**
+   * Writes the messages not yet in the thread log (D-07). It does nothing unless the conversation is kept in a thread store, and a failure never stops
+   * a run: the messages stay unlogged and the next call tries them again. Returns whether everything given is now in the log.
+   */
+  private async captureThread(model: string, messages: AgentMessage[]): Promise<boolean> {
+    const store = this.transcripts;
+    if (!(store instanceof ThreadStore) || messages.length < 2) return false;
+    return store.captureTranscript(this.transcriptOf(model, messages), this.display, this.logged).then(() => true, () => false);
+  }
+
   private async saveTranscript(model: string, messages = this.messages, during = false): Promise<boolean> {
     if (!this.transcripts || messages.length < 2) return false;
-    const transcript = { id: this.conversationId, title: this.title || 'Conversation', model, updatedAt: new Date().toISOString(), turns: messages.filter((message) => message.role === 'user').length, messages, display: [...this.display.entries()].filter(([key]) => messages.some((message) => message.role === 'user' && contentKey(message.content) === key)) };
+    await this.captureThread(model, messages);
+    const transcript = this.transcriptOf(model, messages);
     return (during ? this.transcripts.checkpoint(transcript) : this.transcripts.save(transcript)).then(() => true, () => false);
   }
 
@@ -1434,9 +1474,8 @@ export function visibleTurns(messages: AgentMessage[], display = new Map<string,
     const shown = message.role === 'user' ? display.get(contentKey(message.content)) : undefined;
     if (shown !== undefined) { turns.push({ role: 'user', text: shown, tools: 0 }); continue; }
     if (message.role === 'user') {
-      const ran = /^The user ran (\/\S+(?: [^\n.]*)?)\. Follow these instructions:/.exec(message.content);
       if (message.content.startsWith('<agent-notification') || message.content.startsWith('<conversation-summary>')) continue;
-      turns.push({ role: 'user', text: ran ? ran[1] : message.content, tools: 0 });
+      turns.push({ role: 'user', text: commandForm(message.content) ?? message.content, tools: 0 });
     } else if (message.role === 'assistant') {
       const last = turns.at(-1);
       if (last?.role === 'assistant') { last.text += message.content ? `${last.text ? '\n\n' : ''}${message.content}` : ''; last.tools += message.tool_calls?.length ?? 0; }
@@ -1457,10 +1496,6 @@ function runBoundary(request: Pick<AgentTurnRequest, 'local' | 'privacy'>): Agen
 export function retryNotice(event: Extract<AgentEvent, { type: 'retry' }>): string {
   const stall = event.stall ? `, retry ${event.stall.retry} of ${event.stall.of} before the run stops` : '';
   return `${event.reason} Retrying in ${Math.round(event.delayMs / 1000)} s (attempt ${event.attempt + 1}${stall}); the run continues from where it was.`;
-}
-
-function contentKey(content: string): string {
-  return createHash('sha256').update(content).digest('hex').slice(0, 24);
 }
 
 /** A new conversation ID (the host names a tab before its agent exists). */
