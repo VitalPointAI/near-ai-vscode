@@ -5,9 +5,9 @@ milestone_name: Messaging relay — Teams and Signal
 current_phase: 27
 current_phase_name: Project state follows the project across interfaces and machines (0.4.20)
 status: planning
-stopped_at: Completed 27-20-PLAN.md
-last_updated: "2026-11-13T19:40:40.033Z"
-state_head: 8917938fbe179c6f7dc2c310acfc307683e70d3e
+stopped_at: Completed 27-21-PLAN.md
+last_updated: "2026-11-13T19:45:10.810Z"
+state_head: a3ff61a53b4915a037b856a8cf52a3cca946f553
 progress:
   total_phases: 9
   completed_phases: 0
@@ -76,8 +76,8 @@ None yet.
 
 ## Session
 
-**Last session:** 2026-11-13T19:40:40.015Z
-**Stopped at:** Completed 27-20-PLAN.md
+**Last session:** 2026-11-13T19:45:10.792Z
+**Stopped at:** Completed 27-21-PLAN.md
 **Resume file:** None
 
 ## Performance Metrics
@@ -103,6 +103,7 @@ None yet.
 | Phase 27 P18 | 25min | 3 tasks | 14 files |
 | Phase 27 P19 | 8 min | 2 tasks | 3 files |
 | Phase 27 P20 | 25 min | 2 tasks | 4 files |
+| Phase 27 P21 | 25min | 2 tasks | 2 files |
 
 ## Decisions
 
@@ -157,3 +158,4 @@ None yet.
 - [Phase 27]: 27-18: the first-run invitation goes into the whole welcome section so a computer with no connected profile yet still sees it; the pick-up card also shows 'Checking for updates…' while the pull on open runs
 - [Phase 27]: 27-19: an older build's comparison mode run is read as rerun by one frozen LEGACY_RUN_MODES table inside parseSavedRun; every reader (store, migration, sync records) goes through it, guarded by a source test
 - [Phase 27]: 27-20: default branch moves only away from near-ai/state, only after a pushed code result; pasted address names the setting (no API); sync still pushes near-ai/state only
+- [Phase 27]: 27-21: code push holds NEAR AI per-person records back by default; allowlist team.md, project.json, verifiers.json; tracked records named or blocked on public
