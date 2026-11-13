@@ -5,9 +5,9 @@ milestone_name: Messaging relay — Teams and Signal
 current_phase: 27
 current_phase_name: Project state follows the project across interfaces and machines (0.4.20)
 status: planning
-stopped_at: Completed 27-05-PLAN.md
-last_updated: "2026-11-13T14:56:32.577Z"
-state_head: 0ca452d6337763ecb0d27dd472187f9126f963f2
+stopped_at: Completed 27-17-PLAN.md
+last_updated: "2026-11-13T15:13:15.333Z"
+state_head: a97800e90220a0d66b6884ac5518bcf2355d1ca6
 progress:
   total_phases: 9
   completed_phases: 0
@@ -76,8 +76,8 @@ None yet.
 
 ## Session
 
-**Last session:** 2026-11-13T14:56:32.560Z
-**Stopped at:** Completed 27-05-PLAN.md
+**Last session:** 2026-11-13T15:13:15.316Z
+**Stopped at:** Completed 27-17-PLAN.md
 **Resume file:** None
 
 ## Performance Metrics
@@ -91,6 +91,7 @@ None yet.
 | Phase 27 P09 | 28min | 3 tasks | 11 files |
 | Phase 27 P11 | 9 min | 3 tasks | 8 files |
 | Phase 27 P05 | 10 min | 3 tasks | 9 files |
+| Phase 27 P17 | 11 min | 3 tasks | 7 files |
 
 ## Decisions
 
@@ -113,3 +114,5 @@ None yet.
 - [Phase 27]: 27-05: new thread entries chain from the entry the conversation last wrote or was opened at (ThreadStore.cover), not the log's global main-line tip, so a continuation made elsewhere becomes a branch — Chaining from the global tip would adopt another editor's concurrent entries into this conversation's lineage; an un-covered store re-chains from the start and entry ids dedupe
 - [Phase 27]: 27-05: the thread log is captured before manageContext and on every save; a capture failure never stops a run, and managed messages are marked logged only when their originals were captured — The log must hold the untrimmed originals (D-07) without ever making a model run depend on disk writes
 - [Phase 27]: 27-05: the history list and panel read only the state home; sessions saved under an editor's globalStorage stay unlisted until plan 10's migration — The old transcript store stays only for its key helpers; migration re-seals old transcripts under the project data key
+- [Phase 27]: 27-17: the online-home flow keeps the GitHub token in one local variable (API Authorization header, or a runner wrapper adding GIT_CONFIG_* to the git child environment for https://github.com/ only) and saves only step, method, repo and startedAt; progress step is the last one finished and resume checks getRepo before it would ever create
+- [Phase 27]: 27-17: the person's own code push uses a separate plain git runner (their hooks and config) behind a file list and secret check, and is its own question after the sync step; a folder inside another repository and a pasted address with a password or token are refused
