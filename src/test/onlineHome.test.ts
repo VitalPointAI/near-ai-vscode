@@ -388,12 +388,16 @@ test('the token never appears in a git argument, a file, the progress record, a 
   const argLists: string[][] = [];
   const envs: Array<Record<string, string>> = [];
   const messages: string[] = [];
+  const requests: string[] = [];
   try {
     for (const route of ['vscode', 'gh'] as const) {
       const dir = await projectFolder(`hygiene-${route}`);
       const bare = bareRemote({ withMain: false });
-      const github = fakeGitHub();
+      // The person's code is pushed too, so the default-branch read and PATCH are part of the run (gh makes its repository itself).
+      writeFileSync(path.join(dir, 'app.ts'), 'export {};\n');
+      const github = fakeGitHub({ defaultBranch: DEFAULT_STATE_BRANCH, existing: route === 'gh' ? [`hygiene-${route}`] : undefined });
       const ui = new FakeUi({ fallback: 'gh' });
+      ui.codePush = new FakeCodeOffer([], { offer: true });
       const spy = spyGit();
       const result = await onlineHomeFlow({
         root: dir,
@@ -402,6 +406,7 @@ test('the token never appears in a git argument, a file, the progress record, a 
         gh: fakeGh(),
         fetchFn: github.fetchFn,
         git: spy.git,
+        personGit: spy.git,
         afterRemote: async (remote) => {
           fixtureGit(dir, ['config', `url.${bare}.insteadOf`, remote.url]);
           const paths = await mirrorPaths();
@@ -411,6 +416,8 @@ test('the token never appears in a git argument, a file, the progress record, a 
         }
       });
       assert.equal(result.status, 'done');
+      assert.equal(github.calls.filter((call) => call.method === 'PATCH').length, 1, 'the run sent the default-branch PATCH');
+      for (const call of github.calls) requests.push(call.url, call.body ?? '');
       folders.push(dir);
       argLists.push(...spy.calls);
       envs.push(...spy.envs);
@@ -422,6 +429,7 @@ test('the token never appears in a git argument, a file, the progress record, a 
   for (const secret of secrets) {
     assert.equal(argLists.some((args) => args.some((arg) => arg.includes(secret))), false, 'no git argument holds the token');
     assert.equal(messages.some((message) => message.includes(secret)), false);
+    assert.equal(requests.some((request) => request.includes(secret)), false, 'no request URL or body holds the token');
     assert.equal(logged.some((line) => line.includes(secret)), false);
     for (const folder of folders) {
       for (const file of allFiles(folder)) assert.equal(readFileSync(file).includes(Buffer.from(secret)), false, `${file} holds the token`);
@@ -583,7 +591,7 @@ interface CodeRun { dir: string; bare: string; github: ReturnType<typeof fakeGit
  */
 async function codeRun(name: string, options: {
   route?: 'vscode' | 'gh' | 'url'; defaultBranch?: string; patch?: number | 'offline'; offer?: boolean; push?: boolean;
-  files?: Record<string, string>; hook?: string; remoteHeadAfterSync?: 'state' | 'person';
+  files?: Record<string, string>; hook?: string; remoteHeadAfterSync?: 'state' | 'person'; defaultAfterSync?: 'person';
 }): Promise<CodeRun> {
   const route = options.route ?? 'vscode';
   const dir = await projectFolder(name);
@@ -594,7 +602,8 @@ async function codeRun(name: string, options: {
     writeFileSync(hook, options.hook, { mode: 0o755 });
   }
   const events: string[] = [];
-  const github = fakeGitHub({ defaultBranch: options.defaultBranch, events, patch: options.patch });
+  // gh makes the repository itself, so the fake GitHub is told it exists; with the VS Code route the flow creates it through the fake.
+  const github = fakeGitHub({ defaultBranch: options.defaultBranch, events, patch: options.patch, existing: route === 'gh' ? [name] : undefined });
   const ui = new FakeUi({ visibility: 'private', fallback: route === 'gh' ? 'gh' : 'url', urls: route === 'url' ? ['https://github.com/me/pasted.git'] : [] });
   ui.codePush = new FakeCodeOffer(events, { offer: options.offer ?? true, push: options.push ?? true });
   const spy = spyGit(events);
@@ -614,10 +623,11 @@ async function codeRun(name: string, options: {
       const pushed = (await transport.push(await transport.writeCommit([{ name: 'manifest.json', data: '{}' }]))).ok;
       // GitHub's own behaviour, stood in for on a local remote: a bare remote's HEAD is its default branch.
       if (options.remoteHeadAfterSync === 'state') fixtureGit(bare, ['symbolic-ref', 'HEAD', STATE_REF]);
+      if (options.remoteHeadAfterSync === 'person') fixtureGit(bare, ['symbolic-ref', 'HEAD', `refs/heads/${currentBranch(dir)}`]);
+      if (options.defaultAfterSync === 'person') github.defaultBranch = currentBranch(dir);
       return pushed;
     }
   });
-  if (options.remoteHeadAfterSync === 'person') fixtureGit(bare, ['symbolic-ref', 'HEAD', `refs/heads/${currentBranch(dir)}`]);
   return { dir, bare, github, ui, spy, events, result, token: route === 'url' ? undefined : FAKE_TOKEN };
 }
 
@@ -675,4 +685,100 @@ test('moveDefaultBranch moves only a default of near-ai/state', async () => {
   }
   const gone = await moveDefaultBranch({ token: FAKE_TOKEN, owner: 'me', name: 'missing', to: 'main', fetchFn: fakeGitHub().fetchFn });
   assert.equal(gone.result, 'failed');
+});
+
+const DEFAULT_SENTENCE = /is now the repository's default branch/;
+const FAILED_SENTENCE = /did not change the default branch/;
+
+/** A run where nothing reached the person's repository but the sync branch: no PATCH, no default-branch sentence, the default is still near-ai/state. */
+function assertDefaultUntouched(run: CodeRun): void {
+  assert.equal(run.result.status, 'done');
+  assert.equal(patches(run).length, 0);
+  assert.equal(run.github.defaultBranch, DEFAULT_STATE_BRANCH);
+  assert.equal(run.ui.messages.some((message) => DEFAULT_SENTENCE.test(message) || FAILED_SENTENCE.test(message) || /default branch/.test(message)), false, run.ui.messages.join('|'));
+  assertOnlyOurRefs(run.bare, run.dir, false);
+  assertNoDangerousPush(run.spy.calls);
+}
+
+test('a declined code offer sends no PATCH and leaves the default as it was', async () => {
+  assertDefaultUntouched(await codeRun('declined-offer', { defaultBranch: DEFAULT_STATE_BRANCH, offer: false }));
+});
+
+test('a declined summary sends no PATCH and leaves the default as it was', async () => {
+  assertDefaultUntouched(await codeRun('declined-summary', { defaultBranch: DEFAULT_STATE_BRANCH, push: false }));
+});
+
+test('a planted .env blocks the code push, and with it any PATCH', async () => {
+  const run = await codeRun('blocked-env', { defaultBranch: DEFAULT_STATE_BRANCH, files: { 'app.ts': 'export {};\n', '.env': 'API_KEY=sk_live_FAKEFAKEFAKEFAKE12345\n' } });
+  assertDefaultUntouched(run);
+});
+
+test('a push the online repository refuses sends no PATCH and leaves the sync branch there', async () => {
+  const hook = `#!/bin/sh\nwhile read old new ref; do\n  [ "$ref" = "${STATE_REF}" ] || { echo "branch not accepted" >&2; exit 1; }\ndone\n`;
+  const run = await codeRun('refused-push', { defaultBranch: DEFAULT_STATE_BRANCH, hook });
+  assertDefaultUntouched(run);
+  assert.ok(run.ui.messages.some((message) => /not pushed|nothing was pushed/i.test(message)), run.ui.messages.join('|'));
+});
+
+test('nothing to push sends no PATCH and leaves the default as it was', async () => {
+  assertDefaultUntouched(await codeRun('nothing-to-push', { defaultBranch: DEFAULT_STATE_BRANCH, files: {} }));
+});
+
+test('a default the person chose is read and never changed, and one that is already the pushed branch is left alone too', async () => {
+  for (const [name, options] of [['own-default', { defaultBranch: 'develop' }], ['same-default', { defaultBranch: DEFAULT_STATE_BRANCH, defaultAfterSync: 'person' as const }]] as const) {
+    const run = await codeRun(name, options);
+    assert.equal(run.result.status, 'done');
+    assert.equal(run.github.calls.filter((call) => call.method === 'GET').length, 1, 'the default branch was read');
+    assert.equal(patches(run).length, 0, name);
+    assert.equal(run.github.defaultBranch, options.defaultBranch === 'develop' ? 'develop' : currentBranch(run.dir));
+    assert.equal(run.ui.messages.some((message) => /default branch/.test(message)), false, run.ui.messages.join('|'));
+    assertOnlyOurRefs(run.bare, run.dir, true);
+    assertNoDangerousPush(run.spy.calls);
+  }
+});
+
+test('on the gh route the same move happens, with the gh token only in the Authorization header', async () => {
+  const run = await codeRun('gh-default', { route: 'gh', defaultBranch: DEFAULT_STATE_BRANCH });
+  assert.equal(run.result.status, 'done');
+  const branch = currentBranch(run.dir);
+  assert.equal(patches(run).length, 1);
+  assert.equal(patches(run)[0]?.body, JSON.stringify({ default_branch: branch }));
+  assert.equal(patches(run)[0]?.headers.Authorization, `Bearer ${FAKE_TOKEN}`);
+  assert.equal(run.github.defaultBranch, branch);
+  assert.ok(run.github.calls.every((call) => !call.url.includes(FAKE_TOKEN) && !(call.body ?? '').includes(FAKE_TOKEN)));
+  assertOnlyOurRefs(run.bare, run.dir, true);
+  assertNoDangerousPush(run.spy.calls);
+});
+
+test('a pasted address sends no GitHub request, and names the setting to change when the remote still shows near-ai/state first', async () => {
+  const run = await codeRun('paste-state', { route: 'url', remoteHeadAfterSync: 'state' });
+  assert.equal(run.result.status, 'done');
+  assert.equal(run.github.calls.length, 0, 'no GitHub API request at all');
+  const branch = currentBranch(run.dir);
+  assert.ok(run.ui.messages.some((message) => message.includes(`make ${branch} the default branch`) && message.includes('settings')), run.ui.messages.join('|'));
+  assertOnlyOurRefs(run.bare, run.dir, true);
+  assertNoDangerousPush(run.spy.calls);
+});
+
+test('a pasted address whose remote already shows another branch first gets no settings sentence', async () => {
+  const run = await codeRun('paste-person', { route: 'url', remoteHeadAfterSync: 'person' });
+  assert.equal(run.result.status, 'done');
+  assert.equal(run.github.calls.length, 0);
+  assert.equal(run.ui.messages.some((message) => /default branch/.test(message)), false, run.ui.messages.join('|'));
+  assertOnlyOurRefs(run.bare, run.dir, true);
+});
+
+test('a default-branch change GitHub refuses or cannot reach is told in one plain sentence, the setup still ends done, and the pushed code is left as it is', async () => {
+  for (const patch of [403, 422, 'offline'] as const) {
+    const run = await codeRun(`patch-${String(patch)}`, { defaultBranch: DEFAULT_STATE_BRANCH, patch });
+    assert.equal(run.result.status, 'done', String(patch));
+    const branch = currentBranch(run.dir);
+    const told = run.ui.messages.filter((message) => FAILED_SENTENCE.test(message));
+    assert.equal(told.length, 1, run.ui.messages.join('|'));
+    assert.ok(told[0]?.includes(branch) && told[0].includes(DEFAULT_STATE_BRANCH));
+    assert.equal(run.ui.messages.some((message) => DEFAULT_SENTENCE.test(message)), false);
+    assert.equal(run.github.defaultBranch, DEFAULT_STATE_BRANCH);
+    assertOnlyOurRefs(run.bare, run.dir, true);
+    assertNoDangerousPush(run.spy.calls);
+  }
 });
