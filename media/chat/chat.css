@@ -229,6 +229,8 @@ details.agent-tool .state { color: var(--vscode-errorForeground); }
 #todos .todo::before { display: inline-block; width: 16px; content: '○'; color: var(--vscode-descriptionForeground); }
 #todos .todo.in_progress { color: var(--vscode-foreground); font-weight: 600; }
 #todos .todo.in_progress::before { content: '◐'; color: var(--vscode-progressBar-background); }
+#todos .todo.unconfirmed { color: var(--vscode-descriptionForeground); font-weight: normal; font-style: italic; }
+#todos .todo.unconfirmed::before { content: '?'; color: var(--vscode-descriptionForeground); }
 #todos .todo.completed { color: var(--vscode-descriptionForeground); text-decoration: line-through; }
 #todos .todo.completed::before { content: '✓'; color: var(--vscode-testing-iconPassed, inherit); }
 .changes { display: flex; align-items: center; gap: 8px; margin: 0 0 14px; font-size: 12px; color: var(--vscode-descriptionForeground); }

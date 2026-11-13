@@ -94,8 +94,11 @@ test('parallel sub-agents move their own task-list items as each one ends; a fai
       'Task A:in_progress Task B:completed Task C:in_progress',
       'Task A:in_progress Task B:completed Task C:pending',
       'Task A:completed Task B:completed Task C:pending',
+      'Task A:completed Task B:completed Task C:pending',
       'Task A:completed Task B:completed Task C:pending'
-    ], 'B completes first, C resets on failure, then A completes; the stale TodoWrite echo does not undo them');
+    ], 'B completes first, C resets on failure, then A completes; the stale TodoWrite echo does not undo them; the run end posts the real list once more');
+    const flagged = posted.filter((message) => message.type === 'todos');
+    assert.deepEqual(flagged.map((message) => message.unconfirmed === true), flagged.map((_, index) => index === flagged.length - 1), 'only the run-end list is flagged unconfirmed');
 
     // What the main agent saw: each result says what happened to its item, plus a reminder while items are unfinished.
     const results = mainRequests[2].filter((message) => message.role === 'tool').map((message) => String(message.content)).slice(-3);
@@ -157,7 +160,7 @@ const listWrite = (id: string, ...items: Array<[string, Todo['status']]>) => rep
 interface Scripted { posted: Array<Record<string, unknown>>; requests: AgentMessage[][]; conversation: AgentConversation }
 
 /** Runs `sends` on one conversation against a scripted main model: `script(n, messages)` answers its n-th request (1-based, across all sends). */
-async function scripted(script: (n: number, messages: AgentMessage[]) => CompletionEvent, sends: string[] = ['go'], options: { maxTurns?: number } = {}): Promise<Scripted> {
+async function scripted(script: (n: number, messages: AgentMessage[]) => CompletionEvent, sends: string[] = ['go'], options: { maxTurns?: number; tolerate?: boolean } = {}): Promise<Scripted> {
   const root = await mkdtemp(path.join(tmpdir(), 'near-ai-tasks-run-'));
   const requests: AgentMessage[][] = [];
   const near = {
@@ -170,7 +173,7 @@ async function scripted(script: (n: number, messages: AgentMessage[]) => Complet
   const posted: Array<Record<string, unknown>> = [];
   const conversation = new AgentConversation(root, (message) => posted.push(message), path.join(root, '.ckpt'));
   try {
-    for (const text of sends) await conversation.send({ text, client: near as never, model: 'm', privacy: 'Private', policy: { mode: 'approve-risky', emergencyStop: false }, rules: DEFAULT_RULES, ...(options.maxTurns ? { maxTurns: options.maxTurns } : {}) });
+    for (const text of sends) await conversation.send({ text, client: near as never, model: 'm', privacy: 'Private', policy: { mode: 'approve-risky', emergencyStop: false }, rules: DEFAULT_RULES, ...(options.maxTurns ? { maxTurns: options.maxTurns } : {}) }).catch((error) => { if (!options.tolerate) throw error; });
   } finally {
     conversation.dispose();
   }
@@ -244,6 +247,7 @@ test('a model that ignores the reminder gets no second one, and the host never m
   assert.equal(posted.some((message) => message.type === 'run-stopped'), false);
   const last = todoPosts(posted).at(-1)!;
   assert.equal(shown(last.todos as Todo[]), 'A:pending B:pending C:pending');
+  assert.equal(last.unconfirmed, true, 'the run ended with the items not confirmed done');
 });
 
 test('a run that did not touch the list, or ended with it all completed, gets no reminder', async () => {
@@ -334,4 +338,34 @@ test('sub-agents that name their items by number or a quoted paraphrase end the 
   } finally {
     conversation.dispose();
   }
+});
+
+// ---- "Not confirmed done" at the end of a run (quick 261113-lbo) --------------------------------------------------------------------------
+
+test('a run that ends with unfinished items posts its real list once more, flagged unconfirmed, whatever the outcome', async () => {
+  // Stopped short: the turn limit ends the run while the item is still pending.
+  const limited = await scripted((n) => (n === 1 ? listWrite('t1', ['A', 'pending']) : reply(null, [call(`c${n}`, 'TodoWrite', { todos: [todo('A', 'pending')] })])), ['go'], { maxTurns: 3 });
+  const lastLimited = todoPosts(limited.posted).at(-1)!;
+  assert.equal(lastLimited.unconfirmed, true);
+  assert.equal(shown(lastLimited.todos as Todo[]), 'A:pending');
+  // Failed: the model request throws after the list was written.
+  const failing = await scripted((n) => { if (n === 1) return listWrite('t1', ['A', 'in_progress']); throw Object.assign(new Error('model down'), { retryable: false }); }, ['go'], { tolerate: true });
+  const lastFailing = todoPosts(failing.posted).at(-1)!;
+  assert.equal(lastFailing.unconfirmed, true);
+  assert.equal(shown(lastFailing.todos as Todo[]), 'A:in_progress', 'statuses are posted as they were');
+});
+
+test('a run that never touched the list posts no unconfirmed list', async () => {
+  const { posted } = await scripted((n) => (n === 1 ? listWrite('t1', ['A', 'pending']) : reply('Done.')), ['go', 'again'], { maxTurns: 10 });
+  const flagged = todoPosts(posted).filter((message) => message.unconfirmed === true);
+  assert.equal(flagged.length, 1, 'only the first run, which wrote the list, is flagged');
+});
+
+test('the chat view shows "not confirmed done" for an unconfirmed list', () => {
+  const script = readFileSync(path.join(__dirname, '..', '..', 'media', 'chat', 'chat.js'), 'utf8');
+  const styles = readFileSync(path.join(__dirname, '..', '..', 'media', 'chat', 'chat.css'), 'utf8');
+  assert.match(script, /renderTodos\(m\.todos \|\| \[\], m\.unconfirmed === true\)/);
+  assert.match(script, /not confirmed done/);
+  assert.match(styles, /#todos \.todo\.unconfirmed \{/);
+  assert.match(styles, /#todos \.todo\.unconfirmed::before \{ content: '\?';/);
 });

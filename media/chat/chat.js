@@ -707,17 +707,20 @@
     return toggle;
   }
 
-  function renderTodos(todos) {
+  // `unconfirmed`: the run ended with items not marked done. They show as not confirmed, never as in progress, and nothing is struck through.
+  function renderTodos(todos, unconfirmed) {
     todoPanel.hidden = !todos.length;
     const list = el('ul');
     todos.forEach((todo) => {
-      const item = el('li', 'todo ' + todo.status, todo.status === 'in_progress' && todo.activeForm ? todo.activeForm : todo.content);
-      item.setAttribute('aria-label', todo.status.replace('_', ' ') + ': ' + todo.content);
+      const open = unconfirmed === true && todo.status !== 'completed';
+      const item = el('li', 'todo ' + todo.status + (open ? ' unconfirmed' : ''), !open && todo.status === 'in_progress' && todo.activeForm ? todo.activeForm : todo.content);
+      item.setAttribute('aria-label', open ? 'not confirmed done: ' + todo.content : todo.status.replace('_', ' ') + ': ' + todo.content);
+      if (open) item.title = 'The run ended without this item marked done.';
       list.append(item);
     });
     const done = todos.filter((todo) => todo.status === 'completed').length;
     const title = el('div', 'todo-title');
-    title.append(panelToggle(list, 'todos-list', 'todosCollapsed', `Tasks · ${done}/${todos.length}`, 'the task list'));
+    title.append(panelToggle(list, 'todos-list', 'todosCollapsed', `Tasks · ${done}/${todos.length}` + (unconfirmed === true && done < todos.length ? ` · ${todos.length - done} not confirmed done` : ''), 'the task list'));
     todoPanel.replaceChildren(title, list);
   }
   function onRunChanges(m) {
@@ -1354,7 +1357,7 @@
         break;
       }
       case 'prompt-closed': closePending(m.id, m.outcome === 'cancelled' ? 'cancelled' : 'closed'); break;
-      case 'todos': renderTodos(m.todos || []); break;
+      case 'todos': renderTodos(m.todos || [], m.unconfirmed === true); break;
       case 'run-changes': onRunChanges(m); break;
       case 'run-reverted': {
         const row = document.getElementById('changes-' + m.runId);

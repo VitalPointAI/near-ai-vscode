@@ -444,6 +444,9 @@ export class AgentConversation {
         // Keep what the run did, so the next message continues from there.
         if (error instanceof AgentRunError) { this.messages = error.messages; await this.saveTranscript(request.model); throw error.cause; }
         throw error;
+      } finally {
+        // Whatever way the run ended, a list it touched and left unfinished is shown as not confirmed done.
+        this.settleTaskList(tasksAtStart);
       }
       this.activity?.agentEnded(mainId, result.outcome);
       await this.recordRunSplit(request, mainId, [...result.usage, ...extraUsage]);
@@ -1041,6 +1044,11 @@ export class AgentConversation {
     const open = list.filter((item) => item.status !== 'completed');
     const named = open.map((item) => `"${item.content}" (${item.status === 'in_progress' ? 'in progress' : 'pending'})`).join(', ');
     return [{ role: 'user', content: `<task-list-check>\nYour task list still shows ${open.length} of ${list.length} items not completed: ${named}. If you finished any of them, send TodoWrite now with the full list, marking completed only what is really done, and leave anything not done as it is. Then end your turn with one short line; do not repeat your answer.\n</task-list-check>` }];
+  }
+
+  /** At the end of a run, posts the list once more as unconfirmed when the run touched it and items are unfinished. Statuses are never changed here. */
+  private settleTaskList(tasksAtStart: number): void {
+    if (this.tasks.revision !== tasksAtStart && this.tasks.unfinished) this.post({ type: 'todos', todos: this.tasks.list, unconfirmed: true });
   }
 
   /** Moves a task-list item and shows the list at once, without waiting for sibling agents. */
