@@ -190,3 +190,33 @@ export function mustSucceed(result: GitResult, what: string): GitResult {
 export function redactGitMessage(message: string): string {
   return redactSecrets(message.replace(/(:\/\/)[^\s/@]*@/g, '$1'));
 }
+
+/**
+ * Adds one `-c key=value` equivalent to a child's environment (GIT_CONFIG_COUNT / KEY_n / VALUE_n), after any entries already there, so two callers
+ * (the GitHub sign-in and a credentialed address) never overwrite each other. The value reaches git through its environment only: never an argument,
+ * never a file.
+ */
+export function addGitConfigEnv(env: Record<string, string> | undefined, key: string, value: string): Record<string, string> {
+  const next: Record<string, string> = { ...env };
+  const count = Number.parseInt(next.GIT_CONFIG_COUNT ?? '0', 10);
+  const at = Number.isInteger(count) && count >= 0 ? count : 0;
+  next.GIT_CONFIG_COUNT = String(at + 1);
+  next[`GIT_CONFIG_KEY_${at}`] = key;
+  next[`GIT_CONFIG_VALUE_${at}`] = value;
+  return next;
+}
+
+/** A remote address split into what may be written down and what may not: the address without its credentials, and the credentialed form, if it had one. */
+export interface SplitAddress { clean: string; credentialed?: string }
+
+/**
+ * Removes credentials from an address. On https and http the whole userinfo goes (`user:token@`). On ssh only a password goes: the user name of
+ * `ssh://git@host/...` is not a secret and the connection needs it. Anything else (a path, `git@host:path`, file://) has no credentials and is returned as it is.
+ */
+export function splitAddress(address: string): SplitAddress {
+  const web = /^(https?:\/\/)([^\s/@]+)@(\S+)$/i.exec(address);
+  if (web) return { clean: `${web[1]}${web[3]}`, credentialed: address };
+  const ssh = /^(ssh:\/\/)([^\s/@:]+):[^\s/@]*@(\S+)$/i.exec(address);
+  if (ssh) return { clean: `${ssh[1]}${ssh[2]}@${ssh[3]}`, credentialed: address };
+  return { clean: address };
+}

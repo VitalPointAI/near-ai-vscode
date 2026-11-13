@@ -509,6 +509,13 @@ export class ThreadStore implements ConversationStore {
   /** Whether the thread is being archived or reopened right now. */
   public isBusy(id: string): boolean { return this.busy.has(id); }
 
+  /** Forgets everything held in memory about the logs, after the state home was swapped for a re-keyed copy of itself (a join, plan 15). Nothing on disk is touched. */
+  public forgetCaches(): void {
+    this.caches.clear();
+    this.covered.clear();
+    this.problems.clear();
+  }
+
   /** Registers what brings an archived thread down from the project's synced state (the sync does this when it is built). */
   public setColdFetcher(fetcher: ColdFetcher | undefined): void {
     this.coldFetcher = fetcher;

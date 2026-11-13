@@ -12,7 +12,7 @@ import { GITHUB_MESSAGES, ONLINE_HOME_STEPS, VISIBILITY_NOTES, expectedCloneUrl,
 import type { GitHubErrorKind, OnlineHomeMethod, OnlineHomeProgress, OnlineHomeRepo, OnlineHomeStep, Visibility } from '../domain/state/onlineHome';
 import { GitHubApiError, createUserRepo, getRepo } from './githubApi';
 import type { FetchLike } from './githubApi';
-import { GitNotFoundError, gitText, redactGitMessage, runStateGit } from './stateGit';
+import { GitNotFoundError, addGitConfigEnv, gitText, redactGitMessage, runStateGit } from './stateGit';
 import type { GitRunner } from './stateGit';
 import { stateHomeFor, writeFileAtomic } from './stateHome';
 import type { ProjectStateHome } from './stateHome';
@@ -102,7 +102,7 @@ export function withGitHubAuth(runner: GitRunner, token: string): GitRunner {
   const header = `AUTHORIZATION: basic ${Buffer.from(`x-access-token:${token}`).toString('base64')}`;
   return (args, options = {}) => runner(args, {
     ...options,
-    env: { ...options.env, GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'http.https://github.com/.extraheader', GIT_CONFIG_VALUE_0: header }
+    env: addGitConfigEnv(options.env, 'http.https://github.com/.extraheader', header)
   });
 }
 

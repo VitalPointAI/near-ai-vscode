@@ -104,7 +104,12 @@ export interface StateSyncOptions {
   /** Test seams for the retry wait. */
   sleep?: (ms: number) => Promise<void>;
   random?: () => number;
+  /** False for a sync that only opens the remote once (a throwaway mirror): it must not become the thread store's way of fetching archived threads. Default true. */
+  registerColdFetcher?: boolean;
 }
+
+/** What opening the remote with a recovery code gives: the project's id and data key and the wrap that opened it. Nothing is written by getting it. */
+export type RemoteOpening = { ok: true; stateId: string; dataKey: Buffer; wrap: { kdf: KdfRecord; wrappedKey: SealedBlob } } | { ok: false; outcome: SyncOutcome };
 
 interface SyncState {
   version: 1;
@@ -218,7 +223,7 @@ export class StateSync {
     this.sleep = options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
     this.random = options.random ?? Math.random;
     // A thread kept only online is fetched through this sync when someone opens it.
-    options.threads.setColdFetcher((id) => this.fetchColdThread(id));
+    if (options.registerColdFetcher !== false) options.threads.setColdFetcher((id) => this.fetchColdThread(id));
   }
 
   /** Pull, merge, apply, then push what the remote lacks. */
@@ -237,23 +242,59 @@ export class StateSync {
    */
   public unlockFromRemote(codeBytes: Buffer): Promise<SyncOutcome> {
     return this.enqueue(() => this.guard(async () => {
-      const fetched = await this.options.transport.fetch();
-      if (!fetched.ok) return { kind: 'failed', message: fetched.failure.message, failure: fetched.failure };
-      if (!fetched.value) return { kind: 'nothing-yet', message: MESSAGES.nothingYet };
-      const text = await this.readManifestText(fetched.value);
-      const header = readManifestHeader(text);
-      if (codeBytes.length !== 32) throw new StateRefusedError('wrong-code-or-damaged');
-      const kek = await deriveKek(codeBytes, Buffer.from(header.kdf.salt, 'base64'), header.kdf);
-      const dataKey = unwrapDataKey(kek, header.wrappedKey, header.stateId);
-      openManifest(text, dataKey, 0);
+      const opened = await this.openRemoteNow(codeBytes);
+      if (!opened.ok) return opened.outcome;
       try {
-        await this.options.keys.adoptDataKey(dataKey, header.stateId);
+        await this.options.keys.adoptDataKey(opened.dataKey, opened.stateId);
       } catch (error) {
         return { kind: 'refused', message: error instanceof Error ? error.message : MESSAGES.locked };
       }
-      await this.options.keys.storeRecoveryWrap({ kdf: header.kdf, wrappedKey: header.wrappedKey });
+      await this.options.keys.storeRecoveryWrap(opened.wrap);
       return { kind: 'synced', message: MESSAGES.unlocked };
     }));
+  }
+
+  /**
+   * Opens the remote with the recovery code without keeping anything: the manifest header is read, the code unwraps the data key, and the sealed manifest
+   * is checked with it. The caller decides what to do with the id and key (a computer with nothing adopts them; one with chats of its own joins first).
+   * A wrong code, or any damage, is a plain refusal and writes nothing.
+   */
+  public async openRemote(codeBytes: Buffer): Promise<RemoteOpening> {
+    let opening: RemoteOpening | undefined;
+    const outcome = await this.enqueue(() => this.guard(async () => {
+      opening = await this.openRemoteNow(codeBytes);
+      return opening.ok ? { kind: 'synced', message: MESSAGES.unlocked } : opening.outcome;
+    }));
+    return opening ?? { ok: false, outcome };
+  }
+
+  /**
+   * Whether the remote already holds synced state, and for which project (the id in the manifest's header, readable without any key). Changes nothing.
+   * Used before sync is turned on, so a project whose chats are already online is not given a second, separate copy.
+   */
+  public async remoteState(): Promise<{ ok: true; stateId?: string } | { ok: false; outcome: SyncOutcome }> {
+    let found: { ok: true; stateId?: string } | { ok: false; outcome: SyncOutcome } | undefined;
+    const outcome = await this.enqueue(() => this.guard(async () => {
+      const fetched = await this.options.transport.fetch();
+      if (!fetched.ok) { found = { ok: false, outcome: { kind: 'failed', message: fetched.failure.message, failure: fetched.failure } }; return found.outcome; }
+      if (!fetched.value) { found = { ok: true }; return { kind: 'nothing-yet', message: MESSAGES.nothingYet }; }
+      found = { ok: true, stateId: readManifestHeader(await this.readManifestText(fetched.value)).stateId };
+      return { kind: 'synced', message: '' };
+    }));
+    return found ?? { ok: false, outcome };
+  }
+
+  private async openRemoteNow(codeBytes: Buffer): Promise<RemoteOpening> {
+    const fetched = await this.options.transport.fetch();
+    if (!fetched.ok) return { ok: false, outcome: { kind: 'failed', message: fetched.failure.message, failure: fetched.failure } };
+    if (!fetched.value) return { ok: false, outcome: { kind: 'nothing-yet', message: MESSAGES.nothingYet } };
+    const text = await this.readManifestText(fetched.value);
+    const header = readManifestHeader(text);
+    if (codeBytes.length !== 32) throw new StateRefusedError('wrong-code-or-damaged');
+    const kek = await deriveKek(codeBytes, Buffer.from(header.kdf.salt, 'base64'), header.kdf);
+    const dataKey = unwrapDataKey(kek, header.wrappedKey, header.stateId);
+    openManifest(text, dataKey, 0);
+    return { ok: true, stateId: header.stateId, dataKey, wrap: { kdf: header.kdf, wrappedKey: header.wrappedKey } };
   }
 
   // ---- plumbing ---------------------------------------------------------------------------------------------------------------------

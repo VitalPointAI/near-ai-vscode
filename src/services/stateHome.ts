@@ -141,8 +141,9 @@ export class ProjectStateHome {
   public readonly paths: StatePaths;
   private metaQueue: Promise<unknown> = Promise.resolve();
 
-  public constructor(public readonly root: string) {
-    this.dir = stateFolder(path.resolve(root));
+  /** `dir` is for a copy built beside the real state home (a join, plan 15); every path is then inside it. */
+  public constructor(public readonly root: string, dir?: string) {
+    this.dir = dir ?? stateFolder(path.resolve(root));
     const at = (...parts: string[]) => path.join(this.dir, ...parts);
     this.paths = {
       dir: this.dir,

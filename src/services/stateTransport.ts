@@ -12,8 +12,8 @@ import { TREE_NAME } from '../domain/state/objects';
 import { redactSecrets } from '../domain/redaction';
 import { withMirrorLock } from './stateMirrorLock';
 import type { MirrorLockOptions } from './stateMirrorLock';
-import { GitNotFoundError, STATE_COMMIT_MESSAGE, STATE_IDENTITY_ENV, gitText, mustSucceed, redactGitMessage, runStateGit } from './stateGit';
-import type { GitResult, GitRunner } from './stateGit';
+import { GitNotFoundError, STATE_COMMIT_MESSAGE, STATE_IDENTITY_ENV, addGitConfigEnv, gitText, mustSucceed, redactGitMessage, runStateGit, splitAddress } from './stateGit';
+import type { GitResult, GitRunner, SplitAddress } from './stateGit';
 
 /** The only branch sync ever writes, on the remote. */
 export const STATE_REF = 'refs/heads/near-ai/state';
@@ -125,6 +125,9 @@ export class StateTransport {
   private readonly lock: Partial<MirrorLockOptions>;
   private mirrorReady = false;
   private configuredUrl: string | undefined;
+  /** The credentials of the remote's address, when it has any. They reach git only as a rewrite rule in each call's environment; they are never written to the mirror's config or put in an argument. */
+  private credentials: SplitAddress | undefined;
+  private addressLearnt = false;
 
   public constructor(options: StateTransportOptions) {
     this.root = options.root;
@@ -140,7 +143,19 @@ export class StateTransport {
   }
 
   private mirrorGit(args: string[], extra: { env?: Record<string, string>; input?: Buffer | string; timeoutMs?: number; maxStdoutBytes?: number } = {}): Promise<GitResult> {
-    return this.run(['--git-dir', this.mirrorDir, '-c', 'gc.autoDetach=false', ...args], extra);
+    // An address with a password or token in it is written to the mirror without it (the mirror's config sits in the project folder); git is given the
+    // credentialed form for this call only, as a rewrite of the plain address, in its environment.
+    const credentialed = this.credentials?.credentialed;
+    const env = credentialed ? addGitConfigEnv(extra.env, `url.${credentialed}.insteadOf`, (this.credentials as SplitAddress).clean) : extra.env;
+    return this.run(['--git-dir', this.mirrorDir, '-c', 'gc.autoDetach=false', ...args], env ? { ...extra, env } : extra);
+  }
+
+  /** Remembers the credentials of a resolved address and returns the address without them: the only form that is ever written down or passed as an argument. */
+  private useAddress(address: string): string {
+    const split = splitAddress(address);
+    this.credentials = split.credentialed ? split : undefined;
+    this.addressLearnt = true;
+    return split.clean;
   }
 
   // Everything that touches the mirror runs here, inside withMirrorLock: first this process's turn, then the cross-process file lock, then the mirror itself.
@@ -199,7 +214,9 @@ export class StateTransport {
     return this.inMirror(() => this.configureLocked(url));
   }
 
-  private async configureLocked(url: string): Promise<void> {
+  private async configureLocked(address: string): Promise<void> {
+    // Whatever is written to the mirror's config has no userinfo, however the caller got the address.
+    const url = splitAddress(address).clean;
     if (this.configuredUrl === url) return;
     if (unsafeAddress(url)) throw new StateRefusedError('unsupported-format');
     const settings: Array<[string, string]> = [[`remote.${STATE_REMOTE}.url`, url], [`remote.${STATE_REMOTE}.promisor`, 'true'], [`remote.${STATE_REMOTE}.partialclonefilter`, PARTIAL_CLONE_FILTER]];
@@ -212,7 +229,7 @@ export class StateTransport {
     return this.guarded(() => this.inMirror(async (): Promise<Outcome<string | undefined>> => {
       const resolved = await this.resolveRemoteUrl();
       if (!resolved.ok) return resolved;
-      const url = resolved.value;
+      const url = this.useAddress(resolved.value);
       const listing = await this.mirrorGit(['ls-remote', '--exit-code', url, STATE_REF], { timeoutMs: NETWORK_TIMEOUT_MS });
       if (listing.code === 2) return { ok: true, value: undefined };
       if (listing.code !== 0) return { ok: false, failure: classifyGitFailure(listing) };
@@ -267,6 +284,8 @@ export class StateTransport {
   public readBlob(oid: string): Promise<Buffer> {
     return this.inMirror(async () => {
       if (!OID.test(oid)) throw new StateRefusedError('unsupported-format');
+      // A blob that is not in the mirror yet is fetched by git from the remote written in the mirror's config, which has no credentials in it.
+      if (!this.addressLearnt) { const resolved = await this.resolveRemoteUrl(); if (resolved.ok) this.useAddress(resolved.value); else this.addressLearnt = true; }
       const read = await this.mirrorGit(['cat-file', 'blob', oid], { maxStdoutBytes: MAX_BLOB_BYTES, timeoutMs: NETWORK_TIMEOUT_MS });
       if (read.overflowed) throw new StateRefusedError('unsupported-format');
       if (read.code !== 0) throw new StateRefusedError('missing-object');
@@ -301,7 +320,7 @@ export class StateTransport {
       if (!OID.test(commit)) return { ok: false, failure: failure('invalid-remote') };
       const resolved = await this.resolveRemoteUrl();
       if (!resolved.ok) return resolved;
-      const pushed = await this.mirrorGit(['push', '-q', resolved.value, `${commit}:${STATE_REF}`], { timeoutMs: NETWORK_TIMEOUT_MS });
+      const pushed = await this.mirrorGit(['push', '-q', this.useAddress(resolved.value), `${commit}:${STATE_REF}`], { timeoutMs: NETWORK_TIMEOUT_MS });
       if (pushed.code !== 0) return { ok: false, failure: classifyGitFailure(pushed) };
       return { ok: true, value: commit };
     }));

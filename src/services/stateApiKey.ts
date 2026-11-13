@@ -72,12 +72,21 @@ export async function openApiKeyCopy(home: ProjectStateHome, keys: StateKeys, pr
   if (!dataKey) return undefined;
   const meta = await home.readMeta().catch(() => undefined);
   if (!meta) return undefined;
+  return openApiKeyCopyText(text, dataKey, meta.stateId, profileId, notice);
+}
+
+/**
+ * Opens a sealed copy given as text (a keys/api file, or one that came from another computer inside the synced state) with the project's data key and
+ * state id, in memory. Undefined when it is tampered, swapped to another profile or sealed for another project; `notice` then gets one plain sentence.
+ */
+export function openApiKeyCopyText(text: string, dataKey: Buffer, stateId: string, profileId: string, notice?: (sentence: string) => void): ApiKeyCopy | undefined {
+  if (!PROFILE_ID_PATTERN.test(profileId)) return undefined;
   const refuse = (): undefined => { notice?.("The saved copy of this project's key was changed or is not for this project, so it was not used."); return undefined; };
   try {
     if (text.length > MAX_COPY_BYTES) return refuse();
     const file = JSON.parse(text) as Partial<CopyFile> | null;
     if (typeof file !== 'object' || file === null || file.format !== COPY_FORMAT) return refuse();
-    const plain = open(subKey(dataKey, 'api-key'), { iv: file.iv as string, tag: file.tag as string, data: file.data as string }, aadFor(meta.stateId, KIND, profileId));
+    const plain = open(subKey(dataKey, 'api-key'), { iv: file.iv as string, tag: file.tag as string, data: file.data as string }, aadFor(stateId, KIND, profileId));
     const copy = JSON.parse(plain.toString('utf8')) as Partial<ApiKeyCopy> | null;
     if (typeof copy !== 'object' || copy === null || copy.profileId !== profileId || typeof copy.apiKey !== 'string' || !copy.apiKey
       || typeof copy.endpoint !== 'string' || !copy.endpoint
@@ -89,6 +98,23 @@ export async function openApiKeyCopy(home: ProjectStateHome, keys: StateKeys, pr
   } catch {
     return refuse();
   }
+}
+
+/** The text of a profile's sealed copy file as it is on disk (never opened), or undefined when there is none or it is too large. */
+export async function readApiKeyCopyText(home: ProjectStateHome, profileId: string): Promise<string | undefined> {
+  if (!PROFILE_ID_PATTERN.test(profileId)) return undefined;
+  try {
+    const text = await readFile(copyFile(home, profileId), 'utf8');
+    return text.length > MAX_COPY_BYTES ? undefined : text;
+  } catch {
+    return undefined;
+  }
+}
+
+/** The profile ids that have a sealed copy file here, in order. */
+export async function listApiKeyCopies(home: ProjectStateHome): Promise<string[]> {
+  const names = await readdir(home.paths.apiKeysDir).catch(() => [] as string[]);
+  return names.filter((name) => name.endsWith('.enc')).map((name) => name.slice(0, -4)).filter((id) => eligible(id)).sort();
 }
 
 /** Deletes that one profile's copy. */
