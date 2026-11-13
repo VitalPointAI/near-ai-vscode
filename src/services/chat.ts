@@ -24,6 +24,7 @@ import { archiveProblemText } from '../domain/state/archiveProblem';
 import { threadStoreFor } from './threadStore';
 import { applyRetention, protectedThreadIds } from './threadArchive';
 import { onRunEnded, runEnded } from './runEndHooks';
+import { handlePickupAction, markPickupSeen, pickupCardModel, writePickupPointer } from './pickupCard';
 import { copyAttachmentIntoProject, prepareAttachments, stageAttachment, StagedAttachment } from '../agent/attachments';
 import { TeamDefinition, TeamLibrary, teamAgents } from '../agent/teams';
 import type { GsdAgent } from '../gsd/library';
@@ -128,6 +129,26 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
   // The "no team yet" card: only the latest answer is posted, so a slow check never undoes "Not now".
   const setupNudge = latestOnly(() => setupNudgeShows(context, auth), (show) => { if (!disposed) void panel.webview.postMessage({ type: 'setup-nudge', show }); });
   const feed = sharedActivityFeed();
+  // "Pick up where you left off": the last chat continued in another editor or on another computer. It only offers to reopen that chat.
+  const pickupWriter = () => editorWriter(context.globalState as MementoLike | undefined);
+  const pickupStore = (root: string) => threadStoreFor(root, context.secrets, pickupWriter(), () => vscode.workspace.getConfiguration('nearAi').get<boolean>('sync.keepKeyInProject', true));
+  /** The pointer the card on screen is about, for "Not now". */
+  let pickupAt = '';
+  let pickupShown = false;
+  const pickup = {
+    send: async (): Promise<void> => {
+      const root = workspaceRoot();
+      if (!root || disposed) return;
+      const model = await pickupCardModel({ workspaceState: context.workspaceState as MementoLike | undefined, writer: pickupWriter(), threads: pickupStore(root) }, root).catch(() => undefined);
+      if (!model || disposed) return;
+      pickupAt = model.pointerAt;
+      if (model.show || pickupShown) { pickupShown = model.show; void panel.webview.postMessage({ type: 'pickup-card', model }); }
+    },
+    /** Records where work stopped, for the next editor that opens this project. */
+    note: (root: string, conversationId: string, runId?: string): void => {
+      void writePickupPointer(root, { conversationId, ...(runId ? { runId } : {}), writer: pickupWriter(), at: new Date().toISOString() });
+    }
+  };
   const workspaceRoot = () => vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   const onScreen = (): ChatTab => tabs.find((tab) => tab.id === activeId) ?? tabs[0];
   /** The conversation a message names, or the one on screen; undefined for one that is no longer open. */
@@ -304,7 +325,7 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
   /** History's "open conversation": shows it when open, otherwise opens it as a tab. */
   const openSaved = async (id: string): Promise<void> => {
     const open = tabs.find((tab) => tab.id === id);
-    if (open) { show(open); return; }
+    if (open) { show(open); const openRoot = workspaceRoot(); if (openRoot) pickup.note(openRoot, id); return; }
     const root = workspaceRoot();
     if (!root) return;
     const current = onScreen();
@@ -321,6 +342,7 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     }
     if (!reuse) tabs.push(tab);
     show(tab);
+    pickup.note(root, id);
     // An archived thread that was just opened is live again; the lowest-ranked live thread is archived in its place.
     void retain().catch(() => undefined);
   };
@@ -350,6 +372,12 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     const keep = protectedThreadIds([...openTabSources].flatMap((source) => source()), markers);
     await applyRetention(store, readHistoryLimits().liveConversations, keep);
   };
+  // When a run of one of this chat's conversations ends, the pick-up pointer says so, so another editor can offer to reopen it.
+  const pickupWatch = onRunEnded((event) => {
+    const root = workspaceRoot();
+    if (!root || path.resolve(event.root) !== path.resolve(root) || !tabs.some((tab) => tab.id === event.conversationId)) return;
+    pickup.note(root, event.conversationId, event.runId);
+  });
   const retentionWatch = onRunEnded(async (event) => {
     const root = workspaceRoot();
     if (!root || path.resolve(event.root) !== path.resolve(root)) return;
@@ -449,6 +477,10 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     if (message.type === 'close-conversation') { await closeConversation(message.id); return; }
     if (message.type === 'new-chat') { await newConversation(); return; }
     if (message.type === 'resume-conversation') { await openSaved(message.id); return; }
+    if (message.type === 'pickup-card') {
+      await handlePickupAction(message, { openSaved, markSeen: () => markPickupSeen(context.workspaceState as MementoLike | undefined, pickupAt) });
+      return;
+    }
     if (message.type === 'continue-run') { await continueStopped(tab); return; }
     if (message.type === 'resume-interrupted' || message.type === 'dismiss-interrupted') { await settleInterrupted(tab, message.type === 'resume-interrupted' ? 'resumed' : 'dismissed'); return; }
     if (message.type === 'questions-reply') {
@@ -536,6 +568,7 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
       panel.webview.postMessage(await statusMessage({ agents: runningAgents(), account: state.spend }));
       await sendProfileStatus(panel, auth);
       await setupNudge.refresh();
+      await pickup.send();
       await sendArtifacts(panel);
       return;
     }
@@ -776,7 +809,7 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
   const windowWatch = typeof vscode.window.onDidChangeWindowState === 'function' ? vscode.window.onDidChangeWindowState((window) => { if (window.focused) for (const tab of tabs) tab.focusRegained?.(); }) : undefined;
   // The "no team yet" card goes away as soon as Team Studio (or anyone) saves the project's team.
   const teamWatch = watchProjectTeam(() => { if (!disposed) void setupNudge.refresh(); });
-  panel.onDidDispose(() => { disposed = true; openTabSources.delete(openTabs); retentionWatch.dispose(); for (const tab of tabs) tab.agent?.dispose(); policyWatch.dispose(); tokenWatch.dispose(); windowWatch?.dispose(); teamWatch?.dispose(); state.spendWatch?.dispose(); if (state.spendTimer) clearTimeout(state.spendTimer); }, undefined, context.subscriptions);
+  panel.onDidDispose(() => { disposed = true; openTabSources.delete(openTabs); retentionWatch.dispose(); pickupWatch.dispose(); for (const tab of tabs) tab.agent?.dispose(); policyWatch.dispose(); tokenWatch.dispose(); windowWatch?.dispose(); teamWatch?.dispose(); state.spendWatch?.dispose(); if (state.spendTimer) clearTimeout(state.spendTimer); }, undefined, context.subscriptions);
   // The emergency stop stops every conversation's run; the composer's Stop stops only the one on screen.
   onDidChangeEmergencyStop(async (engaged) => {
     sendPolicyState(panel);
@@ -800,6 +833,7 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
   state.activity = createActivityStore();
   await sendProfileStatus(panel, auth);
   await setupNudge.refresh();
+  await pickup.send();
   await loadModels(panel, auth);
 }
 

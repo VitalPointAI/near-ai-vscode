@@ -139,6 +139,7 @@ ${layoutProbeTag(nonce, layoutProbeAsset(webview, shared))}<script nonce="${nonc
 <script nonce="${nonce}" src="${asset('pending.js')}"></script>
 <script nonce="${nonce}" src="${asset('composer.js')}"></script>
 <script nonce="${nonce}" src="${asset('setup.js')}"></script>
+<script nonce="${nonce}" src="${asset('pickup.js')}"></script>
 <script nonce="${nonce}" src="${asset('chat.js')}"></script>
 </body>
 </html>`;

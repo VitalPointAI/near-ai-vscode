@@ -60,6 +60,9 @@ export type ChatWebviewMessage =
   | { type: 'open-folder' }
   /** The empty chat's "no team yet" card: set up the team, hide the card for this project, or open all setup steps. */
   | { type: 'setup-nudge'; action: 'team' | 'later' | 'menu' }
+  /** The "Pick up where you left off" card: reopen the last chat (the only thing it does), or hide the card for this pointer. */
+  | { type: 'pickup-card'; action: 'open'; id: string }
+  | { type: 'pickup-card'; action: 'later' }
   | { type: 'approval-reply'; callId: string; decision: 'allow' | 'allow-run' | 'allow-always' | 'deny'; feedback?: string; conversationId?: string }
   | { type: 'revert-run'; runId: string; conversationId?: string }
   | { type: 'verify-response'; runId: string; conversationId?: string }
@@ -294,6 +297,11 @@ export function parseChatWebviewMessage(value: unknown): ChatWebviewMessage | un
   if (message.type === 'setup-nudge') {
     if (Object.keys(message).some((key) => key !== 'type' && key !== 'action')) return undefined;
     return message.action === 'team' || message.action === 'later' || message.action === 'menu' ? { type: 'setup-nudge', action: message.action } : undefined;
+  }
+  if (message.type === 'pickup-card') {
+    if (message.action === 'later') return Object.keys(message).length === 2 ? { type: 'pickup-card', action: 'later' } : undefined;
+    if (message.action === 'open' && typeof message.id === 'string' && /^conv-[a-z0-9-]{6,60}$/.test(message.id) && Object.keys(message).length === 3) return { type: 'pickup-card', action: 'open', id: message.id };
+    return undefined;
   }
   const promptResponse = promptResponseMessage(value);
   if (promptResponse) return promptResponse;

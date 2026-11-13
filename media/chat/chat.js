@@ -43,6 +43,8 @@
   const setupKit = window.nearSetup || { renderSetupNudge: () => undefined, welcomeState: () => 'ready', applyWelcomeState: () => { const ready = $('welcome-ready'); if (ready) ready.hidden = false; } };
   // Until the project has a working profile, the welcome shows only the Connect NEAR AI panel.
   const welcomeReady = $('welcome-ready') || welcome;
+  // The "Pick up where you left off" card; without its helper the chat simply shows no card.
+  const pickupKit = window.nearPickup || { renderPickupCard: () => undefined };
   const welcomeMemory = {};
   if ($('welcome-new-profile')) $('welcome-new-profile').addEventListener('click', () => post({ type: 'new-profile' }));
   if ($('welcome-choose-profile')) $('welcome-choose-profile').addEventListener('click', () => post({ type: 'select-profile' }));
@@ -1228,6 +1230,7 @@
       case 'reset': post({ type: 'new-chat' }); break;
       case 'conversations': renderConversations(m); break;
       case 'setup-nudge': setupKit.renderSetupNudge(document, welcomeReady, m.show === true, post, () => input.focus()); break;
+      case 'pickup-card': pickupKit.renderPickupCard(document, welcomeReady, m.model, post, () => input.focus()); break;
       case 'conversation-show': {
         draftsLive = false;
         activeId = m.id;
