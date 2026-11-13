@@ -26,6 +26,8 @@ export interface SyncFailure { kind: SyncFailureKind; message: string; detail?: 
 export type Outcome<T> = { ok: true; value: T } | { ok: false; failure: SyncFailure };
 export interface TreeEntry { name: string; oid: string }
 export interface StateFile { name: string; data: Buffer | string }
+/** A file of an earlier tree carried into a new one by its blob id, so an unchanged object is not read and stored again. */
+export interface StateFileRef { name: string; oid: string }
 
 const MESSAGES: Readonly<Record<SyncFailureKind, string>> = {
   rejected: 'Another computer saved changes first. Sync will combine them with yours and try again.',
@@ -231,8 +233,8 @@ export class StateTransport {
     });
   }
 
-  /** Builds a flat tree of the given files and a commit over it with the anonymous identity, optionally on top of `parent`. Nothing is pushed. */
-  public writeCommit(files: readonly StateFile[], parent?: string): Promise<string> {
+  /** Builds a flat tree of the given files (or blob ids of files already in the mirror) and a commit over it with the anonymous identity, optionally on top of `parent`. Nothing is pushed. */
+  public writeCommit(files: ReadonlyArray<StateFile | StateFileRef>, parent?: string): Promise<string> {
     return this.inMirror(async () => {
       if (parent !== undefined && !OID.test(parent)) throw new StateRefusedError('unsupported-format');
       const seen = new Set<string>();
@@ -240,7 +242,7 @@ export class StateTransport {
       for (const file of files) {
         if (!TREE_NAME.test(file.name) || seen.has(file.name)) throw new StateRefusedError('unsupported-format');
         seen.add(file.name);
-        const blob = gitText(mustSucceed(await this.mirrorGit(['hash-object', '-w', '--stdin'], { input: file.data }), 'storing a state file'));
+        const blob = 'oid' in file ? file.oid : gitText(mustSucceed(await this.mirrorGit(['hash-object', '-w', '--stdin'], { input: file.data }), 'storing a state file'));
         if (!OID.test(blob)) throw new StateRefusedError('unsupported-format');
         lines.push(Buffer.from(`100644 blob ${blob}\t${file.name}\0`, 'utf8'));
       }

@@ -190,16 +190,18 @@ export class ProjectStateHome {
 
   /**
    * Creates the state home on a person's action. The folder (owner-only), then its inner .gitignore, then meta.json, each created exclusively, so
-   * two editors doing this at once end with one stateId.
+   * two editors doing this at once end with one stateId. `options.stateId` is used only when meta.json does not exist yet: it is how a second computer
+   * takes the project's id from the remote before it has any state of its own (SYNC-05).
    */
-  public async ensure(): Promise<StateMeta> {
+  public async ensure(options: { stateId?: string } = {}): Promise<StateMeta> {
+    if (options.stateId !== undefined && !STATE_ID.test(options.stateId)) throw new Error("This project's saved-state id is not valid. Nothing was changed.");
     const existing = await this.readMeta();
     if (existing && (await stat(this.paths.gitignore).catch(() => undefined))?.isFile()) return existing;
     await mkdir(path.dirname(this.dir), { recursive: true });
     await mkdir(this.dir, { mode: 0o700 }).catch((error: NodeJS.ErrnoException) => { if (error.code !== 'EEXIST') throw error; });
     await createExclusive(this.paths.gitignore, GITIGNORE_TEXT);
     if (existing) return existing;
-    const fresh: StateMeta = { format: STATE_FORMAT, stateId: newStateId(), createdAt: new Date().toISOString() };
+    const fresh: StateMeta = { format: STATE_FORMAT, stateId: options.stateId ?? newStateId(), createdAt: new Date().toISOString() };
     if (await createExclusive(this.paths.meta, `${JSON.stringify(fresh, null, 2)}\n`) === 'created') return fresh;
     const winner = await this.readMeta();
     if (!winner) throw new Error("This project's saved-state information could not be created. Nothing was changed.");

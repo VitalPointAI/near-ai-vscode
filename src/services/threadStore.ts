@@ -93,8 +93,10 @@ export interface ImportedThread {
   entries: readonly ThreadEntry[];
   /** Title, model, origin, the times, and `history` when the earlier messages are known to be missing; the counts are worked out from the log. */
   meta: Omit<ThreadMeta, 'id' | 'turns' | 'entries' | 'bytes' | 'tip' | 'state'>;
-  /** The model's working list as that version saved it. */
-  context: Transcript;
+  /** The model's working list as that version saved it. Absent when only the log and meta come (a thread brought from another computer without its context). */
+  context?: Transcript;
+  /** Keep the context's own `basedOnTip` instead of the last imported entry (sync: the context says which entry it covers). */
+  keepContextTip?: boolean;
 }
 
 export type ImportOutcome = 'copied' | 'merged' | 'unchanged';
@@ -617,11 +619,13 @@ export class ThreadStore implements ConversationStore {
     const { state: _state, ...plain } = merged;
     const next: ThreadMeta = { ...plain, ...counted };
     const metaChanged = !existing || canonicalJson(JSON.parse(JSON.stringify(existing))) !== canonicalJson(JSON.parse(JSON.stringify(next)));
-    const context: Transcript = JSON.parse(JSON.stringify({ ...thread.context, basedOnTip: thread.entries.at(-1)?.id ?? '' }));
-    const contextChanged = !existingContext || laterContext(context, existingContext);
+    const context: Transcript | undefined = thread.context
+      ? JSON.parse(JSON.stringify({ ...thread.context, basedOnTip: thread.keepContextTip && typeof thread.context.basedOnTip === 'string' ? thread.context.basedOnTip : thread.entries.at(-1)?.id ?? '' }))
+      : undefined;
+    const contextChanged = context !== undefined && (!existingContext || laterContext(context, existingContext));
     if (!fresh.length && !metaChanged && !contextChanged) return 'unchanged';
     await this.home.ensureFolder(this.dirOf(id));
-    if (contextChanged) await writeFileAtomic(this.contextPath(id), this.sealJson(material, 'thread-context', id, context));
+    if (contextChanged && context) await writeFileAtomic(this.contextPath(id), this.sealJson(material, 'thread-context', id, context));
     // The meta goes last, as everywhere: a crash before it leaves a thread the next pass finishes.
     if (metaChanged || fresh.length) {
       await writeFileAtomic(this.metaPath(id), this.sealJson(material, 'thread-meta', id, next));
