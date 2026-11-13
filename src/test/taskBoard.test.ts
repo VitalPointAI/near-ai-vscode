@@ -275,3 +275,63 @@ test('the reminder is hidden from the reopened view and from the thread log', ()
   assert.equal(isSyntheticMessage(messages[2]), true);
   assert.equal(isSyntheticMessage(messages[0]), false);
 });
+
+// ---- Tolerant, numbered sub-agent task matching (quick 261113-lbo) ------------------------------------------------------------------------
+// Deterministic steps only: a guess would mark the wrong item done, so an ambiguous or one-word name moves nothing.
+
+const boardOf = (...contents: string[]) => { const board = new TaskBoard(); board.write(contents.map((content) => todo(content, 'pending'))); return board; };
+
+test('TaskBoard: a task may name its item by number', () => {
+  const board = boardOf('Write the parser', 'Add login page', 'Ship release 0.4.20');
+  for (const task of ['2', '#2', 'item 2', 'task 2', ' Task 2 ']) assert.equal(board.set(task, 'in_progress'), 'Add login page', task);
+  assert.equal(board.set('#3', 'in_progress'), 'Ship release 0.4.20');
+  assert.equal(board.set('9', 'in_progress'), undefined);
+  // An item whose content is literally "2" is matched exactly first.
+  const literal = boardOf('First', '2', 'Third');
+  assert.equal(literal.set('2', 'completed'), '2');
+});
+
+test('TaskBoard: punctuation, quotes and leading list markers are ignored', () => {
+  const board = boardOf('Write the parser', 'Add login page');
+  for (const task of ['"Write the parser."', '1. Write the parser', '- [ ] Write the parser', '* write the parser!', '[x] Write the parser', '#1 Write the parser']) assert.equal(board.set(task, 'in_progress'), 'Write the parser', task);
+});
+
+test('TaskBoard: a unique whole-word part of an item matches, an ambiguous or one-word name does not', () => {
+  const board = boardOf('Write the parser', 'Add login page', 'Ship release 0.4.20');
+  assert.equal(board.set('login page', 'in_progress'), 'Add login page');
+  assert.equal(board.set('Ship release 0.4.20 to the marketplace', 'in_progress'), 'Ship release 0.4.20');
+  assert.equal(board.set('tests', 'in_progress'), undefined);
+  assert.equal(board.set('parser', 'in_progress'), undefined, 'one word moves nothing');
+  const twins = boardOf('Write the parser', 'write the parser tests');
+  assert.equal(twins.set('the parser', 'completed'), undefined, 'matches both items');
+  assert.equal(shown(twins.list), 'Write the parser:pending write the parser tests:pending', 'nothing moved');
+});
+
+test('sub-agents that name their items by number or a quoted paraphrase end the list at 2/2 with no reminder', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'near-ai-tasks-num-'));
+  const home = await mkdtemp(path.join(tmpdir(), 'near-ai-tasks-num-gsd-'));
+  await mkdir(path.join(home, 'gsd-core'), { recursive: true });
+  const gsd: GsdContext = { home, skills: [], agents: [{ name: 'gsd-worker', description: 'Works', tools: ['Read'], body: 'You are the worker.', file: path.join(home, 'agents', 'gsd-worker.md') }], shellEnv: {} };
+  const mainRequests: AgentMessage[][] = [];
+  const near = {
+    async *streamCompletion(_model: string, messages: AgentMessage[]): AsyncGenerator<CompletionEvent> {
+      if (/^do \w$/.test(String(messages[1]?.content ?? ''))) { yield reply('worker done'); return; }
+      mainRequests.push([...messages]);
+      const turn = mainRequests.length;
+      if (turn === 1) { yield listWrite('t1', ['Task A', 'pending'], ['Task B', 'pending']); return; }
+      if (turn === 2) { yield reply(null, [call('a1', 'Agent', { description: 'do A', prompt: 'do A', task: '2' }), call('a2', 'Agent', { description: 'do B', prompt: 'do B', task: '"task a."' })]); return; }
+      yield reply('All set.');
+    },
+    async actualCostsUsd() { return undefined; }
+  };
+  const posted: Array<Record<string, unknown>> = [];
+  const conversation = new AgentConversation(root, (message) => posted.push(message), path.join(root, '.ckpt'));
+  try {
+    await conversation.send({ text: 'plan it', client: near as never, model: 'm', privacy: 'Private', policy: { mode: 'approve-risky', emergencyStop: false }, rules: DEFAULT_RULES, gsd, maxParallelAgents: 4 });
+    assert.equal(shown(todoPosts(posted).at(-1)!.todos as Todo[]), 'Task A:completed Task B:completed');
+    assert.equal(mainRequests.length, 3, 'no extra reminder turn');
+    assert.equal(reminders(mainRequests).length, 0);
+  } finally {
+    conversation.dispose();
+  }
+});
