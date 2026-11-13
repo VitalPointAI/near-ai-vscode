@@ -56,8 +56,33 @@ export interface CodePushSummary {
   notes: string[];
 }
 
+/** A secret found in a commit that the push would publish. Never carries the value. */
+export interface HistoryHit {
+  /** The path of the file in that commit, or undefined for the commit message. */
+  file?: string;
+  /** The short id of the commit. */
+  commit: string;
+  reason: string;
+}
+
+export interface HistoryLimits { maxCommits: number; maxBytes: number }
+
+export interface HistoryScan {
+  /** How many commits were checked. */
+  commits: number;
+  hits: HistoryHit[];
+  /** False when a limit was reached or git could not list the history: the rest was not checked. */
+  complete: boolean;
+  /** Files in earlier commits that could not be read as text (binary or very large). */
+  unchecked: string[];
+}
+
 export interface CodePushUi {
   message(text: string): void;
+  /** A secret is in the history that the push would publish. Shown as a plain notice; the only choice is not to push. */
+  historyBlocked(text: string): Promise<void>;
+  /** The history was too large to check fully. True only when the person goes on knowing that. */
+  confirmUnscannedHistory(text: string): Promise<boolean>;
   /** The person's click on the list of files, after the check. */
   confirmPush(summary: CodePushSummary): Promise<boolean>;
   /** Add these files (not tracked by git) to .gitignore? */
@@ -68,7 +93,7 @@ export interface CodePushUi {
 
 export type CodePushStatus = 'pushed' | 'declined' | 'blocked' | 'failed' | 'nothing';
 export interface CodePushResult { status: CodePushStatus; message: string }
-export interface CodePushOptions { ui: CodePushUi; visibility: Visibility | 'unknown' }
+export interface CodePushOptions { ui: CodePushUi; visibility: Visibility | 'unknown'; historyLimits?: Partial<HistoryLimits> }
 
 const STATE_FOLDER = '.near-ai/state/';
 const NAME_REASON = 'The file name looks like a password, key or credential file.';
@@ -146,6 +171,11 @@ export async function planCodePush(root: string, git: GitRunner): Promise<CodePu
     if (at >= 0) block(candidate.relative, `It looks like it holds a secret: a key or token (line ${at + 1}).`);
   }
   return { files, blocked: [...blocked.values()].sort((a, b) => a.file.localeCompare(b.file)), unchecked };
+}
+
+/** Stub, replaced in the next commit. */
+export function scanHistory(_root: string, _ref: string, _remote: string, _git: GitRunner, _limits: Partial<HistoryLimits> = {}): Promise<HistoryScan> {
+  return Promise.resolve({ commits: 0, hits: [], complete: true, unchecked: [] });
 }
 
 function ignoreLine(file: string): string {

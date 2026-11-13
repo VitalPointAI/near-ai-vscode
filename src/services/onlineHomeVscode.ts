@@ -75,6 +75,12 @@ function codePushOffer(): CodePushOffer {
         'Push these files'
       ) === 'Push these files';
     },
+    historyBlocked: async (text) => { await vscode.window.showWarningMessage("Your code was not pushed", { modal: true, detail: text }, "Don't push my code"); },
+    confirmUnscannedHistory: async (text) => await vscode.window.showWarningMessage(
+      'Your history was not fully checked',
+      { modal: true, detail: text },
+      'Push anyway'
+    ) === 'Push anyway',
     confirmIgnore: async (files) => await vscode.window.showWarningMessage(
       'Some files look like secrets',
       { modal: true, detail: `They will not be pushed. Add them to .gitignore?\n\n${listed(files)}` },

@@ -474,6 +474,8 @@ class FakeCodeOffer implements CodePushOffer {
   public offer(): Promise<boolean> { this.events.push('offer'); return Promise.resolve(this.answers.offer); }
   public message(): void { /* not needed */ }
   public confirmPush(summary: CodePushSummary): Promise<boolean> { this.events.push('confirm-push'); this.summaries.push(summary); return Promise.resolve(this.answers.push ?? true); }
+  public historyBlocked(): Promise<void> { return Promise.resolve(); }
+  public confirmUnscannedHistory(): Promise<boolean> { return Promise.resolve(false); }
   public confirmIgnore(): Promise<boolean> { return Promise.resolve(false); }
   public askIdentity(): Promise<{ name: string; email: string } | undefined> { return Promise.resolve({ name: 'Pat', email: 'pat@example.test' }); }
 }
