@@ -2,6 +2,53 @@
 
 ## Unreleased
 
+This release is about your project staying the same wherever you open it. The same project in
+code-server, desktop VS Code and on another computer now shows the same chats, runs, comparisons and
+model choices, and a project can be kept in step between computers with a recovery code.
+
+- **One project state, in the project.** Chats, runs, checkpoints, comparisons, model choices and
+  spend history live in a single folder inside the project, `.near-ai/state/`, which the extension keeps
+  out of git. Every editor that opens the folder on this computer shows the same thing. Your earlier
+  chats, runs, comparisons and spend are merged in the first time an editor opens the project, and
+  nothing is overwritten or deleted. Opening a folder you never used NEAR AI in still writes nothing.
+- **Full history in every interface.** Each conversation, including `@near` chats from VS Code's Chat
+  view, opens with every message, reply and tool step, and tool steps open to their output. The 5 most
+  recently used conversations stay open and the older ones are archived inside the project, never
+  deleted, and still listed in **NEAR AI: Show Chat History**; opening one makes it live again
+  (`nearAi.history.liveConversations`).
+- **Model choices follow the project.** Compare Models results and the choices you apply with **Use
+  as...** are saved with the project, so every editor shows them without running the comparison again.
+  A setting in your workspace still wins, then the project's choice, then your user setting. Choices
+  you applied earlier in one editor's user settings are offered for import once, never copied without a
+  click.
+- **Pick up where you left off.** Opening a project in another editor or on another computer shows a
+  card in the empty chat with the last chat, how its run ended and the current Open-GSD phase with its
+  next step. **Open chat** reopens that chat and starts nothing, so it spends nothing.
+- **The NEAR AI key works in a second editor with no set-up.** On the same computer, a second editor
+  uses the project's NEAR AI key because an encrypted copy of it lives in the state folder. With
+  `nearAi.sync.keepKeyInProject` off, that copy cannot be opened without the recovery code or that
+  device's own secret storage.
+- **A sync control in the chat panel.** From the moment the panel opens, a control next to the profile
+  shows **Sync off**, **Synced**, **Syncing...**, **Needs attention** or **No online home**, writes the
+  reason in plain words when something needs you, and starts the right step with one click. It works
+  from the keyboard and in light, dark and high-contrast themes.
+- **Sync between computers with a recovery code.** **NEAR AI: Turn On Project Sync** shows what your git
+  host can and cannot see, then makes a recovery code and shows it once. Enter it on another computer
+  with **NEAR AI: Enter Recovery Code** and your chats, runs, comparisons, model choices and NEAR AI key
+  are there. Everything is encrypted on your computer before it leaves, and your git host sees only that
+  sync is used, roughly how much is stored and when you save. Sync runs after a run or reply ends, a
+  minute after you leave the window, and every 10 minutes while idle
+  (`nearAi.sync.intervalMinutes`, 0 turns it off). It pulls when the project opens and when you come
+  back after 5 minutes away. Nothing is ever pushed to `main`.
+- **Give a project an online home.** With no git repository or remote, one click starts git, signs in
+  to GitHub through VS Code, asks every time whether the repository is public or private, creates it and
+  pushes the encrypted sync branch. Pushing your own code is a separate step that lists the files and
+  blocks likely secrets, including ones left in earlier commits. Without GitHub sign-in it offers the
+  `gh` tool or the address of an empty repository you paste in, and it never asks for a token.
+- **The chat task list checks off finished tasks.** A finished run no longer leaves its list at 0/N.
+  When a run ends with unfinished items, the agent is asked once to update the list, and anything still
+  unfinished shows as "not confirmed done" instead of looking finished. Sub-agent tasks are matched to
+  the list more reliably, and only when the match is unique.
 - **Every research team now has a plagiarism checker.** It sits between the writer and the red
   team, compares the draft with every source fetched in the run and searches the web for
   distinctive sentences, checks every note against its source, and ends
@@ -23,6 +70,17 @@
 - **Role tests for the plagiarism checker.** Team Studio offers a Plagiarism checker role with its
   own graded task, and a member whose name has a task of its own (such as the research team's
   editor or writer) is now tested on that task rather than on its general role's.
+
+Known limits in this release:
+
+- The daily spend limit still counts the spend of the editor it runs in, not the project's total
+  across editors.
+- History shows the lead agent's steps and each sub-agent's report. Sub-agent steps become linked
+  threads in a later release.
+- A single tool output over 2 MiB is stored shortened, with a visible "output shortened" marker.
+- A new recovery code does not stop the old one from opening copies already on the git host. A new
+  code protects only what is pushed afterwards, so treat a leaked code as exposing everything pushed
+  before it.
 
 ## 0.4.19
 
