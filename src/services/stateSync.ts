@@ -265,6 +265,8 @@ export class StateSync {
     if (!manifestOid) throw new StateRefusedError('missing-object');
     const text = (await transport.readBlob(manifestOid)).toString('utf8');
     const manifest = openManifest(text, dataKey, state.lastSeenSeq);
+    // A bundle sealed for another project cannot be told from this one by its key alone (a holder of the key can seal under any id): the id must be ours.
+    if (manifest.header.stateId !== stateId) throw new StateRefusedError('tampered');
     for (const entry of manifest.objects) if (!tree.has(entry.file)) throw new StateRefusedError('missing-object');
     const read = new Set(state.readObjects);
     const entries: Record<string, ThreadEntry[]> = {};
@@ -284,6 +286,10 @@ export class StateSync {
       records.push(...hot.records);
       newObjects.push(first.file);
     }
+    // The authentic index says how many entries each thread has on the remote. A computer that does not hold that many after reading every listed
+    // object is looking at a bundle with parts missing, so nothing is applied.
+    const held = (id: string): number => new Set([...(state.pushed[id] ?? []), ...(entries[id] ?? []).map((entry) => entry.id)]).size;
+    for (const [id, item] of Object.entries(index.threads)) if (item.entries > held(id)) throw new StateRefusedError('missing-object');
     return { tip, seq: manifest.seq, header: manifest.header, objects: manifest.objects, indexFile: manifest.indexFile, tree, newObjects, entries, records, index };
   }
 

@@ -245,8 +245,9 @@ test('two computers pushing at the same moment both end with both computers\' th
   const [first, second] = await Promise.all([a.sync.sync(), b.sync.sync()]);
   assert.equal(first.kind, 'synced', first.message);
   assert.equal(second.kind, 'synced', second.message);
-  assert.equal(Math.max(first.attempts ?? 0, second.attempts ?? 0), 2, 'exactly one push lost the race and was retried');
-  assert.equal((await a.sync.sync()).kind, 'synced');
+  assert.equal(Math.max(first.attempts ?? 0, second.attempts ?? 0), 2, `exactly one push lost the race and was retried: ${JSON.stringify({ first, second, pushes })}`);
+  // Whichever computer lost the race merged the other's work before its retry; the one that won takes it on its next sync.
+  for (const machineOf of [a, b, a]) assert.equal((await machineOf.sync.sync()).kind, 'synced');
   assert.deepEqual(await entryIds(a, 'conv-bravonew01'), await entryIds(b, 'conv-bravonew01'));
   assert.equal((await entryIds(a, 'conv-bravonew01')).length, 2);
   assert.equal((await entryIds(b, 'conv-alphanew01')).length, 2);
