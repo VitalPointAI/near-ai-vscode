@@ -5,9 +5,9 @@ milestone_name: Messaging relay — Teams and Signal
 current_phase: 27
 current_phase_name: Project state follows the project across interfaces and machines (0.4.20)
 status: planning
-stopped_at: Completed 27-10-PLAN.md
-last_updated: "2026-11-13T16:07:06.036Z"
-state_head: 1e63c8c20e3d6f1a339e43b77d7b5c11928889ae
+stopped_at: Completed 27-12-PLAN.md
+last_updated: "2026-11-13T16:29:14.833Z"
+state_head: 0c37e20e4e70811c0bf47d6815edfd39a4f4a26c
 progress:
   total_phases: 9
   completed_phases: 0
@@ -76,8 +76,8 @@ None yet.
 
 ## Session
 
-**Last session:** 2026-11-13T16:07:06.017Z
-**Stopped at:** Completed 27-10-PLAN.md
+**Last session:** 2026-11-13T16:29:14.816Z
+**Stopped at:** Completed 27-12-PLAN.md
 **Resume file:** None
 
 ## Performance Metrics
@@ -96,6 +96,7 @@ None yet.
 | Phase 27 P07 | 10 min | 3 tasks | 9 files |
 | Phase 27 P08 | 6 min | 2 tasks | 6 files |
 | Phase 27 P10 | 16 min | 3 tasks | 10 files |
+| Phase 27 P12 | 70min | 3 tasks | 12 files |
 
 ## Decisions
 
@@ -132,3 +133,8 @@ None yet.
 - [Phase 27]: Spend lines are selected by entry id, not by the project tag on each line, and unionLog is keyed by (entry id, version): later versions of a ledger entry carry no project tag and the first line holds the entry's time and path
 - [Phase 27]: The old transcript key is read from SecretStorage without creating one; a sealed transcript with no key is counted locked and retried at the next start; the source folder is opened read-only
 - [Phase 27]: Migration runs at activation only for a NEAR AI project, otherwise on the first chat send, history list or Compare Models open, and before saved tabs reopen; it logs counts only
+- [Phase 27]: Sync pushes through the transport without holding the mirror lock itself; an in-process queue serialises sync/pull/unlock and MirrorBusyError is the waiting outcome
+- [Phase 27]: SyncOutcome gains a failed kind carrying the transport SyncFailure so offline, sign-in and policy failures reach the scheduler
+- [Phase 27]: Remote index entry counts must be covered by what this computer holds after reading every listed object, and the manifest state id must equal the project's; otherwise the bundle is refused before any write
+- [Phase 27]: A changed local record is built as an edit of the remote head (makeRecord base) so one writer never forks against itself; spend months are united by line, not decided by newer-wins
+- [Phase 27]: unlockFromRemote verifies the unwrap and manifest before the state home exists; a computer with remote state and no key of its own is refused as locked, never given a fresh key
