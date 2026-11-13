@@ -59,7 +59,7 @@ Plans:
   4. Turning sync on shows a high-entropy recovery code once (never stored or logged); on a second machine with the same project cloned, entering it restores chats, runs, comparisons, model choices and the NEAR AI key without re-entering the key, through an encrypted bundle on a dedicated branch of the project's own git remote (never `main`); a leak test proves no plaintext transcript, key or prompt reaches the remote. (SYNC-04, SYNC-05)
   5. Opening the project on a different interface or machine shows a "Pick up where you left off" card (last chat, last run state, current GSD phase and next step); one click reopens it and nothing re-runs or spends money. (SYNC-07)
   6. All git work for sync is done by the extension and reported in plain words; conflicts from two machines merge per record with no lost entries (tested). 0.4.20 ships through the release PR with CHANGELOG and README updated. (SYNC-05, SYNC-08)
-**Plans:** 15/18 plans executed (11 waves)
+**Plans:** 16/18 plans executed (11 waves)
 
 Plans:
 - [x] 27-01-PLAN.md — Wire format and crypto core: recovery code, scrypt wrap, padded AEAD objects, sealed manifest, every refusal (owner confirms the contract first)
@@ -76,7 +76,7 @@ Plans:
 - [x] 27-12-PLAN.md — Two-machine sync: collect, verify, merge, apply; refusal leaves state untouched
 - [x] 27-13-PLAN.md — Archived threads as cold objects with lazy fetch; consolidation and size limits
 - [x] 27-14-PLAN.md — "Pick up where you left off" card (D-03)
-- [ ] 27-15-PLAN.md — Sync on/off, recovery code shown once, restore on a second machine with the NEAR AI key (D-02); no remote routes into the online-home setup; sync status published
+- [x] 27-15-PLAN.md — Sync on/off, recovery code shown once, restore on a second machine with the NEAR AI key (D-02); no remote routes into the online-home setup; sync status published
 - [x] 27-17-PLAN.md — "Give this project an online home": GitHub repo public or private on click, gh or pasted-URL fallback, separate checked code push, resumable (D-14, SYNC-09)
 - [ ] 27-18-PLAN.md — Visible sync control in the chat panel bar with five states, errors on the control, dismissible turn-on prompt (D-16)
 - [ ] 27-16-PLAN.md — Phase gate, owner check on the real host, README/SECURITY, feature PR and release 0.4.20
@@ -267,7 +267,7 @@ Plans:
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 27. Project state follows the project (0.4.20) | 15/18 | Context gathered | - |
+| 27. Project state follows the project (0.4.20) | 16/18 | Context gathered | - |
 | 68. Relay foundation | 0/TBD | Not started | - |
 | 69. Inbound authenticity and allowlisting | 0/TBD | Not started | - |
 | 70. Identity, tenants and requesters | 0/TBD | Not started | - |

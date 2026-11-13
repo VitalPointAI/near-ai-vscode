@@ -5,9 +5,9 @@ milestone_name: Messaging relay — Teams and Signal
 current_phase: 27
 current_phase_name: Project state follows the project across interfaces and machines (0.4.20)
 status: planning
-stopped_at: Completed 27-14-PLAN.md
-last_updated: "2026-11-13T17:07:00.599Z"
-state_head: 74ce0131a8ab52528f1223b2f0f2f5cca74f2ce9
+stopped_at: Completed 27-15-PLAN.md
+last_updated: "2026-11-13T17:36:53.384Z"
+state_head: 670c9d8571ba6b6e6b14d97aa2be8f60d4352662
 progress:
   total_phases: 9
   completed_phases: 0
@@ -76,8 +76,8 @@ None yet.
 
 ## Session
 
-**Last session:** 2026-11-13T17:07:00.579Z
-**Stopped at:** Completed 27-14-PLAN.md
+**Last session:** 2026-11-13T17:36:48.299Z
+**Stopped at:** Completed 27-15-PLAN.md
 **Resume file:** None
 
 ## Performance Metrics
@@ -99,6 +99,7 @@ None yet.
 | Phase 27 P12 | 70min | 3 tasks | 12 files |
 | Phase 27 P13 | 65min | 3 tasks | 11 files |
 | Phase 27 P14 | 40min | 3 tasks | 13 files |
+| Phase 27 P15 | 30 min | 3 tasks | 21 files |
 
 ## Decisions
 
@@ -145,3 +146,7 @@ None yet.
 - [Phase 27]: Size limits stop new uploads and never delete: a warning from 500 MB, no new cold object from 1 GiB or 3500 listed objects, and the message says how many conversations stay on this computer only
 - [Phase 27]: An archive that cannot be opened is explained in plain words and opens nothing; every write to that thread is refused, so an empty view is never saved over it; the archive files are not touched
 - [Phase 27]: 27-14: the pick-up card shows only for a pointer from another editor newer than the last seen; its click calls only openSaved (never resume, auto-resume or a model request); a run marker carries waitingSince while a prompt is open
+- [Phase 27]: Consent comes before the recovery code in turn-on: what the git host can and cannot see is confirmed first, and the wrap is written only after the person says the code is saved, so declining anywhere writes nothing.
+- [Phase 27]: A remote address's userinfo is never written to the mirror config or passed as a git argument: git gets the credentialed form per call as a url insteadOf rewrite in its environment, and automatic syncs ask GitHub silently (only a click may prompt).
+- [Phase 27]: A new recovery code is carried by a pending flag and named by the sealed index, so an older computer adopts the newer wrap instead of pushing its own back.
+- [Phase 27]: Joining a synced project from a computer with chats builds a re-keyed copy beside the state home and swaps by two renames, keeping the original until a sync worked.
