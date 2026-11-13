@@ -73,6 +73,36 @@
         "icon": "$(history)"
       },
       {
+        "command": "nearAi.sync.turnOn",
+        "title": "Turn On Project Sync",
+        "category": "NEAR AI"
+      },
+      {
+        "command": "nearAi.sync.now",
+        "title": "Sync Project Now",
+        "category": "NEAR AI"
+      },
+      {
+        "command": "nearAi.sync.enterRecoveryCode",
+        "title": "Enter Recovery Code",
+        "category": "NEAR AI"
+      },
+      {
+        "command": "nearAi.sync.newRecoveryCode",
+        "title": "Show a New Recovery Code",
+        "category": "NEAR AI"
+      },
+      {
+        "command": "nearAi.sync.turnOff",
+        "title": "Turn Off Project Sync",
+        "category": "NEAR AI"
+      },
+      {
+        "command": "nearAi.sync.onlineHome",
+        "title": "Give This Project an Online Home",
+        "category": "NEAR AI"
+      },
+      {
         "command": "nearAi.openTools",
         "title": "Open Tools",
         "category": "NEAR AI",
@@ -524,6 +554,13 @@
           "minimum": 1,
           "maximum": 50,
           "description": "How many of the most recently used conversations per project stay fully open. Older ones are archived inside the project, never deleted, and reopen in full when you choose them."
+        },
+        "nearAi.sync.intervalMinutes": {
+          "type": "number",
+          "default": 10,
+          "minimum": 0,
+          "maximum": 1440,
+          "description": "How often, in minutes, this project syncs in the background while you are not running anything. 0 turns the background sync off. Project sync itself runs only after you turn it on (NEAR AI: Turn On Project Sync)."
         },
         "nearAi.sync.keepKeyInProject": {
           "type": "boolean",

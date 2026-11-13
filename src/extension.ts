@@ -51,6 +51,7 @@ import { setNearAiDiagnostics } from './services/nearAiClient';
 import { closeInterruptedRuns } from './services/activityStore';
 import { offerProxyAdvice } from './domain/proxyAdvice';
 import { offerNextStep, registerNewProfile, registerProjectSetup } from './services/setupMenu';
+import { flushSyncOnClose, registerSyncCommands } from './services/syncCommands';
 
 /** Returned only to the extension-host tests, which set NEAR_AI_E2E=1. */
 export interface NearAiTestApi { auth: AuthService; sidebar: NearAiPanelViewProvider }
@@ -200,6 +201,8 @@ export function activate(context: vscode.ExtensionContext): NearAiTestApi | unde
   registerWorkspaceCommands(context, (options) => openTeamStudio(context, auth, sidebar, options));
   registerProjectSetup(context, { secrets: context.secrets, chatVisible: () => sidebar.visible });
   registerNewProfile(context, () => configureApiKey(context, auth, sidebar));
+  // Project sync (D-17): the commands, the safe moments it runs at, and the status the chat panel's control shows. It runs only once the person has turned it on.
+  registerSyncCommands(context, auth);
 
   // `@nearAi` in VS Code's built-in Chat view; skipped on hosts without the Chat Participant API.
   registerChatParticipant(context, auth, (command, args) => sidebar.request({ type: 'open-command', command, ...(args ? { args } : {}) }));
@@ -428,6 +431,7 @@ async function showStatus(auth: AuthService): Promise<void> {
   void vscode.window.showInformationMessage(message, { modal: true });
 }
 
-export function deactivate(): void {
-  // Reserved for future provider and agent lifecycle cleanup.
+export async function deactivate(): Promise<void> {
+  // One push, cut off after three seconds and never relied on: the run-end and idle syncs are the reliable path (D-17).
+  await flushSyncOnClose();
 }

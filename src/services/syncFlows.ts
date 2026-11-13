@@ -10,8 +10,9 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { StateRefusedError } from '../domain/state/keys';
 import { generateRecoveryCode, parseRecoveryCode } from '../domain/state/recoveryCode';
-import type { OnlineHomeRemote, OnlineHomeResult } from './onlineHome';
-import { runStateGit, gitText, type GitRunner } from './stateGit';
+import { withGitHubAuth, type OnlineHomeRemote, type OnlineHomeResult } from './onlineHome';
+import { redactSecrets } from '../domain/redaction';
+import { runStateGit, gitText, redactGitMessage, type GitRunner } from './stateGit';
 import { ProjectStateHome } from './stateHome';
 import type { StateKeys } from './stateKeys';
 import type { RunMarker, RunState } from './runMarkers';
@@ -175,6 +176,11 @@ export async function turnOnFlow(input: TurnOnInput): Promise<TurnOnResult> {
   if (finished) return finished;
   const message = made.message ?? (made.status === 'declined' || made.status === 'cancelled' ? 'Project sync was not turned on.' : NO_HOME);
   return { status: made.status === 'declined' || made.status === 'cancelled' ? 'cancelled' : 'no-home', message };
+}
+
+/** The rest of turning sync on, for the online-home flow to call once the remote exists: it returns whether the first sync finished. */
+export function afterRemoteFor(env: SyncEnv, ui: SyncUi): (remote: OnlineHomeRemote) => Promise<boolean> {
+  return async (remote) => (await finishTurnOn(env, ui, remote.name, remote.git)).status === 'on';
 }
 
 async function finishTurnOn(env: SyncEnv, ui: SyncUi, remote: string, git?: GitRunner): Promise<TurnOnResult> {
@@ -376,4 +382,339 @@ export async function turnOffFlow(input: TurnOnInput): Promise<FlowResult> {
   env.onEnabled?.(false);
   ui.info(SYNC_OFF);
   return { status: 'done', message: SYNC_OFF };
+}
+
+// ---- when sync runs (D-17) --------------------------------------------------------------------------------------------------------------
+
+/** The default for nearAi.sync.intervalMinutes: how often a background sync runs while the editor is idle. */
+export const SYNC_INTERVAL_DEFAULT = 10;
+const SYNC_INTERVAL_MAX = 1440;
+/** A pull runs when the window comes back after being away this long. */
+export const RETURN_PULL_AFTER_MS = 300_000;
+/** Automatic pushes are at least this far apart, so push timing shows that someone is active, not which chat (D-09). */
+export const PUSH_BATCH_MS = 120_000;
+/** The push attempted when the editor closes is cut off after this long. It is never relied on. */
+export const DEACTIVATE_PUSH_MS = 3_000;
+/** Requests that arrive within this long of each other become one sync. */
+export const COALESCE_MS = 5_000;
+/** A full sync runs this long after the window loses focus, when nothing is running. */
+export const BLUR_IDLE_MS = 60_000;
+const BACKOFF_FIRST_MS = 60_000;
+const BACKOFF_MAX_MS = 30 * 60_000;
+const WAIT_RETRY_MS = 30_000;
+
+/** The interval setting as the reader sees it: a whole number of minutes from 0 (off) to 1440, and the default for anything that is not a number. */
+export function clampSyncInterval(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return SYNC_INTERVAL_DEFAULT;
+  return Math.min(SYNC_INTERVAL_MAX, Math.max(0, Math.floor(value)));
+}
+
+export type SyncState = 'off' | 'syncing' | 'synced' | 'attention' | 'no-home';
+export type SyncReason = 'run-ended' | 'blur-idle' | 'manual' | 'interval' | 'open' | 'return' | 'retry' | 'close';
+
+/** What the chat panel's sync control shows (D-16): one state and, where it helps, a time and one plain sentence. */
+export interface SyncStatus {
+  state: SyncState;
+  /** When the last sync worked (ISO time), for 'synced'. */
+  at?: string;
+  /** One plain sentence: the problem for 'attention' and 'no-home'. No git terms beyond "git host", no URLs, no secrets. */
+  message?: string;
+  /** Why a sync is running, for 'syncing': 'open' lets the pick-up card say "Checking for updates…". */
+  reason?: SyncReason;
+}
+
+export interface SyncClock {
+  now(): number;
+  setTimeout(work: () => void, ms: number): unknown;
+  clearTimeout(handle: unknown): void;
+}
+
+const realClock: SyncClock = { now: () => Date.now(), setTimeout: (work, ms) => setTimeout(work, ms), clearTimeout: (handle) => clearTimeout(handle as NodeJS.Timeout) };
+
+export interface SyncRequest { mode: 'sync' | 'pull'; /** True only for a person's click: only then may a sign-in be asked for. */ interactive: boolean; reason: SyncReason }
+
+export interface SchedulerOptions {
+  /** Runs one sync. Never called while a run is in flight. */
+  runSync: (request: SyncRequest) => Promise<SyncOutcome>;
+  runsInFlight: () => number;
+  /** The nearAi.sync.intervalMinutes setting as it is now (clamped here). */
+  intervalMinutes: () => unknown;
+  clock?: SyncClock;
+}
+
+interface Job { full: boolean; interactive: boolean; reasons: SyncReason[] }
+
+const NEEDS_SIGN_IN = 'Sync needs you to sign in. Choose Sync Project Now.';
+const COULDNT_REACH = "Couldn't reach your git host, will retry.";
+const RUN_WAITING = 'A chat is running, so sync will run when it ends.';
+const STOPPED = 'Sync stopped unexpectedly and will try again.';
+
+/** A status sentence that cannot carry a URL with credentials or a secret (T-27-91). */
+function plain(text: string): string {
+  return redactSecrets(redactGitMessage(text)).replace(/\s+/g, ' ').trim().slice(0, 300);
+}
+
+/**
+ * Decides when a sync runs, and publishes what it came to (D-17, D-16). Full syncs (pull, merge, push) follow a run or chat reply that ends, the window
+ * being out of focus for a minute, a click on Sync Project Now, and the background interval; pulls follow opening the project and coming back after five
+ * minutes. It never starts while a run is in flight in this editor (what was asked is kept and runs when the run ends), joins requests that arrive close
+ * together, backs off when the host cannot be reached (1, 2, 4 ... 30 minutes, reset by a success) and keeps automatic pushes at least two minutes apart. Only a
+ * person's click may ask for a sign-in. No vscode: the clock, the runs and the sync itself are injected.
+ */
+export class SyncScheduler {
+  private readonly clock: SyncClock;
+  private on = false;
+  private current: SyncStatus = { state: 'off' };
+  private readonly listeners = new Set<(status: SyncStatus) => void>();
+  private pending: Job | undefined;
+  private dueAt = 0;
+  private timer: unknown;
+  private intervalTimer: unknown;
+  private blurTimer: unknown;
+  private retryTimer: unknown;
+  private blurredAt: number | undefined;
+  private running: Promise<void> | undefined;
+  private lastPushAt: number | undefined;
+  private backoffMs = 0;
+  private notBefore = 0;
+  /** The status from before the sync that is running, to go back to when it only had to wait. */
+  private before: SyncStatus = { state: 'off' };
+
+  public constructor(private readonly options: SchedulerOptions) {
+    this.clock = options.clock ?? realClock;
+  }
+
+  public status(): SyncStatus { return { ...this.current }; }
+
+  public onStatus(listener: (status: SyncStatus) => void): { dispose(): void } {
+    this.listeners.add(listener);
+    return { dispose: () => { this.listeners.delete(listener); } };
+  }
+
+  private publish(next: SyncStatus): void {
+    this.current = next.message === undefined ? next : { ...next, message: plain(next.message) };
+    for (const listener of [...this.listeners]) { try { listener(this.status()); } catch { /* a listener never stops sync */ } }
+  }
+
+  /** Sync runs only once turned on. Turning it off stops everything that was scheduled. */
+  public setEnabled(on: boolean): void {
+    this.on = on;
+    if (!on) {
+      this.clearAll();
+      this.pending = undefined;
+      this.publish({ state: 'off' });
+      return;
+    }
+    // The turn-on flow's own first sync follows; recordOutcome replaces this with what it came to.
+    if (this.current.state === 'off') this.publish({ state: 'syncing', reason: 'manual' });
+    this.scheduleInterval();
+  }
+
+  public isEnabled(): boolean { return this.on; }
+
+  /** The project has no remote (or lost it): the control says so and offers the online-home setup. */
+  public setNoHome(): void {
+    this.publish({ state: 'no-home', message: 'This project has no online home yet.' });
+  }
+
+  /** Called when the project opens: with sync on, a pull starts at once and is not waited for. */
+  public start(): void {
+    if (!this.on) return;
+    this.scheduleInterval();
+    this.request('open', false, { immediate: true });
+  }
+
+  public stop(): void {
+    this.clearAll();
+    this.pending = undefined;
+  }
+
+  /** A run or chat reply ended in this editor: a full sync follows. */
+  public runEnded(): void {
+    this.request('run-ended', true);
+  }
+
+  /** The window lost or regained focus. A minute out of focus with nothing running starts a full sync; five minutes away starts a pull on return. */
+  public windowFocus(focused: boolean): void {
+    if (!focused) {
+      if (this.blurredAt === undefined) this.blurredAt = this.clock.now();
+      this.clock.clearTimeout(this.blurTimer);
+      this.blurTimer = this.clock.setTimeout(() => {
+        this.blurTimer = undefined;
+        if (this.blurredAt !== undefined && this.options.runsInFlight() === 0) this.request('blur-idle', true);
+      }, BLUR_IDLE_MS);
+      return;
+    }
+    this.clock.clearTimeout(this.blurTimer);
+    this.blurTimer = undefined;
+    const away = this.blurredAt === undefined ? 0 : this.clock.now() - this.blurredAt;
+    this.blurredAt = undefined;
+    if (away >= RETURN_PULL_AFTER_MS) this.request('return', false, { immediate: true });
+  }
+
+  /** Sync Project Now: a person's click. It may ask for a sign-in and is not held back by the batching or the backoff. */
+  public async syncNow(): Promise<SyncOutcome | undefined> {
+    if (!this.on) return undefined;
+    if (this.options.runsInFlight() > 0) {
+      // Kept for when the run ends. It then runs without asking for a sign-in: the click was minutes ago.
+      this.merge({ full: true, interactive: false, reasons: ['manual'] });
+      return { kind: 'waiting', message: RUN_WAITING };
+    }
+    this.clearTimer();
+    this.merge({ full: true, interactive: true, reasons: ['manual'] });
+    return this.drain();
+  }
+
+  /** Records the result of a sync that was run outside the scheduler (the turn-on flow's first sync), so the status and the backoff follow it. */
+  public recordOutcome(outcome: SyncOutcome, startedAt: number = this.clock.now()): void {
+    this.settle(outcome, startedAt, { full: true, interactive: false, reasons: ['manual'] });
+  }
+
+  /** The interval setting changed: the next background sync is planned again from now. */
+  public reschedule(): void {
+    this.scheduleInterval();
+  }
+
+  /** Editor closing: one sync, cut off after DEACTIVATE_PUSH_MS, and any failure swallowed. Never relied on. */
+  public async flushOnClose(): Promise<void> {
+    if (!this.on) return;
+    this.clearAll();
+    if (this.options.runsInFlight() > 0) return;
+    let timeout: unknown;
+    try {
+      const attempt = this.options.runSync({ mode: 'sync', interactive: false, reason: 'close' }).then(() => undefined, () => undefined);
+      const cutOff = new Promise<void>((resolve) => { timeout = this.clock.setTimeout(resolve, DEACTIVATE_PUSH_MS); });
+      await Promise.race([attempt, cutOff]);
+    } catch { /* closing never fails because of sync */ } finally {
+      this.clock.clearTimeout(timeout);
+    }
+  }
+
+  // ---- internals ----------------------------------------------------------------------------------------------------------------
+
+  private clearTimer(): void {
+    this.clock.clearTimeout(this.timer);
+    this.timer = undefined;
+  }
+
+  private clearAll(): void {
+    for (const handle of [this.timer, this.intervalTimer, this.blurTimer, this.retryTimer]) this.clock.clearTimeout(handle);
+    this.timer = this.intervalTimer = this.blurTimer = this.retryTimer = undefined;
+  }
+
+  private merge(job: Job): void {
+    const held = this.pending;
+    this.pending = held
+      ? { full: held.full || job.full, interactive: held.interactive || job.interactive, reasons: [...new Set([...held.reasons, ...job.reasons])] }
+      : { ...job, reasons: [...job.reasons] };
+  }
+
+  /** Asks for a sync. While a run is in flight the request is kept and nothing is planned; the run ending asks again. */
+  private request(reason: SyncReason, full: boolean, options: { immediate?: boolean } = {}): void {
+    if (!this.on) return;
+    this.merge({ full, interactive: false, reasons: [reason] });
+    if (this.options.runsInFlight() > 0) return;
+    const now = this.clock.now();
+    let due = now + (options.immediate ? 0 : COALESCE_MS);
+    // Automatic pushes are spaced out; a pull is not a push.
+    if (this.pending?.full && this.lastPushAt !== undefined) due = Math.max(due, this.lastPushAt + PUSH_BATCH_MS);
+    due = Math.max(due, this.notBefore);
+    // Nothing holds it back: it starts now, in this call, so the status is 'syncing' as soon as the project opens.
+    if (due <= now) { this.clearTimer(); void this.drain(); return; }
+    if (this.timer !== undefined && due <= this.dueAt) return;
+    this.clearTimer();
+    this.dueAt = due;
+    this.timer = this.clock.setTimeout(() => { this.timer = undefined; void this.drain(); }, Math.max(0, due - now));
+  }
+
+  private scheduleInterval(): void {
+    this.clock.clearTimeout(this.intervalTimer);
+    this.intervalTimer = undefined;
+    const minutes = clampSyncInterval(this.options.intervalMinutes());
+    if (!this.on || minutes === 0) return;
+    this.intervalTimer = this.clock.setTimeout(() => {
+      this.intervalTimer = undefined;
+      // Only while idle: a run in flight skips this one.
+      if (this.options.runsInFlight() === 0 && this.running === undefined) this.request('interval', true);
+      this.scheduleInterval();
+    }, minutes * 60_000);
+  }
+
+  /** Runs what is pending, one sync at a time. */
+  private async drain(): Promise<SyncOutcome | undefined> {
+    if (!this.on) return undefined;
+    if (this.running !== undefined) {
+      // One is already going: what was asked waits for it, then goes next.
+      await this.running;
+      if (this.pending && this.options.runsInFlight() === 0) this.request('retry', this.pending.full, { immediate: true });
+      return undefined;
+    }
+    if (this.options.runsInFlight() > 0 || this.pending === undefined) return undefined;
+    const job = this.pending;
+    this.pending = undefined;
+    let outcome: SyncOutcome | undefined;
+    this.running = (async () => {
+      const startedAt = this.clock.now();
+      const reason = job.reasons.includes('open') ? 'open' : (job.reasons[0] as SyncReason);
+      this.before = this.current;
+      this.publish({ state: 'syncing', reason });
+      try {
+        outcome = await this.options.runSync({ mode: job.full ? 'sync' : 'pull', interactive: job.interactive, reason });
+      } catch {
+        outcome = { kind: 'failed', message: STOPPED };
+      }
+      this.settle(outcome, startedAt, job);
+    })();
+    try { await this.running; } finally { this.running = undefined; }
+    return outcome;
+  }
+
+  /** What a finished sync does to the status, the backoff and the batching. */
+  private settle(outcome: SyncOutcome, startedAt: number, job: Job): void {
+    const now = this.clock.now();
+    if (outcome.kind === 'synced' || outcome.kind === 'nothing-yet') {
+      this.backoffMs = 0;
+      this.notBefore = 0;
+      if (outcome.pushed) this.lastPushAt = startedAt;
+      this.publish({ state: 'synced', at: new Date(now).toISOString(), message: outcome.message });
+      return;
+    }
+    if (outcome.kind === 'waiting') {
+      // Another window is syncing or a run began: not a problem, try again soon.
+      this.publish(this.before.state === 'off' || this.before.state === 'syncing' ? { state: 'synced' } : this.before);
+      this.merge(job);
+      this.clock.clearTimeout(this.retryTimer);
+      this.retryTimer = this.clock.setTimeout(() => { this.retryTimer = undefined; this.request('retry', this.pending?.full ?? false, { immediate: true }); }, WAIT_RETRY_MS);
+      return;
+    }
+    if (outcome.kind === 'refused') {
+      // Retrying cannot change a refusal (a damaged or foreign copy, a locked project): the person is told and the next trigger tries again.
+      this.publish({ state: 'attention', message: outcome.message });
+      return;
+    }
+    const kind = outcome.failure?.kind;
+    if (kind === 'no-remote') { this.setNoHome(); return; }
+    this.backoffMs = this.backoffMs === 0 ? BACKOFF_FIRST_MS : Math.min(BACKOFF_MAX_MS, this.backoffMs * 2);
+    this.notBefore = now + this.backoffMs;
+    const message = kind === 'auth' ? NEEDS_SIGN_IN : kind === 'offline' || kind === 'rejected' ? COULDNT_REACH : outcome.message;
+    this.publish({ state: 'attention', message });
+    // What was asked is not lost: it runs again once the backoff is over.
+    this.merge(job);
+    this.request('retry', this.pending?.full ?? false);
+  }
+}
+
+// ---- the GitHub sign-in for syncs ---------------------------------------------------------------------------------------------------
+
+/**
+ * A git runner that signs in to github.com for the calls that touch the private mirror, with a token looked up when it is needed (carry-forward 27-17):
+ * `getToken` is silent for every automatic sync, and only a person's click may prompt. Nothing is changed when there is no token. The token never
+ * reaches an argument or a file: withGitHubAuth puts it in the child's environment, scoped to https://github.com/.
+ */
+export function tokenRunner(base: GitRunner, getToken: () => Promise<string | undefined>): GitRunner {
+  return async (args, options) => {
+    if (!args.includes('--git-dir')) return base(args, options);
+    const token = await getToken();
+    return (token === undefined ? base : withGitHubAuth(base, token))(args, options);
+  };
 }

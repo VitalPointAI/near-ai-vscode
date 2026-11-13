@@ -6,12 +6,18 @@ import { readFile, readdir, rename } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
 import { redactSecrets } from '../domain/redaction';
+import { onRunEnded, runEnded, runStarted, runsInFlight } from '../services/runEndHooks';
 import { generateRecoveryCode } from '../domain/state/recoveryCode';
 import { StateRefusedError } from '../domain/state/keys';
 import { StateKeys } from '../services/stateKeys';
 import { archiveThread } from '../services/threadArchive';
-import { enterCodeFlow, keepKeyFlow, newCodeFlow, readSyncSettings, turnOffFlow, turnOnFlow } from '../services/syncFlows';
-import { KEY_SENTINEL, bareRemote, computer, fakeUi, fixtureGit, setUpProfile, type Computer } from './helpers/flowFixtures';
+import {
+  BLUR_IDLE_MS, COALESCE_MS, DEACTIVATE_PUSH_MS, PUSH_BATCH_MS, RETURN_PULL_AFTER_MS, SYNC_INTERVAL_DEFAULT, SyncScheduler, clampSyncInterval, enterCodeFlow, keepKeyFlow,
+  afterRemoteFor, newCodeFlow, readSyncSettings, resolveRemote, tokenRunner, turnOffFlow, turnOnFlow, type SyncClock, type SyncRequest
+} from '../services/syncFlows';
+import type { SyncOutcome } from '../services/stateSync';
+import type { GitRunner } from '../services/stateGit';
+import { KEY_SENTINEL, bareRemote, computer, fakeUi, fixtureGit, folderWithoutRemote, setUpProfile, type Computer } from './helpers/flowFixtures';
 import { scanRemote } from './helpers/gitFixtures';
 import { SIX_TURNS, chain, treeHash } from './helpers/syncFixtures';
 import { MemorySecrets } from './helpers/stateFixtures';
@@ -305,4 +311,400 @@ test('redactSecrets removes anything shaped like a recovery code and leaves ordi
   for (const prose of ['a well-known, state-of-the-art, long-lived, hyphen-rich phrase', 'Update encrypted project state', 'sha 0123456789abcdef0123456789abcdef01234567 is a commit', 'ABCD-EFGH-JKMN is only three groups', 'The MAX-RETRY-LIMIT is 5']) {
     assert.equal(redactSecrets(prose), prose);
   }
+});
+
+
+// ---- remote choice ------------------------------------------------------------------------------------------------------------------
+
+test('the remote is the stored one, else origin, else the only one; several and no origin ask once and remember; none is none', async () => {
+  const bareA = bareRemote({ withMain: false });
+  const bareB = bareRemote({ withMain: false });
+  const c = computer(bareA, 'alpha');
+  const asked: string[][] = [];
+  const ui = { pickRemote: async (names: string[]) => { asked.push(names); return 'upstream'; } };
+  const env = { root: c.root, home: c.home, git: c.parts.git as GitRunner };
+
+  assert.deepEqual(await resolveRemote(env, ui), { kind: 'remote', name: 'origin' }, 'origin is used and nothing is asked');
+  assert.deepEqual(asked, []);
+  assert.ok(!existsSync(c.home.dir), 'finding the remote writes nothing');
+
+  fixtureGit(c.root, ['remote', 'add', 'upstream', bareB]);
+  fixtureGit(c.root, ['remote', 'add', 'backup', bareB]);
+  fixtureGit(c.root, ['remote', 'remove', 'origin']);
+  assert.deepEqual(await resolveRemote(env, ui), { kind: 'remote', name: 'upstream' }, 'with several and no origin the person picks');
+  assert.deepEqual(asked, [['backup', 'upstream']]);
+  assert.equal((await readSyncSettings(c.home)).remote, 'upstream', 'the pick is remembered in the state home');
+  assert.deepEqual(await resolveRemote(env, ui), { kind: 'remote', name: 'upstream' });
+  assert.equal(asked.length, 1, 'and not asked again');
+
+  fixtureGit(c.root, ['remote', 'remove', 'upstream']);
+  fixtureGit(c.root, ['remote', 'add', 'other', bareB]);
+  assert.deepEqual(await resolveRemote(env, ui), { kind: 'cancelled' }, 'the stored remote is gone, so it asks again, and an answer that is not a remote is no answer');
+  assert.equal(asked.length, 2);
+
+  fixtureGit(c.root, ['remote', 'remove', 'other']);
+  assert.deepEqual(await resolveRemote(env, ui), { kind: 'remote', name: 'backup' }, 'a single remote is used');
+  fixtureGit(c.root, ['remote', 'remove', 'backup']);
+  assert.deepEqual(await resolveRemote(env, ui), { kind: 'none' });
+  assert.deepEqual(await resolveRemote({ ...env, root: folderWithoutRemote() }, ui), { kind: 'none' }, 'a folder with no remote at all');
+});
+
+// ---- the interval setting -----------------------------------------------------------------------------------------------------------
+
+test('clampSyncInterval reads the setting the way package.json declares it', () => {
+  assert.equal(clampSyncInterval(-5), 0);
+  assert.equal(clampSyncInterval(5000), 1440);
+  assert.equal(clampSyncInterval('x'), 10);
+  assert.equal(clampSyncInterval(2.7), 2);
+  assert.equal(clampSyncInterval(0), 0);
+  assert.equal(clampSyncInterval(Number.NaN), SYNC_INTERVAL_DEFAULT);
+  assert.equal(clampSyncInterval(undefined), SYNC_INTERVAL_DEFAULT);
+  const manifest = JSON.parse(require('node:fs').readFileSync(path.join(__dirname, '..', '..', 'package.json'), 'utf8')) as { contributes: { configuration: { properties: Record<string, Record<string, unknown>> }; commands: Array<{ command: string; title: string; category: string }> } };
+  const setting = manifest.contributes.configuration.properties['nearAi.sync.intervalMinutes'] as Record<string, unknown>;
+  assert.ok(setting, 'the setting is declared');
+  assert.equal(setting.type, 'number');
+  assert.equal(setting.default, SYNC_INTERVAL_DEFAULT);
+  assert.equal(setting.minimum, 0);
+  assert.equal(setting.maximum, 1440);
+  assert.match(String(setting.description), /0 turns the background sync off/);
+  const titles = new Map(manifest.contributes.commands.map((command) => [command.command, command]));
+  const wanted: Array<[string, string]> = [
+    ['nearAi.sync.turnOn', 'Turn On Project Sync'], ['nearAi.sync.now', 'Sync Project Now'], ['nearAi.sync.enterRecoveryCode', 'Enter Recovery Code'],
+    ['nearAi.sync.newRecoveryCode', 'Show a New Recovery Code'], ['nearAi.sync.turnOff', 'Turn Off Project Sync'], ['nearAi.sync.onlineHome', 'Give This Project an Online Home']
+  ];
+  for (const [command, title] of wanted) {
+    assert.equal(titles.get(command)?.title, title, command);
+    assert.equal(titles.get(command)?.category, 'NEAR AI');
+  }
+  for (const text of [...titles.values()].filter((command) => command.command.startsWith('nearAi.sync.')).map((command) => command.title)) assert.ok(!/NEAR organization/.test(text));
+});
+
+// ---- the scheduler, on a fake clock ---------------------------------------------------------------------------------------------------
+
+const settle = (): Promise<void> => new Promise((resolve) => setImmediate(resolve));
+
+class FakeClock implements SyncClock {
+  public time = Date.parse('2026-11-13T10:00:00.000Z');
+  private timers: Array<{ id: number; at: number; work: () => void }> = [];
+  private next = 1;
+  public now(): number { return this.time; }
+  public setTimeout(work: () => void, ms: number): unknown { const id = this.next++; this.timers.push({ id, at: this.time + ms, work }); return id; }
+  public clearTimeout(handle: unknown): void { this.timers = this.timers.filter((timer) => timer.id !== handle); }
+  public get pendingTimers(): number { return this.timers.length; }
+  /** Moves time forward, running every timer that falls due, in order, and letting what each starts finish. */
+  public async advance(ms: number): Promise<void> {
+    const target = this.time + ms;
+    for (;;) {
+      const due = this.timers.filter((timer) => timer.at <= target).sort((a, b) => a.at - b.at || a.id - b.id)[0];
+      if (!due) break;
+      this.timers = this.timers.filter((timer) => timer !== due);
+      this.time = Math.max(this.time, due.at);
+      due.work();
+      await settle();
+    }
+    this.time = target;
+    await settle();
+  }
+}
+
+const OK: SyncOutcome = { kind: 'synced', message: 'Your project is up to date everywhere it is shared.', pushed: true };
+const OFFLINE: SyncOutcome = { kind: 'failed', message: 'Could not reach your git host.', failure: { kind: 'offline', message: 'Could not reach your git host.' } };
+const SECONDS = 1000;
+const MINUTES = 60_000;
+
+function harness(options: { interval?: unknown } = {}) {
+  const clock = new FakeClock();
+  const calls: Array<SyncRequest & { at: number }> = [];
+  let runs = 0;
+  let interval: unknown = options.interval ?? 10;
+  let outcome: (request: SyncRequest) => Promise<SyncOutcome> = async () => OK;
+  const scheduler = new SyncScheduler({
+    clock, runsInFlight: () => runs, intervalMinutes: () => interval,
+    runSync: async (request) => { calls.push({ ...request, at: clock.now() }); return outcome(request); }
+  });
+  scheduler.setEnabled(true);
+  return {
+    clock, calls, scheduler,
+    runs: (count: number) => { runs = count; },
+    interval: (value: unknown) => { interval = value; },
+    outcome: (fn: (request: SyncRequest) => Promise<SyncOutcome>) => { outcome = fn; },
+    /** Calls so far, with their reasons and kinds, as short text. */
+    log: () => calls.map((call) => `${call.mode}:${call.reason}${call.interactive ? ':click' : ''}`)
+  };
+}
+
+test('sync is off until turned on: nothing is scheduled and the status says so', async () => {
+  const clock = new FakeClock();
+  let count = 0;
+  const scheduler = new SyncScheduler({ clock, runsInFlight: () => 0, intervalMinutes: () => 10, runSync: async () => { count += 1; return OK; } });
+  assert.deepEqual(scheduler.status(), { state: 'off' });
+  scheduler.start();
+  scheduler.runEnded();
+  scheduler.windowFocus(false);
+  assert.equal(await scheduler.syncNow(), undefined);
+  await clock.advance(30 * MINUTES);
+  assert.equal(count, 0);
+  assert.equal(clock.pendingTimers, 0);
+  assert.deepEqual(scheduler.status(), { state: 'off' });
+});
+
+test('a pull starts when the project opens, is not waited for, and the status says it is checking for updates', async () => {
+  const h = harness();
+  let finish: (outcome: SyncOutcome) => void = () => undefined;
+  h.outcome(() => new Promise<SyncOutcome>((resolve) => { finish = resolve; }));
+  const seen: string[] = [];
+  h.scheduler.onStatus((status) => seen.push(`${status.state}${status.reason ? `:${status.reason}` : ''}`));
+  const started = h.scheduler.start();
+  assert.equal(started, undefined, 'start returns at once: activation never waits for the sync');
+  assert.deepEqual(h.scheduler.status(), { state: 'syncing', reason: 'open' });
+  assert.deepEqual(h.log(), ['pull:open'], 'a pull, not a push, and it asks for no sign-in');
+  finish({ kind: 'synced', message: 'Your project is up to date everywhere it is shared.' });
+  await settle();
+  const done = h.scheduler.status();
+  assert.equal(done.state, 'synced');
+  assert.equal(done.at, new Date(h.clock.time).toISOString());
+  assert.ok(seen.includes('syncing:open') && seen.at(-1) === 'synced');
+});
+
+test('a pull runs when the window comes back after five minutes away, and not after four', async () => {
+  const four = harness({ interval: 0 });
+  four.scheduler.windowFocus(false);
+  await four.clock.advance(4 * MINUTES);
+  four.scheduler.windowFocus(true);
+  await four.clock.advance(MINUTES);
+  assert.ok(!four.log().includes('pull:return'), 'four minutes away is not enough');
+  assert.deepEqual(four.log(), ['sync:blur-idle'], 'only the full sync after a minute out of focus ran');
+
+  const five = harness({ interval: 0 });
+  five.scheduler.windowFocus(false);
+  await five.clock.advance(RETURN_PULL_AFTER_MS);
+  five.scheduler.windowFocus(true);
+  await settle();
+  assert.deepEqual(five.log(), ['sync:blur-idle', 'pull:return']);
+  assert.equal(RETURN_PULL_AFTER_MS, 300_000);
+});
+
+test('a full sync follows a minute out of focus when nothing is running, and a run in flight stops it', async () => {
+  const h = harness({ interval: 0 });
+  h.scheduler.windowFocus(false);
+  await h.clock.advance(BLUR_IDLE_MS + COALESCE_MS - SECONDS);
+  assert.deepEqual(h.log(), [], 'not before the minute and the short wait that joins requests');
+  await h.clock.advance(SECONDS);
+  assert.deepEqual(h.log(), ['sync:blur-idle']);
+
+  const busy = harness({ interval: 0 });
+  busy.runs(1);
+  busy.scheduler.windowFocus(false);
+  await busy.clock.advance(10 * MINUTES);
+  assert.deepEqual(busy.log(), [], 'nothing runs while a run is in flight');
+  busy.scheduler.windowFocus(true);
+});
+
+test('the interval syncs while idle, is skipped during a run, can be turned off with 0, and follows the setting when it changes', async () => {
+  const h = harness({ interval: 10 });
+  await h.clock.advance(10 * MINUTES + COALESCE_MS - SECONDS);
+  assert.deepEqual(h.log(), []);
+  await h.clock.advance(SECONDS);
+  assert.deepEqual(h.log(), ['sync:interval']);
+
+  h.runs(1);
+  await h.clock.advance(10 * MINUTES);
+  assert.equal(h.calls.length, 1, 'the tick during a run did nothing');
+  h.runs(0);
+  await h.clock.advance(10 * MINUTES);
+  assert.equal(h.calls.length, 2, 'it goes on once idle again');
+
+  h.interval(0);
+  h.scheduler.reschedule();
+  const before = h.calls.length;
+  await h.clock.advance(60 * MINUTES);
+  assert.equal(h.calls.length, before, '0 turns the background sync off');
+
+  h.interval(3);
+  h.scheduler.reschedule();
+  await h.clock.advance(3 * MINUTES + COALESCE_MS);
+  assert.equal(h.calls.length, before + 1, 'a new interval takes effect from the change');
+});
+
+test('a run ending starts a full sync; asking during a run is kept and runs at its end; requests close together are one sync', async () => {
+  const h = harness({ interval: 0 });
+  h.runs(1);
+  assert.equal((await h.scheduler.syncNow())?.kind, 'waiting', 'Sync Project Now during a run waits');
+  await h.clock.advance(MINUTES);
+  assert.deepEqual(h.log(), [], 'never while a run is in flight');
+  h.runs(0);
+  h.scheduler.runEnded();
+  await h.clock.advance(COALESCE_MS);
+  assert.deepEqual(h.log(), ['sync:manual'], 'what was asked during the run runs once, when the run ends, with no sign-in prompt');
+
+  const burst = harness({ interval: 0 });
+  burst.scheduler.runEnded();
+  await burst.clock.advance(SECONDS);
+  burst.scheduler.runEnded();
+  await burst.clock.advance(SECONDS);
+  burst.scheduler.runEnded();
+  await burst.clock.advance(COALESCE_MS + SECONDS);
+  assert.equal(burst.calls.length, 1, 'three requests within seconds make one sync');
+});
+
+test('automatic pushes are at least two minutes apart; Sync Project Now is not held back', async () => {
+  const h = harness({ interval: 0 });
+  h.scheduler.runEnded();
+  await h.clock.advance(COALESCE_MS);
+  assert.equal(h.calls.length, 1);
+  const firstAt = h.calls[0]?.at as number;
+  await h.clock.advance(SECONDS);
+  h.scheduler.runEnded();
+  await h.clock.advance(PUSH_BATCH_MS - 10 * SECONDS);
+  assert.equal(h.calls.length, 1, 'a second push within two minutes of the first waits');
+  await h.clock.advance(10 * SECONDS);
+  assert.equal(h.calls.length, 2);
+  assert.ok((h.calls[1]?.at as number) - firstAt >= PUSH_BATCH_MS);
+
+  const click = await h.scheduler.syncNow();
+  assert.equal(click?.kind, 'synced');
+  assert.equal(h.calls.length, 3, 'the click went at once');
+  assert.deepEqual(h.log().at(-1), 'sync:manual:click', 'and only a click may ask for a sign-in');
+  for (const call of h.calls.slice(0, 2)) assert.equal(call.interactive, false, 'no automatic sync asks for a sign-in');
+});
+
+test('offline failures back off 1, 2, 4 ... up to 30 minutes and a success resets it', async () => {
+  const h = harness({ interval: 0 });
+  h.outcome(async () => OFFLINE);
+  h.scheduler.runEnded();
+  await h.clock.advance(COALESCE_MS);
+  assert.equal(h.calls.length, 1);
+  assert.deepEqual(h.scheduler.status(), { state: 'attention', message: "Couldn't reach your git host, will retry." });
+  const gaps: number[] = [];
+  for (let attempt = 0; attempt < 7; attempt += 1) {
+    const last = h.calls.at(-1)?.at as number;
+    for (let waited = 0; h.calls.length === attempt + 1 && waited < 40 * MINUTES; waited += SECONDS) await h.clock.advance(SECONDS);
+    assert.equal(h.calls.length, attempt + 2, `retry ${attempt + 1} happened`);
+    gaps.push(((h.calls[attempt + 1]?.at as number) - last) / SECONDS);
+  }
+  assert.deepEqual(gaps, [60, 120, 240, 480, 960, 1800, 1800]);
+  h.outcome(async () => OK);
+  await h.clock.advance(40 * MINUTES);
+  assert.equal(h.scheduler.status().state, 'synced');
+  const settled = h.calls.length;
+  h.scheduler.runEnded();
+  await h.clock.advance(PUSH_BATCH_MS);
+  assert.equal(h.calls.length, settled + 1, 'after a success the next trigger runs without the backoff');
+});
+
+test('the editor closing tries one sync and gives up after three seconds, however long it hangs', async () => {
+  const h = harness({ interval: 0 });
+  h.outcome(() => new Promise<SyncOutcome>(() => undefined));
+  let done = false;
+  const closing = h.scheduler.flushOnClose().then(() => { done = true; });
+  await settle();
+  assert.deepEqual(h.log(), ['sync:close']);
+  await h.clock.advance(DEACTIVATE_PUSH_MS - 1);
+  assert.equal(done, false);
+  await h.clock.advance(1);
+  await closing;
+  assert.equal(done, true);
+  assert.equal(DEACTIVATE_PUSH_MS, 3000);
+
+  const failing = harness({ interval: 0 });
+  failing.outcome(async () => { throw new Error('boom https://alice:pw@host.example/x.git'); });
+  await failing.scheduler.flushOnClose();
+  const off = harness({ interval: 0 });
+  off.scheduler.setEnabled(false);
+  await off.scheduler.flushOnClose();
+  assert.equal(off.calls.length, 0, 'with sync off nothing is tried');
+  const running = harness({ interval: 0 });
+  running.runs(1);
+  await running.scheduler.flushOnClose();
+  assert.equal(running.calls.length, 0, 'and not while a run is in flight');
+});
+
+test('the status says what happened in one plain sentence, never a URL with credentials or a secret, and a missing remote or a sign-in is its own state', async () => {
+  const h = harness({ interval: 0 });
+  h.outcome(async () => ({ kind: 'refused', message: 'The copy online could not be opened. Nothing was changed. https://alice:s3cr3t-pw@git.example.test/a.git' }));
+  await h.scheduler.syncNow();
+  const refused = h.scheduler.status();
+  assert.equal(refused.state, 'attention');
+  assert.ok(!/alice|s3cr3t/.test(refused.message ?? ''), 'no credentials in the status');
+  assert.match(refused.message ?? '', /could not be opened/);
+
+  h.outcome(async () => ({ kind: 'failed', message: 'Git asked for a sign-in this editor cannot show.', failure: { kind: 'auth', message: 'x' } }));
+  await h.scheduler.syncNow();
+  assert.deepEqual(h.scheduler.status(), { state: 'attention', message: 'Sync needs you to sign in. Choose Sync Project Now.' });
+
+  h.outcome(async () => ({ kind: 'failed', message: 'This project has no online home yet.', failure: { kind: 'no-remote', message: 'This project has no online home yet.' } }));
+  await h.scheduler.syncNow();
+  assert.deepEqual(h.scheduler.status(), { state: 'no-home', message: 'This project has no online home yet.' });
+
+  h.outcome(async () => ({ kind: 'synced', message: 'ok', pushed: false }));
+  await h.scheduler.syncNow();
+  assert.equal(h.scheduler.status().state, 'synced');
+  h.scheduler.setEnabled(false);
+  assert.deepEqual(h.scheduler.status(), { state: 'off' });
+});
+
+test('turning sync off cancels what was planned, and a syncing status is replaced by the outcome of a sync run outside the scheduler', async () => {
+  const h = harness({ interval: 10 });
+  h.scheduler.runEnded();
+  h.scheduler.setEnabled(false);
+  await h.clock.advance(30 * MINUTES);
+  assert.equal(h.calls.length, 0);
+  h.scheduler.setEnabled(true);
+  assert.equal(h.scheduler.status().state, 'syncing');
+  h.scheduler.recordOutcome({ kind: 'synced', message: 'ok', pushed: true });
+  assert.equal(h.scheduler.status().state, 'synced');
+});
+
+// ---- the GitHub sign-in for syncs -------------------------------------------------------------------------------------------------------
+
+test('tokenRunner signs git in for the mirror\'s calls only when a token exists, through the environment, and looks the token up only for those calls', async () => {
+  const seen: Array<{ args: string[]; env: Record<string, string> | undefined }> = [];
+  const base: GitRunner = async (args, options) => { seen.push({ args, env: options?.env }); return { code: 0, stdout: Buffer.alloc(0), stderr: '' }; };
+  let lookups = 0;
+  const signedIn = tokenRunner(base, async () => { lookups += 1; return 'gho_TOKEN-SENTINEL-77'; });
+  await signedIn(['-C', '/project', 'remote']);
+  assert.equal(lookups, 0, 'reading the project\'s remotes needs no token');
+  await signedIn(['--git-dir', '/mirror', 'fetch', 'state']);
+  assert.equal(lookups, 1);
+  const last = seen.at(-1);
+  assert.equal(last?.env?.GIT_CONFIG_KEY_0, 'http.https://github.com/.extraheader');
+  assert.ok(!last?.args.some((argument) => argument.includes('TOKEN-SENTINEL')), 'the token is in no argument');
+  const silent = tokenRunner(base, async () => undefined);
+  await silent(['--git-dir', '/mirror', 'push']);
+  assert.equal(seen.at(-1)?.env, undefined, 'without a session nothing is added and nothing is asked');
+});
+
+// ---- runs in flight, and the rest of turning on after an online home -------------------------------------------------------------------
+
+test('runStarted and runEnded keep the count of runs in flight per project, and a listener sees the project as idle when the last run ends', async () => {
+  const root = path.join('/project', 'counted');
+  assert.equal(runsInFlight(root), 0);
+  runStarted(root);
+  runStarted(root);
+  runStarted(path.join('/project', 'other'));
+  assert.equal(runsInFlight(root), 2);
+  const seen: number[] = [];
+  const listener = onRunEnded(() => { seen.push(runsInFlight(root)); });
+  await runEnded({ root, conversationId: 'conv-count-one', runId: 'run-1', outcome: 'done' });
+  await runEnded({ root, conversationId: 'conv-count-two', runId: 'run-2', outcome: 'done' });
+  await runEnded({ root, conversationId: 'conv-count-two', runId: 'run-3', outcome: 'done' });
+  listener.dispose();
+  await runEnded({ root: path.join('/project', 'other'), conversationId: 'conv-count-one', runId: 'run-4', outcome: 'done' });
+  assert.deepEqual(seen, [1, 0, 0], 'the count has already dropped when a listener hears of it, and never goes below zero');
+  assert.equal(runsInFlight(root), 0);
+});
+
+test('afterRemoteFor finishes turning sync on for the online-home flow and says whether the first sync finished', async () => {
+  const remote = bareRemote({ withMain: false });
+  const c = computer(remote, 'alpha');
+  await thread(c, 'conv-after-one', 'After one');
+  const fake = fakeUi();
+  const finished = await afterRemoteFor(c.env, fake.ui)({ name: 'origin', url: remote, git: c.parts.git as GitRunner });
+  assert.equal(finished, true);
+  assert.equal(fake.shown.length, 1);
+  assert.equal(remoteTip(remote).length, 40);
+  const other = bareRemote({ withMain: false });
+  const declined = computer(other, 'bravo');
+  const no = await afterRemoteFor(declined.env, fakeUi({ confirm: false }).ui)({ name: 'origin', url: other, git: declined.parts.git as GitRunner });
+  assert.equal(no, false, 'a declined screen is not a finished turn-on');
 });

@@ -13,6 +13,18 @@ export interface RunEndedEvent {
 type RunEndedListener = (event: RunEndedEvent) => void | Promise<void>;
 
 const listeners = new Set<RunEndedListener>();
+/** How many runs are in flight in this editor, by project folder: sync never starts while one is (D-17). */
+const inFlight = new Map<string, number>();
+
+/** Tells the hooks that a run started in this project. Call it with `runEnded` for the same project when the run ends. */
+export function runStarted(root: string): void {
+  inFlight.set(root, (inFlight.get(root) ?? 0) + 1);
+}
+
+/** How many runs are in flight in this editor for the project (0 when none). */
+export function runsInFlight(root: string): number {
+  return inFlight.get(root) ?? 0;
+}
 
 /** Calls `listener` after every run that ends. Dispose the result to stop. */
 export function onRunEnded(listener: RunEndedListener): { dispose(): void } {
@@ -24,6 +36,9 @@ export function onRunEnded(listener: RunEndedListener): { dispose(): void } {
 
 /** Tells every listener that a run ended. Resolves when they have all finished; never rejects. */
 export async function runEnded(event: RunEndedEvent): Promise<void> {
+  // The count drops before any listener hears of it, so a listener that syncs sees the project as idle.
+  const left = (inFlight.get(event.root) ?? 0) - 1;
+  if (left > 0) inFlight.set(event.root, left); else inFlight.delete(event.root);
   await Promise.all([...listeners].map(async (listener) => {
     try { await listener(event); } catch { /* a hook never breaks a run */ }
   }));
