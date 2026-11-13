@@ -5,9 +5,9 @@ milestone_name: Messaging relay — Teams and Signal
 current_phase: 27
 current_phase_name: Project state follows the project across interfaces and machines (0.4.20)
 status: planning
-stopped_at: Completed 27-12-PLAN.md
-last_updated: "2026-11-13T16:29:14.833Z"
-state_head: 0c37e20e4e70811c0bf47d6815edfd39a4f4a26c
+stopped_at: Completed 27-13-PLAN.md
+last_updated: "2026-11-13T16:55:41.114Z"
+state_head: 5b065c535bf7841a59f9344e0cd40c621058ed5f
 progress:
   total_phases: 9
   completed_phases: 0
@@ -76,8 +76,8 @@ None yet.
 
 ## Session
 
-**Last session:** 2026-11-13T16:29:14.816Z
-**Stopped at:** Completed 27-12-PLAN.md
+**Last session:** 2026-11-13T16:55:41.092Z
+**Stopped at:** Completed 27-13-PLAN.md
 **Resume file:** None
 
 ## Performance Metrics
@@ -97,6 +97,7 @@ None yet.
 | Phase 27 P08 | 6 min | 2 tasks | 6 files |
 | Phase 27 P10 | 16 min | 3 tasks | 10 files |
 | Phase 27 P12 | 70min | 3 tasks | 12 files |
+| Phase 27 P13 | 65min | 3 tasks | 11 files |
 
 ## Decisions
 
@@ -138,3 +139,7 @@ None yet.
 - [Phase 27]: Remote index entry counts must be covered by what this computer holds after reading every listed object, and the manifest state id must equal the project's; otherwise the bundle is refused before any write
 - [Phase 27]: A changed local record is built as an edit of the remote head (makeRecord base) so one writer never forks against itself; spend months are united by line, not decided by newer-wins
 - [Phase 27]: unlockFromRemote verifies the unwrap and manifest before the state home exists; a computer with remote state and no key of its own is refused as locked, never given a fresh key
+- [Phase 27]: One cold object per thread: an archive is added as a cold object only when the remote index lists none for the thread; later entries travel hot or beside the archive
+- [Phase 27]: Hot consolidation is built from the old hot objects, kept only if it holds every entry and record they held plus what the push sends; cold objects are never consolidated away; the 200-object rule is replaced by 20 hot objects or twice the live size
+- [Phase 27]: Size limits stop new uploads and never delete: a warning from 500 MB, no new cold object from 1 GiB or 3500 listed objects, and the message says how many conversations stay on this computer only
+- [Phase 27]: An archive that cannot be opened is explained in plain words and opens nothing; every write to that thread is refused, so an empty view is never saved over it; the archive files are not touched
