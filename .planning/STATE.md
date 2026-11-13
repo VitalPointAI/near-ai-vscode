@@ -5,9 +5,9 @@ milestone_name: Messaging relay — Teams and Signal
 current_phase: 27
 current_phase_name: Project state follows the project across interfaces and machines (0.4.20)
 status: planning
-stopped_at: Completed 27-01-PLAN.md
-last_updated: "2026-11-13T13:58:02.338Z"
-state_head: d62e034499a097b91fb17153b7a97b5786bf4270
+stopped_at: Completed 27-03-PLAN.md
+last_updated: "2026-11-13T14:10:19.702Z"
+state_head: e8f62ff3b2a22dd245f3ba724463ab234cfc2fe0
 progress:
   total_phases: 9
   completed_phases: 0
@@ -76,8 +76,8 @@ None yet.
 
 ## Session
 
-**Last session:** 2026-11-13T13:58:02.322Z
-**Stopped at:** Completed 27-01-PLAN.md
+**Last session:** 2026-11-13T14:10:19.686Z
+**Stopped at:** Completed 27-03-PLAN.md
 **Resume file:** None
 
 ## Performance Metrics
@@ -86,6 +86,7 @@ None yet.
 |------|----------|-------|-------|
 | Phase 27 P02 | 13 min | 3 tasks | 12 files |
 | Phase 27 P01 | 8 min | 3 tasks | 7 files |
+| Phase 27 P03 | 11min | 3 tasks | 15 files |
 
 ## Decisions
 
@@ -93,3 +94,6 @@ None yet.
 - [Phase 27]: 27-02: the newest tombstone of each id is always kept and liveRecords() hides it; thread entries are keyed by (thread,id) and the earliest copy is kept
 - [Phase 27]: 27-01: recovery code is 256 random bits, 52 Crockford characters in 13 groups of 4, zero pad bits refused when non-zero (owner, D-18); sync format is symmetric-only so post-quantum safe by construction
 - [Phase 27]: 27-01: kdf bounds also cap scrypt memory at 256 MiB; the 1 MiB manifest cap binds before the 10 000-entry cap (about 5 000 entries)
+- [Phase 27]: 27-03: exclusive create is temp file plus hard link (wx fallback), so a reader never sees a partial key or meta file; ensure() repairs a missing inner .gitignore
+- [Phase 27]: 27-03: a SecretStorage data key is trusted only against meta.keyCheck; transcriptKey() is the writer path, dataKey() the non-creating reader path
+- [Phase 27]: 27-03: the sealed NEAR AI key copy is asked once per scope per host, released only to its sealed endpoint; no sync remote setting declared (D-09)
