@@ -63,6 +63,8 @@ export type ChatWebviewMessage =
   /** The "Pick up where you left off" card: reopen the last chat (the only thing it does), or hide the card for this pointer. */
   | { type: 'pickup-card'; action: 'open'; id: string }
   | { type: 'pickup-card'; action: 'later' }
+  /** The sync control in the bar and the "turn on sync" invitation (D-16): start turning sync on, set up the online home, show what needs attention, sync now, or never show the invitation again. */
+  | { type: 'sync-control'; action: SyncControlRequest }
   | { type: 'approval-reply'; callId: string; decision: 'allow' | 'allow-run' | 'allow-always' | 'deny'; feedback?: string; conversationId?: string }
   | { type: 'revert-run'; runId: string; conversationId?: string }
   | { type: 'verify-response'; runId: string; conversationId?: string }
@@ -71,6 +73,10 @@ export type ChatWebviewMessage =
   | { type: 'prompt-answer'; sessionId: string; promptId: string; text: string }
   | { type: 'prompt-cancel'; sessionId: string; promptId: string }
   | { type: 'prompt-resume'; sessionId: string; promptId: string };
+
+/** What the sync control can ask the host for. */
+export type SyncControlRequest = 'turn-on' | 'set-up-home' | 'show-details' | 'sync-now' | 'dismiss-prompt';
+const SYNC_CONTROL_REQUESTS: readonly string[] = ['turn-on', 'set-up-home', 'show-details', 'sync-now', 'dismiss-prompt'];
 
 export interface ProfileStatusView {
   projectScope: string;
@@ -302,6 +308,10 @@ export function parseChatWebviewMessage(value: unknown): ChatWebviewMessage | un
     if (message.action === 'later') return Object.keys(message).length === 2 ? { type: 'pickup-card', action: 'later' } : undefined;
     if (message.action === 'open' && typeof message.id === 'string' && /^conv-[a-z0-9-]{6,60}$/.test(message.id) && Object.keys(message).length === 3) return { type: 'pickup-card', action: 'open', id: message.id };
     return undefined;
+  }
+  if (message.type === 'sync-control') {
+    if (Object.keys(message).length !== 2 || typeof message.action !== 'string' || !SYNC_CONTROL_REQUESTS.includes(message.action)) return undefined;
+    return { type: 'sync-control', action: message.action as SyncControlRequest };
   }
   const promptResponse = promptResponseMessage(value);
   if (promptResponse) return promptResponse;

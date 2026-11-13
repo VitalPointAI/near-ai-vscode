@@ -25,6 +25,8 @@ import { threadStoreFor } from './threadStore';
 import { applyRetention, protectedThreadIds } from './threadArchive';
 import { onRunEnded, runEnded, runStarted } from './runEndHooks';
 import { handlePickupAction, markPickupSeen, pickupCardModel, writePickupPointer } from './pickupCard';
+import { currentSyncStatus, onSyncStatus } from './syncCommands';
+import { redactSyncText, SYNC_PROMPT_DISMISSED_KEY, syncPanelMessage } from './syncPanel';
 import { copyAttachmentIntoProject, prepareAttachments, stageAttachment, StagedAttachment } from '../agent/attachments';
 import { TeamDefinition, TeamLibrary, teamAgents } from '../agent/teams';
 import type { GsdAgent } from '../gsd/library';
@@ -150,6 +152,17 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     }
   };
   const workspaceRoot = () => vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  // The sync control in the bar (D-16): its state from the moment the panel opens, and again on every change. The invitation is part of the same message.
+  const sendSyncStatus = (): void => {
+    const root = workspaceRoot();
+    if (disposed) return;
+    void panel.webview.postMessage(syncPanelMessage(root ? currentSyncStatus(root) : { state: 'off' }, context.workspaceState as MementoLike | undefined));
+  };
+  const syncWatch = onSyncStatus((root) => {
+    const current = workspaceRoot();
+    if (disposed || !current || path.resolve(root) !== path.resolve(current)) return;
+    sendSyncStatus();
+  });
   const onScreen = (): ChatTab => tabs.find((tab) => tab.id === activeId) ?? tabs[0];
   /** The conversation a message names, or the one on screen; undefined for one that is no longer open. */
   const tabFor = (id: string | undefined): ChatTab | undefined => id ? tabs.find((tab) => tab.id === id) : onScreen();
@@ -472,7 +485,7 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
       return;
     }
     // A (re)loaded view shows the conversation on screen again, with the prompts still waiting pinned.
-    if (message.type === 'chat-ready') { show(onScreen()); return; }
+    if (message.type === 'chat-ready') { show(onScreen()); sendSyncStatus(); return; }
     if (message.type === 'switch-conversation') { const target = tabs.find((candidate) => candidate.id === message.id); if (target) show(target); return; }
     if (message.type === 'close-conversation') { await closeConversation(message.id); return; }
     if (message.type === 'new-chat') { await newConversation(); return; }
@@ -533,6 +546,23 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
       await vscode.commands.executeCommand(message.action === 'team' ? 'nearAi.setupProjectTeam' : 'nearAi.projectSetup');
       return;
     }
+    if (message.type === 'sync-control') {
+      // Each request only opens a flow the person then confirms step by step; none of them runs anything on its own (T-27-87).
+      if (message.action === 'dismiss-prompt') {
+        await context.workspaceState?.update(SYNC_PROMPT_DISMISSED_KEY, true);
+        sendSyncStatus();
+        return;
+      }
+      if (message.action === 'show-details') {
+        const root = workspaceRoot();
+        const detail = redactSyncText(root ? currentSyncStatus(root).message ?? '' : '') || 'The last sync did not finish.';
+        const retry = 'Sync Project Now';
+        if (await vscode.window.showWarningMessage(detail, retry) === retry) await vscode.commands.executeCommand('nearAi.sync.now');
+        return;
+      }
+      await vscode.commands.executeCommand(message.action === 'turn-on' ? 'nearAi.sync.turnOn' : message.action === 'set-up-home' ? 'nearAi.sync.onlineHome' : 'nearAi.sync.now');
+      return;
+    }
     if (message.type === 'open-activity') {
       await vscode.commands.executeCommand('nearAi.openAgentActivity', message.agentId);
       return;
@@ -568,6 +598,7 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
       panel.webview.postMessage(await statusMessage({ agents: runningAgents(), account: state.spend }));
       await sendProfileStatus(panel, auth);
       await setupNudge.refresh();
+      sendSyncStatus();
       await pickup.send();
       await sendArtifacts(panel);
       return;
@@ -810,7 +841,7 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
   const windowWatch = typeof vscode.window.onDidChangeWindowState === 'function' ? vscode.window.onDidChangeWindowState((window) => { if (window.focused) for (const tab of tabs) tab.focusRegained?.(); }) : undefined;
   // The "no team yet" card goes away as soon as Team Studio (or anyone) saves the project's team.
   const teamWatch = watchProjectTeam(() => { if (!disposed) void setupNudge.refresh(); });
-  panel.onDidDispose(() => { disposed = true; openTabSources.delete(openTabs); retentionWatch.dispose(); pickupWatch.dispose(); for (const tab of tabs) tab.agent?.dispose(); policyWatch.dispose(); tokenWatch.dispose(); windowWatch?.dispose(); teamWatch?.dispose(); state.spendWatch?.dispose(); if (state.spendTimer) clearTimeout(state.spendTimer); }, undefined, context.subscriptions);
+  panel.onDidDispose(() => { disposed = true; openTabSources.delete(openTabs); retentionWatch.dispose(); pickupWatch.dispose(); syncWatch.dispose(); for (const tab of tabs) tab.agent?.dispose(); policyWatch.dispose(); tokenWatch.dispose(); windowWatch?.dispose(); teamWatch?.dispose(); state.spendWatch?.dispose(); if (state.spendTimer) clearTimeout(state.spendTimer); }, undefined, context.subscriptions);
   // The emergency stop stops every conversation's run; the composer's Stop stops only the one on screen.
   onDidChangeEmergencyStop(async (engaged) => {
     sendPolicyState(panel);
@@ -834,6 +865,7 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
   state.activity = createActivityStore();
   await sendProfileStatus(panel, auth);
   await setupNudge.refresh();
+  sendSyncStatus();
   await pickup.send();
   await loadModels(panel, auth);
 }

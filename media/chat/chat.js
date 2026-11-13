@@ -45,7 +45,11 @@
   const welcomeReady = $('welcome-ready') || welcome;
   // The "Pick up where you left off" card; without its helper the chat simply shows no card.
   const pickupKit = window.nearPickup || { renderPickupCard: () => undefined };
+  // The sync control in the bar and the invitation before sync is on; without its helper the bar keeps its first text and the chat shows no invitation.
+  const syncKit = window.nearSyncControl || { renderSyncControl: () => undefined, renderSyncPrompt: () => undefined };
+  const syncButton = $('sync');
   const welcomeMemory = {};
+  let syncPromptWanted = false;
   if ($('welcome-new-profile')) $('welcome-new-profile').addEventListener('click', () => post({ type: 'new-profile' }));
   if ($('welcome-choose-profile')) $('welcome-choose-profile').addEventListener('click', () => post({ type: 'select-profile' }));
   if ($('welcome-open-folder')) $('welcome-open-folder').addEventListener('click', () => post({ type: 'open-folder' }));
@@ -1230,7 +1234,12 @@
       case 'reset': post({ type: 'new-chat' }); break;
       case 'conversations': renderConversations(m); break;
       case 'setup-nudge': setupKit.renderSetupNudge(document, welcomeReady, m.show === true, post, () => input.focus()); break;
-      case 'pickup-card': pickupKit.renderPickupCard(document, welcomeReady, m.model, post, () => input.focus()); break;
+      case 'pickup-card': pickupKit.renderPickupCard(document, welcomeReady, m.model, post, () => { input.focus(); syncKit.renderSyncPrompt(document, welcome, post, syncPromptWanted); }); syncKit.renderSyncPrompt(document, welcome, post, syncPromptWanted && !document.getElementById('pickup-card')); break;
+      case 'sync-status':
+        syncKit.renderSyncControl(document, syncButton, m.model, post);
+        syncPromptWanted = m.prompt === true;
+        syncKit.renderSyncPrompt(document, welcome, post, syncPromptWanted && !document.getElementById('pickup-card'));
+        break;
       case 'conversation-show': {
         draftsLive = false;
         activeId = m.id;
