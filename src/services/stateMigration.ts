@@ -15,11 +15,14 @@ import { LIVE_CONVERSATIONS_DEFAULT } from '../domain/state/retention';
 import { messagesToEntries } from '../domain/state/threadCapture';
 import type { ThreadEntry } from '../domain/state/threadEntries';
 import { ActivityStore } from './activityStore';
+import type { AuthService } from './auth';
+import { ProfileStore } from './profileStore';
 import { parseRunMarker, type RunMarker } from './runMarkers';
 import { mirrorProjectSpend } from './spendMirror';
-import { ProjectStateHome, writeFileAtomic } from './stateHome';
+import { editorWriter, ProjectStateHome, stateHomeFor, writeFileAtomic, type MementoLike } from './stateHome';
+import type { SecretsLike } from './stateKeys';
 import { applyRetention } from './threadArchive';
-import type { ImportedThread, ThreadStore } from './threadStore';
+import { threadStoreFor, type ImportedThread, type ThreadStore } from './threadStore';
 import { projectFolderHash, TranscriptStore, type Transcript } from './transcripts';
 
 /** Where an editor's storage came from and who is migrating it. */
@@ -344,4 +347,87 @@ export async function migrateEditorStorage(sources: MigrationSources, home: Proj
     if (meta && !(meta.migrated && key in meta.migrated)) await home.updateMeta({ migrated: { ...(meta.migrated ?? {}), [key]: (options.now?.() ?? new Date()).toISOString() } }).catch(() => undefined);
   }
   return report;
+}
+
+// ---- when it runs ---------------------------------------------------------------------------------------------------------------------
+
+/** What the migration needs of the extension context (the parts of vscode.ExtensionContext it uses), so it runs on plain node in tests. */
+export interface MigrationContext {
+  globalStorageUri: { fsPath: string };
+  secrets: SecretsLike;
+  globalState: MementoLike;
+}
+
+export interface MigrationExtras {
+  /** nearAi.sync.keepKeyInProject. */
+  keepKeyInProject?: () => boolean;
+  /** nearAi.history.liveConversations, read when the run reaches the 5-live step. */
+  liveConversations?: () => number;
+  /** Conversations open in a tab of this editor, so the 5-live step leaves them live. */
+  protectedIds?: () => Iterable<string>;
+  /** Where the counts are written. Only counts go here: never a title, an id or any text. */
+  log?: (line: string) => void;
+}
+
+interface Host { context: MigrationContext; auth?: AuthService; extras: MigrationExtras }
+
+let host: Host | undefined;
+const runs = new Map<string, Promise<MigrationReport | undefined>>();
+
+/** Gives the migration this editor's storage, secrets and writer. Called once at activation; it reads and writes nothing. */
+export function configureMigration(context: MigrationContext, auth?: AuthService, extras: MigrationExtras = {}): void {
+  host = { context, ...(auth ? { auth } : {}), extras };
+  runs.clear();
+}
+
+/** The editor's old install-local transcript key, read without creating one: an editor that never had one has nothing sealed with it. */
+function oldKeyFrom(secrets: SecretsLike): () => Promise<Buffer | undefined> {
+  return async () => {
+    const stored = await secrets.get('nearAi.transcripts.key');
+    const key = stored ? Buffer.from(stored, 'base64') : undefined;
+    return key && key.length === 32 ? key : undefined;
+  };
+}
+
+function countsLine(report: MigrationReport): string {
+  const { threads } = report;
+  return `State merge: conversations ${threads.copied} copied, ${threads.merged} merged, ${threads.unchanged} already there, ${threads.locked} locked, ${threads.skipped + report.skipped} skipped; run markers ${report.markers}; checkpoints ${report.checkpoints}; comparisons ${report.comparisons}; spend lines ${report.spendLines}; archived ${report.archived}.`;
+}
+
+/**
+ * Merges this editor's own storage for the project into the state home, once per project in this extension host. The first call starts it and every
+ * later call gets the same result, so a chat, the history and Compare Models can each ask without repeating the work. Never rejects: a run that fails
+ * is forgotten, so the next ask tries again, and what could not be opened yet (locked) is tried again at the next start. Without configureMigration
+ * (a test, or a host with nothing to migrate) it does nothing.
+ */
+export function ensureMigrated(root: string): Promise<MigrationReport | undefined> {
+  if (!host) return Promise.resolve(undefined);
+  const key = path.resolve(root);
+  const existing = runs.get(key);
+  if (existing) return existing;
+  const { context, auth, extras } = host;
+  const run = (async (): Promise<MigrationReport | undefined> => {
+    try {
+      const sources: MigrationSources = {
+        root: key,
+        globalStorageDir: context.globalStorageUri.fsPath,
+        oldKey: oldKeyFrom(context.secrets),
+        writer: editorWriter(context.globalState),
+        projectScopeId: (auth ? new ProfileStore(key, auth) : new ProfileStore(key)).projectScopeId
+      };
+      const threads = threadStoreFor(key, context.secrets, sources.writer, extras.keepKeyInProject);
+      const report = await migrateEditorStorage(sources, stateHomeFor(key), threads, {
+        ...(extras.liveConversations ? { liveConversations: extras.liveConversations() } : {}),
+        ...(extras.protectedIds ? { protectedIds: extras.protectedIds } : {})
+      });
+      if (changesIn(report) > 0 || report.threads.locked > 0) extras.log?.(countsLine(report));
+      return report;
+    } catch {
+      extras.log?.('State merge did not finish; it will be tried again.');
+      runs.delete(key);
+      return undefined;
+    }
+  })();
+  runs.set(key, run);
+  return run;
 }

@@ -14,7 +14,7 @@ import * as path from 'node:path';
 import { unionLog } from '../domain/state/merge';
 import { canonicalJson } from '../domain/state/records';
 import { nanoToUsd, SpendLedger } from './spendLedger';
-import { writeFileAtomic, type ProjectStateHome } from './stateHome';
+import { stateHomeFor, writeFileAtomic, type ProjectStateHome } from './stateHome';
 
 export interface SpendMirrorOptions {
   /** The editor's spend folder: `<globalStorage>/spend`, holding one folder per key identity. Read only. */
@@ -193,4 +193,14 @@ export function formatProjectSpend(months: readonly ProjectSpendMonth[]): string
     lines.push(`### ${month.month}`, `- ${month.requests} request${month.requests === 1 ? '' : 's'}: ${usd(month.confirmedUsd)} confirmed, ${usd(month.estimatedUsd)} still estimated`, `- By model: ${rows.join('; ') || 'none'}`, '');
   }
   return lines.join('\n').trimEnd();
+}
+
+/**
+ * The "Project spend history" section for the run performance report: what every editor on this computer spent on the project, from the state home's
+ * mirror (D-11). Empty when the project has no state home or no history, so the report is then what it was before. Reading creates nothing.
+ */
+export async function projectSpendSection(root: string, now: number = Date.now()): Promise<string> {
+  const home = stateHomeFor(root);
+  if (!(await home.exists())) return '';
+  return formatProjectSpend(await readProjectSpend(home, now).catch(() => []));
 }

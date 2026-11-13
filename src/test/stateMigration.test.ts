@@ -8,8 +8,8 @@ import { RunCheckpoints } from '../agent/checkpoints';
 import { ActivityStore } from '../services/activityStore';
 import type { AgentMessage } from '../services/nearAiClient';
 import { RunMarkers } from '../services/runMarkers';
-import { formatProjectSpend, mirrorProjectSpend, readProjectSpend } from '../services/spendMirror';
-import { changesIn, emptyReport, migrateEditorStorage, type MigrationOptions, type MigrationReport, type MigrationSources } from '../services/stateMigration';
+import { formatProjectSpend, mirrorProjectSpend, projectSpendSection, readProjectSpend } from '../services/spendMirror';
+import { changesIn, configureMigration, emptyReport, ensureMigrated, migrateEditorStorage, type MigrationOptions, type MigrationReport, type MigrationSources } from '../services/stateMigration';
 import { stateHomeFor, writeFileAtomic } from '../services/stateHome';
 import { stateKeysFor } from '../services/stateKeys';
 import { ThreadStore } from '../services/threadStore';
@@ -620,6 +620,88 @@ test('an archived conversation is not brought back by a second migration, and en
     const item = (await store.index()).find((entry) => entry.id === thread(1).id);
     assert.equal(item?.state, 'archived');
     assert.equal((await store.entries(thread(1).id)).length, 4, 'opening it brings every entry back, the added ones too');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+    await rm(storage, { recursive: true, force: true });
+  }
+});
+
+// ---- plan 10, task 3: when it runs ------------------------------------------------------------------------------------------------------------
+
+function fakeContext(storage: string, secrets: MemorySecrets): { globalStorageUri: { fsPath: string }; secrets: MemorySecrets; globalState: { get<T>(key: string): T | undefined; update(key: string, value: unknown): Promise<void> } } {
+  const values = new Map<string, unknown>();
+  return { globalStorageUri: { fsPath: storage }, secrets, globalState: { get: <T>(key: string) => values.get(key) as T | undefined, update: async (key: string, value: unknown) => { values.set(key, value); } } };
+}
+
+test('ensureMigrated runs once per project, logs only counts, and an editor with nothing to migrate leaves the project untouched', async () => {
+  const root = await tempProject();
+  const empty = await tempProject();
+  const storage = await tempStorage();
+  try {
+    const key = randomBytes(32);
+    const editor = await legacyEditor(storage, root, { key, transcripts: [{ id: 'conv-secret-title', title: 'SENTINEL-TITLE-DO-NOT-LOG', updatedAt: AT, messages: [{ role: 'user', content: 'SENTINEL-TEXT-DO-NOT-LOG' }, { role: 'assistant', content: 'ok' }] }] });
+    const lines: string[] = [];
+    configureMigration(fakeContext(storage, editor.secrets), undefined, { log: (line) => lines.push(line), liveConversations: () => 5 });
+
+    assert.equal(await stateHomeFor(root).exists(), false, 'configuring reads and writes nothing');
+    const first = ensureMigrated(root);
+    assert.equal(ensureMigrated(root), first, 'the second ask gets the same run');
+    const report = await first;
+    assert.equal(report?.threads.copied, 1);
+    assert.equal(await ensureMigrated(root), report);
+    assert.equal(lines.length, 1);
+    assert.match(lines[0], /conversations 1 copied/);
+    assert.equal(lines.join('\n').includes('SENTINEL'), false);
+    assert.equal(lines.join('\n').includes('conv-secret-title'), false);
+
+    // A project this editor holds nothing for: no state home appears.
+    assert.equal((await ensureMigrated(empty))?.threads.copied, 0);
+    assert.equal(await stateHomeFor(empty).exists(), false);
+    assert.equal(lines.length, 1, 'a run that changed nothing logs nothing');
+  } finally {
+    configureMigration(fakeContext(storage, new MemorySecrets()));
+    await rm(root, { recursive: true, force: true });
+    await rm(empty, { recursive: true, force: true });
+    await rm(storage, { recursive: true, force: true });
+  }
+});
+
+test('an editor that never had an old key does not get one made for it, and a locked conversation is tried again after a new start', async () => {
+  const root = await tempProject();
+  const storage = await tempStorage();
+  try {
+    const sealed = await legacyEditor(storage, root, { key: randomBytes(32), transcripts: [{ id: 'conv-sealed-here', updatedAt: AT, messages: conversation() }] });
+    const keyless = new MemorySecrets();
+    configureMigration(fakeContext(storage, keyless));
+    const first = await ensureMigrated(root);
+    assert.equal(first?.threads.locked, 1);
+    assert.equal(keyless.values.has('nearAi.transcripts.key'), false, 'no key was created to look for what a key cannot open');
+    // A new extension host (configure again) with the key back migrates it.
+    configureMigration(fakeContext(storage, sealed.secrets));
+    assert.equal((await ensureMigrated(root))?.threads.copied, 1);
+  } finally {
+    configureMigration(fakeContext(storage, new MemorySecrets()));
+    await rm(root, { recursive: true, force: true });
+    await rm(storage, { recursive: true, force: true });
+  }
+});
+
+test('the run report gets a project spend history section from every editor, and a project with no state home gets none', async () => {
+  const root = await tempProject();
+  const storage = await tempStorage();
+  try {
+    assert.equal(await projectSpendSection(root), '', 'no state home: the report is unchanged');
+    const a = await legacyEditor(path.join(storage, 'a'), root, { spend: [{ identity: 'idA', month: '2026-11', lines: spendLines.a }] });
+    const b = await legacyEditor(path.join(storage, 'b'), root, { spend: [{ identity: 'idB', month: '2026-11', lines: spendLines.b }] });
+    const home = stateHomeFor(root);
+    await home.ensure();
+    assert.equal(await projectSpendSection(root), '', 'a state home with no spend: unchanged');
+    await mirrorProjectSpend({ ledgerRoot: path.join(a.dir, 'spend'), projectScopeId: SCOPE, home });
+    await mirrorProjectSpend({ ledgerRoot: path.join(b.dir, 'spend'), projectScopeId: SCOPE, home });
+    const section = await projectSpendSection(root, Date.UTC(2026, 10, 20));
+    assert.match(section, /^## Project spend history/);
+    assert.match(section, /3 requests/, 'both editors\' requests are in it');
+    assert.match(section, /daily spend limit still counts only this editor/);
   } finally {
     await rm(root, { recursive: true, force: true });
     await rm(storage, { recursive: true, force: true });

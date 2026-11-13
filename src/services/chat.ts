@@ -46,6 +46,7 @@ import { homeFolder, teamLibraryDir, whenTeamsMoved } from '../domain/teamStorag
 import { rememberedRuleNotice } from '../domain/allowRuleNotice';
 import { syncAutoAdvance } from './autoAdvanceConfig';
 import { editorWriter, type MementoLike, stateHomeFor } from './stateHome';
+import { ensureMigrated } from './stateMigration';
 import { autoResumeChoice, autoResumeNotice, cutOffNotice, ownEditorMarkers, resumePrompt, RunMarker, RunMarkers, shouldAutoResume } from './runMarkers';
 import { WaitingNotices } from './waitingNotices';
 import { latestOnly, PROJECT_TEAM_WATCH_PATHS, projectHasTeam, SETUP_NUDGE_DISMISSED_KEY, shouldShowSetupNudge } from './setupSteps';
@@ -356,6 +357,8 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     const root = workspaceRoot();
     if (root) await closeInterruptedRuns(root, editorWriter(context.globalState as MementoLike | undefined));
     const saved = parseSavedConversations(context.workspaceState?.get(OPEN_CONVERSATIONS_KEY));
+    // Tabs reopen from the state home; one saved by 0.4.19 is still in this editor's own storage until it is merged in.
+    if (root && saved.items.length) await ensureMigrated(root);
     for (const item of saved.items) {
       const tab = newTab(item.id);
       tab.title = item.title;
@@ -571,6 +574,8 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
       tab.post({ type: 'auth-required', text: 'Set up a NEAR AI profile for this project to start chatting.' });
       return;
     }
+    // The person is acting in this project: what this editor kept in its own storage is merged into the state home before the run starts (once; no-op after).
+    await ensureMigrated(root);
     const model = message.model?.trim() || tab.model || readSettings().defaultModel;
     if (!model) { tab.post({ type: 'assistant-error', text: 'Choose a model from the list below the message box.' }); return; }
     const modelInfo = active.models.find((candidate) => candidate.id === model);
@@ -847,6 +852,11 @@ function ripgrepPath(): string | undefined {
 
 /** The ids of the conversations open in each chat of this editor, so archiving never takes a thread out from under a tab of another chat. */
 const openTabSources = new Set<() => string[]>();
+
+/** The ids of every conversation open in a tab of this editor (the side view and the panel), so the migration's 5-live step leaves them live. */
+export function openConversationIds(): string[] {
+  return [...openTabSources].flatMap((source) => source());
+}
 
 /** One run-marker store per extension storage and project, shared by every conversation, so its writes stay in order. */
 const runMarkerStores = new Map<string, RunMarkers>();

@@ -9,10 +9,14 @@ import { AuthService } from './services/auth';
 import { ProfileStore } from './services/profileStore';
 import { apiKeyCopyHooks } from './services/stateApiKey';
 import { editorWriter, stateHomeFor } from './services/stateHome';
+import { configureMigration, ensureMigrated } from './services/stateMigration';
+import { mirrorProjectSpend } from './services/spendMirror';
+import { onRunEnded } from './services/runEndHooks';
+import * as path from 'node:path';
 import { stateKeysFor } from './services/stateKeys';
 import { initProfileIndex, listSavedProfiles, runUseSavedProfile } from './services/profileIndex';
 import { GsdRuntime, startRuntimeUpdates } from './gsd/runtime';
-import { readAgentLimits, readModelTiers, readSettings, shouldAutoInstallGsd } from './services/settings';
+import { readAgentLimits, readHistoryLimits, readModelTiers, readSettings, shouldAutoInstallGsd } from './services/settings';
 import { activeProvider } from './services/providerCache';
 import { modelOptions } from './services/chatBridge';
 import { chatHandoff, runApprovedCommand } from './services/cyberHandoff';
@@ -35,6 +39,7 @@ import { openTeamStudio } from './services/teamStudioPanel';
 import { historyItems, LOCKED_DETAIL, threadStoreFor } from './services/threadStore';
 import { chooseGsdCommand } from './services/gsdCommands';
 import { NearAiPanelViewProvider } from './services/panelView';
+import { openConversationIds } from './services/chat';
 import { deriveProfileId } from './domain/auth';
 import { isSecureEndpoint } from './domain/config';
 import { registerChatParticipant } from './services/chatParticipant';
@@ -92,6 +97,22 @@ export function activate(context: vscode.ExtensionContext): NearAiTestApi | unde
   // A reload cut off any run still marked running in this project's history: record it as stopped.
   const projectRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   if (projectRoot) void closeInterruptedRuns(projectRoot, editorWriter(context.globalState));
+
+  // What this editor's own storage holds for the project (conversations, runs in flight, checkpoints, comparisons, spend) is merged into the project's
+  // state home, once, without deleting or changing anything there (D-05). It runs now only for a project the person has set up; any other folder waits
+  // for the first chat, history or Compare Models action, so opening a folder still writes nothing.
+  configureMigration(context, auth, {
+    keepKeyInProject: () => vscode.workspace.getConfiguration('nearAi').get<boolean>('sync.keepKeyInProject', true),
+    liveConversations: () => readHistoryLimits().liveConversations,
+    protectedIds: openConversationIds,
+    log: (line) => nearLog.appendLine(`[${new Date().toISOString()}] ${line}`)
+  });
+  if (projectRoot) void isNearAiProject(projectRoot).then((nearAi) => (nearAi ? ensureMigrated(projectRoot) : undefined)).catch(() => undefined);
+  // After every run, this project's spend from this editor's ledger is mirrored into the state home so every editor can show the history (D-11). The
+  // daily spend limit is not touched: it still counts only this editor's own ledger.
+  context.subscriptions.push(onRunEnded(async (event) => {
+    await mirrorProjectSpend({ ledgerRoot: path.join(context.globalStorageUri.fsPath, 'spend'), projectScopeId: new ProfileStore(event.root).projectScopeId, home: stateHomeFor(event.root), recentMonths: 2 });
+  }));
 
   // In code-server and remote windows, suggest turning off VS Code's proxy support when no proxy is
   // used: a background browser tab otherwise stalls agent runs. Asked once; changed only on the click.
@@ -204,6 +225,8 @@ async function suggestProxySupportOff(context: vscode.ExtensionContext): Promise
 async function showHistory(context: vscode.ExtensionContext, sidebar: NearAiPanelViewProvider): Promise<void> {
   const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   if (!root) { void vscode.window.showInformationMessage('Open a folder to see NEAR AI conversations.'); return; }
+  // A person asked for the list: conversations from before 0.4.20 that this editor kept in its own storage are merged in first.
+  await ensureMigrated(root);
   // D-08: the list is the thread index (the threads' small meta files); no log is opened for any item. Every thread is listed: live, archived, from the
   // Chat view, or locked on this device.
   const saved = await threadStoreFor(root, context.secrets, editorWriter(context.globalState), () => vscode.workspace.getConfiguration('nearAi').get<boolean>('sync.keepKeyInProject', true)).index();

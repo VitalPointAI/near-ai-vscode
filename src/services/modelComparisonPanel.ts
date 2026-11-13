@@ -20,6 +20,7 @@ import { activeProvider, clientFor, type ActiveProvider } from './providerCache'
 import { readAgentRules, readModelTiers, readRoleModels, readRunBudget, readSettings } from './settings';
 import { nanoToUsd, totalNanoUsd } from './spendLedger';
 import { editorWriter } from './stateHome';
+import { ensureMigrated } from './stateMigration';
 
 // NEAR AI: Compare Models. A tab that ranks every model tested on this computer, runs new
 // comparisons (only what has no saved result, or everything again), saves each one as it goes,
@@ -55,6 +56,8 @@ export function registerModelComparison(context: vscode.ExtensionContext, auth: 
 
 async function gather(context: vscode.ExtensionContext, auth: AuthService): Promise<Gathered> {
   const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  // Saved comparisons from before 0.4.20 are in this editor's own storage until they are merged into the project's state home (once; no-op after).
+  if (root) await ensureMigrated(root);
   const settings = readSettings();
   let problem: string | undefined;
   const active = root ? await activeProvider(root, auth).catch((error: unknown) => { problem = providerErrorMessage(error); return undefined; }) : undefined;
