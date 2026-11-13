@@ -579,3 +579,201 @@ test('remoteDefaultBranch reads the symbolic HEAD with git alone, and anything i
   await remoteDefaultBranch('/x', 'origin', (args) => { seen.push(args); return Promise.resolve({ code: 1, stdout: Buffer.alloc(0), stderr: '' }); });
   assert.deepEqual(seen, [['-C', '/x', 'ls-remote', '--symref', 'origin', 'HEAD']]);
 });
+
+// ---- running the setup again: the code offer, the way back after a decline, and the click-confirmed default branch (G-27-6a, G-27-6b) ----
+
+const COMMAND_NAME = "Put This Project's Code Online";
+const HAS_CODE = /online home has this project's code/;
+const SETTINGS = (branch: string): string => `make ${branch} the default branch in the online repository's settings`;
+
+/** The same project's setup run a second time on the same fakes: nothing is created, and what the run did is returned for inspection. */
+async function rerun(run: CodeRun, ui: FakeUi, route: 'vscode' | 'gh' | 'url' = 'vscode'): Promise<{ result: Awaited<ReturnType<typeof onlineHomeFlow>>; afterRemoteRuns: number; gitCalls: string[][]; apiCalls: number; creates: number }> {
+  const gitBefore = run.spy.calls.length;
+  const apiBefore = run.github.calls.length;
+  const createsBefore = run.github.calls.filter((call) => call.method === 'POST').length;
+  let afterRemoteRuns = 0;
+  const result = await onlineHomeFlow({
+    root: run.dir, ui, auth: fakeAuth(FAKE_TOKEN, route === 'vscode'), gh: route === 'gh' ? fakeGh() : undefined, fetchFn: run.github.fetchFn, git: run.spy.git, personGit: run.spy.git,
+    afterRemote: () => { afterRemoteRuns += 1; return Promise.resolve(true); }
+  });
+  return {
+    result, afterRemoteRuns, gitCalls: run.spy.calls.slice(gitBefore), apiCalls: run.github.calls.length - apiBefore,
+    creates: run.github.calls.filter((call) => call.method === 'POST').length - createsBefore
+  };
+}
+
+/** A project whose code is already online while GitHub still shows near-ai/state first, as an earlier build left it. */
+async function codeOnlineDefaultOnState(name: string, route: 'vscode' | 'gh' = 'vscode'): Promise<CodeRun> {
+  const run = await codeRun(name, { route, defaultBranch: 'develop' });
+  assert.equal(run.result.status, 'done');
+  assert.equal(patches(run).length, 0);
+  run.github.defaultBranch = DEFAULT_STATE_BRANCH;
+  return run;
+}
+
+test('declining the code offer ends with one sentence that names the command and says what the online repository holds until then', async () => {
+  const run = await codeRun('decline-sentence', { defaultBranch: DEFAULT_STATE_BRANCH, offer: false });
+  assert.equal(run.result.status, 'done');
+  const told = run.ui.messages.filter((message) => message.includes(COMMAND_NAME));
+  assert.equal(told.length, 1, run.ui.messages.join('|'));
+  assert.match(told[0] as string, /only NEAR AI's encrypted sync branch/);
+  assert.match(told[0] as string, /stays on this computer/);
+  assert.equal(told[0]?.includes('default branch'), false);
+  assert.equal(patches(run).length, 0);
+});
+
+test('running the setup again on a project whose code is not online offers the code push: accepting pushes through the same checks and moves the default once, after the push', async () => {
+  const run = await codeRun('rerun-offer', { defaultBranch: DEFAULT_STATE_BRANCH, offer: false });
+  const ui = new FakeUi();
+  const offer = new FakeCodeOffer(run.events, { offer: true, push: true });
+  ui.codePush = offer;
+  const again = await rerun(run, ui);
+  assert.equal(again.result.status, 'done');
+  assert.equal(again.afterRemoteRuns, 0, 'the turn-on flow is not run again');
+  assert.equal(again.creates, 0, 'no second repository');
+  assert.equal(run.events.filter((event) => event === 'offer').length, 2, 'the code was offered once more');
+  assert.equal(offer.summaries.length, 1);
+  assert.ok(offer.summaries[0]?.files.includes('app.ts'));
+  const branch = currentBranch(run.dir);
+  assert.equal(patches(run).length, 1);
+  assert.equal(patches(run)[0]?.body, JSON.stringify({ default_branch: branch }));
+  const pushAt = run.events.findIndex((event) => event.startsWith('git:') && event.includes(`refs/heads/${branch}:refs/heads/${branch}`));
+  const patchAt = run.events.findIndex((event) => event.startsWith('api:PATCH'));
+  assert.ok(pushAt >= 0 && patchAt > pushAt, run.events.join(' | '));
+  assert.equal(run.github.defaultBranch, branch);
+  assert.ok(ui.messages.some((message) => DEFAULT_SENTENCE.test(message)), ui.messages.join('|'));
+  assertOnlyOurRefs(run.bare, run.dir, true);
+  assertNoDangerousPush(run.spy.calls);
+});
+
+test('running the setup again and declining the code offer names the command again, sends no PATCH and creates nothing', async () => {
+  const run = await codeRun('rerun-decline', { defaultBranch: DEFAULT_STATE_BRANCH, offer: false });
+  const ui = new FakeUi();
+  ui.codePush = new FakeCodeOffer(run.events, { offer: false });
+  const again = await rerun(run, ui);
+  assert.equal(again.result.status, 'done');
+  assert.equal(again.afterRemoteRuns, 0);
+  assert.equal(again.creates, 0);
+  assert.equal(ui.messages.filter((message) => message.includes(COMMAND_NAME)).length, 1, ui.messages.join('|'));
+  assert.equal(again.gitCalls.some((args) => args.includes('push')), false);
+  assert.equal(patches(run).length, 0);
+  assertOnlyOurRefs(run.bare, run.dir, false);
+});
+
+test('a re-run whose branch is already online says so in one sentence, asks once whether to make it the default, and only on the click sends one PATCH', async () => {
+  for (const answer of [true, false]) {
+    const run = await codeOnlineDefaultOnState(`rerun-repair-${String(answer)}`);
+    const ui = new FakeUi({ confirmDefault: answer });
+    const offer = new FakeCodeOffer(run.events, { offer: true });
+    ui.codePush = offer;
+    const again = await rerun(run, ui);
+    const branch = currentBranch(run.dir);
+    assert.equal(again.result.status, 'done');
+    assert.equal(again.afterRemoteRuns, 0);
+    assert.equal(again.creates, 0);
+    assert.equal(ui.messages.filter((message) => HAS_CODE.test(message)).length, 1, ui.messages.join('|'));
+    assert.deepEqual(ui.defaultQuestions, [branch]);
+    assert.equal(run.events.filter((event) => event === 'offer').length, 1, 'the code is not offered again: it is already online');
+    assert.equal(again.gitCalls.some((args) => args.includes('push')), false, 'the repair pushes nothing');
+    assert.equal(patches(run).length, answer ? 1 : 0);
+    assert.equal(run.github.defaultBranch, answer ? branch : DEFAULT_STATE_BRANCH);
+    assert.equal(ui.messages.some((message) => DEFAULT_SENTENCE.test(message)), answer, ui.messages.join('|'));
+    if (answer) assert.equal(patches(run)[0]?.body, JSON.stringify({ default_branch: branch }));
+    assertOnlyOurRefs(run.bare, run.dir, true);
+  }
+});
+
+test('a re-run never asks about, or changes, a default the person chose or one that is already their branch, and without the question on the ui no PATCH is sent', async () => {
+  const own = await codeRun('rerun-own', { defaultBranch: 'develop' });
+  const ownUi = new FakeUi({ confirmDefault: true });
+  ownUi.codePush = new FakeCodeOffer(own.events, { offer: true });
+  await rerun(own, ownUi);
+  assert.deepEqual(ownUi.defaultQuestions, []);
+  assert.equal(patches(own).length, 0);
+  assert.equal(own.github.defaultBranch, 'develop');
+  assert.ok(ownUi.messages.some((message) => HAS_CODE.test(message)));
+
+  const same = await codeRun('rerun-same', { defaultBranch: 'develop' });
+  same.github.defaultBranch = currentBranch(same.dir);
+  const sameUi = new FakeUi({ confirmDefault: true });
+  sameUi.codePush = new FakeCodeOffer(same.events, { offer: true });
+  await rerun(same, sameUi);
+  assert.deepEqual(sameUi.defaultQuestions, []);
+  assert.equal(patches(same).length, 0);
+
+  const silent = await codeOnlineDefaultOnState('rerun-no-question');
+  const silentUi = new FakeUi();
+  silentUi.codePush = new FakeCodeOffer(silent.events, { offer: true });
+  const again = await rerun(silent, silentUi);
+  assert.equal(again.result.status, 'done');
+  assert.equal(patches(silent).length, 0);
+  assert.equal(silent.github.defaultBranch, DEFAULT_STATE_BRANCH);
+});
+
+test('on the gh route the re-run repair is the same click and one PATCH, with the gh token only in the Authorization header', async () => {
+  const run = await codeOnlineDefaultOnState('rerun-gh', 'gh');
+  const ui = new FakeUi({ confirmDefault: true });
+  ui.codePush = new FakeCodeOffer(run.events, { offer: true });
+  const again = await rerun(run, ui, 'gh');
+  assert.equal(again.result.status, 'done');
+  assert.deepEqual(ui.defaultQuestions, [currentBranch(run.dir)]);
+  assert.equal(patches(run).length, 1);
+  assert.equal(patches(run)[0]?.headers.Authorization, `Bearer ${FAKE_TOKEN}`);
+  assert.ok(run.github.calls.every((call) => !call.url.includes(FAKE_TOKEN) && !(call.body ?? '').includes(FAKE_TOKEN)));
+  assert.equal(run.github.defaultBranch, currentBranch(run.dir));
+});
+
+test('on a pasted address a re-run sends no request to GitHub: it names the setting when the remote shows near-ai/state first, says nothing more when it does not, and the code offer works', async () => {
+  const shown = await codeRun('rerun-paste-state', { route: 'url', remoteHeadAfterSync: 'state' });
+  const stateUi = new FakeUi({ confirmDefault: true });
+  stateUi.codePush = new FakeCodeOffer(shown.events, { offer: true });
+  const stateAgain = await rerun(shown, stateUi, 'url');
+  assert.equal(stateAgain.apiCalls, 0);
+  assert.equal(shown.github.calls.length, 0);
+  assert.deepEqual(stateUi.defaultQuestions, []);
+  assert.ok(stateUi.messages.some((message) => HAS_CODE.test(message)));
+  assert.ok(stateUi.messages.some((message) => message.includes(SETTINGS(currentBranch(shown.dir))) && message.includes('settings')), stateUi.messages.join('|'));
+  assert.equal(stateAgain.gitCalls.some((args) => args.includes('push')), false);
+
+  const person = await codeRun('rerun-paste-person', { route: 'url', remoteHeadAfterSync: 'person' });
+  const personUi = new FakeUi({ confirmDefault: true });
+  personUi.codePush = new FakeCodeOffer(person.events, { offer: true });
+  await rerun(person, personUi, 'url');
+  assert.equal(personUi.messages.some((message) => /default branch/.test(message)), false, personUi.messages.join('|'));
+  assert.deepEqual(personUi.defaultQuestions, []);
+
+  const declined = await codeRun('rerun-paste-offer', { route: 'url', remoteHeadAfterSync: 'state', offer: false });
+  const offerUi = new FakeUi();
+  const offer = new FakeCodeOffer(declined.events, { offer: true, push: true });
+  offerUi.codePush = offer;
+  const offered = await rerun(declined, offerUi, 'url');
+  assert.equal(offered.apiCalls, 0);
+  assert.equal(offer.summaries.length, 1);
+  assert.ok(offerUi.messages.some((message) => message.includes(SETTINGS(currentBranch(declined.dir)))), offerUi.messages.join('|'));
+  assertOnlyOurRefs(declined.bare, declined.dir, true);
+  assertNoDangerousPush(declined.spy.calls);
+});
+
+test('the re-run reads the remote with one ls-remote of the person\'s branch, leaves its progress record at done, and a branch it cannot place gets the plain sentence only', async () => {
+  const run = await codeOnlineDefaultOnState('rerun-reads');
+  const ui = new FakeUi({ confirmDefault: false });
+  ui.codePush = new FakeCodeOffer(run.events, { offer: true });
+  const again = await rerun(run, ui);
+  const listed = again.gitCalls.filter((args) => args.includes('ls-remote') && args.includes('--heads'));
+  assert.equal(listed.length, 1);
+  assert.ok(listed[0]?.includes(`refs/heads/${currentBranch(run.dir)}`));
+  assert.equal((await readProgress(stateHomeFor(run.dir)))?.step, 'done');
+
+  // A project that is not on a branch (or whose remote cannot be read) is not offered anything and not asked anything.
+  fixtureGit(run.dir, ['checkout', '-q', '--detach']);
+  fixtureGit(run.dir, ['commit', '-q', '--allow-empty', '-m', 'detached']);
+  const detachedUi = new FakeUi({ confirmDefault: true });
+  const detachedOffer = new FakeCodeOffer(run.events, { offer: true });
+  detachedUi.codePush = detachedOffer;
+  const detached = await rerun(run, detachedUi);
+  assert.equal(detached.result.status, 'done');
+  assert.deepEqual(detachedUi.defaultQuestions, []);
+  assert.equal(detachedOffer.summaries.length, 0);
+  assert.deepEqual(detachedUi.messages, ['This project already has an online home.']);
+  assert.equal(patches(run).length, 0);
+});
