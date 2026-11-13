@@ -5,6 +5,7 @@ import { execFileSync } from 'node:child_process';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { generateRecoveryCode } from '../../domain/state/recoveryCode';
 import { openManifest, openObject } from '../../domain/state/objects';
 import { entryId, type ThreadEntry, type ThreadRole } from '../../domain/state/threadEntries';
 import { RunMarkers, type RunMarker } from '../../services/runMarkers';
@@ -13,7 +14,7 @@ import { stateHomeFor, type ProjectStateHome } from '../../services/stateHome';
 import { stateKeysFor, type StateKeys } from '../../services/stateKeys';
 import { StateTransport } from '../../services/stateTransport';
 import { threadStoreFor, type ThreadStore } from '../../services/threadStore';
-import { hermeticRunner, mirrorPaths, userRepo } from './gitFixtures';
+import { bareRemote, fixtureGit, hermeticRunner, mirrorPaths, userRepo } from './gitFixtures';
 import { MemorySecrets } from './stateFixtures';
 
 export interface Machine {
@@ -119,4 +120,41 @@ export async function remotePayloads(remoteDir: string, machineOf: Machine): Pro
     at += first.of;
   }
   return payloads;
+}
+
+/** Two computers over one remote with sync on: A has one thread and pushed it, B was opened with the code and pulled. */
+export async function syncedPair(thread: string): Promise<{ remote: string; a: Machine; b: Machine; code: string; bytes: Buffer }> {
+  const remote = bareRemote({ withMain: false });
+  const a = await machine(remote, 'alpha');
+  const b = await machine(remote, 'bravo');
+  const { code, bytes } = generateRecoveryCode();
+  await a.keys.ensureDataKey();
+  await a.keys.writeRecoveryWrap(bytes);
+  await a.threads.create({ id: thread, title: 'Shared thread', model: 'near/model-a', origin: 'panel' });
+  await a.threads.appendEntries(thread, chain(thread, a.writer, SIX_TURNS));
+  if ((await a.sync.sync()).kind !== 'synced') throw new Error('the first sync did not finish');
+  if ((await b.sync.unlockFromRemote(bytes)).kind !== 'synced') throw new Error('the code did not open the project');
+  if ((await b.sync.pullOnly()).kind !== 'synced') throw new Error('the first pull did not finish');
+  return { remote, a, b, code, bytes };
+}
+
+const STATE_BRANCH = 'refs/heads/near-ai/state';
+const gitBuffer = (remoteDir: string, args: string[], input?: Buffer): Buffer => execFileSync('git', ['--git-dir', remoteDir, ...args], { input, env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1', GIT_AUTHOR_NAME: 'x', GIT_AUTHOR_EMAIL: 'x@example.test', GIT_COMMITTER_NAME: 'x', GIT_COMMITTER_EMAIL: 'x@example.test' }, maxBuffer: 256 * 1024 * 1024 });
+
+/** The files of the remote's state branch by name, as bytes. */
+export function remoteFiles(remoteDir: string, ref = STATE_BRANCH): Map<string, Buffer> {
+  const files = new Map<string, Buffer>();
+  for (const name of fixtureGit(remoteDir, ['ls-tree', '--name-only', ref]).split('\n').filter(Boolean)) files.set(name, gitBuffer(remoteDir, ['show', `${ref}:${name}`]));
+  return files;
+}
+
+/** Puts a new commit holding exactly these files on the state branch, on top of the old tip, using plain git (what anyone with push rights could do). */
+export function replaceRemoteTree(remoteDir: string, files: ReadonlyMap<string, Buffer>): string {
+  const parent = fixtureGit(remoteDir, ['rev-parse', STATE_BRANCH]).trim();
+  const lines: Buffer[] = [];
+  for (const [name, data] of files) lines.push(Buffer.from(`100644 blob ${gitBuffer(remoteDir, ['hash-object', '-w', '--stdin'], data).toString().trim()}\t${name}\0`));
+  const tree = gitBuffer(remoteDir, ['mktree', '-z'], Buffer.concat(lines)).toString().trim();
+  const commit = gitBuffer(remoteDir, ['commit-tree', tree, '-p', parent, '-m', 'attack']).toString().trim();
+  fixtureGit(remoteDir, ['update-ref', STATE_BRANCH, commit]);
+  return commit;
 }

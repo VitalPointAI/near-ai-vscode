@@ -10,7 +10,7 @@ import { readProjectChoicesSync, writeProjectChoice } from '../services/modelCho
 import { CHECKPOINT_SYNC_BYTES, CHECKPOINT_SYNC_RUNS, SYNCED_KINDS } from '../services/stateRecords';
 import { MAX_PUSH_ATTEMPTS } from '../services/stateSync';
 import { bareRemote, fixtureGit } from './helpers/gitFixtures';
-import { SIX_TURNS, chain, entryIds, machine, remotePayloads, treeHash, writeMarker, type Machine } from './helpers/syncFixtures';
+import { SIX_TURNS, chain, entryIds, machine, remotePayloads, syncedPair, treeHash, writeMarker, type Machine } from './helpers/syncFixtures';
 
 // Phase 27, plan 12 (SYNC-05): two computers with the project cloned at different paths exchange the state home through the project's own remote.
 
@@ -100,21 +100,7 @@ test('the recovery wrap is owner-only and the code is never written anywhere in 
   assert.ok(MAX_PUSH_ATTEMPTS >= 2);
 });
 
-/** Two computers over one remote with sync on and B opened with the code. Machine A already pushed once. */
-async function pair(): Promise<{ remote: string; a: Machine; b: Machine; code: string; bytes: Buffer }> {
-  const remote = bareRemote({ withMain: false });
-  const a = await machine(remote, 'alpha');
-  const b = await machine(remote, 'bravo');
-  const { code, bytes } = generateRecoveryCode();
-  await a.keys.ensureDataKey();
-  await a.keys.writeRecoveryWrap(bytes);
-  await a.threads.create({ id: THREAD, title: 'Shared thread', model: 'near/model-a', origin: 'panel' });
-  await a.threads.appendEntries(THREAD, chain(THREAD, a.writer, SIX_TURNS));
-  assert.equal((await a.sync.sync()).kind, 'synced');
-  assert.equal((await b.sync.unlockFromRemote(bytes)).kind, 'synced');
-  assert.equal((await b.sync.pullOnly()).kind, 'synced');
-  return { remote, a, b, code, bytes };
-}
+const pair = (): ReturnType<typeof syncedPair> => syncedPair(THREAD);
 
 const jsonFiles = async (dir: string): Promise<string[]> => (await readdir(dir).catch(() => [] as string[])).filter((name) => name.endsWith('.json')).sort();
 const later = (ms = 8): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));

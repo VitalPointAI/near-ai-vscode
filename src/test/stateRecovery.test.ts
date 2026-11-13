@@ -9,6 +9,9 @@ import {
   MAX_OBJECT_ENTRIES, OBJECT_MAGIC, buildManifest, openManifest, openObject, readManifestHeader, sealObject, type ObjectEntry, type OpenPart, type SealedPart
 } from '../domain/state/objects';
 import { createHash } from 'node:crypto';
+import { stat } from 'node:fs/promises';
+import { fixtureGit } from './helpers/gitFixtures';
+import { SIX_TURNS, chain, entryIds, machine, remoteFiles, replaceRemoteTree, syncedPair, treeHash, type Machine } from './helpers/syncFixtures';
 
 function kdfRecord(salt: Buffer): KdfRecord {
   return { name: KDF_PARAMS.name, N: KDF_PARAMS.N, r: KDF_PARAMS.r, p: KDF_PARAMS.p, salt: salt.toString('base64') };
@@ -288,4 +291,140 @@ test('no thread title, record id, model name or prompt appears in the plaintext 
     assert.match(part.entry.file, /^[0-9a-f]{32}\.bin$/);
     assert.equal(part.data.includes(Buffer.from('layoff')), false);
   }
+});
+
+// ---- Phase 27, plan 12 (SYNC-04, D-09): a remote that fails verification changes nothing here -------------------------------------------------
+
+const FIRST = 'conv-recovery01';
+const SECOND = 'conv-recovery02';
+const STATE_REF_NAME = 'refs/heads/near-ai/state';
+const tip = (remote: string): string => fixtureGit(remote, ['rev-parse', STATE_REF_NAME]).trim();
+
+/** A and B in step, then A pushes a second thread that B has not pulled yet. The tip before that push is returned for the rollback case. */
+async function arranged(): Promise<{ remote: string; a: Machine; b: Machine; earlier: string }> {
+  const pair = await syncedPair(FIRST);
+  const earlier = tip(pair.remote);
+  await pair.a.threads.create({ id: SECOND, title: 'Second', model: 'm', origin: 'panel' });
+  await pair.a.threads.appendEntries(SECOND, chain(SECOND, pair.a.writer, SIX_TURNS));
+  const pushed = await pair.a.sync.sync();
+  assert.equal(pushed.pushed, true, pushed.message);
+  return { remote: pair.remote, a: pair.a, b: pair.b, earlier };
+}
+
+async function assertRefusedUntouched(b: Machine, expected: RegExp): Promise<void> {
+  const before = treeHash(b.home.dir);
+  const outcome = await b.sync.sync();
+  assert.equal(outcome.kind, 'refused', outcome.message);
+  assert.match(outcome.message, expected);
+  assert.match(outcome.message, /Nothing was changed\./);
+  assert.equal(treeHash(b.home.dir), before, 'every file path and byte of the state home is as it was');
+}
+
+async function manifestOf(remote: string, a: Machine) {
+  const dataKey = await a.keys.dataKey();
+  assert.ok(dataKey);
+  const files = remoteFiles(remote);
+  const text = (files.get('manifest.json') ?? Buffer.alloc(0)).toString('utf8');
+  return { dataKey, files, text, manifest: openManifest(text, dataKey, 0) };
+}
+
+test('a manifest with one flipped byte is refused and the state home is byte-identical', async () => {
+  const { remote, b } = await arranged();
+  const files = remoteFiles(remote);
+  const header = JSON.parse((files.get('manifest.json') ?? Buffer.alloc(0)).toString('utf8')) as { sealed: { data: string } };
+  header.sealed.data = `${header.sealed.data.startsWith('A') ? 'B' : 'A'}${header.sealed.data.slice(1)}`;
+  files.set('manifest.json', Buffer.from(`${JSON.stringify(header)}\n`));
+  replaceRemoteTree(remote, files);
+  await assertRefusedUntouched(b, /changed or is damaged/);
+});
+
+test('an object cut short is refused and the state home is byte-identical', async () => {
+  const { remote, a, b } = await arranged();
+  const { files, manifest } = await manifestOf(remote, a);
+  const hot = manifest.objects.filter((entry) => entry.class === 'hot').at(-1);
+  assert.ok(hot);
+  const bytes = files.get(hot.file) ?? Buffer.alloc(0);
+  files.set(hot.file, bytes.subarray(0, Math.floor(bytes.length / 2)));
+  replaceRemoteTree(remote, files);
+  await assertRefusedUntouched(b, /cut short/);
+});
+
+test('a listed object missing from the tree is refused and the state home is byte-identical', async () => {
+  const { remote, a, b } = await arranged();
+  const { files, manifest } = await manifestOf(remote, a);
+  const hot = manifest.objects.filter((entry) => entry.class === 'hot').at(-1);
+  assert.ok(hot);
+  files.delete(hot.file);
+  replaceRemoteTree(remote, files);
+  await assertRefusedUntouched(b, /missing/);
+});
+
+test('an older valid tree (a lower sequence number than one already seen) is refused and the state home is byte-identical', async () => {
+  const { remote, b, earlier } = await arranged();
+  assert.equal((await b.sync.sync()).kind, 'synced', 'B sees the newer state first');
+  fixtureGit(remote, ['update-ref', STATE_REF_NAME, earlier]);
+  await assertRefusedUntouched(b, /older than one this computer has already seen/);
+});
+
+test('a bundle sealed for another project (another state id), with or without objects, is refused and the state home is byte-identical', async () => {
+  const { remote, a, b } = await arranged();
+  const { dataKey, text } = await manifestOf(remote, a);
+  const header = readManifestHeader(text);
+  const foreignId = newStateId();
+  const empty = new Map<string, Buffer>([['manifest.json', Buffer.from(buildManifest({ stateId: foreignId, kdf: header.kdf, wrappedKey: header.wrappedKey, dataKey, seq: 9, objects: [], indexFile: null }))]]);
+  replaceRemoteTree(remote, empty);
+  await assertRefusedUntouched(b, /changed or is damaged/);
+  const parts = sealObject(dataKey, foreignId, 'hot', { v: 1, entries: {}, records: [] });
+  const withObjects = new Map<string, Buffer>([['manifest.json', Buffer.from(buildManifest({ stateId: foreignId, kdf: header.kdf, wrappedKey: header.wrappedKey, dataKey, seq: 10, objects: parts.map((part) => part.entry), indexFile: null }))]]);
+  for (const part of parts) withObjects.set(part.entry.file, part.data);
+  replaceRemoteTree(remote, withObjects);
+  await assertRefusedUntouched(b, /changed or is damaged/);
+});
+
+test('a manifest that leaves out the object an authentic index says is there is refused and the state home is byte-identical', async () => {
+  const { remote, a, b } = await arranged();
+  const { dataKey, files, text, manifest } = await manifestOf(remote, a);
+  const header = readManifestHeader(text);
+  const hot = manifest.objects.filter((entry) => entry.class === 'hot').at(-1);
+  assert.ok(hot);
+  files.set('manifest.json', Buffer.from(buildManifest({
+    stateId: header.stateId, kdf: header.kdf, wrappedKey: header.wrappedKey, dataKey, seq: manifest.seq + 1,
+    objects: manifest.objects.filter((entry) => entry.file !== hot.file), indexFile: manifest.indexFile
+  })));
+  replaceRemoteTree(remote, files);
+  await assertRefusedUntouched(b, /missing/);
+});
+
+test('the wrong recovery code on a fresh computer creates no state home, and a sync before opening the project creates none either', async () => {
+  const { remote } = await arranged();
+  const fresh = await machine(remote, 'charlie');
+  const wrong = generateRecoveryCode().bytes;
+  const refused = await fresh.sync.unlockFromRemote(wrong);
+  assert.equal(refused.kind, 'refused');
+  assert.match(refused.message, /recovery code is not right/);
+  assert.equal(await stat(fresh.home.dir).then(() => true, () => false), false, 'no state home folder was made');
+  const early = await fresh.sync.sync();
+  assert.equal(early.kind, 'refused');
+  assert.match(early.message, /locked/);
+  assert.equal(await stat(fresh.home.dir).then(() => true, () => false), false);
+});
+
+test('after a refusal a later valid push is accepted and the earlier refusal changed nothing', async () => {
+  const { remote, a, b } = await arranged();
+  const good = tip(remote);
+  const { files } = await manifestOf(remote, a);
+  files.set('manifest.json', Buffer.from('{"format":1}\n'));
+  replaceRemoteTree(remote, files);
+  const before = treeHash(b.home.dir);
+  assert.equal((await b.sync.sync()).kind, 'refused');
+  assert.equal(treeHash(b.home.dir), before);
+  // The owner undoes the damage on the remote; A saves something new; B takes it.
+  fixtureGit(remote, ['update-ref', STATE_REF_NAME, good]);
+  await a.threads.create({ id: 'conv-recovery03', title: 'Third', model: 'm', origin: 'panel' });
+  await a.threads.appendEntries('conv-recovery03', chain('conv-recovery03', a.writer, SIX_TURNS));
+  assert.equal((await a.sync.sync()).pushed, true);
+  const accepted = await b.sync.sync();
+  assert.equal(accepted.kind, 'synced', accepted.message);
+  assert.equal((await entryIds(b, 'conv-recovery03')).length, 6);
+  assert.equal((await entryIds(b, SECOND)).length, 6);
 });
