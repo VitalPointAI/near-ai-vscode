@@ -363,7 +363,9 @@ no single one is relied on:
    not cover them. A declined action is reported as blocked.
 5. **Citations are checked.** CheckCitations confirms each quoted passage
    appears in the page actually fetched, so a report cannot rest on text a
-   source never contained.
+   source never contained. CheckOriginality compares a draft with the same
+   fetched pages for copied runs, misquotations, and close paraphrase; it reads
+   only the workspace draft and pages already fetched, and sends nothing out.
 
 Agent Activity counts, per agent, injections flagged, hidden content removed,
 and actions held and blocked, with an entry for each showing the source.

@@ -200,8 +200,8 @@ run a workflow and stays current; your `~/.claude` setup is never touched.
 software development, research and analysis, presales and solution design,
 writing and content, data analysis, or general. Each type gets a tailored team
 (for example architect, developer, reviewer, QA, security, and DevOps for
-software; investigator, source verifier, analyst, writer, and editor for
-research) and
+software; investigator, source verifier, analyst, writer, plagiarism checker,
+and editor for research) and
 guidance in `AGENTS.md`, which every agent reads, on how this kind of work goes
 through the same Open-GSD cycle: plan, execute, **red team**, verify, audit,
 release. The red-team member attacks the work before it is verified and
@@ -211,15 +211,25 @@ notes list the items not fixed. In these projects `/gsd-execute-phase`,
 `/gsd-verify-work`, and `/gsd-autonomous` include the red-team step.
 
 A research team works in a fixed order: investigator, source verifier,
-analyst, writer, red team, editor. Each member has one output file
-(`TEAM-FINDINGS.md`, `SOURCE-CHECK.md`, `TEAM-ANALYSIS.md`, the report,
-`RED-TEAM.md`, `EDITORIAL-REVIEW.md`) and a stated definition of done, and all
-of them write for the audience and style in `.planning/STYLE.md`. The editor
-is the release gate: it checks the report for coherence and comprehension,
-professional quality, and that every note's verified source says what the
-sentence claims, makes copy edits itself, sends factual problems back, and
-signs off with SIGN-OFF or NOT READY. Nothing is released without SIGN-OFF,
-and the delivered report carries its sources as real endnotes or footnotes
+analyst, writer, plagiarism checker, red team, editor. Each member has one
+output file (`TEAM-FINDINGS.md`, `SOURCE-CHECK.md`, `TEAM-ANALYSIS.md`, the
+report, `INTEGRITY-CHECK.md`, `RED-TEAM.md`, `EDITORIAL-REVIEW.md`) and a
+stated definition of done, and all of them write for the audience and style
+in `.planning/STYLE.md`. Reports are cited in the Chicago Manual of Style,
+18th edition, notes and bibliography (a project can choose another style as a
+recorded owner decision in `STYLE.md`), with footnotes or endnotes as fits the
+report; reliability grades go in the audit annex, not in the notes. The
+**plagiarism checker** is a permanent member of every research team: it
+compares the draft with every source fetched in the run (CheckOriginality),
+searches the web for distinctive sentences, checks every note against its
+source and Chicago 18, never edits the report, and ends
+`INTEGRITY-CHECK.md` with CLEAN or NOT CLEAN. The editor is the release gate:
+it checks the report for coherence and comprehension, professional quality,
+and that every note's verified source says what the sentence claims, makes
+copy edits itself, sends factual problems back, and signs off with SIGN-OFF
+or NOT READY. It cannot sign off while the integrity check says NOT CLEAN, is
+missing, or checked an older draft. Nothing is released without SIGN-OFF,
+and the delivered report carries its sources as real footnotes or endnotes
 (CreateDocument and CreatePdf). The presales reviewer and the writing editor
 are release gates in the same way. A project set up before this keeps its own
 team file; run **NEAR AI: Update Team…** to pick up the new roles.
@@ -486,7 +496,12 @@ until it runs out aren't shown.
   only what is new (a `privacy:` line, new tools, and new Output and Done-when
   sections), and a member you kept is not asked about again until its
   built-in definition changes; members you added are left alone; members no longer built in are
-  kept and flagged; and new built-in members are offered. A project team's
+  kept and flagged; and new built-in members are offered. A permanent
+  built-in member (the research team's plagiarism checker) is not offered
+  but added, and the preview says whether the team was missing it or you had
+  removed it; your own edits to it are merged like any member's. Team Studio's
+  AI team builder adds the plagiarism checker to any team it drafts that
+  gathers or checks sources. A project team's
   `AGENTS.md` guidance is updated the same way when the extension wrote it.
   Teams made before stamps existed are recognised by their member names, and
   a member that matches any released version exactly is treated as unchanged.
@@ -617,8 +632,10 @@ copy of Open-GSD to a project that doesn't already have one.
 
 - **Web research with guard rails.** Agents search with the provider you pick
   (**NEAR AI: Set Up Web Search**: your own SearXNG, Brave Search, or Tavily),
-  read pages and documents with WebFetch, and verify quotes with
-  CheckCitations. Hidden text is stripped, likely prompt injections are
+  read pages and documents with WebFetch, verify quotes with
+  CheckCitations, and check a draft for copied or closely paraphrased
+  passages with CheckOriginality (it compares the draft only with pages
+  fetched in the same run). Hidden text is stripped, likely prompt injections are
   flagged, outside content is fenced as data, and after reading it, commands
   that could send data out always ask. Agent Activity shows each detection.
 - **Cybersecurity scans** touch only the scope the panel showed you. Loopback is
