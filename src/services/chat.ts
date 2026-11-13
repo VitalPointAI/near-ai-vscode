@@ -35,6 +35,7 @@ import { securityAccess } from './securityScan';
 import { webSearchProvider } from './webSearchSetup';
 import { mcpRegistry } from './mcpView';
 import { ActivityStore, closeInterruptedRuns } from './activityStore';
+import { batchView } from '../domain/state/threadView';
 import { ConversationLog, ConversationOutcome, ConversationStatus, ConversationSummary, conversationStatus, conversationTitle, isOutput, MAX_OPEN_CONVERSATIONS, outcomeOf, parseSavedConversations, promptIdOf, PromptOutcome, savedConversations } from './conversations';
 import { ReputationStore } from './reputation';
 import { hostAttribution } from '../domain/activity';
@@ -215,7 +216,13 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     tab.log.clear();
     tab.outcomes.clear();
     tab.outcome = 'done';
-    tab.log.add(Array.isArray(view) ? { type: 'transcript', turns: view, note } : { type: 'transcript', items: view.items, note });
+    if (Array.isArray(view)) tab.log.add({ type: 'transcript', turns: view, note });
+    else {
+      // D-07: every entry reaches the view, in batches so no one message is large; the note follows the last part.
+      const batches = batchView(view.items);
+      if (!batches.length) batches.push([]);
+      batches.forEach((items, index) => tab.log.add({ type: 'transcript', items, part: index + 1, of: batches.length, ...(index === batches.length - 1 ? { note } : {}) }));
+    }
     // A run of it that the extension host never finished (code-server closed it, a reload, a crash).
     const markers = runMarkersFor(context, root);
     const cut = await markers.interruptedRun(tab.id).catch(() => undefined);
@@ -374,6 +381,12 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
   const handle = async (message: ChatWebviewMessage, tab: ChatTab): Promise<void> => {
     // A person acting in the chat releases a run paused on unanswered approvals; Stop below still stops it.
     if (message.type !== 'stop' && USER_ACTIONS.has(message.type)) tab.agent?.userActive();
+    // A reopened card was opened: its stored output goes to the view, only if that conversation is still the one on screen. Nothing is logged or kept.
+    if (message.type === 'thread-tool-output') {
+      const output = await tab.agent?.toolOutput(message.entryId).catch(() => undefined);
+      if (!disposed && tab.id === activeId && tabs.includes(tab)) void panel.webview.postMessage({ type: 'thread-tool-output', entryId: message.entryId, ...(output !== undefined ? { output } : {}) });
+      return;
+    }
     if (message.type === 'stop') {
       const was = isRunning(tab);
       const outcome = tab.outcome;

@@ -28,6 +28,8 @@ export type ChatWebviewMessage =
   | { type: 'agent-control'; agentId: string; action: 'pause' | 'resume' | 'stop' | 'nudge' }
   /** Opens a saved conversation as a tab, or shows it if it is already open. */
   | { type: 'resume-conversation'; id: string }
+  /** A reopened thread's tool card was opened: asks for the step's stored output. Exactly these three keys. */
+  | { type: 'thread-tool-output'; conversationId: string; entryId: string }
   /** Resume or dismiss a conversation's run the extension host never finished. */
   | { type: 'resume-interrupted' | 'dismiss-interrupted'; conversationId?: string }
   /** Continue a run the agent stopped short (stuck, or at the turn limit): sends "Continue." for the user. */
@@ -251,6 +253,11 @@ export function parseChatWebviewMessage(value: unknown): ChatWebviewMessage | un
   const conversation = conversationOf(message);
   if (!conversation.ok) return undefined;
   const scoped = conversation.field;
+  if (message.type === 'thread-tool-output') {
+    // The conversation is required here (a card is asked for in the conversation it is on), and its id is a thread entry id: 26 Crockford base32 characters.
+    if (Object.keys(message).length !== 3 || scoped.conversationId === undefined || typeof message.entryId !== 'string' || !/^[0-9a-z]{26}$/.test(message.entryId)) return undefined;
+    return { type: 'thread-tool-output', conversationId: scoped.conversationId, entryId: message.entryId };
+  }
   if (message.type === 'set-action-policy') {
     if (Object.keys(message).length !== 2 || !isPolicyMode(message.mode)) return undefined;
     return { type: 'set-action-policy', mode: message.mode };

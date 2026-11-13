@@ -148,6 +148,13 @@ details.tool .log {
   font-family: var(--vscode-editor-font-family); font-size: 11px; white-space: pre-wrap; overflow-wrap: anywhere;
   color: var(--vscode-descriptionForeground);
 }
+/* A reopened conversation (D-07): every message and tool step of its log, drawn in slices. Off-screen ones skip layout and paint until they are scrolled near. */
+.reopened { content-visibility: auto; contain-intrinsic-size: auto 48px; }
+details.history-tool summary .history-args { min-width: 0; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--vscode-editor-font-family); font-size: 11px; }
+details.history-tool summary .history-note { flex: none; font-size: 11px; color: var(--vscode-editorWarning-foreground, var(--vscode-descriptionForeground)); }
+details.history-tool .log pre { margin: 0; font: inherit; white-space: pre-wrap; overflow-wrap: anywhere; }
+.history-divider { display: flex; align-items: center; gap: 8px; margin: 4px 0 16px; font-size: 11px; color: var(--vscode-descriptionForeground); }
+.history-divider::before, .history-divider::after { content: ''; flex: 1 1 0; border-top: 1px solid var(--vscode-panel-border); }
 .spinner { width: 10px; height: 10px; border-radius: 50%; border: 1.5px solid var(--vscode-progressBar-background); border-right-color: transparent; animation: spin 0.8s linear infinite; flex: none; }
 @keyframes spin { to { transform: rotate(360deg); } }
 

@@ -121,7 +121,9 @@ export class ConversationLog {
     if (PANELS.has(String(message.type))) this.entries = this.entries.filter((entry) => entry.type !== message.type);
     this.entries.push({ ...message });
     if (this.entries.length > this.max) {
-      this.entries.splice(0, Math.ceil(this.max / 4));
+      // The oldest live output goes first. A reopened thread's history is never trimmed away (D-07): every entry of it stays until the conversation closes.
+      let drop = Math.ceil(this.max / 4);
+      this.entries = this.entries.filter((entry) => entry.type === 'transcript' || drop-- <= 0);
       this.trimmed = true;
     }
   }

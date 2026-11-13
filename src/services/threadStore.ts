@@ -11,6 +11,7 @@ import * as path from 'node:path';
 import { aadFor, open as openSealed, seal, subKey, type SealedBlob } from '../domain/state/keys';
 import { isSyntheticMessage, messagesToEntries } from '../domain/state/threadCapture';
 import { threadLines, threadTip, unionEntries, type ThreadEntry, type ThreadLines, type ThreadRole } from '../domain/state/threadEntries';
+import { pairToolResults } from '../domain/state/threadView';
 import type { AgentMessage } from './nearAiClient';
 import { ProjectStateHome, stateHomeFor, writeFileAtomic } from './stateHome';
 import { stateKeysFor, type SecretsLike, type StateKeys } from './stateKeys';
@@ -192,6 +193,22 @@ export class ThreadStore implements ConversationStore {
   /** A thread arranged for display: the main line and every other continuation. */
   public async lines(id: string): Promise<ThreadLines> {
     return threadLines(await this.entries(id));
+  }
+
+  /**
+   * The stored output of one tool step of a thread, whole up to the 2 MiB cap (D-12): `entryId` is the id of the step's tool-call entry (what the card
+   * carries), or of its tool-result entry. Undefined for an unknown entry, a call with no stored result, or a thread this device cannot open.
+   */
+  public async toolOutput(id: string, entryId: string): Promise<string | undefined> {
+    assertThreadId(id);
+    const lines = await this.lines(id);
+    for (const segment of [lines.main, ...lines.branches.map((branch) => branch.entries)]) {
+      const own = segment.find((entry) => entry.id === entryId);
+      const result = own?.role === 'tool-result' ? own : pairToolResults(segment).get(entryId);
+      const output = (result?.body as { output?: unknown } | undefined)?.output;
+      if (typeof output === 'string') return output;
+    }
+    return undefined;
   }
 
   /** Adds entries to a thread's log. An entry already in the log (same id) is not added twice. Nothing is removed. */

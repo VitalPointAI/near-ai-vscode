@@ -643,6 +643,12 @@ export class AgentConversation {
     return items ? { items } : visibleTurns(transcript.messages, this.display);
   }
 
+  /** The stored output of one tool step of this conversation, for a reopened card that was opened (D-07). Only the thread store keeps it. */
+  public async toolOutput(entryId: string): Promise<string | undefined> {
+    const store = this.transcripts;
+    return store instanceof ThreadStore ? store.toolOutput(this.conversationId, entryId) : undefined;
+  }
+
   public reset(): void {
     this.halt();
     this.steering = [];
