@@ -75,3 +75,8 @@ export function roleUpdate(option: RoleOption, model: string, roleModels: Record
   if (!option.id.startsWith('role:')) return { setting: option.setting, value: model };
   return { setting: option.setting, value: { ...roleModels, [option.id.slice(5)]: model } };
 }
+
+/** The confirmation after applying one model: a project choice (the usual case) or an explicit workspace setting. */
+export function roleAppliedText(label: string, model: string, where: 'project' | 'workspace'): string {
+  return `${label} now uses ${model} ${where === 'project' ? 'for this project' : 'in this workspace'}.`;
+}

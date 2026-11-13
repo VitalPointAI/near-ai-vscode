@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { catalogVersion, type ResultRow, type SavedRun } from '../benchmark/results';
 import { catalogEntries, comparisonPageHtml, defaultSelection, estimateView, historyEntries, leaderboardRows, parseComparisonMessage, reportView, selectionProblem } from '../services/modelComparisonPage';
-import { heldRoles, privacyWarning, roleOptions, roleUpdate } from '../services/modelRoles';
+import { heldRoles, privacyWarning, roleAppliedText, roleOptions, roleUpdate } from '../services/modelRoles';
 import type { ModelInfo } from '../services/nearAiClient';
 import { parseToolsPageMessage } from '../services/toolsDirectory';
 
@@ -36,6 +36,14 @@ test('applying a role writes one setting; an agent role keeps every other role a
   assert.deepEqual(roleUpdate(role('tier:deep'), 'deepseek/deepseek-v4.1-flash', settings.roleModels), { setting: 'agent.deepModel', value: 'deepseek/deepseek-v4.1-flash' });
   assert.deepEqual(roleUpdate(role('main'), 'moonshotai/kimi-k3', settings.roleModels), { setting: 'defaultModel', value: 'moonshotai/kimi-k3' });
   assert.deepEqual(roleUpdate(role('role:gsd-executor'), 'moonshotai/kimi-k3', settings.roleModels), { setting: 'agent.roleModels', value: { ...settings.roleModels, 'gsd-executor': 'moonshotai/kimi-k3' } });
+});
+
+// D-06: a model applied from here now belongs to the project (choices.json), unless the workspace already sets that value itself.
+test('the applied message says where the model was put: for this project, or in this workspace', () => {
+  const roles = roleOptions(settings, catalog);
+  const deep = roles.find((candidate) => candidate.id === 'tier:deep')!;
+  assert.equal(roleAppliedText(deep.label, 'z-ai/glm-5.3', 'project'), 'Deep tier now uses z-ai/glm-5.3 for this project.');
+  assert.equal(roleAppliedText(deep.label, 'z-ai/glm-5.3', 'workspace'), 'Deep tier now uses z-ai/glm-5.3 in this workspace.');
 });
 
 test('a forwarded model taking over a role that uses a private model is warned about; other moves are not', () => {

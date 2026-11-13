@@ -5,7 +5,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { comparisonStoreFor, ComparisonStore } from '../benchmark/store';
 import type { ResultRow, SavedRun } from '../benchmark/results';
-import { projectChoiceFor, readProjectChoicesSync, resolveSetting, writeProjectChoice } from '../services/modelChoices';
+import { declineImport, importOffer, PROJECT_CHOICE_SETTINGS, planApply, projectChoiceFor, projectUndoFor, readChoicesFileSync, readProjectChoicesSync, removeProjectChoice, resolveSetting, undoProjectChoice, writeProjectChoice, type ProjectUndo } from '../services/modelChoices';
 import { stateHomeFor } from '../services/stateHome';
 import { tempProject } from './helpers/stateFixtures';
 
@@ -192,4 +192,117 @@ test('the tools directory names the project choice as the source of a model, and
   assert.equal(plain.source, 'role setting');
   assert.equal(fromProject.source, 'project choice');
   assert.equal(fromProject.model, 'f');
+});
+
+// ---- apply, undo and the import offer (Task 3) ----
+
+test('planApply: the workspace when it sets the value explicitly (workspace or folder), otherwise the project; never user settings', () => {
+  assert.equal(planApply({ workspaceValue: 'x' }), 'workspace');
+  assert.equal(planApply({ workspaceFolderValue: 'x' }), 'workspace');
+  assert.equal(planApply({ globalValue: 'user' }), 'project');
+  assert.equal(planApply({}), 'project');
+  assert.equal(planApply(undefined), 'project');
+});
+
+test('applying then undoing: a previous project choice comes back, a first-time choice is removed, and no user setting is involved', async () => {
+  const root = await tempProject();
+  const setting = 'nearAi.agent.deepModel';
+  // First time: there was no project choice, so undo removes it.
+  const first = projectUndoFor(root, setting);
+  assert.equal(first.previous, undefined);
+  assert.equal(await writeProjectChoice(root, setting, 'm-1', 'edA.1'), true);
+  assert.equal(projectChoiceFor(root, setting), 'm-1');
+  // Second time: the previous project choice is m-1.
+  const second = projectUndoFor(root, setting);
+  assert.equal(second.previous, 'm-1');
+  assert.equal(await writeProjectChoice(root, setting, 'm-2', 'edA.1'), true);
+  assert.equal(projectChoiceFor(root, setting), 'm-2');
+  await undoProjectChoice(second, 'edA.1');
+  assert.equal(projectChoiceFor(root, setting), 'm-1', 'undo restores exactly what was there');
+  await undoProjectChoice(first, 'edA.1');
+  assert.equal(projectChoiceFor(root, setting), undefined, 'undoing a first-time choice removes it');
+  const file = JSON.parse(await readFile(stateHomeFor(root).paths.choices, 'utf8')) as { values: Record<string, unknown> };
+  assert.deepEqual(file.values, {}, 'choices.json no longer has that setting');
+});
+
+test('undoing a role map unwinds several changes in reverse order and keeps other settings', async () => {
+  const root = await tempProject();
+  await writeProjectChoice(root, 'nearAi.agent.fastModel', 'm-fast', 'edA.1');
+  const undoRoles: ProjectUndo[] = [];
+  for (const [name, model] of [['gsd-planner', 'm-a'], ['gsd-verifier', 'm-b']] as const) {
+    undoRoles.push(projectUndoFor(root, 'nearAi.agent.roleModels'));
+    const current = (projectChoiceFor(root, 'nearAi.agent.roleModels') ?? {}) as Record<string, string>;
+    await writeProjectChoice(root, 'nearAi.agent.roleModels', { ...current, [name]: model }, 'edA.1');
+  }
+  assert.deepEqual(projectChoiceFor(root, 'nearAi.agent.roleModels'), { 'gsd-planner': 'm-a', 'gsd-verifier': 'm-b' });
+  for (const entry of [...undoRoles].reverse()) await undoProjectChoice(entry, 'edA.1');
+  assert.equal(projectChoiceFor(root, 'nearAi.agent.roleModels'), undefined);
+  assert.equal(projectChoiceFor(root, 'nearAi.agent.fastModel'), 'm-fast', 'another setting is untouched by the undo');
+});
+
+test('SYNC-06 idempotency edge: applying the same recommendation twice leaves choices.json byte-identical and records no second undo', async () => {
+  const root = await tempProject();
+  const applyOnce = async (): Promise<boolean> => writeProjectChoice(root, 'nearAi.agent.deepModel', 'm-best', 'edA.1');
+  assert.equal(await applyOnce(), true);
+  const bytes = await readFile(stateHomeFor(root).paths.choices, 'utf8');
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  assert.equal(await applyOnce(), false, 'nothing changed, so the panel records no undo entry');
+  assert.equal(await readFile(stateHomeFor(root).paths.choices, 'utf8'), bytes);
+});
+
+test('removing a choice that is not there writes nothing, and never creates the state home', async () => {
+  const root = await tempProject();
+  assert.equal(await removeProjectChoice(root, 'nearAi.agent.deepModel', 'edA.1'), false);
+  assert.equal(await stateHomeFor(root).exists(), false);
+});
+
+test('importOffer lists user-level choices that differ from the default, and nothing is copied by listing', async () => {
+  const root = await tempProject();
+  const inspected = {
+    'nearAi.agent.deepModel': { globalValue: 'user-deep', defaultValue: 'default-deep' },
+    'nearAi.agent.fastModel': { globalValue: 'default-fast', defaultValue: 'default-fast' },
+    'nearAi.agent.standardModel': { defaultValue: 'default-standard' },
+    'nearAi.agent.roleModels': { globalValue: { 'gsd-planner': 'user-p' }, defaultValue: { 'gsd-planner': 'fast' } }
+  };
+  const offer = importOffer(inspected, { version: 1, values: {} });
+  assert.deepEqual(offer, [{ setting: 'nearAi.agent.deepModel', value: 'user-deep' }, { setting: 'nearAi.agent.roleModels', value: { 'gsd-planner': 'user-p' } }]);
+  assert.deepEqual(readProjectChoicesSync(root), {}, 'listing copied nothing');
+  assert.equal(await stateHomeFor(root).exists(), false);
+  // The panel's short names work as well as the full ones.
+  assert.deepEqual(importOffer({ 'agent.deepModel': { globalValue: 'u', defaultValue: 'd' } }, { version: 1, values: {} }), [{ setting: 'nearAi.agent.deepModel', value: 'u' }]);
+});
+
+test('SYNC-06 adjacency edge: no offer when the user value equals the project choice or the default, or every setting already has a project choice', async () => {
+  const root = await tempProject();
+  await writeProjectChoice(root, 'nearAi.agent.deepModel', 'same', 'edA.1');
+  const choices = readChoicesFileSync(root);
+  assert.deepEqual(importOffer({ 'nearAi.agent.deepModel': { globalValue: 'same', defaultValue: 'd' } }, choices), [], 'equal to the project choice');
+  assert.deepEqual(importOffer({ 'nearAi.agent.deepModel': { globalValue: 'other', defaultValue: 'd' } }, choices), [], 'the project already has its own choice, which is never replaced silently');
+  assert.deepEqual(importOffer({ 'nearAi.agent.fastModel': { globalValue: 'd', defaultValue: 'd' } }, choices), [], 'equal to the default');
+  for (const setting of PROJECT_CHOICE_SETTINGS) await writeProjectChoice(root, setting, setting === 'nearAi.agent.roleModels' ? { a: 'x' } : `m-${setting}`, 'edA.1');
+  const all = Object.fromEntries(PROJECT_CHOICE_SETTINGS.map((setting) => [setting, { globalValue: setting === 'nearAi.agent.roleModels' ? { z: 'q' } : 'user-value', defaultValue: setting === 'nearAi.agent.roleModels' ? {} : 'd' }]));
+  assert.deepEqual(importOffer(all, readChoicesFileSync(root)), []);
+});
+
+test("'Not now' is remembered for the project: no further offer, and the other choices are kept", async () => {
+  const root = await tempProject();
+  const inspected = { 'nearAi.agent.deepModel': { globalValue: 'user-deep', defaultValue: 'd' } };
+  assert.equal(importOffer(inspected, readChoicesFileSync(root)).length, 1);
+  await writeProjectChoice(root, 'nearAi.agent.fastModel', 'm-fast', 'edA.1');
+  await declineImport(root, 'edA.1');
+  const choices = readChoicesFileSync(root);
+  assert.equal(choices.importDeclined, true);
+  assert.deepEqual(importOffer(inspected, choices), []);
+  assert.equal(projectChoiceFor(root, 'agent.fastModel'), 'm-fast');
+  assert.equal(projectChoiceFor(root, 'agent.deepModel'), undefined, 'nothing was copied without a click');
+});
+
+test("'Use for this project' writes each offered value, and then there is nothing left to offer", async () => {
+  const root = await tempProject();
+  const inspected = { 'nearAi.agent.deepModel': { globalValue: 'user-deep', defaultValue: 'd' }, 'nearAi.defaultModel': { globalValue: 'user-main', defaultValue: 'd' } };
+  const offer = importOffer(inspected, readChoicesFileSync(root));
+  assert.equal(offer.length, 2);
+  for (const candidate of offer) await writeProjectChoice(root, candidate.setting, candidate.value, 'edA.1');
+  assert.equal(projectChoiceFor(root, 'defaultModel'), 'user-main');
+  assert.deepEqual(importOffer(inspected, readChoicesFileSync(root)), []);
 });

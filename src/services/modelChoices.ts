@@ -226,6 +226,21 @@ export async function declineImport(root: string, _writer: string): Promise<void
   });
 }
 
+/** What one apply replaced, so undo can put it back exactly: the previous project choice, or none (undo removes it). */
+export interface ProjectUndo { root: string; setting: ProjectChoiceSetting; previous: ChoiceValue | undefined }
+
+/** Captures the project's current choice for a setting; call it BEFORE the write so a failed write still leaves what happened undoable. */
+export function projectUndoFor(root: string, setting: string): ProjectUndo {
+  const name = requireSetting(setting);
+  return { root, setting: name, previous: readProjectChoicesSync(root)[name]?.value };
+}
+
+/** Puts the project's choice back to what it was before the apply: the old choice, or none. */
+export async function undoProjectChoice(undo: ProjectUndo, writer: string): Promise<void> {
+  if (undo.previous === undefined) await removeProjectChoice(undo.root, undo.setting, writer);
+  else await writeProjectChoice(undo.root, undo.setting, undo.previous, writer);
+}
+
 export interface ImportCandidate { setting: ProjectChoiceSetting; value: ChoiceValue }
 
 /**
