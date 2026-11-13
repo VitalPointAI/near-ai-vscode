@@ -4,9 +4,10 @@
 
 - Milestone 1: Phases 1-6 (SHIPPED)
 - **v0.4.0 A working core and a native NEAR agent runner**: Phases 7-12 (SHIPPED)
-- **0.4.x line**: ongoing releases on top of v0.4.0 (current; 0.4.5 published 2026-10-29)
+- **0.4.x line**: ongoing releases on top of v0.4.0 (current; 0.4.19 published; 0.4.20 = Phase 27, next before v0.7.0)
 - **v0.5.0 Trusted-source knowledge base**: PAUSED 2026-10-29 and moving to a separate project. Its roadmap, requirements, research and Phase 13 plans are archived in `.planning/milestones/v0.5.0-paused/`; the Phase 13 code lives on the local branch `gsd/phase-13-sovereignty-gate-post-quantum-cryptography-and-the-encrypted`.
 - **v0.7.0 Messaging relay — Teams and Signal**: Phases 68-76 (in planning; requirements defined 2026-11-13)
+- **v0.8.0 Cybersecurity**: Phase 25 (executed; UAT parked until after v0.7.0)
 
 ## 0.4.x line
 
@@ -21,25 +22,6 @@ Work here ships as 0.4.x releases: a `hotfix/0.4.N` branch from `main`, then the
 | 0.4.5 | 2026-10-29 | Team Studio; stalled replies retried and reported; reporting token in Settings |
 
 Next phases are added here (integer numbering continues from 26) when 0.4.x work is planned with GSD.
-
-### Phase 25: Cybersecurity harness with a target picker, offensive and defensive scans
-
-**Goal**: A user picks a target — this workspace, a URL/host, an address range, or a local container — in a dedicated Cybersecurity view, accepts a region-aware legal-use disclaimer once per engagement, and runs either a defensive audit or an offensive exploit scan in which the NEAR AI models plan, execute, verify, and report, producing reproducible findings, an exploit that works or a clear account of why it does not, and an exportable audit trail.
-**Depends on**: Nothing (builds on the shipped 0.4.x agent runtime, approval policy, and `src/security/` dependency scanner)
-**Requirements**: CYBER-01 … CYBER-12
-**Scope**: An *engagement* record is the unit of work: target, authorization statement, allowed modes (passive, active, intrusive), window, rate limit, exclusions, sandbox, and the accepted disclaimer with region, timestamp, and extension version, stored in `.planning/security/` and immutable once a run starts. The panel is a second view alongside Chat with a target picker (workspace folder, URL/host/IP, CIDR, git repo, local container), a mode selector (Defensive, Offensive, Full), a profile (quick, standard, deep), and live run activity; it must work in light, dark, and high-contrast themes and keep a table view of every finding. The harness core is a model-driven loop with planner, operator, critic, and reporter roles over a tool registry: built-in HTTP/TCP/DNS/TLS probes that need no external binary, optional host tools (`nmap`, `httpx`, `nuclei`, `nikto`, `sqlmap`, `testssl.sh`, `semgrep`, `trivy`, `gitleaks`, `whatweb`) detected and reported when absent, and a shell step that is always approval-gated. Defensive work covers recon, headers/TLS/DNS, secrets and dependency and IaC scanning, CVE mapping, and hardening advice; offensive work covers fingerprinting, vulnerability discovery, exploit selection or development, sandboxed PoC execution, access verification, post-exploitation proof, and cleanup. Every intrusive action passes `decidePermission` and the capability policy, is rate-limited and timed out, and is written to an append-only engagement ledger with tool, arguments, result, and reasoning. Findings are normalized (CVSS 3.1/4.0, CWE, CVE, OWASP) with evidence, exact reproduction commands, and a per-run diff, and export as Markdown, JSON, and SARIF. Models are treated as untrusted and interchangeable — a raw-completion abliterated model without native tool calling is driven through a structured protocol with parse-repair, retries, and context compaction — and a run can be replayed from its transcript. The disclaimer is shown before the first scan, names the region's law (US CFAA, UK Computer Misuse Act, EU directive, Australia, Canada, India, …) with a plain "you confirm you own or are authorized to test this target" statement, defaults to "not authorized" for public-sector and critical-infrastructure destinations, and blocks active and intrusive modes until accepted.
-**Success Criteria** (what must be TRUE):
-  1. From the Cybersecurity view a user selects each target kind (workspace, URL/host, CIDR, container), sees the resolved scope and a plan before it runs, and cannot start a passive, active, or intrusive scan without an accepted disclaimer that records region, timestamp, and engagement id; declining leaves the target untouched. (CYBER-01, CYBER-02, CYBER-03)
-  2. A defensive scan of a deliberately misconfigured test service finds the seeded issues (missing headers, expired certificate, outdated dependency, committed secret) with evidence and a reproduction command each, and a scan of a clean service reports no findings from the seeded set. (CYBER-06, CYBER-07)
-  3. An offensive scan against a local vulnerable target in the sandbox reaches a verified proof of access from a developed or adapted exploit, cleans up after itself, and reports honestly when an exploit fails; a run against a patched target says plainly that no exploit worked. (CYBER-08, CYBER-09)
-  4. Any intrusive action without approval is refused, the stop control halts a run within one tool call, rate and time limits are enforced, and the engagement ledger replays the run tool-for-tool so a second person can audit exactly what was sent to the target. (CYBER-10, CYBER-11)
-  5. The same engagement runs end to end against a model with no native tool calling through the structured protocol, and its transcript replay reproduces the findings without contacting the network where the tools allow it. (CYBER-04, CYBER-05, CYBER-11, CYBER-12)
-
-**Research flags**: (1) Which host tools are commonly installed or installable per platform, and their output formats, before writing parsers; prefer JSON output and mark missing tools rather than falling back silently. (2) Sandbox choice for offensive work on Linux, WSL, macOS, and Windows (container vs a separate devcontainer vs a throwaway folder) and how cleanup is proven. (3) Legal text per region, reviewed as plain-language statements rather than advice, plus the public-sector/critical-infrastructure blocklist. (4) Tool-call protocol for raw-completion models: schema, parse-repair, and how to detect a model that cannot follow it. (5) Whether the harness reuses the existing agent loop and approval path or needs a second, tighter loop, and what that costs in tests. (6) Network destinations the harness adds, so they join the declared allowlist and the leak scan.
-**Plans:** 0 plans
-
-Plans:
-- [ ] TBD (run /gsd-plan-phase 25 to break down)
 
 ### Phase 26: Performance: faster agent and research runs
 
@@ -63,6 +45,41 @@ Plans:
 - [x] 26-03-PLAN.md — Context and models: compaction threshold, ranged reads, bounded reports, cache-stable prefix, model deadline with backup, tier routing (PERF-02, PERF-03)
 - [x] 26-04-PLAN.md — Parallelism and reloads: read-only shell pool, worktree fan-out cap, batching instruction, auto-resume without repeats (PERF-04, PERF-05)
 - [x] 26-05-PLAN.md — Research GSD profile and verifier scaffold, docs, verification (PERF-06)
+
+### Phase 27: Project state follows the project across interfaces and machines (0.4.20)
+
+**Goal**: A person opens a project in any interface (code-server from any browser, desktop VS Code, another machine) and finds the same chats, run records, checkpoints, model comparison results and applied model choices, is offered "pick up where you left off", and never has to set the profile up again or pay to redo work already done; everything that leaves the machine is encrypted end to end.
+**Depends on**: Nothing (builds on the shipped 0.4.19 storage, transcripts, profile store and model comparison panel). Ships as release 0.4.20 before v0.7.0 Phase 68.
+**Requirements**: SYNC-01 … SYNC-09
+**Evidence (before)**: 2026-11-13 the owner opened in desktop VS Code a week of work done through code-server on the same host. Projects are mounted at the same path, so project ids match, but chats, runs, checkpoints and `evals/` live in each editor's own `globalStorage` (code-server holds 5 transcript folders and the 2026-11-12 comparison; desktop stops at 2026-11-06), applied model recommendations are written to *user* settings (`modelComparisonPanel.ts` `applyRecommended`, ConfigurationTarget.Global), and the API key plus the transcript encryption key (`nearAi.transcripts.key`) are in each editor's SecretStorage (code-server: the browser), so the profile needed setting up again and copied transcripts could not be decrypted.
+**Success Criteria** (what must be TRUE):
+  1. With the same project folder opened in code-server and in desktop VS Code on one host, both show the same chat list, run records, checkpoints, comparison runs and applied model choices; work done in one appears in the other on next open without any manual step. (SYNC-01, SYNC-06)
+  2. On first start of 0.4.20 each editor merges what its own storage already holds for the project into the project's state home, idempotently and without overwriting or deleting anything; the owner's existing code-server and desktop data both survive. (SYNC-02)
+  3. Transcripts are encrypted with a per-project data key that is portable: unlocked on this device from SecretStorage and on a new device by the recovery code; a wrong code and a tampered bundle are refused with a plain message and leave state untouched. (SYNC-03, SYNC-04)
+  4. Turning sync on shows a high-entropy recovery code once (never stored or logged); on a second machine with the same project cloned, entering it restores chats, runs, comparisons, model choices and the NEAR AI key without re-entering the key, through an encrypted bundle on a dedicated branch of the project's own git remote (never `main`); a leak test proves no plaintext transcript, key or prompt reaches the remote. (SYNC-04, SYNC-05)
+  5. Opening the project on a different interface or machine shows a "Pick up where you left off" card (last chat, last run state, current GSD phase and next step); one click reopens it and nothing re-runs or spends money. (SYNC-07)
+  6. All git work for sync is done by the extension and reported in plain words; conflicts from two machines merge per record with no lost entries (tested). 0.4.20 ships through the release PR with CHANGELOG and README updated. (SYNC-05, SYNC-08)
+**Plans:** 18 plans (11 waves)
+
+Plans:
+- [ ] 27-01-PLAN.md — Wire format and crypto core: recovery code, scrypt wrap, padded AEAD objects, sealed manifest, every refusal (owner confirms the contract first)
+- [ ] 27-02-PLAN.md — Merge laws: records, forks, tombstones, append-only thread entries, property tests; random temp names in shared writers
+- [ ] 27-03-PLAN.md — Project state home and shared data key on one host (D-04, D-10), new settings, sealed NEAR AI key copy for a second editor (D-15)
+- [ ] 27-04-PLAN.md — Run liveness across editors (writer + heartbeat), markers, checkpoints and activity in the state home
+- [ ] 27-05-PLAN.md — Full thread history captured before compaction; shared ThreadStore; no pruning (D-07, D-12, D-13)
+- [ ] 27-06-PLAN.md — Reopen with every message: tool-step cards, chunked rendering, history list from the index
+- [ ] 27-07-PLAN.md — 5 live conversations, crash-safe archive, reopen makes live (D-08)
+- [ ] 27-08-PLAN.md — @near chat participant turns recorded and reopened in the panel (D-07)
+- [ ] 27-09-PLAN.md — Comparisons and applied model choices follow the project; import offer (D-06)
+- [ ] 27-10-PLAN.md — Safe migration from each editor's storage; project spend history mirror (D-05, D-11)
+- [ ] 27-11-PLAN.md — Git transport: private mirror, anonymous commits, remote as a parameter, leak scan (D-01, D-09)
+- [ ] 27-12-PLAN.md — Two-machine sync: collect, verify, merge, apply; refusal leaves state untouched
+- [ ] 27-13-PLAN.md — Archived threads as cold objects with lazy fetch; consolidation and size limits
+- [ ] 27-14-PLAN.md — "Pick up where you left off" card (D-03)
+- [ ] 27-15-PLAN.md — Sync on/off, recovery code shown once, restore on a second machine with the NEAR AI key (D-02); no remote routes into the online-home setup; sync status published
+- [ ] 27-17-PLAN.md — "Give this project an online home": GitHub repo public or private on click, gh or pasted-URL fallback, separate checked code push, resumable (D-14, SYNC-09)
+- [ ] 27-18-PLAN.md — Visible sync control in the chat panel bar with five states, errors on the control, dismissible turn-on prompt (D-16)
+- [ ] 27-16-PLAN.md — Phase gate, owner check on the real host, README/SECURITY, feature PR and release 0.4.20
 
 ## Milestone v0.7.0: Messaging relay — Teams and Signal
 
@@ -224,10 +241,33 @@ Plans:
 | 76 Ops, onboarding and release | OPS-01 … OPS-05 | 5 |
 | **Total** | | **45** |
 
+## Milestone v0.8.0: Cybersecurity
+
+**Milestone goal:** The cybersecurity harness (target picker, legal disclaimer, defensive and offensive scans, engagement ledger) is verified end to end, its twelve regional disclaimers are accepted by the owner, and it ships as its own release, 0.8.0.
+
+**Moved 2026-11-13** out of the 0.4.x line at the owner's request, so the cyber module is planned and released under its own number. Phase 25 keeps its number (its plans, summaries and commits already use it). Its code is already in the extension, and parts reached users in 0.4.x releases; this milestone closes UAT and the owner legal review, then adds any follow-up phases. **Order:** after v0.7.0 (the relay); UAT stays parked until then.
+
+### Phase 25: Cybersecurity harness with a target picker, offensive and defensive scans
+
+**Goal**: A user picks a target — this workspace, a URL/host, an address range, or a local container — in a dedicated Cybersecurity view, accepts a region-aware legal-use disclaimer once per engagement, and runs either a defensive audit or an offensive exploit scan in which the NEAR AI models plan, execute, verify, and report, producing reproducible findings, an exploit that works or a clear account of why it does not, and an exportable audit trail.
+**Depends on**: Nothing (builds on the shipped 0.4.x agent runtime, approval policy, and `src/security/` dependency scanner)
+**Requirements**: CYBER-01 … CYBER-12
+**Scope**: An *engagement* record is the unit of work: target, authorization statement, allowed modes (passive, active, intrusive), window, rate limit, exclusions, sandbox, and the accepted disclaimer with region, timestamp, and extension version, stored in `.planning/security/` and immutable once a run starts. The panel is a second view alongside Chat with a target picker (workspace folder, URL/host/IP, CIDR, git repo, local container), a mode selector (Defensive, Offensive, Full), a profile (quick, standard, deep), and live run activity; it must work in light, dark, and high-contrast themes and keep a table view of every finding. The harness core is a model-driven loop with planner, operator, critic, and reporter roles over a tool registry: built-in HTTP/TCP/DNS/TLS probes that need no external binary, optional host tools (`nmap`, `httpx`, `nuclei`, `nikto`, `sqlmap`, `testssl.sh`, `semgrep`, `trivy`, `gitleaks`, `whatweb`) detected and reported when absent, and a shell step that is always approval-gated. Defensive work covers recon, headers/TLS/DNS, secrets and dependency and IaC scanning, CVE mapping, and hardening advice; offensive work covers fingerprinting, vulnerability discovery, exploit selection or development, sandboxed PoC execution, access verification, post-exploitation proof, and cleanup. Every intrusive action passes `decidePermission` and the capability policy, is rate-limited and timed out, and is written to an append-only engagement ledger with tool, arguments, result, and reasoning. Findings are normalized (CVSS 3.1/4.0, CWE, CVE, OWASP) with evidence, exact reproduction commands, and a per-run diff, and export as Markdown, JSON, and SARIF. Models are treated as untrusted and interchangeable — a raw-completion abliterated model without native tool calling is driven through a structured protocol with parse-repair, retries, and context compaction — and a run can be replayed from its transcript. The disclaimer is shown before the first scan, names the region's law (US CFAA, UK Computer Misuse Act, EU directive, Australia, Canada, India, …) with a plain "you confirm you own or are authorized to test this target" statement, defaults to "not authorized" for public-sector and critical-infrastructure destinations, and blocks active and intrusive modes until accepted.
+**Success Criteria** (what must be TRUE):
+  1. From the Cybersecurity view a user selects each target kind (workspace, URL/host, CIDR, container), sees the resolved scope and a plan before it runs, and cannot start a passive, active, or intrusive scan without an accepted disclaimer that records region, timestamp, and engagement id; declining leaves the target untouched. (CYBER-01, CYBER-02, CYBER-03)
+  2. A defensive scan of a deliberately misconfigured test service finds the seeded issues (missing headers, expired certificate, outdated dependency, committed secret) with evidence and a reproduction command each, and a scan of a clean service reports no findings from the seeded set. (CYBER-06, CYBER-07)
+  3. An offensive scan against a local vulnerable target in the sandbox reaches a verified proof of access from a developed or adapted exploit, cleans up after itself, and reports honestly when an exploit fails; a run against a patched target says plainly that no exploit worked. (CYBER-08, CYBER-09)
+  4. Any intrusive action without approval is refused, the stop control halts a run within one tool call, rate and time limits are enforced, and the engagement ledger replays the run tool-for-tool so a second person can audit exactly what was sent to the target. (CYBER-10, CYBER-11)
+  5. The same engagement runs end to end against a model with no native tool calling through the structured protocol, and its transcript replay reproduces the findings without contacting the network where the tools allow it. (CYBER-04, CYBER-05, CYBER-11, CYBER-12)
+
+**Research flags**: (1) Which host tools are commonly installed or installable per platform, and their output formats, before writing parsers; prefer JSON output and mark missing tools rather than falling back silently. (2) Sandbox choice for offensive work on Linux, WSL, macOS, and Windows (container vs a separate devcontainer vs a throwaway folder) and how cleanup is proven. (3) Legal text per region, reviewed as plain-language statements rather than advice, plus the public-sector/critical-infrastructure blocklist. (4) Tool-call protocol for raw-completion models: schema, parse-repair, and how to detect a model that cannot follow it. (5) Whether the harness reuses the existing agent loop and approval path or needs a second, tighter loop, and what that costs in tests. (6) Network destinations the harness adds, so they join the declared allowlist and the leak scan.
+**Plans:** 8 plans (executed 25-01…25-08; UAT in progress in 25-UAT.md, parked at test 2 of the list on 2026-11-12)
+
 ## Progress
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
+| 27. Project state follows the project (0.4.20) | 0/TBD | Context gathered | - |
 | 68. Relay foundation | 0/TBD | Not started | - |
 | 69. Inbound authenticity and allowlisting | 0/TBD | Not started | - |
 | 70. Identity, tenants and requesters | 0/TBD | Not started | - |
@@ -237,3 +277,4 @@ Plans:
 | 74. Group-chat discipline | 0/TBD | Not started | - |
 | 75. Signal channel | 0/TBD | Not started | - |
 | 76. Ops, onboarding and release | 0/TBD | Not started | - |
+| 25. Cybersecurity harness (v0.8.0) | 8/8 | UAT parked until after v0.7.0 | - |

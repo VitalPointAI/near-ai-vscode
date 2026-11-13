@@ -2,9 +2,9 @@
 gsd_state_version: "1.0"
 milestone: v0.7.0
 milestone_name: messaging-relay-teams-signal
-current_phase: 68
+current_phase: 27
 status: planning
-stopped_at: v0.7.0 roadmap created; Phase 68 ready to plan
+stopped_at: Phase 27 (0.4.20 project state sync) inserted ahead of Phase 68; context gathered, ready to plan
 last_updated: "2026-11-13T01:05:13.000Z"
 state_head: 6fb1522794e0fc44eb16c49b8c63916902546f7c
 progress:
@@ -22,17 +22,19 @@ last_activity_desc: v0.7.0 roadmap created (Phases 68-76, 45 requirements mapped
 ## Current position
 
 Milestone: v0.7.0 Messaging relay — Teams and Signal (Phases 68-76)
-Phase: 68 Relay foundation — not planned
-Next: `/gsd-plan-phase 68`, or `/gsd-quick` for small changes
+Phase: 27 Project state follows the project (release 0.4.20) — context gathered, not planned
+Next: `/gsd-plan-phase 27`; then Phase 68 Relay foundation
 
 ## Accumulated Context
 
 ### Roadmap Evolution
 
+- Phase 27 inserted 2026-11-13 in the 0.4.x line, ahead of v0.7.0 Phase 68: project state follows the project across interfaces and machines, shipping as release 0.4.20 (SYNC-01…08). Its decisions are in 27-CONTEXT.md.
+
 - Milestone v0.7.0 added 2026-11-13: Messaging relay — Teams and Signal. Phases 68-76 map all 45 v0.7.0 requirements (RELAY, AUTH, IDNT, RUNL, CMND, GRP, BUDG, TEAM, SGNL, OPS); traceability table in REQUIREMENTS.md.
 - Phase numbering starts at 68: branch-shipped phases end at 26; the unmerged `feat/team-fix-pass` branch already claims Phases 60-67 for v0.6.0 — 68 keeps both honest.
 - Phase 26 completed on branch perf/research-runs: Performance — faster agent and research runs (PERF-01…07, 5 plans, verified).
-- Phase 25 shipped: Cybersecurity harness (CYBER-01…12).
+- Phase 25 (Cybersecurity harness, CYBER-01…12) moved 2026-11-13 out of the 0.4.x line into its own milestone v0.8.0 Cybersecurity, worked after v0.7.0. All 8 plans are executed; 25-UAT.md is parked at test 2 of the list, and the owner's review of the 12 regional disclaimers is still to do.
 
 ### Locked decisions (encode, do not re-litigate)
 

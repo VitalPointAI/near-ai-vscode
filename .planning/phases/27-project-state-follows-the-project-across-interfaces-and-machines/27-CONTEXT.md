@@ -37,12 +37,53 @@ On 2026-11-13 the owner opened, in desktop VS Code on the host, projects they ha
 - **D-11 The daily spend limit stays per editor in 0.4.20.** (Owner, research Q4.) Project spend history is mirrored into the state home so it can be seen in every editor (SYNC-01). Making `nearAi.dailySpendLimitUsd` count spend from every editor on the host is deferred to a follow-up release. The 0.4.20 CHANGELOG states the known gap.
 - **D-12 Stored tool output is capped at 2 MiB per result, with a visible marker.** (Owner, research Q8.) Every message and tool step is kept. Only a single tool result larger than 2 MiB is shortened, and the history shows a visible "output shortened, N MB" marker. This is the only allowed exception to "nothing truncated" in D-07.
 - **D-13 The history shows the lead agent's view in 0.4.20.** (Owner, research Q7.) Every step of the lead agent plus each sub-agent's report goes into the thread log. A sub-agent's own internal steps become linked threads in a later release. The release notes say so.
+- **D-14 One-click "Give this project an online home" (GitHub, the person chooses public or private).** (Owner, 2026-11-13. This replaces the research recommendation in Claude's Discretion that said "no remote: say so and never `git remote add`".)
+  - **When it is offered.** When the person turns sync on, or opens a project that has no git repo or no remote, the extension offers "Give this project an online home". Nothing happens on their account without that click.
+  - **What one click does.** It runs `git init` if the folder is not a repo yet. It signs in to GitHub through VS Code's built-in GitHub authentication (`vscode.authentication.getSession('github', ['repo'])`). It asks **public or private** each time, with plain notes on each:
+    - private repos can have limits on free GitHub plans;
+    - on a public repo the encrypted state is still unreadable to others (D-09), but the project's own code is visible to everyone.
+    It then creates the repo under the person's account, adds it as the project's remote, pushes the sync branch, and reports every step in plain words.
+  - **Pushing the person's own code.** This is offered as a separate step, after a check that shows what will go up and blocks likely secrets (`.env` files, keys, credential files; reuse the existing secret patterns from the cyber or outbound guard where they fit). The check matters most for a public repo. Choosing not to push the code still leaves sync working.
+  - **When GitHub sign-in is not available.** For example, code-server without the GitHub authentication provider. The extension says so plainly and offers the fallbacks: the `gh` CLI if it is installed, or pasting the URL of an existing empty repo. It never asks for a token in chat.
+  - **Errors.** The repo name already being taken, an offline machine and a refused permission are each reported in plain words. No step is silently skipped, and a half-done setup can be resumed.
+  - **Other hosts.** GitLab and self-hosted remotes come later through the deferred private-remote setting (D-09).
+- **D-15 The NEAR AI key is shared on the same host as well, encrypted, and decrypted only on the person's machine.** (Owner, 2026-11-13.)
+  - **What is stored.** The state home holds an encrypted copy of the project's NEAR AI key and its bound endpoint. It is sealed with AEAD (AES-256-GCM) under a dedicated HKDF subkey of the project data key, with AAD binding it to this state id and record kind.
+  - **Effect.** A second editor on the same host (for example desktop VS Code after code-server) can use the key with no prompt, even when sync is off.
+  - **Where decryption happens.** Only in the extension host on the person's own machine, in memory. The plaintext key is never written to disk, logged, sent to a model or webview, or included in any bundle. After decrypting it, the extension stores it in that editor's SecretStorage under the local project scope, the same as a restore does.
+  - **Synced copy.** The key travels only inside the end-to-end encrypted bundle (D-02/D-09).
+  - **Key file setting.** When `nearAi.sync.keepKeyInProject` is turned off, the local data key file is removed. The encrypted API-key copy then cannot be opened without the recovery code or that device's SecretStorage, and the README says so.
+  - **Tests.** They cover: no plaintext key on disk or in logs (sentinel scan of the state home and the output channel); a tampered or swapped record is refused; the key is unusable when the local key file is missing and SecretStorage is empty; and the copy is removed or rotated when the person changes or removes their key.
+- **D-16 Sync is turned on from a visible control in the chat panel, not a buried setting.** (Owner, 2026-11-13.)
+  - **Where it lives.** The chat panel shows a sync status control as soon as the extension opens, in the panel header or toolbar next to the existing project and profile controls. Its states are "Sync off · Turn on", "Synced · <time>", "Syncing…", "Needs attention" and "No online home · Set up". It is visible without scrolling, opening a menu or going to Settings.
+  - **What one click does.** It starts the turn-on flow (27-15), which includes the D-14 online-home setup when the project has no remote, the recovery-code screen and restore on a new machine.
+  - **Before sync is on.** The pick-up card (D-03) and the first-run or onboarding screen also show a short "Keep this project on your other machines → Turn on sync" prompt. The person can dismiss it, and it never nags again after that.
+  - **Also available elsewhere.** The same action is in the Command Palette (`NEAR AI: Turn On Project Sync`), in the status bar item's menu if one exists, and in Settings. Those are extra ways in, never the only one.
+  - **Status and errors.** The control shows the last sync result in plain words. An error ("Couldn't reach GitHub, will retry") is shown on the control, not only in logs.
+  - **Accessibility.** It is a real button with an accessible name, reachable by keyboard, with contrast that works in light, dark and high-contrast themes.
+- **D-17 Sync timing.** (Owner, 2026-11-13.) Sync only runs once the person has turned it on.
+  - **Saving locally is immediate.** Every write to the state home happens as it occurs, so editors on the same host share it with no push.
+  - **Push triggers.** A sync (pull, merge, then push) runs:
+    - after a run or chat reply ends;
+    - 60 seconds after the window loses focus, if nothing is running;
+    - on "Sync Project Now".
+  - **Pull triggers.**
+    - **Pull on open:** when the project opens with sync on, the extension pulls before it shows the pick-up card (D-03). The card shows "Checking for updates…" while the pull runs, then the newest state. The pull never blocks chatting.
+    - **Pull on return:** when the window regains focus after being away for 5 minutes or more.
+  - **Background interval.** Every `nearAi.sync.intervalMinutes` minutes (default `10`, `0` turns it off, range 0 to 1440, clamped) while the editor is open and idle.
+  - **Best effort on close.** `deactivate` attempts one push within a few seconds. It is never relied on, and the run-end and idle syncs are the reliable path.
+  - **Rules.**
+    - Never sync while a run is in flight in this editor.
+    - Coalesce requests that arrive close together.
+    - Back off when offline.
+    - Batch pushes so that their timing reveals activity, not individual chats (D-09).
+  - **Status.** The sync control (D-16) shows the result.
 - **D-06 Model choices follow the project.** Comparison runs are stored in the project's state home, so Compare Models shows them in every interface. "Apply recommended" writes to workspace settings (or to project state read as a project-level default) instead of user settings. Choices already applied globally in one editor are offered for import into the project rather than silently copied.
 
 ### Claude's Discretion (research recommendations adopted, 2026-11-13)
 
 - Sync runs only after an explicit "turn on" (research Q2).
-- Remote: default `origin`. With several remotes, ask once and store the choice. With none, say "This project has no online home yet" and never run `git remote add` (Q3).
+- Remote: default `origin`. With several remotes, ask once and store the choice. With none, offer D-14 (superseded the original "never `git remote add`" recommendation) (Q3).
 - Migration runs at activation when `isNearAiProject(root)` is true. Otherwise it runs lazily on the first chat, history or compare action, so opening a folder still writes nothing (Q5).
 - Old globalStorage folders are left in place (Q6).
 - Long threads render fully in chunks in the webview (Q9).
