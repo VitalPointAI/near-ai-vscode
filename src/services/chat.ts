@@ -42,7 +42,8 @@ import { ContextGraphMemory } from './contextGraphMemory';
 import { homeFolder, teamLibraryDir, whenTeamsMoved } from '../domain/teamStorage';
 import { rememberedRuleNotice } from '../domain/allowRuleNotice';
 import { syncAutoAdvance } from './autoAdvanceConfig';
-import { autoResumeChoice, autoResumeNotice, cutOffNotice, resumePrompt, RunMarker, RunMarkers, shouldAutoResume } from './runMarkers';
+import { editorWriter, type MementoLike, stateHomeFor } from './stateHome';
+import { autoResumeChoice, autoResumeNotice, cutOffNotice, ownEditorMarkers, resumePrompt, RunMarker, RunMarkers, shouldAutoResume } from './runMarkers';
 import { WaitingNotices } from './waitingNotices';
 import { latestOnly, PROJECT_TEAM_WATCH_PATHS, projectHasTeam, SETUP_NUDGE_DISMISSED_KEY, shouldShowSetupNudge } from './setupSteps';
 
@@ -216,11 +217,15 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     tab.outcome = 'done';
     tab.log.add({ type: 'transcript', turns, note });
     // A run of it that the extension host never finished (code-server closed it, a reload, a crash).
-    const cut = await runMarkersFor(context, root).interruptedRun(tab.id).catch(() => undefined);
+    const markers = runMarkersFor(context, root);
+    const cut = await markers.interruptedRun(tab.id).catch(() => undefined);
     tab.interrupted = cut;
     if (cut) {
       tab.outcome = 'stopped';
       tab.log.add({ type: 'run-interrupted', text: cutOffNotice(cut), resumable: true });
+    } else if (await markers.liveElsewhere(tab.id).catch(() => false)) {
+      // Another editor is running it right now (D-03): it is not cut off, so it is neither marked interrupted nor ever resumed from here.
+      tab.log.add({ type: 'notice', text: 'This conversation is running in another editor right now. Its newest steps appear here when that run saves them.' });
     }
     return true;
   };
@@ -351,8 +356,10 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     const enabled = vscode.workspace.getConfiguration('nearAi').get<boolean>('agent.autoResumeAfterReload', AGENT_DEFAULTS.autoResumeAfterReload) !== false;
     // With the emergency stop on (pressed here or in another window), nothing resumes by itself: the cut-off runs keep their Resume button.
     const emergencyStopped = isEmergencyStopped();
-    const chosen = new Set(autoResumeChoice(tabs.flatMap((tab) => (tab.interrupted ? [tab.interrupted] : [])), { enabled, emergencyStopped }));
-    if (emergencyStopped && enabled) for (const tab of tabs) if (tab.interrupted && shouldAutoResume(tab.interrupted, true)) { const text = 'Not resumed automatically: the emergency stop is on. Run "NEAR AI: Resume", then press Resume here.'; tab.log.add({ type: 'notice', text }); tab.post({ type: 'notice', text }); }
+    // SYNC-07 / D-03: only a run this editor itself lost (a reload) resumes by itself. A cut-off run another editor left keeps its Resume button.
+    const own = new Set(ownEditorMarkers(tabs.flatMap((tab) => (tab.interrupted ? [tab.interrupted] : [])), editorWriter(context.globalState as MementoLike | undefined)));
+    const chosen = new Set(autoResumeChoice([...own], { enabled, emergencyStopped }));
+    if (emergencyStopped && enabled) for (const tab of tabs) if (tab.interrupted && own.has(tab.interrupted) && shouldAutoResume(tab.interrupted, true)) { const text = 'Not resumed automatically: the emergency stop is on. Run "NEAR AI: Resume", then press Resume here.'; tab.log.add({ type: 'notice', text }); tab.post({ type: 'notice', text }); }
     const due = tabs.filter((tab) => tab.interrupted && chosen.has(tab.interrupted));
     for (const tab of due) {
       if (isEmergencyStopped()) break;
@@ -803,9 +810,14 @@ function ripgrepPath(): string | undefined {
 /** One run-marker store per extension storage and project, shared by every conversation, so its writes stay in order. */
 const runMarkerStores = new Map<string, RunMarkers>();
 function runMarkersFor(context: vscode.ExtensionContext, root: string): RunMarkers {
-  const key = `${context.globalStorageUri.fsPath}\n${root}`;
+  const key = path.resolve(root);
   let store = runMarkerStores.get(key);
-  if (!store) { store = new RunMarkers(context.globalStorageUri.fsPath, root); runMarkerStores.set(key, store); }
+  if (!store) {
+    const home = stateHomeFor(root);
+    const storage = context.globalStorageUri.fsPath;
+    store = new RunMarkers(storage, root, { dir: home.paths.runs, writer: editorWriter(context.globalState as MementoLike | undefined), beforeWrite: () => home.ensure() });
+    runMarkerStores.set(key, store);
+  }
   return store;
 }
 

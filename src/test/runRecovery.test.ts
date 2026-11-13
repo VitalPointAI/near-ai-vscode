@@ -39,7 +39,7 @@ test('run markers: a run that started and never ended, in a process that is gone
   // The file is small, atomic (no temporary file left), and holds no prompt or tool input.
   const folder = path.join(dir, 'runs', readdirSync(path.join(dir, 'runs'))[0]);
   assert.deepEqual(readdirSync(folder), [`${CONV}.json`]);
-  assert.deepEqual(Object.keys(JSON.parse(readFileSync(path.join(folder, `${CONV}.json`), 'utf8'))).sort(), ['activeAt', 'conversationId', 'model', 'pid', 'runId', 'savedAt', 'startedAt', 'steps', 'version']);
+  assert.deepEqual(Object.keys(JSON.parse(readFileSync(path.join(folder, `${CONV}.json`), 'utf8'))).sort(), ['activeAt', 'conversationId', 'model', 'pid', 'runId', 'savedAt', 'startedAt', 'steps', 'version', 'writer']);
   // Settled (resumed or dismissed), it is not reported again.
   await later.settle(CONV, 'dismissed');
   assert.deepEqual(await later.interrupted(), []);

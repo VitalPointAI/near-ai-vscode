@@ -1,16 +1,24 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import * as path from 'node:path';
+import { writerEditor } from './stateHome';
 
 // A run that the extension host never finished (code-server closed it, the window reloaded or
 // crashed) leaves no trace in the chat: its tab reopens stopped, or not at all. Each run of a
 // chat conversation therefore records that it started, what it was doing, and that it ended, in a
-// small file in the extension's storage (one per conversation, never in the project). A file that
-// says "started" but never "ended", written by a process that is gone, is a run that was cut off.
-// The files hold IDs, times, a model ID, and tool names only: never prompts, arguments, or output.
+// small file (one per conversation) in the project's state home, which every editor on this computer shares. A file that says "started" but
+// never "ended", written by a process that is gone, is a run that was cut off. A pid means nothing to another editor (its own pid namespace, such
+// as a code-server container), so a marker also carries the writer and a heartbeat: a run another editor keeps refreshing is running elsewhere,
+// and only silence for FOREIGN_LIVE_MS makes it cut off.
+// The files hold IDs, times, a model ID, tool names and the writer id only: never prompts, arguments, or output.
 
 const CONVERSATION_ID = /^conv-[a-z0-9-]{6,60}$/;
 const RUN_ID = /^run-\d+-[a-f0-9]{6}$/;
+const WRITER = /^[a-z0-9]{6,40}\.[a-z0-9]{6,40}$/;
+/** A live run refreshes its marker this often. */
+export const HEARTBEAT_MS = 30_000;
+/** A marker another editor wrote counts as live while it was refreshed within this long (six missed heartbeats). */
+export const FOREIGN_LIVE_MS = 180_000;
 /** Tool names kept for the steps started since the last saved state; older ones are dropped. */
 const MAX_STEPS = 12;
 /** Markers untouched for this long (ended, or cut off and never resumed) are removed when the folder is read. */
@@ -18,12 +26,16 @@ const KEEP_MS = 30 * 24 * 60 * 60_000;
 
 export type RunEnd = 'completed' | 'cancelled' | 'failed' | 'max-turns' | 'stuck' | 'resumed' | 'dismissed';
 
+export type RunState = 'finished' | 'running-here' | 'running-elsewhere' | 'cut-off';
+
 export interface RunMarker {
-  version: 1;
+  version: 1 | 2;
   conversationId: string;
   runId: string;
-  /** The extension host process that ran it; a marker of a live process is not interrupted. */
+  /** The extension host process that ran it; only meaningful to the same editor (the same pid namespace). */
   pid: number;
+  /** `<editor>.<instance>` of the extension host that ran it; absent in a version 1 marker, which counts as another editor's. */
+  writer?: string;
   model?: string;
   startedAt: string;
   /** Last sign of life: the run started, saved its state, or started a step. */
@@ -41,6 +53,12 @@ export interface RunMarkerOptions {
   now?: () => number;
   /** Whether a process is still running; a marker of a running process is not reported as cut off. */
   alive?: (pid: number) => boolean;
+  /** The marker folder itself (the state home's runs folder); without it the old `<storage>/runs/<hash of the project>` form is used. */
+  dir?: string;
+  /** Who is writing: `<editor>.<instance>`. Without it a stand-in derived from the pid is used, so one editor with different pids behaves as before. */
+  writer?: string;
+  /** Awaited before each write; the chat passes the state home's ensure(), so its inner .gitignore exists before the first marker. */
+  beforeWrite?: () => Promise<unknown>;
 }
 
 /** True when a process with this ID exists (EPERM means it exists but belongs to someone else). */
@@ -49,10 +67,13 @@ export function processAlive(pid: number): boolean {
   try { process.kill(pid, 0); return true; } catch (error) { return (error as NodeJS.ErrnoException).code === 'EPERM'; }
 }
 
-/** One project's run markers, in `<storage>/runs/<hash of the project path>/<conversation>.json`. */
+/** One project's run markers, in the state home's `runs/<conversation>.json` (or, in the old form, `<storage>/runs/<hash of the project path>/`). */
 export class RunMarkers {
   private readonly dir: string;
   private readonly pid: number;
+  private readonly writer: string;
+  private readonly beforeWrite: (() => Promise<unknown>) | undefined;
+  private readonly beats = new Map<string, NodeJS.Timeout>();
   private readonly now: () => number;
   private readonly alive: (pid: number) => boolean;
   /** Writes happen one at a time, in order, so a later state never loses to an earlier one. */
@@ -60,8 +81,10 @@ export class RunMarkers {
   private readonly live = new Map<string, RunMarker>();
 
   public constructor(storageDir: string, root: string, options: RunMarkerOptions = {}) {
-    this.dir = path.join(storageDir, 'runs', createHash('sha256').update(path.resolve(root)).digest('hex').slice(0, 16));
+    this.dir = options.dir ?? path.join(storageDir, 'runs', createHash('sha256').update(path.resolve(root)).digest('hex').slice(0, 16));
     this.pid = options.pid ?? process.pid;
+    this.writer = options.writer ?? `legacy.p${String(this.pid).padStart(6, '0')}`;
+    this.beforeWrite = options.beforeWrite;
     this.now = options.now ?? Date.now;
     this.alive = options.alive ?? processAlive;
   }
@@ -72,10 +95,36 @@ export class RunMarkers {
   public start(input: { conversationId: string; runId: string; model?: string }): Promise<void> {
     if (!CONVERSATION_ID.test(input.conversationId) || !RUN_ID.test(input.runId)) return Promise.resolve();
     const at = this.stamp();
-    const marker: RunMarker = { version: 1, conversationId: input.conversationId, runId: input.runId, pid: this.pid, ...(input.model ? { model: input.model.slice(0, 200) } : {}), startedAt: at, activeAt: at, steps: [] };
+    const marker: RunMarker = { version: 2, conversationId: input.conversationId, runId: input.runId, pid: this.pid, writer: this.writer, ...(input.model ? { model: input.model.slice(0, 200) } : {}), startedAt: at, activeAt: at, steps: [] };
     this.live.set(input.conversationId, marker);
+    this.beat(input.conversationId);
     return this.write(marker);
   }
+
+  /** While the run is live its marker is refreshed every HEARTBEAT_MS, so another editor can tell a running run from a cut-off one. */
+  private beat(conversationId: string): void {
+    this.stopBeat(conversationId);
+    const timer = setInterval(() => {
+      const marker = this.live.get(conversationId);
+      if (!marker || marker.endedAt) { this.stopBeat(conversationId); return; }
+      marker.activeAt = this.stamp();
+      void this.write(marker);
+    }, HEARTBEAT_MS);
+    timer.unref?.();
+    this.beats.set(conversationId, timer);
+  }
+
+  private stopBeat(conversationId: string): void {
+    const timer = this.beats.get(conversationId);
+    if (timer) clearInterval(timer);
+    this.beats.delete(conversationId);
+  }
+
+  /** Resolves when every write started so far has finished. */
+  public async idle(): Promise<void> { await this.queue; }
+
+  /** Stops every heartbeat, for when the window closes. The markers stay as they are. */
+  public dispose(): void { for (const id of [...this.beats.keys()]) this.stopBeat(id); }
 
   /** Records a step (tool) the run started; its result is saved with the next saved state. */
   public step(conversationId: string, runId: string, tool: string): Promise<void> {
@@ -100,6 +149,7 @@ export class RunMarkers {
     const marker = this.current(conversationId, runId);
     if (!marker) return Promise.resolve();
     this.live.delete(conversationId);
+    this.stopBeat(conversationId);
     marker.endedAt = this.stamp();
     marker.outcome = outcome;
     return this.write(marker);
@@ -110,6 +160,7 @@ export class RunMarkers {
     await this.queue;
     const marker = await this.read(conversationId);
     if (!marker || marker.endedAt) return;
+    this.stopBeat(conversationId);
     marker.endedAt = this.stamp();
     marker.outcome = outcome;
     await this.write(marker);
@@ -134,8 +185,29 @@ export class RunMarkers {
     return found.sort((a, b) => b.activeAt.localeCompare(a.activeAt));
   }
 
+  /**
+   * Where a run stands, as this editor sees it. Only the same editor's pid is trusted (Pitfall 1): another editor's pid is in another pid namespace,
+   * so for its markers the heartbeat decides.
+   */
+  public runState(marker: RunMarker): RunState {
+    if (marker.endedAt) return 'finished';
+    if (marker.writer === this.writer) return 'running-here';
+    const sameEditor = marker.writer !== undefined && writerEditor(marker.writer) === writerEditor(this.writer);
+    if (sameEditor && !this.alive(marker.pid)) return 'cut-off';
+    return this.now() - Date.parse(marker.activeAt) < FOREIGN_LIVE_MS ? 'running-elsewhere' : 'cut-off';
+  }
+
+  /** Whether the conversation's run (that run, when a runId is given) is live in another window or editor right now. */
+  public async liveElsewhere(conversationId: string, runId?: string): Promise<boolean> {
+    const marker = await this.read(conversationId);
+    return Boolean(marker && (runId === undefined || marker.runId === runId) && this.runState(marker) === 'running-elsewhere');
+  }
+
+  /** The conversation's marker, whatever state its run is in. */
+  public markerOf(conversationId: string): Promise<RunMarker | undefined> { return this.read(conversationId); }
+
   private isInterrupted(marker: RunMarker): boolean {
-    return !marker.endedAt && marker.pid !== this.pid && !this.alive(marker.pid);
+    return this.runState(marker) === 'cut-off';
   }
 
   private current(conversationId: string, runId: string): RunMarker | undefined {
@@ -153,8 +225,10 @@ export class RunMarkers {
     const snapshot = JSON.stringify(marker);
     const next = this.queue.then(async () => {
       const file = path.join(this.dir, `${marker.conversationId}.json`);
-      const temporary = `${file}.${process.pid}.tmp`;
+      // A random suffix: two editors writing one conversation's marker never share a temporary name (Pitfall 3), whatever their pids.
+      const temporary = `${file}.${randomBytes(8).toString('hex')}.tmp`;
       try {
+        await this.beforeWrite?.();
         await mkdir(this.dir, { recursive: true });
         await writeFile(temporary, `${snapshot}\n`, { encoding: 'utf8', mode: 0o600 });
         await rename(temporary, file);
@@ -172,13 +246,15 @@ export function parseRunMarker(value: unknown, conversationId: string): RunMarke
   if (!value || typeof value !== 'object') return undefined;
   const raw = value as Record<string, unknown>;
   const time = (field: unknown) => typeof field === 'string' && !Number.isNaN(Date.parse(field));
-  if (raw.version !== 1 || raw.conversationId !== conversationId || typeof raw.runId !== 'string' || !RUN_ID.test(raw.runId) || typeof raw.pid !== 'number' || !time(raw.startedAt) || !time(raw.activeAt)) return undefined;
+  const writer = typeof raw.writer === 'string' && WRITER.test(raw.writer) ? raw.writer : undefined;
+  if ((raw.version !== 1 && raw.version !== 2) || (raw.version === 2 && !writer) || raw.conversationId !== conversationId || typeof raw.runId !== 'string' || !RUN_ID.test(raw.runId) || typeof raw.pid !== 'number' || !time(raw.startedAt) || !time(raw.activeAt)) return undefined;
   const outcomes = new Set(['completed', 'cancelled', 'failed', 'max-turns', 'stuck', 'resumed', 'dismissed']);
   return {
-    version: 1,
+    version: raw.version as 1 | 2,
     conversationId,
     runId: raw.runId,
     pid: raw.pid,
+    ...(writer ? { writer } : {}),
     ...(typeof raw.model === 'string' && raw.model ? { model: raw.model.slice(0, 200) } : {}),
     startedAt: raw.startedAt as string,
     activeAt: raw.activeAt as string,
@@ -187,6 +263,12 @@ export function parseRunMarker(value: unknown, conversationId: string): RunMarke
     ...(time(raw.endedAt) ? { endedAt: raw.endedAt as string } : {}),
     ...(typeof raw.outcome === 'string' && outcomes.has(raw.outcome) ? { outcome: raw.outcome as RunEnd } : {})
   };
+}
+
+/** The markers written by this editor (any window of it): the only ones that may resume by themselves (D-03). Another editor's cut-off run waits for a click. */
+export function ownEditorMarkers<T extends Pick<RunMarker, 'writer'>>(markers: T[], writer: string): T[] {
+  const editor = writerEditor(writer);
+  return editor ? markers.filter((marker) => writerEditor(marker.writer) === editor) : [];
 }
 
 /** PERF-05: a run cut off longer ago than this is left for the person to resume; one this recent carries on by itself after the reload. */

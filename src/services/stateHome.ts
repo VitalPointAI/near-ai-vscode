@@ -53,6 +53,44 @@ export function newWriterId(hostname: string = os.hostname()): string {
 }
 export const THIS_WRITER = newWriterId();
 
+/** The part of vscode.Memento the writer id needs, so the state services stay free of vscode and tests run on plain node. */
+export interface MementoLike {
+  get<T>(key: string): T | undefined;
+  update(key: string, value: unknown): PromiseLike<void> | Promise<void>;
+}
+
+const EDITOR_ID_KEY = 'nearAi.state.editorId';
+const EDITOR_ID = /^[a-z0-9]{6,40}$/;
+/** One id per extension host (a reload makes a new one): a pid alone is not unique across a container and the host. */
+const INSTANCE_ID = randomBytes(6).toString('hex');
+let processEditorId: string | undefined;
+const editorIds = new WeakMap<object, string>();
+
+/**
+ * Who is writing: `<editor>.<instance>`. The editor id is created once per editor install and kept in its globalState, so it survives reloads and
+ * is the same for every window of that editor; the instance id is new for each extension host. Run markers carry it (Pitfall 1): another editor's
+ * pid means nothing here, but the same editor's pid does. Without a Memento (tests) the editor id lasts for the process.
+ */
+export function editorWriter(globalState?: MementoLike): string {
+  const stored = globalState?.get<string>(EDITOR_ID_KEY);
+  let editor = typeof stored === 'string' && EDITOR_ID.test(stored) ? stored : globalState ? editorIds.get(globalState) : processEditorId;
+  if (!editor) {
+    editor = randomBytes(6).toString('hex');
+    if (globalState) {
+      editorIds.set(globalState, editor);
+      void Promise.resolve(globalState.update(EDITOR_ID_KEY, editor)).catch(() => undefined);
+    } else processEditorId = editor;
+  }
+  return `${editor}.${INSTANCE_ID}`;
+}
+
+/** The editor part of a writer id, or undefined when there is none (a marker from before writers existed). */
+export function writerEditor(writer: string | undefined): string | undefined {
+  if (!writer) return undefined;
+  const dot = writer.indexOf('.');
+  return dot > 0 ? writer.slice(0, dot) : undefined;
+}
+
 function temporaryName(target: string): string {
   return `${target}.${randomBytes(8).toString('hex')}.tmp`;
 }
