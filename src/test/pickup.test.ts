@@ -208,6 +208,13 @@ test('the chat loads the card helper before chat.js and wires it to the host, an
   assert.doesNotMatch(block, /settleInterrupted|autoResumeChoice|receive\(|continueStopped|resume-interrupted/);
 });
 
+test('the card draws its times with the shared panel formatter, and keeps none of its own', () => {
+  const source = readFileSync(path.join(ROOT, 'media', 'chat', 'pickup.js'), 'utf8').replace(/^\s*\/\/.*$/gm, '');
+  assert.match(source, /shortTime/);
+  assert.doesNotMatch(source, /toLocaleTimeString|toLocaleString|toLocaleDateString|DateTimeFormat/);
+  assert.match(source, /syncControlKit\(\)/, 'the formatter comes from the sync control module');
+});
+
 test('the card handler opens the chat and nothing else', async () => {
   const calls: string[] = [];
   const host = { openSaved: (id: string) => { calls.push(`open:${id}`); return Promise.resolve(); }, markSeen: () => { calls.push('seen'); return Promise.resolve(); } };

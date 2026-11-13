@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
-import { shouldShowSyncPrompt, SYNC_PROMPT_TEXT, syncControlModel, syncStatusMessage, type SyncControlModel } from '../domain/state/syncStatus';
+import { shouldShowSyncPrompt, SYNC_PROMPT_TEXT, SYNC_TIME_SLOT, syncControlModel, syncStatusMessage, type SyncControlModel } from '../domain/state/syncStatus';
 import { parseChatWebviewMessage } from '../services/chatBridge';
 import { syncPanelMessage, SYNC_PROMPT_DISMISSED_KEY } from '../services/syncPanel';
 import { pickupCardModel } from '../services/pickupCard';
@@ -22,6 +22,7 @@ interface SyncKit {
   renderSyncControl(doc: FakeDocument, button: FakeNode, model: SyncControlModel, post: (message: unknown) => void): FakeNode;
   renderSyncPrompt(doc: FakeDocument, container: FakeNode, post: (message: unknown) => void, wanted: boolean): FakeNode | undefined;
   buildSyncPrompt(doc: FakeDocument, post: (message: unknown) => void, id?: string): FakeNode;
+  shortTime(iso: string | undefined, now?: number): string;
   TEXT: Record<string, string>;
 }
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -29,6 +30,8 @@ const kit = require(path.join(ROOT, 'media', 'chat', 'syncControl.js')) as SyncK
 
 const NOW = new Date(2026, 10, 13, 15, 30).getTime();
 const AT = new Date(2026, 10, 13, 9, 5).toISOString();
+/** What the control shows for a sync at AT: the panel's own short time, in the panel's own locale. */
+const SYNCED_AT = `Synced · ${new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' }).format(new Date(AT))}`;
 
 /** The bar as panelView.ts lays it out: the profile chip, then the sync chip, its live region and the line that shows a problem's sentence. */
 function bar(options: { detail?: boolean } = {}): { doc: FakeDocument; button: FakeNode; live: FakeNode; detail?: FakeNode } {
@@ -57,7 +60,7 @@ function bar(options: { detail?: boolean } = {}): { doc: FakeDocument; button: F
 const STATUSES: Array<[string, SyncStatus, string, string]> = [
   ['off', { state: 'off' }, 'Sync off · Turn on', 'turn-on'],
   ['syncing', { state: 'syncing', reason: 'open' }, 'Syncing…', 'none'],
-  ['synced', { state: 'synced', at: AT }, 'Synced · 09:05', 'sync-now'],
+  ['synced', { state: 'synced', at: AT }, SYNCED_AT, 'sync-now'],
   ['attention', { state: 'attention', message: 'Couldn\'t reach GitHub, will retry.' }, 'Needs attention', 'show-details'],
   ['no-home', { state: 'no-home', message: 'This project has no online home yet.' }, 'No online home · Set up', 'set-up-home']
 ];
@@ -139,12 +142,77 @@ test('every status shows its exact label, a name that says the state, and posts 
   }
 });
 
-test('"Synced" shows the time of the last sync, today as the clock and another day with its date', () => {
-  assert.equal(syncControlModel({ state: 'synced', at: AT }, NOW).label, 'Synced · 09:05');
-  const yesterday = new Date(2026, 10, 12, 23, 59).toISOString();
-  assert.equal(syncControlModel({ state: 'synced', at: yesterday }, NOW).label, 'Synced · Nov 12, 23:59');
-  assert.equal(syncControlModel({ state: 'synced' }, NOW).label, 'Synced');
-  assert.equal(syncControlModel({ state: 'synced', at: 'not a time' }, NOW).label, 'Synced');
+/** The label the person reads for a status: the model drawn on the control. */
+function shownLabel(status: SyncStatus, now = NOW): string {
+  const { doc, button } = bar();
+  kit.renderSyncControl(doc, button, syncControlModel(status, now), () => undefined);
+  return button.textContent;
+}
+
+test('"Synced" shows the time of the last sync on the control, today as the clock and another day with its date (same cases as 27-18, checked where they are drawn)', () => {
+  const clock = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' });
+  assert.equal(shownLabel({ state: 'synced', at: AT }), `Synced · ${clock.format(new Date(AT))}`);
+  const yesterdayAt = new Date(2026, 10, 12, 23, 59);
+  const other = shownLabel({ state: 'synced', at: yesterdayAt.toISOString() });
+  assert.equal(other, `Synced · ${new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(yesterdayAt)}`);
+  assert.notEqual(other, shownLabel({ state: 'synced', at: new Date(2026, 10, 13, 23, 59).toISOString() }), 'another day reads differently from today');
+  assert.equal(shownLabel({ state: 'synced' }), 'Synced');
+  assert.equal(shownLabel({ state: 'synced', at: 'not a time' }), 'Synced');
+});
+
+// ---- Plan 27-25 (G-27-4d, times): one formatter in the panel for every display time ----
+
+test('tracer: shortTime gives the clock for today, the short month and day and the clock for another day, and nothing for a missing or invalid time', () => {
+  const at = new Date(2026, 10, 13, 9, 5);
+  assert.equal(kit.shortTime(at.toISOString(), NOW), new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' }).format(at));
+  const earlier = new Date(2026, 10, 12, 23, 59);
+  assert.equal(kit.shortTime(earlier.toISOString(), NOW), new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(earlier));
+  assert.equal(kit.shortTime(undefined, NOW), '');
+  assert.equal(kit.shortTime('', NOW), '');
+  assert.equal(kit.shortTime('not a time', NOW), '');
+});
+
+test('tracer: the same instant reads the same on the pick-up card and on the sync control, today and on another day', () => {
+  const today = new Date();
+  for (const at of [new Date(today.getTime() - 60_000), new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1, 12, 0)]) {
+    const iso = at.toISOString();
+    const control = shownLabel({ state: 'synced', at: iso }, Date.now());
+    const { card } = welcomeWithCard({ show: true, pointerAt: iso, lastChat: { id: 'conv-abc123def', title: 'Fix it', at: iso } });
+    const line = card!.all((node) => node.textContent.startsWith('Last chat: '))[0].textContent;
+    const onCard = line.slice(line.indexOf('(') + 1, line.lastIndexOf(')'));
+    assert.ok(onCard.length > 0, 'the card shows a time');
+    assert.equal(control, `Synced · ${kit.shortTime(iso, Date.now())}`);
+    assert.equal(onCard, kit.shortTime(iso, Date.now()), 'the card and the control show the instant the same way');
+  }
+});
+
+test('tracer: the host model carries the time as ISO plus a slot in label, name and tooltip (no digits, no clock formatting on the host)', () => {
+  const model = syncControlModel({ state: 'synced', at: AT }, NOW);
+  assert.equal(model.at, AT);
+  for (const text of [model.label, model.ariaLabel, model.title]) {
+    assert.ok(text.includes(SYNC_TIME_SLOT), text);
+    assert.doesNotMatch(text, /\d/, `no clock time of the host's own: ${text}`);
+  }
+  for (const status of [{ state: 'synced' }, { state: 'synced', at: 'not a time' }] as SyncStatus[]) {
+    const plain = syncControlModel(status, NOW);
+    assert.equal(plain.label, 'Synced');
+    assert.equal(plain.at, undefined);
+    for (const text of [plain.label, plain.ariaLabel, plain.title]) assert.ok(!text.includes(SYNC_TIME_SLOT), text);
+  }
+  assert.equal('at' in syncControlModel({ state: 'off' }, NOW), false);
+  const source = read('src', 'domain', 'state', 'syncStatus.ts');
+  assert.doesNotMatch(source, /getHours|getMinutes|MONTHS|toLocale/, 'the host formats no clock time for display');
+});
+
+test('tracer: the webview replaces the slot in the label, the accessible name and the tooltip with the panel time', () => {
+  const { doc, button } = bar();
+  kit.renderSyncControl(doc, button, syncControlModel({ state: 'synced', at: AT }, NOW), () => undefined);
+  const time = kit.shortTime(AT, Date.now());
+  assert.equal(button.textContent, `Synced · ${time}`);
+  assert.ok((button.attributes.get('aria-label') ?? '').includes(time));
+  assert.ok((button.attributes.get('title') ?? '').includes(time));
+  for (const text of [button.textContent, button.attributes.get('aria-label') ?? '', button.attributes.get('title') ?? '']) assert.ok(!text.includes(SYNC_TIME_SLOT), text);
+  assert.doesNotMatch(read('media', 'chat', 'pickup.js').replace(/^\s*\/\/.*$/gm, ''), /toLocaleTimeString|toLocaleString|toLocaleDateString/, 'the card keeps no formatter of its own');
 });
 
 test('a problem is shown on the control in plain words, in the name and the tooltip, not only in a log', () => {
@@ -165,7 +233,7 @@ test('a status change re-renders the same button (no second control), and the li
   kit.renderSyncControl(doc, button, syncControlModel({ state: 'syncing', reason: 'manual' }, NOW), post);
   assert.equal(live.textContent, 'Project sync: Syncing…');
   kit.renderSyncControl(doc, button, syncControlModel({ state: 'synced', at: AT }, NOW), post);
-  assert.equal(live.textContent, 'Project sync: Synced · 09:05');
+  assert.equal(live.textContent, `Project sync: ${SYNCED_AT}`, 'the live region says the label as shown, with the time, not the slot');
   live.textContent = '';
   kit.renderSyncControl(doc, button, syncControlModel({ state: 'synced', at: AT }, NOW), post);
   assert.equal(live.textContent, '', 'the same state again is not announced again');
@@ -461,8 +529,8 @@ function rulesOf(text: string): Array<{ selector: string; body: string }> {
 test('label budget: every label of every state, with the longest time text, fits a 220 px row at the chip font (at most 26 characters)', () => {
   const times = [AT, new Date(2026, 8, 30, 12, 59).toISOString(), new Date(2026, 11, 28, 23, 59).toISOString(), new Date(2026, 4, 28, 10, 8).toISOString()];
   const labels = [
-    ...STATUSES.map(([, status]) => syncControlModel(status, NOW).label),
-    ...times.map((at) => syncControlModel({ state: 'synced', at }, NOW).label)
+    ...STATUSES.map(([, status]) => shownLabel(status)),
+    ...times.map((at) => shownLabel({ state: 'synced', at }))
   ];
   for (const label of labels) assert.ok(label.length <= 26, `"${label}" is ${label.length} characters`);
   assert.ok(Math.max(...labels.map((label) => label.length)) >= 22, 'the budget is measured against the longest real label, not a short one');
