@@ -44,6 +44,11 @@ code { font-family: var(--vscode-editor-font-family); font-size: 0.95em; word-br
 
 /* The setup the results point to: a card above the board, with its one button. */
 #recommended { margin: 8px 0; padding: 8px 12px; border-left: 3px solid var(--vscode-focusBorder, #007fd4); border-radius: 4px; background: var(--vscode-editorWidget-background); overflow-wrap: anywhere; }
+#project-choices { margin: 8px 0; padding: 8px 12px; border-left: 3px solid var(--vscode-focusBorder, #007fd4); border-radius: 4px; background: var(--vscode-editorWidget-background); overflow-wrap: anywhere; }
+#project-choices p { margin: 4px 0 0; font-size: 0.92em; }
+#project-choices .project-choice-list { margin: 6px 0; padding-left: 18px; }
+#project-choices .project-choice-list li { margin: 4px 0; }
+#project-choices .project-choice-list button { margin-left: 8px; }
 #recommended .recommendation { margin: 6px 0; padding-left: 18px; }
 #recommended .recommendation li { margin: 4px 0; font-size: 0.94em; }
 #recommended .recommendation li.same { color: var(--muted); }

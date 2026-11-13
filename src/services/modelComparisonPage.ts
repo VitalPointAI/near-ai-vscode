@@ -1,7 +1,8 @@
 import { buildLeaderboard, needsRetest, performanceTrend, recommendRoles, recommendTiers, catalogVersion, privacyOf, RUN_ID, summarizeRun, type CostEstimate, type ComparisonPlan, type LeaderboardEntry, type ModelSummary, type RoleRecommendation, type RunMode, type TrendPoint, type SavedRun, type TierRecommendation } from '../benchmark/results';
 import { TASK_SETS, tasksFor, type BenchmarkTask, type TaskSetId, type TaskKind } from '../benchmark/tasks';
 import { isChatModel } from './chatBridge';
-import { heldRoles, type RoleOption } from './modelRoles';
+import { choicesInEffect, PROJECT_CHOICE_SETTINGS, projectChoiceFor, removeProjectChoice, type InspectedSetting } from './modelChoices';
+import { heldRoles, roleOptions, type RoleOption } from './modelRoles';
 import type { ModelInfo } from './nearAiClient';
 
 // The Compare Models page: what the host sends it and accepts from it. Everything here is
@@ -16,8 +17,13 @@ export interface CatalogEntry { id: string; privacy: ReturnType<typeof privacyOf
 export interface HistoryEntry { id: string; startedAt: string; status: SavedRun['status']; stopReason?: string; taskSet: TaskSetId; mode: RunMode; runsPerTask: number; models: string[]; ran: number; reused: number; costUsd?: number }
 export interface LeaderboardRow extends LeaderboardEntry { holds: string[] }
 
+/** A setting whose value right now comes from this project's choice (made in Compare Models), with the model or roles it holds, as plain text. */
+export interface ProjectChoiceView { setting: string; label: string; value: string }
+
 export interface PageState {
   leaderboard: LeaderboardRow[];
+  /** The model settings that come from this project's choice, each of which the person can put back to their own settings. Empty when none do. */
+  projectChoices: ProjectChoiceView[];
   catalog: CatalogEntry[];
   /** Pre-selected: the models the main chat and tiers use now. */
   selected: string[];
@@ -149,7 +155,9 @@ export type ComparisonPageMessage =
   | { type: 'apply-role'; model: string; role: string }
   /** Applies the recommended setup in one go: every tier and role whose best model differs from the one it uses. */
   | { type: 'apply-recommended' }
-  | { type: 'undo-role'; token: string };
+  | { type: 'undo-role'; token: string }
+  /** Puts one model setting back to the person's own settings: clears the project's choice for it. The host accepts only the nine settings a project can carry. */
+  | { type: 'clear-project-choice'; setting: string };
 
 const MODEL_ID = /^[\w.:@+/-]{1,200}$/;
 const ROLE_ID = /^(?:main|tier:(?:deep|standard|fast)|role:[\w*.:-]{1,120})$/;
@@ -179,8 +187,60 @@ export function parseComparisonMessage(value: unknown): ComparisonPageMessage | 
     case 'apply-recommended': return only() ? { type: 'apply-recommended' } : undefined;
     case 'apply-role': return only('model', 'role') && typeof message.model === 'string' && MODEL_ID.test(message.model) && typeof message.role === 'string' && ROLE_ID.test(message.role) ? { type: 'apply-role', model: message.model, role: message.role } : undefined;
     case 'undo-role': return only('token') && typeof message.token === 'string' && /^[a-f0-9]{16}$/.test(message.token) ? { type: 'undo-role', token: message.token } : undefined;
+    case 'clear-project-choice': return only('setting') && typeof message.setting === 'string' && message.setting.length <= 80 ? { type: 'clear-project-choice', setting: message.setting } : undefined;
     default: return undefined;
   }
+}
+
+// ---- the project's model choices: seeing them and putting them back ----
+
+/** What each setting is called on the page and in the picker: the same names the roles use, the setting name for the rest. */
+function settingLabels(): Map<string, string> {
+  const labels = new Map<string, string>(roleOptions({ mainModel: '', tiers: { deep: '', standard: '', fast: '' }, roleModels: {} }, []).filter((option) => option.group !== 'Agent roles').map((option) => [`nearAi.${option.setting}`, option.label]));
+  labels.set('nearAi.agent.roleModels', 'Agent roles');
+  return labels;
+}
+
+export function projectChoiceLabel(setting: string): string {
+  return settingLabels().get(setting) ?? setting.slice('nearAi.'.length);
+}
+
+function describeChoice(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (value && typeof value === 'object') return Object.entries(value as Record<string, unknown>).map(([role, model]) => `${role}: ${String(model)}`).join(', ');
+  return '';
+}
+
+/** The settings whose value comes from this project's choice now, for the page. `inspect` takes a short setting name such as `agent.deepModel`. */
+export function projectChoicesView(root: string | undefined, inspect: (setting: string) => InspectedSetting | undefined): ProjectChoiceView[] {
+  return choicesInEffect(root, inspect, { ttlMs: 0 }).map((setting) => ({ setting, label: projectChoiceLabel(setting), value: describeChoice(projectChoiceFor(root, setting, { ttlMs: 0 })) }));
+}
+
+/** "Use my settings" on one row: the page names a setting, the host accepts only the nine a project can carry and clears that one. */
+export async function clearOneProjectChoice(root: string | undefined, setting: string, writer: string): Promise<{ text: string; cleared: boolean; problem?: boolean }> {
+  if (!(PROJECT_CHOICE_SETTINGS as readonly string[]).includes(setting)) return { text: 'That setting cannot be chosen for a project, so nothing was changed.', cleared: false, problem: true };
+  if (!root) return { text: 'Open a folder to change the models chosen for a project.', cleared: false, problem: true };
+  const label = projectChoiceLabel(setting);
+  const cleared = await removeProjectChoice(root, setting, writer);
+  return { text: cleared ? `${label} now uses your own settings again.` : `${label} was not chosen for this project, so nothing changed.`, cleared };
+}
+
+/**
+ * NEAR AI: Clear This Project's Model Choices. Lists the settings that come from the project's choice and clears the ones picked; `pick` is the multi-select
+ * (a QuickPick in the editor, a stand-in in tests). Returns the one sentence to tell the person.
+ */
+export async function clearProjectModelChoices(options: { root: string | undefined; inspect: (setting: string) => InspectedSetting | undefined; writer: string; pick: (items: Array<{ label: string; description: string; setting: string }>) => Promise<Array<{ setting: string }> | undefined> }): Promise<string> {
+  if (!options.root) return 'Open a folder to change the models chosen for a project.';
+  const inEffect = projectChoicesView(options.root, options.inspect);
+  if (!inEffect.length) return "No model is chosen for this project, so every model comes from your own settings.";
+  const picked = await options.pick(inEffect.map((entry) => ({ label: entry.label, description: entry.value, setting: entry.setting })));
+  if (!picked?.length) return 'Nothing was cleared.';
+  const names: string[] = [];
+  for (const entry of picked) {
+    const outcome = await clearOneProjectChoice(options.root, entry.setting, options.writer);
+    if (outcome.cleared) names.push(projectChoiceLabel(entry.setting));
+  }
+  return names.length ? `Cleared the project's choice for ${names.join(', ')}. ${names.length === 1 ? 'It uses' : 'They use'} your own settings again.` : 'Nothing was cleared.';
 }
 
 /** Why a selection cannot start, in plain words; undefined when it can. */
@@ -203,6 +263,7 @@ export function comparisonPageHtml(options: { cspSource: string; nonce: string; 
 <div class="actions"><button id="refresh" type="button" class="secondary">Refresh</button></div></header>
 <p id="problem" class="error" role="alert" hidden></p>
 <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
+<div id="project-choices" hidden></div>
 <main>
 <section aria-labelledby="board-title"><div class="section-head"><h2 id="board-title">Leaderboard</h2></div>
 <p class="hint">Every model tested on this computer, ranked on its latest result for each task. Scores are out of 10.</p><div id="trend" hidden></div><div id="recommended" hidden></div><div id="retest" hidden></div><div id="board"><p class="hint">Loading…</p></div></section>

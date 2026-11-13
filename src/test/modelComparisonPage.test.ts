@@ -1,6 +1,13 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import test from 'node:test';
+import vm from 'node:vm';
 import { catalogVersion, type ResultRow, type SavedRun } from '../benchmark/results';
+import { PROJECT_CHOICE_SETTINGS, projectChoiceFor, readChoicesFileSync, writeProjectChoice } from '../services/modelChoices';
+import { clearOneProjectChoice, clearProjectModelChoices, projectChoicesView } from '../services/modelComparisonPage';
+import { stateHomeFor } from '../services/stateHome';
+import { tempProject } from './helpers/stateFixtures';
 import { catalogEntries, comparisonPageHtml, defaultSelection, estimateView, historyEntries, leaderboardRows, parseComparisonMessage, reportView, selectionProblem } from '../services/modelComparisonPage';
 import { heldRoles, privacyWarning, roleAppliedText, roleOptions, roleUpdate } from '../services/modelRoles';
 import type { ModelInfo } from '../services/nearAiClient';
@@ -157,4 +164,126 @@ test('a new team is checked per member, and only members whose tested best model
   assert.ok(byMember.mapper, 'a member with no role is judged on the overall score rather than skipped');
   // The page builds the same leaderboard the table shows, so a suggestion cannot disagree with the numbers above it.
   assert.equal(typeof leaderboardRows, 'function');
+});
+
+// ---- the project's model choices can be seen and cleared (plan 27-33, Task 3) ----
+
+class PageNode {
+  children: PageNode[] = [];
+  attributes = new Map<string, string>();
+  dataset: Record<string, string> = {};
+  hidden = false; id = ''; className = ''; type = ''; value = ''; title = ''; checked = false; disabled = false; scope = ''; tabIndex = 0; label = '';
+  private text = '';
+  constructor(public tagName: string) {}
+  get classList() { const list = () => this.className.split(/\s+/).filter(Boolean); return { add: (name: string) => { if (!list().includes(name)) this.className = [...list(), name].join(' '); }, contains: (name: string) => list().includes(name) }; }
+  get textContent(): string { return this.text + this.children.map((child) => child.textContent).join(''); }
+  set textContent(value: string) { this.text = value; this.children = []; }
+  append(...nodes: PageNode[]) { this.children.push(...nodes); }
+  replaceChildren(...nodes: PageNode[]) { this.children = []; this.text = ''; this.append(...nodes); }
+  setAttribute(name: string, value: string) { this.attributes.set(name, value); }
+  private listeners = new Map<string, Array<() => void>>();
+  addEventListener(type: string, listener: () => void) { this.listeners.set(type, [...(this.listeners.get(type) ?? []), listener]); }
+  click() { for (const listener of this.listeners.get('click') ?? []) listener(); }
+  all(): PageNode[] { return this.children.flatMap((child) => [child, ...child.all()]); }
+  querySelectorAll(): PageNode[] { return []; }
+}
+
+function runComparePage() {
+  const body = new PageNode('body');
+  for (const id of ['board', 'trend', 'recommended', 'retest', 'setup', 'history', 'results-section', 'results', 'results-actions', 'progress', 'notice', 'problem', 'refresh', 'project-choices']) { const node = new PageNode('div'); node.id = id; body.append(node); }
+  const listeners: Array<(event: { data: unknown }) => void> = [];
+  const posted: Array<Record<string, unknown>> = [];
+  const document = { getElementById: (id: string) => body.all().find((node) => node.id === id) ?? null, createElement: (tag: string) => new PageNode(tag), createElementNS: (_ns: string, tag: string) => new PageNode(tag), createTextNode: (text: string) => { const node = new PageNode('#text'); node.textContent = text; return node; } };
+  const context = vm.createContext({ document, Option: function Option(text: string, value: string) { const node = new PageNode('option'); node.textContent = text; node.value = value; return node; }, window: { addEventListener: (_type: string, listener: (event: { data: unknown }) => void) => listeners.push(listener) }, acquireVsCodeApi: () => ({ postMessage: (message: Record<string, unknown>) => posted.push(message) }), setTimeout: () => 0, clearTimeout: () => undefined, Date, Math, JSON, Set, Object, String, Number, Boolean });
+  vm.runInContext(readFileSync(path.join(__dirname, '..', '..', 'media', 'compare', 'compare.js'), 'utf8'), context, { timeout: 1000 });
+  return { body, posted, dispatch: (data: unknown) => listeners.forEach((listener) => listener({ data })) };
+}
+
+const emptyState = { leaderboard: [], catalog: [], roles: [], taskSets: [], history: [], selected: [] };
+
+test('the page state lists the settings that come from the project, with labels, and leaves out one the workspace sets itself', async () => {
+  const root = await tempProject();
+  await writeProjectChoice(root, 'nearAi.agent.deepModel', 'tee/deep', 'edA.1');
+  await writeProjectChoice(root, 'nearAi.defaultModel', 'tee/main', 'edA.1');
+  await writeProjectChoice(root, 'nearAi.agent.roleModels', { 'gsd-planner': 'tee/plan' }, 'edA.1');
+  await writeProjectChoice(root, 'nearAi.agent.fastModel', 'tee/fast', 'edA.1');
+  const inspect = (setting: string) => setting === 'agent.fastModel' ? { workspaceValue: 'ws-fast' } : {};
+  assert.deepEqual(projectChoicesView(root, inspect), [
+    { setting: 'nearAi.defaultModel', label: 'Main chat model', value: 'tee/main' },
+    { setting: 'nearAi.agent.deepModel', label: 'Deep tier', value: 'tee/deep' },
+    { setting: 'nearAi.agent.roleModels', label: 'Agent roles', value: 'gsd-planner: tee/plan' }
+  ]);
+  assert.deepEqual(projectChoicesView(undefined, inspect), []);
+});
+
+test('the page shows a "Chosen for this project" list with one "Use my settings" button per setting, and none when there are no choices', () => {
+  const page = runComparePage();
+  page.dispatch({ type: 'state', state: { ...emptyState, projectChoices: [{ setting: 'nearAi.agent.deepModel', label: 'Deep tier', value: 'tee/deep' }, { setting: 'nearAi.agent.roleModels', label: 'Agent roles', value: 'gsd-planner: tee/plan' }] } });
+  const box = page.body.all().find((node) => node.id === 'project-choices')!;
+  assert.equal(box.hidden, false);
+  assert.match(box.textContent, /Chosen for this project/);
+  const rows = box.all().filter((node) => node.tagName === 'li');
+  assert.deepEqual(rows.map((row) => row.textContent.replace(/Use my settings$/, '')), ['Deep tier: tee/deep', 'Agent roles: gsd-planner: tee/plan']);
+  const buttons = box.all().filter((node) => node.tagName === 'button');
+  assert.deepEqual(buttons.map((node) => node.textContent), ['Use my settings', 'Use my settings']);
+  buttons[1]!.click();
+  assert.deepEqual(JSON.parse(JSON.stringify(page.posted.filter((message) => message.type === 'clear-project-choice'))), [{ type: 'clear-project-choice', setting: 'nearAi.agent.roleModels' }]);
+  page.dispatch({ type: 'state', state: { ...emptyState, projectChoices: [] } });
+  assert.equal(box.hidden, true);
+  assert.equal(box.all().filter((node) => node.tagName === 'li').length, 0, 'no list without choices');
+  page.dispatch({ type: 'state', state: emptyState });
+  assert.equal(box.hidden, true, 'a state from an older host has no list either');
+});
+
+test('the host clears one project choice by name, refuses a setting a project cannot carry, and writes nothing then', async () => {
+  assert.deepEqual(parseComparisonMessage({ type: 'clear-project-choice', setting: 'nearAi.agent.deepModel' }), { type: 'clear-project-choice', setting: 'nearAi.agent.deepModel' });
+  assert.equal(parseComparisonMessage({ type: 'clear-project-choice' }), undefined);
+  assert.equal(parseComparisonMessage({ type: 'clear-project-choice', setting: 'nearAi.agent.deepModel', extra: 1 }), undefined);
+  const root = await tempProject();
+  await writeProjectChoice(root, 'nearAi.agent.deepModel', 'tee/deep', 'edA.1');
+  const before = JSON.stringify(readChoicesFileSync(root));
+  for (const bad of ['nearAi.baseUrl', 'agent.deepModel', '', 'nearAi.agent.deepModel/../x']) {
+    const refused = await clearOneProjectChoice(root, bad, 'edA.1');
+    assert.equal(refused.cleared, false);
+    assert.equal(refused.problem, true, bad);
+    assert.match(refused.text, /nothing was changed/);
+  }
+  assert.equal(JSON.stringify(readChoicesFileSync(root)), before, 'nothing was written');
+  assert.equal((await clearOneProjectChoice(undefined, 'nearAi.agent.deepModel', 'edA.1')).problem, true);
+  const cleared = await clearOneProjectChoice(root, 'nearAi.agent.deepModel', 'edA.1');
+  assert.deepEqual(cleared, { text: 'Deep tier now uses your own settings again.', cleared: true });
+  assert.equal(projectChoiceFor(root, 'agent.deepModel', { ttlMs: 0 }), undefined);
+  assert.equal((await clearOneProjectChoice(root, 'nearAi.agent.deepModel', 'edA.1')).cleared, false, 'already clear: nothing changes');
+});
+
+test('the command lists the settings in effect in a multi-select and clears the ones picked; with none it says so in one sentence', async () => {
+  const root = await tempProject();
+  const inspect = () => ({});
+  let offered: Array<{ label: string; description: string; setting: string }> = [];
+  const none = await clearProjectModelChoices({ root, inspect, writer: 'edA.1', pick: async () => { throw new Error('nothing to pick'); } });
+  assert.match(none, /^No model is chosen for this project[^.]*\.$/);
+  await writeProjectChoice(root, 'nearAi.agent.deepModel', 'tee/deep', 'edA.1');
+  await writeProjectChoice(root, 'nearAi.agent.fastModel', 'tee/fast', 'edA.1');
+  await writeProjectChoice(root, 'nearAi.defaultModel', 'tee/main', 'edA.1');
+  const text = await clearProjectModelChoices({ root, inspect, writer: 'edA.1', pick: async (items) => { offered = items; return items.filter((item) => item.setting !== 'nearAi.agent.fastModel'); } });
+  assert.deepEqual(offered.map((item) => [item.label, item.description]), [['Main chat model', 'tee/main'], ['Deep tier', 'tee/deep'], ['Fast tier', 'tee/fast']]);
+  assert.equal(text, "Cleared the project's choice for Main chat model, Deep tier. They use your own settings again.");
+  assert.equal(projectChoiceFor(root, 'agent.fastModel', { ttlMs: 0 }), 'tee/fast', 'the one not picked is kept');
+  assert.equal(projectChoiceFor(root, 'defaultModel', { ttlMs: 0 }), undefined);
+  assert.equal(await clearProjectModelChoices({ root, inspect, writer: 'edA.1', pick: async () => undefined }), 'Nothing was cleared.', 'dismissing the picker changes nothing');
+  assert.equal(projectChoiceFor(root, 'agent.fastModel', { ttlMs: 0 }), 'tee/fast');
+  assert.equal(await stateHomeFor(root).exists(), true);
+});
+
+test('package.json declares the clear command, and each of the nine model settings says a project choice is used instead and where to clear it', () => {
+  const manifest = JSON.parse(readFileSync(path.join(__dirname, '..', '..', 'package.json'), 'utf8')) as { contributes: { commands: Array<{ command: string; title: string; category?: string }>; configuration: { properties: Record<string, { description?: string; markdownDescription?: string }> } } };
+  assert.deepEqual(manifest.contributes.commands.find((command) => command.command === 'nearAi.clearProjectModelChoices'), { command: 'nearAi.clearProjectModelChoices', title: "Clear This Project's Model Choices", category: 'NEAR AI' });
+  const sentence = "A model chosen for this project in Compare Models is used instead of this setting until you clear it there or with NEAR AI: Clear This Project's Model Choices.";
+  for (const setting of PROJECT_CHOICE_SETTINGS) {
+    const property = manifest.contributes.configuration.properties[setting];
+    assert.ok(property, setting);
+    const text = property.markdownDescription ?? property.description ?? '';
+    assert.ok(text.endsWith(sentence), `${setting} ends with the sentence`);
+    assert.doesNotMatch(text, /\u2014/, 'no em-dash');
+  }
 });

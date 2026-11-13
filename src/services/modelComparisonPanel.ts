@@ -12,8 +12,8 @@ import { spendAccountOf } from './agentSession';
 import type { AuthService } from './auth';
 import { providerErrorMessage } from './chatBridge';
 import { isEmergencyStopped, onDidChangeEmergencyStop } from './emergencyStop';
-import { catalogEntries, comparisonPageHtml, defaultSelection, estimateView, historyEntries, leaderboardRows, recommendationView, retestView, parseComparisonMessage, reportView, selectionProblem, taskSetsView, type PageState, type Selection } from './modelComparisonPage';
-import { declineImport, importOffer, PROJECT_CHOICE_SETTINGS, planApply, projectChoiceFor, projectUndoFor, readChoicesFileSync, undoProjectChoice, writeProjectChoice, type ChoiceValue, type ProjectUndo } from './modelChoices';
+import { catalogEntries, comparisonPageHtml, defaultSelection, clearOneProjectChoice, clearProjectModelChoices, estimateView, historyEntries, leaderboardRows, projectChoicesView, recommendationView, retestView, parseComparisonMessage, reportView, selectionProblem, taskSetsView, type PageState, type Selection } from './modelComparisonPage';
+import { declineImport, importOffer, PROJECT_CHOICE_SETTINGS, planApply, projectChoiceFor, projectUndoFor, readChoicesFileSync, undoProjectChoice, writeProjectChoice, type ChoiceValue, type InspectedSetting, type ProjectUndo } from './modelChoices';
 import { privacyWarning, roleAppliedText, roleOptions, roleUpdate, type RoleOption } from './modelRoles';
 import type { ModelInfo, UsageMetadata } from './nearAiClient';
 import { activeProvider, clientFor, type ActiveProvider } from './providerCache';
@@ -62,6 +62,18 @@ const benchmarkTasks = () => (tasksLoaded ??= loadBenchmarkTasks().catch((error:
 
 export function registerModelComparison(context: vscode.ExtensionContext, auth: AuthService): void {
   context.subscriptions.push(vscode.commands.registerCommand('nearAi.compareModels', () => openModelComparison(context, auth)));
+  context.subscriptions.push(vscode.commands.registerCommand('nearAi.clearProjectModelChoices', async () => {
+    const configuration = vscode.workspace.getConfiguration('nearAi');
+    const text = await clearProjectModelChoices({
+      root: projectRootOf(),
+      inspect: (setting) => configuration.inspect(setting),
+      writer: editorWriter(context.globalState),
+      pick: async (items) => vscode.window.showQuickPick(items, { canPickMany: true, title: "Clear This Project's Model Choices", placeHolder: 'Pick the models to put back to your own settings' })
+    });
+    // A project choice raises no settings event, so an open Compare Models tab is refreshed by hand.
+    await repost(context, auth);
+    void vscode.window.showInformationMessage(text);
+  }));
 }
 
 async function gather(context: vscode.ExtensionContext, auth: AuthService): Promise<Gathered> {
@@ -82,7 +94,7 @@ async function gather(context: vscode.ExtensionContext, auth: AuthService): Prom
   return {
     active, models, tasks, runs, roles,
     state: {
-      leaderboard, catalog, selected: defaultSelection(roles, catalog), roles,
+      leaderboard, catalog, selected: defaultSelection(roles, catalog), roles, projectChoices: projectChoicesView(root, (setting) => vscode.workspace.getConfiguration('nearAi').inspect(setting) as InspectedSetting | undefined),
       taskSets: taskSetsView(tasks), history: historyEntries(runs), retest: retestView(leaderboard, models), recommended: recommendationView(leaderboard, roles), trend: performanceTrend(runs),
       ...(running ? { running: { runId: running.runId } } : {}), teeOnly, ...(problem ? { problem } : {})
     }
@@ -140,6 +152,12 @@ export function openModelComparison(context: vscode.ExtensionContext, auth: Auth
           case 'apply-role': await applyRole(context, auth, message.model, message.role); break;
           case 'apply-recommended': await applyRecommended(context, auth); break;
           case 'undo-role': await undoRole(context, auth, message.token); break;
+          case 'clear-project-choice': {
+            const outcome = await clearOneProjectChoice(projectRootOf(), message.setting, editorWriter(context.globalState));
+            post({ type: outcome.problem ? 'error' : 'notice', text: outcome.text });
+            if (outcome.cleared) await repost(context, auth);
+            break;
+          }
         }
       } catch (error) {
         post({ type: 'error', text: providerErrorMessage(error) });

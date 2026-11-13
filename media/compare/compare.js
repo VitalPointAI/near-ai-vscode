@@ -372,6 +372,23 @@
     node.hidden = false;
   }
 
+  // The settings whose model comes from this project's choice, each with one button that puts it back to the person's own setting. Without any, nothing shows.
+  function renderProjectChoices() {
+    const root = $('project-choices');
+    if (!root) return;
+    root.replaceChildren();
+    const entries = (state && state.projectChoices) || [];
+    root.hidden = !entries.length;
+    if (!entries.length) return;
+    const list = el('ul', 'project-choice-list');
+    for (const entry of entries) {
+      const item = el('li');
+      item.append(el('strong', '', entry.label + ': '), el('span', '', entry.value), button('Use my settings', () => vscode.postMessage({ type: 'clear-project-choice', setting: entry.setting }), { secondary: true, label: 'Use my own settings for ' + entry.label + ' instead of this project\'s choice' }));
+      list.append(item);
+    }
+    root.append(el('strong', '', 'Chosen for this project'), el('p', 'hint', 'These models were chosen for this project in Compare Models and are used instead of your own settings. Put one back to use your own.'), list);
+  }
+
   // Models worth testing again: a saved result that is stale or missing a task, and models that were added to the catalog since the last run. Shown above
   // the board so a release of a new model is not something the user has to notice by scrolling (owner, 2026-11-07).
   function renderRetest() {
@@ -487,6 +504,7 @@
     $('problem').hidden = true;
     renderBoard();
     renderTrend();
+    renderProjectChoices();
     renderRecommended();
     renderRetest();
     renderSetup();
