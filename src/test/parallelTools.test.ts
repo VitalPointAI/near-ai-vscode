@@ -11,7 +11,7 @@ import { ShellSession } from '../agent/shell';
 import { agentSystemPrompt } from '../agent/systemPrompt';
 import { teamLeadPrompt } from '../agent/teams';
 import { bashTool, CORE_TOOLS } from '../agent/tools';
-import { checkCitationsTool, webFetchTool, webSearchTool } from '../agent/webTools';
+import { checkCitationsTool, checkOriginalityTool, webFetchTool, webSearchTool } from '../agent/webTools';
 import { Slots } from '../services/agentSession';
 import type { AgentMessage, CompletionEvent, ToolCall } from '../services/nearAiClient';
 
@@ -36,10 +36,11 @@ async function oneTurn(root: string, calls: ToolCall[]): Promise<{ events: Agent
 
 const order = (events: AgentEvent[]) => events.filter((event) => event.type === 'tool-start' || event.type === 'tool-end').map((event) => `${event.type === 'tool-start' ? 'start' : 'end'}:${event.callId}`);
 
-test('WebFetch, WebSearch and CheckCitations run concurrently', () => {
+test('WebFetch, WebSearch, CheckCitations and CheckOriginality run concurrently', () => {
   assert.equal(webFetchTool.concurrent, true);
   assert.equal(webSearchTool(undefined).concurrent, true);
   assert.equal(checkCitationsTool.capability, 'read', 'reads join every batch');
+  assert.equal(checkOriginalityTool.capability, 'read', 'reads join every batch');
 });
 
 test('read-only shell commands are recognised strictly', () => {

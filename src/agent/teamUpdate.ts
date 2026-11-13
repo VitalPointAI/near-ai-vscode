@@ -11,7 +11,7 @@ import { TEMPLATE_HISTORY } from './teamTemplateHistory';
 // version is today's built-in. A member still equal to its base is replaced; a member the user
 // changed is never overwritten without their choice; members the user added are left alone.
 
-const WEB = ['WebSearch', 'WebFetch', 'CheckCitations'];
+const WEB = ['WebSearch', 'WebFetch', 'CheckCitations', 'CheckOriginality'];
 const STAMP_KEYS = ['template', 'templateVersion', 'templateBase'];
 
 export interface TemplateRef {

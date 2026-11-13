@@ -21,6 +21,8 @@ export interface ProjectType {
 
 const READ = ['Read', 'Glob', 'Grep', 'TodoWrite', 'Recall', 'Remember'];
 const WEB = ['WebSearch', 'WebFetch', 'CheckCitations'];
+/** Tools that need pages from the web; a local-only project's team is generated without them. */
+const WEB_ONLY = [...WEB, 'CheckOriginality'];
 const WRITE = ['Write', 'Edit'];
 const DOCS = ['CreatePresentation', 'CreatePdf', 'CreateDocument', 'RenderSvg', 'VectorizeImage'];
 
@@ -234,7 +236,7 @@ export function projectTypeTeam(type: ProjectType, goal: string, locality: 'clou
   return renderTeam(`${type.label} team`, `A ${type.label.toLowerCase()} team. Goal: ${goal}`.slice(0, 300), type.members.map((member) => ({
     ...member,
     // A local-only project has no web access through NEAR; keep members to local tools.
-    ...(local && member.tools ? { tools: member.tools.filter((tool) => !WEB.includes(tool)) } : {}),
+    ...(local && member.tools ? { tools: member.tools.filter((tool) => !WEB_ONLY.includes(tool)) } : {}),
     instructions: `${member.instructions}\n\nProject goal: ${goal}`
   })));
 }

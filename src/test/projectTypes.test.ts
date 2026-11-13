@@ -12,11 +12,11 @@ import type { AgentMessage, CompletionEvent, ToolCall } from '../services/nearAi
 import { projectInstructions } from '../agent/systemPrompt';
 import { parseTeam } from '../agent/teams';
 import { CORE_TOOLS } from '../agent/tools';
-import { checkCitationsTool, webFetchTool, webSearchTool } from '../agent/webTools';
+import { checkCitationsTool, checkOriginalityTool, webFetchTool, webSearchTool } from '../agent/webTools';
 
 // Project types tailor the team and the guidance every agent reads, on the same GSD cycle.
 
-const KNOWN_TOOLS = new Set([...CORE_TOOLS, ...GRAPHICS_TOOLS, webFetchTool, webSearchTool(undefined), checkCitationsTool].map((tool) => tool.name).concat('Remember', 'Recall', 'SecurityScan'));
+const KNOWN_TOOLS = new Set([...CORE_TOOLS, ...GRAPHICS_TOOLS, webFetchTool, webSearchTool(undefined), checkCitationsTool, checkOriginalityTool].map((tool) => tool.name).concat('Remember', 'Recall', 'SecurityScan'));
 
 test('every project type gives a valid team whose members only use tools that exist', () => {
   for (const type of PROJECT_TYPES) {

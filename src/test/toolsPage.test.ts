@@ -99,7 +99,7 @@ test('the directory lists workflows, agents, teams, tools, MCP servers, and mode
   assert.match(directory.teamProblems[0], /broken\.md: The team needs a name/);
   // Every built-in tool a run is given, with its capability.
   const tools = new Map(directory.tools.map((tool) => [tool.name, tool]));
-  for (const name of [...CORE_TOOLS.map((tool) => tool.name), 'WebFetch', 'WebSearch', 'CheckCitations', 'GenerateImage', 'SecurityScan', 'Remember', 'Recall', 'Skill', 'SlashCommand', 'AskUserQuestion', 'Agent', 'Task']) assert.ok(tools.has(name), `lists ${name}`);
+  for (const name of [...CORE_TOOLS.map((tool) => tool.name), 'WebFetch', 'WebSearch', 'CheckCitations', 'CheckOriginality', 'GenerateImage', 'SecurityScan', 'Remember', 'Recall', 'Skill', 'SlashCommand', 'AskUserQuestion', 'Agent', 'Task']) assert.ok(tools.has(name), `lists ${name}`);
   assert.equal(tools.get('Read')?.capability, 'read');
   assert.equal(tools.get('Edit')?.capability, 'edit');
   assert.equal(tools.get('Bash')?.capability, 'shell');
