@@ -1,3 +1,20 @@
-# Phase 27: API coverage
+# API Coverage: project state sync and the online home (Phase 27)
 
-No external API integration: the phase moves project state into a git-ignored folder and syncs it as end-to-end encrypted objects through the system git binary and Node's built-in crypto and zlib; it adds no third-party API, SDK or service, and the existing NEAR AI client is unchanged (its API key is only carried as encrypted data).
+> Full coverage by default. Opt-outs are explicit, reasoned decisions.
+>
+> The first version of this file said the phase used no external API. Plan 27-17 (D-14, SYNC-09)
+> added the GitHub REST API, VS Code's built-in GitHub sign-in and the gh CLI, so the matrix now
+> lists every external surface the phase reaches.
+
+| capability | decision | reason |
+|---|---|---|
+| Project git remote over the system git binary (fetch and push of refs/heads/near-ai/state only) | INTEGRATE | |
+| GitHub REST API: create a repository for the signed-in user (POST /user/repos) | INTEGRATE | |
+| GitHub REST API: read a repository and the signed-in login (resume and checks) | INTEGRATE | |
+| VS Code GitHub authentication provider (getSession github, repo scope) | INTEGRATE | |
+| gh CLI fallback (gh auth token, gh repo create) when VS Code sign-in is unavailable | INTEGRATE | |
+| Push of the person's own code branch after the secret check | INTEGRATE | |
+| NEAR AI Cloud API | OPT-OUT | Unchanged by this phase; its key is only carried as sealed data |
+| GitLab and self-hosted git host APIs | OPT-OUT | Deferred by D-09 and D-14 to the later private-remote setting |
+| GitHub repository deletion or settings changes | OPT-OUT | Never done by the extension; a person makes those changes on GitHub |
+| Third-party sync or storage services | OPT-OUT | Not used: the bundle travels only through the project's own git remote |
