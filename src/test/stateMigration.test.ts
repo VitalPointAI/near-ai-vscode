@@ -363,8 +363,12 @@ test('checkpoints: only this project\'s are copied, as format 2 with paths relat
     assert.equal(saved.format, 2);
     assert.deepEqual(saved.snapshots.map((snapshot) => snapshot.rel ?? snapshot.abs), ['src/a.ts', outside]);
     assert.equal(JSON.stringify(saved).includes(root), false, 'no absolute path inside the project is kept');
-    const loaded = await RunCheckpoints.load('run-1793000000011-aaaaaa', home.paths.checkpoints, { root });
+    // 27-29: a path outside the project loads only when it is inside a root the editor allows (its sub-agent worktree folder); the old editor's
+    // storage folder stands in for one here.
+    const loaded = await RunCheckpoints.load('run-1793000000011-aaaaaa', home.paths.checkpoints, { root, allowedRoots: [storage] });
     assert.deepEqual(loaded?.changedFiles.sort(), [path.join(root, 'src', 'a.ts'), outside].sort());
+    const bounded = await RunCheckpoints.load('run-1793000000011-aaaaaa', home.paths.checkpoints, { root });
+    assert.deepEqual(bounded?.changedFiles, [path.join(root, 'src', 'a.ts')], 'without an allowed root the outside entry is dropped');
   } finally {
     await rm(root, { recursive: true, force: true });
     await rm(other, { recursive: true, force: true });

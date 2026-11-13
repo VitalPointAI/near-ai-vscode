@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { lstat, mkdir, readdir, readFile, rename, rm, stat, unlink, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, readdir, readFile, realpath, rename, rm, stat, unlink, writeFile } from 'node:fs/promises';
 import * as path from 'node:path';
 
 interface Snapshot { path: string; original: string | null }
@@ -13,6 +13,12 @@ export interface RunCheckpointsOptions {
   root?: string;
   /** Awaited before each save; the chat passes the state home's ensure(), so its inner .gitignore exists before the first checkpoint file. */
   beforeWrite?: () => Promise<unknown>;
+  /**
+   * Folders outside the project that a revert may still write (this editor's sub-agent worktree folder). A saved checkpoint lives in the project's
+   * state folder, so it can be edited by anything that can write there: with `root` or `allowedRoots` given, an entry whose path is in neither is
+   * dropped on load, and revert checks each path again (27-REVIEW major checkpoints.ts:100). With neither, nothing is bounded (benchmark and tests).
+   */
+  allowedRoots?: string[];
 }
 
 /** A temporary file this old is left over from a save that never finished (the editor closed between write and rename); a live save takes milliseconds. */
@@ -31,10 +37,13 @@ export class RunCheckpoints {
 
   private readonly root: string | undefined;
   private readonly beforeWrite: (() => Promise<unknown>) | undefined;
+  /** The project folder and the allowed roots, resolved once. Empty means the caller asked for no bound. */
+  private readonly bounds: string[];
 
   public constructor(public readonly runId: string, private readonly storageDir?: string, options: RunCheckpointsOptions = {}) {
     this.root = options.root ? path.resolve(options.root) : undefined;
     this.beforeWrite = options.beforeWrite;
+    this.bounds = [...(this.root ? [this.root] : []), ...(options.allowedRoots ?? []).filter((folder) => folder).map((folder) => path.resolve(folder))];
   }
 
   /** Call before writing `absolutePath`; only the first call per file in a run takes a snapshot. */
@@ -59,6 +68,9 @@ export class RunCheckpoints {
   public async revert(): Promise<string[]> {
     const restored: string[] = [];
     for (const snapshot of this.snapshots.values()) {
+      // Whatever the saved file said, a path outside the project and this editor's worktrees is never written or deleted, and neither is one that
+      // reaches outside through a folder that has since become a link.
+      if (!(await this.safeToTouch(snapshot.path))) continue;
       // A path that became a symlink since (e.g. via a shell command) is replaced, not written through.
       const isLink = await lstat(snapshot.path).then((info) => info.isSymbolicLink(), () => false);
       if (snapshot.original === null) {
@@ -100,7 +112,7 @@ export class RunCheckpoints {
     if (Array.isArray(saved)) {
       for (const item of saved as Array<Record<string, unknown>>) {
         const content = original(item?.original);
-        if (item && typeof item.path === 'string' && path.isAbsolute(item.path) && content !== undefined) found.push({ path: item.path, original: content });
+        if (item && typeof item.path === 'string' && path.isAbsolute(item.path) && content !== undefined && this.inBounds(item.path)) found.push({ path: item.path, original: content });
       }
       return found;
     }
@@ -108,12 +120,36 @@ export class RunCheckpoints {
     for (const item of (saved as { snapshots: Array<Record<string, unknown>> }).snapshots) {
       const content = original(item?.original);
       if (!item || content === undefined) continue;
-      if (item.outside === true && typeof item.abs === 'string' && path.isAbsolute(item.abs)) { found.push({ path: item.abs, original: content }); continue; }
+      if (item.outside === true && typeof item.abs === 'string' && path.isAbsolute(item.abs)) { if (this.inBounds(item.abs)) found.push({ path: item.abs, original: content }); continue; }
       if (typeof item.rel !== 'string' || !this.root) continue;
       const resolved = this.resolveInside(item.rel);
       if (resolved) found.push({ path: resolved, original: content });
     }
     return found;
+  }
+
+  /** Whether a file path is lexically inside the project or an allowed root. With no bound configured every path is. */
+  private inBounds(absolute: string): boolean {
+    if (!this.bounds.length) return true;
+    const resolved = path.resolve(absolute);
+    return this.bounds.some((folder) => { const relative = path.relative(folder, resolved); return relative !== '' && !relative.startsWith('..') && !path.isAbsolute(relative); });
+  }
+
+  /** The lexical check, then the real path of the file's nearest existing parent folder against the real paths of the roots. */
+  private async safeToTouch(absolute: string): Promise<boolean> {
+    if (!this.bounds.length) return true;
+    if (!this.inBounds(absolute)) return false;
+    let parent = path.dirname(path.resolve(absolute));
+    let real: string | undefined;
+    for (;;) {
+      real = await realpath(parent).catch(() => undefined);
+      if (real !== undefined) break;
+      const next = path.dirname(parent);
+      if (next === parent) return false;
+      parent = next;
+    }
+    const realBounds = await Promise.all(this.bounds.map((folder) => realpath(folder).catch(() => folder)));
+    return [...this.bounds, ...realBounds].some((folder) => { const relative = path.relative(folder, real!); return !relative.startsWith('..') && !path.isAbsolute(relative); });
   }
 
   /** A saved relative path made absolute under the root, or undefined when it is empty, absolute, climbs out with '..', or would resolve outside the root (T-27-17). */

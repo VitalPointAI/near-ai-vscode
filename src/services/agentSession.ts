@@ -325,7 +325,7 @@ export class AgentConversation {
     const runId = request.runId ?? AgentConversation.newRunId();
     const account = request.local ? undefined : spendAccountOf(request.client);
     this.runSpendSource = account ? { runId, account } : undefined;
-    const checkpoints = new RunCheckpoints(runId, this.checkpointDir, { root: this.root, ...(this.checkpointPrepare ? { beforeWrite: this.checkpointPrepare } : {}) });
+    const checkpoints = new RunCheckpoints(runId, this.checkpointDir, { root: this.root, allowedRoots: [this.worktreeDir], ...(this.checkpointPrepare ? { beforeWrite: this.checkpointPrepare } : {}) });
     this.runs.set(runId, checkpoints);
     this.shellEnvAllow = request.shellEnvAllow ?? [];
     const shell = this.shellFor(request.gsd?.shellEnv ?? {});
@@ -623,7 +623,7 @@ export class AgentConversation {
 
   /** Undoes every file change a run made with the file tools. */
   public async revert(runId: string): Promise<string[]> {
-    const checkpoints = this.runs.get(runId) ?? await RunCheckpoints.load(runId, this.checkpointDir, { root: this.root, ...(this.checkpointPrepare ? { beforeWrite: this.checkpointPrepare } : {}) });
+    const checkpoints = this.runs.get(runId) ?? await RunCheckpoints.load(runId, this.checkpointDir, { root: this.root, allowedRoots: [this.worktreeDir], ...(this.checkpointPrepare ? { beforeWrite: this.checkpointPrepare } : {}) });
     if (!checkpoints) return [];
     const restored = await checkpoints.revert();
     this.runs.delete(runId);
