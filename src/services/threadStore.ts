@@ -6,7 +6,8 @@
 // threads/index.enc is a cache of every thread's meta. Everything is sealed with the transcript subkey of the project's data key; no vscode here.
 //
 // Nothing here deletes a thread or an entry. A thread whose key is not available on this device is listed as locked, never dropped.
-import { appendFile, open, readFile, readdir, stat } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { appendFile, open, readFile, readdir, rmdir, rm, stat } from 'node:fs/promises';
 import * as path from 'node:path';
 import { aadFor, open as openSealed, seal, subKey, type SealedBlob } from '../domain/state/keys';
 import { isSyntheticMessage, messagesToEntries } from '../domain/state/threadCapture';
@@ -15,6 +16,7 @@ import { PARTIAL_HISTORY, PARTIAL_HISTORY_NOTE, pairToolResults } from '../domai
 import type { AgentMessage } from './nearAiClient';
 import { ProjectStateHome, stateHomeFor, writeFileAtomic } from './stateHome';
 import { stateKeysFor, type SecretsLike, type StateKeys } from './stateKeys';
+import { archiveMeta, unarchiveThread, type ArchiveBundle } from './threadArchive';
 import type { ConversationStore, Transcript, TranscriptSummary } from './transcripts';
 
 export type ThreadOrigin = 'panel' | 'chat-view';
@@ -64,7 +66,8 @@ export function mergeMeta(a: ThreadMeta, b: ThreadMeta): ThreadMeta {
   return { ...newer, createdAt: a.createdAt < b.createdAt ? a.createdAt : b.createdAt, lastUsedAt: a.lastUsedAt > b.lastUsedAt ? a.lastUsedAt : b.lastUsedAt };
 }
 
-function validMeta(value: unknown, id: string): ThreadMeta | undefined {
+/** A thread meta read from a file: only a complete, well-typed one for this thread id. */
+export function validMeta(value: unknown, id: string): ThreadMeta | undefined {
   const meta = value as Partial<ThreadMeta> | null;
   if (!meta || typeof meta !== 'object' || meta.id !== id) return undefined;
   const strings = [meta.title, meta.model, meta.createdAt, meta.lastUsedAt, meta.tip];
@@ -73,7 +76,8 @@ function validMeta(value: unknown, id: string): ThreadMeta | undefined {
   return { ...(meta as ThreadMeta), origin: meta.origin === 'chat-view' ? 'chat-view' : 'panel' };
 }
 
-function validEntry(value: unknown, thread: string): ThreadEntry | undefined {
+/** A thread entry read from a file: only a complete one that belongs to this thread. */
+export function validEntry(value: unknown, thread: string): ThreadEntry | undefined {
   const entry = value as Partial<ThreadEntry> | null;
   if (!entry || typeof entry !== 'object' || entry.thread !== thread) return undefined;
   if (typeof entry.id !== 'string' || typeof entry.at !== 'string' || typeof entry.writer !== 'string') return undefined;
@@ -142,10 +146,10 @@ export class ThreadStore implements ConversationStore {
    * Reads complete lines of the log from `offset`. A line that cannot be parsed or opened is skipped: a torn append, or a line moved here from another
    * thread (its AAD names its own thread). A last line without its newline is left for the next read, since the writer may still be appending it.
    */
-  private async readFrom(id: string, material: Material, offset: number): Promise<{ entries: ThreadEntry[]; end: number }> {
+  private async readFrom(id: string, material: Material, offset: number, file: string = this.logPath(id)): Promise<{ entries: ThreadEntry[]; end: number }> {
     let handle: Awaited<ReturnType<typeof open>>;
     try {
-      handle = await open(this.logPath(id), 'r');
+      handle = await open(file, 'r');
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { entries: [], end: offset };
       throw error;
@@ -193,6 +197,12 @@ export class ThreadStore implements ConversationStore {
 
   /** Every entry of a thread, in time order, with all copies of one entry merged. Empty when the thread is not here or cannot be opened on this device. */
   public async entries(id: string): Promise<ThreadEntry[]> {
+    await this.ensureLive(id);
+    return this.liveEntries(id);
+  }
+
+  /** The entries of the thread's live log, whatever its state: an archived thread has none here. */
+  public async liveEntries(id: string): Promise<ThreadEntry[]> {
     const material = await this.readMaterial();
     if (!material) return [];
     return unionEntries((await this.readFrom(id, material, 0)).entries, []);
@@ -332,21 +342,36 @@ export class ThreadStore implements ConversationStore {
    */
   private async scan(): Promise<{ metas: ThreadMeta[]; locked: Array<{ id: string; updatedAt: string }> }> {
     const folders = await this.threadFolders();
+    const archived = new Set(await this.archivedIds());
     const material = await this.readMaterial();
     const lockedOf = async (id: string) => ({ id, updatedAt: (await stat(path.join(this.home.paths.threads, id)).catch(() => undefined))?.mtime.toISOString() ?? '' });
-    if (!material) return { metas: [], locked: await Promise.all(folders.map(lockedOf)) };
+    const lockedArchive = async (id: string) => ({ id, updatedAt: (await stat(path.join(this.home.paths.archive, id, 'parts.json')).catch(() => undefined))?.mtime.toISOString() ?? '' });
+    if (!material) return { metas: [], locked: [...await Promise.all(folders.map(lockedOf)), ...await Promise.all([...archived].filter((id) => !folders.includes(id)).map(lockedArchive))] };
     const merged = new Map<string, ThreadMeta>();
     const add = (meta: ThreadMeta): void => { const current = merged.get(meta.id); merged.set(meta.id, current ? mergeMeta(current, meta) : meta); };
     for (const meta of await this.readIndex(material)) add(meta);
     const locked: Array<{ id: string; updatedAt: string }> = [];
+    // A thread with a live meta is live, whatever the index cache says; one with only an archive is archived (the files decide, so a crash between the
+    // two steps of archiving never leaves the list wrong).
+    const live = new Set<string>();
     for (const id of folders) {
       const meta = await this.readMeta(id, material);
-      if (meta) { add(meta); continue; }
+      if (meta) { add(meta); live.add(id); continue; }
       if (merged.has(id)) continue;
       const rebuilt = await this.rebuildMeta(id, material);
-      if (rebuilt) add(rebuilt); else locked.push(await lockedOf(id));
+      if (rebuilt) { add(rebuilt); live.add(id); } else if (!archived.has(id)) locked.push(await lockedOf(id));
     }
-    return { metas: [...merged.values()], locked };
+    // An archive the index does not know (the index was lost): its title and counts are read from the archive itself.
+    for (const id of archived) {
+      if (merged.has(id) || live.has(id)) continue;
+      const meta = await archiveMeta(this, id).catch(() => undefined);
+      if (meta) add(meta); else locked.push(await lockedArchive(id));
+    }
+    const metas = [...merged.values()].map((meta): ThreadMeta => {
+      const { state: _state, ...rest } = meta;
+      return live.has(meta.id) || !(archived.has(meta.id) || meta.state === 'archived') ? rest : { ...rest, state: 'archived' };
+    });
+    return { metas, locked };
   }
 
   /** A thread folder with a log but no meta (a crash between the two writes): its meta is rebuilt from the log. Undefined when the log cannot be opened. */
@@ -390,6 +415,166 @@ export class ThreadStore implements ConversationStore {
     });
   }
 
+  // ---- archive support (D-08, plan 07; used by threadArchive.ts) ------------------------------------------------------------------
+
+  private archiveFolderOf(id: string): string { assertThreadId(id); return path.join(this.home.paths.archive, id); }
+
+  /** The folder an archived thread is kept in: archive/<id>/. */
+  public archiveDirOf(id: string): string { return this.archiveFolderOf(id); }
+
+  /** The data key and state id the archive is sealed with, or undefined when this device cannot open the project's state. Creates nothing. */
+  public async archiveKeys(): Promise<{ dataKey: Buffer; stateId: string } | undefined> {
+    const dataKey = await this.keys.dataKey();
+    const meta = await this.home.readMeta();
+    return dataKey && meta ? { dataKey, stateId: meta.stateId } : undefined;
+  }
+
+  /** The ids of the threads that have an archive (a complete parts.json), in no particular order. */
+  public async archivedIds(): Promise<string[]> {
+    const found: string[] = [];
+    for (const item of await readdir(this.home.paths.archive, { withFileTypes: true }).catch(() => [])) {
+      if (!item.isDirectory() || !THREAD_ID.test(item.name)) continue;
+      if ((await stat(path.join(this.home.paths.archive, item.name, 'parts.json')).catch(() => undefined))?.isFile()) found.push(item.name);
+    }
+    return found;
+  }
+
+  /** Makes the thread's archive folder, owner-only. */
+  public async ensureArchiveDir(id: string): Promise<string> {
+    const dir = this.archiveFolderOf(id);
+    await this.home.ensureFolder(dir);
+    return dir;
+  }
+
+  /** What is on disk of the thread's live copy. A folder may hold any of the three after a crash in the middle of archiving. */
+  public async liveFiles(id: string): Promise<{ log: boolean; context: boolean; meta: boolean }> {
+    const has = async (file: string) => Boolean((await stat(file).catch(() => undefined))?.isFile());
+    return { log: await has(this.logPath(id)), context: await has(this.contextPath(id)), meta: await has(this.metaPath(id)) };
+  }
+
+  /** Work on one thread's files one after another: an archive, a reopen and a reconcile of the same thread never overlap. */
+  private readonly busy = new Map<string, Promise<unknown>>();
+  public serial<T>(id: string, work: () => Promise<T>): Promise<T> {
+    const result = (this.busy.get(id) ?? Promise.resolve()).then(work, work);
+    const tail = result.catch(() => undefined);
+    this.busy.set(id, tail);
+    void tail.then(() => { if (this.busy.get(id) === tail) this.busy.delete(id); });
+    return result;
+  }
+
+  /** Whether the thread is being archived or reopened right now. */
+  public isBusy(id: string): boolean { return this.busy.has(id); }
+
+  /**
+   * A thread that is archived and has no live log comes back whole before it is read, so opening one is transparent (D-08). A refused or missing archive
+   * changes nothing: the caller then finds no entries, exactly like a thread this device cannot open.
+   */
+  private async ensureLive(id: string): Promise<void> {
+    if (!THREAD_ID.test(id)) return;
+    if ((await stat(this.logPath(id)).catch(() => undefined))?.isFile()) return;
+    if (!(await stat(path.join(this.archiveFolderOf(id), 'parts.json')).catch(() => undefined))?.isFile()) return;
+    await unarchiveThread(this, id).catch(() => undefined);
+  }
+
+  /**
+   * The live copy of a thread as it is now, for archiving: raw entries (every branch), the saved context, the meta, and a stamp of the three files so
+   * the removal that follows can tell whether anything changed while the archive was written and checked. Undefined when there is nothing to archive.
+   */
+  public async liveSnapshot(id: string): Promise<{ entries: ThreadEntry[]; context: Transcript | null; meta: ThreadMeta; stamp: string } | undefined> {
+    const material = await this.readMaterial();
+    if (!material) return undefined;
+    const stamp = await this.liveStamp(id);
+    const meta = (await this.readMeta(id, material)) ?? (await this.rebuildMeta(id, material));
+    if (!meta) return undefined;
+    const entries = unionEntries((await this.readFrom(id, material, 0)).entries, []);
+    let context: Transcript | null = null;
+    try {
+      const value = this.openJson(material, 'thread-context', id, await readFile(this.contextPath(id), 'utf8')) as Transcript;
+      if (value && value.id === id && Array.isArray(value.messages)) context = value;
+    } catch { /* no saved context: the thread is archived with its log and meta */ }
+    const { state: _state, ...plain } = meta;
+    return { entries, context, meta: plain, stamp };
+  }
+
+  private async liveStamp(id: string): Promise<string> {
+    const size = (await stat(this.logPath(id)).catch(() => undefined))?.size ?? 0;
+    const text = async (file: string) => readFile(file, 'utf8').catch(() => '');
+    return createHash('sha256').update(`${size}\n${await text(this.contextPath(id))}\n${await text(this.metaPath(id))}`).digest('hex');
+  }
+
+  /**
+   * Removes the live copy of a thread whose archive has been written and checked, but only if its files are still the ones the archive was made from
+   * (`stamp`): a thread that was used in the meantime is left as it is. The index is told first; then the log, the context and the meta go, in that
+   * order, meta last, so a crash leaves a thread that reconcileArchives can finish or reverse. Returns whether the live copy was removed.
+   */
+  public removeLive(id: string, snapshot: { meta: ThreadMeta; stamp: string }): Promise<boolean> {
+    assertThreadId(id);
+    return this.enqueue(async () => {
+      const material = await this.readMaterial();
+      if (!material || await this.liveStamp(id) !== snapshot.stamp) return false;
+      await this.replaceIndexEntry(material, { ...snapshot.meta, state: 'archived' });
+      for (const file of [this.logPath(id), this.contextPath(id), this.metaPath(id)]) await rm(file, { force: true });
+      await rmdir(this.dirOf(id)).catch(() => undefined);
+      this.caches.delete(id);
+      return true;
+    });
+  }
+
+  /** Puts one thread's line in the index cache exactly as given (no merge), for a state change. */
+  private async replaceIndexEntry(material: Material, meta: ThreadMeta): Promise<void> {
+    const rest = (await this.readIndex(material)).filter((item) => item.id !== meta.id);
+    await this.writeIndex(material, [...rest, meta]);
+  }
+
+  /**
+   * Brings an archived thread's content into its live folder: every entry is added to the log (union; one already there is not added twice), the
+   * saved context is written unless a live one exists, and the meta is merged with a live one. `touch` makes the thread the most recently used, as
+   * opening it does; a restore the rank rule or a crash recovery asks for leaves its time alone. Returns the live entry ids afterwards.
+   */
+  public restoreLive(id: string, bundle: ArchiveBundle, touch: boolean): Promise<Set<string>> {
+    assertThreadId(id);
+    return this.enqueue(async () => {
+      const material = await this.writeMaterial();
+      // Read before the append, which makes a default meta when there is none.
+      const existing = await this.readMeta(id, material);
+      const earlier = this.covered.get(id);
+      await this.append(id, bundle.entries, material);
+      if (earlier === undefined) this.covered.delete(id); else this.covered.set(id, earlier);
+      const cache = await this.refresh(id, material);
+      await this.home.ensureFolder(this.dirOf(id));
+      if (bundle.context && !(await stat(this.contextPath(id)).catch(() => undefined))?.isFile()) {
+        await writeFileAtomic(this.contextPath(id), this.sealJson(material, 'thread-context', id, bundle.context));
+      }
+      const base = existing ? mergeMeta(existing, bundle.meta) : bundle.meta;
+      const lines = threadLines(cache.skeleton);
+      const { state: _state, ...plain } = base;
+      const next: ThreadMeta = { ...plain, id, tip: lines.main.at(-1)?.id ?? '', entries: cache.ids.size, bytes: cache.offset, turns: lines.main.filter((entry) => entry.role === 'user').length, lastUsedAt: touch && this.now().toISOString() > base.lastUsedAt ? this.now().toISOString() : base.lastUsedAt };
+      await writeFileAtomic(this.metaPath(id), this.sealJson(material, 'thread-meta', id, next));
+      await this.replaceIndexEntry(material, next);
+      return new Set(cache.ids);
+    });
+  }
+
+  /** Adds entries to the archive's delta file (sealed lines, as in a log), for entries a thread gained while archived. Nothing in the archive is rewritten. */
+  public appendArchiveDelta(id: string, entries: readonly ThreadEntry[]): Promise<void> {
+    assertThreadId(id);
+    return this.enqueue(async () => {
+      const material = await this.readMaterial();
+      if (!material) throw new Error('This project has no saved state yet.');
+      for (const entry of entries) if (entry.thread !== id) throw new Error('An entry belongs to another conversation.');
+      if (!entries.length) return;
+      const dir = await this.ensureArchiveDir(id);
+      await appendFile(path.join(dir, 'delta.jsonl'), `${entries.map((entry) => this.sealJson(material, 'thread-entry', id, entry)).join('\n')}\n`, { mode: 0o600 });
+    });
+  }
+
+  /** The entries of an archive's delta file; none when there is no file or this device cannot open it. */
+  public async archiveDeltaEntries(id: string): Promise<ThreadEntry[]> {
+    const material = await this.readMaterial();
+    if (!material) return [];
+    return unionEntries((await this.readFrom(id, material, 0, path.join(this.archiveFolderOf(id), 'delta.jsonl'))).entries, []);
+  }
+
   // ---- ConversationStore -----------------------------------------------------------------------------------------------------------
 
   public save(transcript: Transcript): Promise<void> {
@@ -421,6 +606,7 @@ export class ThreadStore implements ConversationStore {
 
   public async load(id: string): Promise<Transcript | undefined> {
     if (!THREAD_ID.test(id)) return undefined;
+    await this.ensureLive(id);
     const material = await this.readMaterial();
     if (!material) return undefined;
     try {
