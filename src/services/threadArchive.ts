@@ -149,3 +149,8 @@ export function applyRetention(store: ThreadStore, liveCount: number, protectedI
   queues.set(store, run.catch(() => undefined));
   return run;
 }
+
+/** Settles what a crash left, by union (not written yet). */
+export async function reconcileArchives(_store: ThreadStore, _protectedIds: Iterable<string> = []): Promise<string[]> {
+  throw new Error('not implemented');
+}
