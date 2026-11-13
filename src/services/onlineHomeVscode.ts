@@ -6,7 +6,9 @@ import { isNearAiProject } from '../gsd/runtime';
 import { validateRepoName } from '../domain/state/onlineHome';
 import type { Visibility } from '../domain/state/onlineHome';
 import type { CodePushSummary } from './codePushCheck';
+import { systemGhCli } from './onlineHome';
 import type { CodePushOffer, GitHubAuth, OnlineHomeUi } from './onlineHome';
+import { pushCodeLaterFlow } from './codePushLater';
 import { gitText, runStateGit } from './stateGit';
 import { stateHomeFor } from './stateHome';
 
@@ -14,6 +16,7 @@ const NOT_NOW_KEY = 'nearAi.onlineHome.notNow';
 const OFFER_BUTTON = 'Give this project an online home';
 const NOT_NOW = 'Not now';
 const MAX_LISTED = 30;
+const NO_FOLDER = 'Open a folder first.';
 
 /**
  * VS Code's built-in GitHub sign-in. An editor without the GitHub provider (code-server, for example) makes getSession throw, which means "not
@@ -143,6 +146,24 @@ export function vscodeOnlineHomeUi(): OnlineHomeUi {
     codePush: codePushOffer(),
     done: () => { ended = true; end?.(); }
   };
+}
+
+/**
+ * "NEAR AI: Put This Project's Code Online": the checked code push on the person's own command, for a project that already has an online home (G-27-6b).
+ * The offer question is not asked, running the command is the choice; every other question of the checked step is.
+ */
+export function registerCodePushCommand(context: vscode.ExtensionContext): void {
+  context.subscriptions.push(vscode.commands.registerCommand('nearAi.sync.pushCode', async () => {
+    const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    if (!root) { void vscode.window.showInformationMessage(NO_FOLDER); return; }
+    await pushCodeLaterFlow({
+      root,
+      ui: codePushOffer(),
+      auth: vscodeGitHubAuth(),
+      gh: systemGhCli(),
+      pickRemote: async (names) => await vscode.window.showQuickPick(names, { title: 'Which online repository should get your code?', ignoreFocusOut: true })
+    });
+  }));
 }
 
 async function hasRemote(root: string): Promise<boolean> {

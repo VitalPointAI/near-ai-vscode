@@ -103,6 +103,11 @@
         "category": "NEAR AI"
       },
       {
+        "command": "nearAi.sync.pushCode",
+        "title": "Put This Project's Code Online",
+        "category": "NEAR AI"
+      },
+      {
         "command": "nearAi.openTools",
         "title": "Open Tools",
         "category": "NEAR AI",

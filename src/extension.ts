@@ -52,6 +52,7 @@ import { closeInterruptedRuns } from './services/activityStore';
 import { offerProxyAdvice } from './domain/proxyAdvice';
 import { offerNextStep, registerNewProfile, registerProjectSetup } from './services/setupMenu';
 import { flushSyncOnClose, registerSyncCommands } from './services/syncCommands';
+import { registerCodePushCommand } from './services/onlineHomeVscode';
 
 /** Returned only to the extension-host tests, which set NEAR_AI_E2E=1. */
 export interface NearAiTestApi { auth: AuthService; sidebar: NearAiPanelViewProvider }
@@ -203,6 +204,7 @@ export function activate(context: vscode.ExtensionContext): NearAiTestApi | unde
   registerNewProfile(context, () => configureApiKey(context, auth, sidebar));
   // Project sync (D-17): the commands, the safe moments it runs at, and the status the chat panel's control shows. It runs only once the person has turned it on.
   registerSyncCommands(context, auth);
+  registerCodePushCommand(context);
 
   // `@nearAi` in VS Code's built-in Chat view; skipped on hosts without the Chat Participant API.
   registerChatParticipant(context, auth, (command, args) => sidebar.request({ type: 'open-command', command, ...(args ? { args } : {}) }));
