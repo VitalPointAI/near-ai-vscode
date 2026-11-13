@@ -136,6 +136,12 @@ export function planApply(inspected: InspectedSetting | undefined): 'workspace' 
   return inspected?.workspaceValue !== undefined || inspected?.workspaceFolderValue !== undefined ? 'workspace' : 'project';
 }
 
+/** The settings whose value right now comes from the project's choice: it has one, and the workspace does not set the value explicitly. */
+export function choicesInEffect(root: string | undefined, inspect: (setting: string) => InspectedSetting | undefined): ProjectChoiceSetting[] {
+  const values = readProjectChoicesSync(root);
+  return PROJECT_CHOICE_SETTINGS.filter((setting) => values[setting] !== undefined && planApply(inspect(setting.slice('nearAi.'.length))) === 'project');
+}
+
 function later(a: ChoiceEntry, b: ChoiceEntry): boolean {
   return a.at > b.at || (a.at === b.at && a.writer > b.writer);
 }

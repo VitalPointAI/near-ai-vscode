@@ -110,7 +110,7 @@
     for (const agent of data.agents) {
       const item = row('li', [agent.name, agent.description, agent.tier, agent.model]);
       const head = el('div', 'item-head');
-      head.append(el('code', 'name', agent.name), modelLine(agent.tier, agent.model, agent.source === 'role setting' ? 'from roleModels' : agent.source === 'default' ? 'no tier set' : ''));
+      head.append(el('code', 'name', agent.name), modelLine(agent.tier, agent.model, agent.source === 'role setting' ? 'from roleModels' : agent.source === 'project choice' ? 'project choice' : agent.source === 'default' ? 'no tier set' : ''));
       item.append(head);
       if (agent.description) item.append(el('p', 'desc', agent.description));
       if (agent.tools.length) item.append(el('p', 'hint', 'Tools: ' + agent.tools.join(', ')));
@@ -177,6 +177,7 @@
     for (const use of data.settingsModels) {
       const line = el('li');
       line.append(el('span', 'use', use.use), el('code', '', use.model || '(not set)'));
+      if (use.source === 'project choice') line.append(el('span', 'hint', 'project choice'));
       if (use.available === false) line.append(badge('not in your key’s list', 'status stopped'));
       line.append(button('Change', () => vscode.postMessage({ type: 'open-setting', key: use.setting }), { secondary: true, label: 'Change the ' + use.use + ' model setting' }));
       uses.append(line);

@@ -24,7 +24,7 @@ import { ReportingTokenHint, SET_REPORTING_TOKEN_COMMAND } from './reportingToke
 export type ToolStatus = 'runs' | 'asks' | 'auto-checked' | 'off' | 'stopped';
 
 export interface DirectorySkill { name: string; description: string; argumentHint?: string; group: string; insert: string }
-export interface DirectoryAgent { name: string; description: string; tier: string; model: string; source: 'role setting' | 'definition' | 'default'; tools: string[] }
+export interface DirectoryAgent { name: string; description: string; tier: string; model: string; source: 'role setting' | 'project choice' | 'definition' | 'default'; tools: string[] }
 export interface DirectoryTeam { name: string; description: string; command: string; insert: string; project: boolean; members: Array<{ name: string; role?: string; tier: string; model: string; tools: string[] }> }
 export interface DirectoryTool { name: string; description: string; capability: string; status: ToolStatus; statusText: string; notes: string[]; setup?: { label: string; command: string }; /** 0.4.17: the tool runs in Auto by its own marker (the web tools). */ autoSafe?: boolean }
 export interface DirectoryMcpServer { id: string; name: string; transport: string; host: string; enabledHere: boolean; state: string; error?: string; approval: string; tools: Array<{ name: string; agentName: string; description: string; enabled: boolean; status: ToolStatus; statusText: string }> }
@@ -41,7 +41,7 @@ export interface ToolsDirectory {
   mcp: DirectoryMcpServer[];
   models: DirectoryModel[];
   modelsProblem?: string;
-  settingsModels: Array<{ use: string; setting: string; model: string; available: boolean | undefined }>;
+  settingsModels: Array<{ use: string; setting: string; model: string; available: boolean | undefined; /** Shown when the model comes from the project's choice rather than the person's settings. */ source?: 'project choice' }>;
   /** The Elsewhere row for NEAR's usage reporting token; `command` is a page command or `setting:<key>`. */
   reportingToken?: { state: ReportingTokenHint['state']; text: string; title: string; command: string };
 }
@@ -60,7 +60,7 @@ export interface DirectoryInput {
   /** The key's model catalog; undefined when no validated profile, or it could not load. */
   models?: ModelInfo[];
   modelsProblem?: string;
-  settings: { mainModel: string; tiers: { deep: string; standard: string; fast: string }; roleModels: Record<string, string>; visionModel: string; transcriptionModel: string; imageModel: string; safetyModel: string };
+  settings: { mainModel: string; tiers: { deep: string; standard: string; fast: string }; roleModels: Record<string, string>; visionModel: string; transcriptionModel: string; imageModel: string; safetyModel: string; /** Setting names (nearAi.agent.deepModel, ...) whose value comes from the project's choice (D-06). */ fromProject?: string[] };
   /** Whether a usage reporting token is set (from the host's secret storage; never the token). */
   reportingToken?: ReportingTokenHint;
 }
@@ -128,7 +128,7 @@ export function resolveAgentModel(name: string, definitionModel: string | undefi
   // The same order a run uses: a team member's own model line wins; then the role's setting; then the definition.
   const roleModel = teamMember && definitionModel ? undefined : roleModelFor(name, input.settings.roleModels);
   const value = roleModel ?? definitionModel;
-  return { tier: tierOf(value), model: modelForTier(value, input.settings.tiers, input.settings.mainModel), source: roleModel ? 'role setting' : definitionModel ? 'definition' : 'default' };
+  return { tier: tierOf(value), model: modelForTier(value, input.settings.tiers, input.settings.mainModel), source: roleModel ? (input.settings.fromProject?.includes('nearAi.agent.roleModels') ? 'project choice' : 'role setting') : definitionModel ? 'definition' : 'default' };
 }
 
 const stubClient = {} as NearAiClient;
@@ -232,7 +232,7 @@ export function buildToolsDirectory(input: DirectoryInput): ToolsDirectory {
     policy: { mode: option.mode, label: option.label, summary: option.summary, stopped: input.policy.emergencyStop },
     skills, agents, teams, teamProblems, tools, mcp, models,
     ...(input.modelsProblem ? { modelsProblem: input.modelsProblem } : {}),
-    settingsModels: uses.map((use) => ({ ...use, available: input.models ? catalog.some((model) => model.id === use.model) : undefined })),
+    settingsModels: uses.map((use) => ({ ...use, available: input.models ? catalog.some((model) => model.id === use.model) : undefined, ...(input.settings.fromProject?.includes(use.setting) ? { source: 'project choice' as const } : {}) })),
     ...(input.reportingToken ? { reportingToken: { state: input.reportingToken.state, text: input.reportingToken.text, title: input.reportingToken.title, command: input.reportingToken.command === 'workbench.action.openSettings' ? `setting:${input.reportingToken.args[0]}` : input.reportingToken.command } } : {})
   };
 }

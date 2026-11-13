@@ -5,8 +5,26 @@ import { createDefaultSettings, NearAiSettings } from '../domain/config';
 import { ActionPolicyMode } from '../domain/policy';
 import { isEmergencyStopped } from './emergencyStop';
 import { DEFAULT_RULES, PermissionRules } from '../agent/permissions';
+import { projectChoiceFor, resolveSetting, type InspectedSetting } from './modelChoices';
 
 const POLICY_MODES: ActionPolicyMode[] = ['approve-risky', 'mostly-autonomous', 'auto', 'fully-autonomous'];
+
+/**
+ * 0.4.20 (D-06): a model setting resolves as an explicit workspace or folder value, then the project's choice (the state home's choices.json, which
+ * every interface and computer shares), then the user value, then the default. Without a folder, or without a choice, it is exactly what it was.
+ */
+function projectRoot(): string | undefined {
+  return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+}
+
+function inspectedSetting(configuration: vscode.WorkspaceConfiguration, key: string): InspectedSetting | undefined {
+  return typeof configuration.inspect === 'function' ? configuration.inspect(key) as InspectedSetting | undefined : undefined;
+}
+
+function projectString(key: string): string | undefined {
+  const value = projectChoiceFor(projectRoot(), key);
+  return typeof value === 'string' ? value : undefined;
+}
 
 export function readSettings(): NearAiSettings {
   const configuration = vscode.workspace.getConfiguration('nearAi');
@@ -16,7 +34,7 @@ export function readSettings(): NearAiSettings {
   return {
     baseUrl: configuration.get<string>('baseUrl', defaults.baseUrl),
     authMode: 'apiKey',
-    defaultModel: configuration.get<string>('defaultModel', defaults.defaultModel),
+    defaultModel: resolveSetting(inspectedSetting(configuration, 'defaultModel') as InspectedSetting<string> | undefined, projectString('defaultModel'), configuration.get<string>('defaultModel', defaults.defaultModel)),
     actionPolicy: { mode: POLICY_MODES.includes(policy) ? policy : defaults.actionPolicy.mode, emergencyStop: isEmergencyStopped() },
     privacyMode: configuration.get<string>('privacyMode') === 'tee-only' ? 'tee-only' : 'standard',
     dailySpendLimitUsd: Number.isFinite(limit) && limit > 0 ? limit : 0
@@ -40,7 +58,9 @@ export function readAgentRules(): PermissionRules {
 /** NEAR models for Open-GSD's model tiers (opus → deep, sonnet → standard, haiku → fast). */
 /** Model or tier per agent role, defaulting research and mapping roles to the fast tier. */
 export function readRoleModels(): Record<string, string> {
-  const value = vscode.workspace.getConfiguration('nearAi').get<unknown>('agent.roleModels', DEFAULT_ROLE_MODELS);
+  const configuration = vscode.workspace.getConfiguration('nearAi');
+  const projectRoles = projectChoiceFor(projectRoot(), 'agent.roleModels');
+  const value = resolveSetting(inspectedSetting(configuration, 'agent.roleModels'), typeof projectRoles === 'object' ? projectRoles : undefined, configuration.get<unknown>('agent.roleModels', DEFAULT_ROLE_MODELS));
   if (!value || typeof value !== 'object' || Array.isArray(value)) return { ...DEFAULT_ROLE_MODELS };
   return Object.fromEntries(Object.entries(value as Record<string, unknown>).filter((entry): entry is [string, string] => typeof entry[1] === 'string' && entry[1].trim().length > 0).map(([role, model]) => [role.trim(), model.trim()]));
 }
@@ -48,7 +68,7 @@ export function readRoleModels(): Record<string, string> {
 export function readModelTiers(): { deep: string; standard: string; fast: string } {
   const configuration = vscode.workspace.getConfiguration('nearAi');
   const pick = (key: string, fallback: string) => {
-    const value = configuration.get<unknown>(key, fallback);
+    const value = resolveSetting(inspectedSetting(configuration, key), projectString(key), configuration.get<unknown>(key, fallback));
     return typeof value === 'string' && value.trim() ? value.trim() : fallback;
   };
   return { deep: pick('agent.deepModel', AGENT_DEFAULTS.tiers.deep), standard: pick('agent.standardModel', AGENT_DEFAULTS.tiers.standard), fast: pick('agent.fastModel', AGENT_DEFAULTS.tiers.fast) };
@@ -56,7 +76,8 @@ export function readModelTiers(): { deep: string; standard: string; fast: string
 
 /** The auto mode's safety model (nearAi.agent.safetyModel); empty means the fast tier's model. */
 export function readSafetyModel(tiers: { fast: string } = readModelTiers()): string {
-  const value = vscode.workspace.getConfiguration('nearAi').get<unknown>('agent.safetyModel', '');
+  const configuration = vscode.workspace.getConfiguration('nearAi');
+  const value = resolveSetting(inspectedSetting(configuration, 'agent.safetyModel'), projectString('agent.safetyModel'), configuration.get<unknown>('agent.safetyModel', ''));
   return typeof value === 'string' && value.trim() ? value.trim() : tiers.fast;
 }
 
@@ -103,7 +124,7 @@ export function readAgentLimits(): { maxParallelAgents: number; maxTurns: number
 export function readAgentModels(): { visionModel: string; transcriptionModel: string; imageModel: string } {
   const configuration = vscode.workspace.getConfiguration('nearAi');
   const pick = (key: string, fallback: string) => {
-    const value = configuration.get<unknown>(key, fallback);
+    const value = resolveSetting(inspectedSetting(configuration, key), projectString(key), configuration.get<unknown>(key, fallback));
     return typeof value === 'string' && value.trim() ? value.trim() : fallback;
   };
   return { visionModel: pick('agent.visionModel', 'z-ai/glm-5.3-flash'), transcriptionModel: pick('agent.transcriptionModel', 'openai/whisper-large-v3'), imageModel: pick('agent.imageModel', 'black-forest-labs/FLUX.2-klein-4B') };
