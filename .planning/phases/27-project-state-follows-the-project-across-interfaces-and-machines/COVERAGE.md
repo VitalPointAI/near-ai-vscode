@@ -8,11 +8,11 @@
 
 | capability | decision | reason |
 |---|---|---|
-| Project git remote over the system git binary (fetch and push of refs/heads/near-ai/state only) | INTEGRATE | |
+| Project git remote via system git (near-ai/state branch only) | INTEGRATE | |
 | GitHub REST API: create a repository for the signed-in user (POST /user/repos) | INTEGRATE | |
 | GitHub REST API: read a repository and the signed-in login (resume and checks) | INTEGRATE | |
 | VS Code GitHub authentication provider (getSession github, repo scope) | INTEGRATE | |
-| gh CLI fallback (gh auth token, gh repo create) when VS Code sign-in is unavailable | INTEGRATE | |
+| gh CLI fallback (gh auth token, gh repo create) | INTEGRATE | |
 | Push of the person's own code branch after the secret check | INTEGRATE | |
 | NEAR AI Cloud API | OPT-OUT | Unchanged by this phase; its key is only carried as sealed data |
 | GitLab and self-hosted git host APIs | OPT-OUT | Deferred by D-09 and D-14 to the later private-remote setting |
