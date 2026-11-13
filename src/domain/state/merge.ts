@@ -6,9 +6,10 @@
 //   3. neither (both machines edited without seeing the other): keep the newer by (at, writer, rev), and for a kind whose policy is 'fork' keep the older too,
 //      under a new id, so a person's saved work is never dropped;
 //   4. a tombstone wins over a record only when it is strictly newer; an edit after a delete resurrects the record.
-// The laws (commutative, associative, idempotent) hold for histories where an edit is stamped later than the record it edits (makeRecord's `base` does
-// that) and where a record that two machines both extended is merged with the extensions, not with their common ancestor alone; src/test/stateMerge.test.ts
-// states and checks them.
+// mergeRecord is that rule for two copies; mergeRecordSets applies it to whole sets as a function of the records held, so the result cannot depend on
+// order. The laws (commutative, associative, idempotent) hold for histories where an edit is stamped later than every copy of the record it edits
+// (makeRecord's `base` does that for the copy it was given) and where a version is not merged in without the edit that superseded it two steps earlier
+// (a fork kind edited twice in a row keeps no record of the middle step); src/test/stateMerge.test.ts states and checks them.
 import { createHash } from 'node:crypto';
 import { baseId, canonicalJson, MERGE_POLICY, type StateRecord } from './records';
 
@@ -65,36 +66,57 @@ const NUL = '\u0000';
 const slotKey = (record: StateRecord): string => `${slotKind(record)}${NUL}${record.id}`;
 
 /**
- * Merges two sets of records (either may already hold several copies of a slot). The result is normalised and sorted, so equal states give equal
- * arrays: live records by (kind, id), tombstones after them by (target, id).
- * - Records of one slot combine with mergeRecord; the forks that produces are records of their own.
- * - The newest tombstone per slot is always kept, even when a newer edit shadows it, because a copy of the record that meets the tombstone later must
- *   still be removed or forked the same way. A record is dropped when a strictly newer tombstone exists for its id or for the id it was forked from.
- * - Use `liveRecords` to read the records a person should see.
+ * Merges two sets of records (either may already hold several copies of a record). The result depends only on which records the two sets hold, never on
+ * their order or on which side held what, and is sorted, so equal states give equal arrays: live records by (kind, id), then tombstones by (target, id).
+ * Per record family (an id, and for 'fork' kinds also the forks made from it):
+ * - copies with one revision collapse to the later written one;
+ * - a version that another version of the family was written from is dropped (the edit supersedes it, rule 2 applied across forks);
+ * - a version a strictly newer tombstone covers is dropped (a tombstone for an id also covers the forks made from it);
+ * - of what is left, the newest is kept under the family's own id and, for a 'fork' kind, every other version is kept under forkId(id, rev); for the
+ *   other kinds only the newest is kept.
+ * The newest tombstone of each id is always kept, even when a newer edit shadows it, so a copy of the record that meets the tombstone later is removed
+ * the same way. Use `liveRecords` to read the records a person should see.
  */
 export function mergeRecordSets(a: readonly StateRecord[], b: readonly StateRecord[]): StateRecord[] {
-  const live = new Map<string, StateRecord>();
   const stones = new Map<string, StateRecord>();
-  const absorb = (record: StateRecord): void => {
-    const key = slotKey(record);
+  const families = new Map<string, StateRecord[]>();
+  for (const record of [...a, ...b]) {
     if (record.kind === 'tombstone') {
+      const key = slotKey(record);
       const current = stones.get(key);
       stones.set(key, current ? newest(current, record) : record);
-      return;
+      continue;
     }
-    const { keep, fork } = mergeRecord(live.get(key), record);
-    live.set(key, keep);
-    if (fork) absorb(fork);
-  };
-  for (const record of a) absorb(record);
-  for (const record of b) absorb(record);
-  const survivors = [...live.values()].filter((record) => {
-    const own = stones.get(`${record.kind}${NUL}${record.id}`);
-    const origin = stones.get(`${record.kind}${NUL}${baseId(record.id)}`);
-    return !((own && own.at > record.at) || (origin && origin.at > record.at));
-  });
+    const forks = MERGE_POLICY[record.kind] === 'fork';
+    const key = `${record.kind}${NUL}${forks ? baseId(record.id) : record.id}`;
+    const members = families.get(key);
+    if (members) members.push(record); else families.set(key, [record]);
+  }
+  const out: StateRecord[] = [];
+  for (const members of families.values()) {
+    const kind = members[0].kind;
+    const forks = MERGE_POLICY[kind as keyof typeof MERGE_POLICY] === 'fork';
+    const root = forks ? baseId(members[0].id) : members[0].id;
+    const byRev = new Map<string, StateRecord>();
+    const extended = new Set<string>();
+    for (const member of members) {
+      const current = byRev.get(member.rev);
+      if (!current || compareRecords(member, current) > 0) byRev.set(member.rev, member);
+      if (member.basedOn !== undefined && member.basedOn !== member.rev) extended.add(member.basedOn);
+    }
+    const covering = stones.get(`${kind}${NUL}${root}`);
+    const survivors = [...byRev.values()].filter((member) => {
+      if (extended.has(member.rev)) return false;
+      const own = forks ? stones.get(`${kind}${NUL}${forkId(root, member.rev)}`) : undefined;
+      return !((covering && covering.at > member.at) || (own && own.at > member.at));
+    }).sort(compareRecords);
+    const winner = survivors.pop();
+    if (!winner) continue;
+    out.push(winner.id === root ? winner : { ...winner, id: root });
+    if (forks) for (const member of survivors) out.push({ ...member, id: forkId(root, member.rev) });
+  }
   // Order: live records by kind then id, then tombstones by target then id.
-  return [...survivors.sort(byKindThenId), ...[...stones.values()].sort(byKindThenId)];
+  return [...out.sort(byKindThenId), ...[...stones.values()].sort(byKindThenId)];
 }
 
 function byKindThenId(a: StateRecord, b: StateRecord): number {
