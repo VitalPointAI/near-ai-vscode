@@ -325,7 +325,7 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
   // was running is shown as stopped, with its transcript, and its run is closed in the history.
   const ready = (async () => {
     const root = workspaceRoot();
-    if (root) await closeInterruptedRuns(root);
+    if (root) await closeInterruptedRuns(root, editorWriter(context.globalState as MementoLike | undefined));
     const saved = parseSavedConversations(context.workspaceState?.get(OPEN_CONVERSATIONS_KEY));
     for (const item of saved.items) {
       const tab = newTab(item.id);

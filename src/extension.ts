@@ -8,7 +8,7 @@ import { saveHandoff } from './services/handoff';
 import { AuthService } from './services/auth';
 import { ProfileStore } from './services/profileStore';
 import { apiKeyCopyHooks } from './services/stateApiKey';
-import { stateHomeFor } from './services/stateHome';
+import { editorWriter, stateHomeFor } from './services/stateHome';
 import { stateKeysFor } from './services/stateKeys';
 import { initProfileIndex, listSavedProfiles, runUseSavedProfile } from './services/profileIndex';
 import { GsdRuntime, startRuntimeUpdates } from './gsd/runtime';
@@ -90,7 +90,7 @@ export function activate(context: vscode.ExtensionContext): NearAiTestApi | unde
 
   // A reload cut off any run still marked running in this project's history: record it as stopped.
   const projectRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-  if (projectRoot) void closeInterruptedRuns(projectRoot);
+  if (projectRoot) void closeInterruptedRuns(projectRoot, editorWriter(context.globalState));
 
   // In code-server and remote windows, suggest turning off VS Code's proxy support when no proxy is
   // used: a background browser tab otherwise stalls agent runs. Asked once; changed only on the click.

@@ -5,6 +5,8 @@ import { redactSecrets } from '../domain/redaction';
 import { ActivityApprovalSummary, ActivityEvent, ActivityLedger, ActivitySessionSummary, ActivityStatus, addSessionStats, AttributionSnapshot, emptyAgentCounts, normalizeAttribution, normalizeRunSplit, normalizeSessionStats, RunOutcomeLabel, RunSplit, runningCost, sessionOutcome, SessionStats, summarizeAgentCounts } from '../domain/activity';
 import { redactForDisplay } from './agentActivity';
 import type { UsageMetadata } from './nearAiClient';
+import { FOREIGN_LIVE_MS, RunMarkers } from './runMarkers';
+import { stateFolder } from '../domain/scratch';
 
 export interface ActivityFileSystem {
   mkdir(directory: string, options: { recursive: true }): Promise<void>;
@@ -169,9 +171,19 @@ export class ActivityStore {
    * this one has started none yet, so a reload cut it off. It is recorded as stopped, ending at
    * its last activity, so the history does not show it running forever. Returns how many.
    */
-  public async closeInterrupted(summary = 'Run stopped: VS Code reloaded before it finished.'): Promise<number> {
+  public async closeInterrupted(summary = 'Run stopped: VS Code reloaded before it finished.', liveElsewhere?: (session: ActivitySessionSummary) => boolean | Promise<boolean>): Promise<number> {
     await this.load();
-    const open = this.ledger.sessions.filter((session) => session.outcome === 'running' && !session.runOutcome);
+    const running = this.ledger.sessions.filter((session) => session.outcome === 'running' && !session.runOutcome);
+    // With two editors on one project, a run still marked running may be live in the other one. A session whose run another editor keeps alive stays
+    // open; one with no run link cannot be asked, so it stays open while it was updated within the heartbeat window (D-03, Pitfall 6).
+    const open: ActivitySessionSummary[] = [];
+    for (const session of running) {
+      if (liveElsewhere) {
+        const linked = Boolean(session.runId && session.conversationId);
+        if (linked ? await Promise.resolve(liveElsewhere(session)).catch(() => false) : Date.parse(this.clock()) - Date.parse(session.updatedAt) < FOREIGN_LIVE_MS) continue;
+      }
+      open.push(session);
+    }
     for (const session of open) {
       const endedAt = session.updatedAt;
       await this.append(session.sessionId, { status: 'cancelled', kind: 'session', summary });
@@ -213,18 +225,19 @@ export class ActivityStore {
    * view makes one per request, other windows have their own), so writing only this store's copy would erase the runs the others recorded since it
    * loaded (0.4.19 review). Runs are matched by session id, and the copy updated last wins. Then the per-session and whole-file bounds apply.
    */
-  private async writeNow(): Promise<void> {
-    if (!this.dirty) return;
+  private writeNow(): Promise<void> {
+    if (!this.dirty) return Promise.resolve();
     this.dirty = false;
-    const ours = new Map(this.ledger.sessions.map((session) => [session.sessionId, session]));
-    for (const theirs of await this.readSessions()) {
-      const mine = ours.get(theirs.sessionId);
-      const kept = !mine || theirs.updatedAt > mine.updatedAt ? theirs : mine;
-      // A run's split is written once, when its main agent ends, without moving updatedAt: whichever copy has it gives it to the one kept (PR 34).
-      const split = kept.run ?? (kept === theirs ? mine?.run : theirs.run);
-      ours.set(theirs.sessionId, split ? { ...kept, run: split } : kept);
-    }
-    this.ledger.sessions = [...ours.values()].sort((a, b) => b.startedAt.localeCompare(a.startedAt)).slice(0, this.maxSessions);
+    // Stores of one process that share this file take turns: a read-merge-write that overlapped another would write without the other's change.
+    // (Two editors are two processes and cannot take turns here; each write re-reads the file, and a change lost to a true overlap is written again
+    // by the next save of the session that holds it, since that store keeps the newer copy.)
+    const turn = (fileQueues.get(this.filePath) ?? Promise.resolve()).then(() => this.mergeAndWrite());
+    fileQueues.set(this.filePath, turn.catch(() => undefined));
+    return turn;
+  }
+
+  private async mergeAndWrite(): Promise<void> {
+    this.ledger.sessions = mergeSessions(await this.readSessions(), this.ledger.sessions).slice(0, this.maxSessions);
     for (const session of this.ledger.sessions.slice(this.maxSessionsWithEvents)) if (session.events.length) session.events = [];
     let payload = `${JSON.stringify(this.ledger)}\n`;
     // The whole file is bounded too: the oldest sessions give up their events first; their summaries and counters stay.
@@ -242,21 +255,43 @@ export class ActivityStore {
       newest.events = boundEvents(events, this.maxEventsPerSession, Math.max(1_024, this.maxFileBytes - base - 4 * 1_024));
       payload = `${JSON.stringify(this.ledger)}\n`;
     }
-    const directory = path.dirname(this.filePath); const temporary = `${this.filePath}.tmp-${process.pid}-${randomBytes(4).toString('hex')}`;
+    const directory = path.dirname(this.filePath); const temporary = `${this.filePath}.tmp-${randomBytes(8).toString('hex')}`;
     this.writes += 1;
     await this.fileSystem.mkdir(directory, { recursive: true }); await this.fileSystem.writeFile(temporary, payload, 'utf8'); await this.fileSystem.rename(temporary, this.filePath);
   }
 
 }
+/**
+ * The history of two or more writers merged into one: every session id of either side is kept, and where both have the session the copy with the
+ * newer updatedAt wins (ties: the one with more events, then the memory copy). A run's split is written once without moving updatedAt, so whichever
+ * copy has it gives it to the one kept (PR 34). Newest-started first.
+ */
+export function mergeSessions(disk: ActivitySessionSummary[], memory: ActivitySessionSummary[]): ActivitySessionSummary[] {
+  const merged = new Map(memory.map((session) => [session.sessionId, session] as const));
+  for (const theirs of disk) {
+    const mine = merged.get(theirs.sessionId);
+    if (!mine) { merged.set(theirs.sessionId, theirs); continue; }
+    const kept = theirs.updatedAt > mine.updatedAt || (theirs.updatedAt === mine.updatedAt && theirs.events.length > mine.events.length) ? theirs : mine;
+    const split = kept.run ?? (kept === theirs ? mine.run : theirs.run);
+    merged.set(theirs.sessionId, split ? { ...kept, run: split } : kept);
+  }
+  return [...merged.values()].sort((a, b) => b.startedAt.localeCompare(a.startedAt));
+}
+const fileQueues = new Map<string, Promise<unknown>>();
 const interrupted = new Map<string, Promise<number>>();
 /**
- * Closes runs a reload cut off in this project's history, once per extension host: at
- * activation, and before the chat starts any run of its own.
+ * Closes runs a reload cut off in this project's history, once per extension host: at activation, and before the chat starts any run of its own.
+ * With a writer (this editor's id) it first asks the shared run markers, so a run another editor is still running is left open (D-03).
  */
-export function closeInterruptedRuns(workspaceRoot: string): Promise<number> {
+export function closeInterruptedRuns(workspaceRoot: string, writer?: string): Promise<number> {
   const key = path.resolve(workspaceRoot);
   let done = interrupted.get(key);
-  if (!done) { done = new ActivityStore(key).closeInterrupted().catch(() => 0); interrupted.set(key, done); }
+  if (!done) {
+    const markers = writer ? new RunMarkers('', key, { dir: path.join(stateFolder(key), 'runs'), writer }) : undefined;
+    const live = markers ? (session: ActivitySessionSummary) => (session.conversationId ? markers.liveElsewhere(session.conversationId, session.runId) : false) : undefined;
+    done = new ActivityStore(key).closeInterrupted(undefined, live).catch(() => 0);
+    interrupted.set(key, done);
+  }
   return done;
 }
 const RUN_OUTCOMES: RunOutcomeLabel[] = ['completed', 'max-turns', 'stuck', 'cancelled', 'failed'];
