@@ -59,7 +59,7 @@ Plans:
   4. Turning sync on shows a high-entropy recovery code once (never stored or logged); on a second machine with the same project cloned, entering it restores chats, runs, comparisons, model choices and the NEAR AI key without re-entering the key, through an encrypted bundle on a dedicated branch of the project's own git remote (never `main`); a leak test proves no plaintext transcript, key or prompt reaches the remote. (SYNC-04, SYNC-05)
   5. Opening the project on a different interface or machine shows a "Pick up where you left off" card (last chat, last run state, current GSD phase and next step); one click reopens it and nothing re-runs or spends money. (SYNC-07)
   6. All git work for sync is done by the extension and reported in plain words; conflicts from two machines merge per record with no lost entries (tested). 0.4.20 ships through the release PR with CHANGELOG and README updated. (SYNC-05, SYNC-08)
-**Plans:** 17/18 plans executed (11 waves)
+**Plans:** 17/25 plans executed (11 waves; gap closure 27-19 to 27-25 from 27-UAT.md runs before 27-16)
 
 Plans:
 - [x] 27-01-PLAN.md — Wire format and crypto core: recovery code, scrypt wrap, padded AEAD objects, sealed manifest, every refusal (owner confirms the contract first)
@@ -79,6 +79,13 @@ Plans:
 - [x] 27-15-PLAN.md — Sync on/off, recovery code shown once, restore on a second machine with the NEAR AI key (D-02); no remote routes into the online-home setup; sync status published
 - [x] 27-17-PLAN.md — "Give this project an online home": GitHub repo public or private on click, gh or pasted-URL fallback, separate checked code push, resumable (D-14, SYNC-09)
 - [x] 27-18-PLAN.md — Visible sync control in the chat panel bar with five states, errors on the control, dismissible turn-on prompt (D-16)
+- [ ] 27-19-PLAN.md — Gap G-27-2: older comparisons saved with mode "run" are read as "rerun" by every reader
+- [ ] 27-20-PLAN.md — Gap G-27-6a: near-ai/home is the first branch of an empty remote; GitHub default never left on near-ai/state
+- [ ] 27-21-PLAN.md — Gap G-27-6c: NEAR AI's own records in .planning/.near-ai/ stay off the code push by default
+- [ ] 27-22-PLAN.md — Gaps G-27-4a, G-27-4c: whole labels at every side bar width with a real-window clipping guard; error sentence under the control
+- [ ] 27-23-PLAN.md — Gap G-27-6b (and 6a repair): "Put This Project's Code Online", setup re-run offers the push; README and SECURITY
+- [ ] 27-24-PLAN.md — Gaps G-27-4b, G-27-4d: "No online home · Set up" on panel open; one sentence per sync failure
+- [ ] 27-25-PLAN.md — Gap G-27-4d: one time formatter for card and control; invitation after connecting NEAR AI
 - [ ] 27-16-PLAN.md — Phase gate, owner check on the real host, README/SECURITY, feature PR and release 0.4.20
 
 ## Milestone v0.7.0: Messaging relay — Teams and Signal
@@ -267,7 +274,7 @@ Plans:
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 27. Project state follows the project (0.4.20) | 17/18 | Context gathered | - |
+| 27. Project state follows the project (0.4.20) | 17/25 | Gap closure planned | - |
 | 68. Relay foundation | 0/TBD | Not started | - |
 | 69. Inbound authenticity and allowlisting | 0/TBD | Not started | - |
 | 70. Identity, tenants and requesters | 0/TBD | Not started | - |
