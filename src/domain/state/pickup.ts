@@ -119,3 +119,15 @@ export function nextGsdStep(phaseNumber: number, phaseFiles: readonly string[], 
   if (totalPhases !== null && phaseNumber >= totalPhases) return { command: '/gsd-complete-milestone', text: 'Next step: every phase is verified; run /gsd-complete-milestone in the chat' };
   return step('/gsd-discuss-phase', phaseNumber + 1);
 }
+
+/** RED stub: where a run stands for the card. */
+export function runCardState(_marker: PickupMarker, _runState: 'finished' | 'running-here' | 'running-elsewhere' | 'cut-off'): { state: RunCardState; at: string } | undefined {
+  return undefined;
+}
+
+/** The part of a run marker the card needs. */
+export interface PickupMarker {
+  endedAt?: string;
+  waitingSince?: string;
+  activeAt: string;
+}

@@ -7,6 +7,7 @@ import { readdir, readFile } from 'node:fs/promises';
 import * as path from 'node:path';
 import { parseGsdPlanningState } from '../domain/gsdStatus';
 import { derivePickup, nextGsdStep, parsePickupPointer, type PickupModel, type PickupPhase, type PickupPointer, type PickupThread } from '../domain/state/pickup';
+import type { RunMarkers } from './runMarkers';
 import { stateHomeFor, writeFileAtomic, type MementoLike } from './stateHome';
 
 /** The workspaceState key that remembers the newest pointer this editor has seen or dismissed. */
@@ -18,6 +19,8 @@ export interface PickupDeps {
   /** This extension host's writer id (`<editor>.<instance>`). */
   writer: string;
   threads: { index(): Promise<readonly PickupThread[]> };
+  /** The run markers of this project, for the run line of the card. */
+  markers?: Pick<RunMarkers, 'markerOf' | 'runState'>;
 }
 
 /** Records where work stopped. Called from a person's action or a run ending, so it may create the state home. A failure never stops anything. */

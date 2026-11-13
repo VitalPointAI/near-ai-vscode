@@ -2,12 +2,17 @@
 // It only reopens that chat. It never resumes a run, never sends a model request, and so never spends money.
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { mkdir, readdir, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { derivePickup, nextGsdStep, type PickupModel, type PickupPointer, type PickupThread } from '../domain/state/pickup';
+import { derivePickup, nextGsdStep, runCardState, type PickupModel, type PickupPointer, type PickupThread } from '../domain/state/pickup';
 import { parseChatWebviewMessage } from '../services/chatBridge';
 import { handlePickupAction, markPickupSeen, PICKUP_SEEN_KEY, pickupCardModel, readPickupPointer, writePickupPointer } from '../services/pickupCard';
+import { RunMarkers } from '../services/runMarkers';
+import { AgentConversation } from '../services/agentSession';
+import { DEFAULT_RULES } from '../agent/permissions';
+import type { CompletionEvent, ToolCall } from '../services/nearAiClient';
 import { stateHomeFor, type MementoLike } from '../services/stateHome';
 import { gitInit, gitStatus, tempProject } from './helpers/stateFixtures';
 import { FakeDocument, FakeNode } from './helpers/fakeDom';
@@ -291,3 +296,172 @@ test('the card shows the next step as text and only ever posts the two card mess
   assert.deepEqual(posts.map((message) => (message as { action: string }).action), ['open', 'later']);
   assert.doesNotMatch(JSON.stringify(posts), /gsd-/, 'the command is never posted, so it is never run');
 });
+
+// ---- run states on the card ----
+
+const RUN = 'run-1793570629237-876b3a';
+const MINUTE = 60_000;
+
+test('marker states map to the card states', () => {
+  const live = { activeAt: '2026-11-13T10:00:00.000Z' };
+  assert.deepEqual(runCardState({ ...live, endedAt: '2026-11-13T10:30:00.000Z' }, 'finished'), { state: 'finished', at: '2026-11-13T10:30:00.000Z' });
+  assert.deepEqual(runCardState(live, 'cut-off'), { state: 'cut-off', at: live.activeAt });
+  assert.deepEqual(runCardState({ ...live, waitingSince: '2026-11-13T09:59:00.000Z' }, 'running-elsewhere'), { state: 'waiting', at: live.activeAt });
+  assert.deepEqual(runCardState(live, 'running-elsewhere'), { state: 'running-elsewhere', at: live.activeAt });
+  assert.equal(runCardState(live, 'running-here'), undefined, 'a run in this very editor is not "left elsewhere"');
+  // A run that ended is finished even if it was waiting when it ended.
+  assert.equal(runCardState({ ...live, waitingSince: live.activeAt, endedAt: live.activeAt }, 'finished')?.state, 'finished');
+});
+
+test('a run marker records that it waits on a person, and clears it; an older marker without the field still parses', async () => {
+  const root = await tempProject();
+  try {
+    const runs = stateHomeFor(root).paths.runs;
+    const clock = { now: Date.parse('2026-11-13T10:00:00.000Z') };
+    const markers = new RunMarkers('', root, { dir: runs, writer: 'aaaaaaaa1111.hosta00001', pid: 111, now: () => clock.now, alive: () => true });
+    await markers.start({ conversationId: CHAT, runId: RUN });
+    const before = JSON.parse(await readFile(path.join(runs, `${CHAT}.json`), 'utf8')) as Record<string, unknown>;
+    assert.equal('waitingSince' in before, false);
+    assert.ok((await markers.markerOf(CHAT)), 'a version 2 marker without the field parses');
+    clock.now += MINUTE;
+    await markers.waiting(CHAT, RUN, true);
+    await markers.idle();
+    assert.equal((await markers.markerOf(CHAT))?.waitingSince, new Date(clock.now).toISOString());
+    clock.now += MINUTE;
+    await markers.waiting(CHAT, RUN, true);
+    await markers.idle();
+    assert.equal((await markers.markerOf(CHAT))?.waitingSince, new Date(clock.now - MINUTE).toISOString(), 'a second prompt does not move the start of the wait');
+    await markers.waiting(CHAT, 'run-2-bbbbbb', false);
+    assert.ok((await markers.markerOf(CHAT))?.waitingSince, 'another run cannot change it');
+    await markers.waiting(CHAT, RUN, false);
+    await markers.idle();
+    assert.equal((await markers.markerOf(CHAT))?.waitingSince, undefined);
+    await markers.waiting(CHAT, RUN, true);
+    await markers.end(CHAT, RUN, 'completed');
+    assert.equal((await markers.markerOf(CHAT))?.waitingSince, undefined, 'ending the run ends the wait');
+    markers.dispose();
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('the card reports a run another editor keeps alive: running, waiting, finished or cut off', async () => {
+  const root = await tempProject();
+  try {
+    const runs = stateHomeFor(root).paths.runs;
+    const clock = { now: Date.parse('2026-11-13T10:00:00.000Z') };
+    const other = new RunMarkers('', root, { dir: runs, writer: EDITOR_B, pid: 222, now: () => clock.now, alive: () => true });
+    const mine = new RunMarkers('', root, { dir: runs, writer: EDITOR_A, pid: 111, now: () => clock.now, alive: () => false });
+    await writePickupPointer(root, pointer({ runId: RUN }));
+    const deps = { workspaceState: new Memory(), writer: EDITOR_A, threads: { index: () => Promise.resolve([thread()]) }, markers: mine };
+    await other.start({ conversationId: CHAT, runId: RUN });
+    clock.now += MINUTE;
+    assert.equal((await pickupCardModel(deps, root)).lastRun?.state, 'running-elsewhere');
+    await other.waiting(CHAT, RUN, true);
+    await other.idle();
+    assert.equal((await pickupCardModel(deps, root)).lastRun?.state, 'waiting');
+    clock.now += 4 * MINUTE;
+    assert.equal((await pickupCardModel(deps, root)).lastRun?.state, 'cut-off', 'silent for four minutes');
+    await other.end(CHAT, RUN, 'completed');
+    assert.equal((await pickupCardModel(deps, root)).lastRun?.state, 'finished');
+    other.dispose();
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('a chat with no marker has no run line', async () => {
+  const root = await tempProject();
+  await writePickupPointer(root, pointer());
+  const mine = new RunMarkers('', root, { dir: stateHomeFor(root).paths.runs, writer: EDITOR_A, pid: 111 });
+  const model = await pickupCardModel({ workspaceState: new Memory(), writer: EDITOR_A, threads: { index: () => Promise.resolve([thread()]) }, markers: mine }, root);
+  assert.equal(model.show, true);
+  assert.equal(model.lastRun, undefined);
+  mine.dispose();
+});
+
+test('the card for a locked chat says so and offers no Open button', () => {
+  const { doc, welcome } = emptyChat();
+  const posts: unknown[] = [];
+  const card = kit.renderPickupCard(doc, welcome, shown({ lastChat: { id: CHAT, title: '', at: '2026-11-13T10:00:00.000Z', locked: true }, lastRun: { state: 'finished', at: '2026-11-13T10:00:00.000Z' } }), (message) => posts.push(message))!;
+  const lines = card.all((node) => node.tagName === 'p').map((node) => node.textContent);
+  assert.ok(lines.includes('Locked on this device: enter your recovery code to open it'));
+  assert.ok(lines.includes('The last run finished.'));
+  assert.deepEqual(card.all((node) => node.tagName === 'button').map((button) => button.textContent), ['Not now']);
+  assert.deepEqual(posts, []);
+});
+
+test('each run state is said in plain words, and a cut-off run says its own Resume button is the only way it resumes', () => {
+  const runs = kit.TEXT.runs as Record<string, string>;
+  assert.deepEqual(Object.keys(runs).sort(), ['cut-off', 'finished', 'running-elsewhere', 'waiting']);
+  assert.match(runs['cut-off'], /only resumes when you press Resume/);
+  for (const text of Object.values(runs)) assert.doesNotMatch(text, /NEAR organization|[—–]/);
+});
+
+test('the card styles reuse the setup card and take their colours from the theme', () => {
+  const css = readFileSync(path.join(ROOT, 'media', 'chat', 'chat.css'), 'utf8');
+  const rules = css.split('\n').filter((line) => line.includes('pickup-card')).join('\n');
+  assert.match(rules, /\.pickup-card/);
+  assert.doesNotMatch(rules, /#[0-9a-f]{3,8}\b/i, 'no fixed colours: light, dark and high contrast follow the theme');
+  const source = readFileSync(path.join(ROOT, 'media', 'chat', 'pickup.js'), 'utf8');
+  assert.match(source, /'setup-nudge pickup-card'/);
+});
+
+// ---- the click never resumes, runs or spends ----
+
+test('a card click that opens the chat calls only openSaved: no receive, no settle, no model request', async () => {
+  const spies = { openSaved: [] as string[], receive: 0, settleInterrupted: 0, modelRequests: 0, markSeen: 0 };
+  const host = {
+    openSaved: (id: string) => { spies.openSaved.push(id); return Promise.resolve(); },
+    markSeen: () => { spies.markSeen += 1; return Promise.resolve(); }
+  };
+  // What the page can send passes the strict parser; anything it cannot parse never reaches the handler.
+  const parsed = parseChatWebviewMessage({ type: 'pickup-card', action: 'open', id: CHAT });
+  assert.equal(parsed?.type, 'pickup-card');
+  await handlePickupAction(parsed as { type: 'pickup-card'; action: 'open'; id: string }, host);
+  assert.deepEqual(spies, { openSaved: [CHAT], receive: 0, settleInterrupted: 0, modelRequests: 0, markSeen: 0 });
+  // Not now only remembers the pointer.
+  await handlePickupAction({ action: 'later' }, host);
+  assert.deepEqual([spies.openSaved.length, spies.markSeen, spies.receive, spies.settleInterrupted, spies.modelRequests], [1, 1, 0, 0, 0]);
+  // The function's source has no way to reach a run.
+  const source = readFileSync(path.join(ROOT, 'src', 'services', 'pickupCard.ts'), 'utf8');
+  assert.doesNotMatch(source, /receive|settleInterrupted|autoResume|continueStopped|streamCompletion|\.send\(/);
+});
+
+const call = (id: string, name: string, args: Record<string, unknown>): ToolCall => ({ id, type: 'function', function: { name, arguments: JSON.stringify(args) } });
+const usage = { verificationStatus: 'unknown' as const, latencyMs: 1 };
+
+test('a run waiting on an approval marks its marker as waiting, and answering clears it', async () => {
+  const project = await mkdtemp(path.join(tmpdir(), 'near-ai-pickup-wait-'));
+  try {
+    let turn = 0;
+    const near = {
+      async *streamCompletion(): AsyncGenerator<CompletionEvent> {
+        turn += 1;
+        if (turn === 1) { yield { type: 'done', message: { role: 'assistant', content: null, tool_calls: [call('w1', 'Write', { file_path: 'notes.md', content: 'x' })] }, finishReason: 'tool_calls', usage }; return; }
+        yield { type: 'done', message: { role: 'assistant', content: 'ok' }, finishReason: 'stop', usage };
+      },
+      async actualCostsUsd() { return undefined; }
+    };
+    const posted: Array<Record<string, unknown>> = [];
+    const conversation = new AgentConversation(project, (message) => posted.push(message), path.join(project, '.ckpt'));
+    const markers = new RunMarkers('', project, { dir: path.join(project, '.runs'), writer: EDITOR_A });
+    conversation.runMarkers = markers;
+    const running = conversation.send({ text: 'write', client: near as never, model: 'm', privacy: 'Private', policy: { mode: 'approve-risky', emergencyStop: false }, rules: DEFAULT_RULES });
+    try {
+      const request = await until(() => posted.find((message) => message.type === 'approval-request'));
+      await markers.idle();
+      assert.ok((await markers.markerOf(conversation.id))?.waitingSince, 'waiting while the card is open');
+      conversation.answerApproval(String(request.callId), { decision: 'allow' });
+      await markers.idle();
+      assert.equal((await markers.markerOf(conversation.id))?.waitingSince, undefined, 'cleared once answered');
+      await running;
+    } finally { conversation.dispose(); markers.dispose(); }
+  } finally { await rm(project, { recursive: true, force: true }); }
+});
+
+async function until<T>(find: () => T | undefined, ms = 5_000): Promise<T> {
+  const end = Date.now() + ms;
+  for (;;) {
+    const found = find();
+    if (found !== undefined) return found;
+    if (Date.now() > end) throw new Error('the expected message never arrived');
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+}

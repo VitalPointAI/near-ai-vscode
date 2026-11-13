@@ -46,6 +46,8 @@ export interface RunMarker {
   steps: string[];
   endedAt?: string;
   outcome?: RunEnd;
+  /** Set while the run waits on a person (an approval or a question), so another editor can say so; cleared when answered or when the run ends. */
+  waitingSince?: string;
 }
 
 export interface RunMarkerOptions {
@@ -143,6 +145,9 @@ export class RunMarkers {
     marker.steps = [];
     return this.write(marker);
   }
+
+  /** RED stub: records that the run waits on a person (an approval or a question), or no longer does. */
+  public waiting(_conversationId: string, _runId: string, _on: boolean): Promise<void> { return Promise.resolve(); }
 
   /** Records that the run ended. Only the run that wrote the marker can end it. */
   public end(conversationId: string, runId: string, outcome: RunEnd): Promise<void> {
