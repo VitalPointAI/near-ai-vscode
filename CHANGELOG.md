@@ -1,5 +1,29 @@
 # Changelog
 
+## Unreleased
+
+- **Every research team now has a plagiarism checker.** It sits between the writer and the red
+  team, compares the draft with every source fetched in the run and searches the web for
+  distinctive sentences, checks every note against its source, and ends
+  `.planning/research/INTEGRITY-CHECK.md` with CLEAN or NOT CLEAN. It never edits the report;
+  problems go back to the writer. The editor cannot sign off while the check says NOT CLEAN, is
+  missing, or checked an older draft. **NEAR AI: Update Team…** adds it to existing research teams
+  without asking and says whether the team was missing it or it had been removed; your own edits to
+  it are kept like any member's. Team Studio's AI builder adds it to any team it drafts that does
+  research.
+- **Research reports are cited in Chicago style.** Writers now use the Chicago Manual of Style,
+  18th edition, notes and bibliography: a full note the first time a source is cited, shortened
+  notes after, and a bibliography, as footnotes or endnotes to suit the report. Source grades move
+  from the notes to the audit annex. A project can still choose another style in
+  `.planning/STYLE.md`.
+- **New tool: CheckOriginality.** It finds runs of eight or more words copied from a fetched page
+  without quotation marks (and says whether a note is attached), quotations that differ from the
+  page their note cites, quotations with no note, and sentences too close to a source's wording.
+  It only sees pages fetched in the same run, and says so.
+- **Role tests for the plagiarism checker.** Team Studio offers a Plagiarism checker role with its
+  own graded task, and a member whose name has a task of its own (such as the research team's
+  editor or writer) is now tested on that task rather than on its general role's.
+
 ## 0.4.19
 
 This release is about runs that finish, and reports worth reading. Long research runs no longer

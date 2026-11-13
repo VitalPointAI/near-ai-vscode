@@ -2,7 +2,7 @@ import type { ActionCapability, ActionPolicy, ActionPolicyMode } from '../domain
 import { GSD_COMMANDS } from '../domain/gsdCommands';
 import { decidePermission, PermissionRules, RunGrants } from '../agent/permissions';
 import { AgentTool, CORE_TOOLS } from '../agent/tools';
-import { checkCitationsTool, webFetchTool, webSearchTool } from '../agent/webTools';
+import { checkCitationsTool, checkOriginalityTool, webFetchTool, webSearchTool } from '../agent/webTools';
 import { GRAPHICS_TOOLS } from '../agent/graphicsTools';
 import { imageTool, memoryTools } from '../agent/extraTools';
 import { securityTool } from '../agent/securityTool';
@@ -179,6 +179,7 @@ export function buildToolsDirectory(input: DirectoryInput): ToolsDirectory {
     toolEntry(webFetchTool, input),
     toolEntry(webSearchTool(undefined), input, input.webSearch ? {} : { off: 'No web search provider is set up.', setup: { label: 'Set up web search', command: 'nearAi.setUpWebSearch' } }),
     toolEntry(checkCitationsTool, input),
+    toolEntry(checkOriginalityTool, input),
     ...GRAPHICS_TOOLS.map((tool) => toolEntry(tool, input)),
     toolEntry(imageTool(stubClient, image ?? { id: input.settings.imageModel }), input, image ? {} : { off: `The image model (${input.settings.imageModel}) is not in this key's model list.`, setup: { label: 'Choose image model', command: 'setting:nearAi.agent.imageModel' } }),
     toolEntry(securityTool({ consented: () => input.securityConsented, scan: async () => undefined }), input, input.securityConsented ? {} : { off: 'Dependency checks are not allowed for this project yet.', setup: { label: 'Scan dependencies', command: 'nearAi.securityScan' } }),

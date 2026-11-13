@@ -18,7 +18,7 @@ const mentions = (text: string, pattern: RegExp): boolean => pattern.test(text);
 const items = (text: string): number => (text.match(/^\s*(?:\d+[.)]|[-*])\s+\S/gm) ?? []).length;
 
 /** The roles that have a grader of their own, which is what makes a borrowed task's own grader available. */
-const KNOWN_ROLES = new Set(['planner', 'implementer', 'reviewer', 'tester', 'security', 'researcher', 'analyst', 'writer', 'editor', 'red-team']);
+const KNOWN_ROLES = new Set(['planner', 'implementer', 'reviewer', 'tester', 'security', 'researcher', 'analyst', 'writer', 'editor', 'red-team', 'plagiarism-checker']);
 
 export interface RoleGrade { score: number; outOf: number; misses: string[] }
 
@@ -137,6 +137,17 @@ export function gradeRoleAnswer(role: string, root: string, files: Record<string
       add('does not edit the function', !changed(root, files, 'duration.js'));
       break;
     }
+    case 'plagiarism-checker': {
+      const check = read(root, 'INTEGRITY-CHECK.md');
+      const lines = check.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+      add('wrote INTEGRITY-CHECK.md', check.trim().length > 40);
+      add('finds the copied sentence', mentions(check, /(one-in-two-hundred-year|withstand|river traffic)/i) && mentions(check, /(verbatim|word for word|copied|plagiar|unquoted|quotation)/i));
+      add('finds the bare-URL note', /(\[\^2\]|note 2|\^2)/i.test(check) && mentions(check, /(bare url|url|chicago|full note|author|title)/i));
+      add('ends in NOT CLEAN', lines[lines.length - 1] === 'NOT CLEAN');
+      add('lists problems as items', items(check) >= 2);
+      add('does not edit the draft', !changed(root, files, 'draft.md'));
+      break;
+    }
     default: {
       // A role with no grader of its own is graded on the output of the task it was given: did it produce the file, and does the file say something.
       // A new role therefore scores on the same scale as every other role, and the comparison can still rank it (owner, 2026-11-08).
@@ -158,7 +169,8 @@ export function gradeRoleAnswer(role: string, root: string, files: Record<string
 /** The files a run of this task should leave behind, for a report that says what was missing. */
 const OUTPUTS: Record<string, string[]> = {
   planner: ['plan.md'], implementer: ['shop.js'], reviewer: ['review.md'], tester: ['shop.test.js'], security: ['findings.md'],
-  researcher: ['brief.md'], analyst: ['analysis.md'], writer: ['proposal.md'], editor: ['edited.md', 'changes.md'], 'red-team': ['attacks.md']
+  researcher: ['brief.md'], analyst: ['analysis.md'], writer: ['proposal.md'], editor: ['edited.md', 'changes.md'], 'red-team': ['attacks.md'],
+  'plagiarism-checker': ['INTEGRITY-CHECK.md']
 };
 
 /**

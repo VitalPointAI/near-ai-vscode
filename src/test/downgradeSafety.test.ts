@@ -51,7 +51,8 @@ test('every built-in private member reads safely in the build before privacy exi
 
 test('a team written by Update Team, including "add only the new parts", reads safely in the old build', async () => {
   const fixture = await readFile(path.join(FIXTURES, 'wearable-research-team.md'), 'utf8');
-  assert.equal(assertOldParserSafe(applyTeamUpdate(fixture, planTeamUpdate(fixture)!), 'update'), 6);
+  // Seven: the update adds the research team's permanent plagiarism checker (owner decision, 2026-11-13).
+  assert.equal(assertOldParserSafe(applyTeamUpdate(fixture, planTeamUpdate(fixture)!), 'update'), 7);
   const research = projectType('research')!;
   const base = stampTeam(projectTypeTeam(research, 'g', 'cloud'), research);
   const mine = base.replace(/## editor\n[\s\S]*?(?=\n## |$)/, '## editor\nrole: reviewer\nmodel: standard\ntools: Read, CheckCitations\n\nOur house style.\n\nProject goal: g\n');

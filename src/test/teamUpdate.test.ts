@@ -68,10 +68,13 @@ test('the real ResearchX team: every member matches a released version, so all u
   const plan = planTeamUpdate(text)!;
   assert.equal(plan.template.id, 'research');
   assert.equal(plan.template.stamped, false);
-  assert.deepEqual(plan.members.map((member) => [member.name, member.action]), [['investigator', 'auto'], ['source-verifier', 'auto'], ['analyst', 'auto'], ['writer', 'auto'], ['editor', 'auto'], ['red-team', 'auto']]);
+  // The plagiarism checker, a permanent member since template v4, is added without a question (owner decision, 2026-11-13).
+  assert.deepEqual(plan.members.map((member) => [member.name, member.action]), [['investigator', 'auto'], ['source-verifier', 'auto'], ['analyst', 'auto'], ['writer', 'auto'], ['editor', 'auto'], ['red-team', 'auto'], ['plagiarism-checker', 'new']]);
   assert.match(describePlan(plan), /^Research and analysis template: no recorded version \(inferred from member names\) → v\d+\n- investigator: updates automatically\./);
+  assert.match(describePlan(plan), /\n- plagiarism-checker: permanent built-in member, added automatically\. MISSING from this file/);
   const updated = applyTeamUpdate(text, plan);
   const team = parseTeam(updated, 'team.md');
+  assert.deepEqual(team.members.map((member) => member.name), ['investigator', 'source-verifier', 'analyst', 'writer', 'plagiarism-checker', 'editor', 'red-team'], 'it goes after the writer, where the built-in team has it');
   assert.equal(team.name, 'ResearchX', 'the name and description are the user\'s');
   assert.equal(team.description, 'Researching any topic given.');
   const editor = team.members.find((member) => member.name === 'editor')!;
@@ -84,6 +87,39 @@ test('the real ResearchX team: every member matches a released version, so all u
   assert.equal(applyTeamUpdate(updated, again), updated);
   const agents = await readFile(path.join(FIXTURES, 'wearable-research-AGENTS.md'), 'utf8');
   assert.equal(planGuidanceUpdate(agents, 'research').action, 'auto', 'the generated guidance is recognised as unchanged');
+});
+
+test('a permanent member is added without asking when a team lacks it, flagged as missing or removed, and a user-edited copy is merged like any member', () => {
+  const base = stamped();
+  const withoutSection = base.replace(/## plagiarism-checker\n[\s\S]*?(?=\n## )/, '');
+  // Missing: a team stamped by a version before the member existed has neither the section nor a base entry for it.
+  const missing = withoutSection.replace(/\n {2}- plagiarism-checker=[0-9a-f]+/, '');
+  const plan = planTeamUpdate(missing)!;
+  const checker = plan.members.find((member) => member.name === 'plagiarism-checker')!;
+  assert.equal(checker.action, 'new');
+  assert.equal(checker.permanent, true);
+  assert.match(checker.reason, /^MISSING from this file: plagiarism-checker is a permanent member of the research and analysis team; added automatically\.$/);
+  assert.equal(plan.upToDate, false, 'a team without it is never reported as up to date');
+  const updated = applyTeamUpdate(missing, plan);
+  assert.deepEqual(parseTeam(updated, 'x.md').members.map((member) => member.name), research.members.map((member) => member.name), 'added with no decision, in its place in the workflow');
+  assert.equal(planTeamUpdate(updated)!.upToDate, true);
+  assert.equal(applyTeamUpdate(missing, plan, { add: [] }), updated, 'declining every offer does not drop a permanent member');
+  // Removed: the stamp recorded it, so the user deleted it; it is still added back, and the plan says so.
+  const removed = planTeamUpdate(withoutSection)!.members.find((member) => member.name === 'plagiarism-checker')!;
+  assert.equal(removed.action, 'new');
+  assert.match(removed.reason, /^REMOVED from this file, but plagiarism-checker is a permanent member of the research and analysis team that its workflow depends on; added back automatically\.$/);
+  assert.match(describePlan(planTeamUpdate(withoutSection)!), /- plagiarism-checker: permanent built-in member, added automatically\. REMOVED/);
+  assert.match(applyTeamUpdate(withoutSection, planTeamUpdate(withoutSection)!), /## plagiarism-checker\nrole: reviewer\nmodel: deep\n/);
+  // An ordinary member deleted the same way is still not offered back.
+  assert.equal(planTeamUpdate(base.replace(/## analyst\n[\s\S]*?(?=\n## )/, ''))!.members.some((member) => member.name === 'analyst'), false);
+  // The user's own edits to the permanent member are theirs: a choice, kept byte for byte without one, never a second copy.
+  const mine = '## plagiarism-checker\nrole: reviewer\nmodel: standard\ntools: Read, CheckOriginality\n\nOUR OWN INTEGRITY RULES.\n\nProject goal: Assess the market\n';
+  const edited = base.replace(/## plagiarism-checker\n[\s\S]*?(?=\n## )/, mine);
+  const editedPlan = planTeamUpdate(edited)!;
+  assert.equal(editedPlan.members.find((member) => member.name === 'plagiarism-checker')?.action, 'choice');
+  const kept = applyTeamUpdate(edited, editedPlan);
+  assert.match(kept, /## plagiarism-checker\nrole: reviewer\nmodel: standard\ntools: Read, CheckOriginality\n\nOUR OWN INTEGRITY RULES\./);
+  assert.equal(parseTeam(kept, 'x.md').members.filter((member) => member.name === 'plagiarism-checker').length, 1);
 });
 
 test('a member the user edited is never overwritten without a choice; "add new lines only" keeps theirs and adds what is new', () => {

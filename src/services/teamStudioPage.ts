@@ -7,6 +7,7 @@ import { checkDraft, draftFromMarkdown, lineDiff, type DiffLine, type DraftIssue
 import { DEFAULT_TOOLS, parseTeam, recommendedProjectTeam, slugify, TeamLibrary, teamKnowledgeKey, type TeamDefinition } from '../agent/teams';
 import type { AgentDiscoveryAnswers } from '../domain/agents';
 import { buildTeamGraph } from '../agent/teamGraph';
+import { CUSTOM_PLAGIARISM_CHECKER } from '../agent/researchIntegrity';
 import { proposalDraft, proposalText, type TeamProposal } from '../agent/teamBuilder';
 import { layoutNetwork } from '../domain/networkLayout';
 import { gradingCoverage } from '../domain/teamKnowledge';
@@ -76,7 +77,8 @@ const TEAM_ROLES: Array<Omit<StudioRole, 'source'>> = [
   { id: 'analyst', label: 'Analyst', model: 'deep', tools: [...READ, ...WRITE], description: 'Weighs the findings and states conclusions with confidence.', suggestion: 'Collate the findings: identify the key facts, trends, and open questions; weigh conflicting evidence; and state your confidence explicitly. Write the analysis to the place the task names.' },
   { id: 'writer', label: 'Writer', model: 'standard', tools: [...READ, ...WRITE, ...DOCS], description: 'Drafts documents in the project\'s tone and format.', suggestion: 'Draft the document from the material you are given, in the tone and format the project asks for. Never add facts that are not in your sources. Report what you wrote and where.' },
   { id: 'editor', label: 'Editor', model: 'standard', tools: [...READ, 'CheckCitations'], description: 'Edits for accuracy, clarity, and structure. Does not rewrite.', suggestion: 'Edit the draft for accuracy, clarity, tone, and structure. Confirm that citations support the sentences they are attached to. Report required changes; do not rewrite the document yourself.' },
-  { id: 'red-team', label: 'Red team', model: 'deep', tools: [...READ, 'Bash', 'Write'], description: 'Attacks the work like an adversary before it is verified.', suggestion: 'Attack the work like an adversary before it is verified: find bugs, holes, unhandled edge cases, wrong assumptions, and weak tests. Prove what you can. Report the findings, numbered with severity and evidence. Do not fix anything yourself.' }
+  { id: 'red-team', label: 'Red team', model: 'deep', tools: [...READ, 'Bash', 'Write'], description: 'Attacks the work like an adversary before it is verified.', suggestion: 'Attack the work like an adversary before it is verified: find bugs, holes, unhandled edge cases, wrong assumptions, and weak tests. Prove what you can. Report the findings, numbered with severity and evidence. Do not fix anything yourself.' },
+  { id: 'plagiarism-checker', label: 'Plagiarism checker', model: 'deep', tools: [...CUSTOM_PLAGIARISM_CHECKER.tools], description: 'Checks the draft for plagiarism and Chicago 18 citations, and says CLEAN or NOT CLEAN. Does not edit.', suggestion: CUSTOM_PLAGIARISM_CHECKER.instructions }
 ];
 
 /** The role ids the studio offers, in order, so a benchmark can require a task for each one. */

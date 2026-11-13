@@ -117,3 +117,27 @@ test('asking for Update Team again and again during a run leaves one offer waiti
   again();
   assert.equal(later, 1);
 });
+
+test('Update Team never asks about a permanent member: it is not offered, and the confirmation says it is added automatically', async () => {
+  const { updateTeam } = load();
+  const { projectType, projectTypeTeam } = require('../agent/projectTypes') as typeof import('../agent/projectTypes');
+  const { stampTeam } = require('../agent/teamUpdate') as typeof import('../agent/teamUpdate');
+  const base = await mkdtemp(path.join(tmpdir(), 'near-ai-update-permanent-'));
+  const library = new TeamLibrary(path.join(base, 'global'));
+  await mkdir(library.directory, { recursive: true });
+  const research = projectType('research')!;
+  // A research team stamped before the plagiarism checker existed: no section and no base entry for it.
+  const text = stampTeam(projectTypeTeam(research, 'g', 'cloud'), research).replace(/## plagiarism-checker\n[\s\S]*?(?=\n## )/, '').replace(/\n {2}- plagiarism-checker=[0-9a-f]+/, '');
+  const file = path.join(library.directory, 'research.md');
+  await writeFile(file, text);
+  const picks: string[] = [];
+  const details: string[] = [];
+  const window = vscodeStub.window as Record<string, unknown>;
+  const saved = { showQuickPick: window.showQuickPick, showInformationMessage: window.showInformationMessage };
+  window.showQuickPick = async (_items: unknown, options?: { title?: string }) => { picks.push(options?.title ?? ''); return undefined; };
+  window.showInformationMessage = async (_message: string, options?: unknown) => { if (options && typeof options === 'object' && 'detail' in options) details.push(String((options as { detail: string }).detail)); return 'Update'; };
+  try { await updateTeam(library, file); } finally { Object.assign(window, saved); }
+  assert.deepEqual(picks, [], 'nothing is offered or asked');
+  assert.match(details[0] ?? '', /- plagiarism-checker: permanent built-in member, added automatically\. MISSING from this file[\s\S]*1 added \(1 permanent, added automatically\)/);
+  assert.match(await readFile(file, 'utf8'), /## writer\n[\s\S]*\n## plagiarism-checker\nrole: reviewer\n/);
+});

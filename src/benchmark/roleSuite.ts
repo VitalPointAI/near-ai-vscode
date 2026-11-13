@@ -7,7 +7,7 @@ import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { gradeRoleAnswer } from './roleGraders';
-import { fallbackRoleTask, type RoleTask } from './roleTasks';
+import { fallbackRoleTask, roleTaskFor, type RoleTask } from './roleTasks';
 import { runAgentInFolder, type BenchmarkClient } from './runner';
 import type { PermissionRules } from '../agent/permissions';
 
@@ -16,12 +16,14 @@ export interface RolePlan { runs: RoleRun[]; members: number; models: number; es
 
 /**
  * Which runs a team needs. Each member is measured on its own role's task with each candidate model, so the winner is the best model FOR THAT ROLE. A
- * member with no role uses its name, which is how a team member is addressed anyway.
+ * member with no role uses its name, which is how a team member is addressed anyway. A member whose NAME has a task written for it is measured on that
+ * task, because the name is the more specific: the research team's plagiarism-checker has the generic role reviewer, and a code review says nothing
+ * about how well a model checks citations.
  */
 export function planRoleSuite(members: Array<{ name: string; role?: string }>, models: string[]): RolePlan {
   const runs: RoleRun[] = [];
   for (const member of members) {
-    const role = member.role?.trim() || member.name;
+    const role = roleTaskFor(member.name) ? member.name : member.role?.trim() || member.name;
     const { task, written } = fallbackRoleTask(role);
     for (const model of models) runs.push({ member: member.name, role, model, task, written });
   }

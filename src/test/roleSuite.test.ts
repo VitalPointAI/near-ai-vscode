@@ -38,3 +38,10 @@ test('the best model for a member is the most accurate, then the quickest, and a
   assert.equal(picks[0]?.current, 'old', 'the studio can say what changed');
   assert.match(picks[0]?.why ?? '', /best on its role task \(9\/10\)/);
 });
+
+test('a member whose name has a task of its own is measured on it, even when its role is generic', () => {
+  const plan = planRoleSuite([{ name: 'plagiarism-checker', role: 'reviewer' }, { name: 'source-verifier', role: 'reviewer' }], ['a']);
+  assert.equal(plan.runs[0]?.task.role, 'plagiarism-checker', 'the research team\'s checker is measured on checking a draft, not on a code review');
+  assert.equal(plan.runs[0]?.written, true);
+  assert.equal(plan.runs[1]?.task.role, 'reviewer', 'a name with no task of its own falls back to its role');
+});

@@ -29,7 +29,7 @@ export interface ToolContext {
   gsdRuntime?: { home: string; preambles: string[] };
   /** Whether this run has read outside content (web pages, search results, attachments, MCP results). */
   tainted?(): boolean;
-  /** Text of pages fetched in this run, by URL, for CheckCitations. */
+  /** Text of pages fetched in this run, by URL, for CheckCitations and CheckOriginality. */
   pages?: Map<string, string>;
   /** When set, writes outside this workspace-relative folder ask first (research agents write only .planning/). */
   writeScope?: string;

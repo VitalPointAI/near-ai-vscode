@@ -3,6 +3,7 @@
 //
 // The prompt and the parsing are here, pure, so the shape is testable without a model and a bad answer is repaired rather than crashed on. The drafting
 // itself is one model call from the studio; the test-and-set-models step that follows it is the same role suite a saved team goes through.
+import { CUSTOM_PLAGIARISM_CHECKER, hasIntegrityMember, PLAGIARISM_CHECKER, teamDoesResearch } from './researchIntegrity';
 import type { TeamDraft } from './teamMarkdown';
 
 /** The proposal the AI drafts, before it becomes a team file. */
@@ -10,9 +11,12 @@ export interface TeamProposal {
   name: string;
   mission: string;
   description: string;
-  members: Array<{ name: string; role: string; model: string; produces: string; instructions: string }>;
+  /** `tools`: set only for a member the builder adds itself (the plagiarism checker); the AI's own members get the default tools. */
+  members: Array<{ name: string; role: string; model: string; produces: string; instructions: string; tools?: string[] }>;
   /** What the team delivers, and in what form. */
   outputs: Array<{ name: string; format: string; from: string }>;
+  /** What the builder added on its own, and why, so the person sees it before accepting. */
+  notes?: string[];
 }
 
 /** What the person told us, which is all the AI starts from. */
@@ -128,7 +132,19 @@ export function parseProposal(text: string, brief: TeamBrief): { proposal: TeamP
   });
   if (!outputs.length) outputs.push({ name: 'The deliverable', format: brief.outputFormat || 'Markdown', from: members[members.length - 1]?.name ?? 'the team' });
 
-  return { proposal: { name, mission, description, members, outputs }, problems };
+  return { proposal: withPermanentMembers({ name, mission, description, members, outputs }), problems };
+}
+
+/**
+ * Every team that does research gets the plagiarism checker (owner decision, 2026-11-13), placed after the last writer so it checks the draft
+ * before review, unless a member already does that job. Nothing else is added, so a software or data team is left as the AI drafted it.
+ */
+export function withPermanentMembers(proposal: TeamProposal): TeamProposal {
+  if (!teamDoesResearch(proposal.members) || hasIntegrityMember(proposal.members) || proposal.members.some((member) => member.name === PLAGIARISM_CHECKER)) return proposal;
+  const members = [...proposal.members];
+  const writers = members.map((member, index) => (/writ|author|draft/i.test(`${member.name} ${member.role}`) ? index : -1)).filter((index) => index >= 0);
+  members.splice(writers.length ? writers[writers.length - 1] + 1 : members.length, 0, { ...CUSTOM_PLAGIARISM_CHECKER, tools: [...CUSTOM_PLAGIARISM_CHECKER.tools] });
+  return { ...proposal, members, notes: [...(proposal.notes ?? []), `Added ${PLAGIARISM_CHECKER}: every team that does research has one, to check that nothing is plagiarized and every source is cited in Chicago 18 style.`] };
 }
 
 /** The proposal as the studio's draft, so the existing editor, checks and save work on it unchanged. */
@@ -137,7 +153,7 @@ export function proposalDraft(proposal: TeamProposal): TeamDraft {
     name: proposal.name,
     description: `${proposal.mission} ${proposal.description}`.trim().slice(0, 400),
     members: proposal.members.map((member) => ({
-      name: member.name, role: member.role, model: member.model, tools: null,
+      name: member.name, role: member.role, model: member.model, tools: member.tools ? [...member.tools] : null,
       instructions: `${member.instructions}\n\nProduces: ${member.produces}`
     }))
   };
@@ -147,6 +163,7 @@ export function proposalDraft(proposal: TeamProposal): TeamDraft {
 export function proposalText(proposal: TeamProposal): string {
   const lines = [`${proposal.name}`, proposal.mission, '', proposal.description, '', 'Members:'];
   for (const member of proposal.members) lines.push(`- ${member.name} (${member.role}, ${member.model}): ${member.produces}`);
+  for (const note of proposal.notes ?? []) lines.push(`(${note})`);
   lines.push('', 'You get:');
   for (const output of proposal.outputs) lines.push(`- ${output.name}: ${output.format} (from ${output.from})`);
   return lines.join('\n');

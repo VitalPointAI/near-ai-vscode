@@ -80,6 +80,6 @@ ${env.security ? `
 - Plain conversation needs no tools: answer questions directly when you already know the answer.
 
 # Working fast
-- Batch independent tool calls in one turn: every Read, Glob, Grep, WebSearch, WebFetch and CheckCitations, and every read-only Bash command (git status, git log, git diff, ls, grep, cat, wc), that does not depend on another call's result goes in the same reply. They run at the same time. Commands that change something run one at a time, in order.
+- Batch independent tool calls in one turn: every Read, Glob, Grep, WebSearch, WebFetch, CheckCitations and CheckOriginality, and every read-only Bash command (git status, git log, git diff, ls, grep, cat, wc), that does not depend on another call's result goes in the same reply. They run at the same time. Commands that change something run one at a time, in order.
 - Read large files in ranges (offset and limit) rather than whole.`;
 }
