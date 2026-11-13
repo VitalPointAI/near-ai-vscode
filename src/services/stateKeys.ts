@@ -108,22 +108,24 @@ export class StateKeys {
       return found.key;
     }
     if (meta.keyCheck) throw new Error(LOCKED_MESSAGE);
-    const fresh = newDataKey();
-    let key = fresh;
-    if (this.keepKeyInProject()) {
-      await this.home.ensureFolder(this.home.paths.keysDir);
-      await createExclusive(this.home.paths.keysGitignore, IGNORE_ALL);
-      if (await createExclusive(this.home.paths.localKey, `${fresh.toString('base64')}\n`, 0o600) === 'exists') {
-        // Another editor created it at the same moment: use its key.
-        const winner = decodeKey(await this.readKeyFile(this.home.paths.localKey));
-        if (!winner) throw new Error(LOCKED_MESSAGE);
-        key = winner;
+    // First key: under the meta lock, so two editors end with one key and a key check that opens with it. The order leaves no trusted half-state:
+    // this editor's own copy, then the key file, then the key check. A file with no key check is never trusted, so a later creation replaces it.
+    const made = await this.home.withMetaLock(async () => {
+      const current = await this.home.ensure();
+      const already = await this.find(current.stateId, current.keyCheck);
+      if (already) {
+        if (already.from === 'file') await this.storeDeviceCopy(already.key, current.stateId);
+        return { stateId: current.stateId, key: already.key };
       }
-    }
-    await this.home.updateMeta({ keyCheck: this.makeKeyCheck(key, meta.stateId) });
-    await this.storeDeviceCopy(key, meta.stateId);
-    this.cached = { stateId: meta.stateId, key };
-    return key;
+      if (current.keyCheck) throw new Error(LOCKED_MESSAGE);
+      const fresh = newDataKey();
+      await this.storeDeviceCopy(fresh, current.stateId);
+      if (this.keepKeyInProject()) await this.writeKeyFileHeld(fresh);
+      await this.home.updateMetaHeld({ keyCheck: this.makeKeyCheck(fresh, current.stateId) });
+      return { stateId: current.stateId, key: fresh };
+    });
+    this.cached = made;
+    return made.key;
   }
 
   /** The key for the thread and record files at rest. Creates the state home and key on first use. */
@@ -179,23 +181,22 @@ export class StateKeys {
    */
   public async adoptDataKey(key: Buffer, stateId: string): Promise<void> {
     await this.refuseForeignFolder();
-    const meta = await this.home.ensure({ stateId });
-    if (meta.stateId !== stateId) throw new Error('This project already has its own saved chats on this computer, so the online copy was not opened. Nothing was changed.');
-    const existing = await this.find(meta.stateId, meta.keyCheck);
-    if (existing && meta.keyCheck) {
-      if (!existing.key.equals(key)) throw new Error('This project already has its own saved chats on this computer, so the online copy was not opened. Nothing was changed.');
-      this.cached = { stateId: meta.stateId, key: existing.key };
-      return;
-    }
-    if (meta.keyCheck && !this.opensKeyCheck(key, meta.stateId, meta.keyCheck)) throw new Error('This project already has its own saved chats on this computer, so the online copy was not opened. Nothing was changed.');
-    if (this.keepKeyInProject()) {
-      await this.home.ensureFolder(this.home.paths.keysDir);
-      await createExclusive(this.home.paths.keysGitignore, IGNORE_ALL);
-      await createExclusive(this.home.paths.localKey, `${key.toString('base64')}\n`, 0o600);
-    }
-    await this.home.updateMeta({ keyCheck: this.makeKeyCheck(key, meta.stateId) });
-    await this.storeDeviceCopy(key, meta.stateId);
-    this.cached = { stateId: meta.stateId, key };
+    const refused = (): Error => new Error('This project already has its own saved chats on this computer, so the online copy was not opened. Nothing was changed.');
+    await this.home.withMetaLock(async () => {
+      const meta = await this.home.ensure({ stateId });
+      if (meta.stateId !== stateId) throw refused();
+      const existing = await this.find(meta.stateId, meta.keyCheck);
+      if (existing && meta.keyCheck) {
+        if (!existing.key.equals(key)) throw refused();
+        this.cached = { stateId: meta.stateId, key: existing.key };
+        return;
+      }
+      if (meta.keyCheck && !this.opensKeyCheck(key, meta.stateId, meta.keyCheck)) throw refused();
+      await this.storeDeviceCopy(key, meta.stateId);
+      if (this.keepKeyInProject()) await this.writeKeyFileHeld(key);
+      await this.home.updateMetaHeld({ keyCheck: this.makeKeyCheck(key, meta.stateId) });
+      this.cached = { stateId: meta.stateId, key };
+    });
   }
 
   /**
@@ -238,20 +239,26 @@ export class StateKeys {
     }
   }
 
-  /** Writes keys/local.key again from the unlocked key (mode 0600, ignored by git), when the key file is switched back on. Leaves an existing file alone. */
+  /** Writes keys/local.key again from the unlocked key (mode 0600, ignored by git), when the key file is switched back on. */
   public async writeLocalKeyFile(): Promise<void> {
     await this.refuseForeignFolder();
     const key = await this.dataKey();
     if (!key) throw new Error(LOCKED_MESSAGE);
-    await this.home.ensureFolder(this.home.paths.keysDir);
-    await createExclusive(this.home.paths.keysGitignore, IGNORE_ALL);
-    await createExclusive(this.home.paths.localKey, `${key.toString('base64')}\n`, 0o600);
+    // The key is the verified one, so a file already there (planted, or from an older run) is replaced by it rather than left unusable.
+    await this.home.withMetaLock(() => this.writeKeyFileHeld(key));
   }
 
   /** Removes the key file. Refused unless the recovery code can open the project instead, so the chats are never locked out by this. */
   public async removeLocalKeyFile(): Promise<void> {
     if (!await this.hasRecoveryWrap()) throw new Error('The chat key file is kept until a recovery code exists, so your chats stay openable.');
     await rm(this.home.paths.localKey, { force: true });
+  }
+
+  /** Writes keys/local.key (mode 0600, in an owner-only folder ignored by git), replacing any file there, a link included. Only while the meta lock is held. */
+  private async writeKeyFileHeld(key: Buffer): Promise<void> {
+    await this.home.ensureFolder(this.home.paths.keysDir);
+    await createExclusive(this.home.paths.keysGitignore, IGNORE_ALL);
+    await writeFileAtomic(this.home.paths.localKey, `${key.toString('base64')}\n`, { mode: 0o600 });
   }
 
   private makeKeyCheck(key: Buffer, stateId: string) {

@@ -6,7 +6,8 @@
 // the file's time while it works. A waiter takes the lock over when the holder's process has ended (same computer) or the holder has not refreshed
 // it for staleMs (a process on another computer, a reused process id, a stopped process). The transport's own checks keep the remote correct
 // whatever another process does to the mirror; the lock keeps the shared refs moving forward only and keeps two windows from undoing each other's
-// work. Shaped after the Team transport's lock (unmerged branch, copied, never imported). This module never imports vscode.
+// work. Shaped after the Team transport's lock (unmerged branch, copied, never imported). The same lock serves any file name in any folder
+// (acquireFileLock, withFileLock): the state locks of stateLocks.ts use it for meta.json and for sync. This module never imports vscode.
 import { randomBytes } from 'node:crypto';
 import { link, mkdir, open, readFile, rename, rm, stat, utimes } from 'node:fs/promises';
 import { hostname } from 'node:os';
@@ -32,6 +33,11 @@ export interface MirrorLockTimings {
 export interface MirrorLockOptions extends MirrorLockTimings {
   sleep: (ms: number) => Promise<void>;
   random: () => number;
+}
+
+export interface FileLockOptions extends MirrorLockOptions {
+  // The error thrown when the wait ends. Defaults to MirrorBusyError.
+  busy?: () => Error;
 }
 
 export class MirrorBusyError extends Error {
@@ -125,19 +131,24 @@ async function clearIfStale(file: string, staleMs: number): Promise<boolean> {
   return true;
 }
 
-export async function acquireMirrorLock(mirrorDir: string, options: MirrorLockOptions): Promise<HeldMirrorLock> {
+export function acquireMirrorLock(mirrorDir: string, options: MirrorLockOptions): Promise<HeldMirrorLock> {
+  return acquireFileLock(mirrorDir, MIRROR_LOCK_FILE, options);
+}
+
+/** Takes the lock file `fileName` in `dir`, waiting for another holder and taking over a stale one. */
+export async function acquireFileLock(dir: string, fileName: string, options: FileLockOptions): Promise<HeldMirrorLock> {
   const staleMs = options.staleMs ?? DEFAULT_LOCK_STALE_MS;
   const refreshMs = options.refreshMs ?? DEFAULT_LOCK_REFRESH_MS;
   const waitMs = options.waitMs ?? DEFAULT_LOCK_WAIT_MS;
-  const file = path.join(mirrorDir, MIRROR_LOCK_FILE);
-  await mkdir(mirrorDir, { recursive: true });
+  const file = path.join(dir, fileName);
+  await mkdir(dir, { recursive: true });
   const me: Holder = { pid: process.pid, host: hostname(), token: randomBytes(12).toString('hex') };
   const text = `${JSON.stringify(me)}\n`;
   let waited = 0;
   for (let round = 0; ; round += 1) {
     if (await tryCreate(file, text)) return hold(file, me.token, refreshMs);
     if (await clearIfStale(file, staleMs)) continue;
-    if (waited >= waitMs) throw new MirrorBusyError();
+    if (waited >= waitMs) throw options.busy?.() ?? new MirrorBusyError();
     const pause = Math.min(MAX_PAUSE_MS, FIRST_PAUSE_MS * 2 ** Math.min(round, 6)) * (0.5 + options.random());
     waited += pause;
     await options.sleep(pause);
@@ -166,13 +177,18 @@ function hold(file: string, token: string, refreshMs: number): HeldMirrorLock {
   };
 }
 
-// Work on one mirror is serialised in this process first (callers on the same mirror share one chain), then across processes by the file lock.
+// Work under one lock file is serialised in this process first (callers on the same lock share one chain, keyed by the full lock file path), then
+// across processes by the file lock. Not re-entrant: work that holds a lock must not wait for the same lock again.
 const mirrorChains = new Map<string, Promise<void>>();
 
 const realSleep = (ms: number): Promise<void> => new Promise<void>((resolve) => { setTimeout(resolve, ms); });
 
-export async function withMirrorLock<T>(mirrorDir: string, work: () => Promise<T>, options: Partial<MirrorLockOptions> = {}): Promise<T> {
-  const key = path.resolve(mirrorDir);
+export function withMirrorLock<T>(mirrorDir: string, work: () => Promise<T>, options: Partial<MirrorLockOptions> = {}): Promise<T> {
+  return withFileLock(mirrorDir, MIRROR_LOCK_FILE, work, options);
+}
+
+export async function withFileLock<T>(dir: string, fileName: string, work: () => Promise<T>, options: Partial<FileLockOptions> = {}): Promise<T> {
+  const key = path.resolve(dir, fileName);
   const previous = mirrorChains.get(key) ?? Promise.resolve();
   let releaseChain!: () => void;
   const gate = new Promise<void>((resolve) => { releaseChain = resolve; });
@@ -180,7 +196,7 @@ export async function withMirrorLock<T>(mirrorDir: string, work: () => Promise<T
   mirrorChains.set(key, tail);
   await previous;
   try {
-    const held = await acquireMirrorLock(mirrorDir, { sleep: realSleep, random: Math.random, ...options });
+    const held = await acquireFileLock(dir, fileName, { sleep: realSleep, random: Math.random, ...options });
     try {
       return await work();
     } finally {

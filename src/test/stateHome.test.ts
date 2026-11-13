@@ -1,12 +1,16 @@
 import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
-import { readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
-import { readFileSync } from 'node:fs';
+import { execFileSync, spawn } from 'node:child_process';
+import { mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { hostname } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { stateFolder } from '../domain/scratch';
 import { ProjectStateHome, createExclusive, newWriterId, writeFileAtomic } from '../services/stateHome';
-import { git, gitInit, gitStatus, tempProject } from './helpers/stateFixtures';
+import { StateBusyError, STATE_LOCKS_DIR, withStateLock } from '../services/stateLocks';
+import { StateKeys } from '../services/stateKeys';
+import { MemorySecrets, git, gitInit, gitStatus, tempProject } from './helpers/stateFixtures';
 
 test('SYNC-01: after ensure() and three writes, git sees nothing and names the inner .gitignore as the rule', async () => {
   const root = await tempProject();
@@ -140,4 +144,137 @@ test('D-08, D-10: the phase settings are declared with their limits, and no sync
   assert.doesNotMatch(props['nearAi.agent.saveTranscripts'].description, /Never saved in the project/);
   assert.match(props['nearAi.agent.saveTranscripts'].description, /\.near-ai\/state/);
   for (const key of ['nearAi.history.liveConversations', 'nearAi.sync.keepKeyInProject']) assert.doesNotMatch(props[key].description, /NEAR organization/i);
+});
+
+// The meta lock (REVIEW MINOR stateHome.ts:213): key creation and every meta.json change have one owner at a time across editors on this computer.
+
+const SERVICES = path.join(__dirname, '..', 'services');
+
+/** Starts one node child per script, waits until every child says it is ready, then lets them all go at once. Resolves with each child's exit code and output. */
+async function runTogether(dir: string, bodies: string[]): Promise<Array<{ code: number | null; out: string; err: string }>> {
+  const go = path.join(dir, 'go');
+  const children = bodies.map((body, index) => {
+    const script = path.join(dir, `child-${index}.js`);
+    writeFileSync(script, `const fs = require('node:fs');
+(async () => {
+  process.stdout.write('ready\\n');
+  while (!fs.existsSync(${JSON.stringify(go)})) await new Promise((resolve) => setTimeout(resolve, 1));
+${body}
+})().catch((error) => { console.error(String(error && error.stack || error)); process.exit(1); });
+`);
+    const child = spawn(process.execPath, [script], { stdio: ['ignore', 'pipe', 'pipe'] });
+    let out = '';
+    let err = '';
+    let ready!: () => void;
+    const isReady = new Promise<void>((resolve) => { ready = resolve; });
+    child.stdout.on('data', (chunk: Buffer) => { out += chunk.toString('utf8'); if (out.includes('ready')) ready(); });
+    child.stderr.on('data', (chunk: Buffer) => { err += chunk.toString('utf8'); });
+    const done = new Promise<{ code: number | null; out: string; err: string }>((resolve) => { child.on('exit', (code) => resolve({ code, out, err })); });
+    return { isReady, done };
+  });
+  await Promise.all(children.map((child) => child.isReady));
+  writeFileSync(go, 'go');
+  return Promise.all(children.map((child) => child.done));
+}
+
+test('two editors in two processes creating the key at once, ten rounds, end with one key file and a key check that opens with it', async () => {
+  for (let round = 0; round < 10; round += 1) {
+    const root = await tempProject();
+    const scratch = await tempProject();
+    try {
+      const body = `  const { StateKeys } = require(${JSON.stringify(path.join(SERVICES, 'stateKeys.js'))});
+  const { ProjectStateHome } = require(${JSON.stringify(path.join(SERVICES, 'stateHome.js'))});
+  const values = new Map();
+  const secrets = { get: async (k) => values.get(k), store: async (k, v) => { values.set(k, v); }, delete: async (k) => { values.delete(k); } };
+  const key = await new StateKeys(new ProjectStateHome(${JSON.stringify(root)}), secrets).ensureDataKey();
+  process.stdout.write('key ' + key.toString('base64') + '\\n');`;
+      const results = await runTogether(scratch, [body, body]);
+      assert.deepEqual(results.map((result) => result.code), [0, 0], results.map((result) => result.err).join('\n'));
+      const keys = results.map((result) => /key (\S+)/.exec(result.out)?.[1]);
+      assert.ok(keys[0] && keys[0] === keys[1], 'both processes hold the same key');
+      const reader = new StateKeys(new ProjectStateHome(root), new MemorySecrets());
+      const found = await reader.dataKey();
+      assert.ok(found && found.toString('base64') === keys[0], 'the key file and the key check open with that key');
+      assert.equal((await readFile(path.join(stateFolder(root), 'keys', 'local.key'), 'utf8')).trim(), keys[0]);
+      assert.deepEqual((await readdir(path.join(root, STATE_LOCKS_DIR))).filter((name) => name.endsWith('.lock') || name.endsWith('.stale')), [], 'no lock is left behind');
+    } finally { await rm(root, { recursive: true, force: true }); await rm(scratch, { recursive: true, force: true }); }
+  }
+});
+
+test('two processes interleaving 20 updateMeta calls each never lose keyCheck or migrated, and meta.json is always a whole file', async () => {
+  const root = await tempProject();
+  const scratch = await tempProject();
+  try {
+    await new ProjectStateHome(root).ensure();
+    const header = `  const { ProjectStateHome } = require(${JSON.stringify(path.join(SERVICES, 'stateHome.js'))});
+  const home = new ProjectStateHome(${JSON.stringify(root)});`;
+    const setsKeyCheck = `${header}
+  for (let i = 0; i < 20; i += 1) await home.updateMeta({ keyCheck: { iv: 'iv' + i, tag: 'tag', data: 'data' } });`;
+    const setsMigrated = `${header}
+  for (let i = 0; i < 20; i += 1) {
+    const current = await home.readMeta();
+    await home.updateMeta({ migrated: { ...(current.migrated || {}), ['k' + i]: i } });
+  }`;
+    const results = await runTogether(scratch, [setsKeyCheck, setsMigrated]);
+    assert.deepEqual(results.map((result) => result.code), [0, 0], results.map((result) => result.err).join('\n'));
+    const meta = JSON.parse(readFileSync(path.join(stateFolder(root), 'meta.json'), 'utf8'));
+    assert.equal(meta.keyCheck?.iv, 'iv19', 'the last keyCheck is kept');
+    assert.equal(Object.keys(meta.migrated ?? {}).length, 20, 'every migrated entry is kept');
+    assert.deepEqual((await readdir(stateFolder(root))).filter((name) => name.endsWith('.tmp')), []);
+  } finally { await rm(root, { recursive: true, force: true }); await rm(scratch, { recursive: true, force: true }); }
+});
+
+test('a lock left by a dead process on this computer is taken over at once; a fresh lock of a live process makes the waiter give up with one plain sentence', async () => {
+  const root = await tempProject();
+  try {
+    const locks = path.join(root, STATE_LOCKS_DIR);
+    await mkdir(locks, { recursive: true });
+    const lockFile = path.join(locks, 'meta.lock');
+    const dead = execFileSync(process.execPath, ['-e', 'process.stdout.write(String(process.pid))'], { encoding: 'utf8' }).trim();
+    await writeFile(lockFile, `${JSON.stringify({ pid: Number(dead), host: hostname(), token: 'ab'.repeat(8) })}\n`);
+    const started = Date.now();
+    assert.equal(await withStateLock(root, 'meta', () => Promise.resolve('ran'), { waitMs: 2_000 }), 'ran');
+    assert.ok(Date.now() - started < 1_500, 'taken over without waiting');
+    assert.equal(existsSync(lockFile), false, 'released when the work ends');
+    // A live holder with a fresh time: the waiter waits its limit, then reports StateBusyError and does not run the work.
+    await writeFile(lockFile, `${JSON.stringify({ pid: process.pid, host: hostname(), token: 'cd'.repeat(8) })}\n`);
+    let ran = false;
+    await assert.rejects(() => withStateLock(root, 'meta', () => { ran = true; return Promise.resolve(); }, { waitMs: 60, staleMs: 60_000 }), (error: unknown) => {
+      return error instanceof StateBusyError && /Another editor on this computer is saving this project's state\. Try again in a moment\. Nothing was changed\./.test(error.message);
+    });
+    assert.equal(ran, false);
+    assert.ok(existsSync(lockFile), "the live holder's lock is left alone");
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('the locks folder gets its own .gitignore of * first, and after locking and key creation git sees nothing in the project', async () => {
+  const root = await tempProject();
+  try {
+    gitInit(root);
+    await withStateLock(root, 'sync', async () => {
+      assert.equal(await readFile(path.join(root, STATE_LOCKS_DIR, '.gitignore'), 'utf8'), '*\n', 'written before the lock file');
+      assert.deepEqual((await readdir(path.join(root, STATE_LOCKS_DIR))).sort(), ['.gitignore', 'sync.lock']);
+    });
+    assert.equal((await stat(path.join(root, STATE_LOCKS_DIR))).mode & 0o777, 0o700);
+    await new StateKeys(new ProjectStateHome(root), new MemorySecrets()).ensureDataKey();
+    assert.equal(gitStatus(root), '', 'nothing is untracked, modified or staged');
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('a planted key file with no key check is replaced under the lock by a fresh key with a key check', async () => {
+  const root = await tempProject();
+  try {
+    const home = new ProjectStateHome(root);
+    await home.ensure();
+    await home.ensureFolder(home.paths.keysDir);
+    const planted = randomBytes(32).toString('base64');
+    await writeFile(home.paths.localKey, `${planted}\n`, { mode: 0o600 });
+    const keys = new StateKeys(home, new MemorySecrets());
+    const key = await keys.ensureDataKey();
+    assert.notEqual(key.toString('base64'), planted, 'the planted bytes are not the key');
+    assert.equal((await readFile(home.paths.localKey, 'utf8')).trim(), key.toString('base64'));
+    assert.ok((await home.readMeta())?.keyCheck, 'a key check was written');
+    assert.ok((await new StateKeys(new ProjectStateHome(root), new MemorySecrets()).dataKey())?.equals(key));
+    assert.equal((await stat(home.paths.localKey)).mode & 0o777, 0o600);
+  } finally { await rm(root, { recursive: true, force: true }); }
 });

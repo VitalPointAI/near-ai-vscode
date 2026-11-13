@@ -10,6 +10,7 @@ import * as path from 'node:path';
 import { stateFolder } from '../domain/scratch';
 import { newStateId, type SealedBlob } from '../domain/state/keys';
 import { runStateGit, type GitRunner } from './stateGit';
+import { withStateLock } from './stateLocks';
 
 export const STATE_FORMAT = 1 as const;
 const STATE_ID = /^[a-z0-9]{16,40}$/;
@@ -168,7 +169,6 @@ export async function privateFileProblem(file: string): Promise<string | undefin
 export class ProjectStateHome {
   public readonly dir: string;
   public readonly paths: StatePaths;
-  private metaQueue: Promise<unknown> = Promise.resolve();
   private tracked: { at: number; value: boolean } | undefined;
 
   /** `dir` is for a copy built beside the real state home (a join, plan 15); every path is then inside it. */
@@ -258,17 +258,25 @@ export class ProjectStateHome {
     return winner;
   }
 
-  /** Changes the optional meta fields in place. Changes made through one instance are applied in order. */
+  /**
+   * Runs `work` as the one editor changing meta.json or creating the key (REVIEW MINOR stateHome.ts:213): a lock file in .near-ai/locks held across
+   * processes. Not re-entrant: inside `work`, change meta.json with updateMetaHeld, never updateMeta. Throws StateBusyError when the wait ends.
+   */
+  public withMetaLock<T>(work: () => Promise<T>): Promise<T> {
+    return withStateLock(this.root, 'meta', work);
+  }
+
+  /** Changes the optional meta fields in place, under the meta lock. The file is read again inside the lock, so another editor's change is kept. */
   public updateMeta(change: Partial<Omit<StateMeta, 'format' | 'stateId' | 'createdAt'>>): Promise<StateMeta> {
-    const run = async (): Promise<StateMeta> => {
-      const current = await this.ensure();
-      const next: StateMeta = { ...current, ...change };
-      await writeFileAtomic(this.paths.meta, `${JSON.stringify(next, null, 2)}\n`);
-      return next;
-    };
-    const result = this.metaQueue.then(run, run);
-    this.metaQueue = result.catch(() => undefined);
-    return result;
+    return this.withMetaLock(() => this.updateMetaHeld(change));
+  }
+
+  /** The change itself: read meta.json, merge, write the whole file. Only for a caller that already holds the meta lock (withMetaLock). */
+  public async updateMetaHeld(change: Partial<Omit<StateMeta, 'format' | 'stateId' | 'createdAt'>>): Promise<StateMeta> {
+    const current = await this.ensure();
+    const next: StateMeta = { ...current, ...change };
+    await writeFileAtomic(this.paths.meta, `${JSON.stringify(next, null, 2)}\n`);
+    return next;
   }
 
   /** Makes a folder inside the state home owner-only, for the key folders. */
