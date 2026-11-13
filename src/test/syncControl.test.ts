@@ -322,3 +322,16 @@ test('the first-run invitation has the line, a Turn on sync button and a way to 
   doc.getElementById('sync-prompt')!.all((child) => child.tagName === 'button')[1].click();
   assert.equal(doc.getElementById('sync-prompt'), undefined, 'dismissing hides it at once');
 });
+
+test('the first-run invitation steps aside while the pick-up card carries one, and comes back when the card goes', () => {
+  const { doc, welcome, posts } = welcomeWithCard({});
+  kit.renderSyncPrompt(doc, welcome, (message) => posts.push(message), true);
+  assert.equal(doc.body.all((node) => node.textContent === SYNC_PROMPT_TEXT.line).length, 1);
+  const model: Partial<PickupModel> = { show: true, pointerAt: '2026-11-13T10:05:00.000Z', syncPrompt: true };
+  const card = pickup.renderPickupCard(doc, welcome, { pointerAt: '', ...model } as PickupModel, (message) => posts.push(message))!;
+  assert.equal(doc.getElementById('sync-prompt'), undefined, 'one invitation on screen, the one in the card');
+  assert.equal(doc.body.all((node) => node.textContent === SYNC_PROMPT_TEXT.line).length, 1);
+  card.all((node) => node.tagName === 'button' && node.textContent === 'Not now')[0].click();
+  assert.ok(doc.getElementById('sync-prompt'), 'back on the first-run screen once the card is gone');
+  assert.equal(doc.body.all((node) => node.textContent === SYNC_PROMPT_TEXT.line).length, 1);
+});

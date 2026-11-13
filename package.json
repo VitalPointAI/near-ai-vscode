@@ -565,7 +565,8 @@
         "nearAi.sync.keepKeyInProject": {
           "type": "boolean",
           "default": true,
-          "description": "Keeps this project's chat key in a private file inside the project's ignored state folder, so every editor on this computer can open the chats. Turn this off to keep the key only in each editor's secret storage; each new editor or browser then asks for the recovery code."
+          "description": "Keeps this project's chat key in a private file inside the project's ignored state folder, so every editor on this computer can open the chats. Turn this off to keep the key only in each editor's secret storage; each new editor or browser then asks for the recovery code.",
+          "markdownDescription": "Keeps this project's chat key in a private file inside the project's ignored state folder, so every editor on this computer can open the chats. Turn this off to keep the key only in each editor's secret storage; each new editor or browser then asks for the recovery code.\n\n[Turn on project sync](command:nearAi.sync.turnOn) to keep this project on your other machines."
         },
         "nearAi.agent.visionModel": {
           "type": "string",

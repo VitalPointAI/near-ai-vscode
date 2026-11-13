@@ -8,7 +8,10 @@ import * as path from 'node:path';
 import { parseGsdPlanningState } from '../domain/gsdStatus';
 import { derivePickup, nextGsdStep, runCardState, parsePickupPointer, type PickupModel, type PickupPhase, type PickupPointer, type PickupThread } from '../domain/state/pickup';
 import type { RunMarkers } from './runMarkers';
+import { shouldShowSyncPrompt } from '../domain/state/syncStatus';
 import { stateHomeFor, writeFileAtomic, type MementoLike } from './stateHome';
+import { syncPromptDismissed } from './syncPanel';
+import type { SyncStatus } from './syncFlows';
 
 /** The workspaceState key that remembers the newest pointer this editor has seen or dismissed. */
 export const PICKUP_SEEN_KEY = 'nearAi.pickup.lastSeen';
@@ -21,6 +24,8 @@ export interface PickupDeps {
   threads: { index(): Promise<readonly PickupThread[]> };
   /** The run markers of this project, for the run line of the card. */
   markers?: Pick<RunMarkers, 'markerOf' | 'runState'>;
+  /** The project's sync status now. Without it the card says nothing about sync. */
+  syncStatus?: SyncStatus;
 }
 
 /** Records where work stopped. Called from a person's action or a run ending, so it may create the state home. A failure never stops anything. */
@@ -80,7 +85,13 @@ export async function pickupCardModel(deps: PickupDeps, root: string): Promise<P
   const phase = pointer ? await readPickupPhase(root).catch(() => undefined) : undefined;
   const marker = pointer && deps.markers ? await deps.markers.markerOf(pointer.conversationId).catch(() => undefined) : undefined;
   const run = marker && deps.markers ? runCardState(marker, deps.markers.runState(marker)) : undefined;
-  return derivePickup({ pointer, thisWriter: deps.writer, lastSeenAt: typeof seen === 'string' ? seen : undefined, index, ...(run ? { run } : {}), ...(phase ? { phase } : {}) });
+  const model = derivePickup({ pointer, thisWriter: deps.writer, lastSeenAt: typeof seen === 'string' ? seen : undefined, index, ...(run ? { run } : {}), ...(phase ? { phase } : {}) });
+  const status = deps.syncStatus;
+  if (!status) return model;
+  // D-17: while the pull on open runs the card says so; D-16: before sync is on it carries the invitation, until the person dismisses it for this project.
+  const checking = status.state === 'syncing' && status.reason === 'open';
+  const syncPrompt = shouldShowSyncPrompt({ syncOn: status.state !== 'off', dismissed: syncPromptDismissed(deps.workspaceState) });
+  return { ...model, ...(checking ? { checking: true as const } : {}), ...(syncPrompt ? { syncPrompt: true as const } : {}) };
 }
 
 /** The card's messages from the page. */

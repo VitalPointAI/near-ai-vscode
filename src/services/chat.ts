@@ -141,10 +141,12 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     send: async (): Promise<void> => {
       const root = workspaceRoot();
       if (!root || disposed) return;
-      const model = await pickupCardModel({ workspaceState: context.workspaceState as MementoLike | undefined, writer: pickupWriter(), threads: pickupStore(root), markers: runMarkersFor(context, root) }, root).catch(() => undefined);
+      const model = await pickupCardModel({ workspaceState: context.workspaceState as MementoLike | undefined, writer: pickupWriter(), threads: pickupStore(root), markers: runMarkersFor(context, root), syncStatus: currentSyncStatus(root) }, root).catch(() => undefined);
       if (!model || disposed) return;
       pickupAt = model.pointerAt;
-      if (model.show || pickupShown) { pickupShown = model.show; void panel.webview.postMessage({ type: 'pickup-card', model }); }
+      // The card also shows while the pull on open runs ("Checking for updates…"); once it has run the card is worked out again and goes or refreshes.
+      const wanted = model.show || model.checking === true;
+      if (wanted || pickupShown) { pickupShown = wanted; void panel.webview.postMessage({ type: 'pickup-card', model }); }
     },
     /** Records where work stopped, for the next editor that opens this project. */
     note: (root: string, conversationId: string, runId?: string): void => {
@@ -162,6 +164,8 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     const current = workspaceRoot();
     if (disposed || !current || path.resolve(root) !== path.resolve(current)) return;
     sendSyncStatus();
+    // The pull on open starting or finishing changes what the pick-up card says.
+    void pickup.send();
   });
   const onScreen = (): ChatTab => tabs.find((tab) => tab.id === activeId) ?? tabs[0];
   /** The conversation a message names, or the one on screen; undefined for one that is no longer open. */
@@ -551,6 +555,7 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
       if (message.action === 'dismiss-prompt') {
         await context.workspaceState?.update(SYNC_PROMPT_DISMISSED_KEY, true);
         sendSyncStatus();
+        await pickup.send();
         return;
       }
       if (message.action === 'show-details') {

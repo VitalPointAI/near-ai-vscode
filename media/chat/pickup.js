@@ -10,6 +10,7 @@
     open: 'Open chat',
     later: 'Not now',
     locked: 'Locked on this device: enter your recovery code to open it',
+    checking: 'Checking for updates…',
     runs: {
       finished: 'The last run finished.',
       'cut-off': 'The last run was cut off. Open the chat to see it. It only resumes when you press Resume there.',
@@ -17,6 +18,18 @@
       'running-elsewhere': 'The last run is still going in another editor.'
     }
   };
+
+  /** The sync control module's invitation, when it is loaded (in the page it is on `window`; in tests it is the module next to this one). */
+  function syncControlKit() {
+    if (root.nearSyncControl) return root.nearSyncControl;
+    return typeof module === 'object' && module.exports && typeof require === 'function' ? require('./syncControl.js') : undefined;
+  }
+
+  /** The first-run invitation steps aside while this card carries one, and comes back when the card goes. */
+  function refreshInvitation(doc) {
+    const kit = syncControlKit();
+    if (kit && kit.refreshSyncPrompt) kit.refreshSyncPrompt(doc);
+  }
 
   /** How a time reads on the card: the time today, the date and time otherwise. Empty for a time that is not valid. */
   function when(iso, now) {
@@ -33,10 +46,18 @@
    * `afterDismiss` puts focus back in the message box when the card goes away under it. Returns the card or undefined.
    */
   function renderPickupCard(doc, container, model, post, afterDismiss) {
+    const card = drawPickupCard(doc, container, model, post, afterDismiss);
+    refreshInvitation(doc);
+    return card;
+  }
+
+  function drawPickupCard(doc, container, model, post, afterDismiss) {
     const existing = doc.getElementById('pickup-card');
     const hadFocus = Boolean(existing) && Boolean(doc.activeElement) && existing.contains(doc.activeElement);
     if (existing) existing.remove();
-    if (!model || model.show !== true) {
+    // The card also shows while the pull on open runs (D-17), even when there is nothing to pick up yet.
+    const shows = Boolean(model) && (model.show === true || model.checking === true);
+    if (!shows) {
       if (hadFocus && afterDismiss) afterDismiss();
       return undefined;
     }
@@ -53,20 +74,25 @@
     const title = make('h3', '', TEXT.title);
     title.id = 'pickup-card-title';
     card.append(title);
-    const chat = model.lastChat;
+    const chat = model.show === true ? model.lastChat : undefined;
     const canOpen = Boolean(chat) && chat.locked !== true && typeof chat.id === 'string';
     if (chat && chat.locked === true) card.append(make('p', 'pickup-line', TEXT.locked));
     else if (chat) {
       const time = when(chat.at);
       card.append(make('p', 'pickup-line', 'Last chat: ' + (chat.title || 'Conversation') + (time ? ' (' + time + ')' : '')));
     }
-    const run = model.lastRun;
+    const run = model.show === true ? model.lastRun : undefined;
     if (run && TEXT.runs[run.state]) card.append(make('p', 'pickup-line', TEXT.runs[run.state]));
-    const phase = model.phase;
+    const phase = model.show === true ? model.phase : undefined;
     if (phase && typeof phase.number === 'number') {
       card.append(make('p', 'pickup-line', 'Phase ' + phase.number + (phase.name ? ': ' + phase.name : '')));
       if (phase.nextStep && typeof phase.nextStep.text === 'string') card.append(make('p', 'pickup-line', phase.nextStep.text));
     }
+    if (model.checking === true) card.append(make('p', 'pickup-line pickup-checking', TEXT.checking));
+    // D-16: before sync is on the card carries the invitation too; the standalone one on the first-run screen steps aside (its id differs).
+    const kit = model.syncPrompt === true ? syncControlKit() : undefined;
+    const invitation = kit ? kit.buildSyncPrompt(doc, post, 'pickup-sync-prompt') : undefined;
+    if (invitation) card.append(invitation);
     const actions = make('div', 'setup-nudge-actions');
     if (canOpen) {
       const open = make('button', 'text-button primary', TEXT.open);
@@ -82,6 +108,7 @@
     later.type = 'button';
     later.addEventListener('click', () => {
       card.remove();
+      refreshInvitation(doc);
       if (afterDismiss) afterDismiss();
       post({ type: 'pickup-card', action: 'later' });
     });

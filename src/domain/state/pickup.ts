@@ -35,6 +35,10 @@ export interface PickupModel {
   lastChat?: { id: string; title: string; at: string; locked?: boolean };
   lastRun?: { state: RunCardState; at: string };
   phase?: PickupPhase;
+  /** Sync is on and the pull on open is running: the card says "Checking for updates…" (D-17). Absent otherwise. */
+  checking?: true;
+  /** Sync is off and the invitation was not dismissed for this project: the card carries "Keep this project on your other machines" (D-16). Absent otherwise. */
+  syncPrompt?: true;
 }
 
 /** The part of a thread index line the card needs. */

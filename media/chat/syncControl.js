@@ -78,24 +78,35 @@
     return box;
   }
 
+  /** What the last render asked for, so the invitation can be worked out again when the pick-up card (which carries its own) comes or goes. */
+  const lastPrompt = { container: undefined, post: undefined, wanted: false };
+
   /**
-   * Shows the invitation at the top of `container` (the first-run screen) when `wanted` is true and nothing else on the page already shows it (the pick-up
-   * card carries its own), and removes it otherwise. Idempotent by id. Returns the node or undefined.
+   * Shows the invitation at the top of `container` (the first-run screen) when `wanted` is true and the pick-up card does not already carry one, and removes
+   * it otherwise. Idempotent by id. Returns the node or undefined.
    */
   function renderSyncPrompt(doc, container, post, wanted) {
+    lastPrompt.container = container;
+    lastPrompt.post = post;
+    lastPrompt.wanted = wanted === true;
     const existing = doc.getElementById('sync-prompt');
-    if (!wanted) {
+    if (!(wanted === true) || doc.getElementById('pickup-sync-prompt')) {
       if (existing) existing.remove();
       return undefined;
     }
     if (existing) return existing;
     const node = buildSyncPrompt(doc, post);
-    if (!node) return undefined;
     container.prepend(node);
     return node;
   }
 
-  const api = { renderSyncControl, renderSyncPrompt, buildSyncPrompt, TEXT };
+  /** Works the first-run invitation out again from the last request: the pick-up card calls this when it shows or goes. */
+  function refreshSyncPrompt(doc) {
+    if (!lastPrompt.container) return undefined;
+    return renderSyncPrompt(doc, lastPrompt.container, lastPrompt.post, lastPrompt.wanted);
+  }
+
+  const api = { renderSyncControl, renderSyncPrompt, refreshSyncPrompt, buildSyncPrompt, TEXT };
   if (typeof module === 'object' && module.exports) module.exports = api;
   else root.nearSyncControl = api;
 })(typeof window === 'undefined' ? globalThis : window);

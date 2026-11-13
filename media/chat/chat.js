@@ -49,7 +49,6 @@
   const syncKit = window.nearSyncControl || { renderSyncControl: () => undefined, renderSyncPrompt: () => undefined };
   const syncButton = $('sync');
   const welcomeMemory = {};
-  let syncPromptWanted = false;
   if ($('welcome-new-profile')) $('welcome-new-profile').addEventListener('click', () => post({ type: 'new-profile' }));
   if ($('welcome-choose-profile')) $('welcome-choose-profile').addEventListener('click', () => post({ type: 'select-profile' }));
   if ($('welcome-open-folder')) $('welcome-open-folder').addEventListener('click', () => post({ type: 'open-folder' }));
@@ -1234,11 +1233,11 @@
       case 'reset': post({ type: 'new-chat' }); break;
       case 'conversations': renderConversations(m); break;
       case 'setup-nudge': setupKit.renderSetupNudge(document, welcomeReady, m.show === true, post, () => input.focus()); break;
-      case 'pickup-card': pickupKit.renderPickupCard(document, welcomeReady, m.model, post, () => { input.focus(); syncKit.renderSyncPrompt(document, welcome, post, syncPromptWanted); }); syncKit.renderSyncPrompt(document, welcome, post, syncPromptWanted && !document.getElementById('pickup-card')); break;
+      case 'pickup-card': pickupKit.renderPickupCard(document, welcomeReady, m.model, post, () => input.focus()); break;
       case 'sync-status':
         syncKit.renderSyncControl(document, syncButton, m.model, post);
-        syncPromptWanted = m.prompt === true;
-        syncKit.renderSyncPrompt(document, welcome, post, syncPromptWanted && !document.getElementById('pickup-card'));
+        // The invitation steps aside while the pick-up card carries its own (syncControl.js decides).
+        syncKit.renderSyncPrompt(document, welcome, post, m.prompt === true);
         break;
       case 'conversation-show': {
         draftsLive = false;
