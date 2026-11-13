@@ -297,7 +297,11 @@ footer { padding: 6px 12px 8px; }
   color: var(--vscode-input-foreground); font: inherit;
 }
 #input::placeholder { color: var(--vscode-input-placeholderForeground); }
-.composer .bar { display: flex; align-items: center; gap: 4px; padding: 2px 4px 4px 6px; }
+/* The bar wraps at every width (G-27-4a): the profile and sync chips sit together on the first row, and the pickers and buttons take the next one. */
+.composer .bar { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; row-gap: 2px; padding: 2px 4px 4px 6px; }
+/* An empty full-row item after the chips (and the sync detail line): up to this width the pickers start on a new row; wider, one row when it fits. */
+.composer .bar .bar-break { display: none; flex: 0 0 100%; height: 0; }
+@media (max-width: 480px) { .composer .bar .bar-break { display: block; flex-basis: 100%; } }
 #model, #policy, #advance {
   min-width: 0; padding: 1px 2px; border: 0; border-radius: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   font-size: 11px; color: var(--vscode-descriptionForeground); background: transparent; cursor: pointer;
@@ -356,7 +360,9 @@ footer { padding: 6px 12px 8px; }
 .chip:hover { background: var(--vscode-toolbar-hoverBackground); color: var(--vscode-foreground); }
 .chip[data-state="missing"], .chip[data-state="attention"] { color: var(--vscode-textLink-foreground); }
 /* The sync control (D-16): a chip beside the profile chip. Every colour is a theme variable, so it reads in light, dark and high-contrast themes. */
-#sync { flex: none; max-width: 45%; color: var(--vscode-foreground); background: var(--vscode-button-secondaryBackground, transparent); }
+/* The profile name and the sync state are read whole (data-must-read): they never shrink below their text, and where the row is too narrow for one they wrap onto more lines instead of being cut to an ellipsis. */
+#profile, #sync { flex: none; max-width: 100%; white-space: normal; overflow-wrap: anywhere; text-align: left; }
+#sync { color: var(--vscode-foreground); background: var(--vscode-button-secondaryBackground, transparent); }
 #sync:hover { background: var(--vscode-button-secondaryHoverBackground, var(--vscode-toolbar-hoverBackground)); }
 #sync:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 1px; }
 #sync[data-state="synced"] { color: var(--vscode-descriptionForeground); background: transparent; }
@@ -424,9 +430,7 @@ body.vscode-high-contrast #sync:hover, body.vscode-high-contrast-light #sync:hov
 @media (max-width: 260px) {
   #transcript { padding: 10px 10px 4px; }
   footer { padding: 6px 8px 8px; }
-  /* The composer's bar takes two rows: profile and model, then approval policy and the buttons. */
-  .composer .bar { flex-wrap: wrap; row-gap: 2px; }
-  .composer .bar .chip { max-width: 45%; }
+  /* The composer's bar: profile and sync on their own rows (they wrap their own text), then the model, then approval policy and the buttons. */
   #model { flex: 1 1 calc(55% - 4px); max-width: none; }
   #policy { flex: 0 1 auto; max-width: none; }
   /* Slash commands: the description goes under the name. */
