@@ -5,9 +5,9 @@ milestone_name: Messaging relay — Teams and Signal
 current_phase: 27
 current_phase_name: Project state follows the project across interfaces and machines (0.4.20)
 status: planning
-stopped_at: Completed 27-09-PLAN.md
-last_updated: "2026-11-13T14:32:04.084Z"
-state_head: 0d1a12f9c9ba633810e7fd7165c3b5056ecb65eb
+stopped_at: Completed 27-11-PLAN.md
+last_updated: "2026-11-13T14:43:30.317Z"
+state_head: 28aafaa83baf3682639ae023b29a2961e9d9d5b5
 progress:
   total_phases: 9
   completed_phases: 0
@@ -76,8 +76,8 @@ None yet.
 
 ## Session
 
-**Last session:** 2026-11-13T14:32:04.067Z
-**Stopped at:** Completed 27-09-PLAN.md
+**Last session:** 2026-11-13T14:43:30.298Z
+**Stopped at:** Completed 27-11-PLAN.md
 **Resume file:** None
 
 ## Performance Metrics
@@ -89,6 +89,7 @@ None yet.
 | Phase 27 P03 | 11min | 3 tasks | 15 files |
 | Phase 27 P04 | 11 min | 3 tasks | 12 files |
 | Phase 27 P09 | 28min | 3 tasks | 11 files |
+| Phase 27 P11 | 9 min | 3 tasks | 8 files |
 
 ## Decisions
 
@@ -104,3 +105,7 @@ None yet.
 - [Phase 27]: 27-04: checkpoints are format 2 (root-relative inside the project, absolute and marked outside), a relative path that is absolute or climbs out is refused on load; sub-agent worktrees stay in the editor's own storage — Checkpoints must be portable between editors and machines without a revert ever writing outside the project (T-27-17)
 - [Phase 27]: 27-09: import offer lists only settings with no project choice, so an existing project choice is never replaced by the import
 - [Phase 27]: 27-09: applying with no folder open and no explicit workspace value is refused rather than writing user settings (D-06)
+- [Phase 27]: Sync commit identity is near-ai-state at the constant date 2000-01-01, set only on commit-tree; runStateGit refuses commit-tree without all six identity pairs
+- [Phase 27]: Remote-facing StateTransport methods return Outcome<T> with a SyncFailure of one plain sentence; local reads throw StateRefusedError; MirrorBusyError propagates for the caller to word
+- [Phase 27]: Remote addresses are validated when typed and again when a configured name resolves, so a hostile repository remote such as ext:: is refused
+- [Phase 27]: Inherited GIT_DIR, GIT_WORK_TREE, GIT_INDEX_FILE, GIT_OBJECT_DIRECTORY, GIT_CONFIG*, GIT_AUTHOR_* and GIT_COMMITTER_* are stripped inside runStateGit before options.env is applied
