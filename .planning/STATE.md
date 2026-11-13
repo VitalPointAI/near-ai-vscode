@@ -5,9 +5,9 @@ milestone_name: Messaging relay — Teams and Signal
 current_phase: 27
 current_phase_name: Project state follows the project across interfaces and machines (0.4.20)
 status: planning
-stopped_at: Completed 27-18-PLAN.md
-last_updated: "2026-11-13T17:46:17.834Z"
-state_head: 648ff704d207ac5d4b20f9199ed7b1910fea0be1
+stopped_at: Completed 27-19-PLAN.md
+last_updated: "2026-11-13T19:33:29.716Z"
+state_head: 40c7ac9d4076edf8aaa2fd3f88b42b3cf518d529
 progress:
   total_phases: 9
   completed_phases: 0
@@ -76,8 +76,8 @@ None yet.
 
 ## Session
 
-**Last session:** 2026-11-13T17:46:17.814Z
-**Stopped at:** Completed 27-18-PLAN.md
+**Last session:** 2026-11-13T19:33:29.697Z
+**Stopped at:** Completed 27-19-PLAN.md
 **Resume file:** None
 
 ## Performance Metrics
@@ -101,6 +101,7 @@ None yet.
 | Phase 27 P14 | 40min | 3 tasks | 13 files |
 | Phase 27 P15 | 30 min | 3 tasks | 21 files |
 | Phase 27 P18 | 25min | 3 tasks | 14 files |
+| Phase 27 P19 | 8 min | 2 tasks | 3 files |
 
 ## Decisions
 
@@ -153,3 +154,4 @@ None yet.
 - [Phase 27]: Joining a synced project from a computer with chats builds a re-keyed copy beside the state home and swaps by two renames, keeping the original until a sync worked.
 - [Phase 27]: 27-18: the sync control reuses 27-15's status and commands; Needs attention shows its plain sentence with one Sync Project Now button; the Turn on sync invitation appears only while sync is off, once on screen (first-run screen or pick-up card), dismissal stored per project in workspaceState nearAi.sync.promptDismissed
 - [Phase 27]: 27-18: the first-run invitation goes into the whole welcome section so a computer with no connected profile yet still sees it; the pick-up card also shows 'Checking for updates…' while the pull on open runs
+- [Phase 27]: 27-19: an older build's comparison mode run is read as rerun by one frozen LEGACY_RUN_MODES table inside parseSavedRun; every reader (store, migration, sync records) goes through it, guarded by a source test
