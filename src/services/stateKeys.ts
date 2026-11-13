@@ -3,7 +3,7 @@
 //   2. this editor's own SecretStorage, under nearAi.state.<stateId>.dataKey.
 // A candidate is used only if it opens the key check in meta.json, so a planted or swapped key is never trusted. Whatever the file gave is kept
 // in SecretStorage too, so an editor that has opened the project once no longer needs the file. No method logs a key; none is in an error message.
-import { KDF_PARAMS, assertKdfParams, deriveKek, newSalt, open, seal, aadFor, newDataKey, subKey, wrapDataKey, type KdfRecord, type SealedBlob } from '../domain/state/keys';
+import { KDF_PARAMS, assertKdfParams, deriveKek, newSalt, open, seal, aadFor, newDataKey, subKey, unwrapDataKey, wrapDataKey, type KdfRecord, type SealedBlob } from '../domain/state/keys';
 import { createExclusive, ProjectStateHome, stateHomeFor, writeFileAtomic } from './stateHome';
 import { readFile, rm, stat } from 'node:fs/promises';
 import * as path from 'node:path';
@@ -178,6 +178,53 @@ export class StateKeys {
     await this.home.updateMeta({ keyCheck: this.makeKeyCheck(key, meta.stateId) });
     await this.storeDeviceCopy(key, meta.stateId);
     this.cached = key;
+  }
+
+  /**
+   * Opens the project on an editor that holds no key (the key file is off), with the recovery code and the wrap kept in this project's state folder. The
+   * key is checked against the project's key check and then kept in this editor's own secret storage. False for a wrong code or anything that does not fit.
+   */
+  public async unlockWithCode(codeBytes: Buffer): Promise<boolean> {
+    const meta = await this.home.readMeta().catch(() => undefined);
+    const wrap = await this.readRecoveryWrap();
+    if (!meta || !meta.keyCheck || !wrap || codeBytes.length !== 32) return false;
+    try {
+      const key = unwrapDataKey(await deriveKek(codeBytes, Buffer.from(wrap.kdf.salt, 'base64'), wrap.kdf), wrap.wrappedKey, meta.stateId);
+      if (!this.opensKeyCheck(key, meta.stateId, meta.keyCheck)) return false;
+      await this.storeDeviceCopy(key, meta.stateId);
+      this.cached = key;
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Makes sure this editor's own secret storage holds the key, so the project still opens here once the key file is gone. The key file is read even when
+   * the setting that keeps it is already off. False when there is no key to keep (the project is locked here).
+   */
+  public async keepDeviceCopy(): Promise<boolean> {
+    const meta = await this.home.readMeta().catch(() => undefined);
+    if (!meta) return false;
+    let key = this.cached;
+    if (!key) {
+      const fromFile = decodeKey(await readFile(this.home.paths.localKey, 'utf8').catch(() => undefined));
+      if (fromFile && this.opensKeyCheck(fromFile, meta.stateId, meta.keyCheck)) key = fromFile;
+    }
+    key ??= (await this.find(meta.stateId, meta.keyCheck))?.key;
+    if (!key) return false;
+    await this.storeDeviceCopy(key, meta.stateId);
+    this.cached = key;
+    return true;
+  }
+
+  /** Writes keys/local.key again from the unlocked key (mode 0600, ignored by git), when the key file is switched back on. Leaves an existing file alone. */
+  public async writeLocalKeyFile(): Promise<void> {
+    const key = await this.dataKey();
+    if (!key) throw new Error(LOCKED_MESSAGE);
+    await this.home.ensureFolder(this.home.paths.keysDir);
+    await createExclusive(this.home.paths.keysGitignore, IGNORE_ALL);
+    await createExclusive(this.home.paths.localKey, `${key.toString('base64')}\n`, 0o600);
   }
 
   /** Removes the key file. Refused unless the recovery code can open the project instead, so the chats are never locked out by this. */

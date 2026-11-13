@@ -186,7 +186,7 @@ test('keepKeyFlow(false) with no recovery code shows one once, asks, removes key
   const remote = bareRemote({ withMain: false });
   const a = computer(remote, 'alpha');
   await setUpProfile(a);
-  const own = await thread(a, 'conv-key-1', 'Key one');
+  const own = await thread(a, 'conv-key-one', 'Key one');
   assert.ok(existsSync(a.home.paths.localKey));
 
   const declined = await keepKeyFlow({ env: a.env, ui: fakeUi({ confirm: false }).ui }, false);
@@ -200,17 +200,17 @@ test('keepKeyFlow(false) with no recovery code shows one once, asks, removes key
   assert.equal(off.confirms.length, 1);
   assert.ok(!existsSync(a.home.paths.localKey), 'the key file is gone');
   assert.ok(existsSync(a.home.paths.recoveryWrap), 'the code can open the project');
-  assert.deepEqual(await ids(a, 'conv-key-1'), own, 'this editor still opens its chats (its own secret storage holds the key)');
+  assert.deepEqual(await ids(a, 'conv-key-one'), own, 'this editor still opens its chats (its own secret storage holds the key)');
 
   const fresh = new StateKeys(a.home, new MemorySecrets(), () => false);
   assert.equal(await fresh.dataKey(), undefined, 'a fresh editor is locked');
   const editor = computer(remote, 'second', { root: a.root, keepKeyInProject: () => false });
-  assert.deepEqual((await editor.threads.index()).map((item) => ({ id: item.id, locked: item.locked })), [{ id: 'conv-key-1', locked: true }]);
+  assert.deepEqual((await editor.threads.index()).map((item) => ({ id: item.id, locked: item.locked })), [{ id: 'conv-key-one', locked: true }]);
   const wrongCode = await enterCodeFlow({ env: editor.env, ui: fakeUi({ code: generateRecoveryCode().code }).ui });
   assert.equal(wrongCode.status, 'refused');
   const opened = await enterCodeFlow({ env: editor.env, ui: fakeUi({ code: off.shown[0] }).ui });
   assert.equal(opened.status, 'unlocked');
-  assert.deepEqual(await ids(editor, 'conv-key-1'), own, 'the code opened the chats on the fresh editor');
+  assert.deepEqual(await ids(editor, 'conv-key-one'), own, 'the code opened the chats on the fresh editor');
 
   const on = await keepKeyFlow({ env: a.env, ui: fakeUi().ui }, true);
   assert.equal(on.status, 'done');
@@ -223,7 +223,7 @@ test('keepKeyFlow(false) with no recovery code shows one once, asks, removes key
 test('keepKeyFlow(false) when a recovery code exists shows no new code', async () => {
   const remote = bareRemote({ withMain: false });
   const a = computer(remote, 'alpha');
-  await thread(a, 'conv-key-2', 'Key two');
+  await thread(a, 'conv-key-two', 'Key two');
   assert.equal((await turnOnFlow({ env: a.env, ui: fakeUi().ui })).status, 'on');
   const off = fakeUi();
   assert.equal((await keepKeyFlow({ env: a.env, ui: off.ui }, false)).status, 'done');
@@ -236,7 +236,7 @@ test('keepKeyFlow(false) when a recovery code exists shows no new code', async (
 test('turnOffFlow stops syncing and leaves the remote branch and this computer\'s state as they are', async () => {
   const remote = bareRemote({ withMain: false });
   const a = computer(remote, 'alpha');
-  const own = await thread(a, 'conv-off-1', 'Off one');
+  const own = await thread(a, 'conv-off-one', 'Off one');
   assert.equal((await turnOnFlow({ env: a.env, ui: fakeUi().ui })).status, 'on');
   assert.equal((await readSyncSettings(a.home)).enabled, true);
   const tip = remoteTip(remote);
@@ -247,7 +247,7 @@ test('turnOffFlow stops syncing and leaves the remote branch and this computer\'
   assert.deepEqual(seen, [false]);
   assert.equal((await readSyncSettings(a.home)).enabled, false);
   assert.equal(remoteTip(remote), tip, 'nothing was pushed or removed');
-  assert.deepEqual(await ids(a, 'conv-off-1'), own);
+  assert.deepEqual(await ids(a, 'conv-off-one'), own);
   assert.match(off.messages.join('\n'), /sync is off/i);
 });
 

@@ -17,7 +17,7 @@ import type { StateKeys } from './stateKeys';
 import type { RunMarker, RunState } from './runMarkers';
 import { StateSync, type StateSyncOptions, type SyncOutcome } from './stateSync';
 import { StateTransport, validateRemote } from './stateTransport';
-import { adoptRemoteIdentity, discardPreviousState, type AdoptOptions } from './stateRestore';
+import { adoptRemoteIdentity, discardPreviousState, recoverInterruptedAdoption, type AdoptOptions } from './stateRestore';
 import type { ProfileSource, SecretSource } from './stateRecords';
 import type { StateRecord } from '../domain/state/records';
 import type { ThreadStore } from './threadStore';
@@ -37,6 +37,15 @@ const JOIN_TEXT = 'This project has chats on this computer that are not online y
 const LOCKED_HERE = "This project's chats on this computer are locked, so they cannot be added to the online project. Open them first with this computer's own recovery code, or move the project folder aside.";
 const SYNC_ON = 'Project sync is on. Your project is encrypted and saved on your git host.';
 const SYNC_ON_PENDING = 'Project sync is on, but the first save did not finish. It will try again.';
+const UNLOCKED = 'This project is open on this computer again.';
+const JOIN_FAILED = "Something went wrong while adding this computer's chats to the online project, so nothing was changed. Try again.";
+const NEEDS_KEY = "This project's chats are locked on this computer. Enter the recovery code first.";
+const NEW_CODE_SAVED = 'Your new recovery code is the one that opens this project now.';
+const OLD_CODE_NOTE = 'Copies already on your git host can still be opened with the old code until the data is re-keyed.';
+const KEY_FILE_OFF_TEXT = 'Turn off the chat key file in this project? Each new editor or browser will then ask for the recovery code before it can open these chats. A recovery code will be shown first if you have none.';
+const KEY_FILE_OFF_DONE = 'The chat key file was removed. New editors and browsers will ask for the recovery code.';
+const KEY_FILE_ON_DONE = 'The chat key file is back in this project, so every editor on this computer can open the chats.';
+const SYNC_OFF = 'Project sync is off. Your chats stay on this computer, and what is already online is left as it is.';
 const NOTHING_ONLINE = 'There is nothing saved online for this project yet. Turn on project sync on the computer that has your chats first.';
 
 /** Everything a flow asks the person. Each is a click or a typed answer; `undefined` or false means they walked away. */
@@ -217,6 +226,8 @@ export interface EnterCodeInput extends TurnOnInput {
  */
 export async function enterCodeFlow(input: EnterCodeInput): Promise<EnterCodeResult> {
   const { env, ui } = input;
+  // A join that was cut off after its first rename is put right before anything reads this computer's state.
+  await recoverInterruptedAdoption(env.root);
   const typed = await ui.askCode();
   if (typed === undefined) return { status: 'cancelled', message: 'No recovery code was entered.' };
   const bytes = parseRecoveryCode(typed);
@@ -226,6 +237,13 @@ export async function enterCodeFlow(input: EnterCodeInput): Promise<EnterCodeRes
     return { status: 'refused', message };
   }
   try {
+    // A project that is here but locked (no key file, an editor with no key of its own) is opened with the code and the wrap kept in its own folder.
+    if ((await env.home.readMeta().catch(() => undefined)) && !(await env.keys.dataKey()) && await env.keys.hasRecoveryWrap()) {
+      if (await env.keys.unlockWithCode(bytes)) { ui.info(UNLOCKED); return { status: 'unlocked', message: UNLOCKED }; }
+      const message = new StateRefusedError('wrong-code-or-damaged').message;
+      ui.info(message);
+      return { status: 'refused', message };
+    }
     const found = await resolveRemote(env, ui);
     if (found.kind === 'cancelled') return { status: 'cancelled', message: 'Project sync was not turned on.' };
     if (found.kind === 'none') { ui.info(NO_HOME); return { status: 'no-home', message: NO_HOME }; }
@@ -249,9 +267,15 @@ export async function enterCodeFlow(input: EnterCodeInput): Promise<EnterCodeRes
       if (!oldKey) { ui.info(LOCKED_HERE); return { status: 'refused', message: LOCKED_HERE }; }
       if (!(await ui.confirm(JOIN_TEXT))) return { status: 'cancelled', message: 'Nothing was changed.' };
       const options: AdoptOptions = { ...(env.keepKeyInProject ? { keepKeyInProject: env.keepKeyInProject } : {}), ...(env.writer ? { writer: env.writer } : {}), ...(input.adopt ?? {}) };
-      const adopted = await adoptRemoteIdentity(env.root, { stateId: local.stateId, key: oldKey }, { stateId: opening.stateId, key: opening.dataKey }, options);
-      joined = adopted.changed;
-      env.threads.forgetCaches();
+      try {
+        const adopted = await adoptRemoteIdentity(env.root, { stateId: local.stateId, key: oldKey }, { stateId: opening.stateId, key: opening.dataKey }, options);
+        joined = adopted.changed;
+      } catch {
+        ui.info(JOIN_FAILED);
+        return { status: 'failed', message: JOIN_FAILED };
+      } finally {
+        env.threads.forgetCaches();
+      }
     }
     try {
       await env.keys.adoptDataKey(opening.dataKey, opening.stateId);
@@ -277,22 +301,79 @@ export async function enterCodeFlow(input: EnterCodeInput): Promise<EnterCodeRes
   }
 }
 
-// ---- a new code, the key file, turning off (stubs until the tests that drive them are green) --------------------------------------------
+// ---- a new code, the key file, turning off ----------------------------------------------------------------------------------------------
 
 export type FlowStatus = 'done' | 'cancelled' | 'failed';
 export interface FlowResult { status: FlowStatus; message: string }
 
-/** Shows a new recovery code once and makes it the one that opens the project (D-02). */
-export function newCodeFlow(_input: TurnOnInput): Promise<FlowResult> {
-  return Promise.reject(new Error('not implemented'));
+/**
+ * Shows a new recovery code once and makes it the one that opens the project (D-02). Its wrap goes up with the next sync (now, when sync is on). Copies
+ * already on the git host were wrapped under the old code: until the data is re-keyed (not part of this phase) the old code still opens them, and the
+ * message says so.
+ */
+export async function newCodeFlow(input: TurnOnInput): Promise<FlowResult> {
+  const { env, ui } = input;
+  if (!(await env.keys.dataKey())) { ui.info(NEEDS_KEY); return { status: 'failed', message: NEEDS_KEY }; }
+  const settings = await readSyncSettings(env.home);
+  const made = generateRecoveryCode();
+  try {
+    if (!(await ui.showCodeOnce(made.code))) return { status: 'cancelled', message: 'No new recovery code was made.' };
+    await env.keys.writeRecoveryWrap(made.bytes);
+  } finally {
+    made.bytes.fill(0);
+  }
+  let message = NEW_CODE_SAVED;
+  if (settings.enabled) {
+    const found = await resolveRemote(env, ui);
+    if (found.kind === 'remote') {
+      const sync = env.makeSync({ remote: found.name });
+      await sync.markWrapChanged();
+      const outcome = await sync.sync();
+      if (outcome.kind !== 'synced') message = `${message} It could not go online yet and will with the next sync.`;
+    }
+  }
+  message = `${message} ${OLD_CODE_NOTE}`;
+  ui.info(message);
+  return { status: 'done', message };
 }
 
-/** `nearAi.sync.keepKeyInProject` off or on (D-10). */
-export function keepKeyFlow(_input: TurnOnInput, _on: boolean): Promise<FlowResult> {
-  return Promise.reject(new Error('not implemented'));
+/**
+ * `nearAi.sync.keepKeyInProject` off or on (D-10). Off asks first, makes sure a recovery code exists (showing a new one once when it does not), keeps
+ * this editor's own copy of the key, and only then removes keys/local.key. On writes the file again from the unlocked key.
+ */
+export async function keepKeyFlow(input: TurnOnInput, on: boolean): Promise<FlowResult> {
+  const { env, ui } = input;
+  if (on) {
+    try {
+      await env.keys.writeLocalKeyFile();
+    } catch {
+      ui.info(NEEDS_KEY);
+      return { status: 'failed', message: NEEDS_KEY };
+    }
+    ui.info(KEY_FILE_ON_DONE);
+    return { status: 'done', message: KEY_FILE_ON_DONE };
+  }
+  if (!(await env.keys.keepDeviceCopy())) { ui.info(NEEDS_KEY); return { status: 'failed', message: NEEDS_KEY }; }
+  if (!(await ui.confirm(KEY_FILE_OFF_TEXT))) return { status: 'cancelled', message: 'The chat key file was kept.' };
+  if (!(await env.keys.hasRecoveryWrap())) {
+    const made = generateRecoveryCode();
+    try {
+      if (!(await ui.showCodeOnce(made.code))) return { status: 'cancelled', message: 'The chat key file was kept, because no recovery code was saved.' };
+      await env.keys.writeRecoveryWrap(made.bytes);
+    } finally {
+      made.bytes.fill(0);
+    }
+  }
+  await env.keys.removeLocalKeyFile();
+  ui.info(KEY_FILE_OFF_DONE);
+  return { status: 'done', message: KEY_FILE_OFF_DONE };
 }
 
-/** Stops syncing; the remote and this computer's state are left as they are. */
-export function turnOffFlow(_input: TurnOnInput): Promise<FlowResult> {
-  return Promise.reject(new Error('not implemented'));
+/** Stops syncing: nothing is scheduled or pushed any more. The remote branch and this computer's state are left as they are. */
+export async function turnOffFlow(input: TurnOnInput): Promise<FlowResult> {
+  const { env, ui } = input;
+  await writeSyncSettings(env.home, { enabled: false });
+  env.onEnabled?.(false);
+  ui.info(SYNC_OFF);
+  return { status: 'done', message: SYNC_OFF };
 }

@@ -11,12 +11,12 @@ import {
   type ManifestHeader, type ObjectEntry, type OpenPart, type SealedPart
 } from '../domain/state/objects';
 import { compareRecords, slotKind } from '../domain/state/merge';
-import { parseRecord, type StateRecord } from '../domain/state/records';
+import { canonicalJson, parseRecord, type StateRecord } from '../domain/state/records';
 import { threadLines, threadTip, unionEntries, type ThreadEntry } from '../domain/state/threadEntries';
 import type { RunMarker, RunState } from './runMarkers';
 import { rm } from 'node:fs/promises';
 import { ProjectStateHome, writeFileAtomic } from './stateHome';
-import type { StateKeys } from './stateKeys';
+import type { RecoveryWrap, StateKeys } from './stateKeys';
 import { MirrorBusyError } from './stateMirrorLock';
 import {
   THREAD_ID, applyMerged, collectLocal, foldHeads, headMapOf, isSyncedRecord, mergeAll, parsePortableMeta, recordKey, withoutBody,
@@ -122,10 +122,17 @@ interface SyncState {
   heads: StateRecord[];
   /** The entry ids of each thread that the remote's cold objects hold (pushed from here or fetched here), so a consolidated hot object need not carry them again. */
   cold: Record<string, string[]>;
+  /** A new recovery code was made here and its wrap has not been pushed yet: the next push carries it, even with nothing else to send. */
+  wrapPending?: boolean;
 }
 
 function freshState(): SyncState {
   return { version: 1, lastSeenSeq: 0, readObjects: [], pushed: {}, heads: [], cold: {} };
+}
+
+/** A short, stable name for a recovery wrap, so two computers can say whether they mean the same one. */
+export function wrapIdOf(wrap: RecoveryWrap): string {
+  return createHash('sha256').update(canonicalJson(JSON.parse(JSON.stringify({ kdf: wrap.kdf, wrappedKey: wrap.wrappedKey }))), 'utf8').digest('hex').slice(0, 16);
 }
 
 function parseState(text: string): SyncState {
@@ -144,7 +151,7 @@ function parseState(text: string): SyncState {
     return {
       version: 1, lastSeenSeq: value.lastSeenSeq,
       readObjects: Array.isArray(value.readObjects) ? value.readObjects.filter((item): item is string => typeof item === 'string') : [],
-      pushed, heads, cold
+      pushed, heads, cold, ...(value.wrapPending === true ? { wrapPending: true } : {})
     };
   } catch {
     return freshState();
@@ -197,7 +204,8 @@ function parseIndex(value: unknown): IndexPayload {
     if (typeof item.turns === 'number' && Number.isSafeInteger(item.turns) && item.turns >= 0) thread.turns = item.turns;
     threads[id] = thread;
   }
-  return { v: 1, threads };
+  const wrapId = typeof value.wrapId === 'string' && /^[0-9a-f]{16}$/.test(value.wrapId) ? value.wrapId : undefined;
+  return { v: 1, threads, ...(wrapId ? { wrapId } : {}) };
 }
 
 interface RemoteBundle {
@@ -420,15 +428,19 @@ export class StateSync {
       if (mode === 'pull') return { kind: 'synced', message: MESSAGES.synced, pushed: false, attempts: tries };
 
       const send = this.whatRemoteLacks(local, merged, remote, state);
-      if (remote && !send.hasNew) return { kind: 'synced', ...this.withSizeNotes(this.measured(listedBytes(remote?.objects ?? [])), send), pushed: false, attempts: tries };
-
-      const wrap = (await keys.readRecoveryWrap()) ?? (remote ? { kdf: remote.header.kdf, wrappedKey: remote.header.wrappedKey } : undefined);
+      const chosen = await this.chooseWrap(remote, state);
+      if (remote && !send.hasNew && !chosen.mustPush) {
+        if (chosen.settled) { delete state.wrapPending; await this.writeState(state); }
+        return { kind: 'synced', ...this.withSizeNotes(this.measured(listedBytes(remote?.objects ?? [])), send), pushed: false, attempts: tries };
+      }
+      const wrap = chosen.wrap;
       if (!wrap) return { kind: 'refused', message: MESSAGES.noRecoveryCode, attempts: tries };
       const built = await this.buildCommit({ dataKey, stateId: meta.stateId, wrap, remote, state, local, merged, send });
       tries += 1;
       const pushed = await transport.push(built.commit);
       if (pushed.ok) {
         this.learnPush(state, built);
+        if (chosen.pushesLocal || chosen.settled) delete state.wrapPending;
         await this.writeState(state);
         return { kind: 'synced', ...this.withSizeNotes(this.measured(listedBytes(built.objects)), send), pushed: true, attempts: tries };
       }
@@ -436,6 +448,37 @@ export class StateSync {
       if (tries >= MAX_PUSH_ATTEMPTS) return { kind: 'failed', message: MESSAGES.contended, failure: pushed.failure, attempts: tries };
       await this.sleep(RETRY_MIN_MS + Math.floor(this.random() * RETRY_SPAN_MS));
     }
+  }
+
+  /**
+   * Which recovery wrap the next push carries (D-02). This computer's own, normally. After a new code was made here (`wrapPending`) it must reach the
+   * remote even with nothing else to send. When another computer made a new code, the remote's header carries its wrap and the sealed index names that
+   * wrap's id: this computer then takes the remote's wrap instead of pushing its older one back (which would undo the new code). A header that does not
+   * match what the sealed index says is damaged, and this computer's wrap goes up in its place.
+   */
+  private async chooseWrap(remote: RemoteBundle | undefined, state: SyncState): Promise<{ wrap: RecoveryWrap | undefined; mustPush: boolean; pushesLocal: boolean; settled: boolean }> {
+    const { keys } = this.options;
+    const local = await keys.readRecoveryWrap();
+    const header: RecoveryWrap | undefined = remote ? { kdf: remote.header.kdf, wrappedKey: remote.header.wrappedKey } : undefined;
+    if (!local) return { wrap: header, mustPush: false, pushesLocal: false, settled: false };
+    if (!header || wrapIdOf(local) === wrapIdOf(header)) return { wrap: local, mustPush: false, pushesLocal: false, settled: state.wrapPending === true };
+    if (state.wrapPending) return { wrap: local, mustPush: true, pushesLocal: true, settled: false };
+    const claimed = remote?.index.wrapId;
+    if (claimed !== undefined && claimed === wrapIdOf(header)) {
+      await keys.storeRecoveryWrap(header);
+      return { wrap: header, mustPush: false, pushesLocal: false, settled: false };
+    }
+    return { wrap: local, mustPush: false, pushesLocal: false, settled: false };
+  }
+
+  /** Says that a new recovery code was made on this computer, so the next sync pushes its wrap even when there is nothing else to send. */
+  public markWrapChanged(): Promise<void> {
+    return this.enqueue(async () => {
+      const state = await this.readState();
+      state.wrapPending = true;
+      await this.writeState(state);
+      return { kind: 'synced', message: '' } as SyncOutcome;
+    }).then(() => undefined);
   }
 
   private pendingPath(): string {
@@ -634,7 +677,7 @@ export class StateSync {
     for (const [id, thread] of Object.entries(local.threads)) if (!send.hide.has(id)) metas.set(id, thread.meta);
     for (const [id, item] of Object.entries(previous)) if (!metas.has(id)) metas.set(id, item.meta);
     for (const record of merged) if (record.kind === 'thread-meta' && !send.hide.has(record.id)) { const parsed = parsePortableMeta(record.body, record.id); if (parsed) metas.set(record.id, parsed); }
-    const index: IndexPayload = { v: 1, threads: {} };
+    const index: IndexPayload = { v: 1, threads: {}, wrapId: wrapIdOf(wrap) };
     for (const [id, meta] of metas) {
       const list = known.get(id) ?? [];
       const before = previous[id];

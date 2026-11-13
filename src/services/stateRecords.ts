@@ -61,7 +61,12 @@ export interface LocalSnapshot {
 export interface HotPayload { v: 1; entries: Record<string, ThreadEntry[]>; records: StateRecord[] }
 
 /** What an index object holds: for each thread, its meta, how many entries the remote holds and which object files carry them. */
-export interface IndexPayload { v: 1; threads: Record<string, IndexThread> }
+export interface IndexPayload {
+  v: 1;
+  threads: Record<string, IndexThread>;
+  /** Which recovery wrap the computer that pushed used (a short hash of it). The sealed index vouches for it, so a computer can tell a newer code from a damaged header. */
+  wrapId?: string;
+}
 /**
  * One thread in the index: `files` are the hot objects that carry its entries, `cold` the sealed parts of the archive(s) that hold it whole (a computer
  * that does not have them lists the thread from here and fetches them only when it is opened), `coldEntries` how many entries those hold, and `turns`
