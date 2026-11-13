@@ -1,4 +1,5 @@
-// The small part of the GitHub REST API the online-home setup needs: who the token belongs to, create a repository under that account, look one up.
+// The small part of the GitHub REST API the online-home setup needs: who the token belongs to, create a repository under that account, look one up, and
+// change its default branch.
 // fetch is injected (tests pass a fake, nothing here reaches a network on its own). Requests go only to https://api.github.com; the token is sent only
 // as the Authorization header; bodies are JSON.stringify of validated values; an error carries a kind and one plain sentence, never the token and never
 // the response body. No vscode.
@@ -20,13 +21,29 @@ export class GitHubApiError extends Error {
   }
 }
 
-export interface GitHubRepo { owner: string; name: string; url: string; visibility: Visibility }
+export interface GitHubRepo {
+  owner: string;
+  name: string;
+  url: string;
+  visibility: Visibility;
+  /** The repository's default branch, only when GitHub named one that is a safe branch name. */
+  defaultBranch?: string;
+}
+
+/** A branch name that can be shown, compared and sent back to GitHub unchanged: letters, digits and . _ - /, nothing git itself would refuse. */
+export function isSafeBranchName(value: unknown): value is string {
+  if (typeof value !== 'string' || value.length === 0 || value.length > 255) return false;
+  if (!/^[A-Za-z0-9._/-]+$/.test(value)) return false;
+  if (value.includes('..') || value.includes('//')) return false;
+  if (value.startsWith('-') || value.startsWith('/')) return false;
+  return !(value.endsWith('/') || value.endsWith('.') || value.endsWith('.lock'));
+}
 
 function defaultFetch(): FetchLike {
   return (url, init) => globalThis.fetch(url, init);
 }
 
-async function call(token: string, method: 'GET' | 'POST', path: string, body: unknown, fetchFn: FetchLike | undefined): Promise<{ status: number; json: unknown }> {
+async function call(token: string, method: 'GET' | 'POST' | 'PATCH', path: string, body: unknown, fetchFn: FetchLike | undefined): Promise<{ status: number; json: unknown }> {
   const headers: Record<string, string> = {
     Accept: 'application/vnd.github+json',
     'X-GitHub-Api-Version': '2022-11-28',
@@ -59,7 +76,10 @@ function parseRepo(json: unknown): GitHubRepo {
   const cloneUrl = record?.clone_url;
   if (typeof owner !== 'string' || typeof name !== 'string' || typeof cloneUrl !== 'string' || typeof record?.private !== 'boolean') throw new GitHubApiError('other');
   if (!validateLogin(owner) || !validateRepoName(name) || cloneUrl !== expectedCloneUrl(owner, name)) throw new GitHubApiError('other');
-  return { owner, name, url: cloneUrl, visibility: record.private ? 'private' : 'public' };
+  const repo: GitHubRepo = { owner, name, url: cloneUrl, visibility: record.private ? 'private' : 'public' };
+  const defaultBranch = record.default_branch;
+  if (isSafeBranchName(defaultBranch)) repo.defaultBranch = defaultBranch;
+  return repo;
 }
 
 /** The account the token belongs to. */
@@ -89,4 +109,10 @@ export async function getRepo(token: string, owner: string, name: string, fetchF
     if (error instanceof GitHubApiError && error.kind === 'not-found') return undefined;
     throw error;
   }
+}
+
+/** Makes `branch` the repository's default branch with one PATCH. Owner, name and branch are checked before any request; any 2xx answer is done. */
+export async function setDefaultBranch(token: string, owner: string, name: string, branch: string, fetchFn?: FetchLike): Promise<void> {
+  if (!validateLogin(owner) || !validateRepoName(name) || !isSafeBranchName(branch)) throw new GitHubApiError('other');
+  await call(token, 'PATCH', `/repos/${owner}/${name}`, { default_branch: branch }, fetchFn);
 }

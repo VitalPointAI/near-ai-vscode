@@ -7,10 +7,10 @@ import path from 'node:path';
 import test from 'node:test';
 import { VISIBILITY_NOTES } from '../domain/state/onlineHome';
 import type { Visibility } from '../domain/state/onlineHome';
-import { GitHubApiError } from '../services/githubApi';
+import { GitHubApiError, getRepo, isSafeBranchName, setDefaultBranch } from '../services/githubApi';
 import type { FetchLike } from '../services/githubApi';
 import type { CodePushSummary } from '../services/codePushCheck';
-import { onlineHomeFlow, readProgress, systemGhCli } from '../services/onlineHome';
+import { moveDefaultBranch, onlineHomeFlow, readProgress, systemGhCli } from '../services/onlineHome';
 import type { CodePushOffer, GhCli, GhExec, GitHubAuth, OnlineHomeUi } from '../services/onlineHome';
 import { stateHomeFor } from '../services/stateHome';
 import type { GitRunner } from '../services/stateGit';
@@ -21,30 +21,43 @@ const FAKE_TOKEN = 'gho_FAKE_TOKEN_1234567890';
 
 interface ApiCall { url: string; method: string; headers: Record<string, string>; body?: string }
 
-/** A GitHub that exists only in memory: it creates repositories under 'me' and remembers them. */
-function fakeGitHub(options: { login?: string; existing?: string[] } = {}): { fetchFn: FetchLike; calls: ApiCall[]; repos: Set<string> } {
+/** A GitHub that exists only in memory: it creates repositories under 'me', remembers them and their default branch, and accepts a default-branch PATCH. */
+function fakeGitHub(options: { login?: string; existing?: string[]; defaultBranch?: string; events?: string[]; patch?: number | 'offline' } = {}): { fetchFn: FetchLike; calls: ApiCall[]; repos: Set<string>; defaultBranch: string | undefined } {
   const login = options.login ?? 'me';
   const repos = new Set<string>(options.existing ?? []);
   const calls: ApiCall[] = [];
   const reply = (status: number, body: unknown): { status: number; text(): Promise<string> } => ({ status, text: () => Promise.resolve(JSON.stringify(body)) });
+  const repoAnswer = (name: string, isPrivate: boolean): Record<string, unknown> => {
+    const answer: Record<string, unknown> = { name, owner: { login }, clone_url: `https://github.com/${login}/${name}.git`, private: isPrivate };
+    if (github.defaultBranch !== undefined) answer.default_branch = github.defaultBranch;
+    return answer;
+  };
   const fetchFn: FetchLike = (url, init) => {
     calls.push({ url, method: init.method, headers: init.headers, body: init.body });
+    options.events?.push(`api:${init.method} ${url}`);
     if (init.method === 'POST' && url === 'https://api.github.com/user/repos') {
       const body = JSON.parse(init.body ?? '{}') as { name: string; private: boolean };
       if ([...repos].some((existing) => existing.toLowerCase() === body.name.toLowerCase())) {
         return Promise.resolve(reply(422, { message: 'Repository creation failed.', errors: [{ resource: 'Repository', code: 'custom', field: 'name', message: 'name already exists on this account' }] }));
       }
       repos.add(body.name);
-      return Promise.resolve(reply(201, { name: body.name, owner: { login }, clone_url: `https://github.com/${login}/${body.name}.git`, private: body.private }));
+      return Promise.resolve(reply(201, repoAnswer(body.name, body.private)));
     }
     const match = /^https:\/\/api\.github\.com\/repos\/([^/]+)\/([^/]+)$/.exec(url);
+    const found = match ? [...repos].find((existing) => existing.toLowerCase() === (match[2] ?? '').toLowerCase()) : undefined;
     if (init.method === 'GET' && match) {
-      const found = [...repos].find((existing) => existing.toLowerCase() === (match[2] ?? '').toLowerCase());
-      return Promise.resolve(found ? reply(200, { name: found, owner: { login }, clone_url: `https://github.com/${login}/${found}.git`, private: true }) : reply(404, { message: 'Not Found' }));
+      return Promise.resolve(found ? reply(200, repoAnswer(found, true)) : reply(404, { message: 'Not Found' }));
+    }
+    if (init.method === 'PATCH' && match && found) {
+      if (options.patch === 'offline') return Promise.reject(new TypeError('fetch failed'));
+      if (options.patch !== undefined) return Promise.resolve(reply(options.patch, { message: 'refused' }));
+      github.defaultBranch = (JSON.parse(init.body ?? '{}') as { default_branch: string }).default_branch;
+      return Promise.resolve(reply(200, repoAnswer(found, true)));
     }
     return Promise.resolve(reply(404, { message: 'Not Found' }));
   };
-  return { fetchFn, calls, repos };
+  const github = { fetchFn, calls, repos, defaultBranch: options.defaultBranch };
+  return github;
 }
 
 class FakeUi implements OnlineHomeUi {
@@ -80,11 +93,20 @@ function fakeAuth(token: string | null = FAKE_TOKEN, available = true): GitHubAu
 }
 
 /** Records every git call (arguments only) and passes it on to the hermetic runner. */
-function spyGit(): { git: GitRunner; calls: string[][]; envs: Array<Record<string, string>> } {
+function spyGit(events?: string[]): { git: GitRunner; calls: string[][]; envs: Array<Record<string, string>> } {
   const inner = hermeticRunner();
   const calls: string[][] = [];
   const envs: Array<Record<string, string>> = [];
-  return { calls, envs, git: (args, options) => { calls.push(args); envs.push({ ...options?.env }); return inner(args, options); } };
+  return {
+    calls,
+    envs,
+    git: (args, options) => {
+      calls.push(args);
+      envs.push({ ...options?.env });
+      if (events && args.includes('push')) events.push(`git:${args.join(' ')}`);
+      return inner(args, options);
+    }
+  };
 }
 
 /** A gh that exists only in memory. It remembers what it was asked and refuses a name that is taken. */
@@ -524,4 +546,133 @@ test('accepting the offer pushes the code through the signed-in runner with the 
   const pushEnvs = spy.calls.map((args, index) => ({ args, env: spy.envs[index] })).filter((entry) => entry.args.includes('push'));
   assert.ok(pushEnvs.length >= 1 && pushEnvs.every((entry) => entry.env?.GIT_CONFIG_VALUE_0?.startsWith('AUTHORIZATION: basic ')));
   assert.equal(pushEnvs.some((entry) => entry.args.some((arg) => arg.includes(FAKE_TOKEN))), false);
+});
+
+const DEFAULT_STATE_BRANCH = 'near-ai/state';
+
+/** The folder's current branch: the one the person's code push put online. */
+function currentBranch(dir: string): string {
+  return fixtureGit(dir, ['symbolic-ref', '--short', 'HEAD']).trim();
+}
+
+function remoteRefs(bare: string): string[] {
+  return fixtureGit(bare, ['for-each-ref', '--format=%(refname)']).split('\n').filter((ref) => ref !== '').sort();
+}
+
+/** The bare remote holds the sync branch and, when the code was pushed, the person's branch, and nothing else. */
+function assertOnlyOurRefs(bare: string, dir: string, codePushed: boolean): void {
+  const expected = [STATE_REF, ...(codePushed ? [`refs/heads/${currentBranch(dir)}`] : [])].sort();
+  assert.deepEqual(remoteRefs(bare), expected);
+}
+
+/** No push the flow made forces, mirrors or deletes, and none names a refspec that starts with '+' or ':'. */
+function assertNoDangerousPush(calls: string[][]): void {
+  for (const args of calls.filter((entry) => entry.includes('push'))) {
+    for (const arg of args) {
+      assert.ok(!['--force', '--force-with-lease', '-f', '--mirror', '--delete'].includes(arg), `${args.join(' ')} forces or deletes`);
+      assert.ok(!/^[+:]/.test(arg), `${args.join(' ')} has a refspec starting with + or :`);
+    }
+  }
+}
+
+interface CodeRun { dir: string; bare: string; github: ReturnType<typeof fakeGitHub>; ui: FakeUi; spy: ReturnType<typeof spyGit>; events: string[]; result: Awaited<ReturnType<typeof onlineHomeFlow>>; token: string | undefined }
+
+/**
+ * One online-home run on a local bare remote: the sync branch is pushed with StateTransport (as the real turn-on flow does), then the code offer is
+ * answered as given. `route` picks how the token is obtained; 'url' pastes the address of the empty bare remote and involves no token at all.
+ */
+async function codeRun(name: string, options: {
+  route?: 'vscode' | 'gh' | 'url'; defaultBranch?: string; patch?: number | 'offline'; offer?: boolean; push?: boolean;
+  files?: Record<string, string>; hook?: string; remoteHeadAfterSync?: 'state' | 'person';
+}): Promise<CodeRun> {
+  const route = options.route ?? 'vscode';
+  const dir = await projectFolder(name);
+  const bare = bareRemote({ withMain: false });
+  for (const [file, text] of Object.entries(options.files ?? { 'app.ts': 'export {};\n' })) writeFileSync(path.join(dir, file), text);
+  if (options.hook !== undefined) {
+    const hook = path.join(bare, 'hooks', 'pre-receive');
+    writeFileSync(hook, options.hook, { mode: 0o755 });
+  }
+  const events: string[] = [];
+  const github = fakeGitHub({ defaultBranch: options.defaultBranch, events, patch: options.patch });
+  const ui = new FakeUi({ visibility: 'private', fallback: route === 'gh' ? 'gh' : 'url', urls: route === 'url' ? ['https://github.com/me/pasted.git'] : [] });
+  ui.codePush = new FakeCodeOffer(events, { offer: options.offer ?? true, push: options.push ?? true });
+  const spy = spyGit(events);
+  const paths = await mirrorPaths();
+  if (route === 'url') initWithMapping(dir, { 'https://github.com/me/pasted.git': bare });
+  const result = await onlineHomeFlow({
+    root: dir,
+    ui,
+    auth: fakeAuth(FAKE_TOKEN, route === 'vscode'),
+    gh: route === 'gh' ? fakeGh() : undefined,
+    fetchFn: github.fetchFn,
+    git: spy.git,
+    personGit: spy.git,
+    afterRemote: async (remote) => {
+      fixtureGit(dir, ['config', `url.${bare}.insteadOf`, remote.url]);
+      const transport = new StateTransport({ root: dir, remote: remote.name, mirrorDir: paths.mirrorDir, hooksDir: paths.hooksDir, git: remote.git });
+      const pushed = (await transport.push(await transport.writeCommit([{ name: 'manifest.json', data: '{}' }]))).ok;
+      // GitHub's own behaviour, stood in for on a local remote: a bare remote's HEAD is its default branch.
+      if (options.remoteHeadAfterSync === 'state') fixtureGit(bare, ['symbolic-ref', 'HEAD', STATE_REF]);
+      return pushed;
+    }
+  });
+  if (options.remoteHeadAfterSync === 'person') fixtureGit(bare, ['symbolic-ref', 'HEAD', `refs/heads/${currentBranch(dir)}`]);
+  return { dir, bare, github, ui, spy, events, result, token: route === 'url' ? undefined : FAKE_TOKEN };
+}
+
+const patches = (run: CodeRun): ApiCall[] => run.github.calls.filter((call) => call.method === 'PATCH');
+
+test('tracer: once the code is pushed on the VS Code route, the default branch moves from near-ai/state to the pushed branch with one PATCH', async () => {
+  const run = await codeRun('tracer-default', { defaultBranch: DEFAULT_STATE_BRANCH });
+  assert.equal(run.result.status, 'done');
+  const branch = currentBranch(run.dir);
+  const sent = patches(run);
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0]?.url, 'https://api.github.com/repos/me/tracer-default');
+  assert.equal(sent[0]?.body, JSON.stringify({ default_branch: branch }));
+  assert.equal(sent[0]?.headers.Authorization, `Bearer ${FAKE_TOKEN}`);
+  const patchAt = run.events.findIndex((event) => event.startsWith('api:PATCH'));
+  const pushAt = run.events.findIndex((event) => event.startsWith('git:') && event.includes(`refs/heads/${branch}:refs/heads/${branch}`));
+  assert.ok(pushAt >= 0 && patchAt > pushAt, `the PATCH comes after the push of the person's branch: ${run.events.join(' | ')}`);
+  assert.equal(run.github.defaultBranch, branch);
+  assertOnlyOurRefs(run.bare, run.dir, true);
+  assertNoDangerousPush(run.spy.calls);
+  assert.equal(run.ui.messages.filter((message) => /is now the repository's default branch/.test(message)).length, 1, run.ui.messages.join('|'));
+});
+
+test('GitHub answers carry the default branch only when it is a safe branch name, and setDefaultBranch sends one PATCH and checks everything before any request', async () => {
+  const github = fakeGitHub({ existing: ['demo'], defaultBranch: DEFAULT_STATE_BRANCH });
+  assert.equal((await getRepo(FAKE_TOKEN, 'me', 'demo', github.fetchFn))?.defaultBranch, DEFAULT_STATE_BRANCH);
+  for (const unsafe of ['', '-x', '/x', 'a..b', 'x/', 'x.lock', 'a b', 'a;b', 'a'.repeat(256), 'a\nb', 'a//b']) {
+    const odd = fakeGitHub({ existing: ['demo'], defaultBranch: unsafe });
+    const repo = await getRepo(FAKE_TOKEN, 'me', 'demo', odd.fetchFn);
+    assert.ok(repo, 'an unsafe default branch never fails the parse');
+    assert.equal(repo.defaultBranch, undefined, JSON.stringify(unsafe));
+    assert.equal(isSafeBranchName(unsafe), false);
+  }
+  assert.equal((await getRepo(FAKE_TOKEN, 'me', 'demo', fakeGitHub({ existing: ['demo'] }).fetchFn))?.defaultBranch, undefined);
+  for (const safe of ['main', 'feature/x-1', 'release_1.2', 'near-ai/state']) assert.equal(isSafeBranchName(safe), true);
+
+  await setDefaultBranch(FAKE_TOKEN, 'me', 'demo', 'develop', github.fetchFn);
+  const sent = github.calls.filter((call) => call.method === 'PATCH');
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0]?.body, '{"default_branch":"develop"}');
+  assert.equal(github.defaultBranch, 'develop');
+  const before = github.calls.length;
+  for (const [owner, name, branch] of [['-bad', 'demo', 'main'], ['me', 'bad name', 'main'], ['me', 'demo', '-main'], ['me', 'demo', 'a..b']]) {
+    await assert.rejects(setDefaultBranch(FAKE_TOKEN, owner as string, name as string, branch as string, github.fetchFn), (error: unknown) => error instanceof GitHubApiError && error.kind === 'other');
+  }
+  assert.equal(github.calls.length, before, 'nothing was sent for an unsafe owner, name or branch');
+});
+
+test('moveDefaultBranch moves only a default of near-ai/state', async () => {
+  for (const [current, expected, patchCount] of [[DEFAULT_STATE_BRANCH, 'moved', 1], ['develop', 'unchanged', 0], ['main', 'unchanged', 0], [undefined, 'unchanged', 0]] as const) {
+    const github = fakeGitHub({ existing: ['demo'], defaultBranch: current });
+    const moved = await moveDefaultBranch({ token: FAKE_TOKEN, owner: 'me', name: 'demo', to: 'main', fetchFn: github.fetchFn });
+    assert.equal(moved.result, expected, String(current));
+    assert.equal(github.calls.filter((call) => call.method === 'PATCH').length, patchCount);
+  }
+  const gone = await moveDefaultBranch({ token: FAKE_TOKEN, owner: 'me', name: 'missing', to: 'main', fetchFn: fakeGitHub().fetchFn });
+  assert.equal(gone.result, 'failed');
 });

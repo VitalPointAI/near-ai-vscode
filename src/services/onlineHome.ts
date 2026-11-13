@@ -10,17 +10,20 @@ import * as path from 'node:path';
 import { redactSecrets } from '../domain/redaction';
 import { GITHUB_MESSAGES, ONLINE_HOME_STEPS, VISIBILITY_NOTES, expectedCloneUrl, nextOnlineHomeStep, repoNameFromFolder, validateLogin, validateRepoName } from '../domain/state/onlineHome';
 import type { GitHubErrorKind, OnlineHomeMethod, OnlineHomeProgress, OnlineHomeRepo, OnlineHomeStep, Visibility } from '../domain/state/onlineHome';
-import { GitHubApiError, createUserRepo, getRepo } from './githubApi';
+import { GitHubApiError, createUserRepo, getRepo, isSafeBranchName, setDefaultBranch } from './githubApi';
 import type { FetchLike } from './githubApi';
 import { GitNotFoundError, addGitConfigEnv, gitText, redactGitMessage, runStateGit } from './stateGit';
 import type { GitRunner } from './stateGit';
 import { stateHomeFor, writeFileAtomic } from './stateHome';
 import type { ProjectStateHome } from './stateHome';
-import { classifyGitFailure, validateRemote } from './stateTransport';
+import { STATE_REF, classifyGitFailure, validateRemote } from './stateTransport';
 import { pushProjectCode, runPersonGit } from './codePushCheck';
 import type { CodePushUi } from './codePushCheck';
 
 const PROGRESS_FILE = 'online-home.json';
+
+/** The sync branch's own name, taken from the one place that defines its ref. It is the only default branch this flow ever moves away from. */
+const STATE_BRANCH = STATE_REF.replace(/^refs\/heads\//, '');
 
 /** VS Code's GitHub sign-in, or whatever stands in for it. The token is returned to the flow and kept in memory only. */
 export interface GitHubAuth {
@@ -228,6 +231,44 @@ function pastedAddressProblem(value: string): string | undefined {
   return undefined;
 }
 
+/** The sentence told when GitHub did not move the default branch. It speaks of the default branch, not of creating a repository. */
+function defaultBranchFailure(branch: string): string {
+  return `Your code is online, but GitHub did not change the default branch, so ${STATE_BRANCH} is still shown first. Choose ${branch} as the default branch in the repository's settings on GitHub.`;
+}
+
+/**
+ * After the person's code is pushed: when the repository's default branch is still the sync branch (GitHub makes the first branch pushed the default),
+ * make `to` the default with one PATCH. Nothing else can move: there is no parameter that names another branch to move away from, so a default the
+ * person chose is never changed. A refused, offline or unreadable answer is 'failed' with one plain sentence, never an exception.
+ */
+export async function moveDefaultBranch(input: { token: string; owner: string; name: string; to: string; fetchFn?: FetchLike }): Promise<{ result: 'moved' | 'unchanged' | 'failed'; message?: string }> {
+  try {
+    const repo = await getRepo(input.token, input.owner, input.name, input.fetchFn);
+    if (repo === undefined) return { result: 'failed', message: defaultBranchFailure(input.to) };
+    if (repo.defaultBranch !== STATE_BRANCH || input.to === STATE_BRANCH) return { result: 'unchanged' };
+    await setDefaultBranch(input.token, input.owner, input.name, input.to, input.fetchFn);
+    return { result: 'moved', message: `Your code is online, and ${input.to} is now the repository's default branch on GitHub.` };
+  } catch (error) {
+    if (error instanceof GitHubApiError) return { result: 'failed', message: defaultBranchFailure(input.to) };
+    throw error;
+  }
+}
+
+/**
+ * The sentence to tell after a pushed code result, or undefined when there is nothing to say. `git` is the runner the code push used, so the branch
+ * is read from the same repository.
+ */
+export async function defaultBranchAfterPush(input: { root: string; remote: string; git: GitRunner; token?: string; owner?: string; name?: string; fetchFn?: FetchLike }): Promise<string | undefined> {
+  const read = await input.git(['-C', input.root, 'symbolic-ref', '--short', '-q', 'HEAD']);
+  const branch = read.code === 0 ? gitText(read) : '';
+  if (!isSafeBranchName(branch)) return undefined;
+  if (input.token !== undefined && input.owner !== undefined && input.owner !== '' && input.name !== undefined && input.name !== '') {
+    const moved = await moveDefaultBranch({ token: input.token, owner: input.owner, name: input.name, to: branch, fetchFn: input.fetchFn });
+    return moved.result === 'unchanged' ? undefined : moved.message;
+  }
+  return undefined;
+}
+
 async function sameFolder(a: string, b: string): Promise<boolean> {
   const [first, second] = await Promise.all([realpath(a).catch(() => path.resolve(a)), realpath(b).catch(() => path.resolve(b))]);
   return first === second;
@@ -344,8 +385,14 @@ export async function onlineHomeFlow(input: OnlineHomeInput): Promise<OnlineHome
     if (ui.codePush && await ui.codePush.offer()) {
       say('Checking which files would go up…');
       const personGit = input.personGit ?? runPersonGit;
-      const pushed = await pushProjectCode(root, remote.name, token === undefined ? personGit : withGitHubAuth(personGit, token), { ui: ui.codePush, visibility: current.visibility });
+      const codeGit = token === undefined ? personGit : withGitHubAuth(personGit, token);
+      const pushed = await pushProjectCode(root, remote.name, codeGit, { ui: ui.codePush, visibility: current.visibility });
       tell(pushed.message);
+      // The default branch is looked at only after the person's own code reached the repository, never before and never for any other outcome.
+      if (pushed.status === 'pushed') {
+        const sentence = await defaultBranchAfterPush({ root, remote: remote.name, git: codeGit, token, owner: current.owner, name: current.name, fetchFn: input.fetchFn });
+        if (sentence !== undefined) tell(sentence);
+      }
     }
     await save('offer-code');
     await save('done');
