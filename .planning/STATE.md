@@ -5,9 +5,9 @@ milestone_name: Messaging relay — Teams and Signal
 current_phase: 27
 current_phase_name: Project state follows the project across interfaces and machines (0.4.20)
 status: planning
-stopped_at: Completed 27-04-PLAN.md
-last_updated: "2026-11-13T14:21:13.729Z"
-state_head: 81ef1f510795aa4aba1ea0b244846562ccd48720
+stopped_at: Completed 27-09-PLAN.md
+last_updated: "2026-11-13T14:32:04.084Z"
+state_head: 0d1a12f9c9ba633810e7fd7165c3b5056ecb65eb
 progress:
   total_phases: 9
   completed_phases: 0
@@ -76,8 +76,8 @@ None yet.
 
 ## Session
 
-**Last session:** 2026-11-13T14:21:13.713Z
-**Stopped at:** Completed 27-04-PLAN.md
+**Last session:** 2026-11-13T14:32:04.067Z
+**Stopped at:** Completed 27-09-PLAN.md
 **Resume file:** None
 
 ## Performance Metrics
@@ -88,6 +88,7 @@ None yet.
 | Phase 27 P01 | 8 min | 3 tasks | 7 files |
 | Phase 27 P03 | 11min | 3 tasks | 15 files |
 | Phase 27 P04 | 11 min | 3 tasks | 12 files |
+| Phase 27 P09 | 28min | 3 tasks | 11 files |
 
 ## Decisions
 
@@ -101,3 +102,5 @@ None yet.
 - [Phase 27]: 27-04: run liveness across editors by writer id plus 30 s heartbeat; the pid is trusted only for the same editor, any other editor's run is live while its marker is under 3 minutes old — A pid from another editor lives in another pid namespace (code-server container); trusting it caused double spend
 - [Phase 27]: 27-04: only this editor's cut-off markers reach autoResumeChoice; another editor's cut-off run keeps its Resume button (SYNC-07); markers written to the old per-extension storage by 0.4.19 are no longer read — Spending money on a foreign run always takes the person's click (D-03)
 - [Phase 27]: 27-04: checkpoints are format 2 (root-relative inside the project, absolute and marked outside), a relative path that is absolute or climbs out is refused on load; sub-agent worktrees stay in the editor's own storage — Checkpoints must be portable between editors and machines without a revert ever writing outside the project (T-27-17)
+- [Phase 27]: 27-09: import offer lists only settings with no project choice, so an existing project choice is never replaced by the import
+- [Phase 27]: 27-09: applying with no folder open and no explicit workspace value is refused rather than writing user settings (D-06)
