@@ -17,6 +17,7 @@ import type { GitRunner } from './stateGit';
 import { stateHomeFor, writeFileAtomic } from './stateHome';
 import type { ProjectStateHome } from './stateHome';
 import { classifyGitFailure, validateRemote } from './stateTransport';
+import type { CodePushUi } from './codePushCheck';
 
 const PROGRESS_FILE = 'online-home.json';
 
@@ -41,8 +42,15 @@ export interface OnlineHomeUi {
   pickFallback(choices: { gh: boolean }): Promise<'gh' | 'url' | undefined>;
   /** The address of an existing, empty repository. `problem` is the reason the last one did not work. */
   askRepoUrl(problem?: string): Promise<string | undefined>;
+  /** The separate offer to put the person's own code online. Without it the flow never offers. */
+  codePush?: CodePushOffer;
   /** Called when the flow is over, so a progress display can close. */
   done?(): void;
+}
+
+/** The code-push questions plus the first one: whether to look at pushing the code at all. Declining leaves sync working. */
+export interface CodePushOffer extends CodePushUi {
+  offer(): Promise<boolean>;
 }
 
 /** The GitHub command line, when it is installed and signed in. `token` is the one `gh auth token` prints, held in memory only. */
@@ -69,6 +77,8 @@ export interface OnlineHomeInput {
   gh?: GhCli;
   /** The runner for every git call except the person's own code push. Defaults to the sync runner. */
   git?: GitRunner;
+  /** The runner for the person's own code push (their hooks and git settings apply). Defaults to a plain git runner. */
+  personGit?: GitRunner;
   /** The plan-15 turn-on flow: shows the recovery code and pushes the sync branch. Return false when it did not finish. */
   afterRemote: (remote: OnlineHomeRemote) => Promise<boolean | void>;
   /** Called after each step's progress is saved. Tests use it to stop the setup part way. */

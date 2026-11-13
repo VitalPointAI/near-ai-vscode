@@ -1,7 +1,7 @@
 // "Give this project an online home" (D-14): every test uses fakes (sign-in, the GitHub API, gh) and local bare repositories reached through a
 // url.<path>.insteadOf rule, so nothing contacts GitHub, creates a real repository, runs the real gh or uses a real token.
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
@@ -9,8 +9,9 @@ import { VISIBILITY_NOTES } from '../domain/state/onlineHome';
 import type { Visibility } from '../domain/state/onlineHome';
 import { GitHubApiError } from '../services/githubApi';
 import type { FetchLike } from '../services/githubApi';
+import type { CodePushSummary } from '../services/codePushCheck';
 import { onlineHomeFlow, readProgress, systemGhCli } from '../services/onlineHome';
-import type { GhCli, GhExec, GitHubAuth, OnlineHomeUi } from '../services/onlineHome';
+import type { CodePushOffer, GhCli, GhExec, GitHubAuth, OnlineHomeUi } from '../services/onlineHome';
 import { stateHomeFor } from '../services/stateHome';
 import type { GitRunner } from '../services/stateGit';
 import { STATE_REF, StateTransport } from '../services/stateTransport';
@@ -47,6 +48,7 @@ function fakeGitHub(options: { login?: string; existing?: string[] } = {}): { fe
 }
 
 class FakeUi implements OnlineHomeUi {
+  public codePush?: CodePushOffer;
   public readonly messages: string[] = [];
   public readonly steps: string[] = [];
   public readonly visibilityNotes: Array<Readonly<Record<Visibility, string>>> = [];
@@ -463,4 +465,61 @@ test('a folder inside another repository is not given a repository of its own, a
   assert.equal(done.status, 'done');
   assert.deepEqual(done.remote, { name: 'near-ai-home', url: 'https://github.com/me/named.git' });
   assert.equal(fixtureGit(dir, ['config', '--get', 'remote.origin.url']).trim(), 'https://example.com/other/named.git');
+});
+
+class FakeCodeOffer implements CodePushOffer {
+  public readonly events: string[];
+  public readonly summaries: CodePushSummary[] = [];
+  public constructor(events: string[], private readonly answers: { offer: boolean; push?: boolean }) { this.events = events; }
+  public offer(): Promise<boolean> { this.events.push('offer'); return Promise.resolve(this.answers.offer); }
+  public message(): void { /* not needed */ }
+  public confirmPush(summary: CodePushSummary): Promise<boolean> { this.events.push('confirm-push'); this.summaries.push(summary); return Promise.resolve(this.answers.push ?? true); }
+  public confirmIgnore(): Promise<boolean> { return Promise.resolve(false); }
+  public askIdentity(): Promise<{ name: string; email: string } | undefined> { return Promise.resolve({ name: 'Pat', email: 'pat@example.test' }); }
+}
+
+test('the code push is a separate question asked only after the sync branch step, and declining it leaves sync as it was', async () => {
+  const dir = await projectFolder('offer');
+  const events: string[] = [];
+  const ui = new FakeUi();
+  ui.codePush = new FakeCodeOffer(events, { offer: false });
+  const spy = spyGit();
+  const result = await onlineHomeFlow({ root: dir, ui, auth: fakeAuth(), fetchFn: fakeGitHub().fetchFn, git: spy.git, personGit: spy.git, afterRemote: () => { events.push('sync'); return Promise.resolve(true); } });
+  assert.equal(result.status, 'done');
+  assert.deepEqual(events, ['sync', 'offer']);
+  assert.equal(fixtureGit(dir, ['rev-list', '--all', '--count']).trim(), '0', 'no commit was made on the person\'s account of the code');
+  assert.equal(spy.calls.some((args) => args.includes('push')), false);
+
+  // When the sync step does not finish, the code is not even offered.
+  const stalled = await projectFolder('stalled');
+  const stalledEvents: string[] = [];
+  const stalledUi = new FakeUi();
+  stalledUi.codePush = new FakeCodeOffer(stalledEvents, { offer: true });
+  const incomplete = await onlineHomeFlow({ root: stalled, ui: stalledUi, auth: fakeAuth(), fetchFn: fakeGitHub().fetchFn, git: spyGit().git, afterRemote: () => Promise.resolve(false) });
+  assert.equal(incomplete.status, 'sync-incomplete');
+  assert.deepEqual(stalledEvents, []);
+});
+
+test('accepting the offer pushes the code through the signed-in runner with the repository\'s visibility in the summary', async () => {
+  const dir = await projectFolder('code-yes');
+  const bare = bareRemote({ withMain: false });
+  writeFileSync(path.join(dir, 'app.ts'), 'export {};\n');
+  const events: string[] = [];
+  const offer = new FakeCodeOffer(events, { offer: true, push: true });
+  const ui = new FakeUi({ visibility: 'public' });
+  ui.codePush = offer;
+  const spy = spyGit();
+  const result = await onlineHomeFlow({
+    root: dir, ui, auth: fakeAuth(), fetchFn: fakeGitHub().fetchFn, git: spy.git, personGit: spy.git,
+    afterRemote: (remote) => { fixtureGit(dir, ['config', `url.${bare}.insteadOf`, remote.url]); events.push('sync'); return Promise.resolve(true); }
+  });
+  assert.equal(result.status, 'done');
+  assert.deepEqual(events, ['sync', 'offer', 'confirm-push']);
+  assert.equal(offer.summaries[0]?.visibility, 'public');
+  assert.equal(offer.summaries[0]?.remote, 'origin');
+  assert.ok(offer.summaries[0]?.files.includes('app.ts'));
+  assert.ok(fixtureGit(bare, ['for-each-ref', '--format=%(refname)']).split('\n').some((ref) => ref.startsWith('refs/heads/')));
+  const pushEnvs = spy.calls.map((args, index) => ({ args, env: spy.envs[index] })).filter((entry) => entry.args.includes('push'));
+  assert.ok(pushEnvs.length >= 1 && pushEnvs.every((entry) => entry.env?.GIT_CONFIG_VALUE_0?.startsWith('AUTHORIZATION: basic ')));
+  assert.equal(pushEnvs.some((entry) => entry.args.some((arg) => arg.includes(FAKE_TOKEN))), false);
 });
