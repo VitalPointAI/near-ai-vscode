@@ -6,18 +6,26 @@ import { ActivityStore } from './activityStore';
 import { AuthService } from './auth';
 import { ConversationTurn, defaultChatModel, modelPrivacyLabel, providerErrorMessage } from './chatBridge';
 import { OutboundGuard } from './outboundGuard';
-import { spendAccountOf } from './agentSession';
+
 import { nanoToUsd, withSpendTag } from './spendLedger';
 import { activeProvider, clientFor } from './providerCache';
 import { isEmergencyStopped } from './emergencyStop';
 import { UsageMetadata } from './nearAiClient';
-import { readSettings } from './settings';
+import { readAgentLimits, readSettings } from './settings';
+import { newConversationId, spendAccountOf } from './agentSession';
+import { PARTICIPANT_ID, recordParticipantTurn, resolveParticipantThread, ResponseRecorder, type ResponseStreamLike } from './participantRecorder';
+import { editorWriter } from './stateHome';
+import { threadStoreFor } from './threadStore';
 
-export const PARTICIPANT_ID = 'nearAi';
+export { PARTICIPANT_ID };
 
 interface ParticipantResult extends vscode.ChatResult {
-  metadata: { command?: string };
+  /** `threadId` is the thread of the project's state home this turn was recorded in; the next request reads it back from the history (D-07). */
+  metadata: { command?: string; threadId?: string };
 }
+
+export const OPEN_THREAD_COMMAND = 'nearAi.openThread';
+export const OPEN_THREAD_TITLE = 'Open this chat in the NEAR AI panel';
 
 /**
  * `@nearAi` in VS Code's built-in Chat view. Plain prompts stream from NEAR AI Cloud;
@@ -25,19 +33,35 @@ interface ParticipantResult extends vscode.ChatResult {
  */
 export function registerChatParticipant(context: vscode.ExtensionContext, auth: AuthService, runInSidebar: (command: string, args: string) => Promise<void>): void {
   if (typeof vscode.chat?.createChatParticipant !== 'function') return;
-  const participant = vscode.chat.createChatParticipant(PARTICIPANT_ID, async (request, chatContext, response, token): Promise<ParticipantResult> => {
+  const participant = vscode.chat.createChatParticipant(PARTICIPANT_ID, async (request, chatContext, stream, token): Promise<ParticipantResult> => {
     const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-    if (request.command && GSD_COMMANDS.some((definition) => definition.command === request.command)) {
+    // D-07: every turn is kept in the project's state home, whatever the 20-turn model window shows. Recording is best effort and never stops a reply.
+    const store = root && readAgentLimits().saveTranscripts
+      ? threadStoreFor(root, context.secrets, editorWriter(context.globalState), () => vscode.workspace.getConfiguration('nearAi').get<boolean>('sync.keepKeyInProject', true))
+      : undefined;
+    const thread = store ? await resolveParticipantThread(chatContext.history, store).catch(() => ({ threadId: newConversationId() })) : undefined;
+    const response = new ResponseRecorder(stream);
+    let model = '';
+    const isCommand = Boolean(request.command && GSD_COMMANDS.some((definition) => definition.command === request.command));
+    if (isCommand) {
       // Workflows need approvals, questions, and diffs, which the NEAR AI view provides.
-      if (isEmergencyStopped()) { response.markdown('Emergency stop is on. Run **NEAR AI: Resume** first.'); return { metadata: { command: request.command } }; }
-      if (!root) { response.markdown('Open a folder first. Open-GSD workflows run inside a workspace.'); return { metadata: { command: request.command } }; }
-      await runInSidebar(`gsd-${request.command}`, request.prompt.trim());
-      response.markdown(`Started \`/gsd-${request.command}${request.prompt.trim() ? ` ${request.prompt.trim()}` : ''}\` in the **NEAR AI** view, where you can approve changes and answer its questions.`);
-      response.button({ command: 'nearAi.openChat', title: 'Show NEAR AI' });
-      return { metadata: { command: request.command } };
+      if (isEmergencyStopped()) response.markdown('Emergency stop is on. Run **NEAR AI: Resume** first.');
+      else if (!root) response.markdown('Open a folder first. Open-GSD workflows run inside a workspace.');
+      else {
+        await runInSidebar(`gsd-${request.command}`, request.prompt.trim());
+        response.markdown(`Started \`/gsd-${request.command}${request.prompt.trim() ? ` ${request.prompt.trim()}` : ''}\` in the **NEAR AI** view, where you can approve changes and answer its questions.`);
+        response.button({ command: 'nearAi.openChat', title: 'Show NEAR AI' });
+      }
+    } else {
+      model = await answerWithNearAi(auth, root, request.prompt, historyFromChatContext(chatContext.history), response, token);
     }
-    await answerWithNearAi(auth, root, request.prompt, historyFromChatContext(chatContext.history), response, token);
-    return { metadata: {} };
+    if (store && thread) {
+      try {
+        await recordParticipantTurn(store, { threadId: thread.threadId, writer: editorWriter(context.globalState), prompt: request.prompt, reply: response.text(), model });
+        stream.button({ command: OPEN_THREAD_COMMAND, arguments: [thread.threadId], title: OPEN_THREAD_TITLE });
+      } catch { /* the chat itself already answered; a thread that could not be written is simply not offered */ }
+    }
+    return { metadata: { ...(isCommand ? { command: request.command } : {}), ...(thread ? { threadId: thread.threadId } : {}) } };
   });
   participant.iconPath = vscode.Uri.joinPath(context.extensionUri, 'media', 'near-ai-vscode-icon.png');
   participant.followupProvider = {
@@ -52,10 +76,10 @@ export function registerChatParticipant(context: vscode.ExtensionContext, auth: 
   context.subscriptions.push(participant);
 }
 
-async function answerWithNearAi(auth: AuthService, root: string | undefined, prompt: string, history: ConversationTurn[], response: vscode.ChatResponseStream, token: vscode.CancellationToken): Promise<void> {
+async function answerWithNearAi(auth: AuthService, root: string | undefined, prompt: string, history: ConversationTurn[], response: ResponseStreamLike, token: vscode.CancellationToken): Promise<string> {
   if (!root) {
     response.markdown('Open a folder first. NEAR AI keys and profiles are scoped to a project.');
-    return;
+    return '';
   }
   let active;
   try {
@@ -63,18 +87,18 @@ async function answerWithNearAi(auth: AuthService, root: string | undefined, pro
   } catch (error) {
     response.markdown(providerErrorMessage(error));
     response.button({ command: 'nearAi.selectProfile', title: 'Review profile' });
-    return;
+    return '';
   }
   if (!active) {
     response.markdown('This project has no validated NEAR AI profile yet. Set one up to start chatting.');
     response.button({ command: 'nearAi.setup', title: 'Set up NEAR AI' });
-    return;
+    return '';
   }
   const settings = readSettings();
   const model = defaultChatModel(active.models, settings.defaultModel);
   if (!model) {
     response.markdown('NEAR AI returned no chat models for this key.');
-    return;
+    return '';
   }
   const modelInfo = active.models.find((candidate) => candidate.id === model);
   const activity = new ActivityStore(root);
@@ -83,7 +107,7 @@ async function answerWithNearAi(auth: AuthService, root: string | undefined, pro
   const verdict = new OutboundGuard(settings).check({ model, modelInfo, text: prompt }, account?.spentTodayUsd().usd ?? 0);
   if (verdict.outcome !== 'allow') {
     response.markdown(`${verdict.reason}\n\nNothing was sent.${verdict.overrideToken ? ' To send it anyway, use the NEAR AI sidebar, which can send a flagged message once.' : ''}`);
-    return;
+    return '';
   }
   const session = await activity.start({ project: path.basename(root), attribution: hostAttribution(active.profiles.projectScopeId, path.basename(root), active.profile.profileId, active.profile.organization), model, summary: 'Chat view session started.' });
   const abort = new AbortController();
@@ -126,6 +150,7 @@ async function answerWithNearAi(auth: AuthService, root: string | undefined, pro
   } finally {
     cancel.dispose();
   }
+  return model;
 }
 
 /** Rebuilds the conversation from this participant's earlier turns in the same chat. */
