@@ -38,6 +38,7 @@ import { NearAiPanelViewProvider } from './services/panelView';
 import { deriveProfileId } from './domain/auth';
 import { isSecureEndpoint } from './domain/config';
 import { registerChatParticipant } from './services/chatParticipant';
+import { openThreadInPanel } from './services/participantRecorder';
 import { registerWorkspaceCommands } from './services/workspaceCommands';
 import { initEmergencyStop, isEmergencyStopped, setEmergencyStop } from './services/emergencyStop';
 import { clearProviderCache } from './services/providerCache';
@@ -160,6 +161,11 @@ export function activate(context: vscode.ExtensionContext): NearAiTestApi | unde
       stopped: () => readSettings().actionPolicy.emergencyStop
     }))),
     vscode.commands.registerCommand('nearAi.showHistory', () => showHistory(context, sidebar)),
+    // The button under every @near reply (D-07). It is a command the button calls, not a Command Palette entry: it needs a thread id.
+    vscode.commands.registerCommand('nearAi.openThread', (threadId?: unknown) => openThreadInPanel(threadId, {
+      focus: () => vscode.commands.executeCommand(`${NearAiPanelViewProvider.viewId}.focus`),
+      resume: (id) => sidebar.request({ type: 'resume-conversation', id })
+    }, (text) => { void vscode.window.showWarningMessage(text); })),
     vscode.commands.registerCommand('nearAi.gsdCommand', async () => {
       const selected = await chooseGsdCommand();
       if (selected) await sidebar.request({ type: 'open-command', command: `gsd-${selected.command}` });

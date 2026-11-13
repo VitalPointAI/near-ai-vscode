@@ -1,9 +1,13 @@
 import assert from 'node:assert/strict';
-import { stat } from 'node:fs/promises';
+import { readFile, rm, stat } from 'node:fs/promises';
+import path from 'node:path';
 import test from 'node:test';
 import type { ThreadEntry } from '../domain/state/threadEntries';
-import { entriesToMessages } from '../domain/state/threadView';
-import { isThreadId, PARTICIPANT_STOPPED_NOTICE, recordParticipantTurn, resolveParticipantThread, ResponseRecorder, seedEntries, type ParticipantTurnLike, type ResponseStreamLike } from '../services/participantRecorder';
+import { DEFAULT_RULES } from '../agent/permissions';
+import { entriesToMessages, type ViewItem } from '../domain/state/threadView';
+import { AgentConversation } from '../services/agentSession';
+import type { AgentMessage, CompletionEvent } from '../services/nearAiClient';
+import { isThreadId, openThreadInPanel, PARTICIPANT_STOPPED_NOTICE, recordParticipantTurn, resolveParticipantThread, ResponseRecorder, seedEntries, type ParticipantTurnLike, type ResponseStreamLike } from '../services/participantRecorder';
 import { stateHomeFor } from '../services/stateHome';
 import { stateKeysFor } from '../services/stateKeys';
 import { ThreadStore } from '../services/threadStore';
@@ -268,4 +272,110 @@ test('with nearAi.agent.saveTranscripts off nothing is recorded, no thread id is
   } finally {
     delete config['agent.saveTranscripts'];
   }
+});
+
+// The plain-prompt path, with a stand-in provider: what the person reads is what is stored, and how the reply ended decides whether a notice follows.
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const providerCache = require('../services/providerCache') as { activeProvider: unknown; clientFor: unknown };
+function provideStream(events: (() => AsyncGenerator<unknown>) | undefined): void {
+  providerCache.activeProvider = async () => events ? { models: [{ id: 'fake/model', privacyBoundary: 'local' }], provider: { client: {}, provider: 'local' }, profiles: { projectScopeId: 'project-test' }, profile: { profileId: 'p', organization: '' } } : undefined;
+  providerCache.clientFor = () => ({ client: { streamChatEvents: events }, local: true });
+}
+const done = { type: 'done', metadata: { inputTokens: 10, outputTokens: 5, estimatedCostUsd: 0.0001, verificationStatus: 'unknown', latencyMs: 3 } };
+
+test('a plain reply is stored exactly as streamed with its footer, a cancelled one with a notice, and a failed one with the error text and a notice', async () => {
+  const root = await tempProject();
+  provideStream(async function* () { yield { type: 'text', text: 'Hello' }; yield { type: 'text', text: ' there' }; yield done; });
+  const completed = await ask(root, { prompt: 'Greet me' });
+  const store = storeFor(root, sharedSecrets.get(root));
+  const threadId = completed.result.metadata.threadId!;
+  let main = (await store.lines(threadId)).main;
+  assert.deepEqual(main.map((entry) => entry.role), ['user', 'assistant']);
+  assert.equal(textOf(main[1]), completed.markdown, 'what is stored is what the person read');
+  assert.match(textOf(main[1]), /^Hello there\n\n\*fake\/model · .*15 tokens/);
+  assert.equal(completed.buttons.filter((button) => button.command === 'nearAi.openThread').length, 1);
+  assert.equal((await store.meta(threadId))?.model, 'fake/model');
+
+  // The next request carries the id and the cancelled reply keeps what was streamed.
+  const history = [...exchange('Greet me', completed.markdown, threadId)];
+  provideStream(async function* () { yield { type: 'text', text: 'Once upon' }; yield { type: 'status', status: 'cancelled' }; });
+  const cancelled = await ask(root, { prompt: 'Tell a story' }, history, true);
+  assert.equal(cancelled.result.metadata.threadId, threadId);
+  main = (await store.lines(threadId)).main;
+  assert.deepEqual(main.slice(2).map((entry) => entry.role), ['user', 'assistant', 'notice']);
+  assert.equal(textOf(main[3]), 'Once upon');
+  assert.equal(textOf(main[4]), PARTICIPANT_STOPPED_NOTICE);
+
+  provideStream(async function* () { yield { type: 'text', text: 'Partial' }; throw new Error('connection reset'); });
+  const failed = await ask(root, { prompt: 'Again' }, history);
+  main = (await store.lines(threadId)).main;
+  assert.equal(main.at(-1)?.role, 'notice');
+  assert.equal(textOf(main.at(-1)!), PARTICIPANT_STOPPED_NOTICE);
+  assert.equal(textOf(main.at(-2)!), failed.markdown, 'the partial text and the error shown to the person are what is kept');
+});
+
+test('a prompt that never reached the model is not stored, and the session still gets its thread id', async () => {
+  const root = await tempProject();
+  provideStream(undefined);
+  const { result, markdown } = await ask(root, { prompt: 'secret prompt text' });
+  assert.match(markdown, /no validated NEAR AI profile/);
+  const threadId = result.metadata.threadId!;
+  assert.match(threadId, /^conv-/);
+  const store = storeFor(root, sharedSecrets.get(root));
+  assert.deepEqual((await store.entries(threadId)), [], 'no exchange was kept');
+
+  // A session from before this version still gets its one-time seed, even when this request itself was not sent.
+  const older = await tempProject();
+  const sessionBefore = [...exchange('Old question', 'Old answer')];
+  const second = await ask(older, { prompt: 'New question' }, sessionBefore);
+  const seeded = (await storeFor(older, sharedSecrets.get(older)).lines(second.result.metadata.threadId!)).main;
+  assert.deepEqual(seeded.map(textOf), ['Old question', 'Old answer']);
+});
+
+test('a Chat view thread reopens in the NEAR AI panel of another editor with its whole history, and the next message continues it', async () => {
+  const root = await tempProject();
+  try {
+    const store = storeFor(root);
+    const { threadId } = await resolveParticipantThread([], store);
+    await recordParticipantTurn(store, { threadId, writer: 'edA.1', prompt: 'First question', reply: 'First answer', model: 'm' });
+    await recordParticipantTurn(store, { threadId, writer: 'edA.1', prompt: 'Second question', reply: 'Half an ans', model: 'm', stopped: true });
+    await recordParticipantTurn(store, { threadId, writer: 'edA.1', prompt: '', reply: 'Started `/gsd-progress` in the **NEAR AI** view.', model: 'm', command: 'progress' });
+
+    // Another editor on the same host, with nothing of its own but the project folder.
+    const seen: AgentMessage[][] = [];
+    const client = {
+      async *streamCompletion(_model: string, sent: AgentMessage[]): AsyncGenerator<CompletionEvent> {
+        seen.push(structuredClone(sent));
+        yield { type: 'done', message: { role: 'assistant', content: 'Carrying on.' }, finishReason: 'stop', usage: { verificationStatus: 'unknown', latencyMs: 1 } } as CompletionEvent;
+      },
+      async actualCostsUsd() { return undefined; }
+    };
+    const reopened = new AgentConversation(root, () => undefined, stateHomeFor(root).paths.checkpoints, undefined, storeFor(root, new MemorySecrets(), 'edB.1'));
+    const restored = await reopened.restore(threadId);
+    assert.ok(restored && !Array.isArray(restored), 'the thread opens');
+    const items = (restored as { items: ViewItem[] }).items;
+    assert.deepEqual(items.map((item) => item.kind), ['user', 'assistant', 'user', 'assistant', 'notice', 'notice'], 'every prompt, every reply and the notices, in order');
+    assert.equal((items[1] as { text: string }).text, 'First answer');
+
+    await reopened.send({ text: 'Third question', client: client as never, model: 'm', privacy: 'Private', policy: { mode: 'approve-risky', emergencyStop: false }, rules: DEFAULT_RULES });
+    assert.equal(seen[0][0].role, 'system', 'a thread that began in the Chat view still gets the panel\'s system prompt, first');
+    assert.deepEqual(seen[0].slice(1).map((message) => `${message.role}:${message.content}`), ['user:First question', 'assistant:First answer', 'user:Second question', 'assistant:Half an ans', 'user:Third question'], 'the notices are not sent to the model');
+    const main = (await storeFor(root).lines(threadId)).main;
+    assert.deepEqual(main.slice(-2).map(textOf), ['Third question', 'Carrying on.'], 'the panel continues the same thread');
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('nearAi.openThread shows the panel and reopens the thread, and refuses an id that is not a thread id', async () => {
+  const calls: string[] = [];
+  const warnings: string[] = [];
+  const panel = { focus: async () => { calls.push('focus'); }, resume: async (id: string) => { calls.push(`resume ${id}`); } };
+  assert.equal(await openThreadInPanel('conv-abc123-def', panel, (text) => warnings.push(text)), true);
+  assert.deepEqual(calls, ['focus', 'resume conv-abc123-def']);
+  for (const bad of ['../../etc/passwd', 'conv-', '', 7, undefined, { id: 'conv-abc123' }]) assert.equal(await openThreadInPanel(bad, panel, (text) => warnings.push(text)), false);
+  assert.equal(calls.length, 2, 'a bad id reaches neither the view nor the panel');
+  assert.equal(warnings.length, 6);
+  const extension = (await readFile(path.join(__dirname, '..', '..', 'src', 'extension.ts'), 'utf8'));
+  assert.match(extension, /registerCommand\('nearAi\.openThread'/, 'the command is registered');
+  const manifest = JSON.parse(await readFile(path.join(__dirname, '..', '..', 'package.json'), 'utf8')) as { contributes: { commands: Array<{ command: string }> } };
+  assert.equal(manifest.contributes.commands.some((entry) => entry.command === 'nearAi.openThread'), false, 'it is not in the Command Palette');
 });

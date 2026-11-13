@@ -13,7 +13,7 @@ import { isEmergencyStopped } from './emergencyStop';
 import { UsageMetadata } from './nearAiClient';
 import { readAgentLimits, readSettings } from './settings';
 import { newConversationId, spendAccountOf } from './agentSession';
-import { PARTICIPANT_ID, recordParticipantTurn, resolveParticipantThread, ResponseRecorder, type ResponseStreamLike } from './participantRecorder';
+import { PARTICIPANT_ID, recordParticipantTurn, recordSeed, resolveParticipantThread, ResponseRecorder, type ReplyOutcome, type ResolvedThread, type ResponseStreamLike } from './participantRecorder';
 import { editorWriter } from './stateHome';
 import { threadStoreFor } from './threadStore';
 
@@ -39,9 +39,10 @@ export function registerChatParticipant(context: vscode.ExtensionContext, auth: 
     const store = root && readAgentLimits().saveTranscripts
       ? threadStoreFor(root, context.secrets, editorWriter(context.globalState), () => vscode.workspace.getConfiguration('nearAi').get<boolean>('sync.keepKeyInProject', true))
       : undefined;
-    const thread = store ? await resolveParticipantThread(chatContext.history, store).catch(() => ({ threadId: newConversationId() })) : undefined;
+    const thread: ResolvedThread | undefined = store ? await resolveParticipantThread(chatContext.history, store).catch(() => ({ threadId: newConversationId() })) : undefined;
     const response = new ResponseRecorder(stream);
     let model = '';
+    let outcome: ReplyOutcome = 'completed';
     const isCommand = Boolean(request.command && GSD_COMMANDS.some((definition) => definition.command === request.command));
     if (isCommand) {
       // Workflows need approvals, questions, and diffs, which the NEAR AI view provides.
@@ -53,12 +54,22 @@ export function registerChatParticipant(context: vscode.ExtensionContext, auth: 
         response.button({ command: 'nearAi.openChat', title: 'Show NEAR AI' });
       }
     } else {
-      model = await answerWithNearAi(auth, root, request.prompt, historyFromChatContext(chatContext.history), response, token);
+      ({ model, outcome } = await answerWithNearAi(auth, root, request.prompt, historyFromChatContext(chatContext.history), response, token));
     }
     if (store && thread) {
       try {
-        await recordParticipantTurn(store, { threadId: thread.threadId, writer: editorWriter(context.globalState), prompt: request.prompt, reply: response.text(), model });
-        stream.button({ command: OPEN_THREAD_COMMAND, arguments: [thread.threadId], title: OPEN_THREAD_TITLE });
+        const writer = editorWriter(context.globalState);
+        if (outcome === 'not-sent') {
+          // Nothing reached the model (no folder, no profile, the outbound guard held the prompt back), so there is no exchange to keep, and a prompt the
+          // guard held back is never written to disk. Turns the session had before this version still need their one-time seed.
+          if (thread.seed?.length) await recordSeed(store, { threadId: thread.threadId, writer, model, seed: thread.seed });
+        } else {
+          await recordParticipantTurn(store, {
+            threadId: thread.threadId, writer, prompt: request.prompt, reply: response.text(), model,
+            ...(isCommand ? { command: request.command } : {}), ...(outcome === 'cancelled' || outcome === 'failed' ? { stopped: true } : {}), ...(thread.seed ? { seed: thread.seed } : {})
+          });
+          stream.button({ command: OPEN_THREAD_COMMAND, arguments: [thread.threadId], title: OPEN_THREAD_TITLE });
+        }
       } catch { /* the chat itself already answered; a thread that could not be written is simply not offered */ }
     }
     return { metadata: { ...(isCommand ? { command: request.command } : {}), ...(thread ? { threadId: thread.threadId } : {}) } };
@@ -76,10 +87,11 @@ export function registerChatParticipant(context: vscode.ExtensionContext, auth: 
   context.subscriptions.push(participant);
 }
 
-async function answerWithNearAi(auth: AuthService, root: string | undefined, prompt: string, history: ConversationTurn[], response: ResponseStreamLike, token: vscode.CancellationToken): Promise<string> {
+async function answerWithNearAi(auth: AuthService, root: string | undefined, prompt: string, history: ConversationTurn[], response: ResponseStreamLike, token: vscode.CancellationToken): Promise<{ model: string; outcome: ReplyOutcome }> {
+  const notSent = { model: '', outcome: 'not-sent' as const };
   if (!root) {
     response.markdown('Open a folder first. NEAR AI keys and profiles are scoped to a project.');
-    return '';
+    return notSent;
   }
   let active;
   try {
@@ -87,18 +99,18 @@ async function answerWithNearAi(auth: AuthService, root: string | undefined, pro
   } catch (error) {
     response.markdown(providerErrorMessage(error));
     response.button({ command: 'nearAi.selectProfile', title: 'Review profile' });
-    return '';
+    return notSent;
   }
   if (!active) {
     response.markdown('This project has no validated NEAR AI profile yet. Set one up to start chatting.');
     response.button({ command: 'nearAi.setup', title: 'Set up NEAR AI' });
-    return '';
+    return notSent;
   }
   const settings = readSettings();
   const model = defaultChatModel(active.models, settings.defaultModel);
   if (!model) {
     response.markdown('NEAR AI returned no chat models for this key.');
-    return '';
+    return notSent;
   }
   const modelInfo = active.models.find((candidate) => candidate.id === model);
   const activity = new ActivityStore(root);
@@ -107,11 +119,14 @@ async function answerWithNearAi(auth: AuthService, root: string | undefined, pro
   const verdict = new OutboundGuard(settings).check({ model, modelInfo, text: prompt }, account?.spentTodayUsd().usd ?? 0);
   if (verdict.outcome !== 'allow') {
     response.markdown(`${verdict.reason}\n\nNothing was sent.${verdict.overrideToken ? ' To send it anyway, use the NEAR AI sidebar, which can send a flagged message once.' : ''}`);
-    return '';
+    return notSent;
   }
   const session = await activity.start({ project: path.basename(root), attribution: hostAttribution(active.profiles.projectScopeId, path.basename(root), active.profile.profileId, active.profile.organization), model, summary: 'Chat view session started.' });
   const abort = new AbortController();
   const cancel = token.onCancellationRequested(() => abort.abort());
+  // How the reply ended: only a stream that reached its final event is complete.
+  let finished = false;
+  let failed = false;
   response.progress(`Asking ${model}…`);
   try {
     const route = clientFor(active, model);
@@ -120,6 +135,7 @@ async function answerWithNearAi(auth: AuthService, root: string | undefined, pro
       for await (const event of route.client.streamChatEvents(model, [...history, { role: 'user', content: prompt }], abort.signal)) {
         if (event.type === 'text') response.markdown(event.text);
         else if (event.type === 'done') {
+          finished = true;
           let actualCostUsd: number | undefined;
           let pending = false;
           const requestId = event.metadata.requestId;
@@ -144,13 +160,14 @@ async function answerWithNearAi(auth: AuthService, root: string | undefined, pro
     });
   } catch (error) {
     if (!abort.signal.aborted) {
+      failed = true;
       await activity.append(session.sessionId, { status: 'failed', summary: 'Chat request failed.', errorCode: error instanceof Error ? error.name : 'unknown' });
       response.markdown(providerErrorMessage(error));
     }
   } finally {
     cancel.dispose();
   }
-  return model;
+  return { model, outcome: abort.signal.aborted || token.isCancellationRequested ? 'cancelled' : failed || !finished ? 'failed' : 'completed' };
 }
 
 /** Rebuilds the conversation from this participant's earlier turns in the same chat. */

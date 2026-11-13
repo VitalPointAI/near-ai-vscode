@@ -329,8 +329,9 @@ export class AgentConversation {
     this.runs.set(runId, checkpoints);
     this.shellEnvAllow = request.shellEnvAllow ?? [];
     const shell = this.shellFor(request.gsd?.shellEnv ?? {});
-    const freshConversation = !this.messages.length;
-    if (freshConversation) this.messages.push({ role: 'system', content: this.systemPrompt(request, this.root, this.spawnableAgents(request).length > 0) });
+    // A thread reopened from the log alone (one begun in the Chat view) has history and no system prompt: it gets the panel's, first.
+    const freshConversation = this.messages[0]?.role !== 'system';
+    if (freshConversation) this.messages.unshift({ role: 'system', content: this.systemPrompt(request, this.root, this.spawnableAgents(request).length > 0) });
     if (!this.title) this.title = request.text.replace(/\s+/g, ' ').slice(0, 80);
     let prompt = request.text;
     if (request.team) prompt = teamLeadPrompt(request.team, request.text.replace(/^\/team:\S+\s*/, ''));

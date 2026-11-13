@@ -12,7 +12,7 @@ import * as path from 'node:path';
 import { aadFor, open as openSealed, seal, subKey, type SealedBlob } from '../domain/state/keys';
 import { isSyntheticMessage, messagesToEntries } from '../domain/state/threadCapture';
 import { threadLines, threadTip, unionEntries, type ThreadEntry, type ThreadLines, type ThreadRole } from '../domain/state/threadEntries';
-import { PARTIAL_HISTORY, PARTIAL_HISTORY_NOTE, pairToolResults } from '../domain/state/threadView';
+import { PARTIAL_HISTORY, PARTIAL_HISTORY_NOTE, entriesToMessages, pairToolResults } from '../domain/state/threadView';
 import type { AgentMessage } from './nearAiClient';
 import { ProjectStateHome, stateHomeFor, writeFileAtomic } from './stateHome';
 import { stateKeysFor, type SecretsLike, type StateKeys } from './stateKeys';
@@ -611,12 +611,28 @@ export class ThreadStore implements ConversationStore {
     if (!material) return undefined;
     try {
       const value = this.openJson(material, 'thread-context', id, await readFile(this.contextPath(id), 'utf8')) as Transcript;
-      if (!value || value.id !== id || !Array.isArray(value.messages)) return undefined;
+      if (!value || value.id !== id || !Array.isArray(value.messages)) return await this.contextFromLog(id, material);
       this.cover(id, typeof value.basedOnTip === 'string' ? value.basedOnTip : '');
       return value;
     } catch {
-      return undefined;
+      return this.contextFromLog(id, material);
     }
+  }
+
+  /**
+   * The context of a thread that has a log and no saved context (one begun in the Chat view, where no run ever saved a working list), built from the
+   * log's main line the way a thread continued elsewhere is. It has no system prompt: the run that continues it adds the panel's own.
+   */
+  private async contextFromLog(id: string, material: Material): Promise<Transcript | undefined> {
+    const lines = threadLines(await this.liveEntries(id));
+    const tip = lines.main.at(-1)?.id;
+    if (!tip) return undefined;
+    const meta = (await this.readMeta(id, material)) ?? (await this.rebuildMeta(id, material));
+    this.cover(id, tip);
+    return {
+      id, title: meta?.title ?? 'Conversation', model: meta?.model ?? '', updatedAt: meta?.lastUsedAt ?? lines.main.at(-1)!.at,
+      turns: lines.main.filter((entry) => entry.role === 'user').length, messages: entriesToMessages(lines.main), display: [], basedOnTip: tip
+    };
   }
 
   public async list(): Promise<TranscriptSummary[]> {
