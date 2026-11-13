@@ -127,3 +127,18 @@ test('after B opens an archived thread, its next sync does not send the thread a
   const hot = (await remotePayloads(remote, b)).filter((payload): payload is { entries: Record<string, unknown[]> } => typeof payload === 'object' && payload !== null && 'entries' in payload && 'records' in payload);
   assert.ok(hot.every((payload) => !(archived in payload.entries) || (payload.entries[archived] as unknown[]).length === 0), 'no hot object carries the entries the cold object already holds');
 });
+
+test('a remote that cannot filter still syncs correctly: it sends everything, and an archived thread still opens', async () => {
+  const remote = bareRemote({ withMain: false });
+  assert.throws(() => fixtureGit(remote, ['config', '--get', 'uploadpack.allowFilter']), 'this remote does not offer filtering');
+  const { a, b, archived, ids, lines } = await archivedPair(remote);
+  const listed = (await b.threads.index()).find((item) => item.id === archived);
+  assert.equal(listed?.state, 'archived', 'the thread is listed archived from the index, as with a filtering remote');
+  assert.equal(listed?.title, 'The oldest conversation');
+  assert.deepEqual(missingIn(b), [], 'nothing is missing: the host sent every blob');
+  assert.equal(await b.threads.prepareOpen(archived), undefined);
+  assert.deepEqual(await entryIds(b, archived), [...ids].sort());
+  assert.deepEqual((await b.threads.lines(archived)).main.map((entry) => entry.id), lines);
+  assert.equal((await b.sync.sync()).kind, 'synced');
+  assert.equal((await a.sync.sync()).kind, 'synced');
+});
