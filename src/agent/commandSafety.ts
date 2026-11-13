@@ -1,6 +1,7 @@
 import { realpathSync } from 'node:fs';
 import * as path from 'node:path';
 import { plainDownload } from '../domain/plainDownload';
+import { normalizeRelative, PROTECTED_WRITE, STATE_FOLDER_PATH, STATE_FOLDER_TEXT } from '../domain/protectedPaths';
 import { isSensitivePath } from './tools';
 
 // The deterministic half of the `auto` approval mode. It decides the clear cases on its own:
@@ -316,9 +317,7 @@ interface PathFacts { absolute: string; inside: boolean; sensitive: boolean; pro
 
 const DEVICES = new Set(['/dev/null', '/dev/stdout', '/dev/stderr', '/dev/tty']);
 /** Credential and knowledge-base files, on top of the file tools' credential patterns. */
-const KB_OR_SECRET = /(?:^|\/)(?:\.near-credentials|\.near-kb|\.ssh|\.aws|\.gnupg|\.kube|\.docker\/config\.json)(?:\/|$)|\.kbkey$|(?:^|\/)state\.vscdb(?:\.backup)?$|(?:^|\/)\.git-credentials$/i;
-/** Writes that ask even after "allow edits for this run" (the same folders the file tools protect). */
-const PROTECTED_WRITE = /(?:^|\/)(?:\.git|\.planning\/\.near-ai)(?:\/|$)/;
+const KB_OR_SECRET = new RegExp(`(?:^|\\/)(?:\\.near-credentials|\\.near-kb|\\.ssh|\\.aws|\\.gnupg|\\.kube|\\.docker\\/config\\.json)(?:\\/|$)|\\.kbkey$|(?:^|\\/)state\\.vscdb(?:\\.backup)?$|(?:^|\\/)\\.git-credentials$|${STATE_FOLDER_PATH.source}`, 'i');
 
 function isInside(root: string, absolute: string): boolean {
   const relative = path.relative(root, absolute);
@@ -339,7 +338,7 @@ function pathFacts(text: string, cwd: string, context: CommandContext): PathFact
   const real = realPathOrSelf(absolute);
   const realSensitive = real !== absolute && (isSensitivePath(real) || KB_OR_SECRET.test(real.split(path.sep).join('/')));
   const scratch = scratchFacts(text, absolute, sensitive, context) && scratchFacts(real, real, sensitive || realSensitive, context);
-  return { absolute, inside, sensitive: sensitive || realSensitive, protectedWrite: inside && PROTECTED_WRITE.test(relative), device: DEVICES.has(absolute), trusted, scratch };
+  return { absolute, inside, sensitive: sensitive || realSensitive, protectedWrite: inside && PROTECTED_WRITE.test(normalizeRelative(relative)), device: DEVICES.has(absolute), trusted, scratch };
 }
 
 
@@ -419,7 +418,9 @@ function valuePart(text: string): string {
 const looksLikeOption = (text: string) => /^-/.test(text) && text !== '-' && text !== '--';
 
 /** The raw text names a credential or knowledge-base path anywhere (also inside quotes and substitutions). */
-const SENSITIVE_TEXT = /\.near-credentials|\.near-kb\b|\.kbkey\b|state\.vscdb|(?:^|[\s/'"=:])\.ssh(?:\/|\b)|(?:^|[\s/'"=:])\.aws(?:\/|\b)|(?:^|[\s/'"=:<>])\.env(?:\.[\w.-]+)?(?=$|[\s'"/;&|)<>])|\bid_(?:rsa|dsa|ecdsa|ed25519)\b|\.git-credentials|\.netrc\b|\.npmrc\b|\.pypirc\b/i;
+const SENSITIVE_TEXT_BASE = /\.near-credentials|\.near-kb\b|\.kbkey\b|state\.vscdb|(?:^|[\s/'"=:])\.ssh(?:\/|\b)|(?:^|[\s/'"=:])\.aws(?:\/|\b)|(?:^|[\s/'"=:<>])\.env(?:\.[\w.-]+)?(?=$|[\s'"/;&|)<>])|\bid_(?:rsa|dsa|ecdsa|ed25519)\b|\.git-credentials|\.netrc\b|\.npmrc\b|\.pypirc\b/i;
+/** Plus the project's state folder (its keys must not reach a model request through a recursive read or a copy). */
+const SENSITIVE_TEXT = new RegExp(`${SENSITIVE_TEXT_BASE.source}|${STATE_FOLDER_TEXT.source}`, 'i');
 const DOWNLOAD_TO_SHELL = /\b(?:curl|wget|fetch)\b[^\n;&]*\|\s*(?:sudo\s+)?(?:env\s+\S+\s+)?(?:ba|z|da|k|fi|c)?sh\b|\b(?:curl|wget)\b[^\n;&]*\|\s*(?:sudo\s+)?(?:python[0-9.]*|node|perl|ruby|php)\b|\b(?:ba|z|da|k)?sh\s+(?:-c\s+)?["']?(?:\$\(|`|<\()\s*(?:curl|wget)\b|\beval\s+["']?(?:\$\(|`)\s*(?:curl|wget)\b|\b(?:source|\.)\s+<\(\s*(?:curl|wget)\b/i;
 
 // ---------------------------------------------------------------------------------------------
@@ -518,7 +519,7 @@ function checkWrites(args: Word[], state: SegmentState, context: CommandContext,
     const facts = pathFacts(arg.text, state.cwd, context);
     if (facts.sensitive) return risky(`${label} touches ${arg.text}, which may hold credentials or knowledge-base keys`);
     if (!facts.inside && !facts.device) return risky(`${label} writes ${arg.text}, which is outside the workspace`);
-    if (facts.protectedWrite) return risky(`${label} writes ${arg.text}, inside .git or .planning/.near-ai, where writes always ask`);
+    if (facts.protectedWrite) return risky(`${label} writes ${arg.text}, inside .git, .planning/.near-ai or .near-ai (other than its scratch and attachments folders), where writes always ask`);
   }
   return safe(`${label} only changes files inside the workspace`);
 }
@@ -779,7 +780,7 @@ function classifyProgram(name: string, program: string, args: Word[], state: Seg
       const temporary = targets.length > 0 && targets.every((arg) => { const facts = pathFacts(arg.text, state.cwd, context); return !arg.glob && /^\/tmp\/[^/]+/.test(facts.absolute) && !facts.absolute.split('/').includes('..'); });
       if (temporary) return unknown('rm -r of a temporary path');
       if (!targets.length || targets.some((arg) => arg.glob || arg.expansion || !pathFacts(arg.text, state.cwd, context).inside)) return risky('rm -r deletes folders beyond recovery, outside the workspace or decided at run time');
-      if (targets.some((arg) => { const facts = pathFacts(arg.text, state.cwd, context); return facts.protectedWrite || facts.absolute === path.resolve(context.root); })) return risky('rm -r deletes the whole workspace, .git, or .planning/.near-ai');
+      if (targets.some((arg) => { const facts = pathFacts(arg.text, state.cwd, context); return facts.protectedWrite || facts.absolute === path.resolve(context.root); })) return risky('rm -r deletes the whole workspace, .git, .planning/.near-ai or .near-ai');
       // Folders a build or install regenerates (dist, node_modules, …) can go; anything else inside the workspace goes to the safety model.
       const regenerable = targets.every((arg) => { const facts = pathFacts(arg.text, state.cwd, context); return facts.absolute !== path.resolve(context.root) && !facts.protectedWrite && BUILD_OUTPUT.has(path.basename(facts.absolute)); });
       return regenerable ? safe('rm -r only deletes build output inside the workspace, which a build or install recreates') : unknown('rm -r deletes folders inside the workspace');
@@ -789,7 +790,7 @@ function classifyProgram(name: string, program: string, args: Word[], state: Seg
     if (outside) return risky(`${name} deletes ${outside.text}, outside the workspace`);
     if (targets.some((arg) => arg.glob || arg.expansion)) return unknown(`${name} deletes files matched at run time`);
     const guarded = targets.find((arg) => { const facts = pathFacts(arg.text, state.cwd, context); return facts.protectedWrite || facts.absolute === path.resolve(context.root); });
-    if (guarded) return risky(`${name} deletes ${guarded.text}, inside .git or .planning/.near-ai, where writes always ask`);
+    if (guarded) return risky(`${name} deletes ${guarded.text}, inside .git, .planning/.near-ai or .near-ai (other than its scratch and attachments folders), where writes always ask`);
     return safe(`${name} deletes ${targets.length === 1 ? 'a file' : 'files'} inside the workspace`);
   }
   if (name === 'find') {
@@ -1121,7 +1122,7 @@ function classifyText(command: string, context: CommandContext, depth: number): 
       if (facts.sensitive) return risky(`it ${writes ? 'writes' : 'reads'} ${target.text}, which may hold credentials or knowledge-base keys`);
       if (facts.device) continue;
       if (writes && !facts.inside && !facts.scratch) return risky(`it writes ${target.text}, which is outside the workspace`);
-      if (writes && facts.protectedWrite) return risky(`it writes ${target.text}, inside .git or .planning/.near-ai, where writes always ask`);
+      if (writes && facts.protectedWrite) return risky(`it writes ${target.text}, inside .git, .planning/.near-ai or .near-ai (other than its scratch and attachments folders), where writes always ask`);
       // A read of a temporary folder is scratch work: safe, and named as such in the reason (0.4.18).
       if (!writes && !facts.inside && !facts.scratch) findings.push(unknown(`it reads ${target.text}, outside the workspace`));
     }

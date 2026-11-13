@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process';
 import { mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises';
 import * as path from 'node:path';
 import type { ActionCapability } from '../domain/policy';
+import { protectedWriteReason, STATE_FOLDER_PATH } from '../domain/protectedPaths';
 import type { RunCheckpoints } from './checkpoints';
 import { unifiedDiff } from './diff';
 import { matchesGlob } from './glob';
@@ -80,7 +81,9 @@ export function sensitivePathReason(requested: string): string | undefined {
 
 /** Tests the path as written (normalized, so `.env/` and `./.env/.` count) and as it resolves. */
 export function isSensitivePath(file: string): boolean {
-  return SENSITIVE_FILE.test(path.posix.normalize(file.replace(/\\/g, '/')).replace(/\/+$/, ''));
+  const normalized = path.posix.normalize(file.replace(/\\/g, '/')).replace(/\/+$/, '');
+  // The project's state folder holds its keys (27-REVIEW minor commandSafety.ts:319): reading anything in it asks.
+  return SENSITIVE_FILE.test(normalized) || STATE_FOLDER_PATH.test(normalized);
 }
 
 /** Reading a path asks first when either the path or the file it resolves to looks like a credential. */
@@ -91,18 +94,13 @@ export async function sensitiveRead(requested: string | undefined, context: Tool
   return resolved && isSensitivePath(resolved) ? `${requested} resolves to ${resolved}, which looks like it may contain credentials, and its contents would be sent to the model.` : undefined;
 }
 
-/**
- * Writes that always ask, even after "allow edits for this run": git's own files (hooks and
- * config run code on the next git command) and this extension's project settings.
- */
-const PROTECTED_WRITE = /(?:^|\/)(?:\.git|\.planning\/\.near-ai)(?:\/|$)/;
-
+/** Writes that always ask, even after "allow edits for this run": see src/domain/protectedPaths.ts, which the shell guard shares. */
 export async function protectedWrite(requested: string, context: ToolContext): Promise<string | undefined> {
   const resolved = await resolveInWorkspace(context.root, requested).catch(() => undefined);
   const relative = resolved ? path.relative(context.root, resolved).split(path.sep).join('/') : requested;
   if (relative.endsWith('.planning/.near-ai/team.md')) return undefined;
   if (context.writeScope && !(relative === context.writeScope || relative.startsWith(`${context.writeScope.replace(/\/$/, '')}/`))) return `${requested} is outside ${context.writeScope}, where this agent's work belongs. Approve this write only if you expect it.`;
-  return PROTECTED_WRITE.test(relative) ? `${requested} is inside ${relative.startsWith('.git') || relative.includes('/.git') ? '.git, where hooks and config run code on the next git command' : '.planning/.near-ai, which holds this project\'s NEAR AI settings'}. Approve this write only if you expect it.` : undefined;
+  return protectedWriteReason(relative, requested);
 }
 
 /** A write outside the agent's folder after it read outside content asks even under fully-autonomous mode. */
