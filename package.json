@@ -516,7 +516,19 @@
         "nearAi.agent.saveTranscripts": {
           "type": "boolean",
           "default": true,
-          "description": "Save full conversations (including file contents the agent read) in VS Code's extension storage on this machine so they can be resumed from History. Never saved in the project."
+          "description": "Save full conversations (including file contents the agent read), encrypted, in this project's git-ignored state folder (.near-ai/state) so every editor on this computer shows the same chats and they can be resumed from History. They are never committed."
+        },
+        "nearAi.history.liveConversations": {
+          "type": "number",
+          "default": 5,
+          "minimum": 1,
+          "maximum": 50,
+          "description": "How many of the most recently used conversations per project stay fully open. Older ones are archived inside the project, never deleted, and reopen in full when you choose them."
+        },
+        "nearAi.sync.keepKeyInProject": {
+          "type": "boolean",
+          "default": true,
+          "description": "Keeps this project's chat key in a private file inside the project's ignored state folder, so every editor on this computer can open the chats. Turn this off to keep the key only in each editor's secret storage; each new editor or browser then asks for the recovery code."
         },
         "nearAi.agent.visionModel": {
           "type": "string",
