@@ -45,6 +45,8 @@ export interface CodePushPlan {
   files: string[];
   /** NEAR AI's own records (account, runs, costs) that git does not track: left off the list and kept on this computer. Paths from the project root, sorted. */
   heldBack: string[];
+  /** NEAR AI's own records that git already tracks: the push cannot keep them off (they are in git and its history), so they stay on the list and are named. Sorted. */
+  trackedPrivate: string[];
   blocked: CodePushBlock[];
   /** Files that could not be read as text (binary or very large), so they were not checked for secrets. */
   unchecked: string[];
@@ -169,6 +171,7 @@ export async function planCodePush(root: string, git: GitRunner): Promise<CodePu
   const listed = [...new Set([...trackedFiles, ...nulList(others.stdout)])].filter((file) => trackedFiles.has(file) || !file.startsWith(STATE_FOLDER)).sort();
   const heldBack = listed.filter((file) => !trackedFiles.has(file) && isNearAiPrivateRecord(file));
   const files = listed.filter((file) => !heldBack.includes(file));
+  const trackedPrivate = files.filter((file) => trackedFiles.has(file) && isNearAiPrivateRecord(file));
   const blocked = new Map<string, CodePushBlock>();
   const block = (file: string, reason: string): void => {
     if (!blocked.has(file)) blocked.set(file, { file, reason, ...(trackedFiles.has(file) ? { tracked: true } : {}) });
@@ -192,7 +195,7 @@ export async function planCodePush(root: string, git: GitRunner): Promise<CodePu
     const at = lines.findIndex((line) => line.length <= 4_000 && tokenShape.test(line));
     if (at >= 0) block(candidate.relative, `It looks like it holds a secret: a key or token (line ${at + 1}).`);
   }
-  return { files, heldBack, blocked: [...blocked.values()].sort((a, b) => a.file.localeCompare(b.file)), unchecked };
+  return { files, heldBack, trackedPrivate, blocked: [...blocked.values()].sort((a, b) => a.file.localeCompare(b.file)), unchecked };
 }
 
 const SHORT_ID = 7;
@@ -381,6 +384,19 @@ function heldBackNote(files: readonly string[]): string {
   return `These NEAR AI files hold your own account and run records and stay on this computer: ${namesInFolder(files)}.`;
 }
 
+function trackedPrivateNote(files: readonly string[]): string {
+  const many = files.length > 1;
+  return `${namesInFolder(files)} ${many ? 'are' : 'is'} already saved in git, so ${many ? 'they go' : 'it goes'} up with your code. ${many ? 'They hold' : 'It holds'} your own NEAR AI records, such as your organization's name and profile settings (no keys).`;
+}
+
+function trackedPrivateBlockedMessage(files: readonly string[]): string {
+  const many = files.length > 1;
+  const shown = files.slice(0, MAX_NAMES_LISTED).join(', ');
+  const names = files.length > MAX_NAMES_LISTED ? `${shown} and ${files.length - MAX_NAMES_LISTED} more` : shown;
+  const it = many ? 'them' : 'it';
+  return `Your code was not pushed: ${names} ${many ? 'hold' : 'holds'} your own NEAR AI records and git already tracks ${it}, so a public repository would show ${it}; remove ${it} from git first (git rm --cached) and try again.`;
+}
+
 function blockedMessage(blocked: readonly CodePushBlock[]): string {
   const lines = blocked.map((entry) => `- ${entry.file}: ${entry.reason}`);
   const tracked = blocked.filter((entry) => entry.tracked).map((entry) => entry.file);
@@ -427,11 +443,15 @@ export async function pushProjectCode(root: string, remote: string, git: GitRunn
     if (options.visibility === 'public') return { status: 'blocked', message: `Your code was not pushed. ${unscannedText(history, 'public')} This repository is public, so nothing is pushed until the whole history can be checked. Syncing is not affected.` };
     if (!await ui.confirmUnscannedHistory(`${unscannedText(history, options.visibility)}\n\nPush your code anyway?`)) return { status: 'declined', message: 'Your code was not pushed. Syncing is not affected.' };
   }
+  if (options.visibility === 'public' && plan.trackedPrivate.length > 0) {
+    return { status: 'blocked', message: trackedPrivateBlockedMessage(plan.trackedPrivate) };
+  }
   const notes: string[] = [];
   if (options.visibility === 'public') notes.push(PUBLIC_LINE);
   if (!history.complete) notes.push('The history of this project was not fully checked for secrets, and you chose to go on.');
   if (history.unchecked.length > 0) notes.push(`${history.unchecked.length} ${history.unchecked.length === 1 ? 'file' : 'files'} in earlier commits ${history.unchecked.length === 1 ? 'is' : 'are'} too large or not text, so ${history.unchecked.length === 1 ? 'it was' : 'they were'} not checked for secrets.`);
   if (plan.heldBack.length > 0) notes.push(heldBackNote(plan.heldBack));
+  if (plan.trackedPrivate.length > 0) notes.push(trackedPrivateNote(plan.trackedPrivate));
   if (plan.unchecked.length > 0) notes.push(`${plan.unchecked.length} ${plan.unchecked.length === 1 ? 'file is' : 'files are'} too large or not text, so ${plan.unchecked.length === 1 ? 'it was' : 'they were'} not checked for secrets.`);
   if (!await ui.confirmPush({ branch, remote, visibility: options.visibility, files: plan.files, notes })) {
     return { status: 'declined', message: 'Your code was not pushed. Syncing is not affected.' };
