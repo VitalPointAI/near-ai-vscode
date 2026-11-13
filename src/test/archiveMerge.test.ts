@@ -331,7 +331,7 @@ test('when the manifest would list more objects than allowed no new cold object 
   const { remote, a } = await threeArchived({ maxListedObjects: 4 });
   const outcome = await a.sync.sync();
   assert.equal(outcome.kind, 'synced', outcome.message);
-  assert.equal(await coldCount(remote, a), 1, 'two objects are reserved for the hot object and the index, so one archive fits');
-  assert.match(outcome.message, /2 older conversations stay on this computer only/);
+  assert.equal(await coldCount(remote, a), 2, 'two objects are reserved for the hot object and the index, so two archives fit under a limit of four');
+  assert.match(outcome.message, /1 older conversation stays on this computer only/);
   assert.equal((await remoteManifest(remote, a)).objects.length, 4);
 });

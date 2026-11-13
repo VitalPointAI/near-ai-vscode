@@ -10,6 +10,7 @@ import {
   OBJECT_NAME, openManifest, openObject, readManifestHeader, sealObject, buildManifest,
   type ManifestHeader, type ObjectEntry, type OpenPart, type SealedPart
 } from '../domain/state/objects';
+import { compareRecords, slotKind } from '../domain/state/merge';
 import { parseRecord, type StateRecord } from '../domain/state/records';
 import { threadLines, threadTip, unionEntries, type ThreadEntry } from '../domain/state/threadEntries';
 import type { RunMarker, RunState } from './runMarkers';
@@ -19,7 +20,7 @@ import type { StateKeys } from './stateKeys';
 import { MirrorBusyError } from './stateMirrorLock';
 import {
   THREAD_ID, applyMerged, collectLocal, foldHeads, headMapOf, isSyncedRecord, mergeAll, parsePortableMeta, recordKey, withoutBody,
-  type HotPayload, type IndexPayload, type IndexThread, type LocalSnapshot, type PortableMeta, type ProfileSource, type SecretSource
+  type ColdParts, type HotPayload, type IndexPayload, type IndexThread, type LocalSnapshot, type PortableMeta, type ProfileSource, type SecretSource
 } from './stateRecords';
 import type { StateFile, StateFileRef, StateTransport, SyncFailure } from './stateTransport';
 import { bundleOf, installArchive, writeArchive, type ArchiveBundle } from './threadArchive';
@@ -27,8 +28,6 @@ import { mergeMeta, validEntry, type ColdFetchResult, type ThreadStore } from '.
 
 /** A push that loses a race fetches, merges and tries again this many times before giving up until the next sync. */
 export const MAX_PUSH_ATTEMPTS = 5;
-/** When the manifest lists this many objects, the next push seals everything into one fresh object instead of adding another (the manifest is capped at 1 MiB). */
-export const CONSOLIDATE_AT_OBJECTS = 200;
 /** More hot objects than this on the remote after a push, and the push replaces them all with one (SYNC-05). */
 export const HOT_CONSOLIDATE_COUNT = 20;
 /** The other consolidation rule (hot objects bigger than twice what they hold now) only counts once the hot objects add up to this much, so the 64 KiB floor of tiny objects never trips it. */
@@ -52,6 +51,10 @@ export interface SyncOutcome {
   failure?: SyncFailure;
   /** Whether this sync pushed a new commit. */
   pushed?: boolean;
+  /** The archived threads that were not sent because the synced state is full (the message says so); they stay on this computer, and nothing is deleted. */
+  stayLocal?: string[];
+  /** How much synced ciphertext the manifest lists, as measured for the limits. */
+  syncedBytes?: number;
   /** How many pushes were tried. */
   attempts?: number;
 }
@@ -63,8 +66,16 @@ const MESSAGES = {
   locked: "This project's chats are locked on this computer. Enter the recovery code to open them.",
   noRecoveryCode: 'Project sync has no recovery code on this computer yet, so nothing was sent.',
   contended: 'Other computers kept saving at the same moment. Sync will try again shortly.',
-  unlocked: "This project's chats were opened with the recovery code."
+  unlocked: "This project's chats were opened with the recovery code.",
+  overWarning: 'Synced project state is over 500 MB.'
 } as const;
+
+/** The plain sentence for archived conversations that cannot go up: how many, and that nothing was deleted. */
+function stayLocalText(count: number, reason: 'bytes' | 'objects'): string {
+  const subject = count === 1 ? '1 older conversation stays' : `${count} older conversations stay`;
+  const cause = reason === 'bytes' ? 'Synced project state has reached 1 GiB' : 'Synced project state holds as many saved parts as it can';
+  return `${cause}, so ${subject} on this computer only. Nothing was deleted.`;
+}
 
 export interface StateSyncOptions {
   /** The project folder. */
@@ -368,7 +379,7 @@ export class StateSync {
       if (mode === 'pull') return { kind: 'synced', message: MESSAGES.synced, pushed: false, attempts: tries };
 
       const send = this.whatRemoteLacks(local, merged, remote, state);
-      if (remote && !send.hasNew) return { kind: 'synced', message: MESSAGES.synced, pushed: false, attempts: tries };
+      if (remote && !send.hasNew) return { kind: 'synced', ...this.withSizeNotes(this.measured(listedBytes(remote?.objects ?? [])), send), pushed: false, attempts: tries };
 
       const wrap = (await keys.readRecoveryWrap()) ?? (remote ? { kdf: remote.header.kdf, wrappedKey: remote.header.wrappedKey } : undefined);
       if (!wrap) return { kind: 'refused', message: MESSAGES.noRecoveryCode, attempts: tries };
@@ -378,7 +389,7 @@ export class StateSync {
       if (pushed.ok) {
         this.learnPush(state, built);
         await this.writeState(state);
-        return { kind: 'synced', message: MESSAGES.synced, pushed: true, attempts: tries };
+        return { kind: 'synced', ...this.withSizeNotes(this.measured(listedBytes(built.objects)), send), pushed: true, attempts: tries };
       }
       if (pushed.failure.kind !== 'rejected') return { kind: 'failed', message: pushed.failure.message, failure: pushed.failure, attempts: tries };
       if (tries >= MAX_PUSH_ATTEMPTS) return { kind: 'failed', message: MESSAGES.contended, failure: pushed.failure, attempts: tries };
@@ -428,20 +439,51 @@ export class StateSync {
     state.heads = foldHeads(state.heads, remote.records);
   }
 
+  private measured(listedBytesNow: number): number {
+    return this.options.measure ? this.options.measure(listedBytesNow) : listedBytesNow;
+  }
+
+  /** The message and the facts a sync reports about size: a warning from 500 MB, and which archived threads stay on this computer because there is no more room. */
+  private withSizeNotes(total: number, send: SendSet): { message: string; stayLocal?: string[]; syncedBytes: number } {
+    const notes: string[] = [MESSAGES.synced];
+    if (total >= SYNC_WARN_BYTES) notes.push(MESSAGES.overWarning);
+    if (send.heldBack.length && send.stop) notes.push(stayLocalText(send.heldBack.length, send.stop));
+    return { message: notes.join(' '), ...(send.heldBack.length ? { stayLocal: send.heldBack } : {}), syncedBytes: total };
+  }
+
   private whatRemoteLacks(local: LocalSnapshot, merged: readonly StateRecord[], remote: RemoteBundle | undefined, state: SyncState): SendSet {
     const entries: Record<string, ThreadEntry[]> = {};
     const cold: ColdAdd[] = [];
-    for (const [id, thread] of Object.entries(local.threads)) {
+    const heldBack: string[] = [];
+    let stop: 'bytes' | 'objects' | undefined;
+    // What the manifest would list after this push: what it lists now, and a new hot object and a new index.
+    let running = this.measured(listedBytes(remote?.objects ?? []));
+    let listed = (remote?.objects.length ?? 0) + 2;
+    const limit = this.options.maxListedObjects ?? MAX_LISTED_OBJECTS;
+    for (const [id, thread] of Object.entries(local.threads).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) {
       const held = new Set(state.pushed[id] ?? []);
-      // An archived thread that no cold object holds yet goes up as its own archive, byte for byte; what it holds is then not also sent entry by entry.
-      const add = thread.cold && !remoteHoldsCold(remote, id) ? thread.cold : undefined;
-      if (add) cold.push({ id, parts: add.parts, ids: [...add.ids] });
+      let add: ColdParts | undefined;
+      let blocked = false;
+      if (thread.cold && !remoteHoldsCold(remote, id)) {
+        // An archived thread that no cold object holds yet goes up as its own archive, byte for byte; what it holds is then not also sent entry by entry.
+        // Nothing is ever deleted: at the size limits it simply does not go up (and is not sent entry by entry either), and the message says so.
+        const reason = running >= SYNC_COLD_STOP_BYTES ? 'bytes' : listed + thread.cold.parts.length > limit ? 'objects' : undefined;
+        if (reason) { blocked = true; stop ??= reason; } else {
+          add = thread.cold;
+          cold.push({ id, parts: add.parts, ids: [...add.ids] });
+          running += add.parts.reduce((total, part) => total + part.bytes, 0);
+          listed += add.parts.length;
+        }
+      }
       const fresh = thread.entries.filter((entry) => !held.has(entry.id) && !add?.ids.has(entry.id));
+      if (blocked) { if (fresh.length) heldBack.push(id); continue; }
       if (fresh.length) entries[id] = fresh;
     }
+    // A thread kept back that the remote has never heard of is not named in any record or index either.
+    const hide = new Set(heldBack.filter((id) => !remote?.index.threads[id]));
     const held = new Set(state.heads.map(recordKey));
-    const records = merged.filter((record) => isSyncedRecord(record) && !held.has(recordKey(record)));
-    return { entries, records, cold, hasNew: Object.keys(entries).length > 0 || records.length > 0 || cold.length > 0 || !remote };
+    const records = merged.filter((record) => isSyncedRecord(record) && !held.has(recordKey(record)) && !hidden(record, hide));
+    return { entries, records, cold, heldBack, hide, ...(stop ? { stop } : {}), hasNew: Object.keys(entries).length > 0 || records.length > 0 || cold.length > 0 || !remote };
   }
 
   /** Reads the archive parts of each cold add from the archive folder, checked against their listed size and sha256. A thread whose archive changed meanwhile (it was opened) is left for the next sync. */
@@ -463,29 +505,94 @@ export class StateSync {
     return ready;
   }
 
+  /**
+   * What would replace every hot object on the remote: the union of what they hold, what this computer holds and the merged records, less what a cold
+   * object already holds. It is built from the old objects themselves (not from this computer's state alone), then checked to hold every entry id and
+   * every record the old objects held (an entry a cold object holds counts as held, a record counts when its newest revision is there). Returns
+   * undefined when an old object cannot be read or the check fails: the caller then keeps the old objects and pushes as usual.
+   */
+  private async consolidatedHot(input: BuildInput, hot: readonly ObjectEntry[][], covered: (id: string) => Set<string>): Promise<{ payload: HotPayload; parts: SealedPart[] } | undefined> {
+    const { dataKey, stateId, remote, local, merged, send } = input;
+    if (!remote) return undefined;
+    const oldEntries = new Map<string, ThreadEntry[]>();
+    const oldRecords: StateRecord[] = [];
+    try {
+      for (const group of hot) {
+        const parts: OpenPart[] = [];
+        for (const entry of group) parts.push({ entry, data: await this.options.transport.readBlob(remote.tree.get(entry.file) as string) });
+        const content = parseHot(openObject(dataKey, stateId, 'hot', parts));
+        for (const [id, list] of Object.entries(content.entries)) oldEntries.set(id, unionEntries(oldEntries.get(id) ?? [], list));
+        oldRecords.push(...content.records);
+      }
+    } catch {
+      return undefined;
+    }
+    const entries: Record<string, ThreadEntry[]> = {};
+    for (const id of new Set([...oldEntries.keys(), ...Object.keys(local.threads)])) {
+      if (send.hide.has(id)) continue;
+      const have = covered(id);
+      const list = unionEntries(oldEntries.get(id) ?? [], local.threads[id]?.entries ?? []).filter((entry) => !have.has(entry.id));
+      if (list.length) entries[id] = list;
+    }
+    const records = mergeAll(oldRecords, merged.filter((record) => isSyncedRecord(record) && !hidden(record, send.hide)));
+    const wanted: HotPayload = { v: 1, entries, records };
+    const payload = this.options.shapeConsolidated ? this.options.shapeConsolidated(wanted) : wanted;
+    // The new object must hold what the old ones held and also what this push is meant to send, or it is not used.
+    const owed = new Map(oldEntries);
+    for (const [id, list] of Object.entries(send.entries)) owed.set(id, unionEntries(owed.get(id) ?? [], list));
+    for (const [id, list] of owed) {
+      const there = new Set((payload.entries[id] ?? []).map((entry) => entry.id));
+      const have = covered(id);
+      if (list.some((entry) => !there.has(entry.id) && !have.has(entry.id))) return undefined;
+    }
+    const slots = new Map<string, StateRecord>();
+    for (const record of payload.records) {
+      const key = `${slotKind(record)}\u0000${record.id}`;
+      const current = slots.get(key);
+      if (!current || compareRecords(record, current) > 0) slots.set(key, record);
+    }
+    for (const record of [...oldRecords, ...send.records]) {
+      const now = slots.get(`${slotKind(record)}\u0000${record.id}`);
+      if (!now || (now.rev !== record.rev && compareRecords(now, record) < 0)) return undefined;
+    }
+    if (Object.keys(payload.entries).length === 0 && payload.records.length === 0) return undefined;
+    return { payload, parts: sealObject(dataKey, stateId, 'hot', payload) };
+  }
+
   private async buildCommit(input: BuildInput): Promise<BuiltCommit> {
     const { dataKey, stateId, wrap, remote, state, local, merged, send } = input;
     const adds = await this.readColdParts(send.cold);
     const addedIds = new Map<string, string[]>(adds.map((add) => [add.id, add.ids]));
     const addedFiles = new Map<string, string[]>(adds.map((add) => [add.id, add.parts.map((part) => part.file)]));
-    const consolidate = (remote?.objects.filter((entry) => entry.class === 'hot').length ?? 0) + 2 > CONSOLIDATE_AT_OBJECTS;
-    const known = new Map<string, ThreadEntry[]>();
-    for (const [id, thread] of Object.entries(local.threads)) known.set(id, thread.entries);
-    for (const [id, list] of Object.entries(remote?.entries ?? {})) known.set(id, unionEntries(known.get(id) ?? [], list));
     // What a cold object holds is not repeated in the hot object that replaces the old ones.
     const coldIds = (id: string): Set<string> => new Set([...(state.cold[id] ?? []), ...(addedIds.get(id) ?? [])]);
-    const payload: HotPayload = consolidate
-      ? { v: 1, entries: Object.fromEntries([...known].map(([id, list]) => { const covered = coldIds(id); return [id, list.filter((entry) => !covered.has(entry.id))] as const; }).filter(([, list]) => list.length)), records: merged.filter(isSyncedRecord) }
-      : { v: 1, entries: send.entries, records: send.records };
+    const known = new Map<string, ThreadEntry[]>();
+    for (const [id, thread] of Object.entries(local.threads)) if (!send.hide.has(id)) known.set(id, thread.entries);
+    for (const [id, list] of Object.entries(remote?.entries ?? {})) known.set(id, unionEntries(known.get(id) ?? [], list));
+
+    // Hot objects are replaced by one when more than HOT_CONSOLIDATE_COUNT would be listed, or when together they are more than twice what they hold now.
+    const hot = remote ? groupObjects(remote.objects.filter((entry) => entry.class === 'hot')) : [];
+    const incremental: HotPayload = { v: 1, entries: send.entries, records: send.records };
+    const addsHot = Object.keys(incremental.entries).length > 0 || incremental.records.length > 0;
+    const hotBytes = hot.reduce((total, group) => total + group.reduce((sum, entry) => sum + entry.bytes, 0), 0);
+    const overCount = hot.length + (addsHot ? 1 : 0) > HOT_CONSOLIDATE_COUNT;
+    let replacement: { payload: HotPayload; parts: SealedPart[] } | undefined;
+    if (hot.length > 0 && (overCount || (hot.length >= 2 && hotBytes >= HOT_CONSOLIDATE_FLOOR_BYTES))) {
+      const candidate = await this.consolidatedHot(input, hot, coldIds);
+      const liveBytes = candidate?.parts.reduce((total, part) => total + part.entry.bytes, 0) ?? 0;
+      if (candidate && (overCount || hotBytes > 2 * liveBytes)) replacement = candidate;
+    }
+    const consolidate = replacement !== undefined;
+    const payload: HotPayload = replacement?.payload ?? incremental;
     const empty = Object.keys(payload.entries).length === 0 && payload.records.length === 0;
-    const hotParts: SealedPart[] = empty ? [] : sealObject(dataKey, stateId, 'hot', payload);
+    const hotParts: SealedPart[] = replacement?.parts ?? (empty ? [] : sealObject(dataKey, stateId, 'hot', payload));
 
     const hotFiles = hotParts.map((part) => part.entry.file);
     const previous = remote?.index.threads ?? {};
     const metas = new Map<string, PortableMeta>();
-    for (const [id, thread] of Object.entries(local.threads)) metas.set(id, thread.meta);
+    for (const [id, thread] of Object.entries(local.threads)) if (!send.hide.has(id)) metas.set(id, thread.meta);
     for (const [id, item] of Object.entries(previous)) if (!metas.has(id)) metas.set(id, item.meta);
-    for (const record of merged) if (record.kind === 'thread-meta') { const parsed = parsePortableMeta(record.body, record.id); if (parsed) metas.set(record.id, parsed); }
+    for (const record of merged) if (record.kind === 'thread-meta' && !send.hide.has(record.id)) { const parsed = parsePortableMeta(record.body, record.id); if (parsed) metas.set(record.id, parsed); }
     const index: IndexPayload = { v: 1, threads: {} };
     for (const [id, meta] of metas) {
       const list = known.get(id) ?? [];
@@ -610,6 +717,16 @@ function mergeBundles(bundles: readonly ArchiveBundle[]): ArchiveBundle {
   return { entries, context, meta };
 }
 
+/** The bytes the manifest lists: what the remote's tree holds of this project's state, apart from the manifest file itself. */
+function listedBytes(objects: readonly ObjectEntry[]): number {
+  return objects.reduce((total, entry) => total + entry.bytes, 0);
+}
+
+/** Whether a record is about a thread that this push keeps back: its meta and context are not sent either. */
+function hidden(record: StateRecord, hide: ReadonlySet<string>): boolean {
+  return (record.kind === 'thread-meta' || record.kind === 'thread-context') && hide.has(record.id);
+}
+
 function remoteHoldsCold(remote: RemoteBundle | undefined, id: string): boolean {
   return (remote?.index.threads[id]?.cold?.length ?? 0) > 0;
 }
@@ -622,7 +739,17 @@ function coldListed(remote: RemoteBundle | undefined): Record<string, IndexThrea
 
 interface ColdAdd { id: string; parts: ObjectEntry[]; ids: string[] }
 interface ReadyCold extends ColdAdd { files: Array<{ entry: ObjectEntry; data: Buffer }> }
-interface SendSet { entries: Record<string, ThreadEntry[]>; records: StateRecord[]; cold: ColdAdd[]; hasNew: boolean }
+interface SendSet {
+  entries: Record<string, ThreadEntry[]>;
+  records: StateRecord[];
+  cold: ColdAdd[];
+  /** Archived threads kept back at a size limit, and the first limit that kept one back. */
+  heldBack: string[];
+  /** The ones of those the remote has never heard of: not named in any record or the index either. */
+  hide: Set<string>;
+  stop?: 'bytes' | 'objects';
+  hasNew: boolean;
+}
 interface BuildInput {
   dataKey: Buffer;
   stateId: string;
