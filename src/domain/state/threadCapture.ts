@@ -14,11 +14,11 @@ export function contentKey(content: string): string {
 
 /**
  * Whether a message belongs to the model's working context only: the system prompt, a conversation summary, the acknowledgement that follows it, and a
- * background agent's notification. None of these is something the person typed or saw, so none is written to the thread log.
+ * background agent's notification, and the host's end-of-run task-list reminder. None of these is something the person typed or saw, so none is written to the thread log.
  */
 export function isSyntheticMessage(message: AgentMessage): boolean {
   if (message.role === 'system') return true;
-  if (message.role === 'user') return message.content.startsWith('<conversation-summary>') || message.content.startsWith('<agent-notification');
+  if (message.role === 'user') return message.content.startsWith('<conversation-summary>') || message.content.startsWith('<agent-notification') || message.content.startsWith('<task-list-check>');
   return message.role === 'assistant' && message.content === COMPACTION_ACK && !message.tool_calls?.length;
 }
 

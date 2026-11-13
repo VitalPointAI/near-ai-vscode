@@ -4,7 +4,7 @@ import { existsSync } from 'node:fs';
 import * as path from 'node:path';
 import { RunCheckpoints } from '../agent/checkpoints';
 import { compactConversation, contextAction, contextStatus, DEFAULT_COMPACT_AT_TOKENS, DEFAULT_CONTEXT_WINDOW, DEFAULT_THRESHOLDS, estimateTokens, trimOldToolResults } from '../agent/context';
-import { AgentEvent, AgentRun, AgentRunError, ApprovalReply, ApprovalRequest, AWAITING_APPROVAL_PREFIX, RunInput, RunOutcome, RunResult } from '../agent/loop';
+import { AgentEvent, AgentRun, AgentRunError, ApprovalReply, ApprovalRequest, AWAITING_APPROVAL_PREFIX, DEFAULT_MAX_TURNS, RunInput, RunOutcome, RunResult } from '../agent/loop';
 import { countersOf, runSplitOf } from './activityOverview';
 import { PermissionRules, RunGrants } from '../agent/permissions';
 import { SafetyModelCheck } from '../agent/safetyModel';
@@ -373,6 +373,10 @@ export class AgentConversation {
     // One safety check per run, shared with sub-agents, so each command is asked about once.
     const safety = request.policy.mode === 'auto' && request.safetyModel ? new SafetyModelCheck({ client: request.client, model: request.safetyModel, fallbackModel: request.safetyFallbackModel, task: request.text, onUsage: (usage) => extraUsage.push(usage) }) : undefined;
     this.runSafety = safety;
+    // The list as this run found it: a run that never touched it asks for no reminder and flags nothing at its end.
+    const tasksAtStart = this.tasks.revision;
+    let taskCheckSent = false;
+    let mainTurns = 0;
     const run = new AgentRun({
       client: request.client,
       model: request.model,
@@ -401,7 +405,14 @@ export class AgentConversation {
         await this.saveRunState(request.model, runId, next ?? transcript);
         return next;
       },
-      afterAnswer: async (_transcript, signal) => this.waitForBackground(signal),
+      afterAnswer: async (_transcript, signal) => {
+        const background = await this.waitForBackground(signal);
+        if (background?.length) return background;
+        if (taskCheckSent) return undefined;
+        const check = this.taskListCheck(tasksAtStart, signal, (request.maxTurns ?? DEFAULT_MAX_TURNS) - mainTurns);
+        if (check) taskCheckSent = true;
+        return check;
+      },
       // PERF-05: the state is saved after every finished call too, not only before each model turn, so a reload mid-batch keeps the finished results.
       onProgress: (transcript) => this.saveRunState(request.model, runId, transcript),
       input: this.steeringInput,
@@ -411,6 +422,8 @@ export class AgentConversation {
         this.track(mainId, event);
         if (event.type !== 'reasoning' && event.type !== 'turn') this.markVisible();
         if (event.type === 'tool-start') void this.runMarkers?.step(conversationId, runId, event.tool);
+        if (event.type === 'turn') mainTurns += 1;
+        // Every post of the main task list goes through this.tasks, so a host mark is never overwritten by a stale list.
         if (event.type === 'todos') this.post({ type: 'todos', todos: this.tasks.write(event.todos) });
         else this.forward(event, request.model, record);
       }
@@ -1017,6 +1030,19 @@ export class AgentConversation {
     agent.activitySince = Date.now();
   }
 
+  /**
+   * The one reminder a run may send when its answer leaves the list unfinished: it asks the model to update the list and never changes a status
+   * itself (the host marks nothing done that did not finish). Only a run that touched the list asks, and only with two model turns to spare, so
+   * the reminder cannot push a finished run into a turn-limit stop.
+   */
+  private taskListCheck(tasksAtStart: number, signal: AbortSignal, turnsLeft: number): AgentMessage[] | undefined {
+    if (signal.aborted || this.tasks.revision === tasksAtStart || !this.tasks.unfinished || turnsLeft < 2) return undefined;
+    const list = this.tasks.list;
+    const open = list.filter((item) => item.status !== 'completed');
+    const named = open.map((item) => `"${item.content}" (${item.status === 'in_progress' ? 'in progress' : 'pending'})`).join(', ');
+    return [{ role: 'user', content: `<task-list-check>\nYour task list still shows ${open.length} of ${list.length} items not completed: ${named}. If you finished any of them, send TodoWrite now with the full list, marking completed only what is really done, and leave anything not done as it is. Then end your turn with one short line; do not repeat your answer.\n</task-list-check>` }];
+  }
+
   /** Moves a task-list item and shows the list at once, without waiting for sibling agents. */
   private moveTask(task: string, status: Todo['status']): string | undefined {
     const content = this.tasks.set(task, status);
@@ -1182,7 +1208,6 @@ export class AgentConversation {
       this.post({ type: 'tool-end', callId: event.callId, ok: event.ok, output: event.output });
       void record({ status: event.ok ? 'completed' : 'failed', kind: 'tool', ...(started ? { tool: started.tool, durationMs: Date.now() - started.at } : {}), ...(event.output.startsWith(AWAITING_APPROVAL_PREFIX) ? { errorCode: 'approval-pending' } : {}), summary: event.ok ? 'Tool call finished.' : 'Tool call failed or was declined.' });
     }
-    else if (event.type === 'todos') this.post({ type: 'todos', todos: event.todos });
     else if (event.type === 'retry') { this.post({ type: 'assistant-retry', discard: event.discardText, text: retryNotice(event) }); void record({ status: 'running', kind: 'model', model, summary: `Model turn failed; retrying (attempt ${event.attempt + 1}).` }); }
     else if (event.type === 'turn') this.tally(event.usage);
     if (event.type === 'turn') void record({ status: 'completed', kind: 'model', model: event.model || model, requestId: event.usage.requestId, summary: 'Model turn completed.', estimatedCostUsd: event.usage.estimatedCostUsd, inputTokens: event.usage.inputTokens, cachedInputTokens: event.usage.cachedInputTokens, cacheHit: (event.usage.cachedInputTokens ?? 0) > 0, outputTokens: event.usage.outputTokens, durationMs: event.usage.latencyMs });
@@ -1494,7 +1519,7 @@ export function visibleTurns(messages: AgentMessage[], display = new Map<string,
     const shown = message.role === 'user' ? display.get(contentKey(message.content)) : undefined;
     if (shown !== undefined) { turns.push({ role: 'user', text: shown, tools: 0 }); continue; }
     if (message.role === 'user') {
-      if (message.content.startsWith('<agent-notification') || message.content.startsWith('<conversation-summary>')) continue;
+      if (message.content.startsWith('<agent-notification') || message.content.startsWith('<conversation-summary>') || message.content.startsWith('<task-list-check>')) continue;
       turns.push({ role: 'user', text: commandForm(message.content) ?? message.content, tools: 0 });
     } else if (message.role === 'assistant') {
       const last = turns.at(-1);

@@ -46,6 +46,9 @@ export function narrowRuleFor(command: string, allowCommands: string[]): string 
 /** The rules' own words for a command that runs outside the workspace (0.4.17): the card names that kind of risk. */
 const LEAVES_WORKSPACE_REASON = /outside the workspace|leaves the workspace|another user's home directory/;
 
+/** How many model turns a run may take when the request names no limit. */
+export const DEFAULT_MAX_TURNS = 60;
+
 /** Matches the client's DEFAULT_STREAM_IDLE_TIMEOUT_MS; the loop doubles it after a stall. */
 const DEFAULT_IDLE_TIMEOUT_MS = 120_000;
 const MAX_IDLE_TIMEOUT_MS = 600_000;
@@ -306,7 +309,7 @@ export class AgentRun {
   private async loop(messages: AgentMessage[], signal: AbortSignal): Promise<RunResult> {
     let transcript = [...messages];
     const usage: UsageMetadata[] = [];
-    const maxTurns = this.options.maxTurns ?? 60;
+    const maxTurns = this.options.maxTurns ?? DEFAULT_MAX_TURNS;
     try {
       for (let turn = 0; turn < maxTurns; turn += 1) {
         const replaced = await this.options.beforeTurn?.(transcript, usage.at(-1), signal);

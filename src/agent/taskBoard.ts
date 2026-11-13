@@ -7,10 +7,10 @@ const normal = (content: string) => content.trim().toLowerCase();
  * the main agent waits for them. An Agent call that names its `task` sets that item in progress,
  * then completed when the agent finishes, or back to pending if it fails or is stopped.
  *
- * The main agent's TodoWrite list wins, with one exception: an item whose status the host set
- * keeps the host's status when the main agent sends it with the same status it gave the item
- * last time (an echo of its own stale list). Changing that status from its own last value is an
- * explicit decision, and the main agent's value wins.
+ * The invariant: a status the host set survives a stale echo of pending or in_progress (the main
+ * agent resending its own old list), a `completed` the main agent sends is always shown, and the
+ * host itself raises an item to completed only when the sub-agent it tracked finished. Changing a
+ * status from the main agent's own last value is an explicit decision, and the main agent's value wins.
  */
 export class TaskBoard {
   private items: Todo[] = [];
@@ -18,6 +18,11 @@ export class TaskBoard {
   private lastSent = new Map<string, Todo['status']>();
   /** Statuses the host set, by content, until the main agent explicitly overrides them. */
   private readonly marks = new Map<string, Todo['status']>();
+
+  private rev = 0;
+
+  /** Goes up every time the list changes (a write, a set that matched an item, a clear), so a caller can tell whether a run touched it. */
+  public get revision(): number { return this.rev; }
 
   public get list(): Todo[] { return this.items.map((item) => ({ ...item })); }
 
@@ -31,11 +36,14 @@ export class TaskBoard {
 
   /** Applies the main agent's TodoWrite; returns the list to show. */
   public write(todos: Todo[]): Todo[] {
+    this.rev += 1;
     const sent = new Map<string, Todo['status']>();
     this.items = todos.map((item) => {
       sent.set(item.content, item.status);
       const mark = this.marks.get(item.content);
       if (mark === undefined) return { ...item };
+      // A completed the model sends always wins, even when it repeats its own last status: otherwise an item the host moved back to pending could never be completed again.
+      if (item.status === 'completed') { this.marks.delete(item.content); return { ...item }; }
       if (item.status === mark) { this.marks.delete(item.content); return { ...item }; }
       const echo = this.lastSent.get(item.content) === item.status;
       if (echo) return { ...item, status: mark };
@@ -52,11 +60,13 @@ export class TaskBoard {
     const item = this.find(task);
     if (!item) return undefined;
     item.status = status;
+    this.rev += 1;
     this.marks.set(item.content, status);
     return item.content;
   }
 
   public clear(): void {
+    this.rev += 1;
     this.items = [];
     this.lastSent.clear();
     this.marks.clear();
