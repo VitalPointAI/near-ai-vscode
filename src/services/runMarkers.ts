@@ -14,7 +14,8 @@ import { writerEditor } from './stateHome';
 
 const CONVERSATION_ID = /^conv-[a-z0-9-]{6,60}$/;
 const RUN_ID = /^run-\d+-[a-f0-9]{6}$/;
-const WRITER = /^[a-z0-9]{6,40}\.[a-z0-9]{6,40}$/;
+/** What a writer id looks like: `<editor>.<instance>`. */
+export const WRITER = /^[a-z0-9]{6,40}\.[a-z0-9]{6,40}$/;
 /** A live run refreshes its marker this often. */
 export const HEARTBEAT_MS = 30_000;
 /** A marker another editor wrote counts as live while it was refreshed within this long (six missed heartbeats). */

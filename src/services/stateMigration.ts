@@ -17,9 +17,9 @@ import type { ThreadEntry } from '../domain/state/threadEntries';
 import { ActivityStore } from './activityStore';
 import type { AuthService } from './auth';
 import { ProfileStore } from './profileStore';
-import { parseRunMarker, type RunMarker } from './runMarkers';
+import { parseRunMarker, type RunMarker, WRITER } from './runMarkers';
 import { mirrorProjectSpend } from './spendMirror';
-import { editorWriter, ProjectStateHome, stateHomeFor, writeFileAtomic, type MementoLike } from './stateHome';
+import { editorWriter, ProjectStateHome, stateHomeFor, writeFileAtomic, writerEditor, type MementoLike } from './stateHome';
 import type { SecretsLike } from './stateKeys';
 import { applyRetention } from './threadArchive';
 import { threadStoreFor, type ImportedThread, type ThreadStore } from './threadStore';
@@ -185,6 +185,18 @@ function markerLater(candidate: RunMarker, current: RunMarker): boolean {
   return JSON.stringify(candidate) > JSON.stringify(current);
 }
 
+/**
+ * A run marker from 0.4.19 has no writer, so no editor could tell whose run it was: only silence would end it. One still open is stamped as this editor's
+ * (`<editor id>.migrated`: an instance no host has), so its process, which is gone, decides at once and this editor can resume it by itself, while another
+ * editor sees it as any other editor's run. An ended marker, or one that already has a writer, is left as it is.
+ */
+function stampedAsMigrated(marker: RunMarker, writer: string): RunMarker {
+  const editor = writerEditor(writer);
+  const stamp = editor ? `${editor}.migrated` : undefined;
+  if (marker.writer || marker.endedAt || !stamp || !WRITER.test(stamp)) return marker;
+  return { ...marker, version: 2, writer: stamp };
+}
+
 /** Copies the editor's run markers for the project, so a run that was in flight when the editor was upgraded can still be offered for resume. */
 async function migrateMarkers(sources: MigrationSources, home: ProjectStateHome, prepare: () => Promise<void>, report: MigrationReport, options: MigrationOptions): Promise<void> {
   const folder = path.join(sources.globalStorageDir, 'runs', projectFolderHash(sources.root));
@@ -192,7 +204,8 @@ async function migrateMarkers(sources: MigrationSources, home: ProjectStateHome,
     const id = name.slice(0, -5);
     if (!ID.test(id)) continue;
     try {
-      const marker = parseRunMarker(JSON.parse(await readFile(path.join(folder, name), 'utf8')), id);
+      const parsed = parseRunMarker(JSON.parse(await readFile(path.join(folder, name), 'utf8')), id);
+      const marker = parsed && stampedAsMigrated(parsed, sources.writer);
       if (!marker) report.skipped += 1;
       else {
         const target = path.join(home.paths.runs, name);
@@ -367,17 +380,27 @@ export interface MigrationExtras {
   protectedIds?: () => Iterable<string>;
   /** Where the counts are written. Only counts go here: never a title, an id or any text. */
   log?: (line: string) => void;
+  /** The clock the retry back-off reads (tests). */
+  now?: () => number;
 }
+
+/** After a merge fails, the next try waits this long, doubling with each failure in a row up to MIGRATION_RETRY_MAX_MS. */
+export const MIGRATION_RETRY_FIRST_MS = 60_000;
+export const MIGRATION_RETRY_MAX_MS = 1_800_000;
+const retryDelay = (failures: number): number => Math.min(MIGRATION_RETRY_MAX_MS, MIGRATION_RETRY_FIRST_MS * 2 ** Math.max(0, failures - 1));
 
 interface Host { context: MigrationContext; auth?: AuthService; extras: MigrationExtras }
 
 let host: Host | undefined;
 const runs = new Map<string, Promise<MigrationReport | undefined>>();
+/** Per project: when the merge last failed and how many times in a row, so a stuck merge is not started before every message. */
+const failed = new Map<string, { at: number; count: number }>();
 
 /** Gives the migration this editor's storage, secrets and writer. Called once at activation; it reads and writes nothing. */
 export function configureMigration(context: MigrationContext, auth?: AuthService, extras: MigrationExtras = {}): void {
   host = { context, ...(auth ? { auth } : {}), extras };
   runs.clear();
+  failed.clear();
 }
 
 /** The editor's old install-local transcript key, read without creating one: an editor that never had one has nothing sealed with it. */
@@ -397,7 +420,8 @@ function countsLine(report: MigrationReport): string {
 /**
  * Merges this editor's own storage for the project into the state home, once per project in this extension host. The first call starts it and every
  * later call gets the same result, so a chat, the history and Compare Models can each ask without repeating the work. Never rejects: a run that fails
- * is forgotten, so the next ask tries again, and what could not be opened yet (locked) is tried again at the next start. Without configureMigration
+ * is forgotten and tried again after a back-off (a minute, doubling to half an hour), with one log line per failure; asks in between get undefined at
+ * once. What could not be opened yet (locked) is tried again at the next start. Without configureMigration
  * (a test, or a host with nothing to migrate) it does nothing.
  */
 export function ensureMigrated(root: string): Promise<MigrationReport | undefined> {
@@ -406,7 +430,12 @@ export function ensureMigrated(root: string): Promise<MigrationReport | undefine
   const existing = runs.get(key);
   if (existing) return existing;
   const { context, auth, extras } = host;
+  const now = extras.now ?? Date.now;
+  const lastFailure = failed.get(key);
+  if (lastFailure && now() < lastFailure.at + retryDelay(lastFailure.count)) return Promise.resolve(undefined);
   const run = (async (): Promise<MigrationReport | undefined> => {
+    // Yields once, so a failure that happens at once still forgets the run after it was remembered below, never before.
+    await Promise.resolve();
     try {
       const sources: MigrationSources = {
         root: key,
@@ -421,9 +450,13 @@ export function ensureMigrated(root: string): Promise<MigrationReport | undefine
         ...(extras.protectedIds ? { protectedIds: extras.protectedIds } : {})
       });
       if (changesIn(report) > 0 || report.threads.locked > 0) extras.log?.(countsLine(report));
+      failed.delete(key);
       return report;
     } catch {
-      extras.log?.('State merge did not finish; it will be tried again.');
+      const count = (failed.get(key)?.count ?? 0) + 1;
+      failed.set(key, { at: now(), count });
+      const minutes = Math.ceil(retryDelay(count) / 60_000);
+      extras.log?.(`State merge did not finish; it will be tried again in ${minutes} minute${minutes === 1 ? '' : 's'}.`);
       runs.delete(key);
       return undefined;
     }

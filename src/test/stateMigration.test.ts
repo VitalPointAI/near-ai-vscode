@@ -8,9 +8,9 @@ import { RunCheckpoints } from '../agent/checkpoints';
 import { ActivityStore } from '../services/activityStore';
 import type { AgentMessage } from '../services/nearAiClient';
 import { ComparisonStore } from '../benchmark/store';
-import { RunMarkers } from '../services/runMarkers';
+import { autoResumeChoice, FOREIGN_LIVE_MS, ownEditorMarkers, RunMarkers } from '../services/runMarkers';
 import { formatProjectSpend, mirrorProjectSpend, projectSpendSection, readProjectSpend } from '../services/spendMirror';
-import { changesIn, configureMigration, emptyReport, ensureMigrated, migrateEditorStorage, type MigrationOptions, type MigrationReport, type MigrationSources } from '../services/stateMigration';
+import { changesIn, configureMigration, emptyReport, ensureMigrated, MIGRATION_RETRY_FIRST_MS, MIGRATION_RETRY_MAX_MS, migrateEditorStorage, type MigrationOptions, type MigrationReport, type MigrationSources } from '../services/stateMigration';
 import { stateHomeFor, writeFileAtomic } from '../services/stateHome';
 import { stateKeysFor } from '../services/stateKeys';
 import { ThreadStore } from '../services/threadStore';
@@ -743,6 +743,122 @@ test('the run report gets a project spend history section from every editor, and
     assert.match(section, /3 requests/, 'both editors\' requests are in it');
     assert.match(section, /daily spend limit still counts only this editor/);
   } finally {
+    await rm(root, { recursive: true, force: true });
+    await rm(storage, { recursive: true, force: true });
+  }
+});
+
+
+// ---- plan 34: migrated run markers belong to this editor; a failing merge backs off ----------------------------------------------------------
+
+test('a run in flight at upgrade is stamped as this editor\'s: cut off at once here and resumable by itself, running elsewhere then cut off for another editor', async () => {
+  const root = await tempProject();
+  const storage = await tempStorage();
+  try {
+    const editor = await legacyEditor(storage, root, { markers: [{ conversationId: 'conv-in-flight', runId: 'run-1793000000001-aaaaaa', activeAt: minute(20), steps: ['Edit'] }] });
+    const report = await migrate(root, editor, threadsOf(root, editor.secrets, 'editora1.inst00001'), 'editora1.inst00001');
+    assert.equal(report.markers, 1);
+    const raw = JSON.parse(await readFile(path.join(stateHomeFor(root).paths.runs, 'conv-in-flight.json'), 'utf8')) as Record<string, unknown>;
+    assert.equal(raw.writer, 'editora1.migrated');
+    assert.equal(raw.version, 2);
+
+    const at = Date.parse(minute(20)) + 10_000;
+    const here = new RunMarkers(storage, root, { dir: stateHomeFor(root).paths.runs, writer: 'editora1.inst00002', now: () => at, alive: () => false });
+    const marker = (await here.markerOf('conv-in-flight'))!;
+    assert.equal(here.runState(marker), 'cut-off', 'its process is gone, so it is cut off at once in this editor');
+    assert.deepEqual((await here.interrupted()).map((item) => item.conversationId), ['conv-in-flight']);
+    assert.equal(ownEditorMarkers([marker], 'editora1.inst00002').length, 1, 'it counts as this editor\'s own run');
+    assert.deepEqual(autoResumeChoice(ownEditorMarkers([marker], 'editora1.inst00002'), { enabled: true, emergencyStopped: false, now: at }).map((item) => item.conversationId), ['conv-in-flight'], 'and it resumes by itself');
+
+    const clock = { now: at };
+    const there = new RunMarkers(storage, root, { dir: stateHomeFor(root).paths.runs, writer: 'editorb1.inst00001', now: () => clock.now, alive: () => true });
+    assert.equal(there.runState((await there.markerOf('conv-in-flight'))!), 'running-elsewhere', 'another editor sees a run quiet for 10 seconds as live');
+    assert.equal(ownEditorMarkers([marker], 'editorb1.inst00001').length, 0, 'and never resumes it by itself');
+    clock.now = Date.parse(minute(20)) + FOREIGN_LIVE_MS + 1_000;
+    assert.equal(there.runState((await there.markerOf('conv-in-flight'))!), 'cut-off', 'after 3 minutes it is cut off there too, with its Resume button');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+    await rm(storage, { recursive: true, force: true });
+  }
+});
+
+test('a migrated marker that ended, or that already has a writer, keeps what it had; a writer that is not an editor id leaves the marker as it was', async () => {
+  const root = await tempProject();
+  const storage = await tempStorage();
+  try {
+    const editor = await legacyEditor(storage, root, {
+      markers: [
+        { conversationId: 'conv-ended-run', runId: 'run-1793000000001-aaaaaa', activeAt: minute(20), endedAt: minute(21) },
+        { conversationId: 'conv-has-writer', runId: 'run-1793000000002-bbbbbb', activeAt: minute(20), version: 2, writer: 'editorc1.inst00001' }
+      ]
+    });
+    await migrate(root, editor, threadsOf(root, editor.secrets, 'editora1.inst00001'), 'editora1.inst00001');
+    const read = async (id: string) => JSON.parse(await readFile(path.join(stateHomeFor(root).paths.runs, `${id}.json`), 'utf8')) as Record<string, unknown>;
+    assert.equal((await read('conv-ended-run')).writer, undefined, 'an ended run is never resumed, so it gets no writer');
+    assert.equal((await read('conv-has-writer')).writer, 'editorc1.inst00001');
+
+    // The short test writer 'edA.1' is not a writer id the markers accept: the marker is copied as it was rather than made unreadable.
+    const other = await tempProject();
+    try {
+      const old = await legacyEditor(path.join(storage, 'short'), other, { markers: [{ conversationId: 'conv-in-flight', runId: 'run-1793000000003-cccccc', activeAt: minute(20) }] });
+      await migrate(other, old, threadsOf(other, old.secrets), 'edA.1');
+      const markers = new RunMarkers(storage, other, { dir: stateHomeFor(other).paths.runs, writer: 'editord1.inst00001', now: () => Date.parse(minute(20)) + 3_600_000, alive: () => false });
+      assert.deepEqual((await markers.interrupted()).map((item) => item.conversationId), ['conv-in-flight']);
+    } finally { await rm(other, { recursive: true, force: true }); }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+    await rm(storage, { recursive: true, force: true });
+  }
+});
+
+test('a merge that fails is tried again after a back-off that doubles, logs one line per failure, and a success clears it', async () => {
+  const root = await tempProject();
+  const storage = await tempStorage();
+  try {
+    let attempts = 0;
+    let failing = true;
+    const context = fakeContext(storage, new MemorySecrets());
+    const failingContext = { ...context, get globalStorageUri(): { fsPath: string } { attempts += 1; if (failing) throw new Error('storage is gone'); return { fsPath: storage }; } };
+    const lines: string[] = [];
+    const clock = { now: 1_000_000 };
+    configureMigration(failingContext, undefined, { log: (line) => lines.push(line), now: () => clock.now });
+
+    assert.equal(await ensureMigrated(root), undefined);
+    assert.equal(attempts, 1);
+    assert.deepEqual(lines, ['State merge did not finish; it will be tried again in 1 minute.']);
+    clock.now += MIGRATION_RETRY_FIRST_MS - 1;
+    assert.equal(await ensureMigrated(root), undefined);
+    assert.equal(await ensureMigrated(root), undefined);
+    assert.equal(attempts, 1, 'within the first minute nothing runs again');
+    assert.equal(lines.length, 1, 'and nothing is logged again');
+
+    clock.now += 1;
+    assert.equal(await ensureMigrated(root), undefined);
+    assert.equal(attempts, 2, 'after the back-off it runs again');
+    assert.equal(lines.length, 2);
+    assert.match(lines[1], /in 2 minutes\./, 'the wait doubled');
+    clock.now += 2 * MIGRATION_RETRY_FIRST_MS - 1;
+    await ensureMigrated(root);
+    assert.equal(attempts, 2);
+    clock.now += 1;
+    await ensureMigrated(root);
+    assert.equal(attempts, 3);
+    assert.match(lines[2], /in 4 minutes\./);
+    // The wait never passes half an hour.
+    for (let again = 0; again < 8; again += 1) { clock.now += MIGRATION_RETRY_MAX_MS; await ensureMigrated(root); }
+    assert.match(lines.at(-1)!, /in 30 minutes\./);
+
+    // A success clears the back-off: the next failure waits a minute again.
+    failing = false;
+    clock.now += MIGRATION_RETRY_MAX_MS;
+    assert.ok(await ensureMigrated(root), 'it ran and finished');
+    const before = lines.length;
+    failing = true;
+    configureMigration(failingContext, undefined, { log: (line) => lines.push(line), now: () => clock.now });
+    await ensureMigrated(root);
+    assert.match(lines[before], /in 1 minute\./);
+  } finally {
+    configureMigration(fakeContext(storage, new MemorySecrets()));
     await rm(root, { recursive: true, force: true });
     await rm(storage, { recursive: true, force: true });
   }
