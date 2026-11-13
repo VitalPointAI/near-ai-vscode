@@ -1236,8 +1236,8 @@
       case 'pickup-card': pickupKit.renderPickupCard(document, welcomeReady, m.model, post, () => input.focus()); break;
       case 'sync-status':
         syncKit.renderSyncControl(document, syncButton, m.model, post);
-        // The invitation steps aside while the pick-up card carries its own (syncControl.js decides).
-        syncKit.renderSyncPrompt(document, welcome, post, m.prompt === true);
+        // The invitation sits in the ready area (shown once a profile works, after "Connect NEAR AI to start") and steps aside while the pick-up card carries its own (syncControl.js decides).
+        syncKit.renderSyncPrompt(document, welcomeReady, post, m.prompt === true);
         break;
       case 'conversation-show': {
         draftsLive = false;
