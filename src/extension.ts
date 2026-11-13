@@ -32,7 +32,7 @@ import { openCyberPanel } from './services/cyberPanel';
 import { cyberPanelService } from './services/cyberService';
 import { registerModelComparison } from './services/modelComparisonPanel';
 import { openTeamStudio } from './services/teamStudioPanel';
-import { threadStoreFor } from './services/threadStore';
+import { historyItems, LOCKED_DETAIL, threadStoreFor } from './services/threadStore';
 import { chooseGsdCommand } from './services/gsdCommands';
 import { NearAiPanelViewProvider } from './services/panelView';
 import { deriveProfileId } from './domain/auth';
@@ -195,22 +195,15 @@ async function suggestProxySupportOff(context: vscode.ExtensionContext): Promise
   }).catch(() => undefined);
 }
 
-const LOCKED_DETAIL = 'Locked on this device: enter your recovery code to open it';
-
 async function showHistory(context: vscode.ExtensionContext, sidebar: NearAiPanelViewProvider): Promise<void> {
   const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   if (!root) { void vscode.window.showInformationMessage('Open a folder to see NEAR AI conversations.'); return; }
-  const saved = await threadStoreFor(root, context.secrets, editorWriter(context.globalState), () => vscode.workspace.getConfiguration('nearAi').get<boolean>('sync.keepKeyInProject', true)).list();
+  // D-08: the list is the thread index (the threads' small meta files); no log is opened for any item. Every thread is listed: live, archived, from the
+  // Chat view, or locked on this device.
+  const saved = await threadStoreFor(root, context.secrets, editorWriter(context.globalState), () => vscode.workspace.getConfiguration('nearAi').get<boolean>('sync.keepKeyInProject', true)).index();
   if (!saved.length) { void vscode.window.showInformationMessage(readAgentLimits().saveTranscripts ? 'No saved NEAR AI conversations in this project yet.' : 'Saving conversations is off (nearAi.agent.saveTranscripts).'); return; }
-  const picked = await vscode.window.showQuickPick(saved.map((conversation) => conversation.locked
-    ? { label: 'Locked conversation', description: conversation.id, detail: LOCKED_DETAIL, id: conversation.id, locked: true }
-    : {
-      label: conversation.title,
-      description: `${conversation.turns} message${conversation.turns === 1 ? '' : 's'}`,
-      detail: `${new Date(conversation.updatedAt).toLocaleString()} · ${conversation.model}`,
-      id: conversation.id,
-      locked: false
-    }), { placeHolder: 'Open a NEAR AI conversation as a tab, with its full context', matchOnDescription: true, matchOnDetail: true });
+  // Typing filters by title (the label); the description and detail are searched too, so "Archived" or a model name also finds them.
+  const picked = await vscode.window.showQuickPick(historyItems(saved), { placeHolder: 'Open a NEAR AI conversation as a tab, with its full context. Type to filter by title.', matchOnDescription: true, matchOnDetail: true });
   if (!picked) return;
   // A locked conversation is listed so it never seems to have vanished, but it cannot be opened on this device.
   if (picked.locked) { void vscode.window.showInformationMessage(LOCKED_DETAIL); return; }

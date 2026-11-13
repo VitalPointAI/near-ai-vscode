@@ -11,13 +11,16 @@ import * as path from 'node:path';
 import { aadFor, open as openSealed, seal, subKey, type SealedBlob } from '../domain/state/keys';
 import { isSyntheticMessage, messagesToEntries } from '../domain/state/threadCapture';
 import { threadLines, threadTip, unionEntries, type ThreadEntry, type ThreadLines, type ThreadRole } from '../domain/state/threadEntries';
-import { pairToolResults } from '../domain/state/threadView';
+import { PARTIAL_HISTORY, PARTIAL_HISTORY_NOTE, pairToolResults } from '../domain/state/threadView';
 import type { AgentMessage } from './nearAiClient';
 import { ProjectStateHome, stateHomeFor, writeFileAtomic } from './stateHome';
 import { stateKeysFor, type SecretsLike, type StateKeys } from './stateKeys';
 import type { ConversationStore, Transcript, TranscriptSummary } from './transcripts';
 
 export type ThreadOrigin = 'panel' | 'chat-view';
+
+/** A live thread is listed and continued as usual; an archived one is kept whole but tucked away (set by the archive, plan 07). */
+export type ThreadState = 'live' | 'archived';
 
 export interface ThreadMeta {
   id: string;
@@ -36,7 +39,12 @@ export interface ThreadMeta {
   tip: string;
   /** Set when the thread's earliest messages are not all present, for a thread brought in from an older version. */
   history?: string;
+  /** Absent means live. */
+  state?: ThreadState;
 }
+
+/** One line of the history list: a thread's meta with its state settled, or a thread this device cannot open (locked, with no title or counts). */
+export type ThreadIndexItem = Omit<ThreadMeta, 'state'> & { state: ThreadState; locked?: boolean };
 
 export interface ThreadStoreOptions {
   writer: string;
@@ -355,9 +363,17 @@ export class ThreadStore implements ConversationStore {
     };
   }
 
-  /** The meta of every thread this device can open, newest use first. */
-  public async index(): Promise<ThreadMeta[]> {
-    return (await this.scan()).metas.sort((a, b) => b.lastUsedAt.localeCompare(a.lastUsedAt));
+  /**
+   * Every thread of the project for the history list, newest use first: the meta of each thread this device can open (from the index and the threads'
+   * own small meta files, never from a log), and a locked line for each it cannot.
+   */
+  public async index(): Promise<ThreadIndexItem[]> {
+    const { metas, locked } = await this.scan();
+    const items: ThreadIndexItem[] = metas.map((meta) => ({ ...meta, state: meta.state === 'archived' ? 'archived' : 'live' }));
+    for (const item of locked) {
+      items.push({ id: item.id, title: '', model: '', origin: 'panel', createdAt: item.updatedAt, lastUsedAt: item.updatedAt, turns: 0, entries: 0, bytes: 0, tip: '', state: 'live', locked: true });
+    }
+    return items.sort((a, b) => b.lastUsedAt.localeCompare(a.lastUsedAt) || a.id.localeCompare(b.id));
   }
 
   /** Creates a thread's meta, or returns the one it has. Writes no log. */
@@ -448,6 +464,26 @@ export class ThreadStore implements ConversationStore {
       for (const message of fresh) logged.add(message);
     });
   }
+}
+
+/** What the history list says of a thread this device cannot open. */
+export const LOCKED_DETAIL = 'Locked on this device: enter your recovery code to open it';
+
+/** One entry of the history list, in the shape of a VS Code QuickPick item. */
+export interface HistoryItem { id: string; label: string; description: string; detail: string; locked: boolean }
+
+/**
+ * The history list (D-08): one item per thread of the index, newest use first and then by id. The label is the title, so typing filters by title; the
+ * description counts messages and says where it was asked (the Chat view) and whether it is archived; a locked thread says so and is never opened.
+ * `format` words a time (the local time by default).
+ */
+export function historyItems(index: readonly ThreadIndexItem[], format: (iso: string) => string = (iso) => new Date(iso).toLocaleString()): HistoryItem[] {
+  return [...index].sort((a, b) => b.lastUsedAt.localeCompare(a.lastUsedAt) || a.id.localeCompare(b.id)).map((item): HistoryItem => {
+    if (item.locked) return { id: item.id, label: 'Locked conversation', description: `Locked · ${item.id}`, detail: LOCKED_DETAIL, locked: true };
+    const description = [`${item.turns} message${item.turns === 1 ? '' : 's'}`, ...(item.origin === 'chat-view' ? ['Chat view'] : []), ...(item.state === 'archived' ? ['Archived'] : [])].join(' · ');
+    const detail = [format(item.lastUsedAt), ...(item.model ? [item.model] : []), ...(item.history === PARTIAL_HISTORY ? [PARTIAL_HISTORY_NOTE] : [])].join(' · ');
+    return { id: item.id, label: item.title || 'Conversation', description, detail, locked: false };
+  });
 }
 
 const stores = new WeakMap<object, Map<string, ThreadStore>>();
