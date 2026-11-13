@@ -170,6 +170,17 @@ test('a saved comparison reads back as written; damaged or foreign files are ref
   assert.deepEqual(summarizeRun(original).map((entry) => [entry.rank, entry.model]), [[1, 'tee/a'], [2, 'fwd/b']]);
 });
 
+test('a comparison an older build saved with mode "run" reads as "rerun" and is written back that way; an unknown mode is still refused (G-27-2)', () => {
+  const original = saved('2026-11-08T00-28-34-953Z', '2026-11-08T00:28:34.953Z', [row('tee/a', 'implement', 10)]);
+  const older = parseSavedRun(JSON.stringify({ ...original, mode: 'run' }));
+  assert.ok(older, 'a comparison with mode run is readable');
+  assert.equal(older.mode, 'rerun');
+  assert.deepEqual(older, { ...original, mode: 'rerun' });
+  assert.match(serializeRun(older), /"mode": "rerun"/);
+  assert.equal(parseSavedRun(serializeRun(older))!.mode, 'rerun');
+  assert.equal(parseSavedRun(JSON.stringify({ ...original, mode: 'again' })), undefined);
+});
+
 test('the catalog version changes when NEAR\'s listing of a model changes', () => {
   const base: ModelInfo = { id: 'tee/a', privacyBoundary: 'tee', inputPricePerMillion: 1, outputPricePerMillion: 2 };
   assert.equal(catalogVersion(base), catalogVersion({ ...base, fetchedAt: 'later' }));

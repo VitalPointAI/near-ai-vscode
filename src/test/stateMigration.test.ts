@@ -7,6 +7,7 @@ import test from 'node:test';
 import { RunCheckpoints } from '../agent/checkpoints';
 import { ActivityStore } from '../services/activityStore';
 import type { AgentMessage } from '../services/nearAiClient';
+import { ComparisonStore } from '../benchmark/store';
 import { RunMarkers } from '../services/runMarkers';
 import { formatProjectSpend, mirrorProjectSpend, projectSpendSection, readProjectSpend } from '../services/spendMirror';
 import { changesIn, configureMigration, emptyReport, ensureMigrated, migrateEditorStorage, type MigrationOptions, type MigrationReport, type MigrationSources } from '../services/stateMigration';
@@ -389,6 +390,41 @@ test('comparisons: saved runs are copied when absent, a damaged or unrelated fil
     assert.equal(await hashTree(storage), before);
     assert.deepEqual((await readdir(home.paths.comparisons)).sort(), [`${there.id}.json`, `${mine.id}.json`].sort());
     assert.equal(JSON.parse(await readFile(path.join(home.paths.comparisons, `${there.id}.json`), 'utf8')).models.length, 2, 'the later copy in the state home is kept');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+    await rm(storage, { recursive: true, force: true });
+  }
+});
+
+// G-27-2: a comparison an older build saved with mode "run" (the current value is "rerun") was dropped as unreadable, so it never reached the state home.
+function olderModeRun(id: string): string {
+  const row = (model: string, task: string): object => ({ model, task, kind: 'research', taskVersion: '1', run: 1, score: 3, outOf: 4, outcome: 'completed', seconds: 12, turns: 4, inputTokens: 900, outputTokens: 300, generatingMs: 2000, costUsd: 0.002, costEstimated: false, stalls: 0, misses: [], at: '2026-11-08T00:30:00.000Z' });
+  return `${JSON.stringify({
+    format: 'near-ai-model-comparison', version: 1, id, startedAt: '2026-11-08T00:28:34.953Z', finishedAt: '2026-11-08T00:40:00.000Z', status: 'completed', taskSet: 'full', mode: 'run', runsPerTask: 1,
+    models: [{ id: 'model-a', privacy: 'tee', catalogVersion: 'v1' }, { id: 'model-b', privacy: 'tee', catalogVersion: 'v1' }], tasks: [{ id: 'research-1', kind: 'research', version: '1' }],
+    rows: [row('model-a', 'research-1'), row('model-b', 'research-1')]
+  }, null, 2)}\n`;
+}
+
+test('comparisons: one an older build saved with mode "run" is migrated as a rerun comparison, listed by the store, and a second migration changes nothing', async () => {
+  const root = await tempProject();
+  const storage = await tempStorage();
+  try {
+    const id = '2026-11-08T00-28-34-953Z';
+    const editor = await legacyEditor(storage, root, { rawEvals: [{ name: id, text: olderModeRun(id) }] });
+    const store = threadsOf(root, editor.secrets);
+    const first = await migrate(root, editor, store);
+    assert.equal(first.comparisons, 1);
+    assert.equal(first.skipped, 0);
+    const home = stateHomeFor(root);
+    const listed = await new ComparisonStore(home.paths.comparisons).list();
+    assert.deepEqual(listed.map((run) => [run.id, run.mode, run.rows.length]), [[id, 'rerun', 2]]);
+    assert.match(await readFile(path.join(home.paths.comparisons, `${id}.json`), 'utf8'), /"mode": "rerun"/);
+    const state = await hashTree(home.paths.comparisons);
+    const second = await migrate(root, editor, store);
+    assert.equal(second.comparisons, 0);
+    assert.equal(second.skipped, 0);
+    assert.equal(await hashTree(home.paths.comparisons), state);
   } finally {
     await rm(root, { recursive: true, force: true });
     await rm(storage, { recursive: true, force: true });
