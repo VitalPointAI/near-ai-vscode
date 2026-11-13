@@ -203,6 +203,18 @@ export class RunMarkers {
     return Boolean(marker && (runId === undefined || marker.runId === runId) && this.runState(marker) === 'running-elsewhere');
   }
 
+  /** Every run of this project that is running right now, in this window or another (the state is as this editor sees it). */
+  public async liveRuns(): Promise<Array<{ conversationId: string; state: RunState }>> {
+    const found: Array<{ conversationId: string; state: RunState }> = [];
+    for (const name of await readdir(this.dir).catch(() => [] as string[])) {
+      if (!name.endsWith('.json')) continue;
+      const marker = await this.read(name.slice(0, -5));
+      const state = marker ? this.runState(marker) : undefined;
+      if (marker && (state === 'running-here' || state === 'running-elsewhere')) found.push({ conversationId: marker.conversationId, state });
+    }
+    return found;
+  }
+
   /** The conversation's marker, whatever state its run is in. */
   public markerOf(conversationId: string): Promise<RunMarker | undefined> { return this.read(conversationId); }
 

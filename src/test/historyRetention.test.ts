@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
+import { onRunEnded, runEnded } from '../services/runEndHooks';
+import { protectedThreadIds } from '../services/threadArchive';
 import { clampLiveConversations, LIVE_CONVERSATIONS_DEFAULT, LIVE_CONVERSATIONS_MAX, LIVE_CONVERSATIONS_MIN, rankThreads } from '../domain/state/retention';
 
 // Phase 27, plan 07 (SYNC-01, D-08): which threads stay live is derived from data, so every editor places and lists them the same way.
@@ -71,4 +73,35 @@ test('settings reads the live count through the clamp, from nearAi.history.liveC
   assert.ok(source.includes('export function readHistoryLimits'), 'readHistoryLimits exists');
   assert.match(reader, /history\.liveConversations/);
   assert.match(reader, /clampLiveConversations\(/);
+});
+
+test('the protected ids are every open tab and every conversation whose run is running here or elsewhere, and no finished or cut-off one', () => {
+  const keep = protectedThreadIds(['conv-open-1', 'conv-open-2'], [
+    { conversationId: 'conv-here', state: 'running-here' },
+    { conversationId: 'conv-elsewhere', state: 'running-elsewhere' },
+    { conversationId: 'conv-done', state: 'finished' },
+    { conversationId: 'conv-cut', state: 'cut-off' }
+  ]);
+  assert.deepEqual([...keep].sort(), ['conv-elsewhere', 'conv-here', 'conv-open-1', 'conv-open-2']);
+});
+
+test('a running thread that is old stays live through the rank rule when its id is protected', () => {
+  const all = threads(8);
+  const keep = protectedThreadIds([], [{ conversationId: 'conv-t-001', state: 'running-elsewhere' }]);
+  const ranked = rankThreads(all, 5, keep);
+  assert.ok(ranked.live.includes('conv-t-001'));
+  assert.ok(!ranked.archive.includes('conv-t-001'));
+});
+
+test('a run-end listener hears the event, and one that throws or rejects never breaks the others or the run', async () => {
+  const heard: string[] = [];
+  const first = onRunEnded(() => { throw new Error('a hook that breaks'); });
+  const second = onRunEnded(async () => { await Promise.resolve(); throw new Error('a hook that rejects'); });
+  const third = onRunEnded(async (event) => { heard.push(`${event.conversationId}:${event.runId}:${event.outcome}`); });
+  await runEnded({ root: '/project', conversationId: 'conv-x', runId: 'run-1', outcome: 'done' });
+  first.dispose();
+  second.dispose();
+  third.dispose();
+  await runEnded({ root: '/project', conversationId: 'conv-x', runId: 'run-2', outcome: 'done' });
+  assert.deepEqual(heard, ['conv-x:run-1:done'], 'the listener heard only the run that ended while it was registered');
 });

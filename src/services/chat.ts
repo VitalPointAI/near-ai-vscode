@@ -19,8 +19,10 @@ import { hintForView } from './reportingToken';
 import { shownSpendAccount, showSpendAccount, SpendAccount } from './spendAccount';
 import { withSpendTag } from './spendLedger';
 import { ProfileStore } from './profileStore';
-import { readAgentLimits, readAgentModels, readAgentRules, readModelTiers, readRiskSwitches, readRoleModels, readSafetyModel, readSettings, shouldAutoInstallGsd, readRunBudget } from './settings';
+import { readAgentLimits, readAgentModels, readAgentRules, readModelTiers, readRiskSwitches, readRoleModels, readSafetyModel, readSettings, shouldAutoInstallGsd, readRunBudget, readHistoryLimits } from './settings';
 import { threadStoreFor } from './threadStore';
+import { applyRetention, protectedThreadIds } from './threadArchive';
+import { onRunEnded, runEnded } from './runEndHooks';
 import { copyAttachmentIntoProject, prepareAttachments, stageAttachment, StagedAttachment } from '../agent/attachments';
 import { TeamDefinition, TeamLibrary, teamAgents } from '../agent/teams';
 import type { GsdAgent } from '../gsd/library';
@@ -313,6 +315,8 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     }
     if (!reuse) tabs.push(tab);
     show(tab);
+    // An archived thread that was just opened is live again; the lowest-ranked live thread is archived in its place.
+    void retain().catch(() => undefined);
   };
 
   // The status line follows the key's ledger and NEAR's usage summary as they settle, at most once a second.
@@ -328,6 +332,24 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
   };
   panel.webview.html = html;
 
+  // D-08: the few most recently used threads stay live and the rest are archived, never deleted. A thread open in any tab of this editor, or with a run
+  // running here or elsewhere, stays live whatever its rank. It runs when a run ends and once when the chat starts, never during a run of that thread.
+  const openTabs = (): string[] => tabs.map((tab) => tab.id);
+  openTabSources.add(openTabs);
+  const retain = async (): Promise<void> => {
+    const root = workspaceRoot();
+    if (!root || disposed || !readAgentLimits().saveTranscripts) return;
+    const store = threadStoreFor(root, context.secrets, editorWriter(context.globalState as MementoLike | undefined), () => vscode.workspace.getConfiguration('nearAi').get<boolean>('sync.keepKeyInProject', true));
+    const markers = await runMarkersFor(context, root).liveRuns().catch(() => []);
+    const keep = protectedThreadIds([...openTabSources].flatMap((source) => source()), markers);
+    await applyRetention(store, readHistoryLimits().liveConversations, keep);
+  };
+  const retentionWatch = onRunEnded(async (event) => {
+    const root = workspaceRoot();
+    if (!root || path.resolve(event.root) !== path.resolve(root)) return;
+    if (tabs.some((tab) => tab.id === event.conversationId && tab.agent?.running)) return;
+    await retain();
+  });
   // The open conversations come back after a reload. Runs cannot survive one: a conversation that
   // was running is shown as stopped, with its transcript, and its run is closed in the history.
   const ready = (async () => {
@@ -356,6 +378,8 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     activeId = saved.activeId ?? cutOff ?? tabs[0].id;
     feed.focusConversation(activeId);
     sendSummary(true);
+    // Old threads are archived once at start, now that the tabs the person had open are known (and so are protected).
+    void retain().catch(() => undefined);
   })();
 
   // PERF-05: a run a reload cut off carries on by itself (newest first, a few at most), with a notice, unless nearAi.agent.autoResumeAfterReload is off.
@@ -679,6 +703,7 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
         await agent.send({ modelStallMs, ...(backupModel ? { backupModel } : {}), text, skill, gsd, team, attachments, memory: { store: state.memory, projectScope: { kind: 'project', id: projectIdForWorkspace(root) } }, imageModel: route.local ? undefined : imageModel, reputation: new ReputationStore(root), tiers: readModelTiers(), roleModels: readRoleModels(), safetyModel, safetyFallbackModel, riskSwitches: readRiskSwitches(), rememberAllowRule: (rule) => rememberAllowRule(rule, tab), unattendedAutoApprove: vscode.workspace.getConfiguration('nearAi').get<boolean>('agent.unattendedAutoApprove', AGENT_DEFAULTS.unattendedAutoApprove) !== false, researchProfile: vscode.workspace.getConfiguration('nearAi').get<boolean>('gsd.researchProfile', true) !== false, availableModels: delegable.map((candidate) => candidate.id), modelCatalog: delegable, route: privateRouteFor(active.provider, route.local), contextWindows: Object.fromEntries(active.models.map((candidate) => [candidate.id, candidate.contextLength])), maxParallelAgents: limits.maxParallelAgents, maxTurns: limits.maxTurns, client: route.client, model, privacy: modelPrivacyLabel(modelInfo), policy: settings.actionPolicy, rules: readAgentRules(), activity: { store: state.activity, sessionId: session.sessionId }, local: route.local, security: securityAccess(context, root), webSearch: await webSearchProvider(context.secrets), budget: runBudget, mcpTools: mcp.tools, maxOutputTokens: Math.max(1_000, Math.min(1_000_000, Number(vscode.workspace.getConfiguration('nearAi').get<number>('agent.maxOutputTokens', AGENT_DEFAULTS.maxOutputTokens)) || AGENT_DEFAULTS.maxOutputTokens)), shellEnvAllow: vscode.workspace.getConfiguration('nearAi').get<string[]>('agent.shellEnvAllow', []).filter((name) => typeof name === 'string'), runId, ...(redTeamStep ? { skillAddendum: redTeamStep.addendum, projectAgents: redTeamStep.agents } : {}) });
       } finally {
         endRun();
+        void runEnded({ root, conversationId: tab.id, runId, outcome: tab.outcome });
       }
       panel.webview.postMessage(await statusMessage({ agents: runningAgents(), account }));
       await sendArtifacts(panel);
@@ -741,7 +766,7 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
   const windowWatch = typeof vscode.window.onDidChangeWindowState === 'function' ? vscode.window.onDidChangeWindowState((window) => { if (window.focused) for (const tab of tabs) tab.focusRegained?.(); }) : undefined;
   // The "no team yet" card goes away as soon as Team Studio (or anyone) saves the project's team.
   const teamWatch = watchProjectTeam(() => { if (!disposed) void setupNudge.refresh(); });
-  panel.onDidDispose(() => { disposed = true; for (const tab of tabs) tab.agent?.dispose(); policyWatch.dispose(); tokenWatch.dispose(); windowWatch?.dispose(); teamWatch?.dispose(); state.spendWatch?.dispose(); if (state.spendTimer) clearTimeout(state.spendTimer); }, undefined, context.subscriptions);
+  panel.onDidDispose(() => { disposed = true; openTabSources.delete(openTabs); retentionWatch.dispose(); for (const tab of tabs) tab.agent?.dispose(); policyWatch.dispose(); tokenWatch.dispose(); windowWatch?.dispose(); teamWatch?.dispose(); state.spendWatch?.dispose(); if (state.spendTimer) clearTimeout(state.spendTimer); }, undefined, context.subscriptions);
   // The emergency stop stops every conversation's run; the composer's Stop stops only the one on screen.
   onDidChangeEmergencyStop(async (engaged) => {
     sendPolicyState(panel);
@@ -819,6 +844,9 @@ function ripgrepPath(): string | undefined {
   const appRoot = (vscode.env as { appRoot?: string } | undefined)?.appRoot;
   return appRoot ? findRipgrep(appRoot, (candidate) => existsSync(candidate)) : undefined;
 }
+
+/** The ids of the conversations open in each chat of this editor, so archiving never takes a thread out from under a tab of another chat. */
+const openTabSources = new Set<() => string[]>();
 
 /** One run-marker store per extension storage and project, shared by every conversation, so its writes stay in order. */
 const runMarkerStores = new Map<string, RunMarkers>();
