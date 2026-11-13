@@ -17,6 +17,7 @@ import type { GitRunner } from './stateGit';
 import { stateHomeFor, writeFileAtomic } from './stateHome';
 import type { ProjectStateHome } from './stateHome';
 import { classifyGitFailure, validateRemote } from './stateTransport';
+import { pushProjectCode, runPersonGit } from './codePushCheck';
 import type { CodePushUi } from './codePushCheck';
 
 const PROGRESS_FILE = 'online-home.json';
@@ -338,6 +339,15 @@ export async function onlineHomeFlow(input: OnlineHomeInput): Promise<OnlineHome
       if (finished === false) return { status: 'sync-incomplete', remote, message: 'The online repository is set up, but syncing is not turned on yet.' };
       await save('sync');
     }
+
+    // Only now, and as its own question: the person's own code. Declining leaves sync working.
+    if (ui.codePush && await ui.codePush.offer()) {
+      say('Checking which files would go up…');
+      const personGit = input.personGit ?? runPersonGit;
+      const pushed = await pushProjectCode(root, remote.name, token === undefined ? personGit : withGitHubAuth(personGit, token), { ui: ui.codePush, visibility: current.visibility });
+      tell(pushed.message);
+    }
+    await save('offer-code');
     await save('done');
     return { status: 'done', remote };
 
