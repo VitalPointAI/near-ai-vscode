@@ -461,9 +461,19 @@ export interface SchedulerOptions {
 interface Job { full: boolean; interactive: boolean; reasons: SyncReason[] }
 
 const NEEDS_SIGN_IN = 'Sync needs you to sign in. Choose Sync Project Now.';
-const COULDNT_REACH = "Couldn't reach your git host, will retry.";
 const RUN_WAITING = 'A chat is running, so sync will run when it ends.';
 const STOPPED = 'Sync stopped unexpectedly and will try again.';
+
+/**
+ * The one sentence for how a sync came out (D-16, D-17), used by the toast and the control alike so they never word the same failure two ways: the
+ * transport's own plain sentence for a failure, except a sign-in that is missing on an automatic sync, which points at the click that can ask for it.
+ */
+export function statusSentence(outcome: SyncOutcome, interactive: boolean): string {
+  const failure = outcome.failure;
+  if (!failure) return outcome.message;
+  if (failure.kind === 'auth' && !interactive) return NEEDS_SIGN_IN;
+  return failure.message;
+}
 
 /** A status sentence that cannot carry a URL with credentials or a secret (T-27-91). */
 function plain(text: string): string {
@@ -725,8 +735,7 @@ export class SyncScheduler {
     if (kind === 'no-remote') { this.setNoHome(); return; }
     this.backoffMs = this.backoffMs === 0 ? BACKOFF_FIRST_MS : Math.min(BACKOFF_MAX_MS, this.backoffMs * 2);
     this.notBefore = now + this.backoffMs;
-    const message = kind === 'auth' ? NEEDS_SIGN_IN : kind === 'offline' || kind === 'rejected' ? COULDNT_REACH : outcome.message;
-    this.publish({ state: 'attention', message });
+    this.publish({ state: 'attention', message: statusSentence(outcome, job.interactive) });
     // What was asked is not lost: it runs again once the backoff is over.
     this.merge(job);
     this.request('retry', this.pending?.full ?? false);

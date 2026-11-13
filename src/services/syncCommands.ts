@@ -16,7 +16,7 @@ import { stateKeysFor } from './stateKeys';
 import { profileSyncHooks } from './stateRestore';
 import type { SyncOutcome } from './stateSync';
 import {
-  SyncScheduler, afterRemoteFor, buildStateSync, enterCodeFlow, keepKeyFlow, localHomeState, newCodeFlow, readSyncSettings, resolveRemote, tokenRunner, turnOffFlow, turnOnFlow,
+  SyncScheduler, afterRemoteFor, buildStateSync, enterCodeFlow, keepKeyFlow, localHomeState, newCodeFlow, readSyncSettings, resolveRemote, statusSentence, tokenRunner, turnOffFlow, turnOnFlow,
   type SyncEnv, type SyncParts, type SyncStatus, type SyncUi
 } from './syncFlows';
 import { threadStoreFor } from './threadStore';
@@ -197,7 +197,7 @@ export function registerSyncCommands(context: vscode.ExtensionContext, auth: Aut
         return;
       }
       const outcome = await runtime.scheduler.syncNow();
-      if (outcome) void (outcome.kind === 'synced' || outcome.kind === 'nothing-yet' || outcome.kind === 'waiting' ? vscode.window.showInformationMessage(outcome.message) : vscode.window.showWarningMessage(outcome.message));
+      if (outcome) void (outcome.kind === 'synced' || outcome.kind === 'nothing-yet' || outcome.kind === 'waiting' ? vscode.window.showInformationMessage(outcome.message) : vscode.window.showWarningMessage(statusSentence(outcome, true)));
     })),
     vscode.commands.registerCommand('nearAi.sync.enterRecoveryCode', withRuntime(async (runtime) => {
       const result = await enterCodeFlow({ env: runtime.env, ui });
