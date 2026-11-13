@@ -22,9 +22,9 @@ requirements-completed: [SYNC-04, SYNC-05, SYNC-09]
 actuals:
   tokens: 11200
   tasks: 3
-  commits: 6
+  commits: 5
 plan_head_before: ce0ca09a0d3c0f91474fe055902818bb3994c64b
-plan_head_after: 91a8eaedbf0067f4fb236ba8f8ce123064ec5bb4
+plan_head_after: 648ff704d207ac5d4b20f9199ed7b1910fea0be1
 
 tech-stack:
   added: []
@@ -190,11 +190,11 @@ coverage:
 ## Task Commits
 
 1. **Task 1 (tracer): control in the bar, one click into the turn-on flow** - `5f5b152` (feat)
-2. **Task 2 RED** - `5abb25b` (test, 11 of 12 pass, the style rules fail)
-3. **Task 2 GREEN** - `dc842f8` (feat, 12 of 12)
-4. **Task 3 RED** - `cb957a3` (test, 5 of 18 fail)
-5. **Task 3 GREEN** - `b361e8a` (feat, 19 of 19)
-6. **Secret-scan allow-list for the fake token in the redaction test** - `91a8eae` (chore)
+2. **Task 2 RED** - `3294f6e` (test, 11 of 12 pass, the style rules fail)
+3. **Task 2 GREEN** - `a0c958b` (feat, 12 of 12)
+4. **Task 3 RED** - `6e14b4a` (test, 5 of 18 fail)
+5. **Task 3 GREEN** - `648ff70` (feat, 19 of 19)
+6. *(Rewritten in plan 27-16, before anything was pushed: the redaction test now builds its fake GitHub token at run time, so no allow-list line and no extra commit are needed.)*
 
 **Plan metadata:** the docs commit that carries this SUMMARY, STATE.md and ROADMAP.md.
 
@@ -207,16 +207,16 @@ coverage:
 **1. [Rule 2 - Missing critical] A secret-scan block on the redaction test**
 - **Found during:** final verification
 - **Issue:** the test that proves a GitHub token is removed from a status message holds a fake `ghp_` token, which the project's secret scan reports (range scan over this plan's commits).
-- **Fix:** an allow-list line for `src/test/syncControl.test.ts` and the `github-token` rule, with the reason, as the other redaction tests have.
-- **Files modified:** `.github/secret-scan-allow.txt`
-- **Commit:** `91a8eae`
+- **Fix:** first an allow-list line; plan 27-16 replaced it (before anything was pushed) by building the fake token at run time in `src/test/syncControl.test.ts`, so the allow-list line and the literal are gone from the whole range.
+- **Files modified:** `src/test/syncControl.test.ts`
+- **Commit:** `3294f6e`
 
 **2. [Rule 3 - Blocking] The existing pick-up wiring test pins the exact `case 'pickup-card'` line in chat.js**
 - **Found during:** Task 3 GREEN
 - **Issue:** my first version added the invitation's re-render to that line and broke `pickup.test.js`.
 - **Fix:** the line is unchanged; `pickup.js` tells `syncControl.js` to re-work the first-run invitation (`refreshSyncPrompt`) when the card shows or goes.
 - **Files modified:** `media/chat/pickup.js`, `media/chat/syncControl.js`, `media/chat/chat.js`
-- **Commit:** `b361e8a`
+- **Commit:** `648ff70`
 
 ### Plan wording
 
@@ -255,6 +255,6 @@ None. The register is covered: T-27-87 (strict parser, five actions, exact keys;
 ## Self-Check: PASSED
 
 - Files: `src/domain/state/syncStatus.ts`, `src/services/syncPanel.ts`, `media/chat/syncControl.js`, `src/test/syncControl.test.ts` exist.
-- Commits `5f5b152`, `5abb25b`, `dc842f8`, `cb957a3`, `b361e8a`, `91a8eae` are ancestors of HEAD; 6 measured by `git rev-list --count ce0ca09a..HEAD` before this docs commit.
+- Commits `5f5b152`, `3294f6e`, `a0c958b`, `6e14b4a`, `648ff70` are ancestors of HEAD; 5 measured by `git rev-list --count ce0ca09a..HEAD` before this docs commit.
 - Acceptance: syncControl 19 passing (needs 18), pickup and setupNudge pass, 0 failing; `grep -c 'id="sync"' src/services/panelView.ts` is 1; `grep -c "asset('syncControl.js')"` is 1; `grep -c "sync-control" src/services/chatBridge.ts` is 3; `grep -c "#sync" media/chat/chat.css` is 9; `grep -c "vscode-high-contrast" media/chat/chat.css` is 2; the package.json node check exits 0.
 - Plan verification: full suite 1 770 of 1 780 with only the known failure; lint clean; secret scan clean.
