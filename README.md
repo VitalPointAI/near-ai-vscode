@@ -118,7 +118,7 @@ as a row in the chat.
 - **Long sessions stay on track.** Old tool output is trimmed and, near the
   model's limit, earlier history is summarized automatically (with a handoff
   saved for GSD). **History** opens any earlier conversation as a tab, with
-  its full context.
+  every message (see [Your project's state follows the project](#your-projects-state-follows-the-project)).
 - **Guard rails.** The agent can only touch files inside the workspace, asks
   before reading likely credential files (`.env`, keys), and never runs
   commands on your deny list.
@@ -276,10 +276,12 @@ kind of work best, measured on real tasks rather than published benchmarks.
 - **Quick or full.** **Reuse saved results** runs only what is missing, so
   testing a new model against ones you tested before costs only the new
   model's runs. **Run everything again** repeats every task.
-- **Every run is saved** on this computer (in the extension's storage, not
-  the project) and listed under History, so you can reopen its report.
+- **Every run is saved** with the project (in its `.near-ai/state` folder) and
+  listed under History in every editor, so you can reopen its report without
+  running it again.
 - **Use as…** puts a model into the chat's main model, the deep, standard, or
-  fast tier, or an agent role in one click, with **Undo**. Models that aren't
+  fast tier, or an agent role in one click, with **Undo**. The choice is saved
+  for the project, not only for this editor. Models that aren't
   private can't be chosen in TEE-only mode.
 
 ### Agent Activity
@@ -603,6 +605,132 @@ When it offers several, the panel asks which one this scan runs on, once per
 engagement. When it offers none, the panel keeps your chat model and says so,
 because a safety-tuned model may refuse a scan's payloads.
 
+### Your project's state follows the project
+
+Everything NEAR AI keeps for a project lives in one folder inside the project,
+`.near-ai/state/`, which the extension keeps out of git. Every editor that
+opens the folder on this computer (VS Code, code-server, another window) reads
+and writes the same files, so they all show the same thing.
+
+- **Every conversation, in full.** Each chat, including `@near` chats from
+  VS Code's Chat view, opens with every message, reply and tool step in order.
+  Nothing is summarized away, and tool steps open to their output. The one
+  exception is a single tool result larger than 2 MiB, which is stored
+  shortened with a visible "output shortened" marker.
+- **Five live, the rest archived.** The 5 most recently used conversations stay
+  open and instant (change it with `nearAi.history.liveConversations`). Older
+  ones are archived inside the project, never deleted, and still listed in
+  **NEAR AI: Show Chat History**; choosing one opens it whole and makes it live
+  again.
+- **Runs, checkpoints and spend history** for the project are kept there too,
+  so an editor never mistakes another editor's live run for a cut-off one.
+- **Model choices follow the project.** Compare Models results and the choices
+  you apply with **Use as…** are saved with the project, so every editor shows
+  them without running the comparison again. A setting you wrote in your
+  workspace still wins, then the project's choice, then your user setting.
+  Choices you applied earlier in one editor's user settings are offered for
+  import once, never copied without a click.
+- **Pick up where you left off.** When you open a project in another editor or
+  on another computer, a card in the empty chat shows the last chat, how its
+  run ended (finished, cut off, waiting) and the current Open-GSD phase with
+  its next step. **Open chat** reopens that chat and starts nothing, so it
+  spends nothing.
+- **Your old chats come along.** The first time 0.4.20 runs in an editor, that
+  editor's earlier chats, runs, comparisons and spend for the project are
+  merged into the project folder. Nothing is overwritten or deleted, and
+  opening a folder you never used NEAR AI in still writes nothing.
+- **The same NEAR AI key, no set-up.** A second editor on the same computer
+  uses the project's NEAR AI key without asking, because an encrypted copy of
+  it lives in the state folder. It is opened only inside the editor on your
+  computer, never written to disk in plain form. With
+  `nearAi.sync.keepKeyInProject` off, that copy cannot be opened without the
+  recovery code or that device's own secret storage.
+
+### Sync between computers
+
+Project sync keeps an encrypted copy of the project's state on its own git
+host, so the same chats, runs, comparisons, model choices and NEAR AI key are
+there on another computer. It is off until you turn it on, it never touches
+your own branches, and nothing is ever pushed to `main`.
+
+- **A sync control in the chat bar**, next to the profile control, from the
+  moment the panel opens. It reads **Sync off · Turn on**, **Synced · 5 min
+  ago**, **Syncing…**, **Needs attention** (with the reason in plain words) or
+  **No online home · Set up**. One click starts the right step. It works from
+  the keyboard and in light, dark and high-contrast themes. While sync is off,
+  the pick-up card and the first-run screen also offer **Keep this project on
+  your other machines**; dismiss it once and it never comes back.
+- **Turn on** (**NEAR AI: Turn On Project Sync**). It first shows what your git
+  host will and will not be able to see, and only after you agree does it make
+  your recovery code.
+- **The recovery code** is 52 characters in 13 groups of 4, shown once. It is
+  never stored, logged or sent anywhere, and nobody, including NEAR AI, can
+  recover it for you. Keep it in a password manager.
+- **On another computer**, open the cloned project and run **NEAR AI: Enter
+  Recovery Code**. Your chats, runs, comparisons and model choices appear, and
+  the NEAR AI key is set up for that project. If that computer already has
+  chats of its own, they are kept and added.
+- **When it runs.** Saving on this computer is immediate. Sync runs after a
+  run or chat reply ends, 60 seconds after you leave the window when nothing is
+  running, every `nearAi.sync.intervalMinutes` minutes (10 by default, 0 turns
+  it off) while the editor is open and idle, and on **NEAR AI: Sync Project
+  Now**. It pulls when the project opens (the card says "Checking for
+  updates…" and chatting is never blocked) and when you come back to the window
+  after 5 minutes or more. It never runs while a run is in progress, and it
+  backs off when you are offline.
+- **Sign-in.** Automatic syncs never ask you to sign in. If GitHub needs you,
+  the control says "Sync needs you to sign in. Choose Sync Project Now." and
+  that click may ask.
+- **Archived chats on another computer** are listed from the encrypted index
+  and downloaded only when you open one.
+- **Size.** You get a warning from 500 MB. At 1 GiB, older archived chats stop
+  going up and stay on this computer only, with a message saying how many.
+  Nothing is deleted, and they go up once there is room.
+- **Other commands:** **Show a New Recovery Code** (a new code does not stop an
+  old one from opening copies already on the git host), **Turn Off Project
+  Sync**, and **Give This Project an Online Home**.
+
+### Give your project an online home
+
+If the project has no git repository or no remote, turning on sync offers
+**Give this project an online home**, or click **No online home · Set up**.
+Nothing happens on your account until you click.
+
+- **One click** starts git for the folder if needed, signs in to GitHub through
+  VS Code, asks whether the repository is **public or private** (every time,
+  with no default), creates it under your account, adds it as the project's
+  remote and pushes the encrypted sync branch, saying each step in plain words.
+- **Private or public.** A private repository is visible only to you and the
+  people you invite, and GitHub's free plan limits some features for private
+  repositories. On a public one, anyone can see your project's code, but your
+  chats, keys and other state stay encrypted and unreadable.
+- **Pushing your own code is a separate step**, after sync. It shows exactly
+  which files would go up and blocks likely secrets (`.env` files, keys,
+  credential files). It also checks the earlier commits that would be
+  published, not only the current files: a secret committed and later deleted
+  still blocks the push, because the history would carry it. NEAR AI never
+  rewrites your history for you. Declining the code push leaves sync working.
+- **Without GitHub sign-in** (for example in code-server without the GitHub
+  provider) the extension says so and offers the `gh` command-line tool if it
+  is installed, or the address of an existing empty repository you paste in.
+  It never asks you for a token.
+- **Errors are plain.** A taken repository name, being offline and a refused
+  permission each get a sentence, and a half-finished setup can be resumed.
+
+### What your git host can see
+
+| Your git host and anyone who can read the repository | |
+| --- | --- |
+| Can see | That this project uses NEAR AI sync, roughly how much is stored, and when you save |
+| Cannot see | Conversation titles or text, messages, ids, model names, your NEAR AI key, or your name |
+
+Everything is encrypted on your computer before it leaves, and only the
+recovery code (or a device you already unlocked) can open it. Sync commits use
+a generic author, `near-ai-state`, not your git identity, and a constant
+message. Chats at rest in the project folder are protected by file permissions
+on that machine and are end-to-end encrypted everywhere they leave it. The
+details are in [SECURITY.md](SECURITY.md#project-state-and-sync).
+
 ### Respects your projects
 
 The extension only acts in projects you set up with it. Opening a folder,
@@ -649,6 +777,11 @@ copy of Open-GSD to a project that doesn't already have one.
   Problems and the status bar, it re-checks when the project opens and when
   lockfiles change, and agents run the same check after changing
   dependencies. **Add Dependency Scan Workflow** adds a GitHub Actions scan.
+- **Project state stays yours.** Chats at rest in the project folder are
+  protected by file permissions on that machine and are end-to-end encrypted
+  everywhere they leave it. Sync is off until you turn it on; what your git
+  host can see is shown before it is, and the recovery code is shown once and
+  never kept by anyone else.
 - API keys live in VS Code's encrypted **SecretStorage**, scoped to each
   project. They are never written to settings, workspace files, logs, history,
   or exports.
@@ -699,6 +832,9 @@ Read the full [security and trust report](SECURITY.md).
 | `nearAi.agent.roleModels` | research, mapping, fetch and extract roles → fast; planner, plan-checker, verifier, analyst, editor, red-team → deep | Model or tier per agent role, by name or `*` pattern; a team member's own `model:` line wins. |
 | `nearAi.gsd.researchProfile` | `true` | Research and writing projects use the research profile for Open-GSD: coarse phases, quick mode for content edits, verifier scripts in `scripts/verify/`, and the plan-checker only for plans that change a gate or verifier. |
 | `nearAi.agent.saveTranscripts` | `true` | Keep conversations on this machine so History can resume them. |
+| `nearAi.history.liveConversations` | `5` | How many of the most recently used conversations per project stay fully open (1 to 50). Older ones are archived inside the project, never deleted, and reopen in full when you choose them. |
+| `nearAi.sync.keepKeyInProject` | `true` | Keep the project's chat key in a private file (mode 0600) in the project's ignored state folder, so every editor on this computer can open the chats and use the NEAR AI key with no set-up. Off: each new editor or browser asks for the recovery code. |
+| `nearAi.sync.intervalMinutes` | `10` | How often, in minutes, a project with sync turned on syncs in the background while idle. 0 turns the background sync off (0 to 1440). Sync itself runs only after you turn it on. |
 | `nearAi.baseUrl` | NEAR AI Cloud | OpenAI-compatible endpoint (HTTPS, or HTTP on localhost). |
 | `nearAi.privacyMode` | `standard` | `tee-only` blocks models NEAR forwards to other providers. |
 | `nearAi.dailySpendLimitUsd` | `0` (none) | Stop sending requests once today's spend reaches this amount: the larger of NEAR's own total for the key (with a usage reporting token) and this computer's spend ledger. |
@@ -746,6 +882,22 @@ Read the full [security and trust report](SECURITY.md).
   connects, code-server closes the window's extension host after about 5
   minutes, which stops every run in it. Keep the tab open and in front during
   long runs; if a run is cut off, **Resume** it from the chat.
+- **A conversation says "Locked conversation":** this editor cannot open its
+  key. Run **NEAR AI: Enter Recovery Code** and paste the recovery code that was
+  shown when sync was turned on. It happens when `nearAi.sync.keepKeyInProject`
+  is off, or when the chat came from another computer that you have not
+  unlocked yet.
+- **"This project has no online home yet, so it cannot sync":** the project has
+  no git remote. Click **No online home · Set up** in the chat bar, or run
+  **NEAR AI: Give This Project an Online Home**.
+- **Sync says "Sync needs you to sign in. Choose Sync Project Now.":** automatic
+  syncs never open a sign-in. Run **NEAR AI: Sync Project Now** and sign in to
+  GitHub when asked. If the message says git asked for a sign-in the editor
+  cannot show, run `git fetch` once in a terminal in the project so your
+  credential helper can save it.
+- **I lost the recovery code:** nobody can recover it for you. On a computer
+  that is still unlocked, run **NEAR AI: Show a New Recovery Code**. Copies
+  already on the git host still open with the old code.
 - **The agent changed something you didn't want:** click **Revert** under the
   run. Changes made by shell commands it ran are not included; use git for
   those.

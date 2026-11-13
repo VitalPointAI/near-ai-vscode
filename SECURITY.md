@@ -5,7 +5,7 @@ requests, and what it does not do yet. It is a repository-level report, not an
 independent audit or a guarantee about NEAR AI Cloud, the models it serves, or
 other software.
 
-Last reviewed: 2026-10-26, against the code on `main`.
+Last reviewed: 2026-11-13, against the code on `main` plus the project state and sync work for 0.4.20.
 
 ## Where your data goes
 
@@ -15,7 +15,8 @@ Last reviewed: 2026-10-26, against the code on `main`.
 | What the sidebar agent reads or runs | The same model, as tool results: file contents it reads, search results, and command output | Files under the workspace only. Reading a likely credential file (`.env`, private keys, SSH, AWS, or NEAR credential files) asks first. Pick a private or local model to keep this inside a TEE or on your machine. |
 | Open-GSD workflows | The NEAR AI agent runner, on the model you picked; sub-agents use the model for their tier (`nearAi.agent.deepModel`, `standardModel`, `fastModel`) when your provider offers it | The same outbound check, approvals, revert, and cost tracking as any agent run. No Codex or Claude Code runtime is invoked. |
 | Your API key | VS Code SecretStorage, one key per project and profile | Never written to settings, project files, logs, activity, analytics, exports, or error messages. |
-| Saved conversations | VS Code's extension storage on this machine, one folder per project; never the project itself | Full transcripts, including file contents and command output the agent saw, so History can resume them, **encrypted with AES-256-GCM** under a key in SecretStorage (files saved before 0.4.0 are re-encrypted when read). The 50 most recent per project are kept. Turn off with `nearAi.agent.saveTranscripts`. |
+| Saved conversations | The project's own state folder, `.near-ai/state/`, which the extension keeps out of git; with project sync on, also an encrypted copy on your git host (see Project state and sync) | Full transcripts, including file contents and command output the agent saw, so History can resume them in every editor, **encrypted with AES-256-GCM** under a per-project key. Every conversation is kept (the 5 most recent stay open, older ones are archived, none is deleted; `nearAi.history.liveConversations`). A single tool output over 2 MiB is stored shortened with a visible marker. Turn off with `nearAi.agent.saveTranscripts`. |
+| Project state sync (only after **NEAR AI: Turn On Project Sync**) | A branch named `near-ai/state` of your project's own git remote, never `main` | Only ciphertext, with opaque file names and a constant commit message and author. Your git host can see that sync is used, roughly how much is stored, and when you save. See Project state and sync. |
 | Agent Activity | Memory only, while VS Code runs | Prompts, replies, and tool calls for the live page; time- and size-limited; secrets masked. Never written to disk unless you export it. |
 | Your environment variables | Not passed to the agent's commands when they look like credentials (by name or value) | So `env` or a careless script cannot send them to the model. Pass specific ones with `nearAi.agent.shellEnvAllow`. Local MCP servers get only a minimal environment plus what you configure; the Open-GSD installer gets the environment without credential-like variables. |
 | Web searches | Only after **NEAR AI: Set Up Web Search**: your SearXNG instance, Brave Search, or Tavily | The query text; Brave and Tavily also receive your API key, which links the searches to your account. A SearXNG instance you run keeps queries on your infrastructure. |
@@ -284,6 +285,106 @@ Earlier turns of a conversation are not re-checked; each was checked when it
 was sent. The check applies to chat only; it does not yet cover Open-GSD
 workflows (see the table above).
 
+## Project state and sync
+
+Since 0.4.20 the extension keeps a project's chats, runs, checkpoints, comparisons, model choices,
+spend history and resume pointer in one git-ignored folder inside the project, `.near-ai/state/`,
+so every editor on the same computer shows the same project. Optional sync copies that folder,
+encrypted, to a branch of the project's own git remote so another computer can open it.
+
+### Encryption model
+
+- **Keys.** Each project has a random 256-bit data key. It is kept in the editor's secret storage,
+  in a private key file inside the state folder (`keys/local.key`, mode 0600, never added to a
+  bundle, log or push; `nearAi.sync.keepKeyInProject` turns the file off), and, once sync is on,
+  wrapped by a key derived from the recovery code. Nothing else holds it.
+- **Recovery code.** It is generated, never chosen: 256 random bits, shown as 52 characters in 13
+  groups of 4, once, and never stored, logged or sent. Typing is forgiving (case, spaces and look-alike
+  characters), but a code that is not exactly what was generated is refused. The key that wraps the
+  data key comes from scrypt (N = 2^17, r = 8, p = 1, 16-byte random salt, 32-byte key). Costs read
+  from a remote are bounded before any scrypt call, so a hostile manifest cannot ask for more than
+  256 MiB of memory.
+- **Objects.** State is compressed (brotli), padded, and sealed with AES-256-GCM (96-bit random IV,
+  128-bit tag). Each object gets its own HKDF-SHA256 subkey from a random 16-byte salt, and its
+  authenticated additional data binds the project's state id, the object class and its part number
+  and count, so an object cannot be swapped between projects, classes or positions. Padding uses
+  buckets of about 12.5% above a 64 KiB floor, and large payloads are split into parts of at most
+  8 MiB.
+- **Manifest.** The list of objects is sealed too, with a counter that never goes backwards, so an
+  older copy of the state, a missing object or a truncated or altered one is refused and changes
+  nothing on this computer. Every refusal is one plain sentence with no partial plaintext.
+- **The NEAR AI key.** An encrypted copy of the project's key and endpoint sits in the state folder,
+  sealed under its own HKDF subkey of the data key, so a second editor on the same computer needs no
+  set-up. It is opened only in memory inside the editor, then stored in that editor's secret storage.
+  It is never written in plain form to disk, logs, a webview, a model request or a bundle. It
+  travels to another computer only inside the encrypted bundle.
+- **No escrow.** NEAR AI, the extension's authors, your git host and anyone with read access to the
+  repository cannot decrypt the state, and nobody can recover a lost recovery code. A computer
+  that is still unlocked can show a new one.
+- **Anonymous commits.** Sync writes its commits with git plumbing into a private mirror, with the
+  author and committer `near-ai-state <state@near-ai.invalid>`, a constant date and the message
+  "Update encrypted project state". Your git identity and configuration are never read or changed,
+  and hooks, signing, helper transports and the inherited git environment are switched off for those
+  calls. A credential for the remote reaches git only through the child process's environment and is
+  never written to a config file or passed as an argument.
+- **Automatic syncs never prompt.** A background sync looks up an existing GitHub sign-in silently;
+  if there is none it stops with "Sync needs you to sign in. Choose Sync Project Now.".
+
+### Post-quantum reasoning
+
+The sync format uses only symmetric cryptography: AES-256-GCM, HKDF-SHA256 and scrypt over a
+generated code. It has no public-key step, so an attacker who stores the ciphertext today and
+waits for a quantum computer gains at most Grover's square-root speed-up (AES-256 keeps about
+128-bit strength). The recovery code is 256 bits for the same reason: it keeps about 128-bit
+strength against Grover before counting scrypt's cost.
+
+**Constraint for later work.** Any public-key step added to sync, such as sharing state between
+different people in Team Mode, must use a hybrid key exchange (X25519 plus ML-KEM), so that it does
+not bring back the harvest-now-decrypt-later weakness the symmetric design avoids.
+
+### What still leaks
+
+| Leak | Who sees it | Limit |
+| --- | --- | --- |
+| That the project uses NEAR AI sync (the branch name and the manifest's shape) | Anyone who can read the repository | Accepted; they carry no project data |
+| Total size, to within about 12.5% | Same | Padding; objects over 8 MiB are split |
+| Number of objects | Same | Objects are consolidated so the count follows size, not the number of chats |
+| Push times and number of commits | Same, and your git host in any case | The commit date is constant, but the host sees the push. Pushes are batched and spaced apart, so the timing shows activity rather than single chats |
+| That you pushed from some account or address | Your git host | Not something the extension can control |
+
+On a public repository the ciphertext is public too. The recovery code's 256 bits make a search
+against it infeasible. Your project's own code is visible to everyone only if you choose to push it
+to a public repository (see below).
+
+### Residual risks
+
+- **A new recovery code does not revoke the old one.** Copies already on the git host stay in git
+  history and still open with the old code. A new code only protects what is pushed afterwards;
+  treat a leaked code as a leak of everything pushed before it.
+- **Chats at rest in the project folder** are protected by file permissions on that computer
+  (the key file is mode 0600), not by a password. Anyone who can read your files can read your
+  chats. They are end-to-end encrypted everywhere they leave the computer. With
+  `nearAi.sync.keepKeyInProject` off, a new editor or browser needs the recovery code or that
+  device's secret storage.
+- **Size limits.** A warning appears from 500 MB; from 1 GiB, older archived chats stay on this
+  computer only (nothing is deleted) until there is room.
+- **History shows the lead agent's steps** and each sub-agent's report; sub-agent steps become
+  linked threads in a later release. The daily spend limit still counts the spend of the editor
+  it runs in.
+
+### Giving a project an online home and pushing your code
+
+Creating a repository, adding the remote and pushing your own code are separate steps, each behind
+its own click, and public or private is asked every time with no default. Sign-in uses VS Code's
+GitHub authentication, then the `gh` tool, then a pasted address of an empty repository that must
+not contain a password or token; the extension never asks for a token, and a GitHub token is held
+only in memory. Before your own code is pushed, the extension lists the files and blocks likely
+secrets (`.env` files, private keys, credential files, and secret-looking contents). It scans the
+earlier commits that would be published as well: a secret committed once and deleted later still
+blocks the push, naming the file and the short commit id and never the value. For a public
+repository, a history that could not be checked completely is not pushed at all. NEAR AI does not
+rewrite your history; that stays your decision.
+
 ## Costs
 
 Estimates come from NEAR's published per-model prices and the token usage NEAR
@@ -450,6 +551,9 @@ maps, `node_modules`, `.planning`, `.codex`, `.agents`, or `.git`.
 | Scanned PDFs (no text layer), old binary Office files (.doc, .ppt, .xls), and video can't be attached; video can't be generated | The chat says so when a file can't be read; export with OCR or re-save in the current format |
 | Attached PDFs and Office files are parsed on this machine (PDFs by Mozilla's pdf.js, vendored, with script evaluation and font loading off; Office files by the extension's own reader, capped at 50 MB unpacked) | Only the extracted text is sent, and it passes the same privacy and spend checks as typed text |
 | Attached images and audio are sent to the profile's provider (NEAR AI or your local runtime) to be read or transcribed, possibly by a different model than the one you chose | The chat names the model used for each file; TEE-only mode blocks the turn if that model is not TEE-attested |
+| Project sync cannot revoke a recovery code: a new code protects only what is pushed afterwards | Treat a leaked code as exposing everything pushed before it; see Project state and sync |
+| The daily spend limit counts the spend of the editor it runs in, not every editor on the computer | Project spend history is shown in every editor; a combined limit is planned |
+| The history keeps the lead agent's steps and each sub-agent's report; a sub-agent's own steps are not yet separate threads | Linked sub-agent threads are planned |
 | Memory has a searchable list, not a graph view; teams have no shared team memory | Members get project memory and their own private memory |
 | Agent reputation is recorded per role but does not yet change which model a role uses | Routing comes from team `model:` lines and the deep/standard/fast settings |
 | **Revert** restores files changed by the agent's file tools, not changes made by shell commands it ran | Use git for command side effects; documented in the chat |
