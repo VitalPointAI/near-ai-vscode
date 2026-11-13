@@ -45,20 +45,37 @@ export interface MigrationReport {
   };
   /** The ids of the conversations counted as locked. */
   lockedIds: string[];
+  /** Run markers copied (or replaced by a later one). */
+  markers: number;
+  /** Checkpoint files copied. */
+  checkpoints: number;
+  /** Saved model comparisons copied. */
+  comparisons: number;
+  /** Spend lines added to the project's mirror. */
+  spendLines: number;
+  /** Threads the 5-live rule moved to the archive at the end of the run. */
+  archived: number;
+  /** Marker, checkpoint and comparison files that were malformed (or not this project's) and left out. */
+  skipped: number;
 }
 
 export function emptyReport(): MigrationReport {
-  return { threads: { copied: 0, merged: 0, unchanged: 0, locked: 0, partial: 0, skipped: 0 }, lockedIds: [] };
+  return { threads: { copied: 0, merged: 0, unchanged: 0, locked: 0, partial: 0, skipped: 0 }, lockedIds: [], markers: 0, checkpoints: 0, comparisons: 0, spendLines: 0, archived: 0, skipped: 0 };
 }
 
 /** How many things the run changed in the state home. Zero means a rerun found everything already there. */
 export function changesIn(report: MigrationReport): number {
-  return report.threads.copied + report.threads.merged;
+  return report.threads.copied + report.threads.merged + report.markers + report.checkpoints + report.comparisons + report.spendLines + report.archived;
 }
 
 export interface MigrationOptions {
   /** Called after each item is handled, outside its error handling: a throw here ends the run, as a crash would (tests). */
-  afterItem?: (item: { kind: 'thread'; id: string }) => void | Promise<void>;
+  afterItem?: (item: { kind: 'thread' | 'marker' | 'checkpoint' | 'comparison'; id: string }) => void | Promise<void>;
+  /** How many of the most recently used conversations stay live once everything is merged (nearAi.history.liveConversations). */
+  liveConversations?: number;
+  /** Conversations that must stay live whatever their rank (open in a tab of this editor). */
+  protectedIds?: () => Iterable<string>;
+  now?: () => Date;
 }
 
 /** What a conversation saved before 0.4.20 says of itself when its earlier messages were summarised. */
