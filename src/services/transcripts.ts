@@ -34,6 +34,11 @@ export function sharedTranscriptKey(secrets: Parameters<typeof transcriptKey>[0]
   return shared;
 }
 
+/** The name of a project's folder under an editor's `transcripts/` and `runs/`: the first 16 hex characters of sha256 of the project's path. */
+export function projectFolderHash(root: string): string {
+  return createHash('sha256').update(path.resolve(root)).digest('hex').slice(0, 16);
+}
+
 /** A 256-bit key kept in SecretStorage, created on first use. */
 export function transcriptKey(secrets: { get(key: string): Thenable<string | undefined> | Promise<string | undefined>; store(key: string, value: string): Thenable<void> | Promise<void> }): () => Promise<Buffer> {
   let key: Promise<Buffer> | undefined;
@@ -58,8 +63,12 @@ export function transcriptKey(secrets: { get(key: string): Thenable<string | und
 export class TranscriptStore implements ConversationStore {
   private readonly dir: string;
 
-  public constructor(storageDir: string, root: string, private readonly key?: () => Promise<Buffer>) {
-    this.dir = path.join(storageDir, 'transcripts', createHash('sha256').update(path.resolve(root)).digest('hex').slice(0, 16));
+  /**
+   * `readOnly` makes a store that can only read: it never saves, and reading a transcript saved before encryption does not re-save it encrypted. The
+   * migration (plan 10) reads an editor's old folder this way, so nothing in that folder is ever changed.
+   */
+  public constructor(storageDir: string, root: string, private readonly key?: () => Promise<Buffer>, private readonly readOnly = false) {
+    this.dir = path.join(storageDir, 'transcripts', projectFolderHash(root));
   }
 
   private async encode(transcript: Transcript): Promise<string> {
@@ -83,12 +92,14 @@ export class TranscriptStore implements ConversationStore {
 
   /** Saves a conversation. Nothing is ever deleted to make room: a conversation stays until the person removes it. */
   public async save(transcript: Transcript): Promise<void> {
+    if (this.readOnly) throw new Error('This transcript store is read-only.');
     if (!/^conv-[a-z0-9-]{6,60}$/.test(transcript.id)) throw new Error('Invalid transcript id.');
     await this.write(transcript);
   }
 
   /** Saves a running conversation's state, the same as `save`; the thread store treats the two differently, so callers keep them apart. */
   public async checkpoint(transcript: Transcript): Promise<void> {
+    if (this.readOnly) throw new Error('This transcript store is read-only.');
     if (!/^conv-[a-z0-9-]{6,60}$/.test(transcript.id)) throw new Error('Invalid transcript id.');
     await this.write(transcript);
   }
@@ -124,7 +135,7 @@ export class TranscriptStore implements ConversationStore {
       const { value, plain } = await this.decode(await readFile(path.join(this.dir, `${id}.json`), 'utf8'));
       const transcript = value as Transcript;
       if (!transcript || transcript.id !== id || !Array.isArray(transcript.messages)) return undefined;
-      if (plain && this.key) await this.write(transcript).catch(() => undefined);
+      if (plain && this.key && !this.readOnly) await this.write(transcript).catch(() => undefined);
       return transcript;
     } catch {
       return undefined;

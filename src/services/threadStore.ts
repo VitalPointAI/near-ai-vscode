@@ -10,13 +10,14 @@ import { createHash } from 'node:crypto';
 import { appendFile, open, readFile, readdir, rmdir, rm, stat } from 'node:fs/promises';
 import * as path from 'node:path';
 import { aadFor, open as openSealed, seal, subKey, type SealedBlob } from '../domain/state/keys';
+import { canonicalJson } from '../domain/state/records';
 import { isSyntheticMessage, messagesToEntries } from '../domain/state/threadCapture';
 import { threadLines, threadTip, unionEntries, type ThreadEntry, type ThreadLines, type ThreadRole } from '../domain/state/threadEntries';
 import { PARTIAL_HISTORY, PARTIAL_HISTORY_NOTE, entriesToMessages, pairToolResults } from '../domain/state/threadView';
 import type { AgentMessage } from './nearAiClient';
 import { ProjectStateHome, stateHomeFor, writeFileAtomic } from './stateHome';
 import { stateKeysFor, type SecretsLike, type StateKeys } from './stateKeys';
-import { archiveMeta, unarchiveThread, type ArchiveBundle } from './threadArchive';
+import { archiveMeta, readArchive, unarchiveThread, type ArchiveBundle } from './threadArchive';
 import type { ConversationStore, Transcript, TranscriptSummary } from './transcripts';
 
 export type ThreadOrigin = 'panel' | 'chat-view';
@@ -84,6 +85,24 @@ export function validEntry(value: unknown, thread: string): ThreadEntry | undefi
   if (entry.parent !== null && typeof entry.parent !== 'string') return undefined;
   if (!ROLES.includes(entry.role as ThreadRole)) return undefined;
   return entry as ThreadEntry;
+}
+
+/** A conversation read from an older version's storage, ready to merge into the state home. */
+export interface ImportedThread {
+  /** The conversation's entries, in chain order. */
+  entries: readonly ThreadEntry[];
+  /** Title, model, origin, the times, and `history` when the earlier messages are known to be missing; the counts are worked out from the log. */
+  meta: Omit<ThreadMeta, 'id' | 'turns' | 'entries' | 'bytes' | 'tip' | 'state'>;
+  /** The model's working list as that version saved it. */
+  context: Transcript;
+}
+
+export type ImportOutcome = 'copied' | 'merged' | 'unchanged';
+
+/** Whether `candidate` should replace `current` as a thread's saved context: the later one by `updatedAt`, equal times going to the greater text so the choice never depends on order. */
+function laterContext(candidate: Transcript, current: Transcript): boolean {
+  if (candidate.updatedAt !== current.updatedAt) return candidate.updatedAt > current.updatedAt;
+  return canonicalJson(JSON.parse(JSON.stringify(candidate))) > canonicalJson(JSON.parse(JSON.stringify(current)));
 }
 
 interface Material { key: Buffer; stateId: string }
@@ -553,6 +572,71 @@ export class ThreadStore implements ConversationStore {
       await this.replaceIndexEntry(material, next);
       return new Set(cache.ids);
     });
+  }
+
+  // ---- import of an older version's conversation (D-05, plan 10; used by stateMigration.ts) -----------------------------------------
+
+  /**
+   * Merges a conversation brought in from an editor's own storage (0.4.19 and earlier) into the thread of the same id. Entries are added by id (an entry
+   * already there is not written twice), the saved context is replaced only by a later one (by its `updatedAt`), and the meta is merged the way two copies
+   * of one thread's meta always are, so a thread that was continued here since is never set back. A thread that is archived gets the missing entries in
+   * its archive's delta file and is not brought back. Nothing is removed. When there is nothing to add, nothing is written (and no state home is made).
+   */
+  public importThread(id: string, thread: ImportedThread): Promise<ImportOutcome> {
+    assertThreadId(id);
+    return this.serial(id, async () => {
+      const archived = !(await this.liveFiles(id)).log && Boolean((await stat(path.join(this.archiveFolderOf(id), 'parts.json')).catch(() => undefined))?.isFile());
+      if (archived) {
+        const bundle = await readArchive(this, id);
+        const held = new Set([...bundle.entries, ...await this.archiveDeltaEntries(id)].map((entry) => entry.id));
+        const missing = thread.entries.filter((entry) => !held.has(entry.id));
+        if (!missing.length) return 'unchanged';
+        await this.appendArchiveDelta(id, missing);
+        return 'merged';
+      }
+      return this.enqueue(() => this.importLive(id, thread));
+    });
+  }
+
+  private async importLive(id: string, thread: ImportedThread): Promise<ImportOutcome> {
+    for (const entry of thread.entries) if (entry.thread !== id) throw new Error('An entry belongs to another conversation.');
+    const material = (await this.readMaterial()) ?? await this.writeMaterial();
+    const before = await this.refresh(id, material);
+    const fresh = thread.entries.filter((entry) => !before.ids.has(entry.id));
+    const existing = await this.readMeta(id, material);
+    const existingContext = await this.readContextOf(id, material);
+    const known = before.ids.size > 0 || Boolean(existing) || Boolean(existingContext);
+    const earlier = this.covered.get(id);
+    if (fresh.length) await this.append(id, fresh, material);
+    if (earlier === undefined) this.covered.delete(id); else this.covered.set(id, earlier);
+    const cache = await this.refresh(id, material);
+    const lines = threadLines(cache.skeleton);
+    const counted = { turns: lines.main.filter((entry) => entry.role === 'user').length, entries: cache.ids.size, bytes: cache.offset, tip: lines.main.at(-1)?.id ?? '' };
+    const brought: ThreadMeta = { ...thread.meta, id, ...counted };
+    const merged = existing ? mergeMeta(existing, brought) : brought;
+    const { state: _state, ...plain } = merged;
+    const next: ThreadMeta = { ...plain, ...counted };
+    const metaChanged = !existing || canonicalJson(JSON.parse(JSON.stringify(existing))) !== canonicalJson(JSON.parse(JSON.stringify(next)));
+    const context: Transcript = JSON.parse(JSON.stringify({ ...thread.context, basedOnTip: thread.entries.at(-1)?.id ?? '' }));
+    const contextChanged = !existingContext || laterContext(context, existingContext);
+    if (!fresh.length && !metaChanged && !contextChanged) return 'unchanged';
+    await this.home.ensureFolder(this.dirOf(id));
+    if (contextChanged) await writeFileAtomic(this.contextPath(id), this.sealJson(material, 'thread-context', id, context));
+    // The meta goes last, as everywhere: a crash before it leaves a thread the next pass finishes.
+    if (metaChanged || fresh.length) {
+      await writeFileAtomic(this.metaPath(id), this.sealJson(material, 'thread-meta', id, next));
+      await this.indexThread(material, next);
+    }
+    return known ? 'merged' : 'copied';
+  }
+
+  private async readContextOf(id: string, material: Material): Promise<Transcript | undefined> {
+    try {
+      const value = this.openJson(material, 'thread-context', id, await readFile(this.contextPath(id), 'utf8')) as Transcript;
+      return value && value.id === id && Array.isArray(value.messages) ? value : undefined;
+    } catch {
+      return undefined;
+    }
   }
 
   /** Adds entries to the archive's delta file (sealed lines, as in a log), for entries a thread gained while archived. Nothing in the archive is rewritten. */
