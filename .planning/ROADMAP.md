@@ -80,10 +80,10 @@ Plans:
 - [x] 27-17-PLAN.md — "Give this project an online home": GitHub repo public or private on click, gh or pasted-URL fallback, separate checked code push, resumable (D-14, SYNC-09)
 - [x] 27-18-PLAN.md — Visible sync control in the chat panel bar with five states, errors on the control, dismissible turn-on prompt (D-16)
 - [ ] 27-19-PLAN.md — Gap G-27-2: older comparisons saved with mode "run" are read as "rerun" by every reader
-- [ ] 27-20-PLAN.md — Gap G-27-6a: near-ai/home is the first branch of an empty remote; GitHub default never left on near-ai/state
+- [ ] 27-20-PLAN.md — Gap G-27-6a: no extra branch; after the person's code push the GitHub default moves from near-ai/state to their branch (pasted address: the setting to change)
 - [ ] 27-21-PLAN.md — Gap G-27-6c: NEAR AI's own records in .planning/.near-ai/ stay off the code push by default
 - [ ] 27-22-PLAN.md — Gaps G-27-4a, G-27-4c: whole labels at every side bar width with a real-window clipping guard; error sentence under the control
-- [ ] 27-23-PLAN.md — Gap G-27-6b (and 6a repair): "Put This Project's Code Online", setup re-run offers the push; README and SECURITY
+- [ ] 27-23-PLAN.md — Gap G-27-6b (and 6a repair with a click): "Put This Project's Code Online", setup re-run offers the push; README and SECURITY
 - [ ] 27-24-PLAN.md — Gaps G-27-4b, G-27-4d: "No online home · Set up" on panel open; one sentence per sync failure
 - [ ] 27-25-PLAN.md — Gap G-27-4d: one time formatter for card and control; invitation after connecting NEAR AI
 - [ ] 27-16-PLAN.md — Phase gate, owner check on the real host, README/SECURITY, feature PR and release 0.4.20
