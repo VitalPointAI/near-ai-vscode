@@ -9,7 +9,7 @@
 import { createHash } from 'node:crypto';
 import { appendFile, open, readFile, readdir, rmdir, rm, stat } from 'node:fs/promises';
 import * as path from 'node:path';
-import type { ArchiveProblem, ArchiveProblemReason } from '../domain/state/archiveProblem';
+import { ArchiveUnreadableError, type ArchiveProblem, type ArchiveProblemReason } from '../domain/state/archiveProblem';
 import { aadFor, open as openSealed, seal, subKey, type SealedBlob } from '../domain/state/keys';
 import { canonicalJson } from '../domain/state/records';
 import { isSyntheticMessage, messagesToEntries } from '../domain/state/threadCapture';
@@ -266,8 +266,9 @@ export class ThreadStore implements ConversationStore {
   }
 
   /** Adds entries to a thread's log. An entry already in the log (same id) is not added twice. Nothing is removed. */
-  public appendEntries(id: string, entries: readonly ThreadEntry[]): Promise<void> {
+  public async appendEntries(id: string, entries: readonly ThreadEntry[]): Promise<void> {
     assertThreadId(id);
+    await this.assertWritable(id);
     return this.enqueue(async () => { await this.append(id, entries, await this.writeMaterial()); });
   }
 
@@ -438,8 +439,9 @@ export class ThreadStore implements ConversationStore {
   }
 
   /** Creates a thread's meta, or returns the one it has. Writes no log. */
-  public create(meta: Pick<ThreadMeta, 'id' | 'title' | 'model' | 'origin'> & Partial<ThreadMeta>): Promise<ThreadMeta> {
+  public async create(meta: Pick<ThreadMeta, 'id' | 'title' | 'model' | 'origin'> & Partial<ThreadMeta>): Promise<ThreadMeta> {
     assertThreadId(meta.id);
+    await this.assertWritable(meta.id);
     return this.enqueue(async () => {
       const material = await this.writeMaterial();
       const existing = await this.readMeta(meta.id, material);
@@ -542,6 +544,19 @@ export class ThreadStore implements ConversationStore {
     } catch {
       this.problems.set(id, { reason: (await this.archiveKeys()) ? 'damaged' : 'needs-recovery-code' });
     }
+  }
+
+  /**
+   * Nothing is written to a thread that is archived and cannot be opened: a new, empty thread under its id would sit beside the archive and stand in
+   * for it. A healthy archive is brought back whole first (so the write continues the conversation); an archive that is damaged, needs the recovery code
+   * or could not be fetched refuses the write with the reason, and not one file is touched. A thread that has no archive is no business of this check.
+   */
+  private async assertWritable(id: string): Promise<void> {
+    if ((await stat(this.logPath(id)).catch(() => undefined))?.isFile()) return;
+    const archived = Boolean((await stat(path.join(this.archiveFolderOf(id), 'parts.json')).catch(() => undefined))?.isFile()) || await this.isRemoteOnly(id);
+    if (!archived) return;
+    const problem = await this.prepareOpen(id);
+    if (problem) throw new ArchiveUnreadableError(problem.reason);
   }
 
   /**
@@ -752,8 +767,9 @@ export class ThreadStore implements ConversationStore {
     return this.write(transcript, false);
   }
 
-  private write(transcript: Transcript, index: boolean): Promise<void> {
+  private async write(transcript: Transcript, index: boolean): Promise<void> {
     assertThreadId(transcript.id);
+    await this.assertWritable(transcript.id);
     return this.enqueue(async () => {
       const material = await this.writeMaterial();
       const cache = await this.refresh(transcript.id, material);
@@ -815,8 +831,9 @@ export class ThreadStore implements ConversationStore {
    * before the model's context is trimmed or compacted, so the log holds the originals. Messages only the model sees (the system prompt, a summary)
    * are marked logged without being written.
    */
-  public captureTranscript(transcript: Transcript, display: ReadonlyMap<string, string>, logged: WeakSet<AgentMessage>): Promise<void> {
+  public async captureTranscript(transcript: Transcript, display: ReadonlyMap<string, string>, logged: WeakSet<AgentMessage>): Promise<void> {
     assertThreadId(transcript.id);
+    await this.assertWritable(transcript.id);
     return this.enqueue(async () => {
       const fresh = transcript.messages.filter((message) => !logged.has(message));
       const real = fresh.filter((message) => !isSyntheticMessage(message));

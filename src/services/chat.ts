@@ -20,6 +20,7 @@ import { shownSpendAccount, showSpendAccount, SpendAccount } from './spendAccoun
 import { withSpendTag } from './spendLedger';
 import { ProfileStore } from './profileStore';
 import { readAgentLimits, readAgentModels, readAgentRules, readModelTiers, readRiskSwitches, readRoleModels, readSafetyModel, readSettings, shouldAutoInstallGsd, readRunBudget, readHistoryLimits } from './settings';
+import { archiveProblemText } from '../domain/state/archiveProblem';
 import { threadStoreFor } from './threadStore';
 import { applyRetention, protectedThreadIds } from './threadArchive';
 import { onRunEnded, runEnded } from './runEndHooks';
@@ -308,6 +309,10 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     if (!root) return;
     const current = onScreen();
     const reuse = current && isBlank(current) ? current : undefined;
+    // An archived conversation that cannot be opened (damaged, needs the recovery code, or could not be downloaded) is explained, and nothing is opened
+    // in its place: no tab is made for it, so nothing can be saved over it, and its files are not touched (D-08).
+    const problem = await threadStoreFor(root, context.secrets, editorWriter(context.globalState as MementoLike | undefined), () => vscode.workspace.getConfiguration('nearAi').get<boolean>('sync.keepKeyInProject', true)).prepareOpen(id).catch(() => undefined);
+    if (problem) { onScreen().post({ type: 'history-error', text: archiveProblemText(problem.reason) }); return; }
     if (!reuse && !(await makeRoom())) return;
     const tab = reuse ?? newTab();
     if (!(await restoreInto(tab, id, root, 'Opened this conversation with its full context. Continue where you left off.'))) {
