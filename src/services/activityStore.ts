@@ -170,20 +170,24 @@ export class ActivityStore {
    * Ends every run still marked running: only a run of an earlier extension host can be, since
    * this one has started none yet, so a reload cut it off. It is recorded as stopped, ending at
    * its last activity, so the history does not show it running forever. Returns how many.
+   * `options.only` limits it to those sessions (the re-check of the ones skipped earlier), and `options.onSkipped` is told the ids it left open because
+   * another editor still runs them, so they can be looked at again.
    */
-  public async closeInterrupted(summary = 'Run stopped: VS Code reloaded before it finished.', liveElsewhere?: (session: ActivitySessionSummary) => boolean | Promise<boolean>): Promise<number> {
+  public async closeInterrupted(summary = 'Run stopped: VS Code reloaded before it finished.', liveElsewhere?: (session: ActivitySessionSummary) => boolean | Promise<boolean>, options: { only?: ReadonlySet<string>; onSkipped?: (sessionIds: string[]) => void } = {}): Promise<number> {
     await this.load();
-    const running = this.ledger.sessions.filter((session) => session.outcome === 'running' && !session.runOutcome);
+    const running = this.ledger.sessions.filter((session) => session.outcome === 'running' && !session.runOutcome && (!options.only || options.only.has(session.sessionId)));
+    const skipped: string[] = [];
     // With two editors on one project, a run still marked running may be live in the other one. A session whose run another editor keeps alive stays
     // open; one with no run link cannot be asked, so it stays open while it was updated within the heartbeat window (D-03, Pitfall 6).
     const open: ActivitySessionSummary[] = [];
     for (const session of running) {
       if (liveElsewhere) {
         const linked = Boolean(session.runId && session.conversationId);
-        if (linked ? await Promise.resolve(liveElsewhere(session)).catch(() => false) : Date.parse(this.clock()) - Date.parse(session.updatedAt) < FOREIGN_LIVE_MS) continue;
+        if (linked ? await Promise.resolve(liveElsewhere(session)).catch(() => false) : Date.parse(this.clock()) - Date.parse(session.updatedAt) < FOREIGN_LIVE_MS) { skipped.push(session.sessionId); continue; }
       }
       open.push(session);
     }
+    options.onSkipped?.(skipped);
     for (const session of open) {
       const endedAt = session.updatedAt;
       await this.append(session.sessionId, { status: 'cancelled', kind: 'session', summary });
@@ -279,9 +283,36 @@ export function mergeSessions(disk: ActivitySessionSummary[], memory: ActivitySe
 }
 const fileQueues = new Map<string, Promise<unknown>>();
 const interrupted = new Map<string, Promise<number>>();
+/** Per project, the timer that looks again at the sessions skipped at activation because another editor still ran them. */
+const rechecks = new Map<string, NodeJS.Timeout>();
+let recheckMs = FOREIGN_LIVE_MS;
+/** Test seam: how often the skipped sessions are looked at again. */
+export function setActivityRecheckMs(ms: number | undefined): void { recheckMs = ms ?? FOREIGN_LIVE_MS; }
+/**
+ * Looks again, every FOREIGN_LIVE_MS, only at the sessions that were left open at activation: once the other editor's run has ended (its session is no
+ * longer running) or gone quiet (cut off), the session is closed as a reload would have. A session started after activation is never in the list.
+ */
+function recheckSkipped(key: string, live: (session: ActivitySessionSummary) => boolean | Promise<boolean>, skipped: string[]): void {
+  let pending = new Set(skipped);
+  let checking = false;
+  const timer = setInterval(() => {
+    if (checking) return;
+    checking = true;
+    void (async () => {
+      // A fresh store each time: the other editor wrote the file since this one last read it.
+      let left: string[] = [];
+      await new ActivityStore(key).closeInterrupted(undefined, live, { only: pending, onSkipped: (ids) => { left = ids; } }).catch(() => { left = [...pending]; });
+      pending = new Set(left);
+      if (!pending.size) { clearInterval(timer); rechecks.delete(key); }
+    })().finally(() => { checking = false; });
+  }, recheckMs);
+  timer.unref?.();
+  rechecks.set(key, timer);
+}
 /**
  * Closes runs a reload cut off in this project's history, once per extension host: at activation, and before the chat starts any run of its own.
- * With a writer (this editor's id) it first asks the shared run markers, so a run another editor is still running is left open (D-03).
+ * With a writer (this editor's id) it first asks the shared run markers, so a run another editor is still running is left open (D-03), and checked
+ * again every 3 minutes until that run is no longer live.
  */
 export function closeInterruptedRuns(workspaceRoot: string, writer?: string): Promise<number> {
   const key = path.resolve(workspaceRoot);
@@ -289,7 +320,11 @@ export function closeInterruptedRuns(workspaceRoot: string, writer?: string): Pr
   if (!done) {
     const markers = writer ? new RunMarkers('', key, { dir: path.join(stateFolder(key), 'runs'), writer }) : undefined;
     const live = markers ? (session: ActivitySessionSummary) => (session.conversationId ? markers.liveElsewhere(session.conversationId, session.runId) : false) : undefined;
-    done = new ActivityStore(key).closeInterrupted(undefined, live).catch(() => 0);
+    let skipped: string[] = [];
+    done = new ActivityStore(key).closeInterrupted(undefined, live, { onSkipped: (ids) => { skipped = ids; } }).then((closed) => {
+      if (live && skipped.length) recheckSkipped(key, live, skipped);
+      return closed;
+    }).catch(() => 0);
     interrupted.set(key, done);
   }
   return done;
