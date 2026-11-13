@@ -35,10 +35,11 @@ export function fixtureGit(dir: string, args: string[], input?: string | Buffer)
   return execFileSync('git', args, { cwd: dir, env: cleanEnv(), encoding: 'utf8', input, stdio: ['pipe', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024 });
 }
 
-/** An empty bare repository with a `main` branch holding one commit, so a test can prove main is untouched. */
-export function bareRemote(): string {
+/** A bare repository with a `main` branch holding one commit, so a test can prove main is untouched; `withMain: false` leaves it empty. */
+export function bareRemote(options: { withMain?: boolean } = {}): string {
   const dir = mkdtempSync(path.join(tmpdir(), 'near-ai-remote-'));
   fixtureGit(dir, ['init', '--bare', '-q', '-b', 'main']);
+  if (options.withMain === false) return dir;
   const seed = mkdtempSync(path.join(tmpdir(), 'near-ai-seed-'));
   fixtureGit(seed, ['init', '-q', '-b', 'main']);
   writeFileSync(path.join(seed, 'README.md'), 'seed\n');
