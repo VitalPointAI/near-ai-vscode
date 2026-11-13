@@ -837,8 +837,12 @@ function conversationFor(context: vscode.ExtensionContext, root: string, panel: 
     const id = promptIdOf(outbound);
     if (id && notices.opened(id, { panelVisible: (panel as { visible?: boolean }).visible, windowFocused: vscode.window.state?.focused }, waitingIds())) announce(outbound);
   };
-  const conversation = new AgentConversation(root, forward, path.join(storage, 'checkpoints'), ripgrepPath(), transcripts, sharedActivityFeed());
+  const home = stateHomeFor(root);
+  const conversation = new AgentConversation(root, forward, home.paths.checkpoints, ripgrepPath(), transcripts, sharedActivityFeed());
   conversation.runMarkers = runMarkersFor(context, root);
+  // Checkpoints are shared by every editor on this computer; sub-agent worktrees stay in this editor's own storage, never in the project.
+  conversation.worktreeRoot = path.join(storage, 'worktrees');
+  conversation.checkpointPrepare = () => home.ensure();
   const minutes = vscode.workspace.getConfiguration('nearAi').get<number>('agent.approvalTimeoutMinutes', AGENT_DEFAULTS.approvalTimeoutMinutes);
   conversation.approvalTimeoutMs = Math.max(0, Math.min(1_440, typeof minutes === 'number' && Number.isFinite(minutes) ? minutes : AGENT_DEFAULTS.approvalTimeoutMinutes)) * 60_000;
   // PERF-01: a sub-agent's card waits briefly, then the call returns "awaiting approval"; enough of those in a row pause the run.

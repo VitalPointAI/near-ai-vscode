@@ -277,8 +277,13 @@ export class AgentConversation {
     private readonly activity?: ActivityFeed
   ) {}
 
+  /** The folder for sub-agents' git worktrees. The chat sets it to the editor's own storage: a worktree is a full checkout and never belongs in the project. */
+  public worktreeRoot: string | undefined;
+  /** Awaited before each checkpoint save; the chat sets it to the state home's ensure(), so the inner .gitignore exists before any checkpoint file. */
+  public checkpointPrepare: (() => Promise<unknown>) | undefined;
+
   /** Where sub-agents' git worktrees live: the extension's storage, never the project. */
-  private get worktreeDir(): string { return path.join(path.dirname(this.checkpointDir), 'worktrees'); }
+  private get worktreeDir(): string { return this.worktreeRoot ?? path.join(path.dirname(this.checkpointDir), 'worktrees'); }
 
   public get running(): boolean { return Boolean(this.abort); }
   /** This conversation's ID (spend for "this conversation" is tagged with it). */
@@ -315,7 +320,7 @@ export class AgentConversation {
     const runId = request.runId ?? AgentConversation.newRunId();
     const account = request.local ? undefined : spendAccountOf(request.client);
     this.runSpendSource = account ? { runId, account } : undefined;
-    const checkpoints = new RunCheckpoints(runId, this.checkpointDir);
+    const checkpoints = new RunCheckpoints(runId, this.checkpointDir, { root: this.root, ...(this.checkpointPrepare ? { beforeWrite: this.checkpointPrepare } : {}) });
     this.runs.set(runId, checkpoints);
     this.shellEnvAllow = request.shellEnvAllow ?? [];
     const shell = this.shellFor(request.gsd?.shellEnv ?? {});
@@ -590,7 +595,7 @@ export class AgentConversation {
 
   /** Undoes every file change a run made with the file tools. */
   public async revert(runId: string): Promise<string[]> {
-    const checkpoints = this.runs.get(runId) ?? await RunCheckpoints.load(runId, this.checkpointDir);
+    const checkpoints = this.runs.get(runId) ?? await RunCheckpoints.load(runId, this.checkpointDir, { root: this.root, ...(this.checkpointPrepare ? { beforeWrite: this.checkpointPrepare } : {}) });
     if (!checkpoints) return [];
     const restored = await checkpoints.revert();
     this.runs.delete(runId);

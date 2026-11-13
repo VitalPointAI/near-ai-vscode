@@ -4,6 +4,17 @@ import * as path from 'node:path';
 
 interface Snapshot { path: string; original: string | null }
 
+/** What is on disk (format 2): a file inside the project is a path relative to the project root, so the checkpoint works on any machine that has the project. */
+type SavedSnapshot = ({ rel: string } | { abs: string; outside: true }) & { original: string | null };
+const FORMAT = 2;
+
+export interface RunCheckpointsOptions {
+  /** The project folder. Files inside it are saved as root-relative paths; without it every path is saved as an absolute outside path. */
+  root?: string;
+  /** Awaited before each save; the chat passes the state home's ensure(), so its inner .gitignore exists before the first checkpoint file. */
+  beforeWrite?: () => Promise<unknown>;
+}
+
 /** A temporary file this old is left over from a save that never finished (the editor closed between write and rename); a live save takes milliseconds. */
 const STALE_TEMPORARY_MS = 60_000;
 
@@ -18,7 +29,13 @@ export class RunCheckpoints {
   private saving: Promise<void> = Promise.resolve();
   private swept = false;
 
-  public constructor(public readonly runId: string, private readonly storageDir?: string) {}
+  private readonly root: string | undefined;
+  private readonly beforeWrite: (() => Promise<unknown>) | undefined;
+
+  public constructor(public readonly runId: string, private readonly storageDir?: string, options: RunCheckpointsOptions = {}) {
+    this.root = options.root ? path.resolve(options.root) : undefined;
+    this.beforeWrite = options.beforeWrite;
+  }
 
   /** Call before writing `absolutePath`; only the first call per file in a run takes a snapshot. */
   public async capture(absolutePath: string): Promise<void> {
@@ -64,16 +81,52 @@ export class RunCheckpoints {
   }
 
   /** Reloads a run's snapshots saved by an earlier session. */
-  public static async load(runId: string, storageDir: string): Promise<RunCheckpoints | undefined> {
-    const checkpoints = new RunCheckpoints(runId, storageDir);
+  public static async load(runId: string, storageDir: string, options: RunCheckpointsOptions = {}): Promise<RunCheckpoints | undefined> {
+    const checkpoints = new RunCheckpoints(runId, storageDir, options);
     await checkpoints.sweepTemporaries();
     try {
-      const saved = JSON.parse(await readFile(checkpoints.file(), 'utf8')) as Snapshot[];
-      for (const snapshot of saved) checkpoints.snapshots.set(snapshot.path, snapshot);
+      const saved: unknown = JSON.parse(await readFile(checkpoints.file(), 'utf8'));
+      for (const snapshot of checkpoints.readSaved(saved)) checkpoints.snapshots.set(snapshot.path, snapshot);
       return checkpoints;
     } catch {
       return undefined;
     }
+  }
+
+  /** Reads a saved file strictly. Format 1 (a list of absolute paths) and format 2 both load; an entry that is malformed or would land outside the root is dropped. */
+  private readSaved(saved: unknown): Snapshot[] {
+    const original = (value: unknown): string | null | undefined => (value === null || typeof value === 'string' ? value : undefined);
+    const found: Snapshot[] = [];
+    if (Array.isArray(saved)) {
+      for (const item of saved as Array<Record<string, unknown>>) {
+        const content = original(item?.original);
+        if (item && typeof item.path === 'string' && path.isAbsolute(item.path) && content !== undefined) found.push({ path: item.path, original: content });
+      }
+      return found;
+    }
+    if (!saved || typeof saved !== 'object' || (saved as { format?: unknown }).format !== FORMAT || !Array.isArray((saved as { snapshots?: unknown }).snapshots)) return found;
+    for (const item of (saved as { snapshots: Array<Record<string, unknown>> }).snapshots) {
+      const content = original(item?.original);
+      if (!item || content === undefined) continue;
+      if (item.outside === true && typeof item.abs === 'string' && path.isAbsolute(item.abs)) { found.push({ path: item.abs, original: content }); continue; }
+      if (typeof item.rel !== 'string' || !this.root) continue;
+      const resolved = this.resolveInside(item.rel);
+      if (resolved) found.push({ path: resolved, original: content });
+    }
+    return found;
+  }
+
+  /** A saved relative path made absolute under the root, or undefined when it is empty, absolute, climbs out with '..', or would resolve outside the root (T-27-17). */
+  private resolveInside(rel: string): string | undefined {
+    if (!this.root || !rel || rel.includes('\0') || path.isAbsolute(rel) || /^[A-Za-z]:/.test(rel) || rel.split(/[\\/]/).includes('..')) return undefined;
+    const resolved = path.resolve(this.root, rel);
+    return resolved === this.root || !resolved.startsWith(this.root + path.sep) ? undefined : resolved;
+  }
+
+  private toSaved(snapshot: Snapshot): SavedSnapshot {
+    const rel = this.root ? path.relative(this.root, snapshot.path) : undefined;
+    if (rel !== undefined && rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel)) return { rel: rel.split(path.sep).join('/'), original: snapshot.original };
+    return { abs: snapshot.path, outside: true, original: snapshot.original };
   }
 
   /** Deletes this run's temporary files left by a save that was cut off; once per instance, and never one a save could still be renaming. */
@@ -102,11 +155,12 @@ export class RunCheckpoints {
   /** Writes every snapshot taken so far to a temporary file, then renames it over the saved one, so a reader never sees half a file. */
   private async write(): Promise<void> {
     const storageDir = this.storageDir!;
+    await this.beforeWrite?.();
     await mkdir(storageDir, { recursive: true });
     await this.sweepTemporaries();
     const temporary = path.join(storageDir, `.${this.runId}.${randomBytes(4).toString('hex')}.tmp`);
     try {
-      await writeFile(temporary, JSON.stringify([...this.snapshots.values()]), 'utf8');
+      await writeFile(temporary, JSON.stringify({ format: FORMAT, snapshots: [...this.snapshots.values()].map((snapshot) => this.toSaved(snapshot)) }), 'utf8');
       await rename(temporary, this.file());
     } catch (error) {
       await rm(temporary, { force: true }).catch(() => undefined);
