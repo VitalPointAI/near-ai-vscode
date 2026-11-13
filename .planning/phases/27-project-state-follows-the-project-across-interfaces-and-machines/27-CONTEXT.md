@@ -78,6 +78,7 @@ On 2026-11-13 the owner opened, in desktop VS Code on the host, projects they ha
     - Back off when offline.
     - Batch pushes so that their timing reveals activity, not individual chats (D-09).
   - **Status.** The sync control (D-16) shows the result.
+- **D-18 Wire format is post-quantum safe by construction; recovery code is 256 bits.** (Owner, 2026-11-13, 27-01 Task 1.) The sync format uses only symmetric cryptography (AES-256-GCM, HKDF-SHA256, scrypt over a generated code), so harvest-now-decrypt-later attacks by a future quantum computer gain at most Grover's square-root speed-up. The recovery code is 256 generated bits (52 Crockford base32 characters, 13 groups of 4) so it keeps about 128 bits of quantum strength without counting scrypt's cost; the rest of the 27-01 contract is as proposed. Constraint for later work: any public-key step added to sync, such as sharing state between different people in Team Mode, must use a hybrid key exchange (X25519 plus ML-KEM) so it does not reintroduce a harvest-now-decrypt-later weakness.
 - **D-06 Model choices follow the project.** Comparison runs are stored in the project's state home, so Compare Models shows them in every interface. "Apply recommended" writes to workspace settings (or to project state read as a project-level default) instead of user settings. Choices already applied globally in one editor are offered for import into the project rather than silently copied.
 
 ### Claude's Discretion (research recommendations adopted, 2026-11-13)
