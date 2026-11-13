@@ -30,8 +30,8 @@ const kit = require(path.join(ROOT, 'media', 'chat', 'syncControl.js')) as SyncK
 const NOW = new Date(2026, 10, 13, 15, 30).getTime();
 const AT = new Date(2026, 10, 13, 9, 5).toISOString();
 
-/** The bar as panelView.ts lays it out: the profile chip, then the sync chip and its live region. */
-function bar(): { doc: FakeDocument; button: FakeNode; live: FakeNode } {
+/** The bar as panelView.ts lays it out: the profile chip, then the sync chip, its live region and the line that shows a problem's sentence. */
+function bar(options: { detail?: boolean } = {}): { doc: FakeDocument; button: FakeNode; live: FakeNode; detail?: FakeNode } {
   const doc = new FakeDocument();
   const row = doc.createElement('div');
   const profile = doc.createElement('button');
@@ -42,8 +42,16 @@ function bar(): { doc: FakeDocument; button: FakeNode; live: FakeNode } {
   const live = doc.createElement('span');
   live.id = 'sync-live';
   row.append(profile, button, live);
+  let detail: FakeNode | undefined;
+  if (options.detail !== false) {
+    detail = doc.createElement('p');
+    detail.id = 'sync-detail';
+    detail.className = 'sync-detail';
+    detail.hidden = true;
+    row.append(detail);
+  }
   doc.body.append(row);
-  return { doc, button, live };
+  return { doc, button, live, ...(detail ? { detail } : {}) };
 }
 
 const STATUSES: Array<[string, SyncStatus, string, string]> = [
@@ -334,4 +342,91 @@ test('the first-run invitation steps aside while the pick-up card carries one, a
   card.all((node) => node.tagName === 'button' && node.textContent === 'Not now')[0].click();
   assert.ok(doc.getElementById('sync-prompt'), 'back on the first-run screen once the card is gone');
   assert.equal(doc.body.all((node) => node.textContent === SYNC_PROMPT_TEXT.line).length, 1);
+});
+
+// ---- Plan 27-22 (G-27-4c): the plain sentence of a problem is visible text under the control, not only the tooltip ----
+
+const SENTENCE = 'Couldn\'t reach GitHub, will retry.';
+
+test('the attention model carries its plain sentence as detail (the fallback when it has none); no other state has a detail', () => {
+  assert.equal(syncControlModel({ state: 'attention', message: SENTENCE }, NOW).detail, SENTENCE);
+  assert.equal(syncControlModel({ state: 'attention', message: '  ' }, NOW).detail, 'The last sync did not finish.');
+  assert.equal(syncControlModel({ state: 'attention' }, NOW).detail, 'The last sync did not finish.');
+  assert.equal(syncControlModel({ state: 'attention', message: SENTENCE }, NOW).label, 'Needs attention', 'the label is unchanged');
+  for (const [name, status] of STATUSES) {
+    if (name === 'attention') continue;
+    assert.equal('detail' in syncControlModel(status, NOW), false, `${name} has no detail`);
+  }
+});
+
+test('rendering attention shows the sentence as text in #sync-detail and describes the button by it; the next state empties, hides and unlinks it', () => {
+  const { doc, button, detail } = bar();
+  assert.ok(detail);
+  kit.renderSyncControl(doc, button, syncControlModel({ state: 'off' }, NOW), () => undefined);
+  assert.equal(detail.hidden, true);
+  assert.equal(detail.textContent, '');
+  assert.equal(button.attributes.get('aria-describedby'), undefined);
+  kit.renderSyncControl(doc, button, syncControlModel({ state: 'attention', message: SENTENCE }, NOW), () => undefined);
+  assert.equal(detail.textContent, SENTENCE);
+  assert.equal(detail.hidden, false);
+  assert.equal(button.attributes.get('aria-describedby'), 'sync-detail');
+  kit.renderSyncControl(doc, button, syncControlModel({ state: 'synced', at: AT }, NOW), () => undefined);
+  assert.equal(detail.textContent, '');
+  assert.equal(detail.hidden, true);
+  assert.equal(button.attributes.has('aria-describedby'), false, 'the description goes with the problem');
+  kit.renderSyncControl(doc, button, syncControlModel({ state: 'attention', message: 'Sync needs you to sign in.' }, NOW), () => undefined);
+  assert.equal(detail.textContent, 'Sync needs you to sign in.');
+  assert.equal(doc.body.all((node) => node.id === 'sync-detail').length, 1, 'the same detail element, never a second one');
+  assert.equal(doc.body.all((node) => node.id === 'sync').length, 1, 'and the same one button');
+});
+
+test('a sentence with markup characters is set as text, never as HTML', () => {
+  const { doc, button, detail } = bar();
+  assert.ok(detail);
+  const sentence = 'Failed <img src=x onerror=alert(1)> & "more"';
+  kit.renderSyncControl(doc, button, syncControlModel({ state: 'attention', message: sentence }, NOW), () => undefined);
+  assert.equal(detail.textContent, sentence);
+  assert.equal(detail.children.length, 0);
+  assert.doesNotMatch(read('media', 'chat', 'syncControl.js'), /innerHTML|insertAdjacentHTML|outerHTML/);
+});
+
+test('a page without the detail line still renders the control (older markup, other hosts)', () => {
+  const { doc, button } = bar({ detail: false });
+  kit.renderSyncControl(doc, button, syncControlModel({ state: 'attention', message: SENTENCE }, NOW), () => undefined);
+  assert.equal(button.textContent, 'Needs attention');
+  kit.renderSyncControl(doc, button, syncControlModel({ state: 'off' }, NOW), () => undefined);
+  assert.equal(button.attributes.has('aria-describedby'), false);
+});
+
+test('a sentence with a password in a URL or a GitHub token reaches the page redacted in the detail too', () => {
+  const fakeToken = ['ghp', 'abcdefghijklmnopqrstuvwxyz0123456789'].join('_');
+  const url = syncPanelMessage({ state: 'attention', message: 'Failed for https://user:pw@github.com/x/y.git' }, undefined, NOW);
+  assert.ok(url.model.detail && url.model.detail.length > 0);
+  assert.doesNotMatch(url.model.detail, /user:pw|pw@/);
+  const token = syncPanelMessage({ state: 'attention', message: `Rejected token ${fakeToken}` }, undefined, NOW);
+  assert.ok(token.model.detail && !token.model.detail.includes(fakeToken) && !token.model.detail.includes('abcdefghijklmnopqrstuvwxyz0123456789'));
+  const { doc, button, detail } = bar();
+  kit.renderSyncControl(doc, button, token.model, () => undefined);
+  assert.ok(detail && !detail.textContent.includes('abcdefghijklmnopqrstuvwxyz0123456789'), 'what is on the page is the redacted sentence');
+});
+
+test('the bar markup has the detail paragraph right after the live region and before the row break, hidden, with its class', () => {
+  const panel = read('src', 'services', 'panelView.ts');
+  assert.equal((panel.match(/id="sync-detail"/g) ?? []).length, 1);
+  assert.match(panel, /<p id="sync-detail" class="sync-detail"[^>]*\bhidden\b[^>]*><\/p>/);
+  const live = panel.indexOf('id="sync-live"');
+  const detail = panel.indexOf('id="sync-detail"');
+  const rowBreak = panel.indexOf('bar-break');
+  const model = panel.indexOf('id="model"');
+  assert.ok(live > 0 && live < detail && detail < rowBreak && rowBreak < model, 'sync-live, sync-detail, the row break, then the pickers');
+});
+
+test('chat.css shows the detail as a full-row, wrapping line in a theme colour', () => {
+  const css = read('media', 'chat', 'chat.css');
+  const rule = css.match(/^\.sync-detail \{[^}]*\}/m)?.[0] ?? '';
+  assert.ok(rule, 'a .sync-detail rule');
+  assert.match(rule, /flex:\s*0 0 100%|flex-basis:\s*100%/);
+  assert.match(rule, /--vscode-errorForeground|--vscode-inputValidation-warningForeground|--vscode-editorWarning-foreground/);
+  assert.doesNotMatch(rule, /white-space:\s*nowrap/);
+  assert.doesNotMatch(rule, /#[0-9a-fA-F]{3,8}\b(?!\w)|rgba?\(|hsla?\(/, 'no hard-coded colour');
 });

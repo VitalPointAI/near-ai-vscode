@@ -12,6 +12,7 @@ export class FakeNode {
   public readonly listeners = new Map<string, Array<() => void>>();
   public constructor(public readonly tagName: string, private readonly doc: FakeDocument) {}
   public setAttribute(name: string, value: string): void { this.attributes.set(name, value); }
+  public removeAttribute(name: string): void { this.attributes.delete(name); }
   public addEventListener(type: string, listener: () => void): void { this.listeners.set(type, [...(this.listeners.get(type) ?? []), listener]); }
   public click(): void { for (const listener of this.listeners.get('click') ?? []) listener(); }
   public append(...nodes: FakeNode[]): void { for (const node of nodes) { node.parent = this; this.children.push(node); } }
