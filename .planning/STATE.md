@@ -5,9 +5,9 @@ milestone_name: Messaging relay — Teams and Signal
 current_phase: 27
 current_phase_name: Project state follows the project across interfaces and machines (0.4.20)
 status: planning
-stopped_at: Completed 27-02-PLAN.md
-last_updated: "2026-11-13T13:48:53.513Z"
-state_head: 4976814df91c4deef4842b87d1fa0b5530a792cb
+stopped_at: Completed 27-01-PLAN.md
+last_updated: "2026-11-13T13:58:02.338Z"
+state_head: d62e034499a097b91fb17153b7a97b5786bf4270
 progress:
   total_phases: 9
   completed_phases: 0
@@ -76,8 +76,8 @@ None yet.
 
 ## Session
 
-**Last session:** 2026-11-13T13:48:53.496Z
-**Stopped at:** Completed 27-02-PLAN.md
+**Last session:** 2026-11-13T13:58:02.322Z
+**Stopped at:** Completed 27-01-PLAN.md
 **Resume file:** None
 
 ## Performance Metrics
@@ -85,8 +85,11 @@ None yet.
 | Plan | Duration | Tasks | Files |
 |------|----------|-------|-------|
 | Phase 27 P02 | 13 min | 3 tasks | 12 files |
+| Phase 27 P01 | 8 min | 3 tasks | 7 files |
 
 ## Decisions
 
 - [Phase 27]: 27-02: mergeRecordSets is a set function (family grouping, dedupe by rev, supersede, tombstones, canonical fork placement), not a pairwise fold, so merge order cannot change the result
 - [Phase 27]: 27-02: the newest tombstone of each id is always kept and liveRecords() hides it; thread entries are keyed by (thread,id) and the earliest copy is kept
+- [Phase 27]: 27-01: recovery code is 256 random bits, 52 Crockford characters in 13 groups of 4, zero pad bits refused when non-zero (owner, D-18); sync format is symmetric-only so post-quantum safe by construction
+- [Phase 27]: 27-01: kdf bounds also cap scrypt memory at 256 MiB; the 1 MiB manifest cap binds before the 10 000-entry cap (about 5 000 entries)
