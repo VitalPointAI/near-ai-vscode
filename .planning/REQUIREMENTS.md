@@ -134,7 +134,7 @@
 
 Coverage: 45 of 45 v0.7.0 requirements mapped, each to exactly one phase.
 
-## Phase 25 requirements: Cybersecurity harness
+## Phase 25 requirements: Cybersecurity harness (milestone v0.8.0)
 
 **Defined:** 2026-10-30
 **Core value:** A user picks a target, accepts a plain legal-use statement, and gets a reproducible offensive and defensive security assessment that the model plans, runs, verifies, and reports — with every intrusive action approved, recorded, and replayable.
@@ -192,3 +192,17 @@ The v0.5.0 requirements (55, trusted-source knowledge base) are archived with th
 | PERF-05 | 26-04 |
 | PERF-06 | 26-05 |
 | PERF-07 | 26-01 |
+
+## Phase 27 requirements: Project state follows the project (0.4.20)
+
+**Defined:** 2026-11-13
+**Core value:** Whatever interface or machine a person opens a project on, they pick up where they left off: no lost chats, no profile set up again, no paying to redo comparisons. Anything that leaves the machine is encrypted end to end.
+
+- [ ] **SYNC-01**: Project-local state home. Every chat thread with its full conversation history (all messages, in order, never truncated or summarised away; the 5 most recent threads stay live by default, adjustable by a user setting, and older threads are archived, never deleted, and reopenable in full), run records, checkpoints, comparison runs, applied model choices, the project's spend history and the resume pointer live in a git-ignored folder inside the project, shared by every editor that opens it on this machine.
+- [ ] **SYNC-02**: Safe migration. On first start of 0.4.20 each editor merges its own existing storage for the project into the state home by record id; the merge is idempotent, never overwrites a newer record and never deletes the source.
+- [ ] **SYNC-03**: Portable encryption. Transcripts are encrypted with a per-project data key that is wrapped per device in SecretStorage and by the recovery-code key; transcripts under an install-local key are re-encrypted by the editor that holds that key.
+- [ ] **SYNC-04**: Recovery code. A high-entropy code is shown once when sync is turned on and is never stored or logged; a strong KDF derives the wrapping key; the NEAR AI key travels wrapped; a wrong code and a tampered or truncated bundle are refused with a plain message and leave state untouched (tested).
+- [ ] **SYNC-05**: Cross-machine sync over the project's git remote. An encrypted bundle on a dedicated branch (never `main`), written without touching the person's working tree, index or current branch. Records from two machines merge with no lost entries (tested), and a leak test proves no plaintext transcript, key, prompt, title or record id reaches the remote (file names, paths, commit messages and branch names included). Everything pushed is end-to-end encrypted so only the user (recovery code or an unlocked device of theirs) can open it; no key escrow. Sync commits use a generic author/committer identity, never the person's git name or email. The remote is a parameter of the sync layer (a private-remote setting is specified but deferred). All of it is reported in plain words.
+- [ ] **SYNC-06**: Model choices follow the project. Comparison runs show in Compare Models in every interface; "Apply recommended" takes effect at project level in every interface without re-running; choices applied globally before 0.4.20 are offered for import.
+- [ ] **SYNC-07**: Pick up where you left off. Opening the project on a different interface or machine shows the last chat, the last run's state and the current GSD phase with its next step; one click reopens it; nothing re-runs or spends money.
+- [ ] **SYNC-08**: Release 0.4.20 through the release PR, with CHANGELOG and README (Marketplace listing) updated.
