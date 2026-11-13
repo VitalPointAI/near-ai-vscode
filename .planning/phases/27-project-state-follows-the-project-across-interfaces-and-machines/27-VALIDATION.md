@@ -60,6 +60,7 @@ Filled in by the planner and executor from the requirement map below. Each task 
 | D-09 | The remote is a parameter (default `origin`); `nearAi.sync.remote` is not declared in this phase (D-09 defers the setting); `ext::` and other `::` transports are rejected | `stateRemote` | ❌ W0 |
 | SYNC-09 / D-14 | Online home on click only: git init, fake VS Code GitHub session and fake GitHub API (no network), public or private asked every time, repo created, remote added, sync branch pushed; gh CLI and pasted empty-URL fallbacks; name taken, offline, permission errors; resume without a second repo; token never in args, files, messages or logs (plan 17) | `onlineHome` | ❌ W0 |
 | SYNC-09 / D-14 | Separate code push: file list shown, secret file names and contents blocked (ported secret-scan rules, scanSecrets, SECRET_TOKENS), no force (plan 17) | `codePushCheck` | ❌ W0 |
+| D-17 | Sync timing with a fake clock: pull on open (not blocking chat, card shows 'Checking for updates…'), pull on return after 5 minutes, interval while idle (0 off, clamp 0..1440 matching package.json), deactivate push bounded to 3 s, no sync during a run, coalescing, offline backoff, push batching (plans 15 and 18) | `syncFlows`, `syncControl` | ❌ W0 |
 | D-16 | Sync control rendered on panel open in all five states, click posts the turn-on (or set-up) message, accessible name, keyboard reachable, theme rules, prompt in the pick-up card and first-run screen dismissible (plan 18) | `syncControl` | ❌ W0 |
 | SYNC-06 | Settings resolver precedence; apply writes project state; global choices are offered for import, not copied | `modelChoices`, `modelComparisonPage` | ❌ W0 / existing |
 | SYNC-07 | Pick-up card states; the click never re-runs or spends | `pickup`, `runMarkersForeign` | ❌ W0 |
@@ -89,6 +90,7 @@ Filled in by the planner and executor from the requirement map below. Each task 
 | Second-machine restore with the recovery code | SYNC-04, SYNC-05 | Needs a second machine or clone | Turn sync on, record the code, clone on another path or machine, enter the code: chats, runs, comparisons, model choices and the API key are restored |
 | Sync control visible on open | D-16 | Real panels in two editors and three themes | Open the project in code-server and in desktop VS Code: the sync control shows next to the profile control before any action, is reachable with Tab, and reads in light, dark and high-contrast themes |
 | Same-host key with sync off | D-15 | Two real editors with separate secret storage | With sync off, use a project in code-server, then open it in desktop VS Code and send a message: no key prompt |
+| Pull on open on a second editor | D-17 | Two real editors and a real remote | With sync on, push a chat from one machine, open the project on the other: the pick-up card shows 'Checking for updates…', then the new chat, while the chat input stays usable |
 | Online home on a scratch folder | SYNC-09, D-14 | Needs a real GitHub account | Click 'No online home · Set up', choose private, check the repository and its near-ai/state branch on GitHub; the code push is offered separately and blocks a planted .env file |
 
 ---
