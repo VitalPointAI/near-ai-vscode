@@ -5,6 +5,7 @@
 import { mergeRecordSets } from '../domain/state/merge';
 import { makeRecord, type RecordKind, type StateRecord } from '../domain/state/records';
 import { unionEntries, type ThreadEntry } from '../domain/state/threadEntries';
+import type { RunMarker, RunState } from './runMarkers';
 import { readArchive } from './threadArchive';
 import { validEntry, type ThreadMeta, type ThreadStore } from './threadStore';
 import type { Transcript } from './transcripts';
@@ -60,6 +61,7 @@ export interface CollectOptions {
   writer: string;
   profileSource?: ProfileSource;
   secretSource?: SecretSource;
+  runState?: (marker: RunMarker) => RunState;
 }
 
 /** A writer that passes the record rules (lowercase letters, digits and hyphens, 4 to 80 characters). */

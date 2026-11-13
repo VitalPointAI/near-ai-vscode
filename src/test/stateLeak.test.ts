@@ -3,7 +3,13 @@ import test from 'node:test';
 import { TREE_NAME } from '../domain/state/objects';
 import { formatRecoveryCode } from '../domain/state/recoveryCode';
 import { StateTransport, STATE_REF } from '../services/stateTransport';
+import { mkdir, writeFile } from 'node:fs/promises';
+import path from 'node:path';
+import { RunCheckpoints } from '../agent/checkpoints';
+import { generateRecoveryCode } from '../domain/state/recoveryCode';
+import { writeProjectChoice } from '../services/modelChoices';
 import { SENTINEL_EMAIL, SENTINEL_NAME, bareRemote, fixtureGit, hermeticRunner, mirrorPaths, remoteCommits, scanRemote, sealedFiles, userRepo } from './helpers/gitFixtures';
+import { SIX_TURNS, chain, machine, writeMarker } from './helpers/syncFixtures';
 
 const PROMPT = 'SENTINEL_PROMPT_7f3a';
 const API_KEY = 'sk-test-SENTINEL-KEY';
@@ -59,6 +65,63 @@ test('after real pushes the remote holds only ciphertext: no sentinel in any blo
   for (const name of scan.treeNames) assert.match(name, TREE_NAME);
   assert.deepEqual(scan.refs, [STATE_REF]);
   for (const commit of remoteCommits(remoteDir)) {
+    assert.equal(`${commit.an}${commit.ae}${commit.cn}${commit.ce}`, 'near-ai-statestate@near-ai.invalidnear-ai-statestate@near-ai.invalid');
+    assert.equal(commit.message, 'Update encrypted project state');
+  }
+});
+
+test('a real sync of a state home seeded with threads, choices, markers, spend and checkpoints leaves no readable trace in the remote', async () => {
+  const remoteDir = bareRemote({ withMain: false });
+  const a = await machine(remoteDir, 'alpha');
+  const { code, bytes } = generateRecoveryCode();
+  const TITLE = 'SENTINEL_TITLE_c41d';
+  const PROMPT_TEXT = 'SENTINEL_PROMPT_SYNC_88ab';
+  const TOOL_OUTPUT = 'SENTINEL_TOOLOUT_5e90';
+  const CHOICE_MODEL = 'SENTINEL_MODEL_choice-77';
+  const SPEND_MODEL = 'SENTINEL_SPENDMODEL_31f2';
+  const CHECKPOINT_TEXT = 'SENTINEL_CHECKPOINT_a9d4';
+  await a.keys.ensureDataKey();
+  await a.keys.writeRecoveryWrap(bytes);
+  await a.threads.create({ id: 'conv-leakcheck1', title: TITLE, model: CHOICE_MODEL, origin: 'panel' });
+  await a.threads.appendEntries('conv-leakcheck1', chain('conv-leakcheck1', a.writer, [...SIX_TURNS, ['user', PROMPT_TEXT], ['tool-call', TOOL_OUTPUT]]));
+  await writeProjectChoice(a.root, 'nearAi.defaultModel', CHOICE_MODEL, a.writer);
+  await writeMarker(a, 'conv-leakcheck1', { runId: 'run-500-abcdef', endedAt: new Date().toISOString(), outcome: 'completed' });
+  await mkdir(a.home.paths.spend, { recursive: true });
+  await writeFile(path.join(a.home.paths.spend, '2026-11.jsonl'), `${JSON.stringify({ t: 'e', id: 'ent-leak-1', v: 1, at: 1_700_000_000_000, model: SPEND_MODEL, estimateNanoUsd: 5 })}\n`);
+  await writeFile(path.join(a.root, 'tracked-file.ts'), CHECKPOINT_TEXT);
+  await new RunCheckpoints('run-500-abcdef', a.home.paths.checkpoints, { root: a.root, beforeWrite: () => a.home.ensure() }).capture(path.join(a.root, 'tracked-file.ts'));
+  const outcome = await a.sync.sync();
+  assert.equal(outcome.kind, 'synced', outcome.message);
+  const dataKey = await a.keys.dataKey();
+  assert.ok(dataKey);
+  const sentinels: Array<string | Buffer> = [
+    TITLE, PROMPT_TEXT, TOOL_OUTPUT, CHOICE_MODEL, SPEND_MODEL, CHECKPOINT_TEXT, Buffer.from(CHECKPOINT_TEXT).toString('base64'), 'conv-', 'run-', 'leakcheck', 'ent-leak',
+    'near-ai-state-sync', 'nearAi.defaultModel', SENTINEL_NAME, SENTINEL_EMAIL, code, code.replaceAll('-', ''), dataKey.toString('base64'), dataKey.toString('hex'), dataKey, bytes
+  ];
+  const scan = fixtureGit(remoteDir, ['for-each-ref', '--format=%(refname)']).trim();
+  assert.equal(scan, 'refs/heads/near-ai/state');
+  const found = scanRemote(remoteDir, sentinels);
+  assert.deepEqual(found.hits, [], 'no title, id, model name, prompt, key or person identity anywhere in the remote');
+  assert.ok(found.objects >= 5, 'the scan walked real objects');
+  for (const name of found.treeNames) assert.match(name, TREE_NAME);
+  assert.deepEqual(found.refs, [STATE_REF]);
+});
+
+test('the remote history of a real sync carries only the anonymous identity and the constant message', async () => {
+  const remoteDir = bareRemote({ withMain: false });
+  const a = await machine(remoteDir, 'alpha');
+  const { bytes } = generateRecoveryCode();
+  await a.keys.ensureDataKey();
+  await a.keys.writeRecoveryWrap(bytes);
+  await a.threads.create({ id: 'conv-leakcheck2', title: 'Anything', model: 'm', origin: 'panel' });
+  const first = chain('conv-leakcheck2', a.writer, SIX_TURNS);
+  await a.threads.appendEntries('conv-leakcheck2', first);
+  assert.equal((await a.sync.sync()).pushed, true);
+  await a.threads.appendEntries('conv-leakcheck2', chain('conv-leakcheck2', a.writer, [['user', 'again']], first[first.length - 1]?.id ?? null));
+  assert.equal((await a.sync.sync()).pushed, true);
+  const commits = remoteCommits(remoteDir);
+  assert.equal(commits.length, 2);
+  for (const commit of commits) {
     assert.equal(`${commit.an}${commit.ae}${commit.cn}${commit.ce}`, 'near-ai-statestate@near-ai.invalidnear-ai-statestate@near-ai.invalid');
     assert.equal(commit.message, 'Update encrypted project state');
   }

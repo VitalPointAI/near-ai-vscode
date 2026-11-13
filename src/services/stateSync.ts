@@ -12,6 +12,7 @@ import {
 } from '../domain/state/objects';
 import { parseRecord, type StateRecord } from '../domain/state/records';
 import { threadTip, unionEntries, type ThreadEntry } from '../domain/state/threadEntries';
+import type { RunMarker, RunState } from './runMarkers';
 import { ProjectStateHome, writeFileAtomic } from './stateHome';
 import type { StateKeys } from './stateKeys';
 import { MirrorBusyError } from './stateMirrorLock';
@@ -68,6 +69,8 @@ export interface StateSyncOptions {
   isIdle?: () => boolean;
   profileSource?: ProfileSource;
   secretSource?: SecretSource;
+  /** Where a run marker stands as this editor sees it (RunMarkers.runState). Only finished and cut-off runs sync; without it only finished ones do. */
+  runState?: (marker: RunMarker) => RunState;
   applyProfiles?: (records: StateRecord[]) => Promise<void>;
   /** Test seams for the retry wait. */
   sleep?: (ms: number) => Promise<void>;
@@ -348,8 +351,8 @@ export class StateSync {
   }
 
   private collectOptions() {
-    const { writer, profileSource, secretSource } = this.options;
-    return { writer, ...(profileSource ? { profileSource } : {}), ...(secretSource ? { secretSource } : {}) };
+    const { writer, profileSource, secretSource, runState } = this.options;
+    return { writer, ...(profileSource ? { profileSource } : {}), ...(secretSource ? { secretSource } : {}), ...(runState ? { runState } : {}) };
   }
 
   /** What this computer now knows the remote holds, after reading and applying it. */
