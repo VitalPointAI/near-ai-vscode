@@ -1,5 +1,6 @@
 import { AuthMode, DEFAULT_BASE_URL } from '../domain/config';
 import { ProjectCredentialScope, isProjectCredentialScope } from '../domain/auth';
+import type { ApiKeyCopyHooks } from './stateApiKey';
 
 export const API_KEY_SECRET = 'nearAi.apiKey';
 export const REFRESH_TOKEN_SECRET = 'nearAi.refreshToken';
@@ -19,6 +20,13 @@ export interface AuthSnapshot {
 }
 
 export class AuthService {
+  /**
+   * The project's sealed key copy (D-15), set by the extension for the open project. When this editor's SecretStorage has no key for a scope, the
+   * copy is asked once per scope per extension host; a key found there is stored in this editor's own SecretStorage.
+   */
+  public keyCopy?: ApiKeyCopyHooks;
+  private readonly copyAttempts = new Map<string, Promise<void>>();
+
   public constructor(private readonly secrets: SecretStorageLike) {}
 
   public async getSnapshot(mode: AuthMode): Promise<AuthSnapshot> {
@@ -62,7 +70,11 @@ export class AuthService {
    * released only to NEAR AI Cloud's default endpoint, which is then recorded.
    */
   public async getScopedApiKeyFor(scope: ProjectCredentialScope, endpoint: string): Promise<string | undefined> {
-    const apiKey = await this.getScopedApiKey(scope);
+    let apiKey = await this.getScopedApiKey(scope);
+    if (!apiKey && this.keyCopy) {
+      await this.restoreFromCopy(scope, endpoint);
+      apiKey = await this.getScopedApiKey(scope);
+    }
     if (!apiKey) return undefined;
     const bound = await this.secrets.get(scopedSecret(scope, 'api-key-endpoint'));
     const wanted = normalizeEndpoint(endpoint);
@@ -74,6 +86,20 @@ export class AuthService {
     return apiKey;
   }
 
+  /** Asked once per scope per extension host. A copy is released only to the endpoint it was saved for; anything else is ignored. */
+  private restoreFromCopy(scope: ProjectCredentialScope, endpoint: string): Promise<void> {
+    const id = `${scope.projectId}/${scope.profileId}`;
+    let attempt = this.copyAttempts.get(id);
+    if (!attempt) {
+      attempt = (async () => {
+        const copy = await this.keyCopy?.resolve(scope, endpoint);
+        if (copy && normalizeEndpoint(copy.endpoint) === normalizeEndpoint(endpoint)) await this.saveScopedApiKey(scope, copy.apiKey, copy.endpoint);
+      })().catch(() => undefined);
+      this.copyAttempts.set(id, attempt);
+    }
+    return attempt;
+  }
+
   public async getScopedApiKey(scope: ProjectCredentialScope): Promise<string | undefined> {
     this.assertScope(scope);
     return this.secrets.get(scopedSecret(scope, 'api-key'));
@@ -81,6 +107,8 @@ export class AuthService {
 
   public async removeScopedApiKey(scope: ProjectCredentialScope): Promise<void> {
     this.assertScope(scope);
+    // Removing a key on purpose must not bring it back from the shared copy later in this session.
+    this.copyAttempts.set(`${scope.projectId}/${scope.profileId}`, Promise.resolve());
     await this.secrets.delete(scopedSecret(scope, 'api-key'));
     await this.secrets.delete(scopedSecret(scope, 'api-key-endpoint'));
   }

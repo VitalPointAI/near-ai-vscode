@@ -7,6 +7,9 @@ import { isNearAiProject } from './gsd/runtime';
 import { saveHandoff } from './services/handoff';
 import { AuthService } from './services/auth';
 import { ProfileStore } from './services/profileStore';
+import { apiKeyCopyHooks } from './services/stateApiKey';
+import { stateHomeFor } from './services/stateHome';
+import { stateKeysFor } from './services/stateKeys';
 import { initProfileIndex, listSavedProfiles, runUseSavedProfile } from './services/profileIndex';
 import { GsdRuntime, startRuntimeUpdates } from './gsd/runtime';
 import { readAgentLimits, readModelTiers, readSettings, shouldAutoInstallGsd } from './services/settings';
@@ -68,6 +71,17 @@ export function activate(context: vscode.ExtensionContext): NearAiTestApi | unde
   const nearLog = vscode.window.createOutputChannel('NEAR AI');
   setNearAiDiagnostics((line) => nearLog.appendLine(`[${new Date().toISOString()}] ${line}`));
   context.subscriptions.push(nearLog, { dispose: () => setNearAiDiagnostics(undefined) });
+  // A second editor on this computer uses this project's NEAR AI key from its sealed copy in the project's state home, with no prompt (D-15). Nothing
+  // is created here: the state home appears only when a key is saved, so opening a folder still writes nothing.
+  const keyCopyRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  if (keyCopyRoot) {
+    auth.keyCopy = apiKeyCopyHooks({
+      projectScopeId: new ProfileStore(keyCopyRoot).projectScopeId,
+      home: stateHomeFor(keyCopyRoot),
+      keys: stateKeysFor(keyCopyRoot, context.secrets, () => vscode.workspace.getConfiguration('nearAi').get<boolean>('sync.keepKeyInProject', true)),
+      log: (line) => nearLog.appendLine(`[${new Date().toISOString()}] ${line}`)
+    });
+  }
   if (shouldAutoInstallGsd()) {
     void startRuntimeUpdates(new GsdRuntime(context.globalStorageUri.fsPath), vscode.workspace.workspaceFolders?.[0]?.uri.fsPath, (message, failed) => {
       void (failed ? vscode.window.showWarningMessage(message) : vscode.window.showInformationMessage(message));

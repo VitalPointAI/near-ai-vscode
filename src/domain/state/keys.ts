@@ -41,7 +41,7 @@ const FORMAT_PREFIX = 'near-ai/state/v1';
 
 /** base64 fields, as stored in the manifest. */
 export interface SealedBlob { iv: string; tag: string; data: string }
-export type StateKeyPurpose = 'transcripts' | 'object' | 'manifest';
+export type StateKeyPurpose = 'transcripts' | 'object' | 'manifest' | 'api-key';
 
 export function newDataKey(): Buffer { return randomBytes(KEY_BYTES); }
 export function newSalt(): Buffer { return randomBytes(SALT_BYTES); }
