@@ -202,7 +202,7 @@ function reportTurnOn(ui: SyncUi, outcome: SyncOutcome): TurnOnResult {
 
 // ---- entering the recovery code on another computer -------------------------------------------------------------------------------------
 
-export type EnterCodeStatus = 'restored' | 'pending' | 'cancelled' | 'refused' | 'no-home' | 'failed';
+export type EnterCodeStatus = 'restored' | 'unlocked' | 'pending' | 'cancelled' | 'refused' | 'no-home' | 'failed';
 export interface EnterCodeResult { status: EnterCodeStatus; message: string }
 
 export interface EnterCodeInput extends TurnOnInput {
@@ -275,4 +275,24 @@ export async function enterCodeFlow(input: EnterCodeInput): Promise<EnterCodeRes
   } finally {
     bytes.fill(0);
   }
+}
+
+// ---- a new code, the key file, turning off (stubs until the tests that drive them are green) --------------------------------------------
+
+export type FlowStatus = 'done' | 'cancelled' | 'failed';
+export interface FlowResult { status: FlowStatus; message: string }
+
+/** Shows a new recovery code once and makes it the one that opens the project (D-02). */
+export function newCodeFlow(_input: TurnOnInput): Promise<FlowResult> {
+  return Promise.reject(new Error('not implemented'));
+}
+
+/** `nearAi.sync.keepKeyInProject` off or on (D-10). */
+export function keepKeyFlow(_input: TurnOnInput, _on: boolean): Promise<FlowResult> {
+  return Promise.reject(new Error('not implemented'));
+}
+
+/** Stops syncing; the remote and this computer's state are left as they are. */
+export function turnOffFlow(_input: TurnOnInput): Promise<FlowResult> {
+  return Promise.reject(new Error('not implemented'));
 }
