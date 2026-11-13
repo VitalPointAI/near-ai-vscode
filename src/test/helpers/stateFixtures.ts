@@ -24,7 +24,7 @@ const GIT_ENV = {
 };
 
 export function git(dir: string, args: string[]): string {
-  return execFileSync('git', args, { cwd: dir, env: GIT_ENV, encoding: 'utf8' });
+  return execFileSync('git', args, { cwd: dir, env: GIT_ENV, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
 }
 
 export function gitInit(dir: string): void {
