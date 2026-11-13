@@ -351,6 +351,7 @@ export class AgentConversation {
     const conversationId = this.conversationId;
     let ended: RunEnd = 'failed';
     await this.runMarkers?.start({ conversationId, runId, model: request.model });
+    this.markerRun = { conversationId, runId };
     const mainId = `main-${runId}`;
     this.mainAgentId = mainId;
     // Every agent of this run judges a script's provenance from this moment: anything written since asks (review of PR 34).
@@ -473,6 +474,7 @@ export class AgentConversation {
       clearInterval(heartbeat);
       if (this.abort === abort) this.abort = undefined;
       this.releasePending();
+      this.markerRun = undefined;
       // Stopped or failed runs are reconciled too: NEAR bills what they used.
       if (account && !costAsked) void account.settleNow((entry) => entry.runId === runId);
       await this.runMarkers?.end(conversationId, runId, ended);
@@ -1197,8 +1199,12 @@ export class AgentConversation {
     return [...this.waiting.values()].map((message) => ({ ...message, replay: true }));
   }
 
+  /** The run whose marker is live: set while a run is in progress, so its marker can say it is waiting on a person (the pick-up card reads it). */
+  private markerRun: { conversationId: string; runId: string } | undefined;
+
   private openPrompt(id: string, message: Record<string, unknown>): void {
     this.waiting.set(id, message);
+    if (this.markerRun) void this.runMarkers?.waiting(this.markerRun.conversationId, this.markerRun.runId, true);
     this.post(message);
     this.onWaitingChange?.(this.waiting.size);
   }
@@ -1206,6 +1212,7 @@ export class AgentConversation {
   /** Forgets a waiting prompt; one cancelled by a stop or the run ending is reported so the view unpins it. */
   private closePrompt(id: string, cancelled = false): void {
     if (!this.waiting.delete(id)) return;
+    if (this.markerRun && this.waiting.size === 0) void this.runMarkers?.waiting(this.markerRun.conversationId, this.markerRun.runId, false);
     if (cancelled) this.post({ type: 'prompt-closed', id, outcome: 'cancelled' });
     this.onWaitingChange?.(this.waiting.size);
   }

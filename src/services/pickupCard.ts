@@ -6,7 +6,7 @@
 import { readdir, readFile } from 'node:fs/promises';
 import * as path from 'node:path';
 import { parseGsdPlanningState } from '../domain/gsdStatus';
-import { derivePickup, nextGsdStep, parsePickupPointer, type PickupModel, type PickupPhase, type PickupPointer, type PickupThread } from '../domain/state/pickup';
+import { derivePickup, nextGsdStep, runCardState, parsePickupPointer, type PickupModel, type PickupPhase, type PickupPointer, type PickupThread } from '../domain/state/pickup';
 import type { RunMarkers } from './runMarkers';
 import { stateHomeFor, writeFileAtomic, type MementoLike } from './stateHome';
 
@@ -78,7 +78,9 @@ export async function pickupCardModel(deps: PickupDeps, root: string): Promise<P
   const seen = deps.workspaceState?.get<string>(PICKUP_SEEN_KEY);
   const index = pointer ? await deps.threads.index().catch(() => [] as readonly PickupThread[]) : [];
   const phase = pointer ? await readPickupPhase(root).catch(() => undefined) : undefined;
-  return derivePickup({ pointer, thisWriter: deps.writer, lastSeenAt: typeof seen === 'string' ? seen : undefined, index, ...(phase ? { phase } : {}) });
+  const marker = pointer && deps.markers ? await deps.markers.markerOf(pointer.conversationId).catch(() => undefined) : undefined;
+  const run = marker && deps.markers ? runCardState(marker, deps.markers.runState(marker)) : undefined;
+  return derivePickup({ pointer, thisWriter: deps.writer, lastSeenAt: typeof seen === 'string' ? seen : undefined, index, ...(run ? { run } : {}), ...(phase ? { phase } : {}) });
 }
 
 /** The card's messages from the page. */

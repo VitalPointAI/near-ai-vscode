@@ -139,7 +139,7 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     send: async (): Promise<void> => {
       const root = workspaceRoot();
       if (!root || disposed) return;
-      const model = await pickupCardModel({ workspaceState: context.workspaceState as MementoLike | undefined, writer: pickupWriter(), threads: pickupStore(root) }, root).catch(() => undefined);
+      const model = await pickupCardModel({ workspaceState: context.workspaceState as MementoLike | undefined, writer: pickupWriter(), threads: pickupStore(root), markers: runMarkersFor(context, root) }, root).catch(() => undefined);
       if (!model || disposed) return;
       pickupAt = model.pointerAt;
       if (model.show || pickupShown) { pickupShown = model.show; void panel.webview.postMessage({ type: 'pickup-card', model }); }

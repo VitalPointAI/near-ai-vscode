@@ -146,8 +146,17 @@ export class RunMarkers {
     return this.write(marker);
   }
 
-  /** RED stub: records that the run waits on a person (an approval or a question), or no longer does. */
-  public waiting(_conversationId: string, _runId: string, _on: boolean): Promise<void> { return Promise.resolve(); }
+  /**
+   * Records that the run waits on a person (an approval or a question), or no longer does, so another editor can say "waiting for your answer" instead of
+   * "running". A second prompt while one is open does not move the start of the wait. Only the run that wrote the marker can change it.
+   */
+  public waiting(conversationId: string, runId: string, on: boolean): Promise<void> {
+    const marker = this.current(conversationId, runId);
+    if (!marker || Boolean(marker.waitingSince) === on) return Promise.resolve();
+    marker.activeAt = this.stamp();
+    if (on) marker.waitingSince = marker.activeAt; else delete marker.waitingSince;
+    return this.write(marker);
+  }
 
   /** Records that the run ended. Only the run that wrote the marker can end it. */
   public end(conversationId: string, runId: string, outcome: RunEnd): Promise<void> {
@@ -157,6 +166,7 @@ export class RunMarkers {
     this.stopBeat(conversationId);
     marker.endedAt = this.stamp();
     marker.outcome = outcome;
+    delete marker.waitingSince;
     return this.write(marker);
   }
 
@@ -168,6 +178,7 @@ export class RunMarkers {
     this.stopBeat(conversationId);
     marker.endedAt = this.stamp();
     marker.outcome = outcome;
+    delete marker.waitingSince;
     await this.write(marker);
   }
 
@@ -277,6 +288,7 @@ export function parseRunMarker(value: unknown, conversationId: string): RunMarke
     activeAt: raw.activeAt as string,
     ...(time(raw.savedAt) ? { savedAt: raw.savedAt as string } : {}),
     steps: Array.isArray(raw.steps) ? raw.steps.filter((step): step is string => typeof step === 'string').map((step) => step.slice(0, 80)).slice(-MAX_STEPS) : [],
+    ...(time(raw.waitingSince) ? { waitingSince: raw.waitingSince as string } : {}),
     ...(time(raw.endedAt) ? { endedAt: raw.endedAt as string } : {}),
     ...(typeof raw.outcome === 'string' && outcomes.has(raw.outcome) ? { outcome: raw.outcome as RunEnd } : {})
   };

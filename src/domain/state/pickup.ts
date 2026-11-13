@@ -45,6 +45,13 @@ export interface PickupThread {
   locked?: boolean;
 }
 
+/** The part of a run marker the card needs. */
+export interface PickupMarker {
+  endedAt?: string;
+  waitingSince?: string;
+  activeAt: string;
+}
+
 export interface PickupInput {
   pointer: PickupPointer | undefined;
   /** This extension host's writer id. */
@@ -76,6 +83,18 @@ export function parsePickupPointer(value: unknown): PickupPointer | undefined {
   if (typeof raw.at !== 'string' || Number.isNaN(Date.parse(raw.at))) return undefined;
   const runId = typeof raw.runId === 'string' && RUN_ID.test(raw.runId) ? raw.runId : undefined;
   return { conversationId: raw.conversationId, ...(runId ? { runId } : {}), writer: raw.writer, at: raw.at };
+}
+
+/**
+ * Where a run stands for the card, from its marker and how this editor sees it (RunMarkers.runState):
+ * ended is finished; cut off is cut off; a run another editor keeps alive that waits on an approval or a question is waiting; any other live run of
+ * another editor is running elsewhere. A run live in this very editor is not described (the card is about work left elsewhere).
+ */
+export function runCardState(marker: PickupMarker, runState: 'finished' | 'running-here' | 'running-elsewhere' | 'cut-off'): { state: RunCardState; at: string } | undefined {
+  if (marker.endedAt || runState === 'finished') return { state: 'finished', at: marker.endedAt ?? marker.activeAt };
+  if (runState === 'cut-off') return { state: 'cut-off', at: marker.activeAt };
+  if (runState === 'running-here') return undefined;
+  return { state: marker.waitingSince ? 'waiting' : 'running-elsewhere', at: marker.activeAt };
 }
 
 /**
@@ -118,16 +137,4 @@ export function nextGsdStep(phaseNumber: number, phaseFiles: readonly string[], 
   if (!phaseFiles.some((file) => CHECKED.test(file))) return step('/gsd-verify-work', phaseNumber);
   if (totalPhases !== null && phaseNumber >= totalPhases) return { command: '/gsd-complete-milestone', text: 'Next step: every phase is verified; run /gsd-complete-milestone in the chat' };
   return step('/gsd-discuss-phase', phaseNumber + 1);
-}
-
-/** RED stub: where a run stands for the card. */
-export function runCardState(_marker: PickupMarker, _runState: 'finished' | 'running-here' | 'running-elsewhere' | 'cut-off'): { state: RunCardState; at: string } | undefined {
-  return undefined;
-}
-
-/** The part of a run marker the card needs. */
-export interface PickupMarker {
-  endedAt?: string;
-  waitingSince?: string;
-  activeAt: string;
 }

@@ -188,6 +188,9 @@ details.history-tool .log pre { margin: 0; font: inherit; white-space: pre-wrap;
 #welcome .setup-nudge p { margin: 0 0 8px; color: var(--vscode-descriptionForeground); }
 .setup-nudge-actions { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; }
 .setup-nudge button:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 1px; }
+/* The "Pick up where you left off" card reuses the setup card above; a long chat title or phase name wraps instead of widening it. */
+.pickup-card .pickup-line { overflow-wrap: anywhere; }
+#welcome .pickup-card .pickup-line { margin: 0 0 4px; }
 
 /* Agent runs: approvals with diff or command previews, task list, revert */
 .approval pre { margin: 0 0 8px; max-height: 260px; overflow: auto; padding: 6px 8px; border-radius: 4px; font: 11px/1.45 var(--vscode-editor-font-family); background: var(--vscode-textCodeBlock-background, var(--vscode-editor-background)); white-space: pre; }
