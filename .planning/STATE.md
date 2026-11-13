@@ -1,12 +1,13 @@
 ---
 gsd_state_version: "1.0"
 milestone: v0.7.0
-milestone_name: messaging-relay-teams-signal
+milestone_name: Messaging relay — Teams and Signal
 current_phase: 27
+current_phase_name: Project state follows the project across interfaces and machines (0.4.20)
 status: planning
 stopped_at: Phase 27 (0.4.20 project state sync) inserted ahead of Phase 68; context gathered, ready to plan
-last_updated: "2026-11-13T01:05:13.000Z"
-state_head: 6fb1522794e0fc44eb16c49b8c63916902546f7c
+last_updated: "2026-11-13T13:34:45.740Z"
+state_head: 6cb73b2614fe706b76f0a89aafdbea2c435c0185
 progress:
   total_phases: 9
   completed_phases: 0
@@ -22,7 +23,7 @@ last_activity_desc: v0.7.0 roadmap created (Phases 68-76, 45 requirements mapped
 ## Current position
 
 Milestone: v0.7.0 Messaging relay — Teams and Signal (Phases 68-76)
-Phase: 27 Project state follows the project (release 0.4.20) — context gathered, not planned
+Phase: 27 (Project state follows the project across interfaces and machines (0.4.20)) — EXECUTING
 Next: `/gsd-plan-phase 27`; then Phase 68 Relay foundation
 
 ## Accumulated Context
