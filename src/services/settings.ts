@@ -3,6 +3,7 @@ import { DEFAULT_ROLE_MODELS } from '../gsd/library';
 import * as vscode from 'vscode';
 import { createDefaultSettings, NearAiSettings } from '../domain/config';
 import { ActionPolicyMode } from '../domain/policy';
+import { clampLiveConversations, LIVE_CONVERSATIONS_DEFAULT } from '../domain/state/retention';
 import { isEmergencyStopped } from './emergencyStop';
 import { DEFAULT_RULES, PermissionRules } from '../agent/permissions';
 import { projectChoiceFor, resolveSetting, type InspectedSetting } from './modelChoices';
@@ -99,6 +100,12 @@ export function readRunBudget(): { maxCostUsd: number; maxTokens: number } {
     return typeof value === 'number' && Number.isFinite(value) ? Math.min(max, Math.max(min, value)) : fallback;
   };
   return { maxCostUsd: bounded('agent.maxRunCostUsd', AGENT_DEFAULTS.maxRunCostUsd, 0.1, 1_000), maxTokens: bounded('agent.maxRunTokens', AGENT_DEFAULTS.maxRunTokens, 10_000, 100_000_000) };
+}
+
+/** How many of the most recently used conversations stay live; the rest are archived, never deleted (nearAi.history.liveConversations, 1 to 50). */
+export function readHistoryLimits(): { liveConversations: number } {
+  const configuration = vscode.workspace.getConfiguration('nearAi');
+  return { liveConversations: clampLiveConversations(configuration.get<unknown>('history.liveConversations', LIVE_CONVERSATIONS_DEFAULT)) };
 }
 
 /** How long and how much Agent Activity keeps in memory. */

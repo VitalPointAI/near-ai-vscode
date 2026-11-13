@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { cp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { cp, mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
 import { openObject } from '../domain/state/objects';
@@ -356,6 +356,24 @@ test('no thread is archived or opened by a store that cannot open the project (n
     for (let n = 1; n <= 3; n += 1) assert.equal(await exists(path.join(liveDir(root, idOf(n)), 'log.jsonl')), true);
     assert.equal(await exists(stateHomeFor(root).paths.archive), false);
     void store;
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('when the archive cannot be written the live thread is untouched: nothing is removed before an archive exists and has been checked', async () => {
+  const { root, store } = await bigStore(6);
+  try {
+    const id = idOf(1);
+    const before = idsOf(await store.liveEntries(id));
+    await mkdir(stateHomeFor(root).paths.archive, { recursive: true });
+    await writeFile(archiveDir(root, id), 'in the way');
+    const result = await applyRetention(store, 5, []);
+    assert.deepEqual(result.archived, []);
+    assert.deepEqual(idsOf(await store.liveEntries(id)), before);
+    assert.equal(await exists(path.join(liveDir(root, id), 'meta.enc')), true);
+    assert.equal(await exists(path.join(liveDir(root, id), 'context.enc')), true);
+    assert.equal((await store.index()).find((item) => item.id === id)?.state, 'live');
   } finally {
     await rm(root, { recursive: true, force: true });
   }

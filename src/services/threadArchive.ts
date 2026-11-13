@@ -11,6 +11,7 @@ import * as path from 'node:path';
 import { openObject, sealObject, MAX_OBJECT_ENTRIES, MAX_PART_BYTES, OBJECT_HEADER_BYTES, OBJECT_NAME, type OpenPart } from '../domain/state/objects';
 import { rankThreads } from '../domain/state/retention';
 import { threadTip, unionEntries, type ThreadEntry } from '../domain/state/threadEntries';
+import type { RunState } from './runMarkers';
 import { writeFileAtomic } from './stateHome';
 import { validEntry, validMeta, type ThreadMeta, type ThreadStore } from './threadStore';
 import type { Transcript } from './transcripts';
@@ -122,6 +123,31 @@ export function unarchiveThread(store: ThreadStore, id: string, options: { touch
   return store.serial(id, () => unarchiveNow(store, id, options.touch !== false));
 }
 
+/**
+ * Settles what a crash left, by union. For a thread with both a live copy and an archive: a live copy with no log is restored from the archive; a live
+ * copy that has entries the archive lacks (or a thread that must stay live) is made whole with the archive's entries and the archive removed; a live copy
+ * that adds nothing is finished (its files removed). An archive that cannot be opened is left alone with the live copy.
+ */
+export async function reconcileArchives(store: ThreadStore, protectedIds: Iterable<string> = []): Promise<string[]> {
+  const keep = new Set(protectedIds);
+  const settled: string[] = [];
+  for (const id of await store.archivedIds()) {
+    if (store.isBusy(id)) continue;
+    const changed = await store.serial(id, async () => {
+      const files = await store.liveFiles(id);
+      if (!files.log && !files.context && !files.meta) return false;
+      if (!files.log) return unarchiveNow(store, id, false);
+      const bundle = await readArchive(store, id);
+      const held = new Set([...bundle.entries, ...await store.archiveDeltaEntries(id)].map((entry) => entry.id));
+      if (keep.has(id) || (await store.liveEntries(id)).some((entry) => !held.has(entry.id))) return unarchiveNow(store, id, false);
+      const snapshot = await store.liveSnapshot(id);
+      return snapshot ? store.removeLive(id, snapshot) : false;
+    }).catch(() => false);
+    if (changed) settled.push(id);
+  }
+  return settled;
+}
+
 export interface RetentionResult { archived: string[]; restored: string[] }
 
 const queues = new WeakMap<ThreadStore, Promise<unknown>>();
@@ -129,12 +155,17 @@ const queues = new WeakMap<ThreadStore, Promise<unknown>>();
 async function retain(store: ThreadStore, liveCount: number, protectedIds: ReadonlySet<string>): Promise<RetentionResult> {
   const result: RetentionResult = { archived: [], restored: [] };
   if (!await store.archiveKeys()) return result;
+  await reconcileArchives(store, protectedIds);
   const index = (await store.index()).filter((item) => !item.locked);
   const state = new Map(index.map((item) => [item.id, item.state]));
   const ranked = rankThreads(index, liveCount, protectedIds);
   // One thread at a time, each written, checked and only then removed from the live folder.
   for (const id of ranked.archive) {
     if (state.get(id) === 'live' && !store.isBusy(id) && await archiveThread(store, id).catch(() => false)) result.archived.push(id);
+  }
+  // A thread the rank rule puts among the live ones (the setting was raised, or it was continued elsewhere) comes back without being counted as used.
+  for (const id of ranked.live) {
+    if (state.get(id) === 'archived' && !store.isBusy(id) && await unarchiveThread(store, id, { touch: false }).catch(() => false)) result.restored.push(id);
   }
   return result;
 }
@@ -150,7 +181,9 @@ export function applyRetention(store: ThreadStore, liveCount: number, protectedI
   return run;
 }
 
-/** Settles what a crash left, by union (not written yet). */
-export async function reconcileArchives(_store: ThreadStore, _protectedIds: Iterable<string> = []): Promise<string[]> {
-  throw new Error('not implemented');
+/** The threads retention must leave live whatever their rank: every conversation open in a tab of this editor, and every one whose run is running here or elsewhere. */
+export function protectedThreadIds(tabIds: Iterable<string>, markers: ReadonlyArray<{ conversationId: string; state: RunState }>): Set<string> {
+  const keep = new Set(tabIds);
+  for (const marker of markers) if (marker.state === 'running-here' || marker.state === 'running-elsewhere') keep.add(marker.conversationId);
+  return keep;
 }
