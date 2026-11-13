@@ -29,6 +29,16 @@ import { mergeMeta, validEntry, type ColdFetchResult, type ThreadStore } from '.
 export const MAX_PUSH_ATTEMPTS = 5;
 /** When the manifest lists this many objects, the next push seals everything into one fresh object instead of adding another (the manifest is capped at 1 MiB). */
 export const CONSOLIDATE_AT_OBJECTS = 200;
+/** More hot objects than this on the remote after a push, and the push replaces them all with one (SYNC-05). */
+export const HOT_CONSOLIDATE_COUNT = 20;
+/** The other consolidation rule (hot objects bigger than twice what they hold now) only counts once the hot objects add up to this much, so the 64 KiB floor of tiny objects never trips it. */
+export const HOT_CONSOLIDATE_FLOOR_BYTES = 2 * 1024 * 1024;
+/** Plain-words warning from this much synced ciphertext (research flag 7). */
+export const SYNC_WARN_BYTES = 500 * 1024 * 1024;
+/** From this much, no new cold object is added (nothing is ever deleted): research flag 7. */
+export const SYNC_COLD_STOP_BYTES = 1024 * 1024 * 1024;
+/** The manifest lists at most this many objects when a push adds cold ones: its own size limit (1 MiB) binds near 5 000 entries, so there is wide margin. */
+export const MAX_LISTED_OBJECTS = 3500;
 const RETRY_MIN_MS = 200;
 const RETRY_SPAN_MS = 1800;
 const STATE_FILE = 'state.json';
@@ -74,6 +84,12 @@ export interface StateSyncOptions {
   /** Where a run marker stands as this editor sees it (RunMarkers.runState). Only finished and cut-off runs sync; without it only finished ones do. */
   runState?: (marker: RunMarker) => RunState;
   applyProfiles?: (records: StateRecord[]) => Promise<void>;
+  /** Test seam: what the synced ciphertext counts as, given the bytes the manifest lists (to try the size limits without writing a gigabyte). */
+  measure?: (listedBytes: number) => number;
+  /** Test seam: a lower limit than MAX_LISTED_OBJECTS on how many objects the manifest lists. */
+  maxListedObjects?: number;
+  /** Test seam: shapes the consolidated hot payload before it is checked against the objects it replaces (a fault injection). */
+  shapeConsolidated?: (payload: HotPayload) => HotPayload;
   /** Test seams for the retry wait. */
   sleep?: (ms: number) => Promise<void>;
   random?: () => number;
