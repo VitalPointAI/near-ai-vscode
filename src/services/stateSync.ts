@@ -2,15 +2,16 @@
 // index, every object not read before, the sequence number), merge per record with the plan-02 rules, apply to the state home, then build and push one new
 // hot object, a new index and a new manifest on top of the remote tip. A push that loses a race fetches, merges and tries again (never forced). Nothing
 // local is changed when verification fails. The transport owns the mirror lock; this module never holds it around a transport call. No vscode.
+import { createHash } from 'node:crypto';
 import * as path from 'node:path';
 import { readFile } from 'node:fs/promises';
 import { StateRefusedError, aadFor, deriveKek, open as openSealed, seal, subKey, unwrapDataKey, type KdfRecord, type SealedBlob } from '../domain/state/keys';
 import {
-  openManifest, openObject, readManifestHeader, sealObject, buildManifest,
+  OBJECT_NAME, openManifest, openObject, readManifestHeader, sealObject, buildManifest,
   type ManifestHeader, type ObjectEntry, type OpenPart, type SealedPart
 } from '../domain/state/objects';
 import { parseRecord, type StateRecord } from '../domain/state/records';
-import { threadTip, unionEntries, type ThreadEntry } from '../domain/state/threadEntries';
+import { threadLines, threadTip, unionEntries, type ThreadEntry } from '../domain/state/threadEntries';
 import type { RunMarker, RunState } from './runMarkers';
 import { rm } from 'node:fs/promises';
 import { ProjectStateHome, writeFileAtomic } from './stateHome';
@@ -18,10 +19,11 @@ import type { StateKeys } from './stateKeys';
 import { MirrorBusyError } from './stateMirrorLock';
 import {
   THREAD_ID, applyMerged, collectLocal, foldHeads, headMapOf, isSyncedRecord, mergeAll, parsePortableMeta, recordKey, withoutBody,
-  type HotPayload, type IndexPayload, type LocalSnapshot, type PortableMeta, type ProfileSource, type SecretSource
+  type HotPayload, type IndexPayload, type IndexThread, type LocalSnapshot, type PortableMeta, type ProfileSource, type SecretSource
 } from './stateRecords';
 import type { StateFile, StateFileRef, StateTransport, SyncFailure } from './stateTransport';
-import { validEntry, type ThreadStore } from './threadStore';
+import { bundleOf, installArchive, writeArchive, type ArchiveBundle } from './threadArchive';
+import { mergeMeta, validEntry, type ColdFetchResult, type ThreadStore } from './threadStore';
 
 /** A push that loses a race fetches, merges and tries again this many times before giving up until the next sync. */
 export const MAX_PUSH_ATTEMPTS = 5;
@@ -86,10 +88,12 @@ interface SyncState {
   pushed: Record<string, string[]>;
   /** What the remote holds for each record, without bodies: a record whose (kind, id, rev) is here is not sent again. */
   heads: StateRecord[];
+  /** The entry ids of each thread that the remote's cold objects hold (pushed from here or fetched here), so a consolidated hot object need not carry them again. */
+  cold: Record<string, string[]>;
 }
 
 function freshState(): SyncState {
-  return { version: 1, lastSeenSeq: 0, readObjects: [], pushed: {}, heads: [] };
+  return { version: 1, lastSeenSeq: 0, readObjects: [], pushed: {}, heads: [], cold: {} };
 }
 
 function parseState(text: string): SyncState {
@@ -101,10 +105,14 @@ function parseState(text: string): SyncState {
       for (const [id, ids] of Object.entries(value.pushed)) if (THREAD_ID.test(id) && Array.isArray(ids)) pushed[id] = ids.filter((item): item is string => typeof item === 'string');
     }
     const heads = Array.isArray(value.heads) ? value.heads.map((item) => parseRecord(item)).filter((record): record is StateRecord => record !== undefined) : [];
+    const cold: Record<string, string[]> = {};
+    if (value.cold && typeof value.cold === 'object') {
+      for (const [id, ids] of Object.entries(value.cold)) if (THREAD_ID.test(id) && Array.isArray(ids)) cold[id] = ids.filter((item): item is string => typeof item === 'string');
+    }
     return {
       version: 1, lastSeenSeq: value.lastSeenSeq,
       readObjects: Array.isArray(value.readObjects) ? value.readObjects.filter((item): item is string => typeof item === 'string') : [],
-      pushed, heads
+      pushed, heads, cold
     };
   } catch {
     return freshState();
@@ -149,7 +157,13 @@ function parseIndex(value: unknown): IndexPayload {
     if (!THREAD_ID.test(id) || !isObject(item)) continue;
     const meta = parsePortableMeta(item.meta, id);
     if (!meta || typeof item.entries !== 'number' || !Number.isSafeInteger(item.entries) || item.entries < 0 || typeof item.tip !== 'string' || !Array.isArray(item.files)) continue;
-    threads[id] = { meta, entries: item.entries, tip: item.tip, files: item.files.filter((file): file is string => typeof file === 'string') };
+    const thread: IndexThread = { meta, entries: item.entries, tip: item.tip, files: item.files.filter((file): file is string => typeof file === 'string') };
+    // Cold part names are only ever compared with the sealed manifest's own list, so a name that is not an object name can never match anything.
+    const cold = Array.isArray(item.cold) ? item.cold.filter((file): file is string => typeof file === 'string' && OBJECT_NAME.test(file)) : [];
+    if (cold.length) thread.cold = cold;
+    if (typeof item.coldEntries === 'number' && Number.isSafeInteger(item.coldEntries) && item.coldEntries >= 0) thread.coldEntries = item.coldEntries;
+    if (typeof item.turns === 'number' && Number.isSafeInteger(item.turns) && item.turns >= 0) thread.turns = item.turns;
+    threads[id] = thread;
   }
   return { v: 1, threads };
 }
@@ -176,6 +190,8 @@ export class StateSync {
   public constructor(private readonly options: StateSyncOptions) {
     this.sleep = options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
     this.random = options.random ?? Math.random;
+    // A thread kept only online is fetched through this sync when someone opens it.
+    options.threads.setColdFetcher((id) => this.fetchColdThread(id));
   }
 
   /** Pull, merge, apply, then push what the remote lacks. */
@@ -276,7 +292,8 @@ export class StateSync {
     for (const group of groupObjects(manifest.objects)) {
       const first = group[0] as ObjectEntry;
       const isIndex = group.some((entry) => entry.file === manifest.indexFile);
-      if (!isIndex && read.has(first.file)) continue;
+      // A cold object is one archived thread, kept whole: it is read only when that thread is opened (fetchColdThread), never by a sync.
+      if (!isIndex && (first.class === 'cold' || read.has(first.file))) continue;
       const parts: OpenPart[] = [];
       for (const entry of group) parts.push({ entry, data: await transport.readBlob(tree.get(entry.file) as string) });
       const payload = openObject(dataKey, stateId, first.class, parts);
@@ -289,7 +306,7 @@ export class StateSync {
     // The authentic index says how many entries each thread has on the remote. A computer that does not hold that many after reading every listed
     // object is looking at a bundle with parts missing, so nothing is applied.
     const held = (id: string): number => new Set([...(state.pushed[id] ?? []), ...(entries[id] ?? []).map((entry) => entry.id)]).size;
-    for (const [id, item] of Object.entries(index.threads)) if (item.entries > held(id)) throw new StateRefusedError('missing-object');
+    for (const [id, item] of Object.entries(index.threads)) if (item.entries - (item.coldEntries ?? 0) > held(id)) throw new StateRefusedError('missing-object');
     return { tip, seq: manifest.seq, header: manifest.header, objects: manifest.objects, indexFile: manifest.indexFile, tree, newObjects, entries, records, index };
   }
 
@@ -327,7 +344,7 @@ export class StateSync {
       const merged = mergeAll(local.records, incoming);
       const localKeys = new Set(local.records.map(recordKey));
       const toApply = merged.filter((record) => !localKeys.has(recordKey(record)));
-      await applyMerged(home, threads, { entries: remote?.entries ?? {}, records: toApply }, local, this.options.runState ? { runState: this.options.runState } : {});
+      await applyMerged(home, threads, { entries: remote?.entries ?? {}, records: toApply, cold: coldListed(remote) }, local, this.options.runState ? { runState: this.options.runState } : {});
       await this.handleProfiles(toApply, dataKey, meta.stateId);
 
       if (remote) this.learnRemote(state, remote);
@@ -397,24 +414,52 @@ export class StateSync {
 
   private whatRemoteLacks(local: LocalSnapshot, merged: readonly StateRecord[], remote: RemoteBundle | undefined, state: SyncState): SendSet {
     const entries: Record<string, ThreadEntry[]> = {};
+    const cold: ColdAdd[] = [];
     for (const [id, thread] of Object.entries(local.threads)) {
       const held = new Set(state.pushed[id] ?? []);
-      const fresh = thread.entries.filter((entry) => !held.has(entry.id));
+      // An archived thread that no cold object holds yet goes up as its own archive, byte for byte; what it holds is then not also sent entry by entry.
+      const add = thread.cold && !remoteHoldsCold(remote, id) ? thread.cold : undefined;
+      if (add) cold.push({ id, parts: add.parts, ids: [...add.ids] });
+      const fresh = thread.entries.filter((entry) => !held.has(entry.id) && !add?.ids.has(entry.id));
       if (fresh.length) entries[id] = fresh;
     }
     const held = new Set(state.heads.map(recordKey));
     const records = merged.filter((record) => isSyncedRecord(record) && !held.has(recordKey(record)));
-    return { entries, records, hasNew: Object.keys(entries).length > 0 || records.length > 0 || !remote };
+    return { entries, records, cold, hasNew: Object.keys(entries).length > 0 || records.length > 0 || cold.length > 0 || !remote };
+  }
+
+  /** Reads the archive parts of each cold add from the archive folder, checked against their listed size and sha256. A thread whose archive changed meanwhile (it was opened) is left for the next sync. */
+  private async readColdParts(adds: readonly ColdAdd[]): Promise<ReadyCold[]> {
+    const ready: ReadyCold[] = [];
+    for (const add of adds) {
+      const files: Array<{ entry: ObjectEntry; data: Buffer }> = [];
+      try {
+        for (const entry of add.parts) {
+          const data = await readFile(path.join(this.options.threads.archiveDirOf(add.id), entry.file));
+          if (data.length !== entry.bytes || createHash('sha256').update(data).digest('hex') !== entry.sha256) throw new Error('changed');
+          files.push({ entry, data });
+        }
+      } catch {
+        continue;
+      }
+      ready.push({ ...add, files });
+    }
+    return ready;
   }
 
   private async buildCommit(input: BuildInput): Promise<BuiltCommit> {
     const { dataKey, stateId, wrap, remote, state, local, merged, send } = input;
-    const consolidate = (remote?.objects.length ?? 0) + 2 > CONSOLIDATE_AT_OBJECTS;
+    const adds = await this.readColdParts(send.cold);
+    const addedIds = new Map<string, string[]>(adds.map((add) => [add.id, add.ids]));
+    const addedFiles = new Map<string, string[]>(adds.map((add) => [add.id, add.parts.map((part) => part.file)]));
+    const consolidate = (remote?.objects.filter((entry) => entry.class === 'hot').length ?? 0) + 2 > CONSOLIDATE_AT_OBJECTS;
     const known = new Map<string, ThreadEntry[]>();
     for (const [id, thread] of Object.entries(local.threads)) known.set(id, thread.entries);
     for (const [id, list] of Object.entries(remote?.entries ?? {})) known.set(id, unionEntries(known.get(id) ?? [], list));
+    // What a cold object holds is not repeated in the hot object that replaces the old ones.
+    const coldIds = (id: string): Set<string> => new Set([...(state.cold[id] ?? []), ...(addedIds.get(id) ?? [])]);
     const payload: HotPayload = consolidate
-      ? { v: 1, entries: Object.fromEntries([...known].filter(([, list]) => list.length)), records: merged.filter(isSyncedRecord) }
+      ? { v: 1, entries: Object.fromEntries([...known].map(([id, list]) => { const covered = coldIds(id); return [id, list.filter((entry) => !covered.has(entry.id))] as const; }).filter(([, list]) => list.length)), records: merged.filter(isSyncedRecord) }
       : { v: 1, entries: send.entries, records: send.records };
     const empty = Object.keys(payload.entries).length === 0 && payload.records.length === 0;
     const hotParts: SealedPart[] = empty ? [] : sealObject(dataKey, stateId, 'hot', payload);
@@ -428,38 +473,140 @@ export class StateSync {
     const index: IndexPayload = { v: 1, threads: {} };
     for (const [id, meta] of metas) {
       const list = known.get(id) ?? [];
-      const held = new Set([...(state.pushed[id] ?? []), ...(send.entries[id] ?? []).map((entry) => entry.id)]);
-      const sent = consolidate ? list.length > 0 : (send.entries[id]?.length ?? 0) > 0;
+      const before = previous[id];
+      const covered = coldIds(id);
+      const held = new Set([...(state.pushed[id] ?? []), ...(send.entries[id] ?? []).map((entry) => entry.id), ...covered]);
+      const carriesHot = consolidate ? Object.keys(payload.entries).includes(id) : (send.entries[id]?.length ?? 0) > 0;
+      const coldFiles = [...new Set([...(before?.cold ?? []), ...(addedFiles.get(id) ?? [])])];
+      const turns = list.length ? threadLines(list).main.filter((entry) => entry.role === 'user').length : before?.turns;
       index.threads[id] = {
-        meta, entries: held.size, tip: threadTip(list) ?? '',
-        files: [...(consolidate ? [] : previous[id]?.files ?? []), ...(sent ? hotFiles : [])]
+        meta, entries: Math.max(before?.entries ?? 0, held.size), tip: threadTip(list) ?? before?.tip ?? '',
+        files: [...(consolidate ? [] : before?.files ?? []), ...(carriesHot ? hotFiles : [])],
+        ...(coldFiles.length ? { cold: coldFiles, coldEntries: Math.max(before?.coldEntries ?? 0, covered.size) } : {}),
+        ...(turns !== undefined ? { turns } : {})
       };
     }
     const indexParts = sealObject(dataKey, stateId, 'index', index);
     if (indexParts.length !== 1) throw new Error('The sync index is too large to save.');
     const indexEntry = (indexParts[0] as SealedPart).entry;
-    const kept = consolidate || !remote ? [] : remote.objects.filter((entry) => entry.file !== remote.indexFile);
-    const objects = [...kept, ...hotParts.map((part) => part.entry), indexEntry];
+    // Cold objects are never dropped from the list: they are the only copy of an archived thread that is not on this computer.
+    const kept = !remote ? [] : remote.objects.filter((entry) => entry.file !== remote.indexFile && (!consolidate || entry.class === 'cold'));
+    const coldEntries = adds.flatMap((add) => add.parts);
+    const objects = [...kept, ...coldEntries, ...hotParts.map((part) => part.entry), indexEntry];
     const seq = Math.max(remote?.seq ?? 0, state.lastSeenSeq) + 1;
     const manifest = buildManifest({ stateId, kdf: wrap.kdf, wrappedKey: wrap.wrappedKey, dataKey, seq, objects, indexFile: indexEntry.file });
     const files: Array<StateFile | StateFileRef> = [{ name: 'manifest.json', data: manifest }];
     for (const entry of kept) files.push({ name: entry.file, oid: remote?.tree.get(entry.file) as string });
+    for (const add of adds) for (const file of add.files) files.push({ name: file.entry.file, data: file.data });
     for (const part of [...hotParts, ...indexParts]) files.push({ name: part.entry.file, data: part.data });
     const commit = await this.options.transport.writeCommit(files, remote?.tip);
-    return { commit, seq, objects, hotFiles, sent: { entries: payload.entries, records: payload.records } };
+    return { commit, seq, objects, hotFiles, sent: { entries: payload.entries, records: payload.records }, cold: Object.fromEntries(addedIds) };
   }
 
   private learnPush(state: SyncState, built: BuiltCommit): void {
     state.lastSeenSeq = Math.max(state.lastSeenSeq, built.seq);
     const send = built.sent;
     for (const [id, list] of Object.entries(send.entries)) state.pushed[id] = [...new Set([...(state.pushed[id] ?? []), ...list.map((entry) => entry.id)])];
+    for (const [id, ids] of Object.entries(built.cold)) {
+      state.pushed[id] = [...new Set([...(state.pushed[id] ?? []), ...ids])];
+      state.cold[id] = [...new Set([...(state.cold[id] ?? []), ...ids])];
+    }
     state.heads = foldHeads(state.heads, send.records);
     const listed = new Set(groupObjects(built.objects).map((group) => (group[0] as ObjectEntry).file));
     state.readObjects = [...new Set([...state.readObjects, ...(built.hotFiles.length ? [built.hotFiles[0] as string] : [])])].filter((name) => listed.has(name));
   }
+
+  // ---- opening a thread that is kept only online ------------------------------------------------------------------------------------
+
+  /** Records that the remote's cold objects hold these entries of a thread, so this computer never sends them again. */
+  private async noteCold(id: string, ids: readonly string[]): Promise<void> {
+    const state = await this.readState();
+    state.pushed[id] = [...new Set([...(state.pushed[id] ?? []), ...ids])];
+    state.cold[id] = [...new Set([...(state.cold[id] ?? []), ...ids])];
+    await this.writeState(state);
+  }
+
+  /**
+   * Fetches one archived thread from the project's synced state into this computer's archive folder, where the thread store opens it. Only that
+   * thread's cold parts are read (git downloads exactly those blobs); the sealed manifest and index name them, and every part is authenticated as a
+   * cold object of this project, and the bundle must be for this thread, before a single file is written. Nothing is written otherwise.
+   */
+  public async fetchColdThread(id: string): Promise<ColdFetchResult> {
+    const { transport, keys, home, threads } = this.options;
+    if (!THREAD_ID.test(id)) return { ok: false, reason: 'damaged' };
+    const dataKey = await keys.dataKey();
+    const meta = await home.readMeta();
+    if (!dataKey || !meta) return { ok: false, reason: 'needs-recovery-code' };
+    let reading = '';
+    let tip: string | undefined;
+    try {
+      tip = await transport.currentTip();
+      if (!tip) return { ok: false, reason: 'offline' };
+      const tree = new Map((await transport.readTree(tip)).map((entry) => [entry.name, entry.oid]));
+      const manifestOid = tree.get('manifest.json');
+      if (!manifestOid) return { ok: false, reason: 'damaged' };
+      // The floor is 0: this reads one thread out of a tree already merged by a sync; the rollback check belongs to the sync that merges.
+      const manifest = openManifest((await transport.readBlob(manifestOid)).toString('utf8'), dataKey, 0);
+      if (manifest.header.stateId !== meta.stateId || !manifest.indexFile) return { ok: false, reason: 'damaged' };
+      const indexGroup = manifest.objects.filter((entry) => entry.file === manifest.indexFile);
+      const indexParts: OpenPart[] = [];
+      for (const entry of indexGroup) { reading = tree.get(entry.file) ?? ''; indexParts.push({ entry, data: await transport.readBlob(reading) }); }
+      const item = parseIndex(openObject(dataKey, meta.stateId, 'index', indexParts)).threads[id];
+      if (!item?.cold?.length) return { ok: false, reason: 'damaged' };
+      const wanted = new Set(item.cold);
+      const listed = manifest.objects.filter((entry) => wanted.has(entry.file));
+      if (listed.length !== wanted.size || listed.some((entry) => entry.class !== 'cold')) throw new StateRefusedError('tampered');
+      const bundles: ArchiveBundle[] = [];
+      const sealed: Array<Array<{ entry: ObjectEntry; data: Buffer }>> = [];
+      for (const group of groupObjects(listed)) {
+        const parts: OpenPart[] = [];
+        for (const entry of group) { reading = tree.get(entry.file) ?? ''; if (!reading) throw new StateRefusedError('missing-object'); parts.push({ entry, data: await transport.readBlob(reading) }); }
+        bundles.push(bundleOf(openObject(dataKey, meta.stateId, 'cold', parts), id));
+        sealed.push(parts.map((part) => ({ entry: part.entry, data: part.data as Buffer })));
+      }
+      if (!bundles.length) return { ok: false, reason: 'damaged' };
+      const installed = bundles.length === 1
+        ? await installArchive(threads, id, sealed[0] as Array<{ entry: ObjectEntry; data: Buffer }>)
+        : await writeArchive(threads, id, mergeBundles(bundles));
+      await this.noteCold(id, installed.entries.map((entry) => entry.id));
+      return { ok: true };
+    } catch (error) {
+      if (error instanceof StateRefusedError) {
+        // A blob git could not download looks like a missing object: if it is one the mirror still lacks, the cause is the connection, not the data.
+        if (error.reason === 'missing-object' && tip && reading && (await transport.missingObjects(tip).catch(() => [] as string[])).includes(reading)) return { ok: false, reason: 'offline' };
+        return { ok: false, reason: 'damaged' };
+      }
+      return { ok: false, reason: 'offline' };
+    }
+  }
 }
 
-interface SendSet { entries: Record<string, ThreadEntry[]>; records: StateRecord[]; hasNew: boolean }
+/** Several cold objects for one thread (two computers archived it separately): their entries united, the later context and the merged meta kept. */
+function mergeBundles(bundles: readonly ArchiveBundle[]): ArchiveBundle {
+  let entries: ThreadEntry[] = [];
+  let context: ArchiveBundle['context'] = null;
+  let meta = (bundles[0] as ArchiveBundle).meta;
+  for (const bundle of bundles) {
+    entries = unionEntries(entries, bundle.entries);
+    if (bundle.context && (!context || bundle.context.updatedAt > context.updatedAt)) context = bundle.context;
+    meta = mergeMeta(meta, bundle.meta);
+  }
+  return { entries, context, meta };
+}
+
+function remoteHoldsCold(remote: RemoteBundle | undefined, id: string): boolean {
+  return (remote?.index.threads[id]?.cold?.length ?? 0) > 0;
+}
+
+function coldListed(remote: RemoteBundle | undefined): Record<string, IndexThread> {
+  const found: Record<string, IndexThread> = {};
+  for (const [id, item] of Object.entries(remote?.index.threads ?? {})) if (item.cold?.length) found[id] = item;
+  return found;
+}
+
+interface ColdAdd { id: string; parts: ObjectEntry[]; ids: string[] }
+interface ReadyCold extends ColdAdd { files: Array<{ entry: ObjectEntry; data: Buffer }> }
+interface SendSet { entries: Record<string, ThreadEntry[]>; records: StateRecord[]; cold: ColdAdd[]; hasNew: boolean }
 interface BuildInput {
   dataKey: Buffer;
   stateId: string;
@@ -470,5 +617,4 @@ interface BuildInput {
   merged: readonly StateRecord[];
   send: SendSet;
 }
-interface BuiltCommit { commit: string; seq: number; objects: ObjectEntry[]; hotFiles: string[]; sent: { entries: Record<string, ThreadEntry[]>; records: StateRecord[] } }
-
+interface BuiltCommit { commit: string; seq: number; objects: ObjectEntry[]; hotFiles: string[]; sent: { entries: Record<string, ThreadEntry[]>; records: StateRecord[] }; cold: Record<string, string[]> }

@@ -8,7 +8,7 @@
 //         archive/<thread id>/delta.jsonl  optional: sealed entry lines (as in a log) a thread gained while archived (written by sync, plan 13).
 import { readFile, readdir, rm, stat } from 'node:fs/promises';
 import * as path from 'node:path';
-import { openObject, sealObject, MAX_OBJECT_ENTRIES, MAX_PART_BYTES, OBJECT_HEADER_BYTES, OBJECT_NAME, type OpenPart } from '../domain/state/objects';
+import { openObject, sealObject, MAX_OBJECT_ENTRIES, MAX_PART_BYTES, OBJECT_HEADER_BYTES, OBJECT_NAME, type ObjectEntry, type OpenPart } from '../domain/state/objects';
 import { rankThreads } from '../domain/state/retention';
 import { threadTip, unionEntries, type ThreadEntry } from '../domain/state/threadEntries';
 import type { RunState } from './runMarkers';
@@ -45,6 +45,25 @@ function parseParts(text: string): PartRecord[] {
   });
 }
 
+/**
+ * What a bundle payload (an archive's decrypted content, here or fetched from the project's synced state) says of thread `id`, read strictly: it must
+ * name this thread in its meta, every entry and its context, so a bundle moved from another thread is not taken for this one.
+ */
+export function bundleOf(value: unknown, id: string): ArchiveBundle {
+  if (!isRecord(value) || value.format !== BUNDLE_FORMAT || !Array.isArray(value.entries)) throw new Error(UNREADABLE);
+  const meta = validMeta(value.meta, id);
+  const entries = value.entries.map((entry) => validEntry(entry, id));
+  if (!meta || entries.some((entry) => !entry)) throw new Error(UNREADABLE);
+  const context = value.context as Partial<Transcript> | null;
+  if (context !== null && (!isRecord(context) || context.id !== id || !Array.isArray(context.messages))) throw new Error(UNREADABLE);
+  return { entries: entries as ThreadEntry[], context: context as Transcript | null, meta };
+}
+
+/** The parts an archive's parts.json lists, as the entries the sync's sealed manifest lists for a cold object. Throws when parts.json is missing or malformed. */
+export async function archiveParts(store: ThreadStore, id: string): Promise<ObjectEntry[]> {
+  return parseParts(await readFile(path.join(store.archiveDirOf(id), 'parts.json'), 'utf8')).map((record) => ({ ...record, class: 'cold' as const }));
+}
+
 /** Opens one thread's archive: every part is checked against parts.json (size, sha256) and authenticated by openObject before anything is read from it. */
 export async function readArchive(store: ThreadStore, id: string): Promise<ArchiveBundle> {
   const keys = await store.archiveKeys();
@@ -59,15 +78,26 @@ export async function readArchive(store: ThreadStore, id: string): Promise<Archi
     if (size !== undefined && size > MAX_PART_FILE_BYTES) throw new Error(UNREADABLE);
     parts.push({ entry: { ...record, class: 'cold' }, data: size === undefined ? undefined : await readFile(file) });
   }
-  const value = openObject(keys.dataKey, keys.stateId, 'cold', parts);
-  if (!isRecord(value) || value.format !== BUNDLE_FORMAT || !Array.isArray(value.entries)) throw new Error(UNREADABLE);
-  const meta = validMeta(value.meta, id);
-  // An archive moved here from another thread names its own thread in every entry and in its meta, so it is not taken for this one.
-  const entries = value.entries.map((entry) => validEntry(entry, id));
-  if (!meta || entries.some((entry) => !entry)) throw new Error(UNREADABLE);
-  const context = value.context as Partial<Transcript> | null;
-  if (context !== null && (!isRecord(context) || context.id !== id || !Array.isArray(context.messages))) throw new Error(UNREADABLE);
-  return { entries: entries as ThreadEntry[], context: context as Transcript | null, meta };
+  return bundleOf(openObject(keys.dataKey, keys.stateId, 'cold', parts), id);
+}
+
+/**
+ * Puts already sealed parts in the thread's archive folder: the parts first, parts.json last (so an archive without it is a write that never finished),
+ * then the archive is opened again, which authenticates every part under this project's key. Returns what the archive holds. When the check fails the
+ * parts written are left for the caller to remove (an archive without a complete parts.json is never listed).
+ */
+export async function installArchive(store: ThreadStore, id: string, parts: ReadonlyArray<{ entry: ObjectEntry; data: Buffer }>): Promise<ArchiveBundle> {
+  const dir = await store.ensureArchiveDir(id);
+  for (const part of parts) await writeFileAtomic(path.join(dir, part.entry.file), part.data);
+  await writeFileAtomic(path.join(dir, 'parts.json'), `${JSON.stringify({ parts: parts.map(({ entry }) => ({ file: entry.file, bytes: entry.bytes, sha256: entry.sha256, part: entry.part, of: entry.of })) })}\n`);
+  return readArchive(store, id);
+}
+
+/** Seals a bundle (class 'cold', as every archive is) and installs it. Used for a thread fetched from the project's synced state as more than one object. */
+export async function writeArchive(store: ThreadStore, id: string, bundle: ArchiveBundle): Promise<ArchiveBundle> {
+  const keys = await store.archiveKeys();
+  if (!keys) throw new Error(UNREADABLE);
+  return installArchive(store, id, sealObject(keys.dataKey, keys.stateId, 'cold', { format: BUNDLE_FORMAT, entries: bundle.entries, context: bundle.context, meta: bundle.meta }));
 }
 
 /** An archived thread's meta (title, counts, times), marked archived: for a list whose index lost the thread. */

@@ -25,6 +25,8 @@ export interface Machine {
   threads: ThreadStore;
   secrets: MemorySecrets;
   transport: StateTransport;
+  /** The private mirror folder this computer syncs through. */
+  mirrorDir: string;
   sync: StateSync;
   writer: string;
   markers: RunMarkers;
@@ -53,7 +55,7 @@ export async function machine(remoteDir: string, name: string, options: MachineO
     ...(options.isIdle ? { isIdle: options.isIdle } : {}),
     ...options.extra
   });
-  return { name, root, home, keys, threads, secrets, transport, sync, writer, markers };
+  return { name, root, home, keys, threads, secrets, transport, mirrorDir: paths.mirrorDir, sync, writer, markers };
 }
 
 let clock = Date.parse('2026-11-01T10:00:00.000Z');
@@ -120,6 +122,14 @@ export async function remotePayloads(remoteDir: string, machineOf: Machine): Pro
     at += first.of;
   }
   return payloads;
+}
+
+/** The sealed manifest of the remote's state branch, opened with the machine's key: every object listed, with its class, size and file name. */
+export async function remoteManifest(remoteDir: string, machineOf: Machine, ref = 'refs/heads/near-ai/state'): Promise<ReturnType<typeof openManifest>> {
+  const dataKey = await machineOf.keys.dataKey();
+  if (!dataKey) throw new Error('machine has no key');
+  const text = execFileSync('git', ['--git-dir', remoteDir, 'show', `${ref}:manifest.json`], { env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' }, maxBuffer: 64 * 1024 * 1024 }).toString('utf8');
+  return openManifest(text, dataKey, 0);
 }
 
 /** Two computers over one remote with sync on: A has one thread and pushed it, B was opened with the code and pulled. */

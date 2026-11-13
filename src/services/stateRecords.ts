@@ -7,12 +7,13 @@ import * as path from 'node:path';
 import { RUN_ID as COMPARISON_ID, parseSavedRun, serializeRun } from '../benchmark/results';
 import { mergeRecordSets } from '../domain/state/merge';
 import { makeRecord, revOf, type RecordKind, type StateRecord } from '../domain/state/records';
+import type { ObjectEntry } from '../domain/state/objects';
 import { unionEntries, type ThreadEntry } from '../domain/state/threadEntries';
 import { mergeProjectChoices, readChoicesFileSync, type ChoiceEntry } from './modelChoices';
 import { parseRunMarker, type RunMarker, type RunState } from './runMarkers';
 import { mergeSpendLines, parseSpendLines, spendFileText } from './spendMirror';
 import { writeFileAtomic, type ProjectStateHome } from './stateHome';
-import { readArchive } from './threadArchive';
+import { archiveParts, readArchive } from './threadArchive';
 import { validEntry, type ThreadMeta, type ThreadStore } from './threadStore';
 import type { Transcript } from './transcripts';
 
@@ -42,7 +43,11 @@ export interface PortableMeta {
   history?: string;
 }
 
-export interface LocalThread { entries: ThreadEntry[]; meta: PortableMeta; context?: Transcript }
+/** An archived thread's own sealed parts, as the sync's manifest lists a cold object, and the ids of the entries they hold. */
+export interface ColdParts { parts: ObjectEntry[]; ids: Set<string> }
+
+/** `archived` is set for a thread whose content is in this state home's archive folder: it is sent as its own cold object, not entry by entry, and has no context record. */
+export interface LocalThread { entries: ThreadEntry[]; meta: PortableMeta; context?: Transcript; archived?: true; cold?: ColdParts }
 
 export interface LocalSnapshot {
   threads: Record<string, LocalThread>;
@@ -56,7 +61,13 @@ export interface LocalSnapshot {
 export interface HotPayload { v: 1; entries: Record<string, ThreadEntry[]>; records: StateRecord[] }
 
 /** What an index object holds: for each thread, its meta, how many entries the remote holds and which object files carry them. */
-export interface IndexPayload { v: 1; threads: Record<string, { meta: PortableMeta; entries: number; tip: string; files: string[] }> }
+export interface IndexPayload { v: 1; threads: Record<string, IndexThread> }
+/**
+ * One thread in the index: `files` are the hot objects that carry its entries, `cold` the sealed parts of the archive(s) that hold it whole (a computer
+ * that does not have them lists the thread from here and fetches them only when it is opened), `coldEntries` how many entries those hold, and `turns`
+ * the messages the person typed (for the history list).
+ */
+export interface IndexThread { meta: PortableMeta; entries: number; tip: string; files: string[]; cold?: string[]; coldEntries?: number; turns?: number }
 
 /** One profile or secret record handed over by plan 15's sources. */
 export interface SourceRecord { id: string; body: unknown; at?: string; writer?: string }
@@ -160,12 +171,17 @@ async function collectThreads(threads: ThreadStore, build: Builder, writer: stri
     let entries: ThreadEntry[];
     let meta: ThreadMeta;
     let context: Transcript | null;
+    let cold: ColdParts | undefined;
     try {
       if (item.state === 'archived') {
         const bundle = await readArchive(threads, item.id);
-        entries = unionEntries(bundle.entries, await threads.archiveDeltaEntries(item.id));
-        meta = bundle.meta;
+        const delta = await threads.archiveDeltaEntries(item.id);
+        entries = unionEntries(bundle.entries, delta);
+        // The archive's own meta is as old as the archive: a use on another computer, applied to the index, is what makes this thread newer.
+        const used = [bundle.meta.lastUsedAt, item.lastUsedAt, delta.at(-1)?.at ?? ''].reduce((a, b) => (a >= b ? a : b));
+        meta = { ...bundle.meta, lastUsedAt: used };
         context = bundle.context;
+        cold = { parts: await archiveParts(threads, item.id), ids: new Set(bundle.entries.map((entry) => entry.id)) };
       } else {
         const snapshot = await threads.liveSnapshot(item.id);
         if (!snapshot) continue;
@@ -176,10 +192,11 @@ async function collectThreads(threads: ThreadStore, build: Builder, writer: stri
       continue;
     }
     const portable = portableOf(meta);
-    found[item.id] = { entries, meta: portable, ...(context ? { context } : {}) };
+    found[item.id] = { entries, meta: portable, ...(context ? { context } : {}), ...(cold ? { archived: true as const, cold } : {}) };
     const metaRecord = build('thread-meta', item.id, portable, isoOf(portable.lastUsedAt, EPOCH), writer);
     if (metaRecord) records.push(metaRecord);
-    if (context) {
+    // An archived thread's working context lives in its archive; only a live thread's context travels as a record.
+    if (context && !cold) {
       const contextRecord = build('thread-context', item.id, JSON.parse(JSON.stringify(context)), isoOf(context.updatedAt, isoOf(portable.lastUsedAt, EPOCH)), writer);
       if (contextRecord) records.push(contextRecord);
     }
@@ -399,6 +416,8 @@ export interface MergedInput {
   entries: Record<string, ThreadEntry[]>;
   /** Records whose winner is not what this computer holds: these are written. */
   records: StateRecord[];
+  /** The threads the remote's index says are held whole as cold objects, with what the index says of each: a computer without one lists it from here and does not download it. */
+  cold?: Record<string, IndexThread>;
 }
 
 export interface ApplyOptions {
@@ -518,7 +537,7 @@ async function applyPickup(home: ProjectStateHome, records: readonly StateRecord
 export async function applyMerged(home: ProjectStateHome, threads: ThreadStore, merged: MergedInput, local: LocalSnapshot, options: ApplyOptions = {}): Promise<ApplyResult> {
   const metas = groupById(merged.records, 'thread-meta');
   const contexts = groupById(merged.records, 'thread-context');
-  const ids = new Set<string>([...Object.keys(merged.entries), ...metas.keys(), ...contexts.keys()]);
+  const ids = new Set<string>([...Object.keys(merged.entries), ...metas.keys(), ...contexts.keys(), ...Object.keys(merged.cold ?? {})]);
   let applied = 0;
   for (const id of [...ids].sort()) {
     if (!THREAD_ID.test(id)) continue;
@@ -526,6 +545,13 @@ export async function applyMerged(home: ProjectStateHome, threads: ThreadStore, 
     const incomingMeta = metas.has(id) ? parsePortableMeta(metas.get(id)?.body, id) : undefined;
     const incomingContext = contexts.has(id) ? parseContext(contexts.get(id)?.body, id) : undefined;
     const known = local.threads[id]?.meta;
+    const listed = merged.cold?.[id];
+    // A thread kept whole online that this computer does not hold at all is listed as archived from the index; its content is fetched when it is opened.
+    if (listed && !local.threads[id] && !entries.length) {
+      const newest = incomingMeta && incomingMeta.lastUsedAt > listed.meta.lastUsedAt ? incomingMeta : listed.meta;
+      await threads.noteArchivedMeta(id, newest, { entries: listed.entries, tip: listed.tip, ...(listed.turns !== undefined ? { turns: listed.turns } : {}) });
+      continue;
+    }
     const first = entries[0]?.at ?? EPOCH;
     const last = entries[entries.length - 1]?.at ?? first;
     const meta = incomingMeta ?? known ?? { id, title: 'Conversation', model: '', origin: 'panel' as const, createdAt: first, lastUsedAt: last };

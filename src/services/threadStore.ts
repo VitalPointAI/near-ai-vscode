@@ -9,6 +9,7 @@
 import { createHash } from 'node:crypto';
 import { appendFile, open, readFile, readdir, rmdir, rm, stat } from 'node:fs/promises';
 import * as path from 'node:path';
+import type { ArchiveProblem, ArchiveProblemReason } from '../domain/state/archiveProblem';
 import { aadFor, open as openSealed, seal, subKey, type SealedBlob } from '../domain/state/keys';
 import { canonicalJson } from '../domain/state/records';
 import { isSyntheticMessage, messagesToEntries } from '../domain/state/threadCapture';
@@ -46,8 +47,19 @@ export interface ThreadMeta {
   state?: ThreadState;
 }
 
+/** Where an archived thread's content is kept: `local` in this state home's archive folder, `remote` only in the project's synced state until it is opened. */
+export type ThreadLocation = 'local' | 'remote';
+
 /** One line of the history list: a thread's meta with its state settled, or a thread this device cannot open (locked, with no title or counts). */
-export type ThreadIndexItem = Omit<ThreadMeta, 'state'> & { state: ThreadState; locked?: boolean };
+export type ThreadIndexItem = Omit<ThreadMeta, 'state'> & { state: ThreadState; locked?: boolean; location?: ThreadLocation };
+
+/** What fetching an archived thread from the project's synced state came to: it is now in this state home's archive folder, or why not. */
+export type ColdFetchResult = { ok: true } | { ok: false; reason: ArchiveProblemReason };
+/** Registered by the sync (plan 13): brings a thread that is archived only online down into the archive folder, verified. */
+export type ColdFetcher = (id: string) => Promise<ColdFetchResult>;
+
+/** The fields of a thread's meta that two computers agree on (no counts, no archived state). */
+export type ArchivedMetaInput = Omit<ThreadMeta, 'turns' | 'entries' | 'bytes' | 'tip' | 'state'>;
 
 export interface ThreadStoreOptions {
   writer: string;
@@ -119,6 +131,9 @@ export class ThreadStore implements ConversationStore {
   /** The last entry of each thread that this store's conversation has: the parent of what it writes next, and what a saved context covers. */
   private readonly covered = new Map<string, string>();
   private queue: Promise<unknown> = Promise.resolve();
+  private coldFetcher: ColdFetcher | undefined;
+  /** Why the last attempt to bring an archived thread live failed, by thread; cleared when one succeeds. */
+  private readonly problems = new Map<string, ArchiveProblem>();
 
   public constructor(private readonly home: ProjectStateHome, private readonly keys: StateKeys, options: ThreadStoreOptions) {
     this.writer = options.writer;
@@ -361,13 +376,13 @@ export class ThreadStore implements ConversationStore {
    * Every thread's meta: the index cache and each thread's own meta merged, so a thread the index does not know (written by another editor, or an
    * index lost to a crash) is still found. Threads whose meta cannot be opened on this device are returned as `locked`.
    */
-  private async scan(): Promise<{ metas: ThreadMeta[]; locked: Array<{ id: string; updatedAt: string }> }> {
+  private async scan(): Promise<{ metas: ThreadMeta[]; locked: Array<{ id: string; updatedAt: string }>; archivedHere: Set<string> }> {
     const folders = await this.threadFolders();
     const archived = new Set(await this.archivedIds());
     const material = await this.readMaterial();
     const lockedOf = async (id: string) => ({ id, updatedAt: (await stat(path.join(this.home.paths.threads, id)).catch(() => undefined))?.mtime.toISOString() ?? '' });
     const lockedArchive = async (id: string) => ({ id, updatedAt: (await stat(path.join(this.home.paths.archive, id, 'parts.json')).catch(() => undefined))?.mtime.toISOString() ?? '' });
-    if (!material) return { metas: [], locked: [...await Promise.all(folders.map(lockedOf)), ...await Promise.all([...archived].filter((id) => !folders.includes(id)).map(lockedArchive))] };
+    if (!material) return { metas: [], archivedHere: archived, locked: [...await Promise.all(folders.map(lockedOf)), ...await Promise.all([...archived].filter((id) => !folders.includes(id)).map(lockedArchive))] };
     const merged = new Map<string, ThreadMeta>();
     const add = (meta: ThreadMeta): void => { const current = merged.get(meta.id); merged.set(meta.id, current ? mergeMeta(current, meta) : meta); };
     for (const meta of await this.readIndex(material)) add(meta);
@@ -392,7 +407,7 @@ export class ThreadStore implements ConversationStore {
       const { state: _state, ...rest } = meta;
       return live.has(meta.id) || !(archived.has(meta.id) || meta.state === 'archived') ? rest : { ...rest, state: 'archived' };
     });
-    return { metas, locked };
+    return { metas, locked, archivedHere: archived };
   }
 
   /** A thread folder with a log but no meta (a crash between the two writes): its meta is rebuilt from the log. Undefined when the log cannot be opened. */
@@ -414,8 +429,8 @@ export class ThreadStore implements ConversationStore {
    * own small meta files, never from a log), and a locked line for each it cannot.
    */
   public async index(): Promise<ThreadIndexItem[]> {
-    const { metas, locked } = await this.scan();
-    const items: ThreadIndexItem[] = metas.map((meta) => ({ ...meta, state: meta.state === 'archived' ? 'archived' : 'live' }));
+    const { metas, locked, archivedHere } = await this.scan();
+    const items: ThreadIndexItem[] = metas.map((meta) => ({ ...meta, state: meta.state === 'archived' ? 'archived' : 'live', location: meta.state === 'archived' && !archivedHere.has(meta.id) ? 'remote' : 'local' }));
     for (const item of locked) {
       items.push({ id: item.id, title: '', model: '', origin: 'panel', createdAt: item.updatedAt, lastUsedAt: item.updatedAt, turns: 0, entries: 0, bytes: 0, tip: '', state: 'live', locked: true });
     }
@@ -486,15 +501,72 @@ export class ThreadStore implements ConversationStore {
   /** Whether the thread is being archived or reopened right now. */
   public isBusy(id: string): boolean { return this.busy.has(id); }
 
+  /** Registers what brings an archived thread down from the project's synced state (the sync does this when it is built). */
+  public setColdFetcher(fetcher: ColdFetcher | undefined): void {
+    this.coldFetcher = fetcher;
+  }
+
+  /** Whether the index lists the thread as archived while this state home holds neither a live copy nor an archive of it: it is kept online only. */
+  private async isRemoteOnly(id: string): Promise<boolean> {
+    if ((await stat(this.logPath(id)).catch(() => undefined))?.isFile() || (await stat(path.join(this.archiveFolderOf(id), 'parts.json')).catch(() => undefined))?.isFile()) return false;
+    const material = await this.readMaterial();
+    if (!material) return false;
+    if (await this.readMeta(id, material)) return false;
+    return (await this.readIndex(material)).some((item) => item.id === id && item.state === 'archived');
+  }
+
   /**
-   * A thread that is archived and has no live log comes back whole before it is read, so opening one is transparent (D-08). A refused or missing archive
-   * changes nothing: the caller then finds no entries, exactly like a thread this device cannot open.
+   * A thread that is archived and has no live log comes back whole before it is read, so opening one is transparent (D-08). One that is archived only
+   * online is fetched first. A refused, damaged or unfetchable archive changes nothing: the reason is kept (see `prepareOpen`) and the caller finds no
+   * entries, exactly like a thread this device cannot open. The archive files are never touched by a failed attempt.
    */
   private async ensureLive(id: string): Promise<void> {
     if (!THREAD_ID.test(id)) return;
-    if ((await stat(this.logPath(id)).catch(() => undefined))?.isFile()) return;
-    if (!(await stat(path.join(this.archiveFolderOf(id), 'parts.json')).catch(() => undefined))?.isFile()) return;
-    await unarchiveThread(this, id).catch(() => undefined);
+    if ((await stat(this.logPath(id)).catch(() => undefined))?.isFile()) { this.problems.delete(id); return; }
+    let archived = Boolean((await stat(path.join(this.archiveFolderOf(id), 'parts.json')).catch(() => undefined))?.isFile());
+    if (!archived && this.coldFetcher && await this.isRemoteOnly(id)) {
+      const fetched = await this.coldFetcher(id).catch((): ColdFetchResult => ({ ok: false, reason: 'offline' }));
+      if (!fetched.ok) { this.problems.set(id, { reason: fetched.reason }); return; }
+      archived = Boolean((await stat(path.join(this.archiveFolderOf(id), 'parts.json')).catch(() => undefined))?.isFile());
+    }
+    if (!archived) return;
+    try {
+      await unarchiveThread(this, id);
+      this.problems.delete(id);
+    } catch {
+      this.problems.set(id, { reason: (await this.archiveKeys()) ? 'damaged' : 'needs-recovery-code' });
+    }
+  }
+
+  /**
+   * Tries to bring the thread live (fetching it first when it is archived only online) and says why it could not be, or undefined when it is live now or
+   * is no archived thread at all. Opening a conversation from the history asks this first, so a refused archive is explained instead of shown empty.
+   */
+  public async prepareOpen(id: string): Promise<ArchiveProblem | undefined> {
+    assertThreadId(id);
+    await this.ensureLive(id);
+    if ((await stat(this.logPath(id)).catch(() => undefined))?.isFile()) return undefined;
+    return this.problems.get(id);
+  }
+
+  /**
+   * Puts an archived thread's line in the index exactly as another computer describes it, newer fields and later last use winning (the merge two copies
+   * of a thread's meta always get), without opening the archive. This is how a thread kept only online is listed, and how a thread archived here is
+   * ranked by a use on another computer. Does nothing for a thread that is live here. Returns whether the index changed.
+   */
+  public noteArchivedMeta(id: string, meta: ArchivedMetaInput, counts: Partial<Pick<ThreadMeta, 'turns' | 'entries' | 'tip'>> = {}): Promise<boolean> {
+    assertThreadId(id);
+    return this.enqueue(async () => {
+      const material = await this.writeMaterial();
+      if (await this.readMeta(id, material) || (await stat(this.logPath(id)).catch(() => undefined))?.isFile()) return false;
+      const existing = (await this.readIndex(material)).find((item) => item.id === id);
+      const incoming: ThreadMeta = { ...meta, id, turns: counts.turns ?? existing?.turns ?? 0, entries: counts.entries ?? existing?.entries ?? 0, bytes: existing?.bytes ?? 0, tip: counts.tip ?? existing?.tip ?? '' };
+      const { state: _state, ...merged } = existing ? mergeMeta(existing, incoming) : incoming;
+      const next: ThreadMeta = { ...merged, state: 'archived' };
+      if (existing && canonicalJson(JSON.parse(JSON.stringify(existing))) === canonicalJson(JSON.parse(JSON.stringify(next)))) return false;
+      await this.replaceIndexEntry(material, next);
+      return true;
+    });
   }
 
   /**

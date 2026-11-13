@@ -95,6 +95,10 @@ export function validateRemote(value: string, remoteNames: readonly string[]): {
 const OID = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/;
 const LOCAL_TIMEOUT_MS = 30_000;
 const NETWORK_TIMEOUT_MS = 90_000;
+/** The mirror's one remote. It is a promisor: blobs that were filtered out of a fetch are fetched one at a time, by git itself, the first time one is read. */
+const STATE_REMOTE = 'state';
+/** What a fetch leaves out: every blob. The commits and trees (so the file names and the manifest's list) come, and a blob only when it is read. */
+export const PARTIAL_CLONE_FILTER = 'blob:none';
 const MAX_BLOB_BYTES = 16 * 1024 * 1024;
 const MAX_TREE_BYTES = 4 * 1024 * 1024;
 
@@ -120,6 +124,7 @@ export class StateTransport {
   private readonly git: GitRunner;
   private readonly lock: Partial<MirrorLockOptions>;
   private mirrorReady = false;
+  private configuredUrl: string | undefined;
 
   public constructor(options: StateTransportOptions) {
     this.root = options.root;
@@ -185,6 +190,23 @@ export class StateTransport {
     });
   }
 
+  /**
+   * Makes the mirror (and only the mirror: this is `--git-dir` the private folder, never the person's repository) a partial clone of `url`: remote
+   * `state`, a promisor, with the blob filter. Safe to call every time; it does nothing when the address has not changed. A host that cannot filter
+   * ignores the filter and sends everything, so nothing depends on it but bandwidth.
+   */
+  public configurePartialClone(url: string): Promise<void> {
+    return this.inMirror(() => this.configureLocked(url));
+  }
+
+  private async configureLocked(url: string): Promise<void> {
+    if (this.configuredUrl === url) return;
+    if (unsafeAddress(url)) throw new StateRefusedError('unsupported-format');
+    const settings: Array<[string, string]> = [[`remote.${STATE_REMOTE}.url`, url], [`remote.${STATE_REMOTE}.promisor`, 'true'], [`remote.${STATE_REMOTE}.partialclonefilter`, PARTIAL_CLONE_FILTER]];
+    for (const [key, value] of settings) mustSucceed(await this.mirrorGit(['config', key, value]), 'setting up the sync mirror');
+    this.configuredUrl = url;
+  }
+
   /** Fetches the state branch into the mirror's own incoming ref and returns its commit id, or undefined when the remote has no state branch yet. */
   public fetch(): Promise<Outcome<string | undefined>> {
     return this.guarded(() => this.inMirror(async (): Promise<Outcome<string | undefined>> => {
@@ -194,7 +216,8 @@ export class StateTransport {
       const listing = await this.mirrorGit(['ls-remote', '--exit-code', url, STATE_REF], { timeoutMs: NETWORK_TIMEOUT_MS });
       if (listing.code === 2) return { ok: true, value: undefined };
       if (listing.code !== 0) return { ok: false, failure: classifyGitFailure(listing) };
-      const fetched = await this.mirrorGit(['-c', 'transfer.fsckObjects=true', 'fetch', '--no-tags', '-q', url, `+${STATE_REF}:${INCOMING_REF}`], { timeoutMs: NETWORK_TIMEOUT_MS });
+      await this.configureLocked(url);
+      const fetched = await this.mirrorGit(['-c', 'transfer.fsckObjects=true', 'fetch', '--no-tags', '-q', `--filter=${PARTIAL_CLONE_FILTER}`, STATE_REMOTE, `+${STATE_REF}:${INCOMING_REF}`], { timeoutMs: NETWORK_TIMEOUT_MS });
       if (fetched.code !== 0) {
         if (/couldn't find remote ref/.test(fetched.stderr)) return { ok: true, value: undefined };
         return { ok: false, failure: classifyGitFailure(fetched) };
@@ -202,6 +225,24 @@ export class StateTransport {
       const tip = gitText(mustSucceed(await this.mirrorGit(['rev-parse', '--verify', '-q', INCOMING_REF]), 'reading the fetched state'));
       return { ok: true, value: tip };
     }));
+  }
+
+  /** The commit the last fetch left in the mirror's incoming ref, or undefined when there has been none. Reads only the mirror. */
+  public currentTip(): Promise<string | undefined> {
+    return this.inMirror(async () => {
+      const read = await this.mirrorGit(['rev-parse', '--verify', '-q', INCOMING_REF]);
+      return read.code === 0 && OID.test(gitText(read)) ? gitText(read) : undefined;
+    });
+  }
+
+  /** The ids of the objects the mirror was told about and does not hold: after a filtered fetch, the blobs nobody has read yet. */
+  public missingObjects(ref: string = INCOMING_REF): Promise<string[]> {
+    return this.inMirror(async () => {
+      const listed = await this.mirrorGit(['rev-list', '--objects', '--missing=print', ref], { maxStdoutBytes: MAX_TREE_BYTES });
+      if (listed.overflowed) throw new StateRefusedError('unsupported-format');
+      mustSucceed(listed, 'listing the objects not downloaded yet');
+      return gitText(listed).split('\n').filter((line) => line.startsWith('?')).map((line) => line.slice(1).trim()).filter((oid) => OID.test(oid));
+    });
   }
 
   /** The files of a commit's tree. Only manifest.json and <32 hex>.bin blobs are accepted; anything else is refused. */
@@ -222,11 +263,11 @@ export class StateTransport {
     });
   }
 
-  /** One file's bytes, at most 16 MiB. */
+  /** One file's bytes, at most 16 MiB. A blob the mirror does not hold yet is fetched by git first (a network call, so the longer timeout). */
   public readBlob(oid: string): Promise<Buffer> {
     return this.inMirror(async () => {
       if (!OID.test(oid)) throw new StateRefusedError('unsupported-format');
-      const read = await this.mirrorGit(['cat-file', 'blob', oid], { maxStdoutBytes: MAX_BLOB_BYTES });
+      const read = await this.mirrorGit(['cat-file', 'blob', oid], { maxStdoutBytes: MAX_BLOB_BYTES, timeoutMs: NETWORK_TIMEOUT_MS });
       if (read.overflowed) throw new StateRefusedError('unsupported-format');
       if (read.code !== 0) throw new StateRefusedError('missing-object');
       return read.stdout;
