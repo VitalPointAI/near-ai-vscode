@@ -1,9 +1,7 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
-import { mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
 import * as path from 'node:path';
 import type { AgentMessage } from './nearAiClient';
-
-const MAX_TRANSCRIPTS = 50;
 
 export interface TranscriptSummary {
   id: string; title: string; model: string; updatedAt: string; turns: number;
@@ -83,13 +81,13 @@ export class TranscriptStore implements ConversationStore {
     return { value: JSON.parse(Buffer.concat([decipher.update(Buffer.from(envelope.data, 'base64')), decipher.final()]).toString('utf8')), plain: false };
   }
 
+  /** Saves a conversation. Nothing is ever deleted to make room: a conversation stays until the person removes it. */
   public async save(transcript: Transcript): Promise<void> {
     if (!/^conv-[a-z0-9-]{6,60}$/.test(transcript.id)) throw new Error('Invalid transcript id.');
     await this.write(transcript);
-    await this.prune();
   }
 
-  /** Saves a running conversation's state; cheaper than `save`, which also prunes old transcripts. */
+  /** Saves a running conversation's state, the same as `save`; the thread store treats the two differently, so callers keep them apart. */
   public async checkpoint(transcript: Transcript): Promise<void> {
     if (!/^conv-[a-z0-9-]{6,60}$/.test(transcript.id)) throw new Error('Invalid transcript id.');
     await this.write(transcript);
@@ -98,7 +96,8 @@ export class TranscriptStore implements ConversationStore {
   private async write(transcript: Transcript): Promise<void> {
     await mkdir(this.dir, { recursive: true });
     const file = path.join(this.dir, `${transcript.id}.json`);
-    const temporary = `${file}.${process.pid}.tmp`;
+    // A random name, so two editors saving one conversation at once never write the same temporary file.
+    const temporary = `${file}.${randomBytes(8).toString('hex')}.tmp`;
     await writeFile(temporary, await this.encode(transcript), { encoding: 'utf8', mode: 0o600 });
     await rename(temporary, file);
   }
@@ -106,9 +105,12 @@ export class TranscriptStore implements ConversationStore {
   public async list(): Promise<TranscriptSummary[]> {
     const summaries: TranscriptSummary[] = [];
     for (const name of await readdir(this.dir).catch(() => [])) {
-      if (!name.endsWith('.json')) continue;
+      if (!name.endsWith('.json') || !/^conv-[a-z0-9-]{6,60}$/.test(name.slice(0, -5))) continue;
       const transcript = await this.read(name.slice(0, -5));
-      if (transcript) summaries.push({ id: transcript.id, title: transcript.title, model: transcript.model, updatedAt: transcript.updatedAt, turns: transcript.turns });
+      if (transcript) { summaries.push({ id: transcript.id, title: transcript.title, model: transcript.model, updatedAt: transcript.updatedAt, turns: transcript.turns }); continue; }
+      // A file that is there but cannot be opened (sealed with a key this device does not have) is listed as locked, never dropped from the list.
+      const modified = (await stat(path.join(this.dir, name)).catch(() => undefined))?.mtime;
+      summaries.push({ id: name.slice(0, -5), title: '', model: '', updatedAt: (modified ?? new Date(0)).toISOString(), turns: 0, locked: true });
     }
     return summaries.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   }
@@ -127,10 +129,5 @@ export class TranscriptStore implements ConversationStore {
     } catch {
       return undefined;
     }
-  }
-
-  private async prune(): Promise<void> {
-    const all = await this.list();
-    for (const old of all.slice(MAX_TRANSCRIPTS)) await rm(path.join(this.dir, `${old.id}.json`), { force: true });
   }
 }
