@@ -650,16 +650,22 @@ and writes the same files, so they all show the same thing.
 
 Project sync keeps an encrypted copy of the project's state on its own git
 host, so the same chats, runs, comparisons, model choices and NEAR AI key are
-there on another computer. It is off until you turn it on, it never touches
-your own branches, and nothing is ever pushed to `main`.
+there on another computer. It is off until you turn it on. NEAR AI pushes only
+its own encrypted `near-ai/state` branch there, plus your own branch when you
+choose to put your code online (see below). Sync itself never touches your
+branches and never pushes to `main`.
 
 - **A sync control in the chat bar**, next to the profile control, from the
-  moment the panel opens. It reads **Sync off · Turn on**, **Synced · 5 min
-  ago**, **Syncing…**, **Needs attention** (with the reason in plain words) or
-  **No online home · Set up**. One click starts the right step. It works from
-  the keyboard and in light, dark and high-contrast themes. While sync is off,
-  the pick-up card and the first-run screen also offer **Keep this project on
-  your other machines**; dismiss it once and it never comes back.
+  moment the panel opens. It reads **Sync off · Turn on**, **Synced ·** and
+  the clock time of the last sync (for example **Synced · 09:05**),
+  **Syncing…**, **Needs attention** or **No online home · Set up**. When it
+  says **Needs attention**, the reason is written in plain words on a line
+  under the control. One click starts the right step. It works from the
+  keyboard and in light, dark and high-contrast themes. While sync is off, the
+  pick-up card and the first-run screen also offer **Keep this project on your
+  other machines**. On a computer that has no NEAR AI profile yet it appears
+  only after NEAR AI is connected, so **Connect NEAR AI to start** comes first.
+  Dismiss it once and it never comes back.
 - **Turn on** (**NEAR AI: Turn On Project Sync**). It first shows what your git
   host will and will not be able to see, and only after you agree does it make
   your recovery code.
@@ -688,7 +694,8 @@ your own branches, and nothing is ever pushed to `main`.
   Nothing is deleted, and they go up once there is room.
 - **Other commands:** **Show a New Recovery Code** (a new code does not stop an
   old one from opening copies already on the git host), **Turn Off Project
-  Sync**, and **Give This Project an Online Home**.
+  Sync**, **Give This Project an Online Home**, and
+  **Put This Project's Code Online** (see below).
 
 ### Give your project an online home
 
@@ -704,12 +711,41 @@ Nothing happens on your account until you click.
   people you invite, and GitHub's free plan limits some features for private
   repositories. On a public one, anyone can see your project's code, but your
   chats, keys and other state stay encrypted and unreadable.
+- **NEAR AI pushes only two things.** Its own encrypted `near-ai/state`
+  branch, and your own current branch when you choose to put your code online.
+  It creates no other branch and never forces a push.
 - **Pushing your own code is a separate step**, after sync. It shows exactly
   which files would go up and blocks likely secrets (`.env` files, keys,
   credential files). It also checks the earlier commits that would be
   published, not only the current files: a secret committed and later deleted
   still blocks the push, because the history would carry it. NEAR AI never
-  rewrites your history for you. Declining the code push leaves sync working.
+  rewrites your history for you. Declining the code push leaves sync working,
+  and ends with a sentence saying how to do it later.
+- **Put your code online whenever you choose.** Run
+  **NEAR AI: Put This Project's Code Online** in the Command Palette. It runs
+  the same checks as the setup (every file listed, secrets blocked, the history
+  checked, your click on the summary, your own git name and email) against the
+  project's online repository. Running **Give This Project an Online Home**
+  again on a project that already has one offers the same push when your
+  branch is not online yet, and otherwise tells you the online home has its
+  code.
+- **Your own records stay on this computer.** NEAR AI's account and run records
+  in `.planning/.near-ai/` (your organization and profiles, activity, costs,
+  resume points and the like) are left out of the code push, and the summary
+  names them. Only the shared project files, `team.md`, `project.json` and
+  `verifiers.json`, go up with your code.
+- **The default branch.** While `near-ai/state` is the only branch in the
+  repository, GitHub shows it as the repository's default branch. Once your
+  code is pushed, NEAR AI makes your branch the default branch on GitHub when
+  the default is still `near-ai/state`, using your GitHub sign-in. It never
+  changes a default branch you chose yourself. On a pasted address NEAR AI
+  cannot do this, so it tells you which setting to change (on GitHub:
+  Settings, then Default branch).
+- **A repository set up by an earlier version** may still show `near-ai/state`
+  as its default branch. Run **Give This Project an Online Home** again: when
+  your branch is already online, NEAR AI asks once, with a click, whether to
+  make it the default branch. Nothing changes unless you click, and nothing is
+  pushed.
 - **Without GitHub sign-in** (for example in code-server without the GitHub
   provider) the extension says so and offers the `gh` command-line tool if it
   is installed, or the address of an existing empty repository you paste in.

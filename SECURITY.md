@@ -16,7 +16,7 @@ Last reviewed: 2026-11-13, against the code on `main` plus the project state and
 | Open-GSD workflows | The NEAR AI agent runner, on the model you picked; sub-agents use the model for their tier (`nearAi.agent.deepModel`, `standardModel`, `fastModel`) when your provider offers it | The same outbound check, approvals, revert, and cost tracking as any agent run. No Codex or Claude Code runtime is invoked. |
 | Your API key | VS Code SecretStorage, one key per project and profile | Never written to settings, project files, logs, activity, analytics, exports, or error messages. |
 | Saved conversations | The project's own state folder, `.near-ai/state/`, which the extension keeps out of git; with project sync on, also an encrypted copy on your git host (see Project state and sync) | Full transcripts, including file contents and command output the agent saw, so History can resume them in every editor, **encrypted with AES-256-GCM** under a per-project key. Every conversation is kept (the 5 most recent stay open, older ones are archived, none is deleted; `nearAi.history.liveConversations`). A single tool output over 2 MiB is stored shortened with a visible marker. Turn off with `nearAi.agent.saveTranscripts`. |
-| Project state sync (only after **NEAR AI: Turn On Project Sync**) | A branch named `near-ai/state` of your project's own git remote, never `main` | Only ciphertext, with opaque file names and a constant commit message and author. Your git host can see that sync is used, roughly how much is stored, and when you save. See Project state and sync. |
+| Project state sync (only after **NEAR AI: Turn On Project Sync**) | A branch named `near-ai/state` of your project's own git remote, never `main`. NEAR AI writes only that branch and, when you choose to put your code online, your own current branch; no other branch is ever created or pushed | Only ciphertext, with opaque file names and a constant commit message and author. Your git host can see that sync is used, roughly how much is stored, and when you save. See Project state and sync. |
 | Agent Activity | Memory only, while VS Code runs | Prompts, replies, and tool calls for the live page; time- and size-limited; secrets masked. Never written to disk unless you export it. |
 | Your environment variables | Not passed to the agent's commands when they look like credentials (by name or value) | So `env` or a careless script cannot send them to the model. Pass specific ones with `nearAi.agent.shellEnvAllow`. Local MCP servers get only a minimal environment plus what you configure; the Open-GSD installer gets the environment without credential-like variables. |
 | Web searches | Only after **NEAR AI: Set Up Web Search**: your SearXNG instance, Brave Search, or Tavily | The query text; Brave and Tavily also receive your API key, which links the searches to your account. A SearXNG instance you run keeps queries on your infrastructure. |
@@ -24,7 +24,7 @@ Last reviewed: 2026-11-13, against the code on `main` plus the project state and
 | Cybersecurity scans (**NEAR AI: Cybersecurity**) | The model you picked: step results, and response headers, bodies, and TLS certificate details from the target you nominated | Only the target you resolved to a scope is contacted. What comes back is treated as untrusted: fenced as data, invisible characters stripped, injection attempts flagged, and secrets redacted before it is stored or exported. Engagement records and evidence stay in VS Code's extension storage, never in the project. |
 | MCP tool calls | Only servers you add and switch on for the project | The call's arguments, shown on the approval card; see MCP connections below. |
 | Dependency checks | OSV.dev (package names and versions) and endoflife.date (runtime versions), after you agree once per project | No code, file contents, or project names. See Checking your project's dependencies. |
-| Activity and cost records | `.planning/.near-ai/` in your project | Operational facts only (models, token counts, costs, outcomes); no prompts or replies. Add it to `.gitignore` if you do not want it committed. |
+| Activity and cost records | `.planning/.near-ai/` in your project | Operational facts only (models, token counts, costs, outcomes); no prompts or replies. The code push leaves these records out by default and names them in its summary; only the shared project files (`team.md`, `project.json`, `verifiers.json`) go up with your code. Add the folder to `.gitignore` if you do not want it committed. |
 | Open-GSD installation | `npx @opengsd/gsd-core@<exact version> --claude --global` into the extension's own storage, never `~/.claude` | Installed the first time you run a workflow; in NEAR AI projects, checked for updates at startup and daily, which contacts the npm registry (it sees your IP address and the package name). Turn both off with `nearAi.autoInstallGsd`. A new version must pass a compatibility check before it replaces the installed one, and the previous version is kept. |
 
 The extension sends **no telemetry** and loads no remote content into its
@@ -384,6 +384,20 @@ earlier commits that would be published as well: a secret committed once and del
 blocks the push, naming the file and the short commit id and never the value. For a public
 repository, a history that could not be checked completely is not pushed at all. NEAR AI does not
 rewrite your history; that stays your decision.
+
+The code push is also available later, as **NEAR AI: Put This Project's Code Online**, and running
+**Give This Project an Online Home** again offers it; both go through exactly the same checks and
+the same click on the summary. NEAR AI writes only the `near-ai/state` branch and, on your choice,
+your own current branch, and never forces a push. The only setting of your repository it ever
+changes is the default branch: GitHub makes the first branch pushed the default, so while
+`near-ai/state` is the only branch it is shown first. After your code is online, NEAR AI makes
+your branch the default branch through the GitHub API with your token, once, and only when the
+default is still `near-ai/state`; a default branch you chose is never changed. For a repository an
+earlier version set up, the same change is made only after you click to confirm it. On a pasted
+address no request is sent to GitHub and the text names the setting for you to change. NEAR AI's
+own account and run records in `.planning/.near-ai/` stay on this computer by default; the control
+in the chat bar shows a sync problem as a plain sentence under it and never includes a token or
+a password.
 
 ## Costs
 
