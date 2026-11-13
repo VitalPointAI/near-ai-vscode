@@ -1,5 +1,5 @@
 // What the chat panel's sync control says (D-16): one of five states, in plain words, with the one thing a click does. Pure: no vscode, no files, no clock
-// of its own (the caller passes `now`). The sync itself, its triggers and the status it publishes are in services/syncFlows.ts; this only words that status.
+// of its own (the caller passes `now`) and no clock formatting (the panel formats the time). The sync itself, its triggers and the status it publishes are in services/syncFlows.ts; this only words that status.
 import { redactSecrets } from '../redaction';
 import type { SyncState, SyncStatus } from '../../services/syncFlows';
 
@@ -17,6 +17,8 @@ export interface SyncControlModel {
   title: string;
   /** True while a sync runs (aria-busy). */
   busy: boolean;
+  /** For 'synced' with a valid time only: when the last sync finished, as an ISO time. The label, name and tooltip carry SYNC_TIME_SLOT where the panel shows it. */
+  at?: string;
   /** For 'attention' only: the plain sentence, shown as visible text under the control (D-16: the problem is shown on the control, not only in a tooltip). */
   detail?: string;
 }
@@ -32,19 +34,11 @@ export const SYNC_PROMPT_TEXT = {
 const ATTENTION_FALLBACK = 'The last sync did not finish.';
 const NO_HOME_FALLBACK = 'This project has no online home yet.';
 
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-const two = (value: number): string => String(value).padStart(2, '0');
-
-/** A sync time as the control shows it: HH:MM in the person's time today, a short date and time otherwise. Empty for a time that is not valid. */
-export function syncTimeText(iso: string | undefined, now: number): string {
-  if (!iso) return '';
-  const at = new Date(iso);
-  if (Number.isNaN(at.getTime())) return '';
-  const clock = `${two(at.getHours())}:${two(at.getMinutes())}`;
-  const today = new Date(now);
-  const sameDay = at.getFullYear() === today.getFullYear() && at.getMonth() === today.getMonth() && at.getDate() === today.getDate();
-  return sameDay ? clock : `${MONTHS[at.getMonth()]} ${at.getDate()}, ${clock}`;
-}
+/**
+ * Where the panel puts the time of the last sync in the label, the accessible name and the tooltip. The host never formats a clock time for display (the
+ * editor host can run in a container with another time zone and locale): it sends the ISO time as `at`, and the panel's one formatter fills this slot.
+ */
+export const SYNC_TIME_SLOT = '{time}';
 
 /** The control for a sync status. The message is shown as given; the host redacts it before it gets here (see syncStatusMessage). */
 export function syncControlModel(status: SyncStatus, now: number): SyncControlModel {
@@ -52,14 +46,15 @@ export function syncControlModel(status: SyncStatus, now: number): SyncControlMo
     case 'syncing':
       return { state: 'syncing', label: 'Syncing…', action: 'none', ariaLabel: 'Project sync: syncing now', title: 'Syncing this project with your online home.', busy: true };
     case 'synced': {
-      const time = syncTimeText(status.at, now);
+      const valid = typeof status.at === 'string' && !Number.isNaN(new Date(status.at).getTime());
       return {
         state: 'synced',
-        label: time ? `Synced · ${time}` : 'Synced',
+        label: valid ? `Synced · ${SYNC_TIME_SLOT}` : 'Synced',
         action: 'sync-now',
-        ariaLabel: `Project sync: synced${time ? ` at ${time}` : ''}. Choose to sync now.`,
-        title: `${time ? `Last synced ${time}. ` : ''}Choose to sync now.`,
-        busy: false
+        ariaLabel: `Project sync: synced${valid ? ` at ${SYNC_TIME_SLOT}` : ''}. Choose to sync now.`,
+        title: `${valid ? `Last synced ${SYNC_TIME_SLOT}. ` : ''}Choose to sync now.`,
+        busy: false,
+        ...(valid ? { at: status.at } : {})
       };
     }
     case 'attention': {

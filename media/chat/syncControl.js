@@ -10,6 +10,28 @@
     dismiss: 'Don\'t ask again'
   };
 
+  /** The host's placeholder for the time in a label, name and tooltip (SYNC_TIME_SLOT in syncStatus.ts); the panel replaces it with shortTime. */
+  const TIME_SLOT = '{time}';
+
+  /**
+   * The one formatter for a time shown to the person, in the panel so it follows their clock and locale (not the editor host's, which can run in a container).
+   * The time of day when it is today, the short month, day and time on another day; empty for a missing or invalid time. The pick-up card uses it too.
+   */
+  function shortTime(iso, now) {
+    if (!iso) return '';
+    const at = new Date(iso);
+    if (Number.isNaN(at.getTime())) return '';
+    const today = new Date(now === undefined ? Date.now() : now);
+    const sameDay = at.getFullYear() === today.getFullYear() && at.getMonth() === today.getMonth() && at.getDate() === today.getDate();
+    const options = sameDay ? { hour: 'numeric', minute: '2-digit' } : { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' };
+    return new Intl.DateTimeFormat(undefined, options).format(at);
+  }
+
+  /** Puts the panel's time where the host left the slot. Text only: the result is set with textContent and setAttribute. */
+  function withTime(text, time) {
+    return typeof text === 'string' ? text.split(TIME_SLOT).join(time) : text;
+  }
+
   const ACTIONS = ['turn-on', 'set-up-home', 'show-details', 'sync-now'];
 
   /** Per button: the state the live region last announced, and the action a click starts now. */
@@ -32,18 +54,20 @@
         if (ACTIONS.includes(known.action)) post({ type: 'sync-control', action: known.action });
       });
     }
-    button.textContent = model.label;
-    button.setAttribute('aria-label', model.ariaLabel);
-    button.setAttribute('title', model.title);
+    const time = shortTime(model.at, Date.now());
+    const label = withTime(model.label, time);
+    button.textContent = label;
+    button.setAttribute('aria-label', withTime(model.ariaLabel, time));
+    button.setAttribute('title', withTime(model.title, time));
     button.setAttribute('data-state', model.state);
     button.setAttribute('aria-busy', model.busy ? 'true' : 'false');
     // A running sync is not a disabled button: it stays reachable with Tab and keeps its name.
     button.setAttribute('aria-disabled', model.busy ? 'true' : 'false');
-    const changed = known.label !== undefined && known.label !== model.label;
-    known.label = model.label;
+    const changed = known.label !== undefined && known.label !== label;
+    known.label = label;
     known.action = model.action;
     const region = doc.getElementById('sync-live');
-    if (region && changed) region.textContent = 'Project sync: ' + model.label;
+    if (region && changed) region.textContent = 'Project sync: ' + label;
     // A problem's plain sentence is visible text under the control, and the button is described by it; in every other state it is empty, hidden and unlinked.
     const detail = doc.getElementById('sync-detail');
     const sentence = typeof model.detail === 'string' ? model.detail : '';
@@ -115,7 +139,7 @@
     return renderSyncPrompt(doc, lastPrompt.container, lastPrompt.post, lastPrompt.wanted);
   }
 
-  const api = { renderSyncControl, renderSyncPrompt, refreshSyncPrompt, buildSyncPrompt, TEXT };
+  const api = { shortTime, renderSyncControl, renderSyncPrompt, refreshSyncPrompt, buildSyncPrompt, TEXT };
   if (typeof module === 'object' && module.exports) module.exports = api;
   else root.nearSyncControl = api;
 })(typeof window === 'undefined' ? globalThis : window);

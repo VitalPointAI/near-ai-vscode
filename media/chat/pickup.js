@@ -31,14 +31,10 @@
     if (kit && kit.refreshSyncPrompt) kit.refreshSyncPrompt(doc);
   }
 
-  /** How a time reads on the card: the time today, the date and time otherwise. Empty for a time that is not valid. */
-  function when(iso, now) {
-    const at = new Date(iso);
-    if (Number.isNaN(at.getTime())) return '';
-    const today = new Date(now === undefined ? Date.now() : now);
-    return at.toDateString() === today.toDateString()
-      ? at.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
-      : at.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+  /** How a time reads on the card: the panel's one display-time formatter (shared with the sync control), so the same instant reads the same. Empty when it is not valid or the helper is missing. */
+  function when(iso) {
+    const kit = syncControlKit();
+    return kit && typeof kit.shortTime === 'function' ? kit.shortTime(iso, Date.now()) : '';
   }
 
   /**
