@@ -44,7 +44,8 @@ async function decide(preview: TeamUpdatePreview): Promise<(UpdateDecisions & { 
       break;
     }
   }
-  const offered = preview.plan.members.filter((entry) => entry.action === 'new');
+  // Permanent members are added without asking; only the others are offered.
+  const offered = preview.plan.members.filter((entry) => entry.action === 'new' && !entry.permanent);
   let add: string[] = [];
   if (offered.length) {
     const picks = await vscode.window.showQuickPick(offered.map((entry) => ({ label: entry.name, description: 'new in the built-in team', picked: true })), { title: `Update "${preview.name}": add new members?`, canPickMany: true, ignoreFocusOut: true });
@@ -115,10 +116,11 @@ export async function updateTeam(library: TeamLibrary, requested?: string): Prom
   const decisions = await decide(preview);
   if (!decisions) return;
   const counts = (action: string) => preview.plan.members.filter((member) => member.action === action).length;
+  const permanent = preview.plan.members.filter((member) => member.action === 'new' && member.permanent).length;
   const guidanceLine = preview.guidance ? `\nAGENTS.md guidance: ${preview.guidance.action === 'auto' ? 'updated (unchanged since generated)' : preview.guidance.action === 'choice' ? (decisions.guidance === 'take' ? 'replaced, as you chose' : 'kept, as you chose') : 'already current'}.` : preview.guidanceSkipped ? `\n${preview.guidanceSkipped}` : '';
   const confirm = await vscode.window.showInformationMessage(
     `Update "${preview.name}" to the ${preview.plan.template.label} template v${preview.plan.template.toVersion}?`,
-    { modal: true, detail: `${describePlan(preview.plan)}\n\n${counts('auto')} replaced automatically, ${counts('choice')} by your choice, ${decisions.add?.length ?? 0} added; your own and removed members are kept.${guidanceLine}\n\nThe current file is backed up to the team's history first, so you can undo.` },
+    { modal: true, detail: `${describePlan(preview.plan)}\n\n${counts('auto')} replaced automatically, ${counts('choice')} by your choice, ${(decisions.add?.length ?? 0) + permanent} added${permanent ? ` (${permanent} permanent, added automatically)` : ''}; your own and removed members are kept.${guidanceLine}\n\nThe current file is backed up to the team's history first, so you can undo.` },
     'Update'
   );
   if (confirm !== 'Update') return;

@@ -9,7 +9,8 @@ import { TEMPLATE_HISTORY } from './teamTemplateHistory';
 // the member was generated from (recorded in the file's frontmatter, or, for a file made before
 // stamps existed, any released version of that member); the user's copy is the file; the new
 // version is today's built-in. A member still equal to its base is replaced; a member the user
-// changed is never overwritten without their choice; members the user added are left alone.
+// changed is never overwritten without their choice; members the user added are left alone. A permanent built-in member (the research
+// team's plagiarism checker) is added without asking when the file lacks it, even when the user removed it, and the plan says which.
 
 const WEB = ['WebSearch', 'WebFetch', 'CheckCitations', 'CheckOriginality'];
 const STAMP_KEYS = ['template', 'templateVersion', 'templateBase'];
@@ -28,10 +29,11 @@ export interface TemplateRef {
 /**
  * auto: unchanged since generated, replaced. same: already current. choice: the user changed it; they choose. kept: the user chose their own
  * version against this same built-in definition before, so they are not asked again until the built-in changes.
- * new: a built-in member the file lacks, offered. removed: no longer built in, flagged and kept. custom: the user's own member, kept.
+ * new: a built-in member the file lacks, offered; or, when `permanent`, added without asking (the plan's reason says whether it was missing
+ * or removed by the user). removed: no longer built in, flagged and kept. custom: the user's own member, kept.
  */
 export type MemberAction = 'auto' | 'same' | 'choice' | 'kept' | 'new' | 'removed' | 'custom';
-export interface MemberPlan { name: string; action: MemberAction; reason: string; current?: string; proposed?: string; merged?: string; diff?: DiffLine[] }
+export interface MemberPlan { name: string; action: MemberAction; reason: string; current?: string; proposed?: string; merged?: string; diff?: DiffLine[]; permanent?: boolean }
 export interface TeamUpdatePlan { template: TemplateRef; upToDate: boolean; local: boolean; goal?: string; members: MemberPlan[] }
 export type MemberDecision = 'take' | 'keep' | 'merge';
 export interface UpdateDecisions { members?: Record<string, MemberDecision>; add?: string[] }
@@ -108,9 +110,12 @@ export function detectTemplate(text: string): TemplateRef | undefined {
   try { names = splitTeam(text).sections.map((section) => section.name); } catch { return undefined; }
   let best: { type: ProjectType; score: number } | undefined;
   for (const type of PROJECT_TYPES) {
-    const known = new Set(TEMPLATE_HISTORY[type.id]?.flatMap((version) => Object.keys(version.members)) ?? type.members.map((member) => member.name));
+    const versions = TEMPLATE_HISTORY[type.id] ?? [];
+    const known = new Set(versions.length ? versions.flatMap((version) => Object.keys(version.members)) : type.members.map((member) => member.name));
     const shared = names.filter((name) => known.has(name)).length;
-    const score = shared / Math.max(1, type.members.length);
+    // Measured against the smallest released team, so adding a member to the built-in team does not stop an older file being recognised.
+    const size = Math.min(type.members.length, ...versions.map((version) => Object.keys(version.members).length));
+    const score = shared / Math.max(1, size);
     if (shared >= 3 && score >= 0.5 && (!best || score > best.score)) best = { type, score };
   }
   return best ? { id: best.type.id, label: best.type.label, stamped: false, toVersion: templateVersion(best.type.id) } : undefined;
@@ -170,9 +175,17 @@ export function planTeamUpdate(text: string): TeamUpdatePlan | undefined {
   }
   for (const member of type.members) {
     if (sections.some((section) => section.name === member.name)) continue;
-    // A member the stamp recorded but the file no longer has was removed on purpose; do not offer it back.
-    if (template.base && member.name in template.base) continue;
-    members.push({ name: member.name, action: 'new', reason: 'A new member of the built-in team; add it?', proposed: renderSection(builtInSection(type, member.name, local, goal)!) });
+    // A member the stamp recorded but the file no longer has was removed on purpose; do not offer it back, unless the team cannot work without it.
+    const removed = Boolean(template.base && member.name in template.base);
+    const proposed = renderSection(builtInSection(type, member.name, local, goal)!);
+    if (member.permanent) {
+      members.push({ name: member.name, action: 'new', permanent: true, proposed, reason: removed
+        ? `REMOVED from this file, but ${member.name} is a permanent member of the ${type.label.toLowerCase()} team that its workflow depends on; added back automatically.`
+        : `MISSING from this file: ${member.name} is a permanent member of the ${type.label.toLowerCase()} team; added automatically.` });
+      continue;
+    }
+    if (removed) continue;
+    members.push({ name: member.name, action: 'new', reason: 'A new member of the built-in team; add it?', proposed });
   }
   const upToDate = members.every((member) => member.action === 'same' || member.action === 'kept' || member.action === 'custom' || member.action === 'removed') && template.stamped && template.fromVersion === template.toVersion;
   return { template, upToDate, local, ...(goal ? { goal } : {}), members };
@@ -192,12 +205,13 @@ export function applyTeamUpdate(text: string, plan: TeamUpdatePlan, decisions: U
     else if (member?.action === 'choice' && decision === 'merge') out.push(member.merged!);
     else out.push(`${section.raw.replace(/\s+$/, '')}\n`);
   }
-  // New members go where the built-in team has them, after the member that precedes them there.
-  for (const name of decisions.add ?? []) {
+  // New members go where the built-in team has them, after the member that precedes them there. Permanent members are added whatever was chosen.
+  const adding = [...new Set([...(decisions.add ?? []), ...plan.members.filter((member) => member.action === 'new' && member.permanent).map((member) => member.name)])];
+  for (const name of adding) {
     const member = byName.get(name);
     if (member?.action !== 'new') continue;
     const order = type.members.map((entry) => entry.name);
-    const after = order.slice(0, order.indexOf(name)).reverse().find((previous) => parts.sections.some((section) => section.name === previous));
+    const after = order.slice(0, order.indexOf(name)).reverse().find((previous) => out.some((block) => block.startsWith(`## ${previous}\n`)));
     const at = after ? out.findIndex((block) => block.startsWith(`## ${after}\n`)) + 1 : out.length;
     out.splice(at, 0, member.proposed!);
   }
@@ -224,7 +238,7 @@ export function applyTeamUpdate(text: string, plan: TeamUpdatePlan, decisions: U
 export function describePlan(plan: TeamUpdatePlan): string {
   const from = plan.template.fromVersion ? `v${plan.template.fromVersion}` : plan.template.stamped ? 'an unknown version' : 'no recorded version (inferred from member names)';
   const label: Record<MemberAction, string> = { auto: 'updates automatically', same: 'already current', choice: 'needs your choice', kept: 'your version, kept as you chose', new: 'new built-in member, can be added', removed: 'no longer built in, kept', custom: 'your own member, kept' };
-  return [`${plan.template.label} template: ${from} → v${plan.template.toVersion}`, ...plan.members.map((member) => `- ${member.name}: ${label[member.action]}. ${member.reason}`)].join('\n');
+  return [`${plan.template.label} template: ${from} → v${plan.template.toVersion}`, ...plan.members.map((member) => `- ${member.name}: ${member.permanent && member.action === 'new' ? 'permanent built-in member, added automatically' : label[member.action]}. ${member.reason}`)].join('\n');
 }
 
 // ---- AGENTS.md guidance -------------------------------------------------------------------------

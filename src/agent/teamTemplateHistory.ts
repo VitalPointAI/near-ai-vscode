@@ -193,6 +193,41 @@ export const TEMPLATE_HISTORY: Record<string, TemplateSnapshot[]> = {
           '03326a029f70ef14'
         ]
       }
+    },
+    {
+      version: 4,
+      definition: '22396cbf9ec7a7b8',
+      guidance: [
+        '5baf76dcdb71b768'
+      ],
+      members: {
+        investigator: [
+          '2a29c57712c5f92c',
+          '3a9b516d78cd5609'
+        ],
+        'source-verifier': [
+          '1e81392506640216',
+          'cf85a7131c53a496'
+        ],
+        analyst: [
+          '35d79ace67dea2e1'
+        ],
+        writer: [
+          '20e86cb1e41fc9ec'
+        ],
+        'plagiarism-checker': [
+          '80fb64b956966594',
+          'd1af5f171bd845c4'
+        ],
+        'red-team': [
+          'd075af566eb4be9d',
+          'd69196019ca1d3e7'
+        ],
+        editor: [
+          '11003ea00e956dbc',
+          '87ea442ac61149ab'
+        ]
+      }
     }
   ],
   presales: [
