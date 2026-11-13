@@ -17,6 +17,8 @@ export interface SyncControlModel {
   title: string;
   /** True while a sync runs (aria-busy). */
   busy: boolean;
+  /** For 'attention' only: the plain sentence, shown as visible text under the control (D-16: the problem is shown on the control, not only in a tooltip). */
+  detail?: string;
 }
 
 /** The invitation shown before sync is on (D-16). */
@@ -62,7 +64,7 @@ export function syncControlModel(status: SyncStatus, now: number): SyncControlMo
     }
     case 'attention': {
       const message = status.message?.trim() || ATTENTION_FALLBACK;
-      return { state: 'attention', label: 'Needs attention', action: 'show-details', ariaLabel: `Project sync needs attention: ${message} Choose to see what to do.`, title: message, busy: false };
+      return { state: 'attention', label: 'Needs attention', action: 'show-details', ariaLabel: `Project sync needs attention: ${message} Choose to see what to do.`, title: message, busy: false, detail: message };
     }
     case 'no-home': {
       const message = status.message?.trim() || NO_HOME_FALLBACK;

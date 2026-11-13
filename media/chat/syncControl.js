@@ -16,7 +16,7 @@
   const memory = new WeakMap();
 
   /**
-   * Draws `model` ({ state, label, action, ariaLabel, title, busy }) on `button`, replacing what was there (one button, never a second one). A click posts
+   * Draws `model` ({ state, label, action, ariaLabel, title, busy, detail }) on `button`, replacing what was there (one button, never a second one). A click posts
    * { type: 'sync-control', action } unless the action is 'none'. The polite live region beside the button (#sync-live) says the new state when it
    * changes; the first render says nothing. Returns the button.
    */
@@ -44,6 +44,15 @@
     known.action = model.action;
     const region = doc.getElementById('sync-live');
     if (region && changed) region.textContent = 'Project sync: ' + model.label;
+    // A problem's plain sentence is visible text under the control, and the button is described by it; in every other state it is empty, hidden and unlinked.
+    const detail = doc.getElementById('sync-detail');
+    const sentence = typeof model.detail === 'string' ? model.detail : '';
+    if (detail) {
+      detail.textContent = sentence;
+      detail.hidden = sentence === '';
+    }
+    if (detail && sentence) button.setAttribute('aria-describedby', 'sync-detail');
+    else button.removeAttribute('aria-describedby');
     return button;
   }
 

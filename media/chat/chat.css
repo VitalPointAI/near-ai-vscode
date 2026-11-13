@@ -371,6 +371,9 @@ footer { padding: 6px 12px 8px; }
 #sync[data-state="no-home"] { color: var(--vscode-textLink-foreground); background: transparent; }
 body.vscode-high-contrast #sync, body.vscode-high-contrast-light #sync { border: 1px solid var(--vscode-contrastBorder, var(--vscode-focusBorder)); background: transparent; color: var(--vscode-foreground); }
 body.vscode-high-contrast #sync:hover, body.vscode-high-contrast-light #sync:hover { outline: 1px dashed var(--vscode-contrastActiveBorder, var(--vscode-focusBorder)); }
+/* A sync problem's plain sentence (G-27-4c): a full-row line under the chips, wrapping, in the theme's error colour. */
+.sync-detail { flex: 0 0 100%; margin: 2px 0 0; font-size: 11px; color: var(--vscode-errorForeground, var(--vscode-editorWarning-foreground)); white-space: normal; overflow-wrap: anywhere; }
+.sync-detail[hidden] { display: none; }
 /* Send and Stop never shrink, so both fit beside the pickers at narrow widths. */
 .composer .bar .icon-button { flex: none; }
 #stop[hidden] { display: none; }
