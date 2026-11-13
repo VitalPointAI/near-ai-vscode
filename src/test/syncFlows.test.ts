@@ -1,7 +1,8 @@
 // Plan 15, tasks 2 and 3: joining a synced project from a computer that already has chats of its own, a new recovery code, the key-file switch, turning
 // off, the code never stored or logged, and (task 3) the commands' triggers, remote choice and status. Local bare repositories and fakes only.
 import assert from 'node:assert/strict';
-import { existsSync, statSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { readFile, readdir, rename } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
@@ -13,12 +14,13 @@ import { StateKeys } from '../services/stateKeys';
 import { archiveThread } from '../services/threadArchive';
 import {
   BLUR_IDLE_MS, COALESCE_MS, DEACTIVATE_PUSH_MS, PUSH_BATCH_MS, RETURN_PULL_AFTER_MS, SYNC_INTERVAL_DEFAULT, SyncScheduler, clampSyncInterval, enterCodeFlow, keepKeyFlow,
-  afterRemoteFor, newCodeFlow, readSyncSettings, resolveRemote, tokenRunner, turnOffFlow, turnOnFlow, type SyncClock, type SyncRequest
+  afterRemoteFor, localHomeState, newCodeFlow, readSyncSettings, resolveRemote, tokenRunner, turnOffFlow, turnOnFlow, type SyncClock, type SyncRequest
 } from '../services/syncFlows';
 import type { SyncOutcome } from '../services/stateSync';
 import type { GitRunner } from '../services/stateGit';
 import { KEY_SENTINEL, bareRemote, computer, fakeUi, fixtureGit, folderWithoutRemote, setUpProfile, type Computer } from './helpers/flowFixtures';
-import { scanRemote } from './helpers/gitFixtures';
+import { hermeticRunner, scanRemote } from './helpers/gitFixtures';
+import { syncPanelMessage } from '../services/syncPanel';
 import { SIX_TURNS, chain, treeHash } from './helpers/syncFixtures';
 import { MemorySecrets } from './helpers/stateFixtures';
 
@@ -707,4 +709,91 @@ test('afterRemoteFor finishes turning sync on for the online-home flow and says 
   const declined = computer(other, 'bravo');
   const no = await afterRemoteFor(declined.env, fakeUi({ confirm: false }).ui)({ name: 'origin', url: other, git: declined.parts.git as GitRunner });
   assert.equal(no, false, 'a declined screen is not a finished turn-on');
+});
+
+// ---- plan 27-24: "No online home" from panel open, from a local check only (G-27-4b) -----------------------------------------------------
+
+test('the home check is local: no repository or no remote is no-home, a remote is home, and it only lists remotes and writes nothing', async () => {
+  const seen: string[][] = [];
+  const spy: GitRunner = (args, options) => { seen.push(args); return hermeticRunner()(args, options); };
+
+  const plainFolder = mkdtempSync(path.join(tmpdir(), 'near-ai-nogit-'));
+  assert.equal(await localHomeState(plainFolder, spy), 'no-home', 'a folder that is not a repository has no online home');
+  assert.deepEqual(readdirSync(plainFolder), [], 'nothing was written: no .git, no state home');
+
+  const noRemote = folderWithoutRemote();
+  const before = readdirSync(noRemote).sort();
+  assert.equal(await localHomeState(noRemote, spy), 'no-home', 'a repository with no remote has no online home');
+  assert.deepEqual(readdirSync(noRemote).sort(), before, 'and the folder is unchanged');
+
+  const remote = bareRemote();
+  fixtureGit(noRemote, ['remote', 'add', 'origin', remote]);
+  assert.equal(await localHomeState(noRemote, spy), 'home', 'after a remote is added there is a home');
+
+  for (const args of seen) {
+    const verb = args.filter((arg) => !arg.startsWith('-') && !arg.startsWith('/'))[0];
+    assert.equal(verb, 'remote', `only the local remote listing ran, not: ${args.join(' ')}`);
+    assert.ok(!args.some((arg) => ['fetch', 'ls-remote', 'push', 'clone', 'pull'].includes(arg)));
+  }
+  assert.equal(seen.length, 3);
+});
+
+test('the home check says unknown, and changes nothing, when git is not installed', async () => {
+  const missing: GitRunner = async () => { const { GitNotFoundError } = await import('../services/stateGit'); throw new GitNotFoundError(); };
+  assert.equal(await localHomeState('/anywhere', missing), 'unknown');
+  const timedOut: GitRunner = async () => ({ code: 124, stdout: Buffer.alloc(0), stderr: '' });
+  assert.equal(await localHomeState('/anywhere', timedOut), 'unknown', 'a check that did not finish is not an answer');
+});
+
+test('with sync off, the control moves between off and no-home as a remote appears or goes, and says nothing when the answer is the same', () => {
+  const scheduler = new SyncScheduler({ runsInFlight: () => 0, intervalMinutes: () => 10, runSync: async () => OK });
+  const seen: string[] = [];
+  scheduler.onStatus((status) => seen.push(status.state));
+  scheduler.setHomeKnown(false);
+  assert.deepEqual(scheduler.status(), { state: 'no-home', message: 'This project has no online home yet.' });
+  scheduler.setHomeKnown(false);
+  assert.deepEqual(seen, ['no-home'], 'the same answer publishes nothing new');
+  scheduler.setHomeKnown(true);
+  assert.deepEqual(scheduler.status(), { state: 'off' });
+  scheduler.setHomeKnown(true);
+  assert.deepEqual(seen, ['no-home', 'off']);
+});
+
+test('while sync is on, the home check never overrides the scheduler\'s state', async () => {
+  const h = harness({ interval: 0 });
+  await h.scheduler.syncNow();
+  assert.equal(h.scheduler.status().state, 'synced');
+  h.scheduler.setHomeKnown(false);
+  h.scheduler.setHomeKnown(true);
+  assert.equal(h.scheduler.status().state, 'synced');
+  h.scheduler.setNoHome();
+  h.scheduler.setHomeKnown(true);
+  assert.equal(h.scheduler.status().state, 'no-home', 'with sync on, only the scheduler\'s own outcomes move the state');
+});
+
+test('the no-home status gives the control "No online home · Set up" with the set-up action and no invitation', () => {
+  const scheduler = new SyncScheduler({ runsInFlight: () => 0, intervalMinutes: () => 10, runSync: async () => OK });
+  scheduler.setHomeKnown(false);
+  const message = syncPanelMessage(scheduler.status(), undefined, Date.UTC(2026, 0, 2, 12, 0));
+  assert.equal(message.model.state, 'no-home');
+  assert.equal(message.model.label, 'No online home · Set up');
+  assert.equal(message.model.action, 'set-up-home');
+  assert.equal(message.prompt, false);
+});
+
+test('the check runs at activation, after the online-home, turn-on and turn-off commands, and when the panel opens and its view reloads', () => {
+  const src = path.join(__dirname, '..', '..', 'src', 'services');
+  const commands = readFileSync(path.join(src, 'syncCommands.ts'), 'utf8');
+  const chat = readFileSync(path.join(src, 'chat.ts'), 'utf8');
+  assert.match(commands, /export (?:async )?function refreshSyncHome/);
+  const activation = commands.slice(commands.indexOf('readSyncSettings(runtime.env.home)'));
+  assert.match(activation, /refreshSyncHome/, 'at activation, after the sync setting is read');
+  for (const name of ['nearAi.sync.turnOn', 'nearAi.sync.turnOff', 'nearAi.sync.onlineHome']) {
+    const start = commands.indexOf(`'${name}'`);
+    const ends = ['registerCommand', 'onDidChangeConfiguration'].map((marker) => commands.indexOf(marker, start + 10)).filter((at) => at > 0);
+    const block = commands.slice(start, Math.min(...ends));
+    assert.match(block, /refreshSyncHome/, `after ${name}`);
+  }
+  assert.match(chat, /chat-ready'\) \{[^\n]*refreshSyncHome/, 'on chat-ready');
+  assert.match(chat, /refreshSyncHome\(/, 'and on panel set-up');
 });
