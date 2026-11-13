@@ -284,6 +284,9 @@ test('a hybrid profile lists cloud and local models and sends each message to th
 test('a GSD slash command runs the installed skill on the runner: it asks a question, spawns a sub-agent, and reports', async () => {
   const { root, auth } = await projectWithProfile();
   const { writeFile: write, mkdir: makeDir } = await import('node:fs/promises');
+  // The command list must not pick up the real teams library in the person's home folder, so point it at an empty folder inside the project.
+  const previousTeamsDir = process.env.NEAR_AI_TEAMS_DIR;
+  process.env.NEAR_AI_TEAMS_DIR = path.join(root, '.teams-home');
   // An installed runtime in the extension's storage, laid out as the installer leaves it.
   const home = path.join(root, '.global', 'gsd', '1.20.0');
   await makeDir(path.join(home, 'gsd-core', 'bin'), { recursive: true });
@@ -347,5 +350,6 @@ test('a GSD slash command runs the installed skill on the runner: it asks a ques
     assert.deepEqual(commandList.commands, [{ command: 'gsd-progress', title: 'gsd-progress', description: 'Show progress', argumentHint: '[--verbose]' }]);
   } finally {
     globalThis.fetch = originalFetch;
+    if (previousTeamsDir === undefined) delete process.env.NEAR_AI_TEAMS_DIR; else process.env.NEAR_AI_TEAMS_DIR = previousTeamsDir;
   }
 });
