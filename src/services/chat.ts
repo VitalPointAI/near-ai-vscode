@@ -208,14 +208,14 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
   /** Opens a saved conversation's transcript into `tab`; false when it is no longer saved. */
   const restoreInto = async (tab: ChatTab, id: string, root: string, note: string): Promise<boolean> => {
     const agent = ensureAgent(tab, root);
-    const turns = await agent.restore(id);
-    if (!turns) return false;
+    const view = await agent.restore(id);
+    if (!view) return false;
     tab.id = agent.id;
     tab.title = conversationTitle(agent.displayTitle) ?? tab.title;
     tab.log.clear();
     tab.outcomes.clear();
     tab.outcome = 'done';
-    tab.log.add({ type: 'transcript', turns, note });
+    tab.log.add(Array.isArray(view) ? { type: 'transcript', turns: view, note } : { type: 'transcript', items: view.items, note });
     // A run of it that the extension host never finished (code-server closed it, a reload, a crash).
     const markers = runMarkersFor(context, root);
     const cut = await markers.interruptedRun(tab.id).catch(() => undefined);

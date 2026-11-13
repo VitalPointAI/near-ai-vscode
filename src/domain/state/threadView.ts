@@ -68,3 +68,108 @@ export function entriesToMessages(main: readonly ThreadEntry[]): AgentMessage[] 
   }
   return messages;
 }
+
+// ---- the full view of a reopened thread (D-07) ------------------------------------------------------------------------------------------
+
+/** What the view shows for a thread that was migrated with only part of its earlier messages (Pitfall 15). */
+export const PARTIAL_HISTORY_NOTE = 'Earlier messages of this chat were summarised before this version and cannot be restored';
+
+/** The line before a continuation the main line does not contain: the thread was also continued on another computer. */
+export const OTHER_CONTINUATION_LABEL = 'Also continued on another computer';
+
+/** The history marker a thread migrated from before 0.4.20 carries when its earliest messages were already summarised away. */
+export const PARTIAL_HISTORY = 'partial-before-0.4.20';
+
+/** The most characters of a tool call's arguments the view carries; the log keeps them whole. The card shows a one-line preview of them. */
+export const VIEW_ARGS_LIMIT = 2_000;
+
+/** One thing the reopened view shows, in the order it happened. A tool step carries no output: the card asks for it when it is opened. */
+export type ViewItem =
+  | { kind: 'user'; text: string }
+  | { kind: 'assistant'; text: string }
+  | {
+    kind: 'tool';
+    /** The id of the tool-call entry: what the card asks the host for. */
+    entryId: string;
+    name: string;
+    args: string;
+    /** Whether the call has a stored result. */
+    ok: boolean;
+    shortenedBytes?: number;
+    /** Said on the card when the stored output was cut at the 2 MiB cap (D-12), for example "output shortened, 3 MB". */
+    note?: string;
+  }
+  | { kind: 'notice'; text: string }
+  | { kind: 'divider'; text: string };
+
+/** "output shortened, 3 MB": how much of a tool result was not stored. One decimal at most, and no ".0". */
+export function shortenedNote(bytes: number): string {
+  const megabytes = Math.round((bytes / (1024 * 1024)) * 10) / 10;
+  return `output shortened, ${megabytes} MB`;
+}
+
+/**
+ * Pairs each tool call of a run of entries with its result: the first result with the same call id after it. A provider may reuse a call id in a later
+ * turn, so a result answers the nearest call before it. Keys are the ids of the tool-call entries.
+ */
+export function pairToolResults(segment: readonly ThreadEntry[]): Map<string, ThreadEntry> {
+  const open = new Map<string, string>();
+  const pairs = new Map<string, ThreadEntry>();
+  for (const entry of segment) {
+    const callId = textOf(entry.body, 'callId');
+    if (entry.role === 'tool-call') open.set(callId, entry.id);
+    else if (entry.role === 'tool-result' && open.has(callId)) { pairs.set(open.get(callId)!, entry); open.delete(callId); }
+  }
+  return pairs;
+}
+
+function argumentsText(body: unknown): string {
+  const args = field(body, 'args');
+  const text = typeof args === 'string' ? args : JSON.stringify(args ?? {});
+  return text.length > VIEW_ARGS_LIMIT ? `${text.slice(0, VIEW_ARGS_LIMIT)}…` : text;
+}
+
+function segmentItems(segment: readonly ThreadEntry[]): ViewItem[] {
+  const results = pairToolResults(segment);
+  const answered = new Set([...results.values()].map((entry) => entry.id));
+  const items: ViewItem[] = [];
+  for (const entry of segment) {
+    if (entry.role === 'user') items.push({ kind: 'user', text: textOf(entry.body) });
+    else if (entry.role === 'assistant') items.push({ kind: 'assistant', text: textOf(entry.body) });
+    else if (entry.role === 'notice') items.push({ kind: 'notice', text: textOf(entry.body) });
+    else if (entry.role === 'tool-call') {
+      const result = results.get(entry.id);
+      const shortened = result ? field(result.body, 'shortenedBytes') : undefined;
+      const shortenedBytes = typeof shortened === 'number' && Number.isFinite(shortened) && shortened > 0 ? shortened : undefined;
+      items.push({ kind: 'tool', entryId: entry.id, name: textOf(entry.body, 'name') || 'tool', args: argumentsText(entry.body), ok: result !== undefined, ...(shortenedBytes !== undefined ? { shortenedBytes, note: shortenedNote(shortenedBytes) } : {}) });
+    } else if (entry.role === 'tool-result' && !answered.has(entry.id)) {
+      // A result whose call has not arrived (a partial delivery) is still shown, as a step of its own, so nothing is hidden.
+      const shortened = field(entry.body, 'shortenedBytes');
+      const shortenedBytes = typeof shortened === 'number' && Number.isFinite(shortened) && shortened > 0 ? shortened : undefined;
+      items.push({ kind: 'tool', entryId: entry.id, name: 'tool', args: '', ok: true, ...(shortenedBytes !== undefined ? { shortenedBytes, note: shortenedNote(shortenedBytes) } : {}) });
+    }
+  }
+  return items;
+}
+
+/**
+ * Every entry of a thread as the reopened view shows it, in order: the main line first (a tool call and its result are one card), then each other
+ * continuation after a divider. A thread migrated with partial history starts with a note saying so. Nothing is skipped and nothing is cut off.
+ */
+export function entriesToView(lines: Pick<ThreadLines, 'main' | 'branches'>, meta: { history?: string } = {}): ViewItem[] {
+  const items: ViewItem[] = [];
+  if (meta.history === PARTIAL_HISTORY) items.push({ kind: 'notice', text: PARTIAL_HISTORY_NOTE });
+  items.push(...segmentItems(lines.main));
+  for (const branch of lines.branches) {
+    items.push({ kind: 'divider', text: OTHER_CONTINUATION_LABEL }, ...segmentItems(branch.entries));
+  }
+  return items;
+}
+
+/** The items cut into batches of at most `size`, in order, so a long thread reaches the view in pieces. */
+export function batchView<T>(items: readonly T[], size = 200): T[][] {
+  const step = Math.max(1, Math.floor(size));
+  const batches: T[][] = [];
+  for (let start = 0; start < items.length; start += step) batches.push(items.slice(start, start + step));
+  return batches;
+}

@@ -6,7 +6,8 @@ import test from 'node:test';
 import { compactConversation, trimOldToolResults } from '../agent/context';
 import { DEFAULT_RULES } from '../agent/permissions';
 import { contentKey, COMPACTION_ACK, messagesToEntries } from '../domain/state/threadCapture';
-import { AgentConversation, type AgentTurnRequest, type GsdContext } from '../services/agentSession';
+import type { ViewItem } from '../domain/state/threadView';
+import { AgentConversation, type AgentTurnRequest, type GsdContext, type RestoredView } from '../services/agentSession';
 import type { AgentMessage, CompletionEvent, ToolCall } from '../services/nearAiClient';
 import { stateHomeFor } from '../services/stateHome';
 import { StateKeys, stateKeysFor } from '../services/stateKeys';
@@ -43,6 +44,13 @@ function longConversation(turns = 12): { messages: AgentMessage[]; display: Map<
 }
 
 const summarizer = { async *streamCompletion(): AsyncGenerator<CompletionEvent> { yield { type: 'done', message: { role: 'assistant', content: 'SUMMARY of the first part' }, finishReason: 'stop', usage }; } };
+
+/** What a reopened thread shows: a thread store answers with the items of its log (plan 06, D-07). */
+async function itemsOf(view: Promise<RestoredView | undefined>): Promise<ViewItem[]> {
+  const restored = await view;
+  assert.ok(restored && !Array.isArray(restored), 'a thread store answers with items');
+  return (restored as { items: ViewItem[] }).items;
+}
 
 function userTexts(entries: Array<{ role: string; body: unknown }>): string[] {
   return entries.filter((entry) => entry.role === 'user').map((entry) => (entry.body as { text: string }).text);
@@ -133,9 +141,9 @@ test('a compacted conversation reopens with every user turn, from the log, and s
 
     const reopened = new AgentConversation(root, () => undefined, path.join(stateHomeFor(root).paths.checkpoints), undefined, storeFor(root, new MemorySecrets()));
     // A second editor with no key of its own reads the key file in the state home, so it sees the same conversation.
-    const turns = await reopened.restore(conversation.id);
-    assert.deepEqual(turns?.filter((turn) => turn.role === 'user').map((turn) => turn.text), asked, 'all twelve typed messages, in order');
-    assert.equal(turns?.filter((turn) => turn.role === 'assistant').length, 12);
+    const items = await itemsOf(reopened.restore(conversation.id));
+    assert.deepEqual(items.filter((item) => item.kind === 'user').map((item) => (item as { text: string }).text), asked, 'all twelve typed messages, in order');
+    assert.equal(items.filter((item) => item.kind === 'assistant').length, 12);
     assert.equal((await readdir(path.join(stateHomeFor(root).paths.threads, conversation.id))).sort().join(','), 'context.enc,log.jsonl,meta.enc');
   } finally { await rm(root, { recursive: true, force: true }); }
 });
@@ -268,8 +276,8 @@ test('a thread continued on another computer reopens with the continuation in it
       async actualCostsUsd() { return undefined; }
     };
     const reopened = new AgentConversation(root, () => undefined, stateHomeFor(root).paths.checkpoints, undefined, storeFor(root, new MemorySecrets(), 'edC.1'));
-    const turns = await reopened.restore(THREAD);
-    assert.deepEqual(turns?.filter((turn) => turn.role === 'user').map((turn) => turn.text).slice(-2), ['Question 4', 'Asked on the other computer']);
+    const items = await itemsOf(reopened.restore(THREAD));
+    assert.deepEqual(items.filter((item) => item.kind === 'user').map((item) => (item as { text: string }).text).slice(-2), ['Question 4', 'Asked on the other computer']);
     await reopened.send({ text: 'Continue here', client: client as never, model: 'm', privacy: 'Private', policy: { mode: 'approve-risky', emergencyStop: false }, rules: DEFAULT_RULES });
     const context = seen[0].map((message) => message.content).join('\n');
     assert.match(context, /Asked on the other computer/, 'the other computer\'s question is in the context the model continues from');
@@ -303,8 +311,8 @@ test('a second editor on the same host lists and reopens the conversation the fi
     assert.deepEqual(await editorB.lines(THREAD), await editorA.lines(THREAD));
     assert.equal((await editorB.lines(THREAD)).main.length, 24);
     assert.equal((await editorB.load(THREAD))?.messages.length, messages.length, 'and the saved context opens too');
-    const reopened = await new AgentConversation(root, () => undefined, stateHomeFor(root).paths.checkpoints, undefined, editorB).restore(THREAD);
-    assert.equal(reopened?.filter((turn) => turn.role === 'user').length, 6);
+    const reopened = await itemsOf(new AgentConversation(root, () => undefined, stateHomeFor(root).paths.checkpoints, undefined, editorB).restore(THREAD));
+    assert.equal(reopened.filter((item) => item.kind === 'user').length, 6);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 

@@ -413,9 +413,9 @@ test('chat view renders streaming text as partial and the finished reply strictl
   assert.match(script, /function closeSegment\(\) \{[^}]*\n {4}flushAssistant\(\);/);
   // Only streaming frames pass true; no other call renders a reply with the lenient rules.
   assert.deepEqual([...new Set([...script.matchAll(/flushAssistant\(([^)]*)\)[;)]/g)].map((match) => match[1]))].sort(), ['', 'true']);
-  // A saved reply replayed from the transcript is rendered strictly too.
+  // A saved reply replayed from the transcript is rendered strictly too: a reopened thread's items, and the turns of a conversation kept without a log.
   const renders = [...script.matchAll(/renderMarkdown\(([^)]*)\);/g)].map((match) => match[1]);
-  assert.deepEqual(renders, ['current.body, current.text, partial === true', "body, turn.text || ''"]);
+  assert.deepEqual(renders, ['current.body, current.text, partial === true', "body, item.text || ''", "body, turn.text || ''"]);
   assert.match(script, /transcript\.addEventListener\('focusout', tables\.focusLeft\)/);
   // Without the table helper the view falls back to stand-ins for every part of it.
   const fallback = script.slice(script.indexOf('window.nearTables || {'), script.indexOf('\n  };\n', script.indexOf('window.nearTables || {')));

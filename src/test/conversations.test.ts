@@ -21,6 +21,11 @@ import { ConversationLog, conversationStatus, conversationTitle, MAX_OPEN_CONVER
 
 // --- Pure parts ---
 
+/** The texts a transcript message shows: its items (a thread with a log, plan 06) or its turns (a thread saved without one). */
+function shownTexts(message: Record<string, unknown>): string[] {
+  return ((message.items ?? message.turns) as Array<{ text?: string }>).flatMap((entry) => (typeof entry.text === 'string' ? [entry.text] : []));
+}
+
 test('a conversation title is the first line, redacted as run titles are, about 40 characters', () => {
   assert.equal(conversationTitle('  \nFix the login bug\nand more'), 'Fix the login bug');
   const long = conversationTitle('Refactor the payment reconciliation module so that every ledger entry is checked');
@@ -511,7 +516,7 @@ test('sidebar: closing a running conversation asks, stops it, and keeps its tran
     await sidebar.send({ type: 'resume-conversation', id: a });
     assert.equal(sidebar.summary()!.activeId, a);
     assert.equal(sidebar.summary()!.items.length, 1, 'the empty conversation was reused');
-    assert.ok(sidebar.posted.some((message) => message.type === 'transcript' && message.replay && (message.turns as Array<{ text: string }>)[0]?.text === 'keep going'));
+    assert.ok(sidebar.posted.some((message) => message.type === 'transcript' && message.replay && shownTexts(message)[0] === 'keep going'));
     // Opening one that is already open just shows it.
     await sidebar.send({ type: 'new-chat' });
     await sidebar.send({ type: 'resume-conversation', id: a });
@@ -664,7 +669,7 @@ test('sidebar: a run the extension host never finished is reported with Resume, 
     assert.ok(cut, 'the chat says the run was cut off');
     assert.match(String(cut.text), /^This run was cut off \(the window or code-server closed it\) at .+\.$/);
     assert.equal(cut.resumable, true);
-    assert.deepEqual((second.posted.find((message) => message.type === 'transcript')!.turns as Array<{ text: string }>)[0].text, 'long refactor');
+    assert.deepEqual(shownTexts(second.posted.find((message) => message.type === 'transcript')!)[0], 'long refactor');
     assert.equal(second.posted.some((message) => message.type === 'notice' && /stopped when VS Code reloaded/.test(String(message.text))), false, 'one message, not two');
     assert.equal(near.requests.length, 2, 'nothing is resumed until the user clicks Resume');
 

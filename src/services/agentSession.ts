@@ -36,7 +36,7 @@ import { scriptsNamedIn } from '../agent/unattended';
 import { planCheckSkip, researchProfileActive } from '../gsd/researchProfile';
 import type { AgentMessage, ModelInfo, NearAiClient, UsageMetadata } from './nearAiClient';
 import { contentKey, commandForm } from '../domain/state/threadCapture';
-import { entriesToMessages, entriesToTurns } from '../domain/state/threadView';
+import { entriesToMessages, entriesToView, type ViewItem } from '../domain/state/threadView';
 import { ThreadStore } from './threadStore';
 import type { ConversationStore, Transcript } from './transcripts';
 import type { RunEnd, RunMarkers } from './runMarkers';
@@ -611,8 +611,11 @@ export class AgentConversation {
     return restored.map((file) => displayPath(this.root, file));
   }
 
-  /** Continues an earlier conversation with its full context; returns its visible turns for the view. */
-  public async restore(id: string): Promise<Array<{ role: 'user' | 'assistant'; text: string; tools: number }> | undefined> {
+  /**
+   * Continues an earlier conversation with its full context; returns what the view shows. A thread kept by the thread store comes back as `items`: every
+   * entry of its log, tool steps included (D-07). Another store has only the saved messages, so it comes back as the visible turns.
+   */
+  public async restore(id: string): Promise<RestoredView | undefined> {
     const transcript = await this.transcripts?.load(id);
     if (!transcript) return undefined;
     this.reset();
@@ -622,7 +625,7 @@ export class AgentConversation {
     this.conversationId = transcript.id;
     this.title = transcript.title;
     const store = this.transcripts;
-    let turns: Array<{ role: 'user' | 'assistant'; text: string; tools: number }> | undefined;
+    let items: ViewItem[] | undefined;
     if (store instanceof ThreadStore) {
       // D-07: the view comes from the thread log, which holds every message. The saved context is what the model continues from, unless the thread was
       // continued somewhere else since (the log's main line ends at another entry): then the context is rebuilt from the log, so nothing that was said is missing.
@@ -633,11 +636,11 @@ export class AgentConversation {
         this.messages = [...system, ...entriesToMessages(lines.main)];
         store.cover(id, tip);
       }
-      if (lines?.main.length) turns = entriesToTurns(lines);
+      if (lines?.main.length) items = entriesToView(lines, { history: (await store.meta(id).catch(() => undefined))?.history });
     }
     // What was just loaded is already in the log (or is the model's own text); it is never written again.
     for (const message of this.messages) this.logged.add(message);
-    return turns ?? visibleTurns(transcript.messages, this.display);
+    return items ? { items } : visibleTurns(transcript.messages, this.display);
   }
 
   public reset(): void {
@@ -1466,6 +1469,9 @@ export function repairTranscript(messages: AgentMessage[]): AgentMessage[] {
   }
   return changed ? repaired : messages;
 }
+
+/** What a reopened conversation shows: every entry of its log (a thread store), or the visible turns of its saved messages (any other store). */
+export type RestoredView = Array<{ role: 'user' | 'assistant'; text: string; tools: number }> | { items: ViewItem[] };
 
 /** The user-visible turns of a saved conversation: what the user typed and what the agent answered. */
 export function visibleTurns(messages: AgentMessage[], display = new Map<string, string>()): Array<{ role: 'user' | 'assistant'; text: string; tools: number }> {
