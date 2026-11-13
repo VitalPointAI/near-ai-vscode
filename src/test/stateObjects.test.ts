@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import test from 'node:test';
 import { brotliCompressSync, constants as zlibConstants } from 'node:zlib';
-import { StateRefusedError, newDataKey, newStateId } from '../domain/state/keys';
+import { StateRefusedError, aadFor, newDataKey, newSalt, newStateId, sealRaw, subKey } from '../domain/state/keys';
 import {
-  MAX_PART_BYTES, MIN_PADDED_BYTES, OBJECT_HEADER_BYTES, openObject, padmeLength, sealObject, type ObjectEntry, type OpenPart, type SealedPart
+  MAX_DECOMPRESSED_BYTES, MAX_PART_BYTES, MIN_PADDED_BYTES, OBJECT_HEADER_BYTES, OBJECT_MAGIC, openObject, padmeLength, sealObject, type ObjectEntry, type OpenPart, type SealedPart
 } from '../domain/state/objects';
 
 function seeded(seed: number): () => number {
@@ -130,4 +130,18 @@ test('padding and part limits are measured in bytes of the compressed UTF-8 JSON
   const [part] = sealObject(dataKey, stateId, 'hot', payload) as [SealedPart];
   assert.equal(part.data.length, OBJECT_HEADER_BYTES + padmeLength(4 + compressedLength(payload)));
   assert.deepEqual(openObject(dataKey, stateId, 'hot', asOpen([part])), payload);
+});
+
+test('an authenticated object that would expand past 256 MiB is refused instead of exhausting memory', () => {
+  const dataKey = newDataKey();
+  const stateId = newStateId();
+  // A forged-but-authentic part (the writer held the key) whose brotli stream inflates to one byte over the limit.
+  const compressed = brotliCompressSync(Buffer.alloc(MAX_DECOMPRESSED_BYTES + 1), { params: { [zlibConstants.BROTLI_PARAM_QUALITY]: 5 } });
+  const framed = Buffer.concat([Buffer.from([0, 0, 0, 0]), compressed]);
+  framed.writeUInt32BE(compressed.length, 0);
+  const salt = newSalt();
+  const sealed = sealRaw(subKey(dataKey, 'object', salt), framed, aadFor(stateId, 'hot', 0, 1));
+  const data = Buffer.concat([OBJECT_MAGIC, Buffer.from([1]), salt, sealed.iv, sealed.tag, sealed.data]);
+  const entry: ObjectEntry = { file: `${'c'.repeat(32)}.bin`, bytes: data.length, sha256: createHash('sha256').update(data).digest('hex'), class: 'hot', part: 0, of: 1 };
+  assert.throws(() => openObject(dataKey, stateId, 'hot', [{ entry, data }]), refusedAs('tampered'));
 });

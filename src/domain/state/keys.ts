@@ -62,15 +62,19 @@ export function assertKdfParams(kdf: unknown): KdfParams {
   return { name: 'scrypt', N, r, p };
 }
 
-/** The key that wraps the data key. The callback form keeps the extension host free for the ~0.3 s a derivation takes. */
+/** The key that wraps the data key. The callback form keeps the extension host free for the ~0.3 s a derivation takes. Every refusal is a rejection. */
 export function deriveKek(code: Buffer, salt: Buffer, kdf: KdfParams): Promise<Buffer> {
-  const params = assertKdfParams(kdf);
-  if (code.length === 0 || salt.length < 8 || salt.length > 64) return Promise.reject(new StateRefusedError('wrong-code-or-damaged'));
   return new Promise((resolve, reject) => {
-    scrypt(code, salt, KDF_PARAMS.keyLength, { N: params.N, r: params.r, p: params.p, maxmem: SCRYPT_MAXMEM }, (error, key) => {
-      if (error) reject(new StateRefusedError('unsupported-format'));
-      else resolve(key);
-    });
+    try {
+      const params = assertKdfParams(kdf);
+      if (code.length === 0 || salt.length < 8 || salt.length > 64) throw new StateRefusedError('wrong-code-or-damaged');
+      scrypt(code, salt, KDF_PARAMS.keyLength, { N: params.N, r: params.r, p: params.p, maxmem: SCRYPT_MAXMEM }, (error, key) => {
+        if (error) reject(new StateRefusedError('unsupported-format'));
+        else resolve(key);
+      });
+    } catch (error) {
+      reject(error);
+    }
   });
 }
 

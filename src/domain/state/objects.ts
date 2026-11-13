@@ -3,7 +3,7 @@
 //   NAS1 | version 1 | object salt(16) | iv(12) | tag(16) | AES-256-GCM( u32 length | brotli(JSON) | random padding )
 // under a key derived from the data key and the object's own salt. Sizes fall into Padme buckets (8 per octave, 64 KiB floor, at most 12.5% over)
 // and no part exceeds 8 MiB. Names are random, never derived from any id. Pure: no vscode, no files, no git.
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { brotliCompressSync, brotliDecompressSync, constants as zlibConstants } from 'node:zlib';
 import {
   IV_BYTES, SALT_BYTES, TAG_BYTES, StateRefusedError, aadFor, assertKdfParams, open, openRaw, seal, sealRaw, subKey,
@@ -85,13 +85,51 @@ function openPart(dataKey: Buffer, stateId: string, cls: ObjectClass, part: Open
   return openRaw(subKey(dataKey, 'object', Buffer.from(salt)), { iv, tag, data: data.subarray(offset) }, aadFor(stateId, cls, part.entry.part, part.entry.of));
 }
 
-/** Opens every part of one object and returns its payload. */
+const OBJECT_CLASSES: readonly ObjectClass[] = ['hot', 'cold', 'index'];
+const MAX_PART_FILE_BYTES = MAX_PART_BYTES + OBJECT_HEADER_BYTES;
+const SHA256_HEX = /^[0-9a-f]{64}$/;
+
+function sameDigest(entryHash: string, data: Buffer): boolean {
+  if (!SHA256_HEX.test(entryHash)) throw new StateRefusedError('unsupported-format');
+  return timingSafeEqual(Buffer.from(entryHash, 'hex'), createHash('sha256').update(data).digest());
+}
+
+/**
+ * Opens every part of one object and returns its payload, or refuses with one StateRefusedError and returns nothing. Order of checks, all before
+ * any plaintext leaves: the parts form one complete set of this class; each is present; its byte count and sha256 match what the sealed manifest
+ * listed; each authenticates under its own key and position; the length prefix fits; the decompressed size stays under 256 MiB.
+ */
 export function openObject(dataKey: Buffer, stateId: string, cls: ObjectClass, parts: readonly OpenPart[]): unknown {
-  const ordered = [...parts].sort((a, b) => a.entry.part - b.entry.part);
-  const framed = Buffer.concat(ordered.map((part) => openPart(dataKey, stateId, cls, part)));
+  if (parts.length === 0) throw new StateRefusedError('missing-object');
+  const of = parts[0]?.entry.of ?? 0;
+  if (!Number.isInteger(of) || of < 1 || of > MAX_OBJECT_ENTRIES) throw new StateRefusedError('unsupported-format');
+  const ordered: Array<OpenPart | undefined> = new Array<OpenPart | undefined>(of).fill(undefined);
+  for (const part of parts) {
+    const { entry } = part;
+    if (entry.class !== cls || entry.of !== of || !Number.isInteger(entry.part) || entry.part < 0 || entry.part >= of || ordered[entry.part] !== undefined) {
+      throw new StateRefusedError('tampered');
+    }
+    ordered[entry.part] = part;
+  }
+  const checked = ordered.map((part): Buffer => {
+    if (part === undefined || part.data === undefined) throw new StateRefusedError('missing-object');
+    if (!Number.isInteger(part.entry.bytes) || part.entry.bytes < OBJECT_HEADER_BYTES || part.entry.bytes > MAX_PART_FILE_BYTES) throw new StateRefusedError('unsupported-format');
+    if (part.data.length < part.entry.bytes) throw new StateRefusedError('truncated');
+    if (part.data.length > part.entry.bytes || !sameDigest(part.entry.sha256, part.data)) throw new StateRefusedError('tampered');
+    return openPart(dataKey, stateId, cls, part);
+  });
+  const framed = Buffer.concat(checked);
+  if (framed.length < 4) throw new StateRefusedError('truncated');
   const length = framed.readUInt32BE(0);
-  const json = brotliDecompressSync(framed.subarray(4, 4 + length)).toString('utf8');
-  return JSON.parse(json) as unknown;
+  if (length > framed.length - 4) throw new StateRefusedError('truncated');
+  let json: string;
+  try {
+    json = brotliDecompressSync(framed.subarray(4, 4 + length), { maxOutputLength: MAX_DECOMPRESSED_BYTES }).toString('utf8');
+    return JSON.parse(json) as unknown;
+  } catch {
+    // Authenticated bytes that do not decompress or parse (or would expand past the limit) were not written by this program.
+    throw new StateRefusedError('tampered');
+  }
 }
 
 /** The plaintext half of manifest.json. */
@@ -153,11 +191,43 @@ export function readManifestHeader(text: string): ManifestHeader {
   return { format: 1, stateId: parsed.stateId, kdf: { ...params, salt: kdf.salt }, wrappedKey: readBlob(parsed.wrappedKey), sealed: readBlob(parsed.sealed) };
 }
 
-/** Opens the sealed half of a manifest. */
+function nonNegativeInteger(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+}
+
+function readEntry(value: unknown): ObjectEntry {
+  if (!isRecord(value) || !hasOnlyKeys(value, ['file', 'bytes', 'sha256', 'class', 'part', 'of'])) throw new StateRefusedError('unsupported-format');
+  const { file, bytes, sha256, part, of } = value;
+  const cls = value.class;
+  if (typeof file !== 'string' || !OBJECT_NAME.test(file) || typeof sha256 !== 'string' || !SHA256_HEX.test(sha256)) throw new StateRefusedError('unsupported-format');
+  if (typeof cls !== 'string' || !OBJECT_CLASSES.includes(cls as ObjectClass)) throw new StateRefusedError('unsupported-format');
+  if (!nonNegativeInteger(bytes) || bytes < OBJECT_HEADER_BYTES || bytes > MAX_PART_FILE_BYTES) throw new StateRefusedError('unsupported-format');
+  if (!nonNegativeInteger(part) || !nonNegativeInteger(of) || of < 1 || of > MAX_OBJECT_ENTRIES || part >= of) throw new StateRefusedError('unsupported-format');
+  return { file, bytes, sha256, class: cls as ObjectClass, part, of };
+}
+
+/**
+ * Opens the sealed half of a manifest. In order: header parse, sealed open (tampered), seq not below lastSeenSeq (rolled-back), then every entry
+ * well formed (unsupported-format). It returns only after all succeed.
+ */
 export function openManifest(text: string, dataKey: Buffer, lastSeenSeq: number): SealedManifest & { header: ManifestHeader } {
-  void lastSeenSeq;
   const header = readManifestHeader(text);
   const plain = open(subKey(dataKey, 'manifest'), header.sealed, aadFor(header.stateId, 'manifest'));
-  const body = JSON.parse(plain.toString('utf8')) as SealedManifest;
-  return { header, seq: body.seq, objects: body.objects, indexFile: body.indexFile };
+  let body: unknown;
+  try {
+    body = JSON.parse(plain.toString('utf8'));
+  } catch {
+    throw new StateRefusedError('tampered');
+  }
+  if (!isRecord(body) || !hasOnlyKeys(body, ['seq', 'objects', 'indexFile']) || !nonNegativeInteger(body.seq) || !Array.isArray(body.objects)) {
+    throw new StateRefusedError('unsupported-format');
+  }
+  if (body.seq < lastSeenSeq) throw new StateRefusedError('rolled-back');
+  if (body.objects.length > MAX_OBJECT_ENTRIES) throw new StateRefusedError('unsupported-format');
+  const objects = (body.objects as unknown[]).map(readEntry);
+  const files = new Set(objects.map((entry) => entry.file));
+  if (files.size !== objects.length) throw new StateRefusedError('unsupported-format');
+  const indexFile = body.indexFile;
+  if (indexFile !== null && (typeof indexFile !== 'string' || !OBJECT_NAME.test(indexFile) || !files.has(indexFile))) throw new StateRefusedError('unsupported-format');
+  return { header, seq: body.seq, objects, indexFile };
 }
