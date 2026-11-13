@@ -157,7 +157,9 @@ test('a person with no git identity is asked once; accepting sets it for this pr
 });
 
 test('a blocked file that is already tracked is not offered for ignoring, and the push stays blocked with a plain sentence', async () => {
-  const { dir, bare } = await project({ 'a.txt': 'a\n', '.env': 'API=1\n' }, { commit: ['a.txt', '.env'] });
+  // Tracked by git (in the index) but not saved in a commit yet: a file that was committed is also a history hit, which has its own tests below.
+  const { dir, bare } = await project({ 'a.txt': 'a\n', '.env': 'API=1\n' }, { commit: ['a.txt'] });
+  fixtureGit(dir, ['add', '--', '.env']);
   const ui = new FakeUi({ ignore: true });
   const result = await pushProjectCode(dir, 'origin', hermeticRunner(), { ui, visibility: 'private' });
   assert.equal(result.status, 'blocked');

@@ -2,13 +2,14 @@
 // as its own question. Before anything goes up the person sees every file that would be pushed, and likely secrets block the push: secret file names
 // (the repository's own rules), and content that looks like a key (scanSecrets and SECRET_TOKENS). A blocked file can be added to .gitignore, on the
 // person's click, and a file git already tracks must be removed from git by them. The push is the person's ordinary one: their own git settings and
-// hooks apply, nothing is forced. No vscode here.
+// hooks apply, nothing is forced. The check also covers the history the push would publish (every commit not already online): a secret that was
+// saved once and deleted later still goes up with the branch. No vscode here.
 import { spawn } from 'node:child_process';
 import { appendFile, readFile, stat } from 'node:fs/promises';
 import * as path from 'node:path';
-import { readScannable } from '../agent/cyberFiles';
+import { MAX_SCANNABLE_BYTES, readScannable, scannableText } from '../agent/cyberFiles';
 import type { WorkspaceFile } from '../agent/cyberFiles';
-import { scanSecrets } from '../agent/cyberProbes';
+import { scanSecrets, scanSecretText } from '../agent/cyberProbes';
 import { SECRET_TOKENS } from '../domain/redaction';
 import type { Visibility } from '../domain/state/onlineHome';
 import { GitNotFoundError, gitText, redactGitMessage } from './stateGit';
@@ -73,6 +74,8 @@ export interface HistoryScan {
   hits: HistoryHit[];
   /** False when a limit was reached or git could not list the history: the rest was not checked. */
   complete: boolean;
+  /** Why it is not complete, in plain words. */
+  incompleteReason?: string;
   /** Files in earlier commits that could not be read as text (binary or very large). */
   unchecked: string[];
 }
@@ -173,9 +176,166 @@ export async function planCodePush(root: string, git: GitRunner): Promise<CodePu
   return { files, blocked: [...blocked.values()].sort((a, b) => a.file.localeCompare(b.file)), unchecked };
 }
 
-/** Stub, replaced in the next commit. */
-export function scanHistory(_root: string, _ref: string, _remote: string, _git: GitRunner, _limits: Partial<HistoryLimits> = {}): Promise<HistoryScan> {
-  return Promise.resolve({ commits: 0, hits: [], complete: true, unchecked: [] });
+const SHORT_ID = 7;
+const HISTORY_LIMITS: HistoryLimits = { maxCommits: 5_000, maxBytes: 200 * 1024 * 1024 };
+const BATCH_BYTES = 16 * 1024 * 1024;
+const MAX_UNCHECKED_LISTED = 200;
+const COMMIT_ID = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/;
+const NO_BLOB = /^0+$/;
+
+/** Why a file's text looks like it holds a secret, in the same words as the working-tree check, or undefined. Never the value. */
+function contentReason(file: string, text: string): string | undefined {
+  const hit = scanSecretText(file, text)[0];
+  if (hit) return `It looks like it holds a secret: ${hit.pattern} (line ${hit.line}).`;
+  const tokenShape = new RegExp(SECRET_TOKENS.source);
+  const at = text.split(/\r?\n/).findIndex((line) => line.length <= 4_000 && tokenShape.test(line));
+  return at >= 0 ? `It looks like it holds a secret: a key or token (line ${at + 1}).` : undefined;
+}
+
+interface HistoryEntry { commit: string; file: string; blob: string }
+
+/** The files each commit adds or changes: `diff-tree` in NUL form, without rename detection. A commit id token starts a commit, `:` starts an entry, then its path. */
+function parseDiffTree(output: Buffer): HistoryEntry[] {
+  const tokens = output.toString('utf8').split('\0');
+  const entries: HistoryEntry[] = [];
+  let commit = '';
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index]!;
+    if (token.startsWith(':')) {
+      const [, newMode = '', , newBlob = '', status = ''] = token.slice(1).split(' ');
+      const file = tokens[index + 1] ?? '';
+      index += 1;
+      if (commit !== '' && file !== '' && !status.startsWith('D') && newMode !== '160000' && !NO_BLOB.test(newBlob)) entries.push({ commit, file, blob: newBlob });
+    } else if (COMMIT_ID.test(token)) commit = token;
+  }
+  return entries;
+}
+
+/**
+ * Checks everything the push would publish besides the working tree: every commit reachable from `ref` that no remote-tracking ref of `remote` has
+ * (the whole history for a new online repository). For each commit: the file names it adds or changes, the content of those files (the working-tree
+ * rules), and its message. Bounded by commit count and by text read. Only git commands through the person's runner, no network.
+ */
+export async function scanHistory(root: string, ref: string, remote: string, git: GitRunner, limits: Partial<HistoryLimits> = {}): Promise<HistoryScan> {
+  const max: HistoryLimits = { ...HISTORY_LIMITS, ...limits };
+  const base = ['-C', root];
+  const scan: HistoryScan = { commits: 0, hits: [], complete: true, unchecked: [] };
+  const incomplete = (reason: string): void => { scan.complete = false; scan.incompleteReason ??= reason; };
+  if ((await git([...base, 'rev-parse', '--verify', '-q', `${ref}^{commit}`])).code !== 0) return scan;
+  const listed = await git([...base, 'rev-list', '-n', String(max.maxCommits + 1), ref, '--not', `--remotes=${remote}`]);
+  if (listed.code !== 0) { incomplete('git could not list the earlier commits'); return scan; }
+  let ids = listed.stdout.toString('utf8').split('\n').filter((id) => COMMIT_ID.test(id));
+  if (ids.length > max.maxCommits) { ids = ids.slice(0, max.maxCommits); incomplete(`it has more than ${max.maxCommits} commits that are not online yet, and only the newest ${max.maxCommits} were checked`); }
+  ids.reverse(); // oldest first, so a finding names the commit that introduced it
+  scan.commits = ids.length;
+  if (ids.length === 0) return scan;
+  const short = (id: string): string => id.slice(0, SHORT_ID);
+  const input = `${ids.join('\n')}\n`;
+  const found = new Set<string>();
+  const addHit = (hit: HistoryHit): void => {
+    const key = hit.file ?? `message:${hit.commit}`;
+    if (found.has(key)) return;
+    found.add(key);
+    scan.hits.push(hit);
+  };
+
+  // Commit messages.
+  const messages = await git([...base, 'log', '--no-walk=unsorted', '--stdin', '-z', '--format=%H%n%B'], { input });
+  if (messages.code !== 0) incomplete('git could not read the commit messages');
+  else {
+    const tokenShape = new RegExp(SECRET_TOKENS.source);
+    for (const record of messages.stdout.toString('utf8').split('\0')) {
+      const lines = record.split(/\r?\n/);
+      const id = (lines.shift() ?? '').trim();
+      if (!COMMIT_ID.test(id)) continue;
+      if (lines.some((line) => line.length <= 4_000 && tokenShape.test(line))) addHit({ commit: short(id), reason: 'The commit message looks like it holds a key or token.' });
+    }
+  }
+
+  // File names, then content.
+  const changed = await git([...base, 'diff-tree', '--stdin', '-r', '-z', '--root', '-m', '--no-renames'], { input });
+  if (changed.code !== 0) { incomplete('git could not list what each commit changed'); return scan; }
+  const entries = parseDiffTree(changed.stdout);
+  const byBlob = new Map<string, HistoryEntry[]>();
+  const seenEntry = new Set<string>();
+  for (const entry of entries) {
+    const key = `${entry.blob}\0${entry.file}`;
+    if (seenEntry.has(key)) continue;
+    seenEntry.add(key);
+    if (entry.file.startsWith(STATE_FOLDER)) { addHit({ file: entry.file, commit: short(entry.commit), reason: "NEAR AI's private state folder is never pushed as code." }); continue; }
+    if (isSecretFileName(entry.file)) { addHit({ file: entry.file, commit: short(entry.commit), reason: NAME_REASON }); continue; }
+    byBlob.set(entry.blob, [...byBlob.get(entry.blob) ?? [], entry]);
+  }
+  const blobs = [...byBlob.keys()];
+  const sizes = new Map<string, number>();
+  if (blobs.length > 0) {
+    const checked = await git([...base, 'cat-file', '--batch-check'], { input: `${blobs.join('\n')}\n` });
+    if (checked.code !== 0) { incomplete('git could not read the files in earlier commits'); return scan; }
+    for (const line of checked.stdout.toString('utf8').split('\n')) {
+      const [id, type, size] = line.split(' ');
+      if (id && type === 'blob' && size !== undefined) sizes.set(id, Number(size));
+    }
+  }
+  const unchecked = new Set<string>();
+  const readable: string[] = [];
+  for (const blob of blobs) {
+    const size = sizes.get(blob);
+    if (size === undefined) { incomplete('git could not read some files in earlier commits'); continue; }
+    if (size > MAX_SCANNABLE_BYTES) for (const entry of byBlob.get(blob) ?? []) unchecked.add(entry.file);
+    else readable.push(blob);
+  }
+  let read = 0;
+  for (let from = 0; from < readable.length;) {
+    const batch: string[] = [];
+    let batchBytes = 0;
+    while (from < readable.length && (batch.length === 0 || batchBytes + (sizes.get(readable[from]!) ?? 0) <= BATCH_BYTES)) {
+      const blob = readable[from]!;
+      from += 1;
+      if (read + batchBytes + (sizes.get(blob) ?? 0) > max.maxBytes) { incomplete(`the files in its earlier commits add up to more than ${Math.round(max.maxBytes / (1024 * 1024))} MB of text, and the rest were not read`); from = readable.length; break; }
+      batch.push(blob);
+      batchBytes += sizes.get(blob) ?? 0;
+    }
+    if (batch.length === 0) break;
+    read += batchBytes;
+    const out = await git([...base, 'cat-file', '--batch'], { input: `${batch.join('\n')}\n` });
+    if (out.code !== 0) { incomplete('git could not read some files in earlier commits'); break; }
+    let at = 0;
+    while (at < out.stdout.length) {
+      const newline = out.stdout.indexOf(10, at);
+      if (newline < 0) break;
+      const [id = '', type, sizeText] = out.stdout.subarray(at, newline).toString('utf8').split(' ');
+      const size = Number(sizeText);
+      if (type !== 'blob' || !Number.isFinite(size)) { at = newline + 1; continue; }
+      const text = scannableText(out.stdout.subarray(newline + 1, newline + 1 + size));
+      at = newline + 1 + size + 1;
+      for (const entry of byBlob.get(id) ?? []) {
+        if (text === undefined) { unchecked.add(entry.file); continue; }
+        const reason = contentReason(entry.file, text);
+        if (reason) addHit({ file: entry.file, commit: short(entry.commit), reason });
+      }
+    }
+  }
+  scan.unchecked = [...unchecked].sort().slice(0, MAX_UNCHECKED_LISTED);
+  return scan;
+}
+
+function historyBlockedMessage(hits: readonly HistoryHit[]): string {
+  const shown = hits.slice(0, 5).map((hit) => hit.file
+    ? `- ${hit.file} (commit ${hit.commit}): ${hit.reason}`
+    : `- A commit message (commit ${hit.commit}): ${hit.reason}`);
+  const more = hits.length > 5 ? [`- and ${hits.length - 5} more.`] : [];
+  return [
+    'Your code was not pushed. Something that looks like a secret was saved earlier in this project\'s history:',
+    ...shown, ...more, '',
+    'Pushing a branch puts everything ever saved on it online, even a file you deleted later. Adding a file to .gitignore does not take it out of the history, and NEAR AI will not rewrite your history for you.',
+    'A key that was saved in a project should be replaced with a new one. Syncing still works without pushing your code.'
+  ].join('\n');
+}
+
+function unscannedText(scan: HistoryScan, visibility: Visibility | 'unknown'): string {
+  const why = scan.incompleteReason ?? 'it could not be read in full';
+  const who = visibility === 'unknown' ? 'If this repository is public, everyone could see anything in it. ' : '';
+  return `The history of this project was not fully checked for secrets: ${why}. ${who}A secret saved in an earlier commit would go online with your code.`;
 }
 
 function ignoreLine(file: string): string {
@@ -205,6 +365,16 @@ function blockedMessage(blocked: readonly CodePushBlock[]): string {
 export async function pushProjectCode(root: string, remote: string, git: GitRunner, options: CodePushOptions): Promise<CodePushResult> {
   const { ui } = options;
   if (!REMOTE_NAME.test(remote)) return { status: 'failed', message: 'That remote cannot be used, so your code was not pushed.' };
+  // The history the push would publish comes first: a hit there cannot be fixed with .gitignore, so the person is not asked to ignore anything.
+  const branchFirst = await git(['-C', root, 'symbolic-ref', '--short', '-q', 'HEAD']);
+  const headBranch = branchFirst.code === 0 ? gitText(branchFirst) : '';
+  const history: HistoryScan = headBranch === ''
+    ? { commits: 0, hits: [], complete: true, unchecked: [] }
+    : await scanHistory(root, `refs/heads/${headBranch}`, remote, git, options.historyLimits);
+  if (history.hits.length > 0) {
+    await ui.historyBlocked(historyBlockedMessage(history.hits));
+    return { status: 'blocked', message: 'Your code was not pushed because earlier commits look like they hold secrets. Syncing is not affected.' };
+  }
   let plan = await planCodePush(root, git);
   if (plan.blocked.length > 0) {
     const ignorable = plan.blocked.filter((entry) => !entry.tracked).map((entry) => entry.file);
@@ -217,13 +387,18 @@ export async function pushProjectCode(root: string, remote: string, git: GitRunn
       return { status: 'blocked', message: 'Your code was not pushed because some files look like secrets.' };
     }
   }
-  const branchResult = await git(['-C', root, 'symbolic-ref', '--short', '-q', 'HEAD']);
-  const branch = branchResult.code === 0 ? gitText(branchResult) : '';
+  const branch = headBranch;
   if (branch === '') return { status: 'failed', message: 'Your project is not on a branch, so the code was not pushed. Switch to a branch and try again.' };
   if (plan.files.length === 0) return { status: 'nothing', message: 'There are no files to push yet.' };
 
+  if (!history.complete) {
+    if (options.visibility === 'public') return { status: 'blocked', message: `Your code was not pushed. ${unscannedText(history, 'public')} This repository is public, so nothing is pushed until the whole history can be checked. Syncing is not affected.` };
+    if (!await ui.confirmUnscannedHistory(`${unscannedText(history, options.visibility)}\n\nPush your code anyway?`)) return { status: 'declined', message: 'Your code was not pushed. Syncing is not affected.' };
+  }
   const notes: string[] = [];
   if (options.visibility === 'public') notes.push(PUBLIC_LINE);
+  if (!history.complete) notes.push('The history of this project was not fully checked for secrets, and you chose to go on.');
+  if (history.unchecked.length > 0) notes.push(`${history.unchecked.length} ${history.unchecked.length === 1 ? 'file' : 'files'} in earlier commits ${history.unchecked.length === 1 ? 'is' : 'are'} too large or not text, so ${history.unchecked.length === 1 ? 'it was' : 'they were'} not checked for secrets.`);
   if (plan.unchecked.length > 0) notes.push(`${plan.unchecked.length} ${plan.unchecked.length === 1 ? 'file is' : 'files are'} too large or not text, so ${plan.unchecked.length === 1 ? 'it was' : 'they were'} not checked for secrets.`);
   if (!await ui.confirmPush({ branch, remote, visibility: options.visibility, files: plan.files, notes })) {
     return { status: 'declined', message: 'Your code was not pushed. Syncing is not affected.' };

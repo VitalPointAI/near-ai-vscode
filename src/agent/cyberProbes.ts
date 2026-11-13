@@ -629,7 +629,31 @@ const SKIP_SECRET_FILES = /(?:^|\/)(?:package-lock\.json|yarn\.lock|pnpm-lock\.y
 
 interface SecretsProbeInput { root: string }
 
-interface SecretHit { file: string; line: number; pattern: string; prefix: string; evidence: string }
+export interface SecretHit { file: string; line: number; pattern: string; prefix: string; evidence: string }
+
+/** The credential shapes in one file's text (the same rules the workspace scan uses); the matched value is truncated to four characters. */
+export function scanSecretText(relative: string, text: string): SecretHit[] {
+  const hits: SecretHit[] = [];
+  if (SKIP_SECRET_FILES.test(relative)) return hits;
+  const lines = text.split(/\r?\n/);
+  const seen = new Set<string>();
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (!line || line.length > 4_000) continue;
+    for (const pattern of SECRET_PATTERNS) {
+      const match = pattern.regex.exec(line);
+      if (!match) continue;
+      const value = match[1] ?? match[0];
+      const key = `${pattern.name}:${index}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      // Only the first four characters survive into the finding; the rest is redacted away.
+      hits.push({ file: relative, line: index + 1, pattern: pattern.name, prefix: value.slice(0, 4), evidence: line.replace(match[0], `${value.slice(0, 4)}…`).slice(0, 160) });
+      break;
+    }
+  }
+  return hits;
+}
 
 /** Line-scans the workspace for credential shapes; the matched value is truncated to four characters. */
 export async function scanSecrets(root: string, files?: WorkspaceFile[]): Promise<SecretHit[]> {
@@ -639,23 +663,7 @@ export async function scanSecrets(root: string, files?: WorkspaceFile[]): Promis
     if (SKIP_SECRET_FILES.test(file.relative)) continue;
     const text = await readScannable(file);
     if (text === undefined) continue;
-    const lines = text.split(/\r?\n/);
-    const seen = new Set<string>();
-    for (let index = 0; index < lines.length; index += 1) {
-      const line = lines[index];
-      if (!line || line.length > 4_000) continue;
-      for (const pattern of SECRET_PATTERNS) {
-        const match = pattern.regex.exec(line);
-        if (!match) continue;
-        const value = match[1] ?? match[0];
-        const key = `${pattern.name}:${index}`;
-        if (seen.has(key)) continue;
-        seen.add(key);
-        // Only the first four characters survive into the finding; the rest is redacted away.
-        hits.push({ file: file.relative, line: index + 1, pattern: pattern.name, prefix: value.slice(0, 4), evidence: line.replace(match[0], `${value.slice(0, 4)}…`).slice(0, 160) });
-        break;
-      }
-    }
+    hits.push(...scanSecretText(file.relative, text));
   }
   return hits;
 }
