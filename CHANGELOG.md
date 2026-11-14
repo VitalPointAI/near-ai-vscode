@@ -12,8 +12,8 @@
   now names where each file was saved, or says when one could not be saved. Before, it was saved
   silently, and a file sent while the agent was working was not saved at all. A file you remove
   before sending, or whose message is blocked, is never written into the project. A file sent while
-  the agent was working is saved when the message is handed to the agent, so if you then press Stop,
-  the message and its file come back to the message box and the saved copy stays.
+  the agent was working is saved when you send the message, so if you then press Stop, the message
+  and its file come back to the message box and the saved copy stays.
 
 ## 0.4.20
 

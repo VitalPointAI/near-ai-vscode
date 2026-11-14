@@ -608,7 +608,8 @@ export class AgentConversation {
   private takeSteerAttachments(attachments: PreparedAttachments): void {
     for (const note of attachments.notes) this.post({ type: 'notice', text: note });
     const run = this.steerRun;
-    if (!run) return;
+    // A run takes queued messages only while it runs, and it sets steerRun before it starts, so this is never expected; if it ever happens, say so.
+    if (!run) { this.post({ type: 'notice', text: 'An attachment reached the agent outside a run, so it was not counted toward the run\'s cost or safety checks.' }); return; }
     if (attachments.text) run.grants.tainted = true;
     run.extraUsage.push(...attachments.usage);
     for (const event of attachments.security) this.activity?.security(run.mainId, event);

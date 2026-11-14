@@ -763,7 +763,10 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     }
     const text = message.type === 'send' ? message.text : team ? `/team:${team.slug} ${message.args ?? ''}`.trim() : `/${skill!.name}${skill!.args ? ` ${skill!.args}` : ''}`;
     // Attachments the user staged for this message.
-    const staged = message.type === 'send' ? (message.attachmentIds ?? []).map((id) => state.attachments.get(id)).filter((item): item is StagedAttachment => Boolean(item)) : [];
+    const wanted = message.type === 'send' ? [...new Set(message.attachmentIds ?? [])] : [];
+    const staged = wanted.map((id) => state.attachments.get(id)).filter((item): item is StagedAttachment => Boolean(item));
+    // Never the words without the files they refer to: a file that is no longer staged stops the message, which goes back to the composer.
+    if (staged.length < wanted.length) { tab.post({ type: 'outbound-blocked', text, model, reason: MISSING_FILES, confirm: false }); return; }
     const agentModels = readAgentModels();
     // Files carried from a message sent during a run are checked again against the model this turn uses, which may not be the run's.
     const teeBlock = attachmentTeeBlock([...staged, ...(carried?.items ?? []).flatMap((item) => item.staged)], modelInfo, active.models);
@@ -864,7 +867,10 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
   // next model request. Once nothing is running it is an ordinary new message.
   const idle = (tab: ChatTab) => !tab.turns && !tab.agent?.running;
   const steer = async (message: Extract<ChatWebviewMessage, { type: 'steer' }>, tab: ChatTab): Promise<void> => {
-    const ids = message.attachmentIds ?? [];
+    const ids = [...new Set(message.attachmentIds ?? [])];
+    const blocked = (reason: string) => tab.post({ type: 'steer-state', id: message.id, state: 'blocked', reason, text: message.text });
+    // Never the words without the files they refer to, whichever way the message goes.
+    if (ids.some((id) => !state.attachments.has(id))) { blocked(MISSING_FILES); return; }
     if (idle(tab)) {
       tab.post({ type: 'steer-state', id: message.id, state: 'sent-new' });
       // 0.4.21: its attachments go with it, as with any message.
@@ -874,9 +880,6 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     const root = workspaceRoot();
     if (!root) return;
     const staged = ids.map((id) => state.attachments.get(id)).filter((item): item is StagedAttachment => Boolean(item));
-    const blocked = (reason: string) => tab.post({ type: 'steer-state', id: message.id, state: 'blocked', reason, text: message.text });
-    // Never the words without the files they refer to.
-    if (staged.length < ids.length) { blocked('Some of the attached files are no longer available. Attach them again, then send.'); return; }
     // It goes to the provider like any message, so it passes the same outbound check, with what is attached to it.
     if (isEmergencyStopped()) { blocked('Emergency stop is on. Run "NEAR AI: Resume" to continue.'); return; }
     const guard = state.guard ?? new OutboundGuard(readSettings());
@@ -986,9 +989,11 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
   await loadModels(panel, auth);
 }
 
-/** Whether the empty chat's "no team yet" card shows: a working profile, no project team, and no "Not now" here. */
 /** Attachments a send carries from the messages it was made from; `taken` once its turn has them. */
 type Carried = { items: Array<{ prepared: PreparedAttachments; staged: StagedAttachment[] }>; taken: boolean };
+
+/** Why a message whose attached files are gone is not sent. */
+const MISSING_FILES = 'Some of the attached files are no longer available. Attach them again, then send.';
 
 /** The text of text files and documents, which is what the outbound check reads, as it is what is sent. */
 function attachedTextOf(staged: StagedAttachment[]): string {
@@ -1006,8 +1011,8 @@ function attachmentTeeBlock(staged: StagedAttachment[], modelInfo: ModelInfo | u
 
 /**
  * Reads attachments for the message they came with (vision and transcription billed to its run) and names where each is saved in the project, so the
- * agent opens it with its own file tools instead of hunting for it on disk (0.4.18). The copy is made when the file is attached (0.4.21); one that
- * failed then is tried again here.
+ * agent opens it with its own file tools instead of hunting for it on disk (0.4.18). The copy is made here, when the message is sent and has passed its
+ * checks (0.4.21); nothing is written when a file is only attached.
  */
 async function readAttachments(staged: StagedAttachment[], options: { client: NearAiClient; model: string; models: ModelInfo[]; question: string; runId: string | undefined; conversationId: string; root: string }): Promise<PreparedAttachments> {
   const agentModels = readAgentModels();
@@ -1042,6 +1047,7 @@ function mergePrepared(all: PreparedAttachments[]): PreparedAttachments {
   return { text: all.map((item) => item.text).filter(Boolean).join('\n\n'), usage: all.flatMap((item) => item.usage), notes: all.flatMap((item) => item.notes), security: all.flatMap((item) => item.security) };
 }
 
+/** Whether the empty chat's "no team yet" card shows: a working profile, no project team, and no "Not now" here. */
 async function setupNudgeShows(context: vscode.ExtensionContext, auth: AuthService): Promise<boolean> {
   const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   if (!root) return false;

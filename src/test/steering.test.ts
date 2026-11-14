@@ -699,6 +699,13 @@ test('sidebar: a file taken out before sending is never written, and a steer who
     await sidebar.send({ type: 'attachment-remove', id: removed.id });
     assert.equal(existsSync(path.join(root, '.near-ai', 'attachments')), false, 'a file taken out before sending was never written');
 
+    // With nothing running, neither a steer nor an ordinary send goes out without its file.
+    await sidebar.send({ type: 'steer', id: 'steer-a8a8a8a8a8a8', text: 'see the draft now', attachmentIds: [removed.id] });
+    assert.equal(sidebar.posted.find((message) => message.type === 'steer-state' && message.id === 'steer-a8a8a8a8a8a8')?.state, 'blocked');
+    await sidebar.send({ type: 'send', text: 'see the draft too', model: 'z-ai/glm-5.3', attachmentIds: [removed.id] });
+    assert.match(String(sidebar.posted.find((message) => message.type === 'outbound-blocked' && message.text === 'see the draft too')?.reason), /no longer available/);
+    assert.equal(near.requests.length, 0, 'nothing was sent');
+
     const running = sidebar.send({ type: 'send', text: 'Use port 8080', model: 'z-ai/glm-5.3' });
     const approval = await until(() => sidebar.posted.find((message) => message.type === 'approval-request'));
     await sidebar.send({ type: 'steer', id: 'steer-a7a7a7a7a7a7', text: 'see the draft', attachmentIds: [removed.id] });
