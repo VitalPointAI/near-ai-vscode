@@ -128,6 +128,8 @@ export class ThreadStore implements ConversationStore {
   private readonly now: () => Date;
   private readonly writer: string;
   private readonly caches = new Map<string, LogCache>();
+  /** The state id the caches were built for. */
+  private cachedFor: string | undefined;
   /** The last entry of each thread that this store's conversation has: the parent of what it writes next, and what a saved context covers. */
   private readonly covered = new Map<string, string>();
   private queue: Promise<unknown> = Promise.resolve();
@@ -152,13 +154,26 @@ export class ThreadStore implements ConversationStore {
   private async readMaterial(): Promise<Material | undefined> {
     const dataKey = await this.keys.dataKey();
     const meta = await this.home.readMeta();
-    return dataKey && meta ? { key: subKey(dataKey, 'transcripts'), stateId: meta.stateId } : undefined;
+    if (!dataKey || !meta) return undefined;
+    this.followState(meta.stateId);
+    return { key: subKey(dataKey, 'transcripts'), stateId: meta.stateId };
+  }
+
+  /**
+   * What is remembered about the logs (offsets into a file, what each thread's conversation has covered) belongs to one state id. When another editor
+   * joins a synced project the state folder is swapped for a re-keyed copy under a new id, so everything remembered here is dropped at the first look.
+   */
+  private followState(stateId: string): void {
+    if (this.cachedFor !== undefined && this.cachedFor !== stateId) this.forgetCaches();
+    this.cachedFor = stateId;
   }
 
   /** The key and state id for a write, creating the state home and the key on the first one. */
   private async writeMaterial(): Promise<Material> {
     const meta = await this.home.ensure();
-    return { key: await this.keys.transcriptKey(), stateId: meta.stateId };
+    const key = await this.keys.transcriptKey();
+    this.followState(meta.stateId);
+    return { key, stateId: meta.stateId };
   }
 
   private sealJson(material: Material, purpose: string, id: string, value: unknown): string {

@@ -13,7 +13,7 @@ import { RunMarkers } from './runMarkers';
 import { runStateGit } from './stateGit';
 import { editorWriter, stateHomeFor, type MementoLike } from './stateHome';
 import { stateKeysFor } from './stateKeys';
-import { profileSyncHooks } from './stateRestore';
+import { discardPreviousState, profileSyncHooks } from './stateRestore';
 import type { SyncOutcome } from './stateSync';
 import {
   SyncScheduler, afterRemoteFor, buildStateSync, enterCodeFlow, keepKeyFlow, localHomeState, mementoSyncSettings, newCodeFlow, removeOldInProjectSyncFolders, resolveRemote, statusSentence, tokenRunner, turnOffFlow, turnOnFlow,
@@ -151,6 +151,8 @@ function runtimeFor(context: vscode.ExtensionContext, auth: AuthService, root: s
     root: resolved, home, keys, threads, git: runStateGit, keepKeyInProject, writer, settings: syncSettings,
     // These syncs are a person's action (a command they ran), so a GitHub sign-in may be asked for.
     makeSync: (input) => buildStateSync(parts, { ...input, git: input.git ?? tokenRunner(runStateGit, () => githubToken(true)) }),
+    // A join waits while a chat runs in this editor or, by the shared run markers, in another editor on this computer.
+    runsLive: async () => runsInFlight(resolved) > 0 || (await markers.liveRuns()).length > 0,
     onEnabled: (on) => scheduler.setEnabled(on),
     afterRestore: () => { void checkRestoredProfiles(resolved, auth).catch(() => undefined); }
   };
@@ -165,7 +167,11 @@ async function runOnce(parts: SyncParts, root: string, syncSettings: SyncSetting
   if (found.kind === 'none') return { kind: 'failed', message: NO_HOME, failure: { kind: 'no-remote', message: NO_HOME } };
   if (found.kind === 'cancelled') return { kind: 'refused', message: 'Sync could not tell which remote to use. Run Turn On Project Sync to choose one.' };
   const sync = buildStateSync(parts, { remote: found.name, git: tokenRunner(runStateGit, () => githubToken(interactive)) });
-  return mode === 'sync' ? sync.sync() : sync.pullOnly();
+  const outcome = await (mode === 'sync' ? sync.sync() : sync.pullOnly());
+  // A folder kept from before a join goes after the first sync that pushed the joined state, and only when every conversation in it is in that state. It
+  // is not waited for: the status never depends on it, and it does nothing when no such folder is there.
+  if (mode === 'sync' && outcome.kind === 'synced') void discardPreviousState(root, parts.threads).catch(() => undefined);
+  return outcome;
 }
 
 function workspaceRoot(): string | undefined {

@@ -18,9 +18,10 @@ import { runStateGit, gitText, privateHooksDir, redactGitMessage, TIMED_OUT_CODE
 import { ProjectStateHome, stateHomeFor, type MementoLike } from './stateHome';
 import type { StateKeys } from './stateKeys';
 import type { RunMarker, RunState } from './runMarkers';
-import { StateSync, type StateSyncOptions, type SyncOutcome } from './stateSync';
+import { StateSync, syncOwnerFor, type StateSyncOptions, type SyncOutcome } from './stateSync';
+import { StateBusyError } from './stateLocks';
 import { StateTransport, validateRemote } from './stateTransport';
-import { adoptRemoteIdentity, discardPreviousState, recoverInterruptedAdoption, type AdoptOptions } from './stateRestore';
+import { adoptRemoteIdentity, catchUpFromPrevious, discardPreviousState, recoverInterruptedAdoption, type AdoptOptions } from './stateRestore';
 import type { ProfileSource, SecretSource } from './stateRecords';
 import type { StateRecord } from '../domain/state/records';
 import type { ThreadStore } from './threadStore';
@@ -41,6 +42,14 @@ const LOCKED_HERE = "This project's chats on this computer are locked, so they c
 const SYNC_ON = 'Project sync is on. Your project is encrypted and saved on your git host.';
 const SYNC_ON_PENDING = 'Project sync is on, but the first save did not finish. It will try again.';
 const UNLOCKED = 'This project is open on this computer again.';
+const RUN_GOING = 'A chat is running in this project, in this editor or another one. Enter the recovery code again when it has finished. Nothing was changed.';
+/** What the person is told when a join could not carry some conversations; they stay in the folder kept beside the project's saved state. */
+function notCarriedSentence(count: number): string {
+  return count === 1
+    ? "1 conversation on this computer could not be added to the online project, because it could not be opened here. It is kept beside this project's saved state, and nothing was deleted."
+    : `${count} conversations on this computer could not be added to the online project, because they could not be opened here. They are kept beside this project's saved state, and nothing was deleted.`;
+}
+const SYNC_BUSY = 'A sync of this project is running. Enter the recovery code again in a moment. Nothing was changed.';
 const JOIN_FAILED = "Something went wrong while adding this computer's chats to the online project, so nothing was changed. Try again.";
 const NEEDS_KEY = "This project's chats are locked on this computer. Enter the recovery code first.";
 const NEW_CODE_SAVED = 'Your new recovery code opens this project on a new computer.';
@@ -84,6 +93,8 @@ export interface SyncEnv {
   onEnabled?: (on: boolean, remote?: string) => void;
   /** Called after the restore of a second computer, for work that needs an editor (checking the restored profile). */
   afterRestore?: () => void | Promise<void>;
+  /** Whether a chat is running in this project right now, in this editor or another editor on this computer. A join waits until none is. */
+  runsLive?: () => Promise<boolean>;
   /** Whether sync is on and which remote it uses: this editor's own storage. Without one, a store that lasts for this process (never a file in the project). */
   settings?: SyncSettingsStore;
 }
@@ -394,6 +405,11 @@ function reportTurnOn(ui: SyncUi, outcome: SyncOutcome): TurnOnResult {
 
 // ---- entering the recovery code on another computer -------------------------------------------------------------------------------------
 
+/** Whether this computer already has a state folder for the project (chats, runs or choices of its own that a join would carry over). */
+async function hasChatsOfItsOwn(env: SyncEnv): Promise<boolean> {
+  return Boolean(await env.home.readMeta().catch(() => undefined));
+}
+
 export type EnterCodeStatus = 'restored' | 'unlocked' | 'pending' | 'cancelled' | 'refused' | 'no-home' | 'failed';
 export interface EnterCodeResult { status: EnterCodeStatus; message: string }
 
@@ -411,6 +427,8 @@ export async function enterCodeFlow(input: EnterCodeInput): Promise<EnterCodeRes
   const { env, ui } = input;
   // A join that was cut off after its first rename is put right before anything reads this computer's state.
   await recoverInterruptedAdoption(env.root);
+  // A join copies and swaps the state folder: while a chat is running here or in another editor on this computer, it would lose that chat's lines.
+  if (await hasChatsOfItsOwn(env) && await env.runsLive?.().catch(() => true)) { ui.info(RUN_GOING); return { status: 'refused', message: RUN_GOING }; }
   const typed = await ui.askCode();
   if (typed === undefined) return { status: 'cancelled', message: 'No recovery code was entered.' };
   const bytes = parseRecoveryCode(typed);
@@ -444,41 +462,80 @@ export async function enterCodeFlow(input: EnterCodeInput): Promise<EnterCodeRes
       return { status: outcome.kind === 'refused' ? 'refused' : 'failed', message };
     }
     const local = await env.home.readMeta().catch(() => undefined);
-    let joined = false;
-    if (local && local.stateId !== opening.stateId) {
-      const oldKey = await env.keys.dataKey();
+    const joining = local !== undefined && local.stateId !== opening.stateId;
+    let oldKey: Buffer | undefined;
+    if (joining) {
+      oldKey = await env.keys.dataKey();
       if (!oldKey) { ui.info(LOCKED_HERE); return { status: 'refused', message: LOCKED_HERE }; }
       if (!(await ui.confirm(JOIN_TEXT))) return { status: 'cancelled', message: 'Nothing was changed.' };
-      const options: AdoptOptions = { ...(env.keepKeyInProject ? { keepKeyInProject: env.keepKeyInProject } : {}), ...(env.writer ? { writer: env.writer } : {}), ...(input.adopt ?? {}) };
-      try {
-        const adopted = await adoptRemoteIdentity(env.root, { stateId: local.stateId, key: oldKey }, { stateId: opening.stateId, key: opening.dataKey }, options);
-        joined = adopted.changed;
-      } catch {
-        ui.info(JOIN_FAILED);
-        return { status: 'failed', message: JOIN_FAILED };
-      } finally {
-        env.threads.forgetCaches();
+    }
+    // The copy, the swap, the key, the wrap and the catch-up are one operation of the project's sync owner: no sync of this project runs in between.
+    // The first sync after it is its own, started once the operation has returned.
+    const join = async (): Promise<{ joined: boolean; notCarried: string[] } | EnterCodeResult> => {
+      let joined = false;
+      let notCarried: string[] = [];
+      let kept: { previous: string; copied: Awaited<ReturnType<typeof adoptRemoteIdentity>>['copied'] } | undefined;
+      if (joining && local && oldKey) {
+        // Looked at again under the lock: a run may have started since the first look.
+        if (await env.runsLive?.().catch(() => true)) { ui.info(RUN_GOING); return { status: 'refused', message: RUN_GOING }; }
+        const options: AdoptOptions = { ...(env.keepKeyInProject ? { keepKeyInProject: env.keepKeyInProject } : {}), ...(env.writer ? { writer: env.writer } : {}), ...(input.adopt ?? {}) };
+        try {
+          const adopted = await adoptRemoteIdentity(env.root, { stateId: local.stateId, key: oldKey }, { stateId: opening.stateId, key: opening.dataKey }, options);
+          joined = adopted.changed;
+          notCarried = adopted.notCarried;
+          if (adopted.changed && adopted.previous) kept = { previous: adopted.previous, copied: adopted.copied };
+        } catch {
+          env.threads.forgetCaches();
+          ui.info(JOIN_FAILED);
+          return { status: 'failed', message: JOIN_FAILED };
+        }
       }
-    }
+      try {
+        await env.keys.adoptDataKey(opening.dataKey, opening.stateId);
+      } catch (error) {
+        env.threads.forgetCaches();
+        const message = error instanceof Error ? error.message : 'The online copy was not opened. Nothing was changed.';
+        ui.info(message);
+        return { status: 'refused', message };
+      }
+      await env.keys.storeRecoveryWrapIfNewer(opening.wrap, { foreign: { codeBytes: bytes, dataKey: opening.dataKey, stateId: opening.stateId } });
+      if (kept && local && oldKey) {
+        try {
+          const late = await catchUpFromPrevious(env.root, { stateId: local.stateId, key: oldKey }, { stateId: opening.stateId, key: opening.dataKey }, kept.previous, kept.copied, env.writer ? { writer: env.writer } : {});
+          notCarried = [...new Set([...notCarried, ...late.notCarried])];
+        } catch {
+          // The folder from before the join stays, so whatever was not caught up is not lost.
+          notCarried = [...new Set([...notCarried, 'catch-up'])];
+        }
+      }
+      env.threads.forgetCaches();
+      return { joined, notCarried };
+    };
+    let step: Awaited<ReturnType<typeof join>>;
     try {
-      await env.keys.adoptDataKey(opening.dataKey, opening.stateId);
+      step = joining ? await syncOwnerFor(env.root).run(join) : await join();
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'The online copy was not opened. Nothing was changed.';
+      env.threads.forgetCaches();
+      const message = error instanceof StateBusyError ? SYNC_BUSY : JOIN_FAILED;
       ui.info(message);
-      return { status: 'refused', message };
+      return { status: error instanceof StateBusyError ? 'refused' : 'failed', message };
     }
-    await env.keys.storeRecoveryWrapIfNewer(opening.wrap, { foreign: { codeBytes: bytes, dataKey: opening.dataKey, stateId: opening.stateId } });
+    if ('status' in step) return step;
+    const { joined, notCarried } = step;
+    const keptNote = notCarried.length ? ` ${notCarriedSentence(notCarried.length)}` : '';
     await writeEnabled(env, { enabled: true, remote: found.name });
     env.onEnabled?.(true, found.name);
     const outcome = await env.makeSync({ remote: found.name }).sync();
     if (outcome.kind === 'synced' || outcome.kind === 'nothing-yet') {
-      if (joined) await discardPreviousState(env.root);
+      // A folder from before the join goes only when every conversation in it is in the joined state.
+      if (joined) await discardPreviousState(env.root, env.threads).catch(() => undefined);
       await env.afterRestore?.();
-      ui.info(RESTORED);
-      return { status: 'restored', message: RESTORED };
+      const message = `${RESTORED}${keptNote}`;
+      ui.info(message);
+      return { status: 'restored', message };
     }
-    (ui.warn ?? ui.info).call(ui, outcome.message);
-    return { status: 'pending', message: outcome.message };
+    (ui.warn ?? ui.info).call(ui, `${outcome.message}${keptNote}`);
+    return { status: 'pending', message: `${outcome.message}${keptNote}` };
   } finally {
     bytes.fill(0);
   }

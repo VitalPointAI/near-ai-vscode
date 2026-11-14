@@ -5,7 +5,7 @@
 // copy in memory with the project's data key and saves the key under its own project scope, bound to the profile's endpoint. Profiles that reuse another
 // project's key, profiles of a team, and any sign-in token are never collected, sent or written. Nothing here puts a key in a file, a log or a message.
 import { randomBytes } from 'node:crypto';
-import { cp, mkdir, readdir, rename, rm, stat } from 'node:fs/promises';
+import { cp, mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import * as path from 'node:path';
 import { PROFILE_ID_PATTERN, isProfileId, type OrganizationProfile } from '../domain/auth';
 import type { AuthMode } from '../domain/config';
@@ -218,7 +218,14 @@ export interface AdoptResult {
   changed: boolean;
   /** The folder that holds the state as it was before the join, until a sync has worked; undefined when nothing changed. */
   previous?: string;
+  /** The ids of conversations this join did not carry over (locked, unreadable, or kept only online). The folder from before the join is kept for them. */
+  notCarried: string[];
+  /** What the carried files and thread folders looked like when they were copied, so a later catch-up sees what changed since. */
+  copied?: FileSnapshot;
 }
+
+/** Size and modification time of every file under some folders of a state home, by path relative to the home. */
+export type FileSnapshot = Record<string, string>;
 
 class PrivateSecrets implements SecretsLike {
   private readonly values = new Map<string, string>();
@@ -232,14 +239,35 @@ const CARRIED = ['runs', 'checkpoints', 'comparisons', 'choices.json', 'spend', 
 
 const ADOPT_PREFIX = 'state.adopt-';
 const PREVIOUS_PREFIX = 'state.previous-';
+/** Written into a folder kept from before a join when some conversation in it could not be carried: such a folder is never removed. */
+const NOT_CARRIED_FILE = 'not-carried.json';
+const THREAD_FOLDER = /^conv-[a-z0-9-]{6,60}$/;
+const PREVIOUS_TIME = /^state\.previous-(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})(\d{3})Z-[0-9a-f]+$/;
 
 function parentOf(home: ProjectStateHome): string {
   return path.dirname(home.dir);
 }
 
+/** A folder name for the state kept from before a join: the UTC time first (to the millisecond), so names sort by time. */
+function previousName(now: Date = new Date()): string {
+  const stamp = now.toISOString().replace(/[-:.]/g, '');
+  return `${PREVIOUS_PREFIX}${stamp}-${randomBytes(4).toString('hex')}`;
+}
+
+/** The time a kept folder was made: from its name when it has one, else from when it was last changed (names of earlier builds carry no time). */
+async function previousTime(parent: string, name: string): Promise<number> {
+  const found = PREVIOUS_TIME.exec(name);
+  if (found) {
+    const [, y, mo, d, h, mi, sec, ms] = found.map(Number) as number[];
+    return Date.UTC(y as number, (mo as number) - 1, d as number, h as number, mi as number, sec as number, ms as number);
+  }
+  return (await stat(path.join(parent, name)).catch(() => undefined))?.mtimeMs ?? 0;
+}
+
 /**
- * Puts a state home back in order after an adoption that was cut off: when the state folder is missing and a previous one is there (the first rename
- * happened, the second did not), the previous one is renamed back; half-built copies are removed. Safe to call at any time.
+ * Puts a state home back in order after an adoption that was cut off: when the state folder is missing and previous ones are there (the first rename
+ * happened, the second did not), the newest by the time in its name (by modification time for a name without one) is renamed back; half-built copies
+ * are removed. Safe to call at any time.
  */
 export async function recoverInterruptedAdoption(root: string): Promise<void> {
   const home = stateHomeFor(root);
@@ -247,34 +275,102 @@ export async function recoverInterruptedAdoption(root: string): Promise<void> {
   const names = await readdir(parent).catch(() => [] as string[]);
   const present = Boolean((await stat(home.dir).catch(() => undefined))?.isDirectory());
   if (!present) {
-    const previous = names.filter((name) => name.startsWith(PREVIOUS_PREFIX)).sort();
-    const back = previous[previous.length - 1];
-    if (back) await rename(path.join(parent, back), home.dir);
+    let back: { name: string; at: number } | undefined;
+    for (const name of names.filter((item) => item.startsWith(PREVIOUS_PREFIX)).sort()) {
+      const at = await previousTime(parent, name);
+      if (!back || at >= back.at) back = { name, at };
+    }
+    if (back) await rename(path.join(parent, back.name), home.dir);
   }
   for (const name of names) if (name.startsWith(ADOPT_PREFIX)) await rm(path.join(parent, name), { recursive: true, force: true });
 }
 
-/** Removes the state folders kept from before a join, once the joined state has synced. */
-export async function discardPreviousState(root: string): Promise<void> {
-  const parent = parentOf(stateHomeFor(root));
-  for (const name of await readdir(parent).catch(() => [] as string[])) if (name.startsWith(PREVIOUS_PREFIX)) await rm(path.join(parent, name), { recursive: true, force: true });
+async function folderNames(dir: string): Promise<string[]> {
+  return (await readdir(dir, { withFileTypes: true }).catch(() => [])).filter((item) => item.isDirectory() && THREAD_FOLDER.test(item.name)).map((item) => item.name);
 }
+
+/** The ids a kept folder names: each thread folder and each archive folder, and every id recorded as not carried. */
+async function idsHeldBy(folder: string): Promise<{ held: Set<string>; notCarried: string[] }> {
+  const held = new Set([...await folderNames(path.join(folder, 'threads')), ...await folderNames(path.join(folder, 'archive'))]);
+  let notCarried: string[] = [];
+  try {
+    const parsed: unknown = JSON.parse(await readFile(path.join(folder, NOT_CARRIED_FILE), 'utf8'));
+    if (Array.isArray(parsed)) notCarried = parsed.filter((item): item is string => typeof item === 'string');
+  } catch (error) {
+    // A marker that is there but cannot be read is a reason to keep the folder, never to remove it.
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') notCarried = ['unreadable-marker'];
+  }
+  return { held, notCarried };
+}
+
+/** Records, inside the folder kept from before a join, the conversations that were not carried; such a folder is then never removed. */
+async function markNotCarried(previous: string, ids: readonly string[]): Promise<void> {
+  if (!ids.length) return;
+  const kept = (await idsHeldBy(previous)).notCarried;
+  await writeFile(path.join(previous, NOT_CARRIED_FILE), `${JSON.stringify([...new Set([...kept, ...ids])].sort())}\n`, { mode: 0o600 });
+}
+
+/**
+ * Removes the state folders kept from before a join, but only a folder whose every conversation is in the current state: one that holds a thread folder
+ * or an archive folder the current state does not list, or that was marked as holding conversations the join could not carry, is left where it is
+ * (it may hold the only copy). `current` is the project's thread store; without one, the thread folders on disk stand for what the state holds.
+ */
+export async function discardPreviousState(root: string, current?: { index(): Promise<Array<{ id: string; locked?: boolean }>> }): Promise<void> {
+  const home = stateHomeFor(root);
+  const parent = parentOf(home);
+  const kept = (await readdir(parent).catch(() => [] as string[])).filter((name) => name.startsWith(PREVIOUS_PREFIX));
+  if (!kept.length) return;
+  let present: Set<string>;
+  try {
+    present = current
+      ? new Set((await current.index()).filter((item) => !item.locked).map((item) => item.id))
+      : new Set([...await folderNames(home.paths.threads), ...await folderNames(home.paths.archive)]);
+  } catch {
+    return;
+  }
+  for (const name of kept) {
+    const folder = path.join(parent, name);
+    const { held, notCarried } = await idsHeldBy(folder);
+    if (notCarried.length || [...held].some((id) => !present.has(id))) continue;
+    await rm(folder, { recursive: true, force: true });
+  }
+}
+
+/** Size and modification time of every file under the named folders (or files) of `base`. */
+async function snapshotOf(base: string, names: readonly string[]): Promise<FileSnapshot> {
+  const found: FileSnapshot = {};
+  const walk = async (relative: string): Promise<void> => {
+    const full = path.join(base, relative);
+    const info = await stat(full).catch(() => undefined);
+    if (!info) return;
+    if (info.isDirectory()) {
+      for (const child of await readdir(full).catch(() => [] as string[])) await walk(path.join(relative, child));
+    } else if (info.isFile()) {
+      found[relative.split(path.sep).join('/')] = `${info.size}:${info.mtimeMs}`;
+    }
+  };
+  for (const name of names) await walk(name);
+  return found;
+}
+
+const SNAPSHOT_FOLDERS = [...CARRIED, 'threads', 'archive'];
 
 /**
  * Re-encrypts this project's own chats and records under a synced project's identity (D-02, D-05). A copy of the state home is built beside the real
  * one (.near-ai/state.adopt-<random>): every thread, live or archived, is read with the old key and written with the new one under the new id; the
  * plain files are carried over; the key copies are re-sealed. Only when the copy is complete are the folders swapped, by two renames (the old one kept
- * as .near-ai/state.previous-<random>). A failure at any point leaves the original in place, and a cut-off run is put right by the next call.
- * The caller syncs next and calls discardPreviousState only when that worked.
+ * as .near-ai/state.previous-<UTC time>-<hex>). A failure at any point leaves the original in place, and a cut-off run is put right by the next call.
+ * A conversation that cannot be carried (locked, unreadable, kept only online) is listed in `notCarried` and marked in the kept folder, which no
+ * discard then removes. The caller holds the project's sync lock around this and catchUpFromPrevious, syncs next, and calls discardPreviousState only
+ * when that worked.
  */
 export async function adoptRemoteIdentity(root: string, from: Identity, to: Identity, options: AdoptOptions = {}): Promise<AdoptResult> {
   await recoverInterruptedAdoption(root);
   const home = stateHomeFor(root);
   const oldMeta = await home.readMeta();
-  if (!oldMeta || oldMeta.stateId === to.stateId) return { changed: false };
-  const suffix = randomBytes(6).toString('hex');
-  const asideDir = path.join(parentOf(home), `${ADOPT_PREFIX}${suffix}`);
-  const previous = path.join(parentOf(home), `${PREVIOUS_PREFIX}${suffix}`);
+  if (!oldMeta || oldMeta.stateId === to.stateId) return { changed: false, notCarried: [] };
+  const asideDir = path.join(parentOf(home), `${ADOPT_PREFIX}${randomBytes(6).toString('hex')}`);
+  const previous = path.join(parentOf(home), previousName());
   const writer = options.writer ?? 'join-writer';
   const keep = options.keepKeyInProject ?? (() => true);
   try {
@@ -290,10 +386,12 @@ export async function adoptRemoteIdentity(root: string, from: Identity, to: Iden
     const asideKeys = new StateKeys(aside, new PrivateSecrets(), keep);
     await asideKeys.adoptDataKey(to.key, to.stateId);
     const asideStore = new ThreadStore(aside, asideKeys, { writer });
+    // Looked at before anything is read, so a change made while the copy is built is seen afterwards.
+    const copied = await snapshotOf(home.dir, SNAPSHOT_FOLDERS);
+    const notCarried: string[] = [];
     for (const item of await oldStore.index()) {
-      if (item.locked || item.location === 'remote') continue;
-      const thread = await readOldThread(oldStore, item.id, item.state === 'archived');
-      if (thread) await asideStore.importThread(item.id, thread);
+      const thread = item.locked || item.location === 'remote' ? undefined : await readOldThread(oldStore, item.id, item.state === 'archived');
+      if (thread) await asideStore.importThread(item.id, thread); else notCarried.push(item.id);
     }
     for (const name of CARRIED) {
       const source = path.join(home.dir, name);
@@ -316,11 +414,73 @@ export async function adoptRemoteIdentity(root: string, from: Identity, to: Iden
       await rename(previous, home.dir).catch(() => undefined);
       throw error;
     }
-    return { changed: true, previous };
+    try {
+      // The folder from before the join is the only copy of what could not be carried: it is marked so nothing removes it.
+      await markNotCarried(previous, notCarried);
+    } catch (error) {
+      // Not marked means not safe to keep unmarked: the join is undone.
+      await rename(home.dir, asideDir).catch(() => undefined);
+      await rename(previous, home.dir).catch(() => undefined);
+      throw error;
+    }
+    return { changed: true, previous, notCarried, copied };
   } catch (error) {
     await rm(asideDir, { recursive: true, force: true }).catch(() => undefined);
     throw error;
   }
+}
+
+/** What a catch-up found. */
+export interface CatchUpResult {
+  /** Conversations of the folder from before the join that could not be read again, so were not brought up to date. They are kept there. */
+  notCarried: string[];
+}
+
+/**
+ * Brings what was written to the state home between the copy and the swap into the joined state (another editor of this computer appending to a thread
+ * while the join ran): every conversation of the folder from before the join that is new or changed since `copied` (every one, without it) is read with the
+ * old key and added to the joined state under its id and key, entry by entry, an entry already there not written twice; plain files that changed
+ * since the copy are copied again. Nothing is removed, and nothing is touched when nothing changed. The caller holds the project's sync lock.
+ */
+export async function catchUpFromPrevious(root: string, from: Identity, to: Identity, previous: string, copied?: FileSnapshot, options: { writer?: string } = {}): Promise<CatchUpResult> {
+  const home = stateHomeFor(root);
+  const old = new ProjectStateHome(root, previous);
+  const writer = options.writer ?? 'join-writer';
+  const now = await snapshotOf(old.dir, SNAPSHOT_FOLDERS);
+  const changed = (name: string): boolean => copied === undefined || now[name] !== copied[name];
+  const notCarried: string[] = [];
+
+  // Threads and archives that are new or changed.
+  const touched = new Set<string>();
+  for (const name of Object.keys(now)) {
+    const [folder, id] = name.split('/');
+    if ((folder === 'threads' || folder === 'archive') && id && THREAD_FOLDER.test(id) && changed(name)) touched.add(id);
+  }
+  if (touched.size) {
+    const oldSecrets = new PrivateSecrets();
+    await oldSecrets.store(dataKeySecretName(from.stateId), from.key.toString('base64'));
+    const oldStore = new ThreadStore(old, new StateKeys(old, oldSecrets, () => false), { writer });
+    const newSecrets = new PrivateSecrets();
+    await newSecrets.store(dataKeySecretName(to.stateId), to.key.toString('base64'));
+    const newStore = new ThreadStore(home, new StateKeys(home, newSecrets, () => false), { writer });
+    const listed = new Map((await oldStore.index()).map((item) => [item.id, item]));
+    for (const id of touched) {
+      const item = listed.get(id);
+      const thread = item && !item.locked && item.location !== 'remote' ? await readOldThread(oldStore, id, item.state === 'archived') : undefined;
+      if (!thread) { notCarried.push(id); continue; }
+      try { await newStore.importThread(id, thread); } catch { notCarried.push(id); }
+    }
+  }
+
+  // Plain files that changed since they were copied.
+  for (const name of Object.keys(now)) {
+    const [folder] = name.split('/');
+    if (folder === 'threads' || folder === 'archive' || !changed(name)) continue;
+    await mkdir(path.dirname(path.join(home.dir, name)), { recursive: true });
+    await cp(path.join(old.dir, name), path.join(home.dir, name));
+  }
+  if (notCarried.length) await markNotCarried(previous, notCarried).catch(() => undefined);
+  return { notCarried };
 }
 
 async function readOldThread(store: ThreadStore, id: string, archived: boolean): Promise<ImportedThread | undefined> {
