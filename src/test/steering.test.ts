@@ -548,7 +548,7 @@ test('sidebar: a file attached to a message sent during a run reaches the runnin
     const approval = await until(() => sidebar.posted.find((message) => message.type === 'approval-request'));
     const staged = await attach(sidebar, 'ports.txt', 'staging uses port 9090');
     await sidebar.send({ type: 'steer', id: 'steer-a1a1a1a1a1a1', text: 'check the attached ports file', attachmentIds: [staged.id] });
-    assert.ok(sidebar.posted.some((message) => message.type === 'attachments-cleared'), 'nothing stays staged for a later message');
+    assert.deepEqual(sidebar.posted.find((message) => message.type === 'attachments-cleared')?.ids, [staged.id], 'its file leaves the composer, and only its file');
     await sidebar.send({ type: 'approval-reply', callId: approval.callId, decision: 'allow' });
     await running;
     assert.equal(near.requests.length, 2, 'still one run');
@@ -619,4 +619,58 @@ test('a message sent during a run no longer leaves its attachments staged for a 
   const chat = readFileSync(path.join(__dirname, '..', '..', 'media', 'chat', 'chat.js'), 'utf8');
   assert.equal(chat.includes('Attachments stay staged'), false);
   assert.match(chat, /type: 'steer', id, text[^\n]*attachmentIds: ids/);
+});
+
+test('sidebar: a message whose file trips the outbound check is not sent, and its file stays attached in the composer', async () => {
+  const { root, auth } = await projectWithProfile();
+  const near = fakeNear(() => near.requests.length === 1 ? editCall : { content: 'done' });
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = near.fetch;
+  try {
+    const sidebar = await openSidebar(root, auth);
+    const running = sidebar.send({ type: 'send', text: 'Use port 8080', model: 'z-ai/glm-5.3' });
+    const approval = await until(() => sidebar.posted.find((message) => message.type === 'approval-request'));
+    const staged = await attach(sidebar, 'creds.txt', 'api_key=sk-live-999');
+    await sidebar.send({ type: 'steer', id: 'steer-e5e5e5e5e5e5', text: 'use these', attachmentIds: [staged.id] });
+    const blocked = sidebar.posted.find((message) => message.type === 'steer-state' && message.id === 'steer-e5e5e5e5e5e5');
+    assert.equal(blocked?.state, 'blocked');
+    assert.match(String(blocked?.reason), /credential/);
+    assert.equal(sidebar.posted.some((message) => message.type === 'attachments-cleared'), false, 'the file keeps its chip');
+    await sidebar.send({ type: 'approval-reply', callId: approval.callId, decision: 'allow' });
+    await running;
+    assert.equal(near.requests.some((messages) => JSON.stringify(messages).includes('sk-live-999')), false);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('sidebar: a queued file whose message is stopped comes back to the composer and never rides on a later message', async () => {
+  const { root, auth } = await projectWithProfile();
+  let releaseBilling!: () => void;
+  let billingReached = false;
+  const billingGate = new Promise<void>((resolve) => { releaseBilling = resolve; });
+  const near = fakeNear((messages) => ({ content: `Saw: ${lastUser(messages)}` }), { billing: async () => { if (!billingReached) { billingReached = true; await billingGate; } } });
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = near.fetch;
+  const { setEmergencyStop } = require('../services/emergencyStop') as typeof import('../services/emergencyStop');
+  try {
+    const sidebar = await openSidebar(root, auth);
+    const running = sidebar.send({ type: 'send', text: 'hello', model: 'z-ai/glm-5.3' });
+    await until(() => billingReached);
+    const queued = await attach(sidebar, 'carried.txt', 'carried file body');
+    await sidebar.send({ type: 'steer', id: 'steer-f6f6f6f6f6f6', text: 'read the carried file', attachmentIds: [queued.id] });
+    const before = sidebar.posted.length;
+    await setEmergencyStop(true);
+    await until(() => sidebar.posted.slice(before).some((message) => message.type === 'attachment-staged' && message.id === queued.id));
+    releaseBilling();
+    await running;
+    await setEmergencyStop(false);
+    assert.equal(near.requests.length, 1, 'the queued message was not sent');
+    await sidebar.send({ type: 'send', text: 'something else', model: 'z-ai/glm-5.3' });
+    assert.equal(near.requests.length, 2);
+    assert.equal(JSON.stringify(near.requests[1]).includes('carried file body'), false, 'the file does not ride on an unrelated message');
+  } finally {
+    await setEmergencyStop(false);
+    globalThis.fetch = originalFetch;
+  }
 });

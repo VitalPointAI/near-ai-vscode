@@ -263,13 +263,14 @@
     const node = append(el('div', 'turn user steer', text));
     const line = el('span', 'steer-state', options.interrupt ? 'Interrupting…' : 'Sending…');
     node.append(line);
-    steerBubbles.set(id, { node, line });
+    steerBubbles.set(id, { node, line, files: undefined });
     input.value = '';
     autosize();
     updateSendState();
     // 0.4.21: the files attached to this message go with it, to the running agent, never left for a later message.
     const ids = [...staged.keys()];
-    if (ids.length) node.insertBefore(document.createTextNode('\n📎 ' + [...staged.values()].join(', ')), line);
+    const files = ids.length ? document.createTextNode('\n📎 ' + [...staged.values()].join(', ')) : undefined;
+    if (files) { node.insertBefore(files, line); steerBubbles.get(id).files = files; }
     postFor({ type: 'steer', id, text, ...(options.interrupt ? { interrupt: true } : {}), ...(ids.length ? { attachmentIds: ids } : {}) });
   }
   function onSteerState(m) {
@@ -283,6 +284,8 @@
     const bubble = steerBubbles.get(m.id);
     if (bubble) {
       bubble.line.textContent = m.state === 'blocked' && m.reason ? 'Not sent: ' + m.reason : STEER_LABELS[m.state] || '';
+      // A message not sent did not send its files either: they are still attached in the composer.
+      if (m.state === 'blocked' && bubble.files) { bubble.files.remove(); bubble.files = undefined; }
       bubble.line.dataset.state = m.state;
       // Once the agent has it, the message sits where the conversation took it in, and the reply follows it.
       if (m.state === 'delivered' || m.state === 'sent-new') {
@@ -1448,7 +1451,8 @@
       case 'history-error': notice(m.text, [], true); break;
       case 'artifacts': renderArtifacts(m.artifacts); break;
       case 'attachment-staged': staged.set(m.id, m.name); savedAs.set(m.id, m.savedAs || ''); renderChips(); announce('Attached ' + m.name + (m.savedAs ? ', saved in the project as ' + m.savedAs : '')); break;
-      case 'attachments-cleared': staged.clear(); savedAs.clear(); renderChips(); break;
+      // Only the files that went with a message; one attached meanwhile keeps its chip.
+      case 'attachments-cleared': for (const id of Array.isArray(m.ids) ? m.ids : [...staged.keys()]) { staged.delete(id); savedAs.delete(id); } renderChips(); break;
       case 'commands': if (Array.isArray(m.commands) && m.commands.length) commands = m.commands; break;
       case 'notice': notice(m.text || '', []); break;
       // A run the extension host never finished: nothing continues until the user clicks Resume.
