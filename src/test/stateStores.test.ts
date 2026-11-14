@@ -37,8 +37,14 @@ test('checkpoints in the state home are format 2: inside the project root-relati
       { abs: outside, outside: true, original: 'string' },
       { rel: 'src/created.ts', original: 'object' }
     ]);
-    // Editor B: another instance over the same folder, as another window or the browser would be.
-    const editorB = await RunCheckpoints.load('run-1-aaaaaa', home.paths.checkpoints, { root });
+    // A checkpoint file is in the project's state folder, so an editor that does not name the outside folder as allowed drops that entry and
+    // never writes outside the project (27-29); loading it changes nothing on disk.
+    const unbounded = await RunCheckpoints.load('run-1-aaaaaa', home.paths.checkpoints, { root });
+    assert.ok(unbounded, 'the run loads without the outside folder');
+    assert.equal(await readFile(outside, 'utf8'), 'changed b', 'loading touches nothing');
+    // Editor B: another instance over the same folder, as another window or the browser would be, with the outside folder allowed (as the
+    // agent's own worktree is).
+    const editorB = await RunCheckpoints.load('run-1-aaaaaa', home.paths.checkpoints, { root, allowedRoots: [elsewhere] });
     assert.ok(editorB, 'a second editor finds the run');
     await editorB.revert();
     assert.equal(await readFile(inside, 'utf8'), 'original a');
