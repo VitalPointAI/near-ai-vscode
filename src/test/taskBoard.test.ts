@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { DEFAULT_RULES } from '../agent/permissions';
-import { TaskBoard } from '../agent/taskBoard';
+import { TaskBoard, endsWithQuestion } from '../agent/taskBoard';
 import type { Todo } from '../agent/tools';
 import { isSyntheticMessage } from '../domain/state/threadCapture';
 import { AgentConversation, GsdContext, visibleTurns } from '../services/agentSession';
@@ -160,12 +160,13 @@ const listWrite = (id: string, ...items: Array<[string, Todo['status']]>) => rep
 interface Scripted { posted: Array<Record<string, unknown>>; requests: AgentMessage[][]; conversation: AgentConversation }
 
 /** Runs `sends` on one conversation against a scripted main model: `script(n, messages)` answers its n-th request (1-based, across all sends). */
-async function scripted(script: (n: number, messages: AgentMessage[]) => CompletionEvent, sends: string[] = ['go'], options: { maxTurns?: number; tolerate?: boolean } = {}): Promise<Scripted> {
+async function scripted(script: (n: number, messages: AgentMessage[]) => CompletionEvent, sends: string[] = ['go'], options: { maxTurns?: number; tolerate?: boolean; onRequest?: (n: number, conversation: AgentConversation) => void } = {}): Promise<Scripted> {
   const root = await mkdtemp(path.join(tmpdir(), 'near-ai-tasks-run-'));
   const requests: AgentMessage[][] = [];
   const near = {
     async *streamCompletion(_model: string, messages: AgentMessage[]): AsyncGenerator<CompletionEvent> {
       requests.push([...messages]);
+      options.onRequest?.(requests.length, conversation);
       yield script(requests.length, messages);
     },
     async actualCostsUsd() { return undefined; }
@@ -257,6 +258,36 @@ test('a run that did not touch the list, or ended with it all completed, gets no
   const finished = await scripted((n) => (n === 1 ? listWrite('t1', ['A', 'completed']) : reply('Done.')), ['go'], { maxTurns: 10 });
   assert.equal(finished.requests.length, 2);
   assert.equal(reminders(finished.requests).length, 0);
+});
+
+// ---- No reminder after a closing question or while a question waits (27-32, REVIEW MINOR agentSession.ts:408) ------------------------------
+
+test('endsWithQuestion: a closing question mark counts, after spaces, quotes, brackets and emphasis are set aside', () => {
+  for (const text of ['Which one do you want?', 'Shall I go on? ', '**Should I continue?**', 'Ready to merge?)', 'Use option A or B?\n\n', 'Soll ich weitermachen\uFF1F', 'Is it "done"?"', 'Maybe `this`?`', '_Go on?_']) assert.equal(endsWithQuestion(text), true, JSON.stringify(text));
+  for (const text of ['Done.', 'I asked: why? Then I fixed it.', '', '   ', 'Which one? I will wait.', 'All three are done!']) assert.equal(endsWithQuestion(text), false, JSON.stringify(text));
+});
+
+test('a run whose answer ends with a question gets no reminder, no extra turn, and its list is shown as not confirmed done', async () => {
+  const { posted, requests } = await scripted((n) => (n === 1 ? listWrite('t1', ['A', 'pending'], ['B', 'pending'], ['C', 'pending']) : reply('I finished A. Should I start B now?')), ['go'], { maxTurns: 10 });
+  assert.equal(requests.length, 2, 'the list, then the answer that asks: nothing after it');
+  assert.equal(reminders(requests).length, 0);
+  const last = todoPosts(posted).at(-1)!;
+  assert.equal(shown(last.todos as Todo[]), 'A:pending B:pending C:pending');
+  assert.equal(last.unconfirmed, true);
+});
+
+test('an answer that only mentions a question in the middle still gets the one reminder', async () => {
+  const { requests } = await scripted((n) => (n === 1 ? listWrite('t1', ['A', 'pending']) : reply('I asked: why? Then I fixed it.')), ['go'], { maxTurns: 10 });
+  assert.equal(reminders(requests).length, 1);
+  assert.equal(requests.length, 3);
+});
+
+test('a run that ends while a question to the person is waiting gets no reminder', async () => {
+  const seed = (n: number, conversation: AgentConversation) => { if (n === 2) (conversation as unknown as { questions: Map<string, () => void> }).questions.set('q-waiting', () => undefined); };
+  const { posted, requests } = await scripted((n) => (n === 1 ? listWrite('t1', ['A', 'pending'], ['B', 'pending']) : reply('Done.')), ['go'], { maxTurns: 10, onRequest: seed });
+  assert.equal(requests.length, 2);
+  assert.equal(reminders(requests).length, 0);
+  assert.equal(todoPosts(posted).at(-1)!.unconfirmed, true);
 });
 
 test('the reminder never pushes a run into the turn limit: it needs two spare turns', async () => {

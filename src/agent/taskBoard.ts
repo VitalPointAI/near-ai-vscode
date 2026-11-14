@@ -21,6 +21,15 @@ function containsRun(long: string[], short: string[]): boolean {
   return false;
 }
 
+/** What may follow a closing question mark without changing that it closes the text: white space, closing quotes and brackets, Markdown emphasis and code ticks. */
+const AFTER_QUESTION = /[\s"'\u201D\u2019\u00BB)\]}>*_`]+$/u;
+
+/** Whether a final answer ends by asking the person something: its last character, trailing spaces, closing quotes, brackets and emphasis set aside, is a question mark (ASCII or full-width). */
+export function endsWithQuestion(text: string): boolean {
+  const end = text.replace(AFTER_QUESTION, '');
+  return end.endsWith('?') || end.endsWith('\uFF1F');
+}
+
 /**
  * The main run's task list, kept by the host so sub-agents can move their own item along while
  * the main agent waits for them. An Agent call that names its `task` sets that item in progress,

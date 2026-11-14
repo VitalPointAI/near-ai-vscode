@@ -17,7 +17,7 @@ import type { SearchProvider } from '../agent/webSearch';
 import { SecurityAccess, securityTool } from '../agent/securityTool';
 import { AgentTool, CORE_TOOLS, Todo, ToolContext } from '../agent/tools';
 import type { CyberRunAccess } from './cyberRun';
-import { TaskBoard } from '../agent/taskBoard';
+import { TaskBoard, endsWithQuestion } from '../agent/taskBoard';
 import { displayPath, ToolError } from '../agent/workspace';
 import { AgentWorktree, createAgentWorktree, finishAgentWorktree, worktreeReport } from '../agent/worktree';
 import type { ActionPolicy } from '../domain/policy';
@@ -194,6 +194,8 @@ export function steeringContent(text: string): string {
 const headCommit = (root: string): Promise<string | undefined> => new Promise((resolve) => {
   execFile('git', ['rev-parse', '--verify', '--quiet', 'HEAD'], { cwd: root, timeout: 10_000, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } }, (error, stdout) => resolve(error ? undefined : String(stdout).trim() || undefined));
 });
+/** The text of the last assistant message in a transcript, or an empty string when there is none. */
+const lastAssistantText = (transcript: AgentMessage[]): string => { for (let index = transcript.length - 1; index >= 0; index -= 1) { const message = transcript[index]; if (message.role === 'assistant') return message.content ?? ''; } return ''; };
 const minutesSince = (at: number) => { const seconds = Math.max(0, Math.round((Date.now() - at) / 1000)); return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)} min`; };
 
 /**
@@ -405,10 +407,12 @@ export class AgentConversation {
         await this.saveRunState(request.model, runId, next ?? transcript);
         return next;
       },
-      afterAnswer: async (_transcript, signal) => {
+      afterAnswer: async (transcript, signal) => {
         const background = await this.waitForBackground(signal);
         if (background?.length) return background;
         if (taskCheckSent) return undefined;
+        // A closing question, or a question still waiting for the person, stays the last thing they see: no extra paid turn to bury it (the list is shown as not confirmed done at the run's end).
+        if (this.questions.size || endsWithQuestion(lastAssistantText(transcript))) return undefined;
         const check = this.taskListCheck(tasksAtStart, signal, (request.maxTurns ?? DEFAULT_MAX_TURNS) - mainTurns);
         if (check) taskCheckSent = true;
         return check;
