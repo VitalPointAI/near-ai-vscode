@@ -1,6 +1,9 @@
 # Changelog
 
-## Unreleased
+## 0.4.21
+
+This release makes what you send and the team you chose reach the agent: files go with the message
+they were attached to, and your team's members do the specialist work in every run.
 
 - **Files attached to a message go with that message.** A file attached to a message you sent while
   the agent was working was held back for your next message, so the agent read your words without
@@ -19,8 +22,8 @@
   Open-GSD workflow, could not see the team's members, so work such as images went to a general
   agent instead of the team's designer. Now a conversation keeps the team it was started with, and
   without one the project's own team is used, after you agree to it once for that project (and again
-  if its team file changes). Open-GSD keeps the project on track (planning,
-  checking, verification) and hands the specialist work to the member whose role covers it, using a
+  if its team file changes). Open-GSD keeps the project on track (planning, checking, verification)
+  and hands the specialist work to the member whose role covers it, using a
   general agent only when no member fits. The chat says which team it is working with.
 
 ## 0.4.20
