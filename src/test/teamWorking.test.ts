@@ -129,7 +129,7 @@ test('the chat finds the conversation\'s team, else the project\'s, and says whi
   await writeFile(TeamLibrary.projectTeamFile(root), renderTeam('Project team', 'Builds it', [{ name: 'designer', role: 'designer', instructions: 'Make images.' }]));
   const project = await workingTeamFor(find, undefined, undefined);
   assert.equal(project.team?.members[0].name, 'designer');
-  assert.equal(project.notice, 'Working with the Project team team: its members do the specialist work.');
+  assert.equal(project.notice, 'Working with the team "Project team": its members do the specialist work.');
   const again = await workingTeamFor(find, undefined, project.noticed);
   assert.equal(again.team?.slug, project.team!.slug);
   assert.equal(again.notice, undefined, 'said once');
@@ -137,7 +137,7 @@ test('the chat finds the conversation\'s team, else the project\'s, and says whi
   await library.create('Studio', renderTeam('Studio', 'Makes the product', [{ name: 'illustrator', role: 'designer', instructions: 'Draw.' }]));
   const studio = await workingTeamFor(find, 'studio', project.team!.slug);
   assert.equal(studio.team?.name, 'Studio');
-  assert.equal(studio.notice, 'Working with the Studio team: its members do the specialist work.');
+  assert.equal(studio.notice, 'Working with the team "Studio": its members do the specialist work.');
   // A conversation team that was deleted falls back to the project's team, and says so.
   const gone = await workingTeamFor(find, 'deleted-team', undefined);
   assert.equal(gone.team?.name, 'Project team');
@@ -197,4 +197,41 @@ test('the team note is sent once per team in a conversation, not with every mess
   const notes = users.filter((content) => content.includes('<team name='));
   assert.equal(notes.length, 2, 'once for Studio, once when the team changed to Other');
   assert.match(users.find((content) => content.endsWith('second'))!, /^second$/, 'the second message carries no note');
+});
+
+test('a GSD workflow run keeps the team note ahead of its instructions, and an edited team is sent again', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'near-ai-team-'));
+  const gsd = await gsdHome();
+  gsd.skills = [{ name: 'gsd-execute-phase', description: 'Execute a phase', allowedTools: [], body: 'Run each plan with its executor.', file: path.join(gsd.home, 'skills', 'gsd-execute-phase.md'), includes: [] }];
+  const model = modelSpawning('designer');
+  const conversation = new AgentConversation(root, () => undefined, path.join(root, '.ckpt'));
+  const base = { client: model.client as never, model: 'm', privacy: 'x', policy: { mode: 'fully-autonomous' as const, emergencyStop: false }, rules: DEFAULT_RULES, gsd };
+  try {
+    await conversation.send({ ...base, text: '/gsd-execute-phase 3', skill: { name: 'gsd-execute-phase', args: '3' }, memberTeam: studioTeam(root) });
+    const first = String(model.leads[0].messages.filter((message) => message.role === 'user').at(-1)?.content);
+    assert.match(first, /^<team name="Studio">[\s\S]*<\/team>\n\nThe user ran \/gsd-execute-phase 3\. Follow these instructions:\n\nRun each plan with its executor\./, 'the workflow\'s instructions do not replace the note');
+    // The team gains a member: the note is sent again with it.
+    const grown = studioTeam(root);
+    grown.members.push({ name: 'writer', role: 'writer', tools: ['Read'], instructions: 'Write the copy.' });
+    await conversation.send({ ...base, text: 'next', memberTeam: grown });
+    const second = String(model.leads.at(-1)!.messages.filter((message) => message.role === 'user').at(-1)?.content);
+    assert.match(second, /- writer \(writer\): Write the copy\.[\s\S]*\n\nnext$/);
+  } finally { conversation.dispose(); }
+});
+
+test('a run whose turn fails before it starts still sends the note next time', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'near-ai-team-'));
+  const model = modelSpawning('designer');
+  const conversation = new AgentConversation(root, () => undefined, path.join(root, '.ckpt'));
+  const base = { client: model.client as never, model: 'm', privacy: 'x', policy: { mode: 'fully-autonomous' as const, emergencyStop: false }, rules: DEFAULT_RULES, gsd: await gsdHome(), memberTeam: studioTeam(root) };
+  try {
+    await assert.rejects(conversation.send({ ...base, text: '/gsd-missing', skill: { name: 'gsd-missing', args: '' } }), /no skill named gsd-missing/);
+    await conversation.send({ ...base, text: 'go on' });
+  } finally { conversation.dispose(); }
+  assert.match(String(model.leads[0].messages.filter((message) => message.role === 'user').at(-1)?.content), /^<team name="Studio">[\s\S]*\n\ngo on$/);
+});
+
+test('a team with no members is not used', async () => {
+  const empty: TeamDefinition = { slug: 'team', name: 'Empty', description: '', file: '/tmp/team.md', members: [] };
+  assert.deepEqual(await workingTeamFor(async () => empty, undefined, undefined), {});
 });

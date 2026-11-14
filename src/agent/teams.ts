@@ -157,14 +157,16 @@ export function teamAgents(team: TeamDefinition): GsdAgent[] {
 export async function workingTeamFor(find: (slug: string) => Promise<TeamDefinition | undefined>, conversationTeam: string | undefined, noticed: string | undefined): Promise<{ team?: TeamDefinition; notice?: string; noticed?: string }> {
   const quietly = (slug: string) => find(slug).catch(() => undefined);
   const named = conversationTeam ? await quietly(conversationTeam) : undefined;
-  const team = named ?? await quietly('project');
+  const found = named ?? await quietly('project');
+  // A team with no members has no one to give work to.
+  const team = found?.members.length ? found : undefined;
   if (!team) return {};
   // What was said: the team, or that the conversation's team is gone and this one is used instead, which is news even when the team is the same.
   const gone = conversationTeam !== undefined && !named;
   const key = gone ? `${team.slug} (instead of ${conversationTeam})` : team.slug;
   if (key === noticed) return { team, noticed };
   const why = gone ? ` (the ${conversationTeam} team this conversation started with is gone, so the project's team is used)` : '';
-  return { team, noticed: key, notice: `Working with the ${team.name} team: its members do the specialist work${why}.` };
+  return { team, noticed: key, notice: `Working with the team "${team.name}": its members do the specialist work${why}.` };
 }
 
 /** Team text inside the note, with angle brackets made plain, so a line such as `</team>` in a member's instructions cannot end the note early. */

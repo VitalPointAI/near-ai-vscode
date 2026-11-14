@@ -235,7 +235,7 @@ export class AgentConversation {
   private title = '';
   /** The team the newest /team run of this conversation led (0.4.21); kept through compaction, which summarizes the message that named it. */
   private teamSlug: string | undefined;
-  /** The team whose note this conversation's model has in context, so the note is sent once per team rather than every turn. */
+  /** The team note this conversation's model has in context (its full text, so an edited team is sent again), so it is sent once rather than every turn. */
   private notedTeam: string | undefined;
   private shell: ShellSession | undefined;
   private shellEnvAllow: string[] = [];
@@ -344,20 +344,25 @@ export class AgentConversation {
     let prompt = request.text;
     if (request.team) this.teamSlug = request.team.slug;
     if (request.team) prompt = teamLeadPrompt(request.team, request.text.replace(/^\/team:\S+\s*/, ''));
-    // The note is said once per team in a conversation, not every turn: a long GSD conversation would otherwise carry one copy per message. It is said
-    // again after the conversation is summarized (the summary may drop it) and in a reopened conversation.
-    else if (request.memberTeam && this.notedTeam !== request.memberTeam.slug) { prompt = `${teamMembersNote(request.memberTeam)}\n\n${prompt}`; this.notedTeam = request.memberTeam.slug; }
     if (request.skill && request.gsd) {
       const skill = findSkill(request.gsd.skills, request.skill.name);
       if (!skill) throw new Error(`Open-GSD has no skill named ${request.skill.name}.`);
       prompt = `The user ran /${skill.name}${request.skill.args ? ` ${request.skill.args}` : ''}. Follow these instructions:\n\n${await expandPrompt(skill.body, { args: request.skill.args, home: request.gsd.home, root: this.root })}${request.skillAddendum ?? ''}`;
     }
+    // The team note goes ahead of whatever the turn asks, a GSD workflow's instructions included (after them, it would be replaced). It is sent once per
+    // team in a conversation, not every turn: a long GSD conversation would otherwise carry one copy per message. It is sent again when the team or its
+    // members change, after the conversation is summarized (the summary may drop it), and in a reopened conversation.
+    const note = !request.team && request.memberTeam ? teamMembersNote(request.memberTeam) : undefined;
+    const noteSent = note !== undefined && this.notedTeam !== note;
+    if (noteSent) prompt = `${note}\n\n${prompt}`;
     const extraUsage: UsageMetadata[] = [...(request.attachments?.usage ?? [])];
     if (request.attachments?.text) prompt = `${request.attachments.text}\n\n${prompt}`;
     const remembered = request.memory ? await memoryPreamble(request.memory.store, request.memory.projectScope, request.text).catch(() => undefined) : undefined;
     if (remembered) prompt = `<project-memory>\n${remembered}\n</project-memory>\n\n${prompt}`;
     this.display.set(contentKey(prompt), request.text);
     this.messages.push({ role: 'user', content: prompt });
+    // Recorded once the note is in the conversation, never before a turn that failed to start.
+    if (noteSent) this.notedTeam = note;
     // Saved before the run, so a run a reload cuts off still keeps what was asked.
     await this.saveTranscript(request.model);
     const conversationId = this.conversationId;

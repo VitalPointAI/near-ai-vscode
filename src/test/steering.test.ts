@@ -521,7 +521,7 @@ test('sidebar: a plain message in a project with a team works with that team, sa
     await sidebar.send({ type: 'send', text: 'make the pictures', model: 'z-ai/glm-5.3' });
     await sidebar.send({ type: 'send', text: 'and a banner', model: 'z-ai/glm-5.3' });
     const notices = sidebar.posted.filter((message) => message.type === 'notice' && /^Working with the /.test(String(message.text)));
-    assert.deepEqual(notices.map((message) => message.text), ['Working with the Project team team: its members do the specialist work.'], 'said once');
+    assert.deepEqual(notices.map((message) => message.text), ['Working with the team "Project team": its members do the specialist work.'], 'said once');
     assert.match(lastUser(near.requests[0]), /^<team name="Project team">[\s\S]*- designer \(designer\): Make images\.[\s\S]*<\/team>\n\nmake the pictures$/, 'the chat passes the team to the run');
     assert.equal(lastUser(near.requests[1]), 'and a banner', 'the note is not repeated');
   } finally {
