@@ -5,9 +5,9 @@ milestone_name: Messaging relay — Teams and Signal
 current_phase: 27
 current_phase_name: Project state follows the project across interfaces and machines (0.4.20)
 status: planning
-stopped_at: Completed 27-22-PLAN.md
-last_updated: "2026-11-13T20:33:55.873Z"
-state_head: a770848264a19518a1b3bbb07a358936886846c8
+stopped_at: Completed gap-closure plans 27-26..27-36 (full gate green)
+last_updated: "2026-11-13T23:26:49.940Z"
+state_head: 3110b24ca269ea278e1d7bb66bee43177cbc3a9a
 progress:
   total_phases: 9
   completed_phases: 0
@@ -24,7 +24,7 @@ last_activity_desc: "Completed quick task 261113-lbo: fix the chat task list not
 
 Milestone: v0.7.0 Messaging relay — Teams and Signal (Phases 68-76)
 Phase: 27 (Project state follows the project across interfaces and machines (0.4.20)) — EXECUTING
-Next: `/gsd-plan-phase 27`; then Phase 68 Relay foundation
+Next: PR #40 re-review and merge, then 27-16 (release 0.4.20); then Phase 68 Relay foundation
 
 ## Accumulated Context
 
