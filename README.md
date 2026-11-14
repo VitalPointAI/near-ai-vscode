@@ -629,7 +629,11 @@ and writes the same files, so they all show the same thing.
   them without running the comparison again. A setting you wrote in your
   workspace still wins, then the project's choice, then your user setting.
   Choices you applied earlier in one editor's user settings are offered for
-  import once, never copied without a click.
+  import once, never copied without a click. Compare Models lists what this
+  project has chosen under **Chosen for this project**, with a **Use my
+  settings** button on each row. To drop every choice at once, run **NEAR AI:
+  Clear This Project's Model Choices**. A cleared choice stays cleared on every
+  computer after sync. Putting a model into one role changes only that role.
 - **Pick up where you left off.** When you open a project in another editor or
   on another computer, a card in the empty chat shows the last chat, how its
   run ended (finished, cut off, waiting) and the current Open-GSD phase with
@@ -672,6 +676,10 @@ branches and never pushes to `main`.
 - **The recovery code** is 52 characters in 13 groups of 4, shown once. It is
   never stored, logged or sent anywhere, and nobody, including NEAR AI, can
   recover it for you. Keep it in a password manager.
+- **Sync is turned on in each editor you use.** Whether sync is on is decided
+  in each editor, not by a file in the project. A second editor on the same
+  computer shows **Sync off · Turn on** until you click it; there it shows the
+  same consent screen and makes no new recovery code.
 - **On another computer**, open the cloned project and run **NEAR AI: Enter
   Recovery Code**. Your chats, runs, comparisons and model choices appear, and
   the NEAR AI key is set up for that project. If that computer already has
@@ -692,10 +700,34 @@ branches and never pushes to `main`.
 - **Size.** You get a warning from 500 MB. At 1 GiB, older archived chats stop
   going up and stay on this computer only, with a message saying how many.
   Nothing is deleted, and they go up once there is room.
-- **Other commands:** **Show a New Recovery Code** (a new code does not stop an
-  old one from opening copies already on the git host), **Turn Off Project
-  Sync**, **Give This Project an Online Home**, and
-  **Put This Project's Code Online** (see below).
+- **Other commands:** **Show a New Recovery Code** (a new code does not lock
+  out the old one; see the next point), **Turn Off Project Sync**, **Sync
+  Project Now**, **Give This Project an Online Home**, and **Put This Project's
+  Code Online** (see below).
+- **A new recovery code does not lock out the old one.** Anyone who has your
+  old recovery code and can read the project's repository can still open
+  everything synced, including what is synced from now on, because your chats
+  keep the same key. A new code only opens this project on a new computer. A
+  way to change that key is planned. Treat a leaked code as a leak of
+  everything synced.
+- **Files in the project folder do not decide what sync does.** Sync's private
+  mirror and hooks live in the editor's own storage, outside the project. The
+  sync switch, the remote address and the online-home progress are kept per
+  editor. A key file is used only when it is your own private file, is not
+  tracked by git and passes a key check. A saved-state folder that came with
+  the repository's files is not used. The agent asks before it writes anything
+  under `.near-ai/` and before it reads the state folder. **Revert** touches
+  only the project and the editor's own worktrees.
+- **A deleted or rewound sync branch is rebuilt.** If the `near-ai/state`
+  branch is deleted, replaced or set back, it is rebuilt from what your
+  computers hold. Nothing is lost, and an older recovery code is never taken
+  back.
+- **Entering the recovery code is safe on a computer with chats.** It waits
+  for running chats and syncs, keeps what it could not carry, and removes the
+  folder from before the join only when everything in it is carried. What was
+  kept sits in a folder named `.near-ai/state.previous-` and a time, beside
+  the project's saved state. It can be deleted by hand once those
+  conversations are open elsewhere.
 
 ### Give your project an online home
 
@@ -867,7 +899,7 @@ Read the full [security and trust report](SECURITY.md).
 | `nearAi.agent.autoResumeAfterReload` | `true` | A run a reload cut off in the last 12 hours carries on by itself, with a notice; finished steps are not run again. |
 | `nearAi.agent.roleModels` | research, mapping, fetch and extract roles → fast; planner, plan-checker, verifier, analyst, editor, red-team → deep | Model or tier per agent role, by name or `*` pattern; a team member's own `model:` line wins. |
 | `nearAi.gsd.researchProfile` | `true` | Research and writing projects use the research profile for Open-GSD: coarse phases, quick mode for content edits, verifier scripts in `scripts/verify/`, and the plan-checker only for plans that change a gate or verifier. |
-| `nearAi.agent.saveTranscripts` | `true` | Keep conversations on this machine so History can resume them. |
+| `nearAi.agent.saveTranscripts` | `true` | Save full conversations, including file contents the agent read, encrypted in this project's git-ignored state folder, so History can resume them. Every editor on this computer shares them. They are never committed. |
 | `nearAi.history.liveConversations` | `5` | How many of the most recently used conversations per project stay fully open (1 to 50). Older ones are archived inside the project, never deleted, and reopen in full when you choose them. |
 | `nearAi.sync.keepKeyInProject` | `true` | Keep the project's chat key in a private file (mode 0600) in the project's ignored state folder, so every editor on this computer can open the chats and use the NEAR AI key with no set-up. Off: each new editor or browser asks for the recovery code. |
 | `nearAi.sync.intervalMinutes` | `10` | How often, in minutes, a project with sync turned on syncs in the background while idle. 0 turns the background sync off (0 to 1440). Sync itself runs only after you turn it on. |
@@ -932,8 +964,29 @@ Read the full [security and trust report](SECURITY.md).
   cannot show, run `git fetch` once in a terminal in the project so your
   credential helper can save it.
 - **I lost the recovery code:** nobody can recover it for you. On a computer
-  that is still unlocked, run **NEAR AI: Show a New Recovery Code**. Copies
-  already on the git host still open with the old code.
+  that is still unlocked, run **NEAR AI: Show a New Recovery Code**. A new code
+  does not lock out the old one: anyone who has your old code and can read the
+  project's repository can still open everything synced, including what is
+  synced from now on, because your chats keep the same key. A way to change that
+  key is planned.
+- **Chats are not saved in this project:** the project's saved-state folder is
+  part of the project's files in git, so NEAR AI does not use it. Chats still
+  work, but they are not saved until the folder is taken out of the repository.
+  Nothing was changed. Take it out of git's index, for example with
+  `git rm -r --cached .near-ai/state .near-ai/locks`, then commit. NEAR AI's own
+  `.gitignore` files keep it out from then on.
+- **"This conversation is running in another editor right now":** another
+  editor on this project is running that conversation. Wait for it to finish
+  there, or start a new conversation here. The conversation checks again every
+  30 seconds while it is open and reloads itself when that run ends. If the
+  other editor stopped without a sign of life for 3 minutes, Resume is offered.
+- **Entering the recovery code says a chat is running:** "A chat is running in
+  this project, in this editor or another one. Enter the recovery code again
+  when it has finished. Nothing was changed." Enter it again once the run has
+  finished. If it says a sync is running, wait a moment and enter it again.
+- **"Some conversations could not be added":** they could not be opened on this
+  computer, so they were kept beside the project's saved state, in a folder
+  named `.near-ai/state.previous-` and a time. Nothing was deleted.
 - **The agent changed something you didn't want:** click **Revert** under the
   run. Changes made by shell commands it ran are not included; use git for
   those.

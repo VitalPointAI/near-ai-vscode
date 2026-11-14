@@ -20,7 +20,8 @@ model choices, and a project can be kept in step between computers with a recove
   as...** are saved with the project, so every editor shows them without running the comparison again.
   A setting in your workspace still wins, then the project's choice, then your user setting. Choices
   you applied earlier in one editor's user settings are offered for import once, never copied without a
-  click.
+  click. Compare Models lists what the project has chosen, and you can clear the choices there or with
+  **NEAR AI: Clear This Project's Model Choices**. Putting a model into one role changes only that role.
 - **Pick up where you left off.** Opening a project in another editor or on another computer shows a
   card in the empty chat with the last chat, how its run ended and the current Open-GSD phase with its
   next step. **Open chat** reopens that chat and starts nothing, so it spends nothing.
@@ -33,9 +34,12 @@ model choices, and a project can be kept in step between computers with a recove
   reason in plain words when something needs you, and starts the right step with one click. It works
   from the keyboard and in light, dark and high-contrast themes.
 - **Sync between computers with a recovery code.** **NEAR AI: Turn On Project Sync** shows what your git
-  host can and cannot see, then makes a recovery code and shows it once. Enter it on another computer
-  with **NEAR AI: Enter Recovery Code** and your chats, runs, comparisons, model choices and NEAR AI key
-  are there. Everything is encrypted on your computer before it leaves, and your git host sees only that
+  host can and cannot see, then makes a recovery code and shows it once. Sync is turned on in each
+  editor you use; a second editor on the same computer needs one click and shows no new code. Enter
+  the code on another computer with **NEAR AI: Enter Recovery Code** and your chats, runs,
+  comparisons, model choices and NEAR AI key are there. **NEAR AI: Sync Project Now** syncs at once,
+  **NEAR AI: Show a New Recovery Code** makes a new code (it does not lock out the old one, see the
+  known limits), and **NEAR AI: Turn Off Project Sync** stops syncing. Everything is encrypted on your computer before it leaves, and your git host sees only that
   sync is used, roughly how much is stored and when you save. Sync runs after a run or reply ends, a
   minute after you leave the window, and every 10 minutes while idle
   (`nearAi.sync.intervalMinutes`, 0 turns it off). It pulls when the project opens and when you come
@@ -45,10 +49,17 @@ model choices, and a project can be kept in step between computers with a recove
   pushes the encrypted sync branch. Pushing your own code is a separate step that lists the files and
   blocks likely secrets, including ones left in earlier commits. Without GitHub sign-in it offers the
   `gh` tool or the address of an empty repository you paste in, and it never asks for a token.
+  **NEAR AI: Put This Project's Code Online** pushes your own code later, with the same checks.
+- **Sync no longer trusts files in the project folder.** Files that arrive with a cloned repository no
+  longer decide what sync runs, whether it is on, or which key it uses. Sync's private mirror and
+  hooks live in the editor's own storage, the agent asks before it writes under `.near-ai/` or reads
+  the state folder, entering a recovery code on a computer with chats keeps whatever it could not
+  carry, and a deleted or rewound sync branch is rebuilt without loss.
 - **The chat task list checks off finished tasks.** A finished run no longer leaves its list at 0/N.
   When a run ends with unfinished items, the agent is asked once to update the list, and anything still
   unfinished shows as "not confirmed done" instead of looking finished. Sub-agent tasks are matched to
-  the list more reliably, and only when the match is unique.
+  the list more reliably: a sub-agent's task is matched by its text first, and only when the match is
+  unique.
 - **Every research team now has a plagiarism checker.** It sits between the writer and the red
   team, compares the draft with every source fetched in the run and searches the web for
   distinctive sentences, checks every note against its source, and ends
@@ -78,9 +89,13 @@ Known limits in this release:
 - History shows the lead agent's steps and each sub-agent's report. Sub-agent steps become linked
   threads in a later release.
 - A single tool output over 2 MiB is stored shortened, with a visible "output shortened" marker.
-- A new recovery code does not stop the old one from opening copies already on the git host. A new
-  code protects only what is pushed afterwards, so treat a leaked code as exposing everything pushed
-  before it.
+- A new recovery code does not lock out the old one. Anyone with your old code and read access to the
+  repository can still open everything synced, including what is synced from now on, because your
+  chats keep the same key. A way to change that key is planned. Treat a leaked code as a leak of
+  everything synced.
+- A conversation written in one editor at the very instant another editor joins the project can be
+  undone by that join. Conversation writes do not yet take a lock.
+- Error text from a failed reply in VS Code's Chat view stays in VS Code's own chat history.
 
 ## 0.4.19
 

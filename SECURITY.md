@@ -323,12 +323,34 @@ encrypted, to a branch of the project's own git remote so another computer can o
   that is still unlocked can show a new one.
 - **Anonymous commits.** Sync writes its commits with git plumbing into a private mirror, with the
   author and committer `near-ai-state <state@near-ai.invalid>`, a constant date and the message
-  "Update encrypted project state". Your git identity and configuration are never read or changed,
-  and hooks, signing, helper transports and the inherited git environment are switched off for those
-  calls. A credential for the remote reaches git only through the child process's environment and is
+  "Update encrypted project state". Sync never changes your git configuration and never uses your
+  name or email. Git still reads your global git settings and this project's remote address, as any
+  git command would. Hooks, signing, helper transports, fsmonitor and the inherited git environment
+  are switched off for sync's calls, and sync's private mirror and hooks folder live in the editor's
+  own storage, outside the project. A credential for the remote reaches git only through the child process's environment and is
   never written to a config file or passed as an argument.
 - **Automatic syncs never prompt.** A background sync looks up an existing GitHub sign-in silently;
   if there is none it stops with "Sync needs you to sign in. Choose Sync Project Now.".
+
+### What sync trusts in the project folder
+
+Files inside the project folder can arrive with a cloned or downloaded repository, so sync does not
+let them decide what it does:
+
+- **The sync switch, the remote and the online-home progress** are kept per editor, not in the
+  project folder. Whether sync is on is decided in each editor.
+- **Sync's private mirror and hooks folder** live in the editor's own storage, outside the project,
+  so a hook or a git setting planted in the project is never run by sync.
+- **A key file** is used only when it is your own private file (mode 0600), not tracked by git,
+  not a link, and it passes a key check.
+- **A state folder that is tracked by git** is not used. Chats still work, but are not saved until
+  the folder is taken out of the repository, and nothing is changed.
+- **The agent** asks before it writes anything under `.near-ai/` and before it reads the state
+  folder, and its checkpoints and Revert touch only the project and the editor's own worktrees.
+- **Joining a project on a computer that has chats** waits for running chats and syncs, holds the
+  sync lock from the copy to the catch-up, and removes the folder from before the join only when
+  everything in it is carried. What could not be carried is kept beside the project's saved state
+  and never deleted by the extension.
 
 ### Post-quantum reasoning
 
@@ -358,9 +380,13 @@ to a public repository (see below).
 
 ### Residual risks
 
-- **A new recovery code does not revoke the old one.** Copies already on the git host stay in git
-  history and still open with the old code. A new code only protects what is pushed afterwards;
-  treat a leaked code as a leak of everything pushed before it.
+- **A new recovery code does not lock out the old one.** Anyone who has the old code and can read
+  the project's repository can still open everything synced, including what is synced from now on,
+  because the chats keep the same data key. A new code only changes who can open the project on a
+  new computer. Changing the data key is planned. Treat a leaked code as a leak of everything
+  synced.
+- **A deleted, replaced or rewound sync branch** is rebuilt from what your computers hold. Nothing
+  is lost, and an older recovery code is never taken back.
 - **Chats at rest in the project folder** are protected by file permissions on that computer
   (the key file is mode 0600), not by a password. Anyone who can read your files can read your
   chats. They are end-to-end encrypted everywhere they leave the computer. With
@@ -565,7 +591,7 @@ maps, `node_modules`, `.planning`, `.codex`, `.agents`, or `.git`.
 | Scanned PDFs (no text layer), old binary Office files (.doc, .ppt, .xls), and video can't be attached; video can't be generated | The chat says so when a file can't be read; export with OCR or re-save in the current format |
 | Attached PDFs and Office files are parsed on this machine (PDFs by Mozilla's pdf.js, vendored, with script evaluation and font loading off; Office files by the extension's own reader, capped at 50 MB unpacked) | Only the extracted text is sent, and it passes the same privacy and spend checks as typed text |
 | Attached images and audio are sent to the profile's provider (NEAR AI or your local runtime) to be read or transcribed, possibly by a different model than the one you chose | The chat names the model used for each file; TEE-only mode blocks the turn if that model is not TEE-attested |
-| Project sync cannot revoke a recovery code: a new code protects only what is pushed afterwards | Treat a leaked code as exposing everything pushed before it; see Project state and sync |
+| Project sync cannot lock out an old recovery code: anyone with the old code and read access to the repository can still open everything synced, including what is synced from now on, because the data key does not change | Treat a leaked code as a leak of everything synced; changing the data key is planned; see Project state and sync |
 | The daily spend limit counts the spend of the editor it runs in, not every editor on the computer | Project spend history is shown in every editor; a combined limit is planned |
 | The history keeps the lead agent's steps and each sub-agent's report; a sub-agent's own steps are not yet separate threads | Linked sub-agent threads are planned |
 | Memory has a searchable list, not a graph view; teams have no shared team memory | Members get project memory and their own private memory |
