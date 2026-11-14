@@ -110,6 +110,8 @@ interface ChatTab {
   paused: Map<string, { minutes?: number; text: string }>;
   /** What was typed for each queued steer, so a re-shown conversation shows its queued messages. */
   steerTexts: Map<string, string>;
+  /** The team this conversation was last told it works with, so the notice is said once per team. */
+  teamNoticed?: string;
   /** Sends a message of this conversation: logged, and posted to the view when it is on screen. */
   post: (message: Record<string, unknown>) => void;
   /** Its run the extension host never finished, until the user resumes or dismisses it. */
@@ -232,6 +234,22 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
       sendSummary();
     };
     return tab;
+  };
+  /**
+   * The team a conversation works with when the run is not a /team run: the newest /team:<name> typed in it, or the project's own team. Said once per
+   * conversation and team, so the person sees which team's members will be asked.
+   */
+  const workingTeam = async (tab: ChatTab, root: string): Promise<TeamDefinition | undefined> => {
+    await whenTeamsMoved();
+    const library = new TeamLibrary(teamLibraryDir(homeFolder()));
+    const slug = tab.agent?.conversationTeam;
+    const named = slug ? await library.find(slug, root).catch(() => undefined) : undefined;
+    const found = named ?? await library.find('project', root).catch(() => undefined);
+    if (found && tab.teamNoticed !== found.slug) {
+      tab.teamNoticed = found.slug;
+      tab.post({ type: 'notice', text: `Working with the ${found.name} team: its members do the specialist work${slug && !named ? ` (the ${slug} team this conversation started with is gone, so the project's team is used)` : ''}.` });
+    }
+    return found;
   };
   const ensureAgent = (tab: ChatTab, root: string): AgentConversation => {
     if (!tab.agent) {
@@ -747,6 +765,9 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
       tab.post({ type: 'assistant-error', text: providerErrorMessage(error) });
       return;
     }
+    // 0.4.21: a run that is not led as a team still works with one: the team this conversation was started with (/team:<name>), or else the
+    // project's own team. Its members do the specialist work; Open-GSD keeps the project on track.
+    const memberTeam = team ? undefined : await workingTeam(tab, root);
     const text = message.type === 'send' ? message.text : team ? `/team:${team.slug} ${message.args ?? ''}`.trim() : `/${skill!.name}${skill!.args ? ` ${skill!.args}` : ''}`;
     // Attachments the user staged for this message.
     const staged = message.type === 'send' ? (message.attachmentIds ?? []).map((id) => state.attachments.get(id)).filter((item): item is StagedAttachment => Boolean(item)) : [];
@@ -837,7 +858,7 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
       const endRun = beginRun();
       runStarted(root);
       try {
-        await agent.send({ modelStallMs, ...(backupModel ? { backupModel } : {}), text, skill, gsd, team, attachments, memory: { store: state.memory, projectScope: { kind: 'project', id: projectIdForWorkspace(root) } }, imageModel: route.local ? undefined : imageModel, reputation: new ReputationStore(root), tiers: readModelTiers(), roleModels: readRoleModels(), safetyModel, safetyFallbackModel, riskSwitches: readRiskSwitches(), rememberAllowRule: (rule) => rememberAllowRule(rule, tab), unattendedAutoApprove: vscode.workspace.getConfiguration('nearAi').get<boolean>('agent.unattendedAutoApprove', AGENT_DEFAULTS.unattendedAutoApprove) !== false, researchProfile: vscode.workspace.getConfiguration('nearAi').get<boolean>('gsd.researchProfile', true) !== false, availableModels: delegable.map((candidate) => candidate.id), modelCatalog: delegable, route: privateRouteFor(active.provider, route.local), contextWindows: Object.fromEntries(active.models.map((candidate) => [candidate.id, candidate.contextLength])), maxParallelAgents: limits.maxParallelAgents, maxTurns: limits.maxTurns, client: route.client, model, privacy: modelPrivacyLabel(modelInfo), policy: settings.actionPolicy, rules: readAgentRules(), activity: { store: state.activity, sessionId: session.sessionId }, local: route.local, security: securityAccess(context, root), webSearch: await webSearchProvider(context.secrets), budget: runBudget, mcpTools: mcp.tools, maxOutputTokens: Math.max(1_000, Math.min(1_000_000, Number(vscode.workspace.getConfiguration('nearAi').get<number>('agent.maxOutputTokens', AGENT_DEFAULTS.maxOutputTokens)) || AGENT_DEFAULTS.maxOutputTokens)), shellEnvAllow: vscode.workspace.getConfiguration('nearAi').get<string[]>('agent.shellEnvAllow', []).filter((name) => typeof name === 'string'), runId, ...(redTeamStep ? { skillAddendum: redTeamStep.addendum, projectAgents: redTeamStep.agents } : {}) });
+        await agent.send({ modelStallMs, ...(backupModel ? { backupModel } : {}), text, skill, gsd, team, ...(memberTeam ? { memberTeam } : {}), attachments, memory: { store: state.memory, projectScope: { kind: 'project', id: projectIdForWorkspace(root) } }, imageModel: route.local ? undefined : imageModel, reputation: new ReputationStore(root), tiers: readModelTiers(), roleModels: readRoleModels(), safetyModel, safetyFallbackModel, riskSwitches: readRiskSwitches(), rememberAllowRule: (rule) => rememberAllowRule(rule, tab), unattendedAutoApprove: vscode.workspace.getConfiguration('nearAi').get<boolean>('agent.unattendedAutoApprove', AGENT_DEFAULTS.unattendedAutoApprove) !== false, researchProfile: vscode.workspace.getConfiguration('nearAi').get<boolean>('gsd.researchProfile', true) !== false, availableModels: delegable.map((candidate) => candidate.id), modelCatalog: delegable, route: privateRouteFor(active.provider, route.local), contextWindows: Object.fromEntries(active.models.map((candidate) => [candidate.id, candidate.contextLength])), maxParallelAgents: limits.maxParallelAgents, maxTurns: limits.maxTurns, client: route.client, model, privacy: modelPrivacyLabel(modelInfo), policy: settings.actionPolicy, rules: readAgentRules(), activity: { store: state.activity, sessionId: session.sessionId }, local: route.local, security: securityAccess(context, root), webSearch: await webSearchProvider(context.secrets), budget: runBudget, mcpTools: mcp.tools, maxOutputTokens: Math.max(1_000, Math.min(1_000_000, Number(vscode.workspace.getConfiguration('nearAi').get<number>('agent.maxOutputTokens', AGENT_DEFAULTS.maxOutputTokens)) || AGENT_DEFAULTS.maxOutputTokens)), shellEnvAllow: vscode.workspace.getConfiguration('nearAi').get<string[]>('agent.shellEnvAllow', []).filter((name) => typeof name === 'string'), runId, ...(redTeamStep ? { skillAddendum: redTeamStep.addendum, projectAgents: redTeamStep.agents } : {}) });
       } finally {
         endRun();
         void runEnded({ root, conversationId: tab.id, runId, outcome: tab.outcome });

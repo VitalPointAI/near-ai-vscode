@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- **Your team does the specialist work in every run, not only the first.** A team was used only for
+  the `/team:<name>` message that started it. A later message in the same conversation, or an
+  Open-GSD workflow, could not see the team's members, so work such as images went to a general
+  agent instead of the team's designer. Now a conversation keeps the team it was started with, and
+  without one the project's own team is used. Open-GSD keeps the project on track (planning,
+  checking, verification) and hands the specialist work to the member whose role covers it, using a
+  general agent only when no member fits. The chat says which team it is working with.
+
 ## 0.4.20
 
 This release is about your project staying the same wherever you open it. The same project in

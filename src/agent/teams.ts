@@ -149,6 +149,20 @@ export function teamAgents(team: TeamDefinition): GsdAgent[] {
   }));
 }
 
+/**
+ * 0.4.21: the team a run works with when it is not led as a team: later messages of a conversation started with /team:<name>, or any run in a project
+ * with its own team, GSD workflows included. Before, the team existed only for the one /team message, so a later "make the pictures" never saw the
+ * designer and went to general-purpose. Owner, 2026-11-14: "GSD's role is to keep the project on track - like the project manager, contractor, and
+ * quality control. GSD sub contracts teams when available to perform the specialist functions (unless a specialist functional role is missing)."
+ */
+export function teamMembersNote(team: TeamDefinition): string {
+  return `<team name="${team.name.replace(/"/g, "'")}">
+You work with the "${team.name}" team. Its members, each available as an Agent subagent_type:
+${team.members.map((member) => `- ${member.name}${member.role ? ` (${member.role})` : ''}: ${member.instructions.split('\n')[0].slice(0, 160)}`).join('\n')}
+Open-GSD runs the project: like a project manager, contractor and quality control, it plans, tracks, checks and verifies. It subcontracts the specialist work to this team. So when a piece of work, or a workflow step, is something a member's role covers (for example building to an implementer, images to a designer, research to a researcher), spawn that member with the Agent tool instead of an Open-GSD agent or general-purpose. Its prompt must be complete: the step's task, everything the workflow requires of it (files to write, commits, checks to run) and the report you need back. Keep Open-GSD's own agents for keeping the project on track (planning, plan checking, verification, progress), and for specialist work no member covers. Use general-purpose only when neither fits.
+</team>`;
+}
+
 export function teamLeadPrompt(team: TeamDefinition, task: string): string {
   // Owner, 2026-11-08: "ensure all our teams and default instructions prompt the orchestrating agent or team lead to allow use of parallelism where
   // appropriate". The old wording mentioned parallelism in a clause; this makes it a rule with the test for what may run together, and says to fan out in
@@ -161,6 +175,7 @@ ${team.members.map((member) => `- ${member.name}${member.role ? ` (${member.role
 - Then collect the reports, resolve what conflicts, and integrate. If a part's result changes what another part needs, run that second part afterwards and say why it had to wait.
 - Give every member a complete, self-contained prompt: it sees nothing of this conversation. Name the exact output you want back from it.
 - Do the coordination yourself; do not do the members' work for them.
+- Give each part to the member whose role covers it, never to general-purpose or an Open-GSD agent while a member fits. Open-GSD's own agents keep the project on track (planning, checking, verification); the specialist work is the members'.
 - When two or more members that change files run at the same time in a git repository, start each with \`isolation: "worktree"\` so they cannot overwrite each other; each reports its branch for you to merge. Members that only read or research need no worktree.
 
 Finish with a short summary of what each member did, what ran at the same time, and the outcome.

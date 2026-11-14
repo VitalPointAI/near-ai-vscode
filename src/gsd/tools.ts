@@ -9,11 +9,26 @@ export interface Question {
   multiSelect: boolean;
 }
 
+/**
+ * What subagent_type may be. With a team (0.4.21), its members come first with their roles, and the description says to use them for work their roles
+ * cover: before, members were listed among every Open-GSD agent by name alone, and work a member was made for (a designer's images) went to
+ * general-purpose.
+ */
+function subagentTypeHelp(services: Pick<GsdServices, 'agents' | 'teamMembers'>): string {
+  const members = new Set(services.teamMembers ?? []);
+  const team = services.agents.filter((agent) => members.has(agent.name));
+  const others = services.agents.filter((agent) => !members.has(agent.name)).map((agent) => agent.name);
+  if (!team.length) return `One of: ${others.join(', ')}, or general-purpose.`;
+  return `Team members (the specialists: use the member whose role covers the work, also for a workflow step): ${team.map((agent) => `${agent.name} (${agent.description})`).join(', ')}.${others.length ? ` Other agents: ${others.join(', ')}.` : ''} Or general-purpose, only when no team member fits.`;
+}
+
 export interface GsdServices {
   home: string;
   root: string;
   skills: GsdSkill[];
   agents: GsdAgent[];
+  /** 0.4.21: the names of the agents that are members of the team this run works with; the Agent tool lists them first and says to prefer them. */
+  teamMembers?: string[];
   /** Shows the questions in the chat and resolves with one answer per question. */
   ask(questions: Question[], signal: AbortSignal): Promise<string[]>;
   /**
@@ -105,7 +120,7 @@ export function gsdTools(services: GsdServices): AgentTool<any>[] {
       ...(typeof raw.task === 'string' && raw.task.trim() ? { task: raw.task.slice(0, 300) } : {})
     };
   };
-  const agentParameters = { type: 'object', properties: { description: { type: 'string', description: 'Three to five words on the task.' }, prompt: { type: 'string', description: 'The complete task for the agent; it sees nothing else from this conversation.' }, subagent_type: { type: 'string', description: `One of: ${services.agents.map((agent) => agent.name).join(', ')}, or general-purpose.` }, model: { type: 'string', description: 'Optional tier or model ID.' }, run_in_background: { type: 'boolean' }, isolation: { type: 'string', enum: ['worktree'], description: 'Run the agent in its own git worktree on a new branch; its changes stay on that branch for you to merge.' }, task: { type: 'string', description: 'The exact content of the task-list item this agent works on. The task list then shows it in progress while the agent runs and completed when it finishes. Its number on the list (1 for the first item) works too.' } }, required: ['prompt'], additionalProperties: false };
+  const agentParameters = { type: 'object', properties: { description: { type: 'string', description: 'Three to five words on the task.' }, prompt: { type: 'string', description: 'The complete task for the agent; it sees nothing else from this conversation.' }, subagent_type: { type: 'string', description: subagentTypeHelp(services) }, model: { type: 'string', description: 'Optional tier or model ID.' }, run_in_background: { type: 'boolean' }, isolation: { type: 'string', enum: ['worktree'], description: 'Run the agent in its own git worktree on a new branch; its changes stay on that branch for you to merge.' }, task: { type: 'string', description: 'The exact content of the task-list item this agent works on. The task list then shows it in progress while the agent runs and completed when it finishes. Its number on the list (1 for the first item) works too.' } }, required: ['prompt'], additionalProperties: false };
   const agentTool: AgentTool<ReturnType<typeof agentParse>> = {
     name: 'Agent',
     description: 'Start a sub-agent with its own context to do a self-contained task, and get back its final report. Give it everything it needs in the prompt. Several Agent calls in one turn run in parallel. With run_in_background the call returns at once and the report arrives in a later message when the agent finishes. When the agent does an item from your task list, pass that item\'s exact content (or its number on the list) as task.',

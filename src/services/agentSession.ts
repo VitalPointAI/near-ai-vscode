@@ -43,7 +43,7 @@ import type { RunEnd, RunMarkers } from './runMarkers';
 import { NOT_CHECKED_IN_EDITOR, type ResponseEvidence, type VerificationResult } from './attestation';
 import { PreparedAttachments } from '../agent/attachments';
 import { imageTool, memoryPreamble, memoryTools } from '../agent/extraTools';
-import { TeamDefinition, teamAgents, teamLeadPrompt } from '../agent/teams';
+import { TeamDefinition, teamAgents, teamLeadPrompt, teamMembersNote } from '../agent/teams';
 import { knowledgeTools } from '../agent/knowledgeTools';
 import { addKnowledge, KNOWLEDGE_INSTRUCTIONS, loadKnowledge } from './teamKnowledgeStore';
 import { teamKnowledgeKey } from '../agent/teams';
@@ -94,6 +94,8 @@ export interface AgentTurnRequest {
   maxTurns?: number;
   /** Run a team: a lead agent delegates `text` to the team's members. */
   team?: TeamDefinition;
+  /** 0.4.21: the team this run works with, not led: its members can be spawned and are preferred for work their roles cover. */
+  memberTeam?: TeamDefinition;
   /** Attachments already read (text inlined, images described, audio transcribed). */
   attachments?: PreparedAttachments;
   /** Project memory: relevant facts start each turn, and Remember/Recall are available. */
@@ -337,6 +339,7 @@ export class AgentConversation {
     if (!this.title) this.title = request.text.replace(/\s+/g, ' ').slice(0, 80);
     let prompt = request.text;
     if (request.team) prompt = teamLeadPrompt(request.team, request.text.replace(/^\/team:\S+\s*/, ''));
+    else if (request.memberTeam) prompt = `${teamMembersNote(request.memberTeam)}\n\n${prompt}`;
     if (request.skill && request.gsd) {
       const skill = findSkill(request.gsd.skills, request.skill.name);
       if (!skill) throw new Error(`Open-GSD has no skill named ${request.skill.name}.`);
@@ -691,7 +694,30 @@ export class AgentConversation {
 
   /** The agent definitions a run can start; without any, the run has no Agent tool. */
   private spawnableAgents(request: AgentTurnRequest): GsdAgent[] {
-    return [...(request.gsd?.agents ?? []), ...(request.team ? teamAgents(request.team) : []), ...(request.projectAgents ?? [])];
+    // Team members first, so a member wins over an Open-GSD agent of the same name; one definition per name.
+    const all = [...this.teamMembersOf(request), ...(request.gsd?.agents ?? []), ...(request.projectAgents ?? [])];
+    return all.filter((agent, index) => all.findIndex((other) => other.name === agent.name) === index);
+  }
+
+  /** The members of the team this run leads or works with. */
+  private teamMembersOf(request: AgentTurnRequest): GsdAgent[] {
+    const team = request.team ?? request.memberTeam;
+    return team ? teamAgents(team) : [];
+  }
+
+  /**
+   * The team this conversation was started with: the newest `/team:<name>` the person typed in it. Read from the conversation itself, so a reopened
+   * conversation keeps its team, and a later /team:<other> switches it.
+   */
+  public get conversationTeam(): string | undefined {
+    let slug: string | undefined;
+    for (const message of this.messages) {
+      if (message.role !== 'user') continue;
+      const typed = this.display.get(contentKey(message.content));
+      const match = typed ? /^\/team:(\S+)/.exec(typed) : null;
+      if (match) slug = match[1];
+    }
+    return slug;
   }
 
   /** `agentTool` says whether this run's tools include Agent, so the prompt only advises handing work to sub-agents when it can. */
@@ -784,6 +810,7 @@ export class AgentConversation {
       root: this.root,
       skills: gsd?.skills ?? [],
       agents,
+      teamMembers: this.teamMembersOf(request).map((agent) => agent.name),
       ask: (questions, askSignal) => this.askQuestions(questions, askSignal),
       spawn: async (spawn, callSignal) => {
         const label = spawn.agent?.name ?? spawn.type;
