@@ -835,7 +835,7 @@
     "compile": "node scripts/vendor-libs.mjs && tsc -p tsconfig.json",
     "watch": "tsc -p tsconfig.json --watch",
     "lint": "tsc -p tsconfig.json --noEmit",
-    "test": "npm run compile && node --test dist/test/*.test.js scripts/test/*.test.mjs",
+    "test": "npm run compile && node scripts/run-tests.mjs dist/test/*.test.js scripts/test/*.test.mjs",
     "report:spend": "node scripts/spend-report.mjs",
     "report:runs": "node scripts/run-report.mjs",
     "experiment": "node scripts/ab-task.mjs",

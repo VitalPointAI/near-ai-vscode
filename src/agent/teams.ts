@@ -162,14 +162,71 @@ export async function workingTeamFor(find: (slug: string) => Promise<TeamDefinit
   // The project's team comes with the repository, so it is used only once the person agreed to it (owner, 2026-11-14: ask once per project).
   const project = named ? undefined : usable(await quietly('project'));
   const team = named ?? (project && await allowProject(project).catch(() => false) ? project : undefined);
-  if (!team) return {};
-  // What was said: the team, or that the conversation's team is gone and this one is used instead, which is news even when the team is the same.
   const gone = conversationTeam !== undefined && !named;
+  if (!team) {
+    // The conversation's own team is gone and there is no project team to use: said once, rather than dropping the team without a word.
+    if (!gone) return {};
+    const none = `none (instead of ${conversationTeam})`;
+    if (none === noticed) return { noticed };
+    return { noticed: none, notice: `The team "${noTags(conversationTeam).slice(0, 80)}" this conversation started with could not be found or has no members, so this run continues without a team.` };
+  }
+  // What was said: the team, or that the conversation's team is gone and this one is used instead, which is news even when the team is the same.
   const key = gone ? `${team.slug} (instead of ${conversationTeam})` : team.slug;
   if (key === noticed) return { team, noticed };
   const why = gone ? ` (the ${conversationTeam} team this conversation started with is gone or empty, so the project's team is used)` : '';
   const which = named ? `the team "${noTags(team.name)}"` : `this project's team "${noTags(team.name)}" (from .planning/.near-ai/team.md)`;
   return { team, noticed: key, notice: `Working with ${which}: its members do the specialist work${why}.` };
+}
+
+/** Where the answers to "use this project's team?" are kept, per workspace: one per team file, as a multi-root workspace has one team file per folder. */
+export const PROJECT_TEAM_CONSENT_KEY = 'nearAi.projectTeamConsent';
+/** At most this many answers are kept, newest last; older ones are asked again. */
+const MAX_TEAM_CONSENTS = 20;
+export interface TeamConsent { fingerprint: string; use: boolean }
+interface ConsentStore { get<T>(key: string): T | undefined; update(key: string, value: unknown): PromiseLike<void> | Promise<void> }
+
+/** The question asking to use a project's team. Its member names and roles come from a repository file, so they are made plain and capped in length and number. */
+export function projectTeamQuestion(team: TeamDefinition): string {
+  const shown = team.members.slice(0, 6).map((member) => `${noTags(member.name).slice(0, 40)}${member.role ? ` (${noTags(member.role).slice(0, 40)})` : ''}`);
+  const more = team.members.length > shown.length ? ` and ${team.members.length - shown.length} more` : '';
+  return `This project has a team in .planning/.near-ai/team.md: ${shown.join(', ')}${more}. Use it for runs in this project? Its members do the specialist work, with the tools and models that file gives them.`;
+}
+
+/**
+ * Whether this project's team may be used (owner, 2026-11-14: ask once per project). The file comes with the repository, so a cloned repository could
+ * otherwise choose the members, their tools and their models. Never in a window VS Code does not trust, and only `trusted === true` counts as trusted;
+ * otherwise asked once per team file, and asked again when that file's team changes. `ask` resolves true to use it, false not to, undefined when the
+ * question was closed: no team this time, and asked again next time. `fallback` keeps the answers when there is no workspace state.
+ */
+export async function projectTeamAllowed(team: TeamDefinition, options: { trusted: boolean | undefined; store?: ConsentStore; fallback: Map<string, TeamConsent>; ask: (question: string) => Promise<boolean | undefined> }): Promise<boolean> {
+  if (options.trusted !== true) return false;
+  const fingerprint = createHash('sha256').update(JSON.stringify([team.name, team.members])).digest('hex');
+  const stored = options.store?.get<unknown>(PROJECT_TEAM_CONSENT_KEY);
+  // Before 0.4.22 one answer was kept for the whole workspace, as { fingerprint, use }; it still counts for a team with that fingerprint.
+  const legacy = isConsent(stored) ? stored : undefined;
+  const byFile: Record<string, TeamConsent> = stored && typeof stored === 'object' && !legacy ? Object.fromEntries(Object.entries(stored as Record<string, unknown>).filter((entry): entry is [string, TeamConsent] => isConsent(entry[1]))) : {};
+  // The old single answer is bound to the first team file it is used for (#46 review): it is moved under that file and no longer applies to any other
+  // folder's team, even one with the same name and members.
+  if (legacy && legacy.fingerprint === fingerprint && byFile[team.file] === undefined) {
+    await options.store?.update(PROJECT_TEAM_CONSENT_KEY, { [team.file]: legacy });
+    return legacy.use;
+  }
+  const saved = byFile[team.file] ?? options.fallback.get(team.file);
+  if (saved?.fingerprint === fingerprint) return saved.use;
+  const answer = await options.ask(projectTeamQuestion(team));
+  if (answer === undefined) return false;
+  const decision: TeamConsent = { fingerprint, use: answer };
+  options.fallback.delete(team.file);
+  options.fallback.set(team.file, decision);
+  while (options.fallback.size > MAX_TEAM_CONSENTS) options.fallback.delete(options.fallback.keys().next().value as string);
+  delete byFile[team.file];
+  const kept = [...Object.entries(byFile), [team.file, decision] as [string, TeamConsent]].slice(-MAX_TEAM_CONSENTS);
+  await options.store?.update(PROJECT_TEAM_CONSENT_KEY, Object.fromEntries(kept));
+  return decision.use;
+}
+
+function isConsent(value: unknown): value is TeamConsent {
+  return !!value && typeof value === 'object' && typeof (value as TeamConsent).fingerprint === 'string' && typeof (value as TeamConsent).use === 'boolean';
 }
 
 /** Team text inside the note, with angle brackets made plain, so a line such as `</team>` in a member's instructions cannot end the note early. */

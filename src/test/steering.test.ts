@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
-import { mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -12,6 +12,7 @@ import { MAX_MESSAGE_CHARS, parseChatWebviewMessage } from '../services/chatBrid
 import { ProfileStore } from '../services/profileStore';
 import { deriveProfileId } from '../domain/auth';
 import type { AgentMessage, CompletionEvent } from '../services/nearAiClient';
+import { StubNode, chatPage } from './helpers/chatPage';
 
 // Steering: a message typed while a run is going is queued for the running agent, appended to its
 // transcript before the next model request (never mid-stream or mid-tool), ends a retry wait, and
@@ -162,7 +163,7 @@ class MemorySecrets implements SecretStorageLike {
 }
 
 const vscodeStub = {
-  workspace: { workspaceFolders: [] as Array<{ uri: { fsPath: string } }>, name: 'demo', getConfiguration: () => ({ get: (_key: string, fallback?: unknown) => fallback, inspect: () => undefined }), onDidChangeConfiguration: () => ({ dispose() {} }) },
+  workspace: { isTrusted: true, workspaceFolders: [] as Array<{ uri: { fsPath: string } }>, name: 'demo', getConfiguration: () => ({ get: (_key: string, fallback?: unknown) => fallback, inspect: () => undefined }), onDidChangeConfiguration: () => ({ dispose() {} }) },
   window: { showInformationMessage: () => undefined, showWarningMessage: () => undefined, activeTextEditor: undefined },
   commands: { executeCommand: async () => undefined },
   Uri: { joinPath: (base: { fsPath: string }, ...parts: string[]) => ({ fsPath: path.join(base.fsPath, ...parts) }), file: (fsPath: string) => ({ fsPath }) }
@@ -200,12 +201,18 @@ async function projectWithProfile() {
 type Delta = { content?: string; tool_calls?: Array<{ index: number; id: string; function: { name: string; arguments: string } }> };
 
 /** A fake NEAR whose chat turns come from `next`, which sees each request's messages. */
-function fakeNear(next: (messages: Array<{ role: string; content: unknown }>) => Promise<Delta> | Delta, hooks: { billing?: () => Promise<void> } = {}) {
+function fakeNear(next: (messages: Array<{ role: string; content: unknown }>) => Promise<Delta> | Delta, hooks: { billing?: () => Promise<void>; vision?: boolean } = {}) {
   const requests: Array<Array<{ role: string; content: unknown }>> = [];
+  /** Images the model was asked to describe (with `vision`): each one is a paid read. */
+  const imageReads: string[] = [];
   const fetch = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
     const url = String(input);
     if (url.endsWith('/models/pricing')) return new Response('{}', { status: 404 });
-    if (url.endsWith('/models')) return Response.json({ data: [{ id: 'z-ai/glm-5.3', pricing: { input: 1, output: 1 } }] });
+    if (url.endsWith('/models')) return Response.json({ data: [{ id: 'z-ai/glm-5.3', pricing: { input: 1, output: 1 }, ...(hooks.vision ? { input_modalities: ['text', 'image'] } : {}) }] });
+    if (hooks.vision && url.endsWith('/chat/completions') && String(init?.body).includes('"image_url"')) {
+      imageReads.push(String(init?.body));
+      return Response.json({ choices: [{ message: { role: 'assistant', content: 'A red square with the word PORT 7070.' } }], usage: { prompt_tokens: 50, completion_tokens: 10 } });
+    }
     if (url.endsWith('/model/list')) return Response.json({ models: [{ modelId: 'z-ai/glm-5.3', metadata: { attestationSupported: true, providerType: 'tinfoil' } }] });
     if (url.endsWith('/billing/costs')) { await hooks.billing?.(); return Response.json({ requests: [{ requestId: '0b6e3f9e-5a1d-5c2b-8f4e-1d2c3b4a5f60', costNanoUsd: 1000 }] }); }
     if (url.endsWith('/chat/completions')) {
@@ -217,7 +224,7 @@ function fakeNear(next: (messages: Array<{ role: string; content: unknown }>) =>
     }
     return new Response('not found', { status: 404 });
   };
-  return { requests, fetch: fetch as typeof globalThis.fetch };
+  return { requests, imageReads, fetch: fetch as typeof globalThis.fetch };
 }
 
 async function until<T>(read: () => T | undefined): Promise<T> {
@@ -627,10 +634,70 @@ test('sidebar: Stop hands a queued message back with its attachments, ready to s
   }
 });
 
+// Driven on the real chat page rather than matched in its source: the files attached when a message is sent during a run go with that message.
 test('a message sent during a run no longer leaves its attachments staged for a later message', () => {
-  const chat = readFileSync(path.join(__dirname, '..', '..', 'media', 'chat', 'chat.js'), 'utf8');
-  assert.equal(chat.includes('Attachments stay staged'), false);
-  assert.match(chat, /type: 'steer', id, text[^\n]*attachmentIds: ids/);
+  const page = chatPage();
+  page.send({ type: 'assistant-start', model: 'z-ai/glm-5.3' });
+  page.send({ type: 'attachment-staged', id: 'att-0123456789ab', name: 'ports.txt', kind: 'text', size: 10 });
+  const input = page.nodes.get('input') as StubNode;
+  input.value = 'check the attached ports file';
+  page.posts.length = 0;
+  (page.nodes.get('steer') as StubNode).click();
+  const steer = page.sent().find((message) => (message as { type?: string }).type === 'steer') as { id: string; text: string; attachmentIds?: string[] } | undefined;
+  assert.ok(steer, 'the message is sent to the running agent');
+  assert.equal(steer.text, 'check the attached ports file');
+  assert.deepEqual(steer.attachmentIds, ['att-0123456789ab'], 'with the files attached when it was sent');
+  // The host took the files with it; the next message sent during the run carries none.
+  page.send({ type: 'attachments-cleared', ids: ['att-0123456789ab'] });
+  assert.equal((page.nodes.get('chips') as StubNode).hidden, true, 'no file is left in the composer');
+  input.value = 'and one more thing';
+  page.posts.length = 0;
+  (page.nodes.get('steer') as StubNode).click();
+  const next = page.sent().find((message) => (message as { type?: string }).type === 'steer') as { attachmentIds?: string[] } | undefined;
+  assert.ok(next);
+  assert.equal(next.attachmentIds, undefined, 'a later message does not pick up the earlier message\'s files');
+});
+
+/** The text of a message bubble on the chat page, with its file line if it has one. */
+const bubbleText = (node: StubNode) => [node.textContent, ...node.all(() => true).map((child) => child.textContent)].join('');
+
+test('a message that became a new turn loses its file line when that turn is refused, and keeps it when the turn takes the files', () => {
+  const page = chatPage();
+  const transcript = page.nodes.get('transcript') as StubNode;
+  const input = page.nodes.get('input') as StubNode;
+  const sendDuringRun = (text: string, id: string, name: string) => {
+    page.send({ type: 'attachment-staged', id, name, kind: 'text', size: 10 });
+    input.value = text;
+    page.posts.length = 0;
+    (page.nodes.get('steer') as StubNode).click();
+    const steer = page.sent().find((message) => (message as { type?: string }).type === 'steer') as { id: string };
+    const bubble = transcript.all((node) => node.className === 'turn user steer' && node.textContent === text)[0];
+    assert.ok(bubble, 'the message is shown');
+    assert.match(bubbleText(bubble), new RegExp(name.replace('.', '\\.')), 'with its file line');
+    return { steer, bubble };
+  };
+  page.send({ type: 'assistant-start', model: 'z-ai/glm-5.3' });
+  // The run ended first, so the message became a new turn, and that turn was refused: its file was not sent, so the bubble no longer says it was.
+  const refused = sendDuringRun('use these', 'att-aaaaaaaaaaaa', 'creds.txt');
+  page.send({ type: 'steer-state', id: refused.steer.id, state: 'sent-new' });
+  assert.match(bubbleText(refused.bubble), /creds\.txt/, 'sent as a new turn, the line waits on what that turn does');
+  page.send({ type: 'outbound-blocked', text: 'use these', model: 'z-ai/glm-5.3', reason: 'This message looks like it contains a credential.', confirm: false });
+  assert.doesNotMatch(bubbleText(refused.bubble), /creds\.txt/, 'the refused turn did not send the file');
+  // A turn that took its files keeps the line, even when a later message is refused. (The refused file is taken out of the composer first.)
+  page.send({ type: 'attachments-cleared', ids: ['att-aaaaaaaaaaaa'] });
+  page.send({ type: 'assistant-start', model: 'z-ai/glm-5.3' });
+  const taken = sendDuringRun('read the plan', 'att-bbbbbbbbbbbb', 'plan.txt');
+  page.send({ type: 'steer-state', id: taken.steer.id, state: 'sent-new' });
+  page.send({ type: 'attachments-cleared', ids: ['att-bbbbbbbbbbbb'] });
+  page.send({ type: 'outbound-blocked', text: 'something else', model: 'z-ai/glm-5.3', reason: 'Blocked.', confirm: false });
+  assert.match(bubbleText(taken.bubble), /plan\.txt/, 'the file went with its turn');
+  // A turn that ended before its run began hands its files back to the composer: the line goes then too.
+  page.send({ type: 'assistant-start', model: 'z-ai/glm-5.3' });
+  const handedBack = sendDuringRun('look at the draft', 'att-cccccccccccc', 'draft.txt');
+  page.send({ type: 'steer-state', id: handedBack.steer.id, state: 'sent-new' });
+  page.send({ type: 'attachments-cleared', ids: ['att-cccccccccccc'] });
+  page.send({ type: 'attachment-staged', id: 'att-cccccccccccc', name: 'draft.txt', kind: 'text', size: 10 });
+  assert.doesNotMatch(bubbleText(handedBack.bubble), /draft\.txt/, 'the file is back in the composer, not sent');
 });
 
 test('sidebar: a message whose file trips the outbound check is not sent, and its file stays attached in the composer', async () => {
@@ -796,5 +863,121 @@ test('sidebar: a project team the person declines is not used, and a closed ques
   } finally {
     window.showInformationMessage = previousAsk;
     globalThis.fetch = originalFetch;
+  }
+});
+
+// --- Review follow-ups to 0.4.21's attachments. ---
+
+/** The configuration with one setting that throws when read, so a turn fails after its files were read and before its run starts. */
+function failingSetting(key: string) {
+  const original = vscodeStub.workspace.getConfiguration;
+  let failing = false;
+  vscodeStub.workspace.getConfiguration = () => ({ get: (name: string, fallback?: unknown) => { if (failing && name === key) throw new Error('settings could not be read'); return fallback; }, inspect: () => undefined });
+  return { on: () => { failing = true; }, off: () => { failing = false; }, restore: () => { vscodeStub.workspace.getConfiguration = original; } };
+}
+
+test('sidebar: files of a turn that fails before its run starts come back to the composer, whether attached to it or carried into it', async () => {
+  const { root, auth } = await projectWithProfile();
+  let releaseBilling!: () => void;
+  let billingReached = false;
+  const billingGate = new Promise<void>((resolve) => { releaseBilling = resolve; });
+  const near = fakeNear((messages) => ({ content: `Saw: ${lastUser(messages)}` }), { billing: async () => { if (!billingReached) { billingReached = true; await billingGate; } } });
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = near.fetch;
+  const setting = failingSetting('agent.modelStallSeconds');
+  try {
+    const sidebar = await openSidebar(root, auth);
+    // A file carried into a new turn: sent as the run ends, it becomes the next turn, which fails before its run starts.
+    const running = sidebar.send({ type: 'send', text: 'hello', model: 'z-ai/glm-5.3' });
+    await until(() => billingReached);
+    const carried = await attach(sidebar, 'carried.txt', 'carried file body');
+    await sidebar.send({ type: 'steer', id: 'steer-a9a9a9a9a9a9', text: 'read the carried file', attachmentIds: [carried.id] });
+    const before = sidebar.posted.length;
+    setting.on();
+    releaseBilling();
+    await running;
+    const after = sidebar.posted.slice(before);
+    assert.deepEqual(steerStates(sidebar.posted, 'steer-a9a9a9a9a9a9'), ['queued', 'sent-new']);
+    assert.ok(after.some((message) => message.type === 'assistant-error'), 'the turn failed');
+    assert.equal(near.requests.length, 1, 'its run never started');
+    assert.ok(after.some((message) => message.type === 'attachment-staged' && message.id === carried.id), 'the carried file is back in the composer, not lost');
+
+    // A file attached to a turn of its own, read and then failing before its run starts, also comes back.
+    const own = await attach(sidebar, 'own.txt', 'own file body');
+    const mark = sidebar.posted.length;
+    await sidebar.send({ type: 'send', text: 'read my file', model: 'z-ai/glm-5.3', attachmentIds: [own.id] });
+    const sent = sidebar.posted.slice(mark);
+    assert.ok(sent.some((message) => message.type === 'assistant-error'));
+    const cleared = sent.findIndex((message) => message.type === 'attachments-cleared');
+    const restaged = sent.findIndex((message) => message.type === 'attachment-staged' && message.id === own.id);
+    assert.ok(restaged > cleared, 'the file left the composer when read, and came back when the turn failed');
+
+    // Sent again once the setting reads, both files go with that turn.
+    setting.off();
+    await sidebar.send({ type: 'send', text: 'try again', model: 'z-ai/glm-5.3', attachmentIds: [carried.id, own.id] });
+    assert.equal(near.requests.length, 2);
+    assert.match(lastUser(near.requests[1]), /carried file body[\s\S]*own file body[\s\S]*try again$/);
+  } finally {
+    setting.restore();
+    globalThis.fetch = originalFetch;
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('sidebar: a message Stop handed back is sent again without reading (or paying for) its image again', async () => {
+  const { root, auth } = await projectWithProfile();
+  const near = fakeNear((messages) => near.requests.length === 1 ? editCall : { content: `Saw: ${lastUser(messages).slice(-40)}` }, { vision: true });
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = near.fetch;
+  try {
+    const sidebar = await openSidebar(root, auth);
+    const running = sidebar.send({ type: 'send', text: 'Use port 8080', model: 'z-ai/glm-5.3' });
+    await until(() => sidebar.posted.find((message) => message.type === 'approval-request'));
+    const image = await attach(sidebar, 'shot.png', 'not really a png, but read as one');
+    await sidebar.send({ type: 'steer', id: 'steer-b9b9b9b9b9b9', text: 'use the port in this screenshot', attachmentIds: [image.id] });
+    assert.equal(near.imageReads.length, 1, 'the image is read once, when the message is sent during the run');
+    await sidebar.send({ type: 'stop' });
+    await running;
+    assert.ok(sidebar.posted.some((message) => message.type === 'steer-state' && message.state === 'returned'));
+    assert.ok(sidebar.posted.some((message) => message.type === 'attachment-staged' && message.id === image.id && message.savedAs), 'the image is back in the composer');
+
+    // Sent again: it still passes the checks, and goes with what was read, without a second paid read.
+    await sidebar.send({ type: 'send', text: 'use the port in this screenshot', model: 'z-ai/glm-5.3', attachmentIds: [image.id] });
+    assert.equal(near.imageReads.length, 1, 'the image is not read again');
+    assert.equal(near.requests.length, 2);
+    assert.match(lastUser(near.requests[1]), /A red square with the word PORT 7070\.[\s\S]*use the port in this screenshot$/, 'the turn has the description read the first time');
+  } finally {
+    globalThis.fetch = originalFetch;
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('sidebar: a message sent during a run with no project folder open says it was not sent, instead of vanishing', async () => {
+  const { root, auth } = await projectWithProfile();
+  const near = fakeNear(() => near.requests.length === 1 ? editCall : { content: 'done' });
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = near.fetch;
+  try {
+    const sidebar = await openSidebar(root, auth);
+    const running = sidebar.send({ type: 'send', text: 'Use port 8080', model: 'z-ai/glm-5.3' });
+    const approval = await until(() => sidebar.posted.find((message) => message.type === 'approval-request'));
+    // The folder is closed while the run is going.
+    const folders = vscodeStub.workspace.workspaceFolders;
+    vscodeStub.workspace.workspaceFolders = [];
+    try {
+      await sidebar.send({ type: 'steer', id: 'steer-c9c9c9c9c9c9', text: 'also update the README' });
+    } finally {
+      vscodeStub.workspace.workspaceFolders = folders;
+    }
+    const state = sidebar.posted.find((message) => message.type === 'steer-state' && message.id === 'steer-c9c9c9c9c9c9');
+    assert.equal(state?.state, 'blocked', 'the person is told');
+    assert.match(String(state?.reason), /No project folder is open/);
+    assert.equal(state?.text, 'also update the README', 'and the words go back to the message box');
+    await sidebar.send({ type: 'approval-reply', callId: approval.callId, decision: 'allow' });
+    await running;
+    assert.equal(near.requests.some((messages) => JSON.stringify(messages).includes('also update the README')), false);
+  } finally {
+    globalThis.fetch = originalFetch;
+    await rm(root, { recursive: true, force: true });
   }
 });
