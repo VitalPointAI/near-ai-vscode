@@ -163,7 +163,7 @@ class MemorySecrets implements SecretStorageLike {
 }
 
 const vscodeStub = {
-  workspace: { workspaceFolders: [] as Array<{ uri: { fsPath: string } }>, name: 'demo', getConfiguration: () => ({ get: (_key: string, fallback?: unknown) => fallback, inspect: () => undefined }), onDidChangeConfiguration: () => ({ dispose() {} }) },
+  workspace: { isTrusted: true, workspaceFolders: [] as Array<{ uri: { fsPath: string } }>, name: 'demo', getConfiguration: () => ({ get: (_key: string, fallback?: unknown) => fallback, inspect: () => undefined }), onDidChangeConfiguration: () => ({ dispose() {} }) },
   window: { showInformationMessage: () => undefined, showWarningMessage: () => undefined, activeTextEditor: undefined },
   commands: { executeCommand: async () => undefined },
   Uri: { joinPath: (base: { fsPath: string }, ...parts: string[]) => ({ fsPath: path.join(base.fsPath, ...parts) }), file: (fsPath: string) => ({ fsPath }) }

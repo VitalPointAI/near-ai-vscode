@@ -12,6 +12,15 @@
 - **A message sent while the agent is working says when it was not sent.** With no project folder
   open, the message now says it was not sent instead of vanishing, and a message whose files were
   not sent no longer shows them as sent.
+- **A project's team is only used in a trusted window.** If VS Code cannot say the window is trusted,
+  the team that came with the repository is not used and you are not asked about it.
+- **The question about a project's team shows its members plainly.** Names and roles from the team
+  file are shown as plain text, shortened, and only the first few are listed, so a team file cannot
+  make the question say something else. Each folder of a multi-root workspace is asked about its own
+  team.
+- **A conversation whose team is gone says so.** If the team a conversation started with was deleted
+  or renamed and there is no project team to use, the chat now tells you the run continues without a
+  team, instead of dropping it without a word.
 
 ## 0.4.21
 

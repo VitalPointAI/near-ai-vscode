@@ -29,7 +29,7 @@ import { handlePickupAction, markPickupSeen, pickupCardModel, writePickupPointer
 import { currentSyncStatus, onSyncStatus, refreshSyncHome } from './syncCommands';
 import { redactSyncText, SYNC_PROMPT_DISMISSED_KEY, syncPanelMessage } from './syncPanel';
 import { copyAttachmentIntoProject, PreparedAttachments, prepareAttachments, stageAttachment, StagedAttachment } from '../agent/attachments';
-import { TeamDefinition, TeamLibrary, teamAgents, workingTeamFor } from '../agent/teams';
+import { projectTeamAllowed, TeamConsent, TeamDefinition, TeamLibrary, teamAgents, workingTeamFor } from '../agent/teams';
 import type { GsdAgent } from '../gsd/library';
 import { modelOptions, modelPrivacyLabel, modelsAsPrivateAs, privateSafetyModel, parseChatWebviewMessage, providerErrorMessage, discoverGsdArtifacts, isSafeArtifactPath, GsdArtifactLink, profileStatusMessage } from './chatBridge';
 import type { ChatWebviewMessage } from './chatBridge';
@@ -244,25 +244,16 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     // A team that cannot be looked up never stops the message: it runs without one, as it did before teams carried over.
     return workingTeamOrThrow(tab, root).catch(() => undefined);
   };
-  /**
-   * Whether this project's team may be used (owner, 2026-11-14: ask once per project). The file comes with the repository, so a cloned repository could
-   * otherwise choose the members, their tools and their models. Never in a window VS Code does not trust; otherwise asked once, and asked again when
-   * the team file changes. Closing the question uses no team this time and asks again next time.
-   */
-  const allowProjectTeam = async (team: TeamDefinition): Promise<boolean> => {
-    if ((vscode.workspace as { isTrusted?: boolean }).isTrusted === false) return false;
-    const fingerprint = createHash('sha256').update(JSON.stringify([team.name, team.members])).digest('hex');
-    const store = context.workspaceState as MementoLike | undefined;
-    const saved = (store?.get(PROJECT_TEAM_CONSENT_KEY) ?? projectTeamConsent.get(team.file)) as { fingerprint?: string; use?: boolean } | undefined;
-    if (saved?.fingerprint === fingerprint) return saved.use === true;
-    const members = team.members.map((member) => `${member.name}${member.role ? ` (${member.role})` : ''}`).join(', ');
-    const answer = await vscode.window.showInformationMessage(`This project has a team in .planning/.near-ai/team.md: ${members}. Use it for runs in this project? Its members do the specialist work, with the tools and models that file gives them.`, 'Use this team', 'Don\'t use it');
-    if (answer === undefined) return false;
-    const decision = { fingerprint, use: answer === 'Use this team' };
-    projectTeamConsent.set(team.file, decision);
-    await store?.update(PROJECT_TEAM_CONSENT_KEY, decision);
-    return decision.use;
-  };
+  /** Whether this project's team may be used: asked once per team file, never in a window VS Code does not trust (see projectTeamAllowed). */
+  const allowProjectTeam = (team: TeamDefinition): Promise<boolean> => projectTeamAllowed(team, {
+    trusted: (vscode.workspace as { isTrusted?: boolean }).isTrusted,
+    store: context.workspaceState as MementoLike | undefined,
+    fallback: projectTeamConsent,
+    ask: async (question) => {
+      const answer = await vscode.window.showInformationMessage(question, 'Use this team', 'Don\'t use it');
+      return answer === undefined ? undefined : answer === 'Use this team';
+    }
+  });
   const workingTeamOrThrow = async (tab: ChatTab, root: string): Promise<TeamDefinition | undefined> => {
     await whenTeamsMoved();
     const library = new TeamLibrary(teamLibraryDir(homeFolder()));
@@ -1124,12 +1115,10 @@ function mergePrepared(all: PreparedAttachments[]): PreparedAttachments {
   return { text: all.map((item) => item.text).filter(Boolean).join('\n\n'), usage: all.flatMap((item) => item.usage), notes: all.flatMap((item) => item.notes), security: all.flatMap((item) => item.security) };
 }
 
-/** Whether the empty chat's "no team yet" card shows: a working profile, no project team, and no "Not now" here. */
-/** Where the answer to "use this project's team?" is kept, per workspace. */
-const PROJECT_TEAM_CONSENT_KEY = 'nearAi.projectTeamConsent';
-/** The same answers for a host with no workspace state, by team file. */
-const projectTeamConsent = new Map<string, { fingerprint: string; use: boolean }>();
+/** Answers to "use this project's team?" for a host with no workspace state, by team file; bounded by projectTeamAllowed. */
+const projectTeamConsent = new Map<string, TeamConsent>();
 
+/** Whether the empty chat's "no team yet" card shows: a working profile, no project team, and no "Not now" here. */
 async function setupNudgeShows(context: vscode.ExtensionContext, auth: AuthService): Promise<boolean> {
   const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   if (!root) return false;
