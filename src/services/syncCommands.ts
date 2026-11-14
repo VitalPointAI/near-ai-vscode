@@ -16,8 +16,8 @@ import { stateKeysFor } from './stateKeys';
 import { profileSyncHooks } from './stateRestore';
 import type { SyncOutcome } from './stateSync';
 import {
-  SyncScheduler, afterRemoteFor, buildStateSync, enterCodeFlow, keepKeyFlow, localHomeState, newCodeFlow, readSyncSettings, removeOldInProjectSyncFolders, resolveRemote, statusSentence, tokenRunner, turnOffFlow, turnOnFlow,
-  type SyncEnv, type SyncParts, type SyncStatus, type SyncUi
+  SyncScheduler, afterRemoteFor, buildStateSync, enterCodeFlow, keepKeyFlow, localHomeState, mementoSyncSettings, newCodeFlow, removeOldInProjectSyncFolders, resolveRemote, statusSentence, tokenRunner, turnOffFlow, turnOnFlow,
+  type SyncEnv, type SyncParts, type SyncSettingsStore, type SyncStatus, type SyncUi
 } from './syncFlows';
 import { threadStoreFor } from './threadStore';
 
@@ -138,14 +138,17 @@ function runtimeFor(context: vscode.ExtensionContext, auth: AuthService, root: s
     runState: (marker) => markers.runState(marker),
     profiles: profileSyncHooks(resolved, auth, keys, home)
   };
+  // Whether sync is on and which remote it uses live in this editor's own storage, never in a file inside the project (REVIEW B1). A switch an earlier
+  // build kept in meta.json is adopted once, and only when this editor can already open the project's key.
+  const syncSettings = mementoSyncSettings(context.globalState as MementoLike, resolved, { home, keys, git: runStateGit });
   const scheduler: SyncScheduler = new SyncScheduler({
     runsInFlight: () => runsInFlight(resolved),
     intervalMinutes: () => settings().get<unknown>('sync.intervalMinutes', 10),
-    runSync: (request) => runOnce(parts, resolved, home, request.mode, request.interactive)
+    runSync: (request) => runOnce(parts, resolved, syncSettings, request.mode, request.interactive)
   });
   scheduler.onStatus((status) => { for (const listener of [...statusListeners]) { try { listener(resolved, status); } catch { /* a listener never stops sync */ } } });
   const env: SyncEnv = {
-    root: resolved, home, keys, threads, git: runStateGit, keepKeyInProject, writer,
+    root: resolved, home, keys, threads, git: runStateGit, keepKeyInProject, writer, settings: syncSettings,
     // These syncs are a person's action (a command they ran), so a GitHub sign-in may be asked for.
     makeSync: (input) => buildStateSync(parts, { ...input, git: input.git ?? tokenRunner(runStateGit, () => githubToken(true)) }),
     onEnabled: (on) => scheduler.setEnabled(on),
@@ -157,8 +160,8 @@ function runtimeFor(context: vscode.ExtensionContext, auth: AuthService, root: s
 }
 
 /** One automatic or manual sync: the remote the project already uses (never asked about here), the GitHub session asked silently unless this is a click. */
-async function runOnce(parts: SyncParts, root: string, home: ReturnType<typeof stateHomeFor>, mode: 'sync' | 'pull', interactive: boolean): Promise<SyncOutcome> {
-  const found = await resolveRemote({ root, home, git: runStateGit }, { pickRemote: async () => undefined });
+async function runOnce(parts: SyncParts, root: string, syncSettings: SyncSettingsStore, mode: 'sync' | 'pull', interactive: boolean): Promise<SyncOutcome> {
+  const found = await resolveRemote({ root, git: runStateGit, settings: syncSettings }, { pickRemote: async () => undefined });
   if (found.kind === 'none') return { kind: 'failed', message: NO_HOME, failure: { kind: 'no-remote', message: NO_HOME } };
   if (found.kind === 'cancelled') return { kind: 'refused', message: 'Sync could not tell which remote to use. Run Turn On Project Sync to choose one.' };
   const sync = buildStateSync(parts, { remote: found.name, git: tokenRunner(runStateGit, () => githubToken(interactive)) });
@@ -232,7 +235,7 @@ export function registerSyncCommands(context: vscode.ExtensionContext, auth: Aut
   const runtime = runtimeFor(context, auth, root);
   // What earlier dev builds kept inside the project (the sync mirror and hooks folder) is removed once; it never creates the state home.
   void removeOldInProjectSyncFolders(runtime.env.home);
-  void readSyncSettings(runtime.env.home).then((found) => {
+  void (runtime.env.settings as SyncSettingsStore).read().then((found) => {
     runtime.scheduler.setEnabled(found.enabled);
     runtime.scheduler.start();
     return refreshSyncHome(root);

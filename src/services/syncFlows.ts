@@ -15,7 +15,7 @@ import { generateRecoveryCode, parseRecoveryCode } from '../domain/state/recover
 import { withGitHubAuth, type OnlineHomeRemote, type OnlineHomeResult } from './onlineHome';
 import { redactSecrets } from '../domain/redaction';
 import { runStateGit, gitText, privateHooksDir, redactGitMessage, TIMED_OUT_CODE, type GitRunner } from './stateGit';
-import { ProjectStateHome } from './stateHome';
+import { ProjectStateHome, stateHomeFor, type MementoLike } from './stateHome';
 import type { StateKeys } from './stateKeys';
 import type { RunMarker, RunState } from './runMarkers';
 import { StateSync, type StateSyncOptions, type SyncOutcome } from './stateSync';
@@ -83,21 +83,147 @@ export interface SyncEnv {
   onEnabled?: (on: boolean, remote?: string) => void;
   /** Called after the restore of a second computer, for work that needs an editor (checking the restored profile). */
   afterRestore?: () => void | Promise<void>;
+  /** Whether sync is on and which remote it uses: this editor's own storage. Without one, a store that lasts for this process (never a file in the project). */
+  settings?: SyncSettingsStore;
 }
 
 export interface SyncSettings { enabled: boolean; remote?: string }
 
-/** Whether sync is on for this project and which remote it uses, from the git-ignored state home (a cloned project never inherits it). */
-export async function readSyncSettings(home: ProjectStateHome): Promise<SyncSettings> {
-  const meta = await home.readMeta().catch(() => undefined);
-  const sync = meta?.sync;
-  const remote = typeof sync?.remote === 'string' && sync.remote !== '' ? sync.remote : undefined;
-  return { enabled: sync?.enabled === true, ...(remote ? { remote } : {}) };
+/**
+ * Whether sync is on for this project and which remote it uses, kept in this editor's own storage and never in a file inside the project (REVIEW B1: a
+ * cloned or edited project must not be able to turn background sync on or choose where it goes).
+ */
+export interface SyncSettingsStore {
+  read(): Promise<SyncSettings>;
+  /** Merges the given fields. An undefined field is left as it was. */
+  write(change: Partial<SyncSettings>): Promise<void>;
 }
 
-async function writeSyncSettings(home: ProjectStateHome, change: Partial<SyncSettings>): Promise<void> {
-  const meta = await home.ensure();
-  await home.updateMeta({ sync: { ...(meta.sync ?? {}), ...change } });
+function mergeSettings(base: SyncSettings, change: Partial<SyncSettings>): SyncSettings {
+  const remote = change.remote !== undefined && change.remote !== '' ? change.remote : base.remote;
+  return { enabled: change.enabled ?? base.enabled, ...(remote ? { remote } : {}) };
+}
+
+const memoryStores = new Map<string, SyncSettingsStore>();
+
+/** Settings kept for this process only, one store per resolved project folder: what a caller with no editor storage (a test, a fake) gets. Never a file. */
+export function memorySyncSettings(root: string): SyncSettingsStore {
+  const key = path.resolve(root);
+  let store = memoryStores.get(key);
+  if (!store) {
+    let value: SyncSettings = { enabled: false };
+    store = { read: () => Promise.resolve({ ...value }), write: (change) => { value = mergeSettings(value, change); return Promise.resolve(); } };
+    memoryStores.set(key, store);
+  }
+  return store;
+}
+
+const SETTINGS_KEY = 'nearAi.sync.projects';
+const STORED_STATE_ID = /^[a-z0-9]{16,40}$/;
+
+interface StoredSettings { stateId?: string; enabled: boolean; remote?: string; legacyChecked?: boolean }
+
+/** One stored entry, only when it is exactly what this module writes; anything else is no entry. */
+function parseStored(value: unknown): StoredSettings | undefined {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined;
+  const raw = value as Record<string, unknown>;
+  if (typeof raw.enabled !== 'boolean') return undefined;
+  if (raw.stateId !== undefined && (typeof raw.stateId !== 'string' || !STORED_STATE_ID.test(raw.stateId))) return undefined;
+  if (raw.remote !== undefined && (typeof raw.remote !== 'string' || raw.remote === '' || raw.remote.length > 200)) return undefined;
+  if (raw.legacyChecked !== undefined && typeof raw.legacyChecked !== 'boolean') return undefined;
+  return {
+    enabled: raw.enabled,
+    ...(raw.stateId !== undefined ? { stateId: raw.stateId as string } : {}),
+    ...(raw.remote !== undefined ? { remote: raw.remote as string } : {}),
+    ...(raw.legacyChecked === true ? { legacyChecked: true } : {})
+  };
+}
+
+/** What the one-time adoption of the old meta.json switch needs: the state home to read it from, the keys to prove this editor can open the project, git for the remotes. */
+export interface LegacySyncSwitch {
+  home: ProjectStateHome;
+  keys: Pick<StateKeys, 'dataKey'>;
+  git?: GitRunner;
+}
+
+/**
+ * Settings in this editor's globalState (a MementoLike), one entry per project under `nearAi.sync.projects`, keyed by the hash of the project folder and bound
+ * to the state id they were written for (a different state in the folder reads as off). A switch an earlier 0.4.20 build kept in meta.json is adopted once
+ * per editor and project, and only when this editor can already open the project's key and the remote named is one the project has: nothing in the project
+ * folder can turn sync on by itself.
+ */
+export function mementoSyncSettings(memento: MementoLike, root: string, legacy?: LegacySyncSwitch): SyncSettingsStore {
+  const name = mirrorFolderName(root);
+  const stored = (): Record<string, unknown> => {
+    const map = memento.get<unknown>(SETTINGS_KEY);
+    return typeof map === 'object' && map !== null && !Array.isArray(map) ? { ...(map as Record<string, unknown>) } : {};
+  };
+  const save = async (entry: StoredSettings): Promise<void> => { await memento.update(SETTINGS_KEY, { ...stored(), [name]: entry }); };
+  const currentStateId = async (): Promise<string | undefined> => {
+    const home = legacy?.home ?? stateHomeFor(root);
+    return (await home.readMeta().catch(() => undefined))?.stateId;
+  };
+
+  /** The old meta.json switch, looked at once. Undefined when the answer could not be had (it is looked at again next time). */
+  const adopt = async (stateId: string | undefined): Promise<StoredSettings | undefined> => {
+    if (!legacy) return undefined;
+    try {
+      const sync = (await legacy.home.readMeta().catch(() => undefined))?.sync;
+      const remote = typeof sync?.remote === 'string' && sync.remote !== '' ? sync.remote : undefined;
+      let adoptable = sync?.enabled === true && stateId !== undefined && (await legacy.keys.dataKey()) !== undefined;
+      if (adoptable && remote !== undefined) {
+        const listed = await (legacy.git ?? runStateGit)(['-C', root, 'remote']);
+        if (listed.code === TIMED_OUT_CODE) return undefined;
+        adoptable = listed.code === 0 && gitText(listed).split('\n').map((line) => line.trim()).includes(remote);
+      }
+      return adoptable
+        ? { enabled: true, ...(remote ? { remote } : {}), ...(stateId ? { stateId } : {}), legacyChecked: true }
+        : { enabled: false, legacyChecked: true };
+    } catch {
+      return undefined;
+    }
+  };
+
+  /** The entry that applies to the state now in the folder (a different state's entry is no entry). */
+  const load = async (): Promise<StoredSettings> => {
+    const stateId = await currentStateId();
+    let entry = parseStored(stored()[name]);
+    if (!entry) {
+      const adopted = await adopt(stateId);
+      if (!adopted) return { enabled: false };
+      await save(adopted);
+      entry = adopted;
+    } else if (!entry.legacyChecked && legacy) {
+      entry = { ...entry, legacyChecked: true };
+      await save(entry);
+    }
+    if (entry.stateId !== undefined && entry.stateId !== stateId) return { enabled: false, legacyChecked: true };
+    return entry;
+  };
+
+  return {
+    read: async () => {
+      const entry = await load();
+      return { enabled: entry.enabled, ...(entry.remote ? { remote: entry.remote } : {}) };
+    },
+    write: async (change) => {
+      const entry = await load();
+      const stateId = await currentStateId();
+      const merged = mergeSettings({ enabled: entry.enabled, ...(entry.remote ? { remote: entry.remote } : {}) }, change);
+      await save({ ...merged, ...(stateId ? { stateId } : {}), legacyChecked: true });
+    }
+  };
+}
+
+/** The store a flow uses: the editor's own, or (with none given) one that lasts for this process. */
+function settingsOf(env: Pick<SyncEnv, 'root' | 'settings'>): SyncSettingsStore {
+  return env.settings ?? memorySyncSettings(env.root);
+}
+
+/** Turning sync on or choosing a remote starts from a state home that exists, so the stored switch is bound to its id. */
+async function writeEnabled(env: SyncEnv, change: Partial<SyncSettings>): Promise<void> {
+  await env.home.ensure();
+  await settingsOf(env).write(change);
 }
 
 /**
@@ -119,22 +245,22 @@ export async function localHomeState(root: string, git: GitRunner = runStateGit)
 export type RemoteChoice = { kind: 'remote'; name: string } | { kind: 'none' } | { kind: 'cancelled' };
 
 /**
- * The project's remote (D-14, D-09 defers any setting for it): one stored in the state home when it still exists, else `origin`, else the only remote,
- * else the person's pick among several (asked once and remembered in the state home). No repository or no remote is 'none'.
+ * The project's remote (D-14, D-09 defers any setting for it): one stored in this editor's settings when it still exists, else `origin`, else the only remote,
+ * else the person's pick among several (asked once and remembered in this editor's settings). No repository or no remote is 'none'.
  */
-export async function resolveRemote(env: Pick<SyncEnv, 'root' | 'home' | 'git'>, ui: Pick<SyncUi, 'pickRemote'>): Promise<RemoteChoice> {
+export async function resolveRemote(env: Pick<SyncEnv, 'root' | 'git' | 'settings'>, ui: Pick<SyncUi, 'pickRemote'>): Promise<RemoteChoice> {
   const run = env.git ?? runStateGit;
   const listed = await run(['-C', env.root, 'remote']).catch(() => undefined);
   const names = listed && listed.code === 0 ? gitText(listed).split('\n').map((line) => line.trim()).filter((line) => line !== '') : [];
   if (names.length === 0) return { kind: 'none' };
   const usable = (name: string): boolean => !('message' in validateRemote(name, names));
-  const stored = (await readSyncSettings(env.home)).remote;
+  const stored = (await settingsOf(env).read()).remote;
   if (stored && names.includes(stored) && usable(stored)) return { kind: 'remote', name: stored };
   if (names.includes('origin') && usable('origin')) return { kind: 'remote', name: 'origin' };
   if (names.length === 1 && usable(names[0] as string)) return { kind: 'remote', name: names[0] as string };
   const picked = await ui.pickRemote(names);
   if (!picked || !names.includes(picked) || !usable(picked)) return { kind: 'cancelled' };
-  await writeSyncSettings(env.home, { remote: picked });
+  await settingsOf(env).write({ remote: picked });
   return { kind: 'remote', name: picked };
 }
 
@@ -253,7 +379,7 @@ async function finishTurnOn(env: SyncEnv, ui: SyncUi, remote: string, git?: GitR
       made.bytes.fill(0);
     }
   }
-  await writeSyncSettings(env.home, { enabled: true, remote });
+  await writeEnabled(env, { enabled: true, remote });
   env.onEnabled?.(true, remote);
   const outcome = await sync.sync();
   return reportTurnOn(ui, outcome);
@@ -341,7 +467,7 @@ export async function enterCodeFlow(input: EnterCodeInput): Promise<EnterCodeRes
       return { status: 'refused', message };
     }
     await env.keys.storeRecoveryWrap(opening.wrap);
-    await writeSyncSettings(env.home, { enabled: true, remote: found.name });
+    await writeEnabled(env, { enabled: true, remote: found.name });
     env.onEnabled?.(true, found.name);
     const outcome = await env.makeSync({ remote: found.name }).sync();
     if (outcome.kind === 'synced' || outcome.kind === 'nothing-yet') {
@@ -370,7 +496,7 @@ export interface FlowResult { status: FlowStatus; message: string }
 export async function newCodeFlow(input: TurnOnInput): Promise<FlowResult> {
   const { env, ui } = input;
   if (!(await env.keys.dataKey())) { ui.info(NEEDS_KEY); return { status: 'failed', message: NEEDS_KEY }; }
-  const settings = await readSyncSettings(env.home);
+  const settings = await settingsOf(env).read();
   const made = generateRecoveryCode();
   try {
     if (!(await ui.showCodeOnce(made.code))) return { status: 'cancelled', message: 'No new recovery code was made.' };
@@ -428,7 +554,7 @@ export async function keepKeyFlow(input: TurnOnInput, on: boolean): Promise<Flow
 /** Stops syncing: nothing is scheduled or pushed any more. The remote branch and this computer's state are left as they are. */
 export async function turnOffFlow(input: TurnOnInput): Promise<FlowResult> {
   const { env, ui } = input;
-  await writeSyncSettings(env.home, { enabled: false });
+  await settingsOf(env).write({ enabled: false });
   env.onEnabled?.(false);
   ui.info(SYNC_OFF);
   return { status: 'done', message: SYNC_OFF };

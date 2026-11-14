@@ -15,7 +15,7 @@ import { gitText, redactGitMessage, runStateGit } from './stateGit';
 import type { GitRunner } from './stateGit';
 import { stateHomeFor } from './stateHome';
 import type { ProjectStateHome } from './stateHome';
-import { resolveRemote } from './syncFlows';
+import { memorySyncSettings, resolveRemote, type SyncSettingsStore } from './syncFlows';
 
 export const NO_ONLINE_HOME = 'This project has no online home yet, so there is nowhere to put its code. Run "NEAR AI: Give This Project an Online Home" first.';
 const NOT_CHOSEN = 'Your code was not pushed because no online repository was chosen.';
@@ -23,6 +23,8 @@ const NOT_CHOSEN = 'Your code was not pushed because no online repository was ch
 export interface CodePushLaterInput {
   root: string;
   home?: ProjectStateHome;
+  /** Whether sync is on and which remote it uses: this editor's own storage. Without one, a store that lasts for this process. */
+  settings?: SyncSettingsStore;
   /** The code-push dialogs. The question "push at all?" is not asked: running the command is the person's choice. */
   ui: CodePushUi;
   auth: GitHubAuth;
@@ -61,7 +63,7 @@ export async function pushCodeLaterFlow(input: CodePushLaterInput): Promise<Code
   const base = input.git ?? runStateGit;
   const home = input.home ?? stateHomeFor(root);
 
-  const found = await resolveRemote({ root, home, git: base }, { pickRemote: input.pickRemote ?? (() => Promise.resolve(undefined)) });
+  const found = await resolveRemote({ root, git: base, settings: input.settings ?? memorySyncSettings(root) }, { pickRemote: input.pickRemote ?? (() => Promise.resolve(undefined)) });
   if (found.kind === 'none') return finish('no-home', NO_ONLINE_HOME);
   if (found.kind === 'cancelled') return finish('cancelled', NOT_CHOSEN);
   const remote = found.name;

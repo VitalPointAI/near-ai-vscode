@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import { existsSync, mkdtempSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { readFile, readdir, rename } from 'node:fs/promises';
+import { readFile, readdir, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
 import { redactSecrets } from '../domain/redaction';
@@ -14,7 +14,7 @@ import { StateKeys } from '../services/stateKeys';
 import { archiveThread } from '../services/threadArchive';
 import {
   BLUR_IDLE_MS, COALESCE_MS, DEACTIVATE_PUSH_MS, PUSH_BATCH_MS, RETURN_PULL_AFTER_MS, SYNC_INTERVAL_DEFAULT, SyncScheduler, clampSyncInterval, enterCodeFlow, keepKeyFlow,
-  afterRemoteFor, localHomeState, newCodeFlow, readSyncSettings, resolveRemote, statusSentence, tokenRunner, turnOffFlow, turnOnFlow, type SyncClock, type SyncRequest
+  afterRemoteFor, localHomeState, mementoSyncSettings, mirrorFolderName, memorySyncSettings, newCodeFlow, resolveRemote, statusSentence, tokenRunner, turnOffFlow, turnOnFlow, type SyncClock, type SyncRequest
 } from '../services/syncFlows';
 import type { SyncOutcome } from '../services/stateSync';
 import type { GitRunner } from '../services/stateGit';
@@ -246,14 +246,14 @@ test('turnOffFlow stops syncing and leaves the remote branch and this computer\'
   const a = computer(remote, 'alpha');
   const own = await thread(a, 'conv-off-one', 'Off one');
   assert.equal((await turnOnFlow({ env: a.env, ui: fakeUi().ui })).status, 'on');
-  assert.equal((await readSyncSettings(a.home)).enabled, true);
+  assert.equal((await memorySyncSettings(a.root).read()).enabled, true);
   const tip = remoteTip(remote);
   const seen: boolean[] = [];
   const env = { ...a.env, onEnabled: (on: boolean) => { seen.push(on); } };
   const off = fakeUi();
   assert.equal((await turnOffFlow({ env, ui: off.ui })).status, 'done');
   assert.deepEqual(seen, [false]);
-  assert.equal((await readSyncSettings(a.home)).enabled, false);
+  assert.equal((await memorySyncSettings(a.root).read()).enabled, false);
   assert.equal(remoteTip(remote), tip, 'nothing was pushed or removed');
   assert.deepEqual(await ids(a, 'conv-off-one'), own);
   assert.match(off.messages.join('\n'), /sync is off/i);
@@ -324,7 +324,7 @@ test('the remote is the stored one, else origin, else the only one; several and 
   const c = computer(bareA, 'alpha');
   const asked: string[][] = [];
   const ui = { pickRemote: async (names: string[]) => { asked.push(names); return 'upstream'; } };
-  const env = { root: c.root, home: c.home, git: c.parts.git as GitRunner };
+  const env = { root: c.root, git: c.parts.git as GitRunner };
 
   assert.deepEqual(await resolveRemote(env, ui), { kind: 'remote', name: 'origin' }, 'origin is used and nothing is asked');
   assert.deepEqual(asked, []);
@@ -335,7 +335,7 @@ test('the remote is the stored one, else origin, else the only one; several and 
   fixtureGit(c.root, ['remote', 'remove', 'origin']);
   assert.deepEqual(await resolveRemote(env, ui), { kind: 'remote', name: 'upstream' }, 'with several and no origin the person picks');
   assert.deepEqual(asked, [['backup', 'upstream']]);
-  assert.equal((await readSyncSettings(c.home)).remote, 'upstream', 'the pick is remembered in the state home');
+  assert.equal((await memorySyncSettings(c.root).read()).remote, 'upstream', 'the pick is remembered in this editor\'s settings');
   assert.deepEqual(await resolveRemote(env, ui), { kind: 'remote', name: 'upstream' });
   assert.equal(asked.length, 1, 'and not asked again');
 
@@ -349,6 +349,167 @@ test('the remote is the stored one, else origin, else the only one; several and 
   fixtureGit(c.root, ['remote', 'remove', 'backup']);
   assert.deepEqual(await resolveRemote(env, ui), { kind: 'none' });
   assert.deepEqual(await resolveRemote({ ...env, root: folderWithoutRemote() }, ui), { kind: 'none' }, 'a folder with no remote at all');
+});
+
+// ---- plan 27-27: the sync switch and the remote live in this editor's storage, never in the project (REVIEW B1) --------------------------------
+
+/** What an editor's globalState is to the settings: get and update over a map, shared between stores that are given the same one. */
+function fakeMemento(): { get<T>(key: string): T | undefined; update(key: string, value: unknown): Promise<void>; data: Map<string, unknown> } {
+  const data = new Map<string, unknown>();
+  return { data, get: <T>(key: string) => data.get(key) as T | undefined, update: async (key, value) => { data.set(key, JSON.parse(JSON.stringify(value))); } };
+}
+
+function metaOf(c: Computer): Record<string, unknown> {
+  return JSON.parse(readFileSync(c.home.paths.meta, 'utf8')) as Record<string, unknown>;
+}
+
+function stateBranches(remote: string): string {
+  return fixtureGit(remote, ['for-each-ref', 'refs/heads/near-ai']).trim();
+}
+
+test('a meta.json switch planted in the project turns nothing on: the settings read off, the scheduler stays off and the remote gets nothing (tracer, REVIEW B1)', async () => {
+  const remote = bareRemote({ withMain: false });
+  const a = computer(remote, 'alpha');
+  await a.home.ensure();
+  await a.home.updateMeta({ sync: { enabled: true, remote: 'origin' } });
+  const planted = readFileSync(a.home.paths.meta, 'utf8');
+  assert.equal(await a.keys.dataKey(), undefined, 'this editor cannot open a key that came with the project');
+
+  const settings = mementoSyncSettings(fakeMemento(), a.root, { home: a.home, keys: a.keys, git: a.parts.git as GitRunner });
+  assert.deepEqual(await settings.read(), { enabled: false });
+
+  const scheduler = new SyncScheduler({ runsInFlight: () => 0, intervalMinutes: () => 10, runSync: async () => { throw new Error('a sync ran'); } });
+  scheduler.setEnabled((await settings.read()).enabled);
+  scheduler.start();
+  assert.equal(scheduler.status().state, 'off');
+  assert.equal(scheduler.isEnabled(), false);
+  assert.equal(stateBranches(remote), '', 'nothing reached the remote');
+  assert.equal(readFileSync(a.home.paths.meta, 'utf8'), planted, 'the planted file was not touched');
+});
+
+test('turning sync on is kept in the editor\'s storage and meta.json is never given a sync field; turning off changes the store only', async () => {
+  const remote = bareRemote({ withMain: false });
+  const a = computer(remote, 'alpha');
+  await thread(a, 'conv-store-one', 'Store one');
+  const memento = fakeMemento();
+  const settings = mementoSyncSettings(memento, a.root, { home: a.home, keys: a.keys, git: a.parts.git as GitRunner });
+  const env = { ...a.env, settings };
+
+  assert.equal((await turnOnFlow({ env, ui: fakeUi().ui })).status, 'on');
+  assert.deepEqual(await settings.read(), { enabled: true, remote: 'origin' });
+  assert.equal('sync' in metaOf(a), false, 'meta.json has no sync field');
+  const stored = JSON.stringify(memento.data.get('nearAi.sync.projects'));
+  assert.match(stored, /"enabled":true/);
+
+  const before = readFileSync(a.home.paths.meta, 'utf8');
+  assert.equal((await turnOffFlow({ env, ui: fakeUi().ui })).status, 'done');
+  assert.deepEqual(await settings.read(), { enabled: false, remote: 'origin' });
+  assert.equal(readFileSync(a.home.paths.meta, 'utf8'), before, 'turning off wrote nothing into the project');
+});
+
+test('a remote picked among several is remembered in the store, a stored remote that is gone asks again, and an answer that is not a remote is no answer', async () => {
+  const bareA = bareRemote({ withMain: false });
+  const bareB = bareRemote({ withMain: false });
+  const c = computer(bareA, 'alpha');
+  fixtureGit(c.root, ['remote', 'add', 'upstream', bareB]);
+  fixtureGit(c.root, ['remote', 'add', 'backup', bareB]);
+  fixtureGit(c.root, ['remote', 'remove', 'origin']);
+  const memento = fakeMemento();
+  const settings = mementoSyncSettings(memento, c.root, { home: c.home, keys: c.keys, git: c.parts.git as GitRunner });
+  const env = { root: c.root, git: c.parts.git as GitRunner, settings };
+  const asked: string[][] = [];
+  let answer: string | undefined = 'upstream';
+  const ui = { pickRemote: async (names: string[]) => { asked.push(names); return answer; } };
+
+  assert.deepEqual(await resolveRemote(env, ui), { kind: 'remote', name: 'upstream' });
+  assert.deepEqual(await resolveRemote({ ...env, settings: mementoSyncSettings(memento, c.root) }, ui), { kind: 'remote', name: 'upstream' }, 'another store over the same storage sees the pick');
+  assert.equal(asked.length, 1, 'asked once');
+  fixtureGit(c.root, ['remote', 'remove', 'upstream']);
+  fixtureGit(c.root, ['remote', 'add', 'other', bareB]);
+  answer = 'not-a-remote';
+  assert.deepEqual(await resolveRemote(env, ui), { kind: 'cancelled' });
+  assert.equal(asked.length, 2, 'the stored remote is gone, so it asks again');
+  assert.equal(existsSync(c.home.dir), false, 'none of it wrote a file into the project');
+});
+
+test('a switch an earlier build kept in meta.json is adopted once when this editor can open the project\'s key and the remote is the project\'s own', async () => {
+  const remote = bareRemote({ withMain: false });
+  const a = computer(remote, 'alpha');
+  await a.keys.ensureDataKey();
+  await a.home.updateMeta({ sync: { enabled: true, remote: 'origin' } });
+  const memento = fakeMemento();
+  const legacy = { home: a.home, keys: a.keys, git: a.parts.git as GitRunner };
+
+  assert.deepEqual(await mementoSyncSettings(memento, a.root, legacy).read(), { enabled: true, remote: 'origin' });
+  assert.match(JSON.stringify(memento.data.get('nearAi.sync.projects')), /"legacyChecked":true/);
+  await a.home.updateMeta({ sync: {} });
+  assert.deepEqual(await mementoSyncSettings(memento, a.root, legacy).read(), { enabled: true, remote: 'origin' }, 'removing the old field does not turn it off');
+  await a.home.updateMeta({ sync: { enabled: true, remote: 'origin' } });
+  await mementoSyncSettings(memento, a.root, legacy).write({ enabled: false });
+  assert.equal((await mementoSyncSettings(memento, a.root, legacy).read()).enabled, false, 'adopted only once: the old field does not turn it on again');
+});
+
+test('the old switch is not adopted by an editor that cannot open the key, or for a remote the project does not have', async () => {
+  const remote = bareRemote({ withMain: false });
+  const a = computer(remote, 'alpha');
+  await a.keys.ensureDataKey();
+  await a.home.updateMeta({ sync: { enabled: true, remote: 'origin' } });
+  const git = a.parts.git as GitRunner;
+
+  const locked = { home: a.home, keys: { dataKey: async () => undefined }, git };
+  assert.deepEqual(await mementoSyncSettings(fakeMemento(), a.root, locked).read(), { enabled: false }, 'no key this editor can open');
+
+  await a.home.updateMeta({ sync: { enabled: true, remote: 'attacker' } });
+  assert.deepEqual(await mementoSyncSettings(fakeMemento(), a.root, { home: a.home, keys: a.keys, git }).read(), { enabled: false }, 'a remote the project does not have');
+  assert.equal(stateBranches(remote), '');
+});
+
+test('the stored switch is bound to the state id it was written for', async () => {
+  const remote = bareRemote({ withMain: false });
+  const a = computer(remote, 'alpha');
+  await a.keys.ensureDataKey();
+  const memento = fakeMemento();
+  const settings = mementoSyncSettings(memento, a.root, { home: a.home, keys: a.keys, git: a.parts.git as GitRunner });
+  await settings.write({ enabled: true, remote: 'origin' });
+  assert.deepEqual(await settings.read(), { enabled: true, remote: 'origin' });
+
+  const meta = metaOf(a);
+  const other = 'z'.repeat(20);
+  // Swap the id the way another copy of the project would.
+  await writeFile(a.home.paths.meta, `${JSON.stringify({ ...meta, stateId: other }, null, 2)}\n`);
+  assert.deepEqual(await settings.read(), { enabled: false }, 'another state in the folder reads as off');
+});
+
+test('a second editor on the same project shows sync off until its person turns it on, then sees the consent screen and no new code', async () => {
+  const remote = bareRemote({ withMain: false });
+  const a = computer(remote, 'alpha');
+  await thread(a, 'conv-two-editors', 'Two editors');
+  const aSettings = mementoSyncSettings(fakeMemento(), a.root, { home: a.home, keys: a.keys, git: a.parts.git as GitRunner });
+  const first = fakeUi();
+  assert.equal((await turnOnFlow({ env: { ...a.env, settings: aSettings }, ui: first.ui })).status, 'on');
+  assert.equal(first.shown.length, 1);
+
+  const b = computer(remote, 'bravo', { root: a.root });
+  const bSettings = mementoSyncSettings(fakeMemento(), a.root, { home: b.home, keys: b.keys, git: b.parts.git as GitRunner });
+  assert.deepEqual(await bSettings.read(), { enabled: false }, 'this editor has not turned it on');
+  const second = fakeUi();
+  assert.equal((await turnOnFlow({ env: { ...b.env, settings: bSettings }, ui: second.ui })).status, 'on');
+  assert.equal(second.shown.length, 0, 'no new recovery code: the project already has one');
+  assert.equal(second.confirms.length, 1, 'the consent screen was shown');
+  assert.deepEqual(await bSettings.read(), { enabled: true, remote: 'origin' });
+});
+
+test('a stored entry that is not exactly what this module writes is no entry', async () => {
+  const remote = bareRemote({ withMain: false });
+  const a = computer(remote, 'alpha');
+  const memento = fakeMemento();
+  const settings = mementoSyncSettings(memento, a.root);
+  for (const bad of [{ enabled: 'yes' }, { enabled: true, remote: 5 }, { enabled: true, stateId: '../x' }, { enabled: true, remote: '' }, 'on', null, [true]]) {
+    memento.data.set('nearAi.sync.projects', { [mirrorFolderName(a.root)]: bad });
+    assert.deepEqual(await settings.read(), { enabled: false }, JSON.stringify(bad));
+  }
+  memento.data.set('nearAi.sync.projects', 'garbage');
+  assert.deepEqual(await settings.read(), { enabled: false });
 });
 
 // ---- the interval setting -----------------------------------------------------------------------------------------------------------
@@ -787,7 +948,7 @@ test('the check runs at activation, after the online-home, turn-on and turn-off 
   const commands = readFileSync(path.join(src, 'syncCommands.ts'), 'utf8');
   const chat = readFileSync(path.join(src, 'chat.ts'), 'utf8');
   assert.match(commands, /export (?:async )?function refreshSyncHome/);
-  const activation = commands.slice(commands.indexOf('readSyncSettings(runtime.env.home)'));
+  const activation = commands.slice(commands.indexOf('runtime.env.settings'));
   assert.match(activation, /refreshSyncHome/, 'at activation, after the sync setting is read');
   for (const name of ['nearAi.sync.turnOn', 'nearAi.sync.turnOff', 'nearAi.sync.onlineHome']) {
     const start = commands.indexOf(`'${name}'`);
