@@ -109,6 +109,8 @@ export interface ImportedThread {
   context?: Transcript;
   /** Keep the context's own `basedOnTip` instead of the last imported entry (sync: the context says which entry it covers). */
   keepContextTip?: boolean;
+  /** Keep this thread's own meta and take only the counts the log gives (sync, for a conversation whose run is running: nothing of it is replaced). */
+  keepMeta?: boolean;
 }
 
 export type ImportOutcome = 'copied' | 'merged' | 'unchanged';
@@ -730,11 +732,11 @@ export class ThreadStore implements ConversationStore {
     const lines = threadLines(cache.skeleton);
     const counted = { turns: lines.main.filter((entry) => entry.role === 'user').length, entries: cache.ids.size, bytes: cache.offset, tip: lines.main.at(-1)?.id ?? '' };
     const brought: ThreadMeta = { ...thread.meta, id, ...counted };
-    const merged = existing ? mergeMeta(existing, brought) : brought;
+    const merged = existing ? (thread.keepMeta ? existing : mergeMeta(existing, brought)) : brought;
     const { state: _state, ...plain } = merged;
     const next: ThreadMeta = { ...plain, ...counted };
     const metaChanged = !existing || canonicalJson(JSON.parse(JSON.stringify(existing))) !== canonicalJson(JSON.parse(JSON.stringify(next)));
-    const context: Transcript | undefined = thread.context
+    const context: Transcript | undefined = thread.context && !thread.keepMeta
       ? JSON.parse(JSON.stringify({ ...thread.context, basedOnTip: thread.keepContextTip && typeof thread.context.basedOnTip === 'string' ? thread.context.basedOnTip : thread.entries.at(-1)?.id ?? '' }))
       : undefined;
     const contextChanged = context !== undefined && (!existingContext || laterContext(context, existingContext));

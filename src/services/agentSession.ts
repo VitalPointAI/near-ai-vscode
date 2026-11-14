@@ -250,6 +250,8 @@ export class AgentConversation {
   private readonly waiting = new Map<string, Record<string, unknown>>();
   /** Told how many prompts are waiting whenever that changes, so the host can badge the view. */
   public onWaitingChange: ((count: number) => void) | undefined;
+  /** Told each time a running run's state was saved (before a model turn, after a finished call): a quiet point at which project sync may run. */
+  public onRunStateSaved: (() => void) | undefined;
   /** Records each run's start, steps, and end, so a run the extension host never finished can be reported and resumed. */
   public runMarkers: RunMarkers | undefined;
   private readonly runs = new Map<string, RunCheckpoints>();
@@ -1214,7 +1216,9 @@ export class AgentConversation {
    * extension host dies mid-run (code-server closed it, a reload, a crash), Resume continues from here.
    */
   private async saveRunState(model: string, runId: string, messages: AgentMessage[]): Promise<void> {
-    if (await this.saveTranscript(model, messages, true)) await this.runMarkers?.saved(this.conversationId, runId);
+    if (!(await this.saveTranscript(model, messages, true))) return;
+    await this.runMarkers?.saved(this.conversationId, runId);
+    try { this.onRunStateSaved?.(); } catch { /* a listener never breaks a run */ }
   }
 
   private tally(usage: UsageMetadata): void {
@@ -1434,7 +1438,8 @@ export class AgentConversation {
     // "Always allow" on a parked card saves its allow entry, exactly as it does on a card answered in time (owner, 2026-11-14): before, a late answer
     // only granted the command for the run, so the same command asked again in the next run. Only the entry the card offered is saved: the offer was
     // already checked to cover this command and nothing wider, and a held (risky) card offers none.
-    const rule = reply.decision === 'allow-always' ? approval.allowRule : undefined;
+    // Only a card that carries a grant (#47 review): a card held as risky grants nothing, so a late answer to it never saves an entry either.
+    const rule = reply.decision === 'allow-always' && approval.grant?.command ? approval.allowRule : undefined;
     let saved = false;
     if (rule && remember) {
       grants.allowRules.add(rule);

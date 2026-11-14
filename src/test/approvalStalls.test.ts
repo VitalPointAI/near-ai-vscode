@@ -3,7 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { DEFAULT_RULES } from '../agent/permissions';
+import { DEFAULT_RULES, RunGrants } from '../agent/permissions';
 import { AWAITING_APPROVAL_PREFIX } from '../agent/loop';
 import { AgentConversation } from '../services/agentSession';
 import type { AgentMessage, CompletionEvent, ToolCall } from '../services/nearAiClient';
@@ -456,11 +456,34 @@ test('a risky card is never settled by another card\'s answer, even for the same
       const cards = posted.filter((message) => message.type === 'approval-request');
       assert.equal(cards.length, 2);
       assert.ok(cards.every((card) => (card.preview as { kind?: string }).kind === 'note'), 'both cards are held as risky');
+      assert.ok(cards.every((card) => card.allowRule === undefined), 'a held card offers no "Allow every time" entry');
       conversation.answerApproval(String(cards[0].callId), { decision: 'allow-run' });
       assert.equal(posted.some((message) => message.type === 'prompt-closed'), false);
       assert.deepEqual(conversation.waitingPrompts().map((prompt) => prompt.callId), [cards[1].callId], 'the second risky card still asks');
     });
   } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+// #47 review: a late "Always allow" saves an entry only for a card that carries a grant; a card held as risky grants nothing, so nothing is saved for it.
+test('a late "Always allow" on a card with no grant (held as risky) saves no allow entry', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'near-ai-late-risky-'));
+  const conversation = new AgentConversation(root, () => undefined, path.join(root, '.ckpt'));
+  try {
+    const remembered: string[] = [];
+    const late = (conversation as unknown as { lateApproval(label: string, approval: object, reply: object, grants: RunGrants, remember: (rule: string) => void): void }).lateApproval.bind(conversation);
+    const held = { callId: 'x', tool: 'Bash', title: 'Bash make deploy', capability: 'shell', allowRule: 'make deploy' };
+    const grants = new RunGrants();
+    late('helper', held, { decision: 'allow-always' }, grants, (rule) => { remembered.push(rule); });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(remembered.length, 0, 'nothing saved for a held card');
+    assert.equal(grants.allowRules.size, 0);
+    late('helper', { ...held, grant: { command: 'make deploy' } }, { decision: 'allow-always' }, grants, (rule) => { remembered.push(rule); });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(remembered, ['make deploy'], 'a card with a grant still saves its entry');
+  } finally {
+    conversation.dispose();
     await rm(root, { recursive: true, force: true });
   }
 });

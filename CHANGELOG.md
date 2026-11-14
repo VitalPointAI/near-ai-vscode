@@ -26,6 +26,15 @@
   helper agent had already moved on from allowed the command for that run only, so it asked again in
   the next run. It is now saved to the workspace's allow list, as it is on any other approval.
 
+- **Sync no longer waits for a long chat to end.** A chat that ran for hours, or waited hours for
+  your answer, held project sync back the whole time. Sync now also runs when a chat pauses (it is
+  waiting for you, or between steps) once the last sync is older than the sync interval. The chat
+  that is running is not changed by it: what another computer saved for that chat is added when the
+  chat ends.
+- **Sync Project Now works during a chat.** It runs at once instead of waiting for the chat to end.
+- **Turning sync on during a chat no longer shows "Needs attention".** The first sync only had to
+  wait for the chat, so it is no longer reported as a problem, and it runs at the chat's next pause.
+
 ## 0.4.21
 
 This release makes what you send and the team you chose reach the agent: files go with the message

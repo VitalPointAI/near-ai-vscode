@@ -699,8 +699,12 @@ branches and never pushes to `main`.
   it off) while the editor is open and idle, and on **NEAR AI: Sync Project
   Now**. It pulls when the project opens (the card says "Checking for
   updates…" and chatting is never blocked) and when you come back to the window
-  after 5 minutes or more. It never runs while a run is in progress, and it
-  backs off when you are offline.
+  after 5 minutes or more. A long chat does not hold sync back: while a run is
+  in progress, sync runs when the run pauses (it is waiting for you, or between
+  steps) once the last sync is older than the interval (10 minutes when the
+  interval is 0), and **Sync Project Now** runs at once. The chat that is
+  running is never changed by such a sync: what another computer saved for it
+  is added when the run ends. Sync backs off when you are offline.
 - **Sign-in.** Automatic syncs never ask you to sign in. If GitHub needs you,
   the control says "Sync needs you to sign in. Choose Sync Project Now." and
   that click may ask.

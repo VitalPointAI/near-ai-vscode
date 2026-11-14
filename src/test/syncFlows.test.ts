@@ -1,13 +1,13 @@
 // Plan 15, tasks 2 and 3: joining a synced project from a computer that already has chats of its own, a new recovery code, the key-file switch, turning
 // off, the code never stored or logged, and (task 3) the commands' triggers, remote choice and status. Local bare repositories and fakes only.
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { readFile, readdir, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
 import { redactSecrets } from '../domain/redaction';
-import { onRunEnded, runEnded, runStarted, runsInFlight } from '../services/runEndHooks';
+import { liveConversations, onRunEnded, onRunQuiet, runEnded, runQuiet, runStarted, runWaiting, runsInFlight, runsWaiting } from '../services/runEndHooks';
 import { generateRecoveryCode } from '../domain/state/recoveryCode';
 import { KDF_PARAMS, StateRefusedError, deriveKek, newDataKey, newSalt, wrapDataKey } from '../domain/state/keys';
 import { readManifestHeader } from '../domain/state/objects';
@@ -15,7 +15,7 @@ import { StateKeys, generationOf, parseRecoveryWrap, type RecoveryWrap } from '.
 import { wrapIdOf } from '../services/stateSync';
 import { archiveThread } from '../services/threadArchive';
 import {
-  BLUR_IDLE_MS, COALESCE_MS, DEACTIVATE_PUSH_MS, PUSH_BATCH_MS, RETURN_PULL_AFTER_MS, SYNC_INTERVAL_DEFAULT, SyncScheduler, clampSyncInterval, enterCodeFlow, keepKeyFlow,
+  BLUR_IDLE_MS, COALESCE_MS, DEACTIVATE_PUSH_MS, PUSH_BATCH_MS, RETURN_PULL_AFTER_MS, SYNC_INTERVAL_DEFAULT, SyncScheduler, clampSyncInterval, staleAfterMs, enterCodeFlow, keepKeyFlow,
   afterRemoteFor, localHomeState, mementoSyncSettings, mirrorFolderName, memorySyncSettings, newCodeFlow, resolveRemote, statusSentence, tokenRunner, turnOffFlow, turnOnFlow, type SyncClock, type SyncRequest
 } from '../services/syncFlows';
 import type { SyncOutcome } from '../services/stateSync';
@@ -770,16 +770,18 @@ function harness(options: { interval?: unknown } = {}) {
   const clock = new FakeClock();
   const calls: Array<SyncRequest & { at: number }> = [];
   let runs = 0;
+  let waiting = 0;
   let interval: unknown = options.interval ?? 10;
   let outcome: (request: SyncRequest) => Promise<SyncOutcome> = async () => OK;
   const scheduler = new SyncScheduler({
-    clock, runsInFlight: () => runs, intervalMinutes: () => interval,
+    clock, runsInFlight: () => runs, runsWaiting: () => waiting, intervalMinutes: () => interval,
     runSync: async (request) => { calls.push({ ...request, at: clock.now() }); return outcome(request); }
   });
   scheduler.setEnabled(true);
   return {
     clock, calls, scheduler,
     runs: (count: number) => { runs = count; },
+    waiting: (count: number) => { waiting = count; },
     interval: (value: unknown) => { interval = value; },
     outcome: (fn: (request: SyncRequest) => Promise<SyncOutcome>) => { outcome = fn; },
     /** Calls so far, with their reasons and kinds, as short text. */
@@ -880,16 +882,18 @@ test('the interval syncs while idle, is skipped during a run, can be turned off 
   assert.equal(h.calls.length, before + 1, 'a new interval takes effect from the change');
 });
 
-test('a run ending starts a full sync; asking during a run is kept and runs at its end; requests close together are one sync', async () => {
+test('a run ending starts a full sync; an automatic request during a run with no quiet point is kept and runs at its end; requests close together are one sync', async () => {
   const h = harness({ interval: 0 });
+  h.runs(2);
+  // One of two runs ends: the other is still in flight and has reached no quiet point, so the sync is kept.
   h.runs(1);
-  assert.equal((await h.scheduler.syncNow())?.kind, 'waiting', 'Sync Project Now during a run waits');
+  h.scheduler.runEnded();
   await h.clock.advance(MINUTES);
-  assert.deepEqual(h.log(), [], 'never while a run is in flight');
+  assert.deepEqual(h.log(), [], 'not while a run is in flight and at no quiet point');
   h.runs(0);
   h.scheduler.runEnded();
   await h.clock.advance(COALESCE_MS);
-  assert.deepEqual(h.log(), ['sync:manual'], 'what was asked during the run runs once, when the run ends, with no sign-in prompt');
+  assert.deepEqual(h.log(), ['sync:run-ended'], 'what was asked during the run runs once, when the run ends, with no sign-in prompt');
 
   const burst = harness({ interval: 0 });
   burst.scheduler.runEnded();
@@ -1008,6 +1012,157 @@ test('turning sync off cancels what was planned, and a syncing status is replace
   assert.equal(h.scheduler.status().state, 'syncing');
   h.scheduler.recordOutcome({ kind: 'synced', message: 'ok', pushed: true });
   assert.equal(h.scheduler.status().state, 'synced');
+});
+
+test('turning sync on during a chat: a first sync that only had to wait is a wait on the control, not "Needs attention" (owner, 2026-11-14)', async () => {
+  const remote = bareRemote({ withMain: false });
+  const a = computer(remote, 'alpha', { isIdle: () => false });
+  const mirrors = mkdtempSync(path.join(tmpdir(), 'near-ai-wait-mirrors-'));
+  a.parts.mirrorRoot = mirrors;
+  try {
+    const result = await turnOnFlow({ env: a.env, ui: fakeUi().ui });
+    assert.equal(result.status, 'pending');
+    assert.equal(result.outcome, 'waiting', 'the flow says the first sync waited, not that it failed');
+    const h = harness({ interval: 0 });
+    h.scheduler.recordFlow(result);
+    assert.notEqual(h.scheduler.status().state, 'attention', 'a wait never reads "Needs attention"');
+    assert.equal(h.scheduler.status().state, 'synced');
+    // No failure backoff: the retry for a wait comes within a minute, not after the first backoff step.
+    await h.clock.advance(MINUTES);
+    assert.ok(h.calls.length >= 1, 'the waited sync is tried again soon');
+
+    const failed = harness({ interval: 0 });
+    failed.scheduler.recordFlow({ status: 'pending', message: OFFLINE.message });
+    assert.equal(failed.scheduler.status().state, 'attention', 'a pending result with no outcome is still a failure');
+    const refused = harness({ interval: 0 });
+    refused.scheduler.recordFlow({ status: 'pending', message: 'locked', outcome: 'refused' });
+    assert.deepEqual(refused.scheduler.status(), { state: 'attention', message: 'locked' });
+  } finally {
+    for (const dir of [remote, a.root, mirrors]) rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ---- sync during a long run (owner, 2026-11-14) ------------------------------------------------------------------------------------------
+
+test('Sync Project Now during a run runs at once, as a click', async () => {
+  const h = harness({ interval: 0 });
+  h.runs(1);
+  const outcome = await h.scheduler.syncNow();
+  assert.equal(outcome?.kind, 'synced', 'it is not deferred until the run ends');
+  assert.deepEqual(h.log(), ['sync:manual:click']);
+  assert.equal(h.scheduler.status().state, 'synced');
+});
+
+test('during a long run a quiet point syncs once no full sync has finished for the stale time, and not before; the status keeps the last sync meanwhile', async () => {
+  assert.equal(staleAfterMs(10), 10 * MINUTES);
+  assert.equal(staleAfterMs(0), SYNC_INTERVAL_DEFAULT * MINUTES, 'with the background sync off the default stale time applies');
+  assert.equal(staleAfterMs(3), 3 * MINUTES);
+  const h = harness({ interval: 10 });
+  h.scheduler.runEnded();
+  await h.clock.advance(COALESCE_MS);
+  assert.deepEqual(h.log(), ['sync:run-ended']);
+  const synced = h.scheduler.status();
+  assert.equal(synced.state, 'synced');
+  h.runs(1);
+  // A quiet point a minute later: sync is fresh, so nothing runs.
+  await h.clock.advance(MINUTES);
+  h.scheduler.quietPoint();
+  await h.clock.advance(MINUTES);
+  assert.equal(h.calls.length, 1, 'not before the stale time');
+  // The run keeps working: no quiet point and nobody waited on, so the stale time passing alone runs nothing.
+  await h.clock.advance(10 * MINUTES);
+  assert.equal(h.calls.length, 1, 'only at a quiet point');
+  assert.deepEqual(h.scheduler.status(), synced, 'the control keeps the last sync while it waits; never "Needs attention"');
+  // The next quiet point after the stale time syncs, in full and without a sign-in.
+  h.scheduler.quietPoint();
+  await h.clock.advance(COALESCE_MS);
+  assert.equal(h.calls.length, 2);
+  assert.deepEqual(h.log().at(-1), 'sync:quiet');
+  // That reset the stale time: another quiet point right after does nothing.
+  h.scheduler.quietPoint();
+  await h.clock.advance(MINUTES);
+  assert.equal(h.calls.length, 2);
+});
+
+test('a run waiting on the person syncs when sync becomes stale, with no further quiet point (the 4-hour wait)', async () => {
+  const h = harness({ interval: 10 });
+  h.scheduler.runEnded();
+  await h.clock.advance(COALESCE_MS);
+  const lastAt = h.calls[0]?.at as number;
+  h.runs(1);
+  await h.clock.advance(2 * MINUTES);
+  // An approval opens: a quiet point, but sync is fresh.
+  h.waiting(1);
+  h.scheduler.quietPoint();
+  await h.clock.advance(MINUTES);
+  assert.equal(h.calls.length, 1);
+  // The person is away for hours: the sync runs once the stale time is reached, then again each stale time while the wait lasts.
+  await h.clock.advance(4 * 60 * MINUTES);
+  assert.ok(h.calls.length >= 2, 'it synced during the wait');
+  assert.ok((h.calls[1]?.at as number) - lastAt <= 10 * MINUTES + COALESCE_MS, 'at the stale time, not hours later');
+  for (const call of h.calls) { assert.equal(call.mode, 'sync'); assert.equal(call.interactive, false); }
+});
+
+test('a long run that began with sync long out of date syncs at its first quiet point, and automatic pushes stay two minutes apart', async () => {
+  const fresh = harness({ interval: 0 });
+  fresh.runs(1);
+  fresh.scheduler.quietPoint();
+  await fresh.clock.advance(COALESCE_MS);
+  assert.deepEqual(fresh.log(), ['sync:quiet'], 'no full sync yet in this session: the first quiet point syncs');
+
+  const h = harness({ interval: 1 });
+  h.scheduler.runEnded();
+  await h.clock.advance(COALESCE_MS);
+  const pushedAt = h.calls[0]?.at as number;
+  h.runs(1);
+  await h.clock.advance(65 * SECONDS);
+  h.scheduler.quietPoint();
+  await h.clock.advance(PUSH_BATCH_MS);
+  assert.equal(h.calls.length, 2);
+  assert.ok((h.calls[1]?.at as number) - pushedAt >= PUSH_BATCH_MS, 'the push spacing (D-09) still holds during a run');
+});
+
+test('a failed sync at a quiet point backs off and is not retried until a quiet point after the backoff', async () => {
+  const h = harness({ interval: 0 });
+  h.runs(1);
+  h.outcome(async () => OFFLINE);
+  h.scheduler.quietPoint();
+  await h.clock.advance(COALESCE_MS);
+  assert.equal(h.calls.length, 1);
+  assert.equal(h.scheduler.status().state, 'attention', 'a real failure still says so');
+  await h.clock.advance(30 * MINUTES);
+  assert.equal(h.calls.length, 1, 'no retry while the run is busy and at no quiet point');
+  h.outcome(async () => OK);
+  h.scheduler.quietPoint();
+  await h.clock.advance(COALESCE_MS);
+  assert.equal(h.calls.length, 2);
+  assert.equal(h.scheduler.status().state, 'synced');
+});
+
+test('runEndHooks know which conversations run, which wait on the person, and tell of quiet points', () => {
+  const root = path.join('/project', 'quiet');
+  const heard: string[] = [];
+  const watch = onRunQuiet((at) => heard.push(at));
+  try {
+    runStarted(root, 'conv-quiet00001');
+    assert.deepEqual(liveConversations(root), ['conv-quiet00001']);
+    runWaiting(root, 'conv-quiet00001', true);
+    assert.equal(runsWaiting(root), 1);
+    assert.deepEqual(heard, [path.resolve(root)], 'an approval opening is a quiet point');
+    runWaiting(root, 'conv-quiet00001', true);
+    assert.equal(heard.length, 1, 'only when it starts waiting');
+    runQuiet(root);
+    assert.equal(heard.length, 2);
+    runWaiting(root, 'conv-quiet00001', false);
+    assert.equal(runsWaiting(root), 0);
+    runWaiting(root, 'conv-quiet00001', true);
+  } finally {
+    watch.dispose();
+  }
+  void runEnded({ root, conversationId: 'conv-quiet00001', runId: 'run-1-abcdef', outcome: 'done' });
+  assert.deepEqual(liveConversations(root), []);
+  assert.equal(runsWaiting(root), 0, 'a run that ended waits on nobody');
+  assert.equal(runsInFlight(root), 0);
 });
 
 // ---- the GitHub sign-in for syncs -------------------------------------------------------------------------------------------------------
