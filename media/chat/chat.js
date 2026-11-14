@@ -558,8 +558,9 @@
     row.state.textContent = m.ok ? '' : 'failed';
     row.log.textContent = m.output || '';
     if (!m.ok) row.details.open = true;
-    // The call ended without an answer (declined elsewhere): nothing is waiting any more.
-    closePending(m.callId, 'closed');
+    // The call ended without an answer (declined elsewhere): nothing is waiting any more. A sub-agent's call that returned "awaiting approval" ends
+    // while its card is still open (the host says so), and that card stays until it is answered or the host closes it.
+    if (!m.stillWaiting) closePending(m.callId, 'closed');
   }
   function onApproval(m) {
     if (pendingQueue.has(m.callId)) return;
@@ -1403,7 +1404,7 @@
         announce(text);
         break;
       }
-      case 'prompt-closed': closePending(m.id, m.outcome === 'cancelled' ? 'cancelled' : 'closed'); break;
+      case 'prompt-closed': closePending(m.id, m.outcome === 'cancelled' || m.outcome === 'covered' ? m.outcome : 'closed'); break;
       case 'todos': renderTodos(m.todos || [], m.unconfirmed === true); break;
       case 'run-changes': onRunChanges(m); break;
       case 'run-reverted': {
