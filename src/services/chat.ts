@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import * as path from 'node:path';
@@ -240,12 +241,35 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
    * conversation and team, so the person sees which team's members will be asked.
    */
   const workingTeam = async (tab: ChatTab, root: string): Promise<TeamDefinition | undefined> => {
+    // A team that cannot be looked up never stops the message: it runs without one, as it did before teams carried over.
+    return workingTeamOrThrow(tab, root).catch(() => undefined);
+  };
+  /**
+   * Whether this project's team may be used (owner, 2026-11-14: ask once per project). The file comes with the repository, so a cloned repository could
+   * otherwise choose the members, their tools and their models. Never in a window VS Code does not trust; otherwise asked once, and asked again when
+   * the team file changes. Closing the question uses no team this time and asks again next time.
+   */
+  const allowProjectTeam = async (team: TeamDefinition): Promise<boolean> => {
+    if ((vscode.workspace as { isTrusted?: boolean }).isTrusted === false) return false;
+    const fingerprint = createHash('sha256').update(JSON.stringify([team.name, team.members])).digest('hex');
+    const store = context.workspaceState as MementoLike | undefined;
+    const saved = (store?.get(PROJECT_TEAM_CONSENT_KEY) ?? projectTeamConsent.get(team.file)) as { fingerprint?: string; use?: boolean } | undefined;
+    if (saved?.fingerprint === fingerprint) return saved.use === true;
+    const members = team.members.map((member) => `${member.name}${member.role ? ` (${member.role})` : ''}`).join(', ');
+    const answer = await vscode.window.showInformationMessage(`This project has a team in .planning/.near-ai/team.md: ${members}. Use it for runs in this project? Its members do the specialist work, with the tools and models that file gives them.`, 'Use this team', 'Don\'t use it');
+    if (answer === undefined) return false;
+    const decision = { fingerprint, use: answer === 'Use this team' };
+    projectTeamConsent.set(team.file, decision);
+    await store?.update(PROJECT_TEAM_CONSENT_KEY, decision);
+    return decision.use;
+  };
+  const workingTeamOrThrow = async (tab: ChatTab, root: string): Promise<TeamDefinition | undefined> => {
     await whenTeamsMoved();
     const library = new TeamLibrary(teamLibraryDir(homeFolder()));
     // Keyed by the conversation, so a new or reopened conversation in this tab is told again.
     const conversation = tab.agent?.id ?? tab.id;
     const before = tab.teamNoticed?.startsWith(`${conversation}|`) ? tab.teamNoticed.slice(conversation.length + 1) : undefined;
-    const { team, notice, noticed } = await workingTeamFor((slug) => library.find(slug, root), tab.agent?.conversationTeam, before);
+    const { team, notice, noticed } = await workingTeamFor((slug) => library.find(slug, root), tab.agent?.conversationTeam, before, allowProjectTeam);
     if (noticed) tab.teamNoticed = `${conversation}|${noticed}`;
     if (notice) tab.post({ type: 'notice', text: notice });
     return team;
@@ -954,6 +978,11 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
 }
 
 /** Whether the empty chat's "no team yet" card shows: a working profile, no project team, and no "Not now" here. */
+/** Where the answer to "use this project's team?" is kept, per workspace. */
+const PROJECT_TEAM_CONSENT_KEY = 'nearAi.projectTeamConsent';
+/** The same answers for a host with no workspace state, by team file. */
+const projectTeamConsent = new Map<string, { fingerprint: string; use: boolean }>();
+
 async function setupNudgeShows(context: vscode.ExtensionContext, auth: AuthService): Promise<boolean> {
   const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   if (!root) return false;

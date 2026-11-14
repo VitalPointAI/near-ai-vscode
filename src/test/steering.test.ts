@@ -517,15 +517,50 @@ test('sidebar: a plain message in a project with a team works with that team, sa
   const originalFetch = globalThis.fetch;
   globalThis.fetch = near.fetch;
   try {
+    const asked: string[] = [];
+    const window = vscodeStub.window as Record<string, unknown>;
+    const previousAsk = window.showInformationMessage;
+    window.showInformationMessage = async (text: string) => { asked.push(text); return 'Use this team'; };
     const sidebar = await openSidebar(root, auth);
-    await sidebar.send({ type: 'send', text: 'make the pictures', model: 'z-ai/glm-5.3' });
-    await sidebar.send({ type: 'send', text: 'and a banner', model: 'z-ai/glm-5.3' });
-    const notices = sidebar.posted.filter((message) => message.type === 'notice' && /^Working with the /.test(String(message.text)));
-    assert.deepEqual(notices.map((message) => message.text), ['Working with the team "Project team": its members do the specialist work.'], 'said once');
+    try {
+      await sidebar.send({ type: 'send', text: 'make the pictures', model: 'z-ai/glm-5.3' });
+      await sidebar.send({ type: 'send', text: 'and a banner', model: 'z-ai/glm-5.3' });
+    } finally { window.showInformationMessage = previousAsk; }
+    assert.equal(asked.length, 1, 'asked once for the project\'s team');
+    assert.match(asked[0], /^This project has a team in \.planning\/\.near-ai\/team\.md: designer \(designer\)\. Use it/);
+    const notices = sidebar.posted.filter((message) => message.type === 'notice' && /^Working with /.test(String(message.text)));
+    assert.deepEqual(notices.map((message) => message.text), ['Working with this project\'s team "Project team" (from .planning/.near-ai/team.md): its members do the specialist work.'], 'said once');
     assert.match(lastUser(near.requests[0]), /^<team name="Project team">[\s\S]*- designer \(designer\): Make images\.[\s\S]*<\/team>\n\nmake the pictures$/, 'the chat passes the team to the run');
     assert.equal(lastUser(near.requests[1]), 'and a banner', 'the note is not repeated');
   } finally {
     globalThis.fetch = originalFetch;
     if (previousTeams === undefined) delete process.env.NEAR_AI_TEAMS_DIR; else process.env.NEAR_AI_TEAMS_DIR = previousTeams;
+  }
+});
+
+test('sidebar: a project team the person declines is not used, and a closed question asks again next time', async () => {
+  const { root, auth } = await projectWithProfile();
+  const { mkdir: makeDir } = await import('node:fs/promises');
+  const { renderTeam, TeamLibrary } = await import('../agent/teams');
+  await makeDir(path.dirname(TeamLibrary.projectTeamFile(root)), { recursive: true });
+  await writeFile(TeamLibrary.projectTeamFile(root), renderTeam('Declined team', 'Builds it', [{ name: 'designer', role: 'designer', instructions: 'Make images.' }]));
+  const near = fakeNear(() => ({ content: 'ok' }));
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = near.fetch;
+  const window = vscodeStub.window as Record<string, unknown>;
+  const previousAsk = window.showInformationMessage;
+  const answers: Array<string | undefined> = [undefined, "Don't use it"];
+  let asked = 0;
+  window.showInformationMessage = async () => { asked += 1; return answers.shift(); };
+  try {
+    const sidebar = await openSidebar(root, auth);
+    await sidebar.send({ type: 'send', text: 'one', model: 'z-ai/glm-5.3' });
+    await sidebar.send({ type: 'send', text: 'two', model: 'z-ai/glm-5.3' });
+    await sidebar.send({ type: 'send', text: 'three', model: 'z-ai/glm-5.3' });
+    assert.equal(asked, 2, 'closed once (asked again), then declined (not asked a third time)');
+    assert.deepEqual(near.requests.map(lastUser), ['one', 'two', 'three'], 'no team note in any of them');
+  } finally {
+    window.showInformationMessage = previousAsk;
+    globalThis.fetch = originalFetch;
   }
 });

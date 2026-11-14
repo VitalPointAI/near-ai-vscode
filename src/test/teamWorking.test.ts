@@ -129,7 +129,7 @@ test('the chat finds the conversation\'s team, else the project\'s, and says whi
   await writeFile(TeamLibrary.projectTeamFile(root), renderTeam('Project team', 'Builds it', [{ name: 'designer', role: 'designer', instructions: 'Make images.' }]));
   const project = await workingTeamFor(find, undefined, undefined);
   assert.equal(project.team?.members[0].name, 'designer');
-  assert.equal(project.notice, 'Working with the team "Project team": its members do the specialist work.');
+  assert.equal(project.notice, 'Working with this project\'s team "Project team" (from .planning/.near-ai/team.md): its members do the specialist work.');
   const again = await workingTeamFor(find, undefined, project.noticed);
   assert.equal(again.team?.slug, project.team!.slug);
   assert.equal(again.notice, undefined, 'said once');
@@ -141,7 +141,7 @@ test('the chat finds the conversation\'s team, else the project\'s, and says whi
   // A conversation team that was deleted falls back to the project's team, and says so.
   const gone = await workingTeamFor(find, 'deleted-team', undefined);
   assert.equal(gone.team?.name, 'Project team');
-  assert.match(gone.notice!, /the deleted-team team this conversation started with is gone, so the project's team is used/);
+  assert.match(gone.notice!, /the deleted-team team this conversation started with is gone or empty, so the project's team is used/);
   // Said even when the project's team was the one already announced: that the conversation's own team is gone is news.
   const goneAfterProject = await workingTeamFor(find, 'deleted-team', project.noticed);
   assert.match(goneAfterProject.notice!, /is gone/);
@@ -234,4 +234,45 @@ test('a run whose turn fails before it starts still sends the note next time', a
 test('a team with no members is not used', async () => {
   const empty: TeamDefinition = { slug: 'team', name: 'Empty', description: '', file: '/tmp/team.md', members: [] };
   assert.deepEqual(await workingTeamFor(async () => empty, undefined, undefined), {});
+});
+
+test('the project\'s team is used only once the person agreed, and an empty conversation team falls back to it', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'near-ai-team-project-'));
+  const library = new TeamLibrary(await mkdtemp(path.join(tmpdir(), 'near-ai-team-library-')));
+  const find = (slug: string) => library.find(slug, root);
+  await mkdir(path.dirname(TeamLibrary.projectTeamFile(root)), { recursive: true });
+  await writeFile(TeamLibrary.projectTeamFile(root), renderTeam('Project team', 'Builds it', [{ name: 'designer', role: 'designer', instructions: 'Make images.' }]));
+  const asked: string[] = [];
+  const declined = await workingTeamFor(find, undefined, undefined, async (team) => { asked.push(team.name); return false; });
+  assert.deepEqual(declined, {}, 'declined: no team, nothing said');
+  assert.deepEqual(asked, ['Project team']);
+  await library.create('Empty', renderTeam('Empty', 'No one yet', []));
+  const fallback = await workingTeamFor(find, 'empty', undefined, async () => true);
+  assert.equal(fallback.team?.name, 'Project team', 'an empty conversation team falls back to the project\'s');
+  // A /team the conversation started with needs no agreement: the person chose it.
+  await library.create('Studio', renderTeam('Studio', 'Makes it', [{ name: 'illustrator', role: 'designer', instructions: 'Draw.' }]));
+  const chosen = await workingTeamFor(find, 'studio', undefined, async () => { throw new Error('must not ask'); });
+  assert.equal(chosen.team?.name, 'Studio');
+});
+
+test('a reopened conversation that already has the team note does not get a second copy', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'near-ai-team-'));
+  const saved = new Map<string, Transcript>();
+  const store: ConversationStore = { save: async (transcript) => { saved.set(transcript.id, structuredClone(transcript)); }, checkpoint: async (transcript) => { saved.set(transcript.id, structuredClone(transcript)); }, load: async (id) => saved.get(id), list: async () => [] };
+  const model = modelSpawning('designer');
+  const base = { client: model.client as never, model: 'm', privacy: 'x', policy: { mode: 'fully-autonomous' as const, emergencyStop: false }, rules: DEFAULT_RULES, memberTeam: studioTeam(root) };
+  const first = new AgentConversation(root, () => undefined, path.join(root, '.ckpt'), undefined, store);
+  let id: string;
+  try {
+    await first.send({ ...base, text: 'first' });
+    id = (first as unknown as { conversationId: string }).conversationId;
+  } finally { first.dispose(); }
+  const reopened = new AgentConversation(root, () => undefined, path.join(root, '.ckpt'), undefined, store);
+  try {
+    await reopened.restore(id);
+    await reopened.send({ ...base, text: 'second' });
+  } finally { reopened.dispose(); }
+  const users = model.leads.at(-1)!.messages.filter((message) => message.role === 'user').map((message) => String(message.content));
+  assert.equal(users.filter((content) => content.includes('<team name=')).length, 1);
+  assert.equal(users.at(-1), 'second');
 });

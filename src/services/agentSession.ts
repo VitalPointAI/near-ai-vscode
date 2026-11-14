@@ -663,7 +663,13 @@ export class AgentConversation {
     this.conversationId = transcript.id;
     this.title = transcript.title;
     this.teamSlug = undefined;
+    // The newest team note already in the restored context counts as sent, so reopening does not add a second copy.
     this.notedTeam = undefined;
+    for (const message of this.messages) {
+      if (message.role !== 'user' || typeof message.content !== 'string') continue;
+      const notes = message.content.match(/<team name="[^"\n]*">[\s\S]*?<\/team>/g);
+      if (notes) this.notedTeam = notes[notes.length - 1];
+    }
     const store = this.transcripts;
     let items: ViewItem[] | undefined;
     if (store instanceof ThreadStore) {

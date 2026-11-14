@@ -1,6 +1,7 @@
 import type { AgentTool } from '../agent/tools';
 import { ToolError } from '../agent/workspace';
 import { expandPrompt, GsdAgent, GsdSkill } from './library';
+import { noTags } from '../agent/teams';
 
 export interface Question {
   question: string;
@@ -19,7 +20,7 @@ function subagentTypeHelp(services: Pick<GsdServices, 'agents' | 'teamMembers'>)
   const team = services.agents.filter((agent) => members.has(agent.name));
   const others = services.agents.filter((agent) => !members.has(agent.name)).map((agent) => agent.name);
   if (!team.length) return others.length ? `One of: ${others.join(', ')}, or general-purpose.` : 'general-purpose.';
-  return `Team members (the specialists: use the member whose role covers the work, also for a workflow step): ${team.map((agent) => `${agent.name} (${agent.description})`).join(', ')}.${others.length ? ` Other agents: ${others.join(', ')}.` : ''} Or general-purpose, only when no team member fits.`;
+  return `Team members (the specialists: use the member whose role covers the work, also for a workflow step): ${team.map((agent) => `${agent.name} (${noTags(agent.description).slice(0, 80)})`).join(', ')}.${others.length ? ` Other agents: ${others.join(', ')}.` : ''} Or general-purpose, only when no team member fits.`;
 }
 
 export interface GsdServices {

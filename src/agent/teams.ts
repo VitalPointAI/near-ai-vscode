@@ -154,23 +154,26 @@ export function teamAgents(team: TeamDefinition): GsdAgent[] {
  * else none. `notice` is what the chat says, only when the team differs from the one it last said (`noticed`), so it is said once per conversation and
  * team. `find` looks a team up by slug, as TeamLibrary.find does (the slug "project" is the project's own team).
  */
-export async function workingTeamFor(find: (slug: string) => Promise<TeamDefinition | undefined>, conversationTeam: string | undefined, noticed: string | undefined): Promise<{ team?: TeamDefinition; notice?: string; noticed?: string }> {
+export async function workingTeamFor(find: (slug: string) => Promise<TeamDefinition | undefined>, conversationTeam: string | undefined, noticed: string | undefined, allowProject: (team: TeamDefinition) => Promise<boolean> = async () => true): Promise<{ team?: TeamDefinition; notice?: string; noticed?: string }> {
   const quietly = (slug: string) => find(slug).catch(() => undefined);
-  const named = conversationTeam ? await quietly(conversationTeam) : undefined;
-  const found = named ?? await quietly('project');
-  // A team with no members has no one to give work to.
-  const team = found?.members.length ? found : undefined;
+  // A team with no members has no one to give work to: the conversation's falls back to the project's, and an empty project team is not used.
+  const usable = (team: TeamDefinition | undefined) => team?.members.length ? team : undefined;
+  const named = usable(conversationTeam ? await quietly(conversationTeam) : undefined);
+  // The project's team comes with the repository, so it is used only once the person agreed to it (owner, 2026-11-14: ask once per project).
+  const project = named ? undefined : usable(await quietly('project'));
+  const team = named ?? (project && await allowProject(project).catch(() => false) ? project : undefined);
   if (!team) return {};
   // What was said: the team, or that the conversation's team is gone and this one is used instead, which is news even when the team is the same.
   const gone = conversationTeam !== undefined && !named;
   const key = gone ? `${team.slug} (instead of ${conversationTeam})` : team.slug;
   if (key === noticed) return { team, noticed };
-  const why = gone ? ` (the ${conversationTeam} team this conversation started with is gone, so the project's team is used)` : '';
-  return { team, noticed: key, notice: `Working with the team "${team.name}": its members do the specialist work${why}.` };
+  const why = gone ? ` (the ${conversationTeam} team this conversation started with is gone or empty, so the project's team is used)` : '';
+  const which = named ? `the team "${noTags(team.name)}"` : `this project's team "${noTags(team.name)}" (from .planning/.near-ai/team.md)`;
+  return { team, noticed: key, notice: `Working with ${which}: its members do the specialist work${why}.` };
 }
 
 /** Team text inside the note, with angle brackets made plain, so a line such as `</team>` in a member's instructions cannot end the note early. */
-function noTags(text: string): string {
+export function noTags(text: string): string {
   // Line breaks and control characters become spaces too, so a name or role cannot start a line of its own inside the note.
   return text.replace(/[\u0000-\u001f\u007f\u2028\u2029]+/g, ' ').replace(/</g, '‹').replace(/>/g, '›');
 }

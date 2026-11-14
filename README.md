@@ -481,11 +481,11 @@ until it runs out aren't shown.
   specialist work to the team's members, while Open-GSD keeps the project on
   track (planning, checking, verification). Without a `/team` in the
   conversation, the project's own team is used the same way, and the chat
-  says which team it works with. A project team file is part of the project,
-  like its instructions file: one that comes with a cloned repository is used
-  too, so read `.planning/.near-ai/team.md` before running work in a
-  repository you do not trust. Its members still ask before risky actions
-  and keep their own tools. Saving a team file records a
+  says which team it works with. Because a project team file can come with a
+  cloned repository, the first time a run would use it the chat lists its
+  members and asks whether to use it; the answer is kept for that project and
+  asked again when the file changes. A window VS Code does not trust never
+  uses it. Saving a team file records a
   version. Teams can be duplicated, archived, restored, imported, and deleted.
   **Set Up Project Team** asks a few questions and drafts a team for the
   project in `.planning/.near-ai/team.md` for you to review. Your teams are
