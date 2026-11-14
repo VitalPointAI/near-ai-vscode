@@ -111,7 +111,7 @@ test('a recovery wrap that is tracked, a link or group-readable reads as no wrap
     a.secrets.values.set(dataKeySecretName(stateId), key.toString('base64'));
     const salt = newSalt();
     const wrap = { kdf: { name: KDF_PARAMS.name, N: KDF_PARAMS.N, r: KDF_PARAMS.r, p: KDF_PARAMS.p, salt: salt.toString('base64') }, wrappedKey: wrapDataKey(await deriveKek(Buffer.alloc(32, 1), salt, KDF_PARAMS), key, stateId) };
-    await a.keys.storeRecoveryWrap(wrap);
+    await a.keys.storeRecoveryWrapIfNewer(wrap);
     const file = a.home.paths.recoveryWrap;
     assert.ok(await a.keys.readRecoveryWrap(), 'a private untracked wrap is usable');
     assert.equal(await a.keys.hasRecoveryWrap(), true);

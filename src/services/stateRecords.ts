@@ -66,6 +66,8 @@ export interface IndexPayload {
   threads: Record<string, IndexThread>;
   /** Which recovery wrap the computer that pushed used (a short hash of it). The sealed index vouches for it, so a computer can tell a newer code from a damaged header. */
   wrapId?: string;
+  /** The generation of that wrap (a new code made on a computer is one above every generation it held). The higher generation wins: a newer wrap is adopted, an older one is never pushed over it. */
+  wrapGen?: number;
 }
 /**
  * One thread in the index: `files` are the hot objects that carry its entries, `cold` the sealed parts of the archive(s) that hold it whole (a computer

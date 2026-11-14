@@ -9,8 +9,10 @@ import test from 'node:test';
 import { redactSecrets } from '../domain/redaction';
 import { onRunEnded, runEnded, runStarted, runsInFlight } from '../services/runEndHooks';
 import { generateRecoveryCode } from '../domain/state/recoveryCode';
-import { StateRefusedError } from '../domain/state/keys';
-import { StateKeys } from '../services/stateKeys';
+import { KDF_PARAMS, StateRefusedError, deriveKek, newDataKey, newSalt, wrapDataKey } from '../domain/state/keys';
+import { readManifestHeader } from '../domain/state/objects';
+import { StateKeys, generationOf, parseRecoveryWrap, type RecoveryWrap } from '../services/stateKeys';
+import { wrapIdOf } from '../services/stateSync';
 import { archiveThread } from '../services/threadArchive';
 import {
   BLUR_IDLE_MS, COALESCE_MS, DEACTIVATE_PUSH_MS, PUSH_BATCH_MS, RETURN_PULL_AFTER_MS, SYNC_INTERVAL_DEFAULT, SyncScheduler, clampSyncInterval, enterCodeFlow, keepKeyFlow,
@@ -21,7 +23,7 @@ import type { GitRunner } from '../services/stateGit';
 import { KEY_SENTINEL, bareRemote, computer, fakeUi, fixtureGit, folderWithoutRemote, setUpProfile, type Computer } from './helpers/flowFixtures';
 import { hermeticRunner, scanRemote } from './helpers/gitFixtures';
 import { syncPanelMessage } from '../services/syncPanel';
-import { SIX_TURNS, chain, treeHash } from './helpers/syncFixtures';
+import { SIX_TURNS, chain, remoteFiles, replaceRemoteTree, treeHash } from './helpers/syncFixtures';
 import { MemorySecrets } from './helpers/stateFixtures';
 
 async function thread(c: Computer, id: string, title: string): Promise<string[]> {
@@ -153,7 +155,7 @@ test('join: chats that are locked on this computer are not touched, and declinin
 
 // ---- a new code ---------------------------------------------------------------------------------------------------------------------
 
-test('newCodeFlow: the new code opens a fresh computer and the old one is refused; an older computer syncing later does not undo it; the message says earlier copies still open with the old code', async () => {
+test('newCodeFlow: the new code opens a fresh computer and the old one is refused; an older computer syncing later does not undo it; the message says the old code still opens everything synced', async () => {
   const remote = bareRemote({ withMain: false });
   const a = computer(remote, 'alpha');
   await setUpProfile(a);
@@ -170,7 +172,7 @@ test('newCodeFlow: the new code opens a fresh computer and the old one is refuse
   assert.equal(rotate.shown.length, 1);
   const newCode = rotate.shown[0] as string;
   assert.notEqual(newCode, oldCode);
-  assert.match(rotate.messages.join('\n'), /copies already on your git host can still be opened with the old code/i);
+  assert.match(rotate.messages.join('\n'), /anyone who has your old code and can read this project's repository can still open everything synced, including what is synced from now on/i);
 
   const c = computer(remote, 'charlie');
   const wrong = await enterCodeFlow({ env: c.env, ui: fakeUi({ code: oldCode }).ui });
@@ -186,6 +188,194 @@ test('newCodeFlow: the new code opens a fresh computer and the old one is refuse
   const d = computer(remote, 'delta');
   assert.equal((await enterCodeFlow({ env: d.env, ui: fakeUi({ code: newCode }).ui })).status, 'restored', 'the new code still opens it after the older computer pushed');
   assert.equal((await enterCodeFlow({ env: computer(remote, 'echo').env, ui: fakeUi({ code: oldCode }).ui })).status, 'refused');
+});
+
+/** The id of the wrap the remote's manifest header carries. */
+function headerWrapId(remote: string): string {
+  const header = readManifestHeader(fixtureGit(remote, ['show', 'refs/heads/near-ai/state:manifest.json']));
+  return wrapIdOf({ kdf: header.kdf, wrappedKey: header.wrappedKey });
+}
+
+async function localWrap(c: Computer): Promise<RecoveryWrap> {
+  const wrap = await c.keys.readRecoveryWrap();
+  assert.ok(wrap, `${c.name} holds a recovery wrap`);
+  return wrap as RecoveryWrap;
+}
+
+const later = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 8));
+
+test('a new code made while sync is off goes online when sync is turned on again: a fresh computer opens with it, and a computer that still holds the old wrap ends up holding the new one without pushing the old one back', async () => {
+  const remote = bareRemote({ withMain: false });
+  const a = computer(remote, 'alpha');
+  await setUpProfile(a);
+  await thread(a, 'conv-online-1', 'Online one');
+  const first = fakeUi();
+  assert.equal((await turnOnFlow({ env: a.env, ui: first.ui })).status, 'on');
+  const oldCode = first.shown[0] as string;
+  const b = computer(remote, 'bravo');
+  assert.equal((await enterCodeFlow({ env: b.env, ui: fakeUi({ code: oldCode }).ui })).status, 'restored');
+  const oldId = wrapIdOf(await localWrap(a));
+  assert.equal(headerWrapId(remote), oldId);
+
+  assert.equal((await turnOffFlow({ env: a.env, ui: fakeUi().ui })).status, 'done');
+  await later();
+  const rotate = fakeUi();
+  const rotated = await newCodeFlow({ env: a.env, ui: rotate.ui });
+  assert.equal(rotated.status, 'done');
+  assert.match(rotated.message, /It goes online the next time this project syncs\./);
+  const newCode = rotate.shown[0] as string;
+  const newWrap = await localWrap(a);
+  assert.ok(generationOf(newWrap) > generationOf(await localWrap(b)), 'the new code has a higher generation than the old one');
+  assert.equal(headerWrapId(remote), oldId, 'nothing went online while sync was off');
+
+  assert.equal((await turnOnFlow({ env: a.env, ui: fakeUi().ui })).status, 'on');
+  assert.equal(headerWrapId(remote), wrapIdOf(newWrap), 'the new code is the remote header after the next sync');
+  const c = computer(remote, 'charlie');
+  assert.equal((await enterCodeFlow({ env: c.env, ui: fakeUi({ code: oldCode }).ui })).status, 'refused', 'the old code is refused for the new manifest');
+  assert.equal((await enterCodeFlow({ env: c.env, ui: fakeUi({ code: newCode }).ui })).status, 'restored');
+
+  const synced = await b.env.makeSync({ remote: 'origin' }).sync();
+  assert.equal(synced.kind, 'synced');
+  assert.match(synced.message, /A newer recovery code made on another computer now opens this project\./);
+  assert.equal(wrapIdOf(await localWrap(b)), wrapIdOf(newWrap), 'B now holds the new wrap');
+  assert.equal(generationOf(await localWrap(b)), generationOf(newWrap));
+  assert.equal(headerWrapId(remote), wrapIdOf(newWrap), 'the old wrap was not pushed back');
+  await thread(b, 'conv-bravo-1', 'From bravo');
+  assert.equal((await b.env.makeSync({ remote: 'origin' }).sync()).kind, 'synced');
+  assert.equal(headerWrapId(remote), wrapIdOf(newWrap), 'still the new code after B pushed more');
+});
+
+test('a new code made while a background sync of the same project runs is not undone by it: the remote ends with the new wrap', async () => {
+  const remote = bareRemote({ withMain: false });
+  const a = computer(remote, 'alpha');
+  await setUpProfile(a);
+  await thread(a, 'conv-online-1', 'Online one');
+  const first = fakeUi();
+  assert.equal((await turnOnFlow({ env: a.env, ui: first.ui })).status, 'on');
+  const oldId = wrapIdOf(await localWrap(a));
+  await thread(a, 'conv-online-2', 'Something new to push');
+  await later();
+  const rotate = fakeUi();
+  const background = a.env.makeSync({ remote: 'origin' }).sync();
+  const [rotated, ran] = await Promise.all([newCodeFlow({ env: a.env, ui: rotate.ui }), background]);
+  assert.equal(rotated.status, 'done');
+  assert.equal(ran.kind, 'synced');
+  const newWrap = await localWrap(a);
+  assert.notEqual(wrapIdOf(newWrap), oldId);
+  assert.equal(headerWrapId(remote), wrapIdOf(newWrap), 'the remote ends with the new wrap, whichever sync went first');
+  const c = computer(remote, 'charlie');
+  assert.equal((await enterCodeFlow({ env: c.env, ui: fakeUi({ code: rotate.shown[0] as string }).ui })).status, 'restored');
+  assert.deepEqual((await c.threads.index()).map((item) => item.id).sort(), ['conv-online-1', 'conv-online-2']);
+});
+
+test('a wrap of a lower generation never replaces a kept one; a higher one does; a wrap file from an earlier build reads as generation 0', async () => {
+  const remote = bareRemote({ withMain: false });
+  const a = computer(remote, 'alpha');
+  await setUpProfile(a);
+  const { bytes } = generateRecoveryCode();
+  const made = await a.keys.writeRecoveryWrap(bytes);
+  assert.equal(typeof made.gen, 'number');
+  const gen = generationOf(made);
+  const file = a.home.paths.recoveryWrap;
+  const before = readFileSync(file, 'utf8');
+  assert.equal(await a.keys.storeRecoveryWrapIfNewer({ ...made, gen: gen - 1 }), false);
+  assert.equal(await a.keys.storeRecoveryWrapIfNewer({ ...made, gen }), false, 'the same generation changes nothing');
+  assert.equal(readFileSync(file, 'utf8'), before, 'the file is unchanged');
+  assert.equal(await a.keys.storeRecoveryWrapIfNewer({ ...made, gen: gen + 1 }), true);
+  assert.equal(generationOf(await a.keys.readRecoveryWrap()), gen + 1);
+  // A newer code made here is always above what is kept, even when the clock went back.
+  const again = await a.keys.writeRecoveryWrap(bytes);
+  assert.ok(generationOf(again) > gen + 1);
+  await assert.rejects(a.keys.writeRecoveryWrap(bytes, 1), /newer recovery code is already kept/);
+
+  const legacy = { kdf: made.kdf, wrappedKey: made.wrappedKey };
+  await writeFile(file, `${JSON.stringify(legacy)}\n`, { mode: 0o600 });
+  const read = await a.keys.readRecoveryWrap();
+  assert.ok(read);
+  assert.equal(generationOf(read), 0);
+  assert.equal(await a.keys.storeRecoveryWrapIfNewer({ ...legacy, gen: 1 }), true, 'any generation is above an earlier build\'s');
+  for (const bad of [-1, 1.5, '3', null]) assert.equal(parseRecoveryWrap({ ...legacy, gen: bad }), undefined);
+  assert.equal(parseRecoveryWrap({ ...legacy, gen: 7, extra: 1 }), undefined);
+});
+
+test('a remote header whose wrap the sealed index does not vouch for is never adopted: this computer keeps its own wrap and it goes up with its next push', async () => {
+  const remote = bareRemote({ withMain: false });
+  const a = computer(remote, 'alpha');
+  await setUpProfile(a);
+  await thread(a, 'conv-online-1', 'Online one');
+  assert.equal((await turnOnFlow({ env: a.env, ui: fakeUi().ui })).status, 'on');
+  const own = await localWrap(a);
+  // Anyone who can push can swap the plain header; the sealed index still names the wrap that was really used.
+  const files = remoteFiles(remote);
+  const header = JSON.parse((files.get('manifest.json') as Buffer).toString('utf8')) as { kdf: unknown; wrappedKey: unknown };
+  const salt = newSalt();
+  const kdf = { name: KDF_PARAMS.name, N: KDF_PARAMS.N, r: KDF_PARAMS.r, p: KDF_PARAMS.p, salt: salt.toString('base64') };
+  header.kdf = kdf;
+  header.wrappedKey = wrapDataKey(await deriveKek(Buffer.alloc(32, 7), salt, kdf), newDataKey(), 'x');
+  files.set('manifest.json', Buffer.from(`${JSON.stringify(header)}\n`));
+  replaceRemoteTree(remote, files);
+  const swapped = headerWrapId(remote);
+  assert.notEqual(swapped, wrapIdOf(own));
+  const synced = await a.env.makeSync({ remote: 'origin' }).sync();
+  assert.equal(synced.kind, 'synced');
+  assert.equal(wrapIdOf(await localWrap(a)), wrapIdOf(own), 'the swapped header was not adopted');
+  assert.doesNotMatch(synced.message, /newer recovery code/);
+  await thread(a, 'conv-online-2', 'Another');
+  assert.equal((await a.env.makeSync({ remote: 'origin' }).sync()).kind, 'synced');
+  assert.equal(headerWrapId(remote), wrapIdOf(own), 'this computer\'s own wrap went up with the next push');
+});
+
+test('two computers each make a new code while offline: after both sync they hold the wrap with the higher generation, and the one whose code lost is told', async () => {
+  const remote = bareRemote({ withMain: false });
+  const a = computer(remote, 'alpha');
+  await setUpProfile(a);
+  await thread(a, 'conv-online-1', 'Online one');
+  const first = fakeUi();
+  assert.equal((await turnOnFlow({ env: a.env, ui: first.ui })).status, 'on');
+  const b = computer(remote, 'bravo');
+  assert.equal((await enterCodeFlow({ env: b.env, ui: fakeUi({ code: first.shown[0] as string }).ui })).status, 'restored');
+  for (const c of [a, b]) assert.equal((await turnOffFlow({ env: c.env, ui: fakeUi().ui })).status, 'done');
+  await later();
+  const codeA = fakeUi();
+  await newCodeFlow({ env: a.env, ui: codeA.ui });
+  await later();
+  const codeB = fakeUi();
+  await newCodeFlow({ env: b.env, ui: codeB.ui });
+  const wrapA = await localWrap(a);
+  const wrapB = await localWrap(b);
+  assert.ok(generationOf(wrapB) > generationOf(wrapA), 'B made its code later');
+
+  assert.equal((await turnOnFlow({ env: a.env, ui: fakeUi().ui })).status, 'on');
+  assert.equal(headerWrapId(remote), wrapIdOf(wrapA));
+  const bOn = await b.env.makeSync({ remote: 'origin' }).sync();
+  assert.equal(bOn.kind, 'synced');
+  assert.doesNotMatch(bOn.message, /newer recovery code/, 'the code that won is not told it lost');
+  assert.equal(headerWrapId(remote), wrapIdOf(wrapB), 'the higher generation went up over the lower one');
+  const aAfter = await a.env.makeSync({ remote: 'origin' }).sync();
+  assert.equal(aAfter.kind, 'synced');
+  assert.match(aAfter.message, /A newer recovery code made on another computer now opens this project\./);
+  assert.equal(wrapIdOf(await localWrap(a)), wrapIdOf(wrapB));
+  assert.equal(generationOf(await localWrap(a)), generationOf(wrapB));
+  const c = computer(remote, 'charlie');
+  assert.equal((await enterCodeFlow({ env: c.env, ui: fakeUi({ code: codeA.shown[0] as string }).ui })).status, 'refused', 'the code that lost no longer opens a new computer');
+  assert.equal((await enterCodeFlow({ env: c.env, ui: fakeUi({ code: codeB.shown[0] as string }).ui })).status, 'restored');
+});
+
+test('the message after a new code says what the old code still opens, and with sync off that the code goes online at the next sync', async () => {
+  const remote = bareRemote({ withMain: false });
+  const a = computer(remote, 'alpha');
+  await setUpProfile(a);
+  const off = await newCodeFlow({ env: a.env, ui: fakeUi().ui });
+  assert.equal(off.status, 'done');
+  assert.match(off.message, /^Your new recovery code opens this project on a new computer\. It goes online the next time this project syncs\. /);
+  assert.match(off.message, /Anyone who has your old code and can read this project's repository can still open everything synced, including what is synced from now on, because your chats keep the same key\. A way to change that key is planned\.$/);
+  assert.doesNotMatch(off.message, /re-keyed|until the data/i);
+  assert.ok(!off.message.includes('—'), 'no em-dash in the message');
+  await thread(a, 'conv-online-1', 'Online one');
+  assert.equal((await turnOnFlow({ env: a.env, ui: fakeUi().ui })).status, 'on');
+  const on = await newCodeFlow({ env: a.env, ui: fakeUi().ui });
+  assert.doesNotMatch(on.message, /goes online the next time/);
+  assert.match(on.message, /Anyone who has your old code/);
 });
 
 // ---- the key file -------------------------------------------------------------------------------------------------------------------

@@ -22,8 +22,22 @@ const KEY_CHECK_PURPOSE = 'key-check';
 const IGNORE_ALL = '*\n';
 const LOCKED_MESSAGE = "This project's chats are locked on this computer. Enter the recovery code to open them.";
 
-/** What keys/recovery.json holds: the data key wrapped under the recovery code's key. The code itself is never written. */
-export interface RecoveryWrap { kdf: KdfRecord; wrappedKey: SealedBlob }
+/**
+ * What keys/recovery.json holds: the data key wrapped under the recovery code's key. The code itself is never written. `gen` is the wrap's generation:
+ * a new code made on a computer gets one above every generation that computer holds, and the higher generation wins everywhere (a file from an earlier
+ * build has none, which reads as 0). It is not part of the wrap's id.
+ */
+export interface RecoveryWrap { kdf: KdfRecord; wrappedKey: SealedBlob; gen?: number }
+
+/** A wrap's generation; a wrap without one (an earlier build's) is generation 0. */
+export function generationOf(wrap: RecoveryWrap | undefined): number {
+  return wrap?.gen ?? 0;
+}
+
+/** The generation of a new code made now on a computer whose current wrap is `current`: above it, and at least the time in milliseconds. */
+export function nextGeneration(current: RecoveryWrap | undefined): number {
+  return Math.max(Date.now(), generationOf(current) + 1);
+}
 
 const BASE64 = /^[A-Za-z0-9+/]*={0,2}$/;
 
@@ -35,10 +49,13 @@ function strictBlob(value: unknown): SealedBlob | undefined {
   return [iv, tag, data].every((text) => BASE64.test(text)) ? { iv, tag, data } : undefined;
 }
 
-/** Reads a recovery wrap strictly; anything that is not exactly { kdf, wrappedKey } with sane scrypt cost is undefined. */
+/** Reads a recovery wrap strictly; anything that is not exactly { kdf, wrappedKey } or { kdf, wrappedKey, gen } with sane scrypt cost is undefined. */
 export function parseRecoveryWrap(value: unknown): RecoveryWrap | undefined {
   const raw = value as Record<string, unknown> | null;
-  if (typeof raw !== 'object' || raw === null || Object.keys(raw).length !== 2) return undefined;
+  if (typeof raw !== 'object' || raw === null) return undefined;
+  const keys = Object.keys(raw);
+  if (keys.length !== 2 && !(keys.length === 3 && 'gen' in raw)) return undefined;
+  if ('gen' in raw && (typeof raw.gen !== 'number' || !Number.isSafeInteger(raw.gen) || raw.gen < 0)) return undefined;
   const kdf = raw.kdf as Record<string, unknown> | null;
   if (typeof kdf !== 'object' || kdf === null || Object.keys(kdf).length !== 5 || typeof kdf.salt !== 'string') return undefined;
   const wrappedKey = strictBlob(raw.wrappedKey);
@@ -47,7 +64,7 @@ export function parseRecoveryWrap(value: unknown): RecoveryWrap | undefined {
     const params = assertKdfParams(kdf);
     const salt = Buffer.from(kdf.salt, 'base64');
     if (salt.length < 8 || salt.length > 64 || salt.toString('base64') !== kdf.salt) return undefined;
-    return { kdf: { ...params, salt: kdf.salt }, wrappedKey };
+    return { kdf: { ...params, salt: kdf.salt }, wrappedKey, ...('gen' in raw ? { gen: raw.gen as number } : {}) };
   } catch {
     return undefined;
   }
@@ -146,24 +163,60 @@ export class StateKeys {
 
   /**
    * Wraps the data key under a key derived from the recovery code and writes keys/recovery.json (D-02). The data key is created first when this project
-   * has none yet. The code is only read, never stored.
+   * has none yet. The code is only read, never stored. Without `gen` the wrap gets the next generation (above the one kept now, chosen while the meta
+   * lock is held, so a new code made here is always the newest here); with one it is kept only when it is newer than what is kept (storeRecoveryWrapIfNewer).
    */
-  public async writeRecoveryWrap(codeBytes: Buffer): Promise<RecoveryWrap> {
+  public async writeRecoveryWrap(codeBytes: Buffer, gen?: number): Promise<RecoveryWrap> {
     const key = await this.ensureDataKey();
     const meta = await this.home.ensure();
     const salt = newSalt();
     const kdf: KdfRecord = { name: KDF_PARAMS.name, N: KDF_PARAMS.N, r: KDF_PARAMS.r, p: KDF_PARAMS.p, salt: salt.toString('base64') };
-    const wrap: RecoveryWrap = { kdf, wrappedKey: wrapDataKey(await deriveKek(codeBytes, salt, kdf), key, meta.stateId) };
-    await this.storeRecoveryWrap(wrap);
-    return wrap;
+    const made = { kdf, wrappedKey: wrapDataKey(await deriveKek(codeBytes, salt, kdf), key, meta.stateId) };
+    return this.home.withMetaLock(async () => {
+      const current = await this.readRecoveryWrap();
+      const wrap: RecoveryWrap = { ...made, gen: gen ?? nextGeneration(current) };
+      if (!(await this.storeIfNewerHeld(wrap, current))) throw new Error('A newer recovery code is already kept on this computer, so the new one was not saved. Nothing was changed.');
+      return wrap;
+    });
   }
 
-  /** Stores a wrap that came with the remote's manifest, so this computer can seal the same header. */
-  public async storeRecoveryWrap(wrap: RecoveryWrap): Promise<void> {
+  /**
+   * The only way keys/recovery.json is written (REVIEW BLOCKER stateSync.ts:466): the wrap is kept when there is none yet or its generation is higher than
+   * the one kept, and the check and the write happen under the meta lock. A wrap of a lower or equal generation changes nothing and gives false.
+   * `foreign` is for taking over the wrap of a project just opened with its code: a kept wrap that does not open to the same data key with that code
+   * belongs to another project's key (a join replaced it), so it is replaced whatever its generation. `acceptEqual` is the tie rule for wraps that
+   * have no generation (an earlier build's): a different wrap of the same generation that the remote vouches for replaces the kept one.
+   */
+  public async storeRecoveryWrapIfNewer(wrap: RecoveryWrap, options: { foreign?: { codeBytes: Buffer; dataKey: Buffer; stateId: string }; acceptEqual?: boolean } = {}): Promise<boolean> {
+    await this.refuseForeignFolder();
+    return this.home.withMetaLock(async () => {
+      const current = await this.readRecoveryWrap();
+      if (current && options.foreign && !(await this.opensTo(current, options.foreign))) return this.writeWrapHeld(wrap).then(() => true);
+      return this.storeIfNewerHeld(wrap, current, options.acceptEqual === true);
+    });
+  }
+
+  private async storeIfNewerHeld(wrap: RecoveryWrap, current: RecoveryWrap | undefined, acceptEqual = false): Promise<boolean> {
+    if (current && (generationOf(wrap) < generationOf(current) || (generationOf(wrap) === generationOf(current) && !acceptEqual))) return false;
+    await this.writeWrapHeld(wrap);
+    return true;
+  }
+
+  private async writeWrapHeld(wrap: RecoveryWrap): Promise<void> {
     await this.refuseForeignFolder();
     await this.home.ensureFolder(this.home.paths.keysDir);
     await createExclusive(this.home.paths.keysGitignore, IGNORE_ALL);
     await writeFileAtomic(this.home.paths.recoveryWrap, `${JSON.stringify(wrap)}\n`, { mode: 0o600 });
+  }
+
+  /** Whether a kept wrap opens, with the code, to the given data key. Any failure is a no. */
+  private async opensTo(wrap: RecoveryWrap, foreign: { codeBytes: Buffer; dataKey: Buffer; stateId: string }): Promise<boolean> {
+    try {
+      const key = unwrapDataKey(await deriveKek(foreign.codeBytes, Buffer.from(wrap.kdf.salt, 'base64'), wrap.kdf), wrap.wrappedKey, foreign.stateId);
+      return key.equals(foreign.dataKey);
+    } catch {
+      return false;
+    }
   }
 
   /** The recovery wrap, or undefined when there is none or the file is not exactly a wrap. */

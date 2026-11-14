@@ -43,8 +43,9 @@ const SYNC_ON_PENDING = 'Project sync is on, but the first save did not finish. 
 const UNLOCKED = 'This project is open on this computer again.';
 const JOIN_FAILED = "Something went wrong while adding this computer's chats to the online project, so nothing was changed. Try again.";
 const NEEDS_KEY = "This project's chats are locked on this computer. Enter the recovery code first.";
-const NEW_CODE_SAVED = 'Your new recovery code is the one that opens this project now.';
-const OLD_CODE_NOTE = 'Copies already on your git host can still be opened with the old code until the data is re-keyed.';
+const NEW_CODE_SAVED = 'Your new recovery code opens this project on a new computer.';
+const NEW_CODE_OFFLINE = 'It goes online the next time this project syncs.';
+const OLD_CODE_NOTE = "Anyone who has your old code and can read this project's repository can still open everything synced, including what is synced from now on, because your chats keep the same key. A way to change that key is planned.";
 const KEY_FILE_OFF_TEXT = 'Turn off the chat key file in this project? Each new editor or browser will then ask for the recovery code before it can open these chats. A recovery code will be shown first if you have none.';
 const KEY_FILE_OFF_DONE = 'The chat key file was removed. New editors and browsers will ask for the recovery code.';
 const KEY_FILE_ON_DONE = 'The chat key file is back in this project, so every editor on this computer can open the chats.';
@@ -466,7 +467,7 @@ export async function enterCodeFlow(input: EnterCodeInput): Promise<EnterCodeRes
       ui.info(message);
       return { status: 'refused', message };
     }
-    await env.keys.storeRecoveryWrap(opening.wrap);
+    await env.keys.storeRecoveryWrapIfNewer(opening.wrap, { foreign: { codeBytes: bytes, dataKey: opening.dataKey, stateId: opening.stateId } });
     await writeEnabled(env, { enabled: true, remote: found.name });
     env.onEnabled?.(true, found.name);
     const outcome = await env.makeSync({ remote: found.name }).sync();
@@ -489,9 +490,10 @@ export type FlowStatus = 'done' | 'cancelled' | 'failed';
 export interface FlowResult { status: FlowStatus; message: string }
 
 /**
- * Shows a new recovery code once and makes it the one that opens the project (D-02). Its wrap goes up with the next sync (now, when sync is on). Copies
- * already on the git host were wrapped under the old code: until the data is re-keyed (not part of this phase) the old code still opens them, and the
- * message says so.
+ * Shows a new recovery code once and makes it the one that opens the project on a new computer (D-02). Its wrap is written with a generation above every
+ * one this computer holds, and the higher generation always wins, so it goes online with the next sync (now, when sync is on) and is never undone by an
+ * older wrap, however the syncs interleave. The data key is not changed: anyone who has the old code and can read the project's repository can still
+ * open everything synced, including what is synced from now on, and the message says so (a way to change the key is a planned follow-up).
  */
 export async function newCodeFlow(input: TurnOnInput): Promise<FlowResult> {
   const { env, ui } = input;
@@ -505,12 +507,11 @@ export async function newCodeFlow(input: TurnOnInput): Promise<FlowResult> {
     made.bytes.fill(0);
   }
   let message = NEW_CODE_SAVED;
-  if (settings.enabled) {
+  if (!settings.enabled) message = `${message} ${NEW_CODE_OFFLINE}`;
+  else {
     const found = await resolveRemote(env, ui);
     if (found.kind === 'remote') {
-      const sync = env.makeSync({ remote: found.name });
-      await sync.markWrapChanged();
-      const outcome = await sync.sync();
+      const outcome = await env.makeSync({ remote: found.name }).sync();
       if (outcome.kind !== 'synced') message = `${message} It could not go online yet and will with the next sync.`;
     }
   }
