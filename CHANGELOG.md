@@ -1,6 +1,9 @@
 # Changelog
 
-## Unreleased
+## 0.4.22
+
+This release stops Auto asking about the agent's own helper scripts, makes the waiting badge match
+the approvals you can see, and keeps project sync running during long chats.
 
 - **Auto no longer asks before running the agent's own helper scripts.** The agent is told to keep
   helper scripts in the project's `.near-ai/scratch/` folder, but with Auto on, running one asked for
@@ -9,9 +12,27 @@
   asking, and so does one written by another agent of the same run. A script written another way
   (for example with `sed -i`), one the run did not write itself, one changed since, or one written
   after the agent read outside content such as a web page, still asks.
+- **The badge on the NEAR AI tab counts only approvals you can see and answer.** A helper agent's
+  approval that went unanswered disappeared from the chat while still counting on the badge. It now
+  stays in the chat until you answer it, and allowing a command for the run also settles the other
+  waiting approvals for that same command.
+- **"Allow every time" works on a helper agent's waiting approval.** Choosing it on an approval the
+  helper agent had already moved on from allowed the command for that run only, so it asked again in
+  the next run. It is now saved to the workspace's allow list, as it is on any other approval.
+- **Sync no longer waits for a long chat to end.** A chat that ran for hours, or waited hours for
+  your answer, held project sync back the whole time. Sync now also runs when a chat pauses (it is
+  waiting for you, or between steps) once the last sync is older than the sync interval. The chat
+  that is running is not changed by it: what another computer saved for that chat is added when the
+  chat ends.
+- **Sync Project Now works during a chat.** It runs at once instead of waiting for the chat to end.
+- **Turning sync on during a chat no longer shows "Needs attention".** The first sync only had to
+  wait for the chat, so it is no longer reported as a problem, and it runs at the chat's next pause.
 - **A message sent while the agent is working says when it was not sent.** With no project folder
   open, the message now says it was not sent instead of vanishing, and a message whose files were
   not sent no longer shows them as sent.
+- **Attached files are not lost or paid for twice.** Files of a message that fails before the agent
+  starts come back to the message box, and a message Stop handed back is sent again without reading
+  its image or audio file a second time.
 - **A project's team is only used in a trusted window.** If VS Code cannot say the window is trusted,
   the team that came with the repository is not used and you are not asked about it.
 - **The question about a project's team shows its members plainly.** Names and roles from the team
@@ -21,19 +42,6 @@
 - **A conversation whose team is gone says so.** If the team a conversation started with was deleted
   or renamed and there is no project team to use, the chat now tells you the run continues without a
   team, instead of dropping it without a word.
-- **The badge on the NEAR AI tab now counts only approvals you can see and answer.** A helper agent's approval that went unanswered disappeared from the chat while still counting on the badge. It now stays in the chat until you answer it, and allowing a command for the run also settles the other waiting approvals for that same command.
-- **"Allow every time" works on a helper agent's waiting approval.** Choosing it on an approval the
-  helper agent had already moved on from allowed the command for that run only, so it asked again in
-  the next run. It is now saved to the workspace's allow list, as it is on any other approval.
-
-- **Sync no longer waits for a long chat to end.** A chat that ran for hours, or waited hours for
-  your answer, held project sync back the whole time. Sync now also runs when a chat pauses (it is
-  waiting for you, or between steps) once the last sync is older than the sync interval. The chat
-  that is running is not changed by it: what another computer saved for that chat is added when the
-  chat ends.
-- **Sync Project Now works during a chat.** It runs at once instead of waiting for the chat to end.
-- **Turning sync on during a chat no longer shows "Needs attention".** The first sync only had to
-  wait for the chat, so it is no longer reported as a problem, and it runs at the chat's next pause.
 
 ## 0.4.21
 
