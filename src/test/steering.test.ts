@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -636,6 +636,7 @@ test('sidebar: a message whose file trips the outbound check is not sent, and it
     assert.equal(blocked?.state, 'blocked');
     assert.match(String(blocked?.reason), /credential/);
     assert.equal(sidebar.posted.some((message) => message.type === 'attachments-cleared'), false, 'the file keeps its chip');
+    assert.equal(existsSync(path.join(root, staged.savedAs!)), false, 'the blocked file\'s copy is not left in the project');
     await sidebar.send({ type: 'approval-reply', callId: approval.callId, decision: 'allow' });
     await running;
     assert.equal(near.requests.some((messages) => JSON.stringify(messages).includes('sk-live-999')), false);
@@ -671,6 +672,32 @@ test('sidebar: a queued file whose message is stopped comes back to the composer
     assert.equal(JSON.stringify(near.requests[1]).includes('carried file body'), false, 'the file does not ride on an unrelated message');
   } finally {
     await setEmergencyStop(false);
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('sidebar: a file taken out before sending leaves no copy, and a steer whose file is gone is not sent without it', async () => {
+  const { root, auth } = await projectWithProfile();
+  const near = fakeNear(() => near.requests.length === 1 ? editCall : { content: 'done' });
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = near.fetch;
+  try {
+    const sidebar = await openSidebar(root, auth);
+    const removed = await attach(sidebar, 'draft.txt', 'not wanted');
+    assert.equal(existsSync(path.join(root, removed.savedAs!)), true);
+    await sidebar.send({ type: 'attachment-remove', id: removed.id });
+    assert.equal(existsSync(path.join(root, removed.savedAs!)), false, 'removing the chip removes its copy');
+
+    const running = sidebar.send({ type: 'send', text: 'Use port 8080', model: 'z-ai/glm-5.3' });
+    const approval = await until(() => sidebar.posted.find((message) => message.type === 'approval-request'));
+    await sidebar.send({ type: 'steer', id: 'steer-a7a7a7a7a7a7', text: 'see the draft', attachmentIds: [removed.id] });
+    const blocked = sidebar.posted.find((message) => message.type === 'steer-state' && message.id === 'steer-a7a7a7a7a7a7');
+    assert.equal(blocked?.state, 'blocked');
+    assert.match(String(blocked?.reason), /no longer available/);
+    await sidebar.send({ type: 'approval-reply', callId: approval.callId, decision: 'allow' });
+    await running;
+    assert.equal(near.requests.some((messages) => JSON.stringify(messages).includes('see the draft')), false, 'the words are not sent without their file');
+  } finally {
     globalThis.fetch = originalFetch;
   }
 });

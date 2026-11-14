@@ -10,7 +10,7 @@ import { ToolError } from './workspace';
 export type AttachmentKind = 'image' | 'audio' | 'text' | 'document';
 
 /** `text` is the extracted text of a document, read when it is attached; `note` says what could not be read. */
-export interface StagedAttachment { id: string; name: string; kind: AttachmentKind; mime: string; size: number; bytes: Buffer; text?: string; note?: string; hiddenParts?: number; /** 0.4.21: where the copy in the project is, saved when the file is attached. */ savedAs?: string }
+export interface StagedAttachment { id: string; name: string; kind: AttachmentKind; mime: string; size: number; bytes: Buffer; text?: string; note?: string; hiddenParts?: number; /** 0.4.21: where the copy in the project is, saved when the file is attached. */ savedAs?: string; /** Whether that copy was written for this attachment (not an identical file already there), so discarding it may delete it. */ copyCreated?: boolean }
 
 const TYPES: Record<string, { kind: AttachmentKind; mime: string }> = {
   png: { kind: 'image', mime: 'image/png' }, jpg: { kind: 'image', mime: 'image/jpeg' }, jpeg: { kind: 'image', mime: 'image/jpeg' }, gif: { kind: 'image', mime: 'image/gif' }, webp: { kind: 'image', mime: 'image/webp' },
@@ -52,6 +52,11 @@ export async function stageAttachment(file: string): Promise<StagedAttachment> {
  * message: the attachment is still read into the message itself.
  */
 export async function copyAttachmentIntoProject(attachment: StagedAttachment, root: string): Promise<string | undefined> {
+  return (await saveAttachmentCopy(attachment, root))?.path;
+}
+
+/** As copyAttachmentIntoProject, also saying whether the copy was written now (`created`) or an identical file was already there. */
+export async function saveAttachmentCopy(attachment: StagedAttachment, root: string): Promise<{ path: string; created: boolean } | undefined> {
   const folder = path.join(root, '.near-ai', 'attachments');
   const safeName = path.basename(attachment.name).replace(/[^\w.\- ]+/g, '_') || 'attachment';
   const extension = path.extname(safeName);
@@ -63,11 +68,11 @@ export async function copyAttachmentIntoProject(attachment: StagedAttachment, ro
       const target = path.join(folder, name);
       if (await exists(target)) {
         // The same file attached twice is one copy; a different file with the same name gets its own.
-        if (await sameBytes(target, attachment.bytes)) return path.join('.near-ai', 'attachments', name);
+        if (await sameBytes(target, attachment.bytes)) return { path: path.join('.near-ai', 'attachments', name), created: false };
         continue;
       }
       await writeFile(target, attachment.bytes);
-      return path.join('.near-ai', 'attachments', name);
+      return { path: path.join('.near-ai', 'attachments', name), created: true };
     }
   } catch {
     return undefined;
