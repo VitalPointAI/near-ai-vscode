@@ -775,7 +775,8 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
   private async unchangedScratchWrites(): Promise<string[]> {
     const unchanged: string[] = [];
     for (const [file, mtimeMs] of this.grants.scratchWrites) {
-      try { if ((await stat(file)).mtimeMs === mtimeMs) unchanged.push(file); } catch { /* gone */ }
+      // A file changed since, or gone, never counts again, so it is dropped rather than checked on every later call (0.4.22 review).
+      try { if ((await stat(file)).mtimeMs === mtimeMs) unchanged.push(file); else this.grants.scratchWrites.delete(file); } catch { this.grants.scratchWrites.delete(file); }
     }
     return unchanged;
   }
@@ -785,7 +786,8 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
    * are how an agent usually makes a helper script, and none of them was recorded before.
    */
   private async noteToolScratchWrite(tool: AgentTool<any>, input: unknown, startedAt: number, context: ToolContext): Promise<void> {
-    if (tool.capability !== 'workspaceWrite') return;
+    // Only the tools whose `path` is the file they write (0.4.22 review): another write-capable tool may use `path` for something else.
+    if (tool.name !== 'Write' && tool.name !== 'Edit') return;
     // `input` is the tool's parsed input: Write and Edit both parse the model's `file_path` into `path` (tools.ts).
     const target = (input as { path?: unknown } | undefined)?.path;
     if (typeof target !== 'string' || !target || target.split(/[/\\]/).includes('..')) return;

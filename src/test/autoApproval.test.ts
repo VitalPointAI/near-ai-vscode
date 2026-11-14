@@ -614,7 +614,8 @@ test('only a scratch script the run really wrote may run: the loop records the w
     assert.equal((await run.run([{ role: 'user', content: 'check' }], new AbortController().signal)).outcome, 'completed');
     // The script the run wrote runs; the one already there is held, and its card shows why.
     assert.equal(approvals.length, 1, `exactly one of the two asked: ${JSON.stringify(approvals.map((a) => a.title))}`);
-    assert.match(approvals[0]?.title ?? '', /injected\.py/, 'the pre-existing script is the one that asked');
+    // The card's title is cut short, so the full command (subject) is what names the script.
+    assert.match(approvals[0]?.subject ?? '', /injected\.py/, 'the pre-existing script is the one that asked');
     // Held by the safety model (which here is not sure) or by the rules; either way it is not run.
     assert.match(approvals[0]?.reason ?? '', /runs code the rules cannot check|outside the workspace|not sure/);
   } finally {

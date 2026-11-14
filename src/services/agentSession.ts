@@ -358,7 +358,8 @@ export class AgentConversation {
     }
     // The team note goes ahead of whatever the turn asks, a GSD workflow's instructions included (after them, it would be replaced). It is sent once per
     // team in a conversation, not every turn: a long GSD conversation would otherwise carry one copy per message. It is sent again when the team or its
-    // members change, after the conversation is summarized (the summary may drop it), and in a reopened conversation.
+    // members change (notedTeam holds the note's full text) and after the conversation is summarized (the summary may drop it). A reopened conversation
+    // counts the newest note already in its restored context as sent, so it does not get a second copy.
     const note = !request.team && request.memberTeam ? teamMembersNote(request.memberTeam) : undefined;
     const noteSent = note !== undefined && this.notedTeam !== note;
     if (noteSent) prompt = `${note}\n\n${prompt}`;
@@ -743,9 +744,11 @@ export class AgentConversation {
 
   /** The agent definitions a run can start; without any, the run has no Agent tool. */
   private spawnableAgents(request: AgentTurnRequest): GsdAgent[] {
-    // One definition per name, in this order: the team's members, then agents a workflow step adds for this project (the red-team stage), then
-    // Open-GSD's own. A member wins over an Open-GSD agent of the same name, and a project agent over an Open-GSD one.
-    const all = [...this.teamMembersOf(request), ...(request.projectAgents ?? []), ...(request.gsd?.agents ?? [])];
+    // One definition per name, the first one wins. The agents a workflow step adds for this run (the red-team stage) come first, with or without a team
+    // (#46 review), so neither a team file in the repository nor an Open-GSD agent of the same name can replace them; then the team's members, which win
+    // over Open-GSD's agents of the same name; then Open-GSD's.
+    const members = this.teamMembersOf(request);
+    const all = [...(request.projectAgents ?? []), ...members, ...(request.gsd?.agents ?? [])];
     return all.filter((agent, index) => all.findIndex((other) => other.name === agent.name) === index);
   }
 
@@ -862,7 +865,8 @@ export class AgentConversation {
       root: this.root,
       skills: gsd?.skills ?? [],
       agents,
-      teamMembers: this.teamMembersOf(request).map((agent) => agent.name),
+      // A member whose name a run's own agent took is not offered as a member: that name runs the run's agent.
+      teamMembers: this.teamMembersOf(request).map((agent) => agent.name).filter((name) => !(request.projectAgents ?? []).some((agent) => agent.name === name)),
       ask: (questions, askSignal) => this.askQuestions(questions, askSignal),
       spawn: async (spawn, callSignal) => {
         const label = spawn.agent?.name ?? spawn.type;

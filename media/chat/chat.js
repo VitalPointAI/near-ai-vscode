@@ -263,15 +263,34 @@
     const node = append(el('div', 'turn user steer', text));
     const line = el('span', 'steer-state', options.interrupt ? 'Interrupting…' : 'Sending…');
     node.append(line);
-    steerBubbles.set(id, { node, line, files: undefined });
+    steerBubbles.set(id, { node, line, files: undefined, fileIds: [] });
     input.value = '';
     autosize();
     updateSendState();
     // 0.4.21: the files attached to this message go with it, to the running agent, never left for a later message.
     const ids = [...staged.keys()];
     const files = ids.length ? document.createTextNode('\n📎 ' + [...staged.values()].join(', ')) : undefined;
-    if (files) { node.insertBefore(files, line); steerBubbles.get(id).files = files; }
+    if (files) { node.insertBefore(files, line); steerBubbles.get(id).files = files; steerBubbles.get(id).fileIds = ids; }
     postFor({ type: 'steer', id, text, ...(options.interrupt ? { interrupt: true } : {}), ...(ids.length ? { attachmentIds: ids } : {}) });
+  }
+  // File lines of messages that became a new turn. The line goes, as it does for a blocked or returned message, when that turn is refused
+  // (`outbound-blocked`, `assistant-error`) before it took the files (`attachments-cleared`), or when the files come back to the composer unsent.
+  let sentNewFiles = [];
+  function settleSentNewFiles(m) {
+    if (!sentNewFiles.length) return;
+    if (m.type === 'attachments-cleared') {
+      // Only the files it names (#46 review): a clear that names none takes nothing, so a later refusal still removes those file lines.
+      if (!Array.isArray(m.ids)) return;
+      const cleared = new Set(m.ids);
+      for (const entry of sentNewFiles) if (entry.ids.every((id) => cleared.has(id))) entry.taken = true;
+      return;
+    }
+    const refused = m.type === 'outbound-blocked' || m.type === 'assistant-error';
+    sentNewFiles = sentNewFiles.filter((entry) => {
+      if (!(refused && !entry.taken) && !(m.type === 'attachment-staged' && entry.ids.includes(m.id))) return true;
+      entry.files.remove();
+      return false;
+    }).slice(-50);
   }
   function onSteerState(m) {
     // A conversation shown again brings back the messages still queued for its run.
@@ -286,6 +305,8 @@
       bubble.line.textContent = m.state === 'blocked' && m.reason ? 'Not sent: ' + m.reason : STEER_LABELS[m.state] || '';
       // A message not sent (blocked, or handed back by Stop) did not send its files either: they are attached in the composer again.
       if ((m.state === 'blocked' || m.state === 'returned') && bubble.files) { bubble.files.remove(); bubble.files = undefined; }
+      // A message that became a new turn has sent its files only once that turn takes them; until then the line waits on the turn's outcome.
+      if (m.state === 'sent-new' && bubble.files) sentNewFiles = [...sentNewFiles, { files: bubble.files, ids: bubble.fileIds || [], taken: false }].slice(-50);
       bubble.line.dataset.state = m.state;
       // Once the agent has it, the message sits where the conversation took it in, and the reply follows it.
       if (m.state === 'delivered' || m.state === 'sent-new') {
@@ -1418,6 +1439,7 @@
         break;
       }
       case 'outbound-blocked': {
+        settleSentNewFiles(m);
         if (current) { removeTurn(current.node); current = undefined; }
         setBusy(false);
         const actions = m.overrideToken ? [textButton(m.confirm ? 'Send anyway' : 'Send once anyway', () => {
@@ -1441,6 +1463,7 @@
         notice(m.text || 'Retrying…', []);
         break;
       case 'assistant-error':
+        settleSentNewFiles(m);
         closeAllPending('cancelled');
         finishAssistant();
         notice(m.text || 'The request failed.', [], true);
@@ -1450,9 +1473,9 @@
       case 'prompt-error': notice(m.text || 'That answer could not be sent.', [], true); break;
       case 'history-error': notice(m.text, [], true); break;
       case 'artifacts': renderArtifacts(m.artifacts); break;
-      case 'attachment-staged': staged.set(m.id, m.name); savedAs.set(m.id, m.savedAs || ''); renderChips(); announce('Attached ' + m.name + (m.savedAs ? ', saved in the project as ' + m.savedAs : '')); break;
+      case 'attachment-staged': settleSentNewFiles(m); staged.set(m.id, m.name); savedAs.set(m.id, m.savedAs || ''); renderChips(); announce('Attached ' + m.name + (m.savedAs ? ', saved in the project as ' + m.savedAs : '')); break;
       // Only the files that went with a message; one attached meanwhile keeps its chip.
-      case 'attachments-cleared': for (const id of Array.isArray(m.ids) ? m.ids : [...staged.keys()]) { staged.delete(id); savedAs.delete(id); } renderChips(); break;
+      case 'attachments-cleared': settleSentNewFiles(m); for (const id of Array.isArray(m.ids) ? m.ids : [...staged.keys()]) { staged.delete(id); savedAs.delete(id); } renderChips(); break;
       case 'commands': if (Array.isArray(m.commands) && m.commands.length) commands = m.commands; break;
       case 'notice': notice(m.text || '', []); break;
       // A run the extension host never finished: nothing continues until the user clicks Resume.
