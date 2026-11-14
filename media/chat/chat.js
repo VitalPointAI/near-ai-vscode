@@ -95,10 +95,14 @@
   let menuIndex = 0;
   let modelInfo = new Map();
   const staged = new Map();
+  /** Where each staged file was saved in the project (0.4.21), by attachment ID. */
+  const savedAs = new Map();
   function renderChips() {
     chips.replaceChildren(...[...staged.entries()].map(([id, name]) => {
       const chip = el('span', 'chip-file', name);
-      const remove = iconButton('stop', 'Remove ' + name, () => { staged.delete(id); post({ type: 'attachment-remove', id }); renderChips(); });
+      // Where the copy in the project is, so a person can see the file was saved and open it.
+      if (savedAs.get(id)) chip.title = 'Saved in the project as ' + savedAs.get(id);
+      const remove = iconButton('stop', 'Remove ' + name, () => { staged.delete(id); savedAs.delete(id); post({ type: 'attachment-remove', id }); renderChips(); });
       chip.append(remove);
       return chip;
     }));
@@ -259,12 +263,15 @@
     const node = append(el('div', 'turn user steer', text));
     const line = el('span', 'steer-state', options.interrupt ? 'Interrupting…' : 'Sending…');
     node.append(line);
-    steerBubbles.set(id, { node, line });
+    steerBubbles.set(id, { node, line, files: undefined });
     input.value = '';
     autosize();
     updateSendState();
-    if (staged.size) notice('Attachments stay staged: they go with your next message once this run ends.', []);
-    postFor({ type: 'steer', id, text, ...(options.interrupt ? { interrupt: true } : {}) });
+    // 0.4.21: the files attached to this message go with it, to the running agent, never left for a later message.
+    const ids = [...staged.keys()];
+    const files = ids.length ? document.createTextNode('\n📎 ' + [...staged.values()].join(', ')) : undefined;
+    if (files) { node.insertBefore(files, line); steerBubbles.get(id).files = files; }
+    postFor({ type: 'steer', id, text, ...(options.interrupt ? { interrupt: true } : {}), ...(ids.length ? { attachmentIds: ids } : {}) });
   }
   function onSteerState(m) {
     // A conversation shown again brings back the messages still queued for its run.
@@ -277,6 +284,8 @@
     const bubble = steerBubbles.get(m.id);
     if (bubble) {
       bubble.line.textContent = m.state === 'blocked' && m.reason ? 'Not sent: ' + m.reason : STEER_LABELS[m.state] || '';
+      // A message not sent (blocked, or handed back by Stop) did not send its files either: they are attached in the composer again.
+      if ((m.state === 'blocked' || m.state === 'returned') && bubble.files) { bubble.files.remove(); bubble.files = undefined; }
       bubble.line.dataset.state = m.state;
       // Once the agent has it, the message sits where the conversation took it in, and the reply follows it.
       if (m.state === 'delivered' || m.state === 'sent-new') {
@@ -1441,8 +1450,9 @@
       case 'prompt-error': notice(m.text || 'That answer could not be sent.', [], true); break;
       case 'history-error': notice(m.text, [], true); break;
       case 'artifacts': renderArtifacts(m.artifacts); break;
-      case 'attachment-staged': staged.set(m.id, m.name); renderChips(); announce('Attached ' + m.name); break;
-      case 'attachments-cleared': staged.clear(); renderChips(); break;
+      case 'attachment-staged': staged.set(m.id, m.name); savedAs.set(m.id, m.savedAs || ''); renderChips(); announce('Attached ' + m.name + (m.savedAs ? ', saved in the project as ' + m.savedAs : '')); break;
+      // Only the files that went with a message; one attached meanwhile keeps its chip.
+      case 'attachments-cleared': for (const id of Array.isArray(m.ids) ? m.ids : [...staged.keys()]) { staged.delete(id); savedAs.delete(id); } renderChips(); break;
       case 'commands': if (Array.isArray(m.commands) && m.commands.length) commands = m.commands; break;
       case 'notice': notice(m.text || '', []); break;
       // A run the extension host never finished: nothing continues until the user clicks Resume.
