@@ -242,8 +242,11 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
   const workingTeam = async (tab: ChatTab, root: string): Promise<TeamDefinition | undefined> => {
     await whenTeamsMoved();
     const library = new TeamLibrary(teamLibraryDir(homeFolder()));
-    const { team, notice } = await workingTeamFor((slug) => library.find(slug, root), tab.agent?.conversationTeam, tab.teamNoticed);
-    if (team) tab.teamNoticed = team.slug;
+    // Keyed by the conversation, so a new or reopened conversation in this tab is told again.
+    const conversation = tab.agent?.id ?? tab.id;
+    const before = tab.teamNoticed?.startsWith(`${conversation}|`) ? tab.teamNoticed.slice(conversation.length + 1) : undefined;
+    const { team, notice, noticed } = await workingTeamFor((slug) => library.find(slug, root), tab.agent?.conversationTeam, before);
+    if (noticed) tab.teamNoticed = `${conversation}|${noticed}`;
     if (notice) tab.post({ type: 'notice', text: notice });
     return team;
   };

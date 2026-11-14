@@ -503,3 +503,29 @@ test('the approval card offers Allow this time and Allow every time, and "for th
   assert.match(card, /if \(m\.allowRule\) choices\.append\(textButton\('Allow every time'/, 'every time appears only when there is an entry to save');
   assert.match(card, /m\.allowRule === undefined/, 'for this run appears only when there is none');
 });
+
+test('sidebar: a plain message in a project with a team works with that team, says so once, and sends the note once', async () => {
+  const { root, auth } = await projectWithProfile();
+  const teamsDir = await mkdtemp(path.join(tmpdir(), 'near-ai-teams-dir-'));
+  const previousTeams = process.env.NEAR_AI_TEAMS_DIR;
+  process.env.NEAR_AI_TEAMS_DIR = teamsDir;
+  const { mkdir: makeDir } = await import('node:fs/promises');
+  const { renderTeam, TeamLibrary } = await import('../agent/teams');
+  await makeDir(path.dirname(TeamLibrary.projectTeamFile(root)), { recursive: true });
+  await writeFile(TeamLibrary.projectTeamFile(root), renderTeam('Project team', 'Builds it', [{ name: 'designer', role: 'designer', instructions: 'Make images.' }]));
+  const near = fakeNear(() => ({ content: 'ok' }));
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = near.fetch;
+  try {
+    const sidebar = await openSidebar(root, auth);
+    await sidebar.send({ type: 'send', text: 'make the pictures', model: 'z-ai/glm-5.3' });
+    await sidebar.send({ type: 'send', text: 'and a banner', model: 'z-ai/glm-5.3' });
+    const notices = sidebar.posted.filter((message) => message.type === 'notice' && /^Working with the /.test(String(message.text)));
+    assert.deepEqual(notices.map((message) => message.text), ['Working with the Project team team: its members do the specialist work.'], 'said once');
+    assert.match(lastUser(near.requests[0]), /^<team name="Project team">[\s\S]*- designer \(designer\): Make images\.[\s\S]*<\/team>\n\nmake the pictures$/, 'the chat passes the team to the run');
+    assert.equal(lastUser(near.requests[1]), 'and a banner', 'the note is not repeated');
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (previousTeams === undefined) delete process.env.NEAR_AI_TEAMS_DIR; else process.env.NEAR_AI_TEAMS_DIR = previousTeams;
+  }
+});

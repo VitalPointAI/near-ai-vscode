@@ -235,6 +235,8 @@ export class AgentConversation {
   private title = '';
   /** The team the newest /team run of this conversation led (0.4.21); kept through compaction, which summarizes the message that named it. */
   private teamSlug: string | undefined;
+  /** The team whose note this conversation's model has in context, so the note is sent once per team rather than every turn. */
+  private notedTeam: string | undefined;
   private shell: ShellSession | undefined;
   private shellEnvAllow: string[] = [];
   private shellEnvKey = '';
@@ -342,7 +344,9 @@ export class AgentConversation {
     let prompt = request.text;
     if (request.team) this.teamSlug = request.team.slug;
     if (request.team) prompt = teamLeadPrompt(request.team, request.text.replace(/^\/team:\S+\s*/, ''));
-    else if (request.memberTeam) prompt = `${teamMembersNote(request.memberTeam)}\n\n${prompt}`;
+    // The note is said once per team in a conversation, not every turn: a long GSD conversation would otherwise carry one copy per message. It is said
+    // again after the conversation is summarized (the summary may drop it) and in a reopened conversation.
+    else if (request.memberTeam && this.notedTeam !== request.memberTeam.slug) { prompt = `${teamMembersNote(request.memberTeam)}\n\n${prompt}`; this.notedTeam = request.memberTeam.slug; }
     if (request.skill && request.gsd) {
       const skill = findSkill(request.gsd.skills, request.skill.name);
       if (!skill) throw new Error(`Open-GSD has no skill named ${request.skill.name}.`);
@@ -654,6 +658,7 @@ export class AgentConversation {
     this.conversationId = transcript.id;
     this.title = transcript.title;
     this.teamSlug = undefined;
+    this.notedTeam = undefined;
     const store = this.transcripts;
     let items: ViewItem[] | undefined;
     if (store instanceof ThreadStore) {
@@ -688,6 +693,7 @@ export class AgentConversation {
     this.conversationId = newConversationId();
     this.title = '';
     this.teamSlug = undefined;
+    this.notedTeam = undefined;
     this.contextWarned = false;
     this.contextFullWarned = false;
     this.notifications = [];
@@ -779,6 +785,8 @@ export class AgentConversation {
       }
       next = compacted;
       this.contextFullWarned = false;
+      // The summary may have dropped the team note: the next turn says it again.
+      if (mainRun) this.notedTeam = undefined;
       if (mainRun) {
         this.post({ type: 'notice', text: 'The conversation was summarized to stay within the model\'s context window. A handoff was saved to .planning/HANDOFF.json.' });
         await saveHandoff(this.root, { reason: 'context-critical', currentAction: this.title || 'Agent conversation', nextAction: 'Continue from the summarized conversation, or resume it from NEAR AI history.', activeAgents: this.agents.size, pendingApprovals: this.approvals.size }).catch(() => undefined);
