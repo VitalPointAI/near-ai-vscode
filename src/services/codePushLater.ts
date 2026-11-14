@@ -9,12 +9,10 @@ import { GitHubApiError, getRepo } from './githubApi';
 import type { FetchLike } from './githubApi';
 import { pushProjectCode, runPersonGit } from './codePushCheck';
 import type { CodePushStatus, CodePushUi } from './codePushCheck';
-import { defaultBranchAfterPush, readProgress, withGitHubAuth } from './onlineHome';
-import type { GhCli, GitHubAuth } from './onlineHome';
+import { defaultBranchAfterPush, memoryProgressStore, readProgress, withGitHubAuth } from './onlineHome';
+import type { GhCli, GitHubAuth, OnlineHomeProgressStore } from './onlineHome';
 import { gitText, redactGitMessage, runStateGit } from './stateGit';
 import type { GitRunner } from './stateGit';
-import { stateHomeFor } from './stateHome';
-import type { ProjectStateHome } from './stateHome';
 import { memorySyncSettings, resolveRemote, type SyncSettingsStore } from './syncFlows';
 
 export const NO_ONLINE_HOME = 'This project has no online home yet, so there is nowhere to put its code. Run "NEAR AI: Give This Project an Online Home" first.';
@@ -22,7 +20,8 @@ const NOT_CHOSEN = 'Your code was not pushed because no online repository was ch
 
 export interface CodePushLaterInput {
   root: string;
-  home?: ProjectStateHome;
+  /** What the setup saved (the repository, how it was made): this editor's own storage. Without one, a store that lasts for this process. */
+  progress?: OnlineHomeProgressStore;
   /** Whether sync is on and which remote it uses: this editor's own storage. Without one, a store that lasts for this process. */
   settings?: SyncSettingsStore;
   /** The code-push dialogs. The question "push at all?" is not asked: running the command is the person's choice. */
@@ -61,7 +60,6 @@ export async function pushCodeLaterFlow(input: CodePushLaterInput): Promise<Code
   const tell = (text: string): void => ui.message(clean(text));
   const finish = (status: CodePushLaterStatus, message: string): CodePushLaterResult => { tell(message); return { status, message: clean(message) }; };
   const base = input.git ?? runStateGit;
-  const home = input.home ?? stateHomeFor(root);
 
   const found = await resolveRemote({ root, git: base, settings: input.settings ?? memorySyncSettings(root) }, { pickRemote: input.pickRemote ?? (() => Promise.resolve(undefined)) });
   if (found.kind === 'none') return finish('no-home', NO_ONLINE_HOME);
@@ -71,7 +69,7 @@ export async function pushCodeLaterFlow(input: CodePushLaterInput): Promise<Code
   // The repository: what the setup saved when its address is this remote's, otherwise what the address itself says.
   const addressRead = await base(['-C', root, 'config', '--get', `remote.${remote}.url`]);
   const address = addressRead.code === 0 ? gitText(addressRead) : '';
-  const saved = await readProgress(home);
+  const saved = await readProgress(input.progress ?? memoryProgressStore(root));
   const known = saved?.repo !== undefined && saved.repo.url === address ? saved : undefined;
   const parsed = known?.repo ?? githubAddress(address);
   const owner = parsed?.owner ?? '';

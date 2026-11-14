@@ -6,9 +6,11 @@ import { isNearAiProject } from '../gsd/runtime';
 import { validateRepoName } from '../domain/state/onlineHome';
 import type { Visibility } from '../domain/state/onlineHome';
 import type { CodePushSummary } from './codePushCheck';
-import { systemGhCli } from './onlineHome';
+import { mementoProgressStore, systemGhCli } from './onlineHome';
 import type { CodePushOffer, GitHubAuth, OnlineHomeUi } from './onlineHome';
 import { pushCodeLaterFlow } from './codePushLater';
+import type { MementoLike } from './stateHome';
+import { mementoSyncSettings } from './syncFlows';
 import { gitText, runStateGit } from './stateGit';
 import { stateHomeFor } from './stateHome';
 
@@ -166,6 +168,9 @@ export function registerCodePushCommand(context: vscode.ExtensionContext): void 
     if (!root) { void vscode.window.showInformationMessage(NO_FOLDER); return; }
     await pushCodeLaterFlow({
       root,
+      // What the setup saved and the remote this editor chose are kept in this editor's own storage, never in a file inside the project.
+      progress: mementoProgressStore(context.globalState as MementoLike, root),
+      settings: mementoSyncSettings(context.globalState as MementoLike, root),
       ui: codePushOffer(),
       auth: vscodeGitHubAuth(),
       gh: systemGhCli(),

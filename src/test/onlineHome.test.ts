@@ -8,9 +8,8 @@ import test from 'node:test';
 import { VISIBILITY_NOTES } from '../domain/state/onlineHome';
 import { GitHubApiError, getRepo, isSafeBranchName, setDefaultBranch } from '../services/githubApi';
 import type { FetchLike } from '../services/githubApi';
-import { moveDefaultBranch, onlineHomeFlow, readProgress, remoteDefaultBranch, repairDefaultBranch, systemGhCli } from '../services/onlineHome';
+import { memoryProgressStore, mementoProgressStore, moveDefaultBranch, onlineHomeFlow, readProgress, remoteDefaultBranch, repairDefaultBranch, systemGhCli } from '../services/onlineHome';
 import type { GhExec } from '../services/onlineHome';
-import { stateHomeFor } from '../services/stateHome';
 import type { GitRunner } from '../services/stateGit';
 import { STATE_REF, StateTransport } from '../services/stateTransport';
 import { bareRemote, fixtureGit, mirrorPaths } from './helpers/gitFixtures';
@@ -118,7 +117,7 @@ test('without VS Code sign-in the flow says so and creates the repository throug
   await runner(['--version']);
   assert.match(spy.envs.at(-1)?.GIT_CONFIG_VALUE_0 ?? '', /^AUTHORIZATION: basic /);
   assert.equal(spy.envs.at(-1)?.GIT_CONFIG_KEY_0, 'http.https://github.com/.extraheader');
-  assert.equal((await readProgress(stateHomeFor(dir)))?.method, 'gh');
+  assert.equal((await readProgress(memoryProgressStore(dir)))?.method, 'gh');
 });
 
 test('when gh is missing or signed out, the flow offers pasting the address of an empty repository and never asks for a token', async () => {
@@ -136,7 +135,7 @@ test('when gh is missing or signed out, the flow offers pasting the address of a
     assert.equal(ui.visibilityNotes.length, 0, 'a repository that already exists is not given a visibility');
     assert.equal(fixtureGit(dir, ['config', '--get', 'remote.origin.url']).trim(), 'https://github.com/me/empty.git');
     assert.equal(spy.envs.every((env) => env.GIT_CONFIG_VALUE_0 === undefined), true, 'no token was involved');
-    assert.equal((await readProgress(stateHomeFor(dir)))?.method, 'url');
+    assert.equal((await readProgress(memoryProgressStore(dir)))?.method, 'url');
   }
 });
 
@@ -171,7 +170,7 @@ test('GitHub answers become one plain sentence each: a taken name asks for anoth
   assert.equal(offline.status, 'failed');
   assert.ok(offlineUi.messages.includes(OFFLINE), offlineUi.messages.join('|'));
   assert.equal(fixtureGit(offlineDir, ['remote']).trim(), '');
-  assert.equal((await readProgress(stateHomeFor(offlineDir)))?.repo, undefined);
+  assert.equal((await readProgress(memoryProgressStore(offlineDir)))?.repo, undefined);
 
   // Refused permission, both from the API and from the person closing the sign-in.
   for (const [dir, fetchFn, auth] of [
@@ -200,7 +199,7 @@ test('an interrupted setup resumes: after create the repository is found, not cr
   const github = fakeGitHub();
   const stop = (at: string) => (step: string): void => { if (step === at) throw new Error('interrupted'); };
   await assert.rejects(onlineHomeFlow({ root: dir, ui: new FakeUi(), auth: fakeAuth(), fetchFn: github.fetchFn, git: spyGit().git, afterRemote: () => Promise.resolve(true), onStep: stop('create') }), /interrupted/);
-  const saved = await readProgress(stateHomeFor(dir));
+  const saved = await readProgress(memoryProgressStore(dir));
   assert.equal(saved?.step, 'create');
   assert.equal(saved?.repo?.url, 'https://github.com/me/resume.git');
   assert.equal(fixtureGit(dir, ['remote']).trim(), '');
@@ -214,7 +213,7 @@ test('an interrupted setup resumes: after create the repository is found, not cr
   assert.equal(ui.visibilityNotes.length, 0, 'the choice made before is not asked again');
   assert.equal(afterRemoteRuns, 1);
   assert.equal(fixtureGit(dir, ['config', '--get', 'remote.origin.url']).trim(), 'https://github.com/me/resume.git');
-  assert.equal((await readProgress(stateHomeFor(dir)))?.step, 'done');
+  assert.equal((await readProgress(memoryProgressStore(dir)))?.step, 'done');
 
   const early = await projectFolder('early');
   await assert.rejects(onlineHomeFlow({ root: early, ui: new FakeUi(), auth: fakeAuth(), fetchFn: github.fetchFn, git: spyGit().git, afterRemote: () => Promise.resolve(true), onStep: stop('init') }), /interrupted/);
@@ -236,17 +235,66 @@ test('a saved repository that GitHub no longer has starts again at sign-in, and 
   assert.equal(result.status, 'done');
   assert.equal(ui.visibilityNotes.length, 1);
 
-  const home = stateHomeFor(dir);
-  const { writeFile } = await import('node:fs/promises');
-  const file = path.join(home.paths.sync, 'online-home.json');
+  // Whatever the store hands back is trusted only when it is exactly what this flow writes.
+  let held: unknown;
+  const store = { read: () => Promise.resolve(held), write: () => Promise.resolve() };
   for (const bad of [
     { step: 'create', method: 'url', startedAt: 'x', repo: { owner: '', name: 'a', url: 'ext::sh -c x', visibility: 'unknown' } },
     { step: 'create', method: 'vscode', startedAt: 'x', repo: { owner: 'me', name: 'a', url: 'https://evil.example/me/a.git', visibility: 'private' } },
-    { step: 'nope', method: 'vscode', startedAt: 'x' }
+    { step: 'nope', method: 'vscode', startedAt: 'x' },
+    { step: 'create', method: 'carrier-pigeon', startedAt: 'x' },
+    { step: 'create', method: 'vscode', startedAt: 7 },
+    'a string',
+    [1, 2]
   ]) {
-    await writeFile(file, JSON.stringify(bad));
-    assert.equal(await readProgress(home), undefined, JSON.stringify(bad));
+    held = bad;
+    assert.equal(await readProgress(store), undefined, JSON.stringify(bad));
   }
+  held = undefined;
+  assert.equal(await readProgress(store), undefined);
+  assert.equal(await readProgress({ read: () => Promise.reject(new Error('storage failed')), write: () => Promise.resolve() }), undefined);
+});
+
+test('a progress file planted in the project names another repository and is never read: the setup asks for its own name and sends nothing about it', async () => {
+  const dir = await projectFolder('planted-progress');
+  const planted = { step: 'remote', method: 'vscode', startedAt: '2026-11-13T00:00:00.000Z', repo: { owner: 'attacker', name: 'evil', url: 'https://github.com/attacker/evil.git', visibility: 'private' } };
+  const file = path.join(dir, '.near-ai', 'state', 'sync', 'online-home.json');
+  await mkdir(path.dirname(file), { recursive: true });
+  writeFileSync(file, `${JSON.stringify(planted)}\n`);
+  const before = readFileSync(file, 'utf8');
+  const github = fakeGitHub({ existing: ['evil'] });
+  const ui = new FakeUi({ visibility: 'private' });
+  const spy = spyGit();
+  const result = await onlineHomeFlow({ root: dir, ui, auth: fakeAuth(), fetchFn: github.fetchFn, git: spy.git, afterRemote: () => Promise.resolve(true) });
+  assert.equal(result.status, 'done');
+  assert.ok(ui.nameCalls.length >= 1, 'the person is asked what to call their own repository');
+  assert.equal(github.calls.some((call) => call.url.includes('attacker') || call.url.includes('/evil') || (call.body ?? '').includes('evil')), false, github.calls.map((call) => call.url).join('|'));
+  assert.equal(fixtureGit(dir, ['remote', '-v']).includes('attacker'), false, 'no remote names the planted repository');
+  assert.equal(spy.calls.some((args) => args.join(' ').includes('attacker/evil')), false);
+  assert.equal(fixtureGit(dir, ['config', '--get', 'remote.origin.url']).trim(), 'https://github.com/me/planted-progress.git');
+  assert.equal(readFileSync(file, 'utf8'), before, 'the planted file was neither read nor changed');
+});
+
+test('an editor-storage progress record carries a cut-off setup on: the same four fields are saved, no second repository, no second turn-on', async () => {
+  const dir = await projectFolder('memento-resume');
+  const github = fakeGitHub();
+  const data = new Map<string, unknown>();
+  const memento = { get: <T>(key: string) => data.get(key) as T | undefined, update: (key: string, value: unknown) => { data.set(key, JSON.parse(JSON.stringify(value))); return Promise.resolve(); } };
+  const progress = mementoProgressStore(memento, dir);
+  await assert.rejects(onlineHomeFlow({ root: dir, progress, ui: new FakeUi(), auth: fakeAuth(), fetchFn: github.fetchFn, git: spyGit().git, afterRemote: () => Promise.resolve(true), onStep: (step) => { if (step === 'create') throw new Error('interrupted'); } }), /interrupted/);
+  const stored = Object.values(data.get('nearAi.onlineHome.progress') as Record<string, Record<string, unknown>>);
+  assert.equal(stored.length, 1);
+  assert.deepEqual(Object.keys(stored[0] as object).sort(), ['method', 'repo', 'startedAt', 'step']);
+  assert.equal((await readProgress(progress))?.step, 'create');
+  assert.equal(existsSync(path.join(dir, '.near-ai', 'state', 'sync', 'online-home.json')), false, 'nothing was written into the project');
+
+  let afterRemoteRuns = 0;
+  const again = await onlineHomeFlow({ root: dir, progress: mementoProgressStore(memento, dir), ui: new FakeUi(), auth: fakeAuth(), fetchFn: github.fetchFn, git: spyGit().git, afterRemote: () => { afterRemoteRuns += 1; return Promise.resolve(true); } });
+  assert.equal(again.status, 'done');
+  assert.equal(github.calls.filter((call) => call.method === 'POST').length, 1, 'the repository was made once');
+  assert.equal(afterRemoteRuns, 1);
+  assert.equal((await readProgress(mementoProgressStore(memento, dir)))?.step, 'done');
+  assert.equal((await readProgress(mementoProgressStore(memento, path.join(dir, 'elsewhere'))))?.step, undefined, 'another project has no progress');
 });
 
 test('the token never appears in a git argument, a file, the progress record, a message or the console, and git gets it only through its environment', async () => {
@@ -292,7 +340,7 @@ test('the token never appears in a git argument, a file, the progress record, a 
       folders.push(dir);
       argLists.push(...spy.calls);
       envs.push(...spy.envs);
-      messages.push(...ui.messages, ...ui.steps, JSON.stringify(result));
+      messages.push(...ui.messages, ...ui.steps, JSON.stringify(result), JSON.stringify(await memoryProgressStore(dir).read()));
     }
   } finally {
     consoleMethods.forEach((method, index) => { console[method] = originals[index] as never; });
@@ -762,7 +810,7 @@ test('the re-run reads the remote with one ls-remote of the person\'s branch, le
   const listed = again.gitCalls.filter((args) => args.includes('ls-remote') && args.includes('--heads'));
   assert.equal(listed.length, 1);
   assert.ok(listed[0]?.includes(`refs/heads/${currentBranch(run.dir)}`));
-  assert.equal((await readProgress(stateHomeFor(run.dir)))?.step, 'done');
+  assert.equal((await readProgress(memoryProgressStore(run.dir)))?.step, 'done');
 
   // A project that is not on a branch (or whose remote cannot be read) is not offered anything and not asked anything.
   fixtureGit(run.dir, ['checkout', '-q', '--detach']);

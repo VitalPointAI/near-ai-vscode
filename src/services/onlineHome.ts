@@ -5,7 +5,8 @@
 // process environment, never in arguments, files, settings, logs or messages. No vscode here: the editor-facing parts are in onlineHomeVscode.ts, so
 // tests run on plain node with fakes for GitHub, sign-in and gh.
 import { execFile } from 'node:child_process';
-import { mkdir, readFile, realpath } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { realpath } from 'node:fs/promises';
 import * as path from 'node:path';
 import { redactSecrets } from '../domain/redaction';
 import { GITHUB_MESSAGES, ONLINE_HOME_STEPS, VISIBILITY_NOTES, expectedCloneUrl, nextOnlineHomeStep, repoNameFromFolder, validateLogin, validateRepoName } from '../domain/state/onlineHome';
@@ -14,13 +15,10 @@ import { GitHubApiError, createUserRepo, getRepo, isSafeBranchName, setDefaultBr
 import type { FetchLike } from './githubApi';
 import { GitNotFoundError, addGitConfigEnv, gitText, redactGitMessage, runStateGit } from './stateGit';
 import type { GitRunner } from './stateGit';
-import { stateHomeFor, writeFileAtomic } from './stateHome';
-import type { ProjectStateHome } from './stateHome';
+import type { MementoLike } from './stateHome';
 import { STATE_REF, classifyGitFailure, validateRemote } from './stateTransport';
 import { pushProjectCode, runPersonGit } from './codePushCheck';
 import type { CodePushUi } from './codePushCheck';
-
-const PROGRESS_FILE = 'online-home.json';
 
 /** The sync branch's own name, taken from the one place that defines its ref. It is the only default branch this flow ever moves away from. */
 const STATE_BRANCH = STATE_REF.replace(/^refs\/heads\//, '');
@@ -78,7 +76,8 @@ export interface OnlineHomeRemote { name: string; url: string; git: GitRunner }
 
 export interface OnlineHomeInput {
   root: string;
-  home?: ProjectStateHome;
+  /** Where the setup's progress is kept: this editor's own storage. Without one, a store that lasts for this process (never a file in the project). */
+  progress?: OnlineHomeProgressStore;
   ui: OnlineHomeUi;
   auth: GitHubAuth;
   fetchFn?: FetchLike;
@@ -164,10 +163,6 @@ export function systemGhCli(exec: GhExec = defaultGhExec): GhCli {
   };
 }
 
-function progressFile(home: ProjectStateHome): string {
-  return path.join(home.paths.sync, PROGRESS_FILE);
-}
-
 const METHODS: readonly OnlineHomeMethod[] = ['vscode', 'gh', 'url'];
 
 function parseRepo(value: unknown, method: OnlineHomeMethod): OnlineHomeRepo | undefined {
@@ -184,10 +179,49 @@ function parseRepo(value: unknown, method: OnlineHomeMethod): OnlineHomeRepo | u
   return { owner: repo.owner, name: repo.name, url: repo.url, visibility: repo.visibility };
 }
 
-/** The saved setup, or undefined when there is none or it is not exactly what this flow writes (a file in a cloned project is not trusted). */
-export async function readProgress(home: ProjectStateHome): Promise<OnlineHomeProgress | undefined> {
+/**
+ * Where the setup's progress is kept (REVIEW B1): this editor's own storage, never a file inside the project, because the saved repository decides where a
+ * resumed setup adds a remote and pushes. `read` hands back whatever was stored; readProgress decides what of it is trusted.
+ */
+export interface OnlineHomeProgressStore {
+  read(): Promise<unknown>;
+  write(record: OnlineHomeProgress): Promise<void>;
+}
+
+const memoryProgress = new Map<string, OnlineHomeProgressStore>();
+
+/** Progress kept for this process only, one store per resolved project folder: what a caller with no editor storage (a test, a fake) gets. Never a file. */
+export function memoryProgressStore(root: string): OnlineHomeProgressStore {
+  const key = path.resolve(root);
+  let store = memoryProgress.get(key);
+  if (!store) {
+    let value: unknown;
+    store = { read: () => Promise.resolve(value === undefined ? undefined : structuredClone(value)), write: (record) => { value = structuredClone(record); return Promise.resolve(); } };
+    memoryProgress.set(key, store);
+  }
+  return store;
+}
+
+const PROGRESS_KEY = 'nearAi.onlineHome.progress';
+
+/** Progress in this editor's globalState, one entry per project under `nearAi.onlineHome.progress`, keyed by the hash of the project folder (as the sync mirrors are). */
+export function mementoProgressStore(memento: MementoLike, root: string): OnlineHomeProgressStore {
+  // The same name syncFlows.mirrorFolderName gives (syncFlows imports this file, so the one line is repeated here).
+  const name = createHash('sha256').update(path.resolve(root)).digest('hex').slice(0, 16);
+  const stored = (): Record<string, unknown> => {
+    const map = memento.get<unknown>(PROGRESS_KEY);
+    return typeof map === 'object' && map !== null && !Array.isArray(map) ? { ...(map as Record<string, unknown>) } : {};
+  };
+  return {
+    read: () => Promise.resolve(stored()[name]),
+    write: async (record) => { await memento.update(PROGRESS_KEY, { ...stored(), [name]: record }); }
+  };
+}
+
+/** The saved setup, or undefined when there is none or it is not exactly what this flow writes (nothing else is trusted). */
+export async function readProgress(store: OnlineHomeProgressStore): Promise<OnlineHomeProgress | undefined> {
   let parsed: unknown;
-  try { parsed = JSON.parse(await readFile(progressFile(home), 'utf8')); } catch { return undefined; }
+  try { parsed = await store.read(); } catch { return undefined; }
   if (typeof parsed !== 'object' || parsed === null) return undefined;
   const record = parsed as Record<string, unknown>;
   const step = ONLINE_HOME_STEPS.find((candidate) => candidate === record.step);
@@ -199,11 +233,10 @@ export async function readProgress(home: ProjectStateHome): Promise<OnlineHomePr
 }
 
 /** Saves the setup so far. Only these four fields are written; nothing here can hold a token. */
-export async function writeProgress(home: ProjectStateHome, progress: OnlineHomeProgress): Promise<void> {
-  await mkdir(home.paths.sync, { recursive: true, mode: 0o700 });
+export async function writeProgress(store: OnlineHomeProgressStore, progress: OnlineHomeProgress): Promise<void> {
   const record: OnlineHomeProgress = { step: progress.step, method: progress.method, startedAt: progress.startedAt };
   if (progress.repo) record.repo = { owner: progress.repo.owner, name: progress.repo.name, url: progress.repo.url, visibility: progress.repo.visibility };
-  await writeFileAtomic(progressFile(home), `${JSON.stringify(record, null, 2)}\n`);
+  await store.write(record);
 }
 
 const NOT_ALLOWED = GITHUB_MESSAGES.permission;
@@ -389,15 +422,14 @@ export async function onlineHomeFlow(input: OnlineHomeInput): Promise<OnlineHome
   const stop = (status: 'cancelled' | 'failed', message: string): OnlineHomeResult => { tell(message); return { status, message: clean(message) }; };
   try {
     if (!(await ui.confirmStart())) return { status: 'declined' };
-    const home = input.home ?? stateHomeFor(root);
-    await home.ensure();
-    const saved = await readProgress(home);
+    const progressStore = input.progress ?? memoryProgressStore(root);
+    const saved = await readProgress(progressStore);
     const startedAt = saved?.startedAt ?? new Date().toISOString();
     let method: OnlineHomeMethod = saved?.method ?? 'vscode';
     let repo: OnlineHomeRepo | undefined = saved?.repo;
     let token: string | undefined;
     const save = async (step: OnlineHomeStep): Promise<void> => {
-      await writeProgress(home, { step, method, repo, startedAt });
+      await writeProgress(progressStore, { step, method, repo, startedAt });
       await input.onStep?.(step);
     };
 

@@ -6,7 +6,7 @@ import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { AuthService } from './auth';
 import { ProfileStore } from './profileStore';
-import { onlineHomeFlow, systemGhCli } from './onlineHome';
+import { mementoProgressStore, onlineHomeFlow, systemGhCli } from './onlineHome';
 import { offerOnlineHomeAtStart, vscodeGitHubAuth, vscodeOnlineHomeUi } from './onlineHomeVscode';
 import { onRunEnded, runsInFlight } from './runEndHooks';
 import { RunMarkers } from './runMarkers';
@@ -182,7 +182,7 @@ function note(runtime: Runtime, status: string, message: string): void {
 export function registerSyncCommands(context: vscode.ExtensionContext, auth: AuthService): void {
   const ui = vscodeSyncUi();
   const onlineHome = (runtime: Runtime) => (afterRemote: Parameters<typeof onlineHomeFlow>[0]['afterRemote']) =>
-    onlineHomeFlow({ root: runtime.root, ui: vscodeOnlineHomeUi(), auth: vscodeGitHubAuth(), gh: systemGhCli(), afterRemote });
+    onlineHomeFlow({ root: runtime.root, progress: mementoProgressStore(context.globalState as MementoLike, runtime.root), ui: vscodeOnlineHomeUi(), auth: vscodeGitHubAuth(), gh: systemGhCli(), afterRemote });
   const withRuntime = (work: (runtime: Runtime) => Promise<unknown>) => async (): Promise<void> => {
     const root = workspaceRoot();
     if (!root) { void vscode.window.showInformationMessage(NO_FOLDER); return; }
