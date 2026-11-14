@@ -8,7 +8,8 @@ import {
 import {
   MAX_OBJECT_ENTRIES, OBJECT_MAGIC, buildManifest, openManifest, openObject, readManifestHeader, sealObject, type ObjectEntry, type OpenPart, type SealedPart
 } from '../domain/state/objects';
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
+import { redactSecrets } from '../domain/redaction';
 import { stat } from 'node:fs/promises';
 import { fixtureGit } from './helpers/gitFixtures';
 import { SIX_TURNS, chain, entryIds, machine, remoteFiles, replaceRemoteTree, syncedPair, treeHash, type Machine } from './helpers/syncFixtures';
@@ -427,4 +428,40 @@ test('after a refusal a later valid push is accepted and the earlier refusal cha
   assert.equal(accepted.kind, 'synced', accepted.message);
   assert.equal((await entryIds(b, 'conv-recovery03')).length, 6);
   assert.equal((await entryIds(b, SECOND)).length, 6);
+});
+
+// ---- REVIEW MINOR redaction.ts:20: a hex digest is not a recovery code ---------------------------------------------------------------------
+
+function hyphenGroups(text: string): string {
+  return text.match(/.{1,4}/g)?.join('-') ?? '';
+}
+
+test('upper-case hex digests and git object ids are left readable, whole or split into groups of four', () => {
+  for (let round = 0; round < 50; round += 1) {
+    const sha256 = createHash('sha256').update(randomBytes(16)).digest('hex').toUpperCase();
+    const sha1 = createHash('sha1').update(randomBytes(16)).digest('hex').toUpperCase();
+    for (const digest of [sha256, sha1, sha1.slice(0, 40)]) {
+      assert.equal(redactSecrets(`digest ${digest} end`), `digest ${digest} end`, digest);
+      assert.equal(redactSecrets(`digest ${hyphenGroups(digest)} end`), `digest ${hyphenGroups(digest)} end`, hyphenGroups(digest));
+      assert.equal(redactSecrets(hyphenGroups(digest).toLowerCase()), hyphenGroups(digest).toLowerCase());
+    }
+  }
+  assert.equal(redactSecrets('A'.repeat(40)), 'A'.repeat(40), 'a run of one hex character is not a code either');
+});
+
+test('every generated recovery code is still redacted, shown, in lower case, unformatted, or as a long piece of one', () => {
+  for (let round = 0; round < 1000; round += 1) {
+    const { code } = generateRecoveryCode();
+    const plain = code.replace(/-/g, '');
+    assert.equal(redactSecrets(`code ${code} end`), 'code [REDACTED] end', code);
+    assert.equal(redactSecrets(`code ${code.toLowerCase()} end`), 'code [REDACTED] end', code.toLowerCase());
+    assert.equal(redactSecrets(`code ${plain} end`), 'code [REDACTED] end', plain);
+    assert.equal(redactSecrets(`code ${plain.slice(0, 32)} end`), 'code [REDACTED] end', 'a 32-character piece');
+    assert.equal(redactSecrets(`code ${plain.slice(10, 46)} end`), 'code [REDACTED] end', 'a 36-character piece from the middle');
+    assert.equal(redactSecrets(`code ${code.split('-').slice(0, 8).join('-')} end`), 'code [REDACTED] end', 'eight groups');
+  }
+  // The shape the existing tests rely on still holds with the narrower pattern, and a Crockford letter anywhere is enough.
+  assert.equal(redactSecrets(`${'0'.repeat(31)}G`), '[REDACTED]');
+  assert.equal(redactSecrets(`${hyphenGroups('0'.repeat(28))}-000G`), '[REDACTED]');
+  assert.equal(redactSecrets(`${hyphenGroups('0'.repeat(28))}-000g`), '[REDACTED]');
 });

@@ -12,15 +12,18 @@ export const VISIBILITY_NOTES: Readonly<Record<Visibility, string>> = {
 const REPO_NAME = /^[A-Za-z0-9._-]{1,100}$/;
 const LOGIN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/;
 
-/** A repository name suggested from the folder's name: anything GitHub would not accept becomes '-'. */
+/** A repository name suggested from the folder's name: anything GitHub would not accept becomes '-', and a leading '-' or '.' is dropped. */
 export function repoNameFromFolder(folderName: string): string {
   const cleaned = folderName.replace(/[^A-Za-z0-9._-]/g, '-').replace(/^[-.]+/, '').replace(/[-.]+$/, '').replace(/\.git$/i, '').slice(0, 100).replace(/[-.]+$/, '');
   return validateRepoName(cleaned) ? cleaned : 'project';
 }
 
-/** Letters, digits, '.', '-' and '_' only, up to 100 characters; not '.' or '..' and not ending in '.git'. */
+/**
+ * Letters, digits, '.', '-' and '_' only, up to 100 characters; not '.' or '..' and not ending in '.git'. Never starting with '-': the name is an argument
+ * of the gh command line, and a leading '-' would be read as one of its options.
+ */
 export function validateRepoName(name: string): boolean {
-  return REPO_NAME.test(name) && name !== '.' && name !== '..' && !/\.git$/i.test(name);
+  return REPO_NAME.test(name) && !name.startsWith('-') && name !== '.' && name !== '..' && !/\.git$/i.test(name);
 }
 
 /** A GitHub account name: letters, digits and single hyphens inside, up to 39 characters. */
