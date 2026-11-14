@@ -27,7 +27,7 @@ import { onRunEnded, runEnded, runStarted } from './runEndHooks';
 import { handlePickupAction, markPickupSeen, pickupCardModel, writePickupPointer } from './pickupCard';
 import { currentSyncStatus, onSyncStatus, refreshSyncHome } from './syncCommands';
 import { redactSyncText, SYNC_PROMPT_DISMISSED_KEY, syncPanelMessage } from './syncPanel';
-import { copyAttachmentIntoProject, PreparedAttachments, prepareAttachments, saveAttachmentCopy, stageAttachment, StagedAttachment } from '../agent/attachments';
+import { copyAttachmentIntoProject, PreparedAttachments, prepareAttachments, stageAttachment, StagedAttachment } from '../agent/attachments';
 import { TeamDefinition, TeamLibrary, teamAgents } from '../agent/teams';
 import type { GsdAgent } from '../gsd/library';
 import { modelOptions, modelPrivacyLabel, modelsAsPrivateAs, privateSafetyModel, parseChatWebviewMessage, providerErrorMessage, discoverGsdArtifacts, isSafeArtifactPath, GsdArtifactLink, profileStatusMessage } from './chatBridge';
@@ -110,11 +110,6 @@ interface ChatTab {
   paused: Map<string, { minutes?: number; text: string }>;
   /** What was typed for each queued steer, so a re-shown conversation shows its queued messages. */
   steerTexts: Map<string, string>;
-  /**
-   * Attachments, already read, of messages that became this conversation's next turn; that turn takes them (0.4.21). `staged` keeps the originals, so a
-   * turn that ends before taking them (blocked, failed) puts them back in the composer instead of leaving them for an unrelated message.
-   */
-  carried?: Array<{ prepared: PreparedAttachments; staged: StagedAttachment[] }>;
   /** Sends a message of this conversation: logged, and posted to the view when it is on screen. */
   post: (message: Record<string, unknown>) => void;
   /** Its run the extension host never finished, until the user resumes or dismisses it. */
@@ -241,19 +236,6 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
   /** Shows a staged file as a chip, with where it was saved in the project. */
   const postStaged = (attachment: StagedAttachment): void => {
     void panel.webview.postMessage({ type: 'attachment-staged', id: attachment.id, name: attachment.name, kind: attachment.kind, size: attachment.size, ...(attachment.savedAs ? { savedAs: attachment.savedAs } : {}) });
-  };
-  /**
-   * Removes the copy an attachment made in the project, when this attachment wrote it and no other staged file uses it. `keepChip` re-sends the chip
-   * without its saved path, for a file still attached after a blocked send.
-   */
-  const discardCopy = async (attachment: StagedAttachment, keepChip = false): Promise<void> => {
-    const root = workspaceRoot();
-    const saved = attachment.savedAs;
-    if (!root || !saved || !attachment.copyCreated) return;
-    attachment.savedAs = undefined;
-    attachment.copyCreated = undefined;
-    if (![...state.attachments.values()].some((other) => other !== attachment && other.savedAs === saved)) await fs.rm(path.join(root, saved), { force: true }).catch(() => undefined);
-    if (keepChip && state.attachments.has(attachment.id)) postStaged(attachment);
   };
   /** Takes these files out of the composer: they went with a message. Only these, so files attached meanwhile keep their chips. */
   const clearStaged = (staged: StagedAttachment[]): void => {
@@ -541,7 +523,7 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     }
   }).catch(() => undefined);
 
-  const handle = async (message: ChatWebviewMessage, tab: ChatTab): Promise<void> => {
+  const handle = async (message: ChatWebviewMessage, tab: ChatTab, carried?: Carried): Promise<void> => {
     // A person acting in the chat releases a run paused on unanswered approvals; Stop below still stops it.
     if (message.type !== 'stop' && USER_ACTIONS.has(message.type)) tab.agent?.userActive();
     // A reopened card was opened: its stored output goes to the view, only if that conversation is still the one on screen. Nothing is logged or kept.
@@ -596,15 +578,9 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
       for (const uri of picked ?? []) {
         try {
           const attachment = await stageAttachment(uri.fsPath);
-          // 0.4.21: the file is saved into the project the moment it is attached, so it is in the workspace whichever way the message goes, and the
-          // chip says where. A copy that fails is said, never silent; the file is still read into the message itself.
-          const root = workspaceRoot();
-          const copy = root ? await saveAttachmentCopy(attachment, root).catch(() => undefined) : undefined;
-          const saved = copy?.path;
-          if (copy) { attachment.savedAs = copy.path; attachment.copyCreated = copy.created; }
+          // Nothing is written into the project until the message it goes with passes its checks (0.4.21 review): the copy is made when it is sent.
           state.attachments.set(attachment.id, attachment);
           postStaged(attachment);
-          if (saved === undefined) panel.webview.postMessage({ type: 'notice', text: `${attachment.name} could not be saved into the project. It still goes with your message, but the agent cannot open it with its file tools.` });
           if (attachment.note) panel.webview.postMessage({ type: 'notice', text: attachment.note });
         } catch (error) {
           panel.webview.postMessage({ type: 'notice', text: providerErrorMessage(error) });
@@ -613,10 +589,7 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
       return;
     }
     if (message.type === 'attachment-remove') {
-      const removed = state.attachments.get(message.id);
       state.attachments.delete(message.id);
-      // A file taken out before it was sent leaves no copy behind in the project.
-      if (removed) await discardCopy(removed);
       return;
     }
     // Sub-agent IDs are unique, so the one conversation running it takes the control.
@@ -809,15 +782,13 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     await account?.ledger.refresh();
     const spentToday = account?.spentTodayUsd().usd ?? 0;
     // Files carried from messages this turn took over are checked with it, as they are sent with it.
-    const carriedText = message.type === 'send' ? attachedTextOf((tab.carried ?? []).flatMap((item) => item.staged)) : '';
+    const carriedText = attachedTextOf((carried?.items ?? []).flatMap((item) => item.staged));
     const checkedText = [text, attachedText, carriedText].filter(Boolean).join('\n');
     const verdict = state.guard.check({ model, modelInfo, text: checkedText, overrideToken: message.type === 'send' ? message.overrideToken : undefined }, spentToday);
     // One run, with all its sub-agents, may spend at most the per-run cap and what is left of today's limit.
     const runBudget = readRunBudget();
     if (settings.dailySpendLimitUsd > 0) runBudget.maxCostUsd = Math.max(0, Math.min(runBudget.maxCostUsd, settings.dailySpendLimitUsd - spentToday));
     if (verdict.outcome !== 'allow') {
-      // What the check stopped is not left in the project: the copies made at attach time are removed (sending anyway saves them again).
-      for (const item of staged) await discardCopy(item, true);
       tab.post({ type: 'outbound-blocked', text, model, reason: verdict.reason, overrideToken: message.type === 'send' ? verdict.overrideToken : undefined, confirm: verdict.outcome === 'confirm' });
       return;
     }
@@ -846,10 +817,13 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
         clearStaged(staged);
       }
       // Attachments that came with messages queued for a run that ended before taking them come with this turn, the one those messages became.
-      if (message.type === 'send' && tab.carried?.length) {
-        attachments = mergePrepared([...tab.carried.map((item) => item.prepared), ...(attachments ? [attachments] : [])]);
-        tab.carried = undefined;
+      if (carried?.items.length) {
+        attachments = mergePrepared([...carried.items.map((item) => item.prepared), ...(attachments ? [attachments] : [])]);
+        carried.taken = true;
       }
+      // Say where the files went, now that they are in the project.
+      const savedFiles = [...staged, ...(carried?.items ?? []).flatMap((item) => item.staged)].filter((item) => item.savedAs);
+      if (savedFiles.length) tab.post({ type: 'notice', text: `Saved in the project for the agent: ${savedFiles.map((item) => item.savedAs).join(', ')}.` });
       state.memory = state.memory ?? new ContextGraphMemory(root, { trustedActorIds: [AGENT_MEMORY_ACTOR] });
       const delegable = modelsAsPrivateAs(active.models, modelInfo);
       // MCP tools are optional for a message: if they can't be prepared, it is sent without them.
@@ -908,7 +882,6 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     const attachedText = attachedTextOf(staged);
     const verdict = guard.check({ model: tab.model ?? '', modelInfo: tab.modelInfo, text: attachedText ? `${message.text}\n${attachedText}` : message.text }, state.spend?.spentTodayUsd().usd ?? 0);
     if (verdict.outcome !== 'allow') {
-      for (const item of staged) await discardCopy(item, true);
       blocked(`${verdict.reason} It was not sent to the running agent; send it after the run to choose what to do.`);
       return;
     }
@@ -928,18 +901,23 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
         return;
       }
       clearStaged(staged);
+      const saved = staged.filter((item) => item.savedAs);
+      if (saved.length) tab.post({ type: 'notice', text: `Saved in the project for the agent: ${saved.map((item) => item.savedAs).join(', ')}.` });
     }
     // The run may have ended while the files were read: then the message, with them, is the next turn.
     if (idle(tab)) {
       tab.post({ type: 'steer-state', id: message.id, state: 'sent-new' });
-      if (attachments) tab.carried = [...(tab.carried ?? []), { prepared: attachments, staged }];
-      await receive({ type: 'send', text: message.text, conversationId: tab.id, ...(tab.model ? { model: tab.model } : {}) });
+      await receive({ type: 'send', text: message.text, conversationId: tab.id, ...(tab.model ? { model: tab.model } : {}) }, attachments ? [{ prepared: attachments, staged }] : undefined);
       return;
     }
     tab.steerTexts.set(message.id, message.text);
     ensureAgent(tab, root).steer(message.id, message.text, { interrupt: message.interrupt === true, ...(attachments ? { attachments, staged } : {}) });
   };
-  const receive = async (value: unknown): Promise<void> => {
+  /**
+   * `carried`: attachments already read for messages this send was made from (a steer that became a turn). Passed with the send itself, never left on the
+   * conversation, so two sends cannot take each other's files.
+   */
+  const receive = async (value: unknown, carriedItems?: Array<{ prepared: PreparedAttachments; staged: StagedAttachment[] }>): Promise<void> => {
     await ready;
     const message = parseChatWebviewMessage(value);
     if (!message) return;
@@ -949,16 +927,13 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     if (message.type === 'steer') { await steer(message, tab); return; }
     const turn = message.type === 'send' || message.type === 'open-command';
     if (turn) { tab.turns += 1; sendSummary(); }
-    const carriedIn = message.type === 'send' ? tab.carried : undefined;
+    const carried: Carried | undefined = message.type === 'send' && carriedItems?.length ? { items: carriedItems, taken: false } : undefined;
     try {
-      await handle(message, tab);
+      await handle(message, tab, carried);
     } finally {
       if (turn) { tab.turns -= 1; sendSummary(); }
       // A turn that ended before taking the files it carried (blocked or failed) puts them back in the composer, never onto a later message.
-      if (carriedIn && tab.carried === carriedIn) {
-        tab.carried = undefined;
-        for (const attachment of carriedIn.flatMap((item) => item.staged)) { state.attachments.set(attachment.id, attachment); postStaged(attachment); }
-      }
+      if (carried && !carried.taken) for (const attachment of carried.items.flatMap((item) => item.staged)) { state.attachments.set(attachment.id, attachment); postStaged(attachment); }
     }
     if (tab.closing) { if (!tab.turns && !tab.agent?.running) tab.agent?.dispose(); return; }
     // Messages queued for a run that ended before taking them become the next turn, in order.
@@ -967,9 +942,8 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     if (!left.length) return;
     for (const item of left) tab.post({ type: 'steer-state', id: item.id, state: 'sent-new' });
     // Their attachments, already read, come with that turn.
-    const carried = left.flatMap((item) => item.attachments ? [{ prepared: item.attachments, staged: item.staged ?? [] }] : []);
-    if (carried.length) tab.carried = [...(tab.carried ?? []), ...carried];
-    await receive({ type: 'send', text: left.map((item) => item.text).join('\n\n'), conversationId: tab.id, ...(tab.model ? { model: tab.model } : {}) });
+    const carriedOn = left.flatMap((item) => item.attachments ? [{ prepared: item.attachments, staged: item.staged ?? [] }] : []);
+    await receive({ type: 'send', text: left.map((item) => item.text).join('\n\n'), conversationId: tab.id, ...(tab.model ? { model: tab.model } : {}) }, carriedOn);
   };
   panel.webview.onDidReceiveMessage(receive, undefined, context.subscriptions);
   // The picker follows settings.json edits and the emergency stop; each run reads the setting afresh.
@@ -1011,6 +985,9 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
 }
 
 /** Whether the empty chat's "no team yet" card shows: a working profile, no project team, and no "Not now" here. */
+/** Attachments a send carries from the messages it was made from; `taken` once its turn has them. */
+type Carried = { items: Array<{ prepared: PreparedAttachments; staged: StagedAttachment[] }>; taken: boolean };
+
 /** The text of text files and documents, which is what the outbound check reads, as it is what is sent. */
 function attachedTextOf(staged: StagedAttachment[]): string {
   return staged.map((item) => item.kind === 'text' ? item.bytes.toString('utf8') : item.kind === 'document' ? item.text ?? '' : '').filter(Boolean).join('\n');
@@ -1035,8 +1012,9 @@ async function readAttachments(staged: StagedAttachment[], options: { client: Ne
   const prepared = await withSpendTag({ kind: 'attachment', runId: options.runId, conversationId: options.conversationId }, () => prepareAttachments(staged, { client: options.client, model: options.model, models: options.models, visionModel: agentModels.visionModel, transcriptionModel: agentModels.transcriptionModel, question: options.question }));
   const copies: string[] = [];
   for (const item of staged) {
+    // Made here, after the message passed its checks; the path is kept on the attachment so the chat can say where it went.
     const saved = item.savedAs ?? await copyAttachmentIntoProject(item, options.root).catch(() => undefined);
-    if (saved !== undefined) copies.push(saved);
+    if (saved !== undefined) { item.savedAs = saved; copies.push(saved); }
   }
   // A plain sentence, not fenced: this is the agent's own note about where the files are, not outside content.
   if (copies.length > 0) prepared.text = `${prepared.text}\n\nThe attached file${copies.length === 1 ? ' is' : 's are'} saved in this project and can be opened with your own file tools:\n${copies.map((file) => `- ${file}`).join('\n')}`;

@@ -7,10 +7,11 @@
   the file and went looking for it. Now the file is read and goes to the running agent in the same
   message, with the same privacy checks as any attachment. A message that becomes the next turn
   keeps its files, and one that Stop hands back to the composer gets its files back too.
-- **An attached file is saved into the project when you attach it.** Before, the copy in
-  `.near-ai/attachments/` was made only when the message was sent, and the panel never said where it
-  went. Now the copy is made at once, the file's chip shows where it is saved, and a copy that fails
-  says so instead of failing silently.
+- **The chat says where an attached file was saved.** The copy the agent opens with its own file
+  tools is made in `.near-ai/attachments/` once the message passes its privacy checks, and the chat
+  now names where each file was saved. Before, it was saved silently, and a file sent while the agent
+  was working was not saved at all. A file you remove before sending, or whose message is blocked, is
+  never written into the project.
 
 ## 0.4.20
 

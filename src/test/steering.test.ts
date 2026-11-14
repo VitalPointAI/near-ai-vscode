@@ -529,12 +529,23 @@ test('the bridge accepts attachment IDs on a steer, strictly', () => {
   }
 });
 
-test('sidebar: an attached file is saved into the project the moment it is attached, and the chip says where', async () => {
+test('sidebar: nothing is written into the project when a file is attached; sending saves it and says where', async () => {
   const { root, auth } = await projectWithProfile();
-  const sidebar = await openSidebar(root, auth);
-  const staged = await attach(sidebar, 'notes.txt', 'the plan is in here');
-  assert.equal(staged.savedAs, path.join('.near-ai', 'attachments', 'notes.txt'));
-  assert.equal(readFileSync(path.join(root, staged.savedAs), 'utf8'), 'the plan is in here', 'the copy is in the workspace before anything is sent');
+  const near = fakeNear(() => ({ content: 'ok' }));
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = near.fetch;
+  try {
+    const sidebar = await openSidebar(root, auth);
+    const staged = await attach(sidebar, 'notes.txt', 'the plan is in here');
+    assert.equal(staged.savedAs, undefined);
+    assert.equal(existsSync(path.join(root, '.near-ai', 'attachments')), false, 'attaching alone writes nothing into the project');
+    await sidebar.send({ type: 'send', text: 'read my notes', model: 'z-ai/glm-5.3', attachmentIds: [staged.id] });
+    const saved = path.join('.near-ai', 'attachments', 'notes.txt');
+    assert.equal(readFileSync(path.join(root, saved), 'utf8'), 'the plan is in here', 'the message passed its checks, so the file is in the workspace');
+    assert.ok(sidebar.posted.some((message) => message.type === 'notice' && message.text === `Saved in the project for the agent: ${saved}.`), 'and the chat says where');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test('sidebar: a file attached to a message sent during a run reaches the running agent in that same message', async () => {
@@ -636,7 +647,7 @@ test('sidebar: a message whose file trips the outbound check is not sent, and it
     assert.equal(blocked?.state, 'blocked');
     assert.match(String(blocked?.reason), /credential/);
     assert.equal(sidebar.posted.some((message) => message.type === 'attachments-cleared'), false, 'the file keeps its chip');
-    assert.equal(existsSync(path.join(root, staged.savedAs!)), false, 'the blocked file\'s copy is not left in the project');
+    assert.equal(existsSync(path.join(root, '.near-ai', 'attachments')), false, 'the blocked file is never written into the project');
     await sidebar.send({ type: 'approval-reply', callId: approval.callId, decision: 'allow' });
     await running;
     assert.equal(near.requests.some((messages) => JSON.stringify(messages).includes('sk-live-999')), false);
@@ -676,7 +687,7 @@ test('sidebar: a queued file whose message is stopped comes back to the composer
   }
 });
 
-test('sidebar: a file taken out before sending leaves no copy, and a steer whose file is gone is not sent without it', async () => {
+test('sidebar: a file taken out before sending is never written, and a steer whose file is gone is not sent without it', async () => {
   const { root, auth } = await projectWithProfile();
   const near = fakeNear(() => near.requests.length === 1 ? editCall : { content: 'done' });
   const originalFetch = globalThis.fetch;
@@ -684,9 +695,8 @@ test('sidebar: a file taken out before sending leaves no copy, and a steer whose
   try {
     const sidebar = await openSidebar(root, auth);
     const removed = await attach(sidebar, 'draft.txt', 'not wanted');
-    assert.equal(existsSync(path.join(root, removed.savedAs!)), true);
     await sidebar.send({ type: 'attachment-remove', id: removed.id });
-    assert.equal(existsSync(path.join(root, removed.savedAs!)), false, 'removing the chip removes its copy');
+    assert.equal(existsSync(path.join(root, '.near-ai', 'attachments')), false, 'a file taken out before sending was never written');
 
     const running = sidebar.send({ type: 'send', text: 'Use port 8080', model: 'z-ai/glm-5.3' });
     const approval = await until(() => sidebar.posted.find((message) => message.type === 'approval-request'));

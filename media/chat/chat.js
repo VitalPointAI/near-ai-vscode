@@ -284,8 +284,8 @@
     const bubble = steerBubbles.get(m.id);
     if (bubble) {
       bubble.line.textContent = m.state === 'blocked' && m.reason ? 'Not sent: ' + m.reason : STEER_LABELS[m.state] || '';
-      // A message not sent did not send its files either: they are still attached in the composer.
-      if (m.state === 'blocked' && bubble.files) { bubble.files.remove(); bubble.files = undefined; }
+      // A message not sent (blocked, or handed back by Stop) did not send its files either: they are attached in the composer again.
+      if ((m.state === 'blocked' || m.state === 'returned') && bubble.files) { bubble.files.remove(); bubble.files = undefined; }
       bubble.line.dataset.state = m.state;
       // Once the agent has it, the message sits where the conversation took it in, and the reply follows it.
       if (m.state === 'delivered' || m.state === 'sent-new') {
