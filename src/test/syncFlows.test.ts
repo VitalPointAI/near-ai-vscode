@@ -88,6 +88,7 @@ test('join: a computer with chats of its own adds them to the synced project: al
   const enter = fakeUi({ code: turnOn.shown[0] });
   const result = await enterCodeFlow({ env: b.env, ui: enter.ui });
   assert.equal(result.status, 'restored');
+  assert.ok(!result.message.includes('could not be added'), 'every conversation was carried, so no not-carried sentence');
   assert.equal(enter.confirms.length, 1, 'joining is asked about once');
   assert.notEqual((await b.home.readMeta())?.stateId, ownStateId);
   assert.equal((await b.home.readMeta())?.stateId, (await a.home.readMeta())?.stateId, 'this computer took the project\'s id');

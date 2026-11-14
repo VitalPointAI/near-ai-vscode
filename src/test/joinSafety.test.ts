@@ -283,3 +283,32 @@ test('recovery after a cut-off join puts back the newest folder by the time in i
     assert.deepEqual((await readdir(parent)).sort(), ['state', 'state.previous-20261113T090909090Z-ffffffff', 'state.previous-cut']);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
+
+test('one conversation that could not be carried is said in the singular, and its folder is kept even though another thread of the same id is online', async () => {
+  const { b, code } = await setup();
+  await thread(b, 'conv-local-1', 'Local one');
+  await thread(b, 'conv-online-1', 'Same id as the online one');
+  await writeFile(path.join(b.home.paths.threads, 'conv-online-1', 'log.jsonl'), 'not a sealed line\n');
+  await writeFile(path.join(b.home.paths.threads, 'conv-online-1', 'meta.enc'), 'not sealed');
+  const result = await enterCodeFlow({ env: b.env, ui: fakeUi({ code }).ui });
+  assert.equal(result.status, 'restored');
+  assert.ok(result.message.includes("1 conversation on this computer could not be added to the online project, because it could not be opened here. It is kept beside this project's saved state, and nothing was deleted."), result.message);
+  // The online project holds a thread of that id, so by id alone the folder could go; the join's own note keeps it.
+  assert.ok((await b.threads.index()).some((item) => item.id === 'conv-online-1'));
+  await discardPreviousState(b.root, b.threads);
+  assert.equal((await previousFolders(b)).length, 1, 'the folder is still there');
+});
+
+test('a folder marked as holding conversations that were not carried is never removed, whatever the current state lists', async () => {
+  const { b, code } = await setup();
+  await thread(b, 'conv-local-1', 'Local one');
+  assert.equal((await enterCodeFlow({ env: b.env, ui: fakeUi({ code }).ui })).status, 'restored');
+  const marked = path.join(path.dirname(b.home.dir), 'state.previous-20200101T000000000Z-aaaaaaaa');
+  await mkdir(path.join(marked, 'threads', 'conv-local-1'), { recursive: true });
+  await writeFile(path.join(marked, 'not-carried.json'), '["conv-local-1"]\n');
+  const unreadable = path.join(path.dirname(b.home.dir), 'state.previous-20200102T000000000Z-bbbbbbbb');
+  await mkdir(path.join(unreadable, 'threads', 'conv-local-1'), { recursive: true });
+  await writeFile(path.join(unreadable, 'not-carried.json'), 'garbage');
+  await discardPreviousState(b.root, b.threads);
+  assert.deepEqual(await previousFolders(b), ['state.previous-20200101T000000000Z-aaaaaaaa', 'state.previous-20200102T000000000Z-bbbbbbbb']);
+});
