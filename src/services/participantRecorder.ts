@@ -24,22 +24,33 @@ export interface ResponseStreamLike {
 export type ReplyOutcome = 'completed' | 'cancelled' | 'failed' | 'not-sent';
 
 export interface RecordedReply {
-  /** What was streamed as markdown, exactly as sent: the usage footer is part of it. */
+  /** The model's own words, streamed through `answer`. This is the reply that is stored as the assistant's message and read by the model later. */
   text: string;
+  /** Everything else the person read in the reply, in order: the cost footer, error text, the guard's sentences. Kept as a notice, never sent to the model. */
+  notes: string;
   outcome: ReplyOutcome;
 }
 
 /**
- * Passes everything to the real stream and keeps the markdown that was sent. Buttons and progress lines are forwarded and not kept: they are not part
- * of the reply the person reads back.
+ * Passes everything to the real stream and keeps the markdown that was sent, in two parts: `answer` is the model's own text, `markdown` is every other
+ * line the extension adds (the footer, errors, guard sentences). Buttons and progress lines are forwarded and not kept: they are not part of the reply
+ * the person reads back.
  */
 export class ResponseRecorder implements ResponseStreamLike {
-  private readonly parts: string[] = [];
+  private readonly answered: string[] = [];
+  private readonly noted: string[] = [];
 
   public constructor(private readonly stream: ResponseStreamLike) {}
 
+  /** Text from the model: streamed to the person and kept as the reply. */
+  public answer(value: string | { value: string }): unknown {
+    this.answered.push(typeof value === 'string' ? value : String(value.value));
+    return this.stream.markdown(value);
+  }
+
+  /** Anything else the person reads: streamed to the person and kept as a note, apart from the reply. */
   public markdown(value: string | { value: string }): unknown {
-    this.parts.push(typeof value === 'string' ? value : String(value.value));
+    this.noted.push(typeof value === 'string' ? value : String(value.value));
     return this.stream.markdown(value);
   }
 
@@ -47,10 +58,13 @@ export class ResponseRecorder implements ResponseStreamLike {
 
   public progress(value: string): unknown { return this.stream.progress(value); }
 
-  /** The reply so far. */
-  public text(): string { return this.parts.join(''); }
+  /** The model's text so far. */
+  public text(): string { return this.answered.join(''); }
 
-  public finish(outcome: ReplyOutcome): RecordedReply { return { text: this.text(), outcome }; }
+  /** The notes so far. */
+  public notes(): string { return this.noted.join(''); }
+
+  public finish(outcome: ReplyOutcome): RecordedReply { return { text: this.text(), notes: this.notes(), outcome }; }
 }
 
 /** One turn of VS Code's chat history, as much of it as is read here (a request turn has a prompt, a response turn has a result and parts). */
@@ -98,6 +112,12 @@ export function commandNoticeText(command: string, args: string, reply: string):
   return `You ran ${typed} in the Chat view.${reply.trim() ? `\n\n${reply.trim()}` : ''}`;
 }
 
+/**
+ * The usage footer the participant streams after a reply, at the end of a reply's text: a blank line, then one italic line of the model and its
+ * ' · ' separated parts (`usageFooter` in chatParticipant.ts). A session from before turns were recorded holds replies with this still attached.
+ */
+export const USAGE_FOOTER_TAIL = /\n[ \t]*\n\*[^*\n]+(?: · [^*\n]+)+\*[ \t]*$/;
+
 /** A notice that is shown in the thread and is never sent to the model. */
 function notice(text: string): SeedItem {
   return { role: 'notice', body: { text, forContext: false } };
@@ -127,7 +147,10 @@ export function seedEntries(turns: readonly ParticipantTurnLike[]): SeedItem[] {
       else if (text.trim()) items.push(notice(text));
     } else {
       flushCommand('');
-      if (text.trim()) items.push({ role: 'assistant', body: { text } });
+      const footer = USAGE_FOOTER_TAIL.exec(text)?.[0];
+      const answer = footer ? text.slice(0, text.length - footer.length) : text;
+      if (answer.trim()) items.push({ role: 'assistant', body: { text: answer } });
+      if (footer) items.push(notice(footer));
     }
   }
   flushCommand('');
@@ -152,11 +175,16 @@ async function threadWithTail(turns: readonly ParticipantTurnLike[], store: Thre
   // An archived thread is not read here: reading it would bring it back and reorder the history for a guess.
   if (!candidate || candidate.state !== 'live') return undefined;
   const main = (await store.lines(candidate.id)).main;
+  // What follows the reply in the thread is what the person also read: the footer and error text as notices, then the stopped notice (which is not part
+  // of the streamed text). Reply and notes together are what VS Code's own history holds.
   let end = main.length - 1;
   while (end >= 0 && main[end].role === 'notice' && textOf(main[end]) === PARTICIPANT_STOPPED_NOTICE) end -= 1;
-  const tail = main[end];
-  const before = main.slice(0, end).filter((entry) => entry.role === 'user').at(-1);
-  return tail?.role === 'assistant' && textOf(tail).trim() === lastReply && before && textOf(before).trim() === lastPrompt ? candidate.id : undefined;
+  let start = end;
+  while (start >= 0 && main[start].role === 'notice') start -= 1;
+  const tail = main[start];
+  const streamed = tail ? [tail, ...main.slice(start + 1, end + 1)].map(textOf).join('').trim() : '';
+  const before = main.slice(0, start).filter((entry) => entry.role === 'user').at(-1);
+  return tail?.role === 'assistant' && streamed === lastReply && before && textOf(before).trim() === lastPrompt ? candidate.id : undefined;
 }
 
 function textOf(entry: ThreadEntry): string {
@@ -189,8 +217,10 @@ export interface ParticipantTurnInput {
   /** The editor writing (`editorWriter(...)`): kept on every entry, so two editors' entries stay told apart. */
   writer: string;
   prompt: string;
-  /** The reply exactly as streamed. */
+  /** The model's own text, as streamed: stored as the assistant's message. */
   reply: string;
+  /** The rest of what the person read (footer, error text, guard sentences): stored as a notice that is never sent to the model. */
+  notes?: string;
   model: string;
   /** The reply was cut off, cancelled or failed: a notice says so after what was streamed. */
   stopped?: boolean;
@@ -211,17 +241,19 @@ function titleOf(items: readonly SeedItem[]): string {
 }
 
 /**
- * Appends one turn to the thread, creating it (origin 'chat-view') on the first one: the prompt and the reply as streamed; a notice after a reply that
- * stopped early; a single notice for a command. A thread that has nothing yet first gets the seed. The entries continue the thread's main line, so a
+ * Appends one turn to the thread, creating it (origin 'chat-view') on the first one: the prompt and the model's reply; a notice with the footer and error
+ * text the person also read; a notice after a reply that stopped early; a single notice for a command. A thread that has nothing yet first gets the seed. The entries continue the thread's main line, so a
  * turn is never written into the middle of another. The model's 20-turn window is not involved: this stores everything.
  */
 export async function recordParticipantTurn(store: ThreadStore, input: ParticipantTurnInput): Promise<void> {
   const existing = await store.lines(input.threadId);
   const drafts: SeedItem[] = existing.main.length === 0 && input.seed?.length ? [...input.seed] : [];
-  if (input.command) drafts.push(notice(commandNoticeText(input.command, input.prompt, input.reply)));
+  const notes = input.notes ?? '';
+  if (input.command) drafts.push(notice(commandNoticeText(input.command, input.prompt, `${input.reply}${notes}`)));
   else {
     drafts.push({ role: 'user', body: { text: input.prompt } });
     if (input.reply) drafts.push({ role: 'assistant', body: { text: input.reply } });
+    if (notes.trim()) drafts.push(notice(notes));
     if (input.stopped) drafts.push(notice(PARTICIPANT_STOPPED_NOTICE));
   }
   await append(store, input, existing, drafts);

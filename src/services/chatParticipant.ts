@@ -13,7 +13,7 @@ import { isEmergencyStopped } from './emergencyStop';
 import { UsageMetadata } from './nearAiClient';
 import { readAgentLimits, readSettings } from './settings';
 import { newConversationId, spendAccountOf } from './agentSession';
-import { PARTICIPANT_ID, recordParticipantTurn, recordSeed, resolveParticipantThread, ResponseRecorder, type ReplyOutcome, type ResolvedThread, type ResponseStreamLike } from './participantRecorder';
+import { PARTICIPANT_ID, recordParticipantTurn, recordSeed, resolveParticipantThread, ResponseRecorder, USAGE_FOOTER_TAIL, type ReplyOutcome, type ResolvedThread } from './participantRecorder';
 import { editorWriter } from './stateHome';
 import { threadStoreFor } from './threadStore';
 
@@ -64,8 +64,9 @@ export function registerChatParticipant(context: vscode.ExtensionContext, auth: 
           // guard held back is never written to disk. Turns the session had before this version still need their one-time seed.
           if (thread.seed?.length) await recordSeed(store, { threadId: thread.threadId, writer, model, seed: thread.seed });
         } else {
+          const finished = response.finish(outcome);
           await recordParticipantTurn(store, {
-            threadId: thread.threadId, writer, prompt: request.prompt, reply: response.text(), model,
+            threadId: thread.threadId, writer, prompt: request.prompt, reply: finished.text, notes: finished.notes, model,
             ...(isCommand ? { command: request.command } : {}), ...(outcome === 'cancelled' || outcome === 'failed' ? { stopped: true } : {}), ...(thread.seed ? { seed: thread.seed } : {})
           });
           stream.button({ command: OPEN_THREAD_COMMAND, arguments: [thread.threadId], title: OPEN_THREAD_TITLE });
@@ -87,7 +88,7 @@ export function registerChatParticipant(context: vscode.ExtensionContext, auth: 
   context.subscriptions.push(participant);
 }
 
-async function answerWithNearAi(auth: AuthService, root: string | undefined, prompt: string, history: ConversationTurn[], response: ResponseStreamLike, token: vscode.CancellationToken): Promise<{ model: string; outcome: ReplyOutcome }> {
+async function answerWithNearAi(auth: AuthService, root: string | undefined, prompt: string, history: ConversationTurn[], response: ResponseRecorder, token: vscode.CancellationToken): Promise<{ model: string; outcome: ReplyOutcome }> {
   const notSent = { model: '', outcome: 'not-sent' as const };
   if (!root) {
     response.markdown('Open a folder first. NEAR AI keys and profiles are scoped to a project.');
@@ -133,7 +134,7 @@ async function answerWithNearAi(auth: AuthService, root: string | undefined, pro
     // Recorded in the key's spend ledger as a chat view request.
     await withSpendTag({ kind: 'participant', conversationId: session.sessionId }, async () => {
       for await (const event of route.client.streamChatEvents(model, [...history, { role: 'user', content: prompt }], abort.signal)) {
-        if (event.type === 'text') response.markdown(event.text);
+        if (event.type === 'text') response.answer(event.text);
         else if (event.type === 'done') {
           finished = true;
           let actualCostUsd: number | undefined;
@@ -180,7 +181,8 @@ export function historyFromChatContext(turns: ReadonlyArray<vscode.ChatRequestTu
       continue;
     }
     if (turn.result.metadata?.command) continue;
-    const text = turn.response.map((part) => 'value' in part && part.value instanceof vscode.MarkdownString ? part.value.value : '').join('').trim();
+    // The footer after a reply is the extension's own line, not something the model said, so it is not sent back.
+    const text = turn.response.map((part) => 'value' in part && part.value instanceof vscode.MarkdownString ? part.value.value : '').join('').replace(USAGE_FOOTER_TAIL, '').trim();
     if (text) history.push({ role: 'assistant', content: text });
   }
   return history.slice(-20);

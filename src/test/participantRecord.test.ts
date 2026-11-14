@@ -4,10 +4,10 @@ import path from 'node:path';
 import test from 'node:test';
 import type { ThreadEntry } from '../domain/state/threadEntries';
 import { DEFAULT_RULES } from '../agent/permissions';
-import { entriesToMessages, type ViewItem } from '../domain/state/threadView';
+import { entriesToMessages, entriesToView, type ViewItem } from '../domain/state/threadView';
 import { AgentConversation } from '../services/agentSession';
 import type { AgentMessage, CompletionEvent } from '../services/nearAiClient';
-import { isThreadId, openThreadInPanel, PARTICIPANT_STOPPED_NOTICE, recordParticipantTurn, resolveParticipantThread, ResponseRecorder, seedEntries, type ParticipantTurnLike, type ResponseStreamLike } from '../services/participantRecorder';
+import { isThreadId, openThreadInPanel, PARTICIPANT_STOPPED_NOTICE, recordParticipantTurn, resolveParticipantThread, ResponseRecorder, seedEntries, USAGE_FOOTER_TAIL, type ParticipantTurnLike, type ResponseStreamLike } from '../services/participantRecorder';
 import { stateHomeFor } from '../services/stateHome';
 import { stateKeysFor } from '../services/stateKeys';
 import { ThreadStore } from '../services/threadStore';
@@ -41,31 +41,75 @@ function request(prompt: string, command?: string): ParticipantTurnLike {
   return { participant: 'nearAi', prompt, ...(command ? { command } : {}) };
 }
 
-test('a streamed reply with its usage footer is stored as one prompt and one reply in a Chat view thread', async () => {
+test('a streamed reply keeps the model\'s text apart from its usage footer, and both are kept in a Chat view thread in the order the person saw them', async () => {
   const root = await tempProject();
   const store = storeFor(root);
   const stream = new FakeStream();
   const recorder = new ResponseRecorder(stream);
   recorder.progress('Asking m…');
-  recorder.markdown('Hello');
-  recorder.markdown(new FakeMarkdown(' world'));
+  recorder.answer('Hello');
+  recorder.answer(new FakeMarkdown(' world'));
   recorder.markdown('\n\n*m · 12 tokens · $0.0001*');
   assert.deepEqual(stream.seen, ['Hello', ' world', '\n\n*m · 12 tokens · $0.0001*'], 'the real stream receives everything unchanged');
   const finished = recorder.finish('completed');
-  assert.equal(finished.text, 'Hello world\n\n*m · 12 tokens · $0.0001*');
+  assert.equal(finished.text, 'Hello world', 'the model\'s own words');
+  assert.equal(finished.notes, '\n\n*m · 12 tokens · $0.0001*', 'the footer is kept apart');
+  assert.equal(finished.outcome, 'completed');
 
   const { threadId } = await resolveParticipantThread([], store);
-  await recordParticipantTurn(store, { threadId, writer: 'edA.1', prompt: 'Say hello', reply: finished.text, model: 'm' });
+  await recordParticipantTurn(store, { threadId, writer: 'edA.1', prompt: 'Say hello', reply: finished.text, notes: finished.notes, model: 'm' });
 
   const main = (await store.lines(threadId)).main;
-  assert.deepEqual(main.map((entry) => entry.role), ['user', 'assistant']);
+  assert.deepEqual(main.map((entry) => entry.role), ['user', 'assistant', 'notice']);
   assert.equal(textOf(main[0]), 'Say hello');
-  assert.equal(textOf(main[1]), 'Hello world\n\n*m · 12 tokens · $0.0001*', 'the reply is kept exactly as the person saw it, footer included');
+  assert.equal(textOf(main[1]), 'Hello world');
+  assert.equal(textOf(main[2]).trim(), '*m · 12 tokens · $0.0001*', 'the footer follows the reply as a notice');
+  assert.equal((main[2].body as { forContext: boolean }).forContext, false);
+  // Reopened, the person sees the reply and then the footer, in order; the model is sent the reply alone.
+  assert.deepEqual(entriesToView({ main, branches: [] }).map((item) => `${item.kind}:${(item as { text?: string }).text?.trim()}`), ['user:Say hello', 'assistant:Hello world', 'notice:*m · 12 tokens · $0.0001*']);
+  const sent = entriesToMessages(main);
+  assert.deepEqual(sent.map((message) => message.role), ['user', 'assistant']);
+  assert.equal(JSON.stringify(sent).includes('$'), false, 'no cost reaches the model');
   const meta = await store.meta(threadId);
   assert.equal(meta?.origin, 'chat-view');
   assert.equal(meta?.title, 'Say hello');
   assert.equal(meta?.turns, 1);
   assert.equal((await store.index()).find((item) => item.id === threadId)?.origin, 'chat-view');
+});
+
+test('a reply that is only an error is kept as notices and nothing of it reaches the model', async () => {
+  const root = await tempProject();
+  const store = storeFor(root);
+  const { threadId } = await resolveParticipantThread([], store);
+  const recorder = new ResponseRecorder(new FakeStream());
+  recorder.markdown('NEAR AI could not be reached. Check your connection.');
+  const finished = recorder.finish('failed');
+  assert.equal(finished.text, '');
+  await recordParticipantTurn(store, { threadId, writer: 'edA.1', prompt: 'Hi', reply: finished.text, notes: finished.notes, model: 'm', stopped: true });
+  const main = (await store.lines(threadId)).main;
+  assert.deepEqual(main.map((entry) => entry.role), ['user', 'notice', 'notice'], 'no assistant entry');
+  assert.equal(textOf(main[1]), 'NEAR AI could not be reached. Check your connection.');
+  assert.equal(textOf(main[2]), PARTICIPANT_STOPPED_NOTICE);
+  assert.deepEqual(entriesToMessages(main).map((message) => message.role), ['user']);
+  assert.equal(JSON.stringify(entriesToMessages(main)).includes('reached'), false);
+});
+
+test('a session from before turns were recorded has a trailing usage footer moved into a notice after its reply', () => {
+  const footer = '\n\n*fake/model · Private · 15 tokens · ~$0.0001 est.*';
+  const seed = seedEntries([request('Hi'), reply(`Hello there${footer}`), request('Again'), reply('A reply that ends in *emphasis* is not a footer')]);
+  assert.deepEqual(seed.map((item) => item.role), ['user', 'assistant', 'notice', 'user', 'assistant']);
+  assert.equal((seed[1].body as { text: string }).text, 'Hello there');
+  assert.equal((seed[2].body as { text: string }).text, footer);
+  assert.equal((seed[2].body as { forContext: boolean }).forContext, false);
+  assert.equal((seed[4].body as { text: string }).text, 'A reply that ends in *emphasis* is not a footer');
+  assert.equal(USAGE_FOOTER_TAIL.test(footer), true);
+  assert.equal(USAGE_FOOTER_TAIL.test('Plain text'), false);
+});
+
+test('the Chat view hands the model its earlier replies without their usage footer', () => {
+  const footer = '\n\n*fake/model · 15 tokens · $0.0001*';
+  const history = chatParticipant.historyFromChatContext([request('Hi'), reply(`Hello there${footer}`)] as never);
+  assert.deepEqual(history, [{ role: 'user', content: 'Hi' }, { role: 'assistant', content: 'Hello there' }]);
 });
 
 test('the thread id rides in the newest reply, so the next turn continues the same thread, and a first request starts a new one', async () => {
@@ -283,16 +327,18 @@ function provideStream(events: (() => AsyncGenerator<unknown>) | undefined): voi
 }
 const done = { type: 'done', metadata: { inputTokens: 10, outputTokens: 5, estimatedCostUsd: 0.0001, verificationStatus: 'unknown', latencyMs: 3 } };
 
-test('a plain reply is stored exactly as streamed with its footer, a cancelled one with a notice, and a failed one with the error text and a notice', async () => {
+test('a plain reply is stored as the model\'s text with its footer as a notice, a cancelled one with a notice, and a failed one with the error text and a notice', async () => {
   const root = await tempProject();
   provideStream(async function* () { yield { type: 'text', text: 'Hello' }; yield { type: 'text', text: ' there' }; yield done; });
   const completed = await ask(root, { prompt: 'Greet me' });
   const store = storeFor(root, sharedSecrets.get(root));
   const threadId = completed.result.metadata.threadId!;
   let main = (await store.lines(threadId)).main;
-  assert.deepEqual(main.map((entry) => entry.role), ['user', 'assistant']);
-  assert.equal(textOf(main[1]), completed.markdown, 'what is stored is what the person read');
-  assert.match(textOf(main[1]), /^Hello there\n\n\*fake\/model · .*15 tokens/);
+  assert.deepEqual(main.map((entry) => entry.role), ['user', 'assistant', 'notice']);
+  assert.equal(textOf(main[1]), 'Hello there', 'the model\'s own words');
+  assert.equal(`${textOf(main[1])}${textOf(main[2])}`, completed.markdown, 'together they are what the person read');
+  assert.match(textOf(main[2]), /^\n\n\*fake\/model · .*15 tokens/);
+  assert.equal(entriesToMessages(main).some((message) => String(message.content).includes('tokens')), false, 'the footer never reaches the model');
   assert.equal(completed.buttons.filter((button) => button.command === 'nearAi.openThread').length, 1);
   assert.equal((await store.meta(threadId))?.model, 'fake/model');
 
@@ -302,16 +348,31 @@ test('a plain reply is stored exactly as streamed with its footer, a cancelled o
   const cancelled = await ask(root, { prompt: 'Tell a story' }, history, true);
   assert.equal(cancelled.result.metadata.threadId, threadId);
   main = (await store.lines(threadId)).main;
-  assert.deepEqual(main.slice(2).map((entry) => entry.role), ['user', 'assistant', 'notice']);
-  assert.equal(textOf(main[3]), 'Once upon');
-  assert.equal(textOf(main[4]), PARTICIPANT_STOPPED_NOTICE);
+  assert.deepEqual(main.slice(3).map((entry) => entry.role), ['user', 'assistant', 'notice']);
+  assert.equal(textOf(main[4]), 'Once upon');
+  assert.equal(textOf(main[5]), PARTICIPANT_STOPPED_NOTICE);
 
   provideStream(async function* () { yield { type: 'text', text: 'Partial' }; throw new Error('connection reset'); });
   const failed = await ask(root, { prompt: 'Again' }, history);
   main = (await store.lines(threadId)).main;
   assert.equal(main.at(-1)?.role, 'notice');
   assert.equal(textOf(main.at(-1)!), PARTICIPANT_STOPPED_NOTICE);
-  assert.equal(textOf(main.at(-2)!), failed.markdown, 'the partial text and the error shown to the person are what is kept');
+  assert.equal(textOf(main.at(-3)!), 'Partial', 'the partial text is the reply');
+  assert.equal(textOf(main.at(-2)!), failed.markdown.slice('Partial'.length), 'the error shown to the person is a notice after it');
+  assert.equal(entriesToMessages(main).some((message) => String(message.content).includes('connection reset')), false, 'error text never reaches the model');
+});
+
+test('a Chat view reply restored without its metadata still finds its thread, though the thread holds the footer as a notice', async () => {
+  const root = await tempProject();
+  provideStream(async function* () { yield { type: 'text', text: 'Hello there' }; yield done; });
+  const completed = await ask(root, { prompt: 'Greet me' });
+  const store = storeFor(root, sharedSecrets.get(root));
+  const threadId = completed.result.metadata.threadId!;
+  const before = (await store.entries(threadId)).length;
+  const joined = await resolveParticipantThread(exchange('Greet me', completed.markdown), store);
+  assert.equal(joined.threadId, threadId, 'the reply as the person saw it, footer included, is this thread\'s tail');
+  assert.equal(joined.seed, undefined);
+  assert.equal((await store.entries(threadId)).length, before);
 });
 
 test('a prompt that never reached the model is not stored, and the session still gets its thread id', async () => {
