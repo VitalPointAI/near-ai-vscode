@@ -765,7 +765,8 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     // Attachments the user staged for this message.
     const staged = message.type === 'send' ? (message.attachmentIds ?? []).map((id) => state.attachments.get(id)).filter((item): item is StagedAttachment => Boolean(item)) : [];
     const agentModels = readAgentModels();
-    const teeBlock = attachmentTeeBlock(staged, modelInfo, active.models);
+    // Files carried from a message sent during a run are checked again against the model this turn uses, which may not be the run's.
+    const teeBlock = attachmentTeeBlock([...staged, ...(carried?.items ?? []).flatMap((item) => item.staged)], modelInfo, active.models);
     if (teeBlock) { tab.post({ type: 'outbound-blocked', text, model, reason: teeBlock, confirm: false }); return; }
     state.activity = state.activity ?? new ActivityStore(root);
     const settings = readSettings();
@@ -822,8 +823,8 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
         carried.taken = true;
       }
       // Say where the files went, now that they are in the project.
-      const savedFiles = [...staged, ...(carried?.items ?? []).flatMap((item) => item.staged)].filter((item) => item.savedAs);
-      if (savedFiles.length) tab.post({ type: 'notice', text: `Saved in the project for the agent: ${savedFiles.map((item) => item.savedAs).join(', ')}.` });
+      const savedText = savedNotice([...staged, ...(carried?.items ?? []).flatMap((item) => item.staged)]);
+      if (savedText) tab.post({ type: 'notice', text: savedText });
       state.memory = state.memory ?? new ContextGraphMemory(root, { trustedActorIds: [AGENT_MEMORY_ACTOR] });
       const delegable = modelsAsPrivateAs(active.models, modelInfo);
       // MCP tools are optional for a message: if they can't be prepared, it is sent without them.
@@ -901,8 +902,6 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
         return;
       }
       clearStaged(staged);
-      const saved = staged.filter((item) => item.savedAs);
-      if (saved.length) tab.post({ type: 'notice', text: `Saved in the project for the agent: ${saved.map((item) => item.savedAs).join(', ')}.` });
     }
     // The run may have ended while the files were read: then the message, with them, is the next turn.
     if (idle(tab)) {
@@ -911,6 +910,9 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
       return;
     }
     tab.steerTexts.set(message.id, message.text);
+    // Said here only for a message going to the running agent; one that became the next turn is said by that turn.
+    const savedText = savedNotice(staged);
+    if (savedText) tab.post({ type: 'notice', text: savedText });
     ensureAgent(tab, root).steer(message.id, message.text, { interrupt: message.interrupt === true, ...(attachments ? { attachments, staged } : {}) });
   };
   /**
@@ -1019,6 +1021,20 @@ async function readAttachments(staged: StagedAttachment[], options: { client: Ne
   // A plain sentence, not fenced: this is the agent's own note about where the files are, not outside content.
   if (copies.length > 0) prepared.text = `${prepared.text}\n\nThe attached file${copies.length === 1 ? ' is' : 's are'} saved in this project and can be opened with your own file tools:\n${copies.map((file) => `- ${file}`).join('\n')}`;
   return prepared;
+}
+
+/** Files whose saving the chat has already reported. */
+const announced = new WeakSet<StagedAttachment>();
+
+/** What the chat says once files went with a message: where each was saved in the project, and which could not be saved (the agent then has only what was read into the message). */
+function savedNotice(all: StagedAttachment[]): string | undefined {
+  // Each file is said once, though a queued message's files are read when it is queued and sent again with the turn it becomes.
+  const items = all.filter((item) => !announced.has(item));
+  for (const item of items) announced.add(item);
+  const saved = items.filter((item) => item.savedAs).map((item) => item.savedAs);
+  const failed = items.filter((item) => !item.savedAs).map((item) => item.name);
+  const parts = [...(saved.length ? [`Saved in the project for the agent: ${saved.join(', ')}.`] : []), ...(failed.length ? [`Could not save ${failed.join(', ')} into the project: the agent has what was read into the message, but cannot open ${failed.length === 1 ? 'it' : 'them'} with its file tools.`] : [])];
+  return parts.length ? parts.join(' ') : undefined;
 }
 
 /** Several messages' read attachments as one, in order. */

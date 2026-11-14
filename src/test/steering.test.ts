@@ -592,6 +592,7 @@ test('sidebar: a message with a file sent as the run ends becomes the next turn 
     assert.deepEqual(steerStates(sidebar.posted, 'steer-b2b2b2b2b2b2'), ['queued', 'sent-new']);
     assert.equal(near.requests.length, 2);
     assert.match(lastUser(near.requests[1]), /queued file body[\s\S]*read the queued file$/, 'the new turn carries the file, then the words');
+    assert.equal(sidebar.posted.filter((message) => message.type === 'notice' && /queued\.txt/.test(String(message.text))).length, 1, 'where it was saved is said once');
 
     // With nothing running, a message with a file is an ordinary message with its file.
     const idle = await attach(sidebar, 'idle.txt', 'idle file body');
@@ -707,6 +708,24 @@ test('sidebar: a file taken out before sending is never written, and a steer who
     await sidebar.send({ type: 'approval-reply', callId: approval.callId, decision: 'allow' });
     await running;
     assert.equal(near.requests.some((messages) => JSON.stringify(messages).includes('see the draft')), false, 'the words are not sent without their file');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('sidebar: a file that cannot be saved into the project is still sent, and the chat says it was not saved', async () => {
+  const { root, auth } = await projectWithProfile();
+  // A plain file where the attachments folder would go, so the copy fails.
+  await writeFile(path.join(root, '.near-ai'), 'not a folder');
+  const near = fakeNear(() => ({ content: 'ok' }));
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = near.fetch;
+  try {
+    const sidebar = await openSidebar(root, auth);
+    const staged = await attach(sidebar, 'notes.txt', 'still read into the message');
+    await sidebar.send({ type: 'send', text: 'read my notes', model: 'z-ai/glm-5.3', attachmentIds: [staged.id] });
+    assert.match(lastUser(near.requests[0]), /still read into the message/);
+    assert.ok(sidebar.posted.some((message) => message.type === 'notice' && /^Could not save notes\.txt into the project/.test(String(message.text))));
   } finally {
     globalThis.fetch = originalFetch;
   }
