@@ -2,6 +2,7 @@
 // index, every object not read before, the sequence number), merge per record with the plan-02 rules, apply to the state home, then build and push one new
 // hot object, a new index and a new manifest on top of the remote tip. A push that loses a race fetches, merges and tries again (never forced). Nothing
 // local is changed when verification fails. The transport owns the mirror lock; this module never holds it around a transport call. No vscode.
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash } from 'node:crypto';
 import * as path from 'node:path';
 import { readFile } from 'node:fs/promises';
@@ -17,7 +18,8 @@ import type { RunMarker, RunState } from './runMarkers';
 import { rm } from 'node:fs/promises';
 import { ProjectStateHome, writeFileAtomic } from './stateHome';
 import type { RecoveryWrap, StateKeys } from './stateKeys';
-import { MirrorBusyError } from './stateMirrorLock';
+import { StateBusyError, withStateLock } from './stateLocks';
+import { MirrorBusyError, type MirrorLockOptions } from './stateMirrorLock';
 import {
   THREAD_ID, applyMerged, collectLocal, foldHeads, headMapOf, isSyncedRecord, mergeAll, parsePortableMeta, recordKey, withoutBody,
   type ColdParts, type HotPayload, type IndexPayload, type IndexThread, type LocalSnapshot, type PortableMeta, type ProfileSource, type SecretSource
@@ -104,6 +106,8 @@ export interface StateSyncOptions {
   /** Test seams for the retry wait. */
   sleep?: (ms: number) => Promise<void>;
   random?: () => number;
+  /** Test seam: the wait limits and sleep of the cross-process sync lock (a short wait to see 'waiting' without waiting two minutes). */
+  lockTimings?: Partial<MirrorLockOptions>;
   /** False for a sync that only opens the remote once (a throwaway mirror): it must not become the thread store's way of fetching archived threads. Default true. */
   registerColdFetcher?: boolean;
 }
@@ -156,6 +160,10 @@ function parseState(text: string): SyncState {
   } catch {
     return freshState();
   }
+}
+
+function isBusy(error: unknown): boolean {
+  return error instanceof StateBusyError || error instanceof MirrorBusyError;
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -222,8 +230,45 @@ interface RemoteBundle {
   index: IndexPayload;
 }
 
+/**
+ * The one owner of sync bookkeeping (sync/state.json) for a project folder on this computer (REVIEW MAJOR stateSync.ts:226). Every StateSync built for
+ * the folder, whoever built it (the scheduler, a command, a flow), runs through the same in-process queue and holds the cross-process lock
+ * .near-ai/locks/sync.lock from reading sync/state.json to writing it back, so two windows or two editors never interleave a sync. Order rule from
+ * stateLocks.ts: a holder of 'sync' may take 'meta', never the reverse; nothing run here takes 'sync' again.
+ */
+export class SyncOwner {
+  private queued: Promise<unknown> = Promise.resolve();
+
+  public constructor(public readonly root: string) {}
+
+  /**
+   * Runs `work` after the work queued before it, while holding the sync lock. Work started from inside a run of this owner (an archived thread opened
+   * during a merge) runs at once: waiting for the run it is part of would never end. `lock: false` is for work that never reads or writes
+   * sync/state.json (opening the remote with a code, asking what it holds): it keeps its place in the queue but takes no lock file, so a wrong
+   * code still creates nothing in the project folder.
+   */
+  public run<T>(work: () => Promise<T>, timings?: Partial<MirrorLockOptions>, lock = true): Promise<T> {
+    if (insideRun.getStore() === this) return work();
+    const held = (): Promise<T> => insideRun.run(this, work);
+    const inside = lock ? (): Promise<T> => withStateLock(this.root, 'sync', held, timings ?? {}) : held;
+    const result = this.queued.then(inside, inside);
+    this.queued = result.catch(() => undefined);
+    return result;
+  }
+}
+
+const insideRun = new AsyncLocalStorage<SyncOwner>();
+const owners = new Map<string, SyncOwner>();
+
+/** The sync owner of the project folder at `root`: one per resolved folder in this process. */
+export function syncOwnerFor(root: string): SyncOwner {
+  const resolved = path.resolve(root);
+  let owner = owners.get(resolved);
+  if (!owner) { owner = new SyncOwner(resolved); owners.set(resolved, owner); }
+  return owner;
+}
+
 export class StateSync {
-  private chain: Promise<unknown> = Promise.resolve();
   private readonly sleep: (ms: number) => Promise<void>;
   private readonly random: () => number;
 
@@ -259,7 +304,7 @@ export class StateSync {
       }
       await this.options.keys.storeRecoveryWrap(opened.wrap);
       return { kind: 'synced', message: MESSAGES.unlocked };
-    }));
+    }), false);
   }
 
   /**
@@ -272,7 +317,7 @@ export class StateSync {
     const outcome = await this.enqueue(() => this.guard(async () => {
       opening = await this.openRemoteNow(codeBytes);
       return opening.ok ? { kind: 'synced', message: MESSAGES.unlocked } : opening.outcome;
-    }));
+    }), false);
     return opening ?? { ok: false, outcome };
   }
 
@@ -288,7 +333,7 @@ export class StateSync {
       if (!fetched.value) { found = { ok: true }; return { kind: 'nothing-yet', message: MESSAGES.nothingYet }; }
       found = { ok: true, stateId: readManifestHeader(await this.readManifestText(fetched.value)).stateId };
       return { kind: 'synced', message: '' };
-    }));
+    }), false);
     return found ?? { ok: false, outcome };
   }
 
@@ -307,10 +352,14 @@ export class StateSync {
 
   // ---- plumbing ---------------------------------------------------------------------------------------------------------------------
 
-  private enqueue(work: () => Promise<SyncOutcome>): Promise<SyncOutcome> {
-    const result = this.chain.then(work, work);
-    this.chain = result.catch(() => undefined);
-    return result;
+  /** Runs the work as the project folder's sync owner: after what is queued, holding the sync lock. A lock that could not be had in time is 'waiting', and nothing was done. */
+  private async enqueue(work: () => Promise<SyncOutcome>, lock = true): Promise<SyncOutcome> {
+    try {
+      return await syncOwnerFor(this.options.root).run(work, this.options.lockTimings, lock);
+    } catch (error) {
+      if (isBusy(error)) return { kind: 'waiting', message: MESSAGES.waiting };
+      throw error;
+    }
   }
 
   private async guard(work: () => Promise<SyncOutcome>): Promise<SyncOutcome> {
@@ -318,7 +367,7 @@ export class StateSync {
       return await work();
     } catch (error) {
       if (error instanceof StateRefusedError) return { kind: 'refused', message: error.message };
-      if (error instanceof MirrorBusyError) return { kind: 'waiting', message: MESSAGES.waiting };
+      if (isBusy(error)) return { kind: 'waiting', message: MESSAGES.waiting };
       throw error;
     }
   }
@@ -739,6 +788,15 @@ export class StateSync {
    * cold object of this project, and the bundle must be for this thread, before a single file is written. Nothing is written otherwise.
    */
   public async fetchColdThread(id: string): Promise<ColdFetchResult> {
+    try {
+      return await syncOwnerFor(this.options.root).run(() => this.fetchColdNow(id), this.options.lockTimings);
+    } catch (error) {
+      if (isBusy(error)) return { ok: false, reason: 'offline' };
+      throw error;
+    }
+  }
+
+  private async fetchColdNow(id: string): Promise<ColdFetchResult> {
     const { transport, keys, home, threads } = this.options;
     if (!THREAD_ID.test(id)) return { ok: false, reason: 'damaged' };
     const dataKey = await keys.dataKey();
