@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.20
 
 This release is about your project staying the same wherever you open it. The same project in
 code-server, desktop VS Code and on another computer now shows the same chats, runs, comparisons and
@@ -39,11 +39,11 @@ model choices, and a project can be kept in step between computers with a recove
   the code on another computer with **NEAR AI: Enter Recovery Code** and your chats, runs,
   comparisons, model choices and NEAR AI key are there. **NEAR AI: Sync Project Now** syncs at once,
   **NEAR AI: Show a New Recovery Code** makes a new code (it does not lock out the old one, see the
-  known limits), and **NEAR AI: Turn Off Project Sync** stops syncing. Everything is encrypted on your computer before it leaves, and your git host sees only that
-  sync is used, roughly how much is stored and when you save. Sync runs after a run or reply ends, a
-  minute after you leave the window, and every 10 minutes while idle
-  (`nearAi.sync.intervalMinutes`, 0 turns it off). It pulls when the project opens and when you come
-  back after 5 minutes away. Nothing is ever pushed to `main`.
+  known limits), and **NEAR AI: Turn Off Project Sync** stops syncing. Everything is encrypted on
+  your computer before it leaves, and your git host sees only that sync is used, roughly how much is
+  stored and when you save. Sync runs after a run or reply ends, a minute after you leave the window,
+  and every 10 minutes while idle (`nearAi.sync.intervalMinutes`, 0 turns it off). It pulls when the
+  project opens and when you come back after 5 minutes away. Nothing is ever pushed to `main`.
 - **Give a project an online home.** With no git repository or remote, one click starts git, signs in
   to GitHub through VS Code, asks every time whether the repository is public or private, creates it and
   pushes the encrypted sync branch. Pushing your own code is a separate step that lists the files and
