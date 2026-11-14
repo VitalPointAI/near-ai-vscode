@@ -233,6 +233,8 @@ export class AgentConversation {
   private readonly logged = new WeakSet<AgentMessage>();
   private conversationId = newConversationId();
   private title = '';
+  /** The team the newest /team run of this conversation led (0.4.21); kept through compaction, which summarizes the message that named it. */
+  private teamSlug: string | undefined;
   private shell: ShellSession | undefined;
   private shellEnvAllow: string[] = [];
   private shellEnvKey = '';
@@ -338,6 +340,7 @@ export class AgentConversation {
     if (freshConversation) this.messages.unshift({ role: 'system', content: this.systemPrompt(request, this.root, this.spawnableAgents(request).length > 0) });
     if (!this.title) this.title = request.text.replace(/\s+/g, ' ').slice(0, 80);
     let prompt = request.text;
+    if (request.team) this.teamSlug = request.team.slug;
     if (request.team) prompt = teamLeadPrompt(request.team, request.text.replace(/^\/team:\S+\s*/, ''));
     else if (request.memberTeam) prompt = `${teamMembersNote(request.memberTeam)}\n\n${prompt}`;
     if (request.skill && request.gsd) {
@@ -650,6 +653,7 @@ export class AgentConversation {
     this.display = new Map(transcript.display ?? []);
     this.conversationId = transcript.id;
     this.title = transcript.title;
+    this.teamSlug = undefined;
     const store = this.transcripts;
     let items: ViewItem[] | undefined;
     if (store instanceof ThreadStore) {
@@ -683,6 +687,7 @@ export class AgentConversation {
     this.display = new Map();
     this.conversationId = newConversationId();
     this.title = '';
+    this.teamSlug = undefined;
     this.contextWarned = false;
     this.contextFullWarned = false;
     this.notifications = [];
@@ -694,8 +699,9 @@ export class AgentConversation {
 
   /** The agent definitions a run can start; without any, the run has no Agent tool. */
   private spawnableAgents(request: AgentTurnRequest): GsdAgent[] {
-    // Team members first, so a member wins over an Open-GSD agent of the same name; one definition per name.
-    const all = [...this.teamMembersOf(request), ...(request.gsd?.agents ?? []), ...(request.projectAgents ?? [])];
+    // One definition per name, in this order: the team's members, then agents a workflow step adds for this project (the red-team stage), then
+    // Open-GSD's own. A member wins over an Open-GSD agent of the same name, and a project agent over an Open-GSD one.
+    const all = [...this.teamMembersOf(request), ...(request.projectAgents ?? []), ...(request.gsd?.agents ?? [])];
     return all.filter((agent, index) => all.findIndex((other) => other.name === agent.name) === index);
   }
 
@@ -710,11 +716,11 @@ export class AgentConversation {
    * conversation keeps its team, and a later /team:<other> switches it.
    */
   public get conversationTeam(): string | undefined {
+    if (this.teamSlug) return this.teamSlug;
+    // A reopened conversation: the newest /team in what the person typed. Its display line is kept even after the message itself was summarized away.
     let slug: string | undefined;
-    for (const message of this.messages) {
-      if (message.role !== 'user') continue;
-      const typed = this.display.get(contentKey(message.content));
-      const match = typed ? /^\/team:(\S+)/.exec(typed) : null;
+    for (const typed of this.display.values()) {
+      const match = /^\/team:(\S+)/.exec(typed);
       if (match) slug = match[1];
     }
     return slug;
@@ -1133,7 +1139,7 @@ export class AgentConversation {
   }
 
   private transcriptOf(model: string, messages: AgentMessage[]): Transcript {
-    return { id: this.conversationId, title: this.title || 'Conversation', model, updatedAt: new Date().toISOString(), turns: messages.filter((message) => message.role === 'user').length, messages, display: [...this.display.entries()].filter(([key]) => messages.some((message) => message.role === 'user' && contentKey(message.content) === key)) };
+    return { id: this.conversationId, title: this.title || 'Conversation', model, updatedAt: new Date().toISOString(), turns: messages.filter((message) => message.role === 'user').length, messages, display: [...this.display.entries()].filter(([key, typed]) => /^\/team:\S/.test(typed) || messages.some((message) => message.role === 'user' && contentKey(message.content) === key)) };
   }
 
   /**

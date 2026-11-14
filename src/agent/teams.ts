@@ -150,15 +150,34 @@ export function teamAgents(team: TeamDefinition): GsdAgent[] {
 }
 
 /**
+ * Which team a run that is not a /team run works with (0.4.21): the conversation's own (`conversationTeam`, its newest /team), else the project's team,
+ * else none. `notice` is what the chat says, only when the team differs from the one it last said (`noticed`), so it is said once per conversation and
+ * team. `find` looks a team up by slug, as TeamLibrary.find does (the slug "project" is the project's own team).
+ */
+export async function workingTeamFor(find: (slug: string) => Promise<TeamDefinition | undefined>, conversationTeam: string | undefined, noticed: string | undefined): Promise<{ team?: TeamDefinition; notice?: string }> {
+  const quietly = (slug: string) => find(slug).catch(() => undefined);
+  const named = conversationTeam ? await quietly(conversationTeam) : undefined;
+  const team = named ?? await quietly('project');
+  if (!team || team.slug === noticed) return team ? { team } : {};
+  const gone = conversationTeam && !named ? ` (the ${conversationTeam} team this conversation started with is gone, so the project's team is used)` : '';
+  return { team, notice: `Working with the ${team.name} team: its members do the specialist work${gone}.` };
+}
+
+/** Team text inside the note, with angle brackets made plain, so a line such as `</team>` in a member's instructions cannot end the note early. */
+function noTags(text: string): string {
+  return text.replace(/</g, '‹').replace(/>/g, '›');
+}
+
+/**
  * 0.4.21: the team a run works with when it is not led as a team: later messages of a conversation started with /team:<name>, or any run in a project
  * with its own team, GSD workflows included. Before, the team existed only for the one /team message, so a later "make the pictures" never saw the
  * designer and went to general-purpose. Owner, 2026-11-14: "GSD's role is to keep the project on track - like the project manager, contractor, and
  * quality control. GSD sub contracts teams when available to perform the specialist functions (unless a specialist functional role is missing)."
  */
 export function teamMembersNote(team: TeamDefinition): string {
-  return `<team name="${team.name.replace(/"/g, "'")}">
-You work with the "${team.name}" team. Its members, each available as an Agent subagent_type:
-${team.members.map((member) => `- ${member.name}${member.role ? ` (${member.role})` : ''}: ${member.instructions.split('\n')[0].slice(0, 160)}`).join('\n')}
+  return `<team name="${noTags(team.name).replace(/"/g, "'")}">
+You work with the "${noTags(team.name)}" team. Its members, each available as an Agent subagent_type:
+${team.members.map((member) => `- ${member.name}${member.role ? ` (${noTags(member.role)})` : ''}: ${noTags(member.instructions.split('\n')[0].slice(0, 160))}`).join('\n')}
 Open-GSD runs the project: like a project manager, contractor and quality control, it plans, tracks, checks and verifies. It subcontracts the specialist work to this team. So when a piece of work, or a workflow step, is something a member's role covers (for example building to an implementer, images to a designer, research to a researcher), spawn that member with the Agent tool instead of an Open-GSD agent or general-purpose. Its prompt must be complete: the step's task, everything the workflow requires of it (files to write, commits, checks to run) and the report you need back. Keep Open-GSD's own agents for keeping the project on track (planning, plan checking, verification, progress), and for specialist work no member covers. Use general-purpose only when neither fits.
 </team>`;
 }

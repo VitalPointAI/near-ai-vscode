@@ -28,7 +28,7 @@ import { handlePickupAction, markPickupSeen, pickupCardModel, writePickupPointer
 import { currentSyncStatus, onSyncStatus, refreshSyncHome } from './syncCommands';
 import { redactSyncText, SYNC_PROMPT_DISMISSED_KEY, syncPanelMessage } from './syncPanel';
 import { copyAttachmentIntoProject, prepareAttachments, stageAttachment, StagedAttachment } from '../agent/attachments';
-import { TeamDefinition, TeamLibrary, teamAgents } from '../agent/teams';
+import { TeamDefinition, TeamLibrary, teamAgents, workingTeamFor } from '../agent/teams';
 import type { GsdAgent } from '../gsd/library';
 import { modelOptions, modelPrivacyLabel, modelsAsPrivateAs, privateSafetyModel, parseChatWebviewMessage, providerErrorMessage, discoverGsdArtifacts, isSafeArtifactPath, GsdArtifactLink, profileStatusMessage } from './chatBridge';
 import type { ChatWebviewMessage } from './chatBridge';
@@ -242,14 +242,10 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
   const workingTeam = async (tab: ChatTab, root: string): Promise<TeamDefinition | undefined> => {
     await whenTeamsMoved();
     const library = new TeamLibrary(teamLibraryDir(homeFolder()));
-    const slug = tab.agent?.conversationTeam;
-    const named = slug ? await library.find(slug, root).catch(() => undefined) : undefined;
-    const found = named ?? await library.find('project', root).catch(() => undefined);
-    if (found && tab.teamNoticed !== found.slug) {
-      tab.teamNoticed = found.slug;
-      tab.post({ type: 'notice', text: `Working with the ${found.name} team: its members do the specialist work${slug && !named ? ` (the ${slug} team this conversation started with is gone, so the project's team is used)` : ''}.` });
-    }
-    return found;
+    const { team, notice } = await workingTeamFor((slug) => library.find(slug, root), tab.agent?.conversationTeam, tab.teamNoticed);
+    if (team) tab.teamNoticed = team.slug;
+    if (notice) tab.post({ type: 'notice', text: notice });
+    return team;
   };
   const ensureAgent = (tab: ChatTab, root: string): AgentConversation => {
     if (!tab.agent) {
