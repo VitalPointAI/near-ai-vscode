@@ -443,7 +443,7 @@ export class AgentConversation {
       // PERF-05: the state is saved after every finished call too, not only before each model turn, so a reload mid-batch keeps the finished results.
       onProgress: (transcript) => this.saveRunState(request.model, runId, transcript),
       input: this.steeringInput,
-      requestApproval: (approval) => this.askApproval(approval, abort.signal, undefined, mainId),
+      requestApproval: (approval) => this.askApproval(approval, abort.signal, undefined, mainId, undefined, grants),
       rememberAllowRule: request.rememberAllowRule,
       emit: (event) => {
         this.track(mainId, event);
@@ -992,7 +992,7 @@ export class AgentConversation {
               requestApproval: (approval) => this.askApproval({ ...approval, callId: `${agent.id}:${approval.callId}`, title: `${label} › ${approval.title}` }, agent.abort.signal, label, agent.id, {
                 waitMs: this.subagentApprovalWaitMs,
                 onLate: (reply) => this.lateApproval(label, approval, reply, grants)
-              }),
+              }, grants),
               rememberAllowRule: request.rememberAllowRule,
               emit: (event) => {
                 this.track(agent.id, event);
@@ -1296,7 +1296,10 @@ export class AgentConversation {
       // PERF-07: the end names its tool and how long it ran, so a report can tell an approval timeout from a slow command without pairing events.
       const started = this.toolStarts.get(event.callId);
       this.toolStarts.delete(event.callId);
-      this.post({ type: 'tool-end', callId: event.callId, ok: event.ok, output: event.output });
+      // A sub-agent's call that returned "awaiting approval" ends here while its card stays open (PERF-01). The view closed every card whose call
+      // ended, so a parked card vanished from the chat while it still counted on the badge (owner, 2026-11-14: a badge of 50 with nothing to answer).
+      // The end now says so, and the view keeps the card until it is answered or closed.
+      this.post({ type: 'tool-end', callId: event.callId, ok: event.ok, output: event.output, ...(this.waiting.has(event.callId) ? { stillWaiting: true } : {}) });
       void record({ status: event.ok ? 'completed' : 'failed', kind: 'tool', ...(started ? { tool: started.tool, durationMs: Date.now() - started.at } : {}), ...(event.output.startsWith(AWAITING_APPROVAL_PREFIX) ? { errorCode: 'approval-pending' } : {}), summary: event.ok ? 'Tool call finished.' : 'Tool call failed or was declined.' });
     }
     else if (event.type === 'retry') { this.post({ type: 'assistant-retry', discard: event.discardText, text: retryNotice(event) }); void record({ status: 'running', kind: 'model', model, summary: `Model turn failed; retrying (attempt ${event.attempt + 1}).` }); }
@@ -1327,10 +1330,34 @@ export class AgentConversation {
 
   /** Forgets a waiting prompt; one cancelled by a stop or the run ending is reported so the view unpins it. */
   private closePrompt(id: string, cancelled = false): void {
+    this.openCards.delete(id);
     if (!this.waiting.delete(id)) return;
     if (this.markerRun && this.waiting.size === 0) void this.runMarkers?.waiting(this.markerRun.conversationId, this.markerRun.runId, false);
     if (cancelled) this.post({ type: 'prompt-closed', id, outcome: 'cancelled' });
     this.onWaitingChange?.(this.waiting.size);
+  }
+
+  /**
+   * Each open approval card's run grants and the exact command an allow would grant there (only a card that is not held as risky has one), so an answer
+   * that grants a command for the run also settles the other open cards that grant now covers.
+   */
+  private readonly openCards = new Map<string, { grants: RunGrants; command?: string; allowRule?: string; cover(): void }>();
+
+  /**
+   * An answer that granted a command for the rest of the run (allow for this run, always allow, or a late allow of a parked card) settles every other
+   * open card of the same run for that exact command, or for the same saved allow entry, with the same answer: the grant already covers them, so leaving
+   * them open only kept them on the badge. A card held as risky has no grant and is never settled this way (a risky action asks every time).
+   */
+  private settleCovered(request: ApprovalRequest, reply: ApprovalReply, late: boolean, grants: RunGrants): void {
+    const command = request.grant?.command;
+    if (!command) return;
+    if (!(reply.decision === 'allow-run' || reply.decision === 'allow-always' || (late && reply.decision === 'allow'))) return;
+    // A late answer only grants for the run (lateApproval), so only a card answered in time has saved its allow entry.
+    const rule = !late && reply.decision === 'allow-always' ? request.allowRule : undefined;
+    for (const [id, card] of [...this.openCards]) {
+      if (id === request.callId || card.grants !== grants || !card.command || !this.approvals.has(id)) continue;
+      if (card.command === command || (rule !== undefined && card.allowRule === rule)) card.cover();
+    }
   }
 
   /** PERF-04: sub-agents that may run in their own git worktree at once (nearAi.agent.maxParallelWorktrees), within maxParallelAgents. */
@@ -1414,7 +1441,7 @@ export class AgentConversation {
         : `<approval-update agent="${label}" decision="declined">\nThe user declined ${what}, which ${label} had queued.${reply.feedback ? ` Their note: ${reply.feedback}` : ''} Do not run it; adjust instead.\n</approval-update>` });
   }
 
-  private askApproval(request: ApprovalRequest, signal: AbortSignal, agent?: string, agentId?: string, unattended?: { waitMs: number; onLate(reply: ApprovalReply): void }): Promise<ApprovalReply> {
+  private askApproval(request: ApprovalRequest, signal: AbortSignal, agent?: string, agentId?: string, unattended?: { waitMs: number; onLate(reply: ApprovalReply): void }, grants?: RunGrants): Promise<ApprovalReply> {
     if (signal.aborted) return Promise.resolve({ decision: 'deny' });
     if (agentId) this.activity?.approvalAsked(agentId);
     return new Promise((resolve) => {
@@ -1424,19 +1451,32 @@ export class AgentConversation {
       const parkLimitMs = 24 * 60 * 60_000;
       /** Set once the call has returned "awaiting approval": a later answer goes to `onLate`, not to the finished call. */
       let returned = false;
-      const settle = (reply: ApprovalReply, cancelled = false) => {
+      /** `covered`: settled by an answer to another card whose grant covers this one, which must not in turn settle others. */
+      const settle = (reply: ApprovalReply, cancelled = false, covered = false) => {
         if (timer) clearTimeout(timer);
         if (parkLimit) clearTimeout(parkLimit);
         this.closePrompt(request.callId, cancelled);
         if (!cancelled) { this.approvalTimeoutStreaks.delete(agentId ?? 'main'); this.resumeRun(); }
         if (returned) {
           if (!cancelled) unattended?.onLate(reply);
-          return;
+        } else {
+          if (agentId) this.activity?.approvalSettled(agentId, cancelled ? 'cancelled' : reply.decision === 'deny' ? 'declined' : 'allowed');
+          resolve(reply);
         }
-        if (agentId) this.activity?.approvalSettled(agentId, cancelled ? 'cancelled' : reply.decision === 'deny' ? 'declined' : 'allowed');
-        resolve(reply);
+        if (!cancelled && !covered && grants) this.settleCovered(request, reply, returned, grants);
       };
       this.approvals.set(request.callId, settle);
+      if (grants) {
+        this.openCards.set(request.callId, {
+          grants, ...(request.grant?.command ? { command: request.grant.command } : {}), ...(request.allowRule ? { allowRule: request.allowRule } : {}),
+          cover: () => {
+            if (!this.approvals.delete(request.callId)) return;
+            // The view shows why the card went away: the person's answer to the same command already allowed it.
+            this.post({ type: 'prompt-closed', id: request.callId, outcome: 'covered' });
+            settle({ decision: 'allow' }, false, true);
+          }
+        });
+      }
       signal.addEventListener('abort', () => {
         if (!this.approvals.delete(request.callId)) return;
         // A card parked after "awaiting approval" belongs to an agent that has now been stopped: it is removed (review of PR 34), so it cannot linger for

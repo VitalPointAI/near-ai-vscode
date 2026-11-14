@@ -89,6 +89,10 @@ test('the transcript line records the outcome, with the answer for questions', (
   assert.equal(pending.outcomeText({ id: 'q', kind: 'questions', title: 'Which phase?' }, 'answered', 'Phase 9; Yes'), 'Answered: Phase 9; Yes');
 });
 
+test('a card settled by the person\'s answer to the same command says so in the transcript', () => {
+  assert.equal(pending.outcomeText(approval('a', 'npm test'), 'covered'), 'Allowed by your answer to the same command: npm test');
+});
+
 test('the sidebar has a pinned region between the panels and the composer, and loads its script', () => {
   const source = readFileSync(path.join(__dirname, '..', '..', 'src', 'services', 'panelView.ts'), 'utf8');
   const footer = source.slice(source.indexOf('<footer>'), source.indexOf('</footer>'));

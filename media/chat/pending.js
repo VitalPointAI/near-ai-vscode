@@ -65,6 +65,7 @@
       case 'answered': return 'Answered: ' + (detail || title);
       case 'cancelled': return 'Cancelled, the run stopped: ' + title;
       case 'closed': return 'No longer waiting: ' + title;
+      case 'covered': return 'Allowed by your answer to the same command: ' + title;
       default: return title;
     }
   }

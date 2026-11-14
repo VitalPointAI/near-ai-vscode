@@ -8,6 +8,7 @@
   run, with its file tools or from the shell, now runs without asking, and so does one written by
   another agent of the same run. A script the run did not write itself, one changed since, or one
   written after the agent read outside content such as a web page, still asks.
+- **The badge on the NEAR AI tab now counts only approvals you can see and answer.** A helper agent's approval that went unanswered disappeared from the chat while still counting on the badge. It now stays in the chat until you answer it, and allowing a command for the run also settles the other waiting approvals for that same command.
 
 ## 0.4.21
 
