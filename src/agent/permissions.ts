@@ -131,6 +131,11 @@ export class RunGrants {
    * after this moment may have been shaped by that content, whichever agent wrote it and whenever the agent running it started.
    */
   public taintedAt: number | undefined;
+  /**
+   * Absolute paths of scratch files an agent of this run wrote (0.4.22): the only scratch scripts Auto runs without asking. Shared with every
+   * sub-agent through these grants, so a helper one agent writes in `.near-ai/scratch/` can be run by another agent of the same run.
+   */
+  public readonly scratchWrites = new Set<string>();
   public get tainted(): boolean { return this.wasTainted; }
   public set tainted(value: boolean) {
     if (value && !this.wasTainted) this.taintedAt = Date.now();

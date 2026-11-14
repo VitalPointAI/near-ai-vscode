@@ -14,6 +14,7 @@ import { describeWeakened, isTestFile, weakenedTests } from './testIntegrity';
 import { coversOnlyThisCommand, exactRuleFor, riskSentence } from '../domain/approvalRisk';
 import type { AgentTool, SecurityEvent, Todo, ToolContext, ToolPreview } from './tools';
 import { resolveInWorkspace, ToolError } from './workspace';
+import { isScratchPath } from '../domain/scratch';
 
 
 
@@ -686,7 +687,8 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
       const output = await tool.run(input, context);
       if (tool.untrusted) this.grants.tainted = true;
       // A scratch file this command wrote is recorded now that it succeeded, and only if the file is really there (0.4.18 review).
-      if (command !== undefined) await this.noteScratchWrites(command, ranAt);
+      if (command !== undefined) await this.noteScratchWrites(command, ranAt, context);
+      else await this.noteToolScratchWrite(tool, input, ranAt, context);
       return this.finish(call.id, true, output + await this.testWriteNote(tool, input));
     } catch (error) {
       if (signal.aborted) return this.finish(call.id, false, 'Cancelled.');
@@ -717,41 +719,57 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
       ? { gsdPreambles: runtime.preambles, gsdRun: await resolveGsdRun(cwd, runtime.home, context.shell?.environment ?? process.env) }
       : {};
     return {
-      root, cwd, home: homedir(), packageScripts, trustedToolRoots: context.trustedToolRoots, writtenScratch: [...this.writtenScratch], ...gsd, safety: this.options.safety, signal: context.signal,
+      root, cwd, home: homedir(), packageScripts, trustedToolRoots: context.trustedToolRoots, writtenScratch: [...this.grants.scratchWrites], ...gsd, safety: this.options.safety, signal: context.signal,
       ...(this.options.riskSwitches ? { riskSwitches: this.options.riskSwitches } : {}),
       ...(this.options.unattended ? { unattended: { runStartedAt: this.startedAt, ...(this.grants.taintedAt !== undefined ? { taintedAt: this.grants.taintedAt } : {}), ...this.options.unattended } } : {})
     };
   }
 
-  /** Absolute paths of scratch files this run wrote (0.4.18): the only scratch scripts it may run without asking. */
-  private readonly writtenScratch = new Set<string>();
-
-  /**
-   * Records the scratch files a command writes into a temporary folder, so a later call that runs one is known to be running the run's own code and not
-   * something a page it read left there. Only a redirect or a copy into an absolute temporary path counts; a path in the workspace is not scratch.
-   */
   /**
    * Records the scratch files a command rewrote, after it succeeded. Two things make this trustworthy (0.4.18 review):
    *   - it runs AFTER the command, so a write that was refused or failed does not count;
    *   - the file must exist and be newer than the moment the command started, so a destination that received the run's bytes counts while a path that
    *     merely appeared in the text (`cp something /tmp/already-there.py`) does not. A scratch path can only ever be a script the run itself put there.
+   * 0.4.22: the project's own scratch folder (`.near-ai/scratch/`, where the run is told to keep its helpers) counts too, named absolutely or relative
+   * to the shell's folder. Before this only /tmp counted, so every helper the run wrote there asked again when it ran (owner, 2026-11-14: asked to
+   * approve commands every few seconds with Auto on).
    */
-  private async noteScratchWrites(command: string, startedAt: number): Promise<void> {
+  private async noteScratchWrites(command: string, startedAt: number, context: ToolContext): Promise<void> {
     const roots = ['/tmp', '/var/tmp', ...(process.env.TMPDIR ? [path.resolve(process.env.TMPDIR)] : [])].map((root) => path.resolve(root));
     const inScratch = (file: string): boolean => roots.some((root) => file === root || file.startsWith(`${root}${path.sep}`));
+    const cwd = context.shell?.workingDirectory ?? context.root;
     const candidates = new Set<string>();
-    const note = (text: string): void => { const file = path.resolve(text); if (path.isAbsolute(text) && !text.split(/[/\\]/).includes('..') && inScratch(file)) candidates.add(file); };
+    const note = (text: string): void => {
+      if (text.split(/[/\\]/).includes('..')) return;
+      const file = path.resolve(cwd, text);
+      if ((path.isAbsolute(text) && inScratch(file)) || isScratchPath(context.root, file)) candidates.add(file);
+    };
     // `> /tmp/x`, `>> /tmp/x`, and `cp|mv|install|tee` (the destination is the last word on the line).
     for (const match of command.matchAll(/>>?\s*([^\s;&|]+)/g)) if (match[1]) note(match[1]);
     for (const match of command.matchAll(/\b(?:cp|mv|install|tee)\b[^;&|]*\s([^\s;&|]+)\s*$/g)) if (match[1]) note(match[1]);
-    for (const file of candidates) {
-      try {
-        const info = await stat(file);
-        if (info.isFile() && info.mtimeMs >= startedAt - 1000) this.writtenScratch.add(file);
-      } catch {
-        // Not there, so nothing was written where the text suggested.
-      }
+    for (const file of candidates) await this.noteScratchFile(file, startedAt);
+  }
+
+  /** Records one scratch file as the run's own, if it is really there and was written since `startedAt`. */
+  private async noteScratchFile(file: string, startedAt: number): Promise<void> {
+    try {
+      const info = await stat(file);
+      if (info.isFile() && info.mtimeMs >= startedAt - 1000) this.grants.scratchWrites.add(file);
+    } catch {
+      // Not there, so nothing was written where the text suggested.
     }
+  }
+
+  /**
+   * 0.4.22: a file the Write or Edit tool put in the project's scratch folder is the run's own helper, so running it next does not ask. These tools
+   * are how an agent usually makes a helper script, and none of them was recorded before.
+   */
+  private async noteToolScratchWrite(tool: AgentTool<any>, input: unknown, startedAt: number, context: ToolContext): Promise<void> {
+    if (tool.capability !== 'workspaceWrite') return;
+    const target = (input as { path?: unknown } | undefined)?.path;
+    if (typeof target !== 'string' || !target || target.split(/[/\\]/).includes('..')) return;
+    const file = path.resolve(context.root, target);
+    if (isScratchPath(context.root, file)) await this.noteScratchFile(file, startedAt);
   }
 
   private finish(callId: string, ok: boolean, output: string): string {
