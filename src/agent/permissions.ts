@@ -131,6 +131,13 @@ export class RunGrants {
    * after this moment may have been shaped by that content, whichever agent wrote it and whenever the agent running it started.
    */
   public taintedAt: number | undefined;
+  /**
+   * Scratch files an agent of this run wrote (0.4.22), with the modification time they had when the write was recorded: the only scratch scripts
+   * Auto runs without asking. Shared with every sub-agent through these grants, so a helper one agent writes in `.near-ai/scratch/` can be run by
+   * another agent of the same run. A file changed since (by anything) no longer counts, and nothing written after the run read outside content
+   * is recorded, because that content may have shaped it.
+   */
+  public readonly scratchWrites = new Map<string, number>();
   public get tainted(): boolean { return this.wasTainted; }
   public set tainted(value: boolean) {
     if (value && !this.wasTainted) this.taintedAt = Date.now();

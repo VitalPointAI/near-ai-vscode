@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- **Auto no longer asks before running the agent's own helper scripts.** The agent is told to keep
+  helper scripts in the project's `.near-ai/scratch/` folder, but with Auto on, running one asked for
+  approval every time, often every few seconds. A script the agent wrote there during the current
+  run, with its file tools or from the shell, now runs without asking, and so does one written by
+  another agent of the same run. A script the run did not write itself, one changed since, or one
+  written after the agent read outside content such as a web page, still asks.
+
 ## 0.4.21
 
 This release makes what you send and the team you chose reach the agent: files go with the message
