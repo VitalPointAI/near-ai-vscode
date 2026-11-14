@@ -337,7 +337,7 @@ export async function removeOldInProjectSyncFolders(home: ProjectStateHome): Pro
 // ---- turning sync on --------------------------------------------------------------------------------------------------------------------
 
 export type TurnOnStatus = 'on' | 'pending' | 'cancelled' | 'no-home' | 'blocked' | 'failed';
-export interface TurnOnResult { status: TurnOnStatus; message: string }
+export interface TurnOnResult { status: TurnOnStatus; message: string; /** For 'pending': how the first sync came out, so the control shows a wait as a wait, not a failure. */ outcome?: SyncOutcome['kind'] }
 
 export interface TurnOnInput {
   env: SyncEnv;
@@ -400,7 +400,7 @@ async function finishTurnOn(env: SyncEnv, ui: SyncUi, remote: string, git?: GitR
 function reportTurnOn(ui: SyncUi, outcome: SyncOutcome): TurnOnResult {
   if (outcome.kind === 'synced' || outcome.kind === 'nothing-yet') { ui.info(SYNC_ON); return { status: 'on', message: SYNC_ON }; }
   (ui.warn ?? ui.info).call(ui, `${SYNC_ON_PENDING} ${outcome.message}`);
-  return { status: 'pending', message: outcome.message };
+  return { status: 'pending', message: outcome.message, outcome: outcome.kind };
 }
 
 // ---- entering the recovery code on another computer -------------------------------------------------------------------------------------
@@ -411,7 +411,7 @@ async function hasChatsOfItsOwn(env: SyncEnv): Promise<boolean> {
 }
 
 export type EnterCodeStatus = 'restored' | 'unlocked' | 'pending' | 'cancelled' | 'refused' | 'no-home' | 'failed';
-export interface EnterCodeResult { status: EnterCodeStatus; message: string }
+export interface EnterCodeResult { status: EnterCodeStatus; message: string; /** For 'pending': how the sync came out (see TurnOnResult). */ outcome?: SyncOutcome['kind'] }
 
 export interface EnterCodeInput extends TurnOnInput {
   /** Options for joining from a computer that already has chats (test seams). */
@@ -535,7 +535,7 @@ export async function enterCodeFlow(input: EnterCodeInput): Promise<EnterCodeRes
       return { status: 'restored', message };
     }
     (ui.warn ?? ui.info).call(ui, `${outcome.message}${keptNote}`);
-    return { status: 'pending', message: `${outcome.message}${keptNote}` };
+    return { status: 'pending', message: `${outcome.message}${keptNote}`, outcome: outcome.kind };
   } finally {
     bytes.fill(0);
   }
@@ -825,6 +825,18 @@ export class SyncScheduler {
   /** Records the result of a sync that was run outside the scheduler (the turn-on flow's first sync), so the status and the backoff follow it. */
   public recordOutcome(outcome: SyncOutcome, startedAt: number = this.clock.now()): void {
     this.settle(outcome, startedAt, { full: true, interactive: false, reasons: ['manual'] });
+  }
+
+  /**
+   * Tells the scheduler how a turn-on or enter-code flow's own first sync went, so the control shows it. A first sync that only had to wait (a chat
+   * running, another window syncing) is a wait, not a failure: the control keeps saying sync is on and it runs when the wait is over, instead of "Needs
+   * attention" with a failure's backoff (owner, 2026-11-14).
+   */
+  public recordFlow(result: { status: string; message: string; outcome?: SyncOutcome['kind'] }): void {
+    const { status, message, outcome } = result;
+    if (status === 'on' || status === 'restored') this.recordOutcome({ kind: 'synced', message, pushed: true });
+    else if (status === 'pending') this.recordOutcome({ kind: outcome === 'waiting' || outcome === 'refused' ? outcome : 'failed', message });
+    else if (status === 'no-home') this.setNoHome();
   }
 
   /** The interval setting changed: the next background sync is planned again from now. */

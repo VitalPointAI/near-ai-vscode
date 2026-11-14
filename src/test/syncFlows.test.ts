@@ -1,7 +1,7 @@
 // Plan 15, tasks 2 and 3: joining a synced project from a computer that already has chats of its own, a new recovery code, the key-file switch, turning
 // off, the code never stored or logged, and (task 3) the commands' triggers, remote choice and status. Local bare repositories and fakes only.
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { readFile, readdir, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -1008,6 +1008,32 @@ test('turning sync off cancels what was planned, and a syncing status is replace
   assert.equal(h.scheduler.status().state, 'syncing');
   h.scheduler.recordOutcome({ kind: 'synced', message: 'ok', pushed: true });
   assert.equal(h.scheduler.status().state, 'synced');
+});
+
+test('turning sync on during a chat: a first sync that only had to wait is a wait on the control, not "Needs attention" (owner, 2026-11-14)', async () => {
+  const remote = bareRemote({ withMain: false });
+  const a = computer(remote, 'alpha', { isIdle: () => false });
+  try {
+    const result = await turnOnFlow({ env: a.env, ui: fakeUi().ui });
+    assert.equal(result.status, 'pending');
+    assert.equal(result.outcome, 'waiting', 'the flow says the first sync waited, not that it failed');
+    const h = harness({ interval: 0 });
+    h.scheduler.recordFlow(result);
+    assert.notEqual(h.scheduler.status().state, 'attention', 'a wait never reads "Needs attention"');
+    assert.equal(h.scheduler.status().state, 'synced');
+    // No failure backoff: the retry for a wait comes within a minute, not after the first backoff step.
+    await h.clock.advance(MINUTES);
+    assert.ok(h.calls.length >= 1, 'the waited sync is tried again soon');
+
+    const failed = harness({ interval: 0 });
+    failed.scheduler.recordFlow({ status: 'pending', message: OFFLINE.message });
+    assert.equal(failed.scheduler.status().state, 'attention', 'a pending result with no outcome is still a failure');
+    const refused = harness({ interval: 0 });
+    refused.scheduler.recordFlow({ status: 'pending', message: 'locked', outcome: 'refused' });
+    assert.deepEqual(refused.scheduler.status(), { state: 'attention', message: 'locked' });
+  } finally {
+    for (const dir of [remote, a.root]) rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 // ---- the GitHub sign-in for syncs -------------------------------------------------------------------------------------------------------

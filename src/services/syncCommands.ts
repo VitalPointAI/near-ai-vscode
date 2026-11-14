@@ -178,12 +178,6 @@ function workspaceRoot(): string | undefined {
   return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
 }
 
-/** Tells the scheduler how a flow's own first sync went, so the control shows it. */
-function note(runtime: Runtime, status: string, message: string): void {
-  if (status === 'on' || status === 'restored') runtime.scheduler.recordOutcome({ kind: 'synced', message, pushed: true });
-  else if (status === 'pending') runtime.scheduler.recordOutcome({ kind: 'failed', message });
-  else if (status === 'no-home') runtime.scheduler.setNoHome();
-}
 
 export function registerSyncCommands(context: vscode.ExtensionContext, auth: AuthService): void {
   const ui = vscodeSyncUi();
@@ -198,7 +192,7 @@ export function registerSyncCommands(context: vscode.ExtensionContext, auth: Aut
   context.subscriptions.push(
     vscode.commands.registerCommand('nearAi.sync.turnOn', withRuntime(async (runtime) => {
       const result = await turnOnFlow({ env: runtime.env, ui, onlineHome: onlineHome(runtime) });
-      note(runtime, result.status, result.message);
+      runtime.scheduler.recordFlow(result);
       await refreshSyncHome(runtime.root);
     })),
     vscode.commands.registerCommand('nearAi.sync.now', withRuntime(async (runtime) => {
@@ -212,7 +206,7 @@ export function registerSyncCommands(context: vscode.ExtensionContext, auth: Aut
     })),
     vscode.commands.registerCommand('nearAi.sync.enterRecoveryCode', withRuntime(async (runtime) => {
       const result = await enterCodeFlow({ env: runtime.env, ui });
-      note(runtime, result.status, result.message);
+      runtime.scheduler.recordFlow(result);
     })),
     vscode.commands.registerCommand('nearAi.sync.newRecoveryCode', withRuntime((runtime) => newCodeFlow({ env: runtime.env, ui }))),
     vscode.commands.registerCommand('nearAi.sync.turnOff', withRuntime(async (runtime) => {
@@ -221,7 +215,7 @@ export function registerSyncCommands(context: vscode.ExtensionContext, auth: Aut
     })),
     vscode.commands.registerCommand('nearAi.sync.onlineHome', withRuntime(async (runtime) => {
       const result = await onlineHome(runtime)(afterRemoteFor(runtime.env, ui));
-      if (result.status === 'done') note(runtime, 'on', 'Your project is encrypted and saved on your git host.');
+      if (result.status === 'done') runtime.scheduler.recordFlow({ status: 'on', message: 'Your project is encrypted and saved on your git host.' });
       await refreshSyncHome(runtime.root);
     })),
     // The key file setting: changing it runs the flow that makes the change safe; a flow that did not finish puts the setting back.
