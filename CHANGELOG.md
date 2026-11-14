@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- **Files attached to a message go with that message.** A file attached to a message you sent while
+  the agent was working was held back for your next message, so the agent read your words without
+  the file and went looking for it. Now the file is read and goes to the running agent in the same
+  message, with the same privacy checks as any attachment. A message that becomes the next turn
+  keeps its files, and one that Stop hands back to the composer gets its files back too.
+- **An attached file is saved into the project when you attach it.** Before, the copy in
+  `.near-ai/attachments/` was made only when the message was sent, and the panel never said where it
+  went. Now the copy is made at once, the file's chip shows where it is saved, and a copy that fails
+  says so instead of failing silently.
+
 ## 0.4.20
 
 This release is about your project staying the same wherever you open it. The same project in

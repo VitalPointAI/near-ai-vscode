@@ -95,10 +95,14 @@
   let menuIndex = 0;
   let modelInfo = new Map();
   const staged = new Map();
+  /** Where each staged file was saved in the project (0.4.21), by attachment ID. */
+  const savedAs = new Map();
   function renderChips() {
     chips.replaceChildren(...[...staged.entries()].map(([id, name]) => {
       const chip = el('span', 'chip-file', name);
-      const remove = iconButton('stop', 'Remove ' + name, () => { staged.delete(id); post({ type: 'attachment-remove', id }); renderChips(); });
+      // Where the copy in the project is, so a person can see the file was saved and open it.
+      if (savedAs.get(id)) chip.title = 'Saved in the project as ' + savedAs.get(id);
+      const remove = iconButton('stop', 'Remove ' + name, () => { staged.delete(id); savedAs.delete(id); post({ type: 'attachment-remove', id }); renderChips(); });
       chip.append(remove);
       return chip;
     }));
@@ -263,8 +267,10 @@
     input.value = '';
     autosize();
     updateSendState();
-    if (staged.size) notice('Attachments stay staged: they go with your next message once this run ends.', []);
-    postFor({ type: 'steer', id, text, ...(options.interrupt ? { interrupt: true } : {}) });
+    // 0.4.21: the files attached to this message go with it, to the running agent, never left for a later message.
+    const ids = [...staged.keys()];
+    if (ids.length) node.insertBefore(document.createTextNode('\n📎 ' + [...staged.values()].join(', ')), line);
+    postFor({ type: 'steer', id, text, ...(options.interrupt ? { interrupt: true } : {}), ...(ids.length ? { attachmentIds: ids } : {}) });
   }
   function onSteerState(m) {
     // A conversation shown again brings back the messages still queued for its run.
@@ -1441,8 +1447,8 @@
       case 'prompt-error': notice(m.text || 'That answer could not be sent.', [], true); break;
       case 'history-error': notice(m.text, [], true); break;
       case 'artifacts': renderArtifacts(m.artifacts); break;
-      case 'attachment-staged': staged.set(m.id, m.name); renderChips(); announce('Attached ' + m.name); break;
-      case 'attachments-cleared': staged.clear(); renderChips(); break;
+      case 'attachment-staged': staged.set(m.id, m.name); savedAs.set(m.id, m.savedAs || ''); renderChips(); announce('Attached ' + m.name + (m.savedAs ? ', saved in the project as ' + m.savedAs : '')); break;
+      case 'attachments-cleared': staged.clear(); savedAs.clear(); renderChips(); break;
       case 'commands': if (Array.isArray(m.commands) && m.commands.length) commands = m.commands; break;
       case 'notice': notice(m.text || '', []); break;
       // A run the extension host never finished: nothing continues until the user clicks Resume.

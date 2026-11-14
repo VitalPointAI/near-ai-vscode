@@ -49,7 +49,8 @@ test('the bridge parses steer strictly', () => {
     { type: 'steer', id: 'steer-XYZ', text: 'hi' },
     { type: 'steer', id: 'steer-0123456789abc', text: 'hi' },
     { type: 'steer', id, text: 'hi', model: 'm' },
-    { type: 'steer', id, text: 'hi', attachmentIds: ['att-0123456789ab'] }
+    // 0.4.21: a steer may carry attachment IDs, but only well-formed ones (the cases are in the attachment test below).
+    { type: 'steer', id, text: 'hi', attachmentIds: ['att-XYZ'] }
   ]) assert.equal(parseChatWebviewMessage(bad), undefined, JSON.stringify(bad).slice(0, 80));
 });
 
@@ -502,4 +503,120 @@ test('the approval card offers Allow this time and Allow every time, and "for th
   // "For this run" is offered only when no permanent entry can be made, so the two never read as duplicates.
   assert.match(card, /if \(m\.allowRule\) choices\.append\(textButton\('Allow every time'/, 'every time appears only when there is an entry to save');
   assert.match(card, /m\.allowRule === undefined/, 'for this run appears only when there is none');
+});
+
+// --- 0.4.21: a message's attachments go with that message, also when it is sent during a run, and the file is saved into the project when attached. ---
+
+/** Attaches a file from outside the project through the real attach path, and returns its ID and what the chip was told. */
+async function attach(sidebar: Awaited<ReturnType<typeof openSidebar>>, name: string, body: string) {
+  const outside = await mkdtemp(path.join(tmpdir(), 'near-ai-attach-src-'));
+  const file = path.join(outside, name);
+  await writeFile(file, body);
+  (vscodeStub.window as Record<string, unknown>).showOpenDialog = async () => [{ fsPath: file }];
+  const before = sidebar.posted.length;
+  await sidebar.send({ type: 'attach-files' });
+  const staged = sidebar.posted.slice(before).find((message) => message.type === 'attachment-staged');
+  assert.ok(staged, 'the file is staged');
+  return staged as { id: string; name: string; savedAs?: string };
+}
+
+test('the bridge accepts attachment IDs on a steer, strictly', () => {
+  const id = 'steer-0123456789ab';
+  assert.deepEqual(parseChatWebviewMessage({ type: 'steer', id, text: 'see this', attachmentIds: ['att-0123456789ab'] }), { type: 'steer', id, text: 'see this', attachmentIds: ['att-0123456789ab'] });
+  assert.deepEqual(parseChatWebviewMessage({ type: 'steer', id, text: 'see this', attachmentIds: [] }), { type: 'steer', id, text: 'see this' });
+  for (const attachmentIds of [['nope'], 'att-0123456789ab', Array.from({ length: 11 }, () => 'att-0123456789ab')]) {
+    assert.equal(parseChatWebviewMessage({ type: 'steer', id, text: 'see this', attachmentIds }), undefined);
+  }
+});
+
+test('sidebar: an attached file is saved into the project the moment it is attached, and the chip says where', async () => {
+  const { root, auth } = await projectWithProfile();
+  const sidebar = await openSidebar(root, auth);
+  const staged = await attach(sidebar, 'notes.txt', 'the plan is in here');
+  assert.equal(staged.savedAs, path.join('.near-ai', 'attachments', 'notes.txt'));
+  assert.equal(readFileSync(path.join(root, staged.savedAs), 'utf8'), 'the plan is in here', 'the copy is in the workspace before anything is sent');
+});
+
+test('sidebar: a file attached to a message sent during a run reaches the running agent in that same message', async () => {
+  const { root, auth } = await projectWithProfile();
+  const near = fakeNear((messages) => near.requests.length === 1 ? editCall : { content: `Saw: ${lastUser(messages)}` });
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = near.fetch;
+  try {
+    const sidebar = await openSidebar(root, auth);
+    const running = sidebar.send({ type: 'send', text: 'Use port 8080', model: 'z-ai/glm-5.3' });
+    const approval = await until(() => sidebar.posted.find((message) => message.type === 'approval-request'));
+    const staged = await attach(sidebar, 'ports.txt', 'staging uses port 9090');
+    await sidebar.send({ type: 'steer', id: 'steer-a1a1a1a1a1a1', text: 'check the attached ports file', attachmentIds: [staged.id] });
+    assert.ok(sidebar.posted.some((message) => message.type === 'attachments-cleared'), 'nothing stays staged for a later message');
+    await sidebar.send({ type: 'approval-reply', callId: approval.callId, decision: 'allow' });
+    await running;
+    assert.equal(near.requests.length, 2, 'still one run');
+    const delivered = lastUser(near.requests[1]);
+    assert.match(delivered, /staging uses port 9090/, 'the file\'s content is in the message');
+    assert.match(delivered, /\.near-ai[\\/]attachments[\\/]ports\.txt/, 'and where it is saved in the project');
+    assert.match(delivered, /<user-message-during-run>\ncheck the attached ports file\n<\/user-message-during-run>/, 'with the words that refer to it');
+    assert.deepEqual(steerStates(sidebar.posted, 'steer-a1a1a1a1a1a1'), ['queued', 'delivered']);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('sidebar: a message with a file sent as the run ends becomes the next turn with its file', async () => {
+  const { root, auth } = await projectWithProfile();
+  let releaseBilling!: () => void;
+  let billingReached = false;
+  const billingGate = new Promise<void>((resolve) => { releaseBilling = resolve; });
+  const near = fakeNear((messages) => ({ content: `Saw: ${lastUser(messages)}` }), { billing: async () => { if (!billingReached) { billingReached = true; await billingGate; } } });
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = near.fetch;
+  try {
+    const sidebar = await openSidebar(root, auth);
+    const running = sidebar.send({ type: 'send', text: 'hello', model: 'z-ai/glm-5.3' });
+    await until(() => billingReached);
+    const queued = await attach(sidebar, 'queued.txt', 'queued file body');
+    await sidebar.send({ type: 'steer', id: 'steer-b2b2b2b2b2b2', text: 'read the queued file', attachmentIds: [queued.id] });
+    releaseBilling();
+    await running;
+    assert.deepEqual(steerStates(sidebar.posted, 'steer-b2b2b2b2b2b2'), ['queued', 'sent-new']);
+    assert.equal(near.requests.length, 2);
+    assert.match(lastUser(near.requests[1]), /queued file body[\s\S]*read the queued file$/, 'the new turn carries the file, then the words');
+
+    // With nothing running, a message with a file is an ordinary message with its file.
+    const idle = await attach(sidebar, 'idle.txt', 'idle file body');
+    await sidebar.send({ type: 'steer', id: 'steer-c3c3c3c3c3c3', text: 'and this one', attachmentIds: [idle.id] });
+    assert.equal(near.requests.length, 3);
+    assert.match(lastUser(near.requests[2]), /idle file body[\s\S]*and this one$/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('sidebar: Stop hands a queued message back with its attachments, ready to send again', async () => {
+  const { root, auth } = await projectWithProfile();
+  const near = fakeNear(() => near.requests.length === 1 ? editCall : { content: 'should not happen' });
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = near.fetch;
+  try {
+    const sidebar = await openSidebar(root, auth);
+    const running = sidebar.send({ type: 'send', text: 'Use port 8080', model: 'z-ai/glm-5.3' });
+    await until(() => sidebar.posted.find((message) => message.type === 'approval-request'));
+    const staged = await attach(sidebar, 'later.txt', 'for later');
+    await sidebar.send({ type: 'steer', id: 'steer-d4d4d4d4d4d4', text: 'look at this', attachmentIds: [staged.id] });
+    const before = sidebar.posted.length;
+    await sidebar.send({ type: 'stop' });
+    await running;
+    const after = sidebar.posted.slice(before);
+    assert.ok(after.some((message) => message.type === 'steer-state' && message.state === 'returned' && message.text === 'look at this'));
+    assert.ok(after.some((message) => message.type === 'attachment-staged' && message.id === staged.id && message.savedAs), 'the file is staged again');
+    assert.equal(near.requests.length, 1, 'nothing more is sent after stop');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('a message sent during a run no longer leaves its attachments staged for a later message', () => {
+  const chat = readFileSync(path.join(__dirname, '..', '..', 'media', 'chat', 'chat.js'), 'utf8');
+  assert.equal(chat.includes('Attachments stay staged'), false);
+  assert.match(chat, /type: 'steer', id, text[^\n]*attachmentIds: ids/);
 });

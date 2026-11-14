@@ -27,7 +27,7 @@ import { onRunEnded, runEnded, runStarted } from './runEndHooks';
 import { handlePickupAction, markPickupSeen, pickupCardModel, writePickupPointer } from './pickupCard';
 import { currentSyncStatus, onSyncStatus, refreshSyncHome } from './syncCommands';
 import { redactSyncText, SYNC_PROMPT_DISMISSED_KEY, syncPanelMessage } from './syncPanel';
-import { copyAttachmentIntoProject, prepareAttachments, stageAttachment, StagedAttachment } from '../agent/attachments';
+import { copyAttachmentIntoProject, PreparedAttachments, prepareAttachments, stageAttachment, StagedAttachment } from '../agent/attachments';
 import { TeamDefinition, TeamLibrary, teamAgents } from '../agent/teams';
 import type { GsdAgent } from '../gsd/library';
 import { modelOptions, modelPrivacyLabel, modelsAsPrivateAs, privateSafetyModel, parseChatWebviewMessage, providerErrorMessage, discoverGsdArtifacts, isSafeArtifactPath, GsdArtifactLink, profileStatusMessage } from './chatBridge';
@@ -35,7 +35,7 @@ import type { ChatWebviewMessage } from './chatBridge';
 import { sharedActivityFeed } from './activityView';
 import { runTitleFor } from './activityOverview';
 import { AGENT_DEFAULTS } from '../domain/agentDefaults';
-import type { ModelInfo } from './nearAiClient';
+import type { ModelInfo, NearAiClient } from './nearAiClient';
 import { RED_TEAM_WORKFLOW_STEP, redTeamEnabled } from '../agent/projectTypes';
 import { securityAccess } from './securityScan';
 import { webSearchProvider } from './webSearchSetup';
@@ -110,6 +110,8 @@ interface ChatTab {
   paused: Map<string, { minutes?: number; text: string }>;
   /** What was typed for each queued steer, so a re-shown conversation shows its queued messages. */
   steerTexts: Map<string, string>;
+  /** Attachments, already read, of messages that became this conversation's next turn; that turn takes them (0.4.21). */
+  carried?: PreparedAttachments[];
   /** Sends a message of this conversation: logged, and posted to the view when it is on screen. */
   post: (message: Record<string, unknown>) => void;
   /** Its run the extension host never finished, until the user resumes or dismisses it. */
@@ -233,6 +235,10 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     };
     return tab;
   };
+  /** Shows a staged file as a chip, with where it was saved in the project. */
+  const postStaged = (attachment: StagedAttachment): void => {
+    void panel.webview.postMessage({ type: 'attachment-staged', id: attachment.id, name: attachment.name, kind: attachment.kind, size: attachment.size, ...(attachment.savedAs ? { savedAs: attachment.savedAs } : {}) });
+  };
   const ensureAgent = (tab: ChatTab, root: string): AgentConversation => {
     if (!tab.agent) {
       const created = conversationFor(context, root, panel, tab.post, () => tab.title || 'a conversation');
@@ -240,6 +246,10 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
       tab.focusRegained = created.focusRegained;
       tab.agent.adopt(tab.id);
       tab.agent.onWaitingChange = () => sendSummary();
+      // A message Stop hands back to the composer gets its attachments back too, ready to send again.
+      tab.agent.onReturned = (items) => {
+        for (const attachment of items.flatMap((item) => item.staged ?? [])) { state.attachments.set(attachment.id, attachment); postStaged(attachment); }
+      };
     }
     return tab.agent;
   };
@@ -565,8 +575,14 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
       for (const uri of picked ?? []) {
         try {
           const attachment = await stageAttachment(uri.fsPath);
+          // 0.4.21: the file is saved into the project the moment it is attached, so it is in the workspace whichever way the message goes, and the
+          // chip says where. A copy that fails is said, never silent; the file is still read into the message itself.
+          const root = workspaceRoot();
+          const saved = root ? await copyAttachmentIntoProject(attachment, root).catch(() => undefined) : undefined;
+          if (saved !== undefined) attachment.savedAs = saved;
           state.attachments.set(attachment.id, attachment);
-          panel.webview.postMessage({ type: 'attachment-staged', id: attachment.id, name: attachment.name, kind: attachment.kind, size: attachment.size });
+          postStaged(attachment);
+          if (saved === undefined) panel.webview.postMessage({ type: 'notice', text: `${attachment.name} could not be saved into the project. It still goes with your message, but the agent cannot open it with its file tools.` });
           if (attachment.note) panel.webview.postMessage({ type: 'notice', text: attachment.note });
         } catch (error) {
           panel.webview.postMessage({ type: 'notice', text: providerErrorMessage(error) });
@@ -751,11 +767,8 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     // Attachments the user staged for this message.
     const staged = message.type === 'send' ? (message.attachmentIds ?? []).map((id) => state.attachments.get(id)).filter((item): item is StagedAttachment => Boolean(item)) : [];
     const agentModels = readAgentModels();
-    if (readSettings().privacyMode === 'tee-only') {
-      const needs = [...(staged.some((item) => item.kind === 'image') && !(modelInfo?.inputModalities ?? []).includes('image') ? [agentModels.visionModel] : []), ...(staged.some((item) => item.kind === 'audio') ? [agentModels.transcriptionModel] : [])];
-      const forwarded = needs.find((id) => active.models.find((candidate) => candidate.id === id)?.privacyBoundary !== 'tee');
-      if (forwarded) { tab.post({ type: 'outbound-blocked', text, model, reason: `TEE-only mode is on, and ${forwarded}, which would read your attachment, does not run in NEAR's TEE.`, confirm: false }); return; }
-    }
+    const teeBlock = attachmentTeeBlock(staged, modelInfo, active.models);
+    if (teeBlock) { tab.post({ type: 'outbound-blocked', text, model, reason: teeBlock, confirm: false }); return; }
     state.activity = state.activity ?? new ActivityStore(root);
     const settings = readSettings();
     if (!state.guard || state.guardSettings !== JSON.stringify([settings.privacyMode, settings.dailySpendLimitUsd, settings.actionPolicy])) {
@@ -763,7 +776,7 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
       state.guardSettings = JSON.stringify([settings.privacyMode, settings.dailySpendLimitUsd, settings.actionPolicy]);
     }
     // Documents are checked by their extracted text, which is what is sent.
-    const attachedText = staged.map((item) => item.kind === 'text' ? item.bytes.toString('utf8') : item.kind === 'document' ? item.text ?? '' : '').filter(Boolean).join('\n');
+    const attachedText = attachedTextOf(staged);
     // Today's spend from the key's ledger (or NEAR's own total), never from activity history.
     const account = spendAccountOf(active.provider.client);
     followSpend(account);
@@ -790,29 +803,23 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     try {
       const route = clientFor(active, model);
       const limits = readAgentLimits();
-      let attachments;
+      let attachments: PreparedAttachments | undefined;
       if (staged.length) {
         try {
-          // Reading attachments (vision, transcription) is billed to the run they are for.
-          attachments = await withSpendTag({ kind: 'attachment', runId, conversationId }, () => prepareAttachments(staged, { client: route.client, model, models: active.models, visionModel: agentModels.visionModel, transcriptionModel: agentModels.transcriptionModel, question: text }));
+          attachments = await readAttachments(staged, { client: route.client, model, models: active.models, question: text, runId, conversationId, root });
         } catch (error) {
           // The run was opened above, so it is closed here too: otherwise Agent Activity shows it running until the window reloads.
           await state.activity.append(session.sessionId, { status: 'failed', summary: 'Attachments could not be read.', errorCode: error instanceof Error ? error.name : 'unknown' }).catch(() => undefined);
           tab.post({ type: 'assistant-error', text: providerErrorMessage(error) });
           return;
         }
-        // 0.4.18: every attachment is copied into the project, so the agent can open it with its own file tools instead of hunting for it on disk.
-        const copies: string[] = [];
-        for (const item of staged) {
-          const saved = await copyAttachmentIntoProject(item, root).catch(() => undefined);
-          if (saved !== undefined) copies.push(saved);
-        }
-        if (copies.length > 0) {
-          // A plain sentence, not fenced: this is the agent's own note about where the files are, not outside content.
-          attachments.text = `${attachments.text}\n\nThe attached file${copies.length === 1 ? ' is' : 's are'} saved in this project and can be opened with your own file tools:\n${copies.map((file) => `- ${file}`).join('\n')}`;
-        }
         for (const item of staged) state.attachments.delete(item.id);
         panel.webview.postMessage({ type: 'attachments-cleared' });
+      }
+      // Attachments that came with messages queued for a run that ended before taking them come with this turn, the one those messages became.
+      if (message.type === 'send' && tab.carried?.length) {
+        attachments = mergePrepared([...tab.carried, ...(attachments ? [attachments] : [])]);
+        tab.carried = undefined;
       }
       state.memory = state.memory ?? new ContextGraphMemory(root, { trustedActorIds: [AGENT_MEMORY_ACTOR] });
       const delegable = modelsAsPrivateAs(active.models, modelInfo);
@@ -851,25 +858,52 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
   };
   // A message typed while a turn is in progress steers it: the running agent sees it before its
   // next model request. Once nothing is running it is an ordinary new message.
+  const idle = (tab: ChatTab) => !tab.turns && !tab.agent?.running;
   const steer = async (message: Extract<ChatWebviewMessage, { type: 'steer' }>, tab: ChatTab): Promise<void> => {
-    if (!tab.turns && !tab.agent?.running) {
+    const ids = message.attachmentIds ?? [];
+    if (idle(tab)) {
       tab.post({ type: 'steer-state', id: message.id, state: 'sent-new' });
-      await receive({ type: 'send', text: message.text, conversationId: tab.id, ...(tab.model ? { model: tab.model } : {}) });
+      // 0.4.21: its attachments go with it, as with any message.
+      await receive({ type: 'send', text: message.text, conversationId: tab.id, ...(tab.model ? { model: tab.model } : {}), ...(ids.length ? { attachmentIds: ids } : {}) });
       return;
     }
     const root = workspaceRoot();
     if (!root) return;
-    // It goes to the provider like any message, so it passes the same outbound check.
-    let reason: string | undefined;
-    if (isEmergencyStopped()) reason = 'Emergency stop is on. Run "NEAR AI: Resume" to continue.';
-    else {
-      const guard = state.guard ?? new OutboundGuard(readSettings());
-      const verdict = guard.check({ model: tab.model ?? '', modelInfo: tab.modelInfo, text: message.text }, state.spend?.spentTodayUsd().usd ?? 0);
-      if (verdict.outcome !== 'allow') reason = `${verdict.reason} It was not sent to the running agent; send it after the run to choose what to do.`;
+    const staged = ids.map((id) => state.attachments.get(id)).filter((item): item is StagedAttachment => Boolean(item));
+    // It goes to the provider like any message, so it passes the same outbound check, with what is attached to it.
+    const blocked = (reason: string) => tab.post({ type: 'steer-state', id: message.id, state: 'blocked', reason, text: message.text });
+    if (isEmergencyStopped()) { blocked('Emergency stop is on. Run "NEAR AI: Resume" to continue.'); return; }
+    const guard = state.guard ?? new OutboundGuard(readSettings());
+    const attachedText = attachedTextOf(staged);
+    const verdict = guard.check({ model: tab.model ?? '', modelInfo: tab.modelInfo, text: attachedText ? `${message.text}\n${attachedText}` : message.text }, state.spend?.spentTodayUsd().usd ?? 0);
+    if (verdict.outcome !== 'allow') { blocked(`${verdict.reason} It was not sent to the running agent; send it after the run to choose what to do.`); return; }
+    let attachments: PreparedAttachments | undefined;
+    if (staged.length) {
+      // 0.4.21: the files are read now (images described, audio transcribed) and go to the running agent in the same message as these words.
+      try {
+        const active = await activeProvider(root, auth);
+        if (!active) { blocked('No NEAR AI profile is set up, so the attachments could not be read.'); return; }
+        const model = tab.model ?? '';
+        const teeBlock = attachmentTeeBlock(staged, tab.modelInfo, active.models);
+        if (teeBlock) { blocked(`${teeBlock} It was not sent to the running agent.`); return; }
+        const runId = tab.agent?.currentRunId ?? AgentConversation.newRunId();
+        attachments = await readAttachments(staged, { client: clientFor(active, model).client, model, models: active.models, question: message.text, runId, conversationId: tab.agent?.id ?? tab.id, root });
+      } catch (error) {
+        blocked(`The attachments could not be read: ${providerErrorMessage(error)} It was not sent to the running agent.`);
+        return;
+      }
+      for (const item of staged) state.attachments.delete(item.id);
+      panel.webview.postMessage({ type: 'attachments-cleared' });
     }
-    if (reason) { tab.post({ type: 'steer-state', id: message.id, state: 'blocked', reason, text: message.text }); return; }
+    // The run may have ended while the files were read: then the message, with them, is the next turn.
+    if (idle(tab)) {
+      tab.post({ type: 'steer-state', id: message.id, state: 'sent-new' });
+      if (attachments) tab.carried = [attachments];
+      await receive({ type: 'send', text: message.text, conversationId: tab.id, ...(tab.model ? { model: tab.model } : {}) });
+      return;
+    }
     tab.steerTexts.set(message.id, message.text);
-    ensureAgent(tab, root).steer(message.id, message.text, { interrupt: message.interrupt === true });
+    ensureAgent(tab, root).steer(message.id, message.text, { interrupt: message.interrupt === true, ...(attachments ? { attachments, staged } : {}) });
   };
   const receive = async (value: unknown): Promise<void> => {
     await ready;
@@ -892,6 +926,9 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     const left = tab.agent?.takeUndelivered() ?? [];
     if (!left.length) return;
     for (const item of left) tab.post({ type: 'steer-state', id: item.id, state: 'sent-new' });
+    // Their attachments, already read, come with that turn.
+    const carried = left.flatMap((item) => item.attachments ? [item.attachments] : []);
+    if (carried.length) tab.carried = [...(tab.carried ?? []), ...carried];
     await receive({ type: 'send', text: left.map((item) => item.text).join('\n\n'), conversationId: tab.id, ...(tab.model ? { model: tab.model } : {}) });
   };
   panel.webview.onDidReceiveMessage(receive, undefined, context.subscriptions);
@@ -934,6 +971,43 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
 }
 
 /** Whether the empty chat's "no team yet" card shows: a working profile, no project team, and no "Not now" here. */
+/** The text of text files and documents, which is what the outbound check reads, as it is what is sent. */
+function attachedTextOf(staged: StagedAttachment[]): string {
+  return staged.map((item) => item.kind === 'text' ? item.bytes.toString('utf8') : item.kind === 'document' ? item.text ?? '' : '').filter(Boolean).join('\n');
+}
+
+/** Under TEE-only, why these attachments may not be read: a model that would read them (vision or transcription) runs outside NEAR's TEE. */
+function attachmentTeeBlock(staged: StagedAttachment[], modelInfo: ModelInfo | undefined, models: ModelInfo[]): string | undefined {
+  if (readSettings().privacyMode !== 'tee-only') return undefined;
+  const agentModels = readAgentModels();
+  const needs = [...(staged.some((item) => item.kind === 'image') && !(modelInfo?.inputModalities ?? []).includes('image') ? [agentModels.visionModel] : []), ...(staged.some((item) => item.kind === 'audio') ? [agentModels.transcriptionModel] : [])];
+  const forwarded = needs.find((id) => models.find((candidate) => candidate.id === id)?.privacyBoundary !== 'tee');
+  return forwarded ? `TEE-only mode is on, and ${forwarded}, which would read your attachment, does not run in NEAR's TEE.` : undefined;
+}
+
+/**
+ * Reads attachments for the message they came with (vision and transcription billed to its run) and names where each is saved in the project, so the
+ * agent opens it with its own file tools instead of hunting for it on disk (0.4.18). The copy is made when the file is attached (0.4.21); one that
+ * failed then is tried again here.
+ */
+async function readAttachments(staged: StagedAttachment[], options: { client: NearAiClient; model: string; models: ModelInfo[]; question: string; runId: string; conversationId: string; root: string }): Promise<PreparedAttachments> {
+  const agentModels = readAgentModels();
+  const prepared = await withSpendTag({ kind: 'attachment', runId: options.runId, conversationId: options.conversationId }, () => prepareAttachments(staged, { client: options.client, model: options.model, models: options.models, visionModel: agentModels.visionModel, transcriptionModel: agentModels.transcriptionModel, question: options.question }));
+  const copies: string[] = [];
+  for (const item of staged) {
+    const saved = item.savedAs ?? await copyAttachmentIntoProject(item, options.root).catch(() => undefined);
+    if (saved !== undefined) copies.push(saved);
+  }
+  // A plain sentence, not fenced: this is the agent's own note about where the files are, not outside content.
+  if (copies.length > 0) prepared.text = `${prepared.text}\n\nThe attached file${copies.length === 1 ? ' is' : 's are'} saved in this project and can be opened with your own file tools:\n${copies.map((file) => `- ${file}`).join('\n')}`;
+  return prepared;
+}
+
+/** Several messages' read attachments as one, in order. */
+function mergePrepared(all: PreparedAttachments[]): PreparedAttachments {
+  return { text: all.map((item) => item.text).filter(Boolean).join('\n\n'), usage: all.flatMap((item) => item.usage), notes: all.flatMap((item) => item.notes), security: all.flatMap((item) => item.security) };
+}
+
 async function setupNudgeShows(context: vscode.ExtensionContext, auth: AuthService): Promise<boolean> {
   const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   if (!root) return false;
