@@ -279,7 +279,9 @@
   function settleSentNewFiles(m) {
     if (!sentNewFiles.length) return;
     if (m.type === 'attachments-cleared') {
-      const cleared = new Set(Array.isArray(m.ids) ? m.ids : sentNewFiles.flatMap((entry) => entry.ids));
+      // Only the files it names (#46 review): a clear that names none takes nothing, so a later refusal still removes those file lines.
+      if (!Array.isArray(m.ids)) return;
+      const cleared = new Set(m.ids);
       for (const entry of sentNewFiles) if (entry.ids.every((id) => cleared.has(id))) entry.taken = true;
       return;
     }

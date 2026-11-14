@@ -1068,8 +1068,9 @@ function attachmentTeeBlock(staged: StagedAttachment[], modelInfo: ModelInfo | u
  */
 async function readAttachments(staged: StagedAttachment[], options: { client: NearAiClient; model: string; models: ModelInfo[]; question: string; runId: string | undefined; conversationId: string; root: string }): Promise<PreparedAttachments> {
   const agentModels = readAgentModels();
-  // Read by the same models as before, a file is not read (or paid for) again: a message handed back by Stop and sent again reuses what was read.
-  const key = JSON.stringify([options.model, agentModels.visionModel, agentModels.transcriptionModel]);
+  // Read by the same models for the same words as before, a file is not read (or paid for) again: a message handed back by Stop and sent again reuses what was read.
+  // The question is part of it (#46 review): what a file is read for, and its outbound assessment, depend on the words it is sent with.
+  const key = JSON.stringify([options.model, agentModels.visionModel, agentModels.transcriptionModel, options.question]);
   const parts: PreparedAttachments[] = [];
   for (const item of staged) {
     const known = preparedReads.get(item);

@@ -205,7 +205,13 @@ export async function projectTeamAllowed(team: TeamDefinition, options: { truste
   // Before 0.4.22 one answer was kept for the whole workspace, as { fingerprint, use }; it still counts for a team with that fingerprint.
   const legacy = isConsent(stored) ? stored : undefined;
   const byFile: Record<string, TeamConsent> = stored && typeof stored === 'object' && !legacy ? Object.fromEntries(Object.entries(stored as Record<string, unknown>).filter((entry): entry is [string, TeamConsent] => isConsent(entry[1]))) : {};
-  const saved = byFile[team.file] ?? options.fallback.get(team.file) ?? legacy;
+  // The old single answer is bound to the first team file it is used for (#46 review): it is moved under that file and no longer applies to any other
+  // folder's team, even one with the same name and members.
+  if (legacy && legacy.fingerprint === fingerprint && byFile[team.file] === undefined) {
+    await options.store?.update(PROJECT_TEAM_CONSENT_KEY, { [team.file]: legacy });
+    return legacy.use;
+  }
+  const saved = byFile[team.file] ?? options.fallback.get(team.file);
   if (saved?.fingerprint === fingerprint) return saved.use;
   const answer = await options.ask(projectTeamQuestion(team));
   if (answer === undefined) return false;

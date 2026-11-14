@@ -353,6 +353,12 @@ test('an answer saved before answers were kept per file still counts', async () 
   const fingerprint = (first.values.get(PROJECT_TEAM_CONSENT_KEY) as Record<string, TeamConsent>)[team.file].fingerprint;
   const legacy = memento({ [PROJECT_TEAM_CONSENT_KEY]: { fingerprint, use: true } });
   assert.equal(await projectTeamAllowed(team, { trusted: true, store: legacy, fallback: new Map(), ask: async () => { throw new Error('must not ask'); } }), true);
+  // #46 review: the old answer is bound to the file it was first used for, so another folder's identical team is still asked about.
+  let asked = 0;
+  const other = projectTeam('/w/b/.planning/.near-ai/team.md');
+  assert.equal(await projectTeamAllowed(other, { trusted: true, store: legacy, fallback: new Map(), ask: async () => { asked += 1; return false; } }), false);
+  assert.equal(asked, 1, 'a second folder with the same team is asked');
+  assert.equal(await projectTeamAllowed(team, { trusted: true, store: legacy, fallback: new Map(), ask: async () => { throw new Error('must not ask again'); } }), true, 'the first folder keeps its answer');
 });
 
 test('the answers kept without workspace state are bounded', async () => {
@@ -399,7 +405,7 @@ test('agent names and descriptions are made plain and capped in the Agent tool\'
   }
 });
 
-test('a run\'s own agents cannot be replaced by a team member of the same name, and without a team Open-GSD\'s agents come first as before', async () => {
+test('a run\'s own agents cannot be replaced by a team member of the same name, nor, without a team, by an Open-GSD agent', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'near-ai-team-'));
   const gsd = await gsdHome();
   try {
@@ -410,8 +416,10 @@ test('a run\'s own agents cannot be replaced by a team member of the same name, 
       const withTeam = spawnable({ gsd, memberTeam: studioTeam(root), projectAgents: [redTeam] });
       assert.equal(withTeam.find((agent) => agent.name === 'designer')?.body, 'You are red-team from the run.', 'the run\'s agent wins over the team file');
       assert.equal(withTeam.find((agent) => agent.name === 'researcher')?.body, 'You are researcher, the researcher, on the "Studio" team.\n\nResearch the topic and cite sources.', 'a member still wins over Open-GSD');
-      const noTeam = spawnable({ gsd, projectAgents: [{ ...redTeam, name: 'red-team' }] });
-      assert.deepEqual(noTeam.map((agent) => agent.name), ['gsd-executor', 'researcher', 'red-team'], 'Open-GSD\'s agents, then the run\'s, as before 0.4.21');
+      // #46 review: without a team the run's own agents still come first, so an Open-GSD agent of the same name cannot replace a red-team stage agent.
+      const noTeam = spawnable({ gsd, projectAgents: [{ ...redTeam, name: 'researcher', body: 'You are the run\'s researcher.' }] });
+      assert.equal(noTeam.find((agent) => agent.name === 'researcher')?.body, 'You are the run\'s researcher.', 'the run\'s agent wins over Open-GSD');
+      assert.deepEqual(noTeam.map((agent) => agent.name), ['researcher', 'gsd-executor'], 'the run\'s agents, then Open-GSD\'s');
     } finally { conversation.dispose(); }
   } finally {
     await rm(root, { recursive: true, force: true });

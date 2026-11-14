@@ -744,13 +744,11 @@ export class AgentConversation {
 
   /** The agent definitions a run can start; without any, the run has no Agent tool. */
   private spawnableAgents(request: AgentTurnRequest): GsdAgent[] {
-    // One definition per name, the first one wins. With a team: agents a workflow step adds for this run (the red-team stage) first, so a team file in
-    // the repository cannot replace them by reusing a name, then the team's members, which win over Open-GSD's agents of the same name, then Open-GSD's.
-    // Without a team, the order is the one before 0.4.21: Open-GSD's agents, then the run's own.
+    // One definition per name, the first one wins. The agents a workflow step adds for this run (the red-team stage) come first, with or without a team
+    // (#46 review), so neither a team file in the repository nor an Open-GSD agent of the same name can replace them; then the team's members, which win
+    // over Open-GSD's agents of the same name; then Open-GSD's.
     const members = this.teamMembersOf(request);
-    const projectAgents = request.projectAgents ?? [];
-    const gsdAgents = request.gsd?.agents ?? [];
-    const all = members.length ? [...projectAgents, ...members, ...gsdAgents] : [...gsdAgents, ...projectAgents];
+    const all = [...(request.projectAgents ?? []), ...members, ...(request.gsd?.agents ?? [])];
     return all.filter((agent, index) => all.findIndex((other) => other.name === agent.name) === index);
   }
 
