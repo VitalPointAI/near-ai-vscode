@@ -250,6 +250,8 @@ export class AgentConversation {
   private readonly waiting = new Map<string, Record<string, unknown>>();
   /** Told how many prompts are waiting whenever that changes, so the host can badge the view. */
   public onWaitingChange: ((count: number) => void) | undefined;
+  /** Told each time a running run's state was saved (before a model turn, after a finished call): a quiet point at which project sync may run. */
+  public onRunStateSaved: (() => void) | undefined;
   /** Records each run's start, steps, and end, so a run the extension host never finished can be reported and resumed. */
   public runMarkers: RunMarkers | undefined;
   private readonly runs = new Map<string, RunCheckpoints>();
@@ -1210,7 +1212,9 @@ export class AgentConversation {
    * extension host dies mid-run (code-server closed it, a reload, a crash), Resume continues from here.
    */
   private async saveRunState(model: string, runId: string, messages: AgentMessage[]): Promise<void> {
-    if (await this.saveTranscript(model, messages, true)) await this.runMarkers?.saved(this.conversationId, runId);
+    if (!(await this.saveTranscript(model, messages, true))) return;
+    await this.runMarkers?.saved(this.conversationId, runId);
+    try { this.onRunStateSaved?.(); } catch { /* a listener never breaks a run */ }
   }
 
   private tally(usage: UsageMetadata): void {

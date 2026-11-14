@@ -287,7 +287,10 @@ export interface SyncParts {
   git?: GitRunner;
   /** The editor's own folder for sync mirrors (outside every project). Without one, a private temporary folder made once per process is used. */
   mirrorRoot?: string;
+  /** Whether no run is in flight in this editor: the turn-on and join flows' syncs wait while it is false. The scheduler's syncs are built without it. */
   isIdle?: () => boolean;
+  /** The conversations whose run is in flight in this editor: a sync never rewrites them (StateSyncOptions.liveConversations). */
+  liveConversations?: () => Iterable<string>;
   runState?: (marker: RunMarker) => RunState;
   profiles?: { profileSource: ProfileSource; secretSource: SecretSource; applyProfiles: (records: StateRecord[]) => Promise<void> };
   extra?: Partial<StateSyncOptions>;
@@ -312,7 +315,7 @@ export function buildStateSync(parts: SyncParts, input: { remote: string; git?: 
   const transport = new StateTransport({ root: parts.root, remote: input.remote, mirrorDir: mirror.mirrorDir, hooksDir: mirror.hooksDir, git: input.git ?? parts.git ?? runStateGit });
   return new StateSync({
     root: parts.root, home: parts.home, keys: parts.keys, threads: parts.threads, transport, remote: input.remote, writer: parts.writer,
-    ...(parts.isIdle ? { isIdle: parts.isIdle } : {}), ...(parts.runState ? { runState: parts.runState } : {}),
+    ...(parts.isIdle ? { isIdle: parts.isIdle } : {}), ...(parts.liveConversations ? { liveConversations: parts.liveConversations } : {}), ...(parts.runState ? { runState: parts.runState } : {}),
     ...(parts.profiles ?? {}), ...(input.mirror ? { registerColdFetcher: false } : {}), ...(parts.extra ?? {})
   });
 }
@@ -633,6 +636,19 @@ export const DEACTIVATE_PUSH_MS = 3_000;
 export const COALESCE_MS = 5_000;
 /** A full sync runs this long after the window loses focus, when nothing is running. */
 export const BLUR_IDLE_MS = 60_000;
+
+/** How long a quiet point of a run counts for a sync held back by the push spacing (D-09) or a short wait. */
+const QUIET_HOLD_MS = PUSH_BATCH_MS + COALESCE_MS;
+
+/**
+ * While a run is in flight, a full sync runs at the run's next quiet point (it waits on the person, or its state was just saved between model turns) once
+ * no full sync has finished for this long: the background interval when it is on, else the default interval (owner, 2026-11-14). A long run no longer
+ * holds sync back until it ends.
+ */
+export function staleAfterMs(intervalSetting: unknown): number {
+  const minutes = clampSyncInterval(intervalSetting);
+  return (minutes > 0 ? minutes : SYNC_INTERVAL_DEFAULT) * 60_000;
+}
 const BACKOFF_FIRST_MS = 60_000;
 const BACKOFF_MAX_MS = 30 * 60_000;
 const WAIT_RETRY_MS = 30_000;
@@ -644,7 +660,7 @@ export function clampSyncInterval(value: unknown): number {
 }
 
 export type SyncState = 'off' | 'syncing' | 'synced' | 'attention' | 'no-home';
-export type SyncReason = 'run-ended' | 'blur-idle' | 'manual' | 'interval' | 'open' | 'return' | 'retry' | 'close';
+export type SyncReason = 'run-ended' | 'blur-idle' | 'manual' | 'interval' | 'open' | 'return' | 'retry' | 'close' | 'quiet';
 
 /** What the chat panel's sync control shows (D-16): one state and, where it helps, a time and one plain sentence. */
 export interface SyncStatus {
@@ -668,9 +684,14 @@ const realClock: SyncClock = { now: () => Date.now(), setTimeout: (work, ms) => 
 export interface SyncRequest { mode: 'sync' | 'pull'; /** True only for a person's click: only then may a sign-in be asked for. */ interactive: boolean; reason: SyncReason }
 
 export interface SchedulerOptions {
-  /** Runs one sync. Never called while a run is in flight. */
+  /**
+   * Runs one sync. While a run is in flight it is called only at a quiet point of the run once sync is stale (staleAfterMs), or for a person's click; the
+   * sync itself keeps the running conversations out (StateSyncOptions.liveConversations and the run markers).
+   */
   runSync: (request: SyncRequest) => Promise<SyncOutcome>;
   runsInFlight: () => number;
+  /** How many runs in flight are waiting on the person (an approval or a question is open): for as long as one is, the run is at a quiet point. */
+  runsWaiting?: () => number;
   /** The nearAi.sync.intervalMinutes setting as it is now (clamped here). */
   intervalMinutes: () => unknown;
   clock?: SyncClock;
@@ -679,7 +700,6 @@ export interface SchedulerOptions {
 interface Job { full: boolean; interactive: boolean; reasons: SyncReason[] }
 
 const NEEDS_SIGN_IN = 'Sync needs you to sign in. Choose Sync Project Now.';
-const RUN_WAITING = 'A chat is running, so sync will run when it ends.';
 const STOPPED = 'Sync stopped unexpectedly and will try again.';
 
 /**
@@ -701,7 +721,8 @@ function plain(text: string): string {
 /**
  * Decides when a sync runs, and publishes what it came to (D-17, D-16). Full syncs (pull, merge, push) follow a run or chat reply that ends, the window
  * being out of focus for a minute, a click on Sync Project Now, and the background interval; pulls follow opening the project and coming back after five
- * minutes. It never starts while a run is in flight in this editor (what was asked is kept and runs when the run ends), joins requests that arrive close
+ * minutes. While a run is in flight in this editor an automatic sync waits for the run's next quiet point once no full sync has finished for the stale
+ * time (staleAfterMs), or for the run to end, whichever comes first; a click runs at once (owner, 2026-11-14). It joins requests that arrive close
  * together, backs off when the host cannot be reached (1, 2, 4 ... 30 minutes, reset by a success) and keeps automatic pushes at least two minutes apart. Only a
  * person's click may ask for a sign-in. No vscode: the clock, the runs and the sync itself are injected.
  */
@@ -723,6 +744,11 @@ export class SyncScheduler {
   private notBefore = 0;
   /** The status from before the sync that is running, to go back to when it only had to wait. */
   private before: SyncStatus = { state: 'off' };
+  /** When the last full sync finished well (clock ms); undefined until one has in this editor session. */
+  private lastFullAt: number | undefined;
+  /** When a run in flight last reached a quiet point that no sync has used yet (clock ms). It counts for QUIET_HOLD_MS: the push spacing may hold a sync that long. */
+  private quietAt: number | undefined;
+  private staleTimer: unknown;
 
   public constructor(private readonly options: SchedulerOptions) {
     this.clock = options.clock ?? realClock;
@@ -788,7 +814,19 @@ export class SyncScheduler {
 
   /** A run or chat reply ended in this editor: a full sync follows. */
   public runEnded(): void {
+    this.quietAt = undefined;
     this.request('run-ended', true);
+  }
+
+  /**
+   * A run in flight reached a quiet point (it waits on the person, or its state was just saved between model turns). Once sync is stale a full sync runs
+   * now, within the push spacing and the backoff; before that, it runs when sync becomes stale if the run is still waiting on the person then, or at the
+   * next quiet point after.
+   */
+  public quietPoint(): void {
+    if (!this.on || this.options.runsInFlight() === 0) return;
+    this.quietAt = this.clock.now();
+    this.request('quiet', true);
   }
 
   /** The window lost or regained focus. A minute out of focus with nothing running starts a full sync; five minutes away starts a pull on return. */
@@ -812,14 +850,11 @@ export class SyncScheduler {
   /** Sync Project Now: a person's click. It may ask for a sign-in and is not held back by the batching or the backoff. */
   public async syncNow(): Promise<SyncOutcome | undefined> {
     if (!this.on) return undefined;
-    if (this.options.runsInFlight() > 0) {
-      // Kept for when the run ends. It then runs without asking for a sign-in: the click was minutes ago.
-      this.merge({ full: true, interactive: false, reasons: ['manual'] });
-      return { kind: 'waiting', message: RUN_WAITING };
-    }
     this.clearTimer();
     this.merge({ full: true, interactive: true, reasons: ['manual'] });
-    return this.drain();
+    // A click runs now, during a run too: the running conversations are kept out of it (owner, 2026-11-14). One already going finishes first.
+    while (this.running !== undefined) await this.running;
+    return this.drain(true);
   }
 
   /** Records the result of a sync that was run outside the scheduler (the turn-on flow's first sync), so the status and the backoff follow it. */
@@ -867,8 +902,32 @@ export class SyncScheduler {
   }
 
   private clearAll(): void {
-    for (const handle of [this.timer, this.intervalTimer, this.blurTimer, this.retryTimer]) this.clock.clearTimeout(handle);
-    this.timer = this.intervalTimer = this.blurTimer = this.retryTimer = undefined;
+    for (const handle of [this.timer, this.intervalTimer, this.blurTimer, this.retryTimer, this.staleTimer]) this.clock.clearTimeout(handle);
+    this.timer = this.intervalTimer = this.blurTimer = this.retryTimer = this.staleTimer = undefined;
+  }
+
+  /** When sync becomes stale: the stale time after the last full sync that finished well (now, when none has). */
+  private staleAt(): number {
+    return this.lastFullAt === undefined ? this.clock.now() : this.lastFullAt + staleAfterMs(this.options.intervalMinutes());
+  }
+
+  /** Whether an automatic sync may start now: nothing is in flight, or a run is but it is at a quiet point and sync is stale. */
+  private mayRun(): boolean {
+    if (this.options.runsInFlight() === 0) return true;
+    if (this.clock.now() < this.staleAt()) return false;
+    const quiet = this.quietAt !== undefined && this.clock.now() - this.quietAt <= QUIET_HOLD_MS;
+    return quiet || (this.options.runsWaiting?.() ?? 0) > 0;
+  }
+
+  /** While a run is in flight and sync is not stale yet, looks again when it becomes stale (a run waiting on the person makes no new quiet point). */
+  private watchStale(): void {
+    if (this.staleTimer !== undefined || this.pending === undefined || this.options.runsInFlight() === 0) return;
+    const wait = this.staleAt() - this.clock.now();
+    if (wait <= 0) return;
+    this.staleTimer = this.clock.setTimeout(() => {
+      this.staleTimer = undefined;
+      if (this.pending) this.request('quiet', this.pending.full);
+    }, wait);
   }
 
   private merge(job: Job): void {
@@ -878,11 +937,14 @@ export class SyncScheduler {
       : { ...job, reasons: [...job.reasons] };
   }
 
-  /** Asks for a sync. While a run is in flight the request is kept and nothing is planned; the run ending asks again. */
+  /**
+   * Asks for a sync. While a run is in flight and it may not run yet (mayRun) the request is kept: a quiet point once sync is stale, the stale time while
+   * the run waits on the person, or the run ending asks again.
+   */
   private request(reason: SyncReason, full: boolean, options: { immediate?: boolean } = {}): void {
     if (!this.on) return;
     this.merge({ full, interactive: false, reasons: [reason] });
-    if (this.options.runsInFlight() > 0) return;
+    if (!this.mayRun()) { this.watchStale(); return; }
     const now = this.clock.now();
     let due = now + (options.immediate ? 0 : COALESCE_MS);
     // Automatic pushes are spaced out; a pull is not a push.
@@ -903,24 +965,28 @@ export class SyncScheduler {
     if (!this.on || minutes === 0) return;
     this.intervalTimer = this.clock.setTimeout(() => {
       this.intervalTimer = undefined;
-      // Only while idle: a run in flight skips this one.
-      if (this.options.runsInFlight() === 0 && this.running === undefined) this.request('interval', true);
+      // During a run it is kept for the run's next quiet point once sync is stale (or for the run's end).
+      if (this.running === undefined) this.request('interval', true);
       this.scheduleInterval();
     }, minutes * 60_000);
   }
 
-  /** Runs what is pending, one sync at a time. */
-  private async drain(): Promise<SyncOutcome | undefined> {
+  /** Runs what is pending, one sync at a time. `clicked`: a person's click, which runs during a run too. */
+  private async drain(clicked = false): Promise<SyncOutcome | undefined> {
     if (!this.on) return undefined;
     if (this.running !== undefined) {
       // One is already going: what was asked waits for it, then goes next.
       await this.running;
-      if (this.pending && this.options.runsInFlight() === 0) this.request('retry', this.pending.full, { immediate: true });
+      if (this.pending) this.request('retry', this.pending.full, { immediate: true });
       return undefined;
     }
-    if (this.options.runsInFlight() > 0 || this.pending === undefined) return undefined;
+    if (this.pending === undefined || (!clicked && !this.mayRun())) return undefined;
     const job = this.pending;
     this.pending = undefined;
+    // This sync uses the quiet point; the next sync during the run waits for another one.
+    this.quietAt = undefined;
+    this.clock.clearTimeout(this.staleTimer);
+    this.staleTimer = undefined;
     let outcome: SyncOutcome | undefined;
     this.running = (async () => {
       const startedAt = this.clock.now();
@@ -945,6 +1011,7 @@ export class SyncScheduler {
       this.backoffMs = 0;
       this.notBefore = 0;
       if (outcome.pushed) this.lastPushAt = startedAt;
+      if (job.full) this.lastFullAt = now;
       this.publish({ state: 'synced', at: new Date(now).toISOString(), message: outcome.message });
       return;
     }

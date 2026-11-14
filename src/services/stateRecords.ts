@@ -53,6 +53,11 @@ export interface LocalSnapshot {
   threads: Record<string, LocalThread>;
   /** The run ids of runs that are running right now (here or elsewhere): their checkpoints and markers are not sent, and a remote copy never replaces them. */
   liveRuns: Set<string>;
+  /**
+   * The conversations whose run is running right now (here, by this editor's own count or a marker, or elsewhere by a marker). While one runs its context
+   * is not sent and a remote copy of its context or meta is not applied (owner, 2026-11-14): only its log entries move, added by id.
+   */
+  liveThreads: Set<string>;
   /** Every record of every synced kind, including each thread's meta and context. */
   records: StateRecord[];
 }
@@ -89,6 +94,8 @@ export interface CollectOptions {
   runState?: (marker: RunMarker) => RunState;
   /** What the remote is known to hold, so a changed record is written as an edit of it. */
   heads?: HeadMap;
+  /** The conversations whose run is in flight in this editor (runEndHooks), live whatever their marker says. */
+  liveConversations?: Iterable<string>;
 }
 
 /** A writer that passes the record rules (lowercase letters, digits and hyphens, 4 to 80 characters). */
@@ -170,7 +177,7 @@ function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-async function collectThreads(threads: ThreadStore, build: Builder, writer: string): Promise<{ threads: Record<string, LocalThread>; records: StateRecord[] }> {
+async function collectThreads(threads: ThreadStore, build: Builder, writer: string, live: ReadonlySet<string>): Promise<{ threads: Record<string, LocalThread>; records: StateRecord[] }> {
   const found: Record<string, LocalThread> = {};
   const records: StateRecord[] = [];
   for (const item of await threads.index()) {
@@ -202,8 +209,9 @@ async function collectThreads(threads: ThreadStore, build: Builder, writer: stri
     found[item.id] = { entries, meta: portable, ...(context ? { context } : {}), ...(cold ? { archived: true as const, cold } : {}) };
     const metaRecord = build('thread-meta', item.id, portable, isoOf(portable.lastUsedAt, EPOCH), writer);
     if (metaRecord) records.push(metaRecord);
-    // An archived thread's working context lives in its archive; only a live thread's context travels as a record.
-    if (context && !cold) {
+    // An archived thread's working context lives in its archive; only a live thread's context travels as a record, and not while its run is running: the
+    // run rewrites it before every model turn, so it goes up once the run ends (its log entries go up as they are saved).
+    if (context && !cold && !live.has(item.id)) {
       const contextRecord = build('thread-context', item.id, JSON.parse(JSON.stringify(context)), isoOf(context.updatedAt, isoOf(portable.lastUsedAt, EPOCH)), writer);
       if (contextRecord) records.push(contextRecord);
     }
@@ -212,9 +220,10 @@ async function collectThreads(threads: ThreadStore, build: Builder, writer: stri
 }
 
 /** Finished and cut-off markers become records; a run that is running here or elsewhere is never sent, and its run id is reported as live. */
-async function collectMarkers(home: ProjectStateHome, build: Builder, writer: string, runState: CollectOptions['runState']): Promise<{ records: StateRecord[]; live: Set<string> }> {
+async function collectMarkers(home: ProjectStateHome, build: Builder, writer: string, runState: CollectOptions['runState']): Promise<{ records: StateRecord[]; live: Set<string>; liveThreads: Set<string> }> {
   const records: StateRecord[] = [];
   const live = new Set<string>();
+  const liveThreads = new Set<string>();
   for (const name of await readdir(home.paths.runs).catch(() => [] as string[])) {
     if (!name.endsWith('.json')) continue;
     const id = name.slice(0, -5);
@@ -223,11 +232,11 @@ async function collectMarkers(home: ProjectStateHome, build: Builder, writer: st
     try { marker = parseRunMarker(JSON.parse(await readFile(path.join(home.paths.runs, name), 'utf8')), id); } catch { continue; }
     if (!marker) continue;
     const state = runState ? runState(marker) : marker.endedAt ? 'finished' : 'running-here';
-    if (state === 'running-here' || state === 'running-elsewhere') { live.add(marker.runId); continue; }
+    if (state === 'running-here' || state === 'running-elsewhere') { live.add(marker.runId); liveThreads.add(id); continue; }
     const record = build('marker', id, JSON.parse(JSON.stringify(marker)), isoOf(marker.endedAt ?? marker.activeAt, EPOCH), recordWriter(marker.writer, writer));
     if (record) records.push(record);
   }
-  return { records, live };
+  return { records, live, liveThreads };
 }
 
 /** A snapshot's relative path, or undefined when it is empty, absolute, drive-lettered, contains a NUL, or climbs out with '..'. */
@@ -357,15 +366,16 @@ async function collectSource(kind: 'profile' | 'secret', source: ProfileSource |
 export async function collectLocal(home: ProjectStateHome, threads: ThreadStore, options: CollectOptions): Promise<LocalSnapshot> {
   const writer = recordWriter(options.writer, 'this-editor');
   const build = builderFor(options.heads ?? new Map());
-  const collected = await collectThreads(threads, build, writer);
   const markers = await collectMarkers(home, build, writer, options.runState);
+  const liveThreads = new Set([...markers.liveThreads, ...[...(options.liveConversations ?? [])].filter((id) => THREAD_ID.test(id))]);
+  const collected = await collectThreads(threads, build, writer, liveThreads);
   const records = [
     ...collected.records, ...markers.records,
     ...await collectCheckpoints(home, build, writer, markers.live), ...await collectComparisons(home, build, writer), ...collectChoices(home, build, writer),
     ...await collectSpend(home, build, writer), ...await collectPickup(home, build, writer),
     ...await collectSource('profile', options.profileSource, build, writer), ...await collectSource('secret', options.secretSource, build, writer)
   ];
-  return { threads: collected.threads, liveRuns: markers.live, records: records.filter((record) => isSyncedRecord(record)) };
+  return { threads: collected.threads, liveRuns: markers.live, liveThreads, records: records.filter((record) => isSyncedRecord(record)) };
 }
 
 /** One record's identity including its revision: what "the remote already holds this" is decided by. */
@@ -431,7 +441,8 @@ export interface ApplyOptions {
   runState?: (marker: RunMarker) => RunState;
 }
 
-export interface ApplyResult { threads: number; others: number }
+/** `deferred`: the meta and context records of conversations that are running, not applied; the caller keeps them and offers them again once the run ends. */
+export interface ApplyResult { threads: number; others: number; deferred: StateRecord[] }
 
 function groupById(records: readonly StateRecord[], kind: RecordKind): Map<string, StateRecord> {
   const found = new Map<string, StateRecord>();
@@ -540,12 +551,17 @@ async function applyPickup(home: ProjectStateHome, records: readonly StateRecord
  * Writes what a merge brought in. Thread entries are added by id (union, never removed) and each thread's meta and context are merged by the thread
  * store's own rules; every other kind goes through its own store or an atomic file write, after its id passed the pattern for its kind. Idempotent:
  * running it again on the same input changes nothing. Profile and secret records are not handled here (the caller keeps them for plan 15).
+ *
+ * A conversation that is running (local.liveThreads) keeps its own context and meta: what arrived for them is returned as `deferred`, never written, so
+ * the run's next save cannot lose it and a Resume after a crash cannot continue from another computer's context. Its log entries are added by id; the
+ * run keeps chaining from its own last entry (owner, 2026-11-14).
  */
 export async function applyMerged(home: ProjectStateHome, threads: ThreadStore, merged: MergedInput, local: LocalSnapshot, options: ApplyOptions = {}): Promise<ApplyResult> {
   const metas = groupById(merged.records, 'thread-meta');
   const contexts = groupById(merged.records, 'thread-context');
   const ids = new Set<string>([...Object.keys(merged.entries), ...metas.keys(), ...contexts.keys(), ...Object.keys(merged.cold ?? {})]);
   let applied = 0;
+  const deferred: StateRecord[] = [];
   const archivedIds = new Set(await threads.archivedIds());
   for (const id of [...ids].sort()) {
     if (!THREAD_ID.test(id)) continue;
@@ -570,6 +586,15 @@ export async function applyMerged(home: ProjectStateHome, threads: ThreadStore, 
       if (missing.length || newest) applied += 1;
       continue;
     }
+    if (local.liveThreads.has(id)) {
+      for (const record of [metas.get(id), contexts.get(id)]) if (record) deferred.push(record);
+      if (!entries.length) continue;
+      const at = entries[0]?.at ?? EPOCH;
+      const { id: _live, ...own } = local.threads[id]?.meta ?? { id, title: 'Conversation', model: '', origin: 'panel' as const, createdAt: at, lastUsedAt: at };
+      const outcome = await threads.importThread(id, { entries, meta: own, keepMeta: true });
+      if (outcome !== 'unchanged') applied += 1;
+      continue;
+    }
     const first = entries[0]?.at ?? EPOCH;
     const last = entries[entries.length - 1]?.at ?? first;
     const meta = incomingMeta ?? known ?? { id, title: 'Conversation', model: '', origin: 'panel' as const, createdAt: first, lastUsedAt: last };
@@ -584,5 +609,5 @@ export async function applyMerged(home: ProjectStateHome, threads: ThreadStore, 
     + await applyChoices(home, merged.records)
     + await applySpend(home, merged.records)
     + await applyPickup(home, merged.records);
-  return { threads: applied, others };
+  return { threads: applied, others, deferred };
 }

@@ -24,7 +24,7 @@ import { readAgentLimits, readAgentModels, readAgentRules, readModelTiers, readR
 import { archiveProblemText } from '../domain/state/archiveProblem';
 import { threadStoreFor } from './threadStore';
 import { applyRetention, protectedThreadIds } from './threadArchive';
-import { onRunEnded, runEnded, runStarted } from './runEndHooks';
+import { onRunEnded, runEnded, runQuiet, runStarted, runWaiting } from './runEndHooks';
 import { handlePickupAction, markPickupSeen, pickupCardModel, writePickupPointer } from './pickupCard';
 import { currentSyncStatus, onSyncStatus, refreshSyncHome } from './syncCommands';
 import { redactSyncText, SYNC_PROMPT_DISMISSED_KEY, syncPanelMessage } from './syncPanel';
@@ -289,7 +289,9 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
       tab.agent = created.agent;
       tab.focusRegained = created.focusRegained;
       tab.agent.adopt(tab.id);
-      tab.agent.onWaitingChange = () => sendSummary();
+      // Waiting on the person, and the run's state just saved, are quiet points: project sync may run then, so a long run does not hold it back (owner, 2026-11-14).
+      tab.agent.onWaitingChange = (count) => { sendSummary(); runWaiting(root, tab.id, count > 0); };
+      tab.agent.onRunStateSaved = () => runQuiet(root);
       // A message Stop hands back to the composer gets its attachments back too, ready to send again.
       tab.agent.onReturned = (items) => {
         for (const attachment of items.flatMap((item) => item.staged ?? [])) { state.attachments.set(attachment.id, attachment); postStaged(attachment); }
@@ -893,7 +895,7 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
       if (stopped()) { await state.activity.append(session.sessionId, { status: 'cancelled', summary: 'Stopped before the run started.' }); return; }
       // Update Team waits for this to end before it offers to rewrite a team.
       const endRun = beginRun();
-      runStarted(root);
+      runStarted(root, tab.id);
       try {
         await agent.send({ modelStallMs, ...(backupModel ? { backupModel } : {}), text, skill, gsd, team, ...(memberTeam ? { memberTeam } : {}), attachments, memory: { store: state.memory, projectScope: { kind: 'project', id: projectIdForWorkspace(root) } }, imageModel: route.local ? undefined : imageModel, reputation: new ReputationStore(root), tiers: readModelTiers(), roleModels: readRoleModels(), safetyModel, safetyFallbackModel, riskSwitches: readRiskSwitches(), rememberAllowRule: (rule) => rememberAllowRule(rule, tab), unattendedAutoApprove: vscode.workspace.getConfiguration('nearAi').get<boolean>('agent.unattendedAutoApprove', AGENT_DEFAULTS.unattendedAutoApprove) !== false, researchProfile: vscode.workspace.getConfiguration('nearAi').get<boolean>('gsd.researchProfile', true) !== false, availableModels: delegable.map((candidate) => candidate.id), modelCatalog: delegable, route: privateRouteFor(active.provider, route.local), contextWindows: Object.fromEntries(active.models.map((candidate) => [candidate.id, candidate.contextLength])), maxParallelAgents: limits.maxParallelAgents, maxTurns: limits.maxTurns, client: route.client, model, privacy: modelPrivacyLabel(modelInfo), policy: settings.actionPolicy, rules: readAgentRules(), activity: { store: state.activity, sessionId: session.sessionId }, local: route.local, security: securityAccess(context, root), webSearch: await webSearchProvider(context.secrets), budget: runBudget, mcpTools: mcp.tools, maxOutputTokens: Math.max(1_000, Math.min(1_000_000, Number(vscode.workspace.getConfiguration('nearAi').get<number>('agent.maxOutputTokens', AGENT_DEFAULTS.maxOutputTokens)) || AGENT_DEFAULTS.maxOutputTokens)), shellEnvAllow: vscode.workspace.getConfiguration('nearAi').get<string[]>('agent.shellEnvAllow', []).filter((name) => typeof name === 'string'), runId, ...(redTeamStep ? { skillAddendum: redTeamStep.addendum, projectAgents: redTeamStep.agents } : {}) });
       } finally {

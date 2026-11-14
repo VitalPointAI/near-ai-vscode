@@ -91,8 +91,13 @@ export interface StateSyncOptions {
   remote?: string;
   /** This editor's writer id. */
   writer: string;
-  /** Whether no run is in flight in this editor. Sync waits while this is false. */
+  /** Whether no run is in flight in this editor. Sync waits while this is false (the turn-on and join flows; the scheduler's syncs run at a run's quiet points). */
   isIdle?: () => boolean;
+  /**
+   * The conversations whose run is in flight in this editor (runEndHooks.liveConversations). With the run markers they make the live conversations a sync
+   * never rewrites: their context and meta from another computer wait until the run ends, and their context is not sent while it runs (owner, 2026-11-14).
+   */
+  liveConversations?: () => Iterable<string>;
   profileSource?: ProfileSource;
   secretSource?: SecretSource;
   /** Where a run marker stands as this editor sees it (RunMarkers.runState). Only finished and cut-off runs sync; without it only finished ones do. */
@@ -516,18 +521,25 @@ export class StateSync {
       // Everything is read and verified before the first local write.
       const remote = tip ? await this.loadRemote(tip, dataKey, meta.stateId, state) : undefined;
       const local = await collectLocal(home, threads, this.collectOptions(state));
-      const incoming = remote?.records ?? [];
+      // What a sync kept back for a conversation that was running is offered again with what arrived now: once that run has ended it is merged as usual.
+      const held = await this.readDeferred(dataKey, meta.stateId);
+      const incoming = [...(remote?.records ?? []), ...held];
       const merged = mergeAll(local.records, incoming);
       const localKeys = new Set(local.records.map(recordKey));
       const toApply = merged.filter((record) => !localKeys.has(recordKey(record)));
-      await applyMerged(home, threads, { entries: remote?.entries ?? {}, records: toApply, cold: coldListed(remote) }, local, this.options.runState ? { runState: this.options.runState } : {});
+      const applied = await applyMerged(home, threads, { entries: remote?.entries ?? {}, records: toApply, cold: coldListed(remote) }, local, this.options.runState ? { runState: this.options.runState } : {});
+      await this.writeDeferred(applied.deferred, dataKey, meta.stateId);
+      const deferred = new Set(applied.deferred.map(recordKey));
       await this.handleProfiles(toApply, dataKey, meta.stateId);
 
-      if (remote) this.learnRemote(state, remote);
+      // A record kept back is not counted as held here (so this computer's own copy is never written as an edit of it); one kept back earlier and settled now is.
+      if (remote) this.learnRemote(state, remote, deferred);
+      const settledHeld = held.filter((record) => !deferred.has(recordKey(record)));
+      if (settledHeld.length) state.heads = foldHeads(state.heads, settledHeld);
       await this.writeState(state);
       if (mode === 'pull') return { kind: 'synced', message: MESSAGES.synced, pushed: false, attempts: tries };
 
-      const send = this.whatRemoteLacks(local, merged, remote, state);
+      const send = this.whatRemoteLacks(local, merged.filter((record) => !deferred.has(recordKey(record))), remote, state);
       const chosen = await this.chooseWrap(remote, state);
       const notes = [...(chosen.note ? [chosen.note] : []), ...(reset ? await this.unsendableNote(local, remote) : [])];
       if (remote && !send.hasNew && !chosen.mustPush) {
@@ -638,12 +650,36 @@ export class StateSync {
   }
 
   private collectOptions(state: SyncState) {
-    const { writer, profileSource, secretSource, runState } = this.options;
-    return { writer, heads: headMapOf(state.heads), ...(profileSource ? { profileSource } : {}), ...(secretSource ? { secretSource } : {}), ...(runState ? { runState } : {}) };
+    const { writer, profileSource, secretSource, runState, liveConversations } = this.options;
+    return {
+      writer, heads: headMapOf(state.heads), ...(profileSource ? { profileSource } : {}), ...(secretSource ? { secretSource } : {}), ...(runState ? { runState } : {}),
+      ...(liveConversations ? { liveConversations: [...liveConversations()] } : {})
+    };
+  }
+
+  private deferredPath(): string {
+    return path.join(this.options.home.paths.sync, 'deferred.enc');
+  }
+
+  /** The meta and context records a sync kept back for a conversation that was running, sealed under the data key (sync/deferred.enc). */
+  private async readDeferred(dataKey: Buffer, stateId: string): Promise<StateRecord[]> {
+    try {
+      const value = JSON.parse(openSealed(subKey(dataKey, 'transcripts'), JSON.parse(await readFile(this.deferredPath(), 'utf8')) as SealedBlob, aadFor(stateId, 'sync-deferred')).toString('utf8')) as unknown;
+      if (!Array.isArray(value)) return [];
+      return value.map((item) => parseRecord(item)).filter((record): record is StateRecord => record !== undefined && (record.kind === 'thread-meta' || record.kind === 'thread-context'));
+    } catch {
+      return [];
+    }
+  }
+
+  private async writeDeferred(records: readonly StateRecord[], dataKey: Buffer, stateId: string): Promise<void> {
+    if (!records.length) { await rm(this.deferredPath(), { force: true }); return; }
+    await this.options.home.ensureFolder(this.options.home.paths.sync);
+    await writeFileAtomic(this.deferredPath(), JSON.stringify(seal(subKey(dataKey, 'transcripts'), Buffer.from(JSON.stringify(records), 'utf8'), aadFor(stateId, 'sync-deferred'))));
   }
 
   /** What this computer now knows the remote holds, after reading and applying it. */
-  private learnRemote(state: SyncState, remote: RemoteBundle): void {
+  private learnRemote(state: SyncState, remote: RemoteBundle, deferred: ReadonlySet<string> = new Set()): void {
     state.lastSeenSeq = Math.max(state.lastSeenSeq, remote.seq);
     state.lastTip = remote.tip;
     const vouched = vouchedGen(remote);
@@ -651,7 +687,7 @@ export class StateSync {
     const listed = new Set(groupObjects(remote.objects).map((group) => (group[0] as ObjectEntry).file));
     state.readObjects = [...new Set([...state.readObjects.filter((name) => listed.has(name)), ...remote.newObjects])];
     for (const [id, list] of Object.entries(remote.entries)) state.pushed[id] = [...new Set([...(state.pushed[id] ?? []), ...list.map((entry) => entry.id)])];
-    state.heads = foldHeads(state.heads, remote.records);
+    state.heads = foldHeads(state.heads, remote.records.filter((record) => !deferred.has(recordKey(record))));
   }
 
   private measured(listedBytesNow: number): number {

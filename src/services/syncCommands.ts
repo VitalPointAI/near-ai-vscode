@@ -8,7 +8,7 @@ import { AuthService } from './auth';
 import { ProfileStore } from './profileStore';
 import { mementoProgressStore, onlineHomeFlow, systemGhCli } from './onlineHome';
 import { offerOnlineHomeAtStart, vscodeGitHubAuth, vscodeOnlineHomeUi } from './onlineHomeVscode';
-import { onRunEnded, runsInFlight } from './runEndHooks';
+import { liveConversations, onRunEnded, onRunQuiet, runsInFlight, runsWaiting } from './runEndHooks';
 import { RunMarkers } from './runMarkers';
 import { runStateGit } from './stateGit';
 import { editorWriter, stateHomeFor, type MementoLike } from './stateHome';
@@ -135,6 +135,7 @@ function runtimeFor(context: vscode.ExtensionContext, auth: AuthService, root: s
     // The private mirror lives in this editor's own storage, never inside the project (REVIEW B1).
     mirrorRoot: path.join(context.globalStorageUri.fsPath, 'sync-mirrors'),
     isIdle: () => runsInFlight(resolved) === 0,
+    liveConversations: () => liveConversations(resolved),
     runState: (marker) => markers.runState(marker),
     profiles: profileSyncHooks(resolved, auth, keys, home)
   };
@@ -143,6 +144,7 @@ function runtimeFor(context: vscode.ExtensionContext, auth: AuthService, root: s
   const syncSettings = mementoSyncSettings(context.globalState as MementoLike, resolved, { home, keys, git: runStateGit });
   const scheduler: SyncScheduler = new SyncScheduler({
     runsInFlight: () => runsInFlight(resolved),
+    runsWaiting: () => runsWaiting(resolved),
     intervalMinutes: () => settings().get<unknown>('sync.intervalMinutes', 10),
     runSync: (request) => runOnce(parts, resolved, syncSettings, request.mode, request.interactive)
   });
@@ -166,7 +168,10 @@ async function runOnce(parts: SyncParts, root: string, syncSettings: SyncSetting
   const found = await resolveRemote({ root, git: runStateGit, settings: syncSettings }, { pickRemote: async () => undefined });
   if (found.kind === 'none') return { kind: 'failed', message: NO_HOME, failure: { kind: 'no-remote', message: NO_HOME } };
   if (found.kind === 'cancelled') return { kind: 'refused', message: 'Sync could not tell which remote to use. Run Turn On Project Sync to choose one.' };
-  const sync = buildStateSync(parts, { remote: found.name, git: tokenRunner(runStateGit, () => githubToken(interactive)) });
+  // The scheduler decides when a sync may run during a run (its quiet points, or a click), so this sync does not wait for runs to end; the running
+  // conversations are kept out of it by liveConversations and the run markers (owner, 2026-11-14).
+  const { isIdle: _waitsForRuns, ...duringRuns } = parts;
+  const sync = buildStateSync(duringRuns, { remote: found.name, git: tokenRunner(runStateGit, () => githubToken(interactive)) });
   const outcome = await (mode === 'sync' ? sync.sync() : sync.pullOnly());
   // A folder kept from before a join goes after the first sync that pushed the joined state, and only when every conversation in it is in that state. It
   // is not waited for: the status never depends on it, and it does nothing when no such folder is there.
@@ -226,7 +231,8 @@ export function registerSyncCommands(context: vscode.ExtensionContext, auth: Aut
       if (event.affectsConfiguration('nearAi.sync.keepKeyInProject')) void applyKeyFileSetting(runtimeFor(context, auth, root), ui);
     }),
     vscode.window.onDidChangeWindowState((state) => { for (const runtime of runtimes.values()) runtime.scheduler.windowFocus(state.focused); }),
-    onRunEnded((event) => { runtimes.get(path.resolve(event.root))?.scheduler.runEnded(); })
+    onRunEnded((event) => { runtimes.get(path.resolve(event.root))?.scheduler.runEnded(); }),
+    onRunQuiet((root) => { runtimes.get(path.resolve(root))?.scheduler.quietPoint(); })
   );
 
   // Opening the project with sync on: a pull starts at once and is not waited for. Nothing here writes anything for a project that never turned sync on.
