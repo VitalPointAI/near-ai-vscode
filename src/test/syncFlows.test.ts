@@ -1017,6 +1017,8 @@ test('turning sync off cancels what was planned, and a syncing status is replace
 test('turning sync on during a chat: a first sync that only had to wait is a wait on the control, not "Needs attention" (owner, 2026-11-14)', async () => {
   const remote = bareRemote({ withMain: false });
   const a = computer(remote, 'alpha', { isIdle: () => false });
+  const mirrors = mkdtempSync(path.join(tmpdir(), 'near-ai-wait-mirrors-'));
+  a.parts.mirrorRoot = mirrors;
   try {
     const result = await turnOnFlow({ env: a.env, ui: fakeUi().ui });
     assert.equal(result.status, 'pending');
@@ -1036,7 +1038,7 @@ test('turning sync on during a chat: a first sync that only had to wait is a wai
     refused.scheduler.recordFlow({ status: 'pending', message: 'locked', outcome: 'refused' });
     assert.deepEqual(refused.scheduler.status(), { state: 'attention', message: 'locked' });
   } finally {
-    for (const dir of [remote, a.root]) rmSync(dir, { recursive: true, force: true });
+    for (const dir of [remote, a.root, mirrors]) rmSync(dir, { recursive: true, force: true });
   }
 });
 
