@@ -226,3 +226,24 @@ test('the view coming back to visible never loses or doubles an item', async () 
   while (page.frames.length) page.frames.shift()?.();
   assert.equal(reopened(page), 121, 'each item once');
 });
+
+// Owner, 2026-11-14: the badge said 50 prompts were waiting while the chat showed none. A sub-agent's card stays open after its call returns "awaiting
+// approval" (PERF-01), but the view closed every card whose call ended, so the host kept counting cards the person could no longer see or answer.
+test('a parked sub-agent card stays pinned when its call ends with "awaiting approval", and the host can close it with the reason', async () => {
+  const page = chatPage('hidden');
+  const parked = { ...approval, callId: 'agent-1:s1', agent: 'helper' };
+  const answered = { ...approval, callId: 'agent-1:s2', agent: 'helper', title: 'Run npm run lint' };
+  page.send({ type: 'tool-start', callId: 'agent-1:s1', tool: 'Bash', title: 'helper › Run npm test' });
+  page.send(parked);
+  page.send({ type: 'tool-start', callId: 'agent-1:s2', tool: 'Bash', title: 'helper › Run npm run lint' });
+  page.send(answered);
+  await turn(); await turn();
+  page.send({ type: 'tool-end', callId: 'agent-1:s1', ok: false, output: 'Awaiting approval: this action has not run.', stillWaiting: true });
+  // An ordinary end (the call was settled elsewhere) still closes its card, as before.
+  page.send({ type: 'tool-end', callId: 'agent-1:s2', ok: true, output: 'ok' });
+  await turn(); await turn();
+  assert.deepEqual(waitingLines(page), ['Waiting: Run npm test', 'closed: Run npm run lint'], 'the parked card is still there to answer');
+  page.send({ type: 'prompt-closed', id: 'agent-1:s1', outcome: 'covered' });
+  await turn(); await turn();
+  assert.deepEqual(waitingLines(page), ['covered: Run npm test', 'closed: Run npm run lint'], 'a card the host settles says why it went away');
+});

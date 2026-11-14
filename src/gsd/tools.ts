@@ -16,11 +16,14 @@ export interface Question {
  * general-purpose.
  */
 function subagentTypeHelp(services: Pick<GsdServices, 'agents' | 'teamMembers'>): string {
+  // Names and descriptions come from files (a team file may come with the repository), so they are made plain and capped before they go in the tool's
+  // description, where a crafted one could otherwise add instructions of its own.
+  const plain = (text: string, max: number) => noTags(text).slice(0, max);
   const members = new Set(services.teamMembers ?? []);
   const team = services.agents.filter((agent) => members.has(agent.name));
-  const others = services.agents.filter((agent) => !members.has(agent.name)).map((agent) => agent.name);
+  const others = services.agents.filter((agent) => !members.has(agent.name)).map((agent) => plain(agent.name, 80));
   if (!team.length) return others.length ? `One of: ${others.join(', ')}, or general-purpose.` : 'general-purpose.';
-  return `Team members (the specialists: use the member whose role covers the work, also for a workflow step): ${team.map((agent) => `${agent.name} (${noTags(agent.description).slice(0, 80)})`).join(', ')}.${others.length ? ` Other agents: ${others.join(', ')}.` : ''} Or general-purpose, only when no team member fits.`;
+  return `Team members (the specialists: use the member whose role covers the work, also for a workflow step): ${team.map((agent) => `${plain(agent.name, 80)} (${plain(agent.description, 80)})`).join(', ')}.${others.length ? ` Other agents: ${others.join(', ')}.` : ''} Or general-purpose, only when no team member fits.`;
 }
 
 export interface GsdServices {
