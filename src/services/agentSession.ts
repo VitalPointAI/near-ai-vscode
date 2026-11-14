@@ -1438,7 +1438,8 @@ export class AgentConversation {
     // "Always allow" on a parked card saves its allow entry, exactly as it does on a card answered in time (owner, 2026-11-14): before, a late answer
     // only granted the command for the run, so the same command asked again in the next run. Only the entry the card offered is saved: the offer was
     // already checked to cover this command and nothing wider, and a held (risky) card offers none.
-    const rule = reply.decision === 'allow-always' ? approval.allowRule : undefined;
+    // Only a card that carries a grant (#47 review): a card held as risky grants nothing, so a late answer to it never saves an entry either.
+    const rule = reply.decision === 'allow-always' && approval.grant?.command ? approval.allowRule : undefined;
     let saved = false;
     if (rule && remember) {
       grants.allowRules.add(rule);
