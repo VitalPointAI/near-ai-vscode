@@ -273,7 +273,7 @@ test('a saved conversation resumes with its full context', async () => {
   const [saved] = await store.list();
   assert.equal(saved.title, 'What does note.md say?');
   const resumed = new AgentConversation(root, () => undefined, path.join(root, '.ckpt'), undefined, store);
-  const turns = await resumed.restore(saved.id);
+  const turns = await resumed.restore(saved.id) as Array<{ role: string; text: string; tools: number }> | undefined;
   assert.deepEqual(turns?.map((turn) => [turn.role, turn.text, turn.tools]), [['user', 'What does note.md say?', 0], ['assistant', 'The note says hello.', 1]]);
   const seen: AgentMessage[][] = [];
   const recorder = { ...client, async *streamCompletion(model: string, messages: AgentMessage[]) { seen.push(structuredClone(messages)); yield* client.streamCompletion(model, messages); } };

@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import type { AuditEvent, AuditFilter } from '../domain/approval';
@@ -46,7 +46,7 @@ export class AuditStore {
   private get filePath(): string { return path.join(this.workspaceRoot ?? '', '.planning', '.near-ai', 'audit.json'); }
   private async persist(): Promise<void> {
     if (!this.workspaceRoot) return;
-    const file = this.filePath; const temporary = `${file}.${process.pid}.tmp`;
+    const file = this.filePath; const temporary = `${file}.${randomBytes(8).toString('hex')}.tmp`;
     try { await fs.mkdir(path.dirname(file), { recursive: true }); await fs.writeFile(temporary, `${JSON.stringify({ version: 1, events: this.events.slice(-MAX_EVENTS) })}\n`, 'utf8'); await fs.rename(temporary, file); } catch { try { await fs.rm(temporary, { force: true }); } catch { /* best effort */ } }
   }
 }

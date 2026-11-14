@@ -19,8 +19,14 @@ import { hintForView } from './reportingToken';
 import { shownSpendAccount, showSpendAccount, SpendAccount } from './spendAccount';
 import { withSpendTag } from './spendLedger';
 import { ProfileStore } from './profileStore';
-import { readAgentLimits, readAgentModels, readAgentRules, readModelTiers, readRiskSwitches, readRoleModels, readSafetyModel, readSettings, shouldAutoInstallGsd, readRunBudget } from './settings';
-import { sharedTranscriptKey, TranscriptStore } from './transcripts';
+import { readAgentLimits, readAgentModels, readAgentRules, readModelTiers, readRiskSwitches, readRoleModels, readSafetyModel, readSettings, shouldAutoInstallGsd, readRunBudget, readHistoryLimits } from './settings';
+import { archiveProblemText } from '../domain/state/archiveProblem';
+import { threadStoreFor } from './threadStore';
+import { applyRetention, protectedThreadIds } from './threadArchive';
+import { onRunEnded, runEnded, runStarted } from './runEndHooks';
+import { handlePickupAction, markPickupSeen, pickupCardModel, writePickupPointer } from './pickupCard';
+import { currentSyncStatus, onSyncStatus, refreshSyncHome } from './syncCommands';
+import { redactSyncText, SYNC_PROMPT_DISMISSED_KEY, syncPanelMessage } from './syncPanel';
 import { copyAttachmentIntoProject, prepareAttachments, stageAttachment, StagedAttachment } from '../agent/attachments';
 import { TeamDefinition, TeamLibrary, teamAgents } from '../agent/teams';
 import type { GsdAgent } from '../gsd/library';
@@ -35,6 +41,7 @@ import { securityAccess } from './securityScan';
 import { webSearchProvider } from './webSearchSetup';
 import { mcpRegistry } from './mcpView';
 import { ActivityStore, closeInterruptedRuns } from './activityStore';
+import { batchView } from '../domain/state/threadView';
 import { ConversationLog, ConversationOutcome, ConversationStatus, ConversationSummary, conversationStatus, conversationTitle, isOutput, MAX_OPEN_CONVERSATIONS, outcomeOf, parseSavedConversations, promptIdOf, PromptOutcome, savedConversations } from './conversations';
 import { ReputationStore } from './reputation';
 import { hostAttribution } from '../domain/activity';
@@ -42,9 +49,19 @@ import { ContextGraphMemory } from './contextGraphMemory';
 import { homeFolder, teamLibraryDir, whenTeamsMoved } from '../domain/teamStorage';
 import { rememberedRuleNotice } from '../domain/allowRuleNotice';
 import { syncAutoAdvance } from './autoAdvanceConfig';
-import { autoResumeChoice, autoResumeNotice, cutOffNotice, resumePrompt, RunMarker, RunMarkers, shouldAutoResume } from './runMarkers';
+import { editorWriter, type MementoLike, stateHomeFor } from './stateHome';
+import { ensureMigrated } from './stateMigration';
+import { autoResumeChoice, autoResumeNotice, cutOffNotice, HEARTBEAT_MS, ownEditorMarkers, resumePrompt, RunMarker, RunMarkers, shouldAutoResume } from './runMarkers';
 import { WaitingNotices } from './waitingNotices';
 import { latestOnly, PROJECT_TEAM_WATCH_PATHS, projectHasTeam, SETUP_NUDGE_DISMISSED_KEY, shouldShowSetupNudge } from './setupSteps';
+
+/** What the chat says when a message, Resume or Continue reaches a conversation that another editor is running right now. */
+export const RUNNING_ELSEWHERE_HOLD = 'This conversation is running in another editor right now. Wait for it to finish there, or start a new conversation here.';
+
+/** How often a conversation shown as running in another editor checks whether that run is still live; the same beat the run keeps. */
+let followElsewhereMs = HEARTBEAT_MS;
+/** Test seam: how often a conversation running elsewhere is checked again. */
+export function setFollowElsewhereMs(ms: number | undefined): void { followElsewhereMs = ms ?? HEARTBEAT_MS; }
 
 /** Chat model and safety model pairs already told that auto approve has no private safety model. */
 const warnedSafetyModels = new Set<string>();
@@ -122,7 +139,47 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
   // The "no team yet" card: only the latest answer is posted, so a slow check never undoes "Not now".
   const setupNudge = latestOnly(() => setupNudgeShows(context, auth), (show) => { if (!disposed) void panel.webview.postMessage({ type: 'setup-nudge', show }); });
   const feed = sharedActivityFeed();
+  // "Pick up where you left off": the last chat continued in another editor or on another computer. It only offers to reopen that chat.
+  const pickupWriter = () => editorWriter(context.globalState as MementoLike | undefined);
+  const pickupStore = (root: string) => threadStoreFor(root, context.secrets, pickupWriter(), () => vscode.workspace.getConfiguration('nearAi').get<boolean>('sync.keepKeyInProject', true));
+  /** The pointer the card on screen is about, for "Not now". */
+  let pickupAt = '';
+  let pickupShown = false;
+  const pickup = {
+    send: async (): Promise<void> => {
+      const root = workspaceRoot();
+      if (!root || disposed) return;
+      const model = await pickupCardModel({ workspaceState: context.workspaceState as MementoLike | undefined, writer: pickupWriter(), threads: pickupStore(root), markers: runMarkersFor(context, root), syncStatus: currentSyncStatus(root) }, root).catch(() => undefined);
+      if (!model || disposed) return;
+      pickupAt = model.pointerAt;
+      // The card also shows while the pull on open runs ("Checking for updates…"); once it has run the card is worked out again and goes or refreshes.
+      const wanted = model.show || model.checking === true;
+      if (wanted || pickupShown) { pickupShown = wanted; void panel.webview.postMessage({ type: 'pickup-card', model }); }
+    },
+    /** Records where work stopped, for the next editor that opens this project. */
+    note: (root: string, conversationId: string, runId?: string): void => {
+      void writePickupPointer(root, { conversationId, ...(runId ? { runId } : {}), writer: pickupWriter(), at: new Date().toISOString() });
+    }
+  };
   const workspaceRoot = () => vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  // The sync control in the bar (D-16): its state from the moment the panel opens, and again on every change. The invitation is part of the same message.
+  const sendSyncStatus = (): void => {
+    const root = workspaceRoot();
+    if (disposed) return;
+    void panel.webview.postMessage(syncPanelMessage(root ? currentSyncStatus(root) : { state: 'off' }, context.workspaceState as MementoLike | undefined));
+  };
+  // The local look at the project's remotes (nothing fetched, nothing written): whatever it changes reaches the control through the listener below.
+  const refreshSyncHomeHere = (): void => {
+    const root = workspaceRoot();
+    if (root && !disposed) void refreshSyncHome(root).catch(() => undefined);
+  };
+  const syncWatch = onSyncStatus((root) => {
+    const current = workspaceRoot();
+    if (disposed || !current || path.resolve(root) !== path.resolve(current)) return;
+    sendSyncStatus();
+    // The pull on open starting or finishing changes what the pick-up card says.
+    void pickup.send();
+  });
   const onScreen = (): ChatTab => tabs.find((tab) => tab.id === activeId) ?? tabs[0];
   /** The conversation a message names, or the one on screen; undefined for one that is no longer open. */
   const tabFor = (id: string | undefined): ChatTab | undefined => id ? tabs.find((tab) => tab.id === id) : onScreen();
@@ -204,23 +261,72 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     void panel.webview.postMessage({ type: 'conversation-shown', id: tab.id, busy: isRunning(tab) });
     sendSummary(true);
   };
+  /** The tabs showing "running in another editor", each with its check timer. */
+  const following = new Map<ChatTab, NodeJS.Timeout>();
+  const stopFollowing = (tab: ChatTab): void => {
+    const timer = following.get(tab);
+    if (timer) clearInterval(timer);
+    following.delete(tab);
+  };
+  const stopAllFollowing = (): void => { for (const tab of [...following.keys()]) stopFollowing(tab); };
+  context.subscriptions.push({ dispose: stopAllFollowing });
+  /**
+   * While a reopened conversation shows "running in another editor", checks every followElsewhereMs whether that run is still live; once it is not,
+   * the conversation is reloaded so its newest steps show, with Resume when the run was cut off.
+   */
+  const followElsewhere = (tab: ChatTab, root: string): void => {
+    stopFollowing(tab);
+    let checking = false;
+    const timer = setInterval(() => {
+      if (disposed || !tabs.includes(tab) || tab.closing || isRunning(tab)) { stopFollowing(tab); return; }
+      if (checking) return;
+      checking = true;
+      void (async () => {
+        if (await runMarkersFor(context, root).liveElsewhere(tab.id).catch(() => false)) return;
+        stopFollowing(tab);
+        if (disposed || !tabs.includes(tab) || tab.closing || isRunning(tab)) return;
+        if (!(await restoreInto(tab, tab.id, root, 'The run in the other editor has ended. Its newest steps are shown.').catch(() => false))) return;
+        if (tab.id === activeId) show(tab); else sendSummary(true);
+      })().finally(() => { checking = false; });
+    }, followElsewhereMs);
+    timer.unref?.();
+    following.set(tab, timer);
+  };
+  /** True (after saying so) when the conversation is running in another editor: nothing may run it, resume it or end its marker from here. */
+  const heldElsewhere = async (tab: ChatTab, root: string | undefined): Promise<boolean> => {
+    if (!root || !(await runMarkersFor(context, root).liveElsewhere(tab.id).catch(() => false))) return false;
+    tab.post({ type: 'notice', text: RUNNING_ELSEWHERE_HOLD });
+    return true;
+  };
   /** Opens a saved conversation's transcript into `tab`; false when it is no longer saved. */
   const restoreInto = async (tab: ChatTab, id: string, root: string, note: string): Promise<boolean> => {
+    stopFollowing(tab);
     const agent = ensureAgent(tab, root);
-    const turns = await agent.restore(id);
-    if (!turns) return false;
+    const view = await agent.restore(id);
+    if (!view) return false;
     tab.id = agent.id;
     tab.title = conversationTitle(agent.displayTitle) ?? tab.title;
     tab.log.clear();
     tab.outcomes.clear();
     tab.outcome = 'done';
-    tab.log.add({ type: 'transcript', turns, note });
+    if (Array.isArray(view)) tab.log.add({ type: 'transcript', turns: view, note });
+    else {
+      // D-07: every entry reaches the view, in batches so no one message is large; the note follows the last part.
+      const batches = batchView(view.items);
+      if (!batches.length) batches.push([]);
+      batches.forEach((items, index) => tab.log.add({ type: 'transcript', items, part: index + 1, of: batches.length, ...(index === batches.length - 1 ? { note } : {}) }));
+    }
     // A run of it that the extension host never finished (code-server closed it, a reload, a crash).
-    const cut = await runMarkersFor(context, root).interruptedRun(tab.id).catch(() => undefined);
+    const markers = runMarkersFor(context, root);
+    const cut = await markers.interruptedRun(tab.id).catch(() => undefined);
     tab.interrupted = cut;
     if (cut) {
       tab.outcome = 'stopped';
       tab.log.add({ type: 'run-interrupted', text: cutOffNotice(cut), resumable: true });
+    } else if (await markers.liveElsewhere(tab.id).catch(() => false)) {
+      // Another editor is running it right now (D-03): it is not cut off, so it is neither marked interrupted nor ever resumed from here.
+      tab.log.add({ type: 'notice', text: 'This conversation is running in another editor right now. Its newest steps appear here when that run saves them.' });
+      followElsewhere(tab, root);
     }
     return true;
   };
@@ -229,6 +335,7 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     const cut = tab.interrupted;
     const root = workspaceRoot();
     if (!cut || !root) return;
+    if (await heldElsewhere(tab, root)) return;
     tab.interrupted = undefined;
     tab.log.drop('run-interrupted');
     await runMarkersFor(context, root).settle(tab.id, outcome).catch(() => undefined);
@@ -242,6 +349,7 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
   /** Continue after a run stopped short: sends "Continue." as if the user typed it; nothing continues without the click. */
   const continueStopped = async (tab: ChatTab): Promise<void> => {
     if (!tab.continuable || isRunning(tab) || tab.closing) return;
+    if (await heldElsewhere(tab, workspaceRoot())) return;
     tab.continuable = false;
     tab.log.update('run-stopped', { continuable: false });
     const text = 'Continue.';
@@ -277,6 +385,7 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     const index = tabs.indexOf(tab);
     if (index === -1) return;
     tabs.splice(index, 1);
+    stopFollowing(tab);
     tab.closing = true;
     tab.stops += 1;
     tab.agent?.stop();
@@ -288,11 +397,15 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
   /** History's "open conversation": shows it when open, otherwise opens it as a tab. */
   const openSaved = async (id: string): Promise<void> => {
     const open = tabs.find((tab) => tab.id === id);
-    if (open) { show(open); return; }
+    if (open) { show(open); const openRoot = workspaceRoot(); if (openRoot) pickup.note(openRoot, id); return; }
     const root = workspaceRoot();
     if (!root) return;
     const current = onScreen();
     const reuse = current && isBlank(current) ? current : undefined;
+    // An archived conversation that cannot be opened (damaged, needs the recovery code, or could not be downloaded) is explained, and nothing is opened
+    // in its place: no tab is made for it, so nothing can be saved over it, and its files are not touched (D-08).
+    const problem = await threadStoreFor(root, context.secrets, editorWriter(context.globalState as MementoLike | undefined), () => vscode.workspace.getConfiguration('nearAi').get<boolean>('sync.keepKeyInProject', true)).prepareOpen(id).catch(() => undefined);
+    if (problem) { onScreen().post({ type: 'history-error', text: archiveProblemText(problem.reason) }); return; }
     if (!reuse && !(await makeRoom())) return;
     const tab = reuse ?? newTab();
     if (!(await restoreInto(tab, id, root, 'Opened this conversation with its full context. Continue where you left off.'))) {
@@ -301,6 +414,9 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     }
     if (!reuse) tabs.push(tab);
     show(tab);
+    pickup.note(root, id);
+    // An archived thread that was just opened is live again; the lowest-ranked live thread is archived in its place.
+    void retain().catch(() => undefined);
   };
 
   // The status line follows the key's ledger and NEAR's usage summary as they settle, at most once a second.
@@ -316,12 +432,38 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
   };
   panel.webview.html = html;
 
+  // D-08: the few most recently used threads stay live and the rest are archived, never deleted. A thread open in any tab of this editor, or with a run
+  // running here or elsewhere, stays live whatever its rank. It runs when a run ends and once when the chat starts, never during a run of that thread.
+  const openTabs = (): string[] => tabs.map((tab) => tab.id);
+  openTabSources.add(openTabs);
+  const retain = async (): Promise<void> => {
+    const root = workspaceRoot();
+    if (!root || disposed || !readAgentLimits().saveTranscripts) return;
+    const store = threadStoreFor(root, context.secrets, editorWriter(context.globalState as MementoLike | undefined), () => vscode.workspace.getConfiguration('nearAi').get<boolean>('sync.keepKeyInProject', true));
+    const markers = await runMarkersFor(context, root).liveRuns().catch(() => []);
+    const keep = protectedThreadIds([...openTabSources].flatMap((source) => source()), markers);
+    await applyRetention(store, readHistoryLimits().liveConversations, keep);
+  };
+  // When a run of one of this chat's conversations ends, the pick-up pointer says so, so another editor can offer to reopen it.
+  const pickupWatch = onRunEnded((event) => {
+    const root = workspaceRoot();
+    if (!root || path.resolve(event.root) !== path.resolve(root) || !tabs.some((tab) => tab.id === event.conversationId)) return;
+    pickup.note(root, event.conversationId, event.runId);
+  });
+  const retentionWatch = onRunEnded(async (event) => {
+    const root = workspaceRoot();
+    if (!root || path.resolve(event.root) !== path.resolve(root)) return;
+    if (tabs.some((tab) => tab.id === event.conversationId && tab.agent?.running)) return;
+    await retain();
+  });
   // The open conversations come back after a reload. Runs cannot survive one: a conversation that
   // was running is shown as stopped, with its transcript, and its run is closed in the history.
   const ready = (async () => {
     const root = workspaceRoot();
-    if (root) await closeInterruptedRuns(root);
+    if (root) await closeInterruptedRuns(root, editorWriter(context.globalState as MementoLike | undefined));
     const saved = parseSavedConversations(context.workspaceState?.get(OPEN_CONVERSATIONS_KEY));
+    // Tabs reopen from the state home; one saved by 0.4.19 is still in this editor's own storage until it is merged in.
+    if (root && saved.items.length) await ensureMigrated(root);
     for (const item of saved.items) {
       const tab = newTab(item.id);
       tab.title = item.title;
@@ -344,6 +486,8 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     activeId = saved.activeId ?? cutOff ?? tabs[0].id;
     feed.focusConversation(activeId);
     sendSummary(true);
+    // Old threads are archived once at start, now that the tabs the person had open are known (and so are protected).
+    void retain().catch(() => undefined);
   })();
 
   // PERF-05: a run a reload cut off carries on by itself (newest first, a few at most), with a notice, unless nearAi.agent.autoResumeAfterReload is off.
@@ -351,8 +495,10 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     const enabled = vscode.workspace.getConfiguration('nearAi').get<boolean>('agent.autoResumeAfterReload', AGENT_DEFAULTS.autoResumeAfterReload) !== false;
     // With the emergency stop on (pressed here or in another window), nothing resumes by itself: the cut-off runs keep their Resume button.
     const emergencyStopped = isEmergencyStopped();
-    const chosen = new Set(autoResumeChoice(tabs.flatMap((tab) => (tab.interrupted ? [tab.interrupted] : [])), { enabled, emergencyStopped }));
-    if (emergencyStopped && enabled) for (const tab of tabs) if (tab.interrupted && shouldAutoResume(tab.interrupted, true)) { const text = 'Not resumed automatically: the emergency stop is on. Run "NEAR AI: Resume", then press Resume here.'; tab.log.add({ type: 'notice', text }); tab.post({ type: 'notice', text }); }
+    // SYNC-07 / D-03: only a run this editor itself lost (a reload) resumes by itself. A cut-off run another editor left keeps its Resume button.
+    const own = new Set(ownEditorMarkers(tabs.flatMap((tab) => (tab.interrupted ? [tab.interrupted] : [])), editorWriter(context.globalState as MementoLike | undefined)));
+    const chosen = new Set(autoResumeChoice([...own], { enabled, emergencyStopped }));
+    if (emergencyStopped && enabled) for (const tab of tabs) if (tab.interrupted && own.has(tab.interrupted) && shouldAutoResume(tab.interrupted, true)) { const text = 'Not resumed automatically: the emergency stop is on. Run "NEAR AI: Resume", then press Resume here.'; tab.log.add({ type: 'notice', text }); tab.post({ type: 'notice', text }); }
     const due = tabs.filter((tab) => tab.interrupted && chosen.has(tab.interrupted));
     for (const tab of due) {
       if (isEmergencyStopped()) break;
@@ -367,6 +513,12 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
   const handle = async (message: ChatWebviewMessage, tab: ChatTab): Promise<void> => {
     // A person acting in the chat releases a run paused on unanswered approvals; Stop below still stops it.
     if (message.type !== 'stop' && USER_ACTIONS.has(message.type)) tab.agent?.userActive();
+    // A reopened card was opened: its stored output goes to the view, only if that conversation is still the one on screen. Nothing is logged or kept.
+    if (message.type === 'thread-tool-output') {
+      const output = await tab.agent?.toolOutput(message.entryId).catch(() => undefined);
+      if (!disposed && tab.id === activeId && tabs.includes(tab)) void panel.webview.postMessage({ type: 'thread-tool-output', entryId: message.entryId, ...(output !== undefined ? { output } : {}) });
+      return;
+    }
     if (message.type === 'stop') {
       const was = isRunning(tab);
       const outcome = tab.outcome;
@@ -392,11 +544,15 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
       return;
     }
     // A (re)loaded view shows the conversation on screen again, with the prompts still waiting pinned.
-    if (message.type === 'chat-ready') { show(onScreen()); return; }
+    if (message.type === 'chat-ready') { show(onScreen()); sendSyncStatus(); refreshSyncHomeHere(); return; }
     if (message.type === 'switch-conversation') { const target = tabs.find((candidate) => candidate.id === message.id); if (target) show(target); return; }
     if (message.type === 'close-conversation') { await closeConversation(message.id); return; }
     if (message.type === 'new-chat') { await newConversation(); return; }
     if (message.type === 'resume-conversation') { await openSaved(message.id); return; }
+    if (message.type === 'pickup-card') {
+      await handlePickupAction(message, { openSaved, markSeen: () => markPickupSeen(context.workspaceState as MementoLike | undefined, pickupAt) });
+      return;
+    }
     if (message.type === 'continue-run') { await continueStopped(tab); return; }
     if (message.type === 'resume-interrupted' || message.type === 'dismiss-interrupted') { await settleInterrupted(tab, message.type === 'resume-interrupted' ? 'resumed' : 'dismissed'); return; }
     if (message.type === 'questions-reply') {
@@ -449,6 +605,24 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
       await vscode.commands.executeCommand(message.action === 'team' ? 'nearAi.setupProjectTeam' : 'nearAi.projectSetup');
       return;
     }
+    if (message.type === 'sync-control') {
+      // Each request only opens a flow the person then confirms step by step; none of them runs anything on its own (T-27-87).
+      if (message.action === 'dismiss-prompt') {
+        await context.workspaceState?.update(SYNC_PROMPT_DISMISSED_KEY, true);
+        sendSyncStatus();
+        await pickup.send();
+        return;
+      }
+      if (message.action === 'show-details') {
+        const root = workspaceRoot();
+        const detail = redactSyncText(root ? currentSyncStatus(root).message ?? '' : '') || 'The last sync did not finish.';
+        const retry = 'Sync Project Now';
+        if (await vscode.window.showWarningMessage(detail, retry) === retry) await vscode.commands.executeCommand('nearAi.sync.now');
+        return;
+      }
+      await vscode.commands.executeCommand(message.action === 'turn-on' ? 'nearAi.sync.turnOn' : message.action === 'set-up-home' ? 'nearAi.sync.onlineHome' : 'nearAi.sync.now');
+      return;
+    }
     if (message.type === 'open-activity') {
       await vscode.commands.executeCommand('nearAi.openAgentActivity', message.agentId);
       return;
@@ -484,6 +658,8 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
       panel.webview.postMessage(await statusMessage({ agents: runningAgents(), account: state.spend }));
       await sendProfileStatus(panel, auth);
       await setupNudge.refresh();
+      sendSyncStatus();
+      await pickup.send();
       await sendArtifacts(panel);
       return;
     }
@@ -504,6 +680,8 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     const stops = tab.stops;
     /** Stopped (or closed) while this turn was still being prepared: its run never starts. */
     const stopped = () => tab.closing || tab.stops !== stops;
+    // A conversation another editor is running right now is not run from here too: nothing is requested, saved or logged, and the chat says why.
+    if (await heldElsewhere(tab, workspaceRoot())) return;
     // What the user sent stays in the conversation's log (the view showed it as they sent it), and names a new conversation.
     const typed = message.type === 'send' ? message.text : `/${message.command}${message.args ? ` ${message.args}` : ''}`;
     if (!(message.type === 'send' && message.overrideToken)) {
@@ -527,6 +705,8 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
       tab.post({ type: 'auth-required', text: 'Set up a NEAR AI profile for this project to start chatting.' });
       return;
     }
+    // The person is acting in this project: what this editor kept in its own storage is merged into the state home before the run starts (once; no-op after).
+    await ensureMigrated(root);
     const model = message.model?.trim() || tab.model || readSettings().defaultModel;
     if (!model) { tab.post({ type: 'assistant-error', text: 'Choose a model from the list below the message box.' }); return; }
     const modelInfo = active.models.find((candidate) => candidate.id === model);
@@ -655,10 +835,12 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
       if (stopped()) { await state.activity.append(session.sessionId, { status: 'cancelled', summary: 'Stopped before the run started.' }); return; }
       // Update Team waits for this to end before it offers to rewrite a team.
       const endRun = beginRun();
+      runStarted(root);
       try {
         await agent.send({ modelStallMs, ...(backupModel ? { backupModel } : {}), text, skill, gsd, team, attachments, memory: { store: state.memory, projectScope: { kind: 'project', id: projectIdForWorkspace(root) } }, imageModel: route.local ? undefined : imageModel, reputation: new ReputationStore(root), tiers: readModelTiers(), roleModels: readRoleModels(), safetyModel, safetyFallbackModel, riskSwitches: readRiskSwitches(), rememberAllowRule: (rule) => rememberAllowRule(rule, tab), unattendedAutoApprove: vscode.workspace.getConfiguration('nearAi').get<boolean>('agent.unattendedAutoApprove', AGENT_DEFAULTS.unattendedAutoApprove) !== false, researchProfile: vscode.workspace.getConfiguration('nearAi').get<boolean>('gsd.researchProfile', true) !== false, availableModels: delegable.map((candidate) => candidate.id), modelCatalog: delegable, route: privateRouteFor(active.provider, route.local), contextWindows: Object.fromEntries(active.models.map((candidate) => [candidate.id, candidate.contextLength])), maxParallelAgents: limits.maxParallelAgents, maxTurns: limits.maxTurns, client: route.client, model, privacy: modelPrivacyLabel(modelInfo), policy: settings.actionPolicy, rules: readAgentRules(), activity: { store: state.activity, sessionId: session.sessionId }, local: route.local, security: securityAccess(context, root), webSearch: await webSearchProvider(context.secrets), budget: runBudget, mcpTools: mcp.tools, maxOutputTokens: Math.max(1_000, Math.min(1_000_000, Number(vscode.workspace.getConfiguration('nearAi').get<number>('agent.maxOutputTokens', AGENT_DEFAULTS.maxOutputTokens)) || AGENT_DEFAULTS.maxOutputTokens)), shellEnvAllow: vscode.workspace.getConfiguration('nearAi').get<string[]>('agent.shellEnvAllow', []).filter((name) => typeof name === 'string'), runId, ...(redTeamStep ? { skillAddendum: redTeamStep.addendum, projectAgents: redTeamStep.agents } : {}) });
       } finally {
         endRun();
+        void runEnded({ root, conversationId: tab.id, runId, outcome: tab.outcome });
       }
       panel.webview.postMessage(await statusMessage({ agents: runningAgents(), account }));
       await sendArtifacts(panel);
@@ -721,7 +903,7 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
   const windowWatch = typeof vscode.window.onDidChangeWindowState === 'function' ? vscode.window.onDidChangeWindowState((window) => { if (window.focused) for (const tab of tabs) tab.focusRegained?.(); }) : undefined;
   // The "no team yet" card goes away as soon as Team Studio (or anyone) saves the project's team.
   const teamWatch = watchProjectTeam(() => { if (!disposed) void setupNudge.refresh(); });
-  panel.onDidDispose(() => { disposed = true; for (const tab of tabs) tab.agent?.dispose(); policyWatch.dispose(); tokenWatch.dispose(); windowWatch?.dispose(); teamWatch?.dispose(); state.spendWatch?.dispose(); if (state.spendTimer) clearTimeout(state.spendTimer); }, undefined, context.subscriptions);
+  panel.onDidDispose(() => { disposed = true; stopAllFollowing(); openTabSources.delete(openTabs); retentionWatch.dispose(); pickupWatch.dispose(); syncWatch.dispose(); for (const tab of tabs) tab.agent?.dispose(); policyWatch.dispose(); tokenWatch.dispose(); windowWatch?.dispose(); teamWatch?.dispose(); state.spendWatch?.dispose(); if (state.spendTimer) clearTimeout(state.spendTimer); }, undefined, context.subscriptions);
   // The emergency stop stops every conversation's run; the composer's Stop stops only the one on screen.
   onDidChangeEmergencyStop(async (engaged) => {
     sendPolicyState(panel);
@@ -745,6 +927,9 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
   state.activity = createActivityStore();
   await sendProfileStatus(panel, auth);
   await setupNudge.refresh();
+  sendSyncStatus();
+  refreshSyncHomeHere();
+  await pickup.send();
   await loadModels(panel, auth);
 }
 
@@ -800,18 +985,36 @@ function ripgrepPath(): string | undefined {
   return appRoot ? findRipgrep(appRoot, (candidate) => existsSync(candidate)) : undefined;
 }
 
+/** The ids of the conversations open in each chat of this editor, so archiving never takes a thread out from under a tab of another chat. */
+const openTabSources = new Set<() => string[]>();
+
+/** The ids of every conversation open in a tab of this editor (the side view and the panel), so the migration's 5-live step leaves them live. */
+export function openConversationIds(): string[] {
+  return [...openTabSources].flatMap((source) => source());
+}
+
 /** One run-marker store per extension storage and project, shared by every conversation, so its writes stay in order. */
 const runMarkerStores = new Map<string, RunMarkers>();
 function runMarkersFor(context: vscode.ExtensionContext, root: string): RunMarkers {
-  const key = `${context.globalStorageUri.fsPath}\n${root}`;
+  const key = path.resolve(root);
   let store = runMarkerStores.get(key);
-  if (!store) { store = new RunMarkers(context.globalStorageUri.fsPath, root); runMarkerStores.set(key, store); }
+  if (!store) {
+    const home = stateHomeFor(root);
+    const storage = context.globalStorageUri.fsPath;
+    store = new RunMarkers(storage, root, { dir: home.paths.runs, writer: editorWriter(context.globalState as MementoLike | undefined), beforeWrite: () => home.ensure() });
+    runMarkerStores.set(key, store);
+    // The heartbeats stop when the extension deactivates; the markers stay as they are.
+    const made = store;
+    context.subscriptions?.push({ dispose: () => made.dispose() });
+  }
   return store;
 }
 
 function conversationFor(context: vscode.ExtensionContext, root: string, panel: ChatHost, post: (message: Record<string, unknown>) => void, title: () => string): { agent: AgentConversation; focusRegained: () => void } {
   const storage = context.globalStorageUri.fsPath;
-  const transcripts = readAgentLimits().saveTranscripts ? new TranscriptStore(storage, root, sharedTranscriptKey(context.secrets)) : undefined;
+  // Conversations live in the project's state home, so every editor on this computer lists and reopens the same ones (SYNC-01). The state home and its
+  // key are created on the first save, never by opening the folder.
+  const transcripts = readAgentLimits().saveTranscripts ? threadStoreFor(root, context.secrets, editorWriter(context.globalState as MementoLike | undefined), () => vscode.workspace.getConfiguration('nearAi').get<boolean>('sync.keepKeyInProject', true)) : undefined;
   // An agent held for approval or an answer waits; say so when nobody may be looking: the chat is
   // hidden, or the window (in code-server, its browser tab) is in the background. Once per prompt.
   const notices = new WaitingNotices();
@@ -825,8 +1028,12 @@ function conversationFor(context: vscode.ExtensionContext, root: string, panel: 
     const id = promptIdOf(outbound);
     if (id && notices.opened(id, { panelVisible: (panel as { visible?: boolean }).visible, windowFocused: vscode.window.state?.focused }, waitingIds())) announce(outbound);
   };
-  const conversation = new AgentConversation(root, forward, path.join(storage, 'checkpoints'), ripgrepPath(), transcripts, sharedActivityFeed());
+  const home = stateHomeFor(root);
+  const conversation = new AgentConversation(root, forward, home.paths.checkpoints, ripgrepPath(), transcripts, sharedActivityFeed());
   conversation.runMarkers = runMarkersFor(context, root);
+  // Checkpoints are shared by every editor on this computer; sub-agent worktrees stay in this editor's own storage, never in the project.
+  conversation.worktreeRoot = path.join(storage, 'worktrees');
+  conversation.checkpointPrepare = () => home.ensure();
   const minutes = vscode.workspace.getConfiguration('nearAi').get<number>('agent.approvalTimeoutMinutes', AGENT_DEFAULTS.approvalTimeoutMinutes);
   conversation.approvalTimeoutMs = Math.max(0, Math.min(1_440, typeof minutes === 'number' && Number.isFinite(minutes) ? minutes : AGENT_DEFAULTS.approvalTimeoutMinutes)) * 60_000;
   // PERF-01: a sub-agent's card waits briefly, then the call returns "awaiting approval"; enough of those in a row pause the run.

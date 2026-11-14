@@ -31,15 +31,15 @@ test('a path counts as scratch only when it is inside the scratch folder', () =>
 });
 
 test('the gitignore is given the scratch folder once, and nothing when a rule already covers it', () => {
-  assert.deepEqual(gitignoreAdditions(''), ['.near-ai/scratch/', '.near-ai/attachments/']);
-  assert.deepEqual(gitignoreAdditions('node_modules/\n'), ['.near-ai/scratch/', '.near-ai/attachments/']);
+  assert.deepEqual(gitignoreAdditions(''), ['.near-ai/scratch/', '.near-ai/attachments/', '.near-ai/state/']);
+  assert.deepEqual(gitignoreAdditions('node_modules/\n'), ['.near-ai/scratch/', '.near-ai/attachments/', '.near-ai/state/']);
   // A project that ignores the whole folder needs nothing more.
   assert.deepEqual(gitignoreAdditions('.near-ai/\n'), []);
   assert.deepEqual(gitignoreAdditions('.near-ai\n'), []);
-  // One of the two already there: only the other is added.
-  assert.deepEqual(gitignoreAdditions('.near-ai/scratch/\n'), ['.near-ai/attachments/']);
+  // One of the three already there: only the others are added.
+  assert.deepEqual(gitignoreAdditions('.near-ai/scratch/\n'), ['.near-ai/attachments/', '.near-ai/state/']);
   // A negated rule does not count as covering it.
-  assert.deepEqual(gitignoreAdditions('!.near-ai/\n'), ['.near-ai/scratch/', '.near-ai/attachments/']);
+  assert.deepEqual(gitignoreAdditions('!.near-ai/\n'), ['.near-ai/scratch/', '.near-ai/attachments/', '.near-ai/state/']);
 });
 
 test('a project is given the scratch folder and its ignore lines, and the lines are not added twice', async () => {

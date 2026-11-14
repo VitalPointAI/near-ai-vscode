@@ -148,6 +148,13 @@ details.tool .log {
   font-family: var(--vscode-editor-font-family); font-size: 11px; white-space: pre-wrap; overflow-wrap: anywhere;
   color: var(--vscode-descriptionForeground);
 }
+/* A reopened conversation (D-07): every message and tool step of its log, drawn in slices. Off-screen ones skip layout and paint until they are scrolled near. */
+.reopened { content-visibility: auto; contain-intrinsic-size: auto 48px; }
+details.history-tool summary .history-args { min-width: 0; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--vscode-editor-font-family); font-size: 11px; }
+details.history-tool summary .history-note { flex: none; font-size: 11px; color: var(--vscode-editorWarning-foreground, var(--vscode-descriptionForeground)); }
+details.history-tool .log pre { margin: 0; font: inherit; white-space: pre-wrap; overflow-wrap: anywhere; }
+.history-divider { display: flex; align-items: center; gap: 8px; margin: 4px 0 16px; font-size: 11px; color: var(--vscode-descriptionForeground); }
+.history-divider::before, .history-divider::after { content: ''; flex: 1 1 0; border-top: 1px solid var(--vscode-panel-border); }
 .spinner { width: 10px; height: 10px; border-radius: 50%; border: 1.5px solid var(--vscode-progressBar-background); border-right-color: transparent; animation: spin 0.8s linear infinite; flex: none; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
@@ -181,6 +188,14 @@ details.tool .log {
 #welcome .setup-nudge p { margin: 0 0 8px; color: var(--vscode-descriptionForeground); }
 .setup-nudge-actions { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; }
 .setup-nudge button:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 1px; }
+/* The sync invitation (G-27-4d): in the ready area, a box of its own with room above and below, so it never touches the heading or the suggestions around it. */
+.sync-prompt { margin: 12px 0; padding: 10px 12px; border: 1px solid var(--vscode-focusBorder); border-radius: 4px; background: var(--vscode-editorWidget-background); color: var(--vscode-foreground); }
+.sync-prompt p { margin: 0 0 8px; color: var(--vscode-descriptionForeground); }
+/* Inside the pick-up card the invitation is a part of the card, not a second box. */
+.setup-nudge .sync-prompt { margin: 8px 0 0; padding: 0; border: 0; background: none; }
+/* The "Pick up where you left off" card reuses the setup card above; a long chat title or phase name wraps instead of widening it. */
+.pickup-card .pickup-line { overflow-wrap: anywhere; }
+#welcome .pickup-card .pickup-line { margin: 0 0 4px; }
 
 /* Agent runs: approvals with diff or command previews, task list, revert */
 .approval pre { margin: 0 0 8px; max-height: 260px; overflow: auto; padding: 6px 8px; border-radius: 4px; font: 11px/1.45 var(--vscode-editor-font-family); background: var(--vscode-textCodeBlock-background, var(--vscode-editor-background)); white-space: pre; }
@@ -214,6 +229,8 @@ details.agent-tool .state { color: var(--vscode-errorForeground); }
 #todos .todo::before { display: inline-block; width: 16px; content: '○'; color: var(--vscode-descriptionForeground); }
 #todos .todo.in_progress { color: var(--vscode-foreground); font-weight: 600; }
 #todos .todo.in_progress::before { content: '◐'; color: var(--vscode-progressBar-background); }
+#todos .todo.unconfirmed { color: var(--vscode-descriptionForeground); font-weight: normal; font-style: italic; }
+#todos .todo.unconfirmed::before { content: '?'; color: var(--vscode-descriptionForeground); }
 #todos .todo.completed { color: var(--vscode-descriptionForeground); text-decoration: line-through; }
 #todos .todo.completed::before { content: '✓'; color: var(--vscode-testing-iconPassed, inherit); }
 .changes { display: flex; align-items: center; gap: 8px; margin: 0 0 14px; font-size: 12px; color: var(--vscode-descriptionForeground); }
@@ -287,7 +304,11 @@ footer { padding: 6px 12px 8px; }
   color: var(--vscode-input-foreground); font: inherit;
 }
 #input::placeholder { color: var(--vscode-input-placeholderForeground); }
-.composer .bar { display: flex; align-items: center; gap: 4px; padding: 2px 4px 4px 6px; }
+/* The bar wraps at every width (G-27-4a): the profile and sync chips sit together on the first row, and the pickers and buttons take the next one. */
+.composer .bar { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; row-gap: 2px; padding: 2px 4px 4px 6px; }
+/* An empty full-row item after the chips (and the sync detail line): up to this width the pickers start on a new row; wider, one row when it fits. */
+.composer .bar .bar-break { display: none; flex: 0 0 100%; height: 0; }
+@media (max-width: 480px) { .composer .bar .bar-break { display: block; flex-basis: 100%; } }
 #model, #policy, #advance {
   min-width: 0; padding: 1px 2px; border: 0; border-radius: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   font-size: 11px; color: var(--vscode-descriptionForeground); background: transparent; cursor: pointer;
@@ -345,6 +366,21 @@ footer { padding: 6px 12px 8px; }
 }
 .chip:hover { background: var(--vscode-toolbar-hoverBackground); color: var(--vscode-foreground); }
 .chip[data-state="missing"], .chip[data-state="attention"] { color: var(--vscode-textLink-foreground); }
+/* The sync control (D-16): a chip beside the profile chip. Every colour is a theme variable, so it reads in light, dark and high-contrast themes. */
+/* The profile name and the sync state are read whole (data-must-read): they never shrink below their text, and where the row is too narrow for one they wrap onto more lines instead of being cut to an ellipsis. */
+#profile, #sync { flex: none; max-width: 100%; white-space: normal; overflow-wrap: anywhere; text-align: left; }
+#sync { color: var(--vscode-foreground); background: var(--vscode-button-secondaryBackground, transparent); }
+#sync:hover { background: var(--vscode-button-secondaryHoverBackground, var(--vscode-toolbar-hoverBackground)); }
+#sync:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 1px; }
+#sync[data-state="synced"] { color: var(--vscode-descriptionForeground); background: transparent; }
+#sync[data-state="syncing"] { color: var(--vscode-descriptionForeground); background: transparent; cursor: progress; }
+#sync[data-state="attention"] { color: var(--vscode-errorForeground); background: transparent; border: 1px solid var(--vscode-inputValidation-warningBorder, var(--vscode-errorForeground)); }
+#sync[data-state="no-home"] { color: var(--vscode-textLink-foreground); background: transparent; }
+body.vscode-high-contrast #sync, body.vscode-high-contrast-light #sync { border: 1px solid var(--vscode-contrastBorder, var(--vscode-focusBorder)); background: transparent; color: var(--vscode-foreground); }
+body.vscode-high-contrast #sync:hover, body.vscode-high-contrast-light #sync:hover { outline: 1px dashed var(--vscode-contrastActiveBorder, var(--vscode-focusBorder)); }
+/* A sync problem's plain sentence (G-27-4c): a full-row line under the chips, wrapping, in the theme's error colour. */
+.sync-detail { flex: 0 0 100%; margin: 2px 0 0; font-size: 11px; color: var(--vscode-errorForeground, var(--vscode-editorWarning-foreground)); white-space: normal; overflow-wrap: anywhere; }
+.sync-detail[hidden] { display: none; }
 /* Send and Stop never shrink, so both fit beside the pickers at narrow widths. */
 .composer .bar .icon-button { flex: none; }
 #stop[hidden] { display: none; }
@@ -404,9 +440,7 @@ footer { padding: 6px 12px 8px; }
 @media (max-width: 260px) {
   #transcript { padding: 10px 10px 4px; }
   footer { padding: 6px 8px 8px; }
-  /* The composer's bar takes two rows: profile and model, then approval policy and the buttons. */
-  .composer .bar { flex-wrap: wrap; row-gap: 2px; }
-  .composer .bar .chip { max-width: 45%; }
+  /* The composer's bar: profile and sync on their own rows (they wrap their own text), then the model, then approval policy and the buttons. */
   #model { flex: 1 1 calc(55% - 4px); max-width: none; }
   #policy { flex: 0 1 auto; max-width: none; }
   /* Slash commands: the description goes under the name. */

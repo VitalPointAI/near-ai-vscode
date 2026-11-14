@@ -1,11 +1,13 @@
 import assert from 'node:assert/strict';
+import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { buildLeaderboard, catalogVersion, needsRetest, performanceTrend, RUN_ID, recommendRoles, recommendTiers, estimateComparisonCost, latestResults, median, parseSavedRun, planComparison, rankSummaries, reusedRows, runIdFor, serializeRun, summarizeModel, summarizeRun, type ModelSummary, type ResultRow, type SavedRun } from '../benchmark/results';
+import { buildLeaderboard, catalogVersion, LEGACY_RUN_MODES, needsRetest, performanceTrend, RUN_ID, recommendRoles, recommendTiers, estimateComparisonCost, latestResults, median, parseSavedRun, planComparison, rankSummaries, reusedRows, runIdFor, serializeRun, summarizeModel, summarizeRun, type ModelSummary, type ResultRow, type SavedRun } from '../benchmark/results';
 import { ComparisonStore } from '../benchmark/store';
 import type { BenchmarkTask, TaskKind } from '../benchmark/tasks';
+import { historyEntries } from '../services/modelComparisonPage';
 import type { ModelInfo } from '../services/nearAiClient';
 
 // Saved comparisons: what is reused, the cost estimate, the summaries and ranking, the
@@ -168,6 +170,58 @@ test('a saved comparison reads back as written; damaged or foreign files are ref
   assert.equal(damaged.status, 'stopped');
   assert.match(damaged.stopReason!, /closed/);
   assert.deepEqual(summarizeRun(original).map((entry) => [entry.rank, entry.model]), [[1, 'tee/a'], [2, 'fwd/b']]);
+});
+
+test('a comparison an older build saved with mode "run" reads as "rerun" and is written back that way; an unknown mode is still refused (G-27-2)', () => {
+  const original = saved('2026-11-08T00-28-34-953Z', '2026-11-08T00:28:34.953Z', [row('tee/a', 'implement', 10)]);
+  const older = parseSavedRun(JSON.stringify({ ...original, mode: 'run' }));
+  assert.ok(older, 'a comparison with mode run is readable');
+  assert.equal(older.mode, 'rerun');
+  assert.deepEqual(older, { ...original, mode: 'rerun' });
+  assert.match(serializeRun(older), /"mode": "rerun"/);
+  assert.equal(parseSavedRun(serializeRun(older))!.mode, 'rerun');
+  assert.equal(parseSavedRun(JSON.stringify({ ...original, mode: 'again' })), undefined);
+});
+
+test('the store lists and loads a comparison with an older mode value as a rerun, and skips one with a mode nobody ever wrote (G-27-2)', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'near-ai-evals-'));
+  const store = new ComparisonStore(dir);
+  const current = saved('2026-11-09T00-00-00-000Z', '2026-11-09T00:00:00.000Z', [row('tee/a', 'implement', 10)]);
+  const older = saved('2026-11-08T00-28-34-953Z', '2026-11-08T00:28:34.953Z', [row('tee/a', 'implement', 5), row('fwd/b', 'implement', 7)]);
+  await store.save(current);
+  await writeFile(path.join(dir, `${older.id}.json`), JSON.stringify({ ...older, mode: 'run' }));
+  await writeFile(path.join(dir, '2026-11-07T00-00-00-000Z.json'), JSON.stringify({ ...saved('2026-11-07T00-00-00-000Z', '2026-11-07T00:00:00.000Z', []), mode: 'again' }));
+  assert.deepEqual((await store.list()).map((entry) => [entry.id, entry.mode]), [[current.id, 'reuse'], [older.id, 'rerun']]);
+  assert.deepEqual(await store.load(older.id), { ...older, mode: 'rerun' });
+  assert.equal(await store.load('2026-11-07T00-00-00-000Z'), undefined);
+});
+
+test('every older mode value maps to a current mode and none is itself a current one, so the table can never shadow a current value', () => {
+  const none = new Map();
+  for (const [older, current] of Object.entries(LEGACY_RUN_MODES)) {
+    assert.ok(['reuse', 'rerun'].includes(current), `${older} maps to a current mode`);
+    assert.ok(!['reuse', 'rerun'].includes(older), `${older} is not a current mode`);
+    assert.ok(planComparison(['tee/a'], TASKS, 1, current, none).cells.length > 0, `a plan accepts ${current}`);
+  }
+  assert.ok(Object.isFrozen(LEGACY_RUN_MODES));
+  for (const inherited of ['toString', 'constructor', '__proto__']) assert.equal(parseSavedRun(JSON.stringify({ ...saved('2026-11-08T00-28-34-953Z', '2026-11-08T00:28:34.953Z', []), mode: inherited })), undefined, `${inherited} is not an older mode`);
+});
+
+test('the Compare Models history shows a comparison saved with an older mode as a rerun', () => {
+  const older = parseSavedRun(JSON.stringify({ ...saved('2026-11-08T00-28-34-953Z', '2026-11-08T00:28:34.953Z', [row('tee/a', 'implement', 10)]), mode: 'run' }));
+  assert.ok(older);
+  assert.deepEqual(historyEntries([older]).map((entry) => [entry.id, entry.mode]), [['2026-11-08T00-28-34-953Z', 'rerun']]);
+});
+
+test('every reader of a saved comparison goes through parseSavedRun, and no second validator of the mode exists to bypass the older-value table', () => {
+  const src = path.join(__dirname, '..', '..', 'src');
+  const files: string[] = [];
+  const walk = (dir: string) => { for (const name of readdirSync(dir)) { const full = path.join(dir, name); if (statSync(full).isDirectory()) { if (name !== 'test') walk(full); } else if (full.endsWith('.ts')) files.push(full); } };
+  walk(src);
+  const relative = (file: string) => path.relative(src, file).replaceAll(path.sep, '/');
+  for (const reader of ['services/stateRecords.ts', 'services/stateMigration.ts', 'benchmark/store.ts']) assert.match(readFileSync(path.join(src, reader), 'utf8'), /\bparseSavedRun\(|\.then\(parseSavedRun/, `${reader} reads through parseSavedRun`);
+  const bothModes = /\[[^\]]*['"`]reuse['"`][^\]]*['"`]rerun['"`][^\]]*\]|\[[^\]]*['"`]rerun['"`][^\]]*['"`]reuse['"`][^\]]*\]/;
+  assert.deepEqual(files.filter((file) => bothModes.test(readFileSync(file, 'utf8'))).map(relative), ['benchmark/results.ts']);
 });
 
 test('the catalog version changes when NEAR\'s listing of a model changes', () => {

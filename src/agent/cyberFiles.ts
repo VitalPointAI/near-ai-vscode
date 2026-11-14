@@ -9,6 +9,8 @@ const SKIP_DIRS = new Set(['.git', 'node_modules', '.hg', '.svn', 'dist', 'out',
 const MAX_DEPTH = 6;
 const MAX_FILES = 4_000;
 const MAX_FILE_BYTES = 1024 * 1024;
+/** The largest file that is read as text for content checks. */
+export const MAX_SCANNABLE_BYTES = MAX_FILE_BYTES;
 
 export interface WorkspaceFile { absolute: string; relative: string }
 
@@ -39,7 +41,12 @@ export async function readScannable(file: WorkspaceFile): Promise<string | undef
   const info = await stat(file.absolute).catch(() => undefined);
   if (!info || !info.isFile() || info.size > MAX_FILE_BYTES) return undefined;
   const bytes = await readFile(file.absolute).catch(() => undefined);
-  if (!bytes) return undefined;
+  return bytes ? scannableText(bytes) : undefined;
+}
+
+/** The same rule for bytes that are already in memory (a file inside a commit): text of a scannable size, undefined for binaries and oversized content. */
+export function scannableText(bytes: Buffer): string | undefined {
+  if (bytes.length > MAX_FILE_BYTES) return undefined;
   if (bytes.subarray(0, 8_000).includes(0)) return undefined;
   return bytes.toString('utf8');
 }

@@ -69,7 +69,7 @@ export async function loadKnowledge(dir: string, team: string): Promise<{ knowle
 export async function saveKnowledge(dir: string, knowledge: TeamKnowledge): Promise<void> {
   const file = knowledgeFile(dir, knowledge.team);
   await mkdir(path.dirname(file), { recursive: true });
-  const temporary = `${file}.${process.pid}.tmp`;
+  const temporary = `${file}.${randomBytes(8).toString('hex')}.tmp`;
   const { problem: _problem, unreadable: _unreadable, ...record } = knowledge;
   await writeFile(temporary, JSON.stringify(record, null, 2), 'utf8');
   await rename(temporary, file);

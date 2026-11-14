@@ -13,7 +13,19 @@ import * as path from 'node:path';
 export const SCRATCH_DIR = '.near-ai/scratch';
 
 /** The lines a project's `.gitignore` needs so scratch work is never committed. */
-export const SCRATCH_IGNORE_LINES: readonly string[] = Object.freeze(['.near-ai/scratch/', '.near-ai/attachments/']);
+export const SCRATCH_IGNORE_LINES: readonly string[] = Object.freeze(['.near-ai/scratch/', '.near-ai/attachments/', '.near-ai/state/']);
+
+/**
+ * The project's state home (D-04): chats, runs, saved comparisons and the project key, shared by every editor that opens this folder. It is
+ * ignored by git on its own, through an inner `.gitignore` containing `*` that is written before anything else in it; the line above is a
+ * second line of defense, not the guarantee.
+ */
+export const STATE_DIR = '.near-ai/state';
+
+/** The absolute state home for a project. Nothing creates it except a person's action. */
+export function stateFolder(root: string): string {
+  return path.join(root, '.near-ai', 'state');
+}
 
 /** The absolute scratch folder for a project. */
 export function scratchFolder(root: string): string {

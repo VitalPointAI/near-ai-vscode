@@ -29,6 +29,14 @@
     const edge = doc.clientWidth;
     const offenders = [];
     const scrollers = [];
+    // Controls marked data-must-read hold words a person has to read whole (the profile name, the sync state): a control whose text is wider
+    // than its box (cut to an ellipsis or clipped) is reported, because that is invisible to the sideways-overflow checks above.
+    const clipped = [];
+    for (const node of document.body.querySelectorAll('[data-must-read]')) {
+      const rect = node.getBoundingClientRect();
+      if (!rect.width && !rect.height) continue;
+      if (node.scrollWidth > node.clientWidth + 1) clipped.push(describe(node) + ' text "' + (node.textContent || '').trim().slice(0, 40) + '" needs ' + node.scrollWidth + 'px in ' + node.clientWidth + 'px');
+    }
     for (const node of document.body.querySelectorAll('*')) {
       const rect = node.getBoundingClientRect();
       if (!rect.width && !rect.height) continue;
@@ -41,7 +49,7 @@
     return {
       type: 'layout-probe-result', width, scrollWidth: doc.scrollWidth, clientWidth: doc.clientWidth,
       bodyScrollWidth: document.body.scrollWidth, bodyClientWidth: document.body.clientWidth,
-      offenders: offenders.slice(0, 25), scrollers: scrollers.slice(0, 25)
+      offenders: offenders.slice(0, 25), scrollers: scrollers.slice(0, 25), clipped: clipped.slice(0, 25)
     };
   };
 })();

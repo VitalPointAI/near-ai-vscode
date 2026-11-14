@@ -43,6 +43,11 @@
   const setupKit = window.nearSetup || { renderSetupNudge: () => undefined, welcomeState: () => 'ready', applyWelcomeState: () => { const ready = $('welcome-ready'); if (ready) ready.hidden = false; } };
   // Until the project has a working profile, the welcome shows only the Connect NEAR AI panel.
   const welcomeReady = $('welcome-ready') || welcome;
+  // The "Pick up where you left off" card; without its helper the chat simply shows no card.
+  const pickupKit = window.nearPickup || { renderPickupCard: () => undefined };
+  // The sync control in the bar and the invitation before sync is on; without its helper the bar keeps its first text and the chat shows no invitation.
+  const syncKit = window.nearSyncControl || { renderSyncControl: () => undefined, renderSyncPrompt: () => undefined };
+  const syncButton = $('sync');
   const welcomeMemory = {};
   if ($('welcome-new-profile')) $('welcome-new-profile').addEventListener('click', () => post({ type: 'new-profile' }));
   if ($('welcome-choose-profile')) $('welcome-choose-profile').addEventListener('click', () => post({ type: 'select-profile' }));
@@ -702,17 +707,20 @@
     return toggle;
   }
 
-  function renderTodos(todos) {
+  // `unconfirmed`: the run ended with items not marked done. They show as not confirmed, never as in progress, and nothing is struck through.
+  function renderTodos(todos, unconfirmed) {
     todoPanel.hidden = !todos.length;
     const list = el('ul');
     todos.forEach((todo) => {
-      const item = el('li', 'todo ' + todo.status, todo.status === 'in_progress' && todo.activeForm ? todo.activeForm : todo.content);
-      item.setAttribute('aria-label', todo.status.replace('_', ' ') + ': ' + todo.content);
+      const open = unconfirmed === true && todo.status !== 'completed';
+      const item = el('li', 'todo ' + todo.status + (open ? ' unconfirmed' : ''), !open && todo.status === 'in_progress' && todo.activeForm ? todo.activeForm : todo.content);
+      item.setAttribute('aria-label', open ? 'not confirmed done: ' + todo.content : todo.status.replace('_', ' ') + ': ' + todo.content);
+      if (open) item.title = 'The run ended without this item marked done.';
       list.append(item);
     });
     const done = todos.filter((todo) => todo.status === 'completed').length;
     const title = el('div', 'todo-title');
-    title.append(panelToggle(list, 'todos-list', 'todosCollapsed', `Tasks · ${done}/${todos.length}`, 'the task list'));
+    title.append(panelToggle(list, 'todos-list', 'todosCollapsed', `Tasks · ${done}/${todos.length}` + (unconfirmed === true && done < todos.length ? ` · ${todos.length - done} not confirmed done` : ''), 'the task list'));
     todoPanel.replaceChildren(title, list);
   }
   function onRunChanges(m) {
@@ -1106,8 +1114,137 @@
     stepConversation(delta);
   });
 
+  // history:begin
+  // A reopened conversation arrives as batches of items: user messages, assistant replies, tool steps, notices and dividers (D-07). They are drawn in
+  // slices of HISTORY_SLICE per animation frame so a long thread never freezes the view (T-27-27), and anything else the host sends meanwhile waits
+  // behind them, so what is on screen stays in the order it happened. Tool output is not sent with the step: the card asks for it when it is opened.
+  const HISTORY_SLICE = 50;
+  const historyQueue = [];
+  let historyFrame = 0;
+  function previewArguments(text) {
+    const flat = String(text || '').replace(/\s+/g, ' ').trim();
+    return flat.length > 100 ? flat.slice(0, 100) + '\u2026' : flat;
+  }
+  function historyToolCard(item) {
+    const details = el('details', 'tool history-tool reopened');
+    details.dataset.entryId = item.entryId;
+    details.dataset.state = item.ok ? 'completed' : 'failed';
+    const summary = el('summary');
+    summary.append(el('strong', '', item.name));
+    const preview = previewArguments(item.args);
+    if (preview) summary.append(el('span', 'history-args', preview));
+    if (item.note) summary.append(el('span', 'history-note', item.note));
+    details.append(summary, el('div', 'log'));
+    return details;
+  }
+  function historyNode(item) {
+    if (item.kind === 'user') return el('div', 'turn user reopened', item.text || '');
+    if (item.kind === 'assistant') {
+      const node = el('div', 'turn assistant reopened');
+      const body = el('div');
+      renderMarkdown(body, item.text || '');
+      node.append(body);
+      return node;
+    }
+    if (item.kind === 'tool') return historyToolCard(item);
+    if (item.kind === 'divider') {
+      const node = el('div', 'history-divider');
+      node.setAttribute('role', 'separator');
+      node.setAttribute('aria-label', item.text || '');
+      node.append(el('span', '', item.text || ''));
+      return node;
+    }
+    const node = el('div', 'turn notice reopened');
+    node.append(el('span', '', item.text || ''));
+    return node;
+  }
+  // A hidden webview never runs an animation frame, so the queue waits on a frame only while the view is visible and on a timer otherwise. Without
+  // that, a reopened conversation and every approval, question and live event behind it stalled until the person looked at the view (T-27-138).
+  let historyTimer = 0;
+  function viewVisible() {
+    return typeof requestAnimationFrame === 'function' && document.visibilityState === 'visible';
+  }
+  function scheduleHistory() {
+    if (historyFrame || historyTimer) return;
+    if (viewVisible()) historyFrame = requestAnimationFrame(drawHistory);
+    else historyTimer = setTimeout(drawHistory, 0);
+  }
+  function cancelHistoryWork() {
+    if (historyFrame) { cancelAnimationFrame(historyFrame); historyFrame = 0; }
+    if (historyTimer) { clearTimeout(historyTimer); historyTimer = 0; }
+  }
+  // Hidden with a frame pending: that frame will not come, so the rest of the queue moves to a timer.
+  document.addEventListener('visibilitychange', () => {
+    if (historyFrame && document.visibilityState !== 'visible') { cancelAnimationFrame(historyFrame); historyFrame = 0; scheduleHistory(); }
+  });
+  function drawHistory() {
+    historyFrame = 0;
+    historyTimer = 0;
+    const fragment = document.createDocumentFragment();
+    let drawn = 0;
+    while (historyQueue.length && drawn < HISTORY_SLICE) {
+      const unit = historyQueue[0];
+      if (unit.message) {
+        // A message that came in behind the history runs once everything before it is on screen.
+        if (drawn) break;
+        historyQueue.shift();
+        onHostMessage(unit.message);
+        continue;
+      }
+      historyQueue.shift();
+      fragment.append(historyNode(unit.item));
+      drawn += 1;
+      if (unit.item.kind === 'notice') announce(unit.item.text || '');
+    }
+    if (fragment.childNodes.length) append(fragment);
+    if (historyQueue.length) scheduleHistory();
+  }
+  /** Takes a host message that belongs behind the history on screen; false when it can be handled now. */
+  function holdForHistory(m) {
+    if (m.type === 'transcript' && Array.isArray(m.items)) {
+      m.items.forEach((item) => historyQueue.push({ item }));
+      // The note goes after the last part, with the last of the items.
+      if (m.note) historyQueue.push({ item: { kind: 'notice', text: m.note } });
+      scheduleHistory();
+      return true;
+    }
+    if (!historyQueue.length) return false;
+    historyQueue.push({ message: m });
+    return true;
+  }
+  function dropHistory() {
+    historyQueue.length = 0;
+    cancelHistoryWork();
+  }
+  // Opening a tool step asks the host for its stored output, once; the answer is shown as text, never as markup (T-27-25).
+  transcript.addEventListener('toggle', (event) => {
+    const card = event.target;
+    if (!card || !card.classList || !card.classList.contains('history-tool') || !card.open || card.dataset.asked) return;
+    card.dataset.asked = '1';
+    const log = card.querySelector('.log');
+    if (log) log.textContent = 'Loading\u2026';
+    postFor({ type: 'thread-tool-output', entryId: card.dataset.entryId });
+  }, true);
+  function showToolOutput(m) {
+    const cards = transcript.querySelectorAll('details.history-tool');
+    for (const card of cards) {
+      if (card.dataset.entryId !== m.entryId) continue;
+      const log = card.querySelector('.log');
+      if (!log) continue;
+      const pre = el('pre');
+      pre.textContent = typeof m.output === 'string' ? m.output : 'The stored output of this step is not available.';
+      log.replaceChildren(pre);
+    }
+  }
+  // history:end
+
   window.addEventListener('message', (event) => {
     const m = event.data || {};
+    if (m.type === 'conversation-show') dropHistory();
+    if (holdForHistory(m)) return;
+    onHostMessage(m);
+  });
+  function onHostMessage(m) {
     // Only under the extension-host tests, which load the layout probe: report this page's layout.
     if (m.type === 'layout-probe' && window.nearAiLayoutProbe) { vscode.postMessage(window.nearAiLayoutProbe()); return; }
     switch (m.type) {
@@ -1116,6 +1253,12 @@
       case 'reset': post({ type: 'new-chat' }); break;
       case 'conversations': renderConversations(m); break;
       case 'setup-nudge': setupKit.renderSetupNudge(document, welcomeReady, m.show === true, post, () => input.focus()); break;
+      case 'pickup-card': pickupKit.renderPickupCard(document, welcomeReady, m.model, post, () => input.focus()); break;
+      case 'sync-status':
+        syncKit.renderSyncControl(document, syncButton, m.model, post);
+        // The invitation sits in the ready area (shown once a profile works, after "Connect NEAR AI to start") and steps aside while the pick-up card carries its own (syncControl.js decides).
+        syncKit.renderSyncPrompt(document, welcomeReady, post, m.prompt === true);
+        break;
       case 'conversation-show': {
         draftsLive = false;
         activeId = m.id;
@@ -1231,7 +1374,7 @@
         break;
       }
       case 'prompt-closed': closePending(m.id, m.outcome === 'cancelled' ? 'cancelled' : 'closed'); break;
-      case 'todos': renderTodos(m.todos || []); break;
+      case 'todos': renderTodos(m.todos || [], m.unconfirmed === true); break;
       case 'run-changes': onRunChanges(m); break;
       case 'run-reverted': {
         const row = document.getElementById('changes-' + m.runId);
@@ -1349,11 +1492,12 @@
         notice(m.note || 'Resumed this conversation with its full context. Continue where you left off.', []);
         break;
       }
+      case 'thread-tool-output': showToolOutput(m); break;
       case 'questions-request': onQuestions(m); break;
       case 'steer-state': onSteerState(m); break;
       default: break;
     }
-  });
+  }
 
   setBusy(false);
   autosize();

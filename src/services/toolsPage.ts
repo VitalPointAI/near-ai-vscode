@@ -6,6 +6,7 @@ import { AuthService } from './auth';
 import { gsdHostFor } from './chat';
 import { providerErrorMessage } from './chatBridge';
 import { isEmergencyStopped, onDidChangeEmergencyStop } from './emergencyStop';
+import { choicesInEffect } from './modelChoices';
 import { mcpRegistry } from './mcpView';
 import { activeProvider } from './providerCache';
 import { securityConsented } from './securityScan';
@@ -126,7 +127,7 @@ export async function gatherDirectoryInput(context: vscode.ExtensionContext, aut
     mcp: servers,
     ...(catalog.models ? { models: catalog.models } : {}),
     ...(catalog.problem ? { modelsProblem: catalog.problem } : {}),
-    settings: { mainModel: settings.defaultModel, tiers, roleModels: readRoleModels(), visionModel: agentModels.visionModel, transcriptionModel: agentModels.transcriptionModel, imageModel: agentModels.imageModel, safetyModel: readSafetyModel(tiers) },
+    settings: { mainModel: settings.defaultModel, tiers, roleModels: readRoleModels(), visionModel: agentModels.visionModel, transcriptionModel: agentModels.transcriptionModel, imageModel: agentModels.imageModel, safetyModel: readSafetyModel(tiers), fromProject: choicesInEffect(root, (setting) => { const configuration = vscode.workspace.getConfiguration('nearAi'); return typeof configuration.inspect === 'function' ? configuration.inspect(setting) : undefined; }) },
     ...(reportingToken ? { reportingToken } : {})
   };
 }

@@ -73,6 +73,41 @@
         "icon": "$(history)"
       },
       {
+        "command": "nearAi.sync.turnOn",
+        "title": "Turn On Project Sync",
+        "category": "NEAR AI"
+      },
+      {
+        "command": "nearAi.sync.now",
+        "title": "Sync Project Now",
+        "category": "NEAR AI"
+      },
+      {
+        "command": "nearAi.sync.enterRecoveryCode",
+        "title": "Enter Recovery Code",
+        "category": "NEAR AI"
+      },
+      {
+        "command": "nearAi.sync.newRecoveryCode",
+        "title": "Show a New Recovery Code",
+        "category": "NEAR AI"
+      },
+      {
+        "command": "nearAi.sync.turnOff",
+        "title": "Turn Off Project Sync",
+        "category": "NEAR AI"
+      },
+      {
+        "command": "nearAi.sync.onlineHome",
+        "title": "Give This Project an Online Home",
+        "category": "NEAR AI"
+      },
+      {
+        "command": "nearAi.sync.pushCode",
+        "title": "Put This Project's Code Online",
+        "category": "NEAR AI"
+      },
+      {
         "command": "nearAi.openTools",
         "title": "Open Tools",
         "category": "NEAR AI",
@@ -243,6 +278,11 @@
         "title": "Compare Models",
         "category": "NEAR AI",
         "icon": "$(beaker)"
+      },
+      {
+        "command": "nearAi.clearProjectModelChoices",
+        "title": "Clear This Project's Model Choices",
+        "category": "NEAR AI"
       }
     ],
     "viewsContainers": {
@@ -350,7 +390,7 @@
         "nearAi.defaultModel": {
           "type": "string",
           "default": "z-ai/glm-5.3",
-          "description": "Model used for new chats. If NEAR AI doesn't offer it, the first available chat model is used."
+          "description": "Model used for new chats. If NEAR AI doesn't offer it, the first available chat model is used. A model chosen for this project in Compare Models is used instead of this setting until you clear it there or with NEAR AI: Clear This Project's Model Choices."
         },
         "nearAi.actionPolicy": {
           "type": "string",
@@ -465,22 +505,22 @@
         "nearAi.agent.deepModel": {
           "type": "string",
           "default": "moonshotai/kimi-k3",
-          "description": "Model for Open-GSD sub-agents in the deep tier (opus). If your provider does not offer it, the chat's model is used."
+          "description": "Model for Open-GSD sub-agents in the deep tier (opus). If your provider does not offer it, the chat's model is used. A model chosen for this project in Compare Models is used instead of this setting until you clear it there or with NEAR AI: Clear This Project's Model Choices."
         },
         "nearAi.agent.standardModel": {
           "type": "string",
           "default": "z-ai/glm-5.3",
-          "description": "Model for Open-GSD sub-agents in the standard tier (sonnet). If your provider does not offer it, the chat's model is used."
+          "description": "Model for Open-GSD sub-agents in the standard tier (sonnet). If your provider does not offer it, the chat's model is used. A model chosen for this project in Compare Models is used instead of this setting until you clear it there or with NEAR AI: Clear This Project's Model Choices."
         },
         "nearAi.agent.fastModel": {
           "type": "string",
           "default": "Qwen/Qwen3.6-35B-A3B-FP8",
-          "description": "Model for Open-GSD sub-agents in the fast tier (haiku). If your provider does not offer it, the chat's model is used."
+          "description": "Model for Open-GSD sub-agents in the fast tier (haiku). If your provider does not offer it, the chat's model is used. A model chosen for this project in Compare Models is used instead of this setting until you clear it there or with NEAR AI: Clear This Project's Model Choices."
         },
         "nearAi.agent.safetyModel": {
           "type": "string",
           "default": "",
-          "description": "Model that checks shell commands the rules cannot decide when nearAi.actionPolicy is auto. Empty uses the fast tier (nearAi.agent.fastModel). It is used only when it runs privately (in NEAR's TEE or on a local runtime); otherwise those commands ask."
+          "description": "Model that checks shell commands the rules cannot decide when nearAi.actionPolicy is auto. Empty uses the fast tier (nearAi.agent.fastModel). It is used only when it runs privately (in NEAR's TEE or on a local runtime); otherwise those commands ask. A model chosen for this project in Compare Models is used instead of this setting until you clear it there or with NEAR AI: Clear This Project's Model Choices."
         },
         "nearAi.agent.maxParallelAgents": {
           "type": "number",
@@ -516,22 +556,42 @@
         "nearAi.agent.saveTranscripts": {
           "type": "boolean",
           "default": true,
-          "description": "Save full conversations (including file contents the agent read) in VS Code's extension storage on this machine so they can be resumed from History. Never saved in the project."
+          "description": "Save full conversations (including file contents the agent read), encrypted, in this project's git-ignored state folder (.near-ai/state) so every editor on this computer shows the same chats and they can be resumed from History. They are never committed."
+        },
+        "nearAi.history.liveConversations": {
+          "type": "number",
+          "default": 5,
+          "minimum": 1,
+          "maximum": 50,
+          "description": "How many of the most recently used conversations per project stay fully open. Older ones are archived inside the project, never deleted, and reopen in full when you choose them."
+        },
+        "nearAi.sync.intervalMinutes": {
+          "type": "number",
+          "default": 10,
+          "minimum": 0,
+          "maximum": 1440,
+          "description": "How often, in minutes, this project syncs in the background while you are not running anything. 0 turns the background sync off. Project sync itself runs only after you turn it on (NEAR AI: Turn On Project Sync)."
+        },
+        "nearAi.sync.keepKeyInProject": {
+          "type": "boolean",
+          "default": true,
+          "description": "Keeps this project's chat key in a private file inside the project's ignored state folder, so every editor on this computer can open the chats. Turn this off to keep the key only in each editor's secret storage; each new editor or browser then asks for the recovery code.",
+          "markdownDescription": "Keeps this project's chat key in a private file inside the project's ignored state folder, so every editor on this computer can open the chats. Turn this off to keep the key only in each editor's secret storage; each new editor or browser then asks for the recovery code.\n\n[Turn on project sync](command:nearAi.sync.turnOn) to keep this project on your other machines."
         },
         "nearAi.agent.visionModel": {
           "type": "string",
           "default": "z-ai/glm-5.3-flash",
-          "description": "Reads image attachments when the chat's model can't (private by default)."
+          "description": "Reads image attachments when the chat's model can't (private by default). A model chosen for this project in Compare Models is used instead of this setting until you clear it there or with NEAR AI: Clear This Project's Model Choices."
         },
         "nearAi.agent.transcriptionModel": {
           "type": "string",
           "default": "openai/whisper-large-v3",
-          "description": "Transcribes audio attachments (private by default)."
+          "description": "Transcribes audio attachments (private by default). A model chosen for this project in Compare Models is used instead of this setting until you clear it there or with NEAR AI: Clear This Project's Model Choices."
         },
         "nearAi.agent.imageModel": {
           "type": "string",
           "default": "black-forest-labs/FLUX.2-klein-4B",
-          "description": "Model the agent's GenerateImage tool uses (private by default). The tool is offered only when your provider lists this model."
+          "description": "Model the agent's GenerateImage tool uses (private by default). The tool is offered only when your provider lists this model. A model chosen for this project in Compare Models is used instead of this setting until you clear it there or with NEAR AI: Clear This Project's Model Choices."
         },
         "nearAi.activity.retentionMinutes": {
           "type": "number",
@@ -677,7 +737,7 @@
             "*fetch*": "fast",
             "*extract*": "fast"
           },
-          "markdownDescription": "Model for each agent role: a tier (`deep`, `standard`, `fast`) or a NEAR model ID, by agent name or a `*` pattern. Research and mapping roles read large inputs in parallel, so they default to the cheaper fast tier; bulk fetch and extract roles do too. Planner, plan-checker, verifier, analyst, editor and red-team roles default to the deep tier, because their judgement decides the outcome. A team member's own `model:` line wins, and an agent never uses a model less private than the chat's."
+          "markdownDescription": "Model for each agent role: a tier (`deep`, `standard`, `fast`) or a NEAR model ID, by agent name or a `*` pattern. Research and mapping roles read large inputs in parallel, so they default to the cheaper fast tier; bulk fetch and extract roles do too. Planner, plan-checker, verifier, analyst, editor and red-team roles default to the deep tier, because their judgement decides the outcome. A team member's own `model:` line wins, and an agent never uses a model less private than the chat's. A model chosen for this project in Compare Models is used instead of this setting until you clear it there or with NEAR AI: Clear This Project's Model Choices."
         }
       }
     },

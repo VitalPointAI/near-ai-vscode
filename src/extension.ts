@@ -7,9 +7,16 @@ import { isNearAiProject } from './gsd/runtime';
 import { saveHandoff } from './services/handoff';
 import { AuthService } from './services/auth';
 import { ProfileStore } from './services/profileStore';
+import { apiKeyCopyHooks } from './services/stateApiKey';
+import { editorWriter, stateHomeFor } from './services/stateHome';
+import { configureMigration, ensureMigrated } from './services/stateMigration';
+import { mirrorProjectSpend } from './services/spendMirror';
+import { onRunEnded } from './services/runEndHooks';
+import * as path from 'node:path';
+import { stateKeysFor } from './services/stateKeys';
 import { initProfileIndex, listSavedProfiles, runUseSavedProfile } from './services/profileIndex';
 import { GsdRuntime, startRuntimeUpdates } from './gsd/runtime';
-import { readAgentLimits, readModelTiers, readSettings, shouldAutoInstallGsd } from './services/settings';
+import { readAgentLimits, readHistoryLimits, readModelTiers, readSettings, shouldAutoInstallGsd } from './services/settings';
 import { activeProvider } from './services/providerCache';
 import { modelOptions } from './services/chatBridge';
 import { chatHandoff, runApprovedCommand } from './services/cyberHandoff';
@@ -29,12 +36,14 @@ import { openCyberPanel } from './services/cyberPanel';
 import { cyberPanelService } from './services/cyberService';
 import { registerModelComparison } from './services/modelComparisonPanel';
 import { openTeamStudio } from './services/teamStudioPanel';
-import { sharedTranscriptKey, TranscriptStore } from './services/transcripts';
+import { historyItems, LOCKED_DETAIL, threadStoreFor } from './services/threadStore';
 import { chooseGsdCommand } from './services/gsdCommands';
 import { NearAiPanelViewProvider } from './services/panelView';
+import { openConversationIds } from './services/chat';
 import { deriveProfileId } from './domain/auth';
 import { isSecureEndpoint } from './domain/config';
 import { registerChatParticipant } from './services/chatParticipant';
+import { openThreadInPanel } from './services/participantRecorder';
 import { registerWorkspaceCommands } from './services/workspaceCommands';
 import { initEmergencyStop, isEmergencyStopped, setEmergencyStop } from './services/emergencyStop';
 import { clearProviderCache } from './services/providerCache';
@@ -42,6 +51,8 @@ import { setNearAiDiagnostics } from './services/nearAiClient';
 import { closeInterruptedRuns } from './services/activityStore';
 import { offerProxyAdvice } from './domain/proxyAdvice';
 import { offerNextStep, registerNewProfile, registerProjectSetup } from './services/setupMenu';
+import { flushSyncOnClose, registerSyncCommands } from './services/syncCommands';
+import { registerCodePushCommand } from './services/onlineHomeVscode';
 
 /** Returned only to the extension-host tests, which set NEAR_AI_E2E=1. */
 export interface NearAiTestApi { auth: AuthService; sidebar: NearAiPanelViewProvider }
@@ -68,6 +79,17 @@ export function activate(context: vscode.ExtensionContext): NearAiTestApi | unde
   const nearLog = vscode.window.createOutputChannel('NEAR AI');
   setNearAiDiagnostics((line) => nearLog.appendLine(`[${new Date().toISOString()}] ${line}`));
   context.subscriptions.push(nearLog, { dispose: () => setNearAiDiagnostics(undefined) });
+  // A second editor on this computer uses this project's NEAR AI key from its sealed copy in the project's state home, with no prompt (D-15). Nothing
+  // is created here: the state home appears only when a key is saved, so opening a folder still writes nothing.
+  const keyCopyRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  if (keyCopyRoot) {
+    auth.keyCopy = apiKeyCopyHooks({
+      projectScopeId: new ProfileStore(keyCopyRoot).projectScopeId,
+      home: stateHomeFor(keyCopyRoot),
+      keys: stateKeysFor(keyCopyRoot, context.secrets, () => vscode.workspace.getConfiguration('nearAi').get<boolean>('sync.keepKeyInProject', true)),
+      log: (line) => nearLog.appendLine(`[${new Date().toISOString()}] ${line}`)
+    });
+  }
   if (shouldAutoInstallGsd()) {
     void startRuntimeUpdates(new GsdRuntime(context.globalStorageUri.fsPath), vscode.workspace.workspaceFolders?.[0]?.uri.fsPath, (message, failed) => {
       void (failed ? vscode.window.showWarningMessage(message) : vscode.window.showInformationMessage(message));
@@ -76,7 +98,23 @@ export function activate(context: vscode.ExtensionContext): NearAiTestApi | unde
 
   // A reload cut off any run still marked running in this project's history: record it as stopped.
   const projectRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-  if (projectRoot) void closeInterruptedRuns(projectRoot);
+  if (projectRoot) void closeInterruptedRuns(projectRoot, editorWriter(context.globalState));
+
+  // What this editor's own storage holds for the project (conversations, runs in flight, checkpoints, comparisons, spend) is merged into the project's
+  // state home, once, without deleting or changing anything there (D-05). It runs now only for a project the person has set up; any other folder waits
+  // for the first chat, history or Compare Models action, so opening a folder still writes nothing.
+  configureMigration(context, auth, {
+    keepKeyInProject: () => vscode.workspace.getConfiguration('nearAi').get<boolean>('sync.keepKeyInProject', true),
+    liveConversations: () => readHistoryLimits().liveConversations,
+    protectedIds: openConversationIds,
+    log: (line) => nearLog.appendLine(`[${new Date().toISOString()}] ${line}`)
+  });
+  if (projectRoot) void isNearAiProject(projectRoot).then((nearAi) => (nearAi ? ensureMigrated(projectRoot) : undefined)).catch(() => undefined);
+  // After every run, this project's spend from this editor's ledger is mirrored into the state home so every editor can show the history (D-11). The
+  // daily spend limit is not touched: it still counts only this editor's own ledger.
+  context.subscriptions.push(onRunEnded(async (event) => {
+    await mirrorProjectSpend({ ledgerRoot: path.join(context.globalStorageUri.fsPath, 'spend'), projectScopeId: new ProfileStore(event.root).projectScopeId, home: stateHomeFor(event.root), recentMonths: 2 });
+  }));
 
   // In code-server and remote windows, suggest turning off VS Code's proxy support when no proxy is
   // used: a background browser tab otherwise stalls agent runs. Asked once; changed only on the click.
@@ -146,6 +184,11 @@ export function activate(context: vscode.ExtensionContext): NearAiTestApi | unde
       stopped: () => readSettings().actionPolicy.emergencyStop
     }))),
     vscode.commands.registerCommand('nearAi.showHistory', () => showHistory(context, sidebar)),
+    // The button under every @near reply (D-07). It is a command the button calls, not a Command Palette entry: it needs a thread id.
+    vscode.commands.registerCommand('nearAi.openThread', (threadId?: unknown) => openThreadInPanel(threadId, {
+      focus: () => vscode.commands.executeCommand(`${NearAiPanelViewProvider.viewId}.focus`),
+      resume: (id) => sidebar.request({ type: 'resume-conversation', id })
+    }, (text) => { void vscode.window.showWarningMessage(text); })),
     vscode.commands.registerCommand('nearAi.gsdCommand', async () => {
       const selected = await chooseGsdCommand();
       if (selected) await sidebar.request({ type: 'open-command', command: `gsd-${selected.command}` });
@@ -159,6 +202,9 @@ export function activate(context: vscode.ExtensionContext): NearAiTestApi | unde
   registerWorkspaceCommands(context, (options) => openTeamStudio(context, auth, sidebar, options));
   registerProjectSetup(context, { secrets: context.secrets, chatVisible: () => sidebar.visible });
   registerNewProfile(context, () => configureApiKey(context, auth, sidebar));
+  // Project sync (D-17): the commands, the safe moments it runs at, and the status the chat panel's control shows. It runs only once the person has turned it on.
+  registerSyncCommands(context, auth);
+  registerCodePushCommand(context);
 
   // `@nearAi` in VS Code's built-in Chat view; skipped on hosts without the Chat Participant API.
   registerChatParticipant(context, auth, (command, args) => sidebar.request({ type: 'open-command', command, ...(args ? { args } : {}) }));
@@ -184,15 +230,18 @@ async function suggestProxySupportOff(context: vscode.ExtensionContext): Promise
 async function showHistory(context: vscode.ExtensionContext, sidebar: NearAiPanelViewProvider): Promise<void> {
   const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   if (!root) { void vscode.window.showInformationMessage('Open a folder to see NEAR AI conversations.'); return; }
-  const saved = await new TranscriptStore(context.globalStorageUri.fsPath, root, sharedTranscriptKey(context.secrets)).list();
+  // A person asked for the list: conversations from before 0.4.20 that this editor kept in its own storage are merged in first.
+  await ensureMigrated(root);
+  // D-08: the list is the thread index (the threads' small meta files); no log is opened for any item. Every thread is listed: live, archived, from the
+  // Chat view, or locked on this device.
+  const saved = await threadStoreFor(root, context.secrets, editorWriter(context.globalState), () => vscode.workspace.getConfiguration('nearAi').get<boolean>('sync.keepKeyInProject', true)).index();
   if (!saved.length) { void vscode.window.showInformationMessage(readAgentLimits().saveTranscripts ? 'No saved NEAR AI conversations in this project yet.' : 'Saving conversations is off (nearAi.agent.saveTranscripts).'); return; }
-  const picked = await vscode.window.showQuickPick(saved.map((conversation) => ({
-    label: conversation.title,
-    description: `${conversation.turns} message${conversation.turns === 1 ? '' : 's'}`,
-    detail: `${new Date(conversation.updatedAt).toLocaleString()} · ${conversation.model}`,
-    id: conversation.id
-  })), { placeHolder: 'Open a NEAR AI conversation as a tab, with its full context', matchOnDescription: true, matchOnDetail: true });
-  if (picked) await sidebar.request({ type: 'resume-conversation', id: picked.id });
+  // Typing filters by title (the label); the description and detail are searched too, so "Archived" or a model name also finds them.
+  const picked = await vscode.window.showQuickPick(historyItems(saved), { placeHolder: 'Open a NEAR AI conversation as a tab, with its full context. Type to filter by title.', matchOnDescription: true, matchOnDetail: true });
+  if (!picked) return;
+  // A locked conversation is listed so it never seems to have vanished, but it cannot be opened on this device.
+  if (picked.locked) { void vscode.window.showInformationMessage(LOCKED_DETAIL); return; }
+  await sidebar.request({ type: 'resume-conversation', id: picked.id });
 }
 
 async function saveCheckpoint(): Promise<void> {
@@ -384,6 +433,7 @@ async function showStatus(auth: AuthService): Promise<void> {
   void vscode.window.showInformationMessage(message, { modal: true });
 }
 
-export function deactivate(): void {
-  // Reserved for future provider and agent lifecycle cleanup.
+export async function deactivate(): Promise<void> {
+  // One push, cut off after three seconds and never relied on: the run-end and idle syncs are the reliable path (D-17).
+  await flushSyncOnClose();
 }

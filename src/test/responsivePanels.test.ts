@@ -49,7 +49,7 @@ test('grids never ask for more width than the panel has', () => {
 test('each page has narrow-width rules', () => {
   const chat = css('chat/chat.css');
   assert.match(chat, /#transcript \{[^}]*overflow-x: hidden;/);
-  assert.match(chat, /@media \(max-width: 260px\) \{[\s\S]*\.composer \.bar \{ flex-wrap: wrap;/);
+  assert.match(chat, /\n\.composer \.bar \{ display: flex; flex-wrap: wrap;/, 'the bar wraps at every width, outside any media query (G-27-4a)');
   assert.match(chat, /@media \(max-width: 220px\) \{[\s\S]*\.conversation-tab \{ max-width: 100px; \}/);
   assert.match(chat, /#commands \[role="option"\] strong \{ flex: 0 1 auto; min-width: 0;/, 'a long command name shortens instead of widening the menu');
   assert.match(chat, /\.questions \.option \{ display: grid; grid-template-columns: auto minmax\(0, 1fr\);/);

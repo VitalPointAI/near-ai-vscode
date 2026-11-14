@@ -1,10 +1,10 @@
 import { execFile } from 'node:child_process';
-import { createHash, randomBytes } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import * as path from 'node:path';
 import { RunCheckpoints } from '../agent/checkpoints';
 import { compactConversation, contextAction, contextStatus, DEFAULT_COMPACT_AT_TOKENS, DEFAULT_CONTEXT_WINDOW, DEFAULT_THRESHOLDS, estimateTokens, trimOldToolResults } from '../agent/context';
-import { AgentEvent, AgentRun, AgentRunError, ApprovalReply, ApprovalRequest, AWAITING_APPROVAL_PREFIX, RunInput, RunOutcome, RunResult } from '../agent/loop';
+import { AgentEvent, AgentRun, AgentRunError, ApprovalReply, ApprovalRequest, AWAITING_APPROVAL_PREFIX, DEFAULT_MAX_TURNS, RunInput, RunOutcome, RunResult } from '../agent/loop';
 import { countersOf, runSplitOf } from './activityOverview';
 import { PermissionRules, RunGrants } from '../agent/permissions';
 import { SafetyModelCheck } from '../agent/safetyModel';
@@ -17,7 +17,7 @@ import type { SearchProvider } from '../agent/webSearch';
 import { SecurityAccess, securityTool } from '../agent/securityTool';
 import { AgentTool, CORE_TOOLS, Todo, ToolContext } from '../agent/tools';
 import type { CyberRunAccess } from './cyberRun';
-import { TaskBoard } from '../agent/taskBoard';
+import { TaskBoard, endsWithQuestion } from '../agent/taskBoard';
 import { displayPath, ToolError } from '../agent/workspace';
 import { AgentWorktree, createAgentWorktree, finishAgentWorktree, worktreeReport } from '../agent/worktree';
 import type { ActionPolicy } from '../domain/policy';
@@ -35,7 +35,10 @@ import { cleanScratch } from './scratch';
 import { scriptsNamedIn } from '../agent/unattended';
 import { planCheckSkip, researchProfileActive } from '../gsd/researchProfile';
 import type { AgentMessage, ModelInfo, NearAiClient, UsageMetadata } from './nearAiClient';
-import { TranscriptStore } from './transcripts';
+import { contentKey, commandForm } from '../domain/state/threadCapture';
+import { entriesToMessages, entriesToView, type ViewItem } from '../domain/state/threadView';
+import { ThreadStore } from './threadStore';
+import type { ConversationStore, Transcript } from './transcripts';
 import type { RunEnd, RunMarkers } from './runMarkers';
 import { NOT_CHECKED_IN_EDITOR, type ResponseEvidence, type VerificationResult } from './attestation';
 import { PreparedAttachments } from '../agent/attachments';
@@ -191,6 +194,8 @@ export function steeringContent(text: string): string {
 const headCommit = (root: string): Promise<string | undefined> => new Promise((resolve) => {
   execFile('git', ['rev-parse', '--verify', '--quiet', 'HEAD'], { cwd: root, timeout: 10_000, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } }, (error, stdout) => resolve(error ? undefined : String(stdout).trim() || undefined));
 });
+/** The text of the last assistant message in a transcript, or an empty string when there is none. */
+const lastAssistantText = (transcript: AgentMessage[]): string => { for (let index = transcript.length - 1; index >= 0; index -= 1) { const message = transcript[index]; if (message.role === 'assistant') return message.content ?? ''; } return ''; };
 const minutesSince = (at: number) => { const seconds = Math.max(0, Math.round((Date.now() - at) / 1000)); return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)} min`; };
 
 /**
@@ -222,6 +227,8 @@ export class AgentConversation {
   private readonly verifiable = new Map<string, { model: string; evidence: ResponseEvidence; client: NearAiClient }>();
   /** What the user typed, keyed by a hash of the message the model saw (survives compaction). */
   private display = new Map<string, string>();
+  /** Messages already written to the thread log (D-07). A message is logged once, before the model's context can replace it with a trimmed copy or a summary. */
+  private readonly logged = new WeakSet<AgentMessage>();
   private conversationId = newConversationId();
   private title = '';
   private shell: ShellSession | undefined;
@@ -273,12 +280,17 @@ export class AgentConversation {
     private readonly post: (message: Record<string, unknown>) => void,
     private readonly checkpointDir: string,
     private readonly ripgrepPath?: string,
-    private readonly transcripts?: TranscriptStore,
+    private readonly transcripts?: ConversationStore,
     private readonly activity?: ActivityFeed
   ) {}
 
+  /** The folder for sub-agents' git worktrees. The chat sets it to the editor's own storage: a worktree is a full checkout and never belongs in the project. */
+  public worktreeRoot: string | undefined;
+  /** Awaited before each checkpoint save; the chat sets it to the state home's ensure(), so the inner .gitignore exists before any checkpoint file. */
+  public checkpointPrepare: (() => Promise<unknown>) | undefined;
+
   /** Where sub-agents' git worktrees live: the extension's storage, never the project. */
-  private get worktreeDir(): string { return path.join(path.dirname(this.checkpointDir), 'worktrees'); }
+  private get worktreeDir(): string { return this.worktreeRoot ?? path.join(path.dirname(this.checkpointDir), 'worktrees'); }
 
   public get running(): boolean { return Boolean(this.abort); }
   /** This conversation's ID (spend for "this conversation" is tagged with it). */
@@ -315,12 +327,13 @@ export class AgentConversation {
     const runId = request.runId ?? AgentConversation.newRunId();
     const account = request.local ? undefined : spendAccountOf(request.client);
     this.runSpendSource = account ? { runId, account } : undefined;
-    const checkpoints = new RunCheckpoints(runId, this.checkpointDir);
+    const checkpoints = new RunCheckpoints(runId, this.checkpointDir, { root: this.root, allowedRoots: [this.worktreeDir], ...(this.checkpointPrepare ? { beforeWrite: this.checkpointPrepare } : {}) });
     this.runs.set(runId, checkpoints);
     this.shellEnvAllow = request.shellEnvAllow ?? [];
     const shell = this.shellFor(request.gsd?.shellEnv ?? {});
-    const freshConversation = !this.messages.length;
-    if (freshConversation) this.messages.push({ role: 'system', content: this.systemPrompt(request, this.root, this.spawnableAgents(request).length > 0) });
+    // A thread reopened from the log alone (one begun in the Chat view) has history and no system prompt: it gets the panel's, first.
+    const freshConversation = this.messages[0]?.role !== 'system';
+    if (freshConversation) this.messages.unshift({ role: 'system', content: this.systemPrompt(request, this.root, this.spawnableAgents(request).length > 0) });
     if (!this.title) this.title = request.text.replace(/\s+/g, ' ').slice(0, 80);
     let prompt = request.text;
     if (request.team) prompt = teamLeadPrompt(request.team, request.text.replace(/^\/team:\S+\s*/, ''));
@@ -340,6 +353,7 @@ export class AgentConversation {
     const conversationId = this.conversationId;
     let ended: RunEnd = 'failed';
     await this.runMarkers?.start({ conversationId, runId, model: request.model });
+    this.markerRun = { conversationId, runId };
     const mainId = `main-${runId}`;
     this.mainAgentId = mainId;
     // Every agent of this run judges a script's provenance from this moment: anything written since asks (review of PR 34).
@@ -361,6 +375,10 @@ export class AgentConversation {
     // One safety check per run, shared with sub-agents, so each command is asked about once.
     const safety = request.policy.mode === 'auto' && request.safetyModel ? new SafetyModelCheck({ client: request.client, model: request.safetyModel, fallbackModel: request.safetyFallbackModel, task: request.text, onUsage: (usage) => extraUsage.push(usage) }) : undefined;
     this.runSafety = safety;
+    // The list as this run found it: a run that never touched it asks for no reminder and flags nothing at its end.
+    const tasksAtStart = this.tasks.revision;
+    let taskCheckSent = false;
+    let mainTurns = 0;
     const run = new AgentRun({
       client: request.client,
       model: request.model,
@@ -380,12 +398,25 @@ export class AgentConversation {
         this.enforceBudget(request, abort);
         await this.whileRunPaused(signal);
         const pending = this.drainNotifications();
-        const managed = await this.manageContext(pending.length ? [...transcript, ...pending] : transcript, lastUsage, request, signal, true);
-        const next = managed ?? (pending.length ? [...transcript, ...pending] : undefined);
+        const input = pending.length ? [...transcript, ...pending] : transcript;
+        // D-07: the originals go into the thread log first; managing the context may replace them with trimmed copies or a summary.
+        const captured = await this.captureThread(request.model, input);
+        const managed = await this.manageContext(input, lastUsage, request, signal, true);
+        const next = managed ?? (pending.length ? input : undefined);
+        if (captured) for (const message of next ?? transcript) this.logged.add(message);
         await this.saveRunState(request.model, runId, next ?? transcript);
         return next;
       },
-      afterAnswer: async (_transcript, signal) => this.waitForBackground(signal),
+      afterAnswer: async (transcript, signal) => {
+        const background = await this.waitForBackground(signal);
+        if (background?.length) return background;
+        if (taskCheckSent) return undefined;
+        // A closing question, or a question still waiting for the person, stays the last thing they see: no extra paid turn to bury it (the list is shown as not confirmed done at the run's end).
+        if (this.questions.size || endsWithQuestion(lastAssistantText(transcript))) return undefined;
+        const check = this.taskListCheck(tasksAtStart, signal, (request.maxTurns ?? DEFAULT_MAX_TURNS) - mainTurns);
+        if (check) taskCheckSent = true;
+        return check;
+      },
       // PERF-05: the state is saved after every finished call too, not only before each model turn, so a reload mid-batch keeps the finished results.
       onProgress: (transcript) => this.saveRunState(request.model, runId, transcript),
       input: this.steeringInput,
@@ -395,6 +426,8 @@ export class AgentConversation {
         this.track(mainId, event);
         if (event.type !== 'reasoning' && event.type !== 'turn') this.markVisible();
         if (event.type === 'tool-start') void this.runMarkers?.step(conversationId, runId, event.tool);
+        if (event.type === 'turn') mainTurns += 1;
+        // Every post of the main task list goes through this.tasks, so a host mark is never overwritten by a stale list.
         if (event.type === 'todos') this.post({ type: 'todos', todos: this.tasks.write(event.todos) });
         else this.forward(event, request.model, record);
       }
@@ -415,6 +448,9 @@ export class AgentConversation {
         // Keep what the run did, so the next message continues from there.
         if (error instanceof AgentRunError) { this.messages = error.messages; await this.saveTranscript(request.model); throw error.cause; }
         throw error;
+      } finally {
+        // Whatever way the run ended, a list it touched and left unfinished is shown as not confirmed done.
+        this.settleTaskList(tasksAtStart);
       }
       this.activity?.agentEnded(mainId, result.outcome);
       await this.recordRunSplit(request, mainId, [...result.usage, ...extraUsage]);
@@ -458,6 +494,7 @@ export class AgentConversation {
       clearInterval(heartbeat);
       if (this.abort === abort) this.abort = undefined;
       this.releasePending();
+      this.markerRun = undefined;
       // Stopped or failed runs are reconciled too: NEAR bills what they used.
       if (account && !costAsked) void account.settleNow((entry) => entry.runId === runId);
       await this.runMarkers?.end(conversationId, runId, ended);
@@ -590,15 +627,18 @@ export class AgentConversation {
 
   /** Undoes every file change a run made with the file tools. */
   public async revert(runId: string): Promise<string[]> {
-    const checkpoints = this.runs.get(runId) ?? await RunCheckpoints.load(runId, this.checkpointDir);
+    const checkpoints = this.runs.get(runId) ?? await RunCheckpoints.load(runId, this.checkpointDir, { root: this.root, allowedRoots: [this.worktreeDir], ...(this.checkpointPrepare ? { beforeWrite: this.checkpointPrepare } : {}) });
     if (!checkpoints) return [];
     const restored = await checkpoints.revert();
     this.runs.delete(runId);
     return restored.map((file) => displayPath(this.root, file));
   }
 
-  /** Continues an earlier conversation with its full context; returns its visible turns for the view. */
-  public async restore(id: string): Promise<Array<{ role: 'user' | 'assistant'; text: string; tools: number }> | undefined> {
+  /**
+   * Continues an earlier conversation with its full context; returns what the view shows. A thread kept by the thread store comes back as `items`: every
+   * entry of its log, tool steps included (D-07). Another store has only the saved messages, so it comes back as the visible turns.
+   */
+  public async restore(id: string): Promise<RestoredView | undefined> {
     const transcript = await this.transcripts?.load(id);
     if (!transcript) return undefined;
     this.reset();
@@ -607,7 +647,29 @@ export class AgentConversation {
     this.display = new Map(transcript.display ?? []);
     this.conversationId = transcript.id;
     this.title = transcript.title;
-    return visibleTurns(transcript.messages, this.display);
+    const store = this.transcripts;
+    let items: ViewItem[] | undefined;
+    if (store instanceof ThreadStore) {
+      // D-07: the view comes from the thread log, which holds every message. The saved context is what the model continues from, unless the thread was
+      // continued somewhere else since (the log's main line ends at another entry): then the context is rebuilt from the log, so nothing that was said is missing.
+      const lines = await store.lines(id).catch(() => undefined);
+      const tip = lines?.main.at(-1)?.id ?? '';
+      if (lines && tip && transcript.basedOnTip !== tip) {
+        const system = this.messages[0]?.role === 'system' ? [this.messages[0]] : [];
+        this.messages = [...system, ...entriesToMessages(lines.main)];
+        store.cover(id, tip);
+      }
+      if (lines?.main.length) items = entriesToView(lines, { history: (await store.meta(id).catch(() => undefined))?.history });
+    }
+    // What was just loaded is already in the log (or is the model's own text); it is never written again.
+    for (const message of this.messages) this.logged.add(message);
+    return items ? { items } : visibleTurns(transcript.messages, this.display);
+  }
+
+  /** The stored output of one tool step of this conversation, for a reopened card that was opened (D-07). Only the thread store keeps it. */
+  public async toolOutput(entryId: string): Promise<string | undefined> {
+    const store = this.transcripts;
+    return store instanceof ThreadStore ? store.toolOutput(this.conversationId, entryId) : undefined;
   }
 
   public reset(): void {
@@ -638,7 +700,7 @@ export class AgentConversation {
     // Open-GSD note so a workflow's own instructions read as the more specific direction.
     const base = `${agentSystemPrompt({ security: Boolean(request.security), agentTool, root, platform: `${process.platform} ${process.arch}`, date: new Date().toISOString().slice(0, 10), isGitRepo: insideGitRepo(root), model: request.model })}${projectInstructions(root)}\n\n${SCRATCH_INSTRUCTIONS}\n\n${WAITING_INSTRUCTIONS}${request.team ? `\n\n${KNOWLEDGE_INSTRUCTIONS}` : ''}`;
     if (!request.gsd) return base;
-    return `${base}\n\n# Open-GSD\nOpen-GSD is installed at ${request.gsd.home} (read-only to you). Its skills, agents, workflows, templates, and references live there; read them with Read when instructions point to them. Run gsd-tools as the workflows show; CLAUDE_CONFIG_DIR is already set in your shell. ${agentTool ? 'When a workflow says to spawn an agent, use the Agent tool with that subagent_type (run_in_background works). Run each plan, task and research workstream as its own sub-agent with a fresh context, and ask it to end with a short summary (what changed, how it was verified, what is still open) rather than its working notes: your context stays small, which keeps every later turn fast. When the agent does an item on your task list, pass that item\'s exact content as the Agent call\'s task: the list then shows it in progress and marks it completed (or back to pending) when the agent ends, even while other agents still run. Background agents\' reports arrive as messages on their own: once you have nothing else to do, end your turn to wait for them. Never wait with sleep or by polling for output files.' : 'You have no Agent tool here: when a workflow says to spawn an agent, do that part of the work yourself.'} When it says to ask the user, use AskUserQuestion.`;
+    return `${base}\n\n# Open-GSD\nOpen-GSD is installed at ${request.gsd.home} (read-only to you). Its skills, agents, workflows, templates, and references live there; read them with Read when instructions point to them. Run gsd-tools as the workflows show; CLAUDE_CONFIG_DIR is already set in your shell. ${agentTool ? 'When a workflow says to spawn an agent, use the Agent tool with that subagent_type (run_in_background works). Run each plan, task and research workstream as its own sub-agent with a fresh context, and ask it to end with a short summary (what changed, how it was verified, what is still open) rather than its working notes: your context stays small, which keeps every later turn fast. When the agent does an item on your task list, pass that item\'s exact content (or its number on the list, counting from 1) as the Agent call\'s task: the list then shows it in progress and marks it completed (or back to pending) when the agent ends, even while other agents still run. Background agents\' reports arrive as messages on their own: once you have nothing else to do, end your turn to wait for them. Never wait with sleep or by polling for output files.' : 'You have no Agent tool here: when a workflow says to spawn an agent, do that part of the work yourself.'} When it says to ask the user, use AskUserQuestion.`;
   }
 
   private shellFor(env: NodeJS.ProcessEnv): ShellSession {
@@ -975,6 +1037,24 @@ export class AgentConversation {
     agent.activitySince = Date.now();
   }
 
+  /**
+   * The one reminder a run may send when its answer leaves the list unfinished: it asks the model to update the list and never changes a status
+   * itself (the host marks nothing done that did not finish). Only a run that touched the list asks, and only with two model turns to spare, so
+   * the reminder cannot push a finished run into a turn-limit stop.
+   */
+  private taskListCheck(tasksAtStart: number, signal: AbortSignal, turnsLeft: number): AgentMessage[] | undefined {
+    if (signal.aborted || this.tasks.revision === tasksAtStart || !this.tasks.unfinished || turnsLeft < 2) return undefined;
+    const list = this.tasks.list;
+    const open = list.filter((item) => item.status !== 'completed');
+    const named = open.map((item) => `"${item.content}" (${item.status === 'in_progress' ? 'in progress' : 'pending'})`).join(', ');
+    return [{ role: 'user', content: `<task-list-check>\nYour task list still shows ${open.length} of ${list.length} items not completed: ${named}. If you finished any of them, send TodoWrite now with the full list, marking completed only what is really done, and leave anything not done as it is. Then end your turn with one short line; do not repeat your answer.\n</task-list-check>` }];
+  }
+
+  /** At the end of a run, posts the list once more as unconfirmed when the run touched it and items are unfinished. Statuses are never changed here. */
+  private settleTaskList(tasksAtStart: number): void {
+    if (this.tasks.revision !== tasksAtStart && this.tasks.unfinished) this.post({ type: 'todos', todos: this.tasks.list, unconfirmed: true });
+  }
+
   /** Moves a task-list item and shows the list at once, without waiting for sibling agents. */
   private moveTask(task: string, status: Todo['status']): string | undefined {
     const content = this.tasks.set(task, status);
@@ -1025,9 +1105,24 @@ export class AgentConversation {
     this.heartbeats = 0;
   }
 
+  private transcriptOf(model: string, messages: AgentMessage[]): Transcript {
+    return { id: this.conversationId, title: this.title || 'Conversation', model, updatedAt: new Date().toISOString(), turns: messages.filter((message) => message.role === 'user').length, messages, display: [...this.display.entries()].filter(([key]) => messages.some((message) => message.role === 'user' && contentKey(message.content) === key)) };
+  }
+
+  /**
+   * Writes the messages not yet in the thread log (D-07). It does nothing unless the conversation is kept in a thread store, and a failure never stops
+   * a run: the messages stay unlogged and the next call tries them again. Returns whether everything given is now in the log.
+   */
+  private async captureThread(model: string, messages: AgentMessage[]): Promise<boolean> {
+    const store = this.transcripts;
+    if (!(store instanceof ThreadStore) || messages.length < 2) return false;
+    return store.captureTranscript(this.transcriptOf(model, messages), this.display, this.logged).then(() => true, () => false);
+  }
+
   private async saveTranscript(model: string, messages = this.messages, during = false): Promise<boolean> {
     if (!this.transcripts || messages.length < 2) return false;
-    const transcript = { id: this.conversationId, title: this.title || 'Conversation', model, updatedAt: new Date().toISOString(), turns: messages.filter((message) => message.role === 'user').length, messages, display: [...this.display.entries()].filter(([key]) => messages.some((message) => message.role === 'user' && contentKey(message.content) === key)) };
+    await this.captureThread(model, messages);
+    const transcript = this.transcriptOf(model, messages);
     return (during ? this.transcripts.checkpoint(transcript) : this.transcripts.save(transcript)).then(() => true, () => false);
   }
 
@@ -1125,7 +1220,6 @@ export class AgentConversation {
       this.post({ type: 'tool-end', callId: event.callId, ok: event.ok, output: event.output });
       void record({ status: event.ok ? 'completed' : 'failed', kind: 'tool', ...(started ? { tool: started.tool, durationMs: Date.now() - started.at } : {}), ...(event.output.startsWith(AWAITING_APPROVAL_PREFIX) ? { errorCode: 'approval-pending' } : {}), summary: event.ok ? 'Tool call finished.' : 'Tool call failed or was declined.' });
     }
-    else if (event.type === 'todos') this.post({ type: 'todos', todos: event.todos });
     else if (event.type === 'retry') { this.post({ type: 'assistant-retry', discard: event.discardText, text: retryNotice(event) }); void record({ status: 'running', kind: 'model', model, summary: `Model turn failed; retrying (attempt ${event.attempt + 1}).` }); }
     else if (event.type === 'turn') this.tally(event.usage);
     if (event.type === 'turn') void record({ status: 'completed', kind: 'model', model: event.model || model, requestId: event.usage.requestId, summary: 'Model turn completed.', estimatedCostUsd: event.usage.estimatedCostUsd, inputTokens: event.usage.inputTokens, cachedInputTokens: event.usage.cachedInputTokens, cacheHit: (event.usage.cachedInputTokens ?? 0) > 0, outputTokens: event.usage.outputTokens, durationMs: event.usage.latencyMs });
@@ -1142,8 +1236,12 @@ export class AgentConversation {
     return [...this.waiting.values()].map((message) => ({ ...message, replay: true }));
   }
 
+  /** The run whose marker is live: set while a run is in progress, so its marker can say it is waiting on a person (the pick-up card reads it). */
+  private markerRun: { conversationId: string; runId: string } | undefined;
+
   private openPrompt(id: string, message: Record<string, unknown>): void {
     this.waiting.set(id, message);
+    if (this.markerRun) void this.runMarkers?.waiting(this.markerRun.conversationId, this.markerRun.runId, true);
     this.post(message);
     this.onWaitingChange?.(this.waiting.size);
   }
@@ -1151,6 +1249,7 @@ export class AgentConversation {
   /** Forgets a waiting prompt; one cancelled by a stop or the run ending is reported so the view unpins it. */
   private closePrompt(id: string, cancelled = false): void {
     if (!this.waiting.delete(id)) return;
+    if (this.markerRun && this.waiting.size === 0) void this.runMarkers?.waiting(this.markerRun.conversationId, this.markerRun.runId, false);
     if (cancelled) this.post({ type: 'prompt-closed', id, outcome: 'cancelled' });
     this.onWaitingChange?.(this.waiting.size);
   }
@@ -1422,6 +1521,9 @@ export function repairTranscript(messages: AgentMessage[]): AgentMessage[] {
   return changed ? repaired : messages;
 }
 
+/** What a reopened conversation shows: every entry of its log (a thread store), or the visible turns of its saved messages (any other store). */
+export type RestoredView = Array<{ role: 'user' | 'assistant'; text: string; tools: number }> | { items: ViewItem[] };
+
 /** The user-visible turns of a saved conversation: what the user typed and what the agent answered. */
 export function visibleTurns(messages: AgentMessage[], display = new Map<string, string>()): Array<{ role: 'user' | 'assistant'; text: string; tools: number }> {
   const turns: Array<{ role: 'user' | 'assistant'; text: string; tools: number }> = [];
@@ -1429,9 +1531,8 @@ export function visibleTurns(messages: AgentMessage[], display = new Map<string,
     const shown = message.role === 'user' ? display.get(contentKey(message.content)) : undefined;
     if (shown !== undefined) { turns.push({ role: 'user', text: shown, tools: 0 }); continue; }
     if (message.role === 'user') {
-      const ran = /^The user ran (\/\S+(?: [^\n.]*)?)\. Follow these instructions:/.exec(message.content);
-      if (message.content.startsWith('<agent-notification') || message.content.startsWith('<conversation-summary>')) continue;
-      turns.push({ role: 'user', text: ran ? ran[1] : message.content, tools: 0 });
+      if (message.content.startsWith('<agent-notification') || message.content.startsWith('<conversation-summary>') || message.content.startsWith('<task-list-check>')) continue;
+      turns.push({ role: 'user', text: commandForm(message.content) ?? message.content, tools: 0 });
     } else if (message.role === 'assistant') {
       const last = turns.at(-1);
       if (last?.role === 'assistant') { last.text += message.content ? `${last.text ? '\n\n' : ''}${message.content}` : ''; last.tools += message.tool_calls?.length ?? 0; }
@@ -1452,10 +1553,6 @@ function runBoundary(request: Pick<AgentTurnRequest, 'local' | 'privacy'>): Agen
 export function retryNotice(event: Extract<AgentEvent, { type: 'retry' }>): string {
   const stall = event.stall ? `, retry ${event.stall.retry} of ${event.stall.of} before the run stops` : '';
   return `${event.reason} Retrying in ${Math.round(event.delayMs / 1000)} s (attempt ${event.attempt + 1}${stall}); the run continues from where it was.`;
-}
-
-function contentKey(content: string): string {
-  return createHash('sha256').update(content).digest('hex').slice(0, 24);
 }
 
 /** A new conversation ID (the host names a tab before its agent exists). */

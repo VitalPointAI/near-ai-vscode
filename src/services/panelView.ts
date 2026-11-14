@@ -118,7 +118,11 @@ export function sidebarHtml(webview: Pick<vscode.Webview, 'asWebviewUri' | 'cspS
     <div id="chips" class="chips" hidden></div>
     <textarea id="input" rows="1" placeholder="Ask NEAR AI, or type / for commands" aria-label="Message NEAR AI" aria-controls="commands" aria-autocomplete="list" aria-expanded="false"></textarea>
     <div class="bar">
-      <button id="profile" class="chip" type="button" title="Choose the NEAR AI profile for this project">Set up</button>
+      <button id="profile" class="chip" type="button" data-must-read title="Choose the NEAR AI profile for this project">Set up</button>
+      <button id="sync" class="chip" type="button" data-must-read data-state="off" aria-label="Project sync: off. Choose to turn on." title="Keep this project on your other machines. Choose to turn on project sync.">Sync off · Turn on</button>
+      <span id="sync-live" class="visually-hidden" role="status" aria-live="polite"></span>
+      <p id="sync-detail" class="sync-detail" data-must-read hidden></p>
+      <span class="bar-break" aria-hidden="true"></span>
       <select id="model" aria-label="Model"><option value="">Loading models…</option></select>
       <button id="policy" type="button" aria-haspopup="listbox" aria-expanded="false" aria-controls="policy-menu" title="How much the agent may do without asking">Approval…</button>
       <button id="advance" type="button" aria-haspopup="listbox" aria-expanded="false" aria-controls="advance-menu" hidden title="Whether a workflow carries on to its next step by itself, or stops so you can choose">Stops each step ▾</button>
@@ -139,6 +143,8 @@ ${layoutProbeTag(nonce, layoutProbeAsset(webview, shared))}<script nonce="${nonc
 <script nonce="${nonce}" src="${asset('pending.js')}"></script>
 <script nonce="${nonce}" src="${asset('composer.js')}"></script>
 <script nonce="${nonce}" src="${asset('setup.js')}"></script>
+<script nonce="${nonce}" src="${asset('pickup.js')}"></script>
+<script nonce="${nonce}" src="${asset('syncControl.js')}"></script>
 <script nonce="${nonce}" src="${asset('chat.js')}"></script>
 </body>
 </html>`;

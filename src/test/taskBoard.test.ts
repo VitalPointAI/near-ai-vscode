@@ -5,9 +5,10 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { DEFAULT_RULES } from '../agent/permissions';
-import { TaskBoard } from '../agent/taskBoard';
+import { TaskBoard, endsWithQuestion } from '../agent/taskBoard';
 import type { Todo } from '../agent/tools';
-import { AgentConversation, GsdContext } from '../services/agentSession';
+import { isSyntheticMessage } from '../domain/state/threadCapture';
+import { AgentConversation, GsdContext, visibleTurns } from '../services/agentSession';
 import type { AgentMessage, CompletionEvent, ToolCall } from '../services/nearAiClient';
 
 // The Tasks panel follows sub-agents: an Agent call that names its task moves that item to in
@@ -93,8 +94,11 @@ test('parallel sub-agents move their own task-list items as each one ends; a fai
       'Task A:in_progress Task B:completed Task C:in_progress',
       'Task A:in_progress Task B:completed Task C:pending',
       'Task A:completed Task B:completed Task C:pending',
+      'Task A:completed Task B:completed Task C:pending',
       'Task A:completed Task B:completed Task C:pending'
-    ], 'B completes first, C resets on failure, then A completes; the stale TodoWrite echo does not undo them');
+    ], 'B completes first, C resets on failure, then A completes; the stale TodoWrite echo does not undo them; the run end posts the real list once more');
+    const flagged = posted.filter((message) => message.type === 'todos');
+    assert.deepEqual(flagged.map((message) => message.unconfirmed === true), flagged.map((_, index) => index === flagged.length - 1), 'only the run-end list is flagged unconfirmed');
 
     // What the main agent saw: each result says what happened to its item, plus a reminder while items are unfinished.
     const results = mainRequests[2].filter((message) => message.role === 'tool').map((message) => String(message.content)).slice(-3);
@@ -145,4 +149,289 @@ test('the Agent tool documents task, and the running-agents row shows steps', ()
   assert.match(tools, /task: \{ type: 'string', description: 'The exact content of the task-list item this agent works on\./);
   const script = readFileSync(path.join(__dirname, '..', '..', 'media', 'chat', 'chat.js'), 'utf8');
   assert.match(script, /agent\.steps\.done \+ '\/' \+ agent\.steps\.total \+ ' steps'/);
+});
+
+// ---- Run-end task-list check (quick 261113-lbo) ------------------------------------------------------------------------------------------
+// A run whose work finished but whose list was never updated gets one reminder to the model; the host itself never marks an item done.
+
+const reply = (content: string | null, calls?: ToolCall[]): CompletionEvent => ({ type: 'done', message: { role: 'assistant', content, ...(calls ? { tool_calls: calls } : {}) }, finishReason: calls ? 'tool_calls' : 'stop', usage });
+const listWrite = (id: string, ...items: Array<[string, Todo['status']]>) => reply(null, [call(id, 'TodoWrite', { todos: items.map(([content, status]) => todo(content, status)) })]);
+
+interface Scripted { posted: Array<Record<string, unknown>>; requests: AgentMessage[][]; conversation: AgentConversation }
+
+/** Runs `sends` on one conversation against a scripted main model: `script(n, messages)` answers its n-th request (1-based, across all sends). */
+async function scripted(script: (n: number, messages: AgentMessage[]) => CompletionEvent, sends: string[] = ['go'], options: { maxTurns?: number; tolerate?: boolean; onRequest?: (n: number, conversation: AgentConversation) => void } = {}): Promise<Scripted> {
+  const root = await mkdtemp(path.join(tmpdir(), 'near-ai-tasks-run-'));
+  const requests: AgentMessage[][] = [];
+  const near = {
+    async *streamCompletion(_model: string, messages: AgentMessage[]): AsyncGenerator<CompletionEvent> {
+      requests.push([...messages]);
+      options.onRequest?.(requests.length, conversation);
+      yield script(requests.length, messages);
+    },
+    async actualCostsUsd() { return undefined; }
+  };
+  const posted: Array<Record<string, unknown>> = [];
+  const conversation = new AgentConversation(root, (message) => posted.push(message), path.join(root, '.ckpt'));
+  try {
+    for (const text of sends) await conversation.send({ text, client: near as never, model: 'm', privacy: 'Private', policy: { mode: 'approve-risky', emergencyStop: false }, rules: DEFAULT_RULES, ...(options.maxTurns ? { maxTurns: options.maxTurns } : {}) }).catch((error) => { if (!options.tolerate) throw error; });
+  } finally {
+    conversation.dispose();
+  }
+  return { posted, requests, conversation };
+}
+
+const todoPosts = (posted: Array<Record<string, unknown>>) => posted.filter((message) => message.type === 'todos');
+const reminders = (requests: AgentMessage[][]) => (requests.at(-1) ?? []).filter((message) => message.role === 'user' && message.content.startsWith('<task-list-check>'));
+
+test('TaskBoard: revision goes up on write, on a matched set and on clear, not on a miss', () => {
+  const board = new TaskBoard();
+  const start = board.revision;
+  board.write([todo('A', 'pending')]);
+  assert.ok(board.revision > start);
+  const afterWrite = board.revision;
+  assert.equal(board.set('nothing like it', 'completed'), undefined);
+  assert.equal(board.revision, afterWrite, 'a set that matches nothing changes nothing');
+  assert.equal(board.set('A', 'in_progress'), 'A');
+  assert.ok(board.revision > afterWrite);
+  const afterSet = board.revision;
+  board.clear();
+  assert.ok(board.revision > afterSet);
+});
+
+test('TaskBoard: a completed status the host set survives two stale echoes in a row', () => {
+  const board = new TaskBoard();
+  board.write([todo('A', 'pending'), todo('B', 'pending')]);
+  board.set('A', 'completed');
+  assert.equal(shown(board.write([todo('A', 'pending'), todo('B', 'in_progress')])), 'A:completed B:in_progress');
+  assert.equal(shown(board.write([todo('A', 'pending'), todo('B', 'completed')])), 'A:completed B:completed');
+});
+
+test('TaskBoard: a completed status the model sends always wins', () => {
+  const first = new TaskBoard();
+  first.write([todo('A', 'pending')]);
+  first.set('A', 'in_progress');
+  assert.equal(shown(first.write([todo('A', 'completed')])), 'A:completed');
+  // A sub-agent for the item failed and the host moved it back to pending: the model's own completed, the same as its last status, still wins.
+  const second = new TaskBoard();
+  second.write([todo('A', 'completed')]);
+  second.set('A', 'pending');
+  assert.equal(shown(second.write([todo('A', 'completed')])), 'A:completed');
+});
+
+test('a run whose work finished but whose list was never updated gets one reminder and ends N/N', async () => {
+  const { posted, requests } = await scripted((n, messages) => {
+    if (n === 1) return listWrite('t1', ['A', 'pending'], ['B', 'pending'], ['C', 'pending']);
+    if (n === 2) return reply('Done.');
+    if (n === 3) {
+      const last = messages.at(-1);
+      assert.ok(last?.role === 'user' && last.content.startsWith('<task-list-check>') && last.content.endsWith('</task-list-check>'));
+      for (const item of ['A', 'B', 'C']) assert.ok(last.content.includes(`"${item}" (pending)`), last.content);
+      return listWrite('t3', ['A', 'completed'], ['B', 'completed'], ['C', 'completed']);
+    }
+    return reply('All three are done.');
+  }, ['go'], { maxTurns: 10 });
+  const last = todoPosts(posted).at(-1)!;
+  assert.equal(shown(last.todos as Todo[]), 'A:completed B:completed C:completed');
+  assert.equal(last.unconfirmed, undefined);
+  assert.equal(reminders(requests).length, 1, 'one reminder in the whole transcript');
+  assert.equal(requests.length, 4);
+});
+
+test('a model that ignores the reminder gets no second one, and the host never marks anything done', async () => {
+  const { posted, requests } = await scripted((n) => {
+    if (n === 1) return listWrite('t1', ['A', 'pending'], ['B', 'pending'], ['C', 'pending']);
+    return reply('Done.');
+  }, ['go'], { maxTurns: 10 });
+  assert.equal(requests.length, 3, 'list, answer, then one answer to the reminder');
+  assert.equal(reminders(requests).length, 1);
+  assert.equal(posted.some((message) => message.type === 'run-stopped'), false);
+  const last = todoPosts(posted).at(-1)!;
+  assert.equal(shown(last.todos as Todo[]), 'A:pending B:pending C:pending');
+  assert.equal(last.unconfirmed, true, 'the run ended with the items not confirmed done');
+});
+
+test('a run that did not touch the list, or ended with it all completed, gets no reminder', async () => {
+  const untouched = await scripted((n) => (n === 1 ? listWrite('t1', ['A', 'pending']) : reply('Done.')), ['go', 'and another thing'], { maxTurns: 10 });
+  // First run: list then answer, then the reminder's answer (3 requests). Second run: the list is unchanged in it, so exactly one request.
+  assert.equal(untouched.requests.length, 4);
+  const finished = await scripted((n) => (n === 1 ? listWrite('t1', ['A', 'completed']) : reply('Done.')), ['go'], { maxTurns: 10 });
+  assert.equal(finished.requests.length, 2);
+  assert.equal(reminders(finished.requests).length, 0);
+});
+
+// ---- No reminder after a closing question or while a question waits (27-32, REVIEW MINOR agentSession.ts:408) ------------------------------
+
+test('endsWithQuestion: a closing question mark counts, after spaces, quotes, brackets and emphasis are set aside', () => {
+  for (const text of ['Which one do you want?', 'Shall I go on? ', '**Should I continue?**', 'Ready to merge?)', 'Use option A or B?\n\n', 'Soll ich weitermachen\uFF1F', 'Is it "done"?"', 'Maybe `this`?`', '_Go on?_']) assert.equal(endsWithQuestion(text), true, JSON.stringify(text));
+  for (const text of ['Done.', 'I asked: why? Then I fixed it.', '', '   ', 'Which one? I will wait.', 'All three are done!']) assert.equal(endsWithQuestion(text), false, JSON.stringify(text));
+});
+
+test('a run whose answer ends with a question gets no reminder, no extra turn, and its list is shown as not confirmed done', async () => {
+  const { posted, requests } = await scripted((n) => (n === 1 ? listWrite('t1', ['A', 'pending'], ['B', 'pending'], ['C', 'pending']) : reply('I finished A. Should I start B now?')), ['go'], { maxTurns: 10 });
+  assert.equal(requests.length, 2, 'the list, then the answer that asks: nothing after it');
+  assert.equal(reminders(requests).length, 0);
+  const last = todoPosts(posted).at(-1)!;
+  assert.equal(shown(last.todos as Todo[]), 'A:pending B:pending C:pending');
+  assert.equal(last.unconfirmed, true);
+});
+
+test('an answer that only mentions a question in the middle still gets the one reminder', async () => {
+  const { requests } = await scripted((n) => (n === 1 ? listWrite('t1', ['A', 'pending']) : reply('I asked: why? Then I fixed it.')), ['go'], { maxTurns: 10 });
+  assert.equal(reminders(requests).length, 1);
+  assert.equal(requests.length, 3);
+});
+
+test('a run that ends while a question to the person is waiting gets no reminder', async () => {
+  const seed = (n: number, conversation: AgentConversation) => { if (n === 2) (conversation as unknown as { questions: Map<string, () => void> }).questions.set('q-waiting', () => undefined); };
+  const { posted, requests } = await scripted((n) => (n === 1 ? listWrite('t1', ['A', 'pending'], ['B', 'pending']) : reply('Done.')), ['go'], { maxTurns: 10, onRequest: seed });
+  assert.equal(requests.length, 2);
+  assert.equal(reminders(requests).length, 0);
+  assert.equal(todoPosts(posted).at(-1)!.unconfirmed, true);
+});
+
+test('the reminder never pushes a run into the turn limit: it needs two spare turns', async () => {
+  const script = (n: number) => (n === 1 ? listWrite('t1', ['A', 'pending']) : reply('Done.'));
+  const tight = await scripted(script, ['go'], { maxTurns: 2 });
+  assert.equal(tight.requests.length, 2);
+  assert.equal(tight.posted.some((message) => message.type === 'run-stopped'), false);
+  const roomy = await scripted(script, ['go'], { maxTurns: 4 });
+  assert.equal(reminders(roomy.requests).length, 1);
+});
+
+test('the reminder is hidden from the reopened view and from the thread log', () => {
+  const messages: AgentMessage[] = [
+    { role: 'user', content: 'do it' },
+    { role: 'assistant', content: 'Done.' },
+    { role: 'user', content: '<task-list-check>\nYour task list still shows 1 of 1 items not completed: "A" (pending).\n</task-list-check>' },
+    { role: 'assistant', content: 'ok' }
+  ];
+  assert.deepEqual(visibleTurns(messages).map((turn) => turn.role), ['user', 'assistant']);
+  assert.equal(isSyntheticMessage(messages[2]), true);
+  assert.equal(isSyntheticMessage(messages[0]), false);
+});
+
+// ---- Tolerant, numbered sub-agent task matching (quick 261113-lbo) ------------------------------------------------------------------------
+// Deterministic steps only: a guess would mark the wrong item done, so an ambiguous or one-word name moves nothing.
+
+const boardOf = (...contents: string[]) => { const board = new TaskBoard(); board.write(contents.map((content) => todo(content, 'pending'))); return board; };
+
+test('TaskBoard: a task may name its item by number', () => {
+  const board = boardOf('Write the parser', 'Add login page', 'Ship release 0.4.20');
+  for (const task of ['2', '#2', 'item 2', 'task 2', ' Task 2 ']) assert.equal(board.set(task, 'in_progress'), 'Add login page', task);
+  assert.equal(board.set('#3', 'in_progress'), 'Ship release 0.4.20');
+  assert.equal(board.set('9', 'in_progress'), undefined);
+  // An item whose content is literally "2" is matched exactly first.
+  const literal = boardOf('First', '2', 'Third');
+  assert.equal(literal.set('2', 'completed'), '2');
+});
+
+// ---- Text first, the number last (27-32, REVIEW MAJOR taskBoard.ts:61) ---------------------------------------------------------------------
+
+test('TaskBoard: "Task 1" names the item called "Task 1: create schema", not the first item', () => {
+  const board = boardOf('Read the plan', 'Task 1: create schema');
+  assert.equal(board.find('Task 1')?.content, 'Task 1: create schema');
+  assert.equal(board.set('Task 1', 'completed'), 'Task 1: create schema');
+  assert.equal(shown(board.list), 'Read the plan:pending Task 1: create schema:completed', 'the first item stays pending');
+});
+
+test('TaskBoard: the number still names an item when no text matches', () => {
+  const board = boardOf('Read the plan', 'Write tests');
+  for (const task of ['2', '#2', 'item 2', 'task 2', 'no. 2']) assert.equal(board.find(task)?.content, 'Write tests', task);
+  assert.equal(board.find('3'), undefined, 'a position past the end names nothing');
+});
+
+test('TaskBoard: text wins over position', () => {
+  const board = boardOf('Task 2: write tests', 'Task 1: create schema');
+  assert.equal(board.find('Task 1')?.content, 'Task 1: create schema');
+  assert.equal(board.find('Task 2')?.content, 'Task 2: write tests');
+});
+
+test('TaskBoard: two whole-word matches name nothing and never fall back to the first item', () => {
+  const board = boardOf('Task 1: create schema', 'Task 1: create index');
+  assert.equal(board.find('Task 1'), undefined);
+  assert.equal(board.set('Task 1', 'in_progress'), undefined);
+  assert.equal(shown(board.list), 'Task 1: create schema:pending Task 1: create index:pending', 'nothing moved');
+});
+
+test('TaskBoard: a clash between two keys is not "nothing matches", so the number step stays out of it', () => {
+  const board = boardOf('Fix it', 'fix it!', 'Third');
+  assert.equal(board.find('fix-it'), undefined, 'two items share the key, so nothing is named');
+  const numbered = boardOf('Item 2 notes', 'Item 2 follow-up', 'Third');
+  assert.equal(numbered.find('item 2'), undefined, 'two whole-word matches beat the number');
+});
+
+test('TaskBoard: punctuation, quotes and leading list markers are ignored', () => {
+  const board = boardOf('Write the parser', 'Add login page');
+  for (const task of ['"Write the parser."', '1. Write the parser', '- [ ] Write the parser', '* write the parser!', '[x] Write the parser', '#1 Write the parser']) assert.equal(board.set(task, 'in_progress'), 'Write the parser', task);
+});
+
+test('TaskBoard: a unique whole-word part of an item matches, an ambiguous or one-word name does not', () => {
+  const board = boardOf('Write the parser', 'Add login page', 'Ship release 0.4.20');
+  assert.equal(board.set('login page', 'in_progress'), 'Add login page');
+  assert.equal(board.set('Ship release 0.4.20 to the marketplace', 'in_progress'), 'Ship release 0.4.20');
+  assert.equal(board.set('tests', 'in_progress'), undefined);
+  assert.equal(board.set('parser', 'in_progress'), undefined, 'one word moves nothing');
+  const twins = boardOf('Write the parser', 'write the parser tests');
+  assert.equal(twins.set('the parser', 'completed'), undefined, 'matches both items');
+  assert.equal(shown(twins.list), 'Write the parser:pending write the parser tests:pending', 'nothing moved');
+});
+
+test('sub-agents that name their items by number or a quoted paraphrase end the list at 2/2 with no reminder', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'near-ai-tasks-num-'));
+  const home = await mkdtemp(path.join(tmpdir(), 'near-ai-tasks-num-gsd-'));
+  await mkdir(path.join(home, 'gsd-core'), { recursive: true });
+  const gsd: GsdContext = { home, skills: [], agents: [{ name: 'gsd-worker', description: 'Works', tools: ['Read'], body: 'You are the worker.', file: path.join(home, 'agents', 'gsd-worker.md') }], shellEnv: {} };
+  const mainRequests: AgentMessage[][] = [];
+  const near = {
+    async *streamCompletion(_model: string, messages: AgentMessage[]): AsyncGenerator<CompletionEvent> {
+      if (/^do \w$/.test(String(messages[1]?.content ?? ''))) { yield reply('worker done'); return; }
+      mainRequests.push([...messages]);
+      const turn = mainRequests.length;
+      if (turn === 1) { yield listWrite('t1', ['Task A', 'pending'], ['Task B', 'pending']); return; }
+      if (turn === 2) { yield reply(null, [call('a1', 'Agent', { description: 'do A', prompt: 'do A', task: '2' }), call('a2', 'Agent', { description: 'do B', prompt: 'do B', task: '"task a."' })]); return; }
+      yield reply('All set.');
+    },
+    async actualCostsUsd() { return undefined; }
+  };
+  const posted: Array<Record<string, unknown>> = [];
+  const conversation = new AgentConversation(root, (message) => posted.push(message), path.join(root, '.ckpt'));
+  try {
+    await conversation.send({ text: 'plan it', client: near as never, model: 'm', privacy: 'Private', policy: { mode: 'approve-risky', emergencyStop: false }, rules: DEFAULT_RULES, gsd, maxParallelAgents: 4 });
+    assert.equal(shown(todoPosts(posted).at(-1)!.todos as Todo[]), 'Task A:completed Task B:completed');
+    assert.equal(mainRequests.length, 3, 'no extra reminder turn');
+    assert.equal(reminders(mainRequests).length, 0);
+  } finally {
+    conversation.dispose();
+  }
+});
+
+// ---- "Not confirmed done" at the end of a run (quick 261113-lbo) --------------------------------------------------------------------------
+
+test('a run that ends with unfinished items posts its real list once more, flagged unconfirmed, whatever the outcome', async () => {
+  // Stopped short: the turn limit ends the run while the item is still pending.
+  const limited = await scripted((n) => (n === 1 ? listWrite('t1', ['A', 'pending']) : reply(null, [call(`c${n}`, 'TodoWrite', { todos: [todo('A', 'pending')] })])), ['go'], { maxTurns: 3 });
+  const lastLimited = todoPosts(limited.posted).at(-1)!;
+  assert.equal(lastLimited.unconfirmed, true);
+  assert.equal(shown(lastLimited.todos as Todo[]), 'A:pending');
+  // Failed: the model request throws after the list was written.
+  const failing = await scripted((n) => { if (n === 1) return listWrite('t1', ['A', 'in_progress']); throw Object.assign(new Error('model down'), { retryable: false }); }, ['go'], { tolerate: true });
+  const lastFailing = todoPosts(failing.posted).at(-1)!;
+  assert.equal(lastFailing.unconfirmed, true);
+  assert.equal(shown(lastFailing.todos as Todo[]), 'A:in_progress', 'statuses are posted as they were');
+});
+
+test('a run that never touched the list posts no unconfirmed list', async () => {
+  const { posted } = await scripted((n) => (n === 1 ? listWrite('t1', ['A', 'pending']) : reply('Done.')), ['go', 'again'], { maxTurns: 10 });
+  const flagged = todoPosts(posted).filter((message) => message.unconfirmed === true);
+  assert.equal(flagged.length, 1, 'only the first run, which wrote the list, is flagged');
+});
+
+test('the chat view shows "not confirmed done" for an unconfirmed list', () => {
+  const script = readFileSync(path.join(__dirname, '..', '..', 'media', 'chat', 'chat.js'), 'utf8');
+  const styles = readFileSync(path.join(__dirname, '..', '..', 'media', 'chat', 'chat.css'), 'utf8');
+  assert.match(script, /renderTodos\(m\.todos \|\| \[\], m\.unconfirmed === true\)/);
+  assert.match(script, /not confirmed done/);
+  assert.match(styles, /#todos \.todo\.unconfirmed \{/);
+  assert.match(styles, /#todos \.todo\.unconfirmed::before \{ content: '\?';/);
 });

@@ -1,11 +1,13 @@
 import assert from 'node:assert/strict';
-import { mkdtemp } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, writeFile as writeFileAsync } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import test from 'node:test';
+import test, { mock } from 'node:test';
 import { AuthService, SecretStorageLike } from '../services/auth';
 import { ProfileStore } from '../services/profileStore';
 import { deriveProfileId } from '../domain/auth';
+import { FOREIGN_LIVE_MS, RunMarkers } from '../services/runMarkers';
+import { stateHomeFor } from '../services/stateHome';
 
 // Drives the sidebar's real host path: attachChatToView -> initializeChat -> send handler ->
 // OutboundGuard -> activeProvider -> NearAiClient, against a fake NEAR AI server. Only the VS
@@ -43,14 +45,25 @@ function fakeNear(calls: string[]) {
 
 // One stub object for the whole file: chat.ts is cached after the first require, so each test
 // points the shared workspace at its own project instead of building a new stub.
+/** Settings a test sets for one run; every other setting answers its default. */
+const settingOverrides = new Map<string, unknown>();
 const vscodeStub = {
-  workspace: { workspaceFolders: [] as Array<{ uri: { fsPath: string } }>, name: 'demo', getConfiguration: () => ({ get: (_key: string, fallback?: unknown) => fallback, inspect: () => undefined }), onDidChangeConfiguration: () => ({ dispose() {} }) },
+  workspace: { workspaceFolders: [] as Array<{ uri: { fsPath: string } }>, name: 'demo', getConfiguration: () => ({ get: (key: string, fallback?: unknown) => (settingOverrides.has(key) ? settingOverrides.get(key) : fallback), inspect: () => undefined }), onDidChangeConfiguration: () => ({ dispose() {} }) },
   window: { showInformationMessage: () => undefined, showWarningMessage: () => undefined, activeTextEditor: undefined },
   commands: { executeCommand: async () => undefined },
   Uri: { joinPath: (base: { fsPath: string }, ...parts: string[]) => ({ fsPath: path.join(base.fsPath, ...parts) }), file: (fsPath: string) => ({ fsPath }) }
 };
 
-async function openSidebar(root: string, auth: AuthService) {
+class Memento {
+  private readonly values = new Map<string, unknown>();
+  public get<T>(key: string, fallback?: T): T | undefined { return (this.values.has(key) ? this.values.get(key) : fallback) as T | undefined; }
+  public update(key: string, value: unknown): Promise<void> { this.values.set(key, JSON.parse(JSON.stringify(value))); return Promise.resolve(); }
+}
+
+/** What two sidebars of one editor share, and the context's subscriptions, so a test can dispose them. */
+interface SidebarExtras { secrets?: SecretStorageLike; workspaceState?: Memento; subscriptions?: Array<{ dispose(): unknown }> }
+
+async function openSidebar(root: string, auth: AuthService, extras: SidebarExtras = {}) {
   const posted: Array<Record<string, unknown>> = [];
   let receive: ((message: unknown) => Promise<void>) | undefined;
   const view = {
@@ -64,7 +77,7 @@ async function openSidebar(root: string, auth: AuthService) {
   nodeModule._load = (request, parent, isMain) => request === 'vscode' ? vscodeStub : originalLoad(request, parent, isMain);
   try {
     const { attachChatToView } = require('../services/chat') as typeof import('../services/chat');
-    await attachChatToView({ subscriptions: [], globalStorageUri: { fsPath: path.join(root, '.global') }, extensionUri: { fsPath: root } } as never, auth, view as never, '<html></html>');
+    await attachChatToView({ subscriptions: extras.subscriptions ?? [], globalStorageUri: { fsPath: path.join(root, '.global') }, extensionUri: { fsPath: root }, ...(extras.secrets ? { secrets: extras.secrets } : {}), ...(extras.workspaceState ? { workspaceState: extras.workspaceState } : {}) } as never, auth, view as never, '<html></html>');
   } finally {
     nodeModule._load = originalLoad;
   }
@@ -284,6 +297,9 @@ test('a hybrid profile lists cloud and local models and sends each message to th
 test('a GSD slash command runs the installed skill on the runner: it asks a question, spawns a sub-agent, and reports', async () => {
   const { root, auth } = await projectWithProfile();
   const { writeFile: write, mkdir: makeDir } = await import('node:fs/promises');
+  // The command list must not pick up the real teams library in the person's home folder, so point it at an empty folder inside the project.
+  const previousTeamsDir = process.env.NEAR_AI_TEAMS_DIR;
+  process.env.NEAR_AI_TEAMS_DIR = path.join(root, '.teams-home');
   // An installed runtime in the extension's storage, laid out as the installer leaves it.
   const home = path.join(root, '.global', 'gsd', '1.20.0');
   await makeDir(path.join(home, 'gsd-core', 'bin'), { recursive: true });
@@ -346,6 +362,198 @@ test('a GSD slash command runs the installed skill on the runner: it asks a ques
     const commandList = sidebar.posted.filter((message) => message.type === 'commands').at(-1) as { commands: Array<{ command: string; argumentHint?: string }> };
     assert.deepEqual(commandList.commands, [{ command: 'gsd-progress', title: 'gsd-progress', description: 'Show progress', argumentHint: '[--verbose]' }]);
   } finally {
+    globalThis.fetch = originalFetch;
+    if (previousTeamsDir === undefined) delete process.env.NEAR_AI_TEAMS_DIR; else process.env.NEAR_AI_TEAMS_DIR = previousTeamsDir;
+  }
+});
+
+
+// Phase 27, plan 34: a conversation that another editor is running right now is not run from here too.
+
+const OTHER_EDITOR = 'edaaaaaa.inst0001';
+const OTHER_RUN = 'run-1793570629237-876b3a';
+const HOLD = 'This conversation is running in another editor right now. Wait for it to finish there, or start a new conversation here.';
+const MINUTE = 60_000;
+
+/** A conversation saved by one sidebar (its first run ended), and what another sidebar of the same editor needs to reopen it. */
+async function savedConversation(script?: (turn: number) => Record<string, unknown>) {
+  const { root, auth } = await projectWithProfile();
+  const shared = { secrets: new MemorySecrets(), workspaceState: new Memento(), subscriptions: [] as Array<{ dispose(): unknown }> };
+  const calls: string[] = [];
+  const base = fakeNear(calls);
+  let turn = 0;
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    if (!script || !String(input).endsWith('/chat/completions')) return base(input, init);
+    calls.push('/chat/completions');
+    const delta = script(turn++);
+    const body = [`data: ${JSON.stringify({ choices: [{ delta, finish_reason: 'tool_calls' in delta ? 'tool_calls' : 'stop' }] })}`, 'data: {"choices":[],"usage":{"prompt_tokens":10,"completion_tokens":1}}', 'data: [DONE]', ''].join('\n\n');
+    return new Response(body, { status: 200, headers: { 'inference-id': INFERENCE_ID } });
+  }) as typeof fetch;
+  const first = await openSidebar(root, auth, shared);
+  await first.send({ type: 'send', text: 'first question', model: 'z-ai/glm-5.3' });
+  const id = (first.posted.filter((message) => message.type === 'conversations').at(-1) as { activeId: string }).activeId;
+  const runs = stateHomeFor(root).paths.runs;
+  const file = path.join(runs, `${id}.json`);
+  // Its own run marker is written in the background; wait until it has ended before another editor takes over.
+  for (let attempt = 0; attempt < 300 && !JSON.parse(await readFile(file, 'utf8').catch(() => '{}')).endedAt; attempt += 1) await new Promise((resolve) => setTimeout(resolve, 10));
+  const others: RunMarkers[] = [];
+  /** Another editor starts a run of the conversation, its last sign of life `ageMs` ago. */
+  const otherEditorRuns = async (runId = OTHER_RUN, ageMs = 0): Promise<RunMarkers> => {
+    const other = new RunMarkers('', root, { dir: runs, writer: OTHER_EDITOR, pid: 4242, alive: () => true, now: () => Date.now() - ageMs });
+    others.push(other);
+    await other.start({ conversationId: id, runId });
+    await other.idle();
+    return other;
+  };
+  /** A second sidebar of this editor (a reload, or another window): it reopens the saved conversation. */
+  const reopen = async () => {
+    const second = await openSidebar(root, auth, shared);
+    await second.send({ type: 'chat-ready' });
+    return second;
+  };
+  const cleanup = () => { for (const other of others) other.dispose(); mock.restoreAll(); settingOverrides.clear(); require('../services/chat').setFollowElsewhereMs(undefined); };
+  return { root, id, file, calls, first, shared, otherEditorRuns, reopen, cleanup };
+}
+
+async function snapshot(root: string, id: string): Promise<{ threads: Record<string, string>; marker: string }> {
+  const dir = stateHomeFor(root).paths.threads;
+  const threads: Record<string, string> = {};
+  for (const name of await readdir(dir).catch(() => [] as string[])) threads[name] = await readFile(path.join(dir, name), 'utf8').catch(() => '');
+  return { threads, marker: await readFile(path.join(stateHomeFor(root).paths.runs, `${id}.json`), 'utf8') };
+}
+
+const elsewhereNotice = (message: Record<string, unknown>) => message.type === 'notice' && /running in another editor right now\. Its newest steps/.test(String(message.text));
+const chatRequests = (calls: string[]) => calls.filter((call) => call === '/chat/completions').length;
+
+test('tracer: a message to a conversation running in another editor is held, with nothing requested or written', async () => {
+  const originalFetch = globalThis.fetch;
+  const saved = await savedConversation();
+  try {
+    await saved.otherEditorRuns();
+    const second = await saved.reopen();
+    assert.ok(second.posted.some(elsewhereNotice), 'the reopened conversation says it is running elsewhere');
+    const before = await snapshot(saved.root, saved.id);
+    const requests = chatRequests(saved.calls);
+    second.posted.length = 0;
+    await second.send({ type: 'send', text: 'hello', model: 'z-ai/glm-5.3', conversationId: saved.id });
+    assert.equal(chatRequests(saved.calls), requests, 'no model request');
+    assert.deepEqual(second.posted.filter((message) => message.type === 'notice').map((message) => message.text), [HOLD]);
+    assert.deepEqual(await snapshot(saved.root, saved.id), before, 'the thread and the run marker are as they were, byte for byte');
+  } finally {
+    saved.cleanup();
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('Resume and Dismiss on a cut-off run that another editor has since taken over are held, and touch nothing', async () => {
+  const originalFetch = globalThis.fetch;
+  const saved = await savedConversation();
+  try {
+    await saved.otherEditorRuns('run-1793570629237-111111', 10 * MINUTE);
+    const second = await saved.reopen();
+    assert.ok(second.posted.some((message) => message.type === 'run-interrupted'), 'quiet for 10 minutes: shown as cut off, with Resume');
+    // The other editor resumes it meanwhile: its marker is live again.
+    await saved.otherEditorRuns();
+    const before = await snapshot(saved.root, saved.id);
+    const requests = chatRequests(saved.calls);
+    second.posted.length = 0;
+    await second.send({ type: 'resume-interrupted', conversationId: saved.id });
+    await second.send({ type: 'dismiss-interrupted', conversationId: saved.id });
+    assert.equal(chatRequests(saved.calls), requests, 'no model request');
+    assert.deepEqual(second.posted.filter((message) => message.type === 'notice').map((message) => message.text), [HOLD, HOLD]);
+    assert.deepEqual(await snapshot(saved.root, saved.id), before, 'the other editor\'s marker is not ended');
+  } finally {
+    saved.cleanup();
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('Continue on a stopped run is held while another editor runs the conversation', async () => {
+  const originalFetch = globalThis.fetch;
+  settingOverrides.set('agent.maxTurns', 5);
+  const saved = await savedConversation(() => ({ tool_calls: [{ index: 0, id: 'call_read', function: { name: 'Read', arguments: '{"file_path":"missing.txt"}' } }] }));
+  try {
+    const stopped = saved.first.posted.find((message) => message.type === 'run-stopped');
+    assert.equal(stopped?.continuable, true, 'the run stopped short and offers Continue');
+    await saved.otherEditorRuns();
+    const before = await snapshot(saved.root, saved.id);
+    const requests = chatRequests(saved.calls);
+    saved.first.posted.length = 0;
+    await saved.first.send({ type: 'continue-run', conversationId: saved.id });
+    assert.equal(chatRequests(saved.calls), requests, 'no model request');
+    assert.deepEqual(saved.first.posted.filter((message) => message.type === 'notice').map((message) => message.text), [HOLD]);
+    assert.deepEqual(await snapshot(saved.root, saved.id), before);
+  } finally {
+    saved.cleanup();
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('the view follows the other editor run and reloads the conversation once that run has ended', async () => {
+  const originalFetch = globalThis.fetch;
+  const saved = await savedConversation();
+  try {
+    const other = await saved.otherEditorRuns();
+    (require('../services/chat') as typeof import('../services/chat')).setFollowElsewhereMs(20);
+    const second = await saved.reopen();
+    const transcripts = () => second.posted.filter((message) => message.type === 'transcript').length;
+    assert.ok(second.posted.some(elsewhereNotice));
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const before = transcripts();
+    await other.end(saved.id, OTHER_RUN, 'completed');
+    await other.idle();
+    for (let attempt = 0; attempt < 200 && transcripts() === before; attempt += 1) await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.ok(transcripts() > before, 'a transcript message is posted again');
+    const last = second.posted.map((message) => message.type).lastIndexOf('conversation-show');
+    assert.equal(second.posted.slice(last).some(elsewhereNotice), false, 'the running-elsewhere notice is gone');
+    assert.equal(second.posted.slice(last).some((message) => message.type === 'run-interrupted'), false, 'a run that finished is not shown as cut off');
+  } finally {
+    saved.cleanup();
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('the view follows the other editor run, and one that goes quiet is shown as cut off with Resume', async () => {
+  const originalFetch = globalThis.fetch;
+  const saved = await savedConversation();
+  try {
+    await saved.otherEditorRuns();
+    (require('../services/chat') as typeof import('../services/chat')).setFollowElsewhereMs(20);
+    const second = await saved.reopen();
+    const marker = JSON.parse(await readFile(saved.file, 'utf8')) as Record<string, unknown>;
+    marker.activeAt = new Date(Date.now() - FOREIGN_LIVE_MS - MINUTE).toISOString();
+    await writeFileAsync(saved.file, `${JSON.stringify(marker)}\n`);
+    second.posted.length = 0;
+    for (let attempt = 0; attempt < 200 && !second.posted.some((message) => message.type === 'run-interrupted'); attempt += 1) await new Promise((resolve) => setTimeout(resolve, 10));
+    const cut = second.posted.find((message) => message.type === 'run-interrupted');
+    assert.ok(cut, 'the reloaded conversation shows the run-interrupted message');
+    assert.equal(cut.resumable, true);
+  } finally {
+    saved.cleanup();
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('a conversation nobody is running still sends, and disposing the extension stops the heartbeats and the follow timer', async () => {
+  const originalFetch = globalThis.fetch;
+  const saved = await savedConversation();
+  try {
+    assert.equal(chatRequests(saved.calls), 1, 'a new conversation sends as before');
+    await saved.otherEditorRuns();
+    (require('../services/chat') as typeof import('../services/chat')).setFollowElsewhereMs(20);
+    await saved.reopen();
+    const disposeSpy = mock.method(RunMarkers.prototype, 'dispose');
+    const checks = mock.method(RunMarkers.prototype, 'liveElsewhere');
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    assert.ok(checks.mock.callCount() > 0, 'the follow check is running');
+    for (const subscription of saved.shared.subscriptions) subscription.dispose();
+    assert.ok(disposeSpy.mock.callCount() >= 1, 'the project\'s run-marker store was disposed with the extension');
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    const after = checks.mock.callCount();
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    assert.equal(checks.mock.callCount(), after, 'no follow check runs after the extension is disposed');
+  } finally {
+    saved.cleanup();
     globalThis.fetch = originalFetch;
   }
 });

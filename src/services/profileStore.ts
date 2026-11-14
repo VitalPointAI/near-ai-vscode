@@ -170,6 +170,11 @@ export class ProfileStore {
     if (!profile) throw new Error('The requested profile was not found.');
     if (profile.keySource) throw new Error(KEY_ELSEWHERE);
     await this.auth.saveScopedApiKey(this.getScope(profileId), apiKey, profile.baseUrl);
+    // Rotate the sealed copy other editors on this computer read (D-15). Not for a team profile or a reused one; the hooks check both.
+    if (this.auth.keyCopy) {
+      const localKey = profile.provider === 'hybrid' ? await this.auth.getScopedApiKey(localKeyScope(this.getScope(profileId))) : undefined;
+      await this.auth.keyCopy.written(this.getScope(profileId), profile, apiKey, localKey);
+    }
     return this.markValidationStale(profileId);
   }
 
@@ -254,6 +259,7 @@ export class ProfileStore {
     else if (this.auth) {
       await this.auth.removeScopedCredentials(this.getScope(profileId));
       await this.auth.removeScopedCredentials(localKeyScope(this.getScope(profileId)));
+      await this.auth.keyCopy?.removed(profileId);
     }
     await this.persist();
     return true;

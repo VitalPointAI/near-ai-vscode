@@ -60,6 +60,14 @@ function projectTests(): Array<[string, () => Promise<void>]> {
       await vscode.commands.executeCommand('nearAiChatView.focus');
       await observer.next('fromView', (message) => message.type === 'load-models');
     }],
+    ['a project with no online home opens with "No online home · Set up" on the sync control, without a click (G-27-4b)', async () => {
+      // The temporary project has no git repository, so the local check of its remotes finds no home. The page is told as soon as the panel is open.
+      const status = await observer.next('toView', (message) => message.type === 'sync-status' && (message.model as { state?: string } | undefined)?.state === 'no-home');
+      const model = status.model as { label: string; action: string };
+      assert.equal(model.label, 'No online home · Set up');
+      assert.equal(model.action, 'set-up-home');
+      assert.equal(existsSync(path.join(workspace, '.git')), false, 'the check wrote no repository into the folder');
+    }],
     ['a local profile lists the runtime\'s models in the picker', async () => {
       server = await fakeModelServer();
       const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}/v1`;
@@ -168,13 +176,16 @@ function projectTests(): Array<[string, () => Promise<void>]> {
       const problems: string[] = [];
       // Overflow at any width a page reaches fails at once; a retry never hides it.
       const checked = new Set<string>();
-      const checkOverflow = (name: string, report: LayoutReport) => {
-        const key = `${name}@${report.width}`;
+      const checkOverflow = (name: string, report: LayoutReport, state = '') => {
+        const key = `${name}@${report.width}${state}`;
         if (checked.has(key)) return;
         checked.add(key);
-        if (report.scrollWidth > report.clientWidth + 1 || report.bodyScrollWidth > report.bodyClientWidth + 1) problems.push(`${name} at ${report.width}px scrolls sideways: page ${report.scrollWidth} in ${report.clientWidth}, body ${report.bodyScrollWidth} in ${report.bodyClientWidth}`);
-        for (const offender of report.offenders) problems.push(`${name} at ${report.width}px: ${offender}`);
-        for (const scroller of report.scrollers) problems.push(`${name} at ${report.width}px: ${scroller}`);
+        const where = `${name} at ${report.width}px${state ? ` (${state})` : ''}`;
+        if (report.scrollWidth > report.clientWidth + 1 || report.bodyScrollWidth > report.bodyClientWidth + 1) problems.push(`${where} scrolls sideways: page ${report.scrollWidth} in ${report.clientWidth}, body ${report.bodyScrollWidth} in ${report.bodyClientWidth}`);
+        for (const offender of report.offenders) problems.push(`${where}: ${offender}`);
+        for (const scroller of report.scrollers) problems.push(`${where}: ${scroller}`);
+        // A control the person must read whole (the profile name, the sync state) whose text is cut short (G-27-4a).
+        for (const cut of report.clipped) problems.push(`${where}: clipped ${cut}`);
       };
       // VS Code sometimes applies a resize late or not at all. Each width gets up to 4 tries, every try
       // set up afresh after a pause and logged, so CI shows any flakiness; only 4 misses fail the test.
@@ -194,7 +205,13 @@ function projectTests(): Array<[string, () => Promise<void>]> {
       };
       // The sidebar: VS Code's own resize commands, a step at a time, until the chat is as close as they get.
       await vscode.commands.executeCommand('nearAiChatView.focus');
-      for (const target of SIDEBAR_WIDTHS) await measure('chat', target, () => sizeSidebar(target), chatBesideEditor, () => `steps: ${sidebarTrace.join(', ')}`);
+      for (const target of SIDEBAR_WIDTHS) {
+        await measure('chat', target, () => sizeSidebar(target), chatBesideEditor, () => `steps: ${sidebarTrace.join(', ')}`);
+        // The same width in each of the five sync states, with a realistic profile name: nothing a person must read may be cut short.
+        for (const [state, report] of await chatInEverySyncState()) checkOverflow('chat', report, state);
+      }
+      // The chat shows the real profile and sync status again for the tests after this one.
+      await api.sidebar.refresh();
       // Narrow again, so the editor area has room for the widest editor check.
       await sizeSidebar(220);
       await vscode.commands.executeCommand('workbench.action.closeAllEditors');
@@ -462,6 +479,35 @@ async function sizeSidebar(target: number): Promise<LayoutReport> {
     report = await settled('chat');
   }
   return report;
+}
+
+/** A profile name of a realistic length (24 characters), as someone's own profile might be called. */
+const PROFILE_NAME = 'Research-Team-Profile-01';
+
+/**
+ * Shows the chat a profile with a long name and then, one after another, each of the five sync states (built by the host's own
+ * syncStatusMessage, so the words are the real ones), measuring the page after each. The longest attention sentence is about 80 characters.
+ */
+async function chatInEverySyncState(): Promise<Array<[string, LayoutReport]>> {
+  const extension = vscode.extensions.getExtension(EXTENSION_ID)!;
+  const { postToPage } = require(path.join(extension.extensionPath, 'dist/services/layoutProbe')) as typeof import('../../services/layoutProbe');
+  const { syncStatusMessage } = require(path.join(extension.extensionPath, 'dist/domain/state/syncStatus')) as typeof import('../../domain/state/syncStatus');
+  const now = Date.now();
+  const statuses: Array<[string, Parameters<typeof syncStatusMessage>[0]]> = [
+    ['off', { state: 'off' }],
+    ['syncing', { state: 'syncing', reason: 'open' }],
+    ['synced', { state: 'synced', at: new Date(2026, 8, 30, 12, 59).toISOString() }],
+    ['attention', { state: 'attention', message: 'Could not reach GitHub, so your latest changes will go up on the next try here.' }],
+    ['no-home', { state: 'no-home', message: 'This project has no online home yet.' }]
+  ];
+  await postToPage('chat', { type: 'profile-status', value: { profiles: [{ profileId: 'profile-e2e-name', displayName: PROFILE_NAME, organization: 'E2E', validation: { status: 'valid' } }], activeProfileId: 'profile-e2e-name' } });
+  const reports: Array<[string, LayoutReport]> = [];
+  for (const [state, status] of statuses) {
+    await postToPage('chat', syncStatusMessage(status, { now, dismissed: true }));
+    await pause(300);
+    reports.push([state, await probe('chat')]);
+  }
+  return reports;
 }
 
 const LONG_MODEL = 'deepseek/deepseek-v4.1-flash-with-a-rather-long-name';

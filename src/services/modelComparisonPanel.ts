@@ -6,18 +6,21 @@ import * as vscode from 'vscode';
 import { layoutProbeAsset, registerLayoutProbe, sharedMedia } from './layoutProbe';
 import { estimateComparisonCost, latestResults, performanceTrend, planComparison, reusedRows, runIdFor, savedModel, type SavedRun } from '../benchmark/results';
 import { runComparison } from '../benchmark/runner';
-import { ComparisonStore } from '../benchmark/store';
+import { comparisonStoreFor } from '../benchmark/store';
 import { loadBenchmarkTasks, tasksFor, type BenchmarkTask } from '../benchmark/tasks';
 import { spendAccountOf } from './agentSession';
 import type { AuthService } from './auth';
 import { providerErrorMessage } from './chatBridge';
 import { isEmergencyStopped, onDidChangeEmergencyStop } from './emergencyStop';
-import { catalogEntries, comparisonPageHtml, defaultSelection, estimateView, historyEntries, leaderboardRows, recommendationView, retestView, parseComparisonMessage, reportView, selectionProblem, taskSetsView, type PageState, type Selection } from './modelComparisonPage';
-import { privacyWarning, roleOptions, roleUpdate, type RoleOption } from './modelRoles';
+import { catalogEntries, comparisonPageHtml, defaultSelection, clearOneProjectChoice, clearProjectModelChoices, estimateView, historyEntries, leaderboardRows, projectChoicesView, recommendationView, retestView, parseComparisonMessage, reportView, selectionProblem, taskSetsView, type PageState, type Selection } from './modelComparisonPage';
+import { declineImport, importOffer, PROJECT_CHOICE_SETTINGS, planApply, projectChoiceFor, projectUndoFor, readChoicesFileSync, undoProjectChoice, writeProjectChoice, type ChoiceValue, type InspectedSetting, type ProjectUndo } from './modelChoices';
+import { privacyWarning, roleAppliedText, roleOptions, roleUpdate, type RoleOption } from './modelRoles';
 import type { ModelInfo, UsageMetadata } from './nearAiClient';
 import { activeProvider, clientFor, type ActiveProvider } from './providerCache';
 import { readAgentRules, readModelTiers, readRoleModels, readRunBudget, readSettings } from './settings';
 import { nanoToUsd, totalNanoUsd } from './spendLedger';
+import { editorWriter } from './stateHome';
+import { ensureMigrated } from './stateMigration';
 
 // NEAR AI: Compare Models. A tab that ranks every model tested on this computer, runs new
 // comparisons (only what has no saved result, or everything again), saves each one as it goes,
@@ -38,17 +41,45 @@ let tasksLoaded: Promise<BenchmarkTask[]> | undefined;
  * One undo record per applied setting. "Apply all" changes several, so the map holds a LIST: a single role writes a list of one, and undo restores every
  * entry in reverse order (0.4.19 review: the multi-entry shape was stored under a single-entry type, so Apply all could not be undone at all).
  */
-const undo = new Map<string, Array<{ setting: string; previous: unknown; target: vscode.ConfigurationTarget; label: string }>>();
+type UndoEntry = { setting: string; previous: unknown; target: vscode.ConfigurationTarget; label: string } | { target: 'project'; project: ProjectUndo; label: string };
+const undo = new Map<string, UndoEntry[]>();
 
-const storeFor = (context: vscode.ExtensionContext) => new ComparisonStore(path.join(context.globalStorageUri.fsPath, 'evals'));
+const projectRootOf = () => vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+
+/**
+ * The roles of the layer a role is written to: the project's own roleModels choice, or the workspace value when the workspace sets it. Only that layer is
+ * extended, so every other role keeps following the person's settings and the defaults (REVIEW: writing the resolved roles froze them all).
+ */
+function layerRolesFor(where: 'workspace' | 'project', inspected: { workspaceValue?: unknown } | undefined, root: string | undefined): Record<string, string> {
+  const value = where === 'workspace' ? inspected?.workspaceValue : projectChoiceFor(root, 'agent.roleModels');
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  return Object.fromEntries(Object.entries(value as Record<string, unknown>).filter((entry): entry is [string, string] => typeof entry[1] === 'string' && entry[1].trim().length > 0));
+}
+
+/** The project's state home first (so a comparison made in another editor shows here), then this editor's own folder (D-06). */
+const storeFor = (context: vscode.ExtensionContext) => comparisonStoreFor(context.globalStorageUri.fsPath, vscode.workspace.workspaceFolders?.[0]?.uri.fsPath);
 const benchmarkTasks = () => (tasksLoaded ??= loadBenchmarkTasks().catch((error: unknown) => { tasksLoaded = undefined; throw error; }));
 
 export function registerModelComparison(context: vscode.ExtensionContext, auth: AuthService): void {
   context.subscriptions.push(vscode.commands.registerCommand('nearAi.compareModels', () => openModelComparison(context, auth)));
+  context.subscriptions.push(vscode.commands.registerCommand('nearAi.clearProjectModelChoices', async () => {
+    const configuration = vscode.workspace.getConfiguration('nearAi');
+    const text = await clearProjectModelChoices({
+      root: projectRootOf(),
+      inspect: (setting) => configuration.inspect(setting),
+      writer: editorWriter(context.globalState),
+      pick: async (items) => vscode.window.showQuickPick(items, { canPickMany: true, title: "Clear This Project's Model Choices", placeHolder: 'Pick the models to put back to your own settings' })
+    });
+    // A project choice raises no settings event, so an open Compare Models tab is refreshed by hand.
+    await repost(context, auth);
+    void vscode.window.showInformationMessage(text);
+  }));
 }
 
 async function gather(context: vscode.ExtensionContext, auth: AuthService): Promise<Gathered> {
   const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  // Saved comparisons from before 0.4.20 are in this editor's own storage until they are merged into the project's state home (once; no-op after).
+  if (root) await ensureMigrated(root);
   const settings = readSettings();
   let problem: string | undefined;
   const active = root ? await activeProvider(root, auth).catch((error: unknown) => { problem = providerErrorMessage(error); return undefined; }) : undefined;
@@ -63,7 +94,7 @@ async function gather(context: vscode.ExtensionContext, auth: AuthService): Prom
   return {
     active, models, tasks, runs, roles,
     state: {
-      leaderboard, catalog, selected: defaultSelection(roles, catalog), roles,
+      leaderboard, catalog, selected: defaultSelection(roles, catalog), roles, projectChoices: projectChoicesView(root, (setting) => vscode.workspace.getConfiguration('nearAi').inspect(setting) as InspectedSetting | undefined),
       taskSets: taskSetsView(tasks), history: historyEntries(runs), retest: retestView(leaderboard, models), recommended: recommendationView(leaderboard, roles), trend: performanceTrend(runs),
       ...(running ? { running: { runId: running.runId } } : {}), teeOnly, ...(problem ? { problem } : {})
     }
@@ -81,6 +112,7 @@ export function openModelComparison(context: vscode.ExtensionContext, auth: Auth
   const asset = (file: string) => view.webview.asWebviewUri(vscode.Uri.joinPath(media, file)).toString();
   view.webview.html = comparisonPageHtml({ cspSource: view.webview.cspSource, nonce: randomBytes(16).toString('base64'), script: asset('compare.js'), style: asset('compare.css'), base: view.webview.asWebviewUri(vscode.Uri.joinPath(shared, 'base.css')).toString(), probe: layoutProbeAsset(view.webview, shared) });
   registerLayoutProbe('compare', view.webview);
+  void offerImport(context, () => soon());
   post = (message) => { comparisonTap.toView?.(message); void view.webview.postMessage(message); };
   let shown: SavedRun | undefined;
   const refresh = async () => {
@@ -119,7 +151,13 @@ export function openModelComparison(context: vscode.ExtensionContext, auth: Auth
           case 'export': await exportRun(context, message.id); break;
           case 'apply-role': await applyRole(context, auth, message.model, message.role); break;
           case 'apply-recommended': await applyRecommended(context, auth); break;
-          case 'undo-role': await undoRole(message.token); break;
+          case 'undo-role': await undoRole(context, auth, message.token); break;
+          case 'clear-project-choice': {
+            const outcome = await clearOneProjectChoice(projectRootOf(), message.setting, editorWriter(context.globalState));
+            post({ type: outcome.problem ? 'error' : 'notice', text: outcome.text });
+            if (outcome.cleared) await repost(context, auth);
+            break;
+          }
         }
       } catch (error) {
         post({ type: 'error', text: providerErrorMessage(error) });
@@ -133,6 +171,31 @@ export function openModelComparison(context: vscode.ExtensionContext, auth: Auth
     post = () => undefined;
   });
   return view;
+}
+
+/**
+ * 0.4.20 (D-06): models chosen earlier were written to the person's user settings, which no other interface or computer sees. They are offered for this
+ * project once, never copied without a click; "Not now" is remembered for the project. Dismissing the message asks nothing and writes nothing.
+ */
+async function offerImport(context: vscode.ExtensionContext, changed: () => void): Promise<void> {
+  const root = projectRootOf();
+  if (!root) return;
+  try {
+    const choices = readChoicesFileSync(root);
+    if (choices.importDeclined) return;
+    const configuration = vscode.workspace.getConfiguration('nearAi');
+    const inspected = Object.fromEntries(PROJECT_CHOICE_SETTINGS.map((setting) => [setting, configuration.inspect(setting.slice('nearAi.'.length))]));
+    const offer = importOffer(inspected, choices);
+    if (!offer.length) return;
+    const choice = await vscode.window.showInformationMessage('These models were set up earlier in this editor: use them for this project?', 'Use for this project', 'Not now');
+    const writer = editorWriter(context.globalState);
+    if (choice === 'Use for this project') {
+      for (const candidate of offer) await writeProjectChoice(root, candidate.setting, candidate.value, writer);
+      changed();
+    } else if (choice === 'Not now') await declineImport(root, writer);
+  } catch {
+    // The offer is a convenience: failing to show or save it changes nothing.
+  }
 }
 
 async function planFor(context: vscode.ExtensionContext, auth: AuthService, picked: Selection) {
@@ -259,21 +322,36 @@ async function applyRole(context: vscode.ExtensionContext, auth: AuthService, mo
   if (entry.blocked) { post({ type: 'error', text: `TEE-only mode is on, so ${model}, which is not private, cannot be used.` }); return; }
   const configuration = vscode.workspace.getConfiguration('nearAi');
   const inspected = configuration.inspect(option.setting);
-  // Written where the setting is set now: this workspace if it overrides it, else your user settings.
-  const inWorkspace = inspected?.workspaceValue !== undefined || inspected?.workspaceFolderValue !== undefined;
-  const target = inWorkspace ? vscode.ConfigurationTarget.Workspace : vscode.ConfigurationTarget.Global;
-  const previous = inWorkspace ? inspected?.workspaceValue : inspected?.globalValue;
-  const update = roleUpdate(option, model, readRoleModels());
-  await configuration.update(update.setting, update.value, target);
+  // D-06: written to the workspace only when it already sets the value explicitly; otherwise it becomes the project's choice, which every interface and
+  // computer reads. The person's user settings are never written from here.
+  const where = planApply(inspected);
+  const update = roleUpdate(option, model, option.id.startsWith('role:') ? layerRolesFor(where, inspected, projectRootOf()) : {});
   const token = randomBytes(8).toString('hex');
-  undo.set(token, [{ setting: update.setting, previous, target, label: option.label }]);
+  if (where === 'workspace') {
+    await configuration.update(update.setting, update.value, vscode.ConfigurationTarget.Workspace);
+    undo.set(token, [{ setting: update.setting, previous: inspected?.workspaceValue, target: vscode.ConfigurationTarget.Workspace, label: option.label }]);
+  } else {
+    const root = projectRootOf();
+    if (!root) { post({ type: 'error', text: 'Open a folder to choose models for a project.' }); return; }
+    const entryUndo = projectUndoFor(root, update.setting);
+    if (!await writeProjectChoice(root, update.setting, update.value as ChoiceValue, editorWriter(context.globalState))) { post({ type: 'notice', text: `${option.label} already uses ${model} for this project.` }); return; }
+    undo.set(token, [{ target: 'project', project: entryUndo, label: option.label }]);
+  }
   const warning = privacyWarning(entry.privacy, option);
-  post({ type: 'role-applied', token, text: `${option.label} now uses ${model}${inWorkspace ? ' in this workspace' : ''}.`, ...(warning ? { warning } : {}) });
+  post({ type: 'role-applied', token, text: roleAppliedText(option.label, model, where), ...(warning ? { warning } : {}) });
+  if (where === 'project') await repost(context, auth);
+}
+
+/** A project choice raises no settings event, so the page is refreshed by hand after one is written or undone. */
+async function repost(context: vscode.ExtensionContext, auth: AuthService): Promise<void> {
+  if (!panel) return;
+  const refreshed = await gather(context, auth);
+  post({ type: 'state', state: refreshed.state });
 }
 
 /**
  * Applies the recommended setup in one action (owner, 2026-11-07: "implementable by the user confirming with a button which changes all the models
- * appropriately"). Every tier and every agent role whose best model differs is written, one setting each, to the same target a single role would use; the
+ * appropriately"). Every tier and every agent role whose best model differs is written, one setting each, to the same place a single role would use (the project's choices, or the workspace when it sets the value itself); the
  * rest are left exactly as they are, so this never rewrites a setting that already holds the recommended model. One undo token restores all of them.
  * A model the catalog does not offer, or that TEE-only mode blocks, is skipped and named rather than silently dropped.
  */
@@ -285,8 +363,11 @@ async function applyRecommended(context: vscode.ExtensionContext, auth: AuthServ
   const configuration = vscode.workspace.getConfiguration('nearAi');
   const applied: string[] = [];
   const skipped: string[] = [];
-  const undoEntries: Array<{ setting: string; previous: unknown; target: vscode.ConfigurationTarget; label: string }> = [];
-  const roleModels = readRoleModels();
+  const undoEntries: UndoEntry[] = [];
+  const root = projectRootOf();
+  // The roles of the layer being written, extended as each role is applied (every role goes to the same layer).
+  let layerRoles: Record<string, string> | undefined;
+  let wroteProject = false;
   for (const choice of choices) {
     // 0.4.19 review: the cyber recommendation is NOT the chat model. Mapping it to `main` rewrote the ordinary chat model with an abliterated one
     // chosen only because it will not refuse attack payloads. The cyber engagement picks its model when it starts (src/domain/cyberModel.ts), so the bulk
@@ -297,17 +378,21 @@ async function applyRecommended(context: vscode.ExtensionContext, auth: AuthServ
     const entry = gathered.state.catalog.find((candidate) => candidate.id === choice.model);
     if (!option || !entry || entry.blocked) { skipped.push(`${'tier' in choice ? choice.tier : choice.role} (${choice.model})`); continue; }
     const inspected = configuration.inspect(option.setting);
-    const inWorkspace = inspected?.workspaceValue !== undefined || inspected?.workspaceFolderValue !== undefined;
-    const target = inWorkspace ? vscode.ConfigurationTarget.Workspace : vscode.ConfigurationTarget.Global;
-    const previous = inWorkspace ? inspected?.workspaceValue : inspected?.globalValue;
-    const update = roleUpdate(option, choice.model, roleModels);
+    const where = planApply(inspected);
+    if (option.id.startsWith('role:')) layerRoles ??= layerRolesFor(where, inspected, root);
+    const update = roleUpdate(option, choice.model, option.id.startsWith('role:') ? layerRoles ?? {} : {});
+    if (where === 'project' && !root) { skipped.push(`${'tier' in choice ? choice.tier : choice.role} (no project folder is open)`); continue; }
     // The undo entry is recorded BEFORE the write, so a write that throws half way leaves every change that did happen undoable (0.4.19 review: entries were
     // collected after the loop, so a failure left changes applied with no way back).
-    const undoEntry = { setting: update.setting, previous, target, label: option.label };
+    const undoEntry: UndoEntry = where === 'workspace'
+      ? { setting: update.setting, previous: inspected?.workspaceValue, target: vscode.ConfigurationTarget.Workspace, label: option.label }
+      : { target: 'project', project: projectUndoFor(root!, update.setting), label: option.label };
     undoEntries.push(undoEntry);
     try {
-      await configuration.update(update.setting, update.value, target);
-      if (update.setting === 'agent.roleModels') Object.assign(roleModels, update.value as Record<string, string>);
+      if (where === 'workspace') await configuration.update(update.setting, update.value, vscode.ConfigurationTarget.Workspace);
+      else if (await writeProjectChoice(root!, update.setting, update.value as ChoiceValue, editorWriter(context.globalState))) wroteProject = true;
+      else { undoEntries.splice(undoEntries.indexOf(undoEntry), 1); continue; }
+      if (update.setting === 'agent.roleModels') layerRoles = { ...(update.value as Record<string, string>) };
       applied.push(`${option.label} to ${choice.model}`);
     } catch (error) {
       // This one did not happen after all, so it is not undone; the ones already written still are.
@@ -322,13 +407,19 @@ async function applyRecommended(context: vscode.ExtensionContext, auth: AuthServ
     ? `Applied ${applied.length} change${applied.length === 1 ? '' : 's'}: ${applied.join('; ')}.${skipped.length ? ` Skipped ${skipped.join(', ')}, which the catalog no longer offers or TEE-only mode blocks.` : ''}`
     : `Nothing was applied. Skipped ${skipped.join(', ')}.`;
   post({ type: applied.length ? 'role-applied' : 'notice', token, text });
+  if (wroteProject) await repost(context, auth);
 }
 
-async function undoRole(token: string): Promise<void> {
+async function undoRole(context: vscode.ExtensionContext, auth: AuthService, token: string): Promise<void> {
   const change = undo.get(token);
   if (!change || !change.length) return;
   undo.delete(token);
   // In reverse, so two changes to the same setting unwind in the order they were made.
-  for (const entry of [...change].reverse()) await vscode.workspace.getConfiguration('nearAi').update(entry.setting, entry.previous, entry.target);
+  let touchedProject = false;
+  for (const entry of [...change].reverse()) {
+    if (entry.target === 'project') { await undoProjectChoice(entry.project, editorWriter(context.globalState)); touchedProject = true; }
+    else await vscode.workspace.getConfiguration('nearAi').update(entry.setting, entry.previous, entry.target);
+  }
+  if (touchedProject) await repost(context, auth);
   post({ type: 'notice', text: change.length === 1 ? `Undone: ${change[0]?.label} is back to what it was.` : `Undone: ${change.length} settings are back to what they were.` });
 }

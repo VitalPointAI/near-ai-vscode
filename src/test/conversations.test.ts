@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -10,8 +10,9 @@ import { ProfileStore } from '../services/profileStore';
 import { deriveProfileId } from '../domain/auth';
 import { ActivityStore, closeInterruptedRuns } from '../services/activityStore';
 import { historyPage } from '../services/activityOverview';
-import { TranscriptStore } from '../services/transcripts';
+import { threadStoreFor } from '../services/threadStore';
 import { RunMarkers } from '../services/runMarkers';
+import { editorWriter, stateHomeFor, writerEditor } from '../services/stateHome';
 import { ConversationLog, conversationStatus, conversationTitle, MAX_OPEN_CONVERSATIONS, parseSavedConversations, savedConversations } from '../services/conversations';
 
 // Several conversations in the sidebar at once, as in Claude Code: each has its own run,
@@ -19,6 +20,11 @@ import { ConversationLog, conversationStatus, conversationTitle, MAX_OPEN_CONVER
 // background conversation keeps running into its own log until the user switches to it.
 
 // --- Pure parts ---
+
+/** The texts a transcript message shows: its items (a thread with a log, plan 06) or its turns (a thread saved without one). */
+function shownTexts(message: Record<string, unknown>): string[] {
+  return ((message.items ?? message.turns) as Array<{ text?: string }>).flatMap((entry) => (typeof entry.text === 'string' ? [entry.text] : []));
+}
 
 test('a conversation title is the first line, redacted as run titles are, about 40 characters', () => {
   assert.equal(conversationTitle('  \nFix the login bug\nand more'), 'Fix the login bug');
@@ -498,7 +504,7 @@ test('sidebar: closing a running conversation asks, stops it, and keeps its tran
     gate.release('keep going');
     await runA;
     assert.equal(near.requests.length, 1, 'it was stopped');
-    const saved = await new TranscriptStore(path.join(root, '.global'), root, (await import('../services/transcripts')).transcriptKey(shared.secrets)).list();
+    const saved = await threadStoreFor(root, shared.secrets as never, 'testseed.1').list();
     assert.ok(saved.some((transcript) => transcript.id === a && transcript.title === 'keep going'), 'its transcript stays in history');
 
     // A stale message for the closed conversation goes nowhere.
@@ -510,7 +516,7 @@ test('sidebar: closing a running conversation asks, stops it, and keeps its tran
     await sidebar.send({ type: 'resume-conversation', id: a });
     assert.equal(sidebar.summary()!.activeId, a);
     assert.equal(sidebar.summary()!.items.length, 1, 'the empty conversation was reused');
-    assert.ok(sidebar.posted.some((message) => message.type === 'transcript' && message.replay && (message.turns as Array<{ text: string }>)[0]?.text === 'keep going'));
+    assert.ok(sidebar.posted.some((message) => message.type === 'transcript' && message.replay && shownTexts(message)[0] === 'keep going'));
     // Opening one that is already open just shows it.
     await sidebar.send({ type: 'new-chat' });
     await sidebar.send({ type: 'resume-conversation', id: a });
@@ -542,7 +548,7 @@ test('sidebar: at most eight conversations are open; a blank one is reused rathe
 test('sidebar: a reload reopens the conversation list, and a run it cut off shows as stopped in the chat and in Agent Activity history', async () => {
   const { root, auth, shared } = await projectWithProfile();
   // What the previous extension host left: two open conversations, one of them mid-run.
-  const transcripts = new TranscriptStore(path.join(root, '.global'), root, (await import('../services/transcripts')).transcriptKey(shared.secrets));
+  const transcripts = threadStoreFor(root, shared.secrets as never, 'testseed.1');
   const cut = 'conv-cut000-0a0b0c0d';
   const done = 'conv-done00-0e0f1a1b';
   await transcripts.save({ id: cut, title: 'Migrate the database', model: MODEL, updatedAt: new Date().toISOString(), turns: 1, messages: [{ role: 'system', content: 'system' }, { role: 'user', content: 'Migrate the database' }] });
@@ -620,11 +626,16 @@ test('sidebar: a conversation stopped or closed while its turn is still being pr
 // --- 0.4.11: a run cut off by code-server or a reload is reported and can be resumed; waiting prompts are noticed. ---
 
 /** The marker a run left in the extension's storage, rewritten as if its extension host had died. */
+/** A reader that is this test process's editor, in a new extension host, as a window opened after a reload would be. */
+function sameEditorMarkers(root: string): RunMarkers {
+  return new RunMarkers('', root, { dir: stateHomeFor(root).paths.runs, writer: `${writerEditor(editorWriter())}.reader000` });
+}
+
 function killHost(root: string, conversationId: string, steps?: string[]): Record<string, unknown> {
-  const runs = path.join(root, '.global', 'runs');
-  const file = path.join(runs, readdirSync(runs)[0], `${conversationId}.json`);
+  const file = path.join(stateHomeFor(root).paths.runs, `${conversationId}.json`);
   const marker = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
-  const dead = { ...marker, pid: 2_147_483_646, ...(steps ? { steps } : {}) };
+  // The extension host is gone: the same editor's next host has another instance id, and the old pid no longer exists.
+  const dead = { ...marker, pid: 2_147_483_646, writer: `${writerEditor(String(marker.writer))}.deadhost0`, ...(steps ? { steps } : {}) };
   writeFileSync(file, JSON.stringify(dead));
   return marker;
 }
@@ -658,7 +669,7 @@ test('sidebar: a run the extension host never finished is reported with Resume, 
     assert.ok(cut, 'the chat says the run was cut off');
     assert.match(String(cut.text), /^This run was cut off \(the window or code-server closed it\) at .+\.$/);
     assert.equal(cut.resumable, true);
-    assert.deepEqual((second.posted.find((message) => message.type === 'transcript')!.turns as Array<{ text: string }>)[0].text, 'long refactor');
+    assert.deepEqual(shownTexts(second.posted.find((message) => message.type === 'transcript')!)[0], 'long refactor');
     assert.equal(second.posted.some((message) => message.type === 'notice' && /stopped when VS Code reloaded/.test(String(message.text))), false, 'one message, not two');
     assert.equal(near.requests.length, 2, 'nothing is resumed until the user clicks Resume');
 
@@ -670,7 +681,7 @@ test('sidebar: a run the extension host never finished is reported with Resume, 
     assert.ok(resumed.some((message) => message.role === 'tool' && String(message.content).includes('export const port = 3000;')), 'with the step that finished before the cut');
     assert.match(lastUser(resumed), /^Continue the task\. Your previous run was cut off at /);
     assert.match(lastUser(resumed), /this step: Edit\. Its result was never recorded/);
-    assert.deepEqual(await new RunMarkers(path.join(root, '.global'), root).interrupted(), [], 'resumed: not reported again');
+    assert.deepEqual(await sameEditorMarkers(root).interrupted(), [], 'resumed: not reported again');
 
     // A second click does nothing; a later window does not report it again.
     await second.send({ type: 'resume-interrupted', conversationId: a });
@@ -707,7 +718,7 @@ test('sidebar: with nearAi.agent.autoResumeAfterReload on, a cut-off run carries
       assert.ok(resumed.some((message) => message.role === 'tool' && String(message.content).includes('export const port = 3000;')), 'the finished Read is kept, not run again');
       assert.equal(near.requests.filter((request) => !request.some((message) => message.role === 'tool')).length, 1, 'the first step was never asked for again');
       await until(() => second.item(a)?.status !== 'running');
-      assert.deepEqual(await new RunMarkers(path.join(root, '.global'), root).interrupted(), [], 'resumed: not reported again');
+      assert.deepEqual(await sameEditorMarkers(root).interrupted(), [], 'resumed: not reported again');
       gate.release('long refactor');
     });
   } finally {
@@ -736,19 +747,18 @@ test('sidebar: with the emergency stop on (#36), a cut-off run does not resume b
       // the run cut off, as a reload during the stop would leave it.
       await setEmergencyStop(true);
       await until(() => first.item(a)?.status === 'stopped');
-      const runs = path.join(root, '.global', 'runs');
-      const file = path.join(runs, readdirSync(runs)[0], `${a}.json`);
+      const file = path.join(stateHomeFor(root).paths.runs, `${a}.json`);
       await until(() => (JSON.parse(readFileSync(file, 'utf8')).endedAt ? true : undefined));
       const ended = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
       delete ended.endedAt;
       delete ended.outcome;
-      writeFileSync(file, JSON.stringify({ ...ended, pid: 2_147_483_646, steps: ['Edit'] }));
+      writeFileSync(file, JSON.stringify({ ...ended, pid: 2_147_483_646, writer: `${writerEditor(String(ended.writer))}.deadhost0`, steps: ['Edit'] }));
       const second = await openSidebar(root, auth, { secrets: shared.secrets, workspaceState: new Memento() });
       await until(() => second.posted.find((message) => message.type === 'notice' && /^Not resumed automatically: the emergency stop is on/.test(String(message.text))));
       await new Promise((resolve) => setTimeout(resolve, 100));
       assert.equal(near.requests.some((request) => lastUser(request).startsWith('Continue the task')), false, 'nothing was resumed');
       assert.ok(second.posted.some((message) => message.type === 'run-interrupted' && message.resumable === true), 'the Resume button stays');
-      assert.equal((await new RunMarkers(path.join(root, '.global'), root).interrupted()).length, 1, 'the cut-off run is still there to resume later');
+      assert.equal((await sameEditorMarkers(root).interrupted()).length, 1, 'the cut-off run is still there to resume later');
       gate.release('long refactor');
     });
   } finally {
@@ -761,9 +771,9 @@ test('sidebar: Dismiss settles a cut-off run without running anything; a cut-off
   const { root, auth, shared } = await projectWithProfile();
   const cut = 'conv-dism00-0a0b0c0d';
   const lost = 'conv-lost00-0a0b0c0d';
-  const transcripts = new TranscriptStore(path.join(root, '.global'), root, (await import('../services/transcripts')).transcriptKey(shared.secrets));
+  const transcripts = threadStoreFor(root, shared.secrets as never, 'testseed.1');
   await transcripts.save({ id: cut, title: 'Write the report', model: MODEL, updatedAt: new Date().toISOString(), turns: 1, messages: [{ role: 'system', content: 'system' }, { role: 'user', content: 'Write the report' }] });
-  const dead = new RunMarkers(path.join(root, '.global'), root, { pid: 2_147_483_646 });
+  const dead = new RunMarkers('', root, { dir: stateHomeFor(root).paths.runs, pid: 2_147_483_646, writer: `${writerEditor(editorWriter())}.deadhost0` });
   await dead.start({ conversationId: cut, runId: 'run-1-dddddd', model: MODEL });
   await dead.start({ conversationId: lost, runId: 'run-2-eeeeee', model: MODEL });
   await shared.workspaceState.update('nearAi.chat.openConversations', { activeId: cut, items: [{ id: cut, title: 'Write the report', status: 'running' }] });
@@ -781,7 +791,7 @@ test('sidebar: Dismiss settles a cut-off run without running anything; a cut-off
     const again = sidebar.posted.length;
     await sidebar.send({ type: 'switch-conversation', id: cut });
     assert.equal(since(sidebar.posted, again).some((message) => message.type === 'run-interrupted'), false);
-    assert.deepEqual((await new RunMarkers(path.join(root, '.global'), root).interrupted()).map((marker) => marker.conversationId), [lost]);
+    assert.deepEqual((await sameEditorMarkers(root).interrupted()).map((marker) => marker.conversationId), [lost]);
   });
 });
 
