@@ -149,6 +149,49 @@ export function teamAgents(team: TeamDefinition): GsdAgent[] {
   }));
 }
 
+/**
+ * Which team a run that is not a /team run works with (0.4.21): the conversation's own (`conversationTeam`, its newest /team), else the project's team,
+ * else none. `notice` is what the chat says, only when the team differs from the one it last said (`noticed`), so it is said once per conversation and
+ * team. `find` looks a team up by slug, as TeamLibrary.find does (the slug "project" is the project's own team).
+ */
+export async function workingTeamFor(find: (slug: string) => Promise<TeamDefinition | undefined>, conversationTeam: string | undefined, noticed: string | undefined, allowProject: (team: TeamDefinition) => Promise<boolean> = async () => true): Promise<{ team?: TeamDefinition; notice?: string; noticed?: string }> {
+  const quietly = (slug: string) => find(slug).catch(() => undefined);
+  // A team with no members has no one to give work to: the conversation's falls back to the project's, and an empty project team is not used.
+  const usable = (team: TeamDefinition | undefined) => team?.members.length ? team : undefined;
+  const named = usable(conversationTeam ? await quietly(conversationTeam) : undefined);
+  // The project's team comes with the repository, so it is used only once the person agreed to it (owner, 2026-11-14: ask once per project).
+  const project = named ? undefined : usable(await quietly('project'));
+  const team = named ?? (project && await allowProject(project).catch(() => false) ? project : undefined);
+  if (!team) return {};
+  // What was said: the team, or that the conversation's team is gone and this one is used instead, which is news even when the team is the same.
+  const gone = conversationTeam !== undefined && !named;
+  const key = gone ? `${team.slug} (instead of ${conversationTeam})` : team.slug;
+  if (key === noticed) return { team, noticed };
+  const why = gone ? ` (the ${conversationTeam} team this conversation started with is gone or empty, so the project's team is used)` : '';
+  const which = named ? `the team "${noTags(team.name)}"` : `this project's team "${noTags(team.name)}" (from .planning/.near-ai/team.md)`;
+  return { team, noticed: key, notice: `Working with ${which}: its members do the specialist work${why}.` };
+}
+
+/** Team text inside the note, with angle brackets made plain, so a line such as `</team>` in a member's instructions cannot end the note early. */
+export function noTags(text: string): string {
+  // Line breaks and control characters become spaces too, so a name or role cannot start a line of its own inside the note.
+  return text.replace(/[\u0000-\u001f\u007f\u2028\u2029]+/g, ' ').replace(/</g, '‹').replace(/>/g, '›');
+}
+
+/**
+ * 0.4.21: the team a run works with when it is not led as a team: later messages of a conversation started with /team:<name>, or any run in a project
+ * with its own team, GSD workflows included. Before, the team existed only for the one /team message, so a later "make the pictures" never saw the
+ * designer and went to general-purpose. Owner, 2026-11-14: "GSD's role is to keep the project on track - like the project manager, contractor, and
+ * quality control. GSD sub contracts teams when available to perform the specialist functions (unless a specialist functional role is missing)."
+ */
+export function teamMembersNote(team: TeamDefinition): string {
+  return `<team name="${noTags(team.name).replace(/"/g, "'")}">
+You work with the "${noTags(team.name)}" team. Its members, each available as an Agent subagent_type:
+${team.members.map((member) => `- ${noTags(member.name)}${member.role ? ` (${noTags(member.role)})` : ''}: ${noTags(member.instructions.split('\n')[0].slice(0, 160))}`).join('\n')}
+Open-GSD runs the project: like a project manager, contractor and quality control, it plans, tracks, checks and verifies. It subcontracts the specialist work to this team. So when a piece of work, or a workflow step, is something a member's role covers (for example building to an implementer, images to a designer, research to a researcher), spawn that member with the Agent tool instead of an Open-GSD agent or general-purpose. Its prompt must be complete: the step's task, everything the workflow requires of it (files to write, commits, checks to run) and the report you need back. Keep Open-GSD's own agents for keeping the project on track (planning, plan checking, verification, progress), and for specialist work no member covers. Use general-purpose only when neither fits.
+</team>`;
+}
+
 export function teamLeadPrompt(team: TeamDefinition, task: string): string {
   // Owner, 2026-11-08: "ensure all our teams and default instructions prompt the orchestrating agent or team lead to allow use of parallelism where
   // appropriate". The old wording mentioned parallelism in a clause; this makes it a rule with the test for what may run together, and says to fan out in
@@ -161,6 +204,7 @@ ${team.members.map((member) => `- ${member.name}${member.role ? ` (${member.role
 - Then collect the reports, resolve what conflicts, and integrate. If a part's result changes what another part needs, run that second part afterwards and say why it had to wait.
 - Give every member a complete, self-contained prompt: it sees nothing of this conversation. Name the exact output you want back from it.
 - Do the coordination yourself; do not do the members' work for them.
+- Give each part to the member whose role covers it, never to general-purpose or an Open-GSD agent while a member fits. Open-GSD's own agents keep the project on track (planning, checking, verification); the specialist work is the members'.
 - When two or more members that change files run at the same time in a git repository, start each with \`isolation: "worktree"\` so they cannot overwrite each other; each reports its branch for you to merge. Members that only read or research need no worktree.
 
 Finish with a short summary of what each member did, what ran at the same time, and the outcome.

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import * as path from 'node:path';
@@ -28,7 +29,7 @@ import { handlePickupAction, markPickupSeen, pickupCardModel, writePickupPointer
 import { currentSyncStatus, onSyncStatus, refreshSyncHome } from './syncCommands';
 import { redactSyncText, SYNC_PROMPT_DISMISSED_KEY, syncPanelMessage } from './syncPanel';
 import { copyAttachmentIntoProject, PreparedAttachments, prepareAttachments, stageAttachment, StagedAttachment } from '../agent/attachments';
-import { TeamDefinition, TeamLibrary, teamAgents } from '../agent/teams';
+import { TeamDefinition, TeamLibrary, teamAgents, workingTeamFor } from '../agent/teams';
 import type { GsdAgent } from '../gsd/library';
 import { modelOptions, modelPrivacyLabel, modelsAsPrivateAs, privateSafetyModel, parseChatWebviewMessage, providerErrorMessage, discoverGsdArtifacts, isSafeArtifactPath, GsdArtifactLink, profileStatusMessage } from './chatBridge';
 import type { ChatWebviewMessage } from './chatBridge';
@@ -110,6 +111,8 @@ interface ChatTab {
   paused: Map<string, { minutes?: number; text: string }>;
   /** What was typed for each queued steer, so a re-shown conversation shows its queued messages. */
   steerTexts: Map<string, string>;
+  /** The team this conversation was last told it works with, so the notice is said once per team. */
+  teamNoticed?: string;
   /** Sends a message of this conversation: logged, and posted to the view when it is on screen. */
   post: (message: Record<string, unknown>) => void;
   /** Its run the extension host never finished, until the user resumes or dismisses it. */
@@ -232,6 +235,44 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
       sendSummary();
     };
     return tab;
+  };
+  /**
+   * The team a conversation works with when the run is not a /team run: the newest /team:<name> typed in it, or the project's own team. Said once per
+   * conversation and team, so the person sees which team's members will be asked.
+   */
+  const workingTeam = async (tab: ChatTab, root: string): Promise<TeamDefinition | undefined> => {
+    // A team that cannot be looked up never stops the message: it runs without one, as it did before teams carried over.
+    return workingTeamOrThrow(tab, root).catch(() => undefined);
+  };
+  /**
+   * Whether this project's team may be used (owner, 2026-11-14: ask once per project). The file comes with the repository, so a cloned repository could
+   * otherwise choose the members, their tools and their models. Never in a window VS Code does not trust; otherwise asked once, and asked again when
+   * the team file changes. Closing the question uses no team this time and asks again next time.
+   */
+  const allowProjectTeam = async (team: TeamDefinition): Promise<boolean> => {
+    if ((vscode.workspace as { isTrusted?: boolean }).isTrusted === false) return false;
+    const fingerprint = createHash('sha256').update(JSON.stringify([team.name, team.members])).digest('hex');
+    const store = context.workspaceState as MementoLike | undefined;
+    const saved = (store?.get(PROJECT_TEAM_CONSENT_KEY) ?? projectTeamConsent.get(team.file)) as { fingerprint?: string; use?: boolean } | undefined;
+    if (saved?.fingerprint === fingerprint) return saved.use === true;
+    const members = team.members.map((member) => `${member.name}${member.role ? ` (${member.role})` : ''}`).join(', ');
+    const answer = await vscode.window.showInformationMessage(`This project has a team in .planning/.near-ai/team.md: ${members}. Use it for runs in this project? Its members do the specialist work, with the tools and models that file gives them.`, 'Use this team', 'Don\'t use it');
+    if (answer === undefined) return false;
+    const decision = { fingerprint, use: answer === 'Use this team' };
+    projectTeamConsent.set(team.file, decision);
+    await store?.update(PROJECT_TEAM_CONSENT_KEY, decision);
+    return decision.use;
+  };
+  const workingTeamOrThrow = async (tab: ChatTab, root: string): Promise<TeamDefinition | undefined> => {
+    await whenTeamsMoved();
+    const library = new TeamLibrary(teamLibraryDir(homeFolder()));
+    // Keyed by the conversation, so a new or reopened conversation in this tab is told again.
+    const conversation = tab.agent?.id ?? tab.id;
+    const before = tab.teamNoticed?.startsWith(`${conversation}|`) ? tab.teamNoticed.slice(conversation.length + 1) : undefined;
+    const { team, notice, noticed } = await workingTeamFor((slug) => library.find(slug, root), tab.agent?.conversationTeam, before, allowProjectTeam);
+    if (noticed) tab.teamNoticed = `${conversation}|${noticed}`;
+    if (notice) tab.post({ type: 'notice', text: notice });
+    return team;
   };
   /** Shows a staged file as a chip, with where it was saved in the project. */
   const postStaged = (attachment: StagedAttachment): void => {
@@ -761,6 +802,9 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
       tab.post({ type: 'assistant-error', text: providerErrorMessage(error) });
       return;
     }
+    // 0.4.21: a run that is not led as a team still works with one: the team this conversation was started with (/team:<name>), or else the
+    // project's own team. Its members do the specialist work; Open-GSD keeps the project on track.
+    const memberTeam = team ? undefined : await workingTeam(tab, root);
     const text = message.type === 'send' ? message.text : team ? `/team:${team.slug} ${message.args ?? ''}`.trim() : `/${skill!.name}${skill!.args ? ` ${skill!.args}` : ''}`;
     // Attachments the user staged for this message.
     const wanted = message.type === 'send' ? [...new Set(message.attachmentIds ?? [])] : [];
@@ -851,7 +895,7 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
       const endRun = beginRun();
       runStarted(root);
       try {
-        await agent.send({ modelStallMs, ...(backupModel ? { backupModel } : {}), text, skill, gsd, team, attachments, memory: { store: state.memory, projectScope: { kind: 'project', id: projectIdForWorkspace(root) } }, imageModel: route.local ? undefined : imageModel, reputation: new ReputationStore(root), tiers: readModelTiers(), roleModels: readRoleModels(), safetyModel, safetyFallbackModel, riskSwitches: readRiskSwitches(), rememberAllowRule: (rule) => rememberAllowRule(rule, tab), unattendedAutoApprove: vscode.workspace.getConfiguration('nearAi').get<boolean>('agent.unattendedAutoApprove', AGENT_DEFAULTS.unattendedAutoApprove) !== false, researchProfile: vscode.workspace.getConfiguration('nearAi').get<boolean>('gsd.researchProfile', true) !== false, availableModels: delegable.map((candidate) => candidate.id), modelCatalog: delegable, route: privateRouteFor(active.provider, route.local), contextWindows: Object.fromEntries(active.models.map((candidate) => [candidate.id, candidate.contextLength])), maxParallelAgents: limits.maxParallelAgents, maxTurns: limits.maxTurns, client: route.client, model, privacy: modelPrivacyLabel(modelInfo), policy: settings.actionPolicy, rules: readAgentRules(), activity: { store: state.activity, sessionId: session.sessionId }, local: route.local, security: securityAccess(context, root), webSearch: await webSearchProvider(context.secrets), budget: runBudget, mcpTools: mcp.tools, maxOutputTokens: Math.max(1_000, Math.min(1_000_000, Number(vscode.workspace.getConfiguration('nearAi').get<number>('agent.maxOutputTokens', AGENT_DEFAULTS.maxOutputTokens)) || AGENT_DEFAULTS.maxOutputTokens)), shellEnvAllow: vscode.workspace.getConfiguration('nearAi').get<string[]>('agent.shellEnvAllow', []).filter((name) => typeof name === 'string'), runId, ...(redTeamStep ? { skillAddendum: redTeamStep.addendum, projectAgents: redTeamStep.agents } : {}) });
+        await agent.send({ modelStallMs, ...(backupModel ? { backupModel } : {}), text, skill, gsd, team, ...(memberTeam ? { memberTeam } : {}), attachments, memory: { store: state.memory, projectScope: { kind: 'project', id: projectIdForWorkspace(root) } }, imageModel: route.local ? undefined : imageModel, reputation: new ReputationStore(root), tiers: readModelTiers(), roleModels: readRoleModels(), safetyModel, safetyFallbackModel, riskSwitches: readRiskSwitches(), rememberAllowRule: (rule) => rememberAllowRule(rule, tab), unattendedAutoApprove: vscode.workspace.getConfiguration('nearAi').get<boolean>('agent.unattendedAutoApprove', AGENT_DEFAULTS.unattendedAutoApprove) !== false, researchProfile: vscode.workspace.getConfiguration('nearAi').get<boolean>('gsd.researchProfile', true) !== false, availableModels: delegable.map((candidate) => candidate.id), modelCatalog: delegable, route: privateRouteFor(active.provider, route.local), contextWindows: Object.fromEntries(active.models.map((candidate) => [candidate.id, candidate.contextLength])), maxParallelAgents: limits.maxParallelAgents, maxTurns: limits.maxTurns, client: route.client, model, privacy: modelPrivacyLabel(modelInfo), policy: settings.actionPolicy, rules: readAgentRules(), activity: { store: state.activity, sessionId: session.sessionId }, local: route.local, security: securityAccess(context, root), webSearch: await webSearchProvider(context.secrets), budget: runBudget, mcpTools: mcp.tools, maxOutputTokens: Math.max(1_000, Math.min(1_000_000, Number(vscode.workspace.getConfiguration('nearAi').get<number>('agent.maxOutputTokens', AGENT_DEFAULTS.maxOutputTokens)) || AGENT_DEFAULTS.maxOutputTokens)), shellEnvAllow: vscode.workspace.getConfiguration('nearAi').get<string[]>('agent.shellEnvAllow', []).filter((name) => typeof name === 'string'), runId, ...(redTeamStep ? { skillAddendum: redTeamStep.addendum, projectAgents: redTeamStep.agents } : {}) });
       } finally {
         endRun();
         void runEnded({ root, conversationId: tab.id, runId, outcome: tab.outcome });
@@ -1048,6 +1092,11 @@ function mergePrepared(all: PreparedAttachments[]): PreparedAttachments {
 }
 
 /** Whether the empty chat's "no team yet" card shows: a working profile, no project team, and no "Not now" here. */
+/** Where the answer to "use this project's team?" is kept, per workspace. */
+const PROJECT_TEAM_CONSENT_KEY = 'nearAi.projectTeamConsent';
+/** The same answers for a host with no workspace state, by team file. */
+const projectTeamConsent = new Map<string, { fingerprint: string; use: boolean }>();
+
 async function setupNudgeShows(context: vscode.ExtensionContext, auth: AuthService): Promise<boolean> {
   const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   if (!root) return false;

@@ -476,7 +476,16 @@ until it runs out aren't shown.
   teams on their reviewer), so client material stays on private models;
   change a member's line to `privacy: any` to relax it. Run one with `/team:<name> <task>`
   or **Manage Agent Teams**; a lead agent delegates to the members as
-  sub-agents, each limited to its own tools. Saving a team file records a
+  sub-agents, each limited to its own tools. The conversation keeps that team:
+  later messages in it, and Open-GSD workflows run from it, give the
+  specialist work to the team's members, while Open-GSD keeps the project on
+  track (planning, checking, verification). Without a `/team` in the
+  conversation, the project's own team is used the same way, and the chat
+  says which team it works with. Because a project team file can come with a
+  cloned repository, the first time a run would use it the chat lists its
+  members and asks whether to use it; the answer is kept for that project and
+  asked again when the file changes. A window VS Code does not trust never
+  uses it. Saving a team file records a
   version. Teams can be duplicated, archived, restored, imported, and deleted.
   **Set Up Project Team** asks a few questions and drafts a team for the
   project in `.planning/.near-ai/team.md` for you to review. Your teams are

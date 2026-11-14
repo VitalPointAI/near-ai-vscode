@@ -43,7 +43,7 @@ import type { RunEnd, RunMarkers } from './runMarkers';
 import { NOT_CHECKED_IN_EDITOR, type ResponseEvidence, type VerificationResult } from './attestation';
 import { PreparedAttachments, StagedAttachment } from '../agent/attachments';
 import { imageTool, memoryPreamble, memoryTools } from '../agent/extraTools';
-import { TeamDefinition, teamAgents, teamLeadPrompt } from '../agent/teams';
+import { TeamDefinition, teamAgents, teamLeadPrompt, teamMembersNote } from '../agent/teams';
 import { knowledgeTools } from '../agent/knowledgeTools';
 import { addKnowledge, KNOWLEDGE_INSTRUCTIONS, loadKnowledge } from './teamKnowledgeStore';
 import { teamKnowledgeKey } from '../agent/teams';
@@ -94,6 +94,8 @@ export interface AgentTurnRequest {
   maxTurns?: number;
   /** Run a team: a lead agent delegates `text` to the team's members. */
   team?: TeamDefinition;
+  /** 0.4.21: the team this run works with, not led: its members can be spawned and are preferred for work their roles cover. */
+  memberTeam?: TeamDefinition;
   /** Attachments already read (text inlined, images described, audio transcribed). */
   attachments?: PreparedAttachments;
   /** Project memory: relevant facts start each turn, and Remember/Recall are available. */
@@ -234,6 +236,10 @@ export class AgentConversation {
   private readonly logged = new WeakSet<AgentMessage>();
   private conversationId = newConversationId();
   private title = '';
+  /** The team the newest /team run of this conversation led (0.4.21); kept through compaction, which summarizes the message that named it. */
+  private teamSlug: string | undefined;
+  /** The team note this conversation's model has in context (its full text, so an edited team is sent again), so it is sent once rather than every turn. */
+  private notedTeam: string | undefined;
   private shell: ShellSession | undefined;
   private shellEnvAllow: string[] = [];
   private shellEnvKey = '';
@@ -343,18 +349,27 @@ export class AgentConversation {
     if (freshConversation) this.messages.unshift({ role: 'system', content: this.systemPrompt(request, this.root, this.spawnableAgents(request).length > 0) });
     if (!this.title) this.title = request.text.replace(/\s+/g, ' ').slice(0, 80);
     let prompt = request.text;
+    if (request.team) this.teamSlug = request.team.slug;
     if (request.team) prompt = teamLeadPrompt(request.team, request.text.replace(/^\/team:\S+\s*/, ''));
     if (request.skill && request.gsd) {
       const skill = findSkill(request.gsd.skills, request.skill.name);
       if (!skill) throw new Error(`Open-GSD has no skill named ${request.skill.name}.`);
       prompt = `The user ran /${skill.name}${request.skill.args ? ` ${request.skill.args}` : ''}. Follow these instructions:\n\n${await expandPrompt(skill.body, { args: request.skill.args, home: request.gsd.home, root: this.root })}${request.skillAddendum ?? ''}`;
     }
+    // The team note goes ahead of whatever the turn asks, a GSD workflow's instructions included (after them, it would be replaced). It is sent once per
+    // team in a conversation, not every turn: a long GSD conversation would otherwise carry one copy per message. It is sent again when the team or its
+    // members change, after the conversation is summarized (the summary may drop it), and in a reopened conversation.
+    const note = !request.team && request.memberTeam ? teamMembersNote(request.memberTeam) : undefined;
+    const noteSent = note !== undefined && this.notedTeam !== note;
+    if (noteSent) prompt = `${note}\n\n${prompt}`;
     const extraUsage: UsageMetadata[] = [...(request.attachments?.usage ?? [])];
     if (request.attachments?.text) prompt = `${request.attachments.text}\n\n${prompt}`;
     const remembered = request.memory ? await memoryPreamble(request.memory.store, request.memory.projectScope, request.text).catch(() => undefined) : undefined;
     if (remembered) prompt = `<project-memory>\n${remembered}\n</project-memory>\n\n${prompt}`;
     this.display.set(contentKey(prompt), request.text);
     this.messages.push({ role: 'user', content: prompt });
+    // Recorded once the note is in the conversation, never before a turn that failed to start.
+    if (noteSent) this.notedTeam = note;
     // Saved before the run, so a run a reload cuts off still keeps what was asked.
     await this.saveTranscript(request.model);
     const conversationId = this.conversationId;
@@ -674,6 +689,14 @@ export class AgentConversation {
     this.display = new Map(transcript.display ?? []);
     this.conversationId = transcript.id;
     this.title = transcript.title;
+    this.teamSlug = undefined;
+    // The newest team note already in the restored context counts as sent, so reopening does not add a second copy.
+    this.notedTeam = undefined;
+    for (const message of this.messages) {
+      if (message.role !== 'user' || typeof message.content !== 'string') continue;
+      const notes = message.content.match(/<team name="[^"\n]*">[\s\S]*?<\/team>/g);
+      if (notes) this.notedTeam = notes[notes.length - 1];
+    }
     const store = this.transcripts;
     let items: ViewItem[] | undefined;
     if (store instanceof ThreadStore) {
@@ -707,6 +730,8 @@ export class AgentConversation {
     this.display = new Map();
     this.conversationId = newConversationId();
     this.title = '';
+    this.teamSlug = undefined;
+    this.notedTeam = undefined;
     this.contextWarned = false;
     this.contextFullWarned = false;
     this.notifications = [];
@@ -718,7 +743,31 @@ export class AgentConversation {
 
   /** The agent definitions a run can start; without any, the run has no Agent tool. */
   private spawnableAgents(request: AgentTurnRequest): GsdAgent[] {
-    return [...(request.gsd?.agents ?? []), ...(request.team ? teamAgents(request.team) : []), ...(request.projectAgents ?? [])];
+    // One definition per name, in this order: the team's members, then agents a workflow step adds for this project (the red-team stage), then
+    // Open-GSD's own. A member wins over an Open-GSD agent of the same name, and a project agent over an Open-GSD one.
+    const all = [...this.teamMembersOf(request), ...(request.projectAgents ?? []), ...(request.gsd?.agents ?? [])];
+    return all.filter((agent, index) => all.findIndex((other) => other.name === agent.name) === index);
+  }
+
+  /** The members of the team this run leads or works with. */
+  private teamMembersOf(request: AgentTurnRequest): GsdAgent[] {
+    const team = request.team ?? request.memberTeam;
+    return team ? teamAgents(team) : [];
+  }
+
+  /**
+   * The team this conversation was started with: the newest `/team:<name>` the person typed in it. Read from the conversation itself, so a reopened
+   * conversation keeps its team, and a later /team:<other> switches it.
+   */
+  public get conversationTeam(): string | undefined {
+    if (this.teamSlug) return this.teamSlug;
+    // A reopened conversation: the newest /team in what the person typed. Its display line is kept even after the message itself was summarized away.
+    let slug: string | undefined;
+    for (const typed of this.display.values()) {
+      const match = /^\/team:(\S+)/.exec(typed);
+      if (match) slug = match[1];
+    }
+    return slug;
   }
 
   /** `agentTool` says whether this run's tools include Agent, so the prompt only advises handing work to sub-agents when it can. */
@@ -774,6 +823,8 @@ export class AgentConversation {
       }
       next = compacted;
       this.contextFullWarned = false;
+      // The summary may have dropped the team note: the next turn says it again.
+      if (mainRun) this.notedTeam = undefined;
       if (mainRun) {
         this.post({ type: 'notice', text: 'The conversation was summarized to stay within the model\'s context window. A handoff was saved to .planning/HANDOFF.json.' });
         await saveHandoff(this.root, { reason: 'context-critical', currentAction: this.title || 'Agent conversation', nextAction: 'Continue from the summarized conversation, or resume it from NEAR AI history.', activeAgents: this.agents.size, pendingApprovals: this.approvals.size }).catch(() => undefined);
@@ -811,6 +862,7 @@ export class AgentConversation {
       root: this.root,
       skills: gsd?.skills ?? [],
       agents,
+      teamMembers: this.teamMembersOf(request).map((agent) => agent.name),
       ask: (questions, askSignal) => this.askQuestions(questions, askSignal),
       spawn: async (spawn, callSignal) => {
         const label = spawn.agent?.name ?? spawn.type;
@@ -1133,7 +1185,7 @@ export class AgentConversation {
   }
 
   private transcriptOf(model: string, messages: AgentMessage[]): Transcript {
-    return { id: this.conversationId, title: this.title || 'Conversation', model, updatedAt: new Date().toISOString(), turns: messages.filter((message) => message.role === 'user').length, messages, display: [...this.display.entries()].filter(([key]) => messages.some((message) => message.role === 'user' && contentKey(message.content) === key)) };
+    return { id: this.conversationId, title: this.title || 'Conversation', model, updatedAt: new Date().toISOString(), turns: messages.filter((message) => message.role === 'user').length, messages, display: [...this.display.entries()].filter(([key, typed]) => /^\/team:\S/.test(typed) || messages.some((message) => message.role === 'user' && contentKey(message.content) === key)) };
   }
 
   /**
