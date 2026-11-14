@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -49,7 +49,8 @@ test('the bridge parses steer strictly', () => {
     { type: 'steer', id: 'steer-XYZ', text: 'hi' },
     { type: 'steer', id: 'steer-0123456789abc', text: 'hi' },
     { type: 'steer', id, text: 'hi', model: 'm' },
-    { type: 'steer', id, text: 'hi', attachmentIds: ['att-0123456789ab'] }
+    // 0.4.21: a steer may carry attachment IDs, but only well-formed ones (the cases are in the attachment test below).
+    { type: 'steer', id, text: 'hi', attachmentIds: ['att-XYZ'] }
   ]) assert.equal(parseChatWebviewMessage(bad), undefined, JSON.stringify(bad).slice(0, 80));
 });
 
@@ -502,6 +503,239 @@ test('the approval card offers Allow this time and Allow every time, and "for th
   // "For this run" is offered only when no permanent entry can be made, so the two never read as duplicates.
   assert.match(card, /if \(m\.allowRule\) choices\.append\(textButton\('Allow every time'/, 'every time appears only when there is an entry to save');
   assert.match(card, /m\.allowRule === undefined/, 'for this run appears only when there is none');
+});
+
+// --- 0.4.21: a message's attachments go with that message, also when it is sent during a run, and the file is saved into the project when attached. ---
+
+/** Attaches a file from outside the project through the real attach path, and returns its ID and what the chip was told. */
+async function attach(sidebar: Awaited<ReturnType<typeof openSidebar>>, name: string, body: string) {
+  const outside = await mkdtemp(path.join(tmpdir(), 'near-ai-attach-src-'));
+  const file = path.join(outside, name);
+  await writeFile(file, body);
+  (vscodeStub.window as Record<string, unknown>).showOpenDialog = async () => [{ fsPath: file }];
+  const before = sidebar.posted.length;
+  await sidebar.send({ type: 'attach-files' });
+  const staged = sidebar.posted.slice(before).find((message) => message.type === 'attachment-staged');
+  assert.ok(staged, 'the file is staged');
+  return staged as { id: string; name: string; savedAs?: string };
+}
+
+test('the bridge accepts attachment IDs on a steer, strictly', () => {
+  const id = 'steer-0123456789ab';
+  assert.deepEqual(parseChatWebviewMessage({ type: 'steer', id, text: 'see this', attachmentIds: ['att-0123456789ab'] }), { type: 'steer', id, text: 'see this', attachmentIds: ['att-0123456789ab'] });
+  assert.deepEqual(parseChatWebviewMessage({ type: 'steer', id, text: 'see this', attachmentIds: [] }), { type: 'steer', id, text: 'see this' });
+  for (const attachmentIds of [['nope'], 'att-0123456789ab', Array.from({ length: 11 }, () => 'att-0123456789ab')]) {
+    assert.equal(parseChatWebviewMessage({ type: 'steer', id, text: 'see this', attachmentIds }), undefined);
+  }
+});
+
+test('sidebar: nothing is written into the project when a file is attached; sending saves it and says where', async () => {
+  const { root, auth } = await projectWithProfile();
+  const near = fakeNear(() => ({ content: 'ok' }));
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = near.fetch;
+  try {
+    const sidebar = await openSidebar(root, auth);
+    const staged = await attach(sidebar, 'notes.txt', 'the plan is in here');
+    assert.equal(staged.savedAs, undefined);
+    assert.equal(existsSync(path.join(root, '.near-ai', 'attachments')), false, 'attaching alone writes nothing into the project');
+    await sidebar.send({ type: 'send', text: 'read my notes', model: 'z-ai/glm-5.3', attachmentIds: [staged.id] });
+    const saved = path.join('.near-ai', 'attachments', 'notes.txt');
+    assert.equal(readFileSync(path.join(root, saved), 'utf8'), 'the plan is in here', 'the message passed its checks, so the file is in the workspace');
+    assert.ok(sidebar.posted.some((message) => message.type === 'notice' && message.text === `Saved in the project for the agent: ${saved}.`), 'and the chat says where');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('sidebar: a file attached to a message sent during a run reaches the running agent in that same message', async () => {
+  const { root, auth } = await projectWithProfile();
+  const near = fakeNear((messages) => near.requests.length === 1 ? editCall : { content: `Saw: ${lastUser(messages)}` });
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = near.fetch;
+  try {
+    const sidebar = await openSidebar(root, auth);
+    const running = sidebar.send({ type: 'send', text: 'Use port 8080', model: 'z-ai/glm-5.3' });
+    const approval = await until(() => sidebar.posted.find((message) => message.type === 'approval-request'));
+    const staged = await attach(sidebar, 'ports.txt', 'staging uses port 9090');
+    await sidebar.send({ type: 'steer', id: 'steer-a1a1a1a1a1a1', text: 'check the attached ports file', attachmentIds: [staged.id] });
+    assert.deepEqual(sidebar.posted.find((message) => message.type === 'attachments-cleared')?.ids, [staged.id], 'its file leaves the composer, and only its file');
+    await sidebar.send({ type: 'approval-reply', callId: approval.callId, decision: 'allow' });
+    await running;
+    assert.equal(near.requests.length, 2, 'still one run');
+    const delivered = lastUser(near.requests[1]);
+    assert.match(delivered, /staging uses port 9090/, 'the file\'s content is in the message');
+    assert.match(delivered, /\.near-ai[\\/]attachments[\\/]ports\.txt/, 'and where it is saved in the project');
+    assert.match(delivered, /<user-message-during-run>\ncheck the attached ports file\n<\/user-message-during-run>/, 'with the words that refer to it');
+    assert.deepEqual(steerStates(sidebar.posted, 'steer-a1a1a1a1a1a1'), ['queued', 'delivered']);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('sidebar: a message with a file sent as the run ends becomes the next turn with its file', async () => {
+  const { root, auth } = await projectWithProfile();
+  let releaseBilling!: () => void;
+  let billingReached = false;
+  const billingGate = new Promise<void>((resolve) => { releaseBilling = resolve; });
+  const near = fakeNear((messages) => ({ content: `Saw: ${lastUser(messages)}` }), { billing: async () => { if (!billingReached) { billingReached = true; await billingGate; } } });
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = near.fetch;
+  try {
+    const sidebar = await openSidebar(root, auth);
+    const running = sidebar.send({ type: 'send', text: 'hello', model: 'z-ai/glm-5.3' });
+    await until(() => billingReached);
+    const queued = await attach(sidebar, 'queued.txt', 'queued file body');
+    await sidebar.send({ type: 'steer', id: 'steer-b2b2b2b2b2b2', text: 'read the queued file', attachmentIds: [queued.id] });
+    releaseBilling();
+    await running;
+    assert.deepEqual(steerStates(sidebar.posted, 'steer-b2b2b2b2b2b2'), ['queued', 'sent-new']);
+    assert.equal(near.requests.length, 2);
+    assert.match(lastUser(near.requests[1]), /queued file body[\s\S]*read the queued file$/, 'the new turn carries the file, then the words');
+    assert.equal(sidebar.posted.filter((message) => message.type === 'notice' && /queued\.txt/.test(String(message.text))).length, 1, 'where it was saved is said once');
+
+    // With nothing running, a message with a file is an ordinary message with its file.
+    const idle = await attach(sidebar, 'idle.txt', 'idle file body');
+    await sidebar.send({ type: 'steer', id: 'steer-c3c3c3c3c3c3', text: 'and this one', attachmentIds: [idle.id] });
+    assert.equal(near.requests.length, 3);
+    assert.match(lastUser(near.requests[2]), /idle file body[\s\S]*and this one$/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('sidebar: Stop hands a queued message back with its attachments, ready to send again', async () => {
+  const { root, auth } = await projectWithProfile();
+  const near = fakeNear(() => near.requests.length === 1 ? editCall : { content: 'should not happen' });
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = near.fetch;
+  try {
+    const sidebar = await openSidebar(root, auth);
+    const running = sidebar.send({ type: 'send', text: 'Use port 8080', model: 'z-ai/glm-5.3' });
+    await until(() => sidebar.posted.find((message) => message.type === 'approval-request'));
+    const staged = await attach(sidebar, 'later.txt', 'for later');
+    await sidebar.send({ type: 'steer', id: 'steer-d4d4d4d4d4d4', text: 'look at this', attachmentIds: [staged.id] });
+    const before = sidebar.posted.length;
+    await sidebar.send({ type: 'stop' });
+    await running;
+    const after = sidebar.posted.slice(before);
+    assert.ok(after.some((message) => message.type === 'steer-state' && message.state === 'returned' && message.text === 'look at this'));
+    assert.ok(after.some((message) => message.type === 'attachment-staged' && message.id === staged.id && message.savedAs), 'the file is staged again');
+    assert.equal(near.requests.length, 1, 'nothing more is sent after stop');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('a message sent during a run no longer leaves its attachments staged for a later message', () => {
+  const chat = readFileSync(path.join(__dirname, '..', '..', 'media', 'chat', 'chat.js'), 'utf8');
+  assert.equal(chat.includes('Attachments stay staged'), false);
+  assert.match(chat, /type: 'steer', id, text[^\n]*attachmentIds: ids/);
+});
+
+test('sidebar: a message whose file trips the outbound check is not sent, and its file stays attached in the composer', async () => {
+  const { root, auth } = await projectWithProfile();
+  const near = fakeNear(() => near.requests.length === 1 ? editCall : { content: 'done' });
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = near.fetch;
+  try {
+    const sidebar = await openSidebar(root, auth);
+    const running = sidebar.send({ type: 'send', text: 'Use port 8080', model: 'z-ai/glm-5.3' });
+    const approval = await until(() => sidebar.posted.find((message) => message.type === 'approval-request'));
+    const staged = await attach(sidebar, 'creds.txt', 'api_key=sk-live-999');
+    await sidebar.send({ type: 'steer', id: 'steer-e5e5e5e5e5e5', text: 'use these', attachmentIds: [staged.id] });
+    const blocked = sidebar.posted.find((message) => message.type === 'steer-state' && message.id === 'steer-e5e5e5e5e5e5');
+    assert.equal(blocked?.state, 'blocked');
+    assert.match(String(blocked?.reason), /credential/);
+    assert.equal(sidebar.posted.some((message) => message.type === 'attachments-cleared'), false, 'the file keeps its chip');
+    assert.equal(existsSync(path.join(root, '.near-ai', 'attachments')), false, 'the blocked file is never written into the project');
+    await sidebar.send({ type: 'approval-reply', callId: approval.callId, decision: 'allow' });
+    await running;
+    assert.equal(near.requests.some((messages) => JSON.stringify(messages).includes('sk-live-999')), false);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('sidebar: a queued file whose message is stopped comes back to the composer and never rides on a later message', async () => {
+  const { root, auth } = await projectWithProfile();
+  let releaseBilling!: () => void;
+  let billingReached = false;
+  const billingGate = new Promise<void>((resolve) => { releaseBilling = resolve; });
+  const near = fakeNear((messages) => ({ content: `Saw: ${lastUser(messages)}` }), { billing: async () => { if (!billingReached) { billingReached = true; await billingGate; } } });
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = near.fetch;
+  const { setEmergencyStop } = require('../services/emergencyStop') as typeof import('../services/emergencyStop');
+  try {
+    const sidebar = await openSidebar(root, auth);
+    const running = sidebar.send({ type: 'send', text: 'hello', model: 'z-ai/glm-5.3' });
+    await until(() => billingReached);
+    const queued = await attach(sidebar, 'carried.txt', 'carried file body');
+    await sidebar.send({ type: 'steer', id: 'steer-f6f6f6f6f6f6', text: 'read the carried file', attachmentIds: [queued.id] });
+    const before = sidebar.posted.length;
+    await setEmergencyStop(true);
+    await until(() => sidebar.posted.slice(before).some((message) => message.type === 'attachment-staged' && message.id === queued.id));
+    releaseBilling();
+    await running;
+    await setEmergencyStop(false);
+    assert.equal(near.requests.length, 1, 'the queued message was not sent');
+    await sidebar.send({ type: 'send', text: 'something else', model: 'z-ai/glm-5.3' });
+    assert.equal(near.requests.length, 2);
+    assert.equal(JSON.stringify(near.requests[1]).includes('carried file body'), false, 'the file does not ride on an unrelated message');
+  } finally {
+    await setEmergencyStop(false);
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('sidebar: a file taken out before sending is never written, and a steer whose file is gone is not sent without it', async () => {
+  const { root, auth } = await projectWithProfile();
+  const near = fakeNear(() => near.requests.length === 1 ? editCall : { content: 'done' });
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = near.fetch;
+  try {
+    const sidebar = await openSidebar(root, auth);
+    const removed = await attach(sidebar, 'draft.txt', 'not wanted');
+    await sidebar.send({ type: 'attachment-remove', id: removed.id });
+    assert.equal(existsSync(path.join(root, '.near-ai', 'attachments')), false, 'a file taken out before sending was never written');
+
+    // With nothing running, neither a steer nor an ordinary send goes out without its file.
+    await sidebar.send({ type: 'steer', id: 'steer-a8a8a8a8a8a8', text: 'see the draft now', attachmentIds: [removed.id] });
+    assert.equal(sidebar.posted.find((message) => message.type === 'steer-state' && message.id === 'steer-a8a8a8a8a8a8')?.state, 'blocked');
+    await sidebar.send({ type: 'send', text: 'see the draft too', model: 'z-ai/glm-5.3', attachmentIds: [removed.id] });
+    assert.match(String(sidebar.posted.find((message) => message.type === 'outbound-blocked' && message.text === 'see the draft too')?.reason), /no longer available/);
+    assert.equal(near.requests.length, 0, 'nothing was sent');
+
+    const running = sidebar.send({ type: 'send', text: 'Use port 8080', model: 'z-ai/glm-5.3' });
+    const approval = await until(() => sidebar.posted.find((message) => message.type === 'approval-request'));
+    await sidebar.send({ type: 'steer', id: 'steer-a7a7a7a7a7a7', text: 'see the draft', attachmentIds: [removed.id] });
+    const blocked = sidebar.posted.find((message) => message.type === 'steer-state' && message.id === 'steer-a7a7a7a7a7a7');
+    assert.equal(blocked?.state, 'blocked');
+    assert.match(String(blocked?.reason), /no longer available/);
+    await sidebar.send({ type: 'approval-reply', callId: approval.callId, decision: 'allow' });
+    await running;
+    assert.equal(near.requests.some((messages) => JSON.stringify(messages).includes('see the draft')), false, 'the words are not sent without their file');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('sidebar: a file that cannot be saved into the project is still sent, and the chat says it was not saved', async () => {
+  const { root, auth } = await projectWithProfile();
+  // A plain file where the attachments folder would go, so the copy fails.
+  await writeFile(path.join(root, '.near-ai'), 'not a folder');
+  const near = fakeNear(() => ({ content: 'ok' }));
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = near.fetch;
+  try {
+    const sidebar = await openSidebar(root, auth);
+    const staged = await attach(sidebar, 'notes.txt', 'still read into the message');
+    await sidebar.send({ type: 'send', text: 'read my notes', model: 'z-ai/glm-5.3', attachmentIds: [staged.id] });
+    assert.match(lastUser(near.requests[0]), /still read into the message/);
+    assert.ok(sidebar.posted.some((message) => message.type === 'notice' && /^Could not save notes\.txt into the project/.test(String(message.text))));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test('sidebar: a plain message in a project with a team works with that team, says so once, and sends the note once', async () => {

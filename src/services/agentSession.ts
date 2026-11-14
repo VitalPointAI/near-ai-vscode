@@ -41,7 +41,7 @@ import { ThreadStore } from './threadStore';
 import type { ConversationStore, Transcript } from './transcripts';
 import type { RunEnd, RunMarkers } from './runMarkers';
 import { NOT_CHECKED_IN_EDITOR, type ResponseEvidence, type VerificationResult } from './attestation';
-import { PreparedAttachments } from '../agent/attachments';
+import { PreparedAttachments, StagedAttachment } from '../agent/attachments';
 import { imageTool, memoryPreamble, memoryTools } from '../agent/extraTools';
 import { TeamDefinition, teamAgents, teamLeadPrompt, teamMembersNote } from '../agent/teams';
 import { knowledgeTools } from '../agent/knowledgeTools';
@@ -181,8 +181,11 @@ export function agentSteps(todos: Todo[]): { done: number; total: number; active
   return { done: todos.filter((todo) => todo.status === 'completed').length, total: todos.length, ...(active ? { active: active.activeForm || active.content } : {}) };
 }
 
-/** A message the user sent while a run was going. */
-export interface SteerMessage { id: string; text: string }
+/**
+ * A message the user sent while a run was going. 0.4.21: it can carry the files attached to it, already read (`attachments`), so they reach the agent
+ * in the same message as the words that refer to them; `staged` keeps the originals so a message handed back by Stop gets its attachments back too.
+ */
+export interface SteerMessage { id: string; text: string; attachments?: PreparedAttachments; staged?: StagedAttachment[] }
 
 /** How a message sent during a run reaches the agent: marked, so it knows it is new direction. */
 export function steeringContent(text: string): string {
@@ -257,6 +260,10 @@ export class AgentConversation {
   private readonly tasks = new TaskBoard();
   /** Messages the user sent while a run was going, oldest first, until a model request takes them. */
   private steering: SteerMessage[] = [];
+  /** The running main run's taint flag, extra usage and agent id, so attachments that arrive with a message during the run count as they would at its start. */
+  private steerRun: { grants: RunGrants; extraUsage: UsageMetadata[]; mainId: string } | undefined;
+  /** Called with the messages Stop hands back to the composer, so the host can put their attachments back too. */
+  public onReturned: ((items: SteerMessage[]) => void) | undefined;
   private readonly steerListeners = new Set<(notice: { interrupt: boolean }) => void>();
   private slotWaiters: Array<() => void> = [];
   private slotsInUse = 0;
@@ -383,6 +390,7 @@ export class AgentConversation {
     // Attached files are outside content, so the run starts out treated as having read some.
     if (request.attachments?.text) grants.tainted = true;
     for (const event of request.attachments?.security ?? []) this.activity?.security(mainId, event);
+    this.steerRun = { grants, extraUsage, mainId };
     const context: Omit<ToolContext, 'signal' | 'onTodos'> = { root: this.root, checkpoints, shell, readFiles: new Set(), pages: new Map(), ripgrepPath: this.ripgrepPath, readOnlyRoots: request.gsd ? [request.gsd.home] : [], // A person's own teams (0.4.18) are the extension's files as much as the managed Open-GSD runtime: reading them must never ask. Their folder
     // lives outside the workspace by design, so it is a trusted root for reads, and it is never written to by an agent.
     trustedToolRoots: [...(request.gsd ? [request.gsd.home] : []), teamLibraryDir(homeFolder())], ...(request.gsd ? { gsdRuntime: { home: request.gsd.home, preambles: await trustedPreambles(request.gsd.home) } } : {}) };
@@ -510,6 +518,7 @@ export class AgentConversation {
       if (this.abort === abort) this.abort = undefined;
       this.releasePending();
       this.markerRun = undefined;
+      this.steerRun = undefined;
       // Stopped or failed runs are reconciled too: NEAR bills what they used.
       if (account && !costAsked) void account.settleNow((entry) => entry.runId === runId);
       await this.runMarkers?.end(conversationId, runId, ended);
@@ -578,7 +587,9 @@ export class AgentConversation {
   /** Stops the run and its sub-agents. Messages still queued for it go back to the composer. */
   public stop(): void {
     this.halt();
-    for (const item of this.takeUndelivered()) this.post({ type: 'steer-state', id: item.id, state: 'returned', text: item.text });
+    const returned = this.takeUndelivered();
+    for (const item of returned) this.post({ type: 'steer-state', id: item.id, state: 'returned', text: item.text });
+    if (returned.length) this.onReturned?.(returned);
   }
 
   private halt(): void {
@@ -594,9 +605,9 @@ export class AgentConversation {
    * Queues a message the user sent while a run is going (or about to start). The run appends it to
    * its transcript before its next model request; a retry wait ends early for it.
    */
-  public steer(id: string, text: string, options: { interrupt?: boolean } = {}): void {
+  public steer(id: string, text: string, options: { interrupt?: boolean; attachments?: PreparedAttachments; staged?: StagedAttachment[] } = {}): void {
     this.resumeRun();
-    this.steering.push({ id, text });
+    this.steering.push({ id, text, ...(options.attachments ? { attachments: options.attachments } : {}), ...(options.staged?.length ? { staged: options.staged } : {}) });
     this.post({ type: 'steer-state', id, state: 'queued' });
     // 0.4.18: a message the person asked to interrupt with cuts the turn in flight; one that did not waits for the next safe point as before.
     const interrupt = options.interrupt === true;
@@ -607,6 +618,20 @@ export class AgentConversation {
     }
     for (const listener of [...this.steerListeners]) listener({ interrupt });
   }
+
+  /** What a run does with attachments at its start, for attachments that arrive with a message during it: outside content taints the run. */
+  private takeSteerAttachments(attachments: PreparedAttachments): void {
+    for (const note of attachments.notes) this.post({ type: 'notice', text: note });
+    const run = this.steerRun;
+    // A run takes queued messages only while it runs, and it sets steerRun before it starts, so this is never expected; if it ever happens, say so.
+    if (!run) { this.post({ type: 'notice', text: 'An attachment reached the agent outside a run, so it was not counted toward the run\'s cost or safety checks.' }); return; }
+    if (attachments.text) run.grants.tainted = true;
+    run.extraUsage.push(...attachments.usage);
+    for (const event of attachments.security) this.activity?.security(run.mainId, event);
+  }
+
+  /** The ID of the run going now, for spend the host records for it (attachments read during it). */
+  public get currentRunId(): string | undefined { return this.markerRun?.runId; }
 
   /** Queued messages no run took (it ended first), oldest first; the caller sends them as a new turn. */
   public takeUndelivered(): SteerMessage[] {
@@ -623,7 +648,9 @@ export class AgentConversation {
   private readonly steeringInput: RunInput = {
     pending: () => this.steering.length > 0,
     take: () => this.takeUndelivered().map((item) => {
-      const content = steeringContent(item.text);
+      // Attached files go in the same message, ahead of the words, exactly as they do at the start of a run.
+      const content = item.attachments?.text ? `${item.attachments.text}\n\n${steeringContent(item.text)}` : steeringContent(item.text);
+      if (item.attachments) this.takeSteerAttachments(item.attachments);
       this.display.set(contentKey(content), item.text);
       this.post({ type: 'steer-state', id: item.id, state: 'delivered' });
       return { role: 'user', content };

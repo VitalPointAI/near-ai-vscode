@@ -37,7 +37,7 @@ export type ChatWebviewMessage =
   | { type: 'open-artifact'; path: string; kind: GsdArtifactKind }
   | { type: 'send'; text: string; model?: string; overrideToken?: string; attachmentIds?: string[]; conversationId?: string }
   /** A message typed while a run is going: queued for the running agent, or sent as a new turn if it has ended. */
-  | { type: 'steer'; id: string; text: string; conversationId?: string; /** 0.4.18: take effect now, cutting the turn in flight (the Steer button). */ interrupt?: boolean }
+  | { type: 'steer'; id: string; text: string; conversationId?: string; /** 0.4.18: take effect now, cutting the turn in flight (the Steer button). */ interrupt?: boolean; /** 0.4.21: files attached to this message go with it. */ attachmentIds?: string[] }
   | { type: 'attach-files' }
   | { type: 'attachment-remove'; id: string }
   /** Stops one conversation's run (the emergency stop stops them all). */
@@ -256,6 +256,11 @@ function conversationOf(message: Record<string, unknown>): { ok: boolean; field:
   return typeof message.conversationId === 'string' && CONVERSATION_ID.test(message.conversationId) ? { ok: true, field: { conversationId: message.conversationId } } : { ok: false, field: {} };
 }
 
+/** At most 10 attachment IDs, each as the host made it; absent is fine. */
+function validAttachmentIds(ids: unknown): boolean {
+  return ids === undefined || (Array.isArray(ids) && ids.length <= 10 && ids.every((id) => typeof id === 'string' && /^att-[a-f0-9]{12}$/.test(id)));
+}
+
 export function parseChatWebviewMessage(value: unknown): ChatWebviewMessage | undefined {
   if (!value || typeof value !== 'object') return undefined;
   const message = value as Record<string, unknown>;
@@ -344,15 +349,16 @@ export function parseChatWebviewMessage(value: unknown): ChatWebviewMessage | un
   }
   if (message.type === 'steer') {
     // 0.4.18 review: `interrupt` is part of a Steer, so it must be allowed here; without it a Steer was rejected and the button did nothing.
-    if (Object.keys(message).some((key) => key !== 'type' && key !== 'id' && key !== 'text' && key !== 'conversationId' && key !== 'interrupt')) return undefined;
+    if (Object.keys(message).some((key) => key !== 'type' && key !== 'id' && key !== 'text' && key !== 'conversationId' && key !== 'interrupt' && key !== 'attachmentIds')) return undefined;
     if (message.interrupt !== undefined && typeof message.interrupt !== 'boolean') return undefined;
+    if (!validAttachmentIds(message.attachmentIds)) return undefined;
     if (typeof message.id !== 'string' || !/^steer-[a-f0-9]{12}$/.test(message.id)) return undefined;
     if (typeof message.text !== 'string' || !message.text.trim() || message.text.length > MAX_MESSAGE_CHARS) return undefined;
-    return { type: 'steer', id: message.id, text: message.text.trim(), ...scoped, ...(message.interrupt === true ? { interrupt: true } : {}) };
+    return { type: 'steer', id: message.id, text: message.text.trim(), ...scoped, ...(message.interrupt === true ? { interrupt: true } : {}), ...(Array.isArray(message.attachmentIds) && message.attachmentIds.length ? { attachmentIds: message.attachmentIds as string[] } : {}) };
   }
   if (message.type !== 'send' || typeof message.text !== 'string' || !message.text.trim()) return undefined;
   if (Object.keys(message).some((key) => key !== 'type' && key !== 'text' && key !== 'model' && key !== 'overrideToken' && key !== 'attachmentIds' && key !== 'conversationId')) return undefined;
-  if (message.attachmentIds !== undefined && (!Array.isArray(message.attachmentIds) || message.attachmentIds.length > 10 || message.attachmentIds.some((id) => typeof id !== 'string' || !/^att-[a-f0-9]{12}$/.test(id)))) return undefined;
+  if (!validAttachmentIds(message.attachmentIds)) return undefined;
   if (message.overrideToken !== undefined && (typeof message.overrideToken !== 'string' || !/^privacy-[0-9a-f-]{36}$/.test(message.overrideToken))) return undefined;
   return {
     type: 'send',

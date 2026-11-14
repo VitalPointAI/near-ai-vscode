@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- **Files attached to a message go with that message.** A file attached to a message you sent while
+  the agent was working was held back for your next message, so the agent read your words without
+  the file and went looking for it. Now the file is read and goes to the running agent in the same
+  message, with the same privacy checks as any attachment. A message that becomes the next turn
+  keeps its files, and one that Stop hands back to the composer gets its files back too.
+- **The chat says where an attached file was saved.** The copy the agent opens with its own file
+  tools is made in `.near-ai/attachments/` once the message passes its privacy checks, and the chat
+  now names where each file was saved, or says when one could not be saved. Before, it was saved
+  silently, and a file sent while the agent was working was not saved at all. A file you remove
+  before sending, or whose message is blocked, is never written into the project. A file sent while
+  the agent was working is saved when you send the message, so if you then press Stop, the message
+  and its file come back to the message box and the saved copy stays.
 - **Your team does the specialist work in every run, not only the first.** A team was used only for
   the `/team:<name>` message that started it. A later message in the same conversation, or an
   Open-GSD workflow, could not see the team's members, so work such as images went to a general

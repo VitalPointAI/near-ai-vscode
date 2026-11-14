@@ -10,7 +10,7 @@ import { ToolError } from './workspace';
 export type AttachmentKind = 'image' | 'audio' | 'text' | 'document';
 
 /** `text` is the extracted text of a document, read when it is attached; `note` says what could not be read. */
-export interface StagedAttachment { id: string; name: string; kind: AttachmentKind; mime: string; size: number; bytes: Buffer; text?: string; note?: string; hiddenParts?: number }
+export interface StagedAttachment { id: string; name: string; kind: AttachmentKind; mime: string; size: number; bytes: Buffer; text?: string; note?: string; hiddenParts?: number; /** Where the copy in the project is, once the message it went with was sent. */ savedAs?: string }
 
 const TYPES: Record<string, { kind: AttachmentKind; mime: string }> = {
   png: { kind: 'image', mime: 'image/png' }, jpg: { kind: 'image', mime: 'image/jpeg' }, jpeg: { kind: 'image', mime: 'image/jpeg' }, gif: { kind: 'image', mime: 'image/gif' }, webp: { kind: 'image', mime: 'image/webp' },
