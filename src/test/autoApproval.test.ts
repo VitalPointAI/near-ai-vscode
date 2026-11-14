@@ -627,7 +627,7 @@ test('only a scratch script the run really wrote may run: the loop records the w
 // 0.4.22 (owner, 2026-11-14: "I'm still getting asked every couple seconds to approve commands when I have auto on ... anytime it tries to run
 // something from .near-ai folder"). The run is told to keep its helpers in `.near-ai/scratch/`, but only shell writes into /tmp were recorded as the
 // run's own, so every helper made with Write (or a shell write into the project folder) asked again each time it ran.
-test('auto: a helper the run wrote in .near-ai/scratch runs without asking, by Write or by the shell, and a sub-agent may run it too', async () => {
+test('auto: a helper the run wrote in .near-ai/scratch runs without asking (Write, Edit or the shell, any agent of the run), unless changed since or written after outside content', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'near-ai-project-scratch-'));
   const scratchDir = path.join(root, '.near-ai', 'scratch');
   await mkdir(scratchDir, { recursive: true });
@@ -649,6 +649,7 @@ test('auto: a helper the run wrote in .near-ai/scratch runs without asking, by W
   try {
     const lead = new AgentRun(options(scriptedModel([
       { calls: [call('w1', 'Write', { file_path: '.near-ai/scratch/huemap.js', content: 'console.log("hue")\n' })] },
+      { calls: [call('e1', 'Edit', { file_path: '.near-ai/scratch/huemap.js', old_string: '"hue"', new_string: '"hues"' })] },
       { calls: [call('r1', 'Bash', { command: 'node .near-ai/scratch/huemap.js' })] },
       { calls: [call('w2', 'Bash', { command: "printf 'print(1)\\n' > .near-ai/scratch/reds.py" })] },
       { calls: [call('r2', 'Bash', { command: 'python3 .near-ai/scratch/reds.py' })] },
@@ -665,6 +666,28 @@ test('auto: a helper the run wrote in .near-ai/scratch runs without asking, by W
     const asked = approvals.map((request) => request.title);
     assert.deepEqual(asked.filter((title) => /huemap|reds/.test(title)), [], `the run's own helpers ran without asking: ${JSON.stringify(asked)}`);
     assert.ok(asked.some((title) => /stale\.js/.test(title)), 'a script the run did not write still asks');
+    assert.equal(approvals.filter((request) => request.tool === 'Edit' || request.tool === 'Write').length, 0, 'Write and Edit of scratch files ran too');
+
+    // Changed since it was recorded, by something other than the run's recorded write: it no longer counts.
+    approvals.length = 0;
+    const huemap = path.join(scratchDir, 'huemap.js');
+    await writeFile(huemap, 'console.log("changed")\n');
+    const later = new Date(Date.now() + 5000);
+    await utimes(huemap, later, later);
+    const again = new AgentRun(options(scriptedModel([{ calls: [call('c2', 'Bash', { command: 'node .near-ai/scratch/huemap.js' })] }, { text: 'Done.' }]), 'again'));
+    await again.run([{ role: 'user', content: 'go' }], new AbortController().signal);
+    assert.ok(approvals.some((request) => /huemap/.test(request.title)), 'a recorded helper changed afterwards asks');
+
+    // After the run read outside content, a helper it writes is not its own trusted code any more (the content may have shaped it): it asks.
+    approvals.length = 0;
+    grants.tainted = true;
+    const tainted = new AgentRun(options(scriptedModel([
+      { calls: [call('w3', 'Write', { file_path: '.near-ai/scratch/after.js', content: 'console.log("after")\n' })] },
+      { calls: [call('r4', 'Bash', { command: 'node .near-ai/scratch/after.js' })] },
+      { text: 'Done.' }
+    ]), 'tainted'));
+    await tainted.run([{ role: 'user', content: 'go' }], new AbortController().signal);
+    assert.ok(approvals.some((request) => /after\.js/.test(request.title) && request.tool === 'Bash'), 'a helper written after outside content asks');
   } finally {
     shell.dispose();
     await rm(root, { recursive: true, force: true });

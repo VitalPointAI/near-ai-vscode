@@ -683,11 +683,12 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
       }
     }
     const ranAt = Date.now();
+    const cwdBefore = context.shell?.workingDirectory ?? context.root;
     try {
       const output = await tool.run(input, context);
       if (tool.untrusted) this.grants.tainted = true;
       // A scratch file this command wrote is recorded now that it succeeded, and only if the file is really there (0.4.18 review).
-      if (command !== undefined) await this.noteScratchWrites(command, ranAt, context);
+      if (command !== undefined) await this.noteScratchWrites(command, ranAt, context, cwdBefore);
       else await this.noteToolScratchWrite(tool, input, ranAt, context);
       return this.finish(call.id, true, output + await this.testWriteNote(tool, input));
     } catch (error) {
@@ -719,7 +720,7 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
       ? { gsdPreambles: runtime.preambles, gsdRun: await resolveGsdRun(cwd, runtime.home, context.shell?.environment ?? process.env) }
       : {};
     return {
-      root, cwd, home: homedir(), packageScripts, trustedToolRoots: context.trustedToolRoots, writtenScratch: [...this.grants.scratchWrites], ...gsd, safety: this.options.safety, signal: context.signal,
+      root, cwd, home: homedir(), packageScripts, trustedToolRoots: context.trustedToolRoots, writtenScratch: await this.unchangedScratchWrites(), ...gsd, safety: this.options.safety, signal: context.signal,
       ...(this.options.riskSwitches ? { riskSwitches: this.options.riskSwitches } : {}),
       ...(this.options.unattended ? { unattended: { runStartedAt: this.startedAt, ...(this.grants.taintedAt !== undefined ? { taintedAt: this.grants.taintedAt } : {}), ...this.options.unattended } } : {})
     };
@@ -734,15 +735,19 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
    * to the shell's folder. Before this only /tmp counted, so every helper the run wrote there asked again when it ran (owner, 2026-11-14: asked to
    * approve commands every few seconds with Auto on).
    */
-  private async noteScratchWrites(command: string, startedAt: number, context: ToolContext): Promise<void> {
+  private async noteScratchWrites(command: string, startedAt: number, context: ToolContext, cwdBefore: string): Promise<void> {
     const roots = ['/tmp', '/var/tmp', ...(process.env.TMPDIR ? [path.resolve(process.env.TMPDIR)] : [])].map((root) => path.resolve(root));
     const inScratch = (file: string): boolean => roots.some((root) => file === root || file.startsWith(`${root}${path.sep}`));
-    const cwd = context.shell?.workingDirectory ?? context.root;
+    // A relative target is tried against the shell's folder before and after the command; a `cd` elsewhere inside the command can land it in neither,
+    // and then it is simply not recorded (running it asks), which is the safe way to be wrong.
+    const cwdAfter = context.shell?.workingDirectory ?? context.root;
     const candidates = new Set<string>();
     const note = (text: string): void => {
       if (text.split(/[/\\]/).includes('..')) return;
-      const file = path.resolve(cwd, text);
-      if ((path.isAbsolute(text) && inScratch(file)) || isScratchPath(context.root, file)) candidates.add(file);
+      for (const cwd of new Set([cwdBefore, cwdAfter])) {
+        const file = path.resolve(cwd, text);
+        if ((path.isAbsolute(text) && inScratch(file)) || isScratchPath(context.root, file)) candidates.add(file);
+      }
     };
     // `> /tmp/x`, `>> /tmp/x`, and `cp|mv|install|tee` (the destination is the last word on the line).
     for (const match of command.matchAll(/>>?\s*([^\s;&|]+)/g)) if (match[1]) note(match[1]);
@@ -750,14 +755,29 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
     for (const file of candidates) await this.noteScratchFile(file, startedAt);
   }
 
-  /** Records one scratch file as the run's own, if it is really there and was written since `startedAt`. */
+  /**
+   * Records one scratch file as the run's own, if it is really there and was written since `startedAt`. After the run has read outside content
+   * (0.4.22 review), a write is not recorded and an earlier record of the same file is dropped: the content may have shaped what was written, so
+   * running it asks, the same as any other script changed after that moment.
+   */
   private async noteScratchFile(file: string, startedAt: number): Promise<void> {
     try {
       const info = await stat(file);
-      if (info.isFile() && info.mtimeMs >= startedAt - 1000) this.grants.scratchWrites.add(file);
+      if (!info.isFile() || info.mtimeMs < startedAt - 1000) return;
+      if (this.grants.tainted) this.grants.scratchWrites.delete(file);
+      else this.grants.scratchWrites.set(file, info.mtimeMs);
     } catch {
       // Not there, so nothing was written where the text suggested.
     }
+  }
+
+  /** The recorded scratch files that are still exactly as the run left them; one changed since by anything else no longer counts. */
+  private async unchangedScratchWrites(): Promise<string[]> {
+    const unchanged: string[] = [];
+    for (const [file, mtimeMs] of this.grants.scratchWrites) {
+      try { if ((await stat(file)).mtimeMs === mtimeMs) unchanged.push(file); } catch { /* gone */ }
+    }
+    return unchanged;
   }
 
   /**
@@ -766,6 +786,7 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
    */
   private async noteToolScratchWrite(tool: AgentTool<any>, input: unknown, startedAt: number, context: ToolContext): Promise<void> {
     if (tool.capability !== 'workspaceWrite') return;
+    // `input` is the tool's parsed input: Write and Edit both parse the model's `file_path` into `path` (tools.ts).
     const target = (input as { path?: unknown } | undefined)?.path;
     if (typeof target !== 'string' || !target || target.split(/[/\\]/).includes('..')) return;
     const file = path.resolve(context.root, target);
