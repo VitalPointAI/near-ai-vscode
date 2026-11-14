@@ -295,6 +295,41 @@ test('TaskBoard: a task may name its item by number', () => {
   assert.equal(literal.set('2', 'completed'), '2');
 });
 
+// ---- Text first, the number last (27-32, REVIEW MAJOR taskBoard.ts:61) ---------------------------------------------------------------------
+
+test('TaskBoard: "Task 1" names the item called "Task 1: create schema", not the first item', () => {
+  const board = boardOf('Read the plan', 'Task 1: create schema');
+  assert.equal(board.find('Task 1')?.content, 'Task 1: create schema');
+  assert.equal(board.set('Task 1', 'completed'), 'Task 1: create schema');
+  assert.equal(shown(board.list), 'Read the plan:pending Task 1: create schema:completed', 'the first item stays pending');
+});
+
+test('TaskBoard: the number still names an item when no text matches', () => {
+  const board = boardOf('Read the plan', 'Write tests');
+  for (const task of ['2', '#2', 'item 2', 'task 2', 'no. 2']) assert.equal(board.find(task)?.content, 'Write tests', task);
+  assert.equal(board.find('3'), undefined, 'a position past the end names nothing');
+});
+
+test('TaskBoard: text wins over position', () => {
+  const board = boardOf('Task 2: write tests', 'Task 1: create schema');
+  assert.equal(board.find('Task 1')?.content, 'Task 1: create schema');
+  assert.equal(board.find('Task 2')?.content, 'Task 2: write tests');
+});
+
+test('TaskBoard: two whole-word matches name nothing and never fall back to the first item', () => {
+  const board = boardOf('Task 1: create schema', 'Task 1: create index');
+  assert.equal(board.find('Task 1'), undefined);
+  assert.equal(board.set('Task 1', 'in_progress'), undefined);
+  assert.equal(shown(board.list), 'Task 1: create schema:pending Task 1: create index:pending', 'nothing moved');
+});
+
+test('TaskBoard: a clash between two keys is not "nothing matches", so the number step stays out of it', () => {
+  const board = boardOf('Fix it', 'fix it!', 'Third');
+  assert.equal(board.find('fix-it'), undefined, 'two items share the key, so nothing is named');
+  const numbered = boardOf('Item 2 notes', 'Item 2 follow-up', 'Third');
+  assert.equal(numbered.find('item 2'), undefined, 'two whole-word matches beat the number');
+});
+
 test('TaskBoard: punctuation, quotes and leading list markers are ignored', () => {
   const board = boardOf('Write the parser', 'Add login page');
   for (const task of ['"Write the parser."', '1. Write the parser', '- [ ] Write the parser', '* write the parser!', '[x] Write the parser', '#1 Write the parser']) assert.equal(board.set(task, 'in_progress'), 'Write the parser', task);

@@ -49,20 +49,17 @@ export class TaskBoard {
   public get unfinished(): boolean { return this.items.some((item) => item.status !== 'completed'); }
 
   /**
-   * The item a task names, by deterministic steps, the first that hits wins:
-   * (a) its exact content; (b) its content ignoring case and surrounding space; (c) its number, when the whole task is an optional `#`, `item `,
-   * `task ` or `no.` and one or two digits (1 is the first item); (d) the one item whose normalized key equals the task's; (e) the one item
-   * where the shorter name (at least two words) appears as a whole-word run inside the longer. Steps (d) and (e) need exactly one match.
+   * The item a task names, by deterministic steps, the first that hits wins: (a) its exact content; (b) its content ignoring case and surrounding
+   * space; (d) the one item whose normalized key equals the task's; (e) the one item where the shorter name (at least two words) appears as a
+   * whole-word run inside the longer; and only when none of those finds anything, (c) its number, when the whole task is an optional `#`, `item `,
+   * `task ` or `no.` and one or two digits (1 is the first item). Steps (d) and (e) need exactly one match, and two or more matches there mean no
+   * match at all: a clash is not "nothing matches", so it never falls through to the number. The text comes first because a name such as
+   * "Task 1" belongs to the item called "Task 1: create schema", not to whatever sits first in the list.
    * There is no scored fuzzy matching: a wrong match would mark the wrong item done, so a guess moves nothing.
    */
   public find(task: string): Todo | undefined {
     const exact = this.items.find((item) => item.content === task) ?? this.items.find((item) => normal(item.content) === normal(task));
     if (exact) return exact;
-    const number = NUMBERED.exec(task.trim());
-    if (number) {
-      const numbered = this.items[Number(number[1]) - 1];
-      if (numbered) return numbered;
-    }
     const key = keyOf(task);
     if (key === '') return undefined;
     const sameKey = this.items.filter((item) => keyOf(item.content) === key);
@@ -73,7 +70,10 @@ export class TaskBoard {
       const [short, long] = words.length <= other.length ? [words, other] : [other, words];
       return short.length >= 2 && containsRun(long, short);
     });
-    return containing.length === 1 ? containing[0] : undefined;
+    if (sameKey.length > 1 || containing.length > 1) return undefined;
+    if (containing.length === 1) return containing[0];
+    const number = NUMBERED.exec(task.trim());
+    return number ? this.items[Number(number[1]) - 1] : undefined;
   }
 
   /** Applies the main agent's TodoWrite; returns the list to show. */
