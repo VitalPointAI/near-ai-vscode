@@ -849,6 +849,10 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     const conversationId = agent.id;
     const title = runTitleFor(text);
     const session = await state.activity.start({ project: path.basename(root), attribution, model, runId, conversationId, ...(title ? { title } : {}), ...(skill ? { plans: [skill.name] } : {}), summary: skill ? `/${skill.name} started.` : 'Agent conversation turn started.' });
+    // Set once the run is given this turn's files. Until then, files read for it go back to the composer if the turn ends early (stopped, or failed
+    // before its run began), so they are never lost; their read result is kept, so sending them again does not pay to read them again.
+    let delivered = false;
+    let readStaged = false;
     try {
       const route = clientFor(active, model);
       const limits = readAgentLimits();
@@ -863,12 +867,11 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
           return;
         }
         clearStaged(staged);
+        readStaged = true;
       }
       // Attachments that came with messages queued for a run that ended before taking them come with this turn, the one those messages became.
-      if (carried?.items.length) {
-        attachments = mergePrepared([...carried.items.map((item) => item.prepared), ...(attachments ? [attachments] : [])]);
-        carried.taken = true;
-      }
+      // They are marked taken only when the run is given them, below.
+      if (carried?.items.length) attachments = mergePrepared([...carried.items.map((item) => item.prepared), ...(attachments ? [attachments] : [])]);
       // Say where the files went, now that they are in the project.
       const savedText = savedNotice([...staged, ...(carried?.items ?? []).flatMap((item) => item.staged)]);
       if (savedText) tab.post({ type: 'notice', text: savedText });
@@ -890,12 +893,22 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
       const modelStallMs = Math.max(0, Math.min(3_600, typeof stallSeconds === 'number' && Number.isFinite(stallSeconds) ? stallSeconds : AGENT_DEFAULTS.modelStallSeconds)) * 1_000;
       const configuredBackup = String(vscode.workspace.getConfiguration('nearAi').get<unknown>('agent.backupModel', '') ?? '').trim();
       const backupModel = [configuredBackup, readModelTiers().standard, readModelTiers().deep].find((candidate) => candidate && candidate !== model && delegable.some((option) => option.id === candidate));
+      const webSearch = await webSearchProvider(context.secrets);
       if (stopped()) { await state.activity.append(session.sessionId, { status: 'cancelled', summary: 'Stopped before the run started.' }); return; }
+      // The run is given the files now: from here they are its, and they leave the composer for good.
+      delivered = true;
+      if (carried) {
+        carried.taken = true;
+        const carriedStaged = carried.items.flatMap((item) => item.staged);
+        // Says the carried files went with this turn, so a message bubble that showed them keeps its file line.
+        if (carriedStaged.length) clearStaged(carriedStaged);
+      }
+      for (const item of [...staged, ...(carried?.items ?? []).flatMap((entry) => entry.staged)]) preparedReads.delete(item);
       // Update Team waits for this to end before it offers to rewrite a team.
       const endRun = beginRun();
       runStarted(root);
       try {
-        await agent.send({ modelStallMs, ...(backupModel ? { backupModel } : {}), text, skill, gsd, team, ...(memberTeam ? { memberTeam } : {}), attachments, memory: { store: state.memory, projectScope: { kind: 'project', id: projectIdForWorkspace(root) } }, imageModel: route.local ? undefined : imageModel, reputation: new ReputationStore(root), tiers: readModelTiers(), roleModels: readRoleModels(), safetyModel, safetyFallbackModel, riskSwitches: readRiskSwitches(), rememberAllowRule: (rule) => rememberAllowRule(rule, tab), unattendedAutoApprove: vscode.workspace.getConfiguration('nearAi').get<boolean>('agent.unattendedAutoApprove', AGENT_DEFAULTS.unattendedAutoApprove) !== false, researchProfile: vscode.workspace.getConfiguration('nearAi').get<boolean>('gsd.researchProfile', true) !== false, availableModels: delegable.map((candidate) => candidate.id), modelCatalog: delegable, route: privateRouteFor(active.provider, route.local), contextWindows: Object.fromEntries(active.models.map((candidate) => [candidate.id, candidate.contextLength])), maxParallelAgents: limits.maxParallelAgents, maxTurns: limits.maxTurns, client: route.client, model, privacy: modelPrivacyLabel(modelInfo), policy: settings.actionPolicy, rules: readAgentRules(), activity: { store: state.activity, sessionId: session.sessionId }, local: route.local, security: securityAccess(context, root), webSearch: await webSearchProvider(context.secrets), budget: runBudget, mcpTools: mcp.tools, maxOutputTokens: Math.max(1_000, Math.min(1_000_000, Number(vscode.workspace.getConfiguration('nearAi').get<number>('agent.maxOutputTokens', AGENT_DEFAULTS.maxOutputTokens)) || AGENT_DEFAULTS.maxOutputTokens)), shellEnvAllow: vscode.workspace.getConfiguration('nearAi').get<string[]>('agent.shellEnvAllow', []).filter((name) => typeof name === 'string'), runId, ...(redTeamStep ? { skillAddendum: redTeamStep.addendum, projectAgents: redTeamStep.agents } : {}) });
+        await agent.send({ modelStallMs, ...(backupModel ? { backupModel } : {}), text, skill, gsd, team, ...(memberTeam ? { memberTeam } : {}), attachments, memory: { store: state.memory, projectScope: { kind: 'project', id: projectIdForWorkspace(root) } }, imageModel: route.local ? undefined : imageModel, reputation: new ReputationStore(root), tiers: readModelTiers(), roleModels: readRoleModels(), safetyModel, safetyFallbackModel, riskSwitches: readRiskSwitches(), rememberAllowRule: (rule) => rememberAllowRule(rule, tab), unattendedAutoApprove: vscode.workspace.getConfiguration('nearAi').get<boolean>('agent.unattendedAutoApprove', AGENT_DEFAULTS.unattendedAutoApprove) !== false, researchProfile: vscode.workspace.getConfiguration('nearAi').get<boolean>('gsd.researchProfile', true) !== false, availableModels: delegable.map((candidate) => candidate.id), modelCatalog: delegable, route: privateRouteFor(active.provider, route.local), contextWindows: Object.fromEntries(active.models.map((candidate) => [candidate.id, candidate.contextLength])), maxParallelAgents: limits.maxParallelAgents, maxTurns: limits.maxTurns, client: route.client, model, privacy: modelPrivacyLabel(modelInfo), policy: settings.actionPolicy, rules: readAgentRules(), activity: { store: state.activity, sessionId: session.sessionId }, local: route.local, security: securityAccess(context, root), webSearch, budget: runBudget, mcpTools: mcp.tools, maxOutputTokens: Math.max(1_000, Math.min(1_000_000, Number(vscode.workspace.getConfiguration('nearAi').get<number>('agent.maxOutputTokens', AGENT_DEFAULTS.maxOutputTokens)) || AGENT_DEFAULTS.maxOutputTokens)), shellEnvAllow: vscode.workspace.getConfiguration('nearAi').get<string[]>('agent.shellEnvAllow', []).filter((name) => typeof name === 'string'), runId, ...(redTeamStep ? { skillAddendum: redTeamStep.addendum, projectAgents: redTeamStep.agents } : {}) });
       } finally {
         endRun();
         void runEnded({ root, conversationId: tab.id, runId, outcome: tab.outcome });
@@ -905,6 +918,9 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     } catch (error) {
       await state.activity.append(session.sessionId, { status: 'failed', summary: 'Agent run failed.', errorCode: error instanceof Error ? error.name : 'unknown' });
       tab.post({ type: 'assistant-error', text: providerErrorMessage(error) });
+    } finally {
+      // Files this turn read but never gave to a run go back to the composer (carried ones are put back by `receive`).
+      if (readStaged && !delivered) for (const attachment of staged) { state.attachments.set(attachment.id, attachment); postStaged(attachment); }
     }
   };
   // A message typed while a turn is in progress steers it: the running agent sees it before its
@@ -922,7 +938,8 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
       return;
     }
     const root = workspaceRoot();
-    if (!root) return;
+    // Never dropped without a word: with no project folder open there is nowhere for the message (or its files) to go.
+    if (!root) { blocked('No project folder is open, so it was not sent to the running agent. Open the project folder, then send it again.'); return; }
     const staged = ids.map((id) => state.attachments.get(id)).filter((item): item is StagedAttachment => Boolean(item));
     // It goes to the provider like any message, so it passes the same outbound check, with what is attached to it.
     if (isEmergencyStopped()) { blocked('Emergency stop is on. Run "NEAR AI: Resume" to continue.'); return; }
@@ -1060,7 +1077,17 @@ function attachmentTeeBlock(staged: StagedAttachment[], modelInfo: ModelInfo | u
  */
 async function readAttachments(staged: StagedAttachment[], options: { client: NearAiClient; model: string; models: ModelInfo[]; question: string; runId: string | undefined; conversationId: string; root: string }): Promise<PreparedAttachments> {
   const agentModels = readAgentModels();
-  const prepared = await withSpendTag({ kind: 'attachment', runId: options.runId, conversationId: options.conversationId }, () => prepareAttachments(staged, { client: options.client, model: options.model, models: options.models, visionModel: agentModels.visionModel, transcriptionModel: agentModels.transcriptionModel, question: options.question }));
+  // Read by the same models as before, a file is not read (or paid for) again: a message handed back by Stop and sent again reuses what was read.
+  const key = JSON.stringify([options.model, agentModels.visionModel, agentModels.transcriptionModel]);
+  const parts: PreparedAttachments[] = [];
+  for (const item of staged) {
+    const known = preparedReads.get(item);
+    if (known?.key === key) { parts.push(known.prepared); continue; }
+    const read = await withSpendTag({ kind: 'attachment', runId: options.runId, conversationId: options.conversationId }, () => prepareAttachments([item], { client: options.client, model: options.model, models: options.models, visionModel: agentModels.visionModel, transcriptionModel: agentModels.transcriptionModel, question: options.question }));
+    preparedReads.set(item, { key, prepared: read });
+    parts.push(read);
+  }
+  const prepared = mergePrepared(parts);
   const copies: string[] = [];
   for (const item of staged) {
     // Made here, after the message passed its checks; the path is kept on the attachment so the chat can say where it went.
@@ -1071,6 +1098,12 @@ async function readAttachments(staged: StagedAttachment[], options: { client: Ne
   if (copies.length > 0) prepared.text = `${prepared.text}\n\nThe attached file${copies.length === 1 ? ' is' : 's are'} saved in this project and can be opened with your own file tools:\n${copies.map((file) => `- ${file}`).join('\n')}`;
   return prepared;
 }
+
+/**
+ * What each file read to, by the models that read it, until a run is given it. Kept so a file handed back unsent (Stop, or a turn that ended before its
+ * run began) is not read and billed again when it is sent again; the outbound and TEE-only checks still run on every send, before this is used.
+ */
+const preparedReads = new WeakMap<StagedAttachment, { key: string; prepared: PreparedAttachments }>();
 
 /** Files whose saving the chat has already reported. */
 const announced = new WeakSet<StagedAttachment>();

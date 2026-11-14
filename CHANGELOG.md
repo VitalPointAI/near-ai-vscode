@@ -5,9 +5,13 @@
 - **Auto no longer asks before running the agent's own helper scripts.** The agent is told to keep
   helper scripts in the project's `.near-ai/scratch/` folder, but with Auto on, running one asked for
   approval every time, often every few seconds. A script the agent wrote there during the current
-  run, with its file tools or from the shell, now runs without asking, and so does one written by
-  another agent of the same run. A script the run did not write itself, one changed since, or one
-  written after the agent read outside content such as a web page, still asks.
+  run, with its Write or Edit tools or with a shell redirect, `cp`, `mv` or `tee`, now runs without
+  asking, and so does one written by another agent of the same run. A script written another way
+  (for example with `sed -i`), one the run did not write itself, one changed since, or one written
+  after the agent read outside content such as a web page, still asks.
+- **A message sent while the agent is working says when it was not sent.** With no project folder
+  open, the message now says it was not sent instead of vanishing, and a message whose files were
+  not sent no longer shows them as sent.
 
 ## 0.4.21
 
