@@ -131,11 +131,31 @@ interface SyncState {
   wrapPending?: boolean;
   /** The highest wrap generation the remote's sealed index has vouched for here: a header older than this is never adopted. */
   wrapGen?: number;
+  /** The remote's state commit this computer last read or pushed. A tip that is not a descendant of it means the branch was deleted, recreated or rewritten. */
+  lastTip?: string;
+  /** Which remote address (transport.addressId) the bookkeeping is about. A different address is a different remote. */
+  remoteId?: string;
+  /** The highest manifest sequence this computer saw before the bookkeeping was last reset: every manifest it pushes is above it. */
+  seqFloor?: number;
 }
 
 function freshState(): SyncState {
   return { version: 1, lastSeenSeq: 0, readObjects: [], pushed: {}, heads: [], cold: {} };
 }
+
+/** What is kept when the remote's history is gone or rewritten: nothing about what it holds, except a sequence floor above everything seen, the highest wrap generation vouched, and a legacy pending mark. */
+function resetState(old: SyncState): SyncState {
+  return {
+    ...freshState(), seqFloor: Math.max(old.seqFloor ?? 0, old.lastSeenSeq),
+    ...(old.wrapGen !== undefined ? { wrapGen: old.wrapGen } : {}), ...(old.wrapPending ? { wrapPending: true } : {})
+  };
+}
+
+function hasHistory(state: SyncState): boolean {
+  return state.lastTip !== undefined || state.lastSeenSeq > 0 || state.readObjects.length > 0 || state.heads.length > 0 || Object.keys(state.pushed).length > 0;
+}
+
+const TIP_ID = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/;
 
 /** A short, stable name for a recovery wrap, so two computers can say whether they mean the same one. */
 export function wrapIdOf(wrap: RecoveryWrap): string {
@@ -159,7 +179,10 @@ function parseState(text: string): SyncState {
       version: 1, lastSeenSeq: value.lastSeenSeq,
       readObjects: Array.isArray(value.readObjects) ? value.readObjects.filter((item): item is string => typeof item === 'string') : [],
       pushed, heads, cold, ...(value.wrapPending === true ? { wrapPending: true } : {}),
-      ...(typeof value.wrapGen === 'number' && Number.isSafeInteger(value.wrapGen) && value.wrapGen >= 0 ? { wrapGen: value.wrapGen } : {})
+      ...(typeof value.wrapGen === 'number' && Number.isSafeInteger(value.wrapGen) && value.wrapGen >= 0 ? { wrapGen: value.wrapGen } : {}),
+      ...(typeof value.lastTip === 'string' && TIP_ID.test(value.lastTip) ? { lastTip: value.lastTip } : {}),
+      ...(typeof value.remoteId === 'string' && /^[0-9a-f]{16}$/.test(value.remoteId) ? { remoteId: value.remoteId } : {}),
+      ...(typeof value.seqFloor === 'number' && Number.isSafeInteger(value.seqFloor) && value.seqFloor >= 0 ? { seqFloor: value.seqFloor } : {})
     };
   } catch {
     return freshState();
@@ -465,7 +488,7 @@ export class StateSync {
 
   private async attempts(mode: 'sync' | 'pull'): Promise<SyncOutcome> {
     const { transport, home, keys, threads } = this.options;
-    const state = await this.readState();
+    let state = await this.readState();
     let tries = 0;
     for (;;) {
       const fetched = await transport.fetch();
@@ -483,6 +506,13 @@ export class StateSync {
       }
       if (!tip && mode === 'pull') return { kind: 'nothing-yet', message: MESSAGES.nothingYet };
 
+      // The remote's history is gone or rewritten (the branch was deleted, the repository recreated, origin re-pointed, history rewritten): what this
+      // computer believes the remote holds is no longer true, so it forgets that (keeping a sequence floor) and the union merge rebuilds the rest.
+      const address = transport.addressId();
+      const reset = await this.historyChanged(state, tip, address);
+      if (reset) state = resetState(state);
+      if (address !== undefined) state.remoteId = address;
+
       // Everything is read and verified before the first local write.
       const remote = tip ? await this.loadRemote(tip, dataKey, meta.stateId, state) : undefined;
       const local = await collectLocal(home, threads, this.collectOptions(state));
@@ -499,9 +529,10 @@ export class StateSync {
 
       const send = this.whatRemoteLacks(local, merged, remote, state);
       const chosen = await this.chooseWrap(remote, state);
+      const notes = [...(chosen.note ? [chosen.note] : []), ...(reset ? await this.unsendableNote(local, remote) : [])];
       if (remote && !send.hasNew && !chosen.mustPush) {
         if (chosen.settled) { delete state.wrapPending; await this.writeState(state); }
-        return { kind: 'synced', ...this.withSizeNotes(this.measured(listedBytes(remote?.objects ?? [])), send, chosen.note), pushed: false, attempts: tries };
+        return { kind: 'synced', ...this.withSizeNotes(this.measured(listedBytes(remote?.objects ?? [])), send, notes), pushed: false, attempts: tries };
       }
       const wrap = chosen.wrap;
       if (!wrap) return { kind: 'refused', message: MESSAGES.noRecoveryCode, attempts: tries };
@@ -512,12 +543,31 @@ export class StateSync {
         this.learnPush(state, built);
         if (chosen.pushesLocal || chosen.settled) delete state.wrapPending;
         await this.writeState(state);
-        return { kind: 'synced', ...this.withSizeNotes(this.measured(listedBytes(built.objects)), send, chosen.note), pushed: true, attempts: tries };
+        return { kind: 'synced', ...this.withSizeNotes(this.measured(listedBytes(built.objects)), send, notes), pushed: true, attempts: tries };
       }
       if (pushed.failure.kind !== 'rejected') return { kind: 'failed', message: pushed.failure.message, failure: pushed.failure, attempts: tries };
       if (tries >= MAX_PUSH_ATTEMPTS) return { kind: 'failed', message: MESSAGES.contended, failure: pushed.failure, attempts: tries };
       await this.sleep(RETRY_MIN_MS + Math.floor(this.random() * RETRY_SPAN_MS));
     }
+  }
+
+  /**
+   * Whether what this computer believes the remote holds is no longer true: the remote address changed, the state branch is gone while this
+   * computer had pushed to or read from one, or the tip is not a descendant of the last tip this computer saw (the branch was recreated or its history
+   * rewritten). A computer with no tip on record (state.json from an earlier build) is not judged.
+   */
+  private async historyChanged(state: SyncState, tip: string | undefined, address: string | undefined): Promise<boolean> {
+    if (state.remoteId !== undefined && address !== undefined && state.remoteId !== address) return true;
+    if (!tip) return hasHistory(state);
+    if (state.lastTip !== undefined && state.lastTip !== tip) return !(await this.options.transport.isAncestor(state.lastTip, tip));
+    return false;
+  }
+
+  /** After a reset: the archived conversations this computer lists but holds only online, which the remote no longer holds either, so this computer cannot send them again. They stay listed. */
+  private async unsendableNote(local: LocalSnapshot, remote: RemoteBundle | undefined): Promise<string[]> {
+    const lost = (await this.options.threads.index()).filter((item) => item.state === 'archived' && !item.locked && THREAD_ID.test(item.id) && !local.threads[item.id] && !remoteHoldsCold(remote, item.id));
+    if (!lost.length) return [];
+    return [`${lost.length === 1 ? '1 conversation' : `${lost.length} conversations`} kept only online could not be sent again from this computer, because the online copy is gone. ${lost.length === 1 ? 'It stays' : 'They stay'} listed here.`];
   }
 
   /**
@@ -595,6 +645,7 @@ export class StateSync {
   /** What this computer now knows the remote holds, after reading and applying it. */
   private learnRemote(state: SyncState, remote: RemoteBundle): void {
     state.lastSeenSeq = Math.max(state.lastSeenSeq, remote.seq);
+    state.lastTip = remote.tip;
     const vouched = vouchedGen(remote);
     if (vouched !== undefined) state.wrapGen = Math.max(state.wrapGen ?? 0, vouched);
     const listed = new Set(groupObjects(remote.objects).map((group) => (group[0] as ObjectEntry).file));
@@ -608,9 +659,8 @@ export class StateSync {
   }
 
   /** The message and the facts a sync reports about size: a warning from 500 MB, and which archived threads stay on this computer because there is no more room. */
-  private withSizeNotes(total: number, send: SendSet, note?: string): { message: string; stayLocal?: string[]; syncedBytes: number } {
-    const notes: string[] = [MESSAGES.synced];
-    if (note) notes.push(note);
+  private withSizeNotes(total: number, send: SendSet, extra: readonly string[] = []): { message: string; stayLocal?: string[]; syncedBytes: number } {
+    const notes: string[] = [MESSAGES.synced, ...extra];
     if (total >= SYNC_WARN_BYTES) notes.push(MESSAGES.overWarning);
     if (send.heldBack.length && send.stop) notes.push(stayLocalText(send.heldBack.length, send.stop));
     return { message: notes.join(' '), ...(send.heldBack.length ? { stayLocal: send.heldBack } : {}), syncedBytes: total };
@@ -781,7 +831,7 @@ export class StateSync {
     const kept = !remote ? [] : remote.objects.filter((entry) => entry.file !== remote.indexFile && (!consolidate || entry.class === 'cold'));
     const coldEntries = adds.flatMap((add) => add.parts);
     const objects = [...kept, ...coldEntries, ...hotParts.map((part) => part.entry), indexEntry];
-    const seq = Math.max(remote?.seq ?? 0, state.lastSeenSeq) + 1;
+    const seq = Math.max(remote?.seq ?? 0, state.lastSeenSeq, state.seqFloor ?? 0) + 1;
     const manifest = buildManifest({ stateId, kdf: wrap.kdf, wrappedKey: wrap.wrappedKey, dataKey, seq, objects, indexFile: indexEntry.file });
     const files: Array<StateFile | StateFileRef> = [{ name: 'manifest.json', data: manifest }];
     for (const entry of kept) files.push({ name: entry.file, oid: remote?.tree.get(entry.file) as string });
@@ -793,6 +843,7 @@ export class StateSync {
 
   private learnPush(state: SyncState, built: BuiltCommit): void {
     state.lastSeenSeq = Math.max(state.lastSeenSeq, built.seq);
+    state.lastTip = built.commit;
     const send = built.sent;
     for (const [id, list] of Object.entries(send.entries)) state.pushed[id] = [...new Set([...(state.pushed[id] ?? []), ...list.map((entry) => entry.id)])];
     for (const [id, ids] of Object.entries(built.cold)) {

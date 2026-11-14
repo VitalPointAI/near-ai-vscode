@@ -360,11 +360,25 @@ test('a listed object missing from the tree is refused and the state home is byt
   await assertRefusedUntouched(b, /missing/);
 });
 
-test('an older valid tree (a lower sequence number than one already seen) is refused and the state home is byte-identical', async () => {
+test('an older valid tree put back on top of the branch (a lower sequence number than one already seen) is refused and the state home is byte-identical', async () => {
   const { remote, b, earlier } = await arranged();
   assert.equal((await b.sync.sync()).kind, 'synced', 'B sees the newer state first');
-  fixtureGit(remote, ['update-ref', STATE_REF_NAME, earlier]);
+  // A new commit on top of the branch that holds the older tree: the tip still descends from what B saw, so the rollback check applies.
+  replaceRemoteTree(remote, remoteFiles(remote, earlier));
   await assertRefusedUntouched(b, /older than one this computer has already seen/);
+});
+
+test('the branch moved back to an older commit (history rewritten) is not refused as rolled back: nothing B holds is lost and its next manifest is above every sequence it saw (plan 27-30)', async () => {
+  const { remote, b, earlier } = await arranged();
+  assert.equal((await b.sync.sync()).kind, 'synced', 'B sees the newer state first');
+  const seen = (await entryIds(b, SECOND)).length;
+  assert.equal(seen, 6);
+  fixtureGit(remote, ['update-ref', STATE_REF_NAME, earlier]);
+  const synced = await b.sync.sync();
+  assert.equal(synced.kind, 'synced', synced.message);
+  assert.equal((await entryIds(b, SECOND)).length, 6, 'the union merge dropped nothing');
+  const seq = openManifest(fixtureGit(remote, ['show', `${STATE_REF_NAME}:manifest.json`]), (await b.keys.dataKey()) as Buffer, 0).seq;
+  assert.ok(seq >= 3, `the manifest pushed after the rewrite (${seq}) is above the two that were seen before it`);
 });
 
 test('a bundle sealed for another project (another state id), with or without objects, is refused and the state home is byte-identical', async () => {

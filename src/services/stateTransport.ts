@@ -5,6 +5,7 @@
 // force option: a push that loses a race reports 'rejected' and the caller fetches, merges and tries again. Every git call goes through the injected
 // GitRunner, which switches off hooks, signing, helper transports and fsmonitor. Shaped after the Team transport (unmerged branch, copied, never
 // imported). This module never imports vscode.
+import { createHash } from 'node:crypto';
 import { realpathSync } from 'node:fs';
 import { mkdir, stat } from 'node:fs/promises';
 import * as path from 'node:path';
@@ -152,6 +153,8 @@ export class StateTransport {
   /** The credentials of the remote's address, when it has any. They reach git only as a rewrite rule in each call's environment; they are never written to the mirror's config or put in an argument. */
   private credentials: SplitAddress | undefined;
   private addressLearnt = false;
+  /** The clean address the last fetch (or push, or blob read) used, without credentials. */
+  private lastAddress: string | undefined;
 
   public constructor(options: StateTransportOptions) {
     // Nothing inside the project folder may decide what git runs (REVIEW B1): the mirror and the hooks folder must not be in it, links resolved.
@@ -184,6 +187,7 @@ export class StateTransport {
     const split = splitAddress(address);
     this.credentials = split.credentialed ? split : undefined;
     this.addressLearnt = true;
+    this.lastAddress = split.clean;
     return split.clean;
   }
 
@@ -279,6 +283,25 @@ export class StateTransport {
       const read = await this.mirrorGit(['rev-parse', '--verify', '-q', INCOMING_REF]);
       return read.code === 0 && OID.test(gitText(read)) ? gitText(read) : undefined;
     });
+  }
+
+  /**
+   * Whether commit `ancestor` is `tip` or reachable from it, in the mirror. Both must be object ids. Anything else is false: a commit the mirror does not
+   * hold after the fetch cannot be an ancestor of what was fetched, because a fetch brings the whole history of the tip (only blobs are left out).
+   */
+  public isAncestor(ancestor: string, tip: string): Promise<boolean> {
+    return this.inMirror(async () => {
+      if (!OID.test(ancestor) || !OID.test(tip)) return false;
+      return (await this.mirrorGit(['merge-base', '--is-ancestor', ancestor, tip])).code === 0;
+    });
+  }
+
+  /**
+   * A short, stable name for the address the last fetch used (the first 16 hex of the sha256 of the address without credentials), so a computer can tell
+   * that its remote now points somewhere else. Undefined before a fetch.
+   */
+  public addressId(): string | undefined {
+    return this.lastAddress === undefined ? undefined : createHash('sha256').update(this.lastAddress, 'utf8').digest('hex').slice(0, 16);
   }
 
   /** The ids of the objects the mirror was told about and does not hold: after a filtered fetch, the blobs nobody has read yet. */
