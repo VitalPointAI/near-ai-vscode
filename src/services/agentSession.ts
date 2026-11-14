@@ -991,7 +991,7 @@ export class AgentConversation {
               // happens only if they allow it, and the sub-agent works on meanwhile instead of holding the run.
               requestApproval: (approval) => this.askApproval({ ...approval, callId: `${agent.id}:${approval.callId}`, title: `${label} › ${approval.title}` }, agent.abort.signal, label, agent.id, {
                 waitMs: this.subagentApprovalWaitMs,
-                onLate: (reply) => this.lateApproval(label, approval, reply, grants)
+                onLate: (reply) => this.lateApproval(label, approval, reply, grants, request.rememberAllowRule)
               }, grants),
               rememberAllowRule: request.rememberAllowRule,
               emit: (event) => {
@@ -1352,8 +1352,8 @@ export class AgentConversation {
     const command = request.grant?.command;
     if (!command) return;
     if (!(reply.decision === 'allow-run' || reply.decision === 'allow-always' || (late && reply.decision === 'allow'))) return;
-    // A late answer only grants for the run (lateApproval), so only a card answered in time has saved its allow entry.
-    const rule = !late && reply.decision === 'allow-always' ? request.allowRule : undefined;
+    // "Always allow" saves the card's allow entry whether it was answered in time or late (lateApproval), so cards for the same entry are covered too.
+    const rule = reply.decision === 'allow-always' ? request.allowRule : undefined;
     for (const [id, card] of [...this.openCards]) {
       if (id === request.callId || card.grants !== grants || !card.command || !this.approvals.has(id)) continue;
       if (card.command === command || (rule !== undefined && card.allowRule === rule)) card.cover();
@@ -1425,8 +1425,18 @@ export class AgentConversation {
   }
 
   /** A queued sub-agent approval answered after the agent moved on: an allow grants that exact command for the run, and the lead is told either way. */
-  private lateApproval(label: string, approval: ApprovalRequest, reply: ApprovalReply, grants: RunGrants): void {
+  private lateApproval(label: string, approval: ApprovalRequest, reply: ApprovalReply, grants: RunGrants, remember?: (rule: string) => void | Promise<void>): void {
     const allowed = reply.decision === 'allow' || reply.decision === 'allow-run' || reply.decision === 'allow-always';
+    // "Always allow" on a parked card saves its allow entry, exactly as it does on a card answered in time (owner, 2026-11-14): before, a late answer
+    // only granted the command for the run, so the same command asked again in the next run. Only the entry the card offered is saved: the offer was
+    // already checked to cover this command and nothing wider, and a held (risky) card offers none.
+    const rule = reply.decision === 'allow-always' ? approval.allowRule : undefined;
+    let saved = false;
+    if (rule && remember) {
+      grants.allowRules.add(rule);
+      saved = true;
+      void Promise.resolve().then(() => remember(rule)).catch(() => undefined);
+    }
     // The grant recorded on the card when it was made (review of PR 34: the subject line was not always set, so an allow could grant nothing while the
     // lead was told it was allowed). The lead hears "allowed for the run" only when a grant really took effect.
     const command = approval.grant?.command;
@@ -1435,7 +1445,7 @@ export class AgentConversation {
     if (allowed && approval.grant?.edits) { grants.edits = true; granted = true; }
     const what = command ? `\`${command.slice(0, 300)}\`` : `"${approval.title.slice(0, 200)}"`;
     this.notifications.push({ role: 'user', content: allowed && granted
-      ? `<approval-update agent="${label}" decision="allowed">\nThe user approved ${what}, which ${label} had queued. It is now allowed for the rest of this run: run it, or have an agent run it, if it is still needed.\n</approval-update>`
+      ? `<approval-update agent="${label}" decision="allowed">\nThe user approved ${what}, which ${label} had queued. It is now allowed ${saved ? 'every time, in this run and later ones' : 'for the rest of this run'}: run it, or have an agent run it, if it is still needed.\n</approval-update>`
       : allowed
         ? `<approval-update agent="${label}" decision="approved-once">\nThe user approved ${what}, which ${label} had queued, but this kind of action asks every time, so nothing was allowed for the rest of the run. If it is still needed, run it again: it will ask again.\n</approval-update>`
         : `<approval-update agent="${label}" decision="declined">\nThe user declined ${what}, which ${label} had queued.${reply.feedback ? ` Their note: ${reply.feedback}` : ''} Do not run it; adjust instead.\n</approval-update>` });

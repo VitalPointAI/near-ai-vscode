@@ -9,6 +9,9 @@
   another agent of the same run. A script the run did not write itself, one changed since, or one
   written after the agent read outside content such as a web page, still asks.
 - **The badge on the NEAR AI tab now counts only approvals you can see and answer.** A helper agent's approval that went unanswered disappeared from the chat while still counting on the badge. It now stays in the chat until you answer it, and allowing a command for the run also settles the other waiting approvals for that same command.
+- **"Allow every time" works on a helper agent's waiting approval.** Choosing it on an approval the
+  helper agent had already moved on from allowed the command for that run only, so it asked again in
+  the next run. It is now saved to the workspace's allow list, as it is on any other approval.
 
 ## 0.4.21
 

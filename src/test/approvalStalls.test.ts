@@ -210,6 +210,51 @@ test('a late allow of a sub-agent\'s Bash command grants that command for the ru
   assert.equal((await readFile(path.join(root, 'late.txt'), 'utf8')).trim(), 'late');
 });
 
+// Owner, 2026-11-14: "That always allow button was supposed to have been added a long time ago". "Always allow" on a parked card (its sub-agent has
+// moved on) saved nothing: the command was allowed for the run only and asked again in the next. It now saves the card's allow entry, as in time.
+test('"Always allow" on a parked sub-agent card saves its allow entry, as it does on a card answered in time', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'near-ai-late-always-'));
+  const command = 'make build';
+  let subTurn = 0;
+  let leadTurn = 0;
+  let leadTold = '';
+  const near = {
+    async *streamCompletion(_model: string, messages: AgentMessage[]): AsyncGenerator<CompletionEvent> {
+      if (String(messages[0]?.content ?? '').startsWith('You help')) {
+        subTurn += 1;
+        if (subTurn === 1) { yield { type: 'done', message: { role: 'assistant', content: null, tool_calls: [call('s1', 'Bash', { command })] }, finishReason: 'tool_calls', usage }; return; }
+        yield { type: 'done', message: { role: 'assistant', content: 'Queued the build; it is waiting for approval.' }, finishReason: 'stop', usage };
+        return;
+      }
+      leadTurn += 1;
+      if (leadTurn === 1) { yield { type: 'done', message: { role: 'assistant', content: null, tool_calls: [call('a1', 'Agent', { subagent_type: 'helper', prompt: 'build it', description: 'build' })] }, finishReason: 'tool_calls', usage }; return; }
+      const told = messages.find((message) => String(message.content ?? '').startsWith('<approval-update agent="helper"'));
+      if (!told) { yield { type: 'done', message: { role: 'assistant', content: null, tool_calls: [call(`wait${leadTurn}`, 'Bash', { command: 'pwd' })] }, finishReason: 'tool_calls', usage }; return; }
+      leadTold = String(told.content);
+      yield { type: 'done', message: { role: 'assistant', content: 'Done.' }, finishReason: 'stop', usage };
+    },
+    async actualCostsUsd() { return undefined; }
+  };
+  const posted: Array<Record<string, unknown>> = [];
+  const remembered: string[] = [];
+  const conversation = new AgentConversation(root, (message) => posted.push(message), path.join(root, '.ckpt'));
+  conversation.subagentApprovalWaitMs = 20;
+  const rules = { allowCommands: ['pwd'], denyCommands: DEFAULT_RULES.denyCommands };
+  const running = conversation.send({ text: 'go', client: near as never, model: 'm', privacy: 'Private', policy: { mode: 'approve-risky', emergencyStop: false }, rules, rememberAllowRule: (rule: string) => { remembered.push(rule); }, projectAgents: [{ name: 'helper', description: 'helper', tools: ['Bash'], body: 'You help.', file: path.join(root, 'team.md') }] });
+  try {
+    const card = await until(() => posted.find((message) => message.type === 'approval-request' && String(message.callId).endsWith(':s1')));
+    assert.ok(typeof card.allowRule === 'string' && card.allowRule, 'the card offers an allow entry');
+    await until(() => (posted.some((message) => message.type === 'tool-end' && String(message.output).startsWith(AWAITING_APPROVAL_PREFIX)) ? true : undefined));
+    conversation.answerApproval(String(card.callId), { decision: 'allow-always' });
+    await running;
+    assert.deepEqual(remembered, [card.allowRule], 'the late "Always allow" saved the entry the card offered');
+    assert.match(leadTold, /every time, in this run and later ones/, 'the lead is told it is allowed from now on');
+  } finally {
+    conversation.dispose();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 // Review of PR 34: stopping a sub-agent removes its parked cards; answering one afterwards does nothing.
 test('stopping a sub-agent removes its parked approval cards, and a later answer for one grants and reports nothing', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'near-ai-parked-stop-'));
