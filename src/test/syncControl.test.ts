@@ -33,6 +33,14 @@ const AT = new Date(2026, 10, 13, 9, 5).toISOString();
 /** What the control shows for a sync at AT: the panel's own short time, in the panel's own locale. */
 const SYNCED_AT = `Synced · ${new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' }).format(new Date(AT))}`;
 
+/** The control draws its time against the real clock (as it should for people), so tests that build the model at NOW pin the clock
+    to NOW while drawing; otherwise they pass only on the day NOW names, in the machine's own time zone. */
+function atClock<T>(now: number, work: () => T): T {
+  const real = Date.now;
+  Date.now = () => now;
+  try { return work(); } finally { Date.now = real; }
+}
+
 /** The bar as panelView.ts lays it out: the profile chip, then the sync chip, its live region and the line that shows a problem's sentence. */
 function bar(options: { detail?: boolean } = {}): { doc: FakeDocument; button: FakeNode; live: FakeNode; detail?: FakeNode } {
   const doc = new FakeDocument();
@@ -127,7 +135,7 @@ test('tracer: the host builds the panel-open message from the current status, an
 
 // ---- Task 2: all five states, live updates, errors on the control, keyboard and themes ----
 
-test('every status shows its exact label, a name that says the state, and posts the matching action (none while syncing)', () => {
+test('every status shows its exact label, a name that says the state, and posts the matching action (none while syncing)', () => atClock(NOW, () => {
   for (const [name, status, label, action] of STATUSES) {
     const { doc, button } = bar();
     const posts: unknown[] = [];
@@ -140,7 +148,7 @@ test('every status shows its exact label, a name that says the state, and posts 
     button.click();
     assert.deepEqual(posts, action === 'none' ? [] : [{ type: 'sync-control', action }], name);
   }
-});
+}));
 
 /** The label the person reads for a status: the model drawn on the control. */
 function shownLabel(status: SyncStatus, now = NOW): string {
@@ -149,7 +157,7 @@ function shownLabel(status: SyncStatus, now = NOW): string {
   return button.textContent;
 }
 
-test('"Synced" shows the time of the last sync on the control, today as the clock and another day with its date (same cases as 27-18, checked where they are drawn)', () => {
+test('"Synced" shows the time of the last sync on the control, today as the clock and another day with its date (same cases as 27-18, checked where they are drawn)', () => atClock(NOW, () => {
   const clock = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' });
   assert.equal(shownLabel({ state: 'synced', at: AT }), `Synced · ${clock.format(new Date(AT))}`);
   const yesterdayAt = new Date(2026, 10, 12, 23, 59);
@@ -158,7 +166,7 @@ test('"Synced" shows the time of the last sync on the control, today as the cloc
   assert.notEqual(other, shownLabel({ state: 'synced', at: new Date(2026, 10, 13, 23, 59).toISOString() }), 'another day reads differently from today');
   assert.equal(shownLabel({ state: 'synced' }), 'Synced');
   assert.equal(shownLabel({ state: 'synced', at: 'not a time' }), 'Synced');
-});
+}));
 
 // ---- Plan 27-25 (G-27-4d, times): one formatter in the panel for every display time ----
 
@@ -224,7 +232,7 @@ test('a problem is shown on the control in plain words, in the name and the tool
   assert.equal(syncControlModel({ state: 'attention' }, NOW).title.length > 0, true, 'a problem with no sentence still says something');
 });
 
-test('a status change re-renders the same button (no second control), and the live region says the new state once', () => {
+test('a status change re-renders the same button (no second control), and the live region says the new state once', () => atClock(NOW, () => {
   const { doc, button, live } = bar();
   const posts: unknown[] = [];
   const post = (message: unknown): number => posts.push(message);
@@ -240,7 +248,7 @@ test('a status change re-renders the same button (no second control), and the li
   assert.equal(doc.body.all((node) => node.id === 'sync').length, 1, 'one control');
   button.click();
   assert.deepEqual(posts, [{ type: 'sync-control', action: 'sync-now' }], 'one listener, whatever the number of renders');
-});
+}));
 
 test('a message with a password or token in it is redacted before it reaches the control', () => {
   const message = syncPanelMessage({ state: 'attention', message: 'Failed for https://user:pw@github.com/x/y.git' }, undefined, NOW);

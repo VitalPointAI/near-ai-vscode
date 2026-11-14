@@ -126,8 +126,11 @@ test('closeInterruptedRuns(root, writer): a fresh marker from another editor kee
 const OTHER_WRITER = 'edbbbbbb.inst0001';
 const OTHER_RUN = 'run-1793570629999-aaaaaa';
 const SKIPPED = 'session-skipped-001';
+// Closing a session is two writes (the cancelled event, then its run outcome and end), so wait for the finished record, not the first write:
+// on a slower machine a read can land between the two.
 const gone = async (store: () => Promise<ActivitySessionSummary | undefined>, outcome: string, tries = 300) => {
-  for (let attempt = 0; attempt < tries && (await store())?.outcome !== outcome; attempt += 1) await new Promise((resolve) => setTimeout(resolve, 10));
+  const finished = (session: ActivitySessionSummary | undefined) => session?.outcome === outcome && session.runOutcome !== undefined;
+  for (let attempt = 0; attempt < tries && !finished(await store()); attempt += 1) await new Promise((resolve) => setTimeout(resolve, 10));
 };
 
 test('a session skipped at activation is closed by the re-check once the other editor\'s run has ended, with the same stop summary and its last activity as the end', async () => {
