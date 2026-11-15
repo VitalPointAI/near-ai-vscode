@@ -514,6 +514,17 @@ export class SqliteStore implements RelayStore {
     return rows.map(toApproval);
   }
 
+  /**
+   * The durability settings of this store's own connection, read back from SQLite (synchronous is per connection, so a second connection
+   * could not show it). Not part of RelayStore: only the node:sqlite store has these. synchronous 2 is FULL.
+   */
+  durability(): { journalMode: string; synchronous: number; foreignKeys: number } {
+    const journal = this.db.prepare('PRAGMA journal_mode').get() as { journal_mode: string };
+    const synchronous = this.db.prepare('PRAGMA synchronous').get() as { synchronous: number };
+    const foreignKeys = this.db.prepare('PRAGMA foreign_keys').get() as { foreign_keys: number };
+    return { journalMode: journal.journal_mode, synchronous: Number(synchronous.synchronous), foreignKeys: Number(foreignKeys.foreign_keys) };
+  }
+
   async close(): Promise<void> {
     if (this.closed) return;
     this.closed = true;

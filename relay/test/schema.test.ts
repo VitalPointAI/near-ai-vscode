@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -66,6 +67,25 @@ test('a fresh store has user_version equal to SCHEMA_VERSION, write-ahead loggin
       assert.ok(tableNames(file).includes(table), `schema v1 has no ${table} table`);
     }
   });
+});
+
+test('the store connection reads back synchronous FULL, write-ahead logging and foreign keys on, also after a reopen (A5)', async () => {
+  await withTemp(async (dir) => {
+    const file = path.join(dir, 'relay.db');
+    for (let open = 0; open < 2; open += 1) {
+      const store = await openSqliteStore(file);
+      try {
+        // synchronous is per connection, so it is read on the store's own connection: 2 is FULL, which the kill drill cannot show.
+        assert.deepEqual(store.durability(), { journalMode: 'wal', synchronous: 2, foreignKeys: 1 });
+      } finally {
+        await store.close();
+      }
+    }
+  });
+  // The SQLite bundled with Node 26.13.1 already defaults to FULL, so the read-back alone would not notice the pragma being removed; it would
+  // only notice a weaker setting. The store must set FULL itself so a Node release with another default cannot weaken it silently.
+  const source = readFileSync(fileURLToPath(new URL('../../src/store/sqliteStore.ts', import.meta.url)), 'utf8');
+  assert.match(source, /db\.exec\('PRAGMA synchronous = FULL'\)/, 'the store sets synchronous = FULL on every connection');
 });
 
 test('opening, closing and opening again leaves user_version and the instance id unchanged', async () => {
