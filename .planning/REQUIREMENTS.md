@@ -9,10 +9,10 @@
 
 ### Relay foundation
 
-- [ ] **RELAY-01**: The relay runs as its own workspace with its own lockfile and exactly one runtime dependency (`jose`), on Node 26.13.1 (a release carrying all current security fixes, with `engines` pinned so an older runtime refuses to start), while the extension keeps its existing Node target and zero-dependency bundle; the two never share a lockfile.
-- [ ] **RELAY-02**: The relay answers a health check that reports version, uptime, whether the Teams verifier and the Signal sidecar are operational, and the count of in-flight runs, so an operator knows the box is alive without reading logs.
-- [ ] **RELAY-03**: All relay state (run records, conversation bindings, tenant registry, pending approvals, message queues) lives in a single state directory that is git-ignored and readable only by the relay's OS user, and a restart loses no queued message or in-flight run record.
-- [ ] **RELAY-04**: The relay ships as a container image built without a shell or package manager, and every secret it needs (bot secret, tenant API keys, Signal registration material) is read at startup from an operator-supplied source and never appears in the image, the state directory listing, or a log line.
+- [x] **RELAY-01**: The relay runs as its own workspace with its own lockfile and exactly one runtime dependency (`jose`), on Node 26.13.1 (a release carrying all current security fixes, with `engines` pinned so an older runtime refuses to start), while the extension keeps its existing Node target and zero-dependency bundle; the two never share a lockfile.
+- [x] **RELAY-02**: The relay answers a health check that reports version, uptime, whether the Teams verifier and the Signal sidecar are operational, and the count of in-flight runs, so an operator knows the box is alive without reading logs.
+- [x] **RELAY-03**: All relay state (run records, conversation bindings, tenant registry, pending approvals, message queues) lives in a single state directory that is git-ignored and readable only by the relay's OS user, and a restart loses no queued message or in-flight run record.
+- [x] **RELAY-04**: The relay ships as a container image built without a shell or package manager, and every secret it needs (bot secret, tenant API keys, Signal registration material) is read at startup from an operator-supplied source and never appears in the image, the state directory listing, or a log line.
 
 ### Inbound authenticity and allowlisting
 
