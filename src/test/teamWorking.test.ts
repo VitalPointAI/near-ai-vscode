@@ -5,7 +5,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { DEFAULT_RULES } from '../agent/permissions';
 import { PROJECT_TEAM_CONSENT_KEY, projectTeamAllowed, projectTeamQuestion, renderTeam, TeamConsent, TeamDefinition, TeamLibrary, teamLeadPrompt, teamMembersNote, workingTeamFor } from '../agent/teams';
-import { gsdTools } from '../gsd/tools';
+import { gsdTools, MAX_OTHER_AGENTS } from '../gsd/tools';
 import { AgentConversation, GsdContext } from '../services/agentSession';
 import type { AgentMessage, CompletionEvent, ToolDefinition } from '../services/nearAiClient';
 import type { ConversationStore, Transcript } from '../services/transcripts';
@@ -403,6 +403,16 @@ test('agent names and descriptions are made plain and capped in the Agent tool\'
     assert.doesNotMatch(text, /[\n<>]/);
     assert.ok(text.length < 400, `length ${text.length}`);
   }
+});
+
+// #46 review: the other agents beside a team's members were listed in full, so a large Open-GSD library filled the description the members should lead.
+test('the other agents beside a team\'s members are capped, with how many more there are', () => {
+  const agents = [{ name: 'designer', description: 'designer', tools: ['Read'], body: 'b', file: '/team.md' }, ...Array.from({ length: 45 }, (_, index) => ({ name: `gsd-agent-${String(index).padStart(2, '0')}`, description: 'd', tools: ['Read'], body: 'b', file: '/f.md' }))];
+  const tools = gsdTools({ home: '/none', root: '/none', skills: [], agents, teamMembers: ['designer'], ask: async () => [], spawn: async () => '' });
+  const help = String((tools.find((tool) => tool.name === 'Agent')!.parameters as { properties: { subagent_type: { description: string } } }).properties.subagent_type.description);
+  assert.match(help, new RegExp(`Other agents: ${Array.from({ length: MAX_OTHER_AGENTS }, (_, index) => `gsd-agent-${String(index).padStart(2, '0')}`).join(', ')} \\(and ${45 - MAX_OTHER_AGENTS} more\\)\\. Or general-purpose`));
+  assert.doesNotMatch(help, new RegExp(`gsd-agent-${MAX_OTHER_AGENTS}\\b`));
+  assert.ok(help.length < 800, `length ${help.length}`);
 });
 
 test('a run\'s own agents cannot be replaced by a team member of the same name, nor, without a team, by an Open-GSD agent', async () => {
