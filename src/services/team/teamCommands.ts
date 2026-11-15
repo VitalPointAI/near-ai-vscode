@@ -14,6 +14,7 @@ export const VERIFY_LOG_COMMAND = 'nearAi.team.verifyLog';
 export const SOLO_TEXT = 'Team Mode is not on for this project. Run "NEAR AI: Enable Team Mode" to turn it on.';
 export const PUSH_ACTION = 'Share with my team';
 export const SHARED_TEXT = 'Shared with your team.';
+export const PREVIEW_OFF_TEXT = 'Team Mode is an early preview and is off. Turn on the setting nearAi.team.preview in Settings, then run "NEAR AI: Enable Team Mode" again.';
 export const VERIFY_ACTION = 'Verify Team Log';
 const OUTPUT_CHANNEL_NAME = 'NEAR AI Team';
 const TEAM_FILE_PARTS = ['.planning', '.near-ai', 'team.json'];
@@ -154,6 +155,12 @@ export function registerTeamMode(context: vscode.ExtensionContext): TeamModeHand
   }
 
   async function enable(): Promise<void> {
+    // The Command Palette hides Enable while the preview is off, but a keybinding or another command can still call it, so it refuses here too:
+    // the device key is only ever created for a person who turned the preview on.
+    if (!vscode.workspace.getConfiguration('nearAi').get<boolean>('team.preview', false)) {
+      announce('info', PREVIEW_OFF_TEXT);
+      return;
+    }
     const projectRoot = firstFolder();
     if (projectRoot === undefined) {
       announce('error', 'Open your project folder first, then run "NEAR AI: Enable Team Mode" again.');

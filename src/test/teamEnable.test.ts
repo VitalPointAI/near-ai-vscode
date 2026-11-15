@@ -537,6 +537,7 @@ test('pushCodeBranch refuses option-like names and strips credentials from a fai
   await withFixture(['a'], async (fixture) => {
     const root = fixture.clones.a as string;
     assert.equal((await pushCodeBranch(root, 'origin', '--delete')).ok, false);
+    assert.equal((await pushCodeBranch(root, 'origin', 'main:refs/heads/other')).ok, false, 'a refspec is not a branch name');
     assert.equal((await pushCodeBranch(root, '--upload-pack=x', 'main')).ok, false);
     assert.equal((await pushCodeBranch(root, 'origin', 'no-such-branch')).ok, false);
     const password = `pw${randomBytes(8).toString('hex')}`;

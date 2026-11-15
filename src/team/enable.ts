@@ -332,8 +332,8 @@ export async function enableTeamMode(input: EnableInput): Promise<EnableResult> 
 // The Push button (D-20): the only place Team Mode pushes the user's code branch, and only when the user clicks it.
 export async function pushCodeBranch(projectRoot: string, remote: string, branch: string, git: GitRunner = runGit): Promise<{ ok: true } | { ok: false; message: string }> {
   if (!REMOTE_NAME_PATTERN.test(remote)) return { ok: false, message: 'The remote name is not valid.' };
-  // A branch name that starts with a dash would be read as an option.
-  if (branch === '' || branch.startsWith('-') || CONTROL_CHARACTERS.test(branch)) return { ok: false, message: 'The branch name is not valid.' };
+  // A branch name that starts with a dash would be read as an option, and a colon would make it a refspec: the shared ref-name rule refuses both.
+  if (!isGitRefName(branch) || CONTROL_CHARACTERS.test(branch)) return { ok: false, message: 'The branch name is not valid.' };
   const result = await git(['push', remote, branch], { cwd: projectRoot, env: await networkEnv(projectRoot, git), timeoutMs: NETWORK_TIMEOUT_MS });
   return result.code === 0 ? { ok: true } : { ok: false, message: `Pushing ${branch} to ${remote} failed: ${gitFailureText(result)}` };
 }

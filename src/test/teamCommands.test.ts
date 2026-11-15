@@ -23,7 +23,7 @@ const stub = createVscodeStub();
 const uninstall = installVscodeStub(stub);
 const commandsModule = require('../services/team/teamCommands') as typeof import('../services/team/teamCommands');
 test.after(() => { uninstall(); });
-const { ENABLE_COMMAND, PUSH_ACTION, VERIFY_ACTION, VERIFY_LOG_COMMAND, registerTeamMode, teamModeTestApi } = commandsModule;
+const { ENABLE_COMMAND, PREVIEW_OFF_TEXT, PUSH_ACTION, VERIFY_ACTION, VERIFY_LOG_COMMAND, registerTeamMode, teamModeTestApi } = commandsModule;
 
 const EM_DASH = '—';
 const COORDINATION_BRANCH = 'refs/heads/near-ai/coordination';
@@ -55,8 +55,10 @@ function resetStub(): void {
   stub.setWorkspaceFolders([]);
 }
 
-async function withProject(run: (project: Project) => Promise<void>, options: { initialised?: boolean; folderOpen?: boolean } = {}): Promise<void> {
+async function withProject(run: (project: Project) => Promise<void>, options: { initialised?: boolean; folderOpen?: boolean; preview?: boolean } = {}): Promise<void> {
   resetStub();
+  // Enable is only offered to a person who turned the preview on; tests that need it off say so.
+  stub.setConfig('nearAi.team.preview', options.preview ?? true);
   const fixture = await createTeamFixture({ clones: ['a'], initialised: options.initialised ?? true });
   const root = fixture.clones['a'] as string;
   const canaries = makeCanaries();
@@ -198,6 +200,7 @@ test('cancelling any input box returns quietly: no team.json, no message, no key
       assert.deepEqual([...p.secrets.values.keys()].sort(), before, 'no key was stored');
       assert.equal(remoteHasCoordination(p.fixture), false);
       assert.equal(existsSync(path.join(p.storage, 'team')), false, 'no team storage was created');
+    assert.equal(existsSync(path.join(p.storage, 'identity')), false, 'no identity folder was created');
       assert.equal(stub.statusBarItems.length, 0);
       assert.equal(p.handle.session(), undefined);
     });
@@ -217,6 +220,21 @@ test('running Enable again names the existing team and asks nothing', async () =
     assert.ok(stub.notifications[0]?.message.startsWith('This project already has a team: Existing team.'));
     assert.equal(gitIn(p.root, ['rev-list', '--count', 'HEAD']), commitsBefore, 'no second team and no new commit');
   });
+});
+
+test('Enable refuses with the preview off: it asks nothing and creates no team.json, no device key and no storage', async () => {
+  await withProject(async (p) => {
+    const commitsBefore = gitIn(p.root, ['rev-list', '--count', 'HEAD']);
+    await p.enable([]);
+    assert.deepEqual(messages(), [PREVIEW_OFF_TEXT]);
+    assert.equal(stub.inputRequests.length, 0, 'no question was asked');
+    assert.equal(await teamJsonExists(p.root), false);
+    assert.equal(p.secrets.values.has(DEVICE_KEY_SECRET), false, 'no device key was created');
+    assert.equal(existsSync(path.join(p.storage, 'team')), false, 'no team storage was created');
+    assert.equal(gitIn(p.root, ['rev-list', '--count', 'HEAD']), commitsBefore);
+    assert.equal(remoteHasCoordination(p.fixture), false);
+    assert.equal(PREVIEW_OFF_TEXT.includes(EM_DASH), false);
+  }, { preview: false });
 });
 
 test('a folder that is not set up for NEAR AI gets an error that names NEAR AI: Set Up', async () => {

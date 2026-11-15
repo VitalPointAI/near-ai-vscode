@@ -488,7 +488,7 @@ function teamProjectTests(getApi: () => NearAiTestApi): Array<[string, () => Pro
       assert.equal(evidence.publicKey.base64url, teamFile.genesis.ownerDevice.publicKey);
       assert.equal(Buffer.from(evidence.publicKey.base64url, 'base64url').toString('hex'), evidence.publicKey.hex);
       assert.equal(Buffer.from(evidence.publicKey.base64url, 'base64url').toString('base64'), evidence.publicKey.base64);
-      assert.equal(JSON.stringify(evidence).includes(evidence.privateKeySha256), true, 'the digest of the stored text is in the evidence');
+      assert.match(evidence.privateKeySha256, /^[0-9a-f]{64}$/, 'the evidence carries the digest of the stored text, never the text');
 
       const digests: LabelledDigest[] = [
         ...evidence.privateFormDigests.map((digest, index) => ({ ...digest, label: `device key form ${index}` }))
