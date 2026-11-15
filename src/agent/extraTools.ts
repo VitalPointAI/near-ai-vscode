@@ -136,35 +136,36 @@ export function imageTool(client: NearAiClient, model: ModelInfo, models: readon
         reviewer.drafts.delete(old);
       }
       const kb = Math.round(bytes.length / 1024);
-      let decision: ImageReviewDecision;
+      const how = made.note ? ` ${made.note}` : '';
+      // `reviewing` stays set until the decision is fully applied (second review of PR 51): cleared before Accept's awaits, a parallel attempt at the
+      // same path could delete the draft just accepted, and moving it then failed.
       try {
-        decision = await reviewer.review({
+        const decision = await reviewer.review({
           id, file, path: shown, model: used.id, prompt: input.prompt, attempt, bytes: bytes.length,
           ...(made.edited && input.editOf ? { editOf: input.editOf } : {}), ...(made.note ? { note: made.note } : {}),
           ...(context.agentLabel ? { agent: context.agentLabel } : {}), ...(context.agentId ? { agentId: context.agentId } : {})
         }, context.signal);
+        switch (decision.decision) {
+          case 'accept':
+            await context.checkpoints.capture(absolute);
+            await mkdir(path.dirname(absolute), { recursive: true });
+            await moveDraft(reviewer.root, id, absolute);
+            reviewer.drafts.delete(id);
+            return `Accepted by the user and saved to ${shown} (${kb} KB, ${used.id}).${how}`;
+          case 'changes':
+            return `The user asked for changes to draft ${id} (attempt ${attempt} at ${shown}): ${decision.feedback}\nDraft ${id} is kept; call GenerateImage again with edit_of: "${id}", path: "${input.path}", and a prompt that applies these changes. Nothing was saved to ${shown}.${how}`;
+          case 'discard':
+            await deleteDraft(reviewer.root, id);
+            reviewer.drafts.delete(id);
+            return `The user discarded draft ${id}; nothing was saved to ${shown}. Do not generate this image again unless the user asks for it.`;
+          default:
+            // 0.4.24: a review nobody answered in time ends like a stop, but the agent is told why, so it carries on without the image rather than making it again.
+            if (decision.timedOut !== undefined) return `The user did not review the image within ${decision.timedOut} minute${decision.timedOut === 1 ? '' : 's'}, so the review timed out. Draft ${id} is kept in ${DRAFTS_DIR}/ and nothing was saved to ${shown}. Carry on without it and tell the user it is waiting in ${DRAFTS_DIR}/; do not generate it again unless they ask.`;
+            return `Stopped before the user reviewed the image. Draft ${id} is kept in ${DRAFTS_DIR}/ and nothing was saved to ${shown}.`;
+        }
       } finally {
         const kept = reviewer.drafts.get(id);
         if (kept) kept.reviewing = false;
-      }
-      const how = made.note ? ` ${made.note}` : '';
-      switch (decision.decision) {
-        case 'accept':
-          await context.checkpoints.capture(absolute);
-          await mkdir(path.dirname(absolute), { recursive: true });
-          await moveDraft(reviewer.root, id, absolute);
-          reviewer.drafts.delete(id);
-          return `Accepted by the user and saved to ${shown} (${kb} KB, ${used.id}).${how}`;
-        case 'changes':
-          return `The user asked for changes to draft ${id} (attempt ${attempt} at ${shown}): ${decision.feedback}\nDraft ${id} is kept; call GenerateImage again with edit_of: "${id}", path: "${input.path}", and a prompt that applies these changes. Nothing was saved to ${shown}.${how}`;
-        case 'discard':
-          await deleteDraft(reviewer.root, id);
-          reviewer.drafts.delete(id);
-          return `The user discarded draft ${id}; nothing was saved to ${shown}. Do not generate this image again unless the user asks for it.`;
-        default:
-          // 0.4.24: a review nobody answered in time ends like a stop, but the agent is told why, so it carries on without the image rather than making it again.
-          if (decision.timedOut !== undefined) return `The user did not review the image within ${decision.timedOut} minute${decision.timedOut === 1 ? '' : 's'}, so the review timed out. Draft ${id} is kept in ${DRAFTS_DIR}/ and nothing was saved to ${shown}. Carry on without it and tell the user it is waiting in ${DRAFTS_DIR}/; do not generate it again unless they ask.`;
-          return `Stopped before the user reviewed the image. Draft ${id} is kept in ${DRAFTS_DIR}/ and nothing was saved to ${shown}.`;
       }
     }
   };

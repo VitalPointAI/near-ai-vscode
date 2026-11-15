@@ -514,3 +514,35 @@ test('the image tool tells the agent a timed-out review kept the draft, and the 
   const script = require('node:fs').readFileSync(path.join(__dirname, '..', '..', 'media', 'chat', 'chat.js'), 'utf8') as string;
   assert.match(script, /m\.outcome === 'timed-out' && typeof m\.minutes === 'number' \? m\.minutes : undefined/, 'the view passes the minutes on');
 });
+
+// Second review of PR 51: `reviewing` was cleared as soon as the decision came back, before Accept's awaits, so a parallel attempt at the same path could
+// delete the draft just accepted, and moving it then failed with ENOENT.
+test('a parallel attempt at the same path does not delete a draft whose Accept is still being applied', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'near-ai-image-accept-race-'));
+  const shown: ImageDraft[] = [];
+  let accept: (decision: ImageReviewDecision) => void = () => undefined;
+  const reviewer: ImageReviewer = { root, drafts: new Map(), attempts: new Map(), review: (draft) => { shown.push(draft); return shown.length === 1 ? new Promise((resolve) => { accept = resolve; }) : Promise.resolve({ decision: 'changes', feedback: 'x' }); } };
+  const tool = imageTool(imageClient() as never, FLUX as never, [], reviewer);
+  await withContext(root, async (context, checkpoints) => {
+    // Accept's first await (the checkpoint) is held open until the second attempt has run its clean-up of earlier drafts.
+    let open: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => { open = resolve; });
+    let capturing: () => void = () => undefined;
+    const captured = new Promise<void>((resolve) => { capturing = resolve; });
+    const capture = checkpoints.capture.bind(checkpoints);
+    checkpoints.capture = async (file: string) => { capturing(); await gate; return capture(file); };
+    const first = tool.run(tool.parse({ prompt: 'a', path: 'hero.png' }), context);
+    await until(() => shown[0]);
+    accept({ decision: 'accept' });
+    await captured;
+    const second = await tool.run(tool.parse({ prompt: 'b', path: 'hero.png' }), context);
+    assert.match(second, /asked for changes/);
+    assert.ok(existsSync(draftFile(root, shown[0].id)), 'the draft being accepted is still there');
+    open();
+    assert.match(await first, /^Accepted by the user and saved to hero\.png/);
+    assert.ok(existsSync(path.join(root, 'hero.png')), 'the accepted image reached its path');
+    assert.equal(reviewer.drafts.has(shown[0].id), false);
+    assert.ok(reviewer.drafts.has(shown[1].id), 'the newer draft, kept after Request changes, stays');
+    assert.equal(reviewer.drafts.get(shown[1].id)?.reviewing, false, 'and is no longer marked as under review');
+  });
+});
