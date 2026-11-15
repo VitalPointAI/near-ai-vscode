@@ -79,6 +79,7 @@ The extension is not changed by this phase, except for build hygiene: the root p
 - JSON-file-per-tenant store implementation (only if `node:sqlite` shifts).
 - Vault client (a vault agent writing files covers it).
 - Full operator runbook (Phase 76).
+- Retention of message text (code review IN-04, 2026-11-15): `ackMessage` keeps the payload of a `done` message in the database indefinitely. Decide before Phase 71, which first acknowledges messages: blank the payload on ack (the dedupe key alone recognises a redelivery), or purge `done` rows after N days. The owner decides; nothing is stored for real tenants before Phase 69.
 </deferred>
 
 ---
