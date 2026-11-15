@@ -7,7 +7,8 @@ import { readFile, readdir, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
 import { redactSecrets } from '../domain/redaction';
-import { liveConversations, onRunEnded, onRunQuiet, runEnded, runQuiet, runStarted, runWaiting, runsInFlight, runsWaiting } from '../services/runEndHooks';
+import { LIVE_UNBACKED_GRACE_MS, liveConversations, onRunEnded, onRunQuiet, reconcileLiveConversations, runEnded, runQuiet, runStarted, runWaiting, runsInFlight, runsWaiting } from '../services/runEndHooks';
+import { mergeMeta } from '../services/threadStore';
 import { generateRecoveryCode } from '../domain/state/recoveryCode';
 import { KDF_PARAMS, StateRefusedError, deriveKek, newDataKey, newSalt, wrapDataKey } from '../domain/state/keys';
 import { readManifestHeader } from '../domain/state/objects';
@@ -1356,4 +1357,47 @@ test('the sentence a person reads is worded once: no "Couldn\'t" in the sync sou
   const block = commands.slice(start, commands.indexOf('registerCommand', start + 10));
   assert.match(block, /statusSentence\(outcome, true\)/);
   assert.ok(!/showWarningMessage\(outcome\.message\)/.test(block), 'the toast does not use the outcome\'s raw message');
+});
+
+test('a conversation whose run end was missed leaves the live set once no running marker backs it, after a grace (#48 review)', async () => {
+  const root = path.join('/project', 'missed-end');
+  const t0 = Date.parse('2026-11-15T10:00:00.000Z');
+  runStarted(root, 'conv-missed0001', t0);
+  runStarted(root, 'conv-backed0001', t0);
+  runStarted(root, 'conv-fresh00001', t0 + 9 * 60_000);
+  runWaiting(root, 'conv-missed0001', true);
+  assert.equal(runsInFlight(root), 3);
+  const backed = new Set(['conv-backed0001']);
+  const asked: string[] = [];
+  const isBacked = async (id: string) => { asked.push(id); return backed.has(id); };
+  // Within the grace nothing is dropped: a run that has just started may not have written its marker yet.
+  assert.deepEqual((await reconcileLiveConversations(root, isBacked, LIVE_UNBACKED_GRACE_MS, t0 + 60_000)).sort(), ['conv-backed0001', 'conv-fresh00001', 'conv-missed0001']);
+  assert.deepEqual(asked, []);
+  // Later, the one with no running marker goes, with its run in flight and its wait; the backed one and the fresh one stay.
+  const left = await reconcileLiveConversations(root, isBacked, LIVE_UNBACKED_GRACE_MS, t0 + 10 * 60_000);
+  assert.deepEqual(left.sort(), ['conv-backed0001', 'conv-fresh00001']);
+  assert.deepEqual(liveConversations(root).sort(), ['conv-backed0001', 'conv-fresh00001']);
+  assert.equal(runsInFlight(root), 2);
+  assert.equal(runsWaiting(root), 0);
+  // A marker that cannot be read keeps the conversation live (the safe side).
+  assert.deepEqual((await reconcileLiveConversations(root, async () => { throw new Error('unreadable'); }, LIVE_UNBACKED_GRACE_MS, t0 + 60 * 60_000)).sort(), ['conv-backed0001', 'conv-fresh00001']);
+  // The late end of a conversation already dropped does not take another run's count.
+  await runEnded({ root, conversationId: 'conv-missed0001', runId: 'run-1-abcdef', outcome: 'done' });
+  await runEnded({ root, conversationId: 'conv-backed0001', runId: 'run-2-abcdef', outcome: 'done' });
+  await runEnded({ root, conversationId: 'conv-fresh00001', runId: 'run-3-abcdef', outcome: 'done' });
+  assert.deepEqual(liveConversations(root), []);
+  assert.equal(runsInFlight(root), 0);
+});
+
+test('mergeMeta: a placeholder meta never wins over a real one, whatever its times; the times still combine (#48 review)', () => {
+  const real = { id: 'conv-merge00001', title: 'Design review', model: 'near/model-a', origin: 'panel' as const, createdAt: '2026-11-01T00:00:00.000Z', lastUsedAt: '2026-11-02T00:00:00.000Z', turns: 3, entries: 6, bytes: 10, tip: 'e6' };
+  const placeholder = { ...real, title: 'Conversation', model: '', createdAt: '2026-10-30T00:00:00.000Z', lastUsedAt: '2030-01-01T00:00:00.000Z', placeholder: true as const };
+  for (const merged of [mergeMeta(real, placeholder), mergeMeta(placeholder, real)]) {
+    assert.equal(merged.title, 'Design review');
+    assert.equal(merged.model, 'near/model-a');
+    assert.equal(merged.placeholder, undefined);
+    assert.equal(merged.lastUsedAt, '2030-01-01T00:00:00.000Z');
+    assert.equal(merged.createdAt, '2026-10-30T00:00:00.000Z');
+  }
+  assert.equal(mergeMeta(placeholder, { ...placeholder, lastUsedAt: '2031-01-01T00:00:00.000Z' }).placeholder, true, 'two placeholders stay a placeholder');
 });

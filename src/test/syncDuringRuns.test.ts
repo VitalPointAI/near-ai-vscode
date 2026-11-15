@@ -2,14 +2,15 @@
 // kept out of it. Its context and meta from another computer are not applied while it runs (they wait, sealed, and are merged as usual once it ends), its
 // context is not sent while it runs, and its log entries keep moving by id. Two machines over one local bare remote; no network.
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { DEFAULT_RULES } from '../agent/permissions';
 import { AgentConversation } from '../services/agentSession';
 import type { AgentMessage, CompletionEvent } from '../services/nearAiClient';
-import { StateSync } from '../services/stateSync';
+import { deferredFileOf, StateSync } from '../services/stateSync';
+import { memorySyncSettings, turnOffFlow } from '../services/syncFlows';
 import type { StateTransport } from '../services/stateTransport';
 import type { ConversationStore, Transcript } from '../services/transcripts';
 import { SIX_TURNS, chain, entryIds, remotePayloads, syncedPair, writeMarker, type Machine } from './helpers/syncFixtures';
@@ -184,4 +185,76 @@ test('a running conversation reports each saved run state as a quiet point, whil
     assert.ok(quiet.length >= 2, `a quiet point at each save between model turns (got ${quiet.length})`);
     assert.ok(quiet.every((after) => after === false), 'each one came while the run was in progress');
   } finally { await rm(project, { recursive: true, force: true }); }
+});
+
+test('a conversation known only from another computer\'s live run gets a placeholder meta that never replaces its real title (#48 review)', async () => {
+  const OTHER = 'conv-placehold01';
+  const { remote, a, b } = await syncedPair(THREAD);
+  try {
+    // A has the conversation with its real title; its entries carry times later than its meta's last use (a clock ahead, or entries saved after it).
+    await a.threads.create({ id: OTHER, title: 'Design review', model: 'near/model-a', origin: 'panel' });
+    const future = chain(OTHER, a.writer, SIX_TURNS).map((entry, index) => ({ ...entry, at: new Date(Date.parse('2030-01-01T00:00:00.000Z') + index * 1000).toISOString() }));
+    await a.threads.appendEntries(OTHER, future);
+    assert.equal((await a.sync.sync()).kind, 'synced');
+    // On B the conversation is running on another editor by its marker, and B has never seen it.
+    await writeMarker(b, OTHER, { runId: 'run-700-abcdef', writer: 'foreignxed.foreignxin' });
+    assert.equal((await b.sync.sync()).kind, 'synced');
+    const placeholder = await b.threads.meta(OTHER);
+    assert.equal(placeholder?.title, 'Conversation', 'imported under a placeholder while the run is live');
+    assert.equal(placeholder?.placeholder, true);
+    assert.ok(placeholder!.lastUsedAt > (await a.threads.meta(OTHER))!.lastUsedAt, 'the placeholder looks newer than the real meta, which is what made it dangerous');
+    // B's sync never sends the placeholder, so A keeps its title.
+    for (const payload of await remotePayloads(remote, b)) {
+      const records = (payload as { records?: Array<{ kind: string; id: string; body: { title?: string } }> }).records ?? [];
+      assert.equal(records.some((record) => record.kind === 'thread-meta' && record.id === OTHER && record.body.title === 'Conversation'), false, 'no placeholder meta on the remote');
+    }
+    assert.equal((await a.sync.pullOnly()).kind, 'synced');
+    assert.equal((await a.threads.meta(OTHER))?.title, 'Design review');
+    // Once the run ends, the real meta B held back replaces the placeholder, newer-looking or not.
+    await writeMarker(b, OTHER, { runId: 'run-700-abcdef', writer: 'foreignxed.foreignxin', endedAt: new Date().toISOString(), outcome: 'completed' });
+    assert.equal((await b.sync.sync()).kind, 'synced');
+    const real = await b.threads.meta(OTHER);
+    assert.equal(real?.title, 'Design review');
+    assert.equal(real?.model, 'near/model-a');
+    assert.equal(real?.placeholder, undefined);
+    assert.equal((await a.sync.pullOnly()).kind, 'synced');
+    assert.equal((await a.threads.meta(OTHER))?.title, 'Design review');
+  } finally {
+    await cleanUp(remote, [a, b]);
+  }
+});
+
+test('turning sync off removes sync/deferred.enc, and turning it back on still merges what it held (#48 review)', async () => {
+  const { remote, a, b } = await syncedPair(THREAD);
+  try {
+    let live: string[] = [];
+    const aSync = syncFor(a, () => live);
+    await a.threads.save(context('before the run', at(0)));
+    assert.equal((await aSync.sync()).kind, 'synced');
+    // A's run is live; B's newer context arrives and is held back in deferred.enc.
+    live = [THREAD];
+    await b.threads.save(context('B, later', at(20)));
+    assert.equal((await b.sync.sync()).kind, 'synced');
+    assert.equal((await aSync.sync()).kind, 'synced');
+    const deferred = deferredFileOf(a.home);
+    assert.ok(await stat(deferred).then(() => true, () => false), 'the held-back context is in deferred.enc');
+    // Sync is turned off while the run is still live: the file goes.
+    const settings = memorySyncSettings(a.root);
+    await settings.write({ enabled: true, remote: 'origin' });
+    const env = { root: a.root, home: a.home, keys: a.keys, threads: a.threads, settings, makeSync: () => aSync };
+    const notes: string[] = [];
+    const ui = { info: (text: string) => { notes.push(text); } } as unknown as Parameters<typeof turnOffFlow>[0]['ui'];
+    assert.equal((await turnOffFlow({ env, ui })).status, 'done');
+    assert.equal(await stat(deferred).then(() => true, () => false), false, 'deferred.enc is removed when sync is turned off');
+    assert.equal((await settings.read()).enabled, false);
+    // The run ends and sync is turned back on: what the file held is read from the remote again and merged.
+    live = [];
+    assert.equal((await aSync.sync()).kind, 'synced');
+    assert.equal(await contextText(a), 'B, later', 'nothing B saved was lost by removing the file');
+    // Turning off with no deferred file changes nothing else.
+    await turnOffFlow({ env, ui });
+    assert.equal(await stat(deferred).then(() => true, () => false), false);
+  } finally {
+    await cleanUp(remote, [a, b]);
+  }
 });

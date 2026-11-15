@@ -45,6 +45,11 @@ export interface ThreadMeta {
   history?: string;
   /** Absent means live. */
   state?: ThreadState;
+  /**
+   * Set on the stand-in meta of a conversation this computer knows only from another computer's live run (its entries arrived, its meta is held back
+   * until that run ends). A placeholder never wins a merge against a real meta, and sync never sends it (#48 review).
+   */
+  placeholder?: true;
 }
 
 /** Where an archived thread's content is kept: `local` in this state home's archive folder, `remote` only in the project's synced state until it is opened. */
@@ -75,6 +80,11 @@ function assertThreadId(id: string): void {
 
 /** Two copies of one thread's meta: the newer one's fields win, the last use is the later of the two, and the thread began at the earlier. */
 export function mergeMeta(a: ThreadMeta, b: ThreadMeta): ThreadMeta {
+  // A placeholder's title ("Conversation") and empty model never replace a real meta's, however new its times look; the times still combine.
+  if (Boolean(a.placeholder) !== Boolean(b.placeholder)) {
+    const real = a.placeholder ? b : a;
+    return { ...real, createdAt: a.createdAt < b.createdAt ? a.createdAt : b.createdAt, lastUsedAt: a.lastUsedAt > b.lastUsedAt ? a.lastUsedAt : b.lastUsedAt };
+  }
   const newer = a.lastUsedAt !== b.lastUsedAt ? (a.lastUsedAt > b.lastUsedAt ? a : b) : (JSON.stringify(a) >= JSON.stringify(b) ? a : b);
   return { ...newer, createdAt: a.createdAt < b.createdAt ? a.createdAt : b.createdAt, lastUsedAt: a.lastUsedAt > b.lastUsedAt ? a.lastUsedAt : b.lastUsedAt };
 }
@@ -357,6 +367,8 @@ export class ThreadStore implements ConversationStore {
     const at = this.now().toISOString();
     const base: ThreadMeta = existing ?? { id, title: 'Conversation', model: '', origin: 'panel', createdAt: at, lastUsedAt: at, turns: 0, entries: 0, bytes: 0, tip: '' };
     const defined = Object.fromEntries(Object.entries(patch).filter(([, value]) => value !== undefined)) as Partial<ThreadMeta>;
+    // A title saved here makes a placeholder meta a real one.
+    if (defined.title !== undefined) delete base.placeholder;
     const next: ThreadMeta = { ...base, ...defined, id, lastUsedAt: patch.lastUsedAt && patch.lastUsedAt > base.lastUsedAt ? patch.lastUsedAt : at > base.lastUsedAt ? at : base.lastUsedAt };
     await this.home.ensureFolder(this.dirOf(id));
     await writeFileAtomic(this.metaPath(id), this.sealJson(material, 'thread-meta', id, next));

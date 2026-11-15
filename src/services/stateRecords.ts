@@ -41,6 +41,8 @@ export interface PortableMeta {
   createdAt: string;
   lastUsedAt: string;
   history?: string;
+  /** This computer's own stand-in meta for a thread it knows only from another computer's live run (ThreadMeta.placeholder); never sent or received. */
+  placeholder?: true;
 }
 
 /** An archived thread's own sealed parts, as the sync's manifest lists a cold object, and the ids of the entries they hold. */
@@ -151,7 +153,9 @@ const MAX_SPEND_FILE_BYTES = 64 * 1024 * 1024;
 function portableOf(meta: ThreadMeta): PortableMeta {
   return {
     id: meta.id, title: meta.title, model: meta.model, origin: meta.origin === 'chat-view' ? 'chat-view' : 'panel', createdAt: meta.createdAt, lastUsedAt: meta.lastUsedAt,
-    ...(meta.history ? { history: meta.history } : {})
+    ...(meta.history ? { history: meta.history } : {}),
+    // Kept on this computer's own view of the thread, so a merge keeps it from replacing a real meta; never parsed from another computer's record.
+    ...(meta.placeholder ? { placeholder: true as const } : {})
   };
 }
 
@@ -207,7 +211,8 @@ async function collectThreads(threads: ThreadStore, build: Builder, writer: stri
     }
     const portable = portableOf(meta);
     found[item.id] = { entries, meta: portable, ...(context ? { context } : {}), ...(cold ? { archived: true as const, cold } : {}) };
-    const metaRecord = build('thread-meta', item.id, portable, isoOf(portable.lastUsedAt, EPOCH), writer);
+    // A placeholder meta (a conversation known here only from another computer's live run) is never sent: it could only overwrite the real one.
+    const metaRecord = portable.placeholder ? undefined : build('thread-meta', item.id, portable, isoOf(portable.lastUsedAt, EPOCH), writer);
     if (metaRecord) records.push(metaRecord);
     // An archived thread's working context lives in its archive; only a live thread's context travels as a record, and not while its run is running: the
     // run rewrites it before every model turn, so it goes up once the run ends (its log entries go up as they are saved).
@@ -578,7 +583,10 @@ export async function applyMerged(home: ProjectStateHome, threads: ThreadStore, 
       const have = new Set([...(heldHere?.entries ?? []), ...(heldHere ? [] : await threads.archiveDeltaEntries(id))].map((entry) => entry.id));
       const missing = entries.filter((entry) => !have.has(entry.id));
       if (missing.length) await threads.appendArchiveDelta(id, missing);
-      const newest = [known, incomingMeta, listed?.meta].reduce<PortableMeta | undefined>((best, meta) => (meta && (!best || meta.lastUsedAt > best.lastUsedAt) ? meta : best), undefined);
+      // A placeholder is used only when there is no real meta at all.
+      const metas = [known, incomingMeta, listed?.meta].filter((meta): meta is PortableMeta => meta !== undefined);
+      const real = metas.filter((meta) => !meta.placeholder);
+      const newest = (real.length ? real : metas).reduce<PortableMeta | undefined>((best, meta) => (!best || meta.lastUsedAt > best.lastUsedAt ? meta : best), undefined);
       if (newest) {
         const last = missing.at(-1)?.at;
         await threads.noteArchivedMeta(id, last && last > newest.lastUsedAt ? { ...newest, lastUsedAt: last } : newest, listed ? { entries: listed.entries, tip: listed.tip, ...(listed.turns !== undefined ? { turns: listed.turns } : {}) } : {});
@@ -590,14 +598,15 @@ export async function applyMerged(home: ProjectStateHome, threads: ThreadStore, 
       for (const record of [metas.get(id), contexts.get(id)]) if (record) deferred.push(record);
       if (!entries.length) continue;
       const at = entries[0]?.at ?? EPOCH;
-      const { id: _live, ...own } = local.threads[id]?.meta ?? { id, title: 'Conversation', model: '', origin: 'panel' as const, createdAt: at, lastUsedAt: at };
+      // Known only from another computer's live run: a placeholder meta, marked so the real one replaces it in the later merge and it is never sent.
+      const { id: _live, ...own } = local.threads[id]?.meta ?? { id, title: 'Conversation', model: '', origin: 'panel' as const, createdAt: at, lastUsedAt: at, placeholder: true as const };
       const outcome = await threads.importThread(id, { entries, meta: own, keepMeta: true });
       if (outcome !== 'unchanged') applied += 1;
       continue;
     }
     const first = entries[0]?.at ?? EPOCH;
     const last = entries[entries.length - 1]?.at ?? first;
-    const meta = incomingMeta ?? known ?? { id, title: 'Conversation', model: '', origin: 'panel' as const, createdAt: first, lastUsedAt: last };
+    const meta = incomingMeta ?? known ?? { id, title: 'Conversation', model: '', origin: 'panel' as const, createdAt: first, lastUsedAt: last, placeholder: true as const };
     if (!entries.length && !incomingMeta && !incomingContext) continue;
     const { id: _id, ...rest } = meta;
     const outcome = await threads.importThread(id, { entries, meta: rest, ...(incomingContext ? { context: incomingContext, keepContextTip: true } : {}) });
