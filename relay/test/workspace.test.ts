@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { checkNodeVersion, MIN_NODE_VERSION } from '../src/nodeVersion';
 
 // Phase 68, plan 01 (RELAY-01): the relay workspace keeps one runtime dependency, refuses an older Node at install and at start, holds the
-// Node version rule in one place, and keeps the agent core reachable only through src/runner (Phase 71).
+// Node version rule in one place, and keeps the agent core reachable only through src/runner (Phase 77).
 //
 // The old-Node cases need a real older node binary. They run when NEAR_AI_RELAY_OLD_NODE names one (for example
 // ~/.nvm/versions/node/v24.22.2/bin/node) and are skipped with a printed reason otherwise. CI always sets it, and a run in GitHub Actions
@@ -137,7 +137,7 @@ test('package-lock.json is lockfile version 3 and its runtime packages are exact
   assert.deepEqual(runtime, ['', 'node_modules/jose']);
 });
 
-// Phase 71 handoff: only src/runner may reach the extension's agent core (through the @ext/* alias); nothing else in the relay imports
+// Phase 77 handoff: only src/runner may reach the extension's agent core (through the @ext/* alias); nothing else in the relay imports
 // from outside relay/.
 const IMPORT_SPECIFIER = /(?:\bfrom\s*|\bimport\s*\(?\s*)['"]([^'"]+)['"]/;
 

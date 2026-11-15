@@ -1,8 +1,11 @@
 FROM docker.io/library/node:24.22.2-trixie-slim
 # Decoy: a FAKE key placed in the image OUTSIDE the policy's filesystem allowlist,
-# to prove Landlock (not just absence) blocks run-time reads.
-RUN mkdir -p /opt/nearai-decoy/.near-ai/state/keys
-COPY decoy.key /opt/nearai-decoy/.near-ai/state/keys/local.key
-RUN chmod 755 /opt/nearai-decoy /opt/nearai-decoy/.near-ai /opt/nearai-decoy/.near-ai/state /opt/nearai-decoy/.near-ai/state/keys && chmod 644 /opt/nearai-decoy/.near-ai/state/keys/local.key
+# to prove Landlock (not just absence) blocks run-time reads. It is generated at build time
+# from random bytes and starts with FAKE-DECOY-NOT-A-KEY-; tests/key-escape.sh reports a
+# leak whenever any output contains "FAKE-". Nothing outside this image uses it.
+RUN mkdir -p /opt/nearai-decoy/.near-ai/state/keys \
+ && { printf 'FAKE-DECOY-NOT-A-KEY-'; od -An -tx1 -N32 /dev/urandom | tr -d ' \n'; printf '\n'; } > /opt/nearai-decoy/.near-ai/state/keys/local.key \
+ && chmod 755 /opt/nearai-decoy /opt/nearai-decoy/.near-ai /opt/nearai-decoy/.near-ai/state /opt/nearai-decoy/.near-ai/state/keys \
+ && chmod 644 /opt/nearai-decoy/.near-ai/state/keys/local.key
 USER node
 WORKDIR /sandbox

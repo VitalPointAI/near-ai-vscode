@@ -16,7 +16,7 @@ provides:
   - "A green phase gate: relay, container, root lint, full root test, verify:release, secret scan"
 affects: [69, 71, 75, 76]
 
-status: checkpoint-pending
+status: complete
 actuals:
   tokens: 1635
   tasks: 2
@@ -93,19 +93,19 @@ coverage:
     requirement: RELAY-01
     verification:
       - kind: manual
-        ref: "Task 3 (checkpoint:human-action, blocking-human): awaiting the owner's answer"
-        status: pending
+        ref: "Task 3 (checkpoint:human-action): the owner answered \"applied\" on 2026-11-15; read-only gh api check of main's branch protection lists relay"
+        status: pass
     human_judgment: true
 ---
 
 # Phase 68 Plan 08: Relay CI job, required check and phase gate Summary
 
-**The relay is now a required CI check (own job on Node 26.13.1, listed in CI_CHECKS), the release check refuses any relay file in the VSIX, and the whole phase gate is green; only the owner's two D-19 steps remain.**
+**The relay is now a required CI check (own job on Node 26.13.1, listed in CI_CHECKS), the release check refuses any relay file in the VSIX, and the whole phase gate is green; the owner completed both D-19 steps (PR #50 merged as 052d5cf, `relay` required on main since 2026-11-15).**
 
 ## Performance
 
 - **Duration:** about 35 minutes (most of it the relay, container and root suites)
-- **Tasks:** 2 of 3 done; Task 3 is the owner's (checkpoint, not answered)
+- **Tasks:** 3 of 3 done; Task 3 was the owner's (answered "applied" on 2026-11-15)
 - **Files modified:** 6
 
 ## Accomplishments
@@ -120,7 +120,7 @@ coverage:
 
 1. **Task 1 (tracer): relay CI job and required-check entry** - `4a9c61c` (feat)
 2. **Task 2: release-content patterns, docs, phase gate** - `2fe6e97` (feat)
-3. **Task 3: owner approval and branch protection** - not done, awaiting the owner
+3. **Task 3: owner approval and branch protection** - done by the owner (PR #50 approved and merged as 052d5cf; branch protection re-applied 2026-11-15)
 
 **Plan metadata:** committed separately after this summary (docs).
 
@@ -175,13 +175,15 @@ None.
 
 None. T-68-30 (gate paths hold the change for the owner's approval; Task 3 is owner-only), T-68-31 (relay is in CI_CHECKS and guarded by a test), T-68-32 (release check refuses the relay paths; verify:release passes), T-68-33 (read-only token, `persist-credentials: false`, SHA pins asserted) and T-68-34 (`npm ci --ignore-scripts`) are mitigated and tested.
 
-## Task 3: awaiting the owner (D-19)
+## Task 3: answered "applied" (D-19)
 
-Not answered yet. No agent approved a deployment, changed branch protection, pushed, opened a PR or merged anything. Nothing was pushed and no PR exists, so the owner action is recorded in STATE.md as pending. If the owner answers "applied", the continuation confirms with the read-only `gh api repos/VitalPointAI/near-ai-vscode/branches/main/protection --jq '[.required_status_checks.checks[].context]'`, expects `relay` alongside lint, test, e2e, release-content, audit, secret-scan and agent-review, and removes the pending line from STATE.md.
+No agent approved a deployment or changed branch protection; the owner did both. The owner approved the `agent-review-gates` environment for PR #50, which merged as 052d5cf on 2026-11-15, and then re-applied main's branch protection with `relay` as a required check, answering "applied" the same day.
+
+Confirmed with the read-only check `gh api repos/VitalPointAI/near-ai-vscode/branches/main/protection --jq '[.required_status_checks.checks[] | "\(.context):\(.app_id)"]'`, which returned `lint`, `test`, `e2e`, `release-content`, `audit`, `secret-scan` and `relay` (each app 15368) and `agent-review`. The pending line was removed from STATE.md.
 
 ## Next Phase Readiness
 
-The phase's code is done and gated. The remaining work is the PR, the owner's `agent-review-gates` approval, and re-applying branch protection after the merge. Requirements RELAY-01 to RELAY-04 are not ticked here; the orchestrator ticks them.
+The phase is done: the code is merged (PR #50, 052d5cf) and `relay` is a required check on main. Requirements RELAY-01 to RELAY-04 are not ticked here; the orchestrator ticks them.
 
 ## Self-Check: PASSED
 

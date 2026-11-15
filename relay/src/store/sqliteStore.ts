@@ -48,6 +48,14 @@ function checkId(field: string, value: unknown): string {
   return value;
 }
 
+/** A message id is the row id the store handed out: a whole number from 1 up. */
+function checkMessageId(field: string, value: unknown): number {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 1) {
+    throw invalid(field, 'must be a message id the store handed out (a whole number from 1)');
+  }
+  return value;
+}
+
 function checkTime(field: string, value: unknown): number {
   if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) throw invalid(field, 'must be a whole number of milliseconds');
   return value;
@@ -407,7 +415,7 @@ export class SqliteStore implements RelayStore {
 
   async ackMessage(tenantId: string, messageId: number, now: number): Promise<boolean> {
     checkId('tenantId', tenantId);
-    checkTime('messageId', messageId);
+    checkMessageId('messageId', messageId);
     checkTime('now', now);
     return this.transaction(() => Number(this.statement('ack').run(now, tenantId, messageId).changes) === 1);
   }

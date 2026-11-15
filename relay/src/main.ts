@@ -158,8 +158,20 @@ export async function main(argv: readonly string[]): Promise<void> {
     process.exitCode = 1;
     return;
   }
-  logger.info('relay.listening', { host: config.host, port, version: __RELAY_VERSION__, instanceId: await openStore.instanceId() });
-
+  // Everything relay.listening needs is read before the signal handlers go in, so a stop can never
+  // run while that read is still in flight. The handlers then go in before relay.listening is logged:
+  // a supervisor or test that reacts to that line by sending SIGTERM must always get a clean stop,
+  // never the default kill.
+  let instanceId: string;
+  try {
+    instanceId = await openStore.instanceId();
+  } catch (error) {
+    logger.error('relay.start_refused', { reason: 'instance-id', detail: error instanceof Error ? error.message : 'instance id read failed' });
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await openStore.close();
+    process.exitCode = 1;
+    return;
+  }
   let stopping = false;
   const stop = (signal: string): void => {
     if (stopping) return;
@@ -185,4 +197,5 @@ export async function main(argv: readonly string[]): Promise<void> {
   };
   process.on('SIGTERM', () => stop('SIGTERM'));
   process.on('SIGINT', () => stop('SIGINT'));
+  logger.info('relay.listening', { host: config.host, port, version: __RELAY_VERSION__, instanceId });
 }

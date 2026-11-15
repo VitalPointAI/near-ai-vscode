@@ -46,7 +46,7 @@ export interface SecretSpec {
 }
 
 /**
- * Secrets the relay itself knows by name. None is required in Phase 68: nothing uses the Teams secret until Phases 69 and 71, which flip
+ * Secrets the relay itself knows by name. None is required in Phase 68: nothing uses the Teams secret until Phases 75 and 77, which flip
  * TEAMS_APP_SECRET to required when the Teams channel is configured.
  */
 export const RELAY_SECRETS: readonly SecretSpec[] = [

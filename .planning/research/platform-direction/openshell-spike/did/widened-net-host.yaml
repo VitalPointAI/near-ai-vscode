@@ -1,5 +1,5 @@
-# DRAFT. Sandbox section of a CHILD (worker) DID, narrowed from the parent:
-# no /tmp write, npm read-only, inference limited to chat completions.
+# DRAFT. Prover test case (openshell-spike.md section 6): child-sandbox.yaml, the narrowed child, with one change
+# that WIDENS it past the parent: an extra egress host, github.com:443 with full access. The prover answered exceeds_boundary.
 version: 1
 filesystem_policy:
   include_workdir: false

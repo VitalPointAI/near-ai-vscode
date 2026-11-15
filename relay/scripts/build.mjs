@@ -3,7 +3,7 @@
 //
 // The guard and the app are separate files on purpose: the guard checks the Node version and only then imports the app, so an older Node
 // prints one plain sentence instead of failing on a module (node:sqlite) it does not have. The entries table below is the one place that
-// names what gets built; Phase 71 appends the runner entry (format cjs, dist/runner.cjs) here.
+// names what gets built; Phase 77 appends the runner entry (format cjs, dist/runner.cjs) here.
 import { build } from 'esbuild';
 import { globSync, readFileSync, rmSync } from 'node:fs';
 import path from 'node:path';

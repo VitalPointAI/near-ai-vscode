@@ -29,7 +29,7 @@ Run these from the `relay` folder.
 | `npm run test:container` | Builds the image and runs the container suite (Docker and Compose required). It makes only its own uniquely named image, Compose project and volume, and removes them again. |
 | `npm start` | Starts the built relay from `dist/bin.mjs`. Run `npm run build` first. |
 
-The relay has one runtime dependency, `jose` (exact pin, own lockfile, installed with install scripts off). Nothing imports it yet: it is reserved for the Teams JWT validation in Phase 69, and the workspace test pins it so it cannot change by accident.
+The relay has one runtime dependency, `jose` (exact pin, own lockfile, installed with install scripts off). Nothing imports it yet: it is reserved for the Teams JWT validation in Phase 75 (inbound authenticity), and the workspace test pins it so it cannot change by accident.
 
 ## Settings
 
@@ -64,7 +64,7 @@ A secret file must be mode 0400 or 0600 with no group or world access. A secret 
 The kinds of secret in your deployment:
 
 - The Teams bot app secret (`TEAMS_APP_SECRET`).
-- A NEAR AI API key for your organization, and one for each other organization the relay serves, named `NEAR_AI_KEY_` plus a tenant name in capitals, for example `NEAR_AI_KEY_ACME`, given as a file with `NEAR_AI_KEY_ACME_FILE`. A tenant name cannot be `FILE` or end in `_FILE`. Any variable that starts with `NEAR_AI_KEY_`, in any case, set to a plain value stops the relay at start. These keys are used in later phases.
+- A NEAR AI API key for your organization, and one for each other organization the relay serves, named `NEAR_AI_KEY_` plus a tenant name in capitals, for example `NEAR_AI_KEY_ACME`, given as a file with `NEAR_AI_KEY_ACME_FILE`. A tenant name cannot be `FILE` or end in `_FILE`. Any variable that starts with `NEAR_AI_KEY_`, in any case, set to a plain value stops the relay at start. This version does not read these key files at all: nothing opens them, checks their permissions or uses them until Phase 76 (tenants and identity). Until then a misnamed variable or file, a missing file, or a file with loose permissions is not detected, so there is no need to create them yet. If you do, check the names against this paragraph yourself.
 - The Signal registration material. It is not a file the relay reads. It lives in the Signal sidecar's `signal-config` volume, and that volume is itself the credential for the number.
 - The optional `LOG_PSEUDONYM_KEY`. It makes the stable labels that replace phone numbers in logs. When you give none, the relay creates `log-pseudonym.key` in the state directory once and reuses it.
 
@@ -97,7 +97,7 @@ What the container gives you:
 - A shell-less image: distroless Node 26 as user 65532, with no shell, package manager, curl or wget, and only `bin.mjs` and `app.mjs` in `/app`. Both base images are pinned by digest.
 - A read-only root filesystem, every Linux capability dropped, no-new-privileges, a 16 MB private `/tmp`, and limits of 128 processes and 512 MB of memory.
 - The state volume `relay-state` as the only writable path, created empty with mode 0700 for user 65532.
-- The port published on `127.0.0.1` only. TLS for the public Teams webhook ends at your reverse proxy on the host, which the Phase 76 runbook covers. Never publish the relay's port on all interfaces.
+- The port published on `127.0.0.1` only. TLS for the public Teams webhook ends at your reverse proxy on the host, which the Phase 84 runbook covers. Never publish the relay's port on all interfaces.
 
 Podman rootless: run the same image with `--userns=keep-id:uid=65532,gid=65532` so a secret file you own is read as user 65532. The container suite does not cover Podman.
 
@@ -119,14 +119,14 @@ The reply is 200 when the relay is healthy and 503 when it cannot read its own s
 
 `relay/compose.yaml` also describes a Signal sidecar (`bbernhard/signal-cli-rest-api`). It is in the profile `signal`, so it is off by default. Start it only when a later phase tells you to, with `docker compose -f relay/compose.yaml --profile signal up -d`.
 
-- It is pinned by tag and digest: `0.101` plus its sha256. That tag bundles signal-cli 0.14.8. Re-check the tag and re-pin it before about 2026-12-10 (Phase 75 does this).
+- It is pinned by tag and digest: `0.101` plus its sha256 (a multi-architecture index for amd64, arm64 and arm/v7). That tag bundles signal-cli 0.14.8, released 2026-09-10. A signal-cli release stops working with Signal about three months after it comes out, so this pin must be replaced before about 2026-12-10. On 2026-11-15 `0.101` was still the newest stable release, so the pin stayed; the next check is on 2026-12-01, which leaves time to re-pin before it expires. This is upkeep on its own schedule and does not wait for Phase 82 (the Signal channel).
 - It publishes no port. Only the relay, on the Compose network, can reach it.
 - Its `signal-config` volume is the Signal registration. Treat it like a password: back it up privately and never share it.
 - It runs with the same kind of limits as the relay: as the image's own `signal-api` user (uid 1000, never root), a read-only root filesystem, every Linux capability dropped, no-new-privileges, and limits of 256 processes and 1 GB of memory. Its only writable paths are the `signal-config` volume and a 128 MB private `/tmp`. That `/tmp` allows running programs, because the image's process supervisor (s6-overlay) runs its service scripts from `/tmp/s6-runtime` and signal-cli loads its native library from there.
-- What was checked so far is static only: the pinned image's own settings (it is built to run as uid 1000 with a read-only root, `S6_READ_ONLY_ROOT=1`, and keeps its runtime files in `/tmp`) and `docker compose --profile signal config`, which the container suite also asserts. Nothing has started the sidecar yet. Phase 75 starts it for the first time and must confirm it runs with these settings, and loosen one only with a recorded reason.
+- What was checked so far is static only: the pinned image's own settings (it is built to run as uid 1000 with a read-only root, `S6_READ_ONLY_ROOT=1`, and keeps its runtime files in `/tmp`) and `docker compose --profile signal config`, which the container suite also asserts. Nothing has started the sidecar yet. Phase 82 (the Signal channel) starts it for the first time and must confirm it runs with these settings, and loosen one only with a recorded reason.
 
 ## Known limits
 
-- One relay per state directory. Nothing stops a second relay from opening the same folder until Phase 71 adds a lock, so run only one.
+- One relay per state directory. Nothing stops a second relay from opening the same folder until Phase 77 adds a lock, so run only one.
 - No Teams or Signal messages are handled yet.
-- This is a foundation guide. The full operator runbook (reverse proxy, TLS, backups, upgrades) arrives in Phase 76.
+- This is a foundation guide. The full operator runbook (reverse proxy, TLS, backups, upgrades) arrives in Phase 84.

@@ -300,7 +300,9 @@ describe('relay container image and Compose project', { timeout: 1_200_000 }, ()
     assert.ok(typeof signal.pids_limit === 'number' && signal.pids_limit > 0 && signal.pids_limit <= 512, 'a process limit');
     assert.ok(Number(signal.mem_limit) > 0 && Number(signal.mem_limit) <= 2 * 1024 ** 3, 'a memory limit of at most 2 GiB');
     assert.deepEqual(signal.tmpfs?.map((entry) => entry.split(':')[0]), ['/tmp'], 'only /tmp is writable besides the volume');
-    assert.match(readFileSync(COMPOSE_FILE, 'utf8'), /2026-12-10/, 'the file records the Phase 75 re-check date');
+    const composeText = readFileSync(COMPOSE_FILE, 'utf8');
+    assert.match(composeText, /expires about 2026-12-10/, 'the file records when the bundled signal-cli expires');
+    assert.match(composeText, /Next re-check 2026-12-01/, 'the file records the next re-check of the sidecar pin, before it expires');
   });
 
   test('image: user 65532:65532, no secret-like environment variable, no fake secret in history or settings, Node 26.13.1 or later', async () => {
