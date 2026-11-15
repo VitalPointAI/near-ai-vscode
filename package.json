@@ -593,6 +593,19 @@
           "default": "black-forest-labs/FLUX.2-klein-4B",
           "description": "Model the agent's GenerateImage tool uses (private by default). The tool is offered only when your provider lists this model. A model chosen for this project in Compare Models is used instead of this setting until you clear it there or with NEAR AI: Clear This Project's Model Choices."
         },
+        "nearAi.agent.imageReview": {
+          "type": "string",
+          "enum": [
+            "ask",
+            "off"
+          ],
+          "enumDescriptions": [
+            "Each image the agent makes is shown in the chat first. It is saved where the agent wanted only when you accept it; you can also ask for changes or discard it.",
+            "Images are saved where the agent wants them straight away, without showing them to you first."
+          ],
+          "default": "ask",
+          "description": "Whether you review each image the agent makes before it is saved in your project. While an image waits for you, the agent waits too, in every approval mode. Images waiting for review are kept in the project's .near-ai/drafts/images folder, which is never committed; ones left there are removed after 7 days."
+        },
         "nearAi.activity.retentionMinutes": {
           "type": "number",
           "default": 60,

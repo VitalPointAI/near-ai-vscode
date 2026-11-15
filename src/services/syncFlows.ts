@@ -18,7 +18,7 @@ import { runStateGit, gitText, privateHooksDir, redactGitMessage, TIMED_OUT_CODE
 import { ProjectStateHome, stateHomeFor, type MementoLike } from './stateHome';
 import type { StateKeys } from './stateKeys';
 import type { RunMarker, RunState } from './runMarkers';
-import { StateSync, syncOwnerFor, type StateSyncOptions, type SyncOutcome } from './stateSync';
+import { discardDeferred, StateSync, syncOwnerFor, type StateSyncOptions, type SyncOutcome } from './stateSync';
 import { StateBusyError } from './stateLocks';
 import { StateTransport, validateRemote } from './stateTransport';
 import { adoptRemoteIdentity, catchUpFromPrevious, discardPreviousState, recoverInterruptedAdoption, type AdoptOptions } from './stateRestore';
@@ -290,7 +290,7 @@ export interface SyncParts {
   /** Whether no run is in flight in this editor: the turn-on and join flows' syncs wait while it is false. The scheduler's syncs are built without it. */
   isIdle?: () => boolean;
   /** The conversations whose run is in flight in this editor: a sync never rewrites them (StateSyncOptions.liveConversations). */
-  liveConversations?: () => Iterable<string>;
+  liveConversations?: () => Iterable<string> | Promise<Iterable<string>>;
   runState?: (marker: RunMarker) => RunState;
   profiles?: { profileSource: ProfileSource; secretSource: SecretSource; applyProfiles: (records: StateRecord[]) => Promise<void> };
   extra?: Partial<StateSyncOptions>;
@@ -612,11 +612,18 @@ export async function keepKeyFlow(input: TurnOnInput, on: boolean): Promise<Flow
   return { status: 'done', message: KEY_FILE_OFF_DONE };
 }
 
-/** Stops syncing: nothing is scheduled or pushed any more. The remote branch and this computer's state are left as they are. */
+/**
+ * Stops syncing: nothing is scheduled or pushed any more. The remote branch and this computer's state are left as they are, except sync/deferred.enc
+ * (what a sync held back for a running conversation), which is removed: no later sync is coming to merge it.
+ */
 export async function turnOffFlow(input: TurnOnInput): Promise<FlowResult> {
   const { env, ui } = input;
   await settingsOf(env).write({ enabled: false });
   env.onEnabled?.(false);
+  // The removal waits its turn behind a sync already running for this folder, holding the same lock: a sync that was in flight when sync was turned off
+  // would otherwise write deferred.enc again after it was removed. The scheduler is off by now, so nothing new is queued behind it. A lock that cannot be
+  // had in time (another editor's sync) still removes the file, as before.
+  await syncOwnerFor(env.root).run(() => discardDeferred(env.home)).catch(() => discardDeferred(env.home)).catch(() => undefined);
   ui.info(SYNC_OFF);
   return { status: 'done', message: SYNC_OFF };
 }

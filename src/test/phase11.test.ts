@@ -129,6 +129,35 @@ test('GenerateImage saves the PNG in the workspace through a checkpoint, and ask
   assert.throws(() => tool.parse({ prompt: 'x', path: 'icon.jpg' }), /must end in \.png/);
 });
 
+test('GenerateImage can use another image model on this key, by ID or short name, and refuses one that is not an image model (0.4.23)', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'near-ai-image-model-'));
+  const calls: string[] = [];
+  const client = { async generateImage(model: string) { calls.push(model); return { bytes: new Uint8Array([7]), remoteUrlPresent: false }; } };
+  const flux = { id: 'black-forest-labs/FLUX.2-klein-4B', imagePricePerUnit: 0.012, outputModalities: ['image'] };
+  const others = [
+    { id: 'black-forest-labs/FLUX.2-pro', imagePricePerUnit: 0.05, outputModalities: ['image'] },
+    { id: 'z-ai/glm-5.3', outputModalities: ['text'] }
+  ];
+  const tool = imageTool(client as never, flux as never, others as never);
+  assert.match(tool.description, /Uses black-forest-labs\/FLUX\.2-klein-4B \(about \$0\.012 per image\) unless you pass model\. Image models on this key: black-forest-labs\/FLUX\.2-klein-4B \(about \$0\.012 per image\), black-forest-labs\/FLUX\.2-pro \(about \$0\.05 per image\)\./);
+  assert.doesNotMatch(tool.description, /glm/, 'a text model is not offered');
+  assert.equal(tool.parse({ prompt: 'x', path: 'a.png' }).model, flux.id, 'the setting stays the default');
+  const pro = tool.parse({ prompt: 'a hero', path: 'hero.png', model: 'flux.2-pro' });
+  assert.equal(pro.model, 'black-forest-labs/FLUX.2-pro', 'a short name resolves');
+  const preview = await tool.preview!(pro, {} as never);
+  assert.match(preview.kind === 'note' ? preview.text : '', /Generate 1 image with black-forest-labs\/FLUX\.2-pro \(about \$0\.05\)/, 'the approval names the model used');
+  assert.throws(() => tool.parse({ prompt: 'x', path: 'a.png', model: 'z-ai/glm-5.3' }), /"z-ai\/glm-5\.3" is not an image model on this key\. Image models: black-forest-labs\/FLUX\.2-klein-4B, black-forest-labs\/FLUX\.2-pro\./);
+  assert.throws(() => tool.parse({ prompt: 'x', path: 'a.png', model: 'dall-e-9' }), /not an image model/);
+  const checkpoints = new RunCheckpoints('img-model');
+  const shell = new ShellSession(root);
+  try {
+    assert.match(await tool.run(pro, { root, signal: new AbortController().signal, checkpoints, shell, readFiles: new Set() }), /from black-forest-labs\/FLUX\.2-pro\.$/);
+    assert.deepEqual(calls, ['black-forest-labs/FLUX.2-pro'], 'the request (and so its spend record) goes to the model used');
+  } finally {
+    shell.dispose();
+  }
+});
+
 test('Remember and Recall keep project facts across runs, start later runs with relevant facts, and refuse secrets', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'near-ai-memory-'));
   const memory = new ContextGraphMemory(root, { trustedActorIds: [AGENT_MEMORY_ACTOR] });

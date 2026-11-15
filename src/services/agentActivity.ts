@@ -347,6 +347,18 @@ export class ActivityFeed {
     });
   }
 
+  /**
+   * 0.4.23: the agent waits on the person for something that is not an approval (a generated image to review), or has stopped waiting. It shows as
+   * "Waiting for you" and the time counts as waiting on the person, without counting an approval.
+   */
+  public waitingForUser(agentId: string, waiting: boolean): void {
+    this.withAgent(agentId, (_base, stat) => {
+      if (waiting && stat.phase !== 'waiting-you') this.enter(stat, 'waiting-you');
+      else if (!waiting && stat.phase === 'waiting-you') this.enter(stat, 'tool');
+      this.changed([]);
+    });
+  }
+
   /** PERF-07: the agent has nothing to do but wait for its background agents (idle time), or has stopped waiting. */
   public waitingForAgents(agentId: string, waiting: boolean): void {
     this.withAgent(agentId, (_base, stat) => {

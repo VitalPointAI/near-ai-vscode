@@ -1,15 +1,16 @@
 import { execFile } from 'node:child_process';
 import { mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises';
+import { homedir } from 'node:os';
 import * as path from 'node:path';
 import type { ActionCapability } from '../domain/policy';
-import { protectedWriteReason, STATE_FOLDER_PATH } from '../domain/protectedPaths';
+import { namesStateKeys, protectedWriteReason, STATE_FOLDER_PATH, STATE_KEYS_PATH, stateKeysReason } from '../domain/protectedPaths';
 import type { RunCheckpoints } from './checkpoints';
 import { unifiedDiff } from './diff';
 import { matchesGlob } from './glob';
 import { DEFAULT_TIMEOUT_MS, MAX_TIMEOUT_MS, ShellSession, truncate } from './shell';
 import { NETWORK_COMMAND } from './untrusted';
 import { isReadOnlyShellCommand } from './readOnlyShell';
-import { displayPath, resolveInWorkspace, ToolError } from './workspace';
+import { displayPath, resolveInWorkspace, StateKeysError, ToolError } from './workspace';
 
 export interface Todo { content: string; status: 'pending' | 'in_progress' | 'completed'; activeForm?: string }
 
@@ -36,6 +37,9 @@ export interface ToolContext {
   writeScope?: string;
   /** Reports a defense that acted: hidden content removed, a likely injection flagged, an action held or blocked. */
   onSecurity?(event: SecurityEvent): void;
+  /** 0.4.23: the agent making the call (its activity id, and a sub-agent's label), so a card it raises in the main chat says who asked. */
+  agentId?: string;
+  agentLabel?: string;
 }
 
 export interface SecurityEvent { kind: 'injection' | 'hidden-content' | 'held' | 'blocked'; source: string; detail: string }
@@ -57,6 +61,11 @@ export interface AgentTool<I = Record<string, unknown>> {
   /** A short title for the activity row, e.g. "Read src/extension.ts". */
   title(input: I, context: ToolContext): string;
   preview?(input: I, context: ToolContext): Promise<ToolPreview>;
+  /**
+   * A reason this call may not run at all, in any approval mode and whatever the person allowed for the run: it names the project's key folder
+   * (src/domain/protectedPaths.ts, STATE_KEYS_PATH). Checked before the approval policy, so nothing asks first and nothing can allow it.
+   */
+  forbidden?(input: I, context: ToolContext): string | undefined | Promise<string | undefined>;
   /** A reason to always ask first, e.g. reading a likely credential file or writing into `.git/`. */
   sensitive?(input: I, context: ToolContext): string | undefined | Promise<string | undefined>;
   /** A reason to ask even under fully-autonomous mode, e.g. a command that could send data out after the run read untrusted content. */
@@ -92,6 +101,22 @@ export async function sensitiveRead(requested: string | undefined, context: Tool
   if (isSensitivePath(requested)) return sensitivePathReason(requested);
   const resolved = await resolveInWorkspace(context.root, requested, context.readOnlyRoots).catch(() => undefined);
   return resolved && isSensitivePath(resolved) ? `${requested} resolves to ${resolved}, which looks like it may contain credentials, and its contents would be sent to the model.` : undefined;
+}
+
+/** Whether a path (relative or absolute, either slash) is in the project's key folder, which agents may not use at all. */
+export function isStateKeysPath(file: string): boolean {
+  return STATE_KEYS_PATH.test(path.posix.normalize(file.replace(/\\/g, '/')));
+}
+
+/**
+ * The reason a path the agent named may not be used: it is in the project's key folder as written, or resolves there (through a link, `..`, or an
+ * absolute path). Undefined for any other path, and for a path that cannot be resolved (the tool's own check reports that).
+ */
+export async function forbiddenPath(requested: string | undefined, context: ToolContext): Promise<string | undefined> {
+  if (requested === undefined) return undefined;
+  if (isStateKeysPath(requested) || namesStateKeys(requested)) return stateKeysReason(requested);
+  // resolveInWorkspace itself refuses a path that resolves into the key folder (through a link, say): that refusal is this answer.
+  return resolveInWorkspace(context.root, requested, context.readOnlyRoots).then(() => undefined, (error) => (error instanceof StateKeysError ? error.message : undefined));
 }
 
 /** Writes that always ask, even after "allow edits for this run": see src/domain/protectedPaths.ts, which the shell guard shares. */
@@ -163,6 +188,7 @@ export const readTool: AgentTool<{ path: string; offset: number; limit: number; 
   capability: 'read',
   parse: (raw) => ({ path: str(raw, 'file_path')!, offset: Math.max(1, Math.floor(num(raw, 'offset') ?? 1)), limit: Math.min(MAX_READ_LINES, Math.max(1, Math.floor(num(raw, 'limit') ?? MAX_READ_LINES))), ranged: num(raw, 'offset') !== undefined || num(raw, 'limit') !== undefined }),
   title: (input) => `Read ${input.path}`,
+  forbidden: (input, context) => forbiddenPath(input.path, context),
   sensitive: (input, context) => sensitiveRead(input.path, context),
   async run(input, context) {
     const absolute = await resolveInWorkspace(context.root, input.path, context.readOnlyRoots);
@@ -197,6 +223,7 @@ export const writeTool: AgentTool<{ path: string; content: string }> = {
   capability: 'workspaceWrite',
   parse: (raw) => ({ path: str(raw, 'file_path')!, content: typeof raw.content === 'string' ? raw.content : (() => { throw new ToolError('Parameter "content" must be a string.'); })() }),
   title: (input) => `Write ${input.path}`,
+  forbidden: (input, context) => forbiddenPath(input.path, context),
   sensitive: (input, context) => protectedWrite(input.path, context),
   risky: (input, context) => outOfScopeAfterTaint(input.path, context),
   async preview(input, context) {
@@ -229,6 +256,7 @@ export const editTool: AgentTool<{ path: string; oldString: string; newString: s
     return { path: str(raw, 'file_path')!, oldString, newString, replaceAll: bool(raw, 'replace_all') };
   },
   title: (input) => `Edit ${input.path}`,
+  forbidden: (input, context) => forbiddenPath(input.path, context),
   sensitive: (input, context) => protectedWrite(input.path, context),
   risky: (input, context) => outOfScopeAfterTaint(input.path, context),
   async preview(input, context) {
@@ -283,6 +311,8 @@ async function walk(root: string, start: string, visit: (absolute: string, relat
     const entries = await readdir(directory, { withFileTypes: true }).catch(() => []);
     for (const entry of entries) {
       const absolute = path.join(directory, entry.name);
+      // The key folder is never listed or searched, whatever the pattern (0.4.23).
+      if (isStateKeysPath(absolute.split(path.sep).join('/'))) continue;
       if (entry.isDirectory()) { if (!SKIP_DIRS.has(entry.name) || unskipped.has(entry.name)) stack.push(absolute); }
       else if (entry.isFile()) visit(absolute, path.relative(root, absolute).split(path.sep).join('/'));
     }
@@ -296,6 +326,7 @@ export const globTool: AgentTool<{ pattern: string; path?: string }> = {
   capability: 'read',
   parse: (raw) => ({ pattern: str(raw, 'pattern')!, path: str(raw, 'path', false) }),
   title: (input) => `Find ${input.pattern}${input.path ? ` in ${input.path}` : ''}`,
+  forbidden: async (input, context) => (isStateKeysPath(input.pattern) || namesStateKeys(input.pattern) ? stateKeysReason(input.pattern) : forbiddenPath(input.path, context)),
   async run(input, context) {
     const base = await resolveInWorkspace(context.root, input.path ?? '.', context.readOnlyRoots);
     const unskipped = namedSkipDirs(input.pattern);
@@ -324,14 +355,16 @@ export const grepTool: AgentTool<{ pattern: string; path?: string; glob?: string
     return { pattern: str(raw, 'pattern')!, path: str(raw, 'path', false), glob: str(raw, 'glob', false), mode, ignoreCase: bool(raw, '-i'), context: Math.min(20, Math.max(0, Math.floor(num(raw, 'context') ?? 0))), headLimit: Math.min(2_000, Math.max(1, Math.floor(num(raw, 'head_limit') ?? 250))) };
   },
   title: (input) => `Search for ${JSON.stringify(input.pattern)}${input.glob ? ` in ${input.glob}` : ''}`,
+  forbidden: async (input, context) => (input.glob !== undefined && (isStateKeysPath(input.glob) || namesStateKeys(input.glob)) ? stateKeysReason(input.glob) : forbiddenPath(input.path, context)),
   sensitive: (input, context) => sensitiveRead(input.path, context),
   async run(input, context) {
     const base = await resolveInWorkspace(context.root, input.path ?? '.', context.readOnlyRoots);
     const output = context.ripgrepPath ? parseRipgrepOutput(await ripgrep(context.ripgrepPath, base, input, context), input.mode) : await jsGrep(base, input, context);
     // Credential-looking files are left out unless the search was aimed at one (which asked first). Each line carries its
     // file apart from the text, so neither a drive letter (C:\) nor a context line (`file-12-text`) can hide which file it is.
+    // The key folder is left out even of a search aimed at the state folder (0.4.23): a search aimed at the key folder itself is refused before it runs.
     const aimed = input.path !== undefined && isSensitivePath(input.path);
-    const kept = aimed ? output : output.filter((line) => line.file === undefined || !isSensitivePath(line.file));
+    const kept = output.filter((line) => line.file === undefined || ((aimed || !isSensitivePath(line.file)) && !isStateKeysPath(line.file.split(path.sep).join('/'))));
     const hidden = output.length - kept.length;
     const lines = kept.map((line) => (line.file === undefined ? line.text : `${displayPath(context.root, line.file)}${line.text}`));
     if (!lines.length) return hidden ? `No matches outside files that look like credentials (${hidden} line${hidden === 1 ? '' : 's'} hidden; search that file by path to include it).` : 'No matches.';
@@ -396,6 +429,126 @@ async function jsGrep(base: string, input: Parameters<typeof grepTool.run>[0], c
   return out;
 }
 
+/** The most files of a command line, and the largest file, that the key-folder check reads. */
+const SCRIPT_SCAN_FILES = 16;
+const SCRIPT_SCAN_BYTES = 512 * 1024;
+
+/**
+ * The first file a command line names (as a word, relative to the shell's folder or absolute, inside the workspace) whose text names the project's
+ * key folder, as the workspace-relative path; undefined when none does. Only files named on the command line are read, at most SCRIPT_SCAN_FILES of
+ * them and only up to SCRIPT_SCAN_BYTES each, so a script the named one imports, a script `npm run` starts, or one fetched at run time is not seen.
+ */
+export async function scriptNamingStateKeys(command: string, context: ToolContext): Promise<string | undefined> {
+  const words = [...new Set(command.split(/[\s'"`;&|()<>=]+/).filter((word) => word && !word.startsWith('-') && !/^[A-Za-z_]\w*$/.test(word) && /[./\\]/.test(word)))].slice(0, SCRIPT_SCAN_FILES);
+  const cwd = context.shell?.workingDirectory ?? context.root;
+  for (const word of words) {
+    const requested = path.resolve(cwd, word);
+    let absolute: string | undefined;
+    // A word that resolves into the key folder is itself a hit (the forbidden check refuses it first; this keeps the scan from ever reading there).
+    try { absolute = await resolveInWorkspace(context.root, requested); } catch (error) { if (error instanceof StateKeysError) return displayPath(context.root, requested); }
+    if (!absolute) continue;
+    const info = await stat(absolute).catch(() => undefined);
+    if (!info?.isFile() || info.size > SCRIPT_SCAN_BYTES) continue;
+    const text = await readFile(absolute, 'utf8').catch(() => '');
+    if (namesStateKeys(text)) return displayPath(context.root, absolute);
+  }
+  return undefined;
+}
+
+/** At most this many (word, folder) pairs of a command line are resolved through links by the key-folder check; the text check covers every word. */
+const SHELL_LINK_CHECKS = 128;
+/** At most this many folders a command line's `cd`s can leave the shell in are tracked. */
+const SHELL_CD_BASES = 8;
+
+/** `{a,b}` in a shell word expanded (one brace at a time, at most 16 results); a word with no such brace is returned as it is. */
+function expandBraces(word: string): string[] {
+  const out: string[] = [];
+  const pending = [word];
+  while (pending.length && out.length + pending.length <= 16) {
+    const next = pending.shift()!;
+    const match = /\{([^{}]*,[^{}]*)\}/.exec(next);
+    if (!match) { out.push(next); continue; }
+    for (const part of match[1].split(',')) pending.push(next.slice(0, match.index) + part + next.slice(match.index + match[0].length));
+  }
+  return [...out, ...pending];
+}
+
+/** A shell glob segment as a regular expression (`*`, `?`, `[...]`), or undefined when it has no glob characters. */
+function globSegment(segment: string): RegExp | undefined {
+  if (!/[*?[]/.test(segment)) return undefined;
+  let source = '';
+  for (let index = 0; index < segment.length; index += 1) {
+    const char = segment[index];
+    const close = char === '[' ? segment.indexOf(']', index + 2) : -1;
+    if (close > 0) { source += `[${segment.slice(index + 1, close).replace(/^!/, '^').replace(/\\/g, '\\\\')}]`; index = close; }
+    else source += char === '*' ? '.*' : char === '?' ? '.' : char.replace(/[.+^${}()|\\\]\[]/g, '\\$&');
+  }
+  return new RegExp(`^${source}$`, 'i');
+}
+
+/**
+ * An absolute path with each glob segment replaced by the name on the way into the key folder it could match (`.near-ai`, then `state` or one of its
+ * previous copies, then `keys`), so `state/*` from `.near-ai` or `k*` from `.near-ai/state` reads as the key folder. A glob is treated as able to
+ * match a dot name too (as with `shopt -s dotglob`), which is the safe side.
+ */
+function globTowardKeys(absolute: string): string {
+  const parts = absolute.replace(/\\/g, '/').split('/');
+  for (let index = 0; index < parts.length; index += 1) {
+    const glob = globSegment(parts[index]);
+    if (!glob) continue;
+    const previous = (parts[index - 1] ?? '').toLowerCase();
+    const candidates = previous === '.near-ai' ? ['state', 'state.previous-x', 'state.adopt-x'] : /^state(?:\.(?:previous|adopt)-.*)?$/.test(previous) ? ['keys'] : ['.near-ai'];
+    const hit = candidates.find((name) => glob.test(name));
+    if (hit) parts[index] = hit;
+  }
+  return parts.join('/');
+}
+
+/**
+ * Why a command line may not run because of the folder the shell is in, or a word that resolves into the key folder from there; undefined when
+ * neither. This closes what a text check of the line alone misses: the persistent shell keeps its folder between commands, so `cd .near-ai/state`
+ * then `cat keys/local.key` names no `.near-ai` in the second line. Every word is resolved against the shell's current folder and against each
+ * folder a `cd` or `pushd` earlier in the same line moves to, with `{a,b}` braces expanded and globs read as reaching the key folder when they
+ * could; the first SHELL_LINK_CHECKS of those are also resolved through links. A shell already inside the key folder runs nothing but a lone `cd`
+ * out of it. Still a text check: a path built at run time (a variable, `$(...)`, string arithmetic, base64) or a recursive walk (`grep -r`, `find`,
+ * `**`) from a folder above the key folder is not seen; see namesStateKeys.
+ */
+export async function shellReachesStateKeys(command: string, context: ToolContext): Promise<string | undefined> {
+  const start = context.shell?.workingDirectory ?? context.root;
+  const inKeys = async (absolute: string, linkCheck: boolean): Promise<boolean> => {
+    if (isStateKeysPath(globTowardKeys(absolute))) return true;
+    if (!linkCheck) return false;
+    return resolveInWorkspace(context.root, absolute).then(() => false, (error) => error instanceof StateKeysError);
+  };
+  if (await inKeys(start, true)) {
+    const lone = /^\s*cd\s+(['"]?)([^\s'"`;&|()<>$]+)\1\s*$/.exec(command);
+    const target = lone ? path.resolve(start, lone[2].replace(/^~(?=\/|$)/, homedir())) : undefined;
+    if (target !== undefined && !(await inKeys(target, true))) return undefined;
+    return `The shell's current folder, ${displayPath(context.root, start)}, is inside the project's key folder (.near-ai/state/keys), which holds the key that encrypts this project's saved chats. Agents may not run anything there, in any approval mode. Leave it first with a command that is only a cd to another folder, such as cd "${context.root}".`;
+  }
+  const words = command.split(/[\s'"`;&|()<>=]+/).filter((word) => word && !word.startsWith('-') && !word.includes('$'));
+  const bases = [start];
+  let linkChecks = 0;
+  for (let index = 0; index < words.length; index += 1) {
+    const word = words[index].replace(/^~(?=\/|$)/, homedir());
+    for (const expanded of expandBraces(word)) {
+      for (const base of bases) {
+        const absolute = path.resolve(base, expanded);
+        if (await inKeys(absolute, linkChecks++ < SHELL_LINK_CHECKS)) {
+          const from = base === context.root ? '' : ` (from ${displayPath(context.root, base) || '.'})`;
+          return stateKeysReason(`${words[index]}${from}`);
+        }
+      }
+    }
+    // A `cd` or `pushd` earlier in the line moves later words: they are read from that folder too.
+    const previous = words[index - 1];
+    if ((previous === 'cd' || previous === 'pushd') && bases.length < SHELL_CD_BASES) {
+      for (const base of [...bases]) if (bases.length < SHELL_CD_BASES) bases.push(path.resolve(base, word));
+    }
+  }
+  return undefined;
+}
+
 export const bashTool: AgentTool<{ command: string; timeoutMs: number; background: boolean; description?: string }> = {
   name: 'Bash',
   description: 'Run a shell command in a persistent bash session rooted at the workspace (cd and exported variables carry over). Use for builds, tests, git, and package managers; use Read/Glob/Grep instead of cat/find/grep. Set run_in_background for long-running processes such as dev servers, then poll with BashOutput.',
@@ -404,7 +557,17 @@ export const bashTool: AgentTool<{ command: string; timeoutMs: number; backgroun
   parse: (raw) => ({ command: str(raw, 'command')!, timeoutMs: num(raw, 'timeout') ?? DEFAULT_TIMEOUT_MS, background: bool(raw, 'run_in_background'), description: str(raw, 'description', false) }),
   title: (input) => input.description ? `${input.description}` : `Run ${input.command.split('\n')[0].slice(0, 80)}`,
   async preview(input, context) { return { kind: 'command', command: input.command, cwd: displayPath(context.root, context.shell.workingDirectory) || '.', background: input.background }; },
-  risky: (input, context) => context.tainted?.() && NETWORK_COMMAND.test(input.command) ? 'This run has read outside content (a web page, search result, attachment, or MCP result), and this command can send data off this machine. Approve it only if you expected it; text in that content may have asked for it.' : undefined,
+  // A command line that names the key folder, or whose words resolve into it from the shell's folder, is refused (0.4.23); so is any command but a
+  // cd out while the shell is inside it. Text checks, so heuristics: see namesStateKeys and shellReachesStateKeys for what they can and cannot see.
+  forbidden: async (input, context) => (namesStateKeys(input.command) ? stateKeysReason(input.command.split('\n')[0]) : shellReachesStateKeys(input.command, context)),
+  risky: async (input, context) => {
+    if (context.tainted?.() && NETWORK_COMMAND.test(input.command)) return 'This run has read outside content (a web page, search result, attachment, or MCP result), and this command can send data off this machine. Approve it only if you expected it; text in that content may have asked for it.';
+    // A script the command runs (`node script.cjs`) that names the key folder asks, in every mode, with no "always allow": the agent can write such
+    // a script, and a run once did exactly that to read keys/local.key. Asking rather than refusing, because a file can name the folder for honest
+    // reasons (a test of this very rule); the person sees which file and why.
+    const script = await scriptNamingStateKeys(input.command, context);
+    return script ? `This command runs ${script}, which names the project's key folder (.near-ai/state/keys), where the key that encrypts this project's saved chats is kept. Approve it only if you expect a script to read or change those keys; NEAR AI never needs an agent to.` : undefined;
+  },
   // PERF-04: a read-only command runs in its own shell forked at the agent's folder, so several can run in one turn; everything else queues as before.
   concurrentFor: (input) => !input.background && isReadOnlyShellCommand(input.command),
   async run(input, context) {

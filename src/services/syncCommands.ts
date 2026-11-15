@@ -8,7 +8,7 @@ import { AuthService } from './auth';
 import { ProfileStore } from './profileStore';
 import { mementoProgressStore, onlineHomeFlow, systemGhCli } from './onlineHome';
 import { offerOnlineHomeAtStart, vscodeGitHubAuth, vscodeOnlineHomeUi } from './onlineHomeVscode';
-import { liveConversations, onRunEnded, onRunQuiet, runsInFlight, runsWaiting } from './runEndHooks';
+import { onRunEnded, onRunQuiet, reconcileLiveConversations, runsInFlight, runsWaiting } from './runEndHooks';
 import { RunMarkers } from './runMarkers';
 import { runStateGit } from './stateGit';
 import { editorWriter, stateHomeFor, type MementoLike } from './stateHome';
@@ -135,7 +135,11 @@ function runtimeFor(context: vscode.ExtensionContext, auth: AuthService, root: s
     // The private mirror lives in this editor's own storage, never inside the project (REVIEW B1).
     mirrorRoot: path.join(context.globalStorageUri.fsPath, 'sync-mirrors'),
     isIdle: () => runsInFlight(resolved) === 0,
-    liveConversations: () => liveConversations(resolved),
+    // A conversation whose run end was missed would stay live all session; one no running marker of this editor backs is dropped (#48 review).
+    liveConversations: () => reconcileLiveConversations(resolved, async (id) => {
+      const marker = await markers.markerOf(id);
+      return marker !== undefined && markers.runState(marker) === 'running-here';
+    }),
     runState: (marker) => markers.runState(marker),
     profiles: profileSyncHooks(resolved, auth, keys, home)
   };

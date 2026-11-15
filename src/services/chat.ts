@@ -43,7 +43,7 @@ import { webSearchProvider } from './webSearchSetup';
 import { mcpRegistry } from './mcpView';
 import { ActivityStore, closeInterruptedRuns } from './activityStore';
 import { batchView } from '../domain/state/threadView';
-import { ConversationLog, ConversationOutcome, ConversationStatus, ConversationSummary, conversationStatus, conversationTitle, isOutput, MAX_OPEN_CONVERSATIONS, outcomeOf, parseSavedConversations, promptIdOf, PromptOutcome, savedConversations } from './conversations';
+import { ConversationLog, ConversationOutcome, ConversationStatus, ConversationSummary, conversationStatus, conversationTitle, imageReviewTitle, isOutput, loggable, MAX_OPEN_CONVERSATIONS, outcomeOf, parseSavedConversations, promptIdOf, PromptOutcome, savedConversations } from './conversations';
 import { ReputationStore } from './reputation';
 import { hostAttribution } from '../domain/activity';
 import { ContextGraphMemory } from './contextGraphMemory';
@@ -69,7 +69,7 @@ const warnedSafetyModels = new Set<string>();
 
 
 /** Chat messages that only a person's own action sends (review of PR 34: one releases a run paused on unanswered approvals). */
-const USER_ACTIONS: ReadonlySet<string> = new Set(['send', 'steer', 'approval-reply', 'questions-reply', 'agent-control', 'continue-run', 'switch-conversation', 'resume-interrupted']);
+const USER_ACTIONS: ReadonlySet<string> = new Set(['send', 'steer', 'approval-reply', 'questions-reply', 'image-review-reply', 'agent-control', 'continue-run', 'switch-conversation', 'resume-interrupted']);
 export interface ChatHost {
   webview: vscode.Webview;
   onDidDispose: vscode.Event<void>;
@@ -227,7 +227,7 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
       }
       if (message.type === 'prompt-closed' && typeof message.id === 'string') { tab.outcomes.set(message.id, { outcome: message.outcome === 'cancelled' || message.outcome === 'covered' ? message.outcome : 'closed' }); tab.paused.delete(message.id); }
       const steerId = message.type === 'steer-state' ? String(message.id) : undefined;
-      tab.log.add(steerId && message.state === 'queued' && tab.steerTexts.has(steerId) ? { ...message, text: tab.steerTexts.get(steerId) } : message);
+      tab.log.add(steerId && message.state === 'queued' && tab.steerTexts.has(steerId) ? { ...message, text: tab.steerTexts.get(steerId) } : loggable(message));
       if (steerId && message.state !== 'queued') tab.steerTexts.delete(steerId);
       if (disposed) return;
       if (tab.id === activeId && tabs.includes(tab)) void panel.webview.postMessage(message);
@@ -607,6 +607,19 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
       tab.agent?.answerQuestions(message.id, message.answers);
       return;
     }
+    if (message.type === 'image-review-reply') {
+      // Recorded only when that draft was still waiting, so a late click on a card the run already closed leaves its real outcome alone.
+      if (tab.agent?.answerImageReview(message.id, { decision: message.decision, ...(message.feedback ? { feedback: message.feedback } : {}) })) {
+        tab.outcomes.set(message.id, { outcome: message.decision === 'accept' ? 'accepted' : message.decision === 'changes' ? 'changes-requested' : 'discarded', ...(message.feedback ? { detail: message.feedback } : {}) });
+      }
+      return;
+    }
+    if (message.type === 'image-review-open') {
+      // Only a draft this conversation is waiting on: the id names a file in the project's drafts folder, and nothing else can be opened this way.
+      const file = tab.agent?.imageDraftFile(message.id);
+      if (file) await vscode.commands.executeCommand('vscode.open', vscode.Uri.file(file), { preview: true });
+      return;
+    }
     if (message.type === 'attach-files') {
       const picked = await vscode.window.showOpenDialog({ canSelectMany: true, openLabel: 'Attach', title: 'Attach files to your message' });
       for (const uri of picked ?? []) {
@@ -901,7 +914,7 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
       const endRun = beginRun();
       runStarted(root, tab.id);
       try {
-        await agent.send({ modelStallMs, ...(backupModel ? { backupModel } : {}), text, skill, gsd, team, ...(memberTeam ? { memberTeam } : {}), attachments, memory: { store: state.memory, projectScope: { kind: 'project', id: projectIdForWorkspace(root) } }, imageModel: route.local ? undefined : imageModel, reputation: new ReputationStore(root), tiers: readModelTiers(), roleModels: readRoleModels(), safetyModel, safetyFallbackModel, riskSwitches: readRiskSwitches(), rememberAllowRule: (rule) => rememberAllowRule(rule, tab), unattendedAutoApprove: vscode.workspace.getConfiguration('nearAi').get<boolean>('agent.unattendedAutoApprove', AGENT_DEFAULTS.unattendedAutoApprove) !== false, researchProfile: vscode.workspace.getConfiguration('nearAi').get<boolean>('gsd.researchProfile', true) !== false, availableModels: delegable.map((candidate) => candidate.id), modelCatalog: delegable, route: privateRouteFor(active.provider, route.local), contextWindows: Object.fromEntries(active.models.map((candidate) => [candidate.id, candidate.contextLength])), maxParallelAgents: limits.maxParallelAgents, maxTurns: limits.maxTurns, client: route.client, model, privacy: modelPrivacyLabel(modelInfo), policy: settings.actionPolicy, rules: readAgentRules(), activity: { store: state.activity, sessionId: session.sessionId }, local: route.local, security: securityAccess(context, root), webSearch, budget: runBudget, mcpTools: mcp.tools, maxOutputTokens: Math.max(1_000, Math.min(1_000_000, Number(vscode.workspace.getConfiguration('nearAi').get<number>('agent.maxOutputTokens', AGENT_DEFAULTS.maxOutputTokens)) || AGENT_DEFAULTS.maxOutputTokens)), shellEnvAllow: vscode.workspace.getConfiguration('nearAi').get<string[]>('agent.shellEnvAllow', []).filter((name) => typeof name === 'string'), runId, ...(redTeamStep ? { skillAddendum: redTeamStep.addendum, projectAgents: redTeamStep.agents } : {}) });
+        await agent.send({ modelStallMs, ...(backupModel ? { backupModel } : {}), text, skill, gsd, team, ...(memberTeam ? { memberTeam } : {}), attachments, memory: { store: state.memory, projectScope: { kind: 'project', id: projectIdForWorkspace(root) } }, imageModel: route.local ? undefined : imageModel, imageModels: route.local ? undefined : delegable.filter((candidate) => (candidate.outputModalities ?? []).includes('image')), imageReview: vscode.workspace.getConfiguration('nearAi').get<string>('agent.imageReview', AGENT_DEFAULTS.imageReview) === 'off' ? 'off' : 'ask', reputation: new ReputationStore(root), tiers: readModelTiers(), roleModels: readRoleModels(), safetyModel, safetyFallbackModel, riskSwitches: readRiskSwitches(), rememberAllowRule: (rule) => rememberAllowRule(rule, tab), unattendedAutoApprove: vscode.workspace.getConfiguration('nearAi').get<boolean>('agent.unattendedAutoApprove', AGENT_DEFAULTS.unattendedAutoApprove) !== false, researchProfile: vscode.workspace.getConfiguration('nearAi').get<boolean>('gsd.researchProfile', true) !== false, availableModels: delegable.map((candidate) => candidate.id), modelCatalog: delegable, route: privateRouteFor(active.provider, route.local), contextWindows: Object.fromEntries(active.models.map((candidate) => [candidate.id, candidate.contextLength])), maxParallelAgents: limits.maxParallelAgents, maxTurns: limits.maxTurns, client: route.client, model, privacy: modelPrivacyLabel(modelInfo), policy: settings.actionPolicy, rules: readAgentRules(), activity: { store: state.activity, sessionId: session.sessionId }, local: route.local, security: securityAccess(context, root), webSearch, budget: runBudget, mcpTools: mcp.tools, maxOutputTokens: Math.max(1_000, Math.min(1_000_000, Number(vscode.workspace.getConfiguration('nearAi').get<number>('agent.maxOutputTokens', AGENT_DEFAULTS.maxOutputTokens)) || AGENT_DEFAULTS.maxOutputTokens)), shellEnvAllow: vscode.workspace.getConfiguration('nearAi').get<string[]>('agent.shellEnvAllow', []).filter((name) => typeof name === 'string'), runId, ...(redTeamStep ? { skillAddendum: redTeamStep.addendum, projectAgents: redTeamStep.agents } : {}) });
       } finally {
         endRun();
         void runEnded({ root, conversationId: tab.id, runId, outcome: tab.outcome });
@@ -1208,7 +1221,9 @@ function conversationFor(context: vscode.ExtensionContext, root: string, panel: 
   const notices = new WaitingNotices();
   const waitingIds = () => conversation.waitingPrompts().map((prompt) => promptIdOf(prompt)).filter((id): id is string => Boolean(id));
   const announce = (prompt: Record<string, unknown>) => {
-    const text = prompt.type === 'approval-request' ? `An agent in "${title()}" is waiting for your approval: ${String(prompt.title ?? 'an action')}` : `NEAR AI has a question for you in "${title()}" and is waiting for the answer.`;
+    const text = prompt.type === 'approval-request' ? `An agent in "${title()}" is waiting for your approval: ${String(prompt.title ?? 'an action')}`
+      : prompt.type === 'image-review-request' ? `An agent in "${title()}" made an image and is waiting for your review: ${imageReviewTitle(prompt)}`
+      : `NEAR AI has a question for you in "${title()}" and is waiting for the answer.`;
     void Promise.resolve(vscode.window.showWarningMessage(text, 'Show chat')).then((choice) => { if (choice) void vscode.commands.executeCommand('nearAiChatView.focus'); });
   };
   const forward = (outbound: Record<string, unknown>) => {

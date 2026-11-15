@@ -102,7 +102,7 @@ test('parallel sub-agents move their own task-list items as each one ends; a fai
 
     // What the main agent saw: each result says what happened to its item, plus a reminder while items are unfinished.
     const results = mainRequests[2].filter((message) => message.role === 'tool').map((message) => String(message.content)).slice(-3);
-    assert.match(results[0], /A done\n\nTask list: "Task A" is now marked completed\.\nUpdate the task list with TodoWrite if this finished a task\.$/);
+    assert.match(results[0], /A done\n\ngeneral-purpose ran on m\.\n\nTask list: "Task A" is now marked completed\.\nUpdate the task list with TodoWrite if this finished a task\.$/);
     assert.match(results[1], /Task list: "Task B" is now marked completed\./);
     assert.match(results[2], /C broke[\s\S]*Task list: "Task C" is back to pending/);
 
@@ -137,7 +137,7 @@ test('the Agent result has no task-list reminder when there is no list, or nothi
     try {
       await conversation.send({ text: 'go', client: near as never, model: 'm', privacy: 'Private', policy: { mode: 'approve-risky', emergencyStop: false }, rules: DEFAULT_RULES, gsd });
       const result = mainRequests.at(-1)!.filter((message) => message.role === 'tool').map((message) => String(message.content)).at(-1);
-      assert.equal(result, 'helped', JSON.stringify(list));
+      assert.equal(result, 'helped\n\ngeneral-purpose ran on m.', JSON.stringify(list));
     } finally {
       conversation.dispose();
     }

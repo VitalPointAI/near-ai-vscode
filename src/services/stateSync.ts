@@ -5,7 +5,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash } from 'node:crypto';
 import * as path from 'node:path';
-import { readFile } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import { StateRefusedError, aadFor, deriveKek, open as openSealed, seal, subKey, unwrapDataKey, type SealedBlob } from '../domain/state/keys';
 import {
   OBJECT_NAME, openManifest, openObject, readManifestHeader, sealObject, buildManifest,
@@ -97,7 +97,7 @@ export interface StateSyncOptions {
    * The conversations whose run is in flight in this editor (runEndHooks.liveConversations). With the run markers they make the live conversations a sync
    * never rewrites: their context and meta from another computer wait until the run ends, and their context is not sent while it runs (owner, 2026-11-14).
    */
-  liveConversations?: () => Iterable<string>;
+  liveConversations?: () => Iterable<string> | Promise<Iterable<string>>;
   profileSource?: ProfileSource;
   secretSource?: SecretSource;
   /** Where a run marker stands as this editor sees it (RunMarkers.runState). Only finished and cut-off runs sync; without it only finished ones do. */
@@ -165,6 +165,27 @@ const TIP_ID = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/;
 /** A short, stable name for a recovery wrap, so two computers can say whether they mean the same one. */
 export function wrapIdOf(wrap: RecoveryWrap): string {
   return createHash('sha256').update(canonicalJson(JSON.parse(JSON.stringify({ kdf: wrap.kdf, wrappedKey: wrap.wrappedKey }))), 'utf8').digest('hex').slice(0, 16);
+}
+
+/** Where a sync keeps the records it held back for a running conversation (sealed under the data key). */
+export function deferredFileOf(home: ProjectStateHome): string {
+  return path.join(home.paths.sync, 'deferred.enc');
+}
+
+/**
+ * Removes sync/deferred.enc, for when sync is turned off (#48 review): what it held must not stay on disk for a sync that is not coming. When there was one,
+ * the sync's memory of which remote objects it has read is cleared too, so the records it held are read from the remote again if sync is turned back on
+ * (merging them again changes nothing that is already here).
+ */
+export async function discardDeferred(home: ProjectStateHome): Promise<void> {
+  const file = deferredFileOf(home);
+  const existed = await stat(file).then((info) => info.isFile(), () => false);
+  await rm(file, { force: true });
+  if (!existed) return;
+  const statePath = path.join(home.paths.sync, STATE_FILE);
+  const text = await readFile(statePath, 'utf8').catch(() => undefined);
+  if (text === undefined) return;
+  await writeFileAtomic(statePath, `${JSON.stringify({ ...parseState(text), readObjects: [] })}\n`);
 }
 
 function parseState(text: string): SyncState {
@@ -520,7 +541,7 @@ export class StateSync {
 
       // Everything is read and verified before the first local write.
       const remote = tip ? await this.loadRemote(tip, dataKey, meta.stateId, state) : undefined;
-      const local = await collectLocal(home, threads, this.collectOptions(state));
+      const local = await collectLocal(home, threads, await this.collectOptions(state));
       // What a sync kept back for a conversation that was running is offered again with what arrived now: once that run has ended it is merged as usual.
       const held = await this.readDeferred(dataKey, meta.stateId);
       const incoming = [...(remote?.records ?? []), ...held];
@@ -649,16 +670,16 @@ export class StateSync {
     await writeFileAtomic(this.pendingPath(), JSON.stringify(seal(key, Buffer.from(JSON.stringify(all), 'utf8'), aad)));
   }
 
-  private collectOptions(state: SyncState) {
+  private async collectOptions(state: SyncState) {
     const { writer, profileSource, secretSource, runState, liveConversations } = this.options;
     return {
       writer, heads: headMapOf(state.heads), ...(profileSource ? { profileSource } : {}), ...(secretSource ? { secretSource } : {}), ...(runState ? { runState } : {}),
-      ...(liveConversations ? { liveConversations: [...liveConversations()] } : {})
+      ...(liveConversations ? { liveConversations: [...await liveConversations()] } : {})
     };
   }
 
   private deferredPath(): string {
-    return path.join(this.options.home.paths.sync, 'deferred.enc');
+    return deferredFileOf(this.options.home);
   }
 
   /** The meta and context records a sync kept back for a conversation that was running, sealed under the data key (sync/deferred.enc). */

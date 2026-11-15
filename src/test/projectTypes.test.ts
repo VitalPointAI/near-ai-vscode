@@ -94,7 +94,7 @@ test('a GSD workflow in a red-team project gets the stage and can spawn the red-
     conversation.dispose();
   }
   assert.match(parentPrompt, /Execute the phase, then verify it\.\n\n## Project policy: red team before verification/);
-  assert.equal(posted.find((message) => message.type === 'tool-end' && message.callId === 'r1')?.output, '3 findings; RED-TEAM.md written');
+  assert.equal(posted.find((message) => message.type === 'tool-end' && message.callId === 'r1')?.output, '3 findings; RED-TEAM.md written\n\nred-team ran on m.');
   assert.match(childSystem, /Attack the change like an adversary/);
 });
 

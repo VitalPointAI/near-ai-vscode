@@ -158,13 +158,13 @@ test('a sub-agent recovers by itself, and a failed run\'s work stays in the conv
   try {
     await assert.rejects(() => conversation.send(request), /HTTP 401/);
     const workerResult = posted.find((message) => message.type === 'tool-end' && message.callId === 'a1');
-    assert.equal(workerResult?.output, 'worker report', 'the sub-agent retried its stalled turn and reported');
+    assert.equal(workerResult?.output, 'worker report\n\ngsd-worker ran on m.', 'the sub-agent retried its stalled turn and reported');
     assert.ok(posted.some((message) => message.type === 'notice' && /^gsd-worker: NEAR AI stopped sending/.test(String(message.text))));
     await conversation.send({ ...request, text: 'continue' });
     assert.equal(posted.filter((message) => message.type === 'assistant-done').length, 1);
     assert.equal(parentTurn, 3);
     const toolResult = resumedWith.find((message) => message.role === 'tool');
-    assert.equal(toolResult?.content, 'worker report', 'the next message continues with the sub-agent\'s result from the failed run');
+    assert.equal(toolResult?.content, 'worker report\n\ngsd-worker ran on m.', 'the next message continues with the sub-agent\'s result from the failed run');
     assert.equal(resumedWith.at(-1)?.content, 'continue');
   } finally {
     conversation.dispose();

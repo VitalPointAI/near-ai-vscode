@@ -22,5 +22,7 @@ export const AGENT_DEFAULTS = {
   /** PERF-04: sub-agents in their own git worktree at once. */
   maxParallelWorktrees: 4,
   /** PERF-05: resume a run a reload cut off. */
-  autoResumeAfterReload: true
+  autoResumeAfterReload: true,
+  /** 0.4.23: generated images wait as drafts for the person to accept, change or discard ("ask"), or go straight to their path ("off"). */
+  imageReview: 'ask'
 } as const;

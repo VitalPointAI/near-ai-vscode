@@ -259,3 +259,65 @@ export function modelForTier(value: string | undefined, tiers: { deep: string; s
   if (tier.includes('sonnet') || tier === 'standard' || tier === 'balanced') return tiers.standard;
   return value!.includes('/') ? value! : current;
 }
+
+/**
+ * The model ID a name stands for among the model IDs on this key: the exact ID; else the one ID equal to it ignoring case; else the
+ * one ID whose own name (the part after the last "/") equals it ignoring case, so "gpt-6.1-sol" finds "openai/gpt-6.1-sol".
+ * Undefined when nothing matches or the name is ambiguous (several IDs share it).
+ */
+export function resolveModelId(value: string, available: readonly string[]): string | undefined {
+  const name = value.trim();
+  if (!name) return undefined;
+  if (available.includes(name)) return name;
+  const lower = name.toLowerCase();
+  const whole = available.filter((id) => id.toLowerCase() === lower);
+  if (whole.length) return whole.length === 1 ? whole[0] : undefined;
+  const short = available.filter((id) => id.slice(id.lastIndexOf('/') + 1).toLowerCase() === lower);
+  return short.length === 1 ? short[0] : undefined;
+}
+
+/** A bounded list of model IDs for a message: at most `max` IDs and about 1,200 characters, then how many more there are. */
+export function modelList(ids: readonly string[], max = 30): string {
+  const shown: string[] = [];
+  let length = 0;
+  for (const id of ids) {
+    if (shown.length >= max || length + id.length > 1_200) break;
+    shown.push(id);
+    length += id.length + 2;
+  }
+  const more = ids.length - shown.length;
+  return shown.length ? `${shown.join(', ')}${more > 0 ? ` (and ${more} more)` : ''}` : 'none';
+}
+
+/** The model a sub-agent runs on, and a note when it is not the model that was asked for. */
+export type AgentModelChoice = { model: string; note?: string } | { error: string };
+
+/**
+ * The model for a sub-agent. The role's configured model wins, then the model the Agent call asked for, then the agent file's own line.
+ * A tier word (deep, standard, fast and their aliases) maps to that tier's model; any other value is resolved against the model IDs on
+ * this key (`resolveModelId`). A model the Agent call itself asked for that cannot be resolved, or is not on this key, is an error that
+ * names it and lists the models that are: the caller must not run the agent on another model without saying so (a run once passed
+ * "gpt-6.1-sol" and six agents silently ran on the chat's model). A role or agent-file model, or a tier whose model is not on this key,
+ * keeps falling back to the chat's model, with a note saying so. `available` undefined means the list is not known: a full ID ("x/y")
+ * is then used as given.
+ */
+export function agentModelFor(input: { roleModel?: string; requested?: string; agentModel?: string; tiers: { deep: string; standard: string; fast: string }; current: string; available?: readonly string[] }): AgentModelChoice {
+  const { roleModel, requested, agentModel, tiers, current, available } = input;
+  const value = roleModel ?? requested ?? agentModel;
+  const source = roleModel !== undefined ? 'role' : requested !== undefined ? 'request' : 'agent';
+  const trimmed = (value ?? '').trim();
+  const lower = trimmed.toLowerCase();
+  // The Agent call asked for a model, and the role's configured model replaced it: said, so the lead does not report the wrong one.
+  const overridden = source === 'role' && requested?.trim() ? ` The role's configured model (${trimmed}) takes precedence over the requested ${requested.trim().slice(0, 120)}.` : '';
+  if (!trimmed || lower === 'inherit' || lower === 'default') return { model: current, ...(overridden ? { note: overridden.trim() } : {}) };
+  const tier = tierOf(trimmed);
+  const wanted = tier ? tiers[tier] : available ? resolveModelId(trimmed, available) : trimmed.includes('/') ? trimmed : undefined;
+  if (wanted && (!available || available.includes(wanted))) return { model: wanted, ...(overridden ? { note: overridden.trim() } : {}) };
+  if (source === 'request' && !tier) {
+    const ambiguous = available ? available.filter((id) => id.slice(id.lastIndexOf('/') + 1).toLowerCase() === lower) : [];
+    const why = ambiguous.length > 1 ? `matches several models (${modelList(ambiguous, 10)})` : available ? 'is not a model on this key' : 'is not a full model ID, and the list of models on this key is not known';
+    return { error: `The requested model "${trimmed.slice(0, 120)}" ${why}, so the agent was not started. Available models: ${modelList(available ?? [])}. Pass one of these IDs, a tier (deep, standard or fast), or leave model out to use the default.` };
+  }
+  const what = tier ? `the ${tier} tier's model (${wanted})` : source === 'request' ? `the requested model ${trimmed}` : source === 'role' ? `the role's configured model ${trimmed}` : `the agent's own model ${trimmed}`;
+  return { model: current, note: `${what} is not available on this key, so it runs on ${current}.${overridden}`.replace(/^t/, 'T') };
+}

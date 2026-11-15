@@ -52,7 +52,7 @@ export function outcomeOf(message: Record<string, unknown>): ConversationOutcome
 }
 
 /** Messages that count as new output in a conversation that is not on screen. */
-const OUTPUT = new Set(['assistant-delta', 'assistant-done', 'assistant-error', 'assistant-cancelled', 'tool-start', 'notice', 'approval-request', 'questions-request', 'outbound-blocked', 'run-changes', 'run-stopped']);
+const OUTPUT = new Set(['assistant-delta', 'assistant-done', 'assistant-error', 'assistant-cancelled', 'tool-start', 'notice', 'approval-request', 'questions-request', 'image-review-request', 'outbound-blocked', 'run-changes', 'run-stopped']);
 export function isOutput(message: Record<string, unknown>): boolean { return OUTPUT.has(String(message.type)); }
 
 /** The open conversations, kept in the workspace's state so a reload reopens them. */
@@ -142,7 +142,7 @@ export class ConversationLog {
       if (promptId !== undefined) {
         const live = waiting.get(promptId);
         if (live) { shown.add(promptId); out.push({ ...live, replay: true }); }
-        else out.push({ type: 'prompt-record', kind: entry.type === 'approval-request' ? 'approval' : 'questions', title: promptTitle(entry), ...(typeof entry.agent === 'string' ? { agent: entry.agent } : {}), outcome: outcomes.get(promptId)?.outcome ?? 'closed', ...(outcomes.get(promptId)?.detail !== undefined ? { detail: outcomes.get(promptId)?.detail } : {}), replay: true });
+        else out.push({ type: 'prompt-record', kind: entry.type === 'approval-request' ? 'approval' : entry.type === 'image-review-request' ? 'image' : 'questions', title: promptTitle(entry), ...(typeof entry.agent === 'string' ? { agent: entry.agent } : {}), outcome: outcomes.get(promptId)?.outcome ?? 'closed', ...(outcomes.get(promptId)?.detail !== undefined ? { detail: outcomes.get(promptId)?.detail } : {}), replay: true });
         continue;
       }
       if (entry.type === 'tool-end' && typeof entry.output === 'string' && entry.output.length > MAX_REPLAYED_OUTPUT) { out.push({ ...entry, output: `${entry.output.slice(0, MAX_REPLAYED_OUTPUT)}\n…`, replay: true }); continue; }
@@ -153,17 +153,32 @@ export class ConversationLog {
   }
 }
 
-/** The id a pinned prompt is answered by: an approval's call id, or a question set's id. */
+/** The id a pinned prompt is answered by: an approval's call id, a question set's id, or (0.4.23) an image draft's id. */
 export function promptIdOf(message: Message): string | undefined {
   if (message.type === 'approval-request' && typeof message.callId === 'string') return message.callId;
   if (message.type === 'questions-request' && typeof message.id === 'string') return message.id;
+  if (message.type === 'image-review-request' && typeof message.id === 'string') return message.id;
   return undefined;
 }
 
 /** The prompt's one-line title, as the view's pinned header and transcript line word it. */
 function promptTitle(message: Message): string {
   if (message.type === 'approval-request') return String(message.title ?? 'an action');
+  if (message.type === 'image-review-request') return imageReviewTitle(message);
   const questions = Array.isArray(message.questions) ? message.questions as Array<{ question?: unknown }> : [];
   const first = typeof questions[0]?.question === 'string' ? questions[0].question : 'Questions';
   return first + (questions.length > 1 ? ` (+${questions.length - 1} more)` : '');
+}
+
+/** An image review's one-line title: the path it is for and which attempt it is. */
+export function imageReviewTitle(message: Message): string {
+  const attempt = typeof message.attempt === 'number' && message.attempt > 1 ? ` (attempt ${message.attempt})` : '';
+  return `Image for ${String(message.path ?? 'the project')}${attempt}`;
+}
+
+/** What the log keeps of a message: an image review without its image (the waiting prompt is replayed from the conversation, which has it). */
+export function loggable(message: Message): Message {
+  if (message.type !== 'image-review-request' || message.image === undefined) return message;
+  const { image: _image, ...rest } = message;
+  return rest;
 }

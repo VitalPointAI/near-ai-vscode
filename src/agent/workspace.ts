@@ -1,5 +1,6 @@
 import { lstat, realpath } from 'node:fs/promises';
 import * as path from 'node:path';
+import { STATE_KEYS_PATH, stateKeysReason } from '../domain/protectedPaths';
 
 export class ToolError extends Error {
   public constructor(message: string) {
@@ -7,6 +8,9 @@ export class ToolError extends Error {
     this.name = 'ToolError';
   }
 }
+
+/** A path that resolves into the project's key folder, which no agent tool may use (0.4.23). */
+export class StateKeysError extends ToolError {}
 
 /**
  * Resolves a tool's path argument to an absolute path inside the workspace. Relative paths are
@@ -19,6 +23,8 @@ export async function resolveInWorkspace(root: string, requested: string, readOn
   const absolute = path.resolve(realRoot, requested.trim());
   const resolved = await realpathOfExistingPrefix(absolute);
   const within = (base: string) => resolved === base || resolved.startsWith(base + path.sep);
+  // The project's key folder is never an agent tool's file (0.4.23), however it was reached: every file tool resolves its path here.
+  if (STATE_KEYS_PATH.test(resolved.split(path.sep).join('/'))) throw new StateKeysError(stateKeysReason(requested));
   if (within(realRoot)) return resolved;
   // Extra roots (the Open-GSD runtime) can be read but are never passed for writes.
   for (const extra of readOnlyRoots) if (within(await realpath(extra).catch(() => extra))) return resolved;

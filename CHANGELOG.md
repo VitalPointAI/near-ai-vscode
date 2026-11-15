@@ -1,5 +1,53 @@
 # Changelog
 
+## Unreleased
+
+- **A sub-agent runs on the model the agent asked for, or not at all.** When the agent started a
+  helper agent with a model your key does not have, the helper quietly ran on the chat's model
+  instead. A short name such as `gpt-6.1-sol` now finds the full model ID when only one model on
+  your key has that name, and a name that matches no model (or several) stops that helper with a
+  message listing the models your key has, so the agent can pick one. Tiers (deep, standard, fast)
+  work as before.
+- **The agent knows which model each helper agent used.** The helper's report, and the line that
+  says a background helper started, now name the model it ran on, so the agent can tell you
+  truthfully. When a configured role model is not on your key and the chat's model is used
+  instead, the chat says so.
+- **The agent can choose an image model.** GenerateImage can now use any image model on your key,
+  not only the one in `nearAi.agent.imageModel`, which stays the default. The tool lists the image
+  models with their prices, and the approval, the result and the spend record name the model that
+  made the image. A model that is not an image model on your key is refused with the list.
+- **You review each image before it is saved.** An agent could make the same image again and
+  again, judging each one with its own scripts and saving every attempt into your project, while
+  you could not see it. Now each image the agent makes shows in the chat first, with where it will
+  be saved, the model, the attempt number and the prompt. **Accept** saves it where the agent
+  wanted, **Request changes** sends your words back to the agent so it makes a new version
+  (editing the image when the model can), **Discard** throws it away, and **Open full size** opens
+  it in a tab. Images made by helper agents show in the same chat, with the helper's name. The
+  agent waits for your answer in every approval mode, as it does for its questions, and is told
+  not to judge or remake images on its own. Images waiting for you are kept in the project's
+  `.near-ai/drafts/images/` folder, which is never committed. A draft is removed once the agent
+  makes a new version of it, and ones left there are removed after 7 days. To save images straight away as before, set `nearAi.agent.imageReview` to `off`.
+- **Agents can no longer read the project's keys.** In one run an agent wrote a small script that
+  read the project's key file and used it to open the project's own encrypted chats. The project's
+  key folder, `.near-ai/state/keys/`, is now off limits to agents in every approval mode: the file
+  tools refuse it and never list or search it, and a command that names it is refused without
+  asking. The shell check follows the folder the agent's shell is in, so moving into
+  `.near-ai/state` first and then reading `keys/local.key` is refused too, and the shell cannot
+  work inside the key folder at all. A command that runs a project file whose text names the folder always asks first, with
+  no "always allow". The shell checks read the command and the script it runs, so a path put
+  together in other ways can still get through; SECURITY.md lists what they cannot see.
+- **A chat that ended without saying so no longer stops syncing.** If the end of a chat was
+  missed, sync kept treating it as running for the rest of the session and never sent its saved
+  state. A chat that has no running record behind it is now treated as ended after a short while.
+- **A conversation from another computer keeps its title.** A conversation that was running on
+  another computer was added here as "Conversation" until its details arrived, and in rare cases
+  that name could replace the real title. The stand-in name now never replaces a real one and is
+  never sent to other computers.
+- **Turning sync off removes the saved items sync was holding.** What a sync kept back for a
+  running chat (`sync/deferred.enc`) stayed on disk after sync was turned off. It is now removed,
+  and turning sync on again fetches those items from your project's remote again. A sync that was already
+  running when you turned sync off no longer puts the file back afterwards.
+
 ## 0.4.22
 
 This release stops Auto asking about the agent's own helper scripts, makes the waiting badge match
