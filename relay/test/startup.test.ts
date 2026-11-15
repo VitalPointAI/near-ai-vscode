@@ -227,15 +227,18 @@ test('a port that is already taken stops startup with exit 1 and relay.start_ref
   await new Promise<void>((resolve) => holder.listen(0, '127.0.0.1', resolve));
   try {
     const { port } = holder.address() as net.AddressInfo;
-    const run = launch([], { RELAY_HOST: '127.0.0.1', RELAY_PORT: String(port) });
-    const exit = await within(run.exited, 5000, 'the relay failing to listen');
-    assert.equal(exit.code, 1);
-    const lines = logLines(run);
-    // secrets.loaded and log.pseudonym_key (plan 06) come before the server tries to listen.
-    assert.deepEqual(lines.map((line) => line.event), ['secrets.loaded', 'log.pseudonym_key', 'relay.start_refused']);
-    assert.equal(lines[2]?.reason, 'listen');
-    assert.match(String(lines[2]?.detail), /EADDRINUSE/);
-    assert.equal(run.stderr(), '');
+    // The relay opens its state before it listens, so it gets a temporary state directory, never the development default relay/state.
+    await withTempState(async (stateDir) => {
+      const run = launch([], { RELAY_HOST: '127.0.0.1', RELAY_PORT: String(port), RELAY_STATE_DIR: stateDir });
+      const exit = await within(run.exited, 5000, 'the relay failing to listen');
+      assert.equal(exit.code, 1);
+      const lines = logLines(run);
+      // secrets.loaded and log.pseudonym_key (plan 06) come before the server tries to listen.
+      assert.deepEqual(lines.map((line) => line.event), ['secrets.loaded', 'log.pseudonym_key', 'relay.start_refused']);
+      assert.equal(lines[2]?.reason, 'listen');
+      assert.match(String(lines[2]?.detail), /EADDRINUSE/);
+      assert.equal(run.stderr(), '');
+    });
   } finally {
     await new Promise<void>((resolve) => holder.close(() => resolve()));
   }
