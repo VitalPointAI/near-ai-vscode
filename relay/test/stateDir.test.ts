@@ -297,8 +297,9 @@ test('the relay started on a path that does not exist yet creates it 0700 with r
     const finished = await done;
     assert.deepEqual({ code: finished.code, signal: finished.signal }, { code: 0, signal: null });
     const events = parseLines(finished.stdout).map((line) => line.event);
-    assert.deepEqual(events, ['relay.listening', 'relay.stopping', 'relay.stopped']);
-    const listening = parseLines(finished.stdout)[0];
+    // secrets.loaded and log.pseudonym_key (plan 06) are logged before the relay listens.
+    assert.deepEqual(events, ['secrets.loaded', 'log.pseudonym_key', 'relay.listening', 'relay.stopping', 'relay.stopped']);
+    const listening = parseLines(finished.stdout).find((line) => line.event === 'relay.listening');
     assert.match(String(listening?.instanceId), /^[0-9a-f-]{36}$/);
     assert.equal(await modeOf(stateDir), 0o700);
     assert.equal(await modeOf(path.join(stateDir, 'relay.db')), 0o600);

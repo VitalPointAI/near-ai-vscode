@@ -204,9 +204,10 @@ test('the built relay pointed at a newer database exits 1 with relay.start_refus
     const finished = await startRelay(dir).done;
     assert.equal(finished.code, 1);
     const lines = finished.stdout.split('\n').filter((line) => line !== '').map((line) => JSON.parse(line) as Record<string, unknown>);
-    assert.deepEqual(lines.map((line) => line.event), ['relay.start_refused']);
-    assert.equal(lines[0]?.reason, 'store');
-    assert.match(String(lines[0]?.detail), /newer relay/);
+    // secrets.loaded and log.pseudonym_key (plan 06) come before the store is opened.
+    assert.deepEqual(lines.map((line) => line.event), ['secrets.loaded', 'log.pseudonym_key', 'relay.start_refused']);
+    assert.equal(lines[2]?.reason, 'store');
+    assert.match(String(lines[2]?.detail), /newer relay/);
     assert.equal(finished.stderr, '');
   });
 });

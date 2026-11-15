@@ -231,10 +231,10 @@ test('a port that is already taken stops startup with exit 1 and relay.start_ref
     const exit = await within(run.exited, 5000, 'the relay failing to listen');
     assert.equal(exit.code, 1);
     const lines = logLines(run);
-    // secrets.loaded (plan 06) comes before the server tries to listen.
-    assert.deepEqual(lines.map((line) => line.event), ['secrets.loaded', 'relay.start_refused']);
-    assert.equal(lines[1]?.reason, 'listen');
-    assert.match(String(lines[1]?.detail), /EADDRINUSE/);
+    // secrets.loaded and log.pseudonym_key (plan 06) come before the server tries to listen.
+    assert.deepEqual(lines.map((line) => line.event), ['secrets.loaded', 'log.pseudonym_key', 'relay.start_refused']);
+    assert.equal(lines[2]?.reason, 'listen');
+    assert.match(String(lines[2]?.detail), /EADDRINUSE/);
     assert.equal(run.stderr(), '');
   } finally {
     await new Promise<void>((resolve) => holder.close(() => resolve()));
