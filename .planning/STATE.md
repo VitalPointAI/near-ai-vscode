@@ -5,14 +5,14 @@ milestone_name: Messaging relay — Teams and Signal
 current_phase: 68
 current_phase_name: Relay foundation
 status: planning
-stopped_at: Completed 68-06-PLAN.md
-last_updated: "2026-11-15T04:00:41.528Z"
-state_head: 88ab9b6dcd3c6f7f63e0aa16779a532090d70a65
+stopped_at: Completed 68-07-PLAN.md
+last_updated: "2026-11-15T04:07:33.998Z"
+state_head: 01c375d8115f6a4bfb73845f469a9492b8a78efc
 progress:
   total_phases: 9
   completed_phases: 0
   total_plans: 8
-  completed_plans: 6
+  completed_plans: 7
   percent: 0
 last_activity: 2026-11-13
 last_activity_desc: "Completed quick task 261113-lbo: fix the chat task list not checking off finished tasks"
@@ -24,7 +24,7 @@ last_activity_desc: "Completed quick task 261113-lbo: fix the chat task list not
 
 Milestone: v0.7.0 Messaging relay — Teams and Signal (Phases 68-76)
 Phase: 68 (Relay foundation) — EXECUTING
-Next: plan 68-07 (distroless image, hardened Compose with the Signal profile, container hardening suite, operator README) in the messaging-relay worktree; plans 68-01 through 68-06 are done
+Next: plan 68-08 (relay CI job and required check, VSIX release-content patterns, docs, full phase gate, owner hand-off) in the messaging-relay worktree; plans 68-01 through 68-07 are done
 
 ## Accumulated Context
 
@@ -82,8 +82,8 @@ None yet.
 
 ## Session
 
-**Last session:** 2026-11-15T04:00:41.498Z
-**Stopped at:** Completed 68-06-PLAN.md
+**Last session:** 2026-11-15T04:07:33.966Z
+**Stopped at:** Completed 68-07-PLAN.md
 **Resume file:** None
 
 ## Performance Metrics
@@ -117,6 +117,7 @@ None yet.
 | Phase 68 P04 | 35min | 2 tasks | 9 files |
 | Phase 68 P05 | 25min | 3 tasks | 6 files |
 | Phase 68 P06 | 30min | 3 tasks | 9 files |
+| Phase 68 P07 | 40min | 3 tasks | 6 files |
 
 ## Decisions
 
@@ -181,3 +182,5 @@ None yet.
 - [Phase 68]: Plan 68-04: schema v1 holds all five aggregates; crash writer is permit-driven so a kill lands within one message of the last ack; claimed messages return to queued on open
 - [Phase 68]: 68-05: a conversation binding is never moved to another tenant (binding-conflict); approval answers succeed only strictly before expiresAt
 - [Phase 68]: 68-06: plain-secret refusal runs before the state directory is created; secrets come only from {NAME}_FILE, CREDENTIALS_DIRECTORY or /run/secrets; phone-label key is SHA-256 of LOG_PSEUDONYM_KEY or a 0600 log-pseudonym.key created once
+- [Phase 68]: 68-07: relay image code folder staged as /app-skel in the build stage (files 0444, folder 0555) because COPY --chmod also hit the /app folder
+- [Phase 68]: 68-07: container suite checks files and links for shells and package managers, not the base image's empty etc/dpkg and var/lib/dpkg folders; docker build runs without --memory (BuildKit has no such flag)
