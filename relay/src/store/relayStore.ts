@@ -102,7 +102,7 @@ export type NewApproval = Omit<ApprovalRecord, 'state' | 'decision' | 'answeredA
  */
 export type ApprovalAnswerOutcome = 'answered' | 'unknown-approval' | 'wrong-requester' | 'already-answered' | 'expired' | 'run-not-waiting';
 
-export type StoreErrorCode = 'newer-schema' | 'unknown-tenant' | 'binding-conflict' | 'unknown-run' | 'invalid-record';
+export type StoreErrorCode = 'newer-schema' | 'unknown-tenant' | 'tenant-suspended' | 'binding-conflict' | 'unknown-run' | 'invalid-record';
 
 /** A store failure. The message is a plain sentence and never contains a message payload. */
 export class StoreError extends Error {
@@ -134,12 +134,18 @@ export interface RelayStore {
   bindConversation(binding: ConversationBinding): Promise<'created' | 'existing'>;
   getBinding(channel: Channel, conversationId: string): Promise<ConversationBinding | undefined>;
 
-  /** Atomic: queue the message and create its run record in one commit, or recognise a duplicate and write nothing. */
+  /**
+   * Atomic: queue the message and create its run record in one commit, or recognise a duplicate and write nothing. The tenant must be
+   * registered (unknown-tenant) and active (tenant-suspended). A conversation bound to another tenant is refused with binding-conflict; an
+   * unbound conversation is bound to the message's tenant in the same commit, so every queued message's conversation belongs to its tenant
+   * (IDNT-03). Nothing is written when any of these refuses.
+   */
   acceptInbound(message: InboundMessage, runId: string): Promise<AcceptResult>;
   getMessage(tenantId: string, dedupeKey: string): Promise<QueuedMessage | undefined>;
   /**
    * Takes the oldest queued message of one conversation: it becomes claimed and its attempts rise by one. When its run was interrupted (see
-   * below), the run goes back to queued in the same commit.
+   * below), the run goes back to queued in the same commit. Refuses like acceptInbound: unknown-tenant, tenant-suspended (the messages stay
+   * queued until the tenant is active again), and binding-conflict for a conversation bound to another tenant.
    */
   claimNext(tenantId: string, channel: Channel, conversationId: string, now: number): Promise<QueuedMessage | undefined>;
   /** Claimed to done. False when the message was not claimed. */

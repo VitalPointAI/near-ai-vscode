@@ -181,7 +181,7 @@ export function relayStoreContract(name: string, factory: StoreFactory): void {
       await handle.store.putTenant(tenant('acme'));
       await handle.store.putTenant(tenant('globex'));
       const a = await handle.store.acceptInbound(inbound('acme', 'k1', { payload: 'for acme' }), 'run-a');
-      const g = await handle.store.acceptInbound(inbound('globex', 'k1', { payload: 'for globex' }), 'run-g');
+      const g = await handle.store.acceptInbound(inbound('globex', 'k1', { conversationId: 'g-c1', payload: 'for globex' }), 'run-g');
       assert.equal(a.duplicate, false);
       assert.equal(g.duplicate, false);
       assert.equal((await handle.store.getMessage('acme', 'k1'))?.payload, 'for acme');
@@ -196,6 +196,53 @@ export function relayStoreContract(name: string, factory: StoreFactory): void {
       assert.equal(await handle.store.getMessage('nobody', 'k1'), undefined);
       assert.equal(await handle.store.getRun('nobody', 'run-1'), undefined);
       assert.equal(await handle.store.queueDepth('nobody'), 0);
+    }));
+
+  test(`${name}: acceptInbound binds an unbound conversation to the message's tenant in the same commit`, () =>
+    withStore(async (handle) => {
+      await handle.store.putTenant(tenant('acme'));
+      await handle.store.putTenant(tenant('globex'));
+      assert.equal(await handle.store.getBinding('teams', 'c1'), undefined);
+      await handle.store.acceptInbound(inbound('acme', 'k1', { receivedAt: T0 + 7 }), 'run-1');
+      assert.deepEqual(await handle.store.getBinding('teams', 'c1'), { channel: 'teams', conversationId: 'c1', tenantId: 'acme', createdAt: T0 + 7 });
+      await expectStoreError(handle.store.bindConversation({ channel: 'teams', conversationId: 'c1', tenantId: 'globex', createdAt: T0 + 8 }), 'binding-conflict');
+      await handle.reopen();
+      assert.equal((await handle.store.getBinding('teams', 'c1'))?.tenantId, 'acme');
+    }));
+
+  test(`${name}: acceptInbound for a conversation bound to another tenant is binding-conflict and writes nothing`, () =>
+    withStore(async (handle) => {
+      await handle.store.putTenant(tenant('acme'));
+      await handle.store.putTenant(tenant('globex'));
+      await handle.store.bindConversation({ channel: 'teams', conversationId: 'c1', tenantId: 'acme', createdAt: T0 });
+      await expectStoreError(handle.store.acceptInbound(inbound('globex', 'k1'), 'run-1'), 'binding-conflict');
+      assert.equal(await handle.store.getMessage('globex', 'k1'), undefined);
+      assert.equal(await handle.store.getRun('globex', 'run-1'), undefined);
+      assert.equal(await handle.store.queueDepth('globex'), 0);
+      assert.equal(await handle.store.queueDepth('acme'), 0);
+      assert.equal((await handle.store.getBinding('teams', 'c1'))?.tenantId, 'acme');
+      // The same conversation id on the other channel is a different conversation.
+      assert.equal((await handle.store.acceptInbound(inbound('globex', 'k1', { channel: 'signal' }), 'run-1')).duplicate, false);
+    }));
+
+  test(`${name}: a suspended tenant cannot queue or claim (tenant-suspended), and its queued messages wait until it is active again`, () =>
+    withStore(async (handle) => {
+      await handle.store.putTenant(tenant('acme'));
+      await handle.store.acceptInbound(inbound('acme', 'k1'), 'run-1');
+      await handle.store.putTenant(tenant('acme', { status: 'suspended', updatedAt: T0 + 1 }));
+      await expectStoreError(handle.store.acceptInbound(inbound('acme', 'k2'), 'run-2'), 'tenant-suspended');
+      assert.equal(await handle.store.getMessage('acme', 'k2'), undefined);
+      assert.equal(await handle.store.getRun('acme', 'run-2'), undefined);
+      await expectStoreError(handle.store.claimNext('acme', 'teams', 'c1', T0 + 2), 'tenant-suspended');
+      assert.equal((await handle.store.getMessage('acme', 'k1'))?.state, 'queued');
+      assert.equal((await handle.store.getMessage('acme', 'k1'))?.attempts, 0);
+      await handle.store.putTenant(tenant('acme', { status: 'active', updatedAt: T0 + 3 }));
+      assert.equal((await handle.store.claimNext('acme', 'teams', 'c1', T0 + 4))?.dedupeKey, 'k1');
+    }));
+
+  test(`${name}: claimNext for an unregistered tenant is unknown-tenant`, () =>
+    withStore(async (handle) => {
+      await expectStoreError(handle.store.claimNext('nobody', 'teams', 'c1', T0), 'unknown-tenant');
     }));
 
   test(`${name}: claimNext takes one conversation's messages in the order received and never another conversation's`, () =>
@@ -225,7 +272,9 @@ export function relayStoreContract(name: string, factory: StoreFactory): void {
       await handle.store.putTenant(tenant('globex'));
       assert.equal(await handle.store.claimNext('acme', 'teams', 'c1', T0), undefined);
       await handle.store.acceptInbound(inbound('acme', 'k1'), 'run-1');
-      assert.equal(await handle.store.claimNext('globex', 'teams', 'c1', T0), undefined);
+      // teams/c1 now belongs to acme, so globex is refused rather than told the queue is empty (WR-05).
+      await expectStoreError(handle.store.claimNext('globex', 'teams', 'c1', T0), 'binding-conflict');
+      assert.equal(await handle.store.claimNext('globex', 'teams', 'other', T0), undefined);
       assert.equal(await handle.store.claimNext('acme', 'signal', 'c1', T0), undefined);
       assert.equal((await handle.store.claimNext('acme', 'teams', 'c1', T0))?.dedupeKey, 'k1');
     }));
@@ -356,7 +405,7 @@ export function relayStoreContract(name: string, factory: StoreFactory): void {
         ['globex', 'r-running', 'running'],
       ];
       for (const [tenantId, runId, target] of plan) {
-        await handle.store.acceptInbound(inbound(tenantId, `key-${runId}`), runId);
+        await handle.store.acceptInbound(inbound(tenantId, `key-${runId}`, { conversationId: `${tenantId}-${runId}` }), runId);
         if (target !== 'queued') assert.equal(await handle.store.transitionRun(tenantId, runId, 'queued', target, T0 + 1), true);
       }
       assert.equal(await handle.store.countRuns(IN_FLIGHT_RUN_STATES), 3);
@@ -601,7 +650,7 @@ export function relayStoreContract(name: string, factory: StoreFactory): void {
   test(`${name}: listPendingApprovals filters by tenant and optional requester and is ordered by createdAt`, () =>
     withStore(async (handle) => {
       await withRun(handle);
-      await handle.store.acceptInbound(inbound('globex', 'g1'), 'run-g');
+      await handle.store.acceptInbound(inbound('globex', 'g1', { conversationId: 'g-c1' }), 'run-g');
       await handle.store.addApproval(approval('acme', 'third', 'run-1', { createdAt: T0 + 30, requesterId: 'person-1' }));
       await handle.store.acceptInbound(inbound('acme', 'k2', { conversationId: 'c2', requesterId: 'person-2' }), 'run-2');
       await handle.store.addApproval(approval('acme', 'first', 'run-2', { createdAt: T0 + 10, requesterId: 'person-2' }));

@@ -323,20 +323,34 @@ export class SqliteStore implements RelayStore {
     return row ? toBinding(row) : undefined;
   }
 
+  /**
+   * The checks every queue operation makes inside its transaction: the tenant is registered and active, and the conversation is not bound to
+   * another tenant. Returns whether the conversation is bound yet. `what` names the operation in the error sentence.
+   */
+  private checkConversation(tenantId: string, channel: Channel, conversationId: string, what: string): boolean {
+    const tenantRow = this.statement('getTenant').get(tenantId) as Row | undefined;
+    if (!tenantRow) throw new StoreError('unknown-tenant', `${what}: its tenant is not registered.`);
+    if (tenantRow.status !== 'active') throw new StoreError('tenant-suspended', `${what}: its tenant is suspended.`);
+    const binding = this.statement('getBinding').get(channel, conversationId) as Row | undefined;
+    if (binding && binding.tenant_id !== tenantId) {
+      throw new StoreError('binding-conflict', `${what}: the conversation belongs to another tenant.`);
+    }
+    return binding !== undefined;
+  }
+
   async acceptInbound(message: InboundMessage, runId: string): Promise<AcceptResult> {
     checkInbound(message);
     checkId('runId', runId);
     return this.transaction((): AcceptResult => {
+      const bound = this.checkConversation(message.tenantId, message.channel, message.conversationId, 'The message was not stored');
       const existing = this.statement('messageByDedupe').get(message.tenantId, message.dedupeKey) as Row | undefined;
       if (existing) {
         const messageId = Number(existing.message_id);
         const run = this.statement('runIdForMessage').get(message.tenantId, messageId) as Row | undefined;
         return { duplicate: true, messageId, runId: run ? (run.run_id as string) : runId };
       }
-      if (!this.statement('getTenant').get(message.tenantId)) {
-        throw new StoreError('unknown-tenant', 'The message was not stored: its tenant is not registered.');
-      }
       if (this.statement('getRun').get(message.tenantId, runId)) throw invalid('runId', 'is already used by another run of this tenant');
+      if (!bound) this.statement('insertBinding').run(message.channel, message.conversationId, message.tenantId, message.receivedAt);
       const inserted = this.statement('insertMessage').run(
         message.tenantId,
         message.channel,
@@ -374,6 +388,7 @@ export class SqliteStore implements RelayStore {
     checkId('conversationId', conversationId);
     checkTime('now', now);
     return this.transaction(() => {
+      this.checkConversation(tenantId, channel, conversationId, 'No message was claimed');
       const next = this.statement('oldestQueued').get(tenantId, channel, conversationId) as Row | undefined;
       if (!next) return undefined;
       const messageId = Number(next.message_id);
