@@ -121,7 +121,7 @@ function jobSteps(job: string): string[] {
 
 const HAS_RELAY = "if: steps.has_relay.outputs.present == 'true'";
 
-test('the relay job passes without running anything on a commit that has no relay/ (a hotfix from an older tag)', async () => {
+test('the relay job skips its checks only on a hotfix/x.y.z commit that has no relay/, and fails on any other branch without it', async () => {
   const workflow = await readFile(path.join(REPO_ROOT, '.github', 'workflows', 'ci.yml'), 'utf8');
   const steps = jobSteps(ciJob(workflow, 'relay'));
   assert.ok(steps[0]?.includes('uses: actions/checkout@'), 'the relay job checks out the code first');
@@ -130,6 +130,8 @@ test('the relay job passes without running anything on a commit that has no rela
   // The job default is working-directory: relay, which does not exist on an old tag; the detection step must not depend on it.
   assert.ok(detect.includes('working-directory: .'), 'the detection step runs from the repository root');
   assert.ok(!detect.includes('if:'), 'the detection step always runs');
+  // The branch name reaches the script through env (never interpolated into it): the PR's source branch, or the pushed or dispatched ref.
+  assert.ok(detect.includes('BRANCH: ${{ github.head_ref || github.ref_name }}'), 'the detection step reads the branch name from env');
   for (const step of steps.slice(2)) {
     assert.ok(step.includes(HAS_RELAY), `every relay step after the detection is skipped when relay/ is missing:\n${step}`);
   }
@@ -145,23 +147,41 @@ test('the relay job passes without running anything on a commit that has no rela
     .join('\n');
   const scratch = await mkdtemp(path.join(tmpdir(), 'near-ai-relay-ci-detect-'));
   try {
-    const detectIn = async (tree: string): Promise<{ output: string; stdout: string }> => {
+    const detectIn = async (tree: string, branch: string): Promise<{ ok: boolean; output: string; stdout: string }> => {
       const outputFile = path.join(scratch, `${path.basename(tree)}.out`);
       await writeFile(outputFile, '');
-      const stdout = execFileSync('bash', ['-e', '-c', script], { cwd: tree, env: { PATH: process.env.PATH, GITHUB_OUTPUT: outputFile }, encoding: 'utf8' });
-      return { output: await readFile(outputFile, 'utf8'), stdout };
+      const env = { PATH: process.env.PATH, GITHUB_OUTPUT: outputFile, BRANCH: branch };
+      try {
+        const stdout = execFileSync('bash', ['-e', '-c', script], { cwd: tree, env, encoding: 'utf8' });
+        return { ok: true, output: await readFile(outputFile, 'utf8'), stdout };
+      } catch (error) {
+        return { ok: false, output: await readFile(outputFile, 'utf8'), stdout: String((error as { stdout?: unknown }).stdout ?? '') };
+      }
     };
     const oldTag = path.join(scratch, 'old-tag');
     await mkdir(oldTag);
-    const without = await detectIn(oldTag);
-    assert.equal(without.output.trim(), 'present=false');
-    assert.match(without.stdout, /relay checks were skipped/, 'the job log says why the relay checks did not run');
+    // A hotfix cut from a release older than the relay: the job passes and says why nothing ran.
+    const hotfix = await detectIn(oldTag, 'hotfix/0.4.13');
+    assert.ok(hotfix.ok, 'a hotfix/x.y.z commit without relay/ passes the detection step');
+    assert.equal(hotfix.output.trim(), 'present=false');
+    assert.match(hotfix.stdout, /relay checks were skipped/, 'the job log says why the relay checks did not run');
+
+    // Any other branch without relay/package.json (for example a PR that deletes it) fails the job instead of reporting green.
+    for (const branch of ['fix/drop-relay', 'main', 'release/0.4.24', 'hotfix/0.4', 'hotfix/0.4.13-x', 'xhotfix/0.4.13', '']) {
+      const missing = await detectIn(oldTag, branch);
+      assert.equal(missing.ok, false, `a commit on ${JSON.stringify(branch)} without relay/package.json must fail the relay job`);
+      assert.equal(missing.output.trim(), '', `no present= output is written for ${JSON.stringify(branch)}`);
+      assert.match(missing.stdout, /::error title=relay missing::/, 'the job log says the relay is missing');
+    }
 
     const current = path.join(scratch, 'current');
     await mkdir(path.join(current, 'relay'), { recursive: true });
     await writeFile(path.join(current, 'relay', 'package.json'), '{}');
-    const withRelay = await detectIn(current);
-    assert.equal(withRelay.output.trim(), 'present=true');
+    for (const branch of ['fix/relay-housekeeping', 'main', 'hotfix/0.4.13']) {
+      const withRelay = await detectIn(current, branch);
+      assert.ok(withRelay.ok);
+      assert.equal(withRelay.output.trim(), 'present=true', `relay/ present runs the checks on ${branch}`);
+    }
   } finally {
     await rm(scratch, { recursive: true, force: true });
   }
