@@ -1652,7 +1652,8 @@ export class AgentConversation {
       this.imageReviews.set(draft.id, (reply: ImageReviewDecision, cancelled = false) => { answer = { reply, cancelled }; wake(); });
       this.openPrompt(draft.id, {
         type: 'image-review-request', id: draft.id, path: draft.path, model: draft.model, prompt: draft.prompt, attempt: draft.attempt, sizeKb: Math.max(1, Math.round(draft.bytes / 1024)),
-        ...(image ? { image } : { tooLarge: true }), ...(draft.agent ? { agent: draft.agent } : {}), ...(draft.editOf ? { editOf: draft.editOf } : {}), ...(draft.note ? { note: draft.note } : {})
+        // 0.4.24: a draft that could not be read is gone (removed by hand, or by a clean-up), which is not the same as too large to show.
+        ...(image ? { image } : bytes ? { tooLarge: true } : { missing: true }), ...(draft.agent ? { agent: draft.agent } : {}), ...(draft.editOf ? { editOf: draft.editOf } : {}), ...(draft.note ? { note: draft.note } : {})
       });
     }, this.approvalTimeoutMs);
     if (!answer && how === 'timed-out') {

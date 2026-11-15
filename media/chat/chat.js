@@ -692,6 +692,9 @@
       img.src = m.image;
       img.alt = 'Generated image for ' + (m.path || 'the project') + ': ' + String(m.prompt || '').slice(0, 200);
       card.append(img);
+    } else if (m.missing) {
+      // 0.4.24: the draft's file is no longer there, so there is nothing to show, open or save; Discard (or Request changes) settles the card.
+      card.append(el('div', 'meta', 'This draft is gone: its file is no longer in the drafts folder, so there is nothing to show or save. Discard it, or request changes for a new image.'));
     } else {
       card.append(el('div', 'meta', 'This image is too large to show here. Open it full size to see it.'));
     }
@@ -707,8 +710,11 @@
       closePending(m.id, decision === 'accept' ? 'accepted' : decision === 'changes' ? 'changes-requested' : 'discarded', feedback);
     };
     const choices = el('div', 'choices');
-    const accept = textButton('Accept', () => answer('accept'), true);
-    choices.append(accept, textButton('Discard', () => answer('discard')), textButton('Open full size', () => postFor({ type: 'image-review-open', id: m.id })));
+    const accept = textButton('Accept', () => answer('accept'), !m.missing);
+    const discard = textButton('Discard', () => answer('discard'), !!m.missing);
+    const open = textButton('Open full size', () => postFor({ type: 'image-review-open', id: m.id }));
+    if (m.missing) { accept.disabled = true; open.disabled = true; }
+    choices.append(accept, discard, open);
     card.append(choices);
     const changes = el('textarea', 'image-review-changes');
     changes.rows = 2;
@@ -722,7 +728,7 @@
     const changeRow = el('div', 'choices image-review-change-row');
     changeRow.append(request);
     card.append(changes, changeRow);
-    addPending({ id: m.id, kind: 'image', agent: m.agent, title }, card, accept, (m.agent || 'NEAR AI') + ' made an image for you to review: ' + (m.path || ''));
+    addPending({ id: m.id, kind: 'image', agent: m.agent, title }, card, m.missing ? discard : accept, (m.agent || 'NEAR AI') + ' made an image for you to review: ' + (m.path || ''));
   }
 
   // Running sub-agents with what each is doing, how long it has run, and pause, resume, and stop.

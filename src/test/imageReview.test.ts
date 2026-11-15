@@ -13,6 +13,7 @@ import { AgentConversation, GsdContext } from '../services/agentSession';
 import { parseChatWebviewMessage } from '../services/chatBridge';
 import { ConversationLog, loggable, promptIdOf } from '../services/conversations';
 import type { AgentMessage, CompletionEvent, ToolCall } from '../services/nearAiClient';
+import { chatPage, StubNode } from './helpers/chatPage';
 
 // 0.4.23 (owner): the person sees each image the agent makes, can ask for changes, and only an accepted image reaches its path. In a real run an
 // agent made the same image 11 times over hours, scoring each with its own scripts and writing every attempt into the report's image folder.
@@ -558,4 +559,44 @@ test('a parallel attempt at the same path does not delete a draft whose Accept i
     assert.ok(reviewer.drafts.has(shown[1].id), 'the newer draft, kept after Request changes, stays');
     assert.equal(reviewer.drafts.get(shown[1].id)?.reviewing, false, 'and is no longer marked as under review');
   });
+});
+
+// Second review of PR 51: a draft whose file had gone was shown as "too large to show here", which sent the person looking for an image that is not there.
+test('a draft whose file is gone says so on its card, offers no Accept, and a too large one still says too large', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'near-ai-image-gone-'));
+  const posted: Array<Record<string, unknown>> = [];
+  const conversation = new AgentConversation(root, (message) => posted.push(message), path.join(root, '.ckpt'));
+  const internals = conversation as unknown as { askImageReview(draft: ImageDraft, signal: AbortSignal): Promise<ImageReviewDecision> };
+  const controller = new AbortController();
+  try {
+    const id = 'img-0b0b0b0b0b0b';
+    const waiting = internals.askImageReview({ id, file: draftFile(root, id), path: 'assets/a.png', model: 'm', prompt: 'p', attempt: 1, bytes: 3 }, controller.signal);
+    const card = await until(() => posted.find((message) => message.type === 'image-review-request' && message.id === id));
+    assert.equal(card.missing, true, 'the card is told the draft is gone');
+    assert.equal(card.tooLarge, undefined, 'not that it is too large');
+    assert.equal(card.image, undefined);
+    controller.abort();
+    await waiting;
+  } finally {
+    conversation.dispose();
+  }
+  const page = chatPage();
+  const cards = () => [...page.nodes.values()].flatMap((node) => node.all((child) => child.className === 'question image-review'));
+  const texts = (node: StubNode) => node.all(() => true).map((child) => child.textContent);
+  page.send({ type: 'image-review-request', id: 'img-0c0c0c0c0c0c', path: 'assets/a.png', model: 'm', prompt: 'p', attempt: 1, sizeKb: 1, missing: true });
+  const gone = cards()[0];
+  assert.ok(gone, 'the card is shown');
+  assert.ok(texts(gone).some((text) => /^This draft is gone: its file is no longer in the drafts folder/.test(text)), texts(gone).join(' | '));
+  assert.equal(texts(gone).some((text) => /too large/.test(text)), false);
+  const buttons = (node: StubNode) => new Map(node.all((child) => child.tagName === 'button').map((button) => [button.textContent, button]));
+  assert.equal(buttons(gone).get('Accept')?.disabled, true, 'there is nothing to accept');
+  assert.equal(buttons(gone).get('Open full size')?.disabled, true, 'or to open');
+  assert.equal(buttons(gone).get('Discard')?.disabled, false);
+  // Only the card on show is in the page, so the too-large one is shown on a page of its own.
+  const other = chatPage();
+  other.send({ type: 'image-review-request', id: 'img-0d0d0d0d0d0d', path: 'assets/b.png', model: 'm', prompt: 'p', attempt: 1, sizeKb: 9000, tooLarge: true });
+  const large = [...other.nodes.values()].flatMap((node) => node.all((child) => child.className === 'question image-review'))[0];
+  assert.ok(large);
+  assert.ok(texts(large).some((text) => /too large to show here/.test(text)));
+  assert.equal(buttons(large).get('Accept')?.disabled, false);
 });
