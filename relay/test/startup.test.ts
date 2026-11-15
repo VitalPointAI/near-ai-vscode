@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn, type ChildProcess } from 'node:child_process';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { copyFile, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import net from 'node:net';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -267,4 +267,32 @@ test('an unknown path answers 404 without echoing it, and another method on /hea
     assert.ok(!relay.stdout().includes('acme'), 'the request path was echoed into the log');
     assert.equal(relay.stderr(), '');
   });
+});
+
+test('a missing or damaged app.mjs prints one fixed sentence on stderr, no path or stack, and exits 1', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'near-ai-relay-noapp-'));
+  try {
+    const bin = path.join(dir, 'bin.mjs');
+    await copyFile(BIN, bin);
+    const runGuard = (): Promise<{ code: number | null; stdout: string; stderr: string }> =>
+      new Promise((resolve, reject) => {
+        const child = spawn(process.execPath, [bin], { env: { PATH: process.env.PATH ?? '' }, stdio: ['ignore', 'pipe', 'pipe'] });
+        let stdout = '';
+        let stderr = '';
+        child.stdout.on('data', (chunk: Buffer) => { stdout += chunk.toString(); });
+        child.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString(); });
+        child.on('error', reject);
+        child.on('close', (code) => resolve({ code, stdout, stderr }));
+      });
+    for (const situation of ['missing', 'damaged'] as const) {
+      if (situation === 'damaged') await writeFile(path.join(dir, 'app.mjs'), 'export async function main( {\n');
+      const run = await runGuard();
+      assert.equal(run.code, 1, situation);
+      assert.equal(run.stdout, '', situation);
+      assert.equal(run.stderr, 'near-ai-relay could not load its code; reinstall it.\n', `${situation}: ${run.stderr}`);
+      assert.ok(!run.stderr.includes(dir), `${situation}: the sentence names no path`);
+    }
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });
