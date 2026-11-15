@@ -16,7 +16,7 @@ The extension is not changed by this phase, except for build hygiene: the root p
 ## Implementation Decisions
 
 ### Workspace and runtime (locked in STATE.md, restated)
-- **D-01:** `relay/` has its own `package.json`, its own `package-lock.json`, its own `tsconfig.json`, and `engines: { "node": ">=26.13.1 <27" }`. Exactly one runtime dependency: `jose`. Tests use `node:test`. No HTTP framework, no SQLite package, no dotenv.
+- **D-01:** `relay/` has its own `package.json`, its own `package-lock.json`, its own `tsconfig.json`, and `engines: { "node": ">=26.13.1 <27" }`. Exactly one runtime dependency: `jose`. Tests use `node:test`. No HTTP framework, no SQLite package, no dotenv. (`jose` is not imported in Phase 68; it is reserved for the Phase 69 Teams JWT validation and kept now so the pin is reviewed once, code review IN-02.)
 - **D-02:** An older runtime refuses to start twice over: `engine-strict=true` in `relay/.npmrc` for installs, and a startup check of `process.versions.node` that exits non-zero with a plain message. The VSIX never contains `relay/`; the extension keeps Node 24 and its zero-dependency bundle. CI gains a separate relay job on Node 26.13.1. *Undo: cheap.*
 - **D-03:** Node 26.13.1 is not installed on the owner's dev host (only Node 24). Plans install it through nvm for development and tests (`nvm install 26.13.1`) and never change the default Node used by the extension's scripts. *Undo: cheap.*
 

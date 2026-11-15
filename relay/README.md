@@ -29,6 +29,8 @@ Run these from the `relay` folder.
 | `npm run test:container` | Builds the image and runs the container suite (Docker and Compose required). It makes only its own uniquely named image, Compose project and volume, and removes them again. |
 | `npm start` | Starts the built relay from `dist/bin.mjs`. Run `npm run build` first. |
 
+The relay has one runtime dependency, `jose` (exact pin, own lockfile, installed with install scripts off). Nothing imports it yet: it is reserved for the Teams JWT validation in Phase 69, and the workspace test pins it so it cannot change by accident.
+
 ## Settings
 
 The relay reads three settings from its environment. Any other name that starts with `RELAY_` stops the relay at start, so a typo cannot fall back to a default by accident.
