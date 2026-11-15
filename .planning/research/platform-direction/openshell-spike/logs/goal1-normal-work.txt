@@ -1,0 +1,6 @@
+== harness positive control (should say FAIL):
+FAIL(read succeeded) control
+== normal agent work on the copy:
+v24.22.2
+tests ok
+Hello, world!

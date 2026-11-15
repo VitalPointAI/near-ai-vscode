@@ -1,0 +1,12 @@
+did:near:worker-1.orchestrator.placeholder.near under did:near:orchestrator.placeholder.near: ACCEPT (prover: within_boundary, coverage filesystem,network_l4,network_rest,process,landlock)
+exit=0
+did:near:worker-2.orchestrator.placeholder.near under did:near:orchestrator.placeholder.near: REJECT (prover: exceeds_boundary, coverage filesystem,network_l4,network_rest,process,landlock)
+  - authority: network host 'github.com' not granted by parent
+  - authority: mcp tool on mcp.docs.placeholder 'delete_doc' not granted by parent
+  - authority: send channel 'telegram:anyone' not granted by parent
+  - authority: skill.write scope 'skills/**' outside parent
+  - authority: spend 500/P1D exceeds parent 50/P30D
+  - authority: delegation depth 2 not below parent 2
+  - authority: expiry 2027-06-01T00:00:00Z after parent 2026-12-31T23:59:59Z
+  - sandbox: prover exceeds_boundary :: {"domain":"network","binary":null,"ancestor_binary":null,"binary_identity_required":false,"host":"github.com","destination_ip":"8.8.8.8","trusted_gateway":false,"port":443,"protocol":"rest","method":"GET","path":"/"}
+exit=1

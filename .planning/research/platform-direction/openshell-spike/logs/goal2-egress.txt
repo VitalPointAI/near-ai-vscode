@@ -1,0 +1,12 @@
+env HTTPS_PROXY= (unset)
+E1 allowed GET registry.npmjs.org/left-pad: HTTP 200 :: {"_id":"left-pad","_rev":"47-fa2fe73fbfce1508270b488a6ba93e5f","name":"left-pad","time":{"
+E2 POST to allowed host (policy read-only): HTTP 403 :: {"error":"policy_denied","policy":"npm_registry_read","rule":"POST /-/v1/login","detail":"
+E3 GET example.com (not in policy): ERROR EACCES connect EACCES 198.18.0.3:443 - Local (0.0.0.0:0)
+E4 GET github.com (not in policy): ERROR EACCES connect EACCES 198.18.0.4:443 - Local (0.0.0.0:0)
+E5 raw TCP 1.1.1.1:443 (IP, not in policy): ERROR EACCES connect EACCES 1.1.1.1:443 - Local (0.0.0.0:0)
+E6 cloud metadata 169.254.169.254: ERROR EACCES connect EACCES 169.254.169.254:80 - Local (0.0.0.0:0)
+E7 host loopback 127.0.0.1:8080: ERROR ECONNREFUSED connect ECONNREFUSED 127.0.0.1:8080
+== E8 bash /dev/tcp to the ALLOWED host (binary is bash, rule is for node only):
+bash: connect: Permission denied
+bash: line 1: /dev/tcp/registry.npmjs.org/443: Permission denied
+refused rc=1

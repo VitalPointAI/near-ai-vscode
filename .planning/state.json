@@ -1,68 +1,118 @@
 {
   "contract": "1.0.0",
   "flavor": "core",
-  "milestone": "v0.7.0 — Messaging relay — Teams and Signal",
+  "milestone": "v0.7.0: Governed agent platform and messaging relay",
   "phases": [
     {
       "number": "27",
-      "name": "Project state follows the project (0.4.20)",
+      "name": "Project state follows the project (0.4.20; shipped, owner host check open)",
+      "status": "in_progress"
+    },
+    {
+      "number": "28",
+      "name": "Secure development workflow setup step",
+      "status": "pending"
+    },
+    {
+      "number": "29",
+      "name": "A cleanup member with a safe CleanUp tool",
       "status": "pending"
     },
     {
       "number": "68",
       "name": "Relay foundation",
-      "status": "in_progress"
+      "status": "complete"
     },
     {
       "number": "69",
-      "name": "Inbound authenticity and allowlisting",
+      "name": "Team Mode reconciliation",
       "status": "pending"
     },
     {
       "number": "70",
-      "name": "Identity, tenants and requesters",
+      "name": "Capability vocabulary, manifests and one gate with a floor",
       "status": "pending"
     },
     {
       "number": "71",
-      "name": "Teams 1:1 vertical slice",
+      "name": "Delegation that only narrows",
       "status": "pending"
     },
     {
       "number": "72",
-      "name": "Budgets and spend ledger",
+      "name": "Execution backends on a copy, with a guarded apply",
       "status": "pending"
     },
     {
       "number": "73",
-      "name": "Command surface and run lifecycle",
+      "name": "Credential broker",
       "status": "pending"
     },
     {
       "number": "74",
-      "name": "Group-chat discipline",
+      "name": "Run contracts",
       "status": "pending"
     },
     {
       "number": "75",
-      "name": "Signal channel",
+      "name": "Inbound authenticity, allowlisting and channel manifests",
       "status": "pending"
     },
     {
       "number": "76",
+      "name": "Identity, tenants, requesters and pairing",
+      "status": "pending"
+    },
+    {
+      "number": "77",
+      "name": "Teams 1:1 slice under a contract in a sandbox",
+      "status": "pending"
+    },
+    {
+      "number": "78",
+      "name": "Messaging setup view and pairing",
+      "status": "pending"
+    },
+    {
+      "number": "79",
+      "name": "Budgets and spend ledger on run contracts",
+      "status": "pending"
+    },
+    {
+      "number": "80",
+      "name": "Command surface, run lifecycle and request-bound signed approvals",
+      "status": "pending"
+    },
+    {
+      "number": "81",
+      "name": "Group-chat discipline",
+      "status": "pending"
+    },
+    {
+      "number": "82",
+      "name": "Signal channel",
+      "status": "pending"
+    },
+    {
+      "number": "83",
+      "name": "Telegram channel",
+      "status": "pending"
+    },
+    {
+      "number": "84",
       "name": "Ops, onboarding and release",
       "status": "pending"
     },
     {
       "number": "25",
-      "name": "Cybersecurity harness (v0.8.0)",
-      "status": "pending"
+      "name": "Cybersecurity harness (v0.8.0, deferred by the owner to the end)",
+      "status": "deferred"
     }
   ],
   "next": {
-    "command": "/gsd-progress --next",
-    "label": "Advance to the next step (plan phase 68)",
-    "reason": "Phase 1 of 9 — needs a plan"
+    "command": "/gsd-plan-phase 69",
+    "label": "Plan Phase 69 (Team Mode reconciliation)",
+    "reason": "v0.7.0 replanned 2026-11-15; Phase 68 complete; archive feat/team-fix-pass on GitHub first"
   },
-  "updated_at": "2026-11-15T00:44:43.505Z"
+  "updated_at": "2026-11-15T13:22:46.000Z"
 }

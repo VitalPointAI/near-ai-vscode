@@ -1,0 +1,251 @@
+<title>Agent Platform Direction</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a single reading column for a decision memo; wide tables scroll inside their own frame; a decision strip at the top. */
+:root {
+  --bg: #f6f7f8; --surface: #ffffff; --fg: #1b2228; --muted: #56626d; --line: #d9dee3;
+  --accent: #0f6b74; --accent-soft: #e2f0f1;
+  --ok: #2f7a3e; --ok-soft: #e4f2e7; --warn: #9a6200; --warn-soft: #fbf0dc; --no: #a3332b; --no-soft: #f8e4e2;
+  --display: "IBM Plex Sans Condensed", "Arial Narrow", system-ui, sans-serif;
+  --body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #121619; --surface: #1a2025; --fg: #e3e8ec; --muted: #9aa6b0; --line: #2c353c;
+  --accent: #5cc3cc; --accent-soft: #173235;
+  --ok: #7cc98a; --ok-soft: #1b2e20; --warn: #e3b25a; --warn-soft: #33281a; --no: #ee8a80; --no-soft: #3a1f1d; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #121619; --surface: #1a2025; --fg: #e3e8ec; --muted: #9aa6b0; --line: #2c353c;
+  --accent: #5cc3cc; --accent-soft: #173235;
+  --ok: #7cc98a; --ok-soft: #1b2e20; --warn: #e3b25a; --warn-soft: #33281a; --no: #ee8a80; --no-soft: #3a1f1d; color-scheme: dark }
+body { background: var(--bg); color: var(--fg); font-family: var(--body); font-size: 16px; line-height: 1.6; }
+.wrap { max-width: 980px; margin: 0 auto; padding-block: 40px 72px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); display: flex; flex-direction: column; gap: 44px; }
+header { display: flex; flex-direction: column; gap: 10px; }
+.eyebrow { font-family: var(--mono); font-size: 12.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+h1 { font-family: var(--display); font-weight: 600; font-size: clamp(30px, 5vw, 42px); line-height: 1.12; margin: 0; text-wrap: balance; }
+h2 { font-family: var(--display); font-weight: 600; font-size: 25px; line-height: 1.2; margin: 0 0 6px; text-wrap: balance; }
+h3 { font-family: var(--display); font-weight: 600; font-size: 18px; margin: 0; }
+p { margin: 0; max-width: 68ch; }
+section { display: flex; flex-direction: column; gap: 14px; }
+.lede { font-size: 18px; color: var(--fg); max-width: 66ch; }
+.meta { color: var(--muted); font-size: 14px; }
+code, .mono { font-family: var(--mono); font-size: .9em; }
+a { color: var(--accent); }
+a:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+ul { margin: 0; padding-left: 1.2em; display: flex; flex-direction: column; gap: 6px; max-width: 70ch; }
+
+.verdict { background: var(--surface); border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: 6px; padding: 20px 22px; display: flex; flex-direction: column; gap: 10px; }
+.verdict p { max-width: none; }
+
+.options { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+.opt { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 16px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.opt p { font-size: 14.5px; }
+.pill { align-self: flex-start; font-family: var(--mono); font-size: 11.5px; letter-spacing: .04em; text-transform: uppercase; padding: 2px 8px; border-radius: 999px; }
+.pill.ok { background: var(--ok-soft); color: var(--ok); }
+.pill.warn { background: var(--warn-soft); color: var(--warn); }
+.pill.no { background: var(--no-soft); color: var(--no); }
+
+.facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
+.fact { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 16px 18px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.fact dl { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; font-size: 14px; }
+.fact dt { color: var(--muted); }
+.fact dd { margin: 0; min-width: 0; }
+.fact p { font-size: 14.5px; }
+
+.tablewrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; min-width: 760px; font-size: 14px; }
+th, td { text-align: left; vertical-align: top; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+th { font-family: var(--mono); font-size: 11.5px; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); font-weight: 500; background: var(--bg); }
+tr:last-child td { border-bottom: 0; }
+td.size { font-family: var(--mono); white-space: nowrap; }
+.prio { font-family: var(--mono); font-weight: 500; white-space: nowrap; }
+.prio.p1 { color: var(--accent); }
+
+.layers { display: flex; flex-direction: column; gap: 0; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; background: var(--surface); }
+.layer { display: grid; grid-template-columns: 170px 1fr; gap: 16px; padding: 14px 18px; border-bottom: 1px solid var(--line); }
+.layer:last-child { border-bottom: 0; }
+.layer .name { font-family: var(--display); font-weight: 600; font-size: 16px; }
+.layer .where { font-family: var(--mono); font-size: 12px; color: var(--muted); display: block; margin-top: 2px; font-weight: 400; }
+.layer p { font-size: 14.5px; max-width: none; }
+@media (max-width: 560px) { .layer { grid-template-columns: 1fr; gap: 4px; } }
+
+.rules { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 10px; counter-reset: none; }
+.rule { background: var(--accent-soft); border-radius: 6px; padding: 12px 14px; font-size: 14.5px; }
+
+.dont { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 10px; }
+.dont div { border: 1px solid var(--line); border-radius: 6px; padding: 12px 14px; font-size: 14.5px; background: var(--surface); }
+.dont strong { display: block; font-weight: 600; margin-bottom: 2px; }
+
+.steps { display: flex; flex-direction: column; gap: 10px; }
+.step { display: grid; grid-template-columns: 120px 1fr; gap: 16px; padding: 12px 0; border-top: 1px solid var(--line); }
+.step:first-child { border-top: 0; }
+.step .when { font-family: var(--mono); font-size: 12.5px; color: var(--accent); text-transform: uppercase; letter-spacing: .04em; padding-top: 3px; }
+.step p { font-size: 15px; }
+@media (max-width: 560px) { .step { grid-template-columns: 1fr; gap: 2px; } }
+
+.ask { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 16px 18px; display: flex; flex-direction: column; gap: 10px; }
+.ask ol { margin: 0; padding-left: 1.3em; display: flex; flex-direction: column; gap: 8px; max-width: 72ch; }
+footer { color: var(--muted); font-size: 13.5px; display: flex; flex-direction: column; gap: 6px; border-top: 1px solid var(--line); padding-top: 18px; }
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto; } }
+</style>
+
+<div class="wrap">
+  <header>
+    <div class="eyebrow">NEAR AI for VS Code · future release planning · 15 November 2026</div>
+    <h1>Agent Platform Direction</h1>
+    <p class="lede">What to take from Hermes Agent, IronClaw and NVIDIA OpenShell so our agent teams work better, more efficiently and, where people want it, more autonomously, inside the DID trust and governance model we intend to build. Also: whether to fork IronClaw, how plugins should work, and how this fits the move to a product built on Eclipse Theia.</p>
+    <p class="meta">Based on three source-level reviews (shallow clones of each repository, read but never run) and on our own code on <span class="mono">main</span> and the relay branch.</p>
+  </header>
+
+  <section>
+    <h2>Recommendation</h2>
+    <div class="verdict">
+      <p><strong>Keep our TypeScript engine and build the governance layer into it. Do not fork IronClaw now.</strong> Take IronClaw's capability and authorization design, Hermes's best workflow ideas reshaped to pass a DID policy gate, and OpenShell as the sandbox that enforces policy outside the agent's process. Build the editor-independent parts now; they move to Theia unchanged. Ship the first Theia product as a container appliance, then a desktop app from the same code.</p>
+      <p>The owner's starting preference was to fork IronClaw and add Hermes and OpenShell to it. The reviews found that this would mean porting most of our product into Rust while IronClaw itself still lacks DIDs, a Teams channel and NEAR AI attestation checks. The same design fits our code at a fraction of the effort. A low-risk way to keep the option open is described below.</p>
+    </div>
+    <div class="options">
+      <div class="opt"><span class="pill no">Not now</span><h3>Fork IronClaw as our core</h3><p>Rust, about 1.38 million lines in 61 crates. Means re-coding teams, GSD, approvals, privacy tiers, attestation and the spend ledger. Estimated 3 to 6 months plus permanent rebase cost.</p></div>
+      <div class="opt"><span class="pill warn">Optional</span><h3>IronClaw as a backend</h3><p>Run upstream IronClaw unmodified behind its OpenAI-compatible Responses API, contribute upstream, fork only if upstream refuses something essential.</p></div>
+      <div class="opt"><span class="pill ok">Recommended</span><h3>Our engine, their designs</h3><p>Capability manifests, restrict-only delegation and run contracts from IronClaw; scheduling and package lifecycle from Hermes; enforcement from OpenShell.</p></div>
+      <div class="opt"><span class="pill no">Avoid</span><h3>Hermes plugins</h3><p>Hermes's own docs say its plugin capabilities are a consent record, not a security boundary. They cannot carry DID constraints.</p></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>The three projects</h2>
+    <div class="facts">
+      <div class="fact">
+        <h3>Hermes Agent</h3>
+        <dl><dt>From</dt><dd>Nous Research</dd><dt>Language</dt><dd>Python 3.14</dd><dt>Licence</dt><dd>MIT</dd><dt>Activity</dt><dd>v0.23.1 on 10 Nov 2026; patches every few days</dd></dl>
+        <p>Broadest feature set: self-written skills, cron and goal loops, a durable task board with separate worker processes, about 25 messaging platforms, Docker and remote terminal backends, a hardline command blocklist and request-bound approvals. Plugins run in-process with full trust by default. Skill and memory writes happen without approval, and a YOLO mode turns approvals off.</p>
+      </div>
+      <div class="fact">
+        <h3>IronClaw</h3>
+        <dl><dt>From</dt><dd>NEAR AI</dd><dt>Language</dt><dd>Rust (rewrite of OpenClaw)</dd><dt>Licence</dt><dd>MIT or Apache-2.0</dd><dt>Activity</dt><dd>1.0 to 1.4.1, Jul to Sep 2026; no commit on main since 10 Sep</dd></dl>
+        <p>Strongest security design: WASM tools with fuel and memory limits, tool manifests that declare effects, egress hosts and credential handles, credentials injected at the network boundary, staged authorization, leases, and self-written hooks that can only restrict. Channels: Slack and Telegram only; no Teams. No DIDs, per-agent NEAR accounts or on-chain policy. Auto-approve is on by default and it does not check NEAR AI attestation.</p>
+      </div>
+      <div class="fact">
+        <h3>OpenShell</h3>
+        <dl><dt>From</dt><dd>NVIDIA, now in CNCF</dd><dt>Language</dt><dd>Rust</dd><dt>Licence</dt><dd>Apache-2.0</dd><dt>Activity</dt><dd>0.1.x, weekly releases; several RFCs still draft</dd></dl>
+        <p>A sandbox runtime for any agent: a trusted supervisor outside, Landlock and seccomp inside, a network fence, and per-program network rules down to HTTP method and path. Policies are YAML checked by OPA, versioned with rollback. Credentials become placeholders the supervisor swaps for real keys. A policy prover can show a child policy grants nothing beyond its parent. Linux first; macOS through Docker Desktop's VM; Windows is not a security boundary. Telemetry is on by default.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Trust and governance layers</h2>
+    <p>Our plan in <span class="mono">.planning/PROJECT.md</span>: every agent gets a NEAR implicit account and a W3C DID carrying its limits, can never grant itself more than it was created with or delegated, only the orchestrator changes a DID and only with a person's delegated authority, and on-chain policy gates each action. None of the three projects has DIDs. Each fills a different layer:</p>
+    <div class="layers">
+      <div class="layer"><div class="name">Identity and delegation<span class="where">on chain (NEAR)</span></div><p>The DID chain from person to orchestrator to sub-agent to tool: policy hash, parent signature, expiry, revocation. Every delegation can only narrow: child equals parent intersected with the member's own limits.</p></div>
+      <div class="layer"><div class="name">Policy decision<span class="where">once per run, then local</span></div><p>At run start, verify the DID chain and revocation on chain and issue a short-lived lease. Every tool call inside the run passes one local gate, <span class="mono">authorize(actorDid, capability, context)</span>, with a floor no mode or DID can override. If the chain is unreachable, a signed local copy is checked and the gate fails closed. Per-action checks never go on chain.</p></div>
+      <div class="layer"><div class="name">Enforcement<span class="where">OS sandbox + per-tool fence</span></div><p>An OpenShell-style sandbox loads only the policy whose hash matches the lease. The agent works on a copy of the project, so protected folders such as <span class="mono">.near-ai/state/keys</span> are simply absent. Egress allowlists and a credential broker apply here. IronClaw-style WASM isolation can be the inner fence for individual tools.</p></div>
+      <div class="layer"><div class="name">Audit<span class="where">signed, hash-chained</span></div><p>Every grant, consent, delegation and decision goes into the signed event log in OCSF format, with its root anchored on chain from time to time.</p></div>
+    </div>
+    <h3>Hard rules for anything we adopt</h3>
+    <div class="rules">
+      <div class="rule">One gate for every tool call. No side doors for plugins, skills, hooks or schedules.</div>
+      <div class="rule">Delegation only narrows. Leaves are denied the tools that amplify authority.</div>
+      <div class="rule">Skill, memory and plugin text never grants authority.</div>
+      <div class="rule">Plugin and tool code never runs inside the extension or engine process.</div>
+      <div class="rule">Adding tools, servers or schedules is itself governed and never available to member agents.</div>
+      <div class="rule">Agents may propose new rules, schedules or skills. Only a person approves them.</div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Plugins for our teams</h2>
+    <p>Use a hybrid. MCP servers, always out of process, plus our markdown team, agent and skill files remain the building blocks. A package adds a thin signed <span class="mono">plugin.json</span> in the cross-vendor Agent Plugins v1 layout (<span class="mono">skills/</span>, <span class="mono">agents/</span>, <span class="mono">teams/</span>, <span class="mono">mcp.json</span>) with a capabilities block that maps one-to-one onto DID constraints such as <span class="mono">network{hosts}</span>, <span class="mono">mcp{server,tools}</span>, <span class="mono">send{channel}</span>, <span class="mono">schedule</span>, <span class="mono">skill.write{scope}</span> and <span class="mono">spend{usd}</span>.</p>
+    <ul>
+      <li><strong>Enforced, not just consented to:</strong> the gate and the sandbox apply the capabilities block, the way IronClaw enforces its tool manifests.</li>
+      <li><strong>Lifecycle from Hermes:</strong> packages install disabled, are pinned to a commit, are scanned on install, and need fresh consent when an update widens capabilities.</li>
+      <li><strong>Not WASM as our tool format:</strong> MCP already covers tools; WASM stays an option for the inner fence.</li>
+      <li><strong>Theia fit:</strong> Theia AI already reads <span class="mono">agent.md</span> agents, <span class="mono">SKILL.md</span> skills and MCP, so this format carries over.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>What to build, in order</h2>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Priority</th><th>What</th><th>Taken from</th><th>Why it matters</th><th>Size</th></tr></thead>
+        <tbody>
+          <tr><td class="prio p1">1</td><td>Capability vocabulary and one policy gate with a non-overridable floor; a declared capability manifest for every built-in tool and MCP server</td><td>IronClaw, Hermes</td><td>Everything else, including the DID gate, depends on it. Also closes the gap where fully autonomous mode writes protected paths without asking.</td><td class="size">M</td></tr>
+          <tr><td class="prio p1">1</td><td>Restrict-only delegation: depth limit, signed and expiring grants, a lead can only narrow a member's tools, structured results</td><td>IronClaw, Hermes</td><td>Makes "an agent can never exceed what it was delegated" true in code.</td><td class="size">S to M</td></tr>
+          <tr><td class="prio p1">1</td><td>Execution backends: <span class="mono">host</span> (today), <span class="mono">container</span>, <span class="mono">openshell</span>; agents work on a worktree copy and return a diff</td><td>OpenShell</td><td>Our Bash guard is a text check. A script that builds a protected path at run time cannot be caught by text; a sandbox makes it impossible.</td><td class="size">M to L</td></tr>
+          <tr><td class="prio">2</td><td>Credential broker: agents see placeholders; each credential is bound to the host it may be sent to; tool output is scanned for secrets</td><td>OpenShell, IronClaw</td><td>Today we remove secret-looking environment variables by name.</td><td class="size">M</td></tr>
+          <tr><td class="prio">2</td><td>Run contracts for every run nobody started from the chat: caps on cost, tool calls, time and sub-agents; refused if wider than the creator's authority</td><td>IronClaw</td><td>Prerequisite for routines and relay runs.</td><td class="size">S to M</td></tr>
+          <tr><td class="prio">2</td><td>Approvals bound to the exact request and signed by the person's device identity</td><td>Hermes</td><td>Build inside relay Phase 73 so remote approvals are trustworthy.</td><td class="size">M</td></tr>
+          <tr><td class="prio">3</td><td>Routines: scheduled and event-triggered team runs as markdown files with contracts; person-signed, expiring; unanswered approvals expire to deny</td><td>IronClaw, Hermes</td><td>The main lever for more autonomy, kept inside the governance model.</td><td class="size">L</td></tr>
+          <tr><td class="prio">3</td><td>Signed plugin packages with a capabilities block and the Hermes lifecycle</td><td>Hermes, IronClaw</td><td>Lets your organization share teams and tools safely.</td><td class="size">M</td></tr>
+          <tr><td class="prio">3</td><td>OpenShell policy YAML as the sandbox part of each DID; run the prover on every delegation</td><td>OpenShell</td><td>Machine-checked narrowing for files and network.</td><td class="size">M</td></tr>
+          <tr><td class="prio">4</td><td>Per-server MCP spend limits; load tool schemas on demand; agents claim board items under their DIDs</td><td>Hermes</td><td>Efficiency and accountability for larger teams.</td><td class="size">S to M</td></tr>
+          <tr><td class="prio">4</td><td>Learned skills only as staged proposals a person approves; runs that read untrusted content cannot propose</td><td>Hermes</td><td>Useful, but the riskiest form of self-modification. Do last.</td><td class="size">M</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="meta">Sizes: S is days, M is one to three weeks, L is a month or more. Priorities 1 and 2, and the relay, are editor-independent.</p>
+  </section>
+
+  <section>
+    <h2>What not to copy</h2>
+    <div class="dont">
+      <div><strong>In-process plugins</strong>Hermes default; any plugin bug or compromise owns the process.</div>
+      <div><strong>Approvals off</strong>Hermes YOLO mode and IronClaw's auto-approve default.</div>
+      <div><strong>Free self-writes</strong>Agents writing skills, memory or cron jobs without a person's approval.</div>
+      <div><strong>Checks skipped in containers</strong>Hermes skips its dangerous-command check there.</div>
+      <div><strong>Shared credential pools</strong>Child agents must never inherit a parent's keys.</div>
+      <div><strong>MCP sampling on by default</strong>Lets a server drive the model.</div>
+      <div><strong>Global policies that replace</strong>OpenShell global policies override an agent's policy instead of narrowing it.</div>
+      <div><strong>Audit-only enforcement and telemetry</strong>OpenShell defaults; both off in anything we ship.</div>
+      <div><strong>Mounting the live checkout</strong>OpenShell warns it bypasses the file policy; use a copy.</div>
+      <div><strong>Docker socket in code-server</strong>Root-equivalent control of the host. Run the sandbox gateway on the host instead.</div>
+    </div>
+  </section>
+
+  <section>
+    <h2>The relay</h2>
+    <p>Keep building it. IronClaw has no Teams channel, dropped Signal after 1.x, and does not run our teams. Borrow IronClaw's channel manifest shape and its two-step setup: the operator configures a channel once, then each person pairs. The relay is the best fit for OpenShell (Linux, containerized, multi-tenant, workspaces map to tenants), and a sandbox should be required there once the relay runs tools. Phase 68 (PR #50) stands as built. Phase 69 planning is on hold until this direction is agreed.</p>
+  </section>
+
+  <section>
+    <h2>Theia and how it installs</h2>
+    <p>Theia is a sound base for a branded product: its own branding, browser and desktop forms from one codebase, Theia AI for agents, skills and MCP, and VS Code extension compatibility (v1.77 is current). Two caveats: the <span class="mono">@nearai</span> chat participant API is stubbed in Theia, and Theia stores AI API keys in clear text in settings, so we keep our own secret handling.</p>
+    <p>About 30 of our files import VS Code (28 of 126 in <span class="mono">src/services</span>, plus the webviews). The agent core, domain, GSD, MCP and relay code import nothing from VS Code and move as they are.</p>
+    <div class="steps">
+      <div class="step"><div class="when">Now</div><p>Build priorities 1 and 2, the package format and the relay as editor-independent packages. Keep new UI in the current webviews small.</p></div>
+      <div class="step"><div class="when">First Theia</div><p>A container appliance: Theia in the browser, the agent engine, the relay and an optional OpenShell gateway in one Compose stack, with optional GPU passthrough through the NVIDIA Container Toolkit. It replaces today's code-server setup, runs on any Linux machine with Docker or Podman, and can be loaded offline. The current VSIX can bridge the first release inside it.</p></div>
+      <div class="step"><div class="when">Second</div><p>The desktop app from the same code, for people who want a local install. Rebuild Team Studio and chat as Theia widgets and agents. Add routines' UI and learned skills here.</p></div>
+      <div class="step"><div class="when">If shared</div><p>When several people share one machine, Theia Cloud gives each person a container on Kubernetes. Until then, one container per person or per team is enough.</p></div>
+      <div class="step"><div class="when">Throughout</div><p>Keep publishing the VS Code extension while the shared core makes it cheap.</p></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Decisions needed</h2>
+    <div class="ask">
+      <ol>
+        <li><strong>Fork or not.</strong> Accept "our engine, their designs", or choose the IronClaw-as-backend experiment, or the full fork.</li>
+        <li><strong>Target hardware.</strong> Is it a shared server or appliance used by several people, or one machine per person? This decides whether Theia Cloud is needed.</li>
+        <li><strong>IronClaw upstream.</strong> Ask NEAR AI why main has been quiet since 10 September before depending on it in any form.</li>
+        <li><strong>OpenShell spike.</strong> One to two days on Linux: run the agent shell on a worktree copy inside OpenShell and confirm a run-time read of <span class="mono">.near-ai/state/keys</span> becomes impossible. Half a day more to draft a DID document with a sandbox section and run the prover on a parent and child pair.</li>
+        <li><strong>Relay scope.</strong> Resume Phase 69 with these designs folded in (capability manifest, run contracts, channel pairing), or re-plan v0.7.0 first.</li>
+      </ol>
+    </div>
+  </section>
+
+  <section>
+    <h2>Housekeeping found along the way</h2>
+    <ul>
+      <li>README says per-response attestation signatures are not verified yet; SECURITY.md and <span class="mono">src/services/attestation.ts</span> show they are.</li>
+      <li>SECURITY.md says protected paths are written without asking in fully autonomous mode; README says they still ask.</li>
+      <li>SECURITY.md says teams have no shared memory; team knowledge graphs exist.</li>
+      <li>The DID foundations (<span class="mono">src/team/</span>, <span class="mono">src/domain/team/permissions.ts</span>) exist only on unmerged branches such as <span class="mono">feat/team-fix-pass</span>.</li>
+    </ul>
+  </section>
+
+  <footer>
+    <span>Sources: <a href="https://github.com/NousResearch" target="_blank" rel="noopener">github.com/NousResearch</a> (hermes-agent), <a href="https://github.com/nearai/ironclaw" target="_blank" rel="noopener">github.com/nearai/ironclaw</a> (main at b0b999d), <a href="https://github.com/NVIDIA/OpenShell" target="_blank" rel="noopener">github.com/NVIDIA/OpenShell</a>, Eclipse Theia and Theia AI documentation, and this extension's repository.</span>
+    <span>Facts were read from source; nothing from the three projects was run. Where a reviewer inferred rather than read, the full reports say so.</span>
+  </footer>
+</div>

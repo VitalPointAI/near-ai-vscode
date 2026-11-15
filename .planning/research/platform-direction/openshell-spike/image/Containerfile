@@ -1,0 +1,8 @@
+FROM docker.io/library/node:24.22.2-trixie-slim
+# Decoy: a FAKE key placed in the image OUTSIDE the policy's filesystem allowlist,
+# to prove Landlock (not just absence) blocks run-time reads.
+RUN mkdir -p /opt/nearai-decoy/.near-ai/state/keys
+COPY decoy.key /opt/nearai-decoy/.near-ai/state/keys/local.key
+RUN chmod 755 /opt/nearai-decoy /opt/nearai-decoy/.near-ai /opt/nearai-decoy/.near-ai/state /opt/nearai-decoy/.near-ai/state/keys && chmod 644 /opt/nearai-decoy/.near-ai/state/keys/local.key
+USER node
+WORKDIR /sandbox

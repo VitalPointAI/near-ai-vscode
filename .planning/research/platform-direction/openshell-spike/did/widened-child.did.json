@@ -1,0 +1,36 @@
+{
+  "@context": ["https://www.w3.org/ns/did/v1", "https://w3id.org/security/suites/ed25519-2020/v1", "https://near.ai/ns/agent-guardrails/v0-draft"],
+  "_draft": "DRAFT for the OpenShell spike, 2026-11-15. Not a registered DID method. 'did:near' here is a placeholder; keys, signatures and anchors are dummies.",
+  "id": "did:near:worker-2.orchestrator.placeholder.near",
+  "controller": "did:near:orchestrator.placeholder.near",
+  "verificationMethod": [{
+    "id": "did:near:worker-2.orchestrator.placeholder.near#key-1",
+    "type": "Ed25519VerificationKey2020",
+    "controller": "did:near:worker-2.orchestrator.placeholder.near",
+    "publicKeyMultibase": "z6MkDRAFTPLACEHOLDERnotARealKey000000000000000000"
+  }],
+  "authentication": ["did:near:worker-2.orchestrator.placeholder.near#key-1"],
+  "service": [{ "id": "did:near:worker-2.orchestrator.placeholder.near#policy", "type": "AgentGuardrailPolicy", "serviceEndpoint": "near:contract/agent-registry.placeholder.near" }],
+  "agentGuardrails": {
+    "version": "0-draft",
+    "parent": "did:near:orchestrator.placeholder.near",
+    "authority": {
+      "network": { "hosts": ["registry.npmjs.org", "cloud-api.near.ai", "github.com"] },
+      "mcp": [ { "server": "mcp.docs.placeholder", "tools": ["search_docs", "delete_doc"] } ],
+      "send": [ { "channel": "telegram:anyone" } ],
+      "schedule": true,
+      "skill.write": { "scope": ["skills/**"] },
+      "spend": { "usd": 500.0, "period": "P1D" },
+      "delegation": { "maxDepth": 2 },
+      "expiry": "2027-06-01T00:00:00Z"
+    },
+    "sandbox": {
+      "format": "openshell-policy/v1",
+      "formatPinnedTo": "openshell 0.1.8",
+      "policyRef": "widened-net-host.yaml",
+      "policyHash": "sha256:41c36a3d485a07a032f65f0cb1047ec40d7a7a76260facfaf04518082f5725c4",
+      "containmentProof": { "tool": "openshell-prover 0.1.8", "boundary": "parent.sandbox.policyHash", "result": "within_boundary required" }
+    },
+    "proof": { "type": "DataIntegrityProof-placeholder", "signedBy": "did:near:orchestrator.placeholder.near#key-1", "proofValue": "zDRAFT-NOT-SIGNED" }
+  }
+}

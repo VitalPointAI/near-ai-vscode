@@ -1,0 +1,11 @@
+# Platform direction research (2026-11-15)
+
+Source-level reviews of three agent projects, read but never run, and the recommendation the owner accepted on 2026-11-15. The decisions taken from them are recorded in `.planning/PROJECT.md` under "Platform direction", and the plan built on them is the v0.7.0 section of `.planning/ROADMAP.md`.
+
+| File | What it is |
+|------|------------|
+| [summary.html](./summary.html) | The accepted recommendation: keep our TypeScript engine, take IronClaw's capability and authorization design, Hermes's workflow ideas reshaped to pass a DID policy gate, and OpenShell as the sandbox; build order, what not to copy, and the Theia container appliance. |
+| [ironclaw-analysis.md](./ironclaw-analysis.md) | IronClaw (NEAR AI, Rust): capability manifests, credentials injected at the boundary, staged authorization, restrict-only hooks, run guardrails, channel manifests and two-step pairing, and why a fork is not recommended. |
+| [hermes-analysis.md](./hermes-analysis.md) | Hermes Agent (Nous Research, Python): delegation that only narrows, request-bound approvals, schedules, learned skills as proposals, the package lifecycle, and why its in-process plugins fail the single-gate test. |
+| [openshell-analysis.md](./openshell-analysis.md) | NVIDIA OpenShell (Rust, CNCF): kernel-enforced sandbox, policy YAML and the policy prover, credential placeholders, OCSF audit, and how a DID's sandbox section compiles to an OpenShell policy. |
+| [openshell-spike.md](./openshell-spike.md) and [openshell-spike/](./openshell-spike/) | The OpenShell spike approved on 2026-11-15 (OpenShell 0.1.8, Linux, rootless Podman): 33 of 33 escape cases against the key folder blocked, egress limited to the declared host, method and binary, a fake credential injected only on its bound endpoint, and the prover rejecting widened children (file paths come back `unsupported`, so policies use a fixed path vocabulary). Main finding: downloads keep symlinks, so the apply step must treat the copy's changes as untrusted. Also timings, platforms, GPU and arm64 notes. The folder holds the policies, draft DID documents (placeholder keys only), test scripts and logs. Phase 72 is planned from it. |

@@ -33,24 +33,46 @@ The first milestone includes onboarding, both API-key and NEAR sign-in authentic
 - Open-GSD updates must be constrained to the official stable package/channel and must use the upstream installer/update contract rather than copying managed files blindly.
 - The MVP should favor a safe approval policy over unrestricted autonomy; autonomy can be expanded through explicit settings and budgets.
 
-## Current Milestone: v0.7.0 Messaging relay — Teams and Signal
+## Current Milestone: v0.7.0 Governed agent platform and messaging relay
 
-**Goal:** Agents become reachable from Microsoft Teams, and a relay means end users need no VS Code. A person asks a team for something in a Teams group or a Signal group; the answer arrives where they already are. The group sees only the finished result — the working thread stays private to whoever asked.
+**Goal:** Every agent the extension runs works under a governance layer a person can see and check: one policy gate with a floor that nothing overrides, delegation that can only narrow, run contracts with caps, a sandbox that makes protected folders absent rather than forbidden, and credentials the agent never holds, all deciding offline from a signed local policy. On that layer, people reach their teams from Microsoft Teams, Signal and Telegram through a relay, without VS Code: the group sees only the finished result, the working thread stays private to whoever asked, and every relay run executes under a contract in a sandbox.
 
-**Why now:** The v0.4.x line is shipped and stable (0.4.19 released), and the extension's run engine was audited this milestone: `src/agent/` has zero `vscode` imports, so the harness can be hosted headlessly with no refactor. The relay therefore composes existing modules rather than rewriting them, and the extension itself is not modified.
+**Why now:** The owner accepted the platform direction on 2026-11-15 (see "Platform direction" below): keep our TypeScript engine and build the DID trust and governance layer into it. The relay needs that layer before it runs tools for people outside VS Code (run contracts, a sandbox, request-bound signed approvals), and the edge, federation and Theia work that follows needs it to work offline. Phase 68 (relay foundation) is built and stands as it is.
 
-**Decided up front:**
+**Shape:** one milestone in three stages, in order. Stage 1, identity and governance core (Phases 69-74), changes the extension's engine and lands on `main` phase by phase. Stage 2, the relay on the governed core (Phases 75-81). Stage 3, more channels and release (Phases 82-84). The roadmap's v0.7.0 section starts with the order of work across every stream.
+
+**Decided up front (relay, 2026-11-13, still holding):**
 - The relay is a new workspace at `relay/` in this repo, owner-hosted and multi-tenant.
-- Runtime is Node **26.13.1** (current security release) for the relay only; the extension keeps Node 24 and its zero-runtime-dependency bundle.
+- Runtime is Node **26.13.1** for the relay only; the extension keeps Node 24 and its zero-runtime-dependency bundle.
 - Exactly one new runtime dependency: **`jose`**, for Bot Framework JWT/JWKS verification. No HTTP framework, no Bot Framework SDK.
 - Signal goes through a pinned `signal-cli-rest-api` sidecar, not a reimplemented protocol client.
-- Group visibility is **result-only**; work detail stays in the DM/thread.
-- The bot is an **external app** — it never joins the customer's Microsoft organisation.
-- Phase numbering starts at **68** because milestone v0.6.0 (Team Mode, phases 60–67) is already claimed on the unmerged `feat/team-fix-pass` branch.
+- Group visibility is **result-only**; work detail stays in the private chat.
+- The bot is an **external app**: it never joins the customer's Microsoft organization.
+- Phase numbering starts at **68** because milestone v0.6.0 (Team Mode, Phases 60-67) is claimed on the unmerged `feat/team-fix-pass` branch. The replan of 2026-11-15 renumbered the relay phases after 68 (old 69-76, 71.1 and 75.1 are now 75-84); the roadmap has the mapping.
 
 **Naming trap:** this milestone's "relay" is the *messaging* relay. It is not the paused v0.5.0 ciphertext sync relay (RELAY-01/02) and not the planned `relayTransport.ts` board sync from Team Mode.
 
-**Research:** `.planning/research/SUMMARY.md` (with STACK/FEATURES/ARCHITECTURE/PITFALLS alongside it). Requirements: `.planning/REQUIREMENTS.md` §Milestone v0.7.0.
+**Research:** `.planning/research/platform-direction/` (the accepted recommendation and the IronClaw, Hermes and OpenShell reviews) and `.planning/research/SUMMARY.md` with STACK, FEATURES, ARCHITECTURE and PITFALLS for the relay. Requirements: `.planning/REQUIREMENTS.md`, milestone v0.7.0.
+
+## Platform direction (owner decisions, 2026-11-15)
+
+Recorded as the owner gave them. They govern the roadmap from v0.7.0 on; the recommendation behind them is `.planning/research/platform-direction/summary.html`.
+
+1. No fork of IronClaw. Keep our TypeScript engine and build the DID trust and governance layer into it.
+2. Deployment is both connected installs and edge devices with no connectivity; edge devices can combine and federate back to an HQ server. So: the policy gate must work fully offline (a signed local copy of DIDs and policy, fail closed), edge devices must be able to group locally, and there must be edge-to-HQ federation (sync of identities, policy, audit, results when connectivity returns). Theia product: container appliance first (browser Theia + agent engine + relay + optional OpenShell gateway in one Compose stack, GPU passthrough optional, offline-loadable images), desktop app second, VS Code extension kept while cheap.
+3. IronClaw, Hermes Agent and NVIDIA OpenShell are used only as sources for the parts we integrate (designs; OpenShell's policy YAML format and policy prover), not as products we depend on or fork.
+4. An OpenShell spike is approved and runs now in parallel (another agent): Linux, agent shell on a worktree copy inside OpenShell, prove a run-time read of `.near-ai/state/keys` becomes impossible; draft a DID document with a sandbox section and run the prover on a parent/child pair. Plan the execution-backend phase so its research consumes the spike result (it will be written to .planning/research/platform-direction/openshell-spike.md).
+5. Replan v0.7.0 with the designs folded in: capability manifest, run contracts, channel pairing; plus the single policy gate with a non-overridable floor, restrict-only delegation, execution backends and the credential broker, request-bound signed approvals in the command-surface phase. Phase 68 stands as built.
+6. Additional owner requirement (2026-11-15): the product must support both NVIDIA and AMD GPUs. Target hardware includes NVIDIA DGX Spark class GB10 machines (Grace Blackwell, ARM64 CPU, unified memory) and AMD Ryzen AI Max "Strix Halo" machines (x86-64, Radeon iGPU with ROCm/Vulkan, unified memory). Machines of both kinds may be linked together to pool compute and GPU power for local inference, and/or federated back to a larger inference cluster or server, in addition to bursting to cloud resources (NEAR AI Cloud).
+
+7. AMD first (owner, 2026-11-15): the first hardware available to test the platform on is AMD based, a Ryzen AI Max "Strix Halo" machine (https://www.amd.com/en/products/processors/desktops/ryzen/ryzen-ai-halo.html). Sequence development so every hardware-dependent step is built and proven on AMD (x86-64, Radeon iGPU with ROCm or Vulkan, unified memory) first; NVIDIA GB10 (arm64) follows and must not block AMD work.
+
+**What follows from them (the plan's reading, not further owner decisions):**
+- The gate decides from a signed local policy bundle in every case; the chain, when it arrives (later milestone), adds freshness and revocation to that bundle and never becomes a per-action dependency. The bundle format, the capability vocabulary and the DID document shape are costly to change once edge devices hold them offline, so their phases carry an "Undo cost" note.
+- Multi-architecture images (arm64 and amd64) for everything we ship as a container, starting with the relay in v0.7.0; both GPU stacks in the appliance (NVIDIA Container Toolkit / CDI, AMD ROCm through `/dev/kfd` and `/dev/dri`, and a CPU or Vulkan fallback); a sandbox never blocks GPU access the policy grants.
+- A local inference layer that runs on either vendor and is exposed to the engine as providers next to NEAR AI Cloud, built on today's local and hybrid profiles (`src/domain/auth.ts`, `src/services/providerFactory.ts`, `privateRouteFor` in `src/services/providerCache.ts`, the `privacy: private` member rule). Routing goes local first, then linked machines, then the HQ cluster, then a NEAR AI Cloud burst, decided by the gate: data marked private never bursts to a non-TEE target, NEAR AI TEE models count as private only where attested, burst spend counts against the run contract, and at the edge with no connectivity the cloud is simply unavailable.
+- Machines link and federate under signed node identities; the edge grouping and HQ federation milestone covers compute pooling and inference federation as well as identity, policy, audit and result sync.
+- Retired by these decisions: the IronClaw fork, the "IronClaw as an optional backend" experiment, and asking NEAR AI about IronClaw's upstream activity before depending on it (nothing depends on it).
 
 ## Previous Line: 0.4.x
 
@@ -61,6 +83,8 @@ v0.5.0 (trusted-source knowledge base) was paused on 2026-10-29 and is moving to
 ## Planned features (owner, 2026-11-05)
 
 Not started. Recorded so they are not lost; each becomes its own milestone and phase set when the owner starts it.
+
+**Where each stands (checked 2026-11-15):** autonomous phase boundaries and Steer shipped in 0.4.18, and the new-project kind and team step in 0.4.19. The relay is v0.7.0 (Phases 68 and 75-84). Verifiable agent guardrails are planned: v0.7.0 Phases 69-74 build the local, offline layer, and on-chain anchoring is the later "Verifiable identity and policy on NEAR" milestone. The isolated cyber VM is a follow-up phase of v0.8.0 on the execution backends of Phase 72. Decision agents and named agents with personalities are not scheduled; a decision agent may act only under a grant (v0.7.0 Phase 71), and personalities wait for the Theia desktop milestone so the team builder UI is built once. The roadmap's "Later milestones" section has the order.
 
 ### Autonomous GSD phases, and a Steer that interrupts now (0.4.18)
 
@@ -171,6 +195,8 @@ Builds on what exists: signed events and device identities (`src/team/`, Phase 6
 approval and policy layer (`src/agent/permissions.ts`, `src/domain/policy.ts`) and the activity view. Open questions: which NEAR account model, how a
 DID is anchored in the confidential-intents format, what happens when the chain is unreachable, and how a run works with no chain at all.
 
+**Planned (2026-11-15):** the owner's platform direction answers the last two questions: the gate decides from a signed local copy of DIDs and policy and fails closed, so a run works with no chain at all (v0.7.0 Phases 69-74). The account model and the confidential-intents anchoring stay open and belong to the later "Verifiable identity and policy on NEAR" milestone; Phase 71 must choose a DID shape that anchoring can adopt unchanged.
+
 
 ### A new project asks what kind it is, then offers a team for it (0.4.19)
 
@@ -238,4 +264,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-11-05 with four recorded future features; 2026-10-29 after pausing v0.5.0 and continuing the 0.4.x line*
+*Last updated: 2026-11-15 with the owner's platform direction and the v0.7.0 replan; 2026-11-05 with four recorded future features; 2026-10-29 after pausing v0.5.0 and continuing the 0.4.x line*
