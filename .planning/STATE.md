@@ -5,9 +5,9 @@ milestone_name: Messaging relay — Teams and Signal
 current_phase: 68
 current_phase_name: Relay foundation
 status: planning
-stopped_at: Completed 68-07-PLAN.md
-last_updated: "2026-11-15T04:07:33.998Z"
-state_head: 01c375d8115f6a4bfb73845f469a9492b8a78efc
+stopped_at: "Plan 68-08 Tasks 1-2 done; Task 3 (owner: approve agent-review-gates, add relay to branch protection) awaiting the owner"
+last_updated: "2026-11-15T04:13:33.075Z"
+state_head: 2fe6e976ceda86fe800620f2012d78fe85c6779d
 progress:
   total_phases: 9
   completed_phases: 0
@@ -24,7 +24,7 @@ last_activity_desc: "Completed quick task 261113-lbo: fix the chat task list not
 
 Milestone: v0.7.0 Messaging relay — Teams and Signal (Phases 68-76)
 Phase: 68 (Relay foundation) — EXECUTING
-Next: plan 68-08 (relay CI job and required check, VSIX release-content patterns, docs, full phase gate, owner hand-off) in the messaging-relay worktree; plans 68-01 through 68-07 are done
+Next: plan 68-08 Task 3 (owner only): approve agent-review-gates on the relay PR and add relay to main's branch protection. Tasks 1-2 of 68-08 are committed and the full phase gate is green; the PR is not opened yet. Plans 68-01 through 68-07 are done
 
 ## Accumulated Context
 
@@ -67,7 +67,7 @@ Next: plan 68-08 (relay CI job and required check, VSIX release-content patterns
 
 ### Blockers/Concerns
 
-None yet.
+- Owner action pending (D-19): approve agent-review-gates on the relay PR, then add relay to main's branch protection (docs/development-workflow.md section 8).
 
 ### Quick Tasks Completed
 
@@ -82,9 +82,9 @@ None yet.
 
 ## Session
 
-**Last session:** 2026-11-15T04:07:33.966Z
-**Stopped at:** Completed 68-07-PLAN.md
-**Resume file:** None
+**Last session:** 2026-11-15T04:13:32.856Z
+**Stopped at:** Plan 68-08 Tasks 1-2 done; Task 3 (owner: approve agent-review-gates, add relay to branch protection) awaiting the owner
+**Resume file:** .planning/phases/68-relay-foundation/68-08-PLAN.md
 
 ## Performance Metrics
 
