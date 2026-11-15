@@ -1,0 +1,13 @@
+# Timings, OpenShell 0.1.8, Podman 5.7.0 rootless, Linux 7.0.0-43 x86_64, 28 GB RAM host under other load.
+gateway process start to listener bound: ~0.7 s (from gateway.log timestamps)
+attempt 1 create (failed: local image not visible, but pulled supervisor 67 MB + sandbox runtime 11.7 MB from ghcr.io): 6.04 s
+attempt 2 create (failed fast: Podman driver needs gateway_jwt launch authentication): 0.63 s
+sandbox create, images local, incl. upload of 5-file project: 1.17 s
+sandbox create, images local, with provider attached: 1.14 s
+exec true x10 (no login shell): avg 0.051 s
+exec true x10 (login shell): avg 0.053 s
+exec node -e 0 x10: avg 0.072 s
+host node -e 0 x10 baseline: avg 0.023 s
+host bash -c true x10 baseline: avg 0.002 s
+sandbox delete (CLI returns): 5.43 s each (Podman stop timeout path)
+openshell-prover check (child vs parent): 24 to 72 ms per check

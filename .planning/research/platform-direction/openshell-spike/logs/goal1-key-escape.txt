@@ -1,0 +1,33 @@
+== whoami: uid=1000(node) gid=1000(node) groups=1000(node)
+== A. project copy (keys folder absent by construction)
+PASS rc=1 A1 literal path :: cat: .near-ai/state/keys/local.key: No such file or directory 
+PASS rc=1 A2 split string :: cat: .near-ai/state/keys/local.key: No such file or directory 
+PASS rc=1 A3 base64 path :: cat: .near-ai/state/keys/local.key: No such file or directory 
+PASS rc=1 A4 node path.join env :: node:fs:483     return binding.readFileUtf8(path, stringToFlags(options.flag));                    ^  Error: ENOENT: no such file or directo
+PASS rc=1 A5 grep -r ::  
+PASS rc=1 A6 find :: find: '/': Permission denied 
+== B. decoy key present in the image at /opt, outside the policy allowlist (Landlock)
+PASS rc=2 B0 ls /opt :: ls: cannot open directory '/opt': Permission denied 
+PASS rc=1 B1 literal path :: cat: /opt/nearai-decoy/.near-ai/state/keys/local.key: Permission denied 
+PASS rc=1 B2 split string :: cat: /opt/nearai-decoy/.near-ai/state/keys/local.key: Permission denied 
+PASS rc=1 B3 base64 path :: cat: /opt/nearai-decoy/.near-ai/state/keys/local.key: Permission denied 
+PASS rc=1 B4 node path.join env :: node:fs:483     return binding.readFileUtf8(path, stringToFlags(options.flag));                    ^  Error: EACCES: permission denied, open
+PASS rc=2 B5 grep -r /opt :: grep: /opt: Permission denied 
+PASS rc=1 B6 find /opt :: find: '/opt': Permission denied 
+PASS rc=0 B7 symlink in workspace :: cat: /sandbox/project/link.key: Permission denied 
+PASS rc=0 B8 symlink dir :: cat: /sandbox/project/linkdir/.near-ai/state/keys/local.key: Permission denied 
+PASS rc=0 B9 hardlink :: ln: failed to create hard link '/sandbox/project/hard.key' => '/opt/nearai-decoy/.near-ai/state/keys/local.key': Invalid cross-device link 
+PASS rc=1 B10 /proc/1/root :: cat: /proc/1/root/opt/nearai-decoy/.near-ai/state/keys/local.key: Permission denied 
+PASS rc=1 B11 python-less: node child_process via npm-style script :: cat: /opt/nearai-decoy/.near-ai/state/keys/local.key: Permission denied node:child_process:1018     throw err;     ^  Error: Command failed:
+PASS rc=1 B12 cp to /tmp :: cp: cannot open '/opt/nearai-decoy/.near-ai/state/keys/local.key' for reading: Permission denied 
+PASS rc=1 B13 dd :: dd: failed to open '/opt/nearai-decoy/.near-ai/state/keys/local.key': Permission denied 
+== rerun (upload of a dir lands in <dest>/<dirname>; project now at /sandbox/project)
+== whoami: uid=1000(node) gid=1000(node) groups=1000(node)
+== A. project copy (keys folder absent by construction)
+PASS rc=1 A1 literal path :: cat: .near-ai/state/keys/local.key: No such file or directory 
+PASS rc=1 A2 split string :: cat: .near-ai/state/keys/local.key: No such file or directory 
+PASS rc=1 A3 base64 path :: cat: .near-ai/state/keys/local.key: No such file or directory 
+PASS rc=1 A4 node path.join env :: node:fs:483     return binding.readFileUtf8(path, stringToFlags(options.flag));                    ^  Error: ENOENT: no such file or directo
+PASS rc=1 A5 grep -r ::  
+PASS rc=1 A6 find :: find: '/': Permission denied 
+== B. decoy key present in the image at /opt, outside the policy allowlist (Landlock)

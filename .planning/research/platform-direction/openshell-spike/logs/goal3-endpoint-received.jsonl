@@ -1,0 +1,2 @@
+{"t":"2026-11-15T13:03:24.196Z","method":"GET","url":"/v1/chat","authorization":"Bearer FAKE-NEARAI-KEY-Od79j5DF54a2UcGq","body":""}
+{"t":"2026-11-15T13:03:24.210Z","method":"POST","url":"/v1/body","authorization":null,"body":"{\"key\":\"openshell:resolve:env:v11278428660970894216_NEARAI_API_KEY\"}"}

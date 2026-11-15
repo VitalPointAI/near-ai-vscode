@@ -1,0 +1,20 @@
+# Custom provider profile for the spike: a FAKE key that may only be used
+# against the local test endpoint on the gateway host.
+id: nearai-fake
+display_name: NEAR AI (fake, spike)
+description: Fake NEAR AI key for the OpenShell credential placeholder spike
+category: inference
+credentials:
+  - name: api_key
+    description: Fake API key (not a real secret)
+    env_vars: [NEARAI_API_KEY]
+    required: true
+    auth_style: bearer
+    header_name: authorization
+endpoints:
+  - host: host.openshell.internal
+    port: 18555
+    protocol: rest
+    access: read-write
+    enforcement: enforce
+binaries: [/usr/local/bin/node]

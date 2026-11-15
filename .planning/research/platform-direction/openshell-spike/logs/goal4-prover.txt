@@ -1,0 +1,77 @@
+### openshell-prover check parent-sandbox.yaml --boundary parent-sandbox.yaml
+result: within_boundary
+coverage: domains=filesystem,network_l4,network_rest,process,landlock
+exit=0 (29 ms)
+### openshell-prover check child-sandbox.yaml --boundary parent-sandbox.yaml
+result: within_boundary
+coverage: domains=filesystem,network_l4,network_rest,process,landlock
+exit=0 (58 ms)
+### openshell-prover check widened-fs.yaml --boundary parent-sandbox.yaml
+result: unsupported
+coverage: domains=filesystem,network_l4,network_rest,process,landlock
+reason: filesystem write containment for '/home' depends on sandbox path resolution; use matching paths in candidate and boundary
+exit=3 (72 ms)
+### openshell-prover check widened-net-host.yaml --boundary parent-sandbox.yaml
+result: exceeds_boundary
+coverage: domains=filesystem,network_l4,network_rest,process,landlock
+counterexample: network binary=- ancestor_binary=- binary_identity_required=false host=github.com:443 destination_ip=8.8.8.8 trusted_gateway=false protocol=rest method=GET path=/
+exit=1 (36 ms)
+### openshell-prover check widened-method.yaml --boundary parent-sandbox.yaml
+result: exceeds_boundary
+coverage: domains=filesystem,network_l4,network_rest,process,landlock
+counterexample: network binary=- ancestor_binary=- binary_identity_required=false host=registry.npmjs.org:443 destination_ip=::1:0:0 trusted_gateway=false protocol=rest method=B path=/
+exit=1 (61 ms)
+### openshell-prover check widened-binary.yaml --boundary parent-sandbox.yaml
+result: exceeds_boundary
+coverage: domains=filesystem,network_l4,network_rest,process,landlock
+counterexample: network binary=/usr/bin/bash ancestor_binary=/usr/bin/bash binary_identity_required=true host=cloud-api.near.ai:443 destination_ip=8.8.8.8 trusted_gateway=false protocol=rest method=POST path=/v1/chat/completions
+exit=1 (61 ms)
+### openshell-prover check widened-landlock.yaml --boundary parent-sandbox.yaml
+result: exceeds_boundary
+coverage: domains=filesystem,network_l4,network_rest,process,landlock
+counterexample: landlock boundary=hard_requirement candidate=best_effort
+exit=1 (24 ms)
+### openshell-prover check narrowed-subpath.yaml --boundary parent-sandbox.yaml
+result: unsupported
+coverage: domains=filesystem,network_l4,network_rest,process,landlock
+reason: filesystem write containment for '/sandbox/project' depends on sandbox path resolution; use matching paths in candidate and boundary
+exit=3 (65 ms)
+### openshell-prover check child-mcp.yaml --boundary parent-sandbox.yaml
+result: unsupported
+coverage: domains=filesystem,network_l4,network_rest,process,landlock
+reason: candidate policy rule 'mcp_server' uses protocol 'mcp'; only L4 TCP and REST are modeled
+exit=3 (27 ms)
+### reverse: parent as candidate, child as boundary
+result: exceeds_boundary
+coverage: domains=filesystem,network_l4,network_rest,process,landlock
+counterexample: network binary=- ancestor_binary=- binary_identity_required=false host=cloud-api.near.ai:443 destination_ip=8.8.8.8 trusted_gateway=false protocol=rest method=GET path=/v1/models
+exit=1
+### JSON form (child)
+{
+  "schema_version": 1,
+  "prover_version": "0.1.8",
+  "check": "boundary",
+  "coverage": {
+    "domains": [
+      "filesystem",
+      "network_l4",
+      "network_rest",
+      "process",
+      "landlock"
+    ]
+  },
+  "result": "within_boundary",
+  "exit_code": 0,
+  "inputs": {
+    "candidate": "child-sandbox.yaml",
+    "boundary": "parent-sandbox.yaml"
+  },
+  "counterexample": null,
+  "reason_code": null,
+  "reason": null
+}
+### openshell-prover check widened-fs-etc-write.yaml --boundary parent-sandbox.yaml
+result: unsupported
+coverage: domains=filesystem,network_l4,network_rest,process,landlock
+reason: filesystem write containment for '/etc' depends on sandbox path resolution; use matching paths in candidate and boundary
+exit=3
