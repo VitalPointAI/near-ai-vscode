@@ -1028,7 +1028,7 @@ export class AgentConversation {
               beforeTurn: async (transcript, lastUsage, signal) => {
                 if (this.abort) this.enforceBudget(request, this.abort);
                 await this.whileRunPaused(signal);
-                while (agent.paused && !signal.aborted) await new Promise<void>((resolve) => { agent.resume = resolve; signal.addEventListener('abort', () => resolve(), { once: true }); });
+                while (agent.paused && !signal.aborted) await waitOrAbort(signal, (wake) => { agent.resume = wake; });
                 return this.manageContext(transcript, lastUsage, { ...request, model }, signal, false);
               },
               // PERF-01: nobody may be watching a sub-agent, so its card waits only briefly; unanswered, the call returns "awaiting approval", the card
@@ -1598,11 +1598,15 @@ export class AgentConversation {
   private askQuestions(questions: Question[], signal: AbortSignal): Promise<string[]> {
     if (signal.aborted) return Promise.resolve([]);
     const id = `q-${randomBytes(6).toString('hex')}`;
-    return new Promise((resolve) => {
-      const settle = (answers: string[], cancelled = false) => { this.closePrompt(id, cancelled); resolve(answers); };
-      this.questions.set(id, settle);
-      signal.addEventListener('abort', () => { if (this.questions.delete(id)) settle([], true); }, { once: true });
+    // waitOrAbort removes its abort listener once answered, so a long run's questions do not pile listeners up on its signal (agent review of PR 51).
+    let reply: { answers: string[]; cancelled: boolean } | undefined;
+    return waitOrAbort(signal, (wake) => {
+      this.questions.set(id, (answers: string[], cancelled = false) => { reply = { answers, cancelled }; wake(); });
       this.openPrompt(id, { type: 'questions-request', id, questions });
+    }).then(() => {
+      if (!reply) { this.questions.delete(id); reply = { answers: [], cancelled: true }; }
+      this.closePrompt(id, reply.cancelled);
+      return reply.answers;
     });
   }
 
@@ -1624,19 +1628,19 @@ export class AgentConversation {
     const live = draft.agentId ? this.agents.get(draft.agentId) : undefined;
     if (draft.agentId) this.activity?.waitingForUser(draft.agentId, true);
     if (live) { this.setActivity(live, 'Waiting for your image review'); this.postAgents(); }
-    return new Promise((resolve) => {
-      const settle = (reply: ImageReviewDecision, cancelled = false) => {
-        this.closePrompt(draft.id, cancelled);
-        if (draft.agentId) this.activity?.waitingForUser(draft.agentId, false);
-        resolve(reply);
-      };
-      this.imageReviews.set(draft.id, settle);
-      signal.addEventListener('abort', () => { if (this.imageReviews.delete(draft.id)) settle({ decision: 'cancelled' }, true); }, { once: true });
+    // waitOrAbort removes its abort listener once answered, so each review does not leave one on the run's signal (agent review of PR 51).
+    let answer: { reply: ImageReviewDecision; cancelled: boolean } | undefined;
+    await waitOrAbort(signal, (wake) => {
+      this.imageReviews.set(draft.id, (reply: ImageReviewDecision, cancelled = false) => { answer = { reply, cancelled }; wake(); });
       this.openPrompt(draft.id, {
         type: 'image-review-request', id: draft.id, path: draft.path, model: draft.model, prompt: draft.prompt, attempt: draft.attempt, sizeKb: Math.max(1, Math.round(draft.bytes / 1024)),
         ...(image ? { image } : { tooLarge: true }), ...(draft.agent ? { agent: draft.agent } : {}), ...(draft.editOf ? { editOf: draft.editOf } : {}), ...(draft.note ? { note: draft.note } : {})
       });
     });
+    if (!answer) { this.imageReviews.delete(draft.id); answer = { reply: { decision: 'cancelled' }, cancelled: true }; }
+    this.closePrompt(draft.id, answer.cancelled);
+    if (draft.agentId) this.activity?.waitingForUser(draft.agentId, false);
+    return answer.reply;
   }
 
   private releasePending(): void {

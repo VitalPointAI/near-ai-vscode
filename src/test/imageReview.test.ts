@@ -345,3 +345,48 @@ test('the pinned card and the transcript line word an image review', () => {
   assert.match(script, /case 'image-review-request': onImageReview\(m\)/);
   assert.match(script, /m\.image\.startsWith\('data:image\/png;base64,'\)/);
 });
+
+// Agent review of PR 51: each review added an abort listener to the run's signal that stayed after it was answered, piling up over a long run.
+test('answered image reviews and questions leave no abort listener on the run\'s signal; a stop still cancels one that waits', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'near-ai-image-listeners-'));
+  const posted: Array<Record<string, unknown>> = [];
+  const conversation = new AgentConversation(root, (message) => posted.push(message), path.join(root, '.ckpt'));
+  const controller = new AbortController();
+  const signal = controller.signal;
+  let live = 0;
+  const add = signal.addEventListener.bind(signal);
+  const remove = signal.removeEventListener.bind(signal);
+  signal.addEventListener = ((...args: Parameters<typeof add>) => { if (args[0] === 'abort') live += 1; add(...args); }) as typeof signal.addEventListener;
+  signal.removeEventListener = ((...args: Parameters<typeof remove>) => { if (args[0] === 'abort') live -= 1; remove(...args); }) as typeof signal.removeEventListener;
+  const internals = conversation as unknown as { askImageReview(draft: ImageDraft, signal: AbortSignal): Promise<ImageReviewDecision>; askQuestions(questions: unknown[], signal: AbortSignal): Promise<string[]> };
+  try {
+    await mkdir(draftsFolder(root), { recursive: true });
+    for (let round = 0; round < 20; round += 1) {
+      const id = `img-${String(round).padStart(12, '0')}`;
+      await writeFile(draftFile(root, id), Buffer.from([1, 2, 3]));
+      const waiting = internals.askImageReview({ id, file: draftFile(root, id), path: 'assets/a.png', model: 'm', prompt: 'p', attempt: round + 1, bytes: 3 }, signal);
+      await until(() => posted.find((message) => message.type === 'image-review-request' && message.id === id));
+      assert.equal(conversation.answerImageReview(id, round % 2 ? { decision: 'discard' } : { decision: 'changes', feedback: 'brighter' }), true);
+      assert.deepEqual(await waiting, round % 2 ? { decision: 'discard' } : { decision: 'changes', feedback: 'brighter' });
+    }
+    assert.equal(live, 0, 'every answered review removed its listener');
+    assert.deepEqual(conversation.waitingPrompts(), [], 'no card is left waiting');
+    const asked = internals.askQuestions([{ question: 'Which?', options: ['a', 'b'] }], signal);
+    const card = await until(() => posted.find((message) => message.type === 'questions-request'));
+    conversation.answerQuestions(String(card.id), ['a']);
+    assert.deepEqual(await asked, ['a']);
+    assert.equal(live, 0, 'an answered question removed its listener too');
+    // A review still waiting when the run stops is cancelled, its card closed as cancelled, and its listener gone.
+    const id = 'img-999999999999';
+    await writeFile(draftFile(root, id), Buffer.from([1]));
+    const waiting = internals.askImageReview({ id, file: draftFile(root, id), path: 'assets/a.png', model: 'm', prompt: 'p', attempt: 1, bytes: 1 }, signal);
+    await until(() => posted.find((message) => message.type === 'image-review-request' && message.id === id));
+    controller.abort();
+    assert.deepEqual(await waiting, { decision: 'cancelled' });
+    assert.deepEqual(posted.at(-1), { type: 'prompt-closed', id, outcome: 'cancelled' });
+    assert.equal(conversation.answerImageReview(id, { decision: 'accept' }), false, 'a later answer finds nothing');
+    assert.equal(live, 0);
+  } finally {
+    conversation.dispose();
+  }
+});
