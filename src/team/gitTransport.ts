@@ -3,12 +3,17 @@
 // working tree, index and branches are never touched. Every git call goes through the injected GitRunner.
 // Appends are compare-and-swap: a lost push race fetches again and calls the builder again, so Lamport, prev and the signature
 // are always derived from the fresh state (D-29). A rewritten remote branch pauses the transport and is never followed (D-33).
+// Several processes can share one mirror (every window of one VS Code keeps a team's mirror in the same folder), so operations take a
+// cross-process lock as well as the in-process one, and each operation keeps to the commits it fetched itself instead of re-reading refs
+// another process may have moved (debug session team-shared-mirror-duplicate-lamport).
 import { mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
 import * as path from 'node:path';
 import { canonicalize, eventPath } from '../domain/team/canonical';
 import { TEAM_REJECTION_REASONS } from '../domain/team/types';
 import type { CommittedEvent, EntryKind, LogHead, Materializer, TeamEvent } from '../domain/team/types';
+import { MirrorBusyError, acquireFileLock } from '../services/stateMirrorLock';
+import type { HeldMirrorLock, MirrorLockTimings } from '../services/stateMirrorLock';
 import { NEUTRAL_IDENTITY_ENV, gitText, mustSucceed, redactGitMessage, runGit } from './runGit';
 import type { GitResult, GitRunner } from './runGit';
 import { BRANCH_MISSING_REASON } from './transport';
@@ -46,6 +51,11 @@ const DEFAULT_SSH_COMMAND = 'ssh -o BatchMode=yes -o ConnectTimeout=10';
 // The name the mirror gives the remote for the length of one git call; it exists only in that process's environment, never in the mirror's config.
 const TEAM_REMOTE_NAME = 'near-ai-team';
 const AUTH_HINT = 'Run git fetch once in a terminal so your credential helper can store the credentials.';
+// The team mirror's own lock file name. Project state sync's mirror uses a different name (D-23), so the two features never wait on each other.
+export const TEAM_MIRROR_LOCK_FILE = 'near-ai-team-sync.lock';
+// Another process (another window of this VS Code) kept the mirror for longer than the wait limit.
+export const MIRROR_BUSY_SYNC_REASON = 'Another window on this computer is still syncing this team. Team sync will try again.';
+export const MIRROR_BUSY_APPEND_REASON = 'Another window on this computer is still saving to this team. Try again in a moment.';
 
 export interface GitTransportOptions<S> {
   mirrorDir: string;
@@ -62,6 +72,8 @@ export interface GitTransportOptions<S> {
   pinFile?: string;
   // Run `git gc --auto` inside the mirror lock after this many successful operations (RESEARCH Pitfall 8).
   gcEveryOperations?: number;
+  // The cross-process mirror lock's stale, refresh and wait times. Defaults suit real use; tests shorten them.
+  lockTimings?: MirrorLockTimings;
 }
 
 class RemoteUnavailableError extends Error {
@@ -89,7 +101,8 @@ export type GitFailure =
   | { kind: 'auth'; detail: string }
   | { kind: 'unreachable'; detail: string };
 
-// Fetches and commits on one mirror are serialised in this process (D-34). Callers on the same mirror share one chain.
+// Fetches and commits on one mirror are serialised in this process (D-34). Callers on the same mirror share one chain. Other processes are
+// kept out by the file lock in stateMirrorLock (acquireFileLock), taken inside this one.
 const mirrorLocks = new Map<string, Promise<void>>();
 
 export async function withMirrorLock<T>(mirrorDir: string, work: () => Promise<T>): Promise<T> {
@@ -197,6 +210,7 @@ export class GitTransport<S> implements CoordinationTransport<S> {
   private readonly random: () => number;
   private readonly pinFile: string;
   private readonly gcEvery: number;
+  private readonly lockTimings: MirrorLockTimings;
   private readonly listeners = new Set<(entries: CommittedEvent[]) => void>();
   private readonly diagnosticListeners = new Set<(message: string) => void>();
   private readonly listenerErrors: string[] = [];
@@ -231,6 +245,7 @@ export class GitTransport<S> implements CoordinationTransport<S> {
     this.random = options.random ?? Math.random;
     this.pinFile = options.pinFile ?? path.join(path.dirname(options.mirrorDir), 'pin.json');
     this.gcEvery = gcEvery;
+    this.lockTimings = { ...options.lockTimings };
     this.current = options.materializer.initial();
   }
 
@@ -266,26 +281,59 @@ export class GitTransport<S> implements CoordinationTransport<S> {
 
   public fetch(): Promise<CommittedEvent[]> {
     return withMirrorLock(this.mirrorDir, async () => {
-      const entries = await this.fetchLocked();
-      await this.afterOperation(this.statusValue.state === 'ok');
-      return entries;
+      const done = await this.exclusive(async () => {
+        const entries = await this.fetchLocked();
+        await this.afterOperation(this.statusValue.state === 'ok');
+        return entries;
+      });
+      if (done !== undefined) return done.value;
+      if (this.statusValue.state !== 'paused') this.setStatus({ state: 'offline', reason: MIRROR_BUSY_SYNC_REASON });
+      return [];
     });
   }
 
   public readAll(): Promise<CommittedEvent[]> {
     return withMirrorLock(this.mirrorDir, async () => {
-      await this.ensureMirror();
-      if (await this.revParse(LOCAL_REF) === undefined) return [];
-      return this.readRange(LOCAL_REF);
+      const done = await this.exclusive(async () => {
+        await this.ensureMirror();
+        if (await this.revParse(LOCAL_REF) === undefined) return [];
+        return this.readRange(LOCAL_REF);
+      });
+      if (done === undefined) throw new MirrorBusyError();
+      return done.value;
     });
   }
 
   public append(build: AppendBuilder<S>, options?: AppendOptions): Promise<AppendResult> {
     return withMirrorLock(this.mirrorDir, async () => {
-      const result = options?.genesis ? await this.appendGenesis(build, options.genesis.teamFileText) : await this.appendExisting(build);
-      await this.afterOperation(result.ok);
-      return result;
+      const done = await this.exclusive(async () => {
+        const result = options?.genesis ? await this.appendGenesis(build, options.genesis.teamFileText) : await this.appendExisting(build);
+        await this.afterOperation(result.ok);
+        return result;
+      });
+      return done?.value ?? { ok: false, kind: 'busy', reason: MIRROR_BUSY_APPEND_REASON, attempts: 0 };
     });
+  }
+
+  // Runs work with the mirror to this process alone (the caller already holds the in-process lock). undefined when another process kept the
+  // mirror for longer than the wait limit; nothing ran then.
+  private async exclusive<T>(work: () => Promise<T>): Promise<{ value: T } | undefined> {
+    let held: HeldMirrorLock;
+    try {
+      held = await acquireFileLock(this.mirrorDir, TEAM_MIRROR_LOCK_FILE, { ...this.lockTimings, sleep: this.sleep, random: this.random });
+    } catch (error) {
+      if (error instanceof MirrorBusyError) return undefined;
+      throw error;
+    }
+    try {
+      return { value: await work() };
+    } finally {
+      try {
+        await held.release();
+      } catch (error) {
+        this.diagnostic(`The coordination mirror's lock could not be released: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
   }
 
   private mirrorGit(args: string[], extra: { env?: Record<string, string>; input?: string | Buffer; timeoutMs?: number } = {}): Promise<GitResult> {
@@ -508,6 +556,9 @@ export class GitTransport<S> implements CoordinationTransport<S> {
     try {
       await this.ensureMirror();
       await this.loadPin();
+      // Read before the fetch. Another process on this mirror may move the ref while the fetch runs; a head it fetched after this one must not
+      // look like a rewrite of what this fetch brought (the remote only moves forward, so this fetch's head descends from the value read here).
+      const local = await this.revParse(LOCAL_REF);
       const url = await this.remoteUrl();
       const fetched = await this.fetchRemote(url);
       if (fetched.code !== 0) {
@@ -516,7 +567,7 @@ export class GitTransport<S> implements CoordinationTransport<S> {
         if (failure.kind === 'absent') {
           // Only a branch that was never read is normal. One this client has read (a local copy or a saved position) and that is now gone
           // was deleted on the remote, which must stay visible instead of reading as a healthy, empty team (WR-10).
-          const seen = this.pin !== undefined || (await this.revParse(LOCAL_REF)) !== undefined;
+          const seen = this.pin !== undefined || local !== undefined;
           this.setStatus(seen ? { state: 'offline', reason: BRANCH_MISSING_REASON } : { state: 'ok' });
           return [];
         }
@@ -530,7 +581,6 @@ export class GitTransport<S> implements CoordinationTransport<S> {
         return [];
       }
       const trusted: string[] = [];
-      const local = await this.revParse(LOCAL_REF);
       if (local !== undefined) trusted.push(local);
       if (this.pin !== undefined && !trusted.includes(this.pin.head)) trusted.push(this.pin.head);
       const ancestry = await this.checkAncestry(trusted, head);
@@ -548,7 +598,9 @@ export class GitTransport<S> implements CoordinationTransport<S> {
       this.setStatus({ state: 'ok' });
       if (local !== head) mustSucceed(await this.mirrorGit(['update-ref', LOCAL_REF, head]), 'Recording the coordination head');
       if (head === this.lastProcessed) return [];
-      const entries = await this.readRange(this.lastProcessed === undefined ? LOCAL_REF : `${this.lastProcessed}..${LOCAL_REF}`);
+      // Up to the commit this fetch produced, not to the shared ref, which another process may already have moved further: the state must
+      // stand exactly at lastProcessed, or the next fetch would apply the entries past it a second time.
+      const entries = await this.readRange(this.lastProcessed === undefined ? head : `${this.lastProcessed}..${head}`);
       for (const entry of entries) entry.verdict = this.materializer.apply(this.current, entry);
       this.lastProcessed = head;
       this.appliedEntries += entries.length;
@@ -656,7 +708,10 @@ export class GitTransport<S> implements CoordinationTransport<S> {
       const status = this.statusValue;
       if (status.state === 'paused') return { ok: false, kind: 'paused', reason: status.reason ?? TEAM_REJECTION_REASONS.logRewritten, attempts: attempt - 1 };
       if (status.state === 'offline') return { ok: false, kind: 'offline', reason: status.reason ?? 'The remote is not reachable.', attempts: attempt - 1 };
-      const head = await this.revParse(LOCAL_REF);
+      // The parent is the commit the state was built from, never a fresh read of the mirror's ref: another process on this mirror may have moved
+      // that ref, and an event stamped from older state on a newer parent is a fast-forward the remote accepts and every reader rejects. With
+      // this parent the remote's compare-and-swap refuses the push unless the state the builder saw is the remote head.
+      const head = this.lastProcessed;
       if (head === undefined) return { ok: false, kind: 'refused', reason: 'The coordination log does not exist yet. Enable Team Mode first.', attempts: attempt - 1 };
 
       const landed = await this.findLanded(pushed, head);
