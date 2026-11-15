@@ -6,7 +6,7 @@ nyquist_compliant: true
 wave_0_complete: true
 created: "2026-11-14"
 validated: "2026-11-15"
-open_manual: ["D-19"]
+open_manual: []
 ---
 
 # Phase 68: Validation Strategy
@@ -80,7 +80,7 @@ Relay total: 172 tests, 172 pass, 0 fail, 0 skipped (`npm test --prefix relay`).
 
 | Behavior | Requirement | Why Manual | Status |
 |----------|-------------|------------|--------|
-| `relay` added as a required check in branch protection | RELAY-01 (D-19) | Owner-only GitHub setting | Pending. Checked 2026-11-15 with the read-only `gh api repos/VitalPointAI/near-ai-vscode/branches/main/protection --jq '[.required_status_checks.checks[].context]'`: main requires lint, test, e2e, release-content, audit, secret-scan and agent-review, not yet `relay`. The owner re-applies branch protection with the command in `docs/development-workflow.md` section 8. |
+| `relay` added as a required check in branch protection | RELAY-01 (D-19) | Owner-only GitHub setting | Done 2026-11-15 by the owner. Read-only check `gh api repos/VitalPointAI/near-ai-vscode/branches/main/protection --jq '[.required_status_checks.checks[] \| "\(.context):\(.app_id)"]'`: main requires lint, test, e2e, release-content, audit, secret-scan and relay (all app 15368) and agent-review. |
 | Package pins accepted | RELAY-01 (D-20) | Human supply-chain judgement | Done. The owner chose `jose` 6.2.17 and `@types/node` 26.6.6 (recorded in `68-01-SUMMARY.md`). |
 
 ---
@@ -94,4 +94,4 @@ Relay total: 172 tests, 172 pass, 0 fail, 0 skipped (`npm test --prefix relay`).
 - [x] Feedback latency < 120s (relay suite about 15 s, container suite about 20 s with cached base images)
 - [x] `nyquist_compliant: true` set in frontmatter
 
-**Approval:** every automated row is green. One manual item stays open: D-19, the owner's branch protection change, which no code change can close.
+**Approval:** every automated row is green and both manual items are done (D-20 at 68-01, D-19 on 2026-11-15).

@@ -6,7 +6,7 @@ Date: 2026-11-15. Approved by the owner on 2026-11-15. Read together with `opens
 
 | Goal | Result |
 |---|---|
-| 1. Shell in a sandbox on a copy of a project; key folder unreachable, including run-time-built paths, recursive walks and symlinks; normal work still possible; changes come back as a diff | **Pass** (33 of 33 escape cases blocked; edits, a node script and `npm start` worked; diff produced). One new risk found on the return path: downloads keep symlinks. |
+| 1. Shell in a sandbox on a copy of a project; key folder unreachable, including run-time-built paths, recursive walks and symlinks; normal work still possible; changes come back as a diff | **Pass** (20 of 20 escape cases blocked, the cases in `openshell-spike/tests/key-escape.sh`; edits, a node script and `npm start` worked; diff produced). One new risk found on the return path: downloads keep symlinks. |
 | 2. Network egress: allowed host works, others refused | **Pass** (allowed GET works; POST to the same host, other hosts, raw IP, cloud metadata and a different binary are all refused, each with a logged reason) |
 | 3. Credential placeholder with a fake key and a local endpoint | **Pass** (agent sees only a placeholder; the local endpoint receives the fake key; the placeholder is refused for any other host or placement) |
 | 4. Draft DID with authority and sandbox sections; prover accepts the narrowed child and rejects a widened child | **Pass, with a caveat**: network, method, binary and Landlock widenings get `exceeds_boundary`; file-path widenings get `unsupported` (still a reject, but not a proof). MCP rules are `unsupported`. |
@@ -97,7 +97,7 @@ Note: `--upload DIR:/sandbox/project` puts the folder at `/sandbox/project/stage
 | `node -e` spawning `sh -c "cat ..."` (a script started by another script) | | Permission denied |
 | `cp` to `/tmp` then read, `dd` | | Permission denied |
 
-All 33 cases blocked. Harness positive control: a `FAKE-` string that *is* readable was correctly reported as a leak, so the harness can see a failure. Control from the host: `podman exec` into the workload container (outside OpenShell's process tree) does read the decoy file, which proves the file exists and that the block comes from the Landlock rules OpenShell applies to its own process tree.
+All 20 cases in `openshell-spike/tests/key-escape.sh` blocked: 6 against the project copy (A1-A6) and 14 against the decoy outside the Landlock allowlist (B0-B13). `logs/goal1-key-escape.txt` holds 26 PASS lines and no FAIL: those 20, plus the 6 project-copy cases run again after the upload path was fixed (the rerun's B section was not captured). An earlier draft said 33, which is the log's line count, not a case count. Harness positive control: a `FAKE-` string that *is* readable was correctly reported as a leak, so the harness can see a failure. Control from the host: `podman exec` into the workload container (outside OpenShell's process tree) does read the decoy file, which proves the file exists and that the block comes from the Landlock rules OpenShell applies to its own process tree.
 
 Container facts (from `podman inspect`): workload container `network=none`, user 1000:1000, no added capabilities, the common capabilities dropped, only volumes and the sandbox binary mounted. Supervisor container: host network, user 1000:1000, no added capabilities, no host paths mounted beyond its private volumes. No Docker or Podman socket inside either.
 
@@ -321,5 +321,5 @@ Removed (by exact name or ID):
 
 Left in place:
 - The spike scratch folder (session scratchpad, cleared with the session): downloaded release archives and checksums, unpacked binaries (`bin/`), the generated local PKI (`pki/`, test-only keys, owner-only permissions), the gateway SQLite DB and CLI config (`xdg/`), the fake test project, its worktree and stage/result copies, test scripts and raw logs. It contains only FAKE keys.
-- `openshell-spike/` next to this report (policies, DID drafts, test scripts, logs, example config; no private keys). Not committed.
+- `openshell-spike/` next to this report (policies, DID drafts, test scripts, logs, example config, the image's Containerfile; no private keys). Committed with this report in PR #53. The decoy key is not a file in the folder: the Containerfile generates a clearly fake one (`FAKE-DECOY-NOT-A-KEY-` plus random hex) at build time, so the image rebuilds from the folder alone.
 - Unchanged: no `~/.config/openshell` or `~/.local/state/openshell` was created; `podman.socket` user unit stayed inactive and disabled; no Docker containers, images, networks or volumes were created; the user's Podman image list is as before; nothing listens on ports 27670 or 18555. No system files, services or Docker daemon settings were touched, and nothing needed root.

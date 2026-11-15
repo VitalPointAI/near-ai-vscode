@@ -7,7 +7,7 @@
 - **0.4.x line**: ongoing releases on top of v0.4.0 (current; 0.4.22 published 2026-11-14; 0.4.23 published 2026-11-15 (PR #51, release PR #52); 0.4.24 patch next; Phase 27 shipped as 0.4.20 with its record still open; Phases 28 and 29 planned)
 - **v0.5.0 Trusted-source knowledge base**: PAUSED 2026-10-29 and moving to a separate project. Its roadmap, requirements, research and Phase 13 plans are archived in `.planning/milestones/v0.5.0-paused/`; the Phase 13 code lives on the local branch `gsd/phase-13-sovereignty-gate-post-quantum-cryptography-and-the-encrypted`.
 - **v0.6.0 Team Mode**: Phases 60-67 on the unmerged, local-only branch `feat/team-fix-pass` (Phase 60 complete, 61 and 62 built with re-tests open, 63-67 not started). Its identity and signed-event core lands on `main` in v0.7.0 Phase 69; the rest is the later milestone L2 (disposition table there).
-- **v0.7.0 Governed agent platform and messaging relay**: Phases 68-84 (Phase 68 complete; replanned 2026-11-15 from the owner's platform direction; relay phases renumbered)
+- **v0.7.0 Governed agent platform and messaging relay**: Phases 68-84 (Phase 68 complete: merged as PR #50, 052d5cf, and `relay` is a required check on main since the owner's D-19 step, 2026-11-15; replanned 2026-11-15 from the owner's platform direction; relay phases renumbered)
 - **v0.8.0 Cybersecurity**: Phase 25 (executed; deferred by the owner until everything else in this plan is finished, may move to its own product)
 - **Later milestones L1-L6** (outlined 2026-11-15): Theia appliance and local inference; Team Mode on the governed core; routines and signed packages; verifiable identity and policy on NEAR; edge grouping, compute pooling and HQ federation; Theia desktop app and learned skills
 
@@ -27,11 +27,11 @@ Next phases are added here (integer numbering: Phases 26 to 29 so far) when 0.4.
 
 ### Patch line (updated 2026-11-15)
 
-0.4.6 to 0.4.22 are published (the CHANGELOG has each). Patches that need no GSD phase:
+0.4.6 to 0.4.23 are published (the CHANGELOG has each). Patches that need no GSD phase:
 
 | Release | State | Scope |
 |---------|-------|-------|
-| 0.4.23 | PR #51 in review, then its release PR | Agent model never silently replaced, GenerateImage model choice, agents kept out of `.near-ai/state/keys`, image review workflow, the three #48 sync follow-ups |
+| 0.4.23 | Published 2026-11-15 (PR #51, release PR #52) | Agent model never silently replaced, GenerateImage model choice, agents kept out of `.near-ai/state/keys`, image review workflow, the three #48 sync follow-ups |
 | 0.4.24 | Next | The four #46 review minors (run-tests cleanup on exit; cap the "Other agents" list in `src/gsd/tools.ts`; the legacy team consent key in `src/agent/teams.ts` near line 200; `attachments-cleared` versus the chip handler in `media/chat/chat.js`) and three documentation mismatches checked against the code: README "Good to know" says per-response attestation signatures are not verified yet, but SECURITY.md and `src/services/attestation.ts` show they are; SECURITY.md says fully-autonomous mode writes protected files without asking while README says destruction, publishing and reading keys always ask (make both say what the code does today; Phase 70 then changes the behaviour); SECURITY.md says teams have no shared memory, but team knowledge graphs exist |
 
 
@@ -72,7 +72,7 @@ Plans:
   5. Opening the project on a different interface or machine shows a "Pick up where you left off" card (last chat, last run state, current GSD phase and next step); one click reopens it and nothing re-runs or spends money. (SYNC-07)
   6. All git work for sync is done by the extension and reported in plain words; conflicts from two machines merge per record with no lost entries (tested). 0.4.20 ships through the release PR with CHANGELOG and README updated. (SYNC-05, SYNC-08)
 **Plans:** 35/36 plans executed (11 waves; gap closure 27-19 to 27-25 from 27-UAT.md, then 27-26 to 27-36 from the PR #40 review 27-REVIEW.md in 5 waves, all before 27-16)
-**Status (checked 2026-11-15)**: shipped. PR #40 merged and release 0.4.20 was cut through release PR #41 on 2026-11-14 (fixes followed in 0.4.21 and 0.4.22), so SYNC-08 is met. What remains of 27-16 is the record: the owner's check on the real host (27-UAT.md stops at test 8, "your own old chats open in both real editors") and the 27-16 summary.
+**Status (checked 2026-11-15)**: in progress (state `in_progress`, 35/36 plans): the code shipped. PR #40 merged and release 0.4.20 was cut through release PR #41 on 2026-11-14 (fixes followed in 0.4.21 and 0.4.22), so SYNC-08 is met. What remains of 27-16 is the record: the owner's check on the real host (27-UAT.md stops at test 8, "your own old chats open in both real editors") and the 27-16 summary.
 
 Plans:
 - [x] 27-01-PLAN.md — Wire format and crypto core: recovery code, scrypt wrap, padded AEAD objects, sealed manifest, every refusal (owner confirms the contract first)
@@ -156,7 +156,7 @@ Plans:
 | Step | Work | Why here |
 |------|------|----------|
 | 1 | **0.4.23** (PR #51 and release PR #52): done, published 2026-11-15 | It closes a live gap (agents could read the project's key folder) and `main` is strict, so the extension line goes first. |
-| 2 | **PR #50** (Phase 68): merged 2026-11-15 as 052d5cf; the owner adds `relay` to branch protection (D-19); then a small relay housekeeping PR: the relay's README, Compose file, build script and tests point at the new phase numbers, and the Signal sidecar re-check date (2026-12-10, now before the Signal phase) is met by re-pinning (owner, 2026-11-15) | The foundation is done; leaving it open blocks every relay phase, and the date falls due long before Phase 82. |
+| 2 | **PR #50** (Phase 68): merged 2026-11-15 as 052d5cf; the owner added `relay` to branch protection the same day (D-19, done); then a small relay housekeeping PR: the relay's README, Compose file, build script and tests point at the new phase numbers, and the Signal sidecar re-check date (2026-12-10, now before the Signal phase) is met by re-pinning (owner, 2026-11-15) | The foundation is done; leaving it open blocks every relay phase, and the date falls due long before Phase 82. |
 | 3 | **0.4.24 patch**: the four #46 review minors and the three doc mismatches; **Phase 27 record close** (the owner's check on the real host, 27-UAT test 8 onward, then the 27-16 summary) | Small debt, cleared before the engine changes; SECURITY.md and README must agree before Phase 70 changes the floor. |
 | 4 | **Phase 69, Team Mode reconciliation** (`feat/team-fix-pass` archived on GitHub at 4207080) | Phase 70's signed policy, Phase 71's grants and Phase 80's approvals all need device identities and the signed log. Building them a second time would leave two trust cores. |
 | 4a | In parallel: **Phase 28** (secure development workflow setup step) and the **OpenShell spike** (done, see openshell-spike.md) | Phase 28 touches only setup and templates; the spike feeds Phase 72. |
@@ -168,7 +168,7 @@ Plans:
 
 ### Old and new phase numbers
 
-Phase 68 records, `relay/README.md`, `relay/compose.yaml`, `relay/scripts/build.mjs` and the relay tests use the old numbers. Read them through this table.
+Phase 68 records (CONTEXT, PLAN, SUMMARY and VERIFICATION files) use the old numbers. Read them through this table. `relay/README.md`, `relay/compose.yaml`, `relay/scripts/build.mjs` and the relay tests were moved to the new numbers in the relay housekeeping PR.
 
 | Old | New | Phase |
 |-----|-----|-------|
@@ -211,7 +211,7 @@ Phase 68 records, `relay/README.md`, `relay/compose.yaml`, `relay/scripts/build.
   4. The relay ships as a container image built without a shell or package manager, and every secret (bot secret, tenant API keys, Signal registration material) is read at startup from an operator-supplied source and never appears in the image, the state directory listing, or a log line. (RELAY-04)
 **Research flags**: (1) `node:sqlite` is RC in Node 26 — name the JSON-file-per-tenant fallback for registry/state now so storage choices in later phases stay honest. (2) Pin the exact `signal-cli-rest-api` sidecar version in the container definition this early; verify the image's bundled signal-cli age at integration time (Phase 75 in the old numbering, now Phase 82).
 **Plans:** 8/8 plans executed (8 waves, run one after another; owner checkpoints: package pins D-20 in 68-01, gate approval and branch protection D-19 in 68-08)
-**Status (2026-11-15)**: complete, verified (68-VERIFICATION.md, 4/4 must-haves) and merged as PR #50 (052d5cf). Open: the owner's D-19 step (68-08 Task 3: add `relay` to main's branch protection after the merge). Its carried items are listed above.
+**Status (2026-11-15)**: complete, verified (68-VERIFICATION.md, 4/4 must-haves) and merged as PR #50 (052d5cf). The owner's D-19 step (68-08 Task 3) is done: since 2026-11-15 main requires `relay` alongside the other checks. Its carried items are listed above.
 
 Plans:
 **Wave 1**
@@ -236,7 +236,7 @@ Plans:
 - [x] 68-07-PLAN.md — Distroless image and hardened Compose with the Signal profile, container hardening suite, operator README (RELAY-04)
 
 **Wave 8** *(blocked on Wave 7 completion)*
-- [ ] 68-08-PLAN.md — relay CI job and required check, VSIX release-content patterns, docs, full phase gate, owner hand-off (D-19) (Tasks 1-2 done with a green gate; Task 3 is the owner's D-19 step)
+- [x] 68-08-PLAN.md — relay CI job and required check, VSIX release-content patterns, docs, full phase gate, owner hand-off (D-19) (Tasks 1-2 done with a green gate and merged in PR #50; Task 3, the owner's D-19 branch-protection step, done 2026-11-15)
 
 ### Stage 1: identity and governance core (Phases 69-74)
 
@@ -244,7 +244,7 @@ These phases change the extension's engine (`src/agent`, `src/domain`, `src/team
 
 ### Phase 69: Team Mode reconciliation: identities and signed events on main
 **Goal**: The identity, signed-event and permission core built for Team Mode (Phase 60, verified on the unmerged `feat/team-fix-pass` branch) runs on current `main`, so the governance phases build on one tested set of device keys, signatures and permission rules; projects without Team Mode behave exactly as before, and what remains of v0.6.0 has a recorded place in the new plan.
-**Depends on**: Nothing in this milestone. Starts after 0.4.23 merges, so the port is done once against a quiet `main`. Owner first: push `feat/team-fix-pass` to GitHub as an archive branch, and commit or record the five uncommitted files in its legacy worktree.
+**Depends on**: Nothing in this milestone. Starts now that 0.4.23 is merged and published (2026-11-15), so the port is done once against a quiet `main`. Owner first: push `feat/team-fix-pass` to GitHub as an archive branch, and commit or record the five uncommitted files in its legacy worktree.
 **Requirements**: TMR-01, TMR-02, TMR-03, TMR-04, TMR-05
 **Success Criteria** (what must be TRUE):
   1. `feat/team-fix-pass` (local only today: 776 commits on top of 0.4.11, last commit 2026-11-05) is on GitHub as an archive branch, and the five uncommitted files in its legacy worktree are committed or recorded, before any code moves. (TMR-01)
@@ -299,10 +299,10 @@ Plans:
 **Goal**: An agent's commands can run behind a real boundary: on a copy of the project inside a container or an OpenShell sandbox where protected folders are simply absent, with the changes brought back through an apply step that treats them as untrusted, shows the person the diff first and refuses anything that could reach outside the copy; the person always sees which boundary a run has.
 **Depends on**: Phase 70, Phase 71 (per-agent policies and the delegation check). Research reads the OpenShell spike result first.
 **Requirements**: EXEC-01, EXEC-02, EXEC-03, EXEC-04, EXEC-05, EXEC-06, EXEC-07, EXEC-08, EXEC-09, EXEC-10
-**Spike result (2026-11-15, `.planning/research/platform-direction/openshell-spike.md`)**: OpenShell 0.1.8 on Linux with rootless Podman blocked all 33 escape cases against the key folder (absent from the copy, or present but outside the Landlock allowlist), allowed only the declared host, method and binary, injected a fake credential only on the bound endpoint and placement, and its prover rejected widened children in about 50 ms. About 50 ms is added per command and about 1 s per sandbox start, so one sandbox per run is the unit. The most important finding is on the way back: `openshell sandbox download` recreates symlinks as the sandbox made them, so a relative link to `../.near-ai/state/keys/local.key` would point at the real key once applied to the checkout.
+**Spike result (2026-11-15, `.planning/research/platform-direction/openshell-spike.md`)**: OpenShell 0.1.8 on Linux with rootless Podman blocked all 20 escape cases against the key folder (absent from the copy, or present but outside the Landlock allowlist), allowed only the declared host, method and binary, injected a fake credential only on the bound endpoint and placement, and its prover rejected widened children in about 50 ms. About 50 ms is added per command and about 1 s per sandbox start, so one sandbox per run is the unit. The most important finding is on the way back: `openshell sandbox download` recreates symlinks as the sandbox made them, so a relative link to `../.near-ai/state/keys/local.key` would point at the real key once applied to the checkout.
 **Success Criteria** (what must be TRUE):
   1. A project or run chooses host (today's behaviour, labelled as text checks only), container (Docker or Podman, network off unless the policy allows it) or OpenShell (Linux first, version pinned); the chat and Agent Activity say which boundary a run has, sandbox blocks appear there with the binary, host, rule and reason from the sandbox's own log, and on Windows and Intel Macs the choice is container or host, labelled, with nothing claiming isolation it does not have. (EXEC-01, EXEC-07)
-  2. The copy is built by the extension from tracked files and uncommitted changes, never `.near-ai/state`, `.git` or another floor path, and never by bind-mounting the live checkout or relying on `.gitignore` filtering; the spike's 33 escape cases (run-time built paths, base64, `npm run`, recursive walks, links, `/proc`) are regression tests that fail if the key folder becomes readable. (EXEC-02, EXEC-04)
+  2. The copy is built by the extension from tracked files and uncommitted changes, never `.near-ai/state`, `.git` or another floor path, and never by bind-mounting the live checkout or relying on `.gitignore` filtering; the spike's 20 escape cases (`openshell-spike/tests/key-escape.sh`: run-time built paths, base64, `npm run`, recursive walks, links, `/proc`) are regression tests that fail if the key folder becomes readable. (EXEC-02, EXEC-04)
   3. Changes come back only as a diff the person sees before anything is applied, computed on the host from regular files; symlinks (including a relative link back to the key folder), special files, mode changes and paths under protected locations are refused or shown as flagged, and Revert covers what was applied. (EXEC-03)
   4. The OpenShell policy for a run is generated from the agent's grant and the team policy, never written by hand or by an agent: enforce mode, `landlock: hard_requirement`, a non-root user, network rules per binary, and a fixed vocabulary of file paths that a child may only drop or make read-only; when a lead delegates, the child's policy is checked against the parent's with the pinned prover and anything but `within_boundary` is refused, while MCP rules, which the prover cannot model, are left to Phase 71's subset check. (EXEC-05, EXEC-06)
   5. On Linux a guided setup installs the pinned OpenShell release after checking its checksums and build attestations, generates the local certificates and gateway signing keys, runs the gateway as a user service with telemetry off, keeps its sockets under the short runtime folder (the 108-byte socket path limit), and re-verifies on upgrade; under code-server the gateway runs on the host and the editor reaches it only over its own authenticated API, never through a container runtime socket. Workload images are pinned by digest, loaded where the gateway's runtime finds them, built for arm64 and amd64, and a dev server the agent starts is reachable by the person only through a forward the person can see. (EXEC-08, EXEC-09, EXEC-10)
@@ -639,10 +639,10 @@ Also carried: the shared code-server follow-ups (owner, 2026-11-05). Phase 27 al
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 27. Project state follows the project (0.4.20) | 35/36 | Shipped in 0.4.20; owner host check and 27-16 summary open | 2026-11-14 (release) |
+| 27. Project state follows the project (0.4.20) | 35/36 | In Progress: shipped in 0.4.20; owner host check and 27-16 summary open | 2026-11-14 (release) |
 | 28. Secure development workflow setup step | 0/TBD | Not started | - |
 | 29. A cleanup member with a safe CleanUp tool | 0/TBD | Not started (after Phase 70) | - |
-| 68. Relay foundation | 8/8 | Complete; PR #50 in review; owner D-19 step after merge | 2026-11-15 (verified) |
+| 68. Relay foundation | 8/8 | Complete; merged as PR #50 (052d5cf); `relay` required on main (D-19) | 2026-11-15 |
 | 69. Team Mode reconciliation | 0/TBD | Not started (next to plan) | - |
 | 70. Capability vocabulary, manifests and one gate | 0/TBD | Not started | - |
 | 71. Delegation that only narrows | 0/TBD | Not started | - |
