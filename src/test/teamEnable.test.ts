@@ -17,7 +17,7 @@ import type { EnableInput } from '../team/enable';
 import { TeamLog } from '../team/eventLog';
 import type { TeamSigner } from '../team/eventLog';
 import { DEFAULT_COORDINATION_REF, GitTransport } from '../team/gitTransport';
-import { DEVICE_KEY_SECRET_PREFIX, createDeviceIdentity, deviceKeySecretName, emailHash, loadDeviceIdentity } from '../team/identity';
+import { DEVICE_KEY_SECRET, createDeviceIdentity, emailHash, loadDeviceIdentity } from '../team/identity';
 import { GitNotFoundError, runGit } from '../team/runGit';
 import type { GitRunner } from '../team/runGit';
 import { TEAM_FILE_REL, parseTeamFile, readTeamFile, teamStorageDir } from '../team/teamFile';
@@ -212,7 +212,7 @@ test('Enable creates the team, the device key, the orphan coordination branch an
     assert.equal(files.filter((name) => /^events\/\d{12}-evt-[0-9A-HJKMNP-TV-Z]{26}\.json$/.test(name)).length, 2);
     assert.ok(files.includes('team.json'));
 
-    assert.deepEqual([...secrets.values.keys()], [deviceKeySecretName(teamFile.teamId)]);
+    assert.deepEqual([...secrets.values.keys()], [DEVICE_KEY_SECRET]);
     assert.ok(existsSync(path.join(teamStorageDir(fixture.storageDir('a'), teamFile.teamId), 'trust.json')));
 
     const anchor = anchorOf(teamFile);
@@ -488,8 +488,8 @@ test('the canary scanners find a planted value in a git object, a file and every
   const canaries = makeCanaries();
   assert.equal(new Set(canaries.labelled().map((needle) => needle.value)).size, 5, 'every canary is different');
   const secrets = new MemorySecrets();
-  await createDeviceIdentity(secrets, 'team-0123456789abcdef0123456789abcdef');
-  const stored = secrets.values.get(deviceKeySecretName('team-0123456789abcdef0123456789abcdef')) as string;
+  await createDeviceIdentity(secrets);
+  const stored = secrets.values.get(DEVICE_KEY_SECRET) as string;
   const forms = deviceKeyForms(stored);
   assert.ok(forms.length === 3 || forms.length === 4, 'stored form, seed hex and seed base64url, plus base64url when it differs');
   assert.equal(new Set(forms).size, forms.length);
@@ -539,7 +539,7 @@ test('SEC-01 canary: no secret reaches any git object, team.json, extension stor
     const transport = new GitTransport<TeamState>({
       mirrorDir, projectRoot: root, remote: 'origin', ref: DEFAULT_COORDINATION_REF, materializer: teamMaterializer(anchor), baseDelayMs: 1
     });
-    const identity = await loadDeviceIdentity(secrets, teamId);
+    const identity = await loadDeviceIdentity(secrets);
     assert.ok(identity !== undefined);
     if (identity === undefined) return;
     const probe = new TeamLog({ anchor, transport });
@@ -551,7 +551,7 @@ test('SEC-01 canary: no secret reaches any git object, team.json, extension stor
     const signer: TeamSigner = { identity, memberId: owner.id };
     const log = new TeamLog({ anchor, transport, signer });
     const secondSecrets = new MemorySecrets();
-    const second = await createDeviceIdentity(secondSecrets, teamId);
+    const second = await createDeviceIdentity(secondSecrets);
     const accepted: TeamEvent[] = [...genesis.accepted];
     for (const intent of [
       { type: 'member.availability' as const, body: { availability: 'available' as const } },
@@ -572,8 +572,8 @@ test('SEC-01 canary: no secret reaches any git object, team.json, extension stor
     const needles: Needle[] = [
       ...canaries.labelled(),
       { label: 'remote user', value: 'canaryuser' },
-      ...deviceKeyForms(secrets.values.get(deviceKeySecretName(teamId)) as string).map((value, index) => ({ label: `device key form ${index}`, value })),
-      ...deviceKeyForms(secondSecrets.values.get(deviceKeySecretName(teamId)) as string).map((value, index) => ({ label: `second device key form ${index}`, value }))
+      ...deviceKeyForms(secrets.values.get(DEVICE_KEY_SECRET) as string).map((value, index) => ({ label: `device key form ${index}`, value })),
+      ...deviceKeyForms(secondSecrets.values.get(DEVICE_KEY_SECRET) as string).map((value, index) => ({ label: `second device key form ${index}`, value }))
     ];
 
     // Controls: the same scanners do see the canaries where they are meant to be, so an empty result below means something.
@@ -589,7 +589,7 @@ test('SEC-01 canary: no secret reaches any git object, team.json, extension stor
 
     assert.equal(gitIn(root, ['ls-tree', '-r', '--name-only', 'HEAD']).includes('transcripts'), false, 'the transcripts file is not in the project commit');
     assert.equal((await store.list({ type: 'team-roster' })).length, 5);
-    assert.deepEqual([...secrets.values.keys()].filter((key) => key.startsWith(DEVICE_KEY_SECRET_PREFIX)), [deviceKeySecretName(teamId)], 'the device key lives only in secret storage');
+    assert.deepEqual([...secrets.values.keys()].filter((key) => key === DEVICE_KEY_SECRET), [DEVICE_KEY_SECRET], 'the device key lives only in secret storage');
   });
 });
 
@@ -608,7 +608,7 @@ test('a secret typed into the team name is refused and nothing is written anywhe
     assert.equal(existsSync(path.join(root, TEAM_FILE_REL)), false);
     assert.equal(remoteHasRef(fixture, COORDINATION_BRANCH), false);
     assert.deepEqual([...secrets.values.keys()].sort(), before, 'no device key was created');
-    assert.equal([...secrets.values.keys()].some((key) => key.startsWith(DEVICE_KEY_SECRET_PREFIX)), false);
+    assert.equal([...secrets.values.keys()].some((key) => key === DEVICE_KEY_SECRET), false);
     assert.deepEqual(await teamFolders(fixture.storageDir('a')), []);
     assert.equal(gitIn(root, ['log', '-1', '--format=%s']), 'seed');
   });

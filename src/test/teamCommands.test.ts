@@ -6,7 +6,7 @@ import { existsSync, writeFileSync } from 'node:fs';
 import * as path from 'node:path';
 import test from 'node:test';
 import { API_KEY_SECRET, REFRESH_TOKEN_SECRET } from '../services/auth';
-import { deviceKeySecretName } from '../team/identity';
+import { DEVICE_KEY_SECRET } from '../team/identity';
 import { TEAM_FILE_REL, readTeamFile, teamStorageDir } from '../team/teamFile';
 import { deviceKeyForms, makeCanaries, scanFiles, scanGitObjects } from './helpers/teamCanary';
 import type { Needle } from './helpers/teamCanary';
@@ -285,7 +285,7 @@ test('SEC-01 canary: after Enable and Verify no secret or device key reaches the
     const teamFile = await readTeamFile(p.root);
     assert.ok(teamFile !== undefined);
     const storageDir = teamStorageDir(p.storage, teamFile.teamId);
-    const deviceKey = p.secrets.values.get(deviceKeySecretName(teamFile.teamId));
+    const deviceKey = p.secrets.values.get(DEVICE_KEY_SECRET);
     assert.ok(deviceKey !== undefined, 'the device key is in secret storage');
     const needles: Needle[] = [
       ...p.canaries.labelled(),

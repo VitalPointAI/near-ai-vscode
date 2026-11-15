@@ -46,7 +46,7 @@ async function runChild(): Promise<void> {
     if (message.type === 'init') {
       const secrets = new MemorySecrets();
       // The private key stays in this process; only the public half goes to the parent.
-      const identity = await createDeviceIdentity(secrets, message.anchor.teamId);
+      const identity = await createDeviceIdentity(secrets);
       const transport = new GitTransport<TeamState>({
         mirrorDir: message.mirrorDir,
         projectRoot: message.projectRoot,

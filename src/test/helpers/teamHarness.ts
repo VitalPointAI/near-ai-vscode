@@ -75,9 +75,9 @@ export async function createTeamFixture(options: { clones: string[]; initialised
 
 export interface TestOwner { identity: DeviceIdentity; memberId: string; secrets: MemorySecrets }
 
-export async function createOwner(teamId: string): Promise<TestOwner> {
+export async function createOwner(_teamId?: string): Promise<TestOwner> {
   const secrets = new MemorySecrets();
-  const identity = await createDeviceIdentity(secrets, teamId);
+  const identity = await createDeviceIdentity(secrets);
   return { identity, memberId: newMemberId(), secrets };
 }
 

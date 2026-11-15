@@ -12,7 +12,7 @@ import type { SecretStorageLike } from '../services/auth';
 import { teamMaterializer } from '../domain/team/materialize';
 import { buildGenesisEvents } from './eventLog';
 import { DEFAULT_COORDINATION_REF, GitTransport } from './gitTransport';
-import { createDeviceIdentity, emailHash, forgetDeviceIdentity, newMemberId, newTeamId } from './identity';
+import { emailHash, forgetCreatedDeviceIdentity, identityDir, loadOrCreateDeviceIdentity, newMemberId, newTeamId } from './identity';
 import { GitNotFoundError, gitText, redactGitMessage, runGit } from './runGit';
 import type { GitResult, GitRunner } from './runGit';
 import { REMOTE_NAME_PATTERN, TEAM_FILE_REL, TeamFileError, checkTrustPin, canonicalTeamFile, readTeamFile, teamStorageDir, writeTeamFile } from './teamFile';
@@ -143,13 +143,19 @@ function validateEmail(email: string): boolean {
   return email.length <= MAX_EMAIL_LENGTH && email.includes('@') && !CONTROL_CHARACTERS.test(email) && !/\s/.test(email);
 }
 
-// Removes the device key and the whole team storage folder (which holds the mirror). Every failure is returned as text, never dropped.
-async function rollback(secrets: SecretStorageLike, globalStorageDir: string, teamId: string): Promise<string[]> {
+// Removes the whole team storage folder (which holds the mirror) and, only when this Enable call created it, the device key (D-22). An identity that
+// existed before Enable (another team, another attempt) is never touched, and neither is a different key stored since. Every failure is returned as
+// text, never dropped.
+async function rollback(
+  secrets: SecretStorageLike, globalStorageDir: string, teamId: string, createdKey: { fingerprint: string } | undefined
+): Promise<string[]> {
   const problems: string[] = [];
-  try {
-    await forgetDeviceIdentity(secrets, teamId);
-  } catch (error) {
-    problems.push(`The device key could not be removed: ${describeError(error)}`);
+  if (createdKey !== undefined) {
+    try {
+      await forgetCreatedDeviceIdentity(secrets, { identityDir: identityDir(globalStorageDir), fingerprint: createdKey.fingerprint });
+    } catch (error) {
+      problems.push(`The device key could not be removed: ${describeError(error)}`);
+    }
   }
   try {
     await fs.rm(teamStorageDir(globalStorageDir, teamId), { recursive: true, force: true });
@@ -252,7 +258,8 @@ export async function enableTeamMode(input: EnableInput): Promise<EnableResult> 
   const memberId = newMemberId();
   // D-31: the address only feeds the hash. It is not stored, signed or returned.
   const emailHashes = ownerEmail === '' ? [] : [emailHash(teamId, ownerEmail)];
-  const identity = await createDeviceIdentity(input.secrets, teamId);
+  const { identity, created } = await loadOrCreateDeviceIdentity(input.secrets, { identityDir: identityDir(input.globalStorageDir) });
+  const createdKey = created ? { fingerprint: identity.fingerprint } : undefined;
   const storageDir = teamStorageDir(input.globalStorageDir, teamId);
 
   let genesis: ReturnType<typeof buildGenesisEvents>;
@@ -265,7 +272,7 @@ export async function enableTeamMode(input: EnableInput): Promise<EnableResult> 
     };
     assertNoSecrets(teamFile, 'team.json');
   } catch (error) {
-    const problems = await rollback(input.secrets, input.globalStorageDir, teamId);
+    const problems = await rollback(input.secrets, input.globalStorageDir, teamId, createdKey);
     if (error instanceof SecretLeakError) return fail('secret', [error.message, ...problems].join(' '));
     throw error;
   }
@@ -276,11 +283,11 @@ export async function enableTeamMode(input: EnableInput): Promise<EnableResult> 
   });
   const outcome = await pushGenesis({ transport, events: genesis.events, teamFileText: canonicalTeamFile(teamFile), git, projectRoot, remote });
   if (outcome.kind === 'exists') {
-    const problems = await rollback(input.secrets, input.globalStorageDir, teamId);
+    const problems = await rollback(input.secrets, input.globalStorageDir, teamId, createdKey);
     return fail('exists-remotely', ['This remote already has a coordination log.', ...problems].join(' '));
   }
   if (outcome.kind === 'failed') {
-    const problems = await rollback(input.secrets, input.globalStorageDir, teamId);
+    const problems = await rollback(input.secrets, input.globalStorageDir, teamId, createdKey);
     return fail('push-failed', [`The team could not be created on the remote: ${outcome.reason}`, outcome.detail, ...problems, 'Nothing was kept on this computer.'].filter((part) => part !== '').join(' '));
   }
   if (outcome.kind === 'unconfirmed') {

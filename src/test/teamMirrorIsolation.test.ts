@@ -77,7 +77,7 @@ async function world(): Promise<World> {
   const transport = new GitTransport<TeamState>({
     mirrorDir: teamMirror, projectRoot: m.root, remote: 'origin', ref: DEFAULT_COORDINATION_REF, materializer: teamMaterializer(anchor), baseDelayMs: 1, lockTimings: SHORT_WAIT
   });
-  const identity = await loadDeviceIdentity(secrets, teamFile.teamId);
+  const identity = await loadDeviceIdentity(secrets);
   assert.ok(identity !== undefined, 'Enable stored the device key');
   if (identity === undefined) throw new Error('no device key');
   const probe = new TeamLog({ anchor, transport });

@@ -196,7 +196,7 @@ export class TeamSession {
     let identity: DeviceIdentity | undefined;
     let identityProblem: string | undefined;
     try {
-      identity = await loadDeviceIdentity(deps.secrets, deps.teamFile.teamId);
+      identity = await loadDeviceIdentity(deps.secrets);
     } catch (error) {
       identityProblem = `The device key for this team could not be read, so this computer runs read-only: ${describeError(error)}`;
     }

@@ -24,7 +24,7 @@ export async function makeActor(teamId: string): Promise<TestActor> {
 // A second device for an existing member: same member id, a fresh key held in its own secret store.
 export async function makeDevice(actor: TestActor): Promise<TestActor> {
   const secrets = new MemorySecrets();
-  const identity = await createDeviceIdentity(secrets, actor.identity.teamId);
+  const identity = await createDeviceIdentity(secrets);
   return { memberId: actor.memberId, identity, secrets };
 }
 

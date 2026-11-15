@@ -1,12 +1,15 @@
 // Device identity, event signing and id generators (D-05, D-14, D-15, D-31). All key material is generated at run time.
 import assert from 'node:assert/strict';
 import { createHash, generateKeyPairSync } from 'node:crypto';
+import { mkdtemp, readdir, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
 import { MAX_EVENT_BYTES, fingerprintOf, verifyEventSignature } from '../domain/team/canonical';
 import type { TeamEvent, UnsignedTeamEvent } from '../domain/team/types';
 import {
-  DEVICE_KEY_SECRET_PREFIX, createDeviceIdentity, deviceKeySecretName, emailHash, forgetDeviceIdentity, loadDeviceIdentity,
-  newEventId, newMemberId, newTeamId, signEvent, ulid
+  DEVICE_KEY_SECRET, IDENTITY_CREATE_LOCK_FILE, IDENTITY_DIR_NAME, createDeviceIdentity, emailHash, forgetDeviceIdentity, identityDir, loadDeviceIdentity,
+  loadOrCreateDeviceIdentity, newEventId, newMemberId, newTeamId, signEvent, ulid
 } from '../team/identity';
 import { MemorySecrets } from './helpers/teamHarness';
 
@@ -16,58 +19,74 @@ function commentEvent(device: string, body: Record<string, string> = { text: 'he
   return { v: 1, id: newEventId(), teamId: TEAM, type: 'comment.added', lamport: 5, at: '2026-01-01T00:00:00.000Z', author: 'mbr-0123456789abcdef', device, prev: '', body };
 }
 
-test('creating a device identity stores exactly one secret under the team key name and loading returns the same identity', async () => {
+test('creating a device identity stores exactly one secret under the single identity name and loading returns the same identity', async () => {
   const secrets = new MemorySecrets();
-  const created = await createDeviceIdentity(secrets, TEAM);
-  assert.equal(deviceKeySecretName(TEAM), `${DEVICE_KEY_SECRET_PREFIX}${TEAM}`);
-  assert.equal(DEVICE_KEY_SECRET_PREFIX, 'nearAi.team.deviceKey.');
-  assert.deepEqual([...secrets.values.keys()], [`nearAi.team.deviceKey.${TEAM}`]);
-  const loaded = await loadDeviceIdentity(secrets, TEAM);
+  const created = await createDeviceIdentity(secrets);
+  assert.equal(DEVICE_KEY_SECRET, 'nearAi.identity.deviceKey');
+  assert.deepEqual([...secrets.values.keys()], ['nearAi.identity.deviceKey']);
+  const loaded = await loadDeviceIdentity(secrets);
   assert.equal(loaded?.fingerprint, created.fingerprint);
   assert.equal(loaded?.publicKey, created.publicKey);
-  assert.equal(loaded?.teamId, TEAM);
   assert.equal(created.fingerprint, fingerprintOf(Buffer.from(created.publicKey, 'base64url')));
   assert.equal(Buffer.from(created.publicKey, 'base64url').length, 32);
-  assert.equal(await loadDeviceIdentity(secrets, 'team-ffffffffffffffffffffffffffffffff'), undefined);
+  assert.equal(await loadDeviceIdentity(new MemorySecrets()), undefined);
 });
 
-test('a second key for the same team is refused and a forgotten key can be created again', async () => {
+test('a second key is refused and a forgotten key can be created again', async () => {
   const secrets = new MemorySecrets();
-  const first = await createDeviceIdentity(secrets, TEAM);
-  await assert.rejects(() => createDeviceIdentity(secrets, TEAM), /already has a key for this team/);
-  assert.equal((await loadDeviceIdentity(secrets, TEAM))?.fingerprint, first.fingerprint, 'the existing key is untouched');
-  await forgetDeviceIdentity(secrets, TEAM);
+  const first = await createDeviceIdentity(secrets);
+  await assert.rejects(() => createDeviceIdentity(secrets), /already has an identity key/);
+  assert.equal((await loadDeviceIdentity(secrets))?.fingerprint, first.fingerprint, 'the existing key is untouched');
+  await forgetDeviceIdentity(secrets);
   assert.equal(secrets.values.size, 0);
-  const second = await createDeviceIdentity(secrets, TEAM);
+  const second = await createDeviceIdentity(secrets);
   assert.notEqual(second.fingerprint, first.fingerprint);
 });
 
 test('a stored key of another type or an unreadable value is refused with a plain message', async () => {
   const rsa = new MemorySecrets();
   const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
-  rsa.values.set(deviceKeySecretName(TEAM), privateKey.export({ format: 'der', type: 'pkcs8' }).toString('base64'));
-  await assert.rejects(() => loadDeviceIdentity(rsa, TEAM), { message: 'The stored team device key is not an Ed25519 key.' });
+  rsa.values.set(DEVICE_KEY_SECRET, privateKey.export({ format: 'der', type: 'pkcs8' }).toString('base64'));
+  await assert.rejects(() => loadDeviceIdentity(rsa), { message: 'The stored team device key is not an Ed25519 key.' });
   const garbage = new MemorySecrets();
-  garbage.values.set(deviceKeySecretName(TEAM), 'this is not a key');
-  await assert.rejects(() => loadDeviceIdentity(garbage, TEAM), { message: 'The stored team device key could not be read.' });
+  garbage.values.set(DEVICE_KEY_SECRET, 'this is not a key');
+  await assert.rejects(() => loadDeviceIdentity(garbage), { message: 'The stored team device key could not be read.' });
 });
 
 test('the identity object never serialises the private key', async () => {
   const secrets = new MemorySecrets();
-  const identity = await createDeviceIdentity(secrets, TEAM);
-  const stored = secrets.values.get(deviceKeySecretName(TEAM)) as string;
+  const identity = await createDeviceIdentity(secrets);
+  const stored = secrets.values.get(DEVICE_KEY_SECRET) as string;
   const asBase64url = Buffer.from(stored, 'base64').toString('base64url');
   const text = JSON.stringify(identity);
   assert.equal(text.includes(stored), false);
   assert.equal(text.includes(asBase64url), false);
   assert.equal(text.includes(stored.slice(0, 21)), false, 'not even the PKCS#8 header');
-  assert.deepEqual(Object.keys(identity).sort(), ['fingerprint', 'publicKey', 'sign', 'teamId']);
+  assert.deepEqual(Object.keys(identity).sort(), ['fingerprint', 'publicKey', 'sign']);
   assert.equal(String(identity).includes(stored), false);
 });
 
+test('loadOrCreateDeviceIdentity creates the key once and then returns the same identity with created false', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'near-ai-identity-'));
+  try {
+    const secrets = new MemorySecrets();
+    const options = { identityDir: identityDir(dir) };
+    const first = await loadOrCreateDeviceIdentity(secrets, options);
+    assert.equal(first.created, true);
+    const second = await loadOrCreateDeviceIdentity(secrets, options);
+    assert.equal(second.created, false);
+    assert.equal(second.identity.fingerprint, first.identity.fingerprint);
+    assert.deepEqual([...secrets.values.keys()], [DEVICE_KEY_SECRET]);
+    assert.equal(path.basename(identityDir(dir)), IDENTITY_DIR_NAME);
+    assert.equal((await readdir(identityDir(dir))).includes(IDENTITY_CREATE_LOCK_FILE), false, 'the lock is released');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test('signed events verify, and any change to the event, the key or the signature makes verification false', async () => {
-  const identity = await createDeviceIdentity(new MemorySecrets(), TEAM);
-  const other = await createDeviceIdentity(new MemorySecrets(), TEAM);
+  const identity = await createDeviceIdentity(new MemorySecrets());
+  const other = await createDeviceIdentity(new MemorySecrets());
   const event = signEvent(identity, commentEvent(identity.fingerprint));
   assert.equal(event.sig.length, 86);
   assert.equal(verifyEventSignature(event, identity.publicKey), true);
@@ -93,8 +112,8 @@ test('signed events verify, and any change to the event, the key or the signatur
 });
 
 test('signing refuses an event that names another device or is larger than 16 KB', async () => {
-  const identity = await createDeviceIdentity(new MemorySecrets(), TEAM);
-  const stranger = await createDeviceIdentity(new MemorySecrets(), TEAM);
+  const identity = await createDeviceIdentity(new MemorySecrets());
+  const stranger = await createDeviceIdentity(new MemorySecrets());
   assert.throws(() => signEvent(identity, commentEvent(stranger.fingerprint)), /different device/);
   assert.throws(() => signEvent(identity, commentEvent(identity.fingerprint, { text: 'x'.repeat(MAX_EVENT_BYTES) })), /over the 16384 byte limit/);
   assert.doesNotThrow(() => signEvent(identity, commentEvent(identity.fingerprint, { text: 'x'.repeat(MAX_EVENT_BYTES - 1000) })));
