@@ -90,26 +90,30 @@ function readVersion(db: Database): number {
   return row?.user_version ?? 0;
 }
 
-function newerSchema(found: number): StoreError {
+function newerSchema(found: number, supported: number): StoreError {
   return new StoreError(
     'newer-schema',
-    `This state was written by a newer relay (schema ${found}); this relay reads up to schema ${SCHEMA_VERSION}. Start the newer relay or restore a backup.`,
+    `This state was written by a newer relay (schema ${found}); this relay reads up to schema ${supported}. Start the newer relay or restore a backup.`,
   );
 }
 
-/** Brings the database up to SCHEMA_VERSION. Each pending migration and its version bump commit together; an interrupted migration leaves the old version. */
-export function migrate(db: Database, now: () => number): void {
+/**
+ * Brings the database up to the end of `migrations` (SCHEMA_VERSION for the real list). Each pending migration and its version bump commit together;
+ * an interrupted migration leaves the old version. The list is a parameter only so a test can inject a failing step.
+ */
+export function migrate(db: Database, now: () => number, migrations: readonly string[] = MIGRATIONS): void {
+  const supported = migrations.length;
   const found = readVersion(db);
-  if (found > SCHEMA_VERSION) throw newerSchema(found);
+  if (found > supported) throw newerSchema(found, supported);
 
-  for (let index = found; index < MIGRATIONS.length; index += 1) {
+  for (let index = found; index < migrations.length; index += 1) {
     db.exec('BEGIN IMMEDIATE');
     try {
       // Another process may have applied this step while this one waited for the write lock.
       const current = readVersion(db);
-      if (current > SCHEMA_VERSION) throw newerSchema(current);
+      if (current > supported) throw newerSchema(current, supported);
       if (current <= index) {
-        db.exec(MIGRATIONS[index] as string);
+        db.exec(migrations[index] as string);
         db.exec(`PRAGMA user_version = ${index + 1}`);
       }
       db.exec('COMMIT');
