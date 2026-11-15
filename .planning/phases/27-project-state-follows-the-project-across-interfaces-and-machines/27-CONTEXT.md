@@ -7,9 +7,9 @@
 
 On 2026-11-13 the owner opened, in desktop VS Code on the host, projects they had worked on all week through a client connected to the `code-server` container on the same host. The week's progress was missing. The profile needed setting up again. Model choices applied from Compare Models were missing, and redoing the comparison would cost money.
 
-- The container mounts `/home/aaron/projects` at the same path, so project scope ids (`project-<hash>`) and transcript/run folder hashes are identical in both editors. That part is not the cause.
+- The container mounts `<host home>/projects` at the same path, so project scope ids (`project-<hash>`) and transcript/run folder hashes are identical in both editors. That part is not the cause.
 - Per-project data lives in each editor's own `context.globalStorageUri`:
-  - code-server: `/home/aaron/projects/services/code-server/data/share/User/globalStorage/vitalpoint.near-ai-vscode`
+  - code-server: `<host home>/projects/services/code-server/data/share/User/globalStorage/vitalpoint.near-ai-vscode`
   - desktop: `~/.config/Code/User/globalStorage/vitalpoint.near-ai-vscode`
   - Data in each: `transcripts/<hash>`, `runs/<hash>`, `checkpoints/`, `evals/*.json` (ComparisonStore), `spend/`, `cyber/<key>`, `teams/*.md`, `team/`. code-server has 5 transcript folders and the 2026-11-12 comparison. Desktop stops at 2026-11-06.
 - `applyRecommended` in `src/services/modelComparisonPanel.ts` writes to `ConfigurationTarget.Global` unless the project already sets the value. That is the *user* settings.json, which is separate per editor.
