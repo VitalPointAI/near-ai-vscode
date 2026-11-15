@@ -102,6 +102,8 @@ export interface AgentTurnRequest {
   memory?: { store: ContextGraphMemory; projectScope: MemoryScope };
   /** The provider's image model, when it has one; enables GenerateImage. */
   imageModel?: ModelInfo;
+  /** The other models on this key that output images; GenerateImage may be asked to use one of them instead of imageModel. */
+  imageModels?: ModelInfo[];
   reputation?: ReputationStore;
   /** Dependency vulnerability checks for the SecurityScan tool. */
   security?: SecurityAccess;
@@ -842,7 +844,7 @@ export class AgentConversation {
   }
 
   private toolsFor(request: AgentTurnRequest, context: Omit<ToolContext, 'signal' | 'onTodos'>, grants: RunGrants, extraUsage: UsageMetadata[], record: Record_, runSignal: AbortSignal, runId: string): AgentTool<any>[] {
-    const media = request.imageModel ? [imageTool(request.client, request.imageModel)] : [];
+    const media = request.imageModel ? [imageTool(request.client, request.imageModel, request.imageModels ?? [])] : [];
     const memoryFor = (agentScope?: MemoryScope, source = runId) => request.memory ? memoryTools(request.memory.store, { project: request.memory.projectScope, agent: agentScope }, AGENT_MEMORY_ACTOR, source) : [];
     // A team run reads and feeds the team's own knowledge graph, so the team gets better the more it works (owner, 2026-11-08). Every member writes to the
     // same graph, which is what makes it shared: a fact one member verified is there for the next one. The graph is keyed by teamKnowledgeKey: a library team's

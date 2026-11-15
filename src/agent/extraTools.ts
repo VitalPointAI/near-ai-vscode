@@ -3,6 +3,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import * as path from 'node:path';
 import type { ContextGraphNodeDto, MemoryScope } from '../domain/contextGraph';
 import type { ContextGraphMemory } from '../services/contextGraphMemory';
+import { modelList, resolveModelId } from '../gsd/library';
 import type { ModelInfo, NearAiClient } from '../services/nearAiClient';
 import type { AgentTool } from './tools';
 import { displayPath, resolveInWorkspace, ToolError } from './workspace';
@@ -10,32 +11,46 @@ import { displayPath, resolveInWorkspace, ToolError } from './workspace';
 /**
  * Image generation through NEAR's `/images/generations`. Offered only when the provider lists a
  * model that outputs images, so the agent never claims a capability that is not there.
+ *
+ * `model` is the configured image model (nearAi.agent.imageModel), used when the call names none. `models` are the other models on this
+ * key that output images; a call may name one of them (its ID, or the part after the last "/" when that is unique). Any other value is
+ * refused with the list, so an image is never made by a model the agent did not ask for. The approval text, the result and the spend
+ * record (the client tags the request with the model it is sent to) all name the model actually used.
  */
-export function imageTool(client: NearAiClient, model: ModelInfo): AgentTool<{ prompt: string; path: string; size?: string }> {
-  const price = model.imagePricePerUnit;
+export function imageTool(client: NearAiClient, model: ModelInfo, models: readonly ModelInfo[] = []): AgentTool<{ prompt: string; path: string; size?: string; model: string }> {
+  const offered = [model, ...models.filter((candidate) => candidate.id !== model.id && (candidate.outputModalities ?? []).includes('image'))];
+  const byId = new Map(offered.map((candidate) => [candidate.id, candidate]));
+  const ids = offered.map((candidate) => candidate.id);
+  const priced = (candidate: ModelInfo) => candidate.imagePricePerUnit !== undefined ? ` (about $${candidate.imagePricePerUnit} per image)` : '';
   return {
     name: 'GenerateImage',
-    description: `Generate an image with ${model.id} and save it as a PNG in the workspace. Use for icons, illustrations, mockups, and placeholder art the user asked for.${price !== undefined ? ` Costs about $${price} per image.` : ''}`,
-    parameters: { type: 'object', properties: { prompt: { type: 'string', description: 'What the image should show.' }, path: { type: 'string', description: 'Workspace path for the PNG, e.g. assets/hero.png.' }, size: { type: 'string', description: 'e.g. 1024x1024' } }, required: ['prompt', 'path'], additionalProperties: false },
+    description: `Generate an image and save it as a PNG in the workspace. Use for icons, illustrations, mockups, and placeholder art the user asked for. Uses ${model.id}${priced(model)} unless you pass model.${offered.length > 1 ? ` Image models on this key: ${modelList(offered.map((candidate) => `${candidate.id}${priced(candidate)}`), 12)}.` : ''}`,
+    parameters: { type: 'object', properties: { prompt: { type: 'string', description: 'What the image should show.' }, path: { type: 'string', description: 'Workspace path for the PNG, e.g. assets/hero.png.' }, size: { type: 'string', description: 'e.g. 1024x1024' }, model: { type: 'string', description: `Optional image model: one of ${modelList(ids, 12)}. Defaults to ${model.id}.` } }, required: ['prompt', 'path'], additionalProperties: false },
     capability: 'mediaGeneration',
     parse: (raw) => {
       if (typeof raw.prompt !== 'string' || !raw.prompt.trim()) throw new ToolError('Missing required parameter "prompt".');
       if (typeof raw.path !== 'string' || !/\.png$/i.test(raw.path)) throw new ToolError('path must end in .png.');
       if (raw.size !== undefined && (typeof raw.size !== 'string' || !/^\d{2,4}x\d{2,4}$/.test(raw.size))) throw new ToolError('size must look like 1024x1024.');
-      return { prompt: raw.prompt.slice(0, 4000), path: raw.path, ...(raw.size ? { size: raw.size as string } : {}) };
+      if (raw.model !== undefined && typeof raw.model !== 'string') throw new ToolError('model must be a string.');
+      const asked = typeof raw.model === 'string' ? raw.model.trim() : '';
+      const chosen = asked ? resolveModelId(asked, ids) : model.id;
+      if (!chosen) throw new ToolError(`"${asked.slice(0, 120)}" is not an image model on this key. Image models: ${modelList(ids)}. Leave model out to use ${model.id}.`);
+      return { prompt: raw.prompt.slice(0, 4000), path: raw.path, ...(raw.size ? { size: raw.size as string } : {}), model: chosen };
     },
     title: (input) => `Generate image ${input.path}`,
     async preview(input) {
-      return { kind: 'note', text: `Generate 1 image with ${model.id}${price !== undefined ? ` (about $${price})` : ''} and save it to ${input.path}.\nPrompt: ${input.prompt}` };
+      const used = byId.get(input.model) ?? model;
+      return { kind: 'note', text: `Generate 1 image with ${used.id}${used.imagePricePerUnit !== undefined ? ` (about $${used.imagePricePerUnit})` : ''} and save it to ${input.path}.\nPrompt: ${input.prompt}` };
     },
     async run(input, context) {
+      const used = byId.get(input.model) ?? model;
       const absolute = await resolveInWorkspace(context.root, input.path);
-      const result = await client.generateImage(model.id, input.prompt, { count: 1, ...(input.size ? { size: input.size } : {}) }, context.signal);
+      const result = await client.generateImage(used.id, input.prompt, { count: 1, ...(input.size ? { size: input.size } : {}) }, context.signal);
       if (!result.bytes) throw new ToolError(result.remoteUrlPresent ? 'The provider returned a link instead of image data; nothing was saved.' : 'The provider returned no image.');
       await context.checkpoints.capture(absolute);
       await mkdir(path.dirname(absolute), { recursive: true });
       await writeFile(absolute, result.bytes);
-      return `Saved ${displayPath(context.root, absolute)} (${Math.round(result.bytes.length / 1024)} KB) from ${model.id}.`;
+      return `Saved ${displayPath(context.root, absolute)} (${Math.round(result.bytes.length / 1024)} KB) from ${used.id}.`;
     }
   };
 }
