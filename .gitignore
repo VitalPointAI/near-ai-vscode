@@ -25,3 +25,5 @@ eval-*.json
 .near-ai/attachments/
 # A run's own scratch work (src/domain/scratch.ts): written and cleaned by the run, never committed.
 .near-ai/scratch/
+# 0.4.23: generated images waiting for review (src/agent/imageDrafts.ts), never committed.
+.near-ai/drafts/

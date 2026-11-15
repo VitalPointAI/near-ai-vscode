@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import * as path from 'node:path';
 import { RunCheckpoints } from '../agent/checkpoints';
 import { compactConversation, contextAction, contextStatus, DEFAULT_COMPACT_AT_TOKENS, DEFAULT_CONTEXT_WINDOW, DEFAULT_THRESHOLDS, estimateTokens, trimOldToolResults } from '../agent/context';
@@ -42,7 +43,8 @@ import type { ConversationStore, Transcript } from './transcripts';
 import type { RunEnd, RunMarkers } from './runMarkers';
 import { NOT_CHECKED_IN_EDITOR, type ResponseEvidence, type VerificationResult } from './attestation';
 import { PreparedAttachments, StagedAttachment } from '../agent/attachments';
-import { imageTool, memoryPreamble, memoryTools } from '../agent/extraTools';
+import { imageTool, ImageDraft, ImageReviewDecision, ImageReviewer, memoryPreamble, memoryTools } from '../agent/extraTools';
+import { cleanOldDrafts, DRAFT_ID, draftFile } from '../agent/imageDrafts';
 import { TeamDefinition, teamAgents, teamLeadPrompt, teamMembersNote } from '../agent/teams';
 import { knowledgeTools } from '../agent/knowledgeTools';
 import { addKnowledge, KNOWLEDGE_INSTRUCTIONS, loadKnowledge } from './teamKnowledgeStore';
@@ -104,6 +106,12 @@ export interface AgentTurnRequest {
   imageModel?: ModelInfo;
   /** The other models on this key that output images; GenerateImage may be asked to use one of them instead of imageModel. */
   imageModels?: ModelInfo[];
+  /**
+   * 0.4.23 (nearAi.agent.imageReview): "ask", the default, saves each generated image as a draft and waits for the person to accept it, ask for changes
+   * or discard it before anything reaches the path; "off" writes it straight to the path as before. The wait is the same in every approval mode, as
+   * AskUserQuestion's is: nothing reaches the path unless the person accepts it.
+   */
+  imageReview?: 'ask' | 'off';
   reputation?: ReputationStore;
   /** Dependency vulnerability checks for the SecurityScan tool. */
   security?: SecurityAccess;
@@ -248,6 +256,10 @@ export class AgentConversation {
   private abort: AbortController | undefined;
   private readonly approvals = new Map<string, (reply: ApprovalReply, cancelled?: boolean) => void>();
   private readonly questions = new Map<string, (answers: string[], cancelled?: boolean) => void>();
+  /** 0.4.23: generated images waiting for the person's review, by draft id. */
+  private readonly imageReviews = new Map<string, (reply: ImageReviewDecision, cancelled?: boolean) => void>();
+  /** The drafts and attempt counts of this conversation's image reviews, kept across its runs so edit_of and attempt numbers carry over. */
+  private readonly imageReviewState = { drafts: new Map<string, { path: string }>(), attempts: new Map<string, number>() };
   /** Approvals and questions waiting for the user, oldest first, as they were posted (replayed when the view reloads). */
   private readonly waiting = new Map<string, Record<string, unknown>>();
   /** Told how many prompts are waiting whenever that changes, so the host can badge the view. */
@@ -386,6 +398,8 @@ export class AgentConversation {
     // Every agent of this run judges a script's provenance from this moment: anything written since asks (review of PR 34).
     this.currentRunStartedAt = Date.now();
     this.currentBaseCommit = await headCommit(this.root);
+    // Image drafts left for more than a week are removed (only drafts this extension made); it never fails a run.
+    if (request.imageModel) await cleanOldDrafts(this.root).catch(() => 0);
     const boundary = runBoundary(request);
     this.activity?.agentStarted({ agentId: mainId, agent: request.skill ? `/${request.skill.name}` : request.team ? `team:${request.team.slug}` : 'agent', runId, model: request.model, conversationId: this.conversationId, ...(boundary ? { boundary } : {}) }, prompt, freshConversation ? String(this.messages[0].content) : undefined);
     this.post({ type: 'assistant-start', model: request.model, privacy: request.privacy });
@@ -396,7 +410,7 @@ export class AgentConversation {
     if (request.attachments?.text) grants.tainted = true;
     for (const event of request.attachments?.security ?? []) this.activity?.security(mainId, event);
     this.steerRun = { grants, extraUsage, mainId };
-    const context: Omit<ToolContext, 'signal' | 'onTodos'> = { root: this.root, checkpoints, shell, readFiles: new Set(), pages: new Map(), ripgrepPath: this.ripgrepPath, readOnlyRoots: request.gsd ? [request.gsd.home] : [], // A person's own teams (0.4.18) are the extension's files as much as the managed Open-GSD runtime: reading them must never ask. Their folder
+    const context: Omit<ToolContext, 'signal' | 'onTodos'> = { root: this.root, agentId: mainId, checkpoints, shell, readFiles: new Set(), pages: new Map(), ripgrepPath: this.ripgrepPath, readOnlyRoots: request.gsd ? [request.gsd.home] : [], // A person's own teams (0.4.18) are the extension's files as much as the managed Open-GSD runtime: reading them must never ask. Their folder
     // lives outside the workspace by design, so it is a trusted root for reads, and it is never written to by an agent.
     trustedToolRoots: [...(request.gsd ? [request.gsd.home] : []), teamLibraryDir(homeFolder())], ...(request.gsd ? { gsdRuntime: { home: request.gsd.home, preambles: await trustedPreambles(request.gsd.home) } } : {}) };
     const tools = this.toolsFor(request, context, grants, extraUsage, record, abort.signal, runId);
@@ -440,7 +454,7 @@ export class AgentConversation {
         if (background?.length) return background;
         if (taskCheckSent) return undefined;
         // A closing question, or a question still waiting for the person, stays the last thing they see: no extra paid turn to bury it (the list is shown as not confirmed done at the run's end).
-        if (this.questions.size || endsWithQuestion(lastAssistantText(transcript))) return undefined;
+        if (this.questions.size || this.imageReviews.size || endsWithQuestion(lastAssistantText(transcript))) return undefined;
         const check = this.taskListCheck(tasksAtStart, signal, (request.maxTurns ?? DEFAULT_MAX_TURNS) - mainTurns);
         if (check) taskCheckSent = true;
         return check;
@@ -560,6 +574,20 @@ export class AgentConversation {
   public answerQuestions(id: string, answers: string[]): void {
     this.questions.get(id)?.(answers);
     this.questions.delete(id);
+  }
+
+  /** The person's decision on a generated image; false when that draft is not waiting (already decided, or its run stopped). */
+  public answerImageReview(id: string, reply: { decision: 'accept' | 'changes' | 'discard'; feedback?: string }): boolean {
+    const settle = this.imageReviews.get(id);
+    if (!settle) return false;
+    this.imageReviews.delete(id);
+    settle(reply.decision === 'changes' ? { decision: 'changes', feedback: (reply.feedback ?? '').trim() || '(no details given)' } : { decision: reply.decision });
+    return true;
+  }
+
+  /** The file of a draft waiting for review, for "Open full size"; undefined for any other id. */
+  public imageDraftFile(id: string): string | undefined {
+    return DRAFT_ID.test(id) && this.imageReviews.has(id) ? draftFile(this.root, id) : undefined;
   }
 
   /** Pause (before its next model turn), resume, or stop one sub-agent. */
@@ -844,7 +872,7 @@ export class AgentConversation {
   }
 
   private toolsFor(request: AgentTurnRequest, context: Omit<ToolContext, 'signal' | 'onTodos'>, grants: RunGrants, extraUsage: UsageMetadata[], record: Record_, runSignal: AbortSignal, runId: string): AgentTool<any>[] {
-    const media = request.imageModel ? [imageTool(request.client, request.imageModel, request.imageModels ?? [])] : [];
+    const media = request.imageModel ? [imageTool(request.client, request.imageModel, request.imageModels ?? [], request.imageReview === 'off' ? undefined : this.imageReviewer())] : [];
     const memoryFor = (agentScope?: MemoryScope, source = runId) => request.memory ? memoryTools(request.memory.store, { project: request.memory.projectScope, agent: agentScope }, AGENT_MEMORY_ACTOR, source) : [];
     // A team run reads and feeds the team's own knowledge graph, so the team gets better the more it works (owner, 2026-11-08). Every member writes to the
     // same graph, which is what makes it shared: a fact one member verified is there for the next one. The graph is keyed by teamKnowledgeKey: a library team's
@@ -985,7 +1013,7 @@ export class AgentConversation {
             // Its own shell, so parallel agents neither queue behind each other's commands nor share a cwd.
             shell = new ShellSession(agentRoot, undefined, request.gsd?.shellEnv ?? {}, request.shellEnvAllow ?? []);
             // Research agents gather outside content; their writes belong in .planning/ (others ask).
-            const agentContext = { ...context, root: agentRoot, shell, readFiles: new Set<string>(), pages: new Map<string, string>(), ...(/research|synthesi|red-team/i.test(label) ? { writeScope: '.planning' } : {}) };
+            const agentContext = { ...context, root: agentRoot, shell, readFiles: new Set<string>(), pages: new Map<string, string>(), agentId: agent.id, agentLabel: label, ...(/research|synthesi|red-team/i.test(label) ? { writeScope: '.planning' } : {}) };
             const isolationNote = worktree ? `\n\n# Isolation\nYou are working in an isolated git worktree at ${worktree.path} on branch ${worktree.branch}${worktree.root !== worktree.path ? `, in its copy of the workspace folder, ${worktree.root}` : ''}.${worktree.rootUnmatched ? ` The workspace folder (${this.root}) could not be placed inside the worktree, so you start at its top level: change into the matching subfolder before working.` : ''}${worktree.rootCreatedEmpty ? ` git does not track that folder, so its copy here is empty: files you need from it are only in the main checkout.` : ''} Commit your work on this branch; do not switch branches or touch the main checkout at ${this.root}.` : '';
             const base = `${this.systemPrompt({ ...request, model }, agentRoot, tools.some((tool) => tool.name === 'Agent' || tool.name === 'Task'))}${isolationNote}`;
             const system = agentBody ? `${agentBody}\n\n${base}` : base;
@@ -1189,9 +1217,12 @@ export class AgentConversation {
     this.lastVisibleAt = Date.now();
     // Consecutive progress lines replace each other in the chat, so a long quiet stretch is one updating line.
     const agents = [...this.agents.values()];
+    // 0.4.23: a run held on an image review says so, rather than that the agent is thinking.
+    const reviews = this.imageReviews.size;
+    const reviewing = reviews ? `waiting for your review of ${reviews === 1 ? 'an image' : `${reviews} images`}` : undefined;
     const detail = agents.length
-      ? agents.map((agent) => `${agent.description || agent.label}: ${agent.paused ? 'paused' : agent.activity === 'Thinking' ? `thinking for ${minutesSince(agent.activitySince)}${agent.lastAction ? ` after ${agent.lastAction}` : ''}` : agent.activity} (${minutesSince(agent.startedAt)}, ${agent.toolCalls} tool call${agent.toolCalls === 1 ? '' : 's'})`).join(' · ')
-      : 'the agent is thinking';
+      ? `${reviewing ? `${reviewing} · ` : ''}${agents.map((agent) => `${agent.description || agent.label}: ${agent.paused ? 'paused' : agent.activity === 'Thinking' ? `thinking for ${minutesSince(agent.activitySince)}${agent.lastAction ? ` after ${agent.lastAction}` : ''}` : agent.activity} (${minutesSince(agent.startedAt)}, ${agent.toolCalls} tool call${agent.toolCalls === 1 ? '' : 's'})`).join(' · ')}`
+      : reviewing ?? 'the agent is thinking';
     const spent = this.runCostUsd();
     const cost = spent > 0 ? ` · about $${spent.toFixed(2)} so far` : '';
     this.post({ type: 'progress', text: `Still working (${minutesSince(runStartedAt)}): ${detail}${cost}.` });
@@ -1575,15 +1606,54 @@ export class AgentConversation {
     });
   }
 
+  /** The image reviewer of this conversation: drafts in the project, cards in this conversation's chat (a sub-agent's too, labelled with it). */
+  private imageReviewer(): ImageReviewer {
+    return { root: this.root, drafts: this.imageReviewState.drafts, attempts: this.imageReviewState.attempts, review: (draft, signal) => this.askImageReview(draft, signal) };
+  }
+
+  /**
+   * Shows a draft in the chat and waits for the person, like a question: it is pinned, replayed to a reloaded view, counted on the badge and in the run's
+   * marker as waiting on a person, and cancelled (the draft kept) when the run or the agent stops. The image goes in the card as a data URL (the view's
+   * CSP allows data: images), up to MAX_PREVIEW_BYTES; a larger one is opened full size instead.
+   */
+  private async askImageReview(draft: ImageDraft, signal: AbortSignal): Promise<ImageReviewDecision> {
+    if (signal.aborted) return { decision: 'cancelled' };
+    const bytes = await readFile(draft.file).catch(() => undefined);
+    if (signal.aborted) return { decision: 'cancelled' };
+    const image = bytes && bytes.length <= MAX_PREVIEW_BYTES ? `data:image/png;base64,${bytes.toString('base64')}` : undefined;
+    const live = draft.agentId ? this.agents.get(draft.agentId) : undefined;
+    if (draft.agentId) this.activity?.waitingForUser(draft.agentId, true);
+    if (live) { this.setActivity(live, 'Waiting for your image review'); this.postAgents(); }
+    return new Promise((resolve) => {
+      const settle = (reply: ImageReviewDecision, cancelled = false) => {
+        this.closePrompt(draft.id, cancelled);
+        if (draft.agentId) this.activity?.waitingForUser(draft.agentId, false);
+        resolve(reply);
+      };
+      this.imageReviews.set(draft.id, settle);
+      signal.addEventListener('abort', () => { if (this.imageReviews.delete(draft.id)) settle({ decision: 'cancelled' }, true); }, { once: true });
+      this.openPrompt(draft.id, {
+        type: 'image-review-request', id: draft.id, path: draft.path, model: draft.model, prompt: draft.prompt, attempt: draft.attempt, sizeKb: Math.max(1, Math.round(draft.bytes / 1024)),
+        ...(image ? { image } : { tooLarge: true }), ...(draft.agent ? { agent: draft.agent } : {}), ...(draft.editOf ? { editOf: draft.editOf } : {}), ...(draft.note ? { note: draft.note } : {})
+      });
+    });
+  }
+
   private releasePending(): void {
     const approvals = [...this.approvals.values()];
     const questions = [...this.questions.values()];
+    const reviews = [...this.imageReviews.values()];
     this.approvals.clear();
     this.questions.clear();
+    this.imageReviews.clear();
     for (const settle of approvals) settle({ decision: 'deny' }, true);
     for (const settle of questions) settle([], true);
+    for (const settle of reviews) settle({ decision: 'cancelled' }, true);
   }
 }
+
+/** The largest draft shown inside the review card; a larger one is shown with "Open full size" only, to keep the chat's messages small. */
+export const MAX_PREVIEW_BYTES = 8 * 1024 * 1024;
 
 /**
  * Waits until `register`'s wake function is called or the signal aborts, whichever comes first, and removes its abort listener either way (review of

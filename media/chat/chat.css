@@ -135,6 +135,7 @@ button { font: inherit; color: inherit; }
 .text-button:hover { background: var(--vscode-button-secondaryHoverBackground); }
 .text-button.primary { background: var(--vscode-button-background); color: var(--vscode-button-foreground); }
 .text-button.primary:hover { background: var(--vscode-button-hoverBackground); }
+.text-button:disabled { opacity: 0.5; cursor: default; }
 
 /* Open-GSD command runs, shown as a collapsible tool call */
 details.tool { margin: 0 0 12px; border-left: 2px solid var(--vscode-panel-border); padding-left: 8px; }
@@ -281,6 +282,18 @@ details.agent-tool .state { color: var(--vscode-errorForeground); }
 .question details.approval-more { margin: 0 0 8px; }
 .question details.approval-more summary { cursor: pointer; color: var(--vscode-textLink-foreground); font-size: 12px; }
 .question details.approval-more pre { margin: 6px 0 0; max-height: min(260px, 30vh); overflow: auto; }
+/* 0.4.23: a generated image waiting for review. The image fits the card's width and a bounded height, framed with theme colours so it reads in light,
+   dark and high-contrast themes; transparent parts show the widget background. */
+.image-review .image-review-preview { display: block; max-width: 100%; max-height: min(260px, 35vh); width: auto; height: auto; margin: 0 0 6px; object-fit: contain; border: 1px solid var(--vscode-panel-border, var(--vscode-focusBorder)); border-radius: 4px; background: var(--vscode-editorWidget-background, transparent); }
+.image-review .image-review-prompt { white-space: pre-wrap; margin: 6px 0 0; }
+.image-review .choices { margin-top: 6px; }
+.image-review textarea.image-review-changes {
+  display: block; width: 100%; margin-top: 8px; padding: 4px 6px; resize: vertical; font: inherit;
+  color: var(--vscode-input-foreground); background: var(--vscode-input-background);
+  border: 1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius: 2px;
+}
+.image-review textarea.image-review-changes:focus { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
+body.vscode-high-contrast .image-review .image-review-preview, body.vscode-high-contrast-light .image-review .image-review-preview { border-color: var(--vscode-contrastBorder, var(--vscode-focusBorder)); }
 /* A run that reached its approval timeout and parked: the card keeps its buttons, and this line says why the run is not moving. */
 .pending-paused { margin: 4px 0 0; font-size: 12px; color: var(--vscode-editorWarning-foreground, var(--vscode-foreground)); overflow-wrap: anywhere; }
 

@@ -262,6 +262,25 @@ function projectTests(): Array<[string, () => Promise<void>]> {
       console.log(`  Widths measured: chat ${SIDEBAR_WIDTHS.join(', ')}px; pages ${[...EDITOR_WIDTHS, ...WIDER_EDITOR_WIDTHS].join(', ')}px${unmeasured.length ? ` except ${unmeasured.length} too wide for this window` : ''}; text set in a wider stand-in font.`);
       assert.deepEqual(problems, []);
     }],
+    ['an image waiting for review shows its card in the narrow chat without overflow, and its answer goes back through the view (0.4.23)', async () => {
+      const extension = vscode.extensions.getExtension(EXTENSION_ID)!;
+      const { postToPage } = require(path.join(extension.extensionPath, 'dist/services/layoutProbe')) as typeof import('../../services/layoutProbe');
+      await vscode.commands.executeCommand('nearAiChatView.focus');
+      const id = 'img-0e2e0e2e0e2e';
+      // A wide image (1200 px), a long path and model, and a sub-agent's label: the card must still fit the sidebar as the host sends it.
+      await postToPage('chat', { type: 'image-review-request', id, path: `report/img/${'a-rather-long-folder-name/'.repeat(3)}hero-image-for-the-report.png`, model: LONG_MODEL, prompt: 'A lighthouse at dusk. '.repeat(20), attempt: 3, sizeKb: 1, image: `data:image/png;base64,${solidPng(1200, 40).toString('base64')}`, agent: 'gsd-designer' });
+      await pause(500);
+      const report = await probe('chat');
+      console.log(`  image review card at ${report.width}px: page ${report.scrollWidth}/${report.clientWidth}, body ${report.bodyScrollWidth}/${report.bodyClientWidth}`);
+      assert.ok(report.scrollWidth <= report.clientWidth + 1 && report.bodyScrollWidth <= report.bodyClientWidth + 1, `the chat scrolls sideways with the card: ${JSON.stringify(report)}`);
+      assert.deepEqual(report.offenders, [], 'nothing in the card reaches past the edge');
+      // Sent through the view, as the card's Request changes button would. The host has no such draft waiting, so nothing else happens.
+      const asked = observer.fromView.length;
+      await api.sidebar.request({ type: 'image-review-reply', id, decision: 'changes', feedback: 'Warmer light, please.' });
+      const reply = await observer.next('fromView', (message) => message.type === 'image-review-reply' && message.id === id, asked);
+      assert.equal(reply.feedback, 'Warmer light, please.');
+      await postToPage('chat', { type: 'prompt-closed', id, outcome: 'cancelled' });
+    }],
     ['a file write asks for approval, applies on approval, and Revert removes it', async () => {
       const before = observer.toView.length;
       await api.sidebar.request({ type: 'send', text: 'write notes', model: 'fake-coder' });
@@ -552,6 +571,19 @@ const WIDE_REPLY = [
   '```ts', `const veryLongLine = '${'x'.repeat(200)}';`, '```', '',
   `See /home/someone/projects/${'deeply-nested-folder/'.repeat(8)}file.ts and https://example.com/${'segment/'.repeat(12)}page`
 ].join('\n');
+
+/** A PNG of one colour, `width` by `height`, made here so the test needs no image file. */
+function solidPng(width: number, height: number): Buffer {
+  const { deflateSync } = require('node:zlib') as typeof import('node:zlib');
+  const table = Array.from({ length: 256 }, (_, n) => { let c = n; for (let k = 0; k < 8; k += 1) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; return c >>> 0; });
+  const crc = (data: Buffer) => { let c = 0xffffffff; for (const byte of data) c = table[(c ^ byte) & 0xff] ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; };
+  const chunk = (type: string, data: Buffer) => { const head = Buffer.alloc(4); head.writeUInt32BE(data.length); const body = Buffer.concat([Buffer.from(type, 'ascii'), data]); const tail = Buffer.alloc(4); tail.writeUInt32BE(crc(body)); return Buffer.concat([head, body, tail]); };
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(width, 0); header.writeUInt32BE(height, 4); header[8] = 8; header[9] = 2; header[10] = 0; header[11] = 0; header[12] = 0;
+  const row = Buffer.concat([Buffer.from([0]), Buffer.alloc(width * 3, 0x60)]);
+  const pixels = deflateSync(Buffer.concat(Array.from({ length: height }, () => row)));
+  return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk('IHDR', header), chunk('IDAT', pixels), chunk('IEND', Buffer.alloc(0))]);
+}
 
 /** A minimal OpenAI-compatible server: one model, a text reply, and a Write tool call. */
 async function fakeModelServer(): Promise<Server> {

@@ -16,7 +16,7 @@ test('package.json declares the same agent defaults the code and the live tests 
     'nearAi.agent.maxTurns': AGENT_DEFAULTS.maxTurns, 'nearAi.agent.maxParallelAgents': AGENT_DEFAULTS.maxParallelAgents,
     'nearAi.agent.maxRunCostUsd': AGENT_DEFAULTS.maxRunCostUsd, 'nearAi.agent.maxRunTokens': AGENT_DEFAULTS.maxRunTokens,
     'nearAi.agent.maxOutputTokens': AGENT_DEFAULTS.maxOutputTokens, 'nearAi.agent.approvalTimeoutMinutes': AGENT_DEFAULTS.approvalTimeoutMinutes,
-    'nearAi.agent.roleModels': DEFAULT_ROLE_MODELS
+    'nearAi.agent.roleModels': DEFAULT_ROLE_MODELS, 'nearAi.agent.imageReview': AGENT_DEFAULTS.imageReview
   };
   for (const [key, value] of Object.entries(expected)) assert.deepEqual(props[key]?.default, value, key);
 });

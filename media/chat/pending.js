@@ -42,7 +42,7 @@
   /** The heading over the pinned prompt: who is asking, and how many wait. */
   function headerText(item, position, size) {
     const who = (item && item.agent) || 'NEAR AI';
-    const what = item && item.kind === 'approval' ? who + ' needs your approval' : who + ' is asking you';
+    const what = item && item.kind === 'approval' ? who + ' needs your approval' : item && item.kind === 'image' ? who + ' made an image for you to review' : who + ' is asking you';
     return size > 1 ? what + ' · ' + position + ' of ' + size + ' waiting' : what;
   }
 
@@ -50,6 +50,7 @@
   function waitingText(item) {
     if (item.kind === 'approval') return 'Waiting for your approval: ' + item.title;
     if (item.kind === 'questions') return 'Waiting for your answer: ' + item.title;
+    if (item.kind === 'image') return 'Waiting for your review: ' + item.title;
     return 'Waiting for your choice: ' + item.title;
   }
 
@@ -63,7 +64,11 @@
       case 'deny': return 'Declined: ' + title;
       case 'expired': return (detail !== undefined && detail !== '' ? 'Expired after ' + detail + ' min' : 'Expired') + ', declined: ' + title;
       case 'answered': return 'Answered: ' + (detail || title);
-      case 'cancelled': return 'Cancelled, the run stopped: ' + title;
+      case 'cancelled': return item.kind === 'image' ? 'Not reviewed, the run stopped (the draft is kept): ' + title : 'Cancelled, the run stopped: ' + title;
+      // 0.4.23: a generated image's review.
+      case 'accepted': return 'Accepted and saved: ' + title;
+      case 'changes-requested': return 'Changes requested for ' + title + (detail ? ': ' + detail : '');
+      case 'discarded': return 'Discarded: ' + title;
       case 'closed': return 'No longer waiting: ' + title;
       case 'covered': return 'Allowed by your answer to the same command: ' + title;
       default: return title;

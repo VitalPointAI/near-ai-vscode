@@ -36,6 +36,9 @@ export interface ToolContext {
   writeScope?: string;
   /** Reports a defense that acted: hidden content removed, a likely injection flagged, an action held or blocked. */
   onSecurity?(event: SecurityEvent): void;
+  /** 0.4.23: the agent making the call (its activity id, and a sub-agent's label), so a card it raises in the main chat says who asked. */
+  agentId?: string;
+  agentLabel?: string;
 }
 
 export interface SecurityEvent { kind: 'injection' | 'hidden-content' | 'held' | 'blocked'; source: string; detail: string }

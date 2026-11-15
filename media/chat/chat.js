@@ -674,6 +674,57 @@
     addPending({ id: m.id, kind: 'questions', agent: m.agent, title }, card, card.querySelector('input') || submitButton, 'NEAR AI is asking you ' + (m.questions.length === 1 ? 'a question: ' + first.question : m.questions.length + ' questions.'));
   }
 
+  // 0.4.23: a generated image waiting for review. The image is shown (a data URL, which the view's CSP allows), with where it will be saved, the model,
+  // the attempt, and the prompt behind a toggle. Accept saves it at its path; Request changes sends the person's words back to the agent; Discard
+  // deletes the draft; Open full size opens the draft in an editor tab and leaves the card waiting.
+  function imageReviewTitle(m) {
+    return 'Image for ' + (m.path || 'the project') + (typeof m.attempt === 'number' && m.attempt > 1 ? ' (attempt ' + m.attempt + ')' : '');
+  }
+  function onImageReview(m) {
+    if (pendingQueue.has(m.id)) return;
+    const title = imageReviewTitle(m);
+    const card = el('div', 'question image-review');
+    card.setAttribute('role', 'group');
+    card.setAttribute('aria-label', 'Review the image for ' + (m.path || 'the project'));
+    card.append(el('p', '', title));
+    if (typeof m.image === 'string' && m.image.startsWith('data:image/png;base64,')) {
+      const img = el('img', 'image-review-preview');
+      img.src = m.image;
+      img.alt = 'Generated image for ' + (m.path || 'the project') + ': ' + String(m.prompt || '').slice(0, 200);
+      card.append(img);
+    } else {
+      card.append(el('div', 'meta', 'This image is too large to show here. Open it full size to see it.'));
+    }
+    const facts = [m.model, m.sizeKb ? m.sizeKb + ' KB' : '', 'attempt ' + (m.attempt || 1), m.editOf ? 'edit of ' + m.editOf : ''].filter(Boolean).join(' · ');
+    card.append(el('div', 'meta', 'Saved to ' + (m.path || 'the project') + ' only if you accept it · ' + facts));
+    if (m.note) card.append(el('div', 'meta', m.note));
+    const prompt = el('details', 'approval-more');
+    prompt.append(el('summary', '', 'Show the prompt'), el('div', 'meta image-review-prompt', m.prompt || ''));
+    card.append(prompt);
+    const answer = (decision, feedback) => {
+      card.querySelectorAll('button,textarea').forEach((node) => { node.disabled = true; });
+      postFor(Object.assign({ type: 'image-review-reply', id: m.id, decision }, feedback ? { feedback } : {}));
+      closePending(m.id, decision === 'accept' ? 'accepted' : decision === 'changes' ? 'changes-requested' : 'discarded', feedback);
+    };
+    const choices = el('div', 'choices');
+    const accept = textButton('Accept', () => answer('accept'), true);
+    choices.append(accept, textButton('Discard', () => answer('discard')), textButton('Open full size', () => postFor({ type: 'image-review-open', id: m.id })));
+    card.append(choices);
+    const changes = el('textarea', 'image-review-changes');
+    changes.rows = 2;
+    changes.placeholder = 'What should change? The agent makes a new version from your words.';
+    changes.setAttribute('aria-label', 'Changes you want to this image');
+    const request = textButton('Request changes', () => { const text = changes.value.trim(); if (text) answer('changes', text); });
+    request.disabled = true;
+    changes.addEventListener('input', () => { request.disabled = !changes.value.trim(); });
+    // Ctrl+Enter (or Cmd+Enter) in the box sends the request, as the composer's own shortcut does.
+    changes.addEventListener('keydown', (event) => { if (event.key === 'Enter' && (event.ctrlKey || event.metaKey) && changes.value.trim()) { event.preventDefault(); answer('changes', changes.value.trim()); } });
+    const changeRow = el('div', 'choices image-review-change-row');
+    changeRow.append(request);
+    card.append(changes, changeRow);
+    addPending({ id: m.id, kind: 'image', agent: m.agent, title }, card, accept, (m.agent || 'NEAR AI') + ' made an image for you to review: ' + (m.path || ''));
+  }
+
   // Running sub-agents with what each is doing, how long it has run, and pause, resume, and stop.
   let agentClock;
   const clock = (ms) => { const seconds = Math.max(0, Math.floor(ms / 1000)); return seconds < 60 ? seconds + 's' : Math.floor(seconds / 60) + 'm ' + String(seconds % 60).padStart(2, '0') + 's'; };
@@ -1528,6 +1579,7 @@
       }
       case 'thread-tool-output': showToolOutput(m); break;
       case 'questions-request': onQuestions(m); break;
+      case 'image-review-request': onImageReview(m); break;
       case 'steer-state': onSteerState(m); break;
       default: break;
     }

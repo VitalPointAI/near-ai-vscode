@@ -53,6 +53,7 @@ import { offerProxyAdvice } from './domain/proxyAdvice';
 import { offerNextStep, registerNewProfile, registerProjectSetup } from './services/setupMenu';
 import { flushSyncOnClose, registerSyncCommands } from './services/syncCommands';
 import { registerCodePushCommand } from './services/onlineHomeVscode';
+import { cleanOldDrafts } from './agent/imageDrafts';
 
 /** Returned only to the extension-host tests, which set NEAR_AI_E2E=1. */
 export interface NearAiTestApi { auth: AuthService; sidebar: NearAiPanelViewProvider }
@@ -64,12 +65,13 @@ export function activate(context: vscode.ExtensionContext): NearAiTestApi | unde
   // empty list; every reader calls whenTeamsMoved() first, and a move that fails never throws.
   startTeamsMove(migrateTeams({ home: homeFolder(), globalStorage: context.globalStorageUri.fsPath }).catch(() => ({ moved: 0, skipped: 0 })));
   // Scratch work stays inside the project and leaves nothing behind (0.4.18): the folder and its .gitignore lines, and anything a killed run left.
+  // 0.4.23: image drafts older than a week are removed too (only drafts the extension made).
   // Only for a project the person has actually set up (.planning/.near-ai exists), because opening a folder must still write nothing into it: that is
   // the promise the plain e2e checks. Each project is handled on its own, so nothing is shared between projects and nothing is global.
   for (const folder of vscode.workspace.workspaceFolders ?? []) {
     const root = folder.uri.fsPath;
     void isNearAiProject(root)
-      .then((nearAi) => (nearAi ? ensureScratch(root).then(() => cleanScratch(root, { staleOnlyMs: 6 * 60 * 60 * 1000 })) : undefined))
+      .then((nearAi) => (nearAi ? ensureScratch(root).then(() => cleanScratch(root, { staleOnlyMs: 6 * 60 * 60 * 1000 })).then(() => cleanOldDrafts(root)) : undefined))
       .catch(() => undefined);
   }
   // The computer-wide list of saved profiles (metadata only), so a profile set up in one project can be used in another (G-61-9).

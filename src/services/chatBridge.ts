@@ -25,6 +25,10 @@ export type ChatWebviewMessage =
   | { type: 'chat-ready' }
   | { type: 'open-command'; command: string; args?: string; model?: string; conversationId?: string }
   | { type: 'questions-reply'; id: string; answers: string[]; conversationId?: string }
+  /** 0.4.23: the person's decision on a generated image waiting for review; `feedback` is the change they asked for (only with `changes`). */
+  | { type: 'image-review-reply'; id: string; decision: 'accept' | 'changes' | 'discard'; feedback?: string; conversationId?: string }
+  /** 0.4.23: opens a draft waiting for review in an editor tab, full size. */
+  | { type: 'image-review-open'; id: string; conversationId?: string }
   | { type: 'agent-control'; agentId: string; action: 'pause' | 'resume' | 'stop' | 'nudge' }
   /** Opens a saved conversation as a tab, or shows it if it is already open. */
   | { type: 'resume-conversation'; id: string }
@@ -346,6 +350,18 @@ export function parseChatWebviewMessage(value: unknown): ChatWebviewMessage | un
     if (Object.keys(message).some((key) => !['type', 'id', 'answers', 'conversationId'].includes(key))) return undefined;
     if (message.answers.length > 4 || message.answers.some((answer) => typeof answer !== 'string' || answer.length > 4000)) return undefined;
     return { type: 'questions-reply', id: message.id, answers: message.answers as string[], ...scoped };
+  }
+  if (message.type === 'image-review-reply' && typeof message.id === 'string' && /^img-[a-f0-9]{12}$/.test(message.id)) {
+    if (Object.keys(message).some((key) => !['type', 'id', 'decision', 'feedback', 'conversationId'].includes(key))) return undefined;
+    if (message.decision !== 'accept' && message.decision !== 'changes' && message.decision !== 'discard') return undefined;
+    if (message.feedback !== undefined && (typeof message.feedback !== 'string' || message.feedback.length > 4000 || message.decision !== 'changes')) return undefined;
+    // Changes need words: an empty request would tell the agent nothing to change.
+    if (message.decision === 'changes' && !(typeof message.feedback === 'string' && message.feedback.trim())) return undefined;
+    return { type: 'image-review-reply', id: message.id, decision: message.decision, ...(message.decision === 'changes' ? { feedback: (message.feedback as string).trim() } : {}), ...scoped };
+  }
+  if (message.type === 'image-review-open' && typeof message.id === 'string' && /^img-[a-f0-9]{12}$/.test(message.id)) {
+    if (Object.keys(message).some((key) => !['type', 'id', 'conversationId'].includes(key))) return undefined;
+    return { type: 'image-review-open', id: message.id, ...scoped };
   }
   if (message.type === 'steer') {
     // 0.4.18 review: `interrupt` is part of a Steer, so it must be allowed here; without it a Steer was rejected and the button did nothing.

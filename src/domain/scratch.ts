@@ -12,8 +12,8 @@ import * as path from 'node:path';
 /** The scratch folder, relative to the project root, with forward slashes for prompts and git. */
 export const SCRATCH_DIR = '.near-ai/scratch';
 
-/** The lines a project's `.gitignore` needs so scratch work is never committed. */
-export const SCRATCH_IGNORE_LINES: readonly string[] = Object.freeze(['.near-ai/scratch/', '.near-ai/attachments/', '.near-ai/state/']);
+/** The lines a project's `.gitignore` needs so scratch work is never committed (0.4.23: and image drafts waiting for review, src/agent/imageDrafts.ts). */
+export const SCRATCH_IGNORE_LINES: readonly string[] = Object.freeze(['.near-ai/scratch/', '.near-ai/attachments/', '.near-ai/state/', '.near-ai/drafts/']);
 
 /**
  * The project's state home (D-04): chats, runs, saved comparisons and the project key, shared by every editor that opens this folder. It is
