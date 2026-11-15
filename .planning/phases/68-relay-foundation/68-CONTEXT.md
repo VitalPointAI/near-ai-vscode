@@ -45,6 +45,13 @@ The extension is not changed by this phase, except for build hygiene: the root p
 - **D-15:** The relay speaks plain HTTP on an internal port. TLS for the public Teams webhook ends at the owner's reverse proxy, which the runbook documents (Phase 76 finishes the runbook). *Undo: cheap.*
 - **D-16:** The Signal sidecar (`bbernhard/signal-cli-rest-api`, `MODE=json-rpc`) is in the Compose file, pinned to an exact version tag plus digest, behind a Compose profile that is off by default. Phase 75 checks the bundled signal-cli age and wires it.
 
+### Decisions from research (2026-11-14, made on the owner's behalf)
+- **D-17 (amends D-07):** Podman can create the state directory as 0755 and the image has no shell to fix it. If the relay's own uid owns the directory and it is a real directory (not a symlink), the relay tightens it to 0700 and logs that it did. It still refuses to start if another user owns it or it is a symlink.
+- **D-18 (D-11 detail):** The phone-number pseudonym key comes from an optional secret file; without one, the relay creates a random key once and stores it 0600 in the state directory.
+- **D-19:** `relay` becomes a required CI check. Because that changes gate paths and branch protection, the PR waits for the owner's `agent-review-gates` approval and the owner re-applies branch protection (a human-action checkpoint).
+- **D-20:** Package pins are checked by a human before the first install in `relay/` (`jose` 6.2.17 and `@types/node` 26.6.6 are only days old; fallbacks 6.2.15 and 26.6.5).
+- **D-21:** The single-instance lock on the state directory is deferred to Phase 71. The Signal sidecar pin (`0.101`, signal-cli 0.14.8) is re-checked in Phase 75 before about 2026-12-10.
+
 ### Claude's discretion
 - Module layout inside `relay/src/`, the config file format, the router shape, and the exact table schema, as long as D-04's interface holds.
 </decisions>
