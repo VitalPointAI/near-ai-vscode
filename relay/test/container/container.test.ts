@@ -87,6 +87,21 @@ function compose(args: string[], extra: Record<string, string> = {}): Promise<Re
   return run('docker', ['compose', '-p', PROJECT, '-f', COMPOSE_FILE, ...args], { env: composeEnv(extra) });
 }
 
+const PORT_TAKEN = /port is already allocated|address already in use/i;
+
+/**
+ * compose up, retried once on a new port when the published port was taken between freePort() closing its probe and Compose binding it (a
+ * small race on a shared runner or developer machine). Any other failure is returned as it is.
+ */
+async function composeUp(): Promise<Result> {
+  const args = ['up', '-d', '--no-build', '--wait', '--wait-timeout', '120'];
+  const first = await compose(args);
+  if (first.code === 0 || !PORT_TAKEN.test(`${first.stdout}\n${first.stderr}`)) return first;
+  await compose(['down', '--remove-orphans', '--timeout', '5']); // the project's containers only; the state volume is kept
+  hostPort = await freePort();
+  return compose(args);
+}
+
 async function freePort(): Promise<number> {
   const probe = net.createServer();
   await new Promise<void>((resolve) => probe.listen(0, '127.0.0.1', resolve));
@@ -161,7 +176,8 @@ function buildImageRef(): string {
   return first[1];
 }
 
-describe('relay container image and Compose project', { timeout: 1_500_000 }, () => {
+// 20 minutes, below the relay CI job's 25: a hang is then reported as this suite's timeout, not as a cancelled job.
+describe('relay container image and Compose project', { timeout: 1_200_000 }, () => {
   before(async () => {
     const dockerVersion = await run('docker', ['version', '--format', '{{.Server.Version}}']).catch(() => undefined);
     assert.ok(dockerVersion && dockerVersion.code === 0, 'Docker is required for the container suite and was not found or is not running (install Docker, then run it again)');
@@ -342,7 +358,7 @@ describe('relay container image and Compose project', { timeout: 1_500_000 }, ()
 
   test('Compose up: healthy, /healthz on loopback has the five fields, the logs name the secret but never show it', { timeout: 240_000 }, async () => {
     projectStarted = true;
-    const up = await compose(['up', '-d', '--no-build', '--wait', '--wait-timeout', '120']);
+    const up = await composeUp();
     assert.equal(up.code, 0, `compose up failed:\n${up.stdout}\n${up.stderr}\n${(await relayLogs().catch(() => ({ raw: 'no logs' }))).raw}`);
 
     const state = await mustRun('docker', ['compose', '-p', PROJECT, '-f', COMPOSE_FILE, 'ps', '--format', 'json', 'relay'], { env: composeEnv() });
@@ -420,7 +436,7 @@ describe('relay container image and Compose project', { timeout: 1_500_000 }, ()
 
     await mustRun('docker', ['compose', '-p', PROJECT, '-f', COMPOSE_FILE, 'kill', '-s', 'KILL', 'relay'], { env: composeEnv() });
     // The restart policy may bring it back by itself; `up` covers the case where it has not yet.
-    const up = await compose(['up', '-d', '--no-build', '--wait', '--wait-timeout', '120']);
+    const up = await composeUp();
     assert.equal(up.code, 0, `compose up after the kill failed:\n${up.stdout}\n${up.stderr}`);
 
     let listening: Array<Record<string, unknown>> = [];
