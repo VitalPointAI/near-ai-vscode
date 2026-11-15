@@ -71,6 +71,30 @@ export interface AcceptResult {
   runId: string;
 }
 
+/** The extension's ApprovalReply decisions (src/agent/loop.ts) minus `pending`, which means nobody answered and is never stored as an answer. */
+export type ApprovalDecision = 'allow' | 'allow-run' | 'allow-always' | 'deny';
+export const APPROVAL_DECISIONS: readonly ApprovalDecision[] = ['allow', 'allow-run', 'allow-always', 'deny'];
+
+export type ApprovalState = 'pending' | 'answered' | 'expired';
+
+export interface ApprovalRecord {
+  tenantId: string;
+  approvalId: string;
+  runId: string;
+  /** Who asked for the run; only this person may be offered the approval (the extension's callId, tool and title are carried one to one). */
+  requesterId: string;
+  callId: string;
+  tool: string;
+  title: string;
+  state: ApprovalState;
+  decision: ApprovalDecision | null;
+  createdAt: number;
+  expiresAt: number;
+  answeredAt: number | null;
+}
+
+export type NewApproval = Omit<ApprovalRecord, 'state' | 'decision' | 'answeredAt'>;
+
 export type StoreErrorCode = 'newer-schema' | 'unknown-tenant' | 'binding-conflict' | 'unknown-run' | 'invalid-record';
 
 /** A store failure. The message is a plain sentence and never contains a message payload. */
@@ -113,6 +137,16 @@ export interface RelayStore {
   transitionRun(tenantId: string, runId: string, from: RunState, to: RunState, now: number): Promise<boolean>;
   /** Runs in any of these states, across all tenants. */
   countRuns(states: readonly RunState[]): Promise<number>;
+
+  /** Stores a pending approval for a run of the same tenant; unknown-run when that run does not exist under this tenant. */
+  addApproval(approval: NewApproval): Promise<void>;
+  getApproval(tenantId: string, approvalId: string): Promise<ApprovalRecord | undefined>;
+  /** Compare and set from pending, only before expiresAt. False when it was already answered or expired, or when `now` is at or after expiresAt. */
+  answerApproval(tenantId: string, approvalId: string, decision: ApprovalDecision, now: number): Promise<boolean>;
+  /** Marks pending approvals whose expiresAt is at or before `now` as expired, across all tenants; returns how many. */
+  expireApprovals(now: number): Promise<number>;
+  /** Pending approvals of one tenant, optionally of one requester, oldest first. */
+  listPendingApprovals(tenantId: string, requesterId?: string): Promise<ApprovalRecord[]>;
 
   close(): Promise<void>;
 }

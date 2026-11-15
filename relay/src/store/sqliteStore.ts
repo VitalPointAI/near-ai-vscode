@@ -1,14 +1,19 @@
 import { closeSync, openSync } from 'node:fs';
 import { Database } from 'node:sqlite';
 import {
+  APPROVAL_DECISIONS,
   CHANNELS,
   RUN_STATES,
   StoreError,
   type AcceptResult,
+  type ApprovalDecision,
+  type ApprovalRecord,
+  type ApprovalState,
   type Channel,
   type ConversationBinding,
   type InboundMessage,
   type MessageState,
+  type NewApproval,
   type QueuedMessage,
   type RelayStore,
   type RunRecord,
@@ -53,6 +58,23 @@ function checkChannel(value: unknown): Channel {
 function checkRunState(field: string, value: unknown): RunState {
   if (!(RUN_STATES as readonly unknown[]).includes(value)) throw invalid(field, 'is not a run state');
   return value as RunState;
+}
+
+function checkDecision(value: unknown): ApprovalDecision {
+  if (!(APPROVAL_DECISIONS as readonly unknown[]).includes(value)) throw invalid('decision', `must be one of ${APPROVAL_DECISIONS.join(', ')}`);
+  return value as ApprovalDecision;
+}
+
+function checkApproval(approval: NewApproval): void {
+  checkId('tenantId', approval.tenantId);
+  checkId('approvalId', approval.approvalId);
+  checkId('runId', approval.runId);
+  checkId('requesterId', approval.requesterId);
+  checkId('callId', approval.callId);
+  checkId('tool', approval.tool);
+  if (typeof approval.title !== 'string') throw invalid('title', 'must be text');
+  checkTime('createdAt', approval.createdAt);
+  checkTime('expiresAt', approval.expiresAt);
 }
 
 function checkInbound(message: InboundMessage): void {
@@ -102,6 +124,23 @@ function toBinding(row: Row): ConversationBinding {
     conversationId: row.conversation_id as string,
     tenantId: row.tenant_id as string,
     createdAt: Number(row.created_at),
+  };
+}
+
+function toApproval(row: Row): ApprovalRecord {
+  return {
+    tenantId: row.tenant_id as string,
+    approvalId: row.approval_id as string,
+    runId: row.run_id as string,
+    requesterId: row.requester_id as string,
+    callId: row.call_id as string,
+    tool: row.tool as string,
+    title: row.title as string,
+    state: row.state as ApprovalState,
+    decision: row.decision === null ? null : (row.decision as ApprovalDecision),
+    createdAt: Number(row.created_at),
+    expiresAt: Number(row.expires_at),
+    answeredAt: row.answered_at === null ? null : Number(row.answered_at),
   };
 }
 
@@ -174,6 +213,22 @@ export class SqliteStore implements RelayStore {
       queueDepth: db.prepare(`SELECT count(*) AS depth FROM messages WHERE tenant_id = ? AND state != 'done'`),
       getRun: db.prepare('SELECT * FROM runs WHERE tenant_id = ? AND run_id = ?'),
       transitionRun: db.prepare('UPDATE runs SET state = ?, updated_at = ? WHERE tenant_id = ? AND run_id = ? AND state = ?'),
+      insertApproval: db.prepare(
+        `INSERT INTO approvals (tenant_id, approval_id, run_id, requester_id, call_id, tool, title, state, decision, created_at, expires_at, answered_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', NULL, ?, ?, NULL)`,
+      ),
+      getApproval: db.prepare('SELECT * FROM approvals WHERE tenant_id = ? AND approval_id = ?'),
+      answerApproval: db.prepare(
+        `UPDATE approvals SET state = 'answered', decision = ?, answered_at = ?
+         WHERE tenant_id = ? AND approval_id = ? AND state = 'pending' AND expires_at > ?`,
+      ),
+      expireApprovals: db.prepare(`UPDATE approvals SET state = 'expired' WHERE state = 'pending' AND expires_at <= ?`),
+      pendingForTenant: db.prepare(
+        `SELECT * FROM approvals WHERE tenant_id = ? AND state = 'pending' ORDER BY created_at, approval_id`,
+      ),
+      pendingForRequester: db.prepare(
+        `SELECT * FROM approvals WHERE tenant_id = ? AND state = 'pending' AND requester_id = ? ORDER BY created_at, approval_id`,
+      ),
       runCounts: db.prepare('SELECT state, count(*) AS total FROM runs GROUP BY state'),
     };
   }
@@ -346,6 +401,58 @@ export class SqliteStore implements RelayStore {
       if (wanted.has(row.state as RunState)) total += Number(row.total);
     }
     return total;
+  }
+
+  async addApproval(approval: NewApproval): Promise<void> {
+    checkApproval(approval);
+    this.transaction(() => {
+      if (!this.statement('getRun').get(approval.tenantId, approval.runId)) {
+        throw new StoreError('unknown-run', 'The approval was not stored: that run does not exist for this tenant.');
+      }
+      if (this.statement('getApproval').get(approval.tenantId, approval.approvalId)) {
+        throw invalid('approvalId', 'is already used by another approval of this tenant');
+      }
+      this.statement('insertApproval').run(
+        approval.tenantId,
+        approval.approvalId,
+        approval.runId,
+        approval.requesterId,
+        approval.callId,
+        approval.tool,
+        approval.title,
+        approval.createdAt,
+        approval.expiresAt,
+      );
+    });
+  }
+
+  async getApproval(tenantId: string, approvalId: string): Promise<ApprovalRecord | undefined> {
+    checkId('tenantId', tenantId);
+    checkId('approvalId', approvalId);
+    const row = this.statement('getApproval').get(tenantId, approvalId) as Row | undefined;
+    return row ? toApproval(row) : undefined;
+  }
+
+  async answerApproval(tenantId: string, approvalId: string, decision: ApprovalDecision, now: number): Promise<boolean> {
+    checkId('tenantId', tenantId);
+    checkId('approvalId', approvalId);
+    checkDecision(decision);
+    checkTime('now', now);
+    return this.transaction(() => Number(this.statement('answerApproval').run(decision, now, tenantId, approvalId, now).changes) === 1);
+  }
+
+  async expireApprovals(now: number): Promise<number> {
+    checkTime('now', now);
+    return this.transaction(() => Number(this.statement('expireApprovals').run(now).changes));
+  }
+
+  async listPendingApprovals(tenantId: string, requesterId?: string): Promise<ApprovalRecord[]> {
+    checkId('tenantId', tenantId);
+    const rows =
+      requesterId === undefined
+        ? (this.statement('pendingForTenant').all(tenantId) as Row[])
+        : (this.statement('pendingForRequester').all(tenantId, checkId('requesterId', requesterId)) as Row[]);
+    return rows.map(toApproval);
   }
 
   async close(): Promise<void> {
