@@ -116,9 +116,11 @@ export function imageTool(client: NearAiClient, model: ModelInfo, models: readon
       const shown = displayPath(context.root, absolute);
       let source: Uint8Array | undefined;
       if (input.editOf) {
-        if (!reviewer.drafts.has(input.editOf)) throw new ToolError(`${input.editOf} is not a draft kept in this conversation (an accepted draft has moved to its path, and a discarded one is gone). Leave edit_of out to make a new image.`);
+        // PR #55 review: a draft that no longer exists cannot be edited, so the agent is told to make the image fresh, without edit_of.
+        const fresh = `Call GenerateImage again without edit_of, path: "${input.path}", and a prompt that describes the whole image with the user's changes; it makes a new image.`;
+        if (!reviewer.drafts.has(input.editOf)) throw new ToolError(`${input.editOf} is not a draft kept in this conversation (an accepted draft has moved to its path, and a discarded one is gone), so it cannot be edited. ${fresh}`);
         source = await readDraft(reviewer.root, input.editOf);
-        if (!source) { reviewer.drafts.delete(input.editOf); throw new ToolError(`Draft ${input.editOf} is no longer in ${DRAFTS_DIR}. Leave edit_of out to make a new image.`); }
+        if (!source) { reviewer.drafts.delete(input.editOf); throw new ToolError(`Draft ${input.editOf} is no longer in ${DRAFTS_DIR}, so it cannot be edited. ${fresh}`); }
       }
       const made = await makeImage(client, used, input, source, context.signal);
       const bytes = made.result.bytes;
@@ -154,6 +156,11 @@ export function imageTool(client: NearAiClient, model: ModelInfo, models: readon
             reviewer.drafts.delete(id);
             return `Accepted by the user and saved to ${shown} (${kb} KB, ${used.id}).${how}`;
           case 'changes':
+            // PR #55 review: the draft's file may have gone while the card waited (removed by hand, or a clean-up); then edit_of would name a missing file.
+            if (!(await readDraft(reviewer.root, id))) {
+              reviewer.drafts.delete(id);
+              return `The user asked for changes to the image for ${shown} (attempt ${attempt}): ${decision.feedback}\nDraft ${id} is gone from ${DRAFTS_DIR}, so it cannot be edited. Call GenerateImage again without edit_of, path: "${input.path}", and a prompt that describes the whole image with these changes. Nothing was saved to ${shown}.${how}`;
+            }
             return `The user asked for changes to draft ${id} (attempt ${attempt} at ${shown}): ${decision.feedback}\nDraft ${id} is kept; call GenerateImage again with edit_of: "${id}", path: "${input.path}", and a prompt that applies these changes. Nothing was saved to ${shown}.${how}`;
           case 'discard':
             await deleteDraft(reviewer.root, id);

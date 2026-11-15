@@ -693,8 +693,9 @@
       img.alt = 'Generated image for ' + (m.path || 'the project') + ': ' + String(m.prompt || '').slice(0, 200);
       card.append(img);
     } else if (m.missing) {
-      // 0.4.24: the draft's file is no longer there, so there is nothing to show, open or save; Discard (or Request changes) settles the card.
-      card.append(el('div', 'meta', 'This draft is gone: its file is no longer in the drafts folder, so there is nothing to show or save. Discard it, or request changes for a new image.'));
+      // 0.4.24: the draft's file is no longer there, so there is nothing to show, open, save or change (PR #55 review: Request changes told the agent to
+      // edit a missing file); Discard settles the card.
+      card.append(el('div', 'meta', 'This draft is gone: its file is no longer in the drafts folder, so there is nothing to show, save or change. Discard it, then ask the agent for a new image if you still want one.'));
     } else {
       card.append(el('div', 'meta', 'This image is too large to show here. Open it full size to see it.'));
     }
@@ -722,9 +723,11 @@
     changes.setAttribute('aria-label', 'Changes you want to this image');
     const request = textButton('Request changes', () => { const text = changes.value.trim(); if (text) answer('changes', text); });
     request.disabled = true;
-    changes.addEventListener('input', () => { request.disabled = !changes.value.trim(); });
+    // A gone draft has nothing to change: the box and the button stay disabled.
+    if (m.missing) changes.disabled = true;
+    changes.addEventListener('input', () => { request.disabled = !!m.missing || !changes.value.trim(); });
     // Ctrl+Enter (or Cmd+Enter) in the box sends the request, as the composer's own shortcut does.
-    changes.addEventListener('keydown', (event) => { if (event.key === 'Enter' && (event.ctrlKey || event.metaKey) && changes.value.trim()) { event.preventDefault(); answer('changes', changes.value.trim()); } });
+    changes.addEventListener('keydown', (event) => { if (event.key === 'Enter' && (event.ctrlKey || event.metaKey) && !m.missing && changes.value.trim()) { event.preventDefault(); answer('changes', changes.value.trim()); } });
     const changeRow = el('div', 'choices image-review-change-row');
     changeRow.append(request);
     card.append(changes, changeRow);

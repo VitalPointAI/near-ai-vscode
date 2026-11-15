@@ -21,8 +21,8 @@
   made from the prompt instead, which cost a second image. Now that happens only when the error
   says editing is not supported; any other failure is reported as it is.
 - **A missing image draft says so.** A review card for a draft whose file had been removed said the
-  image was too large to show. It now says the draft is gone and offers only Discard or Request
-  changes.
+  image was too large to show. It now says the draft is gone and offers only Discard, and an agent
+  asked to change a draft that is gone is told to make a new image rather than edit a missing file.
 - **Files you attached stay attached.** A rare message from the editor could hide the chips of
   files you had attached while they were still going to be sent with your next message. Chips now
   go only when their files have gone with a message.

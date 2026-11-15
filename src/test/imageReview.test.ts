@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
-import { mkdir, mkdtemp, readdir, readFile, utimes, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -740,6 +740,16 @@ test('a draft whose file is gone says so on its card, offers no Accept, and a to
   assert.equal(buttons(gone).get('Accept')?.disabled, true, 'there is nothing to accept');
   assert.equal(buttons(gone).get('Open full size')?.disabled, true, 'or to open');
   assert.equal(buttons(gone).get('Discard')?.disabled, false);
+  // PR #55 review: Request changes told the agent to edit a missing file. A gone draft has nothing to change, even once words are typed.
+  const box = gone.all((child) => child.className === 'image-review-changes')[0];
+  assert.ok(box);
+  assert.equal(box.disabled, true, 'the change box is disabled');
+  box.value = 'make it blue';
+  for (const listener of box.listeners.input ?? []) listener({ preventDefault() {}, target: box });
+  assert.equal(buttons(gone).get('Request changes')?.disabled, true, 'there is nothing to change');
+  page.posts.length = 0;
+  for (const listener of box.listeners.keydown ?? []) listener({ key: 'Enter', ctrlKey: true, preventDefault() {}, target: box } as never);
+  assert.equal(page.sent().some((message) => (message as { type?: string }).type === 'image-review-reply'), false, 'and Ctrl+Enter sends no change request');
   // Only the card on show is in the page, so the too-large one is shown on a page of its own.
   const other = chatPage();
   other.send({ type: 'image-review-request', id: 'img-0d0d0d0d0d0d', path: 'assets/b.png', model: 'm', prompt: 'p', attempt: 1, sizeKb: 9000, tooLarge: true });
@@ -747,4 +757,31 @@ test('a draft whose file is gone says so on its card, offers no Accept, and a to
   assert.ok(large);
   assert.ok(texts(large).some((text) => /too large to show here/.test(text)));
   assert.equal(buttons(large).get('Accept')?.disabled, false);
+});
+
+// PR #55 review: a change asked for on a draft whose file has gone, or an edit_of naming a draft that no longer exists, tells the agent to make the image
+// fresh without edit_of, never to edit a missing file.
+test('changes to a draft that has gone, and an edit_of naming a missing draft, tell the agent to generate fresh without edit_of', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'near-ai-image-gone-changes-'));
+  const shown: ImageDraft[] = [];
+  const reviewer: ImageReviewer = {
+    root, drafts: new Map(), attempts: new Map(),
+    // The draft is removed (by hand, or a clean-up) while its card waits, then the person asks for changes.
+    review: async (draft) => { shown.push(draft); await rm(draft.file, { force: true }); return { decision: 'changes', feedback: 'make it blue' }; }
+  };
+  const client = imageClient();
+  const tool = imageTool(client as never, FLUX as never, [], reviewer);
+  await withContext(root, async (context) => {
+    const result = await tool.run(tool.parse({ prompt: 'a lighthouse', path: 'hero.png' }), context);
+    assert.match(result, /make it blue/);
+    assert.match(result, /is gone from .*, so it cannot be edited\. Call GenerateImage again without edit_of, path: "hero\.png"/);
+    assert.doesNotMatch(result, /edit_of: "/, 'the agent is not told to edit the missing draft');
+    assert.equal(reviewer.drafts.has(shown[0].id), false, 'the missing draft is forgotten');
+    // Named anyway, it is refused before anything is paid for, with the same advice.
+    await assert.rejects(tool.run(tool.parse({ prompt: 'blue', path: 'hero.png', edit_of: shown[0].id }), context), /cannot be edited\. Call GenerateImage again without edit_of/);
+    // A draft still listed whose file has gone is refused the same way.
+    reviewer.drafts.set('img-0e0e0e0e0e0f', { path: 'hero.png' });
+    await assert.rejects(tool.run(tool.parse({ prompt: 'blue', path: 'hero.png', edit_of: 'img-0e0e0e0e0e0f' }), context), /is no longer in .*, so it cannot be edited\. Call GenerateImage again without edit_of/);
+    assert.deepEqual(client.calls.map((entry) => entry.kind), ['generate'], 'no edit was paid for');
+  });
 });
