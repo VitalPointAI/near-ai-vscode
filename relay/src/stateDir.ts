@@ -106,6 +106,7 @@ function plainName(name: string): void {
 }
 
 async function syncDirectory(dir: string): Promise<void> {
+  // fsync of the directory makes the rename itself durable, not only the file's bytes.
   const handle = await open(dir, constants.O_RDONLY);
   try {
     await handle.sync();
@@ -123,7 +124,7 @@ export async function writePrivateFileAtomic(dir: string, name: string, data: st
     const handle = await open(temporary, 'wx', 0o600);
     try {
       await handle.writeFile(data);
-      await handle.sync();
+      await handle.sync(); // fsync before the rename, so the new name never points at bytes that are not on disk
     } finally {
       await handle.close();
     }
