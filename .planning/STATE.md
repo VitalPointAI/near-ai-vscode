@@ -5,7 +5,7 @@ milestone_name: Messaging relay — Teams and Signal
 current_phase: 68
 current_phase_name: Relay foundation
 status: planning
-stopped_at: Completed gap-closure plans 27-26..27-36 (full gate green)
+stopped_at: Phase 68 planned (8 plans, checker passed)
 last_updated: "2026-11-15T00:44:43.490Z"
 state_head: e3f23803c3c457f337b2285eb5f650b28f203f76
 progress:
@@ -24,7 +24,7 @@ last_activity_desc: "Completed quick task 261113-lbo: fix the chat task list not
 
 Milestone: v0.7.0 Messaging relay — Teams and Signal (Phases 68-76)
 Phase: 68 (Relay foundation) — READY TO EXECUTE
-Next: PR #40 re-review and merge, then 27-16 (release 0.4.20); then Phase 68 Relay foundation
+Next: `/gsd-execute-phase 68` in the messaging-relay worktree; wave 1 stops at the D-20 package-pin checkpoint
 
 ## Accumulated Context
 
