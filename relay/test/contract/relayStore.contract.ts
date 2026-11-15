@@ -438,6 +438,14 @@ export function relayStoreContract(name: string, factory: StoreFactory): void {
       assert.equal((await handle.store.getApproval('acme', 'ap-1'))?.state, 'pending');
     }));
 
+  test(`${name}: an approval id already used by this tenant is invalid-record and the first approval is kept`, () =>
+    withStore(async (handle) => {
+      await withRun(handle);
+      await handle.store.addApproval(approval('acme', 'ap-1', 'run-1', { title: 'first' }));
+      await expectStoreError(handle.store.addApproval(approval('acme', 'ap-1', 'run-1', { title: 'second' })), 'invalid-record');
+      assert.equal((await handle.store.getApproval('acme', 'ap-1'))?.title, 'first');
+    }));
+
   test(`${name}: another tenant cannot read or answer an approval`, () =>
     withStore(async (handle) => {
       await withRun(handle);
