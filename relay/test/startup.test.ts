@@ -302,13 +302,47 @@ test('a missing or damaged app.mjs prints one fixed sentence on stderr, no path 
 
 // Regression: relay.listening was logged before the SIGTERM handler existed, so a supervisor (or a
 // test) that stopped the relay as soon as it saw that line could hit the default kill instead of a
-// clean stop (seen in CI on PR #54). The timing window is too small to hit reliably here, so the
-// order is pinned in the source.
-test('the relay registers its SIGTERM and SIGINT handlers before it logs relay.listening', async () => {
+// clean stop (seen in CI on PR #54). The timing window is small, so the order is pinned in the
+// source, and the next test also checks it on real runs.
+test('the relay reads its instance id, then registers its SIGTERM and SIGINT handlers, then logs relay.listening', async () => {
   const source = await readFile(fileURLToPath(new URL('../../src/main.ts', import.meta.url)), 'utf8');
+  const instanceId = source.indexOf('await openStore.instanceId()');
   const listening = source.indexOf("logger.info('relay.listening'");
   const sigterm = source.indexOf("process.on('SIGTERM'");
   const sigint = source.indexOf("process.on('SIGINT'");
-  assert.ok(listening > 0 && sigterm > 0 && sigint > 0, 'main.ts logs relay.listening and handles SIGTERM and SIGINT');
+  assert.ok(instanceId > 0 && listening > 0 && sigterm > 0 && sigint > 0, 'main.ts reads the instance id, logs relay.listening and handles SIGTERM and SIGINT');
+  assert.equal(source.indexOf('await openStore.instanceId()', instanceId + 1), -1, 'the instance id is read once');
+  // No await between registering the handlers and the relay.listening line, so no stop can run while startup is still reading.
+  assert.ok(instanceId < sigterm && instanceId < sigint, 'the instance id is read before the handlers are registered');
   assert.ok(sigterm < listening && sigint < listening, 'both handlers are registered before relay.listening is logged');
+  assert.ok(!source.slice(Math.min(sigterm, sigint), listening).includes('await '), 'nothing is awaited between the handlers and relay.listening');
+});
+
+test('SIGTERM sent the moment relay.listening appears always stops the relay cleanly with exit 0 (20 runs)', async () => {
+  const once = async (): Promise<void> => {
+    await withTempState(async (stateDir) => {
+      const launched = launch([], { RELAY_HOST: '127.0.0.1', RELAY_PORT: '0', RELAY_STATE_DIR: stateDir });
+      let sent = false;
+      launched.child.stdout?.on('data', () => {
+        if (!sent && launched.stdout().includes('"event":"relay.listening"')) {
+          sent = true;
+          launched.child.kill('SIGTERM');
+        }
+      });
+      let exit: Exit;
+      try {
+        exit = await within(launched.exited, 10000, 'the relay stopping on SIGTERM sent at relay.listening');
+      } catch (error) {
+        launched.child.kill('SIGKILL');
+        throw error;
+      }
+      assert.ok(sent, `relay.listening was never logged; stdout was: ${launched.stdout()}`);
+      assert.deepEqual(exit, { code: 0, signal: null }, `stdout was: ${launched.stdout()}`);
+      const events = eventsOf(launched);
+      assert.ok(events.indexOf('relay.stopped') > events.indexOf('relay.stopping'), 'relay.stopping then relay.stopped');
+      assert.equal(launched.stderr(), '', 'the relay wrote to stderr');
+    });
+  };
+  // Four at a time keeps the 20 runs quick without starting 20 processes at once.
+  for (let batch = 0; batch < 5; batch += 1) await Promise.all([once(), once(), once(), once()]);
 });
