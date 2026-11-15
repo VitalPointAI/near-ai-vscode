@@ -120,9 +120,11 @@ as a row in the chat.
   saved for GSD). **History** opens any earlier conversation as a tab, with
   every message (see [Your project's state follows the project](#your-projects-state-follows-the-project)).
 - **Guard rails.** The agent can only touch files inside the workspace, asks
-  before reading likely credential files (`.env`, keys), never touches the
-  project's own key folder (`.near-ai/state/keys/`), and never runs commands
-  on your deny list.
+  before reading likely credential files (`.env`, keys) or writing into
+  `.git/` and NEAR AI's own project folders (in every mode except Full auto,
+  where these run without asking), never touches the project's own key folder
+  (`.near-ai/state/keys/`) in any mode, and never runs commands on your deny
+  list.
 
 ![An edit waiting for approval, with its diff](https://raw.githubusercontent.com/VitalPointAI/near-ai-vscode/main/docs/marketplace/near-ai-approval.png)
 
@@ -908,7 +910,7 @@ Read the full [security and trust report](SECURITY.md).
 | Setting | Default | What it does |
 | --- | --- | --- |
 | `nearAi.defaultModel` | `z-ai/glm-5.3` | Model used for new chats. |
-| `nearAi.actionPolicy` | `approve-risky` | `approve-risky`: edits and commands ask first. `mostly-autonomous`: edits run, commands ask. `auto`: edits run, and commands run when they pass the safety check (fixed rules for clear cases, a private TEE model for the rest; risky or uncertain commands ask, with the reason). `fully-autonomous`: everything runs except deny-listed commands (only for throwaway workspaces). You can also switch it from the picker next to the model in the chat's bottom bar (Ask before edits / Edits auto / Auto / Full auto); it writes user settings, or the workspace or folder settings when the value is set there, asks before Full auto, and shows "Stopped" while the emergency stop is on. |
+| `nearAi.actionPolicy` | `approve-risky` | `approve-risky`: edits and commands ask first. `mostly-autonomous`: edits run, commands ask. `auto`: edits run, and commands run when they pass the safety check (fixed rules for clear cases, a private TEE model for the rest; risky or uncertain commands ask, with the reason). `fully-autonomous`: everything runs except deny-listed commands, including credential-file reads and writes into `.git/` (only for throwaway workspaces; the key folder is still refused, and actions held after the agent read outside content still ask). You can also switch it from the picker next to the model in the chat's bottom bar (Ask before edits / Edits auto / Auto / Full auto); it writes user settings, or the workspace or folder settings when the value is set there, asks before Full auto, and shows "Stopped" while the emergency stop is on. |
 | `nearAi.agent.allowCommands` | `git status`, `git diff`, `ls`, … | Commands that run without asking, matched by their leading words (`git push` covers `git push origin main`, but never `--force` or a URL). The approval card's **Always allow** adds entries. In `auto`, each part of a chained command is matched on its own; in other modes, anything with `;`, `\|`, `>`, or `$( )` asks. |
 | `nearAi.agent.denyCommands` | `rm -rf /`, `git push --force`, … | Commands the agent may never run. |
 | `nearAi.agent.deepModel` / `standardModel` / `fastModel` | Kimi K3 / GLM 5.3 / Qwen3.6-35B-A3B | Models for Open-GSD's sub-agent tiers (opus / sonnet / haiku). By default only research, synthesis, and mapping roles use the fast tier; GSD's `budget` and `adaptive` model profiles also send checkers and the test-writing auditor there. |

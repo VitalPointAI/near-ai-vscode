@@ -12,7 +12,7 @@ Last reviewed: 2026-11-15, against the code on `main` plus the messaging relay f
 | What | Where it goes | Notes |
 | --- | --- | --- |
 | Chat messages (sidebar and `@nearai`) | The endpoint serving the model you picked: NEAR AI Cloud, or your local runtime | Each message passes the outbound check below first. |
-| What the sidebar agent reads or runs | The same model, as tool results: file contents it reads, search results, and command output | Files under the workspace only. Reading a likely credential file (`.env`, private keys, SSH, AWS, or NEAR credential files) asks first. The project's key folder (`.near-ai/state/keys/`) is refused (see "What the agent can do without asking"). Pick a private or local model to keep this inside a TEE or on your machine. |
+| What the sidebar agent reads or runs | The same model, as tool results: file contents it reads, search results, and command output | Files under the workspace only. Reading a likely credential file (`.env`, private keys, SSH, AWS, or NEAR credential files) asks first, in every mode except `fully-autonomous`. The project's key folder (`.near-ai/state/keys/`) is refused (see "What the agent can do without asking"). Pick a private or local model to keep this inside a TEE or on your machine. |
 | Open-GSD workflows | The NEAR AI agent runner, on the model you picked; sub-agents use the model for their tier (`nearAi.agent.deepModel`, `standardModel`, `fastModel`) when your provider offers it | The same outbound check, approvals, revert, and cost tracking as any agent run. No Codex or Claude Code runtime is invoked. |
 | Your API key | VS Code SecretStorage, one key per project and profile | Never written to settings, project files, logs, activity, analytics, exports, or error messages. |
 | Saved conversations | The project's own state folder, `.near-ai/state/`, which the extension keeps out of git; with project sync on, also an encrypted copy on your git host (see Project state and sync) | Full transcripts, including file contents and command output the agent saw, so History can resume them in every editor, **encrypted with AES-256-GCM** under a per-project key. Every conversation is kept (the 5 most recent stay open, older ones are archived, none is deleted; `nearAi.history.liveConversations`). A single tool output over 2 MiB is stored shortened with a visible marker. Turn off with `nearAi.agent.saveTranscripts`. |
@@ -88,13 +88,18 @@ file changes and commands ask first. A command runs without asking only if it
 matches `nearAi.agent.allowCommands` and is written as plain words. That rules
 out quotes, `~`, variables, globs, newlines, pipes, redirects and substitution.
 It must also use no absolute or `..` paths, and no git options that write files,
-read outside the repository, or delete refs. These always ask, even after
-**Allow edits for this run**:
+read outside the repository, or delete refs. In every mode except
+`fully-autonomous`, these always ask, even after **Allow edits for this run**:
 
 - reading a file that looks like a credential, through any path or symlink;
 - writing into `.git/`, where hooks and config would run on the next git
   command;
-- writing into `.planning/.near-ai/`.
+- writing into `.planning/.near-ai/` (other than its `team.md`) or into
+  `.near-ai/` (other than its `scratch/` and `attachments/` folders).
+
+Under `fully-autonomous` they run without asking (see Known limitations). What
+still applies there: the deny list, the key folder below, and the holds after
+outside content (see "Outside content and prompt injection").
 
 The project's key folder, `.near-ai/state/keys/` (and the `keys/` folder of an older
 `state.previous-*` or `state.adopt-*` copy), is off limits to agents in every mode, with no
@@ -648,7 +653,7 @@ messages.
 | Memory has a searchable list, not a graph view; teams have no shared team memory | Members get project memory and their own private memory |
 | Agent reputation is recorded per role but does not yet change which model a role uses | Routing comes from team `model:` lines and the deep/standard/fast settings |
 | **Revert** restores files changed by the agent's file tools, not changes made by shell commands it ran | Use git for command side effects; documented in the chat |
-| Under `fully-autonomous`, the agent runs commands and writes protected files without asking | Only the deny list applies, and it is a substring backstop, not a sandbox. Intended for throwaway workspaces |
+| Under `fully-autonomous`, the agent runs commands, reads likely credential files, and writes protected files (`.git/`, `.planning/.near-ai/`, `.near-ai/`) without asking | Only the deny list, the key folder refusal and the holds after outside content apply; the deny list is a substring backstop, not a sandbox. Intended for throwaway workspaces |
 | Facts the agent saves with Remember are not reviewed when saved, and later runs start with the relevant ones | Each fact is labeled "verify before relying on it"; review, correct or reset memory with **Manage Project Memory** |
 | Spend limits use NEAR's published prices for estimates; the actual charge arrives from billing after the run | Each run, with all its sub-agents, stops before a model turn once its estimate reaches `nearAi.agent.maxRunCostUsd` (default $5), what is left of `nearAi.dailySpendLimitUsd`, or `nearAi.agent.maxRunTokens`; an agent repeating the same action is nudged and then stopped |
 
