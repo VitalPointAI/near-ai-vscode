@@ -170,7 +170,7 @@ function validateLamportField(value: unknown, path: string): string | undefined 
   return isSafeIntegerInRange(value, 1, MAX_LAMPORT) ? undefined : invalid(path);
 }
 
-// Exact-key bodies for the ten Phase 60 types (D-31). The signed shapes are permanent, so a test pins each one.
+// Exact-key bodies for the eleven implemented types: the ten Phase 60 ones and device.rotated (D-31, D-04). The signed shapes are permanent, so a test pins each one.
 type BodyValidator = (body: Fields) => string | undefined;
 
 const BODY_VALIDATORS: Record<ImplementedEventType, BodyValidator> = {
@@ -199,6 +199,10 @@ const BODY_VALIDATORS: Record<ImplementedEventType, BodyValidator> = {
   'device.revoked': (body) => checkKeys(body, 'body', ['memberId', 'fingerprint'])
     ?? validateId(body.memberId, MEMBER_ID_PATTERN, 'body.memberId')
     ?? validateId(body.fingerprint, FINGERPRINT_PATTERN, 'body.fingerprint'),
+  'device.rotated': (body) => checkKeys(body, 'body', ['memberId', 'from', 'device'])
+    ?? validateId(body.memberId, MEMBER_ID_PATTERN, 'body.memberId')
+    ?? validateId(body.from, FINGERPRINT_PATTERN, 'body.from')
+    ?? validateDeviceRef(body.device, 'body.device'),
   'member.availability': (body) => checkKeys(body, 'body', ['availability'], ['workingHours'])
     ?? validateChoice(body.availability, AVAILABILITIES, 'body.availability')
     ?? (Object.prototype.hasOwnProperty.call(body, 'workingHours') ? validateWorkingHours(body.workingHours, 'body.workingHours') : undefined),

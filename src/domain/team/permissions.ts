@@ -6,7 +6,7 @@ import type { ImplementedTeamEvent, ItemKind, Role, TeamState } from './types';
 export type TeamActionKind = 'board.view' | 'metrics.view-own' | 'metrics.view-all' | 'member.invite' | 'member.remove' | 'member.change-role'
   | 'item.create' | 'item.edit' | 'item.estimate' | 'item.claim' | 'item.assign' | 'lease.manual' | 'review.submit'
   | 'merge.approve-out-of-scope' | 'lease.integrator' | 'budget.set' | 'allocation.grant' | 'allocation.revoke' | 'allocation.request'
-  | 'team.stop' | 'team.resume' | 'policy.change' | 'device.add' | 'device.revoke' | 'member.availability' | 'member.skills' | 'snapshot.write';
+  | 'team.stop' | 'team.resume' | 'policy.change' | 'device.add' | 'device.revoke' | 'device.rotate' | 'member.availability' | 'member.skills' | 'snapshot.write';
 
 export type TeamAction =
   | { kind: 'board.view' | 'metrics.view-own' | 'metrics.view-all' | 'member.invite' | 'item.assign' | 'lease.manual' | 'merge.approve-out-of-scope' | 'lease.integrator' | 'allocation.request' | 'team.stop' | 'team.resume' | 'policy.change' | 'member.availability' | 'snapshot.write' }
@@ -16,7 +16,7 @@ export type TeamAction =
   | { kind: 'item.claim'; itemKind: ItemKind }
   | { kind: 'review.submit'; ownWork: boolean }
   | { kind: 'budget.set' | 'allocation.grant' | 'allocation.revoke'; withinTeamBudget: boolean }
-  | { kind: 'device.add' | 'device.revoke'; memberId: string }
+  | { kind: 'device.add' | 'device.revoke' | 'device.rotate'; memberId: string }
   | { kind: 'member.skills'; memberId: string };
 
 export type PermissionRule = boolean | 'policy:peerMetricsVisible' | 'policy:developerMayIntegrate' | 'own-draft' | 'review-items' | 'not-own-work' | 'within-team-budget' | 'self' | 'self-or-manager';
@@ -58,6 +58,7 @@ export const PERMISSION_MATRIX: Readonly<Record<TeamActionKind, Row>> = Object.f
   'policy.change': row(true, false, false, false, false),
   'device.add': row(true, true, 'self', 'self', 'self'),
   'device.revoke': row(true, true, 'self', 'self', 'self'),
+  'device.rotate': row(true, true, 'self', 'self', 'self'),
   'member.availability': row(true, true, true, true, true),
   'member.skills': row('self-or-manager', 'self-or-manager', 'self-or-manager', 'self-or-manager', 'self-or-manager'),
   'snapshot.write': MANAGERS
@@ -88,6 +89,7 @@ export const ACTION_LABELS: Readonly<Record<TeamActionKind, string>> = Object.fr
   'policy.change': 'changing team policy',
   'device.add': 'adding devices',
   'device.revoke': 'revoking devices',
+  'device.rotate': 'rotating devices',
   'member.availability': 'setting availability',
   'member.skills': 'editing skills',
   'snapshot.write': 'writing snapshots'
@@ -100,7 +102,7 @@ export const PERMISSION_REASONS = {
   ownRole: 'nobody can change their own role',
   leadOnOwner: 'a lead cannot act on the owner',
   ownerCannotBeRemoved: 'the owner cannot be removed',
-  leadOnOwnerDevice: 'a lead cannot add or revoke a device of the owner',
+  leadOnOwnerDevice: 'a lead cannot add, revoke or rotate a device of the owner',
   policyOwnerOnly: 'only the owner can change team policy'
 } as const;
 
@@ -146,6 +148,7 @@ function overrideDenial(state: PermissionView, role: Role, actorId: string, acti
       return role === 'lead' ? PERMISSION_REASONS.leadOnOwner : PERMISSION_REASONS.ownerCannotBeRemoved;
     case 'device.add':
     case 'device.revoke':
+    case 'device.rotate':
       return action.memberId === ownerId && role === 'lead' ? PERMISSION_REASONS.leadOnOwnerDevice : undefined;
     default:
       return undefined;
@@ -177,6 +180,7 @@ export function actionForEvent(event: ImplementedTeamEvent): TeamAction | undefi
     case 'member.removed': return { kind: 'member.remove', targetId: event.body.memberId };
     case 'device.added': return { kind: 'device.add', memberId: event.body.memberId };
     case 'device.revoked': return { kind: 'device.revoke', memberId: event.body.memberId };
+    case 'device.rotated': return { kind: 'device.rotate', memberId: event.body.memberId };
     case 'member.availability': return { kind: 'member.availability' };
     case 'member.skills': return { kind: 'member.skills', memberId: event.body.memberId };
     case 'policy.changed': return { kind: 'policy.change' };

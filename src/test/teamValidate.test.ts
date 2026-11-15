@@ -1,4 +1,4 @@
-// Schema tests for the team event envelope, the ten Phase 60 bodies and the policy (D-07, D-08, D-09 step 1, D-30, D-31).
+// Schema tests for the team event envelope, the eleven implemented bodies and the policy (D-07, D-08, D-09 step 1, D-30, D-31).
 // Reasons are asserted verbatim: they are the fixed strings the materialiser and the UI show.
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
@@ -195,6 +195,7 @@ function bodiesFor(device: { fingerprint: string; publicKey: string }): Record<s
     'member.removed': { memberId: OTHER_ID },
     'device.added': { memberId: OTHER_ID, device },
     'device.revoked': { memberId: OTHER_ID, fingerprint: device.fingerprint },
+    'device.rotated': { memberId: OTHER_ID, from: device.fingerprint, device },
     'member.availability': { availability: 'focus', workingHours: { tz: 'Europe/London', days: [1, 2, 3, 4, 5], start: '09:00', end: '17:30' } },
     'member.skills': { memberId: OTHER_ID, skills: ['typescript', 'c++', 'node.js'] },
     'policy.changed': { changes: { peerMetricsVisible: true, safetyFactorBp: 13000 } },
@@ -206,7 +207,7 @@ function clone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
 }
 
-test('valid bodies for all ten Phase 60 types pass, with and without optional fields', async () => {
+test('valid bodies for all eleven implemented types pass, with and without optional fields', async () => {
   const { owner } = await context();
   const device = { fingerprint: owner.identity.fingerprint, publicKey: owner.identity.publicKey };
   const bodies = bodiesFor(device);

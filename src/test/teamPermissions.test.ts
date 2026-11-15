@@ -78,6 +78,9 @@ const rows: Row[] = [
   { name: 'device.revoke for self', kind: 'device.revoke', build: (self) => ({ kind: 'device.revoke', memberId: self }), expect: [T, T, T, T, T] },
   { name: 'device.revoke for another member', kind: 'device.revoke', build: () => ({ kind: 'device.revoke', memberId: EXTRA }), expect: [T, T, F, F, F] },
   { name: 'device.revoke for the owner', kind: 'device.revoke', build: () => ({ kind: 'device.revoke', memberId: IDS.owner }), expect: [T, F, F, F, F] },
+  { name: 'device.rotate for self', kind: 'device.rotate', build: (self) => ({ kind: 'device.rotate', memberId: self }), expect: [T, T, T, T, T] },
+  { name: 'device.rotate for another member', kind: 'device.rotate', build: () => ({ kind: 'device.rotate', memberId: EXTRA }), expect: [T, T, F, F, F] },
+  { name: 'device.rotate for the owner', kind: 'device.rotate', build: () => ({ kind: 'device.rotate', memberId: IDS.owner }), expect: [T, F, F, F, F] },
   { name: 'member.availability', kind: 'member.availability', build: () => ({ kind: 'member.availability' }), expect: [T, T, T, T, T] },
   { name: 'member.skills for self', kind: 'member.skills', build: (self) => ({ kind: 'member.skills', memberId: self }), expect: [T, T, T, T, T] },
   { name: 'member.skills for another member', kind: 'member.skills', build: () => ({ kind: 'member.skills', memberId: EXTRA }), expect: [T, T, F, F, F] },
@@ -98,7 +101,7 @@ for (const row of rows) {
 
 test('the table covers every kind in the matrix and the matrix has five roles per kind', () => {
   const kinds = Object.keys(PERMISSION_MATRIX);
-  assert.equal(kinds.length, 27);
+  assert.equal(kinds.length, 28);
   for (const kind of kinds) {
     assert.deepEqual(Object.keys(PERMISSION_MATRIX[kind as TeamActionKind]).sort(), [...ROLES].sort(), kind);
     assert.ok(rows.some((row) => row.kind === kind), `no table row for ${kind}`);
@@ -156,8 +159,8 @@ test('an owner may remove a lead and a lead may remove a developer', () => {
   assert.equal(decideTeamAction(view(), IDS.lead, { kind: 'member.remove', targetId: IDS.developer }).allowed, true);
 });
 
-test('a lead cannot add or revoke a device of the owner (D-32) but the owner can', () => {
-  for (const kind of ['device.add', 'device.revoke'] as const) {
+test('a lead cannot add, revoke or rotate a device of the owner (D-32) but the owner can', () => {
+  for (const kind of ['device.add', 'device.revoke', 'device.rotate'] as const) {
     assert.deepEqual(
       decideTeamAction(view(), IDS.lead, { kind, memberId: IDS.owner }),
       { allowed: false, reason: PERMISSION_REASONS.leadOnOwnerDevice },
@@ -168,7 +171,7 @@ test('a lead cannot add or revoke a device of the owner (D-32) but the owner can
 });
 
 test('a developer cannot manage the devices of another member', () => {
-  for (const kind of ['device.add', 'device.revoke'] as const) {
+  for (const kind of ['device.add', 'device.revoke', 'device.rotate'] as const) {
     const decision = decideTeamAction(view(), IDS.developer, { kind, memberId: EXTRA });
     assert.equal(decision.allowed, false, kind);
   }
@@ -208,7 +211,7 @@ const ENVELOPE = {
 };
 const DEVICE = { fingerprint: 'dev-0123456789abcdef0123456789abcdef', publicKey: 'A'.repeat(43) };
 
-test('actionForEvent maps the eight non-genesis Phase 60 event types and skips the genesis pair', () => {
+test('actionForEvent maps every non-genesis implemented event type and skips the genesis pair', () => {
   const cases: Array<[ImplementedTeamEvent, TeamAction | undefined]> = [
     [{ ...ENVELOPE, type: 'team.created', body: { name: 'T', ownerId: IDS.owner, ownerName: 'O', ownerEmailHashes: [], ownerDevice: DEVICE, policy: defaultTeamPolicy() } }, undefined],
     [{ ...ENVELOPE, type: 'member.joined', body: { memberId: IDS.owner, name: 'O', emailHashes: [], role: 'owner', device: DEVICE } }, undefined],
@@ -216,6 +219,7 @@ test('actionForEvent maps the eight non-genesis Phase 60 event types and skips t
     [{ ...ENVELOPE, type: 'member.removed', body: { memberId: EXTRA } }, { kind: 'member.remove', targetId: EXTRA }],
     [{ ...ENVELOPE, type: 'device.added', body: { memberId: IDS.developer, device: DEVICE } }, { kind: 'device.add', memberId: IDS.developer }],
     [{ ...ENVELOPE, type: 'device.revoked', body: { memberId: IDS.developer, fingerprint: DEVICE.fingerprint } }, { kind: 'device.revoke', memberId: IDS.developer }],
+    [{ ...ENVELOPE, type: 'device.rotated', body: { memberId: IDS.developer, from: DEVICE.fingerprint, device: DEVICE } }, { kind: 'device.rotate', memberId: IDS.developer }],
     [{ ...ENVELOPE, type: 'member.availability', body: { availability: 'focus' } }, { kind: 'member.availability' }],
     [{ ...ENVELOPE, type: 'member.skills', body: { memberId: EXTRA, skills: ['ts'] } }, { kind: 'member.skills', memberId: EXTRA }],
     [{ ...ENVELOPE, type: 'policy.changed', body: { changes: { teeOnly: true } } }, { kind: 'policy.change' }],

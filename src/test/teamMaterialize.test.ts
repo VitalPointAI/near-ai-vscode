@@ -185,6 +185,38 @@ test('positional revocation: a revoked device is valid before the revocation and
   assert.equal(replay.members.get(w.owner.memberId)?.availability, 'focus');
 });
 
+test('tracer: an owner rotates their own key in one signed step; the new key signs, the old one is refused from that position on (D-09)', async () => {
+  const w = await world();
+  const fresh = await makeDevice(w.owner);
+  const entries: CommittedEvent[] = [...w.genesis];
+  const take = <T extends ImplementedEventType>(event: TeamEvent<T>): TeamEvent<T> => { entries.push(entryOf(event)); return event; };
+  // Before the rotation the genesis key signs as usual.
+  accept(w, take(make(w, w.owner, 'member.availability', { availability: 'focus' })));
+  const rotation = take(make(w, w.owner, 'device.rotated', { memberId: w.owner.memberId, from: w.owner.identity.fingerprint, device: deviceRef(fresh) }));
+  accept(w, rotation);
+  const devices = w.state.members.get(w.owner.memberId)?.devices ?? [];
+  assert.equal(devices.length, 2);
+  const retired = devices.find((device) => device.fingerprint === w.owner.identity.fingerprint);
+  assert.equal(retired?.rotatedEvent, rotation.id);
+  assert.equal(retired?.rotatedAt, rotation.at);
+  assert.equal(retired?.rotatedTo, fresh.identity.fingerprint);
+  assert.equal(retired?.revokedEvent, undefined);
+  const bound = devices.find((device) => device.fingerprint === fresh.identity.fingerprint);
+  assert.deepEqual(bound, { fingerprint: fresh.identity.fingerprint, publicKey: fresh.identity.publicKey, addedBy: w.owner.memberId, addedEvent: rotation.id });
+  assert.equal(w.state.deviceIndex.get(w.owner.identity.fingerprint), w.owner.memberId, 'the retired fingerprint stays in the index');
+  assert.equal(w.state.deviceIndex.get(fresh.identity.fingerprint), w.owner.memberId);
+  // The new key signs; the retired one is refused with the exact text.
+  accept(w, take(make(w, fresh, 'member.availability', { availability: 'away' })));
+  const late = take(make(w, w.owner, 'member.availability', { availability: 'available' }));
+  reject(w, late, 'device was rotated before this event');
+  assert.equal(R.rotatedDevice, 'device was rotated before this event');
+  assert.equal(w.state.members.get(w.owner.memberId)?.availability, 'away');
+  const replay = reduce(entries, w.anchor);
+  assert.equal(replay.accepted, 5);
+  assert.deepEqual(replay.rejected, [{ eventId: late.id, reason: R.rotatedDevice }]);
+  assert.equal(serialiseState(replay), serialiseState(w.state));
+});
+
 test('positional removal: events before the removal stay valid, events after are rejected', async () => {
   const w = await world();
   const developer = await withMember(w, 'developer');
