@@ -253,6 +253,16 @@ forwarded model instead. New
 research teams set this on every member, and new presales teams on their
 reviewer; `privacy: any` turns it off for a member.
 
+With `nearAi.agent.imageReview` set to `ask` (the default), a generated image
+is first saved as a draft in the project's `.near-ai/drafts/images/` folder,
+which is ignored by git (by the project's `.gitignore` and by the folder's own
+`.gitignore`), and reaches the path the agent named only when you accept it.
+The agent's file tools treat that folder like the rest of `.near-ai/`: writing
+there asks. When you ask for changes and the agent edits the draft, the draft
+image is sent to the same image model's provider, through NEAR AI's
+`/images/edits`; no other image leaves the machine. Drafts are deleted when
+you discard them, and any left behind are removed after 7 days.
+
 ### Document tools and team roles
 
 CreatePdf and CreateDocument write a `.pdf` or `.docx` from Markdown on this

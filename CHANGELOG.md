@@ -16,6 +16,17 @@
   not only the one in `nearAi.agent.imageModel`, which stays the default. The tool lists the image
   models with their prices, and the approval, the result and the spend record name the model that
   made the image. A model that is not an image model on your key is refused with the list.
+- **You review each image before it is saved.** An agent could make the same image again and
+  again, judging each one with its own scripts and saving every attempt into your project, while
+  you could not see it. Now each image the agent makes shows in the chat first, with where it will
+  be saved, the model, the attempt number and the prompt. **Accept** saves it where the agent
+  wanted, **Request changes** sends your words back to the agent so it makes a new version
+  (editing the image when the model can), **Discard** throws it away, and **Open full size** opens
+  it in a tab. Images made by helper agents show in the same chat, with the helper's name. The
+  agent waits for your answer in every approval mode, as it does for its questions, and is told
+  not to judge or remake images on its own. Images waiting for you are kept in the project's
+  `.near-ai/drafts/images/` folder, which is never committed, and ones left there are removed
+  after 7 days. To save images straight away as before, set `nearAi.agent.imageReview` to `off`.
 - **Agents can no longer read the project's keys.** In one run an agent wrote a small script that
   read the project's key file and used it to open the project's own encrypted chats. The project's
   key folder, `.near-ai/state/keys/`, is now off limits to agents in every approval mode: the file
@@ -32,7 +43,8 @@
   never sent to other computers.
 - **Turning sync off removes the saved items sync was holding.** What a sync kept back for a
   running chat (`sync/deferred.enc`) stayed on disk after sync was turned off. It is now removed,
-  and turning sync on again fetches those items from your project's remote again.
+  and turning sync on again fetches those items from your project's remote again. A sync that was already
+  running when you turned sync off no longer puts the file back afterwards.
 
 ## 0.4.22
 

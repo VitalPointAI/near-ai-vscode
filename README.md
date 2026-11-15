@@ -567,8 +567,17 @@ until it runs out aren't shown.
 - **Image generation.** When the provider lists an image model, the agent can
   create PNGs in your workspace with its GenerateImage tool. It uses
   `nearAi.agent.imageModel` unless it asks for another image model on your
-  key. It asks first and shows the model and price, and **Revert** removes the
-  file.
+  key. It asks first and shows the model and price. You then see each image in
+  the chat, with where it will be saved, the model, the attempt number and the
+  prompt, and choose **Accept** (it is saved where the agent wanted),
+  **Request changes** (your words go back to the agent, which makes a new
+  version, editing the draft when the model can), **Discard**, or **Open full
+  size**. Images made by helper agents show in the same chat, labelled with the
+  agent. The agent waits for your answer in every approval mode, and is told
+  not to judge or remake images on its own. Waiting images are kept in the
+  project's `.near-ai/drafts/images/` folder, which is never committed; ones
+  left there are removed after 7 days. **Revert** removes an accepted image.
+  Set `nearAi.agent.imageReview` to `off` to save images straight away.
 - **Project memory.** The agent saves durable facts with Remember, looks them
   up with Recall, and starts each run with the facts relevant to your request.
   Memory stays on this machine and refuses secret-looking content. Review,
@@ -902,6 +911,7 @@ Read the full [security and trust report](SECURITY.md).
 | `nearAi.agent.deepModel` / `standardModel` / `fastModel` | Kimi K3 / GLM 5.3 / Qwen3.6-35B-A3B | Models for Open-GSD's sub-agent tiers (opus / sonnet / haiku). By default only research, synthesis, and mapping roles use the fast tier; GSD's `budget` and `adaptive` model profiles also send checkers and the test-writing auditor there. |
 | `nearAi.teams.updateNotifications` | `true` | Say once per version when a team made from a built-in project type has a newer template (**NEAR AI: Update Team…**). |
 | `nearAi.agent.safetyModel` | the fast tier | With `auto`, the model that checks commands the rules cannot decide. Used only when it runs privately (TEE or local); otherwise those commands ask. |
+| `nearAi.agent.imageReview` | `ask` | `ask`: each image the agent makes waits in the chat for you to accept, change or discard it, and is saved to its path only when you accept it (the agent waits too, in every approval mode). `off`: images are saved straight away. |
 | `nearAi.agent.maxParallelAgents` | `8` | Sub-agents that may run at once. |
 | `nearAi.agent.maxTurns` | `60` | Model turns per run before it pauses for you; **Continue** in the chat carries on. |
 | `nearAi.agent.unattendedAutoApprove` | `true` | In Auto and Edits auto, sub-agents run commands the safety rules call safe and verification scripts inside the project that no agent of the run wrote or changed without a card; pushes, deletes outside the project, publishing, network commands and credential paths still ask. See SECURITY.md, "Sub-agents nobody is watching". |
