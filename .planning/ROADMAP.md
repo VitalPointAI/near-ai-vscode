@@ -521,7 +521,7 @@ Plans:
 Plans:
 - [ ] TBD (run /gsd-plan-phase 84 to break down)
 
-### v0.7.0 coverage
+### Requirement coverage for this milestone
 
 | Phase | Requirements | Count |
 |-------|--------------|-------|
