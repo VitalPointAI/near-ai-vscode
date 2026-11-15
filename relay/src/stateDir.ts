@@ -150,9 +150,13 @@ export async function writePrivateFileAtomic(dir: string, name: string, data: st
   }
 }
 
-/** Reads dir/name, or undefined when it does not exist. Refuses a symbolic link and anything not a plain file owned by the relay with no group or world access. */
-export async function readPrivateFile(dir: string, name: string): Promise<Buffer | undefined> {
+/**
+ * Reads dir/name, or undefined when it does not exist. Refuses a symbolic link and anything not a plain file owned by the relay with no group or
+ * world access. The relay's uid comes from the same option as prepareStateDir, so the two checks always agree.
+ */
+export async function readPrivateFile(dir: string, name: string, options?: PrepareOptions): Promise<Buffer | undefined> {
   plainName(name);
+  const uid = currentUid(options);
   const file = path.join(dir, name);
   let handle;
   try {
@@ -166,7 +170,7 @@ export async function readPrivateFile(dir: string, name: string): Promise<Buffer
   try {
     const info = await handle.stat();
     if (!info.isFile()) throw new StateDirError(`The state file ${name} in ${dir} is not a regular file and was not read.`);
-    if (info.uid !== process.getuid?.()) throw new StateDirError(`The state file ${name} in ${dir} is owned by another user and was not read.`);
+    if (info.uid !== uid) throw new StateDirError(`The state file ${name} in ${dir} is owned by another user and was not read.`);
     if ((info.mode & GROUP_OR_WORLD) !== 0) {
       throw new StateDirError(`The state file ${name} in ${dir} is open to other users (mode ${octal(info.mode)}) and was not read. Run chmod 600 on it as its owner.`);
     }

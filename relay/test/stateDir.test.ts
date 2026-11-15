@@ -258,6 +258,18 @@ test('readPrivateFile returns undefined for a missing name and refuses a 0644 fi
   });
 });
 
+test('readPrivateFile takes the relay uid from the same option as prepareStateDir and refuses a file owned by another uid', async () => {
+  await withTemp(async (dir) => {
+    await writePrivateFileAtomic(dir, 'key.bin', 'payload');
+    assert.equal((await readPrivateFile(dir, 'key.bin', { uid: UID }))?.toString(), 'payload');
+    await assert.rejects(readPrivateFile(dir, 'key.bin', { uid: UID + 1 }), (error: unknown) => {
+      assert.ok(error instanceof StateDirError);
+      assert.match(error.message, /owned by another user/);
+      return true;
+    });
+  });
+});
+
 test('under umask 022 the database, its -wal and its -shm file are all 0600 while the store is open', async () => {
   await withTemp(async (root) => {
     await withUmask(0o022, async () => {
