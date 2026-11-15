@@ -5,7 +5,7 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { crashFields } from '../src/main';
 import { Logger } from '../src/log/logger';
-import { Redactor, SENSITIVE_KEYS } from '../src/log/redact';
+import { isSensitiveKey, Redactor, SENSITIVE_KEYS } from '../src/log/redact';
 
 // Phase 68, plan 02 (RELAY-04, D-11, Pitfall 10): the redaction rules, the logger's line format, and a source guard that fails the suite if
 // any other output path appears in relay/src.
@@ -64,6 +64,51 @@ test('every sensitive key is dropped in any case and punctuation, and a non-stri
     bodyLength: 0,
     tokenLength: 0,
   });
+});
+
+test('a key that contains a credential word anywhere is dropped, so run-time tokens that were never registered cannot be logged', () => {
+  // Written out here rather than derived from the redactor's lists, so a word missing from those lists fails this test.
+  const value = 'eyJhbGciOiJSUzI1NiJ9.fake-unregistered-token';
+  const credentialKeys = [
+    'accessToken',
+    'refresh_token',
+    'idToken',
+    'bearerToken',
+    'clientSecret',
+    'botSecret',
+    'client-secret',
+    'apiKey',
+    'api_key',
+    'X-Api-Key',
+    'nearAiApiKey',
+    'jwt',
+    'teamsJwt',
+    'credential',
+    'credentials',
+    'privateKey',
+    'private_key',
+    'dbPassword',
+    'passwd',
+    'passphrase',
+    'Proxy-Authorization',
+    'sessionCookie',
+    'Set-Cookie',
+    'bearer',
+    'webhookSignature',
+  ];
+  const redactor = new Redactor();
+  for (const key of credentialKeys) {
+    assert.ok(isSensitiveKey(key), `${key} must be treated as sensitive`);
+    const output = redactor.fields({ [key]: value });
+    assert.deepEqual(Object.values(output), [value.length], `${key} kept only the length`);
+    assert.ok(!JSON.stringify(output).includes('fake-unregistered-token'), `${key} leaked its value`);
+  }
+});
+
+test('ids, counts and verdicts whose names only resemble message words are still logged', () => {
+  const fields = { messageId: 'm-1', contentType: 'application/json', bodyLength: 12, textLength: 3, tenantId: 'acme', runId: 'r-1', keyName: 'NEAR_AI_KEY_ACME', signal: 'SIGTERM', durationMs: 42 };
+  for (const key of Object.keys(fields)) assert.equal(isSensitiveKey(key), false, key);
+  assert.deepEqual(new Redactor().fields(fields), fields);
 });
 
 test('a value that is not a flat value becomes [dropped:type]', () => {
