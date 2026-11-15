@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
-import { mkdir, mkdtemp, readdir, readFile, utimes, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -9,10 +9,11 @@ import { editUnsupported, imageTool, ImageDraft, ImageReviewDecision, ImageRevie
 import { cleanOldDrafts, DRAFT_MAX_AGE_MS, draftFile, draftsFolder } from '../agent/imageDrafts';
 import { DEFAULT_RULES } from '../agent/permissions';
 import { ShellSession } from '../agent/shell';
-import { AgentConversation, GsdContext } from '../services/agentSession';
+import { AgentConversation, GsdContext, PARK_LIMIT_MS, QUESTION_RELEASED, QUESTION_TIMED_OUT } from '../services/agentSession';
 import { parseChatWebviewMessage } from '../services/chatBridge';
 import { ConversationLog, loggable, promptIdOf } from '../services/conversations';
 import type { AgentMessage, CompletionEvent, ToolCall } from '../services/nearAiClient';
+import { chatPage, StubNode } from './helpers/chatPage';
 
 // 0.4.23 (owner): the person sees each image the agent makes, can ask for changes, and only an accepted image reaches its path. In a real run an
 // agent made the same image 11 times over hours, scoring each with its own scripts and writing every attempt into the report's image folder.
@@ -134,7 +135,7 @@ test('edit_of edits the draft when the model lists image-edit, and makes a new i
 
 test('edit_of on a model with no listed operations tries the edit endpoint and falls back on a clear unsupported error only', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'near-ai-image-fallback-'));
-  const unsupported = Object.assign(new Error('NEAR AI request failed with HTTP 404 for flux.'), { status: 404 });
+  const unsupported = Object.assign(new Error('NEAR AI request failed with HTTP 404 for flux: image edits are not supported for this model.'), { status: 404 });
   const client = imageClient({ editError: unsupported });
   const reviewer = scriptedReviewer(root, [{ decision: 'changes', feedback: 'brighter' }, { decision: 'accept' }]);
   const tool = imageTool(client as never, FLUX as never, [], reviewer);
@@ -157,6 +158,19 @@ test('edit_of on a model with no listed operations tries the edit endpoint and f
   assert.equal(editUnsupported(Object.assign(new Error('Model does not support image edits'), { status: 400 })), true);
   assert.equal(editUnsupported(Object.assign(new Error('prompt too long'), { status: 400 })), false);
   assert.equal(editUnsupported(Object.assign(new Error('x'), { status: 501 })), true);
+  // Second review of PR 51: a bare 404 is a genuine failure (an unknown model, say), not a reason to pay for a different image; only one whose text says
+  // editing is unsupported falls back.
+  assert.equal(editUnsupported(Object.assign(new Error('NEAR AI request failed with HTTP 404 for flux.'), { status: 404 })), false);
+  assert.equal(editUnsupported(Object.assign(new Error('NEAR AI request failed with HTTP 404: model not found.'), { status: 404 })), false);
+  assert.equal(editUnsupported(Object.assign(new Error('NEAR AI request failed with HTTP 404.'), { status: 404, errorCode: 'not_implemented' })), true);
+  const missing = imageClient({ editError: Object.assign(new Error('NEAR AI request failed with HTTP 404 for flux: model not found.'), { status: 404 }) });
+  const reviewer3 = scriptedReviewer(root, [{ decision: 'changes', feedback: 'again' }]);
+  const tool3 = imageTool(missing as never, FLUX as never, [], reviewer3);
+  await withContext(root, async (context) => {
+    await tool3.run(tool3.parse({ prompt: 'x', path: 'd.png' }), context);
+    await assert.rejects(tool3.run(tool3.parse({ prompt: 'y', path: 'd.png', edit_of: reviewer3.shown[0].id }), context), /HTTP 404/);
+    assert.deepEqual(missing.calls.map((entry) => entry.kind), ['generate', 'edit'], 'no second image is paid for after a plain 404');
+  });
   // A draft that is not this conversation's is refused before anything is paid for.
   await withContext(root, async (context) => {
     await assert.rejects(tool.run(tool.parse({ prompt: 'z', path: 'c.png', edit_of: 'img-000000000000' }), context), /not a draft kept in this conversation/);
@@ -445,4 +459,329 @@ test('answered image reviews and questions leave no abort listener on the run\'s
   } finally {
     conversation.dispose();
   }
+});
+
+// 0.4.24 (second review of PR 51): a question or an image review had no limit, unlike approvals, so in Full auto or an unattended background sub-agent a
+// run could wait for the rest of the session. There (owner: only there) both now end at the approval timeout and settle as timed out.
+const FULL_AUTO = { mode: 'fully-autonomous' as const, emergencyStop: false };
+const ASK_FIRST = { mode: 'approve-risky' as const, emergencyStop: false };
+type AskInternals = {
+  askImageReview(draft: ImageDraft, signal: AbortSignal, policy?: unknown): Promise<ImageReviewDecision>;
+  askQuestions(questions: unknown[], signal: AbortSignal, policy?: unknown, agentId?: string): Promise<string[]>;
+  agents: Map<string, unknown>;
+};
+
+test('in Full auto a question and an image review nobody answers close as timed out after the approval timeout, keep the draft, and leave no listener', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'near-ai-image-timeout-'));
+  const posted: Array<Record<string, unknown>> = [];
+  const counts: number[] = [];
+  const conversation = new AgentConversation(root, (message) => posted.push(message), path.join(root, '.ckpt'));
+  conversation.onWaitingChange = (count) => counts.push(count);
+  conversation.approvalTimeoutMs = 40;
+  const controller = new AbortController();
+  const signal = controller.signal;
+  let live = 0;
+  const add = signal.addEventListener.bind(signal);
+  const remove = signal.removeEventListener.bind(signal);
+  signal.addEventListener = ((...args: Parameters<typeof add>) => { if (args[0] === 'abort') live += 1; add(...args); }) as typeof signal.addEventListener;
+  signal.removeEventListener = ((...args: Parameters<typeof remove>) => { if (args[0] === 'abort') live -= 1; remove(...args); }) as typeof signal.removeEventListener;
+  const internals = conversation as unknown as AskInternals;
+  try {
+    const answers = await internals.askQuestions([{ question: 'Which?', options: ['a', 'b'] }, { question: 'And?', options: ['c', 'd'] }], signal, FULL_AUTO);
+    assert.deepEqual(answers, ['(no answer, timed out)', '(no answer, timed out)'], 'each question is answered as timed out');
+    const card = posted.find((message) => message.type === 'questions-request');
+    assert.ok(card);
+    assert.deepEqual(posted.at(-1), { type: 'prompt-closed', id: card.id, outcome: 'timed-out', minutes: 1 }, 'the card closes as timed out');
+    conversation.answerQuestions(String(card.id), ['a']);
+    assert.deepEqual(conversation.waitingPrompts(), [], 'a late answer finds nothing waiting');
+    await mkdir(draftsFolder(root), { recursive: true });
+    const id = 'img-0a0a0a0a0a0a';
+    await writeFile(draftFile(root, id), Buffer.from([1, 2, 3]));
+    const decision = await internals.askImageReview({ id, file: draftFile(root, id), path: 'assets/a.png', model: 'm', prompt: 'p', attempt: 1, bytes: 3 }, signal, FULL_AUTO);
+    assert.deepEqual(decision, { decision: 'cancelled', timedOut: 1 });
+    assert.deepEqual(posted.at(-1), { type: 'prompt-closed', id, outcome: 'timed-out', minutes: 1 });
+    assert.ok(existsSync(draftFile(root, id)), 'the draft is kept');
+    assert.equal(conversation.answerImageReview(id, { decision: 'accept' }), false, 'a late answer finds nothing');
+    assert.equal(live, 0, 'no abort listener is left on the run\'s signal');
+    assert.deepEqual(counts, [1, 0, 1, 0], 'the badge clears each time');
+    // 0 waits indefinitely, as it does for approvals.
+    conversation.approvalTimeoutMs = 0;
+    const waiting = internals.askQuestions([{ question: 'Still there?', options: ['yes', 'no'] }], signal, FULL_AUTO);
+    const second = await until(() => posted.find((message) => message.type === 'questions-request' && message.id !== card.id));
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    assert.equal(conversation.waitingPrompts().length, 1, 'still waiting with no limit');
+    conversation.answerQuestions(String(second.id), ['yes']);
+    assert.deepEqual(await waiting, ['yes']);
+    assert.equal(live, 0);
+  } finally {
+    conversation.dispose();
+  }
+});
+
+// Owner, 0.4.24: outside Full auto a question or image review that passes the timeout behaves like an approval there (0.4.19: never decide something
+// nobody saw). The run parks on it, the card stays and can still be answered, the draft is kept, and the agent is never told "(no answer, timed out)".
+test('in the other modes a question and an image review past the timeout park the run, keep their cards, and still take a late answer', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'near-ai-image-park-'));
+  const posted: Array<Record<string, unknown>> = [];
+  const conversation = new AgentConversation(root, (message) => posted.push(message), path.join(root, '.ckpt'));
+  conversation.approvalTimeoutMs = 40;
+  const internals = conversation as unknown as AskInternals;
+  const signal = new AbortController().signal;
+  try {
+    for (const policy of [ASK_FIRST, { mode: 'mostly-autonomous' as const, emergencyStop: false }, { mode: 'auto' as const, emergencyStop: false }]) {
+      const before = posted.length;
+      const asked = internals.askQuestions([{ question: 'Which phase?', options: ['9', '10'] }], signal, policy);
+      const card = await until(() => posted.slice(before).find((message) => message.type === 'questions-request'));
+      const parked = await until(() => posted.slice(before).find((message) => message.type === 'approval-paused' && message.callId === card.id));
+      assert.equal(parked.minutes, 1);
+      assert.match(String(parked.text), /^No one answered "Which phase\?" within 1 minute, so the run is paused on this question\. Answer it and the run carries on from here\.$/);
+      await new Promise((resolve) => setTimeout(resolve, 80));
+      assert.deepEqual(conversation.waitingPrompts().map((message) => message.id), [card.id], `${policy.mode}: the card is still waiting`);
+      assert.equal(posted.slice(before).some((message) => message.type === 'prompt-closed'), false, 'and was not closed');
+      conversation.answerQuestions(String(card.id), ['10']);
+      assert.deepEqual(await asked, ['10'], 'the late answer is the answer the agent gets');
+    }
+    await mkdir(draftsFolder(root), { recursive: true });
+    const id = 'img-0e0e0e0e0e0e';
+    await writeFile(draftFile(root, id), Buffer.from([1, 2, 3]));
+    const before = posted.length;
+    const reviewing = internals.askImageReview({ id, file: draftFile(root, id), path: 'assets/a.png', model: 'm', prompt: 'p', attempt: 1, bytes: 3 }, signal, ASK_FIRST);
+    const parked = await until(() => posted.slice(before).find((message) => message.type === 'approval-paused' && message.callId === id));
+    assert.match(String(parked.text), /^No one reviewed the image for assets\/a\.png within 1 minute, so the run is paused on this step\. Nothing was saved\./);
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    assert.deepEqual(conversation.waitingPrompts().map((message) => message.id), [id]);
+    assert.ok(existsSync(draftFile(root, id)), 'the draft is kept');
+    assert.equal(conversation.answerImageReview(id, { decision: 'accept' }), true, 'the card still takes an answer');
+    assert.deepEqual(await reviewing, { decision: 'accept' });
+    assert.equal(posted.some((message) => message.type === 'prompt-closed' && message.outcome === 'timed-out'), false, 'nothing timed out');
+  } finally {
+    conversation.dispose();
+  }
+});
+
+test('outside Full auto a question left a whole day is released like an approval, without "(no answer, timed out)"', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'near-ai-question-release-'));
+  const posted: Array<Record<string, unknown>> = [];
+  const conversation = new AgentConversation(root, (message) => posted.push(message), path.join(root, '.ckpt'));
+  conversation.approvalTimeoutMs = 40;
+  const internals = conversation as unknown as AskInternals;
+  const timers = { set: globalThis.setTimeout };
+  // The day-long limit is shortened for the test; every other timer runs as it is.
+  globalThis.setTimeout = ((handler: () => void, ms?: number) => timers.set(handler, ms === PARK_LIMIT_MS ? 5 : ms)) as typeof setTimeout;
+  try {
+    const answers = await internals.askQuestions([{ question: 'Which phase?', options: ['9', '10'] }], new AbortController().signal, ASK_FIRST);
+    globalThis.setTimeout = timers.set;
+    assert.deepEqual(answers, [QUESTION_RELEASED]);
+    assert.notEqual(QUESTION_RELEASED, QUESTION_TIMED_OUT);
+    const expired = posted.find((message) => message.type === 'approval-expired');
+    assert.ok(expired);
+    assert.equal(expired.minutes, 1440);
+    assert.match(String(expired.text), /waited a whole day without an answer, so the run was released/);
+    assert.deepEqual(conversation.waitingPrompts(), []);
+  } finally {
+    globalThis.setTimeout = timers.set;
+    conversation.dispose();
+  }
+});
+
+// PR #55 review: an image review released after the day-long park outside Full auto was returned as `{ cancelled, timedOut: 1440 }`, so the agent was told
+// the review timed out. It has its own outcome, tool text and transcript line now, like a released question.
+test('outside Full auto an image review left a whole day is released, not timed out: the draft is kept and the agent is told to ask again', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'near-ai-image-release-'));
+  const posted: Array<Record<string, unknown>> = [];
+  const conversation = new AgentConversation(root, (message) => posted.push(message), path.join(root, '.ckpt'));
+  conversation.approvalTimeoutMs = 40;
+  const internals = conversation as unknown as AskInternals;
+  const timers = { set: globalThis.setTimeout };
+  globalThis.setTimeout = ((handler: () => void, ms?: number) => timers.set(handler, ms === PARK_LIMIT_MS ? 5 : ms)) as typeof setTimeout;
+  try {
+    await mkdir(draftsFolder(root), { recursive: true });
+    const id = 'img-0d0d0d0d0d0d';
+    await writeFile(draftFile(root, id), Buffer.from([1, 2, 3]));
+    const decision = await internals.askImageReview({ id, file: draftFile(root, id), path: 'assets/a.png', model: 'm', prompt: 'p', attempt: 1, bytes: 3 }, new AbortController().signal, ASK_FIRST);
+    globalThis.setTimeout = timers.set;
+    assert.deepEqual(decision, { decision: 'released' }, 'released, with no timeout');
+    const expired = posted.find((message) => message.type === 'approval-expired' && message.callId === id);
+    assert.ok(expired);
+    assert.equal(expired.minutes, 1440);
+    assert.equal(expired.text, 'The image for assets/a.png waited a whole day without a review, so the run was released. The draft is kept.');
+    assert.equal(posted.some((message) => message.type === 'prompt-closed' && message.outcome === 'timed-out'), false, 'the card is not closed as timed out');
+    assert.deepEqual(conversation.waitingPrompts(), []);
+    assert.ok(existsSync(draftFile(root, id)), 'the draft is kept');
+  } finally {
+    globalThis.setTimeout = timers.set;
+    conversation.dispose();
+  }
+  // The tool tells the agent it was released, never that it timed out.
+  const toolRoot = await mkdtemp(path.join(tmpdir(), 'near-ai-image-release-tool-'));
+  const reviewer = scriptedReviewer(toolRoot, [{ decision: 'released' }]);
+  const tool = imageTool(imageClient() as never, FLUX as never, [], reviewer);
+  await withContext(toolRoot, async (context) => {
+    const result = await tool.run(tool.parse({ prompt: 'a lighthouse', path: 'hero.png' }), context);
+    assert.match(result, /^Nobody reviewed the image for a day, so the run was released\. Draft img-[0-9a-f]{12} is kept in [^ ]+\/ and nothing was saved to hero\.png\./);
+    assert.match(result, /ask them again if it still matters/);
+    assert.doesNotMatch(result, /timed out/);
+    assert.ok(existsSync(draftFile(toolRoot, reviewer.shown[0].id)), 'the draft is kept');
+    assert.equal(existsSync(path.join(toolRoot, 'hero.png')), false);
+  });
+});
+
+test('a background sub-agent\'s question and image review time out as in Full auto; a foreground one\'s park', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'near-ai-image-background-'));
+  const posted: Array<Record<string, unknown>> = [];
+  const conversation = new AgentConversation(root, (message) => posted.push(message), path.join(root, '.ckpt'));
+  conversation.approvalTimeoutMs = 40;
+  const internals = conversation as unknown as AskInternals;
+  const agent = (id: string, background: boolean) => ({ id, label: id, description: '', model: 'm', abort: new AbortController(), paused: false, background, activity: 'Working', activitySince: Date.now(), startedAt: Date.now(), toolCalls: 0, turns: 0 });
+  internals.agents.set('bg-1', agent('bg-1', true));
+  internals.agents.set('fg-1', agent('fg-1', false));
+  const signal = new AbortController().signal;
+  try {
+    assert.deepEqual(await internals.askQuestions([{ question: 'Which?', options: ['a', 'b'] }], signal, ASK_FIRST, 'bg-1'), ['(no answer, timed out)']);
+    await mkdir(draftsFolder(root), { recursive: true });
+    const id = 'img-0f0f0f0f0f0f';
+    await writeFile(draftFile(root, id), Buffer.from([1, 2, 3]));
+    assert.deepEqual(await internals.askImageReview({ id, file: draftFile(root, id), path: 'assets/a.png', model: 'm', prompt: 'p', attempt: 1, bytes: 3, agentId: 'bg-1', agent: 'bg-1' }, signal, ASK_FIRST), { decision: 'cancelled', timedOut: 1 });
+    assert.ok(existsSync(draftFile(root, id)), 'the draft is kept');
+    const before = posted.length;
+    const asked = internals.askQuestions([{ question: 'Which?', options: ['a', 'b'] }], signal, ASK_FIRST, 'fg-1');
+    const card = await until(() => posted.slice(before).find((message) => message.type === 'questions-request'));
+    await until(() => posted.slice(before).find((message) => message.type === 'approval-paused' && message.callId === card.id));
+    conversation.answerQuestions(String(card.id), ['b']);
+    assert.deepEqual(await asked, ['b'], 'a foreground sub-agent\'s question parks like the lead\'s');
+  } finally {
+    conversation.dispose();
+  }
+});
+
+test('the image tool tells the agent a timed-out review kept the draft, and the transcript words both timeouts', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'near-ai-image-timeout-tool-'));
+  const reviewer = scriptedReviewer(root, [{ decision: 'cancelled', timedOut: 15 }]);
+  const tool = imageTool(imageClient() as never, FLUX as never, [], reviewer);
+  await withContext(root, async (context) => {
+    const result = await tool.run(tool.parse({ prompt: 'a lighthouse', path: 'hero.png' }), context);
+    assert.match(result, /did not review the image within 15 minutes, so the review timed out\. Draft img-[0-9a-f]{12} is kept/);
+    assert.match(result, /do not generate it again unless they ask/);
+    assert.ok(existsSync(draftFile(root, reviewer.shown[0].id)));
+    assert.equal(existsSync(path.join(root, 'hero.png')), false);
+  });
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const pending = require(path.join(__dirname, '..', '..', 'media', 'chat', 'pending.js')) as { outcomeText(item: unknown, outcome: string, detail?: unknown): string };
+  assert.equal(pending.outcomeText({ kind: 'image', title: 'Image for hero.png' }, 'timed-out', 15), 'Timed out, not reviewed within 15 min (the draft is kept): Image for hero.png');
+  assert.equal(pending.outcomeText({ kind: 'questions', title: 'Which phase?' }, 'timed-out', 1), 'Timed out, no answer within 1 min, the agent carried on: Which phase?');
+  // Released after the day-long park outside Full auto: neither is "declined", which only an approval is.
+  assert.equal(pending.outcomeText({ kind: 'questions', title: 'Which phase?' }, 'expired', 1440), 'Expired after 1440 min, no answer: Which phase?');
+  assert.equal(pending.outcomeText({ kind: 'image', title: 'Image for hero.png' }, 'expired', 1440), 'Expired after 1440 min, not reviewed (the draft is kept): Image for hero.png');
+  assert.equal(pending.outcomeText({ kind: 'approval', title: 'Run x' }, 'expired', 1440), 'Expired after 1440 min, declined: Run x');
+  const script = require('node:fs').readFileSync(path.join(__dirname, '..', '..', 'media', 'chat', 'chat.js'), 'utf8') as string;
+  assert.match(script, /m\.outcome === 'timed-out' && typeof m\.minutes === 'number' \? m\.minutes : undefined/, 'the view passes the minutes on');
+});
+
+// Second review of PR 51: `reviewing` was cleared as soon as the decision came back, before Accept's awaits, so a parallel attempt at the same path could
+// delete the draft just accepted, and moving it then failed with ENOENT.
+test('a parallel attempt at the same path does not delete a draft whose Accept is still being applied', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'near-ai-image-accept-race-'));
+  const shown: ImageDraft[] = [];
+  let accept: (decision: ImageReviewDecision) => void = () => undefined;
+  const reviewer: ImageReviewer = { root, drafts: new Map(), attempts: new Map(), review: (draft) => { shown.push(draft); return shown.length === 1 ? new Promise((resolve) => { accept = resolve; }) : Promise.resolve({ decision: 'changes', feedback: 'x' }); } };
+  const tool = imageTool(imageClient() as never, FLUX as never, [], reviewer);
+  await withContext(root, async (context, checkpoints) => {
+    // Accept's first await (the checkpoint) is held open until the second attempt has run its clean-up of earlier drafts.
+    let open: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => { open = resolve; });
+    let capturing: () => void = () => undefined;
+    const captured = new Promise<void>((resolve) => { capturing = resolve; });
+    const capture = checkpoints.capture.bind(checkpoints);
+    checkpoints.capture = async (file: string) => { capturing(); await gate; return capture(file); };
+    const first = tool.run(tool.parse({ prompt: 'a', path: 'hero.png' }), context);
+    await until(() => shown[0]);
+    accept({ decision: 'accept' });
+    await captured;
+    const second = await tool.run(tool.parse({ prompt: 'b', path: 'hero.png' }), context);
+    assert.match(second, /asked for changes/);
+    assert.ok(existsSync(draftFile(root, shown[0].id)), 'the draft being accepted is still there');
+    open();
+    assert.match(await first, /^Accepted by the user and saved to hero\.png/);
+    assert.ok(existsSync(path.join(root, 'hero.png')), 'the accepted image reached its path');
+    assert.equal(reviewer.drafts.has(shown[0].id), false);
+    assert.ok(reviewer.drafts.has(shown[1].id), 'the newer draft, kept after Request changes, stays');
+    assert.equal(reviewer.drafts.get(shown[1].id)?.reviewing, false, 'and is no longer marked as under review');
+  });
+});
+
+// Second review of PR 51: a draft whose file had gone was shown as "too large to show here", which sent the person looking for an image that is not there.
+test('a draft whose file is gone says so on its card, offers no Accept, and a too large one still says too large', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'near-ai-image-gone-'));
+  const posted: Array<Record<string, unknown>> = [];
+  const conversation = new AgentConversation(root, (message) => posted.push(message), path.join(root, '.ckpt'));
+  const internals = conversation as unknown as { askImageReview(draft: ImageDraft, signal: AbortSignal): Promise<ImageReviewDecision> };
+  const controller = new AbortController();
+  try {
+    const id = 'img-0b0b0b0b0b0b';
+    const waiting = internals.askImageReview({ id, file: draftFile(root, id), path: 'assets/a.png', model: 'm', prompt: 'p', attempt: 1, bytes: 3 }, controller.signal);
+    const card = await until(() => posted.find((message) => message.type === 'image-review-request' && message.id === id));
+    assert.equal(card.missing, true, 'the card is told the draft is gone');
+    assert.equal(card.tooLarge, undefined, 'not that it is too large');
+    assert.equal(card.image, undefined);
+    controller.abort();
+    await waiting;
+  } finally {
+    conversation.dispose();
+  }
+  const page = chatPage();
+  const cards = () => [...page.nodes.values()].flatMap((node) => node.all((child) => child.className === 'question image-review'));
+  const texts = (node: StubNode) => node.all(() => true).map((child) => child.textContent);
+  page.send({ type: 'image-review-request', id: 'img-0c0c0c0c0c0c', path: 'assets/a.png', model: 'm', prompt: 'p', attempt: 1, sizeKb: 1, missing: true });
+  const gone = cards()[0];
+  assert.ok(gone, 'the card is shown');
+  assert.ok(texts(gone).some((text) => /^This draft is gone: its file is no longer in the drafts folder/.test(text)), texts(gone).join(' | '));
+  assert.equal(texts(gone).some((text) => /too large/.test(text)), false);
+  const buttons = (node: StubNode) => new Map(node.all((child) => child.tagName === 'button').map((button) => [button.textContent, button]));
+  assert.equal(buttons(gone).get('Accept')?.disabled, true, 'there is nothing to accept');
+  assert.equal(buttons(gone).get('Open full size')?.disabled, true, 'or to open');
+  assert.equal(buttons(gone).get('Discard')?.disabled, false);
+  // PR #55 review: Request changes told the agent to edit a missing file. A gone draft has nothing to change, even once words are typed.
+  const box = gone.all((child) => child.className === 'image-review-changes')[0];
+  assert.ok(box);
+  assert.equal(box.disabled, true, 'the change box is disabled');
+  box.value = 'make it blue';
+  for (const listener of box.listeners.input ?? []) listener({ preventDefault() {}, target: box });
+  assert.equal(buttons(gone).get('Request changes')?.disabled, true, 'there is nothing to change');
+  page.posts.length = 0;
+  for (const listener of box.listeners.keydown ?? []) listener({ key: 'Enter', ctrlKey: true, preventDefault() {}, target: box } as never);
+  assert.equal(page.sent().some((message) => (message as { type?: string }).type === 'image-review-reply'), false, 'and Ctrl+Enter sends no change request');
+  // Only the card on show is in the page, so the too-large one is shown on a page of its own.
+  const other = chatPage();
+  other.send({ type: 'image-review-request', id: 'img-0d0d0d0d0d0d', path: 'assets/b.png', model: 'm', prompt: 'p', attempt: 1, sizeKb: 9000, tooLarge: true });
+  const large = [...other.nodes.values()].flatMap((node) => node.all((child) => child.className === 'question image-review'))[0];
+  assert.ok(large);
+  assert.ok(texts(large).some((text) => /too large to show here/.test(text)));
+  assert.equal(buttons(large).get('Accept')?.disabled, false);
+});
+
+// PR #55 review: a change asked for on a draft whose file has gone, or an edit_of naming a draft that no longer exists, tells the agent to make the image
+// fresh without edit_of, never to edit a missing file.
+test('changes to a draft that has gone, and an edit_of naming a missing draft, tell the agent to generate fresh without edit_of', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'near-ai-image-gone-changes-'));
+  const shown: ImageDraft[] = [];
+  const reviewer: ImageReviewer = {
+    root, drafts: new Map(), attempts: new Map(),
+    // The draft is removed (by hand, or a clean-up) while its card waits, then the person asks for changes.
+    review: async (draft) => { shown.push(draft); await rm(draft.file, { force: true }); return { decision: 'changes', feedback: 'make it blue' }; }
+  };
+  const client = imageClient();
+  const tool = imageTool(client as never, FLUX as never, [], reviewer);
+  await withContext(root, async (context) => {
+    const result = await tool.run(tool.parse({ prompt: 'a lighthouse', path: 'hero.png' }), context);
+    assert.match(result, /make it blue/);
+    assert.match(result, /is gone from .*, so it cannot be edited\. Call GenerateImage again without edit_of, path: "hero\.png"/);
+    assert.doesNotMatch(result, /edit_of: "/, 'the agent is not told to edit the missing draft');
+    assert.equal(reviewer.drafts.has(shown[0].id), false, 'the missing draft is forgotten');
+    // Named anyway, it is refused before anything is paid for, with the same advice.
+    await assert.rejects(tool.run(tool.parse({ prompt: 'blue', path: 'hero.png', edit_of: shown[0].id }), context), /cannot be edited\. Call GenerateImage again without edit_of/);
+    // A draft still listed whose file has gone is refused the same way.
+    reviewer.drafts.set('img-0e0e0e0e0e0f', { path: 'hero.png' });
+    await assert.rejects(tool.run(tool.parse({ prompt: 'blue', path: 'hero.png', edit_of: 'img-0e0e0e0e0e0f' }), context), /is no longer in .*, so it cannot be edited\. Call GenerateImage again without edit_of/);
+    assert.deepEqual(client.calls.map((entry) => entry.kind), ['generate'], 'no edit was paid for');
+  });
 });

@@ -31,7 +31,7 @@ import { redactSyncText, SYNC_PROMPT_DISMISSED_KEY, syncPanelMessage } from './s
 import { copyAttachmentIntoProject, PreparedAttachments, prepareAttachments, stageAttachment, StagedAttachment } from '../agent/attachments';
 import { projectTeamAllowed, TeamConsent, TeamDefinition, TeamLibrary, teamAgents, workingTeamFor } from '../agent/teams';
 import type { GsdAgent } from '../gsd/library';
-import { modelOptions, modelPrivacyLabel, modelsAsPrivateAs, privateSafetyModel, parseChatWebviewMessage, providerErrorMessage, discoverGsdArtifacts, isSafeArtifactPath, GsdArtifactLink, profileStatusMessage } from './chatBridge';
+import { attachmentsClearedMessage, modelOptions, modelPrivacyLabel, modelsAsPrivateAs, privateSafetyModel, parseChatWebviewMessage, providerErrorMessage, discoverGsdArtifacts, isSafeArtifactPath, GsdArtifactLink, profileStatusMessage } from './chatBridge';
 import type { ChatWebviewMessage } from './chatBridge';
 import { sharedActivityFeed } from './activityView';
 import { runTitleFor } from './activityOverview';
@@ -225,7 +225,8 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
         tab.paused.delete(message.callId);
         tab.outcomes.set(message.callId, { outcome: 'expired', ...(typeof message.minutes === 'number' ? { detail: message.minutes } : {}) });
       }
-      if (message.type === 'prompt-closed' && typeof message.id === 'string') { tab.outcomes.set(message.id, { outcome: message.outcome === 'cancelled' || message.outcome === 'covered' ? message.outcome : 'closed' }); tab.paused.delete(message.id); }
+      // 0.4.24: a question or image review nobody answered in time closes as `timed-out`, with the minutes it waited, so a reloaded view says so too.
+      if (message.type === 'prompt-closed' && typeof message.id === 'string') { tab.outcomes.set(message.id, { outcome: message.outcome === 'cancelled' || message.outcome === 'covered' || message.outcome === 'timed-out' ? message.outcome : 'closed', ...(message.outcome === 'timed-out' && typeof message.minutes === 'number' ? { detail: message.minutes } : {}) }); tab.paused.delete(message.id); }
       const steerId = message.type === 'steer-state' ? String(message.id) : undefined;
       tab.log.add(steerId && message.state === 'queued' && tab.steerTexts.has(steerId) ? { ...message, text: tab.steerTexts.get(steerId) } : loggable(message));
       if (steerId && message.state !== 'queued') tab.steerTexts.delete(steerId);
@@ -272,7 +273,9 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
   /** Takes these files out of the composer: they went with a message. Only these, so files attached meanwhile keep their chips. */
   const clearStaged = (staged: StagedAttachment[]): void => {
     for (const item of staged) state.attachments.delete(item.id);
-    void panel.webview.postMessage({ type: 'attachments-cleared', ids: staged.map((item) => item.id) });
+    // Always through the builder, which names the files (the view takes nothing from a clear that names none).
+    const cleared = attachmentsClearedMessage(staged.map((item) => item.id));
+    if (cleared) void panel.webview.postMessage(cleared);
   };
   const ensureAgent = (tab: ChatTab, root: string): AgentConversation => {
     if (!tab.agent) {
@@ -301,8 +304,10 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
       void panel.webview.postMessage(message);
       // A prompt whose wait parked the run says so again when the conversation is shown again, since the run is still on that step and the card is still
       // waiting to be answered (owner, 2026-11-08). Without this, a reloaded view would look like an ordinary prompt.
-      if (message.type === 'approval-request' && typeof message.callId === 'string' && tab.paused.has(message.callId)) {
-        void panel.webview.postMessage({ type: 'approval-paused', callId: message.callId, ...tab.paused.get(message.callId), replay: true });
+      // 0.4.24: a question or an image review parks the run the same way outside Full auto, so theirs is said again too.
+      const parkedId = (message.type === 'approval-request' || message.type === 'questions-request' || message.type === 'image-review-request') ? promptIdOf(message) : undefined;
+      if (parkedId !== undefined && tab.paused.has(parkedId)) {
+        void panel.webview.postMessage({ type: 'approval-paused', callId: parkedId, ...tab.paused.get(parkedId), replay: true });
       }
     }
     void panel.webview.postMessage({ type: 'conversation-shown', id: tab.id, busy: isRunning(tab) });

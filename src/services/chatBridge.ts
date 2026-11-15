@@ -234,6 +234,19 @@ export interface GsdCommandProgressMessage {
   approvalRequired?: boolean;
 }
 
+/**
+ * 0.4.24 (PR #55 review): the host's one way to say files left the composer. The view takes exactly the files a clear names, and a clear naming none
+ * takes nothing (media/chat/chat.js), so a clear must always name them. No host path means "clear every file": files leave the composer only when a
+ * message takes them, and that message knows which. Built only here, so no emission can drop the ids; a guard test keeps the literal out of the rest
+ * of the host.
+ */
+export interface AttachmentsClearedMessage { type: 'attachments-cleared'; ids: [string, ...string[]] }
+/** The message for these files, or none when there are no files to name (nothing left the composer, so the view is told nothing). */
+export function attachmentsClearedMessage(ids: readonly string[]): AttachmentsClearedMessage | undefined {
+  const named = [...new Set(ids.filter((id) => typeof id === 'string' && id.length > 0))];
+  return named.length ? { type: 'attachments-cleared', ids: named as [string, ...string[]] } : undefined;
+}
+
 export function promptMessage(prompt: unknown): StructuredPrompt | undefined { return normalizePrompt(prompt); }
 
 export function progressCardMessage(event: Parameters<typeof progressCardFromEvent>[0], index = 0): ProgressCard {

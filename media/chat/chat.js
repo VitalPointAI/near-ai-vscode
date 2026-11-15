@@ -692,6 +692,10 @@
       img.src = m.image;
       img.alt = 'Generated image for ' + (m.path || 'the project') + ': ' + String(m.prompt || '').slice(0, 200);
       card.append(img);
+    } else if (m.missing) {
+      // 0.4.24: the draft's file is no longer there, so there is nothing to show, open, save or change (PR #55 review: Request changes told the agent to
+      // edit a missing file); Discard settles the card.
+      card.append(el('div', 'meta', 'This draft is gone: its file is no longer in the drafts folder, so there is nothing to show, save or change. Discard it, then ask the agent for a new image if you still want one.'));
     } else {
       card.append(el('div', 'meta', 'This image is too large to show here. Open it full size to see it.'));
     }
@@ -707,8 +711,11 @@
       closePending(m.id, decision === 'accept' ? 'accepted' : decision === 'changes' ? 'changes-requested' : 'discarded', feedback);
     };
     const choices = el('div', 'choices');
-    const accept = textButton('Accept', () => answer('accept'), true);
-    choices.append(accept, textButton('Discard', () => answer('discard')), textButton('Open full size', () => postFor({ type: 'image-review-open', id: m.id })));
+    const accept = textButton('Accept', () => answer('accept'), !m.missing);
+    const discard = textButton('Discard', () => answer('discard'), !!m.missing);
+    const open = textButton('Open full size', () => postFor({ type: 'image-review-open', id: m.id }));
+    if (m.missing) { accept.disabled = true; open.disabled = true; }
+    choices.append(accept, discard, open);
     card.append(choices);
     const changes = el('textarea', 'image-review-changes');
     changes.rows = 2;
@@ -716,13 +723,15 @@
     changes.setAttribute('aria-label', 'Changes you want to this image');
     const request = textButton('Request changes', () => { const text = changes.value.trim(); if (text) answer('changes', text); });
     request.disabled = true;
-    changes.addEventListener('input', () => { request.disabled = !changes.value.trim(); });
+    // A gone draft has nothing to change: the box and the button stay disabled.
+    if (m.missing) changes.disabled = true;
+    changes.addEventListener('input', () => { request.disabled = !!m.missing || !changes.value.trim(); });
     // Ctrl+Enter (or Cmd+Enter) in the box sends the request, as the composer's own shortcut does.
-    changes.addEventListener('keydown', (event) => { if (event.key === 'Enter' && (event.ctrlKey || event.metaKey) && changes.value.trim()) { event.preventDefault(); answer('changes', changes.value.trim()); } });
+    changes.addEventListener('keydown', (event) => { if (event.key === 'Enter' && (event.ctrlKey || event.metaKey) && !m.missing && changes.value.trim()) { event.preventDefault(); answer('changes', changes.value.trim()); } });
     const changeRow = el('div', 'choices image-review-change-row');
     changeRow.append(request);
     card.append(changes, changeRow);
-    addPending({ id: m.id, kind: 'image', agent: m.agent, title }, card, accept, (m.agent || 'NEAR AI') + ' made an image for you to review: ' + (m.path || ''));
+    addPending({ id: m.id, kind: 'image', agent: m.agent, title }, card, m.missing ? discard : accept, (m.agent || 'NEAR AI') + ' made an image for you to review: ' + (m.path || ''));
   }
 
   // Running sub-agents with what each is doing, how long it has run, and pause, resume, and stop.
@@ -1455,7 +1464,7 @@
         announce(text);
         break;
       }
-      case 'prompt-closed': closePending(m.id, m.outcome === 'cancelled' || m.outcome === 'covered' ? m.outcome : 'closed'); break;
+      case 'prompt-closed': closePending(m.id, m.outcome === 'cancelled' || m.outcome === 'covered' || m.outcome === 'timed-out' ? m.outcome : 'closed', m.outcome === 'timed-out' && typeof m.minutes === 'number' ? m.minutes : undefined); break;
       case 'todos': renderTodos(m.todos || [], m.unconfirmed === true); break;
       case 'run-changes': onRunChanges(m); break;
       case 'run-reverted': {
@@ -1527,7 +1536,10 @@
       case 'artifacts': renderArtifacts(m.artifacts); break;
       case 'attachment-staged': settleSentNewFiles(m); staged.set(m.id, m.name); savedAs.set(m.id, m.savedAs || ''); renderChips(); announce('Attached ' + m.name + (m.savedAs ? ', saved in the project as ' + m.savedAs : '')); break;
       // Only the files that went with a message; one attached meanwhile keeps its chip.
-      case 'attachments-cleared': settleSentNewFiles(m); for (const id of Array.isArray(m.ids) ? m.ids : [...staged.keys()]) { staged.delete(id); savedAs.delete(id); } renderChips(); break;
+      // Only the files it names (0.4.24, #46 review), as settleSentNewFiles reads it: a clear that names none takes nothing. Read as "clear all", it hid
+      // the chips of files the host still holds, which would then go with the next message unseen. The host always names the files it took: it builds
+      // this message only with attachmentsClearedMessage (src/services/chatBridge.ts), which needs them, and no host path means "clear every file".
+      case 'attachments-cleared': settleSentNewFiles(m); for (const id of Array.isArray(m.ids) ? m.ids : []) { staged.delete(id); savedAs.delete(id); } renderChips(); break;
       case 'commands': if (Array.isArray(m.commands) && m.commands.length) commands = m.commands; break;
       case 'notice': notice(m.text || '', []); break;
       // A run the extension host never finished: nothing continues until the user clicks Resume.

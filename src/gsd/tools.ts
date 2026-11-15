@@ -1,6 +1,6 @@
 import type { AgentTool } from '../agent/tools';
 import { ToolError } from '../agent/workspace';
-import { expandPrompt, GsdAgent, GsdSkill } from './library';
+import { expandPrompt, GsdAgent, GsdSkill, modelList } from './library';
 import { noTags } from '../agent/teams';
 
 export interface Question {
@@ -9,6 +9,9 @@ export interface Question {
   options: Array<{ label: string; description?: string }>;
   multiSelect: boolean;
 }
+
+/** At most this many other agents are named beside a team's members in the Agent tool's description; the rest are counted. */
+export const MAX_OTHER_AGENTS = 20;
 
 /**
  * What subagent_type may be. With a team (0.4.21), its members come first with their roles, and the description says to use them for work their roles
@@ -23,7 +26,9 @@ function subagentTypeHelp(services: Pick<GsdServices, 'agents' | 'teamMembers'>)
   const team = services.agents.filter((agent) => members.has(agent.name));
   const others = services.agents.filter((agent) => !members.has(agent.name)).map((agent) => plain(agent.name, 80));
   if (!team.length) return others.length ? `One of: ${others.join(', ')}, or general-purpose.` : 'general-purpose.';
-  return `Team members (the specialists: use the member whose role covers the work, also for a workflow step): ${team.map((agent) => `${plain(agent.name, 80)} (${plain(agent.description, 80)})`).join(', ')}.${others.length ? ` Other agents: ${others.join(', ')}.` : ''} Or general-purpose, only when no team member fits.`;
+  // The other agents are bounded like the model lists (#46 review): a large Open-GSD library would otherwise fill the description the members lead. An
+  // agent left out of the list can still be named; the error for an unknown name lists them all.
+  return `Team members (the specialists: use the member whose role covers the work, also for a workflow step): ${team.map((agent) => `${plain(agent.name, 80)} (${plain(agent.description, 80)})`).join(', ')}.${others.length ? ` Other agents: ${modelList(others, MAX_OTHER_AGENTS)}.` : ''} Or general-purpose, only when no team member fits.`;
 }
 
 export interface GsdServices {
@@ -33,8 +38,8 @@ export interface GsdServices {
   agents: GsdAgent[];
   /** 0.4.21: the names of the agents that are members of the team this run works with; the Agent tool lists them first and says to prefer them. */
   teamMembers?: string[];
-  /** Shows the questions in the chat and resolves with one answer per question. */
-  ask(questions: Question[], signal: AbortSignal): Promise<string[]>;
+  /** Shows the questions in the chat and resolves with one answer per question. `agentId` is the sub-agent asking, if one is. */
+  ask(questions: Question[], signal: AbortSignal, agentId?: string): Promise<string[]>;
   /**
    * Runs a sub-agent. In the foreground it resolves with the final report; in the background it
    * resolves at once with the agent's id, and the report reaches the caller when it finishes.
@@ -101,7 +106,7 @@ export function gsdTools(services: GsdServices): AgentTool<any>[] {
     },
     title: (input) => input.questions.length === 1 ? `Ask: ${input.questions[0].question.slice(0, 80)}` : `Ask ${input.questions.length} questions`,
     async run(input, context) {
-      const answers = await services.ask(input.questions, context.signal);
+      const answers = await services.ask(input.questions, context.signal, context.agentId);
       return input.questions.map((question, index) => `Q: ${question.question}\nA: ${answers[index] ?? '(no answer)'}`).join('\n\n');
     }
   };

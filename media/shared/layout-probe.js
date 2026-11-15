@@ -46,10 +46,12 @@
         scrollers.push(describe(node) + ' is ' + node.scrollWidth + 'px wide in ' + node.clientWidth + 'px');
       }
     }
+    // Every image on the page and whether it decoded (naturalWidth above 0), so a test can tell an image that renders from a broken one.
+    const images = [...document.body.querySelectorAll('img')].slice(0, 25).map((node) => ({ element: describe(node), naturalWidth: node.naturalWidth, complete: node.complete }));
     return {
       type: 'layout-probe-result', width, scrollWidth: doc.scrollWidth, clientWidth: doc.clientWidth,
       bodyScrollWidth: document.body.scrollWidth, bodyClientWidth: document.body.clientWidth,
-      offenders: offenders.slice(0, 25), scrollers: scrollers.slice(0, 25), clipped: clipped.slice(0, 25)
+      offenders: offenders.slice(0, 25), scrollers: scrollers.slice(0, 25), clipped: clipped.slice(0, 25), images
     };
   };
 })();

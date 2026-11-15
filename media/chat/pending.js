@@ -62,13 +62,24 @@
       case 'allow-run': return 'Approved for this run: ' + title;
       case 'allow-always': return 'Always allowed in this workspace: ' + title;
       case 'deny': return 'Declined: ' + title;
-      case 'expired': return (detail !== undefined && detail !== '' ? 'Expired after ' + detail + ' min' : 'Expired') + ', declined: ' + title;
+      // 0.4.24: a question or image review can be released after the same day-long wait as an approval; neither is declined.
+      case 'expired': {
+        const after = detail !== undefined && detail !== '' ? 'Expired after ' + detail + ' min' : 'Expired';
+        if (item.kind === 'image') return after + ', not reviewed (the draft is kept): ' + title;
+        if (item.kind === 'questions') return after + ', no answer: ' + title;
+        return after + ', declined: ' + title;
+      }
       case 'answered': return 'Answered: ' + (detail || title);
       case 'cancelled': return item.kind === 'image' ? 'Not reviewed, the run stopped (the draft is kept): ' + title : 'Cancelled, the run stopped: ' + title;
       // 0.4.23: a generated image's review.
       case 'accepted': return 'Accepted and saved: ' + title;
       case 'changes-requested': return 'Changes requested for ' + title + (detail ? ': ' + detail : '');
       case 'discarded': return 'Discarded: ' + title;
+      // 0.4.24: a question or image review nobody answered within the approval timeout; the run carried on without it.
+      case 'timed-out': {
+        const waited = typeof detail === 'number' ? ' within ' + detail + ' min' : ' in time';
+        return item.kind === 'image' ? 'Timed out, not reviewed' + waited + ' (the draft is kept): ' + title : 'Timed out, no answer' + waited + ', the agent carried on: ' + title;
+      }
       case 'closed': return 'No longer waiting: ' + title;
       case 'covered': return 'Allowed by your answer to the same command: ' + title;
       default: return title;

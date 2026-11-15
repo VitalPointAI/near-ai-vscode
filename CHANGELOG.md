@@ -1,5 +1,39 @@
 # Changelog
 
+## Unreleased
+
+- **Questions and image reviews no longer wait forever.** A question from the agent, or an image
+  waiting for your review, had no time limit, so in Full auto or with a helper agent working in the
+  background a run could sit waiting for the rest of the day. They now follow
+  `nearAi.agent.approvalTimeoutMinutes` (15 minutes by default; 0 waits indefinitely). In Full
+  auto, and for a helper agent running in the background, the card then says it timed out and the
+  run carries on: the agent is told the question got no answer, and an image's draft is kept in
+  `.near-ai/drafts/images/` for you to look at later. In the other modes nothing is decided for
+  you: as with an approval, the run is paused on the question or image, the card stays, and your
+  answer carries the run on whenever you are back. Left a whole day, the run is released, as an
+  approval is, and the agent is told nobody answered (an image's draft is kept), not that it timed
+  out.
+- **An accepted image is not lost to a second attempt.** When two attempts at the same image ran
+  at once, the second could delete the image you had just accepted before it was saved, and the
+  save failed. The accepted image is now kept until it is saved.
+- **A failed image edit no longer pays for a different image.** When an edit of an image failed
+  with a "not found" error, it was treated as "this model cannot edit images" and a new image was
+  made from the prompt instead, which cost a second image. Now that happens only when the error
+  says editing is not supported; any other failure is reported as it is.
+- **A missing image draft says so.** A review card for a draft whose file had been removed said the
+  image was too large to show. It now says the draft is gone and offers only Discard, and an agent
+  asked to change a draft that is gone is told to make a new image rather than edit a missing file.
+- **Files you attached stay attached.** A rare message from the editor could hide the chips of
+  files you had attached while they were still going to be sent with your next message. Chips now
+  go only when their files have gone with a message.
+- **Your earlier answer about a project's team is kept.** In a workspace with several folders, an
+  answer to "use this project's team?" saved before 0.4.22 was forgotten when another folder's team
+  was asked about first, so you were asked again. It is now kept for the folder it belongs to.
+- **Docs match what the extension does.** The README no longer says answers cannot be checked
+  (**Verify signature** checks them), the README and SECURITY.md now agree that Full auto reads
+  credential files and writes into `.git/` without asking, and SECURITY.md describes each team's
+  shared knowledge graph.
+
 ## 0.4.23
 
 This release lets you review every image an agent makes before it is saved, makes helper agents

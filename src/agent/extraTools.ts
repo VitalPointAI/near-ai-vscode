@@ -30,8 +30,12 @@ export interface ImageDraft {
   agentId?: string;
 }
 
-/** What the person decided on a draft; `cancelled` when the run or the agent was stopped before they did. */
-export type ImageReviewDecision = { decision: 'accept' } | { decision: 'changes'; feedback: string } | { decision: 'discard' } | { decision: 'cancelled' };
+/**
+ * What the person decided on a draft; `cancelled` when the run or the agent was stopped before they did, or (0.4.24) with `timedOut` when nobody
+ * answered within the approval timeout (Full auto or a background sub-agent only). `released` (0.4.24, PR #55 review): in the other modes the review
+ * parked the run and nobody reviewed it for the whole day-long park limit, so the run was released; that is not a timeout, and the agent is told so.
+ */
+export type ImageReviewDecision = { decision: 'accept' } | { decision: 'changes'; feedback: string } | { decision: 'discard' } | { decision: 'cancelled'; timedOut?: number } | { decision: 'released' };
 
 export interface ImageDraftEntry { path: string; reviewing?: boolean }
 
@@ -112,9 +116,11 @@ export function imageTool(client: NearAiClient, model: ModelInfo, models: readon
       const shown = displayPath(context.root, absolute);
       let source: Uint8Array | undefined;
       if (input.editOf) {
-        if (!reviewer.drafts.has(input.editOf)) throw new ToolError(`${input.editOf} is not a draft kept in this conversation (an accepted draft has moved to its path, and a discarded one is gone). Leave edit_of out to make a new image.`);
+        // PR #55 review: a draft that no longer exists cannot be edited, so the agent is told to make the image fresh, without edit_of.
+        const fresh = `Call GenerateImage again without edit_of, path: "${input.path}", and a prompt that describes the whole image with the user's changes; it makes a new image.`;
+        if (!reviewer.drafts.has(input.editOf)) throw new ToolError(`${input.editOf} is not a draft kept in this conversation (an accepted draft has moved to its path, and a discarded one is gone), so it cannot be edited. ${fresh}`);
         source = await readDraft(reviewer.root, input.editOf);
-        if (!source) { reviewer.drafts.delete(input.editOf); throw new ToolError(`Draft ${input.editOf} is no longer in ${DRAFTS_DIR}. Leave edit_of out to make a new image.`); }
+        if (!source) { reviewer.drafts.delete(input.editOf); throw new ToolError(`Draft ${input.editOf} is no longer in ${DRAFTS_DIR}, so it cannot be edited. ${fresh}`); }
       }
       const made = await makeImage(client, used, input, source, context.signal);
       const bytes = made.result.bytes;
@@ -133,45 +139,60 @@ export function imageTool(client: NearAiClient, model: ModelInfo, models: readon
         reviewer.drafts.delete(old);
       }
       const kb = Math.round(bytes.length / 1024);
-      let decision: ImageReviewDecision;
+      const how = made.note ? ` ${made.note}` : '';
+      // `reviewing` stays set until the decision is fully applied (second review of PR 51): cleared before Accept's awaits, a parallel attempt at the
+      // same path could delete the draft just accepted, and moving it then failed.
       try {
-        decision = await reviewer.review({
+        const decision = await reviewer.review({
           id, file, path: shown, model: used.id, prompt: input.prompt, attempt, bytes: bytes.length,
           ...(made.edited && input.editOf ? { editOf: input.editOf } : {}), ...(made.note ? { note: made.note } : {}),
           ...(context.agentLabel ? { agent: context.agentLabel } : {}), ...(context.agentId ? { agentId: context.agentId } : {})
         }, context.signal);
+        switch (decision.decision) {
+          case 'accept':
+            await context.checkpoints.capture(absolute);
+            await mkdir(path.dirname(absolute), { recursive: true });
+            await moveDraft(reviewer.root, id, absolute);
+            reviewer.drafts.delete(id);
+            return `Accepted by the user and saved to ${shown} (${kb} KB, ${used.id}).${how}`;
+          case 'changes':
+            // PR #55 review: the draft's file may have gone while the card waited (removed by hand, or a clean-up); then edit_of would name a missing file.
+            if (!(await readDraft(reviewer.root, id))) {
+              reviewer.drafts.delete(id);
+              return `The user asked for changes to the image for ${shown} (attempt ${attempt}): ${decision.feedback}\nDraft ${id} is gone from ${DRAFTS_DIR}, so it cannot be edited. Call GenerateImage again without edit_of, path: "${input.path}", and a prompt that describes the whole image with these changes. Nothing was saved to ${shown}.${how}`;
+            }
+            return `The user asked for changes to draft ${id} (attempt ${attempt} at ${shown}): ${decision.feedback}\nDraft ${id} is kept; call GenerateImage again with edit_of: "${id}", path: "${input.path}", and a prompt that applies these changes. Nothing was saved to ${shown}.${how}`;
+          case 'discard':
+            await deleteDraft(reviewer.root, id);
+            reviewer.drafts.delete(id);
+            return `The user discarded draft ${id}; nothing was saved to ${shown}. Do not generate this image again unless the user asks for it.`;
+          case 'released':
+            // 0.4.24 (PR #55 review): released after the day-long park outside Full auto, worded like a released question (QUESTION_RELEASED), never as a timeout.
+            return `Nobody reviewed the image for a day, so the run was released. Draft ${id} is kept in ${DRAFTS_DIR}/ and nothing was saved to ${shown}. Carry on without it and tell the user it is waiting in ${DRAFTS_DIR}/; ask them again if it still matters, and do not generate it again unless they ask.`;
+          default:
+            // 0.4.24: a review nobody answered in time ends like a stop, but the agent is told why, so it carries on without the image rather than making it again.
+            if (decision.timedOut !== undefined) return `The user did not review the image within ${decision.timedOut} minute${decision.timedOut === 1 ? '' : 's'}, so the review timed out. Draft ${id} is kept in ${DRAFTS_DIR}/ and nothing was saved to ${shown}. Carry on without it and tell the user it is waiting in ${DRAFTS_DIR}/; do not generate it again unless they ask.`;
+            return `Stopped before the user reviewed the image. Draft ${id} is kept in ${DRAFTS_DIR}/ and nothing was saved to ${shown}.`;
+        }
       } finally {
         const kept = reviewer.drafts.get(id);
         if (kept) kept.reviewing = false;
-      }
-      const how = made.note ? ` ${made.note}` : '';
-      switch (decision.decision) {
-        case 'accept':
-          await context.checkpoints.capture(absolute);
-          await mkdir(path.dirname(absolute), { recursive: true });
-          await moveDraft(reviewer.root, id, absolute);
-          reviewer.drafts.delete(id);
-          return `Accepted by the user and saved to ${shown} (${kb} KB, ${used.id}).${how}`;
-        case 'changes':
-          return `The user asked for changes to draft ${id} (attempt ${attempt} at ${shown}): ${decision.feedback}\nDraft ${id} is kept; call GenerateImage again with edit_of: "${id}", path: "${input.path}", and a prompt that applies these changes. Nothing was saved to ${shown}.${how}`;
-        case 'discard':
-          await deleteDraft(reviewer.root, id);
-          reviewer.drafts.delete(id);
-          return `The user discarded draft ${id}; nothing was saved to ${shown}. Do not generate this image again unless the user asks for it.`;
-        default:
-          return `Stopped before the user reviewed the image. Draft ${id} is kept in ${DRAFTS_DIR}/ and nothing was saved to ${shown}.`;
       }
     }
   };
 }
 
-/** Whether an error from /images/edits says the model or the endpoint cannot edit images, rather than that the request failed. */
+/**
+ * Whether an error from /images/edits says the model or the endpoint cannot edit images, rather than that the request failed. Only a model that lists no
+ * operations is asked this (one that lists image-edit never falls back). 0.4.24 (second review of PR 51): a 404 counts only when its text says so too,
+ * because a 404 is also a genuine failure (an unknown model or draft), and treating every one as "cannot edit" silently paid for a second image.
+ */
 export function editUnsupported(error: unknown): boolean {
   const failure = (error ?? {}) as { status?: unknown; errorType?: unknown; errorCode?: unknown; message?: unknown };
   const status = typeof failure.status === 'number' ? failure.status : 0;
-  if ([404, 405, 410, 501].includes(status)) return true;
+  if ([405, 410, 501].includes(status)) return true;
   const words = `${String(failure.errorType ?? '')} ${String(failure.errorCode ?? '')} ${String(failure.message ?? '')}`;
-  return [400, 415, 422].includes(status) && /not[\s_-]*(?:supported|implemented)|unsupported|does not support|cannot edit/i.test(words);
+  return [400, 404, 415, 422].includes(status) && /not[\s_-]*(?:supported|implemented)|unsupported|does not support|cannot edit/i.test(words);
 }
 
 /**

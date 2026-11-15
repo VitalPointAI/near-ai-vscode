@@ -297,3 +297,55 @@ test('the script scan reports a word that resolves into the key folder instead o
     context.shell.dispose();
   }
 });
+
+// PR #55 review: SECURITY.md ("What the agent can do without asking", Known limitations) and the README's nearAi.actionPolicy row say that under
+// fully-autonomous credential-file reads and writes into .git/, .planning/.near-ai/ and .near-ai/ run without asking, and that every other mode asks.
+// This pins today's behaviour (src/agent/loop.ts: a `sensitive` call asks only when the mode is not fully-autonomous), so the docs stay backed by code.
+test('fully-autonomous reads credential files and writes into .git/, .planning/.near-ai/ and .near-ai/ without asking; the other modes ask', async () => {
+  const calls = [
+    { name: 'Read', args: { file_path: '.env' } },
+    { name: 'Read', args: { file_path: 'deploy/id_ed25519' } },
+    { name: 'Write', args: { file_path: '.git/hooks/pre-commit', content: '#!/bin/sh\nexit 0\n' } },
+    { name: 'Write', args: { file_path: '.planning/.near-ai/settings.json', content: '{}' } },
+    { name: 'Read', args: { file_path: '.near-ai/state/meta.json' } },
+    { name: 'Edit', args: { file_path: '.near-ai/state/meta.json', old_string: 'v1', new_string: 'v2' } }
+  ];
+  const seed = async (context: ToolContext) => {
+    await mkdir(path.join(context.root, '.git', 'hooks'), { recursive: true });
+    await mkdir(path.join(context.root, 'deploy'), { recursive: true });
+    await mkdir(path.join(context.root, '.near-ai', 'state'), { recursive: true });
+    await writeFile(path.join(context.root, '.env'), 'API_TOKEN=env-secret\n');
+    await writeFile(path.join(context.root, 'deploy', 'id_ed25519'), 'ssh-secret\n');
+    await writeFile(path.join(context.root, '.near-ai', 'state', 'meta.json'), '{"v":"v1"}');
+  };
+  const full = await project();
+  try {
+    await seed(full);
+    const approvals: string[] = [];
+    const results = await runCalls(full, [...calls, { name: 'Bash', args: { command: 'cat .env && printf x > .git/hooks/post-commit' } }], 'fully-autonomous', approvals);
+    assert.deepEqual(approvals, [], 'nothing asked');
+    assert.match(results[0], /env-secret/, 'the credential file was read');
+    assert.match(results[1], /ssh-secret/);
+    assert.equal(await readFile(path.join(full.root, '.git', 'hooks', 'pre-commit'), 'utf8'), '#!/bin/sh\nexit 0\n', 'the .git/ write ran');
+    assert.equal(await readFile(path.join(full.root, '.planning', '.near-ai', 'settings.json'), 'utf8'), '{}');
+    assert.equal(await readFile(path.join(full.root, '.near-ai', 'state', 'meta.json'), 'utf8'), '{"v":"v2"}', results[5]);
+    assert.match(results[6], /env-secret/, 'a shell command reading one runs too');
+    assert.equal(await readFile(path.join(full.root, '.git', 'hooks', 'post-commit'), 'utf8'), 'x');
+  } finally {
+    full.shell.dispose();
+  }
+  for (const mode of ['auto', 'approve-risky'] as const) {
+    const context = await project();
+    try {
+      await seed(context);
+      const approvals: string[] = [];
+      const results = await runCalls(context, calls, mode, approvals);
+      assert.equal(approvals.length, calls.length, `${mode}: every one asked: ${approvals.join(' | ')}`);
+      for (const result of results) assert.match(result, /declined/, `${mode}: ${result}`);
+      assert.equal(results.some((text) => /env-secret|ssh-secret/.test(text)), false);
+      assert.equal(await readFile(path.join(context.root, '.near-ai', 'state', 'meta.json'), 'utf8'), '{"v":"v1"}');
+    } finally {
+      context.shell.dispose();
+    }
+  }
+});

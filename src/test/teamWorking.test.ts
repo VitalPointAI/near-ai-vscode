@@ -4,8 +4,8 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { DEFAULT_RULES } from '../agent/permissions';
-import { PROJECT_TEAM_CONSENT_KEY, projectTeamAllowed, projectTeamQuestion, renderTeam, TeamConsent, TeamDefinition, TeamLibrary, teamLeadPrompt, teamMembersNote, workingTeamFor } from '../agent/teams';
-import { gsdTools } from '../gsd/tools';
+import { LEGACY_TEAM_CONSENT, PROJECT_TEAM_CONSENT_KEY, projectTeamAllowed, projectTeamQuestion, renderTeam, TeamConsent, TeamDefinition, TeamLibrary, teamLeadPrompt, teamMembersNote, workingTeamFor } from '../agent/teams';
+import { gsdTools, MAX_OTHER_AGENTS } from '../gsd/tools';
 import { AgentConversation, GsdContext } from '../services/agentSession';
 import type { AgentMessage, CompletionEvent, ToolDefinition } from '../services/nearAiClient';
 import type { ConversationStore, Transcript } from '../services/transcripts';
@@ -361,6 +361,64 @@ test('an answer saved before answers were kept per file still counts', async () 
   assert.equal(await projectTeamAllowed(team, { trusted: true, store: legacy, fallback: new Map(), ask: async () => { throw new Error('must not ask again'); } }), true, 'the first folder keeps its answer');
 });
 
+// #46 review: asking about another folder's team first saved only the per-file answers, so the old workspace-wide answer was dropped before the folder it
+// belonged to could claim it, and that folder was asked again.
+test('an answer saved before answers were kept per file survives another folder being asked first, until its own folder claims it', async () => {
+  const team = projectTeam('/w/a/.planning/.near-ai/team.md');
+  const probe = memento();
+  await projectTeamAllowed(team, { trusted: true, store: probe, fallback: new Map(), ask: async () => true });
+  const fingerprint = (probe.values.get(PROJECT_TEAM_CONSENT_KEY) as Record<string, TeamConsent>)[team.file].fingerprint;
+  const store = memento({ [PROJECT_TEAM_CONSENT_KEY]: { fingerprint, use: true } });
+  // Another folder, with a different team, is asked about first.
+  const other = projectTeam('/w/b/.planning/.near-ai/team.md', 'illustrator');
+  let asked = 0;
+  assert.equal(await projectTeamAllowed(other, { trusted: true, store, fallback: new Map(), ask: async () => { asked += 1; return false; } }), false);
+  assert.equal(asked, 1);
+  assert.deepEqual(store.values.get(PROJECT_TEAM_CONSENT_KEY), { [LEGACY_TEAM_CONSENT]: { fingerprint, use: true }, [other.file]: { fingerprint: (store.values.get(PROJECT_TEAM_CONSENT_KEY) as Record<string, TeamConsent>)[other.file].fingerprint, use: false } }, 'the old answer is kept under its reserved key');
+  // The folder the old answer belongs to still gets it without being asked, and claims it.
+  assert.equal(await projectTeamAllowed(team, { trusted: true, store, fallback: new Map(), ask: async () => { throw new Error('must not ask'); } }), true);
+  assert.deepEqual(Object.keys(store.values.get(PROJECT_TEAM_CONSENT_KEY) as object).sort(), [other.file, team.file].sort(), 'claimed, it is no longer kept apart');
+  assert.equal(await projectTeamAllowed(other, { trusted: true, store, fallback: new Map(), ask: async () => { throw new Error('must not ask again'); } }), false, 'the other folder keeps its own answer');
+  // Claimed, it no longer applies to a third folder with the same team.
+  let third = 0;
+  assert.equal(await projectTeamAllowed(projectTeam('/w/c/.planning/.near-ai/team.md'), { trusted: true, store, fallback: new Map(), ask: async () => { third += 1; return false; } }), false);
+  assert.equal(third, 1);
+});
+
+// PR #55 review: when the folder the old answer matches already had an answer of its own, the old answer was never claimed and was written back with every
+// later answer for ever, outside the cap. A file with its fingerprint now claims it, and an unclaimed one counts toward the cap as the oldest answer.
+test('an old answer is dropped once a team file with its fingerprint has its own answer, and counts toward the cap until then', async () => {
+  const team = projectTeam('/w/a/.planning/.near-ai/team.md');
+  const probe = memento();
+  await projectTeamAllowed(team, { trusted: true, store: probe, fallback: new Map(), ask: async () => true });
+  const fingerprint = (probe.values.get(PROJECT_TEAM_CONSENT_KEY) as Record<string, TeamConsent>)[team.file].fingerprint;
+  const never = async (): Promise<boolean> => { throw new Error('must not ask'); };
+  // The folder's own answer, with the same fingerprint, wins; the old one is dropped.
+  const own = memento({ [PROJECT_TEAM_CONSENT_KEY]: { [LEGACY_TEAM_CONSENT]: { fingerprint, use: true }, [team.file]: { fingerprint, use: false } } });
+  assert.equal(await projectTeamAllowed(team, { trusted: true, store: own, fallback: new Map(), ask: never }), false, 'the folder\'s own answer counts');
+  assert.deepEqual(own.values.get(PROJECT_TEAM_CONSENT_KEY), { [team.file]: { fingerprint, use: false } }, 'the old answer is gone');
+  // Another folder's answer with its fingerprint claims it too, whichever team is asked about next.
+  const elsewhere = memento({ [PROJECT_TEAM_CONSENT_KEY]: { [LEGACY_TEAM_CONSENT]: { fingerprint, use: true }, '/w/b/.planning/.near-ai/team.md': { fingerprint, use: true } } });
+  const changed = projectTeam('/w/c/.planning/.near-ai/team.md', 'illustrator');
+  assert.equal(await projectTeamAllowed(changed, { trusted: true, store: elsewhere, fallback: new Map(), ask: async () => false }), false);
+  assert.deepEqual(Object.keys(elsewhere.values.get(PROJECT_TEAM_CONSENT_KEY) as object).sort(), ['/w/b/.planning/.near-ai/team.md', changed.file].sort());
+  // The folder's own answer is for an older team: it is asked again, and the old answer goes, as this file claimed it.
+  const stale = memento({ [PROJECT_TEAM_CONSENT_KEY]: { [LEGACY_TEAM_CONSENT]: { fingerprint, use: true }, [team.file]: { fingerprint: 'a'.repeat(64), use: false } } });
+  let asked = 0;
+  assert.equal(await projectTeamAllowed(team, { trusted: true, store: stale, fallback: new Map(), ask: async () => { asked += 1; return true; } }), true);
+  assert.equal(asked, 1);
+  assert.deepEqual(stale.values.get(PROJECT_TEAM_CONSENT_KEY), { [team.file]: { fingerprint, use: true } });
+  // Unclaimed, it counts toward the cap as the oldest answer, so it is the first to go.
+  const full = memento({ [PROJECT_TEAM_CONSENT_KEY]: { [LEGACY_TEAM_CONSENT]: { fingerprint: 'f'.repeat(64), use: true } } });
+  for (let index = 0; index < 19; index += 1) await projectTeamAllowed(projectTeam(`/w/${index}/team.md`, 'illustrator'), { trusted: true, store: full, fallback: new Map(), ask: async () => true });
+  assert.equal(Object.keys(full.values.get(PROJECT_TEAM_CONSENT_KEY) as object).length, 20);
+  assert.ok(LEGACY_TEAM_CONSENT in (full.values.get(PROJECT_TEAM_CONSENT_KEY) as object), 'kept while there is room');
+  await projectTeamAllowed(projectTeam('/w/19/team.md', 'illustrator'), { trusted: true, store: full, fallback: new Map(), ask: async () => true });
+  const kept = Object.keys(full.values.get(PROJECT_TEAM_CONSENT_KEY) as object);
+  assert.equal(kept.length, 20, 'the cap counts it');
+  assert.equal(kept.includes(LEGACY_TEAM_CONSENT), false, 'and it is the oldest');
+});
+
 test('the answers kept without workspace state are bounded', async () => {
   const fallback = new Map<string, TeamConsent>();
   for (let index = 0; index < 50; index += 1) await projectTeamAllowed(projectTeam(`/w/${index}/team.md`), { trusted: true, fallback, ask: async () => true });
@@ -403,6 +461,16 @@ test('agent names and descriptions are made plain and capped in the Agent tool\'
     assert.doesNotMatch(text, /[\n<>]/);
     assert.ok(text.length < 400, `length ${text.length}`);
   }
+});
+
+// #46 review: the other agents beside a team's members were listed in full, so a large Open-GSD library filled the description the members should lead.
+test('the other agents beside a team\'s members are capped, with how many more there are', () => {
+  const agents = [{ name: 'designer', description: 'designer', tools: ['Read'], body: 'b', file: '/team.md' }, ...Array.from({ length: 45 }, (_, index) => ({ name: `gsd-agent-${String(index).padStart(2, '0')}`, description: 'd', tools: ['Read'], body: 'b', file: '/f.md' }))];
+  const tools = gsdTools({ home: '/none', root: '/none', skills: [], agents, teamMembers: ['designer'], ask: async () => [], spawn: async () => '' });
+  const help = String((tools.find((tool) => tool.name === 'Agent')!.parameters as { properties: { subagent_type: { description: string } } }).properties.subagent_type.description);
+  assert.match(help, new RegExp(`Other agents: ${Array.from({ length: MAX_OTHER_AGENTS }, (_, index) => `gsd-agent-${String(index).padStart(2, '0')}`).join(', ')} \\(and ${45 - MAX_OTHER_AGENTS} more\\)\\. Or general-purpose`));
+  assert.doesNotMatch(help, new RegExp(`gsd-agent-${MAX_OTHER_AGENTS}\\b`));
+  assert.ok(help.length < 800, `length ${help.length}`);
 });
 
 test('a run\'s own agents cannot be replaced by a team member of the same name, nor, without a team, by an Open-GSD agent', async () => {

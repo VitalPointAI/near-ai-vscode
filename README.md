@@ -120,9 +120,11 @@ as a row in the chat.
   saved for GSD). **History** opens any earlier conversation as a tab, with
   every message (see [Your project's state follows the project](#your-projects-state-follows-the-project)).
 - **Guard rails.** The agent can only touch files inside the workspace, asks
-  before reading likely credential files (`.env`, keys), never touches the
-  project's own key folder (`.near-ai/state/keys/`), and never runs commands
-  on your deny list.
+  before reading likely credential files (`.env`, keys) or writing into
+  `.git/` and NEAR AI's own project folders (in every mode except Full auto,
+  where these run without asking), never touches the project's own key folder
+  (`.near-ai/state/keys/`) in any mode, and never runs commands on your deny
+  list.
 
 ![An edit waiting for approval, with its diff](https://raw.githubusercontent.com/VitalPointAI/near-ai-vscode/main/docs/marketplace/near-ai-approval.png)
 
@@ -573,8 +575,12 @@ until it runs out aren't shown.
   **Request changes** (your words go back to the agent, which makes a new
   version, editing the draft when the model can), **Discard**, or **Open full
   size**. Images made by helper agents show in the same chat, labelled with the
-  agent. The agent waits for your answer in every approval mode, and is told
-  not to judge or remake images on its own. Waiting images are kept in the
+  agent. The agent waits for your answer in every approval mode. Past
+  `nearAi.agent.approvalTimeoutMinutes` the run is paused on the image, as on
+  an approval, and the card stays; only in Full auto and for a helper agent
+  running in the background does the review time out then, with the draft
+  kept and the run carrying on. The agent is told not to judge or remake
+  images on its own. Waiting images are kept in the
   project's `.near-ai/drafts/images/` folder, which is never committed. A draft
   is removed once a new version of it is made, and ones left there are removed
   after 7 days. **Revert** removes an accepted image.
@@ -906,19 +912,19 @@ Read the full [security and trust report](SECURITY.md).
 | Setting | Default | What it does |
 | --- | --- | --- |
 | `nearAi.defaultModel` | `z-ai/glm-5.3` | Model used for new chats. |
-| `nearAi.actionPolicy` | `approve-risky` | `approve-risky`: edits and commands ask first. `mostly-autonomous`: edits run, commands ask. `auto`: edits run, and commands run when they pass the safety check (fixed rules for clear cases, a private TEE model for the rest; risky or uncertain commands ask, with the reason). `fully-autonomous`: everything runs except deny-listed commands (only for throwaway workspaces). You can also switch it from the picker next to the model in the chat's bottom bar (Ask before edits / Edits auto / Auto / Full auto); it writes user settings, or the workspace or folder settings when the value is set there, asks before Full auto, and shows "Stopped" while the emergency stop is on. |
+| `nearAi.actionPolicy` | `approve-risky` | `approve-risky`: edits and commands ask first. `mostly-autonomous`: edits run, commands ask. `auto`: edits run, and commands run when they pass the safety check (fixed rules for clear cases, a private TEE model for the rest; risky or uncertain commands ask, with the reason). `fully-autonomous`: everything runs except deny-listed commands, including credential-file reads and writes into `.git/` (only for throwaway workspaces; the key folder is still refused, and actions held after the agent read outside content still ask). You can also switch it from the picker next to the model in the chat's bottom bar (Ask before edits / Edits auto / Auto / Full auto); it writes user settings, or the workspace or folder settings when the value is set there, asks before Full auto, and shows "Stopped" while the emergency stop is on. |
 | `nearAi.agent.allowCommands` | `git status`, `git diff`, `ls`, … | Commands that run without asking, matched by their leading words (`git push` covers `git push origin main`, but never `--force` or a URL). The approval card's **Always allow** adds entries. In `auto`, each part of a chained command is matched on its own; in other modes, anything with `;`, `\|`, `>`, or `$( )` asks. |
 | `nearAi.agent.denyCommands` | `rm -rf /`, `git push --force`, … | Commands the agent may never run. |
 | `nearAi.agent.deepModel` / `standardModel` / `fastModel` | Kimi K3 / GLM 5.3 / Qwen3.6-35B-A3B | Models for Open-GSD's sub-agent tiers (opus / sonnet / haiku). By default only research, synthesis, and mapping roles use the fast tier; GSD's `budget` and `adaptive` model profiles also send checkers and the test-writing auditor there. |
 | `nearAi.teams.updateNotifications` | `true` | Say once per version when a team made from a built-in project type has a newer template (**NEAR AI: Update Team…**). |
 | `nearAi.agent.safetyModel` | the fast tier | With `auto`, the model that checks commands the rules cannot decide. Used only when it runs privately (TEE or local); otherwise those commands ask. |
-| `nearAi.agent.imageReview` | `ask` | `ask`: each image the agent makes waits in the chat for you to accept, change or discard it, and is saved to its path only when you accept it (the agent waits too, in every approval mode). `off`: images are saved straight away. |
+| `nearAi.agent.imageReview` | `ask` | `ask`: each image the agent makes waits in the chat for you to accept, change or discard it, and is saved to its path only when you accept it (the agent waits too, in every approval mode; past `nearAi.agent.approvalTimeoutMinutes` the run is paused on it, except in Full auto and for a background helper agent, where the review times out, the draft is kept and the run carries on). `off`: images are saved straight away. |
 | `nearAi.agent.maxParallelAgents` | `8` | Sub-agents that may run at once. |
 | `nearAi.agent.maxTurns` | `60` | Model turns per run before it pauses for you; **Continue** in the chat carries on. |
 | `nearAi.agent.unattendedAutoApprove` | `true` | In Auto and Edits auto, sub-agents run commands the safety rules call safe and verification scripts inside the project that no agent of the run wrote or changed without a card; pushes, deletes outside the project, publishing, network commands and credential paths still ask. See SECURITY.md, "Sub-agents nobody is watching". |
 | `nearAi.agent.subagentApprovalWaitSeconds` | `20` | How long a sub-agent's approval card waits before the sub-agent is told "awaiting approval" and carries on; the card stays queued, and allowing it later allows that command for the run. |
 | `nearAi.agent.approvalTimeoutsBeforePause` | `3` | Unanswered approvals in a row that pause the whole run with a message (0 never pauses). |
-| `nearAi.agent.approvalTimeoutMinutes` | `15` | How long an approval in the main conversation waits before the run shows as paused on that step (it keeps waiting, up to a day). |
+| `nearAi.agent.approvalTimeoutMinutes` | `15` | How long an approval in the main conversation waits before the run shows as paused on that step (it keeps waiting, up to a day). Questions the agent asks you and images waiting for your review pause the run the same way, and their card stays for you to answer. Only in Full auto and for a sub-agent running in the background do they close as timed out at this point and the run carries on (a question gets "(no answer, timed out)", an image's draft is kept). `0` waits indefinitely. |
 | `nearAi.agent.compactAtTokens` | `70000` | Summarize a conversation's earlier history at this many tokens whatever the model's window (old tool output is trimmed from 80% of it). 0 uses only the window thresholds. |
 | `nearAi.agent.modelStallSeconds` | `120` | A reply that sends nothing for this long (before its first token, or between chunks) is retried once on the backup model; a reply that keeps streaming is never cut (30-minute ceiling per reply). 0 turns it off. |
 | `nearAi.agent.backupModel` | standard tier, then deep | The model a stalled reply is retried on; only a model at least as private as the chat's. |
@@ -939,8 +945,12 @@ Read the full [security and trust report](SECURITY.md).
 
 ## Good to know
 
-- **Privacy labels come from NEAR's model catalog.** The extension does not
-  yet verify NEAR's per-response attestation signatures itself.
+- **Privacy labels come from NEAR's model catalog.** You can check a single
+  answer from a private model with **Verify signature**, which checks NEAR's
+  signature and a fresh Intel TDX quote in the editor; it does not check TCB
+  status, enclave measurements or NVIDIA's verdict, and only a run's final
+  answer is offered (see
+  [what it does and doesn't check](SECURITY.md#checking-a-responses-signature)).
 - **No wallet, staking, or NEAR account sign-in yet.** They wait for a
   documented NEAR AI contract; sign-in uses API keys.
 

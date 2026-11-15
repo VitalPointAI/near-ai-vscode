@@ -274,6 +274,13 @@ function projectTests(): Array<[string, () => Promise<void>]> {
       console.log(`  image review card at ${report.width}px: page ${report.scrollWidth}/${report.clientWidth}, body ${report.bodyScrollWidth}/${report.bodyClientWidth}`);
       assert.ok(report.scrollWidth <= report.clientWidth + 1 && report.bodyScrollWidth <= report.bodyClientWidth + 1, `the chat scrolls sideways with the card: ${JSON.stringify(report)}`);
       assert.deepEqual(report.offenders, [], 'nothing in the card reaches past the edge');
+      // The data: image must actually render (second review of PR 51), not just fit: a broken image fits too. Decoding is asynchronous, so it is
+      // read again for a few seconds before failing.
+      const preview = async () => (await probe('chat')).images?.find((image) => image.element.includes('image-review-preview'));
+      let shown = await preview();
+      for (let attempt = 0; attempt < 20 && !(shown && shown.naturalWidth > 0); attempt += 1) { await pause(250); shown = await preview(); }
+      assert.ok(shown, 'the card shows the image');
+      assert.equal(shown.naturalWidth, 1200, `the data: image renders at its own width: ${JSON.stringify(shown)}`);
       // Sent through the view, as the card's Request changes button would. The host has no such draft waiting, so nothing else happens.
       const asked = observer.fromView.length;
       await api.sidebar.request({ type: 'image-review-reply', id, decision: 'changes', feedback: 'Warmer light, please.' });
