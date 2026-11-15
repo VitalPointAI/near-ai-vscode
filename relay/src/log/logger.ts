@@ -1,4 +1,4 @@
-import type { Redactor } from './redact';
+import { type Redactor, uniqueFieldName } from './redact';
 
 // The relay's only output path to stdout (D-11). Every line is one JSON object: time, level, event, then the redacted fields. Values are
 // JSON-encoded, so a control character or a newline inside a field cannot forge a second line, and the event name is checked against a fixed
@@ -37,7 +37,7 @@ export class Logger {
       event: EVENT_NAME.test(event) ? event : 'invalid-event',
     };
     for (const [key, value] of Object.entries(this.redactor.fields(fields))) {
-      entry[RESERVED_KEYS.has(key) ? `field_${key}` : key] = value;
+      entry[uniqueFieldName(entry, RESERVED_KEYS.has(key) ? `field_${key}` : key)] = value;
     }
     try {
       this.sink(JSON.stringify(entry));

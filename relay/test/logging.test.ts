@@ -5,7 +5,7 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { crashFields } from '../src/main';
 import { Logger } from '../src/log/logger';
-import { isSensitiveKey, Redactor, SENSITIVE_KEYS } from '../src/log/redact';
+import { isSensitiveKey, Redactor, SENSITIVE_KEYS, uniqueFieldName } from '../src/log/redact';
 
 // Phase 68, plan 02 (RELAY-04, D-11, Pitfall 10): the redaction rules, the logger's line format, and a source guard that fails the suite if
 // any other output path appears in relay/src.
@@ -49,6 +49,28 @@ test('a secret that contains another registered secret is masked as a whole', ()
 test('authorization, x-api-key, text and prompt keys are dropped and replaced by their length', () => {
   const output = new Redactor().fields({ authorization: 'Bearer abc.def', 'x-api-key': 'k-12345678', text: 'hello there', prompt: 'do the thing' });
   assert.deepEqual(output, { authorizationLength: 14, xapikeyLength: 10, textLength: 11, promptLength: 12 });
+});
+
+test('two fields whose output names collide are both kept, under a numbered name, instead of one overwriting the other', () => {
+  const redactor = new Redactor();
+  // Two sensitive keys that normalise alike.
+  assert.deepEqual(redactor.fields({ Authorization: 'Bearer abc', authorization: 'Bearer abcdef', 'Proxy-Authorization': 'x' }), {
+    authorizationLength: 10,
+    'authorizationLength#2': 13,
+    proxyauthorizationLength: 1,
+  });
+  // A sensitive key next to a plain field that already carries its derived name, in either order.
+  assert.deepEqual(redactor.fields({ textLength: 3, text: 'hello' }), { textLength: 3, 'textLength#2': 5 });
+  assert.deepEqual(redactor.fields({ text: 'hello', textLength: 3 }), { textLength: 5, 'textLength#2': 3 });
+  // Plain keys that become one name once the registered secret values in them are masked.
+  redactor.register('teams', 'value-one-1234');
+  redactor.register('teams', 'value-two-5678');
+  assert.deepEqual(redactor.fields({ 'k-value-one-1234': 'a', 'k-value-two-5678': 'b' }), { 'k-[secret:teams]': 'a', 'k-[secret:teams]#2': 'b' });
+  // A third collision takes the next free number.
+  assert.deepEqual(redactor.fields({ token: 'aa', TOKEN: 'bbb', Token: 'c' }), { tokenLength: 2, 'tokenLength#2': 3, 'tokenLength#3': 1 });
+  // A numbered name that is already taken is skipped too.
+  assert.equal(uniqueFieldName({ a: 1, 'a#2': 2 }, 'a'), 'a#3');
+  assert.equal(uniqueFieldName({ b: 1 }, 'a'), 'a');
 });
 
 test('every sensitive key is dropped in any case and punctuation, and a non-string value gives length 0', () => {
@@ -201,6 +223,15 @@ test('a field named time, level or event cannot overwrite the line envelope', ()
   assert.equal(parsed.level, 'info');
   assert.equal(parsed.event, 'relay.listening');
   assert.equal(parsed.field_event, 'forged.event');
+});
+
+test('a renamed envelope field does not overwrite a field that already carries the new name', () => {
+  const { logger, lines } = capture(new Redactor());
+  logger.info('relay.listening', { field_time: 'first', time: 'forged' });
+  const parsed = JSON.parse(lines[0] as string) as Record<string, unknown>;
+  assert.equal(parsed.time, '2026-11-14T12:00:00.000Z');
+  assert.equal(parsed.field_time, 'first');
+  assert.equal(parsed['field_time#2'], 'forged');
 });
 
 test('the logger redacts before the sink: secrets, tokens, message text and phone numbers never reach it', () => {
