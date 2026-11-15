@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+## 0.4.23
+
+This release lets you review every image an agent makes before it is saved, makes helper agents
+run on the model the agent asked for, keeps agents out of the project's keys, and fixes three sync
+issues.
 
 - **A sub-agent runs on the model the agent asked for, or not at all.** When the agent started a
   helper agent with a model your key does not have, the helper quietly ran on the chat's model
@@ -26,15 +30,16 @@
   agent waits for your answer in every approval mode, as it does for its questions, and is told
   not to judge or remake images on its own. Images waiting for you are kept in the project's
   `.near-ai/drafts/images/` folder, which is never committed. A draft is removed once the agent
-  makes a new version of it, and ones left there are removed after 7 days. To save images straight away as before, set `nearAi.agent.imageReview` to `off`.
+  makes a new version of it, and ones left there are removed after 7 days. To save images straight
+  away as before, set `nearAi.agent.imageReview` to `off`.
 - **Agents can no longer read the project's keys.** In one run an agent wrote a small script that
   read the project's key file and used it to open the project's own encrypted chats. The project's
   key folder, `.near-ai/state/keys/`, is now off limits to agents in every approval mode: the file
   tools refuse it and never list or search it, and a command that names it is refused without
   asking. The shell check follows the folder the agent's shell is in, so moving into
   `.near-ai/state` first and then reading `keys/local.key` is refused too, and the shell cannot
-  work inside the key folder at all. A command that runs a project file whose text names the folder always asks first, with
-  no "always allow". The shell checks read the command and the script it runs, so a path put
+  work inside the key folder at all. A command that runs a project file whose text names the
+  folder always asks first, with no "always allow". The shell checks read the command and the script it runs, so a path put
   together in other ways can still get through; SECURITY.md lists what they cannot see.
 - **A chat that ended without saying so no longer stops syncing.** If the end of a chat was
   missed, sync kept treating it as running for the rest of the session and never sent its saved
@@ -45,8 +50,8 @@
   never sent to other computers.
 - **Turning sync off removes the saved items sync was holding.** What a sync kept back for a
   running chat (`sync/deferred.enc`) stayed on disk after sync was turned off. It is now removed,
-  and turning sync on again fetches those items from your project's remote again. A sync that was already
-  running when you turned sync off no longer puts the file back afterwards.
+  and turning sync on again fetches those items from your project's remote again. A sync that was
+  already running when you turned sync off no longer puts the file back afterwards.
 
 ## 0.4.22
 
