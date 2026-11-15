@@ -658,6 +658,41 @@ test('a message sent during a run no longer leaves its attachments staged for a 
   assert.equal(next.attachmentIds, undefined, 'a later message does not pick up the earlier message\'s files');
 });
 
+// 0.4.24 (#46 review): the chip handler read a clear that names no files as "clear all" while the sent-message file lines read it as "clears nothing".
+// Both now read it as clearing nothing: the host always names the files it took, and hiding chips of files the host still holds would let them go with
+// the next message unseen.
+test('a clear that names no files takes no chip and no file line, and a clear that names one takes only that one', () => {
+  const page = chatPage();
+  const input = page.nodes.get('input') as StubNode;
+  const transcript = page.nodes.get('transcript') as StubNode;
+  page.send({ type: 'assistant-start', model: 'z-ai/glm-5.3' });
+  page.send({ type: 'attachment-staged', id: 'att-111111111111', name: 'one.txt', kind: 'text', size: 10 });
+  page.send({ type: 'attachment-staged', id: 'att-222222222222', name: 'two.txt', kind: 'text', size: 10 });
+  page.send({ type: 'attachments-cleared' });
+  assert.equal((page.nodes.get('chips') as StubNode).hidden, false, 'both chips are still shown');
+  input.value = 'with both files';
+  page.posts.length = 0;
+  (page.nodes.get('steer') as StubNode).click();
+  const steer = page.sent().find((message) => (message as { type?: string }).type === 'steer') as { id: string; attachmentIds?: string[] };
+  assert.deepEqual(steer.attachmentIds, ['att-111111111111', 'att-222222222222'], 'and both still go with the next message');
+  // The message became a new turn; a clear naming no files does not mark its files as taken, so a refusal still removes its file line.
+  const bubble = transcript.all((node) => node.className === 'turn user steer' && node.textContent === 'with both files')[0];
+  page.send({ type: 'steer-state', id: steer.id, state: 'sent-new' });
+  page.send({ type: 'attachments-cleared' });
+  page.send({ type: 'outbound-blocked', text: 'with both files', model: 'z-ai/glm-5.3', reason: 'Blocked.', confirm: false });
+  assert.doesNotMatch(bubbleText(bubble), /one\.txt/, 'the refused turn did not send the files');
+  // A clear naming one file takes that chip only.
+  page.send({ type: 'assistant-start', model: 'z-ai/glm-5.3' });
+  page.send({ type: 'attachment-staged', id: 'att-333333333333', name: 'three.txt', kind: 'text', size: 10 });
+  page.send({ type: 'attachment-staged', id: 'att-444444444444', name: 'four.txt', kind: 'text', size: 10 });
+  page.send({ type: 'attachments-cleared', ids: ['att-333333333333', 'att-111111111111', 'att-222222222222'] });
+  input.value = 'with the last one';
+  page.posts.length = 0;
+  (page.nodes.get('steer') as StubNode).click();
+  const last = page.sent().find((message) => (message as { type?: string }).type === 'steer') as { attachmentIds?: string[] };
+  assert.deepEqual(last.attachmentIds, ['att-444444444444']);
+});
+
 /** The text of a message bubble on the chat page, with its file line if it has one. */
 const bubbleText = (node: StubNode) => [node.textContent, ...node.all(() => true).map((child) => child.textContent)].join('');
 

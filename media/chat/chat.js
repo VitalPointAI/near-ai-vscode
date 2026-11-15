@@ -1533,7 +1533,9 @@
       case 'artifacts': renderArtifacts(m.artifacts); break;
       case 'attachment-staged': settleSentNewFiles(m); staged.set(m.id, m.name); savedAs.set(m.id, m.savedAs || ''); renderChips(); announce('Attached ' + m.name + (m.savedAs ? ', saved in the project as ' + m.savedAs : '')); break;
       // Only the files that went with a message; one attached meanwhile keeps its chip.
-      case 'attachments-cleared': settleSentNewFiles(m); for (const id of Array.isArray(m.ids) ? m.ids : [...staged.keys()]) { staged.delete(id); savedAs.delete(id); } renderChips(); break;
+      // Only the files it names (0.4.24, #46 review), as settleSentNewFiles reads it: a clear that names none takes nothing. Read as "clear all", it hid
+      // the chips of files the host still holds, which would then go with the next message unseen. The host always names the files it took.
+      case 'attachments-cleared': settleSentNewFiles(m); for (const id of Array.isArray(m.ids) ? m.ids : []) { staged.delete(id); savedAs.delete(id); } renderChips(); break;
       case 'commands': if (Array.isArray(m.commands) && m.commands.length) commands = m.commands; break;
       case 'notice': notice(m.text || '', []); break;
       // A run the extension host never finished: nothing continues until the user clicks Resume.
