@@ -279,6 +279,27 @@ test('members carry no email and no value derived from one, and device fingerpri
   assert.equal(validateBody('device.revoked', { memberId: OTHER_ID, fingerprint: 'dev-1' }), `${INVALID}: body.fingerprint`);
 });
 
+test('device.rotated pins its keys: memberId, a fingerprint for from, and a device whose fingerprint matches its key (D-04, D-09)', async () => {
+  const { owner } = await context();
+  const device = { fingerprint: owner.identity.fingerprint, publicKey: owner.identity.publicKey };
+  const stranger = await createOwner(newTeamId());
+  const valid = { memberId: OTHER_ID, from: stranger.identity.fingerprint, device };
+  assert.equal(validateBody('device.rotated', valid), undefined);
+  assert.equal(validateBody('device.rotated', { ...valid, surprise: 1 }), `${INVALID}: body.surprise`);
+  assert.equal(validateBody('device.rotated', { memberId: OTHER_ID, device }), `${INVALID}: body.from`);
+  assert.equal(validateBody('device.rotated', { memberId: OTHER_ID, from: stranger.identity.fingerprint }), `${INVALID}: body.device`);
+  assert.equal(validateBody('device.rotated', { ...valid, memberId: 'member-1' }), `${INVALID}: body.memberId`);
+  assert.equal(validateBody('device.rotated', { ...valid, from: 'dev-1' }), `${INVALID}: body.from`);
+  assert.equal(validateBody('device.rotated', { ...valid, from: stranger.identity.fingerprint.toUpperCase() }), `${INVALID}: body.from`);
+  assert.equal(validateBody('device.rotated', { ...valid, device: { fingerprint: stranger.identity.fingerprint, publicKey: device.publicKey } }), `${INVALID}: body.device.fingerprint`);
+  assert.equal(validateBody('device.rotated', { ...valid, device: { ...device, extra: 1 } }), `${INVALID}: body.device.extra`);
+  assert.equal(validateBody('device.rotated', { ...valid, device: 'device' }), `${INVALID}: body.device`);
+  assert.equal(validateBody('device.rotated', []), `${INVALID}: body`);
+  // The other Phase 60 types stay as they were, and every type outside the eleven is still refused.
+  assert.equal(validateBody('device.rotate', valid), 'unsupported event type for this version');
+  assert.equal(validateBody('member.invited', {}), 'unsupported event type for this version');
+});
+
 test('names are 1 to 80 characters after trimming with no control characters or line separators', () => {
   assert.equal(validateName('Ada', 'n'), undefined);
   assert.equal(validateName('  Ada  ', 'n'), undefined);

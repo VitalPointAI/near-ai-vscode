@@ -10,7 +10,7 @@ import { applyPolicyChanges, defaultTeamPolicy } from '../domain/team/policy';
 import { TEAM_REJECTION_REASONS } from '../domain/team/types';
 import type { CommittedEvent, GenesisAnchor, ImplementedEventBodies, ImplementedEventType, JsonObject, Role, TeamEvent, TeamState } from '../domain/team/types';
 import { newEventId, newMemberId, newTeamId, signEvent } from '../team/identity';
-import { addFixtureMember, buildScenario, entryOf, genesisEntries, makeActor, makeDevice, mulberry32, signed, signedSnapshot, snapshotWrittenBody } from './helpers/teamEvents';
+import { addFixtureMember, buildScenario, entryOf, genesisEntries, makeActor, makeDevice, mulberry32, rotationBody, signed, signedSnapshot, snapshotWrittenBody } from './helpers/teamEvents';
 import type { TestActor } from './helpers/teamEvents';
 
 const R = TEAM_REJECTION_REASONS;
@@ -215,6 +215,152 @@ test('tracer: an owner rotates their own key in one signed step; the new key sig
   assert.equal(replay.accepted, 5);
   assert.deepEqual(replay.rejected, [{ eventId: late.id, reason: R.rotatedDevice }]);
   assert.equal(serialiseState(replay), serialiseState(w.state));
+});
+
+test('rotation references: unknown, removed, foreign, revoked and already rotated keys and taken fingerprints are rejected with fixed reasons', async () => {
+  const w = await world();
+  const developer = await withMember(w, 'developer');
+  const spare = await makeDevice(w.owner);
+  const extra = await makeDevice(w.owner);
+  const stranger = await makeActor(w.teamId);
+  const rotate = (author: TestActor, memberId: string, from: TestActor, to: TestActor): TeamEvent<'device.rotated'> =>
+    make(w, author, 'device.rotated', rotationBody(memberId, from, to));
+  reject(w, rotate(w.owner, newMemberId(), developer, spare), R.memberMissing);
+  reject(w, rotate(w.owner, w.owner.memberId, developer, spare), R.deviceNotBound);
+  reject(w, rotate(w.owner, w.owner.memberId, stranger, spare), R.deviceNotBound);
+  reject(w, rotate(w.owner, developer.memberId, developer, w.owner), R.deviceTaken);
+  // The new fingerprint may not be the retired one either: it is already in the index.
+  reject(w, rotate(w.owner, developer.memberId, developer, developer), R.deviceTaken);
+  const own = rotate(developer, developer.memberId, developer, spare);
+  accept(w, own);
+  assert.equal(w.state.members.get(developer.memberId)?.devices.find((device) => device.fingerprint === developer.identity.fingerprint)?.rotatedTo, spare.identity.fingerprint);
+  reject(w, rotate(w.owner, developer.memberId, developer, extra), R.deviceRotated);
+  reject(w, rotate(w.owner, developer.memberId, spare, spare), R.deviceTaken);
+  // A retired fingerprint can never be registered again, by device.added or by another rotation.
+  reject(w, make(w, w.owner, 'device.added', { memberId: developer.memberId, device: deviceRef(developer) }), R.deviceTaken);
+  reject(w, rotate(w.owner, developer.memberId, spare, developer), R.deviceTaken);
+  accept(w, make(w, w.owner, 'device.added', { memberId: developer.memberId, device: deviceRef(extra) }));
+  accept(w, make(w, w.owner, 'device.revoked', { memberId: developer.memberId, fingerprint: extra.identity.fingerprint }));
+  reject(w, rotate(w.owner, developer.memberId, extra, stranger), R.deviceRevoked);
+  accept(w, make(w, w.owner, 'member.removed', { memberId: developer.memberId }));
+  reject(w, rotate(w.owner, developer.memberId, spare, stranger), R.memberRemoved);
+});
+
+test('self-rotation must be signed by the key it retires; an owner or lead rotating for someone else signs with their own device (D-09)', async () => {
+  const w = await world();
+  const second = await makeDevice(w.owner);
+  const fresh = await makeDevice(w.owner);
+  const later = await makeDevice(w.owner);
+  accept(w, make(w, w.owner, 'device.added', { memberId: w.owner.memberId, device: deviceRef(second) }));
+  // Another of the member's own keys cannot retire it.
+  reject(w, make(w, w.owner, 'device.rotated', rotationBody(w.owner.memberId, second, fresh)), R.rotationNotByOldKey);
+  assert.equal(R.rotationNotByOldKey, 'a member rotates a device key only by signing with that key');
+  accept(w, make(w, second, 'device.rotated', rotationBody(w.owner.memberId, second, fresh)));
+  const developer = await withMember(w, 'developer');
+  const lead = await withMember(w, 'lead');
+  const developerNew = await makeDevice(developer);
+  const developerLater = await makeDevice(developer);
+  // The owner and a lead are not the member, so they sign with their own devices.
+  accept(w, make(w, w.owner, 'device.rotated', rotationBody(developer.memberId, developer, developerNew)));
+  accept(w, make(w, lead, 'device.rotated', rotationBody(developer.memberId, developerNew, developerLater)));
+  assert.equal(w.state.members.get(developer.memberId)?.devices.filter((device) => device.rotatedEvent === undefined).length, 1);
+  accept(w, make(w, fresh, 'device.rotated', rotationBody(w.owner.memberId, fresh, later)));
+});
+
+test('rotation permissions on the read side: members rotate only their own key, owner and lead rotate others, a lead never the owner (D-09, D-32)', async () => {
+  const w = await world();
+  const developer = await withMember(w, 'developer');
+  const reviewer = await withMember(w, 'reviewer');
+  const observer = await withMember(w, 'observer');
+  const lead = await withMember(w, 'lead');
+  const spares = await Promise.all([1, 2, 3, 4, 5, 6, 7].map(() => makeDevice(w.owner)));
+  const spare = (index: number): TestActor => spares[index] as TestActor;
+  reject(w, make(w, developer, 'device.rotated', rotationBody(reviewer.memberId, reviewer, spare(0))), notPermitted('the developer role does not allow rotating devices for another member'));
+  reject(w, make(w, observer, 'device.rotated', rotationBody(w.owner.memberId, w.owner, spare(0))), notPermitted('the observer role does not allow rotating devices for another member'));
+  reject(w, make(w, lead, 'device.rotated', rotationBody(w.owner.memberId, w.owner, spare(0))), notPermitted(PERMISSION_REASONS.leadOnOwnerDevice));
+  assert.equal(PERMISSION_REASONS.leadOnOwnerDevice, 'a lead cannot add, revoke or rotate a device of the owner');
+  for (const [actor, index] of [[developer, 1], [reviewer, 2], [observer, 3]] as Array<[TestActor, number]>) {
+    accept(w, make(w, actor, 'device.rotated', rotationBody(actor.memberId, actor, spare(index))));
+  }
+  accept(w, make(w, lead, 'device.rotated', rotationBody(developer.memberId, spare(1), spare(4))));
+  accept(w, make(w, w.owner, 'device.rotated', rotationBody(lead.memberId, lead, spare(5))));
+  accept(w, make(w, w.owner, 'device.rotated', rotationBody(w.owner.memberId, w.owner, spare(6))));
+});
+
+test('revoking a rotated key is accepted and skips the last-device rule; the last active key is still protected (D-21)', async () => {
+  const w = await world();
+  const fresh = await makeDevice(w.owner);
+  const later = await makeDevice(w.owner);
+  accept(w, make(w, w.owner, 'device.rotated', rotationBody(w.owner.memberId, w.owner, fresh)));
+  // A rotation leaves exactly one active key, so revoking it is still the last-device case.
+  reject(w, make(w, fresh, 'device.revoked', { memberId: w.owner.memberId, fingerprint: fresh.identity.fingerprint }), R.lastDevice);
+  const revocation = make(w, fresh, 'device.revoked', { memberId: w.owner.memberId, fingerprint: w.owner.identity.fingerprint });
+  accept(w, revocation);
+  const retired = w.state.members.get(w.owner.memberId)?.devices.find((device) => device.fingerprint === w.owner.identity.fingerprint);
+  assert.equal(retired?.revokedEvent, revocation.id);
+  assert.equal(retired?.rotatedTo, fresh.identity.fingerprint, 'the rotation record stays when the retired key is revoked too');
+  reject(w, make(w, fresh, 'device.revoked', { memberId: w.owner.memberId, fingerprint: w.owner.identity.fingerprint }), R.deviceRevoked);
+  // Revocation is reported before rotation for a key that is both.
+  reject(w, make(w, w.owner, 'member.availability', { availability: 'away' }), R.revokedDevice);
+  reject(w, make(w, fresh, 'device.rotated', rotationBody(w.owner.memberId, w.owner, later)), R.deviceRevoked);
+  // Rotating again never trips the last-device rule, and the new key is then the protected one.
+  accept(w, make(w, fresh, 'device.rotated', rotationBody(w.owner.memberId, fresh, later)));
+  reject(w, make(w, later, 'device.revoked', { memberId: w.owner.memberId, fingerprint: later.identity.fingerprint }), R.lastDevice);
+});
+
+test('snapshots carry rotation: round-trip keeps the rotation fields, a rotated signer and an inconsistent rotatedTo are refused (D-09)', async () => {
+  const w = await world();
+  const fresh = await makeDevice(w.owner);
+  const rotation = make(w, w.owner, 'device.rotated', rotationBody(w.owner.memberId, w.owner, fresh));
+  accept(w, rotation);
+  accept(w, make(w, fresh, 'snapshot.written', snapshotWrittenBody(w.state)));
+  const good = signedSnapshot(fresh, w.state);
+  const parsed = parseSnapshotFile(canonicalize(good), w.anchor);
+  assert.equal(parsed.ok, true);
+  if (!parsed.ok) return;
+  assert.equal(serialiseState(parsed.state), serialiseState(w.state));
+  const retired = parsed.state.members.get(w.owner.memberId)?.devices.find((device) => device.fingerprint === w.owner.identity.fingerprint);
+  assert.deepEqual(retired, {
+    fingerprint: w.owner.identity.fingerprint, publicKey: w.owner.identity.publicKey, addedBy: w.owner.memberId, addedEvent: w.anchor.eventId,
+    rotatedEvent: rotation.id, rotatedAt: rotation.at, rotatedTo: fresh.identity.fingerprint
+  });
+  // The key that replaced it carries no rotation field.
+  assert.deepEqual(Object.keys(parsed.state.members.get(w.owner.memberId)?.devices.find((device) => device.fingerprint === fresh.identity.fingerprint) ?? {}).sort(), ['addedBy', 'addedEvent', 'fingerprint', 'publicKey']);
+  // A snapshot signed by the retired key is refused like one signed by a revoked key.
+  const byRetired = parseSnapshotFile(canonicalize(signedSnapshot(w.owner, w.state)), w.anchor);
+  assert.deepEqual(byRetired, { ok: false, reason: R.rotatedDevice });
+
+  const plain = (): JsonObject => JSON.parse(serialiseState(w.state)) as JsonObject;
+  type Devices = Array<Record<string, unknown>>;
+  const devicesOf = (state: JsonObject): Devices => ((state.members as Array<{ devices: Devices }>)[0] as { devices: Devices }).devices;
+  assert.doesNotThrow(() => deserialiseState(plain(), w.anchor));
+  const stranger = await makeActor(w.teamId);
+  const elsewhere = plain();
+  (devicesOf(elsewhere)[0] as Record<string, unknown>).rotatedTo = stranger.identity.fingerprint;
+  assert.throws(() => deserialiseState(elsewhere, w.anchor), 'rotatedTo names no device of that member');
+  const pointsAtSelf = plain();
+  (devicesOf(pointsAtSelf)[0] as Record<string, unknown>).rotatedTo = w.owner.identity.fingerprint;
+  assert.throws(() => deserialiseState(pointsAtSelf, w.anchor), 'rotatedTo names the retired key itself');
+  const partial = plain();
+  delete (devicesOf(partial)[0] as Record<string, unknown>).rotatedAt;
+  assert.throws(() => deserialiseState(partial, w.anchor), 'the three rotation fields come together');
+  const wrongEvent = plain();
+  (devicesOf(wrongEvent)[0] as Record<string, unknown>).rotatedEvent = newEventId();
+  assert.throws(() => deserialiseState(wrongEvent, w.anchor), 'the successor was bound by another event');
+});
+
+test('a log with no rotation serialises and hashes with no rotation field anywhere (D-09)', async () => {
+  const w = await world();
+  const second = await makeDevice(w.owner);
+  accept(w, make(w, w.owner, 'device.added', { memberId: w.owner.memberId, device: deviceRef(second) }));
+  accept(w, make(w, w.owner, 'device.revoked', { memberId: w.owner.memberId, fingerprint: second.identity.fingerprint }));
+  assert.ok(!serialiseState(w.state).includes('rotat'));
+  assert.ok(!JSON.stringify(snapshotBody(w.state).state).includes('rotat'));
+  const fresh = await makeDevice(w.owner);
+  const before = stateHash(w.state);
+  accept(w, make(w, w.owner, 'device.rotated', rotationBody(w.owner.memberId, w.owner, fresh)));
+  assert.ok(serialiseState(w.state).includes('rotatedEvent'));
+  assert.notEqual(stateHash(w.state), before);
 });
 
 test('positional removal: events before the removal stay valid, events after are rejected', async () => {
@@ -602,6 +748,9 @@ test('deserialiseState refuses a state that is not tied to the anchor or is inte
 
 test('deterministic property: replay, incremental application and snapshot plus tail agree over seeded random logs', async () => {
   const seeds = Array.from({ length: 40 }, (_unused, index) => 1001 + index * 7919);
+  let withRotation = 0;
+  let withStaleKey = 0;
+  let withRevokedRetiredKey = 0;
   for (const seed of seeds) {
     const scenario = await buildScenario(seed, 60);
     const label = `seed ${seed}`;
@@ -611,6 +760,9 @@ test('deterministic property: replay, incremental application and snapshot plus 
     // (e) exactly the forged entries are rejected, each with its planned reason.
     assert.deepEqual(full.rejected, scenario.forged, `${label}: rejected list`);
     assert.equal(full.refused, undefined, label);
+    if ([...full.members.values()].some((member) => member.devices.some((device) => device.rotatedEvent !== undefined))) withRotation += 1;
+    if (full.rejected.some((rejection) => rejection.reason === R.rotatedDevice)) withStaleKey += 1;
+    if ([...full.members.values()].some((member) => member.devices.some((device) => device.rotatedEvent !== undefined && device.revokedEvent !== undefined))) withRevokedRetiredKey += 1;
     // (b) incremental application in random chunks, with the live state copied between chunks, equals a full replay.
     const random = mulberry32(seed ^ 0x9e3779b9);
     let live = reduce([], scenario.anchor);
@@ -638,4 +790,8 @@ test('deterministic property: replay, incremental application and snapshot plus 
       assert.equal(serialiseState(signedFile.state), serialiseState(full), `${label}: provisional snapshot plus tail`);
     }
   }
+  // The generator must really exercise rotations and the retired key's refusal, or the property says nothing about them.
+  assert.ok(withRotation >= 5, `rotations appear in ${withRotation} of ${seeds.length} seeds`);
+  assert.ok(withStaleKey >= 3, `a retired key is refused in ${withStaleKey} of ${seeds.length} seeds`);
+  assert.ok(withRevokedRetiredKey >= 2, `a retired key is revoked in ${withRevokedRetiredKey} of ${seeds.length} seeds`);
 });

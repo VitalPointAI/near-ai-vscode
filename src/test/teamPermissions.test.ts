@@ -170,6 +170,22 @@ test('a lead cannot add, revoke or rotate a device of the owner (D-32) but the o
   }
 });
 
+test('rotation: developer, reviewer and observer rotate only their own key, with the reworded owner reason and the label (D-09)', () => {
+  assert.equal(PERMISSION_REASONS.leadOnOwnerDevice, 'a lead cannot add, revoke or rotate a device of the owner');
+  assert.equal(ACTION_LABELS['device.rotate'], 'rotating devices');
+  for (const role of ['developer', 'reviewer', 'observer'] as const) {
+    assert.equal(decideTeamAction(view(), IDS[role], { kind: 'device.rotate', memberId: IDS[role] }).allowed, true, `${role} own`);
+    assert.deepEqual(
+      decideTeamAction(view(), IDS[role], { kind: 'device.rotate', memberId: EXTRA }),
+      { allowed: false, reason: `the ${role} role does not allow rotating devices for another member` },
+      `${role} other`
+    );
+  }
+  for (const role of ['owner', 'lead'] as const) {
+    assert.equal(decideTeamAction(view(), IDS[role], { kind: 'device.rotate', memberId: EXTRA }).allowed, true, `${role} other`);
+  }
+});
+
 test('a developer cannot manage the devices of another member', () => {
   for (const kind of ['device.add', 'device.revoke', 'device.rotate'] as const) {
     const decision = decideTeamAction(view(), IDS.developer, { kind, memberId: EXTRA });

@@ -20,7 +20,7 @@ import type { CoordinationTransport } from '../team/transport';
 import { canonicalTeamFile } from '../team/teamFile';
 import { fakeGitResult, createOwner, createTeamFixture, faultRunner, gitIn } from './helpers/teamHarness';
 import type { TeamFixture, TestOwner } from './helpers/teamHarness';
-import { addFixtureMember, entryOf, makeActor, makeDevice, signed } from './helpers/teamEvents';
+import { addFixtureMember, entryOf, makeActor, makeDevice, rotationBody, signed } from './helpers/teamEvents';
 import type { TestActor } from './helpers/teamEvents';
 
 const R = TEAM_REJECTION_REASONS;
@@ -253,6 +253,48 @@ test('an event over 16 KB is refused before signing with the read-side text', as
       assert.equal(result.reason, 'event is larger than 16 KB');
     }
     assert.equal(remoteHead(fixture), before);
+  });
+});
+
+test('rotation on the write side: a failing reference and an event signed by a rotated key are refused with the read-side text and nothing is written (D-09, D-21)', async () => {
+  await withFixture(['a', 'b'], async (fixture) => {
+    const seed = await seedTeam(fixture);
+    const fresh = await makeDevice(seed.owner);
+    const stranger = await makeActor(seed.teamId);
+    const rotate = (from: TestActor, to: TestActor): EventIntent => ({ type: 'device.rotated', body: rotationBody(seed.owner.memberId, from, to) });
+    const refusedWith = async (intent: EventIntent, reason: string): Promise<void> => {
+      const before = remoteHead(fixture);
+      const result = await seed.a.log.append(() => [intent]);
+      assert.equal(result.ok, false);
+      if (!result.ok) assert.equal(result.reason, reason);
+      assert.equal(remoteHead(fixture), before, 'nothing was written');
+    };
+    await refusedWith(rotate(stranger, fresh), R.deviceNotBound);
+    await refusedWith(rotate(seed.owner, seed.owner), R.deviceTaken);
+    // The signer is the owner's first key, so rotating the second key is another key signing for the member.
+    assert.equal((await seed.a.log.append(() => [secondDeviceIntent(seed.second)])).ok, true);
+    await refusedWith(rotate(seed.second, fresh), R.rotationNotByOldKey);
+
+    // Rotating the signer's own key is allowed: the old key signs the step that retires it.
+    const rotated = await seed.a.log.append(() => [rotate(seed.owner, fresh)]);
+    assert.equal(rotated.ok, true);
+    // From here the retired key is refused on write, by TeamLog and by the transport, with the text a reader records.
+    await refusedWith({ type: 'member.availability', body: { availability: 'away' } }, R.rotatedDevice);
+    const head = seed.a.log.state().head;
+    const stale = signed(seed.owner, { teamId: seed.teamId, type: 'member.availability', body: { availability: 'away' }, lamport: head.lamport + 1, prev: head.eventId });
+    const viaTransport = await seed.a.transport.append((state) => [{ ...stale, prev: state.head.eventId }]);
+    assert.equal(viaTransport.ok, false);
+
+    // The new key writes from a second client, and both clients agree with no rejections.
+    const b = clientFor(fixture, 'b', seed.anchor, { identity: fresh.identity, memberId: seed.owner.memberId });
+    await b.log.sync();
+    assert.equal((await b.log.append(() => [{ type: 'member.availability', body: { availability: 'focus' } }])).ok, true);
+    const synced = await seed.a.log.sync();
+    assert.deepEqual(synced.rejected, []);
+    assert.equal(serialiseState(seed.a.log.state()), serialiseState(b.log.state()));
+    const keys = b.log.state().members.get(seed.owner.memberId)?.devices ?? [];
+    assert.equal(keys.find((device) => device.fingerprint === seed.owner.identity.fingerprint)?.rotatedTo, fresh.identity.fingerprint);
+    assert.equal(keys.filter((device) => device.rotatedEvent === undefined && device.revokedEvent === undefined).length, 2, 'the second key and the new key are active');
   });
 });
 

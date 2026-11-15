@@ -45,6 +45,11 @@ export function signed<T extends ImplementedEventType>(actor: TestActor, fields:
   });
 }
 
+// The body of a rotation: `from` is retired and `to` is bound in one step. The author signs it with the key being retired when it is the member's own.
+export function rotationBody(memberId: string, from: TestActor, to: TestActor): ImplementedEventBodies['device.rotated'] {
+  return { memberId, from: from.identity.fingerprint, device: { fingerprint: to.identity.fingerprint, publicKey: to.identity.publicKey } };
+}
+
 export function entryOf(event: TeamEvent, options: { commit?: string; text?: string; path?: string } = {}): CommittedEvent {
   const text = options.text ?? canonicalize(event);
   return {
@@ -118,6 +123,7 @@ export async function buildScenario(seed: number, length: number): Promise<Scena
   const teamId = newTeamId();
   const owner = await makeActor(teamId);
   const second = await makeDevice(owner);
+  const third = await makeDevice(owner);
   const stranger = await makeActor(teamId);
   const otherTeam = newTeamId();
   const { entries: genesis, anchor } = genesisEntries(owner, teamId);
@@ -127,6 +133,8 @@ export async function buildScenario(seed: number, length: number): Promise<Scena
   const forged: Array<{ eventId: string; reason: string }> = [];
   let secondAdded = false;
   let secondRevoked = false;
+  let secondRotated = false;
+  let retiredRevoked = false;
   let snapshotted = false;
   const at = (offset = 1): { teamId: string; lamport: number; prev: string } => ({ teamId, lamport: live.highLamport + offset, prev: live.head.eventId });
   const accepted = (event: TeamEvent): void => {
@@ -142,7 +150,9 @@ export async function buildScenario(seed: number, length: number): Promise<Scena
     entries.push(entry);
     forged.push({ eventId, reason });
   };
-  const signer = (): TestActor => (secondAdded && !secondRevoked && random() < 0.5 ? { ...second } : owner);
+  // The owner's second key until it is rotated, then the key that replaced it.
+  const active = (): TestActor => (secondRotated ? third : second);
+  const signer = (): TestActor => (secondAdded && !secondRevoked && random() < 0.5 ? { ...active() } : owner);
   const addValid = (): void => {
     const roll = random();
     if (!secondAdded) {
@@ -150,6 +160,14 @@ export async function buildScenario(seed: number, length: number): Promise<Scena
       accepted(signed(owner, { ...at(), type: 'device.added', body: { memberId: owner.memberId, device: { fingerprint: second.identity.fingerprint, publicKey: second.identity.publicKey } } }));
     } else if (roll < 0.1 && !secondRevoked) {
       secondRevoked = true;
+      accepted(signed(owner, { ...at(), type: 'device.revoked', body: { memberId: owner.memberId, fingerprint: active().identity.fingerprint } }));
+    } else if (roll < 0.15 && !secondRotated && !secondRevoked) {
+      // Self-rotation: the member's own key signs the event that retires it.
+      secondRotated = true;
+      accepted(signed(second, { ...at(), type: 'device.rotated', body: rotationBody(owner.memberId, second, third) }));
+    } else if (roll >= 0.15 && roll < 0.18 && secondRotated && !retiredRevoked) {
+      // A retired key found copied is revoked afterwards; the last-device rule does not apply to it.
+      retiredRevoked = true;
       accepted(signed(owner, { ...at(), type: 'device.revoked', body: { memberId: owner.memberId, fingerprint: second.identity.fingerprint } }));
     } else if (roll < 0.45) {
       accepted(signed(signer(), { ...at(1 + Math.floor(random() * 5)), type: 'member.availability', body: { availability: pick(['available', 'focus', 'away', 'offline'] as const) } }));
@@ -161,7 +179,7 @@ export async function buildScenario(seed: number, length: number): Promise<Scena
     }
   };
   const addForgery = (): void => {
-    const kind = Math.floor(random() * 10);
+    const kind = Math.floor(random() * 11);
     const reasons = TEAM_REJECTION_REASONS;
     if (kind === 0) {
       const event = signed(owner, { ...at(), type: 'member.availability', body: { availability: 'away' } });
@@ -196,6 +214,10 @@ export async function buildScenario(seed: number, length: number): Promise<Scena
     } else if (kind === 8) {
       const orphan: CommittedEvent = { commit: 'c'.repeat(40), commitTime: 1, path: snapshotPath(live.highLamport + 7), blob: 'b'.repeat(40), size: 2, text: '{}', kind: 'snapshot' };
       rejected(orphan, orphan.path, reasons.snapshotOrphan);
+    } else if (kind === 10 && secondRotated) {
+      // The retired key signs after its rotation (revoked as well once retiredRevoked, and revocation is reported first).
+      const event = signed(second, { ...at(), type: 'member.availability', body: { availability: 'away' } });
+      rejected(entryOf(event), event.id, retiredRevoked ? reasons.revokedDevice : reasons.rotatedDevice);
     } else {
       const event = signed(owner, { ...at(), type: 'member.removed', body: { memberId: owner.memberId } });
       rejected(entryOf(event), event.id, `${reasons.notPermitted}: the owner cannot be removed`);
