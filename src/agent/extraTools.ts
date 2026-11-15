@@ -171,13 +171,17 @@ export function imageTool(client: NearAiClient, model: ModelInfo, models: readon
   };
 }
 
-/** Whether an error from /images/edits says the model or the endpoint cannot edit images, rather than that the request failed. */
+/**
+ * Whether an error from /images/edits says the model or the endpoint cannot edit images, rather than that the request failed. Only a model that lists no
+ * operations is asked this (one that lists image-edit never falls back). 0.4.24 (second review of PR 51): a 404 counts only when its text says so too,
+ * because a 404 is also a genuine failure (an unknown model or draft), and treating every one as "cannot edit" silently paid for a second image.
+ */
 export function editUnsupported(error: unknown): boolean {
   const failure = (error ?? {}) as { status?: unknown; errorType?: unknown; errorCode?: unknown; message?: unknown };
   const status = typeof failure.status === 'number' ? failure.status : 0;
-  if ([404, 405, 410, 501].includes(status)) return true;
+  if ([405, 410, 501].includes(status)) return true;
   const words = `${String(failure.errorType ?? '')} ${String(failure.errorCode ?? '')} ${String(failure.message ?? '')}`;
-  return [400, 415, 422].includes(status) && /not[\s_-]*(?:supported|implemented)|unsupported|does not support|cannot edit/i.test(words);
+  return [400, 404, 415, 422].includes(status) && /not[\s_-]*(?:supported|implemented)|unsupported|does not support|cannot edit/i.test(words);
 }
 
 /**

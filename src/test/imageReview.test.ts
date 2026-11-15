@@ -134,7 +134,7 @@ test('edit_of edits the draft when the model lists image-edit, and makes a new i
 
 test('edit_of on a model with no listed operations tries the edit endpoint and falls back on a clear unsupported error only', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'near-ai-image-fallback-'));
-  const unsupported = Object.assign(new Error('NEAR AI request failed with HTTP 404 for flux.'), { status: 404 });
+  const unsupported = Object.assign(new Error('NEAR AI request failed with HTTP 404 for flux: image edits are not supported for this model.'), { status: 404 });
   const client = imageClient({ editError: unsupported });
   const reviewer = scriptedReviewer(root, [{ decision: 'changes', feedback: 'brighter' }, { decision: 'accept' }]);
   const tool = imageTool(client as never, FLUX as never, [], reviewer);
@@ -157,6 +157,19 @@ test('edit_of on a model with no listed operations tries the edit endpoint and f
   assert.equal(editUnsupported(Object.assign(new Error('Model does not support image edits'), { status: 400 })), true);
   assert.equal(editUnsupported(Object.assign(new Error('prompt too long'), { status: 400 })), false);
   assert.equal(editUnsupported(Object.assign(new Error('x'), { status: 501 })), true);
+  // Second review of PR 51: a bare 404 is a genuine failure (an unknown model, say), not a reason to pay for a different image; only one whose text says
+  // editing is unsupported falls back.
+  assert.equal(editUnsupported(Object.assign(new Error('NEAR AI request failed with HTTP 404 for flux.'), { status: 404 })), false);
+  assert.equal(editUnsupported(Object.assign(new Error('NEAR AI request failed with HTTP 404: model not found.'), { status: 404 })), false);
+  assert.equal(editUnsupported(Object.assign(new Error('NEAR AI request failed with HTTP 404.'), { status: 404, errorCode: 'not_implemented' })), true);
+  const missing = imageClient({ editError: Object.assign(new Error('NEAR AI request failed with HTTP 404 for flux: model not found.'), { status: 404 }) });
+  const reviewer3 = scriptedReviewer(root, [{ decision: 'changes', feedback: 'again' }]);
+  const tool3 = imageTool(missing as never, FLUX as never, [], reviewer3);
+  await withContext(root, async (context) => {
+    await tool3.run(tool3.parse({ prompt: 'x', path: 'd.png' }), context);
+    await assert.rejects(tool3.run(tool3.parse({ prompt: 'y', path: 'd.png', edit_of: reviewer3.shown[0].id }), context), /HTTP 404/);
+    assert.deepEqual(missing.calls.map((entry) => entry.kind), ['generate', 'edit'], 'no second image is paid for after a plain 404');
+  });
   // A draft that is not this conversation's is refused before anything is paid for.
   await withContext(root, async (context) => {
     await assert.rejects(tool.run(tool.parse({ prompt: 'z', path: 'c.png', edit_of: 'img-000000000000' }), context), /not a draft kept in this conversation/);
