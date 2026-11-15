@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -8,7 +8,7 @@ import { RunCheckpoints } from '../agent/checkpoints';
 import { AgentRun, RunInput } from '../agent/loop';
 import { DEFAULT_RULES } from '../agent/permissions';
 import { AuthService, SecretStorageLike } from '../services/auth';
-import { MAX_MESSAGE_CHARS, parseChatWebviewMessage } from '../services/chatBridge';
+import { MAX_MESSAGE_CHARS, attachmentsClearedMessage, parseChatWebviewMessage } from '../services/chatBridge';
 import { ProfileStore } from '../services/profileStore';
 import { deriveProfileId } from '../domain/auth';
 import type { AgentMessage, CompletionEvent } from '../services/nearAiClient';
@@ -1015,4 +1015,84 @@ test('sidebar: a message sent during a run with no project folder open says it w
     globalThis.fetch = originalFetch;
     await rm(root, { recursive: true, force: true });
   }
+});
+
+// 0.4.24 (PR #55 review): the view takes only the files a clear names, so every host path that posts `attachments-cleared` must name them. Driven
+// through the real host paths (an idle send, messages sent during a run, Stop, a new conversation, a turn that fails before its run) rather than read
+// from the source, then the host's own messages are replayed into the real chat page: the chips it shows are the files the host still holds.
+test('sidebar: every attachments-cleared the host posts names its files, and the page left by them holds what the host holds', async () => {
+  const { root, auth } = await projectWithProfile();
+  const near = fakeNear((messages) => near.requests.length === 1 ? editCall : { content: `Saw: ${lastUser(messages).slice(-40)}` });
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = near.fetch;
+  const setting = failingSetting('agent.modelStallSeconds');
+  try {
+    const sidebar = await openSidebar(root, auth);
+    // A run waiting on approval: two messages with files go to it, then Stop hands them back.
+    const running = sidebar.send({ type: 'send', text: 'Use port 8080', model: 'z-ai/glm-5.3' });
+    await until(() => sidebar.posted.find((message) => message.type === 'approval-request'));
+    const queuedOne = await attach(sidebar, 'one.txt', 'first queued');
+    await sidebar.send({ type: 'steer', id: 'steer-f1f1f1f1f1f1', text: 'see one', attachmentIds: [queuedOne.id] });
+    const queuedTwo = await attach(sidebar, 'two.txt', 'second queued');
+    await sidebar.send({ type: 'steer', id: 'steer-f2f2f2f2f2f2', text: 'see two', attachmentIds: [queuedTwo.id] });
+    await sidebar.send({ type: 'stop' });
+    await running;
+    // An idle send that takes its file.
+    const idle = await attach(sidebar, 'idle.txt', 'idle body');
+    await sidebar.send({ type: 'send', text: 'read idle', model: 'z-ai/glm-5.3', attachmentIds: [idle.id] });
+    // A turn that reads its file and fails before its run starts: the file comes back.
+    const failing = await attach(sidebar, 'failing.txt', 'failing body');
+    setting.on();
+    await sidebar.send({ type: 'send', text: 'read failing', model: 'z-ai/glm-5.3', attachmentIds: [failing.id] });
+    setting.off();
+    // A new conversation leaves the staged files where they are.
+    const kept = await attach(sidebar, 'kept.txt', 'kept body');
+    await sidebar.send({ type: 'new-chat' });
+
+    const clears = sidebar.posted.filter((message) => message.type === 'attachments-cleared');
+    assert.ok(clears.length >= 4, 'the paths above each cleared files');
+    for (const clear of clears) {
+      assert.deepEqual(Object.keys(clear).sort(), ['ids', 'type']);
+      assert.ok(Array.isArray(clear.ids) && clear.ids.length > 0 && (clear.ids as unknown[]).every((id) => typeof id === 'string' && /^att-/.test(id)), `a clear names its files: ${JSON.stringify(clear)}`);
+    }
+
+    // The page, given exactly what the host posted about files, shows the files the host still holds; sending them is not refused as missing.
+    const page = chatPage();
+    for (const message of sidebar.posted) if (message.type === 'attachment-staged' || message.type === 'attachments-cleared') page.send(message);
+    const input = page.nodes.get('input') as StubNode;
+    input.value = 'all that is left';
+    page.posts.length = 0;
+    (page.nodes.get('send') as StubNode).click();
+    const sent = page.sent().find((message) => (message as { type?: string }).type === 'send') as { attachmentIds?: string[] } | undefined;
+    assert.ok(sent, 'the page sends');
+    assert.deepEqual([...(sent.attachmentIds ?? [])].sort(), [queuedOne.id, queuedTwo.id, failing.id, kept.id].sort(), 'the chips are the handed-back, returned and kept files, not the taken one');
+    const mark = sidebar.posted.length;
+    await sidebar.send({ type: 'send', text: 'all that is left', model: 'z-ai/glm-5.3', attachmentIds: sent.attachmentIds });
+    const after = sidebar.posted.slice(mark);
+    assert.equal(after.some((message) => message.type === 'outbound-blocked'), false, 'the host holds every file the page shows');
+    assert.deepEqual([...(after.find((message) => message.type === 'attachments-cleared')?.ids as string[])].sort(), [...(sent.attachmentIds ?? [])].sort());
+  } finally {
+    setting.restore();
+    globalThis.fetch = originalFetch;
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('the attachments-cleared builder always names files, and is the only place the host writes that message', () => {
+  assert.deepEqual(attachmentsClearedMessage(['att-111111111111', 'att-111111111111', 'att-222222222222']), { type: 'attachments-cleared', ids: ['att-111111111111', 'att-222222222222'] });
+  assert.equal(attachmentsClearedMessage([]), undefined, 'nothing to name, nothing posted');
+  assert.equal(attachmentsClearedMessage(['']), undefined);
+  const source = path.join(__dirname, '..', '..', 'src');
+  assert.ok(existsSync(path.join(source, 'services', 'chatBridge.ts')), 'the source tree is found');
+  const offenders: string[] = [];
+  const walk = (dir: string): void => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) { if (entry.name !== 'test') walk(full); continue; }
+      if (!entry.name.endsWith('.ts') || full.endsWith(path.join('services', 'chatBridge.ts'))) continue;
+      if (readFileSync(full, 'utf8').includes('\'attachments-cleared\'')) offenders.push(path.relative(source, full));
+    }
+  };
+  walk(source);
+  assert.deepEqual(offenders, [], 'post attachments-cleared through attachmentsClearedMessage');
 });

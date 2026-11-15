@@ -31,7 +31,7 @@ import { redactSyncText, SYNC_PROMPT_DISMISSED_KEY, syncPanelMessage } from './s
 import { copyAttachmentIntoProject, PreparedAttachments, prepareAttachments, stageAttachment, StagedAttachment } from '../agent/attachments';
 import { projectTeamAllowed, TeamConsent, TeamDefinition, TeamLibrary, teamAgents, workingTeamFor } from '../agent/teams';
 import type { GsdAgent } from '../gsd/library';
-import { modelOptions, modelPrivacyLabel, modelsAsPrivateAs, privateSafetyModel, parseChatWebviewMessage, providerErrorMessage, discoverGsdArtifacts, isSafeArtifactPath, GsdArtifactLink, profileStatusMessage } from './chatBridge';
+import { attachmentsClearedMessage, modelOptions, modelPrivacyLabel, modelsAsPrivateAs, privateSafetyModel, parseChatWebviewMessage, providerErrorMessage, discoverGsdArtifacts, isSafeArtifactPath, GsdArtifactLink, profileStatusMessage } from './chatBridge';
 import type { ChatWebviewMessage } from './chatBridge';
 import { sharedActivityFeed } from './activityView';
 import { runTitleFor } from './activityOverview';
@@ -273,7 +273,9 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
   /** Takes these files out of the composer: they went with a message. Only these, so files attached meanwhile keep their chips. */
   const clearStaged = (staged: StagedAttachment[]): void => {
     for (const item of staged) state.attachments.delete(item.id);
-    void panel.webview.postMessage({ type: 'attachments-cleared', ids: staged.map((item) => item.id) });
+    // Always through the builder, which names the files (the view takes nothing from a clear that names none).
+    const cleared = attachmentsClearedMessage(staged.map((item) => item.id));
+    if (cleared) void panel.webview.postMessage(cleared);
   };
   const ensureAgent = (tab: ChatTab, root: string): AgentConversation => {
     if (!tab.agent) {
