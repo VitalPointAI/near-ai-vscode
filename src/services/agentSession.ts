@@ -1686,7 +1686,7 @@ export class AgentConversation {
    * marker as waiting on a person, and cancelled (the draft kept) when the run or the agent stops. The image goes in the card as a data URL (the view's
    * CSP allows data: images), up to MAX_PREVIEW_BYTES; a larger one is opened full size instead. 0.4.24: like a question, in Full auto or a background
    * sub-agent it ends at the approval timeout (cancelled with `timedOut`, the draft kept, the card closed as timed out); in every other mode it parks the
-   * run like an approval, with the card kept open.
+   * run like an approval, with the card kept open, and after the day-long park limit ends as `released` (the draft kept).
    */
   private async askImageReview(draft: ImageDraft, signal: AbortSignal, policy?: ActionPolicy): Promise<ImageReviewDecision> {
     if (signal.aborted) return { decision: 'cancelled' };
@@ -1710,10 +1710,14 @@ export class AgentConversation {
     `The image for ${draft.path} waited a whole day without a review, so the run was released. The draft is kept.`);
     if (!answer && (how === 'timed-out' || how === 'released')) {
       this.imageReviews.delete(draft.id);
-      const minutes = how === 'timed-out' ? this.promptLimitMinutes : Math.round(PARK_LIMIT_MS / 60_000);
-      if (how === 'timed-out') this.closePrompt(draft.id, true, minutes);
-      else this.closePrompt(draft.id);
-      answer = { reply: { decision: 'cancelled', timedOut: minutes }, cancelled: true };
+      if (how === 'timed-out') {
+        this.closePrompt(draft.id, true, this.promptLimitMinutes);
+        answer = { reply: { decision: 'cancelled', timedOut: this.promptLimitMinutes }, cancelled: true };
+      } else {
+        // Released after the day-long park (the chat already said so with approval-expired): its own outcome, so the agent is not told it timed out.
+        this.closePrompt(draft.id);
+        answer = { reply: { decision: 'released' }, cancelled: true };
+      }
     } else {
       if (!answer) { this.imageReviews.delete(draft.id); answer = { reply: { decision: 'cancelled' }, cancelled: true }; }
       this.closePrompt(draft.id, answer.cancelled);

@@ -32,9 +32,10 @@ export interface ImageDraft {
 
 /**
  * What the person decided on a draft; `cancelled` when the run or the agent was stopped before they did, or (0.4.24) with `timedOut` when nobody
- * answered for that many minutes: the approval timeout in Full auto or a background sub-agent, otherwise the day-long park limit.
+ * answered within the approval timeout (Full auto or a background sub-agent only). `released` (0.4.24, PR #55 review): in the other modes the review
+ * parked the run and nobody reviewed it for the whole day-long park limit, so the run was released; that is not a timeout, and the agent is told so.
  */
-export type ImageReviewDecision = { decision: 'accept' } | { decision: 'changes'; feedback: string } | { decision: 'discard' } | { decision: 'cancelled'; timedOut?: number };
+export type ImageReviewDecision = { decision: 'accept' } | { decision: 'changes'; feedback: string } | { decision: 'discard' } | { decision: 'cancelled'; timedOut?: number } | { decision: 'released' };
 
 export interface ImageDraftEntry { path: string; reviewing?: boolean }
 
@@ -158,6 +159,9 @@ export function imageTool(client: NearAiClient, model: ModelInfo, models: readon
             await deleteDraft(reviewer.root, id);
             reviewer.drafts.delete(id);
             return `The user discarded draft ${id}; nothing was saved to ${shown}. Do not generate this image again unless the user asks for it.`;
+          case 'released':
+            // 0.4.24 (PR #55 review): released after the day-long park outside Full auto, worded like a released question (QUESTION_RELEASED), never as a timeout.
+            return `Nobody reviewed the image for a day, so the run was released. Draft ${id} is kept in ${DRAFTS_DIR}/ and nothing was saved to ${shown}. Carry on without it and tell the user it is waiting in ${DRAFTS_DIR}/; ask them again if it still matters, and do not generate it again unless they ask.`;
           default:
             // 0.4.24: a review nobody answered in time ends like a stop, but the agent is told why, so it carries on without the image rather than making it again.
             if (decision.timedOut !== undefined) return `The user did not review the image within ${decision.timedOut} minute${decision.timedOut === 1 ? '' : 's'}, so the review timed out. Draft ${id} is kept in ${DRAFTS_DIR}/ and nothing was saved to ${shown}. Carry on without it and tell the user it is waiting in ${DRAFTS_DIR}/; do not generate it again unless they ask.`;

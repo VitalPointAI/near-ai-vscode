@@ -10,7 +10,9 @@
   run carries on: the agent is told the question got no answer, and an image's draft is kept in
   `.near-ai/drafts/images/` for you to look at later. In the other modes nothing is decided for
   you: as with an approval, the run is paused on the question or image, the card stays, and your
-  answer carries the run on whenever you are back.
+  answer carries the run on whenever you are back. Left a whole day, the run is released, as an
+  approval is, and the agent is told nobody answered (an image's draft is kept), not that it timed
+  out.
 - **An accepted image is not lost to a second attempt.** When two attempts at the same image ran
   at once, the second could delete the image you had just accepted before it was saved, and the
   save failed. The accepted image is now kept until it is saved.

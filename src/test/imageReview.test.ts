@@ -584,6 +584,48 @@ test('outside Full auto a question left a whole day is released like an approval
   }
 });
 
+// PR #55 review: an image review released after the day-long park outside Full auto was returned as `{ cancelled, timedOut: 1440 }`, so the agent was told
+// the review timed out. It has its own outcome, tool text and transcript line now, like a released question.
+test('outside Full auto an image review left a whole day is released, not timed out: the draft is kept and the agent is told to ask again', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'near-ai-image-release-'));
+  const posted: Array<Record<string, unknown>> = [];
+  const conversation = new AgentConversation(root, (message) => posted.push(message), path.join(root, '.ckpt'));
+  conversation.approvalTimeoutMs = 40;
+  const internals = conversation as unknown as AskInternals;
+  const timers = { set: globalThis.setTimeout };
+  globalThis.setTimeout = ((handler: () => void, ms?: number) => timers.set(handler, ms === PARK_LIMIT_MS ? 5 : ms)) as typeof setTimeout;
+  try {
+    await mkdir(draftsFolder(root), { recursive: true });
+    const id = 'img-0d0d0d0d0d0d';
+    await writeFile(draftFile(root, id), Buffer.from([1, 2, 3]));
+    const decision = await internals.askImageReview({ id, file: draftFile(root, id), path: 'assets/a.png', model: 'm', prompt: 'p', attempt: 1, bytes: 3 }, new AbortController().signal, ASK_FIRST);
+    globalThis.setTimeout = timers.set;
+    assert.deepEqual(decision, { decision: 'released' }, 'released, with no timeout');
+    const expired = posted.find((message) => message.type === 'approval-expired' && message.callId === id);
+    assert.ok(expired);
+    assert.equal(expired.minutes, 1440);
+    assert.equal(expired.text, 'The image for assets/a.png waited a whole day without a review, so the run was released. The draft is kept.');
+    assert.equal(posted.some((message) => message.type === 'prompt-closed' && message.outcome === 'timed-out'), false, 'the card is not closed as timed out');
+    assert.deepEqual(conversation.waitingPrompts(), []);
+    assert.ok(existsSync(draftFile(root, id)), 'the draft is kept');
+  } finally {
+    globalThis.setTimeout = timers.set;
+    conversation.dispose();
+  }
+  // The tool tells the agent it was released, never that it timed out.
+  const toolRoot = await mkdtemp(path.join(tmpdir(), 'near-ai-image-release-tool-'));
+  const reviewer = scriptedReviewer(toolRoot, [{ decision: 'released' }]);
+  const tool = imageTool(imageClient() as never, FLUX as never, [], reviewer);
+  await withContext(toolRoot, async (context) => {
+    const result = await tool.run(tool.parse({ prompt: 'a lighthouse', path: 'hero.png' }), context);
+    assert.match(result, /^Nobody reviewed the image for a day, so the run was released\. Draft img-[0-9a-f]{12} is kept in [^ ]+\/ and nothing was saved to hero\.png\./);
+    assert.match(result, /ask them again if it still matters/);
+    assert.doesNotMatch(result, /timed out/);
+    assert.ok(existsSync(draftFile(toolRoot, reviewer.shown[0].id)), 'the draft is kept');
+    assert.equal(existsSync(path.join(toolRoot, 'hero.png')), false);
+  });
+});
+
 test('a background sub-agent\'s question and image review time out as in Full auto; a foreground one\'s park', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'near-ai-image-background-'));
   const posted: Array<Record<string, unknown>> = [];
