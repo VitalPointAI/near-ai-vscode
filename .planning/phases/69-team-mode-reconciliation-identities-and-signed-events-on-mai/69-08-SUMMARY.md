@@ -12,14 +12,15 @@ provides:
   - "Phase 60 criteria on main: a table of run-on-main evidence (TMR-02)"
   - "A review-budget figure: 904,492 bytes against the 950,000 limit, package-lock.json unchanged"
   - "A guard that refuses a remote address starting with a dash before any network call (review finding)"
+  - "Enable Team Mode refuses with the preview off, whatever starts it (review blocker); Push validates the branch as a ref name"
 affects: [69-09, 69-15]
 
 actuals:
-  tokens: 1118
+  tokens: 3200
   tasks: 3
-  commits: 2
+  commits: 3
 plan_head_before: caf8079ccb64f700f925a5e6f453eaadb00e5572
-plan_head_after: 8415bd2bc608eb63c10dbd12848edb6b55b1301c
+plan_head_after: 3897b07a5375285b4af650036e1b24f8d35b8a2c
 
 tech-stack:
   added: []
@@ -30,12 +31,17 @@ key-files:
   created: []
   modified:
     - src/team/gitTransport.ts
+    - src/team/enable.ts
+    - src/services/team/teamCommands.ts
     - src/test/teamGitTransport.test.ts
+    - src/test/teamCommands.test.ts
+    - src/test/teamEnable.test.ts
+    - src/test/e2e/suite.ts
 
 key-decisions:
   - "Main (one documentation commit, #58) was merged into the branch with a merge commit instead of rebasing, because the branch had no pushed history to keep and the owner rules forbid rewriting it"
   - "The review's remote-address finding was fixed in remoteUrl (one chokepoint) rather than in networkTarget, so it covers every git version and every caller"
-  - "The review's four minors from the second round were left for the owner and part 2, not fixed, so the review loop ends here (see the review record)"
+  - "The third review (on the head that only added this summary) escalated the unconditional Enable command to a BLOCKER, so Enable now checks nearAi.team.preview itself; the CHANGELOG line, the canary rendering coverage and the double precondition check are left for the release PR and the owner (see the review record)"
 
 patterns-established: []
 
@@ -45,7 +51,7 @@ status: complete
 
 # Phase 69 Plan 08: PR 1 gate, Phase 60 criteria re-verified on main, PR opened Summary
 
-**PR 1 (#59) is open against main with all seven required checks and the agent review green; the whole local gate passed once on top of current main, and Phase 60's five criteria were re-verified on this branch by running their tests.**
+**PR 1 (#59) is open against main with every required check and the agent review green; the whole local gate passed once on top of current main, and Phase 60's five criteria were re-verified on this branch by running their tests.**
 
 PR: https://github.com/VitalPointAI/near-ai-vscode/pull/59 (title `feat(team): Team Mode core on main with one identity per person (Phase 69, part 1)`). Nothing was merged, approved or pushed to main by this run.
 
@@ -67,7 +73,7 @@ The nine skipped tests are the ones that need something this machine does not ha
 
 `package.json` changes by 36 added lines only (the preview setting, the two commands and their palette gating); no dependency changed.
 
-The merge touched documentation and one test file only. The review fix (below) came after these runs; CI re-ran the full suite, the e2e and every other required check on it, all green.
+The merge touched documentation and one test file only. The review fixes (below) came after these runs; CI re-runs the full suite, the e2e and every other required check on each head.
 
 ### e2e pass lines for plan 07's Team Mode tests (this run)
 
@@ -117,13 +123,26 @@ Round 1, head `b4b7016`: verdict PASS (merge), one MAJOR and three MINOR.
 | [MINOR] no CHANGELOG line for the new setting and commands | Left on purpose: Team Mode is a hidden preview and the plan says the line comes with the release; the PR body says so. Raise it again on the release PR. |
 | [MINOR] `enableDefaults` falls back to `main` when there is no `main` and the current branch name is refused | Left for the owner: this is the behaviour Phase 60 chose and tested (WR-09, a name the shared rules refuse cannot be used, and there is no valid alternative to choose); changing it changes ported behaviour |
 
-Round 2, head `8415bd2`: verdict PASS (merge), no blocker, four MINOR and one NIT, none fixed here so that the review loop ends. For the owner or part 2:
+Round 2, head `8415bd2`: verdict PASS (merge), no blocker, four MINOR and one NIT:
 
 - package.json:769: the Enable command is registered unconditionally and only its Command Palette entry is gated on the preview, so a keybinding or script can start it with the preview off. Accept that in writing, or have Enable refuse when `nearAi.team.preview` is off. (The PR body says the secret is "reachable only with the preview on"; strictly it is reachable only through the Command Palette with the preview on.)
 - CHANGELOG: same deferral as above.
 - `src/test/helpers/teamCanary.ts:55`: the canary scans several renderings of the key but not the seed in standard base64 with padding or the DER in hex; add both or document the coverage.
 - `src/team/enable.ts:300`: `pushCodeBranch` refuses a leading dash and control characters but not `:`; validate the branch with the shared ref-name rule (same class as the fixed finding: a value from git state used as a git argument).
 - NIT `src/services/team/teamCommands.ts:200`: Enable runs the git preconditions twice.
+
+Round 3, head `9c2bff9` (the summary-only commit): the automatic review ran again on the new head and returned verdict FAIL with one BLOCKER, four MINOR and one NIT. The BLOCKER was the first minor of round 2, raised in severity: only the palette entry for Enable was gated, so the command (and the device key it creates) ran with the preview off, contradicting the PR text. The class is "a gate that lives only in the UI". Fixed in `3897b07`:
+
+| Finding | What was done |
+| --- | --- |
+| [BLOCKER] Enable registered unconditionally, only its palette entry gated | `enable()` checks `nearAi.team.preview` first and says how to turn it on; no question, key, folder or commit before that. New unit test with the preview off: nothing is asked, created or pushed. The e2e (re-run locally, 20 of 20) still passes. |
+| [MINOR] `pushCodeBranch` refuses a dash but not a colon (refspec) | Now uses the shared `isGitRefName` rule, with a test for `main:refs/heads/other`. |
+| [MINOR] e2e assertion `JSON.stringify(evidence).includes(evidence.privateKeySha256)` is always true | Replaced with a format check (64 lowercase hex characters). |
+| [MINOR] key canary renderings (padded standard base64 seed, DER in hex) | Left for the owner: the canary also scans the git objects and files for the public renderings and for every window of the private base64 and hex runs (plan 07); extending the rendering list is a test-helper change with its own review round. |
+| [MINOR] CHANGELOG line | Left for the release PR, as the PR template allows ("noted for the next release PR"). |
+| [NIT] git preconditions run twice in Enable | Left: ported behaviour, harmless extra local git calls. |
+
+The review is not deterministic across heads (the same code drew PASS on `b4b7016` and `8415bd2` and FAIL on `9c2bff9`), so the later rounds are recorded here as found.
 
 ## Deviations from Plan
 
@@ -135,6 +154,14 @@ Round 2, head `8415bd2`: verdict PASS (merge), no blocker, four MINOR and one NI
 - **Fix:** `remoteUrl` throws the existing unavailable-remote error when the address starts with `-`; every caller already handles it by reporting offline or refused.
 - **Files modified:** src/team/gitTransport.ts, src/test/teamGitTransport.test.ts
 - **Commit:** 8415bd2
+
+**2. [Rule 2 - Missing critical functionality] Enable Team Mode ran with the preview off**
+- **Found during:** Task 3, agent review of PR 1 (BLOCKER on the third head)
+- **Issue:** only the Command Palette entry was gated on `nearAi.team.preview`; a keybinding or another command could start Enable and create the device key.
+- **Fix:** `enable()` refuses first, before any question, with a plain message naming the setting; `pushCodeBranch` now validates the branch with the shared ref-name rule; the vacuous e2e digest assertion became a format check.
+- **Files modified:** src/services/team/teamCommands.ts, src/team/enable.ts, src/test/teamCommands.test.ts, src/test/teamEnable.test.ts, src/test/e2e/suite.ts
+- **Commit:** 3897b07
+- **Checks:** `npm run lint` clean; `teamCommands`, `teamEnable`, `teamSession`, `teamManifest`, `teamBoundaries` 87 of 87; `npm run test:e2e` (owner-rules line) 20 of 20 with exit 0.
 
 ### Other deviations
 
@@ -155,11 +182,11 @@ None beyond the plan's register. T-69-18 (secrets in public history) is covered 
 ## Open for the owner
 
 1. Merge PR #59 through the normal gates when you are ready (everything is green and approved; this run did not and will not merge).
-2. Decide the preview-gate wording (the Enable command can still be run by keybinding with the preview off) and the CHANGELOG line for the release PR.
+2. The CHANGELOG line for the release PR, and whether to extend the key canary's rendering list (see round 3).
 3. Plan 69-15 checks that PR 1 is on main and stops if it is not.
 
 ## Self-Check: PASSED
 
-- Commits `b4b7016` (merge) and `8415bd2` (fix) are ancestors of HEAD.
+- Commits `b4b7016` (merge), `8415bd2` and `3897b07` (fixes) are ancestors of HEAD.
 - `src/team/gitTransport.ts` and `src/test/teamGitTransport.test.ts` exist and carry the guard and its test.
 - PR #59 is `OPEN`, base `main`; `gh pr checks 59` shows all eight required checks passing.

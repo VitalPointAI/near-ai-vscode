@@ -118,7 +118,7 @@ Next, in order:
 ## Session
 
 **Last session:** 2026-11-15T22:12:24.647Z
-**Stopped at:** Completed 69-08-PLAN.md (PR #59 open, green and approved by the automatic review, not merged); next 69-09
+**Stopped at:** Completed 69-08-PLAN.md (PR #59 open, not merged); next 69-09
 **Resume file:** None
 
 ## Performance Metrics
