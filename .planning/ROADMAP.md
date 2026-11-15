@@ -254,7 +254,7 @@ These phases change the extension's engine (`src/agent`, `src/domain`, `src/team
   5. Every v0.6.0 phase and requirement has a recorded disposition (landed here, carried to the Team Mode milestone, folded into a named new phase, or retired), and carried v0.6.0 ids that collide with v0.7.0 ids (TEAM-01..04, SETUP-01) carry a `TM-` prefix. (TMR-04)
 **Research flags**: (1) The branch forked at 0.4.11; `main` is at 0.4.22 or later, with Phases 26 and 27 in between. Decide per file whether to port by cherry-pick or re-apply from the Phase 60 SUMMARY files; `src/extension.ts`, the `package.json` contributions and `src/agent/permissions.ts` changed most. (2) Team Mode's coordination transport and Phase 27's sync both run private git mirrors: check they cannot share or lock each other's mirror. (3) Phases 61, 62 and 62.1 stay on the archive branch for milestone L2 (owner, 2026-11-15); the branch is archived on GitHub at 4207080.
 **Undo cost**: Low for the code (additive, inert while Team Mode is off). Higher for the signing interface (TMR-05): grants and policy bundles signed through it outlive a change.
-**Plans:** 6/15 plans executed (one per wave; PR 1 is plans 01-08 on `feat/team-core-on-main`, PR 2 is plans 09-15 on `feat/team-signed-payloads`)
+**Plans:** 7/15 plans executed (one per wave; PR 1 is plans 01-08 on `feat/team-core-on-main`, PR 2 is plans 09-15 on `feat/team-signed-payloads`)
 
 Plans:
 **Wave 1**
@@ -276,7 +276,7 @@ Plans:
 - [x] 69-06-PLAN.md — preview setting and palette gating, plain words, manifest and boundary tests
 
 **Wave 7** *(blocked on Wave 6 completion)*
-- [ ] 69-07-PLAN.md — one identity per person per install, rollback rule (D-22), Team Mode e2e in a real window (D-30)
+- [x] 69-07-PLAN.md — one identity per person per install, rollback rule (D-22), Team Mode e2e in a real window (D-30)
 
 **Wave 8** *(blocked on Wave 7 completion)*
 - [ ] 69-08-PLAN.md — PR 1 gate, Phase 60 criteria re-verified on main, open PR 1
@@ -686,7 +686,7 @@ Also carried: the shared code-server follow-ups (owner, 2026-11-05). Phase 27 al
 | 28. Secure development workflow setup step | 0/TBD | Not started | - |
 | 29. A cleanup member with a safe CleanUp tool | 0/TBD | Not started (after Phase 70) | - |
 | 68. Relay foundation | 8/8 | Complete; merged as PR #50 (052d5cf); `relay` required on main (D-19) | 2026-11-15 |
-| 69. Team Mode reconciliation | 6/15 | In Progress (two PRs) | - |
+| 69. Team Mode reconciliation | 7/15 | In Progress (two PRs) | - |
 | 70. Capability vocabulary, manifests and one gate | 0/TBD | Not started | - |
 | 71. Delegation that only narrows | 0/TBD | Not started | - |
 | 72. Execution backends on a copy, with a guarded apply | 0/TBD | Not started (spike done 2026-11-15) | - |
