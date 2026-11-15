@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { DEFAULT_RULES } from '../agent/permissions';
-import { PROJECT_TEAM_CONSENT_KEY, projectTeamAllowed, projectTeamQuestion, renderTeam, TeamConsent, TeamDefinition, TeamLibrary, teamLeadPrompt, teamMembersNote, workingTeamFor } from '../agent/teams';
+import { LEGACY_TEAM_CONSENT, PROJECT_TEAM_CONSENT_KEY, projectTeamAllowed, projectTeamQuestion, renderTeam, TeamConsent, TeamDefinition, TeamLibrary, teamLeadPrompt, teamMembersNote, workingTeamFor } from '../agent/teams';
 import { gsdTools, MAX_OTHER_AGENTS } from '../gsd/tools';
 import { AgentConversation, GsdContext } from '../services/agentSession';
 import type { AgentMessage, CompletionEvent, ToolDefinition } from '../services/nearAiClient';
@@ -359,6 +359,30 @@ test('an answer saved before answers were kept per file still counts', async () 
   assert.equal(await projectTeamAllowed(other, { trusted: true, store: legacy, fallback: new Map(), ask: async () => { asked += 1; return false; } }), false);
   assert.equal(asked, 1, 'a second folder with the same team is asked');
   assert.equal(await projectTeamAllowed(team, { trusted: true, store: legacy, fallback: new Map(), ask: async () => { throw new Error('must not ask again'); } }), true, 'the first folder keeps its answer');
+});
+
+// #46 review: asking about another folder's team first saved only the per-file answers, so the old workspace-wide answer was dropped before the folder it
+// belonged to could claim it, and that folder was asked again.
+test('an answer saved before answers were kept per file survives another folder being asked first, until its own folder claims it', async () => {
+  const team = projectTeam('/w/a/.planning/.near-ai/team.md');
+  const probe = memento();
+  await projectTeamAllowed(team, { trusted: true, store: probe, fallback: new Map(), ask: async () => true });
+  const fingerprint = (probe.values.get(PROJECT_TEAM_CONSENT_KEY) as Record<string, TeamConsent>)[team.file].fingerprint;
+  const store = memento({ [PROJECT_TEAM_CONSENT_KEY]: { fingerprint, use: true } });
+  // Another folder, with a different team, is asked about first.
+  const other = projectTeam('/w/b/.planning/.near-ai/team.md', 'illustrator');
+  let asked = 0;
+  assert.equal(await projectTeamAllowed(other, { trusted: true, store, fallback: new Map(), ask: async () => { asked += 1; return false; } }), false);
+  assert.equal(asked, 1);
+  assert.deepEqual(store.values.get(PROJECT_TEAM_CONSENT_KEY), { [LEGACY_TEAM_CONSENT]: { fingerprint, use: true }, [other.file]: { fingerprint: (store.values.get(PROJECT_TEAM_CONSENT_KEY) as Record<string, TeamConsent>)[other.file].fingerprint, use: false } }, 'the old answer is kept under its reserved key');
+  // The folder the old answer belongs to still gets it without being asked, and claims it.
+  assert.equal(await projectTeamAllowed(team, { trusted: true, store, fallback: new Map(), ask: async () => { throw new Error('must not ask'); } }), true);
+  assert.deepEqual(Object.keys(store.values.get(PROJECT_TEAM_CONSENT_KEY) as object).sort(), [other.file, team.file].sort(), 'claimed, it is no longer kept apart');
+  assert.equal(await projectTeamAllowed(other, { trusted: true, store, fallback: new Map(), ask: async () => { throw new Error('must not ask again'); } }), false, 'the other folder keeps its own answer');
+  // Claimed, it no longer applies to a third folder with the same team.
+  let third = 0;
+  assert.equal(await projectTeamAllowed(projectTeam('/w/c/.planning/.near-ai/team.md'), { trusted: true, store, fallback: new Map(), ask: async () => { third += 1; return false; } }), false);
+  assert.equal(third, 1);
 });
 
 test('the answers kept without workspace state are bounded', async () => {
