@@ -1,0 +1,9 @@
+# Allow-list for the relay image, built from the repository root: everything is left out unless a line below lets it in.
+# relay/state, relay/secrets, .git and .planning never enter the build context. Phase 71 adds !src/agent and what it imports.
+*
+!relay/package.json
+!relay/package-lock.json
+!relay/.npmrc
+!relay/tsconfig.json
+!relay/scripts
+!relay/src
