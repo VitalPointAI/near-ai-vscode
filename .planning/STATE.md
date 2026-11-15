@@ -9,11 +9,11 @@ stopped_at: "v0.7.0 replanned 2026-11-15 around the owner's platform direction; 
 last_updated: "2026-11-15T13:22:46.000Z"
 state_head: 2fe6e976ceda86fe800620f2012d78fe85c6779d
 progress:
-  total_phases: 17
+  total_phases: 20
   completed_phases: 1
   total_plans: 8
   completed_plans: 8
-  percent: 6
+  percent: 5
 last_activity: 2026-11-15
 last_activity_desc: "Replanned v0.7.0 as Governed agent platform and messaging relay (Phases 69-84); OpenShell spike result recorded"
 ---
@@ -99,7 +99,7 @@ Next, in order:
 ### Blockers/Concerns
 
 - Owner action pending (D-19): approve agent-review-gates on PR #50, then add relay to main's branch protection.
-- `feat/team-fix-pass` exists only locally (not on GitHub) and its legacy worktree has five uncommitted files: archive it before Phase 69.
+- `feat/team-fix-pass` is archived on GitHub at 4207080 (its five loose files were committed first); Phase 69 ports from it.
 - The Signal sidecar re-check date (about 2026-12-10) recorded in `relay/compose.yaml`, `relay/README.md` and the container test now falls before the Signal phase.
 
 ### Quick Tasks Completed

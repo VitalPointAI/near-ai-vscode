@@ -102,6 +102,11 @@
       "number": "84",
       "name": "Ops, onboarding and release",
       "status": "pending"
+    },
+    {
+      "number": "25",
+      "name": "Cybersecurity harness (v0.8.0, deferred by the owner to the end)",
+      "status": "deferred"
     }
   ],
   "next": {
