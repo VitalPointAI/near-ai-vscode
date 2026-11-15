@@ -70,6 +70,7 @@ Next, in order:
 - Later milestones in the order L1-L6; mixed NVIDIA and AMD groups may stop at per-vendor pools with request balancing (POOL-01).
 - GATE-05 accepted: fully-autonomous asks before writes into `.git/` and `.near-ai/` state.
 - v0.7.0 stays one milestone with three stage gates.
+- AMD first: the first test hardware is an AMD Ryzen AI Max (Strix Halo) machine; every hardware-dependent step (OpenShell bring-up and GPU passthrough in Phase 72, relay images in Phase 84, the L1 appliance and local inference) is proven on AMD first, NVIDIA GB10 arm64 follows without blocking it.
 
 ### Naming trap
 
