@@ -118,6 +118,8 @@ The reply is 200 when the relay is healthy and 503 when it cannot read its own s
 - It is pinned by tag and digest: `0.101` plus its sha256. That tag bundles signal-cli 0.14.8. Re-check the tag and re-pin it before about 2026-12-10 (Phase 75 does this).
 - It publishes no port. Only the relay, on the Compose network, can reach it.
 - Its `signal-config` volume is the Signal registration. Treat it like a password: back it up privately and never share it.
+- It runs with the same kind of limits as the relay: as the image's own `signal-api` user (uid 1000, never root), a read-only root filesystem, every Linux capability dropped, no-new-privileges, and limits of 256 processes and 1 GB of memory. Its only writable paths are the `signal-config` volume and a 128 MB private `/tmp`. That `/tmp` allows running programs, because the image's process supervisor (s6-overlay) runs its service scripts from `/tmp/s6-runtime` and signal-cli loads its native library from there.
+- What was checked so far is static only: the pinned image's own settings (it is built to run as uid 1000 with a read-only root, `S6_READ_ONLY_ROOT=1`, and keeps its runtime files in `/tmp`) and `docker compose --profile signal config`, which the container suite also asserts. Nothing has started the sidecar yet. Phase 75 starts it for the first time and must confirm it runs with these settings, and loosen one only with a recorded reason.
 
 ## Known limits
 

@@ -48,6 +48,18 @@ services:
     profiles: ["signal"]
     image: docker.io/bbernhard/signal-cli-rest-api:0.101@sha256:2cf09d66a86fdd210e42ee91662216364acc27da1163a8c44167a77ea3a6559a
     restart: unless-stopped
+    # Hardening, checked against the pinned image without starting it: the image runs as signal-api (uid 1000) under s6-overlay with
+    # S6_READ_ONLY_ROOT=1 and its runtime in /tmp/s6-runtime, so it needs no capability and only /tmp writable besides its volume. /tmp
+    # allows exec because s6 runs its service scripts from there and the JVM signal-cli loads its native library from java.io.tmpdir.
+    # Re-check that it starts this way in Phase 75, when the sidecar is first run.
+    user: "1000:1000"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 256
+    mem_limit: 1g
+    tmpfs:
+      - /tmp:size=128m,uid=1000,gid=1000,mode=0700,exec
     environment:
       MODE: json-rpc
       JSON_RPC_RECEIVE_MODE: manual

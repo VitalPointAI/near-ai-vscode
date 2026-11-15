@@ -249,19 +249,41 @@ describe('relay container image and Compose project', { timeout: 1_500_000 }, ()
     assert.equal(config.secrets.teams_app_secret?.file, path.join(secretsDir, 'teams_app_secret'));
   });
 
-  test('the Signal sidecar is only in profile signal, pinned by tag and digest, and publishes no port', async () => {
+  test('the Signal sidecar is only in profile signal, pinned by tag and digest, publishes no port, and is hardened like the relay', async () => {
     const defaults = (await mustRun('docker', ['compose', '-f', COMPOSE_FILE, 'config', '--services'], { env: composeEnv() })).stdout.split('\n').filter(Boolean).sort();
     assert.deepEqual(defaults, ['relay']);
     const withSignal = (await mustRun('docker', ['compose', '--profile', 'signal', '-f', COMPOSE_FILE, 'config', '--services'], { env: composeEnv() })).stdout.split('\n').filter(Boolean).sort();
     assert.deepEqual(withSignal, ['relay', 'signal']);
     const config = JSON.parse((await mustRun('docker', ['compose', '--profile', 'signal', '-f', COMPOSE_FILE, 'config', '--format', 'json'], { env: composeEnv() })).stdout) as {
-      services: Record<string, { image: string; ports?: unknown[]; profiles?: string[] }>;
+      services: Record<
+        string,
+        {
+          image: string;
+          ports?: unknown[];
+          profiles?: string[];
+          user?: string;
+          read_only?: boolean;
+          cap_drop?: string[];
+          security_opt?: string[];
+          pids_limit?: number;
+          mem_limit?: string | number;
+          tmpfs?: string[];
+        }
+      >;
     };
     const signal = config.services.signal;
     assert.ok(signal);
     assert.match(signal.image, /^docker\.io\/bbernhard\/signal-cli-rest-api:\d+\.\d+@sha256:[0-9a-f]{64}$/);
     assert.ok(!signal.ports || signal.ports.length === 0, 'the sidecar publishes no port');
     assert.deepEqual(signal.profiles, ['signal']);
+    // Static only: the suite never starts the sidecar. Its volume is the Signal registration, so it gets the relay's runtime limits.
+    assert.equal(signal.user, '1000:1000', 'the sidecar runs as the image\'s signal-api user, never root');
+    assert.equal(signal.read_only, true);
+    assert.deepEqual(signal.cap_drop, ['ALL']);
+    assert.ok(signal.security_opt?.includes('no-new-privileges:true'));
+    assert.ok(typeof signal.pids_limit === 'number' && signal.pids_limit > 0 && signal.pids_limit <= 512, 'a process limit');
+    assert.ok(Number(signal.mem_limit) > 0 && Number(signal.mem_limit) <= 2 * 1024 ** 3, 'a memory limit of at most 2 GiB');
+    assert.deepEqual(signal.tmpfs?.map((entry) => entry.split(':')[0]), ['/tmp'], 'only /tmp is writable besides the volume');
     assert.match(readFileSync(COMPOSE_FILE, 'utf8'), /2026-12-10/, 'the file records the Phase 75 re-check date');
   });
 
