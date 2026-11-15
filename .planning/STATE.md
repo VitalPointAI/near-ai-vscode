@@ -5,7 +5,7 @@ milestone_name: Governed agent platform and messaging relay
 current_phase: 69
 current_phase_name: Team Mode reconciliation
 status: planning
-stopped_at: "v0.7.0 replanned 2026-11-15 around the owner's platform direction; Phase 68 complete (PR #50 in review, owner D-19 step open); Phase 69 not planned yet"
+stopped_at: "v0.7.0 replanned 2026-11-15 around the owner's platform direction; Phase 68 complete and merged (PR #50, 052d5cf); owner adds relay to branch protection; Phase 69 not planned yet"
 last_updated: "2026-11-15T13:22:46.000Z"
 state_head: 2fe6e976ceda86fe800620f2012d78fe85c6779d
 progress:
@@ -23,15 +23,15 @@ last_activity_desc: "Replanned v0.7.0 as Governed agent platform and messaging r
 ## Current position
 
 Milestone: v0.7.0 Governed agent platform and messaging relay (Phases 68-84), replanned 2026-11-15 from the owner's platform direction (`.planning/PROJECT.md`, "Platform direction"). The roadmap's v0.7.0 section opens with the order of work across every stream.
-Phase 68 (Relay foundation): complete and verified (4/4 must-haves, 8/8 plans); in review as PR #50. Open: the owner's D-19 step.
-0.4.x line: 0.4.22 published 2026-11-14; 0.4.23 in review as PR #51, its release PR follows; 0.4.24 is next (the four #46 review minors and three documentation mismatches). Phase 27 shipped as 0.4.20; its record stays open until the owner's host check.
+Phase 68 (Relay foundation): complete, verified and merged as PR #50 (052d5cf, 2026-11-15). Open: the owner adds `relay` to main's branch protection (D-19).
+0.4.x line: 0.4.22 published 2026-11-14; 0.4.23 merged (PR #51) and published 2026-11-15 (release PR #52, tag v0.4.23); 0.4.24 is next (the four #46 review minors and three documentation mismatches). Phase 27 shipped as 0.4.20; its record stays open until the owner's host check.
 Phase 69 (Team Mode reconciliation): next to plan. Planning starts from the new roadmap, not from the old relay order.
 
 Next, in order:
-1. Owner: review and merge 0.4.23 (PR #51), then its release PR.
-2. Owner: approve `agent-review-gates` on PR #50 and merge it, then add `relay` to main's branch protection (D-19, `docs/development-workflow.md` section 8). Then a small relay housekeeping PR: the relay README, Compose file, build script and tests point at the new phase numbers, and the Signal sidecar re-check date (2026-12-10) is met or moved to Phase 82.
-3. The 0.4.24 patch; the owner's Phase 27 host check (27-UAT test 8 onward) and the 27-16 summary.
-4. Owner: push `feat/team-fix-pass` to GitHub as an archive branch and commit or record the five uncommitted files in its legacy worktree. Then `/gsd-plan-phase 69`.
+1. Owner: add `relay` to main's branch protection (D-19, `docs/development-workflow.md` section 8).
+2. This planning PR; then a small relay housekeeping PR: new phase numbers in the relay README, Compose file, build script and tests; the Signal sidecar re-pin (by 2026-12-10); and PR #50's second-review minors (the `relay` check skips when `relay/package.json` is missing on any branch, so key the skip to hotfix branches; redactor field-name collisions after normalising; README promises tenant key files nothing reads yet; 68-VALIDATION.md still draft; ackMessage id check).
+3. The 0.4.24 patch (the #46 review minors, the three documentation mismatches, and PR #51's deferred image-review minors); the owner's Phase 27 host check (27-UAT test 8 onward) and the 27-16 summary.
+4. `/gsd-plan-phase 69` (`feat/team-fix-pass` is archived on GitHub at 4207080).
 5. In parallel when wanted: `/gsd-plan-phase 28` (secure development workflow step). Phase 72 plans from the OpenShell spike result.
 
 ## Accumulated Context
