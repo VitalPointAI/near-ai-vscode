@@ -57,7 +57,7 @@ status: complete
 
 # Phase 69 Plan 03: Event log, team file, audit mirror and Enable from ae5e9e1 Summary
 
-**The Phase 60 event log, `team.json` with its trust pin, the roster audit mirror and Enable Team Mode run byte-identical on main, with the SEC-01 canary, forgery and four-client concurrency tests passing (85 tests across the six ported test files) and the audit store accepting the new `team-roster` type.**
+**The Phase 60 event log, `team.json` with its trust pin, the roster audit mirror and Enable Team Mode run byte-identical on main, with the SEC-01 canary, forgery and four-client concurrency tests passing (82 tests across the six ported test files) and the audit store accepting the new `team-roster` type.**
 
 ## Performance
 

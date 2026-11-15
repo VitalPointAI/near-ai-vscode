@@ -2,9 +2,9 @@
 gsd_state_version: "1.0"
 milestone: v0.7.0
 milestone_name: Governed agent platform and messaging relay
-current_plan: 3
+current_plan: 4
 status: planning
-stopped_at: Completed 69-02-PLAN.md (git transport, runner and identities re-applied from ae5e9e1, 96 tests green); next 69-03
+stopped_at: Completed 69-03-PLAN.md (event log, team.json, audit mirror and Enable re-applied from ae5e9e1, canary, forgery and concurrency green; 'team-roster' audit type); next 69-04
 last_updated: "2026-11-15T22:12:39.172Z"
 state_head: 40a3182d32b057cb0afad76a4cc002590245202d
 progress:
@@ -16,7 +16,7 @@ progress:
 last_activity: 2026-11-15
 current_phase: 69
 current_phase_name: "Team Mode reconciliation: identities and signed events on main"
-last_activity_desc: Executed 69-02 (git transport, runner and identities re-applied from ae5e9e1, byte-identical)
+last_activity_desc: Executed 69-03 (event log, team.json, audit mirror and Enable re-applied from ae5e9e1, byte-identical; team-roster audit type)
 ---
 
 # Project State
@@ -27,9 +27,9 @@ Milestone: v0.7.0 Governed agent platform and messaging relay (Phases 68-84), re
 Phase 68 (Relay foundation): complete, verified and merged as PR #50 (052d5cf, 2026-11-15). The owner added `relay` to main's branch protection the same day (D-19, done).
 0.4.x line: 0.4.22 published 2026-11-14; 0.4.23 merged (PR #51) and published 2026-11-15 (release PR #52, tag v0.4.23); 0.4.24 is next (the four #46 review minors and three documentation mismatches). Phase 27 shipped as 0.4.20; its record stays open until the owner's host check.
 Phase 69 (Team Mode reconciliation): planned 2026-11-15, 15 plans in 15 waves over two PRs (69-01..08 port the Phase 60 core and the per-person identity, 69-09..15 add device.rotated, the payload signer, key history and the v0.6.0 disposition). Decisions D-01..D-29 were made on the owner's behalf and are recorded in 69-CONTEXT.md with their undo cost. Ready to execute.
-Current Plan: 3
+Current Plan: 4
 Total Plans in Phase: 15
-Plans 69-01 and 69-02 done on `feat/team-core-on-main` (the pure domain core, then the git transport, runner and identities from ae5e9e1, byte-identical, 97 and 96 tests green); the branch is not pushed yet (plan 69-08 pushes).
+Plans 69-01 to 69-03 done on `feat/team-core-on-main` (the pure domain core, then the git transport, runner and identities, then the event log, team.json, audit mirror and Enable, all from ae5e9e1, byte-identical, 97, 96 and 82 tests green); the branch is not pushed yet (plan 69-08 pushes).
 
 Next, in order:
 1. The Phase 69 planning PR is merged (PR #57, c1730bf). The relay housekeeping PR (`fix/relay-housekeeping`) carries: new phase numbers in the relay README, Compose file, build script and tests; the Signal sidecar re-pin (by 2026-12-10); and PR #50's second-review minors (the `relay` check skips when `relay/package.json` is missing on any branch, so key the skip to hotfix branches; redactor field-name collisions after normalising; README promises tenant key files nothing reads yet; 68-VALIDATION.md still draft; ackMessage id check).
