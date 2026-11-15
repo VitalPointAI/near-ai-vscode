@@ -119,7 +119,7 @@ Build order follows the trust boundary: foundation → inbound authenticity (adv
   3. Killing the relay with queued messages and in-flight run records and restarting it loses nothing: all state (run records, conversation bindings, tenant registry, pending approvals, message queues) lives in one git-ignored directory readable only by the relay's OS user. (RELAY-03)
   4. The relay ships as a container image built without a shell or package manager, and every secret (bot secret, tenant API keys, Signal registration material) is read at startup from an operator-supplied source and never appears in the image, the state directory listing, or a log line. (RELAY-04)
 **Research flags**: (1) `node:sqlite` is RC in Node 26 — name the JSON-file-per-tenant fallback for registry/state now so storage choices in later phases stay honest. (2) Pin the exact `signal-cli-rest-api` sidecar version in the container definition this early; verify the image's bundled signal-cli age at integration time (Phase 75).
-**Plans:** 4/8 plans executed (8 waves, run one after another; owner checkpoints: package pins D-20 in 68-01, gate approval and branch protection D-19 in 68-08)
+**Plans:** 5/8 plans executed (8 waves, run one after another; owner checkpoints: package pins D-20 in 68-01, gate approval and branch protection D-19 in 68-08)
 
 Plans:
 **Wave 1**
@@ -135,7 +135,7 @@ Plans:
 - [x] 68-04-PLAN.md — Private state directory (D-07, D-17) and node:sqlite store behind RelayStore, schema v1, kill -9 drill (RELAY-03)
 
 **Wave 5** *(blocked on Wave 4 completion)*
-- [ ] 68-05-PLAN.md — Full RelayStore contract suite: tenants, bindings, queues, runs, approvals; schema versioning and stable instance id (RELAY-03)
+- [x] 68-05-PLAN.md — Full RelayStore contract suite: tenants, bindings, queues, runs, approvals; schema versioning and stable instance id (RELAY-03)
 
 **Wave 6** *(blocked on Wave 5 completion)*
 - [ ] 68-06-PLAN.md — Secrets from files only (D-08, D-09, D-10), stable phone-label key (D-18), end-to-end no-leak run (RELAY-04)
@@ -308,7 +308,7 @@ Plans:
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 27. Project state follows the project (0.4.20) | 35/36 | Gap closure planned | - |
-| 68. Relay foundation | 4/8 | In Progress | - |
+| 68. Relay foundation | 5/8 | In Progress | - |
 | 69. Inbound authenticity and allowlisting | 0/TBD | Not started | - |
 | 70. Identity, tenants and requesters | 0/TBD | Not started | - |
 | 71. Teams 1:1 vertical slice | 0/TBD | Not started | - |
