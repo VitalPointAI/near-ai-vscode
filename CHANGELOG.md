@@ -1,5 +1,39 @@
 # Changelog
 
+## Unreleased
+
+- **A sub-agent runs on the model the agent asked for, or not at all.** When the agent started a
+  helper agent with a model your key does not have, the helper quietly ran on the chat's model
+  instead. A short name such as `gpt-6.1-sol` now finds the full model ID when only one model on
+  your key has that name, and a name that matches no model (or several) stops that helper with a
+  message listing the models your key has, so the agent can pick one. Tiers (deep, standard, fast)
+  work as before.
+- **The agent knows which model each helper agent used.** The helper's report, and the line that
+  says a background helper started, now name the model it ran on, so the agent can tell you
+  truthfully. When a configured role model is not on your key and the chat's model is used
+  instead, the chat says so.
+- **The agent can choose an image model.** GenerateImage can now use any image model on your key,
+  not only the one in `nearAi.agent.imageModel`, which stays the default. The tool lists the image
+  models with their prices, and the approval, the result and the spend record name the model that
+  made the image. A model that is not an image model on your key is refused with the list.
+- **Agents can no longer read the project's keys.** In one run an agent wrote a small script that
+  read the project's key file and used it to open the project's own encrypted chats. The project's
+  key folder, `.near-ai/state/keys/`, is now off limits to agents in every approval mode: the file
+  tools refuse it and never list or search it, and a command that names it is refused without
+  asking. A command that runs a project file whose text names the folder always asks first, with
+  no "always allow". The shell checks read the command and the script it runs, so a path put
+  together in other ways can still get through; SECURITY.md lists what they cannot see.
+- **A chat that ended without saying so no longer stops syncing.** If the end of a chat was
+  missed, sync kept treating it as running for the rest of the session and never sent its saved
+  state. A chat that has no running record behind it is now treated as ended after a short while.
+- **A conversation from another computer keeps its title.** A conversation that was running on
+  another computer was added here as "Conversation" until its details arrived, and in rare cases
+  that name could replace the real title. The stand-in name now never replaces a real one and is
+  never sent to other computers.
+- **Turning sync off removes the saved items sync was holding.** What a sync kept back for a
+  running chat (`sync/deferred.enc`) stayed on disk after sync was turned off. It is now removed,
+  and turning sync on again fetches those items from your project's remote again.
+
 ## 0.4.22
 
 This release stops Auto asking about the agent's own helper scripts, makes the waiting badge match

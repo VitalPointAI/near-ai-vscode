@@ -120,8 +120,9 @@ as a row in the chat.
   saved for GSD). **History** opens any earlier conversation as a tab, with
   every message (see [Your project's state follows the project](#your-projects-state-follows-the-project)).
 - **Guard rails.** The agent can only touch files inside the workspace, asks
-  before reading likely credential files (`.env`, keys), and never runs
-  commands on your deny list.
+  before reading likely credential files (`.env`, keys), never touches the
+  project's own key folder (`.near-ai/state/keys/`), and never runs commands
+  on your deny list.
 
 ![An edit waiting for approval, with its diff](https://raw.githubusercontent.com/VitalPointAI/near-ai-vscode/main/docs/marketplace/near-ai-approval.png)
 
@@ -564,8 +565,10 @@ until it runs out aren't shown.
   `CreateDocument` when the team is loaded, so existing team files gain them
   without being edited.
 - **Image generation.** When the provider lists an image model, the agent can
-  create PNGs in your workspace with its GenerateImage tool. It asks first and
-  shows the price, and **Revert** removes the file.
+  create PNGs in your workspace with its GenerateImage tool. It uses
+  `nearAi.agent.imageModel` unless it asks for another image model on your
+  key. It asks first and shows the model and price, and **Revert** removes the
+  file.
 - **Project memory.** The agent saves durable facts with Remember, looks them
   up with Recall, and starts each run with the facts relevant to your request.
   Memory stays on this machine and refuses secret-looking content. Review,
