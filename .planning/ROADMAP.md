@@ -122,13 +122,28 @@ Build order follows the trust boundary: foundation → inbound authenticity (adv
 **Plans:** 8 plans (8 waves, run one after another; owner checkpoints: package pins D-20 in 68-01, gate approval and branch protection D-19 in 68-08)
 
 Plans:
+**Wave 1**
 - [ ] 68-01-PLAN.md — Relay workspace on Node 26: owner confirms package pins (D-20), guard entry, strict settings, GET /healthz end to end; workspace and Node guard rules with tests (RELAY-01, RELAY-02)
+
+**Wave 2** *(blocked on Wave 1 completion)*
 - [ ] 68-02-PLAN.md — Redacting logger as the relay's only output path (D-11), first log lines, health and logging contract tests (RELAY-02, RELAY-04)
+
+**Wave 3** *(blocked on Wave 2 completion)*
 - [ ] 68-03-PLAN.md — Extension isolation: vsce lists no relay/ path, relay state and secrets git-ignored, root isolation test on Node 24 (RELAY-01)
+
+**Wave 4** *(blocked on Wave 3 completion)*
 - [ ] 68-04-PLAN.md — Private state directory (D-07, D-17) and node:sqlite store behind RelayStore, schema v1, kill -9 drill (RELAY-03)
+
+**Wave 5** *(blocked on Wave 4 completion)*
 - [ ] 68-05-PLAN.md — Full RelayStore contract suite: tenants, bindings, queues, runs, approvals; schema versioning and stable instance id (RELAY-03)
+
+**Wave 6** *(blocked on Wave 5 completion)*
 - [ ] 68-06-PLAN.md — Secrets from files only (D-08, D-09, D-10), stable phone-label key (D-18), end-to-end no-leak run (RELAY-04)
+
+**Wave 7** *(blocked on Wave 6 completion)*
 - [ ] 68-07-PLAN.md — Distroless image and hardened Compose with the Signal profile, container hardening suite, operator README (RELAY-04)
+
+**Wave 8** *(blocked on Wave 7 completion)*
 - [ ] 68-08-PLAN.md — relay CI job and required check, VSIX release-content patterns, docs, full phase gate, owner hand-off (D-19)
 
 ### Phase 69: Inbound authenticity and allowlisting

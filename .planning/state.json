@@ -1,12 +1,68 @@
 {
   "contract": "1.0.0",
   "flavor": "core",
-  "milestone": "0.4.x — line",
-  "phases": [],
+  "milestone": "v0.7.0 — Messaging relay — Teams and Signal",
+  "phases": [
+    {
+      "number": "27",
+      "name": "Project state follows the project (0.4.20)",
+      "status": "pending"
+    },
+    {
+      "number": "68",
+      "name": "Relay foundation",
+      "status": "in_progress"
+    },
+    {
+      "number": "69",
+      "name": "Inbound authenticity and allowlisting",
+      "status": "pending"
+    },
+    {
+      "number": "70",
+      "name": "Identity, tenants and requesters",
+      "status": "pending"
+    },
+    {
+      "number": "71",
+      "name": "Teams 1:1 vertical slice",
+      "status": "pending"
+    },
+    {
+      "number": "72",
+      "name": "Budgets and spend ledger",
+      "status": "pending"
+    },
+    {
+      "number": "73",
+      "name": "Command surface and run lifecycle",
+      "status": "pending"
+    },
+    {
+      "number": "74",
+      "name": "Group-chat discipline",
+      "status": "pending"
+    },
+    {
+      "number": "75",
+      "name": "Signal channel",
+      "status": "pending"
+    },
+    {
+      "number": "76",
+      "name": "Ops, onboarding and release",
+      "status": "pending"
+    },
+    {
+      "number": "25",
+      "name": "Cybersecurity harness (v0.8.0)",
+      "status": "pending"
+    }
+  ],
   "next": {
-    "command": "/gsd-discuss-phase",
-    "label": "Discuss the first phase",
-    "reason": "Project initialized — plan your first phase"
+    "command": "/gsd-progress --next",
+    "label": "Advance to the next step (plan phase 68)",
+    "reason": "Phase 1 of 9 — needs a plan"
   },
-  "updated_at": "2026-10-30T22:12:07.194Z"
+  "updated_at": "2026-11-15T00:44:43.505Z"
 }
