@@ -6,7 +6,7 @@
 - **v0.4.0 A working core and a native NEAR agent runner**: Phases 7-12 (SHIPPED)
 - **0.4.x line**: ongoing releases on top of v0.4.0 (current; 0.4.19 published; 0.4.20 = Phase 27, next before v0.7.0)
 - **v0.5.0 Trusted-source knowledge base**: PAUSED 2026-10-29 and moving to a separate project. Its roadmap, requirements, research and Phase 13 plans are archived in `.planning/milestones/v0.5.0-paused/`; the Phase 13 code lives on the local branch `gsd/phase-13-sovereignty-gate-post-quantum-cryptography-and-the-encrypted`.
-- **v0.7.0 Messaging relay — Teams and Signal**: Phases 68-76 (in planning; requirements defined 2026-11-13)
+- **v0.7.0 Messaging relay — Teams, Signal and Telegram**: Phases 68-76, plus 71.1 and 75.1 inserted 2026-11-15 (in planning; requirements defined 2026-11-13)
 - **v0.8.0 Cybersecurity**: Phase 25 (executed; UAT parked until after v0.7.0)
 
 ## 0.4.x line
@@ -99,15 +99,15 @@ Plans:
 - [x] 27-36-PLAN.md — Review docs and the one full gate: README, SECURITY.md, CHANGELOG honest and complete; full review dispositions
 - [ ] 27-16-PLAN.md — Phase gate, owner check on the real host, README/SECURITY, feature PR and release 0.4.20
 
-## Milestone v0.7.0: Messaging relay — Teams and Signal
+## Milestone v0.7.0: Messaging relay — Teams, Signal and Telegram
 
-**Milestone goal:** A person in a Microsoft Teams group chat or a Signal group asks the team for something, the answer arrives where they already are, and nobody involved opens VS Code. The group sees only the finished result; the working thread stays private to whoever asked.
+**Milestone goal:** A person in a Microsoft Teams group chat, a Signal group or a Telegram chat asks the team for something, the answer arrives where they already are, and nobody involved opens VS Code. The group sees only the finished result; the working thread stays private to whoever asked.
 
 **Phase numbering:** v0.7.0 starts at Phase 68. Branch-shipped phases end at 26; the unmerged `feat/team-fix-pass` branch already claims Phases 60-67 for v0.6.0 — starting at 68 keeps every phase id globally unique whichever lands first. Requirements were defined 2026-11-13 in `.planning/REQUIREMENTS.md`; research lives in `.planning/research/` (STACK, FEATURES, ARCHITECTURE, PITFALLS, SUMMARY).
 
 > **Naming trap.** This milestone is the *messaging* relay at `relay/`: receive a chat message, drive an existing agent team, post the result back. It is **not** the paused v0.5.0 ciphertext sync relay (whose RELAY-01/02 are archived in `.planning/milestones/v0.5.0-paused/`) and **not** the planned `relayTransport.ts` board sync on the unmerged Team Mode branch. The RELAY-01/02 ids are reused here deliberately and are scoped as "v0.7.0 RELAY-01/02" in REQUIREMENTS.md traceability; the ids themselves are not renamed.
 
-Build order follows the trust boundary: foundation → inbound authenticity (adversarial tests before any happy path — 6 of 8 pitfalls are High and sit here) → identity/tenant registry → Teams 1:1 vertical slice (deliberately not groups first) → budgets once the run registry exists → command surface and lifecycle hardening → group discipline → Signal → ops and release.
+Build order follows the trust boundary: foundation → inbound authenticity (adversarial tests before any happy path — 6 of 8 pitfalls are High and sit here) → identity/tenant registry → Teams 1:1 vertical slice (deliberately not groups first) → Messaging setup view (71.1) → budgets once the run registry exists → command surface and lifecycle hardening → group discipline → Signal → Telegram (75.1) → ops and release. WhatsApp was considered and dropped by the owner on 2026-11-15.
 
 ### Phase 68: Relay foundation
 **Goal**: An operator runs the relay as their own host-side service — its own workspace, its own state directory, its own hardened container — before any chat traffic is accepted.
@@ -119,10 +119,32 @@ Build order follows the trust boundary: foundation → inbound authenticity (adv
   3. Killing the relay with queued messages and in-flight run records and restarting it loses nothing: all state (run records, conversation bindings, tenant registry, pending approvals, message queues) lives in one git-ignored directory readable only by the relay's OS user. (RELAY-03)
   4. The relay ships as a container image built without a shell or package manager, and every secret (bot secret, tenant API keys, Signal registration material) is read at startup from an operator-supplied source and never appears in the image, the state directory listing, or a log line. (RELAY-04)
 **Research flags**: (1) `node:sqlite` is RC in Node 26 — name the JSON-file-per-tenant fallback for registry/state now so storage choices in later phases stay honest. (2) Pin the exact `signal-cli-rest-api` sidecar version in the container definition this early; verify the image's bundled signal-cli age at integration time (Phase 75).
-**Plans:** 0 plans
+**Plans:** 7/8 plans executed (8 waves, run one after another; owner checkpoints: package pins D-20 in 68-01, gate approval and branch protection D-19 in 68-08)
 
 Plans:
-- [ ] TBD (run /gsd-plan-phase 68 to break down)
+**Wave 1**
+- [x] 68-01-PLAN.md — Relay workspace on Node 26: owner confirms package pins (D-20), guard entry, strict settings, GET /healthz end to end; workspace and Node guard rules with tests (RELAY-01, RELAY-02)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+- [x] 68-02-PLAN.md — Redacting logger as the relay's only output path (D-11), first log lines, health and logging contract tests (RELAY-02, RELAY-04)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+- [x] 68-03-PLAN.md — Extension isolation: vsce lists no relay/ path, relay state and secrets git-ignored, root isolation test on Node 24 (RELAY-01)
+
+**Wave 4** *(blocked on Wave 3 completion)*
+- [x] 68-04-PLAN.md — Private state directory (D-07, D-17) and node:sqlite store behind RelayStore, schema v1, kill -9 drill (RELAY-03)
+
+**Wave 5** *(blocked on Wave 4 completion)*
+- [x] 68-05-PLAN.md — Full RelayStore contract suite: tenants, bindings, queues, runs, approvals; schema versioning and stable instance id (RELAY-03)
+
+**Wave 6** *(blocked on Wave 5 completion)*
+- [x] 68-06-PLAN.md — Secrets from files only (D-08, D-09, D-10), stable phone-label key (D-18), end-to-end no-leak run (RELAY-04)
+
+**Wave 7** *(blocked on Wave 6 completion)*
+- [x] 68-07-PLAN.md — Distroless image and hardened Compose with the Signal profile, container hardening suite, operator README (RELAY-04)
+
+**Wave 8** *(blocked on Wave 7 completion)*
+- [ ] 68-08-PLAN.md — relay CI job and required check, VSIX release-content patterns, docs, full phase gate, owner hand-off (D-19)
 
 ### Phase 69: Inbound authenticity and allowlisting
 **Goal**: Nothing forged, replayed, expired, emulator-shaped or unallowlisted ever reaches a model — the trust boundary is proven by adversarial tests before any happy-path handler exists.
@@ -168,6 +190,21 @@ Plans:
 
 Plans:
 - [ ] TBD (run /gsd-plan-phase 71 to break down)
+
+### Phase 71.1: Messaging setup view (INSERTED)
+**Goal**: An operator connects the relay to its channels from a simple view in the extension instead of a written procedure: they see whether the relay is up, see each channel's state, connect Teams, and manage who may message the bot.
+**Depends on**: Phase 71 (Teams works end to end, so the view connects something real)
+**Requirements**: SETUP-01, SETUP-02, SETUP-03, SETUP-04
+**Inserted**: 2026-11-15 at the owner's request ("a simple UI for connecting the relay to supported communication channels"; channels Teams, Signal and Telegram; WhatsApp dropped).
+**Success Criteria** (what must be TRUE):
+  1. A Messaging view in the extension shows the relay's health and one card per channel (Teams, Signal, Telegram) with its state: Not set up, Connected or Down. (SETUP-01)
+  2. The view talks to the relay only through a local admin endpoint that authenticates the operator with a token read from a secret file, listens on loopback by default, and is never served on the public webhook port; no secret value ever reaches the webview or VS Code settings. (SETUP-02)
+  3. The Teams card walks the operator through connecting the bot: app ID and secret are written to the relay as secret files, the connection is verified, and the app package for your organization's admin to install is produced. (SETUP-03)
+  4. The operator sees and edits, per channel, who may message the bot, and changes apply without restarting the relay. (SETUP-04)
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 71.1 to break down)
 
 ### Phase 72: Budgets and spend ledger
 **Goal**: Spend is metered where runs happen and capped before the surface grows: a tenant's cap always applies, a conversation's cap defaults to unlimited, and every recorded total reconciles with the extension's ledger.
@@ -217,21 +254,38 @@ Plans:
 ### Phase 75: Signal channel
 **Goal**: The same disciplined experience works over Signal through a supervised, version-pinned sidecar, with its own allowlist and its own registration-material safety net.
 **Depends on**: Phase 74 (Teams semantics are the reference Signal parity is measured against)
-**Requirements**: SGNL-01, SGNL-02, SGNL-03, SGNL-04
+**Requirements**: SGNL-01, SGNL-02, SGNL-03, SGNL-04, SGNL-05
 **Success Criteria** (what must be TRUE):
   1. The relay speaks Signal through a supervised sidecar running a pinned version that is never auto-upgraded, sharing credentials over a socket restricted to the relay's OS user. (SGNL-01)
   2. A group on the relay's Signal number can be allowlisted, and messages from groups that are not allowlisted are rejected. (SGNL-02)
   3. Every text command, acknowledgement, result and document attachment works in Signal with the same semantics as Teams, using quoted replies in place of threads. (SGNL-03)
   4. An onboarding path exists for provisioning the relay's number, backing up its registration material, and recovering it, because losing that material means losing the number. (SGNL-04)
+  5. The Signal card in the Messaging view (Phase 71.1) registers or links the relay's number, backs up its registration material and sends a test message, so SGNL-04's onboarding is a guided flow. (SGNL-05)
 **Research flags**: Pin the exact signal-cli version (locked decision, carried from Phase 68's container definition) and verify the sidecar image's bundled signal-cli age before integrating.
 **Plans:** 0 plans
 
 Plans:
 - [ ] TBD (run /gsd-plan-phase 75 to break down)
 
+### Phase 75.1: Telegram channel (INSERTED)
+**Goal**: The same disciplined experience works over Telegram, with the same trust boundary as Teams and Signal: nothing forged, replayed or unallowlisted reaches a model.
+**Depends on**: Phase 75 (channel parity is measured against Teams and Signal)
+**Requirements**: TGRM-01, TGRM-02, TGRM-03, TGRM-04
+**Inserted**: 2026-11-15 at the owner's request.
+**Success Criteria** (what must be TRUE):
+  1. The Telegram card in the Messaging view connects a bot from its BotFather token, stored as a relay secret file; the relay registers its own webhook with a secret token and rejects any update that does not carry it. (TGRM-01)
+  2. Telegram updates go through the same inbound checks as the other channels (replay window, duplicate update ids, allowlist), proven by adversarial tests before the happy path. (TGRM-02)
+  3. A Telegram chat or group can be allowlisted, and every text command, acknowledgement, result and document attachment works with the same semantics as Teams, using replies in place of threads. (TGRM-03)
+  4. Each Telegram message binds to a tenant and a requester from the verified update alone, and tenant isolation holds for Telegram in the same tested way as the other channels. (TGRM-04)
+**Research flags**: Telegram does not sign updates; the webhook secret token header and an unguessable webhook path are the authenticity mechanism. Confirm Bot API group privacy mode behaviour for mentions before planning.
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 75.1 to break down)
+
 ### Phase 76: Ops, onboarding and release
 **Goal**: A customer's admin and an operator can install, deploy and operate the relay without the core team in the room, the threat model is written down, and CI keeps the trust boundary closed after release.
-**Depends on**: Phase 75 (all surfaces exist to be documented and defended)
+**Depends on**: Phase 75.1 (all surfaces exist to be documented and defended). The written install and deploy steps cover only what the Messaging view (Phase 71.1) does not.
 **Requirements**: OPS-01, OPS-02, OPS-03, OPS-04, OPS-05
 **Success Criteria** (what must be TRUE):
   1. A customer's administrator can install the bot into their tenant by following a written package of steps, including what to verify and how to upgrade. (OPS-01)
@@ -255,9 +309,11 @@ Plans:
 | 72 Budgets and spend ledger | BUDG-01, BUDG-02, BUDG-03 | 3 |
 | 73 Command surface and run lifecycle | RUNL-02, RUNL-04 … RUNL-07, CMND-01 … CMND-03 | 8 |
 | 74 Group-chat discipline | GRP-01 … GRP-05 | 5 |
-| 75 Signal channel | SGNL-01 … SGNL-04 | 4 |
+| 71.1 Messaging setup view | SETUP-01 … SETUP-04 | 4 |
+| 75 Signal channel | SGNL-01 … SGNL-05 | 5 |
+| 75.1 Telegram channel | TGRM-01 … TGRM-04 | 4 |
 | 76 Ops, onboarding and release | OPS-01 … OPS-05 | 5 |
-| **Total** | | **45** |
+| **Total** | | **54** |
 
 ## Milestone v0.8.0: Cybersecurity
 
@@ -286,13 +342,15 @@ Plans:
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 27. Project state follows the project (0.4.20) | 35/36 | Gap closure planned | - |
-| 68. Relay foundation | 0/TBD | Not started | - |
+| 68. Relay foundation | 7/8 | In Progress | - |
 | 69. Inbound authenticity and allowlisting | 0/TBD | Not started | - |
 | 70. Identity, tenants and requesters | 0/TBD | Not started | - |
 | 71. Teams 1:1 vertical slice | 0/TBD | Not started | - |
+| 71.1. Messaging setup view | 0/TBD | Not started | - |
 | 72. Budgets and spend ledger | 0/TBD | Not started | - |
 | 73. Command surface and run lifecycle | 0/TBD | Not started | - |
 | 74. Group-chat discipline | 0/TBD | Not started | - |
 | 75. Signal channel | 0/TBD | Not started | - |
+| 75.1. Telegram channel | 0/TBD | Not started | - |
 | 76. Ops, onboarding and release | 0/TBD | Not started | - |
 | 25. Cybersecurity harness (v0.8.0) | 8/8 | UAT parked until after v0.7.0 | - |

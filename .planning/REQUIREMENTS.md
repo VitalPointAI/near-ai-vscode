@@ -1,6 +1,6 @@
 # Requirements: Near AI for VSCode
 
-## Milestone v0.7.0: Messaging relay — Teams and Signal
+## Milestone v0.7.0: Messaging relay — Teams, Signal and Telegram
 
 **Defined:** 2026-11-13
 **Core value:** A person in a Microsoft Teams group chat or a Signal group asks the team for something, the answer arrives where they already are, and nobody involved opens VS Code. The group sees only the finished result; the working thread stays private to whoever asked.
@@ -9,10 +9,10 @@
 
 ### Relay foundation
 
-- [ ] **RELAY-01**: The relay runs as its own workspace with its own lockfile and exactly one runtime dependency (`jose`), on Node 26.13.1 (a release carrying all current security fixes, with `engines` pinned so an older runtime refuses to start), while the extension keeps its existing Node target and zero-dependency bundle; the two never share a lockfile.
-- [ ] **RELAY-02**: The relay answers a health check that reports version, uptime, whether the Teams verifier and the Signal sidecar are operational, and the count of in-flight runs, so an operator knows the box is alive without reading logs.
-- [ ] **RELAY-03**: All relay state (run records, conversation bindings, tenant registry, pending approvals, message queues) lives in a single state directory that is git-ignored and readable only by the relay's OS user, and a restart loses no queued message or in-flight run record.
-- [ ] **RELAY-04**: The relay ships as a container image built without a shell or package manager, and every secret it needs (bot secret, tenant API keys, Signal registration material) is read at startup from an operator-supplied source and never appears in the image, the state directory listing, or a log line.
+- [x] **RELAY-01**: The relay runs as its own workspace with its own lockfile and exactly one runtime dependency (`jose`), on Node 26.13.1 (a release carrying all current security fixes, with `engines` pinned so an older runtime refuses to start), while the extension keeps its existing Node target and zero-dependency bundle; the two never share a lockfile.
+- [x] **RELAY-02**: The relay answers a health check that reports version, uptime, whether the Teams verifier and the Signal sidecar are operational, and the count of in-flight runs, so an operator knows the box is alive without reading logs.
+- [x] **RELAY-03**: All relay state (run records, conversation bindings, tenant registry, pending approvals, message queues) lives in a single state directory that is git-ignored and readable only by the relay's OS user, and a restart loses no queued message or in-flight run record.
+- [x] **RELAY-04**: The relay ships as a container image built without a shell or package manager, and every secret it needs (bot secret, tenant API keys, Signal registration material) is read at startup from an operator-supplied source and never appears in the image, the state directory listing, or a log line.
 
 ### Inbound authenticity and allowlisting
 
@@ -73,6 +73,21 @@
 - [ ] **SGNL-02**: A group on the relay's Signal number can be allowlisted, and messages from groups that are not allowlisted are rejected.
 - [ ] **SGNL-03**: Every text command, acknowledgement, result and document attachment works in Signal with the same semantics as Teams, using quoted replies in place of threads.
 - [ ] **SGNL-04**: An onboarding path exists for provisioning the relay's number, backing up its registration material, and recovering it, because losing that material means losing the number.
+- [ ] **SGNL-05**: The Messaging view's Signal card registers or links the relay's number, backs up its registration material and sends a test message.
+
+### Telegram channel
+
+- [ ] **TGRM-01**: The relay connects to a Telegram bot from its BotFather token, held as a secret file, registers its own webhook with a secret token and rejects updates without it.
+- [ ] **TGRM-02**: Telegram updates pass the same inbound checks as other channels (replay window, duplicate update ids, allowlist), proven by adversarial tests.
+- [ ] **TGRM-03**: Allowlisted Telegram chats and groups get every command, acknowledgement, result and attachment with Teams semantics, using replies in place of threads.
+- [ ] **TGRM-04**: Each Telegram message binds to a tenant and requester from the verified update alone, with tenant isolation tested.
+
+### Messaging setup view
+
+- [ ] **SETUP-01**: A Messaging view in the extension shows relay health and each channel's state (Not set up, Connected, Down).
+- [ ] **SETUP-02**: The view uses a local, operator-authenticated admin endpoint on loopback, separate from the public webhook port; secret values never reach the webview or settings.
+- [ ] **SETUP-03**: The Teams card connects the bot (app ID and secret written as relay secret files), verifies it, and produces the app package for your organization's admin.
+- [ ] **SETUP-04**: The operator views and edits each channel's allowlist, and changes apply without a restart.
 
 ### Operations, onboarding and release
 
@@ -126,6 +141,15 @@
 | SGNL-02 | Phase 75 — Signal channel |
 | SGNL-03 | Phase 75 — Signal channel |
 | SGNL-04 | Phase 75 — Signal channel |
+| SGNL-05 | Phase 75 — Signal channel |
+| TGRM-01 | Phase 75.1 — Telegram channel |
+| TGRM-02 | Phase 75.1 — Telegram channel |
+| TGRM-03 | Phase 75.1 — Telegram channel |
+| TGRM-04 | Phase 75.1 — Telegram channel |
+| SETUP-01 | Phase 71.1 — Messaging setup view |
+| SETUP-02 | Phase 71.1 — Messaging setup view |
+| SETUP-03 | Phase 71.1 — Messaging setup view |
+| SETUP-04 | Phase 71.1 — Messaging setup view |
 | OPS-01 | Phase 76 — Ops, onboarding and release |
 | OPS-02 | Phase 76 — Ops, onboarding and release |
 | OPS-03 | Phase 76 — Ops, onboarding and release |

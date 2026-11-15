@@ -2,17 +2,17 @@
 gsd_state_version: "1.0"
 milestone: v0.7.0
 milestone_name: Messaging relay — Teams and Signal
-current_phase: 27
-current_phase_name: Project state follows the project across interfaces and machines (0.4.20)
+current_phase: 68
+current_phase_name: Relay foundation
 status: planning
-stopped_at: Completed gap-closure plans 27-26..27-36 (full gate green)
-last_updated: "2026-11-13T23:26:49.940Z"
-state_head: 3110b24ca269ea278e1d7bb66bee43177cbc3a9a
+stopped_at: "Plan 68-08 Tasks 1-2 done; Task 3 (owner: approve agent-review-gates, add relay to branch protection) awaiting the owner"
+last_updated: "2026-11-15T04:13:33.075Z"
+state_head: 2fe6e976ceda86fe800620f2012d78fe85c6779d
 progress:
   total_phases: 9
   completed_phases: 0
-  total_plans: 0
-  completed_plans: 0
+  total_plans: 8
+  completed_plans: 7
   percent: 0
 last_activity: 2026-11-13
 last_activity_desc: "Completed quick task 261113-lbo: fix the chat task list not checking off finished tasks"
@@ -23,8 +23,8 @@ last_activity_desc: "Completed quick task 261113-lbo: fix the chat task list not
 ## Current position
 
 Milestone: v0.7.0 Messaging relay — Teams and Signal (Phases 68-76)
-Phase: 27 (Project state follows the project across interfaces and machines (0.4.20)) — EXECUTING
-Next: PR #40 re-review and merge, then 27-16 (release 0.4.20); then Phase 68 Relay foundation
+Phase: 68 (Relay foundation) — EXECUTING
+Next: plan 68-08 Task 3 (owner only): approve agent-review-gates on the relay PR and add relay to main's branch protection. Tasks 1-2 of 68-08 are committed and the full phase gate is green; the PR is not opened yet. Plans 68-01 through 68-07 are done
 
 ## Accumulated Context
 
@@ -67,7 +67,7 @@ Next: PR #40 re-review and merge, then 27-16 (release 0.4.20); then Phase 68 Rel
 
 ### Blockers/Concerns
 
-None yet.
+- Owner action pending (D-19): approve agent-review-gates on the relay PR, then add relay to main's branch protection (docs/development-workflow.md section 8).
 
 ### Quick Tasks Completed
 
@@ -82,9 +82,9 @@ None yet.
 
 ## Session
 
-**Last session:** 2026-11-13T20:02:28.913Z
-**Stopped at:** Completed 27-22-PLAN.md
-**Resume file:** None
+**Last session:** 2026-11-15T04:13:32.856Z
+**Stopped at:** Plan 68-08 Tasks 1-2 done; Task 3 (owner: approve agent-review-gates, add relay to branch protection) awaiting the owner
+**Resume file:** .planning/phases/68-relay-foundation/68-08-PLAN.md
 
 ## Performance Metrics
 
@@ -111,6 +111,13 @@ None yet.
 | Phase 27 P20 | 25 min | 2 tasks | 4 files |
 | Phase 27 P21 | 25min | 2 tasks | 2 files |
 | Phase 27 P22 | 34 min | 3 tasks | 10 files |
+| Phase 68 P01 | 70min | 3 tasks | 15 files |
+| Phase 68 P02 | 25min | 2 tasks | 7 files |
+| Phase 68 P03 | 10min | 2 tasks | 3 files |
+| Phase 68 P04 | 35min | 2 tasks | 9 files |
+| Phase 68 P05 | 25min | 3 tasks | 6 files |
+| Phase 68 P06 | 30min | 3 tasks | 9 files |
+| Phase 68 P07 | 40min | 3 tasks | 6 files |
 
 ## Decisions
 
@@ -168,3 +175,12 @@ None yet.
 - [Phase 27]: 27-21: code push holds NEAR AI per-person records back by default; allowlist team.md, project.json, verifiers.json; tracked records named or blocked on public
 - [Phase 27]: 27-22: the profile and sync chips wrap their own text at every width (never an ellipsis) and the bar wraps at every width; a row break up to 480 px puts the pickers on the next row
 - [Phase 27]: 27-22: controls a person must read whole carry data-must-read; the test-only layout probe reports clipped ones and the extension-host layout test fails on them in all five sync states at every side bar width
+- [Phase 68]: D-20 answered by the owner: relay pins jose 6.2.17 and @types/node 26.6.6 (newest pair)
+- [Phase 68]: Relay prints nothing and exits 1 on any failed start until plan 02's redacting logger exists (D-11)
+- [Phase 68]: Redaction order is secrets, then phones, then the 500-character cut; the Logger keeps time, level and event reserved and writes colliding field names as field_{key}
+- [Phase 68]: onRejected receives only a plain upper-case method token or OTHER, so client text cannot reach a log line
+- [Phase 68]: Plan 68-04: schema v1 holds all five aggregates; crash writer is permit-driven so a kill lands within one message of the last ack; claimed messages return to queued on open
+- [Phase 68]: 68-05: a conversation binding is never moved to another tenant (binding-conflict); approval answers succeed only strictly before expiresAt
+- [Phase 68]: 68-06: plain-secret refusal runs before the state directory is created; secrets come only from {NAME}_FILE, CREDENTIALS_DIRECTORY or /run/secrets; phone-label key is SHA-256 of LOG_PSEUDONYM_KEY or a 0600 log-pseudonym.key created once
+- [Phase 68]: 68-07: relay image code folder staged as /app-skel in the build stage (files 0444, folder 0555) because COPY --chmod also hit the /app folder
+- [Phase 68]: 68-07: container suite checks files and links for shells and package managers, not the base image's empty etc/dpkg and var/lib/dpkg folders; docker build runs without --memory (BuildKit has no such flag)

@@ -29,3 +29,6 @@ eval-*.json
 .github/**
 CONTRIBUTING.md
 docs/development-workflow.md
+# The messaging relay is its own service with its own lockfile and never ships in the extension.
+relay/**
+.dockerignore

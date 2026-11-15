@@ -5,7 +5,7 @@ requests, and what it does not do yet. It is a repository-level report, not an
 independent audit or a guarantee about NEAR AI Cloud, the models it serves, or
 other software.
 
-Last reviewed: 2026-11-13, against the code on `main` plus the project state and sync work for 0.4.20.
+Last reviewed: 2026-11-15, against the code on `main` plus the messaging relay foundation in `relay/`.
 
 ## Where your data goes
 
@@ -606,7 +606,31 @@ grep -RInE 'eval\(|new Function|shell:[[:space:]]*true' src scripts
 `verify:release` fails if the packaged VSIX is missing the manifest, README,
 this report, the license, the compiled extension, the sidebar's scripts and
 stylesheet, or the listing screenshots, or if it contains source, tests, source
-maps, `node_modules`, `.planning`, `.codex`, `.agents`, or `.git`.
+maps, `node_modules`, `.planning`, `.codex`, `.agents`, `.git`, or anything of the
+messaging relay (`relay/`, `.dockerignore`).
+
+## Messaging relay (foundation)
+
+`relay/` holds the start of a separate service that will carry NEAR AI chats from Microsoft Teams
+and Signal for your organization. It is not part of the extension and is never in the VSIX.
+
+- It handles no Teams or Signal message yet. Its only network endpoint is `GET /healthz`, which
+  returns five fields that identify no one: version, uptime, the Teams and Signal states (both
+  `not-configured` for now), and the number of runs in progress.
+- It listens on `127.0.0.1` by default. Its container publishes the port on `127.0.0.1` only, and
+  public HTTPS is meant to end at your own reverse proxy.
+- It reads secrets only from files with no group or world access, refuses a secret given as a
+  plain environment value, keeps its state in a private folder (0700, files 0600), and writes
+  logs through a redaction layer that drops credentials and message text and replaces phone
+  numbers with stable labels.
+- It has its own `package.json` and lockfile. Its one runtime dependency, `jose`, is the relay's
+  own, pinned exactly and installed with install scripts off; the extension does not use it.
+- CI has a seventh required job, `relay`, which installs the relay with install scripts off, runs
+  `npm audit` at high, its type check and tests on Node 26.13.1, and builds its container image
+  to check the hardening. `verify:release` refuses a VSIX that contains anything from `relay/`.
+
+A full section on what the relay stores and sends comes with the phase that first receives
+messages.
 
 ## Known limitations
 

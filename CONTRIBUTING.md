@@ -65,7 +65,7 @@ PRs are squash-merged, so the PR title (followed by ` (#<number>)`) becomes the 
   to roll it back.
 - Keep a PR to one change. Small PRs are reviewed and merged faster.
 - These must pass before a PR can merge: the CI jobs `lint`, `test`, `e2e`, `release-content`,
-  `audit` and `secret-scan`, and the `agent-review` status. The branch must be up to date with
+  `audit`, `secret-scan` and `relay`, and the `agent-review` status. The branch must be up to date with
   `main`, without conflicts, and with every review conversation resolved.
 - The agent review runs on its own after CI passes: `.github/workflows/agent-review.yml` reviews
   the PR as the reviewer identity `near-ai-reviewer`, sets `agent-review` and approves the PR when

@@ -1,0 +1,79 @@
+# The relay and its optional Signal sidecar. Run from the repository root:
+#   docker compose -f relay/compose.yaml up -d --build
+# Variables (all prefixed NEAR_AI_RELAY_ because the relay refuses unknown RELAY_ settings and an operator's shell may hold them):
+#   NEAR_AI_RELAY_IMAGE         image name to build and run (default near-ai-relay:local)
+#   NEAR_AI_RELAY_PUBLISH_PORT  host port on 127.0.0.1 (default 8080)
+#   NEAR_AI_RELAY_SECRETS_DIR   folder holding the secret files (default relay/secrets)
+name: near-ai-relay
+
+services:
+  relay:
+    build:
+      context: ..
+      dockerfile: relay/Dockerfile
+    image: ${NEAR_AI_RELAY_IMAGE:-near-ai-relay:local}
+    user: "65532:65532"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    restart: unless-stopped
+    pids_limit: 128
+    mem_limit: 512m
+    # Loopback only (D-15). TLS for the public Teams webhook ends at the operator's reverse proxy on the host.
+    ports:
+      - "127.0.0.1:${NEAR_AI_RELAY_PUBLISH_PORT:-8080}:8080"
+    environment:
+      RELAY_HOST: 0.0.0.0
+      RELAY_PORT: "8080"
+      RELAY_STATE_DIR: /var/lib/near-ai-relay
+      TEAMS_APP_SECRET_FILE: /run/secrets/teams_app_secret
+    volumes:
+      - relay-state:/var/lib/near-ai-relay
+    tmpfs:
+      - /tmp:size=16m,uid=65532,gid=65532,mode=0700
+    # Compose ignores uid, gid and mode on file secrets and keeps the host file's owner and mode, so the operator gives the file to
+    # uid 65532 with mode 0400 (sudo chown 65532:65532 secrets/teams_app_secret; chmod 0400 secrets/teams_app_secret). Never add those keys here.
+    secrets:
+      - teams_app_secret
+    healthcheck:
+      test: ["CMD", "/nodejs/bin/node", "/app/bin.mjs", "--healthcheck"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
+  # Off by default (D-16): docker compose -f relay/compose.yaml --profile signal up -d
+  # Tag 0.101 bundles signal-cli 0.14.8. Re-check the tag and the digest, and re-pin them, in Phase 75 before about 2026-12-10 (D-21).
+  signal:
+    profiles: ["signal"]
+    image: docker.io/bbernhard/signal-cli-rest-api:0.101@sha256:2cf09d66a86fdd210e42ee91662216364acc27da1163a8c44167a77ea3a6559a
+    restart: unless-stopped
+    # Hardening, checked against the pinned image without starting it: the image runs as signal-api (uid 1000) under s6-overlay with
+    # S6_READ_ONLY_ROOT=1 and its runtime in /tmp/s6-runtime, so it needs no capability and only /tmp writable besides its volume. /tmp
+    # allows exec because s6 runs its service scripts from there and the JVM signal-cli loads its native library from java.io.tmpdir.
+    # Re-check that it starts this way in Phase 75, when the sidecar is first run.
+    user: "1000:1000"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 256
+    mem_limit: 1g
+    tmpfs:
+      - /tmp:size=128m,uid=1000,gid=1000,mode=0700,exec
+    environment:
+      MODE: json-rpc
+      JSON_RPC_RECEIVE_MODE: manual
+      JSON_RPC_IGNORE_ATTACHMENTS: "true"
+    # This volume is the Signal registration material for the number. It is itself the credential (D-10): back it up privately and
+    # never share it. No ports are published; only the relay, on the Compose network, can reach the sidecar.
+    volumes:
+      - signal-config:/home/.local/share/signal-cli
+
+secrets:
+  # The file must exist before `up` (Compose cannot make a file secret optional).
+  teams_app_secret:
+    file: ${NEAR_AI_RELAY_SECRETS_DIR:-./secrets}/teams_app_secret
+
+volumes:
+  relay-state:
+  signal-config:
