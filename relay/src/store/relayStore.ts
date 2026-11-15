@@ -17,6 +17,14 @@ export interface TenantRecord {
   updatedAt: number;
 }
 
+/** A conversation (one Teams chat or Signal thread) belongs to exactly one tenant for as long as the binding exists (groundwork for IDNT-03). */
+export interface ConversationBinding {
+  channel: Channel;
+  conversationId: string;
+  tenantId: string;
+  createdAt: number;
+}
+
 export interface InboundMessage {
   tenantId: string;
   channel: Channel;
@@ -82,6 +90,13 @@ export interface RelayStore {
   putTenant(record: TenantRecord): Promise<void>;
   getTenant(tenantId: string): Promise<TenantRecord | undefined>;
   listTenants(): Promise<TenantRecord[]>;
+
+  /**
+   * Binds a conversation to a tenant. `created` when it was new, `existing` when the same tenant already holds it. A conversation bound to another
+   * tenant is never moved: that throws StoreError binding-conflict and changes nothing. An unregistered tenant throws unknown-tenant.
+   */
+  bindConversation(binding: ConversationBinding): Promise<'created' | 'existing'>;
+  getBinding(channel: Channel, conversationId: string): Promise<ConversationBinding | undefined>;
 
   /** Atomic: queue the message and create its run record in one commit, or recognise a duplicate and write nothing. */
   acceptInbound(message: InboundMessage, runId: string): Promise<AcceptResult>;

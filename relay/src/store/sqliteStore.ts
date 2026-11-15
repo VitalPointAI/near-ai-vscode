@@ -6,6 +6,7 @@ import {
   StoreError,
   type AcceptResult,
   type Channel,
+  type ConversationBinding,
   type InboundMessage,
   type MessageState,
   type QueuedMessage,
@@ -95,6 +96,15 @@ function toRun(row: Row): RunRecord {
   };
 }
 
+function toBinding(row: Row): ConversationBinding {
+  return {
+    channel: row.channel as Channel,
+    conversationId: row.conversation_id as string,
+    tenantId: row.tenant_id as string,
+    createdAt: Number(row.created_at),
+  };
+}
+
 function toTenant(row: Row): TenantRecord {
   return {
     tenantId: row.tenant_id as string,
@@ -143,6 +153,8 @@ export class SqliteStore implements RelayStore {
       ),
       getTenant: db.prepare('SELECT * FROM tenants WHERE tenant_id = ?'),
       listTenants: db.prepare('SELECT * FROM tenants ORDER BY tenant_id'),
+      getBinding: db.prepare('SELECT * FROM conversation_bindings WHERE channel = ? AND conversation_id = ?'),
+      insertBinding: db.prepare('INSERT INTO conversation_bindings (channel, conversation_id, tenant_id, created_at) VALUES (?, ?, ?, ?)'),
       messageByDedupe: db.prepare('SELECT * FROM messages WHERE tenant_id = ? AND dedupe_key = ?'),
       runIdForMessage: db.prepare('SELECT run_id FROM runs WHERE tenant_id = ? AND message_id = ?'),
       insertMessage: db.prepare(
@@ -210,6 +222,32 @@ export class SqliteStore implements RelayStore {
 
   async listTenants(): Promise<TenantRecord[]> {
     return (this.statement('listTenants').all() as Row[]).map(toTenant);
+  }
+
+  async bindConversation(binding: ConversationBinding): Promise<'created' | 'existing'> {
+    checkChannel(binding.channel);
+    checkId('conversationId', binding.conversationId);
+    checkId('tenantId', binding.tenantId);
+    checkTime('createdAt', binding.createdAt);
+    return this.transaction((): 'created' | 'existing' => {
+      const held = this.statement('getBinding').get(binding.channel, binding.conversationId) as Row | undefined;
+      if (held) {
+        if (held.tenant_id === binding.tenantId) return 'existing';
+        throw new StoreError('binding-conflict', 'The conversation is already bound to another tenant and was not moved.');
+      }
+      if (!this.statement('getTenant').get(binding.tenantId)) {
+        throw new StoreError('unknown-tenant', 'The conversation was not bound: its tenant is not registered.');
+      }
+      this.statement('insertBinding').run(binding.channel, binding.conversationId, binding.tenantId, binding.createdAt);
+      return 'created';
+    });
+  }
+
+  async getBinding(channel: Channel, conversationId: string): Promise<ConversationBinding | undefined> {
+    checkChannel(channel);
+    checkId('conversationId', conversationId);
+    const row = this.statement('getBinding').get(channel, conversationId) as Row | undefined;
+    return row ? toBinding(row) : undefined;
   }
 
   async acceptInbound(message: InboundMessage, runId: string): Promise<AcceptResult> {
