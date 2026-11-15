@@ -64,3 +64,50 @@ test('the relay has its own lockfile and package', async () => {
   assert.equal(manifest.name, 'near-ai-relay');
   assert.equal(manifest.private, true, 'the relay must stay private so it can never be published by accident');
 });
+
+/** The text of one job of ci.yml: from its two-space key line to the next two-space key. */
+function ciJob(workflow: string, job: string): string {
+  const lines = workflow.split(/\r?\n/);
+  const start = lines.findIndex((line) => line === `  ${job}:`);
+  assert.ok(start >= 0, `ci.yml has no ${job} job`);
+  const body: string[] = [lines[start]];
+  for (const line of lines.slice(start + 1)) {
+    if (/^ {2}[A-Za-z0-9_-]+:\s*$/.test(line)) break;
+    body.push(line);
+  }
+  return body.join('\n');
+}
+
+test('CI runs the relay job on Node 26.13.1 with pinned actions', async () => {
+  const workflow = await readFile(path.join(REPO_ROOT, '.github', 'workflows', 'ci.yml'), 'utf8');
+  const relay = ciJob(workflow, 'relay');
+  for (const needle of [
+    'name: relay',
+    "node-version: '26.13.1'",
+    'cache-dependency-path: relay/package-lock.json',
+    'working-directory: relay',
+    'persist-credentials: false',
+    'npm ci --ignore-scripts',
+    'npm audit --omit=dev --audit-level=high',
+    'npm run lint',
+    'npm test',
+    'npm run test:container',
+  ]) {
+    assert.ok(relay.includes(needle), `the relay job must contain: ${needle}`);
+  }
+  const uses = relay.split(/\r?\n/).filter((line) => /^\s*-?\s*uses:/.test(line));
+  assert.ok(uses.length >= 2, 'the relay job must check out the code and set up Node');
+  for (const line of uses) {
+    assert.match(line, /@[0-9a-f]{40}\s+# v\d/, `every action in the relay job is pinned to a full commit SHA with a version comment: ${line.trim()}`);
+  }
+  // The relay's own Node version must not leak into the extension's jobs.
+  assert.equal((workflow.match(/NODE_VERSION: '24'/g) ?? []).length, 1, "the workflow-level NODE_VERSION stays '24' for the extension's jobs");
+  assert.ok(!ciJob(workflow, 'lint').includes('26.13.1'), 'the extension jobs stay on the default Node version');
+});
+
+test('the merge gates require the relay check', async () => {
+  const text = await readFile(path.join(REPO_ROOT, 'scripts', 'lib', 'workflow.mjs'), 'utf8');
+  const line = text.split(/\r?\n/).find((candidate) => candidate.startsWith('export const CI_CHECKS'));
+  assert.ok(line, 'CI_CHECKS is declared in scripts/lib/workflow.mjs');
+  assert.ok(line.includes("'secret-scan', 'relay'"), 'CI_CHECKS must list relay after secret-scan so the merge and tag gates wait for it');
+});
