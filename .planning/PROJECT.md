@@ -68,6 +68,20 @@ v0.5.0 (trusted-source knowledge base) was paused on 2026-10-29 and is moving to
 
 **Constraints:** existing projects keep working with no forced setup or migration; the always-on workflow (task workspaces, review, one path into the main branch, releases and recovery, from Phase 63 on) is introduced with a plain-language first-run explanation and can be turned off per project; the multi-person layer (signed coordination log between people, invites and roster, per-member NEAR keys and spend caps, handing work between people) stays opt-in until a second person joins; `src/domain/team/*` and `src/team/*` never import `vscode`; no new runtime dependencies in the team core; no secret is ever written to the coordination log, `team.json`, settings, transcripts, audit or fixtures; money is integer nano-USD; event ordering never uses wall clock.
 
+## Planned milestone: verifiable agent guardrails (owner, 2026-11-05)
+
+**Not started. Recorded so it is not lost; it becomes its own milestone and phase set when the owner starts it.**
+
+Every agent the extension runs works under guardrails a person can see, and those guardrails are verifiable rather than trusted.
+
+- **Every agent gets a cryptographic identity.** A NEAR Protocol implicit account, with a W3C-compliant DID attached. The DID carries that agent's constraints and limits, so what an agent may do is data, not a prompt.
+- **The activity dashboard shows them.** For each agent: what it is allowed to do, in plain words, and the DID itself for anyone who wants to inspect it. The existing agent activity view is the natural home; the DID sits in its details.
+- **An agent can only act within its DID.** It can never grant itself more permissions or authority than it was created with or delegated to it.
+- **Only the orchestrating agent changes it**, and only with authority delegated by a person. Changing a DID is never something a worker agent can do to itself or to a sibling.
+- **DIDs are stored with NEAR confidential intents**, so they are immutable on chain, and the authorization policies are immutable smart contracts that act as gates: an agent asks to perform a task and the contract checks its authorization before anything runs.
+
+Builds on what already exists: signed events and device identities in `src/domain/team/` and `src/team/` (Phase 60), the per-member permission rows in `src/domain/team/permissions.ts`, the approval and policy layer in `src/agent/permissions.ts` and `src/domain/policy.ts`, and the activity view (`registerAgentActivity`). Open questions for the owner when this starts: which NEAR account model (implicit account per agent, or a registry contract), how a DID is anchored (the confidential-intents format), what happens when the chain is unreachable, and how a local-only run works without a chain at all.
+
 ## Evolution
 
 This document evolves at phase transitions and milestone boundaries.
@@ -86,4 +100,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-11-02 after the owner decisions on one workflow for every project and no developer knowledge required*
+*Last updated: 2026-11-05 with the planned verifiable agent guardrails milestone*

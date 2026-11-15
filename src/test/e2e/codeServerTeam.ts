@@ -197,11 +197,30 @@ async function runVariant(variant: Variant, options: { codeServer: string; brows
       if (answer.exceptionDetails) throw new Error(answer.exceptionDetails.text ?? 'evaluation failed');
       return answer.result?.value as T;
     };
+    // The NEAR AI sidebar is a closed view, so its page does not exist until it is opened. A real keyboard opens it through the Command Palette,
+    // as a person would: Ctrl+P, then the view's own command.
+    await session.send('Page.bringToFront').catch(() => undefined);
+    await pressKey(session, 'p', { ctrl: true });
+    await sleep(600);
+    for (const character of 'nearAiChatView.focus') {
+      await session.send('Input.dispatchKeyEvent', { type: 'char', text: character });
+    }
+    await sleep(600);
+    await pressKey(session, 'Enter');
+    await sleep(2_000);
     // The sidebar's page: the frame that has the chat's Connect group and its own message listener.
     const sidebar = await until('the NEAR AI sidebar page', async () => {
       for (const id of [...contextsSeen]) if (await evaluate<boolean>(id, `!!document.getElementById('welcome') || !!document.getElementById('welcome-connect')`).catch(() => false)) return id;
       return undefined;
-    }, 180_000);
+    }, 180_000).catch(async (error) => {
+      // A failure here is about the harness opening the view, not the product: say what frames exist, and keep a picture.
+      const seen: string[] = [];
+      for (const id of [...contextsSeen]) {
+        const described = await evaluate<string>(id, `(() => { const t = (document.title || '').slice(0, 40); const w = !!document.getElementById('welcome'); const n = document.querySelectorAll('*').length; return t + ' | welcome=' + w + ' | nodes=' + n + ' | ' + location.href.slice(0, 90); })()`).catch(() => 'unreadable');
+        seen.push(`${id}: ${described}`);
+      }
+      throw new Error(`${(error as Error).message}. Frames seen:\n${seen.join('\n')}`);
+    });
     await evaluate<number>(sidebar, RECORDER);
     const connectFacts = async (): Promise<ConnectFacts> => evaluate<ConnectFacts>(sidebar, CONNECT_FACTS);
     const states = async (): Promise<RecordedState[]> => evaluate<RecordedState[]>(sidebar, 'window.__teamStates ? window.__teamStates.slice() : []');

@@ -264,6 +264,8 @@ const KEYS = {
   F10: { key: 'F10', code: 'F10', windowsVirtualKeyCode: 121 },
   n: { key: 'n', code: 'KeyN', windowsVirtualKeyCode: 78, text: 'n' },
   '+': { key: '+', code: 'Equal', windowsVirtualKeyCode: 187, text: '+' },
+  // 61-33: opening a view from the Command Palette in code-server.
+  p: { key: 'p', code: 'KeyP', windowsVirtualKeyCode: 80, text: 'p' },
   '=': { key: '=', code: 'Equal', windowsVirtualKeyCode: 187, text: '=' },
   '-': { key: '-', code: 'Minus', windowsVirtualKeyCode: 189, text: '-' },
   '0': { key: '0', code: 'Digit0', windowsVirtualKeyCode: 48, text: '0' }
