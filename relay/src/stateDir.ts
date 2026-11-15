@@ -24,6 +24,10 @@ export interface PrepareOptions {
 }
 
 const GROUP_OR_WORLD = 0o077;
+/** What writePrivateFileAtomic names its temporary file: a dot, the target name, 8 lowercase hex characters, .tmp. */
+const OWN_TEMP_FILE = /^\..+\.[0-9a-f]{8}\.tmp$/;
+/** The folder mkfs puts at the root of an ext2/3/4 file system, owned by root. A state directory that is a mount point holds one. */
+const LOST_AND_FOUND = 'lost+found';
 
 function octal(mode: number): string {
   return (mode & 0o7777).toString(8).padStart(4, '0');
@@ -75,10 +79,20 @@ export async function prepareStateDir(dir: string, logger: Logger, options?: Pre
     if (entry.isSymbolicLink()) {
       throw new StateDirError(`RELAY_STATE_DIR ${dir} holds a symbolic link (${name}). Remove it or choose another directory.`);
     }
+    // A state directory that is the mount point of its own volume holds the file system's lost+found folder, owned by root, which the operator
+    // cannot remove. The relay never reads or writes it, so exactly that name, as a real folder, is left alone: not checked, not tightened.
+    if (name === LOST_AND_FOUND && entry.isDirectory()) continue;
     if (entry.uid !== uid) {
       throw new StateDirError(
         `RELAY_STATE_DIR ${dir} holds ${name}, which is owned by uid ${entry.uid}; the relay runs as uid ${uid}. Give it to the relay's user or choose another directory.`,
       );
+    }
+    if (entry.isFile() && OWN_TEMP_FILE.test(name)) {
+      // A temporary file of writePrivateFileAtomic that a kill left behind between open and rename. It may hold a copy of a key, and the
+      // complete file is either the old or the new one under its real name, so the leftover is removed.
+      await rm(entryPath, { force: true });
+      logger.info('state_dir.stale_temp_removed', { name });
+      continue;
     }
     if (entry.isFile()) {
       if ((entry.mode & GROUP_OR_WORLD) !== 0) {

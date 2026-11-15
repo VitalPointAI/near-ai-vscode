@@ -45,6 +45,8 @@ Everything the relay keeps lives in one folder, `RELAY_STATE_DIR`. In developmen
 
 - The folder is created with mode 0700 and must belong to the user the relay runs as. Every file in it is mode 0600: the database (`relay.db`, `relay.db-wal`, `relay.db-shm`) and the phone-label key (`log-pseudonym.key`).
 - If the folder or a file belongs to the relay's user but is open to the group or to everyone, the relay tightens it and logs that once. A folder or file that belongs to another user, or that is a link, is refused and the relay does not start.
+- If the folder is the mount point of its own volume, the `lost+found` folder that the file system keeps there (owned by root) is left alone. Nothing else of another user is accepted.
+- A temporary file the relay was writing when it was stopped (named like `.log-pseudonym.key.1a2b3c4d.tmp`) is removed at the next start, and the log says so once.
 - Back it up only while the relay is stopped, and keep the backup as private as the folder.
 
 ## Secrets

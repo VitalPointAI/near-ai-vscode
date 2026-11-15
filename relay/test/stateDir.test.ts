@@ -166,6 +166,48 @@ test('a symbolic link to a directory, a regular file, and a directory holding a 
   });
 });
 
+test('a lost+found folder is left alone (a state directory on its own volume), but lost+found as a file or a link is checked like any entry', async () => {
+  await withTemp(async (root) => {
+    await withUmask(0o022, async () => {
+      const dir = path.join(root, 'state');
+      await mkdir(dir, { mode: 0o700 });
+      await chmod(dir, 0o700);
+      // On a real volume lost+found belongs to root, which a test cannot create; this one is ours and open (0755). It is neither tightened nor
+      // logged, which shows the entry is skipped before the owner and mode checks, so a root owner is not looked at either.
+      await mkdir(path.join(dir, 'lost+found'), { mode: 0o755 });
+      await chmod(path.join(dir, 'lost+found'), 0o755);
+      const { logger, lines } = capture();
+      await prepareStateDir(dir, logger);
+      assert.equal(await modeOf(path.join(dir, 'lost+found')), 0o755);
+      assert.deepEqual(lines, []);
+      // And it is skipped only as a folder: a file of that name is tightened like any other, and a link of that name is refused.
+      await rm(path.join(dir, 'lost+found'), { recursive: true });
+      await writeFile(path.join(dir, 'lost+found'), 'x');
+      await chmod(path.join(dir, 'lost+found'), 0o644);
+      await prepareStateDir(dir, logger);
+      assert.equal(await modeOf(path.join(dir, 'lost+found')), 0o600);
+      await rm(path.join(dir, 'lost+found'));
+      await symlink(root, path.join(dir, 'lost+found'));
+      await assert.rejects(prepareStateDir(dir, logger), StateDirError);
+    });
+  });
+});
+
+test('a temporary file that writePrivateFileAtomic left behind is removed at start with one log line; other names are kept', async () => {
+  await withTemp(async (root) => {
+    const dir = path.join(root, 'state');
+    await mkdir(dir, { mode: 0o700 });
+    await chmod(dir, 0o700);
+    const stale = '.log-pseudonym.key.0a1b2c3d.tmp';
+    await writeFile(path.join(dir, stale), 'half-written key material', { mode: 0o600 });
+    for (const keep of ['.log-pseudonym.key.tmp', 'notes.0a1b2c3d.tmp', '.key.0A1B2C3D.tmp']) await writeFile(path.join(dir, keep), 'x', { mode: 0o600 });
+    const { logger, lines } = capture();
+    await prepareStateDir(dir, logger);
+    assert.deepEqual((await readdir(dir)).sort(), ['.key.0A1B2C3D.tmp', '.log-pseudonym.key.tmp', 'notes.0a1b2c3d.tmp']);
+    assert.deepEqual(lines.map((line) => [line.event, line.name]), [['state_dir.stale_temp_removed', stale]]);
+  });
+});
+
 test('writePrivateFileAtomic leaves a 0600 file with the exact bytes, replaces an earlier one, and leaves no temporary file', async () => {
   await withTemp(async (dir) => {
     await withUmask(0o022, async () => {
