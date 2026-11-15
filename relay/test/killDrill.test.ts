@@ -6,7 +6,7 @@ import path from 'node:path';
 import { Database } from 'node:sqlite';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { RUN_STATES } from '../src/store/relayStore';
+import { IN_FLIGHT_RUN_STATES, RUN_STATES } from '../src/store/relayStore';
 import { openSqliteStore } from '../src/store/sqliteStore';
 
 // Phase 68, plan 04 (RELAY-03): the kill -9 drill. 15 rounds, each on a fresh database: a child process accepts inbound messages through the real
@@ -127,3 +127,50 @@ for (let round = 1; round <= ROUNDS; round += 1) {
     }
   });
 }
+
+/** Starts the writer in `in-flight` mode and kills it with SIGKILL once it printed `ready`. */
+function killWhileInFlight(file: string): Promise<NodeJS.Signals | null> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [CHILD, file, 'in-flight'], { stdio: ['pipe', 'pipe', 'inherit'] });
+    const timer = setTimeout(() => {
+      child.kill('SIGKILL');
+      reject(new Error('the writer did not report ready within 20 s'));
+    }, 20_000);
+    let buffer = '';
+    child.on('error', (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+    child.stdout.on('data', (chunk: Buffer) => {
+      buffer += chunk.toString();
+      if (buffer.includes('ready\n')) child.kill('SIGKILL');
+    });
+    child.on('close', (_code, signal) => {
+      clearTimeout(timer);
+      resolve(signal);
+    });
+  });
+}
+
+test('kill -9 while one run is running and another waits for an approval: after the restart both are interrupted, nothing is in flight, and redelivery works', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'near-ai-relay-drill-'));
+  try {
+    const file = path.join(dir, 'relay.db');
+    assert.equal(await killWhileInFlight(file), 'SIGKILL');
+    const store = await openSqliteStore(file);
+    try {
+      assert.equal((await store.getRun('drill', 'run-1'))?.state, 'interrupted');
+      assert.equal((await store.getRun('drill', 'run-2'))?.state, 'interrupted');
+      assert.equal(await store.countRuns(IN_FLIGHT_RUN_STATES), 0, '/healthz inFlightRuns must not count runs that died with the process');
+      assert.equal((await store.getApproval('drill', 'ap-1'))?.state, 'expired');
+      assert.equal((await store.getMessage('drill', 'msg-1'))?.state, 'queued');
+      const again = await store.claimNext('drill', 'teams', 'c1', Date.now());
+      assert.equal(again?.attempts, 2);
+      assert.equal((await store.getRun('drill', 'run-1'))?.state, 'queued');
+    } finally {
+      await store.close();
+    }
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});

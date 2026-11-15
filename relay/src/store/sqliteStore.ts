@@ -168,7 +168,7 @@ export async function openSqliteStore(file: string, options: { now?: () => numbe
     db.exec('PRAGMA synchronous = FULL');
     db.exec('PRAGMA foreign_keys = ON');
     migrate(db, options.now ?? Date.now);
-    return new SqliteStore(db);
+    return new SqliteStore(db, options.now ?? Date.now);
   } catch (error) {
     if (db.isOpen) db.close();
     throw error;
@@ -179,10 +179,23 @@ export class SqliteStore implements RelayStore {
   private readonly stmt: Record<string, Statement>;
   private closed = false;
 
-  constructor(private readonly db: Database) {
-    // A message that was claimed when the previous process stopped was never finished: it goes back to the queue (attempts are kept).
+  constructor(
+    private readonly db: Database,
+    now: () => number = Date.now,
+  ) {
+    // Recovery from a previous process that stopped without finishing its work (a crash, kill -9 or power loss), in one commit:
+    //  - a message that was claimed was never finished: it goes back to the queue (attempts are kept);
+    //  - a run that was running or waiting for an approval was cut off: it becomes interrupted, so /healthz no longer counts it in flight;
+    //  - a pending approval of such a run can no longer resume it: it expires.
+    // claimNext puts an interrupted run back to queued when it hands out the run's message again, so the redelivery starts like a new run.
+    const recoveredAt = checkTime('now', now());
     this.transaction(() => {
       db.exec(`UPDATE messages SET state = 'queued', claimed_at = NULL WHERE state = 'claimed'`);
+      db.prepare(`UPDATE runs SET state = 'interrupted', updated_at = ? WHERE state IN ('running', 'waiting-approval')`).run(recoveredAt);
+      db.exec(
+        `UPDATE approvals SET state = 'expired' WHERE state = 'pending' AND EXISTS (
+           SELECT 1 FROM runs r WHERE r.tenant_id = approvals.tenant_id AND r.run_id = approvals.run_id AND r.state = 'interrupted')`,
+      );
     });
     this.stmt = {
       instanceId: db.prepare(`SELECT value FROM relay_meta WHERE key = 'instance_id'`),
@@ -208,6 +221,9 @@ export class SqliteStore implements RelayStore {
         `SELECT * FROM messages WHERE tenant_id = ? AND channel = ? AND conversation_id = ? AND state = 'queued' ORDER BY message_id LIMIT 1`,
       ),
       claim: db.prepare(`UPDATE messages SET state = 'claimed', attempts = attempts + 1, claimed_at = ? WHERE tenant_id = ? AND message_id = ?`),
+      requeueInterruptedRun: db.prepare(
+        `UPDATE runs SET state = 'queued', updated_at = ? WHERE tenant_id = ? AND message_id = ? AND state = 'interrupted'`,
+      ),
       messageById: db.prepare('SELECT * FROM messages WHERE tenant_id = ? AND message_id = ?'),
       ack: db.prepare(`UPDATE messages SET state = 'done', done_at = ? WHERE tenant_id = ? AND message_id = ? AND state = 'claimed'`),
       queueDepth: db.prepare(`SELECT count(*) AS depth FROM messages WHERE tenant_id = ? AND state != 'done'`),
@@ -360,6 +376,7 @@ export class SqliteStore implements RelayStore {
       if (!next) return undefined;
       const messageId = Number(next.message_id);
       this.statement('claim').run(now, tenantId, messageId);
+      this.statement('requeueInterruptedRun').run(now, tenantId, messageId);
       return toMessage(this.statement('messageById').get(tenantId, messageId) as Row);
     });
   }

@@ -107,6 +107,11 @@ export class StoreError extends Error {
   }
 }
 
+/**
+ * Opening a store recovers from a previous process that stopped without finishing (crash, kill -9, power loss), in one commit: claimed messages
+ * go back to queued (attempts kept), runs in `running` or `waiting-approval` become `interrupted`, and pending approvals of those runs expire.
+ * Every implementation does this on open, so a restart never leaves a run counted in flight that nothing is running.
+ */
 export interface RelayStore {
   /** The random id this state directory was created with (relay_meta). It identifies the data, not the process. */
   instanceId(): Promise<string>;
@@ -125,7 +130,10 @@ export interface RelayStore {
   /** Atomic: queue the message and create its run record in one commit, or recognise a duplicate and write nothing. */
   acceptInbound(message: InboundMessage, runId: string): Promise<AcceptResult>;
   getMessage(tenantId: string, dedupeKey: string): Promise<QueuedMessage | undefined>;
-  /** Takes the oldest queued message of one conversation: it becomes claimed and its attempts rise by one. */
+  /**
+   * Takes the oldest queued message of one conversation: it becomes claimed and its attempts rise by one. When its run was interrupted (see
+   * below), the run goes back to queued in the same commit.
+   */
   claimNext(tenantId: string, channel: Channel, conversationId: string, now: number): Promise<QueuedMessage | undefined>;
   /** Claimed to done. False when the message was not claimed. */
   ackMessage(tenantId: string, messageId: number, now: number): Promise<boolean>;

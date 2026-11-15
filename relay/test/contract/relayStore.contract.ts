@@ -340,7 +340,8 @@ export function relayStoreContract(name: string, factory: StoreFactory): void {
       assert.equal(run?.state, 'running');
       assert.equal(run?.updatedAt, T0 + 3);
       await handle.reopen();
-      assert.equal((await handle.store.getRun('acme', 'run-1'))?.state, 'running');
+      // The running state was committed (otherwise it would read queued); the reopen then marks the run interrupted, because no process runs it.
+      assert.equal((await handle.store.getRun('acme', 'run-1'))?.state, 'interrupted');
     }));
 
   test(`${name}: countRuns of the in-flight states counts running and waiting-approval only, across tenants`, () =>
@@ -362,7 +363,66 @@ export function relayStoreContract(name: string, factory: StoreFactory): void {
       assert.equal(await handle.store.countRuns(['queued']), 1);
       assert.equal(await handle.store.countRuns([]), 0);
       await handle.reopen();
-      assert.equal(await handle.store.countRuns(IN_FLIGHT_RUN_STATES), 3);
+      // After a restart nothing is running: the three in-flight runs are interrupted, and the queued and finished ones are unchanged.
+      assert.equal(await handle.store.countRuns(IN_FLIGHT_RUN_STATES), 0);
+      assert.equal(await handle.store.countRuns(['interrupted']), 3);
+      assert.equal(await handle.store.countRuns(['queued']), 1);
+      assert.equal(await handle.store.countRuns(['finished']), 1);
+    }));
+
+  test(`${name}: a reopen turns running and waiting-approval runs into interrupted, expires their approvals, and redelivery queues the run again`, () =>
+    withStore(async (handle) => {
+      await handle.store.putTenant(tenant('acme'));
+      await handle.store.acceptInbound(inbound('acme', 'k1', { conversationId: 'c1' }), 'run-1');
+      await handle.store.acceptInbound(inbound('acme', 'k2', { conversationId: 'c2' }), 'run-2');
+      await handle.store.acceptInbound(inbound('acme', 'k3', { conversationId: 'c3' }), 'run-3');
+      assert.ok(await handle.store.claimNext('acme', 'teams', 'c1', T0 + 1));
+      assert.equal(await handle.store.transitionRun('acme', 'run-1', 'queued', 'running', T0 + 2), true);
+      assert.ok(await handle.store.claimNext('acme', 'teams', 'c2', T0 + 1));
+      assert.equal(await handle.store.transitionRun('acme', 'run-2', 'queued', 'running', T0 + 2), true);
+      assert.equal(await handle.store.transitionRun('acme', 'run-2', 'running', 'waiting-approval', T0 + 3), true);
+      await handle.store.addApproval(approval('acme', 'ap-1', 'run-2', { expiresAt: T0 + 1_000_000 }));
+      assert.equal(await handle.store.countRuns(IN_FLIGHT_RUN_STATES), 2);
+
+      await handle.reopen(); // as after a crash: nothing finished run-1 or run-2
+
+      assert.equal((await handle.store.getRun('acme', 'run-1'))?.state, 'interrupted');
+      assert.equal((await handle.store.getRun('acme', 'run-2'))?.state, 'interrupted');
+      assert.equal((await handle.store.getRun('acme', 'run-3'))?.state, 'queued', 'a run that never started is left alone');
+      assert.equal(await handle.store.countRuns(IN_FLIGHT_RUN_STATES), 0, 'nothing is running after a restart, so nothing is in flight');
+      assert.equal(await handle.store.countRuns(['interrupted']), 2);
+      assert.equal((await handle.store.getApproval('acme', 'ap-1'))?.state, 'expired', 'an approval of an interrupted run can no longer be answered');
+      assert.deepEqual(await handle.store.listPendingApprovals('acme'), []);
+
+      // The channel redelivers k1: it is recognised, and claiming it again starts its run from queued, so a worker's queued -> running works.
+      assert.deepEqual(await handle.store.acceptInbound(inbound('acme', 'k1', { conversationId: 'c1' }), 'run-other'), {
+        duplicate: true,
+        messageId: (await handle.store.getMessage('acme', 'k1'))?.messageId,
+        runId: 'run-1',
+      });
+      const again = await handle.store.claimNext('acme', 'teams', 'c1', T0 + 50);
+      assert.equal(again?.dedupeKey, 'k1');
+      assert.equal(again?.attempts, 2);
+      const requeued = await handle.store.getRun('acme', 'run-1');
+      assert.equal(requeued?.state, 'queued');
+      assert.equal(requeued?.updatedAt, T0 + 50);
+      assert.equal(await handle.store.transitionRun('acme', 'run-1', 'queued', 'running', T0 + 51), true);
+      assert.equal(await handle.store.countRuns(IN_FLIGHT_RUN_STATES), 1);
+    }));
+
+  test(`${name}: a reopen leaves finished, failed and cancelled runs as they were`, () =>
+    withStore(async (handle) => {
+      await handle.store.putTenant(tenant('acme'));
+      for (const target of ['finished', 'failed', 'cancelled'] as const) {
+        await handle.store.acceptInbound(inbound('acme', `k-${target}`, { conversationId: `c-${target}` }), `run-${target}`);
+        assert.equal(await handle.store.transitionRun('acme', `run-${target}`, 'queued', target, T0 + 1), true);
+      }
+      await handle.reopen();
+      for (const target of ['finished', 'failed', 'cancelled'] as const) {
+        const run = await handle.store.getRun('acme', `run-${target}`);
+        assert.equal(run?.state, target);
+        assert.equal(run?.updatedAt, T0 + 1);
+      }
     }));
 
   test(`${name}: an unknown run state is invalid-record`, () =>
