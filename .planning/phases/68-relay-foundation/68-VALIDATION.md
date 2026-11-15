@@ -43,7 +43,7 @@ Filled by the planner per task; the requirement-level map is:
 | Requirement | Behavior | Test Type | Automated Command | File Exists | Status |
 |-------------|----------|-----------|-------------------|-------------|--------|
 | RELAY-01 | engines `>=26.13.1 <27`, only `jose` as dependency, `engine-strict`, one non-dev lock entry | unit | `node --test dist/test/workspace.test.js` | ❌ W0 | ⬜ pending |
-| RELAY-01 | Node guard refuses <26.13.1 and >=27 with a plain message, exit 1 | unit | `node --test dist/test/nodeGuard.test.js` | ❌ W0 | ⬜ pending |
+| RELAY-01 | Node guard refuses <26.13.1 and >=27 with a plain message, exit 1 | unit | `node --test dist/test/workspace.test.js` | ❌ W0 | ⬜ pending |
 | RELAY-01 | Extension isolation: `.vscodeignore relay/**`, no root workspaces/deps, relay CI job on 26.13.1 | unit (root, Node 24) | root `npm test` (`src/test/relayIsolation.test.ts`) | ❌ W0 | ⬜ pending |
 | RELAY-01 | VSIX has no `relay/` entry | build check | root `npm run verify:release` | ✅ (pattern added) | ⬜ pending |
 | RELAY-02 | `/healthz` exact five fields, `not-configured` components, no tenant data, 405/404 | integration | `node --test dist/test/health.test.js` | ❌ W0 | ⬜ pending |
