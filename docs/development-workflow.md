@@ -330,6 +330,12 @@ earlier do). All three paths are needed:
   does not, so `release-content` in CI and the `build` job of the Release workflow refuse the
   package.
 
+Do not copy `relay/` or `.dockerignore` into the hotfix branch. A tag older than the messaging
+relay has no `relay/` folder, and the copied `ci.yml` handles that: the `relay` job's first step
+finds no `relay/package.json`, skips every other relay step and passes, with the note "relay
+checks skipped" in the job log. The required `relay` check therefore reports success and the
+hotfix gates are satisfied without a human step.
+
 Check the staged diff before committing: it should only add or update workflow and gate files.
 If `main` changed a script the old code still relies on (for example the vendoring or SBOM
 scripts), restore that file from the tag with `git checkout v<last> -- scripts/<file>`.

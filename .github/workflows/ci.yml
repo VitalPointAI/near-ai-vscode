@@ -158,14 +158,33 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # A hotfix branch cut from a release tag older than the relay has no relay/ folder. The job then
+      # passes without running anything else, so the required relay check does not block the hotfix.
+      # Every later step is guarded by this output.
+      - name: Check that this commit has the relay
+        id: has_relay
+        working-directory: .
+        run: |
+          if [ -f relay/package.json ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=relay checks skipped::relay/package.json is not on this commit (a hotfix from a release older than the relay), so the relay checks were skipped."
+          fi
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        if: steps.has_relay.outputs.present == 'true'
         with:
           node-version: '26.13.1'
           cache: npm
           cache-dependency-path: relay/package-lock.json
-      - run: npm ci --ignore-scripts
-      - run: npm audit --omit=dev --audit-level=high
-      - run: npm run lint
-      - run: npm test
+      - if: steps.has_relay.outputs.present == 'true'
+        run: npm ci --ignore-scripts
+      - if: steps.has_relay.outputs.present == 'true'
+        run: npm audit --omit=dev --audit-level=high
+      - if: steps.has_relay.outputs.present == 'true'
+        run: npm run lint
+      - if: steps.has_relay.outputs.present == 'true'
+        run: npm test
       - name: Build the relay image and check its hardening
+        if: steps.has_relay.outputs.present == 'true'
         run: npm run test:container

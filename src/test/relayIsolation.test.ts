@@ -6,7 +6,8 @@
 
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { access, readFile } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import test from 'node:test';
 
@@ -103,6 +104,67 @@ test('CI runs the relay job on Node 26.13.1 with pinned actions', async () => {
   // The relay's own Node version must not leak into the extension's jobs.
   assert.equal((workflow.match(/NODE_VERSION: '24'/g) ?? []).length, 1, "the workflow-level NODE_VERSION stays '24' for the extension's jobs");
   assert.ok(!ciJob(workflow, 'lint').includes('26.13.1'), 'the extension jobs stay on the default Node version');
+});
+
+/** The steps of one job, each as its text from its `      - ` line to the next one. */
+function jobSteps(job: string): string[] {
+  const lines = job.split(/\r?\n/);
+  const start = lines.findIndex((line) => line === '    steps:');
+  assert.ok(start >= 0, 'the job has steps');
+  const steps: string[][] = [];
+  for (const line of lines.slice(start + 1)) {
+    if (line.startsWith('      - ')) steps.push([line]);
+    else if (steps.length > 0) steps[steps.length - 1]!.push(line);
+  }
+  return steps.map((step) => step.join('\n'));
+}
+
+const HAS_RELAY = "if: steps.has_relay.outputs.present == 'true'";
+
+test('the relay job passes without running anything on a commit that has no relay/ (a hotfix from an older tag)', async () => {
+  const workflow = await readFile(path.join(REPO_ROOT, '.github', 'workflows', 'ci.yml'), 'utf8');
+  const steps = jobSteps(ciJob(workflow, 'relay'));
+  assert.ok(steps[0]?.includes('uses: actions/checkout@'), 'the relay job checks out the code first');
+  const detect = steps[1] ?? '';
+  assert.ok(detect.includes('id: has_relay'), 'the second step of the relay job detects whether relay/ exists');
+  // The job default is working-directory: relay, which does not exist on an old tag; the detection step must not depend on it.
+  assert.ok(detect.includes('working-directory: .'), 'the detection step runs from the repository root');
+  assert.ok(!detect.includes('if:'), 'the detection step always runs');
+  for (const step of steps.slice(2)) {
+    assert.ok(step.includes(HAS_RELAY), `every relay step after the detection is skipped when relay/ is missing:\n${step}`);
+  }
+
+  // Run the detection script itself, as the runner would, on a tree with and without relay/package.json.
+  const scriptLines = detect.split('\n');
+  const runAt = scriptLines.findIndex((line) => line.trim() === 'run: |');
+  assert.ok(runAt >= 0, 'the detection step has a run block');
+  const script = scriptLines
+    .slice(runAt + 1)
+    .filter((line) => line.startsWith('          '))
+    .map((line) => line.slice(10))
+    .join('\n');
+  const scratch = await mkdtemp(path.join(tmpdir(), 'near-ai-relay-ci-detect-'));
+  try {
+    const detectIn = async (tree: string): Promise<{ output: string; stdout: string }> => {
+      const outputFile = path.join(scratch, `${path.basename(tree)}.out`);
+      await writeFile(outputFile, '');
+      const stdout = execFileSync('bash', ['-e', '-c', script], { cwd: tree, env: { PATH: process.env.PATH, GITHUB_OUTPUT: outputFile }, encoding: 'utf8' });
+      return { output: await readFile(outputFile, 'utf8'), stdout };
+    };
+    const oldTag = path.join(scratch, 'old-tag');
+    await mkdir(oldTag);
+    const without = await detectIn(oldTag);
+    assert.equal(without.output.trim(), 'present=false');
+    assert.match(without.stdout, /relay checks were skipped/, 'the job log says why the relay checks did not run');
+
+    const current = path.join(scratch, 'current');
+    await mkdir(path.join(current, 'relay'), { recursive: true });
+    await writeFile(path.join(current, 'relay', 'package.json'), '{}');
+    const withRelay = await detectIn(current);
+    assert.equal(withRelay.output.trim(), 'present=true');
+  } finally {
+    await rm(scratch, { recursive: true, force: true });
+  }
 });
 
 test('the merge gates require the relay check', async () => {
