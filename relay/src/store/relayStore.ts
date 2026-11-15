@@ -95,6 +95,13 @@ export interface ApprovalRecord {
 
 export type NewApproval = Omit<ApprovalRecord, 'state' | 'decision' | 'answeredAt'>;
 
+/**
+ * What answerApproval did. Only `answered` wrote anything. The others are distinct so a caller can tell a race (already-answered, expired) from
+ * a refusal it must not retry (wrong-requester, run-not-waiting). An approval of another tenant reads as unknown-approval, so its existence is
+ * not revealed.
+ */
+export type ApprovalAnswerOutcome = 'answered' | 'unknown-approval' | 'wrong-requester' | 'already-answered' | 'expired' | 'run-not-waiting';
+
 export type StoreErrorCode = 'newer-schema' | 'unknown-tenant' | 'binding-conflict' | 'unknown-run' | 'invalid-record';
 
 /** A store failure. The message is a plain sentence and never contains a message payload. */
@@ -146,11 +153,17 @@ export interface RelayStore {
   /** Runs in any of these states, across all tenants. */
   countRuns(states: readonly RunState[]): Promise<number>;
 
-  /** Stores a pending approval for a run of the same tenant; unknown-run when that run does not exist under this tenant. */
+  /**
+   * Stores a pending approval for a run of the same tenant; unknown-run when that run does not exist under this tenant, invalid-record when
+   * requesterId is not the run's requester.
+   */
   addApproval(approval: NewApproval): Promise<void>;
   getApproval(tenantId: string, approvalId: string): Promise<ApprovalRecord | undefined>;
-  /** Compare and set from pending, only before expiresAt. False when it was already answered or expired, or when `now` is at or after expiresAt. */
-  answerApproval(tenantId: string, approvalId: string, decision: ApprovalDecision, now: number): Promise<boolean>;
+  /**
+   * Compare and set from pending to answered. It succeeds only for the approval's own requester, before expiresAt, and while the run is
+   * `waiting-approval`; the store enforces this, so no caller can grant an approval for someone else or for a run that has moved on.
+   */
+  answerApproval(tenantId: string, approvalId: string, requesterId: string, decision: ApprovalDecision, now: number): Promise<ApprovalAnswerOutcome>;
   /** Marks pending approvals whose expiresAt is at or before `now` as expired, across all tenants; returns how many. */
   expireApprovals(now: number): Promise<number>;
   /** Pending approvals of one tenant, optionally of one requester, oldest first. */

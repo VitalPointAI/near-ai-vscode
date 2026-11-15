@@ -437,10 +437,13 @@ export function relayStoreContract(name: string, factory: StoreFactory): void {
 
   // Approvals
 
+  /** acme's run-1 waits for an approval (queued -> running -> waiting-approval), which is when an approval can be answered. */
   async function withRun(handle: StoreHandle): Promise<void> {
     await handle.store.putTenant(tenant('acme'));
     await handle.store.putTenant(tenant('globex'));
     await handle.store.acceptInbound(inbound('acme', 'k1'), 'run-1');
+    assert.equal(await handle.store.transitionRun('acme', 'run-1', 'queued', 'running', T0 + 1), true);
+    assert.equal(await handle.store.transitionRun('acme', 'run-1', 'running', 'waiting-approval', T0 + 2), true);
   }
 
   test(`${name}: addApproval for an existing run stores a pending approval that survives a reopen`, () =>
@@ -450,7 +453,8 @@ export function relayStoreContract(name: string, factory: StoreFactory): void {
       const expected = { ...approval('acme', 'ap-1', 'run-1'), state: 'pending', decision: null, answeredAt: null };
       assert.deepEqual(await handle.store.getApproval('acme', 'ap-1'), expected);
       await handle.reopen();
-      assert.deepEqual(await handle.store.getApproval('acme', 'ap-1'), expected);
+      // Every field was committed. The run was waiting-approval, so the reopen interrupted it and expired its approval (see the recovery case).
+      assert.deepEqual(await handle.store.getApproval('acme', 'ap-1'), { ...expected, state: 'expired' });
     }));
 
   test(`${name}: addApproval for a run of another tenant or an unknown run is unknown-run and stores nothing`, () =>
@@ -463,12 +467,19 @@ export function relayStoreContract(name: string, factory: StoreFactory): void {
       assert.deepEqual(await handle.store.listPendingApprovals('globex'), []);
     }));
 
-  test(`${name}: answerApproval returns true once and false on a second answer, and keeps the first decision`, () =>
+  test(`${name}: an approval for someone other than the run's requester is invalid-record and is not stored`, () =>
+    withStore(async (handle) => {
+      await withRun(handle);
+      await expectStoreError(handle.store.addApproval(approval('acme', 'ap-1', 'run-1', { requesterId: 'person-2' })), 'invalid-record');
+      assert.equal(await handle.store.getApproval('acme', 'ap-1'), undefined);
+    }));
+
+  test(`${name}: answerApproval answers once, reports already-answered on a second answer, and keeps the first decision`, () =>
     withStore(async (handle) => {
       await withRun(handle);
       await handle.store.addApproval(approval('acme', 'ap-1', 'run-1'));
-      assert.equal(await handle.store.answerApproval('acme', 'ap-1', 'allow-run', T0 + 20), true);
-      assert.equal(await handle.store.answerApproval('acme', 'ap-1', 'deny', T0 + 21), false);
+      assert.equal(await handle.store.answerApproval('acme', 'ap-1', 'person-1', 'allow-run', T0 + 20), 'answered');
+      assert.equal(await handle.store.answerApproval('acme', 'ap-1', 'person-1', 'deny', T0 + 21), 'already-answered');
       const answered = await handle.store.getApproval('acme', 'ap-1');
       assert.equal(answered?.state, 'answered');
       assert.equal(answered?.decision, 'allow-run');
@@ -484,7 +495,7 @@ export function relayStoreContract(name: string, factory: StoreFactory): void {
       const decisions: ApprovalDecision[] = ['allow', 'allow-run', 'allow-always', 'deny'];
       for (const decision of decisions) {
         await handle.store.addApproval(approval('acme', `ap-${decision}`, 'run-1'));
-        assert.equal(await handle.store.answerApproval('acme', `ap-${decision}`, decision, T0 + 20), true);
+        assert.equal(await handle.store.answerApproval('acme', `ap-${decision}`, 'person-1', decision, T0 + 20), 'answered');
         assert.equal((await handle.store.getApproval('acme', `ap-${decision}`))?.decision, decision);
       }
     }));
@@ -493,8 +504,8 @@ export function relayStoreContract(name: string, factory: StoreFactory): void {
     withStore(async (handle) => {
       await withRun(handle);
       await handle.store.addApproval(approval('acme', 'ap-1', 'run-1'));
-      await expectStoreError(handle.store.answerApproval('acme', 'ap-1', 'pending' as ApprovalDecision, T0 + 20), 'invalid-record');
-      await expectStoreError(handle.store.answerApproval('acme', 'ap-1', 'maybe' as ApprovalDecision, T0 + 20), 'invalid-record');
+      await expectStoreError(handle.store.answerApproval('acme', 'ap-1', 'person-1', 'pending' as ApprovalDecision, T0 + 20), 'invalid-record');
+      await expectStoreError(handle.store.answerApproval('acme', 'ap-1', 'person-1', 'maybe' as ApprovalDecision, T0 + 20), 'invalid-record');
       assert.equal((await handle.store.getApproval('acme', 'ap-1'))?.state, 'pending');
     }));
 
@@ -511,10 +522,45 @@ export function relayStoreContract(name: string, factory: StoreFactory): void {
       await withRun(handle);
       await handle.store.addApproval(approval('acme', 'ap-1', 'run-1'));
       assert.equal(await handle.store.getApproval('globex', 'ap-1'), undefined);
-      assert.equal(await handle.store.answerApproval('globex', 'ap-1', 'allow', T0 + 20), false);
+      assert.equal(await handle.store.answerApproval('globex', 'ap-1', 'person-1', 'allow', T0 + 20), 'unknown-approval');
       assert.deepEqual(await handle.store.listPendingApprovals('globex'), []);
       assert.equal((await handle.store.getApproval('acme', 'ap-1'))?.state, 'pending');
-      assert.equal(await handle.store.answerApproval('acme', 'ap-1', 'allow', T0 + 20), true);
+      assert.equal(await handle.store.answerApproval('acme', 'ap-1', 'person-1', 'allow', T0 + 20), 'answered');
+    }));
+
+  test(`${name}: only the approval's requester can answer it (wrong-requester), and the approval stays pending`, () =>
+    withStore(async (handle) => {
+      await withRun(handle);
+      await handle.store.addApproval(approval('acme', 'ap-1', 'run-1', { requesterId: 'person-1' }));
+      assert.equal(await handle.store.answerApproval('acme', 'ap-1', 'person-2', 'allow-always', T0 + 20), 'wrong-requester');
+      const untouched = await handle.store.getApproval('acme', 'ap-1');
+      assert.equal(untouched?.state, 'pending');
+      assert.equal(untouched?.decision, null);
+      assert.equal(await handle.store.answerApproval('acme', 'ap-1', 'person-1', 'deny', T0 + 21), 'answered');
+      assert.equal((await handle.store.getApproval('acme', 'ap-1'))?.decision, 'deny');
+    }));
+
+  test(`${name}: an approval of a run that is no longer waiting-approval cannot be answered (run-not-waiting)`, () =>
+    withStore(async (handle) => {
+      await withRun(handle);
+      await handle.store.addApproval(approval('acme', 'ap-1', 'run-1'));
+      assert.equal(await handle.store.transitionRun('acme', 'run-1', 'waiting-approval', 'cancelled', T0 + 15), true);
+      assert.equal(await handle.store.answerApproval('acme', 'ap-1', 'person-1', 'allow-always', T0 + 20), 'run-not-waiting');
+      assert.equal((await handle.store.getApproval('acme', 'ap-1'))?.state, 'pending');
+
+      // A run that has not reached waiting-approval yet, and one that finished, are refused the same way.
+      await handle.store.acceptInbound(inbound('acme', 'k2', { conversationId: 'c2' }), 'run-2');
+      await handle.store.addApproval(approval('acme', 'ap-2', 'run-2'));
+      assert.equal(await handle.store.answerApproval('acme', 'ap-2', 'person-1', 'allow', T0 + 20), 'run-not-waiting');
+      assert.equal(await handle.store.transitionRun('acme', 'run-2', 'queued', 'finished', T0 + 21), true);
+      assert.equal(await handle.store.answerApproval('acme', 'ap-2', 'person-1', 'allow', T0 + 22), 'run-not-waiting');
+      assert.equal((await handle.store.getApproval('acme', 'ap-2'))?.decision, null);
+    }));
+
+  test(`${name}: an unknown approval id is unknown-approval`, () =>
+    withStore(async (handle) => {
+      await withRun(handle);
+      assert.equal(await handle.store.answerApproval('acme', 'no-such-approval', 'person-1', 'allow', T0 + 20), 'unknown-approval');
     }));
 
   test(`${name}: an answer at or after expiresAt is refused and the approval is not answered`, () =>
@@ -522,10 +568,10 @@ export function relayStoreContract(name: string, factory: StoreFactory): void {
       await withRun(handle);
       await handle.store.addApproval(approval('acme', 'ap-1', 'run-1', { expiresAt: T0 + 100 }));
       await handle.store.addApproval(approval('acme', 'ap-2', 'run-1', { expiresAt: T0 + 100 }));
-      assert.equal(await handle.store.answerApproval('acme', 'ap-1', 'allow', T0 + 100), false);
-      assert.equal(await handle.store.answerApproval('acme', 'ap-2', 'allow', T0 + 101), false);
+      assert.equal(await handle.store.answerApproval('acme', 'ap-1', 'person-1', 'allow', T0 + 100), 'expired');
+      assert.equal(await handle.store.answerApproval('acme', 'ap-2', 'person-1', 'allow', T0 + 101), 'expired');
       assert.equal((await handle.store.getApproval('acme', 'ap-1'))?.decision, null);
-      assert.equal(await handle.store.answerApproval('acme', 'ap-1', 'allow', T0 + 99), true);
+      assert.equal(await handle.store.answerApproval('acme', 'ap-1', 'person-1', 'allow', T0 + 99), 'answered');
     }));
 
   test(`${name}: expireApprovals marks overdue pending approvals expired, counts them, and leaves answered and future ones`, () =>
@@ -534,7 +580,7 @@ export function relayStoreContract(name: string, factory: StoreFactory): void {
       await handle.store.addApproval(approval('acme', 'late', 'run-1', { expiresAt: T0 + 100 }));
       await handle.store.addApproval(approval('acme', 'later', 'run-1', { expiresAt: T0 + 500 }));
       await handle.store.addApproval(approval('acme', 'done', 'run-1', { expiresAt: T0 + 100 }));
-      assert.equal(await handle.store.answerApproval('acme', 'done', 'allow', T0 + 50), true);
+      assert.equal(await handle.store.answerApproval('acme', 'done', 'person-1', 'allow', T0 + 50), 'answered');
       assert.equal(await handle.store.expireApprovals(T0 + 99), 0);
       assert.equal(await handle.store.expireApprovals(T0 + 100), 1);
       assert.equal(await handle.store.expireApprovals(T0 + 100), 0);
@@ -542,10 +588,14 @@ export function relayStoreContract(name: string, factory: StoreFactory): void {
       assert.equal((await handle.store.getApproval('acme', 'late'))?.decision, null);
       assert.equal((await handle.store.getApproval('acme', 'later'))?.state, 'pending');
       assert.equal((await handle.store.getApproval('acme', 'done'))?.state, 'answered');
-      assert.equal(await handle.store.answerApproval('acme', 'late', 'allow', T0 + 101), false);
+      assert.equal(await handle.store.answerApproval('acme', 'late', 'person-1', 'allow', T0 + 101), 'expired');
+      assert.deepEqual((await handle.store.listPendingApprovals('acme')).map((record) => record.approvalId), ['later']);
       await handle.reopen();
       assert.equal((await handle.store.getApproval('acme', 'late'))?.state, 'expired');
-      assert.deepEqual((await handle.store.listPendingApprovals('acme')).map((record) => record.approvalId), ['later']);
+      assert.equal((await handle.store.getApproval('acme', 'done'))?.decision, 'allow');
+      // run-1 was waiting-approval, so the reopen interrupted it and expired its remaining pending approval as well.
+      assert.equal((await handle.store.getApproval('acme', 'later'))?.state, 'expired');
+      assert.deepEqual(await handle.store.listPendingApprovals('acme'), []);
     }));
 
   test(`${name}: listPendingApprovals filters by tenant and optional requester and is ordered by createdAt`, () =>
@@ -553,7 +603,8 @@ export function relayStoreContract(name: string, factory: StoreFactory): void {
       await withRun(handle);
       await handle.store.acceptInbound(inbound('globex', 'g1'), 'run-g');
       await handle.store.addApproval(approval('acme', 'third', 'run-1', { createdAt: T0 + 30, requesterId: 'person-1' }));
-      await handle.store.addApproval(approval('acme', 'first', 'run-1', { createdAt: T0 + 10, requesterId: 'person-2' }));
+      await handle.store.acceptInbound(inbound('acme', 'k2', { conversationId: 'c2', requesterId: 'person-2' }), 'run-2');
+      await handle.store.addApproval(approval('acme', 'first', 'run-2', { createdAt: T0 + 10, requesterId: 'person-2' }));
       await handle.store.addApproval(approval('acme', 'second', 'run-1', { createdAt: T0 + 20, requesterId: 'person-1' }));
       await handle.store.addApproval(approval('globex', 'foreign', 'run-g', { createdAt: T0 + 5 }));
       assert.deepEqual((await handle.store.listPendingApprovals('acme')).map((record) => record.approvalId), ['first', 'second', 'third']);

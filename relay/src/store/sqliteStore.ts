@@ -6,6 +6,7 @@ import {
   RUN_STATES,
   StoreError,
   type AcceptResult,
+  type ApprovalAnswerOutcome,
   type ApprovalDecision,
   type ApprovalRecord,
   type ApprovalState,
@@ -236,7 +237,8 @@ export class SqliteStore implements RelayStore {
       getApproval: db.prepare('SELECT * FROM approvals WHERE tenant_id = ? AND approval_id = ?'),
       answerApproval: db.prepare(
         `UPDATE approvals SET state = 'answered', decision = ?, answered_at = ?
-         WHERE tenant_id = ? AND approval_id = ? AND state = 'pending' AND expires_at > ?`,
+         WHERE tenant_id = ? AND approval_id = ? AND requester_id = ? AND state = 'pending' AND expires_at > ?
+           AND EXISTS (SELECT 1 FROM runs r WHERE r.tenant_id = approvals.tenant_id AND r.run_id = approvals.run_id AND r.state = 'waiting-approval')`,
       ),
       expireApprovals: db.prepare(`UPDATE approvals SET state = 'expired' WHERE state = 'pending' AND expires_at <= ?`),
       pendingForTenant: db.prepare(
@@ -423,9 +425,12 @@ export class SqliteStore implements RelayStore {
   async addApproval(approval: NewApproval): Promise<void> {
     checkApproval(approval);
     this.transaction(() => {
-      if (!this.statement('getRun').get(approval.tenantId, approval.runId)) {
+      const run = this.statement('getRun').get(approval.tenantId, approval.runId) as Row | undefined;
+      if (!run) {
         throw new StoreError('unknown-run', 'The approval was not stored: that run does not exist for this tenant.');
       }
+      // Only the person who asked for the run may be offered its approvals, and answerApproval checks the answer against this requester.
+      if (run.requester_id !== approval.requesterId) throw invalid('requesterId', "must be the run's requester");
       if (this.statement('getApproval').get(approval.tenantId, approval.approvalId)) {
         throw invalid('approvalId', 'is already used by another approval of this tenant');
       }
@@ -450,12 +455,30 @@ export class SqliteStore implements RelayStore {
     return row ? toApproval(row) : undefined;
   }
 
-  async answerApproval(tenantId: string, approvalId: string, decision: ApprovalDecision, now: number): Promise<boolean> {
+  async answerApproval(
+    tenantId: string,
+    approvalId: string,
+    requesterId: string,
+    decision: ApprovalDecision,
+    now: number,
+  ): Promise<ApprovalAnswerOutcome> {
     checkId('tenantId', tenantId);
     checkId('approvalId', approvalId);
+    checkId('requesterId', requesterId);
     checkDecision(decision);
     checkTime('now', now);
-    return this.transaction(() => Number(this.statement('answerApproval').run(decision, now, tenantId, approvalId, now).changes) === 1);
+    return this.transaction((): ApprovalAnswerOutcome => {
+      const row = this.statement('getApproval').get(tenantId, approvalId) as Row | undefined;
+      if (!row) return 'unknown-approval';
+      if (row.requester_id !== requesterId) return 'wrong-requester';
+      if (row.state === 'answered') return 'already-answered';
+      if (row.state === 'expired' || Number(row.expires_at) <= now) return 'expired';
+      const run = this.statement('getRun').get(tenantId, row.run_id as string) as Row | undefined;
+      if (!run || run.state !== 'waiting-approval') return 'run-not-waiting';
+      // The UPDATE repeats every condition, so the write is a compare and set whatever the reads above saw.
+      const changes = Number(this.statement('answerApproval').run(decision, now, tenantId, approvalId, requesterId, now).changes);
+      return changes === 1 ? 'answered' : 'already-answered';
+    });
   }
 
   async expireApprovals(now: number): Promise<number> {
