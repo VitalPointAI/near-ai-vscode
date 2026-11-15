@@ -260,10 +260,27 @@ export function relayStoreContract(name: string, factory: StoreFactory): void {
         assert.equal(next.attempts, 1);
         assert.equal(next.conversationId, 'c1');
         order.push(next.dedupeKey);
+        assert.equal(await handle.store.ackMessage('acme', next.messageId, T0 + 101), true); // the next one is handed out only after this
       }
       assert.deepEqual(order, ['k1', 'k2', 'k3']);
       const other = await handle.store.claimNext('acme', 'teams', 'c2', T0 + 100);
       assert.equal(other?.dedupeKey, 'other');
+    }));
+
+  test(`${name}: claimNext hands out nothing more of a conversation while one of its messages is claimed, and other conversations are not held up`, () =>
+    withStore(async (handle) => {
+      await handle.store.putTenant(tenant('acme'));
+      await handle.store.acceptInbound(inbound('acme', 'k1', { receivedAt: T0 + 1 }), 'run-1');
+      await handle.store.acceptInbound(inbound('acme', 'k2', { receivedAt: T0 + 2 }), 'run-2');
+      await handle.store.acceptInbound(inbound('acme', 'x1', { conversationId: 'c2', receivedAt: T0 + 3 }), 'run-3');
+      const first = await handle.store.claimNext('acme', 'teams', 'c1', T0 + 10);
+      assert.equal(first?.dedupeKey, 'k1');
+      assert.equal(await handle.store.claimNext('acme', 'teams', 'c1', T0 + 11), undefined, 'k2 must wait until k1 is done');
+      assert.equal((await handle.store.getMessage('acme', 'k2'))?.state, 'queued');
+      assert.equal((await handle.store.getMessage('acme', 'k2'))?.attempts, 0);
+      assert.equal((await handle.store.claimNext('acme', 'teams', 'c2', T0 + 12))?.dedupeKey, 'x1', 'another conversation is not held up');
+      assert.equal(await handle.store.ackMessage('acme', first.messageId, T0 + 13), true);
+      assert.equal((await handle.store.claimNext('acme', 'teams', 'c1', T0 + 14))?.dedupeKey, 'k2');
     }));
 
   test(`${name}: claimNext with nothing queued is undefined, also for another tenant or channel`, () =>

@@ -143,7 +143,8 @@ export interface RelayStore {
   acceptInbound(message: InboundMessage, runId: string): Promise<AcceptResult>;
   getMessage(tenantId: string, dedupeKey: string): Promise<QueuedMessage | undefined>;
   /**
-   * Takes the oldest queued message of one conversation: it becomes claimed and its attempts rise by one. When its run was interrupted (see
+   * Takes the oldest queued message of one conversation: it becomes claimed and its attempts rise by one. While a message of the conversation
+   * is claimed, nothing more of it is handed out (undefined), so one conversation's runs never overlap or finish out of order. When its run was interrupted (see
    * below), the run goes back to queued in the same commit. Refuses like acceptInbound: unknown-tenant, tenant-suspended (the messages stay
    * queued until the tenant is active again), and binding-conflict for a conversation bound to another tenant.
    */

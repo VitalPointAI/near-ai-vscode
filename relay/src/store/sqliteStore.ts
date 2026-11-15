@@ -218,8 +218,12 @@ export class SqliteStore implements RelayStore {
         `INSERT INTO runs (tenant_id, run_id, message_id, channel, conversation_id, requester_id, state, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, 'queued', ?, ?)`,
       ),
+      // A conversation is worked on one message at a time: while one of its messages is claimed, nothing else of it is handed out.
       oldestQueued: db.prepare(
-        `SELECT * FROM messages WHERE tenant_id = ? AND channel = ? AND conversation_id = ? AND state = 'queued' ORDER BY message_id LIMIT 1`,
+        `SELECT * FROM messages m WHERE m.tenant_id = ? AND m.channel = ? AND m.conversation_id = ? AND m.state = 'queued'
+           AND NOT EXISTS (SELECT 1 FROM messages c WHERE c.tenant_id = m.tenant_id AND c.channel = m.channel
+                             AND c.conversation_id = m.conversation_id AND c.state = 'claimed')
+         ORDER BY m.message_id LIMIT 1`,
       ),
       claim: db.prepare(`UPDATE messages SET state = 'claimed', attempts = attempts + 1, claimed_at = ? WHERE tenant_id = ? AND message_id = ?`),
       requeueInterruptedRun: db.prepare(
