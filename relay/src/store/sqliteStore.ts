@@ -33,6 +33,8 @@ type Statement = ReturnType<Database['prepare']>;
 type Row = Record<string, unknown>;
 
 const MAX_ID_LENGTH = 256;
+/** An approval title is one line shown to a person (the tool call it asks about), not a document. */
+const MAX_TITLE_LENGTH = 1000;
 const MAX_PAYLOAD_BYTES = 1024 * 1024;
 const BUSY_TIMEOUT_MS = 5000;
 
@@ -74,6 +76,7 @@ function checkApproval(approval: NewApproval): void {
   checkId('callId', approval.callId);
   checkId('tool', approval.tool);
   if (typeof approval.title !== 'string') throw invalid('title', 'must be text');
+  if (approval.title.length > MAX_TITLE_LENGTH) throw invalid('title', `must be at most ${MAX_TITLE_LENGTH} characters`);
   checkTime('createdAt', approval.createdAt);
   checkTime('expiresAt', approval.expiresAt);
 }
