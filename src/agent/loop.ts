@@ -614,6 +614,14 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
     const command = tool.capability === 'shell' ? String((input as { command?: unknown }).command ?? '') : undefined;
     let sensitive: string | undefined;
     let risky: string | undefined;
+    let forbidden: string | undefined;
+    try { forbidden = await tool.forbidden?.(input, context); } catch (error) { return this.finish(call.id, false, `Error: ${(error as Error).message}`); }
+    // Refused before the policy is even asked (0.4.23): no mode, rule or earlier approval can allow it, and no card is shown.
+    if (forbidden) {
+      context.onSecurity?.({ kind: 'blocked', source: title, detail: forbidden });
+      if (tool.capability !== 'read' && tool.capability !== 'plan') this.options.emit({ type: 'permission', tool: tool.name, decision: 'denied' });
+      return this.finish(call.id, false, `Not allowed: ${forbidden}`);
+    }
     try { sensitive = await tool.sensitive?.(input, context); risky = await tool.risky?.(input, context); } catch (error) { return this.finish(call.id, false, `Error: ${(error as Error).message}`); }
     // Auto's context is built for every gated call, because a tool that marks itself autoSafe (the web tools) needs it as well as a shell command.
     const unattended = this.options.unattended && (this.options.policy.mode === 'auto' || this.options.policy.mode === 'mostly-autonomous') && command !== undefined;

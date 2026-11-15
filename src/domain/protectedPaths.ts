@@ -45,3 +45,36 @@ export function protectedWriteReason(relative: string, shown: string = relative)
   if (PLANNING_SETTINGS.test(normalized)) return `${shown} is inside .planning/.near-ai, which holds this project's NEAR AI settings. Approve this write only if you expect it.`;
   return `${shown} is inside .near-ai, where NEAR AI keeps this project's saved state, keys and locks. Approve this write only if you expect it.`;
 }
+
+// 0.4.23: the key folder is off limits to agents altogether. Asking was not enough: in a real run an agent read keys/local.key with a Node script
+// and decrypted the project's own encrypted chats, and in fully-autonomous mode a read of the state folder did not even ask. The extension's own
+// code reads and writes these files directly, never through an agent tool, so nothing the extension does is refused by this.
+
+/**
+ * The state folder's key folder, and the key folders of its join siblings (`state.previous-*`, `state.adopt-*`): the data key (`local.key`),
+ * the recovery wrap (`recovery.json`) and the sealed API key copies (`api/*.enc`). Tested against a relative or absolute path with forward slashes.
+ */
+export const STATE_KEYS_PATH = /(?:^|\/)\.near-ai\/state(?:\.(?:previous|adopt)-[^/]*)?\/keys(?:\/|$)/i;
+
+/** `.near-ai`, `state` (or a sibling) and `keys` in a row, separated by slashes, quotes, commas, `+` or spaces: a path as written or joined in code. */
+const STATE_KEYS_JOINED = /(?<![\w-])\.near-ai[\s'"`,+/\\]+state(?:\.(?:previous|adopt)-[^\s/\\'"`;&|)<>,]*)?(?:[\s'"`,+/\\])+keys(?![\w.-])/i;
+/** `.near-ai` as a folder name. */
+const NEAR_AI_FOLDER = /(?<![\w-])\.near-ai(?![\w-])/i;
+/** With `.near-ai` elsewhere in the same text: `state/keys`, a key file's own name, or a glob over the state folder's subfolders. */
+const STATE_KEYS_HINT = /(?<![\w.-])state[\\/]+keys(?![\w.-])|(?<![\w.-])local\.key(?![\w.-])|(?<![\w.-])recovery\.json(?![\w.-])|\.near-ai[\\/]+(?:state[^\s/\\'"`]*|\*+)[\\/]+(?:\*|k\*|keys)/i;
+
+/**
+ * Whether a command line, or the text of a script a command runs, names the state key folder. A heuristic, and an honest one: it reads text, so it
+ * catches the path as written (`.near-ai/state/keys/local.key`), joined in code (`path.join('.near-ai', 'state', 'keys')`), or reached in two steps
+ * (`cd .near-ai && cat state/keys/local.key`), but not a path built at run time from pieces that do not look like it (string arithmetic, base64,
+ * an environment variable, a directory walk). There is no OS-level sandbox around the agent's shell, so those are not stopped by this check; the
+ * key file stays mode 0600 and owned by this user, which an agent's command also is, so the file's own permissions do not stop them either.
+ */
+export function namesStateKeys(text: string): boolean {
+  return STATE_KEYS_JOINED.test(text) || (NEAR_AI_FOLDER.test(text) && STATE_KEYS_HINT.test(text));
+}
+
+/** Why an agent may not use this path or command. `shown` is how the model named it. */
+export function stateKeysReason(shown: string): string {
+  return `${shown.slice(0, 200)} names the project's key folder (.near-ai/state/keys), which holds the key that encrypts this project's saved chats. Agents may not read, write, list or run anything there, in any approval mode; NEAR AI manages these files itself.`;
+}

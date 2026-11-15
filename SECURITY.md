@@ -12,7 +12,7 @@ Last reviewed: 2026-11-13, against the code on `main` plus the project state and
 | What | Where it goes | Notes |
 | --- | --- | --- |
 | Chat messages (sidebar and `@nearai`) | The endpoint serving the model you picked: NEAR AI Cloud, or your local runtime | Each message passes the outbound check below first. |
-| What the sidebar agent reads or runs | The same model, as tool results: file contents it reads, search results, and command output | Files under the workspace only. Reading a likely credential file (`.env`, private keys, SSH, AWS, or NEAR credential files) asks first. Pick a private or local model to keep this inside a TEE or on your machine. |
+| What the sidebar agent reads or runs | The same model, as tool results: file contents it reads, search results, and command output | Files under the workspace only. Reading a likely credential file (`.env`, private keys, SSH, AWS, or NEAR credential files) asks first. The project's key folder (`.near-ai/state/keys/`) is refused (see "What the agent can do without asking"). Pick a private or local model to keep this inside a TEE or on your machine. |
 | Open-GSD workflows | The NEAR AI agent runner, on the model you picked; sub-agents use the model for their tier (`nearAi.agent.deepModel`, `standardModel`, `fastModel`) when your provider offers it | The same outbound check, approvals, revert, and cost tracking as any agent run. No Codex or Claude Code runtime is invoked. |
 | Your API key | VS Code SecretStorage, one key per project and profile | Never written to settings, project files, logs, activity, analytics, exports, or error messages. |
 | Saved conversations | The project's own state folder, `.near-ai/state/`, which the extension keeps out of git; with project sync on, also an encrypted copy on your git host (see Project state and sync) | Full transcripts, including file contents and command output the agent saw, so History can resume them in every editor, **encrypted with AES-256-GCM** under a per-project key. Every conversation is kept (the 5 most recent stay open, older ones are archived, none is deleted; `nearAi.history.liveConversations`). A single tool output over 2 MiB is stored shortened with a visible marker. Turn off with `nearAi.agent.saveTranscripts`. |
@@ -95,6 +95,16 @@ read outside the repository, or delete refs. These always ask, even after
 - writing into `.git/`, where hooks and config would run on the next git
   command;
 - writing into `.planning/.near-ai/`.
+
+The project's key folder, `.near-ai/state/keys/` (and the `keys/` folder of an older
+`state.previous-*` or `state.adopt-*` copy), is off limits to agents in every mode, with no
+card to approve: Read, Write, Edit, Glob and Grep refuse it, by path or through a link, and
+never list or search it; a shell command whose text names it is refused; and a command that
+runs a file in the project whose text names it (for example `node script.cjs`) always asks,
+with no "always allow". The shell checks read text, so they are a heuristic: a path built at
+run time from pieces that do not look like it, a script that another script or `npm run`
+starts, or a directory walk is not caught. There is no OS-level sandbox around the agent's
+shell.
 
 ### Sub-agents nobody is watching
 
