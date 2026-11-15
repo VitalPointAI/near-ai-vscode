@@ -1,73 +1,104 @@
 ---
 gsd_state_version: "1.0"
 milestone: v0.7.0
-milestone_name: Messaging relay — Teams and Signal
-current_phase: 68
-current_phase_name: Relay foundation
+milestone_name: Governed agent platform and messaging relay
+current_phase: 69
+current_phase_name: Team Mode reconciliation
 status: planning
-stopped_at: "Plan 68-08 Tasks 1-2 done; Task 3 (owner: approve agent-review-gates, add relay to branch protection) awaiting the owner"
-last_updated: "2026-11-15T04:13:33.075Z"
+stopped_at: "v0.7.0 replanned 2026-11-15 around the owner's platform direction; Phase 68 complete (PR #50 in review, owner D-19 step open); Phase 69 not planned yet"
+last_updated: "2026-11-15T16:00:00.000Z"
 state_head: 2fe6e976ceda86fe800620f2012d78fe85c6779d
 progress:
-  total_phases: 9
-  completed_phases: 0
+  total_phases: 17
+  completed_phases: 1
   total_plans: 8
-  completed_plans: 7
-  percent: 0
-last_activity: 2026-11-13
-last_activity_desc: "Completed quick task 261113-lbo: fix the chat task list not checking off finished tasks"
+  completed_plans: 8
+  percent: 6
+last_activity: 2026-11-15
+last_activity_desc: "Replanned v0.7.0 as Governed agent platform and messaging relay (Phases 69-84); OpenShell spike result recorded"
 ---
 
 # Project State
 
 ## Current position
 
-Milestone: v0.7.0 Messaging relay — Teams and Signal (Phases 68-76)
-Phase: 68 (Relay foundation) — EXECUTING
-Next: plan 68-08 Task 3 (owner only): approve agent-review-gates on the relay PR and add relay to main's branch protection. Tasks 1-2 of 68-08 are committed and the full phase gate is green; the PR is not opened yet. Plans 68-01 through 68-07 are done
+Milestone: v0.7.0 Governed agent platform and messaging relay (Phases 68-84), replanned 2026-11-15 from the owner's platform direction (`.planning/PROJECT.md`, "Platform direction"). The roadmap's v0.7.0 section opens with the order of work across every stream.
+Phase 68 (Relay foundation): complete and verified (4/4 must-haves, 8/8 plans); in review as PR #50. Open: the owner's D-19 step.
+0.4.x line: 0.4.22 published 2026-11-14; 0.4.23 in review as PR #51, its release PR follows; 0.4.24 is next (the four #46 review minors and three documentation mismatches). Phase 27 shipped as 0.4.20; its record stays open until the owner's host check.
+Phase 69 (Team Mode reconciliation): next to plan. Planning starts from the new roadmap, not from the old relay order.
+
+Next, in order:
+1. Owner: review and merge 0.4.23 (PR #51), then its release PR.
+2. Owner: approve `agent-review-gates` on PR #50 and merge it, then add `relay` to main's branch protection (D-19, `docs/development-workflow.md` section 8). Then a small relay housekeeping PR: the relay README, Compose file, build script and tests point at the new phase numbers, and the Signal sidecar re-check date (2026-12-10) is met or moved to Phase 82.
+3. The 0.4.24 patch; the owner's Phase 27 host check (27-UAT test 8 onward) and the 27-16 summary.
+4. Owner: push `feat/team-fix-pass` to GitHub as an archive branch and commit or record the five uncommitted files in its legacy worktree. Then `/gsd-plan-phase 69`.
+5. In parallel when wanted: `/gsd-plan-phase 28` (secure development workflow step). Phase 72 plans from the OpenShell spike result.
 
 ## Accumulated Context
 
 ### Roadmap Evolution
 
-- Phase 27 inserted 2026-11-13 in the 0.4.x line, ahead of v0.7.0 Phase 68: project state follows the project across interfaces and machines, shipping as release 0.4.20 (SYNC-01…08). Its decisions are in 27-CONTEXT.md.
-
-- Milestone v0.7.0 added 2026-11-13: Messaging relay — Teams and Signal. Phases 68-76 map all 45 v0.7.0 requirements (RELAY, AUTH, IDNT, RUNL, CMND, GRP, BUDG, TEAM, SGNL, OPS); traceability table in REQUIREMENTS.md.
-- Phase numbering starts at 68: branch-shipped phases end at 26; the unmerged `feat/team-fix-pass` branch already claims Phases 60-67 for v0.6.0 — 68 keeps both honest.
-- Phase 26 completed on branch perf/research-runs: Performance — faster agent and research runs (PERF-01…07, 5 plans, verified).
-- Phase 25 (Cybersecurity harness, CYBER-01…12) moved 2026-11-13 out of the 0.4.x line into its own milestone v0.8.0 Cybersecurity, worked after v0.7.0. All 8 plans are executed; 25-UAT.md is parked at test 2 of the list, and the owner's review of the 12 regional disclaimers is still to do.
+- 2026-11-15: v0.7.0 replanned and renamed "Governed agent platform and messaging relay" after the owner accepted the platform direction (no IronClaw fork; our engine gains the DID governance layer; offline gate; edge grouping and HQ federation; Theia container appliance first; NVIDIA and AMD GPUs). New Stage 1 Phases 69-74 (Team Mode reconciliation, gate with a floor, delegation, execution backends with a guarded apply, credential broker, run contracts). Relay phases renumbered: 69 to 75, 70 to 76, 71 to 77, 71.1 to 78, 72 to 79, 73 to 80, 74 to 81, 75 to 82, 75.1 to 83, 76 to 84 (the phase folders for 71.1 and 75.1 were renamed). 117 active requirements; RUNL-05 retired for APRV-01..04. Phases 28 (secure development workflow step) and 29 (cleanup member) added to the 0.4.x line. Six later milestones outlined (L1-L6). The OpenShell spike passed (33 of 33 key-folder escapes blocked; downloads keep symlinks, so the apply step treats changes as untrusted).
+- 2026-11-15: Phases 71.1 (Messaging setup view) and 75.1 (Telegram) inserted; WhatsApp dropped.
+- Phase 27 inserted 2026-11-13 in the 0.4.x line, ahead of v0.7.0 Phase 68: project state follows the project across interfaces and machines, shipping as release 0.4.20 (SYNC-01…08). Its decisions are in 27-CONTEXT.md. Shipped 2026-11-14 (PR #40, release PR #41).
+- Milestone v0.7.0 added 2026-11-13: Messaging relay, Teams and Signal. Phases 68-76 mapped all 45 requirements then defined (later 54 with SETUP and TGRM).
+- Phase numbering starts at 68: branch-shipped phases end at 26; the unmerged `feat/team-fix-pass` branch claims Phases 60-67 for v0.6.0; 68 keeps both honest.
+- Phase 26 completed on branch perf/research-runs: Performance, faster agent and research runs (PERF-01…07, 5 plans, verified).
+- Phase 25 (Cybersecurity harness, CYBER-01…12) moved 2026-11-13 out of the 0.4.x line into its own milestone v0.8.0 Cybersecurity. All 8 plans are executed; 25-UAT.md is parked at test 2, and the owner's review of the 12 regional disclaimers is still to do. Replan 2026-11-15: UAT may resume once Phase 72 is merged (owner to confirm).
 
 ### Locked decisions (encode, do not re-litigate)
 
-- Relay = new workspace `relay/`, owner-hosted, multi-tenant; Node 26.13.1 + separate lockfile; extension stays Node 24 + zero-dep bundle.
-- Exactly one new runtime dep: `jose`. No HTTP framework, no Bot Framework SDK, no SQLite package (`node:sqlite`, JSON-file-per-tenant fallback — RC in Node 26), no test framework (`node:test`).
-- Signal via pinned `signal-cli-rest-api` sidecar container; pin the exact signal-cli version.
-- Group visibility result-only (ack + finished result); work detail stays in requester's private 1:1/thread.
-- Bot is an external app installed by a customer admin; never joins the customer's Microsoft org.
+- Platform direction (owner, 2026-11-15; verbatim in PROJECT.md): no IronClaw fork; our TypeScript engine gains the DID trust and governance layer; the gate works fully offline from a signed local copy and fails closed; edge devices group locally and federate to HQ; Theia container appliance first, desktop second, VS Code extension kept while cheap; IronClaw, Hermes Agent and OpenShell are design sources only (plus OpenShell's policy format and prover); NVIDIA and AMD GPUs, arm64 and amd64, linked machines, HQ cluster and NEAR AI Cloud burst.
+- Phase 68 stands as built.
+- Relay = workspace `relay/`, owner-hosted, multi-tenant; Node 26.13.1 and a separate lockfile; the extension stays on Node 24 with a zero-dependency bundle.
+- Exactly one relay runtime dependency: `jose`. No HTTP framework, no Bot Framework SDK, no SQLite package (`node:sqlite`, JSON-file-per-tenant fallback), no test framework (`node:test`).
+- Signal via a pinned `signal-cli-rest-api` sidecar; pin the exact signal-cli version.
+- Group visibility result-only; work detail stays in the requester's private chat.
+- The bot is an external app installed by a customer admin; it never joins the customer's Microsoft organization.
 - Per-tenant budget cap always on; per-conversation cap defaults to unlimited.
-- IN scope: Teams in-group streaming, admin onboarding runbook, two-way attachments. OUT: rich Adaptive-Card status UI.
+- Every relay run executes under a contract in a sandbox (EXEC-11, CTRT-07); the relay never gets a container runtime socket.
+
+### Open decisions (owner)
+
+- IN-04 message text retention in the relay store: blank the payload on acknowledgement (recommended) or purge `done` rows after N days. Needed before Phase 75 stores real messages.
+- Whether Phase 69 also lands Team Mode Phases 61, 62 and 62.1 (recommended: no, they go to milestone L2 after their re-test chain closes).
+- DID method and identity lifetime (`did:near` or `did:key`; persistent per member or per run). Needed before Phase 71.
+- Versioning: whether Stage 1 phases ship in 0.4.x releases as they land, with 0.7.0 at the milestone's end (recommended), or wait.
+- Whether v0.8.0 UAT resumes after Phase 72 (recommended) instead of after all of v0.7.0.
+- Whether unpaired chat users get the tenant's default contract (PAIR-02, recommended) or everyone must pair.
+- The Signal sidecar re-check date (2026-12-10) falls before Phase 82: re-pin by then, or move the date in the relay housekeeping PR.
+- The order of the later milestones L1-L6 (recommended order in ROADMAP.md).
+- Whether a mixed NVIDIA and AMD group may stop at per-vendor pools with request balancing (POOL-01), since one model split across vendors may not be practical.
 
 ### Naming trap
 
-- This milestone = messaging relay at `relay/` — NOT the paused v0.5.0 ciphertext sync relay (RELAY-01/02 archived in `.planning/milestones/v0.5.0-paused/`) and NOT `relayTransport.ts` board sync (unmerged branch).
-- REQ-ID collision: v0.5.0 used RELAY-01/02 for ciphertext sync; scope as "v0.7.0 RELAY-01/02" + the one-line note already in REQUIREMENTS.md. Do not rename requirement IDs there.
+- This milestone's relay is the messaging relay at `relay/`: NOT the paused v0.5.0 ciphertext sync relay (RELAY-01/02 archived in `.planning/milestones/v0.5.0-paused/`) and NOT `relayTransport.ts` board sync (unmerged branch; superseded by L5's federation transport).
+- REQ-ID collisions: v0.5.0 used RELAY-01/02 for ciphertext sync (scoped as "v0.7.0 RELAY-01/02"). v0.6.0 uses TEAM-01..04 and SETUP-01 with other meanings; carried v0.6.0 ids take a `TM-` prefix (TMR-04).
 
 ### Reuse pointers
 
 - Durable restart: `src/services/runMarkers.ts` (NOT `runActivity.ts`); `AUTO_RESUME_WITHIN_MS`=12h, `MAX_AUTO_RESUMES`=3.
-- `src/agent/` has zero `vscode` imports — safe reuse surface for headless composition.
-- `src/services/chat.ts` is UI-bound — the relay must NOT import it.
+- `src/agent/` has zero `vscode` imports: the reuse surface for headless composition. `src/services/chat.ts` is UI-bound; the relay must NOT import it.
+- Team Mode core (identity, signed log, permissions) on the archive branch: `src/team/`, `src/domain/team/` (Phase 60 SUMMARY files are the spec).
+- Local models and private routing to build on: `src/domain/auth.ts` (local and hybrid profiles), `src/services/providerFactory.ts`, `privateRouteFor` in `src/services/providerCache.ts`, `src/domain/privacy.ts`.
+- OpenShell spike: `.planning/research/platform-direction/openshell-spike.md` and `openshell-spike/` (policies, DID drafts, the delegation verifier draft, escape tests).
 
 ### Research flags (embedded in phases)
 
-- Teams in-group streaming undocumented → spike with post-don't-stream fallback (Phase 71; TEAM-03 already permits discrete updates).
-- Pin exact `signal-cli` version; verify sidecar image's bundled signal-cli age (Phases 68, 75).
-- Headless harness composition never done → first runner-child boot is a spike (Phase 71).
-- Proactive 1:1 after group @mention depends on bot install scope — highest derail risk; fallback recorded in Phase 74 and carried into Phase 76 threat model.
+- Phase 69: per-file port strategy from a 0.4.11 fork; two private git mirrors (Team Mode and sync) must not collide.
+- Phase 70: capability grammar and policy bundle format (high undo cost); how the relay shares the vocabulary.
+- Phase 71: DID method; persistent or per-run identities; spend as running totals.
+- Phase 72: start with an in-extension integration spike; OpenShell 0.1.x pinning and attestations; gateway size; AMD GPU needs a Strix Halo hardware test; macOS untested.
+- Phase 74: clock trust for expiry on edge devices without network time.
+- Phase 76: Teams field paths against a live tenant; proactive 1:1 install scope (highest derail risk; fallback carried to Phases 81 and 84).
+- Phase 77: headless composition with gate and contracts is a spike; Teams in-group streaming is undocumented (post-don't-stream fallback).
+- Phase 82: pin and verify signal-cli; arm64 sidecar image.
 
 ### Blockers/Concerns
 
-- Owner action pending (D-19): approve agent-review-gates on the relay PR, then add relay to main's branch protection (docs/development-workflow.md section 8).
+- Owner action pending (D-19): approve agent-review-gates on PR #50, then add relay to main's branch protection.
+- `feat/team-fix-pass` exists only locally (not on GitHub) and its legacy worktree has five uncommitted files: archive it before Phase 69.
+- The Signal sidecar re-check date (about 2026-12-10) recorded in `relay/compose.yaml`, `relay/README.md` and the container test now falls before the Signal phase.
 
 ### Quick Tasks Completed
 
@@ -82,9 +113,9 @@ Next: plan 68-08 Task 3 (owner only): approve agent-review-gates on the relay PR
 
 ## Session
 
-**Last session:** 2026-11-15T04:13:32.856Z
-**Stopped at:** Plan 68-08 Tasks 1-2 done; Task 3 (owner: approve agent-review-gates, add relay to branch protection) awaiting the owner
-**Resume file:** .planning/phases/68-relay-foundation/68-08-PLAN.md
+**Last session:** 2026-11-15T16:00:00.000Z
+**Stopped at:** v0.7.0 replanned around the owner's platform direction; next is the owner's merges (PR #51, PR #50 with D-19), the 0.4.24 patch, archiving `feat/team-fix-pass`, then `/gsd-plan-phase 69`
+**Resume file:** .planning/ROADMAP.md (v0.7.0, "Order of work across every stream")
 
 ## Performance Metrics
 
@@ -184,3 +215,7 @@ Next: plan 68-08 Task 3 (owner only): approve agent-review-gates on the relay PR
 - [Phase 68]: 68-06: plain-secret refusal runs before the state directory is created; secrets come only from {NAME}_FILE, CREDENTIALS_DIRECTORY or /run/secrets; phone-label key is SHA-256 of LOG_PSEUDONYM_KEY or a 0600 log-pseudonym.key created once
 - [Phase 68]: 68-07: relay image code folder staged as /app-skel in the build stage (files 0444, folder 0555) because COPY --chmod also hit the /app folder
 - [Phase 68]: 68-07: container suite checks files and links for shells and package managers, not the base image's empty etc/dpkg and var/lib/dpkg folders; docker build runs without --memory (BuildKit has no such flag)
+- [Platform, 2026-11-15]: Owner accepted the platform direction (PROJECT.md, "Platform direction", decisions 1-6): no IronClaw fork, our engine gains the DID governance layer, offline gate from a signed local copy that fails closed, edge grouping and HQ federation, Theia container appliance first, outside projects as design sources only, the OpenShell spike, the v0.7.0 replan, NVIDIA and AMD GPUs with linked machines and a NEAR AI Cloud burst
+- [Platform, 2026-11-15]: v0.7.0 stays one milestone (owner asked for v0.7.0 to be replanned; Phase 68 ships as v0.7.0; the relay depends on the governance phases in one chain) in three stages with a gate before the relay runs tools; relay phases renumbered 75-84
+- [Platform, 2026-11-15]: Team Mode's Phase 60 core lands on main in Phase 69, ported onto current main rather than merging the 0.4.11-based branch; Phases 61, 62 and 62.1 wait for milestone L2 unless the owner decides otherwise
+- [Platform, 2026-11-15]: The OpenShell spike's apply-path finding (downloads keep symlinks) makes the guarded apply a requirement (EXEC-03); the prover cannot prove sub-folder narrowing, so generated policies use a fixed file-path vocabulary (EXEC-05)
