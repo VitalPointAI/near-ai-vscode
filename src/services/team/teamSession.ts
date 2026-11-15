@@ -28,6 +28,8 @@ import { PAUSED_REFUSED_TEXT, createTeamStatusBar, safeReason, statusText } from
 import type { TeamStatusBar } from './teamStatusBar';
 
 export const TEAM_OUTPUT_CHANNEL = 'NEAR AI Team';
+// The context key the manifest's palette when clause reads (D-24): true while a team session runs, so Verify Team Log is never hidden from a team project.
+export const TEAM_ACTIVE_CONTEXT = 'nearAi.team.active';
 export const SHOW_DETAILS_ACTION = 'Show details';
 export const UPDATE_EXTENSION_TEXT = 'Some events need a newer version of NEAR AI. Update the extension to read them.';
 export const READ_ONLY_TEXT = 'This computer has no device key for this team, so it can read the team log but not write to it.';
@@ -54,6 +56,8 @@ export interface TeamSessionDeps {
   timers?: SchedulerTimers;
   git?: GitRunner;
   withProgress?: <T>(title: string, task: () => Promise<T>) => Promise<T>;
+  // Called with true once the session has started and with false when it is disposed (the nearAi.team.active context key).
+  activeChanged?: (active: boolean) => void;
 }
 
 function describeError(error: unknown): string {
@@ -202,6 +206,7 @@ export class TeamSession {
     // The scheduler runs the first sync as soon as it starts, so start waits for that run instead of syncing twice.
     session.scheduler.start();
     await session.firstRun;
+    deps.activeChanged?.(true);
     return session;
   }
 
@@ -235,6 +240,7 @@ export class TeamSession {
     this.scheduler.stop();
     this.diagnosticSubscription.dispose();
     this.deps.statusBar.dispose();
+    this.deps.activeChanged?.(false);
   }
 
   // D-25: replay the whole log from genesis, print the report, and summarise it in a notification.
@@ -426,6 +432,12 @@ export async function createVscodeTeamSession(
       },
       pollSeconds: () => vscode.workspace.getConfiguration('nearAi.team').get<number>('pollSeconds', DEFAULT_POLL_SECONDS),
       focused: () => vscode.window.state.focused,
+      activeChanged: (active) => {
+        // A context key that cannot be set must not stop the session: the failure is written to the channel.
+        Promise.resolve(vscode.commands.executeCommand('setContext', TEAM_ACTIVE_CONTEXT, active)).catch((error: unknown) => {
+          output.appendLine(`Team Mode could not update its menu state: ${describeError(error)}`);
+        });
+      },
       withProgress: <T>(title: string, task: () => Promise<T>): Promise<T> =>
         Promise.resolve(vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title }, () => task())),
       ...overrides

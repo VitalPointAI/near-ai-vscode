@@ -11,6 +11,9 @@ export interface VscodeStub {
   // The action buttons of notifications[i], at the same index.
   notificationActions: string[][];
   configUpdates: unknown[];
+  // Every setContext call in order, and the latest value per key.
+  setContextCalls: Array<{ key: string; value: unknown }>;
+  contextKeys: Map<string, unknown>;
   commands: Map<string, (...args: unknown[]) => unknown>;
   // Answers handed to showInputBox and to the show*Message calls, in order. An empty queue answers undefined (dismissed).
   inputAnswers: Array<string | undefined>;
@@ -34,6 +37,8 @@ export function createVscodeStub(): VscodeStub {
   const notifications: VscodeStub['notifications'] = [];
   const notificationActions: string[][] = [];
   const configUpdates: unknown[] = [];
+  const setContextCalls: VscodeStub['setContextCalls'] = [];
+  const contextKeys = new Map<string, unknown>();
   const commands = new Map<string, (...args: unknown[]) => unknown>();
   const inputAnswers: VscodeStub['inputAnswers'] = [];
   const inputRequests: VscodeStub['inputRequests'] = [];
@@ -121,12 +126,19 @@ export function createVscodeStub(): VscodeStub {
         commands.set(name, handler);
         return { dispose: (): void => { commands.delete(name); } };
       },
-      executeCommand: async (name: string, ...args: unknown[]): Promise<unknown> => commands.get(name)?.(...args)
+      executeCommand: async (name: string, ...args: unknown[]): Promise<unknown> => {
+        if (name === 'setContext') {
+          setContextCalls.push({ key: String(args[0]), value: args[1] });
+          contextKeys.set(String(args[0]), args[1]);
+          return undefined;
+        }
+        return commands.get(name)?.(...args);
+      }
     }
   };
 
   return {
-    vscode, outputChannels, statusBarItems, notifications, notificationActions, configUpdates, commands, inputAnswers, inputRequests, messageAnswers,
+    vscode, outputChannels, statusBarItems, notifications, notificationActions, configUpdates, setContextCalls, contextKeys, commands, inputAnswers, inputRequests, messageAnswers,
     setWorkspaceFolders(paths: string[]): void {
       workspaceFolders = paths.length === 0 ? undefined : paths.map((fsPath, index) => ({ uri: { fsPath }, name: fsPath.split('/').pop() ?? '', index }));
     },

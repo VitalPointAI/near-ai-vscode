@@ -63,6 +63,8 @@ function resetStub(): void {
   stub.notifications.length = 0;
   stub.notificationActions.length = 0;
   stub.configUpdates.length = 0;
+  stub.setContextCalls.length = 0;
+  stub.contextKeys.clear();
   stub.inputAnswers.length = 0;
   stub.messageAnswers.length = 0;
   stub.inputRequests.length = 0;
@@ -104,11 +106,22 @@ test('solo project: activation makes one fs.stat and no timers, channel, status 
     assert.deepEqual(loadedTeamModules(), [], 'no compiled team module was loaded');
     assert.equal(handle.session(), undefined);
     assert.deepEqual([...stub.commands.keys()].sort(), [ENABLE_COMMAND, VERIFY_LOG_COMMAND].sort(), 'both commands are registered and nothing else');
+    assert.deepEqual(stub.setContextCalls, [], 'a solo project never sets the active-team context key');
   } finally {
     timers.restore();
     fsCalls.restore();
     project.cleanup();
   }
+});
+
+test('with the preview setting off, both commands are still registered', async () => {
+  resetStub();
+  stub.setConfig('nearAi.team.preview', false);
+  const context = createFakeContext(path.join(tmpdir(), 'near-ai-preview-off'), {});
+  const handle = registerTeamMode(context as never);
+  assert.equal(await handle.ready, 'solo');
+  assert.deepEqual([...stub.commands.keys()].sort(), [ENABLE_COMMAND, VERIFY_LOG_COMMAND].sort(), 'the setting gates only the palette, never registration');
+  for (const subscription of context.subscriptions) subscription.dispose();
 });
 
 test('no workspace folder resolves solo without touching the filesystem or timers', async () => {
@@ -190,12 +203,14 @@ test('a team project loads the session lazily, shows Team: <name> and stops its 
     await writeTeamFile(projectRoot, parseTeamFile(genesis.teamFileText));
 
     stub.setWorkspaceFolders([projectRoot]);
+    stub.setConfig('nearAi.team.preview', false);
     const fakeContext = createFakeContext(fixture.storageDir('a'), owner.secrets);
     context.current = fakeContext;
     const handle = registerTeamMode(fakeContext as never);
     assert.equal(await handle.ready, 'team');
     assert.ok(handle.session() !== undefined, 'the session is available');
     assert.ok(Object.keys(require.cache).includes(path.join(DIST_ROOT, 'services', 'team', 'teamSession.js')), 'the session module was loaded once the team was found');
+    assert.equal(stub.contextKeys.get('nearAi.team.active'), true, 'the session is active');
     assert.equal(stub.statusBarItems.length, 1);
     assert.equal(stub.statusBarItems[0]?.text, 'Team: Parity team');
     assert.equal(stub.statusBarItems[0]?.visible, true);
@@ -207,6 +222,10 @@ test('a team project loads the session lazily, shows Team: <name> and stops its 
     timers.restore();
     assert.ok(polls.every((entry) => timers.cleared.includes(entry.handle)), 'every poll timer was cleared when the context was disposed');
     assert.equal(stub.statusBarItems[0]?.disposed, true);
+    assert.deepEqual(stub.setContextCalls, [
+      { key: 'nearAi.team.active', value: true },
+      { key: 'nearAi.team.active', value: false }
+    ], 'the active-team key is true after start and false after dispose, with the preview setting off');
   } finally {
     timers.restore();
     for (const subscription of context.current?.subscriptions ?? []) subscription.dispose();
