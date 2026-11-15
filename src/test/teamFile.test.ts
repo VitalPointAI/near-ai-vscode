@@ -10,9 +10,11 @@ import { SecretLeakError } from '../domain/team/secrets';
 import type { TeamFile } from '../domain/team/types';
 import { newTeamId } from '../team/identity';
 import {
-  COORDINATION_REF_PATTERN, REMOTE_NAME_PATTERN, TEAM_FILE_REL, TeamFileError, TrustPinError, canonicalTeamFile, checkTrustPin, parseTeamFile, readTeamFile,
-  serialiseTeamFile, teamFilePath, teamStorageDir, writeTeamFile
+  COORDINATION_REF_PATTERN, REMOTE_NAME_PATTERN, RESERVED_SYNC_REFS, TEAM_FILE_REL, TeamFileError, TrustPinError, canonicalTeamFile, checkTrustPin, collidesWithSyncRef,
+  parseTeamFile, readTeamFile, serialiseTeamFile, teamFilePath, teamStorageDir, writeTeamFile
 } from '../team/teamFile';
+import { INCOMING_REF as TEAM_INCOMING_REF, LOCAL_REF, QUARANTINE_REF_PREFIX } from '../team/gitTransport';
+import { INCOMING_REF, STATE_REF } from '../services/stateTransport';
 import { createOwner, testGenesis } from './helpers/teamHarness';
 
 async function workDir(): Promise<string> {
@@ -293,5 +295,50 @@ test('teamStorageDir joins the global storage with the validated team id and ref
   assert.equal(teamStorageDir('/store', teamId), path.join('/store', 'team', teamId));
   for (const bad of ['../x', 'team-../..', 'team-ZZZZ', '', `${teamId}/..`, `${teamId}\n`]) {
     assert.throws(() => teamStorageDir('/store', bad), TeamFileError, bad);
+  }
+});
+
+// ---- Team Mode and project sync share one remote, so team.json may never name sync's branches (D-12, D-23).
+
+test('team.json refuses the project sync branch, its parents, children and incoming ref, whatever the letter case', async () => {
+  const file = await validFile();
+  const refused = [
+    'refs/heads/near-ai/state',
+    'refs/heads/near-ai/state/x',
+    'refs/heads/near-ai',
+    'refs/heads/NEAR-AI/State',
+    'refs/near-ai/incoming',
+    'refs/near-ai/incoming/a',
+    'refs/near-ai/INCOMING'
+  ];
+  for (const ref of refused) {
+    assert.ok(collidesWithSyncRef(ref), `${ref} collides`);
+    assert.throws(
+      () => parseTeamFile(edited(file, (c) => { c.coordination.ref = ref; })),
+      (error: unknown) => error instanceof TeamFileError && error.message === 'team.json has a missing or invalid "coordination.ref" and was not used.' && !error.message.includes(ref),
+      ref
+    );
+  }
+});
+
+test('team.json still accepts the default coordination branch and sibling names that are not sync branches', async () => {
+  const file = await validFile();
+  const accepted = ['refs/heads/near-ai/coordination', 'refs/near-ai/coordination', 'refs/heads/near-ai/states', 'refs/heads/team-log'];
+  for (const ref of accepted) {
+    assert.equal(collidesWithSyncRef(ref), false, `${ref} does not collide`);
+    assert.equal(parseTeamFile(edited(file, (c) => { c.coordination.ref = ref; })).coordination.ref, ref, ref);
+  }
+});
+
+test('the reserved sync refs are pinned to the sync constants, so a rename on the sync side breaks this test', () => {
+  assert.deepEqual([...RESERVED_SYNC_REFS], [STATE_REF, INCOMING_REF]);
+});
+
+test('the team transport keeps its own local refs out of the refs/near-ai/ namespace and apart from sync refs', () => {
+  for (const ref of [LOCAL_REF, TEAM_INCOMING_REF, QUARANTINE_REF_PREFIX]) {
+    assert.ok(!ref.startsWith('refs/near-ai/'), `${ref} is outside refs/near-ai/`);
+    assert.ok(!collidesWithSyncRef(ref), `${ref} does not collide with a sync ref`);
+    assert.notEqual(ref, STATE_REF);
+    assert.notEqual(ref, INCOMING_REF);
   }
 });

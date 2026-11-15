@@ -15,6 +15,16 @@ export const TEAM_FILE_REL = '.planning/.near-ai/team.json';
 // A remote name can never start with a dash, so the value cannot become a git option; it is also always passed as its own argv entry.
 export const REMOTE_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 export const COORDINATION_REF_PATTERN = /^refs\/(heads|near-ai)\/[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$/;
+// The two branch names project state sync owns on the same remote (src/services/stateTransport.ts: STATE_REF, INCOMING_REF). Hard-coded here so this
+// parser never depends on the sync transport; a test pins both to the sync constants (D-12, D-23).
+export const RESERVED_SYNC_REFS = ['refs/heads/near-ai/state', 'refs/near-ai/incoming'] as const;
+
+// True when a ref equals a sync ref, lies under one, or is a parent of one (git cannot hold both a branch and a branch under it). Compared
+// case-insensitively so a case-folding remote or filesystem cannot make two names one.
+export function collidesWithSyncRef(ref: string): boolean {
+  const lower = ref.toLowerCase();
+  return RESERVED_SYNC_REFS.some((reserved) => lower === reserved || lower.startsWith(`${reserved}/`) || reserved.startsWith(`${lower}/`));
+}
 
 const NEAR_ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/;
 const MAX_TEAM_FILE_BYTES = 16 * 1024;
@@ -62,8 +72,9 @@ function checked(reason: string | undefined, field: string): void {
 }
 
 function validRef(ref: unknown): ref is string {
-  // The pattern keeps the coordination ref to a plain alphabet; the shared validator applies git's own rules (WR-09).
-  return typeof ref === 'string' && COORDINATION_REF_PATTERN.test(ref) && isGitRefName(ref);
+  // The pattern keeps the coordination ref to a plain alphabet; the shared validator applies git's own rules (WR-09). Sync's branch names are
+  // never a coordination ref, so an edited team.json cannot point Team Mode at the project's state branch (D-12, D-23).
+  return typeof ref === 'string' && COORDINATION_REF_PATTERN.test(ref) && isGitRefName(ref) && !collidesWithSyncRef(ref);
 }
 
 function parseNear(value: unknown): NearLink {
