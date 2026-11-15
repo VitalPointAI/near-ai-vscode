@@ -5,14 +5,14 @@ milestone_name: Messaging relay — Teams and Signal
 current_phase: 68
 current_phase_name: Relay foundation
 status: planning
-stopped_at: Phase 68 planned (8 plans, checker passed)
-last_updated: "2026-11-15T00:44:43.490Z"
-state_head: e3f23803c3c457f337b2285eb5f650b28f203f76
+stopped_at: Completed 68-01-PLAN.md
+last_updated: "2026-11-15T03:39:34.948Z"
+state_head: 6dbc3b19353df063f706cf7257242e1f719fcb47
 progress:
   total_phases: 9
   completed_phases: 0
   total_plans: 8
-  completed_plans: 0
+  completed_plans: 1
   percent: 0
 last_activity: 2026-11-13
 last_activity_desc: "Completed quick task 261113-lbo: fix the chat task list not checking off finished tasks"
@@ -23,7 +23,7 @@ last_activity_desc: "Completed quick task 261113-lbo: fix the chat task list not
 ## Current position
 
 Milestone: v0.7.0 Messaging relay — Teams and Signal (Phases 68-76)
-Phase: 68 (Relay foundation) — READY TO EXECUTE
+Phase: 68 (Relay foundation) — EXECUTING
 Next: `/gsd-execute-phase 68` in the messaging-relay worktree; wave 1 stops at the D-20 package-pin checkpoint
 
 ## Accumulated Context
@@ -82,8 +82,8 @@ None yet.
 
 ## Session
 
-**Last session:** 2026-11-13T20:02:28.913Z
-**Stopped at:** Completed 27-22-PLAN.md
+**Last session:** 2026-11-15T03:39:34.922Z
+**Stopped at:** Completed 68-01-PLAN.md
 **Resume file:** None
 
 ## Performance Metrics
@@ -111,6 +111,7 @@ None yet.
 | Phase 27 P20 | 25 min | 2 tasks | 4 files |
 | Phase 27 P21 | 25min | 2 tasks | 2 files |
 | Phase 27 P22 | 34 min | 3 tasks | 10 files |
+| Phase 68 P01 | 70min | 3 tasks | 15 files |
 
 ## Decisions
 
@@ -168,3 +169,5 @@ None yet.
 - [Phase 27]: 27-21: code push holds NEAR AI per-person records back by default; allowlist team.md, project.json, verifiers.json; tracked records named or blocked on public
 - [Phase 27]: 27-22: the profile and sync chips wrap their own text at every width (never an ellipsis) and the bar wraps at every width; a row break up to 480 px puts the pickers on the next row
 - [Phase 27]: 27-22: controls a person must read whole carry data-must-read; the test-only layout probe reports clipped ones and the extension-host layout test fails on them in all five sync states at every side bar width
+- [Phase 68]: D-20 answered by the owner: relay pins jose 6.2.17 and @types/node 26.6.6 (newest pair)
+- [Phase 68]: Relay prints nothing and exits 1 on any failed start until plan 02's redacting logger exists (D-11)
