@@ -941,8 +941,12 @@ Read the full [security and trust report](SECURITY.md).
 
 ## Good to know
 
-- **Privacy labels come from NEAR's model catalog.** The extension does not
-  yet verify NEAR's per-response attestation signatures itself.
+- **Privacy labels come from NEAR's model catalog.** You can check a single
+  answer from a private model with **Verify signature**, which checks NEAR's
+  signature and a fresh Intel TDX quote in the editor; it does not check TCB
+  status, enclave measurements or NVIDIA's verdict, and only a run's final
+  answer is offered (see
+  [what it does and doesn't check](SECURITY.md#checking-a-responses-signature)).
 - **No wallet, staking, or NEAR account sign-in yet.** They wait for a
   documented NEAR AI contract; sign-in uses API keys.
 
