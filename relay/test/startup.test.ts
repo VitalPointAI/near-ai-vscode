@@ -299,3 +299,16 @@ test('a missing or damaged app.mjs prints one fixed sentence on stderr, no path 
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+// Regression: relay.listening was logged before the SIGTERM handler existed, so a supervisor (or a
+// test) that stopped the relay as soon as it saw that line could hit the default kill instead of a
+// clean stop (seen in CI on PR #54). The timing window is too small to hit reliably here, so the
+// order is pinned in the source.
+test('the relay registers its SIGTERM and SIGINT handlers before it logs relay.listening', async () => {
+  const source = await readFile(fileURLToPath(new URL('../../src/main.ts', import.meta.url)), 'utf8');
+  const listening = source.indexOf("logger.info('relay.listening'");
+  const sigterm = source.indexOf("process.on('SIGTERM'");
+  const sigint = source.indexOf("process.on('SIGINT'");
+  assert.ok(listening > 0 && sigterm > 0 && sigint > 0, 'main.ts logs relay.listening and handles SIGTERM and SIGINT');
+  assert.ok(sigterm < listening && sigint < listening, 'both handlers are registered before relay.listening is logged');
+});

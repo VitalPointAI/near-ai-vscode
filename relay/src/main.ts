@@ -158,8 +158,8 @@ export async function main(argv: readonly string[]): Promise<void> {
     process.exitCode = 1;
     return;
   }
-  logger.info('relay.listening', { host: config.host, port, version: __RELAY_VERSION__, instanceId: await openStore.instanceId() });
-
+  // Signal handlers go in before relay.listening is logged: a supervisor or test that reacts to
+  // that line by sending SIGTERM must always get a clean stop, never the default kill.
   let stopping = false;
   const stop = (signal: string): void => {
     if (stopping) return;
@@ -185,4 +185,6 @@ export async function main(argv: readonly string[]): Promise<void> {
   };
   process.on('SIGTERM', () => stop('SIGTERM'));
   process.on('SIGINT', () => stop('SIGINT'));
+  const instanceId = await openStore.instanceId();
+  logger.info('relay.listening', { host: config.host, port, version: __RELAY_VERSION__, instanceId });
 }
