@@ -19,6 +19,8 @@ export interface LayoutReport {
   scrollers: string[];
   /** Controls marked data-must-read whose text does not fit (cut to an ellipsis or clipped): what a person must read whole, but cannot. */
   clipped: string[];
+  /** The page's images (the first 25), with each one's decoded width: 0 means it did not render. */
+  images?: Array<{ element: string; naturalWidth: number; complete: boolean }>;
 }
 
 export function layoutProbeEnabled(): boolean {
