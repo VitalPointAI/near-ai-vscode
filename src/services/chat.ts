@@ -225,7 +225,8 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
         tab.paused.delete(message.callId);
         tab.outcomes.set(message.callId, { outcome: 'expired', ...(typeof message.minutes === 'number' ? { detail: message.minutes } : {}) });
       }
-      if (message.type === 'prompt-closed' && typeof message.id === 'string') { tab.outcomes.set(message.id, { outcome: message.outcome === 'cancelled' || message.outcome === 'covered' ? message.outcome : 'closed' }); tab.paused.delete(message.id); }
+      // 0.4.24: a question or image review nobody answered in time closes as `timed-out`, with the minutes it waited, so a reloaded view says so too.
+      if (message.type === 'prompt-closed' && typeof message.id === 'string') { tab.outcomes.set(message.id, { outcome: message.outcome === 'cancelled' || message.outcome === 'covered' || message.outcome === 'timed-out' ? message.outcome : 'closed', ...(message.outcome === 'timed-out' && typeof message.minutes === 'number' ? { detail: message.minutes } : {}) }); tab.paused.delete(message.id); }
       const steerId = message.type === 'steer-state' ? String(message.id) : undefined;
       tab.log.add(steerId && message.state === 'queued' && tab.steerTexts.has(steerId) ? { ...message, text: tab.steerTexts.get(steerId) } : loggable(message));
       if (steerId && message.state !== 'queued') tab.steerTexts.delete(steerId);

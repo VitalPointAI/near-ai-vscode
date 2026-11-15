@@ -1379,12 +1379,16 @@ export class AgentConversation {
     this.onWaitingChange?.(this.waiting.size);
   }
 
-  /** Forgets a waiting prompt; one cancelled by a stop or the run ending is reported so the view unpins it. */
-  private closePrompt(id: string, cancelled = false): void {
+  /**
+   * Forgets a waiting prompt; one cancelled by a stop or the run ending is reported so the view unpins it. `timedOut` (0.4.24): a question or an image
+   * review nobody answered within the approval timeout, closed as timed out after that many minutes.
+   */
+  private closePrompt(id: string, cancelled = false, timedOut?: number): void {
     this.openCards.delete(id);
     if (!this.waiting.delete(id)) return;
     if (this.markerRun && this.waiting.size === 0) void this.runMarkers?.waiting(this.markerRun.conversationId, this.markerRun.runId, false);
-    if (cancelled) this.post({ type: 'prompt-closed', id, outcome: 'cancelled' });
+    if (timedOut !== undefined) this.post({ type: 'prompt-closed', id, outcome: 'timed-out', minutes: timedOut });
+    else if (cancelled) this.post({ type: 'prompt-closed', id, outcome: 'cancelled' });
     this.onWaitingChange?.(this.waiting.size);
   }
 
@@ -1595,6 +1599,14 @@ export class AgentConversation {
     });
   }
 
+  /** How long a question or an image review waits before it is closed as timed out, in whole minutes for the messages (0.4.24). */
+  private get promptLimitMinutes(): number { return Math.max(1, Math.round(this.approvalTimeoutMs / 60_000)); }
+
+  /**
+   * 0.4.24 (review of PR 51): a question waits up to the approval timeout (nearAi.agent.approvalTimeoutMinutes; 0 waits indefinitely), as approvals do.
+   * Before, it had no limit, so in Full auto or an unattended background sub-agent a run could wait for the rest of the session. On expiry each question
+   * is answered QUESTION_TIMED_OUT and the card is closed as timed out; the agent carries on with its own judgement.
+   */
   private askQuestions(questions: Question[], signal: AbortSignal): Promise<string[]> {
     if (signal.aborted) return Promise.resolve([]);
     const id = `q-${randomBytes(6).toString('hex')}`;
@@ -1603,7 +1615,12 @@ export class AgentConversation {
     return waitOrAbort(signal, (wake) => {
       this.questions.set(id, (answers: string[], cancelled = false) => { reply = { answers, cancelled }; wake(); });
       this.openPrompt(id, { type: 'questions-request', id, questions });
-    }).then(() => {
+    }, this.approvalTimeoutMs).then((how) => {
+      if (!reply && how === 'timed-out') {
+        this.questions.delete(id);
+        this.closePrompt(id, true, this.promptLimitMinutes);
+        return questions.map(() => QUESTION_TIMED_OUT);
+      }
       if (!reply) { this.questions.delete(id); reply = { answers: [], cancelled: true }; }
       this.closePrompt(id, reply.cancelled);
       return reply.answers;
@@ -1618,7 +1635,8 @@ export class AgentConversation {
   /**
    * Shows a draft in the chat and waits for the person, like a question: it is pinned, replayed to a reloaded view, counted on the badge and in the run's
    * marker as waiting on a person, and cancelled (the draft kept) when the run or the agent stops. The image goes in the card as a data URL (the view's
-   * CSP allows data: images), up to MAX_PREVIEW_BYTES; a larger one is opened full size instead.
+   * CSP allows data: images), up to MAX_PREVIEW_BYTES; a larger one is opened full size instead. 0.4.24: like a question, it waits up to the approval
+   * timeout, then settles as cancelled with `timedOut` (the draft kept) and the card closes as timed out.
    */
   private async askImageReview(draft: ImageDraft, signal: AbortSignal): Promise<ImageReviewDecision> {
     if (signal.aborted) return { decision: 'cancelled' };
@@ -1630,15 +1648,22 @@ export class AgentConversation {
     if (live) { this.setActivity(live, 'Waiting for your image review'); this.postAgents(); }
     // waitOrAbort removes its abort listener once answered, so each review does not leave one on the run's signal (agent review of PR 51).
     let answer: { reply: ImageReviewDecision; cancelled: boolean } | undefined;
-    await waitOrAbort(signal, (wake) => {
+    const how = await waitOrAbort(signal, (wake) => {
       this.imageReviews.set(draft.id, (reply: ImageReviewDecision, cancelled = false) => { answer = { reply, cancelled }; wake(); });
       this.openPrompt(draft.id, {
         type: 'image-review-request', id: draft.id, path: draft.path, model: draft.model, prompt: draft.prompt, attempt: draft.attempt, sizeKb: Math.max(1, Math.round(draft.bytes / 1024)),
         ...(image ? { image } : { tooLarge: true }), ...(draft.agent ? { agent: draft.agent } : {}), ...(draft.editOf ? { editOf: draft.editOf } : {}), ...(draft.note ? { note: draft.note } : {})
       });
-    });
-    if (!answer) { this.imageReviews.delete(draft.id); answer = { reply: { decision: 'cancelled' }, cancelled: true }; }
-    this.closePrompt(draft.id, answer.cancelled);
+    }, this.approvalTimeoutMs);
+    if (!answer && how === 'timed-out') {
+      this.imageReviews.delete(draft.id);
+      const minutes = this.promptLimitMinutes;
+      this.closePrompt(draft.id, true, minutes);
+      answer = { reply: { decision: 'cancelled', timedOut: minutes }, cancelled: true };
+    } else {
+      if (!answer) { this.imageReviews.delete(draft.id); answer = { reply: { decision: 'cancelled' }, cancelled: true }; }
+      this.closePrompt(draft.id, answer.cancelled);
+    }
     if (draft.agentId) this.activity?.waitingForUser(draft.agentId, false);
     return answer.reply;
   }
@@ -1656,19 +1681,34 @@ export class AgentConversation {
   }
 }
 
+/** What each question answers when nobody answered within the approval timeout (0.4.24). */
+export const QUESTION_TIMED_OUT = '(no answer, timed out)';
+
 /** The largest draft shown inside the review card; a larger one is shown with "Open full size" only, to keep the chat's messages small. */
 export const MAX_PREVIEW_BYTES = 8 * 1024 * 1024;
 
 /**
  * Waits until `register`'s wake function is called or the signal aborts, whichever comes first, and removes its abort listener either way (review of
- * PR 34: a listener added per wait and never removed piled up on a long run's signal).
+ * PR 34: a listener added per wait and never removed piled up on a long run's signal). With `timeoutMs` above 0 it also ends after that long. It
+ * resolves with what ended it.
  */
-export function waitOrAbort(signal: AbortSignal, register: (wake: () => void) => void): Promise<void> {
-  if (signal.aborted) return Promise.resolve();
-  return new Promise<void>((resolve) => {
-    const done = () => { signal.removeEventListener('abort', done); resolve(); };
-    signal.addEventListener('abort', done, { once: true });
-    register(done);
+export function waitOrAbort(signal: AbortSignal, register: (wake: () => void) => void, timeoutMs = 0): Promise<'woken' | 'aborted' | 'timed-out'> {
+  if (signal.aborted) return Promise.resolve('aborted');
+  return new Promise((resolve) => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let settled = false;
+    const finish = (how: 'woken' | 'aborted' | 'timed-out') => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      signal.removeEventListener('abort', aborted);
+      resolve(how);
+    };
+    const aborted = () => finish('aborted');
+    signal.addEventListener('abort', aborted, { once: true });
+    // 0.4.24: a wait with a limit (the approval timeout, for questions and image reviews) ends on its own, so an unattended run is not held for good.
+    if (timeoutMs > 0) timer = setTimeout(() => finish('timed-out'), timeoutMs);
+    register(() => finish('woken'));
   });
 }
 

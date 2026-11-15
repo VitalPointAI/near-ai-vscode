@@ -69,6 +69,11 @@
       case 'accepted': return 'Accepted and saved: ' + title;
       case 'changes-requested': return 'Changes requested for ' + title + (detail ? ': ' + detail : '');
       case 'discarded': return 'Discarded: ' + title;
+      // 0.4.24: a question or image review nobody answered within the approval timeout; the run carried on without it.
+      case 'timed-out': {
+        const waited = typeof detail === 'number' ? ' within ' + detail + ' min' : ' in time';
+        return item.kind === 'image' ? 'Timed out, not reviewed' + waited + ' (the draft is kept): ' + title : 'Timed out, no answer' + waited + ', the agent carried on: ' + title;
+      }
       case 'closed': return 'No longer waiting: ' + title;
       case 'covered': return 'Allowed by your answer to the same command: ' + title;
       default: return title;

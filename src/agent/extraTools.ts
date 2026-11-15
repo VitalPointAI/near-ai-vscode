@@ -30,8 +30,11 @@ export interface ImageDraft {
   agentId?: string;
 }
 
-/** What the person decided on a draft; `cancelled` when the run or the agent was stopped before they did. */
-export type ImageReviewDecision = { decision: 'accept' } | { decision: 'changes'; feedback: string } | { decision: 'discard' } | { decision: 'cancelled' };
+/**
+ * What the person decided on a draft; `cancelled` when the run or the agent was stopped before they did, or (0.4.24) with `timedOut` when nobody
+ * answered within the approval timeout, that many minutes.
+ */
+export type ImageReviewDecision = { decision: 'accept' } | { decision: 'changes'; feedback: string } | { decision: 'discard' } | { decision: 'cancelled'; timedOut?: number };
 
 export interface ImageDraftEntry { path: string; reviewing?: boolean }
 
@@ -159,6 +162,8 @@ export function imageTool(client: NearAiClient, model: ModelInfo, models: readon
           reviewer.drafts.delete(id);
           return `The user discarded draft ${id}; nothing was saved to ${shown}. Do not generate this image again unless the user asks for it.`;
         default:
+          // 0.4.24: a review nobody answered in time ends like a stop, but the agent is told why, so it carries on without the image rather than making it again.
+          if (decision.timedOut !== undefined) return `The user did not review the image within ${decision.timedOut} minute${decision.timedOut === 1 ? '' : 's'}, so the review timed out. Draft ${id} is kept in ${DRAFTS_DIR}/ and nothing was saved to ${shown}. Carry on without it and tell the user it is waiting in ${DRAFTS_DIR}/; do not generate it again unless they ask.`;
           return `Stopped before the user reviewed the image. Draft ${id} is kept in ${DRAFTS_DIR}/ and nothing was saved to ${shown}.`;
       }
     }

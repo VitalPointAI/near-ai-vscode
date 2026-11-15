@@ -604,7 +604,7 @@
             "Images are saved where the agent wants them straight away, without showing them to you first."
           ],
           "default": "ask",
-          "description": "Whether you review each image the agent makes before it is saved in your project. While an image waits for you, the agent waits too, in every approval mode. Images waiting for review are kept in the project's .near-ai/drafts/images folder, which is never committed; ones left there are removed after 7 days."
+          "description": "Whether you review each image the agent makes before it is saved in your project. While an image waits for you, the agent waits too, in every approval mode, up to nearAi.agent.approvalTimeoutMinutes; then the review times out, the draft is kept and the run carries on. Images waiting for review are kept in the project's .near-ai/drafts/images folder, which is never committed; ones left there are removed after 7 days."
         },
         "nearAi.activity.retentionMinutes": {
           "type": "number",
@@ -684,7 +684,7 @@
           "default": 15,
           "minimum": 0,
           "maximum": 1440,
-          "description": "How long an action in the main conversation waits for your approval before the run is paused on that step. Nothing runs while it is paused; answering whenever you are back carries on from exactly there. If nobody answers for a further day, the action is declined and the run released. 0 waits indefinitely, with no pause and no decline. Sub-agents wait nearAi.agent.subagentApprovalWaitSeconds instead and then carry on."
+          "description": "How long an action in the main conversation waits for your approval before the run is paused on that step. Nothing runs while it is paused; answering whenever you are back carries on from exactly there. If nobody answers for a further day, the action is declined and the run released. 0 waits indefinitely, with no pause and no decline. Sub-agents wait nearAi.agent.subagentApprovalWaitSeconds instead and then carry on. Questions the agent asks you and images waiting for your review (from the main conversation or a sub-agent) wait this long too: then the card closes as timed out, the question is answered \"(no answer, timed out)\" and the image draft is kept, and the run carries on. 0 lets them wait indefinitely."
         },
         "nearAi.agent.unattendedAutoApprove": {
           "type": "boolean",

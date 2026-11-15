@@ -1455,7 +1455,7 @@
         announce(text);
         break;
       }
-      case 'prompt-closed': closePending(m.id, m.outcome === 'cancelled' || m.outcome === 'covered' ? m.outcome : 'closed'); break;
+      case 'prompt-closed': closePending(m.id, m.outcome === 'cancelled' || m.outcome === 'covered' || m.outcome === 'timed-out' ? m.outcome : 'closed', m.outcome === 'timed-out' && typeof m.minutes === 'number' ? m.minutes : undefined); break;
       case 'todos': renderTodos(m.todos || [], m.unconfirmed === true); break;
       case 'run-changes': onRunChanges(m); break;
       case 'run-reverted': {
