@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import http from 'node:http';
+import net from 'node:net';
 import test from 'node:test';
 import { HealthRegistry } from '../src/health';
 import { createRelayServer, listen } from '../src/http/server';
@@ -156,5 +157,23 @@ test('the server closes slow clients: headersTimeout 5000 and requestTimeout 100
   await withServer(registry(), async (_port, server) => {
     assert.equal(server.headersTimeout, 5000);
     assert.equal(server.requestTimeout, 10000);
+  });
+});
+
+test('a client that stops in the middle of its headers is closed after about 5 s, not after the 30 s default check', { timeout: 20_000 }, async () => {
+  await withServer(registry(), async (port) => {
+    const started = Date.now();
+    const closedAfter = await new Promise<number>((resolve, reject) => {
+      const socket = net.connect(port, '127.0.0.1', () => socket.write('GET /healthz HTTP/1.1\r\nHost: 127.0.0.1\r\nX-Slow: '));
+      socket.on('data', () => undefined); // the 408 the server may send before closing
+      socket.on('error', () => undefined); // a reset also counts as closed
+      socket.on('close', () => resolve(Date.now() - started));
+      setTimeout(() => {
+        socket.destroy();
+        reject(new Error('the stalled connection was still open after 15 s'));
+      }, 15_000);
+    });
+    assert.ok(closedAfter >= 4_500, `closed after ${closedAfter} ms, before the 5 s headers timeout`);
+    assert.ok(closedAfter < 8_000, `closed after ${closedAfter} ms; the headers timeout must apply within about a second of 5 s`);
   });
 });

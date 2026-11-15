@@ -17,6 +17,8 @@ const BASE_HEADERS = {
   'x-content-type-options': 'nosniff',
 } as const;
 
+export const CONNECTIONS_CHECKING_INTERVAL_MS = 1000;
+
 export function createRelayServer(options: RelayServerOptions): http.Server {
   const reject = (route: RejectedRoute, method: string, status: number): void => {
     try {
@@ -27,7 +29,9 @@ export function createRelayServer(options: RelayServerOptions): http.Server {
     }
   };
 
-  const server = http.createServer((req, res) => {
+  // headersTimeout and requestTimeout are enforced only when Node checks the open connections, every 30 s by default, so a client that stalls
+  // in its headers would be held for up to 30 s. Checking every second makes the 5 s and 10 s limits real (A3).
+  const server = http.createServer({ connectionsCheckingInterval: CONNECTIONS_CHECKING_INTERVAL_MS }, (req, res) => {
     req.resume();
     const method = req.method ?? 'GET';
     const target = req.url ?? '/';
