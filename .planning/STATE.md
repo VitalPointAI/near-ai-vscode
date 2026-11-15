@@ -4,7 +4,7 @@ milestone: v0.7.0
 milestone_name: Governed agent platform and messaging relay
 status: planning
 stopped_at: "v0.7.0 replanned 2026-11-15 around the owner's platform direction; Phase 68 complete and merged (PR #50, 052d5cf), relay required on main (D-19 done); Phase 69 planned 2026-11-15 (15 plans, two PRs), ready to execute after the planning PR merges"
-last_updated: "2026-11-15T16:42:44.341Z"
+last_updated: "2026-11-15T20:00:00.000Z"
 state_head: 2fe6e976ceda86fe800620f2012d78fe85c6779d
 progress:
   total_phases: 21
@@ -15,7 +15,7 @@ progress:
 last_activity: 2026-11-15
 current_phase_name: "Team Mode reconciliation: identities and signed events on main"
 current_phase: 69
-last_activity_desc: Replanned v0.7.0 as Governed agent platform and messaging relay (Phases 69-84); OpenShell spike result recorded
+last_activity_desc: Folded the owner-approved identity, credential and classification design into v0.7.0 Phases 70 and 71 and the L4 and L5 outlines (132 active requirements)
 ---
 
 # Project State
@@ -26,17 +26,20 @@ Milestone: v0.7.0 Governed agent platform and messaging relay (Phases 68-84), re
 Phase 68 (Relay foundation): complete, verified and merged as PR #50 (052d5cf, 2026-11-15). The owner added `relay` to main's branch protection the same day (D-19, done).
 0.4.x line: 0.4.22 published 2026-11-14; 0.4.23 merged (PR #51) and published 2026-11-15 (release PR #52, tag v0.4.23); 0.4.24 is next (the four #46 review minors and three documentation mismatches). Phase 27 shipped as 0.4.20; its record stays open until the owner's host check.
 Phase 69 (Team Mode reconciliation): planned 2026-11-15, 15 plans in 15 waves over two PRs (69-01..08 port the Phase 60 core and the per-person identity, 69-09..15 add device.rotated, the payload signer, key history and the v0.6.0 disposition). Decisions D-01..D-29 were made on the owner's behalf and are recorded in 69-CONTEXT.md with their undo cost. Ready to execute.
+Identity design (owner, 2026-11-15; PROJECT.md Platform direction decisions 8-13): standard DIDs, verifiable credentials for authority, clearance, roles and compartments, classification labels with routing by label, delegation that narrows at every link, and roots-only anchoring. Folded into Phase 70 (CLAS-01..07), Phase 71 (now "Identities, credentials and delegation that only narrows": VCRD-01..07, DLGT-08, a research step first) and the L4 and L5 outlines. Phase 69 is unchanged.
 
 Next, in order:
 1. The planning PR is merged (PR #53, 6ba1620). The relay housekeeping PR (`fix/relay-housekeeping`) carries: new phase numbers in the relay README, Compose file, build script and tests; the Signal sidecar re-pin (by 2026-12-10); and PR #50's second-review minors (the `relay` check skips when `relay/package.json` is missing on any branch, so key the skip to hotfix branches; redactor field-name collisions after normalising; README promises tenant key files nothing reads yet; 68-VALIDATION.md still draft; ackMessage id check).
 2. The 0.4.24 patch (the #46 review minors, the three documentation mismatches, and PR #51's deferred image-review minors); the owner's Phase 27 host check (27-UAT test 8 onward) and the 27-16 summary.
 3. Phase 69 is planned (15 plans, two PRs): merge its planning PR, then `/gsd-execute-phase 69`.
 4. In parallel when wanted: `/gsd-plan-phase 28` (secure development workflow step). Phase 72 plans from the OpenShell spike result.
+5. Owner action (open, acknowledged 2026-11-15): ask NEAR in writing, through your NEAR AI contact, whether the private shard will accept third-party contracts and data, and when account view keys ship. The answer decides when L4's confidential anchor backend (ANCH-07) is built.
 
 ## Accumulated Context
 
 ### Roadmap Evolution
 
+- 2026-11-15: Identity, credential and classification design folded in (PROJECT.md, Platform direction decisions 8-13; evidence `.planning/research/platform-direction/identity-research.md`). Added CLAS-01..07 to Phase 70 and VCRD-01..07 and DLGT-08 to Phase 71 (117 to 132 active requirements, nothing re-mapped); revised DLGT-01, DLGT-03, DLGT-07, OFFL-03, OFFL-04 and IDNT-05; Phase 71 renamed "Identities, credentials and delegation that only narrows" and given a research step first (JCS conformance, `did:webvh` hosting and caching, status list sizing). L4 drafts revised for roots-only anchoring (ANCH-01..05) with ANCH-07 (confidential backend interface) and ANCH-08 (HQ roles) added; L5 drafts NODE-01, NODE-02 and FED-01 revised, FED-05..08 added (edge sync, per-level maximum offline age, stapled status lists, second-site issuers). The research's twelve open risks are in the research flags of Phases 70, 71 and 74 and L4 and L5. VCRD, not CRED: CRED-xx is the credential broker. Calimero Network evaluated the same day (`calimero-evaluation.md`): not now; its encrypted git transport recommendation is in the L2 and L5 flags.
 - 2026-11-15: v0.7.0 replanned and renamed "Governed agent platform and messaging relay" after the owner accepted the platform direction (no IronClaw fork; our engine gains the DID governance layer; offline gate; edge grouping and HQ federation; Theia container appliance first; NVIDIA and AMD GPUs). New Stage 1 Phases 69-74 (Team Mode reconciliation, gate with a floor, delegation, execution backends with a guarded apply, credential broker, run contracts). Relay phases renumbered: 69 to 75, 70 to 76, 71 to 77, 71.1 to 78, 72 to 79, 73 to 80, 74 to 81, 75 to 82, 75.1 to 83, 76 to 84 (the phase folders for 71.1 and 75.1 were renamed). 117 active requirements; RUNL-05 retired for APRV-01..04. Phases 28 (secure development workflow step) and 29 (cleanup member) added to the 0.4.x line. Six later milestones outlined (L1-L6). The OpenShell spike passed (20 of 20 key-folder escapes blocked; downloads keep symlinks, so the apply step treats changes as untrusted).
 - 2026-11-15: Phases 71.1 (Messaging setup view) and 75.1 (Telegram) inserted; WhatsApp dropped.
 - Phase 27 inserted 2026-11-13 in the 0.4.x line, ahead of v0.7.0 Phase 68: project state follows the project across interfaces and machines, shipping as release 0.4.20 (SYNC-01…08). Its decisions are in 27-CONTEXT.md. Shipped 2026-11-14 (PR #40, release PR #41).
@@ -61,7 +64,9 @@ Next, in order:
 
 - IN-04: the relay blanks a message's text once it is acknowledged (Phase 75).
 - Phase 69 lands only the Team Mode identity, signed log and permissions foundations; Phases 61, 62 and 62.1 go to milestone L2. `feat/team-fix-pass` is archived on GitHub (4207080, loose files committed first).
-- DID method `did:near`; one persistent identity per team member, with per-run grants under it (Phase 71).
+- ~~DID method `did:near`~~ revised and owner-confirmed later on 2026-11-15: `did:key` (Ed25519) for agents and machines, `did:webvh` for people and your organization's root; no `did:near` (two incompatible specifications already hold the name). Still one persistent identity per team member, with per-run grants under it (Phase 71).
+- Identity, credentials and classification (owner, 2026-11-15; PROJECT.md decisions 8-13): DID documents minimal and DID Core 1.0 conformant with no custom authority blocks; authority, clearance, roles and compartments as VC 2.0 credentials with `eddsa-jcs-2022` and Bitstring Status List, a narrow profile on `node:crypto` with zero runtime dependencies (Digital Bazaar packages as devDependencies for cross-checks only), atomic and threshold credentials first, SD-JWT VC and BBS later; labels `{scale, level, compartments, releasability, handling}` with clearance dominance, a session high-water mark, scale presets (commercial, two Canadian government scales, NATO) and routing tiers per level (Restricted, Protected B and C and classified levels local only by default unless your organization approves); the gate prevents mistakes and does not accredit a device; delegation narrows on level, roles, compartments, expiry and depth at every link with nothing revoked in the chain.
+- On chain (owner-confirmed 2026-11-15): NEAR's Confidential Intents private shard takes no third-party contracts or data today, so nothing readable goes on chain; one anchor account per organization writes 32-byte Merkle roots to public NEAR at fixed intervals, behind an interface that moves to a NEAR confidential backend when NEAR allows it; the chain is checked once per run (lease) and the local gate decides every action; offline edge devices fail closed after a per-level maximum offline age; HQ is issuer, DID host, status list publisher and only anchor writer, with an offline root key and pre-rotation. Calimero Network was evaluated the same day as a possible private layer (`.planning/research/platform-direction/calimero-evaluation.md`): not now (NEAR integration and peer-to-peer sync removed; 1.0 is a release-candidate confidential cloud on Intel TDX only, no offline groups, dev mode only on our AMD and NVIDIA hardware, no independent audit); revisit only if HQ moves onto Intel TDX hosting and Calimero ships a stable, audited 1.0 that supports our hardware.
 - Stage 1 phases ship in 0.4.x releases as they land; 0.7.0 at the milestone's end.
 - v0.8.0 Cybersecurity is deferred until everything else in this plan is finished; it may move to its own product.
 - Everyone must pair before a run (PAIR-02); unpaired people get no default contract.
@@ -87,13 +92,16 @@ Next, in order:
 ### Research flags (embedded in phases)
 
 - Phase 69: per-file port strategy from a 0.4.11 fork; two private git mirrors (Team Mode and sync) must not collide.
-- Phase 70: capability grammar and policy bundle format (high undo cost); how the relay shares the vocabulary.
-- Phase 71: DID method; persistent or per-run identities; spend as running totals.
+- Phase 70: capability grammar, label format and policy bundle format (high undo cost); how the relay shares the vocabulary; a fresh install's default label keeps today's routing; NATO preset and the two Canadian scales confirmed by your organization's security officer; Protected B local only by default (no CCCS Medium assessment of NEAR AI Cloud found); not accreditation.
+- Phase 71: research step first (JCS conformance against the W3C vectors, `did:webvh` hosting and caching before HQ exists, status list sizing); spend as running totals; threshold credentials leak the maximum level when all are shown; revocation lag until `validUntil`; not post-quantum (name the cryptosuite in every proof); one clock helper for expiry.
 - Phase 72: start with an in-extension integration spike; OpenShell 0.1.x pinning and attestations; gateway size; AMD GPU needs a Strix Halo hardware test; macOS untested.
-- Phase 74: clock trust for expiry on edge devices without network time.
+- Phase 74: clock trust for expiry on edge devices without network time (also used by Phase 71's credential expiry).
 - Phase 76: Teams field paths against a live tenant; proactive 1:1 install scope (highest derail risk; fallback carried to Phases 81 and 84).
 - Phase 77: headless composition with gate and contracts is a spike; Teams in-group streaming is undocumented (post-don't-stream fallback).
 - Phase 82: pin and verify signal-cli; arm64 sidecar image.
+- L2: encrypt Team Mode event payloads to member device keys over the existing git transport, signatures and hashes in clear (Calimero evaluation's recommendation).
+- L4: NEAR confidential shard takes no third-party contracts or data today, permissioned trust model, conflicting secondary claims; Calimero not now (revisit conditions recorded); roots written at fixed intervals so timing reveals nothing; HQ issuer key compromise; not post-quantum; anchoring cost.
+- L5: offline revocation lag and per-level maximum offline age; device clocks drift offline; federation over the encrypted git transport.
 
 ### Blockers/Concerns
 
@@ -219,3 +227,7 @@ Next, in order:
 - [Platform, 2026-11-15]: v0.7.0 stays one milestone (owner asked for v0.7.0 to be replanned; Phase 68 ships as v0.7.0; the relay depends on the governance phases in one chain) in three stages with a gate before the relay runs tools; relay phases renumbered 75-84
 - [Platform, 2026-11-15]: Team Mode's Phase 60 core lands on main in Phase 69, ported onto current main rather than merging the 0.4.11-based branch; Phases 61, 62 and 62.1 wait for milestone L2 unless the owner decides otherwise
 - [Platform, 2026-11-15]: The OpenShell spike's apply-path finding (downloads keep symlinks) makes the guarded apply a requirement (EXEC-03); the prover cannot prove sub-folder narrowing, so generated policies use a fixed file-path vocabulary (EXEC-05)
+- [Platform, 2026-11-15]: Identity, credential and classification design approved by the owner (PROJECT.md, Platform direction decisions 8-13): standard minimal DIDs, VC 2.0 credentials with `eddsa-jcs-2022` and Bitstring Status List in a zero-dependency narrow profile, classification labels with clearance dominance, high-water mark and routing by label, delegation narrowing at every link; folded into Phases 70 and 71 and L4 and L5
+- [Platform, 2026-11-15]: DID methods `did:key` (agents, machines) and `did:webvh` (people, your organization's root) replace `did:near`; owner-confirmed the same day
+- [Platform, 2026-11-15]: Roots-only anchoring on public NEAR behind an anchor interface until NEAR's confidential shard accepts third-party data; owner-confirmed; asking NEAR in writing stays an open owner action
+- [Platform, 2026-11-15]: Verifiable credentials get the prefix VCRD because CRED is the credential broker (Phase 73); the `eddsa-jcs-2022` proof is a second proof format on Phase 69's one signer, so Phase 69's plans do not change

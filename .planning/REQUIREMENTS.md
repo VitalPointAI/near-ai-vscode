@@ -3,11 +3,14 @@
 ## Milestone v0.7.0: Governed agent platform and messaging relay
 
 **Defined:** 2026-11-13 (relay). **Replanned:** 2026-11-15 from the owner's platform direction (`.planning/PROJECT.md`, "Platform direction"): the identity and governance core was added, the relay requirements were re-mapped to renumbered phases, and new groups were added (TMR, GATE, OFFL, DLGT, EXEC, CRED, CTRT, CHAN, PAIR, APRV).
+**Amended:** 2026-11-15 with the identity, credential and classification design the owner approved (`.planning/PROJECT.md`, Platform direction decisions 8-13; evidence in `.planning/research/platform-direction/identity-research.md`): CLAS (classification labels and routing, Phase 70) and VCRD (verifiable credentials, Phase 71) added, DLGT-08 added, DLGT-01, DLGT-03, DLGT-07, OFFL-03, OFFL-04 and IDNT-05 revised, and the L4 and L5 drafts revised for roots-only anchoring, the confidential backend interface, HQ's roles and the per-level maximum offline age.
 **Core value:** Every agent works under a governance layer a person can see and check, deciding offline from a signed local policy; and a person in a Microsoft Teams, Signal or Telegram chat asks the team for something and the answer arrives where they already are, without VS Code. The group sees only the finished result, the working thread stays private to whoever asked, and every relay run executes under a contract in a sandbox.
 
 > **What "relay" means here.** The new messaging relay at `relay/`: receive a chat message, drive an existing agent team, post the result back. **Not** the paused v0.5.0 ciphertext sync relay (RELAY-01/02, archived in `.planning/milestones/v0.5.0-paused/`) and **not** the planned `relayTransport.ts` board sync on the unmerged Team Mode branch. Those are separate, deliberate, unrelated work.
 
 > **Id collisions with v0.6.0.** The Team Mode requirements on `feat/team-fix-pass` use TEAM-01..04 (team and identity) and SETUP-01 (guided project setup) with other meanings. In this file TEAM-xx is the Teams channel and SETUP-xx the Messaging setup view; carried v0.6.0 ids take a `TM-` prefix (TMR-04).
+
+> **Two kinds of credential.** CRED-xx (Phase 73, credential broker) are secrets such as API keys that agents use by handle and never hold. VCRD-xx (Phase 71) are W3C Verifiable Credentials: signed statements about an identity's authority, clearance, roles and compartments. The prefixes differ on purpose.
 
 ### Relay foundation (Phase 68, done)
 
@@ -34,22 +37,43 @@
 - [ ] **GATE-06**: Fully-autonomous means "no approval needed within the policy's grant", never "gate off", and SECURITY.md and README describe the floor the same way.
 - [ ] **GATE-07**: Every gate decision is recorded with actor, capability, outcome and the rule that decided it, in a record shape (OCSF classes) that a later audit chain can sign and anchor.
 
+### Classification labels and routing (Phase 70)
+
+- [ ] **CLAS-01**: Labels are part of the versioned capability vocabulary and the signed policy bundle: `{scale, level, compartments, releasability, handling}`, attached to files, folders, chats, projects and tool output; an unlabelled item takes its folder's or project's label, a project with no label takes the policy's default, and an unknown scale, level or field is refused.
+- [ ] **CLAS-02**: The policy bundle ships scale presets, each an ordered list: commercial `org` (Public < Internal < Confidential < Restricted; the default), Canadian government as two separate scales (Protected A < Protected B < Protected C, and Confidential < Secret < Top Secret), and NATO (NATO Unclassified < NATO Restricted < NATO Confidential < NATO Secret < Cosmic Top Secret); a clearance on one scale covers another only through a mapping your organization adds to its policy (for example "Secret also covers Protected A and B").
+- [ ] **CLAS-03**: The gate allows access to labelled content only when the actor's clearance dominates the label: the same scale (or a policy mapping), a level at least the label's, every label compartment held, releasability met, and nothing expired or revoked. The check is a small hand-written evaluator in `src/domain` with no runtime dependency, and a property test shows no access without dominance. Until Phase 71's credentials exist the clearance comes from the signed policy bundle; from then on, from verified credentials (VCRD-07).
+- [ ] **CLAS-04**: Every agent session carries a high-water mark, the highest label it has read; anything it writes, sends or summarizes inherits that label, sub-agents start at their parent's mark, and the mark never goes down except by a person's declassification action, which is recorded.
+- [ ] **CLAS-05**: The policy bundle maps each level (and any `handling` flag) to a routing tier: `any-cloud`, `attested-cloud` (only NEAR AI Cloud models whose attestation and response signature verified for this request), `local-only` (an on-device model, no content leaves the machine) or `deny`. Defaults: Public any cloud; Internal, Confidential and Protected A attested cloud; Restricted, Protected B (unless your organization approves an assessed cloud), Protected C and every classified level local only; `deny` available per compartment.
+- [ ] **CLAS-06**: Before every model request the gate decides the route from the session's high-water label; a request that needs `local-only` with no local model configured is refused with a plain explanation and never sent to a cloud.
+- [ ] **CLAS-07**: The product says plainly, where labels are set and in SECURITY.md, that the gate is an organizational control that prevents mistakes and does not make a device accredited for classified information.
+
 ### Offline policy (Phases 70 and 74)
 
 - [ ] **OFFL-01**: The gate decides with no network at all; nothing in a decision waits on a network call.
 - [ ] **OFFL-02**: Policy comes from a local bundle signed by a person's device identity; a missing, unsigned, tampered or expired bundle fails closed to the floor plus read and plan, with a plain explanation of how to fix it; a fresh install creates and signs its first bundle, so nothing breaks.
-- [ ] **OFFL-03**: The bundle carries a version, expiry, issuer and reserved fields for chain anchoring and revocation lists, so the anchoring milestone adds freshness without a format change.
-- [ ] **OFFL-04**: Run admission (a contract and its chain of grants up to the person's signed policy) needs no network, and anything the local copy cannot cover fails closed.
+- [ ] **OFFL-03**: The bundle carries a version, expiry, issuer and reserved fields for anchor roots with inclusion proofs, status list references and a maximum offline age per level, so the anchoring and edge milestones (L4, L5) add freshness without a format change. *(Revised 2026-11-15; was: reserved fields for chain anchoring and revocation lists.)*
+- [ ] **OFFL-04**: Run admission (a contract and its chain of grants and credentials up to the person's signed policy, with status checked from cached status lists) needs no network, and anything the local copy cannot cover fails closed. *(Revised 2026-11-15 to name credentials and status lists.)*
 
 ### Delegation (Phase 71)
 
-- [ ] **DLGT-01**: Every agent in a run acts under its own identity (an Ed25519 key, the NEAR implicit account derived from it offline, and a DID document with an authority section and a reserved sandbox section); no agent uses another agent's key or a shared credential pool.
+- [ ] **DLGT-01**: Every agent, machine and device acts under its own `did:key` (Ed25519; Phase 69's device identity maps to it unchanged), and people and your organization's root use `did:webvh` (a hash-chained log with pre-rotation that verifies offline from a cached copy); DID documents stay minimal and conform to DID Core 1.0 (identifier, verification methods, controller, services) with no custom authority or sandbox members; `did:near` is not used; no agent uses another agent's key or a shared credential pool. *(Revised 2026-11-15, owner-confirmed; was: an Ed25519 key, the NEAR implicit account derived from it, and a DID document with an authority section and a reserved sandbox section.)*
 - [ ] **DLGT-02**: A child's capabilities are the intersection of the parent's grant, the member's declared tools and the task's request, enforced in the gate, never in the prompt, and a property test shows no delegation widens.
-- [ ] **DLGT-03**: Every grant is signed by its delegator, carries an expiry and a budget, and is recorded in the signed log; an expired, unsigned or tampered grant is refused.
+- [ ] **DLGT-03**: Every grant is a delegation credential (the VCRD-02 profile) signed by its delegator, carrying an expiry, a budget, a level cap, roles, compartments and a depth limit, and recorded in the signed log; an expired, unsigned or tampered grant is refused. *(Revised 2026-11-15; was: a signed grant with an expiry and a budget.)*
 - [ ] **DLGT-04**: Delegation depth (default: the lead plus members; members spawn only when marked as orchestrators) and fan-out (per turn and per tree) are capped as data in the grant.
 - [ ] **DLGT-05**: Leaves never receive authority-amplifying capabilities (spawning agents, scheduling, outbound messages, skill or memory writes, changes to tools, MCP servers or policy) unless their grant names them, and adding tools, servers or schedules is never available to member agents.
 - [ ] **DLGT-06**: A delegation may declare a result shape; a member's result is checked with one correction turn, and after a restart an unfinished result is reported as unknown.
-- [ ] **DLGT-07**: The Agent Activity view shows, for each agent, what it may do in plain words and its DID for anyone who wants to inspect it.
+- [ ] **DLGT-07**: The Agent Activity view shows, for each agent, what it may do in plain words, the level, roles and compartments it holds, and its DID for anyone who wants to inspect it.
+- [ ] **DLGT-08**: Delegation only narrows on level, roles, compartments, expiry and depth: at every link of the chain the verifier checks that the level cap is at most the delegator's, roles and compartments are subsets of the delegator's, the expiry is no later than the delegator's earliest relevant credential and the depth limit holds, and that no credential anywhere in the chain is revoked or suspended; one failing link refuses the whole chain, and a property test shows no chain widens.
+
+### Verifiable credentials (Phase 71)
+
+- [ ] **VCRD-01**: Authority, clearance (classification level), access roles and compartments are attributed per identity only as W3C Verifiable Credentials 2.0, never inside a DID document and never on chain: membership, clearance (threshold), compartment, role, device binding and delegation credentials, each with an issuer, a subject DID, an expiry and a status entry.
+- [ ] **VCRD-02**: Credentials follow one narrow profile: a fixed `@context` list (the VC 2.0 context plus one of our own; any other is refused and no JSON-LD processing runs), `DataIntegrityProof` with the `eddsa-jcs-2022` cryptosuite only, Ed25519 keys as Multikey, integers only. It is built on `node:crypto` Ed25519 and the existing canonical JSON with zero new runtime dependencies, signs through Phase 69's signer interface and honours its key status (a revoked key is refused for everything).
+- [ ] **VCRD-03**: The W3C `eddsa-jcs-2022` test vectors are frozen tests, and Digital Bazaar's `@digitalbazaar/eddsa-jcs-2022-cryptosuite` and `@digitalbazaar/vc`, added as devDependencies only, verify our credentials and we verify theirs; the extension bundle gains no runtime dependency.
+- [ ] **VCRD-04**: Revocation (permanent) and suspension (reversible) use Bitstring Status List: each credential has a randomly assigned index in a list of at least 131,072 entries, compressed with `node:zlib` and carrying `validUntil`; a verifier checks status from a cached list and fails closed when a needed list is missing or past `validUntil`; lowering a clearance revokes every higher threshold credential.
+- [ ] **VCRD-05**: Selective disclosure uses atomic and threshold credentials (one fact each, for example "clearance at least Secret" on a named scale), and a holder presents only the credentials a check asks for; SD-JWT VC and BBS are later options, not built here.
+- [ ] **VCRD-06**: Each device and agent `did:key` is bound to its person (or to your organization) by a device binding or delegation credential with a device class and a short expiry; a lost device is cut off by revoking its binding, with no change to anyone's DID.
+- [ ] **VCRD-07**: The gate builds each actor's clearance, roles and compartments only from verified, unexpired, unrevoked credentials and the delegation chain, and a missing or unverifiable credential gives nothing (fail closed). A person with no organization issues their own credentials from their device DID, so a fresh install works with no HQ; in your organization the issuer is your organization's DID.
 
 ### Execution backends (Phases 72 and 77)
 
@@ -106,7 +130,7 @@
 - [ ] **IDNT-02**: Each request is attributed to the person who sent it, by a channel identity recorded on first sight and, once that person has paired, by their identity in the new identity model; the binding survives a restart.
 - [ ] **IDNT-03**: A result and its working thread can only ever reach the tenant, conversation and requester that produced them; a test proves an answer generated for one tenant cannot be delivered to another.
 - [ ] **IDNT-04**: Each tenant has an isolated workspace directory and uses only its own API key, so a run can neither read another tenant's files nor bill another tenant's key.
-- [ ] **IDNT-05**: Each tenant has an identity whose authority section bounds every run for that tenant, so no run for the tenant can exceed it.
+- [ ] **IDNT-05**: Each tenant has an identity whose authority, held as signed credentials and never inside its DID document, bounds every run for that tenant, so no run for the tenant can exceed it. *(Revised 2026-11-15; was: an authority section.)*
 
 ### Channel pairing (Phase 76)
 
@@ -217,13 +241,28 @@
 | OFFL-02 | Phase 70: Capability vocabulary, manifests and one gate | Pending |
 | OFFL-03 | Phase 70: Capability vocabulary, manifests and one gate | Pending |
 | OFFL-04 | Phase 74: Run contracts | Pending |
-| DLGT-01 | Phase 71: Delegation that only narrows | Pending |
-| DLGT-02 | Phase 71: Delegation that only narrows | Pending |
-| DLGT-03 | Phase 71: Delegation that only narrows | Pending |
-| DLGT-04 | Phase 71: Delegation that only narrows | Pending |
-| DLGT-05 | Phase 71: Delegation that only narrows | Pending |
-| DLGT-06 | Phase 71: Delegation that only narrows | Pending |
-| DLGT-07 | Phase 71: Delegation that only narrows | Pending |
+| CLAS-01 | Phase 70: Capability vocabulary, manifests and one gate | Pending |
+| CLAS-02 | Phase 70: Capability vocabulary, manifests and one gate | Pending |
+| CLAS-03 | Phase 70: Capability vocabulary, manifests and one gate | Pending |
+| CLAS-04 | Phase 70: Capability vocabulary, manifests and one gate | Pending |
+| CLAS-05 | Phase 70: Capability vocabulary, manifests and one gate | Pending |
+| CLAS-06 | Phase 70: Capability vocabulary, manifests and one gate | Pending |
+| CLAS-07 | Phase 70: Capability vocabulary, manifests and one gate | Pending |
+| DLGT-01 | Phase 71: Identities, credentials and delegation that only narrows | Pending |
+| DLGT-02 | Phase 71: Identities, credentials and delegation that only narrows | Pending |
+| DLGT-03 | Phase 71: Identities, credentials and delegation that only narrows | Pending |
+| DLGT-04 | Phase 71: Identities, credentials and delegation that only narrows | Pending |
+| DLGT-05 | Phase 71: Identities, credentials and delegation that only narrows | Pending |
+| DLGT-06 | Phase 71: Identities, credentials and delegation that only narrows | Pending |
+| DLGT-07 | Phase 71: Identities, credentials and delegation that only narrows | Pending |
+| DLGT-08 | Phase 71: Identities, credentials and delegation that only narrows | Pending |
+| VCRD-01 | Phase 71: Identities, credentials and delegation that only narrows | Pending |
+| VCRD-02 | Phase 71: Identities, credentials and delegation that only narrows | Pending |
+| VCRD-03 | Phase 71: Identities, credentials and delegation that only narrows | Pending |
+| VCRD-04 | Phase 71: Identities, credentials and delegation that only narrows | Pending |
+| VCRD-05 | Phase 71: Identities, credentials and delegation that only narrows | Pending |
+| VCRD-06 | Phase 71: Identities, credentials and delegation that only narrows | Pending |
+| VCRD-07 | Phase 71: Identities, credentials and delegation that only narrows | Pending |
 | EXEC-01 | Phase 72: Execution backends on a copy, with a guarded apply | Pending |
 | EXEC-02 | Phase 72: Execution backends on a copy, with a guarded apply | Pending |
 | EXEC-03 | Phase 72: Execution backends on a copy, with a guarded apply | Pending |
@@ -316,7 +355,7 @@
 | OPS-06 | Phase 84: Ops, onboarding and release | Pending |
 | OPS-07 | Phase 84: Ops, onboarding and release | Pending |
 
-Coverage: 117 of 117 active v0.7.0 requirements mapped, each to exactly one phase (Phase 68: 4 complete; Phases 69-84: 113 pending). RUNL-05 is retired. Re-mapped on 2026-11-15 from the old numbering: AUTH from 69 to 75, IDNT from 70 to 76, RUNL-01/03 and TEAM from 71 to 77, SETUP from 71.1 to 78, BUDG from 72 to 79, RUNL-02/04/06/07 and CMND from 73 to 80, GRP from 74 to 81, SGNL from 75 to 82, TGRM from 75.1 to 83, OPS from 76 to 84.
+Coverage: 132 of 132 active v0.7.0 requirements mapped, each to exactly one phase (Phase 68: 4 complete; Phases 69-84: 128 pending). RUNL-05 is retired. Amended 2026-11-15 with the identity design: CLAS-01 … CLAS-07 added to Phase 70, DLGT-08 and VCRD-01 … VCRD-07 added to Phase 71 (117 to 132); nothing was re-mapped. Re-mapped on 2026-11-15 from the old numbering: AUTH from 69 to 75, IDNT from 70 to 76, RUNL-01/03 and TEAM from 71 to 77, SETUP from 71.1 to 78, BUDG from 72 to 79, RUNL-02/04/06/07 and CMND from 73 to 80, GRP from 74 to 81, SGNL from 75 to 82, TGRM from 75.1 to 83, OPS from 76 to 84.
 
 ## Phase 25 requirements: Cybersecurity harness (milestone v0.8.0)
 
@@ -455,23 +494,31 @@ Drafted 2026-11-15 with the outlines in ROADMAP.md, "Later milestones". Ids are 
 
 ### L4 Verifiable identity and policy on NEAR
 
-- **ANCH-01**: Agent, person and node identities anchor on NEAR with policy hash, parent DID, parent signature and expiry.
-- **ANCH-02**: Run admission checks the chain once per run and issues a short-lived signed lease, never per action; offline, the signed local copy decides and anything wider fails closed.
-- **ANCH-03**: Revocation on chain is the source of truth, cached with expiry and checked at run start and lease renewal.
-- **ANCH-04**: A DID's sandbox section references an OpenShell policy by hash, the prover's result is recorded, and our own subset check covers what the prover cannot model (MCP tools, spend, schedules, depth, expiry).
-- **ANCH-05**: The root of the hash-chained audit log is anchored from time to time and queued while offline.
+Revised 2026-11-15 for roots-only anchoring (PROJECT.md, Platform direction decision 13, owner-confirmed): nothing readable goes on chain.
+
+- **ANCH-01**: Nothing readable goes on chain. One anchor account per organization writes only 32-byte Merkle roots over DID log heads, status lists and policy bundle hashes, at fixed intervals even when nothing changed (so timing does not show who was added or revoked); no DID document, credential, clearance, role, relationship or ciphertext of any of them is written; a verifier given a leaf and its inclusion path checks it against a root. *(Revised; was: identities anchor on NEAR with policy hash, parent DID, parent signature and expiry.)*
+- **ANCH-02**: Run admission checks the latest anchored roots once per run and issues a short-lived signed lease, never per action; the local gate decides every action; offline, the signed local copy decides and anything wider fails closed.
+- **ANCH-03**: Revocation's source of truth is your organization's status lists, published by HQ and committed in the anchored roots; they are cached with `validUntil` and checked at run start and lease renewal. *(Revised; was: revocation on chain.)*
+- **ANCH-04**: A grant credential (not the DID document) references the run's generated OpenShell policy by hash, the prover's result is recorded, and our own subset check covers what the prover cannot model (MCP tools, spend, schedules, depth, expiry). *(Revised; was: a DID's sandbox section.)*
+- **ANCH-05**: The root of the hash-chained audit log is included in the anchored roots from time to time and queued while offline.
 - **ANCH-06**: The activity dashboard shows each agent's DID and delegation chain in plain words.
+- **ANCH-07**: The anchor sits behind one interface (`anchor(root, kind, epoch)`, `latest(kind)`) with public NEAR mainnet as the first backend, so it moves to a NEAR confidential backend without changing what is anchored once NEAR accepts third-party contracts and data on its private shard; the policy bundle names the backend.
+- **ANCH-08**: HQ is the credential issuer, the `did:webvh` host and witness, the status list publisher and the only anchor writer; your organization's root key stays offline with `did:webvh` pre-rotation, a separate online key issues day-to-day credentials, and a compromised online key is replaced by rotation from the root and re-issued credentials.
 
 ### L5 Edge grouping, compute pooling and HQ federation
 
-- **NODE-01**: Each machine has a signed node identity, enrolled by a person with authority and revocable.
-- **NODE-02**: Edge devices group on the local network with no internet, mutually authenticated by node identity, and each node's gate still decides alone.
+- **NODE-01**: Each machine has a node identity (`did:key`) bound to your organization by a credential issued by a person with authority, and revocable through the status list. *(Revised 2026-11-15; was: a signed node identity.)*
+- **NODE-02**: Edge devices group on the local network with no internet, mutually authenticated by node identity and binding credentials checked against cached DID logs and status lists, and each node's gate still decides alone.
 - **POOL-01**: Linked machines pool GPU and compute for local inference; a mixed NVIDIA and AMD group at least balances requests across per-vendor pools (one model split across vendors is not promised).
 - **POOL-02**: Routing extends to linked machines and the HQ cluster, each hop allowed only where policy, privacy tier and contract allow; an HQ cluster counts as private only when the policy says it belongs to your organization.
-- **FED-01**: On reconnection an edge group federates with HQ: identities, policy, audit and results sync, signed, so neither side can forge the other's records, and a relay in between can withhold but not forge.
+- **FED-01**: On reconnection an edge group federates with HQ: identities (DID logs, credentials, status lists), policy, audit and results sync, signed, so neither side can forge the other's records, and a relay in between can withhold but not forge.
 - **FED-02**: Policy flows down only as signed bundles that never widen an edge's anchored authority.
 - **FED-03**: Audit flows up hash-chained, and gaps are detected.
 - **FED-04**: An HQ inference cluster is one more provider under the same routing rules.
+- **FED-05**: Before going offline an edge device syncs your organization's DID log, the DID logs of the people it works with, all status lists, the policy bundle and the latest anchor roots with inclusion proofs; offline it verifies signatures, status bits and delegation chains locally and checks that the cached lists and bundle hash into the roots it saw.
+- **FED-06**: Each level has a maximum offline age in the policy bundle; past it the gate refuses new access at that level (fail closed), with age measured from the last sync by monotonic counters, not the wall clock alone; on reconnect the device re-syncs, re-evaluates sessions that ran on stale data and flags them for review.
+- **FED-07**: Two offline devices exchange stapled status lists and accept one only when your organization signed it and it is newer than their own; devices with no HQ link authenticate each other by `did:key` (or `did:peer`) and binding credentials.
+- **FED-08**: A second site may hold its own issuer DID under a narrower delegation from your organization (for example, clearances up to Protected B for one compartment), checked like any other delegation (DLGT-08).
 
 ### L6 Theia desktop app and learned skills
 
