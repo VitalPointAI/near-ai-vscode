@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { mkdtemp, readdir, readFile } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -8,6 +10,9 @@ import * as path from 'node:path';
 import * as vscode from 'vscode';
 import type { NearAiTestApi } from '../../extension';
 import type { LayoutReport } from '../../services/layoutProbe';
+import type { VerifyReport } from '../../team/eventLog';
+import { makeCanaries, scanFiles, scanFilesForDigests, scanGitObjects, scanGitObjectsForDigests } from '../helpers/teamCanary';
+import type { LabelledDigest } from '../helpers/teamCanary';
 
 // Runs inside the extension host. Messages are observed on both sides of the real sidebar webview,
 // so every request below goes host → webview script → host, as a user's click would.
@@ -301,7 +306,8 @@ function projectTests(): Array<[string, () => Promise<void>]> {
       await observer.next('toView', (message) => message.type === 'run-reverted', before);
       assert.equal(existsSync(path.join(workspace, 'notes.txt')), false);
       server?.close();
-    }]
+    }],
+    ...teamProjectTests(() => api)
   ];
 }
 
@@ -316,6 +322,14 @@ function plainTests(): Array<[string, () => Promise<void>]> {
       await new Promise((resolve) => setTimeout(resolve, 4000));
       assert.equal(vscode.extensions.getExtension(EXTENSION_ID)!.isActive, true, 'the view activates the extension');
       assert.deepEqual(await readdir(workspace), []);
+    }],
+    ['a folder without team.json starts no team session and creates no identity (D-14, D-30)', async () => {
+      const api = vscode.extensions.getExtension<NearAiTestApi>(EXTENSION_ID)!.exports;
+      assert.ok(api, 'the extension is active, so the test API is there');
+      assert.equal(await api.team.ready, 'solo');
+      assert.equal(api.team.session(), undefined, 'no team session');
+      assert.equal(await api.team.deviceKeyEvidence(), undefined, 'no device key is stored');
+      assert.deepEqual(await readdir(workspace), [], 'the folder is still empty');
     }],
     ['the Cybersecurity command opens its panel in a folder with no NEAR AI setup', async () => {
       // This is the whole reason nearAi.openCyber has its own activation event: everything else waits
@@ -334,6 +348,172 @@ function plainTests(): Array<[string, () => Promise<void>]> {
       await vscode.commands.executeCommand('nearAi.openCyber');
       await new Promise((resolve) => setTimeout(resolve, 1500));
       assert.equal(count(), 1, 'the panel is a singleton (D-01)');
+    }]
+  ];
+}
+
+// ---- Team Mode in a real window (D-30): Enable Team Mode from the Command Palette behind the preview, then Verify Team Log ----
+
+const PREVIEW_OFF_SIGNAL = 'Enable Team Mode ran from the Command Palette with nearAi.team.preview off';
+const A3_SIGNAL = 'Enable Team Mode did not start from the Command Palette with nearAi.team.preview on (A3)';
+const NO_TEAM_JSON_SIGNAL = 'Enable Team Mode did not write .planning/.near-ai/team.json within 60 s';
+const TEAM_FILE_PATH = path.join('.planning', '.near-ai', 'team.json');
+
+/**
+ * Runs a command the way a person does: opens the Command Palette on the label and accepts the selected item every 400 ms until `done()` holds
+ * or the time is up. Input boxes the command opens take the same accept, so they keep the value they were opened with. The first accept
+ * waits 400 ms so the list has filtered. No text is typed.
+ */
+async function runFromPalette(label: string, done: () => boolean, timeoutMs: number): Promise<void> {
+  await vscode.commands.executeCommand('workbench.action.closeQuickOpen');
+  await vscode.commands.executeCommand('workbench.action.quickOpen', `>${label}`);
+  const deadline = Date.now() + timeoutMs;
+  while (!done() && Date.now() < deadline) {
+    await pause(400);
+    if (done()) break;
+    await vscode.commands.executeCommand('workbench.action.acceptSelectedQuickOpenItem');
+  }
+  await vscode.commands.executeCommand('workbench.action.closeQuickOpen');
+}
+
+async function waitUntil(condition: () => boolean | Promise<boolean>, timeoutMs: number, stepMs = 250): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await condition()) return true;
+    await pause(stepMs);
+  }
+  return condition();
+}
+
+// The NEAR AI Team output channel is written to a log file under the window's user data; a failure in it explains a missing team.json.
+async function teamLogTail(): Promise<string> {
+  const userData = process.env.NEAR_AI_E2E_USER_DATA;
+  if (userData === undefined) return '';
+  const found: string[] = [];
+  const walk = async (folder: string, depth: number): Promise<void> => {
+    if (depth > 6) return;
+    for (const entry of await readdir(folder, { withFileTypes: true }).catch(() => [])) {
+      const child = path.join(folder, entry.name);
+      if (entry.isDirectory()) await walk(child, depth + 1);
+      else if (entry.name.includes('NEAR AI Team')) found.push(child);
+    }
+  };
+  await walk(path.join(userData, 'logs'), 0);
+  const texts = await Promise.all(found.map((file) => readFile(file, 'utf8').catch(() => '')));
+  return texts.join('\n').split('\n').slice(-12).join('\n');
+}
+
+function git(cwd: string, args: string[]): string {
+  return execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
+}
+
+function teamProjectTests(getApi: () => NearAiTestApi): Array<[string, () => Promise<void>]> {
+  let remote = '';
+  const teamFilePath = path.join(workspace, TEAM_FILE_PATH);
+  const preview = () => vscode.workspace.getConfiguration('nearAi').inspect<boolean>('team.preview')?.globalValue;
+  const userSettingsPath = path.join(process.env.NEAR_AI_E2E_USER_DATA!, 'User', 'settings.json');
+  const commitSubject = () => { try { return git(workspace, ['log', '-1', '--format=%s']); } catch { return ''; } };
+  return [
+    ['Enable Team Mode is in the Command Palette only with the preview on (D-13, D-24, A3)', async () => {
+      // A scratch repository with one commit and an origin that is a local bare repository: git runs only in these two temporary folders, under the
+      // isolated git config run.ts gave this window.
+      assert.equal(process.env.GIT_CONFIG_NOSYSTEM, '1', 'git reads no system config');
+      assert.equal(path.basename(process.env.GIT_CONFIG_GLOBAL ?? ''), 'e2e.gitconfig', 'git reads only the e2e config file');
+      remote = await mkdtemp(path.join(tmpdir(), 'near-ai-e2e-remote-'));
+      git(workspace, ['init', '-b', 'main']);
+      await writeFile(path.join(workspace, 'README.md'), 'A scratch project for the Team Mode e2e.\n');
+      git(workspace, ['add', 'README.md']);
+      git(workspace, ['commit', '-m', 'first commit']);
+      git(remote, ['init', '--bare']);
+      git(workspace, ['remote', 'add', 'origin', remote]);
+      assert.equal(git(workspace, ['log', '-1', '--format=%an']), 'E2E Owner');
+
+      // Control: a built-in command with a visible effect works through the palette, so a failure below is the product's and not the harness's.
+      const tabs = () => vscode.window.tabGroups.all.reduce((count, group) => count + group.tabs.length, 0);
+      const tabsBefore = tabs();
+      await runFromPalette('File: New Untitled Text File', () => tabs() > tabsBefore, 8_000);
+      assert.ok(tabs() > tabsBefore, 'the Command Palette did not run File: New Untitled Text File, so the harness cannot drive the palette in this VS Code build');
+      await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+
+      // Preview off (the default): Enable is not offered, so accepting for 5 s starts nothing.
+      assert.equal(vscode.workspace.getConfiguration('nearAi').get('team.preview'), false);
+      await runFromPalette('NEAR AI: Enable Team Mode', () => existsSync(teamFilePath), 5_000);
+      await pause(1_000);
+      assert.equal(existsSync(teamFilePath), false, PREVIEW_OFF_SIGNAL);
+      await vscode.commands.executeCommand('notifications.clearAll');
+
+      // Preview on, at the user (Global) target, as a person would set it.
+      await vscode.workspace.getConfiguration('nearAi').update('team.preview', true, vscode.ConfigurationTarget.Global);
+      assert.ok(await waitUntil(() => preview() === true, 10_000), 'nearAi.team.preview is true at the user target');
+      await pause(1_000);
+    }],
+    ['Enable Team Mode answers its prompts with their defaults and commits only team.json (D-30)', async () => {
+      const extension = vscode.extensions.getExtension(EXTENSION_ID)!;
+      const { ENABLE_COMMIT_MESSAGE } = require(path.join(extension.extensionPath, 'dist/team/enable')) as typeof import('../../team/enable');
+      const { DEFAULT_COORDINATION_REF } = require(path.join(extension.extensionPath, 'dist/team/gitTransport')) as typeof import('../../team/gitTransport');
+      const enabled = () => existsSync(teamFilePath) && commitSubject() === ENABLE_COMMIT_MESSAGE && getApi().team.session() !== undefined;
+      await runFromPalette('NEAR AI: Enable Team Mode', enabled, 60_000);
+      if (!enabled()) {
+        // The commit and the session follow team.json by a moment, so wait for them before judging.
+        await waitUntil(enabled, 10_000);
+      }
+      const tail = await teamLogTail();
+      assert.ok(existsSync(teamFilePath), `${existsSync(path.join(workspace, '.git')) ? NO_TEAM_JSON_SIGNAL : 'the scratch repository is missing'}. If no prompt ever opened this is also ${A3_SIGNAL}. NEAR AI Team log:\n${tail}`);
+      assert.equal(commitSubject(), ENABLE_COMMIT_MESSAGE, `the Enable commit was not made. NEAR AI Team log:\n${tail}`);
+      assert.deepEqual(git(workspace, ['diff-tree', '--no-commit-id', '--name-only', '-r', 'HEAD']).split('\n'), [TEAM_FILE_PATH.split(path.sep).join('/')], 'HEAD holds only team.json');
+      const teamFile = JSON.parse(await readFile(teamFilePath, 'utf8')) as { coordination: { ref: string }; genesis: { ownerDevice: { fingerprint: string } } };
+      assert.equal(teamFile.coordination.ref, DEFAULT_COORDINATION_REF);
+      assert.notEqual(git(remote, ['for-each-ref', DEFAULT_COORDINATION_REF]), '', 'the coordination branch is on the bare remote');
+      assert.ok(getApi().team.session() !== undefined, 'a team session is running');
+      await vscode.commands.executeCommand('notifications.clearAll');
+    }],
+    ['Verify Team Log reports the owner and no rejected events (D-30, D-31)', async () => {
+      const report = await vscode.commands.executeCommand<VerifyReport | undefined>('nearAi.team.verifyLog');
+      assert.ok(report !== undefined, 'Verify Team Log returned no report');
+      assert.deepEqual(report.rejected, [], `rejected events: ${JSON.stringify(report.rejected)}`);
+      assert.equal(report.refused, undefined);
+      assert.equal(report.unsupported, 0);
+      assert.ok(report.events >= 1 && report.events === report.accepted, `events ${report.events}, accepted ${report.accepted}`);
+      assert.equal(report.members.length, 1);
+      assert.equal(report.members[0]?.role, 'owner');
+      assert.equal(report.members[0]?.devices.filter((device) => !device.revoked).length, 1);
+      assert.equal(report.status.state, 'ok');
+      await vscode.commands.executeCommand('notifications.clearAll');
+    }],
+    ['no rendering of the new device key or the owner email reaches settings, team.json or the remote (TMR-03)', async () => {
+      const evidence = await getApi().team.deviceKeyEvidence();
+      assert.ok(evidence !== undefined, 'Enable stored a device key');
+      const teamFile = JSON.parse(await readFile(teamFilePath, 'utf8')) as { genesis: { ownerDevice: { fingerprint: string; publicKey: string } } };
+      assert.equal(evidence.fingerprint, teamFile.genesis.ownerDevice.fingerprint);
+      assert.equal(evidence.publicKey.base64url, teamFile.genesis.ownerDevice.publicKey);
+      assert.equal(Buffer.from(evidence.publicKey.base64url, 'base64url').toString('hex'), evidence.publicKey.hex);
+      assert.equal(Buffer.from(evidence.publicKey.base64url, 'base64url').toString('base64'), evidence.publicKey.base64);
+      assert.equal(JSON.stringify(evidence).includes(evidence.privateKeySha256), true, 'the digest of the stored text is in the evidence');
+
+      const digests: LabelledDigest[] = [
+        ...evidence.privateFormDigests.map((digest, index) => ({ ...digest, label: `device key form ${index}` }))
+      ];
+      const workspaceSettings = path.join(workspace, '.vscode', 'settings.json');
+      const files = [userSettingsPath, teamFilePath, ...(existsSync(workspaceSettings) ? [workspaceSettings] : [])];
+      const email = [{ label: 'owner email', value: 'e2e-owner@example.com' }];
+
+      // Controls: the same scanners do find a planted look-alike (a made-up value, not the key) in a file and in an object of the remote, so the
+      // empty results below mean something. The planted value is hashed here; the real key never enters this window.
+      const fake = makeCanaries().apiKey.padEnd(64, 'A').slice(0, 64);
+      const fakeDigest: LabelledDigest = { label: 'planted', length: fake.length, sha256: createHash('sha256').update(fake).digest('hex') };
+      const controlFile = path.join(path.dirname(userSettingsPath), 'canary-control.txt');
+      await writeFile(controlFile, `{"x":"${fake}"}\n`);
+      assert.deepEqual((await scanFilesForDigests([controlFile], [fakeDigest])).map((hit) => hit.split(': ')[1]), ['planted'], 'the file scanner finds a planted value');
+      execFileSync('git', ['--git-dir', remote, 'hash-object', '-w', '--stdin'], { input: `note ${fake}\n` });
+      assert.deepEqual(await scanGitObjectsForDigests(remote, [fakeDigest]), ['planted'], 'the object scanner finds a planted value');
+      const gitConfigPath = process.env.GIT_CONFIG_GLOBAL as string;
+      assert.equal((await scanFiles([gitConfigPath], email)).length, 1, 'the email scanner sees the address where it is by construction');
+
+      assert.deepEqual(await scanFilesForDigests(files, digests), [], 'user settings, workspace settings and team.json');
+      assert.deepEqual(await scanGitObjectsForDigests(remote, digests), [], 'bare remote objects');
+      assert.deepEqual(await scanFiles(files, email), [], 'the plain owner email is not in settings or team.json');
+      assert.deepEqual(await scanGitObjects(remote, email), [], 'the plain owner email is not on the remote');
+      await vscode.commands.executeCommand('notifications.clearAll');
     }]
   ];
 }

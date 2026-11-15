@@ -2,9 +2,11 @@
 // Activation in a project without .planning/.near-ai/team.json does one fs.stat and nothing else: no timers, no output channel, no status bar
 // item, no storage. So this module imports only vscode, Node built-ins and types; every team module is loaded with a dynamic import after
 // team.json is found or inside a command. Failures go to the NEAR AI Team output channel or to the user, never to an empty catch.
+import { createHash } from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
+import type { VerifyReport } from '../../team/eventLog';
 import type { TeamSession } from './teamSession';
 
 export const ENABLE_COMMAND = 'nearAi.team.enable';
@@ -131,18 +133,19 @@ export function registerTeamMode(context: vscode.ExtensionContext): TeamModeHand
     return startSession(projectRoot);
   }
 
-  async function verifyLog(): Promise<void> {
+  // Resolves to the report it printed, or undefined in a solo project or when the check could not finish (D-30: the extension-host test reads it).
+  async function verifyLog(): Promise<VerifyReport | undefined> {
     const projectRoot = firstFolder();
     if (projectRoot === undefined || !(await teamFileExists(projectRoot))) {
       announce('info', SOLO_TEXT);
-      return;
+      return undefined;
     }
     if (session === undefined) {
       const state = await startSession(projectRoot);
       if (state === 'solo') announce('info', SOLO_TEXT);
-      if (session === undefined) return;
+      if (session === undefined) return undefined;
     }
-    await session.verifyLog();
+    return session.verifyLog();
   }
 
   async function ask(options: vscode.InputBoxOptions): Promise<string | undefined> {
@@ -224,12 +227,13 @@ export function registerTeamMode(context: vscode.ExtensionContext): TeamModeHand
   }
 
   // A command never leaves a rejected promise behind: the failure is written to the channel and shown.
-  function guarded(title: string, handler: () => Promise<void>): () => Promise<void> {
-    return async (): Promise<void> => {
+  function guarded<T>(title: string, handler: () => Promise<T>): () => Promise<T | undefined> {
+    return async (): Promise<T | undefined> => {
       try {
-        await handler();
+        return await handler();
       } catch (error) {
         report('error', `${title} did not finish: ${await describe(error)}`);
+        return undefined;
       }
     };
   }
@@ -245,4 +249,57 @@ export function registerTeamMode(context: vscode.ExtensionContext): TeamModeHand
     return 'error';
   });
   return { ready, session: () => session };
+}
+
+// ---- Test-only seam (D-30) ----
+// Built only by src/extension.ts, inside the NEAR_AI_E2E === '1' return of activate, like the rest of NearAiTestApi. The extension-host test reads
+// the team session and checks that no rendering of the device key reached a file. The private key never crosses this seam: the test receives the
+// fingerprint, the public key and SHA-256 digests of the private renderings, and the key, its DER bytes and its seed are never returned, logged,
+// written or put in an error message.
+
+export interface DeviceKeyEvidence {
+  readonly fingerprint: string;
+  readonly publicKey: { readonly base64: string; readonly base64url: string; readonly hex: string };
+  readonly privateKeySha256: string;
+  readonly privateFormDigests: ReadonlyArray<{ readonly length: number; readonly sha256: string }>;
+}
+
+export interface TeamModeTestApi {
+  readonly ready: Promise<TeamModeState>;
+  session(): TeamSession | undefined;
+  deviceKeyEvidence(): Promise<DeviceKeyEvidence | undefined>;
+}
+
+function sha256Hex(text: string): string {
+  return createHash('sha256').update(text, 'utf8').digest('hex');
+}
+
+// The stored key is base64 PKCS#8 for Ed25519: a fixed header and the 32 byte seed. Each text a leak could take: as stored, as base64url, the seed
+// as hex and the seed as base64url. Repeats are dropped (base64 and base64url are the same text when the key has no + or /).
+function privateRenderingDigests(stored: string): Array<{ length: number; sha256: string }> {
+  const der = Buffer.from(stored, 'base64');
+  const seed = der.subarray(der.length - 32);
+  const forms = [...new Set([stored, der.toString('base64url'), seed.toString('hex'), seed.toString('base64url')])];
+  return forms.map((form) => ({ length: form.length, sha256: sha256Hex(form) }));
+}
+
+export function teamModeTestApi(context: vscode.ExtensionContext, handle: TeamModeHandle): TeamModeTestApi {
+  return {
+    ready: handle.ready,
+    session: handle.session,
+    async deviceKeyEvidence(): Promise<DeviceKeyEvidence | undefined> {
+      const { DEVICE_KEY_SECRET, loadDeviceIdentity } = await import('../../team/identity');
+      const stored = await context.secrets.get(DEVICE_KEY_SECRET);
+      if (stored === undefined || stored === '') return undefined;
+      const identity = await loadDeviceIdentity(context.secrets);
+      if (identity === undefined) return undefined;
+      const raw = Buffer.from(identity.publicKey, 'base64url');
+      return {
+        fingerprint: identity.fingerprint,
+        publicKey: { base64: raw.toString('base64'), base64url: raw.toString('base64url'), hex: raw.toString('hex') },
+        privateKeySha256: sha256Hex(stored),
+        privateFormDigests: privateRenderingDigests(stored)
+      };
+    }
+  };
 }

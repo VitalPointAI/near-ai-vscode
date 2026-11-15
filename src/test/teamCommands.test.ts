@@ -2,14 +2,18 @@
 // the team.json-only commit, Push only when clicked, quiet cancellation, the existing-team and failure messages, and a SEC-01 canary scan
 // of every place the command layer can show or store text. Team modules load lazily, as in the product.
 import assert from 'node:assert/strict';
-import { existsSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import test from 'node:test';
 import { API_KEY_SECRET, REFRESH_TOKEN_SECRET } from '../services/auth';
 import { DEVICE_KEY_SECRET } from '../team/identity';
 import { TEAM_FILE_REL, readTeamFile, teamStorageDir } from '../team/teamFile';
-import { deviceKeyForms, makeCanaries, scanFiles, scanGitObjects } from './helpers/teamCanary';
-import type { Needle } from './helpers/teamCanary';
+import { deviceKeyFormDigests, deviceKeyForms, makeCanaries, scanFiles, scanFilesForDigests, scanGitObjects, scanGitObjectsForDigests } from './helpers/teamCanary';
+import type { LabelledDigest, Needle } from './helpers/teamCanary';
 import { MemorySecrets, createTeamFixture, gitIn } from './helpers/teamHarness';
 import type { TeamFixture } from './helpers/teamHarness';
 import { createFakeContext, createVscodeStub, installVscodeStub } from './helpers/vscodeStub';
@@ -19,7 +23,7 @@ const stub = createVscodeStub();
 const uninstall = installVscodeStub(stub);
 const commandsModule = require('../services/team/teamCommands') as typeof import('../services/team/teamCommands');
 test.after(() => { uninstall(); });
-const { ENABLE_COMMAND, PUSH_ACTION, VERIFY_ACTION, VERIFY_LOG_COMMAND, registerTeamMode } = commandsModule;
+const { ENABLE_COMMAND, PUSH_ACTION, VERIFY_ACTION, VERIFY_LOG_COMMAND, registerTeamMode, teamModeTestApi } = commandsModule;
 
 const EM_DASH = '—';
 const COORDINATION_BRANCH = 'refs/heads/near-ai/coordination';
@@ -316,4 +320,91 @@ test('no message, channel line, status text or tooltip contains an em-dash', asy
     assert.equal(uiText().includes(EM_DASH), false);
     assert.ok(stub.notifications.length >= 3, 'the check covered several messages');
   });
+});
+
+// ---- The e2e stand-in seam (D-30, D-31) ----
+
+test('Verify Team Log resolves to the report it printed: one owner and no rejected events; in a solo project it resolves to nothing', async () => {
+  await withProject(async (p) => {
+    const solo = await (stub.commands.get(VERIFY_LOG_COMMAND) as () => Promise<unknown>)();
+    assert.equal(solo, undefined, 'a solo project has no report');
+    await p.enable(['Report team', 'Lead Owner', 'lead@example.invalid']);
+    const report = await (stub.commands.get(VERIFY_LOG_COMMAND) as () => Promise<import('../team/eventLog').VerifyReport | undefined>)();
+    assert.ok(report !== undefined, 'the handler resolves to its report');
+    assert.equal(report.members.length, 1);
+    assert.equal(report.members[0]?.role, 'owner');
+    assert.deepEqual(report.rejected, []);
+    assert.equal(report.refused, undefined);
+    assert.equal(report.unsupported, 0);
+    assert.ok(report.events >= 1 && report.events === report.accepted);
+  });
+});
+
+test('the extension builds the team test API only inside the NEAR_AI_E2E return, and registers Team Mode once', () => {
+  const source = readFileSync(path.join(__dirname, '..', '..', 'src', 'extension.ts'), 'utf8');
+  const lines = source.split('\n');
+  const builders = lines.filter((line) => line.includes('teamModeTestApi('));
+  assert.equal(builders.length, 1);
+  assert.match(builders[0] as string, /process\.env\.NEAR_AI_E2E === '1'/);
+  assert.equal(source.split('registerTeamMode(context)').length - 1, 1);
+  // The seam that would hand the private key to the test window must not exist (the name is split so this file does not hold it either).
+  assert.equal(lines.some((line) => line.includes(`${'stored'}DeviceKey`)), false);
+});
+
+test('the test seam returns the fingerprint, the public key and digests only; its result holds no rendering of the private key', async () => {
+  await withProject(async (p) => {
+    const api = teamModeTestApi(p.context as never, p.handle);
+    assert.equal(await api.deviceKeyEvidence(), undefined, 'no identity yet, so nothing to report');
+    assert.equal(await api.ready, 'solo');
+    await p.enable(['Seam team', 'Lead Owner', 'lead@example.invalid']);
+    const teamFile = await readTeamFile(p.root);
+    assert.ok(teamFile !== undefined);
+    const stored = p.secrets.values.get(DEVICE_KEY_SECRET) as string;
+    const evidence = await api.deviceKeyEvidence();
+    assert.ok(evidence !== undefined);
+    assert.equal(evidence.fingerprint, teamFile.genesis.ownerDevice.fingerprint);
+    const raw = Buffer.from(teamFile.genesis.ownerDevice.publicKey, 'base64url');
+    assert.deepEqual(evidence.publicKey, { base64: raw.toString('base64'), base64url: raw.toString('base64url'), hex: raw.toString('hex') });
+    assert.deepEqual(evidence.privateFormDigests, deviceKeyFormDigests(stored), 'the digests match the helper for the same stored secret');
+    assert.equal(evidence.privateKeySha256, createHash('sha256').update(stored, 'utf8').digest('hex'));
+    assert.deepEqual(Object.keys(evidence).sort(), ['fingerprint', 'privateFormDigests', 'privateKeySha256', 'publicKey']);
+    const serialised = JSON.stringify(evidence);
+    for (const form of deviceKeyForms(stored)) assert.equal(serialised.includes(form), false, 'no private rendering is in the result');
+    assert.equal(api.session()?.teamFile.teamId, teamFile.teamId);
+  });
+});
+
+test('the digest scanners find each private rendering inside surrounding text in a file and in a git object, and not the public key renderings', async () => {
+  const secrets = new MemorySecrets();
+  const { createDeviceIdentity } = await import('../team/identity');
+  const identity = await createDeviceIdentity(secrets);
+  const stored = secrets.values.get(DEVICE_KEY_SECRET) as string;
+  const forms = deviceKeyForms(stored);
+  const digests: LabelledDigest[] = deviceKeyFormDigests(stored).map((digest, index) => ({ ...digest, label: `private form ${index}` }));
+  assert.equal(digests.length, forms.length);
+  const dir = await mkdtemp(path.join(tmpdir(), 'near-ai-digest-scan-'));
+  try {
+    const planted = path.join(dir, 'planted.txt');
+    const publicOnly = path.join(dir, 'public.txt');
+    const raw = Buffer.from(identity.publicKey, 'base64url');
+    writeFileSync(publicOnly, `fingerprint ${identity.fingerprint}\n"key":"${raw.toString('base64')}" ${raw.toString('base64url')} ${raw.toString('hex')}\n`);
+    assert.deepEqual(await scanFilesForDigests([publicOnly], digests), [], 'only public renderings');
+    for (const [index, form] of forms.entries()) {
+      writeFileSync(planted, `before: "${form}", after\n${form}ZZ`);
+      assert.deepEqual(await scanFilesForDigests([planted], digests), [`planted.txt/planted.txt: private form ${index}`], `form ${index} is found`);
+    }
+    writeFileSync(planted, forms.map((form) => `x ${form} y`).join('\n'));
+    assert.equal((await scanFilesForDigests([planted], digests)).length, forms.length, 'all renderings in one file');
+
+    // A git object: found through the uncompressed content, which hashing the raw loose object would never match.
+    const repo = path.join(dir, 'repo.git');
+    execFileSync('git', ['init', '--bare', '-q', repo]);
+    assert.deepEqual(await scanGitObjectsForDigests(repo, digests), []);
+    for (const [index, form] of forms.entries()) {
+      execFileSync('git', ['--git-dir', repo, 'hash-object', '-w', '--stdin'], { input: `{"note":"${form}"}\n` });
+      assert.ok((await scanGitObjectsForDigests(repo, digests)).includes(`private form ${index}`), `form ${index} is found in an object`);
+    }
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });
