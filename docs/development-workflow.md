@@ -333,11 +333,20 @@ earlier do). All three paths are needed:
   package.
 
 Do not copy `relay/` or `.dockerignore` into the hotfix branch. A tag older than the messaging
-relay has no `relay/` folder, and the copied `ci.yml` handles that: on a `hotfix/x.y.z` branch,
-the `relay` job's first step finds no `relay/package.json`, skips every other relay step and
-passes, with the note "relay checks skipped" in the job log. The required `relay` check therefore
-reports success and the hotfix gates are satisfied without a human step. On any other branch a
-missing `relay/package.json` fails the `relay` job, so a change that deletes it cannot pass.
+relay has no `relay/` folder, and the copied `ci.yml` handles that: the `relay` job's first step
+skips every other relay step and passes, with the note "relay checks skipped" in the job log, only
+when all three hold:
+
+- the branch is `hotfix/x.y.z`;
+- `relay/package.json` is not on the commit being tested;
+- it is not on the commit the change starts from either: the PR's base commit, or for the CI run
+  you start by hand on the hotfix head, the commit where the branch left `main` (the old tag).
+
+The run you start by hand on the hotfix head therefore reports success and the hotfix gates are
+satisfied without a human step. (The PR's own run tests the hotfix merged with `main`, which has the
+relay, so the relay checks run there.) A change that deletes `relay/package.json` fails the `relay`
+job on every branch, `hotfix/x.y.z` included, because its base commit still has it, and a push to
+`main` never skips.
 
 Check the staged diff before committing: it should only add or update workflow and gate files.
 If `main` changed a script the old code still relies on (for example the vendoring or SBOM

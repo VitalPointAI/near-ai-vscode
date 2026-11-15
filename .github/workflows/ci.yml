@@ -158,24 +158,40 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # A hotfix branch cut from a release tag older than the relay has no relay/ folder. On a
-      # hotfix/x.y.z branch only, the job then passes without running anything else, so the required
-      # relay check does not block the hotfix. On any other branch a missing relay/package.json fails
-      # the job, so a change that deletes it cannot report green. Every later step is guarded by this
-      # output. The branch name comes in through env, never pasted into the script.
+          # The detection step below reads the base commit and main's history, not only this commit.
+          fetch-depth: 0
+      # A hotfix branch cut from a release tag older than the relay has no relay/ folder. The job then
+      # passes without running anything else, so the required relay check does not block the hotfix,
+      # but only when all of these hold: the branch is hotfix/x.y.z, relay/package.json is not on this
+      # commit, and it is not on the commit this change starts from either (the PR's base commit, or
+      # for a run started by hand the commit where the branch left main). So a change that deletes the
+      # relay fails the job on every branch, hotfix included, and a push to main never skips. Every
+      # later step is guarded by this output. The branch name and base commit come in through env,
+      # never pasted into the script.
       - name: Check that this commit has the relay
         id: has_relay
         working-directory: .
         env:
           BRANCH: ${{ github.head_ref || github.ref_name }}
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
         run: |
           if [ -f relay/package.json ]; then
             echo "present=true" >> "$GITHUB_OUTPUT"
-          elif [[ "$BRANCH" =~ ^hotfix/[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            exit 0
+          fi
+          base=""
+          if [ "$EVENT" = "pull_request" ]; then
+            base="$PR_BASE"
+          elif [ "$EVENT" = "workflow_dispatch" ]; then
+            base="$(git merge-base HEAD refs/remotes/origin/main 2>/dev/null || true)"
+          fi
+          if [[ "$BRANCH" =~ ^hotfix/[0-9]+\.[0-9]+\.[0-9]+$ ]] && [ -n "$base" ] \
+            && git cat-file -e "$base^{commit}" 2>/dev/null && ! git cat-file -e "$base:relay/package.json" 2>/dev/null; then
             echo "present=false" >> "$GITHUB_OUTPUT"
-            echo "::notice title=relay checks skipped::relay/package.json is not on this commit of $BRANCH (a hotfix from a release older than the relay), so the relay checks were skipped."
+            echo "::notice title=relay checks skipped::relay/package.json is neither on this commit of $BRANCH nor on its base commit (a hotfix from a release older than the relay), so the relay checks were skipped."
           else
-            echo "::error title=relay missing::relay/package.json is not on this commit. Only a hotfix/x.y.z branch from a release older than the relay may skip the relay checks."
+            echo "::error title=relay missing::relay/package.json is not on this commit. Only a hotfix/x.y.z branch from a release older than the relay, whose base commit has no relay either, may skip the relay checks."
             exit 1
           fi
       # The relay's refusal of an older Node is tested with a real Node 24 (relay/test/workspace.test.ts). Install it first and keep its

@@ -121,22 +121,27 @@ function jobSteps(job: string): string[] {
 
 const HAS_RELAY = "if: steps.has_relay.outputs.present == 'true'";
 
-test('the relay job skips its checks only on a hotfix/x.y.z commit that has no relay/, and fails on any other branch without it', async () => {
+test('the relay job skips its checks only on a hotfix/x.y.z commit whose base also has no relay/, and fails on any other change without it', async () => {
   const workflow = await readFile(path.join(REPO_ROOT, '.github', 'workflows', 'ci.yml'), 'utf8');
   const steps = jobSteps(ciJob(workflow, 'relay'));
   assert.ok(steps[0]?.includes('uses: actions/checkout@'), 'the relay job checks out the code first');
+  // The detection reads the PR's base commit and main's history, which a shallow checkout does not have.
+  assert.ok(steps[0]?.includes('fetch-depth: 0'), 'the relay job checks out the full history so the base commit can be read');
+  assert.ok(steps[0]?.includes('persist-credentials: false'), 'the relay checkout keeps no credentials');
   const detect = steps[1] ?? '';
   assert.ok(detect.includes('id: has_relay'), 'the second step of the relay job detects whether relay/ exists');
   // The job default is working-directory: relay, which does not exist on an old tag; the detection step must not depend on it.
   assert.ok(detect.includes('working-directory: .'), 'the detection step runs from the repository root');
   assert.ok(!detect.includes('if:'), 'the detection step always runs');
-  // The branch name reaches the script through env (never interpolated into it): the PR's source branch, or the pushed or dispatched ref.
+  // Every input reaches the script through env (never interpolated into it).
   assert.ok(detect.includes('BRANCH: ${{ github.head_ref || github.ref_name }}'), 'the detection step reads the branch name from env');
+  assert.ok(detect.includes('EVENT: ${{ github.event_name }}'), 'the detection step reads the event name from env');
+  assert.ok(detect.includes('PR_BASE: ${{ github.event.pull_request.base.sha }}'), "the detection step reads the PR's base commit from env");
   for (const step of steps.slice(2)) {
     assert.ok(step.includes(HAS_RELAY), `every relay step after the detection is skipped when relay/ is missing:\n${step}`);
   }
 
-  // Run the detection script itself, as the runner would, on a tree with and without relay/package.json.
+  // Run the detection script itself, as the runner would, in a real repository with and without relay/package.json.
   const scriptLines = detect.split('\n');
   const runAt = scriptLines.findIndex((line) => line.trim() === 'run: |');
   assert.ok(runAt >= 0, 'the detection step has a run block');
@@ -147,40 +152,85 @@ test('the relay job skips its checks only on a hotfix/x.y.z commit that has no r
     .join('\n');
   const scratch = await mkdtemp(path.join(tmpdir(), 'near-ai-relay-ci-detect-'));
   try {
-    const detectIn = async (tree: string, branch: string): Promise<{ ok: boolean; output: string; stdout: string }> => {
-      const outputFile = path.join(scratch, `${path.basename(tree)}.out`);
+    const repo = path.join(scratch, 'repo');
+    await mkdir(repo);
+    const git = (...args: string[]): string =>
+      execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', '-c', 'commit.gpgsign=false', ...args], { cwd: repo, encoding: 'utf8' }).trim();
+    git('init', '-q', '-b', 'main');
+    // oldTag: a release older than the relay. main: the relay is added. hotfix: a fix on top of the old tag.
+    // drop: a branch cut from main that deletes the relay.
+    await writeFile(path.join(repo, 'README.md'), 'old\n');
+    git('add', '-A');
+    git('commit', '-q', '-m', 'old release');
+    const oldTag = git('rev-parse', 'HEAD');
+    await mkdir(path.join(repo, 'relay'));
+    await writeFile(path.join(repo, 'relay', 'package.json'), '{}');
+    git('add', '-A');
+    git('commit', '-q', '-m', 'add the relay');
+    const main = git('rev-parse', 'HEAD');
+    git('update-ref', 'refs/remotes/origin/main', main);
+    git('rm', '-q', '-r', 'relay');
+    git('commit', '-q', '-m', 'drop the relay');
+    const drop = git('rev-parse', 'HEAD');
+    git('checkout', '-q', '--detach', oldTag);
+    await writeFile(path.join(repo, 'README.md'), 'fixed\n');
+    git('commit', '-q', '-am', 'hotfix');
+    const hotfix = git('rev-parse', 'HEAD');
+
+    let run = 0;
+    const detectAt = async (
+      commit: string,
+      env: { BRANCH: string; EVENT: string; PR_BASE?: string },
+    ): Promise<{ ok: boolean; output: string; stdout: string }> => {
+      git('checkout', '-q', '--detach', commit);
+      const outputFile = path.join(scratch, `run-${run++}.out`);
       await writeFile(outputFile, '');
-      const env = { PATH: process.env.PATH, GITHUB_OUTPUT: outputFile, BRANCH: branch };
+      const fullEnv = { PATH: process.env.PATH, GITHUB_OUTPUT: outputFile, PR_BASE: '', ...env };
       try {
-        const stdout = execFileSync('bash', ['-e', '-c', script], { cwd: tree, env, encoding: 'utf8' });
+        const stdout = execFileSync('bash', ['-e', '-c', script], { cwd: repo, env: fullEnv, encoding: 'utf8' });
         return { ok: true, output: await readFile(outputFile, 'utf8'), stdout };
       } catch (error) {
         return { ok: false, output: await readFile(outputFile, 'utf8'), stdout: String((error as { stdout?: unknown }).stdout ?? '') };
       }
     };
-    const oldTag = path.join(scratch, 'old-tag');
-    await mkdir(oldTag);
-    // A hotfix cut from a release older than the relay: the job passes and says why nothing ran.
-    const hotfix = await detectIn(oldTag, 'hotfix/0.4.13');
-    assert.ok(hotfix.ok, 'a hotfix/x.y.z commit without relay/ passes the detection step');
-    assert.equal(hotfix.output.trim(), 'present=false');
-    assert.match(hotfix.stdout, /relay checks were skipped/, 'the job log says why the relay checks did not run');
+    const assertSkipped = (result: { ok: boolean; output: string; stdout: string }, label: string): void => {
+      assert.ok(result.ok, `${label}: the detection step passes`);
+      assert.equal(result.output.trim(), 'present=false', `${label}: the relay checks are skipped`);
+      assert.match(result.stdout, /relay checks were skipped/, `${label}: the job log says why the relay checks did not run`);
+    };
+    const assertFails = (result: { ok: boolean; output: string; stdout: string }, label: string): void => {
+      assert.equal(result.ok, false, `${label}: the relay job must fail`);
+      assert.equal(result.output.trim(), '', `${label}: no present= output is written`);
+      assert.match(result.stdout, /::error title=relay missing::/, `${label}: the job log says the relay is missing`);
+    };
 
-    // Any other branch without relay/package.json (for example a PR that deletes it) fails the job instead of reporting green.
+    // A hotfix cut from a release older than the relay: absent on the head and on the base, so the job passes.
+    assertSkipped(await detectAt(hotfix, { BRANCH: 'hotfix/0.4.13', EVENT: 'pull_request', PR_BASE: oldTag }), 'hotfix PR, no relay in base or head');
+    // The CI run started by hand on the hotfix head: its base is where it left main (the old tag).
+    assertSkipped(await detectAt(hotfix, { BRANCH: 'hotfix/0.4.13', EVENT: 'workflow_dispatch' }), 'hotfix run by hand, cut from an old tag');
+
+    // A hotfix branch whose base has the relay but whose head deleted it fails, however the run started.
+    assertFails(await detectAt(drop, { BRANCH: 'hotfix/0.4.13', EVENT: 'pull_request', PR_BASE: main }), 'hotfix PR that deletes the relay');
+    assertFails(await detectAt(drop, { BRANCH: 'hotfix/0.4.13', EVENT: 'workflow_dispatch' }), 'hotfix run by hand that deletes the relay');
+    assertFails(await detectAt(hotfix, { BRANCH: 'hotfix/0.4.13', EVENT: 'pull_request', PR_BASE: main }), 'hotfix PR whose base has the relay');
+    // A push never skips, and a missing or unreadable base never skips.
+    assertFails(await detectAt(hotfix, { BRANCH: 'hotfix/0.4.13', EVENT: 'push' }), 'push without the relay');
+    assertFails(await detectAt(hotfix, { BRANCH: 'hotfix/0.4.13', EVENT: 'pull_request', PR_BASE: '' }), 'hotfix PR with no base commit');
+    assertFails(await detectAt(hotfix, { BRANCH: 'hotfix/0.4.13', EVENT: 'pull_request', PR_BASE: '0'.repeat(40) }), 'hotfix PR with an unknown base commit');
+
+    // Any other branch without relay/package.json fails, even when its base has no relay either.
     for (const branch of ['fix/drop-relay', 'main', 'release/0.4.24', 'hotfix/0.4', 'hotfix/0.4.13-x', 'xhotfix/0.4.13', '']) {
-      const missing = await detectIn(oldTag, branch);
-      assert.equal(missing.ok, false, `a commit on ${JSON.stringify(branch)} without relay/package.json must fail the relay job`);
-      assert.equal(missing.output.trim(), '', `no present= output is written for ${JSON.stringify(branch)}`);
-      assert.match(missing.stdout, /::error title=relay missing::/, 'the job log says the relay is missing');
+      assertFails(await detectAt(hotfix, { BRANCH: branch, EVENT: 'pull_request', PR_BASE: oldTag }), `${JSON.stringify(branch)} without the relay`);
+      assertFails(await detectAt(drop, { BRANCH: branch, EVENT: 'pull_request', PR_BASE: main }), `${JSON.stringify(branch)} deleting the relay`);
     }
 
-    const current = path.join(scratch, 'current');
-    await mkdir(path.join(current, 'relay'), { recursive: true });
-    await writeFile(path.join(current, 'relay', 'package.json'), '{}');
+    // With relay/package.json present the checks always run.
     for (const branch of ['fix/relay-housekeeping', 'main', 'hotfix/0.4.13']) {
-      const withRelay = await detectIn(current, branch);
-      assert.ok(withRelay.ok);
-      assert.equal(withRelay.output.trim(), 'present=true', `relay/ present runs the checks on ${branch}`);
+      for (const event of ['pull_request', 'push', 'workflow_dispatch']) {
+        const withRelay = await detectAt(main, { BRANCH: branch, EVENT: event, PR_BASE: oldTag });
+        assert.ok(withRelay.ok);
+        assert.equal(withRelay.output.trim(), 'present=true', `relay/ present runs the checks on ${branch} (${event})`);
+      }
     }
   } finally {
     await rm(scratch, { recursive: true, force: true });
