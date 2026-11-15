@@ -21,7 +21,7 @@ import { TaskBoard, endsWithQuestion } from '../agent/taskBoard';
 import { displayPath, ToolError } from '../agent/workspace';
 import { AgentWorktree, createAgentWorktree, finishAgentWorktree, worktreeReport } from '../agent/worktree';
 import type { ActionPolicy } from '../domain/policy';
-import { expandPrompt, GsdAgent, GsdSkill, modelForTier, PrivacyCandidate, privateModelFor, roleModelFor, tierOf } from '../gsd/library';
+import { agentModelFor, expandPrompt, GsdAgent, GsdSkill, PrivacyCandidate, privateModelFor, roleModelFor, tierOf } from '../gsd/library';
 import { trustedPreambles } from '../gsd/preamble';
 import { gsdTools, Question } from '../gsd/tools';
 import type { ActivityFeed, AgentBoundary } from './agentActivity';
@@ -888,8 +888,13 @@ export class AgentConversation {
         // A team member's own model line wins; then the role's configured model; then the tier the workflow asked for.
         const teamMember = Boolean(spawn.agent && (!gsd || !spawn.agent.file.startsWith(gsd.home)));
         const roleModel = spawn.agent && !(teamMember && spawn.agent.model) ? roleModelFor(label, request.roleModels ?? {}) : undefined;
-        const wanted = modelForTier(roleModel ?? spawn.model ?? spawn.agent?.model, tiers, request.model);
-        let model = !request.availableModels || request.availableModels.includes(wanted) ? wanted : request.model;
+        // A model the Agent call names that is not on this key fails the call, naming it and the models that are; a role, agent-file or
+        // tier model that is not on this key falls back to the chat's model with a note the lead sees (in the result) and the person sees.
+        // A private member keeps its own resolution below, so its unresolved request still falls back rather than failing.
+        const choice = agentModelFor({ roleModel, requested: spawn.model, agentModel: spawn.agent?.model, tiers, current: request.model, available: request.availableModels });
+        if ('error' in choice && spawn.agent?.privacy !== 'private') throw new ToolError(choice.error);
+        let model = 'error' in choice ? request.model : choice.model;
+        let modelNote = 'error' in choice ? undefined : choice.note;
         // A member that must stay private runs on a TEE or local model, or not at all: it never falls back to a forwarded model.
         if (spawn.agent?.privacy === 'private') {
           const tier = tierOf(roleModel ?? spawn.model ?? spawn.agent.model);
@@ -900,8 +905,13 @@ export class AgentConversation {
           const candidates = offered.filter((candidate) => routeAllows(request.route, candidate));
           const chosen = privateModelFor(model, tier, tiers, candidates);
           if (!chosen || !routeAllows(request.route, candidates.find((candidate) => candidate.id === chosen))) throw new ToolError(privateRefusal(label, tier, request.route));
+          if (chosen !== model || 'error' in choice) modelNote = `${label} must stay private, so it runs on the private model ${chosen}${'error' in choice ? ` (the requested ${spawn.model} is not a model on this key)` : ''}.`;
           model = chosen;
         }
+        // The model the agent runs on goes back to the lead with its report (and in the "Started" line of a background agent), so the lead
+        // can say truthfully which model did the work; a fallback is also shown to the person.
+        const ranOn = `${label} ran on ${model}.${modelNote ? ` ${modelNote}` : ''}`;
+        if (modelNote) this.post({ type: 'notice', text: `${label}: ${modelNote}` });
         const agentBody = spawn.agent ? (gsd ? await expandPrompt(spawn.agent.body, { home: gsd.home, root: this.root }) : spawn.agent.body) : undefined;
         // Each sub-agent's Remember/Recall also reach its own private memory.
         const privateMemory = memoryFor({ kind: 'private-agent', id: `agent-${label}`.slice(0, 80) }, `${runId}-${label}`.slice(0, 100));
@@ -1022,10 +1032,10 @@ export class AgentConversation {
             const done = result.outcome === 'completed';
             if (todo) this.moveTask(todo, done ? 'completed' : 'pending');
             const note = this.taskNote(todo, done);
-            if (result.outcome === 'cancelled') return `${label} was stopped before it finished.${isolated}${note}`;
+            if (result.outcome === 'cancelled') return `${label} was stopped before it finished.\n\n${ranOn}${isolated}${note}`;
             // A sub-agent stopped short says so, so the lead does not take a partial report as finished work.
             const short = stopNotice(result);
-            return `${typeof report === 'string' && report.trim() ? boundedReport(report, label) : `${label} finished without a written report.`}${short ? `\n\n${label} did not finish. ${short}` : ''}${isolated}${note}`;
+            return `${typeof report === 'string' && report.trim() ? boundedReport(report, label) : `${label} finished without a written report.`}${short ? `\n\n${label} did not finish. ${short}` : ''}\n\n${ranOn}${isolated}${note}`;
           } catch (error) {
             if (todo) this.moveTask(todo, 'pending');
             this.activity?.agentEnded(agent.id, 'failed', error instanceof Error ? error.message : String(error));
@@ -1050,7 +1060,7 @@ export class AgentConversation {
           .catch((error: Error) => { this.notifications.push({ role: 'user', content: `<agent-notification id="${agent.id}" agent="${label}" status="failed">\n${error.message}${this.taskNote(todo, false)}\n</agent-notification>` }); })
           .finally(() => { this.background.delete(task); });
         this.background.add(task);
-        return `Started ${label} in the background as ${agent.id}. Its report will arrive in a later message when it finishes; there is no output file to poll. Continue with other work, or end your turn to wait; do not sleep.`;
+        return `Started ${label} in the background as ${agent.id} on ${model}.${modelNote ? ` ${modelNote}` : ''} Its report will arrive in a later message when it finishes; there is no output file to poll. Continue with other work, or end your turn to wait; do not sleep.`;
       }
     });
     all = [...base, ...extra.filter((tool) => gsd || (tool.name !== 'Skill' && tool.name !== 'SlashCommand'))];
