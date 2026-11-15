@@ -620,7 +620,10 @@ export async function turnOffFlow(input: TurnOnInput): Promise<FlowResult> {
   const { env, ui } = input;
   await settingsOf(env).write({ enabled: false });
   env.onEnabled?.(false);
-  await discardDeferred(env.home).catch(() => undefined);
+  // The removal waits its turn behind a sync already running for this folder, holding the same lock: a sync that was in flight when sync was turned off
+  // would otherwise write deferred.enc again after it was removed. The scheduler is off by now, so nothing new is queued behind it. A lock that cannot be
+  // had in time (another editor's sync) still removes the file, as before.
+  await syncOwnerFor(env.root).run(() => discardDeferred(env.home)).catch(() => discardDeferred(env.home)).catch(() => undefined);
   ui.info(SYNC_OFF);
   return { status: 'done', message: SYNC_OFF };
 }

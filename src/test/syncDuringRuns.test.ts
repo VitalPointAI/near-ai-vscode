@@ -258,3 +258,35 @@ test('turning sync off removes sync/deferred.enc, and turning it back on still m
     await cleanUp(remote, [a, b]);
   }
 });
+
+test('a sync in flight when sync is turned off does not write deferred.enc back afterwards (0.4.23)', async () => {
+  const { remote, a, b } = await syncedPair(THREAD);
+  try {
+    let live: string[] = [];
+    const aSync = syncFor(a, () => live);
+    await a.threads.save(context('before the run', at(0)));
+    assert.equal((await aSync.sync()).kind, 'synced');
+    // A's run is live and B has newer context: A's next sync holds it back in deferred.enc.
+    live = [THREAD];
+    await b.threads.save(context('B, later', at(20)));
+    assert.equal((await b.sync.sync()).kind, 'synced');
+    const deferred = deferredFileOf(a.home);
+    assert.equal(await stat(deferred).then(() => true, () => false), false, 'no deferred.enc before the sync');
+    const settings = memorySyncSettings(a.root);
+    await settings.write({ enabled: true, remote: 'origin' });
+    const env = { root: a.root, home: a.home, keys: a.keys, threads: a.threads, settings, makeSync: () => aSync };
+    const ui = { info: () => undefined } as unknown as Parameters<typeof turnOffFlow>[0]['ui'];
+    // The sync starts first and is still running when sync is turned off: before the fix, the removal ran at once and the sync then wrote the file.
+    const inFlight = aSync.sync();
+    const off = turnOffFlow({ env, ui });
+    assert.equal((await inFlight).kind, 'synced');
+    assert.equal((await off).status, 'done');
+    assert.equal(await stat(deferred).then(() => true, () => false), false, 'deferred.enc is gone once both have finished');
+    // Turned back on after the run, what the file held is read from the remote again.
+    live = [];
+    assert.equal((await aSync.sync()).kind, 'synced');
+    assert.equal(await contextText(a), 'B, later');
+  } finally {
+    await cleanUp(remote, [a, b]);
+  }
+});
