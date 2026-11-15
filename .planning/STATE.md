@@ -2,19 +2,20 @@
 gsd_state_version: "1.0"
 milestone: v0.7.0
 milestone_name: Governed agent platform and messaging relay
+current_plan: 2
 status: planning
-stopped_at: "v0.7.0 replanned 2026-11-15 around the owner's platform direction; Phase 68 complete and merged (PR #50, 052d5cf), relay required on main (D-19 done); Phase 69 planned 2026-11-15 (15 plans, two PRs), ready to execute after the planning PR merges"
-last_updated: "2026-11-15T16:42:44.341Z"
-state_head: 2fe6e976ceda86fe800620f2012d78fe85c6779d
+stopped_at: Completed 69-01-PLAN.md (domain core re-applied from ae5e9e1, 97 tests green); next 69-02
+last_updated: "2026-11-15T22:12:39.172Z"
+state_head: 40a3182d32b057cb0afad76a4cc002590245202d
 progress:
   total_phases: 21
   completed_phases: 1
   total_plans: 67
-  completed_plans: 51
+  completed_plans: 52
   percent: 5
 last_activity: 2026-11-15
-current_phase_name: "Team Mode reconciliation: identities and signed events on main"
 current_phase: 69
+current_phase_name: "Team Mode reconciliation: identities and signed events on main"
 last_activity_desc: Replanned v0.7.0 as Governed agent platform and messaging relay (Phases 69-84); OpenShell spike result recorded
 ---
 
@@ -26,6 +27,9 @@ Milestone: v0.7.0 Governed agent platform and messaging relay (Phases 68-84), re
 Phase 68 (Relay foundation): complete, verified and merged as PR #50 (052d5cf, 2026-11-15). The owner added `relay` to main's branch protection the same day (D-19, done).
 0.4.x line: 0.4.22 published 2026-11-14; 0.4.23 merged (PR #51) and published 2026-11-15 (release PR #52, tag v0.4.23); 0.4.24 is next (the four #46 review minors and three documentation mismatches). Phase 27 shipped as 0.4.20; its record stays open until the owner's host check.
 Phase 69 (Team Mode reconciliation): planned 2026-11-15, 15 plans in 15 waves over two PRs (69-01..08 port the Phase 60 core and the per-person identity, 69-09..15 add device.rotated, the payload signer, key history and the v0.6.0 disposition). Decisions D-01..D-29 were made on the owner's behalf and are recorded in 69-CONTEXT.md with their undo cost. Ready to execute.
+Current Plan: 2
+Total Plans in Phase: 15
+Plan 69-01 done on `feat/team-core-on-main` (the pure domain core from ae5e9e1, byte-identical, 97 tests green); the branch is not pushed yet (plan 69-08 pushes).
 
 Next, in order:
 1. The Phase 69 planning PR is merged (PR #57, c1730bf). The relay housekeeping PR (`fix/relay-housekeeping`) carries: new phase numbers in the relay README, Compose file, build script and tests; the Signal sidecar re-pin (by 2026-12-10); and PR #50's second-review minors (the `relay` check skips when `relay/package.json` is missing on any branch, so key the skip to hotfix branches; redactor field-name collisions after normalising; README promises tenant key files nothing reads yet; 68-VALIDATION.md still draft; ackMessage id check).
@@ -113,9 +117,9 @@ Next, in order:
 
 ## Session
 
-**Last session:** 2026-11-15T13:22:46.000Z
-**Stopped at:** v0.7.0 replanned around the owner's platform direction; next is the relay housekeeping PR, the 0.4.24 patch, archiving `feat/team-fix-pass`, then `/gsd-plan-phase 69`
-**Resume file:** .planning/ROADMAP.md (v0.7.0, "Order of work across every stream")
+**Last session:** 2026-11-15T22:12:24.647Z
+**Stopped at:** Completed 69-01-PLAN.md (domain core re-applied from ae5e9e1, 97 tests green); next 69-02
+**Resume file:** None
 
 ## Performance Metrics
 
@@ -149,6 +153,7 @@ Next, in order:
 | Phase 68 P05 | 25min | 3 tasks | 6 files |
 | Phase 68 P06 | 30min | 3 tasks | 9 files |
 | Phase 68 P07 | 40min | 3 tasks | 6 files |
+| Phase 69 P01 | 25min | 2 tasks | 10 files |
 
 ## Decisions
 
