@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+## 0.4.24
+
+This release gives questions and image reviews a time limit that matches approvals, fixes edge
+cases in image review, and corrects README and SECURITY.md where they described the agent's
+permissions differently from how it behaves.
 
 - **Questions and image reviews no longer wait forever.** A question from the agent, or an image
   waiting for your review, had no time limit, so in Full auto or with a helper agent working in the
