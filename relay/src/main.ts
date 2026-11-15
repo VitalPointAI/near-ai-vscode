@@ -1,4 +1,3 @@
-import { randomBytes } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadConfig, type RelayConfig } from './config';
@@ -6,13 +5,14 @@ import { HealthRegistry } from './health';
 import { createRelayServer, listen } from './http/server';
 import { Logger } from './log/logger';
 import { Redactor } from './log/redact';
+import { loadSecrets, refusePlainSecretEnv, RELAY_SECRETS, SecretError } from './secrets';
 import { prepareStateDir, StateDirError } from './stateDir';
 import { IN_FLIGHT_RUN_STATES } from './store/relayStore';
 import { openSqliteStore } from './store/sqliteStore';
 
 declare const __RELAY_VERSION__: string;
 
-// Composition root, built to dist/app.mjs. Plan 04 added the state directory and store steps between settings and listen; plan 06 adds secrets.
+// Composition root, built to dist/app.mjs. Startup order: settings, plain-secret refusal, state directory, secrets, pseudonym key, store, server.
 // The Redactor and the Logger are created first (D-11): every line the relay prints goes through them, and a failed start prints one
 // relay.start_refused line that names the setting and never its value.
 
@@ -52,9 +52,8 @@ export function crashFields(reason: unknown): Record<string, unknown> {
 export async function main(argv: readonly string[]): Promise<void> {
   process.umask(0o077);
 
-  // Until plan 06 installs the D-18 key, phone labels use a key that lives only as long as this process.
+  // Phone labels read phone:unlabelled until the D-18 key is installed below, after the state directory is ready.
   const redactor = new Redactor();
-  redactor.setPseudonymKey(randomBytes(32));
   const logger = new Logger(redactor);
 
   process.on('uncaughtException', (error) => {
@@ -87,6 +86,15 @@ export async function main(argv: readonly string[]): Promise<void> {
     return;
   }
 
+  // D-08: a secret given as a plain environment value stops startup before the state directory is touched.
+  try {
+    refusePlainSecretEnv(process.env);
+  } catch (error) {
+    logger.error('relay.start_refused', { reason: 'secrets', detail: error instanceof SecretError ? error.message : 'a secret setting is not acceptable' });
+    process.exitCode = 1;
+    return;
+  }
+
   try {
     await prepareStateDir(config.stateDir, logger);
   } catch (error) {
@@ -97,6 +105,16 @@ export async function main(argv: readonly string[]): Promise<void> {
     process.exitCode = 1;
     return;
   }
+
+  let secrets: ReadonlyMap<string, string>;
+  try {
+    secrets = await loadSecrets(RELAY_SECRETS, { env: process.env }, redactor);
+  } catch (error) {
+    logger.error('relay.start_refused', { reason: 'secrets', detail: error instanceof SecretError ? error.message : 'the secrets could not be loaded' });
+    process.exitCode = 1;
+    return;
+  }
+  logger.info('secrets.loaded', { names: [...secrets.keys()].join(','), count: secrets.size });
 
   let store;
   try {
