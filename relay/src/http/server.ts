@@ -20,7 +20,8 @@ const BASE_HEADERS = {
 export function createRelayServer(options: RelayServerOptions): http.Server {
   const reject = (route: RejectedRoute, method: string, status: number): void => {
     try {
-      options.onRejected?.(route, method, status);
+      // The method comes from the client: only a plain upper-case token is passed on, so nothing else can reach a log line.
+      options.onRejected?.(route, /^[A-Z]{1,16}$/.test(method) ? method : 'OTHER', status);
     } catch {
       // A failing hook must never change the response.
     }
