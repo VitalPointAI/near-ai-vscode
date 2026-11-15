@@ -385,6 +385,40 @@ test('an answer saved before answers were kept per file survives another folder 
   assert.equal(third, 1);
 });
 
+// PR #55 review: when the folder the old answer matches already had an answer of its own, the old answer was never claimed and was written back with every
+// later answer for ever, outside the cap. A file with its fingerprint now claims it, and an unclaimed one counts toward the cap as the oldest answer.
+test('an old answer is dropped once a team file with its fingerprint has its own answer, and counts toward the cap until then', async () => {
+  const team = projectTeam('/w/a/.planning/.near-ai/team.md');
+  const probe = memento();
+  await projectTeamAllowed(team, { trusted: true, store: probe, fallback: new Map(), ask: async () => true });
+  const fingerprint = (probe.values.get(PROJECT_TEAM_CONSENT_KEY) as Record<string, TeamConsent>)[team.file].fingerprint;
+  const never = async (): Promise<boolean> => { throw new Error('must not ask'); };
+  // The folder's own answer, with the same fingerprint, wins; the old one is dropped.
+  const own = memento({ [PROJECT_TEAM_CONSENT_KEY]: { [LEGACY_TEAM_CONSENT]: { fingerprint, use: true }, [team.file]: { fingerprint, use: false } } });
+  assert.equal(await projectTeamAllowed(team, { trusted: true, store: own, fallback: new Map(), ask: never }), false, 'the folder\'s own answer counts');
+  assert.deepEqual(own.values.get(PROJECT_TEAM_CONSENT_KEY), { [team.file]: { fingerprint, use: false } }, 'the old answer is gone');
+  // Another folder's answer with its fingerprint claims it too, whichever team is asked about next.
+  const elsewhere = memento({ [PROJECT_TEAM_CONSENT_KEY]: { [LEGACY_TEAM_CONSENT]: { fingerprint, use: true }, '/w/b/.planning/.near-ai/team.md': { fingerprint, use: true } } });
+  const changed = projectTeam('/w/c/.planning/.near-ai/team.md', 'illustrator');
+  assert.equal(await projectTeamAllowed(changed, { trusted: true, store: elsewhere, fallback: new Map(), ask: async () => false }), false);
+  assert.deepEqual(Object.keys(elsewhere.values.get(PROJECT_TEAM_CONSENT_KEY) as object).sort(), ['/w/b/.planning/.near-ai/team.md', changed.file].sort());
+  // The folder's own answer is for an older team: it is asked again, and the old answer goes, as this file claimed it.
+  const stale = memento({ [PROJECT_TEAM_CONSENT_KEY]: { [LEGACY_TEAM_CONSENT]: { fingerprint, use: true }, [team.file]: { fingerprint: 'a'.repeat(64), use: false } } });
+  let asked = 0;
+  assert.equal(await projectTeamAllowed(team, { trusted: true, store: stale, fallback: new Map(), ask: async () => { asked += 1; return true; } }), true);
+  assert.equal(asked, 1);
+  assert.deepEqual(stale.values.get(PROJECT_TEAM_CONSENT_KEY), { [team.file]: { fingerprint, use: true } });
+  // Unclaimed, it counts toward the cap as the oldest answer, so it is the first to go.
+  const full = memento({ [PROJECT_TEAM_CONSENT_KEY]: { [LEGACY_TEAM_CONSENT]: { fingerprint: 'f'.repeat(64), use: true } } });
+  for (let index = 0; index < 19; index += 1) await projectTeamAllowed(projectTeam(`/w/${index}/team.md`, 'illustrator'), { trusted: true, store: full, fallback: new Map(), ask: async () => true });
+  assert.equal(Object.keys(full.values.get(PROJECT_TEAM_CONSENT_KEY) as object).length, 20);
+  assert.ok(LEGACY_TEAM_CONSENT in (full.values.get(PROJECT_TEAM_CONSENT_KEY) as object), 'kept while there is room');
+  await projectTeamAllowed(projectTeam('/w/19/team.md', 'illustrator'), { trusted: true, store: full, fallback: new Map(), ask: async () => true });
+  const kept = Object.keys(full.values.get(PROJECT_TEAM_CONSENT_KEY) as object);
+  assert.equal(kept.length, 20, 'the cap counts it');
+  assert.equal(kept.includes(LEGACY_TEAM_CONSENT), false, 'and it is the oldest');
+});
+
 test('the answers kept without workspace state are bounded', async () => {
   const fallback = new Map<string, TeamConsent>();
   for (let index = 0; index < 50; index += 1) await projectTeamAllowed(projectTeam(`/w/${index}/team.md`), { trusted: true, fallback, ask: async () => true });

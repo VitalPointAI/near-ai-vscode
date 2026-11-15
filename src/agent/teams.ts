@@ -210,28 +210,38 @@ export async function projectTeamAllowed(team: TeamDefinition, options: { truste
   // Before 0.4.22 one answer was kept for the whole workspace, as { fingerprint, use }; it still counts for a team with that fingerprint. Until a matching
   // team file claims it, it is kept under LEGACY_TEAM_CONSENT beside the per-file answers.
   const entries: Record<string, TeamConsent> = stored && typeof stored === 'object' && !isConsent(stored) ? Object.fromEntries(Object.entries(stored as Record<string, unknown>).filter((entry): entry is [string, TeamConsent] => isConsent(entry[1]))) : {};
-  const legacy = isConsent(stored) ? stored : entries[LEGACY_TEAM_CONSENT];
+  const storedLegacy = isConsent(stored) ? stored : entries[LEGACY_TEAM_CONSENT];
   const byFile = { ...entries };
   delete byFile[LEGACY_TEAM_CONSENT];
   // The old single answer is bound to the first team file it is used for (#46 review): it is moved under that file and no longer applies to any other
   // folder's team, even one with the same name and members.
-  if (legacy && legacy.fingerprint === fingerprint && byFile[team.file] === undefined) {
-    await options.store?.update(PROJECT_TEAM_CONSENT_KEY, { ...byFile, [team.file]: legacy });
-    return legacy.use;
+  if (storedLegacy && storedLegacy.fingerprint === fingerprint && byFile[team.file] === undefined) {
+    await options.store?.update(PROJECT_TEAM_CONSENT_KEY, { ...byFile, [team.file]: storedLegacy });
+    return storedLegacy.use;
   }
+  // PR #55 review: once a team file with its fingerprint has an answer of its own, or is this file (whose own answer is newer), the old answer is claimed
+  // and dropped. Before, it was written back on every answer for ever, outside the MAX_TEAM_CONSENTS cap.
+  const claimed = !!storedLegacy && (storedLegacy.fingerprint === fingerprint || Object.values(byFile).some((consent) => consent.fingerprint === storedLegacy.fingerprint));
+  const legacy = claimed ? undefined : storedLegacy;
   const saved = byFile[team.file] ?? options.fallback.get(team.file);
-  if (saved?.fingerprint === fingerprint) return saved.use;
+  if (saved?.fingerprint === fingerprint) {
+    if (claimed) await options.store?.update(PROJECT_TEAM_CONSENT_KEY, byFile);
+    return saved.use;
+  }
   const answer = await options.ask(projectTeamQuestion(team));
-  if (answer === undefined) return false;
+  if (answer === undefined) {
+    if (claimed) await options.store?.update(PROJECT_TEAM_CONSENT_KEY, byFile);
+    return false;
+  }
   const decision: TeamConsent = { fingerprint, use: answer };
   options.fallback.delete(team.file);
   options.fallback.set(team.file, decision);
   while (options.fallback.size > MAX_TEAM_CONSENTS) options.fallback.delete(options.fallback.keys().next().value as string);
   delete byFile[team.file];
-  const kept = [...Object.entries(byFile), [team.file, decision] as [string, TeamConsent]].slice(-MAX_TEAM_CONSENTS);
   // An unclaimed old answer is kept (#46 review): before, asking about another folder's team first wrote the per-file answers alone and dropped it, so
-  // the folder it belonged to was asked again.
-  await options.store?.update(PROJECT_TEAM_CONSENT_KEY, { ...(legacy ? { [LEGACY_TEAM_CONSENT]: legacy } : {}), ...Object.fromEntries(kept) });
+  // the folder it belonged to was asked again. It counts toward the cap as the oldest answer (PR #55 review), so it is the first to go.
+  const kept = [...(legacy ? [[LEGACY_TEAM_CONSENT, legacy] as [string, TeamConsent]] : []), ...Object.entries(byFile), [team.file, decision] as [string, TeamConsent]].slice(-MAX_TEAM_CONSENTS);
+  await options.store?.update(PROJECT_TEAM_CONSENT_KEY, Object.fromEntries(kept));
   return decision.use;
 }
 
