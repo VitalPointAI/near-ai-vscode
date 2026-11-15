@@ -27,3 +27,10 @@ eval-*.json
 .near-ai/scratch/
 # 0.4.23: generated images waiting for review (src/agent/imageDrafts.ts), never committed.
 .near-ai/drafts/
+
+# Messaging relay (relay/): runtime state and secret files, never committed
+relay/state/
+relay/secrets/
+relay/**/*.db
+relay/**/*.db-wal
+relay/**/*.db-shm
