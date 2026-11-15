@@ -5,14 +5,14 @@ milestone_name: Messaging relay — Teams and Signal
 current_phase: 68
 current_phase_name: Relay foundation
 status: planning
-stopped_at: Completed 68-03-PLAN.md
-last_updated: "2026-11-15T03:46:19.038Z"
-state_head: 453b7c5052cee105dff256c32fe59654195e4bb0
+stopped_at: Completed 68-04-PLAN.md
+last_updated: "2026-11-15T03:51:19.166Z"
+state_head: a329d73d72998b642a4efe6aea179a255ed14b15
 progress:
   total_phases: 9
   completed_phases: 0
   total_plans: 8
-  completed_plans: 3
+  completed_plans: 4
   percent: 0
 last_activity: 2026-11-13
 last_activity_desc: "Completed quick task 261113-lbo: fix the chat task list not checking off finished tasks"
@@ -24,7 +24,7 @@ last_activity_desc: "Completed quick task 261113-lbo: fix the chat task list not
 
 Milestone: v0.7.0 Messaging relay — Teams and Signal (Phases 68-76)
 Phase: 68 (Relay foundation) — EXECUTING
-Next: plan 68-04 (private state directory D-07 and D-17, node:sqlite store behind RelayStore, schema v1, kill -9 drill) in the messaging-relay worktree; plans 68-01, 68-02 and 68-03 are done
+Next: plan 68-05 (full RelayStore contract suite: tenants, bindings, queues, runs, approvals; schema versioning and stable instance id) in the messaging-relay worktree; plans 68-01 through 68-04 are done
 
 ## Accumulated Context
 
@@ -82,8 +82,8 @@ None yet.
 
 ## Session
 
-**Last session:** 2026-11-15T03:46:19.010Z
-**Stopped at:** Completed 68-03-PLAN.md
+**Last session:** 2026-11-15T03:51:19.136Z
+**Stopped at:** Completed 68-04-PLAN.md
 **Resume file:** None
 
 ## Performance Metrics
@@ -114,6 +114,7 @@ None yet.
 | Phase 68 P01 | 70min | 3 tasks | 15 files |
 | Phase 68 P02 | 25min | 2 tasks | 7 files |
 | Phase 68 P03 | 10min | 2 tasks | 3 files |
+| Phase 68 P04 | 35min | 2 tasks | 9 files |
 
 ## Decisions
 
@@ -175,3 +176,4 @@ None yet.
 - [Phase 68]: Relay prints nothing and exits 1 on any failed start until plan 02's redacting logger exists (D-11)
 - [Phase 68]: Redaction order is secrets, then phones, then the 500-character cut; the Logger keeps time, level and event reserved and writes colliding field names as field_{key}
 - [Phase 68]: onRejected receives only a plain upper-case method token or OTHER, so client text cannot reach a log line
+- [Phase 68]: Plan 68-04: schema v1 holds all five aggregates; crash writer is permit-driven so a kill lands within one message of the last ack; claimed messages return to queued on open
