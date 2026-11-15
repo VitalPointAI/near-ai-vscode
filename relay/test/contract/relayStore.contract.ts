@@ -313,6 +313,25 @@ export function relayStoreContract(name: string, factory: StoreFactory): void {
       assert.equal(await handle.store.claimNext('acme', 'teams', 'c1', T0 + 8), undefined);
     }));
 
+  test(`${name}: ackMessage refuses a messageId that is not a message id as invalid-record, naming the id and not a time`, () =>
+    withStore(async (handle) => {
+      await handle.store.putTenant(tenant('acme'));
+      await handle.store.acceptInbound(inbound('acme', 'k1'), 'run-1');
+      const claimed = await handle.store.claimNext('acme', 'teams', 'c1', T0 + 5);
+      assert.ok(claimed);
+      for (const bad of [0, -1, 1.5, Number.NaN, Number.MAX_SAFE_INTEGER + 1, '1' as unknown as number]) {
+        await assert.rejects(handle.store.ackMessage('acme', bad, T0 + 6), (error: unknown) => {
+          assert.ok(error instanceof StoreError, `expected a StoreError for ${String(bad)}, got ${String(error)}`);
+          assert.equal(error.code, 'invalid-record');
+          assert.match(error.message, /messageId/);
+          assert.doesNotMatch(error.message, /milliseconds/, 'a message id is not checked as a time');
+          return true;
+        });
+      }
+      assert.equal((await handle.store.getMessage('acme', 'k1'))?.state, 'claimed', 'a refused acknowledgement changes nothing');
+      assert.equal(await handle.store.ackMessage('acme', claimed.messageId, T0 + 6), true);
+    }));
+
   test(`${name}: a message that is queued and not yet claimed cannot be acknowledged`, () =>
     withStore(async (handle) => {
       await handle.store.putTenant(tenant('acme'));
