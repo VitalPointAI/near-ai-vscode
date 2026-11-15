@@ -65,6 +65,8 @@ Not in this phase: invitations, joining, removal flows, NEAR organization calls,
 - **D-27 (new):** The ported `teamManifest` test compares against the 0.4.11 merge base, which means nothing on main; it is replaced by a test of main's `package.json` that checks the three Phase 60 contributions, the new setting and the `when` clauses. *Undo: cheap.*
 - **D-28 (accepted consequence of D-06):** The one device fingerprint is visible to anyone who can read the project's remote, and on a shared code-server one install can mean one identity for several people. Recovery and per-person identity on shared hosts stay with the shared code-server requirements (SHRD-02, SHRD-03); this phase only records the consequence in the phase docs. *Undo: as D-06.*
 
+- **D-29 (refines D-25, planning 2026-11-15):** The per-person identity change (D-06, D-22) lands in PR 1, not PR 2, so the per-team key name `nearAi.team.deviceKey.<teamId>` never reaches `main` and no 0.4.x release cut between the two PRs can ship it. PR 1 still records unchanged-port evidence for TMR-02 before the identity is adapted. PR 2 carries `device.rotated`, the payload signer, key status, the solo key history and the disposition record. *Undo: cheap (plan 69-07 can move behind 69-08 to the PR 2 branch).*
+
 ### Claude's Discretion
 - File split inside `src/domain/team/` for the payload signer and key status (one new file or two), and the exact names of exported functions, as long as D-08 and D-09 hold.
 - Order of porting within the plans, as long as each plan leaves main green.

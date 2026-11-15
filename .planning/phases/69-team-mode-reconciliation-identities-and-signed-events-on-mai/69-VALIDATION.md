@@ -51,7 +51,7 @@ Filled by the plans' `<verify>` blocks; requirement to test mapping:
 | TMR-02 SC4 | Concurrent appends lose nothing, no force push; two windows on one mirror | process-level | teamConcurrency, teamSharedMirror | ported / from 3e11c0e |
 | TMR-02 SC5 | No team file: one `fs.stat`, no timers or storage; scheduler cadence | unit with fakes | teamSoloParity, teamScheduler, teamSession, teamRunGit | ported |
 | TMR-02 boundary | No `vscode` import and no new dependency in `src/domain/team`, `src/team` | static | teamBoundaries (new), teamManifest (rewritten, D-27) | ❌ W0 |
-| TMR-03 | Solo parity, canary absent from log, `team.json`, settings, audit; full suite green | integration, suite | teamSoloParity, teamEnable canary, full suite, e2e | ported |
+| TMR-03 | Solo parity, canary absent from log, `team.json`, settings, audit; full suite green | integration, suite | teamSoloParity, teamEnable canary, teamCommands SEC-01 canary (`stub.configUpdates` empty: no setting written), teamSession read-only case, teamKeyRotation canary, full suite, e2e | ported / extended |
 | D-11, D-12, D-23 | Team sync and state sync at once: separate mirrors and locks, reserved refs refused | integration, real git | teamMirrorIsolation (new), teamFile ref table | ❌ W0 |
 | TMR-04 | Every v0.6.0 phase and requirement has a disposition; TM- prefixes; links | static doc check | teamDisposition (new) | ❌ W0 |
 | TMR-05 sign/verify | Round trip per purpose, domain separation, tamper, version, never throws, implicit account id | unit, fuzz | teamSignedPayload (new) | ❌ W0 |
