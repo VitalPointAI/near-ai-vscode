@@ -1,13 +1,15 @@
 ---
 phase: "68"
 slug: "relay-foundation"
-status: draft
-nyquist_compliant: false
-wave_0_complete: false
+status: validated
+nyquist_compliant: true
+wave_0_complete: true
 created: "2026-11-14"
+validated: "2026-11-15"
+open_manual: ["D-19"]
 ---
 
-# Phase 68 — Validation Strategy
+# Phase 68: Validation Strategy
 
 > Per-phase validation contract for feedback sampling during execution. Derived from `68-RESEARCH.md` "Validation Architecture".
 
@@ -38,24 +40,27 @@ created: "2026-11-14"
 
 ## Per-Task Verification Map
 
-Filled by the planner per task; the requirement-level map is:
+The requirement-level map, as verified. Counts are from the 2026-11-15 housekeeping run on `fix/relay-housekeeping` (relay on Node 26.13.1 with `NEAR_AI_RELAY_OLD_NODE` set, so the old-Node cases ran rather than skipped); each file was also run on its own to get its count. At phase close the gate record in `68-08-SUMMARY.md` had 147/147 relay tests and 10/10 container tests; the relay suite has since grown to 172 through the PR #50 review fixes and this housekeeping.
 
 | Requirement | Behavior | Test Type | Automated Command | File Exists | Status |
 |-------------|----------|-----------|-------------------|-------------|--------|
-| RELAY-01 | engines `>=26.13.1 <27`, only `jose` as dependency, `engine-strict`, one non-dev lock entry | unit | `node --test dist/test/workspace.test.js` | ❌ W0 | ⬜ pending |
-| RELAY-01 | Node guard refuses <26.13.1 and >=27 with a plain message, exit 1 | unit | `node --test dist/test/workspace.test.js` | ❌ W0 | ⬜ pending |
-| RELAY-01 | Extension isolation: `.vscodeignore relay/**`, no root workspaces/deps, relay CI job on 26.13.1 | unit (root, Node 24) | root `npm test` (`src/test/relayIsolation.test.ts`) | ❌ W0 | ⬜ pending |
-| RELAY-01 | VSIX has no `relay/` entry | build check | root `npm run verify:release` | ✅ (pattern added) | ⬜ pending |
-| RELAY-02 | `/healthz` exact five fields, `not-configured` components, no tenant data, 405/404 | integration | `node --test dist/test/health.test.js` | ❌ W0 | ⬜ pending |
-| RELAY-02 | spawned `bin.mjs` serves healthz, `--healthcheck` exit 0, SIGTERM exits promptly | integration | `node --test dist/test/startup.test.js` | ❌ W0 | ⬜ pending |
-| RELAY-03 | `RelayStore` contract suite on `sqliteStore` | contract | `node --test dist/test/sqliteStore.test.js` | ❌ W0 | ⬜ pending |
-| RELAY-03 | kill -9 drill, 15 rounds, acked implies present, no duplicates | integration | `node --test dist/test/killDrill.test.js` | ❌ W0 | ⬜ pending |
-| RELAY-03 | state dir 0700, owner/symlink refusal, tighten own too-open dir (D-17), files 0600 | unit | `node --test dist/test/stateDir.test.js` | ❌ W0 | ⬜ pending |
-| RELAY-03 | schema migrations once, newer DB refused, stable instance id | unit | `node --test dist/test/schema.test.js` | ❌ W0 | ⬜ pending |
-| RELAY-04 | secret loader: file-only sources, mode refusal, plain env refused, name-only errors | unit | `node --test dist/test/secrets.test.js` | ❌ W0 | ⬜ pending |
-| RELAY-04 | redacting logger, pseudonym labels (D-18), no console use outside logger | unit | `node --test dist/test/logging.test.js` | ❌ W0 | ⬜ pending |
-| RELAY-04 | no-leak run: fake secrets absent from output, state files and listing | integration | `node --test dist/test/noLeak.test.js` | ❌ W0 | ⬜ pending |
-| RELAY-04 | container: digest pins, no shell, uid 65532, hardened run healthy, kill/restart keeps state, Compose profile for signal | container | `npm run test:container --prefix relay` | ❌ W0 | ⬜ pending |
+| RELAY-01 | engines `>=26.13.1 <27`, only `jose` as dependency, `engine-strict`, one non-dev lock entry, import boundary | unit | `node --test dist/test/workspace.test.js` | ✅ `relay/test/workspace.test.ts` | ✅ green (12/12) |
+| RELAY-01 | Node guard refuses <26.13.1 and >=27 with a plain message, exit 1 (real Node 24 via `NEAR_AI_RELAY_OLD_NODE`) | unit | `node --test dist/test/workspace.test.js` | ✅ `relay/test/workspace.test.ts` | ✅ green (in the 12 above) |
+| RELAY-01 | Extension isolation: `.vscodeignore relay/**`, no root workspaces/deps, relay CI job on 26.13.1, hotfix-only skip, `CI_CHECKS`, release patterns | unit (root, Node 24) | `npx tsc -p tsconfig.json && node --test dist/test/relayIsolation.test.js` | ✅ `src/test/relayIsolation.test.ts` | ✅ green (10/10) |
+| RELAY-01 | VSIX has no `relay/` entry | build check | root `npm run verify:release` | ✅ `scripts/verify-release-content.mjs` | ✅ green (331 entries) |
+| RELAY-02 | `/healthz` exact five fields, `not-configured` components, no tenant data, 405/404 | integration | `node --test dist/test/health.test.js` | ✅ `relay/test/health.test.ts` | ✅ green (12/12) |
+| RELAY-02 | spawned `bin.mjs` serves healthz, `--healthcheck` exit 0, SIGTERM exits promptly | integration | `node --test dist/test/startup.test.js` | ✅ `relay/test/startup.test.ts` | ✅ green (9/9) |
+| RELAY-03 | `RelayStore` contract suite on `sqliteStore` | contract | `node --test dist/test/sqliteStore.test.js` | ✅ `relay/test/sqliteStore.test.ts`, `relay/test/contract/relayStore.contract.ts` | ✅ green (47/47) |
+| RELAY-03 | kill -9 drill, 15 rounds, acked implies present, no duplicates | integration | `node --test dist/test/killDrill.test.js` | ✅ `relay/test/killDrill.test.ts` | ✅ green (16/16) |
+| RELAY-03 | state dir 0700, owner/symlink refusal, tighten own too-open dir (D-17), files 0600 | unit | `node --test dist/test/stateDir.test.js` | ✅ `relay/test/stateDir.test.ts` | ✅ green (15/15) |
+| RELAY-03 | schema migrations once, newer DB refused, stable instance id | unit | `node --test dist/test/schema.test.js` | ✅ `relay/test/schema.test.ts` | ✅ green (8/8) |
+| RELAY-04 | secret loader: file-only sources, mode refusal, plain env refused, name-only errors | unit | `node --test dist/test/secrets.test.js` | ✅ `relay/test/secrets.test.ts` | ✅ green (14/14) |
+| RELAY-04 | redacting logger, no field overwrites another, no console use outside logger | unit | `node --test dist/test/logging.test.js` | ✅ `relay/test/logging.test.ts` | ✅ green (25/25) |
+| RELAY-04 | pseudonym labels stable across restarts (D-18) | unit | `node --test dist/test/pseudonymKey.test.js` | ✅ `relay/test/pseudonymKey.test.ts` | ✅ green (6/6) |
+| RELAY-04 | no-leak run: fake secrets absent from output, state files and listing | integration | `node --test dist/test/noLeak.test.js` | ✅ `relay/test/noLeak.test.ts` | ✅ green (8/8) |
+| RELAY-04 | container: digest pins, no shell, uid 65532, hardened run healthy, kill/restart keeps state, Compose profile for signal, sidecar pin dates | container | `npm run test:container --prefix relay` | ✅ `relay/test/container/container.test.ts` | ✅ green (10/10) |
+
+Relay total: 172 tests, 172 pass, 0 fail, 0 skipped (`npm test --prefix relay`). In CI the old-Node cases run too: the `relay` job installs Node 24 and sets `NEAR_AI_RELAY_OLD_NODE`.
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 
@@ -63,30 +68,30 @@ Filled by the planner per task; the requirement-level map is:
 
 ## Wave 0 Requirements
 
-- [ ] Node 26.13.1 installed through nvm without changing the default (human-verify package pins first, D-20)
-- [ ] `relay/` workspace: package.json, lockfile, tsconfig, `.npmrc`, `.nvmrc`, build and check-node scripts
-- [ ] `relay/test/contract/relayStore.contract.ts` and `relay/test/fixtures/crashWriter.ts`
-- [ ] Root: `src/test/relayIsolation.test.ts`, `.vscodeignore`, `.gitignore`, `.dockerignore`, `verify-release-content` pattern
-- [ ] Root `npm ci` on Node 24 in the worktree for root checks
+- [x] Node 26.13.1 installed through nvm without changing the default (human-verify package pins first, D-20)
+- [x] `relay/` workspace: package.json, lockfile, tsconfig, `.npmrc`, `.nvmrc`, build and check-node scripts
+- [x] `relay/test/contract/relayStore.contract.ts` and `relay/test/fixtures/crashWriter.ts`
+- [x] Root: `src/test/relayIsolation.test.ts`, `.vscodeignore`, `.gitignore`, `.dockerignore`, `verify-release-content` pattern
+- [x] Root `npm ci` on Node 24 in the worktree for root checks
 
 ---
 
 ## Manual-Only Verifications
 
-| Behavior | Requirement | Why Manual | Test Instructions |
-|----------|-------------|------------|-------------------|
-| `relay` added as a required check in branch protection | RELAY-01 (D-19) | Owner-only GitHub setting | Owner runs the `gh api` command the plan gives, after the PR's gate approval |
-| Package pins accepted | RELAY-01 (D-20) | Human supply-chain judgement | Owner confirms `jose` and `@types/node` versions at the checkpoint |
+| Behavior | Requirement | Why Manual | Status |
+|----------|-------------|------------|--------|
+| `relay` added as a required check in branch protection | RELAY-01 (D-19) | Owner-only GitHub setting | Pending. Checked 2026-11-15 with the read-only `gh api repos/VitalPointAI/near-ai-vscode/branches/main/protection --jq '[.required_status_checks.checks[].context]'`: main requires lint, test, e2e, release-content, audit, secret-scan and agent-review, not yet `relay`. The owner re-applies branch protection with the command in `docs/development-workflow.md` section 8. |
+| Package pins accepted | RELAY-01 (D-20) | Human supply-chain judgement | Done. The owner chose `jose` 6.2.17 and `@types/node` 26.6.6 (recorded in `68-01-SUMMARY.md`). |
 
 ---
 
 ## Validation Sign-Off
 
-- [ ] All tasks have `<automated>` verify or Wave 0 dependencies
-- [ ] Sampling continuity: no 3 consecutive tasks without automated verify
-- [ ] Wave 0 covers all MISSING references
-- [ ] No watch-mode flags
-- [ ] Feedback latency < 120s
-- [ ] `nyquist_compliant: true` set in frontmatter
+- [x] All tasks have `<automated>` verify or Wave 0 dependencies
+- [x] Sampling continuity: no 3 consecutive tasks without automated verify
+- [x] Wave 0 covers all MISSING references
+- [x] No watch-mode flags
+- [x] Feedback latency < 120s (relay suite about 15 s, container suite about 20 s with cached base images)
+- [x] `nyquist_compliant: true` set in frontmatter
 
-**Approval:** pending
+**Approval:** every automated row is green. One manual item stays open: D-19, the owner's branch protection change, which no code change can close.
