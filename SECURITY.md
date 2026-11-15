@@ -267,7 +267,8 @@ The agent's file tools treat that folder like the rest of `.near-ai/`: writing
 there asks. When you ask for changes and the agent edits the draft, the draft
 image is sent to the same image model's provider, through NEAR AI's
 `/images/edits`; no other image leaves the machine. Drafts are deleted when
-you discard them, and any left behind are removed after 7 days.
+you discard them or when a new version of the same image is made, and any left
+behind are removed after 7 days.
 
 ### Document tools and team roles
 

@@ -43,7 +43,7 @@ import type { ConversationStore, Transcript } from './transcripts';
 import type { RunEnd, RunMarkers } from './runMarkers';
 import { NOT_CHECKED_IN_EDITOR, type ResponseEvidence, type VerificationResult } from './attestation';
 import { PreparedAttachments, StagedAttachment } from '../agent/attachments';
-import { imageTool, ImageDraft, ImageReviewDecision, ImageReviewer, memoryPreamble, memoryTools } from '../agent/extraTools';
+import { imageTool, ImageDraft, ImageDraftEntry, ImageReviewDecision, ImageReviewer, memoryPreamble, memoryTools } from '../agent/extraTools';
 import { cleanOldDrafts, DRAFT_ID, draftFile } from '../agent/imageDrafts';
 import { TeamDefinition, teamAgents, teamLeadPrompt, teamMembersNote } from '../agent/teams';
 import { knowledgeTools } from '../agent/knowledgeTools';
@@ -259,7 +259,7 @@ export class AgentConversation {
   /** 0.4.23: generated images waiting for the person's review, by draft id. */
   private readonly imageReviews = new Map<string, (reply: ImageReviewDecision, cancelled?: boolean) => void>();
   /** The drafts and attempt counts of this conversation's image reviews, kept across its runs so edit_of and attempt numbers carry over. */
-  private readonly imageReviewState = { drafts: new Map<string, { path: string }>(), attempts: new Map<string, number>() };
+  private readonly imageReviewState = { drafts: new Map<string, ImageDraftEntry>(), attempts: new Map<string, number>() };
   /** Approvals and questions waiting for the user, oldest first, as they were posted (replayed when the view reloads). */
   private readonly waiting = new Map<string, Record<string, unknown>>();
   /** Told how many prompts are waiting whenever that changes, so the host can badge the view. */

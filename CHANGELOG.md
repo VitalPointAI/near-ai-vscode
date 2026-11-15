@@ -25,8 +25,8 @@
   it in a tab. Images made by helper agents show in the same chat, with the helper's name. The
   agent waits for your answer in every approval mode, as it does for its questions, and is told
   not to judge or remake images on its own. Images waiting for you are kept in the project's
-  `.near-ai/drafts/images/` folder, which is never committed, and ones left there are removed
-  after 7 days. To save images straight away as before, set `nearAi.agent.imageReview` to `off`.
+  `.near-ai/drafts/images/` folder, which is never committed. A draft is removed once the agent
+  makes a new version of it, and ones left there are removed after 7 days. To save images straight away as before, set `nearAi.agent.imageReview` to `off`.
 - **Agents can no longer read the project's keys.** In one run an agent wrote a small script that
   read the project's key file and used it to open the project's own encrypted chats. The project's
   key folder, `.near-ai/state/keys/`, is now off limits to agents in every approval mode: the file

@@ -575,8 +575,9 @@ until it runs out aren't shown.
   size**. Images made by helper agents show in the same chat, labelled with the
   agent. The agent waits for your answer in every approval mode, and is told
   not to judge or remake images on its own. Waiting images are kept in the
-  project's `.near-ai/drafts/images/` folder, which is never committed; ones
-  left there are removed after 7 days. **Revert** removes an accepted image.
+  project's `.near-ai/drafts/images/` folder, which is never committed. A draft
+  is removed once a new version of it is made, and ones left there are removed
+  after 7 days. **Revert** removes an accepted image.
   Set `nearAi.agent.imageReview` to `off` to save images straight away.
 - **Project memory.** The agent saves durable facts with Remember, looks them
   up with Recall, and starts each run with the facts relevant to your request.

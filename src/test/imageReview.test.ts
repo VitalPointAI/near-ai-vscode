@@ -164,6 +164,62 @@ test('edit_of on a model with no listed operations tries the edit endpoint and f
   assert.throws(() => tool.parse({ prompt: 'z', path: 'c.png', edit_of: '../../etc/passwd' }), /edit_of must be a draft id/);
 });
 
+// Agent review of PR 51: a draft kept after "Request changes" waited for the 7-day sweep even once a new attempt replaced it.
+test('a new attempt that succeeds deletes the drafts it replaces; a failed one keeps them; another path\'s draft and an open card are left alone', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'near-ai-image-supersede-'));
+  const editing = { ...FLUX, providerOperations: ['image-generation', 'image-edit'] };
+  const failing = Object.assign(new Error('NEAR AI request failed with HTTP 500.'), { status: 500 });
+  let failEdit = false;
+  const client = imageClient();
+  const flaky = { ...client, async editImage(...args: Parameters<typeof client.editImage>) { if (failEdit) throw failing; return client.editImage(...args); } };
+  const reviewer = scriptedReviewer(root, [
+    { decision: 'changes', feedback: 'warmer' }, { decision: 'changes', feedback: 'keep' }, { decision: 'changes', feedback: 'warmer still' }, { decision: 'changes', feedback: 'again' }, { decision: 'accept' }
+  ]);
+  const tool = imageTool(flaky as never, editing as never, [], reviewer);
+  await withContext(root, async (context) => {
+    await tool.run(tool.parse({ prompt: 'a lighthouse', path: 'hero.png' }), context);
+    const first = reviewer.shown[0].id;
+    await tool.run(tool.parse({ prompt: 'an icon', path: 'icon.png' }), context);
+    const icon = reviewer.shown[1].id;
+    // A failed edit keeps the draft it would have replaced.
+    failEdit = true;
+    await assert.rejects(tool.run(tool.parse({ prompt: 'warmer', path: 'hero.png', edit_of: first }), context), /HTTP 500/);
+    assert.ok(existsSync(draftFile(root, first)), 'the draft stays when the edit fails');
+    assert.ok(reviewer.drafts.has(first));
+    // A successful edit deletes it.
+    failEdit = false;
+    await tool.run(tool.parse({ prompt: 'warmer', path: 'hero.png', edit_of: first }), context);
+    const second = reviewer.shown[2].id;
+    assert.equal(existsSync(draftFile(root, first)), false, 'the edited draft is deleted once the edit exists');
+    assert.equal(reviewer.drafts.has(first), false);
+    assert.ok(existsSync(draftFile(root, second)), 'the new draft, kept after Request changes, stays');
+    assert.ok(existsSync(draftFile(root, icon)), 'a draft for another path is left alone');
+    // A new attempt at the same path without edit_of replaces it too.
+    await tool.run(tool.parse({ prompt: 'a lighthouse at dusk', path: 'hero.png' }), context);
+    const third = reviewer.shown[3].id;
+    assert.equal(existsSync(draftFile(root, second)), false, 'a new attempt at the same path deletes the kept draft');
+    assert.ok(existsSync(draftFile(root, third)));
+    // Accepting the next edit moves it to its path and leaves no draft of hero.png behind.
+    await tool.run(tool.parse({ prompt: 'dusk, warmer', path: 'hero.png', edit_of: third }), context);
+    assert.deepEqual([...reviewer.drafts.keys()], [icon]);
+    assert.ok(existsSync(path.join(root, 'hero.png')));
+  });
+  // A draft whose card is still open (another agent's attempt at the same path) is not deleted under it.
+  const root2 = await mkdtemp(path.join(tmpdir(), 'near-ai-image-supersede-open-'));
+  let release: (decision: ImageReviewDecision) => void = () => undefined;
+  const shown: ImageDraft[] = [];
+  const parallel: ImageReviewer = { root: root2, drafts: new Map(), attempts: new Map(), review: (draft) => { shown.push(draft); return shown.length === 1 ? new Promise((resolve) => { release = resolve; }) : Promise.resolve({ decision: 'changes', feedback: 'x' }); } };
+  const tool2 = imageTool(imageClient() as never, FLUX as never, [], parallel);
+  await withContext(root2, async (context) => {
+    const waiting = tool2.run(tool2.parse({ prompt: 'a', path: 'hero.png' }), context);
+    await until(() => shown[0]);
+    await tool2.run(tool2.parse({ prompt: 'b', path: 'hero.png' }), context);
+    assert.ok(existsSync(draftFile(root2, shown[0].id)), 'the draft under review is kept');
+    release({ decision: 'accept' });
+    assert.match(await waiting, /^Accepted by the user and saved to hero\.png/);
+  });
+});
+
 test('with image review off the image is written straight to path, as before', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'near-ai-image-off-'));
   const client = imageClient();

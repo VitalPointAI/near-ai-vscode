@@ -33,12 +33,14 @@ export interface ImageDraft {
 /** What the person decided on a draft; `cancelled` when the run or the agent was stopped before they did. */
 export type ImageReviewDecision = { decision: 'accept' } | { decision: 'changes'; feedback: string } | { decision: 'discard' } | { decision: 'cancelled' };
 
+export interface ImageDraftEntry { path: string; reviewing?: boolean }
+
 /** Shows drafts to the person and waits for their decision. One per conversation, so attempt numbers and edit_of carry across its runs. */
 export interface ImageReviewer {
   /** The project root: drafts are kept there, also for a sub-agent working in its own worktree. */
   root: string;
-  /** Drafts made in this conversation and still on disk, by id, with the path they were made for. */
-  drafts: Map<string, { path: string }>;
+  /** Drafts made in this conversation and still on disk, by id, with the path they were made for and whether a card for it is open. */
+  drafts: Map<string, ImageDraftEntry>;
   /** Attempts so far at each target path (absolute), in this conversation. */
   attempts: Map<string, number>;
   review(draft: ImageDraft, signal: AbortSignal): Promise<ImageReviewDecision>;
@@ -121,13 +123,27 @@ export function imageTool(client: NearAiClient, model: ModelInfo, models: readon
       reviewer.attempts.set(absolute, attempt);
       const id = newDraftId();
       const file = await writeDraft(reviewer.root, id, bytes);
-      reviewer.drafts.set(id, { path: shown });
+      reviewer.drafts.set(id, { path: shown, reviewing: true });
+      // The drafts this one replaces (the one it edits, and any earlier one for the same path kept after "Request changes" or a stop) go now that
+      // the new one exists, rather than waiting for the 7-day sweep (agent review of PR 51). A failed attempt throws above and leaves them be; a
+      // draft whose card is still open (another agent's attempt at the same path) is not touched.
+      for (const [old, entry] of [...reviewer.drafts]) {
+        if (old === id || entry.reviewing || (old !== input.editOf && entry.path !== shown)) continue;
+        await deleteDraft(reviewer.root, old).catch(() => undefined);
+        reviewer.drafts.delete(old);
+      }
       const kb = Math.round(bytes.length / 1024);
-      const decision = await reviewer.review({
-        id, file, path: shown, model: used.id, prompt: input.prompt, attempt, bytes: bytes.length,
-        ...(made.edited && input.editOf ? { editOf: input.editOf } : {}), ...(made.note ? { note: made.note } : {}),
-        ...(context.agentLabel ? { agent: context.agentLabel } : {}), ...(context.agentId ? { agentId: context.agentId } : {})
-      }, context.signal);
+      let decision: ImageReviewDecision;
+      try {
+        decision = await reviewer.review({
+          id, file, path: shown, model: used.id, prompt: input.prompt, attempt, bytes: bytes.length,
+          ...(made.edited && input.editOf ? { editOf: input.editOf } : {}), ...(made.note ? { note: made.note } : {}),
+          ...(context.agentLabel ? { agent: context.agentLabel } : {}), ...(context.agentId ? { agentId: context.agentId } : {})
+        }, context.signal);
+      } finally {
+        const kept = reviewer.drafts.get(id);
+        if (kept) kept.reviewing = false;
+      }
       const how = made.note ? ` ${made.note}` : '';
       switch (decision.decision) {
         case 'accept':
