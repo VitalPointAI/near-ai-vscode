@@ -119,14 +119,14 @@ Build order follows the trust boundary: foundation → inbound authenticity (adv
   3. Killing the relay with queued messages and in-flight run records and restarting it loses nothing: all state (run records, conversation bindings, tenant registry, pending approvals, message queues) lives in one git-ignored directory readable only by the relay's OS user. (RELAY-03)
   4. The relay ships as a container image built without a shell or package manager, and every secret (bot secret, tenant API keys, Signal registration material) is read at startup from an operator-supplied source and never appears in the image, the state directory listing, or a log line. (RELAY-04)
 **Research flags**: (1) `node:sqlite` is RC in Node 26 — name the JSON-file-per-tenant fallback for registry/state now so storage choices in later phases stay honest. (2) Pin the exact `signal-cli-rest-api` sidecar version in the container definition this early; verify the image's bundled signal-cli age at integration time (Phase 75).
-**Plans:** 1/8 plans executed (8 waves, run one after another; owner checkpoints: package pins D-20 in 68-01, gate approval and branch protection D-19 in 68-08)
+**Plans:** 2/8 plans executed (8 waves, run one after another; owner checkpoints: package pins D-20 in 68-01, gate approval and branch protection D-19 in 68-08)
 
 Plans:
 **Wave 1**
 - [x] 68-01-PLAN.md — Relay workspace on Node 26: owner confirms package pins (D-20), guard entry, strict settings, GET /healthz end to end; workspace and Node guard rules with tests (RELAY-01, RELAY-02)
 
 **Wave 2** *(blocked on Wave 1 completion)*
-- [ ] 68-02-PLAN.md — Redacting logger as the relay's only output path (D-11), first log lines, health and logging contract tests (RELAY-02, RELAY-04)
+- [x] 68-02-PLAN.md — Redacting logger as the relay's only output path (D-11), first log lines, health and logging contract tests (RELAY-02, RELAY-04)
 
 **Wave 3** *(blocked on Wave 2 completion)*
 - [ ] 68-03-PLAN.md — Extension isolation: vsce lists no relay/ path, relay state and secrets git-ignored, root isolation test on Node 24 (RELAY-01)
@@ -308,7 +308,7 @@ Plans:
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 27. Project state follows the project (0.4.20) | 35/36 | Gap closure planned | - |
-| 68. Relay foundation | 1/8 | In Progress | - |
+| 68. Relay foundation | 2/8 | In Progress | - |
 | 69. Inbound authenticity and allowlisting | 0/TBD | Not started | - |
 | 70. Identity, tenants and requesters | 0/TBD | Not started | - |
 | 71. Teams 1:1 vertical slice | 0/TBD | Not started | - |
