@@ -8,7 +8,7 @@
 - **v0.5.0 Trusted-source knowledge base**: PAUSED 2026-10-29 and moving to a separate project. Its roadmap, requirements, research and Phase 13 plans are archived in `.planning/milestones/v0.5.0-paused/`; the Phase 13 code lives on the local branch `gsd/phase-13-sovereignty-gate-post-quantum-cryptography-and-the-encrypted`.
 - **v0.6.0 Team Mode**: Phases 60-67 on the unmerged, local-only branch `feat/team-fix-pass` (Phase 60 complete, 61 and 62 built with re-tests open, 63-67 not started). Its identity and signed-event core lands on `main` in v0.7.0 Phase 69; the rest is the later milestone L2 (disposition table there).
 - **v0.7.0 Governed agent platform and messaging relay**: Phases 68-84 (Phase 68 complete; replanned 2026-11-15 from the owner's platform direction; relay phases renumbered)
-- **v0.8.0 Cybersecurity**: Phase 25 (executed; UAT may resume once v0.7.0 Phase 72 is merged, owner to confirm)
+- **v0.8.0 Cybersecurity**: Phase 25 (executed; deferred by the owner until everything else in this plan is finished, may move to its own product)
 - **Later milestones L1-L6** (outlined 2026-11-15): Theia appliance and local inference; Team Mode on the governed core; routines and signed packages; verifiable identity and policy on NEAR; edge grouping, compute pooling and HQ federation; Theia desktop app and learned skills
 
 ## 0.4.x line
@@ -156,12 +156,12 @@ Plans:
 | Step | Work | Why here |
 |------|------|----------|
 | 1 | **0.4.23** (PR #51, in review), then its release PR | It closes a live gap (agents could read the project's key folder) and `main` is strict, so the extension line goes first. |
-| 2 | **PR #50** (Phase 68) merges; the owner approves `agent-review-gates` and adds `relay` to branch protection (D-19); then a small relay housekeeping PR: the relay's README, Compose file, build script and tests point at the new phase numbers, and the Signal sidecar re-check date (2026-12-10, now before the Signal phase) is either met or moved to Phase 82 (open question) | The foundation is done; leaving it open blocks every relay phase, and the date falls due long before Phase 82. |
+| 2 | **PR #50** (Phase 68) merges; the owner approves `agent-review-gates` and adds `relay` to branch protection (D-19); then a small relay housekeeping PR: the relay's README, Compose file, build script and tests point at the new phase numbers, and the Signal sidecar re-check date (2026-12-10, now before the Signal phase) is met by re-pinning (owner, 2026-11-15) | The foundation is done; leaving it open blocks every relay phase, and the date falls due long before Phase 82. |
 | 3 | **0.4.24 patch**: the four #46 review minors and the three doc mismatches; **Phase 27 record close** (the owner's check on the real host, 27-UAT test 8 onward, then the 27-16 summary) | Small debt, cleared before the engine changes; SECURITY.md and README must agree before Phase 70 changes the floor. |
 | 4 | **Phase 69, Team Mode reconciliation**, after the owner archives `feat/team-fix-pass` on GitHub | Phase 70's signed policy, Phase 71's grants and Phase 80's approvals all need device identities and the signed log. Building them a second time would leave two trust cores. |
 | 4a | In parallel: **Phase 28** (secure development workflow setup step) and the **OpenShell spike** (running now) | Phase 28 touches only setup and templates; the spike feeds Phase 72. |
 | 5 | **Stage 1, Phases 70 to 74**: gate and manifests, delegation, execution backends, credential broker, run contracts. **Phase 29** (cleanup member and CleanUp tool) follows Phase 70 | The vocabulary and the gate come first because everything else is checked by them; delegation narrows what the gate checks; backends make protected folders absent; the broker needs the backends' network fence; contracts refer to capabilities, grants and backends. |
-| 5a | **Stage gate**: Stage 1 verified and merged before Phase 77 starts. **v0.8.0 cyber UAT** may resume once Phase 72 is merged (owner to confirm) | The relay must not run tools before contracts and sandboxes exist; the cyber harness should run on the shared backends rather than wait for the whole relay. |
+| 5a | **Stage gate**: Stage 1 verified and merged before Phase 77 starts. v0.8.0 is deferred to the end (owner, 2026-11-15) | The relay must not run tools before contracts and sandboxes exist. |
 | 6 | **Stage 2, Phases 75 to 81**: inbound authenticity and channel manifests (may start once Phase 70 is merged, beside Phases 71 to 74), identity and pairing, the Teams 1:1 slice under a contract in a sandbox, the setup view, budgets, the command surface with signed approvals, group chats | Trust boundary before any happy path, 1:1 before groups, budgets once real runs exist, approvals where remote answers arrive. |
 | 7 | **Stage 3, Phases 82 to 84**: Signal, Telegram, ops and release | Further channels are a manifest plus one adapter once Teams is the reference; release needs every surface to exist. |
 | 8 | **Later milestones**, outlined below: Theia appliance and local inference, Team Mode on the governed core, routines and signed packages, verifiable identity and policy on NEAR, edge grouping and HQ federation, Theia desktop and learned skills | Each depends on v0.7.0's layer; the order and reasons are in that section. |
@@ -189,7 +189,7 @@ Phase 68 records, `relay/README.md`, `relay/compose.yaml`, `relay/scripts/build.
 
 | Item | Source | Lands in |
 |------|--------|----------|
-| IN-04 message text retention (open owner decision) | 68-REVIEW-FIX, 68-CONTEXT deferred | Phase 75, decided before it stores real messages |
+| IN-04 message text retention (decided 2026-11-15: blank on acknowledgement) | 68-REVIEW-FIX, 68-CONTEXT deferred | Phase 75, decided before it stores real messages |
 | A1 log redaction matches sensitive keys by containment | 68-SECURITY advisory | Phase 75 |
 | A3 `connectionsCheckingInterval` near 1 s with a read-back test | 68-SECURITY advisory | Phase 75 |
 | A6 tenant resolved through `getBinding` before `acceptInbound` | 68-SECURITY advisory | Phase 76 |
@@ -252,7 +252,7 @@ These phases change the extension's engine (`src/agent`, `src/domain`, `src/team
   3. A project with no team file behaves exactly as before: the full suite is green, and a canary run finds no secret in the log, `team.json`, settings or audit. (TMR-03)
   4. A person's device identity signs and verifies any canonical payload (a policy bundle, a grant, an approval answer), and a key rotation or revocation is itself a signed event that later checks honour; Phases 70, 71 and 80 use this one interface. (TMR-05)
   5. Every v0.6.0 phase and requirement has a recorded disposition (landed here, carried to the Team Mode milestone, folded into a named new phase, or retired), and carried v0.6.0 ids that collide with v0.7.0 ids (TEAM-01..04, SETUP-01) carry a `TM-` prefix. (TMR-04)
-**Research flags**: (1) The branch forked at 0.4.11; `main` is at 0.4.22 or later, with Phases 26 and 27 in between. Decide per file whether to port by cherry-pick or re-apply from the Phase 60 SUMMARY files; `src/extension.ts`, the `package.json` contributions and `src/agent/permissions.ts` changed most. (2) Team Mode's coordination transport and Phase 27's sync both run private git mirrors: check they cannot share or lock each other's mirror. (3) Phases 61, 62 and 62.1 stay on the archive branch for the Team Mode milestone unless the owner chooses to land them here (open question).
+**Research flags**: (1) The branch forked at 0.4.11; `main` is at 0.4.22 or later, with Phases 26 and 27 in between. Decide per file whether to port by cherry-pick or re-apply from the Phase 60 SUMMARY files; `src/extension.ts`, the `package.json` contributions and `src/agent/permissions.ts` changed most. (2) Team Mode's coordination transport and Phase 27's sync both run private git mirrors: check they cannot share or lock each other's mirror. (3) Phases 61, 62 and 62.1 stay on the archive branch for milestone L2 (owner, 2026-11-15); the branch is archived on GitHub at 4207080.
 **Undo cost**: Low for the code (additive, inert while Team Mode is off). Higher for the signing interface (TMR-05): grants and policy bundles signed through it outlive a change.
 **Plans:** 0 plans
 
@@ -348,7 +348,7 @@ Plans:
 Plans:
 - [ ] TBD (run /gsd-plan-phase 74 to break down)
 
-**Stage gate (after Phase 74):** Phases 69-74 are verified and merged before Phase 77 lets the relay run tools. The extension's releases carry each Stage 1 phase as it lands. v0.8.0's UAT may resume once Phase 72 is merged (owner to confirm).
+**Stage gate (after Phase 74):** Phases 69-74 are verified and merged before Phase 77 lets the relay run tools. The extension's releases carry each Stage 1 phase as it lands. v0.8.0 waits until everything else is finished (owner, 2026-11-15).
 
 ### Stage 2: the relay on the governed core (Phases 75-81)
 
@@ -363,7 +363,7 @@ Build order follows the trust boundary, as before: inbound authenticity with adv
   2. The same message arriving twice (platform retry, reconnect resend, edited event) starts exactly one run, verification is always paired with the dedupe ledger, and the inbound path acknowledges within about a second and works afterwards. (AUTH-03, AUTH-06)
   3. A message from a tenant or group that is not allowlisted is refused in the channel with a plain explanation and never reaches a model. (AUTH-04)
   4. Teams is described by a channel manifest (ingress verification, body limit, egress hosts, credential handles and how each is injected); the relay refuses to start a channel whose manifest and operator-supplied secrets disagree, sends each credential only to its audience, and no agent can change the operator half. (CHAN-01, CHAN-02, CHAN-03)
-**Open decision (IN-04, owner)**: message text retention. `ackMessage` keeps up to 1 MiB of message text per `done` row with no limit in time. Decide before this phase stores real messages: blank the payload on acknowledgement (the dedupe key alone recognises a redelivery; recommended), or purge `done` rows after N days.
+**Decision (IN-04, owner 2026-11-15)**: blank the payload on acknowledgement. Background: `ackMessage` keeps up to 1 MiB of message text per `done` row with no limit in time. Decide before this phase stores real messages: blank the payload on acknowledgement (the dedupe key alone recognises a redelivery; recommended), or purge `done` rows after N days.
 **Carried from Phase 68**: A1 (match sensitive log keys by containment before real auth data is logged), A3 (`connectionsCheckingInterval` near 1 s with a read-back test before the port sits behind the webhook); `jose` comes into use here.
 **Research flags**: PITFALLS ranks 6 of 8 pitfalls High on this boundary. The manifest shape starts from IronClaw's `[channel]` section (see `ironclaw-analysis.md`, R6).
 **Plans:** 0 plans
@@ -379,10 +379,10 @@ Plans:
   1. Each inbound message binds to a tenant from the verified envelope alone, never from message text, and one that cannot be bound is refused rather than guessed; the store resolves the binding before it accepts a message. (IDNT-01)
   2. A test proves a result and its working thread reach only the tenant, conversation and requester that produced them, and each tenant has its own workspace and uses only its own key. (IDNT-03, IDNT-04)
   3. Each tenant has an identity whose authority section bounds every run for that tenant, and each requester is recorded on first sight and survives a restart. (IDNT-02, IDNT-05)
-  4. A person pairs their chat account in two steps (a one-time code from the operator side or the person's own editor, confirmed in the chat), recorded as a signed event; until paired a person can start runs only within the tenant's default contract and cannot approve anything; unpairing, account changes and recycled phone numbers never carry a pairing over. (PAIR-01, PAIR-02, PAIR-03)
+  4. A person pairs their chat account in two steps (a one-time code from the operator side or the person's own editor, confirmed in the chat), recorded as a signed event; until paired a person cannot start runs or approve anything and is told how to pair; unpairing, account changes and recycled phone numbers never carry a pairing over. (PAIR-01, PAIR-02, PAIR-03)
   5. No agent can pair, unpair or change anyone's pairing. (PAIR-04)
 **Carried from Phase 68**: A6 (resolve the tenant through `getBinding` before `acceptInbound`, or enforce the binding inside the store).
-**Research flags**: (1) Confirm Teams tenant, thread and requester field paths against a live tenant before the schema is frozen. (2) Proactive 1:1 messaging after a group mention depends on the bot's install scope, the highest derail risk in the relay; verify here and record the fallback for Phase 81 and the Phase 84 threat model. (3) Whether everyone must pair, or unpaired people get the tenant's default contract (PAIR-02, open question).
+**Research flags**: (1) Confirm Teams tenant, thread and requester field paths against a live tenant before the schema is frozen. (2) Proactive 1:1 messaging after a group mention depends on the bot's install scope, the highest derail risk in the relay; verify here and record the fallback for Phase 81 and the Phase 84 threat model. (3) Everyone must pair (owner, 2026-11-15).
 **Plans:** 0 plans
 
 Plans:
@@ -550,7 +550,7 @@ RUNL-05 (approvals in the private chat) is retired: APRV-01 … APRV-04 replace 
 
 **Milestone goal:** The cybersecurity harness (target picker, legal disclaimer, defensive and offensive scans, engagement ledger) is verified end to end, its twelve regional disclaimers are accepted by the owner, and it ships as its own release, 0.8.0.
 
-**Moved 2026-11-13** out of the 0.4.x line at the owner's request, so the cyber module is planned and released under its own number. Phase 25 keeps its number (its plans, summaries and commits already use it). Its code is already in the extension, and parts reached users in 0.4.x releases; this milestone closes UAT and the owner legal review, then adds any follow-up phases. **Order (replanned 2026-11-15, owner to confirm):** UAT resumes once v0.7.0 Phase 72 (execution backends) is merged, so the harness's sandbox runs through the shared backend interface, instead of waiting for all of v0.7.0. A follow-up phase (numbered when planned) adds the isolated VM enclave recorded in PROJECT.md as another backend of that interface (OpenShell's MicroVM driver is a candidate), with the breakout suite as its release gate; until then a scan never claims VM isolation.
+**Moved 2026-11-13** out of the 0.4.x line at the owner's request, so the cyber module is planned and released under its own number. Phase 25 keeps its number (its plans, summaries and commits already use it). Its code is already in the extension, and parts reached users in 0.4.x releases; this milestone closes UAT and the owner legal review, then adds any follow-up phases. **Order (owner, 2026-11-15):** deferred until everything else in this plan is finished; it may move to its own product. When it resumes, its sandbox runs through the shared execution backend interface from Phase 72. A follow-up phase (numbered when planned) adds the isolated VM enclave recorded in PROJECT.md as another backend of that interface (OpenShell's MicroVM driver is a candidate), with the breakout suite as its release gate; until then a scan never claims VM isolation.
 
 ### Phase 25: Cybersecurity harness with a target picker, offensive and defensive scans
 
@@ -657,4 +657,4 @@ Also carried: the shared code-server follow-ups (owner, 2026-11-05). Phase 27 al
 | 82. Signal channel | 0/TBD | Not started | - |
 | 83. Telegram channel | 0/TBD | Not started | - |
 | 84. Ops, onboarding and release | 0/TBD | Not started | - |
-| 25. Cybersecurity harness (v0.8.0) | 8/8 | UAT parked; may resume after Phase 72 | - |
+| 25. Cybersecurity harness (v0.8.0) | 8/8 | Deferred to the end; may become its own product | - |

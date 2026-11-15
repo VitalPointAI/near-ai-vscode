@@ -111,7 +111,7 @@
 ### Channel pairing (Phase 76)
 
 - [ ] **PAIR-01**: After the operator has configured a channel, a person pairs their chat account in two steps (a one-time code from the operator side or the person's own editor, confirmed in the chat), recorded as a signed event that binds the channel identity to the person's identity within one tenant.
-- [ ] **PAIR-02**: An unpaired person in an allowlisted conversation can start runs only within the tenant's default contract and cannot approve anything; approving and spending beyond the default need a pairing.
+- [ ] **PAIR-02**: An unpaired person in an allowlisted conversation cannot start runs or approve anything; the bot replies with how to pair (owner decision 2026-11-15: everyone must pair).
 - [ ] **PAIR-03**: A person or the operator can unpair, and account changes, reassigned accounts and recycled phone numbers never inherit a pairing.
 - [ ] **PAIR-04**: No agent can pair, unpair or change any pairing, or the operator's channel configuration.
 

@@ -44,7 +44,7 @@ Next, in order:
 - Milestone v0.7.0 added 2026-11-13: Messaging relay, Teams and Signal. Phases 68-76 mapped all 45 requirements then defined (later 54 with SETUP and TGRM).
 - Phase numbering starts at 68: branch-shipped phases end at 26; the unmerged `feat/team-fix-pass` branch claims Phases 60-67 for v0.6.0; 68 keeps both honest.
 - Phase 26 completed on branch perf/research-runs: Performance, faster agent and research runs (PERF-01…07, 5 plans, verified).
-- Phase 25 (Cybersecurity harness, CYBER-01…12) moved 2026-11-13 out of the 0.4.x line into its own milestone v0.8.0 Cybersecurity. All 8 plans are executed; 25-UAT.md is parked at test 2, and the owner's review of the 12 regional disclaimers is still to do. Replan 2026-11-15: UAT may resume once Phase 72 is merged (owner to confirm).
+- Phase 25 (Cybersecurity harness, CYBER-01…12) moved 2026-11-13 out of the 0.4.x line into its own milestone v0.8.0 Cybersecurity. All 8 plans are executed; 25-UAT.md is parked at test 2, and the owner's review of the 12 regional disclaimers is still to do. Owner 2026-11-15: deferred until everything else in this plan is finished; it may move to its own product.
 
 ### Locked decisions (encode, do not re-litigate)
 
@@ -58,17 +58,18 @@ Next, in order:
 - Per-tenant budget cap always on; per-conversation cap defaults to unlimited.
 - Every relay run executes under a contract in a sandbox (EXEC-11, CTRT-07); the relay never gets a container runtime socket.
 
-### Open decisions (owner)
+### Owner answers 2026-11-15 (were open decisions)
 
-- IN-04 message text retention in the relay store: blank the payload on acknowledgement (recommended) or purge `done` rows after N days. Needed before Phase 75 stores real messages.
-- Whether Phase 69 also lands Team Mode Phases 61, 62 and 62.1 (recommended: no, they go to milestone L2 after their re-test chain closes).
-- DID method and identity lifetime (`did:near` or `did:key`; persistent per member or per run). Needed before Phase 71.
-- Versioning: whether Stage 1 phases ship in 0.4.x releases as they land, with 0.7.0 at the milestone's end (recommended), or wait.
-- Whether v0.8.0 UAT resumes after Phase 72 (recommended) instead of after all of v0.7.0.
-- Whether unpaired chat users get the tenant's default contract (PAIR-02, recommended) or everyone must pair.
-- The Signal sidecar re-check date (2026-12-10) falls before Phase 82: re-pin by then, or move the date in the relay housekeeping PR.
-- The order of the later milestones L1-L6 (recommended order in ROADMAP.md).
-- Whether a mixed NVIDIA and AMD group may stop at per-vendor pools with request balancing (POOL-01), since one model split across vendors may not be practical.
+- IN-04: the relay blanks a message's text once it is acknowledged (Phase 75).
+- Phase 69 lands only the Team Mode identity, signed log and permissions foundations; Phases 61, 62 and 62.1 go to milestone L2. `feat/team-fix-pass` is archived on GitHub (4207080, loose files committed first).
+- DID method `did:near`; one persistent identity per team member, with per-run grants under it (Phase 71).
+- Stage 1 phases ship in 0.4.x releases as they land; 0.7.0 at the milestone's end.
+- v0.8.0 Cybersecurity is deferred until everything else in this plan is finished; it may move to its own product.
+- Everyone must pair before a run (PAIR-02); unpaired people get no default contract.
+- Signal sidecar: re-pin by 2026-12-10 in the relay housekeeping PR.
+- Later milestones in the order L1-L6; mixed NVIDIA and AMD groups may stop at per-vendor pools with request balancing (POOL-01).
+- GATE-05 accepted: fully-autonomous asks before writes into `.git/` and `.near-ai/` state.
+- v0.7.0 stays one milestone with three stage gates.
 
 ### Naming trap
 
