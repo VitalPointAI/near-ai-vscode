@@ -225,6 +225,29 @@ test('a field named time, level or event cannot overwrite the line envelope', ()
   assert.equal(parsed.field_event, 'forged.event');
 });
 
+test('fields named __proto__, constructor and prototype are kept as ordinary fields, in the redactor output and on the log line', () => {
+  // JSON.parse (like a computed key) gives an own __proto__ property, the way a field name from outside would arrive.
+  const fields = JSON.parse('{"__proto__":"p","constructor":"c","prototype":"t","hasOwnProperty":"h"}') as Record<string, unknown>;
+  const output = new Redactor().fields(fields);
+  assert.equal(Object.getPrototypeOf(output), Object.prototype, 'the redactor output prototype is not replaced');
+  assert.deepEqual(Object.keys(output), ['__proto__', 'constructor', 'prototype', 'hasOwnProperty']);
+  assert.equal(Object.getOwnPropertyDescriptor(output, '__proto__')?.value, 'p');
+  assert.equal(Object.getOwnPropertyDescriptor(output, 'constructor')?.value, 'c');
+  assert.equal(Object.getOwnPropertyDescriptor(output, 'prototype')?.value, 't');
+
+  const { logger, lines } = capture(new Redactor());
+  logger.info('relay.listening', fields);
+  assert.equal(lines.length, 1);
+  const line = lines[0] as string;
+  assert.match(line, /"__proto__":"p"/, 'the __proto__ field reaches the log line');
+  const parsed = JSON.parse(line) as Record<string, unknown>;
+  assert.deepEqual(Object.keys(parsed), ['time', 'level', 'event', '__proto__', 'constructor', 'prototype', 'hasOwnProperty']);
+  assert.equal(Object.getOwnPropertyDescriptor(parsed, 'constructor')?.value, 'c');
+  assert.equal(Object.getOwnPropertyDescriptor(parsed, 'prototype')?.value, 't');
+  // A second __proto__ under its collision name still keeps both.
+  assert.equal(uniqueFieldName(new Map([['__proto__', 1]]), '__proto__'), '__proto__#2');
+});
+
 test('a renamed envelope field does not overwrite a field that already carries the new name', () => {
   const { logger, lines } = capture(new Redactor());
   logger.info('relay.listening', { field_time: 'first', time: 'forged' });

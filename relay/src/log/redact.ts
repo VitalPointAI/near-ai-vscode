@@ -76,10 +76,11 @@ function normaliseKey(key: string): string {
 }
 
 /** `name` if `target` does not hold it yet, otherwise the first free `name#2`, `name#3` ... so one field never overwrites another. */
-export function uniqueFieldName(target: Record<string, unknown>, name: string): string {
-  if (!Object.hasOwn(target, name)) return name;
+export function uniqueFieldName(target: ReadonlyMap<string, unknown> | Record<string, unknown>, name: string): string {
+  const taken = (candidate: string): boolean => (target instanceof Map ? target.has(candidate) : Object.hasOwn(target, candidate));
+  if (!taken(name)) return name;
   let n = 2;
-  while (Object.hasOwn(target, `${name}#${n}`)) n += 1;
+  while (taken(`${name}#${n}`)) n += 1;
   return `${name}#${n}`;
 }
 
@@ -114,12 +115,14 @@ export class Redactor {
   }
 
   fields(input: Record<string, unknown>): Record<string, LogValue> {
-    const output: Record<string, LogValue> = {};
+    // Collected in a Map and turned into an object at the end: assigning a field called __proto__ to a plain object would run the
+    // prototype setter and lose the field, while Object.fromEntries defines it as an ordinary own property.
+    const output = new Map<string, LogValue>();
     // Output names are derived (a sensitive key becomes its normalised form plus Length, other keys pass through secret masking), so two
     // input keys can map to one name: Authorization and authorization, or text next to a field literally called textLength. Every field
     // is kept under a unique name instead of the later one silently replacing the earlier.
     const put = (name: string, value: LogValue): void => {
-      output[uniqueFieldName(output, name)] = value;
+      output.set(uniqueFieldName(output, name), value);
     };
     for (const [key, value] of Object.entries(input)) {
       const normalised = normaliseKey(key);
@@ -136,7 +139,7 @@ export class Redactor {
       else if (typeof value === 'number' || typeof value === 'boolean' || value === null) put(outputKey, value);
       else put(outputKey, `[dropped:${typeof value}]`);
     }
-    return output;
+    return Object.fromEntries(output);
   }
 
   private phoneLabel(raw: string): string {

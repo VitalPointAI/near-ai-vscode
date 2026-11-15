@@ -31,16 +31,17 @@ export class Logger {
   }
 
   private write(level: LogLevel, event: string, fields: Record<string, unknown>): void {
-    const entry: Record<string, unknown> = {
-      time: new Date(this.now()).toISOString(),
-      level,
-      event: EVENT_NAME.test(event) ? event : 'invalid-event',
-    };
+    // A Map, not a plain object, so a field called __proto__ is kept as a field instead of running the prototype setter.
+    const entry = new Map<string, unknown>([
+      ['time', new Date(this.now()).toISOString()],
+      ['level', level],
+      ['event', EVENT_NAME.test(event) ? event : 'invalid-event'],
+    ]);
     for (const [key, value] of Object.entries(this.redactor.fields(fields))) {
-      entry[uniqueFieldName(entry, RESERVED_KEYS.has(key) ? `field_${key}` : key)] = value;
+      entry.set(uniqueFieldName(entry, RESERVED_KEYS.has(key) ? `field_${key}` : key), value);
     }
     try {
-      this.sink(JSON.stringify(entry));
+      this.sink(JSON.stringify(Object.fromEntries(entry)));
     } catch {
       // A broken sink (a closed pipe) must not take the relay down or throw into the code that logged.
     }
