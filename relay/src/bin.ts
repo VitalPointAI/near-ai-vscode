@@ -1,10 +1,10 @@
 // Guard entry (D-02). It checks the Node version first and only then loads the app, so an older Node prints one plain sentence instead of
 // failing on a module it does not have. The app path sits in a variable so neither tsc nor esbuild follows it into the bundle.
-export {};
+import { checkNodeVersion } from './nodeVersion';
 
-const [major = 0, minor = 0, patch = 0] = process.versions.node.split('.').map(Number);
-if (!(major === 26 && (minor > 13 || (minor === 13 && patch >= 1)))) {
-  process.stderr.write(`near-ai-relay needs Node 26.13.1 or a later 26.x release; this is Node ${process.versions.node}. Install Node 26.13.1 and start again.\n`);
+const refusal = checkNodeVersion(process.versions.node);
+if (refusal) {
+  process.stderr.write(`${refusal}\n`);
   process.exit(1);
 }
 

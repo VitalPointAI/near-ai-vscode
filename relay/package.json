@@ -9,8 +9,9 @@
     "node": ">=26.13.1 <27"
   },
   "scripts": {
-    "build": "node scripts/build.mjs",
-    "test": "node scripts/build.mjs && node ../scripts/run-tests.mjs dist/test/*.test.js",
+    "build": "node scripts/check-node.mjs && node scripts/build.mjs",
+    "lint": "node scripts/check-node.mjs && tsc -p tsconfig.json",
+    "test": "node scripts/check-node.mjs && node scripts/build.mjs && node ../scripts/run-tests.mjs dist/test/*.test.js",
     "start": "node dist/bin.mjs"
   },
   "dependencies": {
