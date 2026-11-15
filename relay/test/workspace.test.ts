@@ -11,7 +11,8 @@ import { checkNodeVersion, MIN_NODE_VERSION } from '../src/nodeVersion';
 // Node version rule in one place, and keeps the agent core reachable only through src/runner (Phase 71).
 //
 // The old-Node cases need a real older node binary. They run when NEAR_AI_RELAY_OLD_NODE names one (for example
-// ~/.nvm/versions/node/v24.22.2/bin/node) and are skipped with a printed reason otherwise.
+// ~/.nvm/versions/node/v24.22.2/bin/node) and are skipped with a printed reason otherwise. CI always sets it, and a run in GitHub Actions
+// without it fails.
 
 const RELAY_ROOT = fileURLToPath(new URL('../../', import.meta.url));
 const OLD_NODE = process.env.NEAR_AI_RELAY_OLD_NODE;
@@ -53,6 +54,11 @@ test('checkNodeVersion refuses 24.22.2, 26.13.0 and 27.0.0 and names 26.13.1 and
 
 test('checkNodeVersion accepts 26.13.1 and later 26.x releases', () => {
   for (const version of ['26.13.1', '26.13.2', '26.14.0', '26.20.5']) assert.equal(checkNodeVersion(version), undefined, version);
+});
+
+test('in GitHub Actions the older-Node refusal tests run and are not skipped', () => {
+  // CI provides Node 24 through NEAR_AI_RELAY_OLD_NODE (the relay job in .github/workflows/ci.yml). Skipping there would hide a broken guard.
+  if (process.env.GITHUB_ACTIONS === 'true') assert.ok(OLD_NODE, 'NEAR_AI_RELAY_OLD_NODE must be set in CI');
 });
 
 test('an older Node running dist/bin.mjs prints one plain sentence naming Node 26.13.1 and exits 1 without a SyntaxError', { skip: SKIP_OLD_NODE }, () => {

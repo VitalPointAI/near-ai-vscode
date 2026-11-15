@@ -81,7 +81,9 @@ this page in the same PR.
 - `audit` and `secret-scan` do not install anything.
 - `relay` is the only job that does not use Node 24: the messaging relay in `relay/` has its own
   lockfile and runs on Node 26.13.1. It installs with `npm ci --ignore-scripts` and builds the relay
-  container image, so it needs Docker, which the GitHub runner provides.
+  container image, so it needs Docker, which the GitHub runner provides. It also installs a Node 24
+  only to prove the relay refuses it (`NEAR_AI_RELAY_OLD_NODE`); those tests fail rather than skip
+  in CI.
 - Every action is pinned to a full commit SHA; the workflow token is read-only and checkouts do
   not keep credentials.
 

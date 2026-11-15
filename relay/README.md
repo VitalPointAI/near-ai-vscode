@@ -25,7 +25,7 @@ Run these from the `relay` folder.
 | --- | --- |
 | `npm ci` | Installs the locked dependencies (install scripts are off). |
 | `npm run lint` | Type-checks the relay. |
-| `npm test` | Builds and runs the unit and integration tests. It does not need Docker. |
+| `npm test` | Builds and runs the unit and integration tests. It does not need Docker. Set `NEAR_AI_RELAY_OLD_NODE` to an older `node` binary (for example `~/.nvm/versions/node/v24.22.2/bin/node`) to also run the older-Node refusal tests, which CI always runs. |
 | `npm run test:container` | Builds the image and runs the container suite (Docker and Compose required). It makes only its own uniquely named image, Compose project and volume, and removes them again. |
 | `npm start` | Starts the built relay from `dist/bin.mjs`. Run `npm run build` first. |
 

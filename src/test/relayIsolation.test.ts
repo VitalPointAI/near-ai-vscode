@@ -167,6 +167,17 @@ test('the relay job passes without running anything on a commit that has no rela
   }
 });
 
+test('the relay job gives the older-Node refusal tests a real Node 24 and still runs everything else on 26.13.1', async () => {
+  const workflow = await readFile(path.join(REPO_ROOT, '.github', 'workflows', 'ci.yml'), 'utf8');
+  const steps = jobSteps(ciJob(workflow, 'relay'));
+  const old = steps.findIndex((step) => step.includes('uses: actions/setup-node@') && step.includes("node-version: '24'"));
+  const keep = steps.findIndex((step) => step.includes('NEAR_AI_RELAY_OLD_NODE=$(command -v node)') && step.includes('$GITHUB_ENV'));
+  const current = steps.findIndex((step) => step.includes('uses: actions/setup-node@') && step.includes("node-version: '26.13.1'"));
+  const firstNpm = steps.findIndex((step) => /run: npm /.test(step));
+  assert.ok(old >= 0 && keep >= 0 && current >= 0 && firstNpm >= 0, 'the relay job installs Node 24, records its path, and installs 26.13.1');
+  assert.ok(old < keep && keep < current && current < firstNpm, 'Node 24 is recorded before 26.13.1 is installed, so 26.13.1 is first on PATH for npm');
+});
+
 test('the merge gates require the relay check', async () => {
   const text = await readFile(path.join(REPO_ROOT, 'scripts', 'lib', 'workflow.mjs'), 'utf8');
   const line = text.split(/\r?\n/).find((candidate) => candidate.startsWith('export const CI_CHECKS'));
