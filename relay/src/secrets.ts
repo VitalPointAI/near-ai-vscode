@@ -112,7 +112,7 @@ async function readSecretFile(name: string, file: string, allowMissing: boolean,
     throw new SecretError(name, `${name}: the file could not be opened (${code ?? 'error'}).`);
   }
   try {
-    const info = await handle.stat();
+    const info = await handle.stat(); // fstat on the opened descriptor: no gap between the check and the read
     if (!info.isFile()) throw new SecretError(name, `${name}: the path is not a regular file.`);
     if ((info.mode & GROUP_OR_WORLD) !== 0) {
       throw new SecretError(name, `${name}: the file is readable or writable by group or others; run chmod 600 (or 400) on it.`);
