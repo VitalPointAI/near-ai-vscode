@@ -1,0 +1,1 @@
+No external API integration: builds the relay itself (workspace, store, secrets, logging, its own /healthz, container, CI); "API" only names a secret class. Teams, NEAR AI and Signal come in later phases.
