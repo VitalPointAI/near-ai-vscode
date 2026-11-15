@@ -10,12 +10,13 @@ import type { TeamSession } from './teamSession';
 export const ENABLE_COMMAND = 'nearAi.team.enable';
 export const VERIFY_LOG_COMMAND = 'nearAi.team.verifyLog';
 export const SOLO_TEXT = 'Team Mode is not on for this project. Run "NEAR AI: Enable Team Mode" to turn it on.';
-export const PUSH_ACTION = 'Push';
+export const PUSH_ACTION = 'Share with my team';
+export const SHARED_TEXT = 'Shared with your team.';
 export const VERIFY_ACTION = 'Verify Team Log';
 const OUTPUT_CHANNEL_NAME = 'NEAR AI Team';
 const TEAM_FILE_PARTS = ['.planning', '.near-ai', 'team.json'];
 const ENABLE_PROGRESS_TITLE = 'Enabling Team Mode';
-const EMAIL_PROMPT = 'Your email is stored only as a salted hash in the team log.';
+const EMAIL_PROMPT = 'Your email is kept only as a scrambled code (a salted hash) in the team record, never as plain text.';
 
 export type TeamModeState = 'solo' | 'team' | 'error';
 export interface TeamModeHandle { ready: Promise<TeamModeState>; session(): TeamSession | undefined }
@@ -201,16 +202,21 @@ export function registerTeamMode(context: vscode.ExtensionContext): TeamModeHand
     }
 
     await startSession(projectRoot);
-    const where = result.branch === undefined
-      ? 'team.json is committed.'
-      : `team.json is committed on ${result.branch}. Push it when you are ready so teammates can see the team.`;
-    const message = `Team Mode is on for ${result.teamFile.name}. ${where}`;
+    const message = result.branch === undefined
+      ? `Team Mode is on for ${result.teamFile.name}.`
+      : `Team Mode is on for ${result.teamFile.name}. Share it so teammates can see the team.`;
     output.appendLine(message);
+    output.appendLine(result.branch === undefined
+      ? 'team.json is committed.'
+      : `team.json is committed on ${result.branch}. Sharing pushes ${result.branch} to ${result.remote}.`);
     const actions = result.branch === undefined ? [VERIFY_ACTION] : [PUSH_ACTION, VERIFY_ACTION];
     const choice = await vscode.window.showInformationMessage(message, ...actions);
     if (choice === PUSH_ACTION && result.branch !== undefined) {
       const pushed = await enableModule.pushCodeBranch(projectRoot, result.remote, result.branch);
-      if (pushed.ok) report('info', `Pushed ${result.branch} to ${result.remote}.`);
+      if (pushed.ok) {
+        output.appendLine(`Pushed ${result.branch} to ${result.remote}.`);
+        report('info', SHARED_TEXT);
+      }
       else report('error', pushed.message);
     } else if (choice === VERIFY_ACTION) {
       await verifyLog();

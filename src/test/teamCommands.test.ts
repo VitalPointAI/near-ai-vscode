@@ -102,11 +102,11 @@ test('Enable asks for team name, owner name and email with defaults, creates tea
     const mainBefore = remoteMain(p.fixture);
     await p.enable(['Command team', 'Lead Owner', 'lead@example.invalid']);
 
-    assert.deepEqual(stub.inputRequests.map((request) => request.prompt?.split('.')[0]), ['Team name', 'Your name as teammates will see it', 'Your email is stored only as a salted hash in the team log']);
+    assert.deepEqual(stub.inputRequests.map((request) => request.prompt?.split('.')[0]), ['Team name', 'Your name as teammates will see it', 'Your email is kept only as a scrambled code (a salted hash) in the team record, never as plain text']);
     assert.equal(stub.inputRequests[0]?.value, 'a', 'the team name defaults to the folder name');
     assert.equal(stub.inputRequests[1]?.value, 'Team Test', 'the owner name defaults to git user.name');
     assert.equal(stub.inputRequests[2]?.value, 'team-test@example.invalid', 'the email defaults to git user.email');
-    assert.equal(stub.inputRequests[2]?.prompt, 'Your email is stored only as a salted hash in the team log.');
+    assert.equal(stub.inputRequests[2]?.prompt, 'Your email is kept only as a scrambled code (a salted hash) in the team record, never as plain text.');
 
     const teamFile = await readTeamFile(p.root);
     assert.ok(teamFile !== undefined, 'team.json was written');
@@ -122,7 +122,8 @@ test('Enable asks for team name, owner name and email with defaults, creates tea
     assert.ok(done !== undefined, 'the confirmation is shown');
     assert.equal(done.level, 'info');
     assert.deepEqual(stub.notificationActions[doneIndex], [PUSH_ACTION, VERIFY_ACTION]);
-    assert.ok(done.message.includes('team.json is committed on main'));
+    assert.equal(done.message, 'Team Mode is on for Command team. Share it so teammates can see the team.');
+    assert.ok(outputLines().includes('team.json is committed on main. Sharing pushes main to origin.'), 'the git detail stays in the channel');
     assert.equal(remoteMain(p.fixture), mainBefore, 'the code branch was not pushed because Push was not clicked');
     assert.deepEqual(stub.configUpdates, [], 'settings were never written');
     assert.ok(remoteHasCoordination(p.fixture), 'the coordination branch exists on the remote');
@@ -136,7 +137,8 @@ test('choosing Push pushes the current branch and reports it', async () => {
     const head = gitIn(p.root, ['rev-parse', 'HEAD']);
     assert.notEqual(head, mainBefore);
     assert.equal(remoteMain(p.fixture), head, 'the remote main now equals the clone HEAD');
-    assert.ok(messages().includes('Pushed main to origin.'));
+    assert.ok(messages().includes('Shared with your team.'));
+    assert.equal(messages().some((message) => message.includes('Pushed main')), false, 'the notification has no git words');
     assert.ok(outputLines().includes('Pushed main to origin.'));
   });
 });
@@ -167,7 +169,7 @@ test('choosing Verify Team Log writes the report to the NEAR AI Team channel', a
     assert.ok(lines.some((line) => line.startsWith('Verify Team Log: Verify team')), 'the report header is in the channel');
     assert.ok(lines.includes('Events: 2 (2 accepted, 0 rejected)'));
     assert.ok(lines.some((line) => line.includes('Lead Owner, owner')));
-    assert.ok(messages().some((message) => message.startsWith('Team log verified: 2 events, 1 member, 0 rejected')));
+    assert.ok(messages().some((message) => message.startsWith('The team record passed its check: 2 events, 1 member, 0 rejected')));
     assert.ok(stub.outputChannels.every((channel) => channel.name === 'NEAR AI Team'));
   });
 });
@@ -178,7 +180,7 @@ test('the Verify Team Log command works from the palette once a team exists', as
     stub.notifications.length = 0;
     await p.verify();
     assert.ok(outputLines().some((line) => line.startsWith('Verify Team Log: Palette team')));
-    assert.ok(messages().some((message) => message.startsWith('Team log verified')));
+    assert.ok(messages().some((message) => message.startsWith('The team record passed its check')));
   });
 });
 

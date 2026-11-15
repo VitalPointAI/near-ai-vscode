@@ -33,7 +33,7 @@ export const TEAM_ACTIVE_CONTEXT = 'nearAi.team.active';
 export const SHOW_DETAILS_ACTION = 'Show details';
 export const UPDATE_EXTENSION_TEXT = 'Some events need a newer version of NEAR AI. Update the extension to read them.';
 export const READ_ONLY_TEXT = 'This computer has no device key for this team, so it can read the team log but not write to it.';
-const VERIFY_PROGRESS_TITLE = 'Verifying the team log';
+const VERIFY_PROGRESS_TITLE = 'Checking the team record';
 const AUDIT_FILE_PARTS = ['.planning', '.near-ai', 'audit.json'];
 
 export interface TeamOutput { appendLine(line: string): void; show(preserveFocus?: boolean): void }
@@ -260,13 +260,13 @@ export class TeamSession {
     const counts = `${plural(report.events, 'event')}, ${plural(report.members.length, 'member')}, ${report.rejected.length} rejected`;
     const problems = report.refused !== undefined || report.rejected.length > 0 || report.unsupported > 0;
     if (!problems) {
-      this.announce('info', `Team log verified: ${counts}`);
+      this.announce('info', `The team record passed its check: ${counts}`);
     } else {
       const extras = [
-        report.refused === undefined ? '' : ` The log was refused: ${safeReason(report.refused)}.`,
+        report.refused === undefined ? '' : ' The record failed its safety check. Choose Show details to see why.',
         report.unsupported > 0 ? ` ${UPDATE_EXTENSION_TEXT}` : ''
       ].join('');
-      this.announce('warn', `Team log checked, with problems: ${counts}.${extras}`);
+      this.announce('warn', `The team record was checked and has problems: ${counts}.${extras}`);
     }
     return report;
   }

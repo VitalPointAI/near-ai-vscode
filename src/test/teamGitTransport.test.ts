@@ -307,6 +307,7 @@ test('every push losing the race returns busy after maxRetries + 1 attempts with
     if (!result.ok) {
       assert.equal(result.kind, 'busy');
       assert.equal(result.attempts, 4);
+      assert.equal(result.reason, 'The team record changed too often while saving. Try again in a moment.');
     }
     assert.equal(builds, 4);
     assert.deepEqual(delays, [75, 150, 300]);

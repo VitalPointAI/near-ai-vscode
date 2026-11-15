@@ -6,10 +6,10 @@ import { redactGitMessage } from '../../team/runGit';
 import { BRANCH_MISSING_REASON } from '../../team/transport';
 import type { TransportStatus } from '../../team/transport';
 
-export const PAUSED_UNREACHABLE_TEXT = 'Team sync paused: remote unreachable';
-export const PAUSED_REWRITTEN_TEXT = 'Team sync paused: log rewritten';
-export const PAUSED_MISSING_TEXT = 'Team sync paused: log missing on remote';
-export const PAUSED_REFUSED_TEXT = 'Team log not trusted';
+export const PAUSED_UNREACHABLE_TEXT = 'Team sync paused: offline';
+export const PAUSED_REWRITTEN_TEXT = 'Team sync paused: record changed';
+export const PAUSED_MISSING_TEXT = 'Team sync paused: team record missing';
+export const PAUSED_REFUSED_TEXT = 'Team record not trusted';
 export const VERIFY_LOG_COMMAND = 'nearAi.team.verifyLog';
 
 const MAX_REASON_LENGTH = 400;
