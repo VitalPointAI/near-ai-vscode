@@ -3,6 +3,7 @@ phase: "69"
 slug: "team-mode-reconciliation-identities-and-signed-events-on-main"
 # status lifecycle: draft (seeded by plan-phase) → validated (set by validate-phase §6)
 status: draft
+# Known draft until execution: the plan checker passed on 2026-11-15; sign-off is completed by /gsd-validate-phase after the phase runs (as with 68 before execution).
 nyquist_compliant: false
 wave_0_complete: false
 created: "2026-11-15"

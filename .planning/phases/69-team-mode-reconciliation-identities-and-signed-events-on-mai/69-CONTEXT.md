@@ -1,7 +1,7 @@
 # Phase 69: Team Mode reconciliation: identities and signed events on main - Context
 
 **Gathered:** 2026-11-15
-**Status:** Ready for planning; decisions D-01..D-29 accepted by the owner on 2026-11-15
+**Status:** Planned; decisions D-01..D-31 accepted by the owner on 2026-11-15 (D-30 and D-31 in the owner follow-up below)
 **Source:** Owner chose "plan now, I decide" for milestone v0.7.0. The decisions below were made by the planning agent on the owner's behalf from ROADMAP.md (Phase 69 and the phases that build on it: 70, 71, 80), PROJECT.md "Platform direction (owner decisions, 2026-11-15)", STATE.md "Owner answers 2026-11-15", and the archived branch `origin/feat/team-fix-pass` (4207080; Phase 60 CONTEXT, SUMMARY and VERIFICATION files). The owner can change any of them; each is marked with how hard it is to undo.
 
 **Owner confirmation (2026-11-15):** "You made the right decisions on my behalf. I'm not going to try teams mode until it's in a published version." All of D-01..D-29 are accepted as written; their undo costs stand and still apply if one is revisited later. D-30 below follows from the second sentence.
