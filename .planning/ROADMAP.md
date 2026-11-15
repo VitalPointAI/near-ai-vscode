@@ -276,7 +276,7 @@ Plans:
 - [ ] 69-06-PLAN.md — preview setting and palette gating, plain words, manifest and boundary tests
 
 **Wave 7** *(blocked on Wave 6 completion)*
-- [ ] 69-07-PLAN.md — one identity per person per install, rollback rule (D-22)
+- [ ] 69-07-PLAN.md — one identity per person per install, rollback rule (D-22), Team Mode e2e in a real window (D-30)
 
 **Wave 8** *(blocked on Wave 7 completion)*
 - [ ] 69-08-PLAN.md — PR 1 gate, Phase 60 criteria re-verified on main, open PR 1
@@ -300,7 +300,7 @@ Plans:
 - [ ] 69-14-PLAN.md — v0.6.0 disposition record (TMR-01, TMR-04)
 
 **Wave 15** *(blocked on Wave 14 completion)*
-- [ ] 69-15-PLAN.md — PR 2 gate after the owner merges PR 1, open PR 2
+- [ ] 69-15-PLAN.md — automated check that PR 1 is on main, rebase PR 2, gate, open PR 2 (no owner checkpoint, D-30)
 
 ### Phase 70: Capability vocabulary, manifests and one gate with a floor
 **Goal**: Every tool call passes one gate that decides from declared capabilities and a signed local policy, with a floor no mode, setting or delegation can override, and the gate never needs the network.

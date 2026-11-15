@@ -1,8 +1,10 @@
 # Phase 69: Team Mode reconciliation: identities and signed events on main - Context
 
 **Gathered:** 2026-11-15
-**Status:** Ready for planning
+**Status:** Ready for planning; decisions D-01..D-29 accepted by the owner on 2026-11-15
 **Source:** Owner chose "plan now, I decide" for milestone v0.7.0. The decisions below were made by the planning agent on the owner's behalf from ROADMAP.md (Phase 69 and the phases that build on it: 70, 71, 80), PROJECT.md "Platform direction (owner decisions, 2026-11-15)", STATE.md "Owner answers 2026-11-15", and the archived branch `origin/feat/team-fix-pass` (4207080; Phase 60 CONTEXT, SUMMARY and VERIFICATION files). The owner can change any of them; each is marked with how hard it is to undo.
+
+**Owner confirmation (2026-11-15):** "You made the right decisions on my behalf. I'm not going to try teams mode until it's in a published version." All of D-01..D-29 are accepted as written; their undo costs stand and still apply if one is revisited later. D-30 below follows from the second sentence.
 
 <domain>
 ## Phase Boundary
@@ -66,6 +68,10 @@ Not in this phase: invitations, joining, removal flows, NEAR organization calls,
 - **D-28 (accepted consequence of D-06):** The one device fingerprint is visible to anyone who can read the project's remote, and on a shared code-server one install can mean one identity for several people. Recovery and per-person identity on shared hosts stay with the shared code-server requirements (SHRD-02, SHRD-03); this phase only records the consequence in the phase docs. *Undo: as D-06.*
 
 - **D-29 (refines D-25, planning 2026-11-15):** The per-person identity change (D-06, D-22) lands in PR 1, not PR 2, so the per-team key name `nearAi.team.deviceKey.<teamId>` never reaches `main` and no 0.4.x release cut between the two PRs can ship it. PR 1 still records unchanged-port evidence for TMR-02 before the identity is adapted. PR 2 carries `device.rotated`, the payload signer, key status, the solo key history and the disposition record. *Undo: cheap (plan 69-07 can move behind 69-08 to the PR 2 branch).*
+
+### Owner follow-up (2026-11-15)
+- **D-30 (refines D-25, D-29; owner):** The owner will not try Team Mode from a PR build, only after it is in a published version. So no plan waits on the owner trying a PR build: PR 1 merges through the normal gates (CI including e2e, the agent review, the owner's merge), and plan 69-15 then rebases PR 2 onto main, runs the gate and opens PR 2 without a blocking owner checkpoint (it still never merges). An extension-host e2e test stands in for the manual check: in a real VS Code window with `nearAi.team.preview` on, it runs Enable Team Mode on a scratch repository with a local bare remote and then Verify Team Log, and checks the log verifies. The owner's own try of Team Mode is a post-release manual check in 69-VALIDATION.md, not a gate. *Undo: cheap.*
+- **D-31 (confirms D-24; owner):** "Verify Team Log" keeps its name; no rename. *Undo: cheap.*
 
 ### Claude's Discretion
 - File split inside `src/domain/team/` for the payload signer and key status (one new file or two), and the exact names of exported functions, as long as D-08 and D-09 hold.
