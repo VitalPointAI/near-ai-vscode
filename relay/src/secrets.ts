@@ -54,8 +54,12 @@ export const RELAY_SECRETS: readonly SecretSpec[] = [
   { name: 'LOG_PSEUDONYM_KEY', secretClass: 'log-pseudonym-key', required: false },
 ];
 
-/** A tenant NEAR AI key is named by the operator: NEAR_AI_KEY_ACME, NEAR_AI_KEY_TEAM_2 and so on. */
-export const TENANT_KEY_NAME = /^NEAR_AI_KEY_[A-Z0-9_]{1,64}$/;
+/**
+ * A tenant NEAR AI key is named by the operator: NEAR_AI_KEY_ACME, NEAR_AI_KEY_TEAM_2 and so on, in capitals. A tenant name cannot be FILE or
+ * end in _FILE, because NEAR_AI_KEY_{TENANT}_FILE is the setting that points at that tenant's key file.
+ */
+export const TENANT_KEY_NAME = /^NEAR_AI_KEY_(?!(?:.*_)?FILE$)[A-Z0-9_]{1,64}$/;
+const TENANT_KEY_PREFIX = 'NEAR_AI_KEY_';
 
 export class SecretError extends Error {
   readonly secretName: string;
@@ -76,16 +80,25 @@ const MIN_SECRET_LENGTH = 8;
 const MAX_SECRET_BYTES = 16384;
 const GROUP_OR_WORLD = 0o077;
 
-/** Throws for the first secret given as a plain environment value. Names ending in _FILE are paths and are allowed. */
+/**
+ * Throws for the first secret given as a plain environment value. Names are compared in any case, and every name that starts with NEAR_AI_KEY_
+ * counts, even one the relay would never read (lower case, too long, odd characters): a value set there is almost certainly a key that should
+ * not sit in the environment. A name ending in _FILE is a path and allowed only when what it points for is a secret name (TEAMS_APP_SECRET_FILE,
+ * NEAR_AI_KEY_ACME_FILE); NEAR_AI_KEY_FILE names no tenant and is refused like any plain key.
+ */
 export function refusePlainSecretEnv(env: NodeJS.ProcessEnv, specs: readonly SecretSpec[] = RELAY_SECRETS): void {
   const known = new Set(specs.map((spec) => spec.name));
   for (const [name, value] of Object.entries(env)) {
     if (value === undefined || value === '') continue;
-    if (name.endsWith('_FILE')) continue;
-    if (known.has(name) || TENANT_KEY_NAME.test(name)) {
+    const upper = name.toUpperCase();
+    if (upper.endsWith('_FILE')) {
+      const stem = upper.slice(0, -'_FILE'.length);
+      if (known.has(stem) || TENANT_KEY_NAME.test(stem)) continue;
+    }
+    if (known.has(upper) || upper.startsWith(TENANT_KEY_PREFIX)) {
       throw new SecretError(
         name,
-        `${name} is set as a plain environment value, which shows up in docker inspect and process listings. Put the secret in a file and set ${name}_FILE, or use a Compose or systemd secret.`,
+        `${name} is set as a plain environment value, which shows up in docker inspect and process listings. Put the secret in a file and set ${upper}_FILE, or use a Compose or systemd secret.`,
       );
     }
   }

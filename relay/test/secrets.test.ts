@@ -103,25 +103,44 @@ test('a missing optional secret is undefined, a missing required one throws nami
   });
 });
 
-test('refusePlainSecretEnv refuses a plain secret and a plain tenant key, ignores empty values and _FILE names, and never repeats the value', () => {
+test('refusePlainSecretEnv refuses a plain secret and a plain tenant key in any case, ignores empty values and real _FILE paths, and never repeats the value', () => {
   const value = 'fake-plain-env-value-44';
-  for (const name of ['TEAMS_APP_SECRET', 'LOG_PSEUDONYM_KEY', 'NEAR_AI_KEY_X', 'NEAR_AI_KEY_TEAM_2']) {
+  const tooLong = `NEAR_AI_KEY_${'A'.repeat(70)}`;
+  for (const [name, hint] of [
+    ['TEAMS_APP_SECRET', 'TEAMS_APP_SECRET_FILE'],
+    ['LOG_PSEUDONYM_KEY', 'LOG_PSEUDONYM_KEY_FILE'],
+    ['NEAR_AI_KEY_X', 'NEAR_AI_KEY_X_FILE'],
+    ['NEAR_AI_KEY_TEAM_2', 'NEAR_AI_KEY_TEAM_2_FILE'],
+    // A2: any case, any length, any characters after the prefix. The relay would never read these, but a value there is a key in the open.
+    ['near_ai_key_acme', 'NEAR_AI_KEY_ACME_FILE'],
+    ['Near_Ai_Key_Acme', 'NEAR_AI_KEY_ACME_FILE'],
+    ['NEAR_AI_KEY_acme', 'NEAR_AI_KEY_ACME_FILE'],
+    ['NEAR_AI_KEY_ACME-PROD', 'NEAR_AI_KEY_ACME-PROD_FILE'],
+    [tooLong, `${tooLong}_FILE`],
+    ['teams_app_secret', 'TEAMS_APP_SECRET_FILE'],
+    // IN-07: NEAR_AI_KEY_FILE points for no tenant, so it is a plain key and not a path setting.
+    ['NEAR_AI_KEY_FILE', 'NEAR_AI_KEY_FILE_FILE'],
+  ] as const) {
     assert.throws(
       () => refusePlainSecretEnv({ [name]: value }),
       (error: unknown) => {
-        assert.ok(error instanceof SecretError);
+        assert.ok(error instanceof SecretError, name);
         assert.equal(error.secretName, name);
         assert.ok(error.message.includes(name));
         assert.ok(!error.message.includes(value), 'the message repeated the value');
-        assert.match(error.message, new RegExp(`${name}_FILE`));
+        assert.ok(error.message.includes(hint), `${name}: the message names ${hint}`);
         return true;
       },
     );
   }
-  assert.doesNotThrow(() => refusePlainSecretEnv({ TEAMS_APP_SECRET: '', NEAR_AI_KEY_X: '' }));
-  assert.doesNotThrow(() => refusePlainSecretEnv({ NEAR_AI_KEY_X_FILE: '/run/secrets/near_ai_key_x', TEAMS_APP_SECRET_FILE: '/x', PATH: '/usr/bin' }));
+  assert.doesNotThrow(() => refusePlainSecretEnv({ TEAMS_APP_SECRET: '', NEAR_AI_KEY_X: '', near_ai_key_acme: '' }));
+  assert.doesNotThrow(() =>
+    refusePlainSecretEnv({ NEAR_AI_KEY_X_FILE: '/run/secrets/near_ai_key_x', TEAMS_APP_SECRET_FILE: '/x', LOG_PSEUDONYM_KEY_FILE: '/y', PATH: '/usr/bin', OTHER_FILE: '/z' }),
+  );
   assert.doesNotThrow(() => refusePlainSecretEnv({}));
   assert.ok(TENANT_KEY_NAME.test('NEAR_AI_KEY_ACME') && !TENANT_KEY_NAME.test('NEAR_AI_KEY_') && !TENANT_KEY_NAME.test('near_ai_key_acme'));
+  // A tenant name cannot end in _FILE: NEAR_AI_KEY_X_FILE is always tenant X's path setting, never a tenant called X_FILE.
+  assert.ok(!TENANT_KEY_NAME.test('NEAR_AI_KEY_X_FILE') && !TENANT_KEY_NAME.test('NEAR_AI_KEY_FILE') && TENANT_KEY_NAME.test('NEAR_AI_KEY_FILES'));
 });
 
 test('a file open to group or others is refused with the chmod hint (0640 and 0604); 0400 and 0600 load', async () => {

@@ -60,7 +60,7 @@ A secret file must be mode 0400 or 0600 with no group or world access. A secret 
 The kinds of secret in your deployment:
 
 - The Teams bot app secret (`TEAMS_APP_SECRET`).
-- A NEAR AI API key for your organization, and one for each other organization the relay serves, named `NEAR_AI_KEY_` plus a tenant name in capitals, for example `NEAR_AI_KEY_ACME`. These are used in later phases.
+- A NEAR AI API key for your organization, and one for each other organization the relay serves, named `NEAR_AI_KEY_` plus a tenant name in capitals, for example `NEAR_AI_KEY_ACME`, given as a file with `NEAR_AI_KEY_ACME_FILE`. A tenant name cannot be `FILE` or end in `_FILE`. Any variable that starts with `NEAR_AI_KEY_`, in any case, set to a plain value stops the relay at start. These keys are used in later phases.
 - The Signal registration material. It is not a file the relay reads. It lives in the Signal sidecar's `signal-config` volume, and that volume is itself the credential for the number.
 - The optional `LOG_PSEUDONYM_KEY`. It makes the stable labels that replace phone numbers in logs. When you give none, the relay creates `log-pseudonym.key` in the state directory once and reuses it.
 
