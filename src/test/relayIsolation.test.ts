@@ -111,3 +111,20 @@ test('the merge gates require the relay check', async () => {
   assert.ok(line, 'CI_CHECKS is declared in scripts/lib/workflow.mjs');
   assert.ok(line.includes("'secret-scan', 'relay'"), 'CI_CHECKS must list relay after secret-scan so the merge and tag gates wait for it');
 });
+
+test('the release check refuses relay files in the VSIX', async () => {
+  const text = await readFile(path.join(REPO_ROOT, 'scripts', 'verify-release-content.mjs'), 'utf8');
+  const relayPattern = String.raw`/^extension\/relay(?:\/|$)/`;
+  const dockerignorePattern = String.raw`/^extension\/\.dockerignore$/`;
+  assert.ok(text.includes(relayPattern), 'verify-release-content must refuse anything under extension/relay');
+  assert.ok(text.includes(dockerignorePattern), 'verify-release-content must refuse extension/.dockerignore');
+  // The patterns are the ones in the forbidden list, not a stray mention elsewhere in the file.
+  const list = text.slice(text.indexOf('const forbiddenPatterns'), text.indexOf('const forbidden ='));
+  assert.ok(list.includes(relayPattern) && list.includes(dockerignorePattern), 'both patterns must sit in forbiddenPatterns');
+  // And they match what they are meant to catch.
+  const relayRegex = /^extension\/relay(?:\/|$)/;
+  const dockerignoreRegex = /^extension\/\.dockerignore$/;
+  assert.ok(relayRegex.test('extension/relay/state/relay.db') && relayRegex.test('extension/relay'));
+  assert.ok(!relayRegex.test('extension/relayed.js'), 'the pattern must not catch unrelated names that start with relay');
+  assert.ok(dockerignoreRegex.test('extension/.dockerignore'));
+});

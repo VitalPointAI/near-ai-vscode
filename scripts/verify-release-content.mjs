@@ -135,6 +135,8 @@ if (missingRuntime.length > 0) fail(`compiled runtime JavaScript is missing: ${m
 const forbiddenPatterns = [
   /^extension\/(?:\.codex|\.agents|\.planning|\.github|\.claude)(?:\/|$)/,
   /^extension\/(?:src|test|scripts|node_modules)(?:\/|$)/,
+  /^extension\/relay(?:\/|$)/,
+  /^extension\/\.dockerignore$/,
   /^extension\/dist\/test(?:\/|$)/,
   /\.map$/,
   /(?:^|\/)\.[^/]+\.tsbuildinfo$/,
