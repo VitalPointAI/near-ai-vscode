@@ -6,10 +6,13 @@ import { HealthRegistry } from './health';
 import { createRelayServer, listen } from './http/server';
 import { Logger } from './log/logger';
 import { Redactor } from './log/redact';
+import { prepareStateDir, StateDirError } from './stateDir';
+import { IN_FLIGHT_RUN_STATES } from './store/relayStore';
+import { openSqliteStore } from './store/sqliteStore';
 
 declare const __RELAY_VERSION__: string;
 
-// Composition root, built to dist/app.mjs. Plans 04 and 06 insert the state directory, secrets and store steps between settings and listen.
+// Composition root, built to dist/app.mjs. Plan 04 added the state directory and store steps between settings and listen; plan 06 adds secrets.
 // The Redactor and the Logger are created first (D-11): every line the relay prints goes through them, and a failed start prints one
 // relay.start_refused line that names the setting and never its value.
 
@@ -84,7 +87,29 @@ export async function main(argv: readonly string[]): Promise<void> {
     return;
   }
 
+  try {
+    await prepareStateDir(config.stateDir, logger);
+  } catch (error) {
+    logger.error('relay.start_refused', {
+      reason: 'state-dir',
+      detail: error instanceof StateDirError ? error.message : 'the state directory could not be prepared',
+    });
+    process.exitCode = 1;
+    return;
+  }
+
+  let store;
+  try {
+    store = await openSqliteStore(path.join(config.stateDir, 'relay.db'));
+  } catch (error) {
+    logger.error('relay.start_refused', { reason: 'store', detail: error instanceof Error ? error.message : 'the store could not be opened' });
+    process.exitCode = 1;
+    return;
+  }
+  const openStore = store;
+
   const health = new HealthRegistry({ version: __RELAY_VERSION__, startedAt: Date.now() });
+  health.setInFlightRuns(() => openStore.countRuns(IN_FLIGHT_RUN_STATES));
   const server = createRelayServer({
     health,
     onRejected: (route, method, status) => {
@@ -98,10 +123,11 @@ export async function main(argv: readonly string[]): Promise<void> {
     port = await listen(server, config.host, config.port);
   } catch (error) {
     logger.error('relay.start_refused', { reason: 'listen', detail: error instanceof Error ? error.message : 'listen failed' });
+    await openStore.close();
     process.exitCode = 1;
     return;
   }
-  logger.info('relay.listening', { host: config.host, port, version: __RELAY_VERSION__ });
+  logger.info('relay.listening', { host: config.host, port, version: __RELAY_VERSION__, instanceId: await openStore.instanceId() });
 
   let stopping = false;
   const stop = (signal: string): void => {
@@ -113,8 +139,16 @@ export async function main(argv: readonly string[]): Promise<void> {
       process.exit(1);
     }, SHUTDOWN_GRACE_MS).unref();
     server.close(() => {
-      logger.info('relay.stopped');
-      process.exit(0);
+      openStore.close().then(
+        () => {
+          logger.info('relay.stopped');
+          process.exit(0);
+        },
+        () => {
+          logger.error('relay.store_close_failed');
+          process.exit(1);
+        },
+      );
     });
     server.closeIdleConnections();
   };
