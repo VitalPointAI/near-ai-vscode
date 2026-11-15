@@ -5,7 +5,7 @@ How a change gets from an idea to the Visual Studio Marketplace. The short rules
 and slash commands behind them, and what to do when something goes wrong.
 
 ```
-branch + worktree -> commits -> PR -> CI (6 jobs) + agent review -> merge agent -> main
+branch + worktree -> commits -> PR -> CI (7 jobs) + agent review -> merge agent -> main
                                                                         |
                          release/x.y.z PR -> merge -> tag vX.Y.Z -> Release workflow
                                                                         |
