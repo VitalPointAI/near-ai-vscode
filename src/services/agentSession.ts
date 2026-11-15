@@ -872,7 +872,7 @@ export class AgentConversation {
   }
 
   private toolsFor(request: AgentTurnRequest, context: Omit<ToolContext, 'signal' | 'onTodos'>, grants: RunGrants, extraUsage: UsageMetadata[], record: Record_, runSignal: AbortSignal, runId: string): AgentTool<any>[] {
-    const media = request.imageModel ? [imageTool(request.client, request.imageModel, request.imageModels ?? [], request.imageReview === 'off' ? undefined : this.imageReviewer())] : [];
+    const media = request.imageModel ? [imageTool(request.client, request.imageModel, request.imageModels ?? [], request.imageReview === 'off' ? undefined : this.imageReviewer(request.policy))] : [];
     const memoryFor = (agentScope?: MemoryScope, source = runId) => request.memory ? memoryTools(request.memory.store, { project: request.memory.projectScope, agent: agentScope }, AGENT_MEMORY_ACTOR, source) : [];
     // A team run reads and feeds the team's own knowledge graph, so the team gets better the more it works (owner, 2026-11-08). Every member writes to the
     // same graph, which is what makes it shared: a fact one member verified is there for the next one. The graph is keyed by teamKnowledgeKey: a library team's
@@ -899,7 +899,7 @@ export class AgentConversation {
       agents,
       // A member whose name a run's own agent took is not offered as a member: that name runs the run's agent.
       teamMembers: this.teamMembersOf(request).map((agent) => agent.name).filter((name) => !(request.projectAgents ?? []).some((agent) => agent.name === name)),
-      ask: (questions, askSignal) => this.askQuestions(questions, askSignal),
+      ask: (questions, askSignal, askerId) => this.askQuestions(questions, askSignal, request.policy, askerId),
       spawn: async (spawn, callSignal) => {
         const label = spawn.agent?.name ?? spawn.type;
         // PERF-06: in a research-profile project the plan-checker runs only for plans that change a gate or verifier; for content-only plans it returns
@@ -1514,7 +1514,7 @@ export class AgentConversation {
       let timer: ReturnType<typeof setTimeout> | undefined;
       let parkLimit: ReturnType<typeof setTimeout> | undefined;
       // A day past the first timeout, which is long enough that nobody is surprised and short enough that an abandoned run does not live for ever.
-      const parkLimitMs = 24 * 60 * 60_000;
+      const parkLimitMs = PARK_LIMIT_MS;
       /** Set once the call has returned "awaiting approval": a later answer goes to `onLate`, not to the finished call. */
       let returned = false;
       /** `covered`: settled by an answer to another card whose grant covers this one, which must not in turn settle others. */
@@ -1599,27 +1599,76 @@ export class AgentConversation {
     });
   }
 
-  /** How long a question or an image review waits before it is closed as timed out, in whole minutes for the messages (0.4.24). */
+  /** The approval timeout in whole minutes, for the messages about a question or image review that waited that long (0.4.24). */
   private get promptLimitMinutes(): number { return Math.max(1, Math.round(this.approvalTimeoutMs / 60_000)); }
 
   /**
-   * 0.4.24 (review of PR 51): a question waits up to the approval timeout (nearAi.agent.approvalTimeoutMinutes; 0 waits indefinitely), as approvals do.
-   * Before, it had no limit, so in Full auto or an unattended background sub-agent a run could wait for the rest of the session. On expiry each question
-   * is answered QUESTION_TIMED_OUT and the card is closed as timed out; the agent carries on with its own judgement.
+   * Whether a question or image review may end on its own once the approval timeout passes (owner, 0.4.24): only in Full auto, where nobody is expected to
+   * be watching, and for a background sub-agent, which nobody may be watching. Everywhere else it waits like an approval does in that mode.
    */
-  private askQuestions(questions: Question[], signal: AbortSignal): Promise<string[]> {
+  private promptMayTimeOut(policy: ActionPolicy | undefined, agentId: string | undefined): boolean {
+    return policy?.mode === 'fully-autonomous' || (agentId !== undefined && this.agents.get(agentId)?.background === true);
+  }
+
+  /**
+   * Waits for the person's answer to a question or image review (0.4.24, review of PR 51: before, these had no limit at all).
+   *
+   * - `mayTimeOut` (Full auto, or a background sub-agent): the wait ends at the approval timeout, resolving 'timed-out'.
+   * - Otherwise it reuses the approvals' park (askApproval): at the timeout the run is paused on this step with `approval-paused`, the card stays open
+   *   and answerable, and nothing is decided for the person (0.4.19: never decide something nobody saw). Only after the same day-long limit as an approval
+   *   is it released, resolving 'released' with `approval-expired`, so an abandoned conversation does not live for ever.
+   *
+   * 0 (nearAi.agent.approvalTimeoutMinutes) waits indefinitely in both cases.
+   */
+  private waitForPerson(id: string, signal: AbortSignal, register: (wake: () => void) => void, mayTimeOut: boolean, paused: (minutes: number) => string, released: string): Promise<'woken' | 'aborted' | 'timed-out' | 'released'> {
+    if (mayTimeOut) return waitOrAbort(signal, register, this.approvalTimeoutMs);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let parkLimit: ReturnType<typeof setTimeout> | undefined;
+    let expired = false;
+    return waitOrAbort(signal, (wake) => {
+      register(wake);
+      if (this.approvalTimeoutMs <= 0) return;
+      timer = setTimeout(() => {
+        if (!this.waiting.has(id)) return;
+        const minutes = this.promptLimitMinutes;
+        this.post({ type: 'approval-paused', callId: id, minutes, text: paused(minutes) });
+        parkLimit = setTimeout(() => {
+          if (!this.waiting.has(id)) return;
+          expired = true;
+          this.post({ type: 'approval-expired', callId: id, minutes: Math.round(PARK_LIMIT_MS / 60_000), text: released });
+          wake();
+        }, PARK_LIMIT_MS);
+        parkLimit.unref?.();
+      }, this.approvalTimeoutMs);
+    }).then((how) => {
+      if (timer) clearTimeout(timer);
+      if (parkLimit) clearTimeout(parkLimit);
+      return expired && how === 'woken' ? 'released' : how;
+    });
+  }
+
+  /**
+   * 0.4.24 (review of PR 51): a question no longer waits without limit. In Full auto or a background sub-agent it ends at the approval timeout: each
+   * question is answered QUESTION_TIMED_OUT, the card closes as timed out, and the agent carries on with its own judgement. In every other mode it parks the
+   * run like an approval: the card stays and the answer, whenever it comes, carries the run on from here.
+   */
+  private askQuestions(questions: Question[], signal: AbortSignal, policy?: ActionPolicy, agentId?: string): Promise<string[]> {
     if (signal.aborted) return Promise.resolve([]);
     const id = `q-${randomBytes(6).toString('hex')}`;
+    const title = questions.length === 1 ? `"${questions[0].question.slice(0, 200)}"` : `${questions.length} questions`;
     // waitOrAbort removes its abort listener once answered, so a long run's questions do not pile listeners up on its signal (agent review of PR 51).
     let reply: { answers: string[]; cancelled: boolean } | undefined;
-    return waitOrAbort(signal, (wake) => {
+    return this.waitForPerson(id, signal, (wake) => {
       this.questions.set(id, (answers: string[], cancelled = false) => { reply = { answers, cancelled }; wake(); });
       this.openPrompt(id, { type: 'questions-request', id, questions });
-    }, this.approvalTimeoutMs).then((how) => {
-      if (!reply && how === 'timed-out') {
+    }, this.promptMayTimeOut(policy, agentId),
+    (minutes) => `No one answered ${title} within ${minutes} minute${minutes === 1 ? '' : 's'}, so the run is paused on this question. Answer it and the run carries on from here.`,
+    `${title} waited a whole day without an answer, so the run was released.`).then((how) => {
+      if (!reply && (how === 'timed-out' || how === 'released')) {
         this.questions.delete(id);
-        this.closePrompt(id, true, this.promptLimitMinutes);
-        return questions.map(() => QUESTION_TIMED_OUT);
+        if (how === 'timed-out') this.closePrompt(id, true, this.promptLimitMinutes);
+        else this.closePrompt(id);
+        return questions.map(() => how === 'timed-out' ? QUESTION_TIMED_OUT : QUESTION_RELEASED);
       }
       if (!reply) { this.questions.delete(id); reply = { answers: [], cancelled: true }; }
       this.closePrompt(id, reply.cancelled);
@@ -1628,17 +1677,18 @@ export class AgentConversation {
   }
 
   /** The image reviewer of this conversation: drafts in the project, cards in this conversation's chat (a sub-agent's too, labelled with it). */
-  private imageReviewer(): ImageReviewer {
-    return { root: this.root, drafts: this.imageReviewState.drafts, attempts: this.imageReviewState.attempts, review: (draft, signal) => this.askImageReview(draft, signal) };
+  private imageReviewer(policy?: ActionPolicy): ImageReviewer {
+    return { root: this.root, drafts: this.imageReviewState.drafts, attempts: this.imageReviewState.attempts, review: (draft, signal) => this.askImageReview(draft, signal, policy) };
   }
 
   /**
    * Shows a draft in the chat and waits for the person, like a question: it is pinned, replayed to a reloaded view, counted on the badge and in the run's
    * marker as waiting on a person, and cancelled (the draft kept) when the run or the agent stops. The image goes in the card as a data URL (the view's
-   * CSP allows data: images), up to MAX_PREVIEW_BYTES; a larger one is opened full size instead. 0.4.24: like a question, it waits up to the approval
-   * timeout, then settles as cancelled with `timedOut` (the draft kept) and the card closes as timed out.
+   * CSP allows data: images), up to MAX_PREVIEW_BYTES; a larger one is opened full size instead. 0.4.24: like a question, in Full auto or a background
+   * sub-agent it ends at the approval timeout (cancelled with `timedOut`, the draft kept, the card closed as timed out); in every other mode it parks the
+   * run like an approval, with the card kept open.
    */
-  private async askImageReview(draft: ImageDraft, signal: AbortSignal): Promise<ImageReviewDecision> {
+  private async askImageReview(draft: ImageDraft, signal: AbortSignal, policy?: ActionPolicy): Promise<ImageReviewDecision> {
     if (signal.aborted) return { decision: 'cancelled' };
     const bytes = await readFile(draft.file).catch(() => undefined);
     if (signal.aborted) return { decision: 'cancelled' };
@@ -1648,18 +1698,21 @@ export class AgentConversation {
     if (live) { this.setActivity(live, 'Waiting for your image review'); this.postAgents(); }
     // waitOrAbort removes its abort listener once answered, so each review does not leave one on the run's signal (agent review of PR 51).
     let answer: { reply: ImageReviewDecision; cancelled: boolean } | undefined;
-    const how = await waitOrAbort(signal, (wake) => {
+    const how = await this.waitForPerson(draft.id, signal, (wake) => {
       this.imageReviews.set(draft.id, (reply: ImageReviewDecision, cancelled = false) => { answer = { reply, cancelled }; wake(); });
       this.openPrompt(draft.id, {
         type: 'image-review-request', id: draft.id, path: draft.path, model: draft.model, prompt: draft.prompt, attempt: draft.attempt, sizeKb: Math.max(1, Math.round(draft.bytes / 1024)),
         // 0.4.24: a draft that could not be read is gone (removed by hand, or by a clean-up), which is not the same as too large to show.
         ...(image ? { image } : bytes ? { tooLarge: true } : { missing: true }), ...(draft.agent ? { agent: draft.agent } : {}), ...(draft.editOf ? { editOf: draft.editOf } : {}), ...(draft.note ? { note: draft.note } : {})
       });
-    }, this.approvalTimeoutMs);
-    if (!answer && how === 'timed-out') {
+    }, this.promptMayTimeOut(policy, draft.agentId),
+    (minutes) => `No one reviewed the image for ${draft.path} within ${minutes} minute${minutes === 1 ? '' : 's'}, so the run is paused on this step. Nothing was saved. Accept, request changes or discard it and the run carries on from here.`,
+    `The image for ${draft.path} waited a whole day without a review, so the run was released. The draft is kept.`);
+    if (!answer && (how === 'timed-out' || how === 'released')) {
       this.imageReviews.delete(draft.id);
-      const minutes = this.promptLimitMinutes;
-      this.closePrompt(draft.id, true, minutes);
+      const minutes = how === 'timed-out' ? this.promptLimitMinutes : Math.round(PARK_LIMIT_MS / 60_000);
+      if (how === 'timed-out') this.closePrompt(draft.id, true, minutes);
+      else this.closePrompt(draft.id);
       answer = { reply: { decision: 'cancelled', timedOut: minutes }, cancelled: true };
     } else {
       if (!answer) { this.imageReviews.delete(draft.id); answer = { reply: { decision: 'cancelled' }, cancelled: true }; }
@@ -1682,8 +1735,13 @@ export class AgentConversation {
   }
 }
 
-/** What each question answers when nobody answered within the approval timeout (0.4.24). */
+/** What each question answers when nobody answered within the approval timeout, in Full auto or a background sub-agent only (0.4.24). */
 export const QUESTION_TIMED_OUT = '(no answer, timed out)';
+/** What each question answers when, in another mode, it waited the whole day-long park limit without an answer and the run was released (0.4.24). */
+export const QUESTION_RELEASED = '(no answer: nobody answered for a day, so the run was released; ask again if it still matters)';
+
+/** How long past the approval timeout a parked approval, question or image review waits before the run is released: a whole day (0.4.19 review). */
+export const PARK_LIMIT_MS = 24 * 60 * 60_000;
 
 /** The largest draft shown inside the review card; a larger one is shown with "Open full size" only, to keep the chat's messages small. */
 export const MAX_PREVIEW_BYTES = 8 * 1024 * 1024;

@@ -302,8 +302,10 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
       void panel.webview.postMessage(message);
       // A prompt whose wait parked the run says so again when the conversation is shown again, since the run is still on that step and the card is still
       // waiting to be answered (owner, 2026-11-08). Without this, a reloaded view would look like an ordinary prompt.
-      if (message.type === 'approval-request' && typeof message.callId === 'string' && tab.paused.has(message.callId)) {
-        void panel.webview.postMessage({ type: 'approval-paused', callId: message.callId, ...tab.paused.get(message.callId), replay: true });
+      // 0.4.24: a question or an image review parks the run the same way outside Full auto, so theirs is said again too.
+      const parkedId = (message.type === 'approval-request' || message.type === 'questions-request' || message.type === 'image-review-request') ? promptIdOf(message) : undefined;
+      if (parkedId !== undefined && tab.paused.has(parkedId)) {
+        void panel.webview.postMessage({ type: 'approval-paused', callId: parkedId, ...tab.paused.get(parkedId), replay: true });
       }
     }
     void panel.webview.postMessage({ type: 'conversation-shown', id: tab.id, busy: isRunning(tab) });

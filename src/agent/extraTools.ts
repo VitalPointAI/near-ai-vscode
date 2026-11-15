@@ -32,7 +32,7 @@ export interface ImageDraft {
 
 /**
  * What the person decided on a draft; `cancelled` when the run or the agent was stopped before they did, or (0.4.24) with `timedOut` when nobody
- * answered within the approval timeout, that many minutes.
+ * answered for that many minutes: the approval timeout in Full auto or a background sub-agent, otherwise the day-long park limit.
  */
 export type ImageReviewDecision = { decision: 'accept' } | { decision: 'changes'; feedback: string } | { decision: 'discard' } | { decision: 'cancelled'; timedOut?: number };
 

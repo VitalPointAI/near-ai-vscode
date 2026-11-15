@@ -4,10 +4,13 @@
 
 - **Questions and image reviews no longer wait forever.** A question from the agent, or an image
   waiting for your review, had no time limit, so in Full auto or with a helper agent working in the
-  background a run could sit waiting for the rest of the day. Both now wait as long as approvals
-  do (`nearAi.agent.approvalTimeoutMinutes`, 15 minutes by default; 0 waits indefinitely). Then
-  the card says it timed out and the run carries on: the agent is told the question got no answer,
-  and an image's draft is kept in `.near-ai/drafts/images/` for you to look at later.
+  background a run could sit waiting for the rest of the day. They now follow
+  `nearAi.agent.approvalTimeoutMinutes` (15 minutes by default; 0 waits indefinitely). In Full
+  auto, and for a helper agent running in the background, the card then says it timed out and the
+  run carries on: the agent is told the question got no answer, and an image's draft is kept in
+  `.near-ai/drafts/images/` for you to look at later. In the other modes nothing is decided for
+  you: as with an approval, the run is paused on the question or image, the card stays, and your
+  answer carries the run on whenever you are back.
 - **An accepted image is not lost to a second attempt.** When two attempts at the same image ran
   at once, the second could delete the image you had just accepted before it was saved, and the
   save failed. The accepted image is now kept until it is saved.

@@ -38,8 +38,8 @@ export interface GsdServices {
   agents: GsdAgent[];
   /** 0.4.21: the names of the agents that are members of the team this run works with; the Agent tool lists them first and says to prefer them. */
   teamMembers?: string[];
-  /** Shows the questions in the chat and resolves with one answer per question. */
-  ask(questions: Question[], signal: AbortSignal): Promise<string[]>;
+  /** Shows the questions in the chat and resolves with one answer per question. `agentId` is the sub-agent asking, if one is. */
+  ask(questions: Question[], signal: AbortSignal, agentId?: string): Promise<string[]>;
   /**
    * Runs a sub-agent. In the foreground it resolves with the final report; in the background it
    * resolves at once with the agent's id, and the report reaches the caller when it finishes.
@@ -106,7 +106,7 @@ export function gsdTools(services: GsdServices): AgentTool<any>[] {
     },
     title: (input) => input.questions.length === 1 ? `Ask: ${input.questions[0].question.slice(0, 80)}` : `Ask ${input.questions.length} questions`,
     async run(input, context) {
-      const answers = await services.ask(input.questions, context.signal);
+      const answers = await services.ask(input.questions, context.signal, context.agentId);
       return input.questions.map((question, index) => `Q: ${question.question}\nA: ${answers[index] ?? '(no answer)'}`).join('\n\n');
     }
   };
