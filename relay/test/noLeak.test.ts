@@ -211,3 +211,50 @@ test('a secret file open to group or others stops the relay with relay.start_ref
     assert.ok(!run.stderr().includes(FAKE_TEAMS));
   });
 });
+
+test('with LOG_PSEUDONYM_KEY_FILE the relay writes no log-pseudonym.key, logs source secret, and the fake key value appears nowhere', async () => {
+  await withScratch(async (scratch) => {
+    const keyFile = await secretFile(scratch, 'log_pseudonym_key', FAKE_PSEUDONYM);
+    const teamsFile = await secretFile(scratch, 'teams_app_secret', FAKE_TEAMS);
+    const run = await runAndStop({ LOG_PSEUDONYM_KEY_FILE: keyFile, TEAMS_APP_SECRET_FILE: teamsFile }, scratch.stateDir);
+
+    assert.equal(await exists(path.join(scratch.stateDir, 'log-pseudonym.key')), false, 'a key file was written although the operator supplied the key');
+    const loaded = logLines(run).find((line) => line.event === 'secrets.loaded');
+    assert.equal(loaded?.names, 'TEAMS_APP_SECRET,LOG_PSEUDONYM_KEY');
+    assert.equal(loaded?.count, 2);
+    assert.equal(logLines(run).find((line) => line.event === 'log.pseudonym_key')?.source, 'secret');
+    assert.equal(run.stderr(), '');
+    await assertNoLeak(scratch.stateDir, [FAKE_PSEUDONYM, FAKE_TEAMS], run);
+  });
+});
+
+test('without a supplied key the relay creates log-pseudonym.key at mode 0600 once and reuses it on the next start', async () => {
+  await withScratch(async (scratch) => {
+    const first = await runAndStop({}, scratch.stateDir);
+    const keyPath = path.join(scratch.stateDir, 'log-pseudonym.key');
+    const info = await stat(keyPath);
+    assert.equal(info.mode & 0o777, 0o600);
+    assert.equal(info.size, 32);
+    assert.equal(logLines(first).find((line) => line.event === 'log.pseudonym_key')?.source, 'created');
+    const bytes = await readFile(keyPath);
+    assert.ok(!first.stdout().includes(bytes.toString('hex')) && !first.stdout().includes(bytes.toString('base64')), 'the key value reached stdout');
+
+    const second = await runAndStop({}, scratch.stateDir);
+    assert.equal(logLines(second).find((line) => line.event === 'log.pseudonym_key')?.source, 'state-file');
+    assert.deepEqual(await readFile(keyPath), bytes);
+    assert.ok(!second.stdout().includes(bytes.toString('hex')) && !second.stdout().includes(bytes.toString('base64')));
+  });
+});
+
+test('a damaged log-pseudonym.key stops the relay with relay.start_refused reason state-dir naming the file', async () => {
+  await withScratch(async (scratch) => {
+    await mkdir(scratch.stateDir, { recursive: true, mode: 0o700 });
+    await writeFile(path.join(scratch.stateDir, 'log-pseudonym.key'), Buffer.alloc(31, 3), { mode: 0o600 });
+    const run = launch({ RELAY_HOST: '127.0.0.1', RELAY_PORT: '0', RELAY_STATE_DIR: scratch.stateDir });
+    const exit = await within(run.exited, 5000, 'the relay refusing a damaged key file');
+    assert.equal(exit.code, 1);
+    const refused = logLines(run).find((line) => line.event === 'relay.start_refused');
+    assert.equal(refused?.reason, 'state-dir');
+    assert.match(String(refused?.detail), /log-pseudonym\.key/);
+  });
+});

@@ -4,6 +4,7 @@ import { loadConfig, type RelayConfig } from './config';
 import { HealthRegistry } from './health';
 import { createRelayServer, listen } from './http/server';
 import { Logger } from './log/logger';
+import { loadPseudonymKey } from './log/pseudonymKey';
 import { Redactor } from './log/redact';
 import { loadSecrets, refusePlainSecretEnv, RELAY_SECRETS, SecretError } from './secrets';
 import { prepareStateDir, StateDirError } from './stateDir';
@@ -115,6 +116,18 @@ export async function main(argv: readonly string[]): Promise<void> {
     return;
   }
   logger.info('secrets.loaded', { names: [...secrets.keys()].join(','), count: secrets.size });
+
+  // D-18: from here on phone labels are stable across restarts.
+  try {
+    redactor.setPseudonymKey(await loadPseudonymKey({ secret: secrets.get('LOG_PSEUDONYM_KEY'), stateDir: config.stateDir, logger }));
+  } catch (error) {
+    logger.error('relay.start_refused', {
+      reason: 'state-dir',
+      detail: error instanceof StateDirError ? error.message : 'the log pseudonym key could not be prepared',
+    });
+    process.exitCode = 1;
+    return;
+  }
 
   let store;
   try {
