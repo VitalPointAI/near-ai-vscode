@@ -63,7 +63,7 @@
 
 No `CLAUDE.md` exists in the repo or the worktree. The owner's global `~/.claude/CLAUDE.md` and memory apply:
 
-- NEAR keys under `~/.near-credentials` are never deleted, overwritten or edited by any task. Relay tests must use fake secret values written to temp directories only. `[VERIFIED: /home/aaron/.claude/CLAUDE.md as injected into this session]`
+- NEAR keys under `~/.near-credentials` are never deleted, overwritten or edited by any task. Relay tests must use fake secret values written to temp directories only. `[VERIFIED: <host home>/.claude/CLAUDE.md as injected into this session]`
 - Development verification cadence: run the smallest relevant check after an edit (one test file plus `tsc --noEmit`), batch before broader suites, run the complete suites once at the phase boundary. Security, secrets, migrations and data-integrity checks are immediately blocking (all of Phase 68 is that kind of work). Never weaken a failing test to get green.
 - Cap test memory (owner memory `cap-test-memory`): every test command is wrapped `systemd-run --user --scope -q -p MemoryMax=4G -p MemorySwapMax=0 choom -n 1000 -- timeout 900 env NODE_OPTIONS=--max-old-space-size=1536 <cmd>`; one heavy run at a time. This wrapper was exercised this session with `node --test` and works on this host.
 - Owner memory `organization-naming`: user-facing text says "your organization", never "NEAR organization". No em-dashes in docs (CONTEXT specifics).

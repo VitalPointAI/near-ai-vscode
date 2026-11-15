@@ -144,7 +144,7 @@ test('loop keys: leading cd and variable assignments are removed and the whole c
   assert.equal(normalizeShellCommand('cd /a/b'), 'cd /a/b', 'a bare cd stays itself');
   assert.notEqual(normalizeShellCommand('cd X && npm test'), normalizeShellCommand('cd X && git status'));
   assert.equal(loopActionKey(call('1', 'Bash', { command: 'cd /w && git status' })), 'Bash git status');
-  const owner = 'cd /home/aaron/projects/codequity/near-ai-vscode/.claude/worktrees/cyber-harness && ';
+  const owner = 'cd /home/dev/projects/near-ai-vscode/.claude/worktrees/cyber-harness && ';
   assert.notEqual(loopActionKey(call('3', 'Bash', { command: `${owner}npm test` })), loopActionKey(call('4', 'Bash', { command: `${owner}git status` })), 'the owner\'s commands are different actions');
   assert.equal(loopActionKey(call('2', 'Read', { file_path: 'a.ts', offset: 40 })), 'Read a.ts@40');
   assert.equal(resultSignature('ok 12 tests in 3.4s at 2026-11-02T10:00:01Z (10:00:01)'), resultSignature('ok 12 tests in 5.1s at 2026-11-02T10:07:44Z (10:07:44)'));
