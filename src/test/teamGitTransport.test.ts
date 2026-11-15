@@ -533,6 +533,30 @@ test('head() reports the applied commit and the last accepted position', async (
 
 // ---- Offline and paused status, rewrite refusal, anomalies and isolation (plan 60-03 task 2, D-03, D-16, D-25, D-33, D-34).
 
+for (const reported of [undefined, '2.30.2']) {
+  test(`a remote address that starts with a dash is refused before any network call (git ${reported ?? 'current'})`, async () => {
+    await withFixture(['a'], async (fixture) => {
+      const teamId = newTeamId();
+      const owner = await createOwner(teamId);
+      const genesis = testGenesis({ teamId, owner, name: 'Dash address team' });
+      const calls: RecordedCall[] = [];
+      const transport = new GitTransport<TeamState>({
+        mirrorDir: path.join(fixture.storageDir('a'), 'coordination.git'), projectRoot: fixture.clones['a'] as string, remote: 'origin',
+        ref: DEFAULT_COORDINATION_REF, materializer: teamMaterializer(genesis.anchor), git: recordingRunner(calls, reported), baseDelayMs: 1
+      });
+      gitIn(fixture.clones['a'] as string, ['config', 'remote.origin.url', '--upload-pack=touch refused-marker']);
+      const appended = await transport.append(async () => genesis.events, { genesis: { teamFileText: genesis.teamFileText } });
+      assert.equal(appended.ok, false);
+      assert.equal(appended.ok === false && appended.kind, 'refused');
+      await transport.fetch();
+      assert.equal(transport.status().state, 'offline');
+      const network = calls.filter((call) => call.args.includes('--git-dir') && ['fetch', 'push', 'ls-remote'].some((verb) => call.args.includes(verb)));
+      assert.deepEqual(network, [], 'no fetch, push or ls-remote ran');
+      assert.equal(calls.some((call) => call.args.some((arg) => arg.startsWith('--upload-pack'))), false, 'the address never reached a git argument');
+    });
+  });
+}
+
 const REWRITTEN_TEXT = "The team's coordination log was rewritten on the remote; Team Mode is paused";
 
 function mirrorOf(fixture: TeamFixture, name: string): string {

@@ -403,6 +403,9 @@ export class GitTransport<S> implements CoordinationTransport<S> {
     const result = await this.git(['-C', this.projectRoot, 'remote', 'get-url', '--push', this.remote], { timeoutMs: LOCAL_TIMEOUT_MS });
     const url = gitText(result);
     if (result.code !== 0 || url === '') throw new RemoteUnavailableError(`This project has no git remote named "${this.remote}".`);
+    // The project's own git config decides this value, and a cloned repository can set it. A value that starts with a dash would read as an
+    // option wherever the URL reaches git as an argument (a git older than 2.31), so it is refused here, before any network call.
+    if (url.startsWith('-')) throw new RemoteUnavailableError(`The address of the git remote named "${this.remote}" is not one Team Mode will contact.`);
     return url;
   }
 
