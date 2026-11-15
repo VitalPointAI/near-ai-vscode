@@ -31,7 +31,9 @@
   read the project's key file and used it to open the project's own encrypted chats. The project's
   key folder, `.near-ai/state/keys/`, is now off limits to agents in every approval mode: the file
   tools refuse it and never list or search it, and a command that names it is refused without
-  asking. A command that runs a project file whose text names the folder always asks first, with
+  asking. The shell check follows the folder the agent's shell is in, so moving into
+  `.near-ai/state` first and then reading `keys/local.key` is refused too, and the shell cannot
+  work inside the key folder at all. A command that runs a project file whose text names the folder always asks first, with
   no "always allow". The shell checks read the command and the script it runs, so a path put
   together in other ways can still get through; SECURITY.md lists what they cannot see.
 - **A chat that ended without saying so no longer stops syncing.** If the end of a chat was

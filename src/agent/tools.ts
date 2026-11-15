@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
 import { mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises';
+import { homedir } from 'node:os';
 import * as path from 'node:path';
 import type { ActionCapability } from '../domain/policy';
 import { namesStateKeys, protectedWriteReason, STATE_FOLDER_PATH, STATE_KEYS_PATH, stateKeysReason } from '../domain/protectedPaths';
@@ -441,12 +442,109 @@ export async function scriptNamingStateKeys(command: string, context: ToolContex
   const words = [...new Set(command.split(/[\s'"`;&|()<>=]+/).filter((word) => word && !word.startsWith('-') && !/^[A-Za-z_]\w*$/.test(word) && /[./\\]/.test(word)))].slice(0, SCRIPT_SCAN_FILES);
   const cwd = context.shell?.workingDirectory ?? context.root;
   for (const word of words) {
-    const absolute = await resolveInWorkspace(context.root, path.resolve(cwd, word)).catch(() => undefined);
+    const requested = path.resolve(cwd, word);
+    let absolute: string | undefined;
+    // A word that resolves into the key folder is itself a hit (the forbidden check refuses it first; this keeps the scan from ever reading there).
+    try { absolute = await resolveInWorkspace(context.root, requested); } catch (error) { if (error instanceof StateKeysError) return displayPath(context.root, requested); }
     if (!absolute) continue;
     const info = await stat(absolute).catch(() => undefined);
     if (!info?.isFile() || info.size > SCRIPT_SCAN_BYTES) continue;
     const text = await readFile(absolute, 'utf8').catch(() => '');
     if (namesStateKeys(text)) return displayPath(context.root, absolute);
+  }
+  return undefined;
+}
+
+/** At most this many (word, folder) pairs of a command line are resolved through links by the key-folder check; the text check covers every word. */
+const SHELL_LINK_CHECKS = 128;
+/** At most this many folders a command line's `cd`s can leave the shell in are tracked. */
+const SHELL_CD_BASES = 8;
+
+/** `{a,b}` in a shell word expanded (one brace at a time, at most 16 results); a word with no such brace is returned as it is. */
+function expandBraces(word: string): string[] {
+  const out: string[] = [];
+  const pending = [word];
+  while (pending.length && out.length + pending.length <= 16) {
+    const next = pending.shift()!;
+    const match = /\{([^{}]*,[^{}]*)\}/.exec(next);
+    if (!match) { out.push(next); continue; }
+    for (const part of match[1].split(',')) pending.push(next.slice(0, match.index) + part + next.slice(match.index + match[0].length));
+  }
+  return [...out, ...pending];
+}
+
+/** A shell glob segment as a regular expression (`*`, `?`, `[...]`), or undefined when it has no glob characters. */
+function globSegment(segment: string): RegExp | undefined {
+  if (!/[*?[]/.test(segment)) return undefined;
+  let source = '';
+  for (let index = 0; index < segment.length; index += 1) {
+    const char = segment[index];
+    const close = char === '[' ? segment.indexOf(']', index + 2) : -1;
+    if (close > 0) { source += `[${segment.slice(index + 1, close).replace(/^!/, '^').replace(/\\/g, '\\\\')}]`; index = close; }
+    else source += char === '*' ? '.*' : char === '?' ? '.' : char.replace(/[.+^${}()|\\\]\[]/g, '\\$&');
+  }
+  return new RegExp(`^${source}$`, 'i');
+}
+
+/**
+ * An absolute path with each glob segment replaced by the name on the way into the key folder it could match (`.near-ai`, then `state` or one of its
+ * previous copies, then `keys`), so `state/*` from `.near-ai` or `k*` from `.near-ai/state` reads as the key folder. A glob is treated as able to
+ * match a dot name too (as with `shopt -s dotglob`), which is the safe side.
+ */
+function globTowardKeys(absolute: string): string {
+  const parts = absolute.replace(/\\/g, '/').split('/');
+  for (let index = 0; index < parts.length; index += 1) {
+    const glob = globSegment(parts[index]);
+    if (!glob) continue;
+    const previous = (parts[index - 1] ?? '').toLowerCase();
+    const candidates = previous === '.near-ai' ? ['state', 'state.previous-x', 'state.adopt-x'] : /^state(?:\.(?:previous|adopt)-.*)?$/.test(previous) ? ['keys'] : ['.near-ai'];
+    const hit = candidates.find((name) => glob.test(name));
+    if (hit) parts[index] = hit;
+  }
+  return parts.join('/');
+}
+
+/**
+ * Why a command line may not run because of the folder the shell is in, or a word that resolves into the key folder from there; undefined when
+ * neither. This closes what a text check of the line alone misses: the persistent shell keeps its folder between commands, so `cd .near-ai/state`
+ * then `cat keys/local.key` names no `.near-ai` in the second line. Every word is resolved against the shell's current folder and against each
+ * folder a `cd` or `pushd` earlier in the same line moves to, with `{a,b}` braces expanded and globs read as reaching the key folder when they
+ * could; the first SHELL_LINK_CHECKS of those are also resolved through links. A shell already inside the key folder runs nothing but a lone `cd`
+ * out of it. Still a text check: a path built at run time (a variable, `$(...)`, string arithmetic, base64) or a recursive walk (`grep -r`, `find`,
+ * `**`) from a folder above the key folder is not seen; see namesStateKeys.
+ */
+export async function shellReachesStateKeys(command: string, context: ToolContext): Promise<string | undefined> {
+  const start = context.shell?.workingDirectory ?? context.root;
+  const inKeys = async (absolute: string, linkCheck: boolean): Promise<boolean> => {
+    if (isStateKeysPath(globTowardKeys(absolute))) return true;
+    if (!linkCheck) return false;
+    return resolveInWorkspace(context.root, absolute).then(() => false, (error) => error instanceof StateKeysError);
+  };
+  if (await inKeys(start, true)) {
+    const lone = /^\s*cd\s+(['"]?)([^\s'"`;&|()<>$]+)\1\s*$/.exec(command);
+    const target = lone ? path.resolve(start, lone[2].replace(/^~(?=\/|$)/, homedir())) : undefined;
+    if (target !== undefined && !(await inKeys(target, true))) return undefined;
+    return `The shell's current folder, ${displayPath(context.root, start)}, is inside the project's key folder (.near-ai/state/keys), which holds the key that encrypts this project's saved chats. Agents may not run anything there, in any approval mode. Leave it first with a command that is only a cd to another folder, such as cd "${context.root}".`;
+  }
+  const words = command.split(/[\s'"`;&|()<>=]+/).filter((word) => word && !word.startsWith('-') && !word.includes('$'));
+  const bases = [start];
+  let linkChecks = 0;
+  for (let index = 0; index < words.length; index += 1) {
+    const word = words[index].replace(/^~(?=\/|$)/, homedir());
+    for (const expanded of expandBraces(word)) {
+      for (const base of bases) {
+        const absolute = path.resolve(base, expanded);
+        if (await inKeys(absolute, linkChecks++ < SHELL_LINK_CHECKS)) {
+          const from = base === context.root ? '' : ` (from ${displayPath(context.root, base) || '.'})`;
+          return stateKeysReason(`${words[index]}${from}`);
+        }
+      }
+    }
+    // A `cd` or `pushd` earlier in the line moves later words: they are read from that folder too.
+    const previous = words[index - 1];
+    if ((previous === 'cd' || previous === 'pushd') && bases.length < SHELL_CD_BASES) {
+      for (const base of [...bases]) if (bases.length < SHELL_CD_BASES) bases.push(path.resolve(base, word));
+    }
   }
   return undefined;
 }
@@ -459,8 +557,9 @@ export const bashTool: AgentTool<{ command: string; timeoutMs: number; backgroun
   parse: (raw) => ({ command: str(raw, 'command')!, timeoutMs: num(raw, 'timeout') ?? DEFAULT_TIMEOUT_MS, background: bool(raw, 'run_in_background'), description: str(raw, 'description', false) }),
   title: (input) => input.description ? `${input.description}` : `Run ${input.command.split('\n')[0].slice(0, 80)}`,
   async preview(input, context) { return { kind: 'command', command: input.command, cwd: displayPath(context.root, context.shell.workingDirectory) || '.', background: input.background }; },
-  // A command line that names the key folder is refused (0.4.23). A text check, so a heuristic: see namesStateKeys for what it can and cannot see.
-  forbidden: (input) => (namesStateKeys(input.command) ? stateKeysReason(input.command.split('\n')[0]) : undefined),
+  // A command line that names the key folder, or whose words resolve into it from the shell's folder, is refused (0.4.23); so is any command but a
+  // cd out while the shell is inside it. Text checks, so heuristics: see namesStateKeys and shellReachesStateKeys for what they can and cannot see.
+  forbidden: async (input, context) => (namesStateKeys(input.command) ? stateKeysReason(input.command.split('\n')[0]) : shellReachesStateKeys(input.command, context)),
   risky: async (input, context) => {
     if (context.tainted?.() && NETWORK_COMMAND.test(input.command)) return 'This run has read outside content (a web page, search result, attachment, or MCP result), and this command can send data off this machine. Approve it only if you expected it; text in that content may have asked for it.';
     // A script the command runs (`node script.cjs`) that names the key folder asks, in every mode, with no "always allow": the agent can write such

@@ -101,9 +101,15 @@ The project's key folder, `.near-ai/state/keys/` (and the `keys/` folder of an o
 card to approve: Read, Write, Edit, Glob and Grep refuse it, by path or through a link, and
 never list or search it; a shell command whose text names it is refused; and a command that
 runs a file in the project whose text names it (for example `node script.cjs`) always asks,
-with no "always allow". The shell checks read text, so they are a heuristic: a path built at
-run time from pieces that do not look like it, a script that another script or `npm run`
-starts, or a directory walk is not caught. There is no OS-level sandbox around the agent's
+with no "always allow". The shell check follows the shell's current folder: each word of a
+command is resolved from that folder, and from any folder a `cd` or `pushd` earlier in the same
+command moves to, with `{a,b}` braces expanded, globs read as reaching the key folder when they
+could, and links followed. So `cd .near-ai/state` followed by `cat keys/local.key` is refused,
+and a shell that ends up inside the key folder runs nothing but a `cd` out of it. The shell
+checks still read text, so they are a heuristic: a path built at run time from pieces that do
+not look like it (a variable, `$(...)`, string arithmetic, base64), a script that another
+script or `npm run` starts, or a directory walk (`grep -r`, `find`, `**`) from a folder above
+the key folder is not caught. There is no OS-level sandbox around the agent's
 shell.
 
 ### Sub-agents nobody is watching

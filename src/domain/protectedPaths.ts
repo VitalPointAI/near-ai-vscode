@@ -68,7 +68,8 @@ const STATE_KEYS_HINT = /(?<![\w.-])state[\\/]+keys(?![\w.-])|(?<![\w.-])local\.
  * catches the path as written (`.near-ai/state/keys/local.key`), joined in code (`path.join('.near-ai', 'state', 'keys')`), or reached in two steps
  * (`cd .near-ai && cat state/keys/local.key`), but not a path built at run time from pieces that do not look like it (string arithmetic, base64,
  * an environment variable, a directory walk). There is no OS-level sandbox around the agent's shell, so those are not stopped by this check; the
- * key file stays mode 0600 and owned by this user, which an agent's command also is, so the file's own permissions do not stop them either.
+ * key file stays mode 0600 and owned by this user, which an agent's command also is, so the file's own permissions do not stop them either. Text
+ * alone cannot see the folder the persistent shell is already in; the Bash tool resolves words from there too (shellReachesStateKeys in tools.ts).
  */
 export function namesStateKeys(text: string): boolean {
   return STATE_KEYS_JOINED.test(text) || (NEAR_AI_FOLDER.test(text) && STATE_KEYS_HINT.test(text));

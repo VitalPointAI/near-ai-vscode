@@ -217,3 +217,83 @@ test('Auto mode: a command naming the key folder is refused without a card, even
     context.shell.dispose();
   }
 });
+
+// PR 51 review: the persistent shell keeps its folder between commands, so the key folder could be reached from a folder the line does not name.
+test('the shell guard follows the shell\'s folder: words that resolve into the key folder from there are refused, and so is the folder itself', async () => {
+  const context = await project();
+  const keys = path.join(context.root, '.near-ai', 'state', 'keys');
+  await mkdir(keys, { recursive: true });
+  await writeFile(path.join(keys, 'local.key'), 'secret-key-bytes');
+  await writeFile(path.join(context.root, '.near-ai', 'state', 'meta.json'), '{}');
+  const forbidden = (command: string) => bashTool.forbidden?.(bashTool.parse({ command }), context);
+  try {
+    // From the state folder: `cat keys/local.key` and `cat keys/*` name no .near-ai, but resolve into the key folder.
+    assert.equal(await forbidden('cd .near-ai/state'), undefined, 'the state folder itself is not the key folder');
+    await context.shell.run('cd .near-ai/state', 5_000);
+    for (const command of ['cat keys/local.key', 'cat keys/*', 'ls keys', 'cat k*/local.key', 'cat ./keys/../keys/local.key', 'cat {keys,x}/local.key', 'cd keys', 'pushd keys', 'cat */local.key', 'xxd "keys/local.key"']) {
+      assert.match(String(await forbidden(command)), /names the project's key folder/, `${command} from .near-ai/state is refused`);
+    }
+    for (const command of ['cat meta.json', 'ls', 'ls threads', 'cat ../../README.md']) assert.equal(await forbidden(command), undefined, `${command} from .near-ai/state is allowed`);
+    // From .near-ai: `cat state/keys/*` and a glob over the state folder's subfolders.
+    await context.shell.run('cd ..', 5_000);
+    for (const command of ['cat state/keys/*', 'cat state/*/local.key', 'cat */keys/local.key', 'ls state/keys']) {
+      assert.match(String(await forbidden(command)), /names the project's key folder/, `${command} from .near-ai is refused`);
+    }
+    assert.equal(await forbidden('cat state/meta.json'), undefined);
+    // From the root: a `cd` earlier in the same line moves the words after it.
+    await context.shell.run(`cd ${JSON.stringify(context.root)}`, 5_000);
+    for (const command of ['cd .near-ai/state && cat keys/*', 'cd .near-ai; cd state; ls keys', 'pushd .near-ai/state >/dev/null && xxd keys/local.key']) {
+      assert.match(String(await forbidden(command)), /names the project's key folder/, `${command} is refused`);
+    }
+    for (const command of ['cd src && ls keys', 'ls keys', 'cat *', 'ls -la']) assert.equal(await forbidden(command), undefined, `${command} from the root is allowed`);
+    // A link to the key folder, reached from the shell's folder.
+    await symlink(path.join(context.root, '.near-ai', 'state', 'keys'), path.join(context.root, '.near-ai', 'state', 'shortcut'));
+    await context.shell.run('cd .near-ai/state', 5_000);
+    assert.match(String(await forbidden('cat shortcut/local.key')), /names the project's key folder/);
+    // A shell already inside the key folder (reached some way the check did not see) runs nothing there but a cd out.
+    await context.shell.run('cd "$(printf "%s" ke)ys"', 5_000);
+    assert.equal(path.basename(context.shell.workingDirectory), 'keys');
+    for (const command of ['ls', 'cat local.key', 'cd .', 'cd ../keys', 'cd .. && cat local.key', 'echo hi']) {
+      assert.match(String(await forbidden(command)), /current folder, \.near-ai\/state\/keys, is inside the project's key folder/, `${command} inside the key folder is refused`);
+    }
+    assert.equal(await forbidden('cd ..'), undefined, 'a lone cd out is allowed');
+    assert.equal(await forbidden(`cd "${context.root}"`), undefined);
+  } finally {
+    context.shell.dispose();
+  }
+});
+
+test('the shell guard, end to end: cd into the state folder, then reading keys/local.key is refused in fully-autonomous mode', async () => {
+  const context = await project();
+  const keys = path.join(context.root, '.near-ai', 'state', 'keys');
+  await mkdir(keys, { recursive: true });
+  await writeFile(path.join(keys, 'local.key'), 'secret-key-bytes');
+  const approvals: string[] = [];
+  try {
+    const results = await runCalls(context, [
+      { name: 'Bash', args: { command: 'cd .near-ai/state' } },
+      { name: 'Bash', args: { command: 'cat keys/local.key' } },
+      { name: 'Bash', args: { command: 'cat keys/*' } },
+      { name: 'Bash', args: { command: 'cd keys' } }
+    ], 'fully-autonomous', approvals);
+    assert.doesNotMatch(results[0], /Not allowed/);
+    for (const refused of results.slice(1)) assert.match(refused, /^Not allowed: .*names the project's key folder/);
+    assert.equal(results.some((text) => text.includes('secret-key-bytes')), false, 'the key never reached the model');
+    assert.equal(approvals.length, 0);
+  } finally {
+    context.shell.dispose();
+  }
+});
+
+test('the script scan reports a word that resolves into the key folder instead of passing over it', async () => {
+  const context = await project();
+  const keys = path.join(context.root, '.near-ai', 'state', 'keys');
+  await mkdir(keys, { recursive: true });
+  await writeFile(path.join(keys, 'local.key'), 'secret-key-bytes');
+  await symlink(keys, path.join(context.root, 'innocent'));
+  try {
+    assert.equal(await scriptNamingStateKeys('node innocent/local.key', context), 'innocent/local.key');
+  } finally {
+    context.shell.dispose();
+  }
+});
