@@ -32,7 +32,7 @@ export const TEAM_OUTPUT_CHANNEL = 'NEAR AI Team';
 export const TEAM_ACTIVE_CONTEXT = 'nearAi.team.active';
 export const SHOW_DETAILS_ACTION = 'Show details';
 export const UPDATE_EXTENSION_TEXT = 'Some events need a newer version of NEAR AI. Update the extension to read them.';
-export const READ_ONLY_TEXT = 'This computer has no device key for this team, so it can read the team log but not write to it.';
+export const READ_ONLY_TEXT = 'This computer is not a device of this team yet, so it can read the team record but not write to it.';
 const VERIFY_PROGRESS_TITLE = 'Checking the team record';
 const AUDIT_FILE_PARTS = ['.planning', '.near-ai', 'audit.json'];
 
@@ -156,6 +156,7 @@ export class TeamSession {
   private readonly diagnosticSubscription: { dispose(): void };
   private log: TeamLog;
   private signing = false;
+  private readOnlyNoted = false;
   private disposed = false;
   private syncing: Promise<void> = Promise.resolve();
   private firstRun: Promise<boolean> | undefined;
@@ -198,11 +199,11 @@ export class TeamSession {
     try {
       identity = await loadDeviceIdentity(deps.secrets);
     } catch (error) {
-      identityProblem = `The device key for this team could not be read, so this computer runs read-only: ${describeError(error)}`;
+      identityProblem = `The identity key on this computer could not be read, so it can read the team record but not write to it: ${describeError(error)}`;
     }
     const session = new TeamSession(deps, storage, identity);
     if (identityProblem !== undefined) session.line(identityProblem);
-    else if (identity === undefined) session.line(READ_ONLY_TEXT);
+    else if (identity === undefined) session.noteReadOnly();
     // The scheduler runs the first sync as soon as it starts, so start waits for that run instead of syncing twice.
     session.scheduler.start();
     await session.firstRun;
@@ -390,13 +391,23 @@ export class TeamSession {
     }
   }
 
+  private noteReadOnly(): void {
+    if (this.readOnlyNoted) return;
+    this.readOnlyNoted = true;
+    this.line(READ_ONLY_TEXT);
+  }
+
   // The signer needs the member id this computer's key belongs to, which is only known once the roster has been read.
   private adoptSigner(): void {
     if (this.signing || this.identity === undefined) return;
     const state = this.transport.state();
     const memberId = state.deviceIndex.get(this.identity.fingerprint);
     const member = memberId === undefined ? undefined : state.members.get(memberId);
-    if (memberId === undefined || member === undefined || member.removedEvent !== undefined) return;
+    if (memberId === undefined || member === undefined || member.removedEvent !== undefined) {
+      // A roster has been read and this computer's identity is not in it: say so once, in the same words as a computer with no identity.
+      if (state.deviceIndex.size > 0) this.noteReadOnly();
+      return;
+    }
     const signer: TeamSigner = { identity: this.identity, memberId };
     this.log = new TeamLog({ anchor: this.anchor, transport: this.transport, signer });
     this.signing = true;

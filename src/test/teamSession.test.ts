@@ -257,9 +257,28 @@ test('a computer without a device key reads and mirrors but is told it is read-o
     const { MemorySecrets } = await import('./helpers/teamHarness');
     const started = await startSession(rig, { secrets: new MemorySecrets() });
     assert.ok(started.lines.includes(READ_ONLY_TEXT));
+    assert.equal(READ_ONLY_TEXT.includes('for this team'), false);
     assert.equal((started.session as unknown as { signing: boolean }).signing, false);
     assert.equal(lastItem().text, `Team: ${TEAM_NAME}`);
     assert.equal((await auditRows(rig.projectRoot)).length, 2);
+    await started.session.sync();
+    assert.deepEqual(stub.configUpdates, [], 'no setting is written by start or sync, and no key is created');
+  });
+});
+
+test('a computer whose identity is not in this team roster is told it is read-only, once, and writes no key or setting', async () => {
+  await withRig(async (rig) => {
+    const { MemorySecrets } = await import('./helpers/teamHarness');
+    const { createDeviceIdentity } = await import('../team/identity');
+    const secrets = new MemorySecrets();
+    await createDeviceIdentity(secrets);
+    const keysBefore = [...secrets.values.keys()];
+    const started = await startSession(rig, { secrets });
+    await started.session.sync();
+    assert.equal(started.lines.filter((line) => line === READ_ONLY_TEXT).length, 1, 'said once, not on every sync');
+    assert.equal((started.session as unknown as { signing: boolean }).signing, false);
+    assert.deepEqual([...secrets.values.keys()], keysBefore, 'opening a team never creates a key');
+    assert.deepEqual(stub.configUpdates, []);
   });
 });
 

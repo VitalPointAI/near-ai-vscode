@@ -9,8 +9,9 @@ import { MAX_EVENT_BYTES, fingerprintOf, verifyEventSignature } from '../domain/
 import type { TeamEvent, UnsignedTeamEvent } from '../domain/team/types';
 import {
   DEVICE_KEY_SECRET, IDENTITY_CREATE_LOCK_FILE, IDENTITY_DIR_NAME, createDeviceIdentity, emailHash, forgetDeviceIdentity, identityDir, loadDeviceIdentity,
-  loadOrCreateDeviceIdentity, newEventId, newMemberId, newTeamId, signEvent, ulid
+  forgetCreatedDeviceIdentity, loadOrCreateDeviceIdentity, newEventId, newMemberId, newTeamId, signEvent, ulid
 } from '../team/identity';
+import { acquireFileLock } from '../services/stateMirrorLock';
 import { MemorySecrets } from './helpers/teamHarness';
 
 const TEAM = 'team-0123456789abcdef0123456789abcdef';
@@ -79,6 +80,58 @@ test('loadOrCreateDeviceIdentity creates the key once and then returns the same 
     assert.deepEqual([...secrets.values.keys()], [DEVICE_KEY_SECRET]);
     assert.equal(path.basename(identityDir(dir)), IDENTITY_DIR_NAME);
     assert.equal((await readdir(identityDir(dir))).includes(IDENTITY_CREATE_LOCK_FILE), false, 'the lock is released');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('forgetCreatedDeviceIdentity deletes nothing unless the stored key is the one named, and then returns whether it deleted', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'near-ai-identity-'));
+  try {
+    const secrets = new MemorySecrets();
+    const options = { identityDir: identityDir(dir) };
+    const { identity } = await loadOrCreateDeviceIdentity(secrets, options);
+    const stranger = await createDeviceIdentity(new MemorySecrets());
+    assert.equal(await forgetCreatedDeviceIdentity(secrets, { ...options, fingerprint: stranger.fingerprint }), false);
+    assert.equal((await loadDeviceIdentity(secrets))?.fingerprint, identity.fingerprint, 'another fingerprint deletes nothing');
+    assert.equal(await forgetCreatedDeviceIdentity(secrets, { ...options, fingerprint: identity.fingerprint }), true);
+    assert.equal(secrets.values.size, 0);
+    assert.equal(await forgetCreatedDeviceIdentity(secrets, { ...options, fingerprint: identity.fingerprint }), false, 'nothing stored, nothing deleted');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('while another window holds identity-create.lock, creation waits and then returns the key that window stored', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'near-ai-identity-'));
+  try {
+    const secrets = new MemorySecrets();
+    const folder = identityDir(dir);
+    const held = await acquireFileLock(folder, IDENTITY_CREATE_LOCK_FILE, { sleep: (ms) => new Promise((resolve) => { setTimeout(resolve, ms); }), random: Math.random });
+    let settled = false;
+    const waiting = loadOrCreateDeviceIdentity(secrets, { identityDir: folder }).then((result) => { settled = true; return result; });
+    await new Promise((resolve) => { setTimeout(resolve, 300); });
+    assert.equal(settled, false, 'the call waits for the lock');
+    assert.equal(secrets.values.size, 0, 'and has created nothing yet');
+    const other = await createDeviceIdentity(secrets);
+    await held.release();
+    const result = await waiting;
+    assert.equal(result.created, false);
+    assert.equal(result.identity.fingerprint, other.fingerprint);
+    assert.equal(secrets.values.size, 1, 'one key');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('two creations racing in one process end with one key', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'near-ai-identity-'));
+  try {
+    const secrets = new MemorySecrets();
+    const options = { identityDir: identityDir(dir) };
+    const results = await Promise.all([loadOrCreateDeviceIdentity(secrets, options), loadOrCreateDeviceIdentity(secrets, options), loadOrCreateDeviceIdentity(secrets, options)]);
+    assert.equal(results.filter((result) => result.created).length, 1);
+    assert.equal(new Set(results.map((result) => result.identity.fingerprint)).size, 1);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

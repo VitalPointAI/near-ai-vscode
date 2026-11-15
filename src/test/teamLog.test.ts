@@ -367,7 +367,8 @@ test('a log without a signer can sync and verify but its append rejects with the
     const seed = await seedTeam(fixture);
     const b = clientFor(fixture, 'b', seed.anchor);
     await assert.rejects(b.log.append(() => [{ type: 'member.availability', body: { availability: 'away' } }]), (error: unknown) => error instanceof Error && error.name === 'NoDeviceKeyError' && error.message === NO_DEVICE_KEY_MESSAGE);
-    assert.equal(NO_DEVICE_KEY_MESSAGE, 'This computer has no device key for this team.');
+    assert.equal(NO_DEVICE_KEY_MESSAGE, 'This computer is not a device of this team yet, so it can read the team record but not write to it.');
+    assert.equal(NO_DEVICE_KEY_MESSAGE.includes('for this team'), false);
     const synced = await b.log.sync();
     assert.equal(synced.accepted.length, 2);
     assert.equal((await b.log.verifyAll()).accepted, 2);

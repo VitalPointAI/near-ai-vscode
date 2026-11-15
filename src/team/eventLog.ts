@@ -22,7 +22,7 @@ export const DEFAULT_SNAPSHOT_EVERY = 500;
 const DEFAULT_YIELD_EVERY = 200;
 // An Ed25519 signature is 86 base64url characters; the placeholder gives the exact size the signed file will have.
 const SIGNATURE_PLACEHOLDER = 'A'.repeat(86);
-export const NO_DEVICE_KEY_MESSAGE = 'This computer has no device key for this team.';
+export const NO_DEVICE_KEY_MESSAGE = 'This computer is not a device of this team yet, so it can read the team record but not write to it.';
 // What a client that lost the snapshot race is told when its builder runs again against a log that already has the snapshot (D-33).
 export const SNAPSHOT_ALREADY_WRITTEN = 'snapshot already written';
 

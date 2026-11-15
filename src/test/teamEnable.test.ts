@@ -363,7 +363,7 @@ test('a failing commit hook leaves team.json unstaged on disk, explains the exac
   });
 });
 
-test('a failed genesis push removes the device key, the mirror and the team storage and writes no team.json', async () => {
+test('a failed genesis push with no earlier identity removes the key it created, the mirror and the team storage and writes no team.json', async () => {
   await withFixture(['a'], async (fixture) => {
     const git = faultRunner(runGit, [{ when: (args) => args.includes('push') && args.includes('--porcelain'), replace: () => fakeGitResult(1, '', 'fatal: unable to access the remote') }]);
     const secrets = new MemorySecrets();
@@ -372,11 +372,83 @@ test('a failed genesis push removes the device key, the mirror and the team stor
     if (result.ok) return;
     assert.equal(result.code, 'push-failed');
     assert.match(result.message, /unable to access the remote/);
-    assert.equal(secrets.values.size, 0, 'the device key is gone');
+    assert.equal(secrets.values.size, 0, 'the key this call created is forgotten');
     assert.deepEqual(await teamFolders(fixture.storageDir('a')), [], 'the team storage folder, with the mirror, is gone');
     assert.equal(existsSync(path.join(fixture.clones.a as string, TEAM_FILE_REL)), false);
     assert.equal(remoteHasRef(fixture, COORDINATION_BRANCH), false);
     assert.equal(gitIn(fixture.clones.a as string, ['log', '-1', '--format=%s']), 'seed');
+  });
+});
+
+// Plants the coordination branch on the bare remote right before the first push, so the push finds it already there (the 'exists' outcome).
+function plantCoordinationBranch(fixture: TeamFixture): GitRunner {
+  let planted = false;
+  return async (args, options) => {
+    if (!planted && args.includes('push') && args.includes('--porcelain')) {
+      planted = true;
+      const tree = execFileSync('git', ['--git-dir', fixture.remote, 'hash-object', '-t', 'tree', '-w', '--stdin'], { input: '', encoding: 'utf8' }).trim();
+      const commit = execFileSync('git', ['--git-dir', fixture.remote, '-c', 'user.name=Other', '-c', 'user.email=other@example.com', 'commit-tree', tree, '-m', 'someone else got there first'], { encoding: 'utf8' }).trim();
+      execFileSync('git', ['--git-dir', fixture.remote, 'update-ref', COORDINATION_BRANCH, commit]);
+    }
+    return runGit(args, options);
+  };
+}
+
+const FAILURE_PATHS: Array<{ name: string; code: string; git: (fixture: TeamFixture) => GitRunner }> = [
+  {
+    name: 'a failed genesis push', code: 'push-failed',
+    git: () => faultRunner(runGit, [{ when: (args) => args.includes('push') && args.includes('--porcelain'), replace: () => fakeGitResult(1, '', 'fatal: unable to access the remote') }])
+  },
+  {
+    name: 'a push that throws before reaching the remote', code: 'push-failed',
+    git: () => async (args, options) => {
+      if (args.includes('push') && args.includes('--porcelain')) throw new Error('disk full while pushing');
+      if (args.includes('fetch')) throw new Error('mirror unusable');
+      return runGit(args, options);
+    }
+  },
+  { name: 'a coordination branch that appears on the remote during the push', code: 'exists-remotely', git: (fixture) => plantCoordinationBranch(fixture) }
+];
+
+for (const failure of FAILURE_PATHS) {
+  test(`an identity that existed before a failed Enable is untouched: ${failure.name}`, async () => {
+    await withFixture(['a'], async (fixture) => {
+      const secrets = new MemorySecrets();
+      const before = await createDeviceIdentity(secrets);
+      const storedBefore = secrets.values.get(DEVICE_KEY_SECRET);
+      const result = await enableTeamMode(inputFor(fixture, 'a', secrets, { git: failure.git(fixture) }));
+      assert.equal(result.ok, false);
+      if (result.ok) return;
+      assert.equal(result.code, failure.code);
+      assert.equal(secrets.values.get(DEVICE_KEY_SECRET), storedBefore, 'the stored key is byte for byte the same');
+      assert.equal((await loadDeviceIdentity(secrets))?.fingerprint, before.fingerprint);
+      assert.deepEqual(await teamFolders(fixture.storageDir('a')), [], 'the team storage folder, with the mirror, is still removed');
+      assert.equal(existsSync(path.join(fixture.clones.a as string, TEAM_FILE_REL)), false);
+    });
+  });
+
+  test(`a failed Enable forgets the key it created and no other: ${failure.name}`, async () => {
+    await withFixture(['a'], async (fixture) => {
+      const secrets = new MemorySecrets();
+      const result = await enableTeamMode(inputFor(fixture, 'a', secrets, { git: failure.git(fixture) }));
+      assert.equal(result.ok, false);
+      if (result.ok) return;
+      assert.equal(result.code, failure.code);
+      assert.equal(secrets.values.size, 0, 'the key this call created is forgotten');
+      assert.deepEqual(await teamFolders(fixture.storageDir('a')), []);
+    });
+  });
+}
+
+test('a successful Enable on a computer that already has an identity reuses it and creates no second key', async () => {
+  await withFixture(['a'], async (fixture) => {
+    const secrets = new MemorySecrets();
+    const before = await createDeviceIdentity(secrets);
+    const result = await enableTeamMode(inputFor(fixture, 'a', secrets));
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.deepEqual([...secrets.values.keys()], [DEVICE_KEY_SECRET]);
+    assert.equal(result.teamFile.genesis.ownerDevice.fingerprint, before.fingerprint, 'the owner device is the identity that was already there');
   });
 });
 
@@ -415,7 +487,7 @@ test('a genesis push that may have landed, with the remote unreachable afterward
   });
 });
 
-test('a genesis push that throws before reaching the remote removes the device key and the mirror (WR-02)', async () => {
+test('a genesis push that throws before reaching the remote, with no earlier identity, removes the key it created and the mirror (WR-02)', async () => {
   await withFixture(['a'], async (fixture) => {
     const git: GitRunner = async (args, options) => {
       if (args.includes('push') && args.includes('--porcelain')) throw new Error('disk full while pushing');
@@ -428,7 +500,7 @@ test('a genesis push that throws before reaching the remote removes the device k
     if (result.ok) return;
     assert.equal(result.code, 'push-failed');
     assert.match(result.message, /disk full while pushing/);
-    assert.equal(secrets.values.size, 0, 'the device key is gone');
+    assert.equal(secrets.values.size, 0, 'the key this call created is forgotten');
     assert.deepEqual(await teamFolders(fixture.storageDir('a')), [], 'the mirror is gone');
     assert.equal(remoteHasRef(fixture, COORDINATION_BRANCH), false);
   });
