@@ -71,14 +71,14 @@ const STAND_IN_SEARCH: SearchProvider = { name: 'searxng', label: 'stand-in', ho
 /**
  * Every source file (outside the tests) whose text mentions `AgentTool<`, so a new file that defines tools fails the catalog test until it is listed here,
  * and listing it is the moment someone checks the catalog covers its tools (GATE-02, T-70-27). `TOOL_DEFINING_FILES` define tools and declare a manifest next to
- * each; the rest carry or list tools (the run loop, the session, the Tools page, the MCP registry, the cyber run). Paths are relative to the repository root.
+ * each; the rest carry or list tools (the run loop, the gate adapter, the session, the Tools page, the MCP registry, the cyber run). Paths are relative to the repository root.
  */
 export const TOOL_DEFINING_FILES: readonly string[] = [
   'src/agent/tools.ts', 'src/agent/webTools.ts', 'src/agent/graphicsTools.ts', 'src/agent/extraTools.ts', 'src/agent/securityTool.ts',
   'src/agent/cyberProbes.ts', 'src/agent/cyberExploitTools.ts', 'src/agent/knowledgeTools.ts', 'src/gsd/tools.ts', 'src/mcp/tools.ts'
 ];
 const TOOL_CARRYING_FILES: readonly string[] = [
-  'src/agent/toolCatalog.ts', 'src/agent/loop.ts', 'src/services/agentSession.ts', 'src/services/toolsDirectory.ts', 'src/services/cyberRun.ts', 'src/services/mcpRegistry.ts'
+  'src/agent/toolCatalog.ts', 'src/agent/loop.ts', 'src/agent/gateAdapter.ts', 'src/services/agentSession.ts', 'src/services/toolsDirectory.ts', 'src/services/cyberRun.ts', 'src/services/mcpRegistry.ts'
 ];
 export const CATALOG_TOOL_FILES: readonly string[] = [...TOOL_DEFINING_FILES, ...TOOL_CARRYING_FILES];
 
