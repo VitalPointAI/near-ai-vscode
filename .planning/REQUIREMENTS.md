@@ -478,7 +478,7 @@ Drafted 2026-11-15 with the outlines in ROADMAP.md, "Later milestones". Ids are 
 
 ### L2 Team Mode on the governed core
 
-- Carried from v0.6.0 (text on the archived `feat/team-fix-pass`, ids prefixed where they collide): TM-TEAM-02, TM-TEAM-03, BOARD-01 … BOARD-04, ASSIGN-01 … ASSIGN-03, CLAIM-01 … CLAIM-05, INTEG-01 … INTEG-03, BUDGET-01 … BUDGET-05, METRIC-01, COLLAB-01, COLLAB-02, SEC-02, SEC-03, FLOW-01, TM-SETUP-01, UX-01. TM-TEAM-01, TM-TEAM-04, SEC-01 and SEC-04 land with Phase 69 (TMR-02, TMR-03). Phase 69 records each disposition (TMR-04).
+- Carried from v0.6.0 (text on the archived `feat/team-fix-pass`, ids prefixed where they collide): TM-TEAM-02, TM-TEAM-03, BOARD-01 … BOARD-04, ASSIGN-01 … ASSIGN-03, CLAIM-01 … CLAIM-05, INTEG-01 … INTEG-03, BUDGET-01 … BUDGET-05, METRIC-01, COLLAB-01, COLLAB-02, SEC-02, SEC-03, FLOW-01, TM-SETUP-01, UX-01. TM-TEAM-01, TM-TEAM-04, SEC-01 and SEC-04 land with Phase 69 (TMR-02, TMR-03). Phase 69 records each disposition (TMR-04). Record: `.planning/research/v0.6.0-disposition.md`.
 - **SHRD-01**: On a shared code-server or appliance, each person's editor-wide spend ledger and daily limit are their own.
 - **SHRD-02**: A recovery code shown once unlocks an encrypted backup of the person's device key and own NEAR AI key (strong KDF; the code is never stored or logged; a wrong code and tampering are refused, tested).
 - **SHRD-03**: "Replace my device": the lead accepts a person back as the same member, keeping assignments, history and role.
