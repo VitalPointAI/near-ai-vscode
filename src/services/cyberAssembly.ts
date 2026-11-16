@@ -12,6 +12,7 @@ import { checkBudget, RateLimiter } from '../domain/cyberLimits';
 import { CyberProtocolDriver } from '../agent/cyberProtocolDriver';
 import { RunCheckpoints } from '../agent/checkpoints';
 import { ShellSession } from '../agent/shell';
+import type { GateHost } from '../gate/host';
 
 /**
  * The one rule for where a workspace's cyber store lives. The panel and the run stack both use it,
@@ -70,6 +71,8 @@ export async function startCyberRunInPanel(
     policy: CyberRunInput['policy'];
     rules?: CyberRunInput['rules'];
     requestApproval: CyberRunInput['requestApproval'];
+    /** The gate every step is decided through (GATE-04); without one the run is failed closed (only reading and planning). */
+    gate?: CyberRunInput['gate'];
     limiter?: CyberRunInput['limiter'];
     budget?: CyberRunInput['budget'];
     toolContext: CyberRunInput['toolContext'];
@@ -91,6 +94,7 @@ export async function startCyberRunInPanel(
     policy: deps.policy,
     ...(deps.rules ? { rules: deps.rules } : {}),
     requestApproval: deps.requestApproval,
+    ...(deps.gate ? { gate: deps.gate } : {}),
     ...(deps.limiter ? { limiter: deps.limiter } : {}),
     ...(deps.budget ? { budget: deps.budget } : {}),
     toolContext: deps.toolContext,
@@ -326,6 +330,8 @@ export function panelCyberRunStarter(
     security?: () => SecurityAccess | undefined;
     /** Shows the approval card and resolves the user's answer. Required for anything that asks. */
     requestApproval?: CyberRunInput['requestApproval'];
+    /** The gate host: each run asks it for its runtime, so a scan's decisions reach the project's log (GATE-07). */
+    gateHost?: Pick<GateHost, 'runtimeFor'>;
     /** Records the run on the engagement; without it an export cannot find the run. */
     recordRun?: (engagement: Engagement, runId: string, startedAt: string, mode: PanelRunRequest['mode'], depth: PanelRunRequest['depth'], model: string) => Promise<void>;
   } = {}
@@ -388,7 +394,11 @@ export function panelCyberRunStarter(
       })
     });
     const result = await startCyberRunInPanel(
-      { ...assembly, grants, tools: assembly.tools(request.engagement), externalFindings: collected, limiter, budget },
+      {
+        ...assembly, grants, tools: assembly.tools(request.engagement), externalFindings: collected, limiter, budget,
+        // A person starts a scan and answers its cards: presence person, interactive; the floor only reports for now, as for chat (D-43).
+        ...(options.gateHost ? { gate: await options.gateHost.runtimeFor({ ...(options.root ? { root: options.root } : {}), actor: { kind: 'agent', sessionId: `cyber-${request.engagement.id}`, agentLabel: 'cyber panel' }, presence: 'person', context: 'interactive', floorMode: 'shadow' }) } : {})
+      },
       request
     );
     // The run record is what makes Export, replay and the diff work; nothing wrote one before.

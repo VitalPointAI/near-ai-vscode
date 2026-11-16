@@ -96,19 +96,23 @@ export interface GateRuntime {
   readonly presence: Presence;
   readonly context: GateContextName;
   readonly floorMode: FloorMode;
+  /** What a record needs and the pure domain cannot know. The host sets them; a runtime built for a test may leave them out. */
+  readonly productVersion?: string;
+  readonly clock?: () => number;
+  readonly newRecordId?: () => string;
 }
 
 /** Every rule id the gate can record: the floor, the bundle and manifest checks, labels, routing, taint, and the settings rules of the migration table. */
 export const GATE_RULE_IDS: readonly string[] = Object.freeze([
   ...FLOOR_RULE_ORDER,
-  'bundle.failed-closed', 'bundle.ceiling.context', 'bundle.ceiling.mode', 'bundle.ceiling.unattended-mcp', 'manifest.context',
+  'bundle.failed-closed', 'bundle.unavailable', 'bundle.ceiling.context', 'bundle.ceiling.mode', 'bundle.ceiling.unattended-mcp', 'manifest.context', 'manifest.effects-unknown',
   'label.dominance', 'label.no-agent-tools', 'label.network-at-mark',
   ...ROUTE_RULES,
   'taint.held',
   'settings.emergency-stop', 'settings.read-plan', 'settings.auto-safe-tool', 'settings.mode.edits', 'settings.run-grant.edits', 'settings.deny-list',
   'settings.engagement-grant', 'settings.run-grant.command', 'settings.allow-rule', 'settings.mode.fully-autonomous', 'settings.mode.other',
   'settings.auto.classifier', 'settings.unattended-verification', 'settings.risk.outside-workspace', 'settings.risk.installs', 'settings.safety-model',
-  'settings.sensitive-read', 'settings.mcp-approval'
+  'settings.sensitive-read', 'settings.mcp-approval', 'settings.tool-forbidden'
 ]);
 
 const MODE_ORDER: readonly ActionPolicyMode[] = Object.freeze(['approve-risky', 'mostly-autonomous', 'auto', 'fully-autonomous'] as const);
@@ -171,7 +175,17 @@ export async function decide(request: GateRequest, bundleState: BundleState, set
   if (policy.emergencyStop) return make('deny', 'settings.emergency-stop', policy.mode, { reason: 'Emergency stop is on.' });
   if (bundleState.state === 'failed-closed') {
     const onlyReadOrPlan = request.effects.length > 0 && request.effects.every((effect) => (FAILED_CLOSED_VERBS as readonly string[]).includes(effect.verb));
-    if (!onlyReadOrPlan) return make('deny', 'bundle.failed-closed', 'approve-risky', { reason: bundleState.sentence });
+    // A run built with no host at all (no policy was ever read for it) has its own rule id, so a record tells it apart from a policy that failed to verify.
+    if (!onlyReadOrPlan) return make('deny', bundleState.reason === 'unavailable' ? 'bundle.unavailable' : 'bundle.failed-closed', 'approve-risky', { reason: bundleState.sentence });
+  }
+  // A request that names no effect is a request whose effects are unknown. Nothing later can judge what it does, so it never reaches the floor, the ceiling
+  // or the settings layer (which would read "no effects" as "nothing to worry about"): with a person here it asks, without one it is refused. A
+  // failed-closed bundle has already refused it above with its own sentence, so no answer can get past that.
+  if (request.effects.length === 0) {
+    const person = request.presence === 'person' && request.context === 'interactive';
+    return person
+      ? make('ask', 'manifest.effects-unknown', 'approve-risky', { reason: `NEAR AI cannot tell what ${shown(request.tool)} would do with this call, so it needs your answer.` })
+      : make('deny', 'manifest.effects-unknown', 'approve-risky', { reason: `NEAR AI cannot tell what ${shown(request.tool)} would do with this call, and nobody is here to answer, so it is refused.` });
   }
   const mode: ActionPolicyMode = bundleState.state === 'valid' ? effectiveMode(policy.mode, bundleState.bundle.ceiling.maxMode[request.context]) : 'approve-risky';
   const verdict = floorFor(request, options.locations);

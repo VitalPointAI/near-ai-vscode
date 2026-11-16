@@ -17,6 +17,7 @@ import { fixPrompt, parseCandidate, REVIEW_FILE, reviewPrompt, reviewVerdict } f
 import { runAgentInFolder } from '../benchmark/runner';
 import { CODING_TASKS, costOf, gradeTask, loadBenchmarkTasks, runMetrics, setUpTask } from '../benchmark/tasks';
 import { NearAiClient, type ModelInfo, type UsageMetadata } from '../services/nearAiClient';
+import { newTestConversation, testGateRuntime } from './helpers/gatedRuns';
 
 // Live tests against NEAR AI Cloud. They spend real money (cents), so they are opt-in:
 //   NEAR_AI_API_KEY=...                      tool round trip, signature verification, billing
@@ -45,7 +46,7 @@ function pick(models: ModelInfo[], pattern: RegExp): string | undefined {
 /** Runs the harness non-interactively in `root` and returns the outcome and usage. */
 async function agent(near: NearAiClient, model: string, root: string, prompt: string, maxTurns = 30): Promise<{ outcome: string; answer: string; usage: UsageMetadata[]; ms: number; changed: string[] }> {
   // The production system prompt and loop (shared with NEAR AI: Compare Models); every action is allowed here.
-  return runAgentInFolder(near, model, root, prompt, { maxTurns, policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES, requestApproval: async () => ({ decision: 'allow' }) });
+  return runAgentInFolder(near, model, root, prompt, { maxTurns, policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES, requestApproval: async () => ({ decision: 'allow' }), gate: testGateRuntime() });
 }
 
 test('live: GLM 5.3 reads a file through a tool round trip, the response verifies, and billing reports the cost', { skip, timeout: 180_000 }, async () => {
@@ -169,7 +170,7 @@ async function runGsdCommand(near: NearAiClient, models: ModelInfo[], root: stri
   const spans: Array<{ title: string; startS: number; seconds: number }> = [];
   // The same feed Agent Activity shows, so the run prints where each agent's time went.
   const feed = new ActivityFeed({ maxAgeMs: 24 * 3_600_000, maxBytes: 64 * 1_048_576 });
-  const conversation: AgentConversation = new AgentConversation(root, (message) => {
+  const conversation: AgentConversation = newTestConversation(root, (message) => {
     const value = message as { type: string; id?: string; callId?: string; title?: string; text?: string; preview?: unknown; questions?: Array<{ question: string; options: Array<{ label: string }> }> };
     posted.push(value);
     if (value.type === 'tool-start' && value.callId) open.set(value.callId, { title: String(value.title), at: Date.now() });
@@ -298,7 +299,7 @@ test('live media: an image, a voice note, a PDF, and a spreadsheet are read, and
   const root = await mkdtemp(path.join(tmpdir(), 'near-ai-media-live-'));
   const storage = await mkdtemp(path.join(tmpdir(), 'near-ai-media-storage-'));
   const posted: Posted[] = [];
-  const conversation = new AgentConversation(root, (message) => posted.push(message as Posted), path.join(storage, 'checkpoints'));
+  const conversation = newTestConversation(root, (message) => posted.push(message as Posted), path.join(storage, 'checkpoints'));
   try {
     await conversation.send({ text: `${question} Then generate a simple flat icon of an otter and save it to icon.png.`, attachments: prepared, imageModel, client: near, model, privacy: 'Private', policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES, maxTurns: 12 });
   } finally {

@@ -7,6 +7,7 @@ import { DEFAULT_RULES } from '../agent/permissions';
 import { agentModelFor, DEFAULT_ROLE_MODELS, resolveModelId, roleModelFor } from '../gsd/library';
 import { AgentConversation, GsdContext } from '../services/agentSession';
 import type { AgentMessage, CompletionEvent, ToolCall } from '../services/nearAiClient';
+import { newTestConversation } from './helpers/gatedRuns';
 
 // Per-role models: research and mapping roles default to the fast tier; a team member's own
 // model line wins; privacy and availability still decide.
@@ -48,7 +49,7 @@ test('agents get their role\'s model; a team member\'s model line wins; an unava
   const tiers = { deep: 'moonshotai/kimi-k3', standard: 'z-ai/glm-5.3', fast: 'z-ai/glm-5.3-flash' };
   const send = async (availableModels: string[]) => {
     modelsUsed.clear();
-    const conversation = new AgentConversation(root, () => undefined, path.join(root, '.ckpt'));
+    const conversation = newTestConversation(root, () => undefined, path.join(root, '.ckpt'));
     try {
       await conversation.send({ text: 'go', client: near as never, model: 'z-ai/glm-5.3', privacy: 'Private', policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES, gsd: { ...gsd, agents: [...gsd.agents, teamResearcher] }, tiers, roleModels: DEFAULT_ROLE_MODELS, availableModels });
     } finally {
@@ -114,7 +115,7 @@ test('an Agent call with an unknown model fails and names the models; a short na
     async actualCostsUsd() { return undefined; }
   };
   const tiers = { deep: 'moonshotai/kimi-k3', standard: 'z-ai/glm-5.3', fast: 'z-ai/glm-5.3-flash' };
-  const conversation = new AgentConversation(root, () => undefined, path.join(root, '.ckpt'));
+  const conversation = newTestConversation(root, () => undefined, path.join(root, '.ckpt'));
   try {
     await conversation.send({ text: 'go', client: near as never, model: 'z-ai/glm-5.3', privacy: 'Private', policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES, gsd: { home: root, skills: [], shellEnv: {}, agents: [{ name: 'designer', description: 'designs', tools: [], body: 'You design.', file: path.join(root, 'agents', 'designer.md') }] }, tiers, availableModels: ['z-ai/glm-5.3', 'openai/gpt-6.1-sol', 'z-ai/glm-5.3-flash'] });
   } finally {

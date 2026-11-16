@@ -3,6 +3,7 @@ import * as vscode from 'vscode';
 import { GSD_COMMANDS } from '../domain/gsdCommands';
 import { AuthService } from './auth';
 import { ChatWebviewMessage } from './chatBridge';
+import type { GateHost } from '../gate/host';
 import { attachChatToView } from './chat';
 import { layoutProbeAsset, layoutProbeTag, registerLayoutProbe, sharedMedia } from './layoutProbe';
 
@@ -14,7 +15,7 @@ export class NearAiPanelViewProvider implements vscode.WebviewViewProvider {
   /** Set only by the extension-host tests (NEAR_AI_E2E=1) to observe both directions of the view's messages. */
   public tap?: { toView(message: unknown): void; fromView(message: unknown): void };
 
-  public constructor(private readonly context: vscode.ExtensionContext, private readonly auth: AuthService) {}
+  public constructor(private readonly context: vscode.ExtensionContext, private readonly auth: AuthService, private readonly gateHost?: GateHost) {}
 
   public async resolveWebviewView(webviewView: vscode.WebviewView): Promise<void> {
     this.view = webviewView;
@@ -28,7 +29,7 @@ export class NearAiPanelViewProvider implements vscode.WebviewViewProvider {
       webviewView.webview.onDidReceiveMessage((message: unknown) => tap.fromView(message));
     }
     registerLayoutProbe('chat', webviewView.webview);
-    await attachChatToView(this.context, this.auth, webviewView, sidebarHtml(webviewView.webview, media));
+    await attachChatToView(this.context, this.auth, webviewView, sidebarHtml(webviewView.webview, media), this.gateHost);
     for (const message of this.pending.splice(0)) void webviewView.webview.postMessage(message);
   }
 

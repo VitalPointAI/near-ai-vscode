@@ -2,6 +2,7 @@
 // no package, and nothing from src/agent. Nothing a person sets, no bundle value and no approval mode turns a floor rule into an allowance: a refusal rule
 // refuses with no card, an ask rule asks with no "always allow" and no run-wide grant (the gate, in decide.ts, enforces that; this file only names the rule).
 import { PROTECTED_WRITE, STATE_KEYS_PATH, namesStateKeys, normalizeRelative, protectedWriteReason, stateKeysReason } from '../protectedPaths';
+import { coversPath } from './pathCover';
 import type { Capability } from './vocabulary';
 
 /** What each rule does. `refuse` means no card and no way through; `ask` means a person is asked, with no shortcut offered. */
@@ -36,7 +37,17 @@ const TEAM_SETTINGS_FILE = '.planning/.near-ai/team.md';
 export function isFloorProtectedWrite(relative: string): boolean {
   const normalized = normalizeRelative(relative);
   if (normalized === TEAM_SETTINGS_FILE) return false;
-  return PROTECTED_WRITE.test(normalized);
+  return PROTECTED_WRITE.test(normalized) || holdsProtectedPlace(normalized);
+}
+
+// A folder name covers everything under it (owner-confirmed 2026-11-16, PR #70 review), so a write or delete of a whole folder that holds a protected place is a
+// write to that place: `.planning` holds `.planning/.near-ai`, and `.near-ai` holds its state. These are one file in each project-root folder the rule protects.
+// A glob, the project root and a folder that climbs out are left to the path check above: they name no one folder, and the root always has been `**`.
+const PROTECTED_PLACES: readonly string[] = Object.freeze(['.planning/.near-ai/settings.json', '.near-ai/state/meta.json']);
+
+function holdsProtectedPlace(normalized: string): boolean {
+  if (normalized === '' || normalized.startsWith('..') || /[*?[{]/.test(normalized)) return false;
+  return PROTECTED_PLACES.some((place) => coversPath(normalized, place));
 }
 
 export interface FloorVerdict {
@@ -177,7 +188,7 @@ function protectedWriteMatch(input: FloorInput): string | undefined {
   for (const effect of input.effects) {
     if (effect.verb !== 'workspaceWrite' && effect.verb !== 'destroy') continue;
     for (const shown of effect.paths) {
-      if (isFloorProtectedWrite(shown)) return protectedWriteReason(shown) ?? `${shown} is a protected place. Approve this write only if you expect it.`;
+      if (isFloorProtectedWrite(shown)) return protectedWriteReason(shown) ?? `${shown} holds this project's NEAR AI settings or saved state, so changing the whole folder changes them. Approve this write only if you expect it.`;
     }
   }
   return undefined;

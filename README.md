@@ -258,6 +258,13 @@ mark the server Trusted, and the approval card shows exactly what is sent.
 URLs (which may carry the access token), header values, and environment values
 are stored in VS Code's encrypted secret storage.
 
+Servers you add from this version on start with every tool undeclared: an
+undeclared tool asks before it runs in every mode except `fully-autonomous`, and
+it runs only while you are there. Servers you added before behave as they did.
+The MCP page has a "What it does" menu for each tool, so you can say whether it
+only reads or changes data on the server. A local server runs on this machine
+with your permissions. This is what you or the server declared it does. NEAR AI cannot check what a server does inside itself.
+
 ### Compare Models
 
 **NEAR AI: Compare Models** (also on the Tools page) shows which models do your
@@ -995,6 +1002,12 @@ copy of Open-GSD to a project that doesn't already have one.
   everywhere they leave it. Sync is off until you turn it on; what your git
   host can see is shown before it is, and the recovery code is shown once and
   never kept by anyone else.
+- **Your policy.** A signed policy file in this extension's own storage, never
+  in your project, sets the most the agent may do, and your settings only
+  narrow it. **NEAR AI: Show Policy** shows it, read only. If it is missing,
+  changed or expired, only reading and planning run until you run
+  **NEAR AI: Reset Policy to Defaults**, which asks first and keeps your old
+  file. See [Your policy file and decision records](SECURITY.md#your-policy-file-and-decision-records).
 - API keys live in VS Code's encrypted **SecretStorage**, scoped to each
   project. They are never written to settings, workspace files, logs, history,
   or exports.

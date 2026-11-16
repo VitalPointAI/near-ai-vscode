@@ -39,3 +39,8 @@ code, .error, .hint, .stats, .toggle { overflow-wrap: anywhere; }
   .state { margin-left: 0; flex-basis: 100%; }
   .actions button { margin: 0 6px 6px 0; }
 }
+.manifest-words { margin: 6px 0; padding-left: 1.2em; }
+.manifest-words li { overflow-wrap: anywhere; }
+.declare { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; margin: 2px 0 8px; }
+.declare .field-label { display: inline; margin: 0; }
+.declare select { width: auto; max-width: 100%; }

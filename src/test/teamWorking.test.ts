@@ -9,6 +9,7 @@ import { gsdTools, MAX_OTHER_AGENTS } from '../gsd/tools';
 import { AgentConversation, GsdContext } from '../services/agentSession';
 import type { AgentMessage, CompletionEvent, ToolDefinition } from '../services/nearAiClient';
 import type { ConversationStore, Transcript } from '../services/transcripts';
+import { newTestConversation } from './helpers/gatedRuns';
 
 // 0.4.21 (owner, 2026-11-14): GSD keeps the project on track, like a project manager, contractor and quality control, and subcontracts the specialist work
 // to the team when there is one. Before, a team existed only for the one /team message: a later "make the pictures" in the same conversation, or a GSD
@@ -79,7 +80,7 @@ test('a run that works with a team offers its members first, with their roles, a
   const root = await mkdtemp(path.join(tmpdir(), 'near-ai-team-'));
   const gsd = await gsdHome();
   const model = modelSpawning('designer');
-  const conversation = new AgentConversation(root, () => undefined, path.join(root, '.ckpt'));
+  const conversation = newTestConversation(root, () => undefined, path.join(root, '.ckpt'));
   try {
     await conversation.send({ text: 'now make the pictures', client: model.client as never, model: 'm', privacy: 'x', policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES, gsd, memberTeam: studioTeam(root) });
   } finally { conversation.dispose(); }
@@ -93,7 +94,7 @@ test('a run that works with a team offers its members first, with their roles, a
 test('a team member wins over an Open-GSD agent of the same name', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'near-ai-team-'));
   const model = modelSpawning('researcher');
-  const conversation = new AgentConversation(root, () => undefined, path.join(root, '.ckpt'));
+  const conversation = newTestConversation(root, () => undefined, path.join(root, '.ckpt'));
   try {
     await conversation.send({ text: 'find sources', client: model.client as never, model: 'm', privacy: 'x', policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES, gsd: await gsdHome(), memberTeam: studioTeam(root) });
   } finally { conversation.dispose(); }
@@ -103,7 +104,7 @@ test('a team member wins over an Open-GSD agent of the same name', async () => {
 test('a conversation remembers the newest /team it was started with, and a run with no team offers no members', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'near-ai-team-'));
   const model = modelSpawning('designer');
-  const conversation = new AgentConversation(root, () => undefined, path.join(root, '.ckpt'));
+  const conversation = newTestConversation(root, () => undefined, path.join(root, '.ckpt'));
   const base = { client: model.client as never, model: 'm', privacy: 'x', policy: { mode: 'fully-autonomous' as const, emergencyStop: false }, rules: DEFAULT_RULES };
   try {
     assert.equal(conversation.conversationTeam, undefined);
@@ -172,7 +173,7 @@ test('a conversation keeps its team through compaction and when it is reopened',
     async actualCostsUsd() { return undefined; }
   };
   const base = { client: client as never, model: 'm', privacy: 'x', policy: { mode: 'fully-autonomous' as const, emergencyStop: false }, rules: DEFAULT_RULES };
-  const first = new AgentConversation(root, () => undefined, path.join(root, '.ckpt'), undefined, store);
+  const first = newTestConversation(root, () => undefined, path.join(root, '.ckpt'), undefined, store);
   // Summarize whenever there is something older than the recent messages to summarize.
   first.compactAtTokens = 1;
   let id: string;
@@ -186,7 +187,7 @@ test('a conversation keeps its team through compaction and when it is reopened',
     assert.ok(!kept.some((content) => content.includes('make a logo')), 'the /team message was summarized away');
     assert.equal(first.conversationTeam, 'studio', 'kept through compaction');
   } finally { first.dispose(); }
-  const reopened = new AgentConversation(root, () => undefined, path.join(root, '.ckpt'), undefined, store);
+  const reopened = newTestConversation(root, () => undefined, path.join(root, '.ckpt'), undefined, store);
   try {
     await reopened.restore(id);
     assert.equal(reopened.conversationTeam, 'studio', 'a reopened conversation keeps it, even after compaction');
@@ -210,7 +211,7 @@ test('team text cannot end the note early', () => {
 test('the team note is sent once per team in a conversation, not with every message', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'near-ai-team-'));
   const model = modelSpawning('designer');
-  const conversation = new AgentConversation(root, () => undefined, path.join(root, '.ckpt'));
+  const conversation = newTestConversation(root, () => undefined, path.join(root, '.ckpt'));
   const base = { client: model.client as never, model: 'm', privacy: 'x', policy: { mode: 'fully-autonomous' as const, emergencyStop: false }, rules: DEFAULT_RULES, memberTeam: studioTeam(root) };
   try {
     await conversation.send({ ...base, text: 'first' });
@@ -228,7 +229,7 @@ test('a GSD workflow run keeps the team note ahead of its instructions, and an e
   const gsd = await gsdHome();
   gsd.skills = [{ name: 'gsd-execute-phase', description: 'Execute a phase', allowedTools: [], body: 'Run each plan with its executor.', file: path.join(gsd.home, 'skills', 'gsd-execute-phase.md'), includes: [] }];
   const model = modelSpawning('designer');
-  const conversation = new AgentConversation(root, () => undefined, path.join(root, '.ckpt'));
+  const conversation = newTestConversation(root, () => undefined, path.join(root, '.ckpt'));
   const base = { client: model.client as never, model: 'm', privacy: 'x', policy: { mode: 'fully-autonomous' as const, emergencyStop: false }, rules: DEFAULT_RULES, gsd };
   try {
     await conversation.send({ ...base, text: '/gsd-execute-phase 3', skill: { name: 'gsd-execute-phase', args: '3' }, memberTeam: studioTeam(root) });
@@ -246,7 +247,7 @@ test('a GSD workflow run keeps the team note ahead of its instructions, and an e
 test('a run whose turn fails before it starts still sends the note next time', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'near-ai-team-'));
   const model = modelSpawning('designer');
-  const conversation = new AgentConversation(root, () => undefined, path.join(root, '.ckpt'));
+  const conversation = newTestConversation(root, () => undefined, path.join(root, '.ckpt'));
   const base = { client: model.client as never, model: 'm', privacy: 'x', policy: { mode: 'fully-autonomous' as const, emergencyStop: false }, rules: DEFAULT_RULES, gsd: await gsdHome(), memberTeam: studioTeam(root) };
   try {
     await assert.rejects(conversation.send({ ...base, text: '/gsd-missing', skill: { name: 'gsd-missing', args: '' } }), /no skill named gsd-missing/);
@@ -285,13 +286,13 @@ test('a reopened conversation that already has the team note does not get a seco
   const store: ConversationStore = { save: async (transcript) => { saved.set(transcript.id, structuredClone(transcript)); }, checkpoint: async (transcript) => { saved.set(transcript.id, structuredClone(transcript)); }, load: async (id) => saved.get(id), list: async () => [] };
   const model = modelSpawning('designer');
   const base = { client: model.client as never, model: 'm', privacy: 'x', policy: { mode: 'fully-autonomous' as const, emergencyStop: false }, rules: DEFAULT_RULES, memberTeam: studioTeam(root) };
-  const first = new AgentConversation(root, () => undefined, path.join(root, '.ckpt'), undefined, store);
+  const first = newTestConversation(root, () => undefined, path.join(root, '.ckpt'), undefined, store);
   let id: string;
   try {
     await first.send({ ...base, text: 'first' });
     id = (first as unknown as { conversationId: string }).conversationId;
   } finally { first.dispose(); }
-  const reopened = new AgentConversation(root, () => undefined, path.join(root, '.ckpt'), undefined, store);
+  const reopened = newTestConversation(root, () => undefined, path.join(root, '.ckpt'), undefined, store);
   try {
     await reopened.restore(id);
     await reopened.send({ ...base, text: 'second' });
@@ -478,7 +479,7 @@ test('a run\'s own agents cannot be replaced by a team member of the same name, 
   const gsd = await gsdHome();
   try {
     const redTeam = { name: 'designer', description: 'red team', tools: ['Read'], body: 'You are red-team from the run.', file: path.join(root, 'red.md') };
-    const conversation = new AgentConversation(root, () => undefined, path.join(root, '.ckpt'));
+    const conversation = newTestConversation(root, () => undefined, path.join(root, '.ckpt'));
     const spawnable = (request: object) => (conversation as unknown as { spawnableAgents(request: object): Array<{ name: string; body: string }> }).spawnableAgents(request);
     try {
       const withTeam = spawnable({ gsd, memberTeam: studioTeam(root), projectAgents: [redTeam] });

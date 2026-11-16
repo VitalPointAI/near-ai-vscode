@@ -11,6 +11,7 @@ import { AnalyticsStore } from '../services/analyticsStore';
 import { AgentConversation, AgentTurnRequest, GsdContext, visibleTurns } from '../services/agentSession';
 import type { AgentMessage, CompletionEvent, ToolCall } from '../services/nearAiClient';
 import { TranscriptStore } from '../services/transcripts';
+import { newTestConversation } from './helpers/gatedRuns';
 
 const call = (id: string, name: string, args: Record<string, unknown>): ToolCall => ({ id, type: 'function', function: { name, arguments: JSON.stringify(args) } });
 const usage = { inputTokens: 10, outputTokens: 5, verificationStatus: 'unknown' as const, latencyMs: 1 };
@@ -40,7 +41,7 @@ async function project() {
   await mkdir(path.join(home, 'gsd-core'), { recursive: true });
   const gsd: GsdContext = { home, skills: [], agents: [{ name: 'gsd-planner', description: 'Plans', tools: ['Read'], body: 'You are the planner.', file: path.join(home, 'agents', 'gsd-planner.md') }], shellEnv: {} };
   const posted: Array<Record<string, unknown>> = [];
-  const conversation = new AgentConversation(root, (message) => posted.push(message), path.join(root, '.ckpt'), undefined, new TranscriptStore(path.join(root, '.store'), root));
+  const conversation = newTestConversation(root, (message) => posted.push(message), path.join(root, '.ckpt'), undefined, new TranscriptStore(path.join(root, '.store'), root));
   return { root, gsd, posted, conversation };
 }
 
@@ -272,7 +273,7 @@ test('a saved conversation resumes with its full context', async () => {
   const store = new TranscriptStore(path.join(root, '.store'), root);
   const [saved] = await store.list();
   assert.equal(saved.title, 'What does note.md say?');
-  const resumed = new AgentConversation(root, () => undefined, path.join(root, '.ckpt'), undefined, store);
+  const resumed = newTestConversation(root, () => undefined, path.join(root, '.ckpt'), undefined, store);
   const turns = await resumed.restore(saved.id) as Array<{ role: string; text: string; tools: number }> | undefined;
   assert.deepEqual(turns?.map((turn) => [turn.role, turn.text, turn.tools]), [['user', 'What does note.md say?', 0], ['assistant', 'The note says hello.', 1]]);
   const seen: AgentMessage[][] = [];

@@ -12,6 +12,7 @@ import { ActivityStore } from '../services/activityStore';
 import { ActivityFeed } from '../services/agentActivity';
 import { AgentConversation, boundedReport, MAX_REPORT_CHARS } from '../services/agentSession';
 import { completionRequestBody, type AgentMessage, type CompletionEvent, type ToolCall, type ToolDefinition } from '../services/nearAiClient';
+import { newTestConversation } from './helpers/gatedRuns';
 
 // PERF-02: transcripts stay small (an absolute compaction threshold, ranged reads, bounded sub-agent reports) and cacheable (a byte-stable prefix).
 
@@ -74,7 +75,7 @@ test('every request\'s tools are identical and its messages are a byte-identical
   };
   const store = new ActivityStore(root);
   const session = await store.start({ sessionId: 'session-cache-prefix', project: 'demo' });
-  const conversation = new AgentConversation(root, () => undefined, path.join(root, '.ckpt'), undefined, undefined, new ActivityFeed({ maxAgeMs: 60 * 60_000, maxBytes: 8 * 1024 * 1024 }));
+  const conversation = newTestConversation(root, () => undefined, path.join(root, '.ckpt'), undefined, undefined, new ActivityFeed({ maxAgeMs: 60 * 60_000, maxBytes: 8 * 1024 * 1024 }));
   try {
     await conversation.send({ text: 'look', client: near as never, model: 'm', privacy: 'Private', policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES, activity: { store, sessionId: session.sessionId } });
     await conversation.send({ text: 'and again', client: near as never, model: 'm', privacy: 'Private', policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES, activity: { store, sessionId: session.sessionId } });
@@ -118,7 +119,7 @@ test('a long single-request run is summarized at the absolute threshold once, an
     async actualCostsUsd() { return undefined; }
   };
   const posted: Array<Record<string, unknown>> = [];
-  const conversation = new AgentConversation(root, (message) => posted.push(message), path.join(root, '.ckpt'));
+  const conversation = newTestConversation(root, (message) => posted.push(message), path.join(root, '.ckpt'));
   try {
     await conversation.send({ text: 'read every part', client: near as never, model: 'm', privacy: 'Private', policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES, contextWindows: { m: 1_000_000 } });
   } finally {

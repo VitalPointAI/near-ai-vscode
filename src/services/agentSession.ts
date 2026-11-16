@@ -5,6 +5,8 @@ import { readFile } from 'node:fs/promises';
 import * as path from 'node:path';
 import { RunCheckpoints } from '../agent/checkpoints';
 import { compactConversation, contextAction, contextStatus, DEFAULT_COMPACT_AT_TOKENS, DEFAULT_CONTEXT_WINDOW, DEFAULT_THRESHOLDS, estimateTokens, trimOldToolResults } from '../agent/context';
+import type { GateHost } from '../gate/host';
+import { recordLateApproval } from '../agent/gateAdapter';
 import { AgentEvent, AgentRun, AgentRunError, ApprovalReply, ApprovalRequest, AWAITING_APPROVAL_PREFIX, DEFAULT_MAX_TURNS, RunInput, RunOutcome, RunResult } from '../agent/loop';
 import { countersOf, runSplitOf } from './activityOverview';
 import { PermissionRules, RunGrants } from '../agent/permissions';
@@ -313,6 +315,8 @@ export class AgentConversation {
     private readonly activity?: ActivityFeed
   ) {}
 
+  /** The one gate (GATE-04): the chat sets it, and every tool call of a run, a sub-agent's included, is decided through it. Without one a run is failed closed: only reading and planning run, and no policy is guessed. */
+  public gateHost: Pick<GateHost, 'runtimeFor'> | undefined;
   /** The folder for sub-agents' git worktrees. The chat sets it to the editor's own storage: a worktree is a full checkout and never belongs in the project. */
   public worktreeRoot: string | undefined;
   /** Awaited before each checkpoint save; the chat sets it to the state home's ensure(), so the inner .gitignore exists before any checkpoint file. */
@@ -421,6 +425,8 @@ export class AgentConversation {
     const tasksAtStart = this.tasks.revision;
     let taskCheckSent = false;
     let mainTurns = 0;
+    // The gate has finished its start-up check before the first call is decided; the main run is an agent working for a person who is here.
+    const gate = await this.gateHost?.runtimeFor({ root: this.root, actor: { kind: 'agent', sessionId: this.conversationId, agentId: mainId, agentLabel: 'agent' }, presence: 'person', context: 'interactive', floorMode: 'shadow' });
     const run = new AgentRun({
       client: request.client,
       model: request.model,
@@ -430,6 +436,7 @@ export class AgentConversation {
       rules: request.rules,
       grants,
       safety,
+      ...(gate ? { gate } : {}),
       ...(request.riskSwitches ? { riskSwitches: request.riskSwitches } : {}),
       maxTurns: request.maxTurns,
       maxOutputTokens: request.maxOutputTokens,
@@ -1019,8 +1026,11 @@ export class AgentConversation {
             const system = agentBody ? `${agentBody}\n\n${base}` : base;
             const boundary = runBoundary(request);
             this.activity?.agentStarted({ agentId: agent.id, agent: label, runId, model, parentId: `main-${runId}`, conversationId: this.conversationId, ...(boundary ? { boundary } : {}) }, spawn.prompt, system);
+            // A sub-agent of a person's run is interactive with the person present, even though its PERF-01 unattended flag below is set (D-43): its cards queue for them.
+            const childGate = await this.gateHost?.runtimeFor({ root: this.root, actor: { kind: 'sub-agent', sessionId: this.conversationId, agentId: agent.id, agentLabel: label }, presence: 'person', context: 'interactive', floorMode: 'shadow' });
             const child = new AgentRun({
               client: request.client, model, tools, context: agentContext, policy: request.policy, rules: request.rules, grants, safety: this.runSafety, maxTurns: request.maxTurns, maxOutputTokens: request.maxOutputTokens,
+              ...(childGate ? { gate: childGate } : {}),
               ...(request.unattendedAutoApprove !== false ? { unattended: { planScripts: scriptsNamedIn(spawn.prompt), runStartedAt: this.currentRunStartedAt, ...(this.currentBaseCommit ? { baseCommit: this.currentBaseCommit } : {}) } } : {}),
               // PERF-03: the sub-agent's backup is the run's backup, or the chat's own model when the backup is what it already runs on.
               ...(request.modelStallMs ? { stallMs: request.modelStallMs, backupModel: [request.backupModel, request.model].find((candidate) => candidate && candidate !== model) } : {}),
@@ -1037,7 +1047,7 @@ export class AgentConversation {
               // happens only if they allow it, and the sub-agent works on meanwhile instead of holding the run.
               requestApproval: (approval) => this.askApproval({ ...approval, callId: `${agent.id}:${approval.callId}`, title: `${label} › ${approval.title}` }, agent.abort.signal, label, agent.id, {
                 waitMs: this.subagentApprovalWaitMs,
-                onLate: (reply) => this.lateApproval(label, approval, reply, grants, request.rememberAllowRule)
+                onLate: (reply) => { if (childGate) recordLateApproval(childGate, approval.callId, reply, { model }); this.lateApproval(label, approval, reply, grants, request.rememberAllowRule); }
               }, grants),
               rememberAllowRule: request.rememberAllowRule,
               emit: (event) => {

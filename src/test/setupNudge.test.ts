@@ -12,6 +12,7 @@ import { ProfileStore } from '../services/profileStore';
 import { parseChatWebviewMessage } from '../services/chatBridge';
 import { SETUP_NUDGE_DISMISSED_KEY } from '../services/setupSteps';
 import { FakeDocument, FakeNode } from './helpers/fakeDom';
+import { testGateHost } from './helpers/gatedRuns';
 
 const ROOT = path.join(__dirname, '..', '..');
 
@@ -318,7 +319,7 @@ test('the host shows the card for a working profile without a team, hides it on 
   const nudge = () => posted.filter((message) => message.type === 'setup-nudge').at(-1)?.show;
   try {
     const { attachChatToView } = load<typeof import('../services/chat')>('../services/chat');
-    await attachChatToView(context as never, auth, sidebar as never, '<html></html>');
+    await attachChatToView(context as never, auth, sidebar as never, '<html></html>', testGateHost());
     assert.equal(nudge(), true, 'shown when the chat opens');
     // The buttons run the host's commands, never a command the view names.
     await receive!({ type: 'setup-nudge', action: 'team' });
@@ -370,7 +371,7 @@ test('the host does not show the card before a profile works', async () => {
   const sidebar = { webview: { html: '', postMessage: async (message: Record<string, unknown>) => { posted.push(message); return true; }, onDidReceiveMessage: (handler: (message: unknown) => Promise<void>) => { receive = handler; return { dispose() {} }; } }, onDidDispose: () => ({ dispose() {} }) };
   const context = { subscriptions: [] as unknown[], globalStorageUri: { fsPath: path.join(tmpdir(), `near-ai-nudge-none-${process.pid}`) }, extensionUri: { fsPath: ROOT, path: ROOT }, secrets: new MemorySecrets(), workspaceState: { get: () => undefined, update: async () => undefined }, globalState: { get: () => undefined, update: async () => undefined } };
   const { attachChatToView } = load<typeof import('../services/chat')>('../services/chat');
-  await attachChatToView(context as never, new AuthService(new MemorySecrets()), sidebar as never, '<html></html>');
+  await attachChatToView(context as never, new AuthService(new MemorySecrets()), sidebar as never, '<html></html>', testGateHost());
   await receive!({ type: 'refresh-status' });
   const shown = posted.filter((message) => message.type === 'setup-nudge').map((message) => message.show);
   assert.ok(shown.length >= 2);

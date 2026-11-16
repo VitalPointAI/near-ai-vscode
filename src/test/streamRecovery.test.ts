@@ -10,6 +10,7 @@ import { ShellSession } from '../agent/shell';
 import { CORE_TOOLS } from '../agent/tools';
 import { AgentConversation, GsdContext } from '../services/agentSession';
 import { AgentMessage, CompletionEvent, NearAiClient, NearAiError, StreamInterruptedError, ToolCall } from '../services/nearAiClient';
+import { newTestRun, newTestConversation } from './helpers/gatedRuns';
 
 // A stalled or dropped NEAR AI stream must neither hang a run nor end it: the turn is retried
 // until it succeeds, and nothing the run already did is lost.
@@ -89,7 +90,7 @@ async function runWith(model: ReturnType<typeof flakyModel>) {
   const events: AgentEvent[] = [];
   const shell = new ShellSession(root);
   try {
-    const run = new AgentRun({
+    const run = newTestRun({
       client: model, model: 'm', tools: CORE_TOOLS, retryDelaysMs: [1, 2], idleTimeoutMs: 1_000, random: () => 0.5,
       context: { root, checkpoints: new RunCheckpoints('recover'), shell, readFiles: new Set() },
       policy: { mode: 'approve-risky', emergencyStop: false }, rules: DEFAULT_RULES,
@@ -153,7 +154,7 @@ test('a sub-agent recovers by itself, and a failed run\'s work stays in the conv
     async actualCostsUsd() { return undefined; }
   };
   const posted: Array<Record<string, unknown>> = [];
-  const conversation = new AgentConversation(root, (message) => posted.push(message), path.join(root, '.ckpt'));
+  const conversation = newTestConversation(root, (message) => posted.push(message), path.join(root, '.ckpt'));
   const request = { text: 'go', client: near as never, model: 'm', privacy: 'Private', policy: { mode: 'approve-risky' as const, emergencyStop: false }, rules: DEFAULT_RULES, gsd };
   try {
     await assert.rejects(() => conversation.send(request), /HTTP 401/);

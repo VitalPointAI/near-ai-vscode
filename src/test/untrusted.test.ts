@@ -16,6 +16,7 @@ import { checkCitationsTool, makeWebFetchTool, webSearchTool } from '../agent/we
 import { writeZip } from '../agent/zip';
 import { ActivityFeed } from '../services/agentActivity';
 import type { AgentMessage, CompletionEvent, ToolCall } from '../services/nearAiClient';
+import { newTestRun } from './helpers/gatedRuns';
 
 // Defenses against instructions hidden in outside content (web pages, search results, attachments).
 
@@ -78,7 +79,7 @@ test('an attack in a fetched page is fenced and flagged; a following network com
   const events: AgentEvent[] = [];
   const shell = new ShellSession(root);
   try {
-    const run = new AgentRun({ client, model: 'm', tools: [...CORE_TOOLS, webFetch], context: { root, checkpoints: new RunCheckpoints('inject'), shell, readFiles: new Set(), pages: new Map() }, policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES, requestApproval: async (request) => { approvals.push(request); return { decision: 'deny' }; }, emit: (event) => events.push(event) });
+    const run = newTestRun({ client, model: 'm', tools: [...CORE_TOOLS, webFetch], context: { root, checkpoints: new RunCheckpoints('inject'), shell, readFiles: new Set(), pages: new Map() }, policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES, requestApproval: async (request) => { approvals.push(request); return { decision: 'deny' }; }, emit: (event) => events.push(event) });
     const result = await run.run([{ role: 'user', content: 'research' }], new AbortController().signal);
     const fetched = String(result.messages.find((message) => message.role === 'tool')?.content);
     assert.match(fetched, /^<untrusted-content id="[0-9a-f]{8}" source="https:\/\/tips\.example\/">/);

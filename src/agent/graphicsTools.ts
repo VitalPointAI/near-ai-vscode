@@ -5,7 +5,7 @@ import { Block, imageReferences, Note, parseDocument, parseMarkdown } from './do
 import { createDocx } from './docxWriter';
 import { createPresentation, DeckSpec, renderSvg, SlideSpec, TraceDetail, vectorize } from './graphics';
 import { createPdf, NoteStyle, PageSize, pdfDate } from './pdfWriter';
-import { AgentTool, protectedWrite, sensitiveRead, ToolContext } from './tools';
+import { AgentTool, declareManifest, fromArgument, INTERACTIVE_AND_UNATTENDED, protectedWrite, sensitiveRead, ToolContext } from './tools';
 import { displayPath, resolveInWorkspace, ToolError } from './workspace';
 
 // Graphics and document tools for the agent: trace an image into SVG, render SVG to PNG, and build
@@ -48,6 +48,7 @@ export const vectorizeTool: AgentTool<{ image: string; output: string; colors?: 
   description: 'Trace a PNG, JPEG, or GIF in the workspace into an SVG with flat color shapes (logos, icons, diagrams, simple illustrations; photos become posterized). Use colors 2-4 for line art and logos, 8-16 for illustrations. Check the result with RenderSvg.',
   parameters: { type: 'object', properties: { image_path: { type: 'string' }, output_path: { type: 'string', description: 'Where to save the .svg.' }, colors: { type: 'number', description: 'Number of colors, 2-64 (default 16).' }, detail: { type: 'string', enum: ['low', 'medium', 'high'], description: 'low: smoother, fewer shapes; high: keeps small details (default medium).' } }, required: ['image_path', 'output_path'], additionalProperties: false },
   capability: 'workspaceWrite',
+  manifest: declareManifest({ tool: 'VectorizeImage', effects: [{ verb: 'workspaceWrite', paths: [fromArgument('output_path')] }, { verb: 'read', paths: [fromArgument('image_path')] }], contexts: INTERACTIVE_AND_UNATTENDED }),
   parse: (raw) => {
     const detail = raw.detail === undefined ? 'medium' : raw.detail;
     if (detail !== 'low' && detail !== 'medium' && detail !== 'high') throw new ToolError('detail must be low, medium, or high.');
@@ -70,6 +71,7 @@ export const renderSvgTool: AgentTool<{ svg: string; output: string; width?: num
   description: 'Render an SVG in the workspace to a PNG, to check how it looks or for places that need a raster image (favicons, README badges, social cards). Text uses the bundled DejaVu Sans fonts.',
   parameters: { type: 'object', properties: { svg_path: { type: 'string' }, output_path: { type: 'string', description: 'Where to save the .png.' }, width: { type: 'number', description: 'Output width in pixels (default: the SVG\'s own width).' } }, required: ['svg_path', 'output_path'], additionalProperties: false },
   capability: 'workspaceWrite',
+  manifest: declareManifest({ tool: 'RenderSvg', effects: [{ verb: 'workspaceWrite', paths: [fromArgument('output_path')] }, { verb: 'read', paths: [fromArgument('svg_path')] }], contexts: INTERACTIVE_AND_UNATTENDED }),
   parse: (raw) => {
     if (raw.width !== undefined && (typeof raw.width !== 'number' || raw.width < 1 || raw.width > 8_192)) throw new ToolError('width must be a number from 1 to 8192.');
     return { svg: withExtension(text(raw, 'svg_path')!, /\.svg$/i, '.svg'), output: withExtension(text(raw, 'output_path')!, /\.png$/i, '.png'), ...(typeof raw.width === 'number' ? { width: raw.width } : {}) };
@@ -120,6 +122,7 @@ export const presentationTool: AgentTool<{ output: string; deck: DeckSpec }> = {
     additionalProperties: false
   },
   capability: 'workspaceWrite',
+  manifest: declareManifest({ tool: 'CreatePresentation', effects: [{ verb: 'workspaceWrite', paths: [fromArgument('output_path')] }], contexts: INTERACTIVE_AND_UNATTENDED }),
   parse: (raw) => {
     if (!Array.isArray(raw.slides) || !raw.slides.length) throw new ToolError('slides must be a non-empty array.');
     if (raw.slides.length > 200) throw new ToolError('A deck can have at most 200 slides.');
@@ -242,6 +245,7 @@ export const pdfTool: AgentTool<DocumentInput> = {
   description: `Create a PDF from Markdown (inline, or a .md file in the workspace), for example to deliver a finished report. Headings become PDF bookmarks, pages are numbered, tables and images are laid out to fit, and the same input always gives the same file. Text uses the standard PDF fonts (Helvetica), which cover Western European languages; other characters are replaced and listed in the result (use CreateDocument for other scripts). ${MARKDOWN_HELP}`,
   parameters: documentParameters('.pdf'),
   capability: 'workspaceWrite',
+  manifest: declareManifest({ tool: 'CreatePdf', effects: [{ verb: 'workspaceWrite', paths: [fromArgument('output_path')] }], contexts: INTERACTIVE_AND_UNATTENDED }),
   parse: (raw) => parseDocumentInput(raw, /\.pdf$/i, '.pdf'),
   title: (input) => `Create ${input.output}`,
   sensitive: async (input, context) => writeReason(context, input.output, await documentReads(input, context)),
@@ -260,6 +264,7 @@ export const documentTool: AgentTool<DocumentInput> = {
   description: `Create a Word document (.docx) from Markdown (inline, or a .md file in the workspace), for example to deliver a report people will edit. Headings use Word's Heading 1-4 styles (so the Navigation pane and a table of contents work), and tables, lists, links, and pictures are real Word objects. Every Unicode character is kept. ${MARKDOWN_HELP}`,
   parameters: documentParameters('.docx'),
   capability: 'workspaceWrite',
+  manifest: declareManifest({ tool: 'CreateDocument', effects: [{ verb: 'workspaceWrite', paths: [fromArgument('output_path')] }], contexts: INTERACTIVE_AND_UNATTENDED }),
   parse: (raw) => parseDocumentInput(raw, /\.docx$/i, '.docx'),
   title: (input) => `Create ${input.output}`,
   sensitive: async (input, context) => writeReason(context, input.output, await documentReads(input, context)),

@@ -186,7 +186,7 @@ test('models resolve like a run does; forwarded models warn, and a knowledge-bas
 });
 
 test('each tool\'s runs/asks badge follows decidePermission in every approval mode', () => {
-  const capabilityOf: Record<string, ActionCapability> = { read: 'read', plan: 'plan', edit: 'workspaceWrite', shell: 'shell', network: 'network', generate: 'mediaGeneration', git: 'gitMutation', publish: 'mediaPublication' };
+  const capabilityOf: Record<string, ActionCapability> = { read: 'read', plan: 'plan', edit: 'workspaceWrite', shell: 'shell', network: 'network', generate: 'mediaGeneration', git: 'gitMutation', publish: 'mediaPublication', learn: 'sharedWrite' };
   for (const mode of MODES) {
     for (const stopped of [false, true]) {
       const policy = { mode, emergencyStop: stopped };

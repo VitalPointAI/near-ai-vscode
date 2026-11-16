@@ -10,6 +10,7 @@ import { ShellSession } from '../agent/shell';
 import { CORE_TOOLS } from '../agent/tools';
 import { DEFAULT_ROLE_MODELS, defaultRoleTier, modelForTier, roleModelFor } from '../gsd/library';
 import type { AgentMessage, CompletionEvent, ToolDefinition } from '../services/nearAiClient';
+import { newTestRun } from './helpers/gatedRuns';
 
 // PERF-03: a slow model turn is retried on the backup model at its deadline, and judgement roles route to the deep tier, bulk roles to fast.
 
@@ -38,7 +39,7 @@ async function run(options: { stallMs?: number; backupModel?: string; scripts: R
   const events: AgentEvent[] = [];
   const shell = new ShellSession(root);
   try {
-    const agent = new AgentRun({ client: client(options.scripts, calls), model: 'slow', tools: CORE_TOOLS, context: { root, checkpoints: new RunCheckpoints('deadline'), shell, readFiles: new Set() }, policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES, requestApproval: async () => ({ decision: 'allow' }), emit: (event) => events.push(event), ...(options.stallMs ? { stallMs: options.stallMs } : {}), ...(options.backupModel ? { backupModel: options.backupModel } : {}) });
+    const agent = newTestRun({ client: client(options.scripts, calls), model: 'slow', tools: CORE_TOOLS, context: { root, checkpoints: new RunCheckpoints('deadline'), shell, readFiles: new Set() }, policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES, requestApproval: async () => ({ decision: 'allow' }), emit: (event) => events.push(event), ...(options.stallMs ? { stallMs: options.stallMs } : {}), ...(options.backupModel ? { backupModel: options.backupModel } : {}) });
     const result = await agent.run([{ role: 'user', content: 'go' }], new AbortController().signal);
     return { result, calls, events };
   } finally {

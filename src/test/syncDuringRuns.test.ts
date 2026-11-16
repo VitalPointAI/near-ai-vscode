@@ -14,6 +14,7 @@ import { memorySyncSettings, turnOffFlow } from '../services/syncFlows';
 import type { StateTransport } from '../services/stateTransport';
 import type { ConversationStore, Transcript } from '../services/transcripts';
 import { SIX_TURNS, chain, entryIds, remotePayloads, syncedPair, writeMarker, type Machine } from './helpers/syncFixtures';
+import { newTestConversation } from './helpers/gatedRuns';
 
 const THREAD = 'conv-duringrun01';
 
@@ -176,7 +177,7 @@ test('a running conversation reports each saved run state as a quiet point, whil
       async actualCostsUsd() { return undefined; }
     };
     await writeFile(path.join(project, 'notes.md'), 'hello\n');
-    const conversation = new AgentConversation(project, () => undefined, path.join(project, '.ckpt'), undefined, store);
+    const conversation = newTestConversation(project, () => undefined, path.join(project, '.ckpt'), undefined, store);
     conversation.onRunStateSaved = () => { quiet.push(finished); };
     try {
       await conversation.send({ text: 'read the notes', client: near as never, model: 'm', privacy: 'Private', policy: { mode: 'approve-risky', emergencyStop: false }, rules: DEFAULT_RULES });

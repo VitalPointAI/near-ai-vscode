@@ -11,6 +11,7 @@ import { CORE_TOOLS } from '../agent/tools';
 import { makeWebFetchTool } from '../agent/webTools';
 import { ActivityFeed, timeBreakdown } from '../services/agentActivity';
 import { CompletionEvent, NearAiClient, type AgentMessage, type ToolCall } from '../services/nearAiClient';
+import { newTestRun } from './helpers/gatedRuns';
 
 // Fewer, faster turns without doing less: independent lookups from one turn run together, and
 // each agent's time is split into waiting, generating, and tools so slow runs can be diagnosed.
@@ -40,7 +41,7 @@ test('web fetches requested in one turn run at the same time; a write between th
   let turn = 0;
   const client = { async *streamCompletion(): AsyncGenerator<CompletionEvent> { const next = turns[turn++]; yield { type: 'done', message: typeof next === 'string' ? { role: 'assistant', content: next } : { role: 'assistant', content: null, tool_calls: next }, finishReason: 'stop', usage: { verificationStatus: 'unknown', latencyMs: 1 } }; } };
   try {
-    const run = new AgentRun({ client, model: 'm', tools: [...CORE_TOOLS, webFetch], context: { root, checkpoints: new RunCheckpoints('together'), shell, readFiles: new Set() }, policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES, requestApproval: async () => ({ decision: 'allow' }), emit: () => undefined });
+    const run = newTestRun({ client, model: 'm', tools: [...CORE_TOOLS, webFetch], context: { root, checkpoints: new RunCheckpoints('together'), shell, readFiles: new Set() }, policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES, requestApproval: async () => ({ decision: 'allow' }), emit: () => undefined });
     const started = Date.now();
     const result = await run.run([{ role: 'user', content: 'research' } as AgentMessage], new AbortController().signal);
     const elapsed = Date.now() - started;

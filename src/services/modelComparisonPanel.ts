@@ -10,6 +10,8 @@ import { comparisonStoreFor } from '../benchmark/store';
 import { loadBenchmarkTasks, tasksFor, type BenchmarkTask } from '../benchmark/tasks';
 import { spendAccountOf } from './agentSession';
 import type { AuthService } from './auth';
+import { unattendedRuntimeFor } from '../gate/host';
+import type { GateHost } from '../gate/host';
 import { providerErrorMessage } from './chatBridge';
 import { isEmergencyStopped, onDidChangeEmergencyStop } from './emergencyStop';
 import { catalogEntries, comparisonPageHtml, defaultSelection, clearOneProjectChoice, clearProjectModelChoices, estimateView, historyEntries, leaderboardRows, projectChoicesView, recommendationView, retestView, parseComparisonMessage, reportView, selectionProblem, taskSetsView, type PageState, type Selection } from './modelComparisonPage';
@@ -60,7 +62,11 @@ function layerRolesFor(where: 'workspace' | 'project', inspected: { workspaceVal
 const storeFor = (context: vscode.ExtensionContext) => comparisonStoreFor(context.globalStorageUri.fsPath, vscode.workspace.workspaceFolders?.[0]?.uri.fsPath);
 const benchmarkTasks = () => (tasksLoaded ??= loadBenchmarkTasks().catch((error: unknown) => { tasksLoaded = undefined; throw error; }));
 
-export function registerModelComparison(context: vscode.ExtensionContext, auth: AuthService): void {
+// The gate host the comparison's task runs are decided through, so their decisions reach the project's log (GATE-07). Set once at activation.
+let gateHost: GateHost | undefined;
+
+export function registerModelComparison(context: vscode.ExtensionContext, auth: AuthService, gate?: GateHost): void {
+  gateHost = gate;
   context.subscriptions.push(vscode.commands.registerCommand('nearAi.compareModels', () => openModelComparison(context, auth)));
   context.subscriptions.push(vscode.commands.registerCommand('nearAi.clearProjectModelChoices', async () => {
     const configuration = vscode.workspace.getConfiguration('nearAi');
@@ -244,6 +250,7 @@ async function start(context: vscode.ExtensionContext, auth: AuthService, picked
   running = { runId, abort, saved, done: 0, total: plan.toRun };
   const stopListener = onDidChangeEmergencyStop((engaged) => { if (engaged) abort.abort('Emergency stop is on.'); });
   const account = spendAccountOf(active.provider.client);
+  const host = gateHost;
   await account?.ledger.refresh();
   const reportNow = () => post({ type: 'report', ...reportView(saved, gathered.models, gathered.roles) });
   reportNow();
@@ -253,6 +260,8 @@ async function start(context: vscode.ExtensionContext, auth: AuthService, picked
       return runComparison({
         runId, plan, tasks, runsPerTask: picked.runs, signal: abort.signal, rules: readAgentRules(), emergencyStopped: isEmergencyStopped,
         clientFor: (model) => clientFor(active, model).client,
+        // Nobody watches a task run: it is decided with presence none in an unattended context, and the floor only reports for now (D-43).
+        ...(host ? { gateFor: (task) => unattendedRuntimeFor(host, projectRootOf(), `compare-${runId}`, `compare ${task.model} ${task.task}`) } : {}),
         overBudget: (runTag, usage) => overBudget(account, runTag, usage),
         stopAll: () => {
           const reached = account?.limitReached();

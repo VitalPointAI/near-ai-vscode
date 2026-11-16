@@ -4,6 +4,7 @@ import { connect as tlsConnect, type PeerCertificate, type TLSSocket } from 'nod
 import { connect as netConnect, type Socket } from 'node:net';
 import { resolve4, resolve6, resolveMx, resolveTxt } from 'node:dns/promises';
 import * as path from 'node:path';
+import { declareManifest, fromArgument, INTERACTIVE_ONLY } from './tools';
 import type { AgentTool } from './tools';
 import { fenceUntrusted } from './untrusted';
 import { ToolError } from './workspace';
@@ -122,6 +123,33 @@ function scannedRoot(deps: CyberProbeDeps, requested: string | undefined): strin
   return root;
 }
 
+// The probes' manifests (GATE-02, D-05). The six that connect to a target declare `network` on it, though their own shorthand stays `read` (silent and
+// scope-checked today, Pitfall 10: a named exception in the catalog); the three that scan files declare `read` on the folder. They exist only while a
+// person runs an engagement, so interactive only, and what they fetch is outside content.
+
+/** The value of each named field with its edges trimmed, as `parse` reads it, so the manifest names the same target the tool will probe. */
+function trimmed(...fields: string[]): (raw: Record<string, unknown>) => Record<string, unknown> {
+  return (raw) => {
+    const out: Record<string, unknown> = { ...raw };
+    for (const field of fields) if (typeof out[field] === 'string') out[field] = (out[field] as string).trim();
+    return out;
+  };
+}
+
+/** A folder the call names, or the whole project when it names none (the tool then uses the engagement's own path, which the engagement scope check holds). */
+function rootOrProject(raw: Record<string, unknown>): Record<string, unknown> {
+  const root = typeof raw.root === 'string' ? raw.root.trim() : '';
+  return { ...raw, root: root || '**' };
+}
+
+function reachesTarget(tool: string, field: string, as: 'url-host' | 'literal') {
+  return declareManifest({ tool, effects: [{ verb: 'network', hosts: [fromArgument(field, as)] }], contexts: INTERACTIVE_ONLY, untrusted: true });
+}
+
+function readsFolder(tool: string) {
+  return declareManifest({ tool, effects: [{ verb: 'read', paths: [fromArgument('root')] }], contexts: INTERACTIVE_ONLY, untrusted: true });
+}
+
 export interface HttpProbeInput { url: string; checks: string[] }
 
 const BODY_EXCERPT_BYTES = 2_048;
@@ -230,6 +258,8 @@ export function cyberProbes(deps: CyberProbeDeps): AgentTool<any>[] {
     description: 'Fetch one URL in the engagement\'s resolved scope and evaluate its response headers (HSTS, X-Content-Type-Options, X-Frame-Options, Server version disclosure). Returns the capture with timings and a compact finding summary. Target responses are outside content.',
     parameters: { type: 'object', properties: { url: { type: 'string', description: 'The absolute http(s) URL to probe; must be inside the engagement\'s scope.' }, checks: { type: 'array', items: { type: 'string' }, description: 'Check ids to evaluate; empty runs all header checks.' } }, required: ['url'], additionalProperties: false },
     capability: 'read',
+    manifest: reachesTarget('CyberHttpProbe', 'url', 'url-host'),
+    manifestInput: trimmed('url'),
     untrusted: true,
     parse: (raw) => {
       const url = typeof raw.url === 'string' ? raw.url.trim() : '';
@@ -311,6 +341,8 @@ function fingerprintProbe(deps: CyberProbeDeps): AgentTool<FingerprintProbeInput
     description: 'Fetch a target\'s root page and report what it appears to run: page title, Server and X-Powered-By headers, framework hints, and response shapes worth trying an exploit against (a login form, a CMS, a cookie without HttpOnly). Target responses are untrusted data.',
     parameters: { type: 'object', properties: { url: { type: 'string', description: 'The absolute http(s) URL to fingerprint; must be inside the resolved scope.' } }, required: ['url'], additionalProperties: false },
     capability: 'read',
+    manifest: reachesTarget('CyberFingerprintProbe', 'url', 'url-host'),
+    manifestInput: trimmed('url'),
     untrusted: true,
     parse: (raw) => {
       const url = typeof raw.url === 'string' ? raw.url.trim() : '';
@@ -388,6 +420,8 @@ function tlsProbe(deps: CyberProbeDeps): AgentTool<TlsProbeInput> {
     description: 'Complete a TLS handshake with an https target in the resolved scope and report the negotiated protocol, cipher, and peer certificate dates. Flags an expired or not-yet-valid certificate and a protocol older than TLS 1.2. The certificate is target-supplied data.',
     parameters: { type: 'object', properties: { url: { type: 'string', description: 'The absolute https URL whose host and port are probed.' } }, required: ['url'], additionalProperties: false },
     capability: 'read',
+    manifest: reachesTarget('CyberTlsProbe', 'url', 'url-host'),
+    manifestInput: trimmed('url'),
     untrusted: true,
     parse: (raw) => {
       const url = typeof raw.url === 'string' ? raw.url.trim() : '';
@@ -475,6 +509,8 @@ function dnsProbe(deps: CyberProbeDeps): AgentTool<DnsProbeInput> {
     description: 'Read the A, AAAA, MX, and TXT records of a host in the resolved scope, and flag a domain that publishes no SPF or DMARC policy. Record data is target-supplied.',
     parameters: { type: 'object', properties: { hostname: { type: 'string', description: 'A hostname inside the engagement' + "'" + 's resolved scope.' } }, required: ['hostname'], additionalProperties: false },
     capability: 'read',
+    manifest: reachesTarget('CyberDnsProbe', 'hostname', 'literal'),
+    manifestInput: trimmed('hostname'),
     untrusted: true,
     parse: (raw) => {
       const hostname = typeof raw.hostname === 'string' ? raw.hostname.trim().replace(/\.$/, '') : '';
@@ -535,6 +571,8 @@ function tcpProbe(deps: CyberProbeDeps): AgentTool<TcpProbeInput> {
     description: 'Check whether TCP ports are open on a host in the resolved scope, one connection per port with a short timeout. The port list is capped to the engagement scope and to 32 ports per call.',
     parameters: { type: 'object', properties: { host: { type: 'string', description: 'Host or literal IP inside the resolved scope.' }, ports: { type: 'array', items: { type: 'number' }, description: 'Ports to try; at most 32, and inside the resolved scope when the scope names ports.' } }, required: ['host', 'ports'], additionalProperties: false },
     capability: 'read',
+    manifest: reachesTarget('CyberTcpProbe', 'host', 'literal'),
+    manifestInput: trimmed('host'),
     untrusted: true,
     parse: (raw) => {
       const host = typeof raw.host === 'string' ? raw.host.trim() : '';
@@ -578,6 +616,8 @@ function robotsProbe(deps: CyberProbeDeps): AgentTool<RobotsProbeInput> {
     description: 'Fetch robots.txt and sitemap.xml for a site in the resolved scope and report every Disallow path as an exposed path an attacker would try. The file contents are target-supplied.',
     parameters: { type: 'object', properties: { url: { type: 'string', description: 'Any absolute http(s) URL on the site; its origin is used.' } }, required: ['url'], additionalProperties: false },
     capability: 'read',
+    manifest: reachesTarget('CyberRobotsProbe', 'url', 'url-host'),
+    manifestInput: trimmed('url'),
     untrusted: true,
     parse: (raw) => {
       const url = typeof raw.url === 'string' ? raw.url.trim() : '';
@@ -674,6 +714,8 @@ function secretsProbe(deps: CyberProbeDeps): AgentTool<SecretsProbeInput> {
     description: 'Scan the workspace for committed credentials: private key blocks, GitHub and AWS key ids, and assigned API keys, tokens, and passwords. Each finding cites file:line, names the pattern, and shows only the first four characters of the value. File contents are untrusted.',
     parameters: { type: 'object', properties: { root: { type: 'string', description: 'Workspace folder to scan; defaults to the engagement scope path.' } }, additionalProperties: false },
     capability: 'read',
+    manifest: readsFolder('CyberSecretsProbe'),
+    manifestInput: rootOrProject,
     untrusted: true,
     parse: (raw) => {
       const root = typeof raw.root === 'string' && raw.root.trim() ? raw.root.trim() : '';
@@ -836,6 +878,8 @@ function iacProbe(deps: CyberProbeDeps): AgentTool<IacProbeInput> {
     description: 'Inspect Terraform, CloudFormation, Kubernetes manifests, Dockerfiles, and CI workflows under a folder for misconfiguration: public ingress, unencrypted storage, a container running as root, a hardcoded credential, an unpinned image or action, and a privileged container. Each finding cites file:line, a CWE id, and a command that prints the offending line.',
     parameters: { type: 'object', properties: { root: { type: 'string', description: 'Folder to scan; defaults to the engagement scope path.' } }, additionalProperties: false },
     capability: 'read',
+    manifest: readsFolder('CyberIacProbe'),
+    manifestInput: rootOrProject,
     untrusted: true,
     parse: (raw) => ({ root: typeof raw.root === 'string' && raw.root.trim() ? raw.root.trim() : '' }),
     title: (input) => `Inspect infrastructure as code in ${input.root || 'the workspace'}`,
@@ -892,6 +936,8 @@ function dependencyProbe(deps: CyberProbeDeps): AgentTool<DependencyProbeInput> 
     description: 'Check the project\'s locked dependencies for known vulnerabilities by reusing the consent-gated OSV.dev scan. Reports each CVE with severity, CWE ids where the advisory has them, the lockfile it came from, and an osv-scanner command that reproduces it. When the scan is not enabled, says so instead of reporting the project clean.',
     parameters: { type: 'object', properties: { root: { type: 'string', description: 'Project folder whose lockfiles are checked; defaults to the engagement scope path.' } }, additionalProperties: false },
     capability: 'read',
+    manifest: readsFolder('CyberDependencyProbe'),
+    manifestInput: rootOrProject,
     untrusted: true,
     parse: (raw) => ({ root: typeof raw.root === 'string' && raw.root.trim() ? raw.root.trim() : '' }),
     title: (input) => `Check dependencies in ${input.root || 'the workspace'}`,

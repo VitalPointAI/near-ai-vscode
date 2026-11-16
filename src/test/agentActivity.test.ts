@@ -7,6 +7,7 @@ import { DEFAULT_RULES } from '../agent/permissions';
 import { ActivityChange, ActivityFeed, redactForDisplay } from '../services/agentActivity';
 import { AgentConversation, GsdContext } from '../services/agentSession';
 import type { AgentMessage, CompletionEvent, ToolCall } from '../services/nearAiClient';
+import { newTestConversation } from './helpers/gatedRuns';
 
 const usage = (inputTokens: number, outputTokens: number, estimatedCostUsd: number) => ({ inputTokens, outputTokens, estimatedCostUsd, verificationStatus: 'unknown' as const, latencyMs: 500 });
 
@@ -113,7 +114,7 @@ test('a conversation records the main agent and its sub-agents, with prompts, to
     async actualCostsUsd() { return undefined; }
   };
   const feed = new ActivityFeed({ maxAgeMs: 60 * 60_000, maxBytes: 8 * 1024 * 1024 });
-  const conversation = new AgentConversation(root, () => undefined, path.join(root, '.ckpt'), undefined, undefined, feed);
+  const conversation = newTestConversation(root, () => undefined, path.join(root, '.ckpt'), undefined, undefined, feed);
   try {
     await conversation.send({ text: 'Plan the work', client: near as never, model: 'z-ai/glm-5.3', privacy: 'Private', policy: { mode: 'approve-risky', emergencyStop: false }, rules: DEFAULT_RULES, gsd });
   } finally {
@@ -156,7 +157,7 @@ test('a run saves its agents\' counters (429s, approvals, tools, time) in its se
   const feed = new ActivityFeed({ maxAgeMs: 60 * 60_000, maxBytes: 8 * 1024 * 1024 });
   let conversation: AgentConversation | undefined;
   const posted: Array<Record<string, unknown>> = [];
-  conversation = new AgentConversation(root, (message) => {
+  conversation = newTestConversation(root, (message) => {
     posted.push(message);
     // The user declines the write while the agent waits.
     if (message.type === 'approval-request') setTimeout(() => conversation!.answerApproval(String(message.callId), { decision: 'deny' }), 20);

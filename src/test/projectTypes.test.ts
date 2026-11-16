@@ -13,6 +13,7 @@ import { projectInstructions } from '../agent/systemPrompt';
 import { parseTeam } from '../agent/teams';
 import { CORE_TOOLS } from '../agent/tools';
 import { checkCitationsTool, checkOriginalityTool, webFetchTool, webSearchTool } from '../agent/webTools';
+import { newTestConversation } from './helpers/gatedRuns';
 
 // Project types tailor the team and the guidance every agent reads, on the same GSD cycle.
 
@@ -87,7 +88,7 @@ test('a GSD workflow in a red-team project gets the stage and can spawn the red-
     async actualCostsUsd() { return undefined; }
   };
   const posted: Array<Record<string, unknown>> = [];
-  const conversation = new AgentConversation(root, (message) => posted.push(message), path.join(root, '.ckpt'));
+  const conversation = newTestConversation(root, (message) => posted.push(message), path.join(root, '.ckpt'));
   try {
     await conversation.send({ text: '/gsd-execute-phase 1', skill: { name: 'gsd-execute-phase', args: '1' }, gsd: { home, skills: [{ name: 'gsd-execute-phase', description: 'Execute', allowedTools: [], body: 'Execute the phase, then verify it.', file: path.join(home, 'SKILL.md'), includes: [] }], agents: [], shellEnv: {} }, skillAddendum: RED_TEAM_WORKFLOW_STEP, projectAgents: redTeam, client: near as never, model: 'm', privacy: 'Private', policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES });
   } finally {

@@ -3,6 +3,7 @@
 // point of the graph.
 import type { KnowledgeAddition, NodeKind, EdgeKind, Grading, KnowledgeOrigin } from '../domain/teamKnowledge';
 import { neighbours, sourceText, withinCeiling, type TeamKnowledge } from '../domain/teamKnowledge';
+import { declareManifest, INTERACTIVE_AND_UNATTENDED, INTERACTIVE_ONLY } from './tools';
 import type { AgentTool } from './tools';
 import { ToolError } from './workspace';
 
@@ -38,6 +39,8 @@ export function knowledgeTools(knowledge: KnowledgeTools, origin: KnowledgeOrigi
     description: 'Read this team\'s shared knowledge graph: what the team has already learned, so you do not research it again. Without arguments it lists the most mentioned actors and their strongest relations; with "query" it searches labels, functions and facts; with "node" it shows one actor in full: what it does, its facts with sources and Admiralty grades, and every relation in both directions with the tension of each.',
     parameters: { type: 'object', properties: { query: { type: 'string', description: 'Words to look for in a label, a function, or a fact.' }, node: { type: 'string', description: 'The exact name of an actor to show in full.' } }, additionalProperties: false },
     capability: 'read',
+    // The team's graph lives under the home folder, outside the project, so no project path names it: the manifest says `plan` (a named shorthand exception).
+    manifest: declareManifest({ tool: 'TeamKnowledge', effects: [{ verb: 'plan' }], contexts: INTERACTIVE_AND_UNATTENDED }),
     parse: (raw) => ({ ...(typeof raw.query === 'string' && raw.query.trim() ? { query: raw.query.trim().slice(0, 200) } : {}), ...(typeof raw.node === 'string' && raw.node.trim() ? { node: raw.node.trim().slice(0, 200) } : {}) }),
     title: (input) => (input.node ? `Knowledge: ${input.node}` : input.query ? `Knowledge: search "${input.query}"` : 'Knowledge graph'),
     async run(input) {
@@ -117,6 +120,8 @@ export function knowledgeTools(knowledge: KnowledgeTools, origin: KnowledgeOrigi
     // always asks. `workspaceWrite` was wrong: where edits are auto-approved, a model reading a hostile page could commit that page as durable team memory
     // with no prompt at all (0.4.19 review).
     capability: 'sharedWrite',
+    // It writes what the whole team shares, which is a skill-scope write for the team (the floor's shared-write rule); it always asks, in every mode.
+    manifest: declareManifest({ tool: 'Learn', effects: [{ verb: 'skill.write', scope: 'team' }], contexts: INTERACTIVE_ONLY }),
     parse: (raw) => {
       if (!Array.isArray(raw.nodes) || !raw.nodes.length) throw new ToolError('Give at least one actor in "nodes".');
       const nodes = raw.nodes.slice(0, 40).map((entry, index) => {

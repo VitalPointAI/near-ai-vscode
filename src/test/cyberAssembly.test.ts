@@ -18,6 +18,7 @@ import { ShellSession } from '../agent/shell';
 import { cyberAssembly, cyberStorePath, modesFor, panelCyberRunStarter, panelModel, panelTools, RATE_PER_MINUTE, type CompletionClient } from '../services/cyberAssembly';
 
 import { startCyberRun } from '../services/cyberRun';
+import { testGateRuntime } from './helpers/gatedRuns';
 
 const SCOPE: ResolvedScope = { hosts: ['example.test'], ports: [443], paths: ['/'], exclusions: [] };
 
@@ -230,6 +231,26 @@ test('a run started for a workspace resolves its client with that workspace, not
   const result = await starter({ engagement: subject, mode: 'defensive', depth: 'quick', signal: new AbortController().signal, onEvent: () => undefined });
   assert.deepEqual(asked, [workspaceRoot], 'the client was resolved for the workspace, which is where the profile lives');
   assert.notEqual(result.outcome, 'refused');
+});
+
+test('with a gate host the panel asks it for each run\'s runtime, with the project when one is open and with none in a window with no folder', async () => {
+  const { root } = await context();
+  const asked: Array<{ root: string | undefined; presence: string; context: string }> = [];
+  const host = { runtimeFor: async (request: { root?: string | undefined; presence: string; context: string }) => { asked.push({ root: request.root, presence: request.presence, context: request.context }); return testGateRuntime(); } };
+  const run = async (options: { root?: string }): Promise<void> => {
+    const starter = panelCyberRunStarter(
+      { globalStorageUri: { fsPath: path.join(root, 'globalStorage') }, extension: { packageJSON: { version: '0.4.10' } } },
+      async () => stepClient,
+      { ...options, model: 'test-model', gateHost: host }
+    );
+    await starter({ engagement: engagement(), mode: 'defensive', depth: 'quick', signal: new AbortController().signal, onEvent: () => undefined });
+  };
+  await run({ root: path.join(root, 'workspace') });
+  await run({});
+  assert.deepEqual(asked, [
+    { root: path.join(root, 'workspace'), presence: 'person', context: 'interactive' },
+    { root: undefined, presence: 'person', context: 'interactive' }
+  ], 'a window with no folder is still decided by the install\'s own policy, not by a fallback');
 });
 
 test('the run mode decides which tools attach, so Defensive never carries the exploit tools', () => {

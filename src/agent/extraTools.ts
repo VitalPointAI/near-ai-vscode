@@ -5,6 +5,9 @@ import type { ContextGraphNodeDto, MemoryScope } from '../domain/contextGraph';
 import type { ContextGraphMemory } from '../services/contextGraphMemory';
 import { modelList, resolveModelId } from '../gsd/library';
 import type { ModelInfo, NearAiClient } from '../services/nearAiClient';
+import { DEFAULT_BASE_URL } from '../domain/config';
+import { parseHostPattern } from '../domain/gate/vocabulary';
+import { declareManifest, fromArgument, INTERACTIVE_AND_UNATTENDED, INTERACTIVE_ONLY } from './tools';
 import type { AgentTool } from './tools';
 import { deleteDraft, DRAFT_ID, DRAFTS_DIR, moveDraft, newDraftId, readDraft, writeDraft } from './imageDrafts';
 import { displayPath, resolveInWorkspace, ToolError } from './workspace';
@@ -67,6 +70,16 @@ type ImageInput = { prompt: string; path: string; size?: string; model: string; 
  * The description tells the agent not to score images itself or to regenerate without feedback: in a real run an agent made the same image 11 times
  * over hours, measuring each one with its own scripts, while the person could not see or steer any of it.
  */
+/** The default NEAR AI endpoint's host, used when a client does not say its own (the Tools page builds the tool with a stand-in client). */
+const DEFAULT_IMAGE_HOST = new URL(DEFAULT_BASE_URL).hostname;
+
+/** The host the client sends to as a manifest names it. A host the manifest format cannot hold (a bracketed IPv6 address) is a loopback address in practice, so it is `localhost`. */
+function imageHost(client: NearAiClient): string {
+  const host = client.baseHost;
+  if (host === undefined) return DEFAULT_IMAGE_HOST;
+  return parseHostPattern(host, 'host', 'request').ok ? host : 'localhost';
+}
+
 export function imageTool(client: NearAiClient, model: ModelInfo, models: readonly ModelInfo[] = [], reviewer?: ImageReviewer): AgentTool<ImageInput> {
   const offered = [model, ...models.filter((candidate) => candidate.id !== model.id && (candidate.outputModalities ?? []).includes('image'))];
   const byId = new Map(offered.map((candidate) => [candidate.id, candidate]));
@@ -81,6 +94,9 @@ export function imageTool(client: NearAiClient, model: ModelInfo, models: readon
     description: `Generate an image and save it as a PNG in the workspace. Use for icons, illustrations, mockups, and placeholder art the user asked for. Uses ${model.id}${priced(model)} unless you pass model.${offered.length > 1 ? ` Image models on this key: ${modelList(offered.map((candidate) => `${candidate.id}${priced(candidate)}`), 12)}.` : ''}${reviewed}`,
     parameters: { type: 'object', properties: { prompt: { type: 'string', description: 'What the image should show.' }, path: { type: 'string', description: 'Workspace path for the PNG, e.g. assets/hero.png.' }, size: { type: 'string', description: 'e.g. 1024x1024' }, model: { type: 'string', description: `Optional image model: one of ${modelList(ids, 12)}. Defaults to ${model.id}.` }, ...editOfParameter }, required: ['prompt', 'path'], additionalProperties: false },
     capability: 'mediaGeneration',
+    // The image is saved at `path` (a draft first when the person reviews it) and made by a model on the client's host. The model is chosen per call,
+    // so no `infer` effect names it here: the shorthand stays `mediaGeneration` (a named exception).
+    manifest: declareManifest({ tool: 'GenerateImage', effects: [{ verb: 'workspaceWrite', paths: [fromArgument('path')] }, { verb: 'network', hosts: [imageHost(client)] }], hosts: [imageHost(client)], contexts: INTERACTIVE_ONLY }),
     parse: (raw) => {
       if (typeof raw.prompt !== 'string' || !raw.prompt.trim()) throw new ToolError('Missing required parameter "prompt".');
       if (typeof raw.path !== 'string' || !/\.png$/i.test(raw.path)) throw new ToolError('path must end in .png.');
@@ -228,6 +244,8 @@ export function memoryTools(memory: ContextGraphMemory, scopes: { project: Memor
     description: 'Save a durable fact about this project for future conversations: a decision, convention, constraint, or hard-won finding. Not for secrets, raw file contents, or temporary state. Use scope "agent" for notes only your role needs.',
     parameters: { type: 'object', properties: { label: { type: 'string', description: 'A short title.' }, fact: { type: 'string', description: 'The fact, in one or two sentences.' }, scope: { type: 'string', enum: ['project', 'agent'] }, confidence: { type: 'number', description: '0 to 1.' } }, required: ['label', 'fact'], additionalProperties: false },
     capability: 'plan',
+    // A fact saved in the project's memory is a project-level change to what future agents are told, so it declares the project scope of `skill.write`.
+    manifest: declareManifest({ tool: 'Remember', effects: [{ verb: 'skill.write', scope: 'project' }], contexts: INTERACTIVE_AND_UNATTENDED }),
     parse: (raw) => {
       if (typeof raw.label !== 'string' || !raw.label.trim() || typeof raw.fact !== 'string' || !raw.fact.trim()) throw new ToolError('label and fact are required.');
       const scope = raw.scope === 'agent' ? 'agent' : 'project';
@@ -248,6 +266,8 @@ export function memoryTools(memory: ContextGraphMemory, scopes: { project: Memor
     description: 'Search this project\'s memory (and your private memory, if you have one) for facts saved in earlier conversations.',
     parameters: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'], additionalProperties: false },
     capability: 'read',
+    // The project's memory is not a project path (PathPattern is project-relative), so recalling a fact declares `plan`, a named shorthand exception.
+    manifest: declareManifest({ tool: 'Recall', effects: [{ verb: 'plan' }], contexts: INTERACTIVE_AND_UNATTENDED }),
     parse: (raw) => {
       if (typeof raw.query !== 'string' || !raw.query.trim()) throw new ToolError('query is required.');
       return { query: raw.query.slice(0, 200) };

@@ -13,6 +13,7 @@ import { AuthService, SecretStorageLike } from '../services/auth';
 import { ProfileStore } from '../services/profileStore';
 import { deriveProfileId } from '../domain/auth';
 import { totalNanoUsd } from '../services/spendLedger';
+import { testGateHost } from './helpers/gatedRuns';
 
 const BASE = 'https://cloud-api.near.ai/v1';
 const MAIN = 'moonshotai/kimi-k3';
@@ -52,7 +53,7 @@ async function openSidebar(root: string, auth: AuthService) {
     webview: { html: '', postMessage: async (message: Record<string, unknown>) => { posted.push(message); if (message.type === 'approval-request') setTimeout(() => { void receive?.({ type: 'approval-reply', callId: message.callId, decision: 'allow' }); }, 5); if (message.type === 'questions-request') setTimeout(() => { void receive?.({ type: 'questions-reply', id: message.id, answers: [] }); }, 5); return true; }, onDidReceiveMessage: (handler: (message: unknown) => Promise<void>) => { receive = handler; return { dispose() {} }; } },
     onDidDispose: (handler: () => void) => { disposed.push(handler); return { dispose() {} }; }
   };
-  await withVscode(() => attachChatToView({ subscriptions: [], globalStorageUri: { fsPath: path.join(root, '.global') }, extensionUri: { fsPath: root }, secrets: new MemorySecrets() } as never, auth, view as never, '<html></html>'));
+  await withVscode(() => attachChatToView({ subscriptions: [], globalStorageUri: { fsPath: path.join(root, '.global') }, extensionUri: { fsPath: root }, secrets: new MemorySecrets() } as never, auth, view as never, '<html></html>', testGateHost()));
   return { posted, send: (message: unknown) => receive!(message), close: () => { for (const handler of disposed) handler(); } };
 }
 
