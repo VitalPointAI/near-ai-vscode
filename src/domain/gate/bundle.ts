@@ -55,12 +55,24 @@ export interface PolicyBundle {
   readonly clearances: readonly Clearance[];
   readonly routing: RoutingTable;
   readonly defaultLabel: Label;
-  /** Reserved (D-12): validated for shape and ignored. */
-  readonly anchorRoots: readonly unknown[];
-  /** Reserved (D-12): validated for shape and ignored. */
-  readonly statusLists: readonly unknown[];
-  /** Reserved (D-12): scale/level to whole seconds, validated for shape and ignored. */
+  /** Reserved (D-12): validated for shape and ignored. Empty in the default bundle. */
+  readonly anchorRoots: readonly AnchorRoot[];
+  /** Reserved (D-12): validated for shape and ignored. Empty in the default bundle. */
+  readonly statusLists: readonly StatusListRef[];
+  /** Reserved (D-12): `scale/level` to whole seconds, validated for shape and ignored. Empty in the default bundle. */
   readonly maxOfflineAge: Readonly<Record<string, number>>;
+}
+
+/** A reserved anchor: a 64 character lowercase hex root and at most 64 hex inclusion proof steps. */
+export interface AnchorRoot {
+  readonly root: string;
+  readonly proof: readonly string[];
+}
+
+/** A reserved status list reference: an https address and the short name of what the list is for. */
+export interface StatusListRef {
+  readonly uri: string;
+  readonly purpose: string;
 }
 
 const BUNDLE_FIELDS = [
@@ -69,7 +81,12 @@ const BUNDLE_FIELDS = [
 ] as const;
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+/** A self-signed bundle lives this long (D-14). */
 export const SELF_SIGNED_LIFETIME_DAYS = 365;
+/** A bundle that still verifies is renewed in its last this many days (D-14). */
+export const RENEW_WINDOW_DAYS = 30;
+/** An issuedAt later than the effective time by more than this is refused as clock-behind. */
+const CLOCK_SKEW_MS = 5 * 60 * 1000;
 
 /** Epoch milliseconds in, so the folder holds no clock. */
 export interface DefaultBundleInput {
@@ -138,6 +155,15 @@ const MAX_SERVER_ID = 128;
 const MAX_SCALES = 16;
 const MAX_LEVELS = 16;
 const PUBLIC_KEY_BYTES = 32;
+const MAX_CLEARANCES = 64;
+const MAX_MAPPINGS = 256;
+const MAX_ANCHOR_ROOTS = 64;
+const MAX_PROOF_STEPS = 64;
+const MAX_STATUS_LISTS = 16;
+const MAX_URI = 2048;
+const MAX_DEPTH = 16;
+const HEX_64 = /^[0-9a-f]{64}$/;
+const PURPOSE_PATTERN = /^[a-z][a-z0-9-]{0,31}$/;
 
 function isoMillis(value: string): number {
   if (!TIMESTAMP_PATTERN.test(value)) return Number.NaN;
@@ -276,8 +302,9 @@ function parseScales(value: unknown, path: string): Parsed<ScaleTable> {
   return { ok: true, value: Object.freeze(out) };
 }
 
-function parseList<T>(value: unknown, path: string, one: (item: unknown, where: string) => Parsed<T>): Parsed<readonly T[]> {
+function parseList<T>(value: unknown, path: string, max: number, one: (item: unknown, where: string) => Parsed<T>): Parsed<readonly T[]> {
   if (!Array.isArray(value)) return refused('wrong-type', path);
+  if (value.length > max) return refused('not-allowed-here', path);
   const out: T[] = [];
   for (let index = 0; index < value.length; index += 1) {
     const item = one(value[index], `${path}[${String(index)}]`);
@@ -287,12 +314,96 @@ function parseList<T>(value: unknown, path: string, one: (item: unknown, where: 
   return { ok: true, value: Object.freeze(out) };
 }
 
+function parseAnchorRoot(value: unknown, path: string): Parsed<AnchorRoot> {
+  if (!isRecord(value)) return refused('wrong-type', path);
+  const keys = checkKeys(value, path, ['root', 'proof']);
+  if (keys !== undefined) return keys;
+  const root = ownValue(value, 'root');
+  if (typeof root !== 'string' || !HEX_64.test(root)) return refused('wrong-type', childPath(path, 'root'));
+  const proof = ownValue(value, 'proof');
+  const proofPath = childPath(path, 'proof');
+  if (!Array.isArray(proof)) return refused('wrong-type', proofPath);
+  if (proof.length > MAX_PROOF_STEPS) return refused('not-allowed-here', proofPath);
+  const steps: string[] = [];
+  for (let index = 0; index < proof.length; index += 1) {
+    const step: unknown = proof[index];
+    if (typeof step !== 'string' || !HEX_64.test(step)) return refused('wrong-type', `${proofPath}[${String(index)}]`);
+    steps.push(step);
+  }
+  return { ok: true, value: Object.freeze({ root, proof: Object.freeze(steps) }) };
+}
+
+function isHttpsAddress(text: string): boolean {
+  if (text.length > MAX_URI || !text.startsWith('https://') || /[\s\u0000-\u001F\u007F]/.test(text)) return false;
+  try {
+    return new URL(text).protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
+function parseStatusList(value: unknown, path: string): Parsed<StatusListRef> {
+  if (!isRecord(value)) return refused('wrong-type', path);
+  const keys = checkKeys(value, path, ['uri', 'purpose']);
+  if (keys !== undefined) return keys;
+  const uri = ownValue(value, 'uri');
+  if (typeof uri !== 'string' || !isHttpsAddress(uri)) return refused('wrong-type', childPath(path, 'uri'));
+  const purpose = ownValue(value, 'purpose');
+  if (typeof purpose !== 'string' || !PURPOSE_PATTERN.test(purpose)) return refused('wrong-type', childPath(path, 'purpose'));
+  return { ok: true, value: Object.freeze({ uri, purpose }) };
+}
+
+/** `scale/level` keys of the declared scales to whole seconds. Whole seconds only: a fraction was already refused by the number check. */
+function parseMaxOfflineAge(value: unknown, scales: ScaleTable, path: string): Parsed<Readonly<Record<string, number>>> {
+  if (!isRecord(value)) return refused('wrong-type', path);
+  const known: string[] = [];
+  for (const id of Object.keys(scales)) {
+    const scale = scales[id];
+    if (scale !== undefined) for (const level of scale.levels) known.push(`${id}/${level}`);
+  }
+  const out: Record<string, number> = {};
+  for (const key of Object.keys(value)) {
+    if (!known.includes(key)) return refused('unknown-field', childPath(path, key.slice(0, 40)));
+    const seconds = ownValue(value, key);
+    if (typeof seconds !== 'number' || !Number.isSafeInteger(seconds) || seconds < 0 || Object.is(seconds, -0)) return refused('wrong-type', childPath(path, key));
+    out[key] = seconds;
+  }
+  return { ok: true, value: Object.freeze(out) };
+}
+
+/**
+ * Every number in a bundle is a safe whole number that is not negative: a fraction, a negative value, negative zero, NaN, an infinity and a value above
+ * Number.MAX_SAFE_INTEGER are refused wherever they sit, before the field checks, so a number in a place that takes none is also refused. Money and shares
+ * use nano-USD and basis points elsewhere; this bundle holds only versions and seconds.
+ */
+function checkNumbers(value: unknown, path: string, depth: number): Refusal | undefined {
+  if (typeof value === 'number') {
+    return Number.isSafeInteger(value) && value >= 0 && !Object.is(value, -0) ? undefined : refused('wrong-type', path);
+  }
+  if (typeof value !== 'object' || value === null) return undefined;
+  if (depth >= MAX_DEPTH) return refused('wrong-type', path);
+  if (Array.isArray(value)) {
+    for (let index = 0; index < value.length; index += 1) {
+      const found = checkNumbers(value[index], `${path}[${String(index)}]`, depth + 1);
+      if (found !== undefined) return found;
+    }
+    return undefined;
+  }
+  for (const key of Object.keys(value)) {
+    const found = checkNumbers((value as Record<string, unknown>)[key], childPath(path, key.slice(0, 40)), depth + 1);
+    if (found !== undefined) return found;
+  }
+  return undefined;
+}
+
 /**
  * Checks a payload against the bundle v1 shape, in place and with exact keys at every level: an unknown field is refused, never ignored, and a missing
  * field is refused, so absent and empty are never confused. The vocabulary and bundle versions are read first so a newer bundle is reported as newer.
  */
 export function parseBundle(value: unknown, path = ''): Parsed<PolicyBundle> {
   if (!isRecord(value)) return refused('wrong-type', path);
+  const numbers = checkNumbers(value, path, 0);
+  if (numbers !== undefined) return numbers;
   const version = ownValue(value, 'bundleVersion');
   if (typeof version === 'number' && version !== BUNDLE_VERSION) return refused('unknown-version', childPath(path, 'bundleVersion'));
   const vocabulary = ownValue(value, 'vocabulary');
@@ -307,24 +418,25 @@ export function parseBundle(value: unknown, path = ''): Parsed<PolicyBundle> {
   if (!issuedAt.ok) return issuedAt;
   const expiresAt = parseTimestamp(ownValue(value, 'expiresAt'), childPath(path, 'expiresAt'));
   if (!expiresAt.ok) return expiresAt;
+  if (isoMillis(expiresAt.value) <= isoMillis(issuedAt.value)) return refused('wrong-type', childPath(path, 'expiresAt'));
   const ceiling = parseCeiling(ownValue(value, 'ceiling'), childPath(path, 'ceiling'));
   if (!ceiling.ok) return ceiling;
   const scales = parseScales(ownValue(value, 'scales'), childPath(path, 'scales'));
   if (!scales.ok) return scales;
-  const mappings = parseList(ownValue(value, 'mappings'), childPath(path, 'mappings'), (item, where) => parseMapping(item, scales.value, where));
+  const mappings = parseList(ownValue(value, 'mappings'), childPath(path, 'mappings'), MAX_MAPPINGS, (item, where) => parseMapping(item, scales.value, where));
   if (!mappings.ok) return mappings;
-  const clearances = parseList(ownValue(value, 'clearances'), childPath(path, 'clearances'), (item, where) => parseClearance(item, scales.value, where));
+  const clearances = parseList(ownValue(value, 'clearances'), childPath(path, 'clearances'), MAX_CLEARANCES, (item, where) => parseClearance(item, scales.value, where));
   if (!clearances.ok) return clearances;
   const routing = parseRouting(ownValue(value, 'routing'), scales.value, childPath(path, 'routing'));
   if (!routing.ok) return routing;
   const defaultLabel = parseLabel(ownValue(value, 'defaultLabel'), scales.value, childPath(path, 'defaultLabel'));
   if (!defaultLabel.ok) return defaultLabel;
-  const anchorRoots = ownValue(value, 'anchorRoots');
-  if (!Array.isArray(anchorRoots)) return refused('wrong-type', childPath(path, 'anchorRoots'));
-  const statusLists = ownValue(value, 'statusLists');
-  if (!Array.isArray(statusLists)) return refused('wrong-type', childPath(path, 'statusLists'));
-  const maxOfflineAge = ownValue(value, 'maxOfflineAge');
-  if (!isRecord(maxOfflineAge)) return refused('wrong-type', childPath(path, 'maxOfflineAge'));
+  const anchorRoots = parseList(ownValue(value, 'anchorRoots'), childPath(path, 'anchorRoots'), MAX_ANCHOR_ROOTS, parseAnchorRoot);
+  if (!anchorRoots.ok) return anchorRoots;
+  const statusLists = parseList(ownValue(value, 'statusLists'), childPath(path, 'statusLists'), MAX_STATUS_LISTS, parseStatusList);
+  if (!statusLists.ok) return statusLists;
+  const maxOfflineAge = parseMaxOfflineAge(ownValue(value, 'maxOfflineAge'), scales.value, childPath(path, 'maxOfflineAge'));
+  if (!maxOfflineAge.ok) return maxOfflineAge;
   return {
     ok: true,
     value: Object.freeze({
@@ -339,9 +451,9 @@ export function parseBundle(value: unknown, path = ''): Parsed<PolicyBundle> {
       clearances: clearances.value,
       routing: routing.value,
       defaultLabel: defaultLabel.value,
-      anchorRoots: Object.freeze([...anchorRoots]) as readonly unknown[],
-      statusLists: Object.freeze([...statusLists]) as readonly unknown[],
-      maxOfflineAge: Object.freeze({}) as Readonly<Record<string, number>>
+      anchorRoots: anchorRoots.value,
+      statusLists: statusLists.value,
+      maxOfflineAge: maxOfflineAge.value
     })
   };
 }
@@ -420,21 +532,67 @@ export interface VerifyBundleOptions {
 }
 
 /**
+ * The time every expiry check uses: the later of the wall clock and the last time this install saw a valid bundle (D-15). Turning the clock back
+ * therefore never revives an expired bundle. A last-valid time that is not a number is ignored, and a wall clock that is not a number gives NaN.
+ */
+export function effectiveNow(now: number, lastValidAt?: number): number {
+  if (!Number.isFinite(now)) return Number.NaN;
+  return lastValidAt !== undefined && Number.isFinite(lastValidAt) && lastValidAt > now ? lastValidAt : now;
+}
+
+/**
+ * True only in the last RENEW_WINDOW_DAYS days before expiresAt, counting from exactly expiresAt minus that many days up to, and not including, expiresAt.
+ * A bundle that has expired needs more than renewal, so it is false there (the verifier already failed it closed).
+ */
+export function needsRenewal(bundle: Pick<PolicyBundle, 'expiresAt'>, now: number, lastValidAt?: number): boolean {
+  const effective = effectiveNow(now, lastValidAt);
+  const expires = isoMillis(bundle.expiresAt);
+  if (Number.isNaN(effective) || Number.isNaN(expires)) return false;
+  return effective >= expires - RENEW_WINDOW_DAYS * DAY_MS && effective < expires;
+}
+
+/**
+ * True only when the payload is a valid bundle equal to the default apart from issuer, issuedAt and expiresAt, which is what lets a bundle that was never
+ * customised be re-signed after a lost key (D-39). A bundle with any other difference, including a changed clearance, is customised. Never throws.
+ */
+export function isDefaultBundle(payload: unknown): boolean {
+  try {
+    const parsed = parseBundle(payload);
+    if (!parsed.ok) return false;
+    const bundle = parsed.value;
+    const fresh = defaultBundlePayload({ issuer: bundle.issuer, now: 0 });
+    return bundleHash({ ...fresh, issuedAt: bundle.issuedAt, expiresAt: bundle.expiresAt }) === bundleHash(bundle);
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Turns a stored envelope into a valid bundle or one failed-closed state with one plain sentence. Never throws. The verifier decides signature, purpose
- * and key status, so a tampered, unsigned, wrong-purpose, unknown-key, revoked or rotated bundle each fails here with its own cause.
+ * and key status, so a tampered, unsigned, wrong-purpose, unknown-key, revoked or rotated bundle each fails here with its own cause. A bundle is valid
+ * while the effective time is before expiresAt and expired at exactly expiresAt.
  */
 export function verifyBundleEnvelope(envelope: unknown, options: VerifyBundleOptions): BundleState {
   if (envelope === undefined) return failedClosed('missing');
+  const effective = effectiveNow(options.now, options.lastValidAt);
+  if (Number.isNaN(effective)) return failedClosed('clock-behind', 'The clock gave no valid time.');
   const verdict = verifyPayload<unknown>(envelope, { purpose: 'policy-bundle', status: options.status });
   if (!verdict.ok) return failedClosed(payloadReason(verdict.reason));
   const parsed = parseBundle(verdict.payload);
   if (!parsed.ok) return failedClosed(shapeReason(parsed), parsed.message);
+  const bundle = parsed.value;
+  // The payload repeats the signer and the signing time on purpose (D-12), so a copy that says something else is refused, character for character.
+  if (bundle.issuer.fingerprint !== verdict.signer.fingerprint || bundle.issuer.publicKey !== verdict.signer.publicKey || bundle.issuedAt !== verdict.signedAt) {
+    return failedClosed('signer-mismatch');
+  }
+  if (isoMillis(bundle.issuedAt) > effective + CLOCK_SKEW_MS) return failedClosed('clock-behind');
+  if (effective >= isoMillis(bundle.expiresAt)) return failedClosed('expired');
   return {
     state: 'valid',
-    bundle: parsed.value,
+    bundle,
     hash: bundleHash(verdict.payload),
     signer: verdict.signer,
-    expiresAt: parsed.value.expiresAt,
-    renewDue: false
+    expiresAt: bundle.expiresAt,
+    renewDue: needsRenewal(bundle, options.now, options.lastValidAt)
   };
 }
