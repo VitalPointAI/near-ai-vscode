@@ -187,8 +187,10 @@ export async function openTeamStudio(context: vscode.ExtensionContext, auth: Aut
       return suggestForTeam(rows, members);
     },
     ask: (prompt, value) => Promise.resolve(vscode.window.showInputBox({ title: 'Team Studio', prompt, value, validateInput: (text) => text.trim() ? undefined : 'Enter a name.' })),
-    pickExportTarget: async (name) => (await vscode.window.showSaveDialog({ defaultUri: vscode.Uri.file(path.join(root ?? context.globalStorageUri.fsPath, name)), filters: { 'Team file': ['md'] }, title: 'Export team' }))?.fsPath,
-    pickImportSource: async () => (await vscode.window.showOpenDialog({ filters: { 'Team file': ['md'] }, title: 'Import a NEAR AI team file', canSelectMany: false }))?.[0]?.fsPath,
+    // A share file is <team>.near-team.json; the dialog filters on its last extension, json. A team .md file can be imported too.
+    pickShareTarget: async (name) => (await vscode.window.showSaveDialog({ defaultUri: vscode.Uri.file(path.join(root ?? homeFolder(), name)), filters: { 'NEAR AI team': ['json'] }, title: 'Share team: save it as one file to send' }))?.fsPath,
+    pickImportSource: async () => (await vscode.window.showOpenDialog({ filters: { 'NEAR AI team': ['json', 'md'] }, title: 'Import a NEAR AI team', canSelectMany: false }))?.[0]?.fsPath,
+    home: homeFolder(),
     applyProjectType: async (projectRoot, type, goal) => {
       const applied = await applyProjectType(projectRoot, type, goal);
       // PERF-06: research and writing projects also get the research GSD profile and its verifier scripts (nearAi.gsd.researchProfile).

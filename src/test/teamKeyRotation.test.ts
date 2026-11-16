@@ -13,7 +13,7 @@ import {
   loadDeviceIdentity, loadOrCreateDeviceIdentity, loadPreviousDeviceIdentity, prepareDeviceRotation, revokeDeviceKey
 } from '../team/identity';
 import type { DeviceIdentity } from '../team/identity';
-import { KEY_HISTORY_FILE, KEY_HISTORY_HEAD_SECRET, localKeyStatus, readKeyHistory } from '../team/keyHistory';
+import { KEY_HISTORY_FILE, KEY_HISTORY_HEAD_SECRET, localKeyStatus, readKeyHistory, setKeyHistoryWarningSink } from '../team/keyHistory';
 import { identityKeyNeedles, scanFiles } from './helpers/teamCanary';
 import type { Needle } from './helpers/teamCanary';
 import { createVscodeStub, installVscodeStub } from './helpers/vscodeStub';
@@ -414,6 +414,53 @@ test('first need passes its warning callback to the key history, so a failed res
     await assert.rejects(() => loadOrCreateDeviceIdentity(wrapper, { identityDir: folder, now: () => T0, warn: (line) => warnings.push(line) }), /saved end could not be stored/);
     assert.equal(warnings.length, 1);
     assert.match(warnings[0] as string, /^The key history could not be put back/);
+  });
+});
+
+// 0.4.26 (PR #62 review): only Enable passed a warning callback, so a failed restore during a rotation or a revocation was reported nowhere. A caller
+// that passes none now reaches the sink Team Mode sets (its output channel); a caller's own callback still wins, and the sink is put back on dispose.
+test('rotation and revocation report a failed restore through the Team Mode warning sink when they pass no callback of their own', async () => {
+  /** The head store fails and the history file has become a folder, so the file cannot be put back either. */
+  const breaking = (folder: string, secrets: MemorySecrets): SecretStorageLike => ({
+    get: (key) => secrets.get(key), delete: (key) => secrets.delete(key),
+    store: async (key, value) => {
+      if (key !== KEY_HISTORY_HEAD_SECRET) return secrets.store(key, value);
+      const file = path.join(folder, KEY_HISTORY_FILE);
+      await rm(file, { force: true });
+      await mkdir(path.join(file, 'blocked'), { recursive: true });
+      throw new Error('store failed');
+    }
+  });
+  const sunk: string[] = [];
+  const sink = setKeyHistoryWarningSink((line) => sunk.push(line));
+  try {
+    await withFolder(async (folder, secrets) => {
+      await loadOrCreateDeviceIdentity(secrets, { identityDir: folder, now: () => T0 });
+      await prepareDeviceRotation(secrets, { identityDir: folder, now: () => T0 });
+      await assert.rejects(() => commitDeviceRotation(breaking(folder, secrets), { identityDir: folder, now: () => T1 }), /saved end could not be stored/);
+      assert.equal(sunk.length, 1, 'the rotation warning reached the sink');
+      assert.match(sunk[0] as string, /^The key history could not be put back/);
+    });
+    await withFolder(async (folder, secrets) => {
+      const { identity } = await loadOrCreateDeviceIdentity(secrets, { identityDir: folder, now: () => T0 });
+      await assert.rejects(() => revokeDeviceKey(breaking(folder, secrets), { identityDir: folder, now: () => T1, key: { fingerprint: identity.fingerprint, publicKey: identity.publicKey } }), /saved end could not be stored/);
+      assert.equal(sunk.length, 2, 'the revocation warning reached the sink');
+    });
+    // A caller's own callback wins over the sink, so a warning is never reported twice.
+    await withFolder(async (folder, secrets) => {
+      const own: string[] = [];
+      const { identity } = await loadOrCreateDeviceIdentity(secrets, { identityDir: folder, now: () => T0 });
+      await assert.rejects(() => revokeDeviceKey(breaking(folder, secrets), { identityDir: folder, now: () => T1, warn: (line) => own.push(line), key: { fingerprint: identity.fingerprint, publicKey: identity.publicKey } }), /saved end could not be stored/);
+      assert.deepEqual([own.length, sunk.length], [1, 2]);
+    });
+  } finally {
+    sink.dispose();
+  }
+  // Disposed: nothing is routed any more.
+  await withFolder(async (folder, secrets) => {
+    const { identity } = await loadOrCreateDeviceIdentity(secrets, { identityDir: folder, now: () => T0 });
+    await assert.rejects(() => revokeDeviceKey(breaking(folder, secrets), { identityDir: folder, now: () => T1, key: { fingerprint: identity.fingerprint, publicKey: identity.publicKey } }), /saved end could not be stored/);
+    assert.equal(sunk.length, 2);
   });
 });
 

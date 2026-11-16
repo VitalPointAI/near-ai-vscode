@@ -349,7 +349,9 @@ function newest(entries, startOf, { unfinishedFirst = false } = {}) {
  *   with main. That run must have finished with conclusion success and every CI job green:
  *   queued or running is waited for; cancelled, startup_failure, a failed or missing job refuse.
  * - A check run from the Actions app whose check suite no workflow run on the commit names yet (GitHub
- *   links them a little after a push) is waited for, not refused: it is judged once it is linked.
+ *   links them a little after a push) is waited for, not refused, but only while a CI workflow run on the
+ *   commit is itself unlinked (listed without a check suite, or not listed yet): it is judged once it is
+ *   linked. With every CI run linked, such a check is refused at once.
  *
  * Returns { ok, problems, waiting }: `waiting` is true when the only problems are CI jobs that
  * are still running or have not reported yet.
@@ -366,7 +368,11 @@ export function evaluateCommit(commit, { required = REQUIRED_CHECKS, reviewer, e
   // workflow run: the run is missing from the list, or listed without a check suite. A check run from the Actions app whose suite no listed workflow
   // run names cannot be told apart from another workflow's yet, so it is waited for (bounded by the caller), never judged; once linked, it is judged.
   const linkedSuites = new Set(workflowRuns.map((run) => run.suiteId).filter((id) => id !== undefined && id !== null));
-  const unlinked = (run) => run.app === CI_WORKFLOW.app && !linkedSuites.has(run.suiteId);
+  // 0.4.26 (PR #62 review): the wait applies only while the CI workflow's own run on the commit is itself not linked yet (listed without a check suite,
+  // or not listed at all). Once every CI run on the commit is linked, a same-named check whose suite no workflow run names (for example a deleted
+  // workflow's) cannot be a CI job still being linked, so it is refused at once as before, rather than turned into a wait that ends in a CI timeout.
+  const ciRunPendingLink = ciWorkflowRuns.length === 0 || ciWorkflowRuns.some((run) => run.suiteId === undefined || run.suiteId === null);
+  const unlinked = (run) => ciRunPendingLink && run.app === CI_WORKFLOW.app && !linkedSuites.has(run.suiteId);
   const attempts = new Map();
   for (const run of checkRuns) {
     if (!run.name) continue;

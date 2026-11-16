@@ -499,6 +499,40 @@ until it runs out aren't shown.
   leaving the builder or the editor with unsaved changes asks first (Discard
   changes, or Save draft / Save); closing the tab keeps the unsaved team as a
   draft and says so the next time the studio opens.
+- **Reusing your teams in a new project.** When you set up a team (**Set Up
+  Project Team**, or **New team** in Team Studio), the starting points list
+  your own saved teams, from any project, next to the ones the extension
+  provides. Filter them with **All**, **My teams** or **Built-in**; each shows
+  its name, description, member count and where it came from. Choosing one of
+  your teams copies its members into the new team for you to review and save,
+  the same way a built-in starting point does. Saved as the project's team,
+  it is asked about before it first runs, like any project team. With no
+  saved teams yet, **My teams** says so: save a team as one of your teams in
+  Team Studio to reuse it anywhere.
+- **Sharing a team.** **Share…** on a team's card in Team Studio (or next to
+  it in the starting points) is the way to send a team (**Open as Markdown**
+  opens the file itself). It saves the team as one file,
+  `<team>.near-team.json`, for you to send. The file holds the team file
+  exactly as saved, a short summary, a format version and a checksum; no
+  file path from your computer, no setting, key or token. A team that holds
+  something that looks like a key or password is refused, and one whose
+  instructions name a folder on your computer is shared only after you agree.
+  The team's knowledge graph stays behind unless you choose to include it, and
+  then local paths, non-web sources and anything that looks like a secret are
+  removed first. **Import…** takes a `.near-team.json` file (or a team `.md`
+  file), checks it, shows its members, models and tools, and adds it to your
+  teams only when you agree. A file changed after it was shared, or one that
+  is not a team, is refused with a plain message. An imported team stays
+  untrusted: the first time it would run, you are asked to approve it. Anything
+  made from it before you approve it (a copy, a team built from it as a
+  starting point or with a member copied from it, or a project team) is asked
+  about on its own, and a project team's question says where it came from. The checksum catches a
+  damaged or hand-edited file but is not a signature; signed team files may
+  come later. The `.near-team.json` format is JSON with `format`
+  (`near-ai-team`), `formatVersion` (1), `team` (`name`, `description`,
+  `members`, `markdown`), `knowledge` (null unless included), `listing`
+  (reserved, always null) and `integrity` (`sha256-` and the base64 SHA-256
+  of the team text and knowledge).
 - **Update Team.** A team made from a built-in project type records where it
   came from in its frontmatter (`template`, `templateVersion`, and a
   `templateBase` list with a fingerprint of each member as generated), so it

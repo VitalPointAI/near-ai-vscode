@@ -223,7 +223,7 @@ test('roles come from team roles and the installed Open-GSD agents; starting poi
 test('every page message is strictly validated', () => {
   const good: unknown[] = [
     { type: 'ready' }, { type: 'refresh' }, { type: 'import' }, { type: 'discard-draft' },
-    ...['open', 'duplicate', 'export', 'archive', 'restore', 'use-in-chat', 'open-markdown', 'versions'].map((type) => ({ type, id: 'user:web' })),
+    ...['open', 'duplicate', 'share', 'archive', 'restore', 'use-in-chat', 'open-markdown', 'versions'].map((type) => ({ type, id: 'user:web' })),
     { type: 'open', id: 'project' }, { type: 'restore', id: 'archived:web-2' },
     { type: 'version-view', id: 'user:web', ref: '2026-10-29T14-03-12-345Z.md' }, { type: 'version-restore', id: 'project', ref: '2026-10-29T14-03-12-345Z.md' },
     { type: 'review', seq: 3, draft: draft() }, { type: 'review', seq: 4, draft: draft(), id: 'user:web' },
@@ -249,7 +249,9 @@ test('every page message is strictly validated', () => {
     { type: 'save-draft', draft: draft(), step: 9, target: 'user' },
     { type: 'starting-point', id: 'gsd:unknown', goal: '', locality: 'cloud' }, { type: 'starting-point', id: 'recommend', goal: '', locality: 'mars' }, { type: 'starting-point', id: 'recommend', goal: '', locality: 'cloud', riskLevel: 'extreme' },
     { type: 'open-setting', key: 'editor.fontSize' }, { type: 'open-setting', key: 'nearAi.agent.denyCommands' },
-    { type: 'run-command', command: 'nearAi.emergencyStop' }, { type: 'delete', id: 'user:web' }
+    { type: 'run-command', command: 'nearAi.emergencyStop' }, { type: 'delete', id: 'user:web' },
+    // 0.4.26: Export (a raw Markdown copy) was removed; Share is the one way to send a team.
+    { type: 'export', id: 'user:web' }
   ];
   for (const message of bad) assert.equal(parseStudioMessage(message), undefined, JSON.stringify(message));
 });
@@ -264,7 +266,7 @@ test('the page HTML is one nonce script and two stylesheets (shared base, then i
 
 // ---------- the host controller, on a real TeamLibrary ----------
 
-interface Harness { posted: Array<Record<string, any>>; send(message: unknown): Promise<void>; deps: TeamStudioDeps; storage: string; root: string; library: TeamLibrary; prefills: string[]; opened: string[]; applied: string[]; drafts: { value?: SavedWizard }; watch(file: string): void; confirmAnswer: { value: boolean }; askAnswer: { value: string | undefined }; exportTarget: { value?: string }; settle(): Promise<void>; chooseAnswer: { value?: string }; asked: Array<{ message: string; actions: string[] }>; kept: { value?: KeptWork }; close(): void }
+interface Harness { posted: Array<Record<string, any>>; send(message: unknown): Promise<void>; deps: TeamStudioDeps; storage: string; root: string; library: TeamLibrary; prefills: string[]; opened: string[]; applied: string[]; drafts: { value?: SavedWizard }; watch(file: string): void; confirmAnswer: { value: boolean }; askAnswer: { value: string | undefined }; shareTarget: { value?: string }; importSource: { value?: string }; confirmed: string[]; settle(): Promise<void>; chooseAnswer: { value?: string }; asked: Array<{ message: string; actions: string[] }>; kept: { value?: KeptWork }; close(): void }
 
 async function harness(): Promise<Harness> {
   const base = await mkdtemp(path.join(tmpdir(), 'near-ai-studio-'));
@@ -277,7 +279,8 @@ async function harness(): Promise<Harness> {
   let watcher: ((file: string) => void) | undefined;
   const prefills: string[] = []; const opened: string[] = []; const applied: string[] = [];
   const drafts: { value?: SavedWizard } = {};
-  const confirmAnswer = { value: true }; const askAnswer: { value: string | undefined } = { value: 'Web copy' }; const exportTarget: { value?: string } = {};
+  const confirmAnswer = { value: true }; const askAnswer: { value: string | undefined } = { value: 'Web copy' };
+  const shareTarget: { value?: string } = {}; const importSource: { value?: string } = {}; const confirmed: string[] = [];
   const chooseAnswer: { value?: string } = {}; const asked: Array<{ message: string; actions: string[] }> = []; const kept: { value?: KeptWork } = {};
   let disposed: (() => void) | undefined;
   const deps: TeamStudioDeps = {
@@ -287,10 +290,11 @@ async function harness(): Promise<Harness> {
     sidebar: { prefill: async (text) => { prefills.push(text); } },
     openFile: async (file) => { opened.push(file); },
     openSetting: async () => undefined,
-    confirm: async () => confirmAnswer.value,
+    confirm: async (message) => { confirmed.push(message); return confirmAnswer.value; },
     ask: async () => askAnswer.value,
-    pickExportTarget: async () => exportTarget.value,
-    pickImportSource: async () => undefined,
+    pickShareTarget: async () => shareTarget.value,
+    pickImportSource: async () => importSource.value,
+    home: base,
     applyProjectType: async (_root, type, goal) => { applied.push(`${type.id}:${goal}`); },
     drafts: { get: () => drafts.value, set: async (value) => { drafts.value = value; } },
     choose: async (message, ...actions) => { asked.push({ message, actions }); return chooseAnswer.value; },
@@ -299,7 +303,7 @@ async function harness(): Promise<Harness> {
   };
   attachTeamStudio({ webview: { postMessage: async (message) => { posted.push(message as Record<string, any>); return true; }, onDidReceiveMessage: (listener) => { receive = listener; return { dispose() {} }; } }, onDidDispose: (listener) => { disposed = listener; return { dispose() {} }; } }, deps);
   const settle = () => new Promise<void>((resolve) => setTimeout(resolve, 20));
-  return { posted, send: async (message) => { await receive!(message); }, deps, storage, root, library, prefills, opened, applied, drafts, watch: (file) => watcher!(file), confirmAnswer, askAnswer, exportTarget, settle, chooseAnswer, asked, kept, close: () => disposed!() };
+  return { posted, send: async (message) => { await receive!(message); }, deps, storage, root, library, prefills, opened, applied, drafts, watch: (file) => watcher!(file), confirmAnswer, askAnswer, shareTarget, importSource, confirmed, settle, chooseAnswer, asked, kept, close: () => disposed!() };
 }
 const last = (h: Harness, type: string) => [...h.posted].reverse().find((message) => message.type === type)!;
 
@@ -460,7 +464,7 @@ test('host: an edit to the open file outside the studio refreshes it', async () 
   assert.ok(h.posted.some((message) => message.type === 'library'));
 });
 
-test('host: duplicate, export, archive (never delete), and restore go through TeamLibrary', async () => {
+test('host: duplicate, archive (never delete), and restore go through TeamLibrary, and the removed Export does nothing', async () => {
   const h = await harness();
   const file = await h.library.create('Web', teamMarkdown(draft()));
   await mkdir(path.dirname(TeamLibrary.projectTeamFile(h.root)), { recursive: true });
@@ -469,9 +473,10 @@ test('host: duplicate, export, archive (never delete), and restore go through Te
   await h.send({ type: 'duplicate', id: 'user:web' });
   assert.equal(parseTeam(await readFile(path.join(h.library.directory, 'web-copy.md'), 'utf8'), 'x.md').name, 'Web copy');
   assert.equal(last(h, 'notice').focus, 'user:web-copy');
-  h.exportTarget.value = path.join(h.root, 'exported.md');
+  // 0.4.26: Export was removed (Share is the one way to send a team; it has its own tests below), so an export message is ignored.
+  const before = h.posted.length;
   await h.send({ type: 'export', id: 'user:web' });
-  assert.equal(await readFile(h.exportTarget.value, 'utf8'), await readFile(file, 'utf8'));
+  assert.equal(h.posted.length, before);
   // The project team cannot be archived from the studio (it would leave the project).
   await h.send({ type: 'archive', id: 'project' });
   assert.ok(existsSync(TeamLibrary.projectTeamFile(h.root)));
@@ -687,11 +692,12 @@ test('page: the library shows cards with actions, an empty state, and "Use in ch
   assert.match(text, /Archived teams \(1\).*Old team/);
   page.byLabel('Use Web team in chat')!.click();
   assert.deepEqual(page.posts.at(-1), { type: 'use-in-chat', id: 'user:web' });
-  for (const [label, type] of [['Open Web team', 'open'], ['Duplicate Web team', 'duplicate'], ['Export Web team', 'export'], ['Archive Web team', 'archive'], ['Restore Old team', 'restore']] as const) {
+  for (const [label, type] of [['Open Web team', 'open'], ['Duplicate Web team', 'duplicate'], ['Share Web team', 'share'], ['Archive Web team', 'archive'], ['Restore Old team', 'restore']] as const) {
     page.byLabel(label)!.click();
     assert.equal(page.posts.at(-1)!.type, type, label);
   }
   assert.equal(page.byLabel('Archive Project team'), undefined, 'the project team has no Archive');
+  assert.equal(page.byLabel('Export Web team'), undefined, 'Export was removed; Share is the one way to send a team');
   // Every message the page sends passes the host's strict parser.
   for (const message of page.posts) assert.ok(parseStudioMessage(message), JSON.stringify(message));
 });
@@ -1229,5 +1235,211 @@ test('a project team has its own knowledge graph, never one shared with every ot
   const shown = JSON.stringify(last(h, 'team').knowledge);
   assert.match(shown, /This project actor/);
   assert.doesNotMatch(shown, /Another project actor/);
+  h.close();
+});
+
+// ---------- 0.4.26: saved teams in the new-team picker, Share and Import ----------
+
+test('host: the picker lists saved teams with the built-in ones, and choosing a saved team copies it into the project team, which still asks before it runs', async () => {
+  const h = await harness();
+  await h.library.create('Web team', teamMarkdown(draft()));
+  await h.send({ type: 'ready' });
+  const picker = last(h, 'state').picker as Array<{ id: string; source: string; label: string; memberCount: number }>;
+  assert.deepEqual(picker.filter((entry) => entry.source === 'mine').map((entry) => [entry.id, entry.label, entry.memberCount]), [['lib:web-team', 'Web team', 2]]);
+  assert.ok(picker.some((entry) => entry.id === 'type:software' && entry.source === 'builtin'));
+  // The builder asks for the saved team's members: exactly as saved, no goal appended.
+  await h.send({ type: 'starting-point', id: 'lib:web-team', goal: 'Ship the site', locality: 'cloud' });
+  const start = last(h, 'starting-point');
+  assert.equal(start.id, 'lib:web-team');
+  assert.deepEqual(start.draft.members, draft().members);
+  // Saved as the project team, through the same create step as any starting point.
+  await h.send({ type: 'create', draft: { ...start.draft, name: 'Project team' }, target: 'project' });
+  const projectFile = TeamLibrary.projectTeamFile(h.root);
+  const projectTeam = parseTeam(await readFile(projectFile, 'utf8'), projectFile);
+  assert.deepEqual(projectTeam.members.map((member) => member.name), ['lead', 'dev']);
+  // The project's team file still goes through "use this project's team?" (per file, by fingerprint) before it first runs.
+  const { projectTeamAllowed } = await import('../agent/teams');
+  const questions: string[] = [];
+  assert.equal(await projectTeamAllowed(projectTeam, { trusted: true, fallback: new Map(), ask: async (question) => { questions.push(question); return true; } }), true);
+  assert.match(questions[0] ?? '', /^This project has a team in \.planning\/\.near-ai\/team\.md: lead \(planner\), dev\./);
+  // A saved team that is gone is said plainly.
+  await h.send({ type: 'starting-point', id: 'lib:nope', goal: '', locality: 'cloud' });
+  assert.match(last(h, 'error').text, /^That team is no longer in your teams\./);
+  h.close();
+});
+
+test('host: Share writes one file with no path or knowledge by default, and Import shows what it holds, asks, and adds it unapproved', async () => {
+  const h = await harness();
+  const file = await h.library.create('Web team', teamMarkdown(draft()));
+  await addKnowledge(h.library.directory, teamKnowledgeKey(file), { nodes: [{ label: 'Supplier', kind: 'organisation', facts: [{ text: `Notes are in ${h.root}/notes.md`, source: `${h.root}/notes.md` }, { text: 'Prices are online', source: 'https://example.com/prices' }] }], edges: [], origin: 'research', at: '2026-11-16T00:00:00.000Z' });
+  await h.send({ type: 'ready' });
+  const out = await mkdtemp(path.join(tmpdir(), 'near-ai-share-'));
+  h.shareTarget.value = path.join(out, 'web-team.near-team.json');
+  h.chooseAnswer.value = 'Share without it';
+  await h.send({ type: 'share', id: 'user:web-team' });
+  assert.match(h.asked.at(-1)!.message, /^Include this team's knowledge graph \(2 facts\)\? It stays on this computer unless you include it\./);
+  assert.deepEqual(h.asked.at(-1)!.actions, ['Share without it', 'Include it']);
+  const shared = await readFile(h.shareTarget.value, 'utf8');
+  assert.equal(JSON.parse(shared).knowledge, null, 'knowledge is off unless included');
+  for (const needle of [path.dirname(h.root), h.library.directory, file]) assert.equal(shared.includes(needle), false, needle);
+  assert.match(last(h, 'notice').text, /^Saved "Web team" to web-team\.near-team\.json\. Send that file to share the team/);
+  // Included on request, cleaned of local paths.
+  h.chooseAnswer.value = 'Include it';
+  h.shareTarget.value = path.join(out, 'with-knowledge.near-team.json');
+  await h.send({ type: 'share', id: 'user:web-team' });
+  const withKnowledge = await readFile(h.shareTarget.value, 'utf8');
+  assert.equal(JSON.parse(withKnowledge).knowledge.nodes.length, 1);
+  assert.equal(withKnowledge.includes(path.dirname(h.root)), false, 'no local path in the knowledge');
+  assert.match(withKnowledge, /https:\/\/example\.com\/prices/);
+
+  // Import into another person's library: shown, asked, added unapproved.
+  const other = await harness();
+  await other.send({ type: 'ready' });
+  other.importSource.value = h.shareTarget.value;
+  other.chooseAnswer.value = undefined;
+  await other.send({ type: 'import' });
+  assert.match(other.asked.at(-1)!.message, /^Add the team "Web team" to your teams\? Builds pages\. 2 members: lead \(planner\), model deep, tools: Read, Grep; dev, tools: .* It comes with a knowledge graph of 2 facts\. It stays untrusted/);
+  assert.equal(last(other, 'notice').text, 'Nothing was imported.');
+  assert.deepEqual(await other.library.list(), [], 'nothing is added without consent');
+  other.chooseAnswer.value = 'Add to my teams';
+  await other.send({ type: 'import' });
+  const added = path.join(other.library.directory, 'web-team.md');
+  assert.equal(await readFile(added, 'utf8'), await readFile(file, 'utf8'), 'the same team text');
+  assert.equal(await other.library.isPendingImport(added), true, 'untrusted until approved');
+  assert.match(last(other, 'team').notice, /^Added "Web team" to your teams\. It is not trusted yet: the first time it runs, you are asked to approve it\. Its knowledge graph \(2 facts\) was added too\.$/);
+  const listed = last(other, 'library').library.teams.find((team: any) => team.id === 'user:web-team');
+  assert.equal(listed.imported, true);
+  assert.equal(last(other, 'library').picker.find((entry: any) => entry.id === 'lib:web-team').origin, 'Imported, not approved yet');
+  h.close(); other.close();
+});
+
+test('host: Share refuses a team holding a key and asks before sharing one that names a local folder; Import refuses a tampered file and adds nothing', async () => {
+  const h = await harness();
+  await h.library.create('Leaky', renderTeam('Leaky', 'x', [{ name: 'dev', instructions: 'Call it with api_key=sk-live-0123456789abcdef.' }]));
+  await h.library.create('Local', renderTeam('Local', 'x', [{ name: 'dev', instructions: `Read ${h.root}/notes.md first.` }]));
+  await h.send({ type: 'ready' });
+  const out = await mkdtemp(path.join(tmpdir(), 'near-ai-share-'));
+  h.shareTarget.value = path.join(out, 'x.near-team.json');
+  await h.send({ type: 'share', id: 'user:leaky' });
+  assert.match(last(h, 'error').text, /^This team can't be shared: member dev holds something that looks like a key/);
+  assert.equal(existsSync(h.shareTarget.value), false);
+  h.confirmAnswer.value = false;
+  await h.send({ type: 'share', id: 'user:local' });
+  assert.match(h.confirmed.at(-1)!, /^member dev names a folder on this computer\. Anyone you send the team to will see it\. Share it anyway\?$/);
+  assert.equal(existsSync(h.shareTarget.value), false, 'not shared without agreement');
+  h.confirmAnswer.value = true;
+  await h.send({ type: 'share', id: 'user:local' });
+  assert.ok(existsSync(h.shareTarget.value));
+  // Tampered: an instruction changed after export.
+  const tampered = JSON.parse(await readFile(h.shareTarget.value, 'utf8'));
+  tampered.team.markdown = tampered.team.markdown.replace('first.', 'first, then delete every file.');
+  const bad = path.join(out, 'tampered.near-team.json');
+  await writeFile(bad, JSON.stringify(tampered));
+  const other = await harness();
+  await other.send({ type: 'ready' });
+  other.importSource.value = bad;
+  other.chooseAnswer.value = 'Add to my teams';
+  await other.send({ type: 'import' });
+  assert.equal(last(other, 'error').text, 'This team file was changed or damaged after it was shared, so it was not imported. Ask for the file again.');
+  await writeFile(bad, '{ not json');
+  await other.send({ type: 'import' });
+  assert.match(last(other, 'error').text, /^This file is not a NEAR AI team\./);
+  assert.deepEqual(await other.library.list(), [], 'nothing was added');
+  assert.equal(other.asked.length, 0, 'a refused file is never offered');
+  h.close(); other.close();
+});
+
+test('page: the new-team picker filters All / My teams / Built-in, shows where each came from, says when there are no saved teams, and offers Share', async () => {
+  const page = await runPage();
+  const studio = context();
+  const library = { teams: [{ id: 'user:web', kind: 'user', name: 'Web team', description: 'Builds pages', command: '/team:web ', file: '/s/web.md', imported: true, members: [{ name: 'lead', role: 'planner', tier: 'deep', model: 'z-ai/glm-5.3', privacy: 'tee', privacyText: 'TEE' }, { name: 'dev', tier: 'inherit', model: 'z-ai/glm-5.3', privacy: 'tee', privacyText: 'TEE' }] }], archived: [] };
+  const { teamPicker } = await import('../services/teamStudioPage');
+  page.dispatch({ type: 'state', context: studio, library, picker: teamPicker(studio.startingPoints, library.teams as never) });
+  // The library card says the team is imported and not approved, and offers Share.
+  assert.match(page.text(), /Web team.*Imported: not approved yet/);
+  page.byLabel('Share Web team')!.click();
+  assert.deepEqual(page.posts.at(-1), { type: 'share', id: 'user:web' });
+  page.dispatch({ type: 'start-wizard', target: 'project' });
+  const radios = (name: string) => page.doc.body.all().filter((node) => node.tagName === 'input' && node.name === name);
+  const shown = () => radios('starting-point').map((node) => node.value);
+  assert.deepEqual(shown().slice(0, 2), ['lib:web', 'recommend'], 'saved teams first, then the built-in ones');
+  assert.match(page.text(), /All \(\d+\).*My teams \(1\).*Built-in \(\d+\)/);
+  assert.match(page.text(), /My teams.*Web team.*Imported, not approved yet.*Builds pages.*2 members: lead, dev/);
+  const filter = (value: string) => { const radio = radios('picker-filter').find((node) => node.value === value)!; radio.checked = true; radio.fire('change'); };
+  filter('mine');
+  assert.deepEqual(shown(), ['lib:web', 'empty']);
+  filter('builtin');
+  assert.ok(!shown().includes('lib:web') && shown().includes('type:software') && shown().includes('gsd:review'));
+  filter('mine');
+  // Choose the saved team and go on: the page asks the host for its members.
+  const mine = radios('starting-point').find((node) => node.value === 'lib:web')!;
+  mine.checked = true; mine.fire('change');
+  page.byLabel('Next: Members')!.click();
+  assert.deepEqual(page.posts.at(-1), { type: 'starting-point', id: 'lib:web', goal: '', locality: 'cloud' });
+  page.dispatch({ type: 'starting-point', id: 'lib:web', draft: { name: '', description: 'Builds pages', members: [{ name: 'lead', role: 'planner', model: 'deep', tools: ['Read'], instructions: 'Plan.' }] } });
+  assert.equal(page.doc.getElementById('m-name-0')!.value, 'lead');
+  page.byLabel('Back')!.click();
+  page.byLabel('Share Web team')!.click();
+  assert.deepEqual(page.posts.at(-1), { type: 'share', id: 'user:web' }, 'Share from the picker');
+  // No saved teams: My teams says how to get one.
+  page.dispatch({ type: 'library', library: { teams: [], archived: [] }, picker: teamPicker(studio.startingPoints, []) });
+  assert.match(page.text(), /You have no saved teams yet\. Save a team as one of your teams in Team Studio to reuse it in any project\./);
+  assert.deepEqual(shown(), ['empty']);
+  for (const message of page.posts) assert.ok(parseStudioMessage(message), JSON.stringify(message));
+});
+
+test('host: a team built from an unapproved import stays unapproved: saved as a library team it asks before it runs, and as the project team its consent says where it came from', async () => {
+  const { projectTeamAllowed, libraryTeamAllowed } = await import('../agent/teams');
+  const h = await harness();
+  const imported = await h.library.importTeam('Shared crew', teamMarkdown(draft({ name: 'Shared crew' })));
+  await h.send({ type: 'ready' });
+  assert.equal(last(h, 'state').picker.find((entry: any) => entry.id === 'lib:shared-crew').origin, 'Imported, not approved yet');
+  // As a builder starting point, saved as one of the person's teams.
+  await h.send({ type: 'starting-point', id: 'lib:shared-crew', goal: '', locality: 'cloud' });
+  const members = last(h, 'starting-point').draft.members;
+  await h.send({ type: 'create', draft: { name: 'My crew', description: 'Mine now', members }, target: 'user' });
+  const mine = path.join(h.library.directory, 'my-crew.md');
+  assert.deepEqual(await h.library.pendingKind(mine), { kind: 'derived', from: 'Shared crew' });
+  assert.match(last(h, 'team').notice, /It has members from the imported team "Shared crew", which you have not approved, so you are asked before it first runs\.$/);
+  const listed = last(h, 'library');
+  assert.equal(listed.library.teams.find((team: any) => team.id === 'user:my-crew').derived, true);
+  assert.equal(listed.picker.find((entry: any) => entry.id === 'lib:my-crew').origin, 'Made from an import, not approved yet');
+  // One member pasted into an otherwise new team is enough.
+  await h.send({ type: 'create', draft: { name: 'Pasted', description: '', members: [{ name: 'other', role: '', model: '', tools: null, instructions: 'Something of my own.' }, { ...members[1], name: 'helper' }] }, target: 'user' });
+  assert.equal((await h.library.pendingKind(path.join(h.library.directory, 'pasted.md')))?.kind, 'derived');
+  // Approving the original approves nothing else.
+  await h.library.approveImport(imported);
+  assert.equal(await h.library.isPendingImport(mine), true);
+  const asked: string[] = [];
+  assert.equal(await libraryTeamAllowed(parseTeam(await readFile(mine, 'utf8'), mine), h.library, async (question) => { asked.push(question); return false; }), false);
+  assert.match(asked[0] ?? '', /^The team "My crew" was made from the imported team "Shared crew", which you have not approved/);
+  // Copied into the project: the per-file consent is still asked, and says where the members came from.
+  await h.send({ type: 'create', draft: { name: 'Project team', description: '', members }, target: 'project' });
+  const projectFile = TeamLibrary.projectTeamFile(h.root);
+  assert.equal(await h.library.projectDerivedFrom(projectFile), 'My crew', 'the nearest unapproved source is named');
+  const questions: string[] = [];
+  const team = parseTeam(await readFile(projectFile, 'utf8'), projectFile);
+  assert.equal(await projectTeamAllowed(team, { trusted: true, fallback: new Map(), ask: async (question) => { questions.push(question); return true; }, derivedFrom: () => h.library.projectDerivedFrom(projectFile) }), true);
+  assert.match(questions[0] ?? '', /^This project has a team in \.planning\/\.near-ai\/team\.md: lead \(planner\), dev\. It was made from the imported team "My crew", which you have not approved\. Use it for runs in this project\?/);
+  // Rebuilt from the person's own members, the note goes.
+  await h.send({ type: 'create', draft: { name: 'Project team', description: '', members: [{ name: 'own', role: '', model: '', tools: null, instructions: 'Entirely my own work.' }] }, target: 'project' });
+  assert.equal(await h.library.projectDerivedFrom(projectFile), undefined);
+  h.close();
+});
+
+test('host: Import refuses a share file with a malformed knowledge graph in plain words and writes nothing', async () => {
+  const { buildTeamPackage } = await import('../agent/teamPackage');
+  const h = await harness();
+  await h.send({ type: 'ready' });
+  const out = await mkdtemp(path.join(tmpdir(), 'near-ai-share-'));
+  const bad = path.join(out, 'bad.near-team.json');
+  await writeFile(bad, buildTeamPackage(teamMarkdown(draft()), '/t/web.md', { version: 1, team: 'web', nodes: [null], edges: [], updatedAt: '2026-11-16T00:00:00.000Z' } as never));
+  h.importSource.value = bad;
+  h.chooseAnswer.value = 'Add to my teams';
+  await h.send({ type: 'import' });
+  assert.match(last(h, 'error').text, /^This team file was changed or damaged after it was shared, so it was not imported\./);
+  assert.deepEqual(await h.library.list(), []);
+  assert.equal(existsSync(path.join(h.library.directory, 'knowledge')), false, 'no graph was written');
+  assert.equal(h.asked.length, 0);
   h.close();
 });

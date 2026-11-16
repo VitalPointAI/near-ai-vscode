@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import test from 'node:test';
@@ -146,6 +146,29 @@ test('choosing Push pushes the current branch and reports it', async () => {
     assert.ok(messages().includes('Shared with your team.'));
     assert.equal(messages().some((message) => message.includes('Pushed main')), false, 'the notification has no git words');
     assert.ok(outputLines().includes('Pushed main to origin.'));
+  });
+});
+
+// 0.4.26 (PR #62 review): a key-history warning from any path, not only Enable's own call, reaches the NEAR AI Team channel once Team Mode is in use.
+test('once Team Mode is on, a key-history warning from a path that passed no callback reaches the NEAR AI Team channel', async () => {
+  const { appendKeyRecord, KEY_HISTORY_FILE } = require('../team/keyHistory') as typeof import('../team/keyHistory');
+  const { identityDir, loadDeviceIdentity } = require('../team/identity') as typeof import('../team/identity');
+  await withProject(async (p) => {
+    await p.enable(['Warn team', 'Lead Owner']);
+    const identity = await loadDeviceIdentity(p.secrets);
+    assert.ok(identity !== undefined);
+    const folder = identityDir(p.storage);
+    const file = path.join(folder, KEY_HISTORY_FILE);
+    const failing = {
+      get: (key: string) => p.secrets.get(key), delete: (key: string) => p.secrets.delete(key),
+      store: async (): Promise<void> => {
+        await rm(file, { force: true });
+        await mkdir(path.join(file, 'blocked'), { recursive: true });
+        throw new Error('store failed');
+      }
+    };
+    await assert.rejects(appendKeyRecord(folder, failing, identity, { kind: 'revoked', key: { fingerprint: identity.fingerprint, publicKey: identity.publicKey } }), /saved end could not be stored/);
+    assert.ok(outputLines().some((line) => line.startsWith('The key history could not be put back')), outputLines().join('\n'));
   });
 });
 

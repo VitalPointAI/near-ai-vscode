@@ -14,7 +14,7 @@
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
-import { isContactableRemoteAddress } from './gitTransport';
+import { OLD_GIT_CREDENTIALS_TEXT, addressCarriesCredentials, gitReadsEnvironmentConfig, isContactableRemoteAddress } from './gitTransport';
 import { gitText, redactGitMessage } from './runGit';
 import type { GitResult, GitRunner } from './runGit';
 
@@ -92,13 +92,14 @@ async function sshEnv(git: GitRunner, gitDir: string): Promise<Record<string, st
 }
 
 // The URL travels in the environment (GIT_CONFIG_*, git 2.31 and later), not in the arguments a local user could read (WR-12). An older git gets
-// it as an argument, as in the transport.
-async function target(git: GitRunner, url: string): Promise<{ target: string; env: Record<string, string> }> {
+// it as an argument, as in the transport, except an address that carries a credential, which is refused instead (0.4.26, PR #62 review).
+type Target = { target: string; env: Record<string, string> } | { refused: string };
+
+async function target(git: GitRunner, url: string): Promise<Target> {
   const version = await git(['--version'], { timeoutMs: LOCAL_TIMEOUT_MS });
-  const match = /(\d+)\.(\d+)/.exec(gitText(version));
-  const major = match === null ? 0 : Number(match[1]);
-  const minor = match === null ? 0 : Number(match[2]);
-  if (version.code !== 0 || !(major > 2 || (major === 2 && minor >= 31))) return { target: url, env: {} };
+  if (version.code !== 0 || !gitReadsEnvironmentConfig(gitText(version))) {
+    return addressCarriesCredentials(url) ? { refused: OLD_GIT_CREDENTIALS_TEXT } : { target: url, env: {} };
+  }
   const inherited = Number(process.env.GIT_CONFIG_COUNT ?? '0');
   const index = Number.isSafeInteger(inherited) && inherited > 0 ? inherited : 0;
   return {
@@ -107,10 +108,16 @@ async function target(git: GitRunner, url: string): Promise<{ target: string; en
   };
 }
 
+// A refusal as a git failure, so callers report it the way they report git's own (128 is git's "fatal", never ls-remote's "ref not found" 2).
+function refusedResult(reason: string): GitResult {
+  return { code: 128, stdout: Buffer.alloc(0), stderr: reason };
+}
+
 /** `git ls-remote --exit-code <remote> <ref>` against the checked fetch address, from a clean folder. */
 export async function cleanLsRemote(git: GitRunner, remote: CheckedRemote, ref: string): Promise<GitResult> {
   return withCleanGitDir(git, async (gitDir) => {
     const to = await target(git, remote.fetchUrl);
+    if ('refused' in to) return refusedResult(to.refused);
     const env = { ...(await sshEnv(git, gitDir)), ...to.env };
     return git(['--git-dir', gitDir, 'ls-remote', UPLOAD_PACK_DEFAULT, '--exit-code', to.target, ref], { cwd: path.dirname(gitDir), env, timeoutMs: CLEAN_NETWORK_TIMEOUT_MS });
   });
@@ -125,6 +132,7 @@ export async function cleanPush(git: GitRunner, remote: CheckedRemote, objectsDi
     let last: GitResult | undefined;
     for (const url of remote.pushUrls) {
       const to = await target(git, url);
+      if ('refused' in to) return refusedResult(to.refused);
       const env = { ...(await sshEnv(git, gitDir)), ...to.env };
       last = await git(['--git-dir', gitDir, 'push', RECEIVE_PACK_DEFAULT, to.target, `${commit}:refs/heads/${branch}`], { cwd: path.dirname(gitDir), env, timeoutMs: CLEAN_NETWORK_TIMEOUT_MS });
       if (last.code !== 0) return last;

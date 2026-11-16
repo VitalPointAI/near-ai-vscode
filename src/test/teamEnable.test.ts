@@ -975,12 +975,21 @@ function markerScript(dir: string, name: string, marker: string): string {
   return file;
 }
 
+/**
+ * A port nothing answers on, held for as long as the test runs (PR #62 review: the port used to be released before git dialled it, so another process
+ * could take it in between). The listener closes every connection at once without a byte, so ssh and git fail fast as they would on a closed port.
+ * Every port handed out is released by releasePorts() at the end of the test.
+ */
+const heldPorts: net.Server[] = [];
 async function closedPort(): Promise<number> {
-  const server = net.createServer();
+  const server = net.createServer((socket) => { socket.destroy(); });
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-  const { port } = server.address() as net.AddressInfo;
-  await new Promise<void>((resolve) => server.close(() => resolve()));
-  return port;
+  heldPorts.push(server);
+  return (server.address() as net.AddressInfo).port;
+}
+async function releasePorts(): Promise<void> {
+  const servers = heldPorts.splice(0);
+  await Promise.all(servers.map((server) => new Promise<void>((resolve) => server.close(() => resolve()))));
 }
 
 /** A local HTTP server that records every request's headers and answers each with `status`. */
@@ -1027,6 +1036,7 @@ test('core.sshCommand, credential.helper and core.gitProxy in the project config
         assert.ok(server.headers.length > 0, 'the HTTP remote was asked, so the credential case reached the network');
       } finally {
         await server.close();
+        await releasePorts();
       }
     });
   });
@@ -1084,6 +1094,7 @@ test('an ssh command inherited from the environment is still used, ahead of the 
       } finally {
         if (saved.command === undefined) delete process.env.GIT_SSH_COMMAND; else process.env.GIT_SSH_COMMAND = saved.command;
         if (saved.ssh === undefined) delete process.env.GIT_SSH; else process.env.GIT_SSH = saved.ssh;
+        await releasePorts();
       }
       assert.equal(existsSync(inherited), true, `${variable}: the inherited ssh command was used`);
       assert.equal(existsSync(marker), false, `${variable}: the project's ssh command was not`);

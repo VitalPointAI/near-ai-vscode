@@ -362,20 +362,42 @@ const NO_TEAM_JSON_SIGNAL = 'Enable Team Mode did not write .planning/.near-ai/t
 const TEAM_FILE_PATH = path.join('.planning', '.near-ai', 'team.json');
 
 /**
+ * Puts keyboard focus somewhere the Command Palette can keep it. The palette closes when it loses focus, and a test before the Team Mode tests leaves a
+ * chat run finishing in a webview and notifications on screen, which could take focus a moment after the palette opened; every accept after that went to
+ * a closed palette, so the control step failed before any product code ran (0.4.26). Closing the palette and notifications, focusing the editor group and
+ * letting it settle removes that window.
+ */
+async function settleFocus(): Promise<void> {
+  await vscode.commands.executeCommand('workbench.action.closeQuickOpen');
+  await vscode.commands.executeCommand('notifications.clearAll');
+  await vscode.commands.executeCommand('workbench.action.focusActiveEditorGroup');
+  await pause(500);
+}
+
+/**
  * Runs a command the way a person does: opens the Command Palette on the label and accepts the selected item every 400 ms until `done()` holds
  * or the time is up. Input boxes the command opens take the same accept, so they keep the value they were opened with. The first accept
- * waits 400 ms so the list has filtered. No text is typed.
+ * waits 400 ms so the list has filtered. No text is typed. Focus is settled first (settleFocus).
+ *
+ * `attempts` above 1 opens the palette again (focus settled each time) when an attempt ends without `done()`: only for a command that is safe to run
+ * twice and changes nothing when it does not run, which is the control step alone. Every Enable Team Mode run, with the preview off or on, gets one
+ * attempt, so a second Enable can never start (PR #67 review). Returns the attempts used.
  */
-async function runFromPalette(label: string, done: () => boolean, timeoutMs: number): Promise<void> {
-  await vscode.commands.executeCommand('workbench.action.closeQuickOpen');
-  await vscode.commands.executeCommand('workbench.action.quickOpen', `>${label}`);
-  const deadline = Date.now() + timeoutMs;
-  while (!done() && Date.now() < deadline) {
-    await pause(400);
-    if (done()) break;
-    await vscode.commands.executeCommand('workbench.action.acceptSelectedQuickOpenItem');
+async function runFromPalette(label: string, done: () => boolean, timeoutMs: number, attempts = 1): Promise<number> {
+  let used = 0;
+  while (used < attempts && !done()) {
+    used += 1;
+    await settleFocus();
+    await vscode.commands.executeCommand('workbench.action.quickOpen', `>${label}`);
+    const deadline = Date.now() + timeoutMs;
+    while (!done() && Date.now() < deadline) {
+      await pause(400);
+      if (done()) break;
+      await vscode.commands.executeCommand('workbench.action.acceptSelectedQuickOpenItem');
+    }
+    await vscode.commands.executeCommand('workbench.action.closeQuickOpen');
   }
-  await vscode.commands.executeCommand('workbench.action.closeQuickOpen');
+  return used;
 }
 
 async function waitUntil(condition: () => boolean | Promise<boolean>, timeoutMs: number, stepMs = 250): Promise<boolean> {
@@ -433,13 +455,16 @@ function teamProjectTests(getApi: () => NearAiTestApi): Array<[string, () => Pro
       // Control: a built-in command with a visible effect works through the palette, so a failure below is the product's and not the harness's.
       const tabs = () => vscode.window.tabGroups.all.reduce((count, group) => count + group.tabs.length, 0);
       const tabsBefore = tabs();
-      await runFromPalette('File: New Untitled Text File', () => tabs() > tabsBefore, 8_000);
-      assert.ok(tabs() > tabsBefore, 'the Command Palette did not run File: New Untitled Text File, so the harness cannot drive the palette in this VS Code build');
+      // Up to three attempts, each with focus settled: opening an untitled file is safe to repeat, and the step only has to show the palette CAN run a
+      // command. A build whose palette cannot be driven at all still fails here, after the third attempt.
+      const controlAttempts = await runFromPalette('File: New Untitled Text File', () => tabs() > tabsBefore, 8_000, 3);
+      assert.ok(tabs() > tabsBefore, `the Command Palette did not run File: New Untitled Text File in ${controlAttempts} attempts, so the harness cannot drive the palette in this VS Code build`);
+      if (controlAttempts > 1) console.log(`  palette control step needed ${controlAttempts} attempts`);
       await vscode.commands.executeCommand('workbench.action.closeAllEditors');
 
       // Preview off (the default): Enable is not offered, so accepting for 5 s starts nothing.
       assert.equal(vscode.workspace.getConfiguration('nearAi').get('team.preview'), false);
-      await runFromPalette('NEAR AI: Enable Team Mode', () => existsSync(teamFilePath), 5_000);
+      await runFromPalette('NEAR AI: Enable Team Mode', () => existsSync(teamFilePath), 5_000, 1);
       await pause(1_000);
       assert.equal(existsSync(teamFilePath), false, PREVIEW_OFF_SIGNAL);
       await vscode.commands.executeCommand('notifications.clearAll');
