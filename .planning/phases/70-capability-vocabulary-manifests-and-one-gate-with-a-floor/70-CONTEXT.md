@@ -154,3 +154,9 @@ Not in this phase: DIDs, verifiable credentials, delegation chains and grants (P
 
 *Phase: 70-capability-vocabulary-manifests-and-one-gate-with-a-floor*
 *Context gathered: 2026-11-16 (decisions made on the owner's behalf)*
+
+
+## Owner decisions after planning (2026-11-16)
+
+- **CLAS-05 ratified** with an amplification: attestation verified after a response proves which model ran, not that the connection was private. Levels that require attested-cloud also need a pre-send check that the connection key is bound to the enclave; without that binding they route local-only. Local-only as "loopback or a host your policy names" is approved.
+- **CLAS-08 added:** a trust badge on every cloud answer in plain words (Verified private model; Model verified, connection not proven; Not verified), with the full attestation available on request. Implemented in plan 70-24.
