@@ -158,6 +158,35 @@ test('a record that is not valid is not written and is reported, and later recor
   });
 });
 
+test('the record that is validated is the record that is stored: one that is only invalid with its real sequence is refused, and nothing is written for it', async () => {
+  await withLog(async ({ dir, key, log, failures }) => {
+    await mkdir(dir, { recursive: true });
+    const file = path.join(dir, `${key}.jsonl`);
+    // The last line of the file carries the largest whole number a record may hold, so the next number is not a whole number a record may hold.
+    const last = { ...record(0), metadata: { ...record(0).metadata, sequence: Number.MAX_SAFE_INTEGER } };
+    await writeFile(file, `${JSON.stringify(last)}\n`, 'utf8');
+    await log.append(record(1));
+    assert.equal(failures.length, 1, 'refused and reported once');
+    assert.equal((await readFile(file, 'utf8')), `${JSON.stringify(last)}\n`, 'no line was added');
+  });
+});
+
+test('every stored line validates as it is stored, with the sequence the log gave it and not the one the caller put in', async () => {
+  await withLog(async ({ dir, key, log }) => {
+    await log.append({ ...record(1), metadata: { ...record(1).metadata, sequence: 41 } });
+    await log.append(record(2));
+    const text = await readFile(path.join(dir, `${key}.jsonl`), 'utf8');
+    const stored = text.split('\n').filter((line) => line !== '');
+    assert.equal(stored.length, 2);
+    for (const line of stored) {
+      const checked = validateDecisionRecord(JSON.parse(line));
+      assert.equal(checked.ok, true);
+      assert.equal(JSON.stringify(checked.ok ? checked.value : undefined), line, 'the validated object is the stored line');
+    }
+    assert.deepEqual(stored.map((line) => (JSON.parse(line) as DecisionRecord).metadata.sequence), [1, 2]);
+  });
+});
+
 test('a failure report that itself throws never turns into a rejected append', async () => {
   const storage = await mkdtemp(path.join(tmpdir(), 'near-ai-gate-log-'));
   try {

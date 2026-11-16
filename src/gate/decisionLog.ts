@@ -136,8 +136,6 @@ export class DecisionLog {
 
   private async write(record: DecisionRecord): Promise<void> {
     const clean = redactRecord(record);
-    const checked = validateDecisionRecord(clean);
-    if (!checked.ok) throw new RecordRefused('A decision record was not valid, so it was not saved. Your work is not affected.');
     await mkdir(this.dir, { recursive: true, mode: 0o700 });
     await withFileLock(this.dir, `${this.key}.lock`, async () => {
       let size = 0;
@@ -151,7 +149,11 @@ export class DecisionLog {
         this.lastSequence = (await lastSequenceOf(this.file)) ?? (await lastSequenceOf(this.rotated(1))) ?? 0;
       }
       const sequence = this.lastSequence + 1;
-      const line = `${JSON.stringify({ ...clean, metadata: { ...clean.metadata, sequence } })}\n`;
+      // The record that is checked is exactly the record that is stored: the real sequence goes in first, then the check, then the line is made from it.
+      const stored: DecisionRecord = { ...clean, metadata: { ...clean.metadata, sequence } };
+      const checked = validateDecisionRecord(stored);
+      if (!checked.ok) throw new RecordRefused('A decision record was not valid, so it was not saved. Your work is not affected.');
+      const line = `${JSON.stringify(checked.value)}\n`;
       const bytes = Buffer.byteLength(line, 'utf8');
       if (bytes > MAX_RECORD_BYTES) throw new RecordRefused('A decision record was larger than the allowed size, so it was not saved. Your work is not affected.');
       if (size > 0 && size + bytes > this.maxBytes) {
