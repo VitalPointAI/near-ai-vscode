@@ -347,6 +347,9 @@ test('snapshots carry rotation: round-trip keeps the rotation fields, a rotated 
   const wrongEvent = plain();
   (devicesOf(wrongEvent)[0] as Record<string, unknown>).rotatedEvent = newEventId();
   assert.throws(() => deserialiseState(wrongEvent, w.anchor), 'the successor was bound by another event');
+  const notATime = plain();
+  (devicesOf(notATime)[0] as Record<string, unknown>).rotatedAt = 'a while ago';
+  assert.throws(() => deserialiseState(notATime, w.anchor), /rotatedAt/, 'rotatedAt is a time like every event time, because it moves the key-rotated boundary');
 });
 
 test('a log with no rotation serialises and hashes with no rotation field anywhere (D-09)', async () => {

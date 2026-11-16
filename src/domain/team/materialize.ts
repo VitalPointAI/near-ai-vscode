@@ -7,7 +7,7 @@ import { actionForEvent, decideTeamAction } from './permissions';
 import { DEFAULT_WIP_LIMIT, applyPolicyChanges, defaultTeamPolicy, validatePolicy } from './policy';
 import { AVAILABILITIES, ROLES, TEAM_REJECTION_REASONS } from './types';
 import type { Availability, CommittedEvent, DeviceKey, DeviceRef, EntryVerdict, GenesisAnchor, ImplementedTeamEvent, JsonObject, Materializer, Member, Rejection, Role, SnapshotRef, TeamEvent, TeamPolicy, TeamState, WorkingHours } from './types';
-import { EVENT_ID_PATTERN, FINGERPRINT_PATTERN, MEMBER_ID_PATTERN, SNAPSHOT_PATH_PATTERN, isRecord, parseEventFile } from './validate';
+import { AT_PATTERN, EVENT_ID_PATTERN, FINGERPRINT_PATTERN, MEMBER_ID_PATTERN, SNAPSHOT_PATH_PATTERN, isRecord, parseEventFile } from './validate';
 
 export const MAX_LAMPORT_JUMP = 1000;
 const R = TEAM_REJECTION_REASONS;
@@ -423,7 +423,7 @@ function parseDeviceKey(value: unknown, path: string): DeviceKey {
   if (rotated !== 0 && rotated !== 3) bad(`${path}.rotatedEvent`);
   if (rotated === 3) {
     key.rotatedEvent = shortText(raw.rotatedEvent, `${path}.rotatedEvent`);
-    key.rotatedAt = shortText(raw.rotatedAt, `${path}.rotatedAt`);
+    key.rotatedAt = patterned(raw.rotatedAt, `${path}.rotatedAt`, AT_PATTERN);
     key.rotatedTo = patterned(raw.rotatedTo, `${path}.rotatedTo`, FINGERPRINT_PATTERN);
   }
   return key;
