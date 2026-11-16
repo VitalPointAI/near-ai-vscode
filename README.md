@@ -312,6 +312,58 @@ details** saves the prompts, replies, and tool calls still kept in memory (for
 `nearAi.activity.retentionMinutes`, 60, and up to `nearAi.activity.maxMegabytes`,
 8 MB; secrets masked) as Markdown or JSON, for debugging.
 
+**Now** also says what an agent waiting for you waits for (an approval, an
+answer to a question, or an image to review), and shows an agent waiting for a
+free slot as queued. An agent that a sub-agent started is shown under that
+sub-agent, not under the run.
+
+### Team Live
+
+**Team Live** lets you watch a team work. Open it with **Watch the team** under
+the running agents in the chat (next to a row of dots, one per agent, that
+shows each one's state), with **Watch the team** in Agent Activity's **Now**,
+with **Watch it live** on Team Studio's **Team shape** tab while that team is
+running, or with **NEAR AI: Watch the Team Live**. It shows the newest team run
+in the conversation on screen; when two runs go at once, pick one at the top.
+Plain runs that start agents (an Open-GSD workflow, for example) show too.
+
+- **The picture.** The lead is at the top and the members hang under whoever
+  they report to. Members not asked to do anything yet are dimmed. Agents that
+  are not members of the team (general-purpose helpers, Open-GSD agents) are
+  smaller dashed cards in a row under the tree, each marked with who started
+  it. A member asked several times is one card with a count. Cards never move
+  while the run goes. In a narrow panel, or with **List**, the same team is an
+  indented list.
+- **Hand-offs.** When an agent is given a task, a dot carrying a short label
+  of the task travels down the line to it, and the card wakes when it
+  arrives. A working card breathes slowly and shows the tool it is using, what
+  it is doing, how long it has worked, its model, and where the model runs
+  (TEE, Local or Cloud). When it finishes, a dot travels back up with "Report
+  ready" or "Did not finish". The lead counts the reports it has read.
+- **States.** Queued, working, waiting for its helpers, needs you (amber, with
+  **Answer in chat**), paused, retrying, done, failed, and stopped. Each has
+  its own icon and words, so you never need to tell them apart by colour.
+- **A card.** Click a card (or press Enter on it) for the member's card from
+  Team Studio, this run's figures (task, model, time, turns, tool calls,
+  approvals, cost), **Pause**, **Resume** and **Stop**, and the end of the
+  agent's latest reply (the last 280 characters, with secrets removed).
+  Escape closes it.
+- **Calm.** Nothing moves when your system asks for reduced motion, or when
+  you turn on **Calm** on the page (it is remembered). States still change, in
+  words and icons. High-contrast themes drop the glow.
+- **Keyboard and screen readers.** The team is a tree: arrow keys move
+  between cards (Right to the first card under this one, Left to the one
+  above), Home and End jump to the first and last. Hand-offs, waits for you
+  and endings are announced politely; what an agent is doing moment to moment
+  is not.
+- **After a reload,** the last run in the project is drawn as it ended, from
+  the activity history. An agent that was still working when VS Code
+  reloaded shows as interrupted.
+
+The page never shows prompts, files or tool results. Task labels are the short
+descriptions the lead gives each agent, with secrets removed and cut to 80
+characters.
+
 **NEAR AI: Show Run Performance Report** opens, for this project, where its runs'
 time went (model wait, tools and sub-agents, approval wait, idle), tokens in,
 cached and out, model latency (p50, p90, max), input tokens per call, unanswered

@@ -5,6 +5,37 @@
 This release adds Improve with AI and a free local check to Team Studio, lets you mark a whole team
 private, and makes Team Studio's AI calls respect TEE-only mode and your daily spend limit.
 
+- **Team Live: watch your team work.** A new panel draws a team run as a tree, the lead at
+  the top and each member under whoever it reports to. When the lead hands a member a task, a
+  dot carrying the task travels down the line and the member's card wakes up; a working card
+  breathes slowly and shows its tool, what it is doing, how long it has worked, its model and
+  where the model runs. When it finishes, a dot travels back up with its report. Waiting for
+  you turns a card amber with **Answer in chat**. Members not asked yet are dimmed, helpers
+  that are not members appear under the agent that started them, and a member asked several
+  times is one card with a count. Click a card for the member's card, this run's figures,
+  Pause, Resume and Stop, and the end of its latest reply with secrets removed. Open it with
+  **Watch the team** under the running agents in the chat, in Agent Activity, on Team Studio's
+  Team shape tab, or with **NEAR AI: Watch the Team Live**. Nothing moves under reduced motion
+  or with **Calm**; every state has an icon and words; the team works as a keyboard tree and a
+  narrow panel shows it as a list. After a reload, the last run is drawn as it ended.
+- **The chat's running agents show the team at a glance:** a row of dots, one per agent, whose
+  shape and words say what each is doing.
+- **An agent started by another sub-agent now reports to that sub-agent.** Before, its report
+  went to the run's lead, which had not asked for it, and the sub-agent ended without it. The
+  sub-agent now reads it before it finishes, and while it waits it gives its place back so the
+  helper can run.
+- **Agent Activity shows who started each agent,** what an agent waiting for you waits for (an
+  approval, an answer or an image review), and agents waiting for a free slot. A question from
+  an agent now counts as waiting for you, as an approval does.
+- **Improve with AI in Team Studio** says the cost is unknown when NEAR gives no price for the
+  model, rather than leaving it out, and a Cancel while it is choosing a model now always reads
+  as cancelled. A suggestion to change who a member reports to that names nobody is now set
+  aside with a reason instead of being read as "reports to nobody".
+- **A member's `privacy:` line may carry a note** after the value (`privacy: private  # client
+  data`); marking the team private no longer adds a second line under it.
+
+## Unreleased
+
 - **Improve with AI in Team Studio.** A new **Improve with AI** button in the team editor (and on
   the last step of the builder) first runs a free check of the team, then, when you ask, has an
   AI review it. Each suggestion changes one thing for one member (its instructions, role, who it
