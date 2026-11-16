@@ -333,6 +333,30 @@ test('timestamps, the DID slot, scales and lists follow their limits', () => {
   assert.equal(({} as Loose).x, undefined);
 });
 
+test('bundle times use the one form clearance expiries use: exactly three fraction digits, a capital Z and a real date', () => {
+  const signer = makeSigner();
+  const reasonOf = (edit: (payload: Loose) => void): string => {
+    const parsed = parseBundle(edited(signer, edit));
+    return parsed.ok ? 'ok' : parsed.reason;
+  };
+  const expiryReason = (text: string): string => reasonOf((p) => { p.clearances = [{ scale: 'org', level: 'Restricted', compartments: [], releasability: [], expiresAt: text }]; });
+  const accepted = ['2030-01-31T23:59:59.000Z', '2030-01-31T23:59:59.250Z', '2028-02-29T12:00:00.001Z'];
+  const refusedForms = [
+    '2030-01-31T23:59:59Z', '2030-01-31T23:59:59.5Z', '2030-01-31T23:59:59.25Z', '2030-01-31T23:59:59.2500Z', '2030-01-31T23:59:59.250z',
+    '2030-01-31T23:59:59.250+00:00', '2030-01-31T23:59:59.250+02:00', '2030-01-31T23:59:59.250', '2030-02-29T00:00:00.000Z'
+  ];
+  for (const text of accepted) {
+    assert.equal(expiryReason(text), 'ok', text);
+    assert.equal(reasonOf((p) => { p.issuedAt = text; p.expiresAt = '2099-01-01T00:00:00.000Z'; }), 'ok', text);
+    assert.equal(reasonOf((p) => { p.expiresAt = text; p.issuedAt = '2000-01-01T00:00:00.000Z'; }), 'ok', text);
+  }
+  for (const text of refusedForms) {
+    assert.equal(expiryReason(text), 'wrong-type', `clearance ${text}`);
+    assert.equal(reasonOf((p) => { p.issuedAt = text; }), 'wrong-type', `issuedAt ${text}`);
+    assert.equal(reasonOf((p) => { p.expiresAt = text; }), 'wrong-type', `expiresAt ${text}`);
+  }
+});
+
 test('a clearance or a mapping listed twice is refused as a duplicate, and an out of order list is refused, so one meaning has one hash', () => {
   const signer = makeSigner();
   const reasonOf = (edit: (payload: Loose) => void): string => {

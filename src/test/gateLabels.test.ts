@@ -133,17 +133,17 @@ test('the reserved releasable-to-no-one token is a valid label entry only on its
 
 test('a clearance parses with an optional real expiry and refuses everything else', () => {
   assert.ok(parseClearance(clearance(), SCALE_PRESETS).ok);
-  const withExpiry = parseClearance(clearance({ expiresAt: '2030-01-31T23:59:59Z' }), SCALE_PRESETS);
+  const withExpiry = parseClearance(clearance({ expiresAt: '2030-01-31T23:59:59.000Z' }), SCALE_PRESETS);
   assert.ok(withExpiry.ok);
-  assert.equal(withExpiry.value.expiresAt, '2030-01-31T23:59:59Z');
+  assert.equal(withExpiry.value.expiresAt, '2030-01-31T23:59:59.000Z');
   assert.ok(parseClearance(clearance({ expiresAt: '2030-01-31T23:59:59.250Z' }), SCALE_PRESETS).ok);
   const reasonOf = (value: unknown) => {
     const parsed = parseClearance(value, SCALE_PRESETS);
     return parsed.ok ? 'accepted' : parsed.reason;
   };
   assert.equal(reasonOf(clearance({ expiresAt: 'tomorrow' })), 'wrong-type');
-  assert.equal(reasonOf(clearance({ expiresAt: '2030-02-30T00:00:00Z' })), 'wrong-type', 'a rolled-over date is not real');
-  assert.equal(reasonOf(clearance({ expiresAt: '2030-01-31T23:59:59+02:00' })), 'wrong-type', 'UTC only');
+  assert.equal(reasonOf(clearance({ expiresAt: '2030-02-30T00:00:00.000Z' })), 'wrong-type', 'a rolled-over date is not real');
+  assert.equal(reasonOf(clearance({ expiresAt: '2030-01-31T23:59:59.000+02:00' })), 'wrong-type', 'UTC only');
   assert.equal(reasonOf(clearance({ expiresAt: 1893456000000 })), 'wrong-type');
   assert.equal(reasonOf(clearance({ expiresAt: undefined })), 'wrong-type');
   assert.equal(reasonOf(clearance({ level: 'Secret' })), 'not-allowed-here');
@@ -151,8 +151,26 @@ test('a clearance parses with an optional real expiry and refuses everything els
   assert.equal(reasonOf({ scale: 'org', level: 'Public', compartments: [] }), 'missing-field');
   assert.equal(reasonOf(clearance({ compartments: ['B', 'A'] })), 'not-sorted');
   assert.equal(reasonOf('Restricted'), 'wrong-type');
-  assert.ok(Number.isNaN(expiryMs('2030-02-30T00:00:00Z')));
-  assert.ok(!Number.isNaN(expiryMs('2030-02-28T00:00:00Z')));
+  assert.ok(Number.isNaN(expiryMs('2030-02-30T00:00:00.000Z')));
+  assert.ok(!Number.isNaN(expiryMs('2030-02-28T00:00:00.000Z')));
+});
+
+test('a clearance expiry is one form only: YYYY-MM-DDTHH:MM:SS.sssZ with exactly three fraction digits, the same form a bundle uses', () => {
+  const accepted = ['2030-01-31T23:59:59.000Z', '2030-01-31T23:59:59.250Z', '2030-02-28T00:00:00.999Z', '2028-02-29T12:00:00.001Z'];
+  for (const text of accepted) {
+    assert.ok(parseClearance(clearance({ expiresAt: text }), SCALE_PRESETS).ok, text);
+    assert.equal(expiryMs(text), Date.parse(text), text);
+  }
+  const refusedForms = [
+    '2030-01-31T23:59:59Z', '2030-01-31T23:59:59.5Z', '2030-01-31T23:59:59.25Z', '2030-01-31T23:59:59.2500Z', '2030-01-31T23:59:59.250000Z',
+    '2030-01-31T23:59:59.250z', '2030-01-31t23:59:59.250Z', '2030-01-31T23:59:59.250+00:00', '2030-01-31T23:59:59.250+02:00', '2030-01-31T23:59:59.250',
+    '2030-01-31 23:59:59.250Z', '2030-01-31T23:59:59.250Z ', ' 2030-01-31T23:59:59.250Z', '2030-02-29T00:00:00.000Z', '2030-01-31T24:00:00.000Z'
+  ];
+  for (const text of refusedForms) {
+    const parsed = parseClearance(clearance({ expiresAt: text }), SCALE_PRESETS);
+    assert.equal(parsed.ok ? 'accepted' : parsed.reason, 'wrong-type', text);
+    assert.ok(Number.isNaN(expiryMs(text)), text);
+  }
 });
 
 test('a mapping names two real levels on two different scales and nothing else', () => {

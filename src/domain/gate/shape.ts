@@ -67,3 +67,16 @@ export function checkKeys(value: Fields, path: string, required: readonly string
   }
   return undefined;
 }
+
+const TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+
+/**
+ * The one time form in the gate's files, for a bundle and a clearance alike: `YYYY-MM-DDTHH:MM:SS.sssZ`, exactly three fraction digits and a capital Z. It
+ * returns epoch milliseconds, or NaN for any other text: no missing or longer fraction, no offset, no lowercase z, and no date that rolls over (February 30).
+ * One form means two files that name the same instant are written the same way and hash the same way.
+ */
+export function parseIsoMillis(value: string): number {
+  if (!TIMESTAMP_PATTERN.test(value)) return Number.NaN;
+  const ms = Date.parse(value);
+  return !Number.isNaN(ms) && new Date(ms).toISOString() === value ? ms : Number.NaN;
+}

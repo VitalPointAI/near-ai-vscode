@@ -13,7 +13,7 @@ import { SCALE_PRESETS, parseClearance, parseLabel, parseMapping } from './label
 import type { Clearance, Label, Scale, ScaleMapping, ScaleTable } from './labels';
 import { DEFAULT_ROUTING, parseRouting } from './routing';
 import type { RoutingTable } from './routing';
-import { checkKeys, childPath, isRecord, ownValue, refused } from './shape';
+import { checkKeys, childPath, isRecord, ownValue, parseIsoMillis, refused } from './shape';
 import type { Parsed, Refusal } from './shape';
 import { CAPABILITY_VERBS, GATE_VOCABULARY_VERSION, isCapabilityVerb } from './vocabulary';
 import type { CapabilityVerb } from './vocabulary';
@@ -145,7 +145,6 @@ export function bundleHash(payload: unknown): string {
 // ---------------------------------------------------------------------------------------------------------------------------------------------------
 // Parsing
 
-const TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 const SCALE_ID_PATTERN = /^[a-z][a-z0-9-]{0,31}$/;
 const FINGERPRINT_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/;
 const DID_PATTERN = /^did:[a-z0-9]+:[A-Za-z0-9._:%-]+$/;
@@ -165,14 +164,8 @@ const MAX_DEPTH = 16;
 const HEX_64 = /^[0-9a-f]{64}$/;
 const PURPOSE_PATTERN = /^[a-z][a-z0-9-]{0,31}$/;
 
-function isoMillis(value: string): number {
-  if (!TIMESTAMP_PATTERN.test(value)) return Number.NaN;
-  const ms = Date.parse(value);
-  return !Number.isNaN(ms) && new Date(ms).toISOString() === value ? ms : Number.NaN;
-}
-
 function parseTimestamp(value: unknown, path: string): Parsed<string> {
-  if (typeof value !== 'string' || Number.isNaN(isoMillis(value))) return refused('wrong-type', path);
+  if (typeof value !== 'string' || Number.isNaN(parseIsoMillis(value))) return refused('wrong-type', path);
   return { ok: true, value };
 }
 
@@ -450,7 +443,7 @@ export function parseBundle(value: unknown, path = ''): Parsed<PolicyBundle> {
   if (!issuedAt.ok) return issuedAt;
   const expiresAt = parseTimestamp(ownValue(value, 'expiresAt'), childPath(path, 'expiresAt'));
   if (!expiresAt.ok) return expiresAt;
-  if (isoMillis(expiresAt.value) <= isoMillis(issuedAt.value)) return refused('wrong-type', childPath(path, 'expiresAt'));
+  if (parseIsoMillis(expiresAt.value) <= parseIsoMillis(issuedAt.value)) return refused('wrong-type', childPath(path, 'expiresAt'));
   const ceiling = parseCeiling(ownValue(value, 'ceiling'), childPath(path, 'ceiling'));
   if (!ceiling.ok) return ceiling;
   const scales = parseScales(ownValue(value, 'scales'), childPath(path, 'scales'));
@@ -582,7 +575,7 @@ export function effectiveNow(now: number, lastValidAt?: number): number {
  */
 export function needsRenewal(bundle: Pick<PolicyBundle, 'expiresAt'>, now: number, lastValidAt?: number): boolean {
   const effective = effectiveNow(now, lastValidAt);
-  const expires = isoMillis(bundle.expiresAt);
+  const expires = parseIsoMillis(bundle.expiresAt);
   if (Number.isNaN(effective) || Number.isNaN(expires)) return false;
   return effective >= expires - RENEW_WINDOW_DAYS * DAY_MS && effective < expires;
 }
@@ -621,8 +614,8 @@ export function verifyBundleEnvelope(envelope: unknown, options: VerifyBundleOpt
   if (bundle.issuer.fingerprint !== verdict.signer.fingerprint || bundle.issuer.publicKey !== verdict.signer.publicKey || bundle.issuedAt !== verdict.signedAt) {
     return failedClosed('signer-mismatch');
   }
-  if (isoMillis(bundle.issuedAt) > effective + CLOCK_SKEW_MS) return failedClosed('clock-behind');
-  if (effective >= isoMillis(bundle.expiresAt)) return failedClosed('expired');
+  if (parseIsoMillis(bundle.issuedAt) > effective + CLOCK_SKEW_MS) return failedClosed('clock-behind');
+  if (effective >= parseIsoMillis(bundle.expiresAt)) return failedClosed('expired');
   return {
     state: 'valid',
     bundle,

@@ -59,9 +59,10 @@ test('compartments, releasability and expiry each deny with their own reason', (
   assert.equal(whyNotDominated(clearance('Restricted'), label('Public', { releasability: ['CAN'] }), context), 'releasability');
   assert.equal(whyNotDominated(clearance('Restricted', { releasability: ['USA'] }), label('Public', { releasability: ['CAN'] }), context), 'releasability');
   assert.equal(whyNotDominated(clearance('Restricted', { releasability: ['CAN', 'USA'] }), label('Public', { releasability: ['CAN'] }), context), undefined);
-  assert.equal(whyNotDominated(clearance('Restricted', { expiresAt: '2026-05-31T23:59:59Z' }), label('Public'), context), 'expired');
-  assert.equal(whyNotDominated(clearance('Restricted', { expiresAt: '2026-06-01T00:00:00Z' }), label('Public'), context), 'expired', 'expiring exactly now is expired');
-  assert.equal(whyNotDominated(clearance('Restricted', { expiresAt: '2026-06-01T00:00:01Z' }), label('Public'), context), undefined);
+  assert.equal(whyNotDominated(clearance('Restricted', { expiresAt: '2026-05-31T23:59:59.000Z' }), label('Public'), context), 'expired');
+  assert.equal(whyNotDominated(clearance('Restricted', { expiresAt: '2026-06-01T00:00:00.000Z' }), label('Public'), context), 'expired', 'expiring exactly now is expired');
+  assert.equal(whyNotDominated(clearance('Restricted', { expiresAt: '2026-06-01T00:00:01.000Z' }), label('Public'), context), undefined);
+  assert.equal(whyNotDominated(clearance('Restricted', { expiresAt: '2026-06-01T00:00:01Z' }), label('Public'), context), 'expired', 'a time without three fraction digits is unreadable, so no access');
   assert.equal(whyNotDominated(clearance('Restricted', { expiresAt: 'not a time' }), label('Public'), context), 'expired', 'an unreadable expiry is no access');
   assert.equal(whyNotDominated(undefined, label('Public'), context), 'no-clearance');
   assert.deepEqual([...DOMINANCE_REASONS], ['no-clearance', 'scale', 'level', 'compartment', 'releasability', 'expired']);

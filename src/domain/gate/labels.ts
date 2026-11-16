@@ -2,7 +2,7 @@
 // from the scale's ordered list, never a number, so a label reads plainly in files and records. Pure: no I/O, no clock, no vscode, no package.
 // Names and tokens compare by exact string equality: no case folding and no Unicode normalisation (a level that differs by case is a different, unknown level).
 // Once a release ships a preset id, a level name or a handling value it never changes in place: a change is label v2 beside v1 (D-22).
-import { checkKeys, childPath, isRecord, ownValue, refused } from './shape';
+import { checkKeys, childPath, isRecord, ownValue, parseIsoMillis, refused } from './shape';
 import type { Fields, Parsed } from './shape';
 
 export type ScaleId = string;
@@ -29,7 +29,7 @@ export interface Clearance {
   readonly level: string;
   readonly compartments: readonly string[];
   readonly releasability: readonly string[];
-  /** ISO 8601 UTC time with a trailing Z; absent means the clearance does not expire. */
+  /** `YYYY-MM-DDTHH:MM:SS.sssZ` (UTC, exactly three fraction digits); absent means the clearance does not expire. */
   readonly expiresAt?: string;
 }
 
@@ -163,7 +163,7 @@ export function parseLabel(value: unknown, scales: ScaleTable, path = ''): Parse
 
 const CLEARANCE_FIELDS = ['scale', 'level', 'compartments', 'releasability'] as const;
 
-/** Parses a clearance. Its releasability may not list the reserved "releasable to no one" token, and `expiresAt`, when present, must be a real ISO 8601 UTC time. */
+/** Parses a clearance. Its releasability may not list the reserved "releasable to no one" token, and `expiresAt`, when present, must be a real UTC time in the one form the gate uses (`YYYY-MM-DDTHH:MM:SS.sssZ`). */
 export function parseClearance(value: unknown, scales: ScaleTable, path = ''): Parsed<Clearance> {
   if (!isRecord(value)) return refused('wrong-type', path);
   const keys = checkKeys(value, path, CLEARANCE_FIELDS, ['expiresAt']);
@@ -232,12 +232,7 @@ export const LABELS_NOT_ACCREDITATION_TEXT =
 export const SCALE_PRESETS_CAVEAT_TEXT =
   "The NATO levels come from secondary copies, and treating the Canadian Protected and Classified families as two scales is how NEAR AI reads them. Your organization's security officer should confirm both before you rely on them.";
 
-const EXPIRY_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/;
-
-/** An `expiresAt` as epoch milliseconds, or NaN when it is not a real ISO 8601 UTC time (a rolled-over date like February 30 is not real). */
+/** A clearance's `expiresAt` as epoch milliseconds, or NaN when it is not in the one time form the gate uses (see parseIsoMillis in shape.ts). */
 export function expiryMs(text: string): number {
-  if (!EXPIRY_PATTERN.test(text)) return Number.NaN;
-  const ms = Date.parse(text);
-  if (Number.isNaN(ms)) return Number.NaN;
-  return new Date(ms).toISOString().slice(0, 19) === text.slice(0, 19) ? ms : Number.NaN;
+  return parseIsoMillis(text);
 }
