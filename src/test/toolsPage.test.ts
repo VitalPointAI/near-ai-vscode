@@ -23,6 +23,7 @@ const SCRIPT = path.join(__dirname, '..', '..', 'media', 'tools', 'tools.js');
 const server = (overrides: Partial<McpServerStatus> = {}): McpServerStatus => ({
   config: { id: 'catalog', name: 'Catalog', transport: 'http', approval: 'ask-for-changes', disabledTools: ['drop'] },
   host: 'mcp.example.com', hasSecrets: { url: true, headers: [], env: [] }, enabledHere: true, state: 'connected', calls: 0, errors: 0,
+  manifestWords: [], toolChoices: {},
   tools: [
     { name: 'search', description: 'Search the catalog. Returns items.', inputSchema: {}, readOnly: true, destructive: false },
     { name: 'update', description: 'Change an item.', inputSchema: {}, readOnly: false, destructive: true },

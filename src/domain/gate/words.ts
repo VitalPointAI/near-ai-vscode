@@ -4,7 +4,7 @@
 // with the sentence that says the manifest is a claim.
 import type { GateContextName } from './bundle';
 import { defaultMcpContexts, isCommandEffect } from './manifest';
-import type { EffectTemplate, McpManifest, McpTransport, ToolManifest } from './manifest';
+import type { EffectTemplate, McpManifest, McpToolEntry, McpTransport, ToolManifest } from './manifest';
 import { CAPABILITY_VERBS } from './vocabulary';
 import type { CapabilityVerb } from './vocabulary';
 
@@ -180,5 +180,39 @@ export function describeMcpManifest(manifest: McpManifest | undefined, transport
   lines.push(...hostLine(hosts));
   lines.push(contextLine(manifest?.contexts ?? defaultMcpContexts(transport)));
   lines.push(MANIFEST_IS_A_CLAIM_TEXT);
+  return lines;
+}
+
+/** What a person can say one MCP tool does. `custom` is a declaration made some other way (a hand-edited manifest); `unknown` is no declaration at all. */
+export type McpToolChoice = 'reads' | 'changes-remote' | 'unknown' | 'custom';
+
+/** Which of the page's choices a declared tool's entry is: only the call itself is `reads`; the call plus network is `changes-remote`; anything else is `custom`. */
+export function mcpToolChoiceOf(entry: McpToolEntry | undefined): McpToolChoice {
+  if (entry === undefined) return 'unknown';
+  const verbs = entry.effects.map((effect) => effect.verb);
+  if (verbs.length > 0 && verbs.every((verb) => verb === 'mcp')) return 'reads';
+  if (verbs.length > 0 && verbs.every((verb) => verb === 'mcp' || verb === 'network') && verbs.includes('network')) return 'changes-remote';
+  return 'custom';
+}
+
+const DECLARED_READS = 'Only reads';
+const DECLARED_CHANGES = 'Changes data on the server';
+
+/**
+ * One line per tool the manifest declares, by tool name in sorted order, each with what it was declared to do (effects in the vocabulary's verb order). A tool the
+ * manifest does not list has no line here; the server's own sentence says how those are treated.
+ */
+export function describeMcpTools(manifest: McpManifest | undefined): string[] {
+  if (manifest === undefined) return [];
+  const lines: string[] = [];
+  for (const name of Object.keys(manifest.tools).sort()) {
+    const entry = manifest.tools[name];
+    if (entry === undefined) continue;
+    const choice = mcpToolChoiceOf(entry);
+    const said = choice === 'reads' ? [DECLARED_READS] : choice === 'changes-remote' ? [DECLARED_CHANGES] : effectLines(entry.effects, literalHosts(entry.effects).length > 0, [], ['mcp']);
+    const parts = said.length > 0 ? said : [DECLARED_READS];
+    if (entry.contexts !== undefined) parts.push(contextLine(entry.contexts));
+    lines.push(`${plain(name)}: ${parts.join('; ')}`);
+  }
   return lines;
 }

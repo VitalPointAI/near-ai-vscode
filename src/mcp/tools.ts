@@ -1,7 +1,8 @@
 import { declareManifest } from '../agent/tools';
 import type { AgentTool } from '../agent/tools';
-import { mcpToolEffects, RESTRICTIVE_EFFECTS } from '../domain/gate/manifest';
-import type { ToolManifest } from '../domain/gate/manifest';
+import { mcpToolEffects, parseMcpManifest, RESTRICTIVE_EFFECTS } from '../domain/gate/manifest';
+import type { McpManifest, McpToolEffects, ToolManifest } from '../domain/gate/manifest';
+import type { ActionCapability } from '../domain/policy';
 import { fenceUntrusted } from '../agent/untrusted';
 import { ToolError } from '../agent/workspace';
 import type { McpConnection, McpServerConfig, McpToolInfo } from './client';
@@ -26,16 +27,57 @@ export function grantsMcpTool(granted: string[], toolName: string): boolean {
   });
 }
 
+/** What a server added from now on starts with: every tool undeclared and most restrictive, only while the person is there (D-06). */
+export function newServerManifest(id: string, transport: 'http' | 'stdio'): McpManifest {
+  const draft = (server: string) => parseMcpManifest({ manifestVersion: 1, server, runsOn: transport === 'stdio' ? 'this-machine' : 'remote', hosts: [], credentials: [], contexts: ['interactive'], tools: {}, toolDefaults: 'restrictive' });
+  const parsed = draft(id);
+  const fallback = parsed.ok ? parsed : draft('server');
+  if (!fallback.ok) throw new Error(`The restrictive starting manifest did not parse (${fallback.reason}); this is a bug.`);
+  return fallback.value;
+}
+
 /**
- * The manifest of one MCP tool today: the legacy one (GATE-02, D-38). A read-only tool on a server that is not set to ask every call is a call on that server;
- * any other tool is a call that also reaches the server's host. It is built from the same facts `capability` is computed from, by `mcpToolEffects`, so the
- * gate sees exactly what the settings layer sees. The server's own hints are a claim, and they are all there is until a server has a manifest of its own;
- * its results are outside content. A name the format cannot hold falls back to the restrictive effects rather than stopping the server from connecting.
+ * The manifest the gate reads for a server: none for one configured before manifests existed (today's behaviour, D-38), the stored one when it parses, and the
+ * restrictive starting one when what is stored does not (a hand-edited or damaged settings file never widens what a server may do, T-70-31).
+ */
+export function serverManifest(config: McpServerConfig): McpManifest | undefined {
+  if (config.manifest === undefined) return undefined;
+  const parsed = parseMcpManifest(config.manifest);
+  if (parsed.ok) return parsed.value;
+  return newServerManifest(config.id, config.transport);
+}
+
+/** The effects, contexts and shorthand of one tool of one server, from the server's manifest (exact tool name only) or, with none, from today's rules. */
+export function mcpToolDecision(config: McpServerConfig, tool: McpToolInfo, host: string): McpToolEffects {
+  return mcpToolEffects(serverManifest(config), { server: config.id, tool: tool.name, host, readOnly: tool.readOnly, destructive: tool.destructive, approval: config.approval, transport: config.transport });
+}
+
+/**
+ * The settings layer's one-word view of an MCP tool. For a server with no manifest, or an undeclared tool on a server set to follow today's rules, it is today's split: a
+ * read-only tool on a server not set to ask every call is `read`, anything else `network`. A declared or restrictive tool is a `read` when it only calls the server and
+ * `network` when it also reaches anything else; a server set to ask before every call is never quieter than `network`.
+ */
+export function mcpToolCapability(config: McpServerConfig, tool: McpToolInfo, host: string): ActionCapability {
+  const decision = mcpToolDecision(config, tool, host);
+  if (serverManifest(config) === undefined || decision.defaults === 'legacy') {
+    const readOnly = tool.readOnly && !tool.destructive;
+    return readOnly && config.approval !== 'ask-every-call' ? 'read' : 'network';
+  }
+  if (config.approval === 'ask-every-call') return 'network';
+  // The call on the server itself is a read, as it is for a read-only tool today; anything else a declaration or the restrictive default adds is network.
+  return decision.effects.every((effect) => effect.verb === 'mcp') ? 'read' : 'network';
+}
+
+/**
+ * The manifest of one MCP tool: the server's own when it has one (GATE-02, GATE-03, D-06), else the legacy one (D-38). A read-only tool on a server that is not set to
+ * ask every call is a call on that server; any other tool is a call that also reaches the server's host. It is built from the same facts `capability` is computed from,
+ * by `mcpToolEffects`, so the gate sees exactly what the settings layer sees. The server's own hints are a claim, and so is a declaration; its results are outside
+ * content. A name the format cannot hold falls back to the restrictive effects rather than stopping the server from connecting.
  */
 export function mcpToolManifest(config: McpServerConfig, tool: McpToolInfo, host: string): ToolManifest {
   const name = mcpToolName(config.id, tool.name);
   const remote = config.transport === 'http' ? ({ runsOn: 'remote' } as const) : {};
-  const found = mcpToolEffects(undefined, { server: config.id, tool: tool.name, host, readOnly: tool.readOnly, destructive: tool.destructive, approval: config.approval, transport: config.transport });
+  const found = mcpToolDecision(config, tool, host);
   const hostsOf = (effects: readonly { readonly verb: string; readonly hosts?: readonly string[] }[]) => effects.flatMap((effect) => (effect.verb === 'network' ? effect.hosts ?? [] : []));
   try {
     return declareManifest({ tool: name, effects: found.effects, hosts: hostsOf(found.effects), contexts: found.contexts, untrusted: true, ...remote });
@@ -60,8 +102,8 @@ function mcpAgentTool(config: McpServerConfig, connection: McpConnection, tool: 
     name: mcpToolName(config.id, tool.name),
     description: `[MCP: ${config.name}] ${tool.description || tool.name}`.slice(0, 1_024),
     parameters: schema,
-    // Read-only tools on a server that isn't "ask every call" follow the normal rules for reads.
-    capability: readOnly && config.approval !== 'ask-every-call' ? 'read' : 'network',
+    // Without a manifest, read-only tools on a server that isn't "ask every call" follow the normal rules for reads; a manifest decides for the tools it declares.
+    capability: mcpToolCapability(config, tool, host),
     manifest: mcpToolManifest(config, tool, host),
     untrusted: true,
     parse: (raw) => {

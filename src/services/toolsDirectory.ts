@@ -7,7 +7,7 @@ import { describeManifest } from '../domain/gate/words';
 import { GsdAgent, GsdSkill, modelForTier, roleModelFor } from '../gsd/library';
 import type { TeamDefinition } from '../agent/teams';
 import type { McpServerStatus } from './mcpRegistry';
-import { mcpToolName } from '../mcp/tools';
+import { mcpToolCapability, mcpToolName } from '../mcp/tools';
 import type { ModelInfo, NearAiClient } from './nearAiClient';
 import { POLICY_OPTIONS } from './approvalPolicy';
 import { ReportingTokenHint, SET_REPORTING_TOKEN_COMMAND } from './reportingToken';
@@ -23,7 +23,7 @@ export interface DirectorySkill { name: string; description: string; argumentHin
 export interface DirectoryAgent { name: string; description: string; tier: string; model: string; source: 'role setting' | 'project choice' | 'definition' | 'default'; tools: string[] }
 export interface DirectoryTeam { name: string; description: string; command: string; insert: string; project: boolean; members: Array<{ name: string; role?: string; tier: string; model: string; tools: string[] }> }
 export interface DirectoryTool { name: string; description: string; capability: string; status: ToolStatus; statusText: string; notes: string[]; /** What the tool's manifest says it can do, in plain words (also the last of `notes`): the team member cards show these. */ words: string[]; setup?: { label: string; command: string }; /** 0.4.17: the tool runs in Auto by its own marker (the web tools). */ autoSafe?: boolean }
-export interface DirectoryMcpServer { id: string; name: string; transport: string; host: string; enabledHere: boolean; state: string; error?: string; approval: string; tools: Array<{ name: string; agentName: string; description: string; enabled: boolean; status: ToolStatus; statusText: string }> }
+export interface DirectoryMcpServer { id: string; name: string; transport: string; host: string; words: string[]; enabledHere: boolean; state: string; error?: string; approval: string; tools: Array<{ name: string; agentName: string; description: string; enabled: boolean; status: ToolStatus; statusText: string }> }
 export interface DirectoryModel { id: string; privacy: 'tee' | 'local' | 'forwarded' | 'unknown'; privacyText: string; contextLength?: number; inputPerMillion?: number; outputPerMillion?: number; imagePrice?: number; kinds: string[]; usedFor: string[] }
 
 export interface ToolsDirectory {
@@ -192,11 +192,11 @@ export function buildToolsDirectory(input: DirectoryInput): ToolsDirectory {
   const mcp: DirectoryMcpServer[] = input.mcp.map((server) => {
     const disabled = new Set(server.config.disabledTools ?? []);
     return {
-      id: server.config.id, name: server.config.name, transport: server.config.transport, host: server.host, enabledHere: server.enabledHere, state: server.state, ...(server.error ? { error: server.error } : {}), approval: server.config.approval,
+      id: server.config.id, name: server.config.name, transport: server.config.transport, host: server.host, words: server.manifestWords, enabledHere: server.enabledHere, state: server.state, ...(server.error ? { error: server.error } : {}), approval: server.config.approval,
       tools: server.tools.map((tool) => {
         const readOnly = tool.readOnly && !tool.destructive;
         // The same capability and "asks" rule as mcpAgentTool.
-        const capability: ActionCapability = readOnly && server.config.approval !== 'ask-every-call' ? 'read' : 'network';
+        const capability: ActionCapability = mcpToolCapability(server.config, tool, server.host);
         const asksByServer = server.config.approval === 'ask-every-call' || (server.config.approval === 'ask-for-changes' && !readOnly);
         let status = capabilityStatus(capability, input.policy, input.rules);
         if (status !== 'stopped' && (!server.enabledHere || disabled.has(tool.name))) status = 'off';

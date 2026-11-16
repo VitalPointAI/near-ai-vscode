@@ -1,6 +1,9 @@
 import type { AgentTool } from '../agent/tools';
 import { displayHost, McpConnection, McpSecrets, McpServerConfig, McpToolInfo } from '../mcp/client';
-import { mcpAgentTools } from '../mcp/tools';
+import { mcpAgentTools, newServerManifest, serverManifest } from '../mcp/tools';
+import { parseMcpManifest } from '../domain/gate/manifest';
+import { describeMcpManifest, describeMcpTools, mcpToolChoiceOf } from '../domain/gate/words';
+import type { McpToolChoice } from '../domain/gate/words';
 
 // MCP servers the user has added: their settings (user-level storage), their secrets
 // (SecretStorage: URLs, header values, environment values), which ones this project uses
@@ -24,6 +27,13 @@ export interface McpServerStatus {
   errors: number;
   averageMs?: number;
   lastUsed?: number;
+  /**
+   * The server's manifest in plain sentences, in a fixed order: where it runs, what it can do, each declared tool by name in sorted order, whether it can run when
+   * nobody is watching, and last the sentence that this is a declaration NEAR AI cannot check (GATE-03, D-07). Never empty, and the last entry is always that sentence.
+   */
+  manifestWords: string[];
+  /** What the person has declared for each tool the server lists right now: `unknown` for one with no declaration. */
+  toolChoices: Record<string, McpToolChoice>;
 }
 
 const SERVERS_KEY = 'nearAi.mcp.servers';
@@ -32,6 +42,17 @@ const secretKey = (id: string) => `nearAi.mcp.server.${id}`;
 export const SERVER_ID = /^[a-z0-9][a-z0-9-]{0,30}$/;
 
 interface Live { connection?: McpConnection; state: McpState; error?: string; calls: number; errors: number; totalMs: number; lastUsed?: number }
+
+/** The manifest's words and the person's declaration for each listed tool; the claim sentence always comes last, after the declared tools. */
+function manifestFacts(config: McpServerConfig, host: string, tools: McpToolInfo[]): Pick<McpServerStatus, 'manifestWords' | 'toolChoices'> {
+  const manifest = serverManifest(config);
+  const words = describeMcpManifest(manifest, config.transport, host);
+  const claim = words.slice(-1);
+  return {
+    manifestWords: [...words.slice(0, -1), ...describeMcpTools(manifest), ...claim],
+    toolChoices: Object.fromEntries(tools.map((tool) => [tool.name, mcpToolChoiceOf(manifest !== undefined && Object.prototype.hasOwnProperty.call(manifest.tools, tool.name) ? manifest.tools[tool.name] : undefined)]))
+  };
+}
 
 export class McpRegistry {
   private readonly live = new Map<string, Live>();
@@ -53,9 +74,27 @@ export class McpRegistry {
   public async save(config: McpServerConfig, secrets: Partial<McpSecrets>): Promise<void> {
     if (!SERVER_ID.test(config.id)) throw new Error('A server id is 1-31 lowercase letters, digits, or dashes.');
     const previous = await this.secretsFor(config.id);
+    const stored = this.withManifest(config);
     await this.secrets.store(secretKey(config.id), JSON.stringify({ ...previous, ...Object.fromEntries(Object.entries(secrets).filter(([, value]) => value !== undefined)) }));
-    await this.global.update(SERVERS_KEY, [...this.servers().filter((server) => server.id !== config.id), config].sort((a, b) => a.name.localeCompare(b.name)));
+    await this.global.update(SERVERS_KEY, [...this.servers().filter((server) => server.id !== config.id), stored].sort((a, b) => a.name.localeCompare(b.name)));
     await this.disconnect(config.id);
+  }
+
+  /**
+   * The config as it is stored. A server added for the first time starts with the restrictive manifest; one that is already stored keeps its own, and one stored with none
+   * stays without (today's behaviour, D-38). The page's save message carries no manifest, so the stored one must be carried over here or an edit would drop it.
+   */
+  private withManifest(config: McpServerConfig): McpServerConfig {
+    const existing = this.servers().find((server) => server.id === config.id);
+    const { manifest: _ignored, ...rest } = config;
+    const given = config.manifest ?? existing?.manifest;
+    if (given === undefined) return existing ? rest : { ...rest, manifest: newServerManifest(config.id, config.transport) };
+    if (existing !== undefined && existing.transport !== config.transport) {
+      // Changing where a server runs changes what its manifest says about it; a server that now runs on this machine is only for runs where the person is there.
+      const moved = parseMcpManifest({ ...given, runsOn: config.transport === 'stdio' ? 'this-machine' : 'remote', contexts: config.transport === 'stdio' ? ['interactive'] : given.contexts });
+      return { ...rest, manifest: moved.ok ? moved.value : newServerManifest(config.id, config.transport) };
+    }
+    return { ...rest, manifest: given };
   }
 
   public async remove(id: string): Promise<void> {
@@ -155,7 +194,8 @@ export class McpRegistry {
         hasSecrets: { url: Boolean(secrets.url), headers: Object.keys(secrets.headers ?? {}), env: Object.keys(secrets.env ?? {}) },
         state: live.state, ...(live.error ? { error: live.error } : {}), ...(live.connection?.serverInfo ? { serverInfo: live.connection.serverInfo } : {}),
         tools: live.connection?.tools ?? [], calls: live.calls, errors: live.errors,
-        ...(live.calls ? { averageMs: Math.round(live.totalMs / live.calls) } : {}), ...(live.lastUsed ? { lastUsed: live.lastUsed } : {})
+        ...(live.calls ? { averageMs: Math.round(live.totalMs / live.calls) } : {}), ...(live.lastUsed ? { lastUsed: live.lastUsed } : {}),
+        ...manifestFacts(config, displayHost(secrets).replace(/:\d+$/, ''), live.connection?.tools ?? [])
       };
     }));
   }

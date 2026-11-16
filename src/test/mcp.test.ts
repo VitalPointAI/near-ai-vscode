@@ -31,6 +31,8 @@ async function registryWithServer(approval: 'ask-for-changes' | 'ask-every-call'
   const secrets = secretStore();
   const registry = new McpRegistry(global, workspace, secrets, path.join(__dirname, '..', '..'));
   await registry.save({ id: 'distributor', name: 'Test Distributor', transport: 'stdio', command: process.execPath, args: [SERVER], approval }, { env: { STOCK: '17' } });
+  // These tests are about servers configured before manifests existed (legacy, D-38): saving now stores a restrictive manifest, so the stored config is set back to none.
+  await global.update('nearAi.mcp.servers', (global.get<Array<Record<string, unknown>>>('nearAi.mcp.servers') ?? []).map(({ manifest: _manifest, ...legacy }) => legacy));
   return { registry, global, workspace, secrets };
 }
 
