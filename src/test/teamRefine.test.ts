@@ -231,7 +231,7 @@ test('privacy rule: a private team only to a private model; a mixed team private
     assert.equal(refused.ok, false);
     assert.equal(refused.ok ? '' : refused.reason, `${why}, so Improve with AI may send it only to a private model. ${NONE.reason}`);
   }
-  assert.match((refinePlan(plain, { knowledgeBase: true, choose: forwardedOnly }) as { reason: string }).reason, /^This project has a knowledge base, so its team is private/);
+  assert.match((refinePlan(plain, { knowledgeBase: true, choose: forwardedOnly }) as { reason: string }).reason, /^This project has a knowledge base, so Team Studio sends teams only to private models\./);
   // Mixed team: the whole team to a private model when there is one...
   assert.deepEqual(refinePlan(mixed, { choose: both }), { ok: true, need: 'private', model: 'z-ai/glm-5.3', private: true, skipped: [] });
   // ...otherwise without the private member's text, said plainly.

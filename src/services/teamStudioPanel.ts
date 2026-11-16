@@ -12,11 +12,10 @@ import { ChatPrefill, gatherDirectoryInput } from './toolsPage';
 import { comparisonStoreFor } from '../benchmark/store';
 import { loadBenchmarkTasks } from '../benchmark/tasks';
 import { leaderboardRows, suggestForTeam } from './modelComparisonPage';
-import { builderPrompt, parseProposal, TEAM_BUILDER_PROMPT } from '../agent/teamBuilder';
 import { activeProvider, clientFor, privateRouteFor, type ActiveProvider } from './providerCache';
 import { readAgentRules, readModelTiers, readSettings } from './settings';
 import { spendAccountOf } from './agentSession';
-import { teamModelCall, type TeamAiDeps } from './teamStudioAi';
+import type { TeamAiDeps } from './teamStudioAi';
 import { bestOf, planRoleSuite, runRoleSuite } from '../benchmark/roleSuite';
 import { draftFromMarkdown, teamMarkdown } from '../agent/teamMarkdown';
 import { readFile, writeFile } from 'node:fs/promises';
@@ -121,19 +120,8 @@ export async function openTeamStudio(context: vscode.ExtensionContext, auth: Aut
     confirm: async (message, action) => (await vscode.window.showWarningMessage(message, { modal: true }, action)) === action,
     choose: async (message, ...actions) => vscode.window.showWarningMessage(message, { modal: true }, ...actions),
     // The tested model for each role, from the comparisons this machine has run, so a saved team is checked against evidence rather than defaults.
-    // The AI start (owner, 2026-11-08): one call drafts the team from the person's own words, and the result is a proposal they accept or edit.
-    draftTeam: async (brief) => {
-      const deps = await teamAiDeps(auth);
-      // 0.4.27: the draft goes through the same outbound check as chat (TEE-only mode, the daily spend limit, emergency stop), and a brief for a private
-      // team goes only to a private model (owner, 2026-11-16). Before, it called the model directly.
-      const reply = await teamModelCall(deps, { need: brief.private ? 'private' : 'any', messages: [
-        { role: 'system', content: TEAM_BUILDER_PROMPT },
-        { role: 'user', content: builderPrompt(brief) }
-      ], maxTokens: 2000 });
-      if (!reply.ok) throw new Error(reply.reason);
-      return parseProposal(reply.text, brief);
-    },
-    // Improve with AI (0.4.27) uses the same guarded call as drafting: the outbound check always runs, and the privacy rule picks the model.
+    // The studio's only way to a model (0.4.27): drafting a team and Improve with AI both go through teamModelCall with these, and the host decides
+    // which model may be used.
     teamAi: () => teamAiDeps(auth),
     // The final step of adding a team: measure each member's role on a few candidate models, then write the winner into the team file. The person is
     // asked first, because this spends real time and tokens, and skipping it leaves exactly the team they wrote.

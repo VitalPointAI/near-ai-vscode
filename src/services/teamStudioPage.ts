@@ -8,10 +8,10 @@ import { DEFAULT_TOOLS, parseTeam, recommendedProjectTeam, slugify, TeamLibrary,
 import type { AgentDiscoveryAnswers } from '../domain/agents';
 import { buildTeamGraph } from '../agent/teamGraph';
 import { checkTeam, checkWarnings } from '../agent/teamCheck';
-import { ACCEPT_ALL_KINDS, applySuggestion, MAX_REFINE_CHARS, parseRefinement, REFINE_PROMPT, refinePlan, refinePrompt, type RefinePlan, type Suggestion } from '../agent/teamRefine';
+import { ACCEPT_ALL_KINDS, applySuggestion, KNOWLEDGE_BASE_PRIVATE, MAX_REFINE_CHARS, parseRefinement, REFINE_PROMPT, refinePlan, refinePrompt, type RefinePlan, type Suggestion } from '../agent/teamRefine';
 import { chooseTeamModel, teamModelCall, type TeamAiDeps } from './teamStudioAi';
 import { CUSTOM_PLAGIARISM_CHECKER } from '../agent/researchIntegrity';
-import { proposalDraft, proposalText, type TeamProposal } from '../agent/teamBuilder';
+import { builderPrompt, parseProposal, proposalDraft, proposalText, TEAM_BUILDER_PROMPT } from '../agent/teamBuilder';
 import { layoutNetwork } from '../domain/networkLayout';
 import { gradingCoverage } from '../domain/teamKnowledge';
 import { knowledgeFile, loadKnowledge } from './teamKnowledgeStore';
@@ -470,11 +470,6 @@ export interface TeamStudioDeps {
    * What the model comparisons say each role should use, for a team that was just saved (owner, 2026-11-07: "as new teams are added, we should
    * automatically check and suggest model optimizations for the new members and roles that are created"). Undefined when no comparison has been run.
    */
-  /**
-   * Drafts a team from the person's own description (owner, 2026-11-08: start with a chat asking what the team should produce, then launch the research to
-   * propose mission, members, roles and outputs). One model call, returned as a proposal for the person to accept or edit.
-   */
-  draftTeam?(brief: { idea: string; outputFormat?: string; depth?: 'quick' | 'thorough'; private?: boolean }): Promise<{ proposal: TeamProposal; problems: string[] }>;
   suggestModels?(members: Array<{ name: string; role?: string; model?: string }>): Promise<Array<{ member: string; model: string; current?: string; why: string; changes: boolean }>>;
   /**
    * The final step of adding a team (owner, 2026-11-08): run each member's role test with the candidate models and apply the winner, so a new team's
@@ -592,13 +587,17 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
   const teamFor = (id: string) => library.teams.find((entry) => entry.id === id);
 
   /** Which model Improve with AI would use for this draft under the privacy rule, or why none may (refinePlan). */
-  const refinePlanFor = async (draft: TeamDraft, id: string | undefined): Promise<{ plan: RefinePlan; ai?: TeamAiDeps }> => {
+  /**
+   * Whether this workspace's project has a knowledge base, read from the workspace on every call and never from a message (PR #69 review). A check that
+   * fails counts as yes, so a model call is private rather than sent on a guess.
+   */
+  const hostKnowledgeBase = () => deps.knowledgeBase().catch(() => true);
+  const refinePlanFor = async (draft: TeamDraft): Promise<{ plan: RefinePlan; ai?: TeamAiDeps }> => {
     if (!deps.teamAi) return { plan: { ok: false, reason: 'No model is available here. Set up a NEAR AI profile for this project first.' } };
     let ai: TeamAiDeps;
     try { ai = await deps.teamAi(); } catch (error) { return { plan: { ok: false, reason: (error as Error).message } }; }
-    if (!context) await load();
-    // The project team of a project with a knowledge base is private, as its members' models already must be.
-    return { plan: refinePlan(draft, { knowledgeBase: Boolean(context?.knowledgeBase && id === 'project'), choose: (need) => chooseTeamModel(need, ai) }), ai };
+    // Any team in a project with a knowledge base is private, as its members' models already must be (reviewDraft); decided here, never from the page.
+    return { plan: refinePlan(draft, { knowledgeBase: await hostKnowledgeBase(), choose: (need) => chooseTeamModel(need, ai) }), ai };
   };
   /** An imported team (or one made from an import) that is not approved: its text is untrusted, and the refiner is told so. */
   const untrustedFor = async (draft: TeamDraft, id: string | undefined): Promise<boolean> => {
@@ -750,11 +749,20 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
       }
       case 'draft-team': {
         // One model call drafts the team from the person's own words (owner, 2026-11-08). The result goes back as a proposal the person reads first, and
-        // only becomes a team when they accept it, so nothing is saved on the strength of one answer.
-        if (!deps.draftTeam) { post({ type: 'error', text: 'No model is available to draft a team. Set up a NEAR AI profile, or fill the team in by hand.' }); return; }
+        // only becomes a team when they accept it, so nothing is saved on the strength of one answer. Like Improve with AI, it goes through teamModelCall
+        // (the outbound check) and the host's own privacy decision (PR #69 review): private when the person asked, or when the project has a knowledge base.
+        if (!deps.teamAi) { post({ type: 'error', text: 'No model is available to draft a team. Set up a NEAR AI profile, or fill the team in by hand.' }); return; }
         post({ type: 'notice', text: 'Drafting the team...' });
         try {
-          const drafted = await deps.draftTeam({ idea: message.idea, ...(message.outputFormat ? { outputFormat: message.outputFormat } : {}), ...(message.depth ? { depth: message.depth } : {}), ...(message.private ? { private: true } : {}) });
+          const ai = await deps.teamAi();
+          const knowledgeBase = await hostKnowledgeBase();
+          const brief = { idea: message.idea, ...(message.outputFormat ? { outputFormat: message.outputFormat } : {}), ...(message.depth ? { depth: message.depth } : {}), ...(message.private ? { private: true } : {}) };
+          const reply = await teamModelCall(ai, { need: message.private || knowledgeBase ? 'private' : 'any', messages: [
+            { role: 'system', content: TEAM_BUILDER_PROMPT },
+            { role: 'user', content: builderPrompt(brief) }
+          ], maxTokens: 2000 });
+          if (!reply.ok) throw new Error(knowledgeBase && !message.private && reply.reason.startsWith('It needs a private model') ? `${KNOWLEDGE_BASE_PRIVATE} ${reply.reason}` : reply.reason);
+          const drafted = parseProposal(reply.text, brief);
           // A team asked for as private stays private once it is a draft, so saving it keeps every member on a private model.
           post({ type: 'team-proposal', proposal: drafted.proposal, draft: { ...proposalDraft(drafted.proposal), ...(message.private ? { private: true } : {}) }, text: proposalText(drafted.proposal), problems: drafted.problems });
         } catch (error) { post({ type: 'error', text: `The team could not be drafted: ${(error as Error).message}` }); }
@@ -763,7 +771,7 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
       case 'improve-check': {
         // Step 1, instant and free: the local check, and whether (and with which model) the AI review could run.
         const findings = checkTeam(message.draft);
-        const { plan, ai } = await refinePlanFor(message.draft, message.id);
+        const { plan, ai } = await refinePlanFor(message.draft);
         const blocked = findings.some((finding) => finding.severity === 'block');
         post({ type: 'improve-checked', seq: message.seq, findings, ai: plan.ok
           ? { available: !blocked, model: plan.model, private: plan.private, skipped: plan.skipped, ...(plan.note ? { note: plan.note } : {}), ...(blocked ? { reason: BLOCKED_BY_SECRET } : {}), ...(ai ? estimateFor(ai, plan.model, message.draft) : {}) }
@@ -783,7 +791,7 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
         const result = (state: 'blocked' | 'failed' | 'cancelled', reason: string) => { if (refine === current) current.controller = undefined; post({ type: 'improve-result', seq, state, reason, suggestions: [], dropped: [] }); };
         if (findings.some((finding) => finding.severity === 'block')) { result('blocked', BLOCKED_BY_SECRET); return; }
         if (message.member && !draft.members.some((member) => member.name === message.member)) { result('blocked', `${message.member} is not on the team.`); return; }
-        const { plan, ai } = await refinePlanFor(draft, message.id);
+        const { plan, ai } = await refinePlanFor(draft);
         if (!plan.ok || !ai) { result('blocked', plan.ok ? 'No model is available here.' : plan.reason); return; }
         if (!input || !context) await load();
         const prompt = refinePrompt(draft, { findings, tools: context!.tools.map((tool) => ({ name: tool.name, description: tool.description })), skipped: plan.skipped, ...(message.member ? { member: message.member } : {}), untrusted: await untrustedFor(draft, message.id) });

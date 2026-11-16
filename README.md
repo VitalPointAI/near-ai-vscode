@@ -506,8 +506,9 @@ until it runs out aren't shown.
   `privacy: private` on every member, so an older version of the extension
   that reads only member lines still keeps each member private; unticking it
   removes only the team's line, and you remove a member's line yourself. A
-  team whose members are all private counts as private too, and so does the
-  project team of a project with a knowledge base. Team Studio sends a
+  team whose members are all private counts as private too, and in a project
+  with a knowledge base every team does (including one you are drafting with
+  AI). Team Studio sends a
   private team only to a private model: a NEAR TEE model on NEAR AI Cloud's
   own endpoint whose attestation NEAR reports as supported or verified (a
   failed, unverified or unreported attestation does not count), or a model on

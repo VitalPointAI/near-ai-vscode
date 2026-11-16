@@ -1464,12 +1464,16 @@ test('a private team (0.4.27): the Purpose toggle marks the draft, the AI start 
   for (const message of page.posts) assert.ok(parseStudioMessage(message), JSON.stringify(message));
 
   const h = await harness();
-  const briefs: unknown[] = [];
-  h.deps.draftTeam = async (brief) => { briefs.push(brief); return { proposal: { name: 'Client team', mission: 'm', description: 'd', members: [{ name: 'a', role: 'writer', model: 'standard', produces: 'p', instructions: 'Write it. Report it.' }], outputs: [] }, problems: [] }; };
+  // Drafting now runs on the host through teamModelCall (PR #69 review): a private brief goes to the private model, an open one to the preferred model.
+  const proposal = { text: JSON.stringify({ name: 'Client team', mission: 'm', description: 'd', members: [{ name: 'a', role: 'writer', model: 'standard', produces: 'p', instructions: 'Write it. Report it.' }], outputs: [] }) };
+  const { ai, sent } = fakeAi([FWD_MODEL, TEE_MODEL], [proposal, proposal]);
+  h.deps.teamAi = async () => ai;
   await h.send({ type: 'draft-team', idea: 'Client briefs', private: true });
-  assert.deepEqual(briefs, [{ idea: 'Client briefs', private: true }]);
+  assert.equal(sent[0].model, 'z-ai/glm-5.3');
+  assert.match(sent[0].messages[1].content!, /Client briefs/);
   assert.equal(last(h, 'team-proposal').draft.private, true);
   await h.send({ type: 'draft-team', idea: 'Open data' });
+  assert.equal(sent[1].model, 'deepseek/flash');
   assert.equal('private' in last(h, 'team-proposal').draft, false);
 });
 
@@ -1739,4 +1743,34 @@ test('host: Cancel sent while the model is still being chosen stops the review b
   await pending;
   assert.equal(sent.length, 0, 'nothing was sent');
   assert.deepEqual([last(h, 'improve-result').seq, last(h, 'improve-result').state], [11, 'cancelled']);
+});
+
+// PR #69 review: the knowledge-base rule keyed off the page's `id`, so a request without one (the builder) or with another id sent a knowledge-base
+// project's team to any model. The host now decides from the workspace alone, for every model call Team Studio makes.
+test('host: in a knowledge-base project every Team Studio model call is private, whatever the page sends (no id, a forged id, the builder)', async () => {
+  const h = await harness();
+  await mkdir(path.join(h.root, '.near-kb'), { recursive: true });
+  await h.library.create('Web team', teamMarkdown(improveDraft()));
+  const forwardedOnly = fakeAi([FWD_MODEL], []);
+  h.deps.teamAi = async () => forwardedOnly.ai;
+  await h.send({ type: 'ready' });
+  for (const [label, extra] of [['no id', {}], ['forged id', { id: 'user:web-team' }]] as const) {
+    await h.send({ type: 'improve-check', seq: 1, draft: improveDraft(), ...extra });
+    assert.equal(last(h, 'improve-checked').ai.available, false, label);
+    assert.match(last(h, 'improve-checked').ai.reason, /This project has a knowledge base, so Team Studio sends teams only to private models\./, label);
+    await h.send({ type: 'improve-ai', seq: 2, draft: improveDraft(), ...extra });
+    assert.equal(last(h, 'improve-result').state, 'blocked', label);
+  }
+  // The builder's AI start: refused rather than sent to the forwarded model.
+  await h.send({ type: 'draft-team', idea: 'A team for client research' });
+  assert.match(last(h, 'error').text, /The team could not be drafted: This project has a knowledge base, so Team Studio sends teams only to private models\./);
+  assert.equal(forwardedOnly.sent.length, 0, 'nothing reached the forwarded model');
+  // With a private model available, every path uses it.
+  const proposal = JSON.stringify({ name: 'Client team', mission: 'm', description: 'd', members: [{ name: 'a', role: 'writer', model: 'standard', produces: 'p', instructions: 'Write it. Report it.' }], outputs: [] });
+  const both = fakeAi([FWD_MODEL, TEE_MODEL], [{ text: proposal }, { text: '{"suggestions": []}' }]);
+  h.deps.teamAi = async () => both.ai;
+  await h.send({ type: 'draft-team', idea: 'A team for client research' });
+  assert.equal(last(h, 'team-proposal').draft.name, 'Client team');
+  await h.send({ type: 'improve-ai', seq: 3, draft: improveDraft() });
+  assert.deepEqual(both.sent.map((entry) => entry.model), ['z-ai/glm-5.3', 'z-ai/glm-5.3']);
 });

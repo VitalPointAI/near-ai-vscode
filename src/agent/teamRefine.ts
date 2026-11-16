@@ -71,12 +71,19 @@ export function readOnlyMember(member: Pick<DraftMember, 'name' | 'role' | 'inst
 // ---------- which model may see the team (owner, 2026-11-16) ----------
 
 export type RefineNeed = 'private' | 'any';
+
+/**
+ * A project with a knowledge base keeps its members on private models, so Team Studio sends any team only to a private model there (PR #69 review: the
+ * rule used to apply only when the page said the team was the project's, so the builder or another id escaped it). The host decides it from the
+ * workspace alone, for every model call the studio makes.
+ */
+export const KNOWLEDGE_BASE_PRIVATE = 'This project has a knowledge base, so Team Studio sends teams only to private models.';
 export type RefinePlan =
   | { ok: true; need: RefineNeed; model: string; private: boolean; skipped: string[]; note?: string }
   | { ok: false; reason: string };
 
 /**
- * The privacy rule for sending a team to a model. A private team (marked, every member private, or the project team of a project with a knowledge base)
+ * The privacy rule for sending a team to a model. A private team (marked, every member private, or any team in a project with a knowledge base)
  * goes only to a private model. A mixed team goes to a private model when there is one; otherwise its private members' text is left out and the review
  * says so. A team with no private members may use any model the settings and TEE-only mode allow. `choose` is chooseTeamModel with the profile's models.
  */
@@ -86,7 +93,8 @@ export function refinePlan(draft: TeamDraft, options: { knowledgeBase?: boolean;
   if (teamPrivate) {
     const choice = options.choose('private');
     if (choice.ok) return { ok: true, need: 'private', model: choice.model, private: true, skipped: [] };
-    const why = draft.private ? 'This team is marked private' : options.knowledgeBase ? 'This project has a knowledge base, so its team is private' : 'Every member of this team is private';
+    if (options.knowledgeBase) return { ok: false, reason: `${KNOWLEDGE_BASE_PRIVATE} ${choice.reason}` };
+    const why = draft.private ? 'This team is marked private' : 'Every member of this team is private';
     return { ok: false, reason: `${why}, so Improve with AI may send it only to a private model. ${choice.reason}` };
   }
   if (privateMembers.length) {

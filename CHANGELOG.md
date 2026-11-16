@@ -27,9 +27,10 @@
   The team file gets `privacy: private` in its frontmatter and on every member, so an older
   version of the extension still keeps each member private; unticking it leaves the members'
   lines for you to remove one by one. A team whose members are all private counts as private too,
-  and so does the project team of a project with a knowledge base. A private team is only ever
-  sent to a private model when Team Studio asks AI about it (a NEAR TEE model counts only when
-  NEAR reports its attestation as supported or verified); a team with some private members leaves their text out when no private model is
+  and in a project with a knowledge base every team does, including one the AI drafts. A private
+  team is only ever sent to a private model when Team Studio asks AI about it (a NEAR TEE model
+  counts only when NEAR reports its attestation as supported or verified); a team with some
+  private members leaves their text out when no private model is
   available, and says so.
 - **Team Studio's AI calls now follow your limits.** Drafting a team with AI used to skip the
   checks chat makes: Emergency stop, your daily spend limit, TEE-only mode and the check for keys

@@ -103,6 +103,6 @@ test('Team Studio has one way to a model: every call in the panel goes through t
   const calls = source.match(/completeOnce\(/g) ?? [];
   assert.equal(calls.length, 1, 'one completeOnce, inside the guarded deps');
   assert.match(source, /complete: \(model, messages, options\) => clientFor\(active, model\)\.client\.completeOnce\(model, messages, options\)/);
-  assert.match(source, /draftTeam: async \(brief\) => \{[\s\S]*?teamModelCall\(/);
+  assert.doesNotMatch(source, /draftTeam:/, 'drafting runs on the host through teamModelCall, not in the panel');
   assert.doesNotMatch(source, /streamChatEvents|streamChat\(/, 'no streaming call skips the guard either');
 });
