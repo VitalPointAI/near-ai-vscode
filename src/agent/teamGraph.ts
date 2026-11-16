@@ -47,6 +47,12 @@ const TOOL_CAPABILITY: Array<[RegExp, string]> = [
   [/^(CreatePdf|CreateDocument)$/, 'Deliver documents']
 ];
 
+/** What a tool lets an agent do, in the same plain words as a member card (0.4.28: Team Live's tool icon), or undefined for a tool it does not know. */
+export function toolCapability(tool: string): string | undefined {
+  if (/^mcp__/.test(tool)) return 'Use connected tools';
+  return TOOL_CAPABILITY.find(([pattern]) => pattern.test(tool))?.[1];
+}
+
 function capabilitiesOf(member: TeamMember): string[] {
   const found: string[] = [];
   for (const tool of member.tools) {
