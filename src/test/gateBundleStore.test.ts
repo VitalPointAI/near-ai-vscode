@@ -82,7 +82,7 @@ test('tracer: a fresh install creates the identity, signs, writes, reads back an
       rule: 'policy.load', bundleHash: result.state.hash
     });
     assert.equal(validateDecisionRecord(record).ok, true);
-    const log = new DecisionLog({ globalStorageDir: storage, projectKey: projectLogKey(path.join(storage, 'a-project')) });
+    const log = new DecisionLog({ globalStorageDir: storage, projectKey: projectLogKey(path.join(storage, 'a-project')), onWriteFailure: (message) => { throw new Error(message); } });
     await log.append(record);
     const lines = (await readFile(path.join(gateDir(storage), 'decisions', `${projectLogKey(path.join(storage, 'a-project'))}.jsonl`), 'utf8')).trim().split('\n');
     assert.equal(lines.length, 1);
