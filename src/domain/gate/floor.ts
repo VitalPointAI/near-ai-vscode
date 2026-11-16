@@ -29,12 +29,13 @@ const TEAM_SETTINGS_FILE = '.planning/.near-ai/team.md';
 
 /**
  * Whether a write to this project-relative path always asks: everything PROTECTED_WRITE covers, except the one file the team builder and Team Studio write
- * on purpose, `.planning/.near-ai/team.md` (D-44). The exemption is the exact file, so `team.md.bak` and `labels.json` beside it are covered, and a
+ * on purpose, `.planning/.near-ai/team.md` at the project root (D-44). The exemption is that one path after `.` and `..` are folded away, so `team.md.bak`
+ * and `labels.json` beside it are covered, a copy of the file inside a nested folder (`sub/.planning/.near-ai/team.md`) or above the root asks, and a
  * `.github/` folder is not a `.git` folder.
  */
 export function isFloorProtectedWrite(relative: string): boolean {
   const normalized = normalizeRelative(relative);
-  if (normalized === TEAM_SETTINGS_FILE || normalized.endsWith(`/${TEAM_SETTINGS_FILE}`)) return false;
+  if (normalized === TEAM_SETTINGS_FILE) return false;
   return PROTECTED_WRITE.test(normalized);
 }
 

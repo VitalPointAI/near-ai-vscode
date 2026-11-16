@@ -114,10 +114,23 @@ test('path boundaries: .git and a folder ending in .git match, .github does not,
     '.planning/.near-ai/team.md.bak', '.planning/.near-ai/team.md/x', '.near-ai/state/meta.json', '.near-ai/locks/a', './.git/hooks/x', 'a/../.git/hooks/x'
   ];
   for (const candidate of protectedPaths) assert.equal(isFloorProtectedWrite(candidate), true, candidate);
-  const open = ['.github/workflows/ci.yml', 'src/.githubrc', 'gitignore.git.md', '.planning/.near-ai/team.md', 'sub/.planning/.near-ai/team.md', '.near-ai/scratch/a.txt', '.near-ai/attachments/b.png', 'src/app.ts'];
+  const open = ['.github/workflows/ci.yml', 'src/.githubrc', 'gitignore.git.md', '.planning/.near-ai/team.md', '.near-ai/scratch/a.txt', '.near-ai/attachments/b.png', 'src/app.ts'];
   for (const candidate of open) assert.equal(isFloorProtectedWrite(candidate), false, candidate);
   assert.equal(floorFor({ effects: [{ verb: 'workspaceWrite', paths: ['.planning/.near-ai/team.md'] }] }), undefined);
   assert.equal(floorFor({ effects: [{ verb: 'workspaceWrite', paths: ['.planning/.near-ai/labels.json'] }] })?.rule, 'floor.protected-write');
+});
+
+test('only the project-root team file is exempt: a nested or escaping path to a file with the same tail still asks', () => {
+  const asks = [
+    'sub/.planning/.near-ai/team.md', 'a/b/.planning/.near-ai/team.md', '../.planning/.near-ai/team.md', 'sub/../../.planning/.near-ai/team.md',
+    '.planning/.near-ai/sub/team.md', '.planning/.near-ai/Team.md', '/abs/.planning/.near-ai/team.md', 'x\\.planning\\.near-ai\\team.md'
+  ];
+  for (const candidate of asks) assert.equal(isFloorProtectedWrite(candidate), true, candidate);
+  // Forms that normalize to exactly the root file are that file.
+  for (const candidate of ['.planning/.near-ai/team.md', './.planning/.near-ai/team.md', 'sub/../.planning/.near-ai/team.md', '.planning//.near-ai/team.md']) {
+    assert.equal(isFloorProtectedWrite(candidate), false, candidate);
+  }
+  assert.equal(floorFor({ effects: [{ verb: 'workspaceWrite', paths: ['sub/.planning/.near-ai/team.md'] }] })?.rule, 'floor.protected-write');
 });
 
 test('a workspace credential-file read is never a floor verdict, and the settings layer keeps asking for it outside fully-autonomous (D-18)', async () => {
