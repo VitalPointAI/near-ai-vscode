@@ -62,6 +62,8 @@
   }
 
   function renderNow(running) {
+    // 0.4.28: a run with agents of its own can be watched as a team.
+    $('watch-team').hidden = !running.some((agent) => agent.sub);
     $('now-empty').hidden = running.length > 0;
     $('now-wrap').hidden = running.length === 0;
     syncRows($('now').querySelector('tbody'), running, (agent) => agent.agentId, (row, agent) => {
@@ -284,6 +286,7 @@
     const next = choices[(index + (event.key === 'ArrowRight' ? 1 : choices.length - 1)) % choices.length];
     next.focus(); next.click(); event.preventDefault();
   });
+  $('watch-team').addEventListener('click', () => vscode.postMessage({ type: 'open-team-live' }));
   ['prev', 'next'].forEach((id) => $(id).addEventListener('click', () => vscode.postMessage({ type: 'history-page', page: Number($(id).dataset.page) })));
   const menu = $('export-menu');
   const details = $('export-details');

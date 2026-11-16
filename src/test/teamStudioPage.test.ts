@@ -1845,3 +1845,22 @@ test('host: a model with no price shows cost unknown, and Cancel while choosing 
   await h.send({ type: 'improve-ai', seq: 3, draft: large });
   assert.deepEqual([last(h, 'improve-result').state, last(h, 'improve-result').reason], ['blocked', 'This team is too large to review in one go. Review one member at a time.']);
 });
+
+// 0.4.28: while a run of the open team is going, the Team shape tab offers to watch it in Team Live.
+test('host: an open team says when a run of it is going, and Watch it live opens Team Live', async () => {
+  const h = await harness();
+  await h.library.create('Web team', teamMarkdown(improveDraft()));
+  const watched: string[] = [];
+  h.deps.liveRun = (slug) => slug === 'web-team';
+  h.deps.watchLive = async () => { watched.push('team-live'); };
+  await h.send({ type: 'ready' });
+  await h.send({ type: 'open', id: 'user:web-team' });
+  assert.equal(last(h, 'team').liveRun, true);
+  h.deps.liveRun = () => false;
+  await h.send({ type: 'open', id: 'user:web-team' });
+  assert.equal('liveRun' in last(h, 'team'), false);
+  assert.deepEqual(parseStudioMessage({ type: 'watch-live' }), { type: 'watch-live' });
+  assert.equal(parseStudioMessage({ type: 'watch-live', id: 'user:web-team' }), undefined);
+  await h.send({ type: 'watch-live' });
+  assert.deepEqual(watched, ['team-live']);
+});

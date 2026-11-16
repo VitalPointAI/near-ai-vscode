@@ -142,6 +142,8 @@
 
   // The saved team's shape and knowledge, held here because a new team must clear them (see startWizard). Declared before anything that assigns them.
   let currentGraph = null;
+  // 0.4.28: a run of the open team is going now, so the shape tab offers to watch it live.
+  let currentLive = false;
   let currentKnowledge = null;
   let selectedNode = null;
   let openCard = null;
@@ -417,6 +419,11 @@
   // never claims to describe a change that has not been saved.
   function sectionShape(root) {
     root.append(el('p', 'hint', 'The saved team, as it is written. Click a member for its card: what it is for, what it can do, and what to expect from it.'));
+    if (currentLive) {
+      const live = el('p', 'hint');
+      live.append('This team is running now. ', button('Watch it live', () => vscode.postMessage({ type: 'watch-live' }), { link: true, label: 'Watch this team work live in Team Live' }));
+      root.append(live);
+    }
     const lax = el('div', 'graph'); lax.id = 'graph';
     const card = el('section', 'member-card');
     card.id = 'member-card'; openCard = null;
@@ -1458,6 +1465,7 @@
         // The shape and knowledge tabs read these, so they are set BEFORE the editor renders: assigned after, the first paint of either tab could show
         // the previous team's graph (0.4.19 review).
         currentGraph = message.graph || null;
+        currentLive = message.liveRun === true;
         currentKnowledge = message.knowledge || null;
         selectedNode = null;
         openEditor(message, true);

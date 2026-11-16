@@ -145,3 +145,8 @@ test('retired studio messages are rejected by the chat protocol and have no host
   assert.match(host, /sendProfileStatus/);
 });
 
+
+test('0.4.28: "Watch the team" asks for Team Live and carries nothing the page could choose', () => {
+  assert.deepEqual(parseChatWebviewMessage({ type: 'open-team-live' }), { type: 'open-team-live' });
+  assert.equal(parseChatWebviewMessage({ type: 'open-team-live', runId: 'run-x' }), undefined);
+});

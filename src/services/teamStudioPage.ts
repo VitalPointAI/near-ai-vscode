@@ -286,7 +286,7 @@ const WORK_SHAPES = ['feature', 'bugfix', 'refactor', 'research', 'release'] as 
 const RISKS = ['low', 'medium', 'high'] as const;
 
 export type StudioMessage =
-  | { type: 'ready' } | { type: 'refresh' } | { type: 'import' } | { type: 'discard-draft' } | { type: 'discard-kept' }
+  | { type: 'ready' } | { type: 'refresh' } | { type: 'import' } | { type: 'discard-draft' } | { type: 'discard-kept' } | { type: 'watch-live' }
   /** Cancel or "All teams" in the guided builder with unsaved changes: the host asks Discard changes / Save draft. */
   | { type: 'leave-wizard'; wizard: SavedWizard }
   /** "All teams" in the editor with unsaved changes: the host asks Discard changes / Save. */
@@ -338,7 +338,7 @@ export function parseStudioMessage(value: unknown): StudioMessage | undefined {
   const message = value;
   const id = () => typeof message.id === 'string' && TEAM_ID.test(message.id);
   switch (message.type) {
-    case 'ready': case 'refresh': case 'import': case 'discard-draft': case 'discard-kept':
+    case 'ready': case 'refresh': case 'import': case 'discard-draft': case 'discard-kept': case 'watch-live':
       return exactKeys(message, ['type']) ? { type: message.type } : undefined;
     case 'leave-wizard': {
       const wizard = exactKeys(message, ['type', 'wizard']) ? savedWizard(message.wizard) : undefined;
@@ -457,6 +457,9 @@ export interface TeamStudioDeps {
   openSetting(key: string): Promise<unknown>;
   /** Runs Update Team on a team file (preview, choices, and confirmation happen there). */
   updateTeam?(file: string): Promise<unknown>;
+  /** 0.4.28: whether a run of the team with this slug is going now, and opening Team Live to watch it. */
+  liveRun?(slug: string): boolean;
+  watchLive?(): Promise<unknown>;
   confirm(message: string, action: string): Promise<boolean>;
   ask(prompt: string, value: string): Promise<string | undefined>;
   /** Where to save a team's share file (`<team>.near-team.json`); undefined when the person cancelled. */
@@ -623,7 +626,9 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
     const entry = teamFor(id);
     // A hand-written private value (tee, local) is shown as it is; the Private team box only ever writes or removes privacy: private (PR #69 review).
     const teamPrivacy = handWrittenTeamPrivacy(textNow);
-    post({ type: 'team', id, kind: entry?.kind ?? (id === 'project' ? 'project' : 'user'), file: displayPath(file, deps.root), command: entry?.command ?? '', draft, base: open.base, ...(teamPrivacy ? { teamPrivacy } : {}), versions: await versionsOf(file), graph: graphOf(textNow, file), knowledge: await knowledgeOf(file), ...(notice ? { notice } : {}) });
+    // 0.4.28: while a run of this team is going, the Team shape tab links to Team Live.
+    const live = deps.liveRun?.(slugify(path.basename(file, '.md'))) === true;
+    post({ type: 'team', id, kind: entry?.kind ?? (id === 'project' ? 'project' : 'user'), file: displayPath(file, deps.root), command: entry?.command ?? '', draft, base: open.base, ...(teamPrivacy ? { teamPrivacy } : {}), ...(live ? { liveRun: true } : {}), versions: await versionsOf(file), graph: graphOf(textNow, file), knowledge: await knowledgeOf(file), ...(notice ? { notice } : {}) });
   };
 
   /**
@@ -980,6 +985,7 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
         return;
       }
       case 'discard-draft': await deps.drafts.set(undefined); return;
+      case 'watch-live': await deps.watchLive?.(); return;
       case 'use-in-chat': {
         const team = teamFor(message.id);
         if (team?.command) await deps.sidebar.prefill(team.command);

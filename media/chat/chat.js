@@ -779,7 +779,27 @@
     agentClock ??= setInterval(() => { const rows = agentPanel.querySelectorAll('.agent-status'); if (!rows.length) { clearInterval(agentClock); agentClock = undefined; } rows.forEach(updateAgentStatus); }, 1000);
     const title = el('div', 'todo-title');
     title.append(panelToggle(list, 'agents-list', 'agentsCollapsed', `Agents running · ${agents.length}`, 'running agents'), ' ', textButton('Activity', () => post({ type: 'open-activity' })));
-    agentPanel.replaceChildren(title, list);
+    agentPanel.replaceChildren(title, teamPulse(agents), list);
+  }
+
+  // 0.4.28: a row of state dots, the lead first, and "Watch the team", which opens Team Live. Each dot has its state in words for a screen reader and
+  // as a tooltip; its shape changes with the state, so colour is never the only sign. Nothing moves here.
+  function agentDotState(agent) {
+    if (agent.paused) return ['paused', 'paused'];
+    const activity = agent.activity || '';
+    if (/^Waiting for your/.test(activity)) return ['needs-you', 'needs you'];
+    if (activity === 'Waiting for a free slot') return ['queued', 'queued'];
+    if (/^Waiting for \d+ helper/.test(activity)) return ['waiting', 'waiting for helpers'];
+    return ['working', 'working'];
+  }
+  function teamPulse(agents) {
+    const line = el('div', 'team-pulse');
+    const dots = el('ul', 'team-dots');
+    dots.setAttribute('aria-label', 'Team state');
+    const dot = (state, words) => { const item = el('li', 'team-dot dot-' + state); item.title = words; item.append(el('span', 'visually-hidden', words)); return item; };
+    dots.append(dot('lead', 'lead: working'), ...agents.map((agent) => { const [state, words] = agentDotState(agent); return dot(state, agent.label + ': ' + words); }));
+    line.append(dots, textButton('Watch the team', () => post({ type: 'open-team-live' })));
+    return line;
   }
 
   // A panel's list can be collapsed to its title line; the choice is remembered across reloads.
