@@ -7,6 +7,7 @@ import { checkDraft, draftFromMarkdown, lineDiff, type DiffLine, type DraftIssue
 import { DEFAULT_TOOLS, parseTeam, recommendedProjectTeam, slugify, TeamLibrary, teamKnowledgeKey, type TeamDefinition } from '../agent/teams';
 import type { AgentDiscoveryAnswers } from '../domain/agents';
 import { buildTeamGraph } from '../agent/teamGraph';
+import { checkTeam, checkWarnings } from '../agent/teamCheck';
 import { CUSTOM_PLAGIARISM_CHECKER } from '../agent/researchIntegrity';
 import { proposalDraft, proposalText, type TeamProposal } from '../agent/teamBuilder';
 import { layoutNetwork } from '../domain/networkLayout';
@@ -206,6 +207,9 @@ export function reviewDraft(draft: TeamDraft, original: string | undefined, inpu
     if (unknownTools.length) warnings.push({ member: index, field: 'tools', message: `${label}: ${unknownTools.join(', ')} ${unknownTools.length === 1 ? 'is not a built-in tool' : 'are not built-in tools'}; agents only get tools that exist.` });
     return model;
   });
+  // 0.4.27: the free local team check (tools that do not match the instructions, no deliverable, overlaps, reports-to problems, keys) shows as
+  // warnings while editing, so a save never depends on running Improve with AI.
+  warnings.push(...checkWarnings(checkTeam(draft, { defaultTools: DEFAULT_TOOLS })));
   return { markdown, errors, warnings, members };
 }
 
