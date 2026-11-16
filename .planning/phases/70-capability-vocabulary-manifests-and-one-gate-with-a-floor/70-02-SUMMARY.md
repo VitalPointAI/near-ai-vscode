@@ -108,7 +108,7 @@ Each run inside `systemd-run --user --scope -q -p MemoryMax=4G -p MemorySwapMax=
 - **Committed in:** `7098110`, `842801e`
 
 **3. [Rule 1 - Bug in my own output] A literal em-dash reached a test file**
-- **Fix:** the no-em-dash check in `gateLabels.test.ts` now writes the character as the escape `—` (and the en-dash as `–`), so the repo files themselves hold no em-dash. Committed in `842801e`.
+- **Fix:** the no-dash check in `gateLabels.test.ts` now writes the two dash characters as unicode escapes, so the repo files themselves hold none. Committed in `842801e`.
 
 ---
 
