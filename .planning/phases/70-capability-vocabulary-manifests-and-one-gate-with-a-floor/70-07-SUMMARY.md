@@ -39,7 +39,7 @@ patterns-established: []
 
 requirements-completed: [GATE-01, GATE-07, OFFL-03, CLAS-02, CLAS-03]
 
-duration: gate runs only
+duration: gate runs and PR review
 completed: 2026-11-16
 status: complete
 ---
@@ -135,6 +135,32 @@ All four ran once; none needed a rerun. Memory was checked with `free -g` before
 
 ## Task 3: the pull request
 
-Filled in after the PR was opened; see the section below.
+- **PR 1: https://github.com/VitalPointAI/near-ai-vscode/pull/66**, `feat/gate-vocabulary` into `main`, title `feat(gate): capability vocabulary, labels and policy bundle formats (Phase 70, part 1)`. State: OPEN. The executor did not merge, approve, enable auto-merge or push to main.
+- The body fills every template section in plain words; says nothing calls the new code yet so no behaviour changes; names vocabulary v1 (D-03, D-35), labels v1 and the four presets (D-22, D-23, D-47), policy bundle v1 (D-12), label map v1 with the `label-map` purpose (D-25) and decision record v1 (D-20); says PR 2 first writes a bundle and records and PR 4 first writes a label map, so each format is still cheap to change; gives the test totals and the rollback. It also lists three owner questions raised by the summaries: the `RELEASABLE-TO-NONE` token (70-02), the `action_id` 3 / `disposition_id` 3 coding of an `asked` record (70-06), and a verb absent from `ceiling.contexts` being allowed in no context (70-03).
+- The `gh pr edit` command fails on this machine (a deprecated Projects classic GraphQL field), so the body was set through `gh api -X PATCH repos/.../pulls/66`.
 
-<!-- gsd:write-continue -->
+### Required checks on d083a49 (the head when the PR opened)
+
+lint pass (25s), test pass (3m29s), e2e pass (3m57s), release-content pass (33s), audit pass (22s), secret-scan pass (7s), relay pass (1m20s). No infrastructure failure, so no `gh run rerun`.
+
+### Agent review
+
+`agent-review` status success, set by `near-ai-reviewer` on d083a49: "PASS: 0 major, 4 minor, 0 nit"; review state APPROVED, recommendation MERGE, no blocker. Findings, none of them fixed in this plan, because each is either a format choice that belongs to the owner or a hardening with no caller yet (a fix would change the formats and need a new gate run and review):
+
+1. [MINOR] `src/domain/config.ts:49` exports the live mutable `LOOPBACK_HOSTS` set, which also feeds `isSecureEndpoint`; a caller could add a host. Suggested: export a frozen copy or an `isLoopbackHost()` predicate. The export itself is one of the plan's recorded edits (70-04, so the route decision can name loopback hosts). Not fixed; offered to the owner as a small follow-up commit.
+2. [MINOR] `src/domain/gate/record.ts:40`: `disposition_id: 3` for an ask is not an OCSF disposition value (1, 2, 8, 25, 26) while the record advertises OCSF 1.9.0. Same as owner question 2 in the PR body; the alternative is "Other" plus an `unmapped` detail. Not fixed; waits for the owner's answer.
+3. [MINOR] `src/domain/gate/bundle.ts` (`parseList` for clearances and mappings) accepts two identical entries, so two semantically equal bundles hash differently, and the hash is carried in decision records. Suggested: refuse duplicates as labels do. Not fixed; a format tightening for the owner to confirm.
+4. [MINOR] `src/domain/gate/labels.ts:237`: `expiryMs` accepts timestamps without a fractional second while `bundle.ts` requires exactly three digits, so two timestamp spellings could coexist in signed files. Suggested: pick one before anything is written to disk. Not fixed; a format choice for the owner.
+
+Findings 2 to 4 are cheap to change now (before PR 2 writes anything) and costly after release, so they are worth an owner decision before merge.
+
+## Deviations from Plan
+
+- **Rebase not needed:** `origin/main` had not moved, so `git rebase origin/main` was a no-op and there were no conflicts (the plan allowed for them).
+- **PR diff includes the orchestrator's state commit:** the diff holds `.planning/STATE.md`, `.planning/ROADMAP.md` and `.planning/state.json` (from `40fd7d5`) as well as the plan summaries; not edited by this plan.
+- **Second push for the SUMMARY:** the SUMMARY records the PR number and review result, which exist only after the PR is open, so it was pushed to the PR branch afterwards (a docs-only commit that starts a fresh CI and review round; its result is in the hand-off report).
+- No auto-fix deviations; no auth gates; no stubs; no threat flags (no new endpoint, file access or auth path: the code is not called yet).
+
+## Self-Check: PASSED
+
+- SUMMARY exists; commits d083a49 (SUMMARY v1) is an ancestor of HEAD and on origin; PR 66 is OPEN into main; `package-lock.json` unchanged; no em-dash in this file.
