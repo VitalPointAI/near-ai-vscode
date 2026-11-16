@@ -2,11 +2,13 @@
 // decidePermissionAsync, handed in as a function, so this file imports nothing from src/agent. The layers run in a fixed order and an earlier layer is never
 // undone by a later one: emergency stop, bundle state, floor, bundle ceiling, labels, then the settings layer. A floor refusal has no card and no way
 // through; a floor ask is a card with no "always allow" and no run-wide grant; a deny from the settings layer (the deny list) still beats a floor ask.
-import type { ActionPolicy } from '../policy';
+import type { ActionPolicy, ActionPolicyMode } from '../policy';
+import { FAILED_CLOSED_VERBS } from './bundle';
 import type { BundleState, GateContextName } from './bundle';
-import { floorFor } from './floor';
-import type { FloorInput, FloorVerdict } from './floor';
+import { FLOOR_RULE_ORDER, floorFor } from './floor';
+import type { FloorInput, FloorLocations, FloorVerdict } from './floor';
 import type { DecisionRecord } from './record';
+import { ROUTE_RULES } from './routing';
 
 /** Whether a person can answer a card right now. A sub-agent of a chat run still has a person, so this is not the same idea as `unattended` (Pitfall 3). */
 export type Presence = 'person' | 'none';
@@ -23,16 +25,29 @@ export interface ActorRef {
   readonly agentLabel?: string;
 }
 
+/** The label layer's answer, worked out by the caller from the session mark and the clearances (plans 20 and 22): a refusal with its plain reason. */
+export interface LabelVerdict {
+  readonly rule: 'label.dominance' | 'label.no-agent-tools' | 'label.network-at-mark';
+  readonly reason: string;
+}
+
 export interface GateRequest extends FloorInput {
   readonly actor: ActorRef;
   readonly tool: string;
   readonly callId: string;
-  /** The shell command, when the tool runs one. */
-  readonly command?: string;
   readonly context: GateContextName;
   readonly presence: Presence;
   /** The person's own setting; the bundle's ceiling can only lower the mode it names. */
   readonly policy: ActionPolicy;
+  /** Today's `tool.sensitive` hook: a reason, set for a protected write or a workspace credential-file read. */
+  readonly sensitive?: string;
+  /** Today's `tool.risky` hook: a reason, set for a hold after outside content. It asks in every mode and offers no run-wide grant. */
+  readonly risky?: string;
+  /** The contexts the tool's manifest lists. Absent means the caller did not check a manifest. */
+  readonly manifestContexts?: readonly GateContextName[];
+  /** The MCP server id, when the tool is an MCP tool. */
+  readonly mcpServer?: string;
+  readonly labelVerdict?: LabelVerdict;
 }
 
 export interface SettingsAnswer {
@@ -50,6 +65,8 @@ export type FloorMode = 'shadow' | 'enforce';
 
 export interface GateOptions {
   readonly floorMode?: FloorMode;
+  /** The home folder and global storage the floor's text checks may name; both optional. */
+  readonly locations?: FloorLocations;
 }
 
 export interface GateDecision {
@@ -58,10 +75,12 @@ export interface GateDecision {
   readonly reason?: string;
   /** True when a floor rule decided this call. */
   readonly floor: boolean;
+  /** Whether the card may offer "always allow". Never true for a floor rule. */
   readonly offerAlwaysAllow: boolean;
+  /** Whether the card may carry a run-wide grant. Never true for a floor rule. */
   readonly allowGrant: boolean;
-  readonly effectiveMode: ActionPolicy['mode'];
-  /** What the floor would have done, set only in shadow mode. */
+  readonly effectiveMode: ActionPolicyMode;
+  /** What the floor would have done, set only in shadow mode when a floor rule matched. */
   readonly shadowFloor?: FloorVerdict;
 }
 
@@ -79,31 +98,112 @@ export interface GateRuntime {
   readonly floorMode: FloorMode;
 }
 
-const NOBODY_HERE = 'Nobody is here to approve this, and it always needs a person: ';
+/** Every rule id the gate can record: the floor, the bundle and manifest checks, labels, routing, taint, and the settings rules of the migration table. */
+export const GATE_RULE_IDS: readonly string[] = Object.freeze([
+  ...FLOOR_RULE_ORDER,
+  'bundle.failed-closed', 'bundle.ceiling.context', 'bundle.ceiling.mode', 'bundle.ceiling.unattended-mcp', 'manifest.context',
+  'label.dominance', 'label.no-agent-tools', 'label.network-at-mark',
+  ...ROUTE_RULES,
+  'taint.held',
+  'settings.emergency-stop', 'settings.read-plan', 'settings.auto-safe-tool', 'settings.mode.edits', 'settings.run-grant.edits', 'settings.deny-list',
+  'settings.engagement-grant', 'settings.run-grant.command', 'settings.allow-rule', 'settings.mode.fully-autonomous', 'settings.mode.other',
+  'settings.auto.classifier', 'settings.unattended-verification', 'settings.risk.outside-workspace', 'settings.risk.installs', 'settings.safety-model',
+  'settings.sensitive-read', 'settings.mcp-approval'
+]);
 
-function decision(outcome: GateDecision['outcome'], rule: string, mode: ActionPolicy['mode'], extra: Partial<GateDecision> = {}): GateDecision {
+const MODE_ORDER: readonly ActionPolicyMode[] = Object.freeze(['approve-risky', 'mostly-autonomous', 'auto', 'fully-autonomous'] as const);
+const NOBODY_HERE = 'Nobody is here to approve this, and it always needs a person: ';
+const MAX_SHOWN = 80;
+
+/** The lower of the person's setting and the bundle's ceiling for the context, in the order approve-risky, mostly-autonomous, auto, fully-autonomous. A mode this list does not know counts as the lowest. */
+export function effectiveMode(settingMode: ActionPolicyMode, ceilingMode: ActionPolicyMode): ActionPolicyMode {
+  const setting = MODE_ORDER.indexOf(settingMode);
+  const ceiling = MODE_ORDER.indexOf(ceilingMode);
+  if (setting < 0 || ceiling < 0) return 'approve-risky';
+  return setting <= ceiling ? settingMode : ceilingMode;
+}
+
+function shown(text: string): string {
+  return text.replace(/[\u0000-\u001F\u007F]/g, ' ').slice(0, MAX_SHOWN);
+}
+
+function ownList<T>(table: Readonly<Partial<Record<string, readonly T[]>>>, key: string): readonly T[] | undefined {
+  return Object.prototype.hasOwnProperty.call(table, key) ? table[key] : undefined;
+}
+
+type Extra = Partial<Pick<GateDecision, 'reason' | 'floor' | 'offerAlwaysAllow' | 'allowGrant' | 'shadowFloor'>>;
+
+function make(outcome: GateDecision['outcome'], rule: string, mode: ActionPolicyMode, extra: Extra = {}): GateDecision {
   return { outcome, rule, floor: false, offerAlwaysAllow: false, allowGrant: false, effectiveMode: mode, ...extra };
 }
 
-function floorDecision(verdict: FloorVerdict, outcome: 'ask' | 'deny', reason: string, mode: ActionPolicy['mode']): GateDecision {
-  return decision(outcome, verdict.rule, mode, { reason, floor: true });
+/** The ceiling checks of a valid bundle: the verb in this context, the manifest's contexts, and an MCP server outside the person's own chat. */
+function ceilingRefusal(request: GateRequest, bundleState: Extract<BundleState, { state: 'valid' }>): { rule: string; reason: string } | undefined {
+  const ceiling = bundleState.bundle.ceiling;
+  for (const effect of request.effects) {
+    const allowedIn = ownList<GateContextName>(ceiling.contexts, effect.verb);
+    if (allowedIn === undefined || !allowedIn.includes(request.context)) {
+      return { rule: 'bundle.ceiling.context', reason: `Your policy does not allow this kind of action (${effect.verb}) in this kind of run (${request.context}).` };
+    }
+  }
+  if (request.manifestContexts !== undefined && !request.manifestContexts.includes(request.context)) {
+    return { rule: 'manifest.context', reason: `${shown(request.tool)} is not set up to run in this kind of run (${request.context}).` };
+  }
+  if (request.context !== 'interactive') {
+    const servers = [...(request.mcpServer === undefined ? [] : [request.mcpServer]), ...request.effects.flatMap((effect) => (effect.verb === 'mcp' ? [effect.server] : []))];
+    const outside = servers.find((server) => !ceiling.unattendedMcp.includes(server));
+    if (outside !== undefined) {
+      return { rule: 'bundle.ceiling.unattended-mcp', reason: `The server "${shown(outside)}" is not on your policy's list of servers that may run when you are not there.` };
+    }
+  }
+  return undefined;
 }
 
-export async function decide(request: GateRequest, _bundleState: BundleState, settings: SettingsLayer, _options: GateOptions = {}): Promise<GateDecision> {
+/**
+ * The one decision (GATE-04). `bundleState` is what the caller last verified; `settings` is today's permission logic; `options.floorMode` is `shadow` only
+ * while the floor is being introduced (it returns exactly today's decision and reports the floor's verdict in `shadowFloor`) and `enforce` by default.
+ * Order: emergency stop, bundle state, floor, bundle ceiling, labels, settings layer. A refusal from an earlier layer is never undone by a later one, and
+ * a deny from the settings layer (the deny list) still beats a floor ask.
+ */
+export async function decide(request: GateRequest, bundleState: BundleState, settings: SettingsLayer, options: GateOptions = {}): Promise<GateDecision> {
+  const floorMode: FloorMode = options.floorMode ?? 'enforce';
   const policy = request.policy;
-  const mode = policy.mode;
-  if (policy.emergencyStop) return decision('deny', 'settings.emergency-stop', mode, { reason: 'Emergency stop is on.' });
-  const verdict = floorFor(request);
-  if (verdict !== undefined && verdict.kind === 'refuse') return floorDecision(verdict, 'deny', verdict.reason, mode);
-  const answer = await settings(request, policy);
-  if (answer.decision === 'deny') return decision('deny', answer.rule, mode, { ...(answer.reason === undefined ? {} : { reason: answer.reason }) });
-  if (verdict !== undefined) {
-    return request.presence === 'none'
-      ? floorDecision(verdict, 'deny', `${NOBODY_HERE}${verdict.reason}`, mode)
-      : floorDecision(verdict, 'ask', verdict.reason, mode);
+  if (policy.emergencyStop) return make('deny', 'settings.emergency-stop', policy.mode, { reason: 'Emergency stop is on.' });
+  if (bundleState.state === 'failed-closed') {
+    const onlyReadOrPlan = request.effects.length > 0 && request.effects.every((effect) => (FAILED_CLOSED_VERBS as readonly string[]).includes(effect.verb));
+    if (!onlyReadOrPlan) return make('deny', 'bundle.failed-closed', 'approve-risky', { reason: bundleState.sentence });
   }
-  return decision(answer.decision, answer.rule, mode, {
+  const mode: ActionPolicyMode = bundleState.state === 'valid' ? effectiveMode(policy.mode, bundleState.bundle.ceiling.maxMode[request.context]) : 'approve-risky';
+  const verdict = floorFor(request, options.locations);
+  const shadow = floorMode === 'shadow' && verdict !== undefined ? { shadowFloor: verdict } : {};
+  // Shadow mode keeps today's one refusal, the key folder, and only reports the rest.
+  if (verdict !== undefined && verdict.kind === 'refuse' && (floorMode === 'enforce' || verdict.rule === 'floor.state-keys')) {
+    return make('deny', verdict.rule, mode, { reason: verdict.reason, floor: true, ...shadow });
+  }
+  if (bundleState.state === 'valid') {
+    const refusal = ceilingRefusal(request, bundleState);
+    if (refusal !== undefined) return make('deny', refusal.rule, mode, { reason: refusal.reason, ...shadow });
+  }
+  if (request.labelVerdict !== undefined) return make('deny', request.labelVerdict.rule, mode, { reason: request.labelVerdict.reason, ...shadow });
+  const answer = await settings(request, { ...policy, mode });
+  if (answer.decision === 'deny') return make('deny', answer.rule, mode, { ...(answer.reason === undefined ? {} : { reason: answer.reason }), ...shadow });
+  if (verdict !== undefined && verdict.kind === 'ask' && floorMode === 'enforce') {
+    // No person to answer means no way through: a floor ask is refused, never approved by default (D-43).
+    return request.presence === 'none'
+      ? make('deny', verdict.rule, mode, { reason: `${NOBODY_HERE}${verdict.reason}`, floor: true })
+      : make('ask', verdict.rule, mode, { reason: verdict.reason, floor: true });
+  }
+  // Today's loop, line 631: a held action asks in every mode and offers no run-wide grant; a sensitive read that would be allowed asks unless fully-autonomous.
+  if (request.risky !== undefined && request.risky !== '') {
+    return make('ask', 'taint.held', mode, { reason: request.risky, offerAlwaysAllow: true, ...shadow });
+  }
+  if (request.sensitive !== undefined && request.sensitive !== '' && answer.decision === 'allow' && mode !== 'fully-autonomous') {
+    return make('ask', 'settings.sensitive-read', mode, { reason: request.sensitive, offerAlwaysAllow: true, allowGrant: true, ...shadow });
+  }
+  const capped = mode !== policy.mode && answer.decision === 'ask' && answer.rule.startsWith('settings.mode.');
+  return make(answer.decision, capped ? 'bundle.ceiling.mode' : answer.rule, mode, {
     ...(answer.reason === undefined ? {} : { reason: answer.reason }),
-    ...(answer.decision === 'ask' ? { offerAlwaysAllow: true, allowGrant: true } : {})
+    ...(answer.decision === 'ask' ? { offerAlwaysAllow: true, allowGrant: true } : {}),
+    ...shadow
   });
 }
