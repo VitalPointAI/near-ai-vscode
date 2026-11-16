@@ -205,3 +205,19 @@ test('a hand-written privacy: tee or privacy: local line is never removed by the
   const written = FILE.replace('owner: ops', 'owner: ops\nprivacy: private');
   assert.doesNotMatch(teamMarkdown({ ...draftFromMarkdown(written, 'clients.md'), private: undefined }, written), /\nowner: ops\nprivacy: private\n/, 'the checkbox\'s own line is removed');
 });
+
+// PR #69 review: the existing line was found case-sensitively while the checkbox's own line was matched case-insensitively, so `Privacy: private`
+// could gain a second privacy key.
+test('a capitalised Privacy line is the same key: ticking never adds a second one, and unticking removes the checkbox value', () => {
+  const keys = (text: string) => (text.match(/^privacy:/gim) ?? []).length;
+  for (const line of ['Privacy: private', 'PRIVACY: Private', 'Privacy: any']) {
+    const text = FILE.replace('owner: ops', `owner: ops\n${line}`);
+    const draft = draftFromMarkdown(text, 'clients.md');
+    const ticked = teamMarkdown({ ...draft, private: true }, text);
+    assert.equal(keys(ticked.slice(0, ticked.indexOf('\n---', 4))), 1, `${line}: one privacy key in the frontmatter`);
+    assert.equal(parseTeam(ticked, 'clients.md').private, true, line);
+    assert.deepEqual(checkDraft({ ...draft, private: true }, text).errors, [], line);
+    const unticked = teamMarkdown({ ...draftFromMarkdown(ticked, 'clients.md'), private: undefined }, ticked);
+    assert.equal(keys(unticked.slice(0, unticked.indexOf('\n---', 4))), 0, `${line}: unticking removes it`);
+  }
+});

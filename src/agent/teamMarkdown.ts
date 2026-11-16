@@ -140,14 +140,23 @@ function setFrontmatterKey(lines: string[], key: string, value: string, after?: 
  * left as it is when the team is not private, so a save never rewrites what already says the same thing.
  */
 function setTeamPrivacy(lines: string[], isPrivate: boolean): void {
-  const index = lines.findIndex((line) => /^privacy:/.test(line));
+  // One case-insensitive matcher finds the line and decides what it says (PR #69 review: the line was found case-sensitively, so `Privacy: private`
+  // gained a second key). The team reads only a lowercase key, so a capitalised line is rewritten in place rather than left beside a new one.
+  const index = lines.findIndex((line) => PRIVACY_KEY.test(line));
+  const value = index >= 0 ? lines[index].replace(PRIVACY_KEY, '') : undefined;
   let current: 'private' | undefined;
-  try { current = index >= 0 ? parseTeamPrivacy(parseFrontmatter(`---\n${lines[index]}\n---\n`).data.privacy) : undefined; } catch { current = undefined; }
-  if (isPrivate) { if (current !== 'private') setFrontmatterKey(lines, 'privacy', 'private', 'description'); return; }
+  try { current = value !== undefined ? parseTeamPrivacy(parseFrontmatter(`---\nprivacy:${value}\n---\n`).data.privacy) : undefined; } catch { current = undefined; }
+  if (isPrivate) {
+    if (current === 'private' && /^privacy:/.test(lines[index])) return;
+    if (index >= 0) { lines.splice(index, 1 + listLength(lines, index), current === 'private' ? `privacy:${value}` : 'privacy: private'); return; }
+    setFrontmatterKey(lines, 'privacy', 'private', 'description');
+    return;
+  }
   // Only the line the checkbox writes is removed (PR #69 review): a hand-written tee or local line, or any other value, is the person's and stays.
   if (index >= 0 && CHECKBOX_PRIVACY.test(lines[index])) lines.splice(index, 1 + listLength(lines, index));
 }
 
+const PRIVACY_KEY = /^privacy:/i;
 const CHECKBOX_PRIVACY = /^privacy:\s*private\s*$/i;
 
 /**
