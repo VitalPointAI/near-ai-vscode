@@ -347,25 +347,25 @@ Plans:
 - [x] 70-07-PLAN.md — PR 1 gate and open (no behaviour change)
 
 **Wave 8** *(blocked on Wave 7 completion)*
-- [ ] 70-08-PLAN.md — manifests on the core, web, graphics, image, memory and security tools, the tool catalog, Tools page words (PR 2)
+- [x] 70-08-PLAN.md — manifests on the core, web, graphics, image, memory and security tools, the tool catalog, Tools page words (PR 2)
 
 **Wave 9** *(blocked on Wave 8 completion)*
-- [ ] 70-09-PLAN.md — manifests on the gsd, cyber, knowledge and MCP tools, member card words, the manifest field required (PR 2)
+- [x] 70-09-PLAN.md — manifests on the gsd, cyber, knowledge and MCP tools, member card words, the manifest field required (PR 2)
 
 **Wave 10** *(blocked on Wave 9 completion)*
-- [ ] 70-10-PLAN.md — MCP manifests: restrictive for new servers, legacy for existing ones, declare per tool (PR 2)
+- [x] 70-10-PLAN.md — MCP manifests: restrictive for new servers, legacy for existing ones, declare per tool (PR 2)
 
 **Wave 11** *(blocked on Wave 10 completion)*
-- [ ] 70-11-PLAN.md — the signed policy file on disk, fresh install, fail closed, renewal, the decision log; D-48 code-server check named (PR 2)
+- [x] 70-11-PLAN.md — the signed policy file on disk, fresh install, fail closed, renewal, the decision log; D-48 code-server check named (PR 2)
 
 **Wave 12** *(blocked on Wave 11 completion)*
-- [ ] 70-12-PLAN.md — the gate on chat runs and sub-agents in shadow, started at activation, cards as transport (PR 2)
+- [x] 70-12-PLAN.md — the gate on chat runs and sub-agents in shadow, started at activation, cards as transport (PR 2)
 
 **Wave 13** *(blocked on Wave 12 completion)*
-- [ ] 70-13-PLAN.md — the gate on cyber steps and comparison runs, the execution path enumeration test, offline runs (PR 2)
+- [x] 70-13-PLAN.md — the gate on cyber steps and comparison runs, the execution path enumeration test, offline runs (PR 2)
 
 **Wave 14** *(blocked on Wave 13 completion)*
-- [ ] 70-14-PLAN.md — status bar, Show Policy, Reset Policy to Defaults, setup step, SECURITY.md and README policy and MCP sections (PR 2)
+- [x] 70-14-PLAN.md — status bar, Show Policy, Reset Policy to Defaults, setup step, SECURITY.md and README policy and MCP sections (PR 2)
 
 **Wave 15** *(blocked on Wave 14 completion)*
 - [ ] 70-15-PLAN.md — automated check that PR 1 is on main, rebase, gate, open PR 2 (formats, fail-closed change and the D-48 release blocker named)
