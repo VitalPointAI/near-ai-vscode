@@ -380,8 +380,8 @@ async function settleFocus(): Promise<void> {
  * waits 400 ms so the list has filtered. No text is typed. Focus is settled first (settleFocus).
  *
  * `attempts` above 1 opens the palette again (focus settled each time) when an attempt ends without `done()`: only for a command that is safe to run
- * twice and changes nothing when it does not run (the control step, and Enable while the preview is off, where more attempts only make the "not offered"
- * finding stronger). Enable itself gets one attempt, so a second Enable can never start while the first is still running. Returns the attempts used.
+ * twice and changes nothing when it does not run, which is the control step alone. Every Enable Team Mode run, with the preview off or on, gets one
+ * attempt, so a second Enable can never start (PR #67 review). Returns the attempts used.
  */
 async function runFromPalette(label: string, done: () => boolean, timeoutMs: number, attempts = 1): Promise<number> {
   let used = 0;
@@ -464,7 +464,7 @@ function teamProjectTests(getApi: () => NearAiTestApi): Array<[string, () => Pro
 
       // Preview off (the default): Enable is not offered, so accepting for 5 s starts nothing.
       assert.equal(vscode.workspace.getConfiguration('nearAi').get('team.preview'), false);
-      await runFromPalette('NEAR AI: Enable Team Mode', () => existsSync(teamFilePath), 5_000, 2);
+      await runFromPalette('NEAR AI: Enable Team Mode', () => existsSync(teamFilePath), 5_000, 1);
       await pause(1_000);
       assert.equal(existsSync(teamFilePath), false, PREVIEW_OFF_SIGNAL);
       await vscode.commands.executeCommand('notifications.clearAll');
