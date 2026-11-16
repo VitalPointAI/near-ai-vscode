@@ -140,7 +140,8 @@ test('the studio warns when a private team or member names a model that is not p
 
 // ---------- which model a private team may be sent to ----------
 
-const TEE: ModelInfo = { id: 'z-ai/glm-5.3', privacyBoundary: 'tee' };
+// NEAR's model list reports its attestation (0.4.27: a TEE model whose attestation is not reported does not count as private).
+const TEE: ModelInfo = { id: 'z-ai/glm-5.3', privacyBoundary: 'tee', attestationSupported: true };
 const FORWARDED: ModelInfo = { id: 'deepseek/flash', privacyBoundary: 'cloud', forwardedTo: 'openrouter.ai' };
 const LOCAL: ModelInfo = { id: 'local/qwen', privacyBoundary: 'local' };
 const route = (near: PrivateRoute) => (model: ModelInfo): PrivateRoute => (model.privacyBoundary === 'local' ? { kind: 'local', attestation: false } : near);
@@ -166,4 +167,27 @@ test('a private call refuses forwarded models and TEE models whose attestation c
   // Any model: the first preferred one, marked as private or not.
   const any = chooseTeamModel('any', { models: [FORWARDED, TEE], preferred: [FORWARDED.id], routeFor: attested, privacyMode: 'standard' });
   assert.deepEqual(any, { ok: true, model: FORWARDED.id, info: FORWARDED, private: false });
+});
+
+test('a TEE model whose attestation is reported failed or unverified, or not reported at all, is not private for drafting or review', () => {
+  const attested = route({ kind: 'near', attestation: true });
+  const choose = (model: ModelInfo) => chooseTeamModel('private', { models: [model], preferred: [model.id], routeFor: attested, privacyMode: 'standard' });
+  for (const [label, model] of [
+    ['failed', { ...TEE, attestationSupported: true, attestationStatus: 'failed' }],
+    ['unverified', { ...TEE, attestationSupported: true, verificationStatus: 'unverified' as const }],
+    ['not attested', { ...TEE, attestationStatus: 'not_attested' }]
+  ] as Array<[string, ModelInfo]>) {
+    const refused = choose(model);
+    assert.equal(refused.ok, false, label);
+    assert.match(refused.ok ? '' : refused.reason, /z-ai\/glm-5\.3: its attestation is reported as failed or unverified/, label);
+  }
+  // Unknown: NEAR said nothing about the model's attestation, so it does not count as private (fail closed).
+  const unknown = choose({ id: 'z-ai/glm-5.3', privacyBoundary: 'tee' });
+  assert.match(unknown.ok ? '' : unknown.reason, /z-ai\/glm-5\.3: NEAR has not reported that its attestation is supported or verified/);
+  // Reported by NEAR's model list (attestationSupported), or verified: private.
+  assert.equal(choose({ ...TEE, attestationSupported: true }).ok, true);
+  assert.equal(choose({ id: 'z-ai/glm-5.3', privacyBoundary: 'tee', verificationStatus: 'verified' }).ok, true);
+  // Any model may still be used for a team with nothing private, but it is not reported as private.
+  const any = chooseTeamModel('any', { models: [{ ...TEE, attestationStatus: 'failed' }], preferred: [], routeFor: attested, privacyMode: 'standard' });
+  assert.deepEqual(any.ok && [any.model, any.private], ['z-ai/glm-5.3', false]);
 });

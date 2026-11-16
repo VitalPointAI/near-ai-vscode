@@ -1476,7 +1476,7 @@ test('a private team (0.4.27): the Purpose toggle marks the draft, the AI start 
 // ---------- Improve with AI (0.4.27) ----------
 
 type FakeReply = { text: string; finishReason?: string } | Error | Promise<{ text: string; finishReason?: string }>;
-function fakeAi(models: Array<{ id: string; privacyBoundary: 'tee' | 'cloud' | 'local'; forwardedTo?: string }>, replies: FakeReply[], settings: Partial<{ privacyMode: 'standard' | 'tee-only'; dailySpendLimitUsd: number; spent: number }> = {}) {
+function fakeAi(models: Array<{ id: string; privacyBoundary: 'tee' | 'cloud' | 'local'; forwardedTo?: string; attestationSupported?: boolean }>, replies: FakeReply[], settings: Partial<{ privacyMode: 'standard' | 'tee-only'; dailySpendLimitUsd: number; spent: number }> = {}) {
   const sent: Array<{ model: string; messages: Array<{ role: string; content: string | null }>; signal?: AbortSignal }> = [];
   const ai = {
     models, preferred: models.map((model) => model.id),
@@ -1493,7 +1493,7 @@ function fakeAi(models: Array<{ id: string; privacyBoundary: 'tee' | 'cloud' | '
   };
   return { ai: ai as unknown as Awaited<ReturnType<NonNullable<TeamStudioDeps['teamAi']>>>, sent };
 }
-const TEE_MODEL = { id: 'z-ai/glm-5.3', privacyBoundary: 'tee' as const, inputPricePerMillion: 1.8, outputPricePerMillion: 5.75 };
+const TEE_MODEL = { id: 'z-ai/glm-5.3', privacyBoundary: 'tee' as const, attestationSupported: true, inputPricePerMillion: 1.8, outputPricePerMillion: 5.75 };
 const FWD_MODEL = { id: 'deepseek/flash', privacyBoundary: 'cloud' as const, forwardedTo: 'openrouter.ai' };
 const improveDraft = (): TeamDraft => ({ name: 'Web team', description: 'Builds pages', members: [
   { name: 'lead', role: 'planner', model: 'deep', tools: ['Read', 'Grep'], instructions: 'Plan the work.\n\nKeep steps small.' },

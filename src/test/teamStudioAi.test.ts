@@ -9,7 +9,7 @@ import { chooseTeamModel, teamModelCall, type TeamAiDeps } from '../services/tea
 // 0.4.27: every Team Studio model call (drafting a team, Improve with AI) passes the same outbound check as chat, and a call that needs a private model
 // gets a NEAR TEE model on an attested route or a local model, or does not happen.
 
-const TEE: ModelInfo = { id: 'z-ai/glm-5.3', privacyBoundary: 'tee', inputPricePerMillion: 1, outputPricePerMillion: 2 };
+const TEE: ModelInfo = { id: 'z-ai/glm-5.3', privacyBoundary: 'tee', attestationSupported: true, inputPricePerMillion: 1, outputPricePerMillion: 2 };
 const FORWARDED: ModelInfo = { id: 'deepseek/flash', privacyBoundary: 'cloud', forwardedTo: 'openrouter.ai' };
 const LOCAL: ModelInfo = { id: 'local/qwen', privacyBoundary: 'local' };
 const IMAGE: ModelInfo = { id: 'img/maker', privacyBoundary: 'tee', outputModalities: ['image'] };
