@@ -223,7 +223,7 @@ test('roles come from team roles and the installed Open-GSD agents; starting poi
 test('every page message is strictly validated', () => {
   const good: unknown[] = [
     { type: 'ready' }, { type: 'refresh' }, { type: 'import' }, { type: 'discard-draft' },
-    ...['open', 'duplicate', 'export', 'archive', 'restore', 'use-in-chat', 'open-markdown', 'versions'].map((type) => ({ type, id: 'user:web' })),
+    ...['open', 'duplicate', 'share', 'archive', 'restore', 'use-in-chat', 'open-markdown', 'versions'].map((type) => ({ type, id: 'user:web' })),
     { type: 'open', id: 'project' }, { type: 'restore', id: 'archived:web-2' },
     { type: 'version-view', id: 'user:web', ref: '2026-10-29T14-03-12-345Z.md' }, { type: 'version-restore', id: 'project', ref: '2026-10-29T14-03-12-345Z.md' },
     { type: 'review', seq: 3, draft: draft() }, { type: 'review', seq: 4, draft: draft(), id: 'user:web' },
@@ -249,7 +249,9 @@ test('every page message is strictly validated', () => {
     { type: 'save-draft', draft: draft(), step: 9, target: 'user' },
     { type: 'starting-point', id: 'gsd:unknown', goal: '', locality: 'cloud' }, { type: 'starting-point', id: 'recommend', goal: '', locality: 'mars' }, { type: 'starting-point', id: 'recommend', goal: '', locality: 'cloud', riskLevel: 'extreme' },
     { type: 'open-setting', key: 'editor.fontSize' }, { type: 'open-setting', key: 'nearAi.agent.denyCommands' },
-    { type: 'run-command', command: 'nearAi.emergencyStop' }, { type: 'delete', id: 'user:web' }
+    { type: 'run-command', command: 'nearAi.emergencyStop' }, { type: 'delete', id: 'user:web' },
+    // 0.4.26: Export (a raw Markdown copy) was removed; Share is the one way to send a team.
+    { type: 'export', id: 'user:web' }
   ];
   for (const message of bad) assert.equal(parseStudioMessage(message), undefined, JSON.stringify(message));
 });
@@ -264,7 +266,7 @@ test('the page HTML is one nonce script and two stylesheets (shared base, then i
 
 // ---------- the host controller, on a real TeamLibrary ----------
 
-interface Harness { posted: Array<Record<string, any>>; send(message: unknown): Promise<void>; deps: TeamStudioDeps; storage: string; root: string; library: TeamLibrary; prefills: string[]; opened: string[]; applied: string[]; drafts: { value?: SavedWizard }; watch(file: string): void; confirmAnswer: { value: boolean }; askAnswer: { value: string | undefined }; exportTarget: { value?: string }; shareTarget: { value?: string }; importSource: { value?: string }; confirmed: string[]; settle(): Promise<void>; chooseAnswer: { value?: string }; asked: Array<{ message: string; actions: string[] }>; kept: { value?: KeptWork }; close(): void }
+interface Harness { posted: Array<Record<string, any>>; send(message: unknown): Promise<void>; deps: TeamStudioDeps; storage: string; root: string; library: TeamLibrary; prefills: string[]; opened: string[]; applied: string[]; drafts: { value?: SavedWizard }; watch(file: string): void; confirmAnswer: { value: boolean }; askAnswer: { value: string | undefined }; shareTarget: { value?: string }; importSource: { value?: string }; confirmed: string[]; settle(): Promise<void>; chooseAnswer: { value?: string }; asked: Array<{ message: string; actions: string[] }>; kept: { value?: KeptWork }; close(): void }
 
 async function harness(): Promise<Harness> {
   const base = await mkdtemp(path.join(tmpdir(), 'near-ai-studio-'));
@@ -277,7 +279,7 @@ async function harness(): Promise<Harness> {
   let watcher: ((file: string) => void) | undefined;
   const prefills: string[] = []; const opened: string[] = []; const applied: string[] = [];
   const drafts: { value?: SavedWizard } = {};
-  const confirmAnswer = { value: true }; const askAnswer: { value: string | undefined } = { value: 'Web copy' }; const exportTarget: { value?: string } = {};
+  const confirmAnswer = { value: true }; const askAnswer: { value: string | undefined } = { value: 'Web copy' };
   const shareTarget: { value?: string } = {}; const importSource: { value?: string } = {}; const confirmed: string[] = [];
   const chooseAnswer: { value?: string } = {}; const asked: Array<{ message: string; actions: string[] }> = []; const kept: { value?: KeptWork } = {};
   let disposed: (() => void) | undefined;
@@ -290,7 +292,6 @@ async function harness(): Promise<Harness> {
     openSetting: async () => undefined,
     confirm: async (message) => { confirmed.push(message); return confirmAnswer.value; },
     ask: async () => askAnswer.value,
-    pickExportTarget: async () => exportTarget.value,
     pickShareTarget: async () => shareTarget.value,
     pickImportSource: async () => importSource.value,
     home: base,
@@ -302,7 +303,7 @@ async function harness(): Promise<Harness> {
   };
   attachTeamStudio({ webview: { postMessage: async (message) => { posted.push(message as Record<string, any>); return true; }, onDidReceiveMessage: (listener) => { receive = listener; return { dispose() {} }; } }, onDidDispose: (listener) => { disposed = listener; return { dispose() {} }; } }, deps);
   const settle = () => new Promise<void>((resolve) => setTimeout(resolve, 20));
-  return { posted, send: async (message) => { await receive!(message); }, deps, storage, root, library, prefills, opened, applied, drafts, watch: (file) => watcher!(file), confirmAnswer, askAnswer, exportTarget, shareTarget, importSource, confirmed, settle, chooseAnswer, asked, kept, close: () => disposed!() };
+  return { posted, send: async (message) => { await receive!(message); }, deps, storage, root, library, prefills, opened, applied, drafts, watch: (file) => watcher!(file), confirmAnswer, askAnswer, shareTarget, importSource, confirmed, settle, chooseAnswer, asked, kept, close: () => disposed!() };
 }
 const last = (h: Harness, type: string) => [...h.posted].reverse().find((message) => message.type === type)!;
 
@@ -463,7 +464,7 @@ test('host: an edit to the open file outside the studio refreshes it', async () 
   assert.ok(h.posted.some((message) => message.type === 'library'));
 });
 
-test('host: duplicate, export, archive (never delete), and restore go through TeamLibrary', async () => {
+test('host: duplicate, archive (never delete), and restore go through TeamLibrary, and the removed Export does nothing', async () => {
   const h = await harness();
   const file = await h.library.create('Web', teamMarkdown(draft()));
   await mkdir(path.dirname(TeamLibrary.projectTeamFile(h.root)), { recursive: true });
@@ -472,9 +473,10 @@ test('host: duplicate, export, archive (never delete), and restore go through Te
   await h.send({ type: 'duplicate', id: 'user:web' });
   assert.equal(parseTeam(await readFile(path.join(h.library.directory, 'web-copy.md'), 'utf8'), 'x.md').name, 'Web copy');
   assert.equal(last(h, 'notice').focus, 'user:web-copy');
-  h.exportTarget.value = path.join(h.root, 'exported.md');
+  // 0.4.26: Export was removed (Share is the one way to send a team; it has its own tests below), so an export message is ignored.
+  const before = h.posted.length;
   await h.send({ type: 'export', id: 'user:web' });
-  assert.equal(await readFile(h.exportTarget.value, 'utf8'), await readFile(file, 'utf8'));
+  assert.equal(h.posted.length, before);
   // The project team cannot be archived from the studio (it would leave the project).
   await h.send({ type: 'archive', id: 'project' });
   assert.ok(existsSync(TeamLibrary.projectTeamFile(h.root)));
@@ -690,11 +692,12 @@ test('page: the library shows cards with actions, an empty state, and "Use in ch
   assert.match(text, /Archived teams \(1\).*Old team/);
   page.byLabel('Use Web team in chat')!.click();
   assert.deepEqual(page.posts.at(-1), { type: 'use-in-chat', id: 'user:web' });
-  for (const [label, type] of [['Open Web team', 'open'], ['Duplicate Web team', 'duplicate'], ['Export Web team', 'export'], ['Archive Web team', 'archive'], ['Restore Old team', 'restore']] as const) {
+  for (const [label, type] of [['Open Web team', 'open'], ['Duplicate Web team', 'duplicate'], ['Share Web team', 'share'], ['Archive Web team', 'archive'], ['Restore Old team', 'restore']] as const) {
     page.byLabel(label)!.click();
     assert.equal(page.posts.at(-1)!.type, type, label);
   }
   assert.equal(page.byLabel('Archive Project team'), undefined, 'the project team has no Archive');
+  assert.equal(page.byLabel('Export Web team'), undefined, 'Export was removed; Share is the one way to send a team');
   // Every message the page sends passes the host's strict parser.
   for (const message of page.posts) assert.ok(parseStudioMessage(message), JSON.stringify(message));
 });

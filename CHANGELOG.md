@@ -17,6 +17,9 @@
   what the team contains and adds it only when you agree; a damaged or edited file is refused with
   a plain message. An imported team is not trusted until you approve it the first time it would
   run.
+  **Share…** replaces the **Export** button on team cards; **Open as Markdown** still opens the
+  team file itself. Anything made from an imported team you have not approved (a copy, a team
+  built from it, or a project team) is asked about before it first runs too.
 - **Team Mode refuses a remote address with a password on git older than 2.31.** Such a git has to
   receive the address on its command line, where other users of the computer can read it, so
   Team Mode now stops and asks you to update git or move the credentials into a credential

@@ -391,7 +391,7 @@
       button('Open', () => vscode.postMessage({ type: 'open', id: team.id }), { primary: true, label: 'Open ' + team.name, id: 'open-' + team.id }),
       button('Use in chat', () => vscode.postMessage({ type: 'use-in-chat', id: team.id }), { label: 'Use ' + team.name + ' in chat' }),
       button('Duplicate', () => vscode.postMessage({ type: 'duplicate', id: team.id }), { label: 'Duplicate ' + team.name }),
-      button('Export', () => vscode.postMessage({ type: 'export', id: team.id }), { label: 'Export ' + team.name }),
+      // Share is the one way to send a team (owner, 2026-11-16): the raw Markdown copy (Export) was dropped. Open as Markdown still shows the file.
       button('Share…', () => vscode.postMessage({ type: 'share', id: team.id }), { label: 'Share ' + team.name })
     );
     // A team made from a built-in project type can be brought up to date; the host previews every change and asks first.

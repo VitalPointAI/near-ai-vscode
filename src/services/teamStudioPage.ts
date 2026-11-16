@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { copyFile, mkdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import * as path from 'node:path';
 import { PROJECT_TYPES, projectTypeTeam, type ProjectType } from '../agent/projectTypes';
 import { detectTemplate, stampTeam } from '../agent/teamUpdate';
@@ -281,7 +281,7 @@ export type StudioMessage =
   | { type: 'leave-editor'; edit: OpenEdit }
   /** What is unsaved right now (nothing, the builder, or the editor), kept if the panel is closed. */
   | { type: 'unsaved'; wizard?: SavedWizard; edit?: OpenEdit }
-  | { type: 'open' | 'duplicate' | 'export' | 'share' | 'archive' | 'restore' | 'use-in-chat' | 'open-markdown' | 'versions' | 'update-team'; id: string }
+  | { type: 'open' | 'duplicate' | 'share' | 'archive' | 'restore' | 'use-in-chat' | 'open-markdown' | 'versions' | 'update-team'; id: string }
   | { type: 'version-view' | 'version-restore'; id: string; ref: string }
   | { type: 'review'; seq: number; draft: TeamDraft; id?: string }
   | { type: 'save'; draft: TeamDraft; id: string; base: string }
@@ -333,7 +333,7 @@ export function parseStudioMessage(value: unknown): StudioMessage | undefined {
       if (message.edit !== undefined) { const edit = openEdit(message.edit); return edit ? { type: 'unsaved', edit } : undefined; }
       return { type: 'unsaved' };
     }
-    case 'open': case 'duplicate': case 'export': case 'share': case 'archive': case 'restore': case 'use-in-chat': case 'open-markdown': case 'versions': case 'update-team':
+    case 'open': case 'duplicate': case 'share': case 'archive': case 'restore': case 'use-in-chat': case 'open-markdown': case 'versions': case 'update-team':
       return exactKeys(message, ['type', 'id']) && id() ? { type: message.type, id: message.id as string } : undefined;
     case 'version-view': case 'version-restore':
       return exactKeys(message, ['type', 'id', 'ref']) && id() && typeof message.ref === 'string' && VERSION_REF.test(message.ref) ? { type: message.type, id: message.id as string, ref: message.ref } : undefined;
@@ -417,7 +417,6 @@ export interface TeamStudioDeps {
   updateTeam?(file: string): Promise<unknown>;
   confirm(message: string, action: string): Promise<boolean>;
   ask(prompt: string, value: string): Promise<string | undefined>;
-  pickExportTarget(defaultName: string): Promise<string | undefined>;
   /** Where to save a team's share file (`<team>.near-team.json`); undefined when the person cancelled. */
   pickShareTarget?(defaultName: string): Promise<string | undefined>;
   /** A share file (.near-team.json) or a team .md file to import. */
@@ -823,15 +822,6 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
         const copy = await deps.library.duplicate(file, name.slice(0, 80));
         await refreshLibrary();
         post({ type: 'notice', text: `Duplicated as "${name}".`, focus: `user:${slugify(path.basename(copy, '.md'))}` });
-        return;
-      }
-      case 'export': {
-        const file = fileFor(message.id);
-        if (!file) return;
-        const target = await deps.pickExportTarget(message.id === 'project' ? 'project-team.md' : path.basename(file));
-        if (!target) return;
-        await copyFile(file, target);
-        post({ type: 'notice', text: `Exported to ${path.basename(target)}.` });
         return;
       }
       case 'archive': {
