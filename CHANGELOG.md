@@ -1,6 +1,9 @@
 # Changelog
 
-## Unreleased
+## 0.4.25
+
+This release adds Team Mode as a preview, so a person can set up a signed team record for a
+project, and hardens how Team Mode talks to git. It also fixes a few edge cases in image review.
 
 - **Team Mode is available as an early preview.** It is off unless you turn on the setting
   `nearAi.team.preview`. With it on, **NEAR AI: Enable Team Mode** creates a team for the open
