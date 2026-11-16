@@ -14,6 +14,7 @@ import type { DecisionOutcome, DecisionRecord } from '../domain/gate/record';
 import type { SecretStorageLike } from '../services/auth';
 import { ensurePolicyBundle, resetPolicyToDefaults } from './bundleStore';
 import type { BundleEvent, BundleResult } from './bundleStore';
+import { readLastValid } from './clockMarker';
 import { DecisionLog, INSTALL_LOG_KEY, projectLogKey } from './decisionLog';
 
 const DEVICE_UNKNOWN = 'device-unknown';
@@ -55,6 +56,8 @@ export class GateHost {
   private starting: Promise<BundleState> | undefined;
   /** True once the start has finished and `current` is what it found. */
   private settled = false;
+  /** The latest time this host has seen (the clock marker's time, then every clock reading). It never decreases, so a clock set back cannot revive an expired policy. */
+  private highWater = 0;
   private readonly logs = new Map<string, DecisionLog>();
   private readonly listeners = new Set<() => void>();
 
@@ -71,11 +74,24 @@ export class GateHost {
     return this.start();
   }
 
-  /** What every decision reads now. A bundle that has expired since it was checked reads as expired, so a long session never runs on an old policy. */
+  /** What every decision reads now. A bundle that has expired since it was checked reads as expired, so a long session never runs on an old policy, and one that has expired stays expired when the clock is set back. */
   public bundleState(): BundleState {
     const state = this.current;
-    if (state.state === 'valid' && Date.parse(state.expiresAt) <= this.clock()) return failedClosed('expired');
+    if (state.state === 'valid' && Date.parse(state.expiresAt) <= this.now()) return failedClosed('expired');
     return state;
+  }
+
+  /**
+   * The time every expiry and renewal check reads: the later of the clock and the latest time this host has seen, which starts from the clock marker's time
+   * (the bundle store never moves that backwards). The status bar and the policy view read it through here too, so no surface shows a policy as valid that a
+   * decision would refuse. A clock that gives no number, or throws, leaves the latest time seen.
+   */
+  public now(): number {
+    try {
+      const wall = (this.options.now?.() ?? new Date()).getTime();
+      if (Number.isFinite(wall) && wall > this.highWater) this.highWater = wall;
+    } catch { /* a clock that throws leaves the latest time seen, which is never later than the real time */ }
+    return this.highWater;
   }
 
   /**
@@ -100,7 +116,7 @@ export class GateHost {
       context: request.context,
       floorMode: request.floorMode,
       productVersion: this.options.productVersion,
-      clock: () => this.clock(),
+      clock: () => this.now(),
       newRecordId: () => randomUUID()
     };
   }
@@ -109,6 +125,7 @@ export class GateHost {
   public async reset(): Promise<BundleResult> {
     await this.start();
     const result = await resetPolicyToDefaults(this.options.globalStorageDir, this.options.secrets, this.storeOptions());
+    await this.seedFromMarker();
     this.current = result.state;
     this.announce(result.event ?? 'policy.reset', result.state);
     this.changed();
@@ -143,8 +160,13 @@ export class GateHost {
     }
   }
 
-  private clock(): number {
-    return (this.options.now?.() ?? new Date()).getTime();
+  // Seeds the high-water mark from the marker in secret storage, which only ever holds the latest time this install saw. A marker that cannot be read leaves
+  // the mark where the clock put it: the bundle store already failed closed in that case.
+  private async seedFromMarker(): Promise<void> {
+    try {
+      const marker = await readLastValid(this.options.secrets);
+      if (marker.present && marker.at !== undefined && marker.at > this.highWater) this.highWater = marker.at;
+    } catch { /* see above */ }
   }
 
   private storeOptions(): { now?: () => Date } {
@@ -185,6 +207,7 @@ export class GateHost {
     } catch (error) {
       result = { state: failedClosed('identity-unavailable', detailOf(error)) };
     }
+    await this.seedFromMarker();
     this.current = result.state;
     this.settled = true;
     this.announce(result.event, result.state);
@@ -204,10 +227,10 @@ export class GateHost {
       const record: DecisionRecord = buildDecisionRecord({
         recordId: randomUUID(),
         sequence: 0,
-        time: this.clock(),
+        time: this.now(),
         productVersion: this.options.productVersion,
         actor: { kind: 'person', deviceFingerprint: this.deviceFingerprint(), sessionId: POLICY_SESSION },
-        callId: `${name}-${this.clock()}`,
+        callId: `${name}-${this.now()}`,
         capability: { verb: 'plan' },
         resource: { name: 'policy bundle', type: 'policy' },
         outcome,

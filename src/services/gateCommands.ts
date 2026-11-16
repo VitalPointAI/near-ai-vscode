@@ -140,7 +140,7 @@ export const POLICY_SETUP_STEP = Object.freeze({
 const POLICY_STEP_VALID_DETAIL = 'Your policy is signed and valid. You can read it here.';
 
 /** The step is done when the policy is valid, and shows the status bar's own sentence when it is not (D-13). */
-export function policySetupStep(host: GateHost, now: () => number = Date.now): SetupStep {
+export function policySetupStep(host: GateHost, now: () => number = () => host.now()): SetupStep {
   return {
     ...POLICY_SETUP_STEP,
     get detail(): string {
@@ -162,9 +162,6 @@ export function registerGate(context: GateActivationContext, options: RegisterGa
   const tell = (message: string): void => {
     try { notify(message); } catch { /* a message that cannot be shown never fails activation */ }
   };
-  const clock = (): number => {
-    try { return (options.now?.() ?? new Date()).getTime(); } catch { return Date.now(); }
-  };
   let projectRoot: string | undefined;
   try {
     projectRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
@@ -179,6 +176,11 @@ export function registerGate(context: GateActivationContext, options: RegisterGa
     onProblem: tell,
     ...(options.now === undefined ? {} : { now: options.now })
   });
+  // Every surface reads the host's own time (the later of the clock and the latest time it has seen), so none shows a policy as valid that a decision refuses
+  // after the clock was set back.
+  const clock = (): number => {
+    try { return host.now(); } catch { return Date.now(); }
+  };
   registerPolicySurfaces(context, host, tell, clock, options.statusTimers);
   void host.start().then((state) => {
     if (state.state === 'failed-closed') tell(state.sentence);

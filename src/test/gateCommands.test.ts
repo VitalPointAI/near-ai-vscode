@@ -411,3 +411,25 @@ test('the registered status bar changes by itself when the policy enters its ren
   assert.ok(bar.tooltip.includes(BUNDLE_FAILURES.expired));
   assert.equal(queue.size, 0);
 });
+
+test('a policy that has ended is not shown as valid again when the clock is set back: the setup step and the host read the same time', async () => {
+  stub.setWorkspaceFolders([]);
+  const storage = await mkdtemp(path.join(tmpdir(), 'near-ai-gate-cmd-'));
+  // A start date well after today's real date, so a step that read the real clock instead of the host's would still call the policy valid.
+  const start = Date.parse('2035-01-01T00:00:00.000Z');
+  let nowMs = start;
+  const host = gateCommands.registerGate(createFakeContext(storage, new MemorySecrets()) as never, { notify: () => undefined, now: () => new Date(nowMs) });
+  const state = await host.state();
+  assert.equal(state.state, 'valid');
+  const step = gateCommands.policySetupStep(host);
+  const ctx = { root: '.', setting: () => undefined, facts: {} };
+  assert.equal(await step.isDone(ctx), true);
+  const expires = Date.parse((state as Extract<BundleState, { state: 'valid' }>).expiresAt);
+  nowMs = expires + DAY;
+  assert.equal(await step.isDone(ctx), false);
+  assert.ok(step.detail.includes(BUNDLE_FAILURES.expired));
+  nowMs = start + 10 * DAY;
+  assert.equal(await step.isDone(ctx), false, 'a clock set back does not make the ended policy valid');
+  assert.ok(step.detail.includes(BUNDLE_FAILURES.expired));
+  assert.equal(host.bundleState().state, 'failed-closed');
+});
