@@ -345,7 +345,14 @@ export class TeamLibrary {
    * list in one file, so a damaged list can never make an imported team look approved, and approving one team touches nothing else.
    */
   private get importsDir(): string { return path.join(this.directory, '.imported'); }
-  private importMarker(file: string): string { return path.join(this.importsDir, path.basename(file)); }
+  /**
+   * The marker for one team file, keyed by its place in the library: `<name>` for a live team, `.archived/<name>` for an archived one (PR #67 review: a
+   * marker keyed by the file name alone was shared by a live and an archived team of the same name, so archiving one could approve the other).
+   */
+  private importMarker(file: string): string {
+    const dir = path.dirname(path.resolve(file));
+    return dir === path.resolve(this.archiveDir) ? path.join(this.importsDir, '.archived', path.basename(file)) : path.join(this.importsDir, path.basename(file));
+  }
   private versionsDir(slug: string): string { return path.join(this.directory, '.versions', slug); }
 
   /** A project team's versions are kept per project, so one project's history never shows another's. */
@@ -377,6 +384,8 @@ export class TeamLibrary {
     for (let n = 2; await exists(path.join(this.directory, `${slug}.md`)); n += 1) slug = `${slugify(name)}-${n}`;
     const file = path.join(this.directory, `${slug}.md`);
     await writeFile(file, content, 'utf8');
+    // A new team starts approved: a marker left at this place by a file removed outside the studio never carries over (importTeam marks after this).
+    await rm(this.importMarker(file), { force: true });
     await this.snapshot(file);
     return file;
   }
@@ -395,7 +404,7 @@ export class TeamLibrary {
    * the question asked before it runs. Approving one team never approves another: each asks once.
    */
   public async markImported(file: string, kind: 'imported' | 'derived' = 'imported', from?: string): Promise<void> {
-    await mkdir(this.importsDir, { recursive: true });
+    await mkdir(path.dirname(this.importMarker(file)), { recursive: true });
     await writeFile(this.importMarker(file), `${kind} ${new Date().toISOString()}${from ? ` ${noTags(from).slice(0, 80)}` : ''}\n`, 'utf8');
   }
 
@@ -428,16 +437,15 @@ export class TeamLibrary {
     const norm = (text: string) => text.replace(/\s+/g, ' ').trim();
     const wanted = new Set(members.map((member) => norm(member.instructions)).filter(Boolean));
     if (!wanted.size) return undefined;
-    for (const name of [...await this.pendingImports()].sort()) {
-      for (const dir of [this.directory, this.archiveDir]) {
-        const file = path.join(dir, name);
-        const text = await readFile(file, 'utf8').catch(() => undefined);
-        if (text === undefined) continue;
-        try {
-          const team = parseTeam(text, file);
-          if (team.members.some((member) => wanted.has(norm(member.instructions)))) return team.name;
-        } catch { /* a team file that does not parse has no members to copy */ }
-      }
+    const archivedNames = (await readdir(path.join(this.importsDir, '.archived')).catch(() => [])).filter((name) => name.endsWith('.md'));
+    const files = [...[...await this.pendingImports()].sort().map((name) => path.join(this.directory, name)), ...archivedNames.sort().map((name) => path.join(this.archiveDir, name))];
+    for (const file of files) {
+      const text = await readFile(file, 'utf8').catch(() => undefined);
+      if (text === undefined) continue;
+      try {
+        const team = parseTeam(text, file);
+        if (team.members.some((member) => wanted.has(norm(member.instructions)))) return team.name;
+      } catch { /* a team file that does not parse has no members to copy */ }
     }
     return undefined;
   }
@@ -501,12 +509,18 @@ export class TeamLibrary {
     return target;
   }
 
-  /** An unapproved import stays unapproved when its file is archived or restored under another name. */
+  /**
+   * Moves a file's marker with the file (archive, restore): the target's place gets exactly the moved file's state, marked or not, and no other file's
+   * marker is touched.
+   */
   private async moveImportMarker(from: string, to: string): Promise<void> {
-    if (!await exists(this.importMarker(from))) return;
-    if (path.basename(from) === path.basename(to)) return;
-    await copyFile(this.importMarker(from), this.importMarker(to));
-    await rm(this.importMarker(from), { force: true });
+    const source = this.importMarker(from);
+    const target = this.importMarker(to);
+    if (source === target) return;
+    await rm(target, { force: true });
+    if (!await exists(source)) return;
+    await mkdir(path.dirname(target), { recursive: true });
+    await rename(source, target);
   }
 
   public async archived(): Promise<string[]> {

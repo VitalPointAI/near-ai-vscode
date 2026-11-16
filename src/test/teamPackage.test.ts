@@ -1,6 +1,6 @@
 // Sharing a team as one file, importing it, and the approval an imported team needs before it runs (0.4.26). Pure functions and a real TeamLibrary.
 import assert from 'node:assert/strict';
-import { mkdtemp, readdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -159,7 +159,9 @@ test('an unapproved import stays unapproved through Duplicate, Archive and Resto
   const restored = await library.restore(archived);
   assert.equal(await library.isPendingImport(restored), true);
   await library.delete(copy);
-  assert.deepEqual((await readdir(path.join(library.directory, '.imported'))).sort(), ['web-crew.md']);
+  // PR #67 review: markers now live per place (live, or under .archived), so this checks the library's answer rather than the folder layout.
+  assert.deepEqual([...await library.pendingImports()], ['web-crew.md']);
+  assert.equal(await library.isPendingImport(copy), false, 'the deleted copy left no marker behind');
   // A legacy Import of a .md file is unapproved too.
   const outside = path.join(await mkdtemp(path.join(tmpdir(), 'near-ai-outside-')), 'shared.md');
   await writeFile(outside, newTeamTemplate('Shared team'));
@@ -247,7 +249,39 @@ test('a member copied unchanged from an unapproved team (imported or derived, in
   const project = TeamLibrary.projectTeamFile('/some/project');
   await library.setProjectDerived(project, 'Web crew');
   assert.equal(await library.projectDerivedFrom(project), 'Web crew');
-  assert.deepEqual([...await library.pendingImports()].sort(), ['copy.md'], 'project notes are not library teams');
+  // pendingImports lists live teams only (PR #67 review); the archived copy is still unapproved, and project notes are never listed as teams.
+  assert.deepEqual([...await library.pendingImports()], [], 'project notes are not library teams');
+  assert.equal(await library.isPendingImport(path.join(library.directory, '.archived', 'copy.md')), true);
   await library.setProjectDerived(project, undefined);
   assert.equal(await library.projectDerivedFrom(project), undefined);
+});
+
+// PR #67 review: markers were keyed by file name alone, shared by the live folder and the archive, so archiving another team of the same name moved the
+// archived import's marker away and it read as approved. Each marker now belongs to one file, live or archived.
+test('archiving a team that shares an unapproved archived import\'s name never approves the import, and the new team is never marked', async () => {
+  const library = new TeamLibrary(await mkdtemp(path.join(tmpdir(), 'near-ai-markers-')));
+  const imported = await library.importTeam('Web crew', TEAM);
+  const archivedImport = await library.archive(imported);
+  assert.equal(await library.isPendingImport(archivedImport), true);
+  const own = await library.create('Web crew', TEAM.replace('Plan the work.', 'Plan my own work.'));
+  assert.equal(path.basename(own), path.basename(archivedImport), 'the same file name, one live and one archived');
+  assert.equal(await library.isPendingImport(own), false, 'a new team is not unapproved because an archived one shares its name');
+  const archivedOwn = await library.archive(own);
+  assert.equal(await library.isPendingImport(archivedImport), true, 'the archived import is still unapproved');
+  assert.equal(await library.isPendingImport(archivedOwn), false);
+  // Deleting the unrelated team removes nothing else's marker.
+  await library.delete(archivedOwn);
+  assert.equal(await library.isPendingImport(archivedImport), true);
+  // Restored, the marker comes back with the file, kind and source intact; a derived one too.
+  const restored = await library.restore(archivedImport);
+  assert.deepEqual(await library.pendingKind(restored), { kind: 'imported' });
+  const copy = await library.duplicate(restored, 'Web crew copy');
+  await library.create('Web crew copy 2', TEAM);
+  const archivedCopy = await library.archive(copy);
+  assert.deepEqual(await library.pendingKind(archivedCopy), { kind: 'derived', from: 'Web crew' });
+  const live = await library.create('Web crew copy', TEAM.replace('Plan the work.', 'Mine.'));
+  assert.equal(await library.isPendingImport(live), false);
+  await library.archive(live);
+  assert.deepEqual(await library.pendingKind(archivedCopy), { kind: 'derived', from: 'Web crew' }, 'still unapproved after a same-named archive');
+  assert.deepEqual([...await library.pendingImports()].sort(), ['web-crew.md'], 'only live teams are listed as live');
 });
