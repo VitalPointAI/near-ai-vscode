@@ -289,17 +289,33 @@ test('no thread title, record id, model name or prompt appears in the plaintext 
   assert.deepEqual(Object.keys(JSON.parse(text) as object).sort(), ['format', 'kdf', 'sealed', 'stateId', 'wrappedKey']);
   // Long, distinctive words are checked against the whole text: random base64 cannot contain them by chance in practice.
   for (const word of ['layoff', 'conv-9f8e7d', 'deepseek', 'ignore all']) assert.equal(text.includes(word), false, word);
-  // Short words such as the tier names 'cold' and 'hot' are checked against the manifest with every long base64, base64url or hex run removed. The
-  // wrapped key and the sealed entries are base64 of random bytes, which contains a three- or four-letter word by chance often enough to fail CI
-  // ("AssertionError: hot" on PR #65). What is left is the JSON structure, its keys and its short non-random values, which is where a leaked tier
-  // name would appear in plain text. A leak inside a random-looking run would be ciphertext, which the sealing tests cover.
-  const withoutRandomRuns = text.replace(/[A-Za-z0-9+/_-]{16,}={0,2}/g, '');
-  for (const word of ['cold', 'hot']) assert.equal(withoutRandomRuns.includes(word), false, word);
-  // The keys of every object, at any depth, are checked by name too, so the removal above cannot hide a key named after the tier.
-  const keys: string[] = [];
-  const walk = (value: unknown): void => { if (Array.isArray(value)) value.forEach(walk); else if (value && typeof value === 'object') for (const [key, entry] of Object.entries(value)) { keys.push(key); walk(entry); } };
-  walk(JSON.parse(text));
-  for (const word of ['cold', 'hot', 'layoff', 'title']) assert.equal(keys.some((key) => key.toLowerCase().includes(word)), false, word);
+  // Short words such as the tier names 'cold' and 'hot' cannot be checked against the whole text: the salt, the wrapped key and the sealed entry are
+  // base64 of random bytes, which contains a three- or four-letter word by chance (about 1 manifest in 500; "AssertionError: hot" on PR #65). So they
+  // are checked, as whole words, against every key and every string value of the parsed manifest at any depth, except the fields known to hold random
+  // bytes: kdf.salt and the iv, tag and data of wrappedKey and sealed. A tier name leaked anywhere else, even inside a long plain value, is found
+  // (PR #67 review: removing every long run of letters and digits first could hide one). What the random fields hold is ciphertext, which the sealing
+  // tests cover.
+  const RANDOM_FIELDS = new Set(['kdf.salt', 'wrappedKey.iv', 'wrappedKey.tag', 'wrappedKey.data', 'sealed.iv', 'sealed.tag', 'sealed.data']);
+  const plainStrings = (value: unknown, at = ''): { keys: string[]; values: string[] } => {
+    const found = { keys: [] as string[], values: [] as string[] };
+    const walk = (entry: unknown, where: string): void => {
+      if (typeof entry === 'string') { if (!RANDOM_FIELDS.has(where)) found.values.push(entry); return; }
+      if (Array.isArray(entry)) { entry.forEach((item, index) => walk(item, `${where}[${index}]`)); return; }
+      if (entry && typeof entry === 'object') for (const [key, child] of Object.entries(entry)) { found.keys.push(key); walk(child, where ? `${where}.${key}` : key); }
+    };
+    walk(value, at);
+    return found;
+  };
+  const leaks = (manifest: unknown): string[] => {
+    const { keys, values } = plainStrings(manifest);
+    return ['cold', 'hot'].filter((word) => [...keys, ...values].some((entry) => new RegExp(`(?:^|[^a-z])${word}(?:[^a-z]|$)`, 'i').test(entry)));
+  };
+  const manifest = JSON.parse(text) as Record<string, unknown>;
+  assert.deepEqual(leaks(manifest), []);
+  // Control: the check finds a tier name planted in a long plain value or a key, so the empty result above means something.
+  assert.deepEqual(leaks({ ...manifest, note: 'thread-archive-cold-tier-entries' }), ['cold']);
+  assert.deepEqual(leaks({ ...manifest, kdf: { ...(manifest.kdf as object), hot: 1 } }), ['hot']);
+  for (const word of ['layoff', 'title']) assert.equal(plainStrings(manifest).keys.some((key) => key.toLowerCase().includes(word)), false, word);
   for (const part of parts) {
     assert.match(part.entry.file, /^[0-9a-f]{32}\.bin$/);
     assert.equal(part.data.includes(Buffer.from('layoff')), false);
