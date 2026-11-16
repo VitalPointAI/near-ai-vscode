@@ -139,13 +139,13 @@ All four ran once; none needed a rerun. Memory was checked with `free -g` before
 - The body fills every template section in plain words; says nothing calls the new code yet so no behaviour changes; names vocabulary v1 (D-03, D-35), labels v1 and the four presets (D-22, D-23, D-47), policy bundle v1 (D-12), label map v1 with the `label-map` purpose (D-25) and decision record v1 (D-20); says PR 2 first writes a bundle and records and PR 4 first writes a label map, so each format is still cheap to change; gives the test totals and the rollback. It also lists three owner questions raised by the summaries: the `RELEASABLE-TO-NONE` token (70-02), the `action_id` 3 / `disposition_id` 3 coding of an `asked` record (70-06), and a verb absent from `ceiling.contexts` being allowed in no context (70-03).
 - The `gh pr edit` command fails on this machine (a deprecated Projects classic GraphQL field), so the body was set through `gh api -X PATCH repos/.../pulls/66`.
 
-### Required checks on d083a49 (the head when the PR opened)
+### Required checks on the head when the PR opened (before the second rebase; its short hash was d083a49)
 
 lint pass (25s), test pass (3m29s), e2e pass (3m57s), release-content pass (33s), audit pass (22s), secret-scan pass (7s), relay pass (1m20s). No infrastructure failure, so no `gh run rerun`.
 
 ### Agent review
 
-`agent-review` status success, set by `near-ai-reviewer` on d083a49: "PASS: 0 major, 4 minor, 0 nit"; review state APPROVED, recommendation MERGE, no blocker. Findings, none of them fixed in this plan, because each is either a format choice that belongs to the owner or a hardening with no caller yet (a fix would change the formats and need a new gate run and review):
+`agent-review` status success, set by `near-ai-reviewer` on that first head: "PASS: 0 major, 4 minor, 0 nit"; review state APPROVED, recommendation MERGE, no blocker. Findings, none of them fixed in this plan, because each is either a format choice that belongs to the owner or a hardening with no caller yet (a fix would change the formats and need a new gate run and review):
 
 1. [MINOR] `src/domain/config.ts:49` exports the live mutable `LOOPBACK_HOSTS` set, which also feeds `isSecureEndpoint`; a caller could add a host. Suggested: export a frozen copy or an `isLoopbackHost()` predicate. The export itself is one of the plan's recorded edits (70-04, so the route decision can name loopback hosts). Not fixed; offered to the owner as a small follow-up commit.
 2. [MINOR] `src/domain/gate/record.ts:40`: `disposition_id: 3` for an ask is not an OCSF disposition value (1, 2, 8, 25, 26) while the record advertises OCSF 1.9.0. Same as owner question 2 in the PR body; the alternative is "Other" plus an `unmapped` detail. Not fixed; waits for the owner's answer.
@@ -161,6 +161,15 @@ Findings 2 to 4 are cheap to change now (before PR 2 writes anything) and costly
 - **Second push for the SUMMARY:** the SUMMARY records the PR number and review result, which exist only after the PR is open, so it was pushed to the PR branch afterwards (a docs-only commit that starts a fresh CI and review round; its result is in the hand-off report).
 - No auto-fix deviations; no auth gates; no stubs; no threat flags (no new endpoint, file access or auth path: the code is not called yet).
 
+## Second rebase after the PR opened
+
+While the first CI and review round ran, PR #65 merged into main (`aacbd69ec636057e6b2112cef60072990f8fdca4`, "docs(plan): NEAR function-call keys ... (#65)"), so GitHub reported the PR as conflicting (dirty). `git fetch origin` then `git rebase origin/main`:
+
+- One conflict, in `.planning/STATE.md` frontmatter (current_plan, status, stopped_at, last_updated, state_head, last_activity_desc), because the state commit `40fd7d5` and #65 both edited it. Resolved by keeping this branch's execution position and folding main's last-activity text into `last_activity_desc` after "before that:". The orchestrator hand-edits STATE.md afterwards, as agreed. `ROADMAP.md` and `state.json` merged without conflict.
+- Main's delta since the first base (`5070c55`) is documentation only (PROJECT.md, REQUIREMENTS.md, ROADMAP.md, STATE.md, three phase plans, PATTERNS, RESEARCH and two research notes), so no source file changed under this branch and the heavy gate was not rerun; instead the cheap checks were repeated: PR diff 513244 bytes, `package-lock.json` unchanged, `git diff --name-status origin/main...HEAD -- src` still 24 A and 5 M with the same files, range secret scan clean (24 commits, 1160 tracked files), exit 0.
+- The branch was pushed with `git push --force-with-lease origin feat/gate-vocabulary` (this branch only). The earlier approval from the first head was dismissed by the push, as designed; a fresh CI and review round ran on the new head (see the hand-off report for its result).
+- The second review round (on the docs-only SUMMARY commit, before this rebase) passed with 0 major, 5 minor, 0 nit. It repeated findings 1, 2 and 4 above (the mutable `LOOPBACK_HOSTS`, `disposition_id: 3`, the fractional-second grammar) and added two: `src/domain/gate/bundle.ts:88` (a comment says the default bundle decides and routes as before, but with `unattendedMcp: []` the ceiling denies every MCP tool in unattended runs and every verb in `relay` and `routine` contexts; say so in the comment) and `src/domain/gate/floor.ts:55` (the team settings exemption uses `endsWith('/.planning/.near-ai/team.md')`, so `sub/.planning/.near-ai/team.md` also skips the protected-write ask; exempt only the project-root path). Not fixed here; offered to the owner as one follow-up commit with the other minors.
+
 ## Self-Check: PASSED
 
-- SUMMARY exists; commits d083a49 (SUMMARY v1) is an ancestor of HEAD and on origin; PR 66 is OPEN into main; `package-lock.json` unchanged; no em-dash in this file.
+- SUMMARY exists; the first SUMMARY commit is an ancestor of HEAD and on origin; PR 66 is OPEN into main; `package-lock.json` unchanged; no em-dash in this file.
