@@ -348,6 +348,8 @@ function newest(entries, startOf, { unfinishedFirst = false } = {}) {
  *   that tested the commit itself (a push or a run started by hand), not a pull request's merge
  *   with main. That run must have finished with conclusion success and every CI job green:
  *   queued or running is waited for; cancelled, startup_failure, a failed or missing job refuse.
+ * - A check run from the Actions app whose check suite no workflow run on the commit names yet (GitHub
+ *   links them a little after a push) is waited for, not refused: it is judged once it is linked.
  *
  * Returns { ok, problems, waiting }: `waiting` is true when the only problems are CI jobs that
  * are still running or have not reported yet.
@@ -360,6 +362,11 @@ export function evaluateCommit(commit, { required = REQUIRED_CHECKS, reviewer, e
   // Another PR's review lands its check runs on main's HEAD (see AGENT_REVIEW_WORKFLOW). They say nothing about this commit, so tagging ignores them.
   const reviewSuites = new Set(workflowRuns.filter((run) => String(run.path ?? '').replace(/@.*$/, '') === AGENT_REVIEW_WORKFLOW.path).map((run) => run.suiteId));
   const runIdOfSuite = new Map(ciWorkflowRuns.map((run) => [run.suiteId, run.id]));
+  // 0.4.25: right after a push (a release PR's squash commit), GitHub can list the CI jobs' check runs before it links their check suite to the
+  // workflow run: the run is missing from the list, or listed without a check suite. A check run from the Actions app whose suite no listed workflow
+  // run names cannot be told apart from another workflow's yet, so it is waited for (bounded by the caller), never judged; once linked, it is judged.
+  const linkedSuites = new Set(workflowRuns.map((run) => run.suiteId).filter((id) => id !== undefined && id !== null));
+  const unlinked = (run) => run.app === CI_WORKFLOW.app && !linkedSuites.has(run.suiteId);
   const attempts = new Map();
   for (const run of checkRuns) {
     if (!run.name) continue;
@@ -401,7 +408,8 @@ export function evaluateCommit(commit, { required = REQUIRED_CHECKS, reviewer, e
       const latest = own[0];
       const status = String(latest.status ?? '').toLowerCase();
       const conclusion = String(latest.conclusion ?? '').toLowerCase();
-      if (status !== 'completed') wait(`${CI_WORKFLOW.name} run ${latest.id} on this commit is ${status || 'not finished'}`);
+      if (latest.suiteId === undefined || latest.suiteId === null) wait(`${CI_WORKFLOW.name} run ${latest.id} on this commit is not linked to its check suite yet`);
+      else if (status !== 'completed') wait(`${CI_WORKFLOW.name} run ${latest.id} on this commit is ${status || 'not finished'}`);
       else {
         judgedRunDone = true;
         if (conclusion !== 'success') block(`${CI_WORKFLOW.name} run ${latest.id} on this commit ended ${conclusion || 'without a conclusion'}; re-run it (gh run rerun ${latest.id}) or start a new one, and tag once it passes`);
@@ -424,7 +432,10 @@ export function evaluateCommit(commit, { required = REQUIRED_CHECKS, reviewer, e
       continue;
     }
     if (CI_CHECKS.includes(name)) {
-      for (const run of named.filter((r) => !r.fromCi)) block(`a check named "${name}" also comes from ${source(run)}, not the ${CI_WORKFLOW.name} workflow; refusing so it cannot stand in for the real job`);
+      for (const run of named.filter((r) => !r.fromCi)) {
+        if (unlinked(run)) wait(`a check named "${name}" from ${source(run)} is not linked to a workflow run yet`);
+        else block(`a check named "${name}" also comes from ${source(run)}, not the ${CI_WORKFLOW.name} workflow; refusing so it cannot stand in for the real job`);
+      }
       for (const status of namedStatuses) block(`a commit status named "${name}" was set by ${status.creator ?? 'an unknown account'}; "${name}" must come from the ${CI_WORKFLOW.name} workflow`);
       const fromCi = named.filter((r) => r.fromCi && judged.has(r.suiteId));
       if (fromCi.length === 0) {
