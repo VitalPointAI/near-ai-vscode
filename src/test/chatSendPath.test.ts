@@ -557,3 +557,38 @@ test('a conversation nobody is running still sends, and disposing the extension 
     globalThis.fetch = originalFetch;
   }
 });
+
+// 0.4.26: a team added with Import team runs only once the person approves it. Closing the question runs nothing; "Use this team" approves it for good.
+test('an imported team asks before its first /team run, runs nothing until approved, and is not asked about again', async () => {
+  const { root, auth } = await projectWithProfile();
+  const { TeamLibrary, renderTeam } = await import('../agent/teams');
+  const previousTeamsDir = process.env.NEAR_AI_TEAMS_DIR;
+  process.env.NEAR_AI_TEAMS_DIR = path.join(root, '.teams-home');
+  const library = new TeamLibrary(process.env.NEAR_AI_TEAMS_DIR);
+  const file = await library.importTeam('Web crew', renderTeam('Web crew', 'Builds pages', [{ name: 'dev', role: 'implementer', instructions: 'Build it.' }]));
+  const calls: string[] = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = fakeNear(calls) as typeof fetch;
+  const asked: string[] = [];
+  const originalWarning = vscodeStub.window.showWarningMessage;
+  try {
+    const sidebar = await openSidebar(root, auth);
+    (vscodeStub.window as { showWarningMessage: unknown }).showWarningMessage = (message: string) => { asked.push(message); return Promise.resolve(undefined); };
+    await sidebar.send({ type: 'open-command', command: 'team:web-crew', args: 'make the page', model: 'z-ai/glm-5.3' });
+    assert.match(asked[0] ?? '', /^The team "Web crew" was imported from a file and has not been approved yet: dev \(implementer\)\. Use it\?/);
+    assert.equal((sidebar.posted.filter((message) => message.type === 'assistant-error').at(-1) as { text: string }).text, 'The imported team "Web crew" was not approved, so it did not run. Run /team:web-crew again to be asked.');
+    assert.equal(calls.some((call) => call.endsWith('/chat/completions')), false, 'nothing ran');
+    assert.equal(await library.isPendingImport(file), true);
+    (vscodeStub.window as { showWarningMessage: unknown }).showWarningMessage = (message: string) => { asked.push(message); return Promise.resolve('Use this team'); };
+    await sidebar.send({ type: 'open-command', command: 'team:web-crew', args: 'make the page', model: 'z-ai/glm-5.3' });
+    assert.equal(await library.isPendingImport(file), false, 'approved');
+    assert.ok(calls.some((call) => call.endsWith('/chat/completions')), 'the team ran once approved');
+    const before = asked.length;
+    await sidebar.send({ type: 'open-command', command: 'team:web-crew', args: 'again', model: 'z-ai/glm-5.3' });
+    assert.equal(asked.slice(before).filter((message) => message.includes('was imported from a file')).length, 0, 'not asked again');
+  } finally {
+    globalThis.fetch = originalFetch;
+    (vscodeStub.window as { showWarningMessage: unknown }).showWarningMessage = originalWarning;
+    if (previousTeamsDir === undefined) delete process.env.NEAR_AI_TEAMS_DIR; else process.env.NEAR_AI_TEAMS_DIR = previousTeamsDir;
+  }
+});

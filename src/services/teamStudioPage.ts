@@ -11,7 +11,9 @@ import { CUSTOM_PLAGIARISM_CHECKER } from '../agent/researchIntegrity';
 import { proposalDraft, proposalText, type TeamProposal } from '../agent/teamBuilder';
 import { layoutNetwork } from '../domain/networkLayout';
 import { gradingCoverage } from '../domain/teamKnowledge';
-import { loadKnowledge } from './teamKnowledgeStore';
+import { knowledgeFile, loadKnowledge } from './teamKnowledgeStore';
+import { buildTeamPackage, cleanKnowledge, importQuestion, MAX_TEAM_PACKAGE_BYTES, readTeamMarkdown, readTeamPackage, shareProblems, TEAM_PACKAGE_EXTENSION, TeamPackageError, type ReadPackage } from '../agent/teamPackage';
+import type { TeamKnowledge } from '../domain/teamKnowledge';
 
 /** The facts, relations and grading of each node, so the page can show a card without being sent the whole graph twice. */
 function nodeDetails(graph: { nodes: Array<{ id: string; facts: Array<{ text: string; source?: string }>; functions: string[]; grading?: unknown; origin: string; mentions: number }>; edges: Array<{ from: string; to: string; kind: string; tension: number | null; basis?: string; grading?: unknown }> }): Record<string, unknown> {
@@ -55,9 +57,40 @@ export interface StudioContext {
 
 export interface StudioMemberModel { tier: string; model: string; privacy: DirectoryModel['privacy']; privacyText: string; available?: boolean }
 /** `update`: the built-in template the team was made from and whether a newer version exists, so the card can offer Update Team. */
-export interface LibraryTeam { id: string; kind: 'project' | 'user'; name: string; description: string; command?: string; file: string; savedAt?: string; error?: string; update?: { template: string; from?: number; to: number; available: boolean }; members: Array<{ name: string; role?: string } & StudioMemberModel> }
+/** `imported`: added with Import team and not yet approved to run; the person is asked the first time it would run. */
+export interface LibraryTeam { id: string; kind: 'project' | 'user'; name: string; description: string; command?: string; file: string; savedAt?: string; error?: string; imported?: boolean; update?: { template: string; from?: number; to: number; available: boolean }; members: Array<{ name: string; role?: string } & StudioMemberModel> }
 export interface LibraryArchived { id: string; name: string; file: string; savedAt?: string }
 export interface LibraryState { teams: LibraryTeam[]; archived: LibraryArchived[] }
+
+/**
+ * One choice in the new-team picker (owner, 2026-11-16: "I'm not seeing the teams I've already set up in other projects and saved as one of my reusable
+ * teams ... Need to see all available teams and maybe be able to filter between my teams and those provided by the extension"). `source` is what the
+ * filter uses: `mine` for the person's saved teams (from any project), `builtin` for what the extension provides. `origin` says where it came from.
+ */
+export interface PickerEntry { id: string; source: 'mine' | 'builtin'; group: StudioStartingPoint['group'] | 'library'; label: string; description: string; members: string[]; memberCount: number; origin: string; imported?: boolean; teamId?: string }
+export type PickerFilter = 'all' | 'mine' | 'builtin';
+
+/** Every starting point the picker offers: the person's saved teams first, then the built-in ones. A library team that does not parse is left out. */
+export function teamPicker(startingPoints: StudioStartingPoint[], teams: LibraryTeam[]): PickerEntry[] {
+  const mine = teams.filter((team) => team.kind === 'user' && !team.error).map((team): PickerEntry => ({
+    id: `lib:${team.id.slice('user:'.length)}`, source: 'mine', group: 'library', label: team.name, description: team.description,
+    members: team.members.map((member) => member.name), memberCount: team.members.length,
+    origin: team.imported ? 'Imported, not approved yet' : `My team${team.savedAt ? `, saved ${team.savedAt.slice(0, 10)}` : ''}`,
+    ...(team.imported ? { imported: true } : {}), teamId: team.id
+  }));
+  const builtin = startingPoints.map((point): PickerEntry => ({
+    id: point.id, source: 'builtin', group: point.group, label: point.label, description: point.description, members: point.members, memberCount: point.members.length,
+    origin: point.group === 'project-type' ? 'Built in: project type' : point.group === 'gsd' ? 'Built in: Open-GSD roles' : 'Built in'
+  }));
+  return [...mine, ...builtin];
+}
+
+/** The picker's entries under a filter. "Start empty" is not a team, so it shows under every filter. */
+export function filterPicker(entries: PickerEntry[], filter: PickerFilter): PickerEntry[] {
+  return entries.filter((entry) => filter === 'all' || entry.source === filter || entry.id === 'empty');
+}
+
+export const NO_SAVED_TEAMS_TEXT = 'You have no saved teams yet. Save a team as one of your teams in Team Studio to reuse it in any project.';
 
 export interface StudioReview { markdown: string; errors: DraftIssue[]; warnings: DraftIssue[]; members: StudioMemberModel[] }
 
@@ -207,6 +240,7 @@ const mtime = async (file: string) => (await stat(file).catch(() => undefined))?
 /** Every team the studio manages: the project team, the user's teams, and archived teams. */
 export async function listLibrary(library: TeamLibrary, root: string | undefined, input: DirectoryInput): Promise<LibraryState> {
   const entries = await library.list(root);
+  const pending = await library.pendingImports();
   const teams = await Promise.all(entries.map(async (entry): Promise<LibraryTeam> => {
     const slug = slugify(path.basename(entry.file, '.md'));
     const team = entry.team;
@@ -216,6 +250,7 @@ export async function listLibrary(library: TeamLibrary, root: string | undefined
       name: team?.name ?? slug, description: team?.description ?? '',
       ...(team ? { command: `/team:${entry.project ? 'project' : team.slug} ` } : {}),
       ...(entry.error ? { error: entry.error } : {}),
+      ...(!entry.project && pending.has(path.basename(entry.file)) ? { imported: true } : {}),
       ...(template ? { update: { template: template.label, ...(template.fromVersion ? { from: template.fromVersion } : {}), to: template.toVersion, available: !template.stamped || template.fromVersion !== template.toVersion } } : {}),
       ...(await mtime(entry.file) ? { savedAt: await mtime(entry.file) } : {}),
       members: (team?.members ?? []).map((member) => ({ name: member.name, ...(member.role ? { role: member.role } : {}), ...memberModel(member, input) }))
@@ -246,7 +281,7 @@ export type StudioMessage =
   | { type: 'leave-editor'; edit: OpenEdit }
   /** What is unsaved right now (nothing, the builder, or the editor), kept if the panel is closed. */
   | { type: 'unsaved'; wizard?: SavedWizard; edit?: OpenEdit }
-  | { type: 'open' | 'duplicate' | 'export' | 'archive' | 'restore' | 'use-in-chat' | 'open-markdown' | 'versions' | 'update-team'; id: string }
+  | { type: 'open' | 'duplicate' | 'export' | 'share' | 'archive' | 'restore' | 'use-in-chat' | 'open-markdown' | 'versions' | 'update-team'; id: string }
   | { type: 'version-view' | 'version-restore'; id: string; ref: string }
   | { type: 'review'; seq: number; draft: TeamDraft; id?: string }
   | { type: 'save'; draft: TeamDraft; id: string; base: string }
@@ -298,7 +333,7 @@ export function parseStudioMessage(value: unknown): StudioMessage | undefined {
       if (message.edit !== undefined) { const edit = openEdit(message.edit); return edit ? { type: 'unsaved', edit } : undefined; }
       return { type: 'unsaved' };
     }
-    case 'open': case 'duplicate': case 'export': case 'archive': case 'restore': case 'use-in-chat': case 'open-markdown': case 'versions': case 'update-team':
+    case 'open': case 'duplicate': case 'export': case 'share': case 'archive': case 'restore': case 'use-in-chat': case 'open-markdown': case 'versions': case 'update-team':
       return exactKeys(message, ['type', 'id']) && id() ? { type: message.type, id: message.id as string } : undefined;
     case 'version-view': case 'version-restore':
       return exactKeys(message, ['type', 'id', 'ref']) && id() && typeof message.ref === 'string' && VERSION_REF.test(message.ref) ? { type: message.type, id: message.id as string, ref: message.ref } : undefined;
@@ -332,16 +367,17 @@ export function parseStudioMessage(value: unknown): StudioMessage | undefined {
     }
     case 'save-draft': {
       if (!exactKeys(message, ['type', 'draft', 'step', 'target'], ['startingPoint']) || !Number.isInteger(message.step) || (message.step as number) < 0 || (message.step as number) > 4 || (message.target !== 'project' && message.target !== 'user')) return undefined;
-      if (message.startingPoint !== undefined && (typeof message.startingPoint !== 'string' || !/^[a-z:-]{1,40}$/.test(message.startingPoint))) return undefined;
+      if (message.startingPoint !== undefined && (typeof message.startingPoint !== 'string' || !/^[a-z0-9:-]{1,70}$/.test(message.startingPoint))) return undefined;
       const draft = parseDraft(message.draft);
       return draft ? { type: 'save-draft', draft, step: message.step as number, target: message.target, ...(message.startingPoint !== undefined ? { startingPoint: message.startingPoint as string } : {}) } : undefined;
     }
     case 'starting-point': {
-      if (!exactKeys(message, ['type', 'id', 'goal', 'locality'], ['workShape', 'riskLevel']) || typeof message.id !== 'string' || !/^(?:recommend|empty|type:[a-z]+|gsd:[a-z-]+)$/.test(message.id) || !text(message.goal, 400)) return undefined;
+      if (!exactKeys(message, ['type', 'id', 'goal', 'locality'], ['workShape', 'riskLevel']) || typeof message.id !== 'string' || !/^(?:recommend|empty|type:[a-z]+|gsd:[a-z-]+|lib:[a-z0-9][a-z0-9-]{0,60})$/.test(message.id) || !text(message.goal, 400)) return undefined;
       if (!(LOCALITIES as readonly unknown[]).includes(message.locality)) return undefined;
       if (message.workShape !== undefined && !(WORK_SHAPES as readonly unknown[]).includes(message.workShape)) return undefined;
       if (message.riskLevel !== undefined && !(RISKS as readonly unknown[]).includes(message.riskLevel)) return undefined;
-      const known = message.id === 'recommend' || message.id === 'empty' || PROJECT_TYPES.some((type) => message.id === `type:${type.id}`) || GSD_TEMPLATES.some((template) => message.id === `gsd:${template.id}`);
+      // A saved team (lib:<slug>) is looked up in the current listing when the message is handled, never by a path from the page.
+      const known = message.id === 'recommend' || message.id === 'empty' || message.id.startsWith('lib:') || PROJECT_TYPES.some((type) => message.id === `type:${type.id}`) || GSD_TEMPLATES.some((template) => message.id === `gsd:${template.id}`);
       return known ? { type: 'starting-point', id: message.id, goal: message.goal as string, locality: message.locality as 'cloud', ...(message.workShape ? { workShape: message.workShape as 'feature' } : {}), ...(message.riskLevel ? { riskLevel: message.riskLevel as 'low' } : {}) } : undefined;
     }
     case 'open-setting':
@@ -382,7 +418,12 @@ export interface TeamStudioDeps {
   confirm(message: string, action: string): Promise<boolean>;
   ask(prompt: string, value: string): Promise<string | undefined>;
   pickExportTarget(defaultName: string): Promise<string | undefined>;
+  /** Where to save a team's share file (`<team>.near-team.json`); undefined when the person cancelled. */
+  pickShareTarget?(defaultName: string): Promise<string | undefined>;
+  /** A share file (.near-team.json) or a team .md file to import. */
   pickImportSource(): Promise<string | undefined>;
+  /** The person's home folder, so a share never carries a path inside it. */
+  home?: string;
   applyProjectType(root: string, type: ProjectType, goal: string): Promise<unknown>;
   /**
    * What the model comparisons say each role should use, for a team that was just saved (owner, 2026-11-07: "as new teams are added, we should
@@ -462,12 +503,12 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
     // The builder's draft is already the resumable draft: say once that it was kept. An open
     // team's changes stay kept until the user reopens or discards them.
     if (kept?.kind === 'wizard' || (kept?.kind === 'editor' && !library.teams.some((team) => team.id === kept.id))) await deps.kept?.set(undefined);
-    post({ type: 'state', library, context, ...(saved ? { savedDraft: saved } : {}), ...(kept?.kind === 'wizard' && saved ? { kept: { kind: 'wizard', text: KEPT_WIZARD_TEXT } } : kept?.kind === 'editor' && library.teams.some((team) => team.id === kept.id) ? { kept: { ...kept, text: `Your unsaved changes to "${kept.name || 'the team'}" were kept as a draft.` } } : {}) });
+    post({ type: 'state', library, context, picker: teamPicker(context!.startingPoints, library.teams), ...(saved ? { savedDraft: saved } : {}), ...(kept?.kind === 'wizard' && saved ? { kept: { kind: 'wizard', text: KEPT_WIZARD_TEXT } } : kept?.kind === 'editor' && library.teams.some((team) => team.id === kept.id) ? { kept: { ...kept, text: `Your unsaved changes to "${kept.name || 'the team'}" were kept as a draft.` } } : {}) });
   };
   const refreshLibrary = async () => {
     if (!input) return;
     library = await listLibrary(deps.library, deps.root, input);
-    post({ type: 'library', library });
+    post({ type: 'library', library, ...(context ? { picker: teamPicker(context.startingPoints, library.teams) } : {}) });
   };
   const soon = () => {
     if (timer) clearTimeout(timer);
@@ -644,6 +685,15 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
       }
       case 'starting-point': {
         if (!context) await load();
+        if (message.id.startsWith('lib:')) {
+          // One of the person's saved teams: its members and description, exactly as saved, copied into the draft. Saving the draft as the project team
+          // then goes through the same steps (and the same "use this project's team?" question before it first runs) as any other starting point.
+          const team = teamFor(`user:${message.id.slice('lib:'.length)}`);
+          if (!team || team.error) { post({ type: 'error', text: 'That team is no longer in your teams. Pick another starting point.' }); return; }
+          const draft = draftFromMarkdown(await readFile(team.file, 'utf8'), team.file);
+          post({ type: 'starting-point', id: message.id, draft: { ...draft, name: '' } });
+          return;
+        }
         const result = startingPointDraft(message, context!);
         post({ type: 'starting-point', id: message.id, draft: result.draft, ...(result.projectType ? { projectType: result.projectType } : {}) });
         return;
@@ -798,9 +848,58 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
       case 'import': {
         const source = await deps.pickImportSource();
         if (!source) return;
-        const file = await deps.library.import(source);
+        // Checked before anything is written, then shown to the person, who decides. A refused file says why in plain words and changes nothing.
+        let read: ReadPackage;
+        try {
+          const size = (await stat(source)).size;
+          if (size > MAX_TEAM_PACKAGE_BYTES) throw new TeamPackageError('This file is too large to be a NEAR AI team, so it was not imported.');
+          const textIn = await readFile(source, 'utf8');
+          read = source.toLowerCase().endsWith('.md') ? readTeamMarkdown(textIn) : readTeamPackage(textIn);
+        } catch (error) {
+          post({ type: 'error', text: error instanceof TeamPackageError ? error.message : `The file could not be read: ${(error as Error).message}` });
+          return;
+        }
+        if (await choose(importQuestion(read), 'Add to my teams') !== 'Add to my teams') { post({ type: 'notice', text: 'Nothing was imported.' }); return; }
+        const file = await deps.library.importTeam(read.team.name, read.markdown);
+        let knowledgeNote = '';
+        if (read.knowledge) {
+          const target = knowledgeFile(deps.library.directory, teamKnowledgeKey(file));
+          if (await exists(target)) knowledgeNote = ' Its knowledge graph was not added, because a graph for that name is already here.';
+          else {
+            await mkdir(path.dirname(target), { recursive: true });
+            await writeFile(target, `${JSON.stringify({ ...read.knowledge, team: teamKnowledgeKey(file) })}\n`, { encoding: 'utf8', flag: 'wx' });
+            knowledgeNote = ` Its knowledge graph (${read.facts} fact${read.facts === 1 ? '' : 's'}) was added too.`;
+          }
+        }
         await refreshLibrary();
-        await sendTeam(`user:${slugify(path.basename(file, '.md'))}`, file, `Imported "${parseTeam(await readFile(file, 'utf8'), file).name}".`);
+        await sendTeam(`user:${slugify(path.basename(file, '.md'))}`, file, `Added "${read.team.name}" to your teams. It is not trusted yet: the first time it runs, you are asked to approve it.${knowledgeNote}`);
+        return;
+      }
+      case 'share': {
+        const file = fileFor(message.id);
+        const entry = teamFor(message.id);
+        if (!file || !entry || entry.error) return;
+        if (!deps.pickShareTarget) { post({ type: 'error', text: 'Sharing is not available here.' }); return; }
+        const markdown = await readFile(file, 'utf8');
+        const problems = shareProblems(markdown, file, deps.home);
+        if (problems.refused) { post({ type: 'error', text: problems.refused }); return; }
+        if (problems.paths.length && !await deps.confirm(`${problems.paths.join(', ')} ${problems.paths.length === 1 ? 'names' : 'name'} a folder on this computer. Anyone you send the team to will see it. Share it anyway?`, 'Share anyway')) return;
+        // The knowledge graph stays here unless the person includes it (off by default); a graph is cleaned of local paths and secrets first.
+        let knowledge: TeamKnowledge | undefined;
+        const loaded = await loadKnowledge(deps.library.directory, teamKnowledgeKey(file)).catch(() => undefined);
+        const facts = loaded ? loaded.knowledge.nodes.reduce((total, node) => total + node.facts.length, 0) : 0;
+        if (loaded && !loaded.problem && facts > 0) {
+          const choice = await choose(`Include this team's knowledge graph (${facts} fact${facts === 1 ? '' : 's'})? It stays on this computer unless you include it. Facts can hold what the team learned in your projects; local paths and anything that looks like a key are removed first.`, 'Share without it', 'Include it');
+          if (choice === undefined) return;
+          if (choice === 'Include it') {
+            knowledge = cleanKnowledge(loaded.knowledge, deps.home);
+            if (!knowledge) { post({ type: 'error', text: 'The knowledge graph holds something that looks like a key or password even after cleaning, so it was not included. Share the team without it.' }); return; }
+          }
+        }
+        const target = await deps.pickShareTarget(`${message.id === 'project' ? 'project-team' : path.basename(file, '.md')}${TEAM_PACKAGE_EXTENSION}`);
+        if (!target) return;
+        await writeFile(target, buildTeamPackage(markdown, file, knowledge), 'utf8');
+        post({ type: 'notice', text: `Saved "${entry.name}" to ${path.basename(target)}${knowledge ? ' with its knowledge graph' : ''}. Send that file to share the team; whoever imports it sees what it contains and is asked before it is added or run.` });
         return;
       }
       case 'versions': {

@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased
+
+- **Your saved teams appear when you set up a new team.** The starting points in Team Studio's
+  builder, including **Set Up Project Team** in a new project, now list the teams you saved as
+  your own (from any project) next to the ones the extension provides, with a filter for **All**,
+  **My teams** and **Built-in**. Each shows its description, how many members it has and where it
+  came from. Choosing one copies its members into the new team for you to review, and a project
+  team made this way is still asked about before it first runs. With no saved teams, **My teams**
+  says how to save one.
+- **Share a team as one file.** **Share…** in Team Studio saves a team as a `.near-team.json` file
+  you can send to someone. It carries the team and a checksum, never a path, setting, key or
+  token from your computer; the team's knowledge graph is left out unless you choose to include
+  it, and is cleaned first when you do. A team holding something that looks like a key is not
+  shared, and one naming a folder on your computer asks first. **Import…** checks the file, shows
+  what the team contains and adds it only when you agree; a damaged or edited file is refused with
+  a plain message. An imported team is not trusted until you approve it the first time it would
+  run.
+
 ## 0.4.25
 
 This release adds Team Mode as a preview, so a person can set up a signed team record for a

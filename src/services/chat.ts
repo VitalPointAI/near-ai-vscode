@@ -29,7 +29,7 @@ import { handlePickupAction, markPickupSeen, pickupCardModel, writePickupPointer
 import { currentSyncStatus, onSyncStatus, refreshSyncHome } from './syncCommands';
 import { redactSyncText, SYNC_PROMPT_DISMISSED_KEY, syncPanelMessage } from './syncPanel';
 import { copyAttachmentIntoProject, PreparedAttachments, prepareAttachments, stageAttachment, StagedAttachment } from '../agent/attachments';
-import { projectTeamAllowed, TeamConsent, TeamDefinition, TeamLibrary, teamAgents, workingTeamFor } from '../agent/teams';
+import { libraryTeamAllowed, projectTeamAllowed, TeamConsent, TeamDefinition, TeamLibrary, teamAgents, workingTeamFor } from '../agent/teams';
 import type { GsdAgent } from '../gsd/library';
 import { attachmentsClearedMessage, modelOptions, modelPrivacyLabel, modelsAsPrivateAs, privateSafetyModel, parseChatWebviewMessage, providerErrorMessage, discoverGsdArtifacts, isSafeArtifactPath, GsdArtifactLink, profileStatusMessage } from './chatBridge';
 import type { ChatWebviewMessage } from './chatBridge';
@@ -255,13 +255,20 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
       return answer === undefined ? undefined : answer === 'Use this team';
     }
   });
+  /** Whether a library team may run: an imported one the person has not approved is asked about first (see libraryTeamAllowed). */
+  const allowLibraryTeam = (team: TeamDefinition, library: TeamLibrary): Promise<boolean> => libraryTeamAllowed(team, library, async (question) => {
+    const answer = await vscode.window.showWarningMessage(question, 'Use this team', 'Don\'t use it');
+    return answer === undefined ? undefined : answer === 'Use this team';
+  });
   const workingTeamOrThrow = async (tab: ChatTab, root: string): Promise<TeamDefinition | undefined> => {
     await whenTeamsMoved();
     const library = new TeamLibrary(teamLibraryDir(homeFolder()));
     // Keyed by the conversation, so a new or reopened conversation in this tab is told again.
     const conversation = tab.agent?.id ?? tab.id;
     const before = tab.teamNoticed?.startsWith(`${conversation}|`) ? tab.teamNoticed.slice(conversation.length + 1) : undefined;
-    const { team, notice, noticed } = await workingTeamFor((slug) => library.find(slug, root), tab.agent?.conversationTeam, before, allowProjectTeam);
+    const { team, notice, noticed } = await workingTeamFor((slug) => library.find(slug, root), tab.agent?.conversationTeam, before, allowProjectTeam,
+      // Not asked here, on every later message: an unapproved import is left out and the chat says to run /team:<name> again, which asks.
+      async (named) => !await library.isPendingImport(named.file));
     if (noticed) tab.teamNoticed = `${conversation}|${noticed}`;
     if (notice) tab.post({ type: 'notice', text: notice });
     return team;
@@ -785,9 +792,12 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     try {
       if (message.type === 'open-command' && message.command.startsWith('team:')) {
         await whenTeamsMoved();
-        team = await new TeamLibrary(teamLibraryDir(homeFolder())).find(message.command.slice(5), root).catch((error: Error) => { throw new Error(`That team file has a problem: ${error.message}`); });
+        const library = new TeamLibrary(teamLibraryDir(homeFolder()));
+        team = await library.find(message.command.slice(5), root).catch((error: Error) => { throw new Error(`That team file has a problem: ${error.message}`); });
         if (!team) { tab.post({ type: 'assistant-error', text: `There is no team called ${message.command.slice(5)}. Create one with NEAR AI: Team Studio.` }); return; }
         if (!message.args?.trim()) { tab.post({ type: 'assistant-error', text: `Tell the team what to do: /team:${team.slug} <task>` }); return; }
+        // 0.4.26: a team added with Import team runs only once the person approves it.
+        if (!await allowLibraryTeam(team, library)) { tab.post({ type: 'assistant-error', text: `The imported team "${team.name}" was not approved, so it did not run. Run /team:${team.slug} again to be asked.` }); return; }
         gsd = await gsdHost.context();
       } else if (message.type === 'open-command') {
         if (!(await gsdHost.context())) {

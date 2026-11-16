@@ -29,6 +29,11 @@
 
   let ctx = null;
   let lib = { teams: [], archived: [] };
+  // Every starting point the new-team picker offers (the host builds it: the person's saved teams, then the built-in ones), and which of them it shows.
+  let picker = null;
+  let pickerFilter = 'all';
+  const PICKER_FILTERS = [['all', 'All'], ['mine', 'My teams'], ['builtin', 'Built-in']];
+  const NO_SAVED_TEAMS = 'You have no saved teams yet. Save a team as one of your teams in Team Studio to reuse it in any project.';
   let savedDraft = null;
   let work = null; // the team being built or edited
   let seq = 0;
@@ -352,6 +357,8 @@
     const head = el('div', 'card-head');
     const title = el('h3', 'card-title', team.name); title.id = nextId('team');
     head.append(icon('team'), title, badge(team.kind === 'project' ? 'This project' : 'My team', team.kind === 'project' ? 'kind project' : 'kind'));
+    // An imported team runs only once the person approves it; the first run asks.
+    if (team.imported) head.append(badge('Imported: not approved yet', 'kind imported', 'Added with Import team. The first time it runs you are asked to approve it.'));
     card.setAttribute('aria-labelledby', title.id);
     card.append(head);
     if (team.error) {
@@ -382,7 +389,8 @@
       button('Open', () => vscode.postMessage({ type: 'open', id: team.id }), { primary: true, label: 'Open ' + team.name, id: 'open-' + team.id }),
       button('Use in chat', () => vscode.postMessage({ type: 'use-in-chat', id: team.id }), { label: 'Use ' + team.name + ' in chat' }),
       button('Duplicate', () => vscode.postMessage({ type: 'duplicate', id: team.id }), { label: 'Duplicate ' + team.name }),
-      button('Export', () => vscode.postMessage({ type: 'export', id: team.id }), { label: 'Export ' + team.name })
+      button('Export', () => vscode.postMessage({ type: 'export', id: team.id }), { label: 'Export ' + team.name }),
+      button('Share…', () => vscode.postMessage({ type: 'share', id: team.id }), { label: 'Share ' + team.name })
     );
     // A team made from a built-in project type can be brought up to date; the host previews every change and asks first.
     if (team.update) actions.append(button(team.update.available ? 'Update team…' : 'Check for updates…', () => vscode.postMessage({ type: 'update-team', id: team.id }), { label: (team.update.available ? 'Update ' : 'Check for updates to ') + team.name + ' (' + team.update.template + ' template' + (team.update.from ? ' v' + team.update.from : '') + (team.update.available ? ' → v' + team.update.to : '') + ')', id: 'update-' + team.id }));
@@ -424,10 +432,30 @@
     root.append(where);
 
     const start = el('fieldset', 'choices starting');
-    start.append(el('legend', '', 'Starting point'), el('p', 'hint', 'Pick one to fill in members you can then change. You can also add every member yourself.'));
-    const groups = [['recommend', 'Recommended'], ['project-type', 'For this kind of project'], ['gsd', 'Built from Open-GSD roles'], ['empty', 'Blank']];
+    start.append(el('legend', '', 'Starting point'), el('p', 'hint', 'Pick one to fill in members you can then change: one of your saved teams, or one the extension provides. You can also add every member yourself.'));
+    const entries = pickerEntries();
+    // All, My teams (saved from any project) or Built-in (provided by the extension).
+    const filter = el('div', 'picker-filter'); filter.setAttribute('role', 'radiogroup'); filter.setAttribute('aria-label', 'Show starting points');
+    for (const [value, label] of PICKER_FILTERS) {
+      const count = entries.filter((entry) => value === 'all' || entry.source === value).filter((entry) => entry.id !== 'empty').length;
+      const option = el('label', 'filter' + (pickerFilter === value ? ' selected' : ''));
+      const radio = el('input'); radio.type = 'radio'; radio.name = 'picker-filter'; radio.value = value; radio.checked = pickerFilter === value; radio.id = 'picker-filter-' + value;
+      radio.addEventListener('change', () => {
+        pickerFilter = value;
+        // The chosen starting point stays chosen only while it is shown, so Next never applies one the person cannot see.
+        const visible = visibleEntries();
+        if (!visible.some((entry) => entry.id === work.startingPoint) && visible.length) work.startingPoint = visible[0].id;
+        render();
+      });
+      option.append(radio, el('span', '', label + ' (' + count + ')'));
+      filter.append(option);
+    }
+    start.append(filter);
+    const groups = [['library', 'My teams'], ['recommend', 'Recommended'], ['project-type', 'For this kind of project'], ['gsd', 'Built from Open-GSD roles'], ['empty', 'Blank']];
+    const visible = visibleEntries();
+    if (pickerFilter === 'mine' && !visible.some((entry) => entry.source === 'mine')) start.append(el('p', 'hint empty-picker', NO_SAVED_TEAMS));
     for (const [group, title] of groups) {
-      const points = (ctx ? ctx.startingPoints : []).filter((point) => point.group === group);
+      const points = visible.filter((point) => point.group === group);
       if (!points.length) continue;
       start.append(el('h4', '', title));
       const grid = el('div', 'choice-grid');
@@ -435,9 +463,16 @@
         const option = el('label', 'choice' + (work.startingPoint === point.id ? ' selected' : ''));
         const radio = el('input'); radio.type = 'radio'; radio.name = 'starting-point'; radio.value = point.id; radio.checked = work.startingPoint === point.id;
         radio.addEventListener('change', () => { work.startingPoint = point.id; render(); });
-        option.append(radio, el('span', 'choice-label', point.label), el('span', 'hint', point.description));
-        if (point.members.length) option.append(el('span', 'hint small', point.members.join(', ')));
-        grid.append(option);
+        option.append(radio, el('span', 'choice-label', point.label));
+        if (point.origin) option.append(badge(point.origin, point.imported ? 'kind imported' : 'kind'));
+        if (point.description) option.append(el('span', 'hint', point.description));
+        if (point.members.length) option.append(el('span', 'hint small', point.memberCount + ' member' + (point.memberCount === 1 ? '' : 's') + ': ' + point.members.join(', ')));
+        // A saved team can be shared from here too (one portable file to send; the host checks it and asks about the knowledge graph).
+        if (point.teamId) {
+          const cell = el('div', 'choice-cell');
+          cell.append(option, button('Share…', () => vscode.postMessage({ type: 'share', id: point.teamId }), { link: true, label: 'Share ' + point.label }));
+          grid.append(cell);
+        } else grid.append(option);
       }
       start.append(grid);
     }
@@ -455,6 +490,16 @@
     }
     if (work.startingPoint.startsWith('type:')) start.append(el('p', 'hint', 'Saving this as the project team also writes this project type\'s guidance to AGENTS.md (plan, execute, red team, verify, audit, release).'));
     root.append(start);
+  }
+
+  /** The picker's entries from the host; before the first state arrives, the built-in starting points. */
+  function pickerEntries() {
+    if (picker) return picker;
+    return (ctx ? ctx.startingPoints : []).map((point) => ({ id: point.id, source: 'builtin', group: point.group, label: point.label, description: point.description, members: point.members, memberCount: point.members.length, origin: 'Built in' }));
+  }
+  /** The entries the current filter shows. "Start empty" is not a team, so it shows under every filter. */
+  function visibleEntries() {
+    return pickerEntries().filter((entry) => pickerFilter === 'all' || entry.source === pickerFilter || entry.id === 'empty');
   }
 
   function renderHeaderName() { if (work && work.mode === 'editor') { const crumbs = $('crumbs'); const last = crumbs.children && crumbs.children[crumbs.children.length - 1]; if (last) last.textContent = work.draft.name || 'Team'; } }
@@ -1157,7 +1202,7 @@
     if (message.type === 'layout-probe' && window.nearAiLayoutProbe) { vscode.postMessage(window.nearAiLayoutProbe()); return; }
     switch (message.type) {
       case 'state':
-        ctx = message.context; lib = message.library; savedDraft = message.savedDraft || null;
+        ctx = message.context; lib = message.library; savedDraft = message.savedDraft || null; picker = message.picker || null;
         render();
         if (work) requestReview();
         if (message.kept) showKept(message.kept);
@@ -1173,7 +1218,9 @@
         break;
       case 'library':
         lib = message.library;
-        if (!work) render();
+        if (message.picker) picker = message.picker;
+        // The picker on the first step of the builder lists saved teams, so it is drawn again when the library changes there.
+        if (!work || (work.mode === 'wizard' && work.step === 0)) render();
         break;
       case 'start-wizard':
         if (isDirty() || isWizardDirty()) { showBanner('Save or discard your changes first, then set up the project team.', 'warning'); break; }
