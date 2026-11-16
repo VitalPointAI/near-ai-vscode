@@ -74,6 +74,13 @@ function statusLabel(status: TransportStatus): string {
   return status.reason === undefined ? status.state : `${status.state} (${safeReason(status.reason)})`;
 }
 
+// An active key carries no label. Any other state is named, so a rotated or revoked key is never read as a working one.
+function deviceStateLabel(device: { state: string; replacedBy?: string }): string {
+  if (device.state === 'active') return '';
+  if (device.state === 'rotated' && device.replacedBy !== undefined) return ` (rotated, replaced by ${safeReason(device.replacedBy)})`;
+  return ` (${device.state})`;
+}
+
 // The Verify Team Log report (D-25) as output lines. Nothing in it is a secret: ids, names, roles and public fingerprints only.
 export function formatVerifyReport(report: VerifyReport, teamFile: TeamFile): string[] {
   const lines: string[] = [
@@ -89,7 +96,7 @@ export function formatVerifyReport(report: VerifyReport, teamFile: TeamFile): st
   for (const member of report.members) {
     const devices = member.devices.length === 0
       ? 'no devices'
-      : member.devices.map((device) => `device ${safeReason(device.fingerprint)}${device.revoked ? ' (revoked)' : ''}`).join(', ');
+      : member.devices.map((device) => `device ${safeReason(device.fingerprint)}${deviceStateLabel(device)}`).join(', ');
     lines.push(`  ${safeReason(member.name)}, ${member.role}${member.removed ? ' (removed)' : ''}: ${devices}`);
   }
   lines.push(`Snapshots: ${report.snapshots}`, `Rejected events: ${report.rejected.length}`);

@@ -3,6 +3,8 @@
 // push race rebuilds lamport, prev, id and signature instead of re-sending a stale event (D-05, D-29). Reading syncs the transport and
 // reports a verdict per entry; verifyAll replays the whole log from genesis (D-25). This module never imports vscode.
 import { CanonicalJsonError, MAX_EVENT_BYTES, canonicalBytes, canonicalize, snapshotPath } from '../domain/team/canonical';
+import { teamKeyStatus } from '../domain/team/keyStatus';
+import type { KeyState } from '../domain/team/keyStatus';
 import { applyEntry, createState, snapshotBody } from '../domain/team/materialize';
 import type { SnapshotFile } from '../domain/team/materialize';
 import { actionForEvent, decideTeamAction } from '../domain/team/permissions';
@@ -133,7 +135,8 @@ export interface SyncResult {
 export interface VerifyReport {
   events: number;
   accepted: number;
-  members: Array<{ id: string; name: string; role: Role; removed: boolean; devices: Array<{ fingerprint: string; revoked: boolean }> }>;
+  // Each key's status comes from the team roster (teamKeyStatus), so a rotated key is not shown as active and a removed member's keys are revoked.
+  members: Array<{ id: string; name: string; role: Role; removed: boolean; devices: Array<{ fingerprint: string; state: KeyState; replacedBy?: string }> }>;
   head: LogHead;
   rejected: Rejection[];
   refused?: string;
@@ -281,12 +284,16 @@ export class TeamLog {
       replayed += 1;
       if (replayed % this.yieldEvery === 0) await nextTurn();
     }
+    const keyStatus = teamKeyStatus(state);
     const report: VerifyReport = {
       events,
       accepted: state.accepted,
       members: [...state.members.values()].map((member) => ({
         id: member.id, name: member.name, role: member.role, removed: member.removedEvent !== undefined,
-        devices: member.devices.map((device) => ({ fingerprint: device.fingerprint, revoked: device.revokedEvent !== undefined }))
+        devices: member.devices.map((device) => {
+          const status = keyStatus({ fingerprint: device.fingerprint, publicKey: device.publicKey });
+          return status.replacedBy === undefined ? { fingerprint: device.fingerprint, state: status.state } : { fingerprint: device.fingerprint, state: status.state, replacedBy: status.replacedBy };
+        })
       })),
       head: { ...state.head },
       rejected: state.rejected.map((rejection) => ({ ...rejection })),

@@ -362,7 +362,7 @@ test('formatVerifyReport lists refused logs, removed members, revoked devices an
   const report: VerifyReport = {
     events: 5, accepted: 3, head: { eventId: 'evt-X', lamport: 4 }, snapshots: 1, unsupported: 2, refused: 'genesis does not match',
     members: [
-      { id: 'm1', name: `Ann\nInjected line ${'x'.repeat(600)}`, role: 'lead', removed: false, devices: [{ fingerprint: 'fp-1', revoked: false }, { fingerprint: 'fp-2', revoked: true }] },
+      { id: 'm1', name: `Ann\nInjected line ${'x'.repeat(600)}`, role: 'lead', removed: false, devices: [{ fingerprint: 'fp-1', state: 'active' }, { fingerprint: 'fp-2', state: 'revoked' }, { fingerprint: 'fp-3', state: 'rotated', replacedBy: 'fp-4' }, { fingerprint: 'fp-5', state: 'unknown' }] },
       { id: 'm2', name: 'Bob', role: 'developer', removed: true, devices: [] }
     ],
     rejected: [{ eventId: 'evt-bad', reason: 'signature is not valid' }, { eventId: 'events/odd\u0007name.json', reason: 'malformed event' }],
@@ -380,7 +380,7 @@ test('formatVerifyReport lists refused logs, removed members, revoked devices an
   assert.equal(lines.some((line) => line.includes('hunter2') || line.includes('user:')), false, 'credentials in a status reason are removed');
   assert.ok(lines.includes('Log refused: genesis does not match'));
   assert.ok(lines.includes('  Bob, developer (removed): no devices'));
-  assert.ok(lines.some((line) => line.includes('device fp-1, device fp-2 (revoked)')));
+  assert.ok(lines.some((line) => line.includes('device fp-1, device fp-2 (revoked), device fp-3 (rotated, replaced by fp-4), device fp-5 (unknown)')));
   assert.ok(lines.includes('Events: 5 (3 accepted, 2 rejected)'));
   assert.ok(lines.includes('Snapshots: 1'));
   assert.ok(lines.includes('Secret-like values found (warning only):'));

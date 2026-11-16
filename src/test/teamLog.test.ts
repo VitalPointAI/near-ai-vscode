@@ -354,8 +354,30 @@ test('verifyAll replays from genesis and reports events, members, devices, head 
     assert.deepEqual(report.head, b.log.state().head);
     assert.deepEqual(report.members, [{
       id: seed.owner.memberId, name: 'Owner Test', role: 'owner', removed: false,
-      devices: [{ fingerprint: seed.owner.identity.fingerprint, revoked: false }, { fingerprint: seed.second.identity.fingerprint, revoked: false }]
+      devices: [{ fingerprint: seed.owner.identity.fingerprint, state: 'active' }, { fingerprint: seed.second.identity.fingerprint, state: 'active' }]
     }]);
+  });
+});
+
+test('verifyAll reports each key with its real status: active, rotated (with its replacement) and revoked', async () => {
+  await withFixture(['a', 'b'], async (fixture) => {
+    const seed = await seedTeam(fixture);
+    const fresh = await makeDevice(seed.owner);
+    assert.equal((await seed.a.log.append(() => [secondDeviceIntent(seed.second)])).ok, true);
+    // The owner's first key retires itself in favour of a fresh key, and the second key is revoked by the owner.
+    assert.equal((await seed.a.log.append(() => [{ type: 'device.rotated', body: rotationBody(seed.owner.memberId, seed.owner, fresh) }])).ok, true);
+    const revoker = clientFor(fixture, 'b', seed.anchor, { identity: fresh.identity, memberId: seed.owner.memberId });
+    await revoker.log.sync();
+    const revoked = await revoker.log.append(() => [{ type: 'device.revoked', body: { memberId: seed.owner.memberId, fingerprint: seed.second.identity.fingerprint } }]);
+    assert.equal(revoked.ok, true);
+
+    const report = await revoker.log.verifyAll();
+    assert.deepEqual(report.rejected, []);
+    const owner = report.members.find((member) => member.id === seed.owner.memberId);
+    const byFingerprint = new Map((owner?.devices ?? []).map((device) => [device.fingerprint, device]));
+    assert.deepEqual(byFingerprint.get(seed.owner.identity.fingerprint), { fingerprint: seed.owner.identity.fingerprint, state: 'rotated', replacedBy: fresh.identity.fingerprint });
+    assert.deepEqual(byFingerprint.get(fresh.identity.fingerprint), { fingerprint: fresh.identity.fingerprint, state: 'active' });
+    assert.deepEqual(byFingerprint.get(seed.second.identity.fingerprint), { fingerprint: seed.second.identity.fingerprint, state: 'revoked' });
   });
 });
 
