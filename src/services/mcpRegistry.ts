@@ -1,7 +1,8 @@
 import type { AgentTool } from '../agent/tools';
 import { displayHost, McpConnection, McpSecrets, McpServerConfig, McpToolInfo } from '../mcp/client';
 import { mcpAgentTools, newServerManifest, serverManifest } from '../mcp/tools';
-import { parseMcpManifest } from '../domain/gate/manifest';
+import { defaultMcpContexts, mcpToolEffects, parseMcpManifest } from '../domain/gate/manifest';
+import type { McpManifest } from '../domain/gate/manifest';
 import { describeMcpManifest, describeMcpTools, mcpToolChoiceOf } from '../domain/gate/words';
 import type { McpToolChoice } from '../domain/gate/words';
 
@@ -35,6 +36,10 @@ export interface McpServerStatus {
   /** What the person has declared for each tool the server lists right now: `unknown` for one with no declaration. */
   toolChoices: Record<string, McpToolChoice>;
 }
+
+/** The three things the MCP page lets a person say a tool does (D-06, D-07). */
+export const MCP_DECLARE_CHOICES = Object.freeze(['reads', 'changes-remote', 'unknown'] as const);
+export type McpDeclareChoice = (typeof MCP_DECLARE_CHOICES)[number];
 
 const SERVERS_KEY = 'nearAi.mcp.servers';
 const ENABLED_KEY = 'nearAi.mcp.enabled';
@@ -95,6 +100,34 @@ export class McpRegistry {
       return { ...rest, manifest: moved.ok ? moved.value : newServerManifest(config.id, config.transport) };
     }
     return { ...rest, manifest: given };
+  }
+
+  /**
+   * Records what the person says one tool of a server does (D-06, D-07): `reads` is the call alone, `changes-remote` is the call and a connection to the server's host,
+   * `unknown` takes the declaration away so the server's default for undeclared tools applies. Only a tool the connected server lists can be declared, by its exact
+   * name. A server with no manifest gets one with this first declaration and keeps today's behaviour for its other tools (D-38). The whole manifest is parsed again
+   * before it is stored.
+   */
+  public async declareMcpToolEffects(serverId: string, toolName: string, choice: McpDeclareChoice): Promise<void> {
+    const config = this.servers().find((server) => server.id === serverId);
+    if (!config) throw new Error(`No MCP server ${serverId}.`);
+    if (!(MCP_DECLARE_CHOICES as readonly string[]).includes(choice)) throw new Error('Choose what the tool does: only reads, changes data on the server, or not known.');
+    const offered = this.live.get(serverId)?.connection?.tools ?? [];
+    if (!offered.some((tool) => tool.name === toolName)) throw new Error(`${config.name} does not list a tool called ${toolName}. Connect it to see its tools.`);
+    const current = serverManifest(config);
+    if (current === undefined && choice === 'unknown') return;
+    const base: McpManifest = current ?? { manifestVersion: 1, server: config.id, runsOn: config.transport === 'stdio' ? 'this-machine' : 'remote', hosts: [], credentials: [], contexts: defaultMcpContexts(config.transport), tools: {}, toolDefaults: 'legacy' };
+    const others = Object.entries(base.tools).filter(([name]) => name !== toolName);
+    let entries = others;
+    if (choice !== 'unknown') {
+      const effects = mcpToolEffects(undefined, { server: config.id, tool: toolName, host: displayHost(await this.secretsFor(config.id)), readOnly: choice === 'reads', destructive: false, approval: 'ask-for-changes', transport: config.transport });
+      if (effects.defaults !== 'legacy') throw new Error(`${toolName} has a name a declaration cannot hold, so it stays treated as able to do anything.`);
+      entries = [...others, [toolName, { effects: effects.effects }]];
+    }
+    const parsed = parseMcpManifest({ ...base, tools: Object.fromEntries(entries.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) });
+    if (!parsed.ok) throw new Error(`That declaration was refused (${parsed.reason} at ${parsed.path || 'the top'}).`);
+    await this.global.update(SERVERS_KEY, this.servers().map((server) => (server.id === serverId ? { ...server, manifest: parsed.value } : server)));
+    this.changed();
   }
 
   public async remove(id: string): Promise<void> {
