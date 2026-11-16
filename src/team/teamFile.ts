@@ -2,7 +2,7 @@
 // Anyone who can push to the code branch can edit this file, so every field is validated before use, nothing in it is a secret,
 // and a local trust pin (RESEARCH Pitfall 10) refuses a later file that names a different team or owner key.
 // This module never imports vscode.
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { canonicalize } from '../domain/team/canonical';
@@ -210,9 +210,24 @@ export function teamStorageDir(globalStorageDir: string, teamId: string): string
   return path.join(globalStorageDir, 'team', teamId);
 }
 
+// The trust pin is kept per project, never per team: team.json is attacker-influenced, so a folder chosen by its team id would let a swapped
+// team.json land in a fresh folder with no pin and be trusted on first sight. The project is identified the way Phase 27 names its sync
+// mirrors (the first 16 hex characters of the SHA-256 of the resolved project path; see mirrorFolderName in syncFlows.ts), so the key is
+// stable for the folder and outside the project's control. <globalStorage>/team/projects/<key>; a team id always starts with "team-", so it
+// can never name this folder.
+export const PROJECT_TRUST_FOLDER = 'projects';
+
+export function projectTrustKey(projectRoot: string): string {
+  return createHash('sha256').update(path.resolve(projectRoot)).digest('hex').slice(0, 16);
+}
+
+export function projectTrustDir(globalStorageDir: string, projectRoot: string): string {
+  return path.join(globalStorageDir, 'team', PROJECT_TRUST_FOLDER, projectTrustKey(projectRoot));
+}
+
 interface TrustPin { version: 1; teamId: string; genesisEventId: string; ownerFingerprint: string }
 
-const PIN_MISMATCH = "This project's team.json names a different team or owner key than this computer saw before. Team Mode is paused until you confirm the change with your team.";
+export const PIN_MISMATCH = "This project's team.json names a different team or owner key than this computer trusted for this project before. Team Mode is paused. If your team really did change (for example it was created again), confirm with your team, then choose \"Trust this new team\".";
 
 function parsePin(text: string): TrustPin {
   let parsed: unknown;
@@ -227,10 +242,15 @@ function parsePin(text: string): TrustPin {
   return { version: 1, teamId: parsed.teamId, genesisEventId: parsed.genesisEventId, ownerFingerprint: parsed.ownerFingerprint };
 }
 
-// Trust on first use: the first team.json seen for a storage folder is pinned; a later one must name the same team, genesis and owner key.
-export async function checkTrustPin(storageDir: string, file: TeamFile): Promise<'first-seen' | 'match'> {
-  const pinFile = path.resolve(storageDir, TRUST_FILE);
-  const wanted: TrustPin = { version: 1, teamId: file.teamId, genesisEventId: file.genesis.eventId, ownerFingerprint: file.genesis.ownerDevice.fingerprint };
+function pinFor(file: TeamFile): TrustPin {
+  return { version: 1, teamId: file.teamId, genesisEventId: file.genesis.eventId, ownerFingerprint: file.genesis.ownerDevice.fingerprint };
+}
+
+// Trust on first use: the first team.json seen for a project (pinDir is projectTrustDir) is pinned; a later one must name the same team,
+// genesis and owner key, or it is refused until the person deliberately trusts it with pinTrust.
+export async function checkTrustPin(pinDir: string, file: TeamFile): Promise<'first-seen' | 'match'> {
+  const pinFile = path.resolve(pinDir, TRUST_FILE);
+  const wanted = pinFor(file);
   return runSerialised<'first-seen' | 'match'>(pinFile, async () => {
     let text: string | undefined;
     try {
@@ -248,4 +268,11 @@ export async function checkTrustPin(storageDir: string, file: TeamFile): Promise
     }
     return 'match';
   });
+}
+
+// Pins this team for the project, replacing any earlier pin. Called only on a deliberate act: Enable, on this computer, after it created the
+// team and pushed its genesis, and the person's own "Trust this new team" choice after a refusal. Never called on a sync or session start.
+export async function pinTrust(pinDir: string, file: TeamFile): Promise<void> {
+  const pinFile = path.resolve(pinDir, TRUST_FILE);
+  await runSerialised(pinFile, () => writeFileAtomic(pinFile, `${JSON.stringify(pinFor(file), null, 2)}\n`));
 }

@@ -20,7 +20,7 @@ import { DEFAULT_COORDINATION_REF, GitTransport } from '../team/gitTransport';
 import { DEVICE_KEY_SECRET, createDeviceIdentity, loadDeviceIdentity } from '../team/identity';
 import { GitNotFoundError, runGit } from '../team/runGit';
 import type { GitRunner } from '../team/runGit';
-import { TEAM_FILE_REL, parseTeamFile, readTeamFile, teamStorageDir } from '../team/teamFile';
+import { TEAM_FILE_REL, parseTeamFile, projectTrustDir, readTeamFile, teamStorageDir } from '../team/teamFile';
 import { deviceKeyForms, makeCanaries, scanFiles, scanGitObjects } from './helpers/teamCanary';
 import type { Needle } from './helpers/teamCanary';
 import { MemorySecrets, createTeamFixture, fakeGitResult, faultRunner, gitIn } from './helpers/teamHarness';
@@ -211,7 +211,8 @@ test('Enable creates the team, the device key, the orphan coordination branch an
     assert.ok(files.includes('team.json'));
 
     assert.deepEqual([...secrets.values.keys()], [DEVICE_KEY_SECRET]);
-    assert.ok(existsSync(path.join(teamStorageDir(fixture.storageDir('a'), teamFile.teamId), 'trust.json')));
+    assert.ok(existsSync(path.join(projectTrustDir(fixture.storageDir('a'), fixture.clones.a as string), 'trust.json')), 'Enable pins the team for this project');
+    assert.equal(existsSync(path.join(teamStorageDir(fixture.storageDir('a'), teamFile.teamId), 'trust.json')), false);
 
     const anchor = anchorOf(teamFile);
     const transport = new GitTransport<TeamState>({

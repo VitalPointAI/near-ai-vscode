@@ -8,9 +8,10 @@ import test from 'node:test';
 import { canonicalize } from '../domain/team/canonical';
 import { SecretLeakError } from '../domain/team/secrets';
 import type { TeamFile } from '../domain/team/types';
+import { TEAM_ID_PATTERN } from '../domain/team/validate';
 import { newTeamId } from '../team/identity';
 import {
-  COORDINATION_REF_PATTERN, REMOTE_NAME_PATTERN, RESERVED_SYNC_REFS, TEAM_FILE_REL, TeamFileError, TrustPinError, canonicalTeamFile, checkTrustPin, collidesWithSyncRef,
+  COORDINATION_REF_PATTERN, REMOTE_NAME_PATTERN, RESERVED_SYNC_REFS, TEAM_FILE_REL, TeamFileError, TrustPinError, canonicalTeamFile, checkTrustPin, PROJECT_TRUST_FOLDER, pinTrust, projectTrustDir, projectTrustKey, collidesWithSyncRef,
   parseTeamFile, readTeamFile, serialiseTeamFile, teamFilePath, teamStorageDir, writeTeamFile
 } from '../team/teamFile';
 import { INCOMING_REF as TEAM_INCOMING_REF, LOCAL_REF, QUARANTINE_REF_PREFIX } from '../team/gitTransport';
@@ -284,6 +285,31 @@ test('a corrupt trust record fails closed and concurrent first sights agree', as
     await fs.writeFile(path.join(dir, 'trust.json'), '{broken', 'utf8');
     await assert.rejects(() => checkTrustPin(dir, file), TrustPinError);
     await fs.writeFile(path.join(dir, 'trust.json'), JSON.stringify({ version: 9 }), 'utf8');
+    await assert.rejects(() => checkTrustPin(dir, file), TrustPinError);
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('the project trust folder is keyed by the resolved project path as Phase 27 keys its sync mirrors, never by anything in team.json', async () => {
+  const { mirrorFolderName } = await import('../services/syncFlows');
+  const root = path.join(tmpdir(), 'some-project');
+  assert.equal(projectTrustKey(root), mirrorFolderName(root));
+  assert.equal(projectTrustKey(`${root}${path.sep}.`), projectTrustKey(root), 'the path is resolved first');
+  assert.notEqual(projectTrustKey(path.join(tmpdir(), 'other-project')), projectTrustKey(root));
+  assert.equal(projectTrustDir('/store', root), path.join('/store', 'team', PROJECT_TRUST_FOLDER, projectTrustKey(root)));
+  assert.equal(TEAM_ID_PATTERN.test(PROJECT_TRUST_FOLDER), false, 'no team id can name the projects folder');
+});
+
+test('pinTrust replaces the pin deliberately, and checkTrustPin then matches only the new team', async () => {
+  const dir = await workDir();
+  try {
+    const file = await validFile();
+    assert.equal(await checkTrustPin(dir, file), 'first-seen');
+    const next = { ...file, teamId: newTeamId() };
+    await assert.rejects(() => checkTrustPin(dir, next), TrustPinError);
+    await pinTrust(dir, next);
+    assert.equal(await checkTrustPin(dir, next), 'match');
     await assert.rejects(() => checkTrustPin(dir, file), TrustPinError);
   } finally {
     await fs.rm(dir, { recursive: true, force: true });

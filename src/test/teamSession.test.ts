@@ -20,7 +20,7 @@ import { NEUTRAL_IDENTITY_ENV, runGit } from '../team/runGit';
 import type { GitRunner } from '../team/runGit';
 import { UNFOCUSED_POLL_MS } from '../team/syncScheduler';
 import type { TransportStatus } from '../team/transport';
-import { TrustPinError, parseTeamFile } from '../team/teamFile';
+import { TrustPinError, parseTeamFile, pinTrust, projectTrustDir, teamStorageDir } from '../team/teamFile';
 import { teamMaterializer } from '../domain/team/materialize';
 import type { TeamState } from '../domain/team/types';
 import { createOwner, createTeamFixture, gitIn, testGenesis } from './helpers/teamHarness';
@@ -505,6 +505,47 @@ test('a changed team.json stops the session with TrustPinError and creates no ti
     assert.equal(stub.statusBarItems.length, created + 1);
     assert.equal(lastItem().disposed, true, 'the status bar item made for the failed session was removed');
     assert.deepEqual(context.subscriptions, []);
+  });
+});
+
+test('the trust pin is kept per project: swapping the team id, the genesis or the owner key in team.json is refused, even with no per-team folder', async () => {
+  await withRig(async (rig) => {
+    (await startSession(rig)).session.dispose();
+    const pinDir = projectTrustDir(rig.globalStorage, rig.projectRoot);
+    assert.ok(existsSync(path.join(pinDir, 'trust.json')), 'the pin is in the project folder');
+    assert.equal(existsSync(path.join(teamStorageDir(rig.globalStorage, rig.teamFile.teamId), 'trust.json')), false, 'and not in the per-team folder');
+    const stranger = await createOwner(rig.teamFile.teamId);
+    const swaps: Array<[string, TeamFile]> = [
+      ['team id', { ...rig.teamFile, teamId: newTeamId() }],
+      ['team id and genesis together', { ...rig.teamFile, teamId: newTeamId(), genesis: { ...rig.teamFile.genesis, eventId: newEventId() } }],
+      ['genesis', { ...rig.teamFile, genesis: { ...rig.teamFile.genesis, eventId: newEventId() } }],
+      ['owner key', { ...rig.teamFile, genesis: { ...rig.teamFile.genesis, ownerDevice: { fingerprint: stranger.identity.fingerprint, publicKey: stranger.identity.publicKey } } }]
+    ];
+    for (const [label, changed] of swaps) {
+      const timers = new FakeTimers();
+      await assert.rejects(() => startSession(rig, { teamFile: changed, timers }), (error: unknown) => error instanceof TrustPinError && /different team or owner key/.test(error.message), label);
+      assert.equal(timers.requests.length, 0, `${label}: no timer`);
+      if (changed.teamId !== rig.teamFile.teamId) {
+        assert.equal(existsSync(teamStorageDir(rig.globalStorage, changed.teamId)), false, `${label}: no folder was made for the swapped team`);
+      }
+    }
+    // The original team still matches: refused attempts leave the pin alone.
+    (await startSession(rig)).session.dispose();
+  });
+});
+
+test('after the person deliberately trusts a re-created team, its session starts, and the old team is then refused', async () => {
+  await withRig(async (rig) => {
+    (await startSession(rig)).session.dispose();
+    const recreated: TeamFile = { ...rig.teamFile, teamId: newTeamId(), genesis: { ...rig.teamFile.genesis, eventId: newEventId() } };
+    await assert.rejects(() => startSession(rig, { teamFile: recreated }), TrustPinError);
+    await pinTrust(projectTrustDir(rig.globalStorage, rig.projectRoot), recreated);
+    const pinned = JSON.parse(await fs.readFile(path.join(projectTrustDir(rig.globalStorage, rig.projectRoot), 'trust.json'), 'utf8')) as Record<string, unknown>;
+    assert.deepEqual(pinned, { version: 1, teamId: recreated.teamId, genesisEventId: recreated.genesis.eventId, ownerFingerprint: recreated.genesis.ownerDevice.fingerprint });
+    // The trust step is all this test checks; the session's own sync of a team it cannot find on the remote is covered elsewhere.
+    const started = await startSession(rig, { teamFile: recreated });
+    started.session.dispose();
+    await assert.rejects(() => startSession(rig), TrustPinError, 'the old team is now the different one');
   });
 });
 

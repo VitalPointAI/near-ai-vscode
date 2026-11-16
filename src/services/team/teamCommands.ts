@@ -16,6 +16,8 @@ export const PUSH_ACTION = 'Share with my team';
 export const SHARED_TEXT = 'Shared with your team.';
 export const PREVIEW_OFF_TEXT = 'Team Mode is an early preview and is off. Turn on the setting nearAi.team.preview in Settings, then run "NEAR AI: Enable Team Mode" again.';
 export const VERIFY_ACTION = 'Verify Team Log';
+export const TRUST_NEW_TEAM_ACTION = 'Trust this new team';
+export const TRUST_CONFIRM_ACTION = 'Trust this team';
 const OUTPUT_CHANNEL_NAME = 'NEAR AI Team';
 const TEAM_FILE_PARTS = ['.planning', '.near-ai', 'team.json'];
 const ENABLE_PROGRESS_TITLE = 'Enabling Team Mode';
@@ -109,6 +111,12 @@ export function registerTeamMode(context: vscode.ExtensionContext): TeamModeHand
         session = started;
         return 'team';
       } catch (error) {
+        const { TrustPinError } = await import('../../team/teamFile');
+        if (error instanceof TrustPinError) {
+          // Not awaited: the session state settles now, and the person answers whenever they choose.
+          void offerTrust(projectRoot, await describe(error));
+          return 'error';
+        }
         report('warn', `Team Mode did not start: ${await describe(error)}`);
         return 'error';
       }
@@ -118,6 +126,37 @@ export function registerTeamMode(context: vscode.ExtensionContext): TeamModeHand
       return await run;
     } finally {
       starting = undefined;
+    }
+  }
+
+  // One disposer for the running session: it stops the poll timer and removes the status bar item (TeamSession.dispose), and it is the only
+  // place that forgets the session, so nothing is left running when the extension stops or the session is replaced.
+  function stopSession(): void {
+    const current = session;
+    session = undefined;
+    current?.dispose();
+  }
+
+  // D-16: a team.json that names a different team, genesis or owner key than this project had is refused. Trusting it is a deliberate act:
+  // the person picks the action, then confirms in a modal that names the team and its owner key; only then is the project's pin replaced.
+  async function offerTrust(projectRoot: string, reason: string): Promise<void> {
+    try {
+      output.appendLine(`Team Mode did not start: ${reason}`);
+      const choice = await vscode.window.showWarningMessage(`Team Mode did not start: ${reason}`, TRUST_NEW_TEAM_ACTION);
+      if (choice !== TRUST_NEW_TEAM_ACTION || disposed) return;
+      const { pinTrust, projectTrustDir, readTeamFile } = await import('../../team/teamFile');
+      const teamFile = await readTeamFile(projectRoot);
+      if (teamFile === undefined) return;
+      const detail = `Only continue if your team confirmed this change. The project's team.json now names the team "${teamFile.name}" (${teamFile.teamId}), whose owner key fingerprint is ${teamFile.genesis.ownerDevice.fingerprint}. This computer will trust that team for this project from now on.`;
+      const confirmed = await vscode.window.showWarningMessage('Trust a different team for this project?', { modal: true, detail }, TRUST_CONFIRM_ACTION);
+      if (confirmed !== TRUST_CONFIRM_ACTION || disposed) return;
+      await pinTrust(projectTrustDir(context.globalStorageUri.fsPath, projectRoot), teamFile);
+      output.appendLine(`This project now trusts the team ${teamFile.name} (${teamFile.teamId}).`);
+      // The refused start may still be settling; wait for it so this start is not folded into it.
+      while (starting !== undefined) await starting;
+      await startSession(projectRoot);
+    } catch (error) {
+      report('error', `The new team could not be trusted: ${await describe(error)}`);
     }
   }
 
@@ -244,7 +283,7 @@ export function registerTeamMode(context: vscode.ExtensionContext): TeamModeHand
   context.subscriptions.push(
     vscode.commands.registerCommand(ENABLE_COMMAND, guarded('Enable Team Mode', enable)),
     vscode.commands.registerCommand(VERIFY_LOG_COMMAND, guarded('Verify Team Log', verifyLog)),
-    { dispose: (): void => { disposed = true; session = undefined; } }
+    { dispose: (): void => { disposed = true; stopSession(); } }
   );
 
   const ready = detect().catch(async (error: unknown): Promise<TeamModeState> => {

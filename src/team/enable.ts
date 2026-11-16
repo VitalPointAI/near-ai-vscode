@@ -15,7 +15,7 @@ import { DEFAULT_COORDINATION_REF, GitTransport } from './gitTransport';
 import { forgetCreatedDeviceIdentity, identityDir, loadOrCreateDeviceIdentity, newMemberId, newTeamId } from './identity';
 import { GitNotFoundError, gitText, redactGitMessage, runGit } from './runGit';
 import type { GitResult, GitRunner } from './runGit';
-import { REMOTE_NAME_PATTERN, TEAM_FILE_REL, TeamFileError, checkTrustPin, canonicalTeamFile, readTeamFile, teamStorageDir, writeTeamFile } from './teamFile';
+import { REMOTE_NAME_PATTERN, TEAM_FILE_REL, TeamFileError, canonicalTeamFile, pinTrust, projectTrustDir, readTeamFile, teamStorageDir, writeTeamFile } from './teamFile';
 
 export const ENABLE_COMMIT_MESSAGE = 'chore(team): enable NEAR AI Team Mode';
 
@@ -303,7 +303,8 @@ export async function enableTeamMode(input: EnableInput): Promise<EnableResult> 
   // The coordination branch now exists, so from here the key stays; a failure only affects the file in the user's project.
   try {
     await writeTeamFile(projectRoot, teamFile);
-    await checkTrustPin(storageDir, teamFile);
+    // This computer just created the team and holds its owner key, so the project's pin is set to it, replacing a pin for an earlier team.
+    await pinTrust(projectTrustDir(input.globalStorageDir, projectRoot), teamFile);
   } catch (error) {
     return {
       ok: false, code: 'commit-failed', teamFile,

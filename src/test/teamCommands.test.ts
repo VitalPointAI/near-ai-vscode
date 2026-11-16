@@ -11,7 +11,8 @@ import * as path from 'node:path';
 import test from 'node:test';
 import { API_KEY_SECRET, REFRESH_TOKEN_SECRET } from '../services/auth';
 import { DEVICE_KEY_SECRET } from '../team/identity';
-import { TEAM_FILE_REL, readTeamFile, teamStorageDir } from '../team/teamFile';
+import { TEAM_FILE_REL, projectTrustDir, readTeamFile, teamStorageDir } from '../team/teamFile';
+import { enableTeamMode } from '../team/enable';
 import { deviceKeyFormDigests, deviceKeyForms, makeCanaries, scanFiles, scanFilesForDigests, scanGitObjects, scanGitObjectsForDigests } from './helpers/teamCanary';
 import type { LabelledDigest, Needle } from './helpers/teamCanary';
 import { MemorySecrets, createTeamFixture, gitIn } from './helpers/teamHarness';
@@ -23,7 +24,7 @@ const stub = createVscodeStub();
 const uninstall = installVscodeStub(stub);
 const commandsModule = require('../services/team/teamCommands') as typeof import('../services/team/teamCommands');
 test.after(() => { uninstall(); });
-const { ENABLE_COMMAND, PREVIEW_OFF_TEXT, PUSH_ACTION, VERIFY_ACTION, VERIFY_LOG_COMMAND, registerTeamMode, teamModeTestApi } = commandsModule;
+const { ENABLE_COMMAND, PREVIEW_OFF_TEXT, PUSH_ACTION, TRUST_CONFIRM_ACTION, TRUST_NEW_TEAM_ACTION, VERIFY_ACTION, VERIFY_LOG_COMMAND, registerTeamMode, teamModeTestApi } = commandsModule;
 
 const EM_DASH = '—';
 const COORDINATION_BRANCH = 'refs/heads/near-ai/coordination';
@@ -434,4 +435,99 @@ test('the digest scanners find each private rendering inside surrounding text in
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
+});
+
+// ---- Trust pin per project (D-16) and the session disposer ----
+
+async function until(condition: () => boolean | Promise<boolean>, what: string, timeoutMs = 20_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await condition()) return;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  assert.fail(`timed out waiting for ${what}`);
+}
+
+test('stopping Team Mode disposes the running session: its status bar item goes and the handle forgets it', async () => {
+  await withProject(async (p) => {
+    await p.enable(['Dispose team', 'Lead Owner']);
+    assert.ok(p.handle.session() !== undefined);
+    // A second registration, as a new window on the same project would make; only its own disposables are released.
+    const context = createFakeContext(p.storage, p.secrets);
+    const itemsBefore = stub.statusBarItems.length;
+    const handle = registerTeamMode(context as never);
+    const own = context.subscriptions.length;
+    assert.equal(await handle.ready, 'team');
+    const item = stub.statusBarItems[itemsBefore] as { disposed?: boolean } | undefined;
+    assert.ok(item !== undefined && item.disposed !== true, 'the new session shows its status bar item');
+    for (const disposable of context.subscriptions.slice(0, own)) disposable.dispose();
+    assert.equal(handle.session(), undefined, 'the handle no longer holds a session');
+    assert.equal(item.disposed, true, 'the session was disposed, not only forgotten');
+    for (const disposable of context.subscriptions.slice(own)) disposable.dispose();
+  });
+});
+
+test('a team.json that swaps the team id is refused for this project, and only a confirmed "Trust this new team" starts a re-created team', async () => {
+  await withProject(async (p) => {
+    await p.enable(['First team', 'Lead Owner']);
+    const first = await readTeamFile(p.root);
+    assert.ok(first !== undefined);
+    for (const disposable of p.context.subscriptions.splice(0)) disposable.dispose();
+
+    // A swapped team id alone gets a fresh per-team folder, so a pin kept per team would trust it on first sight. The project pin refuses it.
+    const swapped = { ...first, teamId: `team-${'f'.repeat(32)}` };
+    writeFileSync(path.join(p.root, TEAM_FILE_REL), `${JSON.stringify(swapped)}\n`);
+    stub.notifications.length = 0;
+    stub.notificationActions.length = 0;
+    stub.messageAnswers.length = 0;
+    stub.messageAnswers.push(undefined);
+    const refusedContext = createFakeContext(p.storage, p.secrets);
+    const refused = registerTeamMode(refusedContext as never);
+    assert.equal(await refused.ready, 'error');
+    assert.equal(refused.session(), undefined);
+    await until(() => stub.notifications.some((entry) => entry.level === 'warn' && /different team or owner key/.test(entry.message)), 'the refusal');
+    const index = stub.notifications.findIndex((entry) => /different team or owner key/.test(entry.message));
+    assert.deepEqual(stub.notificationActions[index], [TRUST_NEW_TEAM_ACTION]);
+    assert.equal(JSON.parse(readFileSync(path.join(projectTrustDir(p.storage, p.root), 'trust.json'), 'utf8')).teamId, first.teamId, 'dismissing keeps the pin');
+    for (const disposable of refusedContext.subscriptions.splice(0)) disposable.dispose();
+
+    // The team is legitimately created again (for example by the owner on another computer): a new genesis on the remote and a new team.json.
+    gitIn(p.fixture.remote, ['update-ref', '-d', COORDINATION_BRANCH]);
+    execFileSync('git', ['rm', '-q', '-f', '--', TEAM_FILE_REL], { cwd: p.root });
+    gitIn(p.root, ['commit', '-q', '-m', 'remove the old team']);
+    const elsewhere = await mkdtemp(path.join(tmpdir(), 'near-ai-other-computer-'));
+    try {
+      const recreated = await enableTeamMode({ projectRoot: p.root, globalStorageDir: elsewhere, secrets: new MemorySecrets(), teamName: 'Second team', ownerName: 'Lead Owner' });
+      assert.equal(recreated.ok, true, recreated.ok ? '' : recreated.message);
+    } finally {
+      await rm(elsewhere, { recursive: true, force: true });
+    }
+    const second = await readTeamFile(p.root);
+    assert.ok(second !== undefined && second.teamId !== first.teamId);
+
+    // Declining the modal changes nothing.
+    stub.messageAnswers.length = 0;
+    stub.messageAnswers.push(TRUST_NEW_TEAM_ACTION, undefined);
+    const declinedContext = createFakeContext(p.storage, p.secrets);
+    const declined = registerTeamMode(declinedContext as never);
+    assert.equal(await declined.ready, 'error');
+    await until(() => stub.messageAnswers.length === 0, 'both questions');
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    assert.equal(declined.session(), undefined);
+    assert.equal(JSON.parse(readFileSync(path.join(projectTrustDir(p.storage, p.root), 'trust.json'), 'utf8')).teamId, first.teamId);
+    for (const disposable of declinedContext.subscriptions.splice(0)) disposable.dispose();
+
+    // Choosing the action and confirming pins the new team for this project and starts it.
+    stub.messageAnswers.push(TRUST_NEW_TEAM_ACTION, TRUST_CONFIRM_ACTION);
+    const trustedContext = createFakeContext(p.storage, p.secrets);
+    const trusted = registerTeamMode(trustedContext as never);
+    assert.equal(await trusted.ready, 'error', 'the first start is refused');
+    await until(() => trusted.session() !== undefined, 'the session after trusting');
+    assert.equal(trusted.session()?.teamFile.teamId, second.teamId);
+    const pin = JSON.parse(readFileSync(path.join(projectTrustDir(p.storage, p.root), 'trust.json'), 'utf8')) as Record<string, unknown>;
+    assert.deepEqual(pin, { version: 1, teamId: second.teamId, genesisEventId: second.genesis.eventId, ownerFingerprint: second.genesis.ownerDevice.fingerprint });
+    const confirm = stub.notificationActions.find((actions) => actions.includes(TRUST_CONFIRM_ACTION));
+    assert.ok(confirm !== undefined && JSON.stringify(confirm).includes(second.genesis.ownerDevice.fingerprint), 'the modal names the new owner key');
+    for (const disposable of trustedContext.subscriptions.splice(0)) disposable.dispose();
+  });
 });

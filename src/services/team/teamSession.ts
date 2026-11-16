@@ -22,7 +22,7 @@ import type { DeviceIdentity } from '../../team/identity';
 import type { GitRunner } from '../../team/runGit';
 import { DEFAULT_POLL_SECONDS, SyncScheduler } from '../../team/syncScheduler';
 import type { SchedulerTimers } from '../../team/syncScheduler';
-import { checkTrustPin, teamStorageDir } from '../../team/teamFile';
+import { checkTrustPin, projectTrustDir, teamStorageDir } from '../../team/teamFile';
 import type { TransportStatus } from '../../team/transport';
 import { PAUSED_REFUSED_TEXT, createTeamStatusBar, safeReason, statusText } from './teamStatusBar';
 import type { TeamStatusBar } from './teamStatusBar';
@@ -191,9 +191,10 @@ export class TeamSession {
   }
 
   // D-16: the pin is checked before anything else exists, so a changed team.json stops the session with no timer and no transport work.
+  // The pin is kept per project, so a team.json that swaps the team id is compared with the team this project had, never trusted afresh.
   public static async start(deps: TeamSessionDeps): Promise<TeamSession> {
+    await checkTrustPin(projectTrustDir(deps.globalStorageDir, deps.projectRoot), deps.teamFile);
     const storage = teamStorageDir(deps.globalStorageDir, deps.teamFile.teamId);
-    await checkTrustPin(storage, deps.teamFile);
     let identity: DeviceIdentity | undefined;
     let identityProblem: string | undefined;
     try {
