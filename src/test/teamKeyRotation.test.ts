@@ -1,7 +1,7 @@
 // Rotating and revoking the person's own key as signed history records (D-09, D-21, TMR-05). All key material is generated at run time.
 import assert from 'node:assert/strict';
 import { generateKeyPairSync } from 'node:crypto';
-import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -394,6 +394,26 @@ test('a replaced key that cannot be set aside safely is refused, never given a c
     assert.equal((await loadDeviceIdentity(secrets))?.fingerprint, first.fingerprint, 'nothing was deleted');
     assert.deepEqual(kinds(await historyOf(folder)), ['created', 'rotated'], 'the history is left as it was');
     assert.deepEqual((await readdir(folder)).filter((name) => name.startsWith('key-history.archived-')), []);
+  });
+});
+
+test('first need passes its warning callback to the key history, so a failed restore reaches the output channel', async () => {
+  await withFolder(async (folder, secrets) => {
+    const warnings: string[] = [];
+    const wrapper: SecretStorageLike = {
+      get: (key) => secrets.get(key), delete: (key) => secrets.delete(key),
+      store: async (key, value) => {
+        if (key !== KEY_HISTORY_HEAD_SECRET) return secrets.store(key, value);
+        // The head cannot be stored, and the history file has been replaced by a folder, so the first record cannot be taken back either.
+        const file = path.join(folder, KEY_HISTORY_FILE);
+        await rm(file, { force: true });
+        await mkdir(path.join(file, 'blocked'), { recursive: true });
+        throw new Error('store failed');
+      }
+    };
+    await assert.rejects(() => loadOrCreateDeviceIdentity(wrapper, { identityDir: folder, now: () => T0, warn: (line) => warnings.push(line) }), /saved end could not be stored/);
+    assert.equal(warnings.length, 1);
+    assert.match(warnings[0] as string, /^The key history could not be put back/);
   });
 });
 

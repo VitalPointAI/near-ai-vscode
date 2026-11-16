@@ -15,6 +15,7 @@ import { withFileLock } from '../services/stateMirrorLock';
 import { MAX_EVENT_BYTES, canonicalBytes, fingerprintOf, signingInput } from '../domain/team/canonical';
 import type { DeviceRef, TeamEvent, TeamEventType, UnsignedTeamEvent } from '../domain/team/types';
 import { appendKeyRecord, archiveKeyHistory, readKeyHistory } from './keyHistory';
+import type { AppendKeyRecordOptions } from './keyHistory';
 import type { KeyHistoryReplay } from '../domain/team/keyRecords';
 
 // One Ed25519 identity per person per install (D-06). Every team this install joins uses this key, so the secret name carries no team id.
@@ -88,6 +89,13 @@ export interface IdentityLockOptions {
   identityDir: string;
   // The clock for the key history records; tests pass a fixed one.
   now?: () => Date;
+  // Where a plain warning from the key history goes (the Team Mode output channel). Never given key material.
+  warn?: (message: string) => void;
+}
+
+// The options every key history append in this module passes on.
+function historyOptions(options: IdentityLockOptions): AppendKeyRecordOptions {
+  return { ...(options.now === undefined ? {} : { now: options.now }), ...(options.warn === undefined ? {} : { warn: options.warn }) };
 }
 
 // The key history (D-09) is the person's own signed record that this key is theirs. Called inside identity-create.lock with the key that is stored, it
@@ -113,7 +121,7 @@ async function ensureCreatedRecord(
   // including a key that is stored but that a history with records does not make active.
   if (!history.ok || history.active !== undefined || (!freshKey && history.head !== undefined)) await archiveKeyHistory(options.identityDir, secrets, clock);
   await appendKeyRecord(
-    options.identityDir, secrets, identity, { kind: 'created', key: { fingerprint: identity.fingerprint, publicKey: identity.publicKey } }, clock
+    options.identityDir, secrets, identity, { kind: 'created', key: { fingerprint: identity.fingerprint, publicKey: identity.publicKey } }, historyOptions(options)
   );
 }
 
@@ -208,7 +216,7 @@ export async function forgetCreatedDeviceIdentity(
     if (!history.ok || history.active?.fingerprint !== stored.fingerprint || history.head?.seq !== 1) return false;
     await appendKeyRecord(
       options.identityDir, secrets, stored, { kind: 'revoked', key: { fingerprint: stored.fingerprint, publicKey: stored.publicKey } },
-      options.now === undefined ? {} : { now: options.now }
+      historyOptions(options)
     );
     await forgetDeviceIdentity(secrets);
     return true;
@@ -300,7 +308,7 @@ export async function commitDeviceRotation(
       await appendKeyRecord(
         options.identityDir, secrets, current,
         { kind: 'rotated', key: { fingerprint: current.fingerprint, publicKey: current.publicKey }, next: { fingerprint: pending.fingerprint, publicKey: pending.publicKey } },
-        options.now === undefined ? {} : { now: options.now }
+        historyOptions(options)
       );
     }
     await finishRotationMoves(secrets);
@@ -339,7 +347,7 @@ export async function revokeDeviceKey(secrets: SecretStorageLike, options: Ident
     const activeStored = [...stored.values()].find((key) => key.fingerprint === history.active?.fingerprint);
     const signer = (matches(current) ? current : undefined) ?? activeStored ?? [...stored.values()].find(matches);
     if (!signer) throw new Error('The key was not revoked: no key on this computer can sign the revocation.');
-    await appendKeyRecord(options.identityDir, secrets, signer, { kind: 'revoked', key: target }, options.now === undefined ? {} : { now: options.now });
+    await appendKeyRecord(options.identityDir, secrets, signer, { kind: 'revoked', key: target }, historyOptions(options));
     for (const name of names) if (matches(stored.get(name))) await secrets.delete(name);
     // A prepared rotation that was never recorded is dropped with the current key it was meant to replace.
     if (matches(current)) await secrets.delete(PENDING_DEVICE_KEY_SECRET);

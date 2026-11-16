@@ -41,6 +41,8 @@ export interface EnableInput {
   checked?: EnablePreconditionsOk;
   git?: GitRunner;
   now?: () => Date;
+  // Where a plain warning from the key history goes (the Team Mode output channel). Never given key material.
+  warn?: (message: string) => void;
 }
 
 export type EnableResult =
@@ -173,12 +175,12 @@ async function networkEnv(projectRoot: string, git: GitRunner): Promise<Record<s
 // existed before Enable (another team, another attempt) is never touched, and neither is a different key stored since. Every failure is returned as
 // text, never dropped.
 async function rollback(
-  secrets: SecretStorageLike, globalStorageDir: string, teamId: string, createdKey: { fingerprint: string } | undefined
+  secrets: SecretStorageLike, globalStorageDir: string, teamId: string, createdKey: { fingerprint: string } | undefined, warn?: (message: string) => void
 ): Promise<string[]> {
   const problems: string[] = [];
   if (createdKey !== undefined) {
     try {
-      await forgetCreatedDeviceIdentity(secrets, { identityDir: identityDir(globalStorageDir), fingerprint: createdKey.fingerprint });
+      await forgetCreatedDeviceIdentity(secrets, { identityDir: identityDir(globalStorageDir), fingerprint: createdKey.fingerprint, ...(warn === undefined ? {} : { warn }) });
     } catch (error) {
       problems.push(`The device key could not be removed: ${describeError(error)}`);
     }
@@ -289,7 +291,7 @@ export async function enableTeamMode(input: EnableInput): Promise<EnableResult> 
   // No email address, and nothing derived from one, is asked for, stored or signed: the team id is public in team.json, so any hash of an
   // address salted with it could be reversed by guessing addresses. The roster format keeps its hash lists, and this version keeps them empty.
   const emailHashes: string[] = [];
-  const { identity, created } = await loadOrCreateDeviceIdentity(input.secrets, { identityDir: identityDir(input.globalStorageDir) });
+  const { identity, created } = await loadOrCreateDeviceIdentity(input.secrets, { identityDir: identityDir(input.globalStorageDir), ...(input.warn === undefined ? {} : { warn: input.warn }) });
   const createdKey = created ? { fingerprint: identity.fingerprint } : undefined;
   const storageDir = teamStorageDir(input.globalStorageDir, teamId);
 
@@ -303,7 +305,7 @@ export async function enableTeamMode(input: EnableInput): Promise<EnableResult> 
     };
     assertNoSecrets(teamFile, 'team.json');
   } catch (error) {
-    const problems = await rollback(input.secrets, input.globalStorageDir, teamId, createdKey);
+    const problems = await rollback(input.secrets, input.globalStorageDir, teamId, createdKey, input.warn);
     if (error instanceof SecretLeakError) return fail('secret', [error.message, ...problems].join(' '));
     throw error;
   }
@@ -314,11 +316,11 @@ export async function enableTeamMode(input: EnableInput): Promise<EnableResult> 
   });
   const outcome = await pushGenesis({ transport, events: genesis.events, teamFileText: canonicalTeamFile(teamFile), git, projectRoot, remote });
   if (outcome.kind === 'exists') {
-    const problems = await rollback(input.secrets, input.globalStorageDir, teamId, createdKey);
+    const problems = await rollback(input.secrets, input.globalStorageDir, teamId, createdKey, input.warn);
     return fail('exists-remotely', ['This remote already has a coordination log.', ...problems].join(' '));
   }
   if (outcome.kind === 'failed') {
-    const problems = await rollback(input.secrets, input.globalStorageDir, teamId, createdKey);
+    const problems = await rollback(input.secrets, input.globalStorageDir, teamId, createdKey, input.warn);
     return fail('push-failed', [`The team could not be created on the remote: ${outcome.reason}`, outcome.detail, ...problems, 'Nothing was kept on this computer.'].filter((part) => part !== '').join(' '));
   }
   if (outcome.kind === 'unconfirmed') {
