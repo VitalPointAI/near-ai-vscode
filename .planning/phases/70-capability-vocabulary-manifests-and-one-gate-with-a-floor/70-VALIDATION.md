@@ -2,6 +2,7 @@
 phase: "70"
 slug: "capability-vocabulary-manifests-and-one-gate-with-a-floor"
 status: draft
+# Known draft until execution: the plan checker passed on 2026-11-16; sign-off is completed by /gsd-validate-phase after the phase runs (as with Phases 68 and 69).
 nyquist_compliant: false
 wave_0_complete: false
 created: "2026-11-16"
