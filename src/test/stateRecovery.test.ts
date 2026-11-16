@@ -287,7 +287,19 @@ test('no thread title, record id, model name or prompt appears in the plaintext 
   const parts = sealObject(dataKey, stateId, 'cold', { title: secretText, id: 'conv-9f8e7d' });
   const text = buildManifest({ stateId, kdf, wrappedKey: wrapDataKey(newDataKey(), dataKey, stateId), dataKey, seq: 1, objects: parts.map((part) => part.entry), indexFile: parts[0]?.entry.file ?? null });
   assert.deepEqual(Object.keys(JSON.parse(text) as object).sort(), ['format', 'kdf', 'sealed', 'stateId', 'wrappedKey']);
-  for (const word of ['layoff', 'conv-9f8e7d', 'deepseek', 'ignore all', 'cold', 'hot']) assert.equal(text.includes(word), false, word);
+  // Long, distinctive words are checked against the whole text: random base64 cannot contain them by chance in practice.
+  for (const word of ['layoff', 'conv-9f8e7d', 'deepseek', 'ignore all']) assert.equal(text.includes(word), false, word);
+  // Short words such as the tier names 'cold' and 'hot' are checked against the manifest with every long base64, base64url or hex run removed. The
+  // wrapped key and the sealed entries are base64 of random bytes, which contains a three- or four-letter word by chance often enough to fail CI
+  // ("AssertionError: hot" on PR #65). What is left is the JSON structure, its keys and its short non-random values, which is where a leaked tier
+  // name would appear in plain text. A leak inside a random-looking run would be ciphertext, which the sealing tests cover.
+  const withoutRandomRuns = text.replace(/[A-Za-z0-9+/_-]{16,}={0,2}/g, '');
+  for (const word of ['cold', 'hot']) assert.equal(withoutRandomRuns.includes(word), false, word);
+  // The keys of every object, at any depth, are checked by name too, so the removal above cannot hide a key named after the tier.
+  const keys: string[] = [];
+  const walk = (value: unknown): void => { if (Array.isArray(value)) value.forEach(walk); else if (value && typeof value === 'object') for (const [key, entry] of Object.entries(value)) { keys.push(key); walk(entry); } };
+  walk(JSON.parse(text));
+  for (const word of ['cold', 'hot', 'layoff', 'title']) assert.equal(keys.some((key) => key.toLowerCase().includes(word)), false, word);
   for (const part of parts) {
     assert.match(part.entry.file, /^[0-9a-f]{32}\.bin$/);
     assert.equal(part.data.includes(Buffer.from('layoff')), false);
