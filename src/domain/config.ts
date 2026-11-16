@@ -46,7 +46,7 @@ export function normalizePolicyMode(value: unknown): ActionPolicyMode {
   return 'approve-risky';
 }
 
-const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
+export const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
 
 /** Credentials only travel over HTTPS; plain HTTP is accepted solely for a runtime on this machine. */
 export function isSecureEndpoint(value: string): boolean {

@@ -1,9 +1,12 @@
 // The routing table of the policy bundle (CLAS-05, D-30, D-37, D-47): which tier of model a label's level may be sent to. Pure: no I/O, no clock, no vscode,
-// no package. This file holds the table, its shipped default and its parser; the decision that reads the table is a later plan.
+// no package. This file holds the table, its shipped default and its parser, then the decision that reads it: which tier a mark needs (D-47: strictest wins)
+// and whether one client, endpoint and model satisfy that tier, judged from local facts only before anything is sent (D-36, D-37).
 // Strictness only goes one way: a handling flag, a compartment or a level can raise the tier, and the strictest of them wins when the decision is made.
 // A label can never relax a tier (D-47); only your organization changing the bundle's table does.
-import { LABEL_TOKEN_PATTERN } from './labels';
-import type { ScaleTable } from './labels';
+import { LOOPBACK_HOSTS } from '../config';
+import type { Mark } from './dominance';
+import { LABEL_TOKEN_PATTERN, labelKey } from './labels';
+import type { Label, ScaleTable } from './labels';
 import { checkKeys, childPath, isRecord, ownValue, refused } from './shape';
 import type { Parsed } from './shape';
 import { parseHostPattern } from './vocabulary';
@@ -149,4 +152,156 @@ export function parseRouting(value: unknown, scales: ScaleTable, path = ''): Par
   const localHosts = parseLocalHosts(ownValue(value, 'localHosts'), childPath(path, 'localHosts'));
   if (!localHosts.ok) return localHosts;
   return { ok: true, value: Object.freeze({ levels: levels.value, handling: handling.value, compartments: compartments.value, localHosts: localHosts.value }) };
+}
+
+function stricter(a: RoutingTier, b: RoutingTier): RoutingTier {
+  return TIER_ORDER[b] > TIER_ORDER[a] ? b : a;
+}
+
+function tableTier(table: Readonly<Record<string, RoutingTier>>, key: string): RoutingTier | undefined {
+  return Object.prototype.hasOwnProperty.call(table, key) ? table[key] : undefined;
+}
+
+/**
+ * The tier one label needs: its level's tier, made stricter by a compartment entry and by an entry for any of its handling flags that the table lists.
+ * Nothing here can relax a tier (D-47). A level the table does not list is `deny`, so an unknown label can only narrow where content may go.
+ * `no-agent-tools` is not a routing key and never changes a tier.
+ */
+export function tierForLabel(label: Label, routing: RoutingTable): RoutingTier {
+  let tier: RoutingTier = tableTier(routing.levels, labelKey(label)) ?? 'deny';
+  for (const compartment of label.compartments) {
+    const entry = tableTier(routing.compartments, compartment);
+    if (entry !== undefined) tier = stricter(tier, entry);
+  }
+  for (const flag of ROUTING_HANDLING_FLAGS) {
+    const entry = routing.handling[flag];
+    if (entry !== undefined && label.handling.includes(flag)) tier = stricter(tier, entry);
+  }
+  return tier;
+}
+
+/**
+ * The strictest tier over every label of the mark, in the order any-cloud, attested-cloud, local-only, deny. The answer does not depend on the order of
+ * the labels. A session starts at the project's default label, so a mark is never empty; an empty mark given anyway takes `defaultLabel`'s tier when the
+ * caller supplies it and is `deny` otherwise, because nothing is known about what the chat has read.
+ */
+export function tierForMark(mark: Mark, routing: RoutingTable, defaultLabel?: Label): RoutingTier {
+  if (mark.length === 0) return defaultLabel === undefined ? 'deny' : tierForLabel(defaultLabel, routing);
+  let tier: RoutingTier = 'any-cloud';
+  for (const label of mark) tier = stricter(tier, tierForLabel(label, routing));
+  return tier;
+}
+
+/** The hostname of an endpoint given as a URL or as a bare host (with or without a port), lowercase, in the form URL.hostname uses; undefined when unreadable. */
+function hostnameOf(host: string): string | undefined {
+  const text = host.trim();
+  if (text === '') return undefined;
+  try {
+    return new URL(text.includes('://') ? text : `http://${text}`).hostname.toLowerCase();
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Whether an endpoint counts as this machine or a host your organization names (D-37): a loopback host, or one matching an entry of `localHosts`
+ * (an exact host, or `*.example.com` for any host below example.com). A host that cannot be read is not local.
+ */
+export function isLocalRouteHost(host: string, localHosts: readonly HostPattern[]): boolean {
+  const name = hostnameOf(host);
+  if (name === undefined) return false;
+  if (LOOPBACK_HOSTS.has(name)) return true;
+  return localHosts.some((pattern) => (pattern.startsWith('*.') ? name.endsWith(pattern.slice(1)) && name.length > pattern.length - 1 : name === pattern));
+}
+
+/** The facts of one request that routing can know before sending, none of them a network call (D-36). */
+export interface RouteFacts {
+  /** The client the run sends through: NEAR AI Cloud, a local runtime, or not said. */
+  readonly clientRoute: 'near' | 'local' | undefined;
+  /** The client's endpoint, as a URL or a host. */
+  readonly host: string;
+  /** Whether the endpoint is NEAR AI Cloud's own, where a TEE model's attestation can be checked. */
+  readonly nearEndpoint: boolean;
+  /** The cached catalog entry of the model. Absent when the model is unknown or the catalog has not loaded, which counts as not private. */
+  readonly model: { readonly id: string; readonly privacyBoundary?: string } | undefined;
+  /** True when this session already saw an attestation fail. */
+  readonly attestationFailed: boolean;
+}
+
+export const ROUTE_RULES = Object.freeze([
+  'route.any-cloud',
+  'route.attested-cloud',
+  'route.local-only',
+  'route.deny',
+  'route.no-local-model',
+  'route.local-host-not-local',
+  'route.not-tee',
+  'route.attestation-failed',
+  'route.no-session'
+] as const);
+export type RouteRule = (typeof ROUTE_RULES)[number];
+export type RefusingRouteRule = Exclude<RouteRule, 'route.any-cloud' | 'route.attested-cloud' | 'route.local-only'>;
+
+/** One plain sentence per refusing rule: nothing was sent, and what to do about it. */
+export const ROUTE_REFUSALS: Readonly<Record<RefusingRouteRule, string>> = Object.freeze({
+  'route.deny': 'Nothing was sent. Your organization\'s rules do not let content at this label go to any model. Start a new chat that has not read this content, or ask your organization\'s security officer about the routing table.',
+  'route.no-local-model': 'Nothing was sent. This chat has read content that may only go to a model running on this computer, and the model for this request is not one. Add a local model and run again, or start a new chat that has not read this content.',
+  'route.local-host-not-local': 'Nothing was sent. Your local runtime points at a host that is not on this computer and that your organization has not named as local, so it cannot count as local. Point the runtime at this computer, or ask your organization to name the host as local.',
+  'route.not-tee': 'Nothing was sent. This chat has read content that may only go to a model running in private hardware on NEAR AI Cloud\'s own endpoint, and this model or endpoint is not confirmed to do that. Choose a private model on NEAR AI Cloud or a local model, or start a new chat that has not read this content.',
+  'route.attestation-failed': 'Nothing was sent. The private hardware check on NEAR AI Cloud failed earlier in this session, so its models cannot count as private now. Switch to a local model, or try again in a new session.',
+  'route.no-session': 'Nothing was sent. This request did not say which route it uses, so no model can be confirmed private. Start the run again from the chat, or choose a local model.'
+});
+
+export interface RouteDecision {
+  readonly allowed: boolean;
+  /** The tier the mark needs. */
+  readonly tier: RoutingTier;
+  readonly rule: RouteRule;
+  /** Present exactly when the request is refused. */
+  readonly reason?: string;
+}
+
+function allow(tier: RoutingTier, rule: RouteRule): RouteDecision {
+  return { allowed: true, tier, rule };
+}
+
+function refuse(tier: RoutingTier, rule: RefusingRouteRule): RouteDecision {
+  return { allowed: false, tier, rule, reason: ROUTE_REFUSALS[rule] };
+}
+
+/** `undefined` when a local client, on a local host, serves a model the catalog marks local; otherwise the rule that says which part fails. */
+function whyNotLocal(facts: RouteFacts, routing: RoutingTable): 'route.no-local-model' | 'route.local-host-not-local' | undefined {
+  if (facts.clientRoute !== 'local') return 'route.no-local-model';
+  if (!isLocalRouteHost(facts.host, routing.localHosts)) return 'route.local-host-not-local';
+  return facts.model?.privacyBoundary === 'local' ? undefined : 'route.no-local-model';
+}
+
+function decideAttested(tier: RoutingTier, routing: RoutingTable, facts: RouteFacts): RouteDecision {
+  // A local model on a local host is stricter than attested cloud, so it satisfies this tier too.
+  if (whyNotLocal(facts, routing) === undefined) return allow(tier, 'route.attested-cloud');
+  if (facts.clientRoute === 'local') {
+    return refuse(tier, isLocalRouteHost(facts.host, routing.localHosts) ? 'route.not-tee' : 'route.local-host-not-local');
+  }
+  // Judged before sending (D-36): the TEE flag and NEAR's own endpoint, because a forwarded model cannot be attested.
+  if (facts.model?.privacyBoundary !== 'tee' || !facts.nearEndpoint) return refuse(tier, 'route.not-tee');
+  if (facts.attestationFailed) return refuse(tier, 'route.attestation-failed');
+  return allow(tier, 'route.attested-cloud');
+}
+
+/**
+ * Whether a request may go, from the session's mark, the bundle's routing table and the local facts of the request (CLAS-05, CLAS-06, D-30, D-36, D-37).
+ * `deny` refuses. `local-only` needs a local client on a loopback host or a host the table names, serving a model the catalog marks local. `attested-cloud`
+ * needs a TEE model on NEAR AI Cloud's own endpoint with no failed attestation this session, or a local model as above. `any-cloud` allows everything.
+ * An unknown model counts as not private for every tier above any-cloud. A refusal always carries a plain sentence that says nothing was sent.
+ */
+export function decideRoute(mark: Mark, routing: RoutingTable, facts: RouteFacts, defaultLabel?: Label): RouteDecision {
+  const tier = tierForMark(mark, routing, defaultLabel);
+  if (tier === 'any-cloud') return allow(tier, 'route.any-cloud');
+  if (tier === 'deny') return refuse(tier, 'route.deny');
+  if (facts.clientRoute === undefined) return refuse(tier, 'route.no-session');
+  if (tier === 'local-only') {
+    const why = whyNotLocal(facts, routing);
+    return why === undefined ? allow(tier, 'route.local-only') : refuse(tier, why);
+  }
+  return decideAttested(tier, routing, facts);
 }
