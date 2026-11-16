@@ -319,7 +319,7 @@ Plans:
   8. Every cloud answer shows a plain trust badge (Verified private model; Model verified, connection not proven; Not verified) with the full attestation on request, and a level that requires attested cloud is sent only after a pre-send check that the connection is bound to the enclave. (CLAS-05, CLAS-08)
 **Research flags**: (1) The capability grammar: start from IronClaw's manifest fields and the Hermes grammar (both in `.planning/research/platform-direction/`), version it, refuse unknown verbs, and reserve verbs for inference routes and GPU devices so later milestones need no grammar change. (2) Migration: approval modes, auto-allow switches, allow rules, protected paths (`src/domain/protectedPaths.ts`) and unattended rules (`src/agent/unattended.ts`) map into the bundle with no change in behaviour except the floor. (3) The relay reuses the vocabulary, but its workspace test lets only `relay/src/runner` import extension code: decide how the types are shared. (4) Labels and routing (`identity-research.md`, section 4): the default label of a fresh install must keep routing as it is today (no behaviour change but the floor); where file and folder labels are stored (a map in the project, not file attributes) and how a label follows a copy, a rename and Phase 72's copy-and-apply; the `attested-cloud` tier reuses the per-request attestation and signature check in `src/services/attestation.ts`, and `local-only` builds on today's local and hybrid profiles. (5) Presets: the NATO list comes only from secondary copies, and modelling the Canadian Protected and Classified families as two scales is the plan's reading, so your organization's security officer confirms both before release; no CCCS Medium (formerly PBMM) assessment of NEAR AI Cloud was found, so Protected B stays local only by default. (6) Not accreditation (research risk 9): the wording of CLAS-07 is checked against what the gate actually guarantees.
 **Undo cost**: High. The vocabulary, the label format and the bundle format are what edge devices hold offline and what anchored roots will commit to (only roots go on chain): settle them before they ship.
-**Plans:** 25 plans (one per wave; after the planning PR, PR 1 is plans 01-07 on `feat/gate-vocabulary`, PR 2 is plans 08-15 on `feat/gate-shadow`, PR 3 is plans 16-18 on `feat/gate-floor`, PR 4 is plans 19-25 on `feat/gate-labels`)
+**Plans:** 28 plans (one per wave; after the planning PR, PR 1 is plans 01-07 on `feat/gate-vocabulary`, PR 2 is plans 08-15 on `feat/gate-shadow`, PR 3 is plans 16-18 on `feat/gate-floor`, PR 4 is plans 19-28 on `feat/gate-labels`)
 **UI hint**: yes
 
 Plans:
@@ -396,7 +396,16 @@ Plans:
 - [ ] 70-24-PLAN.md — routing tiers live: attested-cloud checked after each answer, local-only on this computer, SECURITY.md labels section (PR 4)
 
 **Wave 25** *(blocked on Wave 24 completion)*
-- [ ] 70-25-PLAN.md — automated check that PR 3 is on main, rebase, gate, open PR 4 (names the label map format and the D-48 release blocker)
+- [ ] 70-25-PLAN.md — the pre-send connection binding: research what NEAR AI Cloud's attestation exposes, attested-cloud only over a connection bound to the enclave, else local-only (PR 4)
+
+**Wave 26** *(blocked on Wave 25 completion)*
+- [ ] 70-26-PLAN.md — the trust badge on every cloud answer: three states from checks that ran, details and full attestation, theme-aware (PR 4)
+
+**Wave 27** *(blocked on Wave 26 completion)*
+- [ ] 70-27-PLAN.md — trust badges kept across reloads, the end-to-end badge check, SECURITY.md and README badge text (PR 4)
+
+**Wave 28** *(blocked on Wave 27 completion)*
+- [ ] 70-28-PLAN.md — automated check that PR 3 is on main, rebase, gate, open PR 4 (names the label map format, the connection binding finding, the trust badge and the D-48 release blocker)
 
 **Cross-cutting constraints:** <!-- gsd:generated -->
 - The full gate passes once inside the cap: lint and suite, e2e under xvfb with the Wayland variables removed, verify:release and the range secret scan (D-34).
@@ -672,7 +681,7 @@ Plans:
 | 84 Ops, onboarding and release | OPS-01 … OPS-07 | 7 |
 | **Total** | | **133** |
 
-RUNL-05 (approvals in the private chat) is retired: APRV-01 … APRV-04 replace it with request-bound, signed approvals. The identity amendment of 2026-11-15 added CLAS-01 … CLAS-07 (Phase 70), DLGT-08 and VCRD-01 … VCRD-07 (Phase 71): 117 to 132.
+RUNL-05 (approvals in the private chat) is retired: APRV-01 … APRV-04 replace it with request-bound, signed approvals. The identity amendment of 2026-11-15 added CLAS-01 … CLAS-07 (Phase 70), DLGT-08 and VCRD-01 … VCRD-07 (Phase 71): 117 to 132. The owner added CLAS-08 (the trust badge, Phase 70) on 2026-11-16: 133 in total.
 
 ## Milestone v0.8.0: Cybersecurity
 

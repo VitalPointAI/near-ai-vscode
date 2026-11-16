@@ -55,7 +55,9 @@ created: "2026-11-16"
 | CLAS-04 | mark raises, never lowers; sub-agent shares; writes inherit; rename moves entry; declassify records a reason | unit + integration | `gateMark.test.js` | Wave 0 |
 | CLAS-05 | default routing table by `scale/level`; handling and compartments; join of two scales takes the strictest | unit | `gateRouting.test.js` | Wave 0 |
 | CLAS-06 | guard before `fetchFn` on every content path; local-only with no local client or non-loopback host refused; mark rising mid-run refuses next request; hybrid; attestation after-the-fact record | integration | `gateRouteGuard.test.js` | Wave 0 |
+| CLAS-05 (owner amplification) | attested-cloud sent only with a fresh bound connection fact, else local-only or refused before fetch; the NEAR source against fixture reports and a local TLS server; the pinned handshake refuses another certificate before the request is written; refresh out of band, deduplicated | unit + integration | `gateConnectionBinding.test.js` (+ `gateRouteTiers.test.js`, `attestation.test.js` unchanged in meaning) | Wave 0 |
 | CLAS-07 | exact wording present in SECURITY.md and the label command text | docs | `gateDocs.test.js` | Wave 0 |
+| CLAS-08 | three badge states from checks that ran; exhaustive never-stronger test; one check per answer; details and full attestation; theme rules; replayed on reload with a weaker-wins merge; rendered in the real chat page | unit + page harness + e2e | `gateTrustBadge.test.js`, `gateDocs.test.js`, the e2e badge test in `src/test/e2e/suite.ts` | Wave 0 |
 | boundary | `src/domain/gate` and `src/gate` import rules | scan | extend `teamBoundaries.test.js` | exists, edit |
 
 
@@ -74,6 +76,7 @@ Filled from the plans: every task's `<automated>` command runs one of the test f
 - [ ] a fake-home helper and a `testTool()` fixture helper in `src/test/helpers/`
 - [ ] `src/agent/toolCatalog.ts` (production code the enumeration tests depend on)
 - [ ] a docs-parity test pattern for SECURITY.md and README (new)
+- [ ] `src/test/helpers/attestationFixtures.ts` (quote fixtures shared by the attestation and connection binding tests)
 
 ---
 
@@ -84,6 +87,8 @@ Filled from the plans: every task's `<automated>` command runs one of the test f
 | Your organization's security officer confirms the NATO list and the two Canadian scales | CLAS-02 | Sources are secondary; a person must confirm before relying on them | Read the presets in the bundle and SECURITY.md; record the confirmation |
 | Fresh install on code-server signs its first bundle and the extension stays usable | OFFL-02 | Secrets live in the browser on code-server; covered by unit tests with stubs, confirmed by the owner on a real host BEFORE publishing any release that carries PR 2 (D-48) | Install the released 0.4.x on a clean code-server profile, open a project, run a chat and one edit |
 | The status bar and refusal texts read plainly | OFFL-02, CLAS-06 | Wording judgement | Unplug the network, break the bundle, read the texts |
+| The trust badge reads plainly in light, dark and high contrast themes | CLAS-08 | Visual judgement; the CSS test only proves theme variables and a high-contrast border | Switch between a light, a dark and a high contrast theme with a chat that has each badge state, click each badge and read its details |
+| What NEAR AI Cloud's attestation exposes about the connection key is confirmed against the live service | CLAS-05 | Plan 25's research step records the finding and its sources; a live comparison needs the network and a key | Read the "NEAR AI Cloud connection binding" finding in 70-25-SUMMARY.md and the PR 4 body; if the live comparison was not made there, run one Confidential chat on NEAR AI Cloud and read its badge's details |
 
 ---
 

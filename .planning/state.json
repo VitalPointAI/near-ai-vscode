@@ -112,7 +112,7 @@
   "next": {
     "command": "/gsd-execute-phase 70",
     "label": "Execute Phase 70 (gate with a floor) after the planning PR merges",
-    "reason": "Phase 70 planned 2026-11-16: 25 plans over four code PRs"
+    "reason": "Phase 70 planned 2026-11-16: 28 plans over four code PRs (18 requirements; CLAS-08 added by the owner)"
   },
-  "updated_at": "2026-11-15T13:22:46.000Z"
+  "updated_at": "2026-11-16T14:29:02.000Z"
 }
