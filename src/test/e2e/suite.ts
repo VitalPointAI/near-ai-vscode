@@ -60,6 +60,10 @@ function projectTests(): Array<[string, () => Promise<void>]> {
       const contributed = (extension.packageJSON.contributes.commands as Array<{ command: string }>).map((entry) => entry.command);
       assert.deepEqual(contributed.filter((command) => !registered.has(command)), [], 'contributed commands without a handler');
     }],
+    ['a fresh profile signs its first policy file at activation and it verifies (Phase 70, D-14, D-48)', async () => {
+      const policy = await api.gate.state();
+      assert.equal(policy.state, 'valid', `the first policy file is signed and verifies (${policy.state === 'failed-closed' ? policy.reason : ''})`);
+    }],
     ['the sidebar webview loads its script under the CSP and asks the host for models', async () => {
       api.sidebar.tap = { toView: (message) => observer.record(observer.toView, message), fromView: (message) => observer.record(observer.fromView, message) };
       await vscode.commands.executeCommand('nearAiChatView.focus');
@@ -325,12 +329,18 @@ function plainTests(): Array<[string, () => Promise<void>]> {
       assert.equal(vscode.extensions.getExtension(EXTENSION_ID)!.isActive, true, 'the view activates the extension');
       assert.deepEqual(await readdir(workspace), []);
     }],
-    ['a folder without team.json starts no team session and creates no identity (D-14, D-30)', async () => {
+    // Phase 70 (D-14) changed this test on purpose. It used to say that no device key is stored here. The gate now creates the device identity at
+    // activation, in every folder, because it signs its first policy file with it (a fresh install needs no network and no setup), so Team Mode
+    // alone is no longer the only thing that makes one. What still holds: no team session and nothing written into the folder. What is new: the
+    // gate signed its first policy file and it verifies.
+    ['a folder without team.json starts no team session; the gate signs its own first policy there and writes nothing into the folder (D-14, D-30, Phase 70 D-14)', async () => {
       const api = vscode.extensions.getExtension<NearAiTestApi>(EXTENSION_ID)!.exports;
       assert.ok(api, 'the extension is active, so the test API is there');
       assert.equal(await api.team.ready, 'solo');
       assert.equal(api.team.session(), undefined, 'no team session');
-      assert.equal(await api.team.deviceKeyEvidence(), undefined, 'no device key is stored');
+      const policy = await api.gate.state();
+      assert.equal(policy.state, 'valid', `the first policy file is signed and verifies (${policy.state === 'failed-closed' ? policy.reason : ''})`);
+      assert.ok(await api.team.deviceKeyEvidence() !== undefined, 'the gate created the device identity it signs with');
       assert.deepEqual(await readdir(workspace), [], 'the folder is still empty');
     }],
     ['the Cybersecurity command opens its panel in a folder with no NEAR AI setup', async () => {

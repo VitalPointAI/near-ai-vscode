@@ -31,6 +31,7 @@ import { registerWebSearchSetup } from './services/webSearchSetup';
 import { registerSpendingLimits } from './services/spendingLimits';
 import { registerSpendTracking } from './services/spendTracking';
 import { registerGate } from './services/gateCommands';
+import type { GateHost } from './gate/host';
 import { registerTeamMode, teamModeTestApi } from './services/team/teamCommands';
 import type { TeamModeTestApi } from './services/team/teamCommands';
 import { registerMcpConnections } from './services/mcpView';
@@ -59,7 +60,7 @@ import { registerCodePushCommand } from './services/onlineHomeVscode';
 import { cleanOldDrafts } from './agent/imageDrafts';
 
 /** Returned only to the extension-host tests, which set NEAR_AI_E2E=1. */
-export interface NearAiTestApi { auth: AuthService; sidebar: NearAiPanelViewProvider; team: TeamModeTestApi }
+export interface NearAiTestApi { auth: AuthService; sidebar: NearAiPanelViewProvider; team: TeamModeTestApi; gate: GateHost }
 
 export function activate(context: vscode.ExtensionContext): NearAiTestApi | undefined {
   const auth = new AuthService(context.secrets);
@@ -217,7 +218,7 @@ export function activate(context: vscode.ExtensionContext): NearAiTestApi | unde
 
   // `@nearAi` in VS Code's built-in Chat view; skipped on hosts without the Chat Participant API.
   registerChatParticipant(context, auth, (command, args) => sidebar.request({ type: 'open-command', command, ...(args ? { args } : {}) }));
-  return process.env.NEAR_AI_E2E === '1' ? { auth, sidebar, team: teamModeTestApi(context, teamMode) } : undefined;
+  return process.env.NEAR_AI_E2E === '1' ? { auth, sidebar, team: teamModeTestApi(context, teamMode), gate } : undefined;
 }
 
 async function suggestProxySupportOff(context: vscode.ExtensionContext): Promise<void> {
