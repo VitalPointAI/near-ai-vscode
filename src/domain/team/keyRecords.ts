@@ -162,8 +162,18 @@ function replay(file: unknown, rawHead: KeyHistoryHead | undefined): KeyHistoryR
     if (claimed.seq !== seq) return fail(`Record ${seq} of the key history is out of order or a record is missing (it is numbered ${claimed.seq}).`);
     if (claimed.prev !== prev) return fail(`Record ${seq} of the key history does not follow the record before it, so a record was changed, moved or removed.`);
 
+    // Who may sign this record, decided from the state so far (D-09): the new key itself for created; the active key for rotated; for revoked the
+    // key being withdrawn (while it is active or rotated) or the active key.
     const allowed: DeviceRef[] = [];
-    if (claimed.kind === 'created') allowed.push(claimed.key);
+    if (claimed.kind === 'created') {
+      allowed.push(claimed.key);
+    } else if (claimed.kind === 'rotated') {
+      if (active !== undefined) allowed.push(active);
+    } else {
+      const target = entries.get(claimed.key.fingerprint);
+      if (target !== undefined && target.publicKey === claimed.key.publicKey && target.state !== 'revoked') allowed.push(claimed.key);
+      if (active !== undefined) allowed.push(active);
+    }
     const verdict = verifyPayload<unknown>(raw, { purpose: 'key-record', status: allowedSigners(allowed) });
     if (!verdict.ok) return fail(whyRefused(seq, verdict.reason, verdict.message));
     const record = parseKeyRecord(verdict.payload);
@@ -174,8 +184,18 @@ function replay(file: unknown, rawHead: KeyHistoryHead | undefined): KeyHistoryR
       if (entries.has(record.key.fingerprint)) return fail(`Record ${seq} of the key history adds a key that the history already used.`);
       entries.set(record.key.fingerprint, { publicKey: record.key.publicKey, state: 'active' });
       active = record.key;
+    } else if (record.kind === 'rotated') {
+      if (!sameDevice(active, record.key) || record.next === undefined) return fail(`Record ${seq} of the key history replaces a key that is not the active key.`);
+      if (entries.has(record.next.fingerprint)) return fail(`Record ${seq} of the key history hands over to a key that the history already used.`);
+      entries.set(record.key.fingerprint, { publicKey: record.key.publicKey, state: 'rotated', since: record.at, replacedBy: record.next.fingerprint });
+      entries.set(record.next.fingerprint, { publicKey: record.next.publicKey, state: 'active' });
+      active = record.next;
     } else {
-      return fail(`Record ${seq} of the key history is not a kind this version understands.`);
+      const target = entries.get(record.key.fingerprint);
+      if (target === undefined || target.publicKey !== record.key.publicKey) return fail(`Record ${seq} of the key history revokes a key that the history does not know.`);
+      if (target.state === 'revoked') return fail(`Record ${seq} of the key history revokes a key that was already revoked.`);
+      entries.set(record.key.fingerprint, { publicKey: target.publicKey, state: 'revoked', since: record.at, reason: REVOKED_IN_HISTORY });
+      if (sameDevice(active, record.key)) active = undefined;
     }
     prev = keyRecordHash(raw as SignedPayload<KeyRecord>);
   }
