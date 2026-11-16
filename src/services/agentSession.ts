@@ -272,6 +272,11 @@ export class AgentConversation {
   private readonly agents = new Map<string, LiveAgent>();
   private readonly background = new Set<Promise<void>>();
   private notifications: AgentMessage[] = [];
+  /**
+   * 0.4.28: the reports of background agents a running sub-agent started, kept for that sub-agent (which reads them at its next turn and waits for the
+   * rest before it ends), and its helpers still running. Before, every report went to the run's lead, which had not asked for them.
+   */
+  private readonly inboxes = new Map<string, { reports: AgentMessage[]; pending: Set<Promise<void>> }>();
   /** The main run's task list; sub-agents started for one of its items move that item along. */
   private readonly tasks = new TaskBoard();
   /** Messages the user sent while a run was going, oldest first, until a model request takes them. */
@@ -968,32 +973,39 @@ export class AgentConversation {
         const slot = { held: false, nested: 0, worktree: spawn.isolation === 'worktree', worktreeHeld: false };
         // A foreground agent this agent starts needs a slot from the same pool, so this agent hands its own slot back while it waits for that child
         // and takes one again before its next turn. Otherwise a parent holding the last slot would wait for ever on a child that waits for that slot.
+        // 0.4.28: the same hand-back serves an agent waiting for its background helpers' reports (afterAnswer below).
+        const handBackSlot = () => {
+          if (slot.held) { slot.held = false; this.releaseSlot(); }
+          if (slot.worktreeHeld) { slot.worktreeHeld = false; this.worktreeSlots.release(); }
+        };
+        const takeBackSlot = async () => {
+          // Once the agent is stopped there is no next turn to hold a slot for, and waiting on the aborted signal would throw here and replace the
+          // child's finished report with an error.
+          while (slot.nested === 0 && !slot.held && !agent.abort.signal.aborted) {
+            // Stopped while waiting: there is no next turn, and the child's finished report must still be returned, not replaced by the abort.
+            try { await this.acquireSlot(limit, agent.abort.signal); } catch { break; }
+            slot.held = true;
+            // Another foreground child started while this one waited for the slot: it needs the slot more.
+            if (slot.nested > 0) { slot.held = false; this.releaseSlot(); }
+          }
+          // Then its worktree slot, the same way (PERF-04 with #36).
+          while (slot.worktree && slot.nested === 0 && slot.held && !slot.worktreeHeld && !agent.abort.signal.aborted) {
+            try { await this.worktreeSlots.acquire(this.maxParallelWorktrees, agent.abort.signal); } catch { break; }
+            slot.worktreeHeld = true;
+            if (slot.nested > 0) { slot.worktreeHeld = false; this.worktreeSlots.release(); }
+          }
+        };
         const yieldingSlot = (tool: AgentTool<any>): AgentTool<any> => ({
           ...tool,
           run: async (input, toolContext) => {
             if ((input as { background?: boolean }).background) return tool.run(input, toolContext);
             slot.nested += 1;
-            if (slot.nested === 1 && slot.held) { slot.held = false; this.releaseSlot(); }
-            if (slot.nested === 1 && slot.worktreeHeld) { slot.worktreeHeld = false; this.worktreeSlots.release(); }
+            if (slot.nested === 1) handBackSlot();
             try {
               return await tool.run(input, toolContext);
             } finally {
               slot.nested -= 1;
-              // Once the agent is stopped there is no next turn to hold a slot for, and waiting on the aborted signal would throw here and replace the
-              // child's finished report with an error.
-              while (slot.nested === 0 && !slot.held && !agent.abort.signal.aborted) {
-                // Stopped while waiting: there is no next turn, and the child's finished report must still be returned, not replaced by the abort.
-                try { await this.acquireSlot(limit, agent.abort.signal); } catch { break; }
-                slot.held = true;
-                // Another foreground child started while this one waited for the slot: it needs the slot more.
-                if (slot.nested > 0) { slot.held = false; this.releaseSlot(); }
-              }
-              // Then its worktree slot, the same way (PERF-04 with #36).
-              while (slot.worktree && slot.nested === 0 && slot.held && !slot.worktreeHeld && !agent.abort.signal.aborted) {
-                try { await this.worktreeSlots.acquire(this.maxParallelWorktrees, agent.abort.signal); } catch { break; }
-                slot.worktreeHeld = true;
-                if (slot.nested > 0) { slot.worktreeHeld = false; this.worktreeSlots.release(); }
-              }
+              await takeBackSlot();
             }
           }
         });
@@ -1010,6 +1022,7 @@ export class AgentConversation {
           let shell: ShellSession | undefined;
           let worktree: AgentWorktree | undefined;
           let worktreeState: 'removed' | 'kept' | undefined;
+          const inbox = { reports: [] as AgentMessage[], pending: new Set<Promise<void>>() };
           agent.startedAt = Date.now();
           this.setActivity(agent, 'Starting');
           this.agents.set(agent.id, agent);
@@ -1028,6 +1041,7 @@ export class AgentConversation {
             const base = `${this.systemPrompt({ ...request, model }, agentRoot, tools.some((tool) => tool.name === 'Agent' || tool.name === 'Task'))}${isolationNote}`;
             const system = agentBody ? `${agentBody}\n\n${base}` : base;
             this.activity?.agentStarted(identity, spawn.prompt, system);
+            this.inboxes.set(agent.id, inbox);
             const child = new AgentRun({
               client: request.client, model, tools, context: agentContext, policy: request.policy, rules: request.rules, grants, safety: this.runSafety, maxTurns: request.maxTurns, maxOutputTokens: request.maxOutputTokens,
               ...(request.unattendedAutoApprove !== false ? { unattended: { planScripts: scriptsNamedIn(spawn.prompt), runStartedAt: this.currentRunStartedAt, ...(this.currentBaseCommit ? { baseCommit: this.currentBaseCommit } : {}) } } : {}),
@@ -1038,7 +1052,28 @@ export class AgentConversation {
                 if (this.abort) this.enforceBudget(request, this.abort);
                 await this.whileRunPaused(signal);
                 while (agent.paused && !signal.aborted) await waitOrAbort(signal, (wake) => { agent.resume = wake; });
-                return this.manageContext(transcript, lastUsage, { ...request, model }, signal, false);
+                // Reports of its own background helpers reach it before its next turn, as the lead's reach the lead (0.4.28).
+                const reports = this.takeReports(agent.id);
+                const input = reports.length ? [...transcript, ...reports] : transcript;
+                return (await this.manageContext(input, lastUsage, { ...request, model }, signal, false)) ?? (reports.length ? input : undefined);
+              },
+              // 0.4.28: done, but helpers it started in the background still run: it waits for their reports (handing its slot back meanwhile, so a
+              // helper can run with one slot) instead of ending with "started" and leaving the reports for the lead.
+              afterAnswer: async (_transcript, signal) => {
+                const ready = this.takeReports(agent.id);
+                if (ready.length || !inbox.pending.size || signal.aborted) return ready.length ? ready : undefined;
+                handBackSlot();
+                this.activity?.waitingForAgents(agent.id, true);
+                this.setActivity(agent, `Waiting for ${inbox.pending.size} helper${inbox.pending.size === 1 ? '' : 's'}`);
+                this.postAgents();
+                let reports: AgentMessage[] = [];
+                while (!reports.length && inbox.pending.size && !signal.aborted) {
+                  await waitOrAbort(signal, (wake) => { void Promise.race(inbox.pending).then(wake, wake); });
+                  reports = this.takeReports(agent.id);
+                }
+                this.activity?.waitingForAgents(agent.id, false);
+                await takeBackSlot();
+                return reports.length && !signal.aborted ? reports : undefined;
               },
               // PERF-01: nobody may be watching a sub-agent, so its card waits only briefly; unanswered, the call returns "awaiting approval", the card
               // stays queued, and a later answer is passed to the lead (an allow grants that exact command for the rest of the run).
@@ -1087,6 +1122,9 @@ export class AgentConversation {
             // A failed agent's empty worktree is removed too; one with changes stays for recovery.
             if (worktree && !worktreeState) await finishAgentWorktree(worktree).catch(() => undefined);
             parent.removeEventListener('abort', onParentAbort);
+            // Reports it did not read (it was stopped, or failed) go to the run's lead, as do those of helpers still running when it ended.
+            this.inboxes.delete(agent.id);
+            this.notifications.push(...inbox.reports);
             this.agents.delete(agent.id);
             if (slot.worktreeHeld) { slot.worktreeHeld = false; this.worktreeSlots.release(); }
             if (slot.held) { slot.held = false; this.releaseSlot(); }
@@ -1094,11 +1132,14 @@ export class AgentConversation {
           }
         };
         if (!spawn.background) return execute().catch((error: Error) => { throw new Error(`${error.message}${this.taskNote(todo, false)}`); });
+        // The report goes to whoever started it while that agent runs (0.4.28), else to the run's lead.
+        const owner = this.inboxes.get(parentId);
         const task = execute()
-          .then((report) => { this.notifications.push({ role: 'user', content: `<agent-notification id="${agent.id}" agent="${label}" status="finished">\n${report}\n</agent-notification>` }); })
-          .catch((error: Error) => { this.notifications.push({ role: 'user', content: `<agent-notification id="${agent.id}" agent="${label}" status="failed">\n${error.message}${this.taskNote(todo, false)}\n</agent-notification>` }); })
-          .finally(() => { this.background.delete(task); });
+          .then((report) => { this.deliverReport(parentId, { role: 'user', content: `<agent-notification id="${agent.id}" agent="${label}" status="finished">\n${report}\n</agent-notification>` }); })
+          .catch((error: Error) => { this.deliverReport(parentId, { role: 'user', content: `<agent-notification id="${agent.id}" agent="${label}" status="failed">\n${error.message}${this.taskNote(todo, false)}\n</agent-notification>` }); })
+          .finally(() => { this.background.delete(task); owner?.pending.delete(task); });
         this.background.add(task);
+        owner?.pending.add(task);
         return `Started ${label} in the background as ${agent.id} on ${model}.${modelNote ? ` ${modelNote}` : ''} Its report will arrive in a later message when it finishes; there is no output file to poll. Continue with other work, or end your turn to wait; do not sleep.`;
       }
     });
@@ -1111,6 +1152,23 @@ export class AgentConversation {
     const role = roleFor(label);
     if (!store || !role) return;
     await store.record({ evidenceId: `evidence-${agentId}`.slice(0, 100), profileId: `agent-${label}`.slice(0, 100), role, kind: 'reliability', value, recordedAt: new Date().toISOString(), source: 'runtime', outcome: value > 0 ? 'success' : value < 0 ? 'failure' : 'partial' }).catch(() => undefined);
+  }
+
+  /** A background agent's report: to the sub-agent that started it while that one runs, otherwise to the run's lead (0.4.28). */
+  private deliverReport(ownerId: string, message: AgentMessage): void {
+    const inbox = this.inboxes.get(ownerId);
+    if (inbox) inbox.reports.push(message);
+    else this.notifications.push(message);
+  }
+
+  /** The reports waiting for a sub-agent, now read. */
+  private takeReports(agentId: string): AgentMessage[] {
+    const inbox = this.inboxes.get(agentId);
+    if (!inbox?.reports.length) return [];
+    const reports = inbox.reports;
+    inbox.reports = [];
+    this.activity?.reportsDelivered(agentId, reportCount(reports));
+    return reports;
   }
 
   /** Reports from background agents that finished since the last turn, as user messages. */
@@ -1134,10 +1192,17 @@ export class AgentConversation {
     let unsubscribe: (() => void) | undefined;
     const mainId = this.mainAgentId;
     if (mainId) this.activity?.waitingForAgents(mainId, true);
-    await Promise.race([...this.background, new Promise<void>((resolve) => { signal.addEventListener('abort', () => resolve(), { once: true }); unsubscribe = this.steeringInput.subscribe(() => resolve()); })]);
+    // A helper that finishes may have reported to the sub-agent that started it (0.4.28), not here: then nothing is ready yet, and the lead keeps waiting
+    // while agents still run rather than ending its run under them.
+    let arrived: AgentMessage[] = [];
+    while (!signal.aborted) {
+      await Promise.race([...this.background, new Promise<void>((resolve) => { signal.addEventListener('abort', () => resolve(), { once: true }); unsubscribe = this.steeringInput.subscribe(() => resolve()); })]);
+      unsubscribe?.();
+      arrived = [...this.drainNotifications(), ...this.steeringInput.take()];
+      if (arrived.length || !this.background.size) break;
+    }
     if (mainId) this.activity?.waitingForAgents(mainId, false);
-    unsubscribe?.();
-    return signal.aborted ? undefined : [...this.drainNotifications(), ...this.steeringInput.take()];
+    return signal.aborted ? undefined : arrived;
   }
 
   /** Reserves a slot in the same synchronous step as the check, so parallel spawns cannot overshoot the limit. */
