@@ -4,7 +4,7 @@ milestone: v0.7.0
 milestone_name: Governed agent platform and messaging relay
 current_plan: 15
 status: planning
-stopped_at: Completed 69-14-PLAN.md (the v0.6.0 disposition record with a 14-test structure check on feat/team-signed-payloads, not pushed); next 69-15 (PR 2 gate) on feat/team-signed-payloads
+stopped_at: Completed 69-15-PLAN.md (PR 1 #59 merged as 1cbcb9b; PR 2 from feat/team-signed-payloads rebased onto main, gated and open, waiting for the owner's review and merge)
 last_updated: "2026-11-15T22:12:39.172Z"
 state_head: 40a3182d32b057cb0afad76a4cc002590245202d
 progress:
@@ -16,7 +16,7 @@ progress:
 last_activity: 2026-11-15
 current_phase: 69
 current_phase_name: "Team Mode reconciliation: identities and signed events on main"
-last_activity_desc: Executed 69-14 (the v0.6.0 disposition record: fresh archive evidence, a disposition and reason for all nine phases and 34 requirements with TM- prefixes and a same-id column, the D-28 and key-rotation notes, no local path; teamDisposition pins it with 14 tests; REQUIREMENTS.md and ROADMAP.md link to it)
+last_activity_desc: Executed 69-15 (PR 2 rebased onto main with only its own 30 commits, five owner-requested fixes, fresh TMR-01 evidence, the full gate once, PR 2 opened and never merged; TMR-01..TMR-05 complete)
 ---
 
 # Project State
@@ -26,10 +26,10 @@ last_activity_desc: Executed 69-14 (the v0.6.0 disposition record: fresh archive
 Milestone: v0.7.0 Governed agent platform and messaging relay (Phases 68-84), replanned 2026-11-15 from the owner's platform direction (`.planning/PROJECT.md`, "Platform direction"). The roadmap's v0.7.0 section opens with the order of work across every stream.
 Phase 68 (Relay foundation): complete, verified and merged as PR #50 (052d5cf, 2026-11-15). The owner added `relay` to main's branch protection the same day (D-19, done).
 0.4.x line: 0.4.22 published 2026-11-14; 0.4.23 merged (PR #51) and published 2026-11-15 (release PR #52, tag v0.4.23); 0.4.24 is next (the four #46 review minors and three documentation mismatches). Phase 27 shipped as 0.4.20; its record stays open until the owner's host check.
-Phase 69 (Team Mode reconciliation): planned 2026-11-15, 15 plans in 15 waves over two PRs (69-01..08 port the Phase 60 core and the per-person identity, 69-09..15 add device.rotated, the payload signer, key history and the v0.6.0 disposition). Decisions D-01..D-29 were made on the owner's behalf and are recorded in 69-CONTEXT.md with their undo cost. Ready to execute.
+Phase 69 (Team Mode reconciliation): planned 2026-11-15, 15 plans in 15 waves over two PRs (69-01..08 port the Phase 60 core and the per-person identity, 69-09..15 add device.rotated, the payload signer, key history and the v0.6.0 disposition). Decisions D-01..D-29 were made on the owner's behalf and are recorded in 69-CONTEXT.md with their undo cost. All 15 plans are executed: PR 1 (#59) is merged on main (1cbcb9b) and PR 2 (plans 09-15, `feat/team-signed-payloads`, rebased onto main) is open. Next step: the owner reviews and merges PR 2; nothing else in Phase 69 is pending.
 Current Plan: 15
 Total Plans in Phase: 15
-Plans 69-01 to 69-08 done on `feat/team-core-on-main` (the pure domain core, then the git transport, runner and identities, then the event log, team.json, audit mirror and Enable, all from ae5e9e1, byte-identical, 97, 96 and 82 tests green; then fix 3e11c0e on main's file lock under the team's own lock name, `team.json` refusing sync's branch names, and the team-versus-sync isolation test; then the VS Code adapters, `registerTeamMode` in activation with solo parity, and fix 9e49bc5; then the `nearAi.team.preview` setting with the Command Palette gating and the `nearAi.team.active` context key, the plain-words Phase 60 strings with the command titles kept, and the manifest and import boundary tests; then one Ed25519 identity per person per install, the D-22 rollback rule and the Team Mode e2e in a real window); plan 69-08 pushed the branch and opened PR #59 into main (all eight required checks and the agent review green; waiting for the owner's merge, which plan 69-15 checks before it relies on it).
+Plans 69-01 to 69-08 done on `feat/team-core-on-main` (the pure domain core, then the git transport, runner and identities, then the event log, team.json, audit mirror and Enable, all from ae5e9e1, byte-identical, 97, 96 and 82 tests green; then fix 3e11c0e on main's file lock under the team's own lock name, `team.json` refusing sync's branch names, and the team-versus-sync isolation test; then the VS Code adapters, `registerTeamMode` in activation with solo parity, and fix 9e49bc5; then the `nearAi.team.preview` setting with the Command Palette gating and the `nearAi.team.active` context key, the plain-words Phase 60 strings with the command titles kept, and the manifest and import boundary tests; then one Ed25519 identity per person per install, the D-22 rollback rule and the Team Mode e2e in a real window); plan 69-08 pushed the branch and opened PR #59 into main (all eight required checks and the agent review green; merged by the owner as 1cbcb9b); plans 69-09 to 69-15 (device.rotated, the payload signer and key status, the local signed key history, the identity writing its own history, rotation and revocation of the person's key, the v0.6.0 disposition record, then the rebase onto main, the gate and PR 2) are done on `feat/team-signed-payloads`.
 Identity design (owner, 2026-11-15; PROJECT.md Platform direction decisions 8-13): standard DIDs, verifiable credentials for authority, clearance, roles and compartments, classification labels with routing by label, delegation that narrows at every link, and roots-only anchoring. Folded into Phase 70 (CLAS-01..07), Phase 71 (now "Identities, credentials and delegation that only narrows": VCRD-01..07, DLGT-08, a research step first) and the L4 and L5 outlines. Phase 69 is unchanged.
 
 Next, in order:

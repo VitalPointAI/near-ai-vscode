@@ -21,11 +21,11 @@
 
 ### Team Mode reconciliation (Phase 69)
 
-- [ ] **TMR-01**: Before any code moves, `feat/team-fix-pass` is preserved on GitHub as an archive branch and the uncommitted files in its legacy worktree are committed or recorded.
-- [ ] **TMR-02**: The Team Mode core verified in v0.6.0 Phase 60 (device identities held in SecretStorage, canonical JSON, the signed append-only event envelope with Lamport ordering, event validation, the deterministic materializer, the role-by-action permission matrix, the git coordination transport and the roster) runs on current `main`, re-verified against Phase 60's success criteria, in `src/domain/team/` and `src/team/` with no `vscode` import and no new runtime dependency.
-- [ ] **TMR-03**: A project with no team file behaves exactly as before, the full suite stays green, and a canary test proves no secret reaches the coordination log, `team.json`, settings or audit.
-- [ ] **TMR-04**: Every v0.6.0 phase and requirement has a recorded disposition (landed in Phase 69, carried to the Team Mode milestone, folded into a named v0.7.0 phase, or retired), and carried ids that collide with v0.7.0 ids take a `TM-` prefix.
-- [ ] **TMR-05**: A person's device identity signs and verifies any canonical payload through one interface (policy bundles, grants, approval answers), and key rotation and revocation are signed events that later checks honour.
+- [x] **TMR-01**: Before any code moves, `feat/team-fix-pass` is preserved on GitHub as an archive branch and the uncommitted files in its legacy worktree are committed or recorded.
+- [x] **TMR-02**: The Team Mode core verified in v0.6.0 Phase 60 (device identities held in SecretStorage, canonical JSON, the signed append-only event envelope with Lamport ordering, event validation, the deterministic materializer, the role-by-action permission matrix, the git coordination transport and the roster) runs on current `main`, re-verified against Phase 60's success criteria, in `src/domain/team/` and `src/team/` with no `vscode` import and no new runtime dependency.
+- [x] **TMR-03**: A project with no team file behaves exactly as before, the full suite stays green, and a canary test proves no secret reaches the coordination log, `team.json`, settings or audit.
+- [x] **TMR-04**: Every v0.6.0 phase and requirement has a recorded disposition (landed in Phase 69, carried to the Team Mode milestone, folded into a named v0.7.0 phase, or retired), and carried ids that collide with v0.7.0 ids take a `TM-` prefix.
+- [x] **TMR-05**: A person's device identity signs and verifies any canonical payload through one interface (policy bundles, grants, approval answers), and key rotation and revocation are signed events that later checks honour.
 
 ### Capability gate and manifests (Phase 70)
 
@@ -225,11 +225,11 @@
 | RELAY-02 | Phase 68: Relay foundation *(v0.7.0 RELAY-02: not the archived v0.5.0 ciphertext-sync RELAY-02)* | Complete |
 | RELAY-03 | Phase 68: Relay foundation | Complete |
 | RELAY-04 | Phase 68: Relay foundation | Complete |
-| TMR-01 | Phase 69: Team Mode reconciliation | Pending |
-| TMR-02 | Phase 69: Team Mode reconciliation | Pending |
-| TMR-03 | Phase 69: Team Mode reconciliation | Pending |
-| TMR-04 | Phase 69: Team Mode reconciliation | Pending |
-| TMR-05 | Phase 69: Team Mode reconciliation | Pending |
+| TMR-01 | Phase 69: Team Mode reconciliation | Complete |
+| TMR-02 | Phase 69: Team Mode reconciliation | Complete |
+| TMR-03 | Phase 69: Team Mode reconciliation | Complete |
+| TMR-04 | Phase 69: Team Mode reconciliation | Complete |
+| TMR-05 | Phase 69: Team Mode reconciliation | Complete |
 | GATE-01 | Phase 70: Capability vocabulary, manifests and one gate | Pending |
 | GATE-02 | Phase 70: Capability vocabulary, manifests and one gate | Pending |
 | GATE-03 | Phase 70: Capability vocabulary, manifests and one gate | Pending |
