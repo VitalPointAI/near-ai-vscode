@@ -1,5 +1,11 @@
 // Ed25519 device identity for Team Mode (D-14). The private key lives only in SecretStorage and, while in use, in a closure-held KeyObject.
 // This module never imports vscode: SecretStorage is reached through the type-only SecretStorageLike interface.
+//
+// Rotating or revoking the person's own key (D-09, D-21, TMR-05) is done here as signed records in the person's key history, and nothing more: a rotation
+// through these helpers is local only. The new key is bound in no team roster and this phase signs no device.rotated event for it, because no caller ships
+// yet (the later Replace my device flow signs one per team with the kept previous key, using the signed-event type from plan 09). Until that event is in a
+// team's log, the person's session in that team is read-only, because the new key is not bound there. Teams on main hold only their owner (D-13), so revoking
+// the kept previous key before then leaves no key able to sign that event, and the team stays read-only. Rotation does not stop a copied key; only revoking it does.
 import { createPrivateKey, createPublicKey, generateKeyPairSync, randomBytes, sign as edSign } from 'node:crypto';
 import type { KeyObject } from 'node:crypto';
 import { mkdir } from 'node:fs/promises';
@@ -12,6 +18,10 @@ import { appendKeyRecord, archiveKeyHistory, readKeyHistory } from './keyHistory
 
 // One Ed25519 identity per person per install (D-06). Every team this install joins uses this key, so the secret name carries no team id.
 export const DEVICE_KEY_SECRET = 'nearAi.identity.deviceKey';
+// A rotation keeps the new key aside under the pending name until it is recorded, and keeps the replaced key under the previous name so the team flows
+// that come later can still sign with it. Both hold the same kind of private key as the device key and live only in SecretStorage (D-07).
+export const PENDING_DEVICE_KEY_SECRET = 'nearAi.identity.pendingDeviceKey';
+export const PREVIOUS_DEVICE_KEY_SECRET = 'nearAi.identity.previousDeviceKey';
 export const IDENTITY_DIR_NAME = 'identity';
 export const IDENTITY_CREATE_LOCK_FILE = 'identity-create.lock';
 
@@ -51,17 +61,21 @@ export async function createDeviceIdentity(secrets: SecretStorageLike): Promise<
   return identityFrom(privateKey);
 }
 
-export async function loadDeviceIdentity(secrets: SecretStorageLike): Promise<DeviceIdentity | undefined> {
-  const stored = await secrets.get(DEVICE_KEY_SECRET);
+async function loadStoredKey(secrets: SecretStorageLike, name: string, what: string): Promise<DeviceIdentity | undefined> {
+  const stored = await secrets.get(name);
   if (!stored) return undefined;
   let privateKey: KeyObject;
   try {
     privateKey = createPrivateKey({ key: Buffer.from(stored, 'base64'), format: 'der', type: 'pkcs8' });
   } catch (error) {
-    throw new Error('The stored team device key could not be read.', { cause: error });
+    throw new Error(`The stored ${what} could not be read.`, { cause: error });
   }
-  if (privateKey.asymmetricKeyType !== 'ed25519') throw new Error('The stored team device key is not an Ed25519 key.');
+  if (privateKey.asymmetricKeyType !== 'ed25519') throw new Error(`The stored ${what} is not an Ed25519 key.`);
   return identityFrom(privateKey);
+}
+
+export async function loadDeviceIdentity(secrets: SecretStorageLike): Promise<DeviceIdentity | undefined> {
+  return loadStoredKey(secrets, DEVICE_KEY_SECRET, 'team device key');
 }
 
 export async function forgetDeviceIdentity(secrets: SecretStorageLike): Promise<void> {
@@ -144,6 +158,100 @@ export async function forgetCreatedDeviceIdentity(
     );
     await forgetDeviceIdentity(secrets);
     return true;
+  });
+}
+
+function present(value: string | undefined): value is string {
+  return value !== undefined && value !== '';
+}
+
+// The key moves of a rotation, safe to repeat: the replaced key is stored as the previous key, the pending key becomes the device key, and the pending
+// entry goes. Each step checks what is already there, so a crash after any step is finished by running this again. Called only once the key history
+// already names the pending key as active. Whatever the previous entry holds when it differs from the key being replaced is an earlier rotation's key,
+// which is never dropped silently.
+async function finishRotationMoves(secrets: SecretStorageLike): Promise<void> {
+  const pending = await secrets.get(PENDING_DEVICE_KEY_SECRET);
+  if (!present(pending)) return;
+  const current = await secrets.get(DEVICE_KEY_SECRET);
+  if (present(current) && current !== pending) {
+    const kept = await secrets.get(PREVIOUS_DEVICE_KEY_SECRET);
+    if (present(kept) && kept !== current) {
+      throw new Error('A key from an earlier rotation is still kept, so this rotation cannot be finished. Forget the kept previous key first.');
+    }
+    if (kept !== current) await secrets.store(PREVIOUS_DEVICE_KEY_SECRET, current);
+  }
+  if (current !== pending) await secrets.store(DEVICE_KEY_SECRET, pending);
+  await secrets.delete(PENDING_DEVICE_KEY_SECRET);
+}
+
+export async function loadPreviousDeviceIdentity(secrets: SecretStorageLike): Promise<DeviceIdentity | undefined> {
+  return loadStoredKey(secrets, PREVIOUS_DEVICE_KEY_SECRET, 'previous team device key');
+}
+
+export async function forgetPreviousDeviceIdentity(secrets: SecretStorageLike): Promise<void> {
+  await secrets.delete(PREVIOUS_DEVICE_KEY_SECRET);
+}
+
+// Step one of rotating the person's own key (D-09): a new key is made and kept aside under the pending name, and nothing else changes, so the person
+// keeps signing with the current key and a crash here loses nothing. Refused, with nothing changed, when there is no current key, a rotation is already
+// prepared, or a previous key from an earlier rotation is still kept (it would be dropped silently by the next commit). The current key gets its history
+// record first if it has none, as at first need. Rotating does not stop a copy of the old key from signing; only revoking it does.
+export async function prepareDeviceRotation(
+  secrets: SecretStorageLike, options: IdentityLockOptions
+): Promise<{ current: DeviceIdentity; next: DeviceIdentity }> {
+  await mkdir(options.identityDir, { recursive: true, mode: 0o700 });
+  return withFileLock(options.identityDir, IDENTITY_CREATE_LOCK_FILE, async () => {
+    const current = await loadDeviceIdentity(secrets);
+    if (!current) throw new Error('This computer has no identity key to rotate yet.');
+    if (present(await secrets.get(PENDING_DEVICE_KEY_SECRET))) {
+      throw new Error('A key rotation is already prepared. Finish it before preparing another.');
+    }
+    if (present(await secrets.get(PREVIOUS_DEVICE_KEY_SECRET))) {
+      throw new Error('The key from an earlier rotation is still kept. Forget it before rotating again, so it is not dropped by mistake.');
+    }
+    await ensureCreatedRecord(secrets, current, options, false);
+    const { privateKey } = generateKeyPairSync('ed25519');
+    await secrets.store(PENDING_DEVICE_KEY_SECRET, privateKey.export({ format: 'der', type: 'pkcs8' }).toString('base64'));
+    const readBack = await loadStoredKey(secrets, PENDING_DEVICE_KEY_SECRET, 'pending team device key');
+    if (!readBack || readBack.fingerprint !== identityFrom(privateKey).fingerprint) {
+      try { await secrets.delete(PENDING_DEVICE_KEY_SECRET); } catch { /* the failure below is the one to report */ }
+      throw new Error('The new identity key could not be read back from this computer\'s secret storage, so it was not used.');
+    }
+    return { current, next: readBack };
+  });
+}
+
+// Step two (D-09): records the rotation in the person's key history, signed by the current key, then swaps the keys: the current key becomes the previous
+// key (kept so a team's device.rotated event can later be signed with it), the pending key becomes the device key and the pending entry is deleted. When
+// the history already names the pending key as active (a crash after the record was written) only the key moves are finished, and no second record is
+// written. A failure before the record leaves the current key active and the pending key in place, so the same call can be repeated.
+// This rotation is local only. The new key is in no team roster until a device.rotated event signed with the kept previous key is in that team's log.
+export async function commitDeviceRotation(
+  secrets: SecretStorageLike, options: IdentityLockOptions
+): Promise<{ previous: DeviceIdentity; current: DeviceIdentity }> {
+  await mkdir(options.identityDir, { recursive: true, mode: 0o700 });
+  return withFileLock(options.identityDir, IDENTITY_CREATE_LOCK_FILE, async () => {
+    const pending = await loadStoredKey(secrets, PENDING_DEVICE_KEY_SECRET, 'pending team device key');
+    if (!pending) throw new Error('No key rotation is prepared, so there is nothing to finish.');
+    const history = await readKeyHistory(options.identityDir, secrets);
+    if (!history.ok) throw new Error(`The key was not rotated: ${history.reason}`);
+    if (history.active?.fingerprint !== pending.fingerprint) {
+      const current = await loadDeviceIdentity(secrets);
+      if (!current || history.active?.fingerprint !== current.fingerprint) {
+        throw new Error('The key was not rotated: the key history does not name the key this computer holds as its active key.');
+      }
+      await appendKeyRecord(
+        options.identityDir, secrets, current,
+        { kind: 'rotated', key: { fingerprint: current.fingerprint, publicKey: current.publicKey }, next: { fingerprint: pending.fingerprint, publicKey: pending.publicKey } },
+        options.now === undefined ? {} : { now: options.now }
+      );
+    }
+    await finishRotationMoves(secrets);
+    const [previous, current] = await Promise.all([loadPreviousDeviceIdentity(secrets), loadDeviceIdentity(secrets)]);
+    if (!previous || !current || current.fingerprint !== pending.fingerprint) {
+      throw new Error('The key rotation was recorded but the keys on this computer could not be read back. Run it again to finish.');
+    }
+    return { previous, current };
   });
 }
 
