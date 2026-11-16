@@ -1,6 +1,6 @@
 import { findSecrets } from '../domain/team/secrets';
 import type { DraftIssue, TeamDraft } from './teamMarkdown';
-import { DEFAULT_TOOLS, resolveMemberTools } from './teams';
+import { DEFAULT_TOOLS, reportsToKey, resolveMemberTools } from './teams';
 
 // The free, local team check (0.4.27): no model call. It looks at a team draft the way a careful reviewer would and reports what is likely to go wrong
 // in a run: instructions that ask for something the member's tools cannot do, a member with no clear deliverable or a generic role, two members doing
@@ -66,7 +66,7 @@ export function neededCapabilities(instructions: string): string[] {
 
 /** The members that report to one another in a circle (each name once), or an empty list. */
 export function reportsToCycles(members: ReadonlyArray<{ name: string; reportsTo?: string }>): string[] {
-  const boss = new Map(members.filter((member) => member.reportsTo?.trim()).map((member) => [member.name, member.reportsTo!.trim()]));
+  const boss = new Map(members.filter((member) => reportsToKey(member.reportsTo)).map((member) => [member.name, reportsToKey(member.reportsTo)]));
   const inCycle = new Set<string>();
   for (const start of boss.keys()) {
     const seen: string[] = [];
@@ -111,7 +111,7 @@ export function checkTeam(draft: TeamDraft, options: CheckOptions = {}): TeamFin
     if (!role) findings.push({ id: 'no-role', severity: 'advice', member: index, field: 'role', message: `${label}: it has no role. A role tells the lead what to give it.` });
     else if (GENERIC_ROLES.has(role)) findings.push({ id: 'generic-role', severity: 'warning', member: index, field: 'role', message: `${label}: "${member.role.trim()}" is too general for the lead to know what to give it. Name the job (researcher, reviewer, writer).` });
     const reportsTo = member.reportsTo?.trim();
-    if (reportsTo && !names.has(reportsTo)) findings.push({ id: 'reports-to-missing', severity: 'warning', member: index, field: 'name', message: `${label}: it reports to ${reportsTo}, who is not on the team.` });
+    if (reportsTo && !names.has(reportsToKey(reportsTo))) findings.push({ id: 'reports-to-missing', severity: 'warning', member: index, field: 'name', message: `${label}: it reports to ${reportsTo}, who is not on the team.` });
     const count = words(member.instructions).length;
     if (count > MAX_INSTRUCTION_WORDS) findings.push({ id: 'too-long', severity: 'warning', member: index, field: 'instructions', message: `${label}: its instructions are about ${count} words. Long instructions are followed less reliably: keep what this member must do, and split the rest into another member.` });
   });

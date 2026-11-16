@@ -76,6 +76,15 @@ export function teamKnowledgeKey(file: string, platform: NodeJS.Platform = proce
   return slugify(paths.basename(file, '.md'));
 }
 
+/**
+ * The one way a reports-to value is compared (PR #69 review): `Lead`, `Team Lead` and `team-lead` all name the member team-lead. The parser, the
+ * studio's save and round trip, the local check and Improve with AI all use it, so a hand-written spelling never makes them disagree. Empty is none.
+ */
+export function reportsToKey(value: string | undefined): string {
+  const trimmed = (value ?? '').trim();
+  return trimmed ? slugify(trimmed) : '';
+}
+
 /** Parses a team file; throws with a message that says what to fix. */
 export function parseTeam(text: string, file: string): TeamDefinition {
   const { data, body } = parseFrontmatter(text);
@@ -100,7 +109,7 @@ export function parseTeam(text: string, file: string): TeamDefinition {
     }
     const instructions = rest.slice(index).join('\n').trim();
     if (!instructions) throw new Error(`Member ${memberName} needs instructions under its heading.`);
-    const reportsTo = fields['reports-to'] ? slugify(fields['reports-to']) : undefined;
+    const reportsTo = reportsToKey(fields['reports-to']) || undefined;
     const privacy = parsePrivacy(fields.privacy, memberName);
     members.push({ name: memberName, ...(fields.role ? { role: fields.role } : {}), ...(fields.model ? { model: fields.model } : {}), ...(reportsTo ? { reportsTo } : {}), ...(privacy ? { privacy } : {}), tools: fields.tools ? resolveMemberTools(fields.tools.split(',').map((tool) => tool.trim()).filter(Boolean)) : DEFAULT_TOOLS, instructions });
   }

@@ -1,5 +1,5 @@
 import { parseFrontmatter } from '../gsd/library';
-import { DEFAULT_TOOLS, parsePrivacy, parseTeam, parseTeamPrivacy, renderTeam, resolveMemberTools, slugify } from './teams';
+import { DEFAULT_TOOLS, parsePrivacy, parseTeam, parseTeamPrivacy, renderTeam, reportsToKey, resolveMemberTools, slugify } from './teams';
 
 // The Team Studio edits a team as a draft, but the Markdown file stays the source of truth: saving
 // a draft over an existing file rewrites only what the draft changed. Unknown frontmatter keys,
@@ -52,7 +52,7 @@ export function splitTeam(text: string): TeamParts {
     return {
       raw, name: slugify(heading.trim()),
       ...(fields.role ? { role: fields.role } : {}), ...(fields.model ? { model: fields.model } : {}),
-      ...(fields['reports-to'] ? { reportsTo: slugify(fields['reports-to']) } : {}),
+      ...(reportsToKey(fields['reports-to']) ? { reportsTo: reportsToKey(fields['reports-to']) } : {}),
       ...(privacyOf(fields.privacy) ? { privacy: 'private' as const } : {}),
       ...(fields.tools !== undefined && fields.tools ? { tools: fields.tools.split(',').map((tool) => tool.trim()).filter(Boolean) } : {}),
       instructions: rest.slice(line).join('\n').trim()
@@ -119,7 +119,7 @@ function withPrivateLine(raw: string): string {
 
 function sameMember(section: Section, member: ReturnType<typeof renderMembers>[number]): boolean {
   // reports-to is compared too (0.4.27): without it, a draft that changed only who a member reports to kept the old section, so the change was lost.
-  return section.name === member.name && (section.role ?? '') === (member.role ?? '') && (section.model ?? '') === (member.model ?? '') && (section.reportsTo ?? '') === (member.reportsTo ? slugify(member.reportsTo) : '')
+  return section.name === member.name && (section.role ?? '') === (member.role ?? '') && (section.model ?? '') === (member.model ?? '') && reportsToKey(section.reportsTo) === reportsToKey(member.reportsTo)
     && JSON.stringify(section.tools ?? null) === JSON.stringify(member.tools ?? null) && (section.privacy ?? '') === (member.privacy ?? '') && section.instructions === member.instructions;
 }
 
@@ -235,7 +235,7 @@ export function checkDraft(draft: TeamDraft, original?: string): { markdown: str
     const same = team.name === draft.name.trim() && team.description === draft.description.trim() && (team.private === true) === (draft.private === true || handWrittenTeamPrivacy(original) !== undefined) && team.members.length === expected.length
       && team.members.every((member, index) => member.name === expected[index].name && (member.role ?? '') === (expected[index].role ?? '') && (member.model ?? '') === (expected[index].model ?? '')
         // A tools line is read with the document-output rule applied (resolveMemberTools), so the expected list gets it too.
-        && JSON.stringify(member.tools) === JSON.stringify(expected[index].tools ? resolveMemberTools(expected[index].tools!) : DEFAULT_TOOLS) && (member.privacy ?? '') === (expected[index].privacy ?? '') && (member.reportsTo ?? '') === (expected[index].reportsTo ? slugify(expected[index].reportsTo!) : '') && member.instructions === expected[index].instructions);
+        && JSON.stringify(member.tools) === JSON.stringify(expected[index].tools ? resolveMemberTools(expected[index].tools!) : DEFAULT_TOOLS) && (member.privacy ?? '') === (expected[index].privacy ?? '') && reportsToKey(member.reportsTo) === reportsToKey(expected[index].reportsTo) && member.instructions === expected[index].instructions);
     if (!same) errors.push({ message: 'The saved file would not read back as this team. Check that the name and description do not start and end with quotes, and that no instructions start with "role:", "model:", or "tools:".' });
   } catch (error) {
     errors.push({ message: `The saved file would not be a usable team: ${(error as Error).message}` });

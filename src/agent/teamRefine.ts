@@ -1,7 +1,7 @@
 import { CUSTOM_PLAGIARISM_CHECKER, PLAGIARISM_CHECKER } from './researchIntegrity';
 import { checkTeam, reportsToCycles, type TeamFinding } from './teamCheck';
 import { checkDraft, lineDiff, type DiffLine, type DraftMember, type TeamDraft } from './teamMarkdown';
-import { DEFAULT_TOOLS, teamIsPrivate } from './teams';
+import { DEFAULT_TOOLS, reportsToKey, teamIsPrivate } from './teams';
 
 // Improve with AI (0.4.27): one model call reviews a team draft and returns suggestions as JSON. This file is the pure part: the prompt, the strict
 // parsing of the reply (it is data, never instructions), the privacy rule for what may be sent, and applying one suggestion to a draft with its stale and
@@ -310,9 +310,10 @@ export function parseRefinement(text: string, draft: TeamDraft, options: ParseOp
         break;
       }
       case 'reports-to': {
-        const proposed = (str(entry.proposed, 60) ?? '').trim().toLowerCase();
-        if (proposed && !byName.has(proposed)) { dropped.push(`A reports-to line for ${memberName} was dropped: ${proposed.slice(0, 40)} is not on the team.`); break; }
-        if (proposed === (member.reportsTo ?? '')) break;
+        const written = (str(entry.proposed, 60) ?? '').trim();
+        const proposed = reportsToKey(written);
+        if (proposed && !byName.has(proposed)) { dropped.push(`A reports-to line for ${memberName} was dropped: ${written.slice(0, 40)} is not on the team.`); break; }
+        if (proposed === reportsToKey(member.reportsTo)) break;
         add({ kind: 'reports-to', member: memberName, base: base('reports-to'), proposed, editable: true, diff: lineDiff(member.reportsTo ?? '', proposed) });
         break;
       }
@@ -378,7 +379,7 @@ export function applySuggestion(draft: TeamDraft, suggestion: Suggestion, option
     case 'role': if (/[\r\n,]/.test(value)) return { state: 'invalid', reason: 'A role is one line with no commas.' }; member.role = value; break;
     case 'reports-to': if (value) member.reportsTo = value; else delete member.reportsTo; break;
     case 'tools-add': case 'tools-remove': member.tools = JSON.parse(suggestion.proposed) as string[]; break;
-    case 'remove-member': copy.members.splice(index, 1); for (const other of copy.members) if (other.reportsTo === suggestion.member) delete other.reportsTo; break;
+    case 'remove-member': copy.members.splice(index, 1); for (const other of copy.members) if (reportsToKey(other.reportsTo) === suggestion.member) delete other.reportsTo; break;
     case 'add-member': copy.members.push({ ...suggestion.newMember! }); break;
   }
   // The refiner never changes a model or privacy, whatever the reply said: checked on the result, not trusted from the parsing.
@@ -390,7 +391,7 @@ export function applySuggestion(draft: TeamDraft, suggestion: Suggestion, option
   const { errors } = checkDraft(copy, options.original);
   if (errors.length) return { state: 'invalid', reason: errors[0].message };
   const names = new Set(copy.members.map((entry) => entry.name));
-  const missing = copy.members.find((entry) => entry.reportsTo && !names.has(entry.reportsTo));
+  const missing = copy.members.find((entry) => reportsToKey(entry.reportsTo) && !names.has(reportsToKey(entry.reportsTo)));
   if (missing) return { state: 'invalid', reason: `${missing.name} would report to ${missing.reportsTo}, who is not on the team.` };
   const cycle = reportsToCycles(copy.members);
   if (cycle.length) return { state: 'invalid', reason: `${cycle.join(', ')} would report to each other in a circle.` };
