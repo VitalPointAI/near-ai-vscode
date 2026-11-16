@@ -4,7 +4,7 @@ import * as path from 'node:path';
 import { PROJECT_TYPES, projectTypeTeam, type ProjectType } from '../agent/projectTypes';
 import { detectTemplate, stampTeam } from '../agent/teamUpdate';
 import { checkDraft, draftFromMarkdown, lineDiff, type DiffLine, type DraftIssue, type DraftMember, type TeamDraft } from '../agent/teamMarkdown';
-import { DEFAULT_TOOLS, parseTeam, recommendedProjectTeam, slugify, TeamLibrary, teamKnowledgeKey, type TeamDefinition } from '../agent/teams';
+import { DEFAULT_TOOLS, parseTeam, recommendedProjectTeam, slugify, TeamLibrary, teamIsPrivate, teamKnowledgeKey, type TeamDefinition } from '../agent/teams';
 import type { AgentDiscoveryAnswers } from '../domain/agents';
 import { buildTeamGraph } from '../agent/teamGraph';
 import { checkTeam, checkWarnings } from '../agent/teamCheck';
@@ -59,7 +59,7 @@ export interface StudioContext {
 export interface StudioMemberModel { tier: string; model: string; privacy: DirectoryModel['privacy']; privacyText: string; available?: boolean }
 /** `update`: the built-in template the team was made from and whether a newer version exists, so the card can offer Update Team. */
 /** `imported`: added with Import team and not yet approved to run; the person is asked the first time it would run. */
-export interface LibraryTeam { id: string; kind: 'project' | 'user'; name: string; description: string; command?: string; file: string; savedAt?: string; error?: string; imported?: boolean; derived?: boolean; update?: { template: string; from?: number; to: number; available: boolean }; members: Array<{ name: string; role?: string } & StudioMemberModel> }
+export interface LibraryTeam { id: string; kind: 'project' | 'user'; name: string; description: string; command?: string; file: string; savedAt?: string; error?: string; imported?: boolean; derived?: boolean; /** 0.4.27: marked private, or every member private. */ private?: boolean; update?: { template: string; from?: number; to: number; available: boolean }; members: Array<{ name: string; role?: string } & StudioMemberModel> }
 export interface LibraryArchived { id: string; name: string; file: string; savedAt?: string }
 export interface LibraryState { teams: LibraryTeam[]; archived: LibraryArchived[] }
 
@@ -203,6 +203,10 @@ export function reviewDraft(draft: TeamDraft, original: string | undefined, inpu
     }
     if (model.privacy === 'forwarded') (context.knowledgeBase ? errors : warnings).push({ member: index, field: 'model', message: context.knowledgeBase ? `${label}: this project has a knowledge base, so members must use a TEE or local model. ${model.model} is forwarded outside NEAR's TEE.` : `${label}: ${model.model} is forwarded outside NEAR's TEE, so its prompts and files are not private.` });
     else if (context.knowledgeBase && model.privacy === 'unknown' && input.models) warnings.push({ member: index, field: 'model', message: `${label}: this project has a knowledge base; the privacy of ${model.model} is unknown. Use a TEE or local model.` });
+    // A private member (its own line, or the whole team marked private) runs only on a private model: say so when the model it names is not one.
+    if ((member.privacy === 'private' || draft.private) && (model.privacy === 'forwarded' || (model.privacy === 'unknown' && input.models))) {
+      warnings.push({ member: index, field: 'model', message: `${label}: ${draft.private && member.privacy !== 'private' ? 'the team is private' : 'it is private'}, so a run uses a private model instead of ${model.model}${model.privacy === 'forwarded' ? ' (forwarded outside NEAR\'s TEE)' : ' (its privacy is unknown)'}, and stops if there is none.` });
+    }
     const unknownTools = (member.tools ?? []).filter((tool) => !known.has(tool) && !/^mcp__/.test(tool));
     if (unknownTools.length) warnings.push({ member: index, field: 'tools', message: `${label}: ${unknownTools.join(', ')} ${unknownTools.length === 1 ? 'is not a built-in tool' : 'are not built-in tools'}; agents only get tools that exist.` });
     return model;
@@ -254,6 +258,7 @@ export async function listLibrary(library: TeamLibrary, root: string | undefined
       name: team?.name ?? slug, description: team?.description ?? '',
       ...(team ? { command: `/team:${entry.project ? 'project' : team.slug} ` } : {}),
       ...(entry.error ? { error: entry.error } : {}),
+      ...(team && teamIsPrivate(team) ? { private: true } : {}),
       ...(!entry.project && pending.has(path.basename(entry.file)) ? { imported: true, ...((await library.pendingKind(entry.file))?.kind === 'derived' ? { derived: true } : {}) } : {}),
       ...(template ? { update: { template: template.label, ...(template.fromVersion ? { from: template.fromVersion } : {}), to: template.toVersion, available: !template.stamped || template.fromVersion !== template.toVersion } } : {}),
       ...(await mtime(entry.file) ? { savedAt: await mtime(entry.file) } : {}),
@@ -292,7 +297,7 @@ export type StudioMessage =
   | { type: 'create'; draft: TeamDraft; target: StudioTarget; projectType?: { id: string; goal: string } }
   | { type: 'save-draft'; draft: TeamDraft; step: number; target: StudioTarget; startingPoint?: string }
   | { type: 'optimise-all' }
-  | { type: 'draft-team'; idea: string; outputFormat?: string; depth?: 'quick' | 'thorough' }
+  | { type: 'draft-team'; idea: string; outputFormat?: string; depth?: 'quick' | 'thorough'; private?: boolean }
   | { type: 'starting-point'; id: string; goal: string; locality: 'cloud' | 'local' | 'hybrid'; workShape?: AgentDiscoveryAnswers['workShape']; riskLevel?: AgentDiscoveryAnswers['riskLevel'] }
   | { type: 'open-setting'; key: string };
 
@@ -303,7 +308,9 @@ const text = (value: unknown, max: number): value is string => typeof value === 
 
 /** A draft from the page: exact keys, bounded sizes, plain strings; content rules are checked by reviewDraft. */
 export function parseDraft(value: unknown): TeamDraft | undefined {
-  if (!isPlain(value) || !exactKeys(value, ['name', 'description', 'members']) || !text(value.name, 120) || !text(value.description, 600) || !Array.isArray(value.members) || value.members.length > 12) return undefined;
+  if (!isPlain(value) || !exactKeys(value, ['name', 'description', 'members'], ['private']) || !text(value.name, 120) || !text(value.description, 600) || !Array.isArray(value.members) || value.members.length > 12) return undefined;
+  // The team's own private marking (0.4.27): true or absent, never anything else.
+  if (value.private !== undefined && value.private !== true) return undefined;
   const members: DraftMember[] = [];
   for (const member of value.members) {
     // `reportsTo` is optional and must be allowed here, or a draft that carries the team's hierarchy is refused outright (0.4.19 review).
@@ -313,7 +320,7 @@ export function parseDraft(value: unknown): TeamDraft | undefined {
     if (member.tools !== null && (!Array.isArray(member.tools) || member.tools.length > 80 || !member.tools.every((tool) => typeof tool === 'string' && TOOL_NAME.test(tool)))) return undefined;
     members.push({ name: member.name, role: member.role, model: member.model, tools: member.tools === null ? null : [...new Set(member.tools as string[])], instructions: member.instructions, ...(member.reportsTo ? { reportsTo: member.reportsTo as string } : {}), ...(member.privacy === 'private' ? { privacy: 'private' as const } : {}) });
   }
-  return { name: value.name, description: value.description, members };
+  return { name: value.name, description: value.description, members, ...(value.private === true ? { private: true } : {}) };
 }
 
 export function parseStudioMessage(value: unknown): StudioMessage | undefined {
@@ -348,10 +355,11 @@ export function parseStudioMessage(value: unknown): StudioMessage | undefined {
     }
     case 'optimise-all': return isPlain(message) && exactKeys(message, ['type']) ? { type: 'optimise-all' } : undefined;
     case 'draft-team': {
-      if (!text(message.idea, 2000) || !message.idea.trim()) return undefined;
+      if (!exactKeys(message, ['type', 'idea'], ['outputFormat', 'depth', 'private']) || !text(message.idea, 2000) || !message.idea.trim()) return undefined;
+      if (message.private !== undefined && typeof message.private !== 'boolean') return undefined;
       if (message.outputFormat !== undefined && !text(message.outputFormat, 300)) return undefined;
       if (message.depth !== undefined && message.depth !== 'quick' && message.depth !== 'thorough') return undefined;
-      return { type: 'draft-team', idea: message.idea, ...(message.outputFormat ? { outputFormat: message.outputFormat } : {}), ...(message.depth === 'quick' || message.depth === 'thorough' ? { depth: message.depth } : {}) };
+      return { type: 'draft-team', idea: message.idea, ...(message.outputFormat ? { outputFormat: message.outputFormat } : {}), ...(message.depth === 'quick' || message.depth === 'thorough' ? { depth: message.depth } : {}), ...(message.private === true ? { private: true } : {}) };
     }
     case 'save': {
       if (!exactKeys(message, ['type', 'draft', 'id', 'base']) || !id() || !String(message.id).match(/^(?:project|user:)/) || typeof message.base !== 'string' || !/^[0-9a-f]{64}$/.test(message.base)) return undefined;
@@ -436,7 +444,7 @@ export interface TeamStudioDeps {
    * Drafts a team from the person's own description (owner, 2026-11-08: start with a chat asking what the team should produce, then launch the research to
    * propose mission, members, roles and outputs). One model call, returned as a proposal for the person to accept or edit.
    */
-  draftTeam?(brief: { idea: string; outputFormat?: string; depth?: 'quick' | 'thorough' }): Promise<{ proposal: TeamProposal; problems: string[] }>;
+  draftTeam?(brief: { idea: string; outputFormat?: string; depth?: 'quick' | 'thorough'; private?: boolean }): Promise<{ proposal: TeamProposal; problems: string[] }>;
   suggestModels?(members: Array<{ name: string; role?: string; model?: string }>): Promise<Array<{ member: string; model: string; current?: string; why: string; changes: boolean }>>;
   /**
    * The final step of adding a team (owner, 2026-11-08): run each member's role test with the candidate models and apply the winner, so a new team's
@@ -675,8 +683,9 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
         if (!deps.draftTeam) { post({ type: 'error', text: 'No model is available to draft a team. Set up a NEAR AI profile, or fill the team in by hand.' }); return; }
         post({ type: 'notice', text: 'Drafting the team...' });
         try {
-          const drafted = await deps.draftTeam({ idea: message.idea, ...(message.outputFormat ? { outputFormat: message.outputFormat } : {}), ...(message.depth ? { depth: message.depth } : {}) });
-          post({ type: 'team-proposal', proposal: drafted.proposal, draft: proposalDraft(drafted.proposal), text: proposalText(drafted.proposal), problems: drafted.problems });
+          const drafted = await deps.draftTeam({ idea: message.idea, ...(message.outputFormat ? { outputFormat: message.outputFormat } : {}), ...(message.depth ? { depth: message.depth } : {}), ...(message.private ? { private: true } : {}) });
+          // A team asked for as private stays private once it is a draft, so saving it keeps every member on a private model.
+          post({ type: 'team-proposal', proposal: drafted.proposal, draft: { ...proposalDraft(drafted.proposal), ...(message.private ? { private: true } : {}) }, text: proposalText(drafted.proposal), problems: drafted.problems });
         } catch (error) { post({ type: 'error', text: `The team could not be drafted: ${(error as Error).message}` }); }
         return;
       }

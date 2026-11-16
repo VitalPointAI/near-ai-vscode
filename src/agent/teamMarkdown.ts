@@ -1,5 +1,5 @@
 import { parseFrontmatter } from '../gsd/library';
-import { DEFAULT_TOOLS, parsePrivacy, parseTeam, renderTeam, resolveMemberTools, slugify } from './teams';
+import { DEFAULT_TOOLS, parsePrivacy, parseTeam, parseTeamPrivacy, renderTeam, resolveMemberTools, slugify } from './teams';
 
 // The Team Studio edits a team as a draft, but the Markdown file stays the source of truth: saving
 // a draft over an existing file rewrites only what the draft changed. Unknown frontmatter keys,
@@ -12,7 +12,8 @@ import { DEFAULT_TOOLS, parsePrivacy, parseTeam, renderTeam, resolveMemberTools,
  */
 /** `privacy: 'private'` keeps the member on a NEAR TEE or local model (a `privacy: private` line); like reportsTo, it must be carried or a save drops it. */
 export interface DraftMember { name: string; role: string; model: string; tools: string[] | null; instructions: string; reportsTo?: string; privacy?: 'private' }
-export interface TeamDraft { name: string; description: string; members: DraftMember[] }
+/** `private`: the team's own `privacy: private` frontmatter line (0.4.27): every member runs only on a private model, and the studio sends it only to one. */
+export interface TeamDraft { name: string; description: string; members: DraftMember[]; private?: boolean }
 
 export interface Section { raw: string; name: string; role?: string; model?: string; tools?: string[]; reportsTo?: string; privacy?: 'private'; instructions: string }
 export interface TeamParts { frontmatter?: { open: string; inner: string; close: string }; preamble: string; sections: Section[] }
@@ -65,7 +66,7 @@ export function draftFromMarkdown(text: string, file: string): TeamDraft {
   const team = parseTeam(text, file);
   const sections = splitTeam(text).sections;
   return {
-    name: team.name, description: team.description,
+    name: team.name, description: team.description, ...(team.private ? { private: true } : {}),
     members: team.members.map((member) => {
       const section = sections.find((candidate) => candidate.name === member.name);
       return { name: member.name, role: member.role ?? '', model: member.model ?? '', tools: section?.tools ? [...section.tools] : null, instructions: member.instructions, ...(section?.reportsTo ? { reportsTo: section.reportsTo } : {}), ...(member.privacy ? { privacy: member.privacy } : {}) };
@@ -111,6 +112,18 @@ function setFrontmatterKey(lines: string[], key: string, value: string, after?: 
   lines.splice(anchor >= 0 ? anchor + 1 + listLength(lines, anchor) : lines.length, 0, `${key}: ${value}`);
 }
 
+/**
+ * The team's privacy line: written when the draft is private, removed when it is not and the file says private. A `privacy: any` line the person wrote is
+ * left as it is when the team is not private, so a save never rewrites what already says the same thing.
+ */
+function setTeamPrivacy(lines: string[], isPrivate: boolean): void {
+  const index = lines.findIndex((line) => /^privacy:/.test(line));
+  let current: 'private' | undefined;
+  try { current = index >= 0 ? parseTeamPrivacy(parseFrontmatter(`---\n${lines[index]}\n---\n`).data.privacy) : undefined; } catch { current = undefined; }
+  if (isPrivate) { if (current !== 'private') setFrontmatterKey(lines, 'privacy', 'private', 'description'); return; }
+  if (index >= 0 && (current === 'private' || !/^privacy:\s*(?:any|default|cloud)?\s*$/i.test(lines[index]))) lines.splice(index, 1 + listLength(lines, index));
+}
+
 function listLength(lines: string[], index: number): number {
   let count = 0;
   while (/^\s+-\s+/.test(lines[index + 1 + count] ?? '')) count += 1;
@@ -125,7 +138,7 @@ export function teamMarkdown(draft: TeamDraft, original?: string): string {
   const members = renderMembers(draft);
   const name = draft.name.trim();
   const description = draft.description.trim();
-  if (original === undefined) return renderTeam(name, description, members);
+  if (original === undefined) return renderTeam(name, description, members, { private: draft.private === true });
   const parts = splitTeam(original);
   let head: string;
   if (parts.frontmatter) {
@@ -133,9 +146,10 @@ export function teamMarkdown(draft: TeamDraft, original?: string): string {
     const lines = parts.frontmatter.inner.split(/\r?\n/);
     setFrontmatterKey(lines, 'name', name);
     setFrontmatterKey(lines, 'description', description, 'name');
+    setTeamPrivacy(lines, draft.private === true);
     head = `${parts.frontmatter.open}${lines.join(eol)}${parts.frontmatter.close}`;
   } else {
-    head = `---\nname: ${name}\ndescription: ${description}\n---\n\n`;
+    head = `---\nname: ${name}\ndescription: ${description}\n${draft.private ? 'privacy: private\n' : ''}---\n\n`;
   }
   const out: string[] = [];
   let lastGenerated = false;
@@ -177,7 +191,7 @@ export function checkDraft(draft: TeamDraft, original?: string): { markdown: str
   try {
     const team = parseTeam(markdown, 'team.md');
     const expected = renderMembers(draft);
-    const same = team.name === draft.name.trim() && team.description === draft.description.trim() && team.members.length === expected.length
+    const same = team.name === draft.name.trim() && team.description === draft.description.trim() && (team.private === true) === (draft.private === true) && team.members.length === expected.length
       && team.members.every((member, index) => member.name === expected[index].name && (member.role ?? '') === (expected[index].role ?? '') && (member.model ?? '') === (expected[index].model ?? '')
         // A tools line is read with the document-output rule applied (resolveMemberTools), so the expected list gets it too.
         && JSON.stringify(member.tools) === JSON.stringify(expected[index].tools ? resolveMemberTools(expected[index].tools!) : DEFAULT_TOOLS) && (member.privacy ?? '') === (expected[index].privacy ?? '') && member.instructions === expected[index].instructions);

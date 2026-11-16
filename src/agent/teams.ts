@@ -27,7 +27,12 @@ export interface TeamMember {
    */
   privacy?: 'private';
 }
-export interface TeamDefinition { slug: string; name: string; description: string; members: TeamMember[]; file: string }
+/**
+ * `private` (0.4.27, owner 2026-11-16): the team is marked private (`privacy: private` in its frontmatter). Every member then runs only on a private model,
+ * as if each had its own `privacy: private` line, and Team Studio sends the team only to a private model. A team whose members are all private counts as
+ * private too (see teamIsPrivate).
+ */
+export interface TeamDefinition { slug: string; name: string; description: string; members: TeamMember[]; file: string; private?: boolean }
 
 const MEMBER_NAME = /^[a-z0-9][a-z0-9-]{0,39}$/;
 /** The tools a member gets when its section has no `tools:` line. */
@@ -101,7 +106,22 @@ export function parseTeam(text: string, file: string): TeamDefinition {
   }
   if (!members.length) throw new Error('Add at least one member as a "## member-name" section.');
   if (members.length > 12) throw new Error('A team can have at most 12 members.');
-  return { slug: slugify(path.basename(file, '.md')), name, description: typeof data.description === 'string' ? data.description : '', members, file };
+  const teamPrivacy = parseTeamPrivacy(data.privacy);
+  return { slug: slugify(path.basename(file, '.md')), name, description: typeof data.description === 'string' ? data.description : '', members, file, ...(teamPrivacy ? { private: true } : {}) };
+}
+
+/** The team's own `privacy:` frontmatter line: private (also tee or local) or any (also default or cloud, the same as no line). */
+export function parseTeamPrivacy(value: unknown): 'private' | undefined {
+  if (value === undefined || value === null) return undefined;
+  const privacy = String(value).trim().toLowerCase();
+  if (!privacy || privacy === 'any' || privacy === 'default' || privacy === 'cloud') return undefined;
+  if (privacy === 'private' || privacy === 'tee' || privacy === 'local') return 'private';
+  throw new Error(`The team has "privacy: ${String(value)}" in its frontmatter; use privacy: private (every member on a NEAR TEE or local model only) or privacy: any.`);
+}
+
+/** Whether a team counts as private: marked private, or every member is private (owner, 2026-11-16). */
+export function teamIsPrivate(team: { private?: boolean; members: ReadonlyArray<{ privacy?: 'private' }> }): boolean {
+  return team.private === true || (team.members.length > 0 && team.members.every((member) => member.privacy === 'private'));
 }
 
 /** A member's `privacy:` line: private (also tee or local) or any (also default or cloud, the same as no line). */
@@ -112,8 +132,8 @@ export function parsePrivacy(value: string | undefined, member: string): 'privat
   throw new Error(`Member ${member} has "privacy: ${value}"; use privacy: private (a NEAR TEE or local model only) or privacy: any.`);
 }
 
-export function renderTeam(name: string, description: string, members: Array<Omit<TeamMember, 'tools'> & { tools?: string[] }>): string {
-  const lines = ['---', `name: ${name}`, `description: ${description}`, '---', '', '<!-- Each "## name" section is a team member. Optional lines: role, model (a NEAR model ID or deep/standard/fast), tools (comma-separated), reports-to (another member), and last, privacy (private: a NEAR TEE or local model only; any: whatever the run may use). Then the member\'s instructions. Save to create a new version. -->', ''];
+export function renderTeam(name: string, description: string, members: Array<Omit<TeamMember, 'tools'> & { tools?: string[] }>, options: { private?: boolean } = {}): string {
+  const lines = ['---', `name: ${name}`, `description: ${description}`, ...(options.private ? ['privacy: private'] : []), '---', '', '<!-- Each "## name" section is a team member. Optional lines: role, model (a NEAR model ID or deep/standard/fast), tools (comma-separated), reports-to (another member), and last, privacy (private: a NEAR TEE or local model only; any: whatever the run may use). Then the member\'s instructions. Save to create a new version. -->', ''];
   for (const member of members) {
     lines.push(`## ${member.name}`);
     if (member.role) lines.push(`role: ${member.role}`);
@@ -143,7 +163,8 @@ export function teamAgents(team: TeamDefinition): GsdAgent[] {
     description: member.role ?? member.name,
     tools: member.tools,
     model: member.model,
-    ...(member.privacy ? { privacy: member.privacy } : {}),
+    // A team marked private keeps every member private, as if each had its own privacy: private line.
+    ...(member.privacy || team.private ? { privacy: 'private' as const } : {}),
     body: `You are ${member.name}${member.role ? `, the ${member.role},` : ''} on the "${team.name}" team.\n\n${member.instructions}`,
     file: team.file
   }));
@@ -392,7 +413,7 @@ export class TeamLibrary {
 
   public async duplicate(file: string, name: string): Promise<string> {
     const team = parseTeam(await readFile(file, 'utf8'), file);
-    const copy = await this.create(name, renderTeam(name, team.description, team.members));
+    const copy = await this.create(name, renderTeam(name, team.description, team.members, { private: team.private }));
     // A copy of an imported team that was never approved is still that team: it stays unapproved, so copying it is never a way round the question.
     if (await this.isPendingImport(file)) await this.markImported(copy, 'derived', team.name);
     return copy;

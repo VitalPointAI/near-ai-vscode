@@ -88,6 +88,7 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--vscode-button-
 .badge.privacy.forwarded, .badge.status.ask { color: var(--warn); border-color: currentColor; }
 .badge.status.stopped { color: var(--err); border-color: currentColor; }
 .badge.kind.imported { color: var(--warn); border-color: currentColor; white-space: normal; }
+.badge.kind.private { color: var(--ok); border-color: currentColor; }
 .choice > .badge { grid-column: 2; justify-self: start; margin-top: 2px; white-space: normal; }
 .picker-filter { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 8px; }
 .picker-filter .filter { display: inline-flex; align-items: center; gap: 4px; padding: 2px 10px; border: 1px solid var(--border); border-radius: 12px; cursor: pointer; }

@@ -124,9 +124,9 @@ export async function openTeamStudio(context: vscode.ExtensionContext, auth: Aut
     // The AI start (owner, 2026-11-08): one call drafts the team from the person's own words, and the result is a proposal they accept or edit.
     draftTeam: async (brief) => {
       const deps = await teamAiDeps(auth);
-      // 0.4.27: the draft goes through the same outbound check as chat (TEE-only mode, the daily spend limit, emergency stop). Before, it called the
-      // model directly.
-      const reply = await teamModelCall(deps, { need: 'any', messages: [
+      // 0.4.27: the draft goes through the same outbound check as chat (TEE-only mode, the daily spend limit, emergency stop), and a brief for a private
+      // team goes only to a private model (owner, 2026-11-16). Before, it called the model directly.
+      const reply = await teamModelCall(deps, { need: brief.private ? 'private' : 'any', messages: [
         { role: 'system', content: TEAM_BUILDER_PROMPT },
         { role: 'user', content: builderPrompt(brief) }
       ], maxTokens: 2000 });

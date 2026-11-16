@@ -1443,3 +1443,31 @@ test('host: Import refuses a share file with a malformed knowledge graph in plai
   assert.equal(h.asked.length, 0);
   h.close();
 });
+
+test('a private team (0.4.27): the Purpose toggle marks the draft, the AI start can ask for one, and a private brief keeps the drafted team private', async () => {
+  const page = await runPage();
+  page.dispatch({ type: 'state', context: context(), library: { teams: [{ id: 'user:web', kind: 'user', name: 'Web team', description: '', command: '/team:web ', file: '/s/web.md', private: true, members: [] }], archived: [] } });
+  assert.match(page.text(), /Web team.*Private/, 'the card says the team is private');
+  page.dispatch({ type: 'team', id: 'user:web', kind: 'user', file: 'My teams/web.md', command: '/team:web ', draft: draft(), base: 'b'.repeat(64), versions: [] });
+  const toggle = page.doc.getElementById('f-private')!;
+  assert.equal(toggle.checked, false);
+  toggle.checked = true; toggle.fire('change');
+  page.doc.getElementById('save')!.click();
+  assert.equal(page.posts.at(-1)!.draft.private, true);
+  const name = page.doc.getElementById('f-name')!;
+  name.value = 'Web team 2'; name.fire('input');
+  toggle.checked = false; toggle.fire('change');
+  page.doc.getElementById('save')!.click();
+  assert.equal(page.posts.at(-1)!.type, 'save');
+  assert.equal('private' in page.posts.at(-1)!.draft, false, 'unticked leaves no private key at all');
+  for (const message of page.posts) assert.ok(parseStudioMessage(message), JSON.stringify(message));
+
+  const h = await harness();
+  const briefs: unknown[] = [];
+  h.deps.draftTeam = async (brief) => { briefs.push(brief); return { proposal: { name: 'Client team', mission: 'm', description: 'd', members: [{ name: 'a', role: 'writer', model: 'standard', produces: 'p', instructions: 'Write it. Report it.' }], outputs: [] }, problems: [] }; };
+  await h.send({ type: 'draft-team', idea: 'Client briefs', private: true });
+  assert.deepEqual(briefs, [{ idea: 'Client briefs', private: true }]);
+  assert.equal(last(h, 'team-proposal').draft.private, true);
+  await h.send({ type: 'draft-team', idea: 'Open data' });
+  assert.equal('private' in last(h, 'team-proposal').draft, false);
+});

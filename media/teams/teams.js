@@ -213,6 +213,7 @@
   let lastIdea = '';
   let lastFormat = '';
   let lastDepth = 'thorough';
+  let lastPrivate = false;
 
   // The host computes the draft from the proposal (src/agent/teamBuilder.ts) and sends it with the proposal, so the two cannot drift. This is only a
   // fallback for an older host that does not send it: the page must never throw, even then.
@@ -247,11 +248,17 @@
     depth.addEventListener('change', () => { lastDepth = depth.value; });
     details.append(field('Output format (optional)', format), field('Depth', depth));
     box.append(details);
+    // A private team's brief goes only to a private model, and the drafted team is marked private (owner, 2026-11-16).
+    const privateBox = el('input'); privateBox.type = 'checkbox'; privateBox.id = 'ask-private'; privateBox.checked = lastPrivate;
+    privateBox.addEventListener('change', () => { lastPrivate = privateBox.checked; });
+    const privateLabel = el('label', 'check'); privateLabel.setAttribute('for', privateBox.id);
+    privateLabel.append(privateBox, document.createTextNode(' Private team: draft it with a private model only (NEAR TEE or this machine), and keep its members on private models'));
+    box.append(privateLabel);
     const actions = el('div', 'ask-actions');
     actions.append(button('Draft the team', () => {
       if (!idea.value.trim()) { announce('Say what the team should produce first.'); idea.focus(); return; }
       drafting = true; render();
-      vscode.postMessage({ type: 'draft-team', idea: idea.value, ...(lastFormat.trim() ? { outputFormat: lastFormat } : {}), depth: lastDepth });
+      vscode.postMessage({ type: 'draft-team', idea: idea.value, ...(lastFormat.trim() ? { outputFormat: lastFormat } : {}), depth: lastDepth, ...(lastPrivate ? { private: true } : {}) });
     }, { primary: true, id: 'draft-team' }), el('span', 'hint', 'One model call. You see the proposal before anything is saved.'));
     box.append(actions);
     return box;
@@ -361,6 +368,8 @@
     if (team.imported) head.append(team.derived
       ? badge('Made from an import: not approved yet', 'kind imported', 'Made from an imported team you have not approved. The first time it runs you are asked to approve it.')
       : badge('Imported: not approved yet', 'kind imported', 'Added with Import team. The first time it runs you are asked to approve it.'));
+    // 0.4.27: a private team (marked private, or every member private) runs and is reviewed only on private models.
+    if (team.private) head.append(badge('Private', 'kind private', 'Every member runs only on a private model (NEAR TEE or this machine), and Improve with AI uses only a private model.'));
     card.setAttribute('aria-labelledby', title.id);
     card.append(head);
     if (team.error) {
@@ -420,6 +429,7 @@
     const draft = work.draft;
     root.append(field('Team name', input(draft.name, (value) => { draft.name = value.replace(/[\r\n]+/g, ' '); renderHeaderName(); changed(false); }, { id: 'f-name', maxlength: '80', autocomplete: 'off' }), work.mode === 'editor' ? 'Renaming keeps the file and its /team: command.' : 'Shown in the library and when the team runs.'));
     root.append(field('What the team is for', textarea(draft.description, (value, node) => { const clean = value.replace(/[\r\n]+/g, ' '); if (clean !== value) node.value = clean; draft.description = clean; changed(false); }, 2, 'f-desc'), 'One or two sentences. The lead agent reads this.'));
+    root.append(privateToggle(draft));
     if (work.mode !== 'wizard') return;
     const where = el('fieldset', 'choices');
     where.append(el('legend', '', 'Save it as'));
@@ -492,6 +502,21 @@
     }
     if (work.startingPoint.startsWith('type:')) start.append(el('p', 'hint', 'Saving this as the project team also writes this project type\'s guidance to AGENTS.md (plan, execute, red team, verify, audit, release).'));
     root.append(start);
+  }
+
+  // The team's own private marking (owner, 2026-11-16): every member runs only on a private model, and the team is sent only to a private model when the
+  // studio asks AI about it. A team whose members are all private counts as private even unticked, which the hint says.
+  function privateToggle(draft) {
+    const wrap = el('div', 'field check-field');
+    const box = el('input'); box.type = 'checkbox'; box.id = 'f-private'; box.checked = draft.private === true;
+    box.addEventListener('change', () => { if (box.checked) draft.private = true; else delete draft.private; changed(false); });
+    const label = el('label', 'check'); label.setAttribute('for', box.id);
+    label.append(box, document.createTextNode(' Private team'));
+    const allPrivate = draft.members.length > 0 && draft.members.every((member) => member.privacy === 'private');
+    const hint = el('p', 'hint', 'Every member runs only on a private model (a NEAR TEE model or one on this machine), and Improve with AI sends this team only to a private model.' + (allPrivate && !box.checked ? ' Every member is already private, so the team counts as private.' : ''));
+    hint.id = 'f-private-hint'; box.setAttribute('aria-describedby', hint.id);
+    wrap.append(label, hint);
+    return wrap;
   }
 
   /** The picker's entries from the host; before the first state arrives, the built-in starting points. */
