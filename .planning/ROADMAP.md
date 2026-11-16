@@ -344,7 +344,7 @@ Plans:
 - [x] 70-06-PLAN.md — the floor, decide() layered over today's settings, the OCSF decision record, offline decisions (PR 1)
 
 **Wave 7** *(blocked on Wave 6 completion)*
-- [ ] 70-07-PLAN.md — PR 1 gate and open (no behaviour change)
+- [x] 70-07-PLAN.md — PR 1 gate and open (no behaviour change)
 
 **Wave 8** *(blocked on Wave 7 completion)*
 - [ ] 70-08-PLAN.md — manifests on the core, web, graphics, image, memory and security tools, the tool catalog, Tools page words (PR 2)
