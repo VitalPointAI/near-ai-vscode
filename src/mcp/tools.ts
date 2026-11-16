@@ -1,4 +1,7 @@
+import { declareManifest } from '../agent/tools';
 import type { AgentTool } from '../agent/tools';
+import { mcpToolEffects, RESTRICTIVE_EFFECTS } from '../domain/gate/manifest';
+import type { ToolManifest } from '../domain/gate/manifest';
 import { fenceUntrusted } from '../agent/untrusted';
 import { ToolError } from '../agent/workspace';
 import type { McpConnection, McpServerConfig, McpToolInfo } from './client';
@@ -23,6 +26,24 @@ export function grantsMcpTool(granted: string[], toolName: string): boolean {
   });
 }
 
+/**
+ * The manifest of one MCP tool today: the legacy one (GATE-02, D-38). A read-only tool on a server that is not set to ask every call is a call on that server;
+ * any other tool is a call that also reaches the server's host. It is built from the same facts `capability` is computed from, by `mcpToolEffects`, so the
+ * gate sees exactly what the settings layer sees. The server's own hints are a claim, and they are all there is until a server has a manifest of its own;
+ * its results are outside content. A name the format cannot hold falls back to the restrictive effects rather than stopping the server from connecting.
+ */
+export function mcpToolManifest(config: McpServerConfig, tool: McpToolInfo, host: string): ToolManifest {
+  const name = mcpToolName(config.id, tool.name);
+  const remote = config.transport === 'http' ? ({ runsOn: 'remote' } as const) : {};
+  const found = mcpToolEffects(undefined, { server: config.id, tool: tool.name, host, readOnly: tool.readOnly, destructive: tool.destructive, approval: config.approval, transport: config.transport });
+  const hostsOf = (effects: readonly { readonly verb: string; readonly hosts?: readonly string[] }[]) => effects.flatMap((effect) => (effect.verb === 'network' ? effect.hosts ?? [] : []));
+  try {
+    return declareManifest({ tool: name, effects: found.effects, hosts: hostsOf(found.effects), contexts: found.contexts, untrusted: true, ...remote });
+  } catch {
+    return declareManifest({ tool: name, effects: RESTRICTIVE_EFFECTS, hosts: hostsOf(RESTRICTIVE_EFFECTS), contexts: ['interactive'], untrusted: true, ...remote });
+  }
+}
+
 export interface McpCallStats { onCall(serverId: string, ok: boolean, ms: number): void }
 
 export function mcpAgentTools(config: McpServerConfig, connection: McpConnection, host: string, stats?: McpCallStats): AgentTool<Record<string, unknown>>[] {
@@ -41,6 +62,7 @@ function mcpAgentTool(config: McpServerConfig, connection: McpConnection, tool: 
     parameters: schema,
     // Read-only tools on a server that isn't "ask every call" follow the normal rules for reads.
     capability: readOnly && config.approval !== 'ask-every-call' ? 'read' : 'network',
+    manifest: mcpToolManifest(config, tool, host),
     untrusted: true,
     parse: (raw) => {
       if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) throw new ToolError('Arguments must be a JSON object.');

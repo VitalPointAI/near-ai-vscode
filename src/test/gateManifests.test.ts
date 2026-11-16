@@ -8,9 +8,12 @@ import { braveSearch, searxngSearch, tavilySearch } from '../agent/webSearch';
 import { webSearchTool } from '../agent/webTools';
 import { imageTool } from '../agent/extraTools';
 import type { NearAiClient } from '../services/nearAiClient';
-import { builtInTools, SHORTHAND_EXCEPTIONS } from '../agent/toolCatalog';
+import { builtInTools, OFFERED_ONLY_IN_CONTEXT, SHORTHAND_EXCEPTIONS } from '../agent/toolCatalog';
 import { effectsFor, parseToolManifest, shorthandFor } from '../domain/gate/manifest';
 import { buildStudioContext } from '../services/teamStudioPage';
+import { mcpAgentTools, mcpToolName } from '../mcp/tools';
+import type { McpConnection, McpServerConfig } from '../mcp/client';
+import { mcpToolEffects } from '../domain/gate/manifest';
 import { describeManifest } from '../domain/gate/words';
 import { buildToolsDirectory } from '../services/toolsDirectory';
 import type { DirectoryInput } from '../services/toolsDirectory';
@@ -104,6 +107,8 @@ test('the Tools page lists the catalog and each tool\'s notes carry its manifest
   const directory = buildToolsDirectory(directoryInput());
   const listed = new Map(directory.tools.map((entry) => [entry.name, entry]));
   for (const tool of builtInTools()) {
+    // The cyber and knowledge tools are offered only in a special setting, and the page lists the tools every run has.
+    if (OFFERED_ONLY_IN_CONTEXT.has(tool.name)) { assert.equal(listed.has(tool.name), false, `${tool.name} stays off the page`); continue; }
     const entry = listed.get(tool.name);
     assert.ok(entry, `${tool.name} is on the page`);
     const words = describeManifest(tool.manifest!);
@@ -125,22 +130,37 @@ test('the page\'s status still comes from the settings layer\'s shorthand, not f
   assert.equal(status.get('Bash'), 'asks');
 });
 
+// The order `agentSession.toolsFor` gives them to a run: the core, web, graphics, image and scan tools, a cyber engagement's probes and exploit steps, a team's
+// knowledge graph, memory, and last the gsd tools (MCP tools sit between the cyber and knowledge tools in a run and are not built-in).
+const CYBER_TOOLS = ['CyberHttpProbe', 'CyberTlsProbe', 'CyberDnsProbe', 'CyberTcpProbe', 'CyberRobotsProbe', 'CyberSecretsProbe', 'CyberIacProbe', 'CyberDependencyProbe', 'CyberFingerprintProbe', 'CyberExploitTool', 'CyberPostExploitTool'];
 const EXPECTED_ORDER = [
   'Read', 'Write', 'Edit', 'Glob', 'Grep', 'Bash', 'BashOutput', 'KillShell', 'TodoWrite',
   'WebFetch', 'WebSearch', 'CheckCitations', 'CheckOriginality',
   'VectorizeImage', 'RenderSvg', 'CreatePresentation', 'CreatePdf', 'CreateDocument',
-  'GenerateImage', 'SecurityScan', 'Remember', 'Recall',
+  'GenerateImage', 'SecurityScan',
+  ...CYBER_TOOLS,
+  'TeamKnowledge', 'Learn',
+  'Remember', 'Recall',
   'Skill', 'SlashCommand', 'AskUserQuestion', 'Agent', 'Task'
 ];
 
-test('the catalog holds the built-in tools in the order a run is given them, and the page lists them in that order', () => {
-  assert.deepEqual(builtInTools().map((tool) => tool.name), EXPECTED_ORDER);
+test('the catalog holds all 40 built-in tools, once each, in the order a run is given them, and the page lists the ones every run has in that order', () => {
+  const names = builtInTools().map((tool) => tool.name);
+  assert.equal(names.length, 40);
+  assert.equal(new Set(names).size, 40, 'a duplicate name fails the catalog');
+  assert.deepEqual(names, EXPECTED_ORDER);
   const listed = buildToolsDirectory(directoryInput()).tools.map((entry) => entry.name);
-  assert.deepEqual(listed.slice(0, EXPECTED_ORDER.length), EXPECTED_ORDER);
+  assert.deepEqual(listed, EXPECTED_ORDER.filter((name) => !OFFERED_ONLY_IN_CONTEXT.has(name)));
 });
 
-// The tools that need a person: they do not exist in a run with nobody there (today the image and scan tools, and AskUserQuestion).
-const INTERACTIVE_ONLY_TOOLS = ['GenerateImage', 'SecurityScan', 'AskUserQuestion'];
+test('two tools with equal manifests stay separate catalog entries', () => {
+  const byName = new Map(builtInTools().map((tool) => [tool.name, tool]));
+  assert.deepEqual({ ...byName.get('Agent')!.manifest!, tool: '' }, { ...byName.get('Task')!.manifest!, tool: '' }, 'Agent and Task declare the same effects');
+  assert.notEqual(byName.get('Agent'), byName.get('Task'));
+});
+
+// The tools that need a person: they do not exist in a run with nobody there (the image and scan tools, a question for a person, a write to the team's shared graph, and an engagement's probes).
+const INTERACTIVE_ONLY_TOOLS = ['GenerateImage', 'SecurityScan', 'AskUserQuestion', 'Learn', ...CYBER_TOOLS];
 
 test('unattended runs keep exactly the tools they have today: never the image or scan tools, and never a question for a person', () => {
   const unattended = builtInTools().filter((tool) => tool.manifest!.contexts.includes('unattended')).map((tool) => tool.name);
@@ -242,4 +262,127 @@ test('a team member card says, in the manifest\'s words, what each of its tools 
     const entry = byName.get(tool.name);
     if (entry) assert.deepEqual(entry.words, describeManifest(tool.manifest!), `${tool.name}: the card and the Tools page use the same sentences`);
   }
+});
+
+test('the cyber probes\' effects: a target they connect to, or a folder they read, filled from the call', () => {
+  const byName = new Map(builtInTools().map((tool) => [tool.name, tool]));
+  const effects = (name: string, raw: Record<string, unknown>) => {
+    const tool = byName.get(name)!;
+    const filled = effectsFor(tool.manifest!, tool.manifestInput?.(raw) ?? raw);
+    assert.equal(filled.ok, true, `${name} ${JSON.stringify(raw)}`);
+    return filled.ok ? filled.value : [];
+  };
+  for (const name of ['CyberHttpProbe', 'CyberFingerprintProbe', 'CyberTlsProbe', 'CyberRobotsProbe']) {
+    assert.deepEqual(effects(name, { url: ' https://Target.example:8443/a ' }), [{ verb: 'network', hosts: ['target.example'] }], name);
+    assert.equal(effectsFor(byName.get(name)!.manifest!, { url: 'not a url' }).ok, false, `${name}: a call with no usable target is refused, not widened`);
+  }
+  assert.deepEqual(effects('CyberDnsProbe', { hostname: ' target.example ' }), [{ verb: 'network', hosts: ['target.example'] }]);
+  assert.deepEqual(effects('CyberTcpProbe', { host: '10.0.0.5', ports: [80] }), [{ verb: 'network', hosts: ['10.0.0.5'] }]);
+  for (const name of ['CyberSecretsProbe', 'CyberIacProbe', 'CyberDependencyProbe']) {
+    assert.deepEqual(effects(name, { root: 'services/api' }), [{ verb: 'read', paths: ['services/api'] }], name);
+    assert.deepEqual(effects(name, {}), [{ verb: 'read', paths: ['**'] }], `${name} with no folder reads the project`);
+    assert.deepEqual(effects(name, { root: '   ' }), [{ verb: 'read', paths: ['**'] }], `${name} with a blank folder`);
+    assert.equal(effectsFor(byName.get(name)!.manifest!, byName.get(name)!.manifestInput!({ root: '../outside' })).ok, false, `${name}: a folder outside the project is refused`);
+  }
+  for (const name of ['CyberExploitTool', 'CyberPostExploitTool']) {
+    assert.deepEqual(effects(name, { payload: 'curl x', command: 'id', target: 'target.example' }), [{ verb: 'shell', cwd: 'workspace' }, { verb: 'network', hosts: ['target.example'] }], `${name} with a bare host`);
+    assert.deepEqual(effects(name, { payload: 'curl x', command: 'id', target: 'https://target.example:8443/x' }), [{ verb: 'shell', cwd: 'workspace' }, { verb: 'network', hosts: ['target.example'] }], `${name} with a URL`);
+    assert.deepEqual(effects(name, { payload: 'curl x', command: 'id', target: 'target.example:8080' }), [{ verb: 'shell', cwd: 'workspace' }, { verb: 'network', hosts: ['target.example'] }], `${name} with a host and a port`);
+    assert.equal(effectsFor(byName.get(name)!.manifest!, byName.get(name)!.manifestInput!({ payload: 'curl x' })).ok, false, `${name}: no target is a refusal`);
+  }
+  assert.deepEqual(effects('TeamKnowledge', { query: 'x' }), [{ verb: 'plan' }]);
+  assert.deepEqual(effects('Learn', { nodes: [] }), [{ verb: 'skill.write', scope: 'team' }]);
+  assert.equal(shorthandFor(byName.get('Learn')!.manifest!), 'sharedWrite', 'Learn still asks in every mode, as the floor\'s shared-write rule will');
+});
+
+test('the six network probes are the named shorthand exceptions, each with a reason, and nothing else about the cyber tools differs', () => {
+  const probes = ['CyberHttpProbe', 'CyberFingerprintProbe', 'CyberTlsProbe', 'CyberDnsProbe', 'CyberTcpProbe', 'CyberRobotsProbe'];
+  for (const name of probes) {
+    assert.ok(SHORTHAND_EXCEPTIONS.get(name)!.trim().length >= 20, name);
+    const tool = builtInTools().find((candidate) => candidate.name === name)!;
+    assert.equal(tool.capability, 'read', `${name} stays a silent, scope-checked read for the settings layer`);
+    assert.equal(shorthandFor(tool.manifest!), 'network');
+  }
+  assert.deepEqual([...SHORTHAND_EXCEPTIONS.keys()].filter((name) => name.startsWith('Cyber')).sort(), probes.sort());
+});
+
+test('a manifest says untrusted exactly when the tool\'s results are outside content', () => {
+  for (const tool of builtInTools()) assert.equal(tool.manifest!.untrusted, tool.untrusted === true, tool.name);
+});
+
+test('every manifest is a constant on the tool: it cannot be changed at run time, and every call reads the same object', () => {
+  for (const tool of builtInTools()) {
+    const manifest = tool.manifest! as unknown as { tool: string; effects: unknown[]; contexts: string[]; hosts: string[] };
+    assert.throws(() => { manifest.tool = 'Other'; }, TypeError, `${tool.name}: name`);
+    assert.throws(() => { manifest.effects.push({ verb: 'shell', cwd: 'anywhere' }); }, TypeError, `${tool.name}: effects`);
+    assert.throws(() => { manifest.contexts.push('unattended'); }, TypeError, `${tool.name}: contexts`);
+    assert.throws(() => { manifest.hosts.push('*'); }, TypeError, `${tool.name}: hosts`);
+    assert.equal(tool.manifest!.tool, tool.name);
+  }
+});
+
+function mcpConfig(overrides: Partial<McpServerConfig> = {}): McpServerConfig {
+  return { id: 'catalog', name: 'Catalog', transport: 'http', approval: 'ask-for-changes', ...overrides };
+}
+
+function mcpTools(config: McpServerConfig, host: string) {
+  const connection = {
+    tools: [
+      { name: 'search', description: 'Search', inputSchema: { type: 'object' }, readOnly: true, destructive: false },
+      { name: 'update', description: 'Update', inputSchema: { type: 'object' }, readOnly: false, destructive: false },
+      { name: 'drop', description: 'Drop', inputSchema: { type: 'object' }, readOnly: true, destructive: true }
+    ],
+    call: async () => ''
+  } as unknown as McpConnection;
+  return mcpAgentTools(config, connection, host);
+}
+
+test('every MCP tool carries the legacy manifest built from the facts its capability comes from, so nothing it decides changes (D-38)', () => {
+  for (const approval of ['ask-for-changes', 'ask-every-call', 'trusted'] as const) {
+    for (const transport of ['http', 'stdio'] as const) {
+      const config = mcpConfig({ approval, transport, ...(transport === 'stdio' ? { command: 'server' } : {}) });
+      const host = transport === 'http' ? 'Catalog.Example:8443' : '';
+      for (const tool of mcpTools(config, host)) {
+        const manifest = tool.manifest!;
+        assert.ok(manifest, `${tool.name} has a manifest`);
+        assert.equal(manifest.tool, tool.name);
+        assert.equal(manifest.untrusted, true, 'its results are outside content');
+        assert.equal(manifest.runsOn, transport === 'http' ? 'remote' : 'this-machine');
+        const bare = tool.name.slice(`mcp__catalog__`.length);
+        const facts = { server: 'catalog', tool: bare, host, readOnly: bare !== 'update', destructive: bare === 'drop', approval, transport };
+        const legacy = mcpToolEffects(undefined, facts);
+        assert.equal(tool.capability, legacy.shorthand, `${tool.name}: the shorthand the settings layer uses is what the legacy manifest implies`);
+        assert.deepEqual(manifest.effects, legacy.effects, `${tool.name}: effects`);
+        assert.deepEqual(manifest.contexts, legacy.contexts, `${tool.name}: contexts`);
+        assert.equal(Object.isFrozen(manifest) && Object.isFrozen(manifest.effects), true);
+      }
+    }
+  }
+});
+
+test('an MCP tool that only reads is a call on its server; one that changes things also reaches the server\'s host; a stdio server only runs while a person is there', () => {
+  const [search, update, drop] = mcpTools(mcpConfig(), 'catalog.example');
+  assert.deepEqual(search.manifest!.effects, [{ verb: 'mcp', server: 'catalog', tools: ['search'] }]);
+  assert.deepEqual(update.manifest!.effects, [{ verb: 'mcp', server: 'catalog', tools: ['update'] }, { verb: 'network', hosts: ['catalog.example'] }]);
+  assert.deepEqual(update.manifest!.hosts, ['catalog.example']);
+  assert.deepEqual(drop.manifest!.effects, update.manifest!.effects.map((effect) => ('tools' in effect ? { ...effect, tools: ['drop'] } : effect)));
+  assert.deepEqual(search.manifest!.contexts, ['interactive', 'unattended']);
+  const [stdioSearch] = mcpTools(mcpConfig({ transport: 'stdio', command: 'server' }), '');
+  assert.deepEqual(stdioSearch.manifest!.contexts, ['interactive']);
+  assert.deepEqual(describeManifest(update.manifest!).slice(-2), ['Connects to catalog.example', 'Can also run when nobody is watching']);
+  // A server with no host reaches any site, the widest reading today's behaviour allows.
+  assert.deepEqual(mcpTools(mcpConfig({ approval: 'ask-every-call' }), '')[0].manifest!.hosts, ['*']);
+});
+
+test('an MCP tool whose name the format cannot hold gets the restrictive manifest instead of stopping the server connecting', () => {
+  const connection = { tools: [{ name: 'wild*card', description: 'x', inputSchema: { type: 'object' }, readOnly: true, destructive: false }, { name: 'x'.repeat(200), description: 'y', inputSchema: { type: 'object' }, readOnly: true, destructive: false }], call: async () => '' } as unknown as McpConnection;
+  const tools = mcpAgentTools(mcpConfig(), connection, 'catalog.example');
+  assert.equal(tools.length, 2);
+  for (const tool of tools) {
+    const verbs = tool.manifest!.effects.map((effect) => ('verb' in effect ? effect.verb : 'command'));
+    assert.deepEqual(verbs, ['shell', 'network', 'workspaceWrite', 'destroy'], tool.name);
+    assert.deepEqual(tool.manifest!.contexts, ['interactive']);
+    assert.equal(tool.capability, 'read', 'the settings layer\'s answer is unchanged');
+  }
+  assert.equal(mcpToolName('catalog', 'search'), 'mcp__catalog__search');
 });

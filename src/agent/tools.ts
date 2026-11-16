@@ -4,7 +4,7 @@ import { homedir } from 'node:os';
 import * as path from 'node:path';
 import type { ActionCapability } from '../domain/policy';
 import { parseToolManifest } from '../domain/gate/manifest';
-import type { InputAs, ToolManifest } from '../domain/gate/manifest';
+import type { InputAs, RunsOn, ToolManifest } from '../domain/gate/manifest';
 import type { GateContextName } from '../domain/gate/bundle';
 import { namesStateKeys, protectedWriteReason, STATE_FOLDER_PATH, STATE_KEYS_PATH, stateKeysReason } from '../domain/protectedPaths';
 import type { RunCheckpoints } from './checkpoints';
@@ -56,9 +56,9 @@ export interface AgentTool<I = Record<string, unknown>> {
   parameters: Record<string, unknown>;
   capability: ActionCapability;
   /**
-   * What this tool can do, in the capability vocabulary (GATE-02, D-05), declared next to the tool. Optional in plan 70-08; plan 70-09 makes it
-   * required. The gate reads it for the call's effects and the Tools page reads it for the words; neither changes the settings layer's answer
-   * (`capability` above), which D-04 keeps.
+   * What this tool can do, in the capability vocabulary (GATE-02, D-05), declared next to the tool and required: a tool without one does not compile, so no
+   * tool can be added without saying what it does. The gate reads it for the call's effects and the Tools page and the team member cards read it for the
+   * words; neither changes the settings layer's answer (`capability` above), which D-04 keeps.
    */
   manifest?: ToolManifest;
   /**
@@ -105,10 +105,11 @@ export const INTERACTIVE_ONLY: readonly GateContextName[] = Object.freeze(['inte
 
 /**
  * Declares a built-in tool's manifest. The draft goes through the same parser a bundle or a member card would use, so a declaration the format
- * would refuse stops the extension from loading, not a call at run time. The result is frozen deeply by the parser. Every built-in tool runs on this machine.
+ * would refuse stops the extension from loading, not a call at run time. The result is frozen deeply by the parser. A built-in tool runs on this machine; a tool of a
+ * remote MCP server says `remote`.
  */
-export function declareManifest(draft: { tool: string; effects: readonly unknown[]; hosts?: readonly string[]; contexts: readonly GateContextName[]; untrusted?: boolean }): ToolManifest {
-  const parsed = parseToolManifest({ manifestVersion: 1, tool: draft.tool, effects: draft.effects, hosts: draft.hosts ?? [], credentials: [], contexts: draft.contexts, untrusted: draft.untrusted ?? false, runsOn: 'this-machine' });
+export function declareManifest(draft: { tool: string; effects: readonly unknown[]; hosts?: readonly string[]; contexts: readonly GateContextName[]; untrusted?: boolean; runsOn?: RunsOn }): ToolManifest {
+  const parsed = parseToolManifest({ manifestVersion: 1, tool: draft.tool, effects: draft.effects, hosts: draft.hosts ?? [], credentials: [], contexts: draft.contexts, untrusted: draft.untrusted ?? false, runsOn: draft.runsOn ?? 'this-machine' });
   if (!parsed.ok) throw new Error(`The manifest of ${draft.tool} is not valid (${parsed.reason} at ${parsed.path || 'the top'}).`);
   return parsed.value;
 }
