@@ -134,7 +134,9 @@ export function parsePrivacy(value: string | undefined, member: string): 'privat
 
 export function renderTeam(name: string, description: string, members: Array<Omit<TeamMember, 'tools'> & { tools?: string[] }>, options: { private?: boolean } = {}): string {
   const lines = ['---', `name: ${name}`, `description: ${description}`, ...(options.private ? ['privacy: private'] : []), '---', '', '<!-- Each "## name" section is a team member. Optional lines: role, model (a NEAR model ID or deep/standard/fast), tools (comma-separated), reports-to (another member), and last, privacy (private: a NEAR TEE or local model only; any: whatever the run may use). Then the member\'s instructions. Save to create a new version. -->', ''];
-  for (const member of members) {
+  for (const listed of members) {
+    // A team marked private writes privacy: private on every member too (0.4.27), so a build that reads only member lines keeps each one private.
+    const member = options.private ? { ...listed, privacy: 'private' as const } : listed;
     lines.push(`## ${member.name}`);
     if (member.role) lines.push(`role: ${member.role}`);
     if (member.model) lines.push(`model: ${member.model}`);

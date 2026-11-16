@@ -502,8 +502,11 @@ until it runs out aren't shown.
 - **Private teams.** Tick **Private team** on a team's Purpose step in Team
   Studio (it writes `privacy: private` in the team file's frontmatter) to keep
   every member on a private model, exactly as if each had its own
-  `privacy: private` line. A team whose members are all private counts as
-  private too. Team Studio sends a private team only to a private model: a
+  `privacy: private` line. Marking a team private also writes
+  `privacy: private` on every member, so an older version of the extension
+  that reads only member lines still keeps each member private; unticking it
+  removes only the team's line, and you remove a member's line yourself. A
+  team whose members are all private counts as private too. Team Studio sends a private team only to a private model: a
   NEAR TEE model on NEAR AI Cloud's own endpoint, where its attestation can
   be checked, or a model on this computer. Tick **Private team** when you ask
   the AI to draft a team and the description goes only to a private model,

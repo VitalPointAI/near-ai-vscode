@@ -74,10 +74,14 @@ export function draftFromMarkdown(text: string, file: string): TeamDraft {
   };
 }
 
+/**
+ * The members as they are written. A team marked private writes privacy: private on every member too (0.4.27), so a build that reads only member lines
+ * (one from before the team marking) still keeps every member private. Removing the team marking leaves those member lines: each is removed on its own.
+ */
 function renderMembers(draft: TeamDraft) {
   return draft.members.map((member) => ({
     name: member.name, ...(member.role.trim() ? { role: member.role.trim() } : {}), ...(member.model.trim() ? { model: member.model.trim() } : {}),
-    ...(member.tools ? { tools: member.tools } : {}), ...(member.reportsTo?.trim() ? { reportsTo: member.reportsTo.trim() } : {}), ...(member.privacy === 'private' ? { privacy: 'private' as const } : {}), instructions: member.instructions.trim()
+    ...(member.tools ? { tools: member.tools } : {}), ...(member.reportsTo?.trim() ? { reportsTo: member.reportsTo.trim() } : {}), ...(member.privacy === 'private' || draft.private === true ? { privacy: 'private' as const } : {}), instructions: member.instructions.trim()
   }));
 }
 
@@ -93,6 +97,24 @@ function renderSection(member: ReturnType<typeof renderMembers>[number]): string
   if (member.privacy) lines.push(`privacy: ${member.privacy}`);
   lines.push('', member.instructions, '', '');
   return lines.join('\n');
+}
+
+const MEMBER_FIELD = /^(?:role|model|tools|reports-to):\s*.*$/i;
+const PRIVACY_FIELD = /^privacy:\s*\S*\s*$/i;
+
+/** A member section with privacy: private as its last setting line (an existing privacy line is replaced in place); every other byte is kept. */
+function withPrivateLine(raw: string): string {
+  const eol = raw.includes('\r\n') ? '\r\n' : '\n';
+  const lines = raw.split(/\r?\n/);
+  let last = 0;
+  for (let index = 1; index < lines.length; index += 1) {
+    const line = lines[index].trim();
+    if (PRIVACY_FIELD.test(line)) { lines[index] = 'privacy: private'; return lines.join(eol); }
+    if (MEMBER_FIELD.test(line)) { last = index; continue; }
+    if (line) break;
+  }
+  lines.splice(last + 1, 0, 'privacy: private');
+  return lines.join(eol);
 }
 
 function sameMember(section: Section, member: ReturnType<typeof renderMembers>[number]): boolean {
@@ -155,7 +177,9 @@ export function teamMarkdown(draft: TeamDraft, original?: string): string {
   const out: string[] = [];
   let lastGenerated = false;
   members.forEach((member) => {
-    const kept = parts.sections.find((section) => sameMember(section, member));
+    // A section that differs only by becoming private gets the privacy line added in place, so the rest of it is kept byte for byte.
+    const kept = parts.sections.find((section) => sameMember(section, member))
+      ?? (member.privacy === 'private' ? parts.sections.filter((section) => !section.privacy && sameMember({ ...section, privacy: 'private' }, member)).map((section) => ({ ...section, raw: withPrivateLine(section.raw) }))[0] : undefined);
     // A section that used to be last may need a blank line before the next one.
     if (out.length && !/\n\s*\n$/.test(out[out.length - 1])) out[out.length - 1] += out[out.length - 1].endsWith('\n') ? '\n' : '\n\n';
     out.push(kept ? kept.raw : renderSection(member));

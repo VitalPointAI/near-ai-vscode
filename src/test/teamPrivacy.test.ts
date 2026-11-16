@@ -35,6 +35,28 @@ privacy: private
 Write the brief from the summary. Report where it is.
 `;
 
+/** FILE marked private: the frontmatter line, and a privacy line on every member that did not have one (0.4.27, so an older build keeps them private). */
+const MARKED = FILE.replace('description: Works on client files\n', 'description: Works on client files\nprivacy: private\n').replace('tools: Read, Write\n\nRead the files.', 'tools: Read, Write\nprivacy: private\n\nRead the files.');
+
+test('marking a team private writes privacy: private on every member too, so a build that reads only member lines keeps every member private', async () => {
+  const marked = teamMarkdown({ ...draftFromMarkdown(FILE, 'clients.md'), private: true }, FILE);
+  assert.equal(marked, MARKED);
+  // An older build ignores the frontmatter line: with it gone, every member is still private.
+  const older = parseTeam(marked.replace(/^privacy: private\n/m, ''), 'clients.md');
+  assert.equal(older.private, undefined);
+  assert.deepEqual(older.members.map((member) => member.privacy), ['private', 'private']);
+  // A privacy: any line on a member is replaced in place, keeping the rest of its section.
+  const anyMember = FILE.replace('tools: Read, Write\n\nRead the files.', 'tools: Read, Write\nprivacy: any\n\nRead the files.');
+  assert.equal(teamMarkdown({ ...draftFromMarkdown(anyMember, 'clients.md'), private: true }, anyMember), MARKED);
+  // A new private team, and a duplicate of one, have the line on every member.
+  const fresh = teamMarkdown({ name: 'New', description: 'd', private: true, members: [{ name: 'a', role: '', model: '', tools: null, instructions: 'Do it. Report it.' }] });
+  assert.deepEqual(parseTeam(fresh.replace(/^privacy: private\n/m, ''), 'new.md').members.map((member) => member.privacy), ['private']);
+  const library = new TeamLibrary(await mkdtemp(path.join(tmpdir(), 'near-ai-privacy-')));
+  const file = await library.create('Clients', FILE.replace('owner: ops', 'privacy: private'));
+  const copy = await readFile(await library.duplicate(file, 'Clients copy'), 'utf8');
+  assert.deepEqual(parseTeam(copy.replace(/^privacy: private\n/m, ''), 'copy.md').members.map((member) => member.privacy), ['private', 'private']);
+});
+
 test('privacy: private in the frontmatter marks the team private; any, tee and local read as they do for a member; anything else says what to fix', () => {
   assert.equal(parseTeam(FILE, 'clients.md').private, undefined);
   assert.equal(parseTeam(FILE.replace('owner: ops', 'owner: ops\nprivacy: private'), 'clients.md').private, true);
@@ -65,16 +87,16 @@ test('the studio reads, toggles and saves the marking, keeping everything else b
   const draft = draftFromMarkdown(FILE, 'clients.md');
   assert.equal(draft.private, undefined);
   const marked = teamMarkdown({ ...draft, private: true }, FILE);
-  assert.equal(marked, FILE.replace('description: Works on client files\n', 'description: Works on client files\nprivacy: private\n'), 'one line added after the description');
+  assert.equal(marked, MARKED, 'the frontmatter line, and privacy: private on the member that lacked it; nothing else changes');
   assert.deepEqual(checkDraft({ ...draft, private: true }, FILE).errors, []);
   assert.equal(draftFromMarkdown(marked, 'clients.md').private, true);
-  // Turning it off removes the line; a privacy: any line the person wrote is left alone.
-  assert.equal(teamMarkdown(draft, marked), FILE);
+  // Turning it off removes the frontmatter line and leaves the member lines (the person removes those one by one); privacy: any is left alone.
+  assert.equal(teamMarkdown({ ...draftFromMarkdown(marked, 'clients.md'), private: undefined }, marked), MARKED.replace('description: Works on client files\nprivacy: private\n', 'description: Works on client files\n'));
   const any = FILE.replace('owner: ops', 'owner: ops\nprivacy: any');
   assert.equal(teamMarkdown(draftFromMarkdown(any, 'clients.md'), any), any);
-  // A file that already says tee is private, so saving it unchanged rewrites nothing.
+  // A file that already says tee is private: its frontmatter line is kept as written, and saving gives each member its own privacy line (0.4.27).
   const tee = FILE.replace('owner: ops', 'owner: ops\nprivacy: tee');
-  assert.equal(teamMarkdown(draftFromMarkdown(tee, 'clients.md'), tee), tee);
+  assert.equal(teamMarkdown(draftFromMarkdown(tee, 'clients.md'), tee), tee.replace('tools: Read, Write\n\nRead the files.', 'tools: Read, Write\nprivacy: private\n\nRead the files.'));
   // A new team is exactly what renderTeam writes.
   assert.equal(teamMarkdown({ ...draft, private: true }), renderTeam('Clients', 'Works on client files', [
     { name: 'analyst', role: 'analyst', tools: ['Read', 'Write'], instructions: 'Read the files. Write the summary to the file the task names.' },
