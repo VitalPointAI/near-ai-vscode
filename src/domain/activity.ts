@@ -57,6 +57,8 @@ export interface ActivityEvent {
   summary: string;
   phase?: string;
   agentId?: string;
+  /** 0.4.28: the agent that started this one (another sub-agent, or the run's main agent), so a finished run's team can be drawn as it worked. */
+  parentAgentId?: string;
   agentRole?: string;
   model?: string;
   tool?: string;

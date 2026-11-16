@@ -1,3 +1,4 @@
+import type { TeamDefinition } from '../agent/teams';
 import { redactSecrets } from '../domain/redaction';
 import type { UsageMetadata } from './nearAiClient';
 
@@ -29,8 +30,33 @@ export interface ActivityEntry {
 
 export type AgentStatus = 'running' | 'completed' | 'max-turns' | 'stuck' | 'cancelled' | 'failed';
 
-/** What a running agent is doing right now. */
-export type AgentPhase = 'starting' | 'thinking' | 'generating' | 'tool' | 'waiting-you' | 'cooling-down' | 'paused' | 'waiting-agents';
+/** What a running agent is doing right now. `queued`: its Agent call was made and it waits for a free slot (0.4.28). */
+export type AgentPhase = 'queued' | 'starting' | 'thinking' | 'generating' | 'tool' | 'waiting-you' | 'cooling-down' | 'paused' | 'waiting-agents';
+
+/** What an agent in `waiting-you` waits for: an approval, an answer to a question, or a generated image to review (0.4.28). */
+export type WaitingKind = 'approval' | 'question' | 'image';
+
+/** The longest task label kept for an agent: a short line for a card, never the prompt. */
+export const TASK_LABEL_MAX = 80;
+
+/**
+ * An Agent call's short description as a card may show it (0.4.28): secrets and private keys removed, tags and line breaks gone, cut to
+ * TASK_LABEL_MAX characters on a word boundary. The lead writes it, so it is treated like any other text an agent wrote.
+ */
+export function taskLabel(description: string | undefined): string | undefined {
+  if (!description) return undefined;
+  const plain = redactForDisplay(description).replace(/<[^>]*>/g, ' ').replace(/[\u0000-\u001f\u007f]+/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!plain) return undefined;
+  if (plain.length <= TASK_LABEL_MAX) return plain;
+  const cut = plain.slice(0, TASK_LABEL_MAX - 1);
+  const space = cut.lastIndexOf(' ');
+  return `${(space > TASK_LABEL_MAX / 2 ? cut.slice(0, space) : cut).trimEnd()}…`;
+}
+
+/** The state an agent shows to a person, coarser than its phase: a change of this is news; a change between thinking and a tool is not. */
+function phaseClass(phase: AgentPhase): string {
+  return phase === 'starting' || phase === 'thinking' || phase === 'generating' || phase === 'tool' ? 'working' : phase;
+}
 
 /** Where the agent's model runs: inside NEAR's TEE, on this machine, or forwarded by NEAR. */
 export type AgentBoundary = 'tee' | 'local' | 'cloud';
@@ -91,6 +117,20 @@ export interface AgentStats {
   tools: Record<string, { calls: number; errors: number }>;
   /** Its counters were saved to the project's activity history (after it ended). */
   persisted?: boolean;
+  /** 0.4.28: the Agent call's short description (see taskLabel), whether it is a member of the run's team, and whether it runs in the background. */
+  task?: string;
+  member?: boolean;
+  background?: boolean;
+  /** 0.4.28, on a run's main agent: the slug of the team it leads or works with. */
+  team?: string;
+  /** 0.4.28: what it waits for while `waiting-you`. */
+  waitingKind?: WaitingKind;
+  /** 0.4.28: when its Agent call was made, while it waited for a slot (startedAt is when it got one). */
+  queuedAt?: number;
+  /** 0.4.28: it was stopped before it got a slot, so it never ran: overviews do not count it as an agent that worked. */
+  neverStarted?: boolean;
+  /** 0.4.28: reports of its background agents it has read (the main agent reads them at its next turn, not when they finish). */
+  reportsDelivered?: number;
 }
 
 /**
@@ -131,6 +171,8 @@ const CAPS: Partial<Record<ActivityKind, number>> = { system: 20_000, prompt: 20
 const TOOL_INPUT_CAP = 4_000;
 const TOOL_OUTPUT_CAP = 8_000;
 const MAX_AGENTS = 300;
+/** The teams of the newest runs, for a live picture of each (0.4.28). */
+const MAX_RUN_TEAMS = 20;
 const PRIVATE_KEY = /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)/g;
 
 export function redactForDisplay(value: string): string {
@@ -156,6 +198,24 @@ function cloneStat(stat: AgentStats): AgentStats {
   return { ...stat, approvals: { ...stat.approvals }, tools: Object.fromEntries(Object.entries(stat.tools).map(([name, count]) => [name, { ...count }])) };
 }
 
+/** Who an agent is, as the conversation knows it when it queues or starts one. */
+export interface AgentIdentity {
+  agentId: string; agent: string; runId: string; model: string; parentId?: string; conversationId?: string; boundary?: AgentBoundary;
+  /** 0.4.28: see AgentStats. `task` is the Agent call's description, passed through taskLabel here. */
+  task?: string; member?: boolean; background?: boolean; team?: string;
+}
+
+/** The identity as a stat keeps it: the task label made safe to show, and absent flags left out. */
+function withoutEmpty(agent: AgentIdentity): AgentIdentity {
+  const { task, member, background, team, ...rest } = agent;
+  const label = taskLabel(task);
+  return { ...rest, ...(label ? { task: label } : {}), ...(member ? { member: true } : {}), ...(background ? { background: true } : {}), ...(team ? { team } : {}) };
+}
+
+function freshCounters(): Omit<AgentStats, 'agentId' | 'agent' | 'runId' | 'model' | 'status' | 'startedAt' | 'phase' | 'phaseSince'> {
+  return { turns: 0, inputTokens: 0, cachedTokens: 0, outputTokens: 0, costUsd: 0, modelMs: 0, waitMs: 0, reasoningTokens: 0, toolCalls: 0, toolErrors: 0, retries: 0, injections: 0, hiddenRemoved: 0, held: 0, blocked: 0, rateLimited: 0, coolMs: 0, userWaitMs: 0, idleMs: 0, approvalTimeouts: 0, approvals: { autoAllowed: 0, asked: 0, declined: 0, expired: 0 }, tools: {} };
+}
+
 const size = (entry: ActivityEntry) => 200 + 2 * ((entry.text?.length ?? 0) + (entry.input?.length ?? 0) + (entry.title?.length ?? 0));
 
 export class ActivityFeed {
@@ -169,6 +229,8 @@ export class ActivityFeed {
   private focused = false;
   private seq = 0;
   private bytes = 0;
+  private lifecycle = 0;
+  private readonly teams = new Map<string, TeamDefinition>();
 
   public constructor(private limits: ActivityLimits, private readonly now: () => number = Date.now) {}
 
@@ -184,6 +246,47 @@ export class ActivityFeed {
 
   public agentStats(): AgentStats[] { return [...this.stats.values()].map(cloneStat); }
 
+  /**
+   * Counts changes a person would call news (0.4.28): an agent queued, started, ended, or moved between working, waiting for them, waiting for its
+   * helpers, paused and retrying, and reports read. Team Live sends those at once and everything else (tools, tokens, cost) at most twice a second.
+   */
+  public get lifecycleRevision(): number { return this.lifecycle; }
+
+  /** The team a run leads or works with, as it was when the run started (0.4.28). Kept for the newest runs only. */
+  public setRunTeam(runId: string, team: TeamDefinition): void {
+    this.teams.delete(runId);
+    this.teams.set(runId, team);
+    for (const stale of [...this.teams.keys()].slice(0, Math.max(0, this.teams.size - MAX_RUN_TEAMS))) this.teams.delete(stale);
+  }
+
+  public runTeam(runId: string): TeamDefinition | undefined { return this.teams.get(runId); }
+
+  /**
+   * The end of the agent's newest reply text, at most `max` characters, with secrets removed (0.4.28: Team Live's open card). Never a prompt, reasoning or
+   * a tool's input or output. Undefined when nothing is kept.
+   */
+  public replyTail(agentId: string, max = 280): string | undefined {
+    for (let index = this.entries.length - 1; index >= 0; index -= 1) {
+      const entry = this.entries[index];
+      if (entry.agentId !== agentId || entry.kind !== 'text' || !entry.text?.trim()) continue;
+      const text = redactForDisplay(entry.text).trim();
+      return text.length <= max ? text : `…${text.slice(text.length - max + 1)}`;
+    }
+    return undefined;
+  }
+
+  /**
+   * 0.4.28: the agent's Agent call was made and it waits for a free slot. It shows as queued until `agentStarted` (which keeps this record) or, when it
+   * is stopped first, `agentEnded`, which marks it as never started.
+   */
+  public agentQueued(agent: AgentIdentity): void {
+    const now = this.now();
+    this.stats.set(agent.agentId, { ...withoutEmpty(agent), ...freshCounters(), status: 'running', startedAt: now, queuedAt: now, neverStarted: true, phase: 'queued', phaseSince: now });
+    this.evictStats();
+    this.lifecycle += 1;
+    this.changed([]);
+  }
+
   public get watched(): boolean { return this.listeners.size > 0; }
 
   public clear(): void {
@@ -194,11 +297,15 @@ export class ActivityFeed {
     this.notify({ entries: [], cleared: true });
   }
 
-  public agentStarted(agent: { agentId: string; agent: string; runId: string; model: string; parentId?: string; conversationId?: string; boundary?: AgentBoundary }, prompt?: string, system?: string): void {
+  public agentStarted(agent: AgentIdentity, prompt?: string, system?: string): void {
     const now = this.now();
-    this.stats.set(agent.agentId, { ...agent, status: 'running', startedAt: now, turns: 0, inputTokens: 0, cachedTokens: 0, outputTokens: 0, costUsd: 0, modelMs: 0, waitMs: 0, reasoningTokens: 0, toolCalls: 0, toolErrors: 0, retries: 0, injections: 0, hiddenRemoved: 0, held: 0, blocked: 0, phase: 'starting', phaseSince: now, rateLimited: 0, coolMs: 0, userWaitMs: 0, idleMs: 0, approvalTimeouts: 0, approvals: { autoAllowed: 0, asked: 0, declined: 0, expired: 0 }, tools: {} });
+    // A queued agent keeps when it was queued; everything else starts afresh.
+    const queuedAt = this.stats.get(agent.agentId)?.queuedAt;
+    this.stats.delete(agent.agentId);
+    this.stats.set(agent.agentId, { ...withoutEmpty(agent), ...freshCounters(), status: 'running', startedAt: now, ...(queuedAt !== undefined ? { queuedAt } : {}), phase: 'starting', phaseSince: now });
     if (agent.conversationId && !agent.parentId && !this.focused) this.conversation = agent.conversationId;
-    for (const stale of [...this.stats.keys()].slice(0, Math.max(0, this.stats.size - MAX_AGENTS))) this.stats.delete(stale);
+    this.evictStats();
+    this.lifecycle += 1;
     const base = { runId: agent.runId, agentId: agent.agentId, agent: agent.agent };
     this.add({ ...base, kind: 'agent-start', title: `${agent.agent} started on ${agent.model}` });
     if (system) this.add({ ...base, kind: 'system', title: 'System prompt', text: system });
@@ -208,11 +315,13 @@ export class ActivityFeed {
   public agentEnded(agentId: string, status: Exclude<AgentStatus, 'running'>, summary?: string): void {
     const stat = this.stats.get(agentId);
     if (!stat) return;
-    this.enter(stat, 'thinking');
+    if (stat.phase !== 'queued') this.enter(stat, 'thinking');
     stat.status = status;
     stat.endedAt = this.now();
     stat.coolUntil = undefined;
     stat.tool = undefined;
+    stat.waitingKind = undefined;
+    this.lifecycle += 1;
     this.closeText(agentId);
     this.add({ runId: stat.runId, agentId, agent: stat.agent, kind: 'agent-end', title: `${stat.agent} ${status === 'max-turns' ? 'reached its turn limit' : status === 'stuck' ? 'was stopped because it was not making progress' : status}`, text: summary });
   }
@@ -306,7 +415,7 @@ export class ActivityFeed {
 
   /** An approval was put to the user; `approvalSettled` says how it ended. */
   public approvalAsked(agentId: string): void {
-    this.withAgent(agentId, (_base, stat) => { stat.approvals.asked += 1; this.enter(stat, 'waiting-you'); this.changed([]); });
+    this.withAgent(agentId, (_base, stat) => { stat.approvals.asked += 1; this.enter(stat, 'waiting-you', 'approval'); this.changed([]); });
   }
 
   /**
@@ -318,7 +427,7 @@ export class ActivityFeed {
    * the agent is still waiting.
    */
   public approvalExpired(agentId: string): void {
-    this.withAgent(agentId, (_base, stat) => { if (stat.phase !== 'waiting-you') this.enter(stat, 'waiting-you'); this.changed([]); });
+    this.withAgent(agentId, (_base, stat) => { if (stat.phase !== 'waiting-you') this.enter(stat, 'waiting-you', 'approval'); this.changed([]); });
   }
 
   /**
@@ -348,12 +457,12 @@ export class ActivityFeed {
   }
 
   /**
-   * 0.4.23: the agent waits on the person for something that is not an approval (a generated image to review), or has stopped waiting. It shows as
-   * "Waiting for you" and the time counts as waiting on the person, without counting an approval.
+   * 0.4.23: the agent waits on the person for something that is not an approval (a generated image to review; 0.4.28: or an answer to a question), or
+   * has stopped waiting. It shows as "Waiting for you" and the time counts as waiting on the person, without counting an approval.
    */
-  public waitingForUser(agentId: string, waiting: boolean): void {
+  public waitingForUser(agentId: string, waiting: boolean, kind: Exclude<WaitingKind, 'approval'> = 'image'): void {
     this.withAgent(agentId, (_base, stat) => {
-      if (waiting && stat.phase !== 'waiting-you') this.enter(stat, 'waiting-you');
+      if (waiting && stat.phase !== 'waiting-you') this.enter(stat, 'waiting-you', kind);
       else if (!waiting && stat.phase === 'waiting-you') this.enter(stat, 'tool');
       this.changed([]);
     });
@@ -383,6 +492,12 @@ export class ActivityFeed {
     });
   }
 
+  /** 0.4.28: the agent read `count` reports of its background agents (the main agent, at its next turn; a sub-agent, at its own). */
+  public reportsDelivered(agentId: string, count: number): void {
+    if (count <= 0) return;
+    this.withAgent(agentId, (_base, stat) => { stat.reportsDelivered = (stat.reportsDelivered ?? 0) + count; this.lifecycle += 1; this.changed([]); });
+  }
+
   /** One agent's statistics. */
   public agentStat(agentId: string): AgentStats | undefined { const stat = this.stats.get(agentId); return stat ? cloneStat(stat) : undefined; }
 
@@ -403,16 +518,22 @@ export class ActivityFeed {
     this.changed([]);
   }
 
-  /** Leaves the current phase, adding a finished wait to its total. */
-  private enter(stat: AgentStats, phase: AgentPhase): void {
+  /** Leaves the current phase, adding a finished wait to its total. `kind` says what a `waiting-you` waits for. */
+  private enter(stat: AgentStats, phase: AgentPhase, kind?: WaitingKind): void {
     if (stat.phase === phase) return;
     const now = this.now();
     const spent = Math.max(0, now - stat.phaseSince);
     if (stat.phase === 'cooling-down') { stat.coolMs += spent; stat.coolUntil = undefined; stat.coolReason = undefined; }
     if (stat.phase === 'waiting-you') stat.userWaitMs += spent;
     if (stat.phase === 'paused' || stat.phase === 'waiting-agents') stat.idleMs = (stat.idleMs ?? 0) + spent;
+    if (phaseClass(stat.phase) !== phaseClass(phase)) this.lifecycle += 1;
+    stat.waitingKind = phase === 'waiting-you' ? kind ?? 'approval' : undefined;
     stat.phase = phase;
     stat.phaseSince = now;
+  }
+
+  private evictStats(): void {
+    for (const stale of [...this.stats.keys()].slice(0, Math.max(0, this.stats.size - MAX_AGENTS))) this.stats.delete(stale);
   }
 
   /** A defense that acted, with where it happened (a URL, search, attachment, or action). */

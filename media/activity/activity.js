@@ -4,7 +4,8 @@
 (function () {
   const vscode = acquireVsCodeApi();
   const $ = (id) => document.getElementById(id);
-  const PHASE = { starting: 'Starting', thinking: 'Thinking', generating: 'Writing', tool: 'Running', 'waiting-you': 'Waiting for you', 'cooling-down': 'Cooling down', paused: 'Paused', 'waiting-agents': 'Waiting for agents' };
+  const WAITING = { approval: 'Waiting for your approval', question: 'Waiting for your answer', image: 'Waiting for your image review' };
+  const PHASE = { queued: 'Waiting for a free slot', starting: 'Starting', thinking: 'Thinking', generating: 'Writing', tool: 'Running', 'waiting-you': 'Waiting for you', 'cooling-down': 'Cooling down', paused: 'Paused', 'waiting-agents': 'Waiting for agents' };
   const OUTCOME = { running: 'Running', completed: 'Completed', 'max-turns': 'Turn limit', stuck: 'Stuck', cancelled: 'Stopped', failed: 'Failed', 'setup-blocked': 'Setup needed' };
   const BOUNDARY = { tee: ['TEE', 'Runs inside NEAR AI’s attested TEE'], local: ['Local', 'Runs on this machine'], cloud: ['Forwarded', 'NEAR forwards it to another provider'] };
   const TIME = [['generateMs', 'Generating', 'seg-generate'], ['toolMs', 'Tools and sub-agents', 'seg-tool'], ['userWaitMs', 'Waiting for you', 'seg-user'], ['nearWaitMs', 'Waiting on NEAR', 'seg-near']];
@@ -56,6 +57,7 @@
       return (agent.coolReason === 'rate-limited' ? 'Rate limited' : 'Cooling down') + (left !== undefined ? ' · retry in ' + duration(left) : '');
     }
     if (agent.phase === 'tool') return 'Running ' + (agent.tool || 'a tool');
+    if (agent.phase === 'waiting-you' && WAITING[agent.waitingKind]) return WAITING[agent.waitingKind] + ' · ' + duration(now - agent.phaseSince);
     return (PHASE[agent.phase] || agent.phase) + (agent.phase === 'waiting-you' || agent.phase === 'paused' ? ' · ' + duration(now - agent.phaseSince) : '');
   }
 

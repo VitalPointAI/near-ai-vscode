@@ -401,7 +401,10 @@ export class AgentConversation {
     // Image drafts left for more than a week are removed (only drafts this extension made); it never fails a run.
     if (request.imageModel) await cleanOldDrafts(this.root).catch(() => 0);
     const boundary = runBoundary(request);
-    this.activity?.agentStarted({ agentId: mainId, agent: request.skill ? `/${request.skill.name}` : request.team ? `team:${request.team.slug}` : 'agent', runId, model: request.model, conversationId: this.conversationId, ...(boundary ? { boundary } : {}) }, prompt, freshConversation ? String(this.messages[0].content) : undefined);
+    // 0.4.28: the team the run leads or works with, as it is now, so Team Live draws the run against the team it started with.
+    const runTeam = request.team ?? request.memberTeam;
+    if (runTeam) this.activity?.setRunTeam(runId, runTeam);
+    this.activity?.agentStarted({ agentId: mainId, agent: request.skill ? `/${request.skill.name}` : request.team ? `team:${request.team.slug}` : 'agent', runId, model: request.model, conversationId: this.conversationId, ...(boundary ? { boundary } : {}), ...(runTeam ? { team: runTeam.slug } : {}) }, prompt, freshConversation ? String(this.messages[0].content) : undefined);
     this.post({ type: 'assistant-start', model: request.model, privacy: request.privacy });
     for (const note of request.attachments?.notes ?? []) this.post({ type: 'notice', text: note });
     const record: Record_ = (event) => request.activity ? request.activity.store.append(request.activity.sessionId, event).catch(() => undefined) : Promise.resolve();
@@ -951,6 +954,12 @@ export class AgentConversation {
         // The task-list item this agent does, when the call names one that is on the list.
         const todo = spawn.task ? this.moveTask(spawn.task, 'in_progress') : undefined;
         const agent: LiveAgent = { id: `${label}-${randomBytes(3).toString('hex')}`, label, description: spawn.description, model, abort: new AbortController(), paused: false, background: spawn.background, activity: 'Waiting for a free slot', activitySince: Date.now(), startedAt: Date.now(), toolCalls: 0, turns: 0 };
+        // 0.4.28: who it is on the activity feed from the moment it is asked for, with the agent that asked (the main agent, or a sub-agent starting its own
+        // helper) as its parent. It shows as queued until it gets a slot.
+        const parentId = spawn.parentId ?? `main-${runId}`;
+        const agentBoundary = runBoundary(request);
+        const identity = { agentId: agent.id, agent: label, runId, model, parentId, conversationId: this.conversationId, task: spawn.description, member: teamMember, background: spawn.background, ...(agentBoundary ? { boundary: agentBoundary } : {}) };
+        this.activity?.agentQueued(identity);
         // A background agent outlives the tool call but not the run; a foreground one ends with the call too.
         const parent = spawn.background ? runSignal : callSignal;
         const onParentAbort = () => agent.abort.abort();
@@ -990,12 +999,13 @@ export class AgentConversation {
         });
         const tools = allowed.map((tool) => (tool.name === 'Agent' || tool.name === 'Task' ? yieldingSlot(tool) : tool));
         const execute = async (): Promise<string> => {
-          await this.acquireSlot(limit, agent.abort.signal);
+          // Stopped before it got a slot (0.4.28): it ends as stopped on the feed rather than staying queued.
+          try { await this.acquireSlot(limit, agent.abort.signal); } catch (error) { this.activity?.agentEnded(agent.id, 'cancelled'); throw error; }
           slot.held = true;
           // PERF-04: agents in their own worktree also take a worktree slot (nearAi.agent.maxParallelWorktrees), since each one checks out and builds.
           // Like the agent slot (#36), it is handed back while the agent waits for a foreground helper, so a worktree cap of 1 cannot deadlock either.
           if (slot.worktree) {
-            try { await this.worktreeSlots.acquire(this.maxParallelWorktrees, agent.abort.signal); slot.worktreeHeld = true; } catch (error) { slot.held = false; this.releaseSlot(); throw error; }
+            try { await this.worktreeSlots.acquire(this.maxParallelWorktrees, agent.abort.signal); slot.worktreeHeld = true; } catch (error) { slot.held = false; this.releaseSlot(); this.activity?.agentEnded(agent.id, 'cancelled'); throw error; }
           }
           let shell: ShellSession | undefined;
           let worktree: AgentWorktree | undefined;
@@ -1006,7 +1016,7 @@ export class AgentConversation {
           this.postAgents();
           const started = Date.now();
           const usage: UsageMetadata[] = [];
-          void record({ status: 'running', kind: 'agent', agentId: agent.id, agentRole: label, action: spawn.description, model, summary: `Sub-agent ${label} started.` });
+          void record({ status: 'running', kind: 'agent', agentId: agent.id, parentAgentId: parentId, agentRole: label, action: spawn.description, model, summary: `Sub-agent ${label} started.` });
           try {
             if (spawn.isolation === 'worktree') worktree = await createAgentWorktree(this.root, this.worktreeDir, agent.id);
             const agentRoot = worktree?.root ?? this.root;
@@ -1017,8 +1027,7 @@ export class AgentConversation {
             const isolationNote = worktree ? `\n\n# Isolation\nYou are working in an isolated git worktree at ${worktree.path} on branch ${worktree.branch}${worktree.root !== worktree.path ? `, in its copy of the workspace folder, ${worktree.root}` : ''}.${worktree.rootUnmatched ? ` The workspace folder (${this.root}) could not be placed inside the worktree, so you start at its top level: change into the matching subfolder before working.` : ''}${worktree.rootCreatedEmpty ? ` git does not track that folder, so its copy here is empty: files you need from it are only in the main checkout.` : ''} Commit your work on this branch; do not switch branches or touch the main checkout at ${this.root}.` : '';
             const base = `${this.systemPrompt({ ...request, model }, agentRoot, tools.some((tool) => tool.name === 'Agent' || tool.name === 'Task'))}${isolationNote}`;
             const system = agentBody ? `${agentBody}\n\n${base}` : base;
-            const boundary = runBoundary(request);
-            this.activity?.agentStarted({ agentId: agent.id, agent: label, runId, model, parentId: `main-${runId}`, conversationId: this.conversationId, ...(boundary ? { boundary } : {}) }, spawn.prompt, system);
+            this.activity?.agentStarted(identity, spawn.prompt, system);
             const child = new AgentRun({
               client: request.client, model, tools, context: agentContext, policy: request.policy, rules: request.rules, grants, safety: this.runSafety, maxTurns: request.maxTurns, maxOutputTokens: request.maxOutputTokens,
               ...(request.unattendedAutoApprove !== false ? { unattended: { planScripts: scriptsNamedIn(spawn.prompt), runStartedAt: this.currentRunStartedAt, ...(this.currentBaseCommit ? { baseCommit: this.currentBaseCommit } : {}) } } : {}),
@@ -1055,7 +1064,7 @@ export class AgentConversation {
             const total = sumUsage(usage);
             const report = [...result.messages].reverse().find((message) => message.role === 'assistant' && message.content)?.content;
             await this.recordReputation(request.reputation, label, result.outcome === 'completed' ? 1 : result.outcome === 'max-turns' || result.outcome === 'stuck' ? 0 : -1, agent.id);
-            void record({ status: result.outcome === 'cancelled' ? 'cancelled' : 'completed', kind: 'agent', agentId: agent.id, agentRole: label, action: spawn.description, model, summary: `Sub-agent ${label} ${result.outcome}.`, inputTokens: total.inputTokens, outputTokens: total.outputTokens, estimatedCostUsd: total.estimatedCostUsd, durationMs: Date.now() - started });
+            void record({ status: result.outcome === 'cancelled' ? 'cancelled' : 'completed', kind: 'agent', agentId: agent.id, parentAgentId: parentId, agentRole: label, action: spawn.description, model, summary: `Sub-agent ${label} ${result.outcome}.`, inputTokens: total.inputTokens, outputTokens: total.outputTokens, estimatedCostUsd: total.estimatedCostUsd, durationMs: Date.now() - started });
             shell.dispose();
             worktreeState = worktree ? await finishAgentWorktree(worktree).catch(() => 'kept' as const) : undefined;
             const isolated = worktree && worktreeState ? `\n\n${worktreeReport(worktree, worktreeState)}` : '';
@@ -1071,7 +1080,7 @@ export class AgentConversation {
             this.activity?.agentEnded(agent.id, 'failed', error instanceof Error ? error.message : String(error));
             await this.persistAgent(request, agent.id);
             await this.recordReputation(request.reputation, label, -1, agent.id);
-            void record({ status: 'failed', kind: 'agent', agentId: agent.id, agentRole: label, action: spawn.description, model, summary: `Sub-agent ${label} failed.`, errorCode: error instanceof Error ? error.name : 'unknown', durationMs: Date.now() - started });
+            void record({ status: 'failed', kind: 'agent', agentId: agent.id, parentAgentId: parentId, agentRole: label, action: spawn.description, model, summary: `Sub-agent ${label} failed.`, errorCode: error instanceof Error ? error.name : 'unknown', durationMs: Date.now() - started });
             throw error;
           } finally {
             shell?.dispose();
@@ -1108,6 +1117,8 @@ export class AgentConversation {
   private drainNotifications(): AgentMessage[] {
     const pending = this.notifications;
     this.notifications = [];
+    // 0.4.28: the main agent reads them now, which is when a report reaches it (Team Live shows it docking).
+    if (this.mainAgentId) this.activity?.reportsDelivered(this.mainAgentId, reportCount(pending));
     return pending;
   }
 
@@ -1658,6 +1669,11 @@ export class AgentConversation {
     const title = questions.length === 1 ? `"${questions[0].question.slice(0, 200)}"` : `${questions.length} questions`;
     // waitOrAbort removes its abort listener once answered, so a long run's questions do not pile listeners up on its signal (agent review of PR 51).
     let reply: { answers: string[]; cancelled: boolean } | undefined;
+    // 0.4.28: a question puts the agent asking it in "waiting for you" on the activity feed, as an approval and an image review do (it did not before,
+    // so a sub-agent waiting on a question looked busy); the strip says what it waits for.
+    if (agentId) this.activity?.waitingForUser(agentId, true, 'question');
+    const live = agentId ? this.agents.get(agentId) : undefined;
+    if (live) { this.setActivity(live, 'Waiting for your answer'); this.postAgents(); }
     return this.waitForPerson(id, signal, (wake) => {
       this.questions.set(id, (answers: string[], cancelled = false) => { reply = { answers, cancelled }; wake(); });
       this.openPrompt(id, { type: 'questions-request', id, questions });
@@ -1673,7 +1689,7 @@ export class AgentConversation {
       if (!reply) { this.questions.delete(id); reply = { answers: [], cancelled: true }; }
       this.closePrompt(id, reply.cancelled);
       return reply.answers;
-    });
+    }).finally(() => { if (agentId) this.activity?.waitingForUser(agentId, false, 'question'); });
   }
 
   /** The image reviewer of this conversation: drafts in the project, cards in this conversation's chat (a sub-agent's too, labelled with it). */
@@ -1740,6 +1756,9 @@ export class AgentConversation {
     for (const settle of reviews) settle({ decision: 'cancelled' }, true);
   }
 }
+
+/** How many of these messages are background agents' reports (not approval updates). */
+const reportCount = (messages: AgentMessage[]) => messages.filter((message) => typeof message.content === 'string' && message.content.startsWith('<agent-notification ')).length;
 
 /** What each question answers when nobody answered within the approval timeout, in Full auto or a background sub-agent only (0.4.24). */
 export const QUESTION_TIMED_OUT = '(no answer, timed out)';
