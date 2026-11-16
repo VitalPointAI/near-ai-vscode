@@ -3,21 +3,33 @@
 // (only reading and planning run) with a plain message, and the rest of the extension starts normally.
 //
 // It also owns what the person sees of the policy (OFFL-02, D-13, D-33, D-41): the status bar item, NEAR AI: Show Policy (a read-only virtual document, so
-// nothing is ever written by looking).
+// nothing is ever written by looking), NEAR AI: Reset Policy to Defaults (confirmed in a modal, recorded, the only path that re-signs a bundle that failed
+// verification) and the Policy step in the setup view.
 import * as vscode from 'vscode';
 import { CAPABILITY_VERBS } from '../domain/gate/vocabulary';
 import type { BundleState } from '../domain/gate/bundle';
 import { CLEARANCE_SELF_ASSERTED_TEXT, SCALE_PRESETS_CAVEAT_TEXT, labelKey } from '../domain/gate/labels';
+import { BundleStoreError } from '../gate/bundleStore';
 import { GateHost } from '../gate/host';
 import type { SecretStorageLike } from './auth';
 import { SHOW_POLICY_COMMAND, createGateStatusBar, expiryDate, policyProblem } from './gateStatusBar';
+import { registerSetupStep } from './setupSteps';
+import type { SetupStep } from './setupSteps';
 
+export const RESET_POLICY_COMMAND = 'nearAi.policy.reset';
 export const POLICY_SCHEME = 'near-ai-policy';
 export const POLICY_DOCUMENT_URI = `${POLICY_SCHEME}:/NEAR-AI-Policy.txt`;
 
 /** Shown above the scales, clearances and routing: this version stores them and does not use them yet. Plan 21 removes it when they are live. */
 export const POLICY_LABELS_NOT_USED_TEXT =
   'This version does not use the scales, clearances and routing below yet. They are kept so your policy file does not change when it does.';
+
+export const RESET_CONFIRM_ACTION = 'Reset Policy';
+export const RESET_TITLE = 'Reset your policy to the default?';
+export const RESET_DETAIL =
+  "This replaces your policy file with the default policy and signs it with this computer's key. Your current file is kept beside it. Anything your policy narrowed is allowed again, up to what your settings allow.";
+export const RESET_DONE_TEXT = 'Your policy was reset to the default. Your old policy file was kept beside the new one.';
+export const RESET_FAILED_TEXT = 'Nothing was changed: NEAR AI could not reset your policy.';
 
 export interface GateActivationContext {
   readonly globalStorageUri: { readonly fsPath: string };
@@ -110,6 +122,33 @@ export function policyDocumentText(state: BundleState | undefined, now: number):
 }
 
 // ---------------------------------------------------------------------------------------------------------------------------------------------------
+// The setup step
+
+/** The fixed words of the Policy step. `policySetupStep` adds what depends on the gate's state. */
+export const POLICY_SETUP_STEP = Object.freeze({
+  id: 'policy',
+  label: 'Check your policy',
+  icon: 'shield',
+  command: SHOW_POLICY_COMMAND
+});
+
+const POLICY_STEP_VALID_DETAIL = 'Your policy is signed and valid. You can read it here.';
+
+/** The step is done when the policy is valid, and shows the status bar's own sentence when it is not (D-13). */
+export function policySetupStep(host: GateHost, now: () => number = Date.now): SetupStep {
+  return {
+    ...POLICY_SETUP_STEP,
+    get detail(): string {
+      return policyProblem(host.bundleState(), now()) ?? POLICY_STEP_VALID_DETAIL;
+    },
+    async isDone(): Promise<boolean> {
+      await host.state();
+      return policyProblem(host.bundleState(), now()) === undefined;
+    }
+  };
+}
+
+// ---------------------------------------------------------------------------------------------------------------------------------------------------
 // Activation
 
 /** Starts the gate. Returns at once with the host; its check finishes in the background and `host.state()` waits for it. */
@@ -176,4 +215,29 @@ function registerPolicySurfaces(context: GateActivationContext, host: GateHost, 
       }
     }));
   });
+  attempt('Reset Policy to Defaults', () => {
+    keep(vscode.commands.registerCommand(RESET_POLICY_COMMAND, () => resetPolicy(host)));
+  });
+  attempt('the policy setup step', () => {
+    keep(registerSetupStep(policySetupStep(host, clock)));
+  });
+}
+
+/** The only path that re-signs a bundle that failed verification: a modal the person confirms, then host.reset(), which records policy.reset. */
+export async function resetPolicy(host: GateHost): Promise<boolean> {
+  const answer = await vscode.window.showWarningMessage(RESET_TITLE, { modal: true, detail: RESET_DETAIL }, RESET_CONFIRM_ACTION);
+  if (answer !== RESET_CONFIRM_ACTION) return false;
+  try {
+    const result = await host.reset();
+    if (result.state.state === 'valid') {
+      void Promise.resolve(vscode.window.showInformationMessage(RESET_DONE_TEXT)).catch(() => undefined);
+      return true;
+    }
+    void Promise.resolve(vscode.window.showWarningMessage(result.state.sentence)).catch(() => undefined);
+    return false;
+  } catch (error) {
+    const message = error instanceof BundleStoreError ? error.message : RESET_FAILED_TEXT;
+    void Promise.resolve(vscode.window.showErrorMessage(message)).catch(() => undefined);
+    return false;
+  }
 }

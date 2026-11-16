@@ -1,7 +1,7 @@
 // What the person sees of the policy (OFFL-02, OFFL-03, D-13, D-23, D-27, D-33, D-41): the status bar item and its plain words for every state, the read-only
 // Show Policy view, the confirmed and recorded Reset Policy to Defaults, and the Policy step in the setup view. Runs with the recording vscode stub.
 import assert from 'node:assert/strict';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { mkdtemp, readFile, readdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -9,12 +9,15 @@ import test from 'node:test';
 import { BUNDLE_FAILURES, failedClosed } from '../domain/gate/bundle';
 import type { BundleState } from '../domain/gate/bundle';
 import { CLEARANCE_SELF_ASSERTED_TEXT, SCALE_PRESETS_CAVEAT_TEXT } from '../domain/gate/labels';
+import type { DecisionRecord } from '../domain/gate/record';
 import { POLICY_BUNDLE_FILE, gateDir } from '../gate/bundleStore';
+import { DECISIONS_DIR, projectLogKey } from '../gate/decisionLog';
 import { MemorySecrets } from './helpers/teamHarness';
 import { createFakeContext, createVscodeStub, installVscodeStub } from './helpers/vscodeStub';
 
 const stub = createVscodeStub();
 const uninstall = installVscodeStub(stub);
+const setupSteps = require('../services/setupSteps') as typeof import('../services/setupSteps');
 const gateCommands = require('../services/gateCommands') as typeof import('../services/gateCommands');
 const gateStatusBar = require('../services/gateStatusBar') as typeof import('../services/gateStatusBar');
 test.after(() => { uninstall(); });
@@ -164,4 +167,152 @@ test('the commands are contributed in package.json with the NEAR AI category', a
   const show = manifest.contributes.commands.find((entry) => entry.command === 'nearAi.policy.show');
   assert.deepEqual([show?.title, show?.category], ['Show Policy', 'NEAR AI']);
   assert.equal(existsSync(path.join(__dirname, '..', '..', 'package.json')), true);
+});
+
+// ---------------------------------------------------------------------------------------------------------------------------------------------------
+// Task 2: Reset Policy to Defaults and the Policy setup step
+
+async function recordsOf(storage: string, root: string): Promise<DecisionRecord[]> {
+  const file = path.join(storage, 'gate', DECISIONS_DIR, `${projectLogKey(root)}.jsonl`);
+  if (!existsSync(file)) return [];
+  return (await readFile(file, 'utf8')).split('\n').filter((line) => line !== '').map((line) => JSON.parse(line) as DecisionRecord);
+}
+
+async function tampered(root?: string): Promise<{ host: ReturnType<typeof gateCommands.registerGate>; storage: string; file: string; bytes: string; secrets: MemorySecrets }> {
+  stub.setWorkspaceFolders(root === undefined ? [] : [root]);
+  const first = await started();
+  const file = path.join(gateDir(first.storage), POLICY_BUNDLE_FILE);
+  const bytes = (await readFile(file, 'utf8')).replace('"Restricted"', '"Restricteb"');
+  await writeFile(file, bytes, 'utf8');
+  const second = await started(first.secrets, first.storage);
+  assert.equal(second.state.state, 'failed-closed');
+  return { host: second.host, storage: first.storage, file, bytes, secrets: first.secrets };
+}
+
+function resetNotifications(): void {
+  stub.notifications.length = 0;
+  stub.notificationActions.length = 0;
+  stub.messageAnswers.length = 0;
+}
+
+test('Reset Policy to Defaults is a modal that says what happens, and a confirm signs a fresh default, keeps the old file and records policy.reset', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'near-ai-gate-cmd-project-'));
+  const { host, storage, file, bytes } = await tampered(root);
+  resetNotifications();
+  stub.messageAnswers.push(gateCommands.RESET_CONFIRM_ACTION);
+  await stub.commands.get('nearAi.policy.reset')?.();
+  // The first message is the modal; its text is the plain-words warning and it has one confirm button.
+  assert.equal(stub.notifications[0]?.message, gateCommands.RESET_TITLE);
+  const asked = stub.notificationActions[0] as unknown[];
+  assert.deepEqual(asked[0], { modal: true, detail: gateCommands.RESET_DETAIL });
+  assert.deepEqual(asked.slice(1), [gateCommands.RESET_CONFIRM_ACTION]);
+  assert.match(gateCommands.RESET_DETAIL, /Your current file is kept beside it/);
+  assert.match(gateCommands.RESET_DETAIL, /up to what your settings allow/);
+  assert.ok(!gateCommands.RESET_DETAIL.includes(EM_DASH));
+  assert.deepEqual(stub.notifications.slice(1).map((entry) => [entry.level, entry.message]), [['info', gateCommands.RESET_DONE_TEXT]]);
+  // A fresh default is signed and valid, and the old file is kept beside it with the same bytes.
+  assert.equal(host.bundleState().state, 'valid');
+  const kept = readdirSync(gateDir(storage)).filter((name) => name.startsWith(`${POLICY_BUNDLE_FILE}.replaced-`));
+  assert.equal(kept.length, 1);
+  assert.equal(readFileSync(path.join(gateDir(storage), kept[0] as string), 'utf8'), bytes);
+  assert.notEqual(await readFile(file, 'utf8'), bytes);
+  // The record names the event, and the status bar and the Policy step follow.
+  await host.flush();
+  const records = await recordsOf(storage, root);
+  const reset = records.filter((record) => record.api.operation === 'policy.reset');
+  assert.equal(reset.length, 1);
+  assert.equal(reset[0]?.authorizations[0]?.policy.name, 'policy.reset');
+  assert.equal(records.filter((record) => record.api.operation === 'policy.load').length, 1, 'the failed start was recorded too');
+  const bar = stub.statusBarItems.filter((item) => item.id === 'nearAi.gate').at(-1) as (typeof stub.statusBarItems)[number];
+  assert.equal(bar.text, 'Policy');
+});
+
+test('cancelling Reset Policy to Defaults changes nothing: the file keeps its bytes, nothing is kept beside it, nothing is recorded', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'near-ai-gate-cmd-project-'));
+  const { host, storage, file, bytes } = await tampered(root);
+  await host.flush();
+  const recordsBefore = (await recordsOf(storage, root)).length;
+  const filesBefore = readdirSync(gateDir(storage)).sort();
+  for (const answer of [undefined, 'Not now']) {
+    resetNotifications();
+    stub.messageAnswers.push(answer);
+    await stub.commands.get('nearAi.policy.reset')?.();
+    assert.equal(stub.notifications.length, 1, 'only the modal was shown');
+  }
+  assert.equal(await readFile(file, 'utf8'), bytes);
+  assert.deepEqual(readdirSync(gateDir(storage)).sort(), filesBefore);
+  assert.equal(host.bundleState().state, 'failed-closed');
+  await host.flush();
+  assert.equal((await recordsOf(storage, root)).length, recordsBefore);
+});
+
+test('a reset that cannot finish shows the plain message of the store error and leaves the policy as it was', async () => {
+  stub.setWorkspaceFolders([]);
+  const storage = await mkdtemp(path.join(tmpdir(), 'near-ai-gate-cmd-'));
+  let broken = false;
+  const now = (): Date => (broken ? new Date(Number.NaN) : new Date());
+  const host = gateCommands.registerGate(createFakeContext(storage, new MemorySecrets()) as never, { notify: () => undefined, now });
+  assert.equal((await host.state()).state, 'valid');
+  const file = path.join(gateDir(storage), POLICY_BUNDLE_FILE);
+  const before = await readFile(file, 'utf8');
+  broken = true;
+  resetNotifications();
+  stub.messageAnswers.push(gateCommands.RESET_CONFIRM_ACTION);
+  await stub.commands.get('nearAi.policy.reset')?.();
+  const errors = stub.notifications.filter((entry) => entry.level === 'error');
+  assert.deepEqual(errors.map((entry) => entry.message), ['Nothing was changed: the clock gave no valid time.']);
+  broken = false;
+  assert.equal(await readFile(file, 'utf8'), before);
+});
+
+test('the only caller of the host\'s reset is the confirmed command, and the store\'s reset is reached only through the host', () => {
+  const src = path.join(__dirname, '..');
+  const sources: string[] = [];
+  const walk = (dir: string): void => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else if (entry.name.endsWith('.js') && !full.includes(`${path.sep}test${path.sep}`)) sources.push(full);
+    }
+  };
+  walk(src);
+  const callers = (needle: RegExp): string[] => sources.filter((file) => needle.test(readFileSync(file, 'utf8'))).map((file) => path.relative(src, file)).sort();
+  assert.deepEqual(callers(/\bresetPolicyToDefaults\)?\(/), ['gate/bundleStore.js', 'gate/host.js']);
+  assert.deepEqual(callers(/\bhost\.reset\(\)/), ['services/gateCommands.js']);
+  assert.deepEqual(callers(/\bresetPolicy\(/), ['services/gateCommands.js']);
+});
+
+test('the Policy setup step is added through registerSetupStep, is done when the policy is valid, and shows the same sentence as the status bar when it is not', async () => {
+  stub.setWorkspaceFolders([]);
+  const bad = await tampered();
+  const step = setupSteps.SETUP_STEPS.find((entry) => entry.id === 'policy');
+  assert.ok(step, 'registered');
+  const policy = step as import('../services/setupSteps').SetupStep;
+  assert.deepEqual([policy.label, policy.icon, policy.command], ['Check your policy', 'shield', 'nearAi.policy.show']);
+  const ctx = { root: '.', setting: () => undefined, facts: {} };
+  assert.equal(await policy.isDone(ctx), false);
+  assert.equal(policy.detail, BUNDLE_FAILURES['bad-signature']);
+  const bar = stub.statusBarItems.filter((item) => item.id === 'nearAi.gate').at(-1) as (typeof stub.statusBarItems)[number];
+  assert.ok(bar.tooltip.includes(policy.detail), 'the status bar carries the same sentence');
+  const menu = await setupSteps.buildSetupMenu(setupSteps.SETUP_STEPS.filter((entry) => entry.id === 'policy'), ctx);
+  assert.equal(menu[0]?.done, false);
+  assert.equal(menu[0]?.detail, BUNDLE_FAILURES['bad-signature']);
+  resetNotifications();
+  stub.messageAnswers.push(gateCommands.RESET_CONFIRM_ACTION);
+  await stub.commands.get('nearAi.policy.reset')?.();
+  assert.equal(await policy.isDone(ctx), true);
+  assert.match(policy.detail, /signed and valid/);
+  void bad;
+});
+
+test('SETUP_STEPS itself is not edited: the policy step is in the registry only after the gate registers it', () => {
+  const text = readFileSync(path.join(__dirname, '..', '..', 'src', 'services', 'setupSteps.ts'), 'utf8');
+  assert.ok(!text.includes("'policy'"));
+});
+
+test('the reset command is contributed in package.json with the NEAR AI category and no em-dash in either title', async () => {
+  const manifest = JSON.parse(await readFile(path.join(__dirname, '..', '..', 'package.json'), 'utf8')) as { contributes: { commands: Array<{ command: string; title: string; category?: string }> } };
+  const reset = manifest.contributes.commands.find((entry) => entry.command === 'nearAi.policy.reset');
+  assert.deepEqual([reset?.title, reset?.category], ['Reset Policy to Defaults', 'NEAR AI']);
+  for (const entry of manifest.contributes.commands.filter((item) => item.command.startsWith('nearAi.policy.'))) assert.ok(!entry.title.includes(EM_DASH));
 });

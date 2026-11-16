@@ -301,6 +301,11 @@
         "title": "Show Policy",
         "category": "NEAR AI",
         "icon": "$(shield)"
+      },
+      {
+        "command": "nearAi.policy.reset",
+        "title": "Reset Policy to Defaults",
+        "category": "NEAR AI"
       }
     ],
     "viewsContainers": {
