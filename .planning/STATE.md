@@ -126,7 +126,7 @@ Next, in order:
 ## Session
 
 **Last session:** 2026-11-15T22:12:24.647Z
-**Stopped at:** Completed 69-11-PLAN.md (local signed key history, PR 2 branch not pushed); next 69-12
+**Stopped at:** Completed 69-15-PLAN.md (PR 2 open from feat/team-signed-payloads into main, rebased and gated; waiting for the owner's review and merge)
 **Resume file:** None
 
 ## Performance Metrics
