@@ -99,9 +99,11 @@ function plainCopy<T>(value: T): T {
 }
 
 /**
- * What a fresh install gets: everything today's settings can allow, so it decides and routes exactly as it did before (D-11, D-24, D-27). Every verb runs
- * in interactive and unattended contexts except the reserved `gpu`, the two reserved contexts stay at approve-risky, the four scale presets ship with no
- * mapping, the one clearance is org Restricted (the whole commercial scale), and an unlabelled project is org Public. Returns a fresh object each call.
+ * What a fresh install gets. Every verb except the reserved `gpu` may run in the interactive and unattended contexts, and the two reserved contexts stay at
+ * approve-risky. The ceiling is not the same as today's behaviour everywhere: `unattendedMcp` is empty, so MCP tools are denied in unattended runs, and no verb
+ * lists `relay` or `routine`, so every verb is denied in those two contexts. Nothing calls decide() yet, so no current code path is affected by any of this
+ * (D-11, D-24, D-27). The four scale presets ship with no mapping, the one clearance is org Restricted (the whole commercial scale), and an unlabelled project
+ * is org Public. Returns a fresh object each call.
  */
 export function defaultBundlePayload(input: DefaultBundleInput): PolicyBundle {
   const contexts: Partial<Record<CapabilityVerb, readonly GateContextName[]>> = {};
