@@ -2,6 +2,8 @@
 
 Research report, written 2026-11-16. Read-only research; nothing in the repository was changed.
 
+> Outcome (owner, 2026-11-16; `.planning/PROJECT.md`, Platform direction decisions 14-17): NEAR function-call access keys are used only for agents' and nodes' on-chain calls; off-chain capabilities stay in private credentials checked by the credential broker, and the public key registry of section 8.3 item 1 (also with hashed names) was declined for the risks in section 8.5. The items in section 8.4 named in decision 17 are adopted as designs.
+
 Sources were found by web search and, where it mattered, by reading the primary page. Each claim carries its source link. **(inference)** marks my own reasoning. **(secondary)** marks a vendor blog, news piece or aggregator rather than a specification or the project's own docs. **(from memory)** marks a fact I did not re-check in this session; verify it before relying on it.
 
 Patentability is a legal question and outside the scope of this report. Nothing here says whether any part could or could not be patented.
