@@ -368,7 +368,7 @@ Plans:
 - [x] 70-14-PLAN.md — status bar, Show Policy, Reset Policy to Defaults, setup step, SECURITY.md and README policy and MCP sections (PR 2)
 
 **Wave 15** *(blocked on Wave 14 completion)*
-- [ ] 70-15-PLAN.md — automated check that PR 1 is on main, rebase, gate, open PR 2 (formats, fail-closed change and the D-48 release blocker named)
+- [x] 70-15-PLAN.md — automated check that PR 1 is on main, rebase, gate, open PR 2 (formats, fail-closed change and the D-48 release blocker named)
 
 **Wave 16** *(blocked on Wave 15 completion)*
 - [ ] 70-16-PLAN.md — classifier effect tags for publish, destroy and protected writes; credential-store detection (PR 3)
