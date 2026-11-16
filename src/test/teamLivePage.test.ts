@@ -139,7 +139,7 @@ test('page: draws every card in its state with words, as a tree with levels, and
   assert.match(page.card('m:researcher').textContent, /researcher.*Working.*Running WebSearch.*Task: Find sources.*TEE.*glm-5\.3/);
   assert.match(page.card('m:writer').className, /state-bench/);
   assert.match(page.card('m:writer').textContent, /Not asked yet/);
-  assert.match(page.card('g:general-purpose-bbb111').textContent, /Check a quote.*Needs you: an answer to a question.*Answer in chat/);
+  assert.match(page.card('g:general-purpose-bbb111').textContent, /Check a quote.*Needs you: an answer to a question.*Answer in chat.*From researcher/);
   assert.equal(page.doc.getElementById('tree')!.getAttribute('role') ?? 'tree', 'tree');
   assert.equal(page.cards().filter((node) => node.tabIndex === 0).length, 1, 'one tab stop for the whole tree');
   assert.match(page.doc.getElementById('stage')!.className, /\bwide\b/, 'a wide panel draws the tree');

@@ -203,7 +203,9 @@
     setText(card.activityText, item.activity || '');
     card.activity.title = item.activity || '';
     card.answer.hidden = item.state !== 'needs-you';
-    setText(card.task, item.task ? (item.kind === 'lead' ? item.task : 'Task: ' + item.task) : item.kind === 'member' && item.role ? item.role : '');
+    // A helper says who started it, since in the tree it sits in a band of its own.
+    const from = item.kind === 'guest' && node(item.parent) ? 'From ' + node(item.parent).name + (item.task && item.name !== item.task ? ': ' + item.task : '') : '';
+    setText(card.task, from || (item.task ? (item.kind === 'lead' ? item.task : 'Task: ' + item.task) : item.kind === 'member' && item.role ? item.role : ''));
     card.task.title = item.task || '';
     setText(card.privacy, item.privacy || '');
     card.privacy.hidden = !item.privacy;

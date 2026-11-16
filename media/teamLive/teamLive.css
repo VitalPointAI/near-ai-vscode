@@ -18,9 +18,10 @@ h3 { font-size: 0.95em; font-weight: 600; margin: 14px 0 6px; color: var(--muted
 .heading { min-width: 0; flex: 1 1 220px; }
 .heading .hint { margin: 4px 0 0; }
 .hint { color: var(--muted); }
-.actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-.picker { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; }
-.picker select { max-width: 100%; min-width: 0; font: inherit; color: var(--vscode-dropdown-foreground); background: var(--vscode-dropdown-background); border: 1px solid var(--vscode-dropdown-border, var(--border)); }
+.actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; max-width: 100%; }
+/* A select is as wide as its longest option unless told otherwise: here it shrinks with the panel. */
+.picker { display: flex; align-items: center; gap: 6px; flex: 1 1 160px; min-width: 0; max-width: 100%; }
+.picker select { flex: 1 1 auto; width: 100%; max-width: 100%; min-width: 0; font: inherit; color: var(--vscode-dropdown-foreground); background: var(--vscode-dropdown-background); border: 1px solid var(--vscode-dropdown-border, var(--border)); }
 button { font: inherit; color: var(--vscode-button-foreground); background: var(--vscode-button-background); border: none; padding: 4px 11px; border-radius: 2px; cursor: pointer; }
 button:hover { background: var(--vscode-button-hoverBackground); }
 button.secondary { color: var(--vscode-button-secondaryForeground); background: var(--vscode-button-secondaryBackground); }
