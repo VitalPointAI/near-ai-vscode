@@ -124,8 +124,10 @@ export async function loadOrCreateDeviceIdentity(
   });
 }
 
-// Used by a failed Enable that created the key: it forgets that key only while it is still the stored one. A key that another window stored in the
-// meantime, or one that existed before, is never deleted.
+// Used by a failed Enable that created the key: it forgets that key only while it is still the stored one AND the key history holds nothing but that key's
+// own `created` record (D-22, D-09). It first appends a `revoked` record signed by the key, so the history stays a valid chain that ends with the key
+// withdrawn, and then deletes the key. A key that another window stored in the meantime, one that existed before, or one that has any other history
+// record (or a history that cannot be trusted) is never deleted: the call returns false.
 export async function forgetCreatedDeviceIdentity(
   secrets: SecretStorageLike, options: IdentityLockOptions & { fingerprint: string }
 ): Promise<boolean> {
@@ -133,6 +135,13 @@ export async function forgetCreatedDeviceIdentity(
   return withFileLock(options.identityDir, IDENTITY_CREATE_LOCK_FILE, async () => {
     const stored = await loadDeviceIdentity(secrets);
     if (!stored || stored.fingerprint !== options.fingerprint) return false;
+    const history = await readKeyHistory(options.identityDir, secrets);
+    // One record whose key is the active one can only be that key's own `created` record.
+    if (!history.ok || history.active?.fingerprint !== stored.fingerprint || history.head?.seq !== 1) return false;
+    await appendKeyRecord(
+      options.identityDir, secrets, stored, { kind: 'revoked', key: { fingerprint: stored.fingerprint, publicKey: stored.publicKey } },
+      options.now === undefined ? {} : { now: options.now }
+    );
     await forgetDeviceIdentity(secrets);
     return true;
   });

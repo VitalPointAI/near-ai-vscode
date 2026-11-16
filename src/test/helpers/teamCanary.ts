@@ -58,6 +58,12 @@ export function deviceKeyForms(storedSecret: string): string[] {
   ])];
 }
 
+// The saved end of the key history (seq and hash) lives only in SecretStorage, never in a file, a git object or the audit store. Its stored text is a
+// needle like any other secret, so a scan of those places also proves it never leaked there (TMR-03). Nothing is returned when no head is stored.
+export function keyHistoryHeadNeedles(storedHead: string | undefined): Needle[] {
+  return storedHead === undefined || storedHead === '' ? [] : [{ label: 'key history head', value: storedHead }];
+}
+
 function foundIn(haystack: Buffer, needles: Needle[]): string[] {
   return needles.filter((needle) => haystack.includes(Buffer.from(needle.value, 'utf8'))).map((needle) => needle.label);
 }

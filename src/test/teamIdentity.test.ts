@@ -1,7 +1,7 @@
 // Device identity, event signing and id generators (D-05, D-14, D-15, D-31). All key material is generated at run time.
 import assert from 'node:assert/strict';
 import { generateKeyPairSync } from 'node:crypto';
-import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -13,7 +13,7 @@ import {
 } from '../team/identity';
 import { acquireFileLock } from '../services/stateMirrorLock';
 import { signPayload, verifyPayload } from '../domain/team/signedPayload';
-import { KEY_HISTORY_FILE, KEY_HISTORY_HEAD_SECRET, localKeyStatus, readKeyHistory } from '../team/keyHistory';
+import { KEY_HISTORY_FILE, KEY_HISTORY_HEAD_SECRET, appendKeyRecord, localKeyStatus, readKeyHistory } from '../team/keyHistory';
 import { MemorySecrets } from './helpers/teamHarness';
 
 const TEAM = 'team-0123456789abcdef0123456789abcdef';
@@ -136,6 +136,214 @@ test('forgetCreatedDeviceIdentity deletes nothing unless the stored key is the o
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
+});
+
+async function withFolder<T>(work: (folder: string, secrets: MemorySecrets) => Promise<T>): Promise<T> {
+  const dir = await mkdtemp(path.join(tmpdir(), 'near-ai-identity-'));
+  try {
+    return await work(identityDir(dir), new MemorySecrets());
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}
+
+const ARCHIVE_NAME = /^key-history\.archived-\d{8}T\d{6}Z-[0-9a-f]{6}\.json$/;
+
+interface HistoryFileShape { records: Array<{ payload: { kind: string; key: { fingerprint: string } }; signer: { fingerprint: string } }> }
+
+async function historyFile(folder: string): Promise<HistoryFileShape> {
+  return JSON.parse(await readFile(path.join(folder, KEY_HISTORY_FILE), 'utf8')) as HistoryFileShape;
+}
+
+async function archivedFiles(folder: string): Promise<string[]> {
+  return (await readdir(folder)).filter((name) => name.startsWith('key-history.archived-')).sort();
+}
+
+test('a key stored before any history exists gets exactly one created record signed by that key, and created stays false', async () => {
+  await withFolder(async (folder, secrets) => {
+    const early = await createDeviceIdentity(secrets);
+    assert.equal(secrets.values.has(KEY_HISTORY_HEAD_SECRET), false, 'no history yet');
+    const result = await loadOrCreateDeviceIdentity(secrets, { identityDir: folder });
+    assert.equal(result.created, false);
+    assert.equal(result.identity.fingerprint, early.fingerprint);
+    const file = await historyFile(folder);
+    assert.equal(file.records.length, 1);
+    assert.equal(file.records[0]?.payload.kind, 'created');
+    assert.equal(file.records[0]?.payload.key.fingerprint, early.fingerprint);
+    assert.equal(file.records[0]?.signer.fingerprint, early.fingerprint);
+    const replay = await readKeyHistory(folder, secrets);
+    assert.equal(replay.ok && replay.active?.fingerprint, early.fingerprint);
+    await loadOrCreateDeviceIdentity(secrets, { identityDir: folder });
+    assert.equal((await historyFile(folder)).records.length, 1, 'a later call does not add another');
+    assert.deepEqual(await archivedFiles(folder), []);
+  });
+});
+
+test('a history with one byte changed is archived with its old bytes, a fresh created record starts, and nothing is deleted', async () => {
+  await withFolder(async (folder, secrets) => {
+    const first = await loadOrCreateDeviceIdentity(secrets, { identityDir: folder });
+    const file = path.join(folder, KEY_HISTORY_FILE);
+    const original = await readFile(file, 'utf8');
+    const changed = original.replace(/"sig": "(.)/, (_whole, letter: string) => `"sig": "${letter === 'A' ? 'B' : 'A'}`);
+    assert.notEqual(changed, original);
+    assert.equal(changed.length, original.length, 'one byte differs');
+    await writeFile(file, changed, 'utf8');
+    assert.equal((await readKeyHistory(folder, secrets)).ok, false, 'the edited history is not trusted');
+
+    const again = await loadOrCreateDeviceIdentity(secrets, { identityDir: folder });
+    assert.equal(again.created, false);
+    const archives = await archivedFiles(folder);
+    assert.equal(archives.length, 1);
+    assert.match(archives[0] as string, ARCHIVE_NAME);
+    assert.equal(await readFile(path.join(folder, archives[0] as string), 'utf8'), changed, 'the archive holds exactly the old bytes');
+    const fresh = await historyFile(folder);
+    assert.deepEqual(fresh.records.map((record) => record.payload.kind), ['created']);
+    assert.equal(fresh.records[0]?.payload.key.fingerprint, first.identity.fingerprint);
+    const replay = await readKeyHistory(folder, secrets);
+    assert.equal(replay.ok && replay.head?.seq, 1, 'the saved end matches the fresh history');
+    assert.equal(replay.ok && replay.active?.fingerprint, first.identity.fingerprint);
+  });
+});
+
+test('a history whose active key is not the stored key is archived, and a payload by a key only the archived history knew is unknown-key', async () => {
+  await withFolder(async (folder, secrets) => {
+    const old = await loadOrCreateDeviceIdentity(secrets, { identityDir: folder });
+    const file = path.join(folder, KEY_HISTORY_FILE);
+    const oldBytes = await readFile(file, 'utf8');
+    const oldHead = secrets.values.get(KEY_HISTORY_HEAD_SECRET);
+    // The stored key is replaced behind the history's back (for example secret storage was reset and a key made by another route).
+    await forgetDeviceIdentity(secrets);
+    const replacement = await createDeviceIdentity(secrets);
+    assert.notEqual(replacement.fingerprint, old.identity.fingerprint);
+
+    const result = await loadOrCreateDeviceIdentity(secrets, { identityDir: folder });
+    assert.equal(result.created, false);
+    assert.equal(result.identity.fingerprint, replacement.fingerprint);
+    const archives = await archivedFiles(folder);
+    assert.equal(archives.length, 1);
+    assert.equal(await readFile(path.join(folder, archives[0] as string), 'utf8'), oldBytes, 'the old history is kept byte for byte');
+    assert.notEqual(secrets.values.get(KEY_HISTORY_HEAD_SECRET), oldHead, 'the saved end follows the fresh history');
+    const fresh = await historyFile(folder);
+    assert.deepEqual(fresh.records.map((record) => `${record.payload.kind}:${record.payload.key.fingerprint}`), [`created:${replacement.fingerprint}`]);
+    assert.equal((await readKeyHistory(folder, secrets)).ok, true);
+
+    const status = await localKeyStatus(folder, secrets);
+    const fromOld = verifyPayload(signPayload(old.identity, 'policy-bundle', { rules: [] }), { purpose: 'policy-bundle', status });
+    assert.equal(fromOld.ok, false);
+    if (!fromOld.ok) assert.equal(fromOld.reason, 'unknown-key', 'fails closed: the old key reads as unknown');
+    const fromNew = verifyPayload(signPayload(result.identity, 'policy-bundle', { rules: [] }), { purpose: 'policy-bundle', status });
+    assert.equal(fromNew.ok, true);
+  });
+});
+
+test('a lone saved end with no history file is cleared and a fresh history starts, with nothing to archive', async () => {
+  await withFolder(async (folder, secrets) => {
+    const first = await loadOrCreateDeviceIdentity(secrets, { identityDir: folder });
+    await rm(path.join(folder, KEY_HISTORY_FILE));
+    assert.equal((await readKeyHistory(folder, secrets)).ok, false);
+    await loadOrCreateDeviceIdentity(secrets, { identityDir: folder });
+    assert.deepEqual(await archivedFiles(folder), [], 'there was no file to move');
+    const replay = await readKeyHistory(folder, secrets);
+    assert.equal(replay.ok && replay.active?.fingerprint, first.identity.fingerprint);
+  });
+});
+
+test('a backfill that fails after the unusable history was archived leaves the stored key and the archive in place', async () => {
+  await withFolder(async (folder, secrets) => {
+    await loadOrCreateDeviceIdentity(secrets, { identityDir: folder });
+    await writeFile(path.join(folder, KEY_HISTORY_FILE), 'not json', 'utf8');
+    const stored = secrets.values.get(DEVICE_KEY_SECRET);
+    // A failing secret store makes the append after the archive fail; the key that already existed stays.
+    const failing = Object.assign(Object.create(secrets) as MemorySecrets, { store: async (): Promise<void> => { throw new Error('store is not available'); } });
+    await assert.rejects(() => loadOrCreateDeviceIdentity(failing, { identityDir: folder }));
+    assert.equal(secrets.values.get(DEVICE_KEY_SECRET), stored, 'an existing key is never removed by a failed backfill');
+    assert.equal((await archivedFiles(folder)).length, 1, 'the unusable history was kept aside, not deleted');
+  });
+});
+
+test('a key made by this call is forgotten when its created record cannot be written', async () => {
+  await withFolder(async (folder, secrets) => {
+    const failing = Object.assign(Object.create(secrets) as MemorySecrets, {
+      store: async (key: string, value: string): Promise<void> => {
+        if (key === KEY_HISTORY_HEAD_SECRET) throw new Error('head store is not available');
+        secrets.values.set(key, value);
+      }
+    });
+    await assert.rejects(() => loadOrCreateDeviceIdentity(failing, { identityDir: folder }), /could not be stored/);
+    assert.equal(secrets.values.has(DEVICE_KEY_SECRET), false, 'no key without a history record is left behind');
+    assert.equal((await readdir(folder)).includes(KEY_HISTORY_FILE), false);
+    const later = await loadOrCreateDeviceIdentity(secrets, { identityDir: folder });
+    assert.equal(later.created, true);
+  });
+});
+
+test('forgetCreatedDeviceIdentity appends a revoked record signed by the key before deleting it, and the chain replays ok', async () => {
+  await withFolder(async (folder, secrets) => {
+    const { identity } = await loadOrCreateDeviceIdentity(secrets, { identityDir: folder });
+    assert.equal(await forgetCreatedDeviceIdentity(secrets, { identityDir: folder, fingerprint: identity.fingerprint }), true);
+    assert.equal(secrets.values.has(DEVICE_KEY_SECRET), false);
+    const file = await historyFile(folder);
+    assert.deepEqual(file.records.map((record) => `${record.payload.kind}:${record.payload.key.fingerprint}`), [`created:${identity.fingerprint}`, `revoked:${identity.fingerprint}`]);
+    assert.equal(file.records[1]?.signer.fingerprint, identity.fingerprint, 'the key signed its own withdrawal');
+    const replay = await readKeyHistory(folder, secrets);
+    assert.equal(replay.ok, true);
+    assert.equal(replay.ok && replay.active, undefined);
+    assert.equal(replay.ok && replay.head?.seq, 2);
+    assert.deepEqual(await archivedFiles(folder), []);
+
+    const next = await loadOrCreateDeviceIdentity(secrets, { identityDir: folder });
+    assert.equal(next.created, true);
+    assert.notEqual(next.identity.fingerprint, identity.fingerprint);
+    assert.deepEqual((await historyFile(folder)).records.map((record) => record.payload.kind), ['created', 'revoked', 'created']);
+    assert.deepEqual(await archivedFiles(folder), [], 'the chain simply continues');
+    const status = await localKeyStatus(folder, secrets);
+    const refused = verifyPayload(signPayload(identity, 'policy-bundle', { rules: [] }), { purpose: 'policy-bundle', status });
+    assert.equal(refused.ok, false, 'the withdrawn key is refused');
+    assert.equal(verifyPayload(signPayload(next.identity, 'policy-bundle', { rules: [] }), { purpose: 'policy-bundle', status }).ok, true);
+  });
+});
+
+test('forgetCreatedDeviceIdentity refuses, deleting nothing, when the key has any history record after its created one', async () => {
+  await withFolder(async (folder, secrets) => {
+    const { identity } = await loadOrCreateDeviceIdentity(secrets, { identityDir: folder });
+    const successor = await createDeviceIdentity(new MemorySecrets());
+    await appendKeyRecord(
+      folder, secrets, identity,
+      { kind: 'rotated', key: { fingerprint: identity.fingerprint, publicKey: identity.publicKey }, next: { fingerprint: successor.fingerprint, publicKey: successor.publicKey } }
+    );
+    const before = await readFile(path.join(folder, KEY_HISTORY_FILE), 'utf8');
+    const storedBefore = secrets.values.get(DEVICE_KEY_SECRET);
+    assert.equal(await forgetCreatedDeviceIdentity(secrets, { identityDir: folder, fingerprint: identity.fingerprint }), false);
+    assert.equal(secrets.values.get(DEVICE_KEY_SECRET), storedBefore, 'the key is still stored');
+    assert.equal(await readFile(path.join(folder, KEY_HISTORY_FILE), 'utf8'), before, 'and the history is unchanged');
+  });
+});
+
+test('forgetCreatedDeviceIdentity refuses when the history is broken or does not hold exactly the created record', async () => {
+  await withFolder(async (folder, secrets) => {
+    const { identity } = await loadOrCreateDeviceIdentity(secrets, { identityDir: folder });
+    const file = path.join(folder, KEY_HISTORY_FILE);
+    const original = await readFile(file, 'utf8');
+    await writeFile(file, original.replace(/"sig": "(.)/, (_whole, letter: string) => `"sig": "${letter === 'A' ? 'B' : 'A'}`), 'utf8');
+    assert.equal(await forgetCreatedDeviceIdentity(secrets, { identityDir: folder, fingerprint: identity.fingerprint }), false);
+    assert.equal(secrets.values.has(DEVICE_KEY_SECRET), true);
+    await rm(file);
+    assert.equal(await forgetCreatedDeviceIdentity(secrets, { identityDir: folder, fingerprint: identity.fingerprint }), false);
+    assert.equal(secrets.values.has(DEVICE_KEY_SECRET), true);
+  });
+});
+
+test('the history file and the saved end hold no rendering of the private key', async () => {
+  await withFolder(async (folder, secrets) => {
+    await loadOrCreateDeviceIdentity(secrets, { identityDir: folder });
+    const stored = secrets.values.get(DEVICE_KEY_SECRET) as string;
+    const text = `${await readFile(path.join(folder, KEY_HISTORY_FILE), 'utf8')}\n${secrets.values.get(KEY_HISTORY_HEAD_SECRET) as string}`;
+    const der = Buffer.from(stored, 'base64');
+    const seed = der.subarray(der.length - 32);
+    for (const form of [stored, der.toString('base64url'), seed.toString('hex'), seed.toString('base64url'), seed.toString('base64')]) {
+      assert.equal(text.includes(form), false);
+    }
+  });
 });
 
 test('while another window holds identity-create.lock, creation waits and then returns the key that window stored', async () => {
