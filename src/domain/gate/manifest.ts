@@ -2,6 +2,7 @@
 // Pure: no I/O, no clock, no vscode, no package. A manifest is a declaration in code, not a signed payload; the gate never trusts a field of a call that a
 // manifest did not ask for, and a missing or wrongly typed input field is a refusal, never an empty or wildcard effect (T-70-17).
 // Types are re-exported with `export type` so the relay's isolatedModules build can compile this folder unchanged (Pitfall 12).
+import type { ActionCapability } from '../policy';
 import { GATE_CONTEXTS } from './bundle';
 import type { GateContextName } from './bundle';
 import { checkKeys, childPath, isRecord, ownValue, refused } from './shape';
@@ -122,6 +123,8 @@ export function parseCredentialList(raw: unknown, path: string): Parsed<readonly
 function parseInputField(value: Fields, path: string, allowed: readonly InputAs[]): Parsed<InputFieldSource> {
   const keys = checkKeys(value, path, ['from', 'field', 'as']);
   if (keys !== undefined) return keys;
+  // `from` names the one place a value may come from; a source for anything else (the environment, a file) is not part of the format.
+  if (ownValue(value, 'from') !== 'input') return refused('not-allowed-here', childPath(path, 'from'));
   const field = ownValue(value, 'field');
   if (typeof field !== 'string' || !FIELD_NAME.test(field)) return refused('wrong-type', childPath(path, 'field'));
   const as = parseChoice(ownValue(value, 'as'), childPath(path, 'as'), allowed);
@@ -344,4 +347,218 @@ export function effectsFor(manifest: ToolManifest, input: unknown): Parsed<reado
     out.push(parsed.value);
   }
   return { ok: true, value: Object.freeze(out) };
+}
+
+/** The ActionCapability shorthand a manifest implies, so a test can check that every tool's own `capability` agrees with its manifest except a short named list (Pitfall 10, D-04). */
+export function shorthandFor(manifest: { readonly effects: readonly (EffectEntry | Capability)[] }): ActionCapability {
+  const verbs = new Set<CapabilityVerb>();
+  let sharedSkill = false;
+  for (const entry of manifest.effects) {
+    if ('from' in entry) continue;
+    const verb: unknown = Reflect.get(entry, 'verb');
+    if (typeof verb !== 'string' || !isCapabilityVerb(verb)) continue;
+    verbs.add(verb);
+    if (verb === 'skill.write' && Reflect.get(entry, 'scope') === 'team') sharedSkill = true;
+  }
+  if (sharedSkill) return 'sharedWrite';
+  if (verbs.has('shell')) return 'shell';
+  if (verbs.has('publish')) return 'mediaPublication';
+  if (verbs.has('workspaceWrite') && verbs.has('infer')) return 'mediaGeneration';
+  if (verbs.has('workspaceWrite') || verbs.has('destroy')) return 'workspaceWrite';
+  // Anything that reaches outside this run, or spends or sends, is at least a network action: the shorthand has no quieter word for it.
+  const outward: readonly CapabilityVerb[] = ['network', 'mcp', 'send', 'infer', 'useSecret', 'spend', 'schedule'];
+  if (outward.some((verb) => verbs.has(verb))) return 'network';
+  if (verbs.has('read')) return 'read';
+  return 'plan';
+}
+
+// MCP server manifests v1 (GATE-03, D-06, D-38). A manifest is a claim by the person or the server about what its tools do; the gate uses it to decide, and
+// the words always say so (MANIFEST_IS_A_CLAIM_TEXT in words.ts). A tool the manifest does not declare gets the most restrictive effects under `restrictive`.
+
+export const MCP_TOOL_DEFAULTS = Object.freeze(['restrictive', 'legacy'] as const);
+export type McpToolDefaults = (typeof MCP_TOOL_DEFAULTS)[number];
+
+export type McpTransport = 'http' | 'stdio';
+/** The per-server approval setting as the MCP registry stores it; named here because this folder may not import src/mcp. */
+export type McpApprovalSetting = 'ask-for-changes' | 'ask-every-call' | 'trusted';
+
+export interface McpToolEntry { readonly effects: readonly Capability[]; readonly contexts?: readonly GateContextName[] }
+
+export interface McpManifest {
+  readonly manifestVersion: 1;
+  readonly server: string;
+  readonly runsOn: RunsOn;
+  readonly hosts: readonly HostPattern[];
+  readonly credentials: readonly string[];
+  readonly contexts: readonly GateContextName[];
+  readonly tools: Readonly<Record<string, McpToolEntry>>;
+  readonly toolDefaults: McpToolDefaults;
+}
+
+const MCP_MANIFEST_KEYS = ['manifestVersion', 'server', 'runsOn', 'hosts', 'credentials', 'contexts', 'tools', 'toolDefaults'] as const;
+const MAX_MCP_TOOLS = 512;
+
+function ceilingCapability(candidate: unknown): Capability {
+  const parsed = parseCapability(candidate, { vocabulary: GATE_VOCABULARY_VERSION, mode: 'ceiling' });
+  if (!parsed.ok) throw new Error('A built-in capability did not parse; this is a bug in the manifest module.');
+  return parsed.value;
+}
+
+/** What a tool the manifest does not declare may do: run commands anywhere, reach any site, change any file and delete any file (D-06). */
+export const RESTRICTIVE_EFFECTS: readonly Capability[] = Object.freeze([
+  ceilingCapability({ verb: 'shell', cwd: 'anywhere' }),
+  ceilingCapability({ verb: 'network', hosts: ['*'] }),
+  ceilingCapability({ verb: 'workspaceWrite', paths: ['**'] }),
+  ceilingCapability({ verb: 'destroy', paths: ['**'] })
+]);
+
+/** A stdio server runs on this machine with the person's own permissions, so it only runs while the person is there unless a manifest names another context (D-06). */
+export function defaultMcpContexts(transport: McpTransport): readonly GateContextName[] {
+  return transport === 'stdio' ? Object.freeze(['interactive' as const]) : Object.freeze(['interactive' as const, 'unattended' as const]);
+}
+
+function parseEffectCapabilities(raw: unknown, path: string): Parsed<readonly Capability[]> {
+  if (!Array.isArray(raw)) return refused('wrong-type', path);
+  if (raw.length === 0) return refused('empty-list', path);
+  if (raw.length > MAX_LIST_ENTRIES) return refused('not-allowed-here', path);
+  const out: Capability[] = [];
+  const seen = new Set<string>();
+  for (let index = 0; index < raw.length; index += 1) {
+    const entryPath = `${path}[${index}]`;
+    if (!(index in raw)) return refused('wrong-type', entryPath);
+    const parsed = parseCapability(raw[index], { vocabulary: GATE_VOCABULARY_VERSION, mode: 'ceiling' });
+    if (!parsed.ok) return parsed.path === '' ? refused(parsed.reason, entryPath) : refused(parsed.reason, childPath(entryPath, parsed.path));
+    const key = JSON.stringify(parsed.value);
+    if (seen.has(key)) return refused('duplicate', entryPath);
+    seen.add(key);
+    out.push(parsed.value);
+  }
+  return { ok: true, value: Object.freeze(out) };
+}
+
+function parseToolEntry(value: unknown, path: string): Parsed<McpToolEntry> {
+  if (!isRecord(value)) return refused('wrong-type', path);
+  const keys = checkKeys(value, path, ['effects'], ['contexts']);
+  if (keys !== undefined) return keys;
+  const effects = parseEffectCapabilities(ownValue(value, 'effects'), childPath(path, 'effects'));
+  if (!effects.ok) return effects;
+  if (!Object.prototype.hasOwnProperty.call(value, 'contexts')) return { ok: true, value: Object.freeze({ effects: effects.value }) };
+  const contexts = parseContextNames(value.contexts, childPath(path, 'contexts'));
+  return contexts.ok ? { ok: true, value: Object.freeze({ effects: effects.value, contexts: contexts.value }) } : contexts;
+}
+
+function parseToolTable(value: unknown, path: string): Parsed<Readonly<Record<string, McpToolEntry>>> {
+  if (!isRecord(value)) return refused('wrong-type', path);
+  const names = Object.keys(value);
+  if (names.length > MAX_MCP_TOOLS) return refused('not-allowed-here', path);
+  const entries: [string, McpToolEntry][] = [];
+  for (const name of names) {
+    const where = childPath(path, name.slice(0, 40));
+    const checked = parseManifestName(name, where);
+    if (!checked.ok) return checked;
+    const entry = parseToolEntry(value[name], where);
+    if (!entry.ok) return entry;
+    entries.push([name, entry.value]);
+  }
+  // Built with fromEntries so a tool named `__proto__` is an ordinary own entry and no prototype changes.
+  return { ok: true, value: Object.freeze(Object.fromEntries(entries)) };
+}
+
+/** Parse one MCP server manifest v1. Closed keys; `tools` maps exact tool names to their effects; an empty `tools` object is valid. */
+export function parseMcpManifest(value: unknown): Parsed<McpManifest> {
+  if (!isRecord(value)) return refused('wrong-type', '');
+  const keys = checkKeys(value, '', MCP_MANIFEST_KEYS);
+  if (keys !== undefined) return keys;
+  const version = ownValue(value, 'manifestVersion');
+  if (typeof version !== 'number') return refused('wrong-type', 'manifestVersion');
+  if (version !== MANIFEST_VERSION) return refused('unknown-version', 'manifestVersion');
+  const server = parseManifestName(ownValue(value, 'server'), 'server');
+  if (!server.ok) return server;
+  const runsOn = parseChoice(ownValue(value, 'runsOn'), 'runsOn', RUNS_ON);
+  if (!runsOn.ok) return runsOn;
+  const hosts = parseHostList(ownValue(value, 'hosts'), 'hosts');
+  if (!hosts.ok) return hosts;
+  const credentials = parseCredentialList(ownValue(value, 'credentials'), 'credentials');
+  if (!credentials.ok) return credentials;
+  const contexts = parseContextNames(ownValue(value, 'contexts'), 'contexts');
+  if (!contexts.ok) return contexts;
+  const tools = parseToolTable(ownValue(value, 'tools'), 'tools');
+  if (!tools.ok) return tools;
+  const toolDefaults = parseChoice(ownValue(value, 'toolDefaults'), 'toolDefaults', MCP_TOOL_DEFAULTS);
+  if (!toolDefaults.ok) return toolDefaults;
+  return {
+    ok: true,
+    value: Object.freeze({
+      manifestVersion: MANIFEST_VERSION,
+      server: server.value,
+      runsOn: runsOn.value,
+      hosts: hosts.value,
+      credentials: credentials.value,
+      contexts: contexts.value,
+      tools: tools.value,
+      toolDefaults: toolDefaults.value
+    })
+  };
+}
+
+/** The facts the MCP registry already has about one tool of one server. `readOnly` and `destructive` are the tool's own hints. */
+export interface McpToolFacts {
+  readonly server: string;
+  readonly tool: string;
+  /** The server's host for a remote server; empty or absent for a local command. */
+  readonly host?: string;
+  readonly readOnly: boolean;
+  readonly destructive: boolean;
+  readonly approval: McpApprovalSetting;
+  readonly transport: McpTransport;
+}
+
+export type McpDefaultsUsed = 'declared' | 'restrictive' | 'legacy';
+
+export interface McpToolEffects {
+  readonly effects: readonly Capability[];
+  readonly contexts: readonly GateContextName[];
+  readonly shorthand: ActionCapability;
+  readonly defaults: McpDefaultsUsed;
+}
+
+function legacyHost(host: string | undefined): string {
+  const trimmed = (host ?? '').trim().toLowerCase().replace(/:\d+$/, '');
+  if (trimmed === '') return '*';
+  const parsed = parseHostPattern(trimmed, 'host', 'ceiling');
+  return parsed.ok ? parsed.value : '*';
+}
+
+function hasOwnTool(tools: Readonly<Record<string, McpToolEntry>>, name: string): boolean {
+  return Object.prototype.hasOwnProperty.call(tools, name);
+}
+
+/**
+ * The effects, contexts and shorthand of one MCP tool call. A declared tool uses its own entry (exact name only; a tool named differently by case is a
+ * different tool, T-70-18). With no manifest, or `toolDefaults: 'legacy'`, an undeclared tool decides exactly as src/mcp/tools.ts does today: a read-only
+ * tool on a server that is not set to ask every call is `read`; any other tool is `network` and also reaches the server's host (D-38). Under `restrictive`
+ * an undeclared tool gets RESTRICTIVE_EFFECTS and may only run while the person is there (T-70-16). A server or tool name the vocabulary cannot hold
+ * (a `*`, a control character, too long) is never matched loosely: it gets RESTRICTIVE_EFFECTS too.
+ */
+export function mcpToolEffects(manifest: McpManifest | undefined, facts: McpToolFacts): McpToolEffects {
+  if (manifest !== undefined && hasOwnTool(manifest.tools, facts.tool)) {
+    const entry = manifest.tools[facts.tool];
+    if (entry !== undefined) {
+      return { effects: entry.effects, contexts: entry.contexts ?? manifest.contexts, shorthand: shorthandFor({ effects: entry.effects }), defaults: 'declared' };
+    }
+  }
+  if (manifest !== undefined && manifest.toolDefaults === 'restrictive') return restrictive(manifest);
+  const readOnly = facts.readOnly && !facts.destructive;
+  const quiet = readOnly && facts.approval !== 'ask-every-call';
+  // A `*` in a name would read as a pattern in a ceiling: such a name is never matched, whatever it says, so it gets the restrictive effects.
+  const call = parseCapability({ verb: 'mcp', server: facts.server, tools: [facts.tool] }, { vocabulary: GATE_VOCABULARY_VERSION, mode: 'ceiling' });
+  if (!call.ok || facts.server.includes('*') || facts.tool.includes('*')) return restrictive(manifest);
+  const effects: readonly Capability[] = quiet ? [call.value] : [call.value, ceilingCapability({ verb: 'network', hosts: [legacyHost(facts.host)] })];
+  return { effects: Object.freeze(effects), contexts: manifest?.contexts ?? defaultMcpContexts(facts.transport), shorthand: quiet ? 'read' : 'network', defaults: 'legacy' };
+}
+
+function restrictive(manifest: McpManifest | undefined): McpToolEffects {
+  // An undeclared tool never runs when nobody is watching: only `interactive` survives from the server's contexts, whatever they name (D-06).
+  const contexts = manifest === undefined || manifest.contexts.includes('interactive') ? (['interactive'] as const) : ([] as const);
+  return { effects: RESTRICTIVE_EFFECTS, contexts, shorthand: shorthandFor({ effects: RESTRICTIVE_EFFECTS }), defaults: 'restrictive' };
 }
