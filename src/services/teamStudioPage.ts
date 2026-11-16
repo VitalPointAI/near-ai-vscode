@@ -775,8 +775,12 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
         cancelRefine();
         const seq = message.seq;
         const draft = message.draft;
+        // The request is current from the moment it arrives, so a Cancel sent while the model is still being chosen stops it before anything is sent.
+        const controller = new AbortController();
+        const current: NonNullable<typeof refine> = { seq, ...(message.id ? { id: message.id } : {}), suggestions: new Map<string, Suggestion>(), controller };
+        refine = current;
         const findings = checkTeam(draft);
-        const result = (state: 'blocked' | 'failed' | 'cancelled', reason: string) => post({ type: 'improve-result', seq, state, reason, suggestions: [], dropped: [] });
+        const result = (state: 'blocked' | 'failed' | 'cancelled', reason: string) => { if (refine === current) current.controller = undefined; post({ type: 'improve-result', seq, state, reason, suggestions: [], dropped: [] }); };
         if (findings.some((finding) => finding.severity === 'block')) { result('blocked', BLOCKED_BY_SECRET); return; }
         if (message.member && !draft.members.some((member) => member.name === message.member)) { result('blocked', `${message.member} is not on the team.`); return; }
         const { plan, ai } = await refinePlanFor(draft, message.id);
@@ -784,9 +788,8 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
         if (!input || !context) await load();
         const prompt = refinePrompt(draft, { findings, tools: context!.tools.map((tool) => ({ name: tool.name, description: tool.description })), skipped: plan.skipped, ...(message.member ? { member: message.member } : {}), untrusted: await untrustedFor(draft, message.id) });
         if (prompt.length > MAX_REFINE_CHARS && !message.member) { result('blocked', 'This team is too large to review in one go. Review one member at a time.'); return; }
-        const controller = new AbortController();
-        const current: NonNullable<typeof refine> = { seq, ...(message.id ? { id: message.id } : {}), suggestions: new Map<string, Suggestion>(), controller };
-        refine = current;
+        if (refine !== current) return;
+        if (controller.signal.aborted) { result('cancelled', 'Cancelled. Nothing changed.'); return; }
         post({ type: 'improve-state', seq, state: 'requesting', model: plan.model, private: plan.private });
         let reply: Awaited<ReturnType<typeof teamModelCall>>;
         try {

@@ -1726,3 +1726,17 @@ test('page: Improve with AI shows the local check, then suggestions to accept, r
   assert.ok(page.byLabel('Accept the suggestion for lead: Add tools'), 'the tool suggestion is still pending (its field did not change)');
   for (const message of page.posts) assert.ok(parseStudioMessage(message), JSON.stringify(message));
 });
+
+test('host: Cancel sent while the model is still being chosen stops the review before anything is sent', async () => {
+  const h = await harness();
+  const { ai, sent } = fakeAi([TEE_MODEL], [{ text: REPLY }]);
+  let ready: (() => void) | undefined;
+  h.deps.teamAi = () => new Promise((resolve) => { ready = () => resolve(ai); });
+  const pending = h.send({ type: 'improve-ai', seq: 11, draft: improveDraft() });
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  await h.send({ type: 'improve-cancel', seq: 11 });
+  ready!();
+  await pending;
+  assert.equal(sent.length, 0, 'nothing was sent');
+  assert.deepEqual([last(h, 'improve-result').seq, last(h, 'improve-result').state], [11, 'cancelled']);
+});
