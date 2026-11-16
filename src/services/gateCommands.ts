@@ -71,7 +71,9 @@ export function policyDocumentText(state: BundleState | undefined, now: number):
   lines.push('This view only shows your policy. Editing it changes nothing. To change the policy file itself, run NEAR AI: Reset Policy to Defaults.', '');
   const problem = policyProblem(state, now);
   if (problem !== undefined || state.state !== 'valid') {
-    lines.push('State: not usable, so only reading and planning are allowed', problem ?? '');
+    lines.push('State: not usable, so only reading and planning are allowed');
+    // The sentence is its own line when there is one; a state with none adds nothing, not a blank line.
+    if (problem) lines.push(problem);
     return lines.join('\n');
   }
   const bundle = state.bundle;

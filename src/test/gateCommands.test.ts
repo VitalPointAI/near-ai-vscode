@@ -157,6 +157,23 @@ test('Show Policy for a policy that failed shows the sentence, says only reading
   assert.ok(!text.includes('bundleVersion'));
 });
 
+test('policyDocumentText for a policy that failed is exactly the title, the note, the state line and the sentence, with no blank line after the sentence', () => {
+  const sentence = BUNDLE_FAILURES['bad-signature'];
+  const expected = [
+    'Your NEAR AI policy',
+    '',
+    'This view only shows your policy. Editing it changes nothing. To change the policy file itself, run NEAR AI: Reset Policy to Defaults.',
+    '',
+    'State: not usable, so only reading and planning are allowed',
+    sentence
+  ].join('\n');
+  assert.equal(gateCommands.policyDocumentText(failedClosed('bad-signature'), 0), expected);
+  // A state that carries no sentence adds no line at all, not an empty one.
+  const silent = { ...failedClosed('bad-signature'), sentence: '' };
+  assert.equal(gateCommands.policyDocumentText(silent, 0), expected.slice(0, expected.length - sentence.length - 1));
+  assert.ok(!gateCommands.policyDocumentText(silent, 0).endsWith('\n'));
+});
+
 test('policyDocumentText is pure: the same state gives the same text, and a check that has not finished says so', () => {
   assert.equal(gateCommands.policyDocumentText(failedClosed('missing'), 0), gateCommands.policyDocumentText(failedClosed('missing'), 99));
   assert.match(gateCommands.policyDocumentText(undefined, 0), /checking your policy file/);
