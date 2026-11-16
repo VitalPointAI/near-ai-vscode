@@ -7,6 +7,8 @@ import type { PermissionRules } from '../agent/permissions';
 import { ShellSession } from '../agent/shell';
 import { agentSystemPrompt } from '../agent/systemPrompt';
 import { CORE_TOOLS } from '../agent/tools';
+import { defaultGateRuntime } from '../agent/gateAdapter';
+import type { GateRuntime } from '../domain/gate/decide';
 import type { ActionPolicy } from '../domain/policy';
 import { SpendLimitError, StreamInterruptedError, type UsageMetadata } from '../services/nearAiClient';
 import { withSpendTag } from '../services/spendLedger';
@@ -29,6 +31,17 @@ export interface AgentInFolderOptions {
   requestApproval?: AgentRunOptions['requestApproval'];
   beforeTurn?: AgentRunOptions['beforeTurn'];
   onEvent?(event: AgentEvent): void;
+  /**
+   * The gate this run is decided by (GATE-04). The comparison panel and the team studio pass the host's runtime so the decisions reach the project's log.
+   * Without one the run is decided by the shipped default with presence `none` and context `unattended`, unless the caller passes `requestApproval`, which
+   * means a person answers (D-43): a run nobody watches is never treated as having someone to ask.
+   */
+  gate?: GateRuntime;
+}
+
+/** The gate a run is decided by: the caller's, or the shipped default with nobody present unless the caller supplied a way to ask one (D-43, T-70-86). */
+export function runGateFor(options: Pick<AgentInFolderOptions, 'gate' | 'requestApproval'>): GateRuntime {
+  return options.gate ?? defaultGateRuntime({ presence: options.requestApproval ? 'person' : 'none', context: options.requestApproval ? 'interactive' : 'unattended' });
 }
 
 const UNATTENDED: AgentRunOptions['requestApproval'] = async () => ({ decision: 'deny', feedback: 'Nobody is watching this test run, so actions that need approval are declined. Finish without this action if you can.' });
@@ -44,6 +57,7 @@ export async function runAgentInFolder(client: BenchmarkClient, model: string, r
       context: { root, checkpoints, shell, readFiles: new Set() },
       policy: options.policy ?? { mode: 'fully-autonomous', emergencyStop: false }, rules: options.rules,
       requestApproval: options.requestApproval ?? UNATTENDED, emit: (event) => options.onEvent?.(event),
+      gate: runGateFor(options),
       ...(options.beforeTurn ? { beforeTurn: options.beforeTurn } : {})
     // The production system prompt, so the benchmark measures models as the extension runs them.
     }).run([{ role: 'system', content: agentSystemPrompt({ root, platform: `${process.platform} ${process.arch}`, date: new Date().toISOString().slice(0, 10), isGitRepo: false, model }) }, { role: 'user', content: prompt }], options.signal ?? new AbortController().signal);
@@ -71,6 +85,8 @@ export interface ComparisonOptions {
   stopAll?(): string | undefined;
   /** Where the temporary task folders go (default: the system temp folder). */
   tempDir?: string;
+  /** The gate each task run is decided by, made fresh for each run so a record names the run it belongs to. Without it a run uses the shipped default. */
+  gateFor?(run: { model: string; task: string; run: number; root: string }): GateRuntime | undefined;
   /** Per-task time limit override (tests). */
   timeoutMs?(task: BenchmarkTask): number;
   onRow(row: ResultRow): void | Promise<void>;
@@ -129,8 +145,9 @@ async function runOne(options: ComparisonOptions, model: string, benchmark: Benc
     let outcome: RowOutcome;
     let misses: string[] = [];
     try {
+      const gate = options.gateFor?.({ model, task: benchmark.id, run, root });
       const result = await withSpendTag({ kind: 'eval', runId: runTag }, () => runAgentInFolder(client, model, root, benchmark.prompt, {
-        maxTurns: benchmark.maxTurns, signal: abort.signal, rules: options.rules,
+        maxTurns: benchmark.maxTurns, signal: abort.signal, rules: options.rules, ...(gate ? { gate } : {}),
         policy: { mode: 'fully-autonomous', emergencyStop: options.emergencyStopped() },
         onEvent: (event) => {
           if (event.type === 'turn') usage.push(event.usage);

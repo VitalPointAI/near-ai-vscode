@@ -39,6 +39,12 @@ import type { Step, StepRole } from '../domain/cyberProtocol';
 import type { DisclaimerAcceptance, Engagement } from '../domain/cyber';
 import { scopeFingerprint } from '../domain/cyberLegal';
 import type { ToolContext } from '../agent/tools';
+import { planRoleSuite, runRoleSuite } from '../benchmark/roleSuite';
+import { runAgentInFolder, runComparison, runGateFor } from '../benchmark/runner';
+import type { BenchmarkClient } from '../benchmark/runner';
+import { planComparison } from '../benchmark/results';
+import type { ResultRow } from '../benchmark/results';
+import { loadBenchmarkTasks } from '../benchmark/tasks';
 
 const call = (id: string, name: string, args: Record<string, unknown>): ToolCall => ({ id, type: 'function', function: { name, arguments: JSON.stringify(args) } });
 const usage = { inputTokens: 10, outputTokens: 5, verificationStatus: 'unknown' as const, latencyMs: 1 };
@@ -597,4 +603,87 @@ test('a cyber shell step: the engagement grant allows it with one record, no gra
   assert.deepEqual(declined.order, ['decision:s1:asked', 'card', 'decision:s1:denied']);
   const nobody = await cyberScript(exploit, { capability: 'shell', grant: true, modes: ['passive', 'intrusive'], presence: 'none' });
   assert.equal(nobody.order.includes('run:CyberExploitTool'), true, 'a granted step keeps today\'s decision even when the run is one nobody watches');
+});
+
+// ---- Task 2 (plan 13): benchmark, comparison and role suite runs ----
+
+const benchmarkClient = (turns: Turn[]): BenchmarkClient => {
+  let seen = 0;
+  return {
+    async *streamCompletion(): AsyncGenerator<CompletionEvent> {
+      const turn = turns[seen] ?? { text: 'done' };
+      seen += 1;
+      if (turn.text) yield { type: 'text', text: turn.text };
+      yield { type: 'done', message: { role: 'assistant', content: turn.text ?? null, ...(turn.calls ? { tool_calls: turn.calls } : {}) }, finishReason: turn.calls ? 'tool_calls' : 'stop', usage };
+    }
+  };
+};
+
+test('a run nobody watches is decided with presence none and context unattended, unless the caller can ask a person; a given gate is used as it is', () => {
+  const nobody = runGateFor({}) as ReturnType<typeof defaultGateRuntime>;
+  assert.equal(nobody.presence, 'none');
+  assert.equal(nobody.context, 'unattended');
+  assert.equal(nobody.floorMode, 'shadow');
+  const asked = runGateFor({ requestApproval: async () => ({ decision: 'allow' }) });
+  assert.equal(asked.presence, 'person');
+  assert.equal(asked.context, 'interactive');
+  const own = defaultGateRuntime({ presence: 'none', context: 'routine' });
+  assert.equal(runGateFor({ gate: own }), own);
+});
+
+test('runAgentInFolder with no gate decides every call with nobody present and changes no decision: a Write runs under fully autonomous, and an action that would ask is declined', async () => {
+  const root = await project();
+  const result = await runAgentInFolder(
+    benchmarkClient([{ calls: [call('w1', 'Write', { file_path: 'made.md', content: 'x' }), call('b1', 'Bash', { command: 'git push origin main' })] }, { text: 'done' }]),
+    'm', root, 'go', { maxTurns: 4, rules: DEFAULT_RULES, policy: { mode: 'approve-risky', emergencyStop: false } }
+  );
+  assert.equal(result.outcome, 'completed');
+  assert.equal(existsSync(path.join(root, 'made.md')), false, 'with nobody to ask, an edit that needs approval is declined, as before the gate');
+  const granted = await runAgentInFolder(benchmarkClient([{ calls: [call('w2', 'Write', { file_path: 'made.md', content: 'x' })] }, { text: 'done' }]), 'm', root, 'go', { maxTurns: 4, rules: DEFAULT_RULES });
+  assert.equal(granted.outcome, 'completed');
+  assert.equal(existsSync(path.join(root, 'made.md')), true);
+});
+
+test('with a host runtime passed in, a benchmark run\'s decisions land in the host\'s log, before the call runs', async () => {
+  const started = await startedHost();
+  const root = await project();
+  const logged = await mkdtemp(path.join(tmpdir(), 'near-ai-bench-root-'));
+  const gate = started.host.runtimeFor({ root, actor: { kind: 'agent', sessionId: 'bench-1', agentLabel: 'benchmark' }, presence: 'none', context: 'unattended', floorMode: 'shadow' });
+  await runAgentInFolder(benchmarkClient([{ calls: [call('r1', 'Read', { file_path: 'a.ts' }), call('w1', 'Write', { file_path: 'made.md', content: 'x' })] }, { text: 'done' }]), 'm', logged, 'go', { maxTurns: 4, rules: DEFAULT_RULES, gate });
+  const records = await logOf(started, root);
+  assert.deepEqual(records.map((record) => [callIdOf(record), outcomeOf(record), ruleOf(record)]), [['r1', 'allowed', 'settings.read-plan'], ['w1', 'allowed', 'settings.mode.edits']]);
+  assert.equal(records[0]?.ai_agent?.name, 'benchmark');
+});
+
+test('a comparison passes each task run its own gate, and the decisions reach the project\'s log; the role suite does the same', async () => {
+  const started = await startedHost();
+  const root = await project();
+  const tasks = (await loadBenchmarkTasks()).filter((task) => task.id === 'implement');
+  const made: string[] = [];
+  const rows: ResultRow[] = [];
+  await runComparison({
+    runId: 'run-gate', plan: planComparison(['m1'], tasks, 1, 'rerun', new Map()), tasks, runsPerTask: 1, clientFor: () => benchmarkClient([{ calls: [call('c1', 'Read', { file_path: 'slug.js' })] }, { text: 'Done.' }]),
+    rules: DEFAULT_RULES, emergencyStopped: () => false, signal: new AbortController().signal, onRow: (row) => { rows.push(row); },
+    gateFor: (run) => { made.push(`${run.model}/${run.task}`); return started.host.runtimeFor({ root, actor: { kind: 'agent', sessionId: 'compare-1' }, presence: 'none', context: 'unattended', floorMode: 'shadow' }); }
+  });
+  assert.deepEqual(made, ['m1/implement']);
+  assert.equal(rows.length, 1);
+  const records = await logOf(started, root);
+  assert.deepEqual(records.map((record) => [callIdOf(record), outcomeOf(record)]), [['c1', 'allowed']]);
+});
+
+test('the role suite gives each role run its own gate, so the studio\'s decisions reach the project\'s log with nobody present', async () => {
+  const started = await startedHost();
+  const root = await project();
+  const asked: string[] = [];
+  const plan = planRoleSuite([{ name: 'reviewer', role: 'reviewer' }], ['m1']);
+  const outcomes = await runRoleSuite(plan, {
+    clientFor: () => benchmarkClient([{ calls: [call('t1', 'Glob', { pattern: '*' })] }, { text: 'Done.' }]),
+    rules: DEFAULT_RULES, signal: new AbortController().signal,
+    gateFor: (run) => { asked.push(`${run.member}/${run.model}`); return started.host.runtimeFor({ root, actor: { kind: 'agent', sessionId: 'roles-1' }, presence: 'none', context: 'unattended', floorMode: 'shadow' }); }
+  });
+  assert.equal(outcomes.length, 1);
+  assert.deepEqual(asked, ['reviewer/m1']);
+  const records = await logOf(started, root);
+  assert.deepEqual(records.map((record) => [callIdOf(record), outcomeOf(record), record.api.operation]), [['t1', 'allowed', 'read']]);
 });

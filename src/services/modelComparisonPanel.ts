@@ -10,6 +10,7 @@ import { comparisonStoreFor } from '../benchmark/store';
 import { loadBenchmarkTasks, tasksFor, type BenchmarkTask } from '../benchmark/tasks';
 import { spendAccountOf } from './agentSession';
 import type { AuthService } from './auth';
+import type { GateHost } from '../gate/host';
 import { providerErrorMessage } from './chatBridge';
 import { isEmergencyStopped, onDidChangeEmergencyStop } from './emergencyStop';
 import { catalogEntries, comparisonPageHtml, defaultSelection, clearOneProjectChoice, clearProjectModelChoices, estimateView, historyEntries, leaderboardRows, projectChoicesView, recommendationView, retestView, parseComparisonMessage, reportView, selectionProblem, taskSetsView, type PageState, type Selection } from './modelComparisonPage';
@@ -60,7 +61,11 @@ function layerRolesFor(where: 'workspace' | 'project', inspected: { workspaceVal
 const storeFor = (context: vscode.ExtensionContext) => comparisonStoreFor(context.globalStorageUri.fsPath, vscode.workspace.workspaceFolders?.[0]?.uri.fsPath);
 const benchmarkTasks = () => (tasksLoaded ??= loadBenchmarkTasks().catch((error: unknown) => { tasksLoaded = undefined; throw error; }));
 
-export function registerModelComparison(context: vscode.ExtensionContext, auth: AuthService): void {
+// The gate host the comparison's task runs are decided through, so their decisions reach the project's log (GATE-07). Set once at activation.
+let gateHost: GateHost | undefined;
+
+export function registerModelComparison(context: vscode.ExtensionContext, auth: AuthService, gate?: GateHost): void {
+  gateHost = gate;
   context.subscriptions.push(vscode.commands.registerCommand('nearAi.compareModels', () => openModelComparison(context, auth)));
   context.subscriptions.push(vscode.commands.registerCommand('nearAi.clearProjectModelChoices', async () => {
     const configuration = vscode.workspace.getConfiguration('nearAi');
@@ -253,6 +258,8 @@ async function start(context: vscode.ExtensionContext, auth: AuthService, picked
       return runComparison({
         runId, plan, tasks, runsPerTask: picked.runs, signal: abort.signal, rules: readAgentRules(), emergencyStopped: isEmergencyStopped,
         clientFor: (model) => clientFor(active, model).client,
+        // Nobody watches a task run: it is decided with presence none in an unattended context, and the floor only reports for now (D-43).
+        ...(gateHost ? { gateFor: (task) => { const root = projectRootOf(); return root ? gateHost?.runtimeFor({ root, actor: { kind: 'agent', sessionId: `compare-${runId}`, agentLabel: `compare ${task.model} ${task.task}` }, presence: 'none', context: 'unattended', floorMode: 'shadow' }) : undefined; } } : {}),
         overBudget: (runTag, usage) => overBudget(account, runTag, usage),
         stopAll: () => {
           const reached = account?.limitReached();

@@ -136,7 +136,7 @@ export function activate(context: vscode.ExtensionContext): NearAiTestApi | unde
   const teamMode = registerTeamMode(context);
   registerSpendingLimits(context, auth);
   registerMcpConnections(context);
-  registerModelComparison(context, auth);
+  registerModelComparison(context, auth, gate);
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(NearAiPanelViewProvider.viewId, sidebar, { webviewOptions: { retainContextWhenHidden: true } }),
     vscode.commands.registerCommand('nearAi.setup', () => openOnboarding(context, {
@@ -208,7 +208,7 @@ export function activate(context: vscode.ExtensionContext): NearAiTestApi | unde
 
   registerRunReport(context);
   registerResearchVerifiers(context);
-  registerWorkspaceCommands(context, (options) => openTeamStudio(context, auth, sidebar, options));
+  registerWorkspaceCommands(context, (options) => openTeamStudio(context, auth, sidebar, options, gate));
   registerProjectSetup(context, { secrets: context.secrets, chatVisible: () => sidebar.visible });
   registerNewProfile(context, () => configureApiKey(context, auth, sidebar));
   // Project sync (D-17): the commands, the safe moments it runs at, and the status the chat panel's control shows. It runs only once the person has turned it on.

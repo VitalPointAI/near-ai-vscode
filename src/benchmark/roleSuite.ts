@@ -10,6 +10,7 @@ import { gradeRoleAnswer } from './roleGraders';
 import { fallbackRoleTask, roleTaskFor, type RoleTask } from './roleTasks';
 import { runAgentInFolder, type BenchmarkClient } from './runner';
 import type { PermissionRules } from '../agent/permissions';
+import type { GateRuntime } from '../domain/gate/decide';
 
 export interface RoleRun { member: string; role: string; model: string; task: RoleTask; written: boolean }
 export interface RolePlan { runs: RoleRun[]; members: number; models: number; estimatedRuns: number }
@@ -62,6 +63,8 @@ export interface RoleSuiteOptions {
   /** The model each member uses now, so the studio can say what changed. */
   current?: (member: string) => string | undefined;
   onRun?(): void;
+  /** The gate each role run is decided by, made fresh for each run (GATE-07). Without it a run uses the shipped default, with nobody present. */
+  gateFor?(run: { member: string; model: string; root: string }): GateRuntime | undefined;
 }
 
 /** Runs the plan, one run at a time, and grades each answer from the files it left behind. */
@@ -90,8 +93,9 @@ export async function runRoleSuite(plan: RolePlan, options: RoleSuiteOptions): P
       const limit = setTimeout(() => abort.abort(), run.task.timeoutMs);
       let result: Awaited<ReturnType<typeof runAgentInFolder>>;
       try {
+        const gate = options.gateFor?.({ member: run.member, model: run.model, root });
         result = await runAgentInFolder(options.clientFor(run.model), run.model, root, run.task.prompt, {
-          maxTurns: run.task.maxTurns, signal: abort.signal, rules: options.rules
+          maxTurns: run.task.maxTurns, signal: abort.signal, rules: options.rules, ...(gate ? { gate } : {})
         });
       } finally {
         clearTimeout(limit);
