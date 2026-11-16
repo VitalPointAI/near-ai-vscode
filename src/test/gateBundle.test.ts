@@ -333,6 +333,56 @@ test('timestamps, the DID slot, scales and lists follow their limits', () => {
   assert.equal(({} as Loose).x, undefined);
 });
 
+test('a clearance or a mapping listed twice is refused as a duplicate, and an out of order list is refused, so one meaning has one hash', () => {
+  const signer = makeSigner();
+  const reasonOf = (edit: (payload: Loose) => void): string => {
+    const parsed = parseBundle(edited(signer, edit));
+    return parsed.ok ? 'ok' : parsed.reason;
+  };
+  const restricted = { scale: 'org', level: 'Restricted', compartments: [], releasability: [] };
+  const internal = { scale: 'org', level: 'Internal', compartments: [], releasability: [] };
+  assert.equal(reasonOf((p) => { p.clearances = [restricted, { ...restricted }]; }), 'duplicate');
+  assert.equal(reasonOf((p) => { p.clearances = [internal, restricted, { ...internal }]; }), 'duplicate', 'a repeat that is not next to its first is still a duplicate');
+  assert.equal(reasonOf((p) => { p.clearances = [{ ...restricted, expiresAt: '2030-01-01T00:00:00.000Z' }, { ...restricted, expiresAt: '2030-01-01T00:00:00.000Z' }]; }), 'duplicate');
+  const mapA = { from: { scale: 'org', level: 'Restricted' }, covers: { scale: 'ca-protected', level: 'Protected A' } };
+  const mapB = { from: { scale: 'org', level: 'Restricted' }, covers: { scale: 'ca-protected', level: 'Protected B' } };
+  assert.equal(reasonOf((p) => { p.mappings = [mapA, { from: { ...mapA.from }, covers: { ...mapA.covers } }]; }), 'duplicate');
+  assert.equal(reasonOf((p) => { p.mappings = [mapA, mapB, { ...mapA }]; }), 'duplicate');
+  // Entries that differ in any content are not duplicates: a different expiry, a different level, a different mapping end.
+  assert.equal(reasonOf((p) => { p.clearances = [restricted, { ...restricted, expiresAt: '2030-01-01T00:00:00.000Z' }]; }), 'ok');
+  assert.equal(reasonOf((p) => { p.clearances = [internal, restricted]; }), 'ok');
+  assert.equal(reasonOf((p) => { p.mappings = [mapA, mapB]; }), 'ok');
+  // Order is not meaning (the dominance property test shows it), so one order is the only valid one: the reverse is refused, never a second hash.
+  assert.equal(reasonOf((p) => { p.clearances = [restricted, internal]; }), 'not-sorted');
+  assert.equal(reasonOf((p) => { p.mappings = [mapB, mapA]; }), 'not-sorted');
+});
+
+test('two bundles that mean the same thing have the same hash: key order never changes it, and the one reordering that could (a list) is refused', () => {
+  const signer = makeSigner();
+  const restricted = { scale: 'org', level: 'Restricted', compartments: [], releasability: [] };
+  const internal = { scale: 'org', level: 'Internal', compartments: [], releasability: [] };
+  const mapA = { from: { scale: 'org', level: 'Restricted' }, covers: { scale: 'ca-protected', level: 'Protected A' } };
+  const mapB = { from: { scale: 'org', level: 'Restricted' }, covers: { scale: 'ca-protected', level: 'Protected B' } };
+  const forward = edited(signer, (p) => { p.clearances = [internal, restricted]; p.mappings = [mapA, mapB]; });
+  const backward = edited(signer, (p) => { p.clearances = [restricted, internal]; p.mappings = [mapB, mapA]; });
+  const first = parseBundle(forward);
+  assert.equal(first.ok, true);
+  assert.equal(parseBundle(backward).ok, false, 'the reordered twin cannot exist as a valid bundle');
+  // Same content with every object's keys written in the opposite order: valid, and the same hash.
+  const flipKeys = (value: unknown): unknown => {
+    if (Array.isArray(value)) return value.map(flipKeys);
+    if (value !== null && typeof value === 'object') {
+      return Object.fromEntries(Object.entries(value as Record<string, unknown>).reverse().map(([key, inner]) => [key, flipKeys(inner)]));
+    }
+    return value;
+  };
+  const flipped = flipKeys(forward);
+  const second = parseBundle(flipped);
+  assert.equal(second.ok, true);
+  assert.equal(bundleHash(first.ok ? first.value : undefined), bundleHash(second.ok ? second.value : undefined));
+  assert.equal(bundleHash(forward), bundleHash(flipped));
+});
+
 // ---------------------------------------------------------------------------------------------------------------------------------------------------
 // The hash (OFFL-03 ordering)
 

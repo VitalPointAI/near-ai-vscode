@@ -314,6 +314,38 @@ function parseList<T>(value: unknown, path: string, max: number, one: (item: unk
   return { ok: true, value: Object.freeze(out) };
 }
 
+/**
+ * A list whose order carries no meaning (clearances and mappings are only ever asked "does any entry cover this"), so it has exactly one valid order: strictly
+ * ascending by each entry's text key. An entry that repeats an earlier one is `duplicate` (wherever it sits), and any other out of order entry is `not-sorted`,
+ * so two bundles that mean the same thing cannot be written two ways and cannot have two hashes.
+ */
+function parseSetList<T>(
+  value: unknown, path: string, max: number, one: (item: unknown, where: string) => Parsed<T>, keyOf: (item: T) => string
+): Parsed<readonly T[]> {
+  const list = parseList(value, path, max, one);
+  if (!list.ok) return list;
+  const seen = new Set<string>();
+  let before: string | undefined;
+  for (let index = 0; index < list.value.length; index += 1) {
+    const key = keyOf(list.value[index] as T);
+    const where = `${path}[${String(index)}]`;
+    if (seen.has(key)) return refused('duplicate', where);
+    if (before !== undefined && key < before) return refused('not-sorted', where);
+    seen.add(key);
+    before = key;
+  }
+  return list;
+}
+
+/** A clearance's identity is all of its content: scale, level, both lists and the expiry (absent sorts first). */
+function clearanceKey(clearance: Clearance): string {
+  return JSON.stringify([clearance.scale, clearance.level, clearance.compartments, clearance.releasability, clearance.expiresAt ?? '']);
+}
+
+function mappingKey(mapping: ScaleMapping): string {
+  return JSON.stringify([mapping.from.scale, mapping.from.level, mapping.covers.scale, mapping.covers.level]);
+}
+
 function parseAnchorRoot(value: unknown, path: string): Parsed<AnchorRoot> {
   if (!isRecord(value)) return refused('wrong-type', path);
   const keys = checkKeys(value, path, ['root', 'proof']);
@@ -423,9 +455,13 @@ export function parseBundle(value: unknown, path = ''): Parsed<PolicyBundle> {
   if (!ceiling.ok) return ceiling;
   const scales = parseScales(ownValue(value, 'scales'), childPath(path, 'scales'));
   if (!scales.ok) return scales;
-  const mappings = parseList(ownValue(value, 'mappings'), childPath(path, 'mappings'), MAX_MAPPINGS, (item, where) => parseMapping(item, scales.value, where));
+  const mappings = parseSetList(
+    ownValue(value, 'mappings'), childPath(path, 'mappings'), MAX_MAPPINGS, (item, where) => parseMapping(item, scales.value, where), mappingKey
+  );
   if (!mappings.ok) return mappings;
-  const clearances = parseList(ownValue(value, 'clearances'), childPath(path, 'clearances'), MAX_CLEARANCES, (item, where) => parseClearance(item, scales.value, where));
+  const clearances = parseSetList(
+    ownValue(value, 'clearances'), childPath(path, 'clearances'), MAX_CLEARANCES, (item, where) => parseClearance(item, scales.value, where), clearanceKey
+  );
   if (!clearances.ok) return clearances;
   const routing = parseRouting(ownValue(value, 'routing'), scales.value, childPath(path, 'routing'));
   if (!routing.ok) return routing;
