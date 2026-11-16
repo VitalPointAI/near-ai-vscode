@@ -198,3 +198,12 @@ test('after a reload, the newest run with agents is drawn from the history as it
   assert.deepEqual(view.nodes.map((node) => [node.id, node.state]), [['lead', 'interrupted'], ['m:researcher', 'done'], ['m:writer', 'bench'], ['g:m:researcher>gsd-verifier', 'interrupted']]);
   assert.equal(message.restored, true);
 });
+
+test('the page: only the status region speaks; the card, rebuilt with every frame, is never a live region (review of PR 72)', async () => {
+  const { live } = load(await mkdtemp(path.join(tmpdir(), 'near-ai-live-view-')));
+  const html = live.teamLiveHtml({ asWebviewUri: (value: unknown) => value, cspSource: 'csp' } as never, { fsPath: '/media', path: '/media', toString: () => '/media' } as never);
+  const regions = html.match(/<[^>]*aria-live[^>]*>/g) ?? [];
+  assert.equal(regions.length, 1, regions.join('\n'));
+  assert.match(regions[0], /id="announce"/);
+  assert.match(html, /<section id="card"(?![^>]*aria-live)[^>]*>/);
+});

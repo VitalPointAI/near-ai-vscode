@@ -280,3 +280,37 @@ test('an agent waiting for a slot can be stopped: it ends as stopped, never star
   assert.deepEqual([stopped.status, stopped.neverStarted], ['cancelled', true]);
   assert.equal(plannerTurns, 1, 'the stopped one never ran');
 });
+
+test('the lead waiting for background agents leaves no abort listener behind on the run signal (review of PR 72)', { timeout: 20_000 }, async () => {
+  const { conversation, request } = await nestedProject();
+  let release: (() => void) | undefined;
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  const client = {
+    async *streamCompletion(_model: string, messages: AgentMessage[]): AsyncGenerator<CompletionEvent> {
+      const role = who(messages);
+      if (role === 'planner') { await held; yield reply('planner report'); return; }
+      const heard = messages.some((message) => String(message.content ?? '').startsWith('<agent-notification'));
+      if (!heard && messages.some((message) => message.role === 'tool')) setTimeout(() => release?.(), 50);
+      yield heard ? reply('got it') : messages.some((message) => message.role === 'tool') ? reply('waiting') : reply(null, [call('p1', 'Agent', { subagent_type: 'gsd-planner', description: 'Plan it', prompt: 'plan', run_in_background: true })]);
+    },
+    async actualCostsUsd() { return undefined; }
+  };
+  // Track each abort listener the background wait adds, and check every one was removed again.
+  const proto = AbortSignal.prototype as unknown as { addEventListener: (...args: unknown[]) => void; removeEventListener: (...args: unknown[]) => void };
+  const add = proto.addEventListener;
+  const remove = proto.removeEventListener;
+  let added = 0;
+  const left = new Set<unknown>();
+  proto.addEventListener = function (this: unknown, ...args: unknown[]) { if (args[0] === 'abort' && String(new Error().stack).includes('waitForBackground')) { added += 1; left.add(args[1]); } return add.apply(this, args); };
+  proto.removeEventListener = function (this: unknown, ...args: unknown[]) { if (args[0] === 'abort') left.delete(args[1]); return remove.apply(this, args); };
+  try {
+    await conversation.send(request(client));
+  } finally {
+    proto.addEventListener = add;
+    proto.removeEventListener = remove;
+    release?.();
+    conversation.dispose();
+  }
+  assert.ok(added >= 1, 'the lead waited for its background agent');
+  assert.equal(left.size, 0, 'every abort listener the wait added was removed');
+});

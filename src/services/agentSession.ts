@@ -1201,7 +1201,10 @@ export class AgentConversation {
     // while agents still run rather than ending its run under them.
     let arrived: AgentMessage[] = [];
     while (!signal.aborted) {
-      await Promise.race([...this.background, new Promise<void>((resolve) => { signal.addEventListener('abort', () => resolve(), { once: true }); unsubscribe = this.steeringInput.subscribe(() => resolve()); })]);
+      // The abort listener is removed after each pass (review of PR 72), as waitOrAbort does, so a lead that waits through several waves does not pile them up.
+      let onAbort: (() => void) | undefined;
+      await Promise.race([...this.background, new Promise<void>((resolve) => { onAbort = () => resolve(); signal.addEventListener('abort', onAbort, { once: true }); unsubscribe = this.steeringInput.subscribe(() => resolve()); })]);
+      if (onAbort) signal.removeEventListener('abort', onAbort);
       unsubscribe?.();
       arrived = [...this.drainNotifications(), ...this.steeringInput.take()];
       if (arrived.length || !this.background.size) break;

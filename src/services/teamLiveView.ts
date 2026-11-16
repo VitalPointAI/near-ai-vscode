@@ -266,7 +266,7 @@ export function teamLiveHtml(webview: Pick<vscode.Webview, 'asWebviewUri' | 'csp
     <div id="tree" class="tree" role="tree" aria-label="The team: the lead, its members and helpers"></div>
     <div id="pulses" class="pulses" aria-hidden="true"></div>
   </div>
-  <section id="card" class="card" aria-live="polite" hidden></section>
+  <section id="card" class="card" aria-label="Agent details" hidden></section>
   <p class="hint">Shows what each agent is doing and who asked it, never prompts, files or tool results. An open card shows the end of that agent's latest reply, with secrets removed.</p>
 </main>
 <div id="announce" class="visually-hidden" role="status" aria-live="polite"></div>

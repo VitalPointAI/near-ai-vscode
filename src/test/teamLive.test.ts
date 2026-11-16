@@ -215,3 +215,11 @@ test('a workflow that works with a team is led by the workflow, with the team\'s
   assert.equal(view.nodes.find((node) => node.id === 'm:writer')!.state, 'working');
   assert.equal(buildTeamLive({ runId: 'run-1', team: TEAM, stats: [lead()] }).nodes[0].name, 'Research');
 });
+
+test('the chat\'s team dots are one per running agent, with no made-up dot for the lead (review of PR 72)', () => {
+  const page = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', '..', 'media', 'chat', 'chat.js'), 'utf8') as string;
+  const pulse = page.slice(page.indexOf('function teamPulse('), page.indexOf('function panelToggle('));
+  assert.ok(pulse.length > 0);
+  assert.doesNotMatch(pulse, /'lead'/);
+  assert.match(pulse, /dots\.append\(\.\.\.agents\.map\(/);
+});

@@ -71,6 +71,8 @@ export interface NowRow {
   runId: string;
   label: string;
   sub: boolean;
+  /** 0.4.28: the label of the agent that started this one, when that agent is still listed. */
+  startedBy?: string;
   model: string;
   boundary?: AgentBoundary;
   phase: AgentPhase;
@@ -174,10 +176,12 @@ export function buildWindowSummary(input: OverviewInput): WindowSummary {
 
 /** The agents running now, oldest first, with their spend so far from the ledger. */
 export function nowRows(live: AgentStats[], spend?: OverviewSpend): NowRow[] {
+  const labels = new Map(live.map((stat) => [stat.agentId, stat.agent]));
   return live.filter((stat) => stat.status === 'running').sort((a, b) => a.startedAt - b.startedAt).map((stat) => {
     const totals = spend?.totals({ agentId: stat.agentId });
+    const startedBy = stat.parentId ? labels.get(stat.parentId) : undefined;
     return {
-      agentId: stat.agentId, runId: stat.runId, label: stat.agent, sub: Boolean(stat.parentId), model: stat.model, ...(stat.boundary ? { boundary: stat.boundary } : {}),
+      agentId: stat.agentId, runId: stat.runId, label: stat.agent, sub: Boolean(stat.parentId), ...(startedBy ? { startedBy } : {}), model: stat.model, ...(stat.boundary ? { boundary: stat.boundary } : {}),
       phase: stat.phase, phaseSince: stat.phaseSince, ...(stat.waitingKind ? { waitingKind: stat.waitingKind } : {}), ...(stat.coolUntil ? { coolUntil: stat.coolUntil } : {}), ...(stat.coolReason ? { coolReason: stat.coolReason } : {}), ...(stat.tool ? { tool: stat.tool } : {}),
       startedAt: stat.startedAt, turns: stat.turns, toolCalls: stat.toolCalls, ...(totals?.requests ? { costUsd: nanoToUsd(totalNanoUsd(totals)) } : {})
     };

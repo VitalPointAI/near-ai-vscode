@@ -251,4 +251,6 @@ test('0.4.28: Agent Activity\'s "Watch the team" asks for Team Live, and Now sho
     { agentId: 'writer-abc123', agent: 'writer', runId: 'run-a', parentId: 'main-run-a', model: 'm', status: 'running', phase: 'queued', phaseSince: 0, startedAt: 2, turns: 0, toolCalls: 0 }
   ] as never;
   assert.deepEqual(nowRows(live).map((row) => [row.phase, row.waitingKind ?? '', row.sub]), [['waiting-you', 'question', false], ['queued', '', true]]);
+  // 0.4.28 (review of PR 72): a started agent names who started it; the run's own agent names nobody.
+  assert.deepEqual(nowRows(live).map((row) => row.startedBy), [undefined, 'agent']);
 });

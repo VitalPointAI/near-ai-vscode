@@ -2,8 +2,9 @@
 
 ## Unreleased
 
-This release adds Improve with AI and a free local check to Team Studio, lets you mark a whole team
-private, and makes Team Studio's AI calls respect TEE-only mode and your daily spend limit.
+This release adds Team Live, a panel where you watch your team work: the lead hands out tasks,
+members wake up and report back. Helpers started by a sub-agent now report to that sub-agent, and
+Agent Activity says who started each agent and what a waiting agent waits for.
 
 - **Team Live: watch your team work.** A new panel draws a team run as a tree, the lead at
   the top and each member under whoever it reports to. When the lead hands a member a task, a
@@ -36,8 +37,9 @@ private, and makes Team Studio's AI calls respect TEE-only mode and your daily s
 
 ## 0.4.27
 
-This release adds Improve with AI and a free local check to Team Studio, lets you mark a whole team
-private, and makes Team Studio's AI calls respect TEE-only mode and your daily spend limit.
+This release adds Team Live, a panel where you watch your team work: the lead hands out tasks,
+members wake up and report back. Helpers started by a sub-agent now report to that sub-agent, and
+Agent Activity says who started each agent and what a waiting agent waits for.
 
 - **Improve with AI in Team Studio.** A new **Improve with AI** button in the team editor (and on
   the last step of the builder) first runs a free check of the team, then, when you ask, has an

@@ -314,8 +314,8 @@ details** saves the prompts, replies, and tool calls still kept in memory (for
 
 **Now** also says what an agent waiting for you waits for (an approval, an
 answer to a question, or an image to review), and shows an agent waiting for a
-free slot as queued. An agent that a sub-agent started is shown under that
-sub-agent, not under the run.
+free slot as queued. An agent started by another agent is marked with an arrow
+and names the agent that started it.
 
 ### Team Live
 

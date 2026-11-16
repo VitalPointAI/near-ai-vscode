@@ -782,7 +782,7 @@
     agentPanel.replaceChildren(title, teamPulse(agents), list);
   }
 
-  // 0.4.28: a row of state dots, the lead first, and "Watch the team", which opens Team Live. Each dot has its state in words for a screen reader and
+  // 0.4.28: a row of state dots, one per running agent (the lead's own state is in the chat itself), and "Watch the team", which opens Team Live. Each dot has its state in words for a screen reader and
   // as a tooltip; its shape changes with the state, so colour is never the only sign. Nothing moves here.
   function agentDotState(agent) {
     if (agent.paused) return ['paused', 'paused'];
@@ -797,7 +797,7 @@
     const dots = el('ul', 'team-dots');
     dots.setAttribute('aria-label', 'Team state');
     const dot = (state, words) => { const item = el('li', 'team-dot dot-' + state); item.title = words; item.append(el('span', 'visually-hidden', words)); return item; };
-    dots.append(dot('lead', 'lead: working'), ...agents.map((agent) => { const [state, words] = agentDotState(agent); return dot(state, agent.label + ': ' + words); }));
+    dots.append(...agents.map((agent) => { const [state, words] = agentDotState(agent); return dot(state, agent.label + ': ' + words); }));
     line.append(dots, textButton('Watch the team', () => post({ type: 'open-team-live' })));
     return line;
   }

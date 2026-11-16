@@ -88,7 +88,7 @@
       row.dataset.paused = String(agent.phase === 'paused');
       row.dataset.since = String(agent.startedAt);
       row.className = 'phase-' + agent.phase + (state.focus === agent.agentId ? ' focused' : '');
-      setText(row.children[0].firstChild, (agent.sub ? '↳ ' : '') + agent.label);
+      setText(row.children[0].firstChild, (agent.sub ? '↳ ' : '') + agent.label + (agent.startedBy ? ' (started by ' + agent.startedBy + ')' : ''));
       // On a narrow panel the hidden columns' values show under the agent's name.
       setText(row.children[0].lastChild, duration(now - agent.startedAt) + ' · ' + number(agent.turns) + ' turns · ' + number(agent.toolCalls) + ' tool calls');
       setText(row.children[1].firstChild, agent.model);
