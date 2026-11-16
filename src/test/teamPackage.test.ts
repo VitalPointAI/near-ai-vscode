@@ -285,3 +285,27 @@ test('archiving a team that shares an unapproved archived import\'s name never a
   assert.deepEqual(await library.pendingKind(archivedCopy), { kind: 'derived', from: 'Web crew' }, 'still unapproved after a same-named archive');
   assert.deepEqual([...await library.pendingImports()].sort(), ['web-crew.md'], 'only live teams are listed as live');
 });
+
+// PR #67 review: only the graph's top level was checked, so `nodes: [null]` passed, Import failed with a raw TypeError and the bad graph was written.
+test('a share file whose knowledge graph is malformed anywhere inside is refused with the plain message', () => {
+  const good = cleanKnowledge(knowledge(), '/home/someone')!;
+  const node = good.nodes[0]!;
+  const edge = { id: 'e1', from: node.id, to: node.id, kind: 'related', tension: null, origin: 'research', lastSeen: node.lastSeen, mentions: 1 };
+  assert.equal(readTeamPackage(buildTeamPackage(TEAM, '/t/web.md', { ...good, edges: [edge] } as never)).knowledge!.edges.length, 1, 'a well-formed edge is accepted');
+  const broken: Array<[string, unknown]> = [
+    ['a null node', { ...good, nodes: [null] }],
+    ['a node without facts', { ...good, nodes: [{ ...node, facts: undefined }] }],
+    ['a fact that is not text', { ...good, nodes: [{ ...node, facts: [{ text: 42, origin: 'research' }] }] }],
+    ['an unknown node kind', { ...good, nodes: [{ ...node, kind: 'weapon' }] }],
+    ['a grade off the scale', { ...good, nodes: [{ ...node, grading: { reliability: 'Z', credibility: 9 } }] }],
+    ['an extra node field', { ...good, nodes: [{ ...node, run: 'curl evil' }] }],
+    ['a null edge', { ...good, edges: [null] }],
+    ['an edge with a string tension', { ...good, edges: [{ ...edge, tension: 'high' }] }],
+    ['an edge with an unknown kind', { ...good, edges: [{ ...edge, kind: 'owns-everything' }] }],
+    ['a huge fact', { ...good, nodes: [{ ...node, facts: [{ text: 'x'.repeat(20_000), origin: 'research' }] }] }],
+    ['an unknown top-level field', { ...good, extra: true }]
+  ];
+  for (const [what, value] of broken) {
+    assert.throws(() => readTeamPackage(buildTeamPackage(TEAM, '/t/web.md', value as never)), (error: unknown) => error instanceof TeamPackageError && /^This team file was changed or damaged after it was shared/.test(error.message), what);
+  }
+});

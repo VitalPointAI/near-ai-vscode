@@ -1426,3 +1426,20 @@ test('host: a team built from an unapproved import stays unapproved: saved as a 
   assert.equal(await h.library.projectDerivedFrom(projectFile), undefined);
   h.close();
 });
+
+test('host: Import refuses a share file with a malformed knowledge graph in plain words and writes nothing', async () => {
+  const { buildTeamPackage } = await import('../agent/teamPackage');
+  const h = await harness();
+  await h.send({ type: 'ready' });
+  const out = await mkdtemp(path.join(tmpdir(), 'near-ai-share-'));
+  const bad = path.join(out, 'bad.near-team.json');
+  await writeFile(bad, buildTeamPackage(teamMarkdown(draft()), '/t/web.md', { version: 1, team: 'web', nodes: [null], edges: [], updatedAt: '2026-11-16T00:00:00.000Z' } as never));
+  h.importSource.value = bad;
+  h.chooseAnswer.value = 'Add to my teams';
+  await h.send({ type: 'import' });
+  assert.match(last(h, 'error').text, /^This team file was changed or damaged after it was shared, so it was not imported\./);
+  assert.deepEqual(await h.library.list(), []);
+  assert.equal(existsSync(path.join(h.library.directory, 'knowledge')), false, 'no graph was written');
+  assert.equal(h.asked.length, 0);
+  h.close();
+});

@@ -152,8 +152,55 @@ const isPlain = (value: unknown): value is Plain => Boolean(value) && typeof val
 const NOT_A_TEAM = 'This file is not a NEAR AI team. Ask for the file again, or for the team\'s .md file.';
 const DAMAGED = 'This team file was changed or damaged after it was shared, so it was not imported. Ask for the file again.';
 
+// The stored shape of a knowledge graph, checked all the way down (PR #67 review: only the top level was checked, so `nodes: [null]` passed and then failed
+// with a raw TypeError, and the malformed graph was written). Every node, fact and edge must have exactly the fields the graph stores, of the right type
+// and within these sizes; anything else refuses the whole file.
+const NODE_KINDS = ['actor', 'person', 'organisation', 'system', 'document', 'fact', 'place', 'product', 'event'];
+const EDGE_KINDS = ['supplies', 'certifies', 'regulates', 'funds', 'employs', 'partners', 'competes', 'depends-on', 'contradicts', 'supports', 'owns', 'reports-to', 'related'];
+const ORIGINS = ['research', 'interaction', 'document', 'seed'];
+const MAX_NODES = 5_000;
+const MAX_EDGES = 20_000;
+const MAX_FACTS = 500;
+const SHORT = 400;
+const LONG = 8_000;
+
+const str = (value: unknown, max: number): boolean => typeof value === 'string' && value.length <= max;
+const optional = (value: unknown, check: (value: unknown) => boolean): boolean => value === undefined || check(value);
+const only = (value: Plain, required: string[], allowed: string[]): boolean => required.every((key) => key in value) && Object.keys(value).every((key) => required.includes(key) || allowed.includes(key));
+const count = (value: unknown): boolean => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+
+function gradingShape(value: unknown): boolean {
+  return isPlain(value) && only(value, ['reliability', 'credibility'], []) && typeof value.reliability === 'string' && /^[A-F]$/.test(value.reliability) && typeof value.credibility === 'number' && Number.isInteger(value.credibility) && value.credibility >= 1 && value.credibility <= 6;
+}
+
+function factShape(value: unknown): boolean {
+  return isPlain(value) && only(value, ['text', 'origin'], ['grading', 'source', 'since', 'refutedBy', 'refutedAt'])
+    && str(value.text, LONG) && ORIGINS.includes(value.origin as string) && optional(value.grading, gradingShape)
+    && optional(value.source, (entry) => str(entry, LONG)) && optional(value.since, (entry) => str(entry, SHORT)) && optional(value.refutedBy, (entry) => str(entry, LONG)) && optional(value.refutedAt, (entry) => str(entry, SHORT));
+}
+
+const facts = (value: unknown): boolean => Array.isArray(value) && value.length <= MAX_FACTS && value.every(factShape);
+
+function nodeShape(value: unknown): boolean {
+  return isPlain(value) && only(value, ['id', 'label', 'kind', 'functions', 'facts', 'origin', 'firstSeen', 'lastSeen', 'mentions'], ['history', 'grading'])
+    && str(value.id, SHORT) && str(value.label, SHORT) && NODE_KINDS.includes(value.kind as string)
+    && Array.isArray(value.functions) && value.functions.length <= MAX_FACTS && value.functions.every((entry) => str(entry, SHORT))
+    && facts(value.facts) && optional(value.history, facts) && ORIGINS.includes(value.origin as string) && optional(value.grading, gradingShape)
+    && str(value.firstSeen, SHORT) && str(value.lastSeen, SHORT) && count(value.mentions);
+}
+
+function edgeShape(value: unknown): boolean {
+  return isPlain(value) && only(value, ['id', 'from', 'to', 'kind', 'tension', 'origin', 'lastSeen', 'mentions'], ['basis', 'grading'])
+    && str(value.id, SHORT) && str(value.from, SHORT) && str(value.to, SHORT) && EDGE_KINDS.includes(value.kind as string)
+    && (value.tension === null || (typeof value.tension === 'number' && Number.isFinite(value.tension) && value.tension >= -1 && value.tension <= 1))
+    && optional(value.basis, (entry) => str(entry, LONG)) && ORIGINS.includes(value.origin as string) && optional(value.grading, gradingShape)
+    && str(value.lastSeen, SHORT) && count(value.mentions);
+}
+
 function knowledgeShape(value: unknown): value is TeamKnowledge {
-  return isPlain(value) && value.version === 1 && typeof value.team === 'string' && Array.isArray(value.nodes) && Array.isArray(value.edges) && typeof value.updatedAt === 'string';
+  return isPlain(value) && only(value, ['version', 'team', 'nodes', 'edges', 'updatedAt'], []) && value.version === 1 && str(value.team, SHORT) && str(value.updatedAt, SHORT)
+    && Array.isArray(value.nodes) && value.nodes.length <= MAX_NODES && value.nodes.every(nodeShape)
+    && Array.isArray(value.edges) && value.edges.length <= MAX_EDGES && value.edges.every(edgeShape);
 }
 
 /**
@@ -180,8 +227,8 @@ export function readTeamPackage(text: string): ReadPackage {
   try { parsed = parseTeam(team.markdown, 'imported.md'); } catch (error) { throw new TeamPackageError(`This team file can't be used: ${(error as Error).message}`); }
   if (parsed.name !== team.name || parsed.description !== team.description || parsed.members.length !== team.members) throw new TeamPackageError(DAMAGED);
   if (findSecrets(team.markdown).length || (knowledge && findSecrets(knowledge).length)) throw new TeamPackageError('This team file holds something that looks like a key, token or password, so it was not imported. Ask the sender to remove it and share the team again.');
-  const facts = knowledge ? knowledge.nodes.reduce((total, node) => total + (Array.isArray(node.facts) ? node.facts.length : 0), 0) : 0;
-  return { markdown: team.markdown, team: parsed, knowledge, facts };
+  const factCount = knowledge ? knowledge.nodes.reduce((total, node) => total + node.facts.length, 0) : 0;
+  return { markdown: team.markdown, team: parsed, knowledge, facts: factCount };
 }
 
 /** A plain team .md file brought in with Import team: the same checks a share file's team text gets. */
