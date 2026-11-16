@@ -831,6 +831,32 @@ message. Chats at rest in the project folder are protected by file permissions
 on that machine and are end-to-end encrypted everywhere they leave it. The
 details are in [SECURITY.md](SECURITY.md#project-state-and-sync).
 
+### Team Mode (preview)
+
+Team Mode is for people working on one project together. It is not the agent
+teams above. It is an early preview and is off until you turn on the setting
+`nearAi.team.preview`. For now a team holds only its owner: inviting teammates
+arrives in a later release.
+
+- **NEAR AI: Enable Team Mode** creates a team for the open project. It asks
+  for a team name and your name as teammates will see it, makes a signing key
+  for this computer and keeps it in the editor's secret storage, starts a
+  signed team log on its own branch of the project's git remote, and commits a
+  small `team.json` so every clone can find the team. Your code branch is
+  pushed only if you choose **Share with my team** afterwards.
+- **NEAR AI: Verify Team Log** checks every entry in the team log (signatures,
+  order and permissions) and reports who is in the team and anything it
+  refused. It is shown when the preview is on or a team is running in this
+  project.
+
+Team Mode never asks for or stores your email address. Your private key never
+leaves this computer's secret storage. The team log and `team.json` hold your
+display name, your key's public half and its fingerprint, which anyone who can
+read the repository can see. This computer remembers which team each project
+belongs to: if `team.json` later names a different team or owner key, Team
+Mode pauses and says so, and starts again only after you choose **Trust this
+new team** and confirm it.
+
 ### Respects your projects
 
 The extension only acts in projects you set up with it. Opening a folder,
@@ -942,6 +968,8 @@ Read the full [security and trust report](SECURITY.md).
 | `nearAi.spend.dayBoundary` | `local` | When "today" starts for spend figures and the daily limit: local midnight, or `utc`. |
 | `nearAi.spend.useNearUsageTotal` | `true` | With a usage reporting token set, show NEAR's own total (and check the daily limit against it). Its description links to **Set usage reporting token** and **Clear**; the token itself lives in secret storage. |
 | `nearAi.autoInstallGsd` | `true` | Install Open-GSD when a workflow needs it and keep it current in NEAR AI projects. |
+| `nearAi.team.preview` | `false` | Shows **NEAR AI: Enable Team Mode** in the Command Palette. Team Mode is an early preview, and for now a team holds only its owner (see [Team Mode](#team-mode-preview)). |
+| `nearAi.team.pollSeconds` | `15` | How often, in seconds, Team Mode checks the team log while this window is focused (5 to 3600); unfocused windows check every 2 minutes. |
 
 ## Good to know
 

@@ -9,8 +9,10 @@
   `team.json` so every clone can find the team. Nothing else in your project is pushed unless you
   choose to share your branch. **NEAR AI: Verify Team Log** checks every entry in that log
   (signatures, order and permissions) and reports who is in the team and anything it refused. Team
-  Mode never asks for or stores your email address. For now a team holds only its owner: inviting
-  teammates arrives in a later release.
+  Mode never asks for or stores your email address. This computer remembers which team each project
+  belongs to: if `team.json` later names a different team or owner key, Team Mode pauses until you
+  choose **Trust this new team** and confirm. For now a team holds only its owner: inviting
+  teammates arrives in a later release. See "Team Mode (preview)" in the README.
 
 ## 0.4.24
 
