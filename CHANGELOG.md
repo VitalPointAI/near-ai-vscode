@@ -13,6 +13,21 @@
   belongs to: if `team.json` later names a different team or owner key, Team Mode pauses until you
   choose **Trust this new team** and confirm. For now a team holds only its owner: inviting
   teammates arrives in a later release. See "Team Mode (preview)" in the README.
+- **Team Mode checks the remote address git will really use.** Team Mode contacts only ssh, git,
+  https, http and file addresses or a local path. A `url.<base>.insteadOf` rule in the project's
+  git config could rewrite an allowed address into one of git's command helpers, which runs a
+  program. Enable Team Mode and **Share with my team** now check the address after git applies such
+  rules, and refuse before anything is contacted.
+- **A replaced signing key is never made active again.** If a key change on this computer was
+  recorded but its new key was lost (for example after a crash), the old key could quietly become
+  the active key again. Team Mode now keeps the old key aside, archives the key history (it is never
+  deleted) and starts a fresh key with its own history.
+- **A key history problem is reported, not hidden.** When saving the key history fails and it
+  cannot be put back as it was, Team Mode now says so in its output panel, in plain words and
+  without any key material.
+- **An empty image draft shows as gone.** When an image draft's file was still there but empty,
+  the review card treated it as an image, and asking for changes tried to edit it. The card now
+  says the draft is gone, and the agent is told to make the image again.
 
 ## 0.4.24
 
