@@ -83,6 +83,19 @@ test('the waiting kind follows an approval, a question and an image review, and 
   assert.deepEqual(kind(), ['waiting-you', 'approval']);
   feed.waitingForUser('main-run-1', true, 'question');
   assert.deepEqual(kind(), ['waiting-you', 'question']);
+  // Ending one wait never clears another still open: the question ends, the approval is still waiting; the approval ends, the image review is.
+  feed.waitingForUser('main-run-1', false, 'question');
+  assert.deepEqual(kind(), ['waiting-you', 'approval']);
+  feed.approvalSettled('main-run-1', 'allowed');
+  assert.deepEqual(kind(), ['waiting-you', 'image']);
+  feed.waitingForUser('main-run-1', false);
+  assert.deepEqual(kind(), ['tool', undefined]);
+  // An expiry re-states an open approval; it does not open a second one.
+  feed.approvalAsked('main-run-1');
+  feed.approvalExpired('main-run-1');
+  feed.approvalSettled('main-run-1', 'declined');
+  assert.deepEqual(kind(), ['tool', undefined]);
+  feed.waitingForUser('main-run-1', true);
   feed.agentEnded('main-run-1', 'cancelled');
   assert.deepEqual(kind(), ['thinking', undefined], 'ending while waiting clears it');
   // The 0.4.19 rule still holds: an expiry then an answer counts the prompt once.
@@ -202,12 +215,17 @@ test('a sub-agent\'s question shows as waiting for you, for a question, until it
   const { feed, conversation, request } = await nestedProject();
   const seen: Array<string | undefined> = [];
   let asked: string | undefined;
+  let afterAnswer: string | undefined;
   const client = {
     async *streamCompletion(_model: string, messages: AgentMessage[]): AsyncGenerator<CompletionEvent> {
       const role = who(messages);
       const answered = messages.some((message) => message.role === 'tool');
       if (role === 'parent') yield answered ? reply('all done') : reply(null, [call('p1', 'Agent', { subagent_type: 'gsd-lead', description: 'Ask first', prompt: 'ask' })]);
-      else yield answered ? reply('lead report') : reply(null, [call('q1', 'AskUserQuestion', { questions: [{ question: 'Which colour?', options: [{ label: 'Red' }, { label: 'Blue' }] }] })]);
+      else if (answered) {
+        // Review of PR 72: once answered, the running-agents row no longer says the lead waits for an answer.
+        afterAnswer = [...(conversation as unknown as { agents: Map<string, { label: string; activity: string }> }).agents.values()].find((agent) => agent.label === 'gsd-lead')?.activity;
+        yield reply('lead report');
+      } else yield reply(null, [call('q1', 'AskUserQuestion', { questions: [{ question: 'Which colour?', options: [{ label: 'Red' }, { label: 'Blue' }] }] })]);
     },
     async actualCostsUsd() { return undefined; }
   };
@@ -230,6 +248,7 @@ test('a sub-agent\'s question shows as waiting for you, for a question, until it
   assert.ok(asked, 'the question was asked');
   assert.ok(seen.includes('waiting-you:question'), `the lead showed as waiting for an answer (${seen.join(' > ')})`);
   assert.equal(seen.at(-1), 'busy', 'and went back to work once answered');
+  assert.ok(afterAnswer && afterAnswer !== 'Waiting for your answer', `the lead's activity moved on (${afterAnswer})`);
 });
 
 test('the lead\'s count of reports read goes up when a background report reaches its next turn', { timeout: 20_000 }, async () => {

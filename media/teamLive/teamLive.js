@@ -338,8 +338,9 @@
     const target = cards.get(record.event.to);
     if (target) {
       target.root.classList.remove('awaiting');
-      // The report docks on the card it reached: a short flash of its ring, opacity only.
-      if (arrived && motion() && target.dock.animate) target.dock.animate([{ opacity: 0 }, { opacity: 0.9 }, { opacity: 0 }], { duration: 450 });
+      // A report docks on the card it reached: a short flash of its ring, opacity only. A task arriving does not flash it (review of PR 72): the card
+      // waking up says that.
+      if (arrived && record.event.kind === 'report' && motion() && target.dock.animate) target.dock.animate([{ opacity: 0 }, { opacity: 0.9 }, { opacity: 0 }], { duration: 450 });
     }
     pump();
   }

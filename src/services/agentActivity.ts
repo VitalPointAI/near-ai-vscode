@@ -222,6 +222,11 @@ export class ActivityFeed {
   private entries: ActivityEntry[] = [];
   private readonly open = new Map<string, ActivityEntry>();
   private readonly stats = new Map<string, AgentStats>();
+  /**
+   * Review of PR 72: an agent can wait on the person for several things at once (an approval and a question). Each open wait is kept, oldest first; the
+   * agent shows the newest, and leaves "waiting for you" only when the last one ends, so ending one wait never clears another.
+   */
+  private readonly waits = new Map<string, WaitingKind[]>();
   private readonly listeners = new Set<(change: ActivityChange) => void>();
   private readonly toolNames = new Map<string, string>();
   private conversation: string | undefined;
@@ -321,6 +326,7 @@ export class ActivityFeed {
     stat.coolUntil = undefined;
     stat.tool = undefined;
     stat.waitingKind = undefined;
+    this.waits.delete(agentId);
     this.lifecycle += 1;
     this.closeText(agentId);
     this.add({ runId: stat.runId, agentId, agent: stat.agent, kind: 'agent-end', title: `${stat.agent} ${status === 'max-turns' ? 'reached its turn limit' : status === 'stuck' ? 'was stopped because it was not making progress' : status}`, text: summary });
@@ -415,7 +421,7 @@ export class ActivityFeed {
 
   /** An approval was put to the user; `approvalSettled` says how it ended. */
   public approvalAsked(agentId: string): void {
-    this.withAgent(agentId, (_base, stat) => { stat.approvals.asked += 1; this.enter(stat, 'waiting-you', 'approval'); this.changed([]); });
+    this.withAgent(agentId, (_base, stat) => { stat.approvals.asked += 1; this.openWait(stat, 'approval'); this.changed([]); });
   }
 
   /**
@@ -427,7 +433,7 @@ export class ActivityFeed {
    * the agent is still waiting.
    */
   public approvalExpired(agentId: string): void {
-    this.withAgent(agentId, (_base, stat) => { this.enter(stat, 'waiting-you', 'approval'); this.changed([]); });
+    this.withAgent(agentId, (_base, stat) => { if (!this.waits.get(stat.agentId)?.includes('approval')) this.openWait(stat, 'approval'); else this.enter(stat, 'waiting-you', 'approval'); this.changed([]); });
   }
 
   /**
@@ -439,7 +445,7 @@ export class ActivityFeed {
     this.withAgent(agentId, (_base, stat) => {
       if (outcome === 'declined') stat.approvals.declined += 1;
       if (outcome === 'expired') stat.approvals.expired += 1;
-      if (stat.phase === 'waiting-you') this.enter(stat, 'tool');
+      this.closeWait(stat, 'approval');
       this.changed([]);
     });
   }
@@ -451,7 +457,7 @@ export class ActivityFeed {
   public approvalTimedOut(agentId: string): void {
     this.withAgent(agentId, (_base, stat) => {
       stat.approvalTimeouts = (stat.approvalTimeouts ?? 0) + 1;
-      if (stat.phase === 'waiting-you') this.enter(stat, 'tool');
+      this.closeWait(stat, 'approval');
       this.changed([]);
     });
   }
@@ -462,8 +468,8 @@ export class ActivityFeed {
    */
   public waitingForUser(agentId: string, waiting: boolean, kind: Exclude<WaitingKind, 'approval'> = 'image'): void {
     this.withAgent(agentId, (_base, stat) => {
-      if (waiting) this.enter(stat, 'waiting-you', kind);
-      else if (!waiting && stat.phase === 'waiting-you') this.enter(stat, 'tool');
+      if (waiting) this.openWait(stat, kind);
+      else this.closeWait(stat, kind);
       this.changed([]);
     });
   }
@@ -519,6 +525,24 @@ export class ActivityFeed {
   }
 
   /** Leaves the current phase, adding a finished wait to its total. `kind` says what a `waiting-you` waits for. */
+  private openWait(stat: AgentStats, kind: WaitingKind): void {
+    const open = this.waits.get(stat.agentId) ?? [];
+    open.push(kind);
+    this.waits.set(stat.agentId, open);
+    this.enter(stat, 'waiting-you', kind);
+  }
+
+  /** Ends the newest open wait of this kind; the agent goes back to work only when no other wait is still open. */
+  private closeWait(stat: AgentStats, kind: WaitingKind): void {
+    const open = this.waits.get(stat.agentId) ?? [];
+    const at = open.lastIndexOf(kind);
+    if (at >= 0) open.splice(at, 1);
+    if (!open.length) this.waits.delete(stat.agentId);
+    if (stat.phase !== 'waiting-you') return;
+    if (open.length) stat.waitingKind = open[open.length - 1];
+    else this.enter(stat, 'tool');
+  }
+
   private enter(stat: AgentStats, phase: AgentPhase, kind?: WaitingKind): void {
     // Already waiting for the person, now for something else (a question asked while an approval is open): the kind follows the newest wait (review of PR 72).
     if (stat.phase === phase) { if (phase === 'waiting-you' && kind && stat.waitingKind !== kind) stat.waitingKind = kind; return; }

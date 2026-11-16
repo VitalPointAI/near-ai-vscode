@@ -178,14 +178,19 @@ test('page: a hand-off sends a dot down the line, the card waits for it, and an 
   const again = frame([LEAD, stat('writer-ccc222', 'writer', { task: 'Shorten it' })], ended.view);
   page.dispatch(again.message);
   page.doc.animations.at(-1)!.finish();
+  const docks = () => page.doc.animations.filter((animation) => animation.options.duration === 450).length;
+  assert.equal(docks(), 0, 'a task arriving does not flash the report ring (review of PR 72)');
   const done = frame([LEAD, stat('writer-ccc222', 'writer', { task: 'Shorten it', status: 'completed' })], again.view);
   page.dispatch(done.message);
   assert.match(page.doc.getElementById('pulses')!.children.at(-1)!.textContent, /Report ready/);
+  const report = page.doc.animations.at(-1)!;
+  report.finish();
+  assert.equal(docks(), 1, 'a report arriving flashes the ring of the card it reached');
   // The run stopping cancels everything at once.
   const stopped = frame([{ ...LEAD, status: 'cancelled' }, stat('writer-ccc222', 'writer', { status: 'completed' })], done.view);
   page.dispatch(stopped.message);
   assert.equal(page.doc.getElementById('pulses')!.children.length, 0);
-  assert.ok(page.doc.animations.filter((animation) => animation.options.duration === 900).every((animation) => animation.cancelled || animation === page.doc.animations[1]));
+  assert.ok(page.doc.animations.filter((animation) => animation.options.duration === 900).every((animation) => animation.cancelled || animation === page.doc.animations[1] || animation === report));
 });
 
 test('page: under reduced motion nothing animates, and states and announcements still change', async () => {

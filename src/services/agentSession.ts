@@ -1748,6 +1748,7 @@ export class AgentConversation {
     // so a sub-agent waiting on a question looked busy); the strip says what it waits for.
     if (agentId) this.activity?.waitingForUser(agentId, true, 'question');
     const live = agentId ? this.agents.get(agentId) : undefined;
+    const before = live?.activity;
     if (live) { this.setActivity(live, 'Waiting for your answer'); this.postAgents(); }
     return this.waitForPerson(id, signal, (wake) => {
       this.questions.set(id, (answers: string[], cancelled = false) => { reply = { answers, cancelled }; wake(); });
@@ -1764,7 +1765,7 @@ export class AgentConversation {
       if (!reply) { this.questions.delete(id); reply = { answers: [], cancelled: true }; }
       this.closePrompt(id, reply.cancelled);
       return reply.answers;
-    }).finally(() => { if (agentId) this.activity?.waitingForUser(agentId, false, 'question'); });
+    }).finally(() => { if (agentId) this.activity?.waitingForUser(agentId, false, 'question'); this.endPersonWait(live, 'Waiting for your answer', before); });
   }
 
   /** The image reviewer of this conversation: drafts in the project, cards in this conversation's chat (a sub-agent's too, labelled with it). */
@@ -1788,6 +1789,7 @@ export class AgentConversation {
     const image = present && present.length <= MAX_PREVIEW_BYTES ? `data:image/png;base64,${present.toString('base64')}` : undefined;
     const live = draft.agentId ? this.agents.get(draft.agentId) : undefined;
     if (draft.agentId) this.activity?.waitingForUser(draft.agentId, true);
+    const before = live?.activity;
     if (live) { this.setActivity(live, 'Waiting for your image review'); this.postAgents(); }
     // waitOrAbort removes its abort listener once answered, so each review does not leave one on the run's signal (agent review of PR 51).
     let answer: { reply: ImageReviewDecision; cancelled: boolean } | undefined;
@@ -1816,7 +1818,18 @@ export class AgentConversation {
       this.closePrompt(draft.id, answer.cancelled);
     }
     if (draft.agentId) this.activity?.waitingForUser(draft.agentId, false);
+    this.endPersonWait(live, 'Waiting for your image review', before);
     return answer.reply;
+  }
+
+  /**
+   * Review of PR 72: when a wait on the person ends, the agent's activity goes back to what it said before, unless something newer has replaced the
+   * waiting words meanwhile; the running-agents row then stops saying it waits for you.
+   */
+  private endPersonWait(live: LiveAgent | undefined, waiting: string, before: string | undefined): void {
+    if (!live || live.activity !== waiting) return;
+    this.setActivity(live, before && before !== waiting ? before : 'Thinking');
+    this.postAgents();
   }
 
   private releasePending(): void {
