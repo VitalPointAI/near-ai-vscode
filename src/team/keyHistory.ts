@@ -5,7 +5,13 @@
 // Appends take key-history.lock in the identity folder through the shared file lock. Read, check, write the file and then the head all happen inside
 // the lock, so two windows never lose or interleave a record, and an append that no longer fits the state (for example rotating a key that another
 // window already rotated) is refused. Lock order wherever both are taken: identity-create.lock first, then key-history.lock.
-import { mkdir, readFile, rm, stat } from 'node:fs/promises';
+//
+// A history that is broken, or whose active key is not the person's stored key, is never repaired or deleted: archiveKeyHistory renames it beside the
+// original and clears the saved end, so a fresh history can start. Archiving fails closed: a key that only the archived history knew reads as unknown
+// afterwards (never active), so nothing that depended on it is trusted by mistake. A history that existed before a call is never deleted; the only file
+// this module removes is the first-record file of an append whose own head store failed.
+import { randomBytes } from 'node:crypto';
+import { mkdir, readFile, rename, rm, stat } from 'node:fs/promises';
 import * as path from 'node:path';
 import type { SecretStorageLike } from '../services/auth';
 import { withFileLock } from '../services/stateMirrorLock';
@@ -148,5 +154,54 @@ export async function appendKeyRecord(
       throw new KeyHistoryError('Nothing was added to the key history: its saved end could not be stored.', { cause: error });
     }
     return proof;
+  });
+}
+
+const MAX_ARCHIVE_NAME_ATTEMPTS = 8;
+
+function archiveName(at: Date): string {
+  const compact = at.toISOString().replace(/[-:]/g, '').replace(/\.\d+Z$/, 'Z');
+  return `key-history.archived-${compact}-${randomBytes(3).toString('hex')}.json`;
+}
+
+// Moves an unusable history aside (D-09): the file is renamed to key-history.archived-<UTC time>-<6 hex>.json in the same folder and the saved end is
+// cleared, so the next append starts a fresh history. Returns the archived path, or undefined when there was no file (a lone saved end is still cleared).
+// Rename only: the bytes are kept as they were and an existing archive is never overwritten. Keys only the archived history knew read as unknown from
+// then on, which is the fail-closed outcome.
+export async function archiveKeyHistory(
+  identityDir: string, secrets: SecretStorageLike, options: { now?: () => Date } = {}
+): Promise<string | undefined> {
+  await mkdir(identityDir, { recursive: true, mode: 0o700 });
+  return withFileLock(identityDir, KEY_HISTORY_LOCK_FILE, async () => {
+    const file = path.join(identityDir, KEY_HISTORY_FILE);
+    let archived: string | undefined;
+    let exists = true;
+    try {
+      await stat(file);
+    } catch (error) {
+      if (errorCode(error) !== 'ENOENT') throw new KeyHistoryError('The key history could not be moved aside, so nothing was changed.', { cause: error });
+      exists = false;
+    }
+    if (exists) {
+      const at = (options.now ?? (() => new Date()))();
+      const stamp = at instanceof Date && !Number.isNaN(at.getTime()) ? at : new Date();
+      for (let attempt = 0; archived === undefined; attempt += 1) {
+        if (attempt >= MAX_ARCHIVE_NAME_ATTEMPTS) throw new KeyHistoryError('The key history could not be moved aside, so nothing was changed.');
+        const target = path.join(identityDir, archiveName(stamp));
+        try {
+          await stat(target);
+        } catch (error) {
+          if (errorCode(error) === 'ENOENT') archived = target;
+          else throw new KeyHistoryError('The key history could not be moved aside, so nothing was changed.', { cause: error });
+        }
+      }
+      try {
+        await rename(file, archived);
+      } catch (error) {
+        throw new KeyHistoryError('The key history could not be moved aside, so nothing was changed.', { cause: error });
+      }
+    }
+    await secrets.delete(KEY_HISTORY_HEAD_SECRET);
+    return archived;
   });
 }

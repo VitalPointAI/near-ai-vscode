@@ -18,6 +18,7 @@ import { TeamLog } from '../team/eventLog';
 import type { TeamSigner } from '../team/eventLog';
 import { DEFAULT_COORDINATION_REF, GitTransport } from '../team/gitTransport';
 import { DEVICE_KEY_SECRET, createDeviceIdentity, loadDeviceIdentity } from '../team/identity';
+import { KEY_HISTORY_HEAD_SECRET } from '../team/keyHistory';
 import { GitNotFoundError, runGit } from '../team/runGit';
 import type { GitRunner } from '../team/runGit';
 import { TEAM_FILE_REL, parseTeamFile, projectTrustDir, readTeamFile, teamStorageDir } from '../team/teamFile';
@@ -30,6 +31,11 @@ const OWNER_EMAIL = 'Lead.Owner@Example.invalid';
 const COORDINATION_BRANCH = 'refs/heads/near-ai/coordination';
 // src/services/spendTracking.ts holds this constant but imports vscode, which a node test cannot load, so the key is repeated here.
 const REPORTING_TOKEN_KEY = 'nearAi.usageReportingToken';
+
+// The secret names held, without the saved end of the key history (which stays after a key is forgotten, since the history is kept).
+function storedKeys(secrets: MemorySecrets): string[] {
+  return [...secrets.values.keys()].filter((key) => key !== KEY_HISTORY_HEAD_SECRET);
+}
 
 async function withFixture(clones: string[], run: (fixture: TeamFixture) => Promise<void>, options: { initialised?: boolean } = {}): Promise<void> {
   const fixture = await createTeamFixture({ clones, initialised: options.initialised ?? true });
@@ -210,7 +216,7 @@ test('Enable creates the team, the device key, the orphan coordination branch an
     assert.equal(files.filter((name) => /^events\/\d{12}-evt-[0-9A-HJKMNP-TV-Z]{26}\.json$/.test(name)).length, 2);
     assert.ok(files.includes('team.json'));
 
-    assert.deepEqual([...secrets.values.keys()], [DEVICE_KEY_SECRET]);
+    assert.deepEqual(storedKeys(secrets), [DEVICE_KEY_SECRET]);
     assert.ok(existsSync(path.join(projectTrustDir(fixture.storageDir('a'), fixture.clones.a as string), 'trust.json')), 'Enable pins the team for this project');
     assert.equal(existsSync(path.join(teamStorageDir(fixture.storageDir('a'), teamFile.teamId), 'trust.json')), false);
 
@@ -371,7 +377,7 @@ test('a failing commit hook leaves team.json unstaged on disk, explains the exac
     assert.ok(existsSync(path.join(root, TEAM_FILE_REL)), 'team.json stays on disk');
     assert.equal(gitIn(root, ['diff', '--cached', '--name-only']), '', 'team.json is not left staged');
     assert.equal(gitIn(root, ['log', '-1', '--format=%s']), 'seed', 'no commit was made');
-    assert.equal(secrets.values.size, 1, 'the team exists on the remote, so the key is kept');
+    assert.equal(storedKeys(secrets).length, 1, 'the team exists on the remote, so the key is kept');
     assert.ok(remoteHasRef(fixture, COORDINATION_BRANCH));
 
     const again = await enableTeamMode(inputFor(fixture, 'a', new MemorySecrets()));
@@ -388,7 +394,7 @@ test('a failed genesis push with no earlier identity removes the key it created,
     if (result.ok) return;
     assert.equal(result.code, 'push-failed');
     assert.match(result.message, /unable to access the remote/);
-    assert.equal(secrets.values.size, 0, 'the key this call created is forgotten');
+    assert.deepEqual(storedKeys(secrets), [], 'the key this call created is forgotten');
     assert.deepEqual(await teamFolders(fixture.storageDir('a')), [], 'the team storage folder, with the mirror, is gone');
     assert.equal(existsSync(path.join(fixture.clones.a as string, TEAM_FILE_REL)), false);
     assert.equal(remoteHasRef(fixture, COORDINATION_BRANCH), false);
@@ -450,7 +456,7 @@ for (const failure of FAILURE_PATHS) {
       assert.equal(result.ok, false);
       if (result.ok) return;
       assert.equal(result.code, failure.code);
-      assert.equal(secrets.values.size, 0, 'the key this call created is forgotten');
+      assert.deepEqual(storedKeys(secrets), [], 'the key this call created is forgotten');
       assert.deepEqual(await teamFolders(fixture.storageDir('a')), []);
     });
   });
@@ -463,7 +469,7 @@ test('a successful Enable on a computer that already has an identity reuses it a
     const result = await enableTeamMode(inputFor(fixture, 'a', secrets));
     assert.equal(result.ok, true);
     if (!result.ok) return;
-    assert.deepEqual([...secrets.values.keys()], [DEVICE_KEY_SECRET]);
+    assert.deepEqual(storedKeys(secrets), [DEVICE_KEY_SECRET]);
     assert.equal(result.teamFile.genesis.ownerDevice.fingerprint, before.fingerprint, 'the owner device is the identity that was already there');
   });
 });
@@ -477,7 +483,7 @@ test('a genesis push whose reply was lost but that landed is detected and Enable
     const secrets = new MemorySecrets();
     const result = await enableTeamMode(inputFor(fixture, 'a', secrets, { git }));
     assert.equal(result.ok, true);
-    assert.equal(secrets.values.size, 1);
+    assert.equal(storedKeys(secrets).length, 1);
     assert.ok(remoteHasRef(fixture, COORDINATION_BRANCH));
     assert.equal(gitIn(fixture.clones.a as string, ['log', '-1', '--format=%s']), ENABLE_COMMIT_MESSAGE);
   });
@@ -496,7 +502,7 @@ test('a genesis push that may have landed, with the remote unreachable afterward
     assert.equal(result.code, 'push-unconfirmed');
     assert.match(result.message, /may have been created/);
     assert.match(result.message, /git ls-remote origin refs\/heads\/near-ai\/coordination/);
-    assert.equal(secrets.values.size, 1, 'the only owner key is kept');
+    assert.equal(storedKeys(secrets).length, 1, 'the only owner key is kept');
     assert.equal((await teamFolders(fixture.storageDir('a'))).length, 1, 'the mirror folder is kept');
     assert.ok(remoteHasRef(fixture, COORDINATION_BRANCH), 'the push did land');
     assert.equal(existsSync(path.join(fixture.clones.a as string, TEAM_FILE_REL)), false);
@@ -516,7 +522,7 @@ test('a genesis push that throws before reaching the remote, with no earlier ide
     if (result.ok) return;
     assert.equal(result.code, 'push-failed');
     assert.match(result.message, /disk full while pushing/);
-    assert.equal(secrets.values.size, 0, 'the key this call created is forgotten');
+    assert.deepEqual(storedKeys(secrets), [], 'the key this call created is forgotten');
     assert.deepEqual(await teamFolders(fixture.storageDir('a')), [], 'the mirror is gone');
     assert.equal(remoteHasRef(fixture, COORDINATION_BRANCH), false);
   });
@@ -532,7 +538,7 @@ test('a genesis push that landed and then threw is recognised and Enable finishe
     const secrets = new MemorySecrets();
     const result = await enableTeamMode(inputFor(fixture, 'a', secrets, { git }));
     assert.equal(result.ok, true);
-    assert.equal(secrets.values.size, 1);
+    assert.equal(storedKeys(secrets).length, 1);
     assert.ok(remoteHasRef(fixture, COORDINATION_BRANCH));
   });
 });

@@ -8,6 +8,7 @@ import type { SecretStorageLike } from '../services/auth';
 import { withFileLock } from '../services/stateMirrorLock';
 import { MAX_EVENT_BYTES, canonicalBytes, fingerprintOf, signingInput } from '../domain/team/canonical';
 import type { TeamEvent, TeamEventType, UnsignedTeamEvent } from '../domain/team/types';
+import { appendKeyRecord, archiveKeyHistory, readKeyHistory } from './keyHistory';
 
 // One Ed25519 identity per person per install (D-06). Every team this install joins uses this key, so the secret name carries no team id.
 export const DEVICE_KEY_SECRET = 'nearAi.identity.deviceKey';
@@ -68,23 +69,56 @@ export async function forgetDeviceIdentity(secrets: SecretStorageLike): Promise<
 }
 
 export interface IdentityLockOptions {
-  // The folder that holds identity-create.lock, normally identityDir(globalStorage).
+  // The folder that holds identity-create.lock and the key history, normally identityDir(globalStorage).
   identityDir: string;
+  // The clock for the key history records; tests pass a fixed one.
+  now?: () => Date;
 }
 
-// First-need creation (Pitfall 4): SecretStorage is last write wins, so two windows could each create a key. The lock covers check, create, store and
-// read back, so two windows end with one key. The folder is created here with mode 0o700 (it only holds the lock file, never key material).
+// The key history (D-09) is the person's own signed record that this key is theirs. Called inside identity-create.lock with the key that is stored, it
+// makes sure the history names that key as its active key: nothing to do when it already does, a first `created` record when the history is empty (a key
+// stored before any history existed), and otherwise (the history is broken, or its active key is another one) the old history is archived, never
+// deleted, and a fresh one starts with this key. Keys only the archived history knew then read as unknown, which fails closed (D-09).
+// Lock order: identity-create.lock is held by the caller, key-history.lock is taken inside the history calls.
+async function ensureCreatedRecord(
+  secrets: SecretStorageLike, identity: DeviceIdentity, options: IdentityLockOptions, freshKey: boolean
+): Promise<void> {
+  const clock = options.now === undefined ? {} : { now: options.now };
+  const history = await readKeyHistory(options.identityDir, secrets);
+  if (history.ok && history.active?.fingerprint === identity.fingerprint) return;
+  // An empty history accepts a first key as it is, and so does one whose last key was revoked when the key is brand new. Anything else is set aside first,
+  // including a key that is stored but that a history with records does not make active.
+  if (!history.ok || history.active !== undefined || (!freshKey && history.head !== undefined)) await archiveKeyHistory(options.identityDir, secrets, clock);
+  await appendKeyRecord(
+    options.identityDir, secrets, identity, { kind: 'created', key: { fingerprint: identity.fingerprint, publicKey: identity.publicKey } }, clock
+  );
+}
+
+// First-need creation (Pitfall 4): SecretStorage is last write wins, so two windows could each create a key. The lock covers check, create, store,
+// read back and the key's `created` history record, so two windows end with one key and one record, and a fresh install can sign and verify its first
+// payload with nothing else to set up (D-09). A key found without a history record (for example one made by an earlier release) gets its record here.
+// The folder is created here with mode 0o700 (it holds the lock file and the public key history, never key material).
 export async function loadOrCreateDeviceIdentity(
   secrets: SecretStorageLike, options: IdentityLockOptions
 ): Promise<{ identity: DeviceIdentity; created: boolean }> {
   await mkdir(options.identityDir, { recursive: true, mode: 0o700 });
   return withFileLock(options.identityDir, IDENTITY_CREATE_LOCK_FILE, async () => {
     const existing = await loadDeviceIdentity(secrets);
-    if (existing) return { identity: existing, created: false };
+    if (existing) {
+      await ensureCreatedRecord(secrets, existing, options, false);
+      return { identity: existing, created: false };
+    }
     const made = await createDeviceIdentity(secrets);
     const readBack = await loadDeviceIdentity(secrets);
     if (!readBack || readBack.fingerprint !== made.fingerprint) {
       throw new Error('The new identity key could not be read back from this computer\'s secret storage, so it was not used.');
+    }
+    try {
+      await ensureCreatedRecord(secrets, readBack, options, true);
+    } catch (error) {
+      // This call made the key and it has signed nothing but this attempt, so it is forgotten rather than left without a history record.
+      await forgetDeviceIdentity(secrets).catch(() => undefined);
+      throw error;
     }
     return { identity: readBack, created: true };
   });

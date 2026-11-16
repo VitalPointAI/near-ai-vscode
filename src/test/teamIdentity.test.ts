@@ -1,7 +1,7 @@
 // Device identity, event signing and id generators (D-05, D-14, D-15, D-31). All key material is generated at run time.
 import assert from 'node:assert/strict';
 import { generateKeyPairSync } from 'node:crypto';
-import { mkdtemp, readdir, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -12,6 +12,8 @@ import {
   forgetCreatedDeviceIdentity, loadOrCreateDeviceIdentity, newEventId, newMemberId, newTeamId, signEvent, ulid
 } from '../team/identity';
 import { acquireFileLock } from '../services/stateMirrorLock';
+import { signPayload, verifyPayload } from '../domain/team/signedPayload';
+import { KEY_HISTORY_FILE, KEY_HISTORY_HEAD_SECRET, localKeyStatus, readKeyHistory } from '../team/keyHistory';
 import { MemorySecrets } from './helpers/teamHarness';
 
 const TEAM = 'team-0123456789abcdef0123456789abcdef';
@@ -77,9 +79,43 @@ test('loadOrCreateDeviceIdentity creates the key once and then returns the same 
     const second = await loadOrCreateDeviceIdentity(secrets, options);
     assert.equal(second.created, false);
     assert.equal(second.identity.fingerprint, first.identity.fingerprint);
-    assert.deepEqual([...secrets.values.keys()], [DEVICE_KEY_SECRET]);
+    assert.deepEqual([...secrets.values.keys()].sort(), [DEVICE_KEY_SECRET, KEY_HISTORY_HEAD_SECRET].sort(), 'the key and the saved end of its history');
     assert.equal(path.basename(identityDir(dir)), IDENTITY_DIR_NAME);
     assert.equal((await readdir(identityDir(dir))).includes(IDENTITY_CREATE_LOCK_FILE), false, 'the lock is released');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('a fresh install creates its identity with a created record, then signs and verifies a first policy bundle against its own history', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'near-ai-identity-'));
+  try {
+    const secrets = new MemorySecrets();
+    const options = { identityDir: identityDir(dir) };
+    const first = await loadOrCreateDeviceIdentity(secrets, options);
+    assert.equal(first.created, true);
+
+    const history = await readKeyHistory(options.identityDir, secrets);
+    assert.equal(history.ok, true);
+    if (!history.ok) return;
+    assert.equal(history.active?.fingerprint, first.identity.fingerprint);
+    assert.equal(history.head?.seq, 1, 'exactly one record');
+    const file = JSON.parse(await readFile(path.join(options.identityDir, KEY_HISTORY_FILE), 'utf8')) as { records: Array<{ payload: { kind: string; key: { fingerprint: string } }; signer: { fingerprint: string } }> };
+    assert.equal(file.records.length, 1);
+    assert.equal(file.records[0]?.payload.kind, 'created');
+    assert.equal(file.records[0]?.payload.key.fingerprint, first.identity.fingerprint);
+    assert.equal(file.records[0]?.signer.fingerprint, first.identity.fingerprint, 'the key signed its own creation');
+
+    const bundle = signPayload(first.identity, 'policy-bundle', { rules: [{ name: 'review-before-merge', required: true }] });
+    const verdict = verifyPayload(bundle, { purpose: 'policy-bundle', status: await localKeyStatus(options.identityDir, secrets) });
+    assert.equal(verdict.ok, true);
+    if (verdict.ok) assert.equal(verdict.keyState, 'active');
+
+    const second = await loadOrCreateDeviceIdentity(secrets, options);
+    assert.equal(second.created, false);
+    assert.equal(second.identity.fingerprint, first.identity.fingerprint);
+    const again = await readKeyHistory(options.identityDir, secrets);
+    assert.equal(again.ok && again.head?.seq, 1, 'the second call adds no record');
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -95,7 +131,7 @@ test('forgetCreatedDeviceIdentity deletes nothing unless the stored key is the o
     assert.equal(await forgetCreatedDeviceIdentity(secrets, { ...options, fingerprint: stranger.fingerprint }), false);
     assert.equal((await loadDeviceIdentity(secrets))?.fingerprint, identity.fingerprint, 'another fingerprint deletes nothing');
     assert.equal(await forgetCreatedDeviceIdentity(secrets, { ...options, fingerprint: identity.fingerprint }), true);
-    assert.equal(secrets.values.size, 0);
+    assert.deepEqual([...secrets.values.keys()], [KEY_HISTORY_HEAD_SECRET], 'the key is gone; only the saved end of its history remains');
     assert.equal(await forgetCreatedDeviceIdentity(secrets, { ...options, fingerprint: identity.fingerprint }), false, 'nothing stored, nothing deleted');
   } finally {
     await rm(dir, { recursive: true, force: true });
@@ -118,7 +154,8 @@ test('while another window holds identity-create.lock, creation waits and then r
     const result = await waiting;
     assert.equal(result.created, false);
     assert.equal(result.identity.fingerprint, other.fingerprint);
-    assert.equal(secrets.values.size, 1, 'one key');
+    assert.equal(secrets.values.has(DEVICE_KEY_SECRET), true);
+    assert.equal([...secrets.values.keys()].filter((key) => key === DEVICE_KEY_SECRET).length, 1, 'one key');
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
