@@ -107,14 +107,14 @@ export async function gatherDirectoryInput(context: vscode.ExtensionContext, aut
   const agentModels = readAgentModels();
   const host = gsdHostFor(context);
   const mcp = mcpRegistry(context);
-  const [gsd, version, teams, webSearch, servers, catalog, reportingToken] = await Promise.all([
+  const [gsd, version, teams, searchProvider, servers, catalog, reportingToken] = await Promise.all([
     host.context().catch(() => undefined),
     host.runtime.installedVersion().catch(() => null),
     new TeamLibrary(teamLibraryDir(homeFolder())).list(root).catch(() => []),
-    webSearchProvider(context.secrets).then((provider) => Boolean(provider), () => false),
+    webSearchProvider(context.secrets).catch(() => undefined),
     mcp.status().catch(() => []),
     // The catalog list (cached per profile); no completion is requested.
-    (root ? activeProvider(root, auth) : Promise.resolve(undefined)).then((active) => ({ models: active?.models, problem: active ? undefined : root ? 'Set up a NEAR AI profile for this project to see the models your key can use.' : 'Open a folder to see the models your key can use.' }), (error: unknown) => ({ models: undefined, problem: providerErrorMessage(error) })),
+    (root ? activeProvider(root, auth) : Promise.resolve(undefined)).then((active) => ({ models: active?.models, host: active?.provider.client.baseHost, problem: active ? undefined : root ? 'Set up a NEAR AI profile for this project to see the models your key can use.' : 'Open a folder to see the models your key can use.' }), (error: unknown) => ({ models: undefined, host: undefined, problem: providerErrorMessage(error) })),
     currentReportingTokenHint().catch(() => undefined)
   ]);
   return {
@@ -122,7 +122,9 @@ export async function gatherDirectoryInput(context: vscode.ExtensionContext, aut
     teams,
     policy: { ...settings.actionPolicy, emergencyStop: isEmergencyStopped() },
     rules: readAgentRules(),
-    webSearch,
+    webSearch: Boolean(searchProvider),
+    ...(searchProvider?.host ? { webSearchHost: searchProvider.host } : {}),
+    ...(catalog.host ? { modelHost: catalog.host } : {}),
     securityConsented: root ? securityConsented(context) : false,
     mcp: servers,
     ...(catalog.models ? { models: catalog.models } : {}),

@@ -4,17 +4,12 @@ import { decidePermission, PermissionRules, RunGrants } from '../agent/permissio
 import { AgentTool } from '../agent/tools';
 import { builtInTools } from '../agent/toolCatalog';
 import { describeManifest } from '../domain/gate/words';
-import { checkCitationsTool, checkOriginalityTool, webFetchTool, webSearchTool } from '../agent/webTools';
-import { GRAPHICS_TOOLS } from '../agent/graphicsTools';
-import { imageTool, memoryTools } from '../agent/extraTools';
-import { securityTool } from '../agent/securityTool';
 import { gsdTools } from '../gsd/tools';
 import { GsdAgent, GsdSkill, modelForTier, roleModelFor } from '../gsd/library';
 import type { TeamDefinition } from '../agent/teams';
 import type { McpServerStatus } from './mcpRegistry';
 import { mcpToolName } from '../mcp/tools';
 import type { ModelInfo, NearAiClient } from './nearAiClient';
-import type { ContextGraphMemory } from './contextGraphMemory';
 import { POLICY_OPTIONS } from './approvalPolicy';
 import { ReportingTokenHint, SET_REPORTING_TOKEN_COMMAND } from './reportingToken';
 
@@ -56,6 +51,10 @@ export interface DirectoryInput {
   rules: PermissionRules;
   /** Whether a web search provider is configured (WebSearch is off without one). */
   webSearch: boolean;
+  /** The host that provider sends queries to, for the words under WebSearch; without it the page says the tool reaches nothing. */
+  webSearchHost?: string;
+  /** The host the active profile sends model requests to, for the words under GenerateImage (the default endpoint's host when absent). */
+  modelHost?: string;
   /** Whether this project allowed the dependency scanner. */
   securityConsented: boolean;
   mcp: McpServerStatus[];
@@ -133,8 +132,6 @@ export function resolveAgentModel(name: string, definitionModel: string | undefi
   return { tier: tierOf(value), model: modelForTier(value, input.settings.tiers, input.settings.mainModel), source: roleModel ? (input.settings.fromProject?.includes('nearAi.agent.roleModels') ? 'project choice' : 'role setting') : definitionModel ? 'definition' : 'default' };
 }
 
-const stubClient = {} as NearAiClient;
-const stubMemory = {} as ContextGraphMemory;
 
 function toolEntry(tool: AgentTool<any>, input: DirectoryInput, available: { off?: string; setup?: { label: string; command: string } } = {}): DirectoryTool {
   // A tool that marks itself autoSafe (the web tools) runs in auto; an MCP tool never sets the marker, so it keeps asking.
@@ -178,16 +175,18 @@ export function buildToolsDirectory(input: DirectoryInput): ToolsDirectory {
   const image = catalog.find((model) => model.id === input.settings.imageModel && (model.outputModalities ?? []).includes('image'));
   const gsdInstalled = Boolean(input.gsd);
   const noGsd = gsdInstalled ? {} : { off: 'Offered to agents once Open-GSD is installed (it installs with your first workflow).' };
+  // What is not ready for use yet, and where to set it up, by tool name; the entry stays on the page with its words.
+  const unavailable: Record<string, { off?: string; setup?: { label: string; command: string } }> = {
+    ...(input.webSearch ? {} : { WebSearch: { off: 'No web search provider is set up.', setup: { label: 'Set up web search', command: 'nearAi.setUpWebSearch' } } }),
+    ...(image ? {} : { GenerateImage: { off: `The image model (${input.settings.imageModel}) is not in this key's model list.`, setup: { label: 'Choose image model', command: 'setting:nearAi.agent.imageModel' } } }),
+    ...(input.securityConsented ? {} : { SecurityScan: { off: 'Dependency checks are not allowed for this project yet.', setup: { label: 'Scan dependencies', command: 'nearAi.securityScan' } } })
+  };
   const tools: DirectoryTool[] = [
-    ...builtInTools().map((tool) => toolEntry(tool, input)),
-    toolEntry(webFetchTool, input),
-    toolEntry(webSearchTool(undefined), input, input.webSearch ? {} : { off: 'No web search provider is set up.', setup: { label: 'Set up web search', command: 'nearAi.setUpWebSearch' } }),
-    toolEntry(checkCitationsTool, input),
-    toolEntry(checkOriginalityTool, input),
-    ...GRAPHICS_TOOLS.map((tool) => toolEntry(tool, input)),
-    toolEntry(imageTool(stubClient, image ?? { id: input.settings.imageModel }), input, image ? {} : { off: `The image model (${input.settings.imageModel}) is not in this key's model list.`, setup: { label: 'Choose image model', command: 'setting:nearAi.agent.imageModel' } }),
-    toolEntry(securityTool({ consented: () => input.securityConsented, scan: async () => undefined }), input, input.securityConsented ? {} : { off: 'Dependency checks are not allowed for this project yet.', setup: { label: 'Scan dependencies', command: 'nearAi.securityScan' } }),
-    ...memoryTools(stubMemory, { project: { kind: 'project', id: 'directory' } }, 'directory', 'directory').map((tool) => toolEntry(tool, input)),
+    ...builtInTools({
+      webSearch: input.webSearch && input.webSearchHost ? { name: 'searxng', label: 'configured provider', host: input.webSearchHost, search: async () => [] } : null,
+      imageClient: { ...(input.modelHost ? { baseHost: input.modelHost } : {}) } as NearAiClient,
+      imageModel: image ?? { id: input.settings.imageModel }
+    }).map((tool) => toolEntry(tool, input, unavailable[tool.name])),
     ...gsdTools({ home: '', root: '', skills: [], agents: [], ask: async () => [], spawn: async () => '' }).map((tool) => toolEntry(tool, input, noGsd))
   ];
 

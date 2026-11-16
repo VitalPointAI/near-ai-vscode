@@ -4,6 +4,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { DEFAULT_RULES } from '../agent/permissions';
+import { braveSearch, searxngSearch, tavilySearch } from '../agent/webSearch';
+import { webSearchTool } from '../agent/webTools';
+import { imageTool } from '../agent/extraTools';
+import type { NearAiClient } from '../services/nearAiClient';
 import { builtInTools, SHORTHAND_EXCEPTIONS } from '../agent/toolCatalog';
 import { effectsFor, parseToolManifest, shorthandFor } from '../domain/gate/manifest';
 import { describeManifest } from '../domain/gate/words';
@@ -14,7 +18,7 @@ const EM_DASH = String.fromCharCode(0x2014);
 
 function directoryInput(): DirectoryInput {
   return {
-    teams: [], policy: { mode: 'approve-risky', emergencyStop: false }, rules: DEFAULT_RULES, webSearch: true, securityConsented: true, mcp: [],
+    teams: [], policy: { mode: 'approve-risky', emergencyStop: false }, rules: DEFAULT_RULES, webSearch: true, webSearchHost: 'search.example', securityConsented: true, mcp: [],
     settings: { mainModel: 'm', tiers: { deep: 'm', standard: 'm', fast: 'm' }, roleModels: {}, visionModel: 'm', transcriptionModel: 'm', imageModel: 'm', safetyModel: 'm' }
   };
 }
@@ -118,4 +122,85 @@ test('the page\'s status still comes from the settings layer\'s shorthand, not f
   assert.equal(status.get('BashOutput'), 'runs', 'BashOutput stays a read for the settings layer although its manifest says plan');
   assert.equal(status.get('Write'), 'asks');
   assert.equal(status.get('Bash'), 'asks');
+});
+
+const EXPECTED_ORDER = [
+  'Read', 'Write', 'Edit', 'Glob', 'Grep', 'Bash', 'BashOutput', 'KillShell', 'TodoWrite',
+  'WebFetch', 'WebSearch', 'CheckCitations', 'CheckOriginality',
+  'VectorizeImage', 'RenderSvg', 'CreatePresentation', 'CreatePdf', 'CreateDocument',
+  'GenerateImage', 'SecurityScan', 'Remember', 'Recall'
+];
+
+test('the catalog holds the 22 built-in tools in the order a run is given them, and the page lists them in that order', () => {
+  assert.deepEqual(builtInTools().map((tool) => tool.name), EXPECTED_ORDER);
+  const listed = buildToolsDirectory(directoryInput()).tools.map((entry) => entry.name);
+  assert.deepEqual(listed.slice(0, EXPECTED_ORDER.length), EXPECTED_ORDER);
+});
+
+test('unattended runs keep exactly the tools they have today: the core tools, the web tools, the graphics tools and memory, never the image or scan tools', () => {
+  const unattended = builtInTools().filter((tool) => tool.manifest!.contexts.includes('unattended')).map((tool) => tool.name);
+  assert.deepEqual(unattended, EXPECTED_ORDER.filter((name) => !['GenerateImage', 'SecurityScan'].includes(name)));
+});
+
+test('the effects of the web, graphics, image, memory and security tools are filled from the call', () => {
+  const byName = new Map(builtInTools().map((tool) => [tool.name, tool]));
+  const effects = (name: string, raw: Record<string, unknown>) => {
+    const tool = byName.get(name)!;
+    const filled = effectsFor(tool.manifest!, tool.manifestInput?.(raw) ?? raw);
+    assert.equal(filled.ok, true, `${name} ${JSON.stringify(raw)}`);
+    return filled.ok ? filled.value : [];
+  };
+  assert.deepEqual(effects('WebFetch', { url: 'https://Example.com/a?b=1' }), [{ verb: 'network', hosts: ['example.com'] }]);
+  assert.equal(effectsFor(byName.get('WebFetch')!.manifest!, { url: 'not a url' }).ok, false);
+  assert.deepEqual(effects('WebSearch', { query: 'x' }), [{ verb: 'network', hosts: ['search.example'] }]);
+  assert.deepEqual(effects('CheckCitations', { citations: [] }), [{ verb: 'plan' }]);
+  assert.deepEqual(effects('CheckOriginality', { path: 'draft.md' }), [{ verb: 'plan' }, { verb: 'read', paths: ['draft.md'] }]);
+  assert.deepEqual(effects('CheckOriginality', { text: 'a draft' }), [{ verb: 'plan' }, { verb: 'read', paths: ['**'] }]);
+  assert.deepEqual(effects('VectorizeImage', { image_path: 'a.png', output_path: 'a.svg' }), [{ verb: 'workspaceWrite', paths: ['a.svg'] }, { verb: 'read', paths: ['a.png'] }]);
+  assert.deepEqual(effects('RenderSvg', { svg_path: 'a.svg', output_path: 'a.png' }), [{ verb: 'workspaceWrite', paths: ['a.png'] }, { verb: 'read', paths: ['a.svg'] }]);
+  for (const name of ['CreatePresentation', 'CreatePdf', 'CreateDocument']) assert.deepEqual(effects(name, { output_path: 'out/file' }), [{ verb: 'workspaceWrite', paths: ['out/file'] }]);
+  assert.deepEqual(effects('GenerateImage', { path: 'assets/a.png', prompt: 'x' }), [{ verb: 'workspaceWrite', paths: ['assets/a.png'] }, { verb: 'network', hosts: ['cloud-api.near.ai'] }]);
+  assert.deepEqual(effects('Remember', { label: 'a', fact: 'b' }), [{ verb: 'skill.write', scope: 'project' }]);
+  assert.deepEqual(effects('Recall', { query: 'a' }), [{ verb: 'plan' }]);
+  assert.deepEqual(effects('SecurityScan', {}), [
+    { verb: 'read', paths: ['**/package.json', '**/*lock*'] },
+    { verb: 'workspaceWrite', paths: ['sbom.cdx.json'] },
+    { verb: 'network', hosts: ['api.osv.dev', 'endoflife.date'] }
+  ]);
+});
+
+test('WebSearch names the host of the provider it was built with, and reaches nothing when there is none', () => {
+  const hosts = [braveSearch('k'), tavilySearch('k'), searxngSearch('https://Search.Example.org/'), searxngSearch('http://[::1]:8080')].map((provider) => provider.host);
+  assert.deepEqual(hosts, ['api.search.brave.com', 'api.tavily.com', 'search.example.org', 'localhost']);
+  for (const provider of [braveSearch('k'), tavilySearch('k'), searxngSearch('https://search.example.org')]) {
+    const tool = webSearchTool(provider);
+    assert.equal(shorthandFor(tool.manifest!), tool.capability);
+    const filled = effectsFor(tool.manifest!, { query: 'x' });
+    assert.deepEqual(filled.ok ? filled.value : undefined, [{ verb: 'network', hosts: [provider.host!] }]);
+    assert.deepEqual(tool.manifest!.hosts, [provider.host]);
+  }
+  const none = webSearchTool(undefined);
+  assert.deepEqual(none.manifest!.effects, [{ verb: 'plan' }]);
+  assert.deepEqual(none.manifest!.hosts, []);
+  assert.equal(none.manifest!.untrusted, true, 'its results are outside content either way');
+});
+
+test('GenerateImage names its client\'s host, and a host the format cannot hold becomes localhost', () => {
+  const host = (baseHost: string | undefined) => imageTool({ baseHost } as unknown as NearAiClient, { id: 'img' }).manifest!.hosts;
+  assert.deepEqual(host('cloud-api.near.ai'), ['cloud-api.near.ai']);
+  assert.deepEqual(host('localhost'), ['localhost']);
+  assert.deepEqual(host('127.0.0.1'), ['127.0.0.1']);
+  assert.deepEqual(host('[::1]'), ['localhost']);
+  assert.deepEqual(host(undefined), ['cloud-api.near.ai']);
+});
+
+test('the words say what each of these tools does, and say it only once', () => {
+  const words = (name: string) => describeManifest(builtInTools().find((tool) => tool.name === name)!.manifest!);
+  assert.deepEqual(words('WebFetch'), ['Connects to any site', 'Can also run when nobody is watching']);
+  assert.deepEqual(words('SecurityScan'), ['Reads files in this project', 'Can change files in this project', 'Connects to api.osv.dev, endoflife.date', 'Runs only while you are there']);
+  assert.deepEqual(words('GenerateImage'), ['Can change files in this project', 'Connects to cloud-api.near.ai', 'Runs only while you are there']);
+  for (const tool of builtInTools()) {
+    const lines = describeManifest(tool.manifest!);
+    assert.equal(new Set(lines).size, lines.length, `${tool.name}: no sentence twice`);
+  }
 });

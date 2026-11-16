@@ -7,7 +7,13 @@ import { ToolError } from './workspace';
 export type SearchProviderName = 'brave' | 'tavily' | 'searxng';
 export interface SearchResult { title: string; url: string; snippet: string; published?: string }
 export interface SearchOptions { count: number; freshness?: 'day' | 'week' | 'month' | 'year'; signal?: AbortSignal }
-export interface SearchProvider { name: SearchProviderName; label: string; search(query: string, options: SearchOptions): Promise<SearchResult[]> }
+export interface SearchProvider {
+  name: SearchProviderName;
+  label: string;
+  /** The one host this provider's queries go to, lowercase, as the gate's manifest names it (GATE-02). Absent in a test double, which then declares no network use. */
+  host?: string;
+  search(query: string, options: SearchOptions): Promise<SearchResult[]>;
+}
 
 const TIMEOUT_MS = 20_000;
 
@@ -23,7 +29,7 @@ const signalFor = (options: SearchOptions) => options.signal ? AbortSignal.any([
 export function braveSearch(apiKey: string, fetchFn: typeof fetch = fetch): SearchProvider {
   const freshness = { day: 'pd', week: 'pw', month: 'pm', year: 'py' } as const;
   return {
-    name: 'brave', label: 'Brave Search',
+    name: 'brave', label: 'Brave Search', host: 'api.search.brave.com',
     async search(query, options) {
       const url = new URL('https://api.search.brave.com/res/v1/web/search');
       url.searchParams.set('q', query);
@@ -38,7 +44,7 @@ export function braveSearch(apiKey: string, fetchFn: typeof fetch = fetch): Sear
 
 export function tavilySearch(apiKey: string, fetchFn: typeof fetch = fetch): SearchProvider {
   return {
-    name: 'tavily', label: 'Tavily',
+    name: 'tavily', label: 'Tavily', host: 'api.tavily.com',
     async search(query, options) {
       const body = { query, max_results: Math.min(20, options.count), search_depth: 'basic', include_published_date: true, ...(options.freshness ? { time_range: options.freshness } : {}) };
       const data = await json(await fetchFn('https://api.tavily.com/search', { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${apiKey}` }, body: JSON.stringify(body), signal: signalFor(options) }), 'Tavily') as { results?: Array<{ title?: string; url?: string; content?: string; published_date?: string | null }> };
@@ -52,7 +58,8 @@ export function searxngSearch(baseUrl: string, fetchFn: typeof fetch = fetch): S
   const base = new URL(baseUrl);
   if (base.protocol !== 'https:' && !['localhost', '127.0.0.1', '[::1]'].includes(base.hostname)) throw new ToolError('The SearXNG address must use https:// (http:// only for localhost).');
   return {
-    name: 'searxng', label: `SearXNG (${base.host})`,
+    // A loopback address in brackets is not a host name the gate's format accepts, so it is named as `localhost`, which it is.
+    name: 'searxng', label: `SearXNG (${base.host})`, host: base.hostname === '[::1]' ? 'localhost' : base.hostname.toLowerCase(),
     async search(query, options) {
       const url = new URL('search', base.href.endsWith('/') ? base.href : `${base.href}/`);
       url.searchParams.set('q', query);
