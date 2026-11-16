@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- **Team Mode is available as an early preview.** It is off unless you turn on the setting
+  `nearAi.team.preview`. With it on, **NEAR AI: Enable Team Mode** creates a team for the open
+  project: it makes a signing key for this computer and keeps it in the editor's secret storage,
+  starts a signed team log on its own branch of the project's git remote, and commits a small
+  `team.json` so every clone can find the team. Nothing else in your project is pushed unless you
+  choose to share your branch. **NEAR AI: Verify Team Log** checks every entry in that log
+  (signatures, order and permissions) and reports who is in the team and anything it refused. Team
+  Mode never asks for or stores your email address. For now a team holds only its owner: inviting
+  teammates arrives in a later release.
+
 ## 0.4.24
 
 This release gives questions and image reviews a time limit that matches approvals, fixes edge
