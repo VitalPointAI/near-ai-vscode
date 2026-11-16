@@ -178,6 +178,9 @@ function replay(file: unknown, rawHead: KeyHistoryHead | undefined): KeyHistoryR
     if (!verdict.ok) return fail(whyRefused(seq, verdict.reason, verdict.message));
     const record = parseKeyRecord(verdict.payload);
     if (record === undefined || record.at !== verdict.signedAt) return fail(`Record ${seq} of the key history says a different time than it was signed at.`);
+    // The signers allowed above were chosen from `claimed`, a first read of the untrusted record; what is applied below is the verified copy. They must be
+    // the same record, so an object that reads differently the second time cannot choose who may sign what is applied.
+    if (!canonicalBytes(claimed).equals(canonicalBytes(record))) return fail(`Record ${seq} of the key history reads differently each time it is looked at, so it is not trusted.`);
 
     if (record.kind === 'created') {
       if (active !== undefined) return fail(`Record ${seq} of the key history adds a first key while another key is still active.`);

@@ -306,6 +306,25 @@ test('fail closed: a record re-signed by a different key, and a whole history ma
   assertFailsClosed(replayKeyHistory(own.file, original.head), [A, B, C, attacker], /does not match the end/);
 });
 
+test('fail closed: a record whose payload reads differently the second time cannot pick its own signer (getter object, review of PR 2)', () => {
+  const { A, steps } = chainAB();
+  const attacker = makeSigner();
+  const base = build([steps[0] as Step]);
+  const first = base.file.records[0] as SignedPayload<KeyRecord>;
+  // What the attacker really signs: a rotation of A to the attacker's key, signed by the attacker (not allowed, A must sign a rotation of A).
+  const rotation: KeyRecord = { seq: 2, prev: keyRecordHash(first), kind: 'rotated', key: refOf(A), next: refOf(attacker), at: T2 };
+  const real = signPayload(attacker, 'key-record', rotation, { now: at(T2) });
+  // What it shows the first read: a created record for the attacker's own key, which the attacker may sign.
+  const shown: KeyRecord = { seq: 2, prev: keyRecordHash(first), kind: 'created', key: refOf(attacker), at: T2 };
+  let reads = 0;
+  const trick = { ...real } as Record<string, unknown>;
+  Object.defineProperty(trick, 'payload', { enumerable: true, get: () => { reads += 1; return reads === 1 ? shown : real.payload; } });
+  const file = { version: 1, records: [first, trick] };
+  const result = replayKeyHistory(file, { seq: 2, hash: keyRecordHash(real) });
+  assert.equal(result.ok, false, 'the replay refuses a record that does not read the same twice');
+  if (!result.ok) assert.equal(result.lookup(refOf(attacker)).state, 'unknown');
+});
+
 test('fail closed: a record whose at differs from its signedAt', () => {
   const { A, B, steps } = chainAB();
   const { file, head } = build([steps[0] as Step, { ...(steps[1] as Step), payloadAt: '2026-01-31T00:00:00.000Z' }]);
