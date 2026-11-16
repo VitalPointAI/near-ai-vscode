@@ -670,7 +670,7 @@ Plans:
 | 82 Signal channel | SGNL-01 … SGNL-05 | 5 |
 | 83 Telegram channel | TGRM-01 … TGRM-04 | 4 |
 | 84 Ops, onboarding and release | OPS-01 … OPS-07 | 7 |
-| **Total** | | **132** |
+| **Total** | | **133** |
 
 RUNL-05 (approvals in the private chat) is retired: APRV-01 … APRV-04 replace it with request-bound, signed approvals. The identity amendment of 2026-11-15 added CLAS-01 … CLAS-07 (Phase 70), DLGT-08 and VCRD-01 … VCRD-07 (Phase 71): 117 to 132.
 
