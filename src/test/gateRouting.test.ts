@@ -79,7 +79,7 @@ test('every rule id can be reached, and every refusing rule has one plain senten
   assert.deepEqual(Object.keys(ROUTE_REFUSALS).sort(), ROUTE_RULES.filter((rule) => !['route.any-cloud', 'route.attested-cloud', 'route.local-only'].includes(rule)).sort());
   for (const sentence of Object.values(ROUTE_REFUSALS)) {
     assert.match(sentence, /^Nothing was sent\. /);
-    assert.ok(!sentence.includes('—'), 'no em-dash');
+    assert.ok(!sentence.includes(String.fromCharCode(0x2014)), 'no em-dash');
     assert.ok(!/NEAR organization/i.test(sentence), 'say your organization');
     assert.ok(sentence.length < 400);
   }
@@ -206,3 +206,32 @@ function permutations<T>(items: readonly T[]): T[][] {
   });
   return out;
 }
+
+test('neighbouring levels route as the defaults say (edge CLAS-05 adjacency)', () => {
+  const tierOf = (scale: string, level: string): string => tierForLabel(label(scale, level), DEFAULT_ROUTING);
+  assert.equal(tierOf('org', 'Internal'), 'attested-cloud');
+  assert.equal(tierOf('org', 'Restricted'), 'local-only');
+  assert.equal(tierOf('nato', 'NATO Unclassified'), 'attested-cloud');
+  assert.equal(tierOf('nato', 'NATO Restricted'), 'local-only');
+  assert.equal(tierOf('ca-protected', 'Protected A'), 'attested-cloud');
+  assert.equal(tierOf('ca-protected', 'Protected B'), 'local-only');
+  // The same level name on two scales is two different keys.
+  assert.equal(tierOf('org', 'Confidential'), 'attested-cloud');
+  assert.equal(tierOf('ca-classified', 'Confidential'), 'local-only');
+});
+
+test('routing keys are scale/level with the exact level names, spaces kept and case-sensitive; any other spelling is refused (edge CLAS-05 encoding)', () => {
+  assert.ok(Object.prototype.hasOwnProperty.call(DEFAULT_ROUTING.levels, 'ca-protected/Protected B'));
+  const misspelled = ['ca-protected/protected b', 'ca-protected/Protected_B', 'ca-protected/ProtectedB', 'ca-protected/Protected B ', 'CA-PROTECTED/Protected B', 'Protected B'];
+  for (const key of misspelled) {
+    const levels = { ...DEFAULT_ROUTING.levels, [key]: 'any-cloud' };
+    assert.equal(parseRouting({ levels, handling: {}, compartments: {}, localHosts: [] }, SCALE_PRESETS).ok, false, key);
+    const swapped: Record<string, string> = { ...DEFAULT_ROUTING.levels };
+    delete swapped['ca-protected/Protected B'];
+    swapped[key] = 'any-cloud';
+    assert.equal(parseRouting({ levels: swapped, handling: {}, compartments: {}, localHosts: [] }, SCALE_PRESETS).ok, false, key);
+  }
+  // A label whose level is spelled another way has no entry in a valid table, so it is denied, never routed as another level.
+  assert.equal(tierForLabel(label('ca-protected', 'protected b'), DEFAULT_ROUTING), 'deny');
+  assert.equal(tierForLabel(label('ca-protected', 'Protected B'), DEFAULT_ROUTING), 'local-only');
+});

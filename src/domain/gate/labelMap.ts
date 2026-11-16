@@ -1,0 +1,210 @@
+// Label map v1 (CLAS-01, D-25): the one file per project, `.planning/.near-ai/labels.json`, that says which label a file, a folder or the project carries.
+// It is committed with the project so labels travel with it, and it is signed through Phase 69's one signer under the purpose `label-map`.
+// Pure: no I/O, no clock, no vscode, no package. Reading and writing the file is a later plan; this file holds the format, the key rule and the resolution.
+//
+// Resolution order: the file's own entry, then the nearest labelled ancestor folder, then the project entry, then the bundle's default label.
+// A label only ever restricts, so a map that does not verify (tampered, or signed by a device this one does not know) is applied only where it RAISES the
+// label the verified sources give, never where it would lower one, and the result says so (`raisedByUnverified`) so the person can be told.
+import { normalizeRelative } from '../protectedPaths';
+import { raiseMark } from './dominance';
+import type { Mark } from './dominance';
+import { parseLabel } from './labels';
+import type { Label, ScaleTable } from './labels';
+import { checkKeys, childPath, isRecord, ownValue, refused } from './shape';
+import type { Parsed } from './shape';
+
+export const LABEL_MAP_VERSION = 1;
+
+/** The label map's own vocabulary version: the version of the label format its entries use (labels v1). */
+const LABEL_MAP_VOCABULARY = 1;
+
+/** The size a writer refuses to go above: the signed envelope must stay under MAX_PAYLOAD_BYTES (256 KiB) once the signature and the wrapper are added. */
+export const MAX_LABEL_MAP_BYTES = 200 * 1024;
+
+const MAX_KEY_LENGTH = 512;
+const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/;
+const DRIVE_PREFIX = /^[A-Za-z]:/;
+
+export interface LabelMapPayload {
+  readonly labelMapVersion: 1;
+  readonly vocabulary: 1;
+  /** The label of the project as a whole; absent means the bundle's default applies below the folders. */
+  readonly project?: Label;
+  /** Keyed by normalised project-relative path; a folder's key ends with `/`. */
+  readonly entries: Readonly<Record<string, Label>>;
+}
+
+/** Where a resolved label came from. */
+export type LabelOrigin = 'file' | 'folder' | 'project' | 'default';
+
+export interface ResolvedLabel {
+  readonly mark: Mark;
+  /** Where the verified sources took the label from. */
+  readonly origin: LabelOrigin;
+  /** True when a map that did not verify raised the label above what the verified sources gave. */
+  readonly raisedByUnverified: boolean;
+}
+
+/**
+ * The key an entry is stored under: the path normalised with `normalizeRelative`, with a trailing `/` for a folder. Refused: an empty path, a `..`
+ * segment, a leading `/`, a backslash, a drive prefix, a control character, and anything over 512 characters.
+ */
+export function labelMapKey(path: string, isFolder: boolean): Parsed<string> {
+  if (typeof path !== 'string' || path === '') return refused('wrong-type', '');
+  if (path.length > MAX_KEY_LENGTH) return refused('not-allowed-here', '');
+  if (path.startsWith('/') || path.includes('\\') || DRIVE_PREFIX.test(path) || CONTROL_CHARACTERS.test(path)) return refused('not-allowed-here', '');
+  if (path.split('/').includes('..')) return refused('not-allowed-here', '');
+  const normalised = normalizeRelative(path);
+  if (normalised === '') return refused('wrong-type', '');
+  const key = isFolder ? `${normalised}/` : normalised;
+  return key.length > MAX_KEY_LENGTH ? refused('not-allowed-here', '') : { ok: true, value: key };
+}
+
+/** A stored key is valid only in its own canonical form, so one entry has one spelling. */
+function canonicalKey(key: string): Parsed<string> {
+  const keyed = labelMapKey(key, key.endsWith('/'));
+  return keyed.ok && keyed.value === key ? keyed : refused(keyed.ok ? 'not-allowed-here' : keyed.reason, '');
+}
+
+/** A property defined as an own data property, so a path named `__proto__` is an entry like any other and never changes a prototype. */
+function entriesOf(pairs: ReadonlyArray<readonly [string, Label]>): Readonly<Record<string, Label>> {
+  return Object.freeze(Object.fromEntries(pairs) as Record<string, Label>);
+}
+
+/** Parses a label map payload. Unknown fields, a key that is not canonical, and a label that does not parse against the scales are each refused. */
+export function parseLabelMap(value: unknown, scales: ScaleTable, path = ''): Parsed<LabelMapPayload> {
+  if (!isRecord(value)) return refused('wrong-type', path);
+  const keys = checkKeys(value, path, ['labelMapVersion', 'vocabulary', 'entries'], ['project']);
+  if (keys !== undefined) return keys;
+  for (const [field, expected] of [['labelMapVersion', LABEL_MAP_VERSION], ['vocabulary', LABEL_MAP_VOCABULARY]] as const) {
+    const found = ownValue(value, field);
+    if (typeof found !== 'number' || !Number.isSafeInteger(found)) return refused('wrong-type', childPath(path, field));
+    if (found !== expected) return refused('unknown-version', childPath(path, field));
+  }
+  let project: Label | undefined;
+  if (Object.prototype.hasOwnProperty.call(value, 'project')) {
+    const parsed = parseLabel(ownValue(value, 'project'), scales, childPath(path, 'project'));
+    if (!parsed.ok) return parsed;
+    project = parsed.value;
+  }
+  const raw = ownValue(value, 'entries');
+  if (!isRecord(raw)) return refused('wrong-type', childPath(path, 'entries'));
+  const pairs: Array<readonly [string, Label]> = [];
+  for (const key of Object.keys(raw)) {
+    const where = childPath(childPath(path, 'entries'), key.slice(0, 40));
+    const checked = canonicalKey(key);
+    if (!checked.ok) return refused(checked.reason, where);
+    const label = parseLabel(ownValue(raw, key), scales, where);
+    if (!label.ok) return label;
+    pairs.push([key, label.value]);
+  }
+  const payload = { labelMapVersion: LABEL_MAP_VERSION, vocabulary: LABEL_MAP_VOCABULARY, entries: entriesOf(pairs) } as const;
+  return { ok: true, value: Object.freeze(project === undefined ? payload : { ...payload, project }) };
+}
+
+/** The keys that could hold a label for this path, nearest first: the file's own key, then each ancestor folder up to the top. */
+function chainKeys(path: string): { readonly own: string; readonly folders: readonly string[] } | undefined {
+  const own = labelMapKey(path, path.endsWith('/'));
+  if (!own.ok) return undefined;
+  const parts = own.value.replace(/\/$/, '').split('/');
+  const folders: string[] = [];
+  for (let end = parts.length - 1; end >= 1; end -= 1) folders.push(`${parts.slice(0, end).join('/')}/`);
+  return { own: own.value, folders };
+}
+
+function lookup(map: LabelMapPayload | undefined, path: string): { readonly label: Label; readonly origin: LabelOrigin } | undefined {
+  if (map === undefined) return undefined;
+  const chain = chainKeys(path);
+  if (chain !== undefined) {
+    const own = ownValue(map.entries, chain.own);
+    if (own !== undefined) return { label: own as Label, origin: chain.own.endsWith('/') ? 'folder' : 'file' };
+    for (const folder of chain.folders) {
+      const found = ownValue(map.entries, folder);
+      if (found !== undefined) return { label: found as Label, origin: 'folder' };
+    }
+  }
+  return map.project === undefined ? undefined : { label: map.project, origin: 'project' };
+}
+
+function sameMark(a: Mark, b: Mark): boolean {
+  const flat = (mark: Mark): string => JSON.stringify(mark.map((label) => [label.scale, label.level, label.compartments, label.releasability, label.handling]));
+  return flat(a) === flat(b);
+}
+
+export interface ResolveSources {
+  /** A map whose signature verified. */
+  readonly verified?: LabelMapPayload;
+  /** A map that did not verify. It can raise a label and never lower one. */
+  readonly unverified?: LabelMapPayload;
+  /** The label of last resort, from the signed policy bundle. */
+  readonly bundleDefault: Label;
+  /** The scales the labels are joined on. */
+  readonly scales: ScaleTable;
+}
+
+/**
+ * The label of a project-relative path (a path ending in `/` is a folder): the verified map's own entry, then its nearest labelled ancestor folder,
+ * then its project entry, then the bundle default. A map that did not verify then goes through `raiseMark` only, so it can raise the result and never
+ * lower it, and `raisedByUnverified` says when it did. `origin` always names where the VERIFIED sources took the label from. A path that cannot be
+ * keyed (it climbs out of the project, for example) has no file or folder entry and takes the project entry or the default.
+ */
+export function resolveLabel(path: string, sources: ResolveSources): ResolvedLabel {
+  const verified = lookup(sources.verified, path);
+  const base: Mark = Object.freeze([verified === undefined ? sources.bundleDefault : verified.label]);
+  const origin: LabelOrigin = verified === undefined ? 'default' : verified.origin;
+  const unverified = lookup(sources.unverified, path);
+  if (unverified === undefined) return { mark: base, origin, raisedByUnverified: false };
+  const raised = raiseMark(base, unverified.label, sources.scales);
+  return sameMark(base, raised) ? { mark: base, origin, raisedByUnverified: false } : { mark: raised, origin, raisedByUnverified: true };
+}
+
+function assertKey(key: string): void {
+  if (!canonicalKey(key).ok) throw new RangeError('That path cannot be used as a label map key.');
+}
+
+function build(project: Label | undefined, pairs: ReadonlyArray<readonly [string, Label]>): LabelMapPayload {
+  const payload = { labelMapVersion: LABEL_MAP_VERSION, vocabulary: LABEL_MAP_VOCABULARY, entries: entriesOf(pairs) } as const;
+  return Object.freeze(project === undefined ? payload : { ...payload, project });
+}
+
+function pairsOf(map: LabelMapPayload): Array<readonly [string, Label]> {
+  return Object.keys(map.entries).map((key) => [key, ownValue(map.entries, key) as Label] as const);
+}
+
+/** A new map with the entry for `key` set, or removed when `label` is undefined. The key must come from `labelMapKey`; any other key throws. */
+export function setLabelEntry(map: LabelMapPayload, key: string, label: Label | undefined): LabelMapPayload {
+  assertKey(key);
+  const kept = pairsOf(map).filter(([existing]) => existing !== key);
+  return build(map.project, label === undefined ? kept : [...kept, [key, label]]);
+}
+
+/** A new map with the project entry set, or removed when `label` is undefined. */
+export function setProjectLabel(map: LabelMapPayload, label: Label | undefined): LabelMapPayload {
+  return build(label, pairsOf(map));
+}
+
+/**
+ * A new map after a rename: the entry at `from` moves to `to`, and when both are folders every entry below `from` moves below `to` as well. An entry
+ * already at a destination key is replaced, as the renamed file replaced what was there. A file key cannot move to a folder key or the other way round.
+ */
+export function moveLabelEntry(map: LabelMapPayload, from: string, to: string): LabelMapPayload {
+  assertKey(from);
+  assertKey(to);
+  if (from.endsWith('/') !== to.endsWith('/')) throw new RangeError('A file entry cannot move to a folder entry.');
+  const folder = from.endsWith('/');
+  const moves = (key: string): boolean => (folder ? key.startsWith(from) : key === from);
+  const moved: Array<readonly [string, Label]> = [];
+  const kept: Array<readonly [string, Label]> = [];
+  for (const [key, label] of pairsOf(map)) {
+    if (moves(key)) moved.push([`${to}${folder ? key.slice(from.length) : ''}`, label]);
+    else kept.push([key, label]);
+  }
+  for (const [key] of moved) assertKey(key);
+  const destinations = new Set(moved.map(([key]) => key));
+  return build(map.project, [...kept.filter(([key]) => !destinations.has(key)), ...moved]);
+}
+
+/** The keys of entries whose path `exists` says is gone (a folder key keeps its trailing `/`), in sorted order, so a person can be asked what to do. */
+export function missingLabelPaths(map: LabelMapPayload, exists: (key: string) => boolean): readonly string[] {
+  return Object.freeze(Object.keys(map.entries).filter((key) => !exists(key)).sort());
+}
