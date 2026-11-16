@@ -1,7 +1,9 @@
 import type { ActionCapability, ActionPolicy, ActionPolicyMode } from '../domain/policy';
 import { GSD_COMMANDS } from '../domain/gsdCommands';
 import { decidePermission, PermissionRules, RunGrants } from '../agent/permissions';
-import { AgentTool, CORE_TOOLS } from '../agent/tools';
+import { AgentTool } from '../agent/tools';
+import { builtInTools } from '../agent/toolCatalog';
+import { describeManifest } from '../domain/gate/words';
 import { checkCitationsTool, checkOriginalityTool, webFetchTool, webSearchTool } from '../agent/webTools';
 import { GRAPHICS_TOOLS } from '../agent/graphicsTools';
 import { imageTool, memoryTools } from '../agent/extraTools';
@@ -143,6 +145,8 @@ function toolEntry(tool: AgentTool<any>, input: DirectoryInput, available: { off
   if (tool.sensitive) notes.push('Some paths always ask first (files that look like credentials, or protected locations).');
   if (tool.risky) notes.push('Can ask in any mode once the run has read outside content.');
   if (tool.untrusted) notes.push('Its results are outside content.');
+  // What the tool declares it can do, in plain words (GATE-03, D-07): the same sentences the gate and the member cards use, after today's notes.
+  if (tool.manifest) notes.push(...describeManifest(tool.manifest));
   return {
     name: tool.name, description: firstSentence(tool.description), capability: CAPABILITY_LABEL[tool.capability], status, statusText: STATUS_TEXT[status], notes,
     ...(available.setup ? { setup: available.setup } : {}), ...(tool.autoSafe === true ? { autoSafe: true } : {})
@@ -175,7 +179,7 @@ export function buildToolsDirectory(input: DirectoryInput): ToolsDirectory {
   const gsdInstalled = Boolean(input.gsd);
   const noGsd = gsdInstalled ? {} : { off: 'Offered to agents once Open-GSD is installed (it installs with your first workflow).' };
   const tools: DirectoryTool[] = [
-    ...CORE_TOOLS.map((tool) => toolEntry(tool, input)),
+    ...builtInTools().map((tool) => toolEntry(tool, input)),
     toolEntry(webFetchTool, input),
     toolEntry(webSearchTool(undefined), input, input.webSearch ? {} : { off: 'No web search provider is set up.', setup: { label: 'Set up web search', command: 'nearAi.setUpWebSearch' } }),
     toolEntry(checkCitationsTool, input),

@@ -3,6 +3,9 @@ import { mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import * as path from 'node:path';
 import type { ActionCapability } from '../domain/policy';
+import { parseToolManifest } from '../domain/gate/manifest';
+import type { InputAs, ToolManifest } from '../domain/gate/manifest';
+import type { GateContextName } from '../domain/gate/bundle';
 import { namesStateKeys, protectedWriteReason, STATE_FOLDER_PATH, STATE_KEYS_PATH, stateKeysReason } from '../domain/protectedPaths';
 import type { RunCheckpoints } from './checkpoints';
 import { unifiedDiff } from './diff';
@@ -52,6 +55,17 @@ export interface AgentTool<I = Record<string, unknown>> {
   description: string;
   parameters: Record<string, unknown>;
   capability: ActionCapability;
+  /**
+   * What this tool can do, in the capability vocabulary (GATE-02, D-05), declared next to the tool. Optional in plan 70-08; plan 70-09 makes it
+   * required. The gate reads it for the call's effects and the Tools page reads it for the words; neither changes the settings layer's answer
+   * (`capability` above), which D-04 keeps.
+   */
+  manifest?: ToolManifest;
+  /**
+   * The call's arguments as the manifest reads them: the defaults the tool applies itself written out (a Glob with no path searches the project, so
+   * its path is `**`), because a manifest names fields and cannot say "or the default". Absent means the arguments are used as given.
+   */
+  manifestInput?(raw: Record<string, unknown>): Record<string, unknown>;
   /** Changes nothing, so it can run alongside other lookups from the same turn even though it is not a read (e.g. a web fetch). */
   concurrent?: boolean;
   /** PERF-04: this particular call changes nothing (a read-only shell command), so it may run alongside other lookups. */
@@ -79,6 +93,29 @@ export interface AgentTool<I = Record<string, unknown>> {
    */
   autoSafe?: boolean;
   run(input: I, context: ToolContext): Promise<string>;
+}
+
+/** A manifest effect value read from one named argument of the call (the argument's name as the model sends it, not the parsed field's). */
+export function fromArgument(field: string, as: InputAs = 'path'): { from: 'input'; field: string; as: InputAs } {
+  return { from: 'input', field, as };
+}
+
+export const INTERACTIVE_AND_UNATTENDED: readonly GateContextName[] = Object.freeze(['interactive', 'unattended'] as const);
+export const INTERACTIVE_ONLY: readonly GateContextName[] = Object.freeze(['interactive'] as const);
+
+/**
+ * Declares a built-in tool's manifest. The draft goes through the same parser a bundle or a member card would use, so a declaration the format
+ * would refuse stops the extension from loading, not a call at run time. The result is frozen deeply by the parser. Every built-in tool runs on this machine.
+ */
+export function declareManifest(draft: { tool: string; effects: readonly unknown[]; hosts?: readonly string[]; contexts: readonly GateContextName[]; untrusted?: boolean }): ToolManifest {
+  const parsed = parseToolManifest({ manifestVersion: 1, tool: draft.tool, effects: draft.effects, hosts: draft.hosts ?? [], credentials: [], contexts: draft.contexts, untrusted: draft.untrusted ?? false, runsOn: 'this-machine' });
+  if (!parsed.ok) throw new Error(`The manifest of ${draft.tool} is not valid (${parsed.reason} at ${parsed.path || 'the top'}).`);
+  return parsed.value;
+}
+
+/** A call with no `path` argument means the whole project, so the manifest reads `**` (Glob, Grep, CheckOriginality). A path the call names is passed as given. */
+export function withDefaultPath(raw: Record<string, unknown>): Record<string, unknown> {
+  return typeof raw.path === 'string' && raw.path !== '' ? raw : { ...raw, path: '**' };
 }
 
 /** Files that usually hold credentials; reading one asks first, since its contents go to the model. */
@@ -186,6 +223,7 @@ export const readTool: AgentTool<{ path: string; offset: number; limit: number; 
   description: 'Read a text file from the workspace. Returns lines prefixed with line numbers (`   12\\t...`). Pass offset (1-based line) and limit to read a range, up to 2000 lines at once. Without a range, a file over 600 lines returns its first 400 lines with an outline, so read large files in parts. Read a file before editing or overwriting it.',
   parameters: { type: 'object', properties: { file_path: { type: 'string', description: 'Path relative to the workspace root, or absolute inside it.' }, offset: { type: 'number', description: 'First line to read (1-based).' }, limit: { type: 'number', description: 'Number of lines to read.' } }, required: ['file_path'], additionalProperties: false },
   capability: 'read',
+  manifest: declareManifest({ tool: 'Read', effects: [{ verb: 'read', paths: [fromArgument('file_path')] }], contexts: INTERACTIVE_AND_UNATTENDED }),
   parse: (raw) => ({ path: str(raw, 'file_path')!, offset: Math.max(1, Math.floor(num(raw, 'offset') ?? 1)), limit: Math.min(MAX_READ_LINES, Math.max(1, Math.floor(num(raw, 'limit') ?? MAX_READ_LINES))), ranged: num(raw, 'offset') !== undefined || num(raw, 'limit') !== undefined }),
   title: (input) => `Read ${input.path}`,
   forbidden: (input, context) => forbiddenPath(input.path, context),
@@ -221,6 +259,7 @@ export const writeTool: AgentTool<{ path: string; content: string }> = {
   description: 'Create a file, or replace an existing file entirely. Prefer Edit for changes to existing files. An existing file must be Read first.',
   parameters: { type: 'object', properties: { file_path: { type: 'string' }, content: { type: 'string', description: 'The complete new file contents.' } }, required: ['file_path', 'content'], additionalProperties: false },
   capability: 'workspaceWrite',
+  manifest: declareManifest({ tool: 'Write', effects: [{ verb: 'workspaceWrite', paths: [fromArgument('file_path')] }], contexts: INTERACTIVE_AND_UNATTENDED }),
   parse: (raw) => ({ path: str(raw, 'file_path')!, content: typeof raw.content === 'string' ? raw.content : (() => { throw new ToolError('Parameter "content" must be a string.'); })() }),
   title: (input) => `Write ${input.path}`,
   forbidden: (input, context) => forbiddenPath(input.path, context),
@@ -247,6 +286,7 @@ export const editTool: AgentTool<{ path: string; oldString: string; newString: s
   description: 'Replace an exact string in a file. old_string must match the file exactly (including indentation) and be unique unless replace_all is true. Read the file first.',
   parameters: { type: 'object', properties: { file_path: { type: 'string' }, old_string: { type: 'string' }, new_string: { type: 'string' }, replace_all: { type: 'boolean', description: 'Replace every occurrence.' } }, required: ['file_path', 'old_string', 'new_string'], additionalProperties: false },
   capability: 'workspaceWrite',
+  manifest: declareManifest({ tool: 'Edit', effects: [{ verb: 'workspaceWrite', paths: [fromArgument('file_path')] }], contexts: INTERACTIVE_AND_UNATTENDED }),
   parse: (raw) => {
     const oldString = typeof raw.old_string === 'string' ? raw.old_string : undefined;
     const newString = typeof raw.new_string === 'string' ? raw.new_string : undefined;
@@ -324,6 +364,8 @@ export const globTool: AgentTool<{ pattern: string; path?: string }> = {
   description: 'Find files by glob pattern, such as "**/*.ts" or "src/**/test/*.ts". Returns workspace-relative paths, most recently modified first. Skips .git, node_modules, and build output unless the pattern names them.',
   parameters: { type: 'object', properties: { pattern: { type: 'string' }, path: { type: 'string', description: 'Directory to search; defaults to the workspace root.' } }, required: ['pattern'], additionalProperties: false },
   capability: 'read',
+  manifest: declareManifest({ tool: 'Glob', effects: [{ verb: 'read', paths: [fromArgument('path')] }], contexts: INTERACTIVE_AND_UNATTENDED }),
+  manifestInput: withDefaultPath,
   parse: (raw) => ({ pattern: str(raw, 'pattern')!, path: str(raw, 'path', false) }),
   title: (input) => `Find ${input.pattern}${input.path ? ` in ${input.path}` : ''}`,
   forbidden: async (input, context) => (isStateKeysPath(input.pattern) || namesStateKeys(input.pattern) ? stateKeysReason(input.pattern) : forbiddenPath(input.path, context)),
@@ -349,6 +391,8 @@ export const grepTool: AgentTool<{ pattern: string; path?: string; glob?: string
   description: 'Search file contents with a regular expression (ripgrep syntax). output_mode: "files_with_matches" (default) lists files, "content" shows matching lines with line numbers, "count" shows matches per file. Filter files with glob (e.g. "*.ts").',
   parameters: { type: 'object', properties: { pattern: { type: 'string' }, path: { type: 'string' }, glob: { type: 'string' }, output_mode: { type: 'string', enum: ['files_with_matches', 'content', 'count'] }, '-i': { type: 'boolean', description: 'Case-insensitive.' }, context: { type: 'number', description: 'Lines of context around each match (content mode).' }, head_limit: { type: 'number', description: 'Maximum lines of output.' } }, required: ['pattern'], additionalProperties: false },
   capability: 'read',
+  manifest: declareManifest({ tool: 'Grep', effects: [{ verb: 'read', paths: [fromArgument('path')] }], contexts: INTERACTIVE_AND_UNATTENDED }),
+  manifestInput: withDefaultPath,
   parse: (raw) => {
     const mode = (str(raw, 'output_mode', false) ?? 'files_with_matches') as GrepMode;
     if (!['files_with_matches', 'content', 'count'].includes(mode)) throw new ToolError('output_mode must be files_with_matches, content, or count.');
@@ -554,6 +598,7 @@ export const bashTool: AgentTool<{ command: string; timeoutMs: number; backgroun
   description: 'Run a shell command in a persistent bash session rooted at the workspace (cd and exported variables carry over). Use for builds, tests, git, and package managers; use Read/Glob/Grep instead of cat/find/grep. Set run_in_background for long-running processes such as dev servers, then poll with BashOutput.',
   parameters: { type: 'object', properties: { command: { type: 'string' }, description: { type: 'string', description: 'Five to ten words on what the command does.' }, timeout: { type: 'number', description: `Milliseconds, up to ${MAX_TIMEOUT_MS} (default ${DEFAULT_TIMEOUT_MS}).` }, run_in_background: { type: 'boolean' } }, required: ['command'], additionalProperties: false },
   capability: 'shell',
+  manifest: declareManifest({ tool: 'Bash', effects: [{ verb: 'shell', cwd: 'workspace' }, { from: 'command' }], contexts: INTERACTIVE_AND_UNATTENDED }),
   parse: (raw) => ({ command: str(raw, 'command')!, timeoutMs: num(raw, 'timeout') ?? DEFAULT_TIMEOUT_MS, background: bool(raw, 'run_in_background'), description: str(raw, 'description', false) }),
   title: (input) => input.description ? `${input.description}` : `Run ${input.command.split('\n')[0].slice(0, 80)}`,
   async preview(input, context) { return { kind: 'command', command: input.command, cwd: displayPath(context.root, context.shell.workingDirectory) || '.', background: input.background }; },
@@ -586,6 +631,7 @@ export const bashOutputTool: AgentTool<{ id: string }> = {
   description: 'Read new output from a background command started with Bash run_in_background, and whether it is still running.',
   parameters: { type: 'object', properties: { bash_id: { type: 'string' } }, required: ['bash_id'], additionalProperties: false },
   capability: 'read',
+  manifest: declareManifest({ tool: 'BashOutput', effects: [{ verb: 'plan' }], contexts: INTERACTIVE_AND_UNATTENDED }),
   parse: (raw) => ({ id: str(raw, 'bash_id')! }),
   title: (input) => `Check ${input.id}`,
   async run(input, context) {
@@ -601,6 +647,7 @@ export const killShellTool: AgentTool<{ id: string }> = {
   // It can only stop a job this run started (ids are the run's own), never run a command, so like TodoWrite it changes
   // only the run's own state and does not ask. As 'shell' it had no command, and auto mode sent an empty one to the safety model.
   capability: 'plan',
+  manifest: declareManifest({ tool: 'KillShell', effects: [{ verb: 'plan' }], contexts: INTERACTIVE_AND_UNATTENDED }),
   parse: (raw) => ({ id: str(raw, 'shell_id')! }),
   title: (input) => `Stop ${input.id}`,
   async run(input, context) { return context.shell.kill(input.id) ? `Stopped ${input.id}.` : `${input.id} was not running.`; }
@@ -611,6 +658,7 @@ export const todoTool: AgentTool<{ todos: Todo[] }> = {
   description: 'Create or update the task list for this run. Use it for work with three or more steps: list the steps, keep exactly one in_progress, and mark each completed as soon as it is done. Send the full list every time.',
   parameters: { type: 'object', properties: { todos: { type: 'array', items: { type: 'object', properties: { content: { type: 'string' }, status: { type: 'string', enum: ['pending', 'in_progress', 'completed'] }, activeForm: { type: 'string', description: 'Present-tense form shown while in progress, e.g. "Running tests".' } }, required: ['content', 'status'], additionalProperties: false } } }, required: ['todos'], additionalProperties: false },
   capability: 'plan',
+  manifest: declareManifest({ tool: 'TodoWrite', effects: [{ verb: 'plan' }], contexts: INTERACTIVE_AND_UNATTENDED }),
   parse: (raw) => {
     if (!Array.isArray(raw.todos)) throw new ToolError('todos must be an array.');
     const todos = raw.todos.slice(0, 50).map((item) => {
