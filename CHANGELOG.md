@@ -1,6 +1,9 @@
 # Changelog
 
-## Unreleased
+## 0.4.26
+
+This release shows your saved teams when you set up a new team, lets you share and import a team
+as one file, and tightens how Team Mode handles git addresses and key history warnings.
 
 - **Your saved teams appear when you set up a new team.** The starting points in Team Studio's
   builder, including **Set Up Project Team** in a new project, now list the teams you saved as
@@ -24,8 +27,8 @@
   receive the address on its command line, where other users of the computer can read it, so
   Team Mode now stops and asks you to update git or move the credentials into a credential
   helper.
-- **Team Mode warnings about your key history reach the NEAR AI Team output** from every action,
-  not only Enable Team Mode.
+- **Team Mode warnings about your key history reach the NEAR AI Team output** once Team Mode is
+  active in the window (after Enable or when a team session starts), not only from Enable.
 
 ## 0.4.25
 
