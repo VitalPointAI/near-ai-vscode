@@ -364,6 +364,28 @@ test('tagging waits while CI jobs from github-actions are not yet linked to a wo
   assert.deepEqual([failedJob.ok, failedJob.waiting], [false, false]);
 });
 
+// 0.4.26 (PR #62 review): the wait above covered any same-named check from github-actions whose suite no workflow run names, including one from a
+// deleted workflow whose suite GitHub never lists, so an impersonation refusal became a CI timeout. It now waits only while a CI run is itself unlinked.
+test('a same-named check from a suite no workflow run names is refused at once when every CI run on the commit is linked', () => {
+  const exact = (commit) => gate(commit, { required: CI_CHECKS, exactCommitCi: true });
+  const jobs = CI_CHECKS.map((name) => ciRun(name, { suiteId: 808 }));
+  const stray = ciRun('lint', { suiteId: 909 });
+  const linkedRun = { ...ciWorkflowRun, id: 2, event: 'push', suiteId: 808 };
+  const refused = exact({ checkRuns: [...jobs, stray], workflowRuns: [linkedRun], statuses: [] });
+  assert.deepEqual([refused.ok, refused.waiting], [false, false], refused.problems.join('\n'));
+  assert.match(refused.problems.join('\n'), /"lint" also comes from github-actions \(check suite 909\), not the CI workflow; refusing/);
+  assert.doesNotMatch(refused.problems.join('\n'), /not linked to a workflow run yet/);
+  // The merge gate (every CI run on the commit) refuses it the same way.
+  const merge = greenCommit();
+  merge.checkRuns.push(ciRun('test', { suiteId: 909 }));
+  const merged = gate(merge);
+  assert.deepEqual([merged.ok, merged.waiting], [false, false], merged.problems.join('\n'));
+  assert.match(merged.problems.join('\n'), /"test" also comes from github-actions \(check suite 909\)/);
+  // While the CI run on the commit is itself still unlinked, the same check is waited for, as before.
+  const pending = exact({ checkRuns: [...jobs, stray], workflowRuns: [{ ...linkedRun, suiteId: null }], statuses: [] });
+  assert.deepEqual([pending.ok, pending.waiting], [false, true], pending.problems.join('\n'));
+});
+
 /** A green PR run plus a CI run on the commit itself (workflow_dispatch) with the given jobs. */
 function withExactRun(run, jobs = CI_CHECKS.map((name) => ciRun(name, { suiteId: 909 }))) {
   const commit = greenCommit();
