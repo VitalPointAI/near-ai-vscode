@@ -96,6 +96,10 @@ export interface GateRuntime {
   readonly presence: Presence;
   readonly context: GateContextName;
   readonly floorMode: FloorMode;
+  /** What a record needs and the pure domain cannot know. The host sets them; a runtime built for a test may leave them out. */
+  readonly productVersion?: string;
+  readonly clock?: () => number;
+  readonly newRecordId?: () => string;
 }
 
 /** Every rule id the gate can record: the floor, the bundle and manifest checks, labels, routing, taint, and the settings rules of the migration table. */

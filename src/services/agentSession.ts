@@ -5,6 +5,7 @@ import { readFile } from 'node:fs/promises';
 import * as path from 'node:path';
 import { RunCheckpoints } from '../agent/checkpoints';
 import { compactConversation, contextAction, contextStatus, DEFAULT_COMPACT_AT_TOKENS, DEFAULT_CONTEXT_WINDOW, DEFAULT_THRESHOLDS, estimateTokens, trimOldToolResults } from '../agent/context';
+import type { GateHost } from '../gate/host';
 import { AgentEvent, AgentRun, AgentRunError, ApprovalReply, ApprovalRequest, AWAITING_APPROVAL_PREFIX, DEFAULT_MAX_TURNS, RunInput, RunOutcome, RunResult } from '../agent/loop';
 import { countersOf, runSplitOf } from './activityOverview';
 import { PermissionRules, RunGrants } from '../agent/permissions';
@@ -313,6 +314,8 @@ export class AgentConversation {
     private readonly activity?: ActivityFeed
   ) {}
 
+  /** The one gate (GATE-04): the chat sets it, and every tool call of a run, a sub-agent's included, is decided through it. Without one a run uses the shipped default. */
+  public gateHost: GateHost | undefined;
   /** The folder for sub-agents' git worktrees. The chat sets it to the editor's own storage: a worktree is a full checkout and never belongs in the project. */
   public worktreeRoot: string | undefined;
   /** Awaited before each checkpoint save; the chat sets it to the state home's ensure(), so the inner .gitignore exists before any checkpoint file. */
@@ -421,6 +424,9 @@ export class AgentConversation {
     const tasksAtStart = this.tasks.revision;
     let taskCheckSent = false;
     let mainTurns = 0;
+    // The gate has finished its start-up check before the first call is decided; the main run is an agent working for a person who is here.
+    await this.gateHost?.state();
+    const gate = this.gateHost?.runtimeFor({ root: this.root, actor: { kind: 'agent', sessionId: this.conversationId, agentId: mainId, agentLabel: 'agent' }, presence: 'person', context: 'interactive', floorMode: 'shadow' });
     const run = new AgentRun({
       client: request.client,
       model: request.model,
@@ -430,6 +436,7 @@ export class AgentConversation {
       rules: request.rules,
       grants,
       safety,
+      ...(gate ? { gate } : {}),
       ...(request.riskSwitches ? { riskSwitches: request.riskSwitches } : {}),
       maxTurns: request.maxTurns,
       maxOutputTokens: request.maxOutputTokens,

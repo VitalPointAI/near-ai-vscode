@@ -30,6 +30,7 @@ import { registerSecurityScanning } from './services/securityScan';
 import { registerWebSearchSetup } from './services/webSearchSetup';
 import { registerSpendingLimits } from './services/spendingLimits';
 import { registerSpendTracking } from './services/spendTracking';
+import { registerGate } from './services/gateCommands';
 import { registerTeamMode, teamModeTestApi } from './services/team/teamCommands';
 import type { TeamModeTestApi } from './services/team/teamCommands';
 import { registerMcpConnections } from './services/mcpView';
@@ -124,7 +125,9 @@ export function activate(context: vscode.ExtensionContext): NearAiTestApi | unde
   // used: a background browser tab otherwise stalls agent runs. Asked once; changed only on the click.
   void suggestProxySupportOff(context);
 
-  const sidebar = new NearAiPanelViewProvider(context, auth);
+  // The one gate starts before anything that could run a tool, and before Team Mode; the chat gives each conversation its runtime from it (GATE-04).
+  const gate = registerGate(context);
+  const sidebar = new NearAiPanelViewProvider(context, auth, gate);
   registerAgentActivity(context, sidebar);
   registerUsageExport(context);
   registerSecurityScanning(context);

@@ -5,7 +5,9 @@ import { homedir } from 'node:os';
 import * as path from 'node:path';
 import type { ActionCapability, ActionPolicy } from '../domain/policy';
 import type { AgentMessage, CompletionEvent, ToolCall, ToolDefinition, UsageMetadata } from '../services/nearAiClient';
-import { AutoApprovalContext, allowRuleBlocker, decidePermissionAsync, isAutoAllowed, PermissionRules, RunGrants, suggestAllowRule } from './permissions';
+import { AutoApprovalContext, allowRuleBlocker, isAutoAllowed, PermissionRules, RunGrants, suggestAllowRule } from './permissions';
+import type { GateRuntime } from '../domain/gate/decide';
+import { defaultGateRuntime, gateToolCall } from './gateAdapter';
 import { PREAMBLE_START, resolveGsdRun } from '../gsd/preamble';
 import type { CommandSafetyCheck } from './safetyModel';
 import type { UnattendedScope } from './unattended';
@@ -194,6 +196,12 @@ export interface AgentRunOptions {
   afterAnswer?(transcript: AgentMessage[], signal: AbortSignal): Promise<AgentMessage[] | undefined>;
   /** The user's messages sent during the run; a retry wait, or a request still held by the model's cooldown, ends early when one arrives. */
   input?: RunInput;
+  /**
+   * The one gate (GATE-04): every tool call is decided through it before it runs, and its decision is recorded. Optional with a safe default (the shipped
+   * default bundle, the floor in shadow and an in-memory sink), so a run built without one decides exactly as it did before the gate existed. Production
+   * constructions pass it explicitly.
+   */
+  gate?: GateRuntime;
   requestApproval(request: ApprovalRequest): Promise<ApprovalReply>;
   /** Saves an "always allow" choice to the workspace's allow list (nearAi.agent.allowCommands). */
   rememberAllowRule?(rule: string): void | Promise<void>;
@@ -286,6 +294,7 @@ const UI_OUTPUT_CHARS = 6_000;
  */
 export class AgentRun {
   public readonly grants: RunGrants;
+  private readonly gate: GateRuntime;
   /** When this run was created: a script changed after it was written by the run (PERF-01). */
   private readonly startedAt = Date.now();
   private readonly byName: Map<string, AgentTool<any>>;
@@ -293,6 +302,7 @@ export class AgentRun {
 
   public constructor(private readonly options: AgentRunOptions) {
     this.grants = options.grants ?? new RunGrants();
+    this.gate = options.gate ?? defaultGateRuntime();
     this.byName = new Map(options.tools.map((tool) => [tool.name, tool]));
     this.definitions = options.tools.map((tool) => ({ type: 'function', function: { name: tool.name, description: tool.description, parameters: tool.parameters } }));
   }
@@ -599,10 +609,12 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
     };
     let input: unknown;
     let title = tool.name;
+    let raw: Record<string, unknown> = {};
     try {
-      const raw = JSON.parse(call.function.arguments || '{}') as unknown;
-      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new ToolError('Arguments must be a JSON object.');
-      input = tool.parse(raw as Record<string, unknown>);
+      const parsedArguments = JSON.parse(call.function.arguments || '{}') as unknown;
+      if (!parsedArguments || typeof parsedArguments !== 'object' || Array.isArray(parsedArguments)) throw new ToolError('Arguments must be a JSON object.');
+      raw = parsedArguments as Record<string, unknown>;
+      input = tool.parse(raw);
       title = tool.title(input, context);
     } catch (error) {
       const message = error instanceof SyntaxError ? `Arguments are not valid JSON: ${error.message}` : (error as Error).message;
@@ -616,24 +628,34 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
     let risky: string | undefined;
     let forbidden: string | undefined;
     try { forbidden = await tool.forbidden?.(input, context); } catch (error) { return this.finish(call.id, false, `Error: ${(error as Error).message}`); }
-    // Refused before the policy is even asked (0.4.23): no mode, rule or earlier approval can allow it, and no card is shown.
+    // What the gate is told about this call. The three hooks are today's own; `buildAuto` builds auto approve's context for the mode the settings layer is asked with.
+    const gateInput = (): Parameters<typeof gateToolCall>[1] => ({
+      tool, raw, root: context.root, callId: call.id, ...(command === undefined ? {} : { command }),
+      ...(forbidden ? { forbidden } : {}), ...(sensitive ? { sensitive } : {}), ...(risky ? { risky } : {}),
+      policy: this.options.policy, rules: this.options.rules, grants: this.grants,
+      // Auto's context is built for every gated call, because a tool that marks itself autoSafe (the web tools) needs it as well as a shell command.
+      buildAuto: async (effective) => {
+        const unattended = this.options.unattended && (effective.mode === 'auto' || effective.mode === 'mostly-autonomous') && command !== undefined;
+        return effective.mode === 'auto' || unattended ? { ...(await this.autoContext(context, command ?? '')), autoSafeTool: tool.autoSafe === true } : undefined;
+      }
+    });
+    // Refused before the policy is even asked (0.4.23): no mode, rule or earlier approval can allow it, and no card is shown. The gate still records it.
     if (forbidden) {
+      try { await gateToolCall(this.gate, gateInput(), { model: this.options.model }); } catch { /* the refusal stands; a record never changes it */ }
       context.onSecurity?.({ kind: 'blocked', source: title, detail: forbidden });
       if (tool.capability !== 'read' && tool.capability !== 'plan') this.options.emit({ type: 'permission', tool: tool.name, decision: 'denied' });
       return this.finish(call.id, false, `Not allowed: ${forbidden}`);
     }
     try { sensitive = await tool.sensitive?.(input, context); risky = await tool.risky?.(input, context); } catch (error) { return this.finish(call.id, false, `Error: ${(error as Error).message}`); }
-    // Auto's context is built for every gated call, because a tool that marks itself autoSafe (the web tools) needs it as well as a shell command.
-    const unattended = this.options.unattended && (this.options.policy.mode === 'auto' || this.options.policy.mode === 'mostly-autonomous') && command !== undefined;
-    const autoCtx = this.options.policy.mode === 'auto' || unattended ? { ...(await this.autoContext(context, command ?? '')), autoSafeTool: tool.autoSafe === true } : undefined;
-    const decided = await decidePermissionAsync(tool.capability, command, this.options.policy, this.options.rules, this.grants, autoCtx);
-    // A risky action asks in every mode, and an earlier "allow this command" does not cover it.
-    const permission = decided.decision === 'deny' ? decided : risky ? { decision: 'ask' as const } : sensitive && decided.decision === 'allow' && this.options.policy.mode !== 'fully-autonomous' ? { decision: 'ask' as const } : decided;
+    // The gate decides, with today's permission logic as its settings layer. A risky action asks in every mode, and an earlier "allow this command" does
+    // not cover it; a sensitive read that would be allowed asks unless the mode is fully-autonomous (today's line 631, now inside decide()).
+    const gateCall = await gateToolCall(this.gate, gateInput(), { model: this.options.model });
+    const decision = gateCall.decision;
     if (risky) context.onSecurity?.({ kind: 'held', source: title, detail: risky });
     const gated = tool.capability !== 'read' && tool.capability !== 'plan';
-    if (gated && permission.decision !== 'ask') this.options.emit({ type: 'permission', tool: tool.name, decision: permission.decision === 'deny' ? 'denied' : 'auto-allowed' });
-    if (permission.decision === 'deny') return this.finish(call.id, false, `Not allowed: ${permission.reason}`);
-    if (permission.decision === 'ask') {
+    if (gated && decision.outcome !== 'ask') this.options.emit({ type: 'permission', tool: tool.name, decision: decision.outcome === 'deny' ? 'denied' : 'auto-allowed' });
+    if (decision.outcome === 'deny') return this.finish(call.id, false, `Not allowed: ${decision.reason}`);
+    if (decision.outcome === 'ask') {
       let preview: ToolPreview | undefined;
       try {
         if (risky) {
@@ -645,7 +667,9 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
           preview = sensitive ? { kind: 'note', text: sensitive } : await tool.preview?.(input, context);
         }
       } catch (error) { return this.finish(call.id, false, `Error: ${(error as Error).message}`); }
-      const reason = decided.decision === 'ask' ? decided.reason : risky ?? sensitive;
+      // The card keeps the reason the settings layer gave; a question the gate itself asked (a floor ask, effects it cannot read) carries the gate's own.
+      const settingsSaid = gateCall.settings;
+      const reason = decision.floor || settingsSaid === undefined ? decision.reason : settingsSaid.decision === 'ask' ? settingsSaid.reason : risky ?? sensitive;
       // Owner decision 2026-11-05 (0.4.17): the card says what the safety issue is in plain words, can show the whole command or code, and offers
       // "always allow" for every command, a held one included, because a held command is exactly the one a project should learn about. The entry
       // names the exact command up to its first option (exactRuleFor), so the same command is never asked again and a different one still is.
@@ -659,7 +683,8 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
       // the matcher refuses anyway (an address on the line, `rm`, an interpreter, a risky option), offers no "always allow" at all.
       // The offer is silenced for the three kinds of risk the docs say always ask: a key file, destruction, and sending data out. One click there
       // would let that command run silently for good, which is exactly what "reading keys always asks" forbids (0.4.17 review).
-      const allowRule = command === undefined || this.options.rememberAllowRule === undefined
+      // The card offers "always allow" and a run-wide grant only when the gate's decision allows them (never on a floor ask, D-09).
+      const allowRule = command === undefined || this.options.rememberAllowRule === undefined || !decision.offerAlwaysAllow
         ? undefined
         : offeredRule(command, risk.kind, [...this.options.rules.allowCommands, ...this.grants.allowRules]);
       const reply = await this.options.requestApproval({
@@ -671,7 +696,7 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
         ...(reason ? { risk: { kind: risk.kind, headline: risk.headline } } : {}),
         ...(allowRule ? { allowRule } : {}),
         ...(command ? { subject: command } : {}),
-        ...(!risky && command !== undefined && command.trim() ? { grant: { command: command.trim() } } : !risky && tool.capability === 'workspaceWrite' ? { grant: { edits: true } } : {})
+        ...(decision.allowGrant && command !== undefined && command.trim() ? { grant: { command: command.trim() } } : decision.allowGrant && tool.capability === 'workspaceWrite' ? { grant: { edits: true } } : {})
       });
       if (reply.decision === 'deny') {
         if (risky) context.onSecurity?.({ kind: 'blocked', source: title, detail: 'The user declined it.' });
@@ -681,7 +706,7 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
       if (reply.decision === 'pending') {
         return this.finish(call.id, false, `${AWAITING_APPROVAL_PREFIX} this action has not run. It is queued for the user to approve, and they have been notified. Do not retry it now and do not wait for it: carry on with work that does not depend on it, and list it under "Waiting for approval" in your report. If the user approves it, the same call is allowed for the rest of this run.`);
       }
-      if ((reply.decision === 'allow-run' || reply.decision === 'allow-always') && !risky) {
+      if ((reply.decision === 'allow-run' || reply.decision === 'allow-always') && decision.allowGrant) {
         if (tool.capability === 'workspaceWrite') this.grants.edits = true;
         if (command) this.grants.commands.add(command.trim());
       }
