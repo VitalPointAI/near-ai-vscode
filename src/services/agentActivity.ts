@@ -558,7 +558,7 @@ export class ActivityFeed {
   }
 
   private evictStats(): void {
-    for (const stale of [...this.stats.keys()].slice(0, Math.max(0, this.stats.size - MAX_AGENTS))) this.stats.delete(stale);
+    for (const stale of [...this.stats.keys()].slice(0, Math.max(0, this.stats.size - MAX_AGENTS))) { this.stats.delete(stale); this.waits.delete(stale); }
   }
 
   /** A defense that acted, with where it happened (a URL, search, attachment, or action). */

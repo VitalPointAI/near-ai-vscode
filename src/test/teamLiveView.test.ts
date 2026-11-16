@@ -72,6 +72,7 @@ function load(root: string) {
     open: (runId?: string) => live.openTeamLive(context as never, runId),
     send: async (message: unknown) => { await handlers.message?.(message); },
     hide: () => { panel.visible = false; handlers.viewState?.({ webviewPanel: panel }); },
+    show: () => { panel.visible = true; handlers.viewState?.({ webviewPanel: panel }); },
     close: () => handlers.dispose?.(undefined)
   };
 }
@@ -172,6 +173,12 @@ test('the panel: the picture at once with no catch-up, hand-offs as they happen,
   const again = await until(h.posted, hidden, () => true);
   assert.deepEqual(again.events, []);
   assert.equal(again.view.nodes.find((node: Message) => node.id === 'm:researcher').state, 'done');
+  // Review of PR 72: hidden again, then shown by a page VS Code kept alive, which sends no "ready": the host restarts the feed itself.
+  h.hide();
+  const kept = h.posted.length;
+  h.show();
+  const resumed = await until(h.posted, kept, () => true);
+  assert.deepEqual(resumed.events, [], 'the current picture, without catch-up');
   feed.agentEnded(main, 'completed');
   h.close();
 });
@@ -193,6 +200,12 @@ test('after a reload, the newest run with agents is drawn from the history as it
     [`main-${runId}`, 'cancelled', true, ''], ['researcher-ccc111', 'completed', false, `main-${runId}`], ['helper-ddd111', 'running', true, 'researcher-ccc111']
   ]);
   assert.doesNotMatch(JSON.stringify(stats), new RegExp(KEY), 'the task label is redacted again when read back');
+  // Review of PR 72: the run's title comes from the person's own message; it reaches the page only as a short redacted label.
+  const leaky = h.live.statsFromHistory({ ...saved, title: `deploy it with ${KEY} ${'and more '.repeat(30)}` });
+  assert.doesNotMatch(leaky[0].agent, new RegExp(KEY));
+  assert.ok(leaky[0].agent.length <= 80, leaky[0].agent);
+  assert.equal(h.live.pageTitle(undefined, 'Last run'), 'Last run');
+  assert.equal(h.live.pageTitle(`<b>${KEY}</b>`, 'Run').includes(KEY), false);
   const { message } = h.live.teamLiveMessage({ stats, runs: [{ runId, title: 'Last run', running: false, startedAt: 0 }], runId, team: TEAM, restored: true });
   const view = message.view as { nodes: Array<{ id: string; state: string }>; state: string };
   assert.deepEqual(view.nodes.map((node) => [node.id, node.state]), [['lead', 'interrupted'], ['m:researcher', 'done'], ['m:writer', 'bench'], ['g:m:researcher>gsd-verifier', 'interrupted']]);

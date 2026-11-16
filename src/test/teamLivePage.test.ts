@@ -37,11 +37,14 @@ class FakeNode {
   append(...nodes: Array<FakeNode | string>) {
     for (const node of nodes) {
       const child = typeof node === 'string' ? this.doc.createTextNode(node) : node;
+      // As in a browser, moving the focused node takes focus away from it.
+      if (child.parent && this.doc.activeElement === child) this.doc.activeElement = null;
       child.remove();
       child.parent = this;
       this.children.push(child);
     }
   }
+  contains(node: FakeNode | null): boolean { for (let at: FakeNode | null | undefined = node; at; at = at.parent) if (at === this) return true; return false; }
   remove() { if (this.parent) { this.parent.children = this.parent.children.filter((child) => child !== this); this.parent = undefined; } }
   replaceChildren(...nodes: FakeNode[]) { for (const child of this.children) child.parent = undefined; this.children = []; this.text = ''; this.append(...nodes); }
   setAttribute(name: string, value: string) { this.attributes.set(name, value); if (name === 'class') this.className = value; }
@@ -269,4 +272,14 @@ test('page: the keyboard walks the tree, Enter opens a card with its controls, E
   assert.equal(box.hidden, true);
   assert.deepEqual(page.posts.at(-1), { type: 'open-card' });
   assert.equal(page.doc.activeElement, page.card('m:writer'));
+});
+
+test('page: when the reading order changes mid-run, the focused card keeps the focus (review of PR 72)', async () => {
+  const page = await runPage();
+  const first = frame([LEAD, stat('researcher-aaa111', 'researcher', { task: 'Find sources' })]);
+  page.dispatch(first.message);
+  page.card('m:researcher').focus();
+  // A helper joins under the researcher: the cards are put back in reading order.
+  page.dispatch(frame([LEAD, stat('researcher-aaa111', 'researcher', { task: 'Find sources' }), stat('helper-bbb111', 'gsd-verifier', { parentId: 'researcher-aaa111' })], first.view).message);
+  assert.equal(page.doc.activeElement, page.card('m:researcher'));
 });

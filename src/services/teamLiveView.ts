@@ -99,7 +99,15 @@ export function teamLiveMessage(input: { stats: LiveAgentStat[]; runs: LiveRun[]
   };
 }
 
-const runForPage = (run: LiveRun) => ({ runId: run.runId, title: run.title, running: run.running, startedAt: run.startedAt });
+const runForPage = (run: LiveRun) => ({ runId: run.runId, title: pageTitle(run.title, 'Run'), running: run.running, startedAt: run.startedAt });
+
+/**
+ * Review of PR 72: a run's title can come from the person's own first message (the history's session title), and the page never receives prompt text
+ * as written. Every title is reduced to a short, redacted label on the host before it is sent, the same treatment as a task label.
+ */
+export function pageTitle(title: string | undefined, fallback: string): string {
+  return taskLabel(title) ?? fallback;
+}
 
 /**
  * A finished run drawn from the project's activity history after VS Code reloaded (the live feed starts empty then): each agent with the agent that
@@ -113,7 +121,7 @@ export function statsFromHistory(session: ActivitySessionSummary): LiveAgentStat
   const reloaded = session.events.some((event) => event.kind === 'session' && event.status === 'cancelled' && /reloaded/i.test(event.summary));
   const outcome = session.runOutcome;
   const main: LiveAgentStat = {
-    agentId: `main-${runId}`, agent: session.title ?? 'Run', runId, model: session.models[0] ?? '', startedAt: started(session.startedAt), turns: 0, toolCalls: 0, costUsd: 0, phase: 'thinking',
+    agentId: `main-${runId}`, agent: pageTitle(session.title, 'Run'), runId, model: session.models[0] ?? '', startedAt: started(session.startedAt), turns: 0, toolCalls: 0, costUsd: 0, phase: 'thinking',
     status: outcome ?? 'running', ...(!outcome || reloaded ? { interrupted: true } : {})
   };
   const agents = new Map<string, LiveAgentStat>();
@@ -181,7 +189,7 @@ export function openTeamLive(context: vscode.ExtensionContext, runId?: string): 
       const latest = sessions.filter((session) => session.runId && session.events.some((event) => event.kind === 'agent')).sort((a, b) => Date.parse(b.startedAt) - Date.parse(a.startedAt))[0];
       if (latest) {
         source = statsFromHistory(latest);
-        runs = [{ runId: latest.runId!, title: latest.title ?? 'Last run', running: false, startedAt: Date.parse(latest.startedAt) || 0 }];
+        runs = [{ runId: latest.runId!, title: pageTitle(latest.title, 'Last run'), running: false, startedAt: Date.parse(latest.startedAt) || 0 }];
         team = await historyTeam(latest.title);
         restored = true;
       }
@@ -218,7 +226,8 @@ export function openTeamLive(context: vscode.ExtensionContext, runId?: string): 
     timer = undefined;
   };
   selectRun = (runId) => { wantedRun = runId; previous = undefined; lastJson = ''; if (subscription) void send(); };
-  view.onDidChangeViewState((event) => { if (!event.webviewPanel.visible) stop(); }, undefined, context.subscriptions);
+  // Hidden: stop listening. Shown again: a page VS Code kept alive sends no "ready", so the host restarts the feed itself (review of PR 72).
+  view.onDidChangeViewState((event) => { if (!event.webviewPanel.visible) stop(); else start(); }, undefined, context.subscriptions);
   view.webview.onDidReceiveMessage(async (raw: unknown) => {
     teamLiveTap.fromView?.(raw);
     const message = parseTeamLiveMessage(raw);

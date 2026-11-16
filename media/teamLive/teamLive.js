@@ -120,7 +120,12 @@
     // Reading order: the DOM follows it, so a screen reader and Tab read the team as it is drawn. Only reordered when it changed.
     const tree = $('tree');
     const wanted = view.order.map((entry) => cards.get(entry.id) && cards.get(entry.id).root).filter(Boolean);
-    if (tree.children.length !== wanted.length || wanted.some((item, index) => tree.children[index] !== item)) tree.append(...wanted);
+    if (tree.children.length !== wanted.length || wanted.some((item, index) => tree.children[index] !== item)) {
+      // Moving a node drops its focus; the focused card gets it back, so a keyboard user's place survives a reorder mid-run (review of PR 72).
+      const focused = document.activeElement;
+      tree.append(...wanted);
+      if (focused && focused !== document.activeElement && tree.contains(focused) && typeof focused.focus === 'function') focused.focus();
+    }
     view.order.forEach((entry) => { const card = cards.get(entry.id); if (card) { card.root.setAttribute('aria-level', String(entry.depth + 1)); card.root.style.setProperty('--depth', String(entry.depth)); } });
     if (!focusId || !cards.has(focusId)) focusId = view.order[0] && view.order[0].id;
     for (const [id, card] of cards) card.root.tabIndex = id === focusId ? 0 : -1;
