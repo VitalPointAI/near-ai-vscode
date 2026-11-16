@@ -506,6 +506,8 @@ until it runs out aren't shown.
   `privacy: private` on every member, so an older version of the extension
   that reads only member lines still keeps each member private; unticking it
   removes only the team's line, and you remove a member's line yourself. A
+  `privacy: tee` or `privacy: local` line you wrote by hand also keeps the
+  team private; the studio shows it and leaves it alone. A
   team whose members are all private counts as private too, and in a project
   with a knowledge base every team does (including one you are drafting with
   AI). Team Studio sends a

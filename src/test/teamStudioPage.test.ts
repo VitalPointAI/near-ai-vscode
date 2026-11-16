@@ -1774,3 +1774,19 @@ test('host: in a knowledge-base project every Team Studio model call is private,
   await h.send({ type: 'improve-ai', seq: 3, draft: improveDraft() });
   assert.deepEqual(both.sent.map((entry) => entry.model), ['z-ai/glm-5.3', 'z-ai/glm-5.3']);
 });
+
+test('a hand-written privacy: tee team: the host says so, and the Private team box reflects only the value it writes', async () => {
+  const h = await harness();
+  await h.library.create('Web team', teamMarkdown(improveDraft()).replace('description: Builds pages\n', 'description: Builds pages\nprivacy: tee\n'));
+  await h.send({ type: 'ready' });
+  await h.send({ type: 'open', id: 'user:web-team' });
+  const team = last(h, 'team');
+  assert.equal(team.teamPrivacy, 'tee');
+  assert.equal(team.draft.private, true, 'the team is still private for the review');
+  const page = await runPage();
+  page.dispatch({ type: 'state', context: context(), library: { teams: [], archived: [] } });
+  page.dispatch({ ...team, file: 'My teams/web-team.md' });
+  const box = page.doc.getElementById('f-private')!;
+  assert.deepEqual([box.checked, box.disabled], [false, true]);
+  assert.match(page.text(), /This team's file says privacy: tee, which keeps every member on a private model\. Change that line in the Markdown file to change it\./);
+});

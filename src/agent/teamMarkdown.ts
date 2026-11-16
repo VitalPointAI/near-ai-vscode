@@ -144,7 +144,21 @@ function setTeamPrivacy(lines: string[], isPrivate: boolean): void {
   let current: 'private' | undefined;
   try { current = index >= 0 ? parseTeamPrivacy(parseFrontmatter(`---\n${lines[index]}\n---\n`).data.privacy) : undefined; } catch { current = undefined; }
   if (isPrivate) { if (current !== 'private') setFrontmatterKey(lines, 'privacy', 'private', 'description'); return; }
-  if (index >= 0 && (current === 'private' || !/^privacy:\s*(?:any|default|cloud)?\s*$/i.test(lines[index]))) lines.splice(index, 1 + listLength(lines, index));
+  // Only the line the checkbox writes is removed (PR #69 review): a hand-written tee or local line, or any other value, is the person's and stays.
+  if (index >= 0 && CHECKBOX_PRIVACY.test(lines[index])) lines.splice(index, 1 + listLength(lines, index));
+}
+
+const CHECKBOX_PRIVACY = /^privacy:\s*private\s*$/i;
+
+/**
+ * The team's own privacy value when it is private but not the `private` the checkbox writes (a hand-written `tee` or `local`), or undefined. Such a line is
+ * kept as written whatever the draft says, so the team stays private and its members keep their lines; the studio shows it rather than ticking the box.
+ */
+export function handWrittenTeamPrivacy(text: string | undefined): string | undefined {
+  if (text === undefined || !FRONTMATTER.test(text)) return undefined;
+  const value = parseFrontmatter(text).data.privacy;
+  if (typeof value !== 'string' || CHECKBOX_PRIVACY.test(`privacy: ${value}`)) return undefined;
+  try { return parseTeamPrivacy(value) === 'private' ? value.trim() : undefined; } catch { return undefined; }
 }
 
 function listLength(lines: string[], index: number): number {
@@ -157,7 +171,9 @@ function listLength(lines: string[], index: number): number {
  * The Markdown a draft saves as. With no existing file it is exactly renderTeam's output; over an
  * existing file, only the parts the draft changed are rewritten.
  */
-export function teamMarkdown(draft: TeamDraft, original?: string): string {
+export function teamMarkdown(input: TeamDraft, original?: string): string {
+  // A hand-written private value (tee, local) keeps the team private whatever the draft says (PR #69 review).
+  const draft = handWrittenTeamPrivacy(original) ? { ...input, private: true } : input;
   const members = renderMembers(draft);
   const name = draft.name.trim();
   const description = draft.description.trim();
@@ -215,8 +231,8 @@ export function checkDraft(draft: TeamDraft, original?: string): { markdown: str
   if (errors.length) return { markdown, errors };
   try {
     const team = parseTeam(markdown, 'team.md');
-    const expected = renderMembers(draft);
-    const same = team.name === draft.name.trim() && team.description === draft.description.trim() && (team.private === true) === (draft.private === true) && team.members.length === expected.length
+    const expected = renderMembers(handWrittenTeamPrivacy(original) ? { ...draft, private: true } : draft);
+    const same = team.name === draft.name.trim() && team.description === draft.description.trim() && (team.private === true) === (draft.private === true || handWrittenTeamPrivacy(original) !== undefined) && team.members.length === expected.length
       && team.members.every((member, index) => member.name === expected[index].name && (member.role ?? '') === (expected[index].role ?? '') && (member.model ?? '') === (expected[index].model ?? '')
         // A tools line is read with the document-output rule applied (resolveMemberTools), so the expected list gets it too.
         && JSON.stringify(member.tools) === JSON.stringify(expected[index].tools ? resolveMemberTools(expected[index].tools!) : DEFAULT_TOOLS) && (member.privacy ?? '') === (expected[index].privacy ?? '') && (member.reportsTo ?? '') === (expected[index].reportsTo ? slugify(expected[index].reportsTo!) : '') && member.instructions === expected[index].instructions);

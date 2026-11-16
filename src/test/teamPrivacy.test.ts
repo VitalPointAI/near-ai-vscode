@@ -191,3 +191,17 @@ test('a TEE model whose attestation is reported failed or unverified, or not rep
   const any = chooseTeamModel('any', { models: [{ ...TEE, attestationStatus: 'failed' }], preferred: [], routeFor: attested, privacyMode: 'standard' });
   assert.deepEqual(any.ok && [any.model, any.private], ['z-ai/glm-5.3', false]);
 });
+
+// PR #69 review: unticking Private team removed any privacy line that was not any/default/cloud, including a hand-written tee or local one.
+test('a hand-written privacy: tee or privacy: local line is never removed by the studio; only the line the checkbox writes is', () => {
+  for (const value of ['tee', 'local', 'TEE']) {
+    const file = FILE.replace('owner: ops', `owner: ops\nprivacy: ${value}`);
+    const draft = draftFromMarkdown(file, 'clients.md');
+    const unticked = teamMarkdown({ ...draft, private: undefined }, file);
+    assert.match(unticked, new RegExp(`^privacy: ${value}$`, 'm'), value);
+    assert.equal(parseTeam(unticked, 'clients.md').private, true, value);
+    assert.deepEqual(checkDraft({ ...draft, private: undefined }, file).errors, [], value);
+  }
+  const written = FILE.replace('owner: ops', 'owner: ops\nprivacy: private');
+  assert.doesNotMatch(teamMarkdown({ ...draftFromMarkdown(written, 'clients.md'), private: undefined }, written), /\nowner: ops\nprivacy: private\n/, 'the checkbox\'s own line is removed');
+});

@@ -510,12 +510,17 @@
   // studio asks AI about it. A team whose members are all private counts as private even unticked, which the hint says.
   function privateToggle(draft) {
     const wrap = el('div', 'field check-field');
-    const box = el('input'); box.type = 'checkbox'; box.id = 'f-private'; box.checked = draft.private === true;
+    // A hand-written privacy: tee or local line keeps the team private and is the person's to change in the file: the box reflects only the value it
+    // writes (private), and is disabled (PR #69 review: unticking used to delete such a line).
+    const written = work && work.teamPrivacy;
+    const box = el('input'); box.type = 'checkbox'; box.id = 'f-private'; box.checked = draft.private === true && !written; box.disabled = Boolean(written);
     box.addEventListener('change', () => { if (box.checked) draft.private = true; else delete draft.private; changed(false); });
     const label = el('label', 'check'); label.setAttribute('for', box.id);
     label.append(box, document.createTextNode(' Private team'));
     const allPrivate = draft.members.length > 0 && draft.members.every((member) => member.privacy === 'private');
-    const hint = el('p', 'hint', 'Every member runs only on a private model (a NEAR TEE model or one on this machine), and Improve with AI sends this team only to a private model.' + (allPrivate && !box.checked ? ' Every member is already private, so the team counts as private.' : ''));
+    const hint = el('p', 'hint', written
+      ? 'This team\'s file says privacy: ' + written + ', which keeps every member on a private model. Change that line in the Markdown file to change it.'
+      : 'Every member runs only on a private model (a NEAR TEE model or one on this machine), and Improve with AI sends this team only to a private model.' + (allPrivate && !box.checked ? ' Every member is already private, so the team counts as private.' : ''));
     hint.id = 'f-private-hint'; box.setAttribute('aria-describedby', hint.id);
     wrap.append(label, hint);
     return wrap;
@@ -1115,7 +1120,7 @@
   function openEditor(message, keepTab) {
     const same = keepTab && work && work.mode === 'editor' && work.id === message.id;
     // The same team reopened after a Save keeps its Improve panel: pending suggestions stay, and any whose field changed show as Stale.
-    work = { mode: 'editor', id: message.id, kind: message.kind, file: message.file, command: message.command, base: message.base, draft: message.draft, clean: JSON.stringify(message.draft), tab: same ? work.tab : 0, versions: message.versions || [], review: null, versionView: null, improve: same ? work.improve : null };
+    work = { mode: 'editor', id: message.id, kind: message.kind, file: message.file, command: message.command, base: message.base, draft: message.draft, clean: JSON.stringify(message.draft), teamPrivacy: message.teamPrivacy || null, tab: same ? work.tab : 0, versions: message.versions || [], review: null, versionView: null, improve: same ? work.improve : null };
   }
 
   // ---------- Improve with AI (0.4.27) ----------
