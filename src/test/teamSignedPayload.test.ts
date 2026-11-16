@@ -451,3 +451,19 @@ test('the envelope the signer returns is canonical JSON safe and its key order d
   assert.equal(failure(verifyPayload(roundTripped, { purpose: 'policy-bundle', status: ACTIVE(agent) })), 'ok');
 });
 
+
+test('a key record made of random keys and hashes is never refused as secret-like (the write guard exempts public keys and signatures by shape)', () => {
+  for (let i = 0; i < 3000; i += 1) {
+    const record = {
+      seq: i + 1, prev: randomBytes(32).toString('hex'), kind: 'rotated', at: '2026-03-01T10:00:00.000Z',
+      key: { fingerprint: `dev-${randomBytes(16).toString('hex')}`, publicKey: randomBytes(32).toString('base64url') },
+      next: { fingerprint: `dev-${randomBytes(16).toString('hex')}`, publicKey: randomBytes(32).toString('base64url') }
+    };
+    const { privateKey, publicKey } = generateKeyPairSync('ed25519');
+    const raw = publicKey.export({ format: 'der', type: 'spki' }).subarray(-32);
+    const signer: PayloadSigner = {
+      fingerprint: fingerprintOf(raw), publicKey: raw.toString('base64url'), sign: (bytes) => edSign(null, bytes, privateKey).toString('base64url')
+    };
+    assert.doesNotThrow(() => signPayload(signer, 'key-record', record, { now: () => new Date('2026-03-01T10:00:00.000Z') }));
+  }
+});

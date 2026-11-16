@@ -516,7 +516,7 @@ function checkRotations(state: TeamState): void {
     for (const device of member.devices) {
       if (device.rotatedTo === undefined) continue;
       const successor = member.devices.find((candidate) => candidate.fingerprint === device.rotatedTo);
-      if (successor === undefined || successor.addedEvent !== device.rotatedEvent || state.deviceIndex.get(successor.fingerprint) !== member.id) bad('deviceIndex');
+      if (successor === undefined || successor.addedEvent !== device.rotatedEvent || state.deviceIndex.get(successor.fingerprint) !== member.id) bad('devices.rotatedTo');
     }
   }
 }

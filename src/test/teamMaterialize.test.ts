@@ -337,10 +337,10 @@ test('snapshots carry rotation: round-trip keeps the rotation fields, a rotated 
   const stranger = await makeActor(w.teamId);
   const elsewhere = plain();
   (devicesOf(elsewhere)[0] as Record<string, unknown>).rotatedTo = stranger.identity.fingerprint;
-  assert.throws(() => deserialiseState(elsewhere, w.anchor), 'rotatedTo names no device of that member');
+  assert.throws(() => deserialiseState(elsewhere, w.anchor), /devices\.rotatedTo/, 'rotatedTo names no device of that member');
   const pointsAtSelf = plain();
   (devicesOf(pointsAtSelf)[0] as Record<string, unknown>).rotatedTo = w.owner.identity.fingerprint;
-  assert.throws(() => deserialiseState(pointsAtSelf, w.anchor), 'rotatedTo names the retired key itself');
+  assert.throws(() => deserialiseState(pointsAtSelf, w.anchor), /devices\.rotatedTo/, 'rotatedTo names the retired key itself');
   const partial = plain();
   delete (devicesOf(partial)[0] as Record<string, unknown>).rotatedAt;
   assert.throws(() => deserialiseState(partial, w.anchor), 'the three rotation fields come together');
