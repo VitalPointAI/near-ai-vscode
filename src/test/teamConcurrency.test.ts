@@ -11,7 +11,7 @@ import { defaultTeamPolicy } from '../domain/team/policy';
 import type { GenesisAnchor, TeamFile, TeamState } from '../domain/team/types';
 import { TeamLog, buildGenesisEvents } from '../team/eventLog';
 import { DEFAULT_COORDINATION_REF, GitTransport } from '../team/gitTransport';
-import { emailHash, newTeamId } from '../team/identity';
+import { newTeamId } from '../team/identity';
 import { canonicalTeamFile } from '../team/teamFile';
 import { createOwner, createTeamFixture, gitIn } from './helpers/teamHarness';
 import type { TeamFixture } from './helpers/teamHarness';
@@ -96,7 +96,7 @@ async function seedOwner(fixture: TeamFixture): Promise<Team> {
   const teamId = newTeamId();
   const owner = await createOwner(teamId);
   const genesis = buildGenesisEvents({
-    teamId, teamName: 'Concurrency team', owner: { memberId: owner.memberId, name: 'Owner Test', emailHashes: [emailHash(teamId, 'owner@example.invalid')] },
+    teamId, teamName: 'Concurrency team', owner: { memberId: owner.memberId, name: 'Owner Test', emailHashes: [] },
     identity: owner.identity, policy: defaultTeamPolicy()
   });
   const teamFile: TeamFile = {

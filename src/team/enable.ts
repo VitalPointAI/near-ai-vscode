@@ -12,7 +12,7 @@ import type { SecretStorageLike } from '../services/auth';
 import { teamMaterializer } from '../domain/team/materialize';
 import { buildGenesisEvents } from './eventLog';
 import { DEFAULT_COORDINATION_REF, GitTransport } from './gitTransport';
-import { emailHash, forgetCreatedDeviceIdentity, identityDir, loadOrCreateDeviceIdentity, newMemberId, newTeamId } from './identity';
+import { forgetCreatedDeviceIdentity, identityDir, loadOrCreateDeviceIdentity, newMemberId, newTeamId } from './identity';
 import { GitNotFoundError, gitText, redactGitMessage, runGit } from './runGit';
 import type { GitResult, GitRunner } from './runGit';
 import { REMOTE_NAME_PATTERN, TEAM_FILE_REL, TeamFileError, checkTrustPin, canonicalTeamFile, readTeamFile, teamStorageDir, writeTeamFile } from './teamFile';
@@ -29,9 +29,10 @@ export interface EnableInput {
   secrets: SecretStorageLike;
   teamName: string;
   ownerName: string;
-  ownerEmail?: string;
   remote?: string;
   integrationBranch?: string;
+  // A passed checkEnablePreconditions result for the same project and remote, so a caller that already checked does not run git twice.
+  checked?: EnablePreconditionsOk;
   git?: GitRunner;
   now?: () => Date;
 }
@@ -43,19 +44,18 @@ export type EnableResult =
 export interface EnableDefaults {
   teamName: string;
   ownerName: string;
-  ownerEmail: string;
   remote: string;
   branch?: string;
   integrationBranch: string;
 }
 
-type Preconditions = { ok: true; branch?: string } | { ok: false; code: EnableFailureCode; message: string };
+export interface EnablePreconditionsOk { ok: true; projectRoot: string; remote: string; branch?: string }
+type Preconditions = EnablePreconditionsOk | { ok: false; code: EnableFailureCode; message: string };
 
 const DEFAULT_REMOTE = 'origin';
 const LOCAL_TIMEOUT_MS = 30_000;
 const NETWORK_TIMEOUT_MS = 60_000;
 const COMMIT_TIMEOUT_MS = 120_000;
-const MAX_EMAIL_LENGTH = 254;
 const CONTROL_CHARACTERS = /[\u0000-\u001F\u007F\u2028\u2029]/;
 // The same non-interactive ssh the transport uses, so a passphrase prompt cannot hang the existence check.
 const DEFAULT_SSH_COMMAND = 'ssh -o BatchMode=yes -o ConnectTimeout=10';
@@ -110,7 +110,7 @@ export async function checkEnablePreconditions(projectRoot: string, remote: stri
   if (url.code !== 0) return fail('remote-unreachable', `Git could not read the remote "${remote}": ${gitFailureText(url)}`);
   const branch = await run(['symbolic-ref', '--short', '-q', 'HEAD']);
   const name = branch.code === 0 ? gitText(branch) : '';
-  return name === '' ? { ok: true } : { ok: true, branch: name };
+  return name === '' ? { ok: true, projectRoot, remote } : { ok: true, projectRoot, remote, branch: name };
 }
 
 async function gitConfigValue(projectRoot: string, key: string, git: GitRunner): Promise<string> {
@@ -119,12 +119,12 @@ async function gitConfigValue(projectRoot: string, key: string, git: GitRunner):
 }
 
 export async function enableDefaults(projectRoot: string, git: GitRunner = runGit): Promise<EnableDefaults> {
-  const [ownerName, ownerEmail] = await Promise.all([gitConfigValue(projectRoot, 'user.name', git), gitConfigValue(projectRoot, 'user.email', git)]);
+  const ownerName = await gitConfigValue(projectRoot, 'user.name', git);
   const branchResult = await git(['symbolic-ref', '--short', '-q', 'HEAD'], { cwd: projectRoot, timeoutMs: LOCAL_TIMEOUT_MS });
   const branch = branchResult.code === 0 ? gitText(branchResult) : '';
   const main = await git(['show-ref', '--verify', '-q', 'refs/heads/main'], { cwd: projectRoot, timeoutMs: LOCAL_TIMEOUT_MS });
   const defaults: EnableDefaults = {
-    teamName: path.basename(path.resolve(projectRoot)), ownerName, ownerEmail, remote: DEFAULT_REMOTE,
+    teamName: path.basename(path.resolve(projectRoot)), ownerName, remote: DEFAULT_REMOTE,
     // A current branch the shared name rules would refuse falls back to main, so Enable does not fail on a name the user never chose (WR-09).
     integrationBranch: main.code === 0 || !isGitRefName(branch) ? 'main' : branch
   };
@@ -132,15 +132,14 @@ export async function enableDefaults(projectRoot: string, git: GitRunner = runGi
   return defaults;
 }
 
+// Only an ssh command inherited from the environment is passed on, and it is left where it is. These git calls run in the project, so git
+// applies any core.sshCommand from its config itself; the value is never copied into the environment. Only when no ssh command is set
+// anywhere does the non-interactive default go in.
 async function networkEnv(projectRoot: string, git: GitRunner): Promise<Record<string, string>> {
   const inherited = process.env.GIT_SSH_COMMAND;
   if (inherited !== undefined && inherited !== '') return {};
-  const configured = await gitConfigValue(projectRoot, 'core.sshCommand', git);
-  return { GIT_SSH_COMMAND: configured !== '' ? configured : DEFAULT_SSH_COMMAND };
-}
-
-function validateEmail(email: string): boolean {
-  return email.length <= MAX_EMAIL_LENGTH && email.includes('@') && !CONTROL_CHARACTERS.test(email) && !/\s/.test(email);
+  if ((await gitConfigValue(projectRoot, 'core.sshCommand', git)) !== '') return {};
+  return { GIT_SSH_COMMAND: DEFAULT_SSH_COMMAND };
 }
 
 // Removes the whole team storage folder (which holds the mirror) and, only when this Enable call created it, the device key (D-22). An identity that
@@ -219,7 +218,10 @@ export async function enableTeamMode(input: EnableInput): Promise<EnableResult> 
 
   // Everything below up to the device key is read-only or in memory, so a stop here leaves nothing behind.
   if (!REMOTE_NAME_PATTERN.test(remote)) return fail('invalid-input', 'The remote name is not valid. Use a name such as origin.');
-  const checked = await checkEnablePreconditions(projectRoot, remote, git);
+  const passed = input.checked;
+  const checked = passed !== undefined && passed.ok && passed.projectRoot === projectRoot && passed.remote === remote
+    ? passed
+    : await checkEnablePreconditions(projectRoot, remote, git);
   if (!checked.ok) return checked;
 
   let existing: TeamFile | undefined;
@@ -235,15 +237,13 @@ export async function enableTeamMode(input: EnableInput): Promise<EnableResult> 
 
   const teamName = input.teamName.trim();
   const ownerName = input.ownerName.trim();
-  const ownerEmail = input.ownerEmail?.trim() ?? '';
   if (validateName(teamName, 'teamName') !== undefined) return fail('invalid-input', 'The team name must be 1 to 80 characters with no line breaks.');
   if (validateName(ownerName, 'ownerName') !== undefined) return fail('invalid-input', 'Your display name must be 1 to 80 characters with no line breaks.');
-  if (ownerEmail !== '' && !validateEmail(ownerEmail)) return fail('invalid-input', 'The email address is not valid. Leave it empty or use a full address such as name@example.com.');
   const integrationBranch = input.integrationBranch ?? (await enableDefaults(projectRoot, git)).integrationBranch;
   const policy = defaultTeamPolicy({ integrationBranch });
   if (validatePolicy(policy) !== undefined) return fail('invalid-input', 'The integration branch name is not valid.');
   try {
-    assertNoSecrets({ teamName, ownerName, ...(ownerEmail === '' ? {} : { ownerEmail }) }, 'The team details');
+    assertNoSecrets({ teamName, ownerName }, 'The team details');
   } catch (error) {
     if (error instanceof SecretLeakError) return fail('secret', error.message);
     throw error;
@@ -256,8 +256,9 @@ export async function enableTeamMode(input: EnableInput): Promise<EnableResult> 
 
   const teamId = newTeamId();
   const memberId = newMemberId();
-  // D-31: the address only feeds the hash. It is not stored, signed or returned.
-  const emailHashes = ownerEmail === '' ? [] : [emailHash(teamId, ownerEmail)];
+  // No email address, and nothing derived from one, is asked for, stored or signed: the team id is public in team.json, so any hash of an
+  // address salted with it could be reversed by guessing addresses. The roster format keeps its hash lists, and this version keeps them empty.
+  const emailHashes: string[] = [];
   const { identity, created } = await loadOrCreateDeviceIdentity(input.secrets, { identityDir: identityDir(input.globalStorageDir) });
   const createdKey = created ? { fingerprint: identity.fingerprint } : undefined;
   const storageDir = teamStorageDir(input.globalStorageDir, teamId);

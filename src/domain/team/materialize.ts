@@ -7,7 +7,7 @@ import { actionForEvent, decideTeamAction } from './permissions';
 import { DEFAULT_WIP_LIMIT, applyPolicyChanges, defaultTeamPolicy, validatePolicy } from './policy';
 import { AVAILABILITIES, ROLES, TEAM_REJECTION_REASONS } from './types';
 import type { Availability, CommittedEvent, DeviceKey, DeviceRef, EntryVerdict, GenesisAnchor, ImplementedTeamEvent, JsonObject, Materializer, Member, Rejection, Role, SnapshotRef, TeamEvent, TeamPolicy, TeamState, WorkingHours } from './types';
-import { EMAIL_HASH_PATTERN, EVENT_ID_PATTERN, FINGERPRINT_PATTERN, MEMBER_ID_PATTERN, SNAPSHOT_PATH_PATTERN, isRecord, parseEventFile } from './validate';
+import { EVENT_ID_PATTERN, FINGERPRINT_PATTERN, MEMBER_ID_PATTERN, SNAPSHOT_PATH_PATTERN, isRecord, parseEventFile } from './validate';
 
 export const MAX_LAMPORT_JUMP = 1000;
 const R = TEAM_REJECTION_REASONS;
@@ -404,7 +404,8 @@ function parseMember(value: unknown, path: string): Member {
   if (devices.length === 0) bad(`${path}.devices`);
   const member: Member = {
     id: patterned(raw.id, `${path}.id`, MEMBER_ID_PATTERN), name: shortText(raw.name, `${path}.name`),
-    emailHashes: items(raw.emailHashes, `${path}.emailHashes`, (hash, hashPath) => patterned(hash, hashPath, EMAIL_HASH_PATTERN)),
+    // No email-derived value is kept in this version (see MAX_EMAIL_HASHES in validate.ts), so a snapshot that holds one is refused.
+    emailHashes: items(raw.emailHashes, `${path}.emailHashes`, (_hash, hashPath): string => bad(hashPath)),
     role: choice<Role>(raw.role, `${path}.role`, ROLES), devices,
     skills: items(raw.skills, `${path}.skills`, (skill, skillPath) => shortText(skill, skillPath)),
     availability: choice<Availability>(raw.availability, `${path}.availability`, AVAILABILITIES), wipLimit: integer(raw.wipLimit, `${path}.wipLimit`),

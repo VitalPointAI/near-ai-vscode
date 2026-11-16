@@ -103,16 +103,15 @@ function uiText(): string {
   return JSON.stringify({ lines: outputLines(), notifications: stub.notifications, bars: stub.statusBarItems.map((item) => [item.text, item.tooltip]) });
 }
 
-test('Enable asks for team name, owner name and email with defaults, creates team.json, starts the session and offers Push and Verify Team Log', async () => {
+test('Enable asks for team name and owner name with defaults (never an email), creates team.json, starts the session and offers Push and Verify Team Log', async () => {
   await withProject(async (p) => {
     const mainBefore = remoteMain(p.fixture);
-    await p.enable(['Command team', 'Lead Owner', 'lead@example.invalid']);
+    await p.enable(['Command team', 'Lead Owner']);
 
-    assert.deepEqual(stub.inputRequests.map((request) => request.prompt?.split('.')[0]), ['Team name', 'Your name as teammates will see it', 'Your email is kept only as a scrambled code (a salted hash) in the team record, never as plain text']);
+    assert.deepEqual(stub.inputRequests.map((request) => request.prompt?.split('.')[0]), ['Team name', 'Your name as teammates will see it']);
     assert.equal(stub.inputRequests[0]?.value, 'a', 'the team name defaults to the folder name');
     assert.equal(stub.inputRequests[1]?.value, 'Team Test', 'the owner name defaults to git user.name');
-    assert.equal(stub.inputRequests[2]?.value, 'team-test@example.invalid', 'the email defaults to git user.email');
-    assert.equal(stub.inputRequests[2]?.prompt, 'Your email is kept only as a scrambled code (a salted hash) in the team record, never as plain text.');
+    assert.equal(JSON.stringify(stub.inputRequests).includes('@'), false, 'no prompt asks for or shows an email address');
 
     const teamFile = await readTeamFile(p.root);
     assert.ok(teamFile !== undefined, 'team.json was written');
@@ -139,7 +138,7 @@ test('Enable asks for team name, owner name and email with defaults, creates tea
 test('choosing Push pushes the current branch and reports it', async () => {
   await withProject(async (p) => {
     const mainBefore = remoteMain(p.fixture);
-    await p.enable(['Push team', 'Lead Owner', ''], [PUSH_ACTION]);
+    await p.enable(['Push team', 'Lead Owner'], [PUSH_ACTION]);
     const head = gitIn(p.root, ['rev-parse', 'HEAD']);
     assert.notEqual(head, mainBefore);
     assert.equal(remoteMain(p.fixture), head, 'the remote main now equals the clone HEAD');
@@ -160,7 +159,7 @@ test('a failing Push reports the redacted reason as an error', async () => {
     gitIn(other, ['add', 'other.txt']);
     gitIn(other, ['commit', '-q', '-m', 'other work']);
     gitIn(other, ['push', '-q', 'origin', 'main']);
-    await p.enable(['Failing push', 'Lead Owner', ''], [PUSH_ACTION]);
+    await p.enable(['Failing push', 'Lead Owner'], [PUSH_ACTION]);
     const failure = stub.notifications.find((entry) => entry.level === 'error');
     assert.ok(failure !== undefined, 'the failed push is shown as an error');
     assert.ok(failure.message.startsWith('Pushing main to origin failed'));
@@ -170,7 +169,7 @@ test('a failing Push reports the redacted reason as an error', async () => {
 
 test('choosing Verify Team Log writes the report to the NEAR AI Team channel', async () => {
   await withProject(async (p) => {
-    await p.enable(['Verify team', 'Lead Owner', ''], [VERIFY_ACTION]);
+    await p.enable(['Verify team', 'Lead Owner'], [VERIFY_ACTION]);
     const lines = outputLines();
     assert.ok(lines.some((line) => line.startsWith('Verify Team Log: Verify team')), 'the report header is in the channel');
     assert.ok(lines.includes('Events: 2 (2 accepted, 0 rejected)'));
@@ -182,7 +181,7 @@ test('choosing Verify Team Log writes the report to the NEAR AI Team channel', a
 
 test('the Verify Team Log command works from the palette once a team exists', async () => {
   await withProject(async (p) => {
-    await p.enable(['Palette team', 'Lead Owner', '']);
+    await p.enable(['Palette team', 'Lead Owner']);
     stub.notifications.length = 0;
     await p.verify();
     assert.ok(outputLines().some((line) => line.startsWith('Verify Team Log: Palette team')));
@@ -191,7 +190,7 @@ test('the Verify Team Log command works from the palette once a team exists', as
 });
 
 test('cancelling any input box returns quietly: no team.json, no message, no key, no storage, nothing on the remote', async () => {
-  for (const answers of [[undefined], ['Cancel team', undefined], ['Cancel team', 'Lead Owner', undefined]] as Array<Array<string | undefined>>) {
+  for (const answers of [[undefined], ['Cancel team', undefined]] as Array<Array<string | undefined>>) {
     await withProject(async (p) => {
       const before = [...p.secrets.values.keys()].sort();
       await p.enable(answers);
@@ -209,7 +208,7 @@ test('cancelling any input box returns quietly: no team.json, no message, no key
 
 test('running Enable again names the existing team and asks nothing', async () => {
   await withProject(async (p) => {
-    await p.enable(['Existing team', 'Lead Owner', '']);
+    await p.enable(['Existing team', 'Lead Owner']);
     const asked = stub.inputRequests.length;
     stub.notifications.length = 0;
     const commitsBefore = gitIn(p.root, ['rev-list', '--count', 'HEAD']);
@@ -259,7 +258,7 @@ test('with no folder open Enable asks the user to open the project folder', asyn
 test('a failing commit-msg hook shows a warning with the plain message and the same text in the channel', async () => {
   await withProject(async (p) => {
     writeFileSync(path.join(p.root, '.git', 'hooks', 'commit-msg'), '#!/bin/sh\necho "hook rejected this commit message" >&2\nexit 1\n', { encoding: 'utf8', mode: 0o755 });
-    await p.enable(['Hook team', 'Lead Owner', '']);
+    await p.enable(['Hook team', 'Lead Owner']);
     const warning = stub.notifications.find((entry) => entry.level === 'warn');
     assert.ok(warning !== undefined, 'a warning is shown');
     assert.ok(warning.message.includes('hook rejected this commit message'));
@@ -274,7 +273,7 @@ test('an unreachable remote shows an error, writes it to the channel and creates
   await withProject(async (p) => {
     gitIn(p.root, ['remote', 'set-url', 'origin', path.join(p.fixture.root, 'no-such-remote.git')]);
     const before = [...p.secrets.values.keys()].sort();
-    await p.enable(['Unreachable team', 'Lead Owner', '']);
+    await p.enable(['Unreachable team', 'Lead Owner']);
     const error = stub.notifications.find((entry) => entry.level === 'error');
     assert.ok(error !== undefined);
     assert.ok(error.message.includes('could not be reached'));
@@ -286,7 +285,7 @@ test('an unreachable remote shows an error, writes it to the channel and creates
 
 test('a secret typed as the team name is refused without repeating it anywhere', async () => {
   await withProject(async (p) => {
-    await p.enable([p.canaries.apiKey, 'Lead Owner', '']);
+    await p.enable([p.canaries.apiKey, 'Lead Owner']);
     const error = stub.notifications.find((entry) => entry.level === 'error');
     assert.ok(error !== undefined, 'the refusal is shown');
     assert.equal(uiText().includes(p.canaries.apiKey), false, 'the value is not repeated in the UI or the channel');
@@ -302,7 +301,7 @@ test('SEC-01 canary: after Enable and Verify no secret or device key reaches the
     gitIn(p.root, ['remote', 'set-url', 'origin', url]);
     gitIn(p.root, ['config', `url.${p.fixture.remote}.insteadOf`, url]);
 
-    await p.enable(['Canary team', 'Lead Owner', 'canary.lead@example.invalid'], [VERIFY_ACTION]);
+    await p.enable(['Canary team', 'Lead Owner'], [VERIFY_ACTION]);
     await p.verify();
     const teamFile = await readTeamFile(p.root);
     assert.ok(teamFile !== undefined);
@@ -312,7 +311,6 @@ test('SEC-01 canary: after Enable and Verify no secret or device key reaches the
     const needles: Needle[] = [
       ...p.canaries.labelled(),
       { label: 'remote user', value: 'canaryuser' },
-      { label: 'plain email', value: 'canary.lead@example.invalid' },
       ...deviceKeyForms(deviceKey).map((value, index) => ({ label: `device key form ${index}`, value }))
     ];
 
@@ -325,6 +323,13 @@ test('SEC-01 canary: after Enable and Verify no secret or device key reaches the
     assert.deepEqual(stub.configUpdates, [], 'settings were never written');
     assert.deepEqual(await scanFiles([path.join(p.root, TEAM_FILE_REL), p.storage], needles), [], 'team.json and all extension storage');
     assert.deepEqual(await scanGitObjects(path.join(storageDir, 'coordination.git'), needles), [], 'coordination mirror');
+    // The address in git config is never asked for or copied: not into the UI, team.json, extension storage or the coordination log.
+    const address = gitIn(p.root, ['config', 'user.email']);
+    assert.match(address, /@/);
+    const gitEmail: Needle[] = [{ label: 'git user.email', value: address }];
+    assert.equal(uiText().includes(address), false, 'no UI text holds the git email');
+    assert.deepEqual(await scanFiles([path.join(p.root, TEAM_FILE_REL), p.storage], gitEmail), [], 'team.json and extension storage hold no git email');
+    assert.deepEqual(await scanGitObjects(path.join(storageDir, 'coordination.git'), gitEmail), [], 'the coordination log holds no git email');
     assert.deepEqual(await scanGitObjects(p.fixture.remote, needles), [], 'bare remote');
     assert.deepEqual(await scanGitObjects(path.join(p.root, '.git'), needles, { includeConfig: false }), [], 'project repository objects');
   });
@@ -332,7 +337,7 @@ test('SEC-01 canary: after Enable and Verify no secret or device key reaches the
 
 test('no message, channel line, status text or tooltip contains an em-dash', async () => {
   await withProject(async (p) => {
-    await p.enable(['Plain team', 'Lead Owner', ''], [VERIFY_ACTION]);
+    await p.enable(['Plain team', 'Lead Owner'], [VERIFY_ACTION]);
     await p.enable([]);
     await p.verify();
     assert.equal(uiText().includes(EM_DASH), false);
@@ -346,7 +351,7 @@ test('Verify Team Log resolves to the report it printed: one owner and no reject
   await withProject(async (p) => {
     const solo = await (stub.commands.get(VERIFY_LOG_COMMAND) as () => Promise<unknown>)();
     assert.equal(solo, undefined, 'a solo project has no report');
-    await p.enable(['Report team', 'Lead Owner', 'lead@example.invalid']);
+    await p.enable(['Report team', 'Lead Owner']);
     const report = await (stub.commands.get(VERIFY_LOG_COMMAND) as () => Promise<import('../team/eventLog').VerifyReport | undefined>)();
     assert.ok(report !== undefined, 'the handler resolves to its report');
     assert.equal(report.members.length, 1);
@@ -374,7 +379,7 @@ test('the test seam returns the fingerprint, the public key and digests only; it
     const api = teamModeTestApi(p.context as never, p.handle);
     assert.equal(await api.deviceKeyEvidence(), undefined, 'no identity yet, so nothing to report');
     assert.equal(await api.ready, 'solo');
-    await p.enable(['Seam team', 'Lead Owner', 'lead@example.invalid']);
+    await p.enable(['Seam team', 'Lead Owner']);
     const teamFile = await readTeamFile(p.root);
     assert.ok(teamFile !== undefined);
     const stored = p.secrets.values.get(DEVICE_KEY_SECRET) as string;
@@ -408,8 +413,12 @@ test('the digest scanners find each private rendering inside surrounding text in
     writeFileSync(publicOnly, `fingerprint ${identity.fingerprint}\n"key":"${raw.toString('base64')}" ${raw.toString('base64url')} ${raw.toString('hex')}\n`);
     assert.deepEqual(await scanFilesForDigests([publicOnly], digests), [], 'only public renderings');
     for (const [index, form] of forms.entries()) {
-      writeFileSync(planted, `before: "${form}", after\n${form}ZZ`);
-      assert.deepEqual(await scanFilesForDigests([planted], digests), [`planted.txt/planted.txt: private form ${index}`], `form ${index} is found`);
+      const text = `before: "${form}", after\n${form}ZZ`;
+      writeFileSync(planted, text);
+      // A padded rendering contains its unpadded twin, so exactly the renderings this text contains are reported.
+      const expected = forms.flatMap((other, otherIndex) => (text.includes(other) ? [`planted.txt/planted.txt: private form ${otherIndex}`] : []));
+      assert.ok(expected.includes(`planted.txt/planted.txt: private form ${index}`));
+      assert.deepEqual((await scanFilesForDigests([planted], digests)).sort(), expected.sort(), `form ${index} is found`);
     }
     writeFileSync(planted, forms.map((form) => `x ${form} y`).join('\n'));
     assert.equal((await scanFilesForDigests([planted], digests)).length, forms.length, 'all renderings in one file');

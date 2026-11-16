@@ -560,6 +560,12 @@ test('deserialiseState refuses a state that is not tied to the anchor or is inte
   assert.throws(() => deserialiseState(swapped, w.anchor));
   const inflated = { ...plain(), accepted: 99 };
   assert.throws(() => deserialiseState(inflated, w.anchor));
+  // No email-derived value is kept, so a snapshot member that carries one is refused, however well formed.
+  const withHash = plain();
+  const hashed = withHash.members as Array<{ emailHashes: string[] }>;
+  assert.ok(hashed[0] !== undefined && hashed[0].emailHashes.length === 0, 'members carry an empty list');
+  hashed[0].emailHashes = ['a'.repeat(64)];
+  assert.throws(() => deserialiseState(withHash, w.anchor), /emailHashes/);
 });
 
 test('deterministic property: replay, incremental application and snapshot plus tail agree over seeded random logs', async () => {

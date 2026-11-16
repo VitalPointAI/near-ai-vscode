@@ -2,7 +2,7 @@
 // Activation in a project without .planning/.near-ai/team.json does one fs.stat and nothing else: no timers, no output channel, no status bar
 // item, no storage. So this module imports only vscode, Node built-ins and types; every team module is loaded with a dynamic import after
 // team.json is found or inside a command. Failures go to the NEAR AI Team output channel or to the user, never to an empty catch.
-import { createHash } from 'node:crypto';
+import { createHash, createPrivateKey, createPublicKey } from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
@@ -19,7 +19,6 @@ export const VERIFY_ACTION = 'Verify Team Log';
 const OUTPUT_CHANNEL_NAME = 'NEAR AI Team';
 const TEAM_FILE_PARTS = ['.planning', '.near-ai', 'team.json'];
 const ENABLE_PROGRESS_TITLE = 'Enabling Team Mode';
-const EMAIL_PROMPT = 'Your email is kept only as a scrambled code (a salted hash) in the team record, never as plain text.';
 
 export type TeamModeState = 'solo' | 'team' | 'error';
 export interface TeamModeHandle { ready: Promise<TeamModeState>; session(): TeamSession | undefined }
@@ -192,15 +191,12 @@ export function registerTeamMode(context: vscode.ExtensionContext): TeamModeHand
     if (teamName === undefined) return;
     const ownerName = await ask({ title: 'Enable Team Mode', prompt: 'Your name as teammates will see it', value: defaults.ownerName, validateInput: required });
     if (ownerName === undefined) return;
-    const ownerEmail = await ask({ title: 'Enable Team Mode', prompt: EMAIL_PROMPT, placeHolder: 'Your email (optional)', value: defaults.ownerEmail });
-    if (ownerEmail === undefined) return;
 
     const result = await vscode.window.withProgress(
       { location: vscode.ProgressLocation.Notification, title: ENABLE_PROGRESS_TITLE },
       () => enableModule.enableTeamMode({
         projectRoot, globalStorageDir: context.globalStorageUri.fsPath, secrets: context.secrets,
-        teamName, ownerName, ...(ownerEmail === '' ? {} : { ownerEmail }),
-        remote: defaults.remote, integrationBranch: defaults.integrationBranch
+        teamName, ownerName, remote: defaults.remote, integrationBranch: defaults.integrationBranch, checked
       })
     );
 
@@ -281,12 +277,19 @@ function sha256Hex(text: string): string {
   return createHash('sha256').update(text, 'utf8').digest('hex');
 }
 
-// The stored key is base64 PKCS#8 for Ed25519: a fixed header and the 32 byte seed. Each text a leak could take: as stored, as base64url, the seed
-// as hex and the seed as base64url. Repeats are dropped (base64 and base64url are the same text when the key has no + or /).
+// The stored key is base64 PKCS#8 for Ed25519: a fixed header and the 32 byte seed. Each text a leak could take: the PKCS#8 DER as stored
+// (base64), as base64url and as hex; the seed as hex, base64url and base64 (padded and unpadded); and the SPKI DER of its public half as hex.
+// Repeats are dropped (base64 and base64url are the same text when the key has no + or /). Only digests and lengths leave this function.
 function privateRenderingDigests(stored: string): Array<{ length: number; sha256: string }> {
   const der = Buffer.from(stored, 'base64');
   const seed = der.subarray(der.length - 32);
-  const forms = [...new Set([stored, der.toString('base64url'), seed.toString('hex'), seed.toString('base64url')])];
+  const spki = createPublicKey(createPrivateKey({ key: der, format: 'der', type: 'pkcs8' })).export({ format: 'der', type: 'spki' });
+  const seedBase64 = seed.toString('base64');
+  const forms = [...new Set([
+    stored, der.toString('base64url'), der.toString('hex'),
+    seed.toString('hex'), seed.toString('base64url'), seedBase64, seedBase64.replace(/=+$/, ''),
+    spki.toString('hex')
+  ])];
   return forms.map((form) => ({ length: form.length, sha256: sha256Hex(form) }));
 }
 

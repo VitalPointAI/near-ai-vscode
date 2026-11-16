@@ -1,6 +1,6 @@
 // Ed25519 device identity for Team Mode (D-14). The private key lives only in SecretStorage and, while in use, in a closure-held KeyObject.
 // This module never imports vscode: SecretStorage is reached through the type-only SecretStorageLike interface.
-import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, randomBytes, sign as edSign } from 'node:crypto';
+import { createPrivateKey, createPublicKey, generateKeyPairSync, randomBytes, sign as edSign } from 'node:crypto';
 import type { KeyObject } from 'node:crypto';
 import { mkdir } from 'node:fs/promises';
 import * as path from 'node:path';
@@ -145,7 +145,3 @@ export function newTeamId(): string {
   return `team-${randomBytes(16).toString('hex')}`;
 }
 
-// Members carry salted hashes of their emails, never the addresses themselves (D-31).
-export function emailHash(teamId: string, email: string): string {
-  return createHash('sha256').update(`${teamId}:${email.trim().toLowerCase()}`).digest('hex');
-}

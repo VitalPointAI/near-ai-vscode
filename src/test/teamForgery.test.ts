@@ -15,7 +15,7 @@ import type { GenesisAnchor, Rejection, TeamEvent, TeamFile, TeamState } from '.
 import { TeamLog, buildGenesisEvents, prepareEvents } from '../team/eventLog';
 import type { EventIntent, TeamSigner } from '../team/eventLog';
 import { DEFAULT_COORDINATION_REF, GitTransport } from '../team/gitTransport';
-import { emailHash, newEventId, newTeamId, signEvent } from '../team/identity';
+import { newEventId, newTeamId, signEvent } from '../team/identity';
 import { NEUTRAL_IDENTITY_ENV } from '../team/runGit';
 import { canonicalTeamFile } from '../team/teamFile';
 import { createOwner, createTeamFixture, gitIn } from './helpers/teamHarness';
@@ -55,7 +55,7 @@ async function seedTeam(fixture: TeamFixture): Promise<Seed> {
   const teamId = newTeamId();
   const owner = await createOwner(teamId);
   const genesis = buildGenesisEvents({
-    teamId, teamName: 'Forgery team', owner: { memberId: owner.memberId, name: 'Owner Test', emailHashes: [emailHash(teamId, 'owner@example.invalid')] },
+    teamId, teamName: 'Forgery team', owner: { memberId: owner.memberId, name: 'Owner Test', emailHashes: [] },
     identity: owner.identity, policy: defaultTeamPolicy(), now: fixedNow
   });
   const teamFile: TeamFile = {

@@ -409,14 +409,16 @@ export class GitTransport<S> implements CoordinationTransport<S> {
     return url;
   }
 
-  // The mirror does not see the project's own git config, so a project-level core.sshCommand is passed through. An ssh command
-  // from the environment wins (it also wins inside git), and without any a non-interactive one keeps a passphrase prompt from hanging.
+  // Only an ssh command inherited from the environment is passed on, and it is left where it is. A value from the project's own git
+  // config is never copied into the environment: a cloned or hostile folder could set it, and the mirror does not read that config.
+  // An ssh command git itself would apply to the mirror (the user's global config) is left to git. Without either, a non-interactive
+  // command keeps a passphrase prompt from hanging.
   private async networkEnv(): Promise<Record<string, string>> {
     const inherited = process.env.GIT_SSH_COMMAND;
     if (inherited !== undefined && inherited !== '') return {};
-    const configured = await this.git(['-C', this.projectRoot, 'config', '--get', 'core.sshCommand'], { timeoutMs: LOCAL_TIMEOUT_MS });
-    const command = configured.code === 0 ? gitText(configured) : '';
-    return { GIT_SSH_COMMAND: command !== '' ? command : DEFAULT_SSH_COMMAND };
+    const configured = await this.mirrorGit(['config', '--get', 'core.sshCommand']);
+    if (configured.code === 0 && gitText(configured) !== '') return {};
+    return { GIT_SSH_COMMAND: DEFAULT_SSH_COMMAND };
   }
 
   // git 2.31 and later read config from the environment. The remote URL can carry a credential (https://user:token@host), and a process

@@ -83,7 +83,9 @@ export function validateEnvelope(value: unknown): string | undefined {
 // Shared field validators. Every one returns a full reason string or undefined, and none of them copies its input.
 const CONTROL_CHARACTERS = /[\u0000-\u001F\u007F\u2028\u2029]/;
 const NAME_MAX = 80;
-const MAX_EMAIL_HASHES = 8;
+// No email-derived value is accepted: a hash of an address salted with the public team id can be reversed by guessing addresses, so the
+// roster's hash lists must stay empty in this version. A later format that needs to match addresses must use a value outsiders cannot test.
+const MAX_EMAIL_HASHES = 0;
 const MAX_SKILLS = 32;
 const SKILL_PATTERN = /^[a-z0-9][a-z0-9._+-]{0,39}$/;
 const TIME_ZONE_PATTERN = /^[A-Za-z0-9_+/-]{1,64}$/;
@@ -130,7 +132,7 @@ function validateUniqueList(value: unknown, path: string, max: number, pattern: 
   return undefined;
 }
 
-// Members carry salted hashes only; a plain address can never match the 64 hex shape.
+// Members carry no email and no value derived from one: the list must be present and empty (MAX_EMAIL_HASHES).
 function validateEmailHashes(value: unknown, path: string): string | undefined {
   return validateUniqueList(value, path, MAX_EMAIL_HASHES, EMAIL_HASH_PATTERN);
 }

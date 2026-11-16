@@ -483,19 +483,30 @@ function teamProjectTests(getApi: () => NearAiTestApi): Array<[string, () => Pro
     ['no rendering of the new device key or the owner email reaches settings, team.json or the remote (TMR-03)', async () => {
       const evidence = await getApi().team.deviceKeyEvidence();
       assert.ok(evidence !== undefined, 'Enable stored a device key');
-      const teamFile = JSON.parse(await readFile(teamFilePath, 'utf8')) as { genesis: { ownerDevice: { fingerprint: string; publicKey: string } } };
+      const teamFile = JSON.parse(await readFile(teamFilePath, 'utf8')) as { teamId: string; genesis: { ownerDevice: { fingerprint: string; publicKey: string } } };
       assert.equal(evidence.fingerprint, teamFile.genesis.ownerDevice.fingerprint);
       assert.equal(evidence.publicKey.base64url, teamFile.genesis.ownerDevice.publicKey);
       assert.equal(Buffer.from(evidence.publicKey.base64url, 'base64url').toString('hex'), evidence.publicKey.hex);
       assert.equal(Buffer.from(evidence.publicKey.base64url, 'base64url').toString('base64'), evidence.publicKey.base64);
       assert.match(evidence.privateKeySha256, /^[0-9a-f]{64}$/, 'the evidence carries the digest of the stored text, never the text');
+      // PKCS#8 DER as base64, base64url and hex; the seed as hex, base64url and padded and unpadded base64; SPKI DER as hex (repeats dropped).
+      assert.ok(evidence.privateFormDigests.length >= 6 && evidence.privateFormDigests.length <= 8, `renderings: ${evidence.privateFormDigests.length}`);
+      assert.ok(evidence.privateFormDigests.some((digest) => digest.length === 96), 'the PKCS#8 DER hex rendering is covered');
+      assert.ok(evidence.privateFormDigests.some((digest) => digest.length === 88), 'the SPKI DER hex rendering is covered');
+      assert.ok(evidence.privateFormDigests.some((digest) => digest.length === 44), 'the padded seed base64 rendering is covered');
 
       const digests: LabelledDigest[] = [
         ...evidence.privateFormDigests.map((digest, index) => ({ ...digest, label: `device key form ${index}` }))
       ];
       const workspaceSettings = path.join(workspace, '.vscode', 'settings.json');
       const files = [userSettingsPath, teamFilePath, ...(existsSync(workspaceSettings) ? [workspaceSettings] : [])];
-      const email = [{ label: 'owner email', value: 'e2e-owner@example.com' }];
+      const ownerEmail = 'e2e-owner@example.com';
+      // The address is never asked for or stored, and neither is a hash of it with the public team id (which a guess could test).
+      const email = [
+        { label: 'owner email', value: ownerEmail },
+        { label: 'owner email hash with the team id', value: createHash('sha256').update(`${teamFile.teamId}:${ownerEmail}`).digest('hex') },
+        { label: 'owner email hash', value: createHash('sha256').update(ownerEmail).digest('hex') }
+      ];
 
       // Controls: the same scanners do find a planted look-alike (a made-up value, not the key) in a file and in an object of the remote, so the
       // empty results below mean something. The planted value is hashed here; the real key never enters this window.
@@ -507,12 +518,12 @@ function teamProjectTests(getApi: () => NearAiTestApi): Array<[string, () => Pro
       execFileSync('git', ['--git-dir', remote, 'hash-object', '-w', '--stdin'], { input: `note ${fake}\n` });
       assert.deepEqual(await scanGitObjectsForDigests(remote, [fakeDigest]), ['planted'], 'the object scanner finds a planted value');
       const gitConfigPath = process.env.GIT_CONFIG_GLOBAL as string;
-      assert.equal((await scanFiles([gitConfigPath], email)).length, 1, 'the email scanner sees the address where it is by construction');
+      assert.deepEqual((await scanFiles([gitConfigPath], email)).map((hit) => hit.split(': ')[1]), ['owner email'], 'the email scanner sees the address where it is by construction');
 
       assert.deepEqual(await scanFilesForDigests(files, digests), [], 'user settings, workspace settings and team.json');
       assert.deepEqual(await scanGitObjectsForDigests(remote, digests), [], 'bare remote objects');
-      assert.deepEqual(await scanFiles(files, email), [], 'the plain owner email is not in settings or team.json');
-      assert.deepEqual(await scanGitObjects(remote, email), [], 'the plain owner email is not on the remote');
+      assert.deepEqual(await scanFiles(files, email), [], 'the owner email and its guessable hashes are not in settings or team.json');
+      assert.deepEqual(await scanGitObjects(remote, email), [], 'the owner email and its guessable hashes are not on the remote');
       await vscode.commands.executeCommand('notifications.clearAll');
     }]
   ];

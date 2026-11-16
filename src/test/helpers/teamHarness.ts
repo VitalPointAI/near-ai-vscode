@@ -9,7 +9,7 @@ import type { SecretStorageLike } from '../../services/auth';
 import { canonicalize } from '../../domain/team/canonical';
 import { defaultTeamPolicy } from '../../domain/team/policy';
 import type { CommittedEvent, GenesisAnchor, LogHead, Materializer, TeamEvent, TeamFile } from '../../domain/team/types';
-import { createDeviceIdentity, emailHash, newEventId, newMemberId, signEvent } from '../../team/identity';
+import { createDeviceIdentity, newEventId, newMemberId, signEvent } from '../../team/identity';
 import type { DeviceIdentity } from '../../team/identity';
 import { DEFAULT_COORDINATION_REF } from '../../team/gitTransport';
 import type { GitResult, GitRunner } from '../../team/runGit';
@@ -87,7 +87,7 @@ export interface TestGenesis { events: [TeamEvent<'team.created'>, TeamEvent<'me
 export function testGenesis(options: { teamId: string; owner: TestOwner; name: string }): TestGenesis {
   const { teamId, owner, name } = options;
   const device = { fingerprint: owner.identity.fingerprint, publicKey: owner.identity.publicKey };
-  const hashes = [emailHash(teamId, 'owner@example.invalid')];
+  const hashes: string[] = [];
   const created = signEvent(owner.identity, {
     v: 1, id: newEventId(), teamId, type: 'team.created', lamport: 1, at: '2026-01-01T00:00:00.000Z', author: owner.memberId, device: device.fingerprint, prev: '',
     body: { name, ownerId: owner.memberId, ownerName: 'Owner Test', ownerEmailHashes: hashes, ownerDevice: device, policy: defaultTeamPolicy() }

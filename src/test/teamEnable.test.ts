@@ -1,6 +1,6 @@
 // Enable Team Mode on real git: preconditions, defaults, the team.json-only commit, the existing-team cases, rollback and the Push helper.
 import assert from 'node:assert/strict';
-import { randomBytes } from 'node:crypto';
+import { createHash, createPrivateKey, createPublicKey, randomBytes } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import * as fs from 'node:fs/promises';
@@ -17,7 +17,7 @@ import type { EnableInput } from '../team/enable';
 import { TeamLog } from '../team/eventLog';
 import type { TeamSigner } from '../team/eventLog';
 import { DEFAULT_COORDINATION_REF, GitTransport } from '../team/gitTransport';
-import { DEVICE_KEY_SECRET, createDeviceIdentity, emailHash, loadDeviceIdentity } from '../team/identity';
+import { DEVICE_KEY_SECRET, createDeviceIdentity, loadDeviceIdentity } from '../team/identity';
 import { GitNotFoundError, runGit } from '../team/runGit';
 import type { GitRunner } from '../team/runGit';
 import { TEAM_FILE_REL, parseTeamFile, readTeamFile, teamStorageDir } from '../team/teamFile';
@@ -43,7 +43,7 @@ async function withFixture(clones: string[], run: (fixture: TeamFixture) => Prom
 function inputFor(fixture: TeamFixture, name: string, secrets: MemorySecrets, extra: Partial<EnableInput> = {}): EnableInput {
   return {
     projectRoot: fixture.clones[name] as string, globalStorageDir: fixture.storageDir(name), secrets,
-    teamName: 'Enable team', ownerName: 'Lead Owner', ownerEmail: OWNER_EMAIL, ...extra
+    teamName: 'Enable team', ownerName: 'Lead Owner', ...extra
   };
 }
 
@@ -97,7 +97,7 @@ test('preconditions report each missing prerequisite in plain language and write
   await withFixture(['a'], async (fixture) => {
     const root = fixture.clones.a as string;
     const ready = await checkEnablePreconditions(root);
-    assert.deepEqual(ready, { ok: true, branch: 'main' });
+    assert.deepEqual(ready, { ok: true, projectRoot: root, remote: 'origin', branch: 'main' });
 
     const noGit: GitRunner = async () => { throw new GitNotFoundError(); };
     const gitMissing = await checkEnablePreconditions(root, 'origin', noGit);
@@ -136,13 +136,11 @@ test('a failed precondition stops Enable before any key, folder or file is creat
   });
 });
 
-test('enableDefaults reads the folder name, git identity, remote and branches', async () => {
+test('enableDefaults reads the folder name, git user name (never the email), remote and branches', async () => {
   await withFixture(['a'], async (fixture) => {
     const root = fixture.clones.a as string;
     const defaults = await enableDefaults(root);
-    assert.deepEqual(defaults, {
-      teamName: 'a', ownerName: 'Team Test', ownerEmail: 'team-test@example.invalid', remote: 'origin', branch: 'main', integrationBranch: 'main'
-    });
+    assert.deepEqual(defaults, { teamName: 'a', ownerName: 'Team Test', remote: 'origin', branch: 'main', integrationBranch: 'main' });
     gitIn(root, ['checkout', '-q', '-b', 'feature/work']);
     gitIn(root, ['branch', '-q', '-m', 'main', 'trunk']);
     const withoutMain = await enableDefaults(root);
@@ -228,26 +226,46 @@ test('Enable creates the team, the device key, the orphan coordination branch an
   });
 });
 
-test('the owner email is only present as a salted hash and the plain address is nowhere in the remote or team.json', async () => {
+// Every text an outsider could compute from a guessed address and what the repository makes public (the team id, the team name, the
+// genesis event id and the owner's fingerprint): the plain and normalised address, and SHA-256 and SHA-512 of it alone, salted with each
+// public value before or after (with and without a colon), as hex, base64 and base64url.
+function guessableEmailForms(email: string, publicValues: string[]): string[] {
+  const addresses = [...new Set([email, email.trim().toLowerCase()])];
+  const inputs = addresses.flatMap((address) => [address, ...publicValues.flatMap((salt) => [`${salt}:${address}`, `${salt}${address}`, `${address}:${salt}`, `${address}${salt}`])]);
+  const forms = new Set<string>(addresses);
+  for (const input of inputs) {
+    for (const algorithm of ['sha256', 'sha512']) {
+      const digest = createHash(algorithm).update(input, 'utf8').digest();
+      forms.add(digest.toString('hex'));
+      forms.add(digest.toString('base64'));
+      forms.add(digest.toString('base64url'));
+    }
+  }
+  return [...forms];
+}
+
+test('no email address and no value derived from one reaches the remote or team.json: a guessed address hashed with public data matches nothing', async () => {
   await withFixture(['a'], async (fixture) => {
-    const secrets = new MemorySecrets();
-    const result = await enableTeamMode(inputFor(fixture, 'a', secrets));
+    const root = fixture.clones.a as string;
+    gitIn(root, ['config', 'user.email', OWNER_EMAIL]);
+    const defaults = await enableDefaults(root);
+    assert.equal(JSON.stringify(defaults).includes('@'), false, 'the defaults do not read the git email');
+    const result = await enableTeamMode(inputFor(fixture, 'a', new MemorySecrets()));
     assert.equal(result.ok, true);
     if (!result.ok) return;
     const history = remoteHistory(fixture);
-    assert.ok(history.includes(emailHash(result.teamFile.teamId, OWNER_EMAIL)), 'the hash of the lowercased address is in the genesis body');
-    assert.equal(history.toLowerCase().includes(OWNER_EMAIL.toLowerCase()), false);
-    const fileText = await fs.readFile(path.join(fixture.clones.a as string, TEAM_FILE_REL), 'utf8');
-    assert.equal(fileText.toLowerCase().includes('example.invalid'), false);
+    const fileText = await fs.readFile(path.join(root, TEAM_FILE_REL), 'utf8');
+    assert.ok(history.includes('"ownerEmailHashes":[]') && history.includes('"emailHashes":[]'), 'both genesis bodies carry empty lists');
     assert.equal(fileText.includes('Lead Owner'), false, 'team.json holds no member details');
-  });
-});
 
-test('Enable without an email still works and signs an empty hash list', async () => {
-  await withFixture(['a'], async (fixture) => {
-    const result = await enableTeamMode({ ...inputFor(fixture, 'a', new MemorySecrets()), ownerEmail: '' });
-    assert.equal(result.ok, true);
-    assert.ok(remoteHistory(fixture).includes('"ownerEmailHashes":[]'));
+    const { teamFile } = result;
+    const publicValues = [teamFile.teamId, teamFile.name, teamFile.genesis.eventId, teamFile.genesis.ownerDevice.fingerprint, teamFile.genesis.ownerDevice.publicKey];
+    const guesses = guessableEmailForms(OWNER_EMAIL, publicValues);
+    // Control: the guess list holds what the earlier format stored (SHA-256 hex of "<team id>:<lowercased address>"), so an empty result means something.
+    assert.ok(guesses.includes(createHash('sha256').update(`${teamFile.teamId}:${OWNER_EMAIL.toLowerCase()}`).digest('hex')));
+    const haystacks = [history, fileText, history.toLowerCase(), fileText.toLowerCase()];
+    assert.deepEqual(guesses.filter((guess) => haystacks.some((text) => text.includes(guess) || text.includes(guess.toLowerCase()))), [], 'no guessable form of the address');
+    assert.doesNotMatch(history, /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/, 'no address-shaped text in the coordination log');
   });
 });
 
@@ -321,9 +339,6 @@ test('invalid input is refused before anything is created', async () => {
       ['empty team name', { teamName: '   ' }],
       ['team name with a line break', { teamName: 'one\ntwo' }],
       ['empty owner name', { ownerName: '' }],
-      ['email without an at sign', { ownerEmail: 'not-an-email' }],
-      ['email with a space', { ownerEmail: 'a b@example.invalid' }],
-      ['email over 254 characters', { ownerEmail: `${'a'.repeat(250)}@example.invalid` }],
       ['integration branch with a space', { integrationBranch: 'bad branch' }],
       ['remote that looks like an option', { remote: '--upload-pack=x' }]
     ];
@@ -564,7 +579,17 @@ test('the canary scanners find a planted value in a git object, a file and every
   await createDeviceIdentity(secrets);
   const stored = secrets.values.get(DEVICE_KEY_SECRET) as string;
   const forms = deviceKeyForms(stored);
-  assert.ok(forms.length === 3 || forms.length === 4, 'stored form, seed hex and seed base64url, plus base64url when it differs');
+  // As stored, DER hex, seed hex, seed base64url, padded seed base64 and SPKI hex, plus DER base64url and unpadded seed base64 when they
+  // differ from the stored form and the seed base64url (they do whenever a + or / appears).
+  assert.ok(forms.length >= 6 && forms.length <= 8, `six to eight renderings, got ${forms.length}`);
+  const der = Buffer.from(stored, 'base64');
+  const seed = der.subarray(der.length - 32);
+  for (const [label, expected] of [
+    ['DER hex', der.toString('hex')], ['seed hex', seed.toString('hex')], ['seed base64url', seed.toString('base64url')],
+    ['padded seed base64', seed.toString('base64')], ['unpadded seed base64', seed.toString('base64').replace(/=+$/, '')],
+    ['SPKI hex', createPublicKey(createPrivateKey({ key: der, format: 'der', type: 'pkcs8' })).export({ format: 'der', type: 'spki' }).toString('hex')]
+  ] as const) assert.ok(forms.includes(expected), `${label} is one of the renderings`);
+  assert.ok(seed.toString('base64').endsWith('='), 'a 32 byte seed in base64 is padded');
   assert.equal(new Set(forms).size, forms.length);
   assert.equal(forms[0], stored);
   const needles: Needle[] = [...canaries.labelled(), ...forms.map((value, index) => ({ label: `device key form ${index}`, value }))];
@@ -579,7 +604,10 @@ test('the canary scanners find a planted value in a git object, a file and every
     mkdirSync(path.join(dir, 'files', 'nested'), { recursive: true });
     for (const [index, form] of forms.entries()) writeFileSync(path.join(dir, 'files', 'nested', `form-${index}.txt`), `x${form}x`, 'utf8');
     const hits = await scanFiles([path.join(dir, 'files')], needles);
-    assert.deepEqual(hits.map((hit) => hit.split(': ')[1]).sort(), forms.map((_, index) => `device key form ${index}`).sort());
+    // A padded rendering contains its unpadded twin, so each file is expected to show every rendering its text contains, and no other.
+    const expected = forms.flatMap((form) => forms.flatMap((other, index) => (`x${form}x`.includes(other) ? [`device key form ${index}`] : [])));
+    assert.deepEqual(hits.map((hit) => hit.split(': ')[1]).sort(), expected.sort());
+    for (const index of forms.keys()) assert.ok(hits.some((hit) => hit === `files/nested/form-${index}.txt: device key form ${index}`), `form ${index} is found in its own file`);
     assert.ok(hits.every((hit) => hit.startsWith('files/nested/form-')));
   } finally {
     await fs.rm(dir, { recursive: true, force: true });
@@ -687,15 +715,117 @@ test('a secret typed into the team name is refused and nothing is written anywhe
   });
 });
 
-test('a secret typed into the owner name or email is refused as well', async () => {
+test('a secret typed into the owner name is refused as well', async () => {
   await withFixture(['a'], async (fixture) => {
     const canaries = makeCanaries();
-    for (const extra of [{ ownerName: canaries.refreshToken }, { ownerEmail: `${canaries.reportingToken}@example.invalid` }] as Array<Partial<EnableInput>>) {
+    for (const extra of [{ ownerName: canaries.refreshToken }] as Array<Partial<EnableInput>>) {
       const secrets = new MemorySecrets();
       const result = await enableTeamMode(inputFor(fixture, 'a', secrets, extra));
       assert.equal(result.ok ? undefined : result.code, 'secret');
       assert.equal(secrets.values.size, 0);
     }
     assert.equal(remoteHasRef(fixture, COORDINATION_BRANCH), false);
+  });
+});
+
+// ---- GIT_SSH_COMMAND: only an inherited value passes, never the project's own config ----
+
+const DEFAULT_SSH = 'ssh -o BatchMode=yes -o ConnectTimeout=10';
+const NETWORK_VERBS = new Set(['ls-remote', 'push', 'fetch']);
+
+type RecordedCall = { args: string[]; env: Record<string, string> | undefined };
+
+function recordingRunner(calls: RecordedCall[]): GitRunner {
+  return async (args, options) => {
+    calls.push({ args: [...args], env: options?.env === undefined ? undefined : { ...options.env } });
+    return runGit(args, options);
+  };
+}
+
+const networkCalls = (calls: RecordedCall[]): RecordedCall[] => calls.filter((call) => call.args.some((arg) => NETWORK_VERBS.has(arg)));
+
+async function withSshEnv(value: string | undefined, run: () => Promise<void>): Promise<void> {
+  const saved = process.env.GIT_SSH_COMMAND;
+  if (value === undefined) delete process.env.GIT_SSH_COMMAND;
+  else process.env.GIT_SSH_COMMAND = value;
+  try {
+    await run();
+  } finally {
+    if (saved === undefined) delete process.env.GIT_SSH_COMMAND;
+    else process.env.GIT_SSH_COMMAND = saved;
+  }
+}
+
+test('a core.sshCommand from the project config is never copied into GIT_SSH_COMMAND by Enable, Push or the transport', async () => {
+  await withSshEnv(undefined, async () => {
+    await withFixture(['a', 'b'], async (fixture) => {
+      // Without any configured ssh command, the calls in the project get the non-interactive default (clone b, before a moves main on).
+      const other = fixture.clones.b as string;
+      const plain: RecordedCall[] = [];
+      assert.equal((await pushCodeBranch(other, 'origin', 'main', recordingRunner(plain))).ok, true);
+      assert.deepEqual(networkCalls(plain).map((call) => call.env?.GIT_SSH_COMMAND), [DEFAULT_SSH]);
+
+      const projectSsh = 'ssh -o ProjectConfigured=yes';
+      const root = fixture.clones.a as string;
+      gitIn(root, ['config', 'core.sshCommand', projectSsh]);
+      const calls: RecordedCall[] = [];
+      const result = await enableTeamMode({ ...inputFor(fixture, 'a', new MemorySecrets()), git: recordingRunner(calls) });
+      assert.equal(result.ok, true);
+      const pushed = await pushCodeBranch(root, 'origin', 'main', recordingRunner(calls));
+      assert.equal(pushed.ok, true);
+      const transport = new GitTransport<TeamState>({
+        mirrorDir: path.join(fixture.storageDir('a'), 'check.git'), projectRoot: root, remote: 'origin', ref: DEFAULT_COORDINATION_REF,
+        materializer: teamMaterializer(anchorOf((result as { teamFile: TeamFile }).teamFile)), baseDelayMs: 1, git: recordingRunner(calls)
+      });
+      await transport.fetch();
+
+      const network = networkCalls(calls);
+      assert.ok(network.length >= 3, `network calls were recorded (${network.length})`);
+      assert.deepEqual(calls.filter((call) => JSON.stringify(call.env ?? {}).includes('ProjectConfigured')), [], 'the project value is in no environment');
+      for (const call of network) {
+        const value = call.env?.GIT_SSH_COMMAND;
+        // Calls in the project leave the ssh command to git (which reads the project config itself); the mirror, which does not read it, gets the default.
+        if (call.args.includes('--git-dir')) assert.equal(value, DEFAULT_SSH, call.args.join(' '));
+        else assert.equal(value, undefined, call.args.join(' '));
+      }
+    });
+  });
+});
+
+test('an inherited GIT_SSH_COMMAND is left to the environment: no call sets its own', async () => {
+  await withSshEnv('ssh -o Inherited=yes', async () => {
+    await withFixture(['a'], async (fixture) => {
+      gitIn(fixture.clones.a as string, ['config', 'core.sshCommand', 'ssh -o ProjectConfigured=yes']);
+      const calls: RecordedCall[] = [];
+      const result = await enableTeamMode({ ...inputFor(fixture, 'a', new MemorySecrets()), git: recordingRunner(calls) });
+      assert.equal(result.ok, true);
+      const network = networkCalls(calls);
+      assert.ok(network.length >= 2);
+      assert.deepEqual(network.filter((call) => call.env?.GIT_SSH_COMMAND !== undefined).map((call) => call.args.join(' ')), []);
+    });
+  });
+});
+
+// ---- Preconditions are checked once when the caller passes its result ----
+
+test('Enable reuses a passed precondition result for the same project and remote, and checks again for any other', async () => {
+  await withFixture(['a', 'b'], async (fixture) => {
+    const root = fixture.clones.a as string;
+    const checked = await checkEnablePreconditions(root);
+    assert.equal(checked.ok, true);
+    if (!checked.ok) return;
+    const calls: RecordedCall[] = [];
+    const result = await enableTeamMode({ ...inputFor(fixture, 'a', new MemorySecrets()), checked, git: recordingRunner(calls) });
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.equal(result.branch, 'main', 'the passed branch is used');
+    const preconditionCalls = (list: RecordedCall[]): number => list.filter((call) => call.args[0] === 'rev-parse' && call.args[1] === '--is-inside-work-tree').length;
+    assert.equal(preconditionCalls(calls), 0, 'git preconditions did not run again');
+
+    // A result for another project is not trusted: the preconditions run for this one.
+    const again: RecordedCall[] = [];
+    const other = await enableTeamMode({ ...inputFor(fixture, 'b', new MemorySecrets()), checked, git: recordingRunner(again) });
+    assert.equal(other.ok, false, 'the remote already has a coordination log');
+    assert.equal(preconditionCalls(again), 1);
   });
 });

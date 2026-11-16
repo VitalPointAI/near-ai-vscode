@@ -13,7 +13,7 @@ import type { GenesisAnchor, LogHead, TeamEvent, TeamFile, TeamState } from '../
 import { DEFAULT_SNAPSHOT_EVERY, NO_DEVICE_KEY_MESSAGE, SNAPSHOT_ALREADY_WRITTEN, TeamLog, buildGenesisEvents, prepareEvents } from '../team/eventLog';
 import type { EventIntent, TeamSigner } from '../team/eventLog';
 import { DEFAULT_COORDINATION_REF, GitTransport } from '../team/gitTransport';
-import { emailHash, newTeamId } from '../team/identity';
+import { newTeamId } from '../team/identity';
 import { runGit } from '../team/runGit';
 import type { GitRunner } from '../team/runGit';
 import type { CoordinationTransport } from '../team/transport';
@@ -63,7 +63,7 @@ async function seedTeam(fixture: TeamFixture, extra: { snapshotEvery?: number } 
   const teamId = newTeamId();
   const owner = await createOwner(teamId);
   const genesis = buildGenesisEvents({
-    teamId, teamName: 'Log team', owner: { memberId: owner.memberId, name: 'Owner Test', emailHashes: [emailHash(teamId, 'owner@example.invalid')] },
+    teamId, teamName: 'Log team', owner: { memberId: owner.memberId, name: 'Owner Test', emailHashes: [] },
     identity: owner.identity, policy: defaultTeamPolicy(), now: fixedNow
   });
   const teamFile: TeamFile = {
@@ -105,7 +105,7 @@ test('buildGenesisEvents makes a signed two-event batch that the materialiser ac
   const teamId = newTeamId();
   const owner = await createOwner(teamId);
   const built = buildGenesisEvents({
-    teamId, teamName: 'Genesis team', owner: { memberId: owner.memberId, name: 'Owner Test', emailHashes: [emailHash(teamId, 'owner@example.invalid')] },
+    teamId, teamName: 'Genesis team', owner: { memberId: owner.memberId, name: 'Owner Test', emailHashes: [] },
     identity: owner.identity, policy: defaultTeamPolicy(), near: { organizationId: 'org-1', workspaceId: 'ws-1' }, now: fixedNow
   });
   const [created, joined] = built.events;

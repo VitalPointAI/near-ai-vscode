@@ -1,6 +1,6 @@
 // Device identity, event signing and id generators (D-05, D-14, D-15, D-31). All key material is generated at run time.
 import assert from 'node:assert/strict';
-import { createHash, generateKeyPairSync } from 'node:crypto';
+import { generateKeyPairSync } from 'node:crypto';
 import { mkdtemp, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -8,7 +8,7 @@ import test from 'node:test';
 import { MAX_EVENT_BYTES, fingerprintOf, verifyEventSignature } from '../domain/team/canonical';
 import type { TeamEvent, UnsignedTeamEvent } from '../domain/team/types';
 import {
-  DEVICE_KEY_SECRET, IDENTITY_CREATE_LOCK_FILE, IDENTITY_DIR_NAME, createDeviceIdentity, emailHash, forgetDeviceIdentity, identityDir, loadDeviceIdentity,
+  DEVICE_KEY_SECRET, IDENTITY_CREATE_LOCK_FILE, IDENTITY_DIR_NAME, createDeviceIdentity, forgetDeviceIdentity, identityDir, loadDeviceIdentity,
   forgetCreatedDeviceIdentity, loadOrCreateDeviceIdentity, newEventId, newMemberId, newTeamId, signEvent, ulid
 } from '../team/identity';
 import { acquireFileLock } from '../services/stateMirrorLock';
@@ -184,12 +184,8 @@ test('generated ids have the documented shapes and do not repeat', () => {
   assert.equal(ulid(0).length, 26);
 });
 
-test('email hashes ignore case and spacing, differ across teams, and never contain the address', () => {
-  const hash = emailHash(TEAM, ' Ana@Example.INVALID ');
-  assert.equal(hash, emailHash(TEAM, 'ana@example.invalid'));
-  assert.match(hash, /^[0-9a-f]{64}$/);
-  assert.equal(hash, createHash('sha256').update(`${TEAM}:ana@example.invalid`).digest('hex'));
-  assert.notEqual(hash, emailHash('team-ffffffffffffffffffffffffffffffff', 'ana@example.invalid'));
-  assert.notEqual(hash, emailHash(TEAM, 'bob@example.invalid'));
-  assert.equal(hash.includes('ana'), false);
+test('the identity module offers no way to derive a value from an email address', async () => {
+  // The team id is public in team.json, so any hash of an address salted with it could be reversed by guessing addresses (see validate.ts).
+  const exported = Object.keys(await import('../team/identity'));
+  assert.deepEqual(exported.filter((name) => /mail/i.test(name)), []);
 });

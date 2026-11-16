@@ -1,7 +1,7 @@
 // SEC-01 canaries: secret-shaped strings generated at run time (never literals in the repository) and scanners that look for them,
 // and for the device key in every encoding it could be written in, across git objects and files.
 // The file has no .test suffix on purpose so the test glob does not run it as a suite.
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash, createPrivateKey, createPublicKey, randomBytes } from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { runGit } from '../../team/runGit';
@@ -42,12 +42,20 @@ export function makeCanaries(): Canaries {
 }
 
 // The stored device key is base64 PKCS#8 for Ed25519: a fixed 16 byte header and the 32 byte seed. Each rendering a leak could take is
-// returned (three or four distinct texts), so a scan catches the key whether it was copied as stored, re-encoded, or reduced to its seed.
+// returned, so a scan catches the key whether it was copied as stored, re-encoded, reduced to its seed or written as DER hex: the PKCS#8
+// DER as base64, base64url and hex, the seed as hex, base64url and base64 (padded and unpadded), and the SPKI DER of its public half as hex.
+// The order matches privateRenderingDigests in teamCommands.ts, and repeats are dropped (base64 and base64url are the same text when the
+// key has no + or / in it, and unpadded base64 equals base64url in the same case).
 export function deviceKeyForms(storedSecret: string): string[] {
   const der = Buffer.from(storedSecret, 'base64');
   const seed = der.subarray(der.length - 32);
-  // base64 and base64url are the same text when the key happens to have no + or / in it, so repeats are dropped.
-  return [...new Set([storedSecret, der.toString('base64url'), seed.toString('hex'), seed.toString('base64url')])];
+  const spki = createPublicKey(createPrivateKey({ key: der, format: 'der', type: 'pkcs8' })).export({ format: 'der', type: 'spki' });
+  const seedBase64 = seed.toString('base64');
+  return [...new Set([
+    storedSecret, der.toString('base64url'), der.toString('hex'),
+    seed.toString('hex'), seed.toString('base64url'), seedBase64, seedBase64.replace(/=+$/, ''),
+    spki.toString('hex')
+  ])];
 }
 
 function foundIn(haystack: Buffer, needles: Needle[]): string[] {
@@ -122,10 +130,10 @@ export function deviceKeyFormDigests(storedSecret: string): KeyDigest[] {
   return deviceKeyForms(storedSecret).map((form) => ({ length: form.length, sha256: createHash('sha256').update(form, 'utf8').digest('hex') }));
 }
 
-// Characters of base64 (A-Z a-z 0-9 + /), base64url (- _) and hex. '=' padding is left out of a run; a 48 byte PKCS#8 key has none.
+// Characters of base64 (A-Z a-z 0-9 + /), base64url (- _), hex and base64 padding (=), so a padded rendering is one run.
 const RUN_BYTE = new Uint8Array(256);
 for (const range of ['AZ', 'az', '09']) for (let code = range.charCodeAt(0); code <= range.charCodeAt(1); code += 1) RUN_BYTE[code] = 1;
-for (const char of '+/-_') RUN_BYTE[char.charCodeAt(0)] = 1;
+for (const char of '+/-_=') RUN_BYTE[char.charCodeAt(0)] = 1;
 
 function digestsFoundIn(haystack: Buffer, digests: LabelledDigest[]): string[] {
   const lengths = [...new Set(digests.map((digest) => digest.length))];

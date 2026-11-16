@@ -189,8 +189,8 @@ const PARAGRAPH_SEPARATOR = String.fromCharCode(0x2029);
 
 function bodiesFor(device: { fingerprint: string; publicKey: string }): Record<string, Record<string, unknown>> {
   return {
-    'team.created': { name: 'Core team', ownerId: OWNER_ID, ownerName: 'Ada', ownerEmailHashes: [HASH_A], ownerDevice: device, policy: defaultTeamPolicy(), near: { organizationId: 'org_1', workspaceId: 'ws:2' } },
-    'member.joined': { memberId: OTHER_ID, name: 'Grace', emailHashes: [HASH_A, HASH_B], role: 'developer', device },
+    'team.created': { name: 'Core team', ownerId: OWNER_ID, ownerName: 'Ada', ownerEmailHashes: [], ownerDevice: device, policy: defaultTeamPolicy(), near: { organizationId: 'org_1', workspaceId: 'ws:2' } },
+    'member.joined': { memberId: OTHER_ID, name: 'Grace', emailHashes: [], role: 'developer', device },
     'member.role-changed': { memberId: OTHER_ID, role: 'lead' },
     'member.removed': { memberId: OTHER_ID },
     'device.added': { memberId: OTHER_ID, device },
@@ -219,7 +219,6 @@ test('valid bodies for all ten Phase 60 types pass, with and without optional fi
   assert.equal(validateBody('team.created', created), undefined, 'near is optional');
   assert.equal(validateBody('member.availability', { availability: 'away' }), undefined, 'workingHours is optional');
   assert.equal(validateBody('member.skills', { memberId: OTHER_ID, skills: [] }), undefined);
-  assert.equal(validateBody('member.joined', { ...bodies['member.joined'], emailHashes: [] }), undefined);
   assert.equal(validateBody('item.created', {}), 'unsupported event type for this version');
   assert.equal(validateBody('member.removed', []), `${INVALID}: body`);
   assert.equal(validateBody('member.removed', null), `${INVALID}: body`);
@@ -246,7 +245,7 @@ test('every body rejects extra keys, missing keys and wrong types by field name'
   }
 });
 
-test('members carry email hashes only, and device fingerprints must match their key', async () => {
+test('members carry no email and no value derived from one, and device fingerprints must match their key', async () => {
   const { owner } = await context();
   const device = { fingerprint: owner.identity.fingerprint, publicKey: owner.identity.publicKey };
   const joined = bodiesFor(device)['member.joined'] as Record<string, unknown>;
@@ -256,9 +255,14 @@ test('members carry email hashes only, and device fingerprints must match their 
   assert.equal(validateBody('member.joined', { ...joined, emailHashes: ['ada@example.test'] }), `${INVALID}: body.emailHashes`);
   assert.equal(validateBody('member.joined', { ...joined, emailHashes: [HASH_A.toUpperCase()] }), `${INVALID}: body.emailHashes`);
   assert.equal(validateBody('member.joined', { ...joined, emailHashes: [HASH_A, HASH_A] }), `${INVALID}: body.emailHashes`);
-  const nine = Array.from({ length: 9 }, (_unused, index) => String(index).repeat(64));
-  assert.equal(validateBody('member.joined', { ...joined, emailHashes: nine }), `${INVALID}: body.emailHashes`);
-  assert.equal(validateBody('member.joined', { ...joined, emailHashes: nine.slice(0, 8) }), undefined);
+  // A well-formed hash is refused too: a hash of an address salted with the public team id can be reversed by guessing addresses.
+  assert.equal(validateBody('member.joined', { ...joined, emailHashes: [HASH_A] }), `${INVALID}: body.emailHashes`);
+  assert.equal(validateBody('member.joined', { ...joined, emailHashes: [HASH_A, HASH_B] }), `${INVALID}: body.emailHashes`);
+  assert.equal(validateBody('team.created', { ...plainOwner, ownerEmailHashes: [HASH_A] }), `${INVALID}: body.ownerEmailHashes`);
+  assert.equal(validateBody('member.joined', { ...joined, emailHashes: [] }), undefined, 'the list is present and empty');
+  assert.equal(validateBody('team.created', { ...plainOwner, ownerEmailHashes: [] }), undefined);
+  const { emailHashes: _dropped, ...withoutList } = joined;
+  assert.notEqual(validateBody('member.joined', withoutList), undefined, 'the list is still required');
   assert.equal(validateBody('member.joined', { ...joined, emailHashes: HASH_A }), `${INVALID}: body.emailHashes`);
 
   const stranger = await createOwner(newTeamId());
