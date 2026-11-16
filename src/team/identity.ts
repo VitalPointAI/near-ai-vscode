@@ -224,6 +224,9 @@ export async function prepareDeviceRotation(
 ): Promise<{ current: DeviceIdentity; next: DeviceIdentity }> {
   await mkdir(options.identityDir, { recursive: true, mode: 0o700 });
   return withFileLock(options.identityDir, IDENTITY_CREATE_LOCK_FILE, async () => {
+    // Every path that can write a created record repairs first (first need, revoking, here), so a revoked key a crash left stored is deleted and never
+    // made active again by the backfill below.
+    await repairKeyState(secrets, options);
     const current = await loadDeviceIdentity(secrets);
     if (!current) throw new Error('This computer has no identity key to rotate yet.');
     if (present(await secrets.get(PENDING_DEVICE_KEY_SECRET))) {

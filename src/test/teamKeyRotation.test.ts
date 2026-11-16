@@ -322,6 +322,23 @@ test('a revoked key left stored by a crash is deleted at the next first need and
   });
 });
 
+test('preparing a rotation after a crash that left a revoked key stored deletes it and does not make it active again', async () => {
+  await withFolder(async (folder, secrets) => {
+    const { identity } = await loadOrCreateDeviceIdentity(secrets, { identityDir: folder, now: () => T0 });
+    const blocked = failing(secrets, 'delete', DEVICE_KEY_SECRET);
+    await assert.rejects(() => revokeDeviceKey(blocked, { identityDir: folder, key: refOf(identity), now: () => T1 }), /stopped here/);
+    assert.equal(secrets.values.has(DEVICE_KEY_SECRET), true, 'the revoked key is still stored for the moment');
+
+    await assert.rejects(() => prepareDeviceRotation(secrets, { identityDir: folder, now: () => T2 }), /no identity key to rotate/);
+    assert.equal(secrets.values.has(DEVICE_KEY_SECRET), false, 'the revoked key was deleted, not carried on');
+    assert.equal(secrets.values.has(PENDING_DEVICE_KEY_SECRET), false, 'no new key was made aside');
+    assert.deepEqual(kinds(await historyOf(folder)), ['created', 'revoked'], 'no created record was written for the revoked key');
+    assert.deepEqual((await readdir(folder)).filter((name) => name.startsWith('key-history.archived-')), [], 'nothing was archived');
+    const refused = await verdictOf(folder, secrets, bundleBy(identity, T0));
+    assert.equal(!refused.ok && refused.reason, 'key-revoked', 'the revoked key stays refused');
+  });
+});
+
 test('no rendering of any of the three private keys reaches the history file or the identity folder, and the scanners see the new names', async () => {
   await withFolder(async (folder, secrets) => {
     const { identity: first } = await loadOrCreateDeviceIdentity(secrets, { identityDir: folder, now: () => T0 });
