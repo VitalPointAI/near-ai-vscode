@@ -882,12 +882,28 @@ const TOOL_RUN_SITES: Readonly<Record<string, number>> = { 'src/agent/loop.ts': 
 /** Every production `new AgentRun(`: the main run and each sub-agent in the session, and the benchmark runner. */
 const AGENT_RUN_SITES: Readonly<Record<string, number>> = { 'src/services/agentSession.ts': 2, 'src/benchmark/runner.ts': 1 };
 /**
- * Files under src/agent and src/mcp that may start a process: the shell session, the worktree helper, the Bash tool's own command runner and the unattended
- * safety checks. They are the loop's own tools, behind the gate. Everything else that starts a process is extension code, not an agent tool (src/gsd/runtime.ts,
- * src/services/stateGit.ts, codePushCheck.ts, src/team/runGit.ts, onlineHome.ts, cyberTools.ts, cyberSandbox.ts, src/security/runtimes.ts): the floor's own
- * wording excludes it, and it never runs because a model asked.
+ * Every production file (all of src, apart from src/test) that may import a way to start a process, each with the reason it is not an agent tool execution.
+ * The ones under src/agent are the loop's own tools, behind the gate. The rest are the extension's own helpers: the floor's own wording excludes them, and
+ * none of them runs because a model asked. A new importer is added here with its reason or routed through the gate, never left unlisted.
  */
-const PROCESS_IMPORTERS_IN_AGENT_AND_MCP: readonly string[] = ['src/agent/shell.ts', 'src/agent/tools.ts', 'src/agent/unattended.ts', 'src/agent/worktree.ts'];
+const PROCESS_IMPORTERS: Readonly<Record<string, string>> = {
+  'src/agent/shell.ts': 'the shell session behind the Bash tool; the loop gates every command before it reaches it',
+  'src/agent/tools.ts': 'the Bash tool\'s own command runner and the ripgrep inside the already-gated Grep tool',
+  'src/agent/unattended.ts': 'the unattended-run safety checks (git blob reads of a script before it runs); part of the gate\'s own decision',
+  'src/agent/worktree.ts': 'the worktree helper of the sandboxed run; started by the session, not by a model call',
+  'src/benchmark/execution.ts': 'runs a benchmark task\'s hidden acceptance tests under node after the model has finished; started by the benchmark harness, not by a model call',
+  'src/benchmark/roleTasks.ts': 'not an import: the text of a fixture file written into a benchmark task\'s sandbox',
+  'src/gsd/researchProfile.ts': 'one fixed `git status` read of the working tree for a plan check; the extension\'s own helper',
+  'src/gsd/runtime.ts': 'installs and checks the Open-GSD runtime in the extension\'s own storage (npx with a fixed argument list); not a model call',
+  'src/security/runtimes.ts': 'fixed `--version` probes for the dependency check; the extension\'s own helper',
+  'src/services/agentSession.ts': 'one fixed `git rev-parse HEAD` for the session\'s snapshot; the extension\'s own helper',
+  'src/services/codePushCheck.ts': 'the person\'s own git push after their click; the extension\'s own helper',
+  'src/services/cyberSandbox.ts': 'the cyber harness\'s container runtime wrapper; its steps are tool runs decided at the gated cyberRun.ts site',
+  'src/services/cyberTools.ts': 'fixed `--version` detection of host security tools; the extension\'s own helper',
+  'src/services/onlineHome.ts': 'the GitHub CLI calls of the person\'s own "online home" click; the extension\'s own helper',
+  'src/services/stateGit.ts': 'the one place project sync starts git; the extension\'s own helper',
+  'src/team/runGit.ts': 'the one place the team core starts git; the extension\'s own helper'
+};
 
 test('a tool\'s run is called only at the listed sites, and a planted extra site is reported', () => {
   const found: Record<string, number> = {};
@@ -914,14 +930,24 @@ test('every production `new AgentRun(` passes a gate, and a planted construction
   assert.deepEqual(agentRunConstructions('const run = new AgentRun({ client, ...(gate ? { gate } : {}) });'), [{ line: 1, passesGate: true }]);
 });
 
-test('no file under src/agent or src/mcp imports child_process or execa except the listed ones, and a planted import is reported', () => {
+test('no production file under src imports child_process or execa except the listed ones, each with a reason, and planted imports are reported', () => {
   const files: Record<string, string> = {};
-  for (const file of productionSources()) if (file.startsWith('src/agent/') || file.startsWith('src/mcp/')) files[file] = readFileSync(path.join(REPO, file), 'utf8');
-  assert.ok(Object.keys(files).length > 20, 'the scan read the folders');
+  for (const file of productionSources()) files[file] = readFileSync(path.join(REPO, file), 'utf8');
+  assert.ok(Object.keys(files).length > 200, 'the scan read all of src');
+  assert.ok(Object.keys(files).some((file) => file.startsWith('src/services/')) && Object.keys(files).some((file) => file.startsWith('src/team/')), 'the scan reaches services and team, not only agent and mcp');
+  assert.ok(!Object.keys(files).some((file) => file.startsWith('src/test/')), 'src/test is the one folder left out');
   const importers = processImporters(files);
-  for (const file of importers) assert.ok(PROCESS_IMPORTERS_IN_AGENT_AND_MCP.includes(file), `${file} starts processes and is not on the list`);
-  for (const file of PROCESS_IMPORTERS_IN_AGENT_AND_MCP) assert.ok(existsSync(path.join(REPO, file)), `${file} exists`);
+  for (const file of importers) assert.ok(file in PROCESS_IMPORTERS, `${file} starts processes and is not on the list`);
+  for (const [file, reason] of Object.entries(PROCESS_IMPORTERS)) {
+    assert.ok(existsSync(path.join(REPO, file)), `${file} exists`);
+    assert.ok(importers.includes(file), `${file} is on the list but no longer starts a process, so remove it`);
+    assert.ok(reason.length > 20 && !reason.includes('\u2014'), `${file} has a plain reason`);
+  }
   assert.deepEqual(processImporters({ 'src/agent/new.ts': "import { spawn } from 'node:child_process';", 'src/mcp/new.ts': "const cp = require('child_process');", 'src/agent/quiet.ts': "import { x } from './shell';", 'src/agent/exe.ts': "import execa from 'execa';" }), ['src/agent/exe.ts', 'src/agent/new.ts', 'src/mcp/new.ts']);
+  // The planted case outside agent and mcp: a service that starts a process is reported, and an unlisted one fails the check above.
+  const planted = { 'src/services/newHelper.ts': "import { execFile } from 'node:child_process';\nexecFile('rm', ['-rf', root]);", 'src/services/fine.ts': "import { join } from 'node:path';" };
+  assert.deepEqual(processImporters(planted), ['src/services/newHelper.ts']);
+  assert.ok(!('src/services/newHelper.ts' in PROCESS_IMPORTERS), 'a planted service is not on the list, so the scan above would fail on it');
 });
 
 // One scripted run per effect kind: the tool is spied so the test sees what had been recorded the moment it started.
