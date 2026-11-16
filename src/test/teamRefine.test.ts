@@ -272,3 +272,16 @@ test('an injected imported team: its text is quoted as data, and the tool grabs 
   assert.ok(reply.suggestions.every((item) => item.label));
   assert.equal(reply.dropped.length, 1);
 });
+
+// 0.4.28 (PR #69 review): a reports-to suggestion with no `proposed` (or a name too long to be a member) was read as "reports to nobody", which would
+// quietly cut the member loose from its manager. It is dropped with a reason instead; an empty string still means nobody.
+test('a reports-to suggestion without a name is dropped with a reason, not read as reporting to nobody', () => {
+  const missing = parse({ suggestions: [{ member: 'writer', field: 'reports-to', reason: 'Flatter team.' }] });
+  assert.deepEqual(missing.suggestions, []);
+  assert.deepEqual(missing.dropped, ['A reports-to line for writer was dropped: it did not say who writer should report to.']);
+  const long = parse({ suggestions: [{ member: 'writer', field: 'reports-to', proposed: 'x'.repeat(61), reason: 'Flatter team.' }] });
+  assert.deepEqual(long.suggestions, []);
+  assert.deepEqual(long.dropped, ['A reports-to line for writer was dropped: the name it gave is too long to be a member.']);
+  const nobody = parse({ suggestions: [{ member: 'writer', field: 'reports-to', proposed: '', reason: 'Flatter team.' }] });
+  assert.deepEqual(nobody.suggestions.map((item) => [item.kind, item.proposed]), [['reports-to', '']], 'an empty string is still a clear "nobody"');
+});
