@@ -118,7 +118,7 @@ const DOMAIN_TEAM = 'domain/team';
 const LOCK_MODULE = 'services/stateMirrorLock';
 export function importsOf(text: string): ImportRef[] { ... }
 ```
-For the gate: add `domain/gate` (imports only `src/domain`, Node builtins forbidden except what `domain/team` already allows) and `gate` (may reach only `services/auth` type-only, `services/stateMirrorLock` and `domain/*`). Pitfall 12: the relay compiles `src/domain/gate` too, so keep it free of Node-only imports. Concurrency tests copy `teamConcurrency.test.ts`; canonical and golden tests copy `teamCanonical.test.ts`. Parity tests keep `autoApproval.test.ts` and the 25 `AgentRun` tests unchanged; `protectedPaths.test.ts:304` is rewritten only in PR 2b.
+For the gate: add `domain/gate` (imports only `src/domain`, Node builtins forbidden except what `domain/team` already allows) and `gate` (may reach only `services/auth` type-only, `services/stateMirrorLock` and `domain/*`). Pitfall 12: the relay compiles `src/domain/gate` too, so keep it free of Node-only imports. Concurrency tests copy `teamConcurrency.test.ts`; canonical and golden tests copy `teamCanonical.test.ts`. Parity tests keep `autoApproval.test.ts` and the 25 `AgentRun` tests unchanged; the fully-autonomous test at `protectedPaths.test.ts:304` is rewritten only in plan 17 (PR 3).
 
 ## Shared Patterns
 
