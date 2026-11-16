@@ -200,15 +200,16 @@ function isPin(value: unknown): value is Pin {
 // The project's own git config decides the remote address, so it is checked before it reaches git (D-34). Allowed: an address with the scheme
 // ssh, git, http, https or file; an scp-like address (user@host:path), which git reads as ssh; and a plain local path. Everything else is
 // refused, most of all git's remote helpers: <transport>::<address> (ext:: runs a command, fd:: reads a descriptor) and any other scheme.
-// The helper test is git's own: a scheme-like word directly followed by two colons, before anything else.
-const HELPER_ADDRESS = /^[A-Za-z][A-Za-z0-9+.-]*::/;
+// The helper test is wider than git's own on purpose: any leading run of letters, digits, plus, dot and dash directly followed by two colons, on the
+// value with surrounding whitespace removed, so a spelling git reads as a helper (a leading digit) and one it might (a leading dot) are both refused.
+const HELPER_ADDRESS = /^[A-Za-z0-9+.-]*::/;
 const SCHEME_ADDRESS = /^([A-Za-z][A-Za-z0-9+.-]*):\/\//;
 const CONTACTED_SCHEMES: ReadonlySet<string> = new Set(['ssh', 'git', 'http', 'https', 'file']);
 const CONTROL_CHARACTER = /[\u0000-\u001f\u007f]/;
 
 export function isContactableRemoteAddress(url: string): boolean {
   if (url.trim() === '' || url.startsWith('-') || CONTROL_CHARACTER.test(url)) return false;
-  if (HELPER_ADDRESS.test(url)) return false;
+  if (HELPER_ADDRESS.test(url.trim())) return false;
   const scheme = SCHEME_ADDRESS.exec(url);
   if (scheme !== null) return CONTACTED_SCHEMES.has((scheme[1] as string).toLowerCase());
   return true;

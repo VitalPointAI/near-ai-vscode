@@ -565,7 +565,7 @@ test('only file, ssh, git, http and https addresses, scp-like addresses and plai
   ]) assert.equal(isContactableRemoteAddress(good), true, `${good} is contacted`);
   for (const bad of [
     '', ' ', '-oProxyCommand=x', '--upload-pack=x', 'ext::sh -c true', 'EXT::sh -c true', 'fd::3', 'fd::3,4', 'foo::bar', 'https::example.com/x', 'ext::https://example.com/x',
-    'ext://sh', 'ftp://example.com/team.git', 'ftps://example.com/team.git', 'rsync://example.com/team.git', 'javascript://example.com/%0aalert(1)', 'data://x', 'gopher://example.com/',
+    '1ext::sh -c true', '.ext::x', '+ext::x', '-ext::x', ' ext::sh -c true', '  fd::3', '::x', 'ext://sh', 'ftp://example.com/team.git', 'ftps://example.com/team.git', 'rsync://example.com/team.git', 'javascript://example.com/%0aalert(1)', 'data://x', 'gopher://example.com/',
     'https://example.com/x\nhttps://other.example.com/', 'git@example.com:org/team.git\n--upload-pack=x', 'ssh://example.com/\u0000x'
   ]) assert.equal(isContactableRemoteAddress(bad), false, `${JSON.stringify(bad)} is refused`);
 });
