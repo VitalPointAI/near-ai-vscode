@@ -318,11 +318,87 @@ Plans:
   7. Each model request goes only where the session's label allows (any cloud, attested NEAR AI Cloud only, local only, or nowhere); Protected B content with no local model configured is refused with a plain explanation instead of reaching a cloud, and the label settings and SECURITY.md say the gate prevents mistakes and does not accredit a device for classified information. (CLAS-05, CLAS-06, CLAS-07)
 **Research flags**: (1) The capability grammar: start from IronClaw's manifest fields and the Hermes grammar (both in `.planning/research/platform-direction/`), version it, refuse unknown verbs, and reserve verbs for inference routes and GPU devices so later milestones need no grammar change. (2) Migration: approval modes, auto-allow switches, allow rules, protected paths (`src/domain/protectedPaths.ts`) and unattended rules (`src/agent/unattended.ts`) map into the bundle with no change in behaviour except the floor. (3) The relay reuses the vocabulary, but its workspace test lets only `relay/src/runner` import extension code: decide how the types are shared. (4) Labels and routing (`identity-research.md`, section 4): the default label of a fresh install must keep routing as it is today (no behaviour change but the floor); where file and folder labels are stored (a map in the project, not file attributes) and how a label follows a copy, a rename and Phase 72's copy-and-apply; the `attested-cloud` tier reuses the per-request attestation and signature check in `src/services/attestation.ts`, and `local-only` builds on today's local and hybrid profiles. (5) Presets: the NATO list comes only from secondary copies, and modelling the Canadian Protected and Classified families as two scales is the plan's reading, so your organization's security officer confirms both before release; no CCCS Medium (formerly PBMM) assessment of NEAR AI Cloud was found, so Protected B stays local only by default. (6) Not accreditation (research risk 9): the wording of CLAS-07 is checked against what the gate actually guarantees.
 **Undo cost**: High. The vocabulary, the label format and the bundle format are what edge devices hold offline and what anchored roots will commit to (only roots go on chain): settle them before they ship.
-**Plans:** 0 plans
+**Plans:** 25 plans (one per wave; after the planning PR, PR 1 is plans 01-07 on `feat/gate-vocabulary`, PR 2 is plans 08-15 on `feat/gate-shadow`, PR 3 is plans 16-18 on `feat/gate-floor`, PR 4 is plans 19-25 on `feat/gate-labels`)
 **UI hint**: yes
 
 Plans:
-- [ ] TBD (run /gsd-plan-phase 70 to break down)
+**Wave 1**
+- [ ] 70-01-PLAN.md — capability vocabulary v1, shape helpers, the glob move and the pure gate folder boundary (PR 1)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+- [ ] 70-02-PLAN.md — labels v1, the four scale presets, dominance with a property test, the join, the label texts (PR 1)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+- [ ] 70-03-PLAN.md — policy bundle v1, its default, fail-closed sentences, the clock rule and renewal (PR 1)
+
+**Wave 4** *(blocked on Wave 3 completion)*
+- [ ] 70-04-PLAN.md — the pure route decision, label map v1 and the label-map signing purpose (PR 1)
+
+**Wave 5** *(blocked on Wave 4 completion)*
+- [ ] 70-05-PLAN.md — tool and MCP manifests v1 and their plain words (PR 1)
+
+**Wave 6** *(blocked on Wave 5 completion)*
+- [ ] 70-06-PLAN.md — the floor, decide() layered over today's settings, the OCSF decision record, offline decisions (PR 1)
+
+**Wave 7** *(blocked on Wave 6 completion)*
+- [ ] 70-07-PLAN.md — PR 1 gate and open (no behaviour change)
+
+**Wave 8** *(blocked on Wave 7 completion)*
+- [ ] 70-08-PLAN.md — manifests on the core, web, graphics, image, memory and security tools, the tool catalog, Tools page words (PR 2)
+
+**Wave 9** *(blocked on Wave 8 completion)*
+- [ ] 70-09-PLAN.md — manifests on the gsd, cyber, knowledge and MCP tools, member card words, the manifest field required (PR 2)
+
+**Wave 10** *(blocked on Wave 9 completion)*
+- [ ] 70-10-PLAN.md — MCP manifests: restrictive for new servers, legacy for existing ones, declare per tool (PR 2)
+
+**Wave 11** *(blocked on Wave 10 completion)*
+- [ ] 70-11-PLAN.md — the signed policy file on disk, fresh install, fail closed, renewal, the decision log; D-48 code-server check named (PR 2)
+
+**Wave 12** *(blocked on Wave 11 completion)*
+- [ ] 70-12-PLAN.md — the gate on chat runs and sub-agents in shadow, started at activation, cards as transport (PR 2)
+
+**Wave 13** *(blocked on Wave 12 completion)*
+- [ ] 70-13-PLAN.md — the gate on cyber steps and comparison runs, the execution path enumeration test, offline runs (PR 2)
+
+**Wave 14** *(blocked on Wave 13 completion)*
+- [ ] 70-14-PLAN.md — status bar, Show Policy, Reset Policy to Defaults, setup step, SECURITY.md and README policy and MCP sections (PR 2)
+
+**Wave 15** *(blocked on Wave 14 completion)*
+- [ ] 70-15-PLAN.md — automated check that PR 1 is on main, rebase, gate, open PR 2 (formats, fail-closed change and the D-48 release blocker named)
+
+**Wave 16** *(blocked on Wave 15 completion)*
+- [ ] 70-16-PLAN.md — classifier effect tags for publish, destroy and protected writes; credential-store detection (PR 3)
+
+**Wave 17** *(blocked on Wave 16 completion)*
+- [ ] 70-17-PLAN.md — the floor enforced in every mode, the deliberate protectedPaths test change, SECURITY.md and README in the same plan (PR 3)
+
+**Wave 18** *(blocked on Wave 17 completion)*
+- [ ] 70-18-PLAN.md — automated check that PR 2 is on main, rebase, gate, open PR 3 with the owner's open questions
+
+**Wave 19** *(blocked on Wave 18 completion)*
+- [ ] 70-19-PLAN.md — the route check in NearAiClient.request with a session context at every request site (PR 4)
+
+**Wave 20** *(blocked on Wave 19 completion)*
+- [ ] 70-20-PLAN.md — signed label maps, Set Label, clearance checks on reads, labels that follow renames (PR 4)
+
+**Wave 21** *(blocked on Wave 20 completion)*
+- [ ] 70-21-PLAN.md — Edit Policy and Apply Policy Draft, clearance texts in Show Policy (PR 4)
+
+**Wave 22** *(blocked on Wave 21 completion)*
+- [ ] 70-22-PLAN.md — the session high-water mark: raised by reads, shared with sub-agents, written to files, network tools held (PR 4)
+
+**Wave 23** *(blocked on Wave 22 completion)*
+- [ ] 70-23-PLAN.md — the chat keeps and shows its label, Lower This Chat's Label with a recorded reason (PR 4)
+
+**Wave 24** *(blocked on Wave 23 completion)*
+- [ ] 70-24-PLAN.md — routing tiers live: attested-cloud checked after each answer, local-only on this computer, SECURITY.md labels section (PR 4)
+
+**Wave 25** *(blocked on Wave 24 completion)*
+- [ ] 70-25-PLAN.md — automated check that PR 3 is on main, rebase, gate, open PR 4 (names the label map format and the D-48 release blocker)
+
+**Cross-cutting constraints:** <!-- gsd:generated -->
+- The full gate passes once inside the cap: lint and suite, e2e under xvfb with the Wayland variables removed, verify:release and the range secret scan (D-34).
 
 ### Phase 71: Identities, credentials and delegation that only narrows
 **Goal**: An agent can never hold more than it was delegated: every person, agent and machine acts under its own standard DID, authority, clearance, roles and compartments are signed credentials that can be revoked, a lead passes only a subset of what it holds and every link of the chain is checked, grants expire, depth and fan-out are capped, and members report results in a declared shape.

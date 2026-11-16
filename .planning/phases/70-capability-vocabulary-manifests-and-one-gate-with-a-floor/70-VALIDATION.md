@@ -81,7 +81,7 @@ Filled from the plans: every task's `<automated>` command runs one of the test f
 | Behavior | Requirement | Why Manual | Test Instructions |
 |----------|-------------|------------|-------------------|
 | Your organization's security officer confirms the NATO list and the two Canadian scales | CLAS-02 | Sources are secondary; a person must confirm before relying on them | Read the presets in the bundle and SECURITY.md; record the confirmation |
-| Fresh install on code-server signs its first bundle and the extension stays usable | OFFL-02 | Secrets live in the browser on code-server; covered by unit tests with stubs, confirmed once on a real host after release | Install the released 0.4.x on a clean code-server profile, open a project, run a chat and one edit |
+| Fresh install on code-server signs its first bundle and the extension stays usable | OFFL-02 | Secrets live in the browser on code-server; covered by unit tests with stubs, confirmed by the owner on a real host BEFORE publishing any release that carries PR 2 (D-48) | Install the released 0.4.x on a clean code-server profile, open a project, run a chat and one edit |
 | The status bar and refusal texts read plainly | OFFL-02, CLAS-06 | Wording judgement | Unplug the network, break the bundle, read the texts |
 
 ---
