@@ -131,3 +131,24 @@ test('SECURITY.md says where the policy\'s own events and its trust rule are kep
   assert.match(text, /signs a policy by itself only on a true first install/);
   assert.match(text, /never adopted, even one that carries the default policy/);
 });
+
+// The changelog carries the user-facing words for this phase (PR #70 second review). It is checked wherever the entry sits: under "## Unreleased" before the
+// release that ships it, and under its version after, so this test does not break at release time.
+const CHANGELOG = readFileSync(path.join(ROOT, 'CHANGELOG.md'), 'utf8');
+
+test('CHANGELOG.md has an Unreleased section above the newest release (or the entry already sits in a release) naming the policy changes in plain words', () => {
+  const sections = CHANGELOG.split(/\n(?=## )/).slice(1);
+  const unreleased = sections.find((section) => section.startsWith('## Unreleased'));
+  if (unreleased !== undefined) {
+    assert.equal(sections[0]?.startsWith('## Unreleased'), true, 'Unreleased is the first section, above the newest release');
+    assert.ok(sections.slice(1).some((section) => /^## \d+\.\d+\.\d+/.test(section)), 'a release section follows it');
+  }
+  const entry = flat(unreleased ?? sections.find((section) => /Reset Policy to Defaults/.test(section)) ?? '');
+  assert.notEqual(entry, '', 'the policy entry exists');
+  for (const phrase of [
+    /status bar/i, /Show Policy/, /Reset Policy to Defaults/, /setup step|setup view|Check your policy/i, /Tools page/, /every tool/i,
+    /new (MCP )?server(s)? start(s)? (restrictive|restricted)|start(s)? restrictive/i, /(missing|broken)[^.]*policy file[^.]*(reading and planning|only reading)|only reading and planning/i
+  ]) assert.match(entry, phrase);
+  assert.ok(!entry.includes(EM_DASH), 'no em-dash');
+  assert.ok(!/NEAR organization/i.test(entry), 'your organization, never NEAR organization');
+});
