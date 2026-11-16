@@ -162,17 +162,14 @@ export function registerGate(context: GateActivationContext, options: RegisterGa
   const tell = (message: string): void => {
     try { notify(message); } catch { /* a message that cannot be shown never fails activation */ }
   };
-  let projectRoot: string | undefined;
-  try {
-    projectRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-  } catch {
-    projectRoot = undefined;
-  }
+  // Asked when each record is written, so a folder opened, closed or changed after activation is followed: the policy's events go to the folder that is open
+  // then, and to the install-level log always.
+  const projectRoot = (): string | undefined => vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   const host = new GateHost({
     globalStorageDir: context.globalStorageUri.fsPath,
     secrets: context.secrets,
     productVersion: String(context.extension?.packageJSON?.version ?? '0.0.0'),
-    ...(projectRoot === undefined ? {} : { projectRoot }),
+    projectRoot,
     onProblem: tell,
     ...(options.now === undefined ? {} : { now: options.now })
   });

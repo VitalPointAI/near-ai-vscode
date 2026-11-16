@@ -28,8 +28,11 @@ export interface GateHostOptions {
   readonly globalStorageDir: string;
   readonly secrets: SecretStorageLike;
   readonly productVersion: string;
-  /** The open project, whose log also receives the bundle's own events (policy.load and the rest). None when no folder is open; the install's own log gets them either way. */
-  readonly projectRoot?: string;
+  /**
+   * The open project, whose log also receives the bundle's own events (policy.load and the rest). A function is asked at the time of each record, so a folder
+   * opened or changed after activation is followed. None when no folder is open; the install's own log gets them either way.
+   */
+  readonly projectRoot?: string | (() => string | undefined);
   /** Called once per log, with a plain message, when a record could not be written. */
   readonly onProblem?: (message: string) => void;
   /** The clock for the bundle store and for records. Tests pass a fixed one. */
@@ -173,6 +176,18 @@ export class GateHost {
     return this.options.now === undefined ? {} : { now: this.options.now };
   }
 
+  // The open project at the time of the record. A getter that throws is no folder: the install-level log still gets the record.
+  private projectRootNow(): string | undefined {
+    const option = this.options.projectRoot;
+    if (typeof option !== 'function') return option === '' ? undefined : option;
+    try {
+      const root = option();
+      return root === undefined || root === '' ? undefined : root;
+    } catch {
+      return undefined;
+    }
+  }
+
   private deviceFingerprint(): string {
     return this.current.state === 'valid' ? this.current.signer.fingerprint : DEVICE_UNKNOWN;
   }
@@ -239,7 +254,7 @@ export class GateHost {
         bundleHash: state.state === 'valid' ? state.hash : ''
       });
       const named = { ...record, api: { ...record.api, operation: name } };
-      const root = this.options.projectRoot;
+      const root = this.projectRootNow();
       // Each destination is tried on its own, so a project log that cannot be set up never costs the install its record.
       const targets: Array<() => DecisionLog> = [() => this.installLog(), ...(root === undefined ? [] : [() => this.logFor(root)])];
       for (const target of targets) {

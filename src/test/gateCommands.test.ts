@@ -433,3 +433,49 @@ test('a policy that has ended is not shown as valid again when the clock is set 
   assert.ok(step.detail.includes(BUNDLE_FAILURES.expired));
   assert.equal(host.bundleState().state, 'failed-closed');
 });
+
+test('the policy\'s own events follow the open folder: after a folder change they go to the new folder\'s log, and the install-level log always gets them', async () => {
+  const first = await mkdtemp(path.join(tmpdir(), 'near-ai-gate-cmd-project-'));
+  const second = await mkdtemp(path.join(tmpdir(), 'near-ai-gate-cmd-project-'));
+  stub.setWorkspaceFolders([first]);
+  const { host, storage } = await started();
+  const resetNow = async (): Promise<void> => {
+    resetNotifications();
+    stub.messageAnswers.push(gateCommands.RESET_CONFIRM_ACTION);
+    await stub.commands.get('nearAi.policy.reset')?.();
+    await host.flush();
+  };
+  const resets = async (records: Promise<DecisionRecord[]>): Promise<number> => (await records).filter((record) => record.api.operation === 'policy.reset').length;
+
+  // The folder the window was activated with.
+  await resetNow();
+  assert.equal(await resets(recordsOf(storage, first)), 1);
+  assert.equal(await resets(installRecordsOf(storage)), 1);
+
+  // Another folder is opened in the same window: the event goes to its log, and the first folder's log stays as it was.
+  stub.setWorkspaceFolders([second]);
+  await resetNow();
+  assert.equal(await resets(recordsOf(storage, second)), 1, 'the new folder\'s log received it');
+  assert.equal(await resets(recordsOf(storage, first)), 1, 'the first folder\'s log did not');
+  assert.equal(await resets(installRecordsOf(storage)), 2);
+
+  // The folder is closed: only the install-level log receives it, and no project log appears for it.
+  stub.setWorkspaceFolders([]);
+  await resetNow();
+  assert.equal(await resets(installRecordsOf(storage)), 3);
+  assert.equal(await resets(recordsOf(storage, first)), 1);
+  assert.equal(await resets(recordsOf(storage, second)), 1);
+});
+
+test('a window that was activated with no folder gives the policy\'s events to the project opened afterwards', async () => {
+  const opened = await mkdtemp(path.join(tmpdir(), 'near-ai-gate-cmd-project-'));
+  stub.setWorkspaceFolders([]);
+  const { host, storage } = await started();
+  stub.setWorkspaceFolders([opened]);
+  resetNotifications();
+  stub.messageAnswers.push(gateCommands.RESET_CONFIRM_ACTION);
+  await stub.commands.get('nearAi.policy.reset')?.();
+  await host.flush();
+  assert.equal((await recordsOf(storage, opened)).filter((record) => record.api.operation === 'policy.reset').length, 1);
+  assert.equal((await installRecordsOf(storage)).filter((record) => record.api.operation === 'policy.reset').length, 1);
+});
