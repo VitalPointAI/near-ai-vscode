@@ -242,9 +242,9 @@ test('GATE_RULE_IDS lists every rule id once, including the floor, bundle, manif
     'manifest.effects-unknown', 'label.dominance', 'label.no-agent-tools', 'label.network-at-mark', 'route.deny', 'route.any-cloud', 'taint.held', 'settings.emergency-stop', 'settings.read-plan',
     'settings.auto-safe-tool', 'settings.mode.edits', 'settings.run-grant.edits', 'settings.deny-list', 'settings.engagement-grant', 'settings.run-grant.command',
     'settings.allow-rule', 'settings.mode.fully-autonomous', 'settings.mode.other', 'settings.auto.classifier', 'settings.unattended-verification',
-    'settings.risk.outside-workspace', 'settings.risk.installs', 'settings.safety-model', 'settings.sensitive-read', 'settings.mcp-approval'
+    'settings.risk.outside-workspace', 'settings.risk.installs', 'settings.safety-model', 'settings.sensitive-read', 'settings.mcp-approval', 'settings.tool-forbidden'
   ]) assert.ok(GATE_RULE_IDS.includes(rule), rule);
-  assert.equal(GATE_RULE_IDS.length, FLOOR_RULE_ORDER.length + 7 + 3 + ROUTE_RULES.length + 1 + 18);
+  assert.equal(GATE_RULE_IDS.length, FLOOR_RULE_ORDER.length + 7 + 3 + ROUTE_RULES.length + 1 + 19);
 });
 
 // ---- Effects unknown: an empty effect list fails closed (PR 1 review fold-in) ----

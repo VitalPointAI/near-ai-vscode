@@ -7,7 +7,7 @@ import type { ActionCapability, ActionPolicy } from '../domain/policy';
 import type { AgentMessage, CompletionEvent, ToolCall, ToolDefinition, UsageMetadata } from '../services/nearAiClient';
 import { AutoApprovalContext, allowRuleBlocker, isAutoAllowed, PermissionRules, RunGrants, suggestAllowRule } from './permissions';
 import type { GateRuntime } from '../domain/gate/decide';
-import { gateToolCall, recordApprovalReply, unavailableGateRuntime } from './gateAdapter';
+import { TOOL_FORBIDDEN_RULE, gateToolCall, recordApprovalReply, unavailableGateRuntime } from './gateAdapter';
 import { PREAMBLE_START, resolveGsdRun } from '../gsd/preamble';
 import type { CommandSafetyCheck } from './safetyModel';
 import type { UnattendedScope } from './unattended';
@@ -639,9 +639,10 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
         return effective.mode === 'auto' || unattended ? { ...(await this.autoContext(context, command ?? '')), autoSafeTool: tool.autoSafe === true } : undefined;
       }
     });
-    // Refused before the policy is even asked (0.4.23): no mode, rule or earlier approval can allow it, and no card is shown. The gate still records it.
+    // Refused before the policy is even asked (0.4.23): no mode, rule or earlier approval can allow it, and no card is shown. The gate still records it, and
+    // the record is always a refusal: the loop hands its own answer to the gate (PR #70 third review), so it never reads "allowed" for a call that did not run.
     if (forbidden) {
-      try { await gateToolCall(this.gate, gateInput(), { model: this.options.model }); } catch { /* the refusal stands; a record never changes it */ }
+      try { await gateToolCall(this.gate, gateInput(), { model: this.options.model, refusal: { rule: TOOL_FORBIDDEN_RULE, reason: forbidden } }); } catch { /* the refusal stands; a record never changes it */ }
       context.onSecurity?.({ kind: 'blocked', source: title, detail: forbidden });
       if (tool.capability !== 'read' && tool.capability !== 'plan') this.options.emit({ type: 'permission', tool: tool.name, decision: 'denied' });
       return this.finish(call.id, false, `Not allowed: ${forbidden}`);

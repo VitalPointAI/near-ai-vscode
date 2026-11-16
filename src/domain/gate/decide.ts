@@ -112,7 +112,7 @@ export const GATE_RULE_IDS: readonly string[] = Object.freeze([
   'settings.emergency-stop', 'settings.read-plan', 'settings.auto-safe-tool', 'settings.mode.edits', 'settings.run-grant.edits', 'settings.deny-list',
   'settings.engagement-grant', 'settings.run-grant.command', 'settings.allow-rule', 'settings.mode.fully-autonomous', 'settings.mode.other',
   'settings.auto.classifier', 'settings.unattended-verification', 'settings.risk.outside-workspace', 'settings.risk.installs', 'settings.safety-model',
-  'settings.sensitive-read', 'settings.mcp-approval'
+  'settings.sensitive-read', 'settings.mcp-approval', 'settings.tool-forbidden'
 ]);
 
 const MODE_ORDER: readonly ActionPolicyMode[] = Object.freeze(['approve-risky', 'mostly-autonomous', 'auto', 'fully-autonomous'] as const);

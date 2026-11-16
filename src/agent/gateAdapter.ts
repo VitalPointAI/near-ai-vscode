@@ -59,8 +59,13 @@ function productVersionOf(runtime: GateRuntime): string {
   return runtime.productVersion ?? DEFAULT_PRODUCT_VERSION;
 }
 
-function bundleHashOf(state: BundleState): string {
-  return state.state === 'valid' ? state.hash : '';
+function bundleHashOf(runtime: GateRuntime): string {
+  try {
+    const state: BundleState = runtime.bundleState();
+    return state.state === 'valid' ? state.hash : '';
+  } catch {
+    return ''; // a state that cannot be read never keeps a record from being written
+  }
 }
 
 const WIDEST_SHORTHAND = (capability: ActionCapability): readonly Capability[] => fromActionCapability(capability).capabilities;
@@ -225,7 +230,7 @@ function recordFor(runtime: GateRuntime, gated: GatedCall, outcome: DecisionOutc
     outcome,
     rule,
     ...(reason === undefined || reason === '' ? {} : { reason }),
-    bundleHash: bundleHashOf(runtime.bundleState()),
+    bundleHash: bundleHashOf(runtime),
     ...(decision.shadowFloor === undefined ? {} : { shadowFloor: decision.shadowFloor.rule })
   });
 }
@@ -241,7 +246,43 @@ function keep(runtime: GateRuntime, record: DecisionRecord): void {
 /** Models named in records: the name the run uses, and NEAR AI as the provider. */
 const MODEL_PROVIDER = 'NEAR AI';
 
-export interface GateCallOptions { readonly model?: string }
+/** The rule id of a call the loop refuses because the tool's own `forbidden` hook named it (the key folder today). */
+export const TOOL_FORBIDDEN_RULE = 'settings.tool-forbidden';
+
+/** A refusal the caller makes itself, whatever the gate would have said: its rule id (one of GATE_RULE_IDS) and the plain reason it gives the person. */
+export interface Refusal { readonly rule: string; readonly reason: string }
+
+export interface GateCallOptions {
+  readonly model?: string;
+  /**
+   * Set when the caller refuses the call itself (the loop's `forbidden` hook, an engagement's scope). The gate is still asked, so a layer that outranks the
+   * caller (emergency stop, bundle state, the floor) records its own, more specific rule, but the record is always `denied`, never `allowed` or `asked`: a
+   * call that did not run is never on record as one that could (PR #70 third review).
+   */
+  readonly refusal?: Refusal;
+}
+
+/** The settings layer of a call the caller refuses: today's permission logic is not asked (it could run a classifier or a model about a call that will not run). */
+function refusalLayer(refusal: Refusal): SettingsLayer {
+  return async (): Promise<SettingsAnswer> => ({ decision: 'deny', reason: refusal.reason, rule: refusal.rule });
+}
+
+/** The gate's decision for a call the caller refuses: its own deny when it made one, otherwise the caller's refusal. Never an allow or an ask. */
+function refusedDecision(decision: GateDecision | undefined, refusal: Refusal, mode: ActionPolicy['mode']): GateDecision {
+  if (decision !== undefined && decision.outcome === 'deny') return decision;
+  return { outcome: 'deny', rule: refusal.rule, reason: refusal.reason, floor: false, offerAlwaysAllow: false, allowGrant: false, effectiveMode: decision?.effectiveMode ?? mode, ...(decision?.shadowFloor === undefined ? {} : { shadowFloor: decision.shadowFloor }) };
+}
+
+async function decideOrRefuse(refusal: Refusal | undefined, mode: ActionPolicy['mode'], run: () => Promise<GateDecision>): Promise<GateDecision> {
+  if (refusal === undefined) return run();
+  let decided: GateDecision | undefined;
+  try {
+    decided = await run();
+  } catch {
+    decided = undefined; // the gate could not be asked, and the refusal stands on its own
+  }
+  return refusedDecision(decided, refusal, mode);
+}
 
 /**
  * Decides one tool call (GATE-04). Builds the request, runs decide() with today's settings layer, records the decision (one line, in the order calls are
@@ -265,7 +306,8 @@ export async function gateToolCall(runtime: GateRuntime, input: GateCallInput, o
     ...(input.tool.capability === 'sharedWrite' ? { floorFacts: { sharedWrite: true } } : {})
   };
   const captured: { value?: PermissionDecision } = {};
-  const decision = await decide(request, runtime.bundleState(), settingsLayerFor(input, captured), { floorMode: runtime.floorMode });
+  const layer = options.refusal === undefined ? settingsLayerFor(input, captured) : refusalLayer(options.refusal);
+  const decision = await decideOrRefuse(options.refusal, input.policy.mode, () => decide(request, runtime.bundleState(), layer, { floorMode: runtime.floorMode }));
   const gated: GatedCall = { decision, settings: captured.value, request, effects };
   keep(runtime, recordFor(runtime, gated, outcomeOf(decision), decision.rule, decision.reason, options.model === undefined ? undefined : { name: options.model, provider: MODEL_PROVIDER }));
   return gated;
@@ -310,8 +352,8 @@ export async function gateStep(runtime: GateRuntime, input: GateStepInput, optio
     ...(input.manifestContexts === undefined ? {} : { manifestContexts: input.manifestContexts }),
     ...(input.command === undefined ? {} : { command: input.command })
   };
-  const answered = input.settings;
-  const decision = await decide(request, runtime.bundleState(), async () => answered, { floorMode: runtime.floorMode });
+  const answered: SettingsAnswer = options.refusal === undefined ? input.settings : { decision: 'deny', reason: options.refusal.reason, rule: options.refusal.rule };
+  const decision = await decideOrRefuse(options.refusal, input.policy.mode, () => decide(request, runtime.bundleState(), async () => answered, { floorMode: runtime.floorMode }));
   const gated: GatedCall = { decision, settings: undefined, request, effects: input.effects };
   keep(runtime, recordFor(runtime, gated, outcomeOf(decision), decision.rule, decision.reason, options.model === undefined ? undefined : { name: options.model, provider: MODEL_PROVIDER }));
   return gated;

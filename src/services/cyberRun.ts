@@ -344,7 +344,7 @@ async function cyberRun(input: CyberRunInput): Promise<CyberRunResult> {
         const reason = `"${target}" is outside the resolved scope of engagement ${input.engagement.id}`;
         // A refusal is a decision too: it is recorded with the engagement's own rule, and nothing runs.
         try {
-          await gateStep(gate, { tool: step.tool, callId: `${runId}/${step.id}`, effects: scopeRefusalEffects(target), policy: input.policy, settings: { decision: 'deny', reason, rule: 'settings.engagement-grant' } });
+          await gateStep(gate, { tool: step.tool, callId: `${runId}/${step.id}`, effects: scopeRefusalEffects(target), policy: input.policy, settings: { decision: 'deny', reason, rule: 'settings.engagement-grant' } }, { refusal: { rule: 'settings.engagement-grant', reason } });
         } catch { /* a record never changes the refusal */ }
         emit({ type: 'notice', text: reason });
         await record({ tool: step.tool, arguments: step.args.join(' '), result: `refused: ${reason}`, modelReasoning: step.expectedResult });
