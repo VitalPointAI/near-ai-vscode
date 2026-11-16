@@ -76,7 +76,7 @@ Commit `235bd0b`.
 | the same command (red step of Task 2) | 14 tests, 8 pass, 6 fail |
 | the same command (Task 2, final) | 14 tests, 14 pass, 0 fail, 0 cancelled |
 
-Acceptance greps on the record: `grep -c "4207080ca394d36cf36bbed37b179d8f8400b721"` 5 or more lines; `grep -c "TM-TEAM-0[1-4]\|TM-SETUP-01"` 6; `grep -ci code-server` 2; `grep -c "SHRD-0[23]"` 1; the `device.rotated` line containing "read-only" 1; `grep -c "—"` 0; `grep -nE '/(home|Users|mnt|tmp)/|[A-Za-z]:[\\]'` prints nothing. `package.json` and the lockfile are unchanged (T-69-SC).
+Acceptance greps on the record: `grep -c "4207080ca394d36cf36bbed37b179d8f8400b721"` 3 lines; `grep -c "TM-TEAM-0[1-4]\|TM-SETUP-01"` 6; `grep -ci code-server` 2; `grep -c "SHRD-0[23]"` 1; the `device.rotated` line containing "read-only" 1; `grep -c "—"` 0; `grep -nE '/(home|Users|mnt|tmp)/|[A-Za-z]:[\\]'` prints nothing. `package.json` and the lockfile are unchanged (T-69-SC).
 
 ## Deviations from Plan
 
