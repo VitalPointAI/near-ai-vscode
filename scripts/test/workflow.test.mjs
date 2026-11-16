@@ -341,6 +341,29 @@ test('tagging needs a CI run that tested the commit itself, not only a pull requ
   assert.equal(gate(notStarted, { required: CI_CHECKS, exactCommitCi: true }).waiting, true, 'CI that has not started yet is waited for');
 });
 
+// 0.4.25: right after a release PR merges, the push CI run's check runs can arrive before GitHub links their check suite to the workflow run (the run
+// is missing from the list, or listed without a check suite). Those jobs are waited for, not refused as coming from outside the CI workflow.
+test('tagging waits while CI jobs from github-actions are not yet linked to a workflow run, and judges them once they are', () => {
+  const exact = (commit) => gate(commit, { required: CI_CHECKS, exactCommitCi: true });
+  const jobs = (extra) => CI_CHECKS.map((name) => ciRun(name, { suiteId: 808, status: 'in_progress', conclusion: null, ...extra }));
+  const noRunYet = exact({ checkRuns: jobs(), workflowRuns: [], statuses: [] });
+  assert.deepEqual([noRunYet.ok, noRunYet.waiting], [false, true], noRunYet.problems.join('\n'));
+  assert.doesNotMatch(noRunYet.problems.join('\n'), /not the CI workflow; refusing/);
+  const runWithoutSuite = exact({ checkRuns: jobs(), workflowRuns: [{ ...ciWorkflowRun, id: 2, event: 'push', status: 'queued', conclusion: null, suiteId: null }], statuses: [] });
+  assert.deepEqual([runWithoutSuite.ok, runWithoutSuite.waiting], [false, true], runWithoutSuite.problems.join('\n'));
+  // Even a finished run is waited for while its check suite is not known, since its jobs cannot be told apart from another workflow's yet.
+  const doneWithoutSuite = exact({ checkRuns: jobs({ status: 'completed', conclusion: 'success' }), workflowRuns: [{ ...ciWorkflowRun, id: 2, event: 'push', suiteId: null }], statuses: [] });
+  assert.deepEqual([doneWithoutSuite.ok, doneWithoutSuite.waiting], [false, true], doneWithoutSuite.problems.join('\n'));
+  const linked = exact({ checkRuns: jobs({ status: 'completed', conclusion: 'success' }), workflowRuns: [{ ...ciWorkflowRun, id: 2, event: 'push', suiteId: 808 }], statuses: [] });
+  assert.equal(linked.ok, true, linked.problems.join('\n'));
+  // Once linked to another workflow, a job of the same name is refused as before, and a failed linked CI job is refused at once.
+  const otherWorkflow = exact({ checkRuns: [...jobs({ status: 'completed', conclusion: 'success' }), ciRun('lint', { suiteId: 909 })], workflowRuns: [{ ...ciWorkflowRun, id: 2, event: 'push', suiteId: 808 }, { id: 3, name: 'Other', path: '.github/workflows/other.yml', event: 'push', suiteId: 909 }], statuses: [] });
+  assert.deepEqual([otherWorkflow.ok, otherWorkflow.waiting], [false, false]);
+  assert.match(otherWorkflow.problems.join('\n'), /"lint" also comes from github-actions \(check suite 909\), not the CI workflow/);
+  const failedJob = exact({ checkRuns: jobs({ status: 'completed', conclusion: 'success' }).map((run) => (run.name === 'test' ? { ...run, conclusion: 'failure' } : run)), workflowRuns: [{ ...ciWorkflowRun, id: 2, event: 'push', suiteId: 808 }], statuses: [] });
+  assert.deepEqual([failedJob.ok, failedJob.waiting], [false, false]);
+});
+
 /** A green PR run plus a CI run on the commit itself (workflow_dispatch) with the given jobs. */
 function withExactRun(run, jobs = CI_CHECKS.map((name) => ciRun(name, { suiteId: 909 }))) {
   const commit = greenCommit();

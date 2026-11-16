@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { chmodSync, mkdirSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
@@ -594,6 +594,58 @@ for (const address of ['ext::echo near-ai-refused-marker', 'fd::3', 'ftp://examp
     });
   });
 }
+
+// 0.4.25: the address is checked as git resolves it. A `url.<base>.insteadOf` (or pushInsteadOf) rule in the project's config can turn an allowed
+// address into a remote helper; `git remote get-url` applies those rules, so the check sees ext:: and refuses it before any network call.
+for (const rule of ['insteadOf', 'pushInsteadOf']) {
+  test(`a remote that the ${rule} rule maps to ext:: is refused before any network call`, async () => {
+    await withFixture(['a'], async (fixture) => {
+      const teamId = newTeamId();
+      const owner = await createOwner(teamId);
+      const genesis = testGenesis({ teamId, owner, name: 'Transport rewrite team' });
+      const calls: RecordedCall[] = [];
+      const root = fixture.clones['a'] as string;
+      const transport = new GitTransport<TeamState>({
+        mirrorDir: path.join(fixture.storageDir('a'), 'coordination.git'), projectRoot: root, remote: 'origin',
+        ref: DEFAULT_COORDINATION_REF, materializer: teamMaterializer(genesis.anchor), git: recordingRunner(calls), baseDelayMs: 1
+      });
+      gitIn(root, ['config', 'remote.origin.url', 'https://example.invalid/team.git']);
+      gitIn(root, ['config', `url.ext::echo near-ai-rewrite-marker .${rule}`, 'https://example.invalid/']);
+      const appended = await transport.append(async () => genesis.events, { genesis: { teamFileText: genesis.teamFileText } });
+      assert.equal(appended.ok === false && appended.kind, 'refused');
+      await transport.fetch();
+      assert.equal(transport.status().state, 'offline');
+      const network = calls.filter((call) => call.args.includes('--git-dir') && ['fetch', 'push', 'ls-remote'].some((verb) => call.args.includes(verb)));
+      assert.deepEqual(network, [], 'no fetch, push or ls-remote ran');
+      assert.equal(JSON.stringify(calls.filter((call) => call.args.includes('--git-dir'))).includes('near-ai-rewrite-marker'), false, 'the rewritten address never reached the mirror');
+    });
+  });
+}
+
+// 0.4.25: the mirror never reads the project's config, so the project's uploadpack and receivepack settings are never run by fetch or push either.
+test('the transport never runs a program the project config names as uploadpack or receivepack', async () => {
+  await withFixture(['a'], async (fixture) => {
+    const teamId = newTeamId();
+    const owner = await createOwner(teamId);
+    const genesis = testGenesis({ teamId, owner, name: 'Transport pack program team' });
+    const root = fixture.clones['a'] as string;
+    const marker = path.join(fixture.root, 'pack-program-ran');
+    for (const [key, real] of [['uploadpack', 'git-upload-pack'], ['receivepack', 'git-receive-pack']] as const) {
+      const file = path.join(fixture.root, `${key}.sh`);
+      writeFileSync(file, `#!/bin/sh\necho ran >> '${marker}'\nexec ${real} "$@"\n`, { mode: 0o755 });
+      gitIn(root, ['config', `remote.origin.${key}`, file]);
+    }
+    const transport = new GitTransport<TeamState>({
+      mirrorDir: path.join(fixture.storageDir('a'), 'coordination.git'), projectRoot: root, remote: 'origin',
+      ref: DEFAULT_COORDINATION_REF, materializer: teamMaterializer(genesis.anchor), baseDelayMs: 1
+    });
+    const appended = await transport.append(async () => genesis.events, { genesis: { teamFileText: genesis.teamFileText } });
+    assert.equal(appended.ok, true);
+    await transport.fetch();
+    assert.equal(transport.status().state, 'ok');
+    assert.equal(existsSync(marker), false, 'the project\'s pack program ran');
+  });
+});
 
 const REWRITTEN_TEXT = "The team's coordination log was rewritten on the remote; Team Mode is paused";
 

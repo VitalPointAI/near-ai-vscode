@@ -106,7 +106,11 @@ export async function localKeyStatus(identityDir: string, secrets: SecretStorage
   return (await readKeyHistory(identityDir, secrets)).lookup;
 }
 
-export interface AppendKeyRecordOptions { now?: () => Date }
+export interface AppendKeyRecordOptions {
+  now?: () => Date;
+  /** Where a plain warning goes (the Team Mode output channel). Never given key material. */
+  warn?: (message: string) => void;
+}
 export interface KeyChange { kind: KeyRecordKind; key: DeviceRef; next?: DeviceRef }
 
 // Adds one record. The signer signs it (created and rotated: the key itself or the active key; revoked: the key withdrawn or the active key). Returns the
@@ -149,8 +153,15 @@ export async function appendKeyRecord(
       await secrets.store(KEY_HISTORY_HEAD_SECRET, JSON.stringify(head));
     } catch (error) {
       // The head did not follow the file, so the file goes back to what it was; otherwise the history would read as changed from outside.
-      if (loaded.text === undefined) await rm(file, { force: true }).catch(() => undefined);
-      else await writeFileAtomic(file, loaded.text).catch(() => undefined);
+      // 0.4.25 (PR #61 review): when that fails too, the history reads as changed and the next first need archives it, so it is reported, with the
+      // error code only (no path, no key material), instead of being swallowed.
+      try {
+        if (loaded.text === undefined) await rm(file, { force: true });
+        else await writeFileAtomic(file, loaded.text);
+      } catch (restoreError) {
+        const code = errorCode(restoreError);
+        options.warn?.(`The key history could not be put back after its saved end failed to store${code === undefined ? '' : ` (${code})`}. It will read as changed, and the next time your identity key is needed the history is archived and a new one starts.`);
+      }
       throw new KeyHistoryError('Nothing was added to the key history: its saved end could not be stored.', { cause: error });
     }
     return proof;

@@ -1,11 +1,13 @@
 import assert from 'node:assert/strict';
 import { spawn, type ChildProcess } from 'node:child_process';
+import { EventEmitter } from 'node:events';
 import { copyFile, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import net from 'node:net';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { finishStartup } from '../src/startup';
 
 // Phase 68, plans 01 and 02 (RELAY-01, RELAY-02, RELAY-04): the built relay starts through its guard, answers GET /healthz, passes its own
 // healthcheck and stops on SIGTERM. Everything it prints is one JSON line through the redacting logger on stdout (D-11); stderr stays empty.
@@ -302,20 +304,51 @@ test('a missing or damaged app.mjs prints one fixed sentence on stderr, no path 
 
 // Regression: relay.listening was logged before the SIGTERM handler existed, so a supervisor (or a
 // test) that stopped the relay as soon as it saw that line could hit the default kill instead of a
-// clean stop (seen in CI on PR #54). The timing window is small, so the order is pinned in the
-// source, and the next test also checks it on real runs.
-test('the relay reads its instance id, then registers its SIGTERM and SIGINT handlers, then logs relay.listening', async () => {
-  const source = await readFile(fileURLToPath(new URL('../../src/main.ts', import.meta.url)), 'utf8');
-  const instanceId = source.indexOf('await openStore.instanceId()');
-  const listening = source.indexOf("logger.info('relay.listening'");
-  const sigterm = source.indexOf("process.on('SIGTERM'");
-  const sigint = source.indexOf("process.on('SIGINT'");
-  assert.ok(instanceId > 0 && listening > 0 && sigterm > 0 && sigint > 0, 'main.ts reads the instance id, logs relay.listening and handles SIGTERM and SIGINT');
-  assert.equal(source.indexOf('await openStore.instanceId()', instanceId + 1), -1, 'the instance id is read once');
-  // No await between registering the handlers and the relay.listening line, so no stop can run while startup is still reading.
-  assert.ok(instanceId < sigterm && instanceId < sigint, 'the instance id is read before the handlers are registered');
-  assert.ok(sigterm < listening && sigint < listening, 'both handlers are registered before relay.listening is logged');
-  assert.ok(!source.slice(Math.min(sigterm, sigint), listening).includes('await '), 'nothing is awaited between the handlers and relay.listening');
+// clean stop (seen in CI on PR #54). main.ts finishes startup through finishStartup; this test calls
+// it in order (0.4.25: it used to check the order of strings in main.ts), and the next test also
+// checks the order on real runs.
+test('finishStartup reads first, then registers the SIGTERM and SIGINT handlers, then announces', async () => {
+  const signals = new EventEmitter();
+  const steps: string[] = [];
+  const stopped: string[] = [];
+  let release: (id: string) => void = () => undefined;
+  const finished = finishStartup({
+    read: () => {
+      steps.push('read');
+      return new Promise<string>((resolve) => { release = resolve; });
+    },
+    signals,
+    stop: (signal) => stopped.push(signal),
+    announce: (id) => {
+      steps.push(`announce ${id}`);
+      // Both handlers are in place when the line is logged, and a stop at that moment is a clean stop.
+      assert.equal(signals.listenerCount('SIGTERM'), 1);
+      assert.equal(signals.listenerCount('SIGINT'), 1);
+      signals.emit('SIGTERM');
+    },
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(steps, ['read'], 'nothing more happens while the read is in flight');
+  assert.equal(signals.listenerCount('SIGTERM'), 0, 'no stop can run while startup is still reading');
+  assert.equal(signals.listenerCount('SIGINT'), 0);
+  release('instance-1');
+  assert.equal(await finished, 'instance-1');
+  assert.deepEqual(steps, ['read', 'announce instance-1']);
+  assert.deepEqual(stopped, ['SIGTERM']);
+  signals.emit('SIGINT');
+  assert.deepEqual(stopped, ['SIGTERM', 'SIGINT']);
+  assert.equal(signals.listenerCount('SIGTERM'), 1, 'each handler is registered once');
+});
+
+test('finishStartup registers no handlers and announces nothing when the read fails', async () => {
+  const signals = new EventEmitter();
+  let announced = false;
+  await assert.rejects(
+    finishStartup({ read: () => Promise.reject(new Error('instance id read failed')), signals, stop: () => undefined, announce: () => { announced = true; } }),
+    /instance id read failed/,
+  );
+  assert.equal(announced, false);
+  assert.equal(signals.listenerCount('SIGTERM') + signals.listenerCount('SIGINT'), 0);
 });
 
 test('SIGTERM sent the moment relay.listening appears always stops the relay cleanly with exit 0 (20 runs)', async () => {

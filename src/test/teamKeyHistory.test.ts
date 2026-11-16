@@ -454,6 +454,39 @@ test('a head that cannot be stored puts the file back as it was', async () => {
   });
 });
 
+// 0.4.25 (PR #61 review): the restore after a failed head store was best-effort and silent. When it fails too, the history reads as changed and the
+// next first need archives it, so the person is told through the output channel, in plain words and with no key material.
+test('a restore that fails after the head could not be stored is reported as a plain warning', async () => {
+  await withFolder(async (folder) => {
+    const secrets = new MemorySecrets();
+    const A = makeSigner();
+    const B = makeSigner();
+    await appendKeyRecord(folder, secrets, A, { kind: 'created', key: refOf(A) });
+    const warnings: string[] = [];
+    // The head store fails, and by then the history file has been replaced by a folder with something in it, so putting the file back fails too.
+    const file = path.join(folder, KEY_HISTORY_FILE);
+    const failing = {
+      get: (key: string) => secrets.get(key), delete: (key: string) => secrets.delete(key),
+      store: async (): Promise<void> => {
+        await rm(file, { force: true });
+        await mkdir(path.join(file, 'blocked'), { recursive: true });
+        throw new Error('store failed');
+      }
+    };
+    await assert.rejects(appendKeyRecord(folder, failing, A, { kind: 'rotated', key: refOf(A), next: refOf(B) }, { warn: (line) => warnings.push(line) }), /saved end could not be stored/);
+    assert.equal(warnings.length, 1, warnings.join(' | '));
+    assert.match(warnings[0] as string, /^The key history could not be put back/);
+    for (const needle of [A.fingerprint, A.publicKey, B.fingerprint, B.publicKey]) assert.equal((warnings[0] as string).includes(needle), false, 'no key material in the warning');
+    // A restore that works says nothing.
+    const quiet: string[] = [];
+    const freshSecrets = new MemorySecrets();
+    const plainFailing = { get: (key: string) => freshSecrets.get(key), delete: (key: string) => freshSecrets.delete(key), store: (): Promise<void> => Promise.reject(new Error('store failed')) };
+    const other = await mkdtemp(path.join(folder, 'other-'));
+    await assert.rejects(appendKeyRecord(other, plainFailing, A, { kind: 'created', key: refOf(A) }, { warn: (line) => quiet.push(line) }), /saved end could not be stored/);
+    assert.deepEqual(quiet, []);
+  });
+});
+
 test('a record that is not for the signer: a created record for another key is refused', async () => {
   await withFolder(async (folder) => {
     const secrets = new MemorySecrets();

@@ -143,6 +143,39 @@ test('merge-pr merges a release PR, waits for CI on the squash commit, then tags
   assert.equal(fake.world.tags['v1.2.3'], SQUASH);
 });
 
+// 0.4.25: right after a release PR merged, the push CI run on the squash commit had check runs from github-actions that GitHub had not yet linked to
+// a workflow run, so the tag step refused at once ("also comes from github-actions (check suite N), not the CI workflow"). It now waits for the link.
+const unlinked = (status) => ({
+  checkRuns: CI_CHECKS.map((name, i) => ({ id: 600 + i, name, status, conclusion: null, startedAt: '2026-01-01T00:00:00Z', app: 'github-actions', suiteId: 5 })),
+  workflowRuns: [],
+  statuses: []
+});
+const unlinkedRun = () => ({ ...unlinked('in_progress'), workflowRuns: [{ id: 55, name: 'CI', path: '.github/workflows/ci.yml', event: 'push', status: 'queued', conclusion: null, suiteId: null }] });
+
+test('merge-pr waits for CI on the squash commit to be linked to the CI workflow before judging it, then tags', async () => {
+  const fake = install(readyToMerge({
+    prs: { 9: openPr(9, 'release/1.2.3', HEAD, { title: 'chore(release): 1.2.3' }) },
+    commits: { [HEAD]: greenCommit(), [SQUASH]: [unlinked('queued'), unlinkedRun(), pending(), greenCommit({ suiteId: 5, runId: 55, event: 'push', review: false })] },
+    mainContains: new Set([SQUASH]), files: releaseFiles(HEAD, SQUASH)
+  }));
+  const result = await mergePr(REPO, '9', quiet);
+  assert.deepEqual(result, { merged: true, mergeSha: SQUASH, tag: 'v1.2.3' });
+  assert.equal(fake.called(new RegExp(`commits/${SQUASH}/check-runs`)).length, 4, 'it polled until the run was linked and green');
+  assert.equal(fake.world.tags['v1.2.3'], SQUASH);
+});
+
+test('tagging gives up, bounded, when CI on the commit is never linked to the CI workflow', async () => {
+  install({
+    commits: { [SQUASH]: unlinked('in_progress') }, mainContains: new Set([SQUASH]),
+    files: { [`${SQUASH}:package.json`]: '{"version":"1.2.3"}', [`${SQUASH}:CHANGELOG.md`]: '## 1.2.3\n\nFixes.\n' }
+  });
+  let clock = 0;
+  await assert.rejects(
+    tagRelease(REPO, '1.2.3', SQUASH, { log: () => {}, ci: { timeoutMs: 60_000, now: () => clock, wait: async () => { clock += 30_000; } } }),
+    /did not finish within 1 minutes/
+  );
+});
+
 test('merge-pr refuses a release PR whose version tag already exists, unless --no-tag', async () => {
   const state = () => readyToMerge({ prs: { 9: openPr(9, 'release/1.2.3', HEAD) }, files: releaseFiles(HEAD), tags: { 'v1.2.3': '3'.repeat(40) } });
   let fake = install(state());

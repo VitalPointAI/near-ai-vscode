@@ -11,6 +11,7 @@ import { validateName } from '../domain/team/validate';
 import type { SecretStorageLike } from '../services/auth';
 import { teamMaterializer } from '../domain/team/materialize';
 import { buildGenesisEvents } from './eventLog';
+import { cleanLsRemote, cleanPush, resolveCheckedRemote } from './cleanRemote';
 import { DEFAULT_COORDINATION_REF, GitTransport } from './gitTransport';
 import { forgetCreatedDeviceIdentity, identityDir, loadOrCreateDeviceIdentity, newMemberId, newTeamId } from './identity';
 import { GitNotFoundError, gitText, redactGitMessage, runGit } from './runGit';
@@ -20,7 +21,7 @@ import { REMOTE_NAME_PATTERN, TEAM_FILE_REL, TeamFileError, canonicalTeamFile, p
 export const ENABLE_COMMIT_MESSAGE = 'chore(team): enable NEAR AI Team Mode';
 
 export type EnableFailureCode =
-  | 'git-missing' | 'not-initialised' | 'not-a-repo' | 'no-commit' | 'no-remote' | 'remote-unreachable' | 'exists-locally' | 'exists-remotely'
+  | 'git-missing' | 'not-initialised' | 'not-a-repo' | 'no-commit' | 'no-remote' | 'remote-unreachable' | 'remote-refused' | 'exists-locally' | 'exists-remotely'
   | 'invalid-input' | 'preview-off' | 'secret' | 'push-failed' | 'push-unconfirmed' | 'commit-failed';
 
 // The same words the command shows when the setting is off, kept here so the core refuses in its own voice.
@@ -41,6 +42,8 @@ export interface EnableInput {
   checked?: EnablePreconditionsOk;
   git?: GitRunner;
   now?: () => Date;
+  // Where a plain warning from the key history goes (the Team Mode output channel). Never given key material.
+  warn?: (message: string) => void;
 }
 
 export type EnableResult =
@@ -60,11 +63,8 @@ type Preconditions = EnablePreconditionsOk | { ok: false; code: EnableFailureCod
 
 const DEFAULT_REMOTE = 'origin';
 const LOCAL_TIMEOUT_MS = 30_000;
-const NETWORK_TIMEOUT_MS = 60_000;
 const COMMIT_TIMEOUT_MS = 120_000;
 const CONTROL_CHARACTERS = /[\u0000-\u001F\u007F\u2028\u2029]/;
-// The same non-interactive ssh the transport uses, so a passphrase prompt cannot hang the existence check.
-const DEFAULT_SSH_COMMAND = 'ssh -o BatchMode=yes -o ConnectTimeout=10';
 
 function fail(code: EnableFailureCode, message: string): { ok: false; code: EnableFailureCode; message: string } {
   return { ok: false, code, message };
@@ -110,10 +110,13 @@ export async function checkEnablePreconditions(projectRoot: string, remote: stri
   }
   const head = await run(['rev-parse', '--verify', '-q', 'HEAD']);
   if (head.code !== 0) return fail('no-commit', 'This repository has no commits yet. Make a first commit, then enable Team Mode.');
-  // The URL is only checked for existence: it can carry credentials, so the value is discarded here.
+  // The URL can carry credentials, so the value is discarded here; resolveCheckedRemote checks the resolved addresses without repeating them.
   const url = await run(['remote', 'get-url', remote]);
   if (url.code === 2) return fail('no-remote', `This repository has no remote named "${remote}". Add one with git remote add ${remote} <url>, then enable Team Mode.`);
   if (url.code !== 0) return fail('remote-unreachable', `Git could not read the remote "${remote}": ${gitFailureText(url)}`);
+  // 0.4.25: every address is checked as git resolves it; the network calls below then use only those checked addresses (see cleanRemote.ts).
+  const resolved = await resolveCheckedRemote(projectRoot, remote, git);
+  if (!resolved.ok) return fail('remote-refused', resolved.reason);
   const branch = await run(['symbolic-ref', '--short', '-q', 'HEAD']);
   const name = branch.code === 0 ? gitText(branch) : '';
   return name === '' ? { ok: true, projectRoot, remote } : { ok: true, projectRoot, remote, branch: name };
@@ -138,26 +141,16 @@ export async function enableDefaults(projectRoot: string, git: GitRunner = runGi
   return defaults;
 }
 
-// Only an ssh command inherited from the environment is passed on, and it is left where it is. These git calls run in the project, so git
-// applies any core.sshCommand from its config itself; the value is never copied into the environment. Only when no ssh command is set
-// anywhere does the non-interactive default go in.
-async function networkEnv(projectRoot: string, git: GitRunner): Promise<Record<string, string>> {
-  const inherited = process.env.GIT_SSH_COMMAND;
-  if (inherited !== undefined && inherited !== '') return {};
-  if ((await gitConfigValue(projectRoot, 'core.sshCommand', git)) !== '') return {};
-  return { GIT_SSH_COMMAND: DEFAULT_SSH_COMMAND };
-}
-
 // Removes the whole team storage folder (which holds the mirror) and, only when this Enable call created it, the device key (D-22). An identity that
 // existed before Enable (another team, another attempt) is never touched, and neither is a different key stored since. Every failure is returned as
 // text, never dropped.
 async function rollback(
-  secrets: SecretStorageLike, globalStorageDir: string, teamId: string, createdKey: { fingerprint: string } | undefined
+  secrets: SecretStorageLike, globalStorageDir: string, teamId: string, createdKey: { fingerprint: string } | undefined, warn?: (message: string) => void
 ): Promise<string[]> {
   const problems: string[] = [];
   if (createdKey !== undefined) {
     try {
-      await forgetCreatedDeviceIdentity(secrets, { identityDir: identityDir(globalStorageDir), fingerprint: createdKey.fingerprint });
+      await forgetCreatedDeviceIdentity(secrets, { identityDir: identityDir(globalStorageDir), fingerprint: createdKey.fingerprint, ...(warn === undefined ? {} : { warn }) });
     } catch (error) {
       problems.push(`The device key could not be removed: ${describeError(error)}`);
     }
@@ -207,8 +200,8 @@ async function pushGenesis(args: { transport: GitTransport<TeamState>; events: T
   if (fetchThrew) {
     // The mirror could not be used for the check (for example a folder that cannot be created); ask the remote directly.
     try {
-      const probe = await git(['ls-remote', '--exit-code', remote, DEFAULT_COORDINATION_REF], { cwd: projectRoot, env: await networkEnv(projectRoot, git), timeoutMs: NETWORK_TIMEOUT_MS });
-      if (probe.code === 2) return { kind: 'failed', reason, detail: '' };
+      const resolved = await resolveCheckedRemote(projectRoot, remote, git);
+      if (resolved.ok && (await cleanLsRemote(git, resolved.remote, DEFAULT_COORDINATION_REF)).code === 2) return { kind: 'failed', reason, detail: '' };
     } catch (error) {
       detail = `${detail} ${describeError(error)}`;
     }
@@ -259,7 +252,11 @@ export async function enableTeamMode(input: EnableInput): Promise<EnableResult> 
   }
 
   // D-17: an existing coordination branch on the remote stops Enable before any key exists.
-  const probe = await git(['ls-remote', '--exit-code', remote, DEFAULT_COORDINATION_REF], { cwd: projectRoot, env: await networkEnv(projectRoot, git), timeoutMs: NETWORK_TIMEOUT_MS });
+  // The address is resolved and checked again here, since a passed precondition result may be older; the probe itself never reads the project's
+  // git config (cleanRemote.ts).
+  const resolved = await resolveCheckedRemote(projectRoot, remote, git);
+  if (!resolved.ok) return fail('remote-refused', resolved.reason);
+  const probe = await cleanLsRemote(git, resolved.remote, DEFAULT_COORDINATION_REF);
   if (probe.code === 0) return fail('exists-remotely', 'This remote already has a coordination log. Joining an existing team arrives with team invitations.');
   if (probe.code !== 2) return fail('remote-unreachable', `The remote "${remote}" could not be reached, so nothing was changed: ${gitFailureText(probe)}`);
 
@@ -268,7 +265,7 @@ export async function enableTeamMode(input: EnableInput): Promise<EnableResult> 
   // No email address, and nothing derived from one, is asked for, stored or signed: the team id is public in team.json, so any hash of an
   // address salted with it could be reversed by guessing addresses. The roster format keeps its hash lists, and this version keeps them empty.
   const emailHashes: string[] = [];
-  const { identity, created } = await loadOrCreateDeviceIdentity(input.secrets, { identityDir: identityDir(input.globalStorageDir) });
+  const { identity, created } = await loadOrCreateDeviceIdentity(input.secrets, { identityDir: identityDir(input.globalStorageDir), ...(input.warn === undefined ? {} : { warn: input.warn }) });
   const createdKey = created ? { fingerprint: identity.fingerprint } : undefined;
   const storageDir = teamStorageDir(input.globalStorageDir, teamId);
 
@@ -282,7 +279,7 @@ export async function enableTeamMode(input: EnableInput): Promise<EnableResult> 
     };
     assertNoSecrets(teamFile, 'team.json');
   } catch (error) {
-    const problems = await rollback(input.secrets, input.globalStorageDir, teamId, createdKey);
+    const problems = await rollback(input.secrets, input.globalStorageDir, teamId, createdKey, input.warn);
     if (error instanceof SecretLeakError) return fail('secret', [error.message, ...problems].join(' '));
     throw error;
   }
@@ -293,11 +290,11 @@ export async function enableTeamMode(input: EnableInput): Promise<EnableResult> 
   });
   const outcome = await pushGenesis({ transport, events: genesis.events, teamFileText: canonicalTeamFile(teamFile), git, projectRoot, remote });
   if (outcome.kind === 'exists') {
-    const problems = await rollback(input.secrets, input.globalStorageDir, teamId, createdKey);
+    const problems = await rollback(input.secrets, input.globalStorageDir, teamId, createdKey, input.warn);
     return fail('exists-remotely', ['This remote already has a coordination log.', ...problems].join(' '));
   }
   if (outcome.kind === 'failed') {
-    const problems = await rollback(input.secrets, input.globalStorageDir, teamId, createdKey);
+    const problems = await rollback(input.secrets, input.globalStorageDir, teamId, createdKey, input.warn);
     return fail('push-failed', [`The team could not be created on the remote: ${outcome.reason}`, outcome.detail, ...problems, 'Nothing was kept on this computer.'].filter((part) => part !== '').join(' '));
   }
   if (outcome.kind === 'unconfirmed') {
@@ -345,6 +342,15 @@ export async function pushCodeBranch(projectRoot: string, remote: string, branch
   if (!REMOTE_NAME_PATTERN.test(remote)) return { ok: false, message: 'The remote name is not valid.' };
   // A branch name that starts with a dash would be read as an option, and a colon would make it a refspec: the shared ref-name rule refuses both.
   if (!isGitRefName(branch) || CONTROL_CHARACTERS.test(branch)) return { ok: false, message: 'The branch name is not valid.' };
-  const result = await git(['push', remote, branch], { cwd: projectRoot, env: await networkEnv(projectRoot, git), timeoutMs: NETWORK_TIMEOUT_MS });
+  const resolved = await resolveCheckedRemote(projectRoot, remote, git);
+  if (!resolved.ok) return { ok: false, message: resolved.reason };
+  // 0.4.25: the branch is read in the project (a local read that runs nothing), then pushed from a clean folder that reads the project's objects
+  // through an alternate, so no setting, helper or hook from the project's git config runs (cleanRemote.ts).
+  const commit = await git(['rev-parse', '--verify', '-q', `refs/heads/${branch}^{commit}`], { cwd: projectRoot, timeoutMs: LOCAL_TIMEOUT_MS });
+  if (commit.code !== 0 || !/^[0-9a-f]{40,64}$/.test(gitText(commit))) return { ok: false, message: `There is no branch named ${branch} in this project to push.` };
+  const common = await git(['rev-parse', '--git-common-dir'], { cwd: projectRoot, timeoutMs: LOCAL_TIMEOUT_MS });
+  if (common.code !== 0 || gitText(common) === '') return { ok: false, message: `Pushing ${branch} to ${remote} failed: ${gitFailureText(common)}` };
+  const objectsDir = path.join(path.resolve(projectRoot, gitText(common)), 'objects');
+  const result = await cleanPush(git, resolved.remote, objectsDir, gitText(commit), branch);
   return result.code === 0 ? { ok: true } : { ok: false, message: `Pushing ${branch} to ${remote} failed: ${gitFailureText(result)}` };
 }

@@ -7,6 +7,7 @@ import { Logger } from './log/logger';
 import { loadPseudonymKey } from './log/pseudonymKey';
 import { Redactor } from './log/redact';
 import { loadSecrets, refusePlainSecretEnv, RELAY_SECRETS, SecretError } from './secrets';
+import { finishStartup } from './startup';
 import { prepareStateDir, StateDirError } from './stateDir';
 import { IN_FLIGHT_RUN_STATES } from './store/relayStore';
 import { openSqliteStore } from './store/sqliteStore';
@@ -161,17 +162,7 @@ export async function main(argv: readonly string[]): Promise<void> {
   // Everything relay.listening needs is read before the signal handlers go in, so a stop can never
   // run while that read is still in flight. The handlers then go in before relay.listening is logged:
   // a supervisor or test that reacts to that line by sending SIGTERM must always get a clean stop,
-  // never the default kill.
-  let instanceId: string;
-  try {
-    instanceId = await openStore.instanceId();
-  } catch (error) {
-    logger.error('relay.start_refused', { reason: 'instance-id', detail: error instanceof Error ? error.message : 'instance id read failed' });
-    await new Promise<void>((resolve) => server.close(() => resolve()));
-    await openStore.close();
-    process.exitCode = 1;
-    return;
-  }
+  // never the default kill. finishStartup keeps that order (test/startup.test.ts calls it directly).
   let stopping = false;
   const stop = (signal: string): void => {
     if (stopping) return;
@@ -195,7 +186,18 @@ export async function main(argv: readonly string[]): Promise<void> {
     });
     server.closeIdleConnections();
   };
-  process.on('SIGTERM', () => stop('SIGTERM'));
-  process.on('SIGINT', () => stop('SIGINT'));
-  logger.info('relay.listening', { host: config.host, port, version: __RELAY_VERSION__, instanceId });
+  try {
+    await finishStartup({
+      read: () => openStore.instanceId(),
+      signals: process,
+      stop,
+      announce: (instanceId) => logger.info('relay.listening', { host: config.host, port, version: __RELAY_VERSION__, instanceId }),
+    });
+  } catch (error) {
+    logger.error('relay.start_refused', { reason: 'instance-id', detail: error instanceof Error ? error.message : 'instance id read failed' });
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await openStore.close();
+    process.exitCode = 1;
+    return;
+  }
 }

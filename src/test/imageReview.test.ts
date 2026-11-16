@@ -785,3 +785,47 @@ test('changes to a draft that has gone, and an edit_of naming a missing draft, t
     assert.deepEqual(client.calls.map((entry) => entry.kind), ['generate'], 'no edit was paid for');
   });
 });
+
+// 0.4.25: a draft file that is still there but empty (zero bytes, e.g. a write cut short) has no image either. It was shown as an image (an empty
+// data URL) on the card and could be "edited"; it now counts as gone, like a missing one.
+test('a zero-byte draft is gone: its card says so, changes to it and edit_of naming it tell the agent to generate fresh', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'near-ai-image-empty-'));
+  const posted: Array<Record<string, unknown>> = [];
+  const conversation = new AgentConversation(root, (message) => posted.push(message), path.join(root, '.ckpt'));
+  const internals = conversation as unknown as { askImageReview(draft: ImageDraft, signal: AbortSignal): Promise<ImageReviewDecision> };
+  const controller = new AbortController();
+  try {
+    const id = 'img-0f0f0f0f0f0f';
+    await mkdir(draftsFolder(root), { recursive: true });
+    await writeFile(draftFile(root, id), new Uint8Array(0));
+    const waiting = internals.askImageReview({ id, file: draftFile(root, id), path: 'assets/a.png', model: 'm', prompt: 'p', attempt: 1, bytes: 3 }, controller.signal);
+    const card = await until(() => posted.find((message) => message.type === 'image-review-request' && message.id === id));
+    assert.equal(card.missing, true, 'an empty draft is gone');
+    assert.equal(card.tooLarge, undefined, 'not too large');
+    assert.equal(card.image, undefined, 'and not shown as an image');
+    controller.abort();
+    await waiting;
+  } finally {
+    conversation.dispose();
+  }
+  const shown: ImageDraft[] = [];
+  const reviewer: ImageReviewer = {
+    root, drafts: new Map(), attempts: new Map(),
+    // The draft is emptied while its card waits, then the person asks for changes.
+    review: async (draft) => { shown.push(draft); await writeFile(draft.file, new Uint8Array(0)); return { decision: 'changes', feedback: 'make it blue' }; }
+  };
+  const client = imageClient();
+  const tool = imageTool(client as never, FLUX as never, [], reviewer);
+  await withContext(root, async (context) => {
+    const result = await tool.run(tool.parse({ prompt: 'a lighthouse', path: 'hero.png' }), context);
+    assert.match(result, /is gone from .*, so it cannot be edited\. Call GenerateImage again without edit_of, path: "hero\.png"/);
+    assert.equal(reviewer.drafts.has(shown[0].id), false, 'the empty draft is forgotten');
+    // A draft still listed whose file is empty is refused before anything is paid for.
+    const id = 'img-0e0e0e0e0e1f';
+    await writeFile(draftFile(root, id), new Uint8Array(0));
+    reviewer.drafts.set(id, { path: 'hero.png' });
+    await assert.rejects(tool.run(tool.parse({ prompt: 'blue', path: 'hero.png', edit_of: id }), context), /is no longer in .*, so it cannot be edited\. Call GenerateImage again without edit_of/);
+    assert.equal(reviewer.drafts.has(id), false);
+    assert.deepEqual(client.calls.map((entry) => entry.kind), ['generate'], 'no edit was paid for');
+  });
+});

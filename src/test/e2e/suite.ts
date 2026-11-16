@@ -272,8 +272,10 @@ function projectTests(): Array<[string, () => Promise<void>]> {
       const { postToPage } = require(path.join(extension.extensionPath, 'dist/services/layoutProbe')) as typeof import('../../services/layoutProbe');
       await vscode.commands.executeCommand('nearAiChatView.focus');
       const id = 'img-0e2e0e2e0e2e';
-      // A wide image (1200 px), a long path and model, and a sub-agent's label: the card must still fit the sidebar as the host sends it.
-      await postToPage('chat', { type: 'image-review-request', id, path: `report/img/${'a-rather-long-folder-name/'.repeat(3)}hero-image-for-the-report.png`, model: LONG_MODEL, prompt: 'A lighthouse at dusk. '.repeat(20), attempt: 3, sizeKb: 1, image: `data:image/png;base64,${solidPng(1200, 40).toString('base64')}`, agent: 'gsd-designer' });
+      // A wide image, a long path and model, and a sub-agent's label: the card must still fit the sidebar as the host sends it. The width is one
+      // constant shared by the fixture and the check below (0.4.25), so changing the fixture cannot leave the check pinned to an old number.
+      const IMAGE_WIDTH = 1200;
+      await postToPage('chat', { type: 'image-review-request', id, path: `report/img/${'a-rather-long-folder-name/'.repeat(3)}hero-image-for-the-report.png`, model: LONG_MODEL, prompt: 'A lighthouse at dusk. '.repeat(20), attempt: 3, sizeKb: 1, image: `data:image/png;base64,${solidPng(IMAGE_WIDTH, 40).toString('base64')}`, agent: 'gsd-designer' });
       await pause(500);
       const report = await probe('chat');
       console.log(`  image review card at ${report.width}px: page ${report.scrollWidth}/${report.clientWidth}, body ${report.bodyScrollWidth}/${report.bodyClientWidth}`);
@@ -285,7 +287,7 @@ function projectTests(): Array<[string, () => Promise<void>]> {
       let shown = await preview();
       for (let attempt = 0; attempt < 20 && !(shown && shown.naturalWidth > 0); attempt += 1) { await pause(250); shown = await preview(); }
       assert.ok(shown, 'the card shows the image');
-      assert.equal(shown.naturalWidth, 1200, `the data: image renders at its own width: ${JSON.stringify(shown)}`);
+      assert.equal(shown.naturalWidth, IMAGE_WIDTH, `the data: image renders at its own width: ${JSON.stringify(shown)}`);
       // Sent through the view, as the card's Request changes button would. The host has no such draft waiting, so nothing else happens.
       const asked = observer.fromView.length;
       await api.sidebar.request({ type: 'image-review-reply', id, decision: 'changes', feedback: 'Warmer light, please.' });

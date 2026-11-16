@@ -8,7 +8,7 @@ import { RunCheckpoints } from '../agent/checkpoints';
 import { AgentRun, RunInput } from '../agent/loop';
 import { DEFAULT_RULES } from '../agent/permissions';
 import { AuthService, SecretStorageLike } from '../services/auth';
-import { MAX_MESSAGE_CHARS, attachmentsClearedMessage, parseChatWebviewMessage } from '../services/chatBridge';
+import { ATTACHMENTS_CLEARED, MAX_MESSAGE_CHARS, attachmentsClearedMessage, parseChatWebviewMessage } from '../services/chatBridge';
 import { ProfileStore } from '../services/profileStore';
 import { deriveProfileId } from '../domain/auth';
 import type { AgentMessage, CompletionEvent } from '../services/nearAiClient';
@@ -566,7 +566,7 @@ test('sidebar: a file attached to a message sent during a run reaches the runnin
     const approval = await until(() => sidebar.posted.find((message) => message.type === 'approval-request'));
     const staged = await attach(sidebar, 'ports.txt', 'staging uses port 9090');
     await sidebar.send({ type: 'steer', id: 'steer-a1a1a1a1a1a1', text: 'check the attached ports file', attachmentIds: [staged.id] });
-    assert.deepEqual(sidebar.posted.find((message) => message.type === 'attachments-cleared')?.ids, [staged.id], 'its file leaves the composer, and only its file');
+    assert.deepEqual(sidebar.posted.find((message) => message.type === ATTACHMENTS_CLEARED)?.ids, [staged.id], 'its file leaves the composer, and only its file');
     await sidebar.send({ type: 'approval-reply', callId: approval.callId, decision: 'allow' });
     await running;
     assert.equal(near.requests.length, 2, 'still one run');
@@ -648,7 +648,7 @@ test('a message sent during a run no longer leaves its attachments staged for a 
   assert.equal(steer.text, 'check the attached ports file');
   assert.deepEqual(steer.attachmentIds, ['att-0123456789ab'], 'with the files attached when it was sent');
   // The host took the files with it; the next message sent during the run carries none.
-  page.send({ type: 'attachments-cleared', ids: ['att-0123456789ab'] });
+  page.send({ type: ATTACHMENTS_CLEARED, ids: ['att-0123456789ab'] });
   assert.equal((page.nodes.get('chips') as StubNode).hidden, true, 'no file is left in the composer');
   input.value = 'and one more thing';
   page.posts.length = 0;
@@ -668,7 +668,7 @@ test('a clear that names no files takes no chip and no file line, and a clear th
   page.send({ type: 'assistant-start', model: 'z-ai/glm-5.3' });
   page.send({ type: 'attachment-staged', id: 'att-111111111111', name: 'one.txt', kind: 'text', size: 10 });
   page.send({ type: 'attachment-staged', id: 'att-222222222222', name: 'two.txt', kind: 'text', size: 10 });
-  page.send({ type: 'attachments-cleared' });
+  page.send({ type: ATTACHMENTS_CLEARED });
   assert.equal((page.nodes.get('chips') as StubNode).hidden, false, 'both chips are still shown');
   input.value = 'with both files';
   page.posts.length = 0;
@@ -678,14 +678,14 @@ test('a clear that names no files takes no chip and no file line, and a clear th
   // The message became a new turn; a clear naming no files does not mark its files as taken, so a refusal still removes its file line.
   const bubble = transcript.all((node) => node.className === 'turn user steer' && node.textContent === 'with both files')[0];
   page.send({ type: 'steer-state', id: steer.id, state: 'sent-new' });
-  page.send({ type: 'attachments-cleared' });
+  page.send({ type: ATTACHMENTS_CLEARED });
   page.send({ type: 'outbound-blocked', text: 'with both files', model: 'z-ai/glm-5.3', reason: 'Blocked.', confirm: false });
   assert.doesNotMatch(bubbleText(bubble), /one\.txt/, 'the refused turn did not send the files');
   // A clear naming one file takes that chip only.
   page.send({ type: 'assistant-start', model: 'z-ai/glm-5.3' });
   page.send({ type: 'attachment-staged', id: 'att-333333333333', name: 'three.txt', kind: 'text', size: 10 });
   page.send({ type: 'attachment-staged', id: 'att-444444444444', name: 'four.txt', kind: 'text', size: 10 });
-  page.send({ type: 'attachments-cleared', ids: ['att-333333333333', 'att-111111111111', 'att-222222222222'] });
+  page.send({ type: ATTACHMENTS_CLEARED, ids: ['att-333333333333', 'att-111111111111', 'att-222222222222'] });
   input.value = 'with the last one';
   page.posts.length = 0;
   (page.nodes.get('steer') as StubNode).click();
@@ -719,18 +719,18 @@ test('a message that became a new turn loses its file line when that turn is ref
   page.send({ type: 'outbound-blocked', text: 'use these', model: 'z-ai/glm-5.3', reason: 'This message looks like it contains a credential.', confirm: false });
   assert.doesNotMatch(bubbleText(refused.bubble), /creds\.txt/, 'the refused turn did not send the file');
   // A turn that took its files keeps the line, even when a later message is refused. (The refused file is taken out of the composer first.)
-  page.send({ type: 'attachments-cleared', ids: ['att-aaaaaaaaaaaa'] });
+  page.send({ type: ATTACHMENTS_CLEARED, ids: ['att-aaaaaaaaaaaa'] });
   page.send({ type: 'assistant-start', model: 'z-ai/glm-5.3' });
   const taken = sendDuringRun('read the plan', 'att-bbbbbbbbbbbb', 'plan.txt');
   page.send({ type: 'steer-state', id: taken.steer.id, state: 'sent-new' });
-  page.send({ type: 'attachments-cleared', ids: ['att-bbbbbbbbbbbb'] });
+  page.send({ type: ATTACHMENTS_CLEARED, ids: ['att-bbbbbbbbbbbb'] });
   page.send({ type: 'outbound-blocked', text: 'something else', model: 'z-ai/glm-5.3', reason: 'Blocked.', confirm: false });
   assert.match(bubbleText(taken.bubble), /plan\.txt/, 'the file went with its turn');
   // A turn that ended before its run began hands its files back to the composer: the line goes then too.
   page.send({ type: 'assistant-start', model: 'z-ai/glm-5.3' });
   const handedBack = sendDuringRun('look at the draft', 'att-cccccccccccc', 'draft.txt');
   page.send({ type: 'steer-state', id: handedBack.steer.id, state: 'sent-new' });
-  page.send({ type: 'attachments-cleared', ids: ['att-cccccccccccc'] });
+  page.send({ type: ATTACHMENTS_CLEARED, ids: ['att-cccccccccccc'] });
   page.send({ type: 'attachment-staged', id: 'att-cccccccccccc', name: 'draft.txt', kind: 'text', size: 10 });
   assert.doesNotMatch(bubbleText(handedBack.bubble), /draft\.txt/, 'the file is back in the composer, not sent');
 });
@@ -749,7 +749,7 @@ test('sidebar: a message whose file trips the outbound check is not sent, and it
     const blocked = sidebar.posted.find((message) => message.type === 'steer-state' && message.id === 'steer-e5e5e5e5e5e5');
     assert.equal(blocked?.state, 'blocked');
     assert.match(String(blocked?.reason), /credential/);
-    assert.equal(sidebar.posted.some((message) => message.type === 'attachments-cleared'), false, 'the file keeps its chip');
+    assert.equal(sidebar.posted.some((message) => message.type === ATTACHMENTS_CLEARED), false, 'the file keeps its chip');
     assert.equal(existsSync(path.join(root, '.near-ai', 'attachments')), false, 'the blocked file is never written into the project');
     await sidebar.send({ type: 'approval-reply', callId: approval.callId, decision: 'allow' });
     await running;
@@ -943,7 +943,7 @@ test('sidebar: files of a turn that fails before its run starts come back to the
     await sidebar.send({ type: 'send', text: 'read my file', model: 'z-ai/glm-5.3', attachmentIds: [own.id] });
     const sent = sidebar.posted.slice(mark);
     assert.ok(sent.some((message) => message.type === 'assistant-error'));
-    const cleared = sent.findIndex((message) => message.type === 'attachments-cleared');
+    const cleared = sent.findIndex((message) => message.type === ATTACHMENTS_CLEARED);
     const restaged = sent.findIndex((message) => message.type === 'attachment-staged' && message.id === own.id);
     assert.ok(restaged > cleared, 'the file left the composer when read, and came back when the turn failed');
 
@@ -1049,7 +1049,7 @@ test('sidebar: every attachments-cleared the host posts names its files, and the
     const kept = await attach(sidebar, 'kept.txt', 'kept body');
     await sidebar.send({ type: 'new-chat' });
 
-    const clears = sidebar.posted.filter((message) => message.type === 'attachments-cleared');
+    const clears = sidebar.posted.filter((message) => message.type === ATTACHMENTS_CLEARED);
     assert.ok(clears.length >= 4, 'the paths above each cleared files');
     for (const clear of clears) {
       assert.deepEqual(Object.keys(clear).sort(), ['ids', 'type']);
@@ -1058,7 +1058,7 @@ test('sidebar: every attachments-cleared the host posts names its files, and the
 
     // The page, given exactly what the host posted about files, shows the files the host still holds; sending them is not refused as missing.
     const page = chatPage();
-    for (const message of sidebar.posted) if (message.type === 'attachment-staged' || message.type === 'attachments-cleared') page.send(message);
+    for (const message of sidebar.posted) if (message.type === 'attachment-staged' || message.type === ATTACHMENTS_CLEARED) page.send(message);
     const input = page.nodes.get('input') as StubNode;
     input.value = 'all that is left';
     page.posts.length = 0;
@@ -1070,7 +1070,7 @@ test('sidebar: every attachments-cleared the host posts names its files, and the
     await sidebar.send({ type: 'send', text: 'all that is left', model: 'z-ai/glm-5.3', attachmentIds: sent.attachmentIds });
     const after = sidebar.posted.slice(mark);
     assert.equal(after.some((message) => message.type === 'outbound-blocked'), false, 'the host holds every file the page shows');
-    assert.deepEqual([...(after.find((message) => message.type === 'attachments-cleared')?.ids as string[])].sort(), [...(sent.attachmentIds ?? [])].sort());
+    assert.deepEqual([...(after.find((message) => message.type === ATTACHMENTS_CLEARED)?.ids as string[])].sort(), [...(sent.attachmentIds ?? [])].sort());
   } finally {
     setting.restore();
     globalThis.fetch = originalFetch;
@@ -1079,9 +1079,14 @@ test('sidebar: every attachments-cleared the host posts names its files, and the
 });
 
 test('the attachments-cleared builder always names files, and is the only place the host writes that message', () => {
-  assert.deepEqual(attachmentsClearedMessage(['att-111111111111', 'att-111111111111', 'att-222222222222']), { type: 'attachments-cleared', ids: ['att-111111111111', 'att-222222222222'] });
+  assert.equal(ATTACHMENTS_CLEARED, 'attachments-cleared', 'the wire name media/chat/chat.js handles');
+  assert.deepEqual(attachmentsClearedMessage(['att-111111111111', 'att-111111111111', 'att-222222222222']), { type: ATTACHMENTS_CLEARED, ids: ['att-111111111111', 'att-222222222222'] });
   assert.equal(attachmentsClearedMessage([]), undefined, 'nothing to name, nothing posted');
   assert.equal(attachmentsClearedMessage(['']), undefined);
+  // 0.4.25: the scan matched only the single-quoted literal, so "attachments-cleared" or `attachments-cleared` slipped past it.
+  const mentionsAttachmentsCleared = (text: string) => /(['"`])attachments-cleared\1/.test(text);
+  for (const quoted of ["'attachments-cleared'", '"attachments-cleared"', '`attachments-cleared`']) assert.equal(mentionsAttachmentsCleared(`post({ type: ${quoted} })`), true, quoted);
+  assert.equal(mentionsAttachmentsCleared('post({ type: ATTACHMENTS_CLEARED })'), false, 'the shared constant is not the literal');
   const source = path.join(__dirname, '..', '..', 'src');
   assert.ok(existsSync(path.join(source, 'services', 'chatBridge.ts')), 'the source tree is found');
   const offenders: string[] = [];
@@ -1090,7 +1095,7 @@ test('the attachments-cleared builder always names files, and is the only place 
       const full = path.join(dir, entry.name);
       if (entry.isDirectory()) { if (entry.name !== 'test') walk(full); continue; }
       if (!entry.name.endsWith('.ts') || full.endsWith(path.join('services', 'chatBridge.ts'))) continue;
-      if (readFileSync(full, 'utf8').includes('\'attachments-cleared\'')) offenders.push(path.relative(source, full));
+      if (mentionsAttachmentsCleared(readFileSync(full, 'utf8'))) offenders.push(path.relative(source, full));
     }
   };
   walk(source);

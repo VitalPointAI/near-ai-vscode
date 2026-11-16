@@ -120,7 +120,8 @@ export function imageTool(client: NearAiClient, model: ModelInfo, models: readon
         const fresh = `Call GenerateImage again without edit_of, path: "${input.path}", and a prompt that describes the whole image with the user's changes; it makes a new image.`;
         if (!reviewer.drafts.has(input.editOf)) throw new ToolError(`${input.editOf} is not a draft kept in this conversation (an accepted draft has moved to its path, and a discarded one is gone), so it cannot be edited. ${fresh}`);
         source = await readDraft(reviewer.root, input.editOf);
-        if (!source) { reviewer.drafts.delete(input.editOf); throw new ToolError(`Draft ${input.editOf} is no longer in ${DRAFTS_DIR}, so it cannot be edited. ${fresh}`); }
+        // 0.4.25: a zero-byte draft file has no image to edit, so it counts as gone (bytes?.length, not the Buffer's presence).
+        if (!source?.length) { reviewer.drafts.delete(input.editOf); throw new ToolError(`Draft ${input.editOf} is no longer in ${DRAFTS_DIR}, so it cannot be edited. ${fresh}`); }
       }
       const made = await makeImage(client, used, input, source, context.signal);
       const bytes = made.result.bytes;
@@ -157,7 +158,7 @@ export function imageTool(client: NearAiClient, model: ModelInfo, models: readon
             return `Accepted by the user and saved to ${shown} (${kb} KB, ${used.id}).${how}`;
           case 'changes':
             // PR #55 review: the draft's file may have gone while the card waited (removed by hand, or a clean-up); then edit_of would name a missing file.
-            if (!(await readDraft(reviewer.root, id))) {
+            if (!(await readDraft(reviewer.root, id))?.length) {
               reviewer.drafts.delete(id);
               return `The user asked for changes to the image for ${shown} (attempt ${attempt}): ${decision.feedback}\nDraft ${id} is gone from ${DRAFTS_DIR}, so it cannot be edited. Call GenerateImage again without edit_of, path: "${input.path}", and a prompt that describes the whole image with these changes. Nothing was saved to ${shown}.${how}`;
             }

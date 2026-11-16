@@ -240,11 +240,13 @@ export interface GsdCommandProgressMessage {
  * message takes them, and that message knows which. Built only here, so no emission can drop the ids; a guard test keeps the literal out of the rest
  * of the host.
  */
-export interface AttachmentsClearedMessage { type: 'attachments-cleared'; ids: [string, ...string[]] }
+/** The message's type, shared by the builder below and the tests (0.4.25), so the literal appears in the host only here. */
+export const ATTACHMENTS_CLEARED = 'attachments-cleared' as const;
+export interface AttachmentsClearedMessage { type: typeof ATTACHMENTS_CLEARED; ids: [string, ...string[]] }
 /** The message for these files, or none when there are no files to name (nothing left the composer, so the view is told nothing). */
 export function attachmentsClearedMessage(ids: readonly string[]): AttachmentsClearedMessage | undefined {
   const named = [...new Set(ids.filter((id) => typeof id === 'string' && id.length > 0))];
-  return named.length ? { type: 'attachments-cleared', ids: named as [string, ...string[]] } : undefined;
+  return named.length ? { type: ATTACHMENTS_CLEARED, ids: named as [string, ...string[]] } : undefined;
 }
 
 export function promptMessage(prompt: unknown): StructuredPrompt | undefined { return normalizePrompt(prompt); }

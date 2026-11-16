@@ -15,6 +15,8 @@ import { withFileLock } from '../services/stateMirrorLock';
 import { MAX_EVENT_BYTES, canonicalBytes, fingerprintOf, signingInput } from '../domain/team/canonical';
 import type { DeviceRef, TeamEvent, TeamEventType, UnsignedTeamEvent } from '../domain/team/types';
 import { appendKeyRecord, archiveKeyHistory, readKeyHistory } from './keyHistory';
+import type { AppendKeyRecordOptions } from './keyHistory';
+import type { KeyHistoryReplay } from '../domain/team/keyRecords';
 
 // One Ed25519 identity per person per install (D-06). Every team this install joins uses this key, so the secret name carries no team id.
 export const DEVICE_KEY_SECRET = 'nearAi.identity.deviceKey';
@@ -87,6 +89,13 @@ export interface IdentityLockOptions {
   identityDir: string;
   // The clock for the key history records; tests pass a fixed one.
   now?: () => Date;
+  // Where a plain warning from the key history goes (the Team Mode output channel). Never given key material.
+  warn?: (message: string) => void;
+}
+
+// The options every key history append in this module passes on.
+function historyOptions(options: IdentityLockOptions): AppendKeyRecordOptions {
+  return { ...(options.now === undefined ? {} : { now: options.now }), ...(options.warn === undefined ? {} : { warn: options.warn }) };
 }
 
 // The key history (D-09) is the person's own signed record that this key is theirs. Called inside identity-create.lock with the key that is stored, it
@@ -100,11 +109,19 @@ async function ensureCreatedRecord(
   const clock = options.now === undefined ? {} : { now: options.now };
   const history = await readKeyHistory(options.identityDir, secrets);
   if (history.ok && history.active?.fingerprint === identity.fingerprint) return;
+  // 0.4.25 (PR #61 review): a key the trusted history shows as replaced or withdrawn is never given a fresh `created` record, which would make it active
+  // again. repairKeyState sets such a key aside when it safely can; when it could not, this refuses rather than bringing the key back.
+  if (history.ok) {
+    const state = history.lookup({ fingerprint: identity.fingerprint, publicKey: identity.publicKey }).state;
+    if (state === 'rotated' || state === 'revoked') {
+      throw new Error('The identity key on this computer was replaced or withdrawn in your key history, so it is not used again. Forget the kept previous key, then try again.');
+    }
+  }
   // An empty history accepts a first key as it is, and so does one whose last key was revoked when the key is brand new. Anything else is set aside first,
   // including a key that is stored but that a history with records does not make active.
   if (!history.ok || history.active !== undefined || (!freshKey && history.head !== undefined)) await archiveKeyHistory(options.identityDir, secrets, clock);
   await appendKeyRecord(
-    options.identityDir, secrets, identity, { kind: 'created', key: { fingerprint: identity.fingerprint, publicKey: identity.publicKey } }, clock
+    options.identityDir, secrets, identity, { kind: 'created', key: { fingerprint: identity.fingerprint, publicKey: identity.publicKey } }, historyOptions(options)
   );
 }
 
@@ -129,6 +146,27 @@ async function repairKeyState(secrets: SecretStorageLike, options: IdentityLockO
     const key = await readStoredKeySafely(secrets, name);
     if (key && history.lookup({ fingerprint: key.fingerprint, publicKey: key.publicKey }).state === 'revoked') await secrets.delete(name);
   }
+  await setAsideReplacedKey(secrets, history);
+}
+
+// 0.4.25 (PR #61 review): a rotation whose record was written but whose new key was lost (a crash before the key moves, then the pending entry gone)
+// leaves the replaced key as the device key, and no key on this computer is the history's active key, so the history can never be extended again.
+// The replaced key is moved to the previous slot, as a finished rotation would have kept it, and the device slot is emptied; the next first need then
+// makes a fresh key, and ensureCreatedRecord archives the old history (never deletes it) before the fresh key's `created` record. The replaced key is
+// never made active again. When the previous slot already holds another key (an earlier rotation's), nothing is moved, because that key would be
+// dropped silently; ensureCreatedRecord then refuses the replaced key instead.
+async function setAsideReplacedKey(secrets: SecretStorageLike, history: KeyHistoryReplay): Promise<void> {
+  if (!history.ok || history.active === undefined) return;
+  const current = await readStoredKeySafely(secrets, DEVICE_KEY_SECRET);
+  if (!current || history.lookup({ fingerprint: current.fingerprint, publicKey: current.publicKey }).state !== 'rotated') return;
+  for (const name of [PENDING_DEVICE_KEY_SECRET, PREVIOUS_DEVICE_KEY_SECRET]) {
+    if ((await readStoredKeySafely(secrets, name))?.fingerprint === history.active.fingerprint) return;
+  }
+  const currentText = await secrets.get(DEVICE_KEY_SECRET);
+  const kept = await secrets.get(PREVIOUS_DEVICE_KEY_SECRET);
+  if (!present(currentText) || (present(kept) && kept !== currentText)) return;
+  if (kept !== currentText) await secrets.store(PREVIOUS_DEVICE_KEY_SECRET, currentText);
+  await secrets.delete(DEVICE_KEY_SECRET);
 }
 
 // First-need creation (Pitfall 4): SecretStorage is last write wins, so two windows could each create a key. The lock covers check, create, store,
@@ -178,7 +216,7 @@ export async function forgetCreatedDeviceIdentity(
     if (!history.ok || history.active?.fingerprint !== stored.fingerprint || history.head?.seq !== 1) return false;
     await appendKeyRecord(
       options.identityDir, secrets, stored, { kind: 'revoked', key: { fingerprint: stored.fingerprint, publicKey: stored.publicKey } },
-      options.now === undefined ? {} : { now: options.now }
+      historyOptions(options)
     );
     await forgetDeviceIdentity(secrets);
     return true;
@@ -270,7 +308,7 @@ export async function commitDeviceRotation(
       await appendKeyRecord(
         options.identityDir, secrets, current,
         { kind: 'rotated', key: { fingerprint: current.fingerprint, publicKey: current.publicKey }, next: { fingerprint: pending.fingerprint, publicKey: pending.publicKey } },
-        options.now === undefined ? {} : { now: options.now }
+        historyOptions(options)
       );
     }
     await finishRotationMoves(secrets);
@@ -309,7 +347,7 @@ export async function revokeDeviceKey(secrets: SecretStorageLike, options: Ident
     const activeStored = [...stored.values()].find((key) => key.fingerprint === history.active?.fingerprint);
     const signer = (matches(current) ? current : undefined) ?? activeStored ?? [...stored.values()].find(matches);
     if (!signer) throw new Error('The key was not revoked: no key on this computer can sign the revocation.');
-    await appendKeyRecord(options.identityDir, secrets, signer, { kind: 'revoked', key: target }, options.now === undefined ? {} : { now: options.now });
+    await appendKeyRecord(options.identityDir, secrets, signer, { kind: 'revoked', key: target }, historyOptions(options));
     for (const name of names) if (matches(stored.get(name))) await secrets.delete(name);
     // A prepared rotation that was never recorded is dropped with the current key it was meant to replace.
     if (matches(current)) await secrets.delete(PENDING_DEVICE_KEY_SECRET);

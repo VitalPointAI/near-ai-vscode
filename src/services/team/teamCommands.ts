@@ -235,7 +235,8 @@ export function registerTeamMode(context: vscode.ExtensionContext): TeamModeHand
       { location: vscode.ProgressLocation.Notification, title: ENABLE_PROGRESS_TITLE },
       () => enableModule.enableTeamMode({
         projectRoot, globalStorageDir: context.globalStorageUri.fsPath, secrets: context.secrets,
-        teamName, ownerName, remote: defaults.remote, integrationBranch: defaults.integrationBranch, checked, previewEnabled: true
+        teamName, ownerName, remote: defaults.remote, integrationBranch: defaults.integrationBranch, checked, previewEnabled: true,
+        warn: (message) => output.appendLine(message)
       })
     );
 

@@ -1,6 +1,7 @@
 // Rotating and revoking the person's own key as signed history records (D-09, D-21, TMR-05). All key material is generated at run time.
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { generateKeyPairSync } from 'node:crypto';
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -336,6 +337,83 @@ test('preparing a rotation after a crash that left a revoked key stored deletes 
     assert.deepEqual((await readdir(folder)).filter((name) => name.startsWith('key-history.archived-')), [], 'nothing was archived');
     const refused = await verdictOf(folder, secrets, bundleBy(identity, T0));
     assert.equal(!refused.ok && refused.reason, 'key-revoked', 'the revoked key stays refused');
+  });
+});
+
+// 0.4.25 (PR #61 review): a rotation whose record was written but whose new key was lost (a crash before the key moves, then the pending entry gone)
+// left the old key stored. First need saw a trusted history whose active key is another one, archived it and wrote a fresh `created` record for the old
+// key, making a key the history had replaced active again. Now the old key is kept only as the previous key, the history is archived (never deleted),
+// and a fresh key starts a new history. A key the trusted history shows as replaced or withdrawn is never given a `created` record.
+async function rotationWithLostPendingKey(folder: string, secrets: MemorySecrets): Promise<{ first: DeviceIdentity; lost: DeviceIdentity }> {
+  const { identity: first } = await loadOrCreateDeviceIdentity(secrets, { identityDir: folder, now: () => T0 });
+  const { next } = await prepareDeviceRotation(secrets, { identityDir: folder, now: () => T0 });
+  await assert.rejects(() => commitDeviceRotation(failing(secrets, 'store', PREVIOUS_DEVICE_KEY_SECRET), { identityDir: folder, now: () => T1 }), /stopped here/);
+  assert.deepEqual(kinds(await historyOf(folder)), ['created', 'rotated'], 'the rotation is recorded');
+  await secrets.delete(PENDING_DEVICE_KEY_SECRET);
+  assert.equal((await loadDeviceIdentity(secrets))?.fingerprint, first.fingerprint, 'the replaced key is still the stored one');
+  return { first, lost: next };
+}
+
+test('first need after a recorded rotation whose new key was lost keeps the old key aside, archives the history and starts a fresh key', async () => {
+  await withFolder(async (folder, secrets) => {
+    const { first, lost } = await rotationWithLostPendingKey(folder, secrets);
+    const result = await loadOrCreateDeviceIdentity(secrets, { identityDir: folder, now: () => T2 });
+    assert.equal(result.created, true, 'a fresh key');
+    assert.notEqual(result.identity.fingerprint, first.fingerprint, 'the replaced key is not made active again');
+    assert.notEqual(result.identity.fingerprint, lost.fingerprint);
+    assert.equal((await loadPreviousDeviceIdentity(secrets))?.fingerprint, first.fingerprint, 'the replaced key is kept as the previous key, not deleted');
+    const archives = (await readdir(folder)).filter((name) => name.startsWith('key-history.archived-'));
+    assert.equal(archives.length, 1, 'the old history is archived, not deleted');
+    const archived = JSON.parse(await readFile(path.join(folder, archives[0] as string), 'utf8')) as HistoryShape;
+    assert.deepEqual(kinds(archived), ['created', 'rotated']);
+    const fresh = await historyOf(folder);
+    assert.deepEqual(kinds(fresh), ['created']);
+    assert.equal(fresh.records[0]?.payload.key.fingerprint, result.identity.fingerprint, 'the fresh history names only the fresh key');
+    const byOld = await verdictOf(folder, secrets, bundleBy(first, T3));
+    assert.equal(byOld.ok, false, 'the replaced key does not sign for this person');
+    assert.equal((await verdictOf(folder, secrets, bundleBy(result.identity, T3))).ok, true);
+  });
+});
+
+test('preparing a rotation after a recorded rotation whose new key was lost refuses without making the old key active again', async () => {
+  await withFolder(async (folder, secrets) => {
+    const { first } = await rotationWithLostPendingKey(folder, secrets);
+    await assert.rejects(() => prepareDeviceRotation(secrets, { identityDir: folder, now: () => T2 }), /no identity key to rotate/);
+    assert.equal(secrets.values.has(DEVICE_KEY_SECRET), false);
+    assert.equal((await loadPreviousDeviceIdentity(secrets))?.fingerprint, first.fingerprint, 'the replaced key is kept as the previous key');
+    assert.deepEqual(kinds(await historyOf(folder)), ['created', 'rotated'], 'no created record for the replaced key');
+  });
+});
+
+test('a replaced key that cannot be set aside safely is refused, never given a created record', async () => {
+  await withFolder(async (folder, secrets) => {
+    const { first } = await rotationWithLostPendingKey(folder, secrets);
+    // A key from some earlier rotation still sits in the previous slot, so the replaced key cannot move there without dropping that one.
+    await secrets.store(PREVIOUS_DEVICE_KEY_SECRET, generateKeyPairSync('ed25519').privateKey.export({ format: 'der', type: 'pkcs8' }).toString('base64'));
+    await assert.rejects(() => loadOrCreateDeviceIdentity(secrets, { identityDir: folder, now: () => T2 }), /replaced or withdrawn/);
+    assert.equal((await loadDeviceIdentity(secrets))?.fingerprint, first.fingerprint, 'nothing was deleted');
+    assert.deepEqual(kinds(await historyOf(folder)), ['created', 'rotated'], 'the history is left as it was');
+    assert.deepEqual((await readdir(folder)).filter((name) => name.startsWith('key-history.archived-')), []);
+  });
+});
+
+test('first need passes its warning callback to the key history, so a failed restore reaches the output channel', async () => {
+  await withFolder(async (folder, secrets) => {
+    const warnings: string[] = [];
+    const wrapper: SecretStorageLike = {
+      get: (key) => secrets.get(key), delete: (key) => secrets.delete(key),
+      store: async (key, value) => {
+        if (key !== KEY_HISTORY_HEAD_SECRET) return secrets.store(key, value);
+        // The head cannot be stored, and the history file has been replaced by a folder, so the first record cannot be taken back either.
+        const file = path.join(folder, KEY_HISTORY_FILE);
+        await rm(file, { force: true });
+        await mkdir(path.join(file, 'blocked'), { recursive: true });
+        throw new Error('store failed');
+      }
+    };
+    await assert.rejects(() => loadOrCreateDeviceIdentity(wrapper, { identityDir: folder, now: () => T0, warn: (line) => warnings.push(line) }), /saved end could not be stored/);
+    assert.equal(warnings.length, 1);
+    assert.match(warnings[0] as string, /^The key history could not be put back/);
   });
 });
 
