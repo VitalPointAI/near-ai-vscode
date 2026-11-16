@@ -1,18 +1,24 @@
-// Signed payload tests (TMR-05, D-08, D-20, D-21): one signer and verifier for any canonical payload, checked against a key status lookup.
+// Signed payload tests (TMR-05, D-08, D-10, D-20, D-21): one signer and verifier for any canonical payload, checked against a key status lookup.
 // Keys and canaries are generated at run time; no key material or token literal is written here.
 import assert from 'node:assert/strict';
+import { generateKeyPairSync, randomBytes, sign as edSign } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import test from 'node:test';
-import { reduce } from '../domain/team/materialize';
-import { NO_KNOWN_KEYS, teamKeyStatus } from '../domain/team/keyStatus';
-import { signPayload, verifyPayload } from '../domain/team/signedPayload';
+import { MAX_DEPTH, canonicalize, fingerprintOf, signingInput, verifyEventSignature } from '../domain/team/canonical';
+import { applyEntry, reduce } from '../domain/team/materialize';
+import { NO_KNOWN_KEYS, combineKeyStatus, teamKeyStatus } from '../domain/team/keyStatus';
+import type { KeyStatusLookup } from '../domain/team/keyStatus';
+import {
+  MAX_PAYLOAD_BYTES, PAYLOAD_DOMAIN, PAYLOAD_FAILURES, PAYLOAD_PURPOSES, PayloadError, implicitAccountId, payloadSigningInput, signPayload, verifyPayload
+} from '../domain/team/signedPayload';
+import type { PayloadFailureReason, PayloadPurpose, PayloadSigner, SignedPayload } from '../domain/team/signedPayload';
 import type { TeamState } from '../domain/team/types';
-import { loadOrCreateDeviceIdentity } from '../team/identity';
+import { loadOrCreateDeviceIdentity, newMemberId, newTeamId } from '../team/identity';
 import type { DeviceIdentity } from '../team/identity';
-import { newMemberId, newTeamId } from '../team/identity';
-import { entryOf } from './helpers/teamEvents';
+import { entryOf, makeActor, makeDevice, mulberry32, rotationBody, signed } from './helpers/teamEvents';
+import type { TestActor } from './helpers/teamEvents';
 import { MemorySecrets, testGenesis } from './helpers/teamHarness';
 
 interface TeamWorld { identity: DeviceIdentity; memberId: string; state: TeamState }
@@ -33,6 +39,53 @@ async function teamWorld(): Promise<TeamWorld> {
   }
 }
 
+// An agent-style signer: a plain Ed25519 key held in a closure, not a DeviceIdentity.
+function agentSigner(): PayloadSigner {
+  const { privateKey, publicKey } = generateKeyPairSync('ed25519');
+  const raw = Buffer.from(publicKey.export({ format: 'jwk' }).x as string, 'base64url');
+  return {
+    fingerprint: fingerprintOf(raw),
+    publicKey: raw.toString('base64url'),
+    sign: (bytes: Buffer): string => edSign(null, bytes, privateKey).toString('base64url')
+  };
+}
+
+function statusOf(signer: { fingerprint: string; publicKey: string }, state: 'active' | 'rotated' | 'revoked', since?: string): KeyStatusLookup {
+  return (key) => (key.fingerprint === signer.fingerprint ? { state, ...(since === undefined ? {} : { since }) } : { state: 'unknown' });
+}
+
+const ACTIVE = (signer: PayloadSigner): KeyStatusLookup => statusOf(signer, 'active');
+const at = (iso: string) => (): Date => new Date(iso);
+
+const SAMPLES: Record<PayloadPurpose, unknown> = {
+  'policy-bundle': { version: 1, expiresAt: '2027-01-01T00:00:00Z', issuer: 'dev-sample', rules: [] },
+  grant: { capability: 'read', until: '2026-12-01T00:00:00Z', budgetNanoUsd: 5_000_000_000 },
+  'approval-answer': { requestDigest: 'a'.repeat(64), answer: 'allow' },
+  'key-record': { seq: 1, prev: '', kind: 'created', at: '2026-01-01T00:00:00.000Z' }
+};
+
+function failure(verdict: ReturnType<typeof verifyPayload>): PayloadFailureReason | 'ok' {
+  return verdict.ok ? 'ok' : verdict.reason;
+}
+
+function refused(verdict: ReturnType<typeof verifyPayload>): { reason: PayloadFailureReason; message: string } {
+  assert.equal(verdict.ok, false, 'expected a refusal');
+  if (verdict.ok) throw new Error('unreachable');
+  return { reason: verdict.reason, message: verdict.message };
+}
+
+function throwsPlain(action: () => unknown, pattern?: RegExp): PayloadError {
+  try {
+    action();
+  } catch (error) {
+    assert.ok(error instanceof PayloadError, `expected a PayloadError, got ${String(error)}`);
+    assert.ok(!error.message.includes('\u2014'), 'no em-dash in a message');
+    if (pattern !== undefined) assert.match(error.message, pattern);
+    return error;
+  }
+  throw new assert.AssertionError({ message: 'expected signPayload to refuse' });
+}
+
 test('tracer: the person\'s identity signs a policy-bundle sample and the verifier checks it against the team roster', async () => {
   const world = await teamWorld();
   const sample = { version: 1, expiresAt: '2027-01-01T00:00:00Z', issuer: world.identity.fingerprint, rules: [] as string[] };
@@ -51,3 +104,350 @@ test('tracer: the person\'s identity signs a policy-bundle sample and the verifi
   assert.equal(unknown.ok, false);
   if (!unknown.ok) assert.equal(unknown.reason, 'unknown-key');
 });
+
+test('every purpose round-trips, signed by the device identity and by a plain agent-style key (D-10, D-20)', async () => {
+  const world = await teamWorld();
+  const agent = agentSigner();
+  for (const purpose of PAYLOAD_PURPOSES) {
+    const byDevice = signPayload(world.identity, purpose, SAMPLES[purpose]);
+    const deviceVerdict = verifyPayload(byDevice, { purpose, status: teamKeyStatus(world.state) });
+    assert.equal(failure(deviceVerdict), 'ok', purpose);
+    if (deviceVerdict.ok) assert.deepEqual(deviceVerdict.payload, SAMPLES[purpose]);
+    const byAgent = signPayload(agent, purpose, SAMPLES[purpose]);
+    const agentVerdict = verifyPayload(byAgent, { purpose, status: ACTIVE(agent) });
+    assert.equal(failure(agentVerdict), 'ok', purpose);
+    if (agentVerdict.ok) assert.deepEqual(agentVerdict.payload, SAMPLES[purpose]);
+  }
+  assert.deepEqual([...PAYLOAD_PURPOSES], ['policy-bundle', 'grant', 'approval-answer', 'key-record']);
+});
+
+test('an envelope with a member id and one without both verify, and the one without has no memberId key at all', () => {
+  const agent = agentSigner();
+  const plain = signPayload(agent, 'grant', SAMPLES.grant);
+  assert.equal('memberId' in plain.signer, false);
+  assert.deepEqual(Object.keys(plain.signer).sort(), ['fingerprint', 'publicKey']);
+  assert.equal(failure(verifyPayload(plain, { purpose: 'grant', status: ACTIVE(agent) })), 'ok');
+  const named = signPayload(agent, 'grant', SAMPLES.grant, { memberId: 'mbr-0123456789abcdef' });
+  assert.equal(named.signer.memberId, 'mbr-0123456789abcdef');
+  const verdict = verifyPayload(named, { purpose: 'grant', status: ACTIVE(agent) });
+  assert.equal(failure(verdict), 'ok');
+  if (verdict.ok) assert.equal(verdict.signer.memberId, 'mbr-0123456789abcdef');
+  // The member id is inside the signed bytes: adding or changing it breaks the signature.
+  const swapped = { ...named, signer: { ...named.signer, memberId: 'mbr-ffffffffffffffff' } };
+  assert.equal(failure(verifyPayload(swapped, { purpose: 'grant', status: ACTIVE(agent) })), 'bad-signature');
+  const added = { ...plain, signer: { ...plain.signer, memberId: 'mbr-ffffffffffffffff' } };
+  assert.equal(failure(verifyPayload(added, { purpose: 'grant', status: ACTIVE(agent) })), 'bad-signature');
+});
+
+test('the signed time is the injected clock in ISO form and is returned by the verifier', () => {
+  const agent = agentSigner();
+  const envelope = signPayload(agent, 'grant', SAMPLES.grant, { now: at('2026-05-06T07:08:09.123Z') });
+  assert.equal(envelope.signedAt, '2026-05-06T07:08:09.123Z');
+  const verdict = verifyPayload(envelope, { purpose: 'grant', status: ACTIVE(agent) });
+  assert.equal(verdict.ok && verdict.signedAt, '2026-05-06T07:08:09.123Z');
+});
+
+test('a purpose is part of the signature: another expected purpose is refused, and an edited purpose field breaks the signature', () => {
+  const agent = agentSigner();
+  const envelope = signPayload(agent, 'grant', SAMPLES.grant);
+  assert.equal(failure(verifyPayload(envelope, { purpose: 'policy-bundle', status: ACTIVE(agent) })), 'wrong-purpose');
+  const edited = { ...envelope, purpose: 'policy-bundle' };
+  assert.equal(failure(verifyPayload(edited, { purpose: 'policy-bundle', status: ACTIVE(agent) })), 'bad-signature');
+  assert.equal(failure(verifyPayload(edited, { purpose: 'grant', status: ACTIVE(agent) })), 'wrong-purpose');
+  const unknown = { ...envelope, purpose: 'something-else' };
+  assert.equal(failure(verifyPayload(unknown, { purpose: 'grant', status: ACTIVE(agent) })), 'unknown-purpose');
+  // The same payload signed for two purposes gives two different signatures.
+  const other = signPayload(agent, 'policy-bundle', SAMPLES.grant, { now: at(envelope.signedAt) });
+  assert.notEqual(other.sig, envelope.sig);
+});
+
+test('domain separation both ways: a payload signature is not a team event signature, and an event signature is not a payload signature (D-08, T-69-24)', async () => {
+  const owner: TestActor = await makeActor(newTeamId());
+  const event = signed(owner, { teamId: newTeamId(), type: 'member.availability', body: { availability: 'available' }, lamport: 3, prev: 'evt-x' });
+  const envelope = signPayload(owner.identity, 'approval-answer', SAMPLES['approval-answer']);
+  const unsigned = { v: envelope.v, purpose: envelope.purpose, signer: envelope.signer, signedAt: envelope.signedAt, payload: envelope.payload };
+  assert.equal(payloadSigningInput(unsigned)[0], 'n'.charCodeAt(0));
+  assert.equal(signingInput(event)[0], '{'.charCodeAt(0));
+  assert.ok(payloadSigningInput(unsigned).toString('utf8').startsWith(`${PAYLOAD_DOMAIN}\napproval-answer\n`));
+  // A payload signature placed on an event does not verify, and neither does an event signature placed in a payload envelope.
+  assert.equal(verifyEventSignature(event, owner.identity.publicKey), true);
+  assert.equal(verifyEventSignature({ ...event, sig: envelope.sig }, owner.identity.publicKey), false);
+  const fromEvent: SignedPayload = { ...envelope, sig: event.sig };
+  assert.equal(failure(verifyPayload(fromEvent, { purpose: 'approval-answer', status: ACTIVE(owner.identity) })), 'bad-signature');
+  // Even for a payload that is shaped like an event, the signing input starts with the domain, never a brace.
+  const lookalike = signPayload(owner.identity, 'key-record', event);
+  assert.equal(verifyEventSignature(event, owner.identity.publicKey), true);
+  assert.equal(failure(verifyPayload({ ...lookalike, purpose: 'grant' }, { purpose: 'grant', status: ACTIVE(owner.identity) })), 'bad-signature');
+});
+
+test('any single changed field breaks the envelope: payload, signedAt, fingerprint, public key, signature, member id', () => {
+  const agent = agentSigner();
+  const other = agentSigner();
+  const envelope = signPayload(agent, 'grant', SAMPLES.grant, { memberId: 'mbr-0123456789abcdef' });
+  const status = combineKeyStatus(ACTIVE(agent), ACTIVE(other));
+  const expectation = { purpose: 'grant' as const, status };
+  assert.equal(failure(verifyPayload(envelope, expectation)), 'ok');
+  assert.equal(failure(verifyPayload({ ...envelope, payload: { ...(SAMPLES.grant as object), budgetNanoUsd: 5_000_000_001 } }, expectation)), 'bad-signature');
+  assert.equal(failure(verifyPayload({ ...envelope, signedAt: '2026-01-02T00:00:00.000Z' }, expectation)), 'bad-signature');
+  assert.equal(failure(verifyPayload({ ...envelope, signer: { ...envelope.signer, fingerprint: other.fingerprint } }, expectation)), 'key-mismatch');
+  assert.equal(failure(verifyPayload({ ...envelope, signer: { ...envelope.signer, publicKey: other.publicKey } }, expectation)), 'key-mismatch');
+  // A consistent substitution of the whole key (fingerprint and public key of another signer) fails on the signature.
+  assert.equal(failure(verifyPayload({ ...envelope, signer: { ...envelope.signer, fingerprint: other.fingerprint, publicKey: other.publicKey } }, expectation)), 'bad-signature');
+  const flipped = `${envelope.sig.startsWith('A') ? 'B' : 'A'}${envelope.sig.slice(1)}`;
+  assert.equal(failure(verifyPayload({ ...envelope, sig: flipped }, expectation)), 'bad-signature');
+  assert.equal(failure(verifyPayload({ ...envelope, sig: envelope.sig.slice(1) }, expectation)), 'bad-signature');
+  assert.equal(failure(verifyPayload({ ...envelope, signer: { ...envelope.signer, memberId: 'mbr-ffffffffffffffff' } }, expectation)), 'bad-signature');
+});
+
+test('a signing time that is not canonical ISO text, or a public key that is not 32 bytes of base64url, is malformed', () => {
+  const agent = agentSigner();
+  const envelope = signPayload(agent, 'grant', SAMPLES.grant);
+  const expectation = { purpose: 'grant' as const, status: ACTIVE(agent) };
+  for (const signedAt of ['yesterday', '2026-01-01', '2026-01-01T00:00:00Z', '']) {
+    assert.equal(failure(verifyPayload({ ...envelope, signedAt }, expectation)), 'malformed', signedAt);
+  }
+  for (const publicKey of ['', 'short', `${envelope.signer.publicKey}=`, `${envelope.signer.publicKey}A`]) {
+    assert.equal(failure(verifyPayload({ ...envelope, signer: { ...envelope.signer, publicKey } }, expectation)), 'malformed', publicKey);
+  }
+});
+
+test('another format version is refused with a message that asks to update the extension (T-69-26)', () => {
+  const agent = agentSigner();
+  const envelope = signPayload(agent, 'grant', SAMPLES.grant);
+  for (const v of [2, 0, 99]) {
+    const result = refused(verifyPayload({ ...envelope, v }, { purpose: 'grant', status: ACTIVE(agent) }));
+    assert.equal(result.reason, 'unsupported-version');
+    assert.match(result.message, /update the extension/i);
+  }
+  assert.equal(failure(verifyPayload({ ...envelope, v: '1' }, { purpose: 'grant', status: ACTIVE(agent) })), 'malformed');
+  assert.equal(failure(verifyPayload({ ...envelope, extra: true }, { purpose: 'grant', status: ACTIVE(agent) })), 'malformed');
+  const { sig: _sig, ...withoutSig } = envelope;
+  assert.equal(failure(verifyPayload(withoutSig, { purpose: 'grant', status: ACTIVE(agent) })), 'malformed');
+});
+
+test('signPayload refuses a fraction, an undefined value, deep nesting, a large payload, an unknown purpose and a secret, each in plain words', () => {
+  const agent = agentSigner();
+  const fraction = throwsPlain(() => signPayload(agent, 'grant', { spend: 0.5 }), /whole numbers/);
+  assert.match(fraction.message, /nano-USD or basis points/);
+  throwsPlain(() => signPayload(agent, 'grant', { value: undefined }), /undefined/);
+  let deep: unknown = 'leaf';
+  for (let level = 0; level < MAX_DEPTH + 4; level += 1) deep = { next: deep };
+  throwsPlain(() => signPayload(agent, 'grant', deep), /nested deeper than/);
+  throwsPlain(() => signPayload(agent, 'grant', { text: 'x'.repeat(MAX_PAYLOAD_BYTES + 1) }), /over the \d+ byte limit/);
+  throwsPlain(() => signPayload(agent, 'grant', { text: 'x'.repeat(100) }, { maxBytes: 64 }), /over the 64 byte limit/);
+  throwsPlain(() => signPayload(agent, 'not-a-purpose' as PayloadPurpose, {}), /not a known purpose/);
+  throwsPlain(() => signPayload(agent, 'grant', { when: new Date() }), /plain objects/);
+  // A canary built at run time: the message names where it was found and never repeats it.
+  const canary = `sk-${randomBytes(16).toString('hex')}`;
+  const leak = throwsPlain(() => signPayload(agent, 'grant', { note: canary }), /secret-like value at \$\.note/);
+  assert.equal(leak.message.includes(canary), false);
+  // The same payload without the canary signs, so the refusal was about the canary.
+  assert.equal(signPayload(agent, 'grant', { note: 'plain text' }).payload.note, 'plain text');
+  // A signer whose key does not match its fingerprint is refused before anything is signed.
+  throwsPlain(() => signPayload({ ...agent, fingerprint: fingerprintOf(randomBytes(32)) }, 'grant', {}), /does not match its fingerprint/);
+  // A signer that returns a signature of another key is refused.
+  const liar: PayloadSigner = { ...agent, sign: () => agentSigner().sign(Buffer.from('x')) };
+  throwsPlain(() => signPayload(liar, 'grant', {}), /signature does not match/);
+});
+
+test('the public key and signature fields of an envelope are not mistaken for secrets when a signed payload is signed again as a payload', () => {
+  const agent = agentSigner();
+  const inner = signPayload(agent, 'key-record', SAMPLES['key-record']);
+  const outer = signPayload(agent, 'grant', { record: inner });
+  assert.equal(failure(verifyPayload(outer, { purpose: 'grant', status: ACTIVE(agent) })), 'ok');
+});
+
+test('verifyPayload refuses an oversized envelope with too-large, using the default or the caller\'s limit', () => {
+  const agent = agentSigner();
+  const envelope = signPayload(agent, 'grant', { text: 'x'.repeat(2000) });
+  assert.equal(failure(verifyPayload(envelope, { purpose: 'grant', status: ACTIVE(agent), maxBytes: 1000 })), 'too-large');
+  assert.equal(failure(verifyPayload(envelope, { purpose: 'grant', status: ACTIVE(agent), maxBytes: 100_000 })), 'ok');
+  const big = { ...envelope, payload: { text: 'x'.repeat(MAX_PAYLOAD_BYTES + 10) } };
+  assert.equal(failure(verifyPayload(big, { purpose: 'grant', status: ACTIVE(agent) })), 'too-large');
+});
+
+test('verifyPayload reads the input once, so the payload it returns is the payload that was signed', () => {
+  const agent = agentSigner();
+  const envelope = signPayload(agent, 'grant', { amount: 1 });
+  let reads = 0;
+  const trick = { ...envelope } as Record<string, unknown>;
+  Object.defineProperty(trick, 'payload', { enumerable: true, get: () => { reads += 1; return reads === 1 ? { amount: 1 } : { amount: 1_000_000 }; } });
+  const verdict = verifyPayload<{ amount: number }>(trick, { purpose: 'grant', status: ACTIVE(agent) });
+  assert.equal(verdict.ok && verdict.payload.amount, 1);
+});
+
+test('verifyPayload never throws on 2000 seeded random inputs and always answers with a closed reason', () => {
+  const agent = agentSigner();
+  const valid = signPayload(agent, 'grant', SAMPLES.grant, { memberId: 'mbr-0123456789abcdef' });
+  const random = mulberry32(69_10);
+  const pick = <T>(items: readonly T[]): T => items[Math.floor(random() * items.length)] as T;
+  const hostile = (): unknown => new Proxy({}, {
+    get: () => { throw new Error('getter'); }, ownKeys: () => { throw new Error('keys'); }, getPrototypeOf: () => { throw new Error('proto'); },
+    has: () => { throw new Error('has'); }, getOwnPropertyDescriptor: () => { throw new Error('descriptor'); }
+  });
+  const circular: Record<string, unknown> = {};
+  circular.self = circular;
+  const atoms: Array<() => unknown> = [
+    () => null, () => undefined, () => true, () => 0, () => -0, () => 1.5, () => Number.NaN, () => Number.POSITIVE_INFINITY, () => 2 ** 60,
+    () => 10n, () => Symbol('s'), () => (): void => undefined, () => '', () => 'x'.repeat(1 + Math.floor(random() * 200_000)), () => '\uD800',
+    () => [], () => [1, [2, [3]]], () => ({}), () => new Date(), () => Buffer.from('abc'), () => new Map(), () => circular, hostile,
+    () => ({ v: 1 }), () => ({ v: 1, purpose: 'grant', signer: null, signedAt: 1, payload: 1, sig: 1 }), () => Object.create(null) as unknown
+  ];
+  const mutate = (): unknown => {
+    const copy = JSON.parse(JSON.stringify(valid)) as Record<string, unknown>;
+    const signer = copy.signer as Record<string, unknown>;
+    const field = pick(['v', 'purpose', 'signedAt', 'payload', 'sig', 'signer', 'fingerprint', 'publicKey', 'memberId', 'extra']);
+    const value = pick(atoms)();
+    if (field === 'fingerprint' || field === 'publicKey' || field === 'memberId') signer[field] = value;
+    else if (field === 'extra') copy.extra = value;
+    else copy[field] = value;
+    return copy;
+  };
+  let accepted = 0;
+  for (let index = 0; index < 2000; index += 1) {
+    const input = index % 2 === 0 ? pick(atoms)() : mutate();
+    const verdict = verifyPayload(input, { purpose: 'grant', status: ACTIVE(agent) });
+    if (verdict.ok) { accepted += 1; continue; }
+    assert.ok(Object.prototype.hasOwnProperty.call(PAYLOAD_FAILURES, verdict.reason), verdict.reason);
+    assert.equal(verdict.message, PAYLOAD_FAILURES[verdict.reason]);
+  }
+  // A mutation that replaces a field with the same value it had still verifies, but random garbage must almost never.
+  assert.ok(accepted < 20, `${accepted} garbage inputs were accepted`);
+  assert.equal(failure(verifyPayload(hostile(), { purpose: 'grant', status: ACTIVE(agent) })), 'malformed');
+  // A status source that throws, a missing status source and a missing expectation are refused, not thrown.
+  const throwing: KeyStatusLookup = () => { throw new Error('source down'); };
+  assert.equal(failure(verifyPayload(valid, { purpose: 'grant', status: throwing })), 'unknown-key');
+  assert.equal(failure(verifyPayload(valid, { purpose: 'grant' } as never)), 'unknown-key');
+  assert.equal(failure(verifyPayload(valid, undefined as never)), 'malformed');
+});
+
+test('every reason in the closed list is produced by some input, and the list has exactly those reasons (a new reason needs a message and a test)', () => {
+  const agent = agentSigner();
+  const other = agentSigner();
+  const envelope = signPayload(agent, 'grant', SAMPLES.grant, { now: at('2026-04-01T00:00:00.000Z') });
+  const ok = { purpose: 'grant' as const, status: ACTIVE(agent) };
+  const produced = new Set<string>([
+    failure(verifyPayload(null, ok)),
+    failure(verifyPayload({ ...envelope, v: 2 }, ok)),
+    failure(verifyPayload({ ...envelope, purpose: 'nope' }, ok)),
+    failure(verifyPayload(envelope, { ...ok, purpose: 'policy-bundle' })),
+    failure(verifyPayload(envelope, { ...ok, maxBytes: 10 })),
+    failure(verifyPayload({ ...envelope, signer: { ...envelope.signer, fingerprint: other.fingerprint } }, ok)),
+    failure(verifyPayload({ ...envelope, signedAt: '2026-04-02T00:00:00.000Z' }, ok)),
+    failure(verifyPayload(envelope, { ...ok, status: NO_KNOWN_KEYS })),
+    failure(verifyPayload(envelope, { ...ok, status: statusOf(agent, 'revoked') })),
+    failure(verifyPayload(envelope, { ...ok, status: statusOf(agent, 'rotated', '2026-03-01T00:00:00.000Z') }))
+  ]);
+  assert.deepEqual([...produced].sort(), Object.keys(PAYLOAD_FAILURES).sort());
+});
+
+interface RotatedWorld { old: TestActor; next: TestActor; state: TeamState; rotatedAt: string }
+
+// The owner rotates to a fresh key at a known time, through the real event (plan 09), then the roster is the status source.
+async function rotatedWorld(): Promise<RotatedWorld & { teamId: string }> {
+  const teamId = newTeamId();
+  const old = await makeActor(teamId);
+  const genesis = testGenesis({ teamId, owner: { identity: old.identity, memberId: old.memberId, secrets: old.secrets }, name: 'Rotation test team' });
+  const state = reduce(genesis.events.map((event) => entryOf(event)), genesis.anchor);
+  const next = await makeDevice(old);
+  const rotatedAt = '2026-03-01T00:00:00.000Z';
+  const event = signed(old, { teamId, type: 'device.rotated', body: rotationBody(old.memberId, old, next), lamport: state.head.lamport + 1, prev: state.head.eventId, at: rotatedAt });
+  assert.equal(applyEntry(state, entryOf(event)).accepted, true);
+  return { old, next, state, teamId, rotatedAt };
+}
+
+test('rotation at time T: a payload claimed before T verifies, one at exactly T or after is key-rotated, and the new key is active (D-21)', async () => {
+  const w = await rotatedWorld();
+  const status = teamKeyStatus(w.state);
+  const rotatedMillis = Date.parse(w.rotatedAt);
+  const sign = (millis: number) => signPayload(w.old.identity, 'grant', SAMPLES.grant, { now: () => new Date(millis) });
+  const before = verifyPayload(sign(rotatedMillis - 1), { purpose: 'grant', status });
+  assert.equal(before.ok, true);
+  if (before.ok) assert.equal(before.keyState, 'rotated');
+  const exactly = refused(verifyPayload(sign(rotatedMillis), { purpose: 'grant', status }));
+  assert.equal(exactly.reason, 'key-rotated');
+  assert.equal(failure(verifyPayload(sign(rotatedMillis + 1), { purpose: 'grant', status })), 'key-rotated');
+  assert.match(exactly.message, /revoking/i);
+  const fresh = verifyPayload(signPayload(w.next.identity, 'grant', SAMPLES.grant, { now: () => new Date(rotatedMillis + 1) }), { purpose: 'grant', status });
+  assert.equal(fresh.ok && fresh.keyState, 'active');
+});
+
+test('a rotated key whose rotation time cannot be read is refused, never trusted', () => {
+  const agent = agentSigner();
+  const envelope = signPayload(agent, 'grant', SAMPLES.grant);
+  assert.equal(failure(verifyPayload(envelope, { purpose: 'grant', status: statusOf(agent, 'rotated') })), 'key-rotated');
+  assert.equal(failure(verifyPayload(envelope, { purpose: 'grant', status: statusOf(agent, 'rotated', 'not a time') })), 'key-rotated');
+});
+
+test('a revoked key is refused for everything whatever signedAt says, and so is every key of a removed member (D-21)', async () => {
+  const w = await rotatedWorld();
+  const second = await makeDevice(w.old);
+  const bind = signed(w.next, { teamId: w.teamId, type: 'device.added', body: { memberId: w.old.memberId, device: { fingerprint: second.identity.fingerprint, publicKey: second.identity.publicKey } }, lamport: w.state.head.lamport + 1, prev: w.state.head.eventId });
+  assert.equal(applyEntry(w.state, entryOf(bind)).accepted, true);
+  const revoke = signed(w.next, { teamId: w.teamId, type: 'device.revoked', body: { memberId: w.old.memberId, fingerprint: second.identity.fingerprint }, lamport: w.state.head.lamport + 1, prev: w.state.head.eventId });
+  assert.equal(applyEntry(w.state, entryOf(revoke)).accepted, true);
+  const status = teamKeyStatus(w.state);
+  for (const time of ['2000-01-01T00:00:00.000Z', '2026-03-01T00:00:00.000Z', '2099-01-01T00:00:00.000Z']) {
+    const envelope = signPayload(second.identity, 'grant', SAMPLES.grant, { now: at(time) });
+    const result = refused(verifyPayload(envelope, { purpose: 'grant', status }));
+    assert.equal(result.reason, 'key-revoked', time);
+    assert.equal(result.message, PAYLOAD_FAILURES['key-revoked']);
+  }
+  // A removed member's key is revoked in the roster; the same key is active when only the person's own history is consulted.
+  const developer = await makeActor(w.teamId);
+  w.state.members.set(developer.memberId, {
+    id: developer.memberId, name: 'Developer', emailHashes: [], role: 'developer', skills: [], availability: 'available', wipLimit: 1,
+    joinedAt: '2026-01-01T00:00:00.000Z', joinedEvent: 'evt-0', removedAt: '2026-02-01T00:00:00.000Z', removedEvent: 'evt-1',
+    devices: [{ fingerprint: developer.identity.fingerprint, publicKey: developer.identity.publicKey, addedBy: developer.memberId, addedEvent: 'evt-0' }]
+  });
+  w.state.deviceIndex.set(developer.identity.fingerprint, developer.memberId);
+  const removed = signPayload(developer.identity, 'grant', SAMPLES.grant, { now: at('2026-01-15T00:00:00.000Z') });
+  assert.equal(failure(verifyPayload(removed, { purpose: 'grant', status })), 'key-revoked');
+  assert.equal(failure(verifyPayload(removed, { purpose: 'grant', status: ACTIVE(developer.identity) })), 'ok');
+});
+
+test('the messages are plain: no em-dash, the rotated text points to revoking and never says rotating stops a copied key', () => {
+  for (const [reason, message] of Object.entries(PAYLOAD_FAILURES)) {
+    assert.ok(!message.includes('\u2014'), reason);
+    assert.ok(!message.includes('\u2013'), reason);
+    assert.ok(message.length > 20 && message.endsWith('.'), reason);
+  }
+  const rotated = PAYLOAD_FAILURES['key-rotated'];
+  assert.match(rotated, /revoking/i);
+  assert.doesNotMatch(rotated, /(rotating|rotation|replacing)[^.]*\bstops?\b/i);
+  assert.match(rotated, /Only revoking the old key stops/);
+});
+
+function base58Decode(text: string): Buffer {
+  const alphabet = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+  let value = 0n;
+  for (const char of text) {
+    const digit = alphabet.indexOf(char);
+    assert.ok(digit >= 0, `not a base58 character: ${char}`);
+    value = value * 58n + BigInt(digit);
+  }
+  const hex = value.toString(16);
+  return Buffer.from(hex.length % 2 === 1 ? `0${hex}` : hex, 'hex');
+}
+
+test('the NEAR implicit account id is the lowercase hex of the raw key, for a generated key and for the documentation vector (A10)', () => {
+  const agent = agentSigner();
+  const id = implicitAccountId(agent.publicKey);
+  assert.match(id, /^[0-9a-f]{64}$/);
+  assert.equal(id, Buffer.from(agent.publicKey, 'base64url').toString('hex'));
+  const documented = base58Decode('BGCCDDHfysuuVnaNVtEhhqeT4k9Muyem3Kpgq2U1m9HX');
+  assert.equal(documented.length, 32);
+  assert.equal(implicitAccountId(documented.toString('base64url')), '98793cd91a3f870fb126f66285808c7e094afcfc4eda8a970f6648cdf0dbd6de');
+  assert.throws(() => implicitAccountId('short'), PayloadError);
+});
+
+test('the envelope the signer returns is canonical JSON safe and its key order does not matter to the verifier', () => {
+  const agent = agentSigner();
+  const envelope = signPayload(agent, 'policy-bundle', SAMPLES['policy-bundle']);
+  assert.equal(canonicalize(envelope).startsWith('{"payload":'), true);
+  const reordered = JSON.parse(JSON.stringify({ sig: envelope.sig, payload: envelope.payload, signedAt: envelope.signedAt, signer: envelope.signer, purpose: envelope.purpose, v: 1 })) as unknown;
+  assert.equal(failure(verifyPayload(reordered, { purpose: 'policy-bundle', status: ACTIVE(agent) })), 'ok');
+  const roundTripped = JSON.parse(JSON.stringify(envelope)) as unknown;
+  assert.equal(failure(verifyPayload(roundTripped, { purpose: 'policy-bundle', status: ACTIVE(agent) })), 'ok');
+});
+
