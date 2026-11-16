@@ -60,7 +60,7 @@ export interface AgentTool<I = Record<string, unknown>> {
    * tool can be added without saying what it does. The gate reads it for the call's effects and the Tools page and the team member cards read it for the
    * words; neither changes the settings layer's answer (`capability` above), which D-04 keeps.
    */
-  manifest?: ToolManifest;
+  manifest: ToolManifest;
   /**
    * The call's arguments as the manifest reads them: the defaults the tool applies itself written out (a Glob with no path searches the project, so
    * its path is `**`), because a manifest names fields and cannot say "or the default". Absent means the arguments are used as given.

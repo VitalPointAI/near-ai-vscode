@@ -2,18 +2,29 @@
 // the declared effects agree with the tool's own shorthand except where a reason is named, the manifest reads only arguments the tool really has, and the
 // Tools page says the declaration in plain words. The tests walk `builtInTools()`, so a tool added to the catalog is checked without an edit here.
 import assert from 'node:assert/strict';
+import { mkdtempSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import * as path from 'node:path';
 import test from 'node:test';
 import { DEFAULT_RULES } from '../agent/permissions';
 import { braveSearch, searxngSearch, tavilySearch } from '../agent/webSearch';
 import { webSearchTool } from '../agent/webTools';
 import { imageTool } from '../agent/extraTools';
 import type { NearAiClient } from '../services/nearAiClient';
-import { builtInTools, OFFERED_ONLY_IN_CONTEXT, SHORTHAND_EXCEPTIONS } from '../agent/toolCatalog';
+import { builtInTools, CATALOG_TOOL_FILES, OFFERED_ONLY_IN_CONTEXT, SHORTHAND_EXCEPTIONS, TOOL_DEFINING_FILES } from '../agent/toolCatalog';
 import { effectsFor, parseToolManifest, shorthandFor } from '../domain/gate/manifest';
 import { buildStudioContext } from '../services/teamStudioPage';
 import { mcpAgentTools, mcpToolName } from '../mcp/tools';
 import type { McpConnection, McpServerConfig } from '../mcp/client';
 import { mcpToolEffects } from '../domain/gate/manifest';
+import { AgentConversation } from '../services/agentSession';
+import type { AgentTurnRequest } from '../services/agentSession';
+import { cyberExploitTools } from '../agent/cyberExploitTools';
+import { cyberProbes } from '../agent/cyberProbes';
+import { RunGrants } from '../agent/permissions';
+import type { AgentTool } from '../agent/tools';
+import type { GsdAgent } from '../gsd/library';
+import { fakeHome, testManifest, testTool } from './helpers/gateFixtures';
 import { describeManifest } from '../domain/gate/words';
 import { buildToolsDirectory } from '../services/toolsDirectory';
 import type { DirectoryInput } from '../services/toolsDirectory';
@@ -385,4 +396,69 @@ test('an MCP tool whose name the format cannot hold gets the restrictive manifes
     assert.equal(tool.capability, 'read', 'the settings layer\'s answer is unchanged');
   }
   assert.equal(mcpToolName('catalog', 'search'), 'mcp__catalog__search');
+});
+
+// ---------- the catalog is the whole set, and no tool can exist without a manifest (GATE-02, T-70-27) ----------
+
+/** The tools a run is given when every option is on: the real `toolsFor`, asked with stand-ins for what it only passes along. */
+function toolsOfARunWithEverythingOn(): AgentTool<any>[] {
+  const root = mkdtempSync(path.join(tmpdir(), 'near-ai-gate-run-'));
+  const conversation = new AgentConversation(root, () => undefined, path.join(root, '.ckpt'));
+  const agent: GsdAgent = { name: 'helper', description: 'helps', tools: [], body: 'help', file: path.join(root, 'helper.md') };
+  const request = {
+    text: 'x', client: {}, model: 'm', privacy: 'private', policy: { mode: 'approve-risky', emergencyStop: false }, rules: DEFAULT_RULES,
+    gsd: { home: path.join(root, 'gsd'), skills: [], agents: [agent], shellEnv: {} },
+    memory: { store: {}, projectScope: { kind: 'project', id: 'p' } },
+    imageModel: { id: 'image-model' },
+    security: { consented: () => true, scan: async () => undefined },
+    cyber: { engagement: {}, tools: () => [...cyberProbes({ inScope: () => false }), ...cyberExploitTools({ inScope: () => false, engagementId: 'e', sandboxTier: 'disabled' })], limiter: () => undefined, grant: () => undefined },
+    webSearch: { name: 'searxng', label: 'x', host: 'search.example', search: async () => [] },
+    team: { slug: 'team', name: 'Team', description: 'd', file: path.join(root, 'team.md'), members: [] }
+  } as unknown as AgentTurnRequest;
+  const toolsFor = (conversation as unknown as { toolsFor(...args: unknown[]): AgentTool<any>[] }).toolsFor.bind(conversation);
+  return toolsFor(request, { root, cwd: root }, new RunGrants(), [], async () => undefined, new AbortController().signal, 'run-1');
+}
+
+test('a run with every option on is given exactly the catalog\'s tools, in the catalog\'s order, so a tool added to a run but not to the catalog fails here', () => {
+  const given = toolsOfARunWithEverythingOn().map((tool) => tool.name);
+  assert.deepEqual(given, builtInTools().map((tool) => tool.name));
+});
+
+function sourceFilesUnder(folder: string): string[] {
+  const out: string[] = [];
+  for (const entry of readdirSync(folder)) {
+    const full = path.join(folder, entry);
+    if (statSync(full).isDirectory()) { if (entry !== 'test') out.push(...sourceFilesUnder(full)); } else if (entry.endsWith('.ts') && !entry.endsWith('.test.ts')) out.push(full);
+  }
+  return out;
+}
+
+const REPO = path.resolve(__dirname, '..', '..');
+
+test('every source file that mentions AgentTool< is in CATALOG_TOOL_FILES, and every listed file exists, so a new tool file fails until it is catalogued', () => {
+  const mentioning = sourceFilesUnder(path.join(REPO, 'src')).filter((file) => readFileSync(file, 'utf8').includes('AgentTool<')).map((file) => path.relative(REPO, file).split(path.sep).join('/')).sort();
+  assert.deepEqual(mentioning, [...CATALOG_TOOL_FILES].sort());
+  for (const file of CATALOG_TOOL_FILES) assert.ok(statSync(path.join(REPO, file)).isFile(), `${file} exists`);
+  // A file that defines tools says what each does next to it.
+  for (const file of TOOL_DEFINING_FILES) assert.match(readFileSync(path.join(REPO, file), 'utf8'), /manifest/, `${file} defines tools and declares their manifests`);
+});
+
+test('AgentTool declares its manifest as required: a tool without one does not compile', () => {
+  const text = readFileSync(path.join(REPO, 'src', 'agent', 'tools.ts'), 'utf8');
+  assert.match(text, /^ {2}manifest: ToolManifest;$/m);
+  assert.doesNotMatch(text, /manifest\?:/);
+});
+
+test('the fixtures give a hand-built tool the manifest its shorthand implies, and never the real home', () => {
+  for (const capability of ['read', 'plan', 'workspaceWrite', 'sharedWrite', 'shell', 'network', 'mediaGeneration', 'mediaPublication'] as const) {
+    assert.equal(shorthandFor(testManifest('T', capability)), capability, capability);
+  }
+  const tool = testTool({ name: 'Fixture', description: 'd', parameters: {}, capability: 'workspaceWrite', parse: (raw) => raw, title: () => 't', run: async () => 'ok' });
+  assert.equal(tool.manifest.tool, 'Fixture');
+  assert.equal(shorthandFor(tool.manifest), 'workspaceWrite');
+  const given = testManifest('Own', 'read');
+  assert.equal(testTool({ name: 'X', description: 'd', parameters: {}, capability: 'shell', manifest: given, parse: (raw) => raw, title: () => 't', run: async () => 'ok' }).manifest, given, 'a manifest the test gives is kept');
+  const home = fakeHome();
+  assert.notEqual(home, process.env.HOME);
+  assert.ok(path.resolve(home).startsWith(path.resolve(tmpdir()) + path.sep));
 });

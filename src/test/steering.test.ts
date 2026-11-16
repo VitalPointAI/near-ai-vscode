@@ -13,6 +13,7 @@ import { ProfileStore } from '../services/profileStore';
 import { deriveProfileId } from '../domain/auth';
 import type { AgentMessage, CompletionEvent } from '../services/nearAiClient';
 import { StubNode, chatPage } from './helpers/chatPage';
+import { testManifest } from './helpers/gateFixtures';
 
 // Steering: a message typed while a run is going is queued for the running agent, appended to its
 // transcript before the next model request (never mid-stream or mid-tool), ends a retry wait, and
@@ -77,7 +78,7 @@ test('a message queued during a model turn is appended after its tool calls and 
     }
   };
   const run = new AgentRun({
-    client, model: 'm', tools: [{ name: 'Read', description: 'read', parameters: {}, capability: 'read', parse: (raw: unknown) => raw, title: () => 'Read a.ts', run: async () => { toolRan = true; return 'a'; } } as never],
+    client, model: 'm', tools: [{ name: 'Read', description: 'read', parameters: {}, capability: 'read', manifest: testManifest('Read', 'read'), parse: (raw: unknown) => raw, title: () => 'Read a.ts', run: async () => { toolRan = true; return 'a'; } } as never],
     context: { root, checkpoints: new RunCheckpoints('steer'), readFiles: new Set() } as never,
     policy: { mode: 'approve-risky', emergencyStop: false }, rules: DEFAULT_RULES, input,
     requestApproval: async () => ({ decision: 'allow' }), emit: () => undefined
