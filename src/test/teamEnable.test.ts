@@ -22,7 +22,7 @@ import { KEY_HISTORY_FILE, KEY_HISTORY_HEAD_SECRET, readKeyHistory } from '../te
 import { GitNotFoundError, runGit } from '../team/runGit';
 import type { GitRunner } from '../team/runGit';
 import { TEAM_FILE_REL, parseTeamFile, projectTrustDir, readTeamFile, teamStorageDir } from '../team/teamFile';
-import { deviceKeyForms, keyHistoryHeadNeedles, makeCanaries, scanFiles, scanGitObjects } from './helpers/teamCanary';
+import { deviceKeyForms, identityKeyNeedles, keyHistoryHeadNeedles, makeCanaries, scanFiles, scanGitObjects } from './helpers/teamCanary';
 import type { Needle } from './helpers/teamCanary';
 import { MemorySecrets, createTeamFixture, fakeGitResult, faultRunner, gitIn } from './helpers/teamHarness';
 import type { TeamFixture } from './helpers/teamHarness';
@@ -741,7 +741,7 @@ test('SEC-01 canary: no secret reaches any git object, team.json, extension stor
     const needles: Needle[] = [
       ...canaries.labelled(),
       { label: 'remote user', value: 'canaryuser' },
-      ...deviceKeyForms(secrets.values.get(DEVICE_KEY_SECRET) as string).map((value, index) => ({ label: `device key form ${index}`, value })),
+      ...identityKeyNeedles(secrets.values, 'owner'),
       ...deviceKeyForms(secondSecrets.values.get(DEVICE_KEY_SECRET) as string).map((value, index) => ({ label: `second device key form ${index}`, value })),
       ...keyHistoryHeadNeedles(secrets.values.get(KEY_HISTORY_HEAD_SECRET))
     ];

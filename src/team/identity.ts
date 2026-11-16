@@ -13,7 +13,7 @@ import * as path from 'node:path';
 import type { SecretStorageLike } from '../services/auth';
 import { withFileLock } from '../services/stateMirrorLock';
 import { MAX_EVENT_BYTES, canonicalBytes, fingerprintOf, signingInput } from '../domain/team/canonical';
-import type { TeamEvent, TeamEventType, UnsignedTeamEvent } from '../domain/team/types';
+import type { DeviceRef, TeamEvent, TeamEventType, UnsignedTeamEvent } from '../domain/team/types';
 import { appendKeyRecord, archiveKeyHistory, readKeyHistory } from './keyHistory';
 
 // One Ed25519 identity per person per install (D-06). Every team this install joins uses this key, so the secret name carries no team id.
@@ -108,6 +108,28 @@ async function ensureCreatedRecord(
   );
 }
 
+async function readStoredKeySafely(secrets: SecretStorageLike, name: string): Promise<DeviceIdentity | undefined> {
+  try {
+    return await loadStoredKey(secrets, name, 'team device key');
+  } catch {
+    return undefined;
+  }
+}
+
+// Called inside identity-create.lock before a key is used (first need, revoking). Two things a crash can leave behind are put right when the key history
+// can be trusted: a rotation whose record was written but whose key moves were not finished is finished, and a stored key (current, pending or previous)
+// that the history already shows as revoked is deleted, so a revoked key is never left stored and never made active again by the backfill (D-09, D-21).
+async function repairKeyState(secrets: SecretStorageLike, options: IdentityLockOptions): Promise<void> {
+  const history = await readKeyHistory(options.identityDir, secrets);
+  if (!history.ok) return;
+  const pending = await readStoredKeySafely(secrets, PENDING_DEVICE_KEY_SECRET);
+  if (pending && history.active?.fingerprint === pending.fingerprint) await finishRotationMoves(secrets);
+  for (const name of [DEVICE_KEY_SECRET, PENDING_DEVICE_KEY_SECRET, PREVIOUS_DEVICE_KEY_SECRET]) {
+    const key = await readStoredKeySafely(secrets, name);
+    if (key && history.lookup({ fingerprint: key.fingerprint, publicKey: key.publicKey }).state === 'revoked') await secrets.delete(name);
+  }
+}
+
 // First-need creation (Pitfall 4): SecretStorage is last write wins, so two windows could each create a key. The lock covers check, create, store,
 // read back and the key's `created` history record, so two windows end with one key and one record, and a fresh install can sign and verify its first
 // payload with nothing else to set up (D-09). A key found without a history record (for example one made by an earlier release) gets its record here.
@@ -117,6 +139,7 @@ export async function loadOrCreateDeviceIdentity(
 ): Promise<{ identity: DeviceIdentity; created: boolean }> {
   await mkdir(options.identityDir, { recursive: true, mode: 0o700 });
   return withFileLock(options.identityDir, IDENTITY_CREATE_LOCK_FILE, async () => {
+    await repairKeyState(secrets, options);
     const existing = await loadDeviceIdentity(secrets);
     if (existing) {
       await ensureCreatedRecord(secrets, existing, options, false);
@@ -252,6 +275,40 @@ export async function commitDeviceRotation(
       throw new Error('The key rotation was recorded but the keys on this computer could not be read back. Run it again to finish.');
     }
     return { previous, current };
+  });
+}
+
+// Withdraws one of the person's own keys for good (D-09, D-21): a revoked record is written to the key history and the key's private half is deleted from
+// SecretStorage in the same locked step, so a revoked key is never left stored (and if a crash separates the two, the next first need deletes it, see
+// repairKeyState). A payload signed by a revoked key is refused whatever time it claims. The record is signed by the key itself when it is the stored
+// current key, otherwise by the active key, otherwise by the key itself if its private half is still here. Revoking the current key makes the next first need
+// create a fresh key with its own created record; a rotation that was only prepared is cancelled with it, since that key was never recorded anywhere.
+// Refused with a plain message, changing nothing, for a key the history does not know or one already revoked. No command ships for this yet.
+export async function revokeDeviceKey(secrets: SecretStorageLike, options: IdentityLockOptions & { key: DeviceRef }): Promise<void> {
+  await mkdir(options.identityDir, { recursive: true, mode: 0o700 });
+  await withFileLock(options.identityDir, IDENTITY_CREATE_LOCK_FILE, async () => {
+    await repairKeyState(secrets, options);
+    const history = await readKeyHistory(options.identityDir, secrets);
+    if (!history.ok) throw new Error(`The key was not revoked: ${history.reason}`);
+    const target = { fingerprint: options.key.fingerprint, publicKey: options.key.publicKey };
+    const state = history.lookup(target).state;
+    if (state === 'unknown') throw new Error('The key was not revoked: your key history does not know that key.');
+    if (state === 'revoked') throw new Error('The key was not revoked: it is already revoked.');
+    const names = [DEVICE_KEY_SECRET, PENDING_DEVICE_KEY_SECRET, PREVIOUS_DEVICE_KEY_SECRET] as const;
+    const stored = new Map<string, DeviceIdentity>();
+    for (const name of names) {
+      const key = await readStoredKeySafely(secrets, name);
+      if (key) stored.set(name, key);
+    }
+    const matches = (key: DeviceIdentity | undefined): key is DeviceIdentity => key !== undefined && key.fingerprint === target.fingerprint && key.publicKey === target.publicKey;
+    const current = stored.get(DEVICE_KEY_SECRET);
+    const activeStored = [...stored.values()].find((key) => key.fingerprint === history.active?.fingerprint);
+    const signer = (matches(current) ? current : undefined) ?? activeStored ?? [...stored.values()].find(matches);
+    if (!signer) throw new Error('The key was not revoked: no key on this computer can sign the revocation.');
+    await appendKeyRecord(options.identityDir, secrets, signer, { kind: 'revoked', key: target }, options.now === undefined ? {} : { now: options.now });
+    for (const name of names) if (matches(stored.get(name))) await secrets.delete(name);
+    // A prepared rotation that was never recorded is dropped with the current key it was meant to replace.
+    if (matches(current)) await secrets.delete(PENDING_DEVICE_KEY_SECRET);
   });
 }
 

@@ -4,6 +4,7 @@
 import { createHash, createPrivateKey, createPublicKey, randomBytes } from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
+import { DEVICE_KEY_SECRET, PENDING_DEVICE_KEY_SECRET, PREVIOUS_DEVICE_KEY_SECRET } from '../../team/identity';
 import { runGit } from '../../team/runGit';
 
 export interface Needle { label: string; value: string }
@@ -56,6 +57,17 @@ export function deviceKeyForms(storedSecret: string): string[] {
     seed.toString('hex'), seed.toString('base64url'), seedBase64, seedBase64.replace(/=+$/, ''),
     spki.toString('hex')
   ])];
+}
+
+// Needles for every private key kept in SecretStorage under the three identity names: the device key, the key a rotation keeps aside (pending) and the
+// key it replaced (previous). Each stored value that is present contributes every rendering deviceKeyForms lists, labelled by the name it was stored under,
+// so a scan after a rotation proves none of the three keys reached a file, a git object, settings or the audit store (TMR-03, D-07).
+export function identityKeyNeedles(stored: ReadonlyMap<string, string>, prefix = 'identity'): Needle[] {
+  const names: Array<[string, string]> = [[DEVICE_KEY_SECRET, 'device key'], [PENDING_DEVICE_KEY_SECRET, 'pending key'], [PREVIOUS_DEVICE_KEY_SECRET, 'previous key']];
+  return names.flatMap(([name, label]) => {
+    const value = stored.get(name);
+    return value === undefined || value === '' ? [] : deviceKeyForms(value).map((form, index) => ({ label: `${prefix} ${label} form ${index}`, value: form }));
+  });
 }
 
 // The saved end of the key history (seq and hash) lives only in SecretStorage, never in a file, a git object or the audit store. Its stored text is a
