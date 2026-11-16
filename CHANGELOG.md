@@ -1,5 +1,47 @@
 # Changelog
 
+## Unreleased
+
+- **Improve with AI in Team Studio.** A new **Improve with AI** button in the team editor (and on
+  the last step of the builder) first runs a free check of the team, then, when you ask, has an
+  AI review it. Each suggestion changes one thing for one member (its instructions, role, who it
+  reports to, or its tools) or adds or removes a member, with the reason and the exact lines that
+  change. Accept, reject or edit each one; **Accept all** takes only wording changes. Accepting
+  changes the team in the editor, and **Save** writes it and keeps a version as before. A
+  suggestion that gives a member another tool, or adds or removes a member, is marked and must be
+  accepted on its own. A suggestion that no longer fits (you edited that part, or the file
+  changed) shows as stale, and one that would break the team as invalid; neither changes
+  anything. The review never changes a member's model or privacy, and leaves the plagiarism
+  checker and Open-GSD members as they are. The panel names the model and the most the review
+  can cost before you ask, and the model may give its own rating of the team, shown as its
+  opinion, not a measurement.
+- **A free check of every team while you edit it.** Team Studio now warns when a member's
+  instructions ask for something its tools cannot do (search the web, run commands, change files,
+  make slides or PDFs), when a member told not to edit files still has Write or Edit, when
+  instructions do not say what the member hands back, when a role is vague, when two members do
+  the same work, when a reports-to line names nobody or goes round in a circle, when instructions
+  are very long, and when something looks like a key or password. These are warnings: they never
+  stop a save.
+- **Private teams.** Tick **Private team** in Team Studio, or ask for a private team when the AI
+  drafts one, to keep every member on a private model (a NEAR TEE model or one on this computer).
+  The team file gets `privacy: private` in its frontmatter and on every member, so an older
+  version of the extension still keeps each member private; unticking it leaves the members'
+  lines for you to remove one by one. A team whose members are all private counts as private too,
+  and in a project with a knowledge base every team does, including one the AI drafts. A private
+  team is only ever sent to a private model when Team Studio asks AI about it (a NEAR TEE model
+  counts only when NEAR reports its attestation as supported or verified); a team with some
+  private members leaves their text out when no private model is
+  available, and says so.
+- **Team Studio's AI calls now follow your limits.** Drafting a team with AI used to skip the
+  checks chat makes: Emergency stop, your daily spend limit, TEE-only mode and the check for keys
+  and personal data. It, and Improve with AI, now pass them, and nothing is sent when they say no.
+- **Saving a team keeps a change to who a member reports to.** It was lost when it was the only
+  change to that member.
+- **Team Mode refuses a remote address with a token in it on git older than 2.31**, such as
+  `https://host/team.git?access_token=...`, as it already did for one with a password.
+- **Key history warnings reach the NEAR AI Team output from the moment Team Mode starts**, also
+  for a key rotation or revocation before you enable Team Mode or open a team project.
+
 ## 0.4.26
 
 This release shows your saved teams when you set up a new team, lets you share and import a team

@@ -1,11 +1,13 @@
 // Team Mode in the editor: the two commands, solo-safe activation and the Enable flow (D-19, D-20, D-22, D-24).
 // Activation in a project without .planning/.near-ai/team.json does one fs.stat and nothing else: no timers, no output channel, no status bar
-// item, no storage. So this module imports only vscode, Node built-ins and types; every team module is loaded with a dynamic import after
-// team.json is found or inside a command. Failures go to the NEAR AI Team output channel or to the user, never to an empty catch.
+// item, no storage. So this module imports only vscode, Node built-ins, types and the key-history warning registry (which has no imports of its
+// own); every team module is loaded with a dynamic import after team.json is found or inside a command. Failures go to the NEAR AI Team output
+// channel or to the user, never to an empty catch.
 import { createHash, createPrivateKey, createPublicKey } from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
+import { setKeyHistoryWarningSink } from '../../domain/keyHistoryWarnings';
 import type { VerifyReport } from '../../team/eventLog';
 import type { TeamSession } from './teamSession';
 
@@ -95,14 +97,10 @@ export function registerTeamMode(context: vscode.ExtensionContext): TeamModeHand
   }
 
   // Every key-history warning reaches the NEAR AI Team channel, whichever path raised it (Enable, a rotation, a revocation, a first need), not only the
-  // ones whose caller passed a sink (0.4.26, PR #62 review). Set once a team module is needed anyway (a session starts or Enable runs), so a solo
-  // project still loads nothing.
-  let warningSink: { dispose(): void } | undefined;
-  async function routeKeyHistoryWarnings(): Promise<void> {
-    if (warningSink !== undefined || disposed) return;
-    const { setKeyHistoryWarningSink } = await import('../../team/keyHistory');
-    if (warningSink === undefined && !disposed) warningSink = setKeyHistoryWarningSink((message) => output.appendLine(message));
-  }
+  // ones whose caller passed a sink (0.4.26, PR #62 review). Installed here, once, at registration (0.4.27, PR #67 review: installing it when Enable ran
+  // or a session started missed a rotation or revocation before either, and two of those at once could install two sinks). The sink registry has no
+  // imports and the channel is created only when a line is written, so a solo project still loads no team module and opens no channel.
+  const warningSink = setKeyHistoryWarningSink((message) => { if (!disposed) output.appendLine(message); });
 
   async function startSession(projectRoot: string): Promise<TeamModeState> {
     if (session !== undefined) return 'team';
@@ -112,7 +110,6 @@ export function registerTeamMode(context: vscode.ExtensionContext): TeamModeHand
         const { readTeamFile } = await import('../../team/teamFile');
         const teamFile = await readTeamFile(projectRoot);
         if (teamFile === undefined) return 'solo';
-        await routeKeyHistoryWarnings();
         const { createVscodeTeamSession } = await import('./teamSession');
         const started = await createVscodeTeamSession(context, projectRoot, teamFile, output);
         if (disposed) {
@@ -215,7 +212,6 @@ export function registerTeamMode(context: vscode.ExtensionContext): TeamModeHand
       announce('error', 'Open your project folder first, then run "NEAR AI: Enable Team Mode" again.');
       return;
     }
-    await routeKeyHistoryWarnings();
     const enableModule = await import('../../team/enable');
     const checked = await enableModule.checkEnablePreconditions(projectRoot);
     if (!checked.ok) {
@@ -296,7 +292,7 @@ export function registerTeamMode(context: vscode.ExtensionContext): TeamModeHand
   context.subscriptions.push(
     vscode.commands.registerCommand(ENABLE_COMMAND, guarded('Enable Team Mode', enable)),
     vscode.commands.registerCommand(VERIFY_LOG_COMMAND, guarded('Verify Team Log', verifyLog)),
-    { dispose: (): void => { disposed = true; warningSink?.dispose(); stopSession(); } }
+    { dispose: (): void => { disposed = true; warningSink.dispose(); stopSession(); } }
   );
 
   const ready = detect().catch(async (error: unknown): Promise<TeamModeState> => {

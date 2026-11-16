@@ -61,6 +61,8 @@ export interface ModelInfo {
   locality?: 'cloud' | 'local' | 'hybrid' | 'unknown';
   verificationStatus?: VerificationStatus;
   attestationStatus?: string;
+  /** NEAR's model list says this model runs in a TEE whose attestation can be checked (`attestationSupported` in /model/list metadata). */
+  attestationSupported?: boolean;
   /** Where NEAR sends the request when it does not run the model in its own TEE (e.g. "anthropic", "openrouter.ai"). */
   forwardedTo?: string;
   cancellationSupported?: boolean;
@@ -370,7 +372,7 @@ export class NearAiClient {
   }
 
   private async withPrivacy(models: ModelInfo[], signal?: AbortSignal): Promise<ModelInfo[]> {
-    let privacy: Map<string, Pick<ModelInfo, 'privacyBoundary' | 'forwardedTo'>>;
+    let privacy: Map<string, Pick<ModelInfo, 'privacyBoundary' | 'forwardedTo' | 'attestationSupported'>>;
     try {
       privacy = await this.listModelPrivacy(signal);
     } catch (error) {
@@ -391,11 +393,11 @@ export class NearAiClient {
    * Which models NEAR runs inside an attested TEE and which it forwards to another provider,
    * from `/model/list` metadata. Only the backend kind and destination host are read.
    */
-  public async listModelPrivacy(signal?: AbortSignal): Promise<Map<string, Pick<ModelInfo, 'privacyBoundary' | 'forwardedTo'>>> {
+  public async listModelPrivacy(signal?: AbortSignal): Promise<Map<string, Pick<ModelInfo, 'privacyBoundary' | 'forwardedTo' | 'attestationSupported'>>> {
     const response = await this.request('/model/list', { method: 'GET', signal });
     const body = objectValue(await response.json());
     const rows = Array.isArray(body.models) ? body.models.map(objectValue) : [];
-    const privacy = new Map<string, Pick<ModelInfo, 'privacyBoundary' | 'forwardedTo'>>();
+    const privacy = new Map<string, Pick<ModelInfo, 'privacyBoundary' | 'forwardedTo' | 'attestationSupported'>>();
     for (const row of rows) {
       const id = stringValue(row.modelId);
       if (!id) continue;
@@ -1078,8 +1080,8 @@ function operationList(value: unknown): { values: ProviderOperation[]; malformed
 
 function sameValues(left: string[], right: string[]): boolean { return left.length === right.length && left.every((value) => right.includes(value)); }
 function readinessValue(value: unknown): ModelInfo['readiness'] { return value === 'ready' || value === 'available' ? 'ready' : value === 'not-ready' || value === 'unavailable' || value === 'disabled' ? 'not-ready' : 'unknown'; }
-function modelPrivacy(metadata: Record<string, unknown>): Pick<ModelInfo, 'privacyBoundary' | 'forwardedTo'> {
-  if (metadata.attestationSupported === true && metadata.providerType !== 'external') return { privacyBoundary: 'tee' };
+function modelPrivacy(metadata: Record<string, unknown>): Pick<ModelInfo, 'privacyBoundary' | 'forwardedTo' | 'attestationSupported'> {
+  if (metadata.attestationSupported === true && metadata.providerType !== 'external') return { privacyBoundary: 'tee', attestationSupported: true };
   const config = objectValue(metadata.providerConfig);
   let host: string | undefined;
   try { host = typeof config.base_url === 'string' ? new URL(config.base_url).hostname.replace(/^api\./, '') : undefined; } catch { host = undefined; }

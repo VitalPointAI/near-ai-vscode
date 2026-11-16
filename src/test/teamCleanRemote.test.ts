@@ -27,6 +27,13 @@ test('which addresses can carry a credential', () => {
   for (const address of ['https://example.com/team.git', 'ssh://git@example.com/team.git', 'git@example.com:owner/team.git', '/srv/team.git', 'file:///srv/team.git', 'git://example.com/t.git', 'https://example.com/a@b']) {
     assert.equal(addressCarriesCredentials(address), false, address);
   }
+  // 0.4.27 (PR #67 review): a token can ride in the query of a web address, so any non-empty query there counts; an empty one or a fragment does not.
+  for (const address of ['https://example.com/team.git?access_token=abc', 'http://example.com/t.git?x=1', 'ftps://example.com/t.git?token=t', 'HTTPS://example.com/t.git?private_token=p#main']) {
+    assert.equal(addressCarriesCredentials(address), true, address);
+  }
+  for (const address of ['https://example.com/team.git?', 'https://example.com/team.git#ref?x', 'ssh://example.com/team.git?x=1', 'file:///srv/team.git?x=1']) {
+    assert.equal(addressCarriesCredentials(address), false, address);
+  }
   assert.equal(gitReadsEnvironmentConfig('git version 2.30.9'), false);
   assert.equal(gitReadsEnvironmentConfig('git version 2.31.0'), true);
   assert.equal(gitReadsEnvironmentConfig('git version 3.0.0'), true);

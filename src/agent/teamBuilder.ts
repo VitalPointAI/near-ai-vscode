@@ -26,6 +26,8 @@ export interface TeamBrief {
   outputFormat?: string;
   depth?: 'quick' | 'thorough';
   deadline?: string;
+  /** 0.4.27: the person asked for a private team, so the brief goes only to a private model and the draft is marked private. */
+  private?: boolean;
 }
 
 export const TEAM_BUILDER_PROMPT = `You design teams of AI agents. Given what a person wants a team to be able to produce, you propose the team, and you reply with ONE JSON object and nothing else.

@@ -12,9 +12,10 @@ import { ChatPrefill, gatherDirectoryInput } from './toolsPage';
 import { comparisonStoreFor } from '../benchmark/store';
 import { loadBenchmarkTasks } from '../benchmark/tasks';
 import { leaderboardRows, suggestForTeam } from './modelComparisonPage';
-import { builderPrompt, parseProposal, TEAM_BUILDER_PROMPT } from '../agent/teamBuilder';
-import { activeProvider, clientFor, type ActiveProvider } from './providerCache';
-import { readAgentRules, readModelTiers } from './settings';
+import { activeProvider, clientFor, privateRouteFor, type ActiveProvider } from './providerCache';
+import { readAgentRules, readModelTiers, readSettings } from './settings';
+import { spendAccountOf } from './agentSession';
+import type { TeamAiDeps } from './teamStudioAi';
 import { bestOf, planRoleSuite, runRoleSuite } from '../benchmark/roleSuite';
 import { draftFromMarkdown, teamMarkdown } from '../agent/teamMarkdown';
 import { readFile, writeFile } from 'node:fs/promises';
@@ -62,6 +63,32 @@ async function optimisationSetup(auth: AuthService, context: vscode.ExtensionCon
 }
 
 /**
+ * What a Team Studio model call needs from the active profile: the catalogue, the tier models in order of preference, each model's route (for the
+ * private check), the settings the outbound check reads, and today's spend from the key's ledger. Throws when the project has no profile.
+ */
+async function teamAiDeps(auth: AuthService): Promise<TeamAiDeps> {
+  const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '';
+  const active = await activeProvider(root, auth).catch(() => undefined);
+  if (!active) throw new Error('Set up a NEAR AI profile for this project first.');
+  const tiers = readModelTiers();
+  const settings = readSettings();
+  return {
+    models: active.models,
+    preferred: [tiers.deep, tiers.standard, settings.defaultModel],
+    routeFor: (model) => privateRouteFor(active.provider, clientFor(active, model.id).local),
+    privacyMode: settings.privacyMode,
+    settings,
+    spentTodayUsd: async () => {
+      const account = spendAccountOf(active.provider.client);
+      // Picks up what other windows on this computer spent with the same key, as chat does.
+      await account?.ledger.refresh();
+      return account?.spentTodayUsd().usd ?? 0;
+    },
+    complete: (model, messages, options) => clientFor(active, model).client.completeOnce(model, messages, options)
+  };
+}
+
+/**
  * Opens Team Studio, after the one-time move of older teams has finished (0.4.18 review), so the studio never opens on a half-copied library. It
  * returns a promise so a caller (and a test) can await the panel; VS Code ignores a command handler's promise.
  */
@@ -93,19 +120,9 @@ export async function openTeamStudio(context: vscode.ExtensionContext, auth: Aut
     confirm: async (message, action) => (await vscode.window.showWarningMessage(message, { modal: true }, action)) === action,
     choose: async (message, ...actions) => vscode.window.showWarningMessage(message, { modal: true }, ...actions),
     // The tested model for each role, from the comparisons this machine has run, so a saved team is checked against evidence rather than defaults.
-    // The AI start (owner, 2026-11-08): one call drafts the team from the person's own words, and the result is a proposal they accept or edit.
-    draftTeam: async (brief) => {
-      const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '';
-      const active = await activeProvider(root, auth).catch(() => undefined);
-      if (!active) throw new Error('Set up a NEAR AI profile for this project first.');
-      const tiers = readModelTiers();
-      const client = clientFor(active, tiers.deep || active.models[0]?.id).client;
-      const reply = await client.completeOnce(tiers.deep || active.models[0]?.id, [
-        { role: 'system', content: TEAM_BUILDER_PROMPT },
-        { role: 'user', content: builderPrompt(brief) }
-      ], { maxTokens: 2000 });
-      return parseProposal(reply.text, brief);
-    },
+    // The studio's only way to a model (0.4.27): drafting a team and Improve with AI both go through teamModelCall with these, and the host decides
+    // which model may be used.
+    teamAi: () => teamAiDeps(auth),
     // The final step of adding a team: measure each member's role on a few candidate models, then write the winner into the team file. The person is
     // asked first, because this spends real time and tokens, and skipping it leaves exactly the team they wrote.
     optimiseTeam: async (members, teamName, options = {}) => {

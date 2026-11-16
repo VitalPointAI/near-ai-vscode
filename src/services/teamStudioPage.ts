@@ -3,12 +3,15 @@ import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import * as path from 'node:path';
 import { PROJECT_TYPES, projectTypeTeam, type ProjectType } from '../agent/projectTypes';
 import { detectTemplate, stampTeam } from '../agent/teamUpdate';
-import { checkDraft, draftFromMarkdown, lineDiff, type DiffLine, type DraftIssue, type DraftMember, type TeamDraft } from '../agent/teamMarkdown';
-import { DEFAULT_TOOLS, parseTeam, recommendedProjectTeam, slugify, TeamLibrary, teamKnowledgeKey, type TeamDefinition } from '../agent/teams';
+import { checkDraft, draftFromMarkdown, handWrittenTeamPrivacy, lineDiff, type DiffLine, type DraftIssue, type DraftMember, type TeamDraft } from '../agent/teamMarkdown';
+import { DEFAULT_TOOLS, parseTeam, recommendedProjectTeam, slugify, TeamLibrary, teamIsPrivate, teamKnowledgeKey, type TeamDefinition } from '../agent/teams';
 import type { AgentDiscoveryAnswers } from '../domain/agents';
 import { buildTeamGraph } from '../agent/teamGraph';
+import { checkTeam, checkWarnings } from '../agent/teamCheck';
+import { ACCEPT_ALL_KINDS, applySuggestion, KNOWLEDGE_BASE_PRIVATE, MAX_REFINE_BYTES, parseRefinement, REFINE_PROMPT, refinePlan, refinePrompt, type RefinePlan, type Suggestion } from '../agent/teamRefine';
+import { chooseTeamModel, teamModelCall, type TeamAiDeps } from './teamStudioAi';
 import { CUSTOM_PLAGIARISM_CHECKER } from '../agent/researchIntegrity';
-import { proposalDraft, proposalText, type TeamProposal } from '../agent/teamBuilder';
+import { builderPrompt, parseProposal, proposalDraft, proposalText, TEAM_BUILDER_PROMPT } from '../agent/teamBuilder';
 import { layoutNetwork } from '../domain/networkLayout';
 import { gradingCoverage } from '../domain/teamKnowledge';
 import { knowledgeFile, loadKnowledge } from './teamKnowledgeStore';
@@ -58,7 +61,7 @@ export interface StudioContext {
 export interface StudioMemberModel { tier: string; model: string; privacy: DirectoryModel['privacy']; privacyText: string; available?: boolean }
 /** `update`: the built-in template the team was made from and whether a newer version exists, so the card can offer Update Team. */
 /** `imported`: added with Import team and not yet approved to run; the person is asked the first time it would run. */
-export interface LibraryTeam { id: string; kind: 'project' | 'user'; name: string; description: string; command?: string; file: string; savedAt?: string; error?: string; imported?: boolean; derived?: boolean; update?: { template: string; from?: number; to: number; available: boolean }; members: Array<{ name: string; role?: string } & StudioMemberModel> }
+export interface LibraryTeam { id: string; kind: 'project' | 'user'; name: string; description: string; command?: string; file: string; savedAt?: string; error?: string; imported?: boolean; derived?: boolean; /** 0.4.27: marked private, or every member private. */ private?: boolean; update?: { template: string; from?: number; to: number; available: boolean }; members: Array<{ name: string; role?: string } & StudioMemberModel> }
 export interface LibraryArchived { id: string; name: string; file: string; savedAt?: string }
 export interface LibraryState { teams: LibraryTeam[]; archived: LibraryArchived[] }
 
@@ -202,10 +205,17 @@ export function reviewDraft(draft: TeamDraft, original: string | undefined, inpu
     }
     if (model.privacy === 'forwarded') (context.knowledgeBase ? errors : warnings).push({ member: index, field: 'model', message: context.knowledgeBase ? `${label}: this project has a knowledge base, so members must use a TEE or local model. ${model.model} is forwarded outside NEAR's TEE.` : `${label}: ${model.model} is forwarded outside NEAR's TEE, so its prompts and files are not private.` });
     else if (context.knowledgeBase && model.privacy === 'unknown' && input.models) warnings.push({ member: index, field: 'model', message: `${label}: this project has a knowledge base; the privacy of ${model.model} is unknown. Use a TEE or local model.` });
+    // A private member (its own line, or the whole team marked private) runs only on a private model: say so when the model it names is not one.
+    if ((member.privacy === 'private' || draft.private) && (model.privacy === 'forwarded' || (model.privacy === 'unknown' && input.models))) {
+      warnings.push({ member: index, field: 'model', message: `${label}: ${draft.private && member.privacy !== 'private' ? 'the team is private' : 'it is private'}, so a run uses a private model instead of ${model.model}${model.privacy === 'forwarded' ? ' (forwarded outside NEAR\'s TEE)' : ' (its privacy is unknown)'}, and stops if there is none.` });
+    }
     const unknownTools = (member.tools ?? []).filter((tool) => !known.has(tool) && !/^mcp__/.test(tool));
     if (unknownTools.length) warnings.push({ member: index, field: 'tools', message: `${label}: ${unknownTools.join(', ')} ${unknownTools.length === 1 ? 'is not a built-in tool' : 'are not built-in tools'}; agents only get tools that exist.` });
     return model;
   });
+  // 0.4.27: the free local team check (tools that do not match the instructions, no deliverable, overlaps, reports-to problems, keys) shows as
+  // warnings while editing, so a save never depends on running Improve with AI.
+  warnings.push(...checkWarnings(checkTeam(draft, { defaultTools: DEFAULT_TOOLS })));
   return { markdown, errors, warnings, members };
 }
 
@@ -240,7 +250,8 @@ const mtime = async (file: string) => (await stat(file).catch(() => undefined))?
 /** Every team the studio manages: the project team, the user's teams, and archived teams. */
 export async function listLibrary(library: TeamLibrary, root: string | undefined, input: DirectoryInput): Promise<LibraryState> {
   const entries = await library.list(root);
-  const pending = await library.pendingImports();
+  // The unapproved team files themselves (the library maps each marker to its file), compared by path rather than rebuilt from marker names.
+  const pending = new Set((await library.pendingImportFiles()).map((file) => path.resolve(file)));
   const teams = await Promise.all(entries.map(async (entry): Promise<LibraryTeam> => {
     const slug = slugify(path.basename(entry.file, '.md'));
     const team = entry.team;
@@ -250,7 +261,8 @@ export async function listLibrary(library: TeamLibrary, root: string | undefined
       name: team?.name ?? slug, description: team?.description ?? '',
       ...(team ? { command: `/team:${entry.project ? 'project' : team.slug} ` } : {}),
       ...(entry.error ? { error: entry.error } : {}),
-      ...(!entry.project && pending.has(path.basename(entry.file)) ? { imported: true, ...((await library.pendingKind(entry.file))?.kind === 'derived' ? { derived: true } : {}) } : {}),
+      ...(team && teamIsPrivate(team) ? { private: true } : {}),
+      ...(!entry.project && pending.has(path.resolve(entry.file)) ? { imported: true, ...((await library.pendingKind(entry.file))?.kind === 'derived' ? { derived: true } : {}) } : {}),
       ...(template ? { update: { template: template.label, ...(template.fromVersion ? { from: template.fromVersion } : {}), to: template.toVersion, available: !template.stamped || template.fromVersion !== template.toVersion } } : {}),
       ...(await mtime(entry.file) ? { savedAt: await mtime(entry.file) } : {}),
       members: (team?.members ?? []).map((member) => ({ name: member.name, ...(member.role ? { role: member.role } : {}), ...memberModel(member, input) }))
@@ -288,9 +300,16 @@ export type StudioMessage =
   | { type: 'create'; draft: TeamDraft; target: StudioTarget; projectType?: { id: string; goal: string } }
   | { type: 'save-draft'; draft: TeamDraft; step: number; target: StudioTarget; startingPoint?: string }
   | { type: 'optimise-all' }
-  | { type: 'draft-team'; idea: string; outputFormat?: string; depth?: 'quick' | 'thorough' }
+  | { type: 'draft-team'; idea: string; outputFormat?: string; depth?: 'quick' | 'thorough'; private?: boolean }
   | { type: 'starting-point'; id: string; goal: string; locality: 'cloud' | 'local' | 'hybrid'; workShape?: AgentDiscoveryAnswers['workShape']; riskLevel?: AgentDiscoveryAnswers['riskLevel'] }
-  | { type: 'open-setting'; key: string };
+  | { type: 'open-setting'; key: string }
+  /** Improve with AI (0.4.27): the free local check and whether an AI review is possible, for this draft. */
+  | { type: 'improve-check'; seq: number; draft: TeamDraft; id?: string }
+  /** Ask for the AI review (one model call); `member` reviews one member only. */
+  | { type: 'improve-ai'; seq: number; draft: TeamDraft; id?: string; member?: string }
+  | { type: 'improve-cancel'; seq: number }
+  /** Accept suggestions (by the ids the host gave) into the page's current draft; `edited` is the person's own wording for a single suggestion. */
+  | { type: 'improve-accept'; seq: number; ids: string[]; draft: TeamDraft; id?: string; edited?: string };
 
 type Plain = Record<string, unknown>;
 const isPlain = (value: unknown): value is Plain => Boolean(value) && typeof value === 'object' && !Array.isArray(value) && Object.getPrototypeOf(value) === Object.prototype;
@@ -299,7 +318,9 @@ const text = (value: unknown, max: number): value is string => typeof value === 
 
 /** A draft from the page: exact keys, bounded sizes, plain strings; content rules are checked by reviewDraft. */
 export function parseDraft(value: unknown): TeamDraft | undefined {
-  if (!isPlain(value) || !exactKeys(value, ['name', 'description', 'members']) || !text(value.name, 120) || !text(value.description, 600) || !Array.isArray(value.members) || value.members.length > 12) return undefined;
+  if (!isPlain(value) || !exactKeys(value, ['name', 'description', 'members'], ['private']) || !text(value.name, 120) || !text(value.description, 600) || !Array.isArray(value.members) || value.members.length > 12) return undefined;
+  // The team's own private marking (0.4.27): true or absent, never anything else.
+  if (value.private !== undefined && value.private !== true) return undefined;
   const members: DraftMember[] = [];
   for (const member of value.members) {
     // `reportsTo` is optional and must be allowed here, or a draft that carries the team's hierarchy is refused outright (0.4.19 review).
@@ -309,7 +330,7 @@ export function parseDraft(value: unknown): TeamDraft | undefined {
     if (member.tools !== null && (!Array.isArray(member.tools) || member.tools.length > 80 || !member.tools.every((tool) => typeof tool === 'string' && TOOL_NAME.test(tool)))) return undefined;
     members.push({ name: member.name, role: member.role, model: member.model, tools: member.tools === null ? null : [...new Set(member.tools as string[])], instructions: member.instructions, ...(member.reportsTo ? { reportsTo: member.reportsTo as string } : {}), ...(member.privacy === 'private' ? { privacy: 'private' as const } : {}) });
   }
-  return { name: value.name, description: value.description, members };
+  return { name: value.name, description: value.description, members, ...(value.private === true ? { private: true } : {}) };
 }
 
 export function parseStudioMessage(value: unknown): StudioMessage | undefined {
@@ -344,10 +365,11 @@ export function parseStudioMessage(value: unknown): StudioMessage | undefined {
     }
     case 'optimise-all': return isPlain(message) && exactKeys(message, ['type']) ? { type: 'optimise-all' } : undefined;
     case 'draft-team': {
-      if (!text(message.idea, 2000) || !message.idea.trim()) return undefined;
+      if (!exactKeys(message, ['type', 'idea'], ['outputFormat', 'depth', 'private']) || !text(message.idea, 2000) || !message.idea.trim()) return undefined;
+      if (message.private !== undefined && typeof message.private !== 'boolean') return undefined;
       if (message.outputFormat !== undefined && !text(message.outputFormat, 300)) return undefined;
       if (message.depth !== undefined && message.depth !== 'quick' && message.depth !== 'thorough') return undefined;
-      return { type: 'draft-team', idea: message.idea, ...(message.outputFormat ? { outputFormat: message.outputFormat } : {}), ...(message.depth === 'quick' || message.depth === 'thorough' ? { depth: message.depth } : {}) };
+      return { type: 'draft-team', idea: message.idea, ...(message.outputFormat ? { outputFormat: message.outputFormat } : {}), ...(message.depth === 'quick' || message.depth === 'thorough' ? { depth: message.depth } : {}), ...(message.private === true ? { private: true } : {}) };
     }
     case 'save': {
       if (!exactKeys(message, ['type', 'draft', 'id', 'base']) || !id() || !String(message.id).match(/^(?:project|user:)/) || typeof message.base !== 'string' || !/^[0-9a-f]{64}$/.test(message.base)) return undefined;
@@ -379,6 +401,26 @@ export function parseStudioMessage(value: unknown): StudioMessage | undefined {
       // A saved team (lib:<slug>) is looked up in the current listing when the message is handled, never by a path from the page.
       const known = message.id === 'recommend' || message.id === 'empty' || message.id.startsWith('lib:') || PROJECT_TYPES.some((type) => message.id === `type:${type.id}`) || GSD_TEMPLATES.some((template) => message.id === `gsd:${template.id}`);
       return known ? { type: 'starting-point', id: message.id, goal: message.goal as string, locality: message.locality as 'cloud', ...(message.workShape ? { workShape: message.workShape as 'feature' } : {}), ...(message.riskLevel ? { riskLevel: message.riskLevel as 'low' } : {}) } : undefined;
+    }
+    case 'improve-check': case 'improve-ai': {
+      if (!exactKeys(message, ['type', 'seq', 'draft'], message.type === 'improve-ai' ? ['id', 'member'] : ['id']) || !Number.isSafeInteger(message.seq) || (message.id !== undefined && !id())) return undefined;
+      if (message.member !== undefined && (typeof message.member !== 'string' || !/^[a-z0-9][a-z0-9-]{0,39}$/.test(message.member))) return undefined;
+      const draft = parseDraft(message.draft);
+      if (!draft) return undefined;
+      const extra = { ...(message.id !== undefined ? { id: message.id as string } : {}) };
+      return message.type === 'improve-ai'
+        ? { type: 'improve-ai', seq: message.seq as number, draft, ...extra, ...(message.member !== undefined ? { member: message.member as string } : {}) }
+        : { type: 'improve-check', seq: message.seq as number, draft, ...extra };
+    }
+    case 'improve-cancel':
+      return exactKeys(message, ['type', 'seq']) && Number.isSafeInteger(message.seq) ? { type: 'improve-cancel', seq: message.seq as number } : undefined;
+    case 'improve-accept': {
+      if (!exactKeys(message, ['type', 'seq', 'ids', 'draft'], ['id', 'edited']) || !Number.isSafeInteger(message.seq) || (message.id !== undefined && !id())) return undefined;
+      const ids = message.ids;
+      if (!Array.isArray(ids) || !ids.length || ids.length > 40 || !ids.every((entry) => typeof entry === 'string' && /^s\d{1,3}$/.test(entry)) || new Set(ids).size !== ids.length) return undefined;
+      if (message.edited !== undefined && (!text(message.edited, 12_000) || ids.length !== 1)) return undefined;
+      const draft = parseDraft(message.draft);
+      return draft ? { type: 'improve-accept', seq: message.seq as number, ids: ids as string[], draft, ...(message.id !== undefined ? { id: message.id as string } : {}), ...(message.edited !== undefined ? { edited: message.edited as string } : {}) } : undefined;
     }
     case 'open-setting':
       return exactKeys(message, ['type', 'key']) && typeof message.key === 'string' && /^nearAi\.(?:defaultModel|actionPolicy|agent\.(?:deepModel|standardModel|fastModel|roleModels))$/.test(message.key) ? { type: 'open-setting', key: message.key } : undefined;
@@ -428,11 +470,6 @@ export interface TeamStudioDeps {
    * What the model comparisons say each role should use, for a team that was just saved (owner, 2026-11-07: "as new teams are added, we should
    * automatically check and suggest model optimizations for the new members and roles that are created"). Undefined when no comparison has been run.
    */
-  /**
-   * Drafts a team from the person's own description (owner, 2026-11-08: start with a chat asking what the team should produce, then launch the research to
-   * propose mission, members, roles and outputs). One model call, returned as a proposal for the person to accept or edit.
-   */
-  draftTeam?(brief: { idea: string; outputFormat?: string; depth?: 'quick' | 'thorough' }): Promise<{ proposal: TeamProposal; problems: string[] }>;
   suggestModels?(members: Array<{ name: string; role?: string; model?: string }>): Promise<Array<{ member: string; model: string; current?: string; why: string; changes: boolean }>>;
   /**
    * The final step of adding a team (owner, 2026-11-08): run each member's role test with the candidate models and apply the winner, so a new team's
@@ -443,6 +480,11 @@ export interface TeamStudioDeps {
   optimiseTeam?(members: Array<{ name: string; role?: string; model?: string }>, teamName: string, options?: { signal?: AbortSignal; confirm?: boolean; file?: string }): Promise<{ applied: number; text: string } | undefined>;
   /** The models a role test would try, so testing every team can show the whole cost once before it starts. */
   optimiseCandidates?(): Promise<string[]>;
+  /**
+   * What a Team Studio model call needs from the active profile (0.4.27): the catalogue, preferred models, routes, settings and today's spend. Every call
+   * goes through teamModelCall with it, so the outbound check always runs. Throws (with a message to show) when there is no profile.
+   */
+  teamAi?(): Promise<TeamAiDeps>;
   /** The person asked everything to stop (Emergency stop), so long-running work can be cancelled. */
   onStop?(listener: () => void): { dispose(): void };
   drafts: { get(): unknown; set(value: SavedWizard | undefined): Promise<void> };
@@ -472,6 +514,28 @@ export function optimiseTarget<T extends { file: string; project: boolean; team?
     ?? entries.find((entry) => entry.project && entry.team?.name === teamName);
 }
 
+/** The most the AI review may write back: room for a dozen suggestions with rewritten instructions. */
+const REFINE_MAX_TOKENS = 6000;
+const BLOCKED_BY_SECRET = 'Something in this team looks like a key, token or password (see the local check). Remove it, then ask again: Improve with AI never sends it.';
+
+/** Room for the chat format around the two messages, in tokens. */
+const MESSAGE_OVERHEAD_TOKENS = 200;
+
+/**
+ * What one AI review costs at most (PR #69 review: it counted only the draft, so the "at most" could be exceeded). The input bound is the fixed prompt
+ * plus the largest user prompt the review sends (MAX_REFINE_BYTES, which covers the team, the tool list and the findings), counted as one token per
+ * byte, which no tokenizer goes below; the output bound is the reply's token cap. A local model costs nothing.
+ */
+function estimateFor(ai: TeamAiDeps, model: string): { estimate?: string } {
+  const info = ai.models.find((candidate) => candidate.id === model);
+  if (info?.privacyBoundary === 'local') return { estimate: 'free: it runs on this computer' };
+  if (info?.inputPricePerMillion === undefined && info?.outputPricePerMillion === undefined) return {};
+  const inputTokens = Buffer.byteLength(REFINE_PROMPT, 'utf8') + MAX_REFINE_BYTES + MESSAGE_OVERHEAD_TOKENS;
+  const cost = (inputTokens * (info.inputPricePerMillion ?? 0) + REFINE_MAX_TOKENS * (info.outputPricePerMillion ?? 0)) / 1_000_000;
+  // Rounded up, so the figure shown is never below the ceiling.
+  return { estimate: `at most about $${Math.max(0.01, Math.ceil(cost * 100) / 100).toFixed(2)} (one call)` };
+}
+
 /** Wires the studio page to the team library. Returns refresh/dispose for the host and the tests. */
 export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refresh(): Promise<void>; startWizard(target: StudioTarget): Promise<void>; dispose(): void; ready: Promise<void> } {
   let input: DirectoryInput | undefined;
@@ -486,6 +550,13 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
   /** What the page last said is unsaved; kept if the panel closes. */
   let unsaved: { wizard?: SavedWizard; edit?: OpenEdit } = {};
   const post = (message: unknown) => { void host.webview.postMessage(message); };
+  /**
+   * Improve with AI's current request (0.4.27). One at a time: a new request, Cancel, Emergency stop, opening another team, leaving the editor or closing
+   * the panel aborts it, and a reply for any other sequence number is dropped. The suggestions stay here, keyed by id, so the page accepts them by id
+   * and never sends a suggestion of its own. Nothing here is saved: pending suggestions are gone when the panel closes.
+   */
+  let refine: { seq: number; id?: string; suggestions: Map<string, Suggestion>; controller?: AbortController } | undefined;
+  const cancelRefine = () => { refine?.controller?.abort(); if (refine) refine.controller = undefined; };
   const choose = (message: string, ...actions: string[]): Promise<string | undefined> => deps.choose
     ? deps.choose(message, ...actions)
     : deps.confirm(message, actions[0]).then((yes) => (yes ? actions[0] : undefined));
@@ -523,6 +594,25 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
   };
   const teamFor = (id: string) => library.teams.find((entry) => entry.id === id);
 
+  /** Which model Improve with AI would use for this draft under the privacy rule, or why none may (refinePlan). */
+  /**
+   * Whether this workspace's project has a knowledge base, read from the workspace on every call and never from a message (PR #69 review). A check that
+   * fails counts as yes, so a model call is private rather than sent on a guess.
+   */
+  const hostKnowledgeBase = () => deps.knowledgeBase().catch(() => true);
+  const refinePlanFor = async (draft: TeamDraft): Promise<{ plan: RefinePlan; ai?: TeamAiDeps }> => {
+    if (!deps.teamAi) return { plan: { ok: false, reason: 'No model is available here. Set up a NEAR AI profile for this project first.' } };
+    let ai: TeamAiDeps;
+    try { ai = await deps.teamAi(); } catch (error) { return { plan: { ok: false, reason: (error as Error).message } }; }
+    // Any team in a project with a knowledge base is private, as its members' models already must be (reviewDraft); decided here, never from the page.
+    return { plan: refinePlan(draft, { knowledgeBase: await hostKnowledgeBase(), choose: (need) => chooseTeamModel(need, ai) }), ai };
+  };
+  /** An imported team (or one made from an import) that is not approved: its text is untrusted, and the refiner is told so. */
+  const untrustedFor = async (draft: TeamDraft, id: string | undefined): Promise<boolean> => {
+    if (id) return Boolean(teamFor(id)?.imported);
+    return (await deps.library.unapprovedSource(draft.members).catch(() => undefined)) !== undefined;
+  };
+
   const versionsOf = async (file: string) => (await deps.library.versions(file)).map((version) => ({ ref: path.basename(version), label: versionLabel(path.basename(version)) }));
 
   const sendTeam = async (id: string, file: string, notice?: string) => {
@@ -530,7 +620,9 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
     const draft = draftFromMarkdown(textNow, file);
     open = { id, file, text: textNow, base: hash(textNow) };
     const entry = teamFor(id);
-    post({ type: 'team', id, kind: entry?.kind ?? (id === 'project' ? 'project' : 'user'), file: displayPath(file, deps.root), command: entry?.command ?? '', draft, base: open.base, versions: await versionsOf(file), graph: graphOf(textNow, file), knowledge: await knowledgeOf(file), ...(notice ? { notice } : {}) });
+    // A hand-written private value (tee, local) is shown as it is; the Private team box only ever writes or removes privacy: private (PR #69 review).
+    const teamPrivacy = handWrittenTeamPrivacy(textNow);
+    post({ type: 'team', id, kind: entry?.kind ?? (id === 'project' ? 'project' : 'user'), file: displayPath(file, deps.root), command: entry?.command ?? '', draft, base: open.base, ...(teamPrivacy ? { teamPrivacy } : {}), versions: await versionsOf(file), graph: graphOf(textNow, file), knowledge: await knowledgeOf(file), ...(notice ? { notice } : {}) });
   };
 
   /**
@@ -667,13 +759,97 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
       }
       case 'draft-team': {
         // One model call drafts the team from the person's own words (owner, 2026-11-08). The result goes back as a proposal the person reads first, and
-        // only becomes a team when they accept it, so nothing is saved on the strength of one answer.
-        if (!deps.draftTeam) { post({ type: 'error', text: 'No model is available to draft a team. Set up a NEAR AI profile, or fill the team in by hand.' }); return; }
+        // only becomes a team when they accept it, so nothing is saved on the strength of one answer. Like Improve with AI, it goes through teamModelCall
+        // (the outbound check) and the host's own privacy decision (PR #69 review): private when the person asked, or when the project has a knowledge base.
+        if (!deps.teamAi) { post({ type: 'error', text: 'No model is available to draft a team. Set up a NEAR AI profile, or fill the team in by hand.' }); return; }
         post({ type: 'notice', text: 'Drafting the team...' });
         try {
-          const drafted = await deps.draftTeam({ idea: message.idea, ...(message.outputFormat ? { outputFormat: message.outputFormat } : {}), ...(message.depth ? { depth: message.depth } : {}) });
-          post({ type: 'team-proposal', proposal: drafted.proposal, draft: proposalDraft(drafted.proposal), text: proposalText(drafted.proposal), problems: drafted.problems });
+          const ai = await deps.teamAi();
+          const knowledgeBase = await hostKnowledgeBase();
+          const brief = { idea: message.idea, ...(message.outputFormat ? { outputFormat: message.outputFormat } : {}), ...(message.depth ? { depth: message.depth } : {}), ...(message.private ? { private: true } : {}) };
+          const reply = await teamModelCall(ai, { need: message.private || knowledgeBase ? 'private' : 'any', messages: [
+            { role: 'system', content: TEAM_BUILDER_PROMPT },
+            { role: 'user', content: builderPrompt(brief) }
+          ], maxTokens: 2000 });
+          if (!reply.ok) throw new Error(knowledgeBase && !message.private && reply.reason.startsWith('It needs a private model') ? `${KNOWLEDGE_BASE_PRIVATE} ${reply.reason}` : reply.reason);
+          const drafted = parseProposal(reply.text, brief);
+          // A team asked for as private stays private once it is a draft, so saving it keeps every member on a private model.
+          post({ type: 'team-proposal', proposal: drafted.proposal, draft: { ...proposalDraft(drafted.proposal), ...(message.private ? { private: true } : {}) }, text: proposalText(drafted.proposal), problems: drafted.problems });
         } catch (error) { post({ type: 'error', text: `The team could not be drafted: ${(error as Error).message}` }); }
+        return;
+      }
+      case 'improve-check': {
+        // Step 1, instant and free: the local check, and whether (and with which model) the AI review could run.
+        const findings = checkTeam(message.draft);
+        const { plan, ai } = await refinePlanFor(message.draft);
+        const blocked = findings.some((finding) => finding.severity === 'block');
+        post({ type: 'improve-checked', seq: message.seq, findings, ai: plan.ok
+          ? { available: !blocked, model: plan.model, private: plan.private, skipped: plan.skipped, ...(plan.note ? { note: plan.note } : {}), ...(blocked ? { reason: BLOCKED_BY_SECRET } : {}), ...(ai ? estimateFor(ai, plan.model) : {}) }
+          : { available: false, reason: plan.reason, skipped: [] } });
+        return;
+      }
+      case 'improve-ai': {
+        // Step 2, on request: one model call through the outbound check. Requesting -> Reviewing | NothingToSuggest | Failed | Blocked | Cancelled.
+        cancelRefine();
+        const seq = message.seq;
+        const draft = message.draft;
+        // The request is current from the moment it arrives, so a Cancel sent while the model is still being chosen stops it before anything is sent.
+        const controller = new AbortController();
+        const current: NonNullable<typeof refine> = { seq, ...(message.id ? { id: message.id } : {}), suggestions: new Map<string, Suggestion>(), controller };
+        refine = current;
+        const findings = checkTeam(draft);
+        const result = (state: 'blocked' | 'failed' | 'cancelled', reason: string) => { if (refine === current) current.controller = undefined; post({ type: 'improve-result', seq, state, reason, suggestions: [], dropped: [] }); };
+        if (findings.some((finding) => finding.severity === 'block')) { result('blocked', BLOCKED_BY_SECRET); return; }
+        if (message.member && !draft.members.some((member) => member.name === message.member)) { result('blocked', `${message.member} is not on the team.`); return; }
+        const { plan, ai } = await refinePlanFor(draft);
+        if (!plan.ok || !ai) { result('blocked', plan.ok ? 'No model is available here.' : plan.reason); return; }
+        if (!input || !context) await load();
+        const prompt = refinePrompt(draft, { findings, tools: context!.tools.map((tool) => ({ name: tool.name, description: tool.description })), skipped: plan.skipped, ...(message.member ? { member: message.member } : {}), untrusted: await untrustedFor(draft, message.id) });
+        // The cap holds for every review (a one-member one too), so the cost ceiling shown before asking is a true ceiling.
+        if (Buffer.byteLength(prompt, 'utf8') > MAX_REFINE_BYTES) { result('blocked', message.member ? `${message.member}'s instructions are too long to review in one go. Shorten them first.` : 'This team is too large to review in one go. Review one member at a time.'); return; }
+        if (refine !== current) return;
+        if (controller.signal.aborted) { result('cancelled', 'Cancelled. Nothing changed.'); return; }
+        post({ type: 'improve-state', seq, state: 'requesting', model: plan.model, private: plan.private });
+        let reply: Awaited<ReturnType<typeof teamModelCall>>;
+        try {
+          reply = await teamModelCall(ai, { need: plan.need, messages: [{ role: 'system', content: REFINE_PROMPT }, { role: 'user', content: prompt }], maxTokens: REFINE_MAX_TOKENS, signal: controller.signal });
+        } catch (error) {
+          if (refine !== current) return;
+          current.controller = undefined;
+          if (controller.signal.aborted) result('cancelled', 'Cancelled. Nothing changed.');
+          else result('failed', `The AI review failed: ${(error as Error).message} Nothing changed.`);
+          return;
+        }
+        // A newer request (or Cancel) replaced this one: its reply is dropped.
+        if (refine !== current) return;
+        current.controller = undefined;
+        if (controller.signal.aborted) { result('cancelled', 'Cancelled. Nothing changed.'); return; }
+        if (!reply.ok) { result('blocked', reply.reason); return; }
+        const parsed = parseRefinement(reply.text, draft, { tools: context!.tools.map((tool) => tool.name), skipped: plan.skipped, ...(message.member ? { member: message.member } : {}), ...(reply.finishReason ? { finishReason: reply.finishReason } : {}) });
+        if (!parsed.readable) { result('failed', 'The reply could not be read as suggestions, so nothing changed. Try again.'); return; }
+        current.suggestions = new Map(parsed.suggestions.map((suggestion) => [suggestion.id, suggestion]));
+        post({
+          type: 'improve-result', seq, state: parsed.suggestions.some((suggestion) => suggestion.kind !== 'advice') ? 'reviewing' : 'nothing',
+          model: reply.model, private: reply.private, suggestions: parsed.suggestions, dropped: parsed.dropped, partial: parsed.partial, findings: findings.length,
+          ...(parsed.summary ? { summary: parsed.summary } : {}), ...(parsed.rating ? { rating: parsed.rating } : {}), ...(plan.note ? { note: plan.note } : {})
+        });
+        return;
+      }
+      case 'improve-cancel': if (refine?.seq === message.seq) cancelRefine(); return;
+      case 'improve-accept': {
+        // Accept changes only the page's draft; Save writes it, with its base-hash check and a kept version, as for any edit.
+        if (!refine || refine.seq !== message.seq) { post({ type: 'improve-applied', seq: message.seq, draft: message.draft, results: message.ids.map((id) => ({ id, state: 'stale', reason: 'This review is no longer current. Ask for a new one.' })) }); return; }
+        let draft = message.draft;
+        const results: Array<{ id: string; state: string; reason?: string }> = [];
+        for (const id of message.ids) {
+          const suggestion = refine.suggestions.get(id);
+          if (!suggestion) { results.push({ id, state: 'invalid', reason: 'There is no such suggestion.' }); continue; }
+          // Accept all covers wording only: a tool or member change is accepted on its own, never as part of a batch.
+          if (message.ids.length > 1 && !ACCEPT_ALL_KINDS.includes(suggestion.kind)) { results.push({ id, state: 'pending', reason: 'Accept this one on its own.' }); continue; }
+          const outcome = applySuggestion(draft, suggestion, { original: message.id && open?.id === message.id ? open.text : undefined, ...(message.edited !== undefined ? { edited: message.edited } : {}) });
+          if ('draft' in outcome) { draft = outcome.draft; results.push({ id, state: 'accepted' }); } else results.push({ id, state: outcome.state, reason: outcome.reason });
+        }
+        post({ type: 'improve-applied', seq: message.seq, draft, results, findings: checkTeam(draft).length });
         return;
       }
       case 'review': {
@@ -698,6 +874,7 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
         return;
       }
       case 'open': {
+        cancelRefine();
         const file = fileFor(message.id);
         if (!file) return;
         try { await sendTeam(message.id, file); } catch (error) { post({ type: 'error', text: `This team file can't be opened in the studio: ${(error as Error).message} Open it as Markdown to fix it.` }); }
@@ -709,6 +886,7 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
         return;
       }
       case 'leave-wizard': {
+        cancelRefine();
         const name = message.wizard.draft.name.trim();
         const choice = await choose(`You have an unsaved team${name ? ` "${name}"` : ''}. Discard it, or save it as a draft to finish later?`, 'Discard changes', 'Save draft');
         if (choice === 'Save draft') {
@@ -722,6 +900,7 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
         return;
       }
       case 'leave-editor': {
+        cancelRefine();
         const name = message.edit.draft.name.trim() || teamFor(message.edit.id)?.name || 'this team';
         const choice = await choose(`You have unsaved changes to "${name}". Discard them, or save them before leaving?`, 'Discard changes', 'Save');
         if (choice === 'Save') {
@@ -929,6 +1108,8 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
 
   const subscriptions = [
     deps.watch((file) => { void onWatch(file); }),
+    // Emergency stop cancels an AI review in progress, as it cancels the role tests.
+    ...(deps.onStop ? [deps.onStop(() => cancelRefine())] : []),
     ...(deps.onDidChangeSettings ? [deps.onDidChangeSettings(() => { void refresh(); })] : []),
     host.webview.onDidReceiveMessage(async (value) => {
       const message = parseStudioMessage(value);
@@ -949,6 +1130,7 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
   };
   const dispose = () => {
     if (timer) clearTimeout(timer);
+    cancelRefine();
     for (const subscription of subscriptions) subscription.dispose();
     void keepUnsaved().catch(() => undefined);
   };

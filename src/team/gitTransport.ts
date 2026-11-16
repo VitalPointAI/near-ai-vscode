@@ -221,17 +221,20 @@ export function isContactableRemoteAddress(address: string): boolean {
 // 0.4.26 (PR #62 review): a git older than 2.31 cannot read the remote address from its environment, so the address goes on its command line, which
 // other users of this computer can read. That is refused when the address can carry a credential: a user and password in any URL, or any user name in an
 // http, https, ftp or ftps URL (where the "user" is often a token). An ssh user (ssh://git@host/..., git@host:path) is a name, not a secret, and is allowed.
-export const OLD_GIT_CREDENTIALS_TEXT = 'Your git is older than 2.31, so Team Mode would have to put the remote address on the git command line, where other users of this computer can read it, and that address carries a user name or password. Update git to 2.31 or newer, or remove the credentials from the remote address and let a git credential helper supply them.';
+// 0.4.27 (PR #67 review): a credential can also ride in the query of an http(s) or ftp(s) URL (`?access_token=...`), so any non-empty query there counts.
+export const OLD_GIT_CREDENTIALS_TEXT = 'Your git is older than 2.31, so Team Mode would have to put the remote address on the git command line, where other users of this computer can read it, and that address carries a user name, password or token. Update git to 2.31 or newer, or remove the credentials from the remote address and let a git credential helper supply them.';
 
 export function addressCarriesCredentials(address: string): boolean {
-  const match = /^([a-z][a-z0-9+.-]*):\/\/([^/?#]*)/i.exec(address.trim());
+  const match = /^([a-z][a-z0-9+.-]*):\/\/([^/?#]*)([^?#]*)(?:\?([^#]*))?/i.exec(address.trim());
   if (match === null) return false;
+  const web = /^(?:https?|ftps?)$/i.test(match[1] as string);
+  if (web && (match[4] ?? '') !== '') return true;
   const authority = match[2] as string;
   const at = authority.lastIndexOf('@');
   if (at < 0) return false;
   const userinfo = authority.slice(0, at);
   if (userinfo.includes(':')) return true;
-  return /^(?:https?|ftps?)$/i.test(match[1] as string);
+  return web;
 }
 
 /** Whether a git version string (`git version 2.30.1`) reads remote config from the environment (2.31 and later). Unknown counts as no. */
