@@ -11,6 +11,7 @@ import { validateServerUrl } from '../mcp/client';
 import { grantsMcpTool, mcpToolName } from '../mcp/tools';
 import { McpRegistry } from '../services/mcpRegistry';
 import type { AgentMessage, CompletionEvent, ToolCall } from '../services/nearAiClient';
+import { newTestRun } from './helpers/gatedRuns';
 
 // MCP connections through the vendored SDK client, against a real stdio test server.
 
@@ -73,7 +74,7 @@ test('calls ask by the server\'s approval setting even in fully-autonomous mode;
     const client = { async *streamCompletion(): AsyncGenerator<CompletionEvent> { const next = turns[turn++]; yield { type: 'done', message: typeof next === 'string' ? { role: 'assistant', content: next } : { role: 'assistant', content: null, tool_calls: next }, finishReason: 'stop', usage: { verificationStatus: 'unknown', latencyMs: 1 } }; } };
     const approvals: ApprovalRequest[] = [];
     const events: AgentEvent[] = [];
-    const run = new AgentRun({ client, model: 'm', tools, context: { root, checkpoints: new RunCheckpoints('mcp'), shell, readFiles: new Set() }, policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES, requestApproval: async (request) => { approvals.push(request); return { decision: 'allow' }; }, emit: (event) => events.push(event) });
+    const run = newTestRun({ client, model: 'm', tools, context: { root, checkpoints: new RunCheckpoints('mcp'), shell, readFiles: new Set() }, policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES, requestApproval: async (request) => { approvals.push(request); return { decision: 'allow' }; }, emit: (event) => events.push(event) });
     const result = await run.run([{ role: 'user', content: 'quote it' } as AgentMessage], new AbortController().signal);
     const outputs = result.messages.filter((message) => message.role === 'tool').map((message) => String(message.content));
     assert.match(outputs[0], /<untrusted-content id="[0-9a-f]{8}" source="MCP Test Distributor · lookup_part">\nSW-24: 24-port switch, \$1,299, 17 in stock/);

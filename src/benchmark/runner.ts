@@ -7,7 +7,7 @@ import type { PermissionRules } from '../agent/permissions';
 import { ShellSession } from '../agent/shell';
 import { agentSystemPrompt } from '../agent/systemPrompt';
 import { CORE_TOOLS } from '../agent/tools';
-import { defaultGateRuntime } from '../agent/gateAdapter';
+import { unavailableGateRuntime } from '../agent/gateAdapter';
 import type { GateRuntime } from '../domain/gate/decide';
 import type { ActionPolicy } from '../domain/policy';
 import { SpendLimitError, StreamInterruptedError, type UsageMetadata } from '../services/nearAiClient';
@@ -33,15 +33,15 @@ export interface AgentInFolderOptions {
   onEvent?(event: AgentEvent): void;
   /**
    * The gate this run is decided by (GATE-04). The comparison panel and the team studio pass the host's runtime so the decisions reach the project's log.
-   * Without one the run is decided by the shipped default with presence `none` and context `unattended`, unless the caller passes `requestApproval`, which
-   * means a person answers (D-43): a run nobody watches is never treated as having someone to ask.
+   * Without one the run is failed closed (`bundle.unavailable`: the floor, reading and planning only), with presence `none` and context `unattended` unless the
+   * caller passes `requestApproval`, which means a person answers (D-43): a run nobody watches is never treated as having someone to ask.
    */
   gate?: GateRuntime;
 }
 
-/** The gate a run is decided by: the caller's, or the shipped default with nobody present unless the caller supplied a way to ask one (D-43, T-70-86). */
+/** The gate a run is decided by: the caller's, or the failed-closed runtime of a run with no gate host, with nobody present unless the caller supplied a way to ask one (D-43, T-70-86). */
 export function runGateFor(options: Pick<AgentInFolderOptions, 'gate' | 'requestApproval'>): GateRuntime {
-  return options.gate ?? defaultGateRuntime({ presence: options.requestApproval ? 'person' : 'none', context: options.requestApproval ? 'interactive' : 'unattended' });
+  return options.gate ?? unavailableGateRuntime({ presence: options.requestApproval ? 'person' : 'none', context: options.requestApproval ? 'interactive' : 'unattended' });
 }
 
 const UNATTENDED: AgentRunOptions['requestApproval'] = async () => ({ decision: 'deny', feedback: 'Nobody is watching this test run, so actions that need approval are declined. Finish without this action if you can.' });
@@ -85,7 +85,7 @@ export interface ComparisonOptions {
   stopAll?(): string | undefined;
   /** Where the temporary task folders go (default: the system temp folder). */
   tempDir?: string;
-  /** The gate each task run is decided by, made fresh for each run so a record names the run it belongs to. Without it a run uses the shipped default. */
+  /** The gate each task run is decided by, made fresh for each run so a record names the run it belongs to. Without it a run is failed closed (no gate host). */
   gateFor?(run: { model: string; task: string; run: number; root: string }): GateRuntime | undefined | Promise<GateRuntime | undefined>;
   /** Per-task time limit override (tests). */
   timeoutMs?(task: BenchmarkTask): number;

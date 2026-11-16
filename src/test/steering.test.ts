@@ -14,6 +14,7 @@ import { deriveProfileId } from '../domain/auth';
 import type { AgentMessage, CompletionEvent } from '../services/nearAiClient';
 import { StubNode, chatPage } from './helpers/chatPage';
 import { testManifest } from './helpers/gateFixtures';
+import { newTestRun, testGateHost } from './helpers/gatedRuns';
 
 // Steering: a message typed while a run is going is queued for the running agent, appended to its
 // transcript before the next model request (never mid-stream or mid-tool), ends a retry wait, and
@@ -77,7 +78,7 @@ test('a message queued during a model turn is appended after its tool calls and 
       yield { type: 'done', message: { role: 'assistant', content: 'Done.' }, finishReason: 'stop', usage };
     }
   };
-  const run = new AgentRun({
+  const run = newTestRun({
     client, model: 'm', tools: [{ name: 'Read', description: 'read', parameters: {}, capability: 'read', manifest: testManifest('Read', 'read'), parse: (raw: unknown) => raw, title: () => 'Read a.ts', run: async () => { toolRan = true; return 'a'; } } as never],
     context: { root, checkpoints: new RunCheckpoints('steer'), readFiles: new Set() } as never,
     policy: { mode: 'approve-risky', emergencyStop: false }, rules: DEFAULT_RULES, input,
@@ -101,7 +102,7 @@ test('a message that arrives while the final answer streams keeps the run going'
       yield { type: 'done', message: { role: 'assistant', content: `answer ${seen.length}` }, finishReason: 'stop', usage };
     }
   };
-  const run = new AgentRun({ client, model: 'm', tools: [], context: { root: tmpdir(), checkpoints: new RunCheckpoints('steer'), readFiles: new Set() } as never, policy: { mode: 'approve-risky', emergencyStop: false }, rules: DEFAULT_RULES, input, requestApproval: async () => ({ decision: 'allow' }), emit: () => undefined });
+  const run = newTestRun({ client, model: 'm', tools: [], context: { root: tmpdir(), checkpoints: new RunCheckpoints('steer'), readFiles: new Set() } as never, policy: { mode: 'approve-risky', emergencyStop: false }, rules: DEFAULT_RULES, input, requestApproval: async () => ({ decision: 'allow' }), emit: () => undefined });
   const result = await run.run([{ role: 'user', content: 'start' }], new AbortController().signal);
   assert.equal(seen.length, 2);
   assert.equal(userTexts(seen[1]).at(-1), 'actually, use TypeScript');
@@ -122,7 +123,7 @@ test('a message during a retry wait ends the wait, and the next attempt carries 
   let waits = 0;
   // A wait that only ends when its signal aborts: the run finishing proves the message ended it.
   const sleep = (_ms: number, signal: AbortSignal) => new Promise<void>((resolve) => { waits += 1; setTimeout(() => push('try the other endpoint'), 5); signal.addEventListener('abort', () => resolve(), { once: true }); });
-  const run = new AgentRun({ client, model: 'm', tools: [], context: { root: tmpdir(), checkpoints: new RunCheckpoints('steer'), readFiles: new Set() } as never, policy: { mode: 'approve-risky', emergencyStop: false }, rules: DEFAULT_RULES, input, sleep, requestApproval: async () => ({ decision: 'allow' }), emit: (event) => events.push(event.type) });
+  const run = newTestRun({ client, model: 'm', tools: [], context: { root: tmpdir(), checkpoints: new RunCheckpoints('steer'), readFiles: new Set() } as never, policy: { mode: 'approve-risky', emergencyStop: false }, rules: DEFAULT_RULES, input, sleep, requestApproval: async () => ({ decision: 'allow' }), emit: (event) => events.push(event.type) });
   const result = await run.run([{ role: 'user', content: 'start' }], new AbortController().signal);
   assert.equal(result.outcome, 'completed');
   assert.equal(waits, 1);
@@ -147,7 +148,7 @@ test('a request held by the model\'s cooldown is re-sent with a message that arr
       yield { type: 'done', message: { role: 'assistant', content: 'ok' }, finishReason: 'stop', usage };
     }
   };
-  const run = new AgentRun({ client, model: 'm', tools: [], context: { root: tmpdir(), checkpoints: new RunCheckpoints('steer'), readFiles: new Set() } as never, policy: { mode: 'approve-risky', emergencyStop: false }, rules: DEFAULT_RULES, input, requestApproval: async () => ({ decision: 'allow' }), emit: () => undefined });
+  const run = newTestRun({ client, model: 'm', tools: [], context: { root: tmpdir(), checkpoints: new RunCheckpoints('steer'), readFiles: new Set() } as never, policy: { mode: 'approve-risky', emergencyStop: false }, rules: DEFAULT_RULES, input, requestApproval: async () => ({ decision: 'allow' }), emit: () => undefined });
   const result = await run.run([{ role: 'user', content: 'start' }], new AbortController().signal);
   assert.equal(result.outcome, 'completed');
   assert.equal(seen.length, 2);
@@ -183,7 +184,7 @@ async function openSidebar(root: string, auth: AuthService) {
   nodeModule._load = (request, parent, isMain) => request === 'vscode' ? vscodeStub : originalLoad(request, parent, isMain);
   try {
     const { attachChatToView } = require('../services/chat') as typeof import('../services/chat');
-    await attachChatToView({ subscriptions: [], globalStorageUri: { fsPath: path.join(root, '.global') }, extensionUri: { fsPath: root } } as never, auth, view as never, '<html></html>');
+    await attachChatToView({ subscriptions: [], globalStorageUri: { fsPath: path.join(root, '.global') }, extensionUri: { fsPath: root } } as never, auth, view as never, '<html></html>', testGateHost());
   } finally {
     nodeModule._load = originalLoad;
   }
@@ -429,7 +430,7 @@ test('a Steer pressed while the reply is streaming cuts it at once, and the mess
       yield { type: 'done', message: { role: 'assistant', content: 'Used the other file.' }, finishReason: 'stop', usage };
     }
   };
-  const run = new AgentRun({
+  const run = newTestRun({
     client, model: 'm', tools: [], context: { root, checkpoints: new RunCheckpoints('steer-cut'), readFiles: new Set() } as never,
     policy: { mode: 'approve-risky', emergencyStop: false }, rules: DEFAULT_RULES, input,
     requestApproval: async () => ({ decision: 'allow' }), emit: () => undefined
@@ -463,7 +464,7 @@ test('a message sent without Steer still waits for the reply to finish, as befor
       yield { type: 'done', message: { role: 'assistant', content: 'Noted.' }, finishReason: 'stop', usage };
     }
   };
-  const run = new AgentRun({
+  const run = newTestRun({
     client, model: 'm', tools: [], context: { root, checkpoints: new RunCheckpoints('steer-wait'), readFiles: new Set() } as never,
     policy: { mode: 'approve-risky', emergencyStop: false }, rules: DEFAULT_RULES, input,
     requestApproval: async () => ({ decision: 'allow' }), emit: () => undefined

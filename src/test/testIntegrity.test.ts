@@ -10,6 +10,7 @@ import { ShellSession } from '../agent/shell';
 import { isTestFile, testStrength, weakened } from '../agent/testIntegrity';
 import { CORE_TOOLS } from '../agent/tools';
 import type { AgentMessage, CompletionEvent, ToolCall } from '../services/nearAiClient';
+import { newTestRun } from './helpers/gatedRuns';
 
 // In the model eval, a cheaper model "fixed" a refactor by deleting the assertion that failed. The
 // loop now notices when an agent weakens a test it was given, says so, and asks once before finishing.
@@ -27,7 +28,7 @@ async function runScripted(turns: Array<ToolCall[] | string>): Promise<{ root: s
   let turn = 0;
   const client = { async *streamCompletion(): AsyncGenerator<CompletionEvent> { const next = turns[Math.min(turn++, turns.length - 1)]; yield { type: 'done', message: typeof next === 'string' ? { role: 'assistant', content: next } : { role: 'assistant', content: null, tool_calls: next }, finishReason: 'stop', usage: { verificationStatus: 'unknown', latencyMs: 1 } }; } };
   try {
-    const result = await new AgentRun({ client, model: 'm', tools: CORE_TOOLS, context: { root, checkpoints: new RunCheckpoints('integrity'), shell, readFiles: new Set() }, policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES, requestApproval: async () => ({ decision: 'allow' }), emit: () => undefined })
+    const result = await newTestRun({ client, model: 'm', tools: CORE_TOOLS, context: { root, checkpoints: new RunCheckpoints('integrity'), shell, readFiles: new Set() }, policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES, requestApproval: async () => ({ decision: 'allow' }), emit: () => undefined })
       .run([{ role: 'user', content: 'rename fetchUser to getUser' }], new AbortController().signal);
     return { root, transcript: result.messages, outcome: result.outcome };
   } finally {

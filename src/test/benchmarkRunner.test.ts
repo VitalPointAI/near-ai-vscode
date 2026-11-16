@@ -10,6 +10,7 @@ import { runComparison, type BenchmarkClient } from '../benchmark/runner';
 import { CODING_TASKS, costOf, gradeTask, loadBenchmarkTasks, runMetrics, setUpTask, taskVersion, tasksFor, type BenchmarkTask } from '../benchmark/tasks';
 import { SpendLimitError, StreamInterruptedError, type AgentMessage, type CompletionEvent, type ToolCall } from '../services/nearAiClient';
 import { currentSpendTag, type SpendTag } from '../services/spendLedger';
+import { testGateRuntime } from './helpers/gatedRuns';
 
 // The benchmark's tasks and runner, with a scripted model instead of NEAR: no live calls.
 
@@ -48,7 +49,9 @@ function options(tasks: BenchmarkTask[], models: string[], client: BenchmarkClie
     rows,
     run: (signal = new AbortController().signal) => runComparison({
       runId: 'run-test', plan: planComparison(models, tasks, 1, 'rerun', new Map()), tasks, runsPerTask: 1, clientFor: () => client,
-      rules: DEFAULT_RULES, emergencyStopped: () => false, signal, onRow: (row) => { rows.push(row); }, now: () => new Date('2026-10-30T12:00:00Z'), ...extra
+      rules: DEFAULT_RULES, emergencyStopped: () => false, signal, onRow: (row) => { rows.push(row); }, now: () => new Date('2026-10-30T12:00:00Z'),
+      // An explicit test runtime: a run with no gate is failed closed (no policy is guessed), and these tests are about the comparison, not the gate.
+      gateFor: () => testGateRuntime({ presence: 'none', context: 'unattended' }), ...extra
     })
   };
 }
@@ -190,7 +193,7 @@ test('cells reused from a saved result are not run', async () => {
   const saved = { model: 'a/model', task: 'implement', taskVersion: tasks[0].version, runId: '2026-10-01T00-00-00-000Z', at: '2026-10-01T00:00:00.000Z', rows: [{ outcome: 'completed' } as ResultRow] };
   const plan = planComparison(['a/model', 'b/model'], tasks, 1, 'reuse', new Map([[`a/model\u0000implement\u0000${tasks[0].version}`, saved]]));
   const rows: ResultRow[] = [];
-  await runComparison({ runId: 'r', plan, tasks, runsPerTask: 1, clientFor: () => client, rules: DEFAULT_RULES, emergencyStopped: () => false, signal: new AbortController().signal, onRow: (row) => { rows.push(row); } });
+  await runComparison({ runId: 'r', plan, tasks, runsPerTask: 1, clientFor: () => client, rules: DEFAULT_RULES, emergencyStopped: () => false, signal: new AbortController().signal, onRow: (row) => { rows.push(row); }, gateFor: () => testGateRuntime({ presence: 'none', context: 'unattended' }) });
   assert.deepEqual(rows.map((row) => row.model), ['b/model']);
   assert.ok(seen.every((entry) => entry.model === 'b/model'));
 });

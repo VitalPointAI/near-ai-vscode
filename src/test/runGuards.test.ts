@@ -10,6 +10,7 @@ import { ShellSession } from '../agent/shell';
 import { CORE_TOOLS } from '../agent/tools';
 import { AgentConversation, GsdContext } from '../services/agentSession';
 import type { AgentMessage, CompletionEvent, ToolCall } from '../services/nearAiClient';
+import { newTestRun, newTestConversation } from './helpers/gatedRuns';
 
 // Guards against runs that burn tokens without producing anything: an agent repeating the same
 // action is nudged and then stopped, and a run stops at its cost or token budget.
@@ -24,7 +25,7 @@ async function runScript(next: (turn: number, messages: AgentMessage[]) => ToolC
   const shell = new ShellSession(root);
   const texts: string[] = [];
   try {
-    const run = new AgentRun({ client, model: 'm', tools: CORE_TOOLS, maxTurns: 60, context: { root, checkpoints: new RunCheckpoints('guard'), shell, readFiles: new Set() }, policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES, requestApproval: async () => ({ decision: 'allow' }), emit: (event) => { if (event.type === 'text') texts.push(event.text); } });
+    const run = newTestRun({ client, model: 'm', tools: CORE_TOOLS, maxTurns: 60, context: { root, checkpoints: new RunCheckpoints('guard'), shell, readFiles: new Set() }, policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES, requestApproval: async () => ({ decision: 'allow' }), emit: (event) => { if (event.type === 'text') texts.push(event.text); } });
     const result = await run.run([{ role: 'user', content: 'go' }], new AbortController().signal);
     return { result, turns: turn, transcripts, texts };
   } finally {
@@ -174,7 +175,7 @@ test('a run stops at its cost budget, counting its sub-agents, and keeps its wor
     async actualCostsUsd() { return undefined; }
   };
   const posted: Array<Record<string, unknown>> = [];
-  const conversation = new AgentConversation(root, (message) => posted.push(message), path.join(root, '.ckpt'));
+  const conversation = newTestConversation(root, (message) => posted.push(message), path.join(root, '.ckpt'));
   try {
     await conversation.send({ text: 'go', client: near as never, model: 'm', privacy: 'Private', policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES, gsd, budget: { maxCostUsd: 3.5, maxTokens: 10_000_000 } });
   } finally {
@@ -210,7 +211,7 @@ test('an approval nobody answers parks the run, and answering later runs the act
     async actualCostsUsd() { return undefined; }
   };
   const posted: Array<Record<string, unknown>> = [];
-  const conversation = new AgentConversation(root, (message) => posted.push(message), path.join(root, '.ckpt'));
+  const conversation = newTestConversation(root, (message) => posted.push(message), path.join(root, '.ckpt'));
   conversation.approvalTimeoutMs = 50;
   const running = conversation.send({ text: 'write notes', client: near as never, model: 'm', privacy: 'Private', policy: { mode: 'approve-risky', emergencyStop: false }, rules: DEFAULT_RULES });
   try {
@@ -270,7 +271,7 @@ async function runScriptWithFinish(next: (turn: number) => { calls?: ToolCall[];
   const shell = new ShellSession(root);
   const texts: string[] = [];
   try {
-    const run = new AgentRun({ client, model: 'm', tools: CORE_TOOLS, maxTurns: 30, context: { root, checkpoints: new RunCheckpoints('limit'), shell, readFiles: new Set() }, policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES, requestApproval: async () => ({ decision: 'allow' }), emit: (event) => { if (event.type === 'text') texts.push(event.text); } });
+    const run = newTestRun({ client, model: 'm', tools: CORE_TOOLS, maxTurns: 30, context: { root, checkpoints: new RunCheckpoints('limit'), shell, readFiles: new Set() }, policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES, requestApproval: async () => ({ decision: 'allow' }), emit: (event) => { if (event.type === 'text') texts.push(event.text); } });
     return { result: await run.run([{ role: 'user', content: 'go' }], new AbortController().signal), turns: turn, transcripts, texts };
   } finally {
     shell.dispose();
@@ -290,7 +291,7 @@ test('the token limit applies only to turns without a known price; priced turns 
       async actualCostsUsd() { return undefined; }
     };
     const posted: Array<Record<string, unknown>> = [];
-    const conversation = new AgentConversation(root, (message) => posted.push(message), path.join(root, '.ckpt'));
+    const conversation = newTestConversation(root, (message) => posted.push(message), path.join(root, '.ckpt'));
     // PERF-02 compacts at 70k tokens whatever the window, which would also add a summary request here; this test is about spend, so it is off, as the
     // large window below keeps the window-relative thresholds off.
     conversation.compactAtTokens = 0;
@@ -329,7 +330,7 @@ test('a sub-agent stopped for repeating itself tells its lead it did not finish,
     },
     async actualCostsUsd() { return undefined; }
   };
-  const conversation = new AgentConversation(root, () => undefined, path.join(root, '.ckpt'));
+  const conversation = newTestConversation(root, () => undefined, path.join(root, '.ckpt'));
   try {
     await conversation.send({ text: 'go', client: near as never, model: 'm', privacy: 'Private', policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES, gsd });
   } finally {

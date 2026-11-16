@@ -11,6 +11,7 @@ import { CORE_TOOLS } from '../agent/tools';
 import { MISSING_RESULT, repairTranscript } from '../services/agentSession';
 import { AUTO_RESUME_WITHIN_MS, autoResumeNotice, shouldAutoResume } from '../services/runMarkers';
 import type { AgentMessage, CompletionEvent, ToolCall } from '../services/nearAiClient';
+import { newTestRun } from './helpers/gatedRuns';
 
 // PERF-05: a run a reload cut off carries on by itself, and nothing that had finished is run again.
 
@@ -36,7 +37,7 @@ test('the run saves its state after every finished call, so a reload loses at mo
   const client = { async *streamCompletion(): AsyncGenerator<CompletionEvent> { turn += 1; yield { type: 'done', message: turn === 1 ? { role: 'assistant', content: null, tool_calls: [call('w1', 'Bash', { command: 'echo one > one.txt' }), call('w2', 'Bash', { command: 'echo two > two.txt' }), call('w3', 'Bash', { command: 'echo three > three.txt' })] } : { role: 'assistant', content: 'done' }, finishReason: 'stop', usage: { verificationStatus: 'unknown', latencyMs: 1 } }; } };
   const shell = new ShellSession(root);
   try {
-    const run = new AgentRun({ client, model: 'm', tools: CORE_TOOLS, context: { root, checkpoints: new RunCheckpoints('progress'), shell, readFiles: new Set() }, policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES, requestApproval: async () => ({ decision: 'allow' }), emit: () => undefined, onProgress: (transcript) => { saved.push(structuredClone(transcript)); } });
+    const run = newTestRun({ client, model: 'm', tools: CORE_TOOLS, context: { root, checkpoints: new RunCheckpoints('progress'), shell, readFiles: new Set() }, policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES, requestApproval: async () => ({ decision: 'allow' }), emit: () => undefined, onProgress: (transcript) => { saved.push(structuredClone(transcript)); } });
     await run.run([{ role: 'user', content: 'go' }], new AbortController().signal);
   } finally {
     shell.dispose();

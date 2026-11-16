@@ -13,6 +13,7 @@ import { expandPrompt } from '../gsd/library';
 import { fetchPublic, isPublicAddress } from '../gsd/tools';
 import { modelsAsPrivateAs } from '../services/chatBridge';
 import type { AgentMessage, CompletionEvent, ModelInfo, ToolCall } from '../services/nearAiClient';
+import { newTestRun } from './helpers/gatedRuns';
 
 // Regression tests for the Phase 12 security review findings.
 
@@ -31,7 +32,7 @@ async function runCall(root: string, name: string, args: Record<string, unknown>
   const approvals: ApprovalRequest[] = [];
   const shell = new ShellSession(root);
   try {
-    const run = new AgentRun({
+    const run = newTestRun({
       client: client as never, model: 'm', tools: CORE_TOOLS,
       context: { root, checkpoints: new RunCheckpoints(`sec-${Date.now()}`), shell, readFiles: new Set() },
       policy: { mode: 'approve-risky', emergencyStop: false }, rules: DEFAULT_RULES,

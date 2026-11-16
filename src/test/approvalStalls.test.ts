@@ -7,6 +7,7 @@ import { DEFAULT_RULES, RunGrants } from '../agent/permissions';
 import { AWAITING_APPROVAL_PREFIX } from '../agent/loop';
 import { AgentConversation } from '../services/agentSession';
 import type { AgentMessage, CompletionEvent, ToolCall } from '../services/nearAiClient';
+import { newTestConversation } from './helpers/gatedRuns';
 
 // PERF-01: a sub-agent's approval that nobody answers no longer parks the run for 15 minutes. The call returns "awaiting approval" after a short wait,
 // the card stays queued, three in a row pause the run with a message, and answering one carries on (and tells the lead).
@@ -48,7 +49,7 @@ test('unanswered sub-agent approvals return "awaiting approval", three pause the
     async actualCostsUsd() { return undefined; }
   };
   const posted: Array<Record<string, unknown>> = [];
-  const conversation = new AgentConversation(root, (message) => posted.push(message), path.join(root, '.ckpt'));
+  const conversation = newTestConversation(root, (message) => posted.push(message), path.join(root, '.ckpt'));
   conversation.subagentApprovalWaitMs = 20;
   conversation.approvalTimeoutsBeforePause = 3;
   const running = conversation.send({
@@ -88,7 +89,7 @@ test('the main conversation keeps the 0.4.19 behaviour: its approvals wait for t
     async actualCostsUsd() { return undefined; }
   };
   const posted: Array<Record<string, unknown>> = [];
-  const conversation = new AgentConversation(root, (message) => posted.push(message), path.join(root, '.ckpt'));
+  const conversation = newTestConversation(root, (message) => posted.push(message), path.join(root, '.ckpt'));
   conversation.subagentApprovalWaitMs = 10;
   const running = conversation.send({ text: 'write', client: near as never, model: 'm', privacy: 'Private', policy: { mode: 'approve-risky', emergencyStop: false }, rules: DEFAULT_RULES });
   try {
@@ -132,7 +133,7 @@ test('one agent\'s unanswered approvals pause the run even while another agent\'
     async actualCostsUsd() { return undefined; }
   };
   const posted: Array<Record<string, unknown>> = [];
-  const conversation = new AgentConversation(root, (message) => posted.push(message), path.join(root, '.ckpt'));
+  const conversation = newTestConversation(root, (message) => posted.push(message), path.join(root, '.ckpt'));
   conversation.subagentApprovalWaitMs = 40;
   conversation.approvalTimeoutsBeforePause = 3;
   // Someone answers beta's cards at once; alpha's are left alone.
@@ -191,7 +192,7 @@ test('a late allow of a sub-agent\'s Bash command grants that command for the ru
     async actualCostsUsd() { return undefined; }
   };
   const posted: Array<Record<string, unknown>> = [];
-  const conversation = new AgentConversation(root, (message) => posted.push(message), path.join(root, '.ckpt'));
+  const conversation = newTestConversation(root, (message) => posted.push(message), path.join(root, '.ckpt'));
   conversation.subagentApprovalWaitMs = 20;
   const rules = { allowCommands: ['pwd'], denyCommands: DEFAULT_RULES.denyCommands };
   const running = conversation.send({ text: 'go', client: near as never, model: 'm', privacy: 'Private', policy: { mode: 'approve-risky', emergencyStop: false }, rules, projectAgents: [{ name: 'helper', description: 'helper', tools: ['Bash'], body: 'You help.', file: path.join(root, 'team.md') }] });
@@ -237,7 +238,7 @@ test('"Always allow" on a parked sub-agent card saves its allow entry, as it doe
   };
   const posted: Array<Record<string, unknown>> = [];
   const remembered: string[] = [];
-  const conversation = new AgentConversation(root, (message) => posted.push(message), path.join(root, '.ckpt'));
+  const conversation = newTestConversation(root, (message) => posted.push(message), path.join(root, '.ckpt'));
   conversation.subagentApprovalWaitMs = 20;
   const rules = { allowCommands: ['pwd'], denyCommands: DEFAULT_RULES.denyCommands };
   const running = conversation.send({ text: 'go', client: near as never, model: 'm', privacy: 'Private', policy: { mode: 'approve-risky', emergencyStop: false }, rules, rememberAllowRule: (rule: string) => { remembered.push(rule); }, projectAgents: [{ name: 'helper', description: 'helper', tools: ['Bash'], body: 'You help.', file: path.join(root, 'team.md') }] });
@@ -278,7 +279,7 @@ test('stopping a sub-agent removes its parked approval cards, and a later answer
     async actualCostsUsd() { return undefined; }
   };
   const posted: Array<Record<string, unknown>> = [];
-  const conversation = new AgentConversation(root, (message) => posted.push(message), path.join(root, '.ckpt'));
+  const conversation = newTestConversation(root, (message) => posted.push(message), path.join(root, '.ckpt'));
   conversation.subagentApprovalWaitMs = 20;
   const running = conversation.send({ text: 'go', client: near as never, model: 'm', privacy: 'Private', policy: { mode: 'approve-risky', emergencyStop: false }, rules: DEFAULT_RULES, projectAgents: [{ name: 'helper', description: 'helper', tools: ['Bash'], body: 'You help.', file: path.join(root, 'team.md') }] });
   let callId = '';
@@ -320,7 +321,7 @@ async function pausedRun(after: (conversation: AgentConversation, posted: Array<
     async actualCostsUsd() { return undefined; }
   };
   const posted: Array<Record<string, unknown>> = [];
-  const conversation = new AgentConversation(root, (message) => posted.push(message), path.join(root, '.ckpt'));
+  const conversation = newTestConversation(root, (message) => posted.push(message), path.join(root, '.ckpt'));
   conversation.subagentApprovalWaitMs = 10;
   conversation.approvalTimeoutsBeforePause = 3;
   conversation.runPauseLimitMs = 150;
@@ -392,7 +393,7 @@ function parkedCards(calls: ToolCall[], extra: { attachments?: boolean } = {}) {
   return async (root: string, check: (conversation: AgentConversation, posted: Array<Record<string, unknown>>, counts: number[]) => Promise<void>) => {
     const posted: Array<Record<string, unknown>> = [];
     const counts: number[] = [];
-    const conversation = new AgentConversation(root, (message) => posted.push(message), path.join(root, '.ckpt'));
+    const conversation = newTestConversation(root, (message) => posted.push(message), path.join(root, '.ckpt'));
     conversation.onWaitingChange = (count) => counts.push(count);
     conversation.subagentApprovalWaitMs = 20;
     conversation.approvalTimeoutsBeforePause = 0;
@@ -469,7 +470,7 @@ test('a risky card is never settled by another card\'s answer, even for the same
 // #47 review: a late "Always allow" saves an entry only for a card that carries a grant; a card held as risky grants nothing, so nothing is saved for it.
 test('a late "Always allow" on a card with no grant (held as risky) saves no allow entry', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'near-ai-late-risky-'));
-  const conversation = new AgentConversation(root, () => undefined, path.join(root, '.ckpt'));
+  const conversation = newTestConversation(root, () => undefined, path.join(root, '.ckpt'));
   try {
     const remembered: string[] = [];
     const late = (conversation as unknown as { lateApproval(label: string, approval: object, reply: object, grants: RunGrants, remember: (rule: string) => void): void }).lateApproval.bind(conversation);

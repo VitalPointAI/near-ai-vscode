@@ -8,6 +8,7 @@ import { ProfileStore } from '../services/profileStore';
 import { deriveProfileId } from '../domain/auth';
 import { FOREIGN_LIVE_MS, RunMarkers } from '../services/runMarkers';
 import { stateHomeFor } from '../services/stateHome';
+import { testGateHost } from './helpers/gatedRuns';
 
 // Drives the sidebar's real host path: attachChatToView -> initializeChat -> send handler ->
 // OutboundGuard -> activeProvider -> NearAiClient, against a fake NEAR AI server. Only the VS
@@ -77,7 +78,7 @@ async function openSidebar(root: string, auth: AuthService, extras: SidebarExtra
   nodeModule._load = (request, parent, isMain) => request === 'vscode' ? vscodeStub : originalLoad(request, parent, isMain);
   try {
     const { attachChatToView } = require('../services/chat') as typeof import('../services/chat');
-    await attachChatToView({ subscriptions: extras.subscriptions ?? [], globalStorageUri: { fsPath: path.join(root, '.global') }, extensionUri: { fsPath: root }, ...(extras.secrets ? { secrets: extras.secrets } : {}), ...(extras.workspaceState ? { workspaceState: extras.workspaceState } : {}) } as never, auth, view as never, '<html></html>');
+    await attachChatToView({ subscriptions: extras.subscriptions ?? [], globalStorageUri: { fsPath: path.join(root, '.global') }, extensionUri: { fsPath: root }, ...(extras.secrets ? { secrets: extras.secrets } : {}), ...(extras.workspaceState ? { workspaceState: extras.workspaceState } : {}) } as never, auth, view as never, '<html></html>', testGateHost());
   } finally {
     nodeModule._load = originalLoad;
   }

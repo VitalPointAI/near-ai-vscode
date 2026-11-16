@@ -7,6 +7,7 @@ import { DEFAULT_RULES } from '../agent/permissions';
 import { AgentConversation, GsdContext } from '../services/agentSession';
 import { parseChatWebviewMessage } from '../services/chatBridge';
 import type { AgentMessage, CompletionEvent, ToolCall } from '../services/nearAiClient';
+import { newTestConversation } from './helpers/gatedRuns';
 
 // Long runs show they are moving: each sub-agent's current action, clock, and counts reach the
 // agents strip (throttled), and a progress line appears in the chat when nothing else has.
@@ -40,7 +41,7 @@ test('a quiet run reports each agent\'s progress in the chat and in the agents s
     async actualCostsUsd() { return undefined; }
   };
   const posted: Array<Record<string, unknown>> = [];
-  const conversation = new AgentConversation(root, (message) => posted.push(message), path.join(root, '.ckpt'));
+  const conversation = newTestConversation(root, (message) => posted.push(message), path.join(root, '.ckpt'));
   conversation.progressTiming = { firstMs: 600, everyMs: 900, checkMs: 50 };
   try {
     await conversation.send({ text: 'go', client: near as never, model: 'm', privacy: 'Private', policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES, gsd });

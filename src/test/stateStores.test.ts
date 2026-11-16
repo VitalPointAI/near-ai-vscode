@@ -7,6 +7,7 @@ import { AgentConversation } from '../services/agentSession';
 import { RunMarkers } from '../services/runMarkers';
 import { stateHomeFor } from '../services/stateHome';
 import { gitInit, gitStatus, tempProject } from './helpers/stateFixtures';
+import { newTestConversation } from './helpers/gatedRuns';
 
 // Phase 27, plan 04 (SYNC-01): run markers and run checkpoints live in the project's state home, so a second editor on the same project reads
 // them. Each test works on a temporary project folder; "two editors" are two store instances with nothing in common but that folder.
@@ -163,7 +164,7 @@ test('sub-agent worktrees stay in the editor\'s own storage, never inside the pr
   const root = await tempProject();
   const storage = await tempProject();
   try {
-    const conversation = new AgentConversation(root, () => undefined, stateHomeFor(root).paths.checkpoints);
+    const conversation = newTestConversation(root, () => undefined, stateHomeFor(root).paths.checkpoints);
     const dir = () => (conversation as unknown as { worktreeDir: string }).worktreeDir;
     conversation.worktreeRoot = path.join(storage, 'worktrees');
     assert.equal(dir(), path.join(storage, 'worktrees'));

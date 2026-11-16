@@ -76,7 +76,7 @@ export interface ChatHost {
   onDidDispose: vscode.Event<void>;
 }
 
-export async function attachChatToView(context: vscode.ExtensionContext, auth: AuthService, view: vscode.WebviewView, html: string, gateHost?: GateHost): Promise<void> {
+export async function attachChatToView(context: vscode.ExtensionContext, auth: AuthService, view: vscode.WebviewView, html: string, gateHost?: Pick<GateHost, 'runtimeFor'>): Promise<void> {
   await initializeChat(context, auth, view, html, undefined, gateHost);
 }
 
@@ -124,7 +124,7 @@ interface ChatTab {
   focusRegained?: () => void;
 }
 
-async function initializeChat(context: vscode.ExtensionContext, auth: AuthService, panel: ChatHost, html: string, initialPrompt?: string, gateHost?: GateHost): Promise<void> {
+async function initializeChat(context: vscode.ExtensionContext, auth: AuthService, panel: ChatHost, html: string, initialPrompt?: string, gateHost?: Pick<GateHost, 'runtimeFor'>): Promise<void> {
   configureSpendTracking(context);
   const state = {
     activity: undefined as ActivityStore | undefined,
@@ -1229,7 +1229,7 @@ function runMarkersFor(context: vscode.ExtensionContext, root: string): RunMarke
   return store;
 }
 
-function conversationFor(context: vscode.ExtensionContext, root: string, panel: ChatHost, post: (message: Record<string, unknown>) => void, title: () => string, gateHost?: GateHost): { agent: AgentConversation; focusRegained: () => void } {
+function conversationFor(context: vscode.ExtensionContext, root: string, panel: ChatHost, post: (message: Record<string, unknown>) => void, title: () => string, gateHost?: Pick<GateHost, 'runtimeFor'>): { agent: AgentConversation; focusRegained: () => void } {
   const storage = context.globalStorageUri.fsPath;
   // Conversations live in the project's state home, so every editor on this computer lists and reopens the same ones (SYNC-01). The state home and its
   // key are created on the first save, never by opening the folder.

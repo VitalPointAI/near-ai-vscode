@@ -315,8 +315,8 @@ export class AgentConversation {
     private readonly activity?: ActivityFeed
   ) {}
 
-  /** The one gate (GATE-04): the chat sets it, and every tool call of a run, a sub-agent's included, is decided through it. Without one a run uses the shipped default. */
-  public gateHost: GateHost | undefined;
+  /** The one gate (GATE-04): the chat sets it, and every tool call of a run, a sub-agent's included, is decided through it. Without one a run is failed closed: only reading and planning run, and no policy is guessed. */
+  public gateHost: Pick<GateHost, 'runtimeFor'> | undefined;
   /** The folder for sub-agents' git worktrees. The chat sets it to the editor's own storage: a worktree is a full checkout and never belongs in the project. */
   public worktreeRoot: string | undefined;
   /** Awaited before each checkpoint save; the chat sets it to the state home's ensure(), so the inner .gitignore exists before any checkpoint file. */

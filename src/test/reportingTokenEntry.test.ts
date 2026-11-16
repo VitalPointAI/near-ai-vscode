@@ -18,6 +18,7 @@ import {
 } from '../services/reportingToken';
 import { buildToolsDirectory, parseToolsPageMessage } from '../services/toolsDirectory';
 import { DEFAULT_RULES } from '../agent/permissions';
+import { testGateHost } from './helpers/gatedRuns';
 
 const ROOT = path.join(__dirname, '..', '..');
 const TOKEN = 'rpt-0123456789abcdef0123456789abcdef';
@@ -276,7 +277,7 @@ test('the chat: the spend line links to the token, and the link runs the command
   const sidebar = { webview: { html: '', postMessage: async (message: Record<string, unknown>) => { posted.push(message); return true; }, onDidReceiveMessage: (handler: (message: unknown) => Promise<void>) => { receive = handler; return { dispose() {} }; } }, onDidDispose: () => ({ dispose() {} }) };
   try {
     const { attachChatToView } = load<typeof import('../services/chat')>('../services/chat');
-    await attachChatToView(context as never, auth, sidebar as never, '<html></html>');
+    await attachChatToView(context as never, auth, sidebar as never, '<html></html>', testGateHost());
     const status = () => posted.filter((message) => message.type === 'status').at(-1) as { token?: { state: string; text: string; title: string } } | undefined;
     assert.deepEqual([status()?.token?.state, status()?.token?.text], ['missing', TOKEN_MISSING_TEXT]);
     assert.match(String(status()?.token?.title), /reporting-tokens/);

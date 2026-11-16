@@ -10,6 +10,7 @@ import { comparisonStoreFor } from '../benchmark/store';
 import { loadBenchmarkTasks, tasksFor, type BenchmarkTask } from '../benchmark/tasks';
 import { spendAccountOf } from './agentSession';
 import type { AuthService } from './auth';
+import { unattendedRuntimeFor } from '../gate/host';
 import type { GateHost } from '../gate/host';
 import { providerErrorMessage } from './chatBridge';
 import { isEmergencyStopped, onDidChangeEmergencyStop } from './emergencyStop';
@@ -249,6 +250,7 @@ async function start(context: vscode.ExtensionContext, auth: AuthService, picked
   running = { runId, abort, saved, done: 0, total: plan.toRun };
   const stopListener = onDidChangeEmergencyStop((engaged) => { if (engaged) abort.abort('Emergency stop is on.'); });
   const account = spendAccountOf(active.provider.client);
+  const host = gateHost;
   await account?.ledger.refresh();
   const reportNow = () => post({ type: 'report', ...reportView(saved, gathered.models, gathered.roles) });
   reportNow();
@@ -259,7 +261,7 @@ async function start(context: vscode.ExtensionContext, auth: AuthService, picked
         runId, plan, tasks, runsPerTask: picked.runs, signal: abort.signal, rules: readAgentRules(), emergencyStopped: isEmergencyStopped,
         clientFor: (model) => clientFor(active, model).client,
         // Nobody watches a task run: it is decided with presence none in an unattended context, and the floor only reports for now (D-43).
-        ...(gateHost ? { gateFor: (task) => { const root = projectRootOf(); return root ? gateHost?.runtimeFor({ root, actor: { kind: 'agent', sessionId: `compare-${runId}`, agentLabel: `compare ${task.model} ${task.task}` }, presence: 'none', context: 'unattended', floorMode: 'shadow' }) : undefined; } } : {}),
+        ...(host ? { gateFor: (task) => unattendedRuntimeFor(host, projectRootOf(), `compare-${runId}`, `compare ${task.model} ${task.task}`) } : {}),
         overBudget: (runTag, usage) => overBudget(account, runTag, usage),
         stopAll: () => {
           const reached = account?.limitReached();

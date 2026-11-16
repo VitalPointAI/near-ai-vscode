@@ -5,6 +5,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { keccak256, recoverPersonalSignAddress, verifyTdxQuote } from '../services/attestation';
 import { NearAiClient, type UsageMetadata } from '../services/nearAiClient';
+import { newTestConversation } from './helpers/gatedRuns';
 
 // Vectors produced with ethers 5.7.2, the library NEAR's reference verifier uses.
 const SIGNER = '0x1563915e194d8cfba1943570603f7606a3115508';
@@ -164,7 +165,7 @@ test('the chat offers Verify only for TEE-private cloud answers, and verifies th
   for (const [privacy, local, offered] of cases) {
     const root = await mkdtemp(path.join(tmpdir(), 'near-ai-verify-'));
     const posted: Array<{ type: string; runId?: string }> = [];
-    const conversation = new AgentConversation(root, (message) => posted.push(message as never), path.join(root, '.ckpt'));
+    const conversation = newTestConversation(root, (message) => posted.push(message as never), path.join(root, '.ckpt'));
     await conversation.send({ text: 'hi', client: client as never, model: 'z-ai/glm-5.3', privacy, local, policy: { mode: 'approve-risky', emergencyStop: false }, rules: DEFAULT_RULES });
     const offer = posted.find((message) => message.type === 'response-verifiable');
     assert.equal(Boolean(offer), offered, privacy);

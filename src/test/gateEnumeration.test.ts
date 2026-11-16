@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { RunCheckpoints } from '../agent/checkpoints';
-import { effectsOfCall, gateToolCall, recordApprovalReply, recordLateApproval, defaultGateRuntime, manifestArguments } from '../agent/gateAdapter';
+import { effectsOfCall, gateToolCall, recordApprovalReply, recordLateApproval, manifestArguments } from '../agent/gateAdapter';
 import { AgentRun } from '../agent/loop';
 import type { AgentEvent, ApprovalReply, ApprovalRequest } from '../agent/loop';
 import { DEFAULT_RULES, RunGrants } from '../agent/permissions';
@@ -17,7 +17,7 @@ import { ShellSession } from '../agent/shell';
 import { builtInTools } from '../agent/toolCatalog';
 import { CORE_TOOLS } from '../agent/tools';
 import type { AgentTool } from '../agent/tools';
-import { failedClosed } from '../domain/gate/bundle';
+import { BUNDLE_FAILURES, failedClosed } from '../domain/gate/bundle';
 import type { BundleState } from '../domain/gate/bundle';
 import { GATE_RULE_IDS } from '../domain/gate/decide';
 import type { GateRuntime } from '../domain/gate/decide';
@@ -47,6 +47,7 @@ import type { BenchmarkClient } from '../benchmark/runner';
 import { planComparison } from '../benchmark/results';
 import type { ResultRow } from '../benchmark/results';
 import { loadBenchmarkTasks } from '../benchmark/tasks';
+import { testGateRuntime } from './helpers/gatedRuns';
 
 const call = (id: string, name: string, args: Record<string, unknown>): ToolCall => ({ id, type: 'function', function: { name, arguments: JSON.stringify(args) } });
 const usage = { inputTokens: 10, outputTokens: 5, verificationStatus: 'unknown' as const, latencyMs: 1 };
@@ -264,12 +265,12 @@ test('a call whose effects cannot be filled keeps today\'s decision while the fl
     tool: read, raw: { file_path: outside }, root, callId: 'r1', policy: { mode: 'approve-risky', emergencyStop: false } as ActionPolicy,
     rules: DEFAULT_RULES, grants: new RunGrants(), buildAuto: async () => undefined, ...(gate ? {} : {})
   });
-  const shadow = defaultGateRuntime();
+  const shadow = testGateRuntime();
   assert.ok(effectsOfCall(shadow, read, { file_path: outside }, root).length > 0, 'the stand-in is never an empty list');
   const kept = await gateToolCall(shadow, input(shadow));
   assert.equal(kept.decision.outcome, 'allow');
   assert.equal(kept.decision.rule, 'settings.read-plan');
-  const enforced: GateRuntime = { ...defaultGateRuntime(), floorMode: 'enforce' };
+  const enforced: GateRuntime = { ...testGateRuntime(), floorMode: 'enforce' };
   assert.deepEqual(effectsOfCall(enforced, read, { file_path: outside }, root), []);
   const asked = await gateToolCall(enforced, input(enforced));
   assert.equal(asked.decision.outcome, 'ask');
@@ -282,7 +283,7 @@ test('a call whose effects cannot be filled keeps today\'s decision while the fl
 });
 
 test('no built-in tool declares an empty effect list: every manifest has a template, and an unreadable call still gets a non-empty stand-in while the floor reports', () => {
-  const shadow = defaultGateRuntime();
+  const shadow = testGateRuntime();
   const root = path.join(tmpdir(), 'near-ai-gate-catalog');
   const tools = builtInTools();
   assert.ok(tools.length >= 40);
@@ -299,7 +300,7 @@ test('every rule id a settings answer is given is a rule id the gate can record'
   const shell = CORE_TOOLS.find((tool) => tool.name === 'Bash') as AgentTool<any>;
   const write = CORE_TOOLS.find((tool) => tool.name === 'Write') as AgentTool<any>;
   const read = CORE_TOOLS.find((tool) => tool.name === 'Read') as AgentTool<any>;
-  const runtime = defaultGateRuntime();
+  const runtime = testGateRuntime();
   const rules: string[] = [];
   for (const mode of ['approve-risky', 'mostly-autonomous', 'fully-autonomous'] as const) {
     const policy: ActionPolicy = { mode, emergencyStop: false };
@@ -376,7 +377,7 @@ test('if the bundle fails between the card and the answer, an allow is re-checke
 
 test('a card answer never decides or grants on its own: it goes through recordApprovalReply, and a pending answer is recorded when it arrives late', async () => {
   const root = await project();
-  const runtime = defaultGateRuntime();
+  const runtime = testGateRuntime();
   const write = CORE_TOOLS.find((tool) => tool.name === 'Write') as AgentTool<any>;
   const gated = await gateToolCall(runtime, { tool: write, raw: { file_path: 'p.md', content: 'x' }, root, callId: 'p1', policy: { mode: 'approve-risky', emergencyStop: false }, rules: DEFAULT_RULES, grants: new RunGrants(), buildAuto: async () => undefined });
   assert.equal(gated.decision.outcome, 'ask');
@@ -393,7 +394,7 @@ test('a card answer never decides or grants on its own: it goes through recordAp
 
 test('a call with unparseable arguments reaches no decision and no execution, and a run with no tool calls writes no tool decision record', async () => {
   const root = await project();
-  const runtime = defaultGateRuntime();
+  const runtime = testGateRuntime();
   const setup = runWith(root, [{ calls: [{ id: 'bad', type: 'function', function: { name: 'Write', arguments: '{not json' } }] }, { text: 'sorry' }], { gate: runtime });
   try {
     await go(setup);
@@ -402,7 +403,7 @@ test('a call with unparseable arguments reaches no decision and no execution, an
   }
   assert.match(toolOutputs(setup)[0] ?? '', /^Arguments are not valid JSON/);
   assert.equal(runtime.records.length, 0);
-  const none = defaultGateRuntime();
+  const none = testGateRuntime();
   const quiet = runWith(root, [{ text: 'Nothing to do.' }], { gate: none });
   try {
     const result = await go(quiet);
@@ -416,7 +417,7 @@ test('a call with unparseable arguments reaches no decision and no execution, an
 test('in a batch of concurrent lookups each call gets its own decision before its own run', async () => {
   const root = await project();
   const order: string[] = [];
-  const base = defaultGateRuntime();
+  const base = testGateRuntime();
   const gate: GateRuntime = { ...base, sink: { record: (record) => { order.push(`decision:${record.resources[0]?.name}`); base.sink.record(record); } } };
   const read = CORE_TOOLS.find((tool) => tool.name === 'Read') as AgentTool<any>;
   const spy: AgentTool<any> = { ...read, run: async (input, context) => { order.push(`run:${String((input as { path: string }).path)}`); return read.run(input, context); } };
@@ -495,7 +496,7 @@ test('a sub-agent spawn is decided like any call, and the child\'s own calls are
 
 test('a card for a floor decision carries no run-wide grant and no "always allow", and with nobody present the same call is refused with no card (floor enforced)', async () => {
   const root = await project();
-  const enforced = (presence: 'person' | 'none'): GateRuntime => ({ ...defaultGateRuntime({ presence }), floorMode: 'enforce' });
+  const enforced = (presence: 'person' | 'none'): GateRuntime => ({ ...testGateRuntime({ presence }), floorMode: 'enforce' });
   const hook = call('f1', 'Write', { file_path: '.git/hooks/pre-commit', content: '#!/bin/sh\n' });
   const asked = runWith(root, [{ calls: [hook] }, { text: 'ok' }], { gate: enforced('person'), mode: 'fully-autonomous', answer: () => ({ decision: 'allow-always' }) });
   const refused = runWith(root, [{ calls: [hook] }, { text: 'ok' }], { gate: enforced('none'), mode: 'fully-autonomous' });
@@ -548,15 +549,15 @@ function onePlannedStep(planned: Step) {
   };
 }
 
-interface CyberOutcome { order: string[]; runtime: ReturnType<typeof defaultGateRuntime>; approvals: number; result: Awaited<ReturnType<typeof startCyberRun>> }
+interface CyberOutcome { order: string[]; runtime: ReturnType<typeof testGateRuntime>; approvals: number; result: Awaited<ReturnType<typeof startCyberRun>> }
 
-async function cyberScript(planned: Step, options: { capability?: 'read' | 'shell'; grant?: boolean; mode?: 'approve-risky' | 'auto' | 'fully-autonomous'; approve?: boolean; modes?: Engagement['allowedModes']; presence?: 'person' | 'none' } = {}): Promise<CyberOutcome> {
+async function cyberScript(planned: Step, options: { capability?: 'read' | 'shell'; grant?: boolean; mode?: 'approve-risky' | 'auto' | 'fully-autonomous'; approve?: boolean; modes?: Engagement['allowedModes']; presence?: 'person' | 'none'; noGate?: boolean } = {}): Promise<CyberOutcome> {
   const order: string[] = [];
   const capability = options.capability ?? 'read';
   const directory = await mkdtemp(path.join(tmpdir(), 'near-ai-cyber-gate-'));
   const root = await mkdtemp(path.join(tmpdir(), 'near-ai-cyber-gate-root-'));
-  const base = defaultGateRuntime({ presence: options.presence ?? 'person' });
-  const runtime: ReturnType<typeof defaultGateRuntime> = { ...base, sink: { record: (record: DecisionRecord) => { order.push(`decision:${record.api.request.uid.split('/')[1] ?? record.api.request.uid}:${outcomeOf(record)}`); base.records.push(record); } } };
+  const base = testGateRuntime({ presence: options.presence ?? 'person' });
+  const runtime: ReturnType<typeof testGateRuntime> = { ...base, sink: { record: (record: DecisionRecord) => { order.push(`decision:${record.api.request.uid.split('/')[1] ?? record.api.request.uid}:${outcomeOf(record)}`); base.records.push(record); } } };
   const tool: AgentTool<any> = {
     name: planned.tool, description: planned.tool, parameters: { type: 'object', properties: {} }, capability, manifest: testManifest(planned.tool, capability),
     parse: (raw) => raw, title: () => planned.tool, async run() { order.push(`run:${planned.tool}`); return 'ok'; }
@@ -572,7 +573,7 @@ async function cyberScript(planned: Step, options: { capability?: 'read' | 'shel
     const result = await startCyberRun({
       engagement, currentAcceptance: { region: 'us', scope: scopeFingerprint(CYBER_SCOPE), extensionVersion: '0.4.10', textVersion: 'v1' },
       driver: onePlannedStep(planned) as never, tools, ledger: new CyberLedgerStore(directory), evidence: new CyberEvidenceStore(directory), grants,
-      policy: { mode: options.mode ?? 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES, gate: runtime,
+      policy: { mode: options.mode ?? 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES, ...(options.noGate ? {} : { gate: runtime }),
       requestApproval: async () => { approvals += 1; order.push('card'); return { decision: options.approve === false ? 'deny' : 'allow' }; },
       signal: new AbortController().signal, toolContext: context, now: () => new Date('2026-11-02T12:00:00Z')
     });
@@ -622,26 +623,27 @@ const benchmarkClient = (turns: Turn[]): BenchmarkClient => {
 };
 
 test('a run nobody watches is decided with presence none and context unattended, unless the caller can ask a person; a given gate is used as it is', () => {
-  const nobody = runGateFor({}) as ReturnType<typeof defaultGateRuntime>;
+  const nobody = runGateFor({}) as ReturnType<typeof testGateRuntime>;
   assert.equal(nobody.presence, 'none');
   assert.equal(nobody.context, 'unattended');
   assert.equal(nobody.floorMode, 'shadow');
   const asked = runGateFor({ requestApproval: async () => ({ decision: 'allow' }) });
   assert.equal(asked.presence, 'person');
   assert.equal(asked.context, 'interactive');
-  const own = defaultGateRuntime({ presence: 'none', context: 'routine' });
+  const own = testGateRuntime({ presence: 'none', context: 'routine' });
   assert.equal(runGateFor({ gate: own }), own);
 });
 
-test('runAgentInFolder with no gate decides every call with nobody present and changes no decision: a Write runs under fully autonomous, and an action that would ask is declined', async () => {
+test('runAgentInFolder with an explicit test runtime for a run nobody watches changes no decision: a Write runs under fully autonomous, and an action that would ask is declined', async () => {
   const root = await project();
+  const gate = testGateRuntime({ presence: 'none', context: 'unattended' });
   const result = await runAgentInFolder(
     benchmarkClient([{ calls: [call('w1', 'Write', { file_path: 'made.md', content: 'x' }), call('b1', 'Bash', { command: 'git push origin main' })] }, { text: 'done' }]),
-    'm', root, 'go', { maxTurns: 4, rules: DEFAULT_RULES, policy: { mode: 'approve-risky', emergencyStop: false } }
+    'm', root, 'go', { maxTurns: 4, rules: DEFAULT_RULES, policy: { mode: 'approve-risky', emergencyStop: false }, gate }
   );
   assert.equal(result.outcome, 'completed');
   assert.equal(existsSync(path.join(root, 'made.md')), false, 'with nobody to ask, an edit that needs approval is declined, as before the gate');
-  const granted = await runAgentInFolder(benchmarkClient([{ calls: [call('w2', 'Write', { file_path: 'made.md', content: 'x' })] }, { text: 'done' }]), 'm', root, 'go', { maxTurns: 4, rules: DEFAULT_RULES });
+  const granted = await runAgentInFolder(benchmarkClient([{ calls: [call('w2', 'Write', { file_path: 'made.md', content: 'x' })] }, { text: 'done' }]), 'm', root, 'go', { maxTurns: 4, rules: DEFAULT_RULES, gate });
   assert.equal(granted.outcome, 'completed');
   assert.equal(existsSync(path.join(root, 'made.md')), true);
 });
@@ -688,6 +690,114 @@ test('the role suite gives each role run its own gate, so the studio\'s decision
   assert.deepEqual(asked, ['reviewer/m1']);
   const records = await logOf(started, root);
   assert.deepEqual(records.map((record) => [callIdOf(record), outcomeOf(record), record.api.operation]), [['t1', 'allowed', 'read']]);
+});
+
+// ---- Review of PR 2: a run with no gate host is failed closed, never decided against a policy nobody read ----
+
+const NO_HOST = BUNDLE_FAILURES.unavailable;
+const writeAndRead = (): Turn[] => [{ calls: [call('w1', 'Write', { file_path: 'out.md', content: 'nope' }), call('r1', 'Read', { file_path: 'a.ts' })] }, { text: 'ok' }];
+
+test('bundle.unavailable is a rule id the gate can record, and a plain sentence with no em-dash names what is still allowed', () => {
+  assert.ok(GATE_RULE_IDS.includes('bundle.unavailable'));
+  assert.match(NO_HOST, /only reading and planning/);
+  assert.ok(!NO_HOST.includes('\u2014'));
+});
+
+test('a run built with no gate host: a Write is refused even under fully autonomous, a Read still runs, and no card is shown', async () => {
+  const root = await project();
+  const setup = runWith(root, writeAndRead(), { mode: 'fully-autonomous' });
+  try {
+    await go(setup);
+  } finally {
+    setup.shell.dispose();
+  }
+  const [write, read] = toolOutputs(setup);
+  assert.equal(write, `Not allowed: ${NO_HOST}`);
+  assert.match(read ?? '', /export const value = 1/);
+  assert.equal(existsSync(path.join(root, 'out.md')), false);
+  assert.equal(setup.approvals.length, 0);
+});
+
+test('runGateFor with no gate (comparison, role suite and any folderless fallback) is failed closed with the rule bundle.unavailable: Write and Bash refused, Read and a plan allowed', async () => {
+  const root = await project();
+  const gate = runGateFor({});
+  assert.equal(gate.bundleState().state, 'failed-closed');
+  assert.equal(runGateFor({ requestApproval: async () => ({ decision: 'allow' }) }).bundleState().state, 'failed-closed', 'a person who can answer does not make an unread policy valid');
+  const decide = async (name: string, raw: Record<string, unknown>) => (await gateToolCall(gate, {
+    tool: CORE_TOOLS.find((tool) => tool.name === name) as AgentTool<any>, raw, root, callId: name, policy: { mode: 'fully-autonomous', emergencyStop: false },
+    rules: DEFAULT_RULES, grants: new RunGrants(), buildAuto: async () => undefined
+  })).decision;
+  for (const [name, raw] of [['Write', { file_path: 'out.md', content: 'x' }], ['Bash', { command: 'git status' }]] as const) {
+    const refused = await decide(name, raw);
+    assert.equal(refused.outcome, 'deny', name);
+    assert.equal(refused.rule, 'bundle.unavailable', name);
+    assert.equal(refused.reason, NO_HOST, name);
+  }
+  assert.equal((await decide('Read', { file_path: 'a.ts' })).outcome, 'allow');
+});
+
+test('a benchmark run, a comparison task and a role run with no gate are refused a Write; a gateFor that answers nothing (no host) falls back to the same refusal', async () => {
+  const root = await project();
+  const written = await runAgentInFolder(benchmarkClient(writeAndRead()), 'm', root, 'go', { maxTurns: 4, rules: DEFAULT_RULES });
+  assert.equal(written.outcome, 'completed');
+  assert.equal(existsSync(path.join(root, 'out.md')), false, 'no gate: nothing is written');
+  const tasks = (await loadBenchmarkTasks()).filter((task) => task.id === 'implement');
+  const seen: string[] = [];
+  const toolResults: string[] = [];
+  const watching = (turns: Turn[]): BenchmarkClient => ({
+    async *streamCompletion(_model: string, messages: AgentMessage[]): AsyncGenerator<CompletionEvent> {
+      for (const message of messages) if (message.role === 'tool' && typeof message.content === 'string') toolResults.push(message.content);
+      const turn = turns[Math.min(seen.length, turns.length - 1)] ?? { text: 'done' };
+      seen.push('turn');
+      yield { type: 'done', message: { role: 'assistant', content: turn.text ?? null, ...(turn.calls ? { tool_calls: turn.calls } : {}) }, finishReason: turn.calls ? 'tool_calls' : 'stop', usage };
+    }
+  });
+  await runComparison({
+    runId: 'run-nohost', plan: planComparison(['m1'], tasks, 1, 'rerun', new Map()), tasks, runsPerTask: 1,
+    clientFor: () => watching([{ calls: [call('c1', 'Write', { file_path: 'slug.js', content: 'x' })] }, { text: 'Done.' }]),
+    rules: DEFAULT_RULES, emergencyStopped: () => false, signal: new AbortController().signal, onRow: () => undefined, gateFor: () => undefined
+  });
+  assert.ok(toolResults.some((text) => text === `Not allowed: ${NO_HOST}`), `the comparison task's Write was refused: ${toolResults.join(' | ')}`);
+  seen.length = 0;
+  toolResults.length = 0;
+  const outcomes = await runRoleSuite(planRoleSuite([{ name: 'reviewer', role: 'reviewer' }], ['m1']), {
+    clientFor: () => watching([{ calls: [call('t1', 'Write', { file_path: 'x.md', content: 'x' })] }, { text: 'Done.' }]),
+    rules: DEFAULT_RULES, signal: new AbortController().signal
+  });
+  assert.equal(outcomes.length, 1);
+  assert.ok(toolResults.some((text) => text === `Not allowed: ${NO_HOST}`), `the role run's Write was refused: ${toolResults.join(' | ')}`);
+});
+
+test('a chat conversation with no gate host refuses a Write', async () => {
+  const root = await project();
+  const results: string[] = [];
+  let turn = 0;
+  const near = {
+    async *streamCompletion(_model: string, messages: AgentMessage[]): AsyncGenerator<CompletionEvent> {
+      for (const message of messages) if (message.role === 'tool' && typeof message.content === 'string') results.push(message.content);
+      turn += 1;
+      if (turn === 1) { yield { type: 'done', message: { role: 'assistant', content: null, tool_calls: [call('w1', 'Write', { file_path: 'chat.md', content: 'x' })] }, finishReason: 'tool_calls', usage }; return; }
+      yield { type: 'done', message: { role: 'assistant', content: 'Done.' }, finishReason: 'stop', usage };
+    },
+    async actualCostsUsd() { return undefined; }
+  };
+  const conversation = new AgentConversation(root, () => undefined, path.join(root, '.ckpt'));
+  try {
+    await conversation.send({ text: 'go', client: near as never, model: 'm', privacy: 'Private', policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES });
+  } finally {
+    conversation.dispose();
+  }
+  assert.equal(existsSync(path.join(root, 'chat.md')), false);
+  assert.ok(results.includes(`Not allowed: ${NO_HOST}`), results.join(' | '));
+});
+
+test('a cyber run with no gate refuses an exploit step even with the engagement grant, and never runs its tool; a read step still runs', async () => {
+  const exploit = cyberStep({ tool: 'CyberExploitTool', action: 'exploit', sandbox: 'tempFolder' });
+  const refused = await cyberScript(exploit, { capability: 'shell', grant: true, modes: ['passive', 'intrusive'], noGate: true });
+  assert.equal(refused.order.includes('run:CyberExploitTool'), false, 'no gate: the exploit tool never ran');
+  assert.equal(refused.approvals, 0);
+  const read = await cyberScript(cyberStep(), { noGate: true });
+  assert.deepEqual(read.order.filter((entry) => entry.startsWith('run:')), ['run:CyberHttpProbe'], 'reading still runs');
 });
 
 // ---- Task 3 (plan 13): a test finds every execution path ----
@@ -820,7 +930,7 @@ for (const effect of effectCases()) {
   test(`${effect.name} (${effect.operation}): a scripted run records a decision before the tool's run starts`, async () => {
     const root = await project();
     const order: string[] = [];
-    const base = defaultGateRuntime();
+    const base = testGateRuntime();
     const gate: GateRuntime = { ...base, sink: { record: (record: DecisionRecord) => { order.push(`decision:${record.api.request.uid}:${record.api.operation}`); base.sink.record(record); } } };
     const spy: AgentTool<any> = { ...effect.tool, run: async () => { order.push(`run:${effect.tool.name}`); return 'ok'; } };
     const setup = runWith(root, [{ calls: [call('e1', effect.tool.name, effect.args)] }, { text: 'done' }], { gate, mode: 'fully-autonomous', tools: [...CORE_TOOLS.filter((tool) => tool.name !== effect.tool.name), spy] });

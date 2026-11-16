@@ -10,6 +10,7 @@ import type { Todo } from '../agent/tools';
 import { isSyntheticMessage } from '../domain/state/threadCapture';
 import { AgentConversation, GsdContext, visibleTurns } from '../services/agentSession';
 import type { AgentMessage, CompletionEvent, ToolCall } from '../services/nearAiClient';
+import { newTestConversation } from './helpers/gatedRuns';
 
 // The Tasks panel follows sub-agents: an Agent call that names its task moves that item to in
 // progress, then completed (or back to pending) as soon as that agent ends, without waiting for
@@ -84,7 +85,7 @@ test('parallel sub-agents move their own task-list items as each one ends; a fai
     async actualCostsUsd() { return undefined; }
   };
   const posted: Array<Record<string, unknown>> = [];
-  const conversation = new AgentConversation(root, (message) => posted.push(message), path.join(root, '.ckpt'));
+  const conversation = newTestConversation(root, (message) => posted.push(message), path.join(root, '.ckpt'));
   try {
     await conversation.send({ text: 'plan it', client: near as never, model: 'm', privacy: 'Private', policy: { mode: 'approve-risky', emergencyStop: false }, rules: DEFAULT_RULES, gsd, maxParallelAgents: 4 });
     const lists = posted.filter((message) => message.type === 'todos').map((message) => shown(message.todos as Todo[]));
@@ -133,7 +134,7 @@ test('the Agent result has no task-list reminder when there is no list, or nothi
       },
       async actualCostsUsd() { return undefined; }
     };
-    const conversation = new AgentConversation(root, () => undefined, path.join(root, '.ckpt'));
+    const conversation = newTestConversation(root, () => undefined, path.join(root, '.ckpt'));
     try {
       await conversation.send({ text: 'go', client: near as never, model: 'm', privacy: 'Private', policy: { mode: 'approve-risky', emergencyStop: false }, rules: DEFAULT_RULES, gsd });
       const result = mainRequests.at(-1)!.filter((message) => message.role === 'tool').map((message) => String(message.content)).at(-1);
@@ -172,7 +173,7 @@ async function scripted(script: (n: number, messages: AgentMessage[]) => Complet
     async actualCostsUsd() { return undefined; }
   };
   const posted: Array<Record<string, unknown>> = [];
-  const conversation = new AgentConversation(root, (message) => posted.push(message), path.join(root, '.ckpt'));
+  const conversation = newTestConversation(root, (message) => posted.push(message), path.join(root, '.ckpt'));
   try {
     for (const text of sends) await conversation.send({ text, client: near as never, model: 'm', privacy: 'Private', policy: { mode: 'approve-risky', emergencyStop: false }, rules: DEFAULT_RULES, ...(options.maxTurns ? { maxTurns: options.maxTurns } : {}) }).catch((error) => { if (!options.tolerate) throw error; });
   } finally {
@@ -395,7 +396,7 @@ test('sub-agents that name their items by number or a quoted paraphrase end the 
     async actualCostsUsd() { return undefined; }
   };
   const posted: Array<Record<string, unknown>> = [];
-  const conversation = new AgentConversation(root, (message) => posted.push(message), path.join(root, '.ckpt'));
+  const conversation = newTestConversation(root, (message) => posted.push(message), path.join(root, '.ckpt'));
   try {
     await conversation.send({ text: 'plan it', client: near as never, model: 'm', privacy: 'Private', policy: { mode: 'approve-risky', emergencyStop: false }, rules: DEFAULT_RULES, gsd, maxParallelAgents: 4 });
     assert.equal(shown(todoPosts(posted).at(-1)!.todos as Todo[]), 'Task A:completed Task B:completed');

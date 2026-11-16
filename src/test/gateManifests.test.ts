@@ -29,6 +29,7 @@ import { describeManifest } from '../domain/gate/words';
 import { buildToolsDirectory } from '../services/toolsDirectory';
 import type { DirectoryInput } from '../services/toolsDirectory';
 
+
 const EM_DASH = String.fromCharCode(0x2014);
 
 function directoryInput(): DirectoryInput {

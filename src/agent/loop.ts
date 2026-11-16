@@ -7,7 +7,7 @@ import type { ActionCapability, ActionPolicy } from '../domain/policy';
 import type { AgentMessage, CompletionEvent, ToolCall, ToolDefinition, UsageMetadata } from '../services/nearAiClient';
 import { AutoApprovalContext, allowRuleBlocker, isAutoAllowed, PermissionRules, RunGrants, suggestAllowRule } from './permissions';
 import type { GateRuntime } from '../domain/gate/decide';
-import { defaultGateRuntime, gateToolCall, recordApprovalReply } from './gateAdapter';
+import { gateToolCall, recordApprovalReply, unavailableGateRuntime } from './gateAdapter';
 import { PREAMBLE_START, resolveGsdRun } from '../gsd/preamble';
 import type { CommandSafetyCheck } from './safetyModel';
 import type { UnattendedScope } from './unattended';
@@ -197,9 +197,9 @@ export interface AgentRunOptions {
   /** The user's messages sent during the run; a retry wait, or a request still held by the model's cooldown, ends early when one arrives. */
   input?: RunInput;
   /**
-   * The one gate (GATE-04): every tool call is decided through it before it runs, and its decision is recorded. Optional with a safe default (the shipped
-   * default bundle, the floor in shadow and an in-memory sink), so a run built without one decides exactly as it did before the gate existed. Production
-   * constructions pass it explicitly.
+   * The one gate (GATE-04): every tool call is decided through it before it runs, and its decision is recorded. Optional only so that a run built without
+   * a gate host is safe: it is then failed closed (rule `bundle.unavailable`, an in-memory sink), so only the floor, reading and planning run, and no policy
+   * is ever guessed. Production constructions pass the host's runtime explicitly.
    */
   gate?: GateRuntime;
   requestApproval(request: ApprovalRequest): Promise<ApprovalReply>;
@@ -302,7 +302,7 @@ export class AgentRun {
 
   public constructor(private readonly options: AgentRunOptions) {
     this.grants = options.grants ?? new RunGrants();
-    this.gate = options.gate ?? defaultGateRuntime();
+    this.gate = options.gate ?? unavailableGateRuntime();
     this.byName = new Map(options.tools.map((tool) => [tool.name, tool]));
     this.definitions = options.tools.map((tool) => ({ type: 'function', function: { name: tool.name, description: tool.description, parameters: tool.parameters } }));
   }

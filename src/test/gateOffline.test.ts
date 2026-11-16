@@ -12,7 +12,6 @@ import https = require('node:https');
 import net = require('node:net');
 import test, { after, before } from 'node:test';
 import { RunCheckpoints } from '../agent/checkpoints';
-import { defaultGateRuntime } from '../agent/gateAdapter';
 import { AgentRun } from '../agent/loop';
 import { DEFAULT_RULES } from '../agent/permissions';
 import { ShellSession } from '../agent/shell';
@@ -32,6 +31,7 @@ import { FLOOR_RULE_ORDER, floorFor } from '../domain/gate/floor';
 import { buildDecisionRecord, outcomeOf, validateDecisionRecord } from '../domain/gate/record';
 import { DEFAULT_ROUTING, decideRoute } from '../domain/gate/routing';
 import type { Capability } from '../domain/gate/vocabulary';
+import { testGateRuntime } from './helpers/gatedRuns';
 
 const NOW = Date.parse('2026-11-16T12:00:00.000Z');
 const calls: string[] = [];
@@ -148,7 +148,7 @@ test('a whole scripted run with Read, Write and Bash calls makes every decision 
       yield { type: 'done', message: { role: 'assistant', content: turn.text ?? null, ...(turn.calls ? { tool_calls: turn.calls } : {}) }, finishReason: turn.calls ? 'tool_calls' : 'stop', usage: { inputTokens: 1, outputTokens: 1, verificationStatus: 'unknown' as const, latencyMs: 1 } };
     }
   };
-  const base = defaultGateRuntime({ presence: 'none', context: 'unattended' });
+  const base = testGateRuntime({ presence: 'none', context: 'unattended' });
   const order: string[] = [];
   const gate = { ...base, sink: { record: (record: Parameters<typeof base.sink.record>[0]) => { order.push(`decision:${record.api.request.uid}`); base.records.push(record); } } };
   const spied = CORE_TOOLS.map((tool) => ({ ...tool, run: async (input: never, context: never) => { order.push(`run:${tool.name}`); return tool.run(input, context); } }));

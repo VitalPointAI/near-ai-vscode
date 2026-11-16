@@ -4,7 +4,7 @@
 import { randomUUID } from 'node:crypto';
 import * as path from 'node:path';
 import type { ActionCapability, ActionPolicy } from '../domain/policy';
-import { bundleHash, defaultBundlePayload } from '../domain/gate/bundle';
+import { failedClosed } from '../domain/gate/bundle';
 import type { BundleState, GateContextName } from '../domain/gate/bundle';
 import { decide } from '../domain/gate/decide';
 import type { ActorRef, GateDecision, GateRequest, GateRuntime, SettingsAnswer, SettingsLayer } from '../domain/gate/decide';
@@ -369,37 +369,31 @@ export function recordLateApproval(runtime: GateRuntime, callId: string, reply: 
 }
 
 // ---------------------------------------------------------------------------------------------------------------------------------------------------
-// The default runtime
+// The runtime of a run with no gate host
 // ---------------------------------------------------------------------------------------------------------------------------------------------------
 
-/** The records a default runtime kept, so a test can read them. */
+/** The records an unavailable runtime kept, so a test can read them. */
 export interface MemoryGateRuntime extends GateRuntime {
   readonly records: DecisionRecord[];
 }
 
-const DEFAULT_ACTOR: ActorRef = { kind: 'agent', deviceFingerprint: DEVICE_UNKNOWN, sessionId: 'default-session' };
+/** A run with no host keeps at most this many records in memory (the newest); it has nowhere on disk to put them. */
+const MAX_MEMORY_RECORDS = 200;
 
-let defaultState: BundleState | undefined;
-
-function shippedDefaultState(): BundleState {
-  if (defaultState === undefined) {
-    const issuer = { fingerprint: DEVICE_UNKNOWN, publicKey: 'A'.repeat(43) };
-    const payload = defaultBundlePayload({ issuer, now: Date.now() });
-    defaultState = { state: 'valid', bundle: payload, hash: bundleHash(payload), signer: issuer, expiresAt: payload.expiresAt, renewDue: false };
-  }
-  return defaultState;
-}
+const UNAVAILABLE_ACTOR: ActorRef = { kind: 'agent', deviceFingerprint: DEVICE_UNKNOWN, sessionId: 'no-gate-host' };
 
 /**
- * The runtime a run gets when its creator gave none (Pitfall 1): the shipped default bundle, the floor in shadow, and an in-memory sink. It is the same
- * policy as a fresh install's own bundle, so a run built without a gate decides exactly as it did before the gate existed.
+ * The runtime a run gets when its creator gave it no gate host (Pitfall 1). It never decides against a policy it has not read: its bundle is failed closed with
+ * the rule `bundle.unavailable`, so only the floor and reading and planning are allowed, with a plain reason. Every production path that has a host passes
+ * the host's own runtime (the per-install bundle lives in global storage, so it exists with no project folder open); this is only for a path that has none.
  */
-export function defaultGateRuntime(options: { presence?: GateRuntime['presence']; context?: GateRuntime['context']; actor?: ActorRef } = {}): MemoryGateRuntime {
+export function unavailableGateRuntime(options: { presence?: GateRuntime['presence']; context?: GateRuntime['context']; actor?: ActorRef } = {}): MemoryGateRuntime {
   const records: DecisionRecord[] = [];
+  const state = failedClosed('unavailable');
   return {
-    bundleState: shippedDefaultState,
-    sink: { record: (record) => { records.push(record); } },
-    actor: options.actor ?? DEFAULT_ACTOR,
+    bundleState: () => state,
+    sink: { record: (record) => { records.push(record); if (records.length > MAX_MEMORY_RECORDS) records.shift(); } },
+    actor: options.actor ?? UNAVAILABLE_ACTOR,
     presence: options.presence ?? 'person',
     context: options.context ?? 'interactive',
     floorMode: 'shadow',

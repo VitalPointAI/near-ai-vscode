@@ -71,7 +71,7 @@ export async function startCyberRunInPanel(
     policy: CyberRunInput['policy'];
     rules?: CyberRunInput['rules'];
     requestApproval: CyberRunInput['requestApproval'];
-    /** The gate every step is decided through (GATE-04); without one the run uses the shipped default. */
+    /** The gate every step is decided through (GATE-04); without one the run is failed closed (only reading and planning). */
     gate?: CyberRunInput['gate'];
     limiter?: CyberRunInput['limiter'];
     budget?: CyberRunInput['budget'];
@@ -397,7 +397,7 @@ export function panelCyberRunStarter(
       {
         ...assembly, grants, tools: assembly.tools(request.engagement), externalFindings: collected, limiter, budget,
         // A person starts a scan and answers its cards: presence person, interactive; the floor only reports for now, as for chat (D-43).
-        ...(options.gateHost && options.root ? { gate: await options.gateHost.runtimeFor({ root, actor: { kind: 'agent', sessionId: `cyber-${request.engagement.id}`, agentLabel: 'cyber panel' }, presence: 'person', context: 'interactive', floorMode: 'shadow' }) } : {})
+        ...(options.gateHost ? { gate: await options.gateHost.runtimeFor({ ...(options.root ? { root: options.root } : {}), actor: { kind: 'agent', sessionId: `cyber-${request.engagement.id}`, agentLabel: 'cyber panel' }, presence: 'person', context: 'interactive', floorMode: 'shadow' }) } : {})
       },
       request
     );

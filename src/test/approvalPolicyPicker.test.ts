@@ -9,6 +9,7 @@ import { ProfileStore } from '../services/profileStore';
 import { deriveProfileId } from '../domain/auth';
 import { parseChatWebviewMessage } from '../services/chatBridge';
 import { applyPolicyChoice, POLICY_MODES, POLICY_OPTIONS, PolicyConfiguration, policyStateMessage } from '../services/approvalPolicy';
+import { testGateHost } from './helpers/gatedRuns';
 
 // The composer's approval-policy picker: strict parsing, the scope it writes, the Full auto
 // confirmation, live updates from settings and the emergency stop, and that the next run uses it.
@@ -194,7 +195,7 @@ async function openSidebar(root: string, auth: AuthService) {
     webview: { html: '', postMessage: async (message: Record<string, unknown>) => { posted.push(message); return true; }, onDidReceiveMessage: (handler: (message: unknown) => Promise<void>) => { receive = handler; return { dispose() {} }; } },
     onDidDispose: () => ({ dispose() {} })
   };
-  await attachChatToView({ subscriptions: [], globalStorageUri: { fsPath: path.join(root, '.global') }, extensionUri: { fsPath: root } } as never, auth, view as never, '<html></html>');
+  await attachChatToView({ subscriptions: [], globalStorageUri: { fsPath: path.join(root, '.global') }, extensionUri: { fsPath: root } } as never, auth, view as never, '<html></html>', testGateHost());
   const policies = () => posted.filter((message) => message.type === 'action-policy') as Array<{ mode: string; stopped: boolean; scope: string }>;
   return { posted, policies, send: (message: unknown) => receive!(message) };
 }

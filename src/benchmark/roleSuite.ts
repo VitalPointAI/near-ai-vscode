@@ -63,7 +63,7 @@ export interface RoleSuiteOptions {
   /** The model each member uses now, so the studio can say what changed. */
   current?: (member: string) => string | undefined;
   onRun?(): void;
-  /** The gate each role run is decided by, made fresh for each run (GATE-07). Without it a run uses the shipped default, with nobody present. */
+  /** The gate each role run is decided by, made fresh for each run (GATE-07). Without it a run is failed closed (no gate host), with nobody present. */
   gateFor?(run: { member: string; model: string; root: string }): GateRuntime | undefined | Promise<GateRuntime | undefined>;
 }
 

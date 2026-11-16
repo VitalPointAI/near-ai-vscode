@@ -17,6 +17,7 @@ import { ShellSession } from '../agent/shell';
 import { RunGrants } from '../agent/permissions';
 import type { Step } from '../domain/cyberProtocol';
 import { cyberAssembly, panelTools, startCyberRunInPanel, type CompletionClient } from '../services/cyberAssembly';
+import { testGateRuntime } from './helpers/gatedRuns';
 import { startTarget } from './cyberStartTarget';
 
 /** One planner step naming a built-in tool. */
@@ -81,7 +82,7 @@ async function harness(plan: (target: { httpUrl: string; tlsUrl: string; fixture
     target, prompts, assembly, engagement, collected,
     async run(depth: 'quick' | 'standard' | 'deep' = 'quick') {
       const result = await startCyberRunInPanel(
-        { ...assembly, grants, tools, externalFindings: collected, currentAcceptance: assembly.currentAcceptance, stopped: () => false },
+        { ...assembly, gate: testGateRuntime(), grants, tools, externalFindings: collected, currentAcceptance: assembly.currentAcceptance, stopped: () => false },
         { engagement, mode: 'defensive', depth, signal: new AbortController().signal, onEvent: () => undefined }
       );
       return { result, replay: await assembly.ledger.replay(result.runId) };
@@ -168,7 +169,7 @@ test('a check that already ran is never asked for again, and findings reach the 
   const events: Array<{ type: string; checkId?: string }> = [];
   try {
     const result = await startCyberRunInPanel(
-      { ...box.assembly, grants: new RunGrants(), tools: box.assembly.tools(box.engagement), externalFindings: box.collected, currentAcceptance: box.assembly.currentAcceptance, stopped: () => false },
+      { ...box.assembly, gate: testGateRuntime(), grants: new RunGrants(), tools: box.assembly.tools(box.engagement), externalFindings: box.collected, currentAcceptance: box.assembly.currentAcceptance, stopped: () => false },
       { engagement: box.engagement, mode: 'defensive', depth: 'quick', signal: new AbortController().signal, onEvent: (event) => events.push(event.type === 'finding' ? { type: 'finding', checkId: event.finding.checkId } : { type: event.type }) }
     );
     assert.equal(result.outcome, 'completed');
@@ -205,7 +206,7 @@ test('a run stopped before its last step still chains the findings it found', as
   let stopped = false;
   try {
     const result = await startCyberRunInPanel(
-      { ...box.assembly, grants: new RunGrants(), tools: box.assembly.tools(box.engagement), externalFindings: box.collected, currentAcceptance: box.assembly.currentAcceptance, stopped: () => stopped },
+      { ...box.assembly, gate: testGateRuntime(), grants: new RunGrants(), tools: box.assembly.tools(box.engagement), externalFindings: box.collected, currentAcceptance: box.assembly.currentAcceptance, stopped: () => stopped },
       {
         engagement: box.engagement, mode: 'defensive', depth: 'quick', signal: new AbortController().signal,
         // Stop after the first step, so later steps never run.
@@ -232,7 +233,7 @@ test('the Stop button (an aborted signal) mid-run still chains the findings it f
   const announced: string[] = [];
   try {
     const result = await startCyberRunInPanel(
-      { ...box.assembly, grants: new RunGrants(), tools: box.assembly.tools(box.engagement), externalFindings: box.collected, currentAcceptance: box.assembly.currentAcceptance, stopped: () => false },
+      { ...box.assembly, gate: testGateRuntime(), grants: new RunGrants(), tools: box.assembly.tools(box.engagement), externalFindings: box.collected, currentAcceptance: box.assembly.currentAcceptance, stopped: () => false },
       {
         engagement: box.engagement, mode: 'defensive', depth: 'quick', signal: controller.signal,
         onEvent: (event) => {

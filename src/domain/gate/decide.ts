@@ -105,7 +105,7 @@ export interface GateRuntime {
 /** Every rule id the gate can record: the floor, the bundle and manifest checks, labels, routing, taint, and the settings rules of the migration table. */
 export const GATE_RULE_IDS: readonly string[] = Object.freeze([
   ...FLOOR_RULE_ORDER,
-  'bundle.failed-closed', 'bundle.ceiling.context', 'bundle.ceiling.mode', 'bundle.ceiling.unattended-mcp', 'manifest.context', 'manifest.effects-unknown',
+  'bundle.failed-closed', 'bundle.unavailable', 'bundle.ceiling.context', 'bundle.ceiling.mode', 'bundle.ceiling.unattended-mcp', 'manifest.context', 'manifest.effects-unknown',
   'label.dominance', 'label.no-agent-tools', 'label.network-at-mark',
   ...ROUTE_RULES,
   'taint.held',
@@ -175,7 +175,8 @@ export async function decide(request: GateRequest, bundleState: BundleState, set
   if (policy.emergencyStop) return make('deny', 'settings.emergency-stop', policy.mode, { reason: 'Emergency stop is on.' });
   if (bundleState.state === 'failed-closed') {
     const onlyReadOrPlan = request.effects.length > 0 && request.effects.every((effect) => (FAILED_CLOSED_VERBS as readonly string[]).includes(effect.verb));
-    if (!onlyReadOrPlan) return make('deny', 'bundle.failed-closed', 'approve-risky', { reason: bundleState.sentence });
+    // A run built with no host at all (no policy was ever read for it) has its own rule id, so a record tells it apart from a policy that failed to verify.
+    if (!onlyReadOrPlan) return make('deny', bundleState.reason === 'unavailable' ? 'bundle.unavailable' : 'bundle.failed-closed', 'approve-risky', { reason: bundleState.sentence });
   }
   // A request that names no effect is a request whose effects are unknown. Nothing later can judge what it does, so it never reaches the floor, the ceiling
   // or the settings layer (which would read "no effects" as "nothing to worry about"): with a person here it asks, without one it is refused. A

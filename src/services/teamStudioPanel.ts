@@ -7,6 +7,7 @@ import { applyProjectType } from '../agent/projectTypes';
 import { applyResearchProfile, usesResearchProfile } from '../gsd/researchProfile';
 import { slugify, TeamLibrary } from '../agent/teams';
 import { AuthService } from './auth';
+import { unattendedRuntimeFor } from '../gate/host';
 import type { GateHost } from '../gate/host';
 import { attachTeamStudio, optimiseTarget, StudioTarget, teamStudioHtml, versionLabel } from './teamStudioPage';
 import { ChatPrefill, gatherDirectoryInput } from './toolsPage';
@@ -155,7 +156,7 @@ export async function openTeamStudio(context: vscode.ExtensionContext, auth: Aut
       const outcomes = await runRoleSuite(plan, {
         clientFor: (model) => clientFor(active, model).client, rules: readAgentRules(), signal: options.signal ?? new AbortController().signal,
         // Nobody watches a role run: it is decided with presence none in an unattended context, and its decisions reach the project's log (GATE-07, D-43).
-        ...(gateHost && root ? { gateFor: (run: { member: string; model: string }) => gateHost.runtimeFor({ root, actor: { kind: 'agent', sessionId: `team-roles-${teamName}`, agentLabel: `${run.member} on ${run.model}` }, presence: 'none', context: 'unattended', floorMode: 'shadow' }) } : {})
+        ...(gateHost ? { gateFor: (run: { member: string; model: string }) => unattendedRuntimeFor(gateHost, root, `team-roles-${teamName}`, `${run.member} on ${run.model}`) } : {})
       });
       const picks = bestOf(outcomes);
       if (!picks.length) return { applied: 0, text: options.signal?.aborted ? `${teamName}: cancelled, so its models were left alone.` : 'Every role test failed, so the team is unchanged. Run Compare Models to see why.' };

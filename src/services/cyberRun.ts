@@ -2,7 +2,7 @@ import * as path from 'node:path';
 import { beginRun } from '../agent/runActivity';
 import type { AgentTool, ToolContext } from '../agent/tools';
 import { DEFAULT_RULES, RunGrants, decidePermission, intrusiveGrantDecision, type IntrusiveStep, type PermissionDecision, type PermissionRules } from '../agent/permissions';
-import { defaultGateRuntime, effectsOfStep, gateStep, recordApprovalReply } from '../agent/gateAdapter';
+import { effectsOfStep, gateStep, recordApprovalReply, unavailableGateRuntime } from '../agent/gateAdapter';
 import type { GateRuntime, SettingsAnswer } from '../domain/gate/decide';
 import { fromActionCapability } from '../domain/gate/vocabulary';
 import type { Capability } from '../domain/gate/vocabulary';
@@ -97,7 +97,7 @@ export interface CyberRunInput {
   depth?: DepthProfile;
   /**
    * The one gate (GATE-04): every step is decided through it before its tool runs, and the decision is recorded. The panel passes the host's runtime so the
-   * decisions reach the project's log; without one a step is decided with the shipped default bundle, the floor in shadow and a person present.
+   * decisions reach the project's log; without one a step is failed closed (`bundle.unavailable`: only the floor, reading and planning).
    */
   gate?: GateRuntime;
   /** The stop control, checked before every step (CYBER-10). */
@@ -145,7 +145,7 @@ async function cyberRun(input: CyberRunInput): Promise<CyberRunResult> {
   const emit = (event: CyberRunEvent) => input.onEvent?.(event);
   const runId = newRunId(now);
   const rules = input.rules ?? DEFAULT_RULES;
-  const gate = input.gate ?? defaultGateRuntime({ presence: 'person', context: 'interactive' });
+  const gate = input.gate ?? unavailableGateRuntime({ presence: 'person', context: 'interactive' });
   const findings: Finding[] = [];
   const records: ProtocolStepRecord[] = [];
   const transcript: string[] = [];

@@ -38,7 +38,8 @@ export interface GateHostOptions {
 }
 
 export interface RuntimeRequest {
-  readonly root: string;
+  /** The open project, whose log receives the run's records. None for a window with no folder: the bundle is per install, so the run is still decided by it, and its records have no project log to go to. */
+  readonly root?: string;
   readonly actor: Omit<ActorRef, 'deviceFingerprint'>;
   readonly presence: Presence;
   readonly context: GateContextName;
@@ -86,7 +87,7 @@ export class GateHost {
     const notLoaded = await this.waitForStart();
     let log: DecisionLog | undefined;
     try {
-      log = this.logFor(request.root);
+      log = request.root === undefined ? undefined : this.logFor(request.root);
     } catch (error) {
       // A log that cannot be set up (its folder lies inside the project) is reported once; decisions carry on unrecorded rather than fail.
       try { this.options.onProblem?.(error instanceof Error ? error.message : 'NEAR AI could not set up its record of what was allowed or refused.'); } catch { /* ignored */ }
@@ -218,4 +219,12 @@ export class GateHost {
       try { listener(); } catch { /* a listener never breaks the host */ }
     }
   }
+}
+
+/**
+ * The runtime of a run nobody watches (a comparison task, a role test): presence none, an unattended context, the floor in shadow. `root` is the open project,
+ * or none (undefined or empty) for a window with no folder: the per-install policy is still the real one, only the project log is missing.
+ */
+export function unattendedRuntimeFor(host: Pick<GateHost, 'runtimeFor'>, root: string | undefined, sessionId: string, agentLabel: string): Promise<GateRuntime> {
+  return host.runtimeFor({ ...(root ? { root } : {}), actor: { kind: 'agent', sessionId, agentLabel }, presence: 'none', context: 'unattended', floorMode: 'shadow' });
 }

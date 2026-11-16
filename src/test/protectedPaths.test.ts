@@ -14,6 +14,7 @@ import { resolveInWorkspace } from '../agent/workspace';
 import type { AgentMessage, CompletionEvent, ToolCall } from '../services/nearAiClient';
 import { namesStateKeys, PROTECTED_WRITE, protectedWriteReason, STATE_FOLDER_PATH, STATE_FOLDER_TEXT } from '../domain/protectedPaths';
 import { ShellSession } from '../agent/shell';
+import { newTestRun } from './helpers/gatedRuns';
 
 const shellContext: CommandContext = { root: '/work/app', cwd: '/work/app', home: '/home/dev' };
 
@@ -154,7 +155,7 @@ async function runCalls(context: ToolContext, calls: Array<{ name: string; args:
       yield { type: 'done', message: { role: 'assistant', content: null, tool_calls: [call] }, finishReason: 'tool_calls', usage };
     }
   };
-  const run = new AgentRun({
+  const run = newTestRun({
     client: client as never, model: 'm', tools: [readTool, writeTool, editTool, globTool, grepTool, bashTool], context, policy: { mode, emergencyStop: false }, rules: DEFAULT_RULES,
     requestApproval: async (approval: { title: string; reason?: string }) => { approvals.push(`${approval.title}: ${approval.reason ?? ''}`); return { decision: 'deny' }; },
     emit: () => undefined

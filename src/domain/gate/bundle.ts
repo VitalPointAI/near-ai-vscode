@@ -520,7 +520,8 @@ export const BUNDLE_FAILURES = {
   'clock-behind': 'This computer\'s clock is earlier than the time your policy file was signed. Set the clock to the right time, then reload the window.',
   'no-identity': `NEAR AI has no signing key on this computer yet, so there is no policy to check. ${RESET_FIX}`,
   'identity-unavailable': 'NEAR AI could not save its signing key on this computer, so only reading and planning are allowed until it can.',
-  'not-loaded': 'NEAR AI had not finished loading your policy when this run started, so only reading and planning are allowed for it. Start the run again in a moment, or reload the window.'
+  'not-loaded': 'NEAR AI had not finished loading your policy when this run started, so only reading and planning are allowed for it. Start the run again in a moment, or reload the window.',
+  unavailable: 'NEAR AI has no policy to check this run against, so only reading and planning are allowed for it. Reload the window to try again.'
 } as const;
 export type BundleFailureReason = keyof typeof BUNDLE_FAILURES;
 

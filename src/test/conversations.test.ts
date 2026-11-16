@@ -14,6 +14,7 @@ import { threadStoreFor } from '../services/threadStore';
 import { RunMarkers } from '../services/runMarkers';
 import { editorWriter, stateHomeFor, writerEditor } from '../services/stateHome';
 import { ConversationLog, conversationStatus, conversationTitle, MAX_OPEN_CONVERSATIONS, parseSavedConversations, savedConversations } from '../services/conversations';
+import { testGateHost } from './helpers/gatedRuns';
 
 // Several conversations in the sidebar at once, as in Claude Code: each has its own run,
 // prompts, steering queue, transcript, and spend and activity ID; the view shows one, and a
@@ -210,7 +211,7 @@ async function openSidebar(root: string, auth: AuthService, shared: { secrets: S
   nodeModule._load = (request, parent, isMain) => request === 'vscode' ? vscodeStub : originalLoad(request, parent, isMain);
   try {
     const { attachChatToView } = require('../services/chat') as typeof import('../services/chat');
-    await attachChatToView({ subscriptions: [], globalStorageUri: { fsPath: path.join(root, '.global') }, extensionUri: { fsPath: root }, secrets: shared.secrets, workspaceState: shared.workspaceState } as never, auth, view as never, '<html></html>');
+    await attachChatToView({ subscriptions: [], globalStorageUri: { fsPath: path.join(root, '.global') }, extensionUri: { fsPath: root }, secrets: shared.secrets, workspaceState: shared.workspaceState } as never, auth, view as never, '<html></html>', testGateHost());
   } finally {
     nodeModule._load = originalLoad;
   }

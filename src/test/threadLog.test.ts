@@ -14,6 +14,7 @@ import { StateKeys, stateKeysFor } from '../services/stateKeys';
 import { ThreadStore, threadStoreFor } from '../services/threadStore';
 import { TranscriptStore, type Transcript } from '../services/transcripts';
 import { MemorySecrets, tempProject } from './helpers/stateFixtures';
+import { newTestConversation } from './helpers/gatedRuns';
 
 // Phase 27, plan 05 (SYNC-01, D-07): every thread keeps its full conversation in an append-only log in the state home, captured before the model's
 // context is trimmed or compacted. Each test works on a temporary project folder; a second editor is a second store over the same folder.
@@ -126,7 +127,7 @@ test('a compacted conversation reopens with every user turn, from the log, and s
       },
       async actualCostsUsd() { return undefined; }
     };
-    const conversation = new AgentConversation(root, () => undefined, path.join(stateHomeFor(root).paths.checkpoints), undefined, store);
+    const conversation = newTestConversation(root, () => undefined, path.join(stateHomeFor(root).paths.checkpoints), undefined, store);
     conversation.compactAtTokens = 1_500;
     const asked: string[] = [];
     for (let turn = 1; turn <= 12; turn += 1) {
@@ -139,7 +140,7 @@ test('a compacted conversation reopens with every user turn, from the log, and s
     assert.ok(saved?.messages.some((message) => message.role === 'user' && message.content.startsWith('<conversation-summary>')), 'the run compacted its context');
     assert.ok(saved!.messages.filter((message) => message.role === 'user' && !message.content.startsWith('<conversation-summary>')).length < 12, 'the saved working list lost earlier user messages');
 
-    const reopened = new AgentConversation(root, () => undefined, path.join(stateHomeFor(root).paths.checkpoints), undefined, storeFor(root, new MemorySecrets()));
+    const reopened = newTestConversation(root, () => undefined, path.join(stateHomeFor(root).paths.checkpoints), undefined, storeFor(root, new MemorySecrets()));
     // A second editor with no key of its own reads the key file in the state home, so it sees the same conversation.
     const items = await itemsOf(reopened.restore(conversation.id));
     assert.deepEqual(items.filter((item) => item.kind === 'user').map((item) => (item as { text: string }).text), asked, 'all twelve typed messages, in order');
@@ -242,7 +243,7 @@ test('D-13: a sub-agent adds no entries of its own; its report is the lead agent
       async actualCostsUsd() { return undefined; }
     };
     const store = storeFor(root);
-    const conversation = new AgentConversation(root, () => undefined, stateHomeFor(root).paths.checkpoints, undefined, store);
+    const conversation = newTestConversation(root, () => undefined, stateHomeFor(root).paths.checkpoints, undefined, store);
     await conversation.send({ text: 'Plan the work', client: client as never, model: 'm', privacy: 'Private', policy: { mode: 'approve-risky', emergencyStop: false }, rules: DEFAULT_RULES, gsd });
     const entries = (await store.lines(conversation.id)).main;
     assert.deepEqual(entries.map((entry) => entry.role), ['user', 'tool-call', 'tool-result', 'assistant'], 'only the lead agent\'s own steps');
@@ -275,7 +276,7 @@ test('a thread continued on another computer reopens with the continuation in it
       },
       async actualCostsUsd() { return undefined; }
     };
-    const reopened = new AgentConversation(root, () => undefined, stateHomeFor(root).paths.checkpoints, undefined, storeFor(root, new MemorySecrets(), 'edC.1'));
+    const reopened = newTestConversation(root, () => undefined, stateHomeFor(root).paths.checkpoints, undefined, storeFor(root, new MemorySecrets(), 'edC.1'));
     const items = await itemsOf(reopened.restore(THREAD));
     assert.deepEqual(items.filter((item) => item.kind === 'user').map((item) => (item as { text: string }).text).slice(-2), ['Question 4', 'Asked on the other computer']);
     await reopened.send({ text: 'Continue here', client: client as never, model: 'm', privacy: 'Private', policy: { mode: 'approve-risky', emergencyStop: false }, rules: DEFAULT_RULES });
@@ -311,7 +312,7 @@ test('a second editor on the same host lists and reopens the conversation the fi
     assert.deepEqual(await editorB.lines(THREAD), await editorA.lines(THREAD));
     assert.equal((await editorB.lines(THREAD)).main.length, 24);
     assert.equal((await editorB.load(THREAD))?.messages.length, messages.length, 'and the saved context opens too');
-    const reopened = await itemsOf(new AgentConversation(root, () => undefined, stateHomeFor(root).paths.checkpoints, undefined, editorB).restore(THREAD));
+    const reopened = await itemsOf(newTestConversation(root, () => undefined, stateHomeFor(root).paths.checkpoints, undefined, editorB).restore(THREAD));
     assert.equal(reopened.filter((item) => item.kind === 'user').length, 6);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
