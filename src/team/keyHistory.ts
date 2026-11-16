@@ -106,6 +106,18 @@ export async function localKeyStatus(identityDir: string, secrets: SecretStorage
   return (await readKeyHistory(identityDir, secrets)).lookup;
 }
 
+/**
+ * Where a key-history warning goes when the caller passed no `warn` of its own (0.4.26, PR #62 review: only Enable passed one, so a warning raised while
+ * rotating, revoking or at any other first need went nowhere). Team Mode sets it to its output channel when it registers, so every path that writes the
+ * history reaches the person, including ones added later. Returns a disposer that puts back the sink that was there before. Never given key material.
+ */
+let defaultWarningSink: ((message: string) => void) | undefined;
+export function setKeyHistoryWarningSink(sink: ((message: string) => void) | undefined): { dispose(): void } {
+  const previous = defaultWarningSink;
+  defaultWarningSink = sink;
+  return { dispose: (): void => { if (defaultWarningSink === sink) defaultWarningSink = previous; } };
+}
+
 export interface AppendKeyRecordOptions {
   now?: () => Date;
   /** Where a plain warning goes (the Team Mode output channel). Never given key material. */
@@ -160,7 +172,7 @@ export async function appendKeyRecord(
         else await writeFileAtomic(file, loaded.text);
       } catch (restoreError) {
         const code = errorCode(restoreError);
-        options.warn?.(`The key history could not be put back after its saved end failed to store${code === undefined ? '' : ` (${code})`}. It will read as changed, and the next time your identity key is needed the history is archived and a new one starts.`);
+        (options.warn ?? defaultWarningSink)?.(`The key history could not be put back after its saved end failed to store${code === undefined ? '' : ` (${code})`}. It will read as changed, and the next time your identity key is needed the history is archived and a new one starts.`);
       }
       throw new KeyHistoryError('Nothing was added to the key history: its saved end could not be stored.', { cause: error });
     }

@@ -94,6 +94,16 @@ export function registerTeamMode(context: vscode.ExtensionContext): TeamModeHand
     announce(level, message);
   }
 
+  // Every key-history warning reaches the NEAR AI Team channel, whichever path raised it (Enable, a rotation, a revocation, a first need), not only the
+  // ones whose caller passed a sink (0.4.26, PR #62 review). Set once a team module is needed anyway (a session starts or Enable runs), so a solo
+  // project still loads nothing.
+  let warningSink: { dispose(): void } | undefined;
+  async function routeKeyHistoryWarnings(): Promise<void> {
+    if (warningSink !== undefined || disposed) return;
+    const { setKeyHistoryWarningSink } = await import('../../team/keyHistory');
+    if (warningSink === undefined && !disposed) warningSink = setKeyHistoryWarningSink((message) => output.appendLine(message));
+  }
+
   async function startSession(projectRoot: string): Promise<TeamModeState> {
     if (session !== undefined) return 'team';
     if (starting !== undefined) return starting;
@@ -102,6 +112,7 @@ export function registerTeamMode(context: vscode.ExtensionContext): TeamModeHand
         const { readTeamFile } = await import('../../team/teamFile');
         const teamFile = await readTeamFile(projectRoot);
         if (teamFile === undefined) return 'solo';
+        await routeKeyHistoryWarnings();
         const { createVscodeTeamSession } = await import('./teamSession');
         const started = await createVscodeTeamSession(context, projectRoot, teamFile, output);
         if (disposed) {
@@ -204,6 +215,7 @@ export function registerTeamMode(context: vscode.ExtensionContext): TeamModeHand
       announce('error', 'Open your project folder first, then run "NEAR AI: Enable Team Mode" again.');
       return;
     }
+    await routeKeyHistoryWarnings();
     const enableModule = await import('../../team/enable');
     const checked = await enableModule.checkEnablePreconditions(projectRoot);
     if (!checked.ok) {
@@ -284,7 +296,7 @@ export function registerTeamMode(context: vscode.ExtensionContext): TeamModeHand
   context.subscriptions.push(
     vscode.commands.registerCommand(ENABLE_COMMAND, guarded('Enable Team Mode', enable)),
     vscode.commands.registerCommand(VERIFY_LOG_COMMAND, guarded('Verify Team Log', verifyLog)),
-    { dispose: (): void => { disposed = true; stopSession(); } }
+    { dispose: (): void => { disposed = true; warningSink?.dispose(); stopSession(); } }
   );
 
   const ready = detect().catch(async (error: unknown): Promise<TeamModeState> => {
