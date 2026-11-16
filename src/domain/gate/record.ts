@@ -2,7 +2,10 @@
 // later audit chain can sign it unchanged. "Shaped after" is deliberate: this file checks only what the shape needs and never claims full OCSF schema
 // validity (assumption A1 of the research). Pure: no I/O, no clock (the caller passes epoch milliseconds), no vscode, no package. A record carries names and
 // paths, never file contents, prompts or model output.
-import type { ActorRef } from './decide';
+import { redactSecrets } from '../redaction';
+import { canonicalize } from '../team/canonical';
+import { findSecrets } from '../team/secrets';
+import type { ActorRef, GateDecision } from './decide';
 import type { Label } from './labels';
 import { isRecord, ownValue, refused } from './shape';
 import type { Parsed } from './shape';
@@ -140,7 +143,30 @@ function detailFor(input: DecisionRecordInput): string | undefined {
   return input.reason.length > MAX_DETAIL ? input.reason.slice(0, MAX_DETAIL) : input.reason;
 }
 
-/** The record for one decision. Every number is a whole number and every string is a name, a path, a rule id or a plain sentence. */
+/** The outcome a gate decision is recorded as: a floor refusal (including a floor ask that nobody could answer) is its own outcome, distinct from any other denial. */
+export function outcomeOf(decision: Pick<GateDecision, 'outcome' | 'floor'>): DecisionOutcome {
+  if (decision.outcome === 'allow') return 'allowed';
+  if (decision.outcome === 'ask') return 'asked';
+  return decision.floor ? 'refused-by-floor' : 'denied';
+}
+
+function redactValue(value: unknown): unknown {
+  if (typeof value === 'string') return redactSecrets(value);
+  if (Array.isArray(value)) return value.map(redactValue);
+  if (isRecord(value)) {
+    const out: Record<string, unknown> = {};
+    for (const key of Object.keys(value)) out[key] = redactValue(value[key]);
+    return out;
+  }
+  return value;
+}
+
+/** A copy of the record with `redactSecrets` run over every string, so a token that slipped into a reason or a name never reaches a file. */
+export function redactRecord(record: DecisionRecord): DecisionRecord {
+  return redactValue(record) as DecisionRecord;
+}
+
+/** The record for one decision, already redacted. Every number is a whole number and every string is a name, a path, a rule id or a plain sentence. */
 export function buildDecisionRecord(input: DecisionRecordInput): DecisionRecord {
   const outcome = OUTCOME_FIELDS[input.outcome];
   const activity = activityOf(input.capability);
@@ -200,7 +226,7 @@ export function buildDecisionRecord(input: DecisionRecordInput): DecisionRecord 
       }
     }
   };
-  return record;
+  return redactRecord(record);
 }
 
 type Kind = 'int' | 'string' | 'array';
@@ -229,7 +255,7 @@ function kindOk(value: unknown, kind: Kind): boolean {
 
 /**
  * Check a record only for what its shape needs: the class arithmetic (class 6003, category 6, type_uid = 600300 + activity_id), every required key with
- * the right kind, and the record version. Nothing here claims the record is valid against the full OCSF schema.
+ * the right kind, the record version, whole numbers only and no secret-like string. Nothing here claims the record is valid against the full OCSF schema.
  */
 export function validateDecisionRecord(value: unknown): Parsed<DecisionRecord> {
   if (!isRecord(value)) return refused('wrong-type', '');
@@ -242,5 +268,12 @@ export function validateDecisionRecord(value: unknown): Parsed<DecisionRecord> {
   if (typeof value.activity_id !== 'number' || value.type_uid !== OCSF_API_ACTIVITY.class_uid * 100 + value.activity_id) return refused('not-allowed-here', 'type_uid');
   if (readPath(value, 'metadata.version') !== OCSF_VERSION) return refused('unknown-version', 'metadata.version');
   if (readPath(value, 'unmapped.nearAi.recordVersion') !== RECORD_VERSION) return refused('unknown-version', 'unmapped.nearAi.recordVersion');
+  // Whole numbers only (D-35): the canonical form refuses a fraction, negative zero, undefined and anything that is not plain data.
+  try {
+    canonicalize(value);
+  } catch {
+    return refused('wrong-type', 'canonical');
+  }
+  if (findSecrets(value).length > 0) return refused('not-allowed-here', 'secret');
   return { ok: true, value: value as unknown as DecisionRecord };
 }
