@@ -165,6 +165,7 @@ export function activate(context: vscode.ExtensionContext): NearAiTestApi | unde
       startRun: panelCyberRunStarter(context, (root) => activeProvider(root, auth).then((active) => active?.provider.client), {
         root: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
         model: readModelTiers().standard,
+        gateHost: gate,
         stopped: () => isEmergencyStopped(),
         // Every ask goes to the same approval card the chat uses, so a shell or exploit step is
         // never silently allowed.

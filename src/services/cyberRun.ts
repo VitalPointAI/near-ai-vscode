@@ -1,7 +1,11 @@
 import * as path from 'node:path';
 import { beginRun } from '../agent/runActivity';
 import type { AgentTool, ToolContext } from '../agent/tools';
-import { DEFAULT_RULES, decidePermission, intrusiveGrantDecision, type IntrusiveStep, type PermissionRules, type RunGrants } from '../agent/permissions';
+import { DEFAULT_RULES, RunGrants, decidePermission, intrusiveGrantDecision, type IntrusiveStep, type PermissionDecision, type PermissionRules } from '../agent/permissions';
+import { defaultGateRuntime, effectsOfStep, gateStep, recordApprovalReply } from '../agent/gateAdapter';
+import type { GateRuntime, SettingsAnswer } from '../domain/gate/decide';
+import { fromActionCapability } from '../domain/gate/vocabulary';
+import type { Capability } from '../domain/gate/vocabulary';
 import { verifyFinding, type CriticEvidence } from '../agent/cyberCritic';
 import { checkBudget, type RateLimiter } from '../domain/cyberLimits';
 import { compactSteps, ROLE_PROMPTS, type ProtocolStepRecord, type Step, type StepRole } from '../domain/cyberProtocol';
@@ -91,6 +95,11 @@ export interface CyberRunInput {
   externalFindings?: Finding[];
   /** The depth profile this run promises; its checks decide how many steps the planner gets. */
   depth?: DepthProfile;
+  /**
+   * The one gate (GATE-04): every step is decided through it before its tool runs, and the decision is recorded. The panel passes the host's runtime so the
+   * decisions reach the project's log; without one a step is decided with the shipped default bundle, the floor in shadow and a person present.
+   */
+  gate?: GateRuntime;
   /** The stop control, checked before every step (CYBER-10). */
   stopped?(): boolean;
   /** What a step's tool run receives: root, shell, checkpoints, and the abort signal. */
@@ -136,6 +145,7 @@ async function cyberRun(input: CyberRunInput): Promise<CyberRunResult> {
   const emit = (event: CyberRunEvent) => input.onEvent?.(event);
   const runId = newRunId(now);
   const rules = input.rules ?? DEFAULT_RULES;
+  const gate = input.gate ?? defaultGateRuntime({ presence: 'person', context: 'interactive' });
   const findings: Finding[] = [];
   const records: ProtocolStepRecord[] = [];
   const transcript: string[] = [];
@@ -332,6 +342,10 @@ async function cyberRun(input: CyberRunInput): Promise<CyberRunResult> {
       const target = step.target;
       if (!inScope(target)) {
         const reason = `"${target}" is outside the resolved scope of engagement ${input.engagement.id}`;
+        // A refusal is a decision too: it is recorded with the engagement's own rule, and nothing runs.
+        try {
+          await gateStep(gate, { tool: step.tool, callId: `${runId}/${step.id}`, effects: scopeRefusalEffects(target), policy: input.policy, settings: { decision: 'deny', reason, rule: 'settings.engagement-grant' } });
+        } catch { /* a record never changes the refusal */ }
         emit({ type: 'notice', text: reason });
         await record({ tool: step.tool, arguments: step.args.join(' '), result: `refused: ${reason}`, modelReasoning: step.expectedResult });
         continue;
@@ -352,19 +366,36 @@ async function cyberRun(input: CyberRunInput): Promise<CyberRunResult> {
       const command = capability === 'shell' ? [step.tool, ...step.args].join(' ') : undefined;
       let decision = decidePermission(capability, command, input.policy, rules, input.grants, undefined, intrusive);
       if (decision.decision === 'allow' && intrusive && !intrusiveGrantDecision(input.grants, intrusive)) decision = { decision: 'ask' };
-      if (decision.decision === 'ask') {
+      // The one gate decides on top of that answer, and records the decision before the step's tool or host tool runs (GATE-04, D-08).
+      const callId = `${runId}/${step.id}`;
+      const settings = settingsAnswerFor(decision, capability, command, input.policy, rules, input.grants, intrusive);
+      const stepEffects = hostTool ? hostToolEffects(target) : effectsOfStep(gate, selected!.tool, stepRaw(selected!, step), input.toolContext.root, standInFor(capability, target));
+      const gated = await gateStep(gate, {
+        tool: step.tool, callId, effects: stepEffects, policy: input.policy, settings,
+        ...(command === undefined ? {} : { command }), ...(hostTool ? {} : { manifestContexts: selected!.tool.manifest.contexts })
+      });
+      let outcome = gated.decision.outcome;
+      if (outcome === 'ask') {
         const reply = await input.requestApproval(step);
+        // The card only carried the question: the answer goes back into the gate, which records it and asks the layers that outrank a person again.
+        const answered = await recordApprovalReply(gate, gated, { decision: reply.decision });
         if (reply.decision === 'deny') {
           const reason = `the user declined the step${reply.reason ? `: ${reply.reason}` : ''}`;
           emit({ type: 'notice', text: reason });
           await record({ tool: step.tool, arguments: step.args.join(' '), result: `refused: ${reason}`, modelReasoning: step.expectedResult });
           continue;
         }
-        decision = { decision: 'allow' };
+        if (!answered.proceed) {
+          emit({ type: 'notice', text: answered.reason });
+          await record({ tool: step.tool, arguments: step.args.join(' '), result: `refused: ${answered.reason}`, modelReasoning: step.expectedResult });
+          continue;
+        }
+        outcome = 'allow';
       }
-      if (decision.decision === 'deny') {
-        emit({ type: 'notice', text: decision.reason });
-        await record({ tool: step.tool, arguments: step.args.join(' '), result: `refused: ${decision.reason}`, modelReasoning: step.expectedResult });
+      if (outcome === 'deny') {
+        const reason = gated.decision.reason ?? 'This step is not allowed.';
+        emit({ type: 'notice', text: reason });
+        await record({ tool: step.tool, arguments: step.args.join(' '), result: `refused: ${reason}`, modelReasoning: step.expectedResult });
         continue;
       }
 
@@ -431,6 +462,49 @@ async function cyberRun(input: CyberRunInput): Promise<CyberRunResult> {
     await persistFindings();
     return done('stopped', { reason: 'stopped', ledgerOk: await input.ledger.verify(runId) });
   }
+}
+
+// ---- The gate's view of a step (GATE-04) -----------------------------------------------------------
+
+/** What a step at `target` does when its tool's manifest cannot be filled: the widest honest form of its shorthand, on that target. */
+function standInFor(capability: 'read' | 'shell', target: string): readonly Capability[] {
+  const network = fromActionCapability('network', { hosts: [hostOf(target)] }).capabilities;
+  return capability === 'shell' ? [...fromActionCapability('shell', { cwd: 'anywhere' }).capabilities, ...network] : network;
+}
+
+/** A catalogued host tool starts a process on this machine and reaches the target. */
+function hostToolEffects(target: string): readonly Capability[] {
+  return standInFor('shell', target);
+}
+
+/** The effects recorded for a step refused before any tool was chosen: it was aimed at the target. */
+function scopeRefusalEffects(target: string): readonly Capability[] {
+  return fromActionCapability('network', { hosts: [hostOf(target)] }).capabilities;
+}
+
+/** The arguments a step's tool will be given, as the manifest reads them. A step whose input cannot be built has none, and its effects stand in. */
+function stepRaw(selected: RunTool, step: Step): Record<string, unknown> {
+  try {
+    return selected.input ? selected.input(step) : toolInputFor(step.tool, step);
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Today's decidePermission answer (with the engagement grant), named with a stable rule id by asking the same questions again about the inputs, never by
+ * reading its reason text. A step a person is asked about is `settings.mode.other`, as for any other capability the mode decides.
+ */
+function settingsAnswerFor(decided: PermissionDecision, capability: 'read' | 'shell', command: string | undefined, policy: CyberRunInput['policy'], rules: PermissionRules, grants: RunGrants, intrusive: IntrusiveStep | undefined): SettingsAnswer {
+  const reason = decided.reason === undefined ? {} : { reason: decided.reason };
+  if (policy.emergencyStop) return { decision: decided.decision, ...reason, rule: 'settings.emergency-stop' };
+  if (capability === 'read') return { decision: decided.decision, ...reason, rule: 'settings.read-plan' };
+  if (decided.decision === 'allow') return { decision: 'allow', ...reason, rule: 'settings.engagement-grant' };
+  if (decided.decision === 'ask') return { decision: 'ask', ...reason, rule: 'settings.mode.other' };
+  // A refusal is the deny list unless the engagement grant refused the target; without a grant in play only the deny list could refuse a shell step.
+  const withoutGrant = decidePermission(capability, command, policy, rules, new RunGrants(), undefined, undefined);
+  const grant = intrusiveGrantDecision(grants, intrusive);
+  return { decision: 'deny', reason: decided.reason, rule: withoutGrant.decision === 'deny' || grant === undefined ? 'settings.deny-list' : 'settings.engagement-grant' };
 }
 
 /** Thrown by askRole when the run was stopped before or during a model call. */

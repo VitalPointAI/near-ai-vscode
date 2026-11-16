@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto';
 import * as path from 'node:path';
 import type { ActionCapability, ActionPolicy } from '../domain/policy';
 import { bundleHash, defaultBundlePayload } from '../domain/gate/bundle';
-import type { BundleState } from '../domain/gate/bundle';
+import type { BundleState, GateContextName } from '../domain/gate/bundle';
 import { decide } from '../domain/gate/decide';
 import type { ActorRef, GateDecision, GateRequest, GateRuntime, SettingsAnswer, SettingsLayer } from '../domain/gate/decide';
 import { effectsFor } from '../domain/gate/manifest';
@@ -267,6 +267,52 @@ export async function gateToolCall(runtime: GateRuntime, input: GateCallInput, o
   const captured: { value?: PermissionDecision } = {};
   const decision = await decide(request, runtime.bundleState(), settingsLayerFor(input, captured), { floorMode: runtime.floorMode });
   const gated: GatedCall = { decision, settings: captured.value, request, effects };
+  keep(runtime, recordFor(runtime, gated, outcomeOf(decision), decision.rule, decision.reason, options.model === undefined ? undefined : { name: options.model, provider: MODEL_PROVIDER }));
+  return gated;
+}
+
+/**
+ * A step decided by a caller that has already worked out what today's settings layer says (the cyber panel's step engine, whose permission path is
+ * decidePermission with the engagement grant). The settings answer is handed in whole, so the gate decides on top of it exactly as it does for a chat call.
+ */
+export interface GateStepInput {
+  readonly tool: string;
+  readonly callId: string;
+  /** What the step does. An empty list means unknown, which decide() asks about or refuses. */
+  readonly effects: readonly Capability[];
+  readonly command?: string;
+  readonly manifestContexts?: readonly GateContextName[];
+  readonly policy: ActionPolicy;
+  /** Today's answer for this step, with the stable rule id that gave it. */
+  readonly settings: SettingsAnswer;
+}
+
+/** The effects of a step that runs a tool: its manifest's, filled from the arguments, or `standIn` while the floor only reports. Empty once it is enforced. */
+export function effectsOfStep(runtime: Pick<GateRuntime, 'floorMode'>, tool: AgentTool<any>, raw: Record<string, unknown>, root: string, standIn: readonly Capability[]): readonly Capability[] {
+  const filled = effectsFor(tool.manifest, manifestArguments(tool, raw, root));
+  if (filled.ok) return filled.value;
+  return runtime.floorMode === 'enforce' ? [] : standIn;
+}
+
+/**
+ * Decides one step with a settings answer the caller already has (GATE-04, D-08) and records the decision, ahead of the step's own run. It is gateToolCall
+ * for a path that does not build its answer from an AgentTool.
+ */
+export async function gateStep(runtime: GateRuntime, input: GateStepInput, options: GateCallOptions = {}): Promise<GatedCall> {
+  const request: GateRequest = {
+    actor: runtime.actor,
+    tool: input.tool,
+    callId: input.callId,
+    effects: input.effects,
+    context: runtime.context,
+    presence: runtime.presence,
+    policy: input.policy,
+    ...(input.manifestContexts === undefined ? {} : { manifestContexts: input.manifestContexts }),
+    ...(input.command === undefined ? {} : { command: input.command })
+  };
+  const answered = input.settings;
+  const decision = await decide(request, runtime.bundleState(), async () => answered, { floorMode: runtime.floorMode });
+  const gated: GatedCall = { decision, settings: undefined, request, effects: input.effects };
   keep(runtime, recordFor(runtime, gated, outcomeOf(decision), decision.rule, decision.reason, options.model === undefined ? undefined : { name: options.model, provider: MODEL_PROVIDER }));
   return gated;
 }

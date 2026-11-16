@@ -1,7 +1,7 @@
 // The gate in front of every chat tool call and every sub-agent's (GATE-04, GATE-07, OFFL-02, D-08, D-09, D-10, D-43): a real run's call is decided and
 // recorded on disk before it runs, a broken bundle fails closed, a card is only a transport (its answer goes back into the gate, which records it and
 // re-checks), sub-agents pass the same gate as a person's run, and with a valid bundle nothing decides differently. Plan 13 adds the remaining execution
-// paths to this file.
+// paths to this file: the cyber panel's step engine, benchmark runs, and the scans that find every place a tool runs.
 import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
 import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
@@ -30,6 +30,15 @@ import { DECISIONS_DIR, projectLogKey } from '../gate/decisionLog';
 import { AgentConversation } from '../services/agentSession';
 import type { AgentMessage, CompletionEvent, ToolCall } from '../services/nearAiClient';
 import { MemorySecrets } from './helpers/teamHarness';
+import { testManifest } from './helpers/gateFixtures';
+import { CyberEvidenceStore, CyberLedgerStore } from '../services/cyberLedgerStore';
+import { startCyberRun } from '../services/cyberRun';
+import type { RunTool } from '../services/cyberRun';
+import type { AskRoleResult } from '../agent/cyberProtocolDriver';
+import type { Step, StepRole } from '../domain/cyberProtocol';
+import type { DisclaimerAcceptance, Engagement } from '../domain/cyber';
+import { scopeFingerprint } from '../domain/cyberLegal';
+import type { ToolContext } from '../agent/tools';
 
 const call = (id: string, name: string, args: Record<string, unknown>): ToolCall => ({ id, type: 'function', function: { name, arguments: JSON.stringify(args) } });
 const usage = { inputTokens: 10, outputTokens: 5, verificationStatus: 'unknown' as const, latencyMs: 1 };
@@ -496,4 +505,96 @@ test('a card for a floor decision carries no run-wide grant and no "always allow
   assert.match(card.reason ?? '', /always needs a person|protected|approve/i);
   assert.equal(refused.approvals.length, 0, 'nobody to answer: no card');
   assert.match(toolOutputs(refused)[0] ?? '', /^Not allowed: Nobody is here to approve this/);
+});
+
+// ---- Task 1 (plan 13): the cyber panel's step engine ----
+
+const CYBER_SCOPE = { hosts: ['example.test'], ports: [443], paths: [], exclusions: [] };
+const CYBER_ACCEPTANCE: DisclaimerAcceptance = {
+  acceptor: 'Example Organisation Ltd', osUser: 'test-user', machine: 'test-machine', extensionVersion: '0.4.10', textVersion: 'v1', region: 'us', acceptedAt: '2026-10-31T12:00:00Z'
+};
+
+function cyberStep(overrides: Partial<Step> = {}): Step {
+  return {
+    id: 's1', role: 'operator', action: 'probe', target: 'https://example.test/', tool: 'CyberHttpProbe', args: ['https://example.test/'], sandbox: 'none',
+    expectedResult: 'a 200 response', safetyFlags: { maxDurationMs: 5_000, rateLimit: 0, denyList: [] }, ...overrides
+  };
+}
+
+function cyberEngagement(modes: Engagement['allowedModes'] = ['passive']): Engagement {
+  return {
+    id: 'eng-00000000-0000-4000-8000-000000000001', workspace: '/workspace/example', target: { kind: 'url', value: 'https://example.test/' }, resolvedScope: CYBER_SCOPE,
+    region: 'us', authorizationStatement: 'The acceptor owns the target.', allowedModes: modes, exclusions: [], sandbox: { tier: 'tempFolder' },
+    acceptedDisclaimer: CYBER_ACCEPTANCE, createdAt: CYBER_ACCEPTANCE.acceptedAt, frozen: false
+  };
+}
+
+/** A model that plans one step, echoes it as the operator, then says it is done. */
+function onePlannedStep(planned: Step) {
+  const queues: Partial<Record<StepRole, string[]>> = { planner: [JSON.stringify(planned)], operator: [JSON.stringify(planned)] };
+  return {
+    async askRole(role: StepRole): Promise<AskRoleResult> {
+      const reply = queues[role]?.shift() ?? JSON.stringify({ ...planned, id: `done-${role}`, role, action: 'report', tool: 'done', args: [] });
+      return { kind: 'steps', role, steps: [JSON.parse(reply) as Step], repairs: 0 };
+    }
+  };
+}
+
+interface CyberOutcome { order: string[]; runtime: ReturnType<typeof defaultGateRuntime>; approvals: number; result: Awaited<ReturnType<typeof startCyberRun>> }
+
+async function cyberScript(planned: Step, options: { capability?: 'read' | 'shell'; grant?: boolean; mode?: 'approve-risky' | 'auto' | 'fully-autonomous'; approve?: boolean; modes?: Engagement['allowedModes']; presence?: 'person' | 'none' } = {}): Promise<CyberOutcome> {
+  const order: string[] = [];
+  const capability = options.capability ?? 'read';
+  const directory = await mkdtemp(path.join(tmpdir(), 'near-ai-cyber-gate-'));
+  const root = await mkdtemp(path.join(tmpdir(), 'near-ai-cyber-gate-root-'));
+  const base = defaultGateRuntime({ presence: options.presence ?? 'person' });
+  const runtime: ReturnType<typeof defaultGateRuntime> = { ...base, sink: { record: (record: DecisionRecord) => { order.push(`decision:${record.api.request.uid.split('/')[1] ?? record.api.request.uid}:${outcomeOf(record)}`); base.records.push(record); } } };
+  const tool: AgentTool<any> = {
+    name: planned.tool, description: planned.tool, parameters: { type: 'object', properties: {} }, capability, manifest: testManifest(planned.tool, capability),
+    parse: (raw) => raw, title: () => planned.tool, async run() { order.push(`run:${planned.tool}`); return 'ok'; }
+  };
+  const grants = new RunGrants();
+  const engagement = cyberEngagement(options.modes);
+  if (options.grant) grants.grantIntrusive(engagement.id, () => true);
+  const shell = new ShellSession(root);
+  let approvals = 0;
+  try {
+    const context: ToolContext = { root, signal: new AbortController().signal, checkpoints: new RunCheckpoints('cyber-gate'), shell, readFiles: new Set() };
+    const tools: RunTool[] = [{ tool, capability, target: (step) => step.target }];
+    const result = await startCyberRun({
+      engagement, currentAcceptance: { region: 'us', scope: scopeFingerprint(CYBER_SCOPE), extensionVersion: '0.4.10', textVersion: 'v1' },
+      driver: onePlannedStep(planned) as never, tools, ledger: new CyberLedgerStore(directory), evidence: new CyberEvidenceStore(directory), grants,
+      policy: { mode: options.mode ?? 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES, gate: runtime,
+      requestApproval: async () => { approvals += 1; order.push('card'); return { decision: options.approve === false ? 'deny' : 'allow' }; },
+      signal: new AbortController().signal, toolContext: context, now: () => new Date('2026-11-02T12:00:00Z')
+    });
+    return { order, runtime, approvals, result };
+  } finally {
+    shell.dispose();
+  }
+}
+
+test('a cyber panel step is decided by the gate and recorded before its tool runs, with the outcome the permission path gave', async () => {
+  const inScope = await cyberScript(cyberStep());
+  assert.deepEqual(inScope.order.filter((entry) => entry.startsWith('decision:') || entry.startsWith('run:')), ['decision:s1:allowed', 'run:CyberHttpProbe'], 'one record, ahead of the probe');
+  assert.equal(inScope.runtime.records[0]?.api.operation, 'read');
+  assert.equal(ruleOf(inScope.runtime.records[0] as DecisionRecord), 'settings.read-plan');
+  const outOfScope = await cyberScript(cyberStep({ target: 'https://evil.test/', args: ['https://evil.test/'] }));
+  assert.deepEqual(outOfScope.order, ['decision:s1:denied'], 'one record for the refusal and the tool never ran');
+  assert.equal(outOfScope.runtime.records.length, 1);
+  assert.equal(outOfScope.runtime.records[0]?.resources[0]?.name, 'evil.test');
+});
+
+test('a cyber shell step: the engagement grant allows it with one record, no grant asks first and records the answer, and a declined card never runs it', async () => {
+  const exploit = cyberStep({ tool: 'CyberExploitTool', action: 'exploit', sandbox: 'tempFolder' });
+  const granted = await cyberScript(exploit, { capability: 'shell', grant: true, modes: ['passive', 'intrusive'] });
+  assert.deepEqual(granted.order.filter((entry) => entry !== 'card'), ['decision:s1:allowed', 'run:CyberExploitTool']);
+  assert.equal(granted.approvals, 0);
+  assert.equal(ruleOf(granted.runtime.records[0] as DecisionRecord), 'settings.engagement-grant');
+  const asked = await cyberScript(exploit, { capability: 'shell' });
+  assert.deepEqual(asked.order, ['decision:s1:asked', 'card', 'decision:s1:approved', 'run:CyberExploitTool']);
+  const declined = await cyberScript(exploit, { capability: 'shell', approve: false });
+  assert.deepEqual(declined.order, ['decision:s1:asked', 'card', 'decision:s1:denied']);
+  const nobody = await cyberScript(exploit, { capability: 'shell', grant: true, modes: ['passive', 'intrusive'], presence: 'none' });
+  assert.equal(nobody.order.includes('run:CyberExploitTool'), true, 'a granted step keeps today\'s decision even when the run is one nobody watches');
 });
