@@ -565,7 +565,7 @@ const EDITOR_WIDTHS = [220, 320, 470, 600];
 const WIDER_EDITOR_WIDTHS = [800, 1000];
 const PANELS: Array<[string, string]> = [
   ['activity', 'nearAi.openAgentActivity'], ['compare', 'nearAi.compareModels'], ['mcp', 'nearAi.manageMcp'],
-  ['teams', 'nearAi.manageTeams'], ['tools', 'nearAi.openTools'], ['onboarding', 'nearAi.setup']
+  ['teams', 'nearAi.manageTeams'], ['tools', 'nearAi.openTools'], ['onboarding', 'nearAi.setup'], ['team-live', 'nearAi.openTeamLive']
 ];
 const samples = new Map<string, Message[]>();
 const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -785,7 +785,36 @@ function sampleData(name: string, seen: Message[]): Message[] {
       tools: [{ name: 'search_products_by_a_long_identifier_name', description: 'Searches the catalog.', readOnly: true }, { name: 'delete_product', description: 'Deletes a product.', destructive: true }] };
     return [{ type: 'state', servers: [server], project: 'a-project-folder-with-a-long-name', saved: false }];
   }
+  if (name === 'team-live') return [teamLiveSample()];
   return [];
+}
+
+/**
+ * 0.4.28: a team run as Team Live's host would send it, with long names, every state and helpers, built by the extension's own code. Its tree is three
+ * cards wide, so the narrower widths show the indented list and the wider ones the tree.
+ */
+function teamLiveSample(): Message {
+  const extension = vscode.extensions.getExtension(EXTENSION_ID)!;
+  const { buildTeamLive } = require(path.join(extension.extensionPath, 'dist/agent/teamLiveState')) as typeof import('../../agent/teamLiveState');
+  const { parseTeam } = require(path.join(extension.extensionPath, 'dist/agent/teams')) as typeof import('../../agent/teams');
+  const team = parseTeam(['---', 'name: Market research team with a rather long name', 'description: Finds, writes and checks', '---', '',
+    '## research-analyst-with-a-long-name', 'role: researcher', '', 'Search the web. Report each finding with its URL.', '',
+    '## brief-writer', 'role: writer', 'reports-to: research-analyst-with-a-long-name', '', 'Write the brief. Report where it is.', '',
+    '## reviewer', 'role: reviewer', '', 'Check the brief. Report problems.', '', '## designer', 'role: designer', '', 'Make the cover. Report the file.', ''].join('\n'), 'market.md');
+  const runId = 'run-1700000000000-e2e111';
+  const now = Date.now();
+  const stat = (agentId: string, agent: string, extra: Record<string, unknown> = {}) => ({ agentId, agent, runId, model: LONG_MODEL, status: 'running', phase: 'tool', tool: 'WebSearch', startedAt: now - 95_000, turns: 12, toolCalls: 34, costUsd: 0.0123, boundary: 'tee', parentId: `main-${runId}`, ...extra });
+  const stats = [
+    stat(`main-${runId}`, 'team:market', { parentId: undefined, phase: 'waiting-agents', team: 'market', reportsDelivered: 2 }),
+    stat('research-analyst-with-a-long-name-aaa111', 'research-analyst-with-a-long-name', { task: 'Find every competitor in the market and their prices for the brief', member: true }),
+    stat('research-analyst-with-a-long-name-aaa222', 'research-analyst-with-a-long-name', { status: 'completed', member: true, endedAt: now - 20_000 }),
+    stat('brief-writer-bbb111', 'brief-writer', { phase: 'waiting-you', waitingKind: 'image', member: true, task: 'Draft the market brief with the cover image' }),
+    stat('reviewer-ccc111', 'reviewer', { phase: 'queued', member: true, task: 'Check the brief' }),
+    stat('general-purpose-ddd111', 'general-purpose', { parentId: 'research-analyst-with-a-long-name-aaa111', task: 'Check a quote from a very long source document about pricing', phase: 'cooling-down', coolReason: 'rate-limited' }),
+    stat('gsd-verifier-eee111', 'gsd-verifier', { parentId: 'brief-writer-bbb111', status: 'failed', boundary: 'cloud' })
+  ];
+  const view = buildTeamLive({ runId, stats: stats as never, team });
+  return { type: 'team-live', now, runs: [{ runId, title: 'team:market', running: true, startedAt: now - 95_000 }, { runId: 'run-1700000000000-e2e222', title: 'A second team running at the same time', running: true, startedAt: now - 5_000 }], runId, view, events: [] };
 }
 
 const WIDE_REPLY = [
