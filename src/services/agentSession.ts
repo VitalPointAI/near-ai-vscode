@@ -270,6 +270,8 @@ export class AgentConversation {
   public runMarkers: RunMarkers | undefined;
   private readonly runs = new Map<string, RunCheckpoints>();
   private readonly agents = new Map<string, LiveAgent>();
+  /** 0.4.28: agents asked for that wait for a slot, so Pause and Stop reach them too (Agent Activity and Team Live show them). */
+  private readonly queuedAgents = new Map<string, LiveAgent>();
   private readonly background = new Set<Promise<void>>();
   private notifications: AgentMessage[] = [];
   /**
@@ -600,7 +602,7 @@ export class AgentConversation {
 
   /** Pause (before its next model turn), resume, or stop one sub-agent. */
   public controlAgent(agentId: string, action: 'pause' | 'resume' | 'stop' | 'nudge'): boolean {
-    const agent = this.agents.get(agentId);
+    const agent = this.agents.get(agentId) ?? (action === 'nudge' ? undefined : this.queuedAgents.get(agentId));
     if (!agent) return false;
     if (action === 'nudge') {
       // 0.4.19: "Check now". The queue a run takes belongs to the whole conversation and only the main run consumes it, so the message goes to the main
@@ -965,6 +967,7 @@ export class AgentConversation {
         const agentBoundary = runBoundary(request);
         const identity = { agentId: agent.id, agent: label, runId, model, parentId, conversationId: this.conversationId, task: spawn.description, member: teamMember, background: spawn.background, ...(agentBoundary ? { boundary: agentBoundary } : {}) };
         this.activity?.agentQueued(identity);
+        this.queuedAgents.set(agent.id, agent);
         // A background agent outlives the tool call but not the run; a foreground one ends with the call too.
         const parent = spawn.background ? runSignal : callSignal;
         const onParentAbort = () => agent.abort.abort();
@@ -1012,7 +1015,7 @@ export class AgentConversation {
         const tools = allowed.map((tool) => (tool.name === 'Agent' || tool.name === 'Task' ? yieldingSlot(tool) : tool));
         const execute = async (): Promise<string> => {
           // Stopped before it got a slot (0.4.28): it ends as stopped on the feed rather than staying queued.
-          try { await this.acquireSlot(limit, agent.abort.signal); } catch (error) { this.activity?.agentEnded(agent.id, 'cancelled'); throw error; }
+          try { await this.acquireSlot(limit, agent.abort.signal); } catch (error) { this.activity?.agentEnded(agent.id, 'cancelled'); throw error; } finally { this.queuedAgents.delete(agent.id); }
           slot.held = true;
           // PERF-04: agents in their own worktree also take a worktree slot (nearAi.agent.maxParallelWorktrees), since each one checks out and builds.
           // Like the agent slot (#36), it is handed back while the agent waits for a foreground helper, so a worktree cap of 1 cannot deadlock either.
@@ -1041,6 +1044,8 @@ export class AgentConversation {
             const base = `${this.systemPrompt({ ...request, model }, agentRoot, tools.some((tool) => tool.name === 'Agent' || tool.name === 'Task'))}${isolationNote}`;
             const system = agentBody ? `${agentBody}\n\n${base}` : base;
             this.activity?.agentStarted(identity, spawn.prompt, system);
+            // Paused while it waited for a slot: it starts paused.
+            if (agent.paused) this.activity?.setPaused(agent.id, true);
             this.inboxes.set(agent.id, inbox);
             const child = new AgentRun({
               client: request.client, model, tools, context: agentContext, policy: request.policy, rules: request.rules, grants, safety: this.runSafety, maxTurns: request.maxTurns, maxOutputTokens: request.maxOutputTokens,

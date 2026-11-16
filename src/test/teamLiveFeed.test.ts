@@ -250,3 +250,33 @@ test('the lead\'s count of reports read goes up when a background report reaches
   assert.equal(planner.background, true);
   assert.equal(planner.parentId, main.agentId);
 });
+
+test('an agent waiting for a slot can be stopped: it ends as stopped, never started, and the run goes on', { timeout: 20_000 }, async () => {
+  const { feed, conversation, request } = await nestedProject();
+  let release: (() => void) | undefined;
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  let plannerTurns = 0;
+  const client = {
+    async *streamCompletion(_model: string, messages: AgentMessage[]): AsyncGenerator<CompletionEvent> {
+      const role = who(messages);
+      if (role === 'planner') { plannerTurns += 1; await held; yield reply('planner report'); return; }
+      const results = messages.filter((message) => message.role === 'tool').length;
+      yield results ? reply('done') : reply(null, [call('p1', 'Agent', { subagent_type: 'gsd-planner', description: 'First', prompt: 'one' }), call('p2', 'Agent', { subagent_type: 'gsd-planner', description: 'Second', prompt: 'two' })]);
+    },
+    async actualCostsUsd() { return undefined; }
+  };
+  const running = conversation.send(request(client, { maxParallelAgents: 1 }));
+  let queued: AgentStats | undefined;
+  for (let attempt = 0; attempt < 400 && !queued; attempt += 1) { queued = feed.agentStats().find((stat) => stat.phase === 'queued' && stat.status === 'running'); if (!queued) await new Promise((resolve) => setTimeout(resolve, 5)); }
+  try {
+    assert.ok(queued, 'one planner waits for the only slot');
+    assert.equal(conversation.controlAgent(queued.agentId, 'stop'), true, 'Stop reaches an agent that is still queued');
+  } finally {
+    release?.();
+    await running.catch(() => undefined);
+    conversation.dispose();
+  }
+  const stopped = feed.agentStat(queued!.agentId)!;
+  assert.deepEqual([stopped.status, stopped.neverStarted], ['cancelled', true]);
+  assert.equal(plannerTurns, 1, 'the stopped one never ran');
+});
