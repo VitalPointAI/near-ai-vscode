@@ -499,6 +499,50 @@ until it runs out aren't shown.
   leaving the builder or the editor with unsaved changes asks first (Discard
   changes, or Save draft / Save); closing the tab keeps the unsaved team as a
   draft and says so the next time the studio opens.
+- **Private teams.** Tick **Private team** on a team's Purpose step in Team
+  Studio (it writes `privacy: private` in the team file's frontmatter) to keep
+  every member on a private model, exactly as if each had its own
+  `privacy: private` line. A team whose members are all private counts as
+  private too. Team Studio sends a private team only to a private model: a
+  NEAR TEE model on NEAR AI Cloud's own endpoint, where its attestation can
+  be checked, or a model on this computer. Tick **Private team** when you ask
+  the AI to draft a team and the description goes only to a private model,
+  and the drafted team is marked private.
+- **The local team check.** While you edit a team, Team Studio checks it
+  for free, without a model, and shows what it finds as warnings (never as
+  problems that stop a save): instructions that ask for something the
+  member's tools cannot do (search the web, run commands, change files, make
+  slides or PDFs), a member told not to edit files that still holds Write or
+  Edit, instructions that do not say what the member hands back, a vague
+  role, two members doing the same work, a reports-to line that names
+  nobody or goes round in a circle, very long instructions, and anything that
+  looks like a key, token or password.
+- **Improve with AI.** **Improve with AI** in the team editor (and on the
+  last step of the builder) shows the local check first. When you ask, it
+  sends the team for one AI review and lists suggestions: each changes one
+  field of one member (its instructions, role, reports-to line or tools) or
+  adds or removes a member, with the reason and a line diff. Accept, Reject or
+  Edit each one; **Accept all** takes only wording changes. Accepting changes
+  the team in the editor only: **Save** writes it and keeps a version, as for
+  any edit. A suggestion that adds a tool, or adds or removes a member, is
+  labelled ("gives this member more power") and is accepted on its own. A
+  suggestion whose field changed after the review (you typed, the file
+  changed, or you accepted another suggestion for the same field) shows as
+  **Stale**, and one that would break the team (a `## ` line, a 13th member,
+  a reports-to loop) as **Invalid**; neither changes anything. The review
+  never changes a member's model or privacy, leaves the plagiarism checker
+  and members made from Open-GSD roles as they are, and turns a rename into
+  advice. Which model may see the team follows its privacy: a private team
+  only a private model; a team with some private members a private model,
+  or, when there is none, the review leaves those members' text out and says
+  so; any other team any model your settings allow. TEE-only mode, the daily
+  spend limit and Emergency stop apply as they do in chat, and when no model
+  is allowed the review says why and the local check still works. The panel
+  names the model and the most the review can cost before you ask. An
+  imported team you have not approved is reviewed as untrusted text. The
+  model may add its own rating of the team before and after its suggestions;
+  it is shown as the model's own opinion, not a measurement. **Cancel**,
+  Emergency stop, or opening another team stops a review in progress.
 - **Reusing your teams in a new project.** When you set up a team (**Set Up
   Project Team**, or **New team** in Team Studio), the starting points list
   your own saved teams, from any project, next to the ones the extension
