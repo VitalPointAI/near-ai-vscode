@@ -230,6 +230,12 @@
         "icon": "$(pulse)"
       },
       {
+        "command": "nearAi.openTeamLive",
+        "title": "Watch the Team Live",
+        "category": "NEAR AI",
+        "icon": "$(organization)"
+      },
+      {
         "command": "nearAi.exportAnalytics",
         "title": "Export Usage and Activity…",
         "category": "NEAR AI"

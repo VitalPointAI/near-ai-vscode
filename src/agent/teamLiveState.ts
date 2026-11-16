@@ -173,25 +173,32 @@ export function buildTeamLive(input: { runId: string; stats: LiveAgentStat[]; te
     const walk = (node: MemberNode, parent: string) => { memberParent.set(node.name, parent); for (const child of node.children) walk(child, `m:${node.name}`); };
     for (const root of graph.roots) walk(root, 'lead');
   }
-  const nodeOf = new Map<string, string>();
-  nodeOf.set(mainId, 'lead');
+  // Which card each agent is on. A helper's card depends on its starter's card, which is found by following the starter, whatever order the agents
+  // came in (two can start in the same millisecond); an unknown or looping starter means the lead.
+  const byId = new Map(stats.map((stat) => [stat.agentId, stat]));
+  const nodeOf = new Map<string, string>([[mainId, 'lead']]);
+  const cardOf = (agentId: string | undefined, seen: Set<string> = new Set()): string => {
+    if (!agentId) return 'lead';
+    const known = nodeOf.get(agentId);
+    if (known) return known;
+    const stat = byId.get(agentId);
+    if (!stat || seen.has(agentId)) return 'lead';
+    seen.add(agentId);
+    const id = members.includes(stat.agent) ? `m:${stat.agent}` : stat.agent === 'general-purpose' ? `g:${stat.agentId}` : `g:${cardOf(stat.parentId, seen)}>${stat.agent}`;
+    nodeOf.set(agentId, id);
+    return id;
+  };
   const groups = new Map<string, { kind: 'member' | 'guest'; name: string; parent: string; stats: LiveAgentStat[] }>();
   for (const name of members) groups.set(`m:${name}`, { kind: 'member', name, parent: memberParent.get(name) ?? 'lead', stats: [] });
   const guestOrder: string[] = [];
   for (const stat of stats) {
     if (stat.agentId === mainId) continue;
-    const spawner = (stat.parentId && nodeOf.get(stat.parentId)) || 'lead';
-    let id: string;
-    if (members.includes(stat.agent)) id = `m:${stat.agent}`;
-    else {
-      // Helpers of one kind started by one card share a card with a count; general-purpose ones say nothing by their name, so each keeps its own.
-      id = stat.agent === 'general-purpose' ? `g:${stat.agentId}` : `g:${spawner}>${stat.agent}`;
-      if (!groups.has(id)) { groups.set(id, { kind: 'guest', name: stat.agent === 'general-purpose' ? stat.task ?? 'helper' : stat.agent, parent: spawner, stats: [] }); guestOrder.push(id); }
-    }
+    const id = cardOf(stat.agentId);
+    // Helpers of one kind started by one card share a card with a count; general-purpose ones say nothing by their name, so each keeps its own.
+    if (!groups.has(id)) { groups.set(id, { kind: 'guest', name: stat.agent === 'general-purpose' ? stat.task ?? 'helper' : stat.agent, parent: cardOf(stat.parentId), stats: [] }); guestOrder.push(id); }
     groups.get(id)!.stats.push(stat);
-    nodeOf.set(stat.agentId, id);
   }
-  const spawnerOf = (stat: LiveAgentStat) => (stat.parentId && nodeOf.get(stat.parentId)) || 'lead';
+  const spawnerOf = (stat: LiveAgentStat) => cardOf(stat.parentId);
   const reportsBack = (stat: LiveAgentStat, state: LiveState) => state === 'done' || state === 'failed' || (state === 'stopped' && (stat.status === 'stuck' || stat.status === 'max-turns'));
   const nodes: LiveNode[] = [];
   const leadState = main ? agentState(main) : 'interrupted';
