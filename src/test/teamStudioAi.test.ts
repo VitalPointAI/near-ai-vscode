@@ -1,6 +1,4 @@
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
-import * as path from 'node:path';
 import test from 'node:test';
 import type { PrivateRoute } from '../services/agentSession';
 import type { AgentMessage, ModelInfo } from '../services/nearAiClient';
@@ -97,12 +95,3 @@ test('model choice skips image-only models and says so when the key has no chat 
   assert.match(none.ok ? '' : none.reason, /no chat models/);
 });
 
-test('Team Studio has one way to a model: every call in the panel goes through teamModelCall', async () => {
-  // The panel needs VS Code, so its source is checked instead: the only completeOnce is the one teamModelCall is given, and draftTeam uses teamModelCall.
-  const source = await readFile(path.join(__dirname, '..', '..', 'src', 'services', 'teamStudioPanel.ts'), 'utf8');
-  const calls = source.match(/completeOnce\(/g) ?? [];
-  assert.equal(calls.length, 1, 'one completeOnce, inside the guarded deps');
-  assert.match(source, /complete: \(model, messages, options\) => clientFor\(active, model\)\.client\.completeOnce\(model, messages, options\)/);
-  assert.doesNotMatch(source, /draftTeam:/, 'drafting runs on the host through teamModelCall, not in the panel');
-  assert.doesNotMatch(source, /streamChatEvents|streamChat\(/, 'no streaming call skips the guard either');
-});

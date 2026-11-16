@@ -973,6 +973,12 @@ test('host path: Manage Teams opens one Team Studio tab; Set Up Project Team sta
     const state = posted.find((message) => message.type === 'state')!;
     assert.deepEqual(state.library.teams.map((team: any) => team.id), ['user:web']);
     assert.ok(state.context.tools.some((tool: any) => tool.name === 'Bash' && tool.status === 'asks'));
+    // The panel's only way to a model is teamAiDeps (PR #69 review): with no profile, drafting and Improve with AI both stop with its message, and the
+    // network stub above proves nothing was sent.
+    await receive!({ type: 'draft-team', idea: 'A research team' });
+    assert.equal(posted.filter((message) => message.type === 'error').at(-1)!.text, 'The team could not be drafted: Set up a NEAR AI profile for this project first.');
+    await receive!({ type: 'improve-check', seq: 1, draft: { name: 'T', description: '', members: [{ name: 'a', role: 'writer', model: '', tools: null, instructions: 'Write it. Report it.' }] } });
+    assert.deepEqual(posted.filter((message) => message.type === 'improve-checked').at(-1)!.ai, { available: false, reason: 'Set up a NEAR AI profile for this project first.', skipped: [] });
     await commands.get('nearAi.setupProjectTeam')!();
     assert.equal(created, 1, 'the same tab');
     assert.equal(revealed, 1);
