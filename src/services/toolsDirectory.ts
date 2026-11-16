@@ -2,9 +2,8 @@ import type { ActionCapability, ActionPolicy, ActionPolicyMode } from '../domain
 import { GSD_COMMANDS } from '../domain/gsdCommands';
 import { decidePermission, PermissionRules, RunGrants } from '../agent/permissions';
 import { AgentTool } from '../agent/tools';
-import { builtInTools } from '../agent/toolCatalog';
+import { builtInTools, GSD_TOOL_NAMES } from '../agent/toolCatalog';
 import { describeManifest } from '../domain/gate/words';
-import { gsdTools } from '../gsd/tools';
 import { GsdAgent, GsdSkill, modelForTier, roleModelFor } from '../gsd/library';
 import type { TeamDefinition } from '../agent/teams';
 import type { McpServerStatus } from './mcpRegistry';
@@ -23,7 +22,7 @@ export type ToolStatus = 'runs' | 'asks' | 'auto-checked' | 'off' | 'stopped';
 export interface DirectorySkill { name: string; description: string; argumentHint?: string; group: string; insert: string }
 export interface DirectoryAgent { name: string; description: string; tier: string; model: string; source: 'role setting' | 'project choice' | 'definition' | 'default'; tools: string[] }
 export interface DirectoryTeam { name: string; description: string; command: string; insert: string; project: boolean; members: Array<{ name: string; role?: string; tier: string; model: string; tools: string[] }> }
-export interface DirectoryTool { name: string; description: string; capability: string; status: ToolStatus; statusText: string; notes: string[]; setup?: { label: string; command: string }; /** 0.4.17: the tool runs in Auto by its own marker (the web tools). */ autoSafe?: boolean }
+export interface DirectoryTool { name: string; description: string; capability: string; status: ToolStatus; statusText: string; notes: string[]; /** What the tool's manifest says it can do, in plain words (also the last of `notes`): the team member cards show these. */ words: string[]; setup?: { label: string; command: string }; /** 0.4.17: the tool runs in Auto by its own marker (the web tools). */ autoSafe?: boolean }
 export interface DirectoryMcpServer { id: string; name: string; transport: string; host: string; enabledHere: boolean; state: string; error?: string; approval: string; tools: Array<{ name: string; agentName: string; description: string; enabled: boolean; status: ToolStatus; statusText: string }> }
 export interface DirectoryModel { id: string; privacy: 'tee' | 'local' | 'forwarded' | 'unknown'; privacyText: string; contextLength?: number; inputPerMillion?: number; outputPerMillion?: number; imagePrice?: number; kinds: string[]; usedFor: string[] }
 
@@ -143,9 +142,10 @@ function toolEntry(tool: AgentTool<any>, input: DirectoryInput, available: { off
   if (tool.risky) notes.push('Can ask in any mode once the run has read outside content.');
   if (tool.untrusted) notes.push('Its results are outside content.');
   // What the tool declares it can do, in plain words (GATE-03, D-07): the same sentences the gate and the member cards use, after today's notes.
-  if (tool.manifest) notes.push(...describeManifest(tool.manifest));
+  const words = tool.manifest ? describeManifest(tool.manifest) : [];
+  notes.push(...words);
   return {
-    name: tool.name, description: firstSentence(tool.description), capability: CAPABILITY_LABEL[tool.capability], status, statusText: STATUS_TEXT[status], notes,
+    name: tool.name, description: firstSentence(tool.description), capability: CAPABILITY_LABEL[tool.capability], status, statusText: STATUS_TEXT[status], notes, words,
     ...(available.setup ? { setup: available.setup } : {}), ...(tool.autoSafe === true ? { autoSafe: true } : {})
   };
 }
@@ -186,8 +186,7 @@ export function buildToolsDirectory(input: DirectoryInput): ToolsDirectory {
       webSearch: input.webSearch && input.webSearchHost ? { name: 'searxng', label: 'configured provider', host: input.webSearchHost, search: async () => [] } : null,
       imageClient: { ...(input.modelHost ? { baseHost: input.modelHost } : {}) } as NearAiClient,
       imageModel: image ?? { id: input.settings.imageModel }
-    }).map((tool) => toolEntry(tool, input, unavailable[tool.name])),
-    ...gsdTools({ home: '', root: '', skills: [], agents: [], ask: async () => [], spawn: async () => '' }).map((tool) => toolEntry(tool, input, noGsd))
+    }).map((tool) => toolEntry(tool, input, GSD_TOOL_NAMES.has(tool.name) ? noGsd : unavailable[tool.name]))
   ];
 
   const mcp: DirectoryMcpServer[] = input.mcp.map((server) => {

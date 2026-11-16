@@ -731,6 +731,8 @@
           const line = el('div', 'tool-line');
           const label = el('label'); label.setAttribute('for', id);
           label.append(el('code', 'tool-name', tool.name), el('span', 'hint', ' ' + tool.description));
+          // What the tool's manifest says it can do, in the sentences the Tools page shows.
+          if (tool.words && tool.words.length) label.append(el('span', 'hint tool-words', ' ' + tool.words.join('. ') + '.'));
           line.append(box, label, badge(STATUS_SHORT[tool.status] || tool.status, 'status ' + (STATUS_CLASS[tool.status] || ''), tool.statusText));
           set.append(line);
           if (chosen.includes(tool.name)) (tool.status === 'runs' ? runs : asks).push(tool.name + (tool.status === 'runs' ? '' : ' (' + STATUS_SHORT[tool.status].toLowerCase() + ')'));

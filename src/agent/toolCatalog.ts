@@ -1,4 +1,6 @@
 import { imageTool, memoryTools } from './extraTools';
+import { gsdTools } from '../gsd/tools';
+import type { GsdServices } from '../gsd/tools';
 import { GRAPHICS_TOOLS } from './graphicsTools';
 import { securityTool } from './securityTool';
 import type { SecurityAccess } from './securityTool';
@@ -36,7 +38,12 @@ export interface CatalogStubs {
   imageModel?: ModelInfo;
   security?: SecurityAccess;
   memory?: ContextGraphMemory;
+  /** What the gsd tools need to be built; their manifests do not read it. Stand-ins when absent. */
+  gsd?: GsdServices;
 }
+
+/** The gsd tools' names: the Tools page offers them once Open-GSD is installed, so it needs to tell them from the rest. */
+export const GSD_TOOL_NAMES: ReadonlySet<string> = new Set(['Skill', 'SlashCommand', 'AskUserQuestion', 'Agent', 'Task']);
 
 const STAND_IN_SEARCH: SearchProvider = { name: 'searxng', label: 'stand-in', host: 'search.example', search: async () => [] };
 
@@ -52,6 +59,7 @@ export function builtInTools(stubs: CatalogStubs = {}): AgentTool<any>[] {
     ...GRAPHICS_TOOLS,
     imageTool(stubs.imageClient ?? ({} as NearAiClient), stubs.imageModel ?? { id: 'image-model' }),
     securityTool(stubs.security ?? { consented: () => true, scan: async () => undefined }),
-    ...memoryTools(stubs.memory ?? ({} as ContextGraphMemory), { project: { kind: 'project', id: 'directory' } }, 'directory', 'directory')
+    ...memoryTools(stubs.memory ?? ({} as ContextGraphMemory), { project: { kind: 'project', id: 'directory' } }, 'directory', 'directory'),
+    ...gsdTools(stubs.gsd ?? { home: '', root: '', skills: [], agents: [], ask: async () => [], spawn: async () => '' })
   ];
 }

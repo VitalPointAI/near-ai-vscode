@@ -10,6 +10,7 @@ import { imageTool } from '../agent/extraTools';
 import type { NearAiClient } from '../services/nearAiClient';
 import { builtInTools, SHORTHAND_EXCEPTIONS } from '../agent/toolCatalog';
 import { effectsFor, parseToolManifest, shorthandFor } from '../domain/gate/manifest';
+import { buildStudioContext } from '../services/teamStudioPage';
 import { describeManifest } from '../domain/gate/words';
 import { buildToolsDirectory } from '../services/toolsDirectory';
 import type { DirectoryInput } from '../services/toolsDirectory';
@@ -128,18 +129,22 @@ const EXPECTED_ORDER = [
   'Read', 'Write', 'Edit', 'Glob', 'Grep', 'Bash', 'BashOutput', 'KillShell', 'TodoWrite',
   'WebFetch', 'WebSearch', 'CheckCitations', 'CheckOriginality',
   'VectorizeImage', 'RenderSvg', 'CreatePresentation', 'CreatePdf', 'CreateDocument',
-  'GenerateImage', 'SecurityScan', 'Remember', 'Recall'
+  'GenerateImage', 'SecurityScan', 'Remember', 'Recall',
+  'Skill', 'SlashCommand', 'AskUserQuestion', 'Agent', 'Task'
 ];
 
-test('the catalog holds the 22 built-in tools in the order a run is given them, and the page lists them in that order', () => {
+test('the catalog holds the built-in tools in the order a run is given them, and the page lists them in that order', () => {
   assert.deepEqual(builtInTools().map((tool) => tool.name), EXPECTED_ORDER);
   const listed = buildToolsDirectory(directoryInput()).tools.map((entry) => entry.name);
   assert.deepEqual(listed.slice(0, EXPECTED_ORDER.length), EXPECTED_ORDER);
 });
 
-test('unattended runs keep exactly the tools they have today: the core tools, the web tools, the graphics tools and memory, never the image or scan tools', () => {
+// The tools that need a person: they do not exist in a run with nobody there (today the image and scan tools, and AskUserQuestion).
+const INTERACTIVE_ONLY_TOOLS = ['GenerateImage', 'SecurityScan', 'AskUserQuestion'];
+
+test('unattended runs keep exactly the tools they have today: never the image or scan tools, and never a question for a person', () => {
   const unattended = builtInTools().filter((tool) => tool.manifest!.contexts.includes('unattended')).map((tool) => tool.name);
-  assert.deepEqual(unattended, EXPECTED_ORDER.filter((name) => !['GenerateImage', 'SecurityScan'].includes(name)));
+  assert.deepEqual(unattended, EXPECTED_ORDER.filter((name) => !INTERACTIVE_ONLY_TOOLS.includes(name)));
 });
 
 test('the effects of the web, graphics, image, memory and security tools are filled from the call', () => {
@@ -202,5 +207,39 @@ test('the words say what each of these tools does, and say it only once', () => 
   for (const tool of builtInTools()) {
     const lines = describeManifest(tool.manifest!);
     assert.equal(new Set(lines).size, lines.length, `${tool.name}: no sentence twice`);
+  }
+});
+
+test('the gsd tools\' effects: Skill, SlashCommand and AskUserQuestion change nothing outside the run, and Agent and Task start the agent the call names', () => {
+  const byName = new Map(builtInTools().map((tool) => [tool.name, tool]));
+  const effects = (name: string, raw: Record<string, unknown>) => {
+    const tool = byName.get(name)!;
+    const filled = effectsFor(tool.manifest!, tool.manifestInput?.(raw) ?? raw);
+    assert.equal(filled.ok, true, `${name} ${JSON.stringify(raw)}`);
+    return filled.ok ? filled.value : [];
+  };
+  for (const name of ['Skill', 'SlashCommand', 'AskUserQuestion']) assert.deepEqual(effects(name, {}), [{ verb: 'plan' }], name);
+  for (const name of ['Agent', 'Task']) {
+    assert.deepEqual(effects(name, { prompt: 'x', subagent_type: 'gsd-planner' }), [{ verb: 'spawn', agent: 'gsd-planner' }], name);
+    assert.deepEqual(effects(name, { prompt: 'x', subagent_type: '  gsd-planner ' }), [{ verb: 'spawn', agent: 'gsd-planner' }], `${name} with spaces around the name`);
+    assert.deepEqual(effects(name, { prompt: 'x' }), [{ verb: 'spawn', agent: 'general-purpose' }], `${name} with no agent named starts general-purpose`);
+    assert.deepEqual(effects(name, { prompt: 'x', subagent_type: '' }), [{ verb: 'spawn', agent: 'general-purpose' }], `${name} with an empty name`);
+    // A name the format cannot hold is a refusal, never a wildcard spawn (T-70-17).
+    assert.equal(effectsFor(byName.get(name)!.manifest!, byName.get(name)!.manifestInput!({ prompt: 'x', subagent_type: '*' })).ok, false, `${name} with a wildcard`);
+    assert.equal(effectsFor(byName.get(name)!.manifest!, byName.get(name)!.manifestInput!({ prompt: 'x', subagent_type: 7 })).ok, true, `${name} with a number falls back to general-purpose`);
+  }
+  assert.equal(byName.get('Task')!.manifest!.tool, 'Task');
+  assert.equal(byName.get('SlashCommand')!.manifest!.tool, 'SlashCommand');
+});
+
+test('a team member card says, in the manifest\'s words, what each of its tools can do (D-07)', () => {
+  const studio = buildStudioContext(directoryInput(), { hasProject: true, knowledgeBase: false });
+  const byName = new Map(studio.tools.map((tool) => [tool.name, tool]));
+  assert.ok(byName.get('Agent')!.words.includes('Starts other agents'));
+  assert.ok(byName.get('Task')!.words.includes('Starts other agents'));
+  assert.ok(byName.get('Write')!.words.includes('Can change files in this project'));
+  for (const tool of builtInTools()) {
+    const entry = byName.get(tool.name);
+    if (entry) assert.deepEqual(entry.words, describeManifest(tool.manifest!), `${tool.name}: the card and the Tools page use the same sentences`);
   }
 });

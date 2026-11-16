@@ -1,3 +1,4 @@
+import { declareManifest, fromArgument, INTERACTIVE_AND_UNATTENDED, INTERACTIVE_ONLY } from '../agent/tools';
 import type { AgentTool } from '../agent/tools';
 import { ToolError } from '../agent/workspace';
 import { expandPrompt, GsdAgent, GsdSkill, modelList } from './library';
@@ -48,6 +49,12 @@ export interface GsdServices {
 }
 
 
+/** A call with no subagent_type starts general-purpose (agentParse), so that is the agent the manifest names for it. */
+function withDefaultAgent(raw: Record<string, unknown>): Record<string, unknown> {
+  const named = typeof raw.subagent_type === 'string' ? raw.subagent_type.trim() : '';
+  return { ...raw, subagent_type: named || 'general-purpose' };
+}
+
 /** Tools Open-GSD's Claude runtime expects, implemented for this runner. */
 export function gsdTools(services: GsdServices): AgentTool<any>[] {
   const findSkill = (name: string) => services.skills.find((skill) => skill.name === name || skill.name === `gsd-${name}` || skill.name === name.replace(/^\//, '') || skill.name.replace(/:/g, '-') === name);
@@ -57,6 +64,8 @@ export function gsdTools(services: GsdServices): AgentTool<any>[] {
     description: `Load an installed skill's instructions and follow them. Available skills: ${services.skills.map((skill) => skill.name).join(', ')}.`,
     parameters: { type: 'object', properties: { skill: { type: 'string', description: 'Skill name, e.g. gsd-progress.' }, args: { type: 'string', description: 'Arguments for the skill.' } }, required: ['skill'], additionalProperties: false },
     capability: 'plan',
+    // Loading a skill's instructions changes nothing and reaches nothing: what the skill then asks the agent to do goes through the gate call by call.
+    manifest: declareManifest({ tool: 'Skill', effects: [{ verb: 'plan' }], contexts: INTERACTIVE_AND_UNATTENDED }),
     parse: (raw) => {
       const name = typeof raw.skill === 'string' ? raw.skill.trim() : typeof raw.command === 'string' ? raw.command.trim() : '';
       if (!name) throw new ToolError('Missing required parameter "skill".');
@@ -74,6 +83,7 @@ export function gsdTools(services: GsdServices): AgentTool<any>[] {
   const slashTool: AgentTool<{ name: string; args: string }> = {
     ...skillTool,
     name: 'SlashCommand',
+    manifest: declareManifest({ tool: 'SlashCommand', effects: [{ verb: 'plan' }], contexts: INTERACTIVE_AND_UNATTENDED }),
     description: 'Run an installed slash command, e.g. "/gsd-plan-phase 1 --auto": loads its instructions to follow now.',
     parameters: { type: 'object', properties: { command: { type: 'string', description: 'The command with its arguments, starting with /.' } }, required: ['command'], additionalProperties: false },
     parse: (raw) => {
@@ -89,6 +99,8 @@ export function gsdTools(services: GsdServices): AgentTool<any>[] {
     description: 'Ask the user one to four multiple-choice questions and wait for the answers. Each question has 2-4 options; the user can also type their own answer. Use when a decision is genuinely theirs to make.',
     parameters: { type: 'object', properties: { questions: { type: 'array', minItems: 1, maxItems: 4, items: { type: 'object', properties: { question: { type: 'string' }, header: { type: 'string', description: 'A short label, at most 12 characters.' }, options: { type: 'array', minItems: 2, maxItems: 4, items: { type: 'object', properties: { label: { type: 'string' }, description: { type: 'string' } }, required: ['label'] } }, multiSelect: { type: 'boolean' } }, required: ['question', 'options'] } } }, required: ['questions'], additionalProperties: false },
     capability: 'plan',
+    // It needs a person to answer, so it does not exist in a run with nobody there.
+    manifest: declareManifest({ tool: 'AskUserQuestion', effects: [{ verb: 'plan' }], contexts: INTERACTIVE_ONLY }),
     parse: (raw) => {
       if (!Array.isArray(raw.questions) || !raw.questions.length) throw new ToolError('questions must be a non-empty array.');
       const questions = raw.questions.slice(0, 4).map((value) => {
@@ -136,12 +148,16 @@ export function gsdTools(services: GsdServices): AgentTool<any>[] {
     parameters: agentParameters,
     // Its own tool calls go through the same permission checks; the call itself only reads.
     capability: 'plan',
+    // The agent it starts is named by subagent_type; a call that names none starts general-purpose, which the manifest reads from the written-out default. The
+    // child's own calls are gated on their own.
+    manifest: declareManifest({ tool: 'Agent', effects: [{ verb: 'spawn', agent: fromArgument('subagent_type', 'literal') }], contexts: INTERACTIVE_AND_UNATTENDED }),
+    manifestInput: withDefaultAgent,
     parse: agentParse,
     title: (input) => `${input.type || 'Agent'}: ${input.description || input.prompt.slice(0, 60)}`,
     run: (input, context) => agentRun(input, context.signal)
   };
   // Earlier Claude Code releases named this tool Task; GSD workflows may use either name.
-  const taskTool: AgentTool<ReturnType<typeof agentParse>> = { ...agentTool, name: 'Task' };
+  const taskTool: AgentTool<ReturnType<typeof agentParse>> = { ...agentTool, name: 'Task', manifest: declareManifest({ tool: 'Task', effects: [{ verb: 'spawn', agent: fromArgument('subagent_type', 'literal') }], contexts: INTERACTIVE_AND_UNATTENDED }) };
 
   return [skillTool, slashTool, askTool, agentTool, taskTool];
 }
