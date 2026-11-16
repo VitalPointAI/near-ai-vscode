@@ -1692,7 +1692,9 @@ export class AgentConversation {
     if (signal.aborted) return { decision: 'cancelled' };
     const bytes = await readFile(draft.file).catch(() => undefined);
     if (signal.aborted) return { decision: 'cancelled' };
-    const image = bytes && bytes.length <= MAX_PREVIEW_BYTES ? `data:image/png;base64,${bytes.toString('base64')}` : undefined;
+    // 0.4.25: an empty draft file (zero bytes) has no image either, so it is gone like a missing one, never an image or too large to show.
+    const present = bytes?.length ? bytes : undefined;
+    const image = present && present.length <= MAX_PREVIEW_BYTES ? `data:image/png;base64,${present.toString('base64')}` : undefined;
     const live = draft.agentId ? this.agents.get(draft.agentId) : undefined;
     if (draft.agentId) this.activity?.waitingForUser(draft.agentId, true);
     if (live) { this.setActivity(live, 'Waiting for your image review'); this.postAgents(); }
@@ -1703,7 +1705,7 @@ export class AgentConversation {
       this.openPrompt(draft.id, {
         type: 'image-review-request', id: draft.id, path: draft.path, model: draft.model, prompt: draft.prompt, attempt: draft.attempt, sizeKb: Math.max(1, Math.round(draft.bytes / 1024)),
         // 0.4.24: a draft that could not be read is gone (removed by hand, or by a clean-up), which is not the same as too large to show.
-        ...(image ? { image } : bytes ? { tooLarge: true } : { missing: true }), ...(draft.agent ? { agent: draft.agent } : {}), ...(draft.editOf ? { editOf: draft.editOf } : {}), ...(draft.note ? { note: draft.note } : {})
+        ...(image ? { image } : present ? { tooLarge: true } : { missing: true }), ...(draft.agent ? { agent: draft.agent } : {}), ...(draft.editOf ? { editOf: draft.editOf } : {}), ...(draft.note ? { note: draft.note } : {})
       });
     }, this.promptMayTimeOut(policy, draft.agentId),
     (minutes) => `No one reviewed the image for ${draft.path} within ${minutes} minute${minutes === 1 ? '' : 's'}, so the run is paused on this step. Nothing was saved. Accept, request changes or discard it and the run carries on from here.`,
