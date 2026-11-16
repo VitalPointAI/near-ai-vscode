@@ -4,7 +4,7 @@
 // paths to this file: the cyber panel's step engine, benchmark runs, and the scans that find every place a tool runs.
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
-import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -50,6 +50,8 @@ import { planComparison } from '../benchmark/results';
 import type { ResultRow } from '../benchmark/results';
 import { loadBenchmarkTasks } from '../benchmark/tasks';
 import { testGateRuntime } from './helpers/gatedRuns';
+import { configuredFiles, countByFile, findToolRunSites, programFor } from './helpers/toolRunScan';
+import type { RunSite } from './helpers/toolRunScan';
 
 const call = (id: string, name: string, args: Record<string, unknown>): ToolCall => ({ id, type: 'function', function: { name, arguments: JSON.stringify(args) } });
 const usage = { inputTokens: 10, outputTokens: 5, verificationStatus: 'unknown' as const, latencyMs: 1 };
@@ -914,6 +916,81 @@ test('a tool\'s run is called only at the listed sites, and a planted extra site
   assert.deepEqual(found, TOOL_RUN_SITES);
   assert.equal(toolRunSites('const out = await tool.run(input, context);\nreturn selected!.tool.run(parsed, ctx) + webFetchTool.run(a);'), 3, 'the scan finds a planted site');
   assert.equal(toolRunSites('// tool.run(input)\n * tool.run(input)\nconst shellRun = shell.run(command);'), 0, 'a comment and a shell session are not tool runs');
+});
+
+// The same question asked of the type checker (PR #70 third review): the text scan above only finds `tool.run(` and `xTool.run(`, so an alias, an array
+// element, a destructured name or a bracket access would be missed. This one finds every read of an AgentTool's `run` by the type of what it is read from.
+// One Program over all of src is built once and kept for the whole file; the planted program (a few small files that import the real AgentTool) is another.
+
+let productionProgram: { files: string[]; sites: RunSite[] } | undefined;
+
+function productionRunSites(): { files: string[]; sites: RunSite[] } {
+  if (productionProgram === undefined) {
+    const tests = path.join(REPO, 'src', 'test') + path.sep;
+    const files = configuredFiles(REPO).filter((file) => !file.startsWith(tests));
+    productionProgram = { files, sites: findToolRunSites(programFor(REPO, files), REPO, files) };
+  }
+  return productionProgram;
+}
+
+/** Planted sources, one file each, with the number of sites of each kind the checker must find in it. `AgentTool` is the real one. */
+const PLANTED: ReadonlyArray<{ name: string; source: string; expected: Partial<Record<RunSite['kind'], number>> }> = [
+  { name: 'a direct call', source: 'export async function f(tool: AgentTool<any>) { return tool.run({}, ctx); }', expected: { read: 1 } },
+  { name: 'an alias', source: 'export async function f(tool: AgentTool<any>) { const t = tool; const u = t; return u.run({}, ctx); }', expected: { read: 1 } },
+  { name: 'an array element and a loop variable', source: 'export async function f(tools: AgentTool<any>[]) { await tools[0].run({}, ctx); for (const each of tools) await each.run({}, ctx); }', expected: { read: 2 } },
+  { name: 'a value found in a map', source: 'export async function f(byName: Map<string, AgentTool<any>>) { return byName.get("x")!.run({}, ctx) + (await [...byName.values()].map((entry) => entry.run({}, ctx))); }', expected: { read: 2 } },
+  { name: 'a destructured name', source: 'export async function f(tool: AgentTool<any>) { const { run } = tool; return run({}, ctx); }', expected: { destructure: 1 } },
+  { name: 'a destructured parameter', source: 'export const f = async ({ run }: AgentTool<any>) => run({}, ctx);', expected: { destructure: 1 } },
+  { name: 'a bracket access with the name written out', source: 'export async function f(tool: AgentTool<any>) { return tool["run"]({}, ctx); }', expected: { read: 1 } },
+  { name: 'a bracket access through a constant', source: 'const key = "run" as const; export async function f(tool: AgentTool<any>) { return tool[key]({}, ctx); }', expected: { read: 1 } },
+  { name: 'a bracket access whose key is any text', source: 'export function f(tool: AgentTool<any>, member: string) { return (tool as any as { [key: string]: unknown })[member] ?? tool[member as never]; }', expected: { 'dynamic-key': 1 } },
+  { name: 'a bracket access whose key could be run', source: 'export function f(tool: AgentTool<any>, member: keyof AgentTool<any>) { return tool[member]; }', expected: { read: 1 } },
+  { name: 'a function taken off the tool', source: 'export function f(tool: AgentTool<any>) { return [tool.run.bind(tool), tool.run.call(tool, {}, ctx), tool.run]; }', expected: { read: 3 } },
+  { name: 'an optional call', source: 'export async function f(tool?: AgentTool<any>) { return tool?.run({}, ctx); }', expected: { read: 1 } },
+  { name: 'a type that extends AgentTool and a generic', source: 'interface Named extends AgentTool<any> { extra: string }\nexport async function f<T extends AgentTool<any>>(a: Named, b: T) { return [await a.run({}, ctx), await b.run({}, ctx)]; }', expected: { read: 2 } },
+  { name: 'a value typed any', source: 'export async function f(value: any) { return value.run({}, ctx); }', expected: { untyped: 1 } },
+  { name: 'a value cast to any', source: 'export async function f(tool: AgentTool<any>) { return (tool as any).run({}, ctx); }', expected: { read: 0, untyped: 1 } },
+  { name: 'things that are not a tool run', source: 'declare const shell: { run(command: string): Promise<string> };\nexport async function f(tool: AgentTool<any>) { const own = { run() { return 1; } }; const wrapped: AgentTool<any> = { ...tool, run: async () => "x" }; return [await shell.run("ls"), own.run(), wrapped.name]; }', expected: {} }
+];
+
+let plantedProgram: { dir: string; sites: RunSite[] } | undefined;
+
+async function plantedRunSites(): Promise<{ dir: string; sites: RunSite[] }> {
+  if (plantedProgram === undefined) {
+    const dir = await mkdtemp(path.join(tmpdir(), 'near-ai-gate-planted-'));
+    const files: string[] = [];
+    for (const [index, planted] of PLANTED.entries()) {
+      const file = path.join(dir, `planted${index}.ts`);
+      const header = `import type { AgentTool } from ${JSON.stringify(path.join(REPO, 'src', 'agent', 'tools'))};\ndeclare const ctx: any;\n`;
+      await writeFile(file, `${header}${planted.source}\n`);
+      files.push(file);
+    }
+    plantedProgram = { dir, sites: findToolRunSites(programFor(REPO, files), dir, files) };
+  }
+  return plantedProgram;
+}
+
+test('every production read of an AgentTool\'s run is at a listed site, found with the type checker, and none is untyped or reached by an unknown key', () => {
+  const { files, sites } = productionRunSites();
+  assert.ok(files.length > 200 && files.every((file) => !file.includes(`${path.sep}test${path.sep}`)), 'the scan covers all of src and leaves src/test out');
+  assert.deepEqual(sites.filter((site) => site.kind !== 'read').map((site) => `${site.file}:${site.line} ${site.kind} ${site.text}`), [], 'no destructured, untyped or dynamic reach of a tool\'s run');
+  assert.deepEqual(countByFile(sites), TOOL_RUN_SITES, sites.map((site) => `${site.file}:${site.line}`).join(' '));
+});
+
+test('the type-checked scan finds an alias, an array element, a destructured name, a bracket access and the rest, and not a run that is only defined or is a shell\'s', async () => {
+  const { dir, sites } = await plantedRunSites();
+  try {
+    for (const [index, planted] of PLANTED.entries()) {
+      const mine = sites.filter((site) => site.file === `planted${index}.ts`);
+      const counted: Partial<Record<RunSite['kind'], number>> = {};
+      for (const site of mine) counted[site.kind] = (counted[site.kind] ?? 0) + 1;
+      const wanted = Object.fromEntries(Object.entries(planted.expected).filter(([, count]) => count > 0));
+      assert.deepEqual(counted, wanted, `${planted.name}: ${mine.map((site) => `${site.kind} ${site.text}`).join(' | ')}`);
+    }
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+    plantedProgram = undefined;
+  }
 });
 
 test('every production `new AgentRun(` passes a gate, and a planted construction without one is reported', () => {
