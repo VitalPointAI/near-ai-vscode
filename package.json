@@ -295,6 +295,12 @@
         "title": "Verify Team Log",
         "category": "NEAR AI",
         "icon": "$(verified)"
+      },
+      {
+        "command": "nearAi.policy.show",
+        "title": "Show Policy",
+        "category": "NEAR AI",
+        "icon": "$(shield)"
       }
     ],
     "viewsContainers": {

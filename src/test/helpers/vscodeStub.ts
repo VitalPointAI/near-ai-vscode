@@ -1,7 +1,7 @@
 // A recording stand-in for the vscode module, installed through Module._load for a whole test file.
 // Modules that import 'vscode' must be required AFTER installVscodeStub, so a test file installs the stub first and loads them lazily.
 // The file has no .test suffix on purpose so the test glob does not run it as a suite.
-export interface RecordedStatusBarItem { text: string; tooltip: string; command?: string; visible: boolean; disposed: boolean; backgroundColor?: unknown }
+export interface RecordedStatusBarItem { id?: string; name?: string; priority?: number; text: string; tooltip: string; command?: string; visible: boolean; disposed: boolean; backgroundColor?: unknown }
 
 export interface VscodeStub {
   vscode: unknown;
@@ -20,6 +20,10 @@ export interface VscodeStub {
   // The options each showInputBox call received, in order.
   inputRequests: Array<{ prompt?: string; title?: string; value?: string; placeHolder?: string }>;
   messageAnswers: Array<string | undefined>;
+  // The text of every document shown with showTextDocument (opened through a registered content provider), in order.
+  shownDocuments: Array<{ uri: string; text: string }>;
+  // The content providers registered by scheme.
+  contentProviders: Map<string, { provideTextDocumentContent(uri: unknown): string | Promise<string> }>;
   setConfig(key: string, value: unknown): void;
   // The folders the window reports; an empty list means no folder is open.
   setWorkspaceFolders(paths: string[]): void;
@@ -44,6 +48,8 @@ export function createVscodeStub(): VscodeStub {
   const inputRequests: VscodeStub['inputRequests'] = [];
   let workspaceFolders: Array<{ uri: { fsPath: string }; name: string; index: number }> | undefined;
   const messageAnswers: VscodeStub['messageAnswers'] = [];
+  const shownDocuments: VscodeStub['shownDocuments'] = [];
+  const contentProviders: VscodeStub['contentProviders'] = new Map();
   const config = new Map<string, unknown>();
   const windowListeners = new Set<(state: { focused: boolean; active: boolean }) => void>();
   const configListeners = new Set<ConfigListener>();
@@ -60,6 +66,23 @@ export function createVscodeStub(): VscodeStub {
     ProgressLocation: { SourceControl: 1, Window: 10, Notification: 15 },
     ConfigurationTarget: { Global: 1, Workspace: 2, WorkspaceFolder: 3 },
     ThemeColor: class ThemeColor { public constructor(public readonly id: string) {} },
+    Uri: {
+      parse: (value: string) => {
+        const colon = value.indexOf(':');
+        const scheme = value.slice(0, colon);
+        const rest = value.slice(colon + 1);
+        return { scheme, path: rest, toString: (): string => value };
+      }
+    },
+    EventEmitter: class EventEmitter<T> {
+      private readonly listeners = new Set<(value: T) => void>();
+      public readonly event = (listener: (value: T) => void): { dispose(): void } => {
+        this.listeners.add(listener);
+        return { dispose: (): void => { this.listeners.delete(listener); } };
+      };
+      public fire(value: T): void { for (const listener of [...this.listeners]) listener(value); }
+      public dispose(): void { this.listeners.clear(); }
+    },
     window: {
       get state(): { focused: boolean; active: boolean } { return { focused: windowState.focused, active: windowState.active }; },
       onDidChangeWindowState: (listener: (state: { focused: boolean; active: boolean }) => void) => {
@@ -76,11 +99,12 @@ export function createVscodeStub(): VscodeStub {
           dispose: (): void => undefined
         };
       },
-      createStatusBarItem: (_id: string, _alignment?: number, _priority?: number) => {
-        const item: RecordedStatusBarItem = { text: '', tooltip: '', visible: false, disposed: false };
+      createStatusBarItem: (id: string, _alignment?: number, priority?: number) => {
+        const item: RecordedStatusBarItem = { id, ...(priority === undefined ? {} : { priority }), text: '', tooltip: '', visible: false, disposed: false };
         statusBarItems.push(item);
         return {
-          name: '',
+          set name(value: string) { item.name = value; },
+          get name(): string { return item.name ?? ''; },
           set text(value: string) { item.text = value; },
           get text(): string { return item.text; },
           set tooltip(value: string | undefined) { item.tooltip = value ?? ''; },
@@ -101,6 +125,10 @@ export function createVscodeStub(): VscodeStub {
         inputRequests.push({ ...options });
         return inputAnswers.shift();
       },
+      showTextDocument: async (document: { uri: { toString(): string }; getText(): string }): Promise<unknown> => {
+        shownDocuments.push({ uri: document.uri.toString(), text: document.getText() });
+        return undefined;
+      },
       withProgress: async <T>(_options: unknown, task: (progress: { report(value: unknown): void }) => PromiseLike<T>): Promise<T> => task({ report: (): void => undefined })
     },
     workspace: {
@@ -116,6 +144,15 @@ export function createVscodeStub(): VscodeStub {
           config.set(full, value);
         }
       }),
+      registerTextDocumentContentProvider: (scheme: string, provider: { provideTextDocumentContent(uri: unknown): string | Promise<string> }) => {
+        contentProviders.set(scheme, provider);
+        return { dispose: (): void => { if (contentProviders.get(scheme) === provider) contentProviders.delete(scheme); } };
+      },
+      openTextDocument: async (uri: { scheme: string; toString(): string }) => {
+        const provider = contentProviders.get(uri.scheme);
+        const text = provider === undefined ? '' : await provider.provideTextDocumentContent(uri);
+        return { uri, getText: (): string => text };
+      },
       onDidChangeConfiguration: (listener: ConfigListener) => {
         configListeners.add(listener);
         return { dispose: (): void => { configListeners.delete(listener); } };
@@ -138,7 +175,7 @@ export function createVscodeStub(): VscodeStub {
   };
 
   return {
-    vscode, outputChannels, statusBarItems, notifications, notificationActions, configUpdates, setContextCalls, contextKeys, commands, inputAnswers, inputRequests, messageAnswers,
+    vscode, outputChannels, statusBarItems, notifications, notificationActions, configUpdates, setContextCalls, contextKeys, commands, inputAnswers, inputRequests, messageAnswers, shownDocuments, contentProviders,
     setWorkspaceFolders(paths: string[]): void {
       workspaceFolders = paths.length === 0 ? undefined : paths.map((fsPath, index) => ({ uri: { fsPath }, name: fsPath.split('/').pop() ?? '', index }));
     },
