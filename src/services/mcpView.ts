@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto';
 import * as vscode from 'vscode';
 import { layoutProbeAsset, layoutProbeTag, registerLayoutProbe, sharedMedia } from './layoutProbe';
 import { McpApproval, McpServerConfig, validateServerUrl } from '../mcp/client';
-import { MCP_DECLARE_CHOICES, McpDeclareChoice, McpRegistry, SERVER_ID } from './mcpRegistry';
+import { MCP_DECLARE_CHOICES, McpDeclareChoice, McpRegistry, SERVER_ID, declareOrReport } from './mcpRegistry';
 
 // The MCP Connections page: add, edit, and remove servers, switch them on for this project,
 // choose how calls are approved, switch tools off, and see what is connected and how it is used.
@@ -84,7 +84,9 @@ ${layoutProbeTag(nonce, layoutProbeAsset(view.webview, shared))}<script nonce="$
           // The server id must be a stored server, the tool name a short string and the choice one of the three; the registry then checks the server lists that exact tool.
           const choice = MCP_DECLARE_CHOICES.find((entry) => entry === message.choice);
           if (!known || typeof message.tool !== 'string' || message.tool.length === 0 || message.tool.length > 200 || choice === undefined) break;
-          await mcp.declareMcpToolEffects(known.id, message.tool, choice as McpDeclareChoice);
+          // A failed declaration shows a plain message on the page and never rejects this handler (a raw storage error is not echoed).
+          const tool = message.tool;
+          await declareOrReport(() => mcp.declareMcpToolEffects(known.id, tool, choice as McpDeclareChoice), (text) => { void view.webview.postMessage({ type: 'error', text }); });
           break;
         }
         case 'connect': if (known) await mcp.connectServer(known.id); break;

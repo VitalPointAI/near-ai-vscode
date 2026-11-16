@@ -41,6 +41,28 @@ export interface McpServerStatus {
 export const MCP_DECLARE_CHOICES = Object.freeze(['reads', 'changes-remote', 'unknown'] as const);
 export type McpDeclareChoice = (typeof MCP_DECLARE_CHOICES)[number];
 
+/** A refusal of a declaration whose message is ours, plain and safe to show on the page. Any other error is shown as DECLARE_FAILED_TEXT. */
+export class McpDeclareRefused extends Error {
+  public constructor(message: string) {
+    super(message);
+    this.name = 'McpDeclareRefused';
+  }
+}
+
+export const DECLARE_FAILED_TEXT = 'NEAR AI could not save what that tool does, so nothing was changed. Try again, or reload the window.';
+
+/**
+ * Runs one declaration for the MCP page and never rejects: a plain refusal of ours is shown as it is, and any other failure (a storage error, say, whose text
+ * could carry a name or a path) is shown as the fixed sentence above, never as the raw error text. `show` is called at most once and is itself never allowed to throw.
+ */
+export async function declareOrReport(run: () => Promise<void>, show: (text: string) => void): Promise<void> {
+  try {
+    await run();
+  } catch (error) {
+    try { show(error instanceof McpDeclareRefused ? error.message.slice(0, 300) : DECLARE_FAILED_TEXT); } catch { /* a message that cannot be shown changes nothing */ }
+  }
+}
+
 const SERVERS_KEY = 'nearAi.mcp.servers';
 const ENABLED_KEY = 'nearAi.mcp.enabled';
 const secretKey = (id: string) => `nearAi.mcp.server.${id}`;
@@ -110,10 +132,10 @@ export class McpRegistry {
    */
   public async declareMcpToolEffects(serverId: string, toolName: string, choice: McpDeclareChoice): Promise<void> {
     const config = this.servers().find((server) => server.id === serverId);
-    if (!config) throw new Error(`No MCP server ${serverId}.`);
-    if (!(MCP_DECLARE_CHOICES as readonly string[]).includes(choice)) throw new Error('Choose what the tool does: only reads, changes data on the server, or not known.');
+    if (!config) throw new McpDeclareRefused(`No MCP server ${serverId}.`);
+    if (!(MCP_DECLARE_CHOICES as readonly string[]).includes(choice)) throw new McpDeclareRefused('Choose what the tool does: only reads, changes data on the server, or not known.');
     const offered = this.live.get(serverId)?.connection?.tools ?? [];
-    if (!offered.some((tool) => tool.name === toolName)) throw new Error(`${config.name} does not list a tool called ${toolName}. Connect it to see its tools.`);
+    if (!offered.some((tool) => tool.name === toolName)) throw new McpDeclareRefused(`${config.name} does not list a tool called ${toolName}. Connect it to see its tools.`);
     const current = serverManifest(config);
     if (current === undefined && choice === 'unknown') return;
     const base: McpManifest = current ?? { manifestVersion: 1, server: config.id, runsOn: config.transport === 'stdio' ? 'this-machine' : 'remote', hosts: [], credentials: [], contexts: defaultMcpContexts(config.transport), tools: {}, toolDefaults: 'legacy' };
@@ -121,11 +143,11 @@ export class McpRegistry {
     let entries = others;
     if (choice !== 'unknown') {
       const effects = mcpToolEffects(undefined, { server: config.id, tool: toolName, host: displayHost(await this.secretsFor(config.id)), readOnly: choice === 'reads', destructive: false, approval: 'ask-for-changes', transport: config.transport });
-      if (effects.defaults !== 'legacy') throw new Error(`${toolName} has a name a declaration cannot hold, so it stays treated as able to do anything.`);
+      if (effects.defaults !== 'legacy') throw new McpDeclareRefused(`${toolName} has a name a declaration cannot hold, so it stays treated as able to do anything.`);
       entries = [...others, [toolName, { effects: effects.effects }]];
     }
     const parsed = parseMcpManifest({ ...base, tools: Object.fromEntries(entries.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) });
-    if (!parsed.ok) throw new Error(`That declaration was refused (${parsed.reason} at ${parsed.path || 'the top'}).`);
+    if (!parsed.ok) throw new McpDeclareRefused(`That declaration was refused (${parsed.reason} at ${parsed.path || 'the top'}).`);
     await this.global.update(SERVERS_KEY, this.servers().map((server) => (server.id === serverId ? { ...server, manifest: parsed.value } : server)));
     this.changed();
   }

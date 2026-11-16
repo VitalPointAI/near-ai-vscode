@@ -10,7 +10,7 @@ import type { McpConnection, McpServerConfig, McpToolInfo } from '../mcp/client'
 import { mcpToolCapability, mcpToolName } from '../mcp/tools';
 import { mcpToolEffects, parseMcpManifest, RESTRICTIVE_EFFECTS } from '../domain/gate/manifest';
 import { MANIFEST_IS_A_CLAIM_TEXT, RUNS_ON_THIS_MACHINE_TEXT } from '../domain/gate/words';
-import { McpRegistry } from '../services/mcpRegistry';
+import { DECLARE_FAILED_TEXT, McpDeclareRefused, McpRegistry, declareOrReport } from '../services/mcpRegistry';
 import { buildToolsDirectory } from '../services/toolsDirectory';
 import type { DirectoryInput } from '../services/toolsDirectory';
 
@@ -349,4 +349,50 @@ test('the declare message is checked before the registry is called: a stored ser
   assert.match(block, /typeof message\.tool !== 'string'/);
   assert.match(block, /MCP_DECLARE_CHOICES\.find/);
   assert.ok(block.indexOf('!known') < block.indexOf('declareMcpToolEffects'), 'validated before it is called');
+});
+
+// ---------------------------------------------------------------------------------------------------------------------------------------------------
+// A declaration that fails is reported on the page and never rejects the message handler (PR #70 second review)
+
+test('declareOrReport: a failure never rejects, shows the fixed sentence once, and never echoes the raw error text', async () => {
+  const shown: string[] = [];
+  await declareOrReport(async () => { throw new Error('write failed for token sk-live-0123456789 at /var/lib/private'); }, (text) => { shown.push(text); });
+  assert.deepEqual(shown, [DECLARE_FAILED_TEXT]);
+  assert.ok(!shown[0]?.includes('sk-live') && !shown[0]?.includes('/var'));
+  await assert.doesNotReject(declareOrReport(async () => { throw new Error('x'); }, () => { throw new Error('the page is gone'); }), 'a message that cannot be shown changes nothing');
+  const none: string[] = [];
+  await declareOrReport(async () => undefined, (text) => { none.push(text); });
+  assert.deepEqual(none, [], 'a declaration that worked shows nothing');
+});
+
+test('declareOrReport: a plain refusal of ours is shown as it is', async () => {
+  const shown: string[] = [];
+  await declareOrReport(async () => { throw new McpDeclareRefused('Catalog does not list a tool called x. Connect it to see its tools.'); }, (text) => { shown.push(text); });
+  assert.deepEqual(shown, ['Catalog does not list a tool called x. Connect it to see its tools.']);
+});
+
+test('a real registry: a refused declaration shows its plain refusal, and a storage failure shows the fixed sentence with the stored servers unchanged', async () => {
+  const { registry: reg, global } = await connected('catalog', remote(), { url: 'https://catalog.example/mcp' });
+  const shown: string[] = [];
+  await declareOrReport(() => reg.declareMcpToolEffects('catalog', 'no-such-tool', 'reads'), (text) => { shown.push(text); });
+  assert.equal(shown.length, 1);
+  assert.match(shown[0] as string, /does not list a tool called no-such-tool/);
+  const tool = TOOLS[0] as McpToolInfo;
+  const before = JSON.stringify(global.get(SERVERS_KEY));
+  const update = global.update;
+  global.update = async () => { throw new Error('EACCES: permission denied, open /var/lib/secret-state.json'); };
+  shown.length = 0;
+  await declareOrReport(() => reg.declareMcpToolEffects('catalog', tool.name, 'reads'), (text) => { shown.push(text); });
+  global.update = update;
+  assert.deepEqual(shown, [DECLARE_FAILED_TEXT]);
+  assert.equal(JSON.stringify(global.get(SERVERS_KEY)), before);
+});
+
+test('the declare case of the MCP page routes the call through declareOrReport and posts the text as an error message, never a bare await', () => {
+  const view = readFileSync(path.join(__dirname, '..', '..', 'src', 'services', 'mcpView.ts'), 'utf8');
+  const at = view.indexOf("case 'declare'");
+  const block = view.slice(at, view.indexOf("case 'connect'", at));
+  assert.match(block, /declareOrReport\(\(\) => mcp\.declareMcpToolEffects\(/);
+  assert.match(block, /type: 'error', text/);
+  assert.ok(!/await mcp\.declareMcpToolEffects/.test(block), 'no bare await of the registry call');
 });
