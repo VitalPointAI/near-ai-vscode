@@ -152,6 +152,8 @@ export function verifyPayload<T = unknown>(envelope: unknown, expected: VerifyPa
 function check<T>(envelope: unknown, expected: VerifyPayloadExpectation): PayloadVerdict<T> {
   // Canonicalising first reads the input exactly once, so everything below checks the same bytes that were measured and returned (a getter that
   // answers differently on a second read cannot show one thing to the check and another to the caller).
+  // The input is already parsed JSON in memory, so callers cap what they read before they get here (the key history caps its file at
+  // MAX_KEY_HISTORY_BYTES); the size limit below measures the canonical form and is the limit on what is signed and kept.
   let text: string;
   try {
     text = canonicalize(envelope);

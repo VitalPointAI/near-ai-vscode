@@ -452,18 +452,21 @@ test('the envelope the signer returns is canonical JSON safe and its key order d
 });
 
 
-test('a key record made of random keys and hashes is never refused as secret-like (the write guard exempts public keys and signatures by shape)', () => {
+test('a key record made of keys and hashes in the shapes the history writes is never refused as secret-like (the write guard exempts public keys by shape)', () => {
+  // A fixed seed, so the 3000 shapes are the same on every run and a change to the detector shows up the same way every time.
+  const random = mulberry32(69_15);
+  const bytes = (length: number): Buffer => Buffer.from(Array.from({ length }, () => Math.floor(random() * 256)));
+  const { privateKey, publicKey } = generateKeyPairSync('ed25519');
+  const raw = publicKey.export({ format: 'der', type: 'spki' }).subarray(-32);
+  const signer: PayloadSigner = {
+    fingerprint: fingerprintOf(raw), publicKey: raw.toString('base64url'), sign: (input) => edSign(null, input, privateKey).toString('base64url')
+  };
   for (let i = 0; i < 3000; i += 1) {
     const record = {
-      seq: i + 1, prev: randomBytes(32).toString('hex'), kind: 'rotated', at: '2026-03-01T10:00:00.000Z',
-      key: { fingerprint: `dev-${randomBytes(16).toString('hex')}`, publicKey: randomBytes(32).toString('base64url') },
-      next: { fingerprint: `dev-${randomBytes(16).toString('hex')}`, publicKey: randomBytes(32).toString('base64url') }
+      seq: i + 1, prev: bytes(32).toString('hex'), kind: 'rotated', at: '2026-03-01T10:00:00.000Z',
+      key: { fingerprint: `dev-${bytes(16).toString('hex')}`, publicKey: bytes(32).toString('base64url') },
+      next: { fingerprint: `dev-${bytes(16).toString('hex')}`, publicKey: bytes(32).toString('base64url') }
     };
-    const { privateKey, publicKey } = generateKeyPairSync('ed25519');
-    const raw = publicKey.export({ format: 'der', type: 'spki' }).subarray(-32);
-    const signer: PayloadSigner = {
-      fingerprint: fingerprintOf(raw), publicKey: raw.toString('base64url'), sign: (bytes) => edSign(null, bytes, privateKey).toString('base64url')
-    };
-    assert.doesNotThrow(() => signPayload(signer, 'key-record', record, { now: () => new Date('2026-03-01T10:00:00.000Z') }));
+    assert.doesNotThrow(() => signPayload(signer, 'key-record', record, { now: () => new Date('2026-03-01T10:00:00.000Z') }), `record ${i} is signed`);
   }
 });
