@@ -218,6 +218,30 @@ export function isContactableRemoteAddress(address: string): boolean {
   return true;
 }
 
+// 0.4.26 (PR #62 review): a git older than 2.31 cannot read the remote address from its environment, so the address goes on its command line, which
+// other users of this computer can read. That is refused when the address can carry a credential: a user and password in any URL, or any user name in an
+// http, https, ftp or ftps URL (where the "user" is often a token). An ssh user (ssh://git@host/..., git@host:path) is a name, not a secret, and is allowed.
+export const OLD_GIT_CREDENTIALS_TEXT = 'Your git is older than 2.31, so Team Mode would have to put the remote address on the git command line, where other users of this computer can read it, and that address carries a user name or password. Update git to 2.31 or newer, or remove the credentials from the remote address and let a git credential helper supply them.';
+
+export function addressCarriesCredentials(address: string): boolean {
+  const match = /^([a-z][a-z0-9+.-]*):\/\/([^/?#]*)/i.exec(address.trim());
+  if (match === null) return false;
+  const authority = match[2] as string;
+  const at = authority.lastIndexOf('@');
+  if (at < 0) return false;
+  const userinfo = authority.slice(0, at);
+  if (userinfo.includes(':')) return true;
+  return /^(?:https?|ftps?)$/i.test(match[1] as string);
+}
+
+/** Whether a git version string (`git version 2.30.1`) reads remote config from the environment (2.31 and later). Unknown counts as no. */
+export function gitReadsEnvironmentConfig(versionText: string): boolean {
+  const match = /(\d+)\.(\d+)/.exec(versionText);
+  if (match === null) return false;
+  const major = Number(match[1]);
+  return major > 2 || (major === 2 && Number(match[2]) >= 31);
+}
+
 export class GitTransport<S> implements CoordinationTransport<S> {
   private readonly git: GitRunner;
   private readonly materializer: Materializer<S>;
@@ -431,6 +455,8 @@ export class GitTransport<S> implements CoordinationTransport<S> {
     if (!isContactableRemoteAddress(url)) {
       throw new RemoteUnavailableError(`The address of the git remote named "${this.remote}" is not one Team Mode will contact. Team Mode uses ssh, git, https, http or file addresses, or a local path.`);
     }
+    // Checked here, where every caller already handles a refusal, rather than where the address is handed to git (0.4.26, PR #62 review).
+    if (addressCarriesCredentials(url) && !(await this.supportsEnvironmentConfig())) throw new RemoteUnavailableError(OLD_GIT_CREDENTIALS_TEXT);
     return url;
   }
 
@@ -454,12 +480,7 @@ export class GitTransport<S> implements CoordinationTransport<S> {
   // An older git cannot do that, so it falls back to the argument form.
   private async supportsEnvironmentConfig(): Promise<boolean> {
     if (this.envConfigSupport === undefined) {
-      this.envConfigSupport = this.git(['--version'], { timeoutMs: LOCAL_TIMEOUT_MS }).then((result) => {
-        const match = /(\d+)\.(\d+)/.exec(gitText(result));
-        if (result.code !== 0 || match === null) return false;
-        const major = Number(match[1]);
-        return major > 2 || (major === 2 && Number(match[2]) >= 31);
-      }, () => false);
+      this.envConfigSupport = this.git(['--version'], { timeoutMs: LOCAL_TIMEOUT_MS }).then((result) => result.code === 0 && gitReadsEnvironmentConfig(gitText(result)), () => false);
     }
     return this.envConfigSupport;
   }
