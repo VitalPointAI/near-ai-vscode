@@ -344,3 +344,104 @@ test('secret store wiped with the policy file still there: unknown-key, and Rese
 test('the decision log folder name the install-evidence check reads is the folder the decision log writes', () => {
   assert.equal(DECISION_LOGS_FOLDER, DECISIONS_DIR);
 });
+
+// ---------------------------------------------------------------------------------------------------------------------------------------------------
+// A write that fails after the marker named it (PR #70 third review): the pending hash is withdrawn and the old file is back
+
+/** While the marker holds a pending hash, the key history reads as damaged, so the new file does not verify when it is read back. The new file's text is kept. */
+class ReadBackBreaker extends MemorySecrets {
+  public brokenReads = 0;
+  /** Set to false to let the next write read back as written. */
+  public armed = true;
+  public lastWritten: string | undefined;
+  public constructor(private readonly policyFile: string) { super(); }
+
+  public override async get(key: string): Promise<string | undefined> {
+    if (this.armed && key === KEY_HISTORY_HEAD_SECRET && (this.values.get(LAST_VALID_SECRET) ?? '').includes('"pending"')) {
+      this.brokenReads += 1;
+      this.lastWritten = await readFile(this.policyFile, 'utf8').catch(() => this.lastWritten);
+      return 'damaged';
+    }
+    return super.get(key);
+  }
+}
+
+async function narrowedWithBreaker(storage: string): Promise<{ secrets: ReadBackBreaker; text: string; hash: string }> {
+  const plain = await narrowedInstall(storage);
+  const secrets = new ReadBackBreaker(fileOf(storage));
+  for (const [key, value] of plain.secrets.values) secrets.values.set(key, value);
+  return { secrets, text: plain.text, hash: plain.hash };
+}
+
+test('a reset whose read-back fails leaves the old policy, withdraws the pending hash, and the next start is valid with the old policy', async () => {
+  await withStorage(async (storage) => {
+    const { secrets, text, hash } = await narrowedWithBreaker(storage);
+    await assert.rejects(resetPolicyToDefaults(storage, secrets, { now: at(T0 + DAY) }), /did not read back as written/);
+    assert.ok(secrets.brokenReads > 0, 'the read-back was the step that failed');
+    assert.equal(await readText(storage), text, 'the old policy file is back');
+    const marker = await markerOf(secrets);
+    assert.equal(marker.hash, hash);
+    assert.equal(marker.pending, undefined, 'no hash is left pending for a policy that was never kept');
+    const next = await ensurePolicyBundle(storage, secrets, { now: at(T0 + 2 * DAY) });
+    assert.equal(next.state.state, 'valid');
+    assert.equal(next.state.state === 'valid' ? next.state.hash : '', hash);
+    assert.equal(next.event, undefined);
+  });
+});
+
+test('the file a failed reset wrote is not accepted when it is put back later: it is refused as replaced', async () => {
+  await withStorage(async (storage) => {
+    const { secrets, text } = await narrowedWithBreaker(storage);
+    await assert.rejects(resetPolicyToDefaults(storage, secrets, { now: at(T0 + DAY) }));
+    const neverKept = secrets.lastWritten;
+    assert.ok(neverKept !== undefined && neverKept !== text, 'the failed reset had written a different, default policy');
+    // Someone with disk access plants it: this install signed it, but never kept it, so it must not widen the narrowed policy.
+    await writeFile(fileOf(storage), neverKept, 'utf8');
+    closed(await ensurePolicyBundle(storage, secrets, { now: at(T0 + 2 * DAY) }), 'replaced');
+  });
+});
+
+test('a renewal whose read-back fails puts the old file back, withdraws the pending hash, and the next start is valid and not replaced', async () => {
+  await withStorage(async (storage) => {
+    const { secrets, text, hash } = await narrowedWithBreaker(storage);
+    const during = await ensurePolicyBundle(storage, secrets, { now: at(T0 + 340 * DAY) });
+    assert.ok(secrets.brokenReads > 0, 'the renewal was tried and its read-back failed');
+    assert.equal(during.state.state, 'valid', 'a renewal that did not happen is not a reason to fail closed');
+    assert.equal(during.event, undefined);
+    assert.equal(await readText(storage), text, 'the file the renewal replaced is back');
+    const marker = await markerOf(secrets);
+    assert.equal(marker.hash, hash);
+    assert.equal(marker.pending, undefined);
+    secrets.armed = false;
+    const next = await ensurePolicyBundle(storage, secrets, { now: at(T0 + 341 * DAY) });
+    assert.equal(next.state.state, 'valid');
+    assert.equal(next.event, 'policy.renewed', 'and the renewal that failed is tried again');
+  });
+});
+
+/** A secret store that keeps the marker with its pending hash but answers the first read-back with something else, so naming the hash fails after it was stored. */
+class AnnounceMisread extends MemorySecrets {
+  private lie = false;
+  public override async store(key: string, value: string): Promise<void> {
+    await super.store(key, value);
+    if (key === LAST_VALID_SECRET && value.includes('"pending"')) this.lie = true;
+  }
+
+  public override async get(key: string): Promise<string | undefined> {
+    if (key === LAST_VALID_SECRET && this.lie) { this.lie = false; return 'not what was stored'; }
+    return super.get(key);
+  }
+}
+
+test('a marker update that stored the pending hash but did not read back leaves no pending hash and writes nothing', async () => {
+  await withStorage(async (storage) => {
+    const plain = await narrowedInstall(storage);
+    const secrets = new AnnounceMisread();
+    for (const [key, value] of plain.secrets.values) secrets.values.set(key, value);
+    await assert.rejects(resetPolicyToDefaults(storage, secrets, { now: at(T0 + DAY) }), /Nothing was written/);
+    assert.equal(await readText(storage), plain.text);
+    const marker = await markerOf(secrets);
+    assert.equal(marker.hash, plain.hash);
+    assert.equal(marker.pending, undefined);
+  });
+});

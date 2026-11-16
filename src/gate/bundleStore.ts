@@ -139,16 +139,22 @@ function sign(identity: DeviceIdentity, payload: PolicyBundle, at: Date): Signed
 
 // Checks a freshly signed envelope in memory, writes it through a temp file and a rename, reads it back from disk and verifies it again. Throws
 // BundleStoreError when it does not verify (before anything is written) or cannot be written.
+//
+// Whatever happens after the marker names the new hash as `pending`, a failure leaves the marker and the file as they were: the pending hash is withdrawn, and
+// the file that was there is put back when this call replaced it. A pending hash left behind names a policy this install signed but never kept, so a copy of
+// that file put back later would be accepted as the next policy, widening a narrowed one (PR #70 third review).
 async function install(globalStorageDir: string, secrets: SecretStorageLike, envelope: SignedPayload<PolicyBundle>, nowMs: number, marker: LastValid): Promise<BundleState> {
   const lastValidAt = lastValidAtOf(marker);
   const status = await localKeyStatus(identityDir(globalStorageDir), secrets);
   const before = verifyBundleEnvelope(envelope, { status, now: nowMs, ...(lastValidAt === undefined ? {} : { lastValidAt }) });
   if (before.state !== 'valid') throw new BundleStoreError(`Nothing was written: the new policy did not verify. ${before.sentence}`);
   const file = bundleFile(globalStorageDir);
+  const previous = await readFile(file, 'utf8').catch(() => undefined);
   // The marker names the hash about to be written first, so a crash between the file and the marker leaves a file the next start still accepts.
   try {
     await announceNextHash(secrets, before.hash);
   } catch (error) {
+    await withdrawNextHash(secrets).catch(() => undefined);
     throw new BundleStoreError('Nothing was written: NEAR AI could not update its record of your policy in this computer\'s secret storage.', { cause: error });
   }
   try {
@@ -159,6 +165,8 @@ async function install(globalStorageDir: string, secrets: SecretStorageLike, env
   }
   const after = await verifyDisk(globalStorageDir, secrets, nowMs, marker.present ? { ...marker, pending: before.hash } : marker);
   if (after.state.state !== 'valid' || after.state.hash !== before.hash) {
+    if (previous !== undefined) await writeFileAtomic(file, previous).catch(() => undefined);
+    await withdrawNextHash(secrets).catch(() => undefined);
     throw new BundleStoreError('The new policy file was saved but did not read back as written, so it was not used.');
   }
   return after.state;
@@ -342,8 +350,10 @@ export async function resetPolicyToDefaults(globalStorageDir: string, secrets: S
     try {
       state = await install(globalStorageDir, secrets, envelope, nowMs, marker);
     } catch (error) {
-      // The old file goes back where it was, so a reset that failed leaves the policy as it was.
+      // The old file goes back where it was, so a reset that failed leaves the policy as it was. Install has withdrawn the pending hash on every failure after
+      // naming it; this is the same withdrawal again, for the case where it could not (the secret store failing twice), and it is harmless when there is none.
       if (aside !== undefined) await rename(aside, file).catch(() => undefined);
+      await withdrawNextHash(secrets).catch(() => undefined);
       throw error;
     }
     if (state.state !== 'valid') return { state };
