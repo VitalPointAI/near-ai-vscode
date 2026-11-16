@@ -401,6 +401,8 @@ Failure vocabulary (D-13). The verifier's closed reasons are `malformed`, `unsup
 
 ### 5.5 Labels, scales, mappings, routing tiers
 
+> Superseded in part by D-47 (70-CONTEXT.md): the v1 handling flags are only `local-only` and `no-agent-tools`; `attested-cloud-ok` was dropped and labels never relax routing. Where this section says otherwise, the plans and D-47 win.
+
 Label: `{ scale: string, level: string, compartments: string[], releasability: string[], handling: string[] }`. `level` is the level's name from the scale's ordered list (D-22). `compartments` and `releasability` entries match `^[A-Z0-9][A-Z0-9_-]{0,31}$`, sorted, unique. `handling` is a closed list in v1: `local-only`, `attested-cloud-ok`. Unknown scale, level, handling value or field: refused.
 
 Presets (D-23), each an ordered list, id then levels: `org`: Public, Internal, Confidential, Restricted. `ca-protected`: Protected A, Protected B, Protected C. `ca-classified`: Confidential, Secret, Top Secret. `nato`: NATO Unclassified, NATO Restricted, NATO Confidential, NATO Secret, Cosmic Top Secret. Routing keys are `scale/level`, so `org/Confidential` and `ca-classified/Confidential` are different keys. Mapping entry: `{ "from": { scale, level }, "covers": { scale, level } }`, meaning a clearance at or above `from` on its own scale covers labels up to and including `covers` on the other scale; none ships by default (CLAS-02).
@@ -511,6 +513,8 @@ No agent tool renames or moves files: `CORE_TOOLS` is `[readTool, writeTool, edi
 ## 11. Size estimate and PR grouping (question 11)
 
 Reference sizes [VERIFIED: `git diff` byte counts]: Phase 69 part 1 (`1cbcb9b`): 72 files, 958,828 bytes, of which source 272,765 bytes and tests 550,969 bytes (tests about twice the source). Part 2 (`f2ca69e`): 49 files, 481,821 bytes. Estimate for Phase 70 (`[ASSUMED]`, from lines per module below at about 55 bytes per line, tests at 2x): pure domain (`vocabulary`, `shape`, `manifest`, `words`, `labels`, `dominance`, `routing`, `bundle`, `floor`, `decide`, `record`) about 2,800 lines; `src/gate` stores and clock marker about 800; adapters in loop, cyber, MCP, client guard, session mark about 700; UI about 600; 40 manifests about 250; classifier effect tags about 150 changed lines; docs about 8 KB. Source about 330 KB, tests about 650 KB, total about 1.0 MB (range 0.85 to 1.2 MB). Over one PR; under three.
+
+> Superseded by the plans: the phase ships as four code PRs (PR 1 plans 01-07, PR 2 plans 08-15, PR 3 plans 16-18 with the floor flip and the protectedPaths test rewrite in plan 17, PR 4 plans 19-28). The table below is the research-time proposal.
 
 Recommended grouping (each PR leaves `main` green and the extension usable, D-34):
 

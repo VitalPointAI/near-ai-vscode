@@ -149,4 +149,4 @@ For the gate: add `domain/gate` (imports only `src/domain`, Node builtins forbid
 **Analog search scope:** `src/domain/team`, `src/team`, `src/services`, `src/agent`, `src/test`
 **Files scanned:** about 14 read in part
 **Pattern extraction date:** 2026-11-16
-**Note:** line numbers were read from the working tree for this phase and can drift as earlier PRs land.
+**Note:** PR grouping follows the plans (four code PRs; the protectedPaths fully-autonomous test is rewritten in plan 17, PR 3). Line numbers were read from the working tree for this phase and can drift as earlier PRs land.
