@@ -3,7 +3,7 @@
 // and whether one client, endpoint and model satisfy that tier, judged from local facts only before anything is sent (D-36, D-37).
 // Strictness only goes one way: a handling flag, a compartment or a level can raise the tier, and the strictest of them wins when the decision is made.
 // A label can never relax a tier (D-47); only your organization changing the bundle's table does.
-import { LOOPBACK_HOSTS } from '../config';
+import { isLoopbackHost } from '../config';
 import type { Mark } from './dominance';
 import { LABEL_TOKEN_PATTERN, labelKey } from './labels';
 import type { Label, ScaleTable } from './labels';
@@ -210,7 +210,7 @@ function hostnameOf(host: string): string | undefined {
 export function isLocalRouteHost(host: string, localHosts: readonly HostPattern[]): boolean {
   const name = hostnameOf(host);
   if (name === undefined) return false;
-  if (LOOPBACK_HOSTS.has(name)) return true;
+  if (isLoopbackHost(name)) return true;
   return localHosts.some((pattern) => (pattern.startsWith('*.') ? name.endsWith(pattern.slice(1)) && name.length > pattern.length - 1 : name === pattern));
 }
 

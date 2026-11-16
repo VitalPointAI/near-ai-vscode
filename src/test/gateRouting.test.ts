@@ -2,7 +2,8 @@
 // local facts only. No network, no clock, no key.
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { LOOPBACK_HOSTS } from '../domain/config';
+import * as config from '../domain/config';
+import { isLoopbackHost, isSecureEndpoint } from '../domain/config';
 import { raiseMark } from '../domain/gate/dominance';
 import type { Mark } from '../domain/gate/dominance';
 import { SCALE_PRESETS } from '../domain/gate/labels';
@@ -145,8 +146,23 @@ test('CLAS-06: a configured local runtime on a host that is neither loopback nor
   }
 });
 
+test('the loopback host list is not exported as a live collection: only a predicate is, and nothing a caller does can widen it', () => {
+  assert.equal('LOOPBACK_HOSTS' in config, false, 'no mutable list is exported');
+  for (const host of ['localhost', '127.0.0.1', '[::1]']) assert.equal(isLoopbackHost(host), true, host);
+  for (const host of ['', 'LOCALHOST', 'localhost.', '0.0.0.0', '127.0.0.2', '::1', 'evil.example.com', 'constructor', '__proto__', 'has', 'size']) {
+    assert.equal(isLoopbackHost(host), false, host);
+  }
+  // The predicate and the endpoint check agree, and both are unchanged by anything a caller tries on the module's exports.
+  assert.equal(isSecureEndpoint('http://localhost:11434/v1'), true);
+  assert.equal(isSecureEndpoint('http://127.0.0.1:8080'), true);
+  assert.equal(isSecureEndpoint('http://[::1]:8080'), true);
+  assert.equal(isSecureEndpoint('http://evil.example.com/v1'), false);
+  assert.equal(isSecureEndpoint('https://cloud-api.near.ai/v1'), true);
+  assert.equal(isSecureEndpoint('http://localhost.evil.example.com'), false);
+});
+
 test('isLocalRouteHost: loopback, exact names and subdomain wildcards, and nothing unreadable', () => {
-  assert.deepEqual([...LOOPBACK_HOSTS].sort(), ['127.0.0.1', '[::1]', 'localhost']);
+  for (const host of ['127.0.0.1', '[::1]', 'localhost']) assert.equal(isLoopbackHost(host), true, host);
   assert.equal(isLocalRouteHost('http://localhost:1234', []), true);
   assert.equal(isLocalRouteHost('https://box.lan.example.com', ['box.lan.example.com']), true);
   assert.equal(isLocalRouteHost('https://other.lan.example.com', ['box.lan.example.com']), false);
