@@ -123,6 +123,13 @@ export async function checkEnablePreconditions(projectRoot: string, remote: stri
   return name === '' ? { ok: true, projectRoot, remote } : { ok: true, projectRoot, remote, branch: name };
 }
 
+// 0.4.25: remote.<name>.uploadpack and remote.<name>.receivepack name the program git starts for ls-remote and push (run locally for a file or path
+// remote), and the project's own config can set them. The ls-remote and push below run in the project, so git's defaults are passed on the command
+// line, which git honours over any config value (checked on git 2.53; `-c remote.<name>.uploadpack=...` is not enough, as the repository's value
+// comes first). The transport's mirror never reads the project's config, so it needs nothing here.
+const UPLOAD_PACK_DEFAULT = '--upload-pack=git-upload-pack';
+const RECEIVE_PACK_DEFAULT = '--receive-pack=git-receive-pack';
+
 const REFUSED_ADDRESS_HINT = 'Team Mode uses ssh, git, https, http or file addresses, or a local path.';
 
 // 0.4.25: the address is checked as git will use it, not as the remote's url setting states it. A `url.<base>.insteadOf` or pushInsteadOf rule
@@ -230,7 +237,7 @@ async function pushGenesis(args: { transport: GitTransport<TeamState>; events: T
   if (fetchThrew) {
     // The mirror could not be used for the check (for example a folder that cannot be created); ask the remote directly.
     try {
-      const probe = await git(['ls-remote', '--exit-code', remote, DEFAULT_COORDINATION_REF], { cwd: projectRoot, env: await networkEnv(projectRoot, git), timeoutMs: NETWORK_TIMEOUT_MS });
+      const probe = await git(['ls-remote', UPLOAD_PACK_DEFAULT, '--exit-code', remote, DEFAULT_COORDINATION_REF], { cwd: projectRoot, env: await networkEnv(projectRoot, git), timeoutMs: NETWORK_TIMEOUT_MS });
       if (probe.code === 2) return { kind: 'failed', reason, detail: '' };
     } catch (error) {
       detail = `${detail} ${describeError(error)}`;
@@ -282,7 +289,7 @@ export async function enableTeamMode(input: EnableInput): Promise<EnableResult> 
   }
 
   // D-17: an existing coordination branch on the remote stops Enable before any key exists.
-  const probe = await git(['ls-remote', '--exit-code', remote, DEFAULT_COORDINATION_REF], { cwd: projectRoot, env: await networkEnv(projectRoot, git), timeoutMs: NETWORK_TIMEOUT_MS });
+  const probe = await git(['ls-remote', UPLOAD_PACK_DEFAULT, '--exit-code', remote, DEFAULT_COORDINATION_REF], { cwd: projectRoot, env: await networkEnv(projectRoot, git), timeoutMs: NETWORK_TIMEOUT_MS });
   if (probe.code === 0) return fail('exists-remotely', 'This remote already has a coordination log. Joining an existing team arrives with team invitations.');
   if (probe.code !== 2) return fail('remote-unreachable', `The remote "${remote}" could not be reached, so nothing was changed: ${gitFailureText(probe)}`);
 
@@ -370,6 +377,6 @@ export async function pushCodeBranch(projectRoot: string, remote: string, branch
   if (!isGitRefName(branch) || CONTROL_CHARACTERS.test(branch)) return { ok: false, message: 'The branch name is not valid.' };
   const refused = await refusedRemoteAddress(projectRoot, remote, git);
   if (refused !== undefined) return { ok: false, message: refused };
-  const result = await git(['push', remote, branch], { cwd: projectRoot, env: await networkEnv(projectRoot, git), timeoutMs: NETWORK_TIMEOUT_MS });
+  const result = await git(['push', RECEIVE_PACK_DEFAULT, remote, branch], { cwd: projectRoot, env: await networkEnv(projectRoot, git), timeoutMs: NETWORK_TIMEOUT_MS });
   return result.code === 0 ? { ok: true } : { ok: false, message: `Pushing ${branch} to ${remote} failed: ${gitFailureText(result)}` };
 }

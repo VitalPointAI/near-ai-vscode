@@ -930,6 +930,34 @@ for (const rule of ['insteadOf', 'pushInsteadOf']) {
   });
 }
 
+// ---- The project's own uploadpack and receivepack settings are never run (0.4.25) ----
+
+// remote.<name>.uploadpack and remote.<name>.receivepack name the program git starts for ls-remote, fetch and push. The project's own config can set
+// them (a cloned repository carries its config), so Enable and Push pass git's defaults on the command line, which git honours over any config.
+test('a project config that points uploadpack and receivepack at its own program never runs it in Enable or Push', async () => {
+  await withFixture(['a'], async (fixture) => {
+    const root = fixture.clones.a as string;
+    const marker = path.join(fixture.root, 'pack-program-ran');
+    const script = (name: string, real: string): string => {
+      const file = path.join(fixture.root, name);
+      writeFileSync(file, `#!/bin/sh\necho ran >> '${marker}'\nexec ${real} "$@"\n`, { mode: 0o755 });
+      return file;
+    };
+    gitIn(root, ['config', 'remote.origin.uploadpack', script('upload.sh', 'git-upload-pack')]);
+    gitIn(root, ['config', 'remote.origin.receivepack', script('receive.sh', 'git-receive-pack')]);
+    // The marker scripts work: run through plain git, they do run.
+    execFileSync('git', ['ls-remote', 'origin'], { cwd: root, stdio: 'ignore' });
+    assert.equal(existsSync(marker), true, 'the marker script runs when git uses the project setting');
+    await fs.rm(marker);
+
+    const result = await enableTeamMode(inputFor(fixture, 'a', new MemorySecrets()));
+    assert.equal(result.ok, true, result.ok ? '' : result.message);
+    const pushed = await pushCodeBranch(root, 'origin', 'main');
+    assert.equal(pushed.ok, true, pushed.ok ? '' : pushed.message);
+    assert.equal(existsSync(marker), false, 'the project\'s upload-pack or receive-pack program ran');
+  });
+});
+
 // ---- Preconditions are checked once when the caller passes its result ----
 
 test('Enable reuses a passed precondition result for the same project and remote, and checks again for any other', async () => {

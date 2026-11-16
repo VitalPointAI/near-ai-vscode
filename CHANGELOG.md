@@ -17,7 +17,8 @@
   https, http and file addresses or a local path. A `url.<base>.insteadOf` rule in the project's
   git config could rewrite an allowed address into one of git's command helpers, which runs a
   program. Enable Team Mode and **Share with my team** now check the address after git applies such
-  rules, and refuse before anything is contacted.
+  rules, and refuse before anything is contacted. They also always use git's own upload and
+  receive programs, so a program named in the project's git config for those steps is never run.
 - **A replaced signing key is never made active again.** If a key change on this computer was
   recorded but its new key was lost (for example after a crash), the old key could quietly become
   the active key again. Team Mode now keeps the old key aside, archives the key history (it is never

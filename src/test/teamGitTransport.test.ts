@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { chmodSync, mkdirSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
@@ -621,6 +621,31 @@ for (const rule of ['insteadOf', 'pushInsteadOf']) {
     });
   });
 }
+
+// 0.4.25: the mirror never reads the project's config, so the project's uploadpack and receivepack settings are never run by fetch or push either.
+test('the transport never runs a program the project config names as uploadpack or receivepack', async () => {
+  await withFixture(['a'], async (fixture) => {
+    const teamId = newTeamId();
+    const owner = await createOwner(teamId);
+    const genesis = testGenesis({ teamId, owner, name: 'Transport pack program team' });
+    const root = fixture.clones['a'] as string;
+    const marker = path.join(fixture.root, 'pack-program-ran');
+    for (const [key, real] of [['uploadpack', 'git-upload-pack'], ['receivepack', 'git-receive-pack']] as const) {
+      const file = path.join(fixture.root, `${key}.sh`);
+      writeFileSync(file, `#!/bin/sh\necho ran >> '${marker}'\nexec ${real} "$@"\n`, { mode: 0o755 });
+      gitIn(root, ['config', `remote.origin.${key}`, file]);
+    }
+    const transport = new GitTransport<TeamState>({
+      mirrorDir: path.join(fixture.storageDir('a'), 'coordination.git'), projectRoot: root, remote: 'origin',
+      ref: DEFAULT_COORDINATION_REF, materializer: teamMaterializer(genesis.anchor), baseDelayMs: 1
+    });
+    const appended = await transport.append(async () => genesis.events, { genesis: { teamFileText: genesis.teamFileText } });
+    assert.equal(appended.ok, true);
+    await transport.fetch();
+    assert.equal(transport.status().state, 'ok');
+    assert.equal(existsSync(marker), false, 'the project\'s pack program ran');
+  });
+});
 
 const REWRITTEN_TEXT = "The team's coordination log was rewritten on the remote; Team Mode is paused";
 
