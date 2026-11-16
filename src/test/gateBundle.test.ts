@@ -555,9 +555,17 @@ test('no sentence has an em-dash or the words NEAR organization, and the closed 
 test('the payload issuer must equal the envelope signer and issuedAt must equal signedAt, character for character', () => {
   const signer = makeSigner();
   const flipLast = (text: string): string => text.slice(0, -1) + (text.endsWith('A') ? 'B' : 'A');
+  // A public key is 32 bytes in 43 characters, so the last character carries two bits that decoding ignores: flipping it can change nothing the decoder sees,
+  // and the key then reads as malformed instead of as another signer's (about 6 keys in 100). Changing a decoded byte and encoding it again always gives a
+  // well-formed key that is a different key.
+  const otherKey = (key: string): string => {
+    const bytes = Buffer.from(key, 'base64url');
+    bytes[0] = (bytes[0] ?? 0) ^ 1;
+    return bytes.toString('base64url');
+  };
   const cases: Array<[string, (payload: Loose) => void]> = [
     ['fingerprint', (p) => { p.issuer.fingerprint = flipLast(p.issuer.fingerprint); }],
-    ['public key', (p) => { p.issuer.publicKey = flipLast(p.issuer.publicKey); }],
+    ['public key', (p) => { p.issuer.publicKey = otherKey(p.issuer.publicKey); }],
     ['issuedAt, one millisecond', (p) => { p.issuedAt = new Date(Date.parse(p.issuedAt) + 1).toISOString(); }]
   ];
   for (const [name, edit] of cases) {
