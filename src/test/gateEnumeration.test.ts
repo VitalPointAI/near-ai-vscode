@@ -3,7 +3,7 @@
 // re-checks), sub-agents pass the same gate as a person's run, and with a valid bundle nothing decides differently. Plan 13 adds the remaining execution
 // paths to this file: the cyber panel's step engine, benchmark runs, and the scans that find every place a tool runs.
 import assert from 'node:assert/strict';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -29,6 +29,8 @@ import { POLICY_BUNDLE_FILE, gateDir } from '../gate/bundleStore';
 import { DECISIONS_DIR, projectLogKey } from '../gate/decisionLog';
 import { AgentConversation } from '../services/agentSession';
 import type { AgentMessage, CompletionEvent, ToolCall } from '../services/nearAiClient';
+import { mcpAgentTools } from '../mcp/tools';
+import type { McpConnection, McpServerConfig } from '../mcp/client';
 import { MemorySecrets } from './helpers/teamHarness';
 import { testManifest } from './helpers/gateFixtures';
 import { CyberEvidenceStore, CyberLedgerStore } from '../services/cyberLedgerStore';
@@ -687,3 +689,147 @@ test('the role suite gives each role run its own gate, so the studio\'s decision
   const records = await logOf(started, root);
   assert.deepEqual(records.map((record) => [callIdOf(record), outcomeOf(record), record.api.operation]), [['t1', 'allowed', 'read']]);
 });
+
+// ---- Task 3 (plan 13): a test finds every execution path ----
+//
+// There is no registry of the places a tool runs, so the test reads the production sources and compares what it finds with a list written here. A new place
+// fails the test until someone adds it, which is the moment to check it passes the gate (GATE-04, Pitfall 1, T-70-38). Each scan has a planted check, so the
+// scan itself is known to find what it should.
+
+const REPO = path.resolve(__dirname, '..', '..');
+
+function productionSources(): string[] {
+  const found: string[] = [];
+  const walk = (dir: string): void => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) { if (full !== path.join(REPO, 'src', 'test')) walk(full); continue; }
+      if (entry.name.endsWith('.ts') && !entry.name.endsWith('.d.ts')) found.push(path.relative(REPO, full).split(path.sep).join('/'));
+    }
+  };
+  walk(path.join(REPO, 'src'));
+  return found.sort();
+}
+
+/** The text with whole-line comments removed, so a word in a comment is never a call. */
+function code(text: string): string {
+  return text.split('\n').filter((line) => !/^\s*(?:\/\/|\/\*|\*)/.test(line)).join('\n');
+}
+
+/** How many places a tool object's run is called: `tool.run(`, `selected!.tool.run(`, `webFetchTool.run(`. */
+export function toolRunSites(text: string): number {
+  return [...code(text).matchAll(/\b(?:tool|\w+Tool)[?!]?\.run\(/g)].length;
+}
+
+/** Every `new AgentRun(` and whether its arguments name a gate. */
+export function agentRunConstructions(text: string): Array<{ line: number; passesGate: boolean }> {
+  const source = code(text);
+  const out: Array<{ line: number; passesGate: boolean }> = [];
+  for (const match of source.matchAll(/new AgentRun\(/g)) {
+    const start = (match.index ?? 0) + match[0].length;
+    let depth = 1;
+    let end = start;
+    while (end < source.length && depth > 0) {
+      const char = source[end];
+      if (char === '(') depth += 1;
+      else if (char === ')') depth -= 1;
+      end += 1;
+    }
+    out.push({ line: source.slice(0, match.index).split('\n').length, passesGate: /\bgate\b/.test(source.slice(start, end)) });
+  }
+  return out;
+}
+
+/** The files that import a way to start a process. */
+export function processImporters(files: Record<string, string>): string[] {
+  const form = /(?:\bfrom\s*|\brequire\(\s*|\bimport\(\s*)['"](?:(?:node:)?child_process|execa)['"]/;
+  return Object.entries(files).filter(([, text]) => form.test(code(text))).map(([file]) => file).sort();
+}
+
+/** The only places a tool's own run is called: the loop's executeCall, the cyber step engine, and the sub-agent wrapper that runs inside executeCall. */
+const TOOL_RUN_SITES: Readonly<Record<string, number>> = { 'src/agent/loop.ts': 1, 'src/services/cyberRun.ts': 1, 'src/services/agentSession.ts': 2 };
+/** Every production `new AgentRun(`: the main run and each sub-agent in the session, and the benchmark runner. */
+const AGENT_RUN_SITES: Readonly<Record<string, number>> = { 'src/services/agentSession.ts': 2, 'src/benchmark/runner.ts': 1 };
+/**
+ * Files under src/agent and src/mcp that may start a process: the shell session, the worktree helper, the Bash tool's own command runner and the unattended
+ * safety checks. They are the loop's own tools, behind the gate. Everything else that starts a process is extension code, not an agent tool (src/gsd/runtime.ts,
+ * src/services/stateGit.ts, codePushCheck.ts, src/team/runGit.ts, onlineHome.ts, cyberTools.ts, cyberSandbox.ts, src/security/runtimes.ts): the floor's own
+ * wording excludes it, and it never runs because a model asked.
+ */
+const PROCESS_IMPORTERS_IN_AGENT_AND_MCP: readonly string[] = ['src/agent/shell.ts', 'src/agent/tools.ts', 'src/agent/unattended.ts', 'src/agent/worktree.ts'];
+
+test('a tool\'s run is called only at the listed sites, and a planted extra site is reported', () => {
+  const found: Record<string, number> = {};
+  for (const file of productionSources()) {
+    const count = toolRunSites(readFileSync(path.join(REPO, file), 'utf8'));
+    if (count > 0) found[file] = count;
+  }
+  assert.deepEqual(found, TOOL_RUN_SITES);
+  assert.equal(toolRunSites('const out = await tool.run(input, context);\nreturn selected!.tool.run(parsed, ctx) + webFetchTool.run(a);'), 3, 'the scan finds a planted site');
+  assert.equal(toolRunSites('// tool.run(input)\n * tool.run(input)\nconst shellRun = shell.run(command);'), 0, 'a comment and a shell session are not tool runs');
+});
+
+test('every production `new AgentRun(` passes a gate, and a planted construction without one is reported', () => {
+  const found: Record<string, number> = {};
+  const missing: string[] = [];
+  for (const file of productionSources()) {
+    const sites = agentRunConstructions(readFileSync(path.join(REPO, file), 'utf8'));
+    if (sites.length > 0) found[file] = sites.length;
+    for (const site of sites) if (!site.passesGate) missing.push(`${file}:${site.line}`);
+  }
+  assert.deepEqual(found, AGENT_RUN_SITES);
+  assert.deepEqual(missing, [], 'every construction names a gate');
+  assert.deepEqual(agentRunConstructions('const run = new AgentRun({ client, model, tools });'), [{ line: 1, passesGate: false }], 'the scan finds a planted construction without one');
+  assert.deepEqual(agentRunConstructions('const run = new AgentRun({ client, ...(gate ? { gate } : {}) });'), [{ line: 1, passesGate: true }]);
+});
+
+test('no file under src/agent or src/mcp imports child_process or execa except the listed ones, and a planted import is reported', () => {
+  const files: Record<string, string> = {};
+  for (const file of productionSources()) if (file.startsWith('src/agent/') || file.startsWith('src/mcp/')) files[file] = readFileSync(path.join(REPO, file), 'utf8');
+  assert.ok(Object.keys(files).length > 20, 'the scan read the folders');
+  const importers = processImporters(files);
+  for (const file of importers) assert.ok(PROCESS_IMPORTERS_IN_AGENT_AND_MCP.includes(file), `${file} starts processes and is not on the list`);
+  for (const file of PROCESS_IMPORTERS_IN_AGENT_AND_MCP) assert.ok(existsSync(path.join(REPO, file)), `${file} exists`);
+  assert.deepEqual(processImporters({ 'src/agent/new.ts': "import { spawn } from 'node:child_process';", 'src/mcp/new.ts': "const cp = require('child_process');", 'src/agent/quiet.ts': "import { x } from './shell';", 'src/agent/exe.ts': "import execa from 'execa';" }), ['src/agent/exe.ts', 'src/agent/new.ts', 'src/mcp/new.ts']);
+});
+
+// One scripted run per effect kind: the tool is spied so the test sees what had been recorded the moment it started.
+interface EffectCase { name: string; tool: AgentTool<any>; args: Record<string, unknown>; operation: string }
+
+function mcpCase(): EffectCase {
+  const config: McpServerConfig = { id: 'catalog', name: 'Catalog', transport: 'http', approval: 'trusted' };
+  const connection = { tools: [{ name: 'search', description: 'Search', inputSchema: { type: 'object' }, readOnly: true, destructive: false }], call: async () => 'ok' } as unknown as McpConnection;
+  const tool = mcpAgentTools(config, connection, 'catalog.example')[0] as AgentTool<any>;
+  return { name: tool.name, tool, args: {}, operation: 'mcp' };
+}
+
+function effectCases(): EffectCase[] {
+  const all = builtInTools();
+  const named = (name: string): AgentTool<any> => all.find((tool) => tool.name === name) as AgentTool<any>;
+  return [
+    { name: 'Read', tool: named('Read'), args: { file_path: 'a.ts' }, operation: 'read' },
+    { name: 'Write', tool: named('Write'), args: { file_path: 'new.md', content: 'x' }, operation: 'workspaceWrite' },
+    { name: 'Bash', tool: named('Bash'), args: { command: 'git status' }, operation: 'shell' },
+    { name: 'WebFetch', tool: named('WebFetch'), args: { url: 'https://example.com/page' }, operation: 'network' },
+    mcpCase(),
+    { name: 'Agent', tool: named('Agent'), args: { prompt: 'look around', subagent_type: 'helper', description: 'look' }, operation: 'spawn' }
+  ];
+}
+
+for (const effect of effectCases()) {
+  test(`${effect.name} (${effect.operation}): a scripted run records a decision before the tool's run starts`, async () => {
+    const root = await project();
+    const order: string[] = [];
+    const base = defaultGateRuntime();
+    const gate: GateRuntime = { ...base, sink: { record: (record: DecisionRecord) => { order.push(`decision:${record.api.request.uid}:${record.api.operation}`); base.sink.record(record); } } };
+    const spy: AgentTool<any> = { ...effect.tool, run: async () => { order.push(`run:${effect.tool.name}`); return 'ok'; } };
+    const setup = runWith(root, [{ calls: [call('e1', effect.tool.name, effect.args)] }, { text: 'done' }], { gate, mode: 'fully-autonomous', tools: [...CORE_TOOLS.filter((tool) => tool.name !== effect.tool.name), spy] });
+    try {
+      const result = await go(setup);
+      assert.equal(result.outcome, 'completed');
+    } finally {
+      setup.shell.dispose();
+    }
+    assert.deepEqual(order, [`decision:e1:${effect.operation}`, `run:${effect.tool.name}`], 'one decision, and it came first');
+  });
+}

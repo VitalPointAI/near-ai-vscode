@@ -2,12 +2,22 @@
 // pure decision functions run over the floor matrix, a bundle check, a route decision and a record. Nothing here opens a socket or reads a key.
 import assert from 'node:assert/strict';
 import { createHash, generateKeyPairSync, sign as edSign } from 'node:crypto';
+import { mkdtemp, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import * as path from 'node:path';
 // `import x = require()` hands back the real module object, which the stubs below can replace; an `import * as` namespace is a read-only copy.
 import dns = require('node:dns');
 import http = require('node:http');
 import https = require('node:https');
 import net = require('node:net');
 import test, { after, before } from 'node:test';
+import { RunCheckpoints } from '../agent/checkpoints';
+import { defaultGateRuntime } from '../agent/gateAdapter';
+import { AgentRun } from '../agent/loop';
+import { DEFAULT_RULES } from '../agent/permissions';
+import { ShellSession } from '../agent/shell';
+import { CORE_TOOLS } from '../agent/tools';
+import type { CompletionEvent, ToolCall } from '../services/nearAiClient';
 import { fingerprintOf } from '../domain/team/canonical';
 import { NO_KNOWN_KEYS } from '../domain/team/keyStatus';
 import type { KeyStatusLookup } from '../domain/team/keyStatus';
@@ -120,6 +130,44 @@ test('decide over the floor matrix, a bundle check, a route decision, floorFor a
     bundleHash: state.state === 'valid' ? state.hash : ''
   });
   assert.equal(validateDecisionRecord(record).ok, true);
+});
+
+test('a whole scripted run with Read, Write and Bash calls makes every decision without calling a network function, and each decision comes before its call runs (OFFL-01)', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'near-ai-gate-offline-'));
+  await writeFile(path.join(root, 'a.ts'), 'export const a = 1;\n');
+  const call = (id: string, name: string, args: Record<string, unknown>): ToolCall => ({ id, type: 'function', function: { name, arguments: JSON.stringify(args) } });
+  const turns = [
+    { calls: [call('r1', 'Read', { file_path: 'a.ts' }), call('w1', 'Write', { file_path: 'out.md', content: 'x' }), call('b1', 'Bash', { command: 'pwd' })] },
+    { text: 'done' }
+  ];
+  let seen = 0;
+  const client = {
+    async *streamCompletion(): AsyncGenerator<CompletionEvent> {
+      const turn = (turns[seen] ?? { text: 'done' }) as { text?: string; calls?: ToolCall[] };
+      seen += 1;
+      yield { type: 'done', message: { role: 'assistant', content: turn.text ?? null, ...(turn.calls ? { tool_calls: turn.calls } : {}) }, finishReason: turn.calls ? 'tool_calls' : 'stop', usage: { inputTokens: 1, outputTokens: 1, verificationStatus: 'unknown' as const, latencyMs: 1 } };
+    }
+  };
+  const base = defaultGateRuntime({ presence: 'none', context: 'unattended' });
+  const order: string[] = [];
+  const gate = { ...base, sink: { record: (record: Parameters<typeof base.sink.record>[0]) => { order.push(`decision:${record.api.request.uid}`); base.records.push(record); } } };
+  const spied = CORE_TOOLS.map((tool) => ({ ...tool, run: async (input: never, context: never) => { order.push(`run:${tool.name}`); return tool.run(input, context); } }));
+  const shell = new ShellSession(root);
+  try {
+    const result = await new AgentRun({
+      client: client as never, model: 'm', tools: spied, context: { root, checkpoints: new RunCheckpoints('offline'), shell, readFiles: new Set() },
+      policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES, gate,
+      requestApproval: async () => ({ decision: 'deny' }), emit: () => undefined
+    }).run([{ role: 'user', content: 'go' }], new AbortController().signal);
+    assert.equal(result.outcome, 'completed');
+  } finally {
+    shell.dispose();
+  }
+  assert.equal(base.records.length, 3, 'one decision per call');
+  for (const [id, name] of [['r1', 'Read'], ['w1', 'Write'], ['b1', 'Bash']]) {
+    assert.ok(order.indexOf(`decision:${id}`) >= 0 && order.indexOf(`decision:${id}`) < order.indexOf(`run:${name}`), `${name}: decision before run in ${order.join(', ')}`);
+  }
+  assert.deepEqual(calls, [], 'no network function was called by the run or by any of its decisions');
 });
 
 test('each of the seven stubs was called 0 times by the decisions', () => {
