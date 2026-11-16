@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { RunCheckpoints } from '../agent/checkpoints';
-import { effectsOfCall, gateToolCall, defaultGateRuntime, manifestArguments } from '../agent/gateAdapter';
+import { effectsOfCall, gateToolCall, recordApprovalReply, recordLateApproval, defaultGateRuntime, manifestArguments } from '../agent/gateAdapter';
 import { AgentRun } from '../agent/loop';
 import type { AgentEvent, ApprovalReply, ApprovalRequest } from '../agent/loop';
 import { DEFAULT_RULES, RunGrants } from '../agent/permissions';
@@ -143,8 +143,8 @@ test('tracer: activation starts the gate, and a chat run\'s Write is decided in 
   assert.equal(ruleOf(asked), 'settings.mode.edits');
   assert.equal(existedWhenAsked, false, 'the file did not exist when the question was recorded');
   const records = await logOf(started, root);
-  assert.deepEqual(records.map((record) => [callIdOf(record), outcomeOf(record)]), [['w1', 'asked']]);
-  assert.deepEqual(records.map((record) => record.metadata.sequence), [1]);
+  assert.deepEqual(records.map((record) => [callIdOf(record), outcomeOf(record)]), [['w1', 'asked'], ['w1', 'approved']], 'asked then approved, same call id');
+  assert.deepEqual(records.map((record) => record.metadata.sequence), [1, 2]);
   assert.equal(records[0]?.api.operation, 'workspaceWrite');
   assert.equal(records[0]?.resources[0]?.name, 'out.md');
   assert.equal(records[0]?.ai_agent?.uid, 'main-1');
@@ -295,3 +295,205 @@ test('every rule id a settings answer is given is a rule id the gate can record'
   assert.ok(rules.includes('settings.deny-list') && rules.includes('settings.allow-rule') && rules.includes('settings.mode.fully-autonomous') && rules.includes('settings.mode.edits'));
 });
 
+// ---- Task 2: cards are a transport ----
+
+test('a card answered allow gives asked then approved for the same call id; answered deny gives asked then denied and the call does not run', async () => {
+  const started = await startedHost();
+  const root = await project();
+  const runtime = (): GateRuntime => started.host.runtimeFor({ root, actor: { kind: 'agent', sessionId: 'c', agentId: 'm' }, presence: 'person', context: 'interactive', floorMode: 'shadow' });
+  const allowed = runWith(root, [{ calls: [call('a1', 'Write', { file_path: 'yes.md', content: 'y' })] }, { text: 'ok' }], { gate: runtime(), answer: () => ({ decision: 'allow' }) });
+  const denied = runWith(root, [{ calls: [call('d1', 'Write', { file_path: 'no.md', content: 'n' })] }, { text: 'ok' }], { gate: runtime(), answer: () => ({ decision: 'deny' }) });
+  try {
+    await go(allowed);
+    await go(denied);
+  } finally {
+    allowed.shell.dispose();
+    denied.shell.dispose();
+  }
+  assert.equal(existsSync(path.join(root, 'yes.md')), true);
+  assert.equal(existsSync(path.join(root, 'no.md')), false);
+  const records = await logOf(started, root);
+  assert.deepEqual(records.map((record) => [callIdOf(record), outcomeOf(record)]), [['a1', 'asked'], ['a1', 'approved'], ['d1', 'asked'], ['d1', 'denied']]);
+  assert.deepEqual(records.map((record) => record.metadata.sequence), [1, 2, 3, 4], 'sequence follows decision order');
+});
+
+test('if the emergency stop is switched on between the card and the answer, an allow is re-checked, recorded denied, and the call does not run', async () => {
+  const started = await startedHost();
+  const root = await project();
+  let setup: RunSetup | undefined;
+  setup = runWith(root, [{ calls: [call('w1', 'Write', { file_path: 'late.md', content: 'x' })] }, { text: 'ok' }], {
+    gate: started.host.runtimeFor({ root, actor: { kind: 'agent', sessionId: 'c', agentId: 'm' }, presence: 'person', context: 'interactive', floorMode: 'shadow' }),
+    answer: () => { (setup as RunSetup).policy.emergencyStop = true; return { decision: 'allow' }; }
+  });
+  try {
+    await go(setup);
+  } finally {
+    setup.shell.dispose();
+  }
+  assert.equal(existsSync(path.join(root, 'late.md')), false);
+  assert.match(toolOutputs(setup)[0] ?? '', /^Not allowed: Emergency stop is on\./);
+  const records = await logOf(started, root);
+  assert.deepEqual(records.map((record) => [outcomeOf(record), ruleOf(record)]), [['asked', 'settings.mode.edits'], ['denied', 'settings.emergency-stop']]);
+});
+
+test('if the bundle fails between the card and the answer, an allow is re-checked and refused with the bundle\'s sentence', async () => {
+  const root = await project();
+  const fresh = await startedHost();
+  const live = fresh.host.runtimeFor({ root, actor: { kind: 'agent', sessionId: 'c', agentId: 'm' }, presence: 'person', context: 'interactive', floorMode: 'shadow' });
+  const valid = live.bundleState();
+  let state: BundleState = valid;
+  const gate: GateRuntime = { ...live, bundleState: () => state };
+  const setup = runWith(root, [{ calls: [call('w1', 'Write', { file_path: 'late.md', content: 'x' })] }, { text: 'ok' }], {
+    gate, answer: () => { state = failedClosed('bad-signature'); return { decision: 'allow' }; }
+  });
+  try {
+    await go(setup);
+  } finally {
+    setup.shell.dispose();
+  }
+  assert.equal(existsSync(path.join(root, 'late.md')), false);
+  assert.match(toolOutputs(setup)[0] ?? '', /^Not allowed: Your policy file was changed outside NEAR AI/);
+  const records = await logOf(fresh, root);
+  assert.deepEqual(records.map((record) => [outcomeOf(record), ruleOf(record)]), [['asked', 'settings.mode.edits'], ['denied', 'bundle.failed-closed']]);
+});
+
+test('a card answer never decides or grants on its own: it goes through recordApprovalReply, and a pending answer is recorded when it arrives late', async () => {
+  const root = await project();
+  const runtime = defaultGateRuntime();
+  const write = CORE_TOOLS.find((tool) => tool.name === 'Write') as AgentTool<any>;
+  const gated = await gateToolCall(runtime, { tool: write, raw: { file_path: 'p.md', content: 'x' }, root, callId: 'p1', policy: { mode: 'approve-risky', emergencyStop: false }, rules: DEFAULT_RULES, grants: new RunGrants(), buildAuto: async () => undefined });
+  assert.equal(gated.decision.outcome, 'ask');
+  const pending = await recordApprovalReply(runtime, gated, { decision: 'pending' });
+  assert.equal(pending.proceed, false);
+  assert.deepEqual(runtime.records.map((record) => outcomeOf(record)), ['asked'], 'a pending answer records nothing yet');
+  recordLateApproval(runtime, 'p1', { decision: 'allow' });
+  assert.deepEqual(runtime.records.map((record) => outcomeOf(record)), ['asked', 'approved']);
+  recordLateApproval(runtime, 'p1', { decision: 'allow' });
+  assert.equal(runtime.records.length, 2, 'a late answer is recorded once');
+  const allowed = await gateToolCall(runtime, { tool: write, raw: { file_path: 'q.md', content: 'x' }, root, callId: 'q1', policy: { mode: 'approve-risky', emergencyStop: false }, rules: DEFAULT_RULES, grants: new RunGrants(), buildAuto: async () => undefined });
+  assert.deepEqual(await recordApprovalReply(runtime, allowed, { decision: 'allow-run' }), { proceed: true });
+});
+
+test('a call with unparseable arguments reaches no decision and no execution, and a run with no tool calls writes no tool decision record', async () => {
+  const root = await project();
+  const runtime = defaultGateRuntime();
+  const setup = runWith(root, [{ calls: [{ id: 'bad', type: 'function', function: { name: 'Write', arguments: '{not json' } }] }, { text: 'sorry' }], { gate: runtime });
+  try {
+    await go(setup);
+  } finally {
+    setup.shell.dispose();
+  }
+  assert.match(toolOutputs(setup)[0] ?? '', /^Arguments are not valid JSON/);
+  assert.equal(runtime.records.length, 0);
+  const none = defaultGateRuntime();
+  const quiet = runWith(root, [{ text: 'Nothing to do.' }], { gate: none });
+  try {
+    const result = await go(quiet);
+    assert.equal(result.outcome, 'completed');
+  } finally {
+    quiet.shell.dispose();
+  }
+  assert.equal(none.records.length, 0);
+});
+
+test('in a batch of concurrent lookups each call gets its own decision before its own run', async () => {
+  const root = await project();
+  const order: string[] = [];
+  const base = defaultGateRuntime();
+  const gate: GateRuntime = { ...base, sink: { record: (record) => { order.push(`decision:${record.resources[0]?.name}`); base.sink.record(record); } } };
+  const read = CORE_TOOLS.find((tool) => tool.name === 'Read') as AgentTool<any>;
+  const spy: AgentTool<any> = { ...read, run: async (input, context) => { order.push(`run:${String((input as { path: string }).path)}`); return read.run(input, context); } };
+  const setup = runWith(root, [{ calls: ['a.ts', 'b.ts', 'c.ts'].map((file, index) => call(`r${index}`, 'Read', { file_path: file })) }, { text: 'ok' }], { gate, tools: [spy, ...CORE_TOOLS.filter((tool) => tool.name !== 'Read')] });
+  try {
+    await go(setup);
+  } finally {
+    setup.shell.dispose();
+  }
+  for (const file of ['a.ts', 'b.ts', 'c.ts']) {
+    const decided = order.indexOf(`decision:${file}`);
+    const ran = order.indexOf(`run:${file}`);
+    assert.ok(decided >= 0 && ran >= 0 && decided < ran, `${file}: decision ${decided} before run ${ran} in ${order.join(', ')}`);
+  }
+  assert.equal(base.records.length, 3, 'three decisions, one per call');
+  assert.deepEqual(base.records.map((record) => callIdOf(record)).sort(), ['r0', 'r1', 'r2']);
+});
+
+// ---- sub-agents ----
+
+class RecordingHost extends GateHost {
+  public readonly requests: RuntimeRequest[] = [];
+  public override runtimeFor(request: RuntimeRequest): GateRuntime {
+    this.requests.push(request);
+    return super.runtimeFor(request);
+  }
+}
+
+test('a sub-agent spawn is decided like any call, and the child\'s own calls are decided too, as a sub-agent with the person present in an interactive run', async () => {
+  const storage = await mkdtemp(path.join(tmpdir(), 'near-ai-gate-storage-'));
+  const host = new RecordingHost({ globalStorageDir: storage, secrets: new MemorySecrets(), productVersion: '0.0.0-test' });
+  await host.start();
+  const root = await project();
+  let leadTurn = 0;
+  let helperTurn = 0;
+  const near = {
+    async *streamCompletion(_model: string, messages: AgentMessage[]): AsyncGenerator<CompletionEvent> {
+      const helper = String(messages[0]?.content ?? '').startsWith('You help');
+      if (helper) {
+        helperTurn += 1;
+        if (helperTurn === 1) { yield { type: 'done', message: { role: 'assistant', content: null, tool_calls: [call('h1', 'Read', { file_path: 'a.ts' }), call('h2', 'Write', { file_path: 'helper.md', content: 'x' })] }, finishReason: 'tool_calls', usage }; return; }
+        yield { type: 'done', message: { role: 'assistant', content: 'Helper report.' }, finishReason: 'stop', usage };
+        return;
+      }
+      leadTurn += 1;
+      if (leadTurn === 1) { yield { type: 'done', message: { role: 'assistant', content: null, tool_calls: [call('a1', 'Agent', { subagent_type: 'helper', prompt: 'read a.ts and write notes', description: 'notes' })] }, finishReason: 'tool_calls', usage }; return; }
+      yield { type: 'done', message: { role: 'assistant', content: 'Done.' }, finishReason: 'stop', usage };
+    },
+    async actualCostsUsd() { return undefined; }
+  };
+  const posted: Array<Record<string, unknown>> = [];
+  const conversation = new AgentConversation(root, (message) => posted.push(message), path.join(root, '.ckpt'));
+  conversation.gateHost = host;
+  try {
+    await conversation.send({
+      text: 'go', client: near as never, model: 'm', privacy: 'Private', policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES,
+      projectAgents: [{ name: 'helper', description: 'helper', tools: ['Read', 'Write'], body: 'You help.', file: path.join(root, 'team.md') }]
+    });
+  } finally {
+    conversation.dispose();
+  }
+  assert.equal(existsSync(path.join(root, 'helper.md')), true);
+  assert.deepEqual(host.requests.map((request) => [request.actor.kind, request.presence, request.context, request.floorMode]), [
+    ['agent', 'person', 'interactive', 'shadow'], ['sub-agent', 'person', 'interactive', 'shadow']
+  ]);
+  const records = await logOf({ host, storage, secrets: new MemorySecrets(), problems: [] }, root);
+  const byCall = (id: string): DecisionRecord | undefined => records.find((record) => callIdOf(record) === id);
+  assert.equal(byCall('a1')?.api.operation, 'spawn', 'the lead\'s Agent call is a spawn decision');
+  assert.equal(byCall('h1')?.api.operation, 'read');
+  assert.equal(byCall('h2')?.api.operation, 'workspaceWrite');
+  assert.equal(byCall('h1')?.ai_agent?.name, 'helper');
+  assert.equal(byCall('a1')?.ai_agent?.name, 'agent');
+  const sequences = records.map((record) => record.metadata.sequence);
+  assert.deepEqual(sequences, sequences.map((_, index) => index + 1), 'one log, in decision order, across the lead and its helper');
+});
+
+test('a card for a floor decision carries no run-wide grant and no "always allow", and with nobody present the same call is refused with no card (floor enforced)', async () => {
+  const root = await project();
+  const enforced = (presence: 'person' | 'none'): GateRuntime => ({ ...defaultGateRuntime({ presence }), floorMode: 'enforce' });
+  const hook = call('f1', 'Write', { file_path: '.git/hooks/pre-commit', content: '#!/bin/sh\n' });
+  const asked = runWith(root, [{ calls: [hook] }, { text: 'ok' }], { gate: enforced('person'), mode: 'fully-autonomous', answer: () => ({ decision: 'allow-always' }) });
+  const refused = runWith(root, [{ calls: [hook] }, { text: 'ok' }], { gate: enforced('none'), mode: 'fully-autonomous' });
+  try {
+    await go(asked);
+    await go(refused);
+  } finally {
+    asked.shell.dispose();
+    refused.shell.dispose();
+  }
+  assert.equal(asked.approvals.length, 1);
+  const card = asked.approvals[0] as ApprovalRequest;
+  assert.equal(card.grant, undefined, 'no run-wide grant on a floor card');
+  assert.equal(card.allowRule, undefined);
+  assert.match(card.reason ?? '', /always needs a person|protected|approve/i);
+  assert.equal(refused.approvals.length, 0, 'nobody to answer: no card');
+  assert.match(toolOutputs(refused)[0] ?? '', /^Not allowed: Nobody is here to approve this/);
+});

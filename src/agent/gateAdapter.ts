@@ -23,6 +23,9 @@ const DEFAULT_PRODUCT_VERSION = '0.0.0';
 const MAX_RESOURCE_NAME = 200;
 const DEVICE_UNKNOWN = 'device-unknown';
 
+/** What a card's reply can be, as the loop's own ApprovalReply names it (kept here so this file imports nothing from the loop). */
+export interface GateReply { readonly decision: 'allow' | 'allow-run' | 'allow-always' | 'deny' | 'pending' }
+
 export interface GateCallInput {
   readonly tool: AgentTool<any>;
   /** The model's own arguments, before the tool parsed them: the manifest names these fields, not the parsed ones. */
@@ -266,6 +269,57 @@ export async function gateToolCall(runtime: GateRuntime, input: GateCallInput, o
   const gated: GatedCall = { decision, settings: captured.value, request, effects };
   keep(runtime, recordFor(runtime, gated, outcomeOf(decision), decision.rule, decision.reason, options.model === undefined ? undefined : { name: options.model, provider: MODEL_PROVIDER }));
   return gated;
+}
+
+export type ReplyResult = { readonly proceed: true } | { readonly proceed: false; readonly rule: string; readonly reason: string };
+
+// Asks the person has not answered yet, by run: a late answer is recorded when it arrives.
+const WAITING = new WeakMap<GateRuntime, Map<string, GatedCall>>();
+
+// A settings layer that has already been answered by the person: it only lets the earlier layers be asked again.
+const ANSWERED: SettingsLayer = async (): Promise<SettingsAnswer> => ({ decision: 'allow', rule: 'settings.approved' });
+
+/**
+ * The person's answer to a card (D-09). A card is only a transport: the answer comes back here, is recorded against the same call id (`approved` or
+ * `denied`), and for an allow the layers that outrank the person (emergency stop, bundle state, the floor's refusals, the ceiling) are asked again, so an
+ * answer given after the world changed cannot run the call. A `pending` answer records nothing now and is remembered for `recordLateApproval`.
+ */
+export async function recordApprovalReply(runtime: GateRuntime, gated: GatedCall, reply: GateReply, options: GateCallOptions = {}): Promise<ReplyResult> {
+  const model = options.model === undefined ? undefined : { name: options.model, provider: MODEL_PROVIDER };
+  if (reply.decision === 'pending') {
+    let waiting = WAITING.get(runtime);
+    if (waiting === undefined) { waiting = new Map(); WAITING.set(runtime, waiting); }
+    waiting.set(gated.request.callId, gated);
+    return { proceed: false, rule: gated.decision.rule, reason: 'Nobody has answered yet.' };
+  }
+  if (reply.decision === 'deny') {
+    keep(runtime, recordFor(runtime, gated, 'denied', gated.decision.rule, 'The person declined this action.', model));
+    return { proceed: false, rule: gated.decision.rule, reason: 'The person declined this action.' };
+  }
+  let again: GateDecision;
+  try {
+    again = await decide(gated.request, runtime.bundleState(), ANSWERED, { floorMode: runtime.floorMode });
+  } catch {
+    again = { outcome: 'deny', rule: 'bundle.failed-closed', reason: 'NEAR AI could not check this call again, so it was not run.', floor: false, offerAlwaysAllow: false, allowGrant: false, effectiveMode: 'approve-risky' };
+  }
+  if (again.outcome === 'deny') {
+    const refused: GatedCall = { ...gated, decision: again };
+    keep(runtime, recordFor(runtime, refused, outcomeOf(again), again.rule, again.reason, model));
+    return { proceed: false, rule: again.rule, reason: again.reason ?? 'This is no longer allowed.' };
+  }
+  keep(runtime, recordFor(runtime, gated, 'approved', gated.decision.rule, undefined, model));
+  return { proceed: true };
+}
+
+/** An answer that arrived after the run had gone on (a sub-agent's card the person answered later): recorded against the call it was asked for. Nothing runs from it. */
+export function recordLateApproval(runtime: GateRuntime, callId: string, reply: GateReply, options: GateCallOptions = {}): void {
+  const waiting = WAITING.get(runtime);
+  const gated = waiting?.get(callId);
+  if (waiting === undefined || gated === undefined || reply.decision === 'pending') return;
+  waiting.delete(callId);
+  const model = options.model === undefined ? undefined : { name: options.model, provider: MODEL_PROVIDER };
+  if (reply.decision === 'deny') keep(runtime, recordFor(runtime, gated, 'denied', gated.decision.rule, 'The person declined this action.', model));
+  else keep(runtime, recordFor(runtime, gated, 'approved', gated.decision.rule, undefined, model));
 }
 
 // ---------------------------------------------------------------------------------------------------------------------------------------------------
