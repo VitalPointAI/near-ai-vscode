@@ -13,6 +13,7 @@ import { BundleStoreError } from '../gate/bundleStore';
 import { GateHost } from '../gate/host';
 import type { SecretStorageLike } from './auth';
 import { SHOW_POLICY_COMMAND, createGateStatusBar, expiryDate, policyProblem } from './gateStatusBar';
+import type { GateStatusTimers } from './gateStatusBar';
 import { registerSetupStep } from './setupSteps';
 import type { SetupStep } from './setupSteps';
 
@@ -44,6 +45,8 @@ export interface RegisterGateOptions {
   readonly notify?: (message: string) => void;
   /** The clock for the policy check, for tests. */
   readonly now?: () => Date;
+  /** The timers the policy status bar refreshes itself with, for tests. */
+  readonly statusTimers?: GateStatusTimers;
 }
 
 function warn(message: string): void {
@@ -176,7 +179,7 @@ export function registerGate(context: GateActivationContext, options: RegisterGa
     onProblem: tell,
     ...(options.now === undefined ? {} : { now: options.now })
   });
-  registerPolicySurfaces(context, host, tell, clock);
+  registerPolicySurfaces(context, host, tell, clock, options.statusTimers);
   void host.start().then((state) => {
     if (state.state === 'failed-closed') tell(state.sentence);
   }).catch(() => undefined);
@@ -185,13 +188,14 @@ export function registerGate(context: GateActivationContext, options: RegisterGa
 
 // The status bar, the two commands and the setup step. Each is set up on its own, so one that cannot be (a command id already taken, a status bar that
 // the editor refuses) never stops the gate or the rest of activation.
-function registerPolicySurfaces(context: GateActivationContext, host: GateHost, tell: (message: string) => void, clock: () => number): void {
+function registerPolicySurfaces(context: GateActivationContext, host: GateHost, tell: (message: string) => void, clock: () => number, statusTimers?: GateStatusTimers): void {
   const keep = (item: { dispose(): unknown }): void => { try { context.subscriptions?.push(item); } catch { /* the editor owns disposal; a test context may not */ } };
   const attempt = (what: string, run: () => void): void => {
     try { run(); } catch { try { tell(`NEAR AI could not set up ${what}.`); } catch { /* ignored */ } }
   };
   attempt('the policy status', () => {
-    const bar = createGateStatusBar();
+    // The bar reads the host again when its words are due to change (the renewal window opening, the policy ending), so it never waits for a host change.
+    const bar = createGateStatusBar({ read: () => ({ state: host.bundleState(), now: clock() }), ...(statusTimers === undefined ? {} : { timers: statusTimers }) });
     keep({ dispose: () => { bar.dispose(); } });
     keep({ dispose: host.onDidChange(() => { bar.update(host.bundleState(), clock()); }) });
   });

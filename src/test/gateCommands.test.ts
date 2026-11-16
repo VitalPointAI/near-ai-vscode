@@ -333,3 +333,45 @@ test('the reset command is contributed in package.json with the NEAR AI category
   assert.deepEqual([reset?.title, reset?.category], ['Reset Policy to Defaults', 'NEAR AI']);
   for (const entry of manifest.contributes.commands.filter((item) => item.command.startsWith('nearAi.policy.'))) assert.ok(!entry.title.includes(EM_DASH));
 });
+
+// ---------------------------------------------------------------------------------------------------------------------------------------------------
+// The status bar refreshes itself (owner-confirmed 2026-11-16, PR #70 review)
+
+test('the registered status bar changes by itself when the policy enters its renewal window and again when it ends', async () => {
+  stub.setWorkspaceFolders([]);
+  const storage = await mkdtemp(path.join(tmpdir(), 'near-ai-gate-cmd-'));
+  const start = Date.parse('2026-11-16T12:00:00.000Z');
+  let nowMs = start;
+  const queue = new Map<number, { at: number; callback: () => void }>();
+  let counter = 0;
+  const timers = {
+    set: (callback: () => void, delayMs: number): unknown => { counter += 1; queue.set(counter, { at: nowMs + delayMs, callback }); return counter; },
+    clear: (handle: unknown): void => { queue.delete(handle as number); }
+  };
+  const advanceTo = (target: number): void => {
+    for (;;) {
+      const due = [...queue.entries()].filter(([, timer]) => timer.at <= target).sort((a, b) => a[1].at - b[1].at)[0];
+      if (due === undefined) break;
+      queue.delete(due[0]);
+      nowMs = due[1].at;
+      due[1].callback();
+    }
+    nowMs = target;
+  };
+  const before = stub.statusBarItems.length;
+  const host = gateCommands.registerGate(createFakeContext(storage, new MemorySecrets()) as never, { notify: () => undefined, now: () => new Date(nowMs), statusTimers: timers });
+  const state = await host.state();
+  assert.equal(state.state, 'valid');
+  const bar = stub.statusBarItems.slice(before).filter((item) => item.id === 'nearAi.gate').at(-1) as (typeof stub.statusBarItems)[number];
+  assert.equal(bar.text, 'Policy');
+  assert.equal(queue.size, 1, 'one timer is waiting for the next change');
+  const expires = Date.parse((state as Extract<BundleState, { state: 'valid' }>).expiresAt);
+  advanceTo(expires - 30 * DAY - 1);
+  assert.equal(bar.text, 'Policy');
+  advanceTo(expires - 30 * DAY);
+  assert.equal(bar.text, 'Policy: renewing');
+  advanceTo(expires);
+  assert.equal(bar.text, 'Policy: reading only');
+  assert.ok(bar.tooltip.includes(BUNDLE_FAILURES.expired));
+  assert.equal(queue.size, 0);
+});
