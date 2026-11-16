@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.4.27
+## Unreleased
 
 This release adds Improve with AI and a free local check to Team Studio, lets you mark a whole team
 private, and makes Team Studio's AI calls respect TEE-only mode and your daily spend limit.
@@ -34,7 +34,10 @@ private, and makes Team Studio's AI calls respect TEE-only mode and your daily s
 - **A member's `privacy:` line may carry a note** after the value (`privacy: private  # client
   data`); marking the team private no longer adds a second line under it.
 
-## Unreleased
+## 0.4.27
+
+This release adds Improve with AI and a free local check to Team Studio, lets you mark a whole team
+private, and makes Team Studio's AI calls respect TEE-only mode and your daily spend limit.
 
 - **Improve with AI in Team Studio.** A new **Improve with AI** button in the team editor (and on
   the last step of the builder) first runs a free check of the team, then, when you ask, has an
