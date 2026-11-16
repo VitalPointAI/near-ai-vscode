@@ -11,7 +11,7 @@ import type { BundleState } from '../domain/gate/bundle';
 import { CLEARANCE_SELF_ASSERTED_TEXT, SCALE_PRESETS_CAVEAT_TEXT } from '../domain/gate/labels';
 import type { DecisionRecord } from '../domain/gate/record';
 import { POLICY_BUNDLE_FILE, gateDir } from '../gate/bundleStore';
-import { DECISIONS_DIR, projectLogKey } from '../gate/decisionLog';
+import { DECISIONS_DIR, INSTALL_LOG_KEY, projectLogKey } from '../gate/decisionLog';
 import { MemorySecrets } from './helpers/teamHarness';
 import { createFakeContext, createVscodeStub, installVscodeStub } from './helpers/vscodeStub';
 
@@ -195,6 +195,12 @@ async function recordsOf(storage: string, root: string): Promise<DecisionRecord[
   return (await readFile(file, 'utf8')).split('\n').filter((line) => line !== '').map((line) => JSON.parse(line) as DecisionRecord);
 }
 
+async function installRecordsOf(storage: string): Promise<DecisionRecord[]> {
+  const file = path.join(storage, 'gate', DECISIONS_DIR, `${INSTALL_LOG_KEY}.jsonl`);
+  if (!existsSync(file)) return [];
+  return (await readFile(file, 'utf8')).split('\n').filter((line) => line !== '').map((line) => JSON.parse(line) as DecisionRecord);
+}
+
 async function tampered(root?: string): Promise<{ host: ReturnType<typeof gateCommands.registerGate>; storage: string; file: string; bytes: string; secrets: MemorySecrets }> {
   stub.setWorkspaceFolders(root === undefined ? [] : [root]);
   const first = await started();
@@ -242,6 +248,36 @@ test('Reset Policy to Defaults is a modal that says what happens, and a confirm 
   assert.equal(records.filter((record) => record.api.operation === 'policy.load').length, 1, 'the failed start was recorded too');
   const bar = stub.statusBarItems.filter((item) => item.id === 'nearAi.gate').at(-1) as (typeof stub.statusBarItems)[number];
   assert.equal(bar.text, 'Policy');
+});
+
+test('Reset with no folder open records policy.reset in the install-level log, and the start is on that record too', async () => {
+  const { host, storage } = await tampered();
+  resetNotifications();
+  stub.messageAnswers.push(gateCommands.RESET_CONFIRM_ACTION);
+  await stub.commands.get('nearAi.policy.reset')?.();
+  assert.equal(host.bundleState().state, 'valid');
+  await host.flush();
+  const records = await installRecordsOf(storage);
+  const operations = records.map((record) => record.api.operation);
+  assert.deepEqual(operations, ['policy.created', 'policy.load', 'policy.reset'], 'in the order they happened');
+  assert.equal(records.filter((record) => record.api.operation === 'policy.reset').length, 1);
+  assert.equal(records.find((record) => record.api.operation === 'policy.reset')?.authorizations[0]?.policy.name, 'policy.reset');
+  assert.ok(records.some((record) => record.api.operation === 'policy.load' && record.authorizations[0]?.policy.name === 'bundle.failed-closed'), 'the failed start was recorded too');
+  const folder = readdirSync(path.join(gateDir(storage), DECISIONS_DIR));
+  assert.deepEqual(folder, [`${INSTALL_LOG_KEY}.jsonl`], 'no project log exists, because no project was open');
+});
+
+test('Reset with a folder open records policy.reset in the install-level log and in that project\'s log', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'near-ai-gate-cmd-project-'));
+  const { host, storage } = await tampered(root);
+  resetNotifications();
+  stub.messageAnswers.push(gateCommands.RESET_CONFIRM_ACTION);
+  await stub.commands.get('nearAi.policy.reset')?.();
+  await host.flush();
+  for (const records of [await installRecordsOf(storage), await recordsOf(storage, root)]) {
+    assert.equal(records.filter((record) => record.api.operation === 'policy.reset').length, 1);
+    assert.equal(records.filter((record) => record.api.operation === 'policy.load').length, 1);
+  }
 });
 
 test('cancelling Reset Policy to Defaults changes nothing: the file keeps its bytes, nothing is kept beside it, nothing is recorded', async () => {

@@ -124,3 +124,10 @@ test('the new sections have no em-dash and never say NEAR organization', () => {
     assert.doesNotMatch(text, /NEAR organization/i, name);
   }
 });
+
+test('SECURITY.md says where the policy\'s own events and its trust rule are kept: the install log, with or without a folder, and no self-signing outside a true first install', () => {
+  const text = flat(policySection);
+  assert.match(text, /written to a separate log for the install in the same storage, whether or not a folder is open, and also to the open project's record/);
+  assert.match(text, /signs a policy by itself only on a true first install/);
+  assert.match(text, /never adopted, even one that carries the default policy/);
+});

@@ -28,6 +28,13 @@ export function projectLogKey(root: string): string {
   return createHash('sha256').update(normal).digest('hex').slice(0, 32);
 }
 
+/**
+ * The key of the install-level log, <globalStorage>/gate/decisions/<this key>.jsonl: the policy's own events (policy.created, renewed, reset, load and a
+ * failed start), which belong to this install and not to any one project, so they are kept even when no folder is open. It is a fixed hash of a fixed word, so
+ * it never equals a project key (those are hashes of a folder path) and no path appears in the file name.
+ */
+export const INSTALL_LOG_KEY = createHash('sha256').update('near-ai-install-policy-log').digest('hex').slice(0, 32);
+
 export interface DecisionLogOptions {
   readonly globalStorageDir: string;
   /** From projectLogKey. */

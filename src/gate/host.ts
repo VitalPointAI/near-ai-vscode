@@ -14,7 +14,7 @@ import type { DecisionOutcome, DecisionRecord } from '../domain/gate/record';
 import type { SecretStorageLike } from '../services/auth';
 import { ensurePolicyBundle, resetPolicyToDefaults } from './bundleStore';
 import type { BundleEvent, BundleResult } from './bundleStore';
-import { DecisionLog, projectLogKey } from './decisionLog';
+import { DecisionLog, INSTALL_LOG_KEY, projectLogKey } from './decisionLog';
 
 const DEVICE_UNKNOWN = 'device-unknown';
 const POLICY_SESSION = 'policy';
@@ -27,7 +27,7 @@ export interface GateHostOptions {
   readonly globalStorageDir: string;
   readonly secrets: SecretStorageLike;
   readonly productVersion: string;
-  /** The open project, whose log receives the bundle's own events (policy.load and the rest). None when no folder is open. */
+  /** The open project, whose log also receives the bundle's own events (policy.load and the rest). None when no folder is open; the install's own log gets them either way. */
   readonly projectRoot?: string;
   /** Called once per log, with a plain message, when a record could not be written. */
   readonly onProblem?: (message: string) => void;
@@ -156,13 +156,21 @@ export class GateHost {
   }
 
   private logFor(root: string): DecisionLog {
-    const key = projectLogKey(root);
+    return this.logWithKey(projectLogKey(root), root);
+  }
+
+  // The policy's own events always go here: they belong to this install, and a window with no folder has no project log (SECURITY.md).
+  private installLog(): DecisionLog {
+    return this.logWithKey(INSTALL_LOG_KEY);
+  }
+
+  private logWithKey(key: string, projectRoot?: string): DecisionLog {
     let log = this.logs.get(key);
     if (log === undefined) {
       log = new DecisionLog({
         globalStorageDir: this.options.globalStorageDir,
         projectKey: key,
-        projectRoot: root,
+        ...(projectRoot === undefined ? {} : { projectRoot }),
         onWriteFailure: (message) => { try { this.options.onProblem?.(message); } catch { /* the report never fails a decision */ } }
       });
       this.logs.set(key, log);
@@ -184,10 +192,9 @@ export class GateHost {
     return result.state;
   }
 
-  // The bundle's own events go to the open project's log as `policy.*` records, so a failed-closed start is on the record with its reason.
+  // The bundle's own events are per install: they go to the install-level log in global storage whether or not a folder is open, and also to the open
+  // project's log when there is one, as `policy.*` records, so a failed-closed start is on the record with its reason.
   private announce(event: BundleEvent | undefined, state: BundleState): void {
-    const root = this.options.projectRoot;
-    if (root === undefined) return;
     try {
       const failed = state.state === 'failed-closed';
       const name = event ?? 'policy.load';
@@ -208,7 +215,13 @@ export class GateHost {
         ...(reason === undefined ? {} : { reason }),
         bundleHash: state.state === 'valid' ? state.hash : ''
       });
-      void this.logFor(root).append({ ...record, api: { ...record.api, operation: name } });
+      const named = { ...record, api: { ...record.api, operation: name } };
+      const root = this.options.projectRoot;
+      // Each destination is tried on its own, so a project log that cannot be set up never costs the install its record.
+      const targets: Array<() => DecisionLog> = [() => this.installLog(), ...(root === undefined ? [] : [() => this.logFor(root)])];
+      for (const target of targets) {
+        try { void target().append(named); } catch { /* a record that cannot be kept never changes the state */ }
+      }
     } catch {
       // A record that cannot be kept never changes the state.
     }

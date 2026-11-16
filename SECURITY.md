@@ -156,7 +156,12 @@ is what that file and the records beside it do in this version.
   was asked for, what was decided and why, never file contents, and secrets are
   removed from it. Records are not synced and are not put in your project, in
   the chat history or in the project's synced state. Each project's log rolls
-  over at about 5 MB and keeps the last four older files.
+  over at about 5 MB and keeps the last four older files. What happens to the
+  policy itself (it was created, renewed, reset, loaded, or could not be
+  trusted) belongs to this install and not to a project, so it is written to
+  a separate log for the install in the same storage, whether or not a folder
+  is open, and also to the open project's record when there is one. That log
+  rolls over the same way.
 - **What this version does not use yet.** The file also holds scales,
   clearances and routing tiers. This version stores and shows them and does not
   use them yet.

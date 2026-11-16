@@ -1,14 +1,14 @@
 // A window with no folder open (GATE-04, GATE-07, OFFL-02): the policy is per install and lives in global storage, so a run is decided by the real one there
 // too. Only the project's decision log is missing. A path with no host at all is failed closed instead (gateEnumeration.test.ts).
 import assert from 'node:assert/strict';
-import { readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { decide } from '../domain/gate/decide';
 import { GateHost, unattendedRuntimeFor } from '../gate/host';
-import { DECISIONS_DIR } from '../gate/decisionLog';
+import { DECISIONS_DIR, INSTALL_LOG_KEY } from '../gate/decisionLog';
 import { gateDir } from '../gate/bundleStore';
 import { MemorySecrets } from './helpers/teamHarness';
 
@@ -39,7 +39,10 @@ test('a run nobody watches in a window with no folder is decided by the install\
     assert.equal(decided.outcome, 'allow');
   }
   await host.flush();
-  assert.deepEqual(readdirSync(gateDir(storage)).filter((name) => name === DECISIONS_DIR), [], 'no project, so no project log was made');
+  // Changed on purpose (PR #70 second review, item 4): the policy's own events are per install, so the install-level log exists even with no folder open;
+  // what must not exist is a project log, and the decisions of these runs are not written anywhere.
+  const logs = existsSync(path.join(gateDir(storage), DECISIONS_DIR)) ? readdirSync(path.join(gateDir(storage), DECISIONS_DIR)) : [];
+  assert.deepEqual(logs, [`${INSTALL_LOG_KEY}.jsonl`], 'no project, so no project log was made; only the install log holds the policy\'s own events');
 });
 
 test('a bundle that failed to load fails a window with no folder closed too, with its own sentence', async () => {
