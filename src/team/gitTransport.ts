@@ -439,8 +439,11 @@ export class GitTransport<S> implements CoordinationTransport<S> {
   // An ssh command git itself would apply to the mirror (the user's global config) is left to git. Without either, a non-interactive
   // command keeps a passphrase prompt from hanging.
   private async networkEnv(): Promise<Record<string, string>> {
-    const inherited = process.env.GIT_SSH_COMMAND;
-    if (inherited !== undefined && inherited !== '') return {};
+    // 0.4.25: GIT_SSH counts as inherited too; setting the default GIT_SSH_COMMAND would otherwise override it.
+    for (const name of ['GIT_SSH_COMMAND', 'GIT_SSH']) {
+      const inherited = process.env[name];
+      if (inherited !== undefined && inherited !== '') return {};
+    }
     const configured = await this.mirrorGit(['config', '--get', 'core.sshCommand']);
     if (configured.code === 0 && gitText(configured) !== '') return {};
     return { GIT_SSH_COMMAND: DEFAULT_SSH_COMMAND };

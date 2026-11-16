@@ -13,12 +13,15 @@
   belongs to: if `team.json` later names a different team or owner key, Team Mode pauses until you
   choose **Trust this new team** and confirm. For now a team holds only its owner: inviting
   teammates arrives in a later release. See "Team Mode (preview)" in the README.
-- **Team Mode checks the remote address git will really use.** Team Mode contacts only ssh, git,
-  https, http and file addresses or a local path. A `url.<base>.insteadOf` rule in the project's
-  git config could rewrite an allowed address into one of git's command helpers, which runs a
-  program. Enable Team Mode and **Share with my team** now check the address after git applies such
-  rules, and refuse before anything is contacted. They also always use git's own upload and
-  receive programs, so a program named in the project's git config for those steps is never run.
+- **Team Mode ignores programs named in the project's git config.** A cloned project carries its
+  own git settings, and some of them make git run a program or send extra data when it talks to the
+  remote: an ssh command, a credential helper, a proxy, upload and receive programs, extra HTTP
+  headers, and rules that rewrite the remote address into one of git's command helpers. Enable Team
+  Mode and **Share with my team** now check the remote address as git resolves it (Team Mode
+  contacts only ssh, git, https, http and file addresses or a local path), then reach the remote
+  without the project's git settings, so none of those run. Your own global git settings, such as
+  your credential helper and ssh command, still apply, and so does an ssh command set in your
+  environment.
 - **A replaced signing key is never made active again.** If a key change on this computer was
   recorded but its new key was lost (for example after a crash), the old key could quietly become
   the active key again. Team Mode now keeps the old key aside, archives the key history (it is never

@@ -2,7 +2,9 @@
 import assert from 'node:assert/strict';
 import { createHash, createPrivateKey, createPublicKey, randomBytes } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import * as http from 'node:http';
+import * as net from 'node:net';
 import * as fs from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
@@ -639,7 +641,8 @@ test('pushCodeBranch refuses option-like names and strips credentials from a fai
     assert.equal((await pushCodeBranch(root, '--upload-pack=x', 'main')).ok, false);
     assert.equal((await pushCodeBranch(root, 'origin', 'no-such-branch')).ok, false);
     const password = `pw${randomBytes(8).toString('hex')}`;
-    const git = faultRunner(runGit, [{ when: (args) => args[0] === 'push', replace: () => fakeGitResult(1, '', `fatal: unable to access 'https://someone:${password}@example.invalid/team.git/': refused`) }]);
+    // The push runs from a clean git folder (0.4.25), so its arguments start with --git-dir.
+    const git = faultRunner(runGit, [{ when: (args) => args.includes('push'), replace: () => fakeGitResult(1, '', `fatal: unable to access 'https://someone:${password}@example.invalid/team.git/': refused`) }]);
     const failed = await pushCodeBranch(root, 'origin', 'main', git);
     assert.equal(failed.ok, false);
     const message = failed.ok ? '' : failed.message;
@@ -956,6 +959,136 @@ test('a project config that points uploadpack and receivepack at its own program
     assert.equal(pushed.ok, true, pushed.ok ? '' : pushed.message);
     assert.equal(existsSync(marker), false, 'the project\'s upload-pack or receive-pack program ran');
   });
+});
+
+// ---- Enable and Push never use the project's own git config to reach the remote (0.4.25) ----
+
+// A cloned repository carries its own .git/config, and several of its settings make git run a program or send something on the person's behalf:
+// core.sshCommand, credential.helper, core.gitProxy, the uploadpack and receivepack programs, http.<url>.extraHeader, and an insteadOf rule turning
+// the address into a command helper. Enable and Push resolve and check the address in the project, then reach the remote from a clean git folder
+// that does not read that config, so none of those run. An ssh command inherited from the environment is still honoured.
+
+/** A script that notes each run in `marker` and fails, standing in for a program the project's config names. */
+function markerScript(dir: string, name: string, marker: string): string {
+  const file = path.join(dir, name);
+  writeFileSync(file, `#!/bin/sh\necho "${name} $*" >> '${marker}'\nexit 1\n`, { mode: 0o755 });
+  return file;
+}
+
+async function closedPort(): Promise<number> {
+  const server = net.createServer();
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const { port } = server.address() as net.AddressInfo;
+  await new Promise<void>((resolve) => server.close(() => resolve()));
+  return port;
+}
+
+/** A local HTTP server that records every request's headers and answers each with `status`. */
+async function recordingServer(status: number): Promise<{ url: string; headers: http.IncomingHttpHeaders[]; close(): Promise<void> }> {
+  const headers: http.IncomingHttpHeaders[] = [];
+  const server = http.createServer((request, response) => {
+    headers.push(request.headers);
+    response.writeHead(status, status === 401 ? { 'WWW-Authenticate': 'Basic realm="team"' } : {});
+    response.end();
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const { port } = server.address() as net.AddressInfo;
+  return { url: `http://127.0.0.1:${port}/team.git`, headers, close: () => new Promise<void>((resolve) => server.close(() => resolve())) };
+}
+
+async function enableAndPush(fixture: TeamFixture): Promise<{ enabled: Awaited<ReturnType<typeof enableTeamMode>>; pushed: Awaited<ReturnType<typeof pushCodeBranch>> }> {
+  const root = fixture.clones.a as string;
+  const enabled = await enableTeamMode(inputFor(fixture, 'a', new MemorySecrets()));
+  const pushed = await pushCodeBranch(root, 'origin', 'main');
+  return { enabled, pushed };
+}
+
+test('core.sshCommand, credential.helper and core.gitProxy in the project config never run in Enable or Push', async () => {
+  await withSshEnv(undefined, async () => {
+    await withFixture(['a'], async (fixture) => {
+      const root = fixture.clones.a as string;
+      const marker = path.join(fixture.root, 'project-program-ran');
+      const server = await recordingServer(401);
+      try {
+        const cases: Array<{ what: string; url: string; config: [string, string][] }> = [
+          { what: 'core.sshCommand', url: `ssh://127.0.0.1:${await closedPort()}/team.git`, config: [['core.sshCommand', markerScript(fixture.root, 'ssh.sh', marker)]] },
+          { what: 'credential.helper', url: server.url, config: [['credential.helper', `!${markerScript(fixture.root, 'credential.sh', marker)}`]] },
+          { what: 'core.gitProxy', url: `git://127.0.0.1:${await closedPort()}/team.git`, config: [['core.gitProxy', markerScript(fixture.root, 'proxy.sh', marker)]] }
+        ];
+        for (const { what, url, config } of cases) {
+          gitIn(root, ['remote', 'set-url', 'origin', url]);
+          for (const [key, value] of config) gitIn(root, ['config', key, value]);
+          const { enabled, pushed } = await enableAndPush(fixture);
+          assert.equal(enabled.ok, false, `${what}: nothing answers, so Enable stops`);
+          assert.equal(pushed.ok, false, `${what}: and Push fails`);
+          assert.equal(existsSync(marker), false, `${what}: the project's program ran: ${existsSync(marker) ? readFileSync(marker, 'utf8') : ''}`);
+          for (const [key] of config) gitIn(root, ['config', '--unset-all', key]);
+        }
+        assert.ok(server.headers.length > 0, 'the HTTP remote was asked, so the credential case reached the network');
+      } finally {
+        await server.close();
+      }
+    });
+  });
+});
+
+test('an http.<url>.extraHeader in the project config is never sent by Enable or Push', async () => {
+  await withFixture(['a'], async (fixture) => {
+    const root = fixture.clones.a as string;
+    const server = await recordingServer(404);
+    try {
+      gitIn(root, ['remote', 'set-url', 'origin', server.url]);
+      gitIn(root, ['config', `http.${server.url}.extraHeader`, 'X-Near-Ai-Canary: project-header']);
+      const { enabled, pushed } = await enableAndPush(fixture);
+      assert.equal(enabled.ok, false);
+      assert.equal(pushed.ok, false);
+      assert.ok(server.headers.length >= 2, 'both Enable and Push asked the remote');
+      assert.deepEqual(server.headers.filter((headers) => headers['x-near-ai-canary'] !== undefined), [], 'the project header was sent');
+    } finally {
+      await server.close();
+    }
+  });
+});
+
+test('an insteadOf rewrite to a command helper never runs, even when the project config allows the ext protocol', async () => {
+  await withFixture(['a'], async (fixture) => {
+    const root = fixture.clones.a as string;
+    const marker = path.join(fixture.root, 'project-program-ran');
+    const helper = markerScript(fixture.root, 'ext.sh', marker);
+    gitIn(root, ['remote', 'set-url', 'origin', 'https://example.invalid/team.git']);
+    gitIn(root, ['config', 'protocol.ext.allow', 'always']);
+    gitIn(root, ['config', `url.ext::${helper} .insteadOf`, 'https://example.invalid/']);
+    const { enabled, pushed } = await enableAndPush(fixture);
+    assert.equal(enabled.ok ? undefined : enabled.code, 'remote-refused');
+    assert.equal(pushed.ok, false);
+    assert.equal(existsSync(marker), false);
+  });
+});
+
+test('an ssh command inherited from the environment is still used, ahead of the project config', async () => {
+  for (const variable of ['GIT_SSH_COMMAND', 'GIT_SSH']) {
+    await withFixture(['a'], async (fixture) => {
+      const root = fixture.clones.a as string;
+      const marker = path.join(fixture.root, 'project-program-ran');
+      const inherited = path.join(fixture.root, 'inherited-ran');
+      gitIn(root, ['remote', 'set-url', 'origin', `ssh://127.0.0.1:${await closedPort()}/team.git`]);
+      gitIn(root, ['config', 'core.sshCommand', markerScript(fixture.root, 'project-ssh.sh', marker)]);
+      const own = markerScript(fixture.root, 'inherited-ssh.sh', inherited);
+      const saved = { command: process.env.GIT_SSH_COMMAND, ssh: process.env.GIT_SSH };
+      delete process.env.GIT_SSH_COMMAND;
+      delete process.env.GIT_SSH;
+      process.env[variable] = own;
+      try {
+        const { enabled } = await enableAndPush(fixture);
+        assert.equal(enabled.ok, false);
+      } finally {
+        if (saved.command === undefined) delete process.env.GIT_SSH_COMMAND; else process.env.GIT_SSH_COMMAND = saved.command;
+        if (saved.ssh === undefined) delete process.env.GIT_SSH; else process.env.GIT_SSH = saved.ssh;
+      }
+      assert.equal(existsSync(inherited), true, `${variable}: the inherited ssh command was used`);
+      assert.equal(existsSync(marker), false, `${variable}: the project's ssh command was not`);
+    });
+  }
 });
 
 // ---- Preconditions are checked once when the caller passes its result ----

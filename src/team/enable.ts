@@ -11,7 +11,8 @@ import { validateName } from '../domain/team/validate';
 import type { SecretStorageLike } from '../services/auth';
 import { teamMaterializer } from '../domain/team/materialize';
 import { buildGenesisEvents } from './eventLog';
-import { DEFAULT_COORDINATION_REF, GitTransport, isContactableRemoteAddress } from './gitTransport';
+import { cleanLsRemote, cleanPush, resolveCheckedRemote } from './cleanRemote';
+import { DEFAULT_COORDINATION_REF, GitTransport } from './gitTransport';
 import { forgetCreatedDeviceIdentity, identityDir, loadOrCreateDeviceIdentity, newMemberId, newTeamId } from './identity';
 import { GitNotFoundError, gitText, redactGitMessage, runGit } from './runGit';
 import type { GitResult, GitRunner } from './runGit';
@@ -62,11 +63,8 @@ type Preconditions = EnablePreconditionsOk | { ok: false; code: EnableFailureCod
 
 const DEFAULT_REMOTE = 'origin';
 const LOCAL_TIMEOUT_MS = 30_000;
-const NETWORK_TIMEOUT_MS = 60_000;
 const COMMIT_TIMEOUT_MS = 120_000;
 const CONTROL_CHARACTERS = /[\u0000-\u001F\u007F\u2028\u2029]/;
-// The same non-interactive ssh the transport uses, so a passphrase prompt cannot hang the existence check.
-const DEFAULT_SSH_COMMAND = 'ssh -o BatchMode=yes -o ConnectTimeout=10';
 
 function fail(code: EnableFailureCode, message: string): { ok: false; code: EnableFailureCode; message: string } {
   return { ok: false, code, message };
@@ -112,41 +110,16 @@ export async function checkEnablePreconditions(projectRoot: string, remote: stri
   }
   const head = await run(['rev-parse', '--verify', '-q', 'HEAD']);
   if (head.code !== 0) return fail('no-commit', 'This repository has no commits yet. Make a first commit, then enable Team Mode.');
-  // The URL can carry credentials, so the value is discarded here; refusedRemoteAddress checks the resolved addresses without repeating them.
+  // The URL can carry credentials, so the value is discarded here; resolveCheckedRemote checks the resolved addresses without repeating them.
   const url = await run(['remote', 'get-url', remote]);
   if (url.code === 2) return fail('no-remote', `This repository has no remote named "${remote}". Add one with git remote add ${remote} <url>, then enable Team Mode.`);
   if (url.code !== 0) return fail('remote-unreachable', `Git could not read the remote "${remote}": ${gitFailureText(url)}`);
-  const refused = await refusedRemoteAddress(projectRoot, remote, git);
-  if (refused !== undefined) return fail('remote-refused', refused);
+  // 0.4.25: every address is checked as git resolves it; the network calls below then use only those checked addresses (see cleanRemote.ts).
+  const resolved = await resolveCheckedRemote(projectRoot, remote, git);
+  if (!resolved.ok) return fail('remote-refused', resolved.reason);
   const branch = await run(['symbolic-ref', '--short', '-q', 'HEAD']);
   const name = branch.code === 0 ? gitText(branch) : '';
   return name === '' ? { ok: true, projectRoot, remote } : { ok: true, projectRoot, remote, branch: name };
-}
-
-// 0.4.25: remote.<name>.uploadpack and remote.<name>.receivepack name the program git starts for ls-remote and push (run locally for a file or path
-// remote), and the project's own config can set them. The ls-remote and push below run in the project, so git's defaults are passed on the command
-// line, which git honours over any config value (checked on git 2.53; `-c remote.<name>.uploadpack=...` is not enough, as the repository's value
-// comes first). The transport's mirror never reads the project's config, so it needs nothing here.
-const UPLOAD_PACK_DEFAULT = '--upload-pack=git-upload-pack';
-const RECEIVE_PACK_DEFAULT = '--receive-pack=git-receive-pack';
-
-const REFUSED_ADDRESS_HINT = 'Team Mode uses ssh, git, https, http or file addresses, or a local path.';
-
-// 0.4.25: the address is checked as git will use it, not as the remote's url setting states it. A `url.<base>.insteadOf` or pushInsteadOf rule
-// in the project's own config can turn an allowed address into a remote helper (ext:: runs a command), and the ls-remote and push below run in
-// the project, where git applies those rules. `git remote get-url` applies them too, so every fetch and push address it reports is checked
-// (D-34, the same check GitTransport makes) before any network call. The addresses can carry credentials, so they are never repeated.
-async function refusedRemoteAddress(projectRoot: string, remote: string, git: GitRunner): Promise<string | undefined> {
-  const addresses: string[] = [];
-  for (const args of [['remote', 'get-url', '--all', remote], ['remote', 'get-url', '--push', '--all', remote]]) {
-    const result = await git(args, { cwd: projectRoot, timeoutMs: LOCAL_TIMEOUT_MS });
-    if (result.code !== 0) return `Git could not read the address of the remote "${remote}": ${gitFailureText(result)}`;
-    addresses.push(...result.stdout.toString('utf8').split('\n').map((line) => line.replace(/\r$/, '')).filter((line) => line.trim() !== ''));
-  }
-  if (addresses.length === 0 || addresses.some((address) => !isContactableRemoteAddress(address))) {
-    return `The address of the git remote named "${remote}" is not one Team Mode will contact. ${REFUSED_ADDRESS_HINT}`;
-  }
-  return undefined;
 }
 
 async function gitConfigValue(projectRoot: string, key: string, git: GitRunner): Promise<string> {
@@ -166,16 +139,6 @@ export async function enableDefaults(projectRoot: string, git: GitRunner = runGi
   };
   if (branch !== '') defaults.branch = branch;
   return defaults;
-}
-
-// Only an ssh command inherited from the environment is passed on, and it is left where it is. These git calls run in the project, so git
-// applies any core.sshCommand from its config itself; the value is never copied into the environment. Only when no ssh command is set
-// anywhere does the non-interactive default go in.
-async function networkEnv(projectRoot: string, git: GitRunner): Promise<Record<string, string>> {
-  const inherited = process.env.GIT_SSH_COMMAND;
-  if (inherited !== undefined && inherited !== '') return {};
-  if ((await gitConfigValue(projectRoot, 'core.sshCommand', git)) !== '') return {};
-  return { GIT_SSH_COMMAND: DEFAULT_SSH_COMMAND };
 }
 
 // Removes the whole team storage folder (which holds the mirror) and, only when this Enable call created it, the device key (D-22). An identity that
@@ -237,8 +200,8 @@ async function pushGenesis(args: { transport: GitTransport<TeamState>; events: T
   if (fetchThrew) {
     // The mirror could not be used for the check (for example a folder that cannot be created); ask the remote directly.
     try {
-      const probe = await git(['ls-remote', UPLOAD_PACK_DEFAULT, '--exit-code', remote, DEFAULT_COORDINATION_REF], { cwd: projectRoot, env: await networkEnv(projectRoot, git), timeoutMs: NETWORK_TIMEOUT_MS });
-      if (probe.code === 2) return { kind: 'failed', reason, detail: '' };
+      const resolved = await resolveCheckedRemote(projectRoot, remote, git);
+      if (resolved.ok && (await cleanLsRemote(git, resolved.remote, DEFAULT_COORDINATION_REF)).code === 2) return { kind: 'failed', reason, detail: '' };
     } catch (error) {
       detail = `${detail} ${describeError(error)}`;
     }
@@ -289,7 +252,11 @@ export async function enableTeamMode(input: EnableInput): Promise<EnableResult> 
   }
 
   // D-17: an existing coordination branch on the remote stops Enable before any key exists.
-  const probe = await git(['ls-remote', UPLOAD_PACK_DEFAULT, '--exit-code', remote, DEFAULT_COORDINATION_REF], { cwd: projectRoot, env: await networkEnv(projectRoot, git), timeoutMs: NETWORK_TIMEOUT_MS });
+  // The address is resolved and checked again here, since a passed precondition result may be older; the probe itself never reads the project's
+  // git config (cleanRemote.ts).
+  const resolved = await resolveCheckedRemote(projectRoot, remote, git);
+  if (!resolved.ok) return fail('remote-refused', resolved.reason);
+  const probe = await cleanLsRemote(git, resolved.remote, DEFAULT_COORDINATION_REF);
   if (probe.code === 0) return fail('exists-remotely', 'This remote already has a coordination log. Joining an existing team arrives with team invitations.');
   if (probe.code !== 2) return fail('remote-unreachable', `The remote "${remote}" could not be reached, so nothing was changed: ${gitFailureText(probe)}`);
 
@@ -375,8 +342,15 @@ export async function pushCodeBranch(projectRoot: string, remote: string, branch
   if (!REMOTE_NAME_PATTERN.test(remote)) return { ok: false, message: 'The remote name is not valid.' };
   // A branch name that starts with a dash would be read as an option, and a colon would make it a refspec: the shared ref-name rule refuses both.
   if (!isGitRefName(branch) || CONTROL_CHARACTERS.test(branch)) return { ok: false, message: 'The branch name is not valid.' };
-  const refused = await refusedRemoteAddress(projectRoot, remote, git);
-  if (refused !== undefined) return { ok: false, message: refused };
-  const result = await git(['push', RECEIVE_PACK_DEFAULT, remote, branch], { cwd: projectRoot, env: await networkEnv(projectRoot, git), timeoutMs: NETWORK_TIMEOUT_MS });
+  const resolved = await resolveCheckedRemote(projectRoot, remote, git);
+  if (!resolved.ok) return { ok: false, message: resolved.reason };
+  // 0.4.25: the branch is read in the project (a local read that runs nothing), then pushed from a clean folder that reads the project's objects
+  // through an alternate, so no setting, helper or hook from the project's git config runs (cleanRemote.ts).
+  const commit = await git(['rev-parse', '--verify', '-q', `refs/heads/${branch}^{commit}`], { cwd: projectRoot, timeoutMs: LOCAL_TIMEOUT_MS });
+  if (commit.code !== 0 || !/^[0-9a-f]{40,64}$/.test(gitText(commit))) return { ok: false, message: `There is no branch named ${branch} in this project to push.` };
+  const common = await git(['rev-parse', '--git-common-dir'], { cwd: projectRoot, timeoutMs: LOCAL_TIMEOUT_MS });
+  if (common.code !== 0 || gitText(common) === '') return { ok: false, message: `Pushing ${branch} to ${remote} failed: ${gitFailureText(common)}` };
+  const objectsDir = path.join(path.resolve(projectRoot, gitText(common)), 'objects');
+  const result = await cleanPush(git, resolved.remote, objectsDir, gitText(commit), branch);
   return result.code === 0 ? { ok: true } : { ok: false, message: `Pushing ${branch} to ${remote} failed: ${gitFailureText(result)}` };
 }
