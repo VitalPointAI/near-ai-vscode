@@ -1818,3 +1818,30 @@ test('host: the stated cost of an AI review is a true ceiling: at least the cost
   assert.equal(last(h, 'improve-result').state, 'blocked');
   assert.equal(sent.length, 0);
 });
+
+// 0.4.28 (PR #69 review): a model with no price says "cost unknown" rather than nothing; and a Cancel that came while the model was being chosen is
+// reported as cancelled even for a team too large to review, because the abort is checked before the size.
+test('host: a model with no price shows cost unknown, and Cancel while choosing a model wins over the size check', async () => {
+  const h = await harness();
+  const unpriced = fakeAi([{ id: 'z-ai/glm-5.3', privacyBoundary: 'tee', attestationSupported: true }], []);
+  h.deps.teamAi = async () => unpriced.ai;
+  await h.send({ type: 'improve-check', seq: 1, draft: improveDraft() });
+  assert.equal(last(h, 'improve-checked').ai.estimate, 'cost unknown: NEAR gives no price for this model');
+  let choose: (() => void) | undefined;
+  const chosen = new Promise<void>((resolve) => { choose = resolve; });
+  const slow = fakeAi([TEE_MODEL], []);
+  h.deps.teamAi = async () => { await chosen; return slow.ai; };
+  // Six members near the 12,000-character limit each: more than one review may send.
+  const large = { ...improveDraft(), members: Array.from({ length: 6 }, (_, index) => ({ ...improveDraft().members[0], name: `planner-${index + 1}`, instructions: `${'Plan the work carefully. '.repeat(440)}Report the plan.` })) };
+  assert.ok(parseStudioMessage({ type: 'improve-ai', seq: 2, draft: large }), 'the page may send it');
+  const pending = h.send({ type: 'improve-ai', seq: 2, draft: large });
+  await h.send({ type: 'improve-cancel', seq: 2 });
+  choose!();
+  await pending;
+  assert.deepEqual([last(h, 'improve-result').state, last(h, 'improve-result').reason], ['cancelled', 'Cancelled. Nothing changed.']);
+  assert.equal(slow.sent.length, 0, 'nothing was sent');
+  // Not cancelled, the same team is refused as too large.
+  h.deps.teamAi = async () => slow.ai;
+  await h.send({ type: 'improve-ai', seq: 3, draft: large });
+  assert.deepEqual([last(h, 'improve-result').state, last(h, 'improve-result').reason], ['blocked', 'This team is too large to review in one go. Review one member at a time.']);
+});

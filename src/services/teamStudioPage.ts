@@ -529,7 +529,8 @@ const MESSAGE_OVERHEAD_TOKENS = 200;
 function estimateFor(ai: TeamAiDeps, model: string): { estimate?: string } {
   const info = ai.models.find((candidate) => candidate.id === model);
   if (info?.privacyBoundary === 'local') return { estimate: 'free: it runs on this computer' };
-  if (info?.inputPricePerMillion === undefined && info?.outputPricePerMillion === undefined) return {};
+  // 0.4.28 (PR #69 review): a model with no price information says so, rather than leaving the cost out as if it were free.
+  if (info?.inputPricePerMillion === undefined && info?.outputPricePerMillion === undefined) return { estimate: 'cost unknown: NEAR gives no price for this model' };
   const inputTokens = Buffer.byteLength(REFINE_PROMPT, 'utf8') + MAX_REFINE_BYTES + MESSAGE_OVERHEAD_TOKENS;
   const cost = (inputTokens * (info.inputPricePerMillion ?? 0) + REFINE_MAX_TOKENS * (info.outputPricePerMillion ?? 0)) / 1_000_000;
   // Rounded up, so the figure shown is never below the ceiling.
@@ -805,10 +806,12 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
         if (!plan.ok || !ai) { result('blocked', plan.ok ? 'No model is available here.' : plan.reason); return; }
         if (!input || !context) await load();
         const prompt = refinePrompt(draft, { findings, tools: context!.tools.map((tool) => ({ name: tool.name, description: tool.description })), skipped: plan.skipped, ...(message.member ? { member: message.member } : {}), untrusted: await untrustedFor(draft, message.id) });
-        // The cap holds for every review (a one-member one too), so the cost ceiling shown before asking is a true ceiling.
-        if (Buffer.byteLength(prompt, 'utf8') > MAX_REFINE_BYTES) { result('blocked', message.member ? `${message.member}'s instructions are too long to review in one go. Shorten them first.` : 'This team is too large to review in one go. Review one member at a time.'); return; }
+        // A Cancel (or a newer request) that came while the model was being chosen wins over every later check (0.4.28, PR #69 review): the person is
+        // told it was cancelled, not that the team is too large.
         if (refine !== current) return;
         if (controller.signal.aborted) { result('cancelled', 'Cancelled. Nothing changed.'); return; }
+        // The cap holds for every review (a one-member one too), so the cost ceiling shown before asking is a true ceiling.
+        if (Buffer.byteLength(prompt, 'utf8') > MAX_REFINE_BYTES) { result('blocked', message.member ? `${message.member}'s instructions are too long to review in one go. Shorten them first.` : 'This team is too large to review in one go. Review one member at a time.'); return; }
         post({ type: 'improve-state', seq, state: 'requesting', model: plan.model, private: plan.private });
         let reply: Awaited<ReturnType<typeof teamModelCall>>;
         try {

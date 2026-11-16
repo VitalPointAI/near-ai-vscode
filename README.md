@@ -508,9 +508,11 @@ until it runs out aren't shown.
   removes only the team's line, and you remove a member's line yourself. A
   `privacy: tee` or `privacy: local` line you wrote by hand also keeps the
   team private; the studio shows it and leaves it alone. A
-  team whose members are all private counts as private too, and in a project
-  with a knowledge base every team does (including one you are drafting with
-  AI). Team Studio sends a
+  team whose members are all private counts as private too. In a project
+  with a knowledge base, Team Studio also treats every team as private when
+  it asks AI about it (including one you are drafting with AI), and will not
+  save a member on a model forwarded outside NEAR's TEE; the team is not
+  marked private for runs unless you tick the box. Team Studio sends a
   private team only to a private model: a NEAR TEE model on NEAR AI Cloud's
   own endpoint whose attestation NEAR reports as supported or verified (a
   failed, unverified or unreported attestation does not count), or a model on
@@ -547,7 +549,8 @@ until it runs out aren't shown.
   so; any other team any model your settings allow. TEE-only mode, the daily
   spend limit and Emergency stop apply as they do in chat, and when no model
   is allowed the review says why and the local check still works. The panel
-  names the model and the most the review can cost before you ask. An
+  names the model and the most the review can cost before you ask, or says
+  the cost is unknown when NEAR gives no price for that model. An
   imported team you have not approved is reviewed as untrusted text. The
   model may add its own rating of the team before and after its suggestions;
   it is shown as the model's own opinion, not a measurement. **Cancel**,
