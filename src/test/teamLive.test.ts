@@ -208,3 +208,10 @@ test('privacy: a view carries no prompt, system prompt, reply text or tool input
   walk(view);
   for (const banned of ['prompt', 'system', 'text', 'input', 'output', 'instructions']) assert.equal(keys.has(banned), false, banned);
 });
+
+test('a workflow that works with a team is led by the workflow, with the team\'s members on hand', () => {
+  const view = buildTeamLive({ runId: 'run-1', team: TEAM, stats: [lead({ agent: '/gsd-execute-phase' }), stat('writer-bbb111', 'writer')] });
+  assert.deepEqual([view.nodes[0].name, view.nodes[0].role], ['/gsd-execute-phase', undefined]);
+  assert.equal(view.nodes.find((node) => node.id === 'm:writer')!.state, 'working');
+  assert.equal(buildTeamLive({ runId: 'run-1', team: TEAM, stats: [lead()] }).nodes[0].name, 'Research');
+});

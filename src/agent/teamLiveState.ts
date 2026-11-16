@@ -203,7 +203,8 @@ export function buildTeamLive(input: { runId: string; stats: LiveAgentStat[]; te
   const nodes: LiveNode[] = [];
   const leadState = main ? agentState(main) : 'interrupted';
   const lead: LiveNode = {
-    id: 'lead', kind: 'lead', name: graph ? graph.team.name : input.title ?? main?.agent ?? 'Lead', ...(graph ? { role: 'Lead' } : {}),
+    // A /team run's lead is the team's lead; a workflow that only works with a team (its members on hand) is led by the workflow itself.
+    id: 'lead', kind: 'lead', name: graph && (!main || main.agent.startsWith('team:')) ? graph.team.name : main?.agent ?? input.title ?? 'Lead', ...(graph && (!main || main.agent.startsWith('team:')) ? { role: 'Lead' } : {}),
     ...describe(main ? [main] : [], (stat) => agentState(stat)),
     count: main ? 1 : 0, instances: main ? [instance(main, leadState, 'lead', false)] : []
   };
