@@ -78,7 +78,7 @@ test('a storage folder that cannot be used (a file where the folder should be) s
   assert.equal(state.state, 'failed-closed');
   assert.equal(messages.length, 1);
   assert.doesNotMatch(messages[0] ?? '', /ENOTDIR|\//, 'the message is plain words, not an error code or a path');
-  const runtime = (host as NonNullable<typeof host>).runtimeFor({ root: base, actor: { kind: 'agent', sessionId: 's' }, presence: 'person', context: 'interactive', floorMode: 'shadow' });
+  const runtime = await (host as NonNullable<typeof host>).runtimeFor({ root: base, actor: { kind: 'agent', sessionId: 's' }, presence: 'person', context: 'interactive', floorMode: 'shadow' });
   assert.equal(runtime.bundleState().state, 'failed-closed');
 });
 

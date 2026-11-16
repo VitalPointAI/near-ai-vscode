@@ -505,12 +505,13 @@ const REASON_PRODUCERS: Record<BundleFailureReason, (signer: PayloadSigner) => B
   },
   'clock-behind': (signer) => check(signedDefault(signer, NOW + DAY), signer),
   'no-identity': () => failedClosed('no-identity'),
-  'identity-unavailable': () => failedClosed('identity-unavailable')
+  'identity-unavailable': () => failedClosed('identity-unavailable'),
+  'not-loaded': () => failedClosed('not-loaded')
 };
 
 test('every failure reason has a producer in this file, so none is untested', () => {
   assert.deepEqual(Object.keys(REASON_PRODUCERS).sort(), Object.keys(BUNDLE_FAILURES).sort());
-  assert.equal(Object.keys(BUNDLE_FAILURES).length, 20);
+  assert.equal(Object.keys(BUNDLE_FAILURES).length, 21);
 });
 
 for (const reason of Object.keys(BUNDLE_FAILURES) as BundleFailureReason[]) {
@@ -525,6 +526,8 @@ for (const reason of Object.keys(BUNDLE_FAILURES) as BundleFailureReason[]) {
     assert.ok(!state.sentence.includes('\n'));
     if (reason === 'identity-unavailable') {
       assert.equal(state.sentence, 'NEAR AI could not save its signing key on this computer, so only reading and planning are allowed until it can.');
+    } else if (reason === 'not-loaded') {
+      assert.match(state.sentence, /Start the run again in a moment, or reload the window\.$/);
     } else if (reason === 'clock-behind') {
       assert.match(state.sentence, /Set the clock to the right time, then reload the window\.$/);
     } else if (reason === 'unsupported-version' || reason === 'vocabulary-unknown') {

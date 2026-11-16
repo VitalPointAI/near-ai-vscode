@@ -519,7 +519,8 @@ export const BUNDLE_FAILURES = {
   'signer-mismatch': `Your policy file names a different signer than the one that signed it. ${RESET_FIX}`,
   'clock-behind': 'This computer\'s clock is earlier than the time your policy file was signed. Set the clock to the right time, then reload the window.',
   'no-identity': `NEAR AI has no signing key on this computer yet, so there is no policy to check. ${RESET_FIX}`,
-  'identity-unavailable': 'NEAR AI could not save its signing key on this computer, so only reading and planning are allowed until it can.'
+  'identity-unavailable': 'NEAR AI could not save its signing key on this computer, so only reading and planning are allowed until it can.',
+  'not-loaded': 'NEAR AI had not finished loading your policy when this run started, so only reading and planning are allowed for it. Start the run again in a moment, or reload the window.'
 } as const;
 export type BundleFailureReason = keyof typeof BUNDLE_FAILURES;
 

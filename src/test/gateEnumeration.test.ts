@@ -139,7 +139,7 @@ test('tracer: activation starts the gate, and a chat run\'s Write is decided in 
   let seenWhenAsked: DecisionRecord[] = [];
   let existedWhenAsked: boolean | undefined;
   const setup = runWith(root, [{ calls: [call('w1', 'Write', { file_path: 'out.md', content: 'hello' })] }, { text: 'Written.' }], {
-    gate: started.host.runtimeFor({ root, actor: { kind: 'agent', sessionId: 'conv-1', agentId: 'main-1', agentLabel: 'agent' }, presence: 'person', context: 'interactive', floorMode: 'shadow' }),
+    gate: await started.host.runtimeFor({ root, actor: { kind: 'agent', sessionId: 'conv-1', agentId: 'main-1', agentLabel: 'agent' }, presence: 'person', context: 'interactive', floorMode: 'shadow' }),
     answer: async () => {
       // The card is being shown: the record of the question must already be on disk, and the file must not exist yet.
       seenWhenAsked = await logOf(started, root);
@@ -182,7 +182,7 @@ test('a changed bundle file fails closed: a Write is refused with the bundle\'s 
   const setup = runWith(root, [
     { calls: [call('w1', 'Write', { file_path: 'out.md', content: 'nope' }), call('r1', 'Read', { file_path: 'a.ts' })] },
     { text: 'ok' }
-  ], { gate: second.host.runtimeFor({ root, actor: { kind: 'agent', sessionId: 'conv-2', agentId: 'main-2' }, presence: 'person', context: 'interactive', floorMode: 'shadow' }), mode: 'fully-autonomous' });
+  ], { gate: await second.host.runtimeFor({ root, actor: { kind: 'agent', sessionId: 'conv-2', agentId: 'main-2' }, presence: 'person', context: 'interactive', floorMode: 'shadow' }), mode: 'fully-autonomous' });
   try {
     await go(setup);
   } finally {
@@ -200,9 +200,9 @@ test('a changed bundle file fails closed: a Write is refused with the bundle\'s 
 test('with a valid bundle the gate changes no decision: Edit asks in approve-risky, the same call runs unasked in mostly-autonomous, a Read never asks', async () => {
   const started = await startedHost();
   const root = await project();
-  const runtime = (): GateRuntime => started.host.runtimeFor({ root, actor: { kind: 'agent', sessionId: 'c', agentId: 'm' }, presence: 'person', context: 'interactive', floorMode: 'shadow' });
+  const runtime = (): Promise<GateRuntime> => started.host.runtimeFor({ root, actor: { kind: 'agent', sessionId: 'c', agentId: 'm' }, presence: 'person', context: 'interactive', floorMode: 'shadow' });
   const edit = (id: string): ToolCall => call(id, 'Edit', { file_path: 'a.ts', old_string: 'value = 1', new_string: 'value = 2' });
-  const asking = runWith(root, [{ calls: [call('r1', 'Read', { file_path: 'a.ts' }), edit('e1')] }, { text: 'done' }], { gate: runtime() });
+  const asking = runWith(root, [{ calls: [call('r1', 'Read', { file_path: 'a.ts' }), edit('e1')] }, { text: 'done' }], { gate: await runtime() });
   try {
     await go(asking);
   } finally {
@@ -210,7 +210,7 @@ test('with a valid bundle the gate changes no decision: Edit asks in approve-ris
   }
   assert.deepEqual(asking.approvals.map((request) => request.callId), ['e1'], 'only the edit asked');
   assert.match(await readFile(path.join(root, 'a.ts'), 'utf8'), /value = 2/);
-  const quiet = runWith(root, [{ calls: [call('r2', 'Read', { file_path: 'a.ts' })] }, { calls: [edit('e2')] }, { text: 'done' }], { gate: runtime(), mode: 'mostly-autonomous' });
+  const quiet = runWith(root, [{ calls: [call('r2', 'Read', { file_path: 'a.ts' })] }, { calls: [edit('e2')] }, { text: 'done' }], { gate: await runtime(), mode: 'mostly-autonomous' });
   try {
     await writeFile(path.join(root, 'a.ts'), 'export const value = 1;\n');
     await go(quiet);
@@ -228,7 +228,7 @@ test('a Write named by an absolute path inside the project is judged as that pro
   const root = await project();
   const hooks = path.join(root, '.git', 'hooks');
   const setup = runWith(root, [{ calls: [call('w1', 'Write', { file_path: path.join(hooks, 'pre-commit'), content: '#!/bin/sh\n' })] }, { text: 'ok' }], {
-    gate: started.host.runtimeFor({ root, actor: { kind: 'agent', sessionId: 'c', agentId: 'm' }, presence: 'person', context: 'interactive', floorMode: 'shadow' }),
+    gate: await started.host.runtimeFor({ root, actor: { kind: 'agent', sessionId: 'c', agentId: 'm' }, presence: 'person', context: 'interactive', floorMode: 'shadow' }),
     mode: 'fully-autonomous'
   });
   try {
@@ -317,9 +317,9 @@ test('every rule id a settings answer is given is a rule id the gate can record'
 test('a card answered allow gives asked then approved for the same call id; answered deny gives asked then denied and the call does not run', async () => {
   const started = await startedHost();
   const root = await project();
-  const runtime = (): GateRuntime => started.host.runtimeFor({ root, actor: { kind: 'agent', sessionId: 'c', agentId: 'm' }, presence: 'person', context: 'interactive', floorMode: 'shadow' });
-  const allowed = runWith(root, [{ calls: [call('a1', 'Write', { file_path: 'yes.md', content: 'y' })] }, { text: 'ok' }], { gate: runtime(), answer: () => ({ decision: 'allow' }) });
-  const denied = runWith(root, [{ calls: [call('d1', 'Write', { file_path: 'no.md', content: 'n' })] }, { text: 'ok' }], { gate: runtime(), answer: () => ({ decision: 'deny' }) });
+  const runtime = (): Promise<GateRuntime> => started.host.runtimeFor({ root, actor: { kind: 'agent', sessionId: 'c', agentId: 'm' }, presence: 'person', context: 'interactive', floorMode: 'shadow' });
+  const allowed = runWith(root, [{ calls: [call('a1', 'Write', { file_path: 'yes.md', content: 'y' })] }, { text: 'ok' }], { gate: await runtime(), answer: () => ({ decision: 'allow' }) });
+  const denied = runWith(root, [{ calls: [call('d1', 'Write', { file_path: 'no.md', content: 'n' })] }, { text: 'ok' }], { gate: await runtime(), answer: () => ({ decision: 'deny' }) });
   try {
     await go(allowed);
     await go(denied);
@@ -339,7 +339,7 @@ test('if the emergency stop is switched on between the card and the answer, an a
   const root = await project();
   let setup: RunSetup | undefined;
   setup = runWith(root, [{ calls: [call('w1', 'Write', { file_path: 'late.md', content: 'x' })] }, { text: 'ok' }], {
-    gate: started.host.runtimeFor({ root, actor: { kind: 'agent', sessionId: 'c', agentId: 'm' }, presence: 'person', context: 'interactive', floorMode: 'shadow' }),
+    gate: await started.host.runtimeFor({ root, actor: { kind: 'agent', sessionId: 'c', agentId: 'm' }, presence: 'person', context: 'interactive', floorMode: 'shadow' }),
     answer: () => { (setup as RunSetup).policy.emergencyStop = true; return { decision: 'allow' }; }
   });
   try {
@@ -356,7 +356,7 @@ test('if the emergency stop is switched on between the card and the answer, an a
 test('if the bundle fails between the card and the answer, an allow is re-checked and refused with the bundle\'s sentence', async () => {
   const root = await project();
   const fresh = await startedHost();
-  const live = fresh.host.runtimeFor({ root, actor: { kind: 'agent', sessionId: 'c', agentId: 'm' }, presence: 'person', context: 'interactive', floorMode: 'shadow' });
+  const live = await fresh.host.runtimeFor({ root, actor: { kind: 'agent', sessionId: 'c', agentId: 'm' }, presence: 'person', context: 'interactive', floorMode: 'shadow' });
   const valid = live.bundleState();
   let state: BundleState = valid;
   const gate: GateRuntime = { ...live, bundleState: () => state };
@@ -439,7 +439,7 @@ test('in a batch of concurrent lookups each call gets its own decision before it
 
 class RecordingHost extends GateHost {
   public readonly requests: RuntimeRequest[] = [];
-  public override runtimeFor(request: RuntimeRequest): GateRuntime {
+  public override runtimeFor(request: RuntimeRequest): Promise<GateRuntime> {
     this.requests.push(request);
     return super.runtimeFor(request);
   }
@@ -650,7 +650,7 @@ test('with a host runtime passed in, a benchmark run\'s decisions land in the ho
   const started = await startedHost();
   const root = await project();
   const logged = await mkdtemp(path.join(tmpdir(), 'near-ai-bench-root-'));
-  const gate = started.host.runtimeFor({ root, actor: { kind: 'agent', sessionId: 'bench-1', agentLabel: 'benchmark' }, presence: 'none', context: 'unattended', floorMode: 'shadow' });
+  const gate = await started.host.runtimeFor({ root, actor: { kind: 'agent', sessionId: 'bench-1', agentLabel: 'benchmark' }, presence: 'none', context: 'unattended', floorMode: 'shadow' });
   await runAgentInFolder(benchmarkClient([{ calls: [call('r1', 'Read', { file_path: 'a.ts' }), call('w1', 'Write', { file_path: 'made.md', content: 'x' })] }, { text: 'done' }]), 'm', logged, 'go', { maxTurns: 4, rules: DEFAULT_RULES, gate });
   const records = await logOf(started, root);
   assert.deepEqual(records.map((record) => [callIdOf(record), outcomeOf(record), ruleOf(record)]), [['r1', 'allowed', 'settings.read-plan'], ['w1', 'allowed', 'settings.mode.edits']]);
@@ -666,7 +666,7 @@ test('a comparison passes each task run its own gate, and the decisions reach th
   await runComparison({
     runId: 'run-gate', plan: planComparison(['m1'], tasks, 1, 'rerun', new Map()), tasks, runsPerTask: 1, clientFor: () => benchmarkClient([{ calls: [call('c1', 'Read', { file_path: 'slug.js' })] }, { text: 'Done.' }]),
     rules: DEFAULT_RULES, emergencyStopped: () => false, signal: new AbortController().signal, onRow: (row) => { rows.push(row); },
-    gateFor: (run) => { made.push(`${run.model}/${run.task}`); return started.host.runtimeFor({ root, actor: { kind: 'agent', sessionId: 'compare-1' }, presence: 'none', context: 'unattended', floorMode: 'shadow' }); }
+    gateFor: async (run) => { made.push(`${run.model}/${run.task}`); return await started.host.runtimeFor({ root, actor: { kind: 'agent', sessionId: 'compare-1' }, presence: 'none', context: 'unattended', floorMode: 'shadow' }); }
   });
   assert.deepEqual(made, ['m1/implement']);
   assert.equal(rows.length, 1);
@@ -682,7 +682,7 @@ test('the role suite gives each role run its own gate, so the studio\'s decision
   const outcomes = await runRoleSuite(plan, {
     clientFor: () => benchmarkClient([{ calls: [call('t1', 'Glob', { pattern: '*' })] }, { text: 'Done.' }]),
     rules: DEFAULT_RULES, signal: new AbortController().signal,
-    gateFor: (run) => { asked.push(`${run.member}/${run.model}`); return started.host.runtimeFor({ root, actor: { kind: 'agent', sessionId: 'roles-1' }, presence: 'none', context: 'unattended', floorMode: 'shadow' }); }
+    gateFor: async (run) => { asked.push(`${run.member}/${run.model}`); return await started.host.runtimeFor({ root, actor: { kind: 'agent', sessionId: 'roles-1' }, presence: 'none', context: 'unattended', floorMode: 'shadow' }); }
   });
   assert.equal(outcomes.length, 1);
   assert.deepEqual(asked, ['reviewer/m1']);

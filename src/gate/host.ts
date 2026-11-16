@@ -20,6 +20,9 @@ const DEVICE_UNKNOWN = 'device-unknown';
 const POLICY_SESSION = 'policy';
 const START_FAILED_DETAIL = 'The policy check threw before it could finish.';
 
+/** How long a run waits for the policy check at activation before it is refused as "not loaded": long enough for a healthy start, short enough that a stuck one does not hang the run. */
+export const RUNTIME_START_WAIT_MS = 5000;
+
 export interface GateHostOptions {
   readonly globalStorageDir: string;
   readonly secrets: SecretStorageLike;
@@ -30,6 +33,8 @@ export interface GateHostOptions {
   readonly onProblem?: (message: string) => void;
   /** The clock for the bundle store and for records. Tests pass a fixed one. */
   readonly now?: () => Date;
+  /** How long `runtimeFor` waits for the start to finish. Defaults to RUNTIME_START_WAIT_MS; tests pass a short one. */
+  readonly startWaitMs?: number;
 }
 
 export interface RuntimeRequest {
@@ -47,6 +52,8 @@ function detailOf(error: unknown): string {
 export class GateHost {
   private current: BundleState = failedClosed('identity-unavailable', 'The gate has not finished starting.');
   private starting: Promise<BundleState> | undefined;
+  /** True once the start has finished and `current` is what it found. */
+  private settled = false;
   private readonly logs = new Map<string, DecisionLog>();
   private readonly listeners = new Set<() => void>();
 
@@ -70,8 +77,13 @@ export class GateHost {
     return state;
   }
 
-  /** The runtime of one run: who is acting, whether a person is there, the context and the floor mode, over this host's state and the project's log. */
-  public runtimeFor(request: RuntimeRequest): GateRuntime {
+  /**
+   * The runtime of one run: who is acting, whether a person is there, the context and the floor mode, over this host's state and the project's log. It waits
+   * (for at most `startWaitMs`) for the start to finish, so a run begun during activation is decided with the real bundle. A start that fails or does not
+   * finish in time gives a runtime that is failed closed with a plain sentence, until the start does finish.
+   */
+  public async runtimeFor(request: RuntimeRequest): Promise<GateRuntime> {
+    const notLoaded = await this.waitForStart();
     let log: DecisionLog | undefined;
     try {
       log = this.logFor(request.root);
@@ -80,7 +92,7 @@ export class GateHost {
       try { this.options.onProblem?.(error instanceof Error ? error.message : 'NEAR AI could not set up its record of what was allowed or refused.'); } catch { /* ignored */ }
     }
     return {
-      bundleState: () => this.bundleState(),
+      bundleState: () => (notLoaded !== undefined && !this.settled ? notLoaded : this.bundleState()),
       sink: { record: (record) => { void log?.append(record); } },
       actor: { ...request.actor, deviceFingerprint: this.deviceFingerprint() },
       presence: request.presence,
@@ -110,6 +122,24 @@ export class GateHost {
   /** Resolves when every record queued so far has been written or has failed. */
   public async flush(): Promise<void> {
     await Promise.all([...this.logs.values()].map((log) => log.flush()));
+  }
+
+  /** Waits for the start, up to the bound. Undefined when it finished; otherwise the failed-closed state for a run that began before the policy was loaded. */
+  private async waitForStart(): Promise<Extract<BundleState, { state: 'failed-closed' }> | undefined> {
+    const bound = this.options.startWaitMs ?? RUNTIME_START_WAIT_MS;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const late = new Promise<'late'>((resolve) => {
+      timer = setTimeout(() => resolve('late'), bound);
+      timer.unref?.();
+    });
+    try {
+      const outcome = await Promise.race([this.start().then(() => 'done' as const), late]);
+      return outcome === 'done' ? undefined : failedClosed('not-loaded', 'The policy check had not finished in time.');
+    } catch (error) {
+      return failedClosed('not-loaded', detailOf(error));
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
+    }
   }
 
   private clock(): number {
@@ -147,6 +177,7 @@ export class GateHost {
       result = { state: failedClosed('identity-unavailable', detailOf(error)) };
     }
     this.current = result.state;
+    this.settled = true;
     this.announce(result.event, result.state);
     this.changed();
     return result.state;

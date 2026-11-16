@@ -86,7 +86,7 @@ export interface ComparisonOptions {
   /** Where the temporary task folders go (default: the system temp folder). */
   tempDir?: string;
   /** The gate each task run is decided by, made fresh for each run so a record names the run it belongs to. Without it a run uses the shipped default. */
-  gateFor?(run: { model: string; task: string; run: number; root: string }): GateRuntime | undefined;
+  gateFor?(run: { model: string; task: string; run: number; root: string }): GateRuntime | undefined | Promise<GateRuntime | undefined>;
   /** Per-task time limit override (tests). */
   timeoutMs?(task: BenchmarkTask): number;
   onRow(row: ResultRow): void | Promise<void>;
@@ -145,7 +145,7 @@ async function runOne(options: ComparisonOptions, model: string, benchmark: Benc
     let outcome: RowOutcome;
     let misses: string[] = [];
     try {
-      const gate = options.gateFor?.({ model, task: benchmark.id, run, root });
+      const gate = await options.gateFor?.({ model, task: benchmark.id, run, root });
       const result = await withSpendTag({ kind: 'eval', runId: runTag }, () => runAgentInFolder(client, model, root, benchmark.prompt, {
         maxTurns: benchmark.maxTurns, signal: abort.signal, rules: options.rules, ...(gate ? { gate } : {}),
         policy: { mode: 'fully-autonomous', emergencyStop: options.emergencyStopped() },

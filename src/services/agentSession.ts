@@ -426,8 +426,7 @@ export class AgentConversation {
     let taskCheckSent = false;
     let mainTurns = 0;
     // The gate has finished its start-up check before the first call is decided; the main run is an agent working for a person who is here.
-    await this.gateHost?.state();
-    const gate = this.gateHost?.runtimeFor({ root: this.root, actor: { kind: 'agent', sessionId: this.conversationId, agentId: mainId, agentLabel: 'agent' }, presence: 'person', context: 'interactive', floorMode: 'shadow' });
+    const gate = await this.gateHost?.runtimeFor({ root: this.root, actor: { kind: 'agent', sessionId: this.conversationId, agentId: mainId, agentLabel: 'agent' }, presence: 'person', context: 'interactive', floorMode: 'shadow' });
     const run = new AgentRun({
       client: request.client,
       model: request.model,
@@ -1028,7 +1027,7 @@ export class AgentConversation {
             const boundary = runBoundary(request);
             this.activity?.agentStarted({ agentId: agent.id, agent: label, runId, model, parentId: `main-${runId}`, conversationId: this.conversationId, ...(boundary ? { boundary } : {}) }, spawn.prompt, system);
             // A sub-agent of a person's run is interactive with the person present, even though its PERF-01 unattended flag below is set (D-43): its cards queue for them.
-            const childGate = this.gateHost?.runtimeFor({ root: this.root, actor: { kind: 'sub-agent', sessionId: this.conversationId, agentId: agent.id, agentLabel: label }, presence: 'person', context: 'interactive', floorMode: 'shadow' });
+            const childGate = await this.gateHost?.runtimeFor({ root: this.root, actor: { kind: 'sub-agent', sessionId: this.conversationId, agentId: agent.id, agentLabel: label }, presence: 'person', context: 'interactive', floorMode: 'shadow' });
             const child = new AgentRun({
               client: request.client, model, tools, context: agentContext, policy: request.policy, rules: request.rules, grants, safety: this.runSafety, maxTurns: request.maxTurns, maxOutputTokens: request.maxOutputTokens,
               ...(childGate ? { gate: childGate } : {}),
