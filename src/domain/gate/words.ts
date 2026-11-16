@@ -9,6 +9,11 @@ import { CAPABILITY_VERBS } from './vocabulary';
 import type { CapabilityVerb } from './vocabulary';
 
 export const RUNS_ON_THIS_MACHINE_TEXT = 'Runs on this machine with your permissions';
+/**
+ * What is said when a declaration lists nothing the words can describe. It is the sentence for what the gate does with such a call (`manifest.effects-unknown`):
+ * with a person here it asks, with nobody here it refuses.
+ */
+export const EFFECTS_NOT_DECLARED_TEXT = 'What it does is not declared, so each call asks first, or is refused when nobody is there';
 export const MANIFEST_IS_A_CLAIM_TEXT = 'This is what you or the server declared it does. NEAR AI cannot check what a server does inside itself.';
 
 const RUNS_ELSEWHERE = 'Runs on another machine';
@@ -158,7 +163,8 @@ export function describeManifest(manifest: ToolManifest): string[] {
   const lines: string[] = [];
   if (manifest.runsOn === 'remote') lines.push(RUNS_ELSEWHERE);
   else if (effects.some((effect) => effect.verb === 'shell')) lines.push(RUNS_ON_THIS_MACHINE_TEXT);
-  lines.push(...effectLines(effects, hosts.length > 0, manifest.credentials));
+  // A manifest with no effect of its own (only the command marker) is one the gate cannot read either: it says so, as it does for an undeclared MCP tool.
+  lines.push(...(effects.length === 0 ? [EFFECTS_NOT_DECLARED_TEXT] : effectLines(effects, hosts.length > 0, manifest.credentials)));
   lines.push(...hostLine(hosts));
   lines.push(contextLine(manifest.contexts));
   return lines;
@@ -209,8 +215,10 @@ export function describeMcpTools(manifest: McpManifest | undefined): string[] {
     const entry = manifest.tools[name];
     if (entry === undefined) continue;
     const choice = mcpToolChoiceOf(entry);
-    const said = choice === 'reads' ? [DECLARED_READS] : choice === 'changes-remote' ? [DECLARED_CHANGES] : effectLines(entry.effects, literalHosts(entry.effects).length > 0, [], ['mcp']);
-    const parts = said.length > 0 ? said : [DECLARED_READS];
+    const hosts = literalHosts(entry.effects);
+    const said = choice === 'reads' ? [DECLARED_READS] : choice === 'changes-remote' ? [DECLARED_CHANGES] : [...effectLines(entry.effects, hosts.length > 0, [], ['mcp']), ...hostLine(hosts)];
+    // A declaration the words cannot describe is never "Only reads": the gate treats a call it cannot read as effects unknown, and the words say so too.
+    const parts = said.length > 0 ? said : [EFFECTS_NOT_DECLARED_TEXT];
     if (entry.contexts !== undefined) parts.push(contextLine(entry.contexts));
     lines.push(`${plain(name)}: ${parts.join('; ')}`);
   }

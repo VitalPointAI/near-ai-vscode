@@ -20,7 +20,9 @@ import type { AgentTool } from '../agent/tools';
 import { BUNDLE_FAILURES, failedClosed } from '../domain/gate/bundle';
 import type { BundleState } from '../domain/gate/bundle';
 import { GATE_RULE_IDS } from '../domain/gate/decide';
+import { EFFECTS_NOT_DECLARED_TEXT, describeManifest } from '../domain/gate/words';
 import type { GateRuntime } from '../domain/gate/decide';
+import type { ToolManifest } from '../domain/gate/manifest';
 import type { DecisionRecord } from '../domain/gate/record';
 import type { ActionPolicy } from '../domain/policy';
 import { GateHost } from '../gate/host';
@@ -280,6 +282,25 @@ test('a call whose effects cannot be filled keeps today\'s decision while the fl
   const nobody = await gateToolCall({ ...enforced, presence: 'none' }, input(enforced));
   assert.equal(nobody.decision.outcome, 'deny');
   assert.equal(nobody.decision.rule, 'manifest.effects-unknown');
+});
+
+test('a tool whose manifest lists no effect is effects-unknown at the gate, as its words say: asked with a person here, refused with nobody, in shadow and enforce, never the widest shorthand', async () => {
+  const root = await project();
+  const read = CORE_TOOLS.find((tool) => tool.name === 'Read') as AgentTool<any>;
+  // The parsers refuse an empty effect list, so a hand-made manifest stands in for a damaged stored one.
+  const manifest = { manifestVersion: 1, tool: 'Undeclared', effects: [], hosts: [], credentials: [], contexts: ['interactive', 'unattended'], untrusted: false, runsOn: 'this-machine' } as unknown as ToolManifest;
+  const undeclared: AgentTool<any> = { ...read, name: 'Undeclared', manifest };
+  const input = { tool: undeclared, raw: { file_path: 'a.ts' }, root, callId: 'u1', policy: { mode: 'fully-autonomous', emergencyStop: false } as ActionPolicy, rules: DEFAULT_RULES, grants: new RunGrants(), buildAuto: async () => undefined };
+  assert.deepEqual(effectsOfCall(testGateRuntime(), undeclared, input.raw, root), [], 'no stand-in is invented for it');
+  for (const floorMode of ['shadow', 'enforce'] as const) {
+    const asked = await gateToolCall({ ...testGateRuntime(), floorMode }, input);
+    assert.equal(asked.decision.outcome, 'ask', floorMode);
+    assert.equal(asked.decision.rule, 'manifest.effects-unknown', floorMode);
+    const nobody = await gateToolCall({ ...testGateRuntime({ presence: 'none', context: 'unattended' }), floorMode }, input);
+    assert.equal(nobody.decision.outcome, 'deny', floorMode);
+    assert.equal(nobody.decision.rule, 'manifest.effects-unknown', floorMode);
+  }
+  assert.ok(describeManifest(manifest).includes(EFFECTS_NOT_DECLARED_TEXT), 'the Tools page says the same thing');
 });
 
 test('no built-in tool declares an empty effect list: every manifest has a template, and an unreadable call still gets a non-empty stand-in while the floor reports', () => {
