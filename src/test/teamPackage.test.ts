@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import path from 'node:path';
+import * as path from 'node:path';
 import test from 'node:test';
 import { PROJECT_TYPES, projectTypeTeam } from '../agent/projectTypes';
 import { buildTeamPackage, cleanKnowledge, findLocalPaths, importQuestion, readTeamMarkdown, readTeamPackage, shareProblems, TEAM_PACKAGE_FORMAT, TEAM_PACKAGE_VERSION, TeamPackageError } from '../agent/teamPackage';
@@ -284,6 +284,10 @@ test('archiving a team that shares an unapproved archived import\'s name never a
   await library.archive(live);
   assert.deepEqual(await library.pendingKind(archivedCopy), { kind: 'derived', from: 'Web crew' }, 'still unapproved after a same-named archive');
   assert.deepEqual([...await library.pendingImports()].sort(), ['web-crew.md'], 'only live teams are listed as live');
+  // 0.4.27 (PR #67 review): every marker maps to its team file in one place, live and archived, and each file it gives is one the library calls unapproved.
+  const files = await library.pendingImportFiles();
+  assert.deepEqual(files, [restored, archivedCopy]);
+  for (const file of files) assert.equal(await library.isPendingImport(file), true, file);
 });
 
 // PR #67 review: only the graph's top level was checked, so `nodes: [null]` passed, Import failed with a raw TypeError and the bad graph was written.

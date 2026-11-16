@@ -250,7 +250,8 @@ const mtime = async (file: string) => (await stat(file).catch(() => undefined))?
 /** Every team the studio manages: the project team, the user's teams, and archived teams. */
 export async function listLibrary(library: TeamLibrary, root: string | undefined, input: DirectoryInput): Promise<LibraryState> {
   const entries = await library.list(root);
-  const pending = await library.pendingImports();
+  // The unapproved team files themselves (the library maps each marker to its file), compared by path rather than rebuilt from marker names.
+  const pending = new Set((await library.pendingImportFiles()).map((file) => path.resolve(file)));
   const teams = await Promise.all(entries.map(async (entry): Promise<LibraryTeam> => {
     const slug = slugify(path.basename(entry.file, '.md'));
     const team = entry.team;
@@ -261,7 +262,7 @@ export async function listLibrary(library: TeamLibrary, root: string | undefined
       ...(team ? { command: `/team:${entry.project ? 'project' : team.slug} ` } : {}),
       ...(entry.error ? { error: entry.error } : {}),
       ...(team && teamIsPrivate(team) ? { private: true } : {}),
-      ...(!entry.project && pending.has(path.basename(entry.file)) ? { imported: true, ...((await library.pendingKind(entry.file))?.kind === 'derived' ? { derived: true } : {}) } : {}),
+      ...(!entry.project && pending.has(path.resolve(entry.file)) ? { imported: true, ...((await library.pendingKind(entry.file))?.kind === 'derived' ? { derived: true } : {}) } : {}),
       ...(template ? { update: { template: template.label, ...(template.fromVersion ? { from: template.fromVersion } : {}), to: template.toVersion, available: !template.stamped || template.fromVersion !== template.toVersion } } : {}),
       ...(await mtime(entry.file) ? { savedAt: await mtime(entry.file) } : {}),
       members: (team?.members ?? []).map((member) => ({ name: member.name, ...(member.role ? { role: member.role } : {}), ...memberModel(member, input) }))

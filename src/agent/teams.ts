@@ -450,6 +450,20 @@ export class TeamLibrary {
   }
 
   /**
+   * The team file a marker stands for: the inverse of importMarker, kept beside it so the two cannot drift (PR #67 review: callers rebuilt team paths
+   * from marker names themselves, and would silently read nothing if the naming ever changed).
+   */
+  private markerTeamFile(name: string, archived: boolean): string {
+    return path.join(archived ? this.archiveDir : this.directory, name);
+  }
+
+  /** Every unapproved team file, live then archived, each found from its marker through markerTeamFile. */
+  public async pendingImportFiles(): Promise<string[]> {
+    const archived = (await readdir(path.join(this.importsDir, '.archived')).catch(() => [])).filter((name) => name.endsWith('.md'));
+    return [...[...await this.pendingImports()].sort().map((name) => this.markerTeamFile(name, false)), ...archived.sort().map((name) => this.markerTeamFile(name, true))];
+  }
+
+  /**
    * The name of an unapproved team (imported, or derived from one; in the library or archived) that any of these members was copied from unchanged, or
    * undefined. A member counts as copied when its instructions are the same apart from spacing, so a team built from an unapproved import (as a builder
    * starting point, by copying a member, or from a resumed draft) is caught however it was made, and approving the original later changes nothing for it.
@@ -458,9 +472,7 @@ export class TeamLibrary {
     const norm = (text: string) => text.replace(/\s+/g, ' ').trim();
     const wanted = new Set(members.map((member) => norm(member.instructions)).filter(Boolean));
     if (!wanted.size) return undefined;
-    const archivedNames = (await readdir(path.join(this.importsDir, '.archived')).catch(() => [])).filter((name) => name.endsWith('.md'));
-    const files = [...[...await this.pendingImports()].sort().map((name) => path.join(this.directory, name)), ...archivedNames.sort().map((name) => path.join(this.archiveDir, name))];
-    for (const file of files) {
+    for (const file of await this.pendingImportFiles()) {
       const text = await readFile(file, 'utf8').catch(() => undefined);
       if (text === undefined) continue;
       try {

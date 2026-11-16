@@ -172,6 +172,50 @@ test('once Team Mode is on, a key-history warning from a path that passed no cal
   });
 });
 
+// 0.4.27 (PR #67 review): the sink is installed when Team Mode registers, so a key-history warning raised before Enable or any session (a rotation or a
+// revocation) reaches the channel too; it is one sink, and it goes away with the extension.
+test('before Enable or any session, a key-history warning from a path that passed no callback still reaches the NEAR AI Team channel', async () => {
+  const { appendKeyRecord, KEY_HISTORY_FILE } = require('../team/keyHistory') as typeof import('../team/keyHistory');
+  const { createDeviceIdentity, identityDir } = require('../team/identity') as typeof import('../team/identity');
+  const { keyHistoryWarningSink } = require('../domain/keyHistoryWarnings') as typeof import('../domain/keyHistoryWarnings');
+  let installed: ReturnType<typeof keyHistoryWarningSink>;
+  await withProject(async (p) => {
+    assert.equal(p.handle.session(), undefined, 'no session, no Enable');
+    installed = keyHistoryWarningSink();
+    assert.ok(installed !== undefined, 'the sink exists from registration');
+    const identity = await createDeviceIdentity(p.secrets);
+    const folder = identityDir(p.storage);
+    await appendKeyRecord(folder, p.secrets, identity, { kind: 'created', key: { fingerprint: identity.fingerprint, publicKey: identity.publicKey } });
+    const file = path.join(folder, KEY_HISTORY_FILE);
+    const failing = {
+      get: (key: string) => p.secrets.get(key), delete: (key: string) => p.secrets.delete(key),
+      store: async (): Promise<void> => {
+        await rm(file, { force: true });
+        await mkdir(path.join(file, 'blocked'), { recursive: true });
+        throw new Error('store failed');
+      }
+    };
+    await assert.rejects(appendKeyRecord(folder, failing, identity, { kind: 'revoked', key: { fingerprint: identity.fingerprint, publicKey: identity.publicKey } }), /saved end could not be stored/);
+    assert.equal(outputLines().filter((line) => line.startsWith('The key history could not be put back')).length, 1, 'one sink, one line');
+  });
+  assert.notEqual(keyHistoryWarningSink(), installed!, 'deactivating removed the sink');
+});
+
+test('key-history sinks: disposing one removes exactly that one, so a disposed sink never comes back', () => {
+  const { keyHistoryWarningSink, setKeyHistoryWarningSink } = require('../domain/keyHistoryWarnings') as typeof import('../domain/keyHistoryWarnings');
+  const base = keyHistoryWarningSink();
+  const a = (): void => undefined; const b = (): void => undefined;
+  const first = setKeyHistoryWarningSink(a);
+  const second = setKeyHistoryWarningSink(b);
+  assert.equal(keyHistoryWarningSink(), b);
+  first.dispose();
+  assert.equal(keyHistoryWarningSink(), b, 'disposing the older one leaves the newer');
+  second.dispose();
+  assert.equal(keyHistoryWarningSink(), base, 'and neither comes back');
+  first.dispose();
+  assert.equal(keyHistoryWarningSink(), base, 'disposing twice is harmless');
+});
+
 test('a failing Push reports the redacted reason as an error', async () => {
   await withProject(async (p) => {
     // The bare remote refuses non-fast-forward updates, so a diverged main makes the push fail.
