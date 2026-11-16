@@ -133,6 +133,8 @@ export async function openTeamStudio(context: vscode.ExtensionContext, auth: Aut
       if (!reply.ok) throw new Error(reply.reason);
       return parseProposal(reply.text, brief);
     },
+    // Improve with AI (0.4.27) uses the same guarded call as drafting: the outbound check always runs, and the privacy rule picks the model.
+    teamAi: () => teamAiDeps(auth),
     // The final step of adding a team: measure each member's role on a few candidate models, then write the winner into the team file. The person is
     // asked first, because this spends real time and tokens, and skipping it leaves exactly the team they wrote.
     optimiseTeam: async (members, teamName, options = {}) => {

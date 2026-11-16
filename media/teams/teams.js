@@ -38,6 +38,8 @@
   let work = null; // the team being built or edited
   let seq = 0;
   let reviewTimer = null;
+  // Improve with AI (0.4.27): its own sequence numbers, so a reply to an older request is dropped.
+  let improveSeq = 0;
   let flash = null;
   // Changes to a team that were kept when the studio was closed, until reopened or discarded.
   let keptEdit = null;
@@ -162,7 +164,7 @@
   }
 
   function changed(structural) {
-    if (structural) render(); else updateDirty();
+    if (structural) render(); else { updateDirty(); updateImprove(); }
     reportUnsaved();
     requestReview();
   }
@@ -899,7 +901,7 @@
     panel.append(heading);
     const HINTS = ['Name the team, say what it is for, and pick a starting point.', 'Who is on the team and what each is responsible for.', 'Which model each member runs on.', 'What each member may use, and what will run or ask under your approval mode.', 'Fine-tune each member\'s instructions, check the result, and save.'];
     panel.append(el('p', 'hint', HINTS[work.step]));
-    [sectionPurpose, sectionMembers, sectionModels, sectionTools, (node) => { sectionInstructions(node); sectionChecks(node, true); }][work.step](panel);
+    [sectionPurpose, sectionMembers, sectionModels, sectionTools, (node) => { node.append(improveEntry()); sectionInstructions(node); sectionChecks(node, true); }][work.step](panel);
     root.append(panel);
     const footer = el('div', 'footer');
     footer.append(button('Back', () => goStep(work.step - 1), { disabled: work.step === 0 }), button('Save draft', () => { work.clean = JSON.stringify(work.draft); reportUnsaved(); vscode.postMessage({ type: 'save-draft', draft: work.draft, step: work.step, target: work.target, startingPoint: work.startingPoint }); }, {}), button('Cancel', leaveWork, { link: true }));
@@ -921,9 +923,12 @@
     const dirty = el('span', 'dirty'); dirty.id = 'dirty'; dirty.setAttribute('aria-live', 'polite');
     title.append(dirty);
     const actions = el('div', 'actions');
-    actions.append(button('Save', save, { primary: true, id: 'save' }), button('Revert', () => { work.draft = JSON.parse(work.clean); changed(true); announce('Reverted to the saved team.'); }, { id: 'revert' }), button('Open as Markdown', () => vscode.postMessage({ type: 'open-markdown', id: work.id })), button('Use in chat', () => vscode.postMessage({ type: 'use-in-chat', id: work.id })));
+    actions.append(button('Save', save, { primary: true, id: 'save' }), button('Improve with AI', openImprove, { id: 'improve', label: 'Improve with AI: run the free local check, then ask for an AI review of this team' }), button('Revert', () => { work.draft = JSON.parse(work.clean); changed(true); announce('Reverted to the saved team.'); }, { id: 'revert' }), button('Open as Markdown', () => vscode.postMessage({ type: 'open-markdown', id: work.id })), button('Use in chat', () => vscode.postMessage({ type: 'use-in-chat', id: work.id })));
     head.append(title, actions);
     root.append(head);
+    const slot = el('div', 'improve-slot'); slot.id = 'improve-slot';
+    if (work.improve) slot.append(sectionImprove());
+    root.append(slot);
     const tabs = el('div', 'tabs'); tabs.setAttribute('role', 'tablist'); tabs.setAttribute('aria-label', 'Team sections');
     TABS.forEach((label, index) => {
       const tab = button(label, () => selectTab(index), {});
@@ -1108,7 +1113,198 @@
   }
 
   function openEditor(message, keepTab) {
-    work = { mode: 'editor', id: message.id, kind: message.kind, file: message.file, command: message.command, base: message.base, draft: message.draft, clean: JSON.stringify(message.draft), tab: keepTab && work && work.mode === 'editor' && work.id === message.id ? work.tab : 0, versions: message.versions || [], review: null, versionView: null };
+    const same = keepTab && work && work.mode === 'editor' && work.id === message.id;
+    // The same team reopened after a Save keeps its Improve panel: pending suggestions stay, and any whose field changed show as Stale.
+    work = { mode: 'editor', id: message.id, kind: message.kind, file: message.file, command: message.command, base: message.base, draft: message.draft, clean: JSON.stringify(message.draft), tab: same ? work.tab : 0, versions: message.versions || [], review: null, versionView: null, improve: same ? work.improve : null };
+  }
+
+  // ---------- Improve with AI (0.4.27) ----------
+  // Step 1 is the free local check; step 2, only on request, is one AI review through the host, which sends the team only to a model the privacy rule
+  // allows. Suggestions are data: each one is accepted, rejected or edited on its own, and accepting changes only this draft. Save writes it as always.
+  // Request: Checking -> Checked -> Requesting -> Reviewing | Nothing to suggest | Failed | Blocked | Cancelled. Each suggestion: Pending -> Accepted |
+  // Rejected | Stale (its field changed since the review) | Invalid (applying it would break the team).
+  const KIND_LABEL = { instructions: 'Instructions', role: 'Role', 'reports-to': 'Reports to', 'tools-add': 'Add tools', 'tools-remove': 'Remove tools', 'add-member': 'New member', 'remove-member': 'Remove member', advice: 'Advice' };
+  const ACCEPT_ALL = ['instructions', 'role'];
+  const STATE_LABEL = { accepted: 'Accepted', rejected: 'Rejected', stale: 'Stale', invalid: 'Invalid' };
+
+  function improveEntry() {
+    const slot = el('div', 'improve-slot'); slot.id = 'improve-slot';
+    if (work.improve) { slot.append(sectionImprove()); return slot; }
+    const box = el('div', 'improve-entry');
+    box.append(button('Improve with AI', openImprove, { id: 'improve', label: 'Improve with AI: run the free local check, then ask for an AI review of this team' }), el('span', 'hint', ' A free local check first; an AI review only when you ask.'));
+    slot.append(box);
+    return slot;
+  }
+
+  /** After a keystroke (no full render): if a pending suggestion's field changed, redraw only the Improve panel so it shows Stale at once. */
+  function updateImprove() {
+    const imp = work && work.improve;
+    const slot = $('improve-slot');
+    if (!imp || !slot) return;
+    const before = imp.suggestions.map((item) => item.status).join();
+    refreshStale();
+    if (imp.suggestions.map((item) => item.status).join() === before) return;
+    slot.replaceChildren();
+    slot.append(sectionImprove());
+  }
+
+  function openImprove() {
+    if (!work) return;
+    improveSeq += 1;
+    work.improve = { seq: improveSeq, state: 'checking', findings: [], ai: null, suggestions: [], dropped: [], member: '' };
+    const message = { type: 'improve-check', seq: improveSeq, draft: work.draft };
+    if (work.mode === 'editor') message.id = work.id;
+    vscode.postMessage(message);
+    render();
+    focusLater('improve-heading');
+  }
+
+  function closeImprove() {
+    if (!work || !work.improve) return;
+    if (work.improve.state === 'requesting') vscode.postMessage({ type: 'improve-cancel', seq: work.improve.seq });
+    work.improve = null;
+    render();
+    focusLater(work.mode === 'editor' ? 'improve' : 'step-heading');
+  }
+
+  function askForReview() {
+    const imp = work.improve;
+    improveSeq += 1;
+    imp.seq = improveSeq;
+    Object.assign(imp, { state: 'requesting', suggestions: [], dropped: [], summary: null, rating: null, partial: false, reason: null });
+    const message = { type: 'improve-ai', seq: imp.seq, draft: work.draft };
+    if (work.mode === 'editor') message.id = work.id;
+    if (imp.member) message.member = imp.member;
+    vscode.postMessage(message);
+    render();
+    focusLater('improve-cancel');
+  }
+
+  /** The same value the host compares a suggestion's base with (src/agent/teamRefine.ts fieldValue). */
+  function fieldValue(member, kind) {
+    if (!member) return '';
+    if (kind === 'instructions' || kind === 'remove-member') return member.instructions;
+    if (kind === 'role') return member.role;
+    if (kind === 'reports-to') return member.reportsTo || '';
+    if (kind === 'tools-add' || kind === 'tools-remove') return JSON.stringify(member.tools);
+    return '';
+  }
+
+  /** A pending suggestion whose field changed since the review (an edit, a reload from the file, another suggestion) is Stale. */
+  function refreshStale() {
+    const imp = work && work.improve;
+    if (!imp) return;
+    for (const item of imp.suggestions) {
+      if (item.status !== 'pending' || item.kind === 'advice') continue;
+      const member = work.draft.members.find((entry) => entry.name === item.member);
+      const stale = item.kind === 'add-member' ? Boolean(member) : !member || fieldValue(member, item.kind) !== item.base;
+      if (stale) { item.status = 'stale'; item.note = 'Its field changed after the review, so it no longer fits. Ask for a new review.'; item.editing = false; }
+    }
+  }
+
+  function acceptSuggestions(ids, edited) {
+    const imp = work.improve;
+    const message = { type: 'improve-accept', seq: imp.seq, ids, draft: work.draft };
+    if (work.mode === 'editor') message.id = work.id;
+    if (edited !== undefined) message.edited = edited;
+    vscode.postMessage(message);
+  }
+
+  function suggestionCard(item) {
+    const card = el('li', 'suggestion-card ' + item.status + (item.sensitive ? ' sensitive' : ''));
+    card.id = 'sg-' + item.id;
+    const title = el('p', 'suggestion-title');
+    title.append(el('strong', '', item.member || 'The team'), document.createTextNode(' · ' + (KIND_LABEL[item.kind] || item.kind)));
+    if (item.status !== 'pending') title.append(document.createTextNode(' '), badge(STATE_LABEL[item.status], 'state ' + item.status));
+    card.append(title);
+    if (item.label) { const label = el('p', item.sensitive ? 'notice warning power' : 'hint'); if (item.sensitive) label.append(icon('warn'), document.createTextNode(' ')); label.append(document.createTextNode(item.label)); card.append(label); }
+    card.append(el('p', 'reason', item.reason));
+    if (item.diff && item.kind !== 'advice') {
+      const diff = el('pre', 'diff'); diff.setAttribute('tabindex', '0'); diff.setAttribute('aria-label', 'Proposed change to ' + (item.member || 'the team') + ': lines with - are removed, lines with + are added');
+      for (const line of item.diff) diff.append(el('span', 'diff-line ' + line.op, (line.op === 'add' ? '+ ' : line.op === 'del' ? '- ' : '  ') + line.text + '\n'));
+      card.append(diff);
+    }
+    if (item.note) card.append(el('p', item.status === 'invalid' || item.status === 'stale' ? 'notice warning' : 'hint', item.note));
+    if (item.status !== 'pending' || item.kind === 'advice') return card;
+    const actions = el('div', 'actions');
+    if (item.editing) {
+      const area = textarea(item.edited !== undefined ? item.edited : item.proposed, (value) => { item.edited = value; }, item.kind === 'instructions' ? 7 : 2, 'sg-edit-' + item.id);
+      area.setAttribute('aria-label', 'Your version of the suggested ' + (KIND_LABEL[item.kind] || '').toLowerCase() + ' for ' + item.member);
+      card.append(el('p', 'hint', 'Suggested by the AI; change it as you like, then accept your version.'), area);
+      actions.append(button('Accept my version', () => acceptSuggestions([item.id], item.edited !== undefined ? item.edited : item.proposed), { primary: true, label: 'Accept your version of the suggestion for ' + item.member }), button('Cancel edit', () => { item.editing = false; item.edited = undefined; render(); }, { link: true }));
+    } else {
+      actions.append(button('Accept', () => acceptSuggestions([item.id]), { primary: true, label: 'Accept the suggestion for ' + (item.member || 'the team') + ': ' + (KIND_LABEL[item.kind] || item.kind), id: 'sg-accept-' + item.id }),
+        button('Reject', () => { item.status = 'rejected'; announce('Rejected.'); render(); }, { label: 'Reject the suggestion for ' + (item.member || 'the team') + ': ' + (KIND_LABEL[item.kind] || item.kind) }));
+      if (item.editable) actions.append(button('Edit', () => { item.editing = true; render(); focusLater('sg-edit-' + item.id); }, { label: 'Edit the suggestion for ' + item.member + ' before accepting it' }));
+    }
+    card.append(actions);
+    return card;
+  }
+
+  function sectionImprove() {
+    refreshStale();
+    const imp = work.improve;
+    const box = el('section', 'improve'); box.setAttribute('aria-labelledby', 'improve-heading'); box.setAttribute('aria-live', 'polite');
+    const head = el('div', 'improve-head');
+    const heading = el('h3', '', 'Improve with AI'); heading.id = 'improve-heading'; heading.setAttribute('tabindex', '-1');
+    head.append(heading, button('Close', closeImprove, { link: true, label: 'Close Improve with AI' }));
+    box.append(head);
+    box.append(el('h4', '', 'Local check (free, no model)'));
+    if (imp.state === 'checking') box.append(el('p', 'hint', 'Checking…'));
+    else if (!imp.findings.length) { const ok = el('p', 'ok-line'); ok.append(icon('check'), document.createTextNode(' The local check found nothing to fix.')); box.append(ok); }
+    else {
+      const list = el('ul', 'issues');
+      for (const finding of imp.findings) list.append(issueLine(finding, finding.severity === 'block' ? 'error' : 'warning'));
+      box.append(list);
+    }
+    if (imp.findingsNow !== undefined && imp.findingsBefore !== undefined) box.append(el('p', 'hint', 'Local check: ' + imp.findingsBefore + ' finding' + (imp.findingsBefore === 1 ? '' : 's') + ' before the review, ' + imp.findingsNow + ' now.'));
+    box.append(el('h4', '', 'AI review'));
+    const ai = imp.ai;
+    if (!ai) box.append(el('p', 'hint', 'Finding a model…'));
+    else if (!ai.available) { const why = el('p', 'notice warning'); why.append(icon('warn'), document.createTextNode(' ' + (ai.reason || 'The AI review is not available.'))); box.append(why); }
+    else {
+      box.append(el('p', 'hint', 'One call to ' + ai.model + (ai.private ? ', a private model (NEAR TEE or this computer)' : ', which is not a private model') + (ai.estimate ? ', ' + ai.estimate : '') + '. It suggests changes; nothing changes until you accept one, and nothing is saved until you Save.'));
+      if (ai.note) { const note = el('p', 'notice warning'); note.append(icon('warn'), document.createTextNode(' ' + ai.note)); box.append(note); }
+      const row = el('div', 'actions');
+      const scope = select([{ value: '', label: 'The whole team' }].concat(work.draft.members.map((member) => ({ value: member.name, label: 'Only ' + member.name }))), imp.member || '', (value) => { imp.member = value; }, 'improve-member');
+      scope.setAttribute('aria-label', 'What to review');
+      row.append(scope);
+      if (imp.state === 'requesting') {
+        row.append(el('span', 'hint', 'Asking ' + (imp.model || ai.model) + '…'), button('Cancel', () => { vscode.postMessage({ type: 'improve-cancel', seq: imp.seq }); imp.state = 'cancelled'; imp.reason = 'Cancelled. Nothing changed.'; render(); }, { id: 'improve-cancel', label: 'Cancel the AI review' }));
+      } else row.append(button(imp.suggestions.length || imp.state === 'nothing' ? 'Review again' : 'Run the AI review', askForReview, { primary: true, id: 'improve-run' }));
+      box.append(row);
+    }
+    if (imp.reason && (imp.state === 'failed' || imp.state === 'blocked' || imp.state === 'cancelled')) { const why = el('p', 'notice ' + (imp.state === 'cancelled' ? 'info' : 'warning')); why.append(icon(imp.state === 'cancelled' ? 'check' : 'warn'), document.createTextNode(' ' + imp.reason)); box.append(why); }
+    if (imp.summary) box.append(el('p', 'summary', imp.summary));
+    if (imp.rating) box.append(el('p', 'hint', 'The model\'s own rating, not a measurement: ' + imp.rating.before.toFixed(2) + ' now, ' + imp.rating.after.toFixed(2) + ' with its suggestions (0 to 1).' + (imp.rating.note ? ' ' + imp.rating.note : '')));
+    if (imp.partial) { const cut = el('p', 'notice warning'); cut.append(icon('warn'), document.createTextNode(' The reply was cut short, so some suggestions may be missing.')); box.append(cut); }
+    if (imp.state === 'nothing') box.append(el('p', 'hint', 'The AI review has nothing to change.'));
+    const wording = imp.suggestions.filter((item) => !item.sensitive && item.kind !== 'advice');
+    const power = imp.suggestions.filter((item) => item.sensitive);
+    const advice = imp.suggestions.filter((item) => item.kind === 'advice');
+    const bulk = imp.suggestions.filter((item) => item.status === 'pending' && ACCEPT_ALL.includes(item.kind));
+    if (bulk.length > 1) box.append(button('Accept all wording changes (' + bulk.length + ')', () => acceptSuggestions(bulk.map((item) => item.id)), { id: 'improve-accept-all', label: 'Accept all ' + bulk.length + ' wording changes. Tool and member changes are never included.' }));
+    const group = (title, items, hint) => {
+      if (!items.length) return;
+      box.append(el('h4', '', title));
+      if (hint) box.append(el('p', 'hint', hint));
+      const list = el('ul', 'suggestions');
+      for (const item of items) list.append(suggestionCard(item));
+      box.append(list);
+    };
+    group('Suggested changes', wording);
+    group('Changes to who can do what', power, 'These give a member more power or change who is on the team, so each is accepted on its own and never by Accept all.');
+    group('Advice', advice);
+    if (imp.dropped.length) {
+      const details = el('details', 'dropped');
+      details.append(el('summary', '', imp.dropped.length + ' suggestion' + (imp.dropped.length === 1 ? ' was' : 's were') + ' left out'));
+      const list = el('ul');
+      for (const reason of imp.dropped) list.append(el('li', '', reason));
+      details.append(list);
+      box.append(details);
+    }
+    if (imp.templateNote) box.append(el('p', 'hint', imp.templateNote));
+    return box;
   }
 
   // ---------- render ----------
@@ -1307,6 +1503,61 @@
         announce('The team has been drafted. Review it, then use it or start over.');
         focusMain();
         break;
+      case 'improve-checked': {
+        const imp = work && work.improve;
+        if (!imp || message.seq !== imp.seq) break;
+        imp.findings = Array.isArray(message.findings) ? message.findings : [];
+        imp.ai = message.ai || null;
+        imp.state = 'checked';
+        render();
+        break;
+      }
+      case 'improve-state': {
+        const imp = work && work.improve;
+        if (!imp || message.seq !== imp.seq) break;
+        imp.state = 'requesting'; imp.model = message.model;
+        render();
+        break;
+      }
+      case 'improve-result': {
+        const imp = work && work.improve;
+        // A reply to an older request, or to one that was cancelled here, is dropped.
+        if (!imp || message.seq !== imp.seq || imp.state !== 'requesting') break;
+        imp.state = message.state;
+        imp.reason = message.reason || null;
+        imp.suggestions = (message.suggestions || []).map((item) => Object.assign({}, item, { status: 'pending' }));
+        imp.dropped = message.dropped || [];
+        imp.partial = Boolean(message.partial);
+        imp.summary = message.summary || null;
+        imp.rating = message.rating || null;
+        if (message.note && imp.ai) imp.ai.note = message.note;
+        if (typeof message.findings === 'number') { imp.findingsBefore = message.findings; imp.findingsNow = undefined; }
+        render();
+        announce(message.state === 'reviewing' ? imp.suggestions.length + ' suggestion' + (imp.suggestions.length === 1 ? '' : 's') + ' to review.' : (message.reason || 'The AI review has nothing to change.'));
+        break;
+      }
+      case 'improve-applied': {
+        const imp = work && work.improve;
+        if (!imp || message.seq !== imp.seq) break;
+        let accepted = 0;
+        for (const result of message.results || []) {
+          const item = imp.suggestions.find((entry) => entry.id === result.id);
+          if (!item) continue;
+          if (result.state === 'accepted') { item.status = 'accepted'; item.note = null; item.editing = false; accepted += 1; }
+          else if (result.state === 'stale' || result.state === 'invalid') { item.status = result.state; item.note = result.reason || null; item.editing = false; }
+          else item.note = result.reason || null;
+        }
+        if (accepted) {
+          work.draft = message.draft;
+          if (typeof message.findings === 'number') imp.findingsNow = message.findings;
+          // A team made from a built-in template: Update Team treats a member you changed as yours and asks before replacing it. Said once.
+          const entry = work.mode === 'editor' ? (lib.teams || []).find((team) => team.id === work.id) : null;
+          if (entry && entry.update && !imp.templateNote) imp.templateNote = 'Accepted changes make these members yours: Update Team will ask before replacing them with a newer template.';
+        }
+        changed(true);
+        announce(accepted ? 'Accepted ' + accepted + ' suggestion' + (accepted === 1 ? '' : 's') + '. The draft changed; Save to keep it.' : 'Nothing was accepted.');
+        break;
+      }
       case 'review':
         if (!work || message.seq !== seq) break;
         work.review = { markdown: message.markdown, errors: message.errors, warnings: message.warnings, members: message.members };

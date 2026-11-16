@@ -8,6 +8,8 @@ import { DEFAULT_TOOLS, parseTeam, recommendedProjectTeam, slugify, TeamLibrary,
 import type { AgentDiscoveryAnswers } from '../domain/agents';
 import { buildTeamGraph } from '../agent/teamGraph';
 import { checkTeam, checkWarnings } from '../agent/teamCheck';
+import { ACCEPT_ALL_KINDS, applySuggestion, MAX_REFINE_CHARS, parseRefinement, REFINE_PROMPT, refinePlan, refinePrompt, type RefinePlan, type Suggestion } from '../agent/teamRefine';
+import { chooseTeamModel, teamModelCall, type TeamAiDeps } from './teamStudioAi';
 import { CUSTOM_PLAGIARISM_CHECKER } from '../agent/researchIntegrity';
 import { proposalDraft, proposalText, type TeamProposal } from '../agent/teamBuilder';
 import { layoutNetwork } from '../domain/networkLayout';
@@ -299,7 +301,14 @@ export type StudioMessage =
   | { type: 'optimise-all' }
   | { type: 'draft-team'; idea: string; outputFormat?: string; depth?: 'quick' | 'thorough'; private?: boolean }
   | { type: 'starting-point'; id: string; goal: string; locality: 'cloud' | 'local' | 'hybrid'; workShape?: AgentDiscoveryAnswers['workShape']; riskLevel?: AgentDiscoveryAnswers['riskLevel'] }
-  | { type: 'open-setting'; key: string };
+  | { type: 'open-setting'; key: string }
+  /** Improve with AI (0.4.27): the free local check and whether an AI review is possible, for this draft. */
+  | { type: 'improve-check'; seq: number; draft: TeamDraft; id?: string }
+  /** Ask for the AI review (one model call); `member` reviews one member only. */
+  | { type: 'improve-ai'; seq: number; draft: TeamDraft; id?: string; member?: string }
+  | { type: 'improve-cancel'; seq: number }
+  /** Accept suggestions (by the ids the host gave) into the page's current draft; `edited` is the person's own wording for a single suggestion. */
+  | { type: 'improve-accept'; seq: number; ids: string[]; draft: TeamDraft; id?: string; edited?: string };
 
 type Plain = Record<string, unknown>;
 const isPlain = (value: unknown): value is Plain => Boolean(value) && typeof value === 'object' && !Array.isArray(value) && Object.getPrototypeOf(value) === Object.prototype;
@@ -392,6 +401,26 @@ export function parseStudioMessage(value: unknown): StudioMessage | undefined {
       const known = message.id === 'recommend' || message.id === 'empty' || message.id.startsWith('lib:') || PROJECT_TYPES.some((type) => message.id === `type:${type.id}`) || GSD_TEMPLATES.some((template) => message.id === `gsd:${template.id}`);
       return known ? { type: 'starting-point', id: message.id, goal: message.goal as string, locality: message.locality as 'cloud', ...(message.workShape ? { workShape: message.workShape as 'feature' } : {}), ...(message.riskLevel ? { riskLevel: message.riskLevel as 'low' } : {}) } : undefined;
     }
+    case 'improve-check': case 'improve-ai': {
+      if (!exactKeys(message, ['type', 'seq', 'draft'], message.type === 'improve-ai' ? ['id', 'member'] : ['id']) || !Number.isSafeInteger(message.seq) || (message.id !== undefined && !id())) return undefined;
+      if (message.member !== undefined && (typeof message.member !== 'string' || !/^[a-z0-9][a-z0-9-]{0,39}$/.test(message.member))) return undefined;
+      const draft = parseDraft(message.draft);
+      if (!draft) return undefined;
+      const extra = { ...(message.id !== undefined ? { id: message.id as string } : {}) };
+      return message.type === 'improve-ai'
+        ? { type: 'improve-ai', seq: message.seq as number, draft, ...extra, ...(message.member !== undefined ? { member: message.member as string } : {}) }
+        : { type: 'improve-check', seq: message.seq as number, draft, ...extra };
+    }
+    case 'improve-cancel':
+      return exactKeys(message, ['type', 'seq']) && Number.isSafeInteger(message.seq) ? { type: 'improve-cancel', seq: message.seq as number } : undefined;
+    case 'improve-accept': {
+      if (!exactKeys(message, ['type', 'seq', 'ids', 'draft'], ['id', 'edited']) || !Number.isSafeInteger(message.seq) || (message.id !== undefined && !id())) return undefined;
+      const ids = message.ids;
+      if (!Array.isArray(ids) || !ids.length || ids.length > 40 || !ids.every((entry) => typeof entry === 'string' && /^s\d{1,3}$/.test(entry)) || new Set(ids).size !== ids.length) return undefined;
+      if (message.edited !== undefined && (!text(message.edited, 12_000) || ids.length !== 1)) return undefined;
+      const draft = parseDraft(message.draft);
+      return draft ? { type: 'improve-accept', seq: message.seq as number, ids: ids as string[], draft, ...(message.id !== undefined ? { id: message.id as string } : {}), ...(message.edited !== undefined ? { edited: message.edited as string } : {}) } : undefined;
+    }
     case 'open-setting':
       return exactKeys(message, ['type', 'key']) && typeof message.key === 'string' && /^nearAi\.(?:defaultModel|actionPolicy|agent\.(?:deepModel|standardModel|fastModel|roleModels))$/.test(message.key) ? { type: 'open-setting', key: message.key } : undefined;
     default:
@@ -455,6 +484,11 @@ export interface TeamStudioDeps {
   optimiseTeam?(members: Array<{ name: string; role?: string; model?: string }>, teamName: string, options?: { signal?: AbortSignal; confirm?: boolean; file?: string }): Promise<{ applied: number; text: string } | undefined>;
   /** The models a role test would try, so testing every team can show the whole cost once before it starts. */
   optimiseCandidates?(): Promise<string[]>;
+  /**
+   * What a Team Studio model call needs from the active profile (0.4.27): the catalogue, preferred models, routes, settings and today's spend. Every call
+   * goes through teamModelCall with it, so the outbound check always runs. Throws (with a message to show) when there is no profile.
+   */
+  teamAi?(): Promise<TeamAiDeps>;
   /** The person asked everything to stop (Emergency stop), so long-running work can be cancelled. */
   onStop?(listener: () => void): { dispose(): void };
   drafts: { get(): unknown; set(value: SavedWizard | undefined): Promise<void> };
@@ -484,6 +518,20 @@ export function optimiseTarget<T extends { file: string; project: boolean; team?
     ?? entries.find((entry) => entry.project && entry.team?.name === teamName);
 }
 
+/** The most the AI review may write back: room for a dozen suggestions with rewritten instructions. */
+const REFINE_MAX_TOKENS = 6000;
+const BLOCKED_BY_SECRET = 'Something in this team looks like a key, token or password (see the local check). Remove it, then ask again: Improve with AI never sends it.';
+
+/** What one AI review would cost at most: the team as input, and the most the reply may be. A local model costs nothing. */
+function estimateFor(ai: TeamAiDeps, model: string, draft: TeamDraft): { estimate?: string } {
+  const info = ai.models.find((candidate) => candidate.id === model);
+  if (info?.privacyBoundary === 'local') return { estimate: 'free: it runs on this computer' };
+  if (info?.inputPricePerMillion === undefined && info?.outputPricePerMillion === undefined) return {};
+  const inputTokens = (JSON.stringify(draft).length + REFINE_PROMPT.length + 4000) / 4;
+  const cost = (inputTokens * (info.inputPricePerMillion ?? 0) + REFINE_MAX_TOKENS * (info.outputPricePerMillion ?? 0)) / 1_000_000;
+  return { estimate: `at most about $${cost < 0.01 ? '0.01' : cost.toFixed(2)} (one call)` };
+}
+
 /** Wires the studio page to the team library. Returns refresh/dispose for the host and the tests. */
 export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refresh(): Promise<void>; startWizard(target: StudioTarget): Promise<void>; dispose(): void; ready: Promise<void> } {
   let input: DirectoryInput | undefined;
@@ -498,6 +546,13 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
   /** What the page last said is unsaved; kept if the panel closes. */
   let unsaved: { wizard?: SavedWizard; edit?: OpenEdit } = {};
   const post = (message: unknown) => { void host.webview.postMessage(message); };
+  /**
+   * Improve with AI's current request (0.4.27). One at a time: a new request, Cancel, Emergency stop, opening another team, leaving the editor or closing
+   * the panel aborts it, and a reply for any other sequence number is dropped. The suggestions stay here, keyed by id, so the page accepts them by id
+   * and never sends a suggestion of its own. Nothing here is saved: pending suggestions are gone when the panel closes.
+   */
+  let refine: { seq: number; id?: string; suggestions: Map<string, Suggestion>; controller?: AbortController } | undefined;
+  const cancelRefine = () => { refine?.controller?.abort(); if (refine) refine.controller = undefined; };
   const choose = (message: string, ...actions: string[]): Promise<string | undefined> => deps.choose
     ? deps.choose(message, ...actions)
     : deps.confirm(message, actions[0]).then((yes) => (yes ? actions[0] : undefined));
@@ -534,6 +589,21 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
     return team && kinds.includes(team.kind) ? team.file : undefined;
   };
   const teamFor = (id: string) => library.teams.find((entry) => entry.id === id);
+
+  /** Which model Improve with AI would use for this draft under the privacy rule, or why none may (refinePlan). */
+  const refinePlanFor = async (draft: TeamDraft, id: string | undefined): Promise<{ plan: RefinePlan; ai?: TeamAiDeps }> => {
+    if (!deps.teamAi) return { plan: { ok: false, reason: 'No model is available here. Set up a NEAR AI profile for this project first.' } };
+    let ai: TeamAiDeps;
+    try { ai = await deps.teamAi(); } catch (error) { return { plan: { ok: false, reason: (error as Error).message } }; }
+    if (!context) await load();
+    // The project team of a project with a knowledge base is private, as its members' models already must be.
+    return { plan: refinePlan(draft, { knowledgeBase: Boolean(context?.knowledgeBase && id === 'project'), choose: (need) => chooseTeamModel(need, ai) }), ai };
+  };
+  /** An imported team (or one made from an import) that is not approved: its text is untrusted, and the refiner is told so. */
+  const untrustedFor = async (draft: TeamDraft, id: string | undefined): Promise<boolean> => {
+    if (id) return Boolean(teamFor(id)?.imported);
+    return (await deps.library.unapprovedSource(draft.members).catch(() => undefined)) !== undefined;
+  };
 
   const versionsOf = async (file: string) => (await deps.library.versions(file)).map((version) => ({ ref: path.basename(version), label: versionLabel(path.basename(version)) }));
 
@@ -689,6 +759,76 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
         } catch (error) { post({ type: 'error', text: `The team could not be drafted: ${(error as Error).message}` }); }
         return;
       }
+      case 'improve-check': {
+        // Step 1, instant and free: the local check, and whether (and with which model) the AI review could run.
+        const findings = checkTeam(message.draft);
+        const { plan, ai } = await refinePlanFor(message.draft, message.id);
+        const blocked = findings.some((finding) => finding.severity === 'block');
+        post({ type: 'improve-checked', seq: message.seq, findings, ai: plan.ok
+          ? { available: !blocked, model: plan.model, private: plan.private, skipped: plan.skipped, ...(plan.note ? { note: plan.note } : {}), ...(blocked ? { reason: BLOCKED_BY_SECRET } : {}), ...(ai ? estimateFor(ai, plan.model, message.draft) : {}) }
+          : { available: false, reason: plan.reason, skipped: [] } });
+        return;
+      }
+      case 'improve-ai': {
+        // Step 2, on request: one model call through the outbound check. Requesting -> Reviewing | NothingToSuggest | Failed | Blocked | Cancelled.
+        cancelRefine();
+        const seq = message.seq;
+        const draft = message.draft;
+        const findings = checkTeam(draft);
+        const result = (state: 'blocked' | 'failed' | 'cancelled', reason: string) => post({ type: 'improve-result', seq, state, reason, suggestions: [], dropped: [] });
+        if (findings.some((finding) => finding.severity === 'block')) { result('blocked', BLOCKED_BY_SECRET); return; }
+        if (message.member && !draft.members.some((member) => member.name === message.member)) { result('blocked', `${message.member} is not on the team.`); return; }
+        const { plan, ai } = await refinePlanFor(draft, message.id);
+        if (!plan.ok || !ai) { result('blocked', plan.ok ? 'No model is available here.' : plan.reason); return; }
+        if (!input || !context) await load();
+        const prompt = refinePrompt(draft, { findings, tools: context!.tools.map((tool) => ({ name: tool.name, description: tool.description })), skipped: plan.skipped, ...(message.member ? { member: message.member } : {}), untrusted: await untrustedFor(draft, message.id) });
+        if (prompt.length > MAX_REFINE_CHARS && !message.member) { result('blocked', 'This team is too large to review in one go. Review one member at a time.'); return; }
+        const controller = new AbortController();
+        const current: NonNullable<typeof refine> = { seq, ...(message.id ? { id: message.id } : {}), suggestions: new Map<string, Suggestion>(), controller };
+        refine = current;
+        post({ type: 'improve-state', seq, state: 'requesting', model: plan.model, private: plan.private });
+        let reply: Awaited<ReturnType<typeof teamModelCall>>;
+        try {
+          reply = await teamModelCall(ai, { need: plan.need, messages: [{ role: 'system', content: REFINE_PROMPT }, { role: 'user', content: prompt }], maxTokens: REFINE_MAX_TOKENS, signal: controller.signal });
+        } catch (error) {
+          if (refine !== current) return;
+          current.controller = undefined;
+          if (controller.signal.aborted) result('cancelled', 'Cancelled. Nothing changed.');
+          else result('failed', `The AI review failed: ${(error as Error).message} Nothing changed.`);
+          return;
+        }
+        // A newer request (or Cancel) replaced this one: its reply is dropped.
+        if (refine !== current) return;
+        current.controller = undefined;
+        if (controller.signal.aborted) { result('cancelled', 'Cancelled. Nothing changed.'); return; }
+        if (!reply.ok) { result('blocked', reply.reason); return; }
+        const parsed = parseRefinement(reply.text, draft, { tools: context!.tools.map((tool) => tool.name), skipped: plan.skipped, ...(message.member ? { member: message.member } : {}), ...(reply.finishReason ? { finishReason: reply.finishReason } : {}) });
+        if (!parsed.readable) { result('failed', 'The reply could not be read as suggestions, so nothing changed. Try again.'); return; }
+        current.suggestions = new Map(parsed.suggestions.map((suggestion) => [suggestion.id, suggestion]));
+        post({
+          type: 'improve-result', seq, state: parsed.suggestions.some((suggestion) => suggestion.kind !== 'advice') ? 'reviewing' : 'nothing',
+          model: reply.model, private: reply.private, suggestions: parsed.suggestions, dropped: parsed.dropped, partial: parsed.partial, findings: findings.length,
+          ...(parsed.summary ? { summary: parsed.summary } : {}), ...(parsed.rating ? { rating: parsed.rating } : {}), ...(plan.note ? { note: plan.note } : {})
+        });
+        return;
+      }
+      case 'improve-cancel': if (refine?.seq === message.seq) cancelRefine(); return;
+      case 'improve-accept': {
+        // Accept changes only the page's draft; Save writes it, with its base-hash check and a kept version, as for any edit.
+        if (!refine || refine.seq !== message.seq) { post({ type: 'improve-applied', seq: message.seq, draft: message.draft, results: message.ids.map((id) => ({ id, state: 'stale', reason: 'This review is no longer current. Ask for a new one.' })) }); return; }
+        let draft = message.draft;
+        const results: Array<{ id: string; state: string; reason?: string }> = [];
+        for (const id of message.ids) {
+          const suggestion = refine.suggestions.get(id);
+          if (!suggestion) { results.push({ id, state: 'invalid', reason: 'There is no such suggestion.' }); continue; }
+          // Accept all covers wording only: a tool or member change is accepted on its own, never as part of a batch.
+          if (message.ids.length > 1 && !ACCEPT_ALL_KINDS.includes(suggestion.kind)) { results.push({ id, state: 'pending', reason: 'Accept this one on its own.' }); continue; }
+          const outcome = applySuggestion(draft, suggestion, { original: message.id && open?.id === message.id ? open.text : undefined, ...(message.edited !== undefined ? { edited: message.edited } : {}) });
+          if ('draft' in outcome) { draft = outcome.draft; results.push({ id, state: 'accepted' }); } else results.push({ id, state: outcome.state, reason: outcome.reason });
+        }
+        post({ type: 'improve-applied', seq: message.seq, draft, results, findings: checkTeam(draft).length });
+        return;
+      }
       case 'review': {
         if (!input || !context) await load();
         const original = message.id && open?.id === message.id ? open.text : undefined;
@@ -711,6 +851,7 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
         return;
       }
       case 'open': {
+        cancelRefine();
         const file = fileFor(message.id);
         if (!file) return;
         try { await sendTeam(message.id, file); } catch (error) { post({ type: 'error', text: `This team file can't be opened in the studio: ${(error as Error).message} Open it as Markdown to fix it.` }); }
@@ -722,6 +863,7 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
         return;
       }
       case 'leave-wizard': {
+        cancelRefine();
         const name = message.wizard.draft.name.trim();
         const choice = await choose(`You have an unsaved team${name ? ` "${name}"` : ''}. Discard it, or save it as a draft to finish later?`, 'Discard changes', 'Save draft');
         if (choice === 'Save draft') {
@@ -735,6 +877,7 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
         return;
       }
       case 'leave-editor': {
+        cancelRefine();
         const name = message.edit.draft.name.trim() || teamFor(message.edit.id)?.name || 'this team';
         const choice = await choose(`You have unsaved changes to "${name}". Discard them, or save them before leaving?`, 'Discard changes', 'Save');
         if (choice === 'Save') {
@@ -942,6 +1085,8 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
 
   const subscriptions = [
     deps.watch((file) => { void onWatch(file); }),
+    // Emergency stop cancels an AI review in progress, as it cancels the role tests.
+    ...(deps.onStop ? [deps.onStop(() => cancelRefine())] : []),
     ...(deps.onDidChangeSettings ? [deps.onDidChangeSettings(() => { void refresh(); })] : []),
     host.webview.onDidReceiveMessage(async (value) => {
       const message = parseStudioMessage(value);
@@ -962,6 +1107,7 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
   };
   const dispose = () => {
     if (timer) clearTimeout(timer);
+    cancelRefine();
     for (const subscription of subscriptions) subscription.dispose();
     void keepUnsaved().catch(() => undefined);
   };
