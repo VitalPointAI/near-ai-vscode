@@ -283,6 +283,18 @@
         "command": "nearAi.clearProjectModelChoices",
         "title": "Clear This Project's Model Choices",
         "category": "NEAR AI"
+      },
+      {
+        "command": "nearAi.team.enable",
+        "title": "Enable Team Mode",
+        "category": "NEAR AI",
+        "icon": "$(organization)"
+      },
+      {
+        "command": "nearAi.team.verifyLog",
+        "title": "Verify Team Log",
+        "category": "NEAR AI",
+        "icon": "$(verified)"
       }
     ],
     "viewsContainers": {
@@ -751,10 +763,34 @@
             "*extract*": "fast"
           },
           "markdownDescription": "Model for each agent role: a tier (`deep`, `standard`, `fast`) or a NEAR model ID, by agent name or a `*` pattern. Research and mapping roles read large inputs in parallel, so they default to the cheaper fast tier; bulk fetch and extract roles do too. Planner, plan-checker, verifier, analyst, editor and red-team roles default to the deep tier, because their judgement decides the outcome. A team member's own `model:` line wins, and an agent never uses a model less private than the chat's. A model chosen for this project in Compare Models is used instead of this setting until you clear it there or with NEAR AI: Clear This Project's Model Choices."
+        },
+        "nearAi.team.pollSeconds": {
+          "type": "number",
+          "default": 15,
+          "minimum": 5,
+          "maximum": 3600,
+          "scope": "application",
+          "description": "How often Team Mode checks the team's coordination log, in seconds, while this window is focused. Unfocused windows check every 2 minutes."
+        },
+        "nearAi.team.preview": {
+          "type": "boolean",
+          "default": false,
+          "scope": "application",
+          "description": "Shows Enable Team Mode in the Command Palette. Team Mode is an early preview: until invitations arrive, a team holds only its owner."
         }
       }
     },
     "menus": {
+      "commandPalette": [
+        {
+          "command": "nearAi.team.enable",
+          "when": "config.nearAi.team.preview"
+        },
+        {
+          "command": "nearAi.team.verifyLog",
+          "when": "config.nearAi.team.preview || nearAi.team.active"
+        }
+      ],
       "view/title": [
         {
           "command": "nearAi.newChat",

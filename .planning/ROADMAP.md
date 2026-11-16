@@ -256,32 +256,32 @@ These phases change the extension's engine (`src/agent`, `src/domain`, `src/team
   5. Every v0.6.0 phase and requirement has a recorded disposition (landed here, carried to the Team Mode milestone, folded into a named new phase, or retired), and carried v0.6.0 ids that collide with v0.7.0 ids (TEAM-01..04, SETUP-01) carry a `TM-` prefix. (TMR-04)
 **Research flags**: (1) The branch forked at 0.4.11; `main` is at 0.4.22 or later, with Phases 26 and 27 in between. Decide per file whether to port by cherry-pick or re-apply from the Phase 60 SUMMARY files; `src/extension.ts`, the `package.json` contributions and `src/agent/permissions.ts` changed most. (2) Team Mode's coordination transport and Phase 27's sync both run private git mirrors: check they cannot share or lock each other's mirror. (3) Phases 61, 62 and 62.1 stay on the archive branch for milestone L2 (owner, 2026-11-15); the branch is archived on GitHub at 4207080.
 **Undo cost**: Low for the code (additive, inert while Team Mode is off). Higher for the signing interface (TMR-05): grants and policy bundles signed through it outlive a change.
-**Plans:** 15 plans (one per wave; PR 1 is plans 01-08 on `feat/team-core-on-main`, PR 2 is plans 09-15 on `feat/team-signed-payloads`)
+**Plans:** 8/15 plans executed (one per wave; PR 1 is plans 01-08 on `feat/team-core-on-main`, PR 2 is plans 09-15 on `feat/team-signed-payloads`)
 
 Plans:
 **Wave 1**
-- [ ] 69-01-PLAN.md — TMR-01 archive check, worktree install, pure domain core from ae5e9e1
+- [x] 69-01-PLAN.md — TMR-01 archive check, worktree install, pure domain core from ae5e9e1
 
 **Wave 2** *(blocked on Wave 1 completion)*
-- [ ] 69-02-PLAN.md — transport, git runner, identity and git transport with their tests
+- [x] 69-02-PLAN.md — transport, git runner, identity and git transport with their tests
 
 **Wave 3** *(blocked on Wave 2 completion)*
-- [ ] 69-03-PLAN.md — event log, team.json, audit mirror, Enable, canary, forgery and concurrency
+- [x] 69-03-PLAN.md — event log, team.json, audit mirror, Enable, canary, forgery and concurrency
 
 **Wave 4** *(blocked on Wave 3 completion)*
-- [ ] 69-04-PLAN.md — two windows on one mirror with main's lock, reserved sync refs, isolation test
+- [x] 69-04-PLAN.md — two windows on one mirror with main's lock, reserved sync refs, isolation test
 
 **Wave 5** *(blocked on Wave 4 completion)*
-- [ ] 69-05-PLAN.md — VS Code adapters, activation, solo parity, fix 9e49bc5
+- [x] 69-05-PLAN.md — VS Code adapters, activation, solo parity, fix 9e49bc5
 
 **Wave 6** *(blocked on Wave 5 completion)*
-- [ ] 69-06-PLAN.md — preview setting and palette gating, plain words, manifest and boundary tests
+- [x] 69-06-PLAN.md — preview setting and palette gating, plain words, manifest and boundary tests
 
 **Wave 7** *(blocked on Wave 6 completion)*
-- [ ] 69-07-PLAN.md — one identity per person per install, rollback rule (D-22), Team Mode e2e in a real window (D-30)
+- [x] 69-07-PLAN.md — one identity per person per install, rollback rule (D-22), Team Mode e2e in a real window (D-30)
 
 **Wave 8** *(blocked on Wave 7 completion)*
-- [ ] 69-08-PLAN.md — PR 1 gate, Phase 60 criteria re-verified on main, open PR 1
+- [x] 69-08-PLAN.md — PR 1 gate, Phase 60 criteria re-verified on main, open PR 1
 
 **Wave 9** *(blocked on Wave 8 completion)*
 - [ ] 69-09-PLAN.md — device.rotated end to end
@@ -695,7 +695,7 @@ Also carried: the shared code-server follow-ups (owner, 2026-11-05). Phase 27 al
 | 28. Secure development workflow setup step | 0/TBD | Not started | - |
 | 29. A cleanup member with a safe CleanUp tool | 0/TBD | Not started (after Phase 70) | - |
 | 68. Relay foundation | 8/8 | Complete; merged as PR #50 (052d5cf); `relay` required on main (D-19) | 2026-11-15 |
-| 69. Team Mode reconciliation | 0/15 | Planned (two PRs) | - |
+| 69. Team Mode reconciliation | 8/15 | In Progress (two PRs) | - |
 | 70. Capability vocabulary, manifests and one gate | 0/TBD | Not started | - |
 | 71. Identities, credentials and delegation that only narrows | 0/TBD | Not started (opens with a research step) | - |
 | 72. Execution backends on a copy, with a guarded apply | 0/TBD | Not started (spike done 2026-11-15) | - |

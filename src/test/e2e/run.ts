@@ -46,13 +46,25 @@ async function main(): Promise<void> {
     // A maximized window (VS Code's own setting; the test window ignores saved window sizes), so the
     // width checks can size a page to 600px beside a second editor group. CI gives xvfb a 1920x1080 screen.
     await mkdir(path.join(userData, 'User'), { recursive: true });
-    await writeFile(path.join(userData, 'User', 'settings.json'), JSON.stringify({ 'window.newWindowDimensions': 'maximized' }));
+    // The project scenario runs real git (the Team Mode tests): VS Code's own git integration is off so it never holds the index lock while Enable
+    // commits, and git reads only this config file, never the developer's or the CI runner's.
+    const userSettings: Record<string, unknown> = { 'window.newWindowDimensions': 'maximized', ...(scenario === 'project' ? { 'git.enabled': false } : {}) };
+    await writeFile(path.join(userData, 'User', 'settings.json'), JSON.stringify(userSettings));
+    const gitEnv: Record<string, string> = {};
+    if (scenario === 'project') {
+      const gitConfig = path.join(userData, 'e2e.gitconfig');
+      await writeFile(gitConfig, ['[user]', '\tname = E2E Owner', '\temail = e2e-owner@example.com', '[init]', '\tdefaultBranch = main', '[commit]', '\tgpgsign = false', ''].join('\n'));
+      gitEnv.GIT_CONFIG_GLOBAL = gitConfig;
+      gitEnv.GIT_CONFIG_NOSYSTEM = '1';
+    }
     await runTests({
       version,
       extensionDevelopmentPath,
       extensionTestsPath,
-      launchArgs: [workspace, '--disable-extensions', '--disable-workspace-trust', `--user-data-dir=${userData}`, '--skip-welcome', '--skip-release-notes', ...screenArgs],
-      extensionTestsEnv: { NEAR_AI_E2E: '1', NEAR_AI_E2E_SCENARIO: scenario, NEAR_AI_E2E_WORKSPACE: workspace }
+      // --password-store=basic keeps this window's secrets (Enable stores the device key) in its own temporary user data, so it never asks the
+      // person's OS keyring or puts an unlock prompt on the real screen.
+      launchArgs: [workspace, '--disable-extensions', '--disable-workspace-trust', `--user-data-dir=${userData}`, '--password-store=basic', '--skip-welcome', '--skip-release-notes', ...screenArgs],
+      extensionTestsEnv: { NEAR_AI_E2E: '1', NEAR_AI_E2E_SCENARIO: scenario, NEAR_AI_E2E_WORKSPACE: workspace, NEAR_AI_E2E_USER_DATA: userData, ...gitEnv }
     });
   }
 }

@@ -9,7 +9,7 @@ export type BudgetStatus = 'ok' | 'warning' | 'hard-stop';
 export type AuditEventType =
   | 'preflight' | 'route' | 'preview' | 'approval' | 'dispatch' | 'denial' | 'retry'
   | 'pause' | 'resume' | 'cancellation' | 'budget' | 'emergency-stop'
-  | 'completed' | 'failed' | 'setup-blocked' | 'near-wallet';
+  | 'completed' | 'failed' | 'setup-blocked' | 'near-wallet' | 'team-roster';
 
 export interface CostEstimate { inputTokens: number; outputTokens: number; totalTokens: number; costUsd: number; currency: 'USD'; }
 export interface BudgetState { limitUsd: number; spentUsd: number; reservedUsd: number; remainingUsd: number; status: BudgetStatus; warningAtUsd: number; }
