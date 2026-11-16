@@ -8,7 +8,7 @@ import { DEFAULT_TOOLS, parseTeam, recommendedProjectTeam, slugify, TeamLibrary,
 import type { AgentDiscoveryAnswers } from '../domain/agents';
 import { buildTeamGraph } from '../agent/teamGraph';
 import { checkTeam, checkWarnings } from '../agent/teamCheck';
-import { ACCEPT_ALL_KINDS, applySuggestion, KNOWLEDGE_BASE_PRIVATE, MAX_REFINE_CHARS, parseRefinement, REFINE_PROMPT, refinePlan, refinePrompt, type RefinePlan, type Suggestion } from '../agent/teamRefine';
+import { ACCEPT_ALL_KINDS, applySuggestion, KNOWLEDGE_BASE_PRIVATE, MAX_REFINE_BYTES, parseRefinement, REFINE_PROMPT, refinePlan, refinePrompt, type RefinePlan, type Suggestion } from '../agent/teamRefine';
 import { chooseTeamModel, teamModelCall, type TeamAiDeps } from './teamStudioAi';
 import { CUSTOM_PLAGIARISM_CHECKER } from '../agent/researchIntegrity';
 import { builderPrompt, parseProposal, proposalDraft, proposalText, TEAM_BUILDER_PROMPT } from '../agent/teamBuilder';
@@ -518,14 +518,22 @@ export function optimiseTarget<T extends { file: string; project: boolean; team?
 const REFINE_MAX_TOKENS = 6000;
 const BLOCKED_BY_SECRET = 'Something in this team looks like a key, token or password (see the local check). Remove it, then ask again: Improve with AI never sends it.';
 
-/** What one AI review would cost at most: the team as input, and the most the reply may be. A local model costs nothing. */
-function estimateFor(ai: TeamAiDeps, model: string, draft: TeamDraft): { estimate?: string } {
+/** Room for the chat format around the two messages, in tokens. */
+const MESSAGE_OVERHEAD_TOKENS = 200;
+
+/**
+ * What one AI review costs at most (PR #69 review: it counted only the draft, so the "at most" could be exceeded). The input bound is the fixed prompt
+ * plus the largest user prompt the review sends (MAX_REFINE_BYTES, which covers the team, the tool list and the findings), counted as one token per
+ * byte, which no tokenizer goes below; the output bound is the reply's token cap. A local model costs nothing.
+ */
+function estimateFor(ai: TeamAiDeps, model: string): { estimate?: string } {
   const info = ai.models.find((candidate) => candidate.id === model);
   if (info?.privacyBoundary === 'local') return { estimate: 'free: it runs on this computer' };
   if (info?.inputPricePerMillion === undefined && info?.outputPricePerMillion === undefined) return {};
-  const inputTokens = (JSON.stringify(draft).length + REFINE_PROMPT.length + 4000) / 4;
+  const inputTokens = Buffer.byteLength(REFINE_PROMPT, 'utf8') + MAX_REFINE_BYTES + MESSAGE_OVERHEAD_TOKENS;
   const cost = (inputTokens * (info.inputPricePerMillion ?? 0) + REFINE_MAX_TOKENS * (info.outputPricePerMillion ?? 0)) / 1_000_000;
-  return { estimate: `at most about $${cost < 0.01 ? '0.01' : cost.toFixed(2)} (one call)` };
+  // Rounded up, so the figure shown is never below the ceiling.
+  return { estimate: `at most about $${Math.max(0.01, Math.ceil(cost * 100) / 100).toFixed(2)} (one call)` };
 }
 
 /** Wires the studio page to the team library. Returns refresh/dispose for the host and the tests. */
@@ -776,7 +784,7 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
         const { plan, ai } = await refinePlanFor(message.draft);
         const blocked = findings.some((finding) => finding.severity === 'block');
         post({ type: 'improve-checked', seq: message.seq, findings, ai: plan.ok
-          ? { available: !blocked, model: plan.model, private: plan.private, skipped: plan.skipped, ...(plan.note ? { note: plan.note } : {}), ...(blocked ? { reason: BLOCKED_BY_SECRET } : {}), ...(ai ? estimateFor(ai, plan.model, message.draft) : {}) }
+          ? { available: !blocked, model: plan.model, private: plan.private, skipped: plan.skipped, ...(plan.note ? { note: plan.note } : {}), ...(blocked ? { reason: BLOCKED_BY_SECRET } : {}), ...(ai ? estimateFor(ai, plan.model) : {}) }
           : { available: false, reason: plan.reason, skipped: [] } });
         return;
       }
@@ -797,7 +805,8 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
         if (!plan.ok || !ai) { result('blocked', plan.ok ? 'No model is available here.' : plan.reason); return; }
         if (!input || !context) await load();
         const prompt = refinePrompt(draft, { findings, tools: context!.tools.map((tool) => ({ name: tool.name, description: tool.description })), skipped: plan.skipped, ...(message.member ? { member: message.member } : {}), untrusted: await untrustedFor(draft, message.id) });
-        if (prompt.length > MAX_REFINE_CHARS && !message.member) { result('blocked', 'This team is too large to review in one go. Review one member at a time.'); return; }
+        // The cap holds for every review (a one-member one too), so the cost ceiling shown before asking is a true ceiling.
+        if (Buffer.byteLength(prompt, 'utf8') > MAX_REFINE_BYTES) { result('blocked', message.member ? `${message.member}'s instructions are too long to review in one go. Shorten them first.` : 'This team is too large to review in one go. Review one member at a time.'); return; }
         if (refine !== current) return;
         if (controller.signal.aborted) { result('cancelled', 'Cancelled. Nothing changed.'); return; }
         post({ type: 'improve-state', seq, state: 'requesting', model: plan.model, private: plan.private });

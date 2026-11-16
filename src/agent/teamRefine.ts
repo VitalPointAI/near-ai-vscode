@@ -149,8 +149,11 @@ Rules:
 /** Team text inside the prompt: JSON with "<" escaped, so no text in the team can close the <team-file> block early. */
 const quoteJson = (value: unknown) => JSON.stringify(value, null, 1).replace(/</g, '\\u003c');
 
-/** More than this much team text is too much to review in one call; the person reviews one member at a time instead. */
-export const MAX_REFINE_CHARS = 60_000;
+/**
+ * The most the review's user prompt may be, in UTF-8 bytes: more is too much for one call (the person reviews one member at a time instead), and it is
+ * what the stated cost ceiling counts, since no token is shorter than a byte.
+ */
+export const MAX_REFINE_BYTES = 60_000;
 
 export interface RefinePromptOptions {
   findings: readonly TeamFinding[];

@@ -1796,3 +1796,25 @@ test('a hand-written privacy: tee team: the host says so, and the Private team b
   assert.deepEqual([box.checked, box.disabled], [false, true]);
   assert.match(page.text(), /This team's file says privacy: tee, which keeps every member on a private model\. Change that line in the Markdown file to change it\./);
 });
+
+// PR #69 review: the "at most" figure counted only the draft, the fixed prompt and a margin. It must cover the largest prompt the review will send.
+test('host: the stated cost of an AI review is a true ceiling: at least the cost of the largest prompt the review would send', async () => {
+  const { MAX_REFINE_BYTES, REFINE_PROMPT } = await import('../agent/teamRefine');
+  const h = await harness();
+  const { ai } = fakeAi([TEE_MODEL], []);
+  h.deps.teamAi = async () => ai;
+  await h.send({ type: 'improve-check', seq: 1, draft: improveDraft() });
+  const stated = Number(/at most about \$(\d+\.\d+)/.exec(last(h, 'improve-checked').ai.estimate)![1]);
+  // Every token is at least one byte, so the largest prompt is at most this many input tokens; the reply is capped at 6000 tokens.
+  const largest = (Buffer.byteLength(REFINE_PROMPT, 'utf8') + MAX_REFINE_BYTES) * TEE_MODEL.inputPricePerMillion / 1_000_000 + 6000 * TEE_MODEL.outputPricePerMillion / 1_000_000;
+  assert.ok(stated >= largest, `${stated} >= ${largest}`);
+  // A prompt over the cap is never sent, in a one-member review too.
+  const huge = improveDraft();
+  huge.members[0].instructions = `${'Plan the work in detail. '.repeat(470)}Report the plan.`;
+  const many: TeamDraft = { ...huge, members: Array.from({ length: 12 }, (_, index) => ({ ...huge.members[0], name: `m${index}` })) };
+  const { ai: counted, sent } = fakeAi([TEE_MODEL], []);
+  h.deps.teamAi = async () => counted;
+  await h.send({ type: 'improve-ai', seq: 2, draft: many });
+  assert.equal(last(h, 'improve-result').state, 'blocked');
+  assert.equal(sent.length, 0);
+});
