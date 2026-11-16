@@ -71,7 +71,7 @@ function pathFields(tool: AgentTool<any>): string[] {
   const take = (value: unknown): void => {
     if (value === null || typeof value !== 'object' || Array.isArray(value)) return;
     const source = value as Partial<InputFieldSource>;
-    if (source.from === 'input' && source.as === 'path' && typeof source.field === 'string') names.add(source.field);
+    if (source.from === 'input' && (source.as === 'path' || source.as === 'folder') && typeof source.field === 'string') names.add(source.field);
   };
   for (const entry of tool.manifest.effects) {
     if ('from' in entry) continue;

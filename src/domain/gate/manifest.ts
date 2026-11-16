@@ -7,7 +7,8 @@ import { GATE_CONTEXTS } from './bundle';
 import type { GateContextName } from './bundle';
 import { checkKeys, childPath, isRecord, ownValue, refused } from './shape';
 import type { Fields, Parsed } from './shape';
-import { CREDENTIAL_HANDLE_PATTERN, GATE_VOCABULARY_VERSION, isCapabilityVerb, parseCapability, parseHostPattern } from './vocabulary';
+import { contentsOf } from './pathCover';
+import { CREDENTIAL_HANDLE_PATTERN, GATE_VOCABULARY_VERSION, isCapabilityVerb, parseCapability, parseHostPattern, parsePathPattern } from './vocabulary';
 import type { Capability, CapabilityVerb, HostPattern } from './vocabulary';
 import { findSecrets } from '../team/secrets';
 
@@ -24,7 +25,7 @@ export type RunsOn = (typeof RUNS_ON)[number];
 export const GATE_RUN_CONTEXTS = GATE_CONTEXTS;
 
 /** How an input value becomes part of an effect: a project path, the host of a URL, or the value as given. */
-export const INPUT_AS = Object.freeze(['path', 'url-host', 'literal'] as const);
+export const INPUT_AS = Object.freeze(['path', 'folder', 'url-host', 'literal'] as const);
 export type InputAs = (typeof INPUT_AS)[number];
 
 export interface InputFieldSource { readonly from: 'input'; readonly field: string; readonly as: InputAs }
@@ -61,7 +62,7 @@ const BASH_TOOL = 'Bash';
 /** The constraint fields a manifest may fill from a call, which forms each accepts, and a stand-in value used to check the rest of the template in place. */
 interface SourceField { readonly list: boolean; readonly as: readonly InputAs[]; readonly probe: (index: number) => string }
 const SOURCE_FIELDS: ReadonlyMap<string, SourceField> = new Map<string, SourceField>([
-  ['paths', { list: true, as: ['path', 'literal'], probe: (index) => `probe${index}` }],
+  ['paths', { list: true, as: ['path', 'folder', 'literal'], probe: (index) => `probe${index}` }],
   ['hosts', { list: true, as: ['url-host', 'literal'], probe: (index) => `probe${index}.example` }],
   ['agent', { list: false, as: ['literal'], probe: (index) => `probe${index}` }],
   ['channel', { list: false, as: ['literal'], probe: (index) => `probe${index}` }]
@@ -288,6 +289,12 @@ function resolveSource(source: InputFieldSource, input: unknown): Parsed<string>
   const raw = ownField(input, source.field);
   if (raw === undefined) return refused('missing-field', where);
   if (typeof raw !== 'string' || raw === '') return refused('wrong-type', where);
+  // `folder` reads a path as the folder it names, and everything under it (`src` is `src/**`); the root in any form is `**`.
+  if (source.as === 'folder') {
+    // The same checks a `path` gets first, so an absolute path, a `..` or a backslash is refused here too and never read as a project folder.
+    const folder = parsePathPattern(raw, where);
+    return folder.ok ? { ok: true, value: contentsOf(folder.value) } : folder;
+  }
   if (source.as !== 'url-host') return { ok: true, value: raw };
   let host = '';
   try {

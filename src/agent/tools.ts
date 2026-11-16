@@ -4,6 +4,7 @@ import { homedir } from 'node:os';
 import * as path from 'node:path';
 import type { ActionCapability } from '../domain/policy';
 import { parseToolManifest } from '../domain/gate/manifest';
+import { contentsOf } from '../domain/gate/pathCover';
 import type { InputAs, RunsOn, ToolManifest } from '../domain/gate/manifest';
 import type { GateContextName } from '../domain/gate/bundle';
 import { namesStateKeys, protectedWriteReason, STATE_FOLDER_PATH, STATE_KEYS_PATH, stateKeysReason } from '../domain/protectedPaths';
@@ -117,6 +118,17 @@ export function declareManifest(draft: { tool: string; effects: readonly unknown
 /** A call with no `path` argument means the whole project, so the manifest reads `**` (Glob, Grep, CheckOriginality). A path the call names is passed as given. */
 export function withDefaultPath(raw: Record<string, unknown>): Record<string, unknown> {
   return typeof raw.path === 'string' && raw.path !== '' ? raw : { ...raw, path: '**' };
+}
+
+/**
+ * The Glob and Grep form of that: the project root written as `.` or `./` is `**`, as an empty or missing path always was. A folder name is read as the folder
+ * and everything under it by the manifest's `folder` source (owner-confirmed, PR #70 review), so no other change is made here.
+ */
+export function withRootPath(raw: Record<string, unknown>): Record<string, unknown> {
+  const given = withDefaultPath(raw);
+  // Only a relative spelling of the root: `/` or `C:\` is the machine's root, not the project's, and stays as written so the gate refuses it.
+  const isRoot = typeof given.path === 'string' && !path.isAbsolute(given.path) && !/[\\]/.test(given.path) && contentsOf(given.path) === '**';
+  return isRoot ? { ...given, path: '**' } : given;
 }
 
 /** Files that usually hold credentials; reading one asks first, since its contents go to the model. */
@@ -365,8 +377,8 @@ export const globTool: AgentTool<{ pattern: string; path?: string }> = {
   description: 'Find files by glob pattern, such as "**/*.ts" or "src/**/test/*.ts". Returns workspace-relative paths, most recently modified first. Skips .git, node_modules, and build output unless the pattern names them.',
   parameters: { type: 'object', properties: { pattern: { type: 'string' }, path: { type: 'string', description: 'Directory to search; defaults to the workspace root.' } }, required: ['pattern'], additionalProperties: false },
   capability: 'read',
-  manifest: declareManifest({ tool: 'Glob', effects: [{ verb: 'read', paths: [fromArgument('path')] }], contexts: INTERACTIVE_AND_UNATTENDED }),
-  manifestInput: withDefaultPath,
+  manifest: declareManifest({ tool: 'Glob', effects: [{ verb: 'read', paths: [fromArgument('path'), fromArgument('path', 'folder')] }], contexts: INTERACTIVE_AND_UNATTENDED }),
+  manifestInput: withRootPath,
   parse: (raw) => ({ pattern: str(raw, 'pattern')!, path: str(raw, 'path', false) }),
   title: (input) => `Find ${input.pattern}${input.path ? ` in ${input.path}` : ''}`,
   forbidden: async (input, context) => (isStateKeysPath(input.pattern) || namesStateKeys(input.pattern) ? stateKeysReason(input.pattern) : forbiddenPath(input.path, context)),
@@ -392,8 +404,8 @@ export const grepTool: AgentTool<{ pattern: string; path?: string; glob?: string
   description: 'Search file contents with a regular expression (ripgrep syntax). output_mode: "files_with_matches" (default) lists files, "content" shows matching lines with line numbers, "count" shows matches per file. Filter files with glob (e.g. "*.ts").',
   parameters: { type: 'object', properties: { pattern: { type: 'string' }, path: { type: 'string' }, glob: { type: 'string' }, output_mode: { type: 'string', enum: ['files_with_matches', 'content', 'count'] }, '-i': { type: 'boolean', description: 'Case-insensitive.' }, context: { type: 'number', description: 'Lines of context around each match (content mode).' }, head_limit: { type: 'number', description: 'Maximum lines of output.' } }, required: ['pattern'], additionalProperties: false },
   capability: 'read',
-  manifest: declareManifest({ tool: 'Grep', effects: [{ verb: 'read', paths: [fromArgument('path')] }], contexts: INTERACTIVE_AND_UNATTENDED }),
-  manifestInput: withDefaultPath,
+  manifest: declareManifest({ tool: 'Grep', effects: [{ verb: 'read', paths: [fromArgument('path'), fromArgument('path', 'folder')] }], contexts: INTERACTIVE_AND_UNATTENDED }),
+  manifestInput: withRootPath,
   parse: (raw) => {
     const mode = (str(raw, 'output_mode', false) ?? 'files_with_matches') as GrepMode;
     if (!['files_with_matches', 'content', 'count'].includes(mode)) throw new ToolError('output_mode must be files_with_matches, content, or count.');

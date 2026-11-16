@@ -105,7 +105,9 @@ test('the core tools\' effects are filled from the call, with the whole project 
   assert.deepEqual(effects('Write', { file_path: 'src/a.ts', content: 'x' }), [{ verb: 'workspaceWrite', paths: ['src/a.ts'] }]);
   assert.deepEqual(effects('Edit', { file_path: 'src/a.ts', old_string: 'a', new_string: 'b' }), [{ verb: 'workspaceWrite', paths: ['src/a.ts'] }]);
   assert.deepEqual(effects('Glob', { pattern: '**/*.ts' }), [{ verb: 'read', paths: ['**'] }]);
-  assert.deepEqual(effects('Glob', { pattern: '*.ts', path: 'src' }), [{ verb: 'read', paths: ['src'] }]);
+  // A folder name covers everything under it (owner-confirmed, PR #70 review), so a Glob or Grep given a folder names the folder and its contents.
+  assert.deepEqual(effects('Glob', { pattern: '*.ts', path: 'src' }), [{ verb: 'read', paths: ['src', 'src/**'] }]);
+  assert.deepEqual(effects('Grep', { pattern: 'x', path: 'src/' }), [{ verb: 'read', paths: ['src', 'src/**'] }]);
   assert.deepEqual(effects('Grep', { pattern: 'x' }), [{ verb: 'read', paths: ['**'] }]);
   assert.deepEqual(effects('Bash', { command: 'ls' }), [{ verb: 'shell', cwd: 'workspace' }]);
   for (const name of ['BashOutput', 'KillShell', 'TodoWrite']) assert.deepEqual(effects(name, {}), [{ verb: 'plan' }]);

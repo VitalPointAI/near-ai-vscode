@@ -19,7 +19,7 @@ import { EFFECTS_NOT_DECLARED_TEXT, MANIFEST_IS_A_CLAIM_TEXT, RUNS_ON_THIS_MACHI
 
 const EM_DASH = String.fromCharCode(0x2014);
 
-function source(field: string, as: 'path' | 'url-host' | 'literal'): { from: 'input'; field: string; as: string } {
+function source(field: string, as: 'path' | 'folder' | 'url-host' | 'literal'): { from: 'input'; field: string; as: string } {
   return { from: 'input', field, as };
 }
 
@@ -126,6 +126,7 @@ test('GATE-02 templates: a typo, a field on the wrong verb, an unknown verb and 
   assert.equal(refusedWith(toolManifest('X', [{ verb: 'fly' }])), 'unknown-verb');
   assert.equal(refusedWith(toolManifest('X', [{ verb: 'workspaceWrite', paths: [source('file_path', 'url-host')] }])), 'not-allowed-here');
   assert.equal(refusedWith(toolManifest('X', [{ verb: 'network', hosts: [source('url', 'path')] }])), 'not-allowed-here');
+  assert.equal(refusedWith(toolManifest('X', [{ verb: 'network', hosts: [source('url', 'folder')] }])), 'not-allowed-here', 'a folder source is for paths only');
   assert.equal(refusedWith(toolManifest('X', [{ verb: 'workspaceWrite', paths: [{ from: 'env', field: 'HOME', as: 'path' }] }])), 'not-allowed-here');
   assert.equal(refusedWith(toolManifest('X', [{ verb: 'workspaceWrite', paths: [{ from: 'input', field: 'bad field', as: 'path' }] }])), 'wrong-type');
   assert.equal(refusedWith(toolManifest('X', [{ verb: 'workspaceWrite', paths: [{ from: 'input', field: 'a', as: 'path', extra: 1 }] }])), 'unknown-field');
@@ -499,4 +500,16 @@ test('describeManifest: a manifest that lists no effect says that what it does i
   assert.ok(describeManifest(NO_EFFECTS).includes(EFFECTS_NOT_DECLARED_TEXT));
   const known = parsed(toolManifest('Read', [{ verb: 'read', paths: ['src/**'] }]));
   assert.ok(!describeManifest(known).includes(EFFECTS_NOT_DECLARED_TEXT));
+});
+
+test('a `folder` source fills a path as the folder and everything under it, and refuses what a `path` source refuses', () => {
+  const manifest = parsed(toolManifest('Search', [{ verb: 'read', paths: [source('where', 'path'), source('where', 'folder')] }]));
+  const fill = (where: unknown) => effectsFor(manifest, { where });
+  const names = (where: unknown): string[] | undefined => { const out = fill(where); return out.ok ? out.value.flatMap((effect) => (effect.verb === 'read' ? [...effect.paths] : [])) : undefined; };
+  assert.deepEqual(names('src'), ['src', 'src/**']);
+  assert.deepEqual(names('src/'), ['src', 'src/**']);
+  assert.deepEqual(names('src/**'), ['src/**']);
+  assert.deepEqual(names('**'), ['**']);
+  for (const bad of ['/etc', '../x', 'C:\\x', 'a\\b', '', 3, undefined]) assert.equal(names(bad), undefined, `refuses ${String(bad)}`);
+  assert.equal(refusedWith(toolManifest('Search', [{ verb: 'read', paths: [source('where', 'folder')] }, { verb: 'read', paths: [source('where', 'folder')] }])), 'duplicate');
 });
