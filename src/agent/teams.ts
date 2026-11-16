@@ -86,6 +86,9 @@ export function reportsToKey(value: string | undefined): string {
 }
 
 /** Parses a team file; throws with a message that says what to fix. */
+/** A member's privacy setting line: `privacy:`, any case, a one-word value, and an optional `# note`. Team Studio finds the line with the same pattern. */
+export const MEMBER_PRIVACY_LINE = /^(privacy):\s*([^\s#]*)\s*(?:#.*)?$/i;
+
 export function parseTeam(text: string, file: string): TeamDefinition {
   const { data, body } = parseFrontmatter(text);
   const name = typeof data.name === 'string' && data.name.trim() ? data.name.trim() : '';
@@ -101,8 +104,9 @@ export function parseTeam(text: string, file: string): TeamDefinition {
     let index = 0;
     while (index < rest.length) {
       // `privacy:` counts as a setting only with a one-word value: an existing member's instructions may open with a sentence such as "Privacy: handle
-      // client data carefully", which must stay instructions rather than fail as an unknown privacy value and make the whole team unloadable.
-      const field = /^(role|model|tools|reports-to):\s*(.*)$/i.exec(rest[index].trim()) ?? /^(privacy):\s*(\S*)\s*$/i.exec(rest[index].trim());
+      // client data carefully", which must stay instructions rather than fail as an unknown privacy value and make the whole team unloadable. A note
+      // after a `#` is allowed, as in the frontmatter (0.4.28, PR #69 review): `privacy: private  # client data` is a private member, not instructions.
+      const field = /^(role|model|tools|reports-to):\s*(.*)$/i.exec(rest[index].trim()) ?? MEMBER_PRIVACY_LINE.exec(rest[index].trim());
       if (!field) { if (rest[index].trim()) break; index += 1; continue; }
       fields[field[1].toLowerCase()] = field[2].trim();
       index += 1;
