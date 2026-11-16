@@ -26,11 +26,13 @@ const MAX_DETAIL = 300;
 
 interface OutcomeFields { readonly action_id: number; readonly disposition_id: number; readonly status_id: number; readonly severity_id: number }
 
-// action_id 1 Allowed, 2 Denied, 3 Observed. disposition_id 1 Allowed, 2 Blocked, 8 Approved, 25 Rejected, 26 Unauthorized; an ask is written as 3 until a
-// person answers (the answer is a second record with the same call id). status_id 1 Success, 2 Failure.
+// The OCSF 1.3.0 security_control profile enums. action_id: 0 Unknown, 1 Allowed, 2 Denied, 99 Other (there is no 3). disposition_id: 1 Allowed, 2 Blocked,
+// 3 Quarantined, 8 Approved, 25 Rejected, 26 Unauthorized, 99 Other. An ask has no OCSF value of its own, so until a person answers it is written as 99 Other
+// for both, with the gate's own word for it (`outcome: 'asked'`) in unmapped.nearAi; the answer is a second record with the same call id. 3 is never used.
+// status_id 1 Success, 2 Failure.
 const OUTCOME_FIELDS: Readonly<Record<DecisionOutcome, OutcomeFields>> = Object.freeze({
   allowed: { action_id: 1, disposition_id: 1, status_id: 1, severity_id: 1 },
-  asked: { action_id: 3, disposition_id: 3, status_id: 1, severity_id: 3 },
+  asked: { action_id: 99, disposition_id: 99, status_id: 1, severity_id: 3 },
   approved: { action_id: 1, disposition_id: 8, status_id: 1, severity_id: 3 },
   denied: { action_id: 2, disposition_id: 25, status_id: 2, severity_id: 4 },
   'refused-by-floor': { action_id: 2, disposition_id: 2, status_id: 2, severity_id: 4 }
@@ -111,6 +113,8 @@ export interface DecisionRecord {
       readonly recordVersion: number;
       readonly capability: Capability;
       readonly bundleHash: string;
+      /** Present only on a record whose action and disposition are 99 Other (an ask): the gate's own name for the outcome. The standard ids describe every other outcome. */
+      readonly outcome?: DecisionOutcome;
       readonly label?: Label;
       readonly tier?: string;
       readonly shadowFloor?: string;
@@ -220,6 +224,7 @@ export function buildDecisionRecord(input: DecisionRecordInput): DecisionRecord 
         recordVersion: RECORD_VERSION,
         capability: input.capability,
         bundleHash: input.bundleHash,
+        ...(outcome.action_id === 99 ? { outcome: input.outcome } : {}),
         ...(input.label === undefined ? {} : { label: copyLabel(input.label) }),
         ...(input.tier === undefined ? {} : { tier: input.tier }),
         ...(input.shadowFloor === undefined ? {} : { shadowFloor: input.shadowFloor })

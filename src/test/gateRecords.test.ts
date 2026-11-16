@@ -60,10 +60,10 @@ test('activity ids: read and plan are 2, a workspace write is 3, destroy is 4, e
   assert.equal(RECORD_VERSION, 1);
 });
 
-test('outcome ids: allowed 1/1, asked 3 with its detail, approved 1/8, denied 2/25, refused-by-floor 2/2, and a clearance failure 2/26', () => {
+test('outcome ids: allowed 1/1, asked 99/99 (Other) with its detail, approved 1/8, denied 2/25, refused-by-floor 2/2, and a clearance failure 2/26', () => {
   const write: Capability = { verb: 'workspaceWrite', paths: ['src/a.ts'] };
   const table: Record<DecisionOutcome, [number, number, number | undefined, number]> = {
-    allowed: [1, 1, undefined, 1], asked: [3, 3, undefined, 3], approved: [1, 8, undefined, 3], denied: [2, 25, undefined, 4], 'refused-by-floor': [2, 2, undefined, 4]
+    allowed: [1, 1, undefined, 1], asked: [99, 99, undefined, 3], approved: [1, 8, undefined, 3], denied: [2, 25, undefined, 4], 'refused-by-floor': [2, 2, undefined, 4]
   };
   assert.deepEqual([...DECISION_OUTCOMES].sort(), Object.keys(table).sort());
   for (const outcome of DECISION_OUTCOMES) {
@@ -80,6 +80,31 @@ test('outcome ids: allowed 1/1, asked 3 with its detail, approved 1/8, denied 2/
   assert.equal(unauthorized.disposition_id, 26);
   assert.equal(unauthorized.status_detail, 'Your clearance does not cover this label.');
   assert.equal(buildDecisionRecord(inputFor(write, { outcome: 'refused-by-floor', clearanceFailure: true })).disposition_id, 2, 'only a plain denial becomes unauthorized');
+});
+
+test('an asked record is OCSF Other (action 99, disposition 99) with the gate outcome in unmapped, and no record ever uses disposition 3 (Quarantined)', () => {
+  const write: Capability = { verb: 'workspaceWrite', paths: ['src/a.ts'] };
+  const asked = buildDecisionRecord(inputFor(write, { outcome: 'asked' }));
+  assert.equal(asked.action_id, 99);
+  assert.equal(asked.disposition_id, 99);
+  assert.equal(asked.unmapped.nearAi.outcome, 'asked');
+  assert.equal(validateDecisionRecord(JSON.parse(canonicalize(asked))).ok, true);
+  const seen = new Set<number>();
+  for (const outcome of DECISION_OUTCOMES) {
+    for (const clearanceFailure of [false, true]) {
+      for (const capability of [write, { verb: 'read', paths: ['a'] } as Capability, { verb: 'destroy', paths: ['a'] } as Capability]) {
+        const record = buildDecisionRecord(inputFor(capability, { outcome, clearanceFailure }));
+        assert.notEqual(record.disposition_id, 3, `${outcome} ${String(clearanceFailure)}`);
+        assert.ok([0, 1, 2, 99].includes(record.action_id), `${outcome} action ${String(record.action_id)}`);
+        seen.add(record.disposition_id);
+      }
+    }
+  }
+  assert.deepEqual([...seen].sort((a, b) => a - b), [1, 2, 8, 25, 26, 99]);
+  // Every other outcome is fully described by its standard ids, so it carries no extra outcome field.
+  for (const outcome of DECISION_OUTCOMES.filter((one) => one !== 'asked')) {
+    assert.equal(buildDecisionRecord(inputFor(write, { outcome })).unmapped.nearAi.outcome, undefined, outcome);
+  }
 });
 
 test('asked and approved for one call are two records with one call id, and refused-by-floor differs from denied', () => {
