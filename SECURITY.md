@@ -131,7 +131,9 @@ is what that file and the records beside it do in this version.
 - **Who signs it.** Your own device key, held on this computer, signs it. A
   fresh install signs a default policy that allows what your settings allow, so
   nothing changes until a policy narrows it. Your settings can narrow what the
-  policy allows and can never widen it.
+  policy allows and can never widen it. Activation creates this install's
+  device identity in every folder, not only for Team Mode, because it signs the
+  first policy file with it.
 - **When it cannot be trusted.** If the file is missing, unsigned, changed or
   expired, only reading and planning run until you run **NEAR AI: Reset Policy
   to Defaults**, and the project's key folder stays off limits in every case.

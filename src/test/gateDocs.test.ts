@@ -67,11 +67,13 @@ test('the commands the docs name are the ones package.json contributes, and the 
   }
 });
 
-test('the policy section says what the code does: own storage not the project, own device key, default allows what settings allow, only the command re-signs, no network, records redacted and not synced, labels not used yet', () => {
+test('the policy section says what the code does: own storage not the project, own device key (created at activation in every folder), default allows what settings allow, only the command re-signs, no network, records redacted and not synced, labels not used yet', () => {
   for (const phrase of [
     "this extension's own storage",
     'never in your project',
     'Your own device key',
+    "creates this install's device identity in every folder",
+    'because it signs the first policy file',
     'allows what your settings allow',
     'only reading and planning run',
     'Deleting the file does not reset a policy',
