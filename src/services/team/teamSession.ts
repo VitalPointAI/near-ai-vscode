@@ -8,6 +8,7 @@ import * as path from 'node:path';
 import * as vscode from 'vscode';
 import type { AuditEvent, AuditFilter } from '../../domain/approval';
 import { teamMaterializer } from '../../domain/team/materialize';
+import { DEFAULT_RECENT_LIMIT, RecentMap } from '../../domain/team/recentMap';
 import { TEAM_REJECTION_REASONS } from '../../domain/team/types';
 import type { GenesisAnchor, Role, TeamEvent, TeamFile, TeamState } from '../../domain/team/types';
 import { AuditStore } from '../auditStore';
@@ -58,6 +59,8 @@ export interface TeamSessionDeps {
   withProgress?: <T>(title: string, task: () => Promise<T>) => Promise<T>;
   // Called with true once the session has started and with false when it is disposed (the nearAi.team.active context key).
   activeChanged?: (active: boolean) => void;
+  // How many reported rejections and issues the session remembers (default DEFAULT_RECENT_LIMIT). A test setting.
+  reportedLimit?: number;
 }
 
 function describeError(error: unknown): string {
@@ -168,8 +171,11 @@ export class TeamSession {
   private syncing: Promise<void> = Promise.resolve();
   private firstRun: Promise<boolean> | undefined;
   private lastStatusKey: string | undefined;
-  private readonly reportedRejections = new Set<string>();
-  private readonly reportedIssues = new Map<string, string>();
+  // What the person was already told. Both keep only the most recent entries (DEFAULT_RECENT_LIMIT), so a long session or a remote that keeps
+  // producing rejected events cannot grow them without bound. forgottenNoted makes the note about dropped entries appear once per session.
+  private readonly reportedRejections: RecentMap<true>;
+  private readonly reportedIssues: RecentMap<string>;
+  private forgottenNoted = false;
   private refusalAnnounced = false;
   private pendingRoster: TeamEvent[] = [];
   // The author's role at each queued event's log position (WR-05), so a later promotion or demotion does not rewrite history.
@@ -177,6 +183,8 @@ export class TeamSession {
 
   private constructor(deps: TeamSessionDeps, storage: string, identity: DeviceIdentity | undefined) {
     this.deps = deps;
+    this.reportedRejections = new RecentMap<true>(deps.reportedLimit ?? DEFAULT_RECENT_LIMIT);
+    this.reportedIssues = new RecentMap<string>(deps.reportedLimit ?? DEFAULT_RECENT_LIMIT);
     this.teamFile = deps.teamFile;
     this.storage = storage;
     this.identity = identity;
@@ -297,6 +305,15 @@ export class TeamSession {
     if (this.reportedIssues.get(category) === key) return;
     this.reportedIssues.set(category, key);
     this.line(text);
+    this.noteForgotten();
+  }
+
+  // Said once: when the oldest entries had to be let go, an event that comes back later could be listed a second time.
+  private noteForgotten(): void {
+    const dropped = this.reportedRejections.dropped + this.reportedIssues.dropped;
+    if (dropped === 0 || this.forgottenNoted) return;
+    this.forgottenNoted = true;
+    this.line(`Team Mode no longer remembers the oldest ${plural(dropped, 'rejected event or problem')} it reported in this session, so one of them could be listed again.`);
   }
 
   private clearIssue(category: string): void {
@@ -361,9 +378,10 @@ export class TeamSession {
     for (const rejection of rejected) {
       const key = `${rejection.eventId}\n${rejection.reason}`;
       if (this.reportedRejections.has(key)) continue;
-      this.reportedRejections.add(key);
+      this.reportedRejections.set(key, true);
       this.line(`Rejected event ${rejection.eventId}: ${rejection.reason}`);
     }
+    this.noteForgotten();
   }
 
   private noteSnapshot(snapshot: { ok: boolean; reason?: string } | undefined): void {
