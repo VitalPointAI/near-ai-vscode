@@ -15,6 +15,7 @@ import { withFileLock } from '../services/stateMirrorLock';
 import { MAX_EVENT_BYTES, canonicalBytes, fingerprintOf, signingInput } from '../domain/team/canonical';
 import type { DeviceRef, TeamEvent, TeamEventType, UnsignedTeamEvent } from '../domain/team/types';
 import { appendKeyRecord, archiveKeyHistory, readKeyHistory } from './keyHistory';
+import type { KeyHistoryReplay } from '../domain/team/keyRecords';
 
 // One Ed25519 identity per person per install (D-06). Every team this install joins uses this key, so the secret name carries no team id.
 export const DEVICE_KEY_SECRET = 'nearAi.identity.deviceKey';
@@ -100,6 +101,14 @@ async function ensureCreatedRecord(
   const clock = options.now === undefined ? {} : { now: options.now };
   const history = await readKeyHistory(options.identityDir, secrets);
   if (history.ok && history.active?.fingerprint === identity.fingerprint) return;
+  // 0.4.25 (PR #61 review): a key the trusted history shows as replaced or withdrawn is never given a fresh `created` record, which would make it active
+  // again. repairKeyState sets such a key aside when it safely can; when it could not, this refuses rather than bringing the key back.
+  if (history.ok) {
+    const state = history.lookup({ fingerprint: identity.fingerprint, publicKey: identity.publicKey }).state;
+    if (state === 'rotated' || state === 'revoked') {
+      throw new Error('The identity key on this computer was replaced or withdrawn in your key history, so it is not used again. Forget the kept previous key, then try again.');
+    }
+  }
   // An empty history accepts a first key as it is, and so does one whose last key was revoked when the key is brand new. Anything else is set aside first,
   // including a key that is stored but that a history with records does not make active.
   if (!history.ok || history.active !== undefined || (!freshKey && history.head !== undefined)) await archiveKeyHistory(options.identityDir, secrets, clock);
@@ -129,6 +138,27 @@ async function repairKeyState(secrets: SecretStorageLike, options: IdentityLockO
     const key = await readStoredKeySafely(secrets, name);
     if (key && history.lookup({ fingerprint: key.fingerprint, publicKey: key.publicKey }).state === 'revoked') await secrets.delete(name);
   }
+  await setAsideReplacedKey(secrets, history);
+}
+
+// 0.4.25 (PR #61 review): a rotation whose record was written but whose new key was lost (a crash before the key moves, then the pending entry gone)
+// leaves the replaced key as the device key, and no key on this computer is the history's active key, so the history can never be extended again.
+// The replaced key is moved to the previous slot, as a finished rotation would have kept it, and the device slot is emptied; the next first need then
+// makes a fresh key, and ensureCreatedRecord archives the old history (never deletes it) before the fresh key's `created` record. The replaced key is
+// never made active again. When the previous slot already holds another key (an earlier rotation's), nothing is moved, because that key would be
+// dropped silently; ensureCreatedRecord then refuses the replaced key instead.
+async function setAsideReplacedKey(secrets: SecretStorageLike, history: KeyHistoryReplay): Promise<void> {
+  if (!history.ok || history.active === undefined) return;
+  const current = await readStoredKeySafely(secrets, DEVICE_KEY_SECRET);
+  if (!current || history.lookup({ fingerprint: current.fingerprint, publicKey: current.publicKey }).state !== 'rotated') return;
+  for (const name of [PENDING_DEVICE_KEY_SECRET, PREVIOUS_DEVICE_KEY_SECRET]) {
+    if ((await readStoredKeySafely(secrets, name))?.fingerprint === history.active.fingerprint) return;
+  }
+  const currentText = await secrets.get(DEVICE_KEY_SECRET);
+  const kept = await secrets.get(PREVIOUS_DEVICE_KEY_SECRET);
+  if (!present(currentText) || (present(kept) && kept !== currentText)) return;
+  if (kept !== currentText) await secrets.store(PREVIOUS_DEVICE_KEY_SECRET, currentText);
+  await secrets.delete(DEVICE_KEY_SECRET);
 }
 
 // First-need creation (Pitfall 4): SecretStorage is last write wins, so two windows could each create a key. The lock covers check, create, store,
