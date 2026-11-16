@@ -120,6 +120,41 @@ script or `npm run` starts, or a directory walk (`grep -r`, `find`, `**`) from a
 the key folder is not caught. There is no OS-level sandbox around the agent's
 shell.
 
+### Your policy file and decision records
+
+Before a tool runs, NEAR AI checks the call against a signed policy file. This
+is what that file and the records beside it do in this version.
+
+- **Where it lives.** The policy file is kept in this extension's own storage
+  on this computer, never in your project. It is not committed, synced or
+  shared with the people you work with.
+- **Who signs it.** Your own device key, held on this computer, signs it. A
+  fresh install signs a default policy that allows what your settings allow, so
+  nothing changes until a policy narrows it. Your settings can narrow what the
+  policy allows and can never widen it.
+- **When it cannot be trusted.** If the file is missing, unsigned, changed or
+  expired, only reading and planning run until you run **NEAR AI: Reset Policy
+  to Defaults**, and the project's key folder stays off limits in every case.
+  The status bar says "Policy: reading only" with one sentence naming the cause
+  and the fix. Deleting the file does not reset a policy: a file that has gone
+  missing counts as a changed one. Only that command re-signs a policy that
+  failed. It asks you to confirm, keeps the old file beside the new one, and
+  records the reset.
+- **Reading it.** **NEAR AI: Show Policy** opens the policy in plain words and
+  as stored. The view is read only, and editing it changes nothing.
+- **No network.** Nothing in a decision needs the network, so the policy
+  works the same offline.
+- **Decision records.** Each decision, allowed, asked or refused, is written
+  to a record for the project in this extension's storage. A record names what
+  was asked for, what was decided and why, never file contents, and secrets are
+  removed from it. Records are not synced and are not put in your project, in
+  the chat history or in the project's synced state. Each project's log rolls
+  over at about 5 MB and keeps the last four older files.
+- **What this version does not use yet.** The file also holds scales,
+  clearances and routing tiers. This version stores and shows them and does not
+  use them yet.
+- **Your clearance is your own word.** Until verified credentials arrive, your clearance comes from your own policy file, which your own device key signs, so it is self-declared. It is not an enforced clearance boundary.
+
 ### Sub-agents nobody is watching
 
 In the `auto` and `mostly-autonomous` policies, a sub-agent (an agent another
@@ -568,9 +603,19 @@ Brave Search, or Tavily (keys in SecretStorage). It is off until you choose.
   marks read-only follow your normal rules; every other tool asks in every
   mode, including fully-autonomous), *ask before every call*, or *trusted*.
   Tools can be switched off one by one.
+- **Servers added from this version on** start with every tool undeclared. An
+  undeclared tool asks before it runs in every mode except `fully-autonomous`
+  (a tool the server marks as changing data still asks in every mode, as
+  above), and it runs only while you are there: a run with nobody present does
+  not call it. Servers you added before this version behave as they did.
+- **Declaring what a tool does.** The MCP page has a "What it does" menu for
+  each tool of a connected server: it only reads, it changes data on the server,
+  or you do not know. That decides how the tool is treated from then on.
+  This is what you or the server declared it does. NEAR AI cannot check what a server does inside itself.
 - **Local servers** run only after you confirm the exact command, with a
   minimal environment (PATH, HOME, and the like) plus the variables you set,
-  never the editor's own environment.
+  never the editor's own environment. Runs on this machine with your permissions:
+  a local server is a program on your computer with the same access you have.
 - **Results** are outside content: fenced, scanned for injection attempts, and
   shown in Agent Activity.
 - **Not yet supported:** servers that require an interactive OAuth sign-in.
