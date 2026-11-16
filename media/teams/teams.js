@@ -19,8 +19,8 @@
   const TAB_KNOWLEDGE = TABS.indexOf('Knowledge');
   const TAB_CHECKS = TABS.indexOf('Markdown & checks');
   const TAB_HISTORY = TABS.indexOf('History');
-  const CAPABILITY_ORDER = ['read', 'plan', 'edit', 'shell', 'network', 'generate', 'git', 'publish'];
-  const CAPABILITY_LABEL = { read: 'Read', plan: 'Plan and coordinate', edit: 'Edit files', shell: 'Run commands', network: 'Network', generate: 'Generate media', git: 'Git', publish: 'Publish' };
+  const CAPABILITY_ORDER = ['read', 'plan', 'edit', 'shell', 'network', 'generate', 'git', 'publish', 'learn'];
+  const CAPABILITY_LABEL = { read: 'Read', plan: 'Plan and coordinate', edit: 'Edit files', shell: 'Run commands', network: 'Network', generate: 'Generate media', git: 'Git', publish: 'Publish', learn: 'Share with the team' };
   const STATUS_CLASS = { runs: 'ok', asks: 'ask', 'auto-checked': 'checked', off: 'off', stopped: 'stopped' };
   const STATUS_SHORT = { runs: 'Runs', asks: 'Asks first', 'auto-checked': 'Checked', off: 'Off', stopped: 'Blocked' };
   const PRIVACY_LABEL = { tee: 'TEE', local: 'Local', forwarded: 'Forwarded', unknown: 'Unknown' };

@@ -11,9 +11,9 @@ import { braveSearch, searxngSearch, tavilySearch } from '../agent/webSearch';
 import { webSearchTool } from '../agent/webTools';
 import { imageTool } from '../agent/extraTools';
 import type { NearAiClient } from '../services/nearAiClient';
-import { builtInTools, CATALOG_TOOL_FILES, OFFERED_ONLY_IN_CONTEXT, SHORTHAND_EXCEPTIONS, TOOL_DEFINING_FILES } from '../agent/toolCatalog';
+import { builtInTools, CATALOG_TOOL_FILES, SHORTHAND_EXCEPTIONS, TOOL_DEFINING_FILES } from '../agent/toolCatalog';
 import { effectsFor, parseToolManifest, shorthandFor } from '../domain/gate/manifest';
-import { buildStudioContext } from '../services/teamStudioPage';
+import { buildStudioContext, reviewDraft } from '../services/teamStudioPage';
 import { mcpAgentTools, mcpToolName } from '../mcp/tools';
 import type { McpConnection, McpServerConfig } from '../mcp/client';
 import { mcpToolEffects } from '../domain/gate/manifest';
@@ -26,7 +26,7 @@ import type { AgentTool } from '../agent/tools';
 import type { GsdAgent } from '../gsd/library';
 import { fakeHome, testManifest, testTool } from './helpers/gateFixtures';
 import { describeManifest } from '../domain/gate/words';
-import { buildToolsDirectory } from '../services/toolsDirectory';
+import { buildToolsDirectory, capabilityStatus, STATUS_TEXT } from '../services/toolsDirectory';
 import type { DirectoryInput } from '../services/toolsDirectory';
 
 
@@ -119,8 +119,6 @@ test('the Tools page lists the catalog and each tool\'s notes carry its manifest
   const directory = buildToolsDirectory(directoryInput());
   const listed = new Map(directory.tools.map((entry) => [entry.name, entry]));
   for (const tool of builtInTools()) {
-    // The cyber and knowledge tools are offered only in a special setting, and the page lists the tools every run has.
-    if (OFFERED_ONLY_IN_CONTEXT.has(tool.name)) { assert.equal(listed.has(tool.name), false, `${tool.name} stays off the page`); continue; }
     const entry = listed.get(tool.name);
     assert.ok(entry, `${tool.name} is on the page`);
     const words = describeManifest(tool.manifest!);
@@ -156,13 +154,53 @@ const EXPECTED_ORDER = [
   'Skill', 'SlashCommand', 'AskUserQuestion', 'Agent', 'Task'
 ];
 
-test('the catalog holds all 40 built-in tools, once each, in the order a run is given them, and the page lists the ones every run has in that order', () => {
+test('the catalog holds all 40 built-in tools, once each, in the order a run is given them, and the page lists every one of them in that order', () => {
   const names = builtInTools().map((tool) => tool.name);
   assert.equal(names.length, 40);
   assert.equal(new Set(names).size, 40, 'a duplicate name fails the catalog');
   assert.deepEqual(names, EXPECTED_ORDER);
   const listed = buildToolsDirectory(directoryInput()).tools.map((entry) => entry.name);
-  assert.deepEqual(listed, EXPECTED_ORDER.filter((name) => !OFFERED_ONLY_IN_CONTEXT.has(name)));
+  assert.deepEqual(listed, EXPECTED_ORDER, 'the page lists all 40, the cyber, TeamKnowledge and Learn tools included (owner-confirmed, PR #70 review)');
+});
+
+test('the 13 tools a run has only in a special setting are on the Tools page with their manifest words, in catalog order, and say whether they need a person', () => {
+  const context = ['CyberHttpProbe', 'CyberTlsProbe', 'CyberDnsProbe', 'CyberTcpProbe', 'CyberRobotsProbe', 'CyberSecretsProbe', 'CyberIacProbe', 'CyberDependencyProbe', 'CyberFingerprintProbe', 'CyberExploitTool', 'CyberPostExploitTool', 'TeamKnowledge', 'Learn'];
+  assert.equal(context.length, 13);
+  const directory = buildToolsDirectory(directoryInput());
+  const listed = directory.tools.map((entry) => entry.name);
+  assert.deepEqual(listed.filter((name) => context.includes(name)), context, 'all 13, once each, in catalog order');
+  assert.equal(listed.indexOf('SecurityScan') + 1, listed.indexOf('CyberHttpProbe'), 'the probes follow the scan tool');
+  assert.equal(listed.indexOf('Learn') + 1, listed.indexOf('Remember'), 'the knowledge tools sit before memory');
+  const byName = new Map(builtInTools().map((tool) => [tool.name, tool]));
+  for (const name of context) {
+    const entry = directory.tools.find((tool) => tool.name === name)!;
+    const words = describeManifest(byName.get(name)!.manifest!);
+    assert.ok(words.length > 0, `${name} has words`);
+    assert.deepEqual(entry.words, words, `${name} shows its manifest words`);
+    assert.deepEqual(entry.notes.slice(entry.notes.length - words.length), words, `${name}: the words come last in its notes`);
+    // Its status comes from the same shorthand logic as every other tool: the entry's status is what capabilityStatus says for the tool's own capability.
+    assert.equal(entry.status, capabilityStatus(byName.get(name)!.capability, { mode: 'approve-risky', emergencyStop: false }, DEFAULT_RULES, byName.get(name)!.autoSafe === true), `${name} status`);
+    assert.equal(entry.statusText, STATUS_TEXT[entry.status]);
+    // The interactive-only ones never claim they can run unattended; their words say they run only while a person is there.
+    const interactiveOnly = INTERACTIVE_ONLY_TOOLS.includes(name);
+    assert.equal(byName.get(name)!.manifest!.contexts.includes('unattended'), !interactiveOnly, `${name} contexts`);
+    assert.equal(words.includes('Can also run when nobody is watching'), !interactiveOnly, `${name} words about running unattended`);
+    assert.equal(words.includes('Runs only while you are there'), interactiveOnly, `${name} words about needing a person`);
+  }
+  assert.ok(directory.tools.find((tool) => tool.name === 'TeamKnowledge')!.words.includes('Can also run when nobody is watching'), 'TeamKnowledge also works with no person');
+});
+
+test('the team studio pickers offer the 13 tools with their words, and TeamKnowledge is no longer warned about as not built in', () => {
+  const studio = buildStudioContext(directoryInput(), { hasProject: true, knowledgeBase: false });
+  const names = studio.tools.map((tool) => tool.name);
+  assert.deepEqual(names, EXPECTED_ORDER, 'the picker lists the whole catalog in catalog order');
+  const byName = new Map(builtInTools().map((tool) => [tool.name, tool]));
+  for (const name of [...CYBER_TOOLS, 'TeamKnowledge', 'Learn']) assert.deepEqual(studio.tools.find((tool) => tool.name === name)!.words, describeManifest(byName.get(name)!.manifest!), `${name} words in the picker`);
+  const draft = { name: 'k', description: '', members: [{ name: 'a', role: '', model: '', tools: ['TeamKnowledge', 'Learn', 'CyberHttpProbe', 'Teleport'], instructions: 'x' }] } as unknown as Parameters<typeof reviewDraft>[0];
+  const review = reviewDraft(draft, undefined, directoryInput(), studio);
+  const text = review.warnings.map((issue) => issue.message).join('\n');
+  assert.match(text, /Teleport is not a built-in tool/, 'a name no tool has still warns');
+  assert.doesNotMatch(text, /TeamKnowledge|Learn|CyberHttpProbe/, 'a tool in the catalog is not warned about');
 });
 
 test('two tools with equal manifests stay separate catalog entries', () => {

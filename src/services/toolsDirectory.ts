@@ -2,7 +2,7 @@ import type { ActionCapability, ActionPolicy, ActionPolicyMode } from '../domain
 import { GSD_COMMANDS } from '../domain/gsdCommands';
 import { decidePermission, PermissionRules, RunGrants } from '../agent/permissions';
 import { AgentTool } from '../agent/tools';
-import { builtInTools, GSD_TOOL_NAMES, OFFERED_ONLY_IN_CONTEXT } from '../agent/toolCatalog';
+import { builtInTools, GSD_TOOL_NAMES } from '../agent/toolCatalog';
 import { describeManifest } from '../domain/gate/words';
 import { GsdAgent, GsdSkill, modelForTier, roleModelFor } from '../gsd/library';
 import type { TeamDefinition } from '../agent/teams';
@@ -186,7 +186,7 @@ export function buildToolsDirectory(input: DirectoryInput): ToolsDirectory {
       webSearch: input.webSearch && input.webSearchHost ? { name: 'searxng', label: 'configured provider', host: input.webSearchHost, search: async () => [] } : null,
       imageClient: { ...(input.modelHost ? { baseHost: input.modelHost } : {}) } as NearAiClient,
       imageModel: image ?? { id: input.settings.imageModel }
-    }).filter((tool) => !OFFERED_ONLY_IN_CONTEXT.has(tool.name)).map((tool) => toolEntry(tool, input, GSD_TOOL_NAMES.has(tool.name) ? noGsd : unavailable[tool.name]))
+    }).map((tool) => toolEntry(tool, input, GSD_TOOL_NAMES.has(tool.name) ? noGsd : unavailable[tool.name]))
   ];
 
   const mcp: DirectoryMcpServer[] = input.mcp.map((server) => {

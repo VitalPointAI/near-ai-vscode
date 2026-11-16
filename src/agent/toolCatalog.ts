@@ -54,15 +54,6 @@ export interface CatalogStubs {
   gsd?: GsdServices;
 }
 
-/**
- * The tools a run is given only in a special setting: a cyber engagement's probes and exploit steps, and a team's knowledge graph. The Tools page and the
- * team studio's tool pickers list the tools every run has, as before, so these are left off them (the studio would otherwise warn about them as unknown).
- */
-export const OFFERED_ONLY_IN_CONTEXT: ReadonlySet<string> = new Set([
-  'CyberHttpProbe', 'CyberTlsProbe', 'CyberDnsProbe', 'CyberTcpProbe', 'CyberRobotsProbe', 'CyberSecretsProbe', 'CyberIacProbe', 'CyberDependencyProbe', 'CyberFingerprintProbe',
-  'CyberExploitTool', 'CyberPostExploitTool', 'TeamKnowledge', 'Learn'
-]);
-
 /** The gsd tools' names: the Tools page offers them once Open-GSD is installed, so it needs to tell them from the rest. */
 export const GSD_TOOL_NAMES: ReadonlySet<string> = new Set(['Skill', 'SlashCommand', 'AskUserQuestion', 'Agent', 'Task']);
 
