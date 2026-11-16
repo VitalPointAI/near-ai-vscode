@@ -13,6 +13,7 @@ import { AGENT_MEMORY_ACTOR, AgentConversation } from '../services/agentSession'
 import { ContextGraphMemory } from '../services/contextGraphMemory';
 import type { AgentMessage, CompletionEvent, ToolCall } from '../services/nearAiClient';
 import { ReputationStore } from '../services/reputation';
+import { newTestConversation } from './helpers/gatedRuns';
 
 const usage = { inputTokens: 10, outputTokens: 5, verificationStatus: 'unknown' as const, latencyMs: 1 };
 const call = (id: string, name: string, args: Record<string, unknown>): ToolCall => ({ id, type: 'function', function: { name, arguments: JSON.stringify(args) } });
@@ -72,7 +73,7 @@ test('running a team gives the lead its members as sub-agents with their own too
     async actualCostsUsd() { return undefined; }
   };
   const reputation = new ReputationStore(root);
-  const conversation = new AgentConversation(root, () => undefined, path.join(root, '.ckpt'));
+  const conversation = newTestConversation(root, () => undefined, path.join(root, '.ckpt'));
   await conversation.send({ text: '/team:crew add a flag', team, client: client as never, model: 'm', privacy: 'Private', policy: { mode: 'approve-risky', emergencyStop: false }, rules: DEFAULT_RULES, reputation });
   assert.match(requests[0].system, /You are NEAR AI/);
   assert.ok(requests[0].tools.includes('Agent') && !requests[0].tools.includes('Skill'), 'teams get Agent but not GSD skills');

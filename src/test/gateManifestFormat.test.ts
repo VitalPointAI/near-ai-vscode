@@ -15,11 +15,11 @@ import {
   shorthandFor
 } from '../domain/gate/manifest';
 import type { McpManifest, McpToolFacts, ToolManifest } from '../domain/gate/manifest';
-import { MANIFEST_IS_A_CLAIM_TEXT, RUNS_ON_THIS_MACHINE_TEXT, describeManifest, describeMcpManifest } from '../domain/gate/words';
+import { EFFECTS_NOT_DECLARED_TEXT, MANIFEST_IS_A_CLAIM_TEXT, RUNS_ON_THIS_MACHINE_TEXT, describeManifest, describeMcpManifest, describeMcpTools } from '../domain/gate/words';
 
 const EM_DASH = String.fromCharCode(0x2014);
 
-function source(field: string, as: 'path' | 'url-host' | 'literal'): { from: 'input'; field: string; as: string } {
+function source(field: string, as: 'path' | 'folder' | 'url-host' | 'literal'): { from: 'input'; field: string; as: string } {
   return { from: 'input', field, as };
 }
 
@@ -126,6 +126,7 @@ test('GATE-02 templates: a typo, a field on the wrong verb, an unknown verb and 
   assert.equal(refusedWith(toolManifest('X', [{ verb: 'fly' }])), 'unknown-verb');
   assert.equal(refusedWith(toolManifest('X', [{ verb: 'workspaceWrite', paths: [source('file_path', 'url-host')] }])), 'not-allowed-here');
   assert.equal(refusedWith(toolManifest('X', [{ verb: 'network', hosts: [source('url', 'path')] }])), 'not-allowed-here');
+  assert.equal(refusedWith(toolManifest('X', [{ verb: 'network', hosts: [source('url', 'folder')] }])), 'not-allowed-here', 'a folder source is for paths only');
   assert.equal(refusedWith(toolManifest('X', [{ verb: 'workspaceWrite', paths: [{ from: 'env', field: 'HOME', as: 'path' }] }])), 'not-allowed-here');
   assert.equal(refusedWith(toolManifest('X', [{ verb: 'workspaceWrite', paths: [{ from: 'input', field: 'bad field', as: 'path' }] }])), 'wrong-type');
   assert.equal(refusedWith(toolManifest('X', [{ verb: 'workspaceWrite', paths: [{ from: 'input', field: 'a', as: 'path', extra: 1 }] }])), 'unknown-field');
@@ -480,4 +481,35 @@ test('every sentence this module writes is free of em-dashes and of the words "N
   for (const words of samples) assertPlainWords(words);
   assert.equal(RUNS_ON_THIS_MACHINE_TEXT.includes(EM_DASH), false);
   assert.equal(MANIFEST_IS_A_CLAIM_TEXT.includes(EM_DASH), false);
+});
+
+// ---- A declared tool whose effects say nothing is not "Only reads" (review of PR 2) ----
+
+// The parsers refuse both of these (an empty effect list, a manifest with no effect of its own), so a hand-made object stands in for a damaged stored one.
+const NO_EFFECTS = { manifestVersion: 1, tool: 'Undeclared', effects: [], hosts: [], credentials: [], contexts: ['interactive', 'unattended'], untrusted: false, runsOn: 'this-machine' } as unknown as ToolManifest;
+
+test('describeMcpTools: a declared tool whose effects give no sentence says plainly that what it does is not declared, never "Only reads"', () => {
+  const base = mcpParsed(mcpManifest({ toolDefaults: 'legacy' }));
+  const manifest: McpManifest = { ...base, tools: { empty: { effects: [] }, search: { effects: [{ verb: 'mcp', server: 'local', tools: ['search'] }] } } };
+  assert.deepEqual(describeMcpTools(manifest), [`empty: ${EFFECTS_NOT_DECLARED_TEXT}`, 'search: Only reads']);
+  assert.ok(!EFFECTS_NOT_DECLARED_TEXT.includes(EM_DASH));
+  assert.match(EFFECTS_NOT_DECLARED_TEXT, /not declared/);
+});
+
+test('describeManifest: a manifest that lists no effect says that what it does is not declared, and one that lists effects does not', () => {
+  assert.ok(describeManifest(NO_EFFECTS).includes(EFFECTS_NOT_DECLARED_TEXT));
+  const known = parsed(toolManifest('Read', [{ verb: 'read', paths: ['src/**'] }]));
+  assert.ok(!describeManifest(known).includes(EFFECTS_NOT_DECLARED_TEXT));
+});
+
+test('a `folder` source fills a path as the folder and everything under it, and refuses what a `path` source refuses', () => {
+  const manifest = parsed(toolManifest('Search', [{ verb: 'read', paths: [source('where', 'path'), source('where', 'folder')] }]));
+  const fill = (where: unknown) => effectsFor(manifest, { where });
+  const names = (where: unknown): string[] | undefined => { const out = fill(where); return out.ok ? out.value.flatMap((effect) => (effect.verb === 'read' ? [...effect.paths] : [])) : undefined; };
+  assert.deepEqual(names('src'), ['src', 'src/**']);
+  assert.deepEqual(names('src/'), ['src', 'src/**']);
+  assert.deepEqual(names('src/**'), ['src/**']);
+  assert.deepEqual(names('**'), ['**']);
+  for (const bad of ['/etc', '../x', 'C:\\x', 'a\\b', '', 3, undefined]) assert.equal(names(bad), undefined, `refuses ${String(bad)}`);
+  assert.equal(refusedWith(toolManifest('Search', [{ verb: 'read', paths: [source('where', 'folder')] }, { verb: 'read', paths: [source('where', 'folder')] }])), 'duplicate');
 });

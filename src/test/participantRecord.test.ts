@@ -12,6 +12,7 @@ import { stateHomeFor } from '../services/stateHome';
 import { stateKeysFor } from '../services/stateKeys';
 import { ThreadStore } from '../services/threadStore';
 import { MemorySecrets, tempProject } from './helpers/stateFixtures';
+import { newTestConversation } from './helpers/gatedRuns';
 
 // Phase 27, plan 08 (SYNC-01, D-07): the @near chat participant's turns are recorded in the project's state home, whatever VS Code's own 20-turn
 // window shows the model. Each test works on a temporary project folder.
@@ -411,7 +412,7 @@ test('a Chat view thread reopens in the NEAR AI panel of another editor with its
       },
       async actualCostsUsd() { return undefined; }
     };
-    const reopened = new AgentConversation(root, () => undefined, stateHomeFor(root).paths.checkpoints, undefined, storeFor(root, new MemorySecrets(), 'edB.1'));
+    const reopened = newTestConversation(root, () => undefined, stateHomeFor(root).paths.checkpoints, undefined, storeFor(root, new MemorySecrets(), 'edB.1'));
     const restored = await reopened.restore(threadId);
     assert.ok(restored && !Array.isArray(restored), 'the thread opens');
     const items = (restored as { items: ViewItem[] }).items;

@@ -509,6 +509,7 @@ export const BUNDLE_FAILURES = {
   'too-large': `Your policy file is larger than the allowed size. ${RESET_FIX}`,
   'key-mismatch': `The key named in your policy file does not match its fingerprint. ${RESET_FIX}`,
   'bad-signature': `Your policy file was changed outside NEAR AI. ${RESET_FIX}`,
+  replaced: `Your policy file is not the one NEAR AI last used, so it was replaced outside NEAR AI. ${RESET_FIX}`,
   'unknown-key': `Your policy file was signed by a key this computer does not know. ${RESET_FIX}`,
   'key-revoked': `The key that signed your policy file was revoked, so nothing it signed is accepted. ${RESET_FIX}`,
   'key-rotated': `The key that signed your policy file was replaced by a newer one, and the file was signed at or after the replacement. ${RESET_FIX}`,
@@ -519,7 +520,9 @@ export const BUNDLE_FAILURES = {
   'signer-mismatch': `Your policy file names a different signer than the one that signed it. ${RESET_FIX}`,
   'clock-behind': 'This computer\'s clock is earlier than the time your policy file was signed. Set the clock to the right time, then reload the window.',
   'no-identity': `NEAR AI has no signing key on this computer yet, so there is no policy to check. ${RESET_FIX}`,
-  'identity-unavailable': 'NEAR AI could not save its signing key on this computer, so only reading and planning are allowed until it can.'
+  'identity-unavailable': 'NEAR AI could not save its signing key on this computer, so only reading and planning are allowed until it can.',
+  'not-loaded': 'NEAR AI had not finished loading your policy when this run started, so only reading and planning are allowed for it. Start the run again in a moment, or reload the window.',
+  unavailable: 'NEAR AI has no policy to check this run against, so only reading and planning are allowed for it. Reload the window to try again.'
 } as const;
 export type BundleFailureReason = keyof typeof BUNDLE_FAILURES;
 
@@ -583,8 +586,9 @@ export function needsRenewal(bundle: Pick<PolicyBundle, 'expiresAt'>, now: numbe
 }
 
 /**
- * True only when the payload is a valid bundle equal to the default apart from issuer, issuedAt and expiresAt, which is what lets a bundle that was never
- * customised be re-signed after a lost key (D-39). A bundle with any other difference, including a changed clearance, is customised. Never throws.
+ * True only when the payload is a valid bundle equal to the default apart from issuer, issuedAt and expiresAt, that is, a bundle that was never
+ * customised. The bundle store no longer re-signs anything on this test (PR #70 second review: a policy this install did not sign is never adopted outside a
+ * true first install), so it is kept for a view that wants to say whether a policy is still the shipped one. A changed clearance is customised. Never throws.
  */
 export function isDefaultBundle(payload: unknown): boolean {
   try {

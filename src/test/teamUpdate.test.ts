@@ -17,6 +17,7 @@ import { DEFAULT_RULES } from '../agent/permissions';
 import { ShellSession } from '../agent/shell';
 import type { AgentMessage, CompletionEvent } from '../services/nearAiClient';
 import { PartialUpdateError, RunStartedError, TeamChangedError, TeamUpdater, UpdateNotices } from '../services/teamUpdates';
+import { newTestRun } from './helpers/gatedRuns';
 
 // Update Team: a team made from a built-in project type is brought up to date member by member,
 // replacing only what the user never changed, and asking about everything else.
@@ -262,14 +263,14 @@ test('a run outside the chat (a bare agent loop, as sub-agents and benchmarks us
   const shell = new ShellSession(root);
   try {
     assert.equal(runInProgress(), false);
-    const run = new AgentRun({ client: client as never, model: 'm', tools: [], context: { root, checkpoints: new RunCheckpoints('activity'), shell, readFiles: new Set() }, policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES, requestApproval: async () => ({ decision: 'allow' }) as never, emit: () => undefined });
+    const run = newTestRun({ client: client as never, model: 'm', tools: [], context: { root, checkpoints: new RunCheckpoints('activity'), shell, readFiles: new Set() }, policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES, requestApproval: async () => ({ decision: 'allow' }) as never, emit: () => undefined });
     const result = await run.run([{ role: 'user', content: 'hi' }], new AbortController().signal);
     assert.equal(result.outcome, 'completed');
     assert.deepEqual(seen, [true], 'in progress while the model works');
     assert.deepEqual(offered, ['after the run'], 'the offer waits for the end');
     assert.equal(runInProgress(), false, 'and the count returns to zero');
     // A loop that fails still ends its count.
-    const failing = new AgentRun({ client: { async *streamCompletion() { throw new Error('boom'); }, async actualCostsUsd() { return undefined; } } as never, model: 'm', tools: [], context: { root, checkpoints: new RunCheckpoints('activity2'), shell, readFiles: new Set() }, policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES, requestApproval: async () => ({ decision: 'allow' }) as never, emit: () => undefined });
+    const failing = newTestRun({ client: { async *streamCompletion() { throw new Error('boom'); }, async actualCostsUsd() { return undefined; } } as never, model: 'm', tools: [], context: { root, checkpoints: new RunCheckpoints('activity2'), shell, readFiles: new Set() }, policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES, requestApproval: async () => ({ decision: 'allow' }) as never, emit: () => undefined });
     await failing.run([{ role: 'user', content: 'hi' }], new AbortController().signal).catch(() => undefined);
     assert.equal(runInProgress(), false);
   } finally {

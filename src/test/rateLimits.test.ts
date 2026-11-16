@@ -13,6 +13,7 @@ import { AuthService, SecretStorageLike } from '../services/auth';
 import { activeProvider, clearProviderCache } from '../services/providerCache';
 import { ProfileStore } from '../services/profileStore';
 import { CompletionEvent, MAX_RETRY_AFTER_MS, NearAiClient, NearAiError, parseRetryAfter, setNearAiDiagnostics } from '../services/nearAiClient';
+import { newTestRun } from './helpers/gatedRuns';
 
 // The 429/5xx retry storm (debug session near-429-storm): one retry layer that honours Retry-After
 // with jitter, a per-model cooldown shared by every caller of a client, a bounded number of minutes
@@ -32,7 +33,7 @@ async function agentRun(client: AgentRunOptions['client'], extra: Partial<AgentR
   const root = await mkdtemp(path.join(tmpdir(), 'near-ai-rate-'));
   const shell = new ShellSession(root);
   const events: AgentEvent[] = [];
-  const run = new AgentRun({
+  const run = newTestRun({
     client, model: 'z-ai/glm-5.3', tools: [],
     context: { root, checkpoints: new RunCheckpoints('rate'), shell, readFiles: new Set() },
     policy: { mode: 'approve-risky', emergencyStop: false }, rules: DEFAULT_RULES,

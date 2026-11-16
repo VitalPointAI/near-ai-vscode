@@ -318,6 +318,11 @@ export class NearAiClient {
     options.spend?.attach(this);
   }
 
+  /** The host this client sends model requests to, lowercase (the gate's tool manifests name it); undefined when the base URL has none. */
+  public get baseHost(): string | undefined {
+    try { return new URL(this.options.baseUrl).hostname.toLowerCase() || undefined; } catch { return undefined; }
+  }
+
   /** The key's spend account, when spend tracking is on for this client. */
   public get spend(): SpendSink | undefined { return this.options.spend; }
 

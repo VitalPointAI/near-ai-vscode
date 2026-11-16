@@ -12,6 +12,7 @@ import { ShellSession } from '../agent/shell';
 import { CORE_TOOLS } from '../agent/tools';
 import { isKnownPreamble, resolveGsdRun, trustedPreambles } from '../gsd/preamble';
 import type { AgentMessage, CompletionEvent, ToolCall } from '../services/nearAiClient';
+import { newTestRun } from './helpers/gatedRuns';
 
 // Open-GSD workflow snippets start with a fixed resolver (the preamble) that defines gsd_run. In
 // auto they run without asking only when the preamble is exactly one the managed runtime ships and
@@ -139,7 +140,7 @@ test('agent loop in auto: a real-shaped Open-GSD snippet runs without an approva
     };
     const approvals: ApprovalRequest[] = [];
     const shell = new ShellSession(root, undefined, { CLAUDE_CONFIG_DIR: home, CLAUDE_ENV_FILE: '', RUNTIME_DIR: '' });
-    const agent = new AgentRun({
+    const agent = newTestRun({
       client: model, model: 'm', tools: CORE_TOOLS,
       context: { root, checkpoints: new RunCheckpoints('gsd-preamble'), shell, readFiles: new Set(), readOnlyRoots: [home], trustedToolRoots: [home], gsdRuntime: { home, preambles } },
       policy: { mode: 'auto', emergencyStop: false }, rules: DEFAULT_RULES,

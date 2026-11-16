@@ -25,6 +25,7 @@ import { providerErrorMessage } from '../services/chatBridge';
 import { CompletionEvent, NearAiClient, NearAiError, StreamInterruptedError } from '../services/nearAiClient';
 import { SpendAccount, SpendSink } from '../services/spendAccount';
 import type { SpendFinish, SpendStart } from '../services/spendLedger';
+import { newTestRun, newTestConversation } from './helpers/gatedRuns';
 
 const MODEL = 'moonshotai/kimi-k3';
 type Behaviour = (res: http.ServerResponse) => void;
@@ -254,7 +255,7 @@ async function runLoop(plan: Behaviour[], options: { idleMs?: number; stallRetri
   const root = await mkdtemp(path.join(tmpdir(), 'near-ai-stall-'));
   const events: AgentEvent[] = [];
   const shell = new ShellSession(root);
-  const run = new AgentRun({
+  const run = newTestRun({
     client, model: MODEL, tools: [], retryDelaysMs: [5, 10, 20], random: () => 0.5, ...(options.stallRetries !== undefined ? { stallRetries: options.stallRetries } : {}),
     context: { root, checkpoints: new RunCheckpoints('stall'), shell, readFiles: new Set() }, policy: { mode: 'approve-risky', emergencyStop: false }, rules: DEFAULT_RULES,
     requestApproval: async () => ({ decision: 'allow' }), emit: (event) => events.push(event)
@@ -308,7 +309,7 @@ test('after the retries run out the chat says so, Agent Activity shows the run f
   const client = new NearAiClient({ baseUrl: near.base, apiKey: 'k', maxRetries: 0, streamIdleTimeoutMs: 200, spend: account });
   const feed = new ActivityFeed({ maxAgeMs: 60 * 60_000, maxBytes: 8 * 1024 * 1024 });
   const posted: Array<Record<string, unknown>> = [];
-  const conversation = new AgentConversation(root, (message) => posted.push(message), path.join(root, '.ckpt'), undefined, undefined, feed);
+  const conversation = newTestConversation(root, (message) => posted.push(message), path.join(root, '.ckpt'), undefined, undefined, feed);
   let error: unknown;
   try {
     await conversation.send({ text: 'Fix the failing test', client: client as never, model: MODEL, privacy: 'Private', policy: { mode: 'approve-risky', emergencyStop: false }, rules: DEFAULT_RULES });

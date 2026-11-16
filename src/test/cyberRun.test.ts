@@ -19,6 +19,7 @@ import { DEFAULT_RULES, RunGrants } from '../agent/permissions';
 import type { AgentTool } from '../agent/tools';
 import { CyberEvidenceStore, CyberLedgerStore } from '../services/cyberLedgerStore';
 import { checkAcceptance, replayRun, scopeIncludes, startCyberRun, type CyberRunEvent, type RunTool } from '../services/cyberRun';
+import { testManifest } from './helpers/gateFixtures';
 
 const ACCEPTANCE: DisclaimerAcceptance = {
   acceptor: 'Example Organisation Ltd', osUser: 'test-user', machine: 'test-machine', extensionVersion: '0.4.10',
@@ -82,7 +83,7 @@ class ScriptedModel {
 function countingTool(name: string, output: string): { tool: AgentTool<any>; calls: string[] } {
   const calls: string[] = [];
   const tool: AgentTool<{ args?: string[]; target?: string }> = {
-    name, description: name, parameters: { type: 'object', properties: {} }, capability: 'read',
+    name, description: name, parameters: { type: 'object', properties: {} }, capability: 'read', manifest: testManifest(name, 'read'),
     parse: (raw) => ({ args: raw.args as string[] | undefined, target: raw.target as string | undefined }),
     title: () => name,
     async run() { calls.push(name); return output; }

@@ -13,6 +13,7 @@ import { CORE_TOOLS } from '../agent/tools';
 import type { ActionPolicy } from '../domain/policy';
 import { privateSafetyModel } from '../services/chatBridge';
 import { AgentMessage, CompletionEvent, ModelInfo, NearAiClient, ToolCall } from '../services/nearAiClient';
+import { newTestRun } from './helpers/gatedRuns';
 
 const auto: ActionPolicy = { mode: 'auto', emergencyStop: false };
 const where = { root: '/work/app', cwd: '/work/app', home: '/home/dev' };
@@ -307,7 +308,7 @@ test('agent loop in auto: npm test runs without asking, git push asks with the r
   const approvals: ApprovalRequest[] = [];
   const safety = fakeSafety(false, 'Safety model: installs a package the task did not ask for.');
   const shell = new ShellSession(root);
-  const run = new AgentRun({
+  const run = newTestRun({
     client: model, model: 'z-ai/glm-5.3', tools: CORE_TOOLS,
     context: { root, checkpoints: new RunCheckpoints('auto'), shell, readFiles: new Set() },
     policy: auto, rules: DEFAULT_RULES, safety: safety.check,
@@ -362,7 +363,7 @@ test('agent loop in auto: the managed Open-GSD runtime\'s gsd-tools runs without
   const approvals: ApprovalRequest[] = [];
   const safety = fakeSafety(false);
   const shell = new ShellSession(root);
-  const run = new AgentRun({
+  const run = newTestRun({
     client: model, model: 'z-ai/glm-5.3', tools: CORE_TOOLS,
     context: { root, checkpoints: new RunCheckpoints('auto-gsd'), shell, readFiles: new Set(), readOnlyRoots: [home], trustedToolRoots: [home] },
     policy: auto, rules: DEFAULT_RULES, safety: safety.check,
@@ -393,7 +394,7 @@ test('agent loop: "always allow" offers a narrow entry, saves it, and covers lat
   const approvals: ApprovalRequest[] = [];
   const saved: string[] = [];
   const shell = new ShellSession(root);
-  const run = new AgentRun({
+  const run = newTestRun({
     client: model, model: 'z-ai/glm-5.3', tools: CORE_TOOLS,
     context: { root, checkpoints: new RunCheckpoints('always'), shell, readFiles: new Set() },
     policy: auto, rules: DEFAULT_RULES, safety: fakeSafety(false).check,
@@ -545,7 +546,7 @@ test('auto: a bare gsd_run call gets the Open-GSD decision too, not only a comma
   const preamble = `${PREAMBLE_START} ...the block...`;
   const runtime = { home, preambles: [preamble] };
   const seen: Array<{ trimmed: boolean; commands: string[] }> = [];
-  const run = new AgentRun({
+  const run = newTestRun({
     client: { async *streamCompletion() { yield { type: 'done', message: { role: 'assistant', content: 'Done.' }, finishReason: 'stop', usage: { verificationStatus: 'unknown' as const } } as never; } },
     model: 'm', tools: [], context: { root: where.root, checkpoints: new RunCheckpoints('gsd-auto'), readFiles: new Set() } as never,
     policy: { mode: 'auto', emergencyStop: false }, rules: DEFAULT_RULES,
@@ -603,7 +604,7 @@ test('only a scratch script the run really wrote may run: the loop records the w
     { calls: [call('s3', 'Bash', { command: `python3 ${theirs}` })] },
     { text: 'Done.' }
   ]);
-  const run = new AgentRun({
+  const run = newTestRun({
     client: model, model: 'z-ai/glm-5.3', tools: CORE_TOOLS,
     context: { root, checkpoints: new RunCheckpoints('scratch-run'), shell, readFiles: new Set() },
     policy: auto, rules: DEFAULT_RULES, safety: fakeSafety(false).check,
@@ -648,7 +649,7 @@ test('auto: a helper the run wrote in .near-ai/scratch runs without asking (Writ
     emit: () => undefined
   });
   try {
-    const lead = new AgentRun(options(scriptedModel([
+    const lead = newTestRun(options(scriptedModel([
       { calls: [call('w1', 'Write', { file_path: '.near-ai/scratch/huemap.js', content: 'console.log("hue")\n' })] },
       { calls: [call('e1', 'Edit', { file_path: '.near-ai/scratch/huemap.js', old_string: '"hue"', new_string: '"hues"' })] },
       { calls: [call('r1', 'Bash', { command: 'node .near-ai/scratch/huemap.js' })] },
@@ -659,7 +660,7 @@ test('auto: a helper the run wrote in .near-ai/scratch runs without asking (Writ
     ]), 'lead'));
     assert.equal((await lead.run([{ role: 'user', content: 'go' }], new AbortController().signal)).outcome, 'completed');
     // A sub-agent shares the run's grants, so the lead's helper is the run's own code there too.
-    const child = new AgentRun(options(scriptedModel([
+    const child = newTestRun(options(scriptedModel([
       { calls: [call('c1', 'Bash', { command: `node ${path.join(scratchDir, 'huemap.js')}` })] },
       { text: 'Done.' }
     ]), 'child'));
@@ -675,14 +676,14 @@ test('auto: a helper the run wrote in .near-ai/scratch runs without asking (Writ
     await writeFile(huemap, 'console.log("changed")\n');
     const later = new Date(Date.now() + 5000);
     await utimes(huemap, later, later);
-    const again = new AgentRun(options(scriptedModel([{ calls: [call('c2', 'Bash', { command: 'node .near-ai/scratch/huemap.js' })] }, { text: 'Done.' }]), 'again'));
+    const again = newTestRun(options(scriptedModel([{ calls: [call('c2', 'Bash', { command: 'node .near-ai/scratch/huemap.js' })] }, { text: 'Done.' }]), 'again'));
     await again.run([{ role: 'user', content: 'go' }], new AbortController().signal);
     assert.ok(approvals.some((request) => /huemap/.test(request.title)), 'a recorded helper changed afterwards asks');
 
     // After the run read outside content, a helper it writes is not its own trusted code any more (the content may have shaped it): it asks.
     approvals.length = 0;
     grants.tainted = true;
-    const tainted = new AgentRun(options(scriptedModel([
+    const tainted = newTestRun(options(scriptedModel([
       { calls: [call('w3', 'Write', { file_path: '.near-ai/scratch/after.js', content: 'console.log("after")\n' })] },
       { calls: [call('r4', 'Bash', { command: 'node .near-ai/scratch/after.js' })] },
       { text: 'Done.' }

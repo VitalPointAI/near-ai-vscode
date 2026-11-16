@@ -101,6 +101,19 @@ test('a failed-closed bundle leaves read and plan to the settings layer and deni
   }
 });
 
+test('a run with no gate host (the unavailable state) is refused everything but read and plan under its own rule id, with its own sentence', async () => {
+  const none = failedClosed('unavailable');
+  const read = await decide(requestFor([{ verb: 'read', paths: ['src/**'] }, { verb: 'plan' }]), none, allows);
+  assert.equal(read.outcome, 'allow');
+  for (const effects of [[write(['src/app.ts'])], [SHELL], [{ verb: 'read', paths: ['a'] } as Capability, write(['a'])], []]) {
+    const denied = await decide(requestFor(effects), none, allows, { floorMode: 'shadow' });
+    assert.equal(denied.outcome, 'deny');
+    assert.equal(denied.rule, 'bundle.unavailable');
+    assert.equal(denied.reason, none.sentence);
+  }
+  assert.equal((await decide(requestFor([write(['a'])]), failedClosed('expired'), allows)).rule, 'bundle.failed-closed', 'a policy that failed to verify keeps its own rule id');
+});
+
 test('a failed-closed bundle keeps the floor: a read of the key folder is still refused with no card', async () => {
   const decided = await decide(requestFor([{ verb: 'read', paths: ['.near-ai/state/keys/local.key'] }]), failedClosed('expired'), allows);
   assert.equal(decided.outcome, 'deny');
@@ -225,11 +238,56 @@ test('enforce is the default and reports no shadowFloor', async () => {
 test('GATE_RULE_IDS lists every rule id once, including the floor, bundle, manifest, label, route, taint and settings ids', () => {
   assert.equal(new Set(GATE_RULE_IDS).size, GATE_RULE_IDS.length);
   for (const rule of [
-    ...FLOOR_RULE_ORDER, 'bundle.failed-closed', 'bundle.ceiling.context', 'bundle.ceiling.mode', 'bundle.ceiling.unattended-mcp', 'manifest.context',
-    'label.dominance', 'label.no-agent-tools', 'label.network-at-mark', 'route.deny', 'route.any-cloud', 'taint.held', 'settings.emergency-stop', 'settings.read-plan',
+    ...FLOOR_RULE_ORDER, 'bundle.failed-closed', 'bundle.unavailable', 'bundle.ceiling.context', 'bundle.ceiling.mode', 'bundle.ceiling.unattended-mcp', 'manifest.context',
+    'manifest.effects-unknown', 'label.dominance', 'label.no-agent-tools', 'label.network-at-mark', 'route.deny', 'route.any-cloud', 'taint.held', 'settings.emergency-stop', 'settings.read-plan',
     'settings.auto-safe-tool', 'settings.mode.edits', 'settings.run-grant.edits', 'settings.deny-list', 'settings.engagement-grant', 'settings.run-grant.command',
     'settings.allow-rule', 'settings.mode.fully-autonomous', 'settings.mode.other', 'settings.auto.classifier', 'settings.unattended-verification',
-    'settings.risk.outside-workspace', 'settings.risk.installs', 'settings.safety-model', 'settings.sensitive-read', 'settings.mcp-approval'
+    'settings.risk.outside-workspace', 'settings.risk.installs', 'settings.safety-model', 'settings.sensitive-read', 'settings.mcp-approval', 'settings.tool-forbidden'
   ]) assert.ok(GATE_RULE_IDS.includes(rule), rule);
-  assert.equal(GATE_RULE_IDS.length, FLOOR_RULE_ORDER.length + 5 + 3 + ROUTE_RULES.length + 1 + 18);
+  assert.equal(GATE_RULE_IDS.length, FLOOR_RULE_ORDER.length + 7 + 3 + ROUTE_RULES.length + 1 + 19);
+});
+
+// ---- Effects unknown: an empty effect list fails closed (PR 1 review fold-in) ----
+
+function countingSettings(): { layer: SettingsLayer; calls: () => number } {
+  let calls = 0;
+  return { layer: async (): Promise<SettingsAnswer> => { calls += 1; return { decision: 'allow', rule: 'settings.mode.fully-autonomous' }; }, calls: () => calls };
+}
+
+test('an empty effect list with a valid bundle and a person present asks with its own rule, no always-allow, no run-wide grant, and never reaches the settings layer', async () => {
+  const settings = countingSettings();
+  const decided = await decide(requestFor([]), validBundleState(), settings.layer);
+  assert.equal(decided.outcome, 'ask');
+  assert.equal(decided.rule, 'manifest.effects-unknown');
+  assert.equal(decided.offerAlwaysAllow, false);
+  assert.equal(decided.allowGrant, false);
+  assert.equal(decided.floor, false);
+  assert.equal(settings.calls(), 0);
+  assert.ok(GATE_RULE_IDS.includes(decided.rule));
+});
+
+test('an empty effect list with nobody present, or in an unattended context, is denied with a plain reason and never reaches the settings layer', async () => {
+  for (const overrides of [{ presence: 'none' as const }, { context: 'unattended' as const }, { context: 'routine' as const, presence: 'none' as const }]) {
+    const settings = countingSettings();
+    const decided = await decide(requestFor([], overrides), validBundleState(), settings.layer);
+    assert.equal(decided.outcome, 'deny', JSON.stringify(overrides));
+    assert.equal(decided.rule, 'manifest.effects-unknown');
+    assert.match(decided.reason ?? '', /cannot tell what Write would do/);
+    assert.equal(decided.offerAlwaysAllow, false);
+    assert.equal(decided.allowGrant, false);
+    assert.equal(settings.calls(), 0);
+  }
+});
+
+test('an empty effect list is never asked past a failed-closed bundle, is the same rule in either floor mode, and the emergency stop still comes first', async () => {
+  const settings = countingSettings();
+  const closed = await decide(requestFor([]), failedClosed('missing'), settings.layer);
+  assert.equal(closed.rule, 'bundle.failed-closed');
+  assert.equal(closed.outcome, 'deny');
+  const shadowed = await decide(requestFor([]), validBundleState(), settings.layer, { floorMode: 'shadow' });
+  assert.equal(shadowed.rule, 'manifest.effects-unknown');
+  const stopped = await decide(requestFor([], { policy: { mode: 'fully-autonomous', emergencyStop: true } }), validBundleState(), settings.layer);
+  assert.equal(stopped.rule, 'settings.emergency-stop');
+  assert.equal(stopped.outcome, 'deny');
+  assert.equal(settings.calls(), 0);
 });

@@ -9,6 +9,7 @@ import { DEFAULT_RULES } from '../agent/permissions';
 import { ShellSession } from '../agent/shell';
 import { CORE_TOOLS } from '../agent/tools';
 import { AgentMessage, CompletionEvent, NearAiClient, ToolCall } from '../services/nearAiClient';
+import { newTestRun } from './helpers/gatedRuns';
 
 const call = (id: string, name: string, args: Record<string, unknown>): ToolCall => ({ id, type: 'function', function: { name, arguments: JSON.stringify(args) } });
 
@@ -34,7 +35,7 @@ async function setup(turns: Parameters<typeof scriptedModel>[0], decide: (reques
   const events: AgentEvent[] = [];
   const approvals: ApprovalRequest[] = [];
   const shell = new ShellSession(root);
-  const run = new AgentRun({
+  const run = newTestRun({
     client: model, model: 'z-ai/glm-5.3', tools: CORE_TOOLS,
     context: { root, checkpoints: new RunCheckpoints('loop'), shell, readFiles: new Set() },
     policy: { mode: 'approve-risky', emergencyStop: false }, rules: DEFAULT_RULES,

@@ -1,5 +1,5 @@
-// The import boundary of the team core (D-18, TMR-02) and of the pure capability gate (Phase 70, D-01, D-02). src/domain/team and src/domain/gate are
-// pure domain code and src/team is the headless team engine: none of them may
+// The import boundary of the team core (D-18, TMR-02) and of the capability gate (Phase 70, D-01, D-02). src/domain/team and src/domain/gate are
+// pure domain code, src/team is the headless team engine and src/gate is the gate's Node side (bundle and decision log on disk): none of them may
 // import vscode, neither may use a package outside Node, and src/team reaches the editor-side services only through the type-only SecretStorageLike
 // from src/services/auth and the shared mirror lock src/services/stateMirrorLock (which itself imports only Node modules). The test reads the
 // TypeScript sources under src (the compiled tests run from dist/test, so the sources are found from the repository root).
@@ -14,6 +14,7 @@ const SRC = path.join(REPO_ROOT, 'src');
 const DOMAIN_TEAM = 'domain/team';
 const DOMAIN_GATE = 'domain/gate';
 const TEAM = 'team';
+const GATE = 'gate';
 const LOCK_MODULE = 'services/stateMirrorLock';
 const AUTH_MODULE = 'services/auth';
 
@@ -63,12 +64,18 @@ const RULES: Readonly<Record<string, Rule>> = {
     name: 'src/team',
     allows: (target, typeOnly) => under(target, TEAM) || under(target, 'domain')
       || (target === AUTH_MODULE && typeOnly) || target === LOCK_MODULE
+  },
+  // The gate's Node side (D-01): its own folder, the pure domain, the team engine (identity, key history), the type-only auth interface and the shared lock.
+  [GATE]: {
+    name: 'src/gate',
+    allows: (target, typeOnly) => under(target, GATE) || under(target, 'domain') || under(target, TEAM)
+      || (target === AUTH_MODULE && typeOnly) || target === LOCK_MODULE
   }
 };
 
 // Violations in one file's text, as "file:line specifier  reason". `file` is the path under src with forward slashes, e.g. team/gitTransport.ts.
 export function boundaryViolations(file: string, text: string): string[] {
-  const folder = file.startsWith(`${DOMAIN_TEAM}/`) ? DOMAIN_TEAM : file.startsWith(`${DOMAIN_GATE}/`) ? DOMAIN_GATE : TEAM;
+  const folder = file.startsWith(`${DOMAIN_TEAM}/`) ? DOMAIN_TEAM : file.startsWith(`${DOMAIN_GATE}/`) ? DOMAIN_GATE : file.startsWith(`${GATE}/`) ? GATE : TEAM;
   const rule = RULES[folder] as Rule;
   const problems: string[] = [];
   for (const ref of importsOf(text)) {
@@ -121,6 +128,10 @@ test('no file under src/domain/gate imports vscode, a package, or anything outsi
 
 test('no file under src/team imports vscode, a package, or a service other than the type-only auth import and the shared mirror lock', () => {
   scan(TEAM, 9);
+});
+
+test('no file under src/gate imports vscode, a package, or anything outside src/gate, src/domain, src/team, the type-only auth import and the shared mirror lock', () => {
+  scan(GATE, 3);
 });
 
 test('src/services/stateMirrorLock.ts imports only Node modules, so the shared lock pulls no editor code into the team core', () => {
@@ -182,6 +193,29 @@ test('the scanner has teeth: vscode, a package, an editor service, a value impor
     'domain/gate/planted.ts:5 ../../agent/tools',
     'domain/gate/planted.ts:6 vscode',
     'domain/gate/planted.ts:7 left-pad'
+  ]);
+});
+
+test('the scanner has teeth for src/gate: vscode, a package, an editor service, a value import of auth and an agent import are reported', () => {
+  const found = boundaryViolations('gate/planted.ts', [
+    "import { ok } from './bundleStore';",
+    "import { redactRecord } from '../domain/gate/record';",
+    "import { loadOrCreateDeviceIdentity } from '../team/identity';",
+    "import type { SecretStorageLike } from '../services/auth';",
+    "import { withFileLock } from '../services/stateMirrorLock';",
+    "import { createHash } from 'node:crypto';",
+    "import { loginFlow } from '../services/auth';",
+    "import { AuditStore } from '../services/auditStore';",
+    "import { tools } from '../agent/tools';",
+    "import * as vscode from 'vscode';",
+    "import { thing } from 'left-pad';"
+  ].join('\n')).map((entry) => entry.split('  ')[0]);
+  assert.deepEqual(found, [
+    'gate/planted.ts:7 ../services/auth',
+    'gate/planted.ts:8 ../services/auditStore',
+    'gate/planted.ts:9 ../agent/tools',
+    'gate/planted.ts:10 vscode',
+    'gate/planted.ts:11 left-pad'
   ]);
 });
 

@@ -8,6 +8,8 @@ import { applyProjectType } from '../agent/projectTypes';
 import { applyResearchProfile, usesResearchProfile } from '../gsd/researchProfile';
 import { slugify, TeamLibrary } from '../agent/teams';
 import { AuthService } from './auth';
+import { unattendedRuntimeFor } from '../gate/host';
+import type { GateHost } from '../gate/host';
 import { attachTeamStudio, optimiseTarget, StudioTarget, teamStudioHtml, versionLabel } from './teamStudioPage';
 import { ChatPrefill, gatherDirectoryInput } from './toolsPage';
 import { comparisonStoreFor } from '../benchmark/store';
@@ -93,7 +95,7 @@ async function teamAiDeps(auth: AuthService): Promise<TeamAiDeps> {
  * Opens Team Studio, after the one-time move of older teams has finished (0.4.18 review), so the studio never opens on a half-copied library. It
  * returns a promise so a caller (and a test) can await the panel; VS Code ignores a command handler's promise.
  */
-export async function openTeamStudio(context: vscode.ExtensionContext, auth: AuthService, sidebar: ChatPrefill, options: { wizard?: StudioTarget } = {}): Promise<void> {
+export async function openTeamStudio(context: vscode.ExtensionContext, auth: AuthService, sidebar: ChatPrefill, options: { wizard?: StudioTarget } = {}, gateHost?: GateHost): Promise<void> {
   // Only an actual move is waited for: with nothing to move this opens in the same tick, as it always did.
   if (teamsMoveInFlight() !== undefined) await whenTeamsMoved();
   if (current) {
@@ -154,7 +156,11 @@ export async function openTeamStudio(context: vscode.ExtensionContext, auth: Aut
         );
         if (answer !== 'Run the tests') return undefined;
       }
-      const outcomes = await runRoleSuite(plan, { clientFor: (model) => clientFor(active, model).client, rules: readAgentRules(), signal: options.signal ?? new AbortController().signal });
+      const outcomes = await runRoleSuite(plan, {
+        clientFor: (model) => clientFor(active, model).client, rules: readAgentRules(), signal: options.signal ?? new AbortController().signal,
+        // Nobody watches a role run: it is decided with presence none in an unattended context, and its decisions reach the project's log (GATE-07, D-43).
+        ...(gateHost ? { gateFor: (run: { member: string; model: string }) => unattendedRuntimeFor(gateHost, root, `team-roles-${teamName}`, `${run.member} on ${run.model}`) } : {})
+      });
       const picks = bestOf(outcomes);
       if (!picks.length) return { applied: 0, text: options.signal?.aborted ? `${teamName}: cancelled, so its models were left alone.` : 'Every role test failed, so the team is unchanged. Run Compare Models to see why.' };
       // Which picks really matched a member, collected where the write happens, so the notice below cannot claim a write that did not happen.

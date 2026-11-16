@@ -7,6 +7,7 @@ import test from 'node:test';
 import { AutoApprovalContext, decidePermissionAsync, DEFAULT_RULES, PermissionRules, RunGrants } from '../agent/permissions';
 import { argumentProblem, forbiddenScriptContent, scriptInvocation, scriptsNamedIn, unattendedDecision } from '../agent/unattended';
 import type { ActionPolicyMode } from '../domain/policy';
+import { newTestRun } from './helpers/gatedRuns';
 
 // PERF-01: a sub-agent nobody watches runs its own safe and verification commands without a card, and nothing that the approval policy promises will ask
 // (a push, a delete outside the project, publishing, the network, a credential path) is ever let through by it.
@@ -254,7 +255,7 @@ test('a script written after the main agent read outside content still asks when
   const shell = new ShellSession(root);
   try {
     // The helper shares the run's grants (tainted earlier by the main agent) and is created after the script was written.
-    const helper = new AgentRun({ client, model: 'm', tools: CORE_TOOLS, grants, unattended: {}, context: { root, checkpoints: new RunCheckpoints('taint'), shell, readFiles: new Set() }, policy: { mode: 'mostly-autonomous', emergencyStop: false }, rules: RULES, requestApproval: async (request) => { asked.push(request.title); return { decision: 'deny' }; }, emit: () => undefined });
+    const helper = newTestRun({ client, model: 'm', tools: CORE_TOOLS, grants, unattended: {}, context: { root, checkpoints: new RunCheckpoints('taint'), shell, readFiles: new Set() }, policy: { mode: 'mostly-autonomous', emergencyStop: false }, rules: RULES, requestApproval: async (request) => { asked.push(request.title); return { decision: 'deny' }; }, emit: () => undefined });
     await helper.run([{ role: 'user', content: 'verify' }], new AbortController().signal);
   } finally {
     shell.dispose();

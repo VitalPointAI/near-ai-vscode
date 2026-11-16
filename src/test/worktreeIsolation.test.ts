@@ -10,6 +10,7 @@ import { DEFAULT_RULES } from '../agent/permissions';
 import { gsdTools } from '../gsd/tools';
 import { AgentConversation, GsdContext } from '../services/agentSession';
 import type { AgentMessage, CompletionEvent, ToolCall } from '../services/nearAiClient';
+import { newTestConversation } from './helpers/gatedRuns';
 
 // Open-GSD treats this runner as a `harness-worktree` host: an Agent call with
 // isolation="worktree" must run in its own git worktree on a new branch, leave the main checkout
@@ -63,7 +64,7 @@ test('isolation="worktree" runs each agent on its own branch in its own director
     async actualCostsUsd() { return undefined; }
   };
   const posted: Array<Record<string, unknown>> = [];
-  const conversation = new AgentConversation(root, (message) => posted.push(message), path.join(storage, 'checkpoints'));
+  const conversation = newTestConversation(root, (message) => posted.push(message), path.join(storage, 'checkpoints'));
   try {
     await conversation.send({ text: 'execute', client: near as never, model: 'm', privacy: 'Private', policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES, gsd });
   } finally {
@@ -110,7 +111,7 @@ test('isolation="worktree" in a workspace opened at a subfolder of the repositor
     async actualCostsUsd() { return undefined; }
   };
   const posted: Array<Record<string, unknown>> = [];
-  const conversation = new AgentConversation(root, (message) => posted.push(message), path.join(storage, 'checkpoints'));
+  const conversation = newTestConversation(root, (message) => posted.push(message), path.join(storage, 'checkpoints'));
   try {
     await conversation.send({ text: 'go', client: near as never, model: 'm', privacy: 'Private', policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES, gsd });
   } finally {
@@ -135,7 +136,7 @@ test('isolation="worktree" outside a git repository is refused with a clear reas
     async actualCostsUsd() { return undefined; }
   };
   const posted: Array<Record<string, unknown>> = [];
-  const conversation = new AgentConversation(root, (message) => posted.push(message), path.join(storage, 'checkpoints'));
+  const conversation = newTestConversation(root, (message) => posted.push(message), path.join(storage, 'checkpoints'));
   try {
     await conversation.send({ text: 'go', client: near as never, model: 'm', privacy: 'Private', policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES, gsd });
   } finally {
@@ -170,7 +171,7 @@ test('with one agent slot and one worktree slot, a worktree agent that starts a 
     async actualCostsUsd() { return undefined; }
   };
   const posted: Array<Record<string, unknown>> = [];
-  const conversation = new AgentConversation(root, (message) => posted.push(message), path.join(storage, 'checkpoints'));
+  const conversation = newTestConversation(root, (message) => posted.push(message), path.join(storage, 'checkpoints'));
   conversation.maxParallelWorktrees = 1;
   try {
     await conversation.send({ text: 'execute', client: near as never, model: 'm', privacy: 'Private', policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES, gsd: nested, maxParallelAgents: 1 });

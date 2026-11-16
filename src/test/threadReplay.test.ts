@@ -14,6 +14,7 @@ import { StateKeys, stateKeysFor } from '../services/stateKeys';
 import { historyItems, ThreadStore, type ThreadIndexItem } from '../services/threadStore';
 import type { Transcript } from '../services/transcripts';
 import { MemorySecrets, tempProject } from './helpers/stateFixtures';
+import { newTestConversation } from './helpers/gatedRuns';
 
 // Phase 27, plan 06 (SYNC-01, D-07, D-08, D-12): a reopened thread shows every entry of its log, tool steps as cards with their output on demand,
 // long threads in batches, a second continuation labelled, and the history list built from the index.
@@ -87,7 +88,7 @@ test('reopening a thread of a ThreadStore returns items whose user texts equal w
     const transcript: Transcript = { id: THREAD, title: 'Three questions', model: 'm', updatedAt: new Date().toISOString(), turns: 3, messages };
     await store.captureTranscript(transcript, new Map(), new WeakSet());
     await store.save(transcript);
-    const reopened = new AgentConversation(root, () => undefined, stateHomeFor(root).paths.checkpoints, undefined, storeFor(root, new MemorySecrets(), 'edB.1'));
+    const reopened = newTestConversation(root, () => undefined, stateHomeFor(root).paths.checkpoints, undefined, storeFor(root, new MemorySecrets(), 'edB.1'));
     const view = await reopened.restore(THREAD);
     assert.ok(view && !Array.isArray(view), 'a thread store answers with items');
     const items = (view as { items: ViewItem[] }).items;
@@ -272,14 +273,14 @@ test('a run that reopens a long thread through the agent shows every typed messa
       async *streamCompletion(): AsyncGenerator<CompletionEvent> { yield { type: 'done', message: { role: 'assistant', content: 'ok' }, finishReason: 'stop', usage }; },
       async actualCostsUsd() { return undefined; }
     };
-    const conversation = new AgentConversation(root, () => undefined, stateHomeFor(root).paths.checkpoints, undefined, store);
+    const conversation = newTestConversation(root, () => undefined, stateHomeFor(root).paths.checkpoints, undefined, store);
     const asked: string[] = [];
     for (let turn = 1; turn <= 4; turn += 1) {
       asked.push(`Typed ${turn}`);
       const request: AgentTurnRequest = { text: `Typed ${turn}`, client: client as never, model: 'm', privacy: 'Private', policy: { mode: 'approve-risky', emergencyStop: false }, rules: DEFAULT_RULES };
       await conversation.send(request);
     }
-    const view = await new AgentConversation(root, () => undefined, stateHomeFor(root).paths.checkpoints, undefined, storeFor(root, new MemorySecrets(), 'edC.1')).restore(conversation.id);
+    const view = await newTestConversation(root, () => undefined, stateHomeFor(root).paths.checkpoints, undefined, storeFor(root, new MemorySecrets(), 'edC.1')).restore(conversation.id);
     const items = (view as { items: ViewItem[] }).items;
     assert.deepEqual(items.filter((item) => item.kind === 'user').map((item) => (item as { text: string }).text), asked);
     assert.equal(items.filter((item) => item.kind === 'assistant').length, 4);

@@ -11,6 +11,7 @@ import { isNearCloudEndpoint } from '../domain/config';
 import { privateRouteFor } from '../services/providerCache';
 import { AgentConversation, GsdContext, routeAllows, type PrivateRoute } from '../services/agentSession';
 import type { AgentMessage, CompletionEvent, ToolCall } from '../services/nearAiClient';
+import { newTestConversation } from './helpers/gatedRuns';
 
 // A team member marked `privacy: private` runs only on a model in a NEAR TEE or on this machine:
 // the most capable private model for its tier, and never a forwarded one, even when that is all
@@ -92,7 +93,7 @@ test('a run puts a private member on a private model, and refuses it clearly whe
   const send = async (catalog: typeof CATALOG, route: PrivateRoute | undefined = { kind: 'near', attestation: true }, model = 'cloud/frontier') => {
     modelsUsed.clear();
     toolResults.length = 0;
-    const conversation = new AgentConversation(root, () => undefined, path.join(root, '.ckpt'));
+    const conversation = newTestConversation(root, () => undefined, path.join(root, '.ckpt'));
     try {
       await conversation.send({ text: 'go', client: near as never, model, privacy: 'Not private', policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES, gsd, tiers: TIERS, availableModels: catalog.map((entry) => entry.id), modelCatalog: catalog, ...(route ? { route } : {}) });
     } finally {
@@ -139,7 +140,7 @@ test('a private member only runs on a model that is private on the run\'s own ro
   };
   const run = async (catalog: Array<{ id: string; privacyBoundary: string; outputPricePerMillion?: number }>, route: PrivateRoute | undefined, model: string) => {
     used.length = 0; results.length = 0;
-    const conversation = new AgentConversation(root, () => undefined, path.join(root, '.ckpt'));
+    const conversation = newTestConversation(root, () => undefined, path.join(root, '.ckpt'));
     try {
       await conversation.send({ text: 'go', client: client as never, model, privacy: 'x', policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES, gsd, tiers: { deep: 'tee/kimi', standard: 'tee/glm', fast: 'tee/glm' }, availableModels: catalog.map((entry) => entry.id), modelCatalog: catalog, ...(route ? { route } : {}) });
     } finally { conversation.dispose(); }

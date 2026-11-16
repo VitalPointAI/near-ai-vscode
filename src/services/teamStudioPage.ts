@@ -40,7 +40,8 @@ import { buildToolsDirectory, firstSentence, PRIVACY_TEXT, privacyOf, resolveAge
 
 export type StudioTarget = 'project' | 'user';
 
-export interface StudioTool { name: string; description: string; capability: string; status: ToolStatus; statusText: string }
+/** `words`: what the tool's manifest says it can do, from the same sentences the Tools page shows (GATE-03, D-07); the member card shows them beside the tool. */
+export interface StudioTool { name: string; description: string; capability: string; status: ToolStatus; statusText: string; words: string[] }
 export interface StudioRole { id: string; label: string; description: string; source: 'team' | 'gsd'; suggestion: string; tools: string[] | null; model: string }
 export interface StudioStartingPoint { id: string; group: 'recommend' | 'project-type' | 'gsd' | 'empty'; label: string; description: string; members: string[] }
 
@@ -144,7 +145,7 @@ const GSD_TEMPLATES: Array<{ id: string; label: string; description: string; mem
 ];
 
 function studioTools(directory: ToolsDirectory): StudioTool[] {
-  return directory.tools.map((tool) => ({ name: tool.name, description: tool.description, capability: tool.capability, status: tool.status, statusText: tool.statusText }));
+  return directory.tools.map((tool) => ({ name: tool.name, description: tool.description, capability: tool.capability, status: tool.status, statusText: tool.statusText, words: tool.words }));
 }
 
 /** Everything the studio's pickers need, computed from the Tools directory (the same sources a run uses). */

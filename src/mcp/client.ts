@@ -1,5 +1,6 @@
 import * as path from 'node:path';
 import { ToolError } from '../agent/workspace';
+import type { McpManifest } from '../domain/gate/manifest';
 
 // A connection to one MCP server through the official SDK's client (vendored in vendor/mcp):
 // a local command over stdio, or a remote server over Streamable HTTP with an SSE fallback.
@@ -16,6 +17,11 @@ export interface McpServerConfig {
   approval: McpApproval;
   /** Tools the user switched off for this server. */
   disabledTools?: string[];
+  /**
+   * What the server's tools may do, as the person declared it (GATE-03, D-06). A server added after manifests existed is stored with a restrictive one; a server
+   * configured before has none, which means today's behaviour (D-38, no data migration). It is a claim by the person, never checked against the server.
+   */
+  manifest?: McpManifest;
 }
 
 /** Values kept in SecretStorage: a remote URL may carry the access token itself. */

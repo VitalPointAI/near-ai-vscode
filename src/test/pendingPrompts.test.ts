@@ -8,6 +8,7 @@ import { DEFAULT_RULES } from '../agent/permissions';
 import { AgentConversation, GsdContext } from '../services/agentSession';
 import { parseChatWebviewMessage } from '../services/chatBridge';
 import type { AgentMessage, CompletionEvent, ToolCall } from '../services/nearAiClient';
+import { newTestConversation } from './helpers/gatedRuns';
 
 // Prompts that block a run (approvals, questions) are pinned above the composer until settled:
 // the view's queue and wording, and the host side that tracks what is waiting, replays it to a
@@ -119,7 +120,7 @@ function writingConversation(root: string) {
   };
   const posted: Array<Record<string, unknown>> = [];
   const counts: number[] = [];
-  const conversation = new AgentConversation(root, (message) => posted.push(message), path.join(root, '.ckpt'));
+  const conversation = newTestConversation(root, (message) => posted.push(message), path.join(root, '.ckpt'));
   conversation.onWaitingChange = (count) => counts.push(count);
   const send = () => conversation.send({ text: 'write notes', client: near as never, model: 'm', privacy: 'Private', policy: { mode: 'approve-risky', emergencyStop: false }, rules: DEFAULT_RULES });
   return { conversation, posted, counts, send };
@@ -212,7 +213,7 @@ test('questions wait, replay, and are cancelled when the run is stopped', async 
   };
   const posted: Array<Record<string, unknown>> = [];
   const counts: number[] = [];
-  const conversation = new AgentConversation(root, (message) => posted.push(message), path.join(root, '.ckpt'));
+  const conversation = newTestConversation(root, (message) => posted.push(message), path.join(root, '.ckpt'));
   conversation.onWaitingChange = (count) => counts.push(count);
   try {
     const running = conversation.send({ text: 'ask me', client: near as never, model: 'm', privacy: 'Private', policy: { mode: 'approve-risky', emergencyStop: false }, rules: DEFAULT_RULES, gsd });

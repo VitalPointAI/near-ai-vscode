@@ -53,6 +53,7 @@ import { syncAutoAdvance } from './autoAdvanceConfig';
 import { editorWriter, type MementoLike, stateHomeFor } from './stateHome';
 import { ensureMigrated } from './stateMigration';
 import { autoResumeChoice, autoResumeNotice, cutOffNotice, HEARTBEAT_MS, ownEditorMarkers, resumePrompt, RunMarker, RunMarkers, shouldAutoResume } from './runMarkers';
+import type { GateHost } from '../gate/host';
 import { WaitingNotices } from './waitingNotices';
 import { latestOnly, PROJECT_TEAM_WATCH_PATHS, projectHasTeam, SETUP_NUDGE_DISMISSED_KEY, shouldShowSetupNudge } from './setupSteps';
 
@@ -75,8 +76,8 @@ export interface ChatHost {
   onDidDispose: vscode.Event<void>;
 }
 
-export async function attachChatToView(context: vscode.ExtensionContext, auth: AuthService, view: vscode.WebviewView, html: string): Promise<void> {
-  await initializeChat(context, auth, view, html);
+export async function attachChatToView(context: vscode.ExtensionContext, auth: AuthService, view: vscode.WebviewView, html: string, gateHost?: Pick<GateHost, 'runtimeFor'>): Promise<void> {
+  await initializeChat(context, auth, view, html, undefined, gateHost);
 }
 
 /** Where the open conversation list is kept in the workspace's state. */
@@ -123,7 +124,7 @@ interface ChatTab {
   focusRegained?: () => void;
 }
 
-async function initializeChat(context: vscode.ExtensionContext, auth: AuthService, panel: ChatHost, html: string, initialPrompt?: string): Promise<void> {
+async function initializeChat(context: vscode.ExtensionContext, auth: AuthService, panel: ChatHost, html: string, initialPrompt?: string, gateHost?: Pick<GateHost, 'runtimeFor'>): Promise<void> {
   configureSpendTracking(context);
   const state = {
     activity: undefined as ActivityStore | undefined,
@@ -288,7 +289,7 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
   };
   const ensureAgent = (tab: ChatTab, root: string): AgentConversation => {
     if (!tab.agent) {
-      const created = conversationFor(context, root, panel, tab.post, () => tab.title || 'a conversation');
+      const created = conversationFor(context, root, panel, tab.post, () => tab.title || 'a conversation', gateHost);
       tab.agent = created.agent;
       tab.focusRegained = created.focusRegained;
       tab.agent.adopt(tab.id);
@@ -1232,7 +1233,7 @@ function runMarkersFor(context: vscode.ExtensionContext, root: string): RunMarke
   return store;
 }
 
-function conversationFor(context: vscode.ExtensionContext, root: string, panel: ChatHost, post: (message: Record<string, unknown>) => void, title: () => string): { agent: AgentConversation; focusRegained: () => void } {
+function conversationFor(context: vscode.ExtensionContext, root: string, panel: ChatHost, post: (message: Record<string, unknown>) => void, title: () => string, gateHost?: Pick<GateHost, 'runtimeFor'>): { agent: AgentConversation; focusRegained: () => void } {
   const storage = context.globalStorageUri.fsPath;
   // Conversations live in the project's state home, so every editor on this computer lists and reopens the same ones (SYNC-01). The state home and its
   // key are created on the first save, never by opening the folder.
@@ -1255,6 +1256,8 @@ function conversationFor(context: vscode.ExtensionContext, root: string, panel: 
   const home = stateHomeFor(root);
   const conversation = new AgentConversation(root, forward, home.paths.checkpoints, ripgrepPath(), transcripts, sharedActivityFeed());
   conversation.runMarkers = runMarkersFor(context, root);
+  // The one gate (GATE-04): every tool call of this conversation, and of its sub-agents, is decided through it.
+  conversation.gateHost = gateHost;
   // Checkpoints are shared by every editor on this computer; sub-agent worktrees stay in this editor's own storage, never in the project.
   conversation.worktreeRoot = path.join(storage, 'worktrees');
   conversation.checkpointPrepare = () => home.ensure();

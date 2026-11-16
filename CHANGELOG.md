@@ -3,8 +3,10 @@
 ## Unreleased
 
 This release adds Team Live, a panel where you watch your team work: the lead hands out tasks,
-members wake up and report back. Helpers started by a sub-agent now report to that sub-agent, and
-Agent Activity says who started each agent and what a waiting agent waits for.
+members wake up and report back. It also gives NEAR AI a policy: one signed file that sets the most
+the agent may do, a status bar item and commands to see and reset it, and a plain statement of what
+every tool does. Your settings still decide what is allowed day to day, and they can only narrow
+what the policy allows.
 
 - **Team Live: watch your team work.** A new panel draws a team run as a tree, the lead at
   the top and each member under whoever it reports to. When the lead hands a member a task, a
@@ -34,6 +36,31 @@ Agent Activity says who started each agent and what a waiting agent waits for.
   aside with a reason instead of being read as "reports to nobody".
 - **A member's `privacy:` line may carry a note** after the value (`privacy: private  # client
   data`); marking the team private no longer adds a second line under it.
+- **A policy status bar item.** A **Policy** item in the status bar shows that your policy is
+  signed and valid. It says when the policy is close to its end and being renewed, and turns to a
+  warning, with one sentence naming the cause and the fix, when the policy cannot be trusted.
+- **NEAR AI: Show Policy.** Opens your policy in plain words and as stored. The view is read only:
+  looking at it, or editing the text, changes nothing.
+- **NEAR AI: Reset Policy to Defaults.** Asks you to confirm, signs a fresh default policy with
+  this computer's key, keeps your old policy file beside the new one, and records the reset. It is
+  the only way back from a policy that failed.
+- **A policy step in setup.** The setup view has a **Check your policy** step. It is done when your
+  policy is valid, and shows the status bar's sentence when it is not.
+- **Every tool says what it does.** Each tool now declares whether it reads, changes your files,
+  runs commands, uses the network or starts other agents, among others, and the Tools page shows
+  it in plain words. For an MCP server's tools you can say what each one does (only reads,
+  changes data on the server, or not known) on the MCP Connections page.
+- **New MCP servers start restrictive.** A server you add starts with every tool undeclared. An
+  undeclared tool asks before it runs in every mode except `fully-autonomous`, and it runs only
+  while you are there: a run with nobody watching does not call it. Servers you added before keep
+  working as they did.
+- **A broken or missing policy file falls back to reading and planning only.** If the policy file
+  is missing, changed outside NEAR AI, signed by a key this computer does not know, or expired,
+  only reading and planning run until you run **NEAR AI: Reset Policy to Defaults**. NEAR AI never
+  signs a replacement by itself, except on a true first install.
+- **Records of the policy.** What happens to your policy (created, renewed, reset, or failing to
+  load) is recorded in this extension's storage, in a log for this computer, and in the open
+  project's record when a folder is open. Nothing goes into your project.
 
 ## 0.4.27
 

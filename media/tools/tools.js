@@ -154,6 +154,8 @@
       if (server.enabledHere && server.state !== 'connected') head.append(button('Connect', () => vscode.postMessage({ type: 'mcp-connect', id: server.id }), { secondary: true, label: 'Connect to ' + server.name + ' to list its tools' }));
       item.append(head);
       if (server.host) item.append(el('p', 'hint', server.transport + ' · ' + server.host));
+      // What the server's manifest says it does, in the order the extension sends it; the last line says it is a declaration NEAR AI cannot check.
+      (server.words || []).forEach((line) => item.append(el('p', 'hint', line)));
       if (server.error) item.append(el('p', 'error', server.error));
       if (!server.tools.length) item.append(el('p', 'hint', server.state === 'connected' ? 'This server lists no tools.' : 'Its tools are listed once it connects (when an agent first uses it, or with Connect).'));
       else {

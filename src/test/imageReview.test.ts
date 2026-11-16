@@ -14,6 +14,7 @@ import { parseChatWebviewMessage } from '../services/chatBridge';
 import { ConversationLog, loggable, promptIdOf } from '../services/conversations';
 import type { AgentMessage, CompletionEvent, ToolCall } from '../services/nearAiClient';
 import { chatPage, StubNode } from './helpers/chatPage';
+import { newTestConversation } from './helpers/gatedRuns';
 
 // 0.4.23 (owner): the person sees each image the agent makes, can ask for changes, and only an accepted image reaches its path. In a real run an
 // agent made the same image 11 times over hours, scoring each with its own scripts and writing every attempt into the report's image folder.
@@ -289,7 +290,7 @@ function imageConversation(root: string, options: { subAgent?: boolean; imageRev
   };
   const posted: Array<Record<string, unknown>> = [];
   const counts: number[] = [];
-  const conversation = new AgentConversation(root, (message) => posted.push(message), path.join(root, '.ckpt'));
+  const conversation = newTestConversation(root, (message) => posted.push(message), path.join(root, '.ckpt'));
   conversation.onWaitingChange = (count) => counts.push(count);
   return { conversation, posted, counts, results, near };
 }
@@ -420,7 +421,7 @@ test('the pinned card and the transcript line word an image review', () => {
 test('answered image reviews and questions leave no abort listener on the run\'s signal; a stop still cancels one that waits', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'near-ai-image-listeners-'));
   const posted: Array<Record<string, unknown>> = [];
-  const conversation = new AgentConversation(root, (message) => posted.push(message), path.join(root, '.ckpt'));
+  const conversation = newTestConversation(root, (message) => posted.push(message), path.join(root, '.ckpt'));
   const controller = new AbortController();
   const signal = controller.signal;
   let live = 0;
@@ -475,7 +476,7 @@ test('in Full auto a question and an image review nobody answers close as timed 
   const root = await mkdtemp(path.join(tmpdir(), 'near-ai-image-timeout-'));
   const posted: Array<Record<string, unknown>> = [];
   const counts: number[] = [];
-  const conversation = new AgentConversation(root, (message) => posted.push(message), path.join(root, '.ckpt'));
+  const conversation = newTestConversation(root, (message) => posted.push(message), path.join(root, '.ckpt'));
   conversation.onWaitingChange = (count) => counts.push(count);
   conversation.approvalTimeoutMs = 40;
   const controller = new AbortController();
@@ -523,7 +524,7 @@ test('in Full auto a question and an image review nobody answers close as timed 
 test('in the other modes a question and an image review past the timeout park the run, keep their cards, and still take a late answer', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'near-ai-image-park-'));
   const posted: Array<Record<string, unknown>> = [];
-  const conversation = new AgentConversation(root, (message) => posted.push(message), path.join(root, '.ckpt'));
+  const conversation = newTestConversation(root, (message) => posted.push(message), path.join(root, '.ckpt'));
   conversation.approvalTimeoutMs = 40;
   const internals = conversation as unknown as AskInternals;
   const signal = new AbortController().signal;
@@ -562,7 +563,7 @@ test('in the other modes a question and an image review past the timeout park th
 test('outside Full auto a question left a whole day is released like an approval, without "(no answer, timed out)"', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'near-ai-question-release-'));
   const posted: Array<Record<string, unknown>> = [];
-  const conversation = new AgentConversation(root, (message) => posted.push(message), path.join(root, '.ckpt'));
+  const conversation = newTestConversation(root, (message) => posted.push(message), path.join(root, '.ckpt'));
   conversation.approvalTimeoutMs = 40;
   const internals = conversation as unknown as AskInternals;
   const timers = { set: globalThis.setTimeout };
@@ -589,7 +590,7 @@ test('outside Full auto a question left a whole day is released like an approval
 test('outside Full auto an image review left a whole day is released, not timed out: the draft is kept and the agent is told to ask again', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'near-ai-image-release-'));
   const posted: Array<Record<string, unknown>> = [];
-  const conversation = new AgentConversation(root, (message) => posted.push(message), path.join(root, '.ckpt'));
+  const conversation = newTestConversation(root, (message) => posted.push(message), path.join(root, '.ckpt'));
   conversation.approvalTimeoutMs = 40;
   const internals = conversation as unknown as AskInternals;
   const timers = { set: globalThis.setTimeout };
@@ -629,7 +630,7 @@ test('outside Full auto an image review left a whole day is released, not timed 
 test('a background sub-agent\'s question and image review time out as in Full auto; a foreground one\'s park', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'near-ai-image-background-'));
   const posted: Array<Record<string, unknown>> = [];
-  const conversation = new AgentConversation(root, (message) => posted.push(message), path.join(root, '.ckpt'));
+  const conversation = newTestConversation(root, (message) => posted.push(message), path.join(root, '.ckpt'));
   conversation.approvalTimeoutMs = 40;
   const internals = conversation as unknown as AskInternals;
   const agent = (id: string, background: boolean) => ({ id, label: id, description: '', model: 'm', abort: new AbortController(), paused: false, background, activity: 'Working', activitySince: Date.now(), startedAt: Date.now(), toolCalls: 0, turns: 0 });
@@ -713,7 +714,7 @@ test('a parallel attempt at the same path does not delete a draft whose Accept i
 test('a draft whose file is gone says so on its card, offers no Accept, and a too large one still says too large', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'near-ai-image-gone-'));
   const posted: Array<Record<string, unknown>> = [];
-  const conversation = new AgentConversation(root, (message) => posted.push(message), path.join(root, '.ckpt'));
+  const conversation = newTestConversation(root, (message) => posted.push(message), path.join(root, '.ckpt'));
   const internals = conversation as unknown as { askImageReview(draft: ImageDraft, signal: AbortSignal): Promise<ImageReviewDecision> };
   const controller = new AbortController();
   try {
@@ -791,7 +792,7 @@ test('changes to a draft that has gone, and an edit_of naming a missing draft, t
 test('a zero-byte draft is gone: its card says so, changes to it and edit_of naming it tell the agent to generate fresh', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'near-ai-image-empty-'));
   const posted: Array<Record<string, unknown>> = [];
-  const conversation = new AgentConversation(root, (message) => posted.push(message), path.join(root, '.ckpt'));
+  const conversation = newTestConversation(root, (message) => posted.push(message), path.join(root, '.ckpt'));
   const internals = conversation as unknown as { askImageReview(draft: ImageDraft, signal: AbortSignal): Promise<ImageReviewDecision> };
   const controller = new AbortController();
   try {

@@ -70,6 +70,22 @@
     name.focus();
   }
 
+  // What the person says a tool does. This is a declaration NEAR AI cannot check, and the server's own last sentence says so under the menu.
+  const DECLARE = { unknown: 'Not known', reads: 'Only reads', 'changes-remote': 'Changes data on the server' };
+  function declareControl(server, tool, words) {
+    const choice = (server.toolChoices || {})[tool.name] || 'unknown';
+    const select = document.createElement('select');
+    select.setAttribute('aria-label', 'What ' + tool.name + ' does');
+    const options = Object.entries(DECLARE).concat(choice === 'custom' ? [['custom', 'Declared another way']] : []);
+    options.forEach(([value, text]) => { const option = el('option', '', text); option.value = value; select.append(option); });
+    select.value = choice;
+    select.addEventListener('change', () => { if (select.value !== 'custom') vscode.postMessage({ type: 'declare', id: server.config.id, tool: tool.name, choice: select.value }); });
+    const wrap = el('div', 'declare');
+    wrap.append(el('span', 'field-label', 'What it does '), select);
+    if (words.length) wrap.append(el('span', 'hint', ' ' + words[words.length - 1]));
+    return wrap;
+  }
+
   function card(server) {
     const box = el('article', 'server state-' + server.state);
     const head = el('div', 'server-head');
@@ -78,6 +94,9 @@
     const where = server.config.transport === 'http' ? (server.host || 'no URL set') : [server.config.command].concat(server.config.args || []).join(' ');
     box.append(el('p', 'where', (server.config.transport === 'http' ? 'Remote: ' : 'Runs locally: ') + where));
     if (server.error) box.append(el('p', 'error', server.error));
+    // What the server is declared to do, in the order the extension sends it (where it runs first, the declaration sentence last). Always set with textContent.
+    const words = server.manifestWords || [];
+    if (words.length) { const list = el('ul', 'manifest-words'); words.forEach((line) => list.append(el('li', 'hint', line))); box.append(list); }
     const controls = el('div', 'controls');
     const here = document.createElement('input');
     here.type = 'checkbox';
@@ -109,6 +128,7 @@
         const label = el('label');
         label.append(box2, el('code', '', ' ' + tool.name), el('span', 'tag', tool.readOnly && !tool.destructive ? 'read-only' : tool.destructive ? 'can delete' : 'can change data'));
         item.append(label, el('p', 'hint', tool.description));
+        item.append(declareControl(server, tool, words));
         list.append(item);
       });
       details.append(list);

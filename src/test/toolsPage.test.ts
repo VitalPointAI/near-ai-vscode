@@ -23,6 +23,7 @@ const SCRIPT = path.join(__dirname, '..', '..', 'media', 'tools', 'tools.js');
 const server = (overrides: Partial<McpServerStatus> = {}): McpServerStatus => ({
   config: { id: 'catalog', name: 'Catalog', transport: 'http', approval: 'ask-for-changes', disabledTools: ['drop'] },
   host: 'mcp.example.com', hasSecrets: { url: true, headers: [], env: [] }, enabledHere: true, state: 'connected', calls: 0, errors: 0,
+  manifestWords: [], toolChoices: {},
   tools: [
     { name: 'search', description: 'Search the catalog. Returns items.', inputSchema: {}, readOnly: true, destructive: false },
     { name: 'update', description: 'Change an item.', inputSchema: {}, readOnly: false, destructive: true },
@@ -152,7 +153,7 @@ test('each tool\'s runs/asks column follows decidePermission in every approval m
       const capabilityOf = new Map(everyTool.map((tool) => [tool.name, tool.capability]));
       for (const tool of directory.tools) {
         if (tool.status === 'off') continue;
-        const capability = capabilityOf.get(tool.name) ?? ({ read: 'read', plan: 'plan', edit: 'workspaceWrite', shell: 'shell', network: 'network', generate: 'mediaGeneration' } as const)[tool.capability as 'read'];
+        const capability = capabilityOf.get(tool.name) ?? ({ read: 'read', plan: 'plan', edit: 'workspaceWrite', shell: 'shell', network: 'network', generate: 'mediaGeneration', learn: 'sharedWrite' } as const)[tool.capability as 'read'];
         // The directory now carries the tool's own marker, so this reads it rather than reconstructing it from a name: dropping the marker from
         // the directory fails here. A tool the list does not hold (an MCP one) has no marker and keeps asking.
         const autoSafe = tool.autoSafe === true;

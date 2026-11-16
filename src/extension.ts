@@ -31,6 +31,8 @@ import { registerSecurityScanning } from './services/securityScan';
 import { registerWebSearchSetup } from './services/webSearchSetup';
 import { registerSpendingLimits } from './services/spendingLimits';
 import { registerSpendTracking } from './services/spendTracking';
+import { registerGate } from './services/gateCommands';
+import type { GateHost } from './gate/host';
 import { registerTeamMode, teamModeTestApi } from './services/team/teamCommands';
 import type { TeamModeTestApi } from './services/team/teamCommands';
 import { registerMcpConnections } from './services/mcpView';
@@ -59,7 +61,7 @@ import { registerCodePushCommand } from './services/onlineHomeVscode';
 import { cleanOldDrafts } from './agent/imageDrafts';
 
 /** Returned only to the extension-host tests, which set NEAR_AI_E2E=1. */
-export interface NearAiTestApi { auth: AuthService; sidebar: NearAiPanelViewProvider; team: TeamModeTestApi }
+export interface NearAiTestApi { auth: AuthService; sidebar: NearAiPanelViewProvider; team: TeamModeTestApi; gate: GateHost }
 
 export function activate(context: vscode.ExtensionContext): NearAiTestApi | undefined {
   const auth = new AuthService(context.secrets);
@@ -125,7 +127,9 @@ export function activate(context: vscode.ExtensionContext): NearAiTestApi | unde
   // used: a background browser tab otherwise stalls agent runs. Asked once; changed only on the click.
   void suggestProxySupportOff(context);
 
-  const sidebar = new NearAiPanelViewProvider(context, auth);
+  // The one gate starts before anything that could run a tool, and before Team Mode; the chat gives each conversation its runtime from it (GATE-04).
+  const gate = registerGate(context);
+  const sidebar = new NearAiPanelViewProvider(context, auth, gate);
   registerAgentActivity(context, sidebar);
   registerTeamLive(context, sidebar);
   registerUsageExport(context);
@@ -135,7 +139,7 @@ export function activate(context: vscode.ExtensionContext): NearAiTestApi | unde
   const teamMode = registerTeamMode(context);
   registerSpendingLimits(context, auth);
   registerMcpConnections(context);
-  registerModelComparison(context, auth);
+  registerModelComparison(context, auth, gate);
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(NearAiPanelViewProvider.viewId, sidebar, { webviewOptions: { retainContextWhenHidden: true } }),
     vscode.commands.registerCommand('nearAi.setup', () => openOnboarding(context, {
@@ -164,6 +168,7 @@ export function activate(context: vscode.ExtensionContext): NearAiTestApi | unde
       startRun: panelCyberRunStarter(context, (root) => activeProvider(root, auth).then((active) => active?.provider.client), {
         root: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
         model: readModelTiers().standard,
+        gateHost: gate,
         stopped: () => isEmergencyStopped(),
         // Every ask goes to the same approval card the chat uses, so a shell or exploit step is
         // never silently allowed.
@@ -206,7 +211,7 @@ export function activate(context: vscode.ExtensionContext): NearAiTestApi | unde
 
   registerRunReport(context);
   registerResearchVerifiers(context);
-  registerWorkspaceCommands(context, (options) => openTeamStudio(context, auth, sidebar, options));
+  registerWorkspaceCommands(context, (options) => openTeamStudio(context, auth, sidebar, options, gate));
   registerProjectSetup(context, { secrets: context.secrets, chatVisible: () => sidebar.visible });
   registerNewProfile(context, () => configureApiKey(context, auth, sidebar));
   // Project sync (D-17): the commands, the safe moments it runs at, and the status the chat panel's control shows. It runs only once the person has turned it on.
@@ -215,7 +220,7 @@ export function activate(context: vscode.ExtensionContext): NearAiTestApi | unde
 
   // `@nearAi` in VS Code's built-in Chat view; skipped on hosts without the Chat Participant API.
   registerChatParticipant(context, auth, (command, args) => sidebar.request({ type: 'open-command', command, ...(args ? { args } : {}) }));
-  return process.env.NEAR_AI_E2E === '1' ? { auth, sidebar, team: teamModeTestApi(context, teamMode) } : undefined;
+  return process.env.NEAR_AI_E2E === '1' ? { auth, sidebar, team: teamModeTestApi(context, teamMode), gate } : undefined;
 }
 
 async function suggestProxySupportOff(context: vscode.ExtensionContext): Promise<void> {

@@ -491,6 +491,8 @@ const REASON_PRODUCERS: Record<BundleFailureReason, (signer: PayloadSigner) => B
     envelope.payload.expiresAt = new Date(NOW + 10 * 365 * DAY).toISOString();
     return check(envelope, signer);
   },
+  // Produced by the store, which knows the last-valid hash; src/test/gateBundleTrust.test.ts reaches it through a replaced file on disk.
+  replaced: () => failedClosed('replaced'),
   'unknown-key': (signer) => verifyBundleEnvelope(signedDefault(signer), { status: NO_KNOWN_KEYS, now: NOW }),
   'key-revoked': (signer) => verifyBundleEnvelope(signedDefault(signer), { status: () => ({ state: 'revoked' }), now: NOW }),
   'key-rotated': (signer) => verifyBundleEnvelope(signedDefault(signer), { status: () => ({ state: 'rotated', since: new Date(NOW - 1000).toISOString() }), now: NOW }),
@@ -505,12 +507,14 @@ const REASON_PRODUCERS: Record<BundleFailureReason, (signer: PayloadSigner) => B
   },
   'clock-behind': (signer) => check(signedDefault(signer, NOW + DAY), signer),
   'no-identity': () => failedClosed('no-identity'),
-  'identity-unavailable': () => failedClosed('identity-unavailable')
+  'identity-unavailable': () => failedClosed('identity-unavailable'),
+  'not-loaded': () => failedClosed('not-loaded'),
+  unavailable: () => failedClosed('unavailable')
 };
 
 test('every failure reason has a producer in this file, so none is untested', () => {
   assert.deepEqual(Object.keys(REASON_PRODUCERS).sort(), Object.keys(BUNDLE_FAILURES).sort());
-  assert.equal(Object.keys(BUNDLE_FAILURES).length, 20);
+  assert.equal(Object.keys(BUNDLE_FAILURES).length, 23);
 });
 
 for (const reason of Object.keys(BUNDLE_FAILURES) as BundleFailureReason[]) {
@@ -525,6 +529,10 @@ for (const reason of Object.keys(BUNDLE_FAILURES) as BundleFailureReason[]) {
     assert.ok(!state.sentence.includes('\n'));
     if (reason === 'identity-unavailable') {
       assert.equal(state.sentence, 'NEAR AI could not save its signing key on this computer, so only reading and planning are allowed until it can.');
+    } else if (reason === 'not-loaded') {
+      assert.match(state.sentence, /Start the run again in a moment, or reload the window\.$/);
+    } else if (reason === 'unavailable') {
+      assert.match(state.sentence, /Reload the window to try again\.$/);
     } else if (reason === 'clock-behind') {
       assert.match(state.sentence, /Set the clock to the right time, then reload the window\.$/);
     } else if (reason === 'unsupported-version' || reason === 'vocabulary-unknown') {
@@ -549,9 +557,17 @@ test('no sentence has an em-dash or the words NEAR organization, and the closed 
 test('the payload issuer must equal the envelope signer and issuedAt must equal signedAt, character for character', () => {
   const signer = makeSigner();
   const flipLast = (text: string): string => text.slice(0, -1) + (text.endsWith('A') ? 'B' : 'A');
+  // A public key is 32 bytes in 43 characters, so the last character carries two bits that decoding ignores: flipping it can change nothing the decoder sees,
+  // and the key then reads as malformed instead of as another signer's (about 6 keys in 100). Changing a decoded byte and encoding it again always gives a
+  // well-formed key that is a different key.
+  const otherKey = (key: string): string => {
+    const bytes = Buffer.from(key, 'base64url');
+    bytes[0] = (bytes[0] ?? 0) ^ 1;
+    return bytes.toString('base64url');
+  };
   const cases: Array<[string, (payload: Loose) => void]> = [
     ['fingerprint', (p) => { p.issuer.fingerprint = flipLast(p.issuer.fingerprint); }],
-    ['public key', (p) => { p.issuer.publicKey = flipLast(p.issuer.publicKey); }],
+    ['public key', (p) => { p.issuer.publicKey = otherKey(p.issuer.publicKey); }],
     ['issuedAt, one millisecond', (p) => { p.issuedAt = new Date(Date.parse(p.issuedAt) + 1).toISOString(); }]
   ];
   for (const [name, edit] of cases) {

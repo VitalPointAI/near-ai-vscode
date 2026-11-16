@@ -7,7 +7,8 @@ import { DEFAULT_RULES } from '../agent/permissions';
 import { buildWindowSummary } from '../services/activityOverview';
 import { ActivityStore } from '../services/activityStore';
 import { ActivityFeed, AgentStats, TASK_LABEL_MAX, taskLabel } from '../services/agentActivity';
-import { AgentConversation, AgentTurnRequest, GsdContext } from '../services/agentSession';
+import { AgentTurnRequest, GsdContext } from '../services/agentSession';
+import { newTestConversation } from './helpers/gatedRuns';
 import type { AgentMessage, CompletionEvent, ToolCall } from '../services/nearAiClient';
 
 // 0.4.28 (Team Live): what the activity feed now knows about each agent, which the live team view (and Agent Activity) draw from: who really started it,
@@ -163,7 +164,8 @@ async function nestedProject() {
   ] };
   const posted: Array<Record<string, unknown>> = [];
   const feed = new ActivityFeed(LIMITS);
-  const conversation = new AgentConversation(root, (message) => posted.push(message), path.join(root, '.ckpt'), undefined, undefined, feed);
+  // Every run goes through the gate since Phase 70; without a host it fails closed to reading and planning, so the test runs have the test gate.
+  const conversation = newTestConversation(root, (message) => posted.push(message), path.join(root, '.ckpt'), undefined, undefined, feed);
   const request = (client: unknown, extra: Partial<AgentTurnRequest> = {}): AgentTurnRequest => ({ text: 'go', client: client as never, model: 'z-ai/glm-5.3', privacy: 'Private', policy: { mode: 'approve-risky', emergencyStop: false }, rules: DEFAULT_RULES, gsd, ...extra });
   return { root, gsd, posted, feed, conversation, request };
 }

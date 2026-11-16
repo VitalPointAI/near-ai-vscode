@@ -16,6 +16,7 @@ import type { CompletionEvent, ToolCall } from '../services/nearAiClient';
 import { stateHomeFor, type MementoLike } from '../services/stateHome';
 import { gitInit, gitStatus, tempProject } from './helpers/stateFixtures';
 import { FakeDocument, FakeNode } from './helpers/fakeDom';
+import { newTestConversation } from './helpers/gatedRuns';
 
 const ROOT = path.join(__dirname, '..', '..');
 
@@ -447,7 +448,7 @@ test('a run waiting on an approval marks its marker as waiting, and answering cl
       async actualCostsUsd() { return undefined; }
     };
     const posted: Array<Record<string, unknown>> = [];
-    const conversation = new AgentConversation(project, (message) => posted.push(message), path.join(project, '.ckpt'));
+    const conversation = newTestConversation(project, (message) => posted.push(message), path.join(project, '.ckpt'));
     const markers = new RunMarkers('', project, { dir: path.join(project, '.runs'), writer: EDITOR_A });
     conversation.runMarkers = markers;
     const running = conversation.send({ text: 'write', client: near as never, model: 'm', privacy: 'Private', policy: { mode: 'approve-risky', emergencyStop: false }, rules: DEFAULT_RULES });

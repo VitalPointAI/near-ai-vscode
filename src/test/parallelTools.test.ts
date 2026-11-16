@@ -14,6 +14,7 @@ import { bashTool, CORE_TOOLS } from '../agent/tools';
 import { checkCitationsTool, checkOriginalityTool, webFetchTool, webSearchTool } from '../agent/webTools';
 import { Slots } from '../services/agentSession';
 import type { AgentMessage, CompletionEvent, ToolCall } from '../services/nearAiClient';
+import { newTestRun } from './helpers/gatedRuns';
 
 // PERF-04: lookups run side by side (the web tools, CheckCitations, and read-only shell commands), anything that changes state still runs alone and in
 // order, worktree agents are capped, and the prompts tell agents to batch.
@@ -26,7 +27,7 @@ async function oneTurn(root: string, calls: ToolCall[]): Promise<{ events: Agent
   const shell = new ShellSession(root);
   const events: AgentEvent[] = [];
   try {
-    const run = new AgentRun({ client, model: 'm', tools: CORE_TOOLS, context: { root, checkpoints: new RunCheckpoints('parallel'), shell, readFiles: new Set() }, policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES, requestApproval: async () => ({ decision: 'allow' }), emit: (event) => events.push(event) });
+    const run = newTestRun({ client, model: 'm', tools: CORE_TOOLS, context: { root, checkpoints: new RunCheckpoints('parallel'), shell, readFiles: new Set() }, policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES, requestApproval: async () => ({ decision: 'allow' }), emit: (event) => events.push(event) });
     const result = await run.run([{ role: 'user', content: 'go' }], new AbortController().signal);
     return { events, messages: result.messages };
   } finally {
