@@ -156,7 +156,14 @@ function replay(file: unknown, rawHead: KeyHistoryHead | undefined): KeyHistoryR
   let prev = '';
   for (let index = 0; index < records.length; index += 1) {
     const seq = index + 1;
-    const raw: unknown = records[index];
+    // One read of the record, as canonical JSON: the checks, the signature, the hash that the next record names and the head all use this one copy, so an
+    // object that answers differently on a later read cannot be looked at one way and hashed another.
+    let raw: unknown;
+    try {
+      raw = JSON.parse(canonicalBytes(records[index]).toString('utf8'));
+    } catch {
+      return fail(`Record ${seq} of the key history is not in a form this version can read.`);
+    }
     const claimed = isPlainRecord(raw) ? parseKeyRecord(raw.payload) : undefined;
     if (claimed === undefined) return fail(`Record ${seq} of the key history is not in a form this version can read.`);
     if (claimed.seq !== seq) return fail(`Record ${seq} of the key history is out of order or a record is missing (it is numbered ${claimed.seq}).`);

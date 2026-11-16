@@ -110,7 +110,8 @@ async function ensureCreatedRecord(
 
 async function readStoredKeySafely(secrets: SecretStorageLike, name: string): Promise<DeviceIdentity | undefined> {
   try {
-    return await loadStoredKey(secrets, name, 'team device key');
+    const what = name === PENDING_DEVICE_KEY_SECRET ? 'pending team device key' : name === PREVIOUS_DEVICE_KEY_SECRET ? 'previous team device key' : 'team device key';
+    return await loadStoredKey(secrets, name, what);
   } catch {
     return undefined;
   }
