@@ -497,7 +497,7 @@ test('a team.json that swaps the team id is refused for this project, and only a
     gitIn(p.root, ['commit', '-q', '-m', 'remove the old team']);
     const elsewhere = await mkdtemp(path.join(tmpdir(), 'near-ai-other-computer-'));
     try {
-      const recreated = await enableTeamMode({ projectRoot: p.root, globalStorageDir: elsewhere, secrets: new MemorySecrets(), teamName: 'Second team', ownerName: 'Lead Owner' });
+      const recreated = await enableTeamMode({ projectRoot: p.root, globalStorageDir: elsewhere, secrets: new MemorySecrets(), teamName: 'Second team', ownerName: 'Lead Owner', previewEnabled: true });
       assert.equal(recreated.ok, true, recreated.ok ? '' : recreated.message);
     } finally {
       await rm(elsewhere, { recursive: true, force: true });

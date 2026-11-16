@@ -194,7 +194,7 @@ export function registerTeamMode(context: vscode.ExtensionContext): TeamModeHand
 
   async function enable(): Promise<void> {
     // The Command Palette hides Enable while the preview is off, but a keybinding or another command can still call it, so it refuses here too:
-    // the device key is only ever created for a person who turned the preview on.
+    // the device key is only ever created for a person who turned the preview on. The core checks again from the flag passed below.
     if (!vscode.workspace.getConfiguration('nearAi').get<boolean>('team.preview', false)) {
       announce('info', PREVIEW_OFF_TEXT);
       return;
@@ -235,7 +235,7 @@ export function registerTeamMode(context: vscode.ExtensionContext): TeamModeHand
       { location: vscode.ProgressLocation.Notification, title: ENABLE_PROGRESS_TITLE },
       () => enableModule.enableTeamMode({
         projectRoot, globalStorageDir: context.globalStorageUri.fsPath, secrets: context.secrets,
-        teamName, ownerName, remote: defaults.remote, integrationBranch: defaults.integrationBranch, checked
+        teamName, ownerName, remote: defaults.remote, integrationBranch: defaults.integrationBranch, checked, previewEnabled: true
       })
     );
 

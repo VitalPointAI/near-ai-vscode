@@ -12,7 +12,7 @@ import { AuditStore } from '../services/auditStore';
 import { API_KEY_SECRET, REFRESH_TOKEN_SECRET } from '../services/auth';
 import type { GenesisAnchor, TeamEvent, TeamFile, TeamState } from '../domain/team/types';
 import { fileMirrorMark, mirrorRosterEvents } from '../team/auditMirror';
-import { ENABLE_COMMIT_MESSAGE, checkEnablePreconditions, enableDefaults, enableTeamMode, pushCodeBranch } from '../team/enable';
+import { ENABLE_COMMIT_MESSAGE, ENABLE_PREVIEW_OFF_MESSAGE, checkEnablePreconditions, enableDefaults, enableTeamMode, pushCodeBranch } from '../team/enable';
 import type { EnableInput } from '../team/enable';
 import { TeamLog } from '../team/eventLog';
 import type { TeamSigner } from '../team/eventLog';
@@ -49,7 +49,7 @@ async function withFixture(clones: string[], run: (fixture: TeamFixture) => Prom
 function inputFor(fixture: TeamFixture, name: string, secrets: MemorySecrets, extra: Partial<EnableInput> = {}): EnableInput {
   return {
     projectRoot: fixture.clones[name] as string, globalStorageDir: fixture.storageDir(name), secrets,
-    teamName: 'Enable team', ownerName: 'Lead Owner', ...extra
+    teamName: 'Enable team', ownerName: 'Lead Owner', previewEnabled: true, ...extra
   };
 }
 
@@ -139,6 +139,29 @@ test('a failed precondition stops Enable before any key, folder or file is creat
     assert.equal(secrets.values.size, 0);
     assert.equal(existsSync(path.join(fixture.storageDir('a'), 'team')), false);
     assert.equal(existsSync(path.join(fixture.clones.a as string, TEAM_FILE_REL)), false);
+  });
+});
+
+test('the core refuses to enable unless the caller says the preview is on, and then creates and asks nothing', async () => {
+  await withFixture(['a'], async (fixture) => {
+    for (const previewEnabled of [undefined, false] as const) {
+      const secrets = new MemorySecrets();
+      const calls: string[][] = [];
+      const git: GitRunner = async (args, options) => { calls.push([...args]); return runGit(args, options); };
+      const { previewEnabled: _on, ...withoutFlag } = inputFor(fixture, 'a', secrets, { git });
+      const result = await enableTeamMode(previewEnabled === undefined ? withoutFlag : { ...withoutFlag, previewEnabled });
+      assert.equal(result.ok, false, `preview flag ${String(previewEnabled)}`);
+      assert.equal(result.ok ? undefined : result.code, 'preview-off');
+      assert.equal(result.ok ? undefined : result.message, ENABLE_PREVIEW_OFF_MESSAGE);
+      assert.deepEqual(calls, [], 'not even a read-only git call ran, so nothing was asked of the project or the remote');
+      assert.equal(secrets.values.size, 0, 'no device key was created');
+      assert.equal(existsSync(path.join(fixture.storageDir('a'), 'team')), false, 'no team folder or trust pin was written');
+      assert.equal(existsSync(path.join(fixture.clones.a as string, TEAM_FILE_REL)), false, 'no team.json was written');
+      assert.equal(gitIn(fixture.clones.a as string, ['status', '--porcelain']), '');
+      assert.equal(gitIn(fixture.remote, ['for-each-ref', DEFAULT_COORDINATION_REF]), '', 'nothing reached the remote');
+    }
+    const secrets = new MemorySecrets();
+    assert.equal((await enableTeamMode(inputFor(fixture, 'a', secrets))).ok, true, 'with the flag, Enable runs as before');
   });
 });
 

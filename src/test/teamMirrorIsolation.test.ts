@@ -68,7 +68,7 @@ async function world(): Promise<World> {
   await mkdir(path.join(m.root, '.planning', '.near-ai'), { recursive: true });
   const secrets = new TeamSecrets();
   const enabled = await enableTeamMode({
-    projectRoot: m.root, globalStorageDir: storage, secrets, teamName: TEAM_NAME, ownerName: 'Isolation Owner'
+    projectRoot: m.root, globalStorageDir: storage, secrets, teamName: TEAM_NAME, ownerName: 'Isolation Owner', previewEnabled: true
   });
   if (!enabled.ok) assert.fail(`Enable did not finish: ${enabled.message}`);
   const teamFile = enabled.teamFile;
