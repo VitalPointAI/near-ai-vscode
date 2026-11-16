@@ -326,25 +326,25 @@ Plans:
 
 Plans:
 **Wave 1**
-- [ ] 70-01-PLAN.md — capability vocabulary v1, shape helpers, the glob move and the pure gate folder boundary (PR 1)
+- [x] 70-01-PLAN.md — capability vocabulary v1, shape helpers, the glob move and the pure gate folder boundary (PR 1)
 
 **Wave 2** *(blocked on Wave 1 completion)*
-- [ ] 70-02-PLAN.md — labels v1, the four scale presets, dominance with a property test, the join, the label texts (PR 1)
+- [x] 70-02-PLAN.md — labels v1, the four scale presets, dominance with a property test, the join, the label texts (PR 1)
 
 **Wave 3** *(blocked on Wave 2 completion)*
-- [ ] 70-03-PLAN.md — policy bundle v1, its default, fail-closed sentences, the clock rule and renewal (PR 1)
+- [x] 70-03-PLAN.md — policy bundle v1, its default, fail-closed sentences, the clock rule and renewal (PR 1)
 
 **Wave 4** *(blocked on Wave 3 completion)*
-- [ ] 70-04-PLAN.md — the pure route decision, label map v1 and the label-map signing purpose (PR 1)
+- [x] 70-04-PLAN.md — the pure route decision, label map v1 and the label-map signing purpose (PR 1)
 
 **Wave 5** *(blocked on Wave 4 completion)*
-- [ ] 70-05-PLAN.md — tool and MCP manifests v1 and their plain words (PR 1)
+- [x] 70-05-PLAN.md — tool and MCP manifests v1 and their plain words (PR 1)
 
 **Wave 6** *(blocked on Wave 5 completion)*
-- [ ] 70-06-PLAN.md — the floor, decide() layered over today's settings, the OCSF decision record, offline decisions (PR 1)
+- [x] 70-06-PLAN.md — the floor, decide() layered over today's settings, the OCSF decision record, offline decisions (PR 1)
 
 **Wave 7** *(blocked on Wave 6 completion)*
-- [ ] 70-07-PLAN.md — PR 1 gate and open (no behaviour change)
+- [x] 70-07-PLAN.md — PR 1 gate and open (no behaviour change)
 
 **Wave 8** *(blocked on Wave 7 completion)*
 - [ ] 70-08-PLAN.md — manifests on the core, web, graphics, image, memory and security tools, the tool catalog, Tools page words (PR 2)

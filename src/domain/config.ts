@@ -48,6 +48,11 @@ export function normalizePolicyMode(value: unknown): ActionPolicyMode {
 
 const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
 
+/** Whether a host name (as `new URL(...).hostname` gives it) is this machine. A question, not the list, so no caller can add a host to it. */
+export function isLoopbackHost(host: string): boolean {
+  return LOOPBACK_HOSTS.has(host);
+}
+
 /** Credentials only travel over HTTPS; plain HTTP is accepted solely for a runtime on this machine. */
 export function isSecureEndpoint(value: string): boolean {
   try {

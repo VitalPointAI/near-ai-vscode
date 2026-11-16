@@ -1,4 +1,5 @@
-// The import boundary of the team core (D-18, TMR-02). src/domain/team is pure domain code and src/team is the headless team engine: neither may
+// The import boundary of the team core (D-18, TMR-02) and of the pure capability gate (Phase 70, D-01, D-02). src/domain/team and src/domain/gate are
+// pure domain code and src/team is the headless team engine: none of them may
 // import vscode, neither may use a package outside Node, and src/team reaches the editor-side services only through the type-only SecretStorageLike
 // from src/services/auth and the shared mirror lock src/services/stateMirrorLock (which itself imports only Node modules). The test reads the
 // TypeScript sources under src (the compiled tests run from dist/test, so the sources are found from the repository root).
@@ -11,6 +12,7 @@ import test from 'node:test';
 const REPO_ROOT = path.resolve(__dirname, '..', '..');
 const SRC = path.join(REPO_ROOT, 'src');
 const DOMAIN_TEAM = 'domain/team';
+const DOMAIN_GATE = 'domain/gate';
 const TEAM = 'team';
 const LOCK_MODULE = 'services/stateMirrorLock';
 const AUTH_MODULE = 'services/auth';
@@ -52,6 +54,11 @@ const RULES: Readonly<Record<string, Rule>> = {
     name: 'src/domain/team',
     allows: (target) => under(target, DOMAIN_TEAM) || under(target, 'domain/redaction')
   },
+  // The pure gate folder may use anything under src/domain, nothing else: no editor, no package, no src/agent (D-01, D-02). The relay's build compiles it too.
+  [DOMAIN_GATE]: {
+    name: 'src/domain/gate',
+    allows: (target) => under(target, 'domain')
+  },
   [TEAM]: {
     name: 'src/team',
     allows: (target, typeOnly) => under(target, TEAM) || under(target, 'domain')
@@ -61,7 +68,7 @@ const RULES: Readonly<Record<string, Rule>> = {
 
 // Violations in one file's text, as "file:line specifier  reason". `file` is the path under src with forward slashes, e.g. team/gitTransport.ts.
 export function boundaryViolations(file: string, text: string): string[] {
-  const folder = file.startsWith(`${DOMAIN_TEAM}/`) ? DOMAIN_TEAM : TEAM;
+  const folder = file.startsWith(`${DOMAIN_TEAM}/`) ? DOMAIN_TEAM : file.startsWith(`${DOMAIN_GATE}/`) ? DOMAIN_GATE : TEAM;
   const rule = RULES[folder] as Rule;
   const problems: string[] = [];
   for (const ref of importsOf(text)) {
@@ -108,6 +115,10 @@ test('no file under src/domain/team imports vscode, a package, or anything beyon
   scan(DOMAIN_TEAM, 7);
 });
 
+test('no file under src/domain/gate imports vscode, a package, or anything outside src/domain', () => {
+  scan(DOMAIN_GATE, 2);
+});
+
 test('no file under src/team imports vscode, a package, or a service other than the type-only auth import and the shared mirror lock', () => {
   scan(TEAM, 9);
 });
@@ -119,7 +130,7 @@ test('src/services/stateMirrorLock.ts imports only Node modules, so the shared l
   assert.deepEqual(refs.filter((ref) => !isNodeModule(ref.specifier)).map((ref) => `${ref.line} ${ref.specifier}`), []);
 });
 
-test('the scanner has teeth: vscode, a package, an editor service and a value import of auth are all reported', () => {
+test('the scanner has teeth: vscode, a package, an editor service, a value import of auth and an agent import from the gate folder are all reported', () => {
   const planted = [
     "import * as vscode from 'vscode';",
     "import { thing } from 'left-pad';",
@@ -157,6 +168,21 @@ test('the scanner has teeth: vscode, a package, an editor service and a value im
     "import { createHash } from 'crypto';"
   ].join('\n')).map((entry) => entry.split('  ')[0]);
   assert.deepEqual(domain, ['domain/team/planted.ts:3 ../approval', 'domain/team/planted.ts:4 ../../services/auth', 'domain/team/planted.ts:5 ../../services/stateMirrorLock']);
+  const gate = boundaryViolations('domain/gate/planted.ts', [
+    "import { ok } from './shape';",
+    "import { normalizeRelative } from '../protectedPaths';",
+    "import { matchesGlob } from '../glob';",
+    "import type { Thing } from '../team/types';",
+    "import { tools } from '../../agent/tools';",
+    "import * as vscode from 'vscode';",
+    "import { thing } from 'left-pad';",
+    "import { createHash } from 'node:crypto';"
+  ].join('\n')).map((entry) => entry.split('  ')[0]);
+  assert.deepEqual(gate, [
+    'domain/gate/planted.ts:5 ../../agent/tools',
+    'domain/gate/planted.ts:6 vscode',
+    'domain/gate/planted.ts:7 left-pad'
+  ]);
 });
 
 test('comments that mention an import are not imports', () => {
