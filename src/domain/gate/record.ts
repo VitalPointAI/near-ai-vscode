@@ -26,10 +26,11 @@ const MAX_DETAIL = 300;
 
 interface OutcomeFields { readonly action_id: number; readonly disposition_id: number; readonly status_id: number; readonly severity_id: number }
 
-// The OCSF 1.3.0 security_control profile enums. action_id: 0 Unknown, 1 Allowed, 2 Denied, 99 Other (there is no 3). disposition_id: 1 Allowed, 2 Blocked,
-// 3 Quarantined, 8 Approved, 25 Rejected, 26 Unauthorized, 99 Other. An ask has no OCSF value of its own, so until a person answers it is written as 99 Other
-// for both, with the gate's own word for it (`outcome: 'asked'`) in unmapped.nearAi; the answer is a second record with the same call id. 3 is never used.
-// status_id 1 Success, 2 Failure.
+// The enums of the OCSF version this record declares (OCSF_VERSION, 1.9.0), as read from that schema's API Activity class. action_id: 0 Unknown, 1 Allowed,
+// 2 Denied, 3 Observed, 4 Modified, 99 Other. disposition_id: 1 Allowed, 2 Blocked, 3 Quarantined, 8 Approved, 25 Rejected, 26 Unauthorized, 99 Other (among
+// others this record never uses). status_id: 1 Success, 2 Failure. An ask has no value of its own that this record uses, so until a person answers it is
+// written as 99 Other for both action and disposition, with the gate's own word for it (`outcome: 'asked'`) in `unmapped.nearAi.outcome`; the answer is a
+// second record with the same call id. Action 3 (Observed) and disposition 3 (Quarantined) are never used.
 const OUTCOME_FIELDS: Readonly<Record<DecisionOutcome, OutcomeFields>> = Object.freeze({
   allowed: { action_id: 1, disposition_id: 1, status_id: 1, severity_id: 1 },
   asked: { action_id: 99, disposition_id: 99, status_id: 1, severity_id: 3 },
