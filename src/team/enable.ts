@@ -21,9 +21,15 @@ export const ENABLE_COMMIT_MESSAGE = 'chore(team): enable NEAR AI Team Mode';
 
 export type EnableFailureCode =
   | 'git-missing' | 'not-initialised' | 'not-a-repo' | 'no-commit' | 'no-remote' | 'remote-unreachable' | 'exists-locally' | 'exists-remotely'
-  | 'invalid-input' | 'secret' | 'push-failed' | 'push-unconfirmed' | 'commit-failed';
+  | 'invalid-input' | 'preview-off' | 'secret' | 'push-failed' | 'push-unconfirmed' | 'commit-failed';
+
+// The same words the command shows when the setting is off, kept here so the core refuses in its own voice.
+export const ENABLE_PREVIEW_OFF_MESSAGE = 'Team Mode is an early preview and is off. Turn on the setting nearAi.team.preview in Settings, then run "NEAR AI: Enable Team Mode" again.';
 
 export interface EnableInput {
+  // The preview gate holds in the core, not only in the command: Enable refuses unless the caller says the preview setting is on. The VS Code
+  // command passes true after reading the setting. Anything else, including a missing value, means off.
+  previewEnabled?: boolean;
   projectRoot: string;
   globalStorageDir: string;
   secrets: SecretStorageLike;
@@ -215,6 +221,9 @@ export async function enableTeamMode(input: EnableInput): Promise<EnableResult> 
   const now = input.now ?? ((): Date => new Date());
   const remote = input.remote ?? DEFAULT_REMOTE;
   const projectRoot = input.projectRoot;
+
+  // First, before any git call, folder read or key: a refused Enable leaves nothing behind and asks nothing of the person.
+  if (input.previewEnabled !== true) return fail('preview-off', ENABLE_PREVIEW_OFF_MESSAGE);
 
   // Everything below up to the device key is read-only or in memory, so a stop here leaves nothing behind.
   if (!REMOTE_NAME_PATTERN.test(remote)) return fail('invalid-input', 'The remote name is not valid. Use a name such as origin.');

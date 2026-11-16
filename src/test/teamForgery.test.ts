@@ -20,7 +20,7 @@ import { NEUTRAL_IDENTITY_ENV } from '../team/runGit';
 import { canonicalTeamFile } from '../team/teamFile';
 import { createOwner, createTeamFixture, gitIn } from './helpers/teamHarness';
 import type { TeamFixture, TestOwner } from './helpers/teamHarness';
-import { addFixtureMember, entryOf, genesisEntries, makeActor, signed } from './helpers/teamEvents';
+import { addFixtureMember, entryOf, genesisEntries, makeActor, makeDevice, signed } from './helpers/teamEvents';
 import type { TestActor } from './helpers/teamEvents';
 
 const fixedNow = (): Date => new Date('2026-02-03T04:05:06.000Z');
@@ -248,7 +248,9 @@ test('a denied role case gets the same text from prepareEvents as applyEntry rec
     { label: 'developer removes the reviewer', actor: developer, intent: { type: 'member.removed', body: { memberId: reviewer.memberId } } },
     { label: 'reviewer edits the owner skills', actor: reviewer, intent: { type: 'member.skills', body: { memberId: owner.memberId, skills: ['rust'] } } },
     { label: 'developer adds a device for the lead', actor: developer, intent: { type: 'device.added', body: { memberId: lead.memberId, device: spareDevice } } },
-    { label: 'lead promotes a developer to owner', actor: lead, intent: { type: 'member.role-changed', body: { memberId: developer.memberId, role: 'owner' } } }
+    { label: 'lead promotes a developer to owner', actor: lead, intent: { type: 'member.role-changed', body: { memberId: developer.memberId, role: 'owner' } } },
+    { label: 'lead rotates a device of the owner', actor: lead, intent: { type: 'device.rotated', body: { memberId: owner.memberId, from: owner.identity.fingerprint, device: spareDevice } } },
+    { label: 'developer rotates a device of the lead', actor: developer, intent: { type: 'device.rotated', body: { memberId: lead.memberId, from: lead.identity.fingerprint, device: spareDevice } } }
   ];
   for (const candidate of denied) {
     const { prepared, read } = decide(candidate);
@@ -260,17 +262,70 @@ test('a denied role case gets the same text from prepareEvents as applyEntry rec
 });
 
 test('an allowed role case is allowed by prepareEvents and accepted by applyEntry', async () => {
-  const { owner, lead, developer, reviewer, decide } = await roleWorld();
+  const { owner, lead, developer, reviewer, spareDevice, decide } = await roleWorld();
   const allowed: RoleCase[] = [
     { label: 'owner changes policy', actor: owner, intent: { type: 'policy.changed', body: { changes: { dispatchMode: 'auto' } } } },
     { label: 'lead sets availability', actor: lead, intent: { type: 'member.availability', body: { availability: 'away' } } },
     { label: 'developer edits own skills', actor: developer, intent: { type: 'member.skills', body: { memberId: developer.memberId, skills: ['rust'] } } },
     { label: 'lead edits another member skills', actor: lead, intent: { type: 'member.skills', body: { memberId: reviewer.memberId, skills: ['docs'] } } },
-    { label: 'lead promotes a developer to reviewer', actor: lead, intent: { type: 'member.role-changed', body: { memberId: developer.memberId, role: 'reviewer' } } }
+    { label: 'lead promotes a developer to reviewer', actor: lead, intent: { type: 'member.role-changed', body: { memberId: developer.memberId, role: 'reviewer' } } },
+    { label: 'developer rotates their own key', actor: developer, intent: { type: 'device.rotated', body: { memberId: developer.memberId, from: developer.identity.fingerprint, device: spareDevice } } },
+    { label: 'lead rotates the key of a reviewer', actor: lead, intent: { type: 'device.rotated', body: { memberId: reviewer.memberId, from: reviewer.identity.fingerprint, device: spareDevice } } },
+    { label: 'owner rotates their own key', actor: owner, intent: { type: 'device.rotated', body: { memberId: owner.memberId, from: owner.identity.fingerprint, device: spareDevice } } }
   ];
   for (const candidate of allowed) {
     const { prepared, read } = decide(candidate);
     assert.ok(Array.isArray(prepared), `${candidate.label}: the write side allows`);
     assert.equal(read, undefined, `${candidate.label}: the read side accepts`);
   }
+});
+
+test('rotation forgeries pushed raw are rejected by both clients with the matching reasons and never change state', async () => {
+  await withFixture(['a', 'b', 'raw'], async (fixture) => {
+    const seed = await seedTeam(fixture);
+    const owner = seed.owner;
+    const second = await makeDevice(owner);
+    const third = await makeDevice(owner);
+    const fourth = await makeDevice(owner);
+    const stranger = await makeActor(seed.teamId);
+    const b = clientFor(fixture, 'b', seed.anchor);
+    const added = await seed.a.log.append(() => [{ type: 'device.added', body: { memberId: owner.memberId, device: { fingerprint: second.identity.fingerprint, publicKey: second.identity.publicKey } } }]);
+    assert.equal(added.ok, true);
+    const rawDir = fixture.clones['raw'] as string;
+    const position = (): { teamId: string; lamport: number; prev: string } => {
+      const head = seed.a.log.state().head;
+      return { teamId: seed.teamId, lamport: head.lamport + 1, prev: head.eventId };
+    };
+    const refOf = (actor: TestActor): { fingerprint: string; publicKey: string } => ({ fingerprint: actor.identity.fingerprint, publicKey: actor.identity.publicKey });
+    // A valid self-rotation of the second key, pushed raw: both clients accept it.
+    const rotation = signed(second, { ...position(), type: 'device.rotated', body: { memberId: owner.memberId, from: second.identity.fingerprint, device: refOf(third) } });
+    rawPush(rawDir, [rotation], 'raw: valid rotation');
+    const syncedA = await seed.a.log.sync();
+    assert.deepEqual(syncedA.rejected, []);
+    assert.deepEqual(syncedA.accepted.map((event) => event.id), [rotation.id]);
+    assert.deepEqual((await b.log.sync()).rejected, []);
+    const beforeA = withoutRejections(seed.a.log.state());
+    assert.equal(beforeA, withoutRejections(b.log.state()));
+
+    const forgeries: Forgery[] = [
+      { label: 'from is not bound to the member', event: signed(owner, { ...position(), type: 'device.rotated', body: { memberId: owner.memberId, from: stranger.identity.fingerprint, device: refOf(fourth) } }), reason: TEAM_REJECTION_REASONS.deviceNotBound },
+      { label: 'from is already rotated', event: signed(owner, { ...position(), type: 'device.rotated', body: { memberId: owner.memberId, from: second.identity.fingerprint, device: refOf(fourth) } }), reason: TEAM_REJECTION_REASONS.deviceRotated },
+      { label: 'self-rotation signed by another of the member keys', event: signed(owner, { ...position(), type: 'device.rotated', body: { memberId: owner.memberId, from: third.identity.fingerprint, device: refOf(fourth) } }), reason: TEAM_REJECTION_REASONS.rotationNotByOldKey },
+      { label: 'the retired key signs after its rotation', event: signed(second, { ...position(), type: 'member.availability', body: { availability: 'away' } }), reason: TEAM_REJECTION_REASONS.rotatedDevice }
+    ];
+    for (const forgery of forgeries) rawPush(rawDir, [forgery.event], `raw: ${forgery.label}`);
+    const expected: Rejection[] = forgeries.map((forgery) => ({ eventId: forgery.event.id, reason: forgery.reason }));
+    const afterA = await seed.a.log.sync();
+    const afterB = await b.log.sync();
+    assert.deepEqual(afterA.rejected, expected);
+    assert.deepEqual(afterB.rejected, expected);
+    assert.deepEqual(afterA.accepted, []);
+    assert.equal(withoutRejections(seed.a.log.state()), beforeA, 'the forgeries change nothing but the rejection list');
+    assert.equal(serialiseState(seed.a.log.state()), serialiseState(b.log.state()));
+    for (const client of [seed.a, b]) {
+      const report = await client.log.verifyAll();
+      assert.deepEqual(report.rejected, expected);
+      assert.equal(report.head.eventId, rotation.id);
+    }
+  });
 });

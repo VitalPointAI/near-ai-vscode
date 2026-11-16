@@ -12,16 +12,17 @@ import { AuditStore } from '../services/auditStore';
 import { API_KEY_SECRET, REFRESH_TOKEN_SECRET } from '../services/auth';
 import type { GenesisAnchor, TeamEvent, TeamFile, TeamState } from '../domain/team/types';
 import { fileMirrorMark, mirrorRosterEvents } from '../team/auditMirror';
-import { ENABLE_COMMIT_MESSAGE, checkEnablePreconditions, enableDefaults, enableTeamMode, pushCodeBranch } from '../team/enable';
+import { ENABLE_COMMIT_MESSAGE, ENABLE_PREVIEW_OFF_MESSAGE, checkEnablePreconditions, enableDefaults, enableTeamMode, pushCodeBranch } from '../team/enable';
 import type { EnableInput } from '../team/enable';
 import { TeamLog } from '../team/eventLog';
 import type { TeamSigner } from '../team/eventLog';
 import { DEFAULT_COORDINATION_REF, GitTransport } from '../team/gitTransport';
-import { DEVICE_KEY_SECRET, createDeviceIdentity, loadDeviceIdentity } from '../team/identity';
+import { DEVICE_KEY_SECRET, createDeviceIdentity, identityDir, loadDeviceIdentity, loadOrCreateDeviceIdentity } from '../team/identity';
+import { KEY_HISTORY_FILE, KEY_HISTORY_HEAD_SECRET, readKeyHistory } from '../team/keyHistory';
 import { GitNotFoundError, runGit } from '../team/runGit';
 import type { GitRunner } from '../team/runGit';
 import { TEAM_FILE_REL, parseTeamFile, projectTrustDir, readTeamFile, teamStorageDir } from '../team/teamFile';
-import { deviceKeyForms, makeCanaries, scanFiles, scanGitObjects } from './helpers/teamCanary';
+import { deviceKeyForms, identityKeyNeedles, keyHistoryHeadNeedles, makeCanaries, scanFiles, scanGitObjects } from './helpers/teamCanary';
 import type { Needle } from './helpers/teamCanary';
 import { MemorySecrets, createTeamFixture, fakeGitResult, faultRunner, gitIn } from './helpers/teamHarness';
 import type { TeamFixture } from './helpers/teamHarness';
@@ -30,6 +31,11 @@ const OWNER_EMAIL = 'Lead.Owner@Example.invalid';
 const COORDINATION_BRANCH = 'refs/heads/near-ai/coordination';
 // src/services/spendTracking.ts holds this constant but imports vscode, which a node test cannot load, so the key is repeated here.
 const REPORTING_TOKEN_KEY = 'nearAi.usageReportingToken';
+
+// The secret names held, without the saved end of the key history (which stays after a key is forgotten, since the history is kept).
+function storedKeys(secrets: MemorySecrets): string[] {
+  return [...secrets.values.keys()].filter((key) => key !== KEY_HISTORY_HEAD_SECRET);
+}
 
 async function withFixture(clones: string[], run: (fixture: TeamFixture) => Promise<void>, options: { initialised?: boolean } = {}): Promise<void> {
   const fixture = await createTeamFixture({ clones, initialised: options.initialised ?? true });
@@ -43,7 +49,7 @@ async function withFixture(clones: string[], run: (fixture: TeamFixture) => Prom
 function inputFor(fixture: TeamFixture, name: string, secrets: MemorySecrets, extra: Partial<EnableInput> = {}): EnableInput {
   return {
     projectRoot: fixture.clones[name] as string, globalStorageDir: fixture.storageDir(name), secrets,
-    teamName: 'Enable team', ownerName: 'Lead Owner', ...extra
+    teamName: 'Enable team', ownerName: 'Lead Owner', previewEnabled: true, ...extra
   };
 }
 
@@ -136,6 +142,29 @@ test('a failed precondition stops Enable before any key, folder or file is creat
   });
 });
 
+test('the core refuses to enable unless the caller says the preview is on, and then creates and asks nothing', async () => {
+  await withFixture(['a'], async (fixture) => {
+    for (const previewEnabled of [undefined, false] as const) {
+      const secrets = new MemorySecrets();
+      const calls: string[][] = [];
+      const git: GitRunner = async (args, options) => { calls.push([...args]); return runGit(args, options); };
+      const { previewEnabled: _on, ...withoutFlag } = inputFor(fixture, 'a', secrets, { git });
+      const result = await enableTeamMode(previewEnabled === undefined ? withoutFlag : { ...withoutFlag, previewEnabled });
+      assert.equal(result.ok, false, `preview flag ${String(previewEnabled)}`);
+      assert.equal(result.ok ? undefined : result.code, 'preview-off');
+      assert.equal(result.ok ? undefined : result.message, ENABLE_PREVIEW_OFF_MESSAGE);
+      assert.deepEqual(calls, [], 'not even a read-only git call ran, so nothing was asked of the project or the remote');
+      assert.equal(secrets.values.size, 0, 'no device key was created');
+      assert.equal(existsSync(path.join(fixture.storageDir('a'), 'team')), false, 'no team folder or trust pin was written');
+      assert.equal(existsSync(path.join(fixture.clones.a as string, TEAM_FILE_REL)), false, 'no team.json was written');
+      assert.equal(gitIn(fixture.clones.a as string, ['status', '--porcelain']), '');
+      assert.equal(gitIn(fixture.remote, ['for-each-ref', DEFAULT_COORDINATION_REF]), '', 'nothing reached the remote');
+    }
+    const secrets = new MemorySecrets();
+    assert.equal((await enableTeamMode(inputFor(fixture, 'a', secrets))).ok, true, 'with the flag, Enable runs as before');
+  });
+});
+
 test('enableDefaults reads the folder name, git user name (never the email), remote and branches', async () => {
   await withFixture(['a'], async (fixture) => {
     const root = fixture.clones.a as string;
@@ -210,7 +239,7 @@ test('Enable creates the team, the device key, the orphan coordination branch an
     assert.equal(files.filter((name) => /^events\/\d{12}-evt-[0-9A-HJKMNP-TV-Z]{26}\.json$/.test(name)).length, 2);
     assert.ok(files.includes('team.json'));
 
-    assert.deepEqual([...secrets.values.keys()], [DEVICE_KEY_SECRET]);
+    assert.deepEqual(storedKeys(secrets), [DEVICE_KEY_SECRET]);
     assert.ok(existsSync(path.join(projectTrustDir(fixture.storageDir('a'), fixture.clones.a as string), 'trust.json')), 'Enable pins the team for this project');
     assert.equal(existsSync(path.join(teamStorageDir(fixture.storageDir('a'), teamFile.teamId), 'trust.json')), false);
 
@@ -371,7 +400,7 @@ test('a failing commit hook leaves team.json unstaged on disk, explains the exac
     assert.ok(existsSync(path.join(root, TEAM_FILE_REL)), 'team.json stays on disk');
     assert.equal(gitIn(root, ['diff', '--cached', '--name-only']), '', 'team.json is not left staged');
     assert.equal(gitIn(root, ['log', '-1', '--format=%s']), 'seed', 'no commit was made');
-    assert.equal(secrets.values.size, 1, 'the team exists on the remote, so the key is kept');
+    assert.equal(storedKeys(secrets).length, 1, 'the team exists on the remote, so the key is kept');
     assert.ok(remoteHasRef(fixture, COORDINATION_BRANCH));
 
     const again = await enableTeamMode(inputFor(fixture, 'a', new MemorySecrets()));
@@ -388,7 +417,7 @@ test('a failed genesis push with no earlier identity removes the key it created,
     if (result.ok) return;
     assert.equal(result.code, 'push-failed');
     assert.match(result.message, /unable to access the remote/);
-    assert.equal(secrets.values.size, 0, 'the key this call created is forgotten');
+    assert.deepEqual(storedKeys(secrets), [], 'the key this call created is forgotten');
     assert.deepEqual(await teamFolders(fixture.storageDir('a')), [], 'the team storage folder, with the mirror, is gone');
     assert.equal(existsSync(path.join(fixture.clones.a as string, TEAM_FILE_REL)), false);
     assert.equal(remoteHasRef(fixture, COORDINATION_BRANCH), false);
@@ -443,18 +472,71 @@ for (const failure of FAILURE_PATHS) {
     });
   });
 
-  test(`a failed Enable forgets the key it created and no other: ${failure.name}`, async () => {
+  test(`a failed Enable forgets the key it created and no other, and the history ends with created then revoked: ${failure.name}`, async () => {
     await withFixture(['a'], async (fixture) => {
       const secrets = new MemorySecrets();
       const result = await enableTeamMode(inputFor(fixture, 'a', secrets, { git: failure.git(fixture) }));
       assert.equal(result.ok, false);
       if (result.ok) return;
       assert.equal(result.code, failure.code);
-      assert.equal(secrets.values.size, 0, 'the key this call created is forgotten');
+      assert.deepEqual(storedKeys(secrets), [], 'the key this call created is forgotten');
       assert.deepEqual(await teamFolders(fixture.storageDir('a')), []);
+
+      const folder = identityDir(fixture.storageDir('a'));
+      const file = JSON.parse(await fs.readFile(path.join(folder, KEY_HISTORY_FILE), 'utf8')) as { records: Array<{ payload: { kind: string; key: { fingerprint: string } }; signer: { fingerprint: string } }> };
+      assert.deepEqual(file.records.map((record) => record.payload.kind), ['created', 'revoked']);
+      const [created, revoked] = file.records;
+      assert.equal(created?.payload.key.fingerprint, revoked?.payload.key.fingerprint, 'both records are about the key this call made');
+      assert.equal(revoked?.signer.fingerprint, created?.payload.key.fingerprint, 'the key signed its own withdrawal');
+      const replay = await readKeyHistory(folder, secrets);
+      assert.equal(replay.ok, true, 'the chain stays valid');
+      assert.equal(replay.ok && replay.active, undefined);
+      assert.deepEqual((await fs.readdir(folder)).filter((name) => name.startsWith('key-history.archived-')), [], 'nothing was archived or deleted');
+    });
+  });
+
+  test(`a failed Enable on a computer with an identity before it leaves the key and its history unchanged: ${failure.name}`, async () => {
+    await withFixture(['a'], async (fixture) => {
+      const secrets = new MemorySecrets();
+      const folder = identityDir(fixture.storageDir('a'));
+      const before = await loadOrCreateDeviceIdentity(secrets, { identityDir: folder });
+      const historyBefore = await fs.readFile(path.join(folder, KEY_HISTORY_FILE), 'utf8');
+      const storedBefore = secrets.values.get(DEVICE_KEY_SECRET);
+      const headBefore = secrets.values.get(KEY_HISTORY_HEAD_SECRET);
+      const result = await enableTeamMode(inputFor(fixture, 'a', secrets, { git: failure.git(fixture) }));
+      assert.equal(result.ok, false);
+      if (result.ok) return;
+      assert.equal(result.code, failure.code);
+      assert.equal(secrets.values.get(DEVICE_KEY_SECRET), storedBefore);
+      assert.equal(secrets.values.get(KEY_HISTORY_HEAD_SECRET), headBefore);
+      assert.equal(await fs.readFile(path.join(folder, KEY_HISTORY_FILE), 'utf8'), historyBefore, 'the history file is byte for byte the same');
+      assert.equal((await loadDeviceIdentity(secrets))?.fingerprint, before.identity.fingerprint);
     });
   });
 }
+
+test('an Enable after a failed one that forgot its key makes a new key whose created record follows the revoked one', async () => {
+  await withFixture(['a'], async (fixture) => {
+    const secrets = new MemorySecrets();
+    const failed = await enableTeamMode(inputFor(fixture, 'a', secrets, { git: (FAILURE_PATHS[0] as { git: (fixture: TeamFixture) => GitRunner }).git(fixture) }));
+    assert.equal(failed.ok, false);
+    const folder = identityDir(fixture.storageDir('a'));
+    const first = await readKeyHistory(folder, secrets);
+    assert.equal(first.ok && first.head?.seq, 2);
+
+    const second = await enableTeamMode(inputFor(fixture, 'a', secrets));
+    assert.equal(second.ok, true);
+    if (!second.ok) return;
+    const file = JSON.parse(await fs.readFile(path.join(folder, KEY_HISTORY_FILE), 'utf8')) as { records: Array<{ payload: { kind: string; key: { fingerprint: string } } }> };
+    assert.deepEqual(file.records.map((record) => record.payload.kind), ['created', 'revoked', 'created']);
+    const newKey = file.records[2]?.payload.key.fingerprint;
+    assert.notEqual(newKey, file.records[0]?.payload.key.fingerprint, 'a new key, not the withdrawn one');
+    assert.equal(newKey, second.teamFile.genesis.ownerDevice.fingerprint, 'the new key is the owner device');
+    const replay = await readKeyHistory(folder, secrets);
+    assert.equal(replay.ok && replay.active?.fingerprint, newKey);
+    assert.equal(replay.ok && replay.head?.seq, 3);
+  });
+});
 
 test('a successful Enable on a computer that already has an identity reuses it and creates no second key', async () => {
   await withFixture(['a'], async (fixture) => {
@@ -463,7 +545,7 @@ test('a successful Enable on a computer that already has an identity reuses it a
     const result = await enableTeamMode(inputFor(fixture, 'a', secrets));
     assert.equal(result.ok, true);
     if (!result.ok) return;
-    assert.deepEqual([...secrets.values.keys()], [DEVICE_KEY_SECRET]);
+    assert.deepEqual(storedKeys(secrets), [DEVICE_KEY_SECRET]);
     assert.equal(result.teamFile.genesis.ownerDevice.fingerprint, before.fingerprint, 'the owner device is the identity that was already there');
   });
 });
@@ -477,7 +559,7 @@ test('a genesis push whose reply was lost but that landed is detected and Enable
     const secrets = new MemorySecrets();
     const result = await enableTeamMode(inputFor(fixture, 'a', secrets, { git }));
     assert.equal(result.ok, true);
-    assert.equal(secrets.values.size, 1);
+    assert.equal(storedKeys(secrets).length, 1);
     assert.ok(remoteHasRef(fixture, COORDINATION_BRANCH));
     assert.equal(gitIn(fixture.clones.a as string, ['log', '-1', '--format=%s']), ENABLE_COMMIT_MESSAGE);
   });
@@ -496,7 +578,7 @@ test('a genesis push that may have landed, with the remote unreachable afterward
     assert.equal(result.code, 'push-unconfirmed');
     assert.match(result.message, /may have been created/);
     assert.match(result.message, /git ls-remote origin refs\/heads\/near-ai\/coordination/);
-    assert.equal(secrets.values.size, 1, 'the only owner key is kept');
+    assert.equal(storedKeys(secrets).length, 1, 'the only owner key is kept');
     assert.equal((await teamFolders(fixture.storageDir('a'))).length, 1, 'the mirror folder is kept');
     assert.ok(remoteHasRef(fixture, COORDINATION_BRANCH), 'the push did land');
     assert.equal(existsSync(path.join(fixture.clones.a as string, TEAM_FILE_REL)), false);
@@ -516,7 +598,7 @@ test('a genesis push that throws before reaching the remote, with no earlier ide
     if (result.ok) return;
     assert.equal(result.code, 'push-failed');
     assert.match(result.message, /disk full while pushing/);
-    assert.equal(secrets.values.size, 0, 'the key this call created is forgotten');
+    assert.deepEqual(storedKeys(secrets), [], 'the key this call created is forgotten');
     assert.deepEqual(await teamFolders(fixture.storageDir('a')), [], 'the mirror is gone');
     assert.equal(remoteHasRef(fixture, COORDINATION_BRANCH), false);
   });
@@ -532,7 +614,7 @@ test('a genesis push that landed and then threw is recognised and Enable finishe
     const secrets = new MemorySecrets();
     const result = await enableTeamMode(inputFor(fixture, 'a', secrets, { git }));
     assert.equal(result.ok, true);
-    assert.equal(secrets.values.size, 1);
+    assert.equal(storedKeys(secrets).length, 1);
     assert.ok(remoteHasRef(fixture, COORDINATION_BRANCH));
   });
 });
@@ -593,7 +675,11 @@ test('the canary scanners find a planted value in a git object, a file and every
   assert.ok(seed.toString('base64').endsWith('='), 'a 32 byte seed in base64 is padded');
   assert.equal(new Set(forms).size, forms.length);
   assert.equal(forms[0], stored);
-  const needles: Needle[] = [...canaries.labelled(), ...forms.map((value, index) => ({ label: `device key form ${index}`, value }))];
+  const headText = JSON.stringify({ seq: 1, hash: randomBytes(32).toString('hex') });
+  assert.deepEqual(keyHistoryHeadNeedles(undefined), []);
+  assert.deepEqual(keyHistoryHeadNeedles(''), []);
+  assert.deepEqual(keyHistoryHeadNeedles(headText), [{ label: 'key history head', value: headText }]);
+  const needles: Needle[] = [...canaries.labelled(), ...forms.map((value, index) => ({ label: `device key form ${index}`, value })), ...keyHistoryHeadNeedles(headText)];
 
   const dir = await fs.mkdtemp(path.join(tmpdir(), 'near-ai-canary-scan-'));
   try {
@@ -610,6 +696,10 @@ test('the canary scanners find a planted value in a git object, a file and every
     assert.deepEqual(hits.map((hit) => hit.split(': ')[1]).sort(), expected.sort());
     for (const index of forms.keys()) assert.ok(hits.some((hit) => hit === `files/nested/form-${index}.txt: device key form ${index}`), `form ${index} is found in its own file`);
     assert.ok(hits.every((hit) => hit.startsWith('files/nested/form-')));
+    writeFileSync(path.join(dir, 'files', 'head.txt'), `copied ${headText} here`, 'utf8');
+    assert.ok((await scanFiles([path.join(dir, 'files', 'head.txt')], needles)).some((hit) => hit.endsWith(': key history head')), 'a copy of the saved end is found');
+    execFileSync('git', ['--git-dir', repo, 'hash-object', '-w', '--stdin'], { input: headText, stdio: ['pipe', 'pipe', 'pipe'] });
+    assert.ok((await scanGitObjects(repo, needles)).includes('key history head'));
   } finally {
     await fs.rm(dir, { recursive: true, force: true });
   }
@@ -674,9 +764,14 @@ test('SEC-01 canary: no secret reaches any git object, team.json, extension stor
     const needles: Needle[] = [
       ...canaries.labelled(),
       { label: 'remote user', value: 'canaryuser' },
-      ...deviceKeyForms(secrets.values.get(DEVICE_KEY_SECRET) as string).map((value, index) => ({ label: `device key form ${index}`, value })),
-      ...deviceKeyForms(secondSecrets.values.get(DEVICE_KEY_SECRET) as string).map((value, index) => ({ label: `second device key form ${index}`, value }))
+      ...identityKeyNeedles(secrets.values, 'owner'),
+      ...deviceKeyForms(secondSecrets.values.get(DEVICE_KEY_SECRET) as string).map((value, index) => ({ label: `second device key form ${index}`, value })),
+      ...keyHistoryHeadNeedles(secrets.values.get(KEY_HISTORY_HEAD_SECRET))
     ];
+    assert.equal(needles.filter((needle) => needle.label === 'key history head').length, 1, 'Enable saved the end of the key history, so the scan below looks for it');
+    const historyFile = path.join(identityDir(fixture.storageDir('a')), KEY_HISTORY_FILE);
+    assert.ok(existsSync(historyFile), 'the key history file is inside the extension storage the scan covers');
+    assert.deepEqual(await scanFiles([historyFile], needles), [], 'the key history file holds no private key rendering and not the saved end');
 
     // Controls: the same scanners do see the canaries where they are meant to be, so an empty result below means something.
     assert.deepEqual((await scanFiles([path.join(root, '.planning', '.near-ai', 'transcripts')], needles)).map((hit) => hit.split(': ')[1]), ['prompt']);

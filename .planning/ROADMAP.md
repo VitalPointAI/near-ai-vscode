@@ -256,7 +256,7 @@ These phases change the extension's engine (`src/agent`, `src/domain`, `src/team
   5. Every v0.6.0 phase and requirement has a recorded disposition (landed here, carried to the Team Mode milestone, folded into a named new phase, or retired), and carried v0.6.0 ids that collide with v0.7.0 ids (TEAM-01..04, SETUP-01) carry a `TM-` prefix. (TMR-04)
 **Research flags**: (1) The branch forked at 0.4.11; `main` is at 0.4.22 or later, with Phases 26 and 27 in between. Decide per file whether to port by cherry-pick or re-apply from the Phase 60 SUMMARY files; `src/extension.ts`, the `package.json` contributions and `src/agent/permissions.ts` changed most. (2) Team Mode's coordination transport and Phase 27's sync both run private git mirrors: check they cannot share or lock each other's mirror. (3) Phases 61, 62 and 62.1 stay on the archive branch for milestone L2 (owner, 2026-11-15); the branch is archived on GitHub at 4207080.
 **Undo cost**: Low for the code (additive, inert while Team Mode is off). Higher for the signing interface (TMR-05): grants and policy bundles signed through it outlive a change.
-**Plans:** 8/15 plans executed (one per wave; PR 1 is plans 01-08 on `feat/team-core-on-main`, PR 2 is plans 09-15 on `feat/team-signed-payloads`)
+**Plans:** 15/15 plans executed (one per wave; PR 1 is plans 01-08 on `feat/team-core-on-main`, PR 2 is plans 09-15 on `feat/team-signed-payloads`)
 
 Plans:
 **Wave 1**
@@ -284,25 +284,25 @@ Plans:
 - [x] 69-08-PLAN.md — PR 1 gate, Phase 60 criteria re-verified on main, open PR 1
 
 **Wave 9** *(blocked on Wave 8 completion)*
-- [ ] 69-09-PLAN.md — device.rotated end to end
+- [x] 69-09-PLAN.md — device.rotated end to end
 
 **Wave 10** *(blocked on Wave 9 completion)*
-- [ ] 69-10-PLAN.md — payload signer and key status
+- [x] 69-10-PLAN.md — payload signer and key status
 
 **Wave 11** *(blocked on Wave 10 completion)*
-- [ ] 69-11-PLAN.md — local signed key history
+- [x] 69-11-PLAN.md — local signed key history
 
 **Wave 12** *(blocked on Wave 11 completion)*
-- [ ] 69-12-PLAN.md — the identity writes and backfills its own history
+- [x] 69-12-PLAN.md — the identity writes and backfills its own history
 
 **Wave 13** *(blocked on Wave 12 completion)*
-- [ ] 69-13-PLAN.md — rotation and revocation helpers for the person's key
+- [x] 69-13-PLAN.md — rotation and revocation helpers for the person's key
 
 **Wave 14** *(blocked on Wave 13 completion)*
-- [ ] 69-14-PLAN.md — v0.6.0 disposition record (TMR-01, TMR-04)
+- [x] 69-14-PLAN.md — v0.6.0 disposition record (TMR-01, TMR-04)
 
 **Wave 15** *(blocked on Wave 14 completion)*
-- [ ] 69-15-PLAN.md — automated check that PR 1 is on main, rebase PR 2, gate, open PR 2 (no owner checkpoint, D-30)
+- [x] 69-15-PLAN.md — automated check that PR 1 is on main, rebase PR 2, gate, open PR 2 (no owner checkpoint, D-30)
 
 ### Phase 70: Capability vocabulary, manifests and one gate with a floor
 **Goal**: Every tool call passes one gate that decides from declared capabilities, classification labels and a signed local policy, with a floor no mode, setting or delegation can override; the same gate decides where a model request may go from the label of what the session has read, and it never needs the network.
@@ -650,6 +650,8 @@ Outlines, not plans: each gets a version number, requirements and phases (number
 | 66 Budgets and allocations | Re-based: allocations become spend constraints in grants and use the budget arithmetic of BUDG-04; per-key caps at the provider stay. |
 | 67 Metrics, collaboration, team memory, team stop, release readiness, relay transport | Carried, except: team memory proposals share the staged-proposal pipeline with learned skills (L6), team stop builds on the gate's stop, and `relayTransport.ts` is superseded by L5's federation transport. |
 
+The full record, with the archive evidence and a disposition for every one of the 34 v0.6.0 requirements, is `.planning/research/v0.6.0-disposition.md`.
+
 Also carried: the shared code-server follow-ups (owner, 2026-11-05). Phase 27 already moved chats, run records, checkpoints and project spend history into each project's own state folder, so with one copy of the project per person those are per person already; what remains is the editor-wide spend ledger and daily limit per person, a recovery code that unlocks an encrypted backup of the person's device key and own NEAR AI key, and "Replace my device" (the lead accepts the person back as the same member).
 **Depends on**: Phase 69 and v0.7.0 Stage 1.
 **Research flags**: Drift: the branch forked at 0.4.11; every month on the archive raises the cost of landing 61 and 62. The v0.6.0 ids that collide with v0.7.0 ids carry a `TM-` prefix (Phase 69). Transport privacy (Calimero evaluation, 2026-11-15, section 5.4, recommended instead of Calimero): encrypt each Team Mode event payload to the member device keys over the existing git transport, leaving signatures and hashes in clear, so the git host and the network see only ciphertext and sizes; removing a member re-encrypts future events only; roots over the ciphertext hashes can still be anchored in L4, written at fixed intervals so timing reveals nothing. Phase 69's plaintext signed log is not changed by this; it is a decision for this milestone.
@@ -695,7 +697,7 @@ Also carried: the shared code-server follow-ups (owner, 2026-11-05). Phase 27 al
 | 28. Secure development workflow setup step | 0/TBD | Not started | - |
 | 29. A cleanup member with a safe CleanUp tool | 0/TBD | Not started (after Phase 70) | - |
 | 68. Relay foundation | 8/8 | Complete; merged as PR #50 (052d5cf); `relay` required on main (D-19) | 2026-11-15 |
-| 69. Team Mode reconciliation | 8/15 | In Progress (two PRs) | - |
+| 69. Team Mode reconciliation | 15/15 | In Progress (two PRs) | - |
 | 70. Capability vocabulary, manifests and one gate | 0/TBD | Not started | - |
 | 71. Identities, credentials and delegation that only narrows | 0/TBD | Not started (opens with a research step) | - |
 | 72. Execution backends on a copy, with a guarded apply | 0/TBD | Not started (spike done 2026-11-15) | - |

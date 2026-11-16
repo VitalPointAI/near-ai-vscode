@@ -12,7 +12,7 @@ import { eventPath } from '../domain/team/canonical';
 import { serialiseState, teamMaterializer } from '../domain/team/materialize';
 import { TEAM_REJECTION_REASONS } from '../domain/team/types';
 import type { GenesisAnchor, LogHead, TeamEvent, TeamState } from '../domain/team/types';
-import { CAS_LOST_MARKERS, DEFAULT_COORDINATION_REF, GitTransport, LOCAL_REF, QUARANTINE_REF_PREFIX, RETRYABLE_FETCH_MARKERS, classifyGitFailure, classifyPush } from '../team/gitTransport';
+import { CAS_LOST_MARKERS, DEFAULT_COORDINATION_REF, GitTransport, LOCAL_REF, QUARANTINE_REF_PREFIX, RETRYABLE_FETCH_MARKERS, classifyGitFailure, classifyPush, isContactableRemoteAddress } from '../team/gitTransport';
 import type { GitTransportOptions } from '../team/gitTransport';
 import { newTeamId } from '../team/identity';
 import { redactGitMessage, runGit } from '../team/runGit';
@@ -553,6 +553,44 @@ for (const reported of [undefined, '2.30.2']) {
       const network = calls.filter((call) => call.args.includes('--git-dir') && ['fetch', 'push', 'ls-remote'].some((verb) => call.args.includes(verb)));
       assert.deepEqual(network, [], 'no fetch, push or ls-remote ran');
       assert.equal(calls.some((call) => call.args.some((arg) => arg.startsWith('--upload-pack'))), false, 'the address never reached a git argument');
+    });
+  });
+}
+
+test('only file, ssh, git, http and https addresses, scp-like addresses and plain local paths are contacted', () => {
+  for (const good of [
+    'https://example.com/team.git', 'HTTP://example.com/team.git', 'http://user:token@example.com:8080/team.git', 'ssh://git@example.com/team.git', 'git://example.com/team.git',
+    'file:///srv/teams/team.git', 'git@example.com:org/team.git', 'example.com:org/team.git', '[::1]:org/team.git', '/srv/teams/team.git', './team.git', '../team.git', 'team.git',
+    'C:\\teams\\team.git', 'ssh://[::1]/team.git'
+  ]) assert.equal(isContactableRemoteAddress(good), true, `${good} is contacted`);
+  for (const bad of [
+    '', ' ', '-oProxyCommand=x', '--upload-pack=x', 'ext::sh -c true', 'EXT::sh -c true', 'fd::3', 'fd::3,4', 'foo::bar', 'https::example.com/x', 'ext::https://example.com/x',
+    ' -oProxyCommand=x', ' --upload-pack=x', '1ext::sh -c true', '.ext::x', '+ext::x', '-ext::x', ' ext::sh -c true', '  fd::3', '::x', 'ext://sh', 'ftp://example.com/team.git', 'ftps://example.com/team.git', 'rsync://example.com/team.git', 'javascript://example.com/%0aalert(1)', 'data://x', 'gopher://example.com/',
+    'https://example.com/x\nhttps://other.example.com/', 'git@example.com:org/team.git\n--upload-pack=x', 'ssh://example.com/\u0000x'
+  ]) assert.equal(isContactableRemoteAddress(bad), false, `${JSON.stringify(bad)} is refused`);
+});
+
+for (const address of ['ext::echo near-ai-refused-marker', 'fd::3', 'ftp://example.com/team.git', 'rsync://example.com/team.git']) {
+  test(`a remote address that is not file, ssh, git, http or https is refused before any network call: ${address}`, async () => {
+    await withFixture(['a'], async (fixture) => {
+      const teamId = newTeamId();
+      const owner = await createOwner(teamId);
+      const genesis = testGenesis({ teamId, owner, name: 'Transport address team' });
+      const calls: RecordedCall[] = [];
+      const transport = new GitTransport<TeamState>({
+        mirrorDir: path.join(fixture.storageDir('a'), 'coordination.git'), projectRoot: fixture.clones['a'] as string, remote: 'origin',
+        ref: DEFAULT_COORDINATION_REF, materializer: teamMaterializer(genesis.anchor), git: recordingRunner(calls), baseDelayMs: 1
+      });
+      gitIn(fixture.clones['a'] as string, ['config', 'remote.origin.url', address]);
+      const appended = await transport.append(async () => genesis.events, { genesis: { teamFileText: genesis.teamFileText } });
+      assert.equal(appended.ok, false);
+      assert.equal(appended.ok === false && appended.kind, 'refused');
+      await transport.fetch();
+      assert.equal(transport.status().state, 'offline');
+      const network = calls.filter((call) => call.args.includes('--git-dir') && ['fetch', 'push', 'ls-remote'].some((verb) => call.args.includes(verb)));
+      assert.deepEqual(network, [], 'no fetch, push or ls-remote ran');
+      assert.equal(JSON.stringify(calls).includes(address), false, 'the address never reached a git argument or environment value');
+      assert.equal(JSON.stringify(appended).includes('echo'), false, 'the refusal does not repeat the address');
     });
   });
 }

@@ -332,6 +332,33 @@ test('a raw-pushed event with a broken signature is printed once, listed by veri
   });
 });
 
+test('the rejections a session remembers are bounded to the most recent ones, with one plain note of how many were let go, and dedupe still holds inside the bound', async () => {
+  await withRig(async (rig) => {
+    const started = await startSession(rig, { reportedLimit: 2 });
+    const forged = [3, 4, 5, 6].map((lamport) => tamperedEvent(rig, lamport));
+    const printed = (event: TeamEvent): number => started.lines.filter((text) => text.startsWith(`Rejected event ${event.id}:`)).length;
+    const forgotten = (): string[] => started.lines.filter((text) => text.startsWith('Team Mode no longer remembers'));
+
+    rawPush(rig.fixture.clones['raw'] as string, [forged[0] as TeamEvent, forged[1] as TeamEvent], 'raw: two forgeries');
+    assert.equal(await started.session.sync(), true);
+    assert.equal(await started.session.sync(), true);
+    assert.deepEqual([printed(forged[0] as TeamEvent), printed(forged[1] as TeamEvent)], [1, 1], 'inside the bound each is printed once, however often it comes back');
+    assert.deepEqual(forgotten(), [], 'nothing has been let go yet');
+
+    rawPush(rig.fixture.clones['raw'] as string, [forged[2] as TeamEvent], 'raw: a third forgery');
+    assert.equal(await started.session.sync(), true);
+    assert.equal(printed(forged[2] as TeamEvent), 1);
+    assert.equal(forgotten().length, 1, 'one note once the oldest entry was let go');
+    assert.match(forgotten()[0] as string, /oldest 1 rejected event or problem/);
+
+    rawPush(rig.fixture.clones['raw'] as string, [forged[3] as TeamEvent], 'raw: a fourth forgery');
+    assert.equal(await started.session.sync(), true);
+    assert.equal(printed(forged[3] as TeamEvent), 1);
+    assert.equal(forgotten().length, 1, 'the note is not repeated');
+    assertPlainCopy(started.lines);
+  });
+});
+
 test('an event of an unsupported type makes verifyLog tell the user to update the extension', async () => {
   await withRig(async (rig) => {
     const started = await startSession(rig);
@@ -362,7 +389,7 @@ test('formatVerifyReport lists refused logs, removed members, revoked devices an
   const report: VerifyReport = {
     events: 5, accepted: 3, head: { eventId: 'evt-X', lamport: 4 }, snapshots: 1, unsupported: 2, refused: 'genesis does not match',
     members: [
-      { id: 'm1', name: `Ann\nInjected line ${'x'.repeat(600)}`, role: 'lead', removed: false, devices: [{ fingerprint: 'fp-1', revoked: false }, { fingerprint: 'fp-2', revoked: true }] },
+      { id: 'm1', name: `Ann\nInjected line ${'x'.repeat(600)}`, role: 'lead', removed: false, devices: [{ fingerprint: 'fp-1', state: 'active' }, { fingerprint: 'fp-2', state: 'revoked' }, { fingerprint: 'fp-3', state: 'rotated', replacedBy: 'fp-4' }, { fingerprint: 'fp-5', state: 'unknown' }] },
       { id: 'm2', name: 'Bob', role: 'developer', removed: true, devices: [] }
     ],
     rejected: [{ eventId: 'evt-bad', reason: 'signature is not valid' }, { eventId: 'events/odd\u0007name.json', reason: 'malformed event' }],
@@ -380,7 +407,7 @@ test('formatVerifyReport lists refused logs, removed members, revoked devices an
   assert.equal(lines.some((line) => line.includes('hunter2') || line.includes('user:')), false, 'credentials in a status reason are removed');
   assert.ok(lines.includes('Log refused: genesis does not match'));
   assert.ok(lines.includes('  Bob, developer (removed): no devices'));
-  assert.ok(lines.some((line) => line.includes('device fp-1, device fp-2 (revoked)')));
+  assert.ok(lines.some((line) => line.includes('device fp-1, device fp-2 (revoked), device fp-3 (rotated, replaced by fp-4), device fp-5 (unknown)')));
   assert.ok(lines.includes('Events: 5 (3 accepted, 2 rejected)'));
   assert.ok(lines.includes('Snapshots: 1'));
   assert.ok(lines.includes('Secret-like values found (warning only):'));

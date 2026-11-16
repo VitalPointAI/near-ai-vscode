@@ -1,4 +1,4 @@
-// Materialiser for the team event log: the full D-09 validation pipeline and the state transitions for the ten Phase 60 event types.
+// Materialiser for the team event log: the full D-09 validation pipeline and the state transitions for the eleven implemented event types (the ten Phase 60 ones and device.rotated).
 // Every client runs exactly this code on every committed entry, so it is pure and deterministic: no I/O, no clock, no secret scanning
 // (acceptance must not depend on detector versions), and ordering comes only from the order entries are applied in (D-03).
 import { createHash } from 'node:crypto';
@@ -7,7 +7,7 @@ import { actionForEvent, decideTeamAction } from './permissions';
 import { DEFAULT_WIP_LIMIT, applyPolicyChanges, defaultTeamPolicy, validatePolicy } from './policy';
 import { AVAILABILITIES, ROLES, TEAM_REJECTION_REASONS } from './types';
 import type { Availability, CommittedEvent, DeviceKey, DeviceRef, EntryVerdict, GenesisAnchor, ImplementedTeamEvent, JsonObject, Materializer, Member, Rejection, Role, SnapshotRef, TeamEvent, TeamPolicy, TeamState, WorkingHours } from './types';
-import { EVENT_ID_PATTERN, FINGERPRINT_PATTERN, MEMBER_ID_PATTERN, SNAPSHOT_PATH_PATTERN, isRecord, parseEventFile } from './validate';
+import { AT_PATTERN, EVENT_ID_PATTERN, FINGERPRINT_PATTERN, MEMBER_ID_PATTERN, SNAPSHOT_PATH_PATTERN, isRecord, parseEventFile } from './validate';
 
 export const MAX_LAMPORT_JUMP = 1000;
 const R = TEAM_REJECTION_REASONS;
@@ -90,6 +90,8 @@ function boundKey(state: TeamState, event: ImplementedTeamEvent): DeviceKey | st
   const key = member?.devices.find((device) => device.fingerprint === event.device);
   if (member === undefined || key === undefined) return R.unboundDevice;
   if (key.revokedEvent !== undefined) return R.revokedDevice;
+  // Rotation retires a key from its log position on, like revocation (D-09, D-11): events before the rotation stay valid.
+  if (key.rotatedEvent !== undefined) return R.rotatedDevice;
   if (member.removedEvent !== undefined) return R.removedAuthor;
   return key;
 }
@@ -138,7 +140,22 @@ function referenceProblem(state: TeamState, event: ImplementedTeamEvent): string
         ? member.devices.find((device) => device.fingerprint === event.body.fingerprint) : undefined;
       if (key === undefined) return R.deviceNotBound;
       if (key.revokedEvent !== undefined) return R.deviceRevoked;
-      return member.devices.filter((device) => device.revokedEvent === undefined).length === 1 ? R.lastDevice : undefined;
+      // A key that was only rotated is already out of use, so revoking it never leaves the member without a key (D-21).
+      if (key.rotatedEvent !== undefined) return undefined;
+      return member.devices.filter((device) => device.revokedEvent === undefined && device.rotatedEvent === undefined).length === 1 ? R.lastDevice : undefined;
+    }
+    case 'device.rotated': {
+      const member = lookupMember(state, event.body.memberId);
+      if (typeof member === 'string') return member;
+      const key = state.deviceIndex.get(event.body.from) === member.id
+        ? member.devices.find((device) => device.fingerprint === event.body.from) : undefined;
+      if (key === undefined) return R.deviceNotBound;
+      if (key.revokedEvent !== undefined) return R.deviceRevoked;
+      if (key.rotatedEvent !== undefined) return R.deviceRotated;
+      if (state.deviceIndex.has(event.body.device.fingerprint)) return R.deviceTaken;
+      // A member rotates their own key only with the key it retires; an owner or lead acting for someone else signs with their own device.
+      if (event.author === member.id && event.device !== event.body.from) return R.rotationNotByOldKey;
+      return undefined;
     }
     case 'snapshot.written': {
       // The hash is computed before the transition and only when such an event arrives, about once per 500 events.
@@ -190,6 +207,18 @@ function applyTransition(state: TeamState, event: ImplementedTeamEvent): void {
       if (key === undefined) throw new Error(`Device ${event.body.fingerprint} vanished between the reference check and the transition.`);
       key.revokedEvent = event.id;
       key.revokedBy = event.author;
+      return;
+    }
+    case 'device.rotated': {
+      const member = memberOf(state, event.body.memberId);
+      const old = member.devices.find((device) => device.fingerprint === event.body.from);
+      if (old === undefined) throw new Error(`Device ${event.body.from} vanished between the reference check and the transition.`);
+      // The old fingerprint stays in the index, so it can never be registered again.
+      old.rotatedEvent = event.id;
+      old.rotatedAt = event.at;
+      old.rotatedTo = event.body.device.fingerprint;
+      member.devices.push({ fingerprint: event.body.device.fingerprint, publicKey: event.body.device.publicKey, addedBy: event.author, addedEvent: event.id });
+      state.deviceIndex.set(event.body.device.fingerprint, member.id);
       return;
     }
     case 'member.availability': {
@@ -382,13 +411,21 @@ function emptyList(value: unknown, path: string): void {
 }
 
 function parseDeviceKey(value: unknown, path: string): DeviceKey {
-  const raw = plainRecord(value, path, ['fingerprint', 'publicKey', 'addedBy', 'addedEvent'], ['revokedEvent', 'revokedBy']);
+  const raw = plainRecord(value, path, ['fingerprint', 'publicKey', 'addedBy', 'addedEvent'], ['revokedEvent', 'revokedBy', 'rotatedEvent', 'rotatedAt', 'rotatedTo']);
   const publicKey = shortText(raw.publicKey, `${path}.publicKey`);
   const fingerprint = patterned(raw.fingerprint, `${path}.fingerprint`, FINGERPRINT_PATTERN);
   if (!isStrictBase64url(publicKey, 32) || fingerprint !== fingerprintOf(Buffer.from(publicKey, 'base64url'))) bad(`${path}.publicKey`);
   const key: DeviceKey = { fingerprint, publicKey, addedBy: shortText(raw.addedBy, `${path}.addedBy`), addedEvent: shortText(raw.addedEvent, `${path}.addedEvent`) };
   if (raw.revokedEvent !== undefined) key.revokedEvent = shortText(raw.revokedEvent, `${path}.revokedEvent`);
   if (raw.revokedBy !== undefined) key.revokedBy = shortText(raw.revokedBy, `${path}.revokedBy`);
+  // The three rotation fields come together or not at all.
+  const rotated = [raw.rotatedEvent, raw.rotatedAt, raw.rotatedTo].filter((field) => field !== undefined).length;
+  if (rotated !== 0 && rotated !== 3) bad(`${path}.rotatedEvent`);
+  if (rotated === 3) {
+    key.rotatedEvent = shortText(raw.rotatedEvent, `${path}.rotatedEvent`);
+    key.rotatedAt = patterned(raw.rotatedAt, `${path}.rotatedAt`, AT_PATTERN);
+    key.rotatedTo = patterned(raw.rotatedTo, `${path}.rotatedTo`, FINGERPRINT_PATTERN);
+  }
   return key;
 }
 
@@ -473,6 +510,17 @@ function checkIndex(state: TeamState): void {
   if (devices !== state.deviceIndex.size) bad('deviceIndex');
 }
 
+// A rotated key points at the key that replaced it: a device of the same member, bound by the rotation event itself.
+function checkRotations(state: TeamState): void {
+  for (const member of state.members.values()) {
+    for (const device of member.devices) {
+      if (device.rotatedTo === undefined) continue;
+      const successor = member.devices.find((candidate) => candidate.fingerprint === device.rotatedTo);
+      if (successor === undefined || successor.addedEvent !== device.rotatedEvent || state.deviceIndex.get(successor.fingerprint) !== member.id) bad('devices.rotatedTo');
+    }
+  }
+}
+
 // Rebuilds a state from the shape serialiseState writes. Anything that does not match that shape exactly is refused, because a
 // snapshot arrives from a remote. The final comparison guarantees the rebuilt state serialises back to the very same text.
 export function deserialiseState(value: JsonObject, anchor: GenesisAnchor): TeamState {
@@ -505,6 +553,7 @@ export function deserialiseState(value: JsonObject, anchor: GenesisAnchor): Team
   state.rejected = items(root.rejected, 'rejected', parseRejection);
   state.snapshots = items(root.snapshots, 'snapshots', parseSnapshotRef);
   checkIndex(state);
+  checkRotations(state);
   checkAnchorBinding(state, anchor);
   if (canonicalize(value) !== serialiseState(state)) bad('state');
   return state;
@@ -548,6 +597,7 @@ export function parseSnapshotFile(fileText: string, anchor: GenesisAnchor): Pars
     const member = state.members.get(file.author);
     if (key === undefined || member === undefined) return snapshotFailure(R.unboundDevice);
     if (key.revokedEvent !== undefined) return snapshotFailure(R.revokedDevice);
+    if (key.rotatedEvent !== undefined) return snapshotFailure(R.rotatedDevice);
     if (member.removedEvent !== undefined) return snapshotFailure(R.removedAuthor);
     if (member.role !== 'owner' && member.role !== 'lead') return snapshotFailure(SNAPSHOT_REASONS.notManager);
     const { sig, ...unsigned } = file;

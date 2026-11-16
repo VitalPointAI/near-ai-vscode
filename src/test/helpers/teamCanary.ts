@@ -1,9 +1,17 @@
 // SEC-01 canaries: secret-shaped strings generated at run time (never literals in the repository) and scanners that look for them,
 // and for the device key in every encoding it could be written in, across git objects and files.
 // The file has no .test suffix on purpose so the test glob does not run it as a suite.
+//
+// What the scanners see. Every scan looks at the bytes as they are and at two normalised views of them, so a key that was split up on its way
+// out is still found: one view drops whitespace (space, tab, CR, LF) and ':' and the text escapes \n, \r and \t (a base64 rendering wrapped
+// over lines, hex written in ':' or space separated groups, in a file or inside a JSON string), the other also drops '-' (hex in '-' separated
+// groups). '-' is kept in the first view because base64url uses it. Limits, not covered: a rendering broken by anything else (a comma, a
+// quote, a '0x' prefix on each byte, a number list), another alphabet or encoding (base32, percent-encoding, reversed or byte-swapped order),
+// a key that is encrypted, compressed or split across two files or objects, and only part of a key.
 import { createHash, createPrivateKey, createPublicKey, randomBytes } from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
+import { DEVICE_KEY_SECRET, PENDING_DEVICE_KEY_SECRET, PREVIOUS_DEVICE_KEY_SECRET } from '../../team/identity';
 import { runGit } from '../../team/runGit';
 
 export interface Needle { label: string; value: string }
@@ -58,8 +66,59 @@ export function deviceKeyForms(storedSecret: string): string[] {
   ])];
 }
 
+// Needles for every private key kept in SecretStorage under the three identity names: the device key, the key a rotation keeps aside (pending) and the
+// key it replaced (previous). Each stored value that is present contributes every rendering deviceKeyForms lists, labelled by the name it was stored under,
+// so a scan after a rotation proves none of the three keys reached a file, a git object, settings or the audit store (TMR-03, D-07).
+export function identityKeyNeedles(stored: ReadonlyMap<string, string>, prefix = 'identity'): Needle[] {
+  const names: Array<[string, string]> = [[DEVICE_KEY_SECRET, 'device key'], [PENDING_DEVICE_KEY_SECRET, 'pending key'], [PREVIOUS_DEVICE_KEY_SECRET, 'previous key']];
+  return names.flatMap(([name, label]) => {
+    const value = stored.get(name);
+    return value === undefined || value === '' ? [] : deviceKeyForms(value).map((form, index) => ({ label: `${prefix} ${label} form ${index}`, value: form }));
+  });
+}
+
+// The saved end of the key history (seq and hash) lives only in SecretStorage, never in a file, a git object or the audit store. Its stored text is a
+// needle like any other secret, so a scan of those places also proves it never leaked there (TMR-03). Nothing is returned when no head is stored.
+export function keyHistoryHeadNeedles(storedHead: string | undefined): Needle[] {
+  return storedHead === undefined || storedHead === '' ? [] : [{ label: 'key history head', value: storedHead }];
+}
+
+// Separators a rendering of a key could be split with: whitespace and ':' always, and '-' in the second view only (base64url uses '-').
+const SPLIT_SEPARATORS = new Set([0x20, 0x09, 0x0d, 0x0a, 0x3a]);
+const DASH = 0x2d;
+const BACKSLASH = 0x5c;
+const ESCAPED_LETTERS = new Set(['n', 'r', 't'].map((letter) => letter.charCodeAt(0)));
+
+function withoutSeparators(haystack: Buffer, alsoDash: boolean): Buffer {
+  const kept = Buffer.allocUnsafe(haystack.length);
+  let length = 0;
+  for (let index = 0; index < haystack.length; index += 1) {
+    const byte = haystack[index] as number;
+    // The two characters of a text escape (backslash then n, r or t) are one separator. Base64, base64url and hex have no backslash.
+    if (byte === BACKSLASH && ESCAPED_LETTERS.has(haystack[index + 1] as number)) { index += 1; continue; }
+    if (SPLIT_SEPARATORS.has(byte) || (alsoDash && byte === DASH)) continue;
+    kept[length] = byte;
+    length += 1;
+  }
+  return kept.subarray(0, length);
+}
+
+// The bytes as they are, then the views with separators removed. A view that is no shorter than the one before it dropped nothing, so it is not repeated.
+function scanViews(haystack: Buffer): Buffer[] {
+  const views = [haystack];
+  for (const alsoDash of [false, true]) {
+    const view = withoutSeparators(haystack, alsoDash);
+    if (view.length < (views[views.length - 1] as Buffer).length) views.push(view);
+  }
+  return views;
+}
+
 function foundIn(haystack: Buffer, needles: Needle[]): string[] {
-  return needles.filter((needle) => haystack.includes(Buffer.from(needle.value, 'utf8'))).map((needle) => needle.label);
+  const views = scanViews(haystack);
+  return needles.filter((needle) => {
+    const value = Buffer.from(needle.value, 'utf8');
+    return views.some((view) => view.includes(value));
+  }).map((needle) => needle.label);
 }
 
 async function readIfPresent(file: string): Promise<Buffer | undefined> {
@@ -136,6 +195,12 @@ for (const range of ['AZ', 'az', '09']) for (let code = range.charCodeAt(0); cod
 for (const char of '+/-_=') RUN_BYTE[char.charCodeAt(0)] = 1;
 
 function digestsFoundIn(haystack: Buffer, digests: LabelledDigest[]): string[] {
+  const labels = new Set<string>();
+  for (const view of scanViews(haystack)) for (const label of digestsFoundInView(view, digests)) labels.add(label);
+  return [...labels];
+}
+
+function digestsFoundInView(haystack: Buffer, digests: LabelledDigest[]): string[] {
   const lengths = [...new Set(digests.map((digest) => digest.length))];
   const wanted = new Map<string, string[]>();
   for (const digest of digests) wanted.set(`${digest.length}:${digest.sha256}`, [...(wanted.get(`${digest.length}:${digest.sha256}`) ?? []), digest.label]);

@@ -476,7 +476,7 @@ function teamProjectTests(getApi: () => NearAiTestApi): Array<[string, () => Pro
       assert.ok(report.events >= 1 && report.events === report.accepted, `events ${report.events}, accepted ${report.accepted}`);
       assert.equal(report.members.length, 1);
       assert.equal(report.members[0]?.role, 'owner');
-      assert.equal(report.members[0]?.devices.filter((device) => !device.revoked).length, 1);
+      assert.equal(report.members[0]?.devices.filter((device) => device.state === 'active').length, 1);
       assert.equal(report.status.state, 'ok');
       await vscode.commands.executeCommand('notifications.clearAll');
     }],
