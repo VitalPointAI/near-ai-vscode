@@ -784,13 +784,11 @@
 
   // 0.4.28: a row of state dots, one per running agent (the lead's own state is in the chat itself), and "Watch the team", which opens Team Live. Each dot has its state in words for a screen reader and
   // as a tooltip; its shape changes with the state, so colour is never the only sign. Nothing moves here.
+  // The host sends each agent's state as a word (review of PR 72); the page never reads it back from the activity wording.
+  const DOT_WORDS = { paused: 'paused', 'needs-you': 'needs you', queued: 'queued', waiting: 'waiting for helpers', working: 'working' };
   function agentDotState(agent) {
-    if (agent.paused) return ['paused', 'paused'];
-    const activity = agent.activity || '';
-    if (/^Waiting for your/.test(activity)) return ['needs-you', 'needs you'];
-    if (activity === 'Waiting for a free slot') return ['queued', 'queued'];
-    if (/^Waiting for \d+ helper/.test(activity)) return ['waiting', 'waiting for helpers'];
-    return ['working', 'working'];
+    const state = Object.prototype.hasOwnProperty.call(DOT_WORDS, agent.state) ? agent.state : agent.paused ? 'paused' : 'working';
+    return [state, DOT_WORDS[state]];
   }
   function teamPulse(agents) {
     const line = el('div', 'team-pulse');

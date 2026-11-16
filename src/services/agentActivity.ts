@@ -427,7 +427,7 @@ export class ActivityFeed {
    * the agent is still waiting.
    */
   public approvalExpired(agentId: string): void {
-    this.withAgent(agentId, (_base, stat) => { if (stat.phase !== 'waiting-you') this.enter(stat, 'waiting-you', 'approval'); this.changed([]); });
+    this.withAgent(agentId, (_base, stat) => { this.enter(stat, 'waiting-you', 'approval'); this.changed([]); });
   }
 
   /**
@@ -462,7 +462,7 @@ export class ActivityFeed {
    */
   public waitingForUser(agentId: string, waiting: boolean, kind: Exclude<WaitingKind, 'approval'> = 'image'): void {
     this.withAgent(agentId, (_base, stat) => {
-      if (waiting && stat.phase !== 'waiting-you') this.enter(stat, 'waiting-you', kind);
+      if (waiting) this.enter(stat, 'waiting-you', kind);
       else if (!waiting && stat.phase === 'waiting-you') this.enter(stat, 'tool');
       this.changed([]);
     });
@@ -520,7 +520,8 @@ export class ActivityFeed {
 
   /** Leaves the current phase, adding a finished wait to its total. `kind` says what a `waiting-you` waits for. */
   private enter(stat: AgentStats, phase: AgentPhase, kind?: WaitingKind): void {
-    if (stat.phase === phase) return;
+    // Already waiting for the person, now for something else (a question asked while an approval is open): the kind follows the newest wait (review of PR 72).
+    if (stat.phase === phase) { if (phase === 'waiting-you' && kind && stat.waitingKind !== kind) stat.waitingKind = kind; return; }
     const now = this.now();
     const spent = Math.max(0, now - stat.phaseSince);
     if (stat.phase === 'cooling-down') { stat.coolMs += spent; stat.coolUntil = undefined; stat.coolReason = undefined; }

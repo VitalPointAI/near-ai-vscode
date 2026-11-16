@@ -222,4 +222,17 @@ test('the chat\'s team dots are one per running agent, with no made-up dot for t
   assert.ok(pulse.length > 0);
   assert.doesNotMatch(pulse, /'lead'/);
   assert.match(pulse, /dots\.append\(\.\.\.agents\.map\(/);
+  // The state comes from the host as a word, never read back from the activity wording.
+  const dotState = page.slice(page.indexOf('function agentDotState('), page.indexOf('function teamPulse('));
+  assert.doesNotMatch(dotState, /activity/);
+  assert.match(dotState, /agent\.state/);
+});
+
+test('the state the chat\'s team dots show comes from the activity feed\'s phase', () => {
+  const { agentDotState } = require('../services/agentSession') as typeof import('../services/agentSession');
+  const cases: Array<[boolean, string | undefined, string]> = [
+    [true, 'thinking', 'paused'], [false, 'paused', 'paused'], [false, 'waiting-you', 'needs-you'], [false, 'queued', 'queued'],
+    [false, 'waiting-agents', 'waiting'], [false, 'tool', 'working'], [false, undefined, 'working']
+  ];
+  for (const [paused, phase, want] of cases) assert.equal(agentDotState({ paused }, phase ? { phase: phase as never } : undefined), want, `${paused} ${phase}`);
 });

@@ -85,10 +85,10 @@ export function reportsToKey(value: string | undefined): string {
   return trimmed ? slugify(trimmed) : '';
 }
 
-/** Parses a team file; throws with a message that says what to fix. */
 /** A member's privacy setting line: `privacy:`, any case, a one-word value, and an optional `# note`. Team Studio finds the line with the same pattern. */
 export const MEMBER_PRIVACY_LINE = /^(privacy):\s*([^\s#]*)\s*(?:#.*)?$/i;
 
+/** Parses a team file; throws with a message that says what to fix. */
 export function parseTeam(text: string, file: string): TeamDefinition {
   const { data, body } = parseFrontmatter(text);
   const name = typeof data.name === 'string' && data.name.trim() ? data.name.trim() : '';

@@ -25,7 +25,7 @@ import type { ActionPolicy } from '../domain/policy';
 import { agentModelFor, expandPrompt, GsdAgent, GsdSkill, PrivacyCandidate, privateModelFor, roleModelFor, tierOf } from '../gsd/library';
 import { trustedPreambles } from '../gsd/preamble';
 import { gsdTools, Question } from '../gsd/tools';
-import type { ActivityFeed, AgentBoundary } from './agentActivity';
+import type { ActivityFeed, AgentBoundary, AgentPhase } from './agentActivity';
 import type { ActivityStore } from './activityStore';
 import { saveHandoff } from './handoff';
 import { homeFolder, teamLibraryDir } from '../domain/teamStorage';
@@ -1078,7 +1078,9 @@ export class AgentConversation {
                 }
                 this.activity?.waitingForAgents(agent.id, false);
                 await takeBackSlot();
-                return reports.length && !signal.aborted ? reports : undefined;
+                // Stopped while reports were already taken: they go on to the lead rather than being lost (review of PR 72).
+                if (signal.aborted && reports.length) { this.notifications.push(...reports); return undefined; }
+                return reports.length ? reports : undefined;
               },
               // PERF-01: nobody may be watching a sub-agent, so its card waits only briefly; unanswered, the call returns "awaiting approval", the card
               // stays queued, and a later answer is passed to the lead (an allow grants that exact command for the rest of the run).
@@ -1232,7 +1234,7 @@ export class AgentConversation {
 
   private postAgents(): void {
     if (this.agentsTimer) { clearTimeout(this.agentsTimer); this.agentsTimer = undefined; }
-    this.post({ type: 'agents', count: this.agents.size, agents: [...this.agents.values()].map((agent) => ({ id: agent.id, label: agent.label, description: agent.description, model: agent.model, paused: agent.paused, background: agent.background, activity: agent.activity, activitySince: agent.activitySince, lastAction: agent.lastAction, startedAt: agent.startedAt, toolCalls: agent.toolCalls, turns: agent.turns, ...(agent.todos?.length ? { steps: agentSteps(agent.todos) } : {}) })) });
+    this.post({ type: 'agents', count: this.agents.size, agents: [...this.agents.values()].map((agent) => ({ id: agent.id, label: agent.label, description: agent.description, model: agent.model, paused: agent.paused, background: agent.background, activity: agent.activity, state: agentDotState(agent, this.activity?.agentStat(agent.id)), activitySince: agent.activitySince, lastAction: agent.lastAction, startedAt: agent.startedAt, toolCalls: agent.toolCalls, turns: agent.turns, ...(agent.todos?.length ? { steps: agentSteps(agent.todos) } : {}) })) });
   }
 
   /** Refreshes the agents strip at most once a second. */
@@ -1849,6 +1851,18 @@ export const MAX_PREVIEW_BYTES = 8 * 1024 * 1024;
  * PR 34: a listener added per wait and never removed piled up on a long run's signal). With `timeoutMs` above 0 it also ends after that long. It
  * resolves with what ended it.
  */
+/**
+ * 0.4.28 (review of PR 72): the state the chat's team dots show, as a machine word from the activity feed's phase, never read back from the activity
+ * wording. Without a feed it falls back to what the session knows itself.
+ */
+export function agentDotState(agent: { paused: boolean }, stat?: { phase: AgentPhase }): 'paused' | 'needs-you' | 'queued' | 'waiting' | 'working' {
+  if (agent.paused || stat?.phase === 'paused') return 'paused';
+  if (stat?.phase === 'waiting-you') return 'needs-you';
+  if (stat?.phase === 'queued') return 'queued';
+  if (stat?.phase === 'waiting-agents') return 'waiting';
+  return 'working';
+}
+
 export function waitOrAbort(signal: AbortSignal, register: (wake: () => void) => void, timeoutMs = 0): Promise<'woken' | 'aborted' | 'timed-out'> {
   if (signal.aborted) return Promise.resolve('aborted');
   return new Promise((resolve) => {

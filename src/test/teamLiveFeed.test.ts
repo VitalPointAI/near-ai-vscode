@@ -78,6 +78,11 @@ test('the waiting kind follows an approval, a question and an image review, and 
   assert.deepEqual(kind(), ['tool', undefined]);
   feed.waitingForUser('main-run-1', true);
   assert.deepEqual(kind(), ['waiting-you', 'image'], 'an image review stays the default, as in 0.4.23');
+  // Review of PR 72: a new wait while already waiting for the person names the newest wait, whichever way round.
+  feed.approvalAsked('main-run-1');
+  assert.deepEqual(kind(), ['waiting-you', 'approval']);
+  feed.waitingForUser('main-run-1', true, 'question');
+  assert.deepEqual(kind(), ['waiting-you', 'question']);
   feed.agentEnded('main-run-1', 'cancelled');
   assert.deepEqual(kind(), ['thinking', undefined], 'ending while waiting clears it');
   // The 0.4.19 rule still holds: an expiry then an answer counts the prompt once.
@@ -313,4 +318,38 @@ test('the lead waiting for background agents leaves no abort listener behind on 
   }
   assert.ok(added >= 1, 'the lead waited for its background agent');
   assert.equal(left.size, 0, 'every abort listener the wait added was removed');
+});
+
+test('a sub-agent stopped just as its helper\'s report is taken passes that report on to the lead, never drops it (review of PR 72)', { timeout: 20_000 }, async () => {
+  const { feed, conversation, request } = await nestedProject();
+  const counters = { parent: 0, lead: 0, planner: 0 };
+  let parentHeard = false;
+  const client = {
+    async *streamCompletion(_model: string, messages: AgentMessage[]): AsyncGenerator<CompletionEvent> {
+      const role = who(messages);
+      const turn = counters[role]++;
+      if (role === 'parent') {
+        if (messages.some((message) => String(message.content ?? '').includes('planner report'))) parentHeard = true;
+        yield turn === 0 ? reply(null, [call('p1', 'Agent', { subagent_type: 'gsd-lead', description: 'Lead the work', prompt: 'lead it' })]) : reply('all done');
+      } else if (role === 'lead') yield turn === 0 ? reply(null, [call('l1', 'Agent', { subagent_type: 'gsd-planner', description: 'Plan it', prompt: 'plan it', run_in_background: true })]) : reply('lead waits for its planner');
+      else { await new Promise((resolve) => setTimeout(resolve, 30)); yield reply('planner report'); }
+    },
+    async actualCostsUsd() { return undefined; }
+  };
+  // The lead is stopped at the exact moment it takes its helper's report: the report is in hand and the signal has aborted.
+  const session = conversation as unknown as { takeReports: (agentId: string) => AgentMessage[] };
+  const take = session.takeReports.bind(conversation);
+  let stopped = false;
+  session.takeReports = (agentId: string) => {
+    const lead = feed.agentStats().find((stat) => stat.agent === 'gsd-lead');
+    if (lead && agentId === lead.agentId && lead.phase === 'waiting-agents' && !stopped) stopped = conversation.controlAgent(agentId, 'stop');
+    return take(agentId);
+  };
+  try {
+    await conversation.send(request(client));
+  } finally {
+    conversation.dispose();
+  }
+  assert.equal(stopped, true, 'the lead was stopped while it waited for its helper');
+  assert.equal(parentHeard, true, 'the planner\'s report reached the run\'s lead');
 });
