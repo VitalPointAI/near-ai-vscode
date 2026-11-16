@@ -595,6 +595,33 @@ for (const address of ['ext::echo near-ai-refused-marker', 'fd::3', 'ftp://examp
   });
 }
 
+// 0.4.25: the address is checked as git resolves it. A `url.<base>.insteadOf` (or pushInsteadOf) rule in the project's config can turn an allowed
+// address into a remote helper; `git remote get-url` applies those rules, so the check sees ext:: and refuses it before any network call.
+for (const rule of ['insteadOf', 'pushInsteadOf']) {
+  test(`a remote that the ${rule} rule maps to ext:: is refused before any network call`, async () => {
+    await withFixture(['a'], async (fixture) => {
+      const teamId = newTeamId();
+      const owner = await createOwner(teamId);
+      const genesis = testGenesis({ teamId, owner, name: 'Transport rewrite team' });
+      const calls: RecordedCall[] = [];
+      const root = fixture.clones['a'] as string;
+      const transport = new GitTransport<TeamState>({
+        mirrorDir: path.join(fixture.storageDir('a'), 'coordination.git'), projectRoot: root, remote: 'origin',
+        ref: DEFAULT_COORDINATION_REF, materializer: teamMaterializer(genesis.anchor), git: recordingRunner(calls), baseDelayMs: 1
+      });
+      gitIn(root, ['config', 'remote.origin.url', 'https://example.invalid/team.git']);
+      gitIn(root, ['config', `url.ext::echo near-ai-rewrite-marker .${rule}`, 'https://example.invalid/']);
+      const appended = await transport.append(async () => genesis.events, { genesis: { teamFileText: genesis.teamFileText } });
+      assert.equal(appended.ok === false && appended.kind, 'refused');
+      await transport.fetch();
+      assert.equal(transport.status().state, 'offline');
+      const network = calls.filter((call) => call.args.includes('--git-dir') && ['fetch', 'push', 'ls-remote'].some((verb) => call.args.includes(verb)));
+      assert.deepEqual(network, [], 'no fetch, push or ls-remote ran');
+      assert.equal(JSON.stringify(calls.filter((call) => call.args.includes('--git-dir'))).includes('near-ai-rewrite-marker'), false, 'the rewritten address never reached the mirror');
+    });
+  });
+}
+
 const REWRITTEN_TEXT = "The team's coordination log was rewritten on the remote; Team Mode is paused";
 
 function mirrorOf(fixture: TeamFixture, name: string): string {

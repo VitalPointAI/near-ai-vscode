@@ -902,6 +902,34 @@ test('an inherited GIT_SSH_COMMAND is left to the environment: no call sets its 
   });
 });
 
+// ---- The remote address is checked as git resolves it (0.4.25) ----
+
+// A `url.<base>.insteadOf` rule in the project's config can turn an allowed address into a remote helper (ext:: runs a command). Enable and the Push
+// button resolve the address with `git remote get-url`, which applies those rules, and refuse it before any ls-remote or push.
+for (const rule of ['insteadOf', 'pushInsteadOf']) {
+  test(`Enable and Push refuse a remote that the ${rule} rule maps to ext::, before any network call`, async () => {
+    await withFixture(['a'], async (fixture) => {
+      const root = fixture.clones.a as string;
+      gitIn(root, ['remote', 'set-url', 'origin', 'https://example.invalid/team.git']);
+      gitIn(root, ['config', `url.ext::echo near-ai-rewrite-marker .${rule}`, 'https://example.invalid/']);
+      const secrets = new MemorySecrets();
+      const calls: RecordedCall[] = [];
+      const checked = await checkEnablePreconditions(root, 'origin', recordingRunner(calls));
+      assert.equal(checked.ok ? undefined : checked.code, 'remote-refused');
+      assert.match(checked.ok ? '' : checked.message, /is not one Team Mode will contact/);
+      assert.doesNotMatch(checked.ok ? '' : checked.message, /near-ai-rewrite-marker/, 'the refusal does not repeat the address');
+      const result = await enableTeamMode({ ...inputFor(fixture, 'a', secrets), git: recordingRunner(calls) });
+      assert.equal(result.ok ? undefined : result.code, 'remote-refused');
+      const pushed = await pushCodeBranch(root, 'origin', 'main', recordingRunner(calls));
+      assert.equal(pushed.ok, false);
+      assert.match(pushed.ok ? '' : pushed.message, /is not one Team Mode will contact/);
+      assert.deepEqual(networkCalls(calls).map((call) => call.args.join(' ')), [], 'no ls-remote or push ran');
+      assert.equal(secrets.values.size, 0, 'no key was made');
+      assert.equal(existsSync(path.join(root, TEAM_FILE_REL)), false);
+    });
+  });
+}
+
 // ---- Preconditions are checked once when the caller passes its result ----
 
 test('Enable reuses a passed precondition result for the same project and remote, and checks again for any other', async () => {

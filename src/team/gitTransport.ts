@@ -202,8 +202,8 @@ function isPin(value: unknown): value is Pin {
 // refused, most of all git's remote helpers: <transport>::<address> (ext:: runs a command, fd:: reads a descriptor) and any other scheme.
 // The helper test is wider than git's own on purpose: any leading run of letters, digits, plus, dot and dash directly followed by two colons, on the
 // value with surrounding whitespace removed, so a spelling git reads as a helper (a leading digit) and one it might (a leading dot) are both refused.
-// Limit: this checks the address as the project's git config states it. A `url.<base>.insteadOf` rewrite in that same config is the project owner's own setting
-// and is not followed here.
+// The address checked is the one `git remote get-url --push` reports (remoteUrl below), which has the project's `url.<base>.insteadOf` and
+// pushInsteadOf rules applied, so a rewrite to a helper is refused like the helper itself (0.4.25). Only that checked address reaches the mirror.
 const HELPER_ADDRESS = /^[A-Za-z0-9+.-]*::/;
 const SCHEME_ADDRESS = /^([A-Za-z][A-Za-z0-9+.-]*):\/\//;
 const CONTACTED_SCHEMES: ReadonlySet<string> = new Set(['ssh', 'git', 'http', 'https', 'file']);
@@ -419,7 +419,8 @@ export class GitTransport<S> implements CoordinationTransport<S> {
     return Math.max(1, this.baseDelayMs / 8) * (0.5 + this.random());
   }
 
-  // Read on every call and never stored or returned: the URL can embed credentials (D-34).
+  // Read on every call and never stored or returned: the URL can embed credentials (D-34). get-url applies the project's insteadOf and
+  // pushInsteadOf rules, so the address checked here is the address used.
   private async remoteUrl(): Promise<string> {
     const result = await this.git(['-C', this.projectRoot, 'remote', 'get-url', '--push', this.remote], { timeoutMs: LOCAL_TIMEOUT_MS });
     const url = gitText(result);

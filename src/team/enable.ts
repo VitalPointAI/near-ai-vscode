@@ -11,7 +11,7 @@ import { validateName } from '../domain/team/validate';
 import type { SecretStorageLike } from '../services/auth';
 import { teamMaterializer } from '../domain/team/materialize';
 import { buildGenesisEvents } from './eventLog';
-import { DEFAULT_COORDINATION_REF, GitTransport } from './gitTransport';
+import { DEFAULT_COORDINATION_REF, GitTransport, isContactableRemoteAddress } from './gitTransport';
 import { forgetCreatedDeviceIdentity, identityDir, loadOrCreateDeviceIdentity, newMemberId, newTeamId } from './identity';
 import { GitNotFoundError, gitText, redactGitMessage, runGit } from './runGit';
 import type { GitResult, GitRunner } from './runGit';
@@ -20,7 +20,7 @@ import { REMOTE_NAME_PATTERN, TEAM_FILE_REL, TeamFileError, canonicalTeamFile, p
 export const ENABLE_COMMIT_MESSAGE = 'chore(team): enable NEAR AI Team Mode';
 
 export type EnableFailureCode =
-  | 'git-missing' | 'not-initialised' | 'not-a-repo' | 'no-commit' | 'no-remote' | 'remote-unreachable' | 'exists-locally' | 'exists-remotely'
+  | 'git-missing' | 'not-initialised' | 'not-a-repo' | 'no-commit' | 'no-remote' | 'remote-unreachable' | 'remote-refused' | 'exists-locally' | 'exists-remotely'
   | 'invalid-input' | 'preview-off' | 'secret' | 'push-failed' | 'push-unconfirmed' | 'commit-failed';
 
 // The same words the command shows when the setting is off, kept here so the core refuses in its own voice.
@@ -110,13 +110,34 @@ export async function checkEnablePreconditions(projectRoot: string, remote: stri
   }
   const head = await run(['rev-parse', '--verify', '-q', 'HEAD']);
   if (head.code !== 0) return fail('no-commit', 'This repository has no commits yet. Make a first commit, then enable Team Mode.');
-  // The URL is only checked for existence: it can carry credentials, so the value is discarded here.
+  // The URL can carry credentials, so the value is discarded here; refusedRemoteAddress checks the resolved addresses without repeating them.
   const url = await run(['remote', 'get-url', remote]);
   if (url.code === 2) return fail('no-remote', `This repository has no remote named "${remote}". Add one with git remote add ${remote} <url>, then enable Team Mode.`);
   if (url.code !== 0) return fail('remote-unreachable', `Git could not read the remote "${remote}": ${gitFailureText(url)}`);
+  const refused = await refusedRemoteAddress(projectRoot, remote, git);
+  if (refused !== undefined) return fail('remote-refused', refused);
   const branch = await run(['symbolic-ref', '--short', '-q', 'HEAD']);
   const name = branch.code === 0 ? gitText(branch) : '';
   return name === '' ? { ok: true, projectRoot, remote } : { ok: true, projectRoot, remote, branch: name };
+}
+
+const REFUSED_ADDRESS_HINT = 'Team Mode uses ssh, git, https, http or file addresses, or a local path.';
+
+// 0.4.25: the address is checked as git will use it, not as the remote's url setting states it. A `url.<base>.insteadOf` or pushInsteadOf rule
+// in the project's own config can turn an allowed address into a remote helper (ext:: runs a command), and the ls-remote and push below run in
+// the project, where git applies those rules. `git remote get-url` applies them too, so every fetch and push address it reports is checked
+// (D-34, the same check GitTransport makes) before any network call. The addresses can carry credentials, so they are never repeated.
+async function refusedRemoteAddress(projectRoot: string, remote: string, git: GitRunner): Promise<string | undefined> {
+  const addresses: string[] = [];
+  for (const args of [['remote', 'get-url', '--all', remote], ['remote', 'get-url', '--push', '--all', remote]]) {
+    const result = await git(args, { cwd: projectRoot, timeoutMs: LOCAL_TIMEOUT_MS });
+    if (result.code !== 0) return `Git could not read the address of the remote "${remote}": ${gitFailureText(result)}`;
+    addresses.push(...result.stdout.toString('utf8').split('\n').map((line) => line.replace(/\r$/, '')).filter((line) => line.trim() !== ''));
+  }
+  if (addresses.length === 0 || addresses.some((address) => !isContactableRemoteAddress(address))) {
+    return `The address of the git remote named "${remote}" is not one Team Mode will contact. ${REFUSED_ADDRESS_HINT}`;
+  }
+  return undefined;
 }
 
 async function gitConfigValue(projectRoot: string, key: string, git: GitRunner): Promise<string> {
@@ -345,6 +366,8 @@ export async function pushCodeBranch(projectRoot: string, remote: string, branch
   if (!REMOTE_NAME_PATTERN.test(remote)) return { ok: false, message: 'The remote name is not valid.' };
   // A branch name that starts with a dash would be read as an option, and a colon would make it a refspec: the shared ref-name rule refuses both.
   if (!isGitRefName(branch) || CONTROL_CHARACTERS.test(branch)) return { ok: false, message: 'The branch name is not valid.' };
+  const refused = await refusedRemoteAddress(projectRoot, remote, git);
+  if (refused !== undefined) return { ok: false, message: refused };
   const result = await git(['push', remote, branch], { cwd: projectRoot, env: await networkEnv(projectRoot, git), timeoutMs: NETWORK_TIMEOUT_MS });
   return result.code === 0 ? { ok: true } : { ok: false, message: `Pushing ${branch} to ${remote} failed: ${gitFailureText(result)}` };
 }
