@@ -208,3 +208,46 @@ test('the picker lists the person\'s saved teams and the built-in ones, with whe
   assert.deepEqual(filterPicker(teamPicker(POINTS, [TEAMS[0]!]), 'mine').map((entry) => entry.id), ['empty']);
   assert.match(NO_SAVED_TEAMS_TEXT, /^You have no saved teams yet\. Save a team as one of your teams in Team Studio/);
 });
+
+// 0.4.26 follow-up: anything made from an unapproved import stays unapproved, and approving the original does not approve it.
+test('a duplicate of an unapproved import is unapproved in its own right: approving the original leaves it asking, and its question says where it came from', async () => {
+  const library = new TeamLibrary(await mkdtemp(path.join(tmpdir(), 'near-ai-derived-')));
+  const original = await library.importTeam('Web crew', TEAM);
+  const copy = await library.duplicate(original, 'Web crew copy');
+  assert.deepEqual(await library.pendingKind(copy), { kind: 'derived', from: 'Web crew' });
+  assert.deepEqual(await library.pendingKind(original), { kind: 'imported' });
+  // Archived and restored, the reason travels with it.
+  const restored = await library.restore(await library.archive(copy));
+  assert.deepEqual(await library.pendingKind(restored), { kind: 'derived', from: 'Web crew' });
+  await library.approveImport(original);
+  assert.equal(await library.isPendingImport(original), false);
+  assert.equal(await library.isPendingImport(restored), true, 'approving the original does not approve its copy');
+  const asked: string[] = [];
+  const copyTeam = parseTeam(await readFile(restored, 'utf8'), restored);
+  assert.equal(await libraryTeamAllowed(copyTeam, library, async (question) => { asked.push(question); return true; }), true);
+  assert.match(asked[0] ?? '', /^The team "Web crew copy" was made from the imported team "Web crew", which you have not approved, and has not been approved yet: lead \(planner\), dev \(implementer\)\. Use it\?/);
+  assert.equal(await library.isPendingImport(restored), false, 'each asks once');
+});
+
+test('a member copied unchanged from an unapproved team (imported or derived, in the library or archived) is found; approved and own teams are not', async () => {
+  const library = new TeamLibrary(await mkdtemp(path.join(tmpdir(), 'near-ai-derived-')));
+  const own = renderTeam('Own', 'x', [{ name: 'mine', instructions: 'Write   my\nown thing.' }]);
+  await library.create('Own', own);
+  assert.equal(await library.unapprovedSource([{ instructions: 'Write my own thing.' }]), undefined, 'a team the person made is not a source');
+  const original = await library.importTeam('Web crew', TEAM);
+  assert.equal(await library.unapprovedSource([{ instructions: 'Something new.' }, { instructions: '  Build it and   run the tests.\n' }]), 'Web crew', 'spacing does not hide a copy');
+  assert.equal(await library.unapprovedSource([{ instructions: 'Build it and run the tests, then deploy.' }]), undefined, 'a changed member is the person\'s own');
+  // Derived teams are sources too, and archiving does not hide one.
+  const copy = await library.duplicate(original, 'Copy');
+  await library.approveImport(original);
+  assert.equal(await library.unapprovedSource([{ instructions: 'Plan the work.' }]), 'Copy');
+  await library.archive(copy);
+  assert.equal(await library.unapprovedSource([{ instructions: 'Plan the work.' }]), 'Copy');
+  // A project team made from one keeps that fact on this computer, and a later rebuild from something else clears it.
+  const project = TeamLibrary.projectTeamFile('/some/project');
+  await library.setProjectDerived(project, 'Web crew');
+  assert.equal(await library.projectDerivedFrom(project), 'Web crew');
+  assert.deepEqual([...await library.pendingImports()].sort(), ['copy.md'], 'project notes are not library teams');
+  await library.setProjectDerived(project, undefined);
+  assert.equal(await library.projectDerivedFrom(project), undefined);
+});

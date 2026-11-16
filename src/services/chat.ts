@@ -248,6 +248,8 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
   /** Whether this project's team may be used: asked once per team file, never in a window VS Code does not trust (see projectTeamAllowed). */
   const allowProjectTeam = (team: TeamDefinition): Promise<boolean> => projectTeamAllowed(team, {
     trusted: (vscode.workspace as { isTrusted?: boolean }).isTrusted,
+    // 0.4.26: a project team made from an unapproved import says so in the question.
+    derivedFrom: () => new TeamLibrary(teamLibraryDir(homeFolder())).projectDerivedFrom(team.file),
     store: context.workspaceState as MementoLike | undefined,
     fallback: projectTeamConsent,
     ask: async (question) => {

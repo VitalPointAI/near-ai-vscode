@@ -197,26 +197,30 @@ export interface TeamConsent { fingerprint: string; use: boolean }
 interface ConsentStore { get<T>(key: string): T | undefined; update(key: string, value: unknown): PromiseLike<void> | Promise<void> }
 
 /** The question asking to use a project's team. Its member names and roles come from a repository file, so they are made plain and capped in length and number. */
-export function projectTeamQuestion(team: TeamDefinition): string {
+export function projectTeamQuestion(team: TeamDefinition, derivedFrom?: string): string {
   const shown = team.members.slice(0, 6).map((member) => `${noTags(member.name).slice(0, 40)}${member.role ? ` (${noTags(member.role).slice(0, 40)})` : ''}`);
   const more = team.members.length > shown.length ? ` and ${team.members.length - shown.length} more` : '';
-  return `This project has a team in .planning/.near-ai/team.md: ${shown.join(', ')}${more}. Use it for runs in this project? Its members do the specialist work, with the tools and models that file gives them.`;
+  // 0.4.26: a project team made from an imported team the person never approved says so, so the answer is an informed one.
+  const origin = derivedFrom === undefined ? '' : ` It was made from the imported team "${noTags(derivedFrom).slice(0, 80)}", which you have not approved.`;
+  return `This project has a team in .planning/.near-ai/team.md: ${shown.join(', ')}${more}.${origin} Use it for runs in this project? Its members do the specialist work, with the tools and models that file gives them.`;
 }
 
 /** The question asked before an imported team first runs. Its names and roles come from a file someone sent, so they are made plain and capped. */
-export function importedTeamQuestion(team: TeamDefinition): string {
+export function importedTeamQuestion(team: TeamDefinition, pending: { kind: 'imported' | 'derived'; from?: string } = { kind: 'imported' }): string {
   const shown = team.members.slice(0, 6).map((member) => `${noTags(member.name).slice(0, 40)}${member.role ? ` (${noTags(member.role).slice(0, 40)})` : ''}`);
   const more = team.members.length > shown.length ? ` and ${team.members.length - shown.length} more` : '';
-  return `The team "${noTags(team.name).slice(0, 80)}" was imported from a file and has not been approved yet: ${shown.join(', ')}${more}. Use it? Its members do the work with the tools and models that file gives them. Approving it makes it one of your teams.`;
+  const how = pending.kind === 'derived' ? `was made from the imported team${pending.from ? ` "${noTags(pending.from).slice(0, 80)}"` : ''}, which you have not approved,` : 'was imported from a file';
+  return `The team "${noTags(team.name).slice(0, 80)}" ${how} and has not been approved yet: ${shown.join(', ')}${more}. Use it? Its members do the work with the tools and models that file gives them. Approving it makes it one of your teams.`;
 }
 
 /**
  * Whether a library team may run (0.4.26): any team the person made or approved may; one added with Import team is asked about first, and approving it
  * once makes it one of their teams. `ask` resolves true to use it, false not to, undefined when the question was closed (not this time; asked again).
  */
-export async function libraryTeamAllowed(team: TeamDefinition, library: Pick<TeamLibrary, 'isPendingImport' | 'approveImport'>, ask: (question: string) => Promise<boolean | undefined>): Promise<boolean> {
-  if (!await library.isPendingImport(team.file)) return true;
-  if (await ask(importedTeamQuestion(team)) !== true) return false;
+export async function libraryTeamAllowed(team: TeamDefinition, library: Pick<TeamLibrary, 'pendingKind' | 'approveImport'>, ask: (question: string) => Promise<boolean | undefined>): Promise<boolean> {
+  const pending = await library.pendingKind(team.file);
+  if (!pending) return true;
+  if (await ask(importedTeamQuestion(team, pending)) !== true) return false;
   await library.approveImport(team.file);
   return true;
 }
@@ -227,7 +231,7 @@ export async function libraryTeamAllowed(team: TeamDefinition, library: Pick<Tea
  * otherwise asked once per team file, and asked again when that file's team changes. `ask` resolves true to use it, false not to, undefined when the
  * question was closed: no team this time, and asked again next time. `fallback` keeps the answers when there is no workspace state.
  */
-export async function projectTeamAllowed(team: TeamDefinition, options: { trusted: boolean | undefined; store?: ConsentStore; fallback: Map<string, TeamConsent>; ask: (question: string) => Promise<boolean | undefined> }): Promise<boolean> {
+export async function projectTeamAllowed(team: TeamDefinition, options: { trusted: boolean | undefined; store?: ConsentStore; fallback: Map<string, TeamConsent>; ask: (question: string) => Promise<boolean | undefined>; derivedFrom?: () => Promise<string | undefined> }): Promise<boolean> {
   if (options.trusted !== true) return false;
   const fingerprint = createHash('sha256').update(JSON.stringify([team.name, team.members])).digest('hex');
   const stored = options.store?.get<unknown>(PROJECT_TEAM_CONSENT_KEY);
@@ -252,7 +256,7 @@ export async function projectTeamAllowed(team: TeamDefinition, options: { truste
     if (claimed) await options.store?.update(PROJECT_TEAM_CONSENT_KEY, byFile);
     return saved.use;
   }
-  const answer = await options.ask(projectTeamQuestion(team));
+  const answer = await options.ask(projectTeamQuestion(team, await options.derivedFrom?.().catch(() => undefined)));
   if (answer === undefined) {
     if (claimed) await options.store?.update(PROJECT_TEAM_CONSENT_KEY, byFile);
     return false;
@@ -381,26 +385,80 @@ export class TeamLibrary {
     const team = parseTeam(await readFile(file, 'utf8'), file);
     const copy = await this.create(name, renderTeam(name, team.description, team.members));
     // A copy of an imported team that was never approved is still that team: it stays unapproved, so copying it is never a way round the question.
-    if (await this.isPendingImport(file)) await this.markImported(copy);
+    if (await this.isPendingImport(file)) await this.markImported(copy, 'derived', team.name);
     return copy;
   }
 
-  /** Records that this library team came from Import team and has not been approved to run. */
-  public async markImported(file: string): Promise<void> {
+  /**
+   * Records that this library team has not been approved to run: it came from Import team (`imported`), or it was made from one that is not approved
+   * (`derived`: duplicated, built from it as a starting point, or with any member copied from it unchanged). `from` names the team it came from, for
+   * the question asked before it runs. Approving one team never approves another: each asks once.
+   */
+  public async markImported(file: string, kind: 'imported' | 'derived' = 'imported', from?: string): Promise<void> {
     await mkdir(this.importsDir, { recursive: true });
-    await writeFile(this.importMarker(file), `${new Date().toISOString()}\n`, 'utf8');
+    await writeFile(this.importMarker(file), `${kind} ${new Date().toISOString()}${from ? ` ${noTags(from).slice(0, 80)}` : ''}\n`, 'utf8');
   }
 
-  /** Whether this file is a library team added with Import team that the person has not yet approved. A project's own team never is. */
+  /** Whether this file is a library team added with Import team (or made from one) that the person has not yet approved. A project's own team never is. */
   public async isPendingImport(file: string): Promise<boolean> {
     const dir = path.dirname(path.resolve(file));
     if (dir !== path.resolve(this.directory) && dir !== path.resolve(this.archiveDir)) return false;
     return exists(this.importMarker(file));
   }
 
+  /** Why a library team is unapproved: imported itself, or derived from an unapproved import (with that team's name). Undefined when it is approved. */
+  public async pendingKind(file: string): Promise<{ kind: 'imported' | 'derived'; from?: string } | undefined> {
+    if (!await this.isPendingImport(file)) return undefined;
+    const text = (await readFile(this.importMarker(file), 'utf8').catch(() => '')).trim();
+    const match = /^derived \S+(?: (.+))?$/.exec(text);
+    return match ? { kind: 'derived', ...(match[1] ? { from: match[1] } : {}) } : { kind: 'imported' };
+  }
+
   /** The library team files (by name) still waiting for approval. */
   public async pendingImports(): Promise<Set<string>> {
-    return new Set(await readdir(this.importsDir).catch(() => []));
+    return new Set((await readdir(this.importsDir).catch(() => [])).filter((name) => name.endsWith('.md')));
+  }
+
+  /**
+   * The name of an unapproved team (imported, or derived from one; in the library or archived) that any of these members was copied from unchanged, or
+   * undefined. A member counts as copied when its instructions are the same apart from spacing, so a team built from an unapproved import (as a builder
+   * starting point, by copying a member, or from a resumed draft) is caught however it was made, and approving the original later changes nothing for it.
+   */
+  public async unapprovedSource(members: ReadonlyArray<{ instructions: string }>): Promise<string | undefined> {
+    const norm = (text: string) => text.replace(/\s+/g, ' ').trim();
+    const wanted = new Set(members.map((member) => norm(member.instructions)).filter(Boolean));
+    if (!wanted.size) return undefined;
+    for (const name of [...await this.pendingImports()].sort()) {
+      for (const dir of [this.directory, this.archiveDir]) {
+        const file = path.join(dir, name);
+        const text = await readFile(file, 'utf8').catch(() => undefined);
+        if (text === undefined) continue;
+        try {
+          const team = parseTeam(text, file);
+          if (team.members.some((member) => wanted.has(norm(member.instructions)))) return team.name;
+        } catch { /* a team file that does not parse has no members to copy */ }
+      }
+    }
+    return undefined;
+  }
+
+  /**
+   * A project team made from an unapproved import keeps that fact beside the library (a project's team.md comes with the repository, so the note is
+   * kept on this computer, never in the file). The project's own consent is asked as always; its question says where the members came from.
+   */
+  private projectMarker(projectTeamFile: string): string { return path.join(this.importsDir, `${teamKnowledgeKey(projectTeamFile)}.project`); }
+
+  public async setProjectDerived(projectTeamFile: string, from: string | undefined): Promise<void> {
+    if (from === undefined) { await rm(this.projectMarker(projectTeamFile), { force: true }); return; }
+    await mkdir(this.importsDir, { recursive: true });
+    await writeFile(this.projectMarker(projectTeamFile), `derived ${new Date().toISOString()} ${noTags(from).slice(0, 80)}\n`, 'utf8');
+  }
+
+  /** The unapproved import this project's team was made from, or undefined. */
+  public async projectDerivedFrom(projectTeamFile: string): Promise<string | undefined> {
+    const text = (await readFile(this.projectMarker(projectTeamFile), 'utf8').catch(() => '')).trim();
+    const match = /^derived \S+ (.+)$/.exec(text);
+    return match?.[1];
   }
 
   /** The person approved this imported team: it is one of their teams like any other from now on. */
@@ -446,8 +504,9 @@ export class TeamLibrary {
   /** An unapproved import stays unapproved when its file is archived or restored under another name. */
   private async moveImportMarker(from: string, to: string): Promise<void> {
     if (!await exists(this.importMarker(from))) return;
-    await this.markImported(to);
-    if (path.basename(from) !== path.basename(to)) await rm(this.importMarker(from), { force: true });
+    if (path.basename(from) === path.basename(to)) return;
+    await copyFile(this.importMarker(from), this.importMarker(to));
+    await rm(this.importMarker(from), { force: true });
   }
 
   public async archived(): Promise<string[]> {

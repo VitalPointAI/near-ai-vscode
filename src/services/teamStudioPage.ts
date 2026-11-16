@@ -58,7 +58,7 @@ export interface StudioContext {
 export interface StudioMemberModel { tier: string; model: string; privacy: DirectoryModel['privacy']; privacyText: string; available?: boolean }
 /** `update`: the built-in template the team was made from and whether a newer version exists, so the card can offer Update Team. */
 /** `imported`: added with Import team and not yet approved to run; the person is asked the first time it would run. */
-export interface LibraryTeam { id: string; kind: 'project' | 'user'; name: string; description: string; command?: string; file: string; savedAt?: string; error?: string; imported?: boolean; update?: { template: string; from?: number; to: number; available: boolean }; members: Array<{ name: string; role?: string } & StudioMemberModel> }
+export interface LibraryTeam { id: string; kind: 'project' | 'user'; name: string; description: string; command?: string; file: string; savedAt?: string; error?: string; imported?: boolean; derived?: boolean; update?: { template: string; from?: number; to: number; available: boolean }; members: Array<{ name: string; role?: string } & StudioMemberModel> }
 export interface LibraryArchived { id: string; name: string; file: string; savedAt?: string }
 export interface LibraryState { teams: LibraryTeam[]; archived: LibraryArchived[] }
 
@@ -75,7 +75,7 @@ export function teamPicker(startingPoints: StudioStartingPoint[], teams: Library
   const mine = teams.filter((team) => team.kind === 'user' && !team.error).map((team): PickerEntry => ({
     id: `lib:${team.id.slice('user:'.length)}`, source: 'mine', group: 'library', label: team.name, description: team.description,
     members: team.members.map((member) => member.name), memberCount: team.members.length,
-    origin: team.imported ? 'Imported, not approved yet' : `My team${team.savedAt ? `, saved ${team.savedAt.slice(0, 10)}` : ''}`,
+    origin: team.imported ? (team.derived ? 'Made from an import, not approved yet' : 'Imported, not approved yet') : `My team${team.savedAt ? `, saved ${team.savedAt.slice(0, 10)}` : ''}`,
     ...(team.imported ? { imported: true } : {}), teamId: team.id
   }));
   const builtin = startingPoints.map((point): PickerEntry => ({
@@ -250,7 +250,7 @@ export async function listLibrary(library: TeamLibrary, root: string | undefined
       name: team?.name ?? slug, description: team?.description ?? '',
       ...(team ? { command: `/team:${entry.project ? 'project' : team.slug} ` } : {}),
       ...(entry.error ? { error: entry.error } : {}),
-      ...(!entry.project && pending.has(path.basename(entry.file)) ? { imported: true } : {}),
+      ...(!entry.project && pending.has(path.basename(entry.file)) ? { imported: true, ...((await library.pendingKind(entry.file))?.kind === 'derived' ? { derived: true } : {}) } : {}),
       ...(template ? { update: { template: template.label, ...(template.fromVersion ? { from: template.fromVersion } : {}), to: template.toVersion, available: !template.stamped || template.fromVersion !== template.toVersion } } : {}),
       ...(await mtime(entry.file) ? { savedAt: await mtime(entry.file) } : {}),
       members: (team?.members ?? []).map((member) => ({ name: member.name, ...(member.role ? { role: member.role } : {}), ...memberModel(member, input) }))
@@ -752,6 +752,9 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
         // A team made from a project type records the template and each member's generated definition, so Update Team can bring it up to date later.
         const fromType = message.projectType ? PROJECT_TYPES.find((candidate) => candidate.id === message.projectType!.id) : undefined;
         const markdown = fromType ? stampTeam(review.markdown, fromType) : review.markdown;
+        // 0.4.26: a team with any member copied unchanged from an unapproved import (a saved team used as the starting point, a resumed draft, a member
+        // pasted in) stays unapproved however it was made. Checked on the content, so no path round it depends on how the draft was built.
+        const unapprovedFrom = await deps.library.unapprovedSource(message.draft.members).catch(() => undefined);
         if (message.target === 'project') {
           if (!deps.root) { post({ type: 'error', text: 'Open a project folder to save a project team, or save it to My teams.' }); return; }
           file = TeamLibrary.projectTeamFile(deps.root);
@@ -763,15 +766,19 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
           await writeFile(file, markdown, 'utf8');
           await deps.library.snapshot(file);
           id = 'project';
+          // The project's own consent is asked before it first runs, as for any project team; its question says the members came from that import.
+          await deps.library.setProjectDerived(file, unapprovedFrom);
           if (fromType) await deps.applyProjectType(deps.root, fromType, message.projectType!.goal.trim().slice(0, 400) || message.draft.description.trim());
         } else {
           file = await deps.library.create(message.draft.name.trim(), markdown);
+          if (unapprovedFrom !== undefined) await deps.library.markImported(file, 'derived', unapprovedFrom);
           id = `user:${slugify(path.basename(file, '.md'))}`;
           created = true;
         }
         await deps.drafts.set(undefined);
         await refreshLibrary();
-        await sendTeam(id, file, message.target === 'project' ? `Saved the project team. Run it with /team:project <task>.${message.projectType ? ' AGENTS.md now has this project type\'s guidance.' : ''}` : `Saved "${message.draft.name.trim()}". Run it with /team:${path.basename(file, '.md')} <task>.`);
+        const unapprovedNote = unapprovedFrom === undefined ? '' : ` It has members from the imported team "${unapprovedFrom}", which you have not approved, so you are asked before it first runs.`;
+        await sendTeam(id, file, `${message.target === 'project' ? `Saved the project team. Run it with /team:project <task>.${message.projectType ? ' AGENTS.md now has this project type\'s guidance.' : ''}` : `Saved "${message.draft.name.trim()}". Run it with /team:${path.basename(file, '.md')} <task>.`}${unapprovedNote}`);
         // A team that was just saved is checked against the model results, so a new member does not silently keep a default model the tests disagree with.
         const saved = draftFromMarkdown(await readFile(file, 'utf8'), file);
         await suggestModelsFor(saved, id);

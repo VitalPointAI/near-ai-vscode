@@ -358,7 +358,9 @@
     const title = el('h3', 'card-title', team.name); title.id = nextId('team');
     head.append(icon('team'), title, badge(team.kind === 'project' ? 'This project' : 'My team', team.kind === 'project' ? 'kind project' : 'kind'));
     // An imported team runs only once the person approves it; the first run asks.
-    if (team.imported) head.append(badge('Imported: not approved yet', 'kind imported', 'Added with Import team. The first time it runs you are asked to approve it.'));
+    if (team.imported) head.append(team.derived
+      ? badge('Made from an import: not approved yet', 'kind imported', 'Made from an imported team you have not approved. The first time it runs you are asked to approve it.')
+      : badge('Imported: not approved yet', 'kind imported', 'Added with Import team. The first time it runs you are asked to approve it.'));
     card.setAttribute('aria-labelledby', title.id);
     card.append(head);
     if (team.error) {

@@ -1384,3 +1384,42 @@ test('page: the new-team picker filters All / My teams / Built-in, shows where e
   assert.deepEqual(shown(), ['empty']);
   for (const message of page.posts) assert.ok(parseStudioMessage(message), JSON.stringify(message));
 });
+
+test('host: a team built from an unapproved import stays unapproved: saved as a library team it asks before it runs, and as the project team its consent says where it came from', async () => {
+  const { projectTeamAllowed, libraryTeamAllowed } = await import('../agent/teams');
+  const h = await harness();
+  const imported = await h.library.importTeam('Shared crew', teamMarkdown(draft({ name: 'Shared crew' })));
+  await h.send({ type: 'ready' });
+  assert.equal(last(h, 'state').picker.find((entry: any) => entry.id === 'lib:shared-crew').origin, 'Imported, not approved yet');
+  // As a builder starting point, saved as one of the person's teams.
+  await h.send({ type: 'starting-point', id: 'lib:shared-crew', goal: '', locality: 'cloud' });
+  const members = last(h, 'starting-point').draft.members;
+  await h.send({ type: 'create', draft: { name: 'My crew', description: 'Mine now', members }, target: 'user' });
+  const mine = path.join(h.library.directory, 'my-crew.md');
+  assert.deepEqual(await h.library.pendingKind(mine), { kind: 'derived', from: 'Shared crew' });
+  assert.match(last(h, 'team').notice, /It has members from the imported team "Shared crew", which you have not approved, so you are asked before it first runs\.$/);
+  const listed = last(h, 'library');
+  assert.equal(listed.library.teams.find((team: any) => team.id === 'user:my-crew').derived, true);
+  assert.equal(listed.picker.find((entry: any) => entry.id === 'lib:my-crew').origin, 'Made from an import, not approved yet');
+  // One member pasted into an otherwise new team is enough.
+  await h.send({ type: 'create', draft: { name: 'Pasted', description: '', members: [{ name: 'other', role: '', model: '', tools: null, instructions: 'Something of my own.' }, { ...members[1], name: 'helper' }] }, target: 'user' });
+  assert.equal((await h.library.pendingKind(path.join(h.library.directory, 'pasted.md')))?.kind, 'derived');
+  // Approving the original approves nothing else.
+  await h.library.approveImport(imported);
+  assert.equal(await h.library.isPendingImport(mine), true);
+  const asked: string[] = [];
+  assert.equal(await libraryTeamAllowed(parseTeam(await readFile(mine, 'utf8'), mine), h.library, async (question) => { asked.push(question); return false; }), false);
+  assert.match(asked[0] ?? '', /^The team "My crew" was made from the imported team "Shared crew", which you have not approved/);
+  // Copied into the project: the per-file consent is still asked, and says where the members came from.
+  await h.send({ type: 'create', draft: { name: 'Project team', description: '', members }, target: 'project' });
+  const projectFile = TeamLibrary.projectTeamFile(h.root);
+  assert.equal(await h.library.projectDerivedFrom(projectFile), 'My crew', 'the nearest unapproved source is named');
+  const questions: string[] = [];
+  const team = parseTeam(await readFile(projectFile, 'utf8'), projectFile);
+  assert.equal(await projectTeamAllowed(team, { trusted: true, fallback: new Map(), ask: async (question) => { questions.push(question); return true; }, derivedFrom: () => h.library.projectDerivedFrom(projectFile) }), true);
+  assert.match(questions[0] ?? '', /^This project has a team in \.planning\/\.near-ai\/team\.md: lead \(planner\), dev\. It was made from the imported team "My crew", which you have not approved\. Use it for runs in this project\?/);
+  // Rebuilt from the person's own members, the note goes.
+  await h.send({ type: 'create', draft: { name: 'Project team', description: '', members: [{ name: 'own', role: '', model: '', tools: null, instructions: 'Entirely my own work.' }] }, target: 'project' });
+  assert.equal(await h.library.projectDerivedFrom(projectFile), undefined);
+  h.close();
+});
