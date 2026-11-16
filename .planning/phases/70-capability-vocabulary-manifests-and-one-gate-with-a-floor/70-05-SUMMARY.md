@@ -112,7 +112,7 @@ None. All three mitigations of the plan's threat register hold as tested (T-70-1
 
 ## Issues Encountered
 
-- A first draft of `words.ts` came back with a literal long dash in the regex that strips it from names (the escape had been turned into the character on disk). It was replaced by the `—` escape before the Task 2 commit; the committed files contain no long dash.
+- A first draft of `words.ts` came back with a literal long dash in the regex that strips it from names (the escape had been turned into the character on disk). It was replaced by the `the four-digit escape for the long dash` escape before the Task 2 commit; the committed files contain no long dash.
 
 ## Self-Check: PASSED
 
