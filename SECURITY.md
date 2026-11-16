@@ -139,9 +139,14 @@ is what that file and the records beside it do in this version.
   to Defaults**, and the project's key folder stays off limits in every case.
   The status bar says "Policy: reading only" with one sentence naming the cause
   and the fix. Deleting the file does not reset a policy: a file that has gone
-  missing counts as a changed one. Only that command re-signs a policy that
-  failed. It asks you to confirm, keeps the old file beside the new one, and
-  records the reset.
+  missing counts as a changed one. A file signed by a key this computer does
+  not know is never adopted, even one that carries the default policy, and a
+  valid file that is not the policy NEAR AI last used is refused too. NEAR AI
+  signs a policy by itself only on a true first install, when nothing shows an
+  earlier one: no remembered policy in this computer's secret storage, no
+  policy file, no record naming an earlier policy and no key history without
+  its key. Only that command re-signs a policy that failed. It asks you to
+  confirm, keeps the old file beside the new one, and records the reset.
 - **Reading it.** **NEAR AI: Show Policy** opens the policy in plain words and
   as stored. The view is read only, and editing it changes nothing.
 - **No network.** Nothing in a decision needs the network, so the policy

@@ -2,11 +2,19 @@
 // (signPayload, purpose policy-bundle) and checked with the one verifier. Node I/O only: this module never imports vscode, and SecretStorage is reached
 // through the type-only SecretStorageLike interface. Nothing here waits on the network.
 //
-// The rule that matters most (Pitfall 7): a bundle is created by itself only on a true fresh install, meaning no bundle file AND no last-valid marker in
-// SecretStorage. Once this install has had a valid bundle (the marker exists), a missing, changed or otherwise unverifiable file is never re-signed
-// silently, because that would let anyone with disk access widen a narrowed policy by deleting the file. It fails closed with a plain sentence, and only
-// resetPolicyToDefaults (the person's own command) signs a fresh one, keeping the old file beside it under a new name. The two safe automatic cases are
-// renewing a bundle that still verifies (D-14) and re-signing a bundle that was never customised after the device key was lost (D-39).
+// The rule that matters most (Pitfall 7, and the PR #70 second review): this store never signs a policy it did not itself write. It creates a first policy
+// by itself only on a TRUE first install: no last-valid marker in SecretStorage, no policy file or kept-aside copy, no decision log that ever named a valid
+// policy, and no key history left behind by a lost key (src/gate/installEvidence.ts). Anything else that is not a valid bundle fails closed with a plain
+// sentence, whatever its content: a missing file, a changed file, and a file signed by a key this computer does not know (even one that carries the shipped
+// default policy, because its signature proves nothing about who wrote it). Only resetPolicyToDefaults (the person's own command, recorded as policy.reset)
+// signs a fresh one, keeping the old file beside it under a new name. The one automatic write besides the first is renewing a bundle (D-14), and only when
+// this install's own key signed it AND its hash is the last-valid hash held in SecretStorage. A valid file whose hash is not the last-valid one (an older
+// signed policy put back, say) is refused as `replaced`, so rolling the file back cannot widen a narrowed policy either.
+//
+// What a disk-only writer can and cannot do: the marker (time and last-valid hash), the device key and the end of the key history all live in
+// SecretStorage, which a file write cannot reach. Deleting the policy file, replacing it, or deleting every file this store keeps gives a failed-closed
+// state, never a self-signed one, unless the secret store itself was wiped AND the disk was cleaned of every trace listed above; that last case is
+// indistinguishable from a new computer and is treated as one.
 //
 // Check, sign, write and read back all happen inside bundle.lock in the gate folder, so two windows starting together end with one identity and one
 // bundle. Lock order wherever both are taken: bundle.lock first, then identity-create.lock (inside loadOrCreateDeviceIdentity), then key-history.lock.
@@ -14,7 +22,7 @@ import { mkdir, readFile, rename, stat } from 'node:fs/promises';
 import * as path from 'node:path';
 import type { SecretStorageLike } from '../services/auth';
 import { withFileLock } from '../services/stateMirrorLock';
-import { SELF_SIGNED_LIFETIME_DAYS, defaultBundlePayload, effectiveNow, failedClosed, isDefaultBundle, verifyBundleEnvelope } from '../domain/gate/bundle';
+import { SELF_SIGNED_LIFETIME_DAYS, defaultBundlePayload, effectiveNow, failedClosed, verifyBundleEnvelope } from '../domain/gate/bundle';
 import type { BundleState, PolicyBundle } from '../domain/gate/bundle';
 import { MAX_PAYLOAD_BYTES, PayloadError, signPayload } from '../domain/team/signedPayload';
 import type { SignedPayload } from '../domain/team/signedPayload';
@@ -22,8 +30,9 @@ import { identityDir, loadDeviceIdentity, loadOrCreateDeviceIdentity } from '../
 import type { DeviceIdentity } from '../team/identity';
 import { localKeyStatus } from '../team/keyHistory';
 import { writeFileAtomic } from '../team/teamFile';
-import { readLastValid, writeLastValid } from './clockMarker';
+import { announceNextHash, readLastValid, withdrawNextHash, writeLastValid } from './clockMarker';
 import type { LastValid } from './clockMarker';
+import { earlierInstallEvidence } from './installEvidence';
 
 export const GATE_DIR_NAME = 'gate';
 export const POLICY_BUNDLE_FILE = 'policy-bundle.json';
@@ -43,7 +52,7 @@ export class BundleStoreError extends Error {
 }
 
 /** What happened to the file during a call, for the caller to record. Absent when nothing was written. */
-export type BundleEvent = 'policy.created' | 'policy.renewed' | 'policy.resigned-default' | 'policy.reset';
+export type BundleEvent = 'policy.created' | 'policy.renewed' | 'policy.reset';
 
 export interface BundleResult {
   readonly state: BundleState;
@@ -108,6 +117,10 @@ async function verifyDisk(globalStorageDir: string, secrets: SecretStorageLike, 
   const status = await localKeyStatus(identityDir(globalStorageDir), secrets);
   const lastValidAt = marker.present ? marker.at : undefined;
   const state = verifyBundleEnvelope(envelope, { status, now: nowMs, ...(lastValidAt === undefined ? {} : { lastValidAt }) });
+  // A file that verifies but is not the one this install last accepted (or is writing right now) was put there from outside: refused, never adopted.
+  if (state.state === 'valid' && marker.present && marker.hash !== undefined && state.hash !== marker.hash && state.hash !== marker.pending) {
+    return { state: failedClosed('replaced'), envelope };
+  }
   return { state, envelope };
 }
 
@@ -132,12 +145,19 @@ async function install(globalStorageDir: string, secrets: SecretStorageLike, env
   const before = verifyBundleEnvelope(envelope, { status, now: nowMs, ...(lastValidAt === undefined ? {} : { lastValidAt }) });
   if (before.state !== 'valid') throw new BundleStoreError(`Nothing was written: the new policy did not verify. ${before.sentence}`);
   const file = bundleFile(globalStorageDir);
+  // The marker names the hash about to be written first, so a crash between the file and the marker leaves a file the next start still accepts.
+  try {
+    await announceNextHash(secrets, before.hash);
+  } catch (error) {
+    throw new BundleStoreError('Nothing was written: NEAR AI could not update its record of your policy in this computer\'s secret storage.', { cause: error });
+  }
   try {
     await writeFileAtomic(file, `${JSON.stringify(envelope, null, 2)}\n`);
   } catch (error) {
+    await withdrawNextHash(secrets).catch(() => undefined);
     throw new BundleStoreError('Nothing was written: the policy file could not be saved in this extension\'s storage folder.', { cause: error });
   }
-  const after = await verifyDisk(globalStorageDir, secrets, nowMs, marker);
+  const after = await verifyDisk(globalStorageDir, secrets, nowMs, marker.present ? { ...marker, pending: before.hash } : marker);
   if (after.state.state !== 'valid' || after.state.hash !== before.hash) {
     throw new BundleStoreError('The new policy file was saved but did not read back as written, so it was not used.');
   }
@@ -188,6 +208,8 @@ async function tryRenew(
   globalStorageDir: string, secrets: SecretStorageLike, current: BundleState & { state: 'valid' }, nowMs: number, marker: LastValid
 ): Promise<BundleState | undefined> {
   try {
+    // Only this install's own key, and only the policy this install last accepted: a bundle that merely verifies is never carried forward.
+    if (!marker.present || marker.hash === undefined || marker.hash !== current.hash) return undefined;
     const identity = await loadDeviceIdentity(secrets);
     if (identity === undefined || identity.fingerprint !== current.signer.fingerprint || identity.publicKey !== current.signer.publicKey) return undefined;
     const effective = effectiveNow(nowMs, lastValidAtOf(marker));
@@ -218,10 +240,12 @@ export async function loadPolicyBundle(globalStorageDir: string, secrets: Secret
 
 /**
  * The activation check (OFFL-02). Runs once when the extension starts and never per decision.
- * - True fresh install (no file and no marker): creates the identity if needed, signs the default bundle, writes and reads it back, remembers it.
- * - A bundle that verifies: remembered, and re-signed with fresh dates in its last 30 days when this install's own key signed it.
- * - The signer is unknown here and the stored bundle is the shipped default: re-signed with the current identity (D-39).
- * - Anything else: the failed-closed state with its sentence, and the file is left exactly as it was.
+ * - True first install (no marker, no file, and no earlier-install evidence on disk): creates the identity if needed, signs the default bundle, writes
+ *   and reads it back, remembers it.
+ * - A bundle that verifies and whose hash is the last-valid one: remembered, and re-signed with fresh dates in its last 30 days when this install's own
+ *   key signed it. A valid bundle with another hash is refused as `replaced`.
+ * - Anything else, including a bundle signed by a key this computer does not know whatever it contains: the failed-closed state with its sentence, and
+ *   the file is left exactly as it was. Nothing here ever signs a policy it did not write itself (D-39 as amended by the PR #70 second review).
  * Throws BundleStoreError only when a first bundle could not be written to disk.
  */
 export async function ensurePolicyBundle(globalStorageDir: string, secrets: SecretStorageLike, options: BundleStoreOptions = {}): Promise<BundleResult> {
@@ -252,13 +276,12 @@ export async function ensurePolicyBundle(globalStorageDir: string, secrets: Secr
       return kept.state === 'valid' && event !== undefined ? { state: kept, event } : { state: kept };
     }
     if (state.reason === 'missing') {
-      // The only silent creation: this install has never had a valid bundle. With a marker, a missing file is a changed policy, never a fresh start.
+      // The only silent creation: this install has never had a valid bundle. With a marker, a missing file is a changed policy, never a fresh start; with
+      // no marker, anything on disk that says a policy existed before (a wiped secret store, say) is the same.
       if (marker.present) return { state };
+      const earlier = await earlierInstallEvidence(dir, identityDir(globalStorageDir), secrets);
+      if (earlier !== undefined) return { state: failedClosed('missing', earlier) };
       return installDefault(globalStorageDir, secrets, options, nowMs, marker, 'policy.created');
-    }
-    if (state.reason === 'unknown-key' && found.envelope !== undefined && isDefaultBundle((found.envelope as { payload?: unknown }).payload)) {
-      // The signature checked out and only the key is unknown here (a lost device key), and nothing in the bundle was ever customised (D-39).
-      return installDefault(globalStorageDir, secrets, options, nowMs, marker, 'policy.resigned-default');
     }
     return { state };
   });

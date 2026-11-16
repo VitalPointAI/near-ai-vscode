@@ -360,36 +360,41 @@ test('a bundle that does not verify is never renewed, even inside the last 30 da
 });
 
 // ---------------------------------------------------------------------------------------------------------------------------------------------------
-// A lost device key (D-39)
+// A lost device key (D-39, amended by the PR #70 second review: an unknown signer is never adopted; src/test/gateBundleTrust.test.ts has the rest)
 
-test('a lost device key with the shipped default bundle: re-signed with a new identity and the event policy.resigned-default', async () => {
+test('a lost device key with the shipped default bundle: failed-closed unknown-key, the file is unchanged, nothing is re-signed, and Reset is the way back', async () => {
   await withStorage(async (storage) => {
     const { identity, first } = await freshInstall(storage);
     // A cleared browser on code-server: the secret store is empty again, the global storage folder is still there.
     const lost = new MemorySecrets();
+    const before = await readFile(bundleFileOf(storage), 'utf8');
     const result = await ensurePolicyBundle(storage, lost, { now: at(T0 + DAY) });
-    assert.equal(result.event, 'policy.resigned-default');
-    assert.equal(result.state.state, 'valid');
-    if (result.state.state !== 'valid' || first.state.state !== 'valid') return;
+    assertFailedClosed(result, 'unknown-key');
+    assert.equal(await readFile(bundleFileOf(storage), 'utf8'), before);
+    assert.equal(lost.values.size, 0);
+    const reset = await resetPolicyToDefaults(storage, lost, { now: at(T0 + 2 * DAY) });
+    assert.equal(reset.event, 'policy.reset');
+    assert.equal(reset.state.state, 'valid');
+    if (reset.state.state !== 'valid' || first.state.state !== 'valid') return;
     const fresh = await loadDeviceIdentity(lost);
     assert.ok(fresh);
     assert.notEqual(fresh.fingerprint, identity.fingerprint);
-    assert.equal(result.state.bundle.issuer.fingerprint, fresh.fingerprint);
-    assert.equal((await readLastValid(lost)).present, true);
+    assert.equal(reset.state.bundle.issuer.fingerprint, fresh.fingerprint);
     // The same content apart from signer and dates.
-    assert.deepEqual({ ...result.state.bundle, issuer: null, issuedAt: '', expiresAt: '' }, { ...first.state.bundle, issuer: null, issuedAt: '', expiresAt: '' });
-    assert.equal((await ensurePolicyBundle(storage, lost, { now: at(T0 + 2 * DAY) })).event, undefined);
+    assert.deepEqual({ ...reset.state.bundle, issuer: null, issuedAt: '', expiresAt: '' }, { ...first.state.bundle, issuer: null, issuedAt: '', expiresAt: '' });
+    assert.equal((await ensurePolicyBundle(storage, lost, { now: at(T0 + 3 * DAY) })).event, undefined);
   });
 });
 
-test('a lost device key with the marker kept (only the key and its saved end are gone) also re-signs a default bundle', async () => {
+test('a lost device key with the marker kept (only the key and its saved end are gone) also fails closed as unknown-key, even for a default bundle', async () => {
   await withStorage(async (storage) => {
     const { secrets } = await freshInstall(storage);
     secrets.values.delete(DEVICE_KEY_SECRET);
     secrets.values.delete(KEY_HISTORY_HEAD_SECRET);
-    const result = await ensurePolicyBundle(storage, secrets, { now: at(T0 + DAY) });
-    assert.equal(result.event, 'policy.resigned-default');
-    assert.equal(result.state.state, 'valid');
+    const before = await readFile(bundleFileOf(storage), 'utf8');
+    assertFailedClosed(await ensurePolicyBundle(storage, secrets, { now: at(T0 + DAY) }), 'unknown-key');
+    assert.equal(await readFile(bundleFileOf(storage), 'utf8'), before);
+    assert.equal(secrets.values.has(DEVICE_KEY_SECRET), false);
   });
 });
 

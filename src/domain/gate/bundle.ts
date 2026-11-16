@@ -509,6 +509,7 @@ export const BUNDLE_FAILURES = {
   'too-large': `Your policy file is larger than the allowed size. ${RESET_FIX}`,
   'key-mismatch': `The key named in your policy file does not match its fingerprint. ${RESET_FIX}`,
   'bad-signature': `Your policy file was changed outside NEAR AI. ${RESET_FIX}`,
+  replaced: `Your policy file is not the one NEAR AI last used, so it was replaced outside NEAR AI. ${RESET_FIX}`,
   'unknown-key': `Your policy file was signed by a key this computer does not know. ${RESET_FIX}`,
   'key-revoked': `The key that signed your policy file was revoked, so nothing it signed is accepted. ${RESET_FIX}`,
   'key-rotated': `The key that signed your policy file was replaced by a newer one, and the file was signed at or after the replacement. ${RESET_FIX}`,
@@ -585,8 +586,9 @@ export function needsRenewal(bundle: Pick<PolicyBundle, 'expiresAt'>, now: numbe
 }
 
 /**
- * True only when the payload is a valid bundle equal to the default apart from issuer, issuedAt and expiresAt, which is what lets a bundle that was never
- * customised be re-signed after a lost key (D-39). A bundle with any other difference, including a changed clearance, is customised. Never throws.
+ * True only when the payload is a valid bundle equal to the default apart from issuer, issuedAt and expiresAt, that is, a bundle that was never
+ * customised. The bundle store no longer re-signs anything on this test (PR #70 second review: a policy this install did not sign is never adopted outside a
+ * true first install), so it is kept for a view that wants to say whether a policy is still the shipped one. A changed clearance is customised. Never throws.
  */
 export function isDefaultBundle(payload: unknown): boolean {
   try {

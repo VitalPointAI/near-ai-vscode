@@ -491,6 +491,8 @@ const REASON_PRODUCERS: Record<BundleFailureReason, (signer: PayloadSigner) => B
     envelope.payload.expiresAt = new Date(NOW + 10 * 365 * DAY).toISOString();
     return check(envelope, signer);
   },
+  // Produced by the store, which knows the last-valid hash; src/test/gateBundleTrust.test.ts reaches it through a replaced file on disk.
+  replaced: () => failedClosed('replaced'),
   'unknown-key': (signer) => verifyBundleEnvelope(signedDefault(signer), { status: NO_KNOWN_KEYS, now: NOW }),
   'key-revoked': (signer) => verifyBundleEnvelope(signedDefault(signer), { status: () => ({ state: 'revoked' }), now: NOW }),
   'key-rotated': (signer) => verifyBundleEnvelope(signedDefault(signer), { status: () => ({ state: 'rotated', since: new Date(NOW - 1000).toISOString() }), now: NOW }),
@@ -512,7 +514,7 @@ const REASON_PRODUCERS: Record<BundleFailureReason, (signer: PayloadSigner) => B
 
 test('every failure reason has a producer in this file, so none is untested', () => {
   assert.deepEqual(Object.keys(REASON_PRODUCERS).sort(), Object.keys(BUNDLE_FAILURES).sort());
-  assert.equal(Object.keys(BUNDLE_FAILURES).length, 22);
+  assert.equal(Object.keys(BUNDLE_FAILURES).length, 23);
 });
 
 for (const reason of Object.keys(BUNDLE_FAILURES) as BundleFailureReason[]) {
