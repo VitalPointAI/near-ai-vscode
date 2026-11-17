@@ -214,6 +214,49 @@ export function isLocalRouteHost(host: string, localHosts: readonly HostPattern[
   return localHosts.some((pattern) => (pattern.startsWith('*.') ? name.endsWith(pattern.slice(1)) && name.length > pattern.length - 1 : name === pattern));
 }
 
+/**
+ * Whether the connection a request would use is proven to end inside NEAR AI Cloud's private hardware (CLAS-05 as the owner amplified it, D-50). `bound`
+ * is the only state that lets content at an attested-cloud level go to NEAR AI Cloud, and only while fresh; every other state, and no fact at all, keeps
+ * that content on this computer.
+ */
+export const CONNECTION_BINDING_STATES = Object.freeze(['bound', 'not-bound', 'unavailable', 'unknown'] as const);
+export type ConnectionBindingState = (typeof CONNECTION_BINDING_STATES)[number];
+
+/** What a binding source last found for one host. Read from memory at decision time, never fetched by a decision (OFFL-01). */
+export interface ConnectionBindingFact {
+  readonly state: ConnectionBindingState;
+  /** The host the fact is about, as a URL or a host. A fact about another host never counts for this one. */
+  readonly host: string;
+  /** When the binding was checked, in epoch milliseconds. */
+  readonly checkedAt?: number;
+  /** The fingerprint of the bound key; present only when bound. Never written to a decision record. */
+  readonly fingerprint?: string;
+  /** A plain diagnostic, never shown as the refusal. */
+  readonly detail?: string;
+}
+
+/** A bound fact older than this (10 minutes) no longer counts: the connection has to be proven again. */
+export const BINDING_MAX_AGE_MS = 600_000;
+
+/** True only for a bound fact with both times known and an age from zero up to, not including, BINDING_MAX_AGE_MS. No fact or no clock is never fresh. */
+export function isBindingFresh(fact: ConnectionBindingFact | undefined, now: number | undefined): boolean {
+  if (fact === undefined || fact.state !== 'bound') return false;
+  if (typeof now !== 'number' || !Number.isFinite(now)) return false;
+  if (typeof fact.checkedAt !== 'number' || !Number.isFinite(fact.checkedAt)) return false;
+  const age = now - fact.checkedAt;
+  return age >= 0 && age < BINDING_MAX_AGE_MS;
+}
+
+/** Why a request at an attested-cloud level was not sent to NEAR AI Cloud: `unknown` covers no fact, an unknown fact, a stale one and one for another host. */
+export type BindingRefusalCause = 'not-bound' | 'unavailable' | 'unknown';
+
+/** One plain sentence per cause. Each says nothing was sent and that content at this level stays on this computer. */
+export const BINDING_REFUSALS: Readonly<Record<BindingRefusalCause, string>> = Object.freeze({
+  'not-bound': 'Nothing was sent. The connection to NEAR AI Cloud could not be proven to end inside its private hardware, so content at this level stays on this computer.',
+  unavailable: 'Nothing was sent. The check that the connection to NEAR AI Cloud ends inside its private hardware could not be made, so content at this level stays on this computer.',
+  unknown: 'Nothing was sent. There is no recent proof that the connection to NEAR AI Cloud ends inside its private hardware, so content at this level stays on this computer.'
+});
+
 /** The facts of one request that routing can know before sending, none of them a network call (D-36). */
 export interface RouteFacts {
   /** The client the run sends through: NEAR AI Cloud, a local runtime, or not said. */
@@ -226,6 +269,14 @@ export interface RouteFacts {
   readonly model: { readonly id: string; readonly privacyBoundary?: string } | undefined;
   /** True when this session already saw an attestation fail. */
   readonly attestationFailed: boolean;
+  /** The connection binding fact for the client's host, read from memory. Absent counts as unknown, never as bound (D-50). */
+  readonly binding?: ConnectionBindingFact;
+  /** The time of the decision in epoch milliseconds. Absent means no binding is fresh. */
+  readonly now?: number;
+  /** Whether the session can use a local model instead. Absent means no, so the refusal names the missing local model. */
+  readonly localModelAvailable?: boolean;
+  /** True when the request ran outside any session route and was decided with the default one: an allowed answer is then `route.default-session`. */
+  readonly sessionless?: boolean;
 }
 
 export const ROUTE_RULES = Object.freeze([
@@ -237,10 +288,19 @@ export const ROUTE_RULES = Object.freeze([
   'route.local-host-not-local',
   'route.not-tee',
   'route.attestation-failed',
-  'route.no-session'
+  'route.no-session',
+  'route.default-session',
+  'route.connection-not-bound'
 ] as const);
 export type RouteRule = (typeof ROUTE_RULES)[number];
-export type RefusingRouteRule = Exclude<RouteRule, 'route.any-cloud' | 'route.attested-cloud' | 'route.local-only'>;
+export type RefusingRouteRule = Exclude<RouteRule, 'route.any-cloud' | 'route.attested-cloud' | 'route.local-only' | 'route.default-session'>;
+
+/**
+ * Events about a session's routing that are recorded but decide nothing themselves: the answer check after a response at an attested-cloud level, and a
+ * person's Check again that clears a failed one (plan 25). Named now so a record written by a later version is never one this version cannot name (D-49).
+ */
+export const ROUTE_EVENT_IDS = Object.freeze(['route.attestation-checked', 'route.attestation-cleared'] as const);
+export type RouteEventId = (typeof ROUTE_EVENT_IDS)[number];
 
 /** One plain sentence per refusing rule: nothing was sent, and what to do about it. */
 export const ROUTE_REFUSALS: Readonly<Record<RefusingRouteRule, string>> = Object.freeze({
@@ -249,7 +309,8 @@ export const ROUTE_REFUSALS: Readonly<Record<RefusingRouteRule, string>> = Objec
   'route.local-host-not-local': 'Nothing was sent. Your local runtime points at a host that is not on this computer and that your organization has not named as local, so it cannot count as local. Point the runtime at this computer, or ask your organization to name the host as local.',
   'route.not-tee': 'Nothing was sent. This chat has read content that may only go to a model running in private hardware on NEAR AI Cloud\'s own endpoint, and this model or endpoint is not confirmed to do that. Choose a private model on NEAR AI Cloud or a local model, or start a new chat that has not read this content.',
   'route.attestation-failed': 'Nothing was sent. The private hardware check on NEAR AI Cloud failed earlier in this session, so its models cannot count as private now. Switch to a local model, or try again in a new session.',
-  'route.no-session': 'Nothing was sent. This request did not say which route it uses, so no model can be confirmed private. Start the run again from the chat, or choose a local model.'
+  'route.no-session': 'Nothing was sent. This request did not say which route it uses, so no model can be confirmed private. Start the run again from the chat, or choose a local model.',
+  'route.connection-not-bound': 'Nothing was sent. Content at this level may go to NEAR AI Cloud only over a connection proven to end inside its private hardware, and this connection is not proven. Choose a local model for this chat, or start a new chat that has not read this content.'
 });
 
 export interface RouteDecision {
@@ -261,8 +322,8 @@ export interface RouteDecision {
   readonly reason?: string;
 }
 
-function allow(tier: RoutingTier, rule: RouteRule): RouteDecision {
-  return { allowed: true, tier, rule };
+function allow(tier: RoutingTier, rule: RouteRule, facts?: RouteFacts): RouteDecision {
+  return { allowed: true, tier, rule: facts?.sessionless === true ? 'route.default-session' : rule };
 }
 
 function refuse(tier: RoutingTier, rule: RefusingRouteRule): RouteDecision {
@@ -276,32 +337,87 @@ function whyNotLocal(facts: RouteFacts, routing: RoutingTable): 'route.no-local-
   return facts.model?.privacyBoundary === 'local' ? undefined : 'route.no-local-model';
 }
 
+/** The cause a binding fact gives for not sending: its own state when it says not-bound or unavailable, otherwise unknown (none, unknown, stale, another host). */
+function bindingCause(facts: RouteFacts): BindingRefusalCause {
+  const fact = facts.binding;
+  if (fact === undefined || !sameHost(fact.host, facts.host)) return 'unknown';
+  if (fact.state === 'not-bound' || fact.state === 'unavailable') return fact.state;
+  return 'unknown';
+}
+
+function sameHost(a: string, b: string): boolean {
+  const first = hostnameOf(a);
+  return first !== undefined && first === hostnameOf(b);
+}
+
+/** The cause's sentence, then the rule's sentence without its own opening "Nothing was sent.", so the reason says it once. */
+function bindingReason(cause: BindingRefusalCause, rule: 'route.connection-not-bound' | 'route.no-local-model'): string {
+  return `${BINDING_REFUSALS[cause]} ${ROUTE_REFUSALS[rule].replace(/^Nothing was sent\. /, '')}`;
+}
+
 function decideAttested(tier: RoutingTier, routing: RoutingTable, facts: RouteFacts): RouteDecision {
   // A local model on a local host is stricter than attested cloud, so it satisfies this tier too.
-  if (whyNotLocal(facts, routing) === undefined) return allow(tier, 'route.attested-cloud');
+  if (whyNotLocal(facts, routing) === undefined) return allow(tier, 'route.attested-cloud', facts);
   if (facts.clientRoute === 'local') {
     return refuse(tier, isLocalRouteHost(facts.host, routing.localHosts) ? 'route.not-tee' : 'route.local-host-not-local');
   }
   // Judged before sending (D-36): the TEE flag and NEAR's own endpoint, because a forwarded model cannot be attested.
   if (facts.model?.privacyBoundary !== 'tee' || !facts.nearEndpoint) return refuse(tier, 'route.not-tee');
   if (facts.attestationFailed) return refuse(tier, 'route.attestation-failed');
-  return allow(tier, 'route.attested-cloud');
+  // The owner's CLAS-05 amplification (D-50): a verified answer proves which model ran, not that the connection was private. Without a fresh bound fact for
+  // this host the content stays on this computer; no fact, an unknown one and a stale one are never treated as bound.
+  if (isBindingFresh(facts.binding, facts.now) && facts.binding !== undefined && sameHost(facts.binding.host, facts.host)) return allow(tier, 'route.attested-cloud', facts);
+  const rule = facts.localModelAvailable === true ? 'route.connection-not-bound' : 'route.no-local-model';
+  return { allowed: false, tier, rule, reason: bindingReason(bindingCause(facts), rule) };
 }
 
 /**
  * Whether a request may go, from the session's mark, the bundle's routing table and the local facts of the request (CLAS-05, CLAS-06, D-30, D-36, D-37).
  * `deny` refuses. `local-only` needs a local client on a loopback host or a host the table names, serving a model the catalog marks local. `attested-cloud`
- * needs a TEE model on NEAR AI Cloud's own endpoint with no failed attestation this session, or a local model as above. `any-cloud` allows everything.
- * An unknown model counts as not private for every tier above any-cloud. A refusal always carries a plain sentence that says nothing was sent.
+ * needs a TEE model on NEAR AI Cloud's own endpoint with no failed attestation this session and a fresh bound connection fact for that host (D-50), or a
+ * local model as above. `any-cloud` allows everything. An unknown model counts as not private for every tier above any-cloud. A refusal always carries a
+ * plain sentence that says nothing was sent. An allowed request decided outside any session (`facts.sessionless`) is `route.default-session`.
  */
 export function decideRoute(mark: Mark, routing: RoutingTable, facts: RouteFacts, defaultLabel?: Label): RouteDecision {
   const tier = tierForMark(mark, routing, defaultLabel);
-  if (tier === 'any-cloud') return allow(tier, 'route.any-cloud');
+  if (tier === 'any-cloud') return allow(tier, 'route.any-cloud', facts);
   if (tier === 'deny') return refuse(tier, 'route.deny');
   if (facts.clientRoute === undefined) return refuse(tier, 'route.no-session');
   if (tier === 'local-only') {
     const why = whyNotLocal(facts, routing);
-    return why === undefined ? allow(tier, 'route.local-only') : refuse(tier, why);
+    return why === undefined ? allow(tier, 'route.local-only', facts) : refuse(tier, why);
   }
   return decideAttested(tier, routing, facts);
 }
+
+/**
+ * The routing a failed-closed policy uses (D-53): the shipped table with every tier stricter than any-cloud raised to at least local-only, and no host named
+ * as local. A broken policy never relaxes where content goes and never sends labelled content off this computer; content at the default label still goes
+ * where it does today.
+ */
+export function routingWhileFailedClosed(): RoutingTable {
+  return FAILED_CLOSED_ROUTING;
+}
+
+function raisedAboveAnyCloud(tier: RoutingTier): RoutingTier {
+  return tier === 'any-cloud' ? tier : stricter(tier, 'local-only');
+}
+
+const FAILED_CLOSED_ROUTING: RoutingTable = (() => {
+  const levels: Record<string, RoutingTier> = {};
+  for (const key of Object.keys(DEFAULT_ROUTING.levels)) {
+    const tier = tableTier(DEFAULT_ROUTING.levels, key);
+    if (tier !== undefined) levels[key] = raisedAboveAnyCloud(tier);
+  }
+  const handling: Partial<Record<RoutingHandlingFlag, RoutingTier>> = {};
+  for (const flag of ROUTING_HANDLING_FLAGS) {
+    const tier = DEFAULT_ROUTING.handling[flag];
+    if (tier !== undefined) handling[flag] = raisedAboveAnyCloud(tier);
+  }
+  const compartments: Record<string, RoutingTier> = {};
+  for (const key of Object.keys(DEFAULT_ROUTING.compartments)) {
+    const tier = tableTier(DEFAULT_ROUTING.compartments, key);
+    if (tier !== undefined) compartments[key] = raisedAboveAnyCloud(tier);
+  }
+  return Object.freeze({ levels: Object.freeze(levels), handling: Object.freeze(handling), compartments: Object.freeze(compartments), localHosts: Object.freeze([]) });
+})();

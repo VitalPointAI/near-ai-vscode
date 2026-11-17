@@ -1,6 +1,11 @@
 import { createHash } from 'node:crypto';
 import { sha256Hex, verifyResponse, type ResponseEvidence, type VerificationResult } from './attestation';
-import { isSecureEndpoint } from '../domain/config';
+import { isNearCloudEndpoint, isSecureEndpoint } from '../domain/config';
+import { decideRoute } from '../domain/gate/routing';
+import type { ConnectionBindingFact, RouteDecision, RouteFacts, RouteRule } from '../domain/gate/routing';
+import { currentSessionRoute, defaultSessionRoute, routingOf } from '../gate/sessionMark';
+import type { SessionRoute } from '../gate/sessionMark';
+import type { ConnectionBindingSource } from './connectionBinding';
 import { redactSecrets } from '../domain/redaction';
 import { currentSpendTag, SpendKind, SpendTag, usdToNano } from './spendLedger';
 import type { SpendSink } from './spendAccount';
@@ -94,6 +99,8 @@ export interface UsageMetadata {
   answerChars?: number;
   /** Hashes for checking NEAR's signature on this completion later. */
   evidence?: ResponseEvidence;
+  /** The connection binding fact the route check read for this request, when the client has a binding source (plan 25 gives NEAR clients one). */
+  connection?: ConnectionBindingFact;
 }
 
 export interface ImageGenerationOptions {
@@ -144,10 +151,33 @@ export interface NearAiClientOptions {
   spend?: SpendSink;
   /** Tags every recorded response from this client carries (the project). */
   spendTag?: Pick<SpendTag, 'projectId'>;
+  /**
+   * Which route this client is (CLAS-06): NEAR AI Cloud, or a local runtime. The provider factory sets it for every client that sends content; a client
+   * that does not say is refused at every level stricter than any-cloud (`route.no-session`).
+   */
+  route?: 'near' | 'local';
+  /** Says whether the connection to this client's host is proven to end inside private hardware (D-50). No client has one before plan 25. */
+  binding?: ConnectionBindingSource;
+  /** True when the session can use a local model instead of this client (a hybrid profile's NEAR client), so a refusal names the right fix. */
+  localModelAvailable?: boolean;
 }
 
 /** Endpoints NEAR bills for; every 2xx answer from one is recorded in the spend ledger. */
 const BILLABLE_PATHS = new Set(['/chat/completions', '/images/generations', '/images/edits', '/audio/transcriptions']);
+
+/**
+ * The requests that carry content to a model (a POST to one of these): each is routed before anything is sent (CLAS-06). The same four paths as
+ * BILLABLE_PATHS, named for what they carry rather than what they cost, so the route check never depends on whether spend tracking is on.
+ */
+export const CONTENT_PATHS: ReadonlySet<string> = new Set(['/chat/completions', '/images/generations', '/images/edits', '/audio/transcriptions']);
+
+/** A model request the session's route does not allow (CLAS-06): thrown before anything is sent, with the plain sentence that says so. */
+export class RouteRefusedError extends Error {
+  public constructor(public readonly rule: RouteRule, message: string) {
+    super(message);
+    this.name = 'RouteRefusedError';
+  }
+}
 
 export const DEFAULT_RESPONSE_TIMEOUT_MS = 60_000;
 /** Output tokens allowed in one agent reply unless nearAi.agent.maxOutputTokens says otherwise. */
@@ -312,6 +342,8 @@ export class NearAiClient {
   private readonly charges = new WeakMap<Response, { finish: (result: Parameters<ReturnType<SpendSink['begin']>>[0]) => void; inputTokens: number; model?: string }>();
   /** Each streamed response's connection: `abort` closes it, `release` unhooks the caller's signal once the body is done. */
   private readonly streams = new WeakMap<Response, { abort: () => void; release: () => void }>();
+  /** The binding fact the route check read for each content response, when the client has a binding source; its usage carries it. */
+  private readonly connections = new WeakMap<Response, ConnectionBindingFact>();
 
   public constructor(private readonly options: NearAiClientOptions) {
     this.fetchFn = options.fetchFn ?? fetch;
@@ -443,7 +475,7 @@ export class NearAiClient {
   private async readImageResult(response: Response, model: string, count: number, started: number): Promise<ImageGenerationResult> {
     let result: ImageGenerationResult;
     try {
-      result = imageResult(await response.json(), metadataFromHeaders(response.headers, started));
+      result = imageResult(await response.json(), this.usageStart(response, started));
     } catch (error) {
       this.settleCharge(response, 'partial');
       throw error;
@@ -469,7 +501,7 @@ export class NearAiClient {
     const response = await this.request('/audio/transcriptions', { method: 'POST', signal, body: form }, { model });
     let body: Record<string, unknown>;
     try { body = objectValue(await response.json()); } catch (error) { this.settleCharge(response, 'partial'); throw error; }
-    const usage = usageFromPayload(objectValue(body.usage), metadataFromHeaders(response.headers, started));
+    const usage = usageFromPayload(objectValue(body.usage), this.usageStart(response, started));
     const info = this.models.get(model);
     const estimate = usage.inputTokens !== undefined || usage.outputTokens !== undefined ? estimateCostUsd(info ?? { id: '' }, usage.inputTokens, usage.outputTokens, usage.cachedInputTokens) : info?.requestPricePerUnit;
     if (usage.estimatedCostUsd === undefined && estimate !== undefined) usage.estimatedCostUsd = estimate;
@@ -490,7 +522,7 @@ export class NearAiClient {
     }, { model, spendKind: 'attachment' });
     let body: Record<string, unknown>;
     try { body = objectValue(await response.json()); } catch (error) { this.settleCharge(response, 'partial'); throw error; }
-    const usage = usageFromPayload(objectValue(body.usage), metadataFromHeaders(response.headers, started));
+    const usage = usageFromPayload(objectValue(body.usage), this.usageStart(response, started));
     usage.estimatedCostUsd = estimateCostUsd(this.models.get(model) ?? { id: '' }, usage.inputTokens, usage.outputTokens, usage.cachedInputTokens);
     this.settleCharge(response, 'completed', usage);
     const choice = objectValue(Array.isArray(body.choices) ? body.choices[0] : undefined);
@@ -526,7 +558,7 @@ export class NearAiClient {
     const text = stringValue(message.content) ?? '';
     const reasoning = stringValue(message.reasoning_content) ?? stringValue(message.reasoning);
     const finishReason = stringValue(choice.finish_reason);
-    const usage = usageFromPayload(objectValue(body.usage), metadataFromHeaders(response.headers, started));
+    const usage = usageFromPayload(objectValue(body.usage), this.usageStart(response, started));
     usage.estimatedCostUsd = estimateCostUsd(this.models.get(model) ?? { id: '' }, usage.inputTokens, usage.outputTokens, usage.cachedInputTokens);
     this.settleCharge(response, 'completed', usage);
     return { text, usage, ...(reasoning ? { reasoning } : {}), ...(finishReason ? { finishReason } : {}) };
@@ -593,7 +625,7 @@ export class NearAiClient {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ model, messages, stream: true, stream_options: { include_usage: true } })
     }, { model, stream: true });
-    const metadata = metadataFromHeaders(response.headers, started);
+    const metadata = this.usageStart(response, started);
     if (!response.body) { this.streams.get(response)?.release(); this.settleCharge(response, 'partial', metadata); throw new NearAiError(response.status, 'NEAR AI returned no streaming body.', false, metadata.requestId); }
 
     let completed = false;
@@ -627,7 +659,7 @@ export class NearAiClient {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ model, messages, stream: true, stream_options: { include_usage: true } })
     }, { model, stream: true });
-    const metadata = metadataFromHeaders(response.headers, started);
+    const metadata = this.usageStart(response, started);
     if (!response.body) { this.streams.get(response)?.release(); this.settleCharge(response, 'partial', metadata); throw new NearAiError(response.status, 'NEAR AI returned no streaming body.', false, metadata.requestId); }
 
     let latest = metadata;
@@ -672,7 +704,7 @@ export class NearAiClient {
     const requestBody = completionRequestBody(model, messages, tools, maxTokens);
     const response = await this.request('/chat/completions', { method: 'POST', signal, headers: { 'content-type': 'application/json' }, body: requestBody }, { model, stream: true });
     const connection = this.streams.get(response);
-    let usage = metadataFromHeaders(response.headers, started);
+    let usage = this.usageStart(response, started);
     // NEAR signs SHA-256 of the exact request body and raw response; keep both hashes for verification.
     const rawResponse = createHash('sha256');
     let chatId: string | undefined;
@@ -901,6 +933,58 @@ export class NearAiClient {
     charge.finish({ status, ...(usage?.requestId ? { requestId: usage.requestId } : {}), ...(usage?.inputTokens !== undefined ? { inputTokens: usage.inputTokens } : {}), ...(usage?.cachedInputTokens !== undefined ? { cachedInputTokens: usage.cachedInputTokens } : {}), ...(usage?.outputTokens !== undefined ? { outputTokens: usage.outputTokens } : {}), ...(estimateUsd !== undefined ? { estimateNanoUsd: usdToNano(estimateUsd) } : {}) });
   }
 
+  /**
+   * The route check of one content request (CLAS-06, D-31, D-36): the session's route (or the default one outside every route), and only local facts: this
+   * client's route kind, host and endpoint, the model's entry in this client's own cached catalog, the binding fact held in memory, and the clock. No network
+   * call is made here (OFFL-01). Throws RouteRefusedError when the route refuses. Returns the binding fact when this client has a binding source.
+   */
+  private checkRoute(model: string | undefined): ConnectionBindingFact | undefined {
+    const inSession = currentSessionRoute();
+    const route = inSession ?? defaultSessionRoute();
+    const { routing, defaultLabel } = routingOf(route);
+    const host = this.options.baseUrl;
+    const fact = this.bindingFact(host);
+    const info = model === undefined ? undefined : this.models.get(model);
+    const facts: RouteFacts = {
+      clientRoute: this.options.route,
+      host,
+      nearEndpoint: isNearCloudEndpoint(host),
+      model: info === undefined ? undefined : { id: info.id, ...(info.privacyBoundary === undefined ? {} : { privacyBoundary: info.privacyBoundary }) },
+      attestationFailed: route.attestation.failed === true,
+      binding: fact,
+      now: clockOf(route),
+      localModelAvailable: this.options.localModelAvailable === true,
+      sessionless: inSession === undefined
+    };
+    let decision: RouteDecision;
+    try {
+      decision = decideRoute(route.markOf(), routing, facts, defaultLabel);
+    } catch {
+      // A mark that cannot be read means nothing is known about what the session has read: nothing above the default can be assumed, so it is refused.
+      decision = decideRoute([], routing, facts);
+    }
+    if (!decision.allowed) throw new RouteRefusedError(decision.rule, decision.reason ?? 'Nothing was sent.');
+    return this.options.binding === undefined ? undefined : fact;
+  }
+
+  /** The binding fact held in memory for the host. No source, a source that throws, or a fact it does not have is unknown, never bound (D-50). */
+  private bindingFact(host: string): ConnectionBindingFact {
+    const source = this.options.binding;
+    if (source !== undefined) {
+      try {
+        const fact = source.current(host);
+        if (fact !== undefined) return fact;
+      } catch { /* a source that throws is unknown */ }
+    }
+    return { state: 'unknown', host };
+  }
+
+  /** The usage a response starts with: its headers, and the binding fact the route check read when there is one. */
+  private usageStart(response: Response, started: number): UsageMetadata {
+    const connection = this.connections.get(response);
+    return { ...metadataFromHeaders(response.headers, started), ...(connection === undefined ? {} : { connection }) };
+  }
+
   private async request(path: string, init: RequestInit, overrides: { maxRetries?: number; model?: string; failFast?: boolean; spendKind?: SpendKind; secret?: string; stream?: boolean } = {}): Promise<Response> {
     const url = `${this.options.baseUrl.replace(/\/$/, '')}${path}`;
     // One retry layer: the agent loop backs off between model turns. Here, at most one quick retry,
@@ -911,6 +995,9 @@ export class NearAiClient {
     const responseTimeoutMs = Math.max(1, this.options.responseTimeoutMs ?? DEFAULT_RESPONSE_TIMEOUT_MS);
     if (!isSecureEndpoint(url)) throw new NearAiError(0, 'NEAR AI endpoint must use HTTPS; plain HTTP is only allowed for localhost.', false);
     const model = overrides.model;
+    // CLAS-06: the route is decided once, here, for every content request, before the spend check, before a concurrency slot is taken and before the first
+    // byte is sent, whether or not spend tracking is on. A retry below is the same request and is not decided again.
+    const connection = CONTENT_PATHS.has(path) && (init.method ?? 'GET') === 'POST' ? this.checkRoute(model) : undefined;
     const billable = BILLABLE_PATHS.has(path) && (init.method ?? 'GET') === 'POST' && this.options.spend !== undefined;
     if (billable) {
       // The daily limit is checked before every billable request, whoever sends it.
@@ -957,6 +1044,7 @@ export class NearAiClient {
         }
         if (response.ok) {
           if (model) this.cooling.delete(model);
+          if (connection !== undefined) this.connections.set(response, connection);
           if (billable) this.charge(path, init, model, overrides.spendKind, response, 'open');
           // A stream keeps the caller's stop wired to the connection while its body is read, and its
           // reader can close the connection itself when the stream stalls; the reader releases it.
@@ -1125,6 +1213,15 @@ function parseSseLine(line: string, metadata: UsageMetadata, model?: ModelInfo):
  */
 export function completionRequestBody(model: string, messages: AgentMessage[], tools: ToolDefinition[], maxTokens: number): string {
   return JSON.stringify({ model, messages, stream: true, stream_options: { include_usage: true }, max_tokens: maxTokens, ...(tools.length ? { tools, tool_choice: 'auto' } : {}) });
+}
+
+/** The time of a route decision: the route's clock, or the system clock when the route has none or its clock throws. */
+function clockOf(route: SessionRoute): number {
+  try {
+    const now = route.clock?.();
+    if (typeof now === 'number' && Number.isFinite(now)) return now;
+  } catch { /* the system clock below */ }
+  return Date.now();
 }
 
 function metadataFromHeaders(headers: Headers, startedAt: number): UsageMetadata {
