@@ -236,7 +236,7 @@
   }
 
   /** Moves to one of the screens before the steps, and puts focus on its heading. */
-  function goStage(stage, pickMode) {
+  function goStage(stage, pickMode, focusId) {
     work.stage = stage;
     if (pickMode) work.pickMode = pickMode;
     work.awaitingStart = null;
@@ -244,7 +244,7 @@
     work.busy = false;
     // The same for a recommendation asked for on a screen the person has left: its reply is dropped.
     work.recommendSeq = null;
-    focusLater('step-heading');
+    focusLater(focusId || 'step-heading');
     render();
   }
 
@@ -379,7 +379,7 @@
   function askSection() {
     const box = el('section', 'ask');
     if (drafting) { box.append(el('p', 'hint', 'Drafting the team from what you wrote...')); return box; }
-    box.append(el('h2', '', 'What should this team be able to produce?'));
+    box.append(el('h3', '', 'What should this team be able to produce?'));
     box.append(el('p', 'hint', 'Describe it in your own words. The team is drafted from this: its name, its members and their roles, what each one hands back, and the outputs you get.'));
     if (askTarget === 'project') box.append(el('p', 'hint', 'The team you draft here is saved as this project\'s team unless you choose otherwise.'));
     const idea = el('textarea', 'ask-idea', '');
@@ -415,7 +415,9 @@
 
   function proposalSection() {
     const box = el('section', 'proposal');
-    box.append(el('h2', '', proposal.proposal.name || 'Proposed team'));
+    const title = el('h3', '', proposal.proposal.name || 'Proposed team'); title.id = 'proposal-title'; title.setAttribute('tabindex', '-1');
+    box.setAttribute('aria-labelledby', title.id);
+    box.append(title);
     box.append(el('p', 'mission', proposal.proposal.mission));
     box.append(el('p', '', proposal.proposal.description));
     const members = el('table', 'proposal-members');
@@ -454,16 +456,72 @@
     return box;
   }
 
+  // ---------- the dashboard (owner, 2026-11-17: "The Team Studio main page needs to be more of a dashboard of existing teams and their statuses, model
+  // setups, stats about them, rating, etc.") ----------
+  // The host works out every figure (src/domain/teamDashboard.ts) from what the extension keeps: the project's run history, the runs going now, the team
+  // files, the local check and the last role test. The page only lays it out, and says "none yet" or "not recorded" where there is no record.
+  const SORTS = [['used', 'Most used'], ['recent', 'Recently run'], ['rating', 'Rating'], ['name', 'Name']];
+  const STATUS_TEXT = { running: 'Running now', ready: 'Ready', attention: 'Needs attention', 'never-run': 'Never run' };
+  const PRIVACY_WORD = { tee: 'Private', local: 'Private', forwarded: 'Cloud', unknown: 'Privacy unknown' };
+  const FIRST_TEAM_LABEL = 'New team: create your first team';
+  const NO_HISTORY = 'Runs and spend are kept per project. Open a project folder to see them.';
+  /** The sort and the Needs attention filter, kept with the webview's own state (per person, on this computer), so the tab opens as it was left. */
+  const viewState = (() => { try { const value = vscode.getState ? vscode.getState() : null; return value && typeof value === 'object' ? value : {}; } catch (error) { return {}; } })();
+  let dash = null;
+  let dashSort = SORTS.some(([value]) => value === viewState.dashSort) ? viewState.dashSort : 'used';
+  let dashAttention = viewState.dashAttention === true;
+  function rememberView() { try { if (vscode.setState) vscode.setState({ dashSort, dashAttention }); } catch (error) { /* the view still works, it is only not remembered */ } }
+  /** Ratings chosen on a card and not yet confirmed by the host (team id -> stars, 0 for none), shown at once; sent once the choice settles. */
+  const pendingRating = new Map();
+  const ratingQueue = new Map();
+  let ratingTimer = null;
+  const keyOf = (id) => String(id).replace(/[^A-Za-z0-9_-]/g, '-');
+  const ratingOf = (team) => (pendingRating.has(team.id) ? pendingRating.get(team.id) : (team.rating || 0));
+  const NO_STATS = { runs: 0, running: 0, completed: 0, failed: 0, cancelled: 0, ended: 0, timedRuns: 0, costedRuns: 0, runsThisWeek: 0 };
+  /** The host's card for a team; a team it has not worked out yet (an older host, or a listing that arrived first) gets an honest empty one. */
+  function cardInfo(team) {
+    const card = dash && dash.cards ? dash.cards[team.id] : null;
+    if (card) return card;
+    const attention = [];
+    if (team.error) attention.push('The team file needs fixing: ' + team.error);
+    if (team.imported) attention.push('Imported and not approved yet: you are asked the first time it runs.');
+    return { id: team.id, status: attention.length ? 'attention' : 'never-run', attention, stats: NO_STATS, health: { parts: [] } };
+  }
+  const needsAttention = (team) => cardInfo(team).attention.length > 0 || Boolean(team.error);
+
+  /** "5 minutes ago", "2 days ago": relative to the time the host worked the dashboard out, so it never depends on this page's clock. */
+  function ago(iso) {
+    const at = Date.parse(iso);
+    if (isNaN(at)) return 'unknown';
+    const now = dash && typeof dash.now === 'number' ? dash.now : Date.now();
+    const minutes = Math.floor(Math.max(0, now - at) / 60000);
+    const unit = (count, word) => count + ' ' + word + (count === 1 ? '' : 's') + ' ago';
+    if (minutes < 1) return 'just now';
+    if (minutes < 60) return unit(minutes, 'minute');
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return unit(hours, 'hour');
+    const days = Math.floor(hours / 24);
+    if (days < 31) return unit(days, 'day');
+    return new Date(at).toLocaleDateString(undefined, { dateStyle: 'medium' });
+  }
+  function duration(ms) {
+    const seconds = Math.round(ms / 1000);
+    if (seconds < 60) return seconds + ' s';
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return minutes + ' min' + (seconds % 60 ? ' ' + (seconds % 60) + ' s' : '');
+    return Math.floor(minutes / 60) + ' h' + (minutes % 60 ? ' ' + (minutes % 60) + ' min' : '');
+  }
+
   function renderLibrary(root) {
     const bar = el('div', 'toolbar');
-    const heading = el('h2', '', 'Teams'); heading.id = 'library-title';
+    const heading = el('h2', '', 'Your teams'); heading.id = 'library-title';
     const actions = el('div', 'actions');
+    // New team goes to the builder's first screen: Use an existing team, Create a new team, or Recommend a team for me.
     actions.append(button('New team', () => startWizard('user'), { primary: true, icon: 'plus' }));
     // On demand, for every team at once: test each and set its member models from what the tests found.
     // 0.4.19 review: it said "This takes a few minutes", and six members on three models can run for hours. The host asks first and states the ceiling
     // worked out from the runs, so the button only says the run is coming, not how long it takes.
     actions.append(button('Optimise all teams', () => { announce('Testing every team to set its models. The cost and the longest it can take are asked before anything runs.'); vscode.postMessage({ type: 'optimise-all' }); }, { label: 'Test every team and set each member model from what the tests found, after asking about the cost' }));
-    if (ctx && ctx.hasProject) actions.append(button(lib.teams.some((team) => team.kind === 'project') ? 'Rebuild project team' : 'Set up project team', () => startWizard('project')));
     actions.append(button('Import…', () => vscode.postMessage({ type: 'import' })), button('Refresh', () => vscode.postMessage({ type: 'refresh' }), { link: true }));
     bar.append(heading, actions);
     root.append(bar);
@@ -474,22 +532,28 @@
       resume.append(button('Resume', () => startWizard(savedDraft.target, savedDraft), { primary: true }), button('Discard draft', () => { vscode.postMessage({ type: 'discard-draft' }); savedDraft = null; render(); }, { link: true }));
       root.append(resume);
     }
-    root.append(askSection());
-    if (proposal) root.append(proposalSection());
 
     if (!lib.teams.length) {
+      // The first run: no summary of nothing, just the two ways in.
       const empty = el('div', 'empty');
       const art = icon('team'); art.setAttribute('class', 'icon large');
-      empty.append(art, el('h3', '', 'Create your first team'), el('p', 'hint', 'A team is a few agents with their own roles, models, and tools. A lead agent hands them the work and puts their results together. The studio guides you through it in five steps.'));
+      empty.append(art, el('h3', '', 'Create your first team'), el('p', 'hint', 'A team is a few agents with their own roles, models, and tools. A lead agent hands them the work and puts their results together. Start from a team the extension provides, build your own, or let the studio recommend one.'));
       const go = el('div', 'actions center');
-      go.append(button('Create your first team', () => startWizard('user'), { primary: true, icon: 'plus' }));
+      go.append(button('New team', () => startWizard('user'), { primary: true, icon: 'plus', label: FIRST_TEAM_LABEL }));
       if (ctx && ctx.hasProject) go.append(button('Set up a team for this project', () => startWizard('project')));
       empty.append(go);
       root.append(empty);
     } else {
+      root.append(summaryRow());
+      const attentionCount = lib.teams.filter(needsAttention).length;
+      root.append(dashControls(attentionCount));
       const list = el('ul', 'cards'); list.setAttribute('aria-labelledby', 'library-title');
-      for (const team of lib.teams) list.append(teamCard(team));
+      // The project's own team comes first when there is none yet: a card that says so, with Set up (not a team, so never filtered in).
+      if (ctx && ctx.hasProject && !dashAttention && !lib.teams.some((team) => team.kind === 'project')) list.append(projectEmptyCard());
+      const shown = sortedTeams(lib.teams.filter((team) => !dashAttention || needsAttention(team)));
+      for (const team of shown) list.append(teamCard(team));
       root.append(list);
+      if (dashAttention && !shown.length) root.append(el('p', 'hint', 'No team needs attention.'));
     }
 
     if (lib.archived.length) {
@@ -510,19 +574,96 @@
     }
   }
 
+  /** The summary row: teams, running now, runs and spend this week, and how many need attention, each from the host's records. */
+  function summaryRow() {
+    const summary = dash && dash.summary ? dash.summary : null;
+    const history = Boolean(dash && dash.history);
+    const box = el('section', 'summary'); box.setAttribute('aria-label', 'Summary');
+    const tiles = el('dl', 'tiles');
+    const tile = (id, label, value, title) => {
+      const wrap = el('div', 'tile' + (id === 'sum-attention' && value !== '0' ? ' warn' : ''));
+      const value_ = el('dd', '', value); value_.id = id;
+      wrap.append(el('dt', '', label), value_);
+      if (title) wrap.title = title;
+      tiles.append(wrap);
+    };
+    const runs = summary ? summary.runsThisWeek : 0;
+    tile('sum-teams', 'Teams', String(lib.teams.length));
+    tile('sum-running', 'Running now', String(summary ? summary.running : 0), 'Teams with a run going now.');
+    tile('sum-runs', 'Runs this week', !history ? 'not recorded' : runs ? String(runs) : 'none', 'Team runs started in this project in the last seven days.');
+    tile('sum-spend', 'Spend this week', !history ? 'not recorded' : !runs ? 'none' : summary.spendThisWeekUsd === undefined ? 'not recorded' : money(summary.spendThisWeekUsd), 'What those runs cost, from the spend ledger.');
+    tile('sum-attention', 'Need attention', String(summary ? summary.attention : lib.teams.filter(needsAttention).length));
+    box.append(tiles, el('p', 'hint small', history ? 'This week is the last seven days, in this project.' : NO_HISTORY));
+    return box;
+  }
+
+  function dashControls(attentionCount) {
+    const box = el('div', 'dash-controls');
+    box.append(field('Sort by', select(SORTS.map(([value, label]) => ({ value, label })), dashSort, (value) => {
+      dashSort = SORTS.some(([known]) => known === value) ? value : 'used';
+      rememberView();
+      focusLater('dash-sort');
+      render();
+    }, 'dash-sort')));
+    const check = el('input'); check.type = 'checkbox'; check.id = 'dash-attention'; check.checked = dashAttention;
+    check.addEventListener('change', () => { dashAttention = check.checked === true; rememberView(); focusLater('dash-attention'); render(); });
+    const label = el('label', 'check'); label.setAttribute('for', check.id);
+    label.append(check, document.createTextNode('Needs attention only (' + attentionCount + ')'));
+    box.append(label);
+    return box;
+  }
+
+  /** The teams in the chosen order; ties (and Name) by name. */
+  function sortedTeams(teams) {
+    const stats = (team) => cardInfo(team).stats || NO_STATS;
+    const lastRun = (team) => { const at = stats(team).lastRunAt ? Date.parse(stats(team).lastRunAt) : NaN; return isNaN(at) ? -1 : at; };
+    const health = (team) => { const value = cardInfo(team).health; return value && typeof value.score === 'number' ? value.score : -1; };
+    const byName = (a, b) => String(a.name).localeCompare(String(b.name), undefined, { sensitivity: 'base' });
+    const order = {
+      used: (a, b) => stats(b).runs - stats(a).runs,
+      recent: (a, b) => lastRun(b) - lastRun(a),
+      rating: (a, b) => ratingOf(b) - ratingOf(a) || health(b) - health(a),
+      name: () => 0
+    }[dashSort] || (() => 0);
+    return teams.slice().sort((a, b) => order(a, b) || byName(a, b));
+  }
+
+  function projectEmptyCard() {
+    const card = el('li', 'card project-empty'); card.dataset.id = 'project-empty';
+    const head = el('div', 'card-head');
+    const title = el('h3', 'card-title', 'No team for this project yet'); title.id = 'project-empty-title';
+    head.append(teamIcon('Project team'), title, badge('Project team', 'kind project'));
+    card.setAttribute('aria-labelledby', title.id);
+    card.append(head, el('p', 'desc', 'A project team works on this folder and runs with /team:project. Set one up from a team you have, a new one, or a recommendation.'));
+    const actions = el('div', 'card-actions');
+    actions.append(button('Set up', () => startWizard('project'), { primary: true, label: 'Set up a team for this project' }));
+    card.append(actions);
+    return card;
+  }
+
+  function kindBadge(team) {
+    if (team.kind === 'project') return badge('Project team', 'kind project');
+    // An imported team runs only once the person approves it; the first run asks.
+    if (team.imported && !team.derived) return badge('Imported', 'kind imported', 'Added with Import team. The first time it runs you are asked to approve it.');
+    return badge('One of your teams', 'kind', 'Saved in My teams, so you can use it in any project.');
+  }
+
   function teamCard(team) {
-    const card = el('li', 'card'); card.dataset.id = team.id;
+    const info = cardInfo(team);
+    const key = team.id;
+    const card = el('li', 'card dash-card'); card.dataset.id = team.id;
     const head = el('div', 'card-head');
     const title = el('h3', 'card-title', team.name); title.id = nextId('team');
-    head.append(teamIcon(team.name, team.icon), title, badge(team.kind === 'project' ? 'This project' : 'My team', team.kind === 'project' ? 'kind project' : 'kind'));
-    // An imported team runs only once the person approves it; the first run asks.
-    if (team.imported) head.append(team.derived
-      ? badge('Made from an import: not approved yet', 'kind imported', 'Made from an imported team you have not approved. The first time it runs you are asked to approve it.')
-      : badge('Imported: not approved yet', 'kind imported', 'Added with Import team. The first time it runs you are asked to approve it.'));
+    head.append(teamIcon(team.name, team.icon), title, kindBadge(team));
     // 0.4.27: a private team (marked private, or every member private) runs and is reviewed only on private models.
     if (team.private) head.append(badge('Private', 'kind private', 'Every member runs only on a private model (NEAR TEE or this machine), and Improve with AI uses only a private model.'));
     card.setAttribute('aria-labelledby', title.id);
     card.append(head);
+    // The status, as words in a pill (never colour alone), and Watch it live while it runs.
+    const status = el('p', 'status-line');
+    status.append(el('span', 'pill ' + info.status, STATUS_TEXT[info.status] || 'Never run'));
+    if (info.status === 'running') status.append(button('Watch it live', () => vscode.postMessage({ type: 'watch-live', id: team.id }), { link: true, label: 'Watch ' + team.name + ' live in Team Live' }));
+    card.append(status);
     if (team.error) {
       const problem = el('p', 'error'); problem.append(icon('error'), document.createTextNode(' Needs fixing: ' + team.error));
       card.append(problem);
@@ -532,27 +673,35 @@
       card.append(actions);
       return card;
     }
-    const key = team.id;
+    if (info.attention.length) {
+      const reasons = el('ul', 'reasons'); reasons.setAttribute('aria-label', 'Why it needs attention');
+      for (const reason of info.attention) { const item = el('li', ''); item.append(icon('warn'), document.createTextNode(' ' + reason)); reasons.append(item); }
+      card.append(reasons);
+    }
     const open = expandedCards.has(key);
     if (open) card.className += ' expanded';
     const desc = el('p', 'desc clamp', team.description || '');
-    desc.id = 'desc-' + key.replace(/[^A-Za-z0-9_-]/g, '-');
+    desc.id = 'desc-' + keyOf(key);
     card.append(desc);
-    const chips = el('ul', 'chips'); chips.setAttribute('aria-label', 'Members');
+    // Models: each member's model (or tier) and whether it is private, compact; a model that is not in the model directory is flagged.
+    card.append(el('h4', '', 'Models'));
+    const models = el('ul', 'member-models'); models.setAttribute('aria-label', 'Members and their models');
     const shownMembers = open ? team.members : team.members.slice(0, MEMBER_CHIPS);
-    for (const member of shownMembers) chips.append(el('li', 'chip', member.name + (member.role && member.role !== member.name ? ' · ' + member.role : '')));
+    for (const member of shownMembers) {
+      const item = el('li', 'member-model');
+      item.append(el('strong', '', member.name), document.createTextNode(' ' + modelLabel(member) + ' · '), el('span', 'privacy-word ' + (member.privacy || 'unknown'), PRIVACY_WORD[member.privacy] || 'Privacy unknown'));
+      item.title = (member.role ? member.name + ' (' + member.role + '): ' : member.name + ': ') + (member.model || 'the main model') + '. ' + (member.privacyText || '');
+      if (member.available === false) item.append(el('span', 'flag', 'not in the model directory'));
+      models.append(item);
+    }
     const hiddenMembers = team.members.length - shownMembers.length;
-    if (hiddenMembers > 0) chips.append(el('li', 'chip more-chip', '+' + hiddenMembers + ' more'));
-    card.append(chips);
-    if (team.description || hiddenMembers > 0 || open) card.append(moreButton(key, team.name, desc.id, hiddenMembers, (team.description || '').length > CLAMP_CHARS));
-    const counts = {};
-    team.members.forEach((member) => { counts[member.privacy] = (counts[member.privacy] || 0) + 1; });
-    const models = el('div', 'models');
-    models.append(el('span', 'hint', 'Models: '));
-    for (const privacy of ['tee', 'local', 'forwarded', 'unknown']) if (counts[privacy]) models.append(privacyBadge(privacy, counts[privacy] + ' member' + (counts[privacy] === 1 ? '' : 's') + ': ' + PRIVACY_LABEL[privacy]), el('span', 'count', '×' + counts[privacy]));
-    const distinct = [...new Set(team.members.map((member) => member.model))];
-    models.append(el('span', 'hint', ' ' + distinct.slice(0, 3).join(', ') + (distinct.length > 3 ? ', …' : '')));
+    if (hiddenMembers > 0) models.append(el('li', 'member-model more-chip', '+' + hiddenMembers + ' more'));
     card.append(models);
+    if (team.description || hiddenMembers > 0 || open) card.append(moreButton(key, team.name, desc.id, hiddenMembers, (team.description || '').length > CLAMP_CHARS));
+    card.append(el('h4', '', 'Activity'), statsBlock(info.stats || NO_STATS));
+    const rating = el('div', 'rating');
+    rating.append(el('h4', '', 'Rating'), healthBlock(info.health), ratingField(team));
+    card.append(rating);
     card.append(el('p', 'meta', team.members.length + ' member' + (team.members.length === 1 ? '' : 's') + (team.savedAt ? ' · saved ' + when(team.savedAt) : '') + (team.command ? ' · ' + team.command.trim() : '')));
     if (flash === team.id) { card.className += ' flash'; pendingFocus = 'open-' + team.id; }
     const actions = el('div', 'card-actions');
@@ -568,6 +717,87 @@
     if (team.kind === 'user') actions.append(button('Archive', () => vscode.postMessage({ type: 'archive', id: team.id }), { label: 'Archive ' + team.name }));
     card.append(actions);
     return card;
+  }
+
+  /** "glm-5.3 (deep)": the model's own name, and the tier it comes from when it is one. */
+  function modelLabel(member) {
+    const short = String(member.model || '').split('/').pop() || 'the main model';
+    const tier = member.tier === 'deep' || member.tier === 'standard' || member.tier === 'fast' ? ' (' + member.tier + ')' : member.tier === 'inherit' ? ' (main model)' : '';
+    return short + tier;
+  }
+
+  /** Runs, last run, success, average time and spend, from the project's run history; none yet or not recorded where there is no record. */
+  function statsBlock(stats) {
+    if (!dash || !dash.history) return el('p', 'hint small', NO_HISTORY);
+    const list = el('dl', 'stats');
+    const row = (label, value, title) => { const wrap = el('div', 'stat'); wrap.append(el('dt', '', label), el('dd', '', value)); if (title) wrap.title = title; list.append(wrap); };
+    const none = 'none yet';
+    row('Runs', stats.runs ? String(stats.runs) : none, 'Runs started with this team\'s /team: command in this project.');
+    row('Last run', stats.lastRunAt ? ago(stats.lastRunAt) : 'never', stats.lastRunAt ? when(stats.lastRunAt) : '');
+    row('Success', stats.ended ? Math.round(100 * (stats.successRate || 0)) + '% (' + stats.completed + ' of ' + stats.ended + ')' : stats.runs ? 'none ended yet' : none, 'Completed, out of the runs that ended (failed, stopped or cancelled count against it).');
+    row('Average time', typeof stats.averageMs === 'number' ? duration(stats.averageMs) : none);
+    row('Spend', !stats.runs ? none : typeof stats.spendUsd === 'number' ? money(stats.spendUsd) + ' total, ' + money(stats.perRunUsd || 0) + ' a run' : 'not recorded', typeof stats.spendUsd === 'number' && stats.costedRuns < stats.runs ? 'Recorded for ' + stats.costedRuns + ' of ' + stats.runs + ' runs.' : 'What the runs cost, from the spend ledger.');
+    return list;
+  }
+
+  /** The computed health and the parts it is made of. */
+  function healthBlock(health) {
+    const box = el('div', 'health');
+    const score = health && typeof health.score === 'number' ? health.score : null;
+    const line = el('p', 'health-score');
+    line.append(el('span', 'label', 'Health'), el('strong', '', score === null ? 'not known' : score + ' out of 100'));
+    box.append(line);
+    const parts = el('ul', 'health-parts');
+    for (const part of (health && health.parts) || []) parts.append(el('li', '', part.label + ': ' + (typeof part.score === 'number' ? part.score + '. ' : '') + part.detail));
+    if (parts.children.length) box.append(parts);
+    return box;
+  }
+
+  /**
+   * The person's own 1 to 5 stars: native radio buttons in a fieldset, so it is one Tab stop, the arrow keys move between the stars, and a screen reader
+   * says each one. A choice is shown at once and sent when it settles, so arrowing past two stars to the third writes one version of the team file.
+   */
+  function ratingField(team) {
+    const key = keyOf(team.id);
+    const current = ratingOf(team);
+    const group = el('fieldset', 'stars');
+    group.append(el('legend', '', 'Your rating'));
+    const hintId = 'rate-hint-' + key;
+    group.setAttribute('aria-describedby', hintId);
+    const name = 'rate-' + key;
+    for (let value = 0; value <= 5; value += 1) {
+      const radio = el('input'); radio.type = 'radio'; radio.name = name; radio.value = String(value); radio.id = name + '-' + value; radio.checked = value === current;
+      const label = el('label', 'star' + (value === 0 ? ' none' : '') + (value && value <= current ? ' on' : '')); label.setAttribute('for', radio.id);
+      if (value === 0) label.append(document.createTextNode('No rating'));
+      // A filled star or an outline one, so the rating never rests on colour alone (high contrast themes included).
+      else { const glyph = el('span', 'glyph', value <= current ? '★' : '☆'); glyph.setAttribute('aria-hidden', 'true'); label.append(glyph, el('span', 'visually-hidden', value + (value === 1 ? ' star' : ' stars'))); }
+      radio.addEventListener('change', () => { if (radio.checked) chooseRating(team, value, group); });
+      group.append(radio, label);
+    }
+    const hint = el('p', 'hint small', 'Only yours: kept in the team file, and left out when you share it.'); hint.id = hintId;
+    group.append(hint);
+    return group;
+  }
+
+  function chooseRating(team, value, group) {
+    pendingRating.set(team.id, value);
+    ratingQueue.set(team.id, value);
+    // The stars light up at once, in place, so focus stays on the star the person is on.
+    for (const node of group.children) {
+      if (node.tagName !== 'label' && node.tagName !== 'LABEL') continue;
+      const stars = Number((node.getAttribute('for') || '').split('-').pop());
+      const base = node.className.replace(/\s*\bon\b/g, '');
+      const lit = Boolean(stars && stars <= value);
+      node.className = lit ? base + ' on' : base;
+      const glyph = node.children && node.children[0];
+      if (stars && glyph && glyph.className === 'glyph') glyph.textContent = lit ? '★' : '☆';
+    }
+    if (ratingTimer) clearTimeout(ratingTimer);
+    ratingTimer = setTimeout(() => {
+      ratingTimer = null;
+      for (const [id, rating] of ratingQueue) vscode.postMessage({ type: 'rate', id, rating });
+      ratingQueue.clear();
+    }, 300);
   }
 
   // ---------- sections shared by the wizard and the editor ----------
@@ -729,7 +959,7 @@
   }
 
   function renderStart(root) {
-    const titles = { start: 'How do you want to start?', new: 'Create a new team', recommend: 'Recommend a team for me', pick: work.pickMode === 'existing' ? 'Use an existing team' : 'Clone an existing team' };
+    const titles = { start: 'How do you want to start?', new: 'Create a new team', recommend: 'Recommend a team for me', ai: 'Describe it, and AI drafts it', pick: work.pickMode === 'existing' ? 'Use an existing team' : 'Clone an existing team' };
     const panel = el('section', 'panel start'); panel.setAttribute('aria-labelledby', 'step-heading');
     const heading = el('h2', '', titles[work.stage]); heading.id = 'step-heading'; heading.setAttribute('tabindex', '-1');
     panel.append(heading);
@@ -748,10 +978,19 @@
         ['new-ai', 'Describe it, and AI drafts it', 'Say what the team should produce. AI proposes a team for you to look over before anything is saved.', describeToAi]
       ]));
     } else if (work.stage === 'recommend') sectionRecommend(panel);
-    else sectionPicker(panel);
+    else if (work.stage === 'ai') {
+      // The AI start (owner, 2026-11-17: moved off the main page, which is a dashboard now): what the team should produce, then the proposal it drafted.
+      panel.append(el('p', 'hint', 'One model call drafts the team. You see it, and can start over, before anything is saved.'));
+      panel.append(askSection());
+      if (proposal) panel.append(proposalSection());
+    } else sectionPicker(panel);
     root.append(panel);
     const footer = el('div', 'footer');
-    if (work.stage !== 'start') footer.append(button('Back', () => goStage(work.stage === 'pick' && work.pickMode === 'clone' ? 'new' : 'start'), {}));
+    if (work.stage !== 'start') footer.append(button('Back', () => {
+      // Back from the AI start: Create a new team, and a draft made after that is one of the person's teams unless they come back this way.
+      if (work.stage === 'ai') { askTarget = 'user'; goStage('new'); return; }
+      goStage(work.stage === 'pick' && work.pickMode === 'clone' ? 'new' : 'start');
+    }, {}));
     footer.append(button('Cancel', leaveWork, { link: true }));
     root.append(footer);
   }
@@ -975,14 +1214,28 @@
     requestReview();
   }
 
-  /** Describe it, and AI drafts it: the library's AI box (leaving the builder asks first when something is unsaved). */
+  /**
+   * Describe it, and AI drafts it: the AI start, a screen of the builder (0.4.31: it was a box on the main page). A team drafted here is saved where this
+   * builder saves. With unsaved work the host asks first: the work is dropped (or kept as a draft) and a fresh builder opens on this screen.
+   */
   function describeToAi() {
-    // With unsaved work the host asks first: the target is kept only if the person then leaves for the AI box.
     if (isWizardDirty()) { pendingAsk = work.target; leaveWork(); return; }
     askTarget = work.target;
-    work = null;
-    focusLater('ask-idea');
-    render();
+    goStage('ai', null, 'ask-idea');
+  }
+
+  /** A fresh builder on the AI start, saving to `target`. */
+  function openAiStage(target) {
+    startWizard(target);
+    askTarget = work.target;
+    goStage('ai', null, proposal ? 'proposal-title' : 'ask-idea');
+  }
+
+  /** A drafted team that arrived after the person left the AI start: back to it, unless something unsaved is open. */
+  function reviewDrafted() {
+    hideBanner();
+    if (isDirty() || isWizardDirty()) { showBanner('Save or discard your changes first, then review the drafted team.', 'warning'); return; }
+    openAiStage(askTarget);
   }
 
   function renderHeaderName() { if (work && work.mode === 'editor') { const crumbs = $('crumbs'); const last = crumbs.children && crumbs.children[crumbs.children.length - 1]; if (last) last.textContent = work.draft.name || 'Team'; } }
@@ -1907,7 +2160,7 @@
     if (message.type === 'layout-probe' && window.nearAiLayoutProbe) { vscode.postMessage(window.nearAiLayoutProbe()); return; }
     switch (message.type) {
       case 'state':
-        ctx = message.context; lib = message.library; savedDraft = message.savedDraft || null; picker = message.picker || null;
+        ctx = message.context; lib = message.library; savedDraft = message.savedDraft || null; picker = message.picker || null; dash = message.dashboard || null;
         render();
         if (work) requestReview();
         if (message.kept) showKept(message.kept);
@@ -1920,8 +2173,9 @@
         askTarget = toAsk || 'user';
         work = null;
         if (message.savedDraft) savedDraft = message.savedDraft;
-        if (toAsk) focusLater('ask-idea');
-        render();
+        // Leaving for the AI start: a fresh builder opens on it, saving where the one that was left would have.
+        if (toAsk) openAiStage(toAsk);
+        else render();
         if (message.notice) { showBanner(message.notice, 'info'); announce(message.notice); }
         if (!toAsk) focusMain();
         break;
@@ -1929,9 +2183,21 @@
       case 'library':
         lib = message.library;
         if (message.picker) picker = message.picker;
+        if (message.dashboard) dash = message.dashboard;
         // The builder's picker lists saved teams, so it is drawn again when the library changes there; a selected team that has gone is unselected.
         if (work && work.mode === 'wizard' && work.pick && !pickerEntries().some((entry) => entry.id === work.pick)) work.pick = null;
         if (!work || (work.mode === 'wizard' && work.stage === 'pick')) render();
+        break;
+      // A team run started or ended: the dashboard alone, drawn when the dashboard is on screen (the builder and the editor are left as they are).
+      case 'dashboard':
+        dash = message.dashboard || dash;
+        if (!work) render();
+        break;
+      case 'rated':
+        pendingRating.delete(message.id);
+        // The team file gained its rating line: an editor on the version before moves to this one, as for an icon change.
+        if (message.base && work && work.mode === 'editor' && work.id === message.id) work.base = message.base;
+        if (message.text) announce(message.text);
         break;
       case 'start-wizard':
         if (isDirty() || isWizardDirty()) { showBanner('Save or discard your changes first, then set up the project team.', 'warning'); break; }
@@ -1989,10 +2255,15 @@
       case 'team-proposal':
         drafting = false;
         proposal = { proposal: message.proposal, draft: message.draft || null, problems: message.problems || [] };
-        if (!work) render();
-        else { work = null; render(); }
-        announce('The team has been drafted. Review it, then use it or start over.');
-        focusMain();
+        if (work && work.mode === 'wizard' && work.stage === 'ai') {
+          focusLater('proposal-title');
+          render();
+          announce('The team has been drafted. Review it, then use it or start over.');
+        } else {
+          // The person left the AI start while it was drafting: the team is kept and offered, never dropped and never forced on screen.
+          showBanner('The team you described is drafted.', 'info', [button('Review it', reviewDrafted, { primary: true, label: 'Review the drafted team' })]);
+          announce('The team you described is drafted. Review it from the banner.');
+        }
         break;
       case 'improve-checked': {
         const imp = work && work.improve;
@@ -2185,9 +2456,11 @@
         showBanner(message.text, 'error');
         // A failed draft leaves the ask box replaced by "Drafting the team..." with no way back, because only team-proposal cleared this: clear it and
         // draw the box again so the person can retry or change what they wrote.
-        if (drafting) { drafting = false; if (!work) render(); }
+        if (drafting) { drafting = false; if (work && work.mode === 'wizard' && work.stage === 'ai') render(); }
         // A starting point that could not be read, or a Use as is that failed: their buttons work again.
         if (work && work.mode === 'wizard') { work.awaitingStart = null; work.recommendSeq = null; if (work.busy) { work.busy = false; render(); } }
+        // A rating that was not saved: the cards show the saved ratings again.
+        if (pendingRating.size) { pendingRating.clear(); ratingQueue.clear(); if (!work) render(); }
         // An icon request that was refused or failed: its buttons work again.
         if (work && work.mode === 'editor' && work.iconBusy) { work.iconBusy = false; render(); }
         break;

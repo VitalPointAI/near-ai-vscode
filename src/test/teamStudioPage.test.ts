@@ -679,6 +679,9 @@ class FakeDoc {
 }
 
 /** `extra`: more globals for the page (the icon tests give it a fake image decoder). */
+/** The first-run button (0.4.31): its visible text is New team, and its name says what it does there. */
+const FIRST_TEAM = 'New team: create your first team';
+
 /** `webviewState`: what the page keeps with VS Code's webview state (getState / setState), so a test can open a page with it and read it back. */
 async function runPage(extra: Record<string, unknown> = {}, options: { state?: unknown } = {}) {
   const doc = new FakeDoc();
@@ -696,15 +699,16 @@ test('page: the library shows cards with actions, an empty state, and "Use in ch
   assert.deepEqual(page.posts, [{ type: 'ready' }]);
   page.dispatch({ type: 'state', context: context(), library: { teams: [], archived: [] } });
   assert.match(page.text(), /Create your first team/);
-  assert.ok(page.byLabel('Create your first team'));
+  assert.ok(page.byLabel(FIRST_TEAM));
   const library = { teams: [
     { id: 'project', kind: 'project', name: 'Project team', description: 'For this repo', command: '/team:project ', file: '/p/team.md', savedAt: '2026-10-29T10:00:00.000Z', members: [{ name: 'dev', role: 'implementer', tier: 'standard', model: 'deepseek/flash', privacy: 'forwarded', privacyText: 'Forwarded' }] },
     { id: 'user:web', kind: 'user', name: 'Web team', description: 'Builds pages', command: '/team:web ', file: '/s/web.md', members: [{ name: 'lead', role: 'planner', tier: 'deep', model: 'z-ai/glm-5.3', privacy: 'tee', privacyText: 'TEE' }, { name: 'dev', tier: 'inherit', model: 'z-ai/glm-5.3', privacy: 'tee', privacyText: 'TEE' }] }
   ], archived: [{ id: 'archived:old', name: 'Old team', file: '/s/.archived/old.md' }] };
   page.dispatch({ type: 'library', library });
   const text = page.text();
-  assert.match(text, /Project team.*This project.*For this repo.*dev · implementer.*Forwarded/);
-  assert.match(text, /Web team.*My team.*lead · planner.*TEE×2.*2 members.*\/team:web/);
+  // 0.4.31, the dashboard: the kind in words, and each member's model or tier with its privacy (a forwarded model is cloud).
+  assert.match(text, /Project team.*Project team.*For this repo.*dev flash \(standard\) · Cloud/);
+  assert.match(text, /Web team.*One of your teams.*lead glm-5\.3 \(deep\) · Private.*dev glm-5\.3 \(main model\) · Private.*2 members.*\/team:web/);
   assert.match(text, /Archived teams \(1\).*Old team/);
   page.byLabel('Use Web team in chat')!.click();
   assert.deepEqual(page.posts.at(-1), { type: 'use-in-chat', id: 'user:web' });
@@ -721,7 +725,7 @@ test('page: the library shows cards with actions, an empty state, and "Use in ch
 test('page: the wizard walks five steps, asks the host to check the draft, and saves', async () => {
   const page = await runPage();
   page.dispatch({ type: 'state', context: context(), library: { teams: [], archived: [] } });
-  page.byLabel('Create your first team')!.click();
+  page.byLabel(FIRST_TEAM)!.click();
   // 2026-11-17: the builder asks how to start first. A new team cloned from an Open-GSD starting point: the page asks the host for its members, with
   // what the team is for, and then opens the five steps.
   page.byLabel('Create a new team')!.click();
@@ -843,16 +847,16 @@ test('page: Cancel and "All teams" leave at once when nothing changed, and ask t
   const page = await runPage();
   page.dispatch({ type: 'state', context: context(), library: { teams: [], archived: [] } });
   // Nothing changed: no prompt.
-  page.byLabel('Create your first team')!.click();
+  page.byLabel(FIRST_TEAM)!.click();
   page.byLabel('Cancel')!.click();
   assert.match(page.text(), /Create your first team/);
   assert.equal(page.posts.some((message) => message.type === 'leave-wizard'), false);
-  page.byLabel('Create your first team')!.click();
+  page.byLabel(FIRST_TEAM)!.click();
   page.byLabel('Back to all teams')!.click();
   assert.match(page.text(), /Create your first team/);
   assert.equal(page.posts.some((message) => message.type === 'leave-wizard'), false);
   // A change: the page asks the host and stays until it answers. (2026-11-17: a new team is named after choosing how to start it.)
-  page.byLabel('Create your first team')!.click();
+  page.byLabel(FIRST_TEAM)!.click();
   page.byLabel('Create a new team')!.click();
   page.byLabel('From scratch')!.click();
   const name = page.doc.getElementById('f-name')!;
@@ -869,7 +873,7 @@ test('page: Cancel and "All teams" leave at once when nothing changed, and ask t
   assert.match(page.text(), /Create your first team/);
   assert.deepEqual(page.posts.at(-1), { type: 'unsaved' }, 'nothing unsaved any more');
   // Save draft: back to the library, with the draft to resume.
-  page.byLabel('Create your first team')!.click();
+  page.byLabel(FIRST_TEAM)!.click();
   page.byLabel('Create a new team')!.click();
   page.byLabel('From scratch')!.click();
   page.doc.getElementById('f-name')!.value = 'Kept'; page.doc.getElementById('f-name')!.fire('input');
@@ -1398,7 +1402,7 @@ test('page: the new-team picker filters All / My teams / Built-in, shows where e
   const { teamPicker } = await import('../services/teamStudioPage');
   page.dispatch({ type: 'state', context: studio, library, picker: teamPicker(studio.startingPoints, library.teams as never) });
   // The library card says the team is imported and not approved, and offers Share.
-  assert.match(page.text(), /Web team.*Imported: not approved yet/);
+  assert.match(page.text(), /Web team.*Imported.*Imported and not approved yet/);
   page.byLabel('Share Web team')!.click();
   assert.deepEqual(page.posts.at(-1), { type: 'share', id: 'user:web' });
   page.dispatch({ type: 'start-wizard', target: 'project' });
@@ -2253,12 +2257,12 @@ test('page: drafts keep how the team was started, an old draft resumes straight 
   cloned.byLabel('Back')!.click();
   assert.equal(cloned.heading(), 'Use an existing team');
   assert.equal(cloned.radios('starting-point').find((node) => node.value === 'lib:web')!.checked, true, 'with the team it was cloned from selected');
-  // Describe it, and AI drafts it: the library's AI box, ready to type in.
+  // Describe it, and AI drafts it: the AI start, a screen of the builder since 0.4.31 (it was a box on the main page), ready to type in.
   const ai = await builderPage();
   ai.byLabel('New team')!.click();
   ai.byLabel('Create a new team')!.click();
   ai.byLabel('Describe it, and AI drafts it')!.click();
-  assert.equal(ai.doc.getElementById('step-heading'), null);
+  assert.equal(ai.heading(), 'Describe it, and AI drafts it');
   assert.equal(ai.doc.activeElement, ai.doc.getElementById('ask-idea'));
   for (const message of [...page.posts, ...old.posts, ...purpose.posts, ...cloned.posts, ...ai.posts]) assert.ok(parseStudioMessage(message), JSON.stringify(message));
 });
@@ -2532,10 +2536,11 @@ test('page: the team keeps the entry point\'s Save it as on every path: from scr
     page.byLabel('Use this team')!.click();
     assert.equal(target(), entry, `${entry}: drafted by AI`);
     leave();
-    // The library's own AI box, not reached from the builder, saves to My teams as before.
+    // A drafted team that arrives with no builder open (0.4.31: the main page has no AI box) is offered from a banner, and saves to My teams as before.
     page.dispatch({ type: 'team-proposal', ...proposal });
+    page.byLabel('Review the drafted team')!.click();
     page.byLabel('Use this team')!.click();
-    assert.equal(target(), 'user', `${entry}: the library's AI box afterwards`);
+    assert.equal(target(), 'user', `${entry}: a draft reviewed from the banner afterwards`);
     leave();
   }
 });
@@ -2562,7 +2567,8 @@ const PROPOSAL = { proposal: { name: 'Client team', mission: 'm', description: '
 test('page: a team drafted by AI is aimed at the project only straight from a project builder; staying, leaving another way, or starting over forgets it', async () => {
   const page = await builderPage();
   const target = () => page.radios('target').find((node) => node.checked)?.value;
-  const draftedTarget = () => { page.dispatch({ type: 'team-proposal', ...PROPOSAL }); page.byLabel('Use this team')!.click(); const value = target(); page.byLabel('Back to all teams')!.click(); if (page.posts.at(-1)!.type === 'leave-wizard') page.dispatch({ type: 'left', choice: 'discard' }); return value; };
+  // 0.4.31: a draft that arrives with no AI start on screen is offered from a banner (Review it), which opens the AI start again.
+  const draftedTarget = () => { page.dispatch({ type: 'team-proposal', ...PROPOSAL }); if (!page.byLabel('Use this team')) page.byLabel('Review the drafted team')!.click(); page.byLabel('Use this team')!.click(); const value = target(); page.byLabel('Back to all teams')!.click(); if (page.posts.at(-1)!.type === 'leave-wizard') page.dispatch({ type: 'left', choice: 'discard' }); return value; };
   const toDescribe = (dirty: boolean) => {
     page.dispatch({ type: 'start-wizard', target: 'project' });
     page.byLabel('Create a new team')!.click();
@@ -2596,6 +2602,8 @@ test('page: a team drafted by AI is aimed at the project only straight from a pr
   page.byLabel('Back to all teams')!.click();
   assert.equal(draftedTarget(), 'user', 'opened a team');
   toDescribe(false);
+  // The AI start is a screen of the builder now, so another builder is started from the main page after leaving this one.
+  page.byLabel('Back to all teams')!.click();
   page.byLabel('New team')!.click();
   page.byLabel('Cancel')!.click();
   assert.equal(draftedTarget(), 'user', 'started and left another builder');
@@ -2845,7 +2853,8 @@ test('page: library cards clamp a long description to three lines with Show more
   assert.equal(more.getAttribute('aria-expanded'), 'false');
   assert.equal(more.getAttribute('aria-controls'), desc.id);
   assert.equal(more.hidden, false);
-  const chips = (id: string) => card(id).all().filter((node) => node.className.split(/\s+/).includes('chip')).map((node) => node.textContent);
+  // 0.4.31: the members are listed with their models (the dashboard's Models list), clamped the same way: four, then a count of the rest.
+  const chips = (id: string) => card(id).all().filter((node) => node.className.split(/\s+/).includes('member-model')).map((node) => (node.className.includes('more-chip') ? node.textContent : node.children[0]!.textContent));
   assert.equal(chips('user:market').length, 5, 'four members and a count of the rest');
   assert.equal(chips('user:market').at(-1), '+3 more');
   assert.match(long.textContent, /7 members/);
@@ -3572,7 +3581,6 @@ test('host: a Use as is that cannot write the team file says what went wrong in 
 // "The Team Studio main page needs to be more of a dashboard of existing teams and their statuses, model setups, stats about them, rating, etc." New team
 // leads to the builder's first screen; the "What should this team be able to produce?" box moved into it (Create a new team > Describe it, and AI drafts it).
 
-const FIRST_TEAM = 'New team: create your first team';
 const MINUTE = 60_000;
 const HOUR_MS = 60 * MINUTE;
 
@@ -3706,11 +3714,14 @@ test('page: the star rating is set on the card, saved through the host, kept aft
   // Native radio buttons: one Tab stop, the arrow keys move between them, and each has a name a screen reader says.
   assert.deepEqual(stars.map((node) => node.type), ['radio', 'radio', 'radio', 'radio', 'radio', 'radio']);
   const labels = page.card('user:web')!.all().filter((node) => node.tagName === 'label' && node.className.includes('star')).map((node) => node.textContent);
-  assert.deepEqual(labels.map((label) => label.replace('★', '').trim()), ['No rating', '1 star', '2 stars', '3 stars', '4 stars', '5 stars']);
+  assert.deepEqual(labels.map((label) => label.replace(/[★☆]/, '').trim()), ['No rating', '1 star', '2 stars', '3 stars', '4 stars', '5 stars']);
+  // A filled star or an outline one, never colour alone.
+  assert.deepEqual(page.card('user:web')!.all().filter((node) => node.className === 'glyph').map((node) => node.textContent), ['☆', '☆', '☆', '☆', '☆']);
   assert.equal(stars.find((node) => node.checked)!.value, '0', 'not rated yet');
   // Choosing 3 stars: shown at once, sent once the choice settles (the arrow keys pass through 1 and 2 on the way).
   for (const value of ['1', '2', '3']) { const star = stars.find((node) => node.value === value)!; star.checked = true; star.fire('change'); }
   assert.equal(page.posts.filter((message) => message.type === 'rate').length, 0);
+  assert.deepEqual(page.card('user:web')!.all().filter((node) => node.className === 'glyph').map((node) => node.textContent), ['★', '★', '★', '☆', '☆'], 'shown at once');
   await page.wait(); await page.wait();
   assert.deepEqual(page.posts.filter((message) => message.type === 'rate'), [{ type: 'rate', id: 'user:web', rating: 3 }]);
   page.dispatch({ type: 'rated', id: 'user:web', rating: 3, text: 'Rated Web team 3 out of 5.' });
