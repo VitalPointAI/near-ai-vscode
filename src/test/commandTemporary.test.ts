@@ -65,3 +65,22 @@ test('the floor reads deletes in the stand-in temporary folder as scratch, and t
   const system = await floorFactsFor({ command: `rm -rf ${path.join(tmpdir(), 'near-ai-scratch-x')}`, root });
   assert.deepEqual(system.effects, [], 'a delete in the system temporary folder');
 });
+
+// PR #74 review round 4: the temporary folders are resolved once, not with four realpath calls on every shell call. The cache is asked again only when
+// the temporary folder or TMPDIR it was worked out from changes; a test still hands in its own stand-in.
+test('the temporary folders are worked out once and again only when the temporary folder or TMPDIR changes', async () => {
+  const { temporaryRootsCache } = await import('../agent/gateAdapter');
+  const env: Record<string, string | undefined> = { TMPDIR: '/stand-in/tmp-a' };
+  let tmp = '/stand-in/os-tmp';
+  let resolved = 0;
+  const roots = temporaryRootsCache({ tmpdir: () => tmp, env, realpath: (folder: string) => { resolved += 1; return folder; } });
+  const first = roots();
+  for (let call = 0; call < 100; call += 1) assert.equal(roots(), first, 'the same answer, not worked out again');
+  assert.equal(resolved, 4, 'four folders resolved once');
+  assert.ok(first.includes('/stand-in/os-tmp') && first.includes('/stand-in/tmp-a'));
+  env.TMPDIR = '/stand-in/tmp-b';
+  assert.ok(roots().includes('/stand-in/tmp-b'), 'a new TMPDIR is seen');
+  tmp = '/stand-in/os-tmp-2';
+  assert.ok(roots().includes('/stand-in/os-tmp-2'), 'a new temporary folder is seen');
+  assert.equal(resolved, 12, 'worked out once per change');
+});

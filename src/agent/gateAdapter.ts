@@ -80,7 +80,7 @@ export interface FloorShellContext {
 
 export interface FloorFactsInput extends Partial<FloorShellContext> {
   readonly command: string;
-  /** The system's temporary folders; absent, systemTemporaryRoots() is asked. A delete inside one is scratch work, not destruction. */
+  /** The system's temporary folders; absent, the process's own, worked out once (temporaryRootsCache). A delete inside one is scratch work, not destruction. */
   readonly temporaryRoots?: readonly string[];
   /** The folder this call works in. */
   readonly root: string;
@@ -108,6 +108,8 @@ export interface FloorCommandFacts {
 export interface TemporarySource {
   readonly tmpdir: () => string;
   readonly env: Readonly<Record<string, string | undefined>>;
+  /** Resolves a folder through links; realpathSync by default. Throws when it does not resolve. */
+  readonly realpath?: (folder: string) => string;
 }
 
 /**
@@ -116,15 +118,33 @@ export interface TemporarySource {
  * these rather than reading the environment itself (PR #74 review). Reads no file: realpath only.
  */
 export function systemTemporaryRoots(source: TemporarySource = { tmpdir, env: process.env }): string[] {
+  const resolve = source.realpath ?? ((folder: string) => realpathSync(folder));
   const written = [source.tmpdir(), source.env.TMPDIR, '/tmp', '/var/tmp'].filter((entry): entry is string => typeof entry === 'string' && entry !== '' && path.isAbsolute(entry)).map((entry) => path.resolve(entry));
   const out: string[] = [];
   for (const entry of written) {
     let real: string | undefined;
-    try { real = realpathSync(entry); } catch { real = undefined; }
+    try { real = resolve(entry); } catch { real = undefined; }
     for (const folder of real === undefined ? [entry] : [entry, real]) if (!out.includes(folder)) out.push(folder);
   }
   return out;
 }
+
+/**
+ * systemTemporaryRoots worked out once and kept (PR #74 review round 4: it resolves four folders, and the floor reads every shell call), worked out again
+ * only when the temporary folder or TMPDIR it came from changes.
+ */
+export function temporaryRootsCache(source: TemporarySource = { tmpdir, env: process.env }): () => readonly string[] {
+  let key: string | undefined;
+  let roots: readonly string[] = [];
+  return () => {
+    const now = `${source.tmpdir()}\u0000${source.env.TMPDIR ?? ''}`;
+    if (now !== key) { roots = Object.freeze(systemTemporaryRoots(source)); key = now; }
+    return roots;
+  };
+}
+
+/** The process's own temporary folders, kept by temporaryRootsCache: what the floor uses when its caller names none. */
+const processTemporaryRoots = temporaryRootsCache();
 
 /** The two readers the floor uses on a command. Given only by tests (a reader that throws) and by nothing else; each defaults to the real one. */
 export interface FloorReaders {
@@ -168,7 +188,7 @@ export async function floorFactsFor(input: FloorFactsInput, readers: FloorReader
       ...(input.packageScriptsAt === undefined ? {} : { packageScriptsAt: input.packageScriptsAt }),
       ...(input.trustedRoots === undefined ? {} : { trustedToolRoots: [...input.trustedRoots] }),
       ...(input.gsdPreambles === undefined ? {} : { gsdPreambles: [...input.gsdPreambles] }),
-      temporaryRoots: input.temporaryRoots === undefined ? systemTemporaryRoots() : [...input.temporaryRoots]
+      temporaryRoots: input.temporaryRoots === undefined ? processTemporaryRoots() : input.temporaryRoots
     });
   } catch {
     // The classifier is pure and should never throw; if it does, nothing is known about what the command does.
