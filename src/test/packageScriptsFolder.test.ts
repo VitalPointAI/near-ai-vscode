@@ -5,7 +5,7 @@
 // project, or a package.json that cannot be read gives unknown effects (the gate asks), never "a project script". Nothing here runs a command, and every
 // folder is under the test run's temporary folder.
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -87,22 +87,43 @@ test('a folder that cannot be known, is outside the project, or has a package.js
   assert.deepEqual(wrong.map((command) => `${command} → ${JSON.stringify(classify(command))}`), []);
 });
 
-test('the reader caches each package.json by folder and reads it again only when its size or time changes', () => {
+// PR #74 review round 8: a cache keyed on size and time missed a same-size rewrite within the clock's resolution. The file is read for every decision
+// (a package.json is small), and only its parse is kept, by the file's content, so a rewrite is seen whatever its size and time.
+test('the reader reads each package.json for every decision and keeps only its parse, by content', () => {
   const root = project();
   let reads = 0;
   const reader = new PackageScriptsReader({ statSync, readFileSync: ((file: string, encoding: BufferEncoding) => { reads += 1; return readFileSync(file, encoding); }) as typeof readFileSync });
   const sub = path.join(root, 'sub');
   const first = reader.at(sub, root);
   assert.equal(first.kind, 'found');
-  reader.at(sub, root);
+  assert.equal(reader.at(sub, root), first, 'unchanged content: the same parse');
   reader.at(path.join(sub, 'deeper'), root);
-  assert.equal(reads, 1, 'read once while unchanged');
+  assert.equal(reads, 3, 'read for every decision');
   packageJson(sub, { sync: 'echo nothing to push now' });
   const again = reader.at(sub, root);
-  assert.equal(reads, 2, 'read again after it changed');
   assert.deepEqual(again.kind === 'found' ? again.scripts : undefined, { sync: 'echo nothing to push now' });
   assert.equal(reader.at(path.join(root, 'broken'), root).kind, 'unreadable');
   assert.equal(reader.at(path.join(root, '..'), root).kind, 'outside');
+});
+
+test('a rewrite of the same size with the same time is seen', () => {
+  const root = project();
+  const reader = new PackageScriptsReader();
+  const folder = path.join(root, 'same');
+  packageJson(folder, { sync: 'echo aaaaaa' });
+  const file = path.join(folder, 'package.json');
+  const STAMP = 1_700_000_000; // whole seconds, so the time set back is exactly the time read
+  utimesSync(file, STAMP, STAMP);
+  const before = statSync(file);
+  assert.deepEqual((reader.at(folder, root) as { scripts: unknown }).scripts, { sync: 'echo aaaaaa' });
+  // Same length, same time: only the content differs.
+  writeFileSync(file, readFileSync(file, 'utf8').replace('echo aaaaaa', 'git push -f'));
+  utimesSync(file, STAMP, STAMP);
+  const after = statSync(file);
+  assert.equal(after.size, before.size);
+  assert.equal(after.mtimeMs, before.mtimeMs);
+  assert.deepEqual((reader.at(folder, root) as { scripts: unknown }).scripts, { sync: 'git push -f' });
+  assert.ok((classifyCommand('cd same && npm run sync', { root, cwd: root, packageScriptsAt: (at) => reader.at(at, root) }).effects ?? []).length > 0, 'and the floor sees the push');
 });
 
 test('through the gate in Full auto: cd into a package whose script pushes is a floor publish, an unknown folder asks, with nobody both are refused', async () => {

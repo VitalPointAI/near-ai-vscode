@@ -320,7 +320,7 @@ export class AgentRun {
   /** When this run was created: a script changed after it was written by the run (PERF-01). */
   private readonly startedAt = Date.now();
   /** The package scripts the floor reads, by project folder: read once per run, and again only when package.json has changed since (Pitfall 5). */
-  /** package.json scripts by file, for every folder a command runs a package manager in; each read again only when it changes (PR #74 review round 4). */
+  /** package.json scripts by file, for every folder a command runs a package manager in; each read for every decision, its parse kept by content (PR #74 review rounds 4 and 8). */
   private readonly packageScripts = new PackageScriptsReader();
   private readonly byName: Map<string, AgentTool<any>>;
   private readonly definitions: ToolDefinition[];

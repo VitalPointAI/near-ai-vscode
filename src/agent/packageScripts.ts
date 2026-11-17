@@ -1,7 +1,9 @@
 // The package.json scripts a package manager would run in a folder, for the shell classifier (PR #74 review round 4). npm, yarn, pnpm and bun use the
 // nearest package.json at or above the folder they run in, so `cd sub && npm run x` runs sub/package.json's x. The reader finds that file, reads its
-// scripts, and keeps them by file, read again only when the file's size or time changes (a run can rewrite a script and then run it). It only reads
+// scripts, and reads the file again for every decision (a run can rewrite a script and then run it, and a same-size rewrite within the clock's resolution
+// keeps its size and time, PR #74 review round 8); only the parse is kept, by the file's content. It only reads
 // package.json files; it runs nothing.
+import { createHash } from 'node:crypto';
 import { readFileSync as nodeReadFileSync, statSync as nodeStatSync } from 'node:fs';
 import * as path from 'node:path';
 import type { PackageScriptsAt } from './commandSafety';
@@ -12,7 +14,7 @@ export interface PackageScriptsFs {
   readonly readFileSync: typeof nodeReadFileSync;
 }
 
-interface Cached { readonly size: number; readonly mtimeMs: number; readonly result: PackageScriptsAt }
+interface Cached { readonly hash: string; readonly result: PackageScriptsAt }
 
 export class PackageScriptsReader {
   private readonly cache = new Map<string, Cached>();
@@ -35,10 +37,18 @@ export class PackageScriptsReader {
       if (info !== undefined) {
         if (!inside(project, current)) return { kind: 'outside', folder: current };
         if (!info.isFile()) return { kind: 'unreadable', folder: current };
+        // Read for every decision; parsed again only when the content differs from the last read.
+        let text: string;
+        try {
+          text = String(this.fs.readFileSync(file, 'utf8'));
+        } catch {
+          return { kind: 'unreadable', folder: current };
+        }
+        const hash = createHash('sha256').update(text).digest('hex');
         const cached = this.cache.get(file);
-        if (cached !== undefined && cached.size === info.size && cached.mtimeMs === info.mtimeMs) return cached.result;
-        const result = this.read(file, current);
-        this.cache.set(file, { size: info.size, mtimeMs: info.mtimeMs, result });
+        if (cached !== undefined && cached.hash === hash) return cached.result;
+        const result = this.parse(text, current);
+        this.cache.set(file, { hash, result });
         return result;
       }
       const parent = path.dirname(current);
@@ -47,9 +57,9 @@ export class PackageScriptsReader {
     }
   }
 
-  private read(file: string, folder: string): PackageScriptsAt {
+  private parse(text: string, folder: string): PackageScriptsAt {
     try {
-      const manifest = JSON.parse(String(this.fs.readFileSync(file, 'utf8'))) as { scripts?: unknown };
+      const manifest = JSON.parse(text) as { scripts?: unknown };
       const raw = manifest.scripts;
       const scripts = raw && typeof raw === 'object' && !Array.isArray(raw)
         ? Object.fromEntries(Object.entries(raw as Record<string, unknown>).filter((entry): entry is [string, string] => typeof entry[1] === 'string'))
