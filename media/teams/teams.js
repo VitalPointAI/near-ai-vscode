@@ -126,7 +126,7 @@
   const isDirty = () => Boolean(work && work.mode === 'editor' && JSON.stringify(work.draft) !== work.clean);
   // The builder has unsaved changes once its draft differs from how it started (or was last saved as a draft).
   const isWizardDirty = () => Boolean(work && work.mode === 'wizard' && JSON.stringify(work.draft) !== work.clean);
-  const wizardState = () => { const state = { draft: work.draft, step: work.step, target: work.target }; if (work.startingPoint) state.startingPoint = work.startingPoint; return state; };
+  const wizardState = () => { const state = { draft: work.draft, step: work.step, target: work.target }; if (work.startingPoint) state.startingPoint = work.startingPoint; if (work.path) state.path = work.path; return state; };
 
   // The host keeps what is unsaved if the panel is closed (it cannot ask then), so it always knows.
   function reportUnsaved() {
@@ -148,6 +148,15 @@
   let selectedNode = null;
   let openCard = null;
 
+  // How the builder starts (owner, 2026-11-17: "if I select an existing team I shouldn't have to name it and give it a description"). Its stages:
+  //   start ("How do you want to start?") -> pick (Use an existing team) -> Use as is (the host saves it; the builder closes)
+  //                                                                       -> Clone and modify -> steps (Purpose ... save)
+  //   start -> new (Create a new team) -> From scratch -> steps
+  //                                    -> pick (Clone an existing team) -> Clone and modify -> steps
+  //                                    -> Describe it, and AI drafts it -> the library's AI box
+  // Back goes one screen up from each of them: from the Purpose step to the screen the team was started from (work.path), and to Create a new team for
+  // a draft saved before this change (no path) or a team the AI drafted. Cancel and "All teams" leave from any of them, asking first when something
+  // is unsaved. A resumed draft opens straight on its step.
   function startWizard(target, resume, fromProposal) {
     hideBanner();
     // A new team has no shape or knowledge yet, so the previous team's are cleared here. Without this, "New team" showed the last team's hierarchy and
@@ -156,14 +165,44 @@
     currentKnowledge = null;
     selectedNode = null;
     openCard = null;
-    work = resume
-      ? { mode: 'wizard', target: resume.target, step: resume.step, maxStep: resume.step, draft: clone(resume.draft), startingPoint: resume.startingPoint || 'recommend', options: { locality: 'cloud', workShape: 'feature', riskLevel: 'medium' }, review: null }
-      : { mode: 'wizard', target: target === 'project' && ctx && ctx.hasProject ? 'project' : 'user', step: 0, maxStep: 0, draft: fromProposal ? clone(fromProposal.draft || fallbackDraft(fromProposal.proposal || fromProposal)) : { name: target === 'project' ? 'Project team' : '', description: '', members: [] }, startingPoint: 'recommend', options: { locality: 'cloud', workShape: 'feature', riskLevel: 'medium' }, review: null };
+    const options = { locality: 'cloud', workShape: 'feature', riskLevel: 'medium', goal: '' };
+    // Another builder: a draft aimed at the project from an earlier one is forgotten. (A proposal being used has already taken its target.)
+    askTarget = 'user';
+    pendingAsk = null;
+    if (resume) work = { mode: 'wizard', stage: 'steps', target: resume.target, step: resume.step, maxStep: resume.step, draft: clone(resume.draft), startingPoint: resume.startingPoint || 'recommend', path: resume.path || null, defaultName: '', options, review: null };
+    else if (fromProposal) work = { mode: 'wizard', stage: 'steps', target: target === 'project' && ctx && ctx.hasProject ? 'project' : 'user', step: 0, maxStep: 0, draft: clone(fromProposal.draft || fallbackDraft(fromProposal.proposal || fromProposal)), startingPoint: 'empty', path: null, defaultName: '', options, review: null };
+    else {
+      const name = target === 'project' ? 'Project team' : '';
+      work = { mode: 'wizard', stage: 'start', target: target === 'project' && ctx && ctx.hasProject ? 'project' : 'user', step: 0, maxStep: 0, draft: { name, description: '', members: [] }, startingPoint: 'empty', path: null, defaultName: name, options, review: null };
+    }
+    work.pickMode = 'existing';
+    // A draft cloned from a team goes back to the picker with that team still selected.
+    work.pick = resume && resume.path && resume.startingPoint && resume.startingPoint !== 'empty' ? resume.startingPoint : null;
+    work.cloned = null;
     work.clean = JSON.stringify(work.draft);
+    focusLater('step-heading');
     render();
     requestReview();
-    focusMain();
   }
+
+  /** Moves to one of the screens before the steps, and puts focus on its heading. */
+  function goStage(stage, pickMode) {
+    work.stage = stage;
+    if (pickMode) work.pickMode = pickMode;
+    work.awaitingStart = null;
+    // A request left behind is no longer waited on here (PR #75 review): the buttons are offered again, and the host still answers a second request.
+    work.busy = false;
+    focusLater('step-heading');
+    render();
+  }
+
+  /** Back from the Purpose step: the screen the team was started from. */
+  function backFromPurpose() {
+    if (work.path === 'existing') goStage('pick', 'existing');
+    else if (work.path === 'clone') goStage('pick', 'clone');
+    else goStage('new');
+  }
+
 
   function changed(structural) {
     if (structural) render(); else { updateDirty(); updateImprove(); }
@@ -199,6 +238,8 @@
   function leaveWork() {
     if (isWizardDirty()) { vscode.postMessage({ type: 'leave-wizard', wizard: wizardState() }); return; }
     if (isDirty()) { vscode.postMessage({ type: 'leave-editor', edit: { id: work.id, draft: work.draft, base: work.base } }); return; }
+    askTarget = 'user';
+    pendingAsk = null;
     work = null;
     render();
     focusMain();
@@ -218,6 +259,11 @@
   let lastFormat = '';
   let lastDepth = 'thorough';
   let lastPrivate = false;
+  // Where a team drafted by AI is saved: 'project' only when the person came straight from a builder saving to this project's team (Describe it, and
+  // AI drafts it). Forgotten whenever the builder is left another way, a team or another builder is opened, or the proposal is discarded (PR #75
+  // review), so a later draft from the library's own box is one of the person's teams. `pendingAsk` holds it while the host asks about unsaved work.
+  let askTarget = 'user';
+  let pendingAsk = null;
 
   // The host computes the draft from the proposal (src/agent/teamBuilder.ts) and sends it with the proposal, so the two cannot drift. This is only a
   // fallback for an older host that does not send it: the page must never throw, even then.
@@ -237,6 +283,7 @@
     if (drafting) { box.append(el('p', 'hint', 'Drafting the team from what you wrote...')); return box; }
     box.append(el('h2', '', 'What should this team be able to produce?'));
     box.append(el('p', 'hint', 'Describe it in your own words. The team is drafted from this: its name, its members and their roles, what each one hands back, and the outputs you get.'));
+    if (askTarget === 'project') box.append(el('p', 'hint', 'The team you draft here is saved as this project\'s team unless you choose otherwise.'));
     const idea = el('textarea', 'ask-idea', '');
     idea.id = 'ask-idea'; idea.rows = 3;
     idea.value = lastIdea;
@@ -300,8 +347,10 @@
     }
     const actions = el('div', 'ask-actions');
     actions.append(
-      button('Use this team', () => { const from = proposal; proposal = null; startWizard('user', null, from); }, { primary: true }),
-      button('Start over', () => { proposal = null; drafting = false; render(); }, { link: true })
+      // A team drafted from the builder keeps where that builder was saving to (its entry point, or the person's choice there); one drafted from the
+      // library's own box is one of the person's teams, as before (PR #75 review).
+      button('Use this team', () => { const from = proposal; const target = askTarget; proposal = null; askTarget = 'user'; startWizard(target, null, from); }, { primary: true }),
+      button('Start over', () => { proposal = null; drafting = false; askTarget = 'user'; render(); }, { link: true })
     );
     box.append(actions);
     return box;
@@ -444,73 +493,14 @@
     where.append(el('legend', '', 'Save it as'));
     [['project', 'This project\'s team', 'Saved in .planning/.near-ai/team.md; run with /team:project.'], ['user', 'One of my teams', 'Reusable in any project; run with /team:<name>.']].forEach(([value, label, hint]) => {
       const option = el('label', 'choice' + (work.target === value ? ' selected' : ''));
-      const radio = el('input'); radio.type = 'radio'; radio.name = 'target'; radio.value = value; radio.checked = work.target === value;
+      const radio = el('input'); radio.type = 'radio'; radio.name = 'target'; radio.value = value; radio.checked = work.target === value; radio.id = 'target-' + value;
       if (value === 'project' && !(ctx && ctx.hasProject)) { radio.disabled = true; hint = 'Open a project folder to save a project team.'; }
       radio.addEventListener('change', () => { work.target = value; render(); });
       option.append(radio, el('span', 'choice-label', label), el('span', 'hint', hint));
       where.append(option);
     });
     root.append(where);
-
-    const start = el('fieldset', 'choices starting');
-    start.append(el('legend', '', 'Starting point'), el('p', 'hint', 'Pick one to fill in members you can then change: one of your saved teams, or one the extension provides. You can also add every member yourself.'));
-    const entries = pickerEntries();
-    // All, My teams (saved from any project) or Built-in (provided by the extension).
-    const filter = el('div', 'picker-filter'); filter.setAttribute('role', 'radiogroup'); filter.setAttribute('aria-label', 'Show starting points');
-    for (const [value, label] of PICKER_FILTERS) {
-      const count = entries.filter((entry) => value === 'all' || entry.source === value).filter((entry) => entry.id !== 'empty').length;
-      const option = el('label', 'filter' + (pickerFilter === value ? ' selected' : ''));
-      const radio = el('input'); radio.type = 'radio'; radio.name = 'picker-filter'; radio.value = value; radio.checked = pickerFilter === value; radio.id = 'picker-filter-' + value;
-      radio.addEventListener('change', () => {
-        pickerFilter = value;
-        // The chosen starting point stays chosen only while it is shown, so Next never applies one the person cannot see.
-        const visible = visibleEntries();
-        if (!visible.some((entry) => entry.id === work.startingPoint) && visible.length) work.startingPoint = visible[0].id;
-        render();
-      });
-      option.append(radio, el('span', '', label + ' (' + count + ')'));
-      filter.append(option);
-    }
-    start.append(filter);
-    const groups = [['library', 'My teams'], ['recommend', 'Recommended'], ['project-type', 'For this kind of project'], ['gsd', 'Built from Open-GSD roles'], ['empty', 'Blank']];
-    const visible = visibleEntries();
-    if (pickerFilter === 'mine' && !visible.some((entry) => entry.source === 'mine')) start.append(el('p', 'hint empty-picker', NO_SAVED_TEAMS));
-    for (const [group, title] of groups) {
-      const points = visible.filter((point) => point.group === group);
-      if (!points.length) continue;
-      start.append(el('h4', '', title));
-      const grid = el('div', 'choice-grid');
-      for (const point of points) {
-        const option = el('label', 'choice' + (work.startingPoint === point.id ? ' selected' : ''));
-        const radio = el('input'); radio.type = 'radio'; radio.name = 'starting-point'; radio.value = point.id; radio.checked = work.startingPoint === point.id;
-        radio.addEventListener('change', () => { work.startingPoint = point.id; render(); });
-        option.append(radio, el('span', 'choice-label', point.label));
-        if (point.origin) option.append(badge(point.origin, point.imported ? 'kind imported' : 'kind'));
-        if (point.description) option.append(el('span', 'hint', point.description));
-        if (point.members.length) option.append(el('span', 'hint small', point.memberCount + ' member' + (point.memberCount === 1 ? '' : 's') + ': ' + point.members.join(', ')));
-        // A saved team can be shared from here too (one portable file to send; the host checks it and asks about the knowledge graph).
-        if (point.teamId) {
-          const cell = el('div', 'choice-cell');
-          cell.append(option, button('Share…', () => vscode.postMessage({ type: 'share', id: point.teamId }), { link: true, label: 'Share ' + point.label }));
-          grid.append(cell);
-        } else grid.append(option);
-      }
-      start.append(grid);
-    }
-    const opts = el('div', 'inline-fields');
-    if (work.startingPoint !== 'empty') opts.append(field('Where models may run', select([{ value: 'cloud', label: 'NEAR AI Cloud' }, { value: 'local', label: 'Local runtime only' }, { value: 'hybrid', label: 'Both' }], work.options.locality, (value) => { work.options.locality = value; }, 'f-locality')));
-    if (work.startingPoint === 'recommend') {
-      opts.append(field('Kind of work', select(['feature', 'bugfix', 'refactor', 'research', 'release'].map((value) => ({ value, label: value[0].toUpperCase() + value.slice(1) })), work.options.workShape, (value) => { work.options.workShape = value; }, 'f-shape')));
-      opts.append(field('Risk', select([{ value: 'low', label: 'Low' }, { value: 'medium', label: 'Medium' }, { value: 'high', label: 'High (adds a security member)' }], work.options.riskLevel, (value) => { work.options.riskLevel = value; }, 'f-risk')));
-    }
-    start.append(opts);
-    if (work.startingPoint !== 'empty') {
-      const applyRow = el('div', 'actions');
-      applyRow.append(button(draft.members.length ? 'Replace members with this starting point' : 'Use this starting point', () => applyStartingPoint(false), { id: 'apply-start' }));
-      start.append(applyRow);
-    }
-    if (work.startingPoint.startsWith('type:')) start.append(el('p', 'hint', 'Saving this as the project team also writes this project type\'s guidance to AGENTS.md (plan, execute, red team, verify, audit, release).'));
-    root.append(start);
+    if ((work.startingPoint || '').startsWith('type:')) root.append(el('p', 'hint', 'Saving this as the project team also writes this project type\'s guidance to AGENTS.md (plan, execute, red team, verify, audit, release).'));
   }
 
   // The team's own private marking (owner, 2026-11-16): every member runs only on a private model, and the team is sent only to a private model when the
@@ -536,19 +526,211 @@
   /** The picker's entries from the host; before the first state arrives, the built-in starting points. */
   function pickerEntries() {
     if (picker) return picker;
-    return (ctx ? ctx.startingPoints : []).map((point) => ({ id: point.id, source: 'builtin', group: point.group, label: point.label, description: point.description, members: point.members, memberCount: point.members.length, origin: 'Built in' }));
+    // Names come from the host (PR #75 review): the page has no naming rules of its own, so what it shows is what the host saves.
+    return (ctx ? ctx.startingPoints : []).map((point) => ({ id: point.id, source: 'builtin', group: point.group, label: point.label, name: point.name || point.label, cloneName: point.name || point.label, description: point.description, members: point.members, memberCount: point.members.length, origin: 'Built in' }));
   }
-  /** The entries the current filter shows. "Start empty" is not a team, so it shows under every filter. */
+  /** The teams the picker offers under the current filter. "Start empty" is not a team: From scratch is its own choice now. */
   function visibleEntries() {
-    return pickerEntries().filter((entry) => pickerFilter === 'all' || entry.source === pickerFilter || entry.id === 'empty');
+    return pickerEntries().filter((entry) => entry.id !== 'empty' && (pickerFilter === 'all' || entry.source === pickerFilter));
+  }
+  const entryName = (entry) => entry.name || entry.label;
+
+  // ---------- the screens before the steps ----------
+  function startChoices(items) {
+    const list = el('div', 'start-choices'); list.setAttribute('role', 'group'); list.setAttribute('aria-labelledby', 'step-heading');
+    for (const [id, label, hint, onClick] of items) {
+      const node = el('button', 'start-choice'); node.type = 'button'; node.id = id;
+      node.setAttribute('aria-label', label);
+      const note = el('span', 'hint', hint); note.id = id + '-hint';
+      node.setAttribute('aria-describedby', note.id);
+      node.append(el('span', 'choice-label', label), note);
+      node.addEventListener('click', onClick);
+      list.append(node);
+    }
+    return list;
+  }
+
+  function renderStart(root) {
+    const titles = { start: 'How do you want to start?', new: 'Create a new team', pick: work.pickMode === 'existing' ? 'Use an existing team' : 'Clone an existing team' };
+    const panel = el('section', 'panel start'); panel.setAttribute('aria-labelledby', 'step-heading');
+    const heading = el('h2', '', titles[work.stage]); heading.id = 'step-heading'; heading.setAttribute('tabindex', '-1');
+    panel.append(heading);
+    if (work.stage === 'start') {
+      panel.append(el('p', 'hint', 'Use a team that already exists, or make a new one with its own name.'));
+      panel.append(startChoices([
+        ['start-existing', 'Use an existing team', 'One of your saved teams, or one the extension provides. Use it as it is, or clone it and change it.', () => goStage('pick', 'existing')],
+        ['start-new', 'Create a new team', 'Give it a name and its members: from scratch, or from a copy of an existing team.', () => goStage('new')]
+      ]));
+    } else if (work.stage === 'new') {
+      panel.append(el('p', 'hint', 'A new team gets its own name, and you choose where to save it.'));
+      panel.append(startChoices([
+        ['new-scratch', 'From scratch', work.draft.members.length && !work.cloned ? 'Keep the ' + work.draft.members.length + ' member' + (work.draft.members.length === 1 ? '' : 's') + ' your team has now, and add or remove any yourself.' : 'Start with no members and add each one yourself.', startFromScratch],
+        ['new-clone', 'Clone an existing team', 'Start from a copy of one of your teams or a built-in one, then change it.', () => goStage('pick', 'clone')],
+        ['new-ai', 'Describe it, and AI drafts it', 'Say what the team should produce. AI proposes a team for you to look over before anything is saved.', describeToAi]
+      ]));
+    } else sectionPicker(panel);
+    root.append(panel);
+    const footer = el('div', 'footer');
+    if (work.stage !== 'start') footer.append(button('Back', () => goStage(work.stage === 'pick' && work.pickMode === 'clone' ? 'new' : 'start'), {}));
+    footer.append(button('Cancel', leaveWork, { link: true }));
+    root.append(footer);
+  }
+
+  /** The existing teams: the person's saved teams and the built-in ones, filtered and grouped. A selected team shows what can be done with it. */
+  function sectionPicker(root) {
+    const existing = work.pickMode === 'existing';
+    root.append(el('p', 'hint', existing ? 'Pick a team. Use it as it is, or clone it into a new team and change it.' : 'Pick the team to copy. You name the copy, and can change everything in it before it is saved.'));
+    const entries = pickerEntries().filter((entry) => entry.id !== 'empty');
+    // All, My teams (saved from any project) or Built-in (provided by the extension).
+    const filter = el('div', 'picker-filter'); filter.setAttribute('role', 'radiogroup'); filter.setAttribute('aria-label', 'Show teams');
+    for (const [value, label] of PICKER_FILTERS) {
+      const count = entries.filter((entry) => value === 'all' || entry.source === value).length;
+      const option = el('label', 'filter' + (pickerFilter === value ? ' selected' : ''));
+      const radio = el('input'); radio.type = 'radio'; radio.name = 'picker-filter'; radio.value = value; radio.checked = pickerFilter === value; radio.id = 'picker-filter-' + value;
+      radio.addEventListener('change', () => {
+        pickerFilter = value;
+        // The selected team stays selected only while it is shown, so its buttons never act on a team the person cannot see.
+        if (work.pick && !visibleEntries().some((entry) => entry.id === work.pick)) work.pick = null;
+        render();
+      });
+      option.append(radio, el('span', '', label + ' (' + count + ')'));
+      filter.append(option);
+    }
+    root.append(filter);
+    const groups = [['library', 'My teams'], ['recommend', 'Recommended'], ['project-type', 'For this kind of project'], ['gsd', 'Built from Open-GSD roles']];
+    const visible = visibleEntries();
+    if (pickerFilter === 'mine' && !visible.length) root.append(el('p', 'hint empty-picker', NO_SAVED_TEAMS));
+    // The radios share one name, so they are one group to the keyboard and a screen reader; the selected team's buttons and answers sit beside them.
+    const list = el('div', 'starting'); list.setAttribute('role', 'group'); list.setAttribute('aria-label', 'Teams');
+    for (const [group, title] of groups) {
+      const points = visible.filter((point) => point.group === group);
+      if (!points.length) continue;
+      list.append(el('h4', '', title));
+      const grid = el('div', 'choice-grid');
+      for (const point of points) {
+        const selected = work.pick === point.id;
+        const cell = el('div', 'choice-cell' + (selected ? ' selected' : ''));
+        const option = el('label', 'choice' + (selected ? ' selected' : ''));
+        const radio = el('input'); radio.type = 'radio'; radio.name = 'starting-point'; radio.value = point.id; radio.checked = selected; radio.id = 'pick-' + point.id.replace(/[^a-z0-9-]/g, '-');
+        // What the team is for belongs to the team it was typed for (PR #75 review): choosing another one starts it empty.
+        radio.addEventListener('change', () => { if (work.pick !== point.id) work.options.goal = ''; work.pick = point.id; render(); });
+        option.append(radio, el('span', 'choice-label', point.label));
+        if (point.origin) option.append(badge(point.origin, point.imported ? 'kind imported' : 'kind'));
+        if (point.description) option.append(el('span', 'hint', point.description));
+        if (point.members.length) option.append(el('span', 'hint small', point.memberCount + ' member' + (point.memberCount === 1 ? '' : 's') + ': ' + point.members.join(', ')));
+        cell.append(option);
+        // A saved team can be shared from here too (one portable file to send; the host checks it and asks about the knowledge graph).
+        if (point.teamId) cell.append(button('Share…', () => vscode.postMessage({ type: 'share', id: point.teamId }), { link: true, label: 'Share ' + point.label }));
+        if (selected) cell.append(pickActions(point));
+        grid.append(cell);
+      }
+      list.append(grid);
+    }
+    root.append(list);
+  }
+
+  /**
+   * What can be done with the selected team. A built-in team is made from a few answers (what it is for, where its models run, and for the
+   * recommendation the kind of work and its risk), so those are asked here, before Use as is or Clone and modify, and nothing else is.
+   */
+  function pickActions(point) {
+    const existing = work.pickMode === 'existing';
+    const name = entryName(point);
+    const box = el('div', 'pick-details');
+    if (point.source === 'builtin') {
+      const fields = el('div', 'inline-fields');
+      fields.append(field('What the team is for', input(work.options.goal, (value) => { work.options.goal = value.replace(/[\r\n]+/g, ' '); }, { id: 'f-goal', maxlength: '400', autocomplete: 'off' }), 'Optional. It is written into the members\' instructions.'));
+      fields.append(field('Where models may run', select([{ value: 'cloud', label: 'NEAR AI Cloud' }, { value: 'local', label: 'Local runtime only' }, { value: 'hybrid', label: 'Both' }], work.options.locality, (value) => { work.options.locality = value; }, 'f-locality')));
+      if (point.id === 'recommend') {
+        fields.append(field('Kind of work', select(['feature', 'bugfix', 'refactor', 'research', 'release'].map((value) => ({ value, label: value[0].toUpperCase() + value.slice(1) })), work.options.workShape, (value) => { work.options.workShape = value; }, 'f-shape')));
+        fields.append(field('Risk', select([{ value: 'low', label: 'Low' }, { value: 'medium', label: 'Medium' }, { value: 'high', label: 'High (adds a security member)' }], work.options.riskLevel, (value) => { work.options.riskLevel = value; }, 'f-risk')));
+      }
+      box.append(fields);
+    }
+    const actions = el('div', 'actions');
+    if (existing) actions.append(button('Use as is', () => useAsIs(point), { primary: true, label: 'Use ' + name + ' as is', id: 'use-as-is', disabled: work.busy }));
+    actions.append(button('Clone and modify', () => cloneEntry(point), { primary: !existing, label: 'Clone ' + name + ' and modify it', id: 'clone-team', disabled: work.busy }));
+    if (work.busy) { box.setAttribute('aria-busy', 'true'); actions.append(el('span', 'hint', 'Waiting for the answer…')); }
+    box.append(actions);
+    if (existing) {
+      box.append(el('p', 'hint', ctx && ctx.hasProject
+        ? 'Use as is makes it this project\'s team (run it with /team:project) without changing it. If the project already has a team, you are asked first, and the old one stays in its history.'
+        : point.source === 'builtin' ? (point.saveAs ? 'Use as is saves it to My teams as "' + point.saveAs + '" and opens it in chat.' : 'Use as is saves it to My teams under its own name and opens it in chat.') : 'Use as is opens it in chat.'));
+    }
+    const count = work.draft.members.length;
+    if (count) box.append(el('p', 'hint', 'Clone and modify replaces the ' + count + ' member' + (count === 1 ? '' : 's') + ' your team has now.'));
+    if (point.id.startsWith('type:')) box.append(el('p', 'hint', 'As this project\'s team it also writes this project type\'s guidance to AGENTS.md (plan, execute, red team, verify, audit, release).'));
+    return box;
+  }
+
+  function startAnswers(point, message) {
+    if (point.source !== 'builtin') return message;
+    message.goal = work.options.goal.slice(0, 400);
+    message.locality = work.options.locality;
+    if (point.id === 'recommend') { message.workShape = work.options.workShape; message.riskLevel = work.options.riskLevel; }
+    return message;
+  }
+
+  /** Use as is: the host makes it this project's team, or puts it in the chat. Unsaved work in the builder is only dropped after the host asks. */
+  function useAsIs(point) {
+    if (work.busy) return;
+    const message = startAnswers(point, { type: 'use-team', id: point.id });
+    if (isWizardDirty()) message.discard = true;
+    announce('Using ' + entryName(point) + ' as it is.');
+    vscode.postMessage(message);
+    // Until the host answers (the team, used, declined, or an error), Use as is and Clone and modify wait, so a double click sends one request.
+    work.busy = true;
+    render();
+  }
+
+  /** Clone and modify: the host sends the team's members, and the Purpose step opens with the copy's name and description filled in. */
+  function cloneEntry(point) {
+    if (work.busy) return;
+    const label = entryName(point);
+    work.awaitingStart = { id: point.id, clone: true, path: work.pickMode === 'existing' ? 'existing' : 'clone', label, name: point.cloneName || label, goal: point.source === 'builtin' ? work.options.goal : '' };
+    const message = startAnswers(point, { type: 'starting-point', id: point.id, goal: '', locality: work.options.locality });
+    vscode.postMessage(message);
+    work.busy = true;
+    render();
+  }
+
+  /** From scratch: no members. Members, a name and a description that a clone filled in are cleared; anything the person wrote is kept. */
+  function startFromScratch() {
+    if (work.cloned) {
+      work.draft.members = [];
+      if (work.cloned.name !== undefined && work.draft.name === work.cloned.name) work.draft.name = work.defaultName;
+      if (work.cloned.description !== undefined && work.draft.description === work.cloned.description) work.draft.description = '';
+      work.cloned = null;
+    }
+    work.startingPoint = 'empty';
+    work.projectType = null;
+    work.path = 'scratch';
+    work.stage = 'steps';
+    work.step = 0;
+    focusLater('step-heading');
+    render();
+    requestReview();
+  }
+
+  /** Describe it, and AI drafts it: the library's AI box (leaving the builder asks first when something is unsaved). */
+  function describeToAi() {
+    // With unsaved work the host asks first: the target is kept only if the person then leaves for the AI box.
+    if (isWizardDirty()) { pendingAsk = work.target; leaveWork(); return; }
+    askTarget = work.target;
+    work = null;
+    focusLater('ask-idea');
+    render();
   }
 
   function renderHeaderName() { if (work && work.mode === 'editor') { const crumbs = $('crumbs'); const last = crumbs.children && crumbs.children[crumbs.children.length - 1]; if (last) last.textContent = work.draft.name || 'Team'; } }
 
-  function applyStartingPoint(thenNext) {
-    if (work.startingPoint === 'empty') { if (thenNext) goStep(1); return; }
-    work.awaitingStart = { next: thenNext };
-    const message = { type: 'starting-point', id: work.startingPoint, goal: work.draft.description, locality: work.options.locality };
+  /**
+   * A draft saved before the builder asked how to start can be on its Purpose step with a starting point chosen and no members yet: Next fills them in
+   * from it, as it did when the draft was saved.
+   */
+  function applyLegacyStart() {
+    work.awaitingStart = { id: work.startingPoint, legacy: true };
+    const message = { type: 'starting-point', id: work.startingPoint, goal: work.draft.description.slice(0, 400), locality: work.options.locality };
     if (work.startingPoint === 'recommend') { message.workShape = work.options.workShape; message.riskLevel = work.options.riskLevel; }
     vscode.postMessage(message);
   }
@@ -608,7 +790,7 @@
       list.append(item);
     });
     root.append(list);
-    if (!draft.members.length) root.append(el('p', 'hint empty-inline', 'No members yet. Add one, or go back and pick a starting point.'));
+    if (!draft.members.length) root.append(el('p', 'hint empty-inline', 'No members yet. Add one, or go back to the start and clone an existing team.'));
     root.append(button('Add member', () => {
       let n = draft.members.length + 1;
       while (draft.members.some((member) => member.name === 'member-' + n)) n += 1;
@@ -892,6 +1074,7 @@
 
   // ---------- the wizard ----------
   function goStep(step) {
+    work.stage = 'steps';
     work.step = Math.max(0, Math.min(STEPS.length - 1, step));
     work.maxStep = Math.max(work.maxStep, work.step);
     render();
@@ -899,6 +1082,7 @@
   }
 
   function renderWizard(root) {
+    if (work.stage !== 'steps') { renderStart(root); return; }
     const stepper = el('ol', 'stepper'); stepper.setAttribute('aria-label', 'Steps');
     STEPS.forEach((label, index) => {
       const item = el('li', index === work.step ? 'current' : index < work.step ? 'done' : '');
@@ -913,16 +1097,16 @@
     const panel = el('section', 'panel'); panel.setAttribute('aria-labelledby', 'step-heading');
     const heading = el('h2', '', STEPS[work.step]); heading.id = 'step-heading'; heading.setAttribute('tabindex', '-1');
     panel.append(heading);
-    const HINTS = ['Name the team, say what it is for, and pick a starting point.', 'Who is on the team and what each is responsible for.', 'Which model each member runs on.', 'What each member may use, and what will run or ask under your approval mode.', 'Fine-tune each member\'s instructions, check the result, and save.'];
+    const HINTS = ['Name the new team, say what it is for, and choose where to save it.', 'Who is on the team and what each is responsible for.', 'Which model each member runs on.', 'What each member may use, and what will run or ask under your approval mode.', 'Fine-tune each member\'s instructions, check the result, and save.'];
     panel.append(el('p', 'hint', HINTS[work.step]));
     [sectionPurpose, sectionMembers, sectionModels, sectionTools, (node) => { node.append(improveEntry()); sectionInstructions(node); sectionChecks(node, true); }][work.step](panel);
     root.append(panel);
     const footer = el('div', 'footer');
-    footer.append(button('Back', () => goStep(work.step - 1), { disabled: work.step === 0 }), button('Save draft', () => { work.clean = JSON.stringify(work.draft); reportUnsaved(); vscode.postMessage({ type: 'save-draft', draft: work.draft, step: work.step, target: work.target, startingPoint: work.startingPoint }); }, {}), button('Cancel', leaveWork, { link: true }));
+    footer.append(button('Back', () => { if (work.step === 0) backFromPurpose(); else goStep(work.step - 1); }, {}), button('Save draft', () => { work.clean = JSON.stringify(work.draft); reportUnsaved(); vscode.postMessage(Object.assign({ type: 'save-draft' }, wizardState())); }, {}), button('Cancel', leaveWork, { link: true }));
     const spacer = el('span', 'spacer'); footer.append(spacer);
     const count = el('span', 'hint'); count.id = 'error-count'; footer.append(count);
     if (work.step < STEPS.length - 1) footer.append(button('Next: ' + STEPS[work.step + 1], () => {
-      if (work.step === 0 && !work.draft.members.length && work.startingPoint !== 'empty') { applyStartingPoint(true); return; }
+      if (work.step === 0 && !work.path && !work.draft.members.length && work.startingPoint && work.startingPoint !== 'empty') { applyLegacyStart(); return; }
       goStep(work.step + 1);
     }, { primary: true, id: 'next' }));
     else footer.append(button(work.target === 'project' ? 'Save project team' : 'Save team', save, { primary: true, id: 'save' }));
@@ -1122,7 +1306,7 @@
     if (!work) return;
     if (work.mode === 'editor') { vscode.postMessage({ type: 'save', draft: work.draft, id: work.id, base: work.base }); return; }
     const message = { type: 'create', draft: work.draft, target: work.target };
-    if (work.target === 'project' && work.startingPoint.startsWith('type:') && work.projectType) message.projectType = { id: work.projectType, goal: work.draft.description };
+    if (work.target === 'project' && (work.startingPoint || '').startsWith('type:') && work.projectType) message.projectType = { id: work.projectType, goal: work.draft.description };
     vscode.postMessage(message);
   }
 
@@ -1444,20 +1628,26 @@
         if (work) requestReview();
         if (message.kept) showKept(message.kept);
         break;
-      case 'left':
-        // The host's answer to leaving with unsaved changes: stay, or go back to the library.
+      case 'left': {
+        // The host's answer to leaving with unsaved changes: stay, or go back to the library (to the AI box when that is where the person was going).
+        const toAsk = pendingAsk;
+        pendingAsk = null;
         if (message.choice === 'stay' || !work) break;
+        askTarget = toAsk || 'user';
         work = null;
         if (message.savedDraft) savedDraft = message.savedDraft;
+        if (toAsk) focusLater('ask-idea');
         render();
         if (message.notice) { showBanner(message.notice, 'info'); announce(message.notice); }
-        focusMain();
+        if (!toAsk) focusMain();
         break;
+      }
       case 'library':
         lib = message.library;
         if (message.picker) picker = message.picker;
-        // The picker on the first step of the builder lists saved teams, so it is drawn again when the library changes there.
-        if (!work || (work.mode === 'wizard' && work.step === 0)) render();
+        // The builder's picker lists saved teams, so it is drawn again when the library changes there; a selected team that has gone is unselected.
+        if (work && work.mode === 'wizard' && work.pick && !pickerEntries().some((entry) => entry.id === work.pick)) work.pick = null;
+        if (!work || (work.mode === 'wizard' && work.stage === 'pick')) render();
         break;
       case 'start-wizard':
         if (isDirty() || isWizardDirty()) { showBanner('Save or discard your changes first, then set up the project team.', 'warning'); break; }
@@ -1470,6 +1660,8 @@
         currentLive = message.liveRun === true;
         currentKnowledge = message.knowledge || null;
         selectedNode = null;
+        askTarget = 'user';
+        pendingAsk = null;
         openEditor(message, true);
         if (keptEdit && keptEdit.id === message.id) {
           // Reopening a team whose changes were kept: they come back as unsaved changes.
@@ -1580,18 +1772,55 @@
         updateDirty();
         break;
       case 'starting-point': {
-        if (!work || work.mode !== 'wizard') break;
-        const draft = message.draft;
-        work.draft.members = draft.members;
-        if (!work.draft.description.trim() && draft.description) work.draft.description = draft.description;
-        work.projectType = message.projectType || null;
-        const next = work.awaitingStart && work.awaitingStart.next;
+        // Any reply frees Use as is and Clone and modify again, even one that is dropped below.
+        if (work && work.mode === 'wizard' && work.busy) { work.busy = false; if (work.stage === 'pick') render(); }
+        // Only the reply to the request still waiting: one for a screen the person has left (Back, another team) is dropped.
+        const pending = work && work.mode === 'wizard' ? work.awaitingStart : null;
+        if (!pending || pending.id !== message.id) break;
+        // The person left the picker: this reply is dropped for good, so a later one cannot move the builder either (PR #75 review).
+        if (pending.clone && work.stage !== 'pick') { work.awaitingStart = null; break; }
         work.awaitingStart = null;
-        announce('Added ' + draft.members.length + ' members from the starting point.');
-        if (next) goStep(1); else { render(); }
+        const draft = message.draft;
+        work.projectType = message.projectType || null;
+        work.startingPoint = message.id;
+        if (pending.legacy) {
+          work.draft.members = draft.members;
+          if (!work.draft.description.trim() && draft.description) work.draft.description = draft.description;
+          announce('Added ' + draft.members.length + ' members from the starting point.');
+          goStep(1);
+          requestReview();
+          break;
+        }
+        // Clone and modify: the members are the team's; the name and description are filled in where they are empty, the default, or what an
+        // earlier clone filled in, so nothing the person wrote is replaced.
+        const before = work.cloned || {};
+        const cloned = {};
+        // The copy's name is the host's, resolved against the library when it sent the members.
+        if (!work.draft.name.trim() || work.draft.name === work.defaultName || work.draft.name === before.name) { work.draft.name = (message.cloneName || pending.name).slice(0, 80); cloned.name = work.draft.name; }
+        const description = (pending.goal || '').trim() || draft.description || '';
+        if (!work.draft.description.trim() || work.draft.description === before.description) { work.draft.description = description.slice(0, 600); cloned.description = work.draft.description; }
+        work.draft.members = draft.members;
+        work.cloned = cloned;
+        work.path = pending.path;
+        work.stage = 'steps';
+        work.step = 0;
+        announce('Cloned ' + pending.label + ': ' + draft.members.length + ' member' + (draft.members.length === 1 ? '' : 's') + '. Name the new team, say what it is for, and choose where to save it.');
+        focusLater('step-heading');
+        render();
         requestReview();
         break;
       }
+      case 'used':
+        // Use as is was declined (the project's team, or the builder's unsaved work, is kept): nothing changed, so the builder stays where it is.
+        if (message.declined) { if (work && work.mode === 'wizard') { work.busy = false; render(); } if (message.text) { showBanner(message.text, 'info'); announce(message.text); } break; }
+        askTarget = 'user';
+        pendingAsk = null;
+        // Use as is finished without a project team to open (a saved team put in the chat, or a built-in saved to My teams first): back to the library.
+        if (work && work.mode === 'wizard') work = null;
+        flash = message.focus || null;
+        render();
+        if (message.text) { showBanner(message.text, 'info'); announce(message.text); }
+        break;
       case 'external-change': {
         if (!work || work.mode !== 'editor' || work.id !== message.id) break;
         work.versions = message.versions || work.versions;
@@ -1629,6 +1858,8 @@
         // A failed draft leaves the ask box replaced by "Drafting the team..." with no way back, because only team-proposal cleared this: clear it and
         // draw the box again so the person can retry or change what they wrote.
         if (drafting) { drafting = false; if (!work) render(); }
+        // A starting point that could not be read, or a Use as is that failed: their buttons work again.
+        if (work && work.mode === 'wizard') { work.awaitingStart = null; if (work.busy) { work.busy = false; render(); } }
         break;
     }
   });

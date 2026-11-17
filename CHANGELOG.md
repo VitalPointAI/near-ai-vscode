@@ -39,6 +39,24 @@ to undo, and no mode lets an agent near the places where your keys and passwords
   query parameter named for one. SECURITY.md lists what is removed and what is not.
 - **Team Studio follows the folder you have open.** Open another folder while Team Studio is open
   and it lists, tests and saves that folder's team.
+- **Using a team you already have no longer asks you to name it.** Building a team used to open
+  on its name, what it is for and where to save it, even when you only wanted a team you already
+  had. It now asks how you want to start. **Use an existing team** lists your saved teams and the
+  built-in ones; pick one, then **Use as is** or **Clone and modify**. Use as is makes it this
+  project's team, asking first if the project already has one (the old one stays in its history),
+  or, with no folder open, puts it in the chat; a built-in team is saved to My teams under its own
+  name first. A built-in team that is made from your answers asks only those, next to the buttons.
+  **Create a new team** starts from scratch, from a clone of an existing team, or from a description
+  the AI drafts a team from. Only a new team or a clone asks for a name, what it is for and where to
+  save it; a clone of one of your teams starts as "Copy of" that team, and a clone of a built-in team
+  starts under the built-in's name. Back returns to the screen before at every step,
+  and a draft you saved earlier opens on the step you left it. A team drafted by AI from the builder
+  for this project is saved as this project's team unless you choose otherwise.
+- **A team is not saved when its origin cannot be checked.** If Team Studio cannot check whether a
+  team's members came from an imported team you have not approved, it now says so and saves
+  nothing, instead of saving the team without the question it asks before such a team first runs.
+- **Replacing a project's team always keeps the old one.** When the old team and the new one were
+  kept as versions within the same millisecond, the new version could overwrite the old one.
 
 ## 0.4.28
 

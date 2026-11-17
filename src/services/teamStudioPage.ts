@@ -43,7 +43,8 @@ export type StudioTarget = 'project' | 'user';
 /** `words`: what the tool's manifest says it can do, from the same sentences the Tools page shows (GATE-03, D-07); the member card shows them beside the tool. */
 export interface StudioTool { name: string; description: string; capability: string; status: ToolStatus; statusText: string; words: string[] }
 export interface StudioRole { id: string; label: string; description: string; source: 'team' | 'gsd'; suggestion: string; tools: string[] | null; model: string }
-export interface StudioStartingPoint { id: string; group: 'recommend' | 'project-type' | 'gsd' | 'empty'; label: string; description: string; members: string[] }
+/** `name`: the team's own name (startingPointTeamName), set by buildStudioContext so the page never works one out. */
+export interface StudioStartingPoint { id: string; group: 'recommend' | 'project-type' | 'gsd' | 'empty'; label: string; name?: string; description: string; members: string[] }
 
 export interface StudioContext {
   hasProject: boolean;
@@ -71,19 +72,46 @@ export interface LibraryState { teams: LibraryTeam[]; archived: LibraryArchived[
  * teams ... Need to see all available teams and maybe be able to filter between my teams and those provided by the extension"). `source` is what the
  * filter uses: `mine` for the person's saved teams (from any project), `builtin` for what the extension provides. `origin` says where it came from.
  */
-export interface PickerEntry { id: string; source: 'mine' | 'builtin'; group: StudioStartingPoint['group'] | 'library'; label: string; description: string; members: string[]; memberCount: number; origin: string; imported?: boolean; teamId?: string }
+export interface PickerEntry { id: string; source: 'mine' | 'builtin'; group: StudioStartingPoint['group'] | 'library'; label: string; /** The team's own name. */ name: string;
+  /** What Clone and modify names the copy ("Copy of" a saved team, a built-in's own name), made unique among the person's saved teams. */ cloneName: string;
+  /** A built-in only: the name Use as is saves it to My teams under when no project is open, made unique the same way. The page shows it, never works it out. */ saveAs?: string;
+  description: string; members: string[]; memberCount: number; origin: string; imported?: boolean; teamId?: string }
 export type PickerFilter = 'all' | 'mine' | 'builtin';
+
+/**
+ * A built-in starting point's own name as a team (owner, 2026-11-17: Use as is saves a built-in "under its own name"). A project type's team is already
+ * named "<label> team" when it is made (projectTypeTeam), and the recommendation is a team made from answers, so it gets a name of its own.
+ */
+export function startingPointTeamName(point: { id: string; label: string }): string {
+  if (point.id === 'recommend') return 'Recommended team';
+  if (point.id === 'empty') return 'New team';
+  return /\bteam$/i.test(point.label.trim()) ? point.label.trim() : `${point.label.trim()} team`;
+}
+
+/** The name a clone starts with: "Copy of" a saved team, or a built-in's own name, unique among the person's saved teams. */
+export function cloneNameFor(name: string, source: PickerEntry['source'], teams: ReadonlyArray<Pick<LibraryTeam, 'id' | 'kind' | 'name'>>): string {
+  return uniqueTeamName(source === 'mine' ? `Copy of ${name}` : name, teams);
+}
+
+/** `base`, or `base 2`, `base 3`... : the first that none of the person's saved teams has as its name or its file name. */
+export function uniqueTeamName(base: string, teams: ReadonlyArray<Pick<LibraryTeam, 'id' | 'kind' | 'name'>>): string {
+  const clean = base.replace(/[\r\n]+/g, ' ').trim().slice(0, 80) || 'New team';
+  const taken = (name: string) => teams.some((team) => team.kind === 'user' && (team.name.trim().toLowerCase() === name.toLowerCase() || team.id === `user:${slugify(name)}`));
+  let name = clean;
+  for (let n = 2; taken(name); n += 1) name = `${clean.slice(0, 76)} ${n}`;
+  return name;
+}
 
 /** Every starting point the picker offers: the person's saved teams first, then the built-in ones. A library team that does not parse is left out. */
 export function teamPicker(startingPoints: StudioStartingPoint[], teams: LibraryTeam[]): PickerEntry[] {
   const mine = teams.filter((team) => team.kind === 'user' && !team.error).map((team): PickerEntry => ({
-    id: `lib:${team.id.slice('user:'.length)}`, source: 'mine', group: 'library', label: team.name, description: team.description,
+    id: `lib:${team.id.slice('user:'.length)}`, source: 'mine', group: 'library', label: team.name, name: team.name, cloneName: cloneNameFor(team.name, 'mine', teams), description: team.description,
     members: team.members.map((member) => member.name), memberCount: team.members.length,
     origin: team.imported ? (team.derived ? 'Made from an import, not approved yet' : 'Imported, not approved yet') : `My team${team.savedAt ? `, saved ${team.savedAt.slice(0, 10)}` : ''}`,
     ...(team.imported ? { imported: true } : {}), teamId: team.id
   }));
   const builtin = startingPoints.map((point): PickerEntry => ({
-    id: point.id, source: 'builtin', group: point.group, label: point.label, description: point.description, members: point.members, memberCount: point.members.length,
+    id: point.id, source: 'builtin', group: point.group, label: point.label, name: startingPointTeamName(point), cloneName: cloneNameFor(startingPointTeamName(point), 'builtin', teams), saveAs: uniqueTeamName(startingPointTeamName(point), teams), description: point.description, members: point.members, memberCount: point.members.length,
     origin: point.group === 'project-type' ? 'Built in: project type' : point.group === 'gsd' ? 'Built in: Open-GSD roles' : 'Built in'
   }));
   return [...mine, ...builtin];
@@ -169,12 +197,12 @@ export function buildStudioContext(input: DirectoryInput, options: { hasProject:
     tiers: { main: input.settings.mainModel, ...input.settings.tiers },
     models: directory.models,
     ...(directory.modelsProblem ? { modelsProblem: directory.modelsProblem } : {}),
-    startingPoints: [
+    startingPoints: ([
       { id: 'recommend', group: 'recommend', label: 'Recommend a team for me', description: 'Answer three questions about the work and its risk; the studio suggests a team sized to it.', members: [] },
       ...PROJECT_TYPES.map((type) => ({ id: `type:${type.id}`, group: 'project-type' as const, label: type.label, description: type.description, members: type.members.map((member) => member.name) })),
       ...GSD_TEMPLATES.map((template) => ({ id: `gsd:${template.id}`, group: 'gsd' as const, label: template.label, description: `${template.description}${gsdDescription(template.members[0].role) ? '' : ' (Open-GSD roles; installs with your first workflow.)'}`, members: template.members.map((member) => member.name) })),
       { id: 'empty', group: 'empty', label: 'Start empty', description: 'Add every member yourself.', members: [] }
-    ]
+    ] as StudioStartingPoint[]).map((point) => ({ ...point, name: startingPointTeamName(point) }))
   };
 }
 
@@ -299,10 +327,15 @@ export type StudioMessage =
   | { type: 'review'; seq: number; draft: TeamDraft; id?: string }
   | { type: 'save'; draft: TeamDraft; id: string; base: string }
   | { type: 'create'; draft: TeamDraft; target: StudioTarget; projectType?: { id: string; goal: string } }
-  | { type: 'save-draft'; draft: TeamDraft; step: number; target: StudioTarget; startingPoint?: string }
+  | { type: 'save-draft'; draft: TeamDraft; step: number; target: StudioTarget; startingPoint?: string; path?: BuilderPath }
   | { type: 'optimise-all' }
   | { type: 'draft-team'; idea: string; outputFormat?: string; depth?: 'quick' | 'thorough'; private?: boolean }
   | { type: 'starting-point'; id: string; goal: string; locality: 'cloud' | 'local' | 'hybrid'; workShape?: AgentDiscoveryAnswers['workShape']; riskLevel?: AgentDiscoveryAnswers['riskLevel'] }
+  /**
+   * Use as is (owner, 2026-11-17): an existing team, unchanged and with no name asked. With a project open it becomes the project's team; with none it
+   * goes to the chat (a built-in is saved to My teams first). `discard`: the builder holds unsaved work, so the host asks before it is dropped.
+   */
+  | { type: 'use-team'; id: string; goal?: string; locality?: 'cloud' | 'local' | 'hybrid'; workShape?: AgentDiscoveryAnswers['workShape']; riskLevel?: AgentDiscoveryAnswers['riskLevel']; discard?: true }
   | { type: 'open-setting'; key: string }
   /** Improve with AI (0.4.27): the free local check and whether an AI review is possible, for this draft. */
   | { type: 'improve-check'; seq: number; draft: TeamDraft; id?: string }
@@ -332,6 +365,26 @@ export function parseDraft(value: unknown): TeamDraft | undefined {
     members.push({ name: member.name, role: member.role, model: member.model, tools: member.tools === null ? null : [...new Set(member.tools as string[])], instructions: member.instructions, ...(member.reportsTo ? { reportsTo: member.reportsTo as string } : {}), ...(member.privacy === 'private' ? { privacy: 'private' as const } : {}) });
   }
   return { name: value.name, description: value.description, members, ...(value.private === true ? { private: true } : {}) };
+}
+
+/**
+ * How a team in the builder was started (owner, 2026-11-17), so Back from its Purpose step returns to the screen it came from: `scratch` (Create a new
+ * team > From scratch), `clone` (Create a new team > Clone an existing team) or `existing` (Use an existing team > Clone and modify). A draft saved before
+ * this has none, and goes back to Create a new team.
+ */
+export const BUILDER_PATHS = ['scratch', 'clone', 'existing'] as const;
+export type BuilderPath = typeof BUILDER_PATHS[number];
+
+/** The team a starting-point or use-team message names, with its answers. A saved team (lib:<slug>) is looked up in the listing when it is handled. */
+function startRequest(message: Plain, allowEmpty: boolean): { id: string; locality?: 'cloud' | 'local' | 'hybrid'; workShape?: AgentDiscoveryAnswers['workShape']; riskLevel?: AgentDiscoveryAnswers['riskLevel'] } | undefined {
+  const id = message.id;
+  if (typeof id !== 'string' || !/^(?:recommend|empty|type:[a-z]+|gsd:[a-z-]+|lib:[a-z0-9][a-z0-9-]{0,60})$/.test(id) || (!allowEmpty && id === 'empty')) return undefined;
+  if (message.locality !== undefined && !(LOCALITIES as readonly unknown[]).includes(message.locality)) return undefined;
+  if (message.workShape !== undefined && !(WORK_SHAPES as readonly unknown[]).includes(message.workShape)) return undefined;
+  if (message.riskLevel !== undefined && !(RISKS as readonly unknown[]).includes(message.riskLevel)) return undefined;
+  const known = id === 'recommend' || id === 'empty' || id.startsWith('lib:') || PROJECT_TYPES.some((type) => id === `type:${type.id}`) || GSD_TEMPLATES.some((template) => id === `gsd:${template.id}`);
+  if (!known) return undefined;
+  return { id, ...(message.locality !== undefined ? { locality: message.locality as 'cloud' } : {}), ...(message.workShape ? { workShape: message.workShape as 'feature' } : {}), ...(message.riskLevel ? { riskLevel: message.riskLevel as 'low' } : {}) };
 }
 
 export function parseStudioMessage(value: unknown): StudioMessage | undefined {
@@ -389,19 +442,22 @@ export function parseStudioMessage(value: unknown): StudioMessage | undefined {
       return draft ? { type: 'create', draft, target: message.target, ...(projectType ? { projectType } : {}) } : undefined;
     }
     case 'save-draft': {
-      if (!exactKeys(message, ['type', 'draft', 'step', 'target'], ['startingPoint']) || !Number.isInteger(message.step) || (message.step as number) < 0 || (message.step as number) > 4 || (message.target !== 'project' && message.target !== 'user')) return undefined;
+      if (!exactKeys(message, ['type', 'draft', 'step', 'target'], ['startingPoint', 'path']) || !Number.isInteger(message.step) || (message.step as number) < 0 || (message.step as number) > 4 || (message.target !== 'project' && message.target !== 'user')) return undefined;
       if (message.startingPoint !== undefined && (typeof message.startingPoint !== 'string' || !/^[a-z0-9:-]{1,70}$/.test(message.startingPoint))) return undefined;
+      if (message.path !== undefined && !(BUILDER_PATHS as readonly unknown[]).includes(message.path)) return undefined;
       const draft = parseDraft(message.draft);
-      return draft ? { type: 'save-draft', draft, step: message.step as number, target: message.target, ...(message.startingPoint !== undefined ? { startingPoint: message.startingPoint as string } : {}) } : undefined;
+      return draft ? { type: 'save-draft', draft, step: message.step as number, target: message.target, ...(message.startingPoint !== undefined ? { startingPoint: message.startingPoint as string } : {}), ...(message.path !== undefined ? { path: message.path as BuilderPath } : {}) } : undefined;
     }
     case 'starting-point': {
-      if (!exactKeys(message, ['type', 'id', 'goal', 'locality'], ['workShape', 'riskLevel']) || typeof message.id !== 'string' || !/^(?:recommend|empty|type:[a-z]+|gsd:[a-z-]+|lib:[a-z0-9][a-z0-9-]{0,60})$/.test(message.id) || !text(message.goal, 400)) return undefined;
-      if (!(LOCALITIES as readonly unknown[]).includes(message.locality)) return undefined;
-      if (message.workShape !== undefined && !(WORK_SHAPES as readonly unknown[]).includes(message.workShape)) return undefined;
-      if (message.riskLevel !== undefined && !(RISKS as readonly unknown[]).includes(message.riskLevel)) return undefined;
-      // A saved team (lib:<slug>) is looked up in the current listing when the message is handled, never by a path from the page.
-      const known = message.id === 'recommend' || message.id === 'empty' || message.id.startsWith('lib:') || PROJECT_TYPES.some((type) => message.id === `type:${type.id}`) || GSD_TEMPLATES.some((template) => message.id === `gsd:${template.id}`);
-      return known ? { type: 'starting-point', id: message.id, goal: message.goal as string, locality: message.locality as 'cloud', ...(message.workShape ? { workShape: message.workShape as 'feature' } : {}), ...(message.riskLevel ? { riskLevel: message.riskLevel as 'low' } : {}) } : undefined;
+      if (!exactKeys(message, ['type', 'id', 'goal', 'locality'], ['workShape', 'riskLevel']) || !text(message.goal, 400)) return undefined;
+      const start = startRequest(message, true);
+      return start ? { type: 'starting-point', ...start, goal: message.goal, locality: start.locality ?? 'cloud' } : undefined;
+    }
+    case 'use-team': {
+      if (!exactKeys(message, ['type', 'id'], ['goal', 'locality', 'workShape', 'riskLevel', 'discard']) || (message.goal !== undefined && !text(message.goal, 400))) return undefined;
+      if (message.discard !== undefined && message.discard !== true) return undefined;
+      const start = startRequest(message, false);
+      return start ? { type: 'use-team', ...start, ...(typeof message.goal === 'string' ? { goal: message.goal } : {}), ...(message.discard === true ? { discard: true as const } : {}) } : undefined;
     }
     case 'improve-check': case 'improve-ai': {
       if (!exactKeys(message, ['type', 'seq', 'draft'], message.type === 'improve-ai' ? ['id', 'member'] : ['id']) || !Number.isSafeInteger(message.seq) || (message.id !== undefined && !id())) return undefined;
@@ -437,7 +493,7 @@ export interface StudioHost {
   onDidDispose(listener: () => void): { dispose(): void };
 }
 
-export interface SavedWizard { draft: TeamDraft; step: number; target: StudioTarget; startingPoint?: string }
+export interface SavedWizard { draft: TeamDraft; step: number; target: StudioTarget; startingPoint?: string; path?: BuilderPath }
 /** Unsaved changes to a team open in the editor: its id, the draft, and the file version it started from. */
 export interface OpenEdit { id: string; draft: TeamDraft; base: string }
 /**
@@ -554,6 +610,8 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
   let library: LibraryState = { teams: [], archived: [] };
   let open: OpenTeam | undefined;
   let pendingWizard: StudioTarget | undefined;
+  /** A Use as is is running (asking, or writing): another is ignored until it has answered. */
+  let usingTeam = false;
   let pageReady = false;
   let markReady: () => void = () => undefined;
   const ready = new Promise<void>((resolve) => { markReady = resolve; });
@@ -621,7 +679,8 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
   /** An imported team (or one made from an import) that is not approved: its text is untrusted, and the refiner is told so. */
   const untrustedFor = async (draft: TeamDraft, id: string | undefined): Promise<boolean> => {
     if (id) return Boolean(teamFor(id)?.imported);
-    return (await deps.library.unapprovedSource(draft.members).catch(() => undefined)) !== undefined;
+    // A check that cannot run counts as untrusted (PR #75 review), so the review never treats such text as the person's own.
+    return (await deps.library.unapprovedSource(draft.members).catch(() => 'unknown')) !== undefined;
   };
 
   const versionsOf = async (file: string) => (await deps.library.versions(file)).map((version) => ({ ref: path.basename(version), label: versionLabel(path.basename(version)) }));
@@ -712,6 +771,37 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
     const version = await deps.library.snapshot(file);
     await refreshLibrary();
     return { file, notice: `Saved "${edit.draft.name.trim()}" as version ${version}.` };
+  };
+
+  /**
+   * Which unapproved imported team any of these members was copied from (0.4.26), for the first-run question. A check that cannot run fails closed
+   * (PR #75 review): it was read as "none", so a team could be written without the question that says where its members came from. The caller says
+   * nothing was changed and writes nothing.
+   */
+  const importOrigin = async (members: ReadonlyArray<{ instructions: string }>, verb: 'used' | 'saved'): Promise<{ from: string | undefined } | undefined> => {
+    try { return { from: await deps.library.unapprovedSource(members) }; } catch (error) {
+      post({ type: 'error', text: `Not ${verb}: it could not be checked whether this team has members from an imported team you have not approved (${(error as Error).message}). Nothing was changed.` });
+      return undefined;
+    }
+  };
+
+  /**
+   * Writes the project's team, the one way a save or Use as is replaces it: an existing team is replaced only after the person agrees, and is kept as a
+   * version first (so it can be restored from History); the new team is versioned too. Undefined when the person kept the old one.
+   */
+  const writeProjectTeam = async (root: string, markdown: string, unapprovedFrom: string | undefined, projectType?: { type: ProjectType; goal: string }): Promise<string | undefined> => {
+    const file = TeamLibrary.projectTeamFile(root);
+    if (await exists(file)) {
+      if (!await deps.confirm('This project already has a team. Replace it? Its earlier versions stay in the team history.', 'Replace')) return undefined;
+      await deps.library.snapshot(file);
+    }
+    await mkdir(path.dirname(file), { recursive: true });
+    await writeFile(file, markdown, 'utf8');
+    await deps.library.snapshot(file);
+    // The project's own consent is asked before it first runs, as for any project team; its question says the members came from that import.
+    await deps.library.setProjectDerived(file, unapprovedFrom);
+    if (projectType) await deps.applyProjectType(root, projectType.type, projectType.goal);
+    return file;
   };
 
   const startWizard = async (target: StudioTarget) => {
@@ -881,11 +971,100 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
           const team = teamFor(`user:${message.id.slice('lib:'.length)}`);
           if (!team || team.error) { post({ type: 'error', text: 'That team is no longer in your teams. Pick another starting point.' }); return; }
           const draft = draftFromMarkdown(await readFile(team.file, 'utf8'), team.file);
-          post({ type: 'starting-point', id: message.id, draft: { ...draft, name: '' } });
+          post({ type: 'starting-point', id: message.id, cloneName: cloneNameFor(team.name, 'mine', library.teams), draft: { ...draft, name: '' } });
           return;
         }
         const result = startingPointDraft(message, context!);
-        post({ type: 'starting-point', id: message.id, draft: result.draft, ...(result.projectType ? { projectType: result.projectType } : {}) });
+        const point = context!.startingPoints.find((candidate) => candidate.id === message.id);
+        // The name a clone starts with is worked out here, from the library as it is now, so the page never applies naming rules of its own.
+        post({ type: 'starting-point', id: message.id, ...(point ? { cloneName: cloneNameFor(startingPointTeamName(point), 'builtin', library.teams) } : {}), draft: result.draft, ...(result.projectType ? { projectType: result.projectType } : {}) });
+        return;
+      }
+      case 'use-team': {
+        // One at a time (PR #75 review): a second Use as is while one is still asking or writing is ignored, so a double click never asks twice or writes
+        // twice. The page also waits for the answer before it offers the buttons again.
+        // A second request is answered too (PR #75 review): a page that lost its waiting state, after a reload say, is told rather than left silent.
+        if (usingTeam) { post({ type: 'error', text: 'Still working on the team you chose. Wait for it to finish.' }); return; }
+        usingTeam = true;
+        const use = message;
+        try {
+          await (async () => {
+            // Use as is (owner, 2026-11-17): the team exactly as it is, with no name, description or "Save it as" to fill in. With a project open it becomes
+            // the project's team; with none it goes to the chat. The same checks a save runs apply, so Use as is is never a way round them.
+            if (!input || !context) await load();
+            const root = deps.root();
+            let saved: LibraryTeam | undefined;
+            let name: string;
+            let markdown: string;
+            let members: DraftMember[];
+            let fromType: ProjectType | undefined;
+            const goal = (use.goal ?? '').trim().slice(0, 400);
+            if (use.id.startsWith('lib:')) {
+              // One of the person's saved teams, found in the current listing (never by a path from the page), copied byte for byte.
+              saved = teamFor(`user:${use.id.slice('lib:'.length)}`);
+              if (!saved || saved.error) { post({ type: 'error', text: 'That team is no longer in your teams. Pick another one.' }); return; }
+              markdown = await readFile(saved.file, 'utf8');
+              const draft = draftFromMarkdown(markdown, saved.file);
+              const review = reviewDraft(draft, markdown, input!, context!);
+              if (review.errors.length) { post({ type: 'error', text: `Not used: ${review.errors[0]!.message} Choose Clone and modify to change it.` }); return; }
+              name = saved.name;
+              members = draft.members;
+            } else {
+              // A built-in: made from its template under its own name. With no project it is saved to My teams, so its name is made unique there.
+              const point = context!.startingPoints.find((candidate) => candidate.id === use.id);
+              // startRequest accepts only ids that are listed, so this cannot happen today; it still answers rather than leave the page waiting.
+              if (!point) { post({ type: 'error', text: 'That built-in team is not available here. Pick another one.' }); return; }
+              const result = startingPointDraft({ id: use.id, goal, locality: use.locality ?? 'cloud', ...(use.workShape ? { workShape: use.workShape } : {}), ...(use.riskLevel ? { riskLevel: use.riskLevel } : {}) }, context!);
+              name = root ? startingPointTeamName(point) : uniqueTeamName(startingPointTeamName(point), library.teams);
+              const draft = { ...result.draft, name };
+              const review = reviewDraft(draft, undefined, input!, context!);
+              if (review.errors.length) { post({ type: 'error', text: `Not used: ${review.errors[0]!.message} Choose Clone and modify to change it.` }); return; }
+              fromType = result.projectType ? PROJECT_TYPES.find((candidate) => candidate.id === result.projectType) : undefined;
+              markdown = fromType ? stampTeam(review.markdown, fromType) : review.markdown;
+              members = draft.members;
+            }
+            // Every outcome gets exactly one answer (PR #75 review): the project team opened (team), used, declined (used, with declined), or an error.
+            // Anything that writes a team first checks where its members came from, before anything is asked.
+            let unapprovedFrom: string | undefined;
+            if (root || !saved) {
+              const origin = await importOrigin(members, 'used');
+              if (!origin) return;
+              unapprovedFrom = origin.from;
+            }
+            // The builder had unsaved work: it is dropped only when the person agrees, as leaving the builder asks.
+            if (use.discard && await choose(`Use "${name}" as is? The team you were building is not saved, so it will be discarded.`, 'Use as is') !== 'Use as is') {
+              post({ type: 'used', declined: true, text: 'Not changed. The team you were building is still here.' });
+              return;
+            }
+            if (root) {
+              const file = await writeProjectTeam(root, markdown, unapprovedFrom, fromType ? { type: fromType, goal: goal || 'the work in this project' } : undefined);
+              if (!file) { post({ type: 'used', declined: true, text: 'Not changed. This project\'s team is as it was.' }); return; }
+              unsaved = {};
+              await refreshLibrary();
+              const unapprovedNote = unapprovedFrom === undefined ? '' : ` It has members from the imported team "${unapprovedFrom}", which you have not approved, so you are asked before it first runs.`;
+              await sendTeam('project', file, `"${name}" is now this project's team. Run it with /team:project <task>.${fromType ? ' AGENTS.md now has this project type\'s guidance.' : ''}${unapprovedNote}`);
+              return;
+            }
+            if (saved) {
+              await deps.sidebar.prefill(saved.command ?? `/team:${use.id.slice('lib:'.length)} `);
+              unsaved = {};
+              post({ type: 'used', text: `${(saved.command ?? '').trim()} is in the chat box. Type your task after it and send.`, focus: saved.id });
+              return;
+            }
+            // A built-in with no project: chat runs teams by their file, so it is saved to My teams first, under its own name.
+            const file = await deps.library.create(name, markdown);
+            if (unapprovedFrom !== undefined) await deps.library.markImported(file, 'derived', unapprovedFrom);
+            const slug = path.basename(file, '.md');
+            unsaved = {};
+            await refreshLibrary();
+            await deps.sidebar.prefill(`/team:${slug} `);
+            post({ type: 'used', text: `Saved "${name}" to My teams, and /team:${slug} is in the chat box. Type your task after it and send.`, focus: `user:${slugify(slug)}` });
+            return;
+          })();
+        } catch (error) {
+          // A confirm or write that fails still answers, so the page never waits with its buttons off (PR #75 review).
+          post({ type: 'error', text: `Not used: ${(error as Error).message || 'the team could not be written.'}` });
+        } finally { usingTeam = false; }
         return;
       }
       case 'open': {
@@ -947,23 +1126,17 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
         const markdown = fromType ? stampTeam(review.markdown, fromType) : review.markdown;
         // 0.4.26: a team with any member copied unchanged from an unapproved import (a saved team used as the starting point, a resumed draft, a member
         // pasted in) stays unapproved however it was made. Checked on the content, so no path round it depends on how the draft was built.
-        const unapprovedFrom = await deps.library.unapprovedSource(message.draft.members).catch(() => undefined);
+        const origin = await importOrigin(message.draft.members, 'saved');
+        if (!origin) return;
+        const unapprovedFrom = origin.from;
         if (message.target === 'project') {
           // The folder open now, read once for the whole save, so the file and the project type go to the same folder.
           const root = deps.root();
           if (!root) { post({ type: 'error', text: 'Open a project folder to save a project team, or save it to My teams.' }); return; }
-          file = TeamLibrary.projectTeamFile(root);
-          if (await exists(file)) {
-            if (!await deps.confirm('This project already has a team. Replace it? Its earlier versions stay in the team history.', 'Replace')) return;
-            await deps.library.snapshot(file);
-          }
-          await mkdir(path.dirname(file), { recursive: true });
-          await writeFile(file, markdown, 'utf8');
-          await deps.library.snapshot(file);
+          const written = await writeProjectTeam(root, markdown, unapprovedFrom, fromType ? { type: fromType, goal: message.projectType!.goal.trim().slice(0, 400) || message.draft.description.trim() } : undefined);
+          if (!written) return;
+          file = written;
           id = 'project';
-          // The project's own consent is asked before it first runs, as for any project team; its question says the members came from that import.
-          await deps.library.setProjectDerived(file, unapprovedFrom);
-          if (fromType) await deps.applyProjectType(root, fromType, message.projectType!.goal.trim().slice(0, 400) || message.draft.description.trim());
         } else {
           file = await deps.library.create(message.draft.name.trim(), markdown);
           if (unapprovedFrom !== undefined) await deps.library.markImported(file, 'derived', unapprovedFrom);
@@ -989,7 +1162,7 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
         return;
       }
       case 'save-draft': {
-        await deps.drafts.set({ draft: message.draft, step: message.step, target: message.target, ...(message.startingPoint ? { startingPoint: message.startingPoint } : {}) });
+        await deps.drafts.set({ draft: message.draft, step: message.step, target: message.target, ...(message.startingPoint ? { startingPoint: message.startingPoint } : {}), ...(message.path ? { path: message.path } : {}) });
         post({ type: 'notice', text: 'Draft saved. Pick it up again from Team Studio at any time.' });
         return;
       }
@@ -1175,13 +1348,14 @@ function keptWork(value: unknown): KeptWork | undefined {
 function savedWizard(value: unknown): SavedWizard | undefined {
   if (!isPlain(value)) return undefined;
   const parsed = parseStudioMessage({ ...value, type: 'save-draft' });
-  return parsed?.type === 'save-draft' ? { draft: parsed.draft, step: parsed.step, target: parsed.target, ...(parsed.startingPoint ? { startingPoint: parsed.startingPoint } : {}) } : undefined;
+  return parsed?.type === 'save-draft' ? { draft: parsed.draft, step: parsed.step, target: parsed.target, ...(parsed.startingPoint ? { startingPoint: parsed.startingPoint } : {}), ...(parsed.path ? { path: parsed.path } : {}) } : undefined;
 }
 
-/** "2026-10-29T14-03-12-345Z.md" → "2026-10-29 14:03:12 UTC". */
+/** "2026-10-29T14-03-12-345Z.md" (or "...-345Z-2.md", the second taken in that millisecond) → "2026-10-29 14:03:12 UTC". */
 export function versionLabel(ref: string): string {
-  const match = /^(\d{4}-\d\d-\d\d)T(\d\d)-(\d\d)-(\d\d)-\d+Z\.md$/.exec(ref);
-  return match ? `${match[1]} ${match[2]}:${match[3]}:${match[4]} UTC` : ref.replace(/\.md$/, '');
+  // Versions taken in the same millisecond carry a number (-2, -3); the label keeps it, so History never shows two identical entries (PR #75 review).
+  const match = /^(\d{4}-\d\d-\d\d)T(\d\d)-(\d\d)-(\d\d)-\d+Z(?:-(\d+))?\.md$/.exec(ref);
+  return match ? `${match[1]} ${match[2]}:${match[3]}:${match[4]} UTC${match[5] ? ` (${match[5]})` : ''}` : ref.replace(/\.md$/, '');
 }
 
 function displayPath(file: string, root: string | undefined): string {

@@ -161,6 +161,14 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--vscode-button-
 .choice > .hint { grid-column: 2; margin: 2px 0 0; }
 .choice-label { font-weight: 600; }
 .choice.selected { border-color: var(--accent); background: var(--vscode-list-inactiveSelectionBackground); }
+/* How the builder starts: two or three large choices, then the picker, where the selected team spans the row with its answers and buttons. */
+.start-choices { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(260px, 100%), 1fr)); gap: 8px; margin: 12px 0 4px; }
+button.start-choice { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; min-width: 0; padding: 12px 14px; text-align: left; white-space: normal; color: var(--vscode-foreground); background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
+button.start-choice:hover:not(:disabled) { border-color: var(--accent); background: var(--vscode-list-hoverBackground, var(--surface)); }
+button.start-choice .hint { margin: 0; overflow-wrap: anywhere; }
+.choice-cell.selected { grid-column: 1 / -1; }
+.pick-details { padding: 8px 10px; margin-top: 4px; border: 1px solid var(--accent); border-radius: var(--radius); min-width: 0; }
+.pick-details .actions { margin: 6px 0 2px; }
 
 /* Members */
 .member-list { list-style: none; padding: 0; margin: 10px 0; counter-reset: none; }
@@ -215,7 +223,7 @@ table.grid tbody th { font-weight: 600; overflow-wrap: anywhere; }
 .tabs + .panel { border-top-left-radius: 0; }
 
 /* High contrast: rely on borders, not fills */
-body.vscode-high-contrast .card, body.vscode-high-contrast .panel, body.vscode-high-contrast .choice { border-color: var(--vscode-contrastBorder, var(--border)); }
+body.vscode-high-contrast .card, body.vscode-high-contrast .panel, body.vscode-high-contrast .choice, body.vscode-high-contrast button.start-choice { border-color: var(--vscode-contrastBorder, var(--border)); }
 body.vscode-high-contrast .choice.selected, body.vscode-high-contrast .tabs .tab.active { outline: 1px solid var(--vscode-contrastActiveBorder, var(--accent)); }
 
 @media (max-width: 520px) {
