@@ -862,11 +862,20 @@
   let recommendSeq = 0;
 
   /** The answers changed: a team shown for the old ones no longer applies, so it is cleared (and the person is told) until recommended again. */
+  // PR #82 review, round 2: every change of an answer ends the request in flight too (its reply is for the old answers), not only a team already shown;
+  // a reply is taken only when its number and its answers match the answers on screen; and Use as is and Clone send the answers the shown team was made
+  // from, never whatever the fields hold now.
+  const currentAnswers = () => ({ goal: work.options.goal.slice(0, 400), locality: work.options.locality, workShape: work.options.workShape, riskLevel: work.options.riskLevel });
+  const sameAnswers = (one, two) => Boolean(one && two) && ['goal', 'locality', 'workShape', 'riskLevel'].every((key) => one[key] === two[key]);
+
   function answersChanged(redraw) {
-    if (!work.recommendation) return;
+    const waiting = work.recommendSeq !== null;
+    if (waiting) { work.recommendSeq = null; work.busy = false; }
+    if (!work.recommendation && !waiting) return;
     work.recommendation = null;
     work.recommendStale = true;
-    if (redraw) { render(); return; }
+    // A request that was waiting had its button off: draw the screen again so Recommend works at once.
+    if (redraw || waiting) { render(); return; }
     // While typing: the shown team is replaced in place, so the field keeps its caret.
     const box = $('recommendation');
     if (box) box.replaceChildren(el('p', 'hint', STALE_RECOMMENDATION));
@@ -897,7 +906,7 @@
       const chips = el('ul', 'chips'); chips.setAttribute('aria-label', 'Members');
       for (const member of shown.members) chips.append(el('li', 'chip', member.name + (member.role && member.role !== member.name ? ' · ' + member.role : '')));
       result.append(chips);
-      const point = { id: 'recommend', source: 'builtin', name: shown.name, cloneName: shown.cloneName, ...(shown.saveAs ? { saveAs: shown.saveAs } : {}), members: shown.members.map((member) => member.name) };
+      const point = { id: 'recommend', source: 'builtin', name: shown.name, cloneName: shown.cloneName, ...(shown.saveAs ? { saveAs: shown.saveAs } : {}), members: shown.members.map((member) => member.name), answers: shown.answers };
       pickButtons(result, point, true);
     } else if (work.recommendStale) result.append(el('p', 'hint', STALE_RECOMMENDATION));
     root.append(result);
@@ -909,12 +918,14 @@
     recommendSeq += 1;
     work.recommendSeq = recommendSeq;
     work.busy = true;
-    vscode.postMessage({ type: 'recommend', seq: recommendSeq, goal: work.options.goal.slice(0, 400), locality: work.options.locality, workShape: work.options.workShape, riskLevel: work.options.riskLevel });
+    vscode.postMessage(Object.assign({ type: 'recommend', seq: recommendSeq }, currentAnswers()));
     render();
   }
 
   function startAnswers(point, message) {
     if (point.source !== 'builtin') return message;
+    // The recommendation shown carries the answers it was made from, and sends exactly those.
+    if (point.answers) return Object.assign(message, point.answers);
     message.goal = work.options.goal.slice(0, 400);
     message.locality = work.options.locality;
     if (point.id === 'recommend') { message.workShape = work.options.workShape; message.riskLevel = work.options.riskLevel; }
@@ -939,7 +950,7 @@
     const label = entryName(point);
     // The recommendation is cloned on its own screen; its path is `existing`, which a 0.4.29 build also reads, and Back finds its screen from the starting
     // point (backFromPurpose).
-    work.awaitingStart = { id: point.id, clone: true, stage: work.stage, path: work.stage === 'recommend' || work.pickMode === 'existing' ? 'existing' : 'clone', label, name: point.cloneName || label, goal: point.source === 'builtin' ? work.options.goal : '' };
+    work.awaitingStart = { id: point.id, clone: true, stage: work.stage, path: work.stage === 'recommend' || work.pickMode === 'existing' ? 'existing' : 'clone', label, name: point.cloneName || label, goal: point.answers ? point.answers.goal : point.source === 'builtin' ? work.options.goal : '' };
     const message = startAnswers(point, { type: 'starting-point', id: point.id, goal: '', locality: work.options.locality });
     vscode.postMessage(message);
     work.busy = true;
@@ -2086,10 +2097,12 @@
       case 'recommendation': {
         // Only the reply to the request still waiting, on the screen it was asked from.
         if (!work || work.mode !== 'wizard' || work.stage !== 'recommend' || work.recommendSeq === null || message.seq !== work.recommendSeq) break;
+        // Made from answers that are no longer the ones on screen: not shown (answersChanged has normally ended the request already).
+        if (!sameAnswers(message.answers, currentAnswers())) { work.recommendSeq = null; work.busy = false; work.recommendStale = true; render(); break; }
         work.recommendSeq = null;
         work.busy = false;
         work.recommendStale = false;
-        work.recommendation = { name: String(message.name || ''), cloneName: String(message.cloneName || message.name || ''), ...(message.saveAs ? { saveAs: String(message.saveAs) } : {}), description: String(message.description || ''), members: Array.isArray(message.members) ? message.members.map((member) => ({ name: String(member.name || ''), role: String(member.role || '') })) : [] };
+        work.recommendation = { answers: currentAnswers(), name: String(message.name || ''), cloneName: String(message.cloneName || message.name || ''), ...(message.saveAs ? { saveAs: String(message.saveAs) } : {}), description: String(message.description || ''), members: Array.isArray(message.members) ? message.members.map((member) => ({ name: String(member.name || ''), role: String(member.role || '') })) : [] };
         render();
         announce('Recommended ' + work.recommendation.name + ': ' + work.recommendation.members.length + ' members. Use it as it is, or clone it and change it.');
         break;

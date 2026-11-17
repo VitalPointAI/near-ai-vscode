@@ -528,10 +528,12 @@ export class TeamLibrary {
    * Makes this PNG the team's icon. It is checked first (TeamIconError says why it is refused, and nothing is written); the icon it replaces is kept in
    * the history; the file is written whole, then the team file names it.
    */
-  public async setIcon(teamFile: string, png: Uint8Array): Promise<{ text: string; textChanged: boolean }> {
+  public async setIcon(teamFile: string, png: Uint8Array): Promise<{ text: string; textChanged: boolean; kept: boolean }> {
+    // `kept`: an icon file was there and is now in the history, so a message may say so (PR #82 review, round 2).
+    const kept = await exists(this.iconFile(teamFile));
     const undo = await this.placeIcon(teamFile, png);
     try {
-      return await this.setReference(teamFile, TeamLibrary.iconName(teamFile));
+      return { ...await this.setReference(teamFile, TeamLibrary.iconName(teamFile)), kept };
     } catch (error) {
       // The team file could not be changed: the icon goes back as it was, so a failure leaves neither change. When even that fails, say what is left.
       await undo().catch(() => { throw new TeamIconPartialError('The new icon file was written, but the team file could not be changed to name it, and the earlier icon file could not be put back. The team shows its default icon; set the icon again, or restore an earlier one from History.'); });
@@ -551,7 +553,7 @@ export class TeamLibrary {
   }
 
   /** Makes an earlier icon (by its name in the history) the team's icon again; the current one goes into the history. */
-  public async restoreIcon(teamFile: string, ref: string): Promise<{ text: string; textChanged: boolean }> {
+  public async restoreIcon(teamFile: string, ref: string): Promise<{ text: string; textChanged: boolean; kept: boolean }> {
     const version = (await this.iconVersions(teamFile)).find((candidate) => path.basename(candidate) === ref);
     if (!version) throw new TeamIconError('There is no such icon in this team\'s history.');
     return this.setIcon(teamFile, await readFile(version));

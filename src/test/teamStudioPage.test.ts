@@ -2649,11 +2649,12 @@ test('host: a Use as is whose write fails answers with an error, and the next on
   await h.send({ type: 'ready' });
   await h.send({ type: 'use-team', id: 'lib:web-team' });
   const snapshot = h.library.snapshot.bind(h.library);
-  h.library.snapshot = async () => { throw new Error('the disk is full.'); };
+  // PR #82 review, round 2: a file-system error is said in plain words, never passed on with the path its message carries.
+  h.library.snapshot = async () => { throw Object.assign(new Error(`ENOSPC: no space left on device, copyfile '${h.root}/.planning/.near-ai/team.md'`), { code: 'ENOSPC' }); };
   const posted = h.posted.length;
   await h.send({ type: 'use-team', id: 'gsd:review' });
   const answers = h.posted.slice(posted).filter((message) => ['team', 'used', 'error', 'notice'].includes(message.type));
-  assert.deepEqual(answers.map((message) => [message.type, message.text]), [['error', 'Not used: the disk is full.']]);
+  assert.deepEqual(answers.map((message) => [message.type, message.text]), [['error', 'Not used: the team file could not be written (the disk is full).']]);
   h.library.snapshot = snapshot;
   h.confirmAnswer.value = false;
   assert.deepEqual((await answersTo(h, { type: 'use-team', id: 'lib:web-team' })).map((answer) => answer.declined), [true], 'the next request runs');

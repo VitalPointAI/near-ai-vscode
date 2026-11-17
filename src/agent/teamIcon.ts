@@ -1,3 +1,5 @@
+import { parseFrontmatter } from '../gsd/library';
+
 // Team icons (0.4.30, owner 2026-11-17: "give user ability to upload or AI generate an icon for the team. Ensure there's a default icon available if none
 // are selected/generated"). No VS Code imports, so the tests run it directly, and nothing here reads or writes a file.
 //
@@ -173,12 +175,32 @@ export function withIconReference(text: string, name: string | undefined): strin
   const kept = lines.filter((_, index) => !at.includes(index));
   if (line !== undefined) {
     if (at.length) kept.splice(at[0]!, 0, line);
-    else {
-      const description = kept.findIndex((entry) => /^description:/.test(entry));
-      kept.splice(description >= 0 ? description + 1 : kept.length, 0, line);
-    }
+    else kept.splice(iconLinePlace(kept), 0, line);
   }
   return `${open}${kept.join(eol)}${close}${text.slice(match[0].length)}`;
+}
+
+/** A top-level key line as the team loader's front matter parser reads it (parseFrontmatter in gsd/library.ts): a key at the start of the line. */
+const KEY_LINE = /^([A-Za-z0-9_-]+):\s*(.*)$/;
+
+/**
+ * Where a new icon line goes (PR #82 review, round 2: it went after any `description:` line, which put it inside a hand-written `description: |` block).
+ * Right after the description only when its value is complete on that one line (not a block scalar, not a quote left open, not continued on an indented
+ * line); otherwise at the end of the front matter, which ends any value above it. The place is then checked with the loader's own parser: every key must
+ * read as it did, or the line goes at the end.
+ */
+function iconLinePlace(lines: string[]): number {
+  const description = lines.findIndex((entry) => /^description:/.test(entry));
+  if (description < 0) return lines.length;
+  const value = (KEY_LINE.exec(lines[description]!)?.[2] ?? '').trim();
+  const quote = value[0] === '"' || value[0] === "'" ? value[0] : undefined;
+  const oneLine = value !== '' && !/^[|>]/.test(value) && (!quote || (value.length > 1 && value.endsWith(quote)))
+    && !/^\s/.test(lines[description + 1] ?? '');
+  if (!oneLine) return lines.length;
+  const read = (entries: string[]) => JSON.stringify(parseFrontmatter(`---\n${entries.join('\n')}\n---\n`).data);
+  const placed = [...lines.slice(0, description + 1), 'icon: x', ...lines.slice(description + 1)];
+  const { icon: _icon, ...rest } = parseFrontmatter(`---\n${placed.join('\n')}\n---\n`).data;
+  return JSON.stringify(rest) === read(lines) ? description + 1 : lines.length;
 }
 
 // ---- small helpers ----

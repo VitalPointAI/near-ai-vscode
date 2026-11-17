@@ -1075,7 +1075,8 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
         const result = startingPointDraft({ id: 'recommend', goal: message.goal, locality: message.locality, workShape: message.workShape, riskLevel: message.riskLevel }, context!);
         const own = startingPointTeamName(point);
         const name = deps.root() ? own : uniqueTeamName(own, library.teams);
-        post({ type: 'recommendation', seq: message.seq, name, cloneName: cloneNameFor(own, 'builtin', library.teams), ...(deps.root() ? {} : { saveAs: name }), description: result.draft.description, members: result.draft.members.map((member) => ({ name: member.name, role: member.role })) });
+        // The answers it was made from go back with it, so the page shows it only while they are still the ones on screen.
+        post({ type: 'recommendation', seq: message.seq, answers: { goal: message.goal, locality: message.locality, workShape: message.workShape, riskLevel: message.riskLevel }, name, cloneName: cloneNameFor(own, 'builtin', library.teams), ...(deps.root() ? {} : { saveAs: name }), description: result.draft.description, members: result.draft.members.map((member) => ({ name: member.name, role: member.role })) });
         return;
       }
       case 'use-team': {
@@ -1163,7 +1164,8 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
           })();
         } catch (error) {
           // A confirm or write that fails still answers, so the page never waits with its buttons off (PR #75 review).
-          post({ type: 'error', text: `Not used: ${(error as Error).message || 'the team could not be written.'}` });
+          // Path-free (PR #82 review, round 2): a file-system error names the file, so it is said in plain words; the icon errors already are plain.
+          post({ type: 'error', text: error instanceof TeamIconError ? `Not used: ${error.message}` : `Not used: the team file could not be written${fileProblem(error)}.` });
         } finally { usingTeam = false; }
         return;
       }
@@ -1331,10 +1333,13 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
         // 0.4.30: the icon the file carried, checked when it was read, goes beside the new team under its own name. Without one, the imported text's
         // icon line is removed, so it can never show an icon file it happens to name (one left in the library folder, say).
         let iconNote = '';
-        if (read.icon) { await deps.library.setIcon(file, read.icon); iconNote = ' Its icon was added too.'; }
-        else {
-          await deps.library.removeIcon(file);
-          if (read.iconProblem) iconNote = ` Its icon was left out: ${read.iconProblem}`;
+        // The team is in the library by now: an icon that cannot be written is reported in the notice, never as an error after the fact (PR #82 review,
+        // round 2), and the list is still refreshed below. The file-system error names a path, so it is not passed on.
+        if (read.icon) {
+          try { await deps.library.setIcon(file, read.icon); iconNote = ' Its icon was added too.'; } catch { iconNote = ' Its icon could not be saved, so it shows the default icon. You can upload it again from its Purpose tab.'; }
+        } else {
+          try { await deps.library.removeIcon(file); } catch { iconNote = ' Its team file could not be cleaned of the icon it names; check its icon on its Purpose tab.'; }
+          if (read.iconProblem) iconNote = ` Its icon was left out: ${read.iconProblem}${iconNote}`;
         }
         let knowledgeNote = '';
         if (read.knowledge) {
@@ -1475,8 +1480,7 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
         iconWaiting = undefined;
         const problem = checkTeamIcon(message.png);
         if (problem) { post({ type: 'error', text: `Not saved: ${problem}` }); return; }
-        const had = Boolean(await deps.library.readIcon(waiting.file));
-        await changeIcon(message.id, waiting.file, (file) => deps.library.setIcon(file, message.png), `The icon is saved.${had ? ' The one before it is in History.' : ''}`);
+        await changeIcon(message.id, waiting.file, (file) => deps.library.setIcon(file, message.png), (result) => `The icon is saved.${result.kept ? ' The one before it is in History.' : ''}`);
         return;
       }
       case 'icon-failed': if (iconWaiting?.seq === message.seq) iconWaiting = undefined; return;
@@ -1486,7 +1490,8 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
         if (iconWorking) { post({ type: 'error', text: 'Still working on an icon. Wait for it to finish.' }); return; }
         // The latest request wins: a picture still on its way from the page for an earlier one is not used after this.
         iconWaiting = undefined;
-        await changeIcon(message.id, file, (teamFile) => deps.library.removeIcon(teamFile), 'Removed the icon. The team shows its default icon again; the old one is in History.');
+        // History holds the old icon only when there was an icon file to move there; a lone icon line is only taken away (PR #82 review, round 2).
+        await changeIcon(message.id, file, (teamFile) => deps.library.removeIcon(teamFile), (result) => result.removed ? 'Removed the icon. The team shows its default icon again; the old one is in History.' : 'Removed the icon line, which named no icon file. The team shows its default icon.');
         return;
       }
       case 'icon-restore': {
@@ -1494,7 +1499,7 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
         if (!file) { post({ type: 'error', text: 'That team is no longer in your teams.' }); return; }
         if (iconWorking) { post({ type: 'error', text: 'Still working on an icon. Wait for it to finish.' }); return; }
         iconWaiting = undefined;
-        await changeIcon(message.id, file, (teamFile) => deps.library.restoreIcon(teamFile, message.ref), `Restored the icon from ${versionLabel(message.ref)}. The one before it is in History.`);
+        await changeIcon(message.id, file, (teamFile) => deps.library.restoreIcon(teamFile, message.ref), (result) => `Restored the icon from ${versionLabel(message.ref)}.${result.kept ? ' The one before it is in History.' : ''}`);
         return;
       }
       case 'open-setting': await deps.openSetting(message.key); return;
@@ -1513,8 +1518,10 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
    * team open in the editor moves to the new version (`base`) when it was on the one before, and a later save is not taken for an outside edit. Nothing
    * changed (no icon to remove) gets icon-done. A refusal says why in plain words, never with a path.
    */
-  const changeIcon = async (id: string, file: string, change: (file: string) => Promise<{ text: string; textChanged: boolean; removed?: boolean }>, text: string) => {
-    let result: { text: string; textChanged: boolean; removed?: boolean };
+  /** What a change did, to choose its words: `kept`, an icon went into the history on the way; `removed`, an icon file was there to remove. */
+  type IconChange = { text: string; textChanged: boolean; removed?: boolean; kept?: boolean };
+  const changeIcon = async (id: string, file: string, change: (file: string) => Promise<IconChange>, text: (result: IconChange) => string) => {
+    let result: IconChange;
     let before: string;
     try {
       before = await readFile(file, 'utf8');
@@ -1529,7 +1536,7 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
     if (rebase && result.textChanged) open = { ...open!, text: result.text, base: hash(result.text) };
     await refreshLibrary();
     const icon = await iconOf(file, result.text);
-    post({ type: 'icon-updated', id, ...(icon ? { icon } : {}), iconHistory: await iconHistoryOf(file), ...(rebase ? { base: open!.base } : {}), text });
+    post({ type: 'icon-updated', id, ...(icon ? { icon } : {}), iconHistory: await iconHistoryOf(file), ...(rebase ? { base: open!.base } : {}), text: text(result) });
   };
 
   const subscriptions = [
@@ -1592,6 +1599,13 @@ export function versionLabel(ref: string): string {
   // 0.4.30: an earlier icon's name in the history (.png) reads the same way.
   const match = /^(\d{4}-\d\d-\d\d)T(\d\d)-(\d\d)-(\d\d)-\d+Z(?:-(\d+))?\.(?:md|png)$/.exec(ref);
   return match ? `${match[1]} ${match[2]}:${match[3]}:${match[4]} UTC${match[5] ? ` (${match[5]})` : ''}` : ref.replace(/\.(?:md|png)$/, '');
+}
+
+/** A file-system error in plain words, without the path its message carries: " (permission was denied)", or nothing when the cause is not one of these. */
+export function fileProblem(error: unknown): string {
+  const code = (error as NodeJS.ErrnoException | undefined)?.code;
+  const words: Record<string, string> = { EACCES: 'permission was denied', EPERM: 'permission was denied', ENOSPC: 'the disk is full', EROFS: 'the disk is read-only', ENOENT: 'a folder it needs is missing', EISDIR: 'a folder is in its place', EBUSY: 'the file is in use' };
+  return code && words[code] ? ` (${words[code]})` : '';
 }
 
 function displayPath(file: string, root: string | undefined): string {
