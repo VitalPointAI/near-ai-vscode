@@ -88,3 +88,20 @@ test('through the gate in Full auto: a merge and an API write ask with no shortc
     }
   }
 });
+
+// PR #76 review round 2: with `--` before the group, the group word was read again as the action, so `gh -- pr merge 12` lost its publish tag.
+test('`--` anywhere before the action ends the options and keeps every tag', () => {
+  const wrong: string[] = [];
+  for (const [command, expected] of [
+    ['gh -- pr merge 12', [REMOTE]], ['gh pr -- merge 12', [REMOTE]], ['gh pr merge -- 12', [REMOTE]], ['gh -R acme/app pr -- merge 12', [REMOTE]],
+    ['glab -- mr merge 3', [REMOTE]], ['glab mr -- merge 3', [REMOTE]], ['gh -- release create v1', [RELEASE]], ['gh release -- create v1', [RELEASE]],
+    ['gh -- api -X POST repos/acme/app/issues', [REMOTE]], ['gh -- pr view 12', []], ['gh -- pr create --fill', []]
+  ] as const) {
+    const got = JSON.stringify(classify(command).effects ?? []);
+    if (got !== JSON.stringify(expected)) wrong.push(`${command} → ${got}`);
+  }
+  for (const command of ['gh -- auth login', 'gh auth -- login']) if (classify(command).credentialChange === undefined) wrong.push(`${command} is not a credential change`);
+  for (const command of ['gh -- auth token', 'gh auth -- token']) if (classifyCommand(command, context).printsCredential === undefined) wrong.push(`${command} is not a printer`);
+  for (const command of ['gh -- $GROUP merge', 'gh pr -- $ACTION 12']) if (classify(command).effectsUnknown === undefined) wrong.push(`${command} is read as known`);
+  assert.deepEqual(wrong, []);
+});

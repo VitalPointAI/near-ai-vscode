@@ -1000,7 +1000,17 @@ function githubAction(args: readonly Word[]): { group?: Word; action?: Word; gro
   for (let index = 0; index < args.length; index += 1) {
     const word = args[index]!;
     const text = word.text;
-    if (text === '--') { const next = args[index + 1]; if (group === undefined) { group = next; groupAt = index + 1; continue; } return next === undefined ? { group, groupAt } : next.expansion ? { unknown: 'with an action decided at run time' } : { group, action: next, groupAt }; }
+    // `--` ends the options: the words after it are the group (if not read yet) and the action, read once each (PR #76 review round 2).
+    if (text === '--') {
+      const after = args.slice(index + 1);
+      const groupWord = group === undefined ? after[0] : group;
+      const groupIndex = group === undefined ? index + 1 : groupAt;
+      const action = group === undefined ? after[1] : after[0];
+      if (groupWord === undefined) return { groupAt };
+      if (groupWord.expansion) return { unknown: 'with a command decided at run time' };
+      if (groupWord.text === 'api' || action === undefined) return { group: groupWord, groupAt: groupIndex };
+      return action.expansion ? { unknown: 'with an action decided at run time' } : { group: groupWord, action, groupAt: groupIndex };
+    }
     if (looksLikeOption(text)) {
       if (group?.text === 'api') return { group, groupAt };
       // Under `auth`, -h names the host (`gh auth token -h github.com`); elsewhere it asks for help.
