@@ -50,7 +50,11 @@ to undo, and no mode lets an agent near the places where your keys and passwords
   the AI drafts a team from. Only a new team or a clone asks for a name, what it is for and where to
   save it; a clone of one of your teams starts as "Copy of" that team, and a clone of a built-in team
   starts under the built-in's name. Back returns to the screen before at every step,
-  and a draft you saved earlier opens on the step you left it.
+  and a draft you saved earlier opens on the step you left it. A team drafted by AI from the builder
+  for this project is saved as this project's team unless you choose otherwise.
+- **A team is not saved when its origin cannot be checked.** If Team Studio cannot check whether a
+  team's members came from an imported team you have not approved, it now says so and saves
+  nothing, instead of saving the team without the question it asks before such a team first runs.
 - **Replacing a project's team always keeps the old one.** When the old team and the new one were
   kept as versions within the same millisecond, the new version could overwrite the old one.
 
