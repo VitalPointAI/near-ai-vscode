@@ -96,6 +96,10 @@ test('every rule id can be reached, and every refusing rule has one plain senten
     assert.ok(!/NEAR organization/i.test(sentence), 'say your organization');
     assert.ok(sentence.length < 400);
   }
+  // PR #81 review: before 4c a chat has no label of its own, so a new chat changes nothing about this refusal; the sentence offers only what helps.
+  assert.ok(!/new chat/.test(ROUTE_REFUSALS['route.connection-not-bound']), 'no new chat advised before a chat carries a label');
+  assert.match(ROUTE_REFUSALS['route.connection-not-bound'], /stays on this computer/);
+  assert.match(ROUTE_REFUSALS['route.connection-not-bound'], /local model/);
 });
 
 function withDenyRestricted(): RoutingTable {

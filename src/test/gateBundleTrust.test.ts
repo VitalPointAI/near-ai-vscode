@@ -15,7 +15,7 @@ import type { BundleResult } from '../gate/bundleStore';
 import { LAST_VALID_SECRET, readLastValid, writeLastValid } from '../gate/clockMarker';
 import { DECISIONS_DIR, DecisionLog, MODEL_REQUESTS_DIR, projectLogKey } from '../gate/decisionLog';
 import { GateHost } from '../gate/host';
-import { DECISION_LOGS_FOLDER, MODEL_REQUEST_LOGS_FOLDER } from '../gate/installEvidence';
+import { DECISION_LOGS_FOLDER, MODEL_REQUEST_LOGS_FOLDER, earlierInstallEvidence } from '../gate/installEvidence';
 import { DEVICE_KEY_SECRET, createDeviceIdentity, identityDir, loadDeviceIdentity, loadOrCreateDeviceIdentity } from '../team/identity';
 import type { DeviceIdentity } from '../team/identity';
 import { KEY_HISTORY_HEAD_SECRET } from '../team/keyHistory';
@@ -463,5 +463,23 @@ test('a marker update that stored the pending hash but did not read back leaves 
     const marker = await markerOf(secrets);
     assert.equal(marker.hash, plain.hash);
     assert.equal(marker.pending, undefined);
+  });
+});
+
+test('the install-evidence check names the folder it could not read, or the kind of log that remembers a policy', async () => {
+  await withStorage(async (storage) => {
+    const gate = path.join(storage, GATE_DIR_NAME);
+    await mkdir(gate, { recursive: true });
+    const secrets = new MemorySecrets();
+    // A folder that cannot be listed (here a plain file where the folder should be) is evidence, and the reason names which one.
+    await writeFile(path.join(gate, MODEL_REQUEST_LOGS_FOLDER), 'not a folder');
+    assert.equal(await earlierInstallEvidence(gate, path.join(storage, 'identity'), secrets), 'the model-request logs could not be read');
+    await rm(path.join(gate, MODEL_REQUEST_LOGS_FOLDER));
+    await writeFile(path.join(gate, DECISION_LOGS_FOLDER), 'not a folder');
+    assert.equal(await earlierInstallEvidence(gate, path.join(storage, 'identity'), secrets), 'the decision logs could not be read');
+    await rm(path.join(gate, DECISION_LOGS_FOLDER));
+    await mkdir(path.join(gate, MODEL_REQUEST_LOGS_FOLDER));
+    await writeFile(path.join(gate, MODEL_REQUEST_LOGS_FOLDER, 'p.jsonl'), `{"bundleHash":"${'a'.repeat(64)}"}\n`);
+    assert.equal(await earlierInstallEvidence(gate, path.join(storage, 'identity'), secrets), 'a model-request log records an earlier valid policy');
   });
 });

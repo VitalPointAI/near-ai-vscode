@@ -8,7 +8,8 @@ import type { AgentMessage, CompletionEvent, ToolCall, ToolDefinition, UsageMeta
 import { AutoApprovalContext, allowRuleBlocker, isAutoAllowed, PermissionRules, RunGrants, suggestAllowRule } from './permissions';
 import { CREDENTIAL_HOLD_RULE, OUTSIDE_WORKSPACE_RULE } from '../domain/gate/decide';
 import type { GateRuntime } from '../domain/gate/decide';
-import { TOOL_FORBIDDEN_RULE, gateToolCall, recordApprovalReply, recordRefusedBeforeGate, shellReadsCredentialFile, unavailableGateRuntime } from './gateAdapter';
+import { labelReadFilter } from './gateLabels';
+import { TOOL_FORBIDDEN_RULE, followCommandMoves, gateToolCall, recordApprovalReply, recordRefusedBeforeGate, shellReadsCredentialFile, unavailableGateRuntime } from './gateAdapter';
 import type { FloorShellContext } from './gateAdapter';
 import { PackageScriptsReader } from './packageScripts';
 import { PREAMBLE_START, resolveGsdRun } from '../gsd/preamble';
@@ -786,8 +787,12 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
     if (credentialFile !== undefined) this.grants.noteCredentialRead(credentialFile);
     const ranAt = Date.now();
     const cwdBefore = context.shell?.workingDirectory ?? context.root;
+    // A search leaves out what the clearances do not cover, the way it leaves out credential files (CLAS-03).
+    if (tool.capability === 'read') context.canRead = await labelReadFilter(this.gate, context.root);
     try {
       const output = await tool.run(input, context);
+      // A rename the command made carries its label with it (D-26, D-42).
+      if (command !== undefined) await followCommandMoves(this.gate, { command, root: context.root, ...(floorShell ?? {}) });
       if (tool.untrusted) this.grants.tainted = true;
       // A scratch file this command wrote is recorded now that it succeeded, and only if the file is really there (0.4.18 review).
       if (command !== undefined) await this.noteScratchWrites(command, ranAt, context, cwdBefore);

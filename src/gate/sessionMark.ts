@@ -149,13 +149,6 @@ function isDefaultMark(mark: Mark, defaultLabel: Label): boolean {
 }
 
 /**
- * The infer record of one model request, built the way a tool call's record is (product version, clock and record id from the route): the capability
- * `infer` with the tier, provider and model, the model as the resource, the outcome and the rule, the policy's hash. A routine allowed request (route.any-cloud,
- * or route.default-session outside every route) gets the short record: no reason, the model and the policy's hash written once each, and, while the mark is
- * the default label, no label. The connection state
- * is kept only when the tier read it (attested-cloud). Never a host, a URL, a path or a fingerprint: the facts' host and binding fingerprint are not read here.
- */
-/**
  * The label that decided a refusal: the policy's default label when the mark is empty (nothing raised it), otherwise the first label of the mark whose own
  * tier is the decision's tier. Undefined when none can be named, which only a routing table that cannot be read leaves.
  */
@@ -178,6 +171,12 @@ export interface RouteRecordContext {
   readonly checkFailed?: boolean;
 }
 
+/**
+ * The infer record of one model request, built the way a tool call's record is (product version, clock and record id from the route): the capability
+ * `infer` with the tier, provider and model, the model as the resource, the outcome and the rule, the policy's hash. A routine allowed request (route.any-cloud,
+ * or route.default-session outside every route) gets the short record: no reason, the model and the policy's hash written once each, and, while the mark is
+ * the default label, no label. The connection state is kept only when the tier read it (attested-cloud). Never a host, a URL, a path or a fingerprint: the facts' host and binding fingerprint are not read here.
+ */
 export function routeRecordFor(route: SessionRoute, decision: RouteDecision, facts: RouteFacts, request: RouteRequest, context: RouteRecordContext): DecisionRecord {
   const recordId = (route.newRecordId ?? randomUUID)();
   const provider = facts.clientRoute === 'local' ? 'local' : facts.clientRoute === 'near' ? 'near-ai' : 'unknown';

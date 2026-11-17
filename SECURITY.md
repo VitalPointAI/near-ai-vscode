@@ -269,6 +269,12 @@ is what that file and the records beside it do in this version.
   confirm, keeps the old file beside the new one, and records the reset.
 - **Reading it.** **NEAR AI: Show Policy** opens the policy in plain words and
   as stored. The view is read only, and editing it changes nothing.
+- **Changing it.** **NEAR AI: Edit Policy** opens an unsigned draft of the
+  policy in force, kept in this extension's storage and never in your project.
+  **NEAR AI: Apply Policy Draft** checks it, sets the signer and the dates
+  itself, signs it with your device key and records the change with the old and
+  new policy hashes. A draft that is not valid, or that was made before the
+  policy changed (a reset, or an edit in another window), changes nothing.
 - **No network.** Nothing in a decision needs the network, so the policy
   works the same offline.
 - **Decision records.** Each decision, allowed, asked or refused, is written
@@ -307,9 +313,9 @@ is what that file and the records beside it do in this version.
   chat, a helper agent, an attached file being read, the chat view in VS Code,
   Team Studio, a cybersecurity scan or a model comparison, NEAR AI checks the
   request against the routing tiers in the policy file, using only what is on
-  this computer. Nothing can be labelled yet, so every request is at the
-  policy's default label, which may go to any model, and on a fresh install
-  nothing changes where requests go. A request the routing does not allow is
+  this computer. A label does not change where content is sent yet, so every
+  request is at the policy's default label, which may go to any model, and on
+  a fresh install nothing changes where requests go. A request the routing does not allow is
   not sent, and you are told why in plain words. Until NEAR AI can prove that a
   connection to NEAR AI Cloud ends inside its private hardware, content at a
   level whose tier needs an attested cloud model stays on this computer for
@@ -323,8 +329,37 @@ is what that file and the records beside it do in this version.
   raised the label. A request whose route cannot be worked out is refused with
   a fixed reason and no label. A record of a model request names never the
   content, the endpoint's address or a file path.
-- **What this version does not use yet.** The file also holds scales and
-  clearances. This version stores and shows them and does not use them yet.
+- **Labels and clearances in this version.** **NEAR AI: Set Label** labels a
+  file, a folder or the project. Labels are kept in
+  `.planning/.near-ai/labels.json`, signed with your device key, and travel
+  with the project, so anyone who can read the project can read its labels,
+  compartment names included: do not use a compartment name that is itself
+  secret. A label file NEAR AI cannot verify (changed by hand, merged, or signed
+  on another computer) only ever makes a label stricter, and it is signed
+  again only after you confirm. A label file that cannot be read, or that was
+  deleted, stops agents reading the project until you put it back (for example
+  with git restore) or sign the labels this computer last checked again with
+  **NEAR AI: Set Label**. A signed label file that is older than, or different
+  from, the one this computer last checked (for example after switching
+  branches) also stops agent reads, with one button, Use this branch's labels,
+  that makes its labels the current ones. NEAR AI remembers the label file it
+  last checked in this computer's secret storage, so deleting files does not
+  make it forget. Reading NEAR AI's own Open-GSD runtime files is judged at the
+  default label; a link from there into the project keeps the project file's
+  label. While a label file holds reads, only reads of the project are held:
+  reads of those runtime files go on. You can set only a label your own clearance covers;
+  to add a clearance, use **NEAR AI: Edit Policy** and **NEAR AI: Apply Policy
+  Draft**. An agent cannot read a file whose label your clearances do not
+  cover, through the file tools, searches or a command that names it; a read
+  a command does not show (a path built in a variable) is not seen. A glob in a
+  command (such as `secret/*.md`) is checked against every labelled file it
+  could match, and a glob next to a variable is judged by the strictest label
+  in the project. Content
+  with no label takes your policy's default label, so a policy with no
+  clearance on that scale cannot read it. Decision records hold the labels
+  involved and stay on this computer. A label does not change where content is
+  sent yet: every model request is routed by the default label and the routing
+  tiers. Labels and routing are an organizational control that helps prevent mistakes. They check what NEAR AI itself sends to a model and what its own file tools read, and they cannot see everything a shell command or an add-on server does. They do not make this device accredited for classified information. Until verified credentials arrive, your clearance is the one you declared yourself, so it is not an enforced boundary.
 - **Your clearance is your own word.** Until verified credentials arrive, your clearance comes from your own policy file, which your own device key signs, so it is self-declared. It is not an enforced clearance boundary.
 
 ### Sub-agents nobody is watching

@@ -298,7 +298,7 @@ export async function configureApiKey(context: vscode.ExtensionContext, auth: Au
   let localApiKey = '';
   if (usesLocal) {
     const entered = (await vscode.window.showInputBox({
-      title: title(), prompt: 'Local runtime URL (OpenAI-compatible, ending in /v1)', value: 'http://localhost:11434/v1', ignoreFocusOut: true,
+      title: title(), prompt: 'Local runtime URL (OpenAI-compatible, ending in /v1). Only a runtime on this computer (localhost or 127.0.0.1) counts as local for content that must stay on this computer, unless your organization names its host in the policy.', value: 'http://localhost:11434/v1', ignoreFocusOut: true,
       validateInput: (value) => isSecureEndpoint(value.trim()) ? undefined : 'Use http://localhost, http://127.0.0.1, or an https:// URL.'
     }))?.trim();
     if (!entered) return;

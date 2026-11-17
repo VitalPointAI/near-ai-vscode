@@ -9,6 +9,8 @@ import { FLOOR_RULE_ORDER, floorFor } from './floor';
 import type { FloorInput, FloorLocations } from './floor';
 import type { DecisionRecord } from './record';
 import { LABEL_EVENT_IDS } from './labels';
+import type { Label } from './labels';
+import type { LabelSource } from './labelMap';
 import { ROUTE_EVENT_IDS, ROUTE_RULES } from './routing';
 
 /** Whether a person can answer a card right now. A sub-agent of a chat run still has a person, so this is not the same idea as `unattended` (Pitfall 3). */
@@ -30,6 +32,8 @@ export interface ActorRef {
 export interface LabelVerdict {
   readonly rule: 'label.dominance' | 'label.no-agent-tools' | 'label.network-at-mark';
   readonly reason: string;
+  /** The label that decided it, for the record; absent when no single label did (a label file that cannot be read). */
+  readonly label?: Label;
 }
 
 export interface GateRequest extends FloorInput {
@@ -118,6 +122,12 @@ export interface GateRuntime {
   readonly productVersion?: string;
   readonly clock?: () => number;
   readonly newRecordId?: () => string;
+  /**
+   * The labels of a folder the run works in (CLAS-01, CLAS-03): the host gives every runtime the reader it keeps for each root, so a sub-agent in its own
+   * worktree reads that worktree's file. Only unavailableGateRuntime and a test runtime that gives none leave it out; a caller then reads the folder's label
+   * file trusting no key, so a label it holds only raises (fail closed).
+   */
+  readonly labels?: (root: string) => LabelSource;
 }
 
 /**
@@ -213,7 +223,7 @@ function ceilingRefusal(request: GateRequest, bundleState: Extract<BundleState, 
 /**
  * The one decision (GATE-04). `bundleState` is what the caller last verified; `settings` is today's permission logic. The floor is always enforced (D-19):
  * a floor refusal has no card, and a floor ask has no "always allow" and no run-wide grant, in every mode, fully-autonomous included.
- * Order: emergency stop, bundle state, unknown effects (after the floor's refusals of what such a call names and a settings refusal on the request), the
+ * Order: emergency stop, bundle state, unknown effects (after the floor's refusals of what such a call names, a label verdict and a settings refusal on the request), the
  * floor's refusals, bundle ceiling, labels, a settings refusal on the request, settings layer, the floor's asks. A refusal from an earlier layer is never undone by a later one, and
  * a deny from the settings layer (the deny list) still beats a floor ask.
  */
@@ -238,6 +248,9 @@ export async function decide(request: GateRequest, bundleState: BundleState, set
     const named = floorFor({ effects: [], ...(request.command === undefined ? {} : { command: request.command }), ...(request.floorFacts === undefined ? {} : { floorFacts: request.floorFacts }), ...(request.workspace === undefined ? {} : { workspace: request.workspace }) }, options.locations);
     if (named !== undefined && named.kind === 'refuse') return make('deny', named.rule, 'approve-risky', { reason: named.reason, floor: true });
     // The deny list decides before a person is asked about effects nobody can read (D-10): a denied command is never put in front of a person.
+    // A label the caller found on what the call names refuses it here, before anyone is asked (D-53): a command nobody can read that names a file above
+    // your clearance is refused, not put on a card.
+    if (request.labelVerdict !== undefined) return make('deny', request.labelVerdict.rule, 'approve-risky', { reason: request.labelVerdict.reason });
     if (request.settingsRefusal !== undefined) return make('deny', request.settingsRefusal.rule, 'approve-risky', { reason: request.settingsRefusal.reason });
     // A path the tool itself would refuse is refused here, with the tool's own words, rather than shown on a card that could only end in that refusal.
     if (request.outsideWorkspace !== undefined) return make('deny', OUTSIDE_WORKSPACE_RULE, 'approve-risky', { reason: request.outsideWorkspace });

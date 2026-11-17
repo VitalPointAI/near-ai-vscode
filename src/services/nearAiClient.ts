@@ -1,8 +1,10 @@
 import { createHash } from 'node:crypto';
 import { sha256Hex, verifyResponse, type ResponseEvidence, type VerificationResult } from './attestation';
 import { isNearCloudEndpoint, isSecureEndpoint } from '../domain/config';
-import { decideRoute, routeCheckFailed } from '../domain/gate/routing';
-import type { ConnectionBindingFact, RouteDecision, RouteFacts, RouteRule } from '../domain/gate/routing';
+import { decideRoute, routeCheckFailed, routingWhileFailedClosed } from '../domain/gate/routing';
+import type { ConnectionBindingFact, RouteDecision, RouteFacts, RouteRule, RoutingTable } from '../domain/gate/routing';
+import { SHIPPED_DEFAULT_LABEL } from '../domain/gate/bundle';
+import type { Label } from '../domain/gate/labels';
 import type { Mark } from '../domain/gate/dominance';
 import { currentSessionRoute, defaultSessionRoute, routeRecordFor, routingOf } from '../gate/sessionMark';
 import type { SessionRoute } from '../gate/sessionMark';
@@ -164,10 +166,30 @@ export interface NearAiClientOptions {
 }
 
 /**
+ * A list of paths no caller can change (PR #81 review): a frozen view over a set only this function holds, so neither `add` nor `Set.prototype.add.call`
+ * can put a path on it or take one off. A content path added at run time would otherwise skip the route check.
+ */
+function readOnlyPaths(paths: readonly string[]): ReadonlySet<string> {
+  const held = new Set(paths);
+  const view: ReadonlySet<string> = Object.freeze({
+    has: (value: string): boolean => held.has(value),
+    get size(): number { return held.size; },
+    forEach: (callback: (value: string, value2: string, set: ReadonlySet<string>) => void, thisArg?: unknown): void => {
+      for (const value of held) callback.call(thisArg, value, value, view);
+    },
+    entries: () => new Set(held).entries(),
+    keys: () => new Set(held).keys(),
+    values: () => new Set(held).values(),
+    [Symbol.iterator]: () => new Set(held).values()
+  });
+  return view;
+}
+
+/**
  * The requests that carry content to a model (a POST to one of these). The one list of them: BILLABLE_PATHS is this same set, because NEAR AI bills exactly
  * the requests that carry content, so the spend check and the route check can never disagree about a path (PR 4a review).
  */
-export const CONTENT_PATHS: ReadonlySet<string> = new Set(['/chat/completions', '/images/generations', '/images/edits', '/audio/transcriptions']);
+export const CONTENT_PATHS: ReadonlySet<string> = readOnlyPaths(['/chat/completions', '/images/generations', '/images/edits', '/audio/transcriptions']);
 
 /** Endpoints NEAR bills for; every 2xx answer from one is recorded in the spend ledger. The same set as CONTENT_PATHS, never a copy of it. */
 export const BILLABLE_PATHS: ReadonlySet<string> = CONTENT_PATHS;
@@ -176,7 +198,7 @@ export const BILLABLE_PATHS: ReadonlySet<string> = CONTENT_PATHS;
  * The only requests other than a GET that the client sends without a route check: billing lookups and the key check, which carry request ids and nothing
  * else. Every other request that is not a GET is route checked, so a content path someone adds and forgets to list is checked, never sent unchecked.
  */
-export const NON_CONTENT_POST_PATHS: ReadonlySet<string> = new Set(['/billing/costs', '/check_api_key']);
+export const NON_CONTENT_POST_PATHS: ReadonlySet<string> = readOnlyPaths(['/billing/costs', '/check_api_key']);
 
 /** Whether a request is route checked: every method but GET and HEAD, except the listed non-content paths. */
 export function needsRouteCheck(path: string, method: string | undefined): boolean {
@@ -955,17 +977,23 @@ export class NearAiClient {
   private checkRoute(model: string | undefined): ConnectionBindingFact | undefined {
     const inSession = currentSessionRoute();
     const route = inSession ?? defaultSessionRoute();
-    const { routing, defaultLabel, bundleHash } = routingOf(route);
+    // Until the route's policy has been read, the record names the failed-closed routing and no policy hash (PR #81 review: a state that cannot be read for
+    // its routing is refused and recorded below, never thrown past the check).
+    let routing: RoutingTable = routingWhileFailedClosed();
+    let defaultLabel: Label = SHIPPED_DEFAULT_LABEL;
+    let bundleHash = '';
     const host = this.options.baseUrl;
     const fact = this.bindingFact(host);
+    const attestation = attestationStateOf(route);
     const info = model === undefined ? undefined : this.models.get(model);
     const facts: RouteFacts = {
       clientRoute: this.options.route,
       host,
       nearEndpoint: isNearCloudEndpoint(host),
       model: info === undefined ? undefined : { id: info.id, ...(info.privacyBoundary === undefined ? {} : { privacyBoundary: info.privacyBoundary }) },
-      attestationFailed: route.attestation.failed === true,
-      binding: fact,
+      attestationFailed: attestation === 'failed',
+      // An unproven answer-check state is never proof of a private connection: no binding counts for it (D-50).
+      binding: attestation === 'unproven' ? { state: 'unknown', host } : fact,
       now: clockOf(route),
       localModelAvailable: this.options.localModelAvailable === true,
       sessionless: inSession === undefined
@@ -974,10 +1002,11 @@ export class NearAiClient {
     let mark: Mark = [];
     let checkFailed = false;
     try {
+      ({ routing, defaultLabel, bundleHash } = routingOf(route));
       mark = route.markOf();
       decision = decideRoute(mark, routing, facts, defaultLabel);
     } catch {
-      // A mark that cannot be read, or a routing table that throws, means the route cannot be worked out: it is refused with a fixed rule and a plain
+      // A policy state, a mark or a routing table that cannot be read means the route cannot be worked out: it is refused with a fixed rule and a plain
       // sentence, and recorded, rather than guessed or left to throw something nobody can read (PR 4a review).
       mark = [];
       checkFailed = true;
@@ -1020,7 +1049,7 @@ export class NearAiClient {
     const responseTimeoutMs = Math.max(1, this.options.responseTimeoutMs ?? DEFAULT_RESPONSE_TIMEOUT_MS);
     if (!isSecureEndpoint(url)) throw new NearAiError(0, 'NEAR AI endpoint must use HTTPS; plain HTTP is only allowed for localhost.', false);
     const model = overrides.model;
-    // CLAS-06: the route is decided once, here, for every content request, before the spend check, before a concurrency slot is taken and before the first
+    // CLAS-06: the route is decided once, here, for every content request, before the spend check, before the cooldown probe slot is taken and before the first
     // byte is sent, whether or not spend tracking is on. A retry below is the same request and is not decided again.
     const connection = needsRouteCheck(path, init.method) ? this.checkRoute(model) : undefined;
     const billable = BILLABLE_PATHS.has(path) && (init.method ?? 'GET') === 'POST' && this.options.spend !== undefined;
@@ -1238,6 +1267,21 @@ function parseSseLine(line: string, metadata: UsageMetadata, model?: ModelInfo):
  */
 export function completionRequestBody(model: string, messages: AgentMessage[], tools: ToolDefinition[], maxTokens: number): string {
   return JSON.stringify({ model, messages, stream: true, stream_options: { include_usage: true }, max_tokens: maxTokens, ...(tools.length ? { tools, tool_choice: 'auto' } : {}) });
+}
+
+/**
+ * The route's shared answer-check state (PR #85 review): `failed` only when a check really failed (`attestation.failed === true`); `unproven` when the
+ * state is missing or cannot be read, which never claims a failed check but is never proof either; otherwise `ok`. Only the attested-cloud tier reads it:
+ * an unproven state there gets no binding, so the content stays on this computer (D-50), and every other tier ignores it.
+ */
+function attestationStateOf(route: SessionRoute): 'ok' | 'failed' | 'unproven' {
+  try {
+    const failed = (route.attestation as { failed?: unknown } | undefined)?.failed;
+    if (failed === true) return 'failed';
+    return failed === false ? 'ok' : 'unproven';
+  } catch {
+    return 'unproven';
+  }
 }
 
 /** The time of a route decision: the route's clock, or the system clock when the route has none or its clock throws. */
