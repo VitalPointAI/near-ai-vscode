@@ -49,11 +49,11 @@ export const POLICY_SCHEME = 'near-ai-policy';
 export const POLICY_DOCUMENT_URI = `${POLICY_SCHEME}:/NEAR-AI-Policy.txt`;
 
 /**
- * Shown above the scales, clearances and routing. From PR 4a the routing is used: every model request is checked against it, at the default label because
- * nothing can be labelled yet. The scales and clearances are stored and not used yet. Plan 21 removes the rest of this line when they are live.
+ * Shown above the scales, clearances and routing (D-49, D-50). From PR 4b the clearances are checked when an agent reads a labelled file; a label does not
+ * change where content is sent until plan 24 (PR 4c), which replaces this line when routing by label is live.
  */
-export const POLICY_LABELS_NOT_USED_TEXT =
-  'This version checks every model request against the routing below, at your policy\'s default label, because nothing can be labelled yet. It does not use the scales and clearances below yet. They are kept so your policy file does not change when it does.';
+export const POLICY_ROUTING_NOT_LIVE_TEXT =
+  'This version checks the clearances below when an agent reads a labelled file. A label does not change where content is sent yet: every model request is routed by the default label and the routing tiers below, and levels that need an attested cloud stay on this computer.';
 
 export const RESET_CONFIRM_ACTION = 'Reset Policy';
 export const RESET_TITLE = 'Reset your policy to the default?';
@@ -92,8 +92,8 @@ function sectionList(lines: readonly string[]): string[] {
 
 /**
  * The plain-words view of a policy followed by its exact stored form. Pure. It states the state and the fix when the policy failed, and for a valid policy
- * the ceiling, the scales, clearances and routing it holds and the reserved fields. The scales, clearances and routing are marked as not used by this
- * version, and the clearance is marked as self-declared (D-27), wherever they appear.
+ * the ceiling, the default label (with what it means for unlabelled content, Pitfall 14), the scales, clearances and routing it holds and the reserved
+ * fields. What this version uses of them is said above them, and the clearance is marked as self-declared (D-27), wherever they appear.
  */
 export function policyDocumentText(state: BundleState | undefined, now: number): string {
   const lines: string[] = ['Your NEAR AI policy', ''];
@@ -131,7 +131,10 @@ export function policyDocumentText(state: BundleState | undefined, now: number):
   lines.push(
     `  Add-on servers allowed in runs with nobody present: ${bundle.ceiling.unattendedMcp.length === 0 ? 'none' : bundle.ceiling.unattendedMcp.join(', ')}`,
     '',
-    POLICY_LABELS_NOT_USED_TEXT,
+    POLICY_ROUTING_NOT_LIVE_TEXT,
+    '',
+    `Default label: ${labelKey(bundle.defaultLabel)}`,
+    `  ${unlabelledDefaultText(bundle.defaultLabel)}`,
     '',
     'Scales',
     `  ${SCALE_PRESETS_CAVEAT_TEXT}`,

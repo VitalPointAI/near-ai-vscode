@@ -163,3 +163,123 @@ test('Edit Policy\'s notice names Apply and Discard and says the clearance is se
   void STALE_DRAFT_TEXT;
   void POLICY_BUNDLE_FILE;
 });
+
+// ---- Task 2: invalid and stale drafts, the extension's own signer and dates, expiry, and what Show Policy says ----
+
+async function storedBytes(s: Started): Promise<string> {
+  return readFile(path.join(gateDir(s.storage), POLICY_BUNDLE_FILE), 'utf8');
+}
+
+test('an invalid draft (an unknown field, a level not in its scale, a mapping within one scale, not JSON) is refused with a plain reason and the stored bytes are unchanged', async () => {
+  const s = await started();
+  const draft = await editPolicy(s);
+  const bytes = await storedBytes(s);
+  const cases: Array<[string, string, RegExp]> = [
+    ['an unknown field', JSON.stringify({ ...draft, surprise: true }), /has a field the vocabulary does not have/],
+    ['a level not in its scale', JSON.stringify({ ...draft, clearances: [{ scale: 'ca-protected', level: 'Protected Z', compartments: [], releasability: [] }] }), /not allowed in this place\. \(at clearances\[0\]\.level\)/],
+    ['a mapping within one scale', JSON.stringify({ ...draft, mappings: [{ from: { scale: 'org', level: 'Restricted' }, covers: { scale: 'org', level: 'Public' } }] }), /not allowed in this place\. \(at mappings\[0\]\.covers\)/],
+    ['not JSON', '{ "clearances": [', /not valid JSON/]
+  ];
+  for (const [name, text, reason] of cases) {
+    await writeFile(draftPath(s), text);
+    resetUi();
+    assert.equal(await apply(s), false, name);
+    const warned = stub.notifications.find((entry) => entry.level === 'warn')?.message ?? '';
+    assert.match(warned, /^Nothing was changed/, name);
+    assert.match(warned, reason, name);
+    assert.equal(await storedBytes(s), bytes, `${name}: the policy's bytes are unchanged`);
+    assert.ok(existsSync(draftPath(s)), `${name}: the draft is kept so it can be fixed`);
+  }
+});
+
+test('a draft made before a reset, or before another window\'s Apply, is refused as stale and changes nothing (D-53)', async () => {
+  const s = await started();
+  const draft = await editPolicy(s);
+  await s.host.reset();
+  await writeDraft(s, { ...draft, clearances: [...(draft['clearances'] as unknown[]), PB_CLEARANCE] });
+  const bytes = await storedBytes(s);
+  resetUi();
+  assert.equal(await apply(s), false);
+  assert.equal(stub.notifications.find((entry) => entry.level === 'warn')?.message, `Nothing was changed. ${STALE_DRAFT_TEXT}`);
+  assert.equal(await storedBytes(s), bytes);
+  // Another window's Apply: two drafts made from the same policy, the second applied after the first.
+  const first = await editPolicy(s);
+  const base = await readFile(path.join(gateDir(s.storage), POLICY_DRAFT_BASE_FILE), 'utf8');
+  await writeDraft(s, { ...first, clearances: [...(first['clearances'] as unknown[]), PB_CLEARANCE] });
+  assert.equal(await apply(s), true);
+  await writeDraft(s, first);
+  await writeFile(path.join(gateDir(s.storage), POLICY_DRAFT_BASE_FILE), base);
+  const applied = await storedBytes(s);
+  resetUi();
+  assert.equal(await apply(s), false, 'the older draft would undo the other edit');
+  assert.equal(await storedBytes(s), applied);
+});
+
+test('the extension, not the draft, sets the signer and the dates: another device\'s issuer, a past issuedAt and an expiry ten years ahead are replaced', async () => {
+  const s = await started();
+  const draft = await editPolicy(s);
+  const other = { fingerprint: 'f'.repeat(64), publicKey: 'B'.repeat(43) };
+  await writeDraft(s, { ...draft, issuer: other, issuedAt: '2020-01-01T00:00:00.000Z', expiresAt: '2036-01-01T00:00:00.000Z' });
+  assert.equal(await apply(s), true);
+  const state = s.host.bundleState();
+  assert.equal(state.state, 'valid');
+  if (state.state !== 'valid') return;
+  assert.notEqual(state.bundle.issuer.fingerprint, other.fingerprint);
+  assert.equal(state.bundle.issuer.fingerprint, state.signer.fingerprint, 'this install signed it in its own name');
+  assert.ok(Date.parse(state.bundle.issuedAt) > Date.parse('2026-01-01T00:00:00.000Z'), 'a fresh signing time');
+  const days = (Date.parse(state.bundle.expiresAt) - Date.parse(state.bundle.issuedAt)) / 86_400_000;
+  assert.equal(days, 365, 'the usual lifetime, not ten years');
+});
+
+test('a self-added clearance that expires during a chat: the next read of content that needs it is refused with the expiry sentence, and Show Policy shows the date', async () => {
+  const s = await started();
+  const draft = await editPolicy(s);
+  const ends = new Date(Date.now() + 1500).toISOString();
+  await writeDraft(s, { ...draft, clearances: [...(draft['clearances'] as unknown[]), { ...PB_CLEARANCE, expiresAt: ends }] });
+  assert.equal(await apply(s), true);
+  assert.equal(await setLabelPB(s), true);
+  assert.match(await readAsAgent(s, 'secret/plan.md'), new RegExp(SECRET), 'read while the clearance holds');
+  stub.shownDocuments.length = 0;
+  await stub.commands.get('nearAi.policy.show')?.();
+  assert.ok(stub.shownDocuments[0]?.text.includes(`ca-protected/Protected B, until ${ends}`), 'Show Policy shows the expiry');
+  await new Promise((resolve) => setTimeout(resolve, 1700));
+  assert.match(await readAsAgent(s, 'secret/plan.md'), new RegExp(`Not allowed: This file is labelled ca-protected/Protected B, and your clearance for it ended on ${ends.slice(0, 10)}\\.`));
+});
+
+test('Show Policy says what is live: clearances are checked on reads, a label does not change where content is sent yet, and unlabelled content takes the default label', async () => {
+  const s = await started();
+  stub.shownDocuments.length = 0;
+  await stub.commands.get('nearAi.policy.show')?.();
+  const text = stub.shownDocuments[0]?.text ?? '';
+  assert.ok(text.includes(gateCommands.POLICY_ROUTING_NOT_LIVE_TEXT));
+  assert.equal((gateCommands as Record<string, unknown>)['POLICY_LABELS_NOT_USED_TEXT'], undefined, 'the old sentence is gone');
+  assert.match(gateCommands.POLICY_ROUTING_NOT_LIVE_TEXT, /checks the clearances below when an agent reads a labelled file/);
+  assert.match(gateCommands.POLICY_ROUTING_NOT_LIVE_TEXT, /does not change where content is sent yet/);
+  assert.match(gateCommands.POLICY_ROUTING_NOT_LIVE_TEXT, /levels that need an attested cloud stay on this computer/);
+  const pitfall = gateCommands.unlabelledDefaultText({ scale: 'org', level: 'Public', compartments: [], releasability: [], handling: [] });
+  assert.ok(text.includes(pitfall), 'the Pitfall 14 sentence');
+  assert.ok(text.indexOf('Default label: org/Public') >= 0 && text.indexOf(pitfall) > text.indexOf('Default label: org/Public'), 'beside the default label');
+  // Edit Policy's notice carries it too.
+  await editPolicy(s);
+  assert.ok(stub.notifications.find((entry) => entry.level === 'info')?.message.includes(pitfall));
+});
+
+test('every message Edit Policy, Apply Policy Draft and Show Policy show where clearances appear says they are self-declared, with no em-dash, and never calls a clearance verified or enforced', async () => {
+  const s = await started();
+  const texts: string[] = [];
+  stub.shownDocuments.length = 0;
+  await stub.commands.get('nearAi.policy.show')?.();
+  texts.push(stub.shownDocuments[0]?.text ?? '');
+  const draft = await editPolicy(s);
+  texts.push(stub.notifications.find((entry) => entry.level === 'info')?.message ?? '');
+  await writeDraft(s, { ...draft, clearances: [...(draft['clearances'] as unknown[]), PB_CLEARANCE] });
+  resetUi();
+  assert.equal(await apply(s), true);
+  texts.push(stub.notifications.find((entry) => entry.level === 'info')?.message ?? '');
+  for (const text of texts) {
+    assert.ok(text.includes(CLEARANCE_SELF_ASSERTED_TEXT), text.slice(0, 80));
+    assert.ok(!text.includes(EM_DASH));
+    const withoutQuoted = text.replace(CLEARANCE_SELF_ASSERTED_TEXT, '').replace(LABELS_NOT_ACCREDITATION_TEXT, '');
+    assert.doesNotMatch(withoutQuoted, /clearance (?:is |was )?(?:verified|enforced)|verified clearance|enforced clearance/i);
+  }
+});

@@ -109,7 +109,7 @@ test('a policy file that was changed shows "Policy: reading only" with the bundl
   assert.equal((item.backgroundColor as { id: string }).id, 'statusBarItem.warningBackground');
 });
 
-test('Show Policy opens a read-only document with the hash, the self-declared clearance text, the scales caveat and the "not used yet" line above the scales, clearances and routing', async () => {
+test('Show Policy opens a read-only document with the hash, the self-declared clearance text, the scales caveat and the "what is live" line above the scales, clearances and routing', async () => {
   const { storage, state } = await started();
   assert.equal(state.state, 'valid');
   if (state.state !== 'valid') return;
@@ -124,23 +124,23 @@ test('Show Policy opens a read-only document with the hash, the self-declared cl
   assert.ok(text.includes(state.hash), 'the bundle hash');
   assert.ok(text.includes(CLEARANCE_SELF_ASSERTED_TEXT));
   assert.ok(text.includes(SCALE_PRESETS_CAVEAT_TEXT));
-  assert.ok(text.includes(gateCommands.POLICY_LABELS_NOT_USED_TEXT));
-  // PR 4a: the routing is used now (every model request is checked against it); the scales and clearances are not yet.
-  assert.match(gateCommands.POLICY_LABELS_NOT_USED_TEXT, /checks every model request against the routing below/);
-  assert.match(gateCommands.POLICY_LABELS_NOT_USED_TEXT, /does not use the scales and clearances below yet/);
-  assert.doesNotMatch(gateCommands.POLICY_LABELS_NOT_USED_TEXT, /does not use the scales, clearances and routing/);
+  assert.ok(text.includes(gateCommands.POLICY_ROUTING_NOT_LIVE_TEXT));
+  // PR 4b (plan 21): the clearances are checked on reads now; a label does not change where content is sent until plan 24.
+  assert.match(gateCommands.POLICY_ROUTING_NOT_LIVE_TEXT, /checks the clearances below when an agent reads a labelled file/);
+  assert.match(gateCommands.POLICY_ROUTING_NOT_LIVE_TEXT, /does not change where content is sent yet/);
+  assert.doesNotMatch(gateCommands.POLICY_ROUTING_NOT_LIVE_TEXT, /does not use the scales and clearances/);
   assert.ok(text.includes(state.bundle.issuer.fingerprint), 'the issuer');
   assert.ok(text.includes(state.expiresAt), 'the expiry');
   assert.ok(text.includes('"bundleVersion": 1'), 'the pretty-printed payload');
   assert.ok(text.includes('anchorRoots') && text.includes('statusLists') && text.includes('maxOfflineAge'), 'the reserved fields');
-  const notUsed = text.indexOf(gateCommands.POLICY_LABELS_NOT_USED_TEXT);
+  const notUsed = text.indexOf(gateCommands.POLICY_ROUTING_NOT_LIVE_TEXT);
   for (const heading of ['\nScales\n', '\nClearances\n', '\nRouting tiers']) {
     const at = text.indexOf(heading);
     assert.ok(at > notUsed, `${heading.trim()} comes after the "not used yet" line`);
   }
   assert.ok(text.indexOf('"scales"') > notUsed, 'the JSON copy of the scales also comes after the line');
   assert.ok(text.indexOf(CLEARANCE_SELF_ASSERTED_TEXT) < text.indexOf('\nRouting tiers'), 'the clearance text sits with the clearances');
-  assert.doesNotMatch(text, /unlabell?ed/i, 'the unlabelled-content sentence arrives with plan 21, when clearance checks are live');
+  assert.ok(text.includes(gateCommands.unlabelledDefaultText(state.bundle.defaultLabel)), 'the unlabelled-content sentence arrived with plan 21, when clearance checks went live');
   assert.ok(!text.includes(EM_DASH));
   assert.doesNotMatch(text, /NEAR organization/);
   // Looking changes nothing: the file and its folder are as they were.
