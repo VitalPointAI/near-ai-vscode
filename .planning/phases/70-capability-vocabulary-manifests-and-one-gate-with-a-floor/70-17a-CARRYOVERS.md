@@ -105,7 +105,8 @@ the unchanged source first (the tests compiled and ran before the implementation
 ### Results
 
 - Lint (`tsc --noEmit`): clean.
-- Full `npm test` (once, at the end, 6G cap): 3330 tests, 3321 passed, 0 failed, 0 cancelled, 9 skipped (the same 9 as before).
+- Full `npm test` (once, at the end, 6G cap): 3330 tests, 3321 passed, 0 failed, 0 cancelled, 9 skipped (the same 9 as before). After the follow-up
+  below, again: 3338 tests, 3329 passed, 0 failed, 0 cancelled, 9 skipped.
 - `node scripts/secret-scan.mjs --range origin/main..HEAD`: clean.
 - `package.json` and `package-lock.json`: unchanged by this round. No activation or webview code changed, so the e2e suite was not run.
 
@@ -136,8 +137,8 @@ the unchanged source first (the tests compiled and ran before the implementation
   effects (it asserted they had no tag) and still checks four levels are read.
 - Deliberate test change: `commandSafety.test.ts` asserted a self-referencing script (`test: npm test`) is `safe`, which was the fail-open result. It now
   asserts `unknown` with unknown effects; its intent (no endless loop) is kept.
-- Known UX cost: a deny-listed command that is also too deep or too long now asks instead of being refused by the deny list (the unknown-effects step comes
-  before the settings layer). Nothing runs without a person.
+- A deny-listed command that was also too deep or too long was asked about instead of refused by the deny list (the unknown-effects step came before the
+  settings layer). That broke D-10 and is fixed below ("Follow-up: the deny list decides first").
 
 ### 2. [MAJOR] `floorFactsFor` failed open on any reader failure
 
@@ -195,3 +196,25 @@ the unchanged source first (the tests compiled and ran before the implementation
 ### 6. [MINOR] `git gc`, `git prune`, `git rebase --continue` tagged destruction
 
 - Not changed, as instructed: it is the owner question already in the PR body.
+
+### Follow-up: the deny list decides first (D-10)
+
+- Commit `2c11d7c`, asked for by the coordinator after the first report.
+- The gap: with unknown effects, `decide()` asked before the settings layer ran, so a deny-listed command that was too deep, too long, had too many words,
+  or whose classifier or resolver threw, became a card a person could approve. The phase's rule is that the deny list and the emergency stop always win.
+- `GateRequest.settingsRefusal` carries a refusal the settings layer makes whatever else is true, worked out before the gate: `gateToolCall` sets it from
+  the deny list for a shell command (`denyListReason` in `permissions.ts`, which `decidePermission` now also uses, so there is one matcher); `gateStep`
+  sets it when the caller's settings answer is already a deny (an engagement's scope). `decide()` refuses with it before every step that could only ask:
+  inside the unknown-effects step (after the floor's own refusals of what the call names, so a credential store is still recorded as the floor's) and
+  before the settings layer, so before the floor's asks, taint holds and sensitive reads. The emergency stop and the bundle state still come first.
+- Can the deny list be matched on an over-long command? Yes: the matcher is a plain substring search over the whole text (quotes and escapes removed,
+  spaces collapsed) with no length or depth cap, and it runs on the raw command, not on what the classifier read. So no "refuse when it might match"
+  fallback was needed; a too-long command that contains a deny pattern is refused by the deny list itself.
+- Tests: `commandBounds.test.ts`, for each unknown-effects cause (past the bound, thousands deep, too long, too many words, classifier throws, resolver
+  throws), a command with the default deny rule `git push --force` is refused as `settings.deny-list` in all four modes with a person there, the emergency
+  stop refuses it as `settings.emergency-stop`, and with no deny rule the same command is asked about (`manifest.effects-unknown`).
+  `gateDecide.test.ts`: a settings refusal on the request beats each kind of ask (unknown effects, a floor ask, a taint hold, a sensitive read, the
+  settings layer's own ask), and the emergency stop beats it.
+- Records: a deny-listed call is still recorded as `settings.deny-list` with the same reason; the settings layer is no longer asked about it, so no
+  classifier or safety model runs for a command that will not run.
+- Lint clean, full `npm test` as above, secret scan clean.
