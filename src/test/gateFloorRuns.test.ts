@@ -493,3 +493,23 @@ test('an allow-list entry that matches a floor action does not get past the floo
     }
   }
 });
+
+// PR #74 review round 4: the floor reads the package.json of the folder a package manager runs in. Through a real run in Full auto with nobody present, a
+// `cd sub && npm run sync` whose sub/package.json pushes is refused as a publish and nothing reaches the remote; the same name at the root (which pushes
+// nothing) still runs.
+test('through a real run in Full auto, cd into a package whose script pushes is refused as a publish, and nothing is pushed', async () => {
+  const w = world();
+  try {
+    mkdirSync(path.join(w.root, 'sub'));
+    writeFileSync(path.join(w.root, 'sub', 'package.json'), JSON.stringify({ name: 'sub', scripts: { sync: 'git push origin HEAD:refs/heads/from-sub-script' } }));
+    writeFileSync(path.join(w.root, 'package.json'), JSON.stringify({ name: 'root', scripts: { sync: 'echo root-sync-ran' } }));
+    const ran = await runIn(w, [call('s1', 'Bash', { command: 'cd sub && npm run sync' }), call('s2', 'Bash', { command: 'npm run sync' })], { mode: 'fully-autonomous', presence: 'none' });
+    assert.match(ran.outputs[0] ?? '', /^Not allowed: /, 'the sub-package push is refused');
+    assert.equal(remoteHas(w.remote, 'refs/heads/from-sub-script'), false, 'nothing was pushed');
+    const first = ran.records.filter((record) => record.api.request.uid === 's1');
+    assert.equal(ruleOf(first[0]!), 'floor.publish');
+    assert.match(ran.outputs[1] ?? '', /root-sync-ran/, 'the root script, which pushes nothing, runs as before');
+  } finally {
+    w.shell.dispose();
+  }
+});

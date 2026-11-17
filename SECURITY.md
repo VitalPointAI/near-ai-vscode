@@ -142,15 +142,18 @@ themselves. There is no operating-system sandbox around the shell yet, so a
 determined command can still get past them.
 
 The checks that find publishing, destruction and protected writes in a shell
-command also read its text, through npm run scripts and wrappers such as bash
--c, sudo, xargs, pipes, subshells, timeout, nice, stdbuf, flock and watch. They
-do not see a command built while it runs (bash -c "$CMD"), a file run with
-source or piped into sh, or a script written or changed earlier on the same
-line (it is read as it was before the line ran). Under fully-autonomous such a
-command runs without asking. A command nested more than four levels deep, too
-long to read, or started by a program they do not know with a command they
-would flag among the words after it, is not guessed at: it asks, and it is
-refused when nobody is there to answer. That last case also asks when the words
+command also read its text, through npm, yarn, pnpm and bun scripts (from the
+package.json of the folder the command runs in, after any cd on the line) and
+wrappers such as bash -c, sudo, xargs, pipes, subshells, timeout, nice, stdbuf,
+flock and watch. They do not see a command built while it runs (bash -c
+"$CMD"), a file run with source or piped into sh, or a script written or
+changed earlier on the same line (it is read as it was before the line ran).
+Under fully-autonomous such a command runs without asking. A command nested
+more than four levels deep, too long to read, running a package script in a
+folder they cannot tell or whose package.json they cannot read, or started by a
+program they do not know with a command they would flag among the words after
+it, is not guessed at: it asks, and it is refused when nobody is there to
+answer. That last case also asks when the words
 only mention such a command (for example `mytool git push`, where `git push` is
 text the program reads): a false alarm costs one card, a miss would run unasked.
 

@@ -86,7 +86,23 @@ export interface CommandContext {
    * command is checked on its own, so `cd app && git push` is covered by "git push".
    */
   isAllowListed?(command: string): boolean;
+  /**
+   * The package.json scripts a package manager run in `folder` would use: the nearest package.json at or above it (PackageScriptsReader). Given, `npm run x`
+   * reads the folder the command really runs in (the shell's folder, any cd or pushd earlier on the line, --prefix, -C, --cwd, --workspace); absent, the
+   * classifier falls back to `packageScripts` (the project root's) for the root and treats any other folder as unknown (PR #74 review round 4).
+   */
+  packageScriptsAt?(folder: string): PackageScriptsAt;
 }
+
+/** What the package.json a package manager would use in a folder says. */
+export type PackageScriptsAt =
+  | { readonly kind: 'found'; readonly folder: string; readonly scripts: Readonly<Record<string, string>> }
+  /** No package.json at or above the folder. */
+  | { readonly kind: 'none' }
+  /** There is one, but it could not be read or parsed. */
+  | { readonly kind: 'unreadable'; readonly folder: string }
+  /** The one that would be used is outside the project. */
+  | { readonly kind: 'outside'; readonly folder: string };
 
 // Effects are gathered for the whole classifyCommand call, not handed back result by result: the classifier often rebuilds a result from an inner one
 // (`npm run x`, `xargs`, `find -exec`, a substitution) or decides on one part and stops, and a tag carried by hand through each of those would be lost in the
@@ -192,6 +208,8 @@ interface Lexed {
   opaque?: string;
   /** Unterminated quotes or substitutions: the structure itself is unknown. */
   broken?: string;
+  /** Parentheses grouped part of the line: a cd inside them does not carry past them, which a line read in order cannot tell. */
+  subshell?: boolean;
 }
 
 const GLOB_CHARS = new Set(['*', '?', '[', '{']);
@@ -220,6 +238,7 @@ function lex(command: string): Lexed {
   const substitutions: string[] = [];
   let opaque: string | undefined;
   const markOpaque = (reason: string) => { opaque = opaque ?? reason; };
+  let subshell = false;
   let segment: Segment = { words: [], redirects: [] };
   let word: Word | undefined;
   let pendingRedirect: Redirect | undefined;
@@ -395,6 +414,7 @@ function lex(command: string): Lexed {
     if (char === '(' || char === ')') {
       // Subshells and groups: their commands are still checked, but the whole is never `safe`.
       markOpaque('it runs a subshell');
+      subshell = true;
       const problem = endSegment(';');
       if (problem) return { segments, substitutions, broken: problem };
       continue;
@@ -412,7 +432,7 @@ function lex(command: string): Lexed {
   // A trailing operator (`ls &&`) leaves the shell waiting for more.
   const last = segments.at(-1);
   if (last?.next && last.next !== ';' && last.next !== '&') return { segments, substitutions, broken: `the command ends with "${last.next}"` };
-  return { segments, substitutions, opaque };
+  return { segments, substitutions, opaque, ...(subshell ? { subshell } : {}) };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -610,7 +630,11 @@ const FLOCK_FLAGS = /^-[sxenuoF]+$|^--(?:shared|exclusive|nonblock|nb|unlock|clo
 const WATCH_VALUE_OPTIONS = new Set(['-n', '--interval', '-q', '--equexit']);
 const WATCH_FLAGS = /^-[dtbegcCxpwr]+$|^--(?:differences(?:=\w+)?|no-title|beep|errexit|chgexit|color|no-color|exec|precise|no-wrap|no-rerun)$|^--(?:interval|equexit)=\S+$|^-n[\d.]+$/;
 
-interface SegmentState { cwd: string }
+interface SegmentState {
+  cwd: string;
+  /** Why the shell's folder at this point of the line cannot be known (a cd to a run-time folder, popd, a cd inside parentheses), when it cannot. */
+  cwdUnknown?: string;
+}
 
 const XARGS_VALUE_OPTIONS = new Set(['-n', '-L', '-P', '-I', '-d', '-s', '-E', '-a', '--max-args', '--max-lines', '--max-procs', '--delimiter', '--arg-file', '--replace', '--eof']);
 
@@ -808,8 +832,30 @@ function classifyGit(args: Word[], state: SegmentState, context: CommandContext)
   }
 }
 
-function checkScript(name: string, state: SegmentState, context: CommandContext, runner: string, depth: number): CommandClassification {
-  const scripts = context.packageScripts ?? {};
+/**
+ * The scripts a package manager run in `folder` (the shell's folder when not given) would use, or why they cannot be known. A folder decided at run time,
+ * one outside the project, and a package.json that cannot be read are all unknown: the command's effects are unknown, never "a project script".
+ */
+function scriptsIn(folder: string | undefined, state: SegmentState, context: CommandContext): { scripts: Readonly<Record<string, string>>; folder: string } | { unknown: string } {
+  if (folder === undefined && state.cwdUnknown !== undefined) return { unknown: state.cwdUnknown };
+  const at = path.resolve(folder ?? state.cwd);
+  if (!isInside(context.root, at)) return { unknown: 'it runs scripts from a folder outside the project' };
+  if (context.packageScriptsAt === undefined) {
+    // No reader: only the project root's scripts are known (the caller's packageScripts), as before.
+    if (at !== path.resolve(context.root) && context.packageScripts !== undefined) return { unknown: 'it runs the scripts of a folder whose package.json was not read' };
+    return { scripts: context.packageScripts ?? {}, folder: at };
+  }
+  const found = context.packageScriptsAt(at);
+  if (found.kind === 'none') return { scripts: {}, folder: at };
+  if (found.kind === 'unreadable') return { unknown: 'the package.json it would run scripts from could not be read' };
+  if (found.kind === 'outside' || !isInside(context.root, found.folder)) return { unknown: 'it runs scripts from a package.json outside the project' };
+  return { scripts: found.scripts, folder: found.folder };
+}
+
+function checkScript(name: string, state: SegmentState, context: CommandContext, runner: string, depth: number, folder?: string): CommandClassification {
+  const source = scriptsIn(folder, state, context);
+  if ('unknown' in source) return beyondReach(`${runner} ${name}: ${source.unknown}`);
+  const scripts = source.scripts;
   // Every script npm would run is read, even after one has decided the verdict, so what the later ones publish or destroy is still seen.
   let decided: CommandClassification | undefined;
   const mark = effectMark();
@@ -817,7 +863,8 @@ function checkScript(name: string, state: SegmentState, context: CommandContext,
     const body = scripts[key];
     if (typeof body !== 'string') continue;
     // A script that runs scripts (or itself) stops at the one bound, inside classifyText, with its effects unknown.
-    const inner = classifyText(body, { ...context, cwd: state.cwd }, depth + 1);
+    // The script runs in its package's own folder.
+    const inner = classifyText(body, { ...context, cwd: source.folder }, depth + 1);
     if (inner.verdict === 'risky') decided ??= risky(`${runner} ${name} runs the "${key}" script (${body.length > 120 ? `${body.slice(0, 120)}…` : body}), and ${inner.reason}`, inner.effects);
   }
   // A release-like name is a publish on its own word; when the script body already says where it publishes, that is the tag.
@@ -826,7 +873,47 @@ function checkScript(name: string, state: SegmentState, context: CommandContext,
   return decided ?? safe(`${runner} ${name} runs a project script`);
 }
 
-function classifyPackageManager(manager: string, args: Word[], state: SegmentState, context: CommandContext, depth: number): CommandClassification {
+/**
+ * The folder a package manager's options send it to (npm --prefix and -C, yarn and bun --cwd, pnpm -C and --dir, npm --workspace given a package folder),
+ * with the options taken out of the words; or why its scripts cannot be known (a run-time folder, a workspace by name, every workspace, a filter).
+ */
+function packageManagerFolder(manager: string, args: Word[], state: SegmentState, context: CommandContext): { args: Word[]; folder?: string } | { unknown: string } {
+  const folderOptions = manager === 'npm' ? ['--prefix', '-C'] : manager === 'pnpm' ? ['-C', '--dir'] : ['--cwd'];
+  const spread = manager === 'npm' ? /^(?:--workspaces|-ws|--include-workspace-root)$/ : manager === 'pnpm' ? /^(?:-r|--recursive|--filter|-F|-w|--workspace-root|--filter=.*|--filter-prod.*)$/ : manager === 'bun' ? /^--filter(?:=.*)?$/ : /^$/;
+  const kept: Word[] = [];
+  let folder: string | undefined;
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg.text === '--') { kept.push(...args.slice(index)); break; }
+    if (spread.test(arg.text)) return { unknown: `${arg.text} runs scripts in other packages` };
+    const [option, inline] = arg.text.includes('=') ? [arg.text.slice(0, arg.text.indexOf('=')), arg.text.slice(arg.text.indexOf('=') + 1)] : [arg.text, undefined];
+    const workspace = manager === 'npm' && (option === '--workspace' || option === '-w');
+    if (!folderOptions.includes(option) && !workspace) { kept.push(arg); continue; }
+    const value = inline !== undefined ? { ...arg, text: inline } : args[index + 1];
+    if (inline === undefined) index += 1;
+    if (value === undefined || value.expansion || value.glob) return { unknown: `${option} names a folder decided at run time` };
+    // npm resolves a workspace from the project's root; a workspace given by name (not a folder with its own package.json) is not resolved here.
+    const target = path.resolve(workspace ? context.root : state.cwd, value.text);
+    if (workspace) {
+      const found = context.packageScriptsAt?.(target);
+      if (found === undefined || found.kind !== 'found' || path.resolve(found.folder) !== target) return { unknown: `${option} ${value.text} names a workspace the rules do not read by name` };
+    }
+    folder = target;
+  }
+  return { args: kept, ...(folder === undefined ? {} : { folder }) };
+}
+
+/** Subcommands of pnpm and bun that are their own, not a script of the same name. */
+const PNPM_BUN_COMMANDS = new Set(['add', 'install', 'i', 'remove', 'rm', 'uninstall', 'update', 'up', 'upgrade', 'link', 'unlink', 'dlx', 'x', 'exec', 'create', 'init', 'pack', 'publish', 'outdated', 'list', 'ls', 'why', 'store', 'config', 'set', 'get', 'audit', 'import', 'prune', 'patch', 'rebuild', 'root', 'bin', 'env', 'setup', 'server', 'fetch', 'deploy', 'build', 'test', 't', 'run', 'start', 'pm', 'repl', 'help']);
+
+function classifyPackageManager(manager: string, givenArgs: Word[], state: SegmentState, context: CommandContext, depth: number): CommandClassification {
+  const located = packageManagerFolder(manager, givenArgs, state, context);
+  if ('unknown' in located) return beyondReach(`${manager}: ${located.unknown}`);
+  const args = located.args;
+  const folder = located.folder;
+  // A package manager runs the scripts (and the install hooks) of the folder it runs in: one this line cannot show, or one outside the project, is unknown.
+  if (folder === undefined && state.cwdUnknown !== undefined) return beyondReach(`${manager}: ${state.cwdUnknown}`);
+  if (!isInside(context.root, folder ?? state.cwd)) return beyondReach(`${manager} runs in a folder outside the project`);
   const words = args.map((arg) => arg.text);
   if (words.some((word) => /^--(?:prefix|global|location|userconfig|globalconfig|registry)(?:=|$)/.test(word) || word === '-g')) return unknown(`${manager} with --prefix, --global, or a registry option acts outside the workspace`);
   const first = words.findIndex((word) => !looksLikeOption(word));
@@ -841,14 +928,22 @@ function classifyPackageManager(manager: string, args: Word[], state: SegmentSta
   if (installs && words.every((word) => word === sub || LOCKFILE_INSTALL_OPTIONS.test(word))) return safe(`${manager} ${sub || 'install'} installs what the project's lockfile already lists`);
   const extraCheck = checkReads(extra.filter((arg) => arg.text !== '--'), state, context, `${manager} ${sub}`);
   if (extraCheck.verdict !== 'safe') return extraCheck;
-  if (['test', 't', 'tst'].includes(sub)) return checkScript('test', state, context, manager, depth);
+  if (['test', 't', 'tst'].includes(sub)) return checkScript('test', state, context, manager, depth, folder);
   if (['run', 'run-script', 'rum', 'urn'].includes(sub)) {
     const script = extra.find((arg) => !looksLikeOption(arg.text));
     if (!script) return safe(`${manager} run lists the project scripts`);
-    return checkScript(script.text, state, context, `${manager} run`, depth);
+    return checkScript(script.text, state, context, `${manager} run`, depth, folder);
   }
-  if (['build', 'lint', 'typecheck', 'check', 'start'].includes(sub) && manager !== 'npm') return checkScript(sub, state, context, manager, depth);
-  if (manager === 'yarn' && sub && !['add', 'install', 'remove', 'upgrade', 'up', 'dlx', 'exec', 'create', 'init', 'link', 'unlink', 'global', 'cache', 'set', 'plugin', 'npm', 'pack', 'workspace', 'workspaces'].includes(sub)) return checkScript(sub, state, context, manager, depth);
+  // npm start, stop and restart run the scripts of those names (restart runs stop, then start).
+  if (manager === 'npm' && ['start', 'stop', 'restart'].includes(sub)) return checkScript(sub, state, context, manager, depth, folder);
+  if (['build', 'lint', 'typecheck', 'check', 'start'].includes(sub) && manager !== 'npm') return checkScript(sub, state, context, manager, depth, folder);
+  if (manager === 'yarn' && (sub === 'workspace' || sub === 'workspaces')) return beyondReach(`yarn ${sub} runs scripts in other packages`);
+  if (manager === 'yarn' && sub && !['add', 'install', 'remove', 'upgrade', 'up', 'dlx', 'exec', 'create', 'init', 'link', 'unlink', 'global', 'cache', 'set', 'plugin', 'npm', 'pack'].includes(sub)) return checkScript(sub, state, context, manager, depth, folder);
+  // pnpm and bun run a script by its name too, when it is not one of their own commands.
+  if ((manager === 'pnpm' || manager === 'bun') && sub && !looksLikeOption(sub) && !PNPM_BUN_COMMANDS.has(sub)) {
+    const source = scriptsIn(folder, state, context);
+    if ('unknown' in source || typeof source.scripts[sub] === 'string') return checkScript(sub, state, context, manager, depth, folder);
+  }
   if (['ls', 'list', 'outdated', 'view', 'info', 'why', 'explain', 'help', '--version', '-v'].includes(sub) || (!sub && words.some((word) => word === '--version' || word === '-v'))) return unknown(`${manager} ${sub} may contact the registry`);
   return unknown(`${manager} ${sub || ''} can install or run code the rules cannot check`.replace(/\s+/g, ' '));
 }
@@ -1511,8 +1606,9 @@ function classifyStructure(raw: string, context: CommandContext, depth: number):
     if (secret) decided ??= risky(`it names ${secret.text}, which may hold credentials or knowledge-base keys`);
     if (program && programName(program.text) === 'cd' && segment.words.indexOf(program) === 0) {
       const target = segment.words[1];
+      if (lexed.subshell) state.cwdUnknown ??= 'it changes folder inside parentheses, so later parts may run in either folder';
       if (!target) { findings.push(unknown('cd with no directory goes to the home directory, outside the workspace')); state.cwd = context.home ?? '/'; continue; }
-      if (target.expansion || target.glob || target.text === '-' || segment.words.length > 2) { findings.push(unknown('cd to a directory decided at run time')); continue; }
+      if (target.expansion || target.glob || target.text === '-' || segment.words.length > 2) { findings.push(unknown('cd to a directory decided at run time')); state.cwdUnknown ??= 'it changes to a folder decided at run time'; continue; }
       // Owner decision 2026-11-05 (0.4.17): a cd inside the workspace is part of ordinary work, so it is safe and does not make the whole
       // command unknown; a cd that leaves the workspace still asks.
       const facts = pathFacts(target.text, state.cwd, context);
@@ -1520,6 +1616,13 @@ function classifyStructure(raw: string, context: CommandContext, depth: number):
       if (!facts.inside && !facts.scratch) findings.push(unknown(`cd ${target.text} leaves the workspace`));
       state.cwd = facts.absolute;
       continue;
+    }
+    // pushd moves the folder as cd does and popd moves it back to one this line may not show: the verdict is the rules' own, the folder is followed.
+    if (program && segment.words.indexOf(program) === 0 && (programName(program.text) === 'pushd' || programName(program.text) === 'popd')) {
+      const target = segment.words[1];
+      if (lexed.subshell) state.cwdUnknown ??= 'it changes folder inside parentheses, so later parts may run in either folder';
+      if (programName(program.text) === 'popd' || target === undefined || target.expansion || target.glob || segment.words.length > 2 || /^[+-]\d*$/.test(target.text)) state.cwdUnknown ??= `${program.text} moves to a folder this line does not show`;
+      else state.cwd = pathFacts(target.text, state.cwd, context).absolute;
     }
     // A part the user put on their allow list runs as is (the deny list is checked before this).
     const plain = segment.words.every((word) => !word.expansion && !word.glob && (!word.quoted || /^[\w.\/:=@+,%-]+$/.test(word.text)));

@@ -171,7 +171,14 @@ test('each gap the publishing and destruction text names is a real gap today, so
   for (const stopped of [nested(5), `git status # ${'x'.repeat(MAX_COMMAND_LENGTH)}`, 'chronic git push', 'ionice -c3 rm -rf src']) {
     assert.equal(typeof classifyCommand(stopped, context).effectsUnknown, 'string', `${stopped.slice(0, 40)}: its effects are unknown, as the text says`);
   }
-  assert.match(FLOOR_EFFECTS_CANNOT_SEE_TEXT, /nested more than four levels deep, too long to read, or started by a program they do not know with a command they would flag among the words after it, is not guessed at: it asks/);
+  assert.match(FLOOR_EFFECTS_CANNOT_SEE_TEXT, /nested more than four levels deep, too long to read, running a package script in a folder they cannot tell or whose package\.json they cannot read, or started by a program they do not know with a command they would flag among the words after it, is not guessed at: it asks/);
+  assert.match(FLOOR_EFFECTS_CANNOT_SEE_TEXT, /from the package\.json of the folder the command runs in, after any cd on the line/);
+  // PR #74 review round 4: a package script in a folder the line cannot show asks, as the text says; one in a folder it can show is read there.
+  for (const stopped of ['cd "$D" && npm test', 'cd .. && npm run build', 'npm --prefix "$P" run build']) {
+    assert.equal(typeof classifyCommand(stopped, { ...context, packageScriptsAt: () => ({ kind: 'none' }) }).effectsUnknown, 'string', `${stopped}: unknown, as the text says`);
+  }
+  const fromSub = classifyCommand('cd sub && npm run sync', { ...context, packageScriptsAt: (folder: string) => (folder === '/work/app/sub' ? { kind: 'found', folder, scripts: { sync: 'git push' } } : { kind: 'none' }) });
+  assert.ok((fromSub.effects ?? []).length > 0, 'the script of the folder the command runs in is read');
   assert.equal(MAX_NESTING, 4, 'the text says four levels');
   for (const seen of ['sudo git push', 'bash -c "git push"', 'echo x | xargs git push', '(git push)', 'timeout 5 git push', 'nice git push', 'stdbuf -oL git push', 'flock /tmp/lock git push', 'watch git push']) {
     assert.ok(tags(seen).length > 0, `${seen} is seen, as the text says`);

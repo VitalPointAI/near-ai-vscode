@@ -20,7 +20,7 @@ import type { DecisionOutcome, DecisionRecord, DecisionResource } from '../domai
 import { fromActionCapability } from '../domain/gate/vocabulary';
 import type { Capability } from '../domain/gate/vocabulary';
 import { classifyCommand, downloadSegments } from './commandSafety';
-import type { CommandEffect } from './commandSafety';
+import type { CommandEffect, PackageScriptsAt } from './commandSafety';
 import { decidePermissionAsync, denyListReason, isAutoAllowed } from './permissions';
 import type { AutoApprovalContext, PermissionDecision, PermissionRules, RunGrants } from './permissions';
 import { shellReachesCredentialStore } from './tools';
@@ -68,8 +68,10 @@ export interface GateCallInput {
 export interface FloorShellContext {
   /** The shell's folder when the command runs (absolute). */
   readonly cwd: string;
-  /** The project's package.json scripts, so `npm run x` is read as what x runs. */
+  /** The project's package.json scripts, so `npm run x` is read as what x runs. Used only when `packageScriptsAt` is not given (tests). */
   readonly packageScripts?: Readonly<Record<string, string>>;
+  /** The scripts of the package.json a package manager would use in a folder, so `cd sub && npm run x` is read as sub's x (PackageScriptsReader). */
+  readonly packageScriptsAt?: (folder: string) => PackageScriptsAt;
   /** The managed Open-GSD runtime's folders, whose gsd-tools verbs the classifier reads. */
   readonly trustedRoots?: readonly string[];
   /** The Open-GSD preambles the runtime ships, so what follows one is read as a command. */
@@ -163,6 +165,7 @@ export async function floorFactsFor(input: FloorFactsInput, readers: FloorReader
       cwd: input.cwd ?? input.root,
       ...(input.home === undefined ? {} : { home: input.home }),
       ...(input.packageScripts === undefined ? {} : { packageScripts: { ...input.packageScripts } }),
+      ...(input.packageScriptsAt === undefined ? {} : { packageScriptsAt: input.packageScriptsAt }),
       ...(input.trustedRoots === undefined ? {} : { trustedToolRoots: [...input.trustedRoots] }),
       ...(input.gsdPreambles === undefined ? {} : { gsdPreambles: [...input.gsdPreambles] }),
       temporaryRoots: input.temporaryRoots === undefined ? systemTemporaryRoots() : [...input.temporaryRoots]

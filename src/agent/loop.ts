@@ -9,6 +9,7 @@ import { AutoApprovalContext, allowRuleBlocker, isAutoAllowed, PermissionRules, 
 import type { GateRuntime } from '../domain/gate/decide';
 import { TOOL_FORBIDDEN_RULE, gateToolCall, recordApprovalReply, recordRefusedBeforeGate, unavailableGateRuntime } from './gateAdapter';
 import type { FloorShellContext } from './gateAdapter';
+import { PackageScriptsReader } from './packageScripts';
 import { PREAMBLE_START, resolveGsdRun } from '../gsd/preamble';
 import type { CommandSafetyCheck } from './safetyModel';
 import type { UnattendedScope } from './unattended';
@@ -315,7 +316,8 @@ export class AgentRun {
   /** When this run was created: a script changed after it was written by the run (PERF-01). */
   private readonly startedAt = Date.now();
   /** The package scripts the floor reads, by project folder: read once per run, and again only when package.json has changed since (Pitfall 5). */
-  private readonly floorScripts = new Map<string, { stamp: string; scripts: Record<string, string> | undefined }>();
+  /** package.json scripts by file, for every folder a command runs a package manager in; each read again only when it changes (PR #74 review round 4). */
+  private readonly packageScripts = new PackageScriptsReader();
   private readonly byName: Map<string, AgentTool<any>>;
   private readonly definitions: ToolDefinition[];
 
@@ -775,31 +777,13 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
   /** Where a shell command runs and what the project's scripts run, for the floor. No safety model and no runtime check: it must be cheap for every call. */
   private async floorShellContext(context: ToolContext): Promise<FloorShellContext> {
     const root = context.root;
-    const packageScripts = await this.floorPackageScripts(root);
     return {
       cwd: context.shell?.workingDirectory ?? root,
-      ...(packageScripts === undefined ? {} : { packageScripts }),
+      // The scripts of the folder each package manager in the command really runs in, not only the project root's.
+      packageScriptsAt: (folder) => this.packageScripts.at(folder, root),
       ...(context.trustedToolRoots === undefined ? {} : { trustedRoots: context.trustedToolRoots }),
       ...(context.gsdRuntime?.preambles.length ? { gsdPreambles: context.gsdRuntime.preambles } : {})
     };
-  }
-
-  /** The project's package.json scripts, read once per run and again only when the file changed (a run can rewrite a script and then run it). */
-  private async floorPackageScripts(root: string): Promise<Record<string, string> | undefined> {
-    const file = path.join(root, 'package.json');
-    const info = await stat(file).catch(() => undefined);
-    const stamp = info === undefined ? 'none' : `${info.mtimeMs}:${info.size}`;
-    const cached = this.floorScripts.get(root);
-    if (cached !== undefined && cached.stamp === stamp) return cached.scripts;
-    let scripts: Record<string, string> | undefined;
-    if (info !== undefined) {
-      try {
-        const manifest = JSON.parse(await readFile(file, 'utf8')) as { scripts?: unknown };
-        if (manifest.scripts && typeof manifest.scripts === 'object' && !Array.isArray(manifest.scripts)) scripts = Object.fromEntries(Object.entries(manifest.scripts as Record<string, unknown>).filter((entry): entry is [string, string] => typeof entry[1] === 'string'));
-      } catch { /* not JSON: no scripts are read */ }
-    }
-    this.floorScripts.set(root, { stamp, scripts });
-    return scripts;
   }
 
   /** Where a shell command would run, and what the project's npm scripts run, for the auto mode's checks. */
@@ -825,7 +809,7 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
       ? { gsdPreambles: runtime.preambles, gsdRun: await resolveGsdRun(cwd, runtime.home, context.shell?.environment ?? process.env) }
       : {};
     return {
-      root, cwd, home: homedir(), packageScripts, trustedToolRoots: context.trustedToolRoots, writtenScratch: await this.unchangedScratchWrites(), ...gsd, safety: this.options.safety, signal: context.signal,
+      root, cwd, home: homedir(), packageScripts, packageScriptsAt: (folder: string) => this.packageScripts.at(folder, root), trustedToolRoots: context.trustedToolRoots, writtenScratch: await this.unchangedScratchWrites(), ...gsd, safety: this.options.safety, signal: context.signal,
       ...(this.options.riskSwitches ? { riskSwitches: this.options.riskSwitches } : {}),
       ...(this.options.unattended ? { unattended: { runStartedAt: this.startedAt, ...(this.grants.taintedAt !== undefined ? { taintedAt: this.grants.taintedAt } : {}), ...this.options.unattended } } : {})
     };
