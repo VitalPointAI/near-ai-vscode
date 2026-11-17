@@ -984,14 +984,16 @@ export class NearAiClient {
     let bundleHash = '';
     const host = this.options.baseUrl;
     const fact = this.bindingFact(host);
+    const attestation = attestationStateOf(route);
     const info = model === undefined ? undefined : this.models.get(model);
     const facts: RouteFacts = {
       clientRoute: this.options.route,
       host,
       nearEndpoint: isNearCloudEndpoint(host),
       model: info === undefined ? undefined : { id: info.id, ...(info.privacyBoundary === undefined ? {} : { privacyBoundary: info.privacyBoundary }) },
-      attestationFailed: attestationFailedOf(route),
-      binding: fact,
+      attestationFailed: attestation === 'failed',
+      // An unproven answer-check state is never proof of a private connection: no binding counts for it (D-50).
+      binding: attestation === 'unproven' ? { state: 'unknown', host } : fact,
       now: clockOf(route),
       localModelAvailable: this.options.localModelAvailable === true,
       sessionless: inSession === undefined
@@ -1267,12 +1269,18 @@ export function completionRequestBody(model: string, messages: AgentMessage[], t
   return JSON.stringify({ model, messages, stream: true, stream_options: { include_usage: true }, max_tokens: maxTokens, ...(tools.length ? { tools, tool_choice: 'auto' } : {}) });
 }
 
-/** Whether the route's shared answer check has failed. A route whose state cannot be read counts as failed, so it never makes a model count as private. */
-function attestationFailedOf(route: SessionRoute): boolean {
+/**
+ * The route's shared answer-check state (PR #85 review): `failed` only when a check really failed (`attestation.failed === true`); `unproven` when the
+ * state is missing or cannot be read, which never claims a failed check but is never proof either; otherwise `ok`. Only the attested-cloud tier reads it:
+ * an unproven state there gets no binding, so the content stays on this computer (D-50), and every other tier ignores it.
+ */
+function attestationStateOf(route: SessionRoute): 'ok' | 'failed' | 'unproven' {
   try {
-    return route.attestation.failed !== false;
+    const failed = (route.attestation as { failed?: unknown } | undefined)?.failed;
+    if (failed === true) return 'failed';
+    return failed === false ? 'ok' : 'unproven';
   } catch {
-    return true;
+    return 'unproven';
   }
 }
 

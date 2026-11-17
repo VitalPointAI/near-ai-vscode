@@ -161,3 +161,20 @@ test('the local runtime prompt says that only a runtime on this computer counts 
   assert.ok(source.includes('Only a runtime on this computer (localhost or 127.0.0.1) counts as local for content that must stay on this computer, unless your organization names its host in the policy.'));
   assert.ok(source.includes("validateInput: (value) => isSecureEndpoint(value.trim())"), 'the prompt still accepts the same URLs');
 });
+
+// PR #85 review: a route whose answer-check state is missing is unproven, not failed. At an attested-cloud level that keeps the content on this computer
+// (D-50, the binding's unknown cause); on every other tier it blocks nothing.
+test('a missing attestation state: any-cloud and local-only are unaffected, attested-cloud stays on this computer as unproven, never as a failed check', async () => {
+  for (const attestation of [{}, undefined] as const) {
+    const route = (mark: Mark): SessionRoute => ({ markOf: () => mark, bundleState: () => stateWith(), actor: ACTOR, ...(attestation === undefined ? {} : { attestation }) }) as unknown as SessionRoute;
+    const near = await nearClient({ localModelAvailable: true }, undefined);
+    const nearCloud = new NearAiClient({ baseUrl: NEAR, apiKey: 'k', route: 'near', fetchFn: fakeFetch({ tee: ['tee-model'] }).fetchFn });
+    await nearCloud.listModels();
+    assert.equal((await withSessionRoute(route([label('org', 'Public')]), () => ask(nearCloud, 'tee-model'))).text, 'ok', 'any-cloud');
+    const local = await localClient('http://127.0.0.1:11434/v1');
+    assert.equal((await withSessionRoute(route([PROTECTED_B]), () => ask(local.client, 'local-model'))).text, 'ok', 'local-only');
+    assert.equal((await withSessionRoute(route([label('org', 'Internal')]), () => ask(local.client, 'local-model'))).text, 'ok', 'attested-cloud on a local model');
+    await assert.rejects(() => withSessionRoute(route([label('org', 'Internal')]), () => ask(near.client, 'tee-model')), refusedWith('route.connection-not-bound', BINDING_REFUSALS.unknown));
+    assert.equal(near.content.length, 0);
+  }
+});
