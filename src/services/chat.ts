@@ -54,6 +54,8 @@ import { editorWriter, type MementoLike, stateHomeFor } from './stateHome';
 import { ensureMigrated } from './stateMigration';
 import { autoResumeChoice, autoResumeNotice, cutOffNotice, HEARTBEAT_MS, ownEditorMarkers, resumePrompt, RunMarker, RunMarkers, shouldAutoResume } from './runMarkers';
 import type { GateHost } from '../gate/host';
+import { sessionRouteFrom, withSessionRoute } from '../gate/sessionMark';
+import type { RouteAttestation, SessionRoute } from '../gate/sessionMark';
 import { WaitingNotices } from './waitingNotices';
 import { latestOnly, PROJECT_TEAM_WATCH_PATHS, projectHasTeam, SETUP_NUDGE_DISMISSED_KEY, shouldShowSetupNudge } from './setupSteps';
 
@@ -887,7 +889,7 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
       let attachments: PreparedAttachments | undefined;
       if (staged.length) {
         try {
-          attachments = await readAttachments(staged, { client: route.client, model, models: active.models, question: text, runId, conversationId, root });
+          attachments = await readAttachments(staged, { client: route.client, model, models: active.models, question: text, runId, conversationId, root, ...(gateHost ? { gateHost } : {}), attestation: agent.routeAttestation });
         } catch (error) {
           // The run was opened above, so it is closed here too: otherwise Agent Activity shows it running until the window reloads.
           await state.activity.append(session.sessionId, { status: 'failed', summary: 'Attachments could not be read.', errorCode: error instanceof Error ? error.name : 'unknown' }).catch(() => undefined);
@@ -988,7 +990,7 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
         const teeBlock = attachmentTeeBlock(staged, tab.modelInfo, active.models);
         if (teeBlock) { blocked(`${teeBlock} It was not sent to the running agent.`); return; }
         // Billed to the running run once it has started; a run still being prepared has no ID yet, so the spend is tagged to the conversation alone.
-        attachments = await readAttachments(staged, { client: clientFor(active, model).client, model, models: active.models, question: message.text, runId: tab.agent?.currentRunId, conversationId: tab.agent?.id ?? tab.id, root });
+        attachments = await readAttachments(staged, { client: clientFor(active, model).client, model, models: active.models, question: message.text, runId: tab.agent?.currentRunId, conversationId: tab.agent?.id ?? tab.id, root, ...(gateHost ? { gateHost } : {}), ...(tab.agent ? { attestation: tab.agent.routeAttestation } : {}) });
       } catch (error) {
         blocked(`The attachments could not be read: ${providerErrorMessage(error)} It was not sent to the running agent.`);
         return;
@@ -1098,21 +1100,30 @@ function attachmentTeeBlock(staged: StagedAttachment[], modelInfo: ModelInfo | u
   return forwarded ? `TEE-only mode is on, and ${forwarded}, which would read your attachment, does not run in NEAR's TEE.` : undefined;
 }
 
+/** CLAS-06: a person sent these files, so their reads are routed (and recorded) as the person's, with the chat's attestation state. None without a gate host. */
+async function attachmentRoute(options: { root: string; conversationId: string; gateHost?: Pick<GateHost, 'runtimeFor'>; attestation?: RouteAttestation }): Promise<SessionRoute | undefined> {
+  const runtime = await options.gateHost?.runtimeFor({ root: options.root, actor: { kind: 'person', sessionId: options.conversationId }, presence: 'person', context: 'interactive' });
+  return runtime ? sessionRouteFrom(runtime, options.attestation ? { attestation: options.attestation } : {}) : undefined;
+}
+
 /**
  * Reads attachments for the message they came with (vision and transcription billed to its run) and names where each is saved in the project, so the
  * agent opens it with its own file tools instead of hunting for it on disk (0.4.18). The copy is made here, when the message is sent and has passed its
  * checks (0.4.21); nothing is written when a file is only attached.
  */
-async function readAttachments(staged: StagedAttachment[], options: { client: NearAiClient; model: string; models: ModelInfo[]; question: string; runId: string | undefined; conversationId: string; root: string }): Promise<PreparedAttachments> {
+async function readAttachments(staged: StagedAttachment[], options: { client: NearAiClient; model: string; models: ModelInfo[]; question: string; runId: string | undefined; conversationId: string; root: string; gateHost?: Pick<GateHost, 'runtimeFor'>; attestation?: RouteAttestation }): Promise<PreparedAttachments> {
   const agentModels = readAgentModels();
   // Read by the same models for the same words as before, a file is not read (or paid for) again: a message handed back by Stop and sent again reuses what was read.
   // The question is part of it (#46 review): what a file is read for, and its outbound assessment, depend on the words it is sent with.
   const key = JSON.stringify([options.model, agentModels.visionModel, agentModels.transcriptionModel, options.question]);
   const parts: PreparedAttachments[] = [];
+  let route: SessionRoute | undefined;
   for (const item of staged) {
     const known = preparedReads.get(item);
     if (known?.key === key) { parts.push(known.prepared); continue; }
-    const read = await withSpendTag({ kind: 'attachment', runId: options.runId, conversationId: options.conversationId }, () => prepareAttachments([item], { client: options.client, model: options.model, models: options.models, visionModel: agentModels.visionModel, transcriptionModel: agentModels.transcriptionModel, question: options.question }));
+    const prepare = () => prepareAttachments([item], { client: options.client, model: options.model, models: options.models, visionModel: agentModels.visionModel, transcriptionModel: agentModels.transcriptionModel, question: options.question });
+    route ??= await attachmentRoute(options);
+    const read = await withSpendTag({ kind: 'attachment', runId: options.runId, conversationId: options.conversationId }, () => (route ? withSessionRoute(route, prepare) : prepare()));
     preparedReads.set(item, { key, prepared: read });
     parts.push(read);
   }

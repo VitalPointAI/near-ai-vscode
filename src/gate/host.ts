@@ -16,9 +16,12 @@ import { ensurePolicyBundle, resetPolicyToDefaults } from './bundleStore';
 import type { BundleEvent, BundleResult } from './bundleStore';
 import { readLastValid } from './clockMarker';
 import { DecisionLog, INSTALL_LOG_KEY, projectLogKey } from './decisionLog';
+import type { SessionRoute } from './sessionMark';
 
 const DEVICE_UNKNOWN = 'device-unknown';
 const POLICY_SESSION = 'policy';
+/** The session id of a model request made outside every session route. */
+export const NO_SESSION_ID = 'no-session';
 const START_FAILED_DETAIL = 'The policy check threw before it could finish.';
 
 /**
@@ -141,6 +144,33 @@ export class GateHost {
       productVersion: this.options.productVersion,
       clock: () => this.now(),
       newRecordId: () => randomUUID()
+    };
+  }
+
+  /**
+   * The route a model request made outside every session route is decided with (CLAS-06, D-31): this host's policy now, a person with no session, the empty
+   * mark (the policy's default label), and records written to the project open at the time of each record, or to the install log with no folder open. It is
+   * synchronous, so a request never waits for it; before the start has finished the policy reads as failed closed, which routes the default label as today.
+   */
+  public sessionRouteWithoutContext(): SessionRoute {
+    // The device is read at each record, so a request after the start names the signer the start found.
+    const fingerprint = (): string => this.deviceFingerprint();
+    return {
+      markOf: () => [],
+      bundleState: () => this.bundleState(),
+      get actor() { return { kind: 'person' as const, deviceFingerprint: fingerprint(), sessionId: NO_SESSION_ID }; },
+      sink: {
+        record: (record) => {
+          try {
+            const root = this.projectRootNow();
+            void (root === undefined ? this.installLog() : this.logFor(root)).append(record);
+          } catch { /* a record that cannot be kept never changes a request (D-21) */ }
+        }
+      },
+      clock: () => this.now(),
+      newRecordId: () => randomUUID(),
+      productVersion: this.options.productVersion,
+      attestation: { failed: false }
     };
   }
 

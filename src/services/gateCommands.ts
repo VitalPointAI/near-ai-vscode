@@ -12,6 +12,7 @@ import type { BundleState } from '../domain/gate/bundle';
 import { CLEARANCE_SELF_ASSERTED_TEXT, SCALE_PRESETS_CAVEAT_TEXT, labelKey } from '../domain/gate/labels';
 import { BundleStoreError } from '../gate/bundleStore';
 import { GateHost } from '../gate/host';
+import { setDefaultSessionRoute } from '../gate/sessionMark';
 import type { SecretStorageLike } from './auth';
 import { SHOW_POLICY_COMMAND, createGateStatusBar, expiryDate, policyProblem } from './gateStatusBar';
 import type { GateStatusTimers } from './gateStatusBar';
@@ -182,6 +183,8 @@ export function registerGate(context: GateActivationContext, options: RegisterGa
     try { return host.now(); } catch { return Date.now(); }
   };
   registerPolicySurfaces(context, host, tell, clock, options.statusTimers);
+  // CLAS-06: a model request made outside every session route is still decided by this host's policy and recorded in the open project's log.
+  setDefaultSessionRoute(host.sessionRouteWithoutContext());
   // A closed folder's decision log is let go when the window's folders change, so a long session does not keep one per folder it ever opened.
   try {
     const subscription = vscode.workspace.onDidChangeWorkspaceFolders(() => {

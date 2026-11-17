@@ -13,6 +13,7 @@ import { CyberProtocolDriver } from '../agent/cyberProtocolDriver';
 import { RunCheckpoints } from '../agent/checkpoints';
 import { ShellSession } from '../agent/shell';
 import type { GateHost } from '../gate/host';
+import { sessionRouteFrom, withSessionRoute } from '../gate/sessionMark';
 
 /**
  * The one rule for where a workspace's cyber store lives. The panel and the run stack both use it,
@@ -393,14 +394,11 @@ export function panelCyberRunStarter(
         ...(security ? { security } : {})
       })
     });
-    const result = await startCyberRunInPanel(
-      {
-        ...assembly, grants, tools: assembly.tools(request.engagement), externalFindings: collected, limiter, budget,
-        // A person starts a scan and answers its cards: presence person, interactive; the floor is enforced here as in chat (D-43).
-        ...(options.gateHost ? { gate: await options.gateHost.runtimeFor({ ...(options.root ? { root: options.root } : {}), actor: { kind: 'agent', sessionId: `cyber-${request.engagement.id}`, agentLabel: 'cyber panel' }, presence: 'person', context: 'interactive' }) } : {})
-      },
-      request
-    );
+    // A person starts a scan and answers its cards: presence person, interactive; the floor is enforced here as in chat (D-43).
+    const gate = options.gateHost ? await options.gateHost.runtimeFor({ ...(options.root ? { root: options.root } : {}), actor: { kind: 'agent', sessionId: `cyber-${request.engagement.id}`, agentLabel: 'cyber panel' }, presence: 'person', context: 'interactive' }) : undefined;
+    const start = () => startCyberRunInPanel({ ...assembly, grants, tools: assembly.tools(request.engagement), externalFindings: collected, limiter, budget, ...(gate ? { gate } : {}) }, request);
+    // CLAS-06: every role call of the scan (the driver's completeOnce) runs inside the run's session route, decided at the client and recorded in its log.
+    const result = await (gate ? withSessionRoute(sessionRouteFrom(gate), start) : start());
     // The run record is what makes Export, replay and the diff work; nothing wrote one before.
     if (options.recordRun) await options.recordRun(request.engagement, result.runId, startedAt, request.mode, request.depth, model).catch(() => undefined);
     return result;
