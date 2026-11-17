@@ -126,6 +126,48 @@ The coordinator opens the PR. The body is in the coordinator's scratch file `pr-
 
 The PR number is not known here.
 
+## Review round 1 (PR #81, 5 minor findings)
+
+Main was merged in again first: `git merge origin/main` brought in #78 (the planning PR, `5f6b9cf`) with no conflict. Main's plan files were kept as they are, and this PR's summaries are unchanged by the merge.
+
+Each fix was seen failing first: with the five fixes switched off in place, 5 tests failed; restored, all passed. All five fixes are in commit `b882b3d`.
+
+1. **One list of content paths.**
+   - `CONTENT_PATHS` is the only list, and `BILLABLE_PATHS` is that same set.
+   - `needsRouteCheck` checks every request that is not a GET, except the named `NON_CONTENT_POST_PATHS` (`/billing/costs`, `/check_api_key`).
+   - A test fails if the sets drift, or if the client writes a POST to a path on neither list. It also shows a POST to an unlisted path being refused while the key check passes.
+2. **The request-site scan reads the syntax tree.** Coverage is decided by the shape of the code around each call. A call counts as covered when it is:
+   - the work argument of `withSessionRoute`;
+   - inside a local function used only as that work;
+   - inside a hook of `new AgentRun({...})`;
+   - inside a class method whose every call is covered;
+   - in `loop.ts`, inside an AgentRun method other than the constructor.
+
+   Each `inside` entry names the call in its caller that reaches it (`via`). The sites that used to call unwrapped when there was no gate host now wrap in the default route, and the cybersecurity role call is wrapped where it is made.
+
+   Planted unwrapped calls are reported with their file and line: in the chat session, the attachment read, Team Studio (its work also called directly), the cyber hand-off, and a new file. That is exactly 5 findings.
+3. **The deciding label on every refusal.** `routeRecordFor` writes the label that decided a refusal: the default label when the mark is empty, otherwise the mark's label whose tier decided. Data classifications name each level once. The SECURITY.md sentence and its gateDocs pin say the default label case and the no-label case.
+4. **A throwing routing table or mark** gives `routeCheckFailed()`: `route.deny` with `ROUTE_CHECK_FAILED_TEXT`. It is recorded with no label and thrown as a plain `RouteRefusedError`. There is a test for it.
+5. **The default route is cleared at deactivation.** `setDefaultSessionRoute` returns a function that clears the route only while it is still the one set, and `registerGate` adds it to the context's subscriptions. A test in `gateActivation.test.ts` covers set, cleared on dispose, and a replaced host that does not clear its replacement.
+
+### Tests changed in this round
+
+- `gateRouteGuard.test.ts`:
+  - The scan test was replaced by the syntax-tree version. It is stricter: the old checks are all still made, and planted calls in files that wrap elsewhere are now caught.
+  - `productionSources` returns the text as written, so line numbers are real. The client-construction scan strips comments itself.
+  - The short-record test passes `routing` in the record context.
+  - 3 tests were added.
+- `gateActivation.test.ts`: 1 test was added. It starts by clearing the default route, because the earlier tests in that file activate hosts without deactivating them.
+- `gateDocs.test.ts`: 2 phrases were added to the SECURITY.md pin.
+
+### Gate after the round
+
+| Gate | Result |
+|---|---|
+| `npm run lint && npm test` (6G) | exit 0; 3,503 tests, 3,494 pass, 0 fail, 0 cancelled, 9 skipped |
+| e2e under xvfb, Wayland variables unset (6G) | exit 0; 21 passing, 0 failing |
+| Range secret scan | see the report; run after this commit |
+
 ## Deviations from Plan
 
 1. **Merge instead of rebase** (coordinator): `git merge origin/main` (commit `d7952a5`) instead of `git rebase --onto origin/main <PR4A_BASE>`. As a result `origin/main..HEAD` lists the merge commit too. The PR diff still holds only 4a's changes.
