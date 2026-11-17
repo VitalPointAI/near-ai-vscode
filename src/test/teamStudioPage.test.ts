@@ -17,6 +17,7 @@ import type { ActionCapability, ActionPolicyMode } from '../domain/policy';
 import type { Suggestion } from '../agent/teamRefine';
 import { attachTeamStudio, buildStudioContext, KEPT_WIZARD_TEXT, optimiseTarget, parseStudioMessage, reviewDraft, teamPicker, teamStudioHtml, type KeptWork, type SavedWizard, type StudioContext, type TeamStudioDeps } from '../services/teamStudioPage';
 import type { DirectoryInput } from '../services/toolsDirectory';
+import { JPEG, png, SVG, WEBP } from './iconFixtures';
 
 // Team Studio: a visual builder and manager for the Markdown team files, which stay the source of truth.
 
@@ -670,11 +671,12 @@ class FakeDoc {
   createTextNode(text: string) { const node = new FakeNode('#text', this); node.textContent = text; return node; }
 }
 
-async function runPage() {
+/** `extra`: more globals for the page (the icon tests give it a fake image decoder). */
+async function runPage(extra: Record<string, unknown> = {}) {
   const doc = new FakeDoc();
   const posts: Array<Record<string, any>> = [];
   const listeners: Array<(event: { data: unknown }) => void> = [];
-  const sandbox = vm.createContext({ document: doc, window: { addEventListener: (_type: string, listener: (event: { data: unknown }) => void) => listeners.push(listener) }, acquireVsCodeApi: () => ({ postMessage: (message: Record<string, any>) => posts.push(JSON.parse(JSON.stringify(message))) }), setTimeout, clearTimeout, JSON, Map, Set, Date, String, Boolean, Object, isNaN, Math, Option: function Option(text: string, value: string) { const node = doc.createElement('option'); node.textContent = text; node.value = value; return node; } });
+  const sandbox = vm.createContext({ ...extra, document: doc, window: { addEventListener: (_type: string, listener: (event: { data: unknown }) => void) => listeners.push(listener) }, acquireVsCodeApi: () => ({ postMessage: (message: Record<string, any>) => posts.push(JSON.parse(JSON.stringify(message))) }), setTimeout, clearTimeout, JSON, Map, Set, Date, String, Boolean, Object, isNaN, Math, Option: function Option(text: string, value: string) { const node = doc.createElement('option'); node.textContent = text; node.value = value; return node; } });
   vm.runInContext(await readFile(SCRIPT, 'utf8'), sandbox, { timeout: 1000 });
   const byLabel = (label: string) => doc.body.all().find((node) => node.tagName === 'button' && (node.getAttribute('aria-label') === label || (!node.getAttribute('aria-label') && node.textContent === label)));
   return { doc, posts, dispatch: (data: unknown) => listeners.forEach((listener) => listener({ data })), byLabel, text: () => doc.getElementById('main')!.textContent, wait: () => new Promise((resolve) => setTimeout(resolve, 200)) };
@@ -2858,4 +2860,225 @@ test('page: picker cards clamp the same way, and Show more opens only that card 
   assert.equal(cell('lib:web').className.split(/\s+/).includes('expanded'), false);
   assert.equal(page.radios('starting-point').some((node) => node.checked), false, 'nothing selected');
   assert.equal(page.byLabel('Use Market team as is'), undefined);
+});
+
+// ---------- 0.4.30: team icons (owner, 2026-11-17) ----------
+
+const ICON_URI = `data:image/png;base64,${png(128, 128, { seed: 2 }).toString('base64')}`;
+
+test('page: every card has an icon: the team\'s own, or a default made from its name (initials on a colour from the name), built-in teams too', async () => {
+  const page = await builderPage({ teams: [{ ...WEB_CARD, icon: ICON_URI }, LONG_CARD, { ...WEB_CARD, id: 'user:forged', name: 'Forged team', icon: 'data:image/svg+xml;base64,PHN2Zz4=' }, { ...WEB_CARD, id: 'user:script', name: 'Script team', icon: 'javascript:alert(1)' }] });
+  const card = (id: string) => page.doc.body.all().find((node) => node.tagName === 'li' && node.dataset.id === id)!;
+  const iconOf = (node: FakeNode) => node.all().find((child) => child.className.split(/\s+/).includes('team-icon'))!;
+  const own = iconOf(card('user:web'));
+  assert.equal(own.tagName, 'img');
+  assert.equal((own as unknown as { src: string }).src, ICON_URI);
+  assert.equal((own as unknown as { alt: string }).alt, '', 'decorative: the name is beside it');
+  const fallback = iconOf(card('user:market'));
+  assert.equal(fallback.tagName, 'svg');
+  assert.ok(fallback.className.split(/\s+/).includes('team-icon-default'));
+  assert.equal(fallback.getAttribute('aria-hidden'), 'true');
+  assert.equal(fallback.textContent, 'M', 'initials from the name, without the word "team"');
+  const colour = fallback.all().find((node) => node.tagName === 'rect')!.getAttribute('fill');
+  assert.match(colour!, /^#[0-9a-f]{6}$/);
+  // Anything but a PNG data URI is never loaded: the default is shown.
+  for (const id of ['user:forged', 'user:script']) {
+    assert.equal(iconOf(card(id)).tagName, 'svg', id);
+    assert.equal(card(id).all().some((node) => node.tagName === 'img'), false, id);
+  }
+  // The same name always gets the same colour; the picker shows the same icons, and built-in teams get the default.
+  page.byLabel('New team')!.click();
+  page.byLabel('Use an existing team')!.click();
+  const cell = (id: string) => page.radios('starting-point').find((node) => node.value === id)!.parent!.parent!;
+  assert.equal(iconOf(cell('lib:web')).tagName, 'img');
+  assert.equal(iconOf(cell('lib:market')).all().find((node) => node.tagName === 'rect')!.getAttribute('fill'), colour);
+  assert.equal(iconOf(cell('type:software')).tagName, 'svg');
+  assert.equal(iconOf(cell('type:software')).textContent, 'SD');
+  assert.equal(iconOf(cell('gsd:review')).textContent, 'R');
+});
+
+/** A page with a fake image decoder and canvas: the decoder reports `size`, the canvas returns `out` and records what was drawn. */
+async function iconPage(options: { size?: [number, number]; fail?: boolean; out?: Buffer } = {}) {
+  const drawn: unknown[][] = [];
+  const out = options.out ?? png(128, 128, { seed: 5 });
+  const page = await runPage({
+    atob: (text: string) => Buffer.from(text, 'base64').toString('latin1'),
+    Blob: class { constructor(public parts: unknown[], public options: unknown) {} },
+    Uint8Array,
+    createImageBitmap: async () => { if (options.fail) throw new Error('not an image'); return { width: options.size?.[0] ?? 300, height: options.size?.[1] ?? 200, close() {} }; }
+  });
+  const make = page.doc.createElement.bind(page.doc);
+  (page.doc as unknown as { createElement: (tag: string) => unknown }).createElement = (tag: string) => tag === 'canvas'
+    ? { width: 0, height: 0, getContext: () => ({ drawImage: (...args: unknown[]) => drawn.push(args), getImageData: () => ({ data: new Uint8ClampedArray(128 * 128 * 4) }), putImageData() {} }), toDataURL: (type: string) => `data:${type};base64,${out.toString('base64')}` }
+    : make(tag);
+  page.dispatch({ type: 'state', context: context(), library: { teams: [WEB_CARD], archived: [] } });
+  return { ...page, drawn, out };
+}
+
+const HISTORY = [{ ref: '2026-11-17T10-00-00-000Z.png', label: '2026-11-17 10:00:00 UTC', icon: ICON_URI }];
+const openTeam = (overrides: Record<string, unknown> = {}) => ({ type: 'team', id: 'user:web', kind: 'user', file: 'My teams/web.md', command: '/team:web ', draft: draft(), base: 'b'.repeat(64), versions: [], iconHistory: [], iconAi: { available: false, reason: 'This team is private, so its icon can only be made by a private image model, and none is available.' }, ...overrides });
+
+test('page: a saved team\'s Purpose tab uploads an icon (cropped to a square and made a 128 x 128 PNG here), removes it, and History restores an earlier one', async () => {
+  const page = await iconPage();
+  page.dispatch(openTeam({ iconHistory: HISTORY }));
+  const preview = page.doc.getElementById('icon-preview')!;
+  assert.equal(preview.tagName, 'svg', 'the default until one is set');
+  assert.equal(preview.getAttribute('role'), 'img');
+  assert.equal(preview.getAttribute('aria-label'), 'Default icon for Web team');
+  assert.equal(page.byLabel('Remove the icon of Web team and use the default'), undefined, 'nothing to remove');
+  // Generate is offered only when allowed, and says why not.
+  const generate = page.byLabel('Generate an icon for Web team with AI')!;
+  assert.equal(generate.disabled, true);
+  assert.match(page.text(), /This team is private, so its icon can only be made by a private image model/);
+  page.byLabel('Upload an icon for Web team (PNG, JPEG or WebP)')!.click();
+  assert.deepEqual(page.posts.at(-1), { type: 'icon-upload', id: 'user:web' });
+  assert.equal(page.byLabel('Upload an icon for Web team (PNG, JPEG or WebP)')!.disabled, true, 'one request at a time');
+  assert.match(page.text(), /Working on the icon/);
+  // The host checked the file and sends its bytes; the page crops the middle square and re-encodes it as a 128 x 128 PNG.
+  page.dispatch({ type: 'icon-source', seq: 3, id: 'user:web', mime: 'image/jpeg', data: JPEG.toString('base64') });
+  await page.wait();
+  assert.deepEqual(page.drawn[0]!.slice(1), [50, 0, 200, 200, 0, 0, 128, 128], 'the centre square, scaled to 128 x 128');
+  assert.deepEqual(page.posts.at(-1), { type: 'icon-set', seq: 3, id: 'user:web', png: page.out.toString('base64') });
+  page.dispatch({ type: 'icon-updated', id: 'user:web', icon: ICON_URI, iconHistory: HISTORY, base: 'c'.repeat(64), text: 'The icon is saved. The one before it is in History.' });
+  const shown = page.doc.getElementById('icon-preview')!;
+  assert.equal(shown.tagName, 'img');
+  assert.equal((shown as unknown as { src: string }).src, ICON_URI);
+  assert.equal((shown as unknown as { alt: string }).alt, 'Icon for Web team');
+  assert.match(page.doc.getElementById('banner')!.textContent, /The icon is saved/);
+  assert.equal(page.byLabel('Upload an icon for Web team (PNG, JPEG or WebP)')!.disabled, false);
+  // The team file gained its icon line, so the next save goes from the new version, not a conflict.
+  page.type('f-desc', 'Builds and tests pages');
+  page.byLabel('Save')!.click();
+  assert.equal(page.posts.at(-1)!.base, 'c'.repeat(64));
+  page.byLabel('Remove the icon of Web team and use the default')!.click();
+  assert.deepEqual(page.posts.at(-1), { type: 'icon-remove', id: 'user:web' });
+  page.dispatch({ type: 'icon-done', id: 'user:web' });
+  page.byLabel('History')!.click();
+  assert.match(page.text(), /Earlier icons/);
+  page.byLabel('Restore the icon from 2026-11-17 10:00:00 UTC')!.click();
+  assert.deepEqual(page.posts.at(-1), { type: 'icon-restore', id: 'user:web', ref: HISTORY[0]!.ref });
+  for (const message of page.posts) assert.ok(parseStudioMessage(message), JSON.stringify(message));
+});
+
+test('page: an image the page cannot read is reported, and the host is told so it stops waiting', async () => {
+  const page = await iconPage({ fail: true });
+  page.dispatch(openTeam());
+  page.byLabel('Upload an icon for Web team (PNG, JPEG or WebP)')!.click();
+  page.dispatch({ type: 'icon-source', seq: 4, id: 'user:web', mime: 'image/webp', data: WEBP.toString('base64') });
+  await page.wait();
+  assert.deepEqual(page.posts.at(-1), { type: 'icon-failed', seq: 4 });
+  assert.match(page.doc.getElementById('banner')!.textContent, /could not be read as an image/);
+  assert.equal(page.byLabel('Upload an icon for Web team (PNG, JPEG or WebP)')!.disabled, false);
+  // An answer for another team, or none at all (an error), frees the buttons too.
+  page.byLabel('Upload an icon for Web team (PNG, JPEG or WebP)')!.click();
+  page.dispatch({ type: 'error', text: 'SVG images can carry scripts, so they are not accepted.' });
+  assert.equal(page.byLabel('Upload an icon for Web team (PNG, JPEG or WebP)')!.disabled, false);
+});
+
+test('host: Upload checks the file by its bytes and size before the page sees it, never sends a path, and checks the page\'s PNG again before saving it', async () => {
+  const h = await harness();
+  await h.library.create('Web team', teamMarkdown(draft()));
+  const file = path.join(h.library.directory, 'web-team.md');
+  await h.send({ type: 'ready' });
+  await h.send({ type: 'open', id: 'user:web-team' });
+  assert.equal(last(h, 'team').icon, undefined);
+  assert.deepEqual(last(h, 'team').iconHistory, []);
+  const pick: { value?: string } = {};
+  h.deps.pickIconSource = async () => pick.value;
+  const dir = await mkdtemp(path.join(tmpdir(), 'near-ai-icon-source-'));
+  const upload = async (name: string | undefined, bytes?: Buffer) => {
+    if (name && bytes) await writeFile(path.join(dir, name), bytes);
+    pick.value = name ? path.join(dir, name) : undefined;
+    const before = h.posted.length;
+    await h.send({ type: 'icon-upload', id: 'user:web-team' });
+    return h.posted.slice(before);
+  };
+  assert.deepEqual(await upload(undefined), [{ type: 'icon-done', id: 'user:web-team' }], 'cancelled: one answer, nothing else');
+  assert.match((await upload('logo.svg', SVG))[0]!.text, /SVG images can carry scripts/);
+  assert.match((await upload('logo.png', SVG))[0]!.text, /SVG images can carry scripts/, 'judged by its bytes, not its name');
+  assert.match((await upload('notes.png', Buffer.from('hello')))[0]!.text, /Use a PNG, JPEG or WebP image/);
+  assert.match((await upload('huge.jpg', Buffer.concat([JPEG, Buffer.alloc(2 * 1024 * 1024)])))[0]!.text, /larger than 2 MB/);
+  const sent = await upload('photo.jpg', JPEG);
+  assert.deepEqual(sent.map((message) => message.type), ['icon-source']);
+  const source = sent[0]!;
+  assert.deepEqual([source.id, source.mime, source.data], ['user:web-team', 'image/jpeg', JPEG.toString('base64')]);
+  assert.ok(Number.isSafeInteger(source.seq));
+  assert.equal(JSON.stringify(h.posted).includes(dir), false, 'no path of the file reaches the page');
+  // The page's answer is checked again: a wrong size, or an answer to another request, writes nothing.
+  await h.send({ type: 'icon-set', seq: source.seq, id: 'user:web-team', png: png(64, 64).toString('base64') });
+  assert.match(last(h, 'error').text, /Not saved: .*64 x 64/);
+  assert.equal(existsSync(path.join(h.library.directory, 'web-team.icon.png')), false);
+  await h.send({ type: 'icon-set', seq: source.seq, id: 'user:web-team', png: png().toString('base64') });
+  assert.match(last(h, 'error').text, /no longer waiting for an icon/i, 'that request is over');
+  const again = (await upload('photo.webp', WEBP))[0]!;
+  assert.equal(again.mime, 'image/webp');
+  await h.send({ type: 'icon-set', seq: again.seq + 1, id: 'user:web-team', png: png().toString('base64') });
+  assert.match(last(h, 'error').text, /no longer waiting for an icon/i);
+  const third = (await upload('photo.jpg', JPEG))[0]!;
+  const icon = png(128, 128, { seed: 4 });
+  await h.send({ type: 'icon-set', seq: third.seq, id: 'user:web-team', png: icon.toString('base64') });
+  const updated = last(h, 'icon-updated');
+  assert.equal(updated.id, 'user:web-team');
+  assert.equal(updated.icon, `data:image/png;base64,${icon.toString('base64')}`);
+  assert.match(updated.text, /icon is saved/i);
+  assert.deepEqual(await readFile(path.join(h.library.directory, 'web-team.icon.png')), icon);
+  assert.match(await readFile(file, 'utf8'), /\nicon: web-team\.icon\.png\n/);
+  assert.equal(last(h, 'library').library.teams[0].icon, updated.icon, 'the cards show it');
+  assert.equal(JSON.stringify(h.posted).includes(h.storage), false, 'no path of the icon reaches the page');
+  // The open editor moves to the new version of the file, so its next save is not a conflict.
+  assert.match(updated.base, /^[0-9a-f]{64}$/);
+  await h.send({ type: 'save', id: 'user:web-team', draft: draft({ description: 'Builds and tests pages' }), base: updated.base });
+  assert.match(last(h, 'team').notice, /^Saved/);
+  assert.match(await readFile(file, 'utf8'), /description: Builds and tests pages\nicon: web-team\.icon\.png\n/);
+  assert.equal(last(h, 'team').icon, updated.icon, 'the editor shows it after a save');
+  // Listed again from disk, it is still there.
+  await h.send({ type: 'refresh' });
+  assert.equal(last(h, 'state').library.teams[0].icon, updated.icon);
+  assert.equal((last(h, 'state').picker as Array<{ id: string; icon?: string }>).find((entry) => entry.id === 'lib:web-team')!.icon, updated.icon);
+  h.close();
+});
+
+test('host: Remove returns to the default and keeps the icon in History; Restore brings an earlier one back; each request gets one answer', async () => {
+  const h = await harness();
+  const file = await h.library.create('Web team', teamMarkdown(draft()));
+  const first = png(128, 128, { seed: 6 });
+  await h.library.setIcon(file, first);
+  await h.send({ type: 'ready' });
+  await h.send({ type: 'open', id: 'user:web-team' });
+  assert.equal(last(h, 'team').icon, `data:image/png;base64,${first.toString('base64')}`);
+  await h.send({ type: 'icon-remove', id: 'user:web-team' });
+  const removed = last(h, 'icon-updated');
+  assert.equal(removed.icon, undefined);
+  assert.match(removed.text, /default icon/);
+  assert.equal(removed.iconHistory.length, 1);
+  assert.match(removed.iconHistory[0].ref, /^[\w.-]+\.png$/);
+  assert.match(removed.iconHistory[0].label, /UTC/);
+  assert.equal(removed.iconHistory[0].icon, `data:image/png;base64,${first.toString('base64')}`);
+  assert.equal(last(h, 'library').library.teams[0].icon, undefined);
+  assert.doesNotMatch(await readFile(file, 'utf8'), /icon:/);
+  const before = h.posted.length;
+  await h.send({ type: 'icon-remove', id: 'user:web-team' });
+  assert.deepEqual(h.posted.slice(before), [{ type: 'icon-done', id: 'user:web-team' }], 'nothing to remove');
+  await h.send({ type: 'icon-restore', id: 'user:web-team', ref: removed.iconHistory[0].ref });
+  assert.equal(last(h, 'icon-updated').icon, removed.iconHistory[0].icon);
+  assert.deepEqual(await readFile(path.join(h.library.directory, 'web-team.icon.png')), first);
+  await h.send({ type: 'icon-restore', id: 'user:web-team', ref: '2020-01-01T00-00-00-000Z.png' });
+  assert.match(last(h, 'error').text, /no such icon/i);
+  // An archived team's id is not a team with an icon to change.
+  for (const message of [{ type: 'icon-upload', id: 'archived:web-team' }, { type: 'icon-remove', id: '../x' }]) assert.equal(parseStudioMessage(message), undefined);
+  h.close();
+});
+
+test('message parsing: the icon messages take exact keys, a team id, strict base64 within the cap, and a version name', () => {
+  const good = png().toString('base64');
+  for (const message of [
+    { type: 'icon-upload', id: 'user:web' }, { type: 'icon-upload', id: 'project' }, { type: 'icon-generate', id: 'user:web' }, { type: 'icon-remove', id: 'project' },
+    { type: 'icon-set', seq: 1, id: 'user:web', png: good }, { type: 'icon-failed', seq: 2 }, { type: 'icon-restore', id: 'user:web', ref: '2026-11-17T10-00-00-000Z.png' }
+  ]) assert.ok(parseStudioMessage(message), JSON.stringify(message).slice(0, 80));
+  for (const message of [
+    { type: 'icon-upload' }, { type: 'icon-upload', id: 'user:web', path: '/tmp/x.png' }, { type: 'icon-upload', id: '/home/x/web.md' },
+    { type: 'icon-set', seq: 1, id: 'user:web' }, { type: 'icon-set', seq: 1, id: 'user:web', png: 'not base64!' }, { type: 'icon-set', seq: 1, id: 'user:web', png: 'A'.repeat(200_000) },
+    { type: 'icon-set', seq: 'one', id: 'user:web', png: good }, { type: 'icon-set', seq: 1, id: 'user:web', png: good, mime: 'image/svg+xml' },
+    { type: 'icon-failed' }, { type: 'icon-restore', id: 'user:web', ref: '../web.md' }, { type: 'icon-restore', id: 'user:web', ref: 'x.md' }, { type: 'icon-generate', id: 'user:web', prompt: 'a cat' }
+  ]) assert.equal(parseStudioMessage(message), undefined, JSON.stringify(message).slice(0, 80));
 });
