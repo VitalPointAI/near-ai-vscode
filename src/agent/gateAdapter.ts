@@ -257,7 +257,11 @@ function pathFields(tool: AgentTool<any>): string[] {
  * by the vocabulary, which is what "effects unknown" means.
  */
 export function manifestArguments(tool: AgentTool<any>, raw: Record<string, unknown>, root: string): Record<string, unknown> {
-  const given = tool.manifestInput?.(raw) ?? raw;
+  return projectRelative(tool, tool.manifestInput?.(raw) ?? raw, root);
+}
+
+/** Arguments already in the manifest's shape (manifestInput has run), with each absolute path inside the folder written relative to it. */
+function projectRelative(tool: AgentTool<any>, given: Record<string, unknown>, root: string): Record<string, unknown> {
   let out: Record<string, unknown> | undefined;
   for (const field of pathFields(tool)) {
     const value = given[field];
@@ -275,13 +279,22 @@ export function manifestArguments(tool: AgentTool<any>, raw: Record<string, unkn
  * empty, and decide() asks a person about it or, with nobody here, refuses it with `manifest.effects-unknown`. No stand-in is invented.
  */
 export function effectsOfCall(tool: AgentTool<any>, raw: Record<string, unknown>, root: string): readonly Capability[] {
-  const filled = effectsFor(tool.manifest, manifestArguments(tool, raw, root));
+  return effectsOfArguments(tool, tool.manifestInput?.(raw) ?? raw, root);
+}
+
+/** The effects of arguments already in the manifest's shape (what readCallPaths built): manifestInput is not run again. */
+function effectsOfArguments(tool: AgentTool<any>, args: Record<string, unknown>, root: string): readonly Capability[] {
+  const filled = effectsFor(tool.manifest, projectRelative(tool, args, root));
   return filled.ok ? filled.value : [];
 }
 
 /** What reading the call's paths showed: the arguments with each trusted-folder read written as a project read, and what the floor must know about them. */
 export interface CallPaths {
-  readonly raw: Record<string, unknown>;
+  /**
+   * The call's arguments in the manifest's shape, built once (the tool's manifestInput has run, PR #74 review round 2), with each trusted-folder read written
+   * as `**`. The effects are filled from these, never from the model's own arguments again, so a tool whose manifestInput renames a field keeps the rewrite.
+   */
+  readonly input: Record<string, unknown>;
   /** The trusted-folder files read, named by the folder's own name and the path inside it (never the full machine path). */
   readonly trustedReads: readonly string[];
   readonly facts: Pick<FloorFacts, 'credentialStore' | 'identityFiles'>;
@@ -329,8 +342,8 @@ export async function readCallPaths(tool: AgentTool<any>, raw: Record<string, un
       if (!path.isAbsolute(folder)) continue;
       const real = await realFolder(folder);
       if (!insideFolder(real, resolved)) continue;
-      // The model's own arguments with this one field rewritten, so the tool's manifestInput runs once, as it does for every other call.
-      out ??= { ...raw };
+      // The arguments in the manifest's shape with this one field rewritten: the effects are filled from these, so manifestInput runs once per call.
+      out ??= { ...given };
       out[field] = '**';
       const inside = path.relative(real, resolved).split(path.sep).join('/');
       trustedReads.push(inside === '' ? path.basename(real) : `${path.basename(real)}/${inside}`);
@@ -338,7 +351,7 @@ export async function readCallPaths(tool: AgentTool<any>, raw: Record<string, un
     }
   }
   return {
-    raw: out ?? raw,
+    input: out ?? given,
     trustedReads,
     facts: { ...(credentialStore === undefined ? {} : { credentialStore }), ...(identityFiles === undefined ? {} : { identityFiles }) }
   };
@@ -557,7 +570,7 @@ async function decideOrRefuse(refusal: Refusal | undefined, mode: ActionPolicy['
 export async function gateToolCall(runtime: GateRuntime, input: GateCallInput, options: GateCallOptions = {}): Promise<GatedCall> {
   // The paths a file tool names are read first: a credential store or the identity folders is a floor fact, and a read in a trusted folder is a known read.
   const paths = await readCallPaths(input.tool, input.raw, input.root, input.readOnlyRoots ?? [], runtime.locations ?? {});
-  const declared = effectsOfCall(input.tool, paths.raw, input.root);
+  const declared = effectsOfArguments(input.tool, paths.input, input.root);
   // A shell call's command is read by the floor in every mode (Pitfall 5); what it tags joins the manifest's own effects.
   const read = input.command === undefined ? undefined : await floorFactsFor({ command: input.command, root: input.root, ...(input.shell ?? {}), ...(runtime.locations ?? {}) }, options.floorReaders);
   // A command the floor could not read whole has unknown effects, whatever the manifest says: decide() asks about it with a person and refuses it with nobody.
@@ -666,7 +679,7 @@ export interface StepEffects {
 export async function effectsOfStep(tool: AgentTool<any>, raw: Record<string, unknown>, root: string, readOnlyRoots: readonly string[] = [], locations: FloorLocations = {}): Promise<StepEffects> {
   const paths = await readCallPaths(tool, raw, root, readOnlyRoots, locations);
   const first = paths.trustedReads[0];
-  return { effects: effectsOfCall(tool, paths.raw, root), floorFacts: paths.facts, ...(first === undefined ? {} : { resource: { name: shownName(first), type: 'file' } }) };
+  return { effects: effectsOfArguments(tool, paths.input, root), floorFacts: paths.facts, ...(first === undefined ? {} : { resource: { name: shownName(first), type: 'file' } }) };
 }
 
 /**
