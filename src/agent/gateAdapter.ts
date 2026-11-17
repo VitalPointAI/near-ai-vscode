@@ -3,7 +3,7 @@
 // outside the floor every outcome equals what the loop decided before, and the floor is always enforced (D-19). No vscode import here.
 import { randomUUID } from 'node:crypto';
 import { realpathSync } from 'node:fs';
-import { realpath } from 'node:fs/promises';
+import { lstat, realpath } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import type { ActionCapability, ActionPolicy } from '../domain/policy';
@@ -786,6 +786,37 @@ export async function gateToolCall(runtime: GateRuntime, input: GateCallInput, o
   }
   keep(runtime, recordFor(runtime, gated, outcomeOf(decision), decision.rule, decision.reason, model));
   return gated;
+}
+
+/**
+ * Labels follow an agent's rename (D-26, D-42): after a shell command ran, the classifier's own parse says which `mv` or `git mv` it made (after global
+ * options, wrappers and `--`). Exactly one rename, with one source and one target inside the project, is followed, and only when the source is gone and the
+ * target exists; a move into an existing folder lands under it. Anything else is not followed, and the missing-path report covers it. Never throws.
+ */
+export async function followCommandMoves(runtime: GateRuntime, input: FloorFactsInput): Promise<void> {
+  try {
+    const source = runtime.labels?.(input.root);
+    if (source?.followMove === undefined) return;
+    const read = classifyCommand(input.command, floorClassifierContext(input));
+    if (read.movesUnfollowable === true || read.moves === undefined || read.moves.length !== 1) return;
+    const move = read.moves[0]!;
+    const kind = async (relative: string): Promise<'file' | 'folder' | undefined> => {
+      try {
+        return (await lstat(path.join(input.root, ...relative.split('/')))).isDirectory() ? 'folder' : 'file';
+      } catch {
+        return undefined;
+      }
+    };
+    if (await kind(move.from) !== undefined) return;
+    let target = move.to;
+    const into = `${move.to}/${path.posix.basename(move.from)}`;
+    if (await kind(move.to) === 'folder' && await kind(into) !== undefined) target = into;
+    const landed = await kind(target);
+    if (landed === undefined) return;
+    await source.followMove(landed === 'folder' ? `${move.from}/` : move.from, landed === 'folder' ? `${target}/` : target);
+  } catch {
+    // A rename that cannot be followed leaves the old entry, which the missing-path report names.
+  }
 }
 
 const APPROVED_ONCE_REASON = 'A person approved this exact call once, after the run had moved on.';

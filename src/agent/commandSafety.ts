@@ -58,6 +58,13 @@ export interface CommandClassification {
    * package.json), `bash -c`, a substitution (D-18, PR #76 review round 3). After it runs, the run is marked as having read a credential file.
    */
   credentialFile?: string;
+  /**
+   * The renames the command makes, as the classifier's own parse reads them (D-26, D-42): `mv` and `git mv`, after global options, wrappers and `--`, each
+   * with exactly one source and one target inside the project, project-relative. Absent when there is none. `movesUnfollowable` is set when a rename was
+   * seen that cannot be followed (several sources, a path decided at run time, a path outside the project), so no label is moved for the command.
+   */
+  moves?: Array<{ from: string; to: string }>;
+  movesUnfollowable?: true;
 }
 
 // The bounds are shared with the credential-store check (src/domain/commandBounds.ts), so neither reads what the other gives up on.
@@ -124,8 +131,31 @@ export type PackageScriptsAt =
 // (`npm run x`, `xargs`, `find -exec`, a substitution) or decides on one part and stops, and a tag carried by hand through each of those would be lost in the
 // next one somebody writes (Pitfall 2). Classification is synchronous, so the frame on top of this stack is always the call being made.
 // The frame also keeps whether the classifier stopped reading somewhere (the bound, the caps): wherever that happens, the whole command's effects are unknown.
-interface EffectFrame { effects: CommandEffect[]; unknown?: string; credentialChange?: string; printsCredential?: string; reachesNetwork?: string; credentialFile?: string }
+interface EffectFrame { effects: CommandEffect[]; unknown?: string; credentialChange?: string; printsCredential?: string; reachesNetwork?: string; credentialFile?: string; moves?: Array<{ from: string; to: string }>; movesUnfollowable?: true }
 const effectFrames: EffectFrame[] = [];
+
+/**
+ * A rename the command makes (`mv`, `git mv`), from the operands the classifier already split: followed only with one source and one target, both plain
+ * words inside the project (D-26, D-42). Anything else marks the command's renames as unfollowable.
+ */
+function noteMove(operands: readonly Word[], state: SegmentState, context: CommandContext): void {
+  const frame = effectFrames[effectFrames.length - 1];
+  if (frame === undefined) return;
+  const [from, to] = operands;
+  if (operands.length !== 2 || from === undefined || to === undefined || state.cwdUnknown !== undefined || [from, to].some((word) => word.expansion || word.glob)) {
+    frame.movesUnfollowable = true;
+    return;
+  }
+  const relativeOf = (word: Word): string | undefined => {
+    const facts = pathFacts(word.text, state.cwd, context);
+    const relative = path.relative(path.resolve(context.root), facts.absolute).split(path.sep).join('/');
+    return facts.inside && relative !== '' ? relative : undefined;
+  };
+  const source = relativeOf(from);
+  const target = relativeOf(to);
+  if (source === undefined || target === undefined) { frame.movesUnfollowable = true; return; }
+  (frame.moves ??= []).push({ from: source, to: target });
+}
 
 /** The command reaches the network, as the rules know it (reachesNetwork). The first reason is kept. */
 function noteNetwork(reason: string): void {
@@ -1352,6 +1382,7 @@ function classifyGit(args: Word[], state: SegmentState, context: CommandContext)
       return safe(`${label} records a new commit locally`);
     case 'mv': case 'rm': {
       const operands = rest.filter((arg) => !looksLikeOption(arg.text) && arg.text !== '--');
+      if (sub === 'mv') noteMove(operands, state, context);
       // Forced, it can lose uncommitted changes: a write to each file it names, like a plain rm or mv inside the project.
       if (has('-f', '--force') || shortFlag('f')) return writeResult(`${label} --force can lose uncommitted changes`, operands, state, context);
       const writes = checkWrites(operands, state, context, label);
@@ -2416,6 +2447,7 @@ const READ_ONLY_GH = new Set([
     if (name === 'cp' || name === 'mv') {
       // Every operand is checked as a write; sources outside the workspace are not `safe` either.
       const operands = args.filter((arg) => !looksLikeOption(arg.text));
+      if (name === 'mv') noteMove(operands.filter((arg) => arg.text !== '--'), state, context);
       const writes = checkWrites(operands.slice(-1), state, context, name);
       if (writes.verdict !== 'safe') return writes;
       const sources = name === 'mv' ? checkWrites(operands.slice(0, -1), state, context, 'mv') : checkReads(operands.slice(0, -1), state, context, 'cp');
@@ -2726,6 +2758,8 @@ export function classifyCommand(command: string, context: CommandContext): Comma
     ...(frame.credentialChange === undefined ? {} : { credentialChange: frame.credentialChange }),
     ...(frame.printsCredential === undefined ? {} : { printsCredential: frame.printsCredential }),
     ...(frame.reachesNetwork === undefined ? {} : { reachesNetwork: frame.reachesNetwork }),
-    ...(frame.credentialFile === undefined ? {} : { credentialFile: frame.credentialFile })
+    ...(frame.credentialFile === undefined ? {} : { credentialFile: frame.credentialFile }),
+    ...(frame.moves === undefined ? {} : { moves: frame.moves }),
+    ...(frame.movesUnfollowable === undefined ? {} : { movesUnfollowable: true as const })
   };
 }

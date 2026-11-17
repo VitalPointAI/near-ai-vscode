@@ -3,8 +3,10 @@
 // again silently, an unreadable or rolled-back map holds reads, labels follow renames, and two writers take turns. Real files in temporary folders, an
 // in-memory secret store and the recording vscode stub; no test reads the real home folder or makes a network call.
 import assert from 'node:assert/strict';
+import { execFileSync, fork } from 'node:child_process';
+import type { ChildProcess } from 'node:child_process';
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
-import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -12,10 +14,15 @@ import { RunCheckpoints } from '../agent/checkpoints';
 import type { AgentEvent } from '../agent/loop';
 import { DEFAULT_RULES } from '../agent/permissions';
 import { ShellSession } from '../agent/shell';
-import { bashTool, readTool } from '../agent/tools';
+import { bashTool, readTool, writeTool } from '../agent/tools';
+import { gateToolCall } from '../agent/gateAdapter';
+import { RunGrants as Grants } from '../agent/permissions';
 import { bundleHash, defaultBundlePayload } from '../domain/gate/bundle';
 import type { PolicyBundle } from '../domain/gate/bundle';
-import { LABELS_NOT_ACCREDITATION_TEXT, SCALE_PRESETS_CAVEAT_TEXT } from '../domain/gate/labels';
+import { SHIPPED_DEFAULT_LABEL } from '../domain/gate/bundle';
+import { MAX_LABEL_MAP_BYTES, setLabelEntry } from '../domain/gate/labelMap';
+import type { LabelMapPayload } from '../domain/gate/labelMap';
+import { LABELS_NOT_ACCREDITATION_TEXT, SCALE_PRESETS, SCALE_PRESETS_CAVEAT_TEXT } from '../domain/gate/labels';
 import type { Clearance, Label } from '../domain/gate/labels';
 import type { DecisionRecord } from '../domain/gate/record';
 import { signPayload, verifyPayload } from '../domain/team/signedPayload';
@@ -23,11 +30,13 @@ import { POLICY_BUNDLE_FILE, gateDir } from '../gate/bundleStore';
 import { writeLastValid } from '../gate/clockMarker';
 import { DECISIONS_DIR, projectLogKey } from '../gate/decisionLog';
 import type { GateHost } from '../gate/host';
-import { LABEL_MAP_FILE } from '../gate/labelMapStore';
+import { LABEL_MAP_FILE, LABEL_MAP_ROLLED_BACK_TEXT, LABEL_MAP_UNREADABLE_TEXT, LABEL_MAP_UNVERIFIED_TEXT, LabelMapError, readLabelMarker, updateLabelMap } from '../gate/labelMapStore';
 import type { AgentMessage, CompletionEvent, ToolCall } from '../services/nearAiClient';
-import { identityDir, loadDeviceIdentity } from '../team/identity';
+import { createDeviceIdentity, identityDir, loadDeviceIdentity, loadOrCreateDeviceIdentity } from '../team/identity';
 import { localKeyStatus } from '../team/keyHistory';
 import { newTestRun } from './helpers/gatedRuns';
+import { FileSecrets } from './helpers/keyHistoryChild';
+import type { LabelChildReply, LabelChildStart } from './helpers/labelMapChild';
 import { MemorySecrets } from './helpers/teamHarness';
 import { createFakeContext, createVscodeStub, installVscodeStub } from './helpers/vscodeStub';
 
@@ -123,16 +132,17 @@ function scripted(calls: ToolCall[]): { streamCompletion(model: string, messages
 }
 
 /** An agent run in the project under the host's runtime: the tool outputs, and the whole transcript as text. */
-async function agentRun(s: Started, calls: ToolCall[], root = s.root): Promise<{ outputs: string[]; transcript: string }> {
+async function agentRun(s: Started, calls: ToolCall[], root = s.root, approve = false): Promise<{ outputs: string[]; transcript: string }> {
   const gate = await s.host.runtimeFor({ root, actor: { kind: 'agent', sessionId: 'labels', agentId: 'main' }, presence: 'person', context: 'interactive' });
   const events: AgentEvent[] = [];
+  const shell = new ShellSession(root);
   const run = newTestRun({
     client: scripted(calls) as never, model: 'm', tools: [readTool, bashTool], gate,
-    context: { root, checkpoints: new RunCheckpoints('labels'), shell: new ShellSession(root), readFiles: new Set() },
+    context: { root, checkpoints: new RunCheckpoints('labels'), shell, readFiles: new Set() },
     policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES,
-    requestApproval: async () => ({ decision: 'deny' }), emit: (event) => events.push(event)
+    requestApproval: async () => ({ decision: approve ? 'allow' : 'deny' }), emit: (event) => events.push(event)
   });
-  const result = await run.run([{ role: 'user', content: 'go' }], new AbortController().signal);
+  const result = await run.run([{ role: 'user', content: 'go' }], new AbortController().signal).finally(() => shell.dispose());
   const outputs = events.filter((event): event is Extract<AgentEvent, { type: 'tool-end' }> => event.type === 'tool-end').map((event) => event.output);
   return { outputs, transcript: JSON.stringify(result.messages) };
 }
@@ -207,4 +217,295 @@ test('every runtime the host gives has a label reader, one per folder, and its r
   assert.notEqual(runtime.labels(other), runtime.labels(s.root), 'a worktree or another folder has its own');
   const noFolder = await s.host.runtimeFor({ actor: { kind: 'agent', sessionId: 'y' }, presence: 'person', context: 'interactive' });
   assert.ok(noFolder.labels !== undefined);
+});
+
+// ---- Task 2: maps nobody here signed, unreadable and rolled-back maps, renames, limits and two writers ----
+
+const INTERNAL = label('org', 'Internal');
+const CONFIDENTIAL = label('org', 'Confidential');
+
+/** The label a path resolves to now, through the host's reader under the policy in force. */
+async function labelOf(s: Started, relative: string): Promise<string> {
+  const policy = s.host.labelPolicy();
+  const view = await s.host.labelsFor(s.root).view(policy.scales);
+  return view.resolve(relative, policy.defaultLabel).mark.map((each) => `${each.scale}/${each.level}`).join('+');
+}
+
+async function stateOf(s: Started): Promise<string> {
+  return (await s.host.labelsFor(s.root).view(s.host.labelPolicy().scales)).state;
+}
+
+/** Writes the project's map by hand: the envelope as it is, with its payload changed by `edit` (so the signature no longer matches). */
+async function handEdit(s: Started, edit: (payload: Record<string, unknown> & { entries: Record<string, unknown> }) => void): Promise<void> {
+  const file = path.join(s.root, LABEL_MAP_FILE);
+  const envelope = JSON.parse(await readFile(file, 'utf8')) as { payload: Record<string, unknown> & { entries: Record<string, unknown> } };
+  edit(envelope.payload);
+  await writeFile(file, `${JSON.stringify(envelope, null, 2)}\n`);
+}
+
+/** A labelled project: secret/plan.md at Protected B (the person holds that clearance) and src/a.ts at Internal, both set through Set Label. */
+async function labelled(): Promise<Started> {
+  const s = await started({ clearances: [clearance('ca-protected', 'Protected B')] });
+  assert.equal(await setLabelVia(s.root, 'secret/plan.md', { scale: 'ca-protected', level: 'Protected B' }), true);
+  assert.equal(await setLabelVia(s.root, 'src/a.ts', { scale: 'org', level: 'Internal' }), true);
+  return s;
+}
+
+test('a map changed by hand is unverified: a label it raises applies, one it lowers does not, and the person is told once per window', async () => {
+  const s = await labelled();
+  await handEdit(s, (payload) => {
+    payload.entries['secret/plan.md'] = PA;
+    payload.entries['notes.md'] = CONFIDENTIAL;
+  });
+  assert.equal(await stateOf(s), 'unverified');
+  assert.equal(await labelOf(s, 'secret/plan.md'), 'ca-protected/Protected B', 'the lowering did not apply');
+  assert.equal(await labelOf(s, 'notes.md'), 'org/Confidential', 'the raise did');
+  await stateOf(s);
+  assert.equal(s.problems.filter((message) => message === LABEL_MAP_UNVERIFIED_TEXT).length, 1, 'told once');
+});
+
+test('a map signed by a key this computer does not know (a teammate\'s, before Phase 71) only raises too', async () => {
+  const s = await labelled();
+  const teammate = await createDeviceIdentity(new MemorySecrets());
+  const file = path.join(s.root, LABEL_MAP_FILE);
+  const theirs = JSON.parse(await readFile(file, 'utf8')) as { payload: LabelMapPayload };
+  const payload = { ...theirs.payload, entries: { ...theirs.payload.entries, 'secret/plan.md': PA, 'notes.md': CONFIDENTIAL } };
+  await writeFile(file, `${JSON.stringify(signPayload(teammate, 'label-map', payload), null, 2)}\n`);
+  assert.equal(await stateOf(s), 'unverified');
+  assert.equal(await labelOf(s, 'secret/plan.md'), 'ca-protected/Protected B');
+  assert.equal(await labelOf(s, 'notes.md'), 'org/Confidential');
+});
+
+test('a hand edit that deletes or lowers a verified label still resolves it from what this computer last verified (D-59)', async () => {
+  const s = await labelled();
+  await handEdit(s, (payload) => { delete payload.entries['secret/plan.md']; payload.entries['src/a.ts'] = label('org', 'Public'); });
+  assert.equal(await labelOf(s, 'secret/plan.md'), 'ca-protected/Protected B');
+  assert.equal(await labelOf(s, 'src/a.ts'), 'org/Internal');
+  const ran = await agentRun(s, [call('r1', 'Read', { file_path: 'secret/plan.md' })]);
+  assert.ok(!ran.transcript.includes(SECRET_TEXT) || (ran.outputs[0] ?? '').includes(SECRET_TEXT), 'read only under the person\'s own Protected B clearance');
+});
+
+test('Set Label on an unverified map asks before signing it again: Cancel leaves the bytes, Sign Again keeps the verified entries and only the raises', async () => {
+  const s = await labelled();
+  await handEdit(s, (payload) => {
+    payload.entries['secret/plan.md'] = PA;
+    payload.entries['notes.md'] = CONFIDENTIAL;
+  });
+  const file = path.join(s.root, LABEL_MAP_FILE);
+  const before = await readFile(file, 'utf8');
+  assert.equal(await setLabelVia(s.root, 'src/', { scale: 'org', level: 'Internal' }), false, 'dismissed');
+  assert.equal(stub.messageOptions.at(-1)?.modal, true);
+  assert.equal(await readFile(file, 'utf8'), before, 'Cancel wrote nothing');
+  assert.equal(await setLabelVia(s.root, 'src/', { scale: 'org', level: 'Internal', confirm: gateCommands.SIGN_AGAIN_ACTION }), true);
+  assert.equal(await mapVerifies(s), true);
+  const payload = (JSON.parse(await readFile(file, 'utf8')) as { payload: LabelMapPayload }).payload;
+  assert.equal(payload.entries['secret/plan.md']?.level, 'Protected B', 'the lowering was not kept');
+  assert.equal(payload.entries['notes.md']?.level, 'Confidential', 'the raise was');
+  assert.equal(payload.entries['src/']?.level, 'Internal', 'and the change itself');
+  assert.equal(await stateOf(s), 'verified');
+});
+
+test('an automatic write never signs an unverified map: no confirm, nothing written, and a plain error', async () => {
+  const s = await labelled();
+  await handEdit(s, (payload) => { payload.entries['notes.md'] = CONFIDENTIAL; });
+  const file = path.join(s.root, LABEL_MAP_FILE);
+  const before = await readFile(file, 'utf8');
+  await assert.rejects(() => s.host.changeLabels(s.root, (map) => map), (error: unknown) => error instanceof LabelMapError && /never signed again without you/.test(error.message));
+  assert.equal(await readFile(file, 'utf8'), before);
+});
+
+test('a map with a merge conflict is unreadable: every agent read in that project is refused with the sentence, and reads come back once it is fixed and signed again', async () => {
+  const s = await labelled();
+  const file = path.join(s.root, LABEL_MAP_FILE);
+  const good = await readFile(file, 'utf8');
+  await writeFile(file, `<<<<<<< HEAD\n${good}=======\n{}\n>>>>>>> other\n`);
+  assert.equal(await stateOf(s), 'unreadable');
+  const ran = await agentRun(s, [call('r1', 'Read', { file_path: 'notes.md' })]);
+  assert.equal(ran.outputs[0], `Not allowed: ${LABEL_MAP_UNREADABLE_TEXT}`);
+  await writeFile(file, good);
+  assert.equal(await stateOf(s), 'verified');
+  const again = await agentRun(s, [call('r2', 'Read', { file_path: 'notes.md' })]);
+  assert.match(again.outputs[0] ?? '', /public notes/);
+});
+
+test('D-59 deletion: a deleted map with a marker is rolled back, holds every read in the project, and Set Label signs the last verified labels again', async () => {
+  const s = await labelled();
+  await rm(path.join(s.root, LABEL_MAP_FILE));
+  assert.equal(await stateOf(s), 'rolled-back');
+  for (const target of ['secret/plan.md', 'notes.md']) {
+    const ran = await agentRun(s, [call('r1', 'Read', { file_path: target })]);
+    assert.equal(ran.outputs[0], `Not allowed: ${LABEL_MAP_ROLLED_BACK_TEXT}`);
+  }
+  assert.ok(s.problems.includes(LABEL_MAP_ROLLED_BACK_TEXT), 'the person is told, naming the fix');
+  assert.equal(await setLabelVia(s.root, 'notes.md', { scale: 'org', level: 'Internal', confirm: gateCommands.SIGN_AGAIN_ACTION }), true);
+  assert.equal(await stateOf(s), 'verified');
+  assert.equal(await labelOf(s, 'secret/plan.md'), 'ca-protected/Protected B', 'the restored map still holds Protected B');
+  assert.equal(await labelOf(s, 'notes.md'), 'org/Internal');
+});
+
+test('D-59 replay: an older signed copy put back, or another map at the same revision, is rolled back', async () => {
+  const s = await labelled();
+  const file = path.join(s.root, LABEL_MAP_FILE);
+  // Revision 1 held only secret/plan.md... then src/a.ts was added at revision 2. Keep revision 2, then sign a revision 3 removing nothing.
+  const second = await readFile(file, 'utf8');
+  assert.equal(await setLabelVia(s.root, 'notes.md', { scale: 'org', level: 'Internal' }), true);
+  await writeFile(file, second);
+  assert.equal(await stateOf(s), 'rolled-back', 'an older copy signed by this computer\'s own key');
+  // The same revision as the marker with other contents, signed by this computer's own key.
+  const marker = await readLabelMarker(s.storage, s.root);
+  assert.ok(marker !== undefined);
+  const identity = await loadDeviceIdentity(s.secrets);
+  assert.ok(identity !== undefined);
+  const forged = { ...(marker.payload as LabelMapPayload), entries: {} };
+  await writeFile(file, `${JSON.stringify(signPayload(identity, 'label-map', forged), null, 2)}\n`);
+  assert.equal(await stateOf(s), 'rolled-back', 'same revision, another hash');
+  const ran = await agentRun(s, [call('r1', 'Read', { file_path: 'secret/plan.md' })]);
+  assert.equal(ran.outputs[0], `Not allowed: ${LABEL_MAP_ROLLED_BACK_TEXT}`);
+});
+
+test('D-59 removal on purpose: Set Label\'s Remove choice signs a removal that names the key, the marker moves, and the file reads at the default label', async () => {
+  const s = await labelled();
+  assert.equal(await setLabelVia(s.root, 'src/a.ts', { scale: gateCommands.REMOVE_LABEL_ITEM, reason: 'No longer internal.' }), true);
+  const payload = (JSON.parse(await readFile(path.join(s.root, LABEL_MAP_FILE), 'utf8')) as { payload: LabelMapPayload }).payload;
+  assert.deepEqual(payload.removed, ['src/a.ts']);
+  assert.equal(payload.revision, 3);
+  assert.equal((await readLabelMarker(s.storage, s.root))?.revision, 3);
+  assert.equal(await stateOf(s), 'verified');
+  assert.equal(await labelOf(s, 'src/a.ts'), 'org/Public');
+  const records = await projectRecords(s);
+  assert.ok(records.some((record) => ruleOf(record) === 'label.set' && record.status_detail === 'No longer internal.'), 'the removal and its reason are on record');
+  // A newer map signed by this computer's key that drops a key without naming it is rolled back.
+  const identity = await loadDeviceIdentity(s.secrets);
+  assert.ok(identity !== undefined);
+  const dropped = { ...payload, revision: 4, entries: {} } as LabelMapPayload;
+  delete (dropped as { removed?: unknown }).removed;
+  await writeFile(path.join(s.root, LABEL_MAP_FILE), `${JSON.stringify(signPayload(identity, 'label-map', dropped), null, 2)}\n`);
+  assert.equal(await stateOf(s), 'rolled-back');
+});
+
+test('VS Code renames move the entry, and a renamed folder moves its whole subtree', async () => {
+  const s = await labelled();
+  await mkdir(path.join(s.root, 'lib'));
+  await rename(path.join(s.root, 'src', 'a.ts'), path.join(s.root, 'lib', 'a.ts'));
+  await stub.fireRename([{ from: path.join(s.root, 'src', 'a.ts'), to: path.join(s.root, 'lib', 'a.ts') }]);
+  assert.equal(await labelOf(s, 'lib/a.ts'), 'org/Internal');
+  assert.equal(await labelOf(s, 'src/a.ts'), 'org/Public');
+  await rename(path.join(s.root, 'secret'), path.join(s.root, 'private'));
+  await stub.fireRename([{ from: path.join(s.root, 'secret'), to: path.join(s.root, 'private') }]);
+  assert.equal(await labelOf(s, 'private/plan.md'), 'ca-protected/Protected B');
+  assert.equal(await stateOf(s), 'verified');
+});
+
+function git(root: string, ...args: string[]): void {
+  execFileSync('git', args, { cwd: root, stdio: 'ignore', env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1', HOME: root } });
+}
+
+test('an agent\'s successful mv, git mv and git -C . mv -- move the entry; a failed one, or one with several sources, does not', async () => {
+  for (const command of ['mv src/a.ts lib/a.ts', 'git mv src/a.ts lib/a.ts', 'git -C . mv -- src/a.ts lib/a.ts']) {
+    const s = await labelled();
+    await mkdir(path.join(s.root, 'lib'));
+    git(s.root, 'init', '-q');
+    git(s.root, 'add', '-A');
+    git(s.root, '-c', 'user.email=test@example.org', '-c', 'user.name=test', 'commit', '-qm', 'init');
+    await agentRun(s, [call('b1', 'Bash', { command })], s.root, true);
+    assert.ok(existsSync(path.join(s.root, 'lib', 'a.ts')), `${command} ran`);
+    assert.equal(await labelOf(s, 'lib/a.ts'), 'org/Internal', command);
+    assert.equal(await stateOf(s), 'verified', command);
+  }
+  const s = await labelled();
+  await agentRun(s, [call('b2', 'Bash', { command: 'mv src/a.ts nowhere/a.ts' })], s.root, true);
+  assert.equal(await labelOf(s, 'src/a.ts'), 'org/Internal', 'a failed mv moves nothing');
+  await mkdir(path.join(s.root, 'lib'));
+  await writeFile(path.join(s.root, 'b.ts'), 'b\n');
+  await agentRun(s, [call('b3', 'Bash', { command: 'mv src/a.ts b.ts lib/' })], s.root, true);
+  assert.ok(existsSync(path.join(s.root, 'lib', 'a.ts')));
+  assert.equal(await labelOf(s, 'lib/a.ts'), 'org/Public', 'several sources are not followed');
+  assert.equal(await labelOf(s, 'src/a.ts'), 'org/Internal', 'the old entry stays for the missing-path report');
+});
+
+test('entries whose path is gone are reported once and stay in the map', async () => {
+  const s = await labelled();
+  await rm(path.join(s.root, 'src', 'a.ts'));
+  s.host.labelsFor(s.root).invalidate();
+  await stateOf(s);
+  await stateOf(s);
+  const reported = s.problems.filter((message) => message.includes('no longer exist'));
+  assert.equal(reported.length, 1);
+  assert.match(reported[0] ?? '', /src\/a\.ts/);
+  const payload = (JSON.parse(await readFile(path.join(s.root, LABEL_MAP_FILE), 'utf8')) as { payload: LabelMapPayload }).payload;
+  assert.ok(payload.entries['src/a.ts'] !== undefined, 'kept');
+});
+
+test('a write past MAX_LABEL_MAP_BYTES and a path the signer would refuse as secret-like are refused with plain messages, writing nothing', async () => {
+  const s = await labelled();
+  const file = path.join(s.root, LABEL_MAP_FILE);
+  const before = await readFile(file, 'utf8');
+  const many = (map: LabelMapPayload): LabelMapPayload => {
+    let out = map;
+    for (let index = 0; index < Math.ceil(MAX_LABEL_MAP_BYTES / 100) + 10; index += 1) out = setLabelEntry(out, `bulk/file-${String(index).padStart(6, '0')}-with-a-long-name-to-fill-space.txt`, INTERNAL);
+    return out;
+  };
+  await assert.rejects(() => s.host.changeLabels(s.root, many), (error: unknown) => error instanceof LabelMapError && /byte limit/.test(error.message));
+  const secretLike = 'keys/sk-abcdefghijklmnop.txt';
+  await assert.rejects(() => s.host.changeLabels(s.root, (map) => setLabelEntry(map, secretLike, INTERNAL)), (error: unknown) => error instanceof LabelMapError && error.message.includes(secretLike));
+  assert.equal(await readFile(file, 'utf8'), before);
+});
+
+interface Writer { child: ChildProcess; ready: Promise<void>; done: Promise<LabelChildReply & { type: 'done' }> }
+
+function startWriter(start: LabelChildStart): Writer {
+  const child = fork(path.join(__dirname, 'helpers', 'labelMapChild.js'), [], { execArgv: [], stdio: ['ignore', 'ignore', 'pipe', 'ipc'] });
+  let stderr = '';
+  child.stderr?.on('data', (chunk: Buffer) => { stderr += chunk.toString('utf8'); });
+  const ready = new Promise<void>((resolve, reject) => {
+    child.on('message', (message: LabelChildReply) => { if (message.type === 'ready') resolve(); });
+    child.on('exit', (code) => { reject(new Error(`the writer exited with ${String(code)} before it was ready: ${stderr}`)); });
+  });
+  const done = new Promise<LabelChildReply & { type: 'done' }>((resolve, reject) => {
+    child.on('message', (message: LabelChildReply) => { if (message.type === 'done') resolve(message); });
+    child.on('exit', (code) => { reject(new Error(`the writer exited with ${String(code)} without an answer: ${stderr}`)); });
+  });
+  ready.catch(() => undefined);
+  done.catch(() => undefined);
+  child.send(start);
+  return { child, ready, done };
+}
+
+test('two writers (two processes) raising different entries at once both land, and the map verifies', async () => {
+  const storage = await mkdtemp(path.join(TEMP, 'near-ai-labels-race-'));
+  const root = await project();
+  const secretsFile = path.join(storage, 'secrets.json');
+  const secrets = new FileSecrets(secretsFile);
+  await loadOrCreateDeviceIdentity(secrets, { identityDir: identityDir(storage) });
+  await updateLabelMap(root, (map) => map, { globalStorageDir: storage, secrets, scales: SCALE_PRESETS, defaultLabel: SHIPPED_DEFAULT_LABEL });
+  const writers = [startWriter({ type: 'start', globalStorageDir: storage, secretsFile, root, key: 'notes.md', label: INTERNAL }), startWriter({ type: 'start', globalStorageDir: storage, secretsFile, root, key: 'src/a.ts', label: CONFIDENTIAL })];
+  let results: Array<LabelChildReply & { type: 'done' }>;
+  try {
+    await Promise.all(writers.map((writer) => writer.ready));
+    for (const writer of writers) writer.child.send({ type: 'go' });
+    results = await Promise.all(writers.map((writer) => writer.done));
+  } finally {
+    for (const writer of writers) writer.child.kill();
+  }
+  for (const result of results) assert.equal(result.ok, true, result.message);
+  const envelope: unknown = JSON.parse(await readFile(path.join(root, LABEL_MAP_FILE), 'utf8'));
+  const verdict = verifyPayload<LabelMapPayload>(envelope, { purpose: 'label-map', status: await localKeyStatus(identityDir(storage), secrets) });
+  assert.ok(verdict.ok);
+  if (verdict.ok) {
+    assert.equal(verdict.payload.entries['notes.md']?.level, 'Internal');
+    assert.equal(verdict.payload.entries['src/a.ts']?.level, 'Confidential');
+    assert.equal(verdict.payload.revision, 3);
+  }
+});
+
+test('an agent\'s Write to the label file is a floor ask in every mode: only the extension\'s own writer signs it (D-25, D-44)', async () => {
+  const s = await labelled();
+  const runtime = await s.host.runtimeFor({ root: s.root, actor: { kind: 'agent', sessionId: 'w' }, presence: 'person', context: 'interactive' });
+  for (const mode of ['approve-risky', 'mostly-autonomous', 'auto', 'fully-autonomous'] as const) {
+    const raw = { file_path: LABEL_MAP_FILE, content: '{}' };
+    const gated = await gateToolCall(runtime, { tool: writeTool, raw, root: s.root, callId: `w-${mode}`, policy: { mode, emergencyStop: false }, rules: DEFAULT_RULES, grants: new Grants(), buildAuto: async () => undefined });
+    assert.equal(gated.decision.outcome, 'ask', mode);
+    assert.equal(gated.decision.rule, 'floor.protected-write', mode);
+    assert.equal(gated.decision.offerAlwaysAllow, false, mode);
+  }
 });

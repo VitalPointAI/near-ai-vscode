@@ -186,13 +186,25 @@ interface Classified {
 function classify(raw: RawMap, marker: LabelMarker | undefined): Classified {
   switch (raw.kind) {
     case 'missing':
-      return { state: 'none' };
+      return { state: marker === undefined ? 'none' : 'rolled-back' };
     case 'unreadable':
       return { state: 'unreadable' };
     case 'unverified':
-      return { state: 'unverified', untrusted: raw.payload };
-    case 'verified':
-      return { state: 'verified', trusted: raw.payload, ...(marker === undefined || marker.hash !== raw.hash ? { adopt: markerFor(raw) } : {}) };
+      return { state: 'unverified', untrusted: raw.payload, ...(marker === undefined ? {} : { trusted: marker.payload }) };
+    case 'verified': {
+      const fresh = markerFor(raw);
+      if (marker === undefined) return { state: 'verified', trusted: raw.payload, adopt: fresh };
+      if (fresh.revision < marker.revision) return { state: 'rolled-back' };
+      if (fresh.revision === marker.revision) return fresh.hash === marker.hash ? { state: 'verified', trusted: raw.payload } : { state: 'rolled-back' };
+      // Newer: every key the marker holds is still there, or this very revision names it as removed and follows the marker's directly.
+      const kept = new Set(rawKeys(raw.payload));
+      const dropped = rawKeys(marker.payload).filter((key) => !kept.has(key));
+      if (dropped.length > 0) {
+        const named = new Set(rawRemoved(raw.payload));
+        if (fresh.revision !== marker.revision + 1 || dropped.some((key) => !named.has(key))) return { state: 'rolled-back' };
+      }
+      return { state: 'verified', trusted: raw.payload, adopt: fresh };
+    }
   }
 }
 

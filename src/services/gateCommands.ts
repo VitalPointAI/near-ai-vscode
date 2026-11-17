@@ -258,6 +258,9 @@ function registerPolicySurfaces(context: GateActivationContext, host: GateHost, 
       return setLabel(host, target);
     }));
   });
+  attempt('label rename tracking', () => {
+    keep(vscode.workspace.onDidRenameFiles((event) => followRenames(host, event.files)));
+  });
   attempt('the policy setup step', () => {
     keep(registerSetupStep(policySetupStep(host, clock)));
   });
@@ -393,6 +396,19 @@ async function labelTargetOf(uri: unknown): Promise<LabelTarget | undefined> {
   if (relative === '') return { root: folder.uri.fsPath, path: '' };
   const isFolder = (await stat(fsPath).catch(() => undefined))?.isDirectory() === true;
   return { root: folder.uri.fsPath, path: isFolder ? `${relative}/` : relative };
+}
+
+/** Labels follow renames and moves made in VS Code (D-26): each rename inside a project moves its entry, a folder its whole subtree. */
+async function followRenames(host: GateHost, files: ReadonlyArray<{ readonly oldUri: vscode.Uri; readonly newUri: vscode.Uri }>): Promise<void> {
+  for (const file of files) {
+    const folder = vscode.workspace.getWorkspaceFolder(file.newUri);
+    if (folder === undefined) continue;
+    const from = path.relative(folder.uri.fsPath, file.oldUri.fsPath).split(path.sep).join('/');
+    const to = path.relative(folder.uri.fsPath, file.newUri.fsPath).split(path.sep).join('/');
+    if (from === '' || to === '' || from.startsWith('..') || to.startsWith('..')) continue;
+    const isFolder = (await stat(file.newUri.fsPath).catch(() => undefined))?.isDirectory() === true;
+    await host.followRename(folder.uri.fsPath, isFolder ? `${from}/` : from, isFolder ? `${to}/` : to);
+  }
 }
 
 /** The only path that re-signs a bundle that failed verification: a modal the person confirms, then host.reset(), which records policy.reset. */
