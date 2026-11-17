@@ -218,3 +218,66 @@ the unchanged source first (the tests compiled and ran before the implementation
 - Records: a deny-listed call is still recorded as `settings.deny-list` with the same reason; the settings layer is no longer asked about it, so no
   classifier or safety model runs for a command that will not run.
 - Lint clean, full `npm test` as above, secret scan clean.
+
+## Review round 2 (PR #74)
+
+Four commits on `feat/gate-floor`, one per finding. Every new test was seen failing against the unchanged source first.
+
+### Results
+
+- Lint (`tsc --noEmit`): clean.
+- Full `npm test` (once, at the end, 6G cap): 3345 tests, 3335 passed, 1 failed, 0 cancelled, 9 skipped (the same 9). The one failure is a timing race in
+  `teamStudioPage.test.ts` ("a newer request drops the older reply", which waits a fixed 10 ms for a request to be sent and read `sent[0]` as undefined
+  under full-suite load). Nothing in Team Studio changed in this round; the file was then run alone three times: 55 of 55 each time. Left as is (out of
+  scope; a candidate for a follow-up that waits for the send instead of a fixed delay).
+- `node scripts/secret-scan.mjs --range origin/main..HEAD`: clean. No package changes. No activation or webview code changed, so e2e was not run.
+
+### 1. [MAJOR] A window with no folder recorded no decisions
+
+- Commit `7bd7e43`.
+- `GateHost.runtimeFor` wrote records only when the request named a folder. It now resolves the log key once for every runtime (the project's, or
+  `INSTALL_LOG_KEY` for no folder or an empty one) and opens the log by that key at each record, so a log let go is reopened as before.
+- Test (`gateHostLogs.test.ts`): each kind of runtime the host hands out (folder; no folder; sub-agent with and without a folder; nobody present with a
+  folder, with none, and with an empty one) writes a record that is on disk in the log its key names; a fresh host's first no-folder record opens the
+  install log.
+- SECURITY.md now says the decisions of a no-folder window go to the install log.
+
+### 2. [MINOR] Unknown wrappers hid a floor action
+
+- Commit `85beef0`.
+- stdbuf, flock and watch are read in the wrapper loop like timeout and nice, each with its own option syntax: stdbuf's `-i/-o/-e` modes (attached, as
+  the next word, or `--output=`); flock's flags and value options, its lock file, then a command or `-c`/`--command` (read as a command line); watch's
+  `-n`/`--interval` and flags, one quoted command line read as `sh -c` reads it, and `-x` read as words. A flock lock file in a protected place is a
+  write there. A known runner still makes a `safe` command `unknown` (it changes how it runs).
+- The class: after a program the rules do not know, each later word that names a program the rules can tag (`TAGGED_PROGRAMS`: the tagged commands,
+  the runners, shells, privilege wrappers, interpreters) is read from there; if that tags anything, the command's effects are unknown, so the gate asks.
+  More than 16 such words are not each read: unknown too. Words that tag nothing (`chronic git status`) change nothing. Shell keywords (`if`, `{`,
+  `exec`, ...) keep their own reading, which already reads the words after them.
+- Tests (`commandEffects.test.ts`): every tagged row (publish, destroy, protected write) through ten forms of the three runners keeps its exact tags;
+  every row after four unknown wrappers (`chronic`, `ionice -c3`, a made-up runner with options, one by absolute path) is tagged or has unknown effects;
+  look-alikes stay untagged. The source scan in `commandBounds.test.ts` now counts parentheses to read a call's arguments (it missed
+  `classifyWords(args.slice(index), …, depth + 1)`) and covers the new probe.
+- Docs: `FLOOR_EFFECTS_CANNOT_SEE_TEXT` and SECURITY.md name timeout, nice, stdbuf, flock and watch among the wrappers read, drop "wrappers they do not
+  know" from what runs unread, and say a program they do not know with a flagged command after it asks. The CHANGELOG bullet says the same. gateDocs:
+  the three wrappers move from the "not seen" list to the "seen" list, `chronic git push` and `ionice -c3 rm -rf src` are checked to have unknown effects,
+  and the text and changelog phrase checks follow the new words.
+
+### 3. [MINOR] `--user 1000:1000` was removed from records
+
+- Commit `a0492b8`.
+- After `-u`, `--user`, `--proxy-user` or `-U`, a value of digits, a colon and digits (quoted, attached or after `=`) is kept. Every other value with a
+  colon is still removed, including a numeric user with a password and a number-only password after a name. Nothing else was exempted (a name and
+  group, or `$(id -u):$(id -g)`, can carry a password, so they are still removed).
+- Tests (`gateRecordRedaction.test.ts`): six docker and podman forms kept whole by both the class rule and the token rules; the near misses removed.
+  SECURITY.md says the numeric user and group is kept; gateDocs checks the sentence and runs the example.
+
+### 4. [MINOR] manifestInput ran twice per call
+
+- Commit `412620d`.
+- `CallPaths.input` (replacing `raw`) is the call's arguments in the manifest's shape, built once by `readCallPaths`, with each trusted-folder read
+  written as `**`. `gateToolCall` and `effectsOfStep` fill the effects from it (`effectsOfArguments`), so manifestInput runs once per call and a tool
+  that renames a field keeps the trusted-folder rewrite. `effectsOfCall` and `manifestArguments` keep their behaviour for callers that start from the
+  model's own arguments.
+- Tests (`gateCallArguments.test.ts`): a stand-in tool whose manifestInput renames `file` to `file_path`: a trusted-folder read is a known read and is
+  allowed with nobody present, manifestInput runs once for the whole decision, a read outside every trusted folder stays unknown, and a project read is
+  its project path.
