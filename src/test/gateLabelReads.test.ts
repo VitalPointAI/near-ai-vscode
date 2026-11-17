@@ -2,13 +2,13 @@
 // nobody can read, a policy that failed closed, and cyber steps. The label file here is written unsigned, so the runs read it the way a run with no gate
 // host does: trusting no key, so every label in it only raises (fail closed). Nothing leaves this computer; every project is under the temporary folder.
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { RunCheckpoints } from '../agent/checkpoints';
 import { gateStep, gateToolCall } from '../agent/gateAdapter';
-import { FAILED_CLOSED_LABEL_TEXT } from '../agent/gateLabels';
+import { FAILED_CLOSED_LABEL_TEXT, labelReadFilter } from '../agent/gateLabels';
 import type { AgentEvent, ApprovalRequest } from '../agent/loop';
 import { DEFAULT_RULES, RunGrants } from '../agent/permissions';
 import { ShellSession } from '../agent/shell';
@@ -57,13 +57,13 @@ function scripted(calls: ToolCall[]) {
   };
 }
 
-async function run(root: string, calls: ToolCall[], gate: GateRuntime = testGateRuntime(), tools: AgentTool<any>[] = [readTool, globTool, grepTool, bashTool], approve = false): Promise<{ outputs: string[]; cards: ApprovalRequest[]; transcript: string }> {
+async function run(root: string, calls: ToolCall[], gate: GateRuntime = testGateRuntime(), tools: AgentTool<any>[] = [readTool, globTool, grepTool, bashTool], approve = false, readOnlyRoots?: string[]): Promise<{ outputs: string[]; cards: ApprovalRequest[]; transcript: string }> {
   const events: AgentEvent[] = [];
   const cards: ApprovalRequest[] = [];
   const shell = new ShellSession(root);
   const agent = newTestRun({
     client: scripted(calls) as never, model: 'm', tools, gate,
-    context: { root, checkpoints: new RunCheckpoints('label-reads'), shell, readFiles: new Set() },
+    context: { root, checkpoints: new RunCheckpoints('label-reads'), shell, readFiles: new Set(), ...(readOnlyRoots === undefined ? {} : { readOnlyRoots }) },
     policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES,
     requestApproval: async (card) => { cards.push(card); return { decision: approve ? 'allow' : 'deny' }; }, emit: (event) => events.push(event)
   });
@@ -146,4 +146,39 @@ test('a command nobody can read that names a labelled file is refused, not asked
   assert.equal(gated.effects.length, 0, 'its effects are unknown');
   assert.equal(gated.decision.outcome, 'deny');
   assert.equal(gated.decision.rule, 'label.dominance');
+});
+
+// ---- D-63: the Open-GSD runtime is the extension's own files, judged at the default label ----
+
+/** A project labelled Protected B as a whole (above the default clearance), and a stand-in Open-GSD runtime folder outside it with a link into the project. */
+function labelledProjectAndRuntime(): { root: string; runtime: string } {
+  const root = project();
+  const payload = { labelMapVersion: 1, vocabulary: 1, project: label('ca-protected', 'Protected B'), entries: {} };
+  writeFileSync(path.join(root, ...LABEL_MAP_FILE.split('/')), JSON.stringify({ v: 1, purpose: 'label-map', signer: { fingerprint: 'x', publicKey: 'A'.repeat(43) }, signedAt: '2026-11-17T00:00:00.000Z', payload, sig: 'x' }));
+  const runtime = realpathSync(mkdtempSync(path.join(tmpdir(), 'near-ai-gsd-runtime-')));
+  writeFileSync(path.join(runtime, 'workflow.md'), 'RUNTIME workflow steps\n');
+  symlinkSync(path.join(root, 'secret', 'plan.md'), path.join(runtime, 'plan-link.md'));
+  return { root, runtime };
+}
+
+test('D-63: a read of the Open-GSD runtime is judged at the default label, while the project\'s own files keep the project\'s label', async () => {
+  const { root, runtime } = labelledProjectAndRuntime();
+  const ran = await run(root, [call('r1', 'Read', { file_path: path.join(runtime, 'workflow.md') })], testGateRuntime(), undefined, false, [runtime]);
+  assert.match(ran.outputs[0] ?? '', /RUNTIME workflow steps/);
+  const own = await run(root, [call('r2', 'Read', { file_path: 'notes.md' })], testGateRuntime(), undefined, false, [runtime]);
+  assert.match(own.outputs[0] ?? '', PB_REFUSAL);
+  const search = await run(root, [call('g1', 'Grep', { pattern: 'RUNTIME', path: runtime, output_mode: 'content' })], testGateRuntime(), undefined, false, [runtime]);
+  assert.match(search.outputs[0] ?? '', /RUNTIME workflow steps/);
+});
+
+test('D-63: a link from the runtime folder into the project does not launder the project file\'s label', async () => {
+  const { root, runtime } = labelledProjectAndRuntime();
+  const ran = await run(root, [call('r1', 'Read', { file_path: path.join(runtime, 'plan-link.md') })], testGateRuntime(), undefined, false, [runtime]);
+  assert.match(ran.outputs[0] ?? '', PB_REFUSAL);
+  assert.ok(!ran.transcript.includes(SECRET));
+  // A search's results are filtered the same way: a result in the runtime is judged at the default label unless its real place is in the project.
+  const canRead = await labelReadFilter(testGateRuntime(), root);
+  assert.equal(canRead(path.relative(root, path.join(runtime, 'workflow.md'))), true);
+  assert.equal(canRead(path.relative(root, path.join(runtime, 'plan-link.md'))), false);
+  assert.equal(canRead('notes.md'), false, 'the project is labelled above the clearance');
 });

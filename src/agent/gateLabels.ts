@@ -5,6 +5,7 @@
 // folder, with path-like words also followed through links within a fixed bound (the same words the credential-read check reads, so the two never
 // disagree). A read the text does not show (a path built in a variable, a recursive search) is not seen: that is a documented limit, as it is for the
 // credential-read check, and the label words in LABELS_NOT_ACCREDITATION_TEXT say a shell command cannot be fully seen.
+import { realpathSync } from 'node:fs';
 import { realpath } from 'node:fs/promises';
 import * as path from 'node:path';
 import { SHIPPED_DEFAULT_LABEL } from '../domain/gate/bundle';
@@ -245,6 +246,8 @@ function markOf(view: LabelView, relative: string, defaultLabel: Label): Mark {
 export interface LabelCheckInput extends NamedPathsInput {
   /** True when the call's effects are unknown or it runs a command: it may read anything in the project, so a held map holds it too. */
   readonly mayReadAnything?: boolean;
+  /** True when the call reads the extension's own installed files (the Open-GSD runtime): judged at the policy's default label (D-63). */
+  readonly defaultReads?: boolean;
 }
 
 /**
@@ -254,7 +257,7 @@ export interface LabelCheckInput extends NamedPathsInput {
 export async function labelVerdictFor(runtime: GateRuntime, input: LabelCheckInput): Promise<LabelVerdict | undefined> {
   try {
     const paths = await namedPaths(input);
-    if (paths.length === 0 && input.mayReadAnything !== true) return undefined;
+    if (paths.length === 0 && input.mayReadAnything !== true && input.defaultReads !== true) return undefined;
     const state = stateOf(runtime);
     const facts = state === undefined ? clearanceFactsOf({ state: 'failed-closed' } as BundleState, nowOf(runtime)) : clearanceFactsOf(state, nowOf(runtime));
     const view = await sourceOf(runtime, input.root).view(facts.scales);
@@ -263,6 +266,7 @@ export async function labelVerdictFor(runtime: GateRuntime, input: LabelCheckInp
       const verdict = markVerdict(markOf(view, relative, facts.defaultLabel), facts);
       if (verdict !== undefined) return verdict;
     }
+    if (input.defaultReads === true) return markVerdict([facts.defaultLabel], facts);
     return undefined;
   } catch {
     return { rule: 'label.dominance', reason: 'NEAR AI could not check the labels of what this call reads, so it was refused rather than guessed. Try again.' };
@@ -279,9 +283,21 @@ export async function labelReadFilter(runtime: GateRuntime, root: string): Promi
     const facts = state === undefined ? clearanceFactsOf({ state: 'failed-closed' } as BundleState, nowOf(runtime)) : clearanceFactsOf(state, nowOf(runtime));
     const view = await sourceOf(runtime, root).view(facts.scales);
     if (holdsReads(view.state)) return () => false;
+    let realRoot: string;
+    try { realRoot = realpathSync(root); } catch { realRoot = path.resolve(root); }
     return (relativePath) => {
       try {
-        return markVerdict(view.resolve(relativePath.split(path.sep).join('/'), facts.defaultLabel).mark, facts) === undefined;
+        // A result outside the project (a search of the Open-GSD runtime) is judged at the default label (D-63), unless its real place, links followed, is
+        // in the project: then it keeps the project's label for that place, so a link cannot launder one.
+        const absolute = path.resolve(root, relativePath);
+        let inside = insideRelative(root, absolute);
+        if (inside === undefined) {
+          let real: string | undefined;
+          try { real = realpathSync(absolute); } catch { real = undefined; }
+          inside = real === undefined ? undefined : insideRelative(realRoot, real);
+          if (inside === undefined) return markVerdict([facts.defaultLabel], facts) === undefined;
+        }
+        return markVerdict(view.resolve(inside, facts.defaultLabel).mark, facts) === undefined;
       } catch {
         return false;
       }

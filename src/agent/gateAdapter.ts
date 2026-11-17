@@ -378,6 +378,12 @@ export interface CallPaths {
   readonly input: Record<string, unknown>;
   /** The trusted-folder files read, named by the folder's own name and the path inside it (never the full machine path). */
   readonly trustedReads: readonly string[];
+  /**
+   * The project-relative real paths (links followed, as the tools resolve them) of the paths read-only fields name inside the project, for the label check
+   * (D-63): a path whose real place is in the project keeps the project's labels however it was named, so a link from the Open-GSD runtime into the project
+   * cannot launder a label.
+   */
+  readonly projectReads: readonly string[];
   readonly facts: Pick<FloorFacts, 'credentialStore' | 'identityFiles'>;
   /**
    * When a path is outside the project and every folder the tool may use for it (a trusted folder only for a read): the tool would refuse the call, so the
@@ -420,6 +426,7 @@ export async function readCallPaths(tool: AgentTool<any>, raw: Record<string, un
   const fields = pathFieldVerbs(tool);
   let out: Record<string, unknown> | undefined;
   const trustedReads: string[] = [];
+  const projectReads: string[] = [];
   let credentialStore: string | undefined;
   let identityFiles: string | undefined;
   let outside: { reason: string; toolMessage: string } | undefined;
@@ -444,7 +451,10 @@ export async function readCallPaths(tool: AgentTool<any>, raw: Record<string, un
     }
     if (resolved === undefined || ![...verbs].every((verb) => verb === 'read')) continue;
     const known = await resolvedFolders();
-    if (insideFolder(known.root, resolved)) continue;
+    if (insideFolder(known.root, resolved)) {
+      projectReads.push(path.relative(known.root, resolved).split(path.sep).join('/'));
+      continue;
+    }
     for (const { real } of known.trusted) {
       if (!insideFolder(real, resolved)) continue;
       // The arguments in the manifest's shape with this one field rewritten: the effects are filled from these, so manifestInput runs once per call.
@@ -458,6 +468,7 @@ export async function readCallPaths(tool: AgentTool<any>, raw: Record<string, un
   return {
     input: out ?? given,
     trustedReads,
+    projectReads,
     facts: { ...(credentialStore === undefined ? {} : { credentialStore }), ...(identityFiles === undefined ? {} : { identityFiles }) },
     ...(outside === undefined ? {} : { outside })
   };
@@ -736,9 +747,13 @@ export async function gateToolCall(runtime: GateRuntime, input: GateCallInput, o
       ? credentialHoldReason(credentialRead, input.command !== undefined) : undefined;
   // The label verdict (CLAS-03, D-28): every path the call reads, and for a command every path its words name, checked against the clearances here, so
   // decide() stays pure. A command, or a call whose effects are unknown, may read anything, so a label file that is held holds it too (D-53, D-59).
+  // D-63: a read in the Open-GSD runtime (a trusted folder, resolved through links) is judged at the default label, not as the project-wide read its
+  // effects are written as; every read whose real place is in the project is judged by that place.
+  const trusted = paths.trustedReads.length > 0;
   const labelVerdict = await labelVerdictFor(runtime, {
     root: input.root,
-    reads: readEffectPaths(effects.length > 0 ? effects : declared),
+    reads: [...new Set([...(trusted ? [] : readEffectPaths(effects.length > 0 ? effects : declared)), ...paths.projectReads])],
+    ...(trusted ? { defaultReads: true } : {}),
     ...(input.command === undefined ? {} : { command: input.command, cwd: input.shell?.cwd ?? input.root }),
     mayReadAnything: input.command !== undefined || effects.length === 0
   });
