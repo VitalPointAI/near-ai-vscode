@@ -808,8 +808,33 @@ export function namesCredentialFile(command: string): string | undefined {
   return found === null ? undefined : found[0].replace(/^[\s'"=:<>/]+/, '').slice(0, 120);
 }
 
-/** Network code written inline for an interpreter (`node -e "fetch(...)"`, Python's requests), and bash's own network files. */
-const INLINE_NETWORK = /\b(?:requests|urllib|http\.client|fetch|axios|net\.connect|socket)\b.{0,40}(?:post|get|send|connect|request|\(|https?:)|\/dev\/(?:tcp|udp)\//i;
+/**
+ * Network code written inline for an interpreter (`node -e "fetch(...)"`, Python's requests, Ruby's and Perl's sockets, PHP's fsockopen), and bash's own
+ * network files. Looked for only in code an interpreter or a shell's `-c` runs (PR #76 review round 4), never in a message or a search pattern.
+ */
+const INLINE_NETWORK = /\b(?:requests|urllib|http\.client|fetch|axios|net\.connect|socket|TCPSocket|IO::Socket|fsockopen|stream_socket_client|curl_exec)\b.{0,40}(?:post|get|send|connect|request|new|\(|https?:|:\d)|\/dev\/(?:tcp|udp)\//i;
+/** An interpreter's options that run code written on the line, by interpreter. */
+const INLINE_CODE_OPTIONS: Readonly<Record<string, readonly string[]>> = Object.freeze({
+  node: ['-e', '--eval', '-p', '--print'], bun: ['-e', '--eval', '-p', '--print'], python: ['-c'], python2: ['-c'], python3: ['-c'], ruby: ['-e'], perl: ['-e', '-E'],
+  php: ['-r'], pwsh: ['-c', '-Command'], powershell: ['-c', '-Command']
+});
+
+/** The code an interpreter runs from the line (`node -e CODE`, `python -c CODE`, `deno eval CODE`), each piece, or none. */
+function inlineCode(name: string, args: readonly Word[]): string[] {
+  if (name === 'deno') return args[0]?.text === 'eval' ? args.slice(1).filter((arg) => !looksLikeOption(arg.text)).map((arg) => arg.text) : [];
+  const options = INLINE_CODE_OPTIONS[name];
+  if (options === undefined) return [];
+  const out: string[] = [];
+  for (let index = 0; index < args.length; index += 1) {
+    const text = args[index]!.text;
+    const equals = text.indexOf('=');
+    const option = equals > 0 ? text.slice(0, equals) : text;
+    if (!options.includes(option)) continue;
+    const code = equals > 0 ? text.slice(equals + 1) : args[index + 1]?.text;
+    if (code !== undefined) out.push(code);
+  }
+  return out;
+}
 
 /**
  * Whether a shell command can send data off this computer as the rules know it (owner decision after PR #74, D-18): it publishes or sends, the classifier
@@ -817,7 +842,6 @@ const INLINE_NETWORK = /\b(?:requests|urllib|http\.client|fetch|axios|net\.conne
  * build, a test run, `node app.js`) is not: what a program it starts does is not seen here (SECURITY.md says so). A plain download is not either.
  */
 export function commandMaySend(command: string, context: CommandContext): boolean {
-  if (INLINE_NETWORK.test(command)) return true;
   const classified = classifyCommand(command, context);
   if (classified.effectsUnknown !== undefined || classified.reachesNetwork !== undefined) return true;
   return (classified.effects ?? []).some((effect) => effect.verb === 'publish' || effect.verb === 'send' || effect.verb === 'network');
@@ -1985,17 +2009,22 @@ function noteInlineScript(name: string, args: readonly Word[], state: SegmentSta
     if (text.trim()) classifyText(text, { ...context, cwd: state.cwd }, depth + 1);
     return;
   }
+  // Network code an interpreter runs from the line (D-18): looked for in that code only.
+  if (inlineCode(name, args).some((code) => INLINE_NETWORK.test(code))) noteNetwork(`${name} runs code written on the line that reaches the network`);
   if (!SHELLS.has(name)) return;
   const at = args.findIndex((arg) => /^-[A-Za-z]*c[A-Za-z]*$/.test(arg.text));
   if (at < 0) return;
   let index = at + 1;
   while (index < args.length && (looksLikeOption(args[index].text) || args[index].text === '--')) index += 1;
   const script = args[index];
+  if (script !== undefined && INLINE_NETWORK.test(script.text)) noteNetwork(`${name} -c runs code that reaches the network`);
   if (script !== undefined && !script.expansion) classifyText(script.text, { ...context, cwd: state.cwd }, depth + 1);
 }
 
 /** The protected places a segment's redirects write, tagged whatever else decides the segment (D-44). */
 function noteRedirectWrites(redirects: readonly Redirect[], state: SegmentState, context: CommandContext): void {
+  // A redirect to or from bash's own network files reaches the network (D-18).
+  if (redirects.some((redirect) => redirect.target !== undefined && /^\/dev\/(?:tcp|udp)\//.test(redirect.target.text))) noteNetwork('it redirects to or from a network connection');
   const targets = redirects
     .filter((redirect) => redirect.op !== '<' && redirect.op !== '<<' && redirect.op !== '<<<' && !(redirect.op.endsWith('&') && redirect.target && /^[0-9-]+$/.test(redirect.target.text)))
     .flatMap((redirect) => (redirect.target === undefined || redirect.target.glob ? [] : [redirect.target]));

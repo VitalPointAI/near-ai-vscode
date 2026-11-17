@@ -216,6 +216,9 @@ test('the old fully-autonomous wording is gone from SECURITY.md and README, and 
   // Owner decision after PR #74 (D-18): a credential read holds what could send it out.
   assert.match(row, /After it reads such a file, anything that could send data off this computer asks too/);
   assert.ok(flat(floorSection).includes('Once a run has read such a file, in any mode, a call that could send data off this computer asks in every mode, `fully-autonomous` included, with no **Always allow** and no grant for the rest of the run, and is refused when nobody is there to answer'));
+  // PR #76 review round 4: two behaviours that surprise, said plainly.
+  assert.ok(flat(floorSection).includes('A command that only mentions a credential file (`echo .env`, a commit message that names it) marks the run as a read does, and the mark lasts until the run ends.'));
+  assert.ok(flat(floorSection).includes('For aws, gcloud and az, a word that looks like a command that prints a token (such as `get-session-token`, `print-access-token` or `get-access-token`) anywhere among the arguments, even as an option\'s value, makes the command refused as one: rename that word, or run that step yourself.'));
   // What the hold does not see, said plainly: a program the agent starts, and a plain download's address (coordinator, after the first report).
   assert.ok(flat(floorSection).includes('Local work still runs unasked: builds, tests, `npm run` scripts, `make`, and `node` or `python` running a script. A program the agent starts can still read the credential and send it itself, and a plain download\'s address could carry it; only the planned sandbox around the shell closes that.'));
   // Owner decisions after PR #74: signing in or out asks too, and a credential read holds what could send it out.

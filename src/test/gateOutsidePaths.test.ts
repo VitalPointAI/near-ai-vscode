@@ -57,7 +57,10 @@ test('a file-tool path outside the project and every trusted folder is refused u
         const where = `${tool.name} ${JSON.stringify(raw)} (${mode}, ${presence})`;
         assert.equal(gated.decision.outcome, 'deny', where);
         assert.equal(gated.decision.rule, 'call.outside-workspace', where);
-        assert.match(gated.decision.reason ?? '', /is outside the workspace\. Tools can only use files under /, where);
+        // PR #76 review round 4 (changed deliberately): the reason on record is fixed words with the path as the agent gave it, or its name alone when that
+        // was a machine path, never the tool's own text with the project's folder; the agent still gets the tool's own message.
+        assert.match(gated.decision.reason ?? '', /is outside the project and every folder this tool may use, so the tool would refuse it\./, where);
+        assert.ok(!(gated.decision.reason ?? '').includes(base), `${where}: no machine path in the reason`);
         assert.equal(gated.settings, undefined, `${where}: the settings layer is not asked`);
         assert.equal(runtime.records.length, 1, where);
         assert.equal(ruleOf(runtime.records[0]!), 'call.outside-workspace', where);

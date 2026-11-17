@@ -146,7 +146,10 @@ print-access-token` and `print-identity-token`, `az account get-access-token`,
 `aws ecr get-login-password` and the like, `npm token list` and `create`, and the `docker-credential-*`
 helpers), VS Code's own secrets database, and this extension's own identity
 and policy files in its storage. This holds for the file tools and for shell
-commands alike.
+commands alike. For aws, gcloud and az, a word that looks like a command that
+prints a token (such as `get-session-token`, `print-access-token` or
+`get-access-token`) anywhere among the arguments, even as an option's value,
+makes the command refused as one: rename that word, or run that step yourself.
 
 A file tool's path outside the project and every folder that tool may use (a
 folder NEAR AI trusts for reading, such as the managed Open-GSD runtime, is for
@@ -177,7 +180,9 @@ and a plain download's address could carry it; only the planned sandbox around
 the shell closes that. The read is seen as the other checks see one: a file the
 command or tool names, or a path that resolves to one; a recursive search, a
 glob, a path built while the command runs, or a link named without a folder
-(`cat notes` where `notes` is a link to `.env`) is not.
+(`cat notes` where `notes` is a link to `.env`) is not. A command that only
+mentions a credential file (`echo .env`, a commit message that names it) marks
+the run as a read does, and the mark lasts until the run ends.
 
 The checks that keep agents out of key and credential folders read the text of
 a command, following the shell's folder and any cd or pushd earlier in the same

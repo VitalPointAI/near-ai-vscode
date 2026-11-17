@@ -11,7 +11,7 @@ import { failedClosed } from '../domain/gate/bundle';
 import type { BundleState, GateContextName } from '../domain/gate/bundle';
 import { decide } from '../domain/gate/decide';
 import type { ActorRef, GateDecision, GateOptions, GateRequest, GateRuntime, PreGateRule, SettingsAnswer, SettingsLayer } from '../domain/gate/decide';
-import { namesCredentialStore, namesIdentityFiles, printerReason } from '../domain/gate/floor';
+import { credentialReason, identityFilesReason, namesCredentialStore, namesIdentityFiles, printerReason } from '../domain/gate/floor';
 import type { FloorFacts, FloorLocations } from '../domain/gate/floor';
 import { effectsFor } from '../domain/gate/manifest';
 import type { InputFieldSource } from '../domain/gate/manifest';
@@ -303,6 +303,8 @@ export interface GatedCall {
   readonly approvedOnce?: boolean;
   /** The file that may hold credentials this call reads, when it reads one: the run is marked with it once the call runs (D-18). */
   readonly readsCredential?: string;
+  /** The tool's own words for a path outside the project, which the agent is told when the call is refused for it; never put on record. */
+  readonly toolMessage?: string;
 }
 
 function productVersionOf(runtime: GateRuntime): string {
@@ -395,10 +397,17 @@ export interface CallPaths {
   readonly trustedReads: readonly string[];
   readonly facts: Pick<FloorFacts, 'credentialStore' | 'identityFiles'>;
   /**
-   * The tool's own message when a path is outside the project and every folder the tool may use for it (a trusted folder only for a read): the tool would
-   * refuse the call, so the gate refuses it up front (`call.outside-workspace`, owner decision after PR #74) instead of showing a card.
+   * When a path is outside the project and every folder the tool may use for it (a trusted folder only for a read): the tool would refuse the call, so the
+   * gate refuses it up front (`call.outside-workspace`, owner decision after PR #74) instead of showing a card. `reason` is what the record says, in fixed
+   * words with the path as the agent gave it (only its name, when that was a machine path); `toolMessage` is the tool's own words, for the agent only.
    */
-  readonly outside?: string;
+  readonly outside?: { readonly reason: string; readonly toolMessage: string };
+}
+
+/** The reason on record for a path outside the project: fixed words, and never a machine path (PR #76 review round 4). */
+function outsideReason(given: string): string {
+  const shown = path.isAbsolute(given) || /^[A-Za-z]:[\\/]/.test(given) || given.startsWith('~') ? `A file named ${shownName(path.basename(given))}` : shownName(given);
+  return `${shown} is outside the project and every folder this tool may use, so the tool would refuse it.`;
 }
 
 function insideFolder(folder: string, target: string): boolean {
@@ -430,7 +439,7 @@ export async function readCallPaths(tool: AgentTool<any>, raw: Record<string, un
   const trustedReads: string[] = [];
   let credentialStore: string | undefined;
   let identityFiles: string | undefined;
-  let outside: string | undefined;
+  let outside: { reason: string; toolMessage: string } | undefined;
   for (const [field, verbs] of fields) {
     const value = given[field];
     if (typeof value !== 'string' || value.trim() === '') continue;
@@ -441,11 +450,14 @@ export async function readCallPaths(tool: AgentTool<any>, raw: Record<string, un
       resolved = await resolveInWorkspace(root, value, readOnly ? [...readOnlyRoots] : []);
     } catch (error) {
       resolved = undefined; // outside the project and every trusted folder, or the key folder: the tool refuses it, and its effects stay unknown
-      if (error instanceof OutsideWorkspaceError) outside ??= error.message;
+      if (error instanceof OutsideWorkspaceError) outside ??= { reason: outsideReason(value), toolMessage: error.message };
     }
-    for (const shown of resolved === undefined || resolved === value ? [value] : [value, resolved]) {
-      credentialStore ??= namesCredentialStore(shown, locations, { root });
-      identityFiles ??= namesIdentityFiles(shown, locations);
+    // The path as the agent gave it names the store in the reason; one reached only through a link is named by what the agent gave, never the machine path.
+    credentialStore ??= namesCredentialStore(value, locations, { root });
+    identityFiles ??= namesIdentityFiles(value, locations);
+    if (resolved !== undefined && resolved !== value) {
+      if (credentialStore === undefined && namesCredentialStore(resolved, locations, { root }) !== undefined) credentialStore = credentialReason(shownName(value).slice(0, 120));
+      if (identityFiles === undefined && namesIdentityFiles(resolved, locations) !== undefined) identityFiles = identityFilesReason(shownName(value).slice(0, 120));
     }
     if (resolved === undefined || ![...verbs].every((verb) => verb === 'read')) continue;
     const known = await resolvedFolders();
@@ -583,8 +595,25 @@ function resourceOf(tool: string, effects: readonly Capability[], command: strin
   }
 }
 
-function recordFor(runtime: GateRuntime, gated: GatedCall, outcome: DecisionOutcome, rule: string, reason: string | undefined, model: { name: string; provider: string } | undefined): DecisionRecord {
+/**
+ * A record's words with the project's folder and the home folder written as `<project>` and `~` (PR #76 review round 4): a reason that names the shell's
+ * folder, or a command typed with a machine path, never puts that path on record. The longer folder is replaced first.
+ */
+export function withoutMachinePaths(text: string, folders: { readonly project?: string; readonly home?: string }): string {
+  const pairs: Array<[string, string]> = [];
+  if (folders.project !== undefined && folders.project.length > 1) pairs.push([folders.project, '<project>']);
+  if (folders.home !== undefined && folders.home.length > 1) pairs.push([folders.home, '~']);
+  let out = text;
+  for (const [folder, label] of pairs.sort((a, b) => b[0].length - a[0].length)) out = out.split(folder).join(label);
+  return out;
+}
+
+function recordFor(runtime: GateRuntime, gated: GatedCall, outcome: DecisionOutcome, rule: string, givenReason: string | undefined, model: { name: string; provider: string } | undefined): DecisionRecord {
   const capability = gated.effects[0] ?? WIDEST_SHORTHAND('plan')[0] as Capability;
+  const folders = { ...(gated.request.workspace === undefined ? {} : { project: gated.request.workspace.root }), ...(runtime.locations?.home === undefined ? {} : { home: runtime.locations.home }) };
+  const reason = givenReason === undefined ? undefined : withoutMachinePaths(givenReason, folders);
+  const given = gated.resource ?? resourceOf(gated.request.tool, gated.effects, gated.request.command);
+  const resource = { ...given, name: withoutMachinePaths(given.name, folders) };
   return buildDecisionRecord({
     recordId: (runtime.newRecordId ?? randomUUID)(),
     // The log numbers each line as it writes it; this is replaced there.
@@ -595,7 +624,7 @@ function recordFor(runtime: GateRuntime, gated: GatedCall, outcome: DecisionOutc
     ...(model === undefined ? {} : { model }),
     callId: gated.request.callId,
     capability,
-    resource: gated.resource ?? resourceOf(gated.request.tool, gated.effects, gated.request.command),
+    resource,
     outcome,
     rule,
     ...(reason === undefined || reason === '' ? {} : { reason }),
@@ -731,7 +760,7 @@ export async function gateToolCall(runtime: GateRuntime, input: GateCallInput, o
     // The project and the shell's folder, for the floor's text check of the command (a project's own globalStorage/ folder is the project's).
     workspace: { root: input.root, cwd: input.shell?.cwd ?? input.root },
     // A path the tool would refuse as outside the project: refused up front, after the floor's own refusals, the emergency stop and the deny list.
-    ...(paths.outside === undefined ? {} : { outsideWorkspace: paths.outside }),
+    ...(paths.outside === undefined ? {} : { outsideWorkspace: paths.outside.reason }),
     ...(credentialHold === undefined ? {} : { credentialHold }),
     ...(denied === undefined ? {} : { settingsRefusal: { rule: 'settings.deny-list', reason: denied } })
   };
@@ -746,7 +775,8 @@ export async function gateToolCall(runtime: GateRuntime, input: GateCallInput, o
   const callKey = floorAsk ? exactCall : undefined;
   const gated: GatedCall = {
     decision, settings: captured.value, request, effects, ...(resource === undefined ? {} : { resource }), ...(callKey === undefined ? {} : { callKey }),
-    ...(readsCredential === undefined ? {} : { readsCredential })
+    ...(readsCredential === undefined ? {} : { readsCredential }),
+    ...(paths.outside === undefined ? {} : { toolMessage: paths.outside.toolMessage })
   };
   const model = options.model === undefined ? undefined : { name: options.model, provider: MODEL_PROVIDER };
   // A floor ask a person already approved once, late (a sub-agent's parked card): this exact call runs this time only. decide() has just been asked again,

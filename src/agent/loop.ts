@@ -6,7 +6,7 @@ import * as path from 'node:path';
 import type { ActionCapability, ActionPolicy } from '../domain/policy';
 import type { AgentMessage, CompletionEvent, ToolCall, ToolDefinition, UsageMetadata } from '../services/nearAiClient';
 import { AutoApprovalContext, allowRuleBlocker, isAutoAllowed, PermissionRules, RunGrants, suggestAllowRule } from './permissions';
-import { CREDENTIAL_HOLD_RULE } from '../domain/gate/decide';
+import { CREDENTIAL_HOLD_RULE, OUTSIDE_WORKSPACE_RULE } from '../domain/gate/decide';
 import type { GateRuntime } from '../domain/gate/decide';
 import { TOOL_FORBIDDEN_RULE, gateToolCall, recordApprovalReply, recordRefusedBeforeGate, shellReadsCredentialFile, unavailableGateRuntime } from './gateAdapter';
 import type { FloorShellContext } from './gateAdapter';
@@ -703,7 +703,8 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
     if (risky) context.onSecurity?.({ kind: 'held', source: title, detail: risky });
     const gated = tool.capability !== 'read' && tool.capability !== 'plan';
     if (gated && decision.outcome !== 'ask') this.options.emit({ type: 'permission', tool: tool.name, decision: decision.outcome === 'deny' ? 'denied' : 'auto-allowed' });
-    if (decision.outcome === 'deny') return this.finish(call.id, false, `Not allowed: ${decision.reason}`);
+    // A path outside the project: the agent is told the tool's own words, which the record never carries (PR #76 review round 4).
+    if (decision.outcome === 'deny') return this.finish(call.id, false, `Not allowed: ${decision.rule === OUTSIDE_WORKSPACE_RULE && gateCall.toolMessage !== undefined ? gateCall.toolMessage : decision.reason}`);
     // A floor call the person approved once, late, runs now with no new card; the gate has used that approval up, so the next identical call asks again.
     if (decision.outcome === 'ask' && !gateCall.approvedOnce) {
       let preview: ToolPreview | undefined;
