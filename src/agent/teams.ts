@@ -5,6 +5,7 @@ import * as path from 'node:path';
 import type { AgentDiscoveryAnswers } from '../domain/agents';
 import { parseFrontmatter, type GsdAgent } from '../gsd/library';
 import { recommendAgentTeam } from '../services/agentTeams';
+import { withTeamRating } from './teamFrontMatter';
 import { checkTeamIcon, iconReference, MAX_TEAM_ICON_BYTES, TEAM_ICON_SUFFIX, TeamIconError, TeamIconPartialError, withIconReference } from './teamIcon';
 
 // Agent teams as Markdown files the user edits in VS Code. Frontmatter names the team; each
@@ -518,6 +519,19 @@ export class TeamLibrary {
   private async setReference(teamFile: string, name: string | undefined): Promise<{ text: string; textChanged: boolean }> {
     const before = await readFile(teamFile, 'utf8');
     const text = withIconReference(before, name);
+    if (text === before) return { text, textChanged: false };
+    await writeFile(teamFile, text, 'utf8');
+    await this.snapshot(teamFile);
+    return { text, textChanged: true };
+  }
+
+  /**
+   * The person's own rating of the team (1 to 5 stars), or none: one `rating:` line in its front matter, written the way the icon line is (one line, every
+   * other byte kept) and kept as a new version like any save. A rating that is already there writes nothing.
+   */
+  public async setRating(teamFile: string, rating: number | undefined): Promise<{ text: string; textChanged: boolean }> {
+    const before = await readFile(teamFile, 'utf8');
+    const text = withTeamRating(before, rating);
     if (text === before) return { text, textChanged: false };
     await writeFile(teamFile, text, 'utf8');
     await this.snapshot(teamFile);

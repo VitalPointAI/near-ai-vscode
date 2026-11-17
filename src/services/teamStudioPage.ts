@@ -17,6 +17,9 @@ import { gradingCoverage } from '../domain/teamKnowledge';
 import { knowledgeFile, loadKnowledge } from './teamKnowledgeStore';
 import { buildTeamPackage, cleanKnowledge, importQuestion, MAX_TEAM_PACKAGE_BYTES, readTeamMarkdown, readTeamPackage, shareProblems, TEAM_PACKAGE_EXTENSION, TeamPackageError, type ReadPackage } from '../agent/teamPackage';
 import type { TeamKnowledge } from '../domain/teamKnowledge';
+import { teamRating, withTeamRating } from '../agent/teamFrontMatter';
+import { buildDashboard, parseRoleTests, type CheckCounts, type DashboardTeam, type RunningTeam, type TeamDashboard } from '../domain/teamDashboard';
+import type { ActivitySessionSummary } from '../domain/activity';
 import { checkTeamIcon, decodeIconBase64, iconDataUri, iconSourceProblem, iconSourceType, MAX_GENERATED_IMAGE_BYTES, MAX_ICON_SOURCE_BYTES, TeamIconError, TeamIconPartialError, teamIconPrompt, withIconReference, type IconSourceType } from '../agent/teamIcon';
 
 /** The facts, relations and grading of each node, so the page can show a card without being sent the whole graph twice. */
@@ -65,7 +68,7 @@ export interface StudioMemberModel { tier: string; model: string; privacy: Direc
 /** `update`: the built-in template the team was made from and whether a newer version exists, so the card can offer Update Team. */
 /** `imported`: added with Import team and not yet approved to run; the person is asked the first time it would run. */
 /** `icon` (0.4.30): the team's own icon as a PNG data URI, checked; absent when the team shows the default (initials on a colour, drawn by the page). */
-export interface LibraryTeam { id: string; kind: 'project' | 'user'; name: string; description: string; command?: string; file: string; savedAt?: string; error?: string; imported?: boolean; derived?: boolean; /** 0.4.27: marked private, or every member private. */ private?: boolean; update?: { template: string; from?: number; to: number; available: boolean }; icon?: string; members: Array<{ name: string; role?: string } & StudioMemberModel> }
+export interface LibraryTeam { id: string; kind: 'project' | 'user'; name: string; description: string; command?: string; file: string; savedAt?: string; error?: string; imported?: boolean; derived?: boolean; /** 0.4.27: marked private, or every member private. */ private?: boolean; update?: { template: string; from?: number; to: number; available: boolean }; icon?: string; /** The person's own rating (1 to 5 stars) from its front matter. */ rating?: number; /** What the free local check finds in it, counted. */ check?: CheckCounts; members: Array<{ name: string; role?: string } & StudioMemberModel> }
 export interface LibraryArchived { id: string; name: string; file: string; savedAt?: string }
 export interface LibraryState { teams: LibraryTeam[]; archived: LibraryArchived[] }
 
@@ -291,6 +294,8 @@ export async function listLibrary(library: TeamLibrary, root: string | undefined
     const template = text !== undefined ? detectTemplate(text) : undefined;
     // 0.4.30: the team's own icon, checked, as a data URI; the page draws the default for a team without one.
     const icon = text !== undefined ? await library.readIcon(entry.file, text) : undefined;
+    const rating = text !== undefined ? teamRating(text) : undefined;
+    const check = text !== undefined ? checkCounts(text, entry.file) : undefined;
     return {
       id: entry.project ? 'project' : `user:${slug}`, kind: entry.project ? 'project' : 'user', file: entry.file,
       name: team?.name ?? slug, description: team?.description ?? '',
@@ -301,6 +306,8 @@ export async function listLibrary(library: TeamLibrary, root: string | undefined
       ...(template ? { update: { template: template.label, ...(template.fromVersion ? { from: template.fromVersion } : {}), to: template.toVersion, available: !template.stamped || template.fromVersion !== template.toVersion } } : {}),
       ...(await mtime(entry.file) ? { savedAt: await mtime(entry.file) } : {}),
       ...(icon ? { icon: iconDataUri(icon) } : {}),
+      ...(rating ? { rating } : {}),
+      ...(check ? { check } : {}),
       members: (team?.members ?? []).map((member) => ({ name: member.name, ...(member.role ? { role: member.role } : {}), ...memberModel(member, input) }))
     };
   }));
@@ -310,6 +317,28 @@ export async function listLibrary(library: TeamLibrary, root: string | undefined
     return { id: `archived:${slugify(path.basename(file, '.md'))}`, name, file, ...(savedAt ? { savedAt } : {}) };
   }));
   return { teams, archived };
+}
+
+/** The free local check's findings for a team file, counted by how serious they are; undefined when the file does not read as a draft. */
+function checkCounts(text: string, file: string): CheckCounts | undefined {
+  try {
+    const findings = checkTeam(draftFromMarkdown(text, file), { defaultTools: DEFAULT_TOOLS });
+    return { block: findings.filter((finding) => finding.severity === 'block').length, warning: findings.filter((finding) => finding.severity === 'warning').length, advice: findings.filter((finding) => finding.severity === 'advice').length };
+  } catch { return undefined; }
+}
+
+/** The listing as the page gets it: everything but the files' paths, which stay here (the page names teams only by the ids it was given). */
+export function pageLibrary(state: LibraryState): { teams: Array<Omit<LibraryTeam, 'file'>>; archived: Array<Omit<LibraryArchived, 'file'>> } {
+  return { teams: state.teams.map(({ file: _file, ...team }) => team), archived: state.archived.map(({ file: _file, ...entry }) => entry) };
+}
+
+/** A listed team as the dashboard counts it: `/team:` names a library team by its file name, and the project team's file is team.md. */
+function dashboardTeam(team: LibraryTeam): DashboardTeam {
+  return {
+    id: team.id, kind: team.kind, slug: team.kind === 'project' ? slugify(path.basename(team.file, '.md')) : team.id.slice('user:'.length), file: team.file,
+    ...(team.error ? { error: team.error } : {}), ...(team.imported ? { imported: true } : {}), ...(team.derived ? { derived: true } : {}), ...(team.check ? { check: team.check } : {}),
+    members: team.members.map((member) => ({ name: member.name, model: member.model, ...(member.available !== undefined ? { available: member.available } : {}) }))
+  };
 }
 
 // ---- Messages from the page: strictly validated; anything else is ignored. ----
@@ -325,7 +354,11 @@ const WORK_SHAPES = ['feature', 'bugfix', 'refactor', 'research', 'release'] as 
 const RISKS = ['low', 'medium', 'high'] as const;
 
 export type StudioMessage =
-  | { type: 'ready' } | { type: 'refresh' } | { type: 'import' } | { type: 'discard-draft' } | { type: 'discard-kept' } | { type: 'watch-live' }
+  | { type: 'ready' } | { type: 'refresh' } | { type: 'import' } | { type: 'discard-draft' } | { type: 'discard-kept' }
+  /** Watch it live (Team Live): `id`, the team whose run to show; without one, the newest run. */
+  | { type: 'watch-live'; id?: string }
+  /** The person's own rating of a team, 1 to 5 stars; 0 clears it. */
+  | { type: 'rate'; id: string; rating: number }
   /** Cancel or "All teams" in the guided builder with unsaved changes: the host asks Discard changes / Save draft. */
   | { type: 'leave-wizard'; wizard: SavedWizard }
   /** "All teams" in the editor with unsaved changes: the host asks Discard changes / Save. */
@@ -417,8 +450,15 @@ export function parseStudioMessage(value: unknown): StudioMessage | undefined {
   const message = value;
   const id = () => typeof message.id === 'string' && TEAM_ID.test(message.id);
   switch (message.type) {
-    case 'ready': case 'refresh': case 'import': case 'discard-draft': case 'discard-kept': case 'watch-live':
+    case 'ready': case 'refresh': case 'import': case 'discard-draft': case 'discard-kept':
       return exactKeys(message, ['type']) ? { type: message.type } : undefined;
+    case 'watch-live':
+      if (!exactKeys(message, ['type'], ['id'])) return undefined;
+      if (message.id === undefined) return { type: 'watch-live' };
+      return typeof message.id === 'string' && ICON_TEAM_ID.test(message.id) ? { type: 'watch-live', id: message.id } : undefined;
+    case 'rate':
+      return exactKeys(message, ['type', 'id', 'rating']) && typeof message.id === 'string' && ICON_TEAM_ID.test(message.id) && Number.isInteger(message.rating) && (message.rating as number) >= 0 && (message.rating as number) <= 5
+        ? { type: 'rate', id: message.id, rating: message.rating as number } : undefined;
     case 'leave-wizard': {
       const wizard = exactKeys(message, ['type', 'wizard']) ? savedWizard(message.wizard) : undefined;
       return wizard ? { type: 'leave-wizard', wizard } : undefined;
@@ -563,7 +603,16 @@ export interface TeamStudioDeps {
   updateTeam?(file: string): Promise<unknown>;
   /** 0.4.28: whether a run of the team with this slug is going now, and opening Team Live to watch it. */
   liveRun?(slug: string): boolean;
-  watchLive?(): Promise<unknown>;
+  /** Opens Team Live; with a run id, on that run. */
+  watchLive?(runId?: string): Promise<unknown>;
+  /** The open project's run history (its activity history); asked only with a folder open. */
+  history?(): Promise<ActivitySessionSummary[]>;
+  /** The team runs going now, from the live activity feed: each run's id, the slug its team runs under, and the team's file when the feed has it. */
+  runningTeams?(): RunningTeam[];
+  /** A team run started or ended (the activity feed's own notification, never a timer), so the dashboard is listed again. */
+  onDidChangeRuns?(listener: () => void): { dispose(): void };
+  /** The last role test of each team, as Optimise all teams kept it (scores only, keyed by a hash of the team file's path). */
+  roleTests?: { get(): unknown };
   confirm(message: string, action: string): Promise<boolean>;
   ask(prompt: string, value: string): Promise<string | undefined>;
   /** Where to save a team's share file (`<team>.near-team.json`); undefined when the person cancelled. */
@@ -693,12 +742,31 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
     // The builder's draft is already the resumable draft: say once that it was kept. An open
     // team's changes stay kept until the user reopens or discards them.
     if (kept?.kind === 'wizard' || (kept?.kind === 'editor' && !library.teams.some((team) => team.id === kept.id))) await deps.kept?.set(undefined);
-    post({ type: 'state', library, context, picker: teamPicker(context!.startingPoints, library.teams), ...(saved ? { savedDraft: saved } : {}), ...(kept?.kind === 'wizard' && saved ? { kept: { kind: 'wizard', text: KEPT_WIZARD_TEXT } } : kept?.kind === 'editor' && library.teams.some((team) => team.id === kept.id) ? { kept: { ...kept, text: `Your unsaved changes to "${kept.name || 'the team'}" were kept as a draft.` } } : {}) });
+    post({ type: 'state', library: pageLibrary(library), dashboard: await dashboardOf(), context, picker: teamPicker(context!.startingPoints, library.teams), ...(saved ? { savedDraft: saved } : {}), ...(kept?.kind === 'wizard' && saved ? { kept: { kind: 'wizard', text: KEPT_WIZARD_TEXT } } : kept?.kind === 'editor' && library.teams.some((team) => team.id === kept.id) ? { kept: { ...kept, text: `Your unsaved changes to "${kept.name || 'the team'}" were kept as a draft.` } } : {}) });
   };
   const refreshLibrary = async () => {
     if (!input) return;
     library = await listLibrary(deps.library, deps.root(), input);
-    post({ type: 'library', library, ...(context ? { picker: teamPicker(context.startingPoints, library.teams) } : {}) });
+    post({ type: 'library', library: pageLibrary(library), dashboard: await dashboardOf(), ...(context ? { picker: teamPicker(context.startingPoints, library.teams) } : {}) });
+  };
+  /**
+   * The dashboard from the listing held now: the open project's run history (none without a folder, or when it cannot be read, which the page then says
+   * rather than showing zeros as fact), the runs going now, and the role tests kept.
+   */
+  const dashboardOf = async (): Promise<TeamDashboard> => {
+    let history = Boolean(deps.root() && deps.history);
+    let sessions: ActivitySessionSummary[] = [];
+    if (history) { try { sessions = await deps.history!(); } catch { history = false; } }
+    let running: RunningTeam[] = [];
+    try { running = deps.runningTeams?.() ?? []; } catch { running = []; }
+    return buildDashboard({ now: Date.now(), history, sessions, running, roleTests: parseRoleTests(deps.roleTests?.get()), teams: library.teams.map(dashboardTeam) });
+  };
+  /** A team run started or ended: the dashboard alone is sent again, once for a burst of changes. */
+  let dashboardTimer: ReturnType<typeof setTimeout> | undefined;
+  const dashboardSoon = () => {
+    if (dashboardTimer) clearTimeout(dashboardTimer);
+    dashboardTimer = setTimeout(() => { dashboardTimer = undefined; void dashboardOf().then((dashboard) => post({ type: 'dashboard', dashboard }), () => undefined); }, 150);
+    dashboardTimer.unref?.();
   };
   const soon = () => {
     if (timer) clearTimeout(timer);
@@ -945,6 +1013,8 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
         } finally { stop?.dispose(); }
         if (controller.signal.aborted && done < teams.length) results.push(`Cancelled after ${done} of ${teams.length} teams; the ones already tested kept their models.`);
         post({ type: 'notice', text: results.join(' ') });
+        // The role tests just run count in each team's health on the dashboard.
+        await refreshLibrary();
         await sendTeam('library', open?.file ?? '', '');
         return;
       }
@@ -1269,7 +1339,30 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
         return;
       }
       case 'discard-draft': await deps.drafts.set(undefined); return;
-      case 'watch-live': await deps.watchLive?.(); return;
+      case 'watch-live': {
+        // The team's own run when it has one going now (the listing's ids only); otherwise the newest run, as before.
+        const run = message.id ? (await dashboardOf()).cards[message.id]?.runId : undefined;
+        await (run ? deps.watchLive?.(run) : deps.watchLive?.());
+        return;
+      }
+      case 'rate': {
+        const file = fileFor(message.id);
+        const team = teamFor(message.id);
+        if (!file || !team) { post({ type: 'error', text: 'That team is no longer in your teams.' }); return; }
+        if (team.error) { post({ type: 'error', text: 'Fix this team file first, then rate it.' }); return; }
+        let result: { text: string; textChanged: boolean };
+        let before: string;
+        try {
+          before = await readFile(file, 'utf8');
+          result = await deps.library.setRating(file, message.rating || undefined);
+        } catch (error) { post({ type: 'error', text: `The rating could not be saved${fileProblem(error)}. Nothing was changed.` }); return; }
+        // The team file gained, changed or lost its rating line: an editor open on the version before moves to this one, as for an icon change.
+        const rebase = result.textChanged && open?.file === file && hash(before) === open.base;
+        if (rebase) open = { ...open!, text: result.text, base: hash(result.text) };
+        if (result.textChanged) await refreshLibrary();
+        post({ type: 'rated', id: message.id, rating: message.rating, ...(rebase ? { base: open!.base } : {}), text: message.rating ? `Rated ${team.name} ${message.rating} out of 5.` : `Cleared your rating of ${team.name}.` });
+        return;
+      }
       case 'use-in-chat': {
         const team = teamFor(message.id);
         if (team?.command) await deps.sidebar.prefill(team.command);
@@ -1329,7 +1422,8 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
           return;
         }
         if (await choose(importQuestion(read), 'Add to my teams') !== 'Add to my teams') { post({ type: 'notice', text: 'Nothing was imported.' }); return; }
-        const file = await deps.library.importTeam(read.team.name, read.markdown);
+        // Someone else's rating is not the person's own: it is left out, so the card shows only ratings they gave.
+        const file = await deps.library.importTeam(read.team.name, withTeamRating(read.markdown, undefined));
         // 0.4.30: the icon the file carried, checked when it was read, goes beside the new team under its own name. Without one, the imported text's
         // icon line is removed, so it can never show an icon file it happens to name (one left in the library folder, say).
         let iconNote = '';
@@ -1360,7 +1454,8 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
         const entry = teamFor(message.id);
         if (!file || !entry || entry.error) return;
         if (!deps.pickShareTarget) { post({ type: 'error', text: 'Sharing is not available here.' }); return; }
-        const markdown = await readFile(file, 'utf8');
+        // The person's own rating stays here: it is their opinion, not part of the team (a version 1 file read by any build).
+        const markdown = withTeamRating(await readFile(file, 'utf8'), undefined);
         const problems = shareProblems(markdown, file, deps.home);
         if (problems.refused) { post({ type: 'error', text: problems.refused }); return; }
         if (problems.paths.length && !await deps.confirm(`${problems.paths.join(', ')} ${problems.paths.length === 1 ? 'names' : 'name'} a folder on this computer. Anyone you send the team to will see it. Share it anyway?`, 'Share anyway')) return;
@@ -1545,6 +1640,7 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
     ...(deps.onStop ? [deps.onStop(() => cancelRefine())] : []),
     ...(deps.onDidChangeSettings ? [deps.onDidChangeSettings(() => { void refresh(); })] : []),
     ...(deps.onDidChangeFolder ? [deps.onDidChangeFolder(() => { void refresh(); })] : []),
+    ...(deps.onDidChangeRuns ? [deps.onDidChangeRuns(() => { if (pageReady) dashboardSoon(); })] : []),
     host.webview.onDidReceiveMessage(async (value) => {
       const message = parseStudioMessage(value);
       if (!message) return;
@@ -1564,6 +1660,7 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
   };
   const dispose = () => {
     if (timer) clearTimeout(timer);
+    if (dashboardTimer) clearTimeout(dashboardTimer);
     cancelRefine();
     for (const subscription of subscriptions) subscription.dispose();
     void keepUnsaved().catch(() => undefined);

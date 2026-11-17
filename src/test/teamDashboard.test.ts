@@ -169,13 +169,13 @@ test('status: running now, needs attention (with the reason), ready, or never ru
 test('a running team still lists what needs attention; a team is matched to a run by its file first, then its name', () => {
   const dashboard = buildDashboard({
     now: NOW, history: true, sessions: [], roleTests: {},
-    running: [{ runId: 'run-a-000000', slug: 'team', file: '/p/.planning/.near-ai/team.md' }, { runId: 'run-b-000000', slug: 'web', file: '/lib/elsewhere.md' }],
+    running: [{ runId: 'run-a-000000', slug: 'team', file: '/p/.planning/.near-ai/team.md' }, { runId: 'run-b-000000', slug: 'web' }],
     teams: [team({ id: 'project', kind: 'project', slug: 'team', file: '/p/.planning/.near-ai/team.md', imported: false }), team({ id: 'user:team', slug: 'team', file: '/lib/team.md' }), team({ id: 'user:web', check: { block: 0, warning: 1, advice: 0 } })]
   });
   assert.equal(dashboard.cards['project']!.status, 'running');
   assert.equal(dashboard.cards['project']!.runId, 'run-a-000000');
   assert.equal(dashboard.cards['user:team']!.status, 'never-run', 'a library team called "team" is not the project team that is running');
-  assert.equal(dashboard.cards['user:web']!.status, 'running', 'a run whose file is unknown is matched by its name');
+  assert.equal(dashboard.cards['user:web']!.status, 'running', 'a run whose file is not known is matched by its name');
   assert.match(dashboard.cards['user:web']!.attention.join(' '), /local check found 1 problem\b/);
   assert.equal(dashboard.summary.running, 2);
   assert.equal(dashboard.summary.attention, 1);
@@ -411,7 +411,8 @@ test('host: the role test recorded for a team counts in its health; a broken rec
   await h.send({ type: 'refresh' });
   const health = h.latest('state').dashboard.cards['user:web-team'].health;
   assert.equal(health.parts[1].score, 80);
-  assert.equal(health.score, 90);
+  assert.equal(health.parts[0].score, 95, 'the local check: one suggestion (dev has no role)');
+  assert.equal(health.score, 88, 'the average of 95 and 80, rounded');
 });
 
 test('host: with no project folder open there is no run history, and the dashboard says so', async () => {

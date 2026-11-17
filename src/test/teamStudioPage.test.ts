@@ -327,7 +327,10 @@ test('host: the library lists the project team, user teams, and archived teams',
   assert.deepEqual(state.library.teams.map((team: any) => [team.id, team.kind, team.name, team.members.length, Boolean(team.error)]), [['project', 'project', 'Project team', 1, false], ['user:broken', 'user', 'broken', 0, true], ['user:web', 'user', 'Web team', 2, false]]);
   const webTeam = state.library.teams.find((team: any) => team.id === 'user:web');
   assert.equal(webTeam.command, '/team:web ');
-  assert.equal(webTeam.file, web);
+  // The page names teams by their ids only: the file's path stays on the host (Team Studio dashboard, 0.4.31).
+  assert.equal('file' in webTeam, false);
+  assert.ok(web);
+  assert.ok(state.library.archived.every((entry: any) => !('file' in entry)));
   assert.ok(webTeam.savedAt);
   assert.deepEqual(webTeam.members.map((member: any) => [member.name, member.role, member.model, member.privacy]), [['lead', 'planner', 'z-ai/glm-5.3', 'tee'], ['dev', undefined, 'z-ai/glm-5.3', 'tee']]);
   assert.equal(state.library.teams[0].members[0].privacy, 'forwarded', 'the standard tier is a forwarded model here');
@@ -1898,7 +1901,9 @@ test('host: an open team says when a run of it is going, and Watch it live opens
   await h.send({ type: 'open', id: 'user:web-team' });
   assert.equal('liveRun' in last(h, 'team'), false);
   assert.deepEqual(parseStudioMessage({ type: 'watch-live' }), { type: 'watch-live' });
-  assert.equal(parseStudioMessage({ type: 'watch-live', id: 'user:web-team' }), undefined);
+  // 0.4.31: the dashboard names the team whose run to watch; anything but a listed team's id is refused.
+  assert.deepEqual(parseStudioMessage({ type: 'watch-live', id: 'user:web-team' }), { type: 'watch-live', id: 'user:web-team' });
+  assert.equal(parseStudioMessage({ type: 'watch-live', id: '../web-team' }), undefined);
   await h.send({ type: 'watch-live' });
   assert.deepEqual(watched, ['team-live']);
 });
