@@ -8,8 +8,8 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { POLICY_EVENT_IDS } from '../domain/gate/bundle';
-import { GATE_RULE_IDS, RECORD_RULE_IDS } from '../domain/gate/decide';
-import { buildDecisionRecord, validateDecisionRecord } from '../domain/gate/record';
+import { GATE_RULE_IDS, RECORD_RULE_IDS, RECORD_UNKNOWN_RULE } from '../domain/gate/decide';
+import { buildDecisionRecord, unknownRuleListeners, validateDecisionRecord } from '../domain/gate/record';
 import type { DecisionRecordInput } from '../domain/gate/record';
 import { CAPABILITY_VERBS } from '../domain/gate/vocabulary';
 import { GATE_DIR_NAME } from '../gate/bundleStore';
@@ -30,13 +30,16 @@ function input(rule: string, extra: Partial<DecisionRecordInput> = {}): Decision
 test('the policy events are a list of their own, kept apart from the gate\'s rules, and both are known to a record', () => {
   assert.deepEqual([...POLICY_EVENT_IDS], ['policy.created', 'policy.renewed', 'policy.reset', 'policy.load']);
   for (const event of POLICY_EVENT_IDS) assert.ok(!GATE_RULE_IDS.includes(event), `${event} is an event, not a rule`);
-  assert.deepEqual([...RECORD_RULE_IDS].sort(), [...GATE_RULE_IDS, ...POLICY_EVENT_IDS].sort());
+  assert.deepEqual([...RECORD_RULE_IDS].sort(), [...GATE_RULE_IDS, ...POLICY_EVENT_IDS, RECORD_UNKNOWN_RULE].sort());
+  assert.equal(RECORD_UNKNOWN_RULE, 'record.unknown-rule');
   assert.equal(new Set(RECORD_RULE_IDS).size, RECORD_RULE_IDS.length, 'no id is on both lists');
 });
 
 test('a record is valid with every known rule, and refused with a rule or an operation nobody knows', () => {
   for (const rule of RECORD_RULE_IDS) assert.equal(validateDecisionRecord(buildDecisionRecord(input(rule))).ok, true, rule);
-  const invented = validateDecisionRecord(buildDecisionRecord(input('policy.invented')));
+  // The check itself still refuses a rule nobody knows (the builder and the log put one under record.unknown-rule before it gets here).
+  const known = buildDecisionRecord(input('policy.load'));
+  const invented = validateDecisionRecord({ ...known, authorizations: [{ ...known.authorizations[0]!, policy: { ...known.authorizations[0]!.policy, name: 'policy.invented' } }] });
   assert.equal(invented.ok, false);
   assert.equal(invented.ok ? '' : invented.path, 'authorizations[0].policy.name');
   const record = buildDecisionRecord(input('policy.load'));
@@ -47,17 +50,41 @@ test('a record is valid with every known rule, and refused with a rule or an ope
   assert.equal(strange.ok ? '' : strange.path, 'api.operation');
 });
 
-test('the decision log does not write a record with an unknown rule, and says so once', async () => {
+// PR #74 review round 11: a record with a rule nobody knows is not dropped. It is kept under record.unknown-rule, with the id it was given beside it, so no
+// decision is ever missing from the log; the log says so once. In a test run, the gate's test helper makes the same thing fail the test (loud), so a
+// writer with a new id is caught before it ships.
+test('a record built with a rule nobody knows is kept under record.unknown-rule with the id it was given, and the log says so once', async () => {
+  const built = buildDecisionRecord(input('newspace.invented'));
+  assert.equal(built.authorizations[0]?.policy.name, RECORD_UNKNOWN_RULE);
+  assert.equal(built.unmapped.nearAi.unknownRule, 'newspace.invented');
+  assert.equal(validateDecisionRecord(built).ok, true);
   const storage = await mkdtemp(path.join(tmpdir(), 'near-ai-record-ids-'));
   const problems: string[] = [];
   const log = new DecisionLog({ globalStorageDir: storage, projectKey: projectLogKey(path.join(storage, 'project')), onWriteFailure: (message) => problems.push(message) });
   await log.append(buildDecisionRecord(input('settings.read-plan')));
+  // A record put together by hand, past the builder, with an unknown rule: also kept, not dropped.
+  const handMade = buildDecisionRecord(input('settings.read-plan'));
+  await log.append({ ...handMade, authorizations: [{ ...handMade.authorizations[0]!, policy: { ...handMade.authorizations[0]!.policy, name: 'other.invented' } }] });
   await log.append(buildDecisionRecord(input('policy.invented')));
   const dir = path.join(storage, GATE_DIR_NAME, DECISIONS_DIR);
   const [file] = await readdir(dir);
-  const lines = (await readFile(path.join(dir, file as string), 'utf8')).trim().split('\n');
-  assert.equal(lines.length, 1);
-  assert.equal(problems.length, 1);
+  const lines = (await readFile(path.join(dir, file as string), 'utf8')).trim().split('\n').map((line) => JSON.parse(line) as { authorizations: Array<{ policy: { name: string } }>; unmapped: { nearAi: { unknownRule?: string } } });
+  assert.deepEqual(lines.map((line) => line.authorizations[0]?.policy.name), ['settings.read-plan', RECORD_UNKNOWN_RULE, RECORD_UNKNOWN_RULE]);
+  assert.deepEqual(lines.map((line) => line.unmapped.nearAi.unknownRule), [undefined, 'other.invented', 'policy.invented']);
+  assert.equal(problems.length, 1, 'said once');
+});
+
+test('a listener hears every unknown rule the builder keeps, which is how a test run makes it fail loudly', () => {
+  const heard: string[] = [];
+  const listener = (id: string): void => { heard.push(id); };
+  unknownRuleListeners.add(listener);
+  try {
+    buildDecisionRecord(input('newspace.invented'));
+    buildDecisionRecord(input('settings.read-plan'));
+  } finally {
+    unknownRuleListeners.delete(listener);
+  }
+  assert.deepEqual(heard, ['newspace.invented']);
 });
 
 test('the host\'s policy events (created, loaded, reset) are written with known ids, to the install log and the open project\'s log', async () => {
@@ -104,7 +131,8 @@ const NOT_RECORD_IDS: Readonly<Record<string, string>> = {
   'bundle.lock': 'the policy file\'s lock file name',
   'settings.approved': 'the answer of the settings layer after a person approved; an allow, which a record never carries as its rule (the record keeps the asked call\'s rule)',
   'settings.mode.': 'a prefix decide() matches, not an id',
-  'policy.name': 'a field path inside a record (authorizations[].policy.name), read by the record check'
+  'policy.name': 'a field path inside a record (authorizations[].policy.name), read by the record check',
+  'agent.allowCommands': 'a setting name (nearAi.agent.allowCommands) an allow rule is saved under, never a record rule'
 };
 
 function productionSources(): string[] {
@@ -128,6 +156,60 @@ function code(text: string): string {
 export function ruleShapedIds(text: string): string[] {
   return [...code(text).matchAll(RULE_SHAPED)].map((match) => match[2] as string);
 }
+
+/**
+ * Every string literal in a place that becomes a record's rule or operation, whatever its namespace (PR #74 review round 11): a `rule:` property, a rule
+ * comparison, decide()'s `make(outcome, rule, ...)`, the literals a *Rule* function returns, and an `operation:` property. A new namespace is caught here,
+ * not only the ones RULE_SHAPED lists.
+ */
+export function recordIdLiterals(text: string): Array<{ kind: 'rule' | 'operation'; id: string }> {
+  const source = code(text);
+  const found: Array<{ kind: 'rule' | 'operation'; id: string }> = [];
+  const literal = "(['\"\\x60])([^'\"\\x60$\\n]+)\\1";
+  for (const match of source.matchAll(new RegExp(String.raw`\brule\s*(?::|[!=]==?)\s*` + literal, 'g'))) found.push({ kind: 'rule', id: match[2]! });
+  for (const match of source.matchAll(new RegExp(literal + String.raw`\s*[!=]==?\s*[\w.?]*\brule\b`, 'g'))) found.push({ kind: 'rule', id: match[2]! });
+  for (const match of source.matchAll(new RegExp(String.raw`\bmake\(\s*'(?:allow|ask|deny)',\s*` + literal, 'g'))) found.push({ kind: 'rule', id: match[2]! });
+  for (const match of source.matchAll(new RegExp(String.raw`\boperation\s*:\s*` + literal, 'g'))) found.push({ kind: 'operation', id: match[2]! });
+  // Inside a function whose name says it gives a rule (settingsRuleFor, shellRule), every id-shaped literal it can return.
+  for (const fn of source.matchAll(/function (\w*[Rr]ule\w*)\([^)]*\)[^{]*\{/g)) {
+    const start = (fn.index ?? 0) + fn[0].length;
+    let depth = 1;
+    let end = start;
+    for (; end < source.length && depth > 0; end += 1) {
+      if (source[end] === '{') depth += 1;
+      else if (source[end] === '}') depth -= 1;
+    }
+    for (const match of source.slice(start, end).matchAll(/(['"`])([a-z][\w-]*(?:\.[a-z][\w-]*)+)\1/g)) found.push({ kind: 'rule', id: match[2]! });
+  }
+  return found;
+}
+
+test('every literal that becomes a record rule or operation, in any namespace, is a known id', () => {
+  const operations = new Set<string>([...CAPABILITY_VERBS, ...POLICY_EVENT_IDS]);
+  const wrong: string[] = [];
+  let seen = 0;
+  // The files that write records or decide what they say: the gate's own (src/gate, src/domain/gate, the adapter) and every file that imports from them.
+  const gateFiles = productionSources().filter((file) => {
+    const relative = path.relative(REPO, file).split(path.sep).join('/');
+    return /^src\/(?:gate|domain\/gate)\//.test(relative) || relative === 'src/agent/gateAdapter.ts'
+      || /from '[./]*(?:\/|)(?:domain\/gate|gate|agent\/gateAdapter)(?:\/[\w]+)?'|from '\.\/gateAdapter'|from '\.\.\/gate\//.test(readFileSync(file, 'utf8'));
+  });
+  assert.ok(gateFiles.length >= 15, `${gateFiles.length} files that write or decide records`);
+  for (const file of gateFiles) {
+    for (const { kind, id } of recordIdLiterals(readFileSync(file, 'utf8'))) {
+      // A rule id has a dot (namespace.name); a type name or a path segment that a `rule` variable is compared with is not one.
+      if (kind === 'rule' && !/^[a-z][\w-]*(?:\.[a-z][\w-]*)+$/.test(id)) continue;
+      seen += 1;
+      const known = kind === 'rule' ? RECORD_RULE_IDS.includes(id) || id in NOT_RECORD_IDS : operations.has(id);
+      if (!known) wrong.push(`${path.relative(REPO, file)}: ${kind} ${id}`);
+    }
+  }
+  assert.deepEqual(wrong, []);
+  assert.ok(seen > 30, `${seen} literals checked`);
+  // The scan finds a planted id in a namespace no list names, in each place.
+  const planted = recordIdLiterals("const a = { rule: 'brandnew.thing' };\nif (x.rule === 'other.place') {}\nmake('deny', 'third.space', mode);\nfunction pickRule() { return 'fourth.kind'; }\nconst b = { operation: 'fifth.op' };");
+  assert.deepEqual(planted.map((entry) => entry.id).sort(), ['brandnew.thing', 'fifth.op', 'fourth.kind', 'other.place', 'third.space']);
+});
 
 test('every rule-shaped id written in the production sources is a known record id or is named as something else', () => {
   const unknown: string[] = [];

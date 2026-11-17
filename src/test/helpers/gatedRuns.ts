@@ -8,8 +8,15 @@ import { bundleHash, defaultBundlePayload } from '../../domain/gate/bundle';
 import type { BundleState } from '../../domain/gate/bundle';
 import type { ActorRef, GateRuntime } from '../../domain/gate/decide';
 import type { DecisionRecord } from '../../domain/gate/record';
+import { unknownRuleListeners } from '../../domain/gate/record';
 import type { GateHost } from '../../gate/host';
 import { AgentConversation } from '../../services/agentSession';
+
+// PR #74 review round 11: in the product a record with a rule nobody knows is kept under record.unknown-rule; in any test that runs the gate through this
+// helper it fails the test, loudly, so a writer with a new id is caught before it ships.
+unknownRuleListeners.add((id) => {
+  throw new Error(`A decision record was given a rule nobody knows: "${id}". Add it to GATE_RULE_IDS (src/domain/gate/decide.ts) or name it in gateRecordIds.test.ts.`);
+});
 
 const TEST_DEVICE = 'device-test';
 

@@ -130,10 +130,16 @@ export const GATE_RULE_IDS: readonly string[] = Object.freeze([
 ]);
 
 /**
- * Every id a decision record may carry as its rule (`authorizations[].policy.name`): the gate's rules and the policy's own events. The decision log refuses a
- * record whose rule is not here (validateDecisionRecord), so a writer that invents an id is caught by the first record it writes, not by a reader later.
+ * The rule a record carries when the one it was given is not known (PR #74 review round 11): the record is kept, with the id it was given beside it in
+ * `unmapped.nearAi.unknownRule`, so no decision is ever missing from the log. In a test run the gate's test helper makes it fail the test instead.
  */
-export const RECORD_RULE_IDS: readonly string[] = Object.freeze([...GATE_RULE_IDS, ...POLICY_EVENT_IDS]);
+export const RECORD_UNKNOWN_RULE = 'record.unknown-rule';
+
+/**
+ * Every id a decision record may carry as its rule (`authorizations[].policy.name`): the gate's rules, the policy's own events, and RECORD_UNKNOWN_RULE.
+ * validateDecisionRecord refuses any other, and the builder and the decision log put an unknown one under RECORD_UNKNOWN_RULE, so none is ever dropped.
+ */
+export const RECORD_RULE_IDS: readonly string[] = Object.freeze([...GATE_RULE_IDS, ...POLICY_EVENT_IDS, RECORD_UNKNOWN_RULE]);
 
 const MODE_ORDER: readonly ActionPolicyMode[] = Object.freeze(['approve-risky', 'mostly-autonomous', 'auto', 'fully-autonomous'] as const);
 const NOBODY_HERE = 'Nobody is here to approve this, and it always needs a person: ';

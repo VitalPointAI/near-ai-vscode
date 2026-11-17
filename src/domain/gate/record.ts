@@ -6,7 +6,7 @@ import { redactCredentialArguments, redactSecrets } from '../redaction';
 import { canonicalize } from '../team/canonical';
 import { findSecrets } from '../team/secrets';
 import { POLICY_EVENT_IDS } from './bundle';
-import { RECORD_RULE_IDS } from './decide';
+import { RECORD_RULE_IDS, RECORD_UNKNOWN_RULE } from './decide';
 import type { ActorRef, GateDecision } from './decide';
 import type { Label } from './labels';
 import { isRecord, ownValue, refused } from './shape';
@@ -78,6 +78,26 @@ export interface DecisionRecordInput {
   readonly shadowFloor?: string;
 }
 
+/**
+ * Who hears that a record was given a rule nobody knows. Nothing listens in the product (the record is kept under RECORD_UNKNOWN_RULE, with the id beside
+ * it); the gate's test helper listens and throws, so a writer with a new id fails the test that runs it (PR #74 review round 11).
+ */
+export const unknownRuleListeners = new Set<(id: string) => void>();
+
+/** The record's rule, known: an unknown one becomes RECORD_UNKNOWN_RULE with the id it was given (shown plainly, at most 120 characters) beside it. */
+export function withKnownRule(record: DecisionRecord): DecisionRecord {
+  const entry = record.authorizations[0];
+  const rule = entry?.policy.name;
+  if (entry === undefined || typeof rule !== 'string' || RECORD_RULE_IDS.includes(rule)) return record;
+  for (const listener of [...unknownRuleListeners]) listener(rule);
+  const shown = rule.replace(/[\u0000-\u001F\u007F]/g, ' ').slice(0, 120);
+  return {
+    ...record,
+    authorizations: [{ ...entry, policy: { ...entry.policy, name: RECORD_UNKNOWN_RULE } }, ...record.authorizations.slice(1)],
+    unmapped: { ...record.unmapped, nearAi: { ...record.unmapped.nearAi, unknownRule: shown } }
+  };
+}
+
 export interface DecisionRecord {
   readonly metadata: {
     readonly version: string;
@@ -122,6 +142,8 @@ export interface DecisionRecord {
       readonly label?: Label;
       readonly tier?: string;
       readonly shadowFloor?: string;
+      /** The rule a writer gave that nobody knows; the record's rule is then RECORD_UNKNOWN_RULE. */
+      readonly unknownRule?: string;
     };
   };
 }
@@ -244,7 +266,7 @@ export function buildDecisionRecord(input: DecisionRecordInput): DecisionRecord 
       }
     }
   };
-  return redactRecord(record);
+  return withKnownRule(redactRecord(record));
 }
 
 type Kind = 'int' | 'string' | 'array';
