@@ -27,7 +27,7 @@ import type { Label } from '../domain/gate/labels';
 import type { GateRuntime } from '../domain/gate/decide';
 import type { DecisionRecord } from '../domain/gate/record';
 import { validateDecisionRecord } from '../domain/gate/record';
-import { LABEL_MAP_FILE } from '../gate/labelMapStore';
+import { LABEL_LOWERING_REFUSED_TEXT, LABEL_MAP_FILE, LabelMapError } from '../gate/labelMapStore';
 import { GateHost } from '../gate/host';
 import { setLabelEntry } from '../domain/gate/labelMap';
 import { MemorySecrets } from './helpers/teamHarness';
@@ -462,4 +462,62 @@ test('Bash writes the classifier tags (cp, tee) take the mark like Write and Edi
   assert.deepEqual(keys(grants.mark!.current()), ['org/Confidential'], 'the copy read raised the mark first');
   assert.equal(await labelOfPath(host, root, 'copy.md'), 'org/Confidential');
   assert.equal(await labelOfPath(host, root, 'out.txt'), 'org/Confidential');
+});
+
+// ---- PR #87 review round 1: a write that claims to raise is worked out inside the writer's lock, against the map it is given ----
+
+test('review 1: a label raised by another writer between the auto-raise\'s read and its write is never set back down', async () => {
+  const { host, root } = await hostWithLabels({ 'conf.md': label('org', 'Confidential') });
+  writeFileSync(path.join(root, 'out.md'), 'derived\n');
+  // Another window (or Set Label) raises out.md to Restricted right after this host read the labels and before its write.
+  const other = new GateHost({ globalStorageDir: (host as unknown as { options: { globalStorageDir: string } }).options.globalStorageDir, secrets: (host as unknown as { options: { secrets: MemorySecrets } }).options.secrets, productVersion: '0.4.30-test', projectRoot: root, home: root });
+  assert.equal((await other.start()).state, 'valid');
+  const reader = host.labelsFor(root);
+  const view = reader.view.bind(reader);
+  let raced = false;
+  reader.view = async (scales) => {
+    const seen = await view(scales);
+    if (!raced) { raced = true; await other.changeLabels(root, (map) => setLabelEntry(map, 'out.md', label('org', 'Restricted'))); }
+    return seen;
+  };
+  await host.writeRaises(root, new Map([['out.md', [label('org', 'Confidential')]]]));
+  reader.view = view;
+  reader.invalidate();
+  assert.equal(await labelOfPath(host, root, 'out.md'), 'org/Restricted', 'the higher label stays');
+});
+
+test('review 1: a synced copy of the label file raised mid-write keeps its raises', async () => {
+  const { host, root } = await hostWithLabels({ 'conf.md': label('org', 'Confidential'), 'notes.md': label('org', 'Internal') });
+  const file = path.join(root, ...LABEL_MAP_FILE.split('/'));
+  const other = new GateHost({ globalStorageDir: (host as unknown as { options: { globalStorageDir: string } }).options.globalStorageDir, secrets: (host as unknown as { options: { secrets: MemorySecrets } }).options.secrets, productVersion: '0.4.30-test', projectRoot: root, home: root });
+  assert.equal((await other.start()).state, 'valid');
+  const reader = host.labelsFor(root);
+  const view = reader.view.bind(reader);
+  let raced = false;
+  reader.view = async (scales) => {
+    const seen = await view(scales);
+    // The copy that arrives raises notes.md and out.md to Restricted.
+    if (!raced) { raced = true; await other.changeLabels(root, (map) => setLabelEntry(setLabelEntry(map, 'notes.md', label('org', 'Restricted')), 'out.md', label('org', 'Restricted'))); }
+    return seen;
+  };
+  await host.writeRaises(root, new Map([['out.md', [label('org', 'Confidential')]], ['notes.md', [label('org', 'Confidential')]]]));
+  reader.view = view;
+  reader.invalidate();
+  assert.ok(existsSync(file));
+  assert.equal(await labelOfPath(host, root, 'notes.md'), 'org/Restricted');
+  assert.equal(await labelOfPath(host, root, 'out.md'), 'org/Restricted');
+});
+
+test('review 1: the writer refuses any write that would lower or drop a label unless a person\'s recorded lowering is named', async () => {
+  const { host, root } = await hostWithLabels({ 'conf.md': label('org', 'Confidential'), 'notes.md': label('org', 'Internal') });
+  const file = path.join(root, ...LABEL_MAP_FILE.split('/'));
+  const bytes = readFileSync(file, 'utf8');
+  await assert.rejects(() => host.changeLabels(root, (map) => setLabelEntry(map, 'conf.md', label('org', 'Public'))), (error: unknown) => error instanceof LabelMapError && error.message === LABEL_LOWERING_REFUSED_TEXT);
+  await assert.rejects(() => host.changeLabels(root, (map) => setLabelEntry(map, 'notes.md', undefined)), (error: unknown) => error instanceof LabelMapError && error.message === LABEL_LOWERING_REFUSED_TEXT, 'a dropped entry is a lowering too');
+  await assert.rejects(() => host.changeLabels(root, (map) => setLabelEntry(map, 'conf.md', label('ca-protected', 'Protected B'))), (error: unknown) => error instanceof LabelMapError, 'another scale replaces the label, which lowers it on its own scale');
+  assert.equal(readFileSync(file, 'utf8'), bytes, 'nothing was written');
+  // A raise passes, and a person's recorded lowering through its own path passes.
+  await host.changeLabels(root, (map) => setLabelEntry(map, 'notes.md', label('org', 'Confidential')));
+  await host.changeLabels(root, (map) => setLabelEntry(map, 'conf.md', label('org', 'Public')), undefined, { lowering: { kind: 'person', reason: 'cleared for release' } });
+  assert.equal(await labelOfPath(host, root, 'conf.md'), 'org/Public');
 });

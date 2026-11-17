@@ -550,7 +550,8 @@ export async function setLabel(host: GateHost, target: LabelTarget): Promise<boo
       // Re-checked against the map the write is really made over, so no lowering is ever signed without a reason (fail closed: nothing is written).
       if (reason === undefined && lowers(ownLabel(map), label, policy.scales)) throw new LabelMapError(LOWER_NEEDS_REASON_TEXT);
       return keyText === '' ? setProjectLabel(map, label) : setLabelEntry(map, keyText, label);
-    }, confirm);
+      // A person's recorded change (label.set below, with the reason when it lowers): the one path that may lower or remove a label.
+    }, confirm, { lowering: { kind: 'person', reason: reason ?? '' } });
   } catch (error) {
     void Promise.resolve(vscode.window.showWarningMessage(error instanceof LabelMapError ? error.message : 'Nothing was changed: NEAR AI could not save the label.')).catch(() => undefined);
     return false;

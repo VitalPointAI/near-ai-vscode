@@ -20,7 +20,7 @@ import { DecisionLog, INSTALL_LOG_KEY, projectLogKey } from './decisionLog';
 import type { LogKind } from './decisionLog';
 import type { SessionRoute } from './sessionMark';
 import { SHIPPED_DEFAULT_LABEL } from '../domain/gate/bundle';
-import { labelMapKey, moveLabelEntry, setLabelEntry } from '../domain/gate/labelMap';
+import { labelMapKey, moveLabelEntry, resolveLabel, setLabelEntry } from '../domain/gate/labelMap';
 import { joinLabels, raiseMark, sameMark } from '../domain/gate/dominance';
 import type { Mark } from '../domain/gate/dominance';
 import { DEFAULT_ROUTING, TIER_ORDER, tierForLabel } from '../domain/gate/routing';
@@ -29,7 +29,7 @@ import type { LabelMapPayload } from '../domain/gate/labelMap';
 import { SCALE_PRESETS } from '../domain/gate/labels';
 import type { Clearance, Label, LabelEventId, ScaleMapping, ScaleTable } from '../domain/gate/labels';
 import { LabelMapError, LabelReader, lastVerifiedLabelMap, updateLabelMap } from './labelMapStore';
-import type { LabelMapQuestion, LabelMapWrite } from './labelMapStore';
+import type { LabelLowering, LabelMapQuestion, LabelMapWrite } from './labelMapStore';
 import type { LabelMapState } from '../domain/gate/labelMap';
 import { NO_KNOWN_KEYS } from '../domain/team/keyStatus';
 import type { KeyStatusLookup } from '../domain/team/keyStatus';
@@ -110,6 +110,9 @@ export interface GateHostOptions {
   /** Told, once per signature per window, when a merge did not apply a lowering made on another copy of a chat, with the sentence for that chat (D-58). */
   readonly onLoweringRejected?: (chatId: string, sentence: string) => void;
 }
+
+/** Thrown inside the writer when, under its lock, nothing would rise: nothing is written. */
+const NOTHING_TO_RAISE = 'Nothing was written: no label would rise.';
 
 /** Said once when a raise a labelled chat's write needs cannot be written automatically. */
 export const LABEL_RAISE_REFUSED_TEXT =
@@ -264,7 +267,7 @@ export class GateHost {
    * Changes a project's labels through the one writer (updateLabelMap), with this policy's scales, and has the project's reader read the file again.
    * `confirm` is the person's answer before an unverified map is signed again or the last verified labels are restored; with none, such a write is refused.
    */
-  public async changeLabels(root: string, change: (map: LabelMapPayload) => LabelMapPayload, confirm?: (question: LabelMapQuestion) => Promise<boolean>): Promise<LabelMapWrite> {
+  public async changeLabels(root: string, change: (map: LabelMapPayload) => LabelMapPayload, confirm?: (question: LabelMapQuestion) => Promise<boolean>, options: { readonly lowering?: LabelLowering } = {}): Promise<LabelMapWrite> {
     await this.start();
     const policy = this.labelPolicy();
     try {
@@ -274,6 +277,7 @@ export class GateHost {
         scales: policy.scales,
         defaultLabel: policy.defaultLabel,
         ...(confirm === undefined ? {} : { confirm }),
+        ...(options.lowering === undefined ? {} : { lowering: options.lowering }),
         ...(this.options.now === undefined ? {} : { now: this.options.now })
       });
     } finally {
@@ -358,23 +362,40 @@ export class GateHost {
   public async writeRaises(root: string, raises: ReadonlyMap<string, readonly Label[]>): Promise<boolean> {
     const policy = this.labelPolicy();
     const routing = this.routingNow();
-    const view = await this.labelsFor(root).view(policy.scales);
-    const next = new Map<string, Label>();
+    const proposed = new Map<string, readonly Label[]>();
     for (const [relative, mark] of raises) {
       const key = labelMapKey(relative, false);
-      if (!key.ok) continue;
-      const current = view.resolve(key.value, policy.defaultLabel);
-      const label = raisedEntryLabel(current.origin === 'default' ? [] : current.mark, mark, policy.scales, routing);
-      if (label !== undefined) next.set(key.value, label);
+      if (key.ok) proposed.set(key.value, [...(proposed.get(key.value) ?? []), ...mark]);
     }
-    if (next.size === 0) return false;
+    // Worked out inside the writer's lock, against the map it reads there (PR #87 review): a label another writer raised meanwhile is the one joined with,
+    // so this write can only keep or raise it. Nothing rises: nothing is written at all.
+    const raised = new Map<string, Label>();
+    const rise = (map: LabelMapPayload): Map<string, Label> => {
+      const out = new Map<string, Label>();
+      for (const [key, mark] of proposed) {
+        const current = resolveLabel(key, { verified: map, bundleDefault: policy.defaultLabel, scales: policy.scales });
+        const label = raisedEntryLabel(current.origin === 'default' ? [] : current.mark, mark, policy.scales, routing);
+        if (label !== undefined) out.set(key, label);
+      }
+      return out;
+    };
+    // A cheap look first, at the labels as last read: when nothing would rise, the writer is not asked at all, so a chat at the default mark never touches
+    // labels.json and an unverified map is not reported for nothing. The look decides only whether to ask; what is written is worked out under the lock.
+    const view = await this.labelsFor(root).view(policy.scales);
+    const mightRise = [...proposed].some(([key, mark]) => {
+      const current = view.resolve(key, policy.defaultLabel);
+      return raisedEntryLabel(current.origin === 'default' ? [] : current.mark, mark, policy.scales, routing) !== undefined;
+    });
+    if (!mightRise) return false;
     try {
       await this.changeLabels(root, (map) => {
         let out = map;
-        for (const [key, label] of next) out = setLabelEntry(out, key, label);
+        for (const [key, label] of rise(map)) { out = setLabelEntry(out, key, label); raised.set(key, label); }
+        if (raised.size === 0) throw new LabelMapError(NOTHING_TO_RAISE);
         return out;
       });
     } catch (error) {
+      if (error instanceof LabelMapError && error.message === NOTHING_TO_RAISE) return false;
       const kept = this.refusedRaises.get(projectLogKey(root)) ?? new Map<string, Label[]>();
       for (const [relative, mark] of raises) kept.set(relative, [...(kept.get(relative) ?? []), ...mark]);
       this.refusedRaises.set(projectLogKey(root), kept);
@@ -389,7 +410,7 @@ export class GateHost {
       }
       return false;
     }
-    for (const [key, label] of next) this.recordLabelEvent(root, { event: 'label.set', path: key, label, reason: 'A file a labelled chat wrote took the chat\'s label.' });
+    for (const [key, label] of raised) this.recordLabelEvent(root, { event: 'label.set', path: key, label, reason: 'A file a labelled chat wrote took the chat\'s label.' });
     return true;
   }
 
@@ -469,7 +490,7 @@ export class GateHost {
         if (!affected) return map;
         moved = true;
         return moveLabelEntry(map, from, to);
-      });
+      }, undefined, { lowering: { kind: 'move' } });
     } catch (error) {
       const message = error instanceof LabelMapError ? `A label was not moved with a renamed file. ${error.message}` : 'A label was not moved with a renamed file.';
       if (!this.toldLabelProblems.has(message)) {
@@ -742,32 +763,26 @@ export function runtimePerRoot(host: Pick<GateHost, 'runtimeFor'> | undefined, r
 }
 
 /**
- * The one label a written file's entry takes from the chat's mark (D-26, D-29): undefined when the mark is not above the file's label now. A label map entry
- * holds one label, so of the mark's labels joined onto the file's own scale, and the mark's labels on other scales, the one whose routing tier is strictest
- * is written (the file's own scale wins a tie); a label on another scale replaces the file's own only when its tier is stricter, so a write never makes
- * where the file's content may go any wider.
+ * The one label a written file's entry takes from the chat's mark (D-26, D-29, PR #87 review): undefined when nothing rises. It is always a join, never a
+ * replacement: with a label on the path now (its own entry, or a folder's or the project's), the mark's labels on that label's scale are joined onto it, and
+ * a mark with nothing on that scale changes nothing (a map entry holds one label, and another scale in its place would lower it on its own; the chat's own
+ * mark still keeps what it holds on this computer). With no label on the path, the mark's label whose routing tier is strictest is written.
  */
 export function raisedEntryLabel(current: Mark, mark: readonly Label[], scales: ScaleTable, routing: RoutingTable): Label | undefined {
-  let raised: Mark = current;
-  for (const label of mark) raised = raiseMark(raised, label, scales);
-  if (current.length > 0 && sameMark(raised, current)) return undefined;
   const tier = (label: Label): number => {
     try { return TIER_ORDER[tierForLabel(label, routing)]; } catch { return TIER_ORDER.deny; }
   };
-  const own = current[0];
-  let sameScale: Label | undefined = own;
-  const others: Label[] = [];
-  for (const label of mark) {
-    if (own !== undefined && label.scale === own.scale) sameScale = joinLabels(sameScale ?? label, label, scales) ?? sameScale;
-    else others.push(label);
+  const fold = (start: Label, labels: readonly Label[]): Label => labels.reduce((held, label) => (label.scale === held.scale ? joinLabels(held, label, scales) ?? held : held), start);
+  if (current.length > 0) {
+    const held = current.find((label) => mark.some((each) => each.scale === label.scale));
+    if (held === undefined || current.length > 1) return undefined;
+    const joined = fold(held, mark);
+    return sameMark([joined], [held]) ? undefined : joined;
   }
-  let best = sameScale;
-  for (const label of others) {
-    let joined = label;
-    for (const other of others) if (other !== label && other.scale === label.scale) joined = joinLabels(joined, other, scales) ?? joined;
+  let best: Label | undefined;
+  for (const label of mark) {
+    const joined = fold(label, mark);
     if (best === undefined || tier(joined) > tier(best)) best = joined;
   }
-  if (best === undefined) return undefined;
-  if (current.length > 0 && sameMark([best], current)) return undefined;
   return best;
 }
