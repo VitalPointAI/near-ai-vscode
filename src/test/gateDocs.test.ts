@@ -217,7 +217,9 @@ test('CHANGELOG.md has an Unreleased section above the newest release (or the en
     assert.equal(sections[0]?.startsWith('## Unreleased'), true, 'Unreleased is the first section, above the newest release');
     assert.ok(sections.slice(1).some((section) => /^## \d+\.\d+\.\d+/.test(section)), 'a release section follows it');
   }
-  const entry = flat(unreleased ?? sections.find((section) => /Reset Policy to Defaults/.test(section)) ?? '');
+  // The policy entry is found by its own words wherever it sits (it shipped in 0.4.28), not taken to be whatever "## Unreleased" holds: a later change's
+  // Unreleased entry is not the policy entry (PR #74 review).
+  const entry = flat(sections.find((section) => /Reset Policy to Defaults/.test(section)) ?? '');
   assert.notEqual(entry, '', 'the policy entry exists');
   for (const phrase of [
     /status bar/i, /Show Policy/, /Reset Policy to Defaults/, /setup step|setup view|Check your policy/i, /Tools page/, /every tool/i,
@@ -225,6 +227,25 @@ test('CHANGELOG.md has an Unreleased section above the newest release (or the en
   ]) assert.match(entry, phrase);
   assert.ok(!entry.includes(EM_DASH), 'no em-dash');
   assert.ok(!/NEAR organization/i.test(entry), 'your organization, never NEAR organization');
+});
+
+// PR #74 review: the enforced floor's user-visible changes are in the changelog, in plain words, under "## Unreleased" until the release that ships them
+// (then under that version). Found by its own words, so the test holds across the release.
+test('CHANGELOG.md says, in plain words, what Full auto now asks about and refuses, and what else changed for users in this branch', () => {
+  const sections = CHANGELOG.split(/\n(?=## )/).slice(1);
+  const section = sections.find((candidate) => /Full auto asks before what is hard to undo/.test(candidate)) ?? '';
+  assert.notEqual(section, '', 'the floor entry exists');
+  assert.ok(/^## (?:Unreleased|\d+\.\d+\.\d+)/.test(section), 'under Unreleased or a release');
+  const entry = flat(section);
+  for (const phrase of [
+    /Full auto included/, /`\.git\/`/, /`\.planning\/\.near-ai\/`/, /publish/i, /git push/, /`git reset --hard`/, /no \*\*Always allow\*\*/,
+    /nobody to answer[^.]*refused|refused[^.]*nobody/i, /Everything else still runs without asking/, /NEAR key folder/, /VS Code's own secrets database/,
+    /identity and policy files/, /nested more than four levels deep, or too long to check/, /search provider/i, /decision record/i
+  ]) assert.match(entry, phrase);
+  for (const line of section.split('\n').filter((text) => text.startsWith('- '))) assert.match(line, /^- \*\*[^*]+\*\*/, `each bullet leads with a bold sentence: ${line.slice(0, 60)}`);
+  assert.ok(!entry.includes(EM_DASH), 'no em-dash');
+  assert.ok(!/NEAR organization/i.test(entry), 'your organization, never NEAR organization');
+  assert.doesNotMatch(entry, /\b(?:decide\(\)|floorFor|classifyCommand|gateToolCall|effectsUnknown|PR #\d+)\b/, 'no internal names');
 });
 
 // PR #70 review carry-over: the record section said "secrets are removed" while only token shapes were. It now says what is removed and what is not, and
