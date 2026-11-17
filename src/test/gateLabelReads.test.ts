@@ -8,7 +8,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { RunCheckpoints } from '../agent/checkpoints';
 import { gateStep, gateToolCall } from '../agent/gateAdapter';
-import { FAILED_CLOSED_LABEL_TEXT, labelReadFilter } from '../agent/gateLabels';
+import { FAILED_CLOSED_LABEL_TEXT, labelReadFilter, labelVerdictFor } from '../agent/gateLabels';
 import type { AgentEvent, ApprovalRequest } from '../agent/loop';
 import { DEFAULT_RULES, RunGrants } from '../agent/permissions';
 import { ShellSession } from '../agent/shell';
@@ -18,7 +18,7 @@ import { failedClosed } from '../domain/gate/bundle';
 import type { GateRuntime } from '../domain/gate/decide';
 import type { Label } from '../domain/gate/labels';
 import type { CompletionEvent, ToolCall } from '../services/nearAiClient';
-import { LABEL_MAP_FILE } from '../gate/labelMapStore';
+import { LABEL_MAP_FILE, LABEL_MAP_UNREADABLE_TEXT } from '../gate/labelMapStore';
 import { newTestRun, testGateRuntime } from './helpers/gatedRuns';
 
 const SECRET = 'THE PROTECTED B PLAN';
@@ -181,4 +181,41 @@ test('D-63: a link from the runtime folder into the project does not launder the
   assert.equal(canRead(path.relative(root, path.join(runtime, 'workflow.md'))), true);
   assert.equal(canRead(path.relative(root, path.join(runtime, 'plan-link.md'))), false);
   assert.equal(canRead('notes.md'), false, 'the project is labelled above the clearance');
+});
+
+// ---- D-67: while a label file holds reads, the hold is per path: Open-GSD runtime reads go on, project reads stay held ----
+
+/** A project whose label file cannot be read (a merge conflict), and a runtime folder with its own file and a link into the project. */
+function heldProjectAndRuntime(): { root: string; runtime: string } {
+  const { root, runtime } = labelledProjectAndRuntime();
+  writeFileSync(path.join(root, ...LABEL_MAP_FILE.split('/')), '<<<<<<< HEAD\n{}\n=======\n{}\n>>>>>>> other\n');
+  return { root, runtime };
+}
+
+test('D-67: while the label file holds reads, a read of the Open-GSD runtime goes on and a project read stays held', async () => {
+  const { root, runtime } = heldProjectAndRuntime();
+  const ran = await run(root, [call('r1', 'Read', { file_path: path.join(runtime, 'workflow.md') })], testGateRuntime(), undefined, false, [runtime]);
+  assert.match(ran.outputs[0] ?? '', /RUNTIME workflow steps/);
+  const own = await run(root, [call('r2', 'Read', { file_path: 'notes.md' })], testGateRuntime(), undefined, false, [runtime]);
+  assert.equal(own.outputs[0], `Not allowed: ${LABEL_MAP_UNREADABLE_TEXT}`);
+});
+
+test('D-67: while the label file holds reads, a link from the runtime folder into the project stays held', async () => {
+  const { root, runtime } = heldProjectAndRuntime();
+  const ran = await run(root, [call('r1', 'Read', { file_path: path.join(runtime, 'plan-link.md') })], testGateRuntime(), undefined, false, [runtime]);
+  assert.equal(ran.outputs[0], `Not allowed: ${LABEL_MAP_UNREADABLE_TEXT}`);
+  assert.ok(!ran.transcript.includes(SECRET));
+});
+
+test('D-67: a call that reads both the runtime and the project has its project part held, and a search shows the runtime results only', async () => {
+  const { root, runtime } = heldProjectAndRuntime();
+  const both = await labelVerdictFor(testGateRuntime(), { root, reads: ['notes.md'], defaultReads: true });
+  assert.equal(both?.reason, LABEL_MAP_UNREADABLE_TEXT, 'the project part is held');
+  assert.equal(await labelVerdictFor(testGateRuntime(), { root, reads: [], defaultReads: true }), undefined, 'the runtime part alone goes on');
+  const command = await labelVerdictFor(testGateRuntime(), { root, reads: [], command: `cat ${path.join(runtime, 'workflow.md')} notes.md`, mayReadAnything: true });
+  assert.equal(command?.reason, LABEL_MAP_UNREADABLE_TEXT, 'a command may read the project, so it stays held');
+  const canRead = await labelReadFilter(testGateRuntime(), root);
+  assert.equal(canRead(path.relative(root, path.join(runtime, 'workflow.md'))), true, 'a runtime result is shown');
+  assert.equal(canRead(path.relative(root, path.join(runtime, 'plan-link.md'))), false, 'a runtime link into the project is hidden');
+  assert.equal(canRead('notes.md'), false, 'a project result is hidden');
 });

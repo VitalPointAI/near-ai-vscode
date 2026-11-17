@@ -388,7 +388,8 @@ test('SECURITY.md says a branch switch holds reads with Use this branch\'s label
     "in this computer's secret storage, so deleting files does not make it forget",
     'for example with git restore',
     "Reading NEAR AI's own Open-GSD runtime files is judged at the default label",
-    "a link from there into the project keeps the project file's label"
+    "a link from there into the project keeps the project file's label",
+    'While a label file holds reads, only reads of the project are held: reads of those runtime files go on'
   ]) assert.ok(words.includes(phrase), phrase);
   assert.ok(!policySection.includes(EM_DASH));
 });

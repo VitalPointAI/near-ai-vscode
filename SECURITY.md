@@ -345,7 +345,8 @@ is what that file and the records beside it do in this version.
   last checked in this computer's secret storage, so deleting files does not
   make it forget. Reading NEAR AI's own Open-GSD runtime files is judged at the
   default label; a link from there into the project keeps the project file's
-  label. You can set only a label your own clearance covers;
+  label. While a label file holds reads, only reads of the project are held:
+  reads of those runtime files go on. You can set only a label your own clearance covers;
   to add a clearance, use **NEAR AI: Edit Policy** and **NEAR AI: Apply Policy
   Draft**. An agent cannot read a file whose label your clearances do not
   cover, through the file tools, searches or a command that names it; a read

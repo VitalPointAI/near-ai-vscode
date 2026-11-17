@@ -261,7 +261,9 @@ export async function labelVerdictFor(runtime: GateRuntime, input: LabelCheckInp
     const state = stateOf(runtime);
     const facts = state === undefined ? clearanceFactsOf({ state: 'failed-closed' } as BundleState, nowOf(runtime)) : clearanceFactsOf(state, nowOf(runtime));
     const view = await sourceOf(runtime, input.root).view(facts.scales);
-    if (holdsReads(view.state)) return { rule: 'label.dominance', reason: view.problem ?? FAILED_CLOSED_LABEL_TEXT };
+    // A held label file holds every project read, path by path (D-67): a call that names a project path, or may read anything (a command, effects nobody
+    // can read), is held; a read of the extension's own Open-GSD runtime alone goes on, judged at the default label below.
+    if (holdsReads(view.state) && (paths.length > 0 || input.mayReadAnything === true)) return { rule: 'label.dominance', reason: view.problem ?? FAILED_CLOSED_LABEL_TEXT };
     for (const relative of paths) {
       const verdict = markVerdict(markOf(view, relative, facts.defaultLabel), facts);
       if (verdict !== undefined) return verdict;
@@ -275,14 +277,16 @@ export async function labelVerdictFor(runtime: GateRuntime, input: LabelCheckInp
 
 /**
  * Whether an agent may see a project-relative path in a search's results (Glob, Grep): built once per call from the runtime's labels and clearances. A
- * path the clearances do not cover is left out, the way Grep leaves out credential files. A project whose label file is held hides everything.
+ * path the clearances do not cover is left out, the way Grep leaves out credential files. A project whose label file is held hides every project path; a
+ * result outside the project (the Open-GSD runtime) is judged at the default label (D-63, D-67).
  */
 export async function labelReadFilter(runtime: GateRuntime, root: string): Promise<(relativePath: string) => boolean> {
   try {
     const state = stateOf(runtime);
     const facts = state === undefined ? clearanceFactsOf({ state: 'failed-closed' } as BundleState, nowOf(runtime)) : clearanceFactsOf(state, nowOf(runtime));
     const view = await sourceOf(runtime, root).view(facts.scales);
-    if (holdsReads(view.state)) return () => false;
+    // While the label file holds reads, every project result is hidden and a result outside the project is still judged at the default label (D-67).
+    const held = holdsReads(view.state);
     let realRoot: string;
     try { realRoot = realpathSync(root); } catch { realRoot = path.resolve(root); }
     return (relativePath) => {
@@ -297,6 +301,7 @@ export async function labelReadFilter(runtime: GateRuntime, root: string): Promi
           inside = real === undefined ? undefined : insideRelative(realRoot, real);
           if (inside === undefined) return markVerdict([facts.defaultLabel], facts) === undefined;
         }
+        if (held) return false;
         return markVerdict(view.resolve(inside, facts.defaultLabel).mark, facts) === undefined;
       } catch {
         return false;
