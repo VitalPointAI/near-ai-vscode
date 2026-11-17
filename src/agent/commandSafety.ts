@@ -788,7 +788,9 @@ function classifyGit(args: Word[], state: SegmentState, context: CommandContext)
     }
     case 'branch':
       if (has('-d', '-D', '--delete', '-f', '--force', '-m', '-M', '--move', '-c', '-C', '--copy', '--set-upstream-to', '-u', '--unset-upstream', '--edit-description') || shortFlag('dDmMcCfu')) {
-        // Deleting a branch or forcing one over another is destruction; a plain rename, copy or upstream change is not.
+        // Destruction: deleting a branch (-d, -D, --delete), force-updating one (-f, --force), and a forced rename or copy (-M, -C, or --move/--copy with
+        // --force), which overwrites an existing branch of the new name and can lose its commits. A plain rename or copy (-m, -c, --move, --copy) keeps
+        // every commit, and an upstream or description change touches none: those are not destruction (still risky, so they ask in the asking modes).
         const destroys = has('-d', '-D', '--delete', '-f', '--force') || shortFlag('dDfMC');
         return risky('git branch deletes, moves, or force-updates a branch', destroys ? DESTROY_ALL : undefined);
       }

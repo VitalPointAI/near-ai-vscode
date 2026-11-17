@@ -298,3 +298,16 @@ test('a program the rules do not know, followed by any tagged command, has unkno
     assert.equal(classify(command).effectsUnknown, undefined, `${command}: nothing tagged follows`);
   }
 });
+
+// PR #74 review round 5: git branch. A plain rename or copy (-m, -c, --move, --copy) keeps every commit, so it is not destruction. A forced one (-M, -C, or
+// --move/--copy with --force) overwrites an existing branch of the new name, whose commits can be lost, so it is, as are deleting and force-updating.
+test('git branch: a plain rename or copy is not destruction, a forced one is', () => {
+  for (const command of ['git branch -m old new', 'git branch -c old new', 'git branch --move old new', 'git branch --copy old new', 'git branch -m new']) {
+    const result = classify(command);
+    assert.equal(result.effects, undefined, `${command}: no tag`);
+    assert.equal(result.verdict, 'risky', `${command}: still asks in the asking modes, as before`);
+  }
+  for (const command of ['git branch -M old new', 'git branch -C old new', 'git branch --move --force old new', 'git branch --copy --force old new', 'git branch -mf old new', 'git branch -cf old new', 'git branch -f main HEAD~1', 'git branch -D old']) {
+    assert.deepEqual(classify(command).effects, [destroy()], `${command}: destruction`);
+  }
+});
