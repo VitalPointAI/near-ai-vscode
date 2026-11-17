@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.28
 
 This release adds Team Live, a panel where you watch your team work: the lead hands out tasks,
 members wake up and report back. It also gives NEAR AI a policy: one signed file that sets the most
