@@ -12,7 +12,7 @@ import { FAILED_CLOSED_LABEL_TEXT, labelReadFilter, labelVerdictFor } from '../a
 import type { AgentEvent, ApprovalRequest } from '../agent/loop';
 import { DEFAULT_RULES, RunGrants } from '../agent/permissions';
 import { ShellSession } from '../agent/shell';
-import { bashTool, globTool, grepTool, readTool } from '../agent/tools';
+import { INTERACTIVE_AND_UNATTENDED, bashTool, declareManifest, fromArgument, globTool, grepTool, readTool } from '../agent/tools';
 import type { AgentTool } from '../agent/tools';
 import { failedClosed } from '../domain/gate/bundle';
 import type { GateRuntime } from '../domain/gate/decide';
@@ -218,4 +218,50 @@ test('D-67: a call that reads both the runtime and the project has its project p
   assert.equal(canRead(path.relative(root, path.join(runtime, 'workflow.md'))), true, 'a runtime result is shown');
   assert.equal(canRead(path.relative(root, path.join(runtime, 'plan-link.md'))), false, 'a runtime link into the project is hidden');
   assert.equal(canRead('notes.md'), false, 'a project result is hidden');
+});
+
+// ---- PR #85 review: shell globs, and every path field of a mixed call ----
+
+test('a shell glob is checked against every labelled entry it could match: cat secret/*.md is refused when secret/plan.md is above the clearance', async () => {
+  const root = project();
+  for (const command of ['cat secret/*.md', 'cat secret/plan.m?', 'cat secret/{plan,other}.md', 'cat */plan.md', 'grep -r PLAN **/*.md', 'cat ./secret/*']) {
+    const ran = await run(root, [call('b1', 'Bash', { command })]);
+    assert.match(ran.outputs[0] ?? '', PB_REFUSAL, command);
+    assert.ok(!ran.transcript.includes(SECRET), command);
+  }
+  // A glob that cannot reach the labelled file is not refused for it.
+  const other = await run(root, [call('b2', 'Bash', { command: 'cat secret/*.txt notes.md' })], testGateRuntime(), undefined, true);
+  assert.match(other.outputs[0] ?? '', /PLAN notes, public/);
+  // A glob under a variable cannot be bounded, so the strictest label in the project decides.
+  const unbounded = await labelVerdictFor(testGateRuntime(), { root, reads: [], command: 'cat "$DIR"/*.md', mayReadAnything: true });
+  assert.equal(unbounded?.rule, 'label.dominance');
+});
+
+test('every path field of a call is checked, also when another field reads the Open-GSD runtime: a mixed read of a labelled project file is refused', async () => {
+  const { runtime } = labelledProjectAndRuntime();
+  const root = project();
+  const twoFiles: AgentTool<{ a: string; b: string }> = {
+    ...readTool,
+    name: 'ReadTwo',
+    parameters: { type: 'object', properties: { a: { type: 'string' }, b: { type: 'string' } }, required: ['a', 'b'] },
+    // Field b is read and also written (an edit-in-place tool), so it is not a read-only field: the per-path check must still cover it.
+    manifest: declareManifest({ tool: 'ReadTwo', effects: [{ verb: 'read', paths: [fromArgument('a'), fromArgument('b')] }, { verb: 'workspaceWrite', paths: [fromArgument('b')] }], contexts: INTERACTIVE_AND_UNATTENDED }),
+    manifestInput: undefined,
+    parse: (raw: Record<string, unknown>) => ({ a: String(raw['a']), b: String(raw['b']) }),
+    title: () => 'Read two',
+    forbidden: undefined,
+    sensitive: undefined,
+    run: async () => 'ran'
+  } as never;
+  const gated = await gateToolCall(testGateRuntime(), {
+    tool: twoFiles as never, raw: { a: path.join(runtime, 'workflow.md'), b: 'secret/plan.md' }, root, callId: 'm1', readOnlyRoots: [runtime],
+    policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES, grants: new RunGrants(), buildAuto: async () => undefined
+  });
+  assert.equal(gated.decision.outcome, 'deny');
+  assert.equal(gated.decision.rule, 'label.dominance');
+  const runtimeOnly = await gateToolCall(testGateRuntime(), {
+    tool: twoFiles as never, raw: { a: path.join(runtime, 'workflow.md'), b: 'notes.md' }, root, callId: 'm2', readOnlyRoots: [runtime],
+    policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES, grants: new RunGrants(), buildAuto: async () => undefined
+  });
+  assert.notEqual(runtimeOnly.decision.rule, 'label.dominance', 'the runtime file and an unlabelled project file are not refused for a label');
 });

@@ -389,7 +389,9 @@ test('SECURITY.md says a branch switch holds reads with Use this branch\'s label
     'for example with git restore',
     "Reading NEAR AI's own Open-GSD runtime files is judged at the default label",
     "a link from there into the project keeps the project file's label",
-    'While a label file holds reads, only reads of the project are held: reads of those runtime files go on'
+    'While a label file holds reads, only reads of the project are held: reads of those runtime files go on',
+    // PR #85 review: globs, beside the variable-path gap.
+    'a read a command does not show (a path built in a variable) is not seen. A glob in a command (such as `secret/*.md`) is checked against every labelled file it could match, and a glob next to a variable is judged by the strictest label in the project'
   ]) assert.ok(words.includes(phrase), phrase);
   assert.ok(!policySection.includes(EM_DASH));
 });

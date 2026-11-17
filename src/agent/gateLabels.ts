@@ -108,7 +108,23 @@ export interface NamedPathsInput {
  * (a path-like one also through links). A word may be a folder, so it is checked both as a file and as a folder by the caller.
  */
 export async function namedPaths(input: NamedPathsInput): Promise<string[]> {
+  return [...(await namedReads(input)).paths];
+}
+
+/** What a call names: plain paths, glob patterns (project-relative, checked against every entry they could match), and whether a glob is unbounded. */
+export interface NamedReads {
+  readonly paths: readonly string[];
+  readonly patterns: readonly string[];
+  /** True when a word holds both a variable and a glob, so what it matches cannot be bounded: the strictest label in the project decides. */
+  readonly unbounded: boolean;
+}
+
+const GLOB_CHARS = /[*?[{]/;
+
+export async function namedReads(input: NamedPathsInput): Promise<NamedReads> {
   const out = new Set<string>();
+  const patterns = new Set<string>();
+  let unbounded = false;
   const follow = linkResolver(input.realpath === undefined ? {} : { realpath: input.realpath });
   const add = (relative: string | undefined): void => { if (relative !== undefined) out.add(relative); };
   for (const read of input.reads) {
@@ -123,11 +139,19 @@ export async function namedPaths(input: NamedPathsInput): Promise<string[]> {
     // relative to a folder the line moves to is still seen.
     const cwd = input.cwd ?? input.root;
     const folders = [cwd, ...changedFolders(input.command).map((folder) => path.resolve(cwd, folder))].slice(0, 8);
+    // A glob next to a variable (`"$DIR"/*.md`) matches what the variable holds at run time: it cannot be bounded (PR #85 review).
+    unbounded = input.command.slice(0, MAX_COMMAND_LENGTH).split(/\s+/).some((token) => /[$`]/.test(token) && GLOB_CHARS.test(token.replace(/\$\{[^}]*\}/g, '')));
     for (const word of commandWords(input.command)) {
-      const literal = /[*?[{]/.test(word) ? patternBase(word) : word;
+      const glob = GLOB_CHARS.test(word);
+      const literal = glob ? patternBase(word) : word;
       for (const folder of folders) {
         const absolute = path.resolve(folder, literal === '' ? '.' : literal);
         add(insideRelative(input.root, absolute));
+        // The glob itself, as a project-relative pattern, so every labelled entry it could match is checked (PR #85 review: `cat secret/*.md`).
+        if (glob) {
+          const pattern = insideRelative(input.root, path.resolve(folder, word));
+          if (pattern !== undefined) patterns.add(pattern);
+        }
         if (pathLike(word) && literal === word) {
           const real = await follow(absolute);
           if (real !== undefined && real !== absolute) add(insideRelative(input.root, real));
@@ -135,7 +159,49 @@ export async function namedPaths(input: NamedPathsInput): Promise<string[]> {
       }
     }
   }
-  return [...out];
+  return { paths: [...out], patterns: [...patterns], unbounded };
+}
+
+/** A shell glob as an anchored expression over project-relative paths: `**` any folders, `*` and `?` within one name, `[...]` and `{a,b}` as the shell reads them. */
+function globExpression(pattern: string): RegExp | undefined {
+  let out = '';
+  for (let index = 0; index < pattern.length; index += 1) {
+    const char = pattern[index]!;
+    if (char === '*') {
+      if (pattern[index + 1] === '*') { out += '.*'; index += 1; if (pattern[index + 1] === '/') index += 1; } else out += '[^/]*';
+    } else if (char === '?') out += '[^/]';
+    else if (char === '[') {
+      const end = pattern.indexOf(']', index + 2);
+      if (end < 0) return undefined;
+      const body = pattern.slice(index + 1, end).replace(/^!/, '^').replace(/\\/g, '\\\\');
+      out += `[${body}]`;
+      index = end;
+    } else if (char === '{') {
+      const end = pattern.indexOf('}', index);
+      if (end < 0) return undefined;
+      out += `(?:${pattern.slice(index + 1, end).split(',').map((part) => part.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '[^/]*').replace(/\?/g, '[^/]')).join('|')})`;
+      index = end;
+    } else out += char.replace(/[.+^${}()|[\]\\]/g, '\\$&');
+  }
+  try {
+    return new RegExp(`^${out}$`);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The labelled entries a glob could match (PR #85 review): a file entry the expression matches, and every folder entry inside the glob's fixed folder
+ * (what a folder holds is not known here, so it counts, fail closed). A glob the expression cannot read counts every entry inside its fixed folder.
+ */
+export function entriesMatching(pattern: string, keys: readonly string[]): string[] {
+  const base = patternBase(pattern);
+  const expression = globExpression(pattern);
+  return keys.filter((key) => {
+    if (!key.startsWith(base) && !base.startsWith(key)) return false;
+    if (key.endsWith('/') || expression === undefined) return true;
+    return expression.test(key);
+  });
 }
 
 /** What the clearance check reads from the policy now: a valid policy's own, or a failed-closed one's (no clearances, the shipped default label). */
@@ -256,16 +322,25 @@ export interface LabelCheckInput extends NamedPathsInput {
  */
 export async function labelVerdictFor(runtime: GateRuntime, input: LabelCheckInput): Promise<LabelVerdict | undefined> {
   try {
-    const paths = await namedPaths(input);
-    if (paths.length === 0 && input.mayReadAnything !== true && input.defaultReads !== true) return undefined;
+    const named = await namedReads(input);
+    const paths = named.paths;
+    const projectNamed = paths.length > 0 || named.patterns.length > 0 || named.unbounded;
+    if (!projectNamed && input.mayReadAnything !== true && input.defaultReads !== true) return undefined;
     const state = stateOf(runtime);
     const facts = state === undefined ? clearanceFactsOf({ state: 'failed-closed' } as BundleState, nowOf(runtime)) : clearanceFactsOf(state, nowOf(runtime));
     const view = await sourceOf(runtime, input.root).view(facts.scales);
     // A held label file holds every project read, path by path (D-67): a call that names a project path, or may read anything (a command, effects nobody
     // can read), is held; a read of the extension's own Open-GSD runtime alone goes on, judged at the default label below.
-    if (holdsReads(view.state) && (paths.length > 0 || input.mayReadAnything === true)) return { rule: 'label.dominance', reason: view.problem ?? FAILED_CLOSED_LABEL_TEXT };
+    if (holdsReads(view.state) && (projectNamed || input.mayReadAnything === true)) return { rule: 'label.dominance', reason: view.problem ?? FAILED_CLOSED_LABEL_TEXT };
     for (const relative of paths) {
       const verdict = markVerdict(markOf(view, relative, facts.defaultLabel), facts);
+      if (verdict !== undefined) return verdict;
+    }
+    // Globs: every entry a glob could match; an unbounded glob: every entry and the project's own label, so the strictest label in scope decides.
+    const keys = view.keys();
+    const reached = named.unbounded ? ['', ...keys] : named.patterns.flatMap((pattern) => entriesMatching(pattern, keys));
+    for (const key of [...new Set(reached)]) {
+      const verdict = markVerdict(view.resolve(key, facts.defaultLabel).mark, facts);
       if (verdict !== undefined) return verdict;
     }
     if (input.defaultReads === true) return markVerdict([facts.defaultLabel], facts);

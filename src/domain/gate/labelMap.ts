@@ -158,6 +158,9 @@ export function nextRevision(previous: LabelMapPayload | undefined, next: LabelM
 export function withRevision(map: LabelMapPayload, revision: number, removed: readonly string[]): LabelMapPayload {
   if (!Number.isSafeInteger(revision) || revision < 0) throw new RangeError('A revision is a whole number from 0.');
   const named = [...new Set(removed)].sort();
+  // The parser refuses a longer list, so a map is never written that cannot be read back (PR #85 review). A map under MAX_LABEL_MAP_BYTES holds far fewer
+  // entries than this, so one write never needs more.
+  if (named.length > MAX_REMOVED_KEYS) throw new RangeError(`A revision may name at most ${String(MAX_REMOVED_KEYS)} removed labels.`);
   return build(map.project, pairsOf(map), revision, named.length === 0 ? undefined : named);
 }
 
@@ -299,6 +302,8 @@ export interface LabelView {
   readonly missing: readonly string[];
   /** The label of a project-relative path (a folder ends with `/`, the project is the empty path), the bundle's default label last. */
   resolve(relativePath: string, defaultLabel: Label): ResolvedLabel;
+  /** Every labelled path the map holds (trusted and untrusted alike), so a pattern can be checked against each entry it could match. */
+  keys(): readonly string[];
 }
 
 /** Where a runtime reads a project's labels. The host gives one per project; it is read again only when the file changes. */

@@ -281,8 +281,13 @@ test('a hand edit that deletes or lowers a verified label still resolves it from
   await handEdit(s, (payload) => { delete payload.entries['secret/plan.md']; payload.entries['src/a.ts'] = label('org', 'Public'); });
   assert.equal(await labelOf(s, 'secret/plan.md'), 'ca-protected/Protected B');
   assert.equal(await labelOf(s, 'src/a.ts'), 'org/Internal');
-  const ran = await agentRun(s, [call('r1', 'Read', { file_path: 'secret/plan.md' })]);
-  assert.ok(!ran.transcript.includes(SECRET_TEXT) || (ran.outputs[0] ?? '').includes(SECRET_TEXT), 'read only under the person\'s own Protected B clearance');
+  // Under the person's own Protected B clearance the read is allowed; under the default policy (no such clearance) the deleted entry still refuses it.
+  const allowed = await agentRun(s, [call('r1', 'Read', { file_path: 'secret/plan.md' })]);
+  assert.match(allowed.outputs[0] ?? '', new RegExp(SECRET_TEXT), 'read under the person\'s own clearance');
+  await s.host.reset();
+  const refused = await agentRun(s, [call('r2', 'Read', { file_path: 'secret/plan.md' })]);
+  assert.match(refused.outputs[0] ?? '', /^Not allowed: This file is labelled ca-protected\/Protected B, and your policy gives you no clearance on that scale\./);
+  assert.ok(!refused.transcript.includes(SECRET_TEXT), 'the hand edit did not drop the label');
 });
 
 test('Set Label on an unverified map asks before signing it again: Cancel leaves the bytes, Sign Again keeps the verified entries and only the raises', async () => {
@@ -637,4 +642,28 @@ test('D-64: LABEL_EVENT_IDS names label.branch-accepted and label.declassify-rej
   assert.ok(stub.notifications.some((entry) => entry.message === gateCommands.NO_LABELS_WHILE_FAILED_TEXT));
   assert.match(gateCommands.NO_LABELS_WHILE_FAILED_TEXT, /^Nothing can be labelled while your policy cannot be trusted/);
   assert.equal(existsSync(path.join(s.root, LABEL_MAP_FILE)), false);
+});
+
+// ---- PR #85 review: the removed list is bounded, and the writer never writes a map the parser refuses ----
+
+test('withRevision takes up to MAX_REMOVED_KEYS removed keys and refuses more, and a map under the byte limit can never drop more than that in one write', async () => {
+  const { MAX_REMOVED_KEYS, parseLabelMap, withRevision } = await import('../domain/gate/labelMap');
+  const empty = { labelMapVersion: 1, vocabulary: 1, entries: {} } as LabelMapPayload;
+  const keys = (count: number): string[] => Array.from({ length: count }, (_, index) => `f/${String(index)}`);
+  const atCap = withRevision(empty, 2, keys(MAX_REMOVED_KEYS));
+  assert.equal(parseLabelMap(JSON.parse(JSON.stringify(atCap)), SCALE_PRESETS).ok, true, 'at the cap the parser accepts it');
+  assert.throws(() => withRevision(empty, 2, keys(MAX_REMOVED_KEYS + 1)), /at most/);
+  // The smallest entry (a one-letter path at org/Public) is about 90 bytes, so the byte limit holds far fewer entries than the removed cap.
+  const smallest = Buffer.byteLength(JSON.stringify({ a: label('org', 'Public') }), 'utf8') - 2;
+  assert.ok(Math.floor(MAX_LABEL_MAP_BYTES / smallest) < MAX_REMOVED_KEYS);
+});
+
+test('a change that would give a map the parser refuses is refused before signing, writing nothing, so Set Label can always read back what it wrote', async () => {
+  const s = await labelled();
+  const file = path.join(s.root, LABEL_MAP_FILE);
+  const before = await readFile(file, 'utf8');
+  const broken = (map: LabelMapPayload): LabelMapPayload => ({ ...map, entries: { ...map.entries, './not/canonical': label('org', 'Internal') } });
+  await assert.rejects(() => s.host.changeLabels(s.root, broken), (error: unknown) => error instanceof LabelMapError && /^Nothing was written/.test(error.message));
+  assert.equal(await readFile(file, 'utf8'), before);
+  assert.equal(await stateOf(s), 'verified');
 });

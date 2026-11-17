@@ -449,12 +449,14 @@ export async function readCallPaths(tool: AgentTool<any>, raw: Record<string, un
       if (credentialStore === undefined && namesCredentialStore(resolved, locations, { root }) !== undefined) credentialStore = credentialReason(shownName(value).slice(0, 120));
       if (identityFiles === undefined && namesIdentityFiles(resolved, locations) !== undefined) identityFiles = identityFilesReason(shownName(value).slice(0, 120));
     }
-    if (resolved === undefined || ![...verbs].every((verb) => verb === 'read')) continue;
+    if (resolved === undefined) continue;
     const known = await resolvedFolders();
+    // Every field a read effect reads, whatever else the call does with it (PR #85 review): its real place in the project is checked against the labels.
     if (insideFolder(known.root, resolved)) {
-      projectReads.push(path.relative(known.root, resolved).split(path.sep).join('/'));
+      if (verbs.has('read')) projectReads.push(path.relative(known.root, resolved).split(path.sep).join('/'));
       continue;
     }
+    if (![...verbs].every((verb) => verb === 'read')) continue;
     for (const { real } of known.trusted) {
       if (!insideFolder(real, resolved)) continue;
       // The arguments in the manifest's shape with this one field rewritten: the effects are filled from these, so manifestInput runs once per call.

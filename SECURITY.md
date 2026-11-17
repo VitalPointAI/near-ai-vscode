@@ -350,7 +350,10 @@ is what that file and the records beside it do in this version.
   to add a clearance, use **NEAR AI: Edit Policy** and **NEAR AI: Apply Policy
   Draft**. An agent cannot read a file whose label your clearances do not
   cover, through the file tools, searches or a command that names it; a read
-  a command does not show (a path built in a variable) is not seen. Content
+  a command does not show (a path built in a variable) is not seen. A glob in a
+  command (such as `secret/*.md`) is checked against every labelled file it
+  could match, and a glob next to a variable is judged by the strictest label
+  in the project. Content
   with no label takes your policy's default label, so a policy with no
   clearance on that scale cannot read it. Decision records hold the labels
   involved and stay on this computer. A label does not change where content is

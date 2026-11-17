@@ -309,6 +309,7 @@ function viewOf(classified: Classified, scales: ScaleTable, missing: readonly st
     state,
     ...(problem === undefined ? {} : { problem }),
     missing,
+    keys: (): readonly string[] => [...new Set([...Object.keys(trusted?.entries ?? {}), ...Object.keys(state === 'unverified' ? untrusted?.entries ?? {} : {})])],
     resolve: (relativePath: string, defaultLabel: Label): ResolvedLabel => resolveLabel(relativePath, {
       ...(trusted === undefined ? {} : { verified: trusted }),
       ...(state === 'unverified' && untrusted !== undefined ? { unverified: untrusted } : {}),
@@ -496,7 +497,13 @@ export async function updateLabelMap(root: string, change: (map: LabelMapPayload
         break;
       }
     }
-    const changed = nextRevision(previous, change(base));
+    let changed: LabelMapPayload;
+    try {
+      changed = nextRevision(previous, change(base));
+    } catch (error) {
+      if (error instanceof RangeError) throw new LabelMapError(`Nothing was written: ${error.message} Change fewer labels at once.`, { cause: error });
+      throw error;
+    }
     // The revision always passes the marker's, and every key the last verified map holds that the new map does not is named, so a write never reads back
     // as older than, or as an unsigned removal from, what this computer verified. A verified file newer than the marker (adopted now) is the base the next
     // revision follows.
@@ -507,8 +514,17 @@ export async function updateLabelMap(root: string, change: (map: LabelMapPayload
       const kept = new Set(labelMapKeys(changed));
       const dropped = rawKeys(lastPayload).filter((key) => !kept.has(key));
       if (labelMapRevision(changed) !== lastRevision + 1 || dropped.some((key) => !(changed.removed ?? []).includes(key))) {
-        versioned = withRevision(changed, Math.max(labelMapRevision(changed), lastRevision + 1), [...(changed.removed ?? []), ...dropped]);
+        try {
+          versioned = withRevision(changed, Math.max(labelMapRevision(changed), lastRevision + 1), [...(changed.removed ?? []), ...dropped]);
+        } catch (error) {
+          if (error instanceof RangeError) throw new LabelMapError(`Nothing was written: ${error.message} Change fewer labels at once.`, { cause: error });
+          throw error;
+        }
       }
+    }
+    // The writer never writes a map the parser would refuse, so Set Label can always read back, and so repair, what it wrote (PR #85 review).
+    if (!parseLabelMap(JSON.parse(JSON.stringify(versioned)), options.scales).ok) {
+      throw new LabelMapError('Nothing was written: the change would give a label file this version cannot read back.');
     }
     const size = Buffer.byteLength(JSON.stringify(versioned), 'utf8');
     if (size > MAX_LABEL_MAP_BYTES) throw new LabelMapError(`Nothing was written: the label file would be ${String(size)} bytes, over the ${String(MAX_LABEL_MAP_BYTES)} byte limit. Label a folder instead of each file in it.`);
