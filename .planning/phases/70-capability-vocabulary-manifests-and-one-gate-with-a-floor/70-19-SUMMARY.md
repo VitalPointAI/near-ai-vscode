@@ -126,7 +126,7 @@ At the old size, model requests alone rolled the log over after 7.4, 4.0, 1.5 an
 - `npm run lint`: clean.
 - Full `npm test` (6G cap): 3,489 tests, 3,480 pass, 0 fail, 0 cancelled, 9 skipped (the live NEAR AI tests that need a key). After the owner follow-up: 3,493 tests, 3,484 pass, 0 fail, 0 cancelled, 9 skipped; `npm run lint` clean.
 - Range secret scan (`node scripts/secret-scan.mjs --range origin/main..HEAD`): clean, 1,251 tracked files and 5 commits.
-- e2e (`xvfb-run -a npm run test:e2e`, 6G cap, run once because activation and the chat path changed): exit 0, 23 e2e tests passing, 0 failing. Run again once after the owner follow-up: exit 0, the same 23 passing, 0 failing.
+- e2e (`xvfb-run -a npm run test:e2e`, 6G cap, run once because activation and the chat path changed): exit 0, 21 e2e tests passing across both scenarios (16 in a set-up project, 5 in a plain folder), 0 failing. Run again once after the owner follow-up: exit 0, the same 21 passing, 0 failing. (An earlier count of 23 or 26 included the VS Code download lines.)
 - `package.json` and `package-lock.json` unchanged; no new package.
 - Diff against origin/main, code only (without this SUMMARY): 26 files, 1,646 insertions, 111 deletions, 181,618 bytes of unified diff; it was 148,183 bytes before the owner follow-up (the plan estimated about 160 KB at open).
 
