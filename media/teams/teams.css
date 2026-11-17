@@ -93,8 +93,8 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--vscode-button-
 .picker-filter { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 8px; }
 .picker-filter .filter { display: inline-flex; align-items: center; gap: 4px; padding: 2px 10px; border: 1px solid var(--border); border-radius: 12px; cursor: pointer; }
 .picker-filter .filter.selected { border-color: var(--vscode-focusBorder); }
-.choice-cell { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.choice-cell .choice { margin: 0; }
+.choice-cell { display: flex; flex-direction: column; gap: 2px; min-width: 0; height: 100%; }
+.choice-cell .choice { margin: 0; flex: 1 1 auto; }
 .count { font-size: 0.82em; color: var(--muted); margin: 0 6px 0 2px; }
 
 /* Banner and notices */
@@ -120,6 +120,14 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--vscode-button-
 .card-head .badge { margin-left: auto; }
 .card-title { margin: 0; font-size: 1.05em; overflow-wrap: anywhere; }
 .desc { margin: 0; }
+/* One size of card (0.4.30): a description is clamped to three lines, and the space for three is kept even when it is shorter, so the cards in a row line
+   up; Show more (button.more) opens one card. The grid stretches every card in a row to the tallest, and the actions sit at the bottom. */
+.clamp { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3; overflow: hidden; overflow-wrap: anywhere; }
+.clamp.clamp-2 { -webkit-line-clamp: 2; line-clamp: 2; }
+.expanded .clamp { display: block; -webkit-line-clamp: unset; line-clamp: none; overflow: visible; }
+.card .desc { min-height: calc(3 * 1.45em); }
+button.more { align-self: flex-start; padding: 0 4px; font-size: 0.9em; }
+.more-chip { background: none; color: var(--muted); border: 1px solid var(--border); }
 .chips { list-style: none; padding: 0; margin: 2px 0; display: flex; flex-wrap: wrap; gap: 4px; }
 .chip { font-size: 0.85em; padding: 1px 8px; border-radius: 10px; background: var(--vscode-badge-background); color: var(--vscode-badge-foreground); }
 .models { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; }

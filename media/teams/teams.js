@@ -256,6 +256,50 @@
 
   function focusMain() { const main = $('main'); if (main && main.focus) main.focus(); }
 
+  // ---------- one size of card (0.4.30, owner 2026-11-17: "ensure each of the team cards are standard size (truncate/show more for description if it's
+  // too long)") ----------
+  // A card's description is clamped to three lines and its member list to four names; Show more opens that card alone (aria-expanded), and the cards
+  // open stay open while the page is drawn again. Whether anything is clamped is worked out from the text first, then measured once the page is laid out,
+  // so a description that wraps to four lines in a narrow panel still gets its button.
+  const MEMBER_CHIPS = 4;
+  const CLAMP_CHARS = 120;
+  const expandedCards = new Set();
+
+  /** The Show more / Show less button for one card. `key` names the card (its team id; picker cards are prefixed), `controls` the clamped part. */
+  function moreButton(key, name, controls, hiddenMembers, longText) {
+    const open = expandedCards.has(key);
+    const node = button(open ? 'Show less' : 'Show more', () => {
+      if (expandedCards.has(key)) expandedCards.delete(key); else expandedCards.add(key);
+      focusLater(node.id);
+      render();
+    }, { link: true, label: (open ? 'Show less about ' : 'Show more about ') + name, id: 'more-' + key.replace(/[^A-Za-z0-9_-]/g, '-') });
+    node.className += ' more';
+    node.setAttribute('aria-expanded', open ? 'true' : 'false');
+    node.setAttribute('aria-controls', controls);
+    node.dataset.hiddenMembers = String(hiddenMembers);
+    node.hidden = !(open || hiddenMembers > 0 || longText);
+    return node;
+  }
+
+  /** After layout: a card whose text is cut off shows its button, one whose text fits does not. Only in a real page (the tests' small DOM has no layout). */
+  function measureClamps() {
+    const main = $('main');
+    if (!main || typeof main.querySelectorAll !== 'function') return;
+    for (const node of main.querySelectorAll('button.more')) {
+      if (node.getAttribute('aria-expanded') === 'true') { node.hidden = false; continue; }
+      const holder = node.closest('.card, .choice-cell');
+      const cut = holder ? [...holder.querySelectorAll('.clamp')].some((part) => part.scrollHeight > part.clientHeight + 1) : false;
+      node.hidden = !(cut || Number(node.dataset.hiddenMembers || 0) > 0);
+    }
+  }
+  let measureQueued = false;
+  function measureSoon() {
+    if (measureQueued || typeof requestAnimationFrame !== 'function') return;
+    measureQueued = true;
+    requestAnimationFrame(() => { measureQueued = false; measureClamps(); });
+  }
+  window.addEventListener('resize', () => measureSoon());
+
   // ---------- library ----------
   // ---------- the AI start ----------
   // Owner, 2026-11-08: "start with the chat asking what type of task or output the user wants the team to be able to provide", then draft the team with a
@@ -443,10 +487,19 @@
       card.append(actions);
       return card;
     }
-    if (team.description) card.append(el('p', 'desc', team.description));
+    const key = team.id;
+    const open = expandedCards.has(key);
+    if (open) card.className += ' expanded';
+    const desc = el('p', 'desc clamp', team.description || '');
+    desc.id = 'desc-' + key.replace(/[^A-Za-z0-9_-]/g, '-');
+    card.append(desc);
     const chips = el('ul', 'chips'); chips.setAttribute('aria-label', 'Members');
-    for (const member of team.members) chips.append(el('li', 'chip', member.name + (member.role && member.role !== member.name ? ' · ' + member.role : '')));
+    const shownMembers = open ? team.members : team.members.slice(0, MEMBER_CHIPS);
+    for (const member of shownMembers) chips.append(el('li', 'chip', member.name + (member.role && member.role !== member.name ? ' · ' + member.role : '')));
+    const hiddenMembers = team.members.length - shownMembers.length;
+    if (hiddenMembers > 0) chips.append(el('li', 'chip more-chip', '+' + hiddenMembers + ' more'));
     card.append(chips);
+    if (team.description || hiddenMembers > 0 || open) card.append(moreButton(key, team.name, desc.id, hiddenMembers, (team.description || '').length > CLAMP_CHARS));
     const counts = {};
     team.members.forEach((member) => { counts[member.privacy] = (counts[member.privacy] || 0) + 1; });
     const models = el('div', 'models');
@@ -624,16 +677,22 @@
       const grid = el('div', 'choice-grid');
       for (const point of points) {
         const selected = work.pick === point.id;
-        const cell = el('div', 'choice-cell' + (selected ? ' selected' : ''));
+        const key = 'pick:' + point.id;
+        const open = expandedCards.has(key);
+        const cell = el('div', 'choice-cell' + (selected ? ' selected' : '') + (open ? ' expanded' : ''));
         const option = el('label', 'choice' + (selected ? ' selected' : ''));
         const radio = el('input'); radio.type = 'radio'; radio.name = 'starting-point'; radio.value = point.id; radio.checked = selected; radio.id = 'pick-' + point.id.replace(/[^a-z0-9-]/g, '-');
         // What the team is for belongs to the team it was typed for (PR #75 review): choosing another one starts it empty.
         radio.addEventListener('change', () => { if (work.pick !== point.id) work.options.goal = ''; work.pick = point.id; render(); });
         option.append(radio, el('span', 'choice-label', point.label));
         if (point.origin) option.append(badge(point.origin, point.imported ? 'kind imported' : 'kind'));
-        if (point.description) option.append(el('span', 'hint', point.description));
-        if (point.members.length) option.append(el('span', 'hint small', point.memberCount + ' member' + (point.memberCount === 1 ? '' : 's') + ': ' + point.members.join(', ')));
+        const descId = 'pdesc-' + point.id.replace(/[^A-Za-z0-9_-]/g, '-');
+        const desc = el('span', 'hint clamp', point.description || ''); desc.id = descId;
+        option.append(desc);
+        if (point.members.length) option.append(el('span', 'hint small clamp clamp-2', point.memberCount + ' member' + (point.memberCount === 1 ? '' : 's') + ': ' + point.members.join(', ')));
         cell.append(option);
+        // Beside the choice, not inside its label, so opening a card never selects the team.
+        if (point.description || point.members.length) cell.append(moreButton(key, entryName(point), descId, 0, (point.description || '').length > CLAMP_CHARS || point.members.join(', ').length > CLAMP_CHARS));
         // A saved team can be shared from here too (one portable file to send; the host checks it and asks about the knowledge graph).
         if (point.teamId) cell.append(button('Share…', () => vscode.postMessage({ type: 'share', id: point.teamId }), { link: true, label: 'Share ' + point.label }));
         if (selected) cell.append(pickActions(point));
@@ -1677,6 +1736,7 @@
     pendingFocus = null;
     const node = target && $(target);
     if (node && node.focus) node.focus();
+    measureSoon();
   }
 
   function showKept(kept) {
