@@ -13,6 +13,9 @@ import type { ActorRef, GateRequest, SettingsAnswer, SettingsLayer } from '../do
 import { buildDecisionRecord, validateDecisionRecord } from '../domain/gate/record';
 import type { Capability } from '../domain/gate/vocabulary';
 
+// The name of the floor option PR 2 had, built so that `grep -rn` for it over src finds only product code that brings it back.
+const OLD_FLOOR_OPTION = ['floor', 'Mode'].join('');
+
 const NOW = Date.parse('2026-11-16T12:00:00.000Z');
 const PERSON: ActorRef = { kind: 'person', deviceFingerprint: 'dev-00000000000000000000000000000000', sessionId: 'session-1' };
 
@@ -238,8 +241,8 @@ test('the floor is always enforced: the inputs that shadow mode only reported no
   assert.equal(none.floor, false);
 });
 
-test('no option turns the floor off: decide() ignores a floorMode it is handed, and no runtime or request carries one', async () => {
-  const sneaky = { floorMode: 'shadow' } as unknown as Parameters<typeof decide>[3];
+test('no option turns the floor off: decide() ignores the old shadow option if it is handed one', async () => {
+  const sneaky = { [OLD_FLOOR_OPTION]: 'shadow' } as unknown as Parameters<typeof decide>[3];
   const decided = await decide(requestFor([write(['.git/hooks/pre-commit'])]), validBundleState(), allows, sneaky);
   assert.equal(decided.outcome, 'ask');
   assert.equal(decided.rule, 'floor.protected-write');
@@ -258,7 +261,7 @@ test('source scan: no production file under src names a floor mode, so nothing c
       if (!/\.(ts|tsx|js|mjs|cjs)$/.test(entry.name)) continue;
       scanned += 1;
       const text = readFileSync(full, 'utf8');
-      for (const needle of ['floorMode', 'FloorMode', "'shadow' | 'enforce'", "floorMode: 'shadow'"]) {
+      for (const needle of [OLD_FLOOR_OPTION, 'F' + OLD_FLOOR_OPTION.slice(1), "'shadow' | 'enforce'", `${OLD_FLOOR_OPTION}: 'shadow'`]) {
         if (text.includes(needle)) offenders.push(`${path.relative(src, full)}: ${needle}`);
       }
     }

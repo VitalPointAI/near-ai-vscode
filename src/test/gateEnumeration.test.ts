@@ -53,6 +53,9 @@ import { testGateRuntime } from './helpers/gatedRuns';
 import { configuredFiles, countByFile, findToolRunSites, programFor } from './helpers/toolRunScan';
 import type { RunSite } from './helpers/toolRunScan';
 
+// The name of the floor option PR 2 had, built so that a search of src for it finds only product code that brings it back.
+const OLD_FLOOR_OPTION = ['floor', 'Mode'].join('');
+
 const call = (id: string, name: string, args: Record<string, unknown>): ToolCall => ({ id, type: 'function', function: { name, arguments: JSON.stringify(args) } });
 const usage = { inputTokens: 10, outputTokens: 5, verificationStatus: 'unknown' as const, latencyMs: 1 };
 
@@ -501,7 +504,7 @@ test('a sub-agent spawn is decided like any call, and the child\'s own calls are
     conversation.dispose();
   }
   assert.equal(existsSync(path.join(root, 'helper.md')), true);
-  assert.deepEqual(host.requests.map((request) => [request.actor.kind, request.presence, request.context, 'floorMode' in request]), [
+  assert.deepEqual(host.requests.map((request) => [request.actor.kind, request.presence, request.context, OLD_FLOOR_OPTION in request]), [
     ['agent', 'person', 'interactive', false], ['sub-agent', 'person', 'interactive', false]
   ]);
   const records = await logOf({ host, storage, secrets: new MemorySecrets(), problems: [] }, root);
@@ -647,7 +650,7 @@ test('a run nobody watches is decided with presence none and context unattended,
   const nobody = runGateFor({}) as ReturnType<typeof testGateRuntime>;
   assert.equal(nobody.presence, 'none');
   assert.equal(nobody.context, 'unattended');
-  assert.equal('floorMode' in nobody, false, 'no runtime carries a floor mode: the floor is always enforced');
+  assert.equal(OLD_FLOOR_OPTION in nobody, false, 'no runtime carries a floor mode: the floor is always enforced');
   const asked = runGateFor({ requestApproval: async () => ({ decision: 'allow' }) });
   assert.equal(asked.presence, 'person');
   assert.equal(asked.context, 'interactive');
