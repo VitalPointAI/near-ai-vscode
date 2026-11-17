@@ -26,7 +26,7 @@ export function greenCommit({ suiteId = 1, runId = 11, event = 'pull_request', r
  * per read, the last repeating) }, files: { [`${sha}:${path}`]: text }, tags: { [tag]: sha },
  * branches: { [name]: sha }, behind: { [sha]: n }, mainContains: Set of shas, threads: [],
  * protection: contexts or undefined (404), failOn: RegExp of calls that fail, mergeSha,
- * mergeFails, mergeUnconfirmed, commentFails, statusFails(state) }.
+ * mergeFails, mergeUnconfirmed, branchAlreadyDeleted, commentFails, statusFails(state) }.
  */
 export function fakeGitHub(state) {
   const calls = [];
@@ -52,6 +52,8 @@ export function fakeGitHub(state) {
       if (head !== pr.headRefOid) throw new Error('gh pr merge failed: head moved');
       if (world.mergeFails) throw new Error('gh pr merge failed: GraphQL: Base branch was modified');
       if (!world.mergeUnconfirmed) Object.assign(pr, { state: 'MERGED', mergeCommit: { oid: world.mergeSha } });
+      // The repository deletes a merged branch itself, so gh's own --delete-branch finds nothing and fails after the merge.
+      if (world.branchAlreadyDeleted) throw new Error(`gh pr merge ${args[2]} failed: failed to delete remote branch ${pr.headRefName}: HTTP 404: Reference does not exist (https://api.github.com/repos/${REPO}/git/refs/heads/x)`);
       return '';
     }
     if (verb === 'pr' && sub === 'comment') {
