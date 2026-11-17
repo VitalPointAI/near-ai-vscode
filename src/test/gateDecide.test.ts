@@ -6,7 +6,7 @@ import test from 'node:test';
 import type { ActionPolicy } from '../domain/policy';
 import { bundleHash, defaultBundlePayload, failedClosed } from '../domain/gate/bundle';
 import type { BundleState, PolicyBundle } from '../domain/gate/bundle';
-import { GATE_RULE_IDS, decide, effectiveMode } from '../domain/gate/decide';
+import { GATE_RULE_IDS, PRE_GATE_RULES, decide, effectiveMode } from '../domain/gate/decide';
 import { FLOOR_RULE_ORDER } from '../domain/gate/floor';
 import { ROUTE_RULES } from '../domain/gate/routing';
 import type { ActorRef, GateRequest, SettingsAnswer, SettingsLayer } from '../domain/gate/decide';
@@ -280,7 +280,8 @@ test('GATE_RULE_IDS lists every rule id once, including the floor, bundle, manif
     'settings.allow-rule', 'settings.mode.fully-autonomous', 'settings.mode.other', 'settings.auto.classifier', 'settings.unattended-verification',
     'settings.risk.outside-workspace', 'settings.risk.installs', 'settings.safety-model', 'settings.sensitive-read', 'settings.mcp-approval', 'settings.tool-forbidden'
   ]) assert.ok(GATE_RULE_IDS.includes(rule), rule);
-  assert.equal(GATE_RULE_IDS.length, FLOOR_RULE_ORDER.length + 7 + 3 + ROUTE_RULES.length + 1 + 19);
+  for (const rule of PRE_GATE_RULES) assert.ok(GATE_RULE_IDS.includes(rule), rule);
+  assert.equal(GATE_RULE_IDS.length, FLOOR_RULE_ORDER.length + 7 + 3 + ROUTE_RULES.length + 1 + 19 + PRE_GATE_RULES.length);
 });
 
 // ---- Effects unknown: an empty effect list fails closed (PR 1 review fold-in) ----

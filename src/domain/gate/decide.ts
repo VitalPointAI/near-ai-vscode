@@ -101,7 +101,14 @@ export interface GateRuntime {
   readonly newRecordId?: () => string;
 }
 
-/** Every rule id the gate can record: the floor, the bundle and manifest checks, labels, routing, taint, and the settings rules of the migration table. */
+/**
+ * The rules of a call refused before the gate could be asked, which the loop still records so no refused call is missing from the log: a tool name the run
+ * does not have, and a tool's own check (its forbidden, sensitive, risky or preview hook) that threw, so the call could not be judged and did not run.
+ */
+export const PRE_GATE_RULES = Object.freeze(['call.unknown-tool', 'call.check-failed'] as const);
+export type PreGateRule = (typeof PRE_GATE_RULES)[number];
+
+/** Every rule id the gate can record: the floor, the bundle and manifest checks, labels, routing, taint, the settings rules of the migration table, and the calls refused before the gate. */
 export const GATE_RULE_IDS: readonly string[] = Object.freeze([
   ...FLOOR_RULE_ORDER,
   'bundle.failed-closed', 'bundle.unavailable', 'bundle.ceiling.context', 'bundle.ceiling.mode', 'bundle.ceiling.unattended-mcp', 'manifest.context', 'manifest.effects-unknown',
@@ -111,7 +118,8 @@ export const GATE_RULE_IDS: readonly string[] = Object.freeze([
   'settings.emergency-stop', 'settings.read-plan', 'settings.auto-safe-tool', 'settings.mode.edits', 'settings.run-grant.edits', 'settings.deny-list',
   'settings.engagement-grant', 'settings.run-grant.command', 'settings.allow-rule', 'settings.mode.fully-autonomous', 'settings.mode.other',
   'settings.auto.classifier', 'settings.unattended-verification', 'settings.risk.outside-workspace', 'settings.risk.installs', 'settings.safety-model',
-  'settings.sensitive-read', 'settings.mcp-approval', 'settings.tool-forbidden'
+  'settings.sensitive-read', 'settings.mcp-approval', 'settings.tool-forbidden',
+  ...PRE_GATE_RULES
 ]);
 
 /**

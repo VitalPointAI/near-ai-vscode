@@ -7,7 +7,7 @@ import type { ActionCapability, ActionPolicy } from '../domain/policy';
 import type { AgentMessage, CompletionEvent, ToolCall, ToolDefinition, UsageMetadata } from '../services/nearAiClient';
 import { AutoApprovalContext, allowRuleBlocker, isAutoAllowed, PermissionRules, RunGrants, suggestAllowRule } from './permissions';
 import type { GateRuntime } from '../domain/gate/decide';
-import { TOOL_FORBIDDEN_RULE, gateToolCall, recordApprovalReply, unavailableGateRuntime } from './gateAdapter';
+import { TOOL_FORBIDDEN_RULE, gateToolCall, recordApprovalReply, recordRefusedBeforeGate, unavailableGateRuntime } from './gateAdapter';
 import type { FloorShellContext } from './gateAdapter';
 import { PREAMBLE_START, resolveGsdRun } from '../gsd/preamble';
 import type { CommandSafetyCheck } from './safetyModel';
@@ -94,6 +94,8 @@ export interface ApprovalReply { decision: 'allow' | 'allow-run' | 'allow-always
 /** How a tool result that is waiting on an approval begins, so the activity log can count it (PERF-01, PERF-07). */
 export const AWAITING_APPROVAL_PREFIX = 'Awaiting approval:';
 
+/** The reason recorded when a tool's own check threw: fixed words, so an error's text (which could name anything) never reaches a record. */
+const CHECK_FAILED_REASON = 'The tool\'s own check of this call could not finish, so the call was not run.';
 const AWAITING_APPROVAL_TEXT = `${AWAITING_APPROVAL_PREFIX} this action has not run. It is queued for the user to approve, and they have been notified. Do not retry it now and do not wait for it: carry on with work that does not depend on it, and list it under "Waiting for approval" in your report.`;
 
 /** What the agent is told when nobody answered a card in time. A floor card is approved for one call only, so the agent is told exactly that (D-43, Pitfall 4). */
@@ -618,7 +620,16 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
     await this.options.beforeTool?.(signal);
     if (signal.aborted) return 'Cancelled before this tool ran.';
     const tool = this.byName.get(call.function.name);
-    if (!tool) return `Error: unknown tool "${call.function.name}". Available tools: ${[...this.byName.keys()].join(', ')}.`;
+    if (!tool) {
+      // Refused before the gate could be asked, and still on the record (PR #70 review carry-over): a log that skips these would not show every refusal.
+      recordRefusedBeforeGate(this.gate, { tool: call.function.name, callId: call.id, rule: 'call.unknown-tool', reason: 'This run has no tool by that name, so nothing ran.' }, { model: this.options.model });
+      return `Error: unknown tool "${call.function.name}". Available tools: ${[...this.byName.keys()].join(', ')}.`;
+    }
+    // A tool's own check that throws: the call cannot be judged, so it does not run, and the refusal is recorded like any other.
+    const checkFailed = (error: unknown): string => {
+      recordRefusedBeforeGate(this.gate, { tool: tool.name, callId: call.id, rule: 'call.check-failed', reason: CHECK_FAILED_REASON, capability: tool.capability }, { model: this.options.model });
+      return this.finish(call.id, false, `Error: ${(error as Error).message}`);
+    };
     const context: ToolContext = {
       ...this.options.context, signal, onTodos: (todos) => this.options.emit({ type: 'todos', todos }),
       tainted: () => this.grants.tainted,
@@ -644,7 +655,7 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
     let sensitive: string | undefined;
     let risky: string | undefined;
     let forbidden: string | undefined;
-    try { forbidden = await tool.forbidden?.(input, context); } catch (error) { return this.finish(call.id, false, `Error: ${(error as Error).message}`); }
+    try { forbidden = await tool.forbidden?.(input, context); } catch (error) { return checkFailed(error); }
     // The floor reads every shell command, in every mode, with a cheap context of its own (Pitfall 5).
     const floorShell = command === undefined ? undefined : await this.floorShellContext(context);
     // What the gate is told about this call. The three hooks are today's own; `buildAuto` builds auto approve's context for the mode the settings layer is asked with.
@@ -667,7 +678,7 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
       if (tool.capability !== 'read' && tool.capability !== 'plan') this.options.emit({ type: 'permission', tool: tool.name, decision: 'denied' });
       return this.finish(call.id, false, `Not allowed: ${forbidden}`);
     }
-    try { sensitive = await tool.sensitive?.(input, context); risky = await tool.risky?.(input, context); } catch (error) { return this.finish(call.id, false, `Error: ${(error as Error).message}`); }
+    try { sensitive = await tool.sensitive?.(input, context); risky = await tool.risky?.(input, context); } catch (error) { return checkFailed(error); }
     // The gate decides, with today's permission logic as its settings layer. A risky action asks in every mode, and an earlier "allow this command" does
     // not cover it; a sensitive read that would be allowed asks unless the mode is fully-autonomous (today's line 631, now inside decide()).
     const gateCall = await gateToolCall(this.gate, gateInput(), { model: this.options.model });
@@ -688,7 +699,7 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
         } else {
           preview = sensitive ? { kind: 'note', text: sensitive } : await tool.preview?.(input, context);
         }
-      } catch (error) { return this.finish(call.id, false, `Error: ${(error as Error).message}`); }
+      } catch (error) { return checkFailed(error); }
       // The card keeps the reason the settings layer gave; a question the gate itself asked (effects it cannot read) carries the gate's own. A floor ask
       // keeps the settings layer's own words when it would have asked anyway (what the command does, in plain words) and adds why it always asks.
       const settingsSaid = gateCall.settings;

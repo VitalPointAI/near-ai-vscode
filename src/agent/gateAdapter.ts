@@ -8,7 +8,7 @@ import type { ActionCapability, ActionPolicy } from '../domain/policy';
 import { failedClosed } from '../domain/gate/bundle';
 import type { BundleState, GateContextName } from '../domain/gate/bundle';
 import { decide } from '../domain/gate/decide';
-import type { ActorRef, GateDecision, GateOptions, GateRequest, GateRuntime, SettingsAnswer, SettingsLayer } from '../domain/gate/decide';
+import type { ActorRef, GateDecision, GateOptions, GateRequest, GateRuntime, PreGateRule, SettingsAnswer, SettingsLayer } from '../domain/gate/decide';
 import { namesCredentialStore, namesIdentityFiles } from '../domain/gate/floor';
 import type { FloorFacts, FloorLocations } from '../domain/gate/floor';
 import { effectsFor } from '../domain/gate/manifest';
@@ -421,6 +421,43 @@ function keep(runtime: GateRuntime, record: DecisionRecord): void {
 
 /** Models named in records: the name the run uses, and NEAR AI as the provider. */
 const MODEL_PROVIDER = 'NEAR AI';
+
+/** A call refused before the gate could be asked (PRE_GATE_RULES): the name the model gave, its call id, why, and what the tool says it does when it is known. */
+export interface RefusedBeforeGate {
+  readonly tool: string;
+  readonly callId: string;
+  readonly rule: PreGateRule;
+  readonly reason: string;
+  /** The tool's own shorthand, when the tool exists; an unknown tool is recorded as a plan, which names nothing it could reach. */
+  readonly capability?: ActionCapability;
+}
+
+/**
+ * Records a call the loop refused before the gate could be asked, so every refused call is in the log (PR #70 review carry-over): a tool name the run does
+ * not have, or a tool's own check that threw. The record is `denied` and names the tool, never the arguments. Never throws.
+ */
+export function recordRefusedBeforeGate(runtime: GateRuntime, call: RefusedBeforeGate, options: Pick<GateCallOptions, 'model'> = {}): void {
+  try {
+    const capability = (call.capability === undefined ? undefined : WIDEST_SHORTHAND(call.capability)[0]) ?? { verb: 'plan' } as Capability;
+    keep(runtime, buildDecisionRecord({
+      recordId: (runtime.newRecordId ?? randomUUID)(),
+      sequence: 0,
+      time: (runtime.clock ?? Date.now)(),
+      productVersion: productVersionOf(runtime),
+      actor: runtime.actor,
+      ...(options.model === undefined ? {} : { model: { name: options.model, provider: MODEL_PROVIDER } }),
+      callId: call.callId,
+      capability,
+      resource: { name: shownName(call.tool), type: 'tool' },
+      outcome: 'denied',
+      rule: call.rule,
+      reason: call.reason,
+      bundleHash: bundleHashOf(runtime)
+    }));
+  } catch {
+    // A record that cannot be kept never changes what the loop does (D-21).
+  }
+}
 
 /** The rule id of a call the loop refuses because the tool's own `forbidden` hook named it (the key folder today). */
 export const TOOL_FORBIDDEN_RULE = 'settings.tool-forbidden';

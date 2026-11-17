@@ -23,6 +23,7 @@ import { GATE_RULE_IDS } from '../domain/gate/decide';
 import { EFFECTS_NOT_DECLARED_TEXT, describeManifest } from '../domain/gate/words';
 import type { GateRuntime } from '../domain/gate/decide';
 import type { ToolManifest } from '../domain/gate/manifest';
+import { validateDecisionRecord } from '../domain/gate/record';
 import type { DecisionRecord } from '../domain/gate/record';
 import type { ActionPolicy } from '../domain/policy';
 import { GateHost } from '../gate/host';
@@ -436,6 +437,53 @@ test('a call with unparseable arguments reaches no decision and no execution, an
     quiet.shell.dispose();
   }
   assert.equal(none.records.length, 0);
+});
+
+// PR #70 review carry-over: a call refused before the gate could be asked wrote no record, so the log did not show every refusal.
+test('a call to a tool the run does not have is refused and recorded denied with call.unknown-tool, naming the tool and never its arguments', async () => {
+  const root = await project();
+  const runtime = testGateRuntime();
+  const setup = runWith(root, [{ calls: [{ id: 'ghost', type: 'function', function: { name: 'DeleteEverything', arguments: '{"path":"secret-plan.md"}' } }] }, { text: 'ok' }], { gate: runtime });
+  try {
+    await go(setup);
+  } finally {
+    setup.shell.dispose();
+  }
+  assert.equal(runtime.records.length, 1);
+  const record = runtime.records[0]!;
+  assert.equal(record.authorizations[0]!.policy.name, 'call.unknown-tool');
+  assert.ok(GATE_RULE_IDS.includes('call.unknown-tool'));
+  assert.equal(record.api.request.uid, 'ghost');
+  assert.equal(record.action_id, 2, 'denied');
+  assert.deepEqual(record.resources, [{ name: 'DeleteEverything', type: 'tool' }]);
+  assert.ok(!JSON.stringify(record).includes('secret-plan'), 'the arguments are not recorded');
+  assert.equal(validateDecisionRecord(record).ok, true);
+});
+
+test('a tool whose own check throws is not run and is recorded denied with call.check-failed, for the forbidden, sensitive, risky and preview hooks', async () => {
+  const write = CORE_TOOLS.find((tool) => tool.name === 'Write') as AgentTool<any>;
+  for (const hook of ['forbidden', 'sensitive', 'risky', 'preview'] as const) {
+    const root = await project();
+    const runtime = testGateRuntime();
+    let ran = false;
+    const broken: AgentTool<any> = { ...write, [hook]: async () => { throw new Error(`the ${hook} check fell over at /private/detail`); }, run: async () => { ran = true; return 'ran'; } };
+    const setup = runWith(root, [{ calls: [{ id: `call-${hook}`, type: 'function', function: { name: 'Write', arguments: JSON.stringify({ file_path: 'out.md', content: 'x' }) } }] }, { text: 'ok' }], { gate: runtime, tools: [broken], answer: () => ({ decision: 'allow' }) });
+    try {
+      await go(setup);
+    } finally {
+      setup.shell.dispose();
+    }
+    assert.equal(ran, false, `${hook}: the call did not run`);
+    assert.match(toolOutputs(setup)[0] ?? '', /fell over/, `${hook}: the model is told why`);
+    const last = runtime.records.at(-1)!;
+    assert.equal(last.authorizations[0]!.policy.name, 'call.check-failed', hook);
+    assert.equal(last.api.request.uid, `call-${hook}`);
+    assert.equal(last.action_id, 2, `${hook}: denied`);
+    assert.equal(last.api.operation, 'workspaceWrite', `${hook}: named by the tool's own shorthand`);
+    assert.ok(!JSON.stringify(last).includes('/private/detail'), `${hook}: the error's text is not recorded`);
+    // The preview runs after the gate asked, so its record follows the ask and closes it; the other hooks run before the gate, so theirs is the only one.
+    assert.deepEqual(runtime.records.map((entry) => entry.unmapped.nearAi.outcome ?? entry.action_id), hook === 'preview' ? ['asked', 2] : [2], hook);
+  }
 });
 
 test('in a batch of concurrent lookups each call gets its own decision before its own run', async () => {
