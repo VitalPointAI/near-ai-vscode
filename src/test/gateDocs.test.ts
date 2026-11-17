@@ -13,6 +13,7 @@ import { BUNDLE_FAILURES } from '../domain/gate/bundle';
 import { MANIFEST_IS_A_CLAIM_TEXT, RUNS_ON_THIS_MACHINE_TEXT } from '../domain/gate/words';
 import { MAX_DECISION_LOG_BYTES, MAX_ROTATED_FILES, MODEL_REQUESTS_DIR } from '../gate/decisionLog';
 import { redactCredentialArguments } from '../domain/redaction';
+import { OUTBOUND_LIMITS_TEXT } from '../agent/outboundCheck';
 
 const ROOT = path.resolve(__dirname, '..', '..');
 const SECURITY = readFileSync(path.join(ROOT, 'SECURITY.md'), 'utf8');
@@ -394,4 +395,13 @@ test('SECURITY.md says a branch switch holds reads with Use this branch\'s label
     'a read a command does not show (a path built in a variable) is not seen. A glob in a command (such as `secret/*.md`) is checked against every labelled file it could match, and a glob next to a variable is judged by the strictest label in the project'
   ]) assert.ok(words.includes(phrase), phrase);
   assert.ok(!policySection.includes(EM_DASH));
+});
+
+test('D-60: SECURITY.md says, word for word with the code, what the outbound check of labelled text catches and what it does not', () => {
+  assert.ok(flat(SECURITY).includes(flat(OUTBOUND_LIMITS_TEXT)), 'the limits text is in SECURITY.md');
+  for (const phrase of ['copied or quoted', 'does not catch a paraphrase', 'an encoding such as base64', 'a program the agent starts', 'Phase 72', 'never in a record']) {
+    assert.ok(OUTBOUND_LIMITS_TEXT.includes(phrase), phrase);
+  }
+  assert.ok(!OUTBOUND_LIMITS_TEXT.includes(EM_DASH));
+  assert.ok(!/NEAR organization/.test(OUTBOUND_LIMITS_TEXT));
 });

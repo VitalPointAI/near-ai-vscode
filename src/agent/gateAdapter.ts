@@ -630,7 +630,8 @@ function recordFor(runtime: GateRuntime, gated: GatedCall, outcome: DecisionOutc
   const capability = gated.effects[0] ?? WIDEST_SHORTHAND('plan')[0] as Capability;
   const folders = { ...(gated.request.workspace === undefined ? {} : { project: gated.request.workspace.root }), ...(runtime.locations?.home === undefined ? {} : { home: runtime.locations.home }) };
   const reason = givenReason === undefined ? undefined : withoutMachinePaths(givenReason, folders);
-  const given = gated.resource ?? resourceOf(gated.request.tool, gated.effects, gated.request.command);
+  // A refusal for labelled text in the payload names the tool only, never the command or address that carried the text (D-60).
+  const given = rule === 'label.outbound-match' ? { name: shownName(gated.request.tool), type: 'tool' } : gated.resource ?? resourceOf(gated.request.tool, gated.effects, gated.request.command);
   const resource = { ...given, name: withoutMachinePaths(given.name, folders) };
   return buildDecisionRecord({
     recordId: (runtime.newRecordId ?? randomUUID)(),

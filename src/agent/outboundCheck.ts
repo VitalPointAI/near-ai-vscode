@@ -150,3 +150,7 @@ export const OUTBOUND_MATCH_TEXT =
 /** The sentence when the payload could not be read for checking (fail closed). */
 export const OUTBOUND_UNREADABLE_TEXT =
   'This chat has read labelled content, and what this call would send could not be checked for it, so it is refused rather than guessed.';
+
+/** What SECURITY.md says of this check, word for word (gateDocs pins it): what it catches and what it does not. */
+export const OUTBOUND_LIMITS_TEXT =
+  'While a chat holds content whose label may not go to any cloud (Internal, Confidential or higher by default), NEAR AI keeps fingerprints of the labelled text its agents read, never the text itself, only in memory and never in a record, and refuses a web fetch, a web search, an add-on server call or a command that could send data off this computer when what it would send carries some of that text. This catches labelled text copied or quoted into a request. It does not catch a paraphrase, an encoding such as base64, or a program the agent starts that reads the file and sends it itself; the sandbox planned for Phase 72 is the stronger fix.';
