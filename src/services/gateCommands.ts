@@ -103,9 +103,13 @@ export function policyDocumentText(state: BundleState | undefined, now: number):
     lines.push('NEAR AI is checking your policy file. Open this view again in a moment.');
     return lines.join('\n');
   }
-  lines.push('This view only shows your policy. Editing it changes nothing. To change the policy file itself, run NEAR AI: Reset Policy to Defaults.', '');
   const problem = policyProblem(state, now);
-  if (problem !== undefined || state.state !== 'valid') {
+  const usable = problem === undefined && state.state === 'valid';
+  // Edit Policy works only on a policy that can be trusted, so a failed one names only the reset (D-41).
+  lines.push(usable
+    ? 'This view only shows your policy. Editing it changes nothing. To change your policy, run NEAR AI: Edit Policy; to go back to the default, run NEAR AI: Reset Policy to Defaults.'
+    : 'This view only shows your policy. Editing it changes nothing. To change the policy file itself, run NEAR AI: Reset Policy to Defaults.', '');
+  if (!usable || state.state !== 'valid') {
     lines.push('State: not usable, so only reading and planning are allowed');
     // The sentence is its own line when there is one; a state with none adds nothing, not a blank line.
     if (problem) lines.push(problem);

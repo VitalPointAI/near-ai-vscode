@@ -283,3 +283,11 @@ test('every message Edit Policy, Apply Policy Draft and Show Policy show where c
     assert.doesNotMatch(withoutQuoted, /clearance (?:is |was )?(?:verified|enforced)|verified clearance|enforced clearance/i);
   }
 });
+
+test('Show Policy names the command that changes the policy (Edit Policy) beside the one that resets it, and stays read-only', async () => {
+  await started();
+  stub.shownDocuments.length = 0;
+  await stub.commands.get('nearAi.policy.show')?.();
+  const text = stub.shownDocuments[0]?.text ?? '';
+  assert.match(text, /This view only shows your policy\. Editing it changes nothing\. To change your policy, run NEAR AI: Edit Policy; to go back to the default, run NEAR AI: Reset Policy to Defaults\./);
+});
