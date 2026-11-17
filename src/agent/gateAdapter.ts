@@ -19,11 +19,11 @@ import { buildDecisionRecord, outcomeOf } from '../domain/gate/record';
 import type { DecisionOutcome, DecisionRecord, DecisionResource } from '../domain/gate/record';
 import { fromActionCapability } from '../domain/gate/vocabulary';
 import type { Capability } from '../domain/gate/vocabulary';
-import { classifyCommand, downloadSegments } from './commandSafety';
-import type { CommandEffect, PackageScriptsAt } from './commandSafety';
+import { classifyCommand, commandMaySend, downloadSegments, MAX_COMMAND_LENGTH, MAX_COMMAND_WORDS, namesCredentialFile } from './commandSafety';
+import type { CommandContext, CommandEffect, PackageScriptsAt } from './commandSafety';
 import { decidePermissionAsync, denyListReason, isAutoAllowed } from './permissions';
 import type { AutoApprovalContext, PermissionDecision, PermissionRules, RunGrants } from './permissions';
-import { shellReachesCredentialStore } from './tools';
+import { isSensitivePath, shellReachesCredentialStore } from './tools';
 import type { AgentTool } from './tools';
 import { OutsideWorkspaceError, resolveInWorkspace } from './workspace';
 
@@ -62,6 +62,11 @@ export interface GateCallInput {
    * places inside one of them is a known read, not an unknown effect; nothing here widens what may be written.
    */
   readonly readOnlyRoots?: readonly string[];
+  /**
+   * Set, with the file as the agent named it, when this call itself reads a file that may hold credentials (a Read of `.env`, `cat .env`): a call that
+   * reads one and can send data in the same line is held as one that runs after such a read (owner decision after PR #74, D-18).
+   */
+  readonly readsCredential?: string;
 }
 
 /** The cheap part of the classifier's context the floor needs: no safety model, no Open-GSD runtime check, nothing that asks a person. */
@@ -182,16 +187,7 @@ export async function floorFactsFor(input: FloorFactsInput, readers: FloorReader
   };
   let classified: ReturnType<typeof classifyCommand>;
   try {
-    classified = classify(input.command, {
-      root: input.root,
-      cwd: input.cwd ?? input.root,
-      ...(input.home === undefined ? {} : { home: input.home }),
-      ...(input.packageScripts === undefined ? {} : { packageScripts: { ...input.packageScripts } }),
-      ...(input.packageScriptsAt === undefined ? {} : { packageScriptsAt: input.packageScriptsAt }),
-      ...(input.trustedRoots === undefined ? {} : { trustedToolRoots: [...input.trustedRoots] }),
-      ...(input.gsdPreambles === undefined ? {} : { gsdPreambles: [...input.gsdPreambles] }),
-      temporaryRoots: input.temporaryRoots === undefined ? processTemporaryRoots() : input.temporaryRoots
-    });
+    classified = classify(input.command, floorClassifierContext(input));
   } catch {
     // The classifier is pure and should never throw; if it does, nothing is known about what the command does.
     return { effects: [], facts, effectsUnknown: 'the command could not be read' };
@@ -201,6 +197,50 @@ export async function floorFactsFor(input: FloorFactsInput, readers: FloorReader
   const printer = facts.credentialStore === undefined && classified.printsCredential !== undefined ? { credentialStore: printerReason(classified.printsCredential) } : {};
   const read = { ...facts, ...printer, ...(classified.credentialChange === undefined ? {} : { credentialChange: classified.credentialChange }) };
   return { effects: classified.effects ?? [], facts: read, ...(unknownWhy === undefined ? {} : { effectsUnknown: unknownWhy }) };
+}
+
+/** The classifier's context for the floor's own reading of a command: cheap, with no safety model, no allow list and no scratch record. */
+function floorClassifierContext(input: FloorFactsInput): CommandContext {
+  return {
+    root: input.root,
+    cwd: input.cwd ?? input.root,
+    ...(input.home === undefined ? {} : { home: input.home }),
+    ...(input.packageScripts === undefined ? {} : { packageScripts: { ...input.packageScripts } }),
+    ...(input.packageScriptsAt === undefined ? {} : { packageScriptsAt: input.packageScriptsAt }),
+    ...(input.trustedRoots === undefined ? {} : { trustedToolRoots: [...input.trustedRoots] }),
+    ...(input.gsdPreambles === undefined ? {} : { gsdPreambles: [...input.gsdPreambles] }),
+    temporaryRoots: input.temporaryRoots === undefined ? processTemporaryRoots() : input.temporaryRoots
+  };
+}
+
+/** How many words of a command are resolved through links when looking for a credential file it reads. */
+const CREDENTIAL_FILE_LINK_CHECKS = 64;
+
+/**
+ * The file that may hold credentials a shell command reads, as written, or undefined (owner decision after PR #74, D-18): one its text names (`.env`, a key
+ * file, `.ssh/`), or a word that resolves to one from the shell's folder, links followed. Text and paths only: nothing is opened. A command past the
+ * classifier's bounds, or one that cannot be read, is taken to read one (fail closed). A read the text does not show (a recursive search, a glob, a path
+ * built while the command runs) is not seen.
+ */
+export async function shellReadsCredentialFile(command: string, context: { root: string; shell?: { workingDirectory: string } }, options: { realpath?: (target: string) => Promise<string> } = {}): Promise<string | undefined> {
+  if (command.trim() === '') return undefined;
+  const named = namesCredentialFile(command);
+  if (named !== undefined) return named;
+  if (command.length > MAX_COMMAND_LENGTH) return 'a file the command may read';
+  const words = command.split(/[\s'"`;&|()<>=]+/).filter((word) => word !== '' && !word.startsWith('-') && !word.includes('$'));
+  if (words.length > MAX_COMMAND_WORDS) return 'a file the command may read';
+  const cwd = context.shell?.workingDirectory ?? context.root;
+  let checks = 0;
+  for (const word of words) {
+    const absolute = path.resolve(cwd, word);
+    if (isSensitivePath(word) || isSensitivePath(absolute)) return word.slice(0, 120);
+    if (checks >= CREDENTIAL_FILE_LINK_CHECKS || /[*?[]/.test(word)) continue;
+    checks += 1;
+    let real: string | undefined;
+    try { real = await (options.realpath ?? realpath)(absolute); } catch { real = undefined; }
+    if (real !== undefined && real !== absolute && isSensitivePath(real)) return word.slice(0, 120);
+  }
+  return undefined;
 }
 
 /** What decide() is told by the runtime: when the host knows them, the home folder and global storage the floor's text checks may name. Nothing turns the floor off. */
@@ -647,6 +687,12 @@ export async function gateToolCall(runtime: GateRuntime, input: GateCallInput, o
   // The deny list is read here, before the gate, so it refuses a shell command before any step that could only ask, unknown effects included (D-10). It
   // reads the whole text, so a command too long or too deep for the classifier is still matched.
   const denied = input.tool.capability === 'shell' && input.command !== undefined ? denyListReason(input.command, input.rules) : undefined;
+  // After a credential read (this run's, or this very call's), a call that can send data off this computer is held in every mode (owner decision after
+  // PR #74, D-18). Worked out only then, so other calls pay nothing for it.
+  const credentialRead = input.grants.credentialRead ?? input.readsCredential;
+  const credentialHold = credentialRead === undefined ? undefined
+    : (input.command === undefined ? callSendsOffMachine(input.tool, effects) : read?.effectsUnknown !== undefined || shellMaySend(input.command, { command: input.command, root: input.root, ...(input.shell ?? {}), ...(runtime.locations ?? {}) }))
+      ? credentialHoldReason(credentialRead, input.command !== undefined) : undefined;
   const request: GateRequest = {
     actor: runtime.actor,
     tool: input.tool.name,
@@ -665,6 +711,7 @@ export async function gateToolCall(runtime: GateRuntime, input: GateCallInput, o
     workspace: { root: input.root, cwd: input.shell?.cwd ?? input.root },
     // A path the tool would refuse as outside the project: refused up front, after the floor's own refusals, the emergency stop and the deny list.
     ...(paths.outside === undefined ? {} : { outsideWorkspace: paths.outside }),
+    ...(credentialHold === undefined ? {} : { credentialHold }),
     ...(denied === undefined ? {} : { settingsRefusal: { rule: 'settings.deny-list', reason: denied } })
   };
   const captured: { value?: PermissionDecision } = {};
@@ -689,6 +736,25 @@ export async function gateToolCall(runtime: GateRuntime, input: GateCallInput, o
 }
 
 const APPROVED_ONCE_REASON = 'A person approved this exact call once, after the run had moved on.';
+
+/** Whether a call that is not a shell command can send data off this computer: its tool runs elsewhere, or it reaches the network, sends or publishes. */
+function callSendsOffMachine(tool: AgentTool<any>, effects: readonly Capability[]): boolean {
+  if (tool.manifest.runsOn === 'remote') return true;
+  return effects.some((effect) => effect.verb === 'network' || effect.verb === 'send' || effect.verb === 'publish');
+}
+
+/** commandMaySend with the floor's own context; a reader that throws counts as "may send" (fail closed). */
+function shellMaySend(command: string, input: FloorFactsInput): boolean {
+  try {
+    return commandMaySend(command, floorClassifierContext(input));
+  } catch {
+    return true;
+  }
+}
+
+function credentialHoldReason(file: string, command: boolean): string {
+  return `This run has read ${shownName(file).slice(0, 120)}, which may hold credentials, and this ${command ? 'command' : 'call'} may send data off this computer. It asks in every mode after such a read; approve it only if you expect it.`;
+}
 
 /** How long a late floor approval waits for its call (PR #74 review round 5): long enough for the lead to retry it, short enough not to linger. */
 export const FLOOR_APPROVAL_TTL_MS = 5 * 60_000;

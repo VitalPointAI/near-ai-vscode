@@ -6,8 +6,9 @@ import * as path from 'node:path';
 import type { ActionCapability, ActionPolicy } from '../domain/policy';
 import type { AgentMessage, CompletionEvent, ToolCall, ToolDefinition, UsageMetadata } from '../services/nearAiClient';
 import { AutoApprovalContext, allowRuleBlocker, isAutoAllowed, PermissionRules, RunGrants, suggestAllowRule } from './permissions';
+import { CREDENTIAL_HOLD_RULE } from '../domain/gate/decide';
 import type { GateRuntime } from '../domain/gate/decide';
-import { TOOL_FORBIDDEN_RULE, gateToolCall, recordApprovalReply, recordRefusedBeforeGate, unavailableGateRuntime } from './gateAdapter';
+import { TOOL_FORBIDDEN_RULE, gateToolCall, recordApprovalReply, recordRefusedBeforeGate, shellReadsCredentialFile, unavailableGateRuntime } from './gateAdapter';
 import type { FloorShellContext } from './gateAdapter';
 import { PackageScriptsReader } from './packageScripts';
 import { PREAMBLE_START, resolveGsdRun } from '../gsd/preamble';
@@ -666,13 +667,15 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
     let sensitive: string | undefined;
     let risky: string | undefined;
     let forbidden: string | undefined;
+    // The file that may hold credentials this call reads, when it reads one (owner decision after PR #74, D-18): set on the run once the call runs.
+    let readsCredential: string | undefined;
     try { forbidden = await tool.forbidden?.(input, context); } catch (error) { return checkFailed(error); }
     // The floor reads every shell command, in every mode, with a cheap context of its own (Pitfall 5).
     const floorShell = command === undefined ? undefined : await this.floorShellContext(context);
     // What the gate is told about this call. The three hooks are today's own; `buildAuto` builds auto approve's context for the mode the settings layer is asked with.
     const gateInput = (): Parameters<typeof gateToolCall>[1] => ({
       tool, raw, root: context.root, callId: call.id, ...(command === undefined ? {} : { command }), ...(floorShell === undefined ? {} : { shell: floorShell }),
-      ...(forbidden ? { forbidden } : {}), ...(sensitive ? { sensitive } : {}), ...(risky ? { risky } : {}),
+      ...(forbidden ? { forbidden } : {}), ...(sensitive ? { sensitive } : {}), ...(risky ? { risky } : {}), ...(readsCredential ? { readsCredential } : {}),
       policy: this.options.policy, rules: this.options.rules, grants: this.grants,
       ...(context.readOnlyRoots === undefined || context.readOnlyRoots.length === 0 ? {} : { readOnlyRoots: context.readOnlyRoots }),
       // Auto's context is built for every gated call, because a tool that marks itself autoSafe (the web tools) needs it as well as a shell command.
@@ -690,6 +693,9 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
       return this.finish(call.id, false, `Not allowed: ${forbidden}`);
     }
     try { sensitive = await tool.sensitive?.(input, context); risky = await tool.risky?.(input, context); } catch (error) { return checkFailed(error); }
+    // A read tool's own sensitive check is its credential read; a shell command's is found from its text and paths (a check that fails counts as one).
+    if (command !== undefined) readsCredential = await shellReadsCredentialFile(command, context).catch(() => 'a file the command may read');
+    else if (tool.capability === 'read' && sensitive) readsCredential = credentialShown(input, tool.name);
     // The gate decides, with today's permission logic as its settings layer. A risky action asks in every mode, and an earlier "allow this command" does
     // not cover it; a sensitive read that would be allowed asks unless the mode is fully-autonomous (today's line 631, now inside decide()).
     const gateCall = await gateToolCall(this.gate, gateInput(), { model: this.options.model });
@@ -715,7 +721,7 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
       // keeps the settings layer's own words when it would have asked anyway (what the command does, in plain words) and adds why it always asks.
       const settingsSaid = gateCall.settings;
       const settingsReason = settingsSaid?.decision === 'ask' ? settingsSaid.reason : undefined;
-      const reason = decision.floor
+      const reason = decision.floor || decision.rule === CREDENTIAL_HOLD_RULE
         ? (settingsReason && decision.reason && !settingsReason.includes(decision.reason) ? `${settingsReason} ${decision.reason}` : decision.reason ?? settingsReason)
         : settingsSaid === undefined ? decision.reason : settingsSaid.decision === 'ask' ? settingsSaid.reason : risky ?? sensitive;
       // Owner decision 2026-11-05 (0.4.17): the card says what the safety issue is in plain words, can show the whole command or code, and offers
@@ -769,6 +775,8 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
         try { await this.options.rememberAllowRule?.(allowRule); } catch { /* still allowed for this run; the setting could not be saved */ }
       }
     }
+    // The call runs: from now on this run has read a file that may hold credentials, and what can send data off this computer asks (D-18).
+    if (readsCredential !== undefined) this.grants.noteCredentialRead(readsCredential);
     const ranAt = Date.now();
     const cwdBefore = context.shell?.workingDirectory ?? context.root;
     try {
@@ -899,6 +907,12 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
     this.options.emit({ type: 'tool-end', callId, ok, output: bounded.length > UI_OUTPUT_CHARS ? `${bounded.slice(0, UI_OUTPUT_CHARS)}\n…` : bounded });
     return bounded;
   }
+}
+
+/** The path a read tool was given, for the credential-read hold's reason; the tool's name when there is none. */
+function credentialShown(input: unknown, fallback: string): string {
+  const given = (input as { path?: unknown } | undefined)?.path;
+  return typeof given === 'string' && given.trim() !== '' ? given : fallback;
 }
 
 const LEADING_CD = /^cd\s+(?:--\s+)?(?:"[^"]*"|'[^']*'|[^\s;&|]+)\s*(?:&&|;)\s*/;

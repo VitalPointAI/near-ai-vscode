@@ -6,6 +6,7 @@ import { normalizeRelative, PROTECTED_WRITE, STATE_FOLDER_PATH, STATE_FOLDER_TEX
 import { parsePathPattern } from '../domain/gate/vocabulary';
 import type { Capability, PublishTarget } from '../domain/gate/vocabulary';
 import { isSensitivePath } from './tools';
+import { NETWORK_COMMAND as NETWORK_TEXT } from './untrusted';
 
 // The deterministic half of the `auto` approval mode. It decides the clear cases on its own:
 // ordinary build, test, and read-only commands inside the workspace are `safe`; commands that can
@@ -783,6 +784,36 @@ function skipGlobals(name: string, args: readonly Word[]): { rest: Word[]; value
     return { unknown: `${text} is an option of ${name} the rules do not know, so its subcommand cannot be told` };
   }
   return { rest: args.slice(index), valued, skipped, ...(folder === undefined ? {} : { folder }) };
+}
+
+/** Moving the shell's folder runs nothing. */
+const FOLDER_MOVES: ReadonlySet<string> = new Set(['cd', 'pushd', 'popd']);
+
+/** The credential or knowledge-base path a command's text names (SENSITIVE_TEXT_BASE: not the project's state folder, which is not a credential file), as written, or undefined. */
+export function namesCredentialFile(command: string): string | undefined {
+  const found = SENSITIVE_TEXT_BASE.exec(command);
+  return found === null ? undefined : found[0].replace(/^[\s'"=:<>/]+/, '').slice(0, 120);
+}
+
+/**
+ * Whether a shell command can send data off this computer, read whole and failing closed (owner decision after PR #74, D-18): it cannot only when the
+ * rules call it safe, or when every part of it is a plain local reader (`cat`, `grep`, `head`, ...) with no substitution, and in either case it has no
+ * network program, no download, no publish or send, and nothing the rules did not read. Used to hold such a command after the run read a credential file.
+ */
+export function commandMaySend(command: string, context: CommandContext): boolean {
+  if (NETWORK_TEXT.test(command) || downloadSegments(command).length > 0) return true;
+  const classified = classifyCommand(command, context);
+  if (classified.effectsUnknown !== undefined) return true;
+  if ((classified.effects ?? []).some((effect) => effect.verb === 'publish' || effect.verb === 'send' || effect.verb === 'network')) return true;
+  if (classified.verdict === 'safe') return false;
+  const lexed = lex(command.trim());
+  if (lexed.broken !== undefined || lexed.substitutions.length > 0 || lexed.segments.length === 0) return true;
+  return !lexed.segments.every((segment) => {
+    // Past any leading `NAME=value` assignments, the program must be a plain local reader, named as written.
+    const first = segment.words.findIndex((word) => !/^[A-Za-z_][A-Za-z0-9_]*=/.test(word.text));
+    const program = first < 0 ? undefined : segment.words[first];
+    return program !== undefined && !program.expansion && !program.glob && (READ_ONLY.has(programName(program.text)) || FOLDER_MOVES.has(program.text));
+  });
 }
 
 /** The raw text names a credential or knowledge-base path anywhere (also inside quotes and substitutions). */

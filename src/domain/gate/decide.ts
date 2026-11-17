@@ -61,6 +61,11 @@ export interface GateRequest extends FloorInput {
    * floor's refusals and a settings refusal.
    */
   readonly outsideWorkspace?: string;
+  /**
+   * Set, with the plain reason, when the run (or this call) has read a file that may hold credentials and this call can send data off this computer (owner
+   * decision after PR #74, D-18): it asks in every mode, fully-autonomous included, with no "always allow" and no grant, and is refused with nobody here.
+   */
+  readonly credentialHold?: string;
 }
 
 export interface SettingsAnswer {
@@ -122,6 +127,9 @@ export interface GateRuntime {
 export const PRE_GATE_RULES = Object.freeze(['call.unknown-tool', 'call.check-failed', 'call.bad-arguments'] as const);
 export type PreGateRule = (typeof PRE_GATE_RULES)[number];
 
+/** A call that can send data off this computer after the run read a file that may hold credentials (GateRequest.credentialHold). */
+export const CREDENTIAL_HOLD_RULE = 'taint.credential-read';
+
 /** A file tool's path outside the project and every folder the tool may use: the tool would refuse it, so the gate does, with no card. */
 export const OUTSIDE_WORKSPACE_RULE = 'call.outside-workspace';
 
@@ -131,7 +139,7 @@ export const GATE_RULE_IDS: readonly string[] = Object.freeze([
   'bundle.failed-closed', 'bundle.unavailable', 'bundle.ceiling.context', 'bundle.ceiling.mode', 'bundle.ceiling.unattended-mcp', 'manifest.context', 'manifest.effects-unknown',
   'label.dominance', 'label.no-agent-tools', 'label.network-at-mark',
   ...ROUTE_RULES,
-  'taint.held',
+  'taint.held', CREDENTIAL_HOLD_RULE,
   'settings.emergency-stop', 'settings.read-plan', 'settings.auto-safe-tool', 'settings.mode.edits', 'settings.run-grant.edits', 'settings.deny-list',
   'settings.engagement-grant', 'settings.run-grant.command', 'settings.allow-rule', 'settings.mode.fully-autonomous', 'settings.mode.other',
   'settings.auto.classifier', 'settings.unattended-verification', 'settings.risk.outside-workspace', 'settings.risk.installs', 'settings.safety-model',
@@ -253,6 +261,12 @@ export async function decide(request: GateRequest, bundleState: BundleState, set
     return request.presence === 'none'
       ? make('deny', verdict.rule, mode, { reason: `${NOBODY_HERE}${verdict.reason}`, floor: true })
       : make('ask', verdict.rule, mode, { reason: verdict.reason, floor: true });
+  }
+  // After a credential read, a call that can send data out asks in every mode with no shortcut, and with nobody here it is refused (D-18, after PR #74).
+  if (request.credentialHold !== undefined && request.credentialHold !== '') {
+    return request.presence === 'none'
+      ? make('deny', CREDENTIAL_HOLD_RULE, mode, { reason: `${NOBODY_HERE}${request.credentialHold}` })
+      : make('ask', CREDENTIAL_HOLD_RULE, mode, { reason: request.credentialHold });
   }
   // Today's loop, line 631: a held action asks in every mode and offers no run-wide grant; a sensitive call that would be allowed asks unless the mode is
   // fully-autonomous. A protected write never gets here (the floor asked above), so in fully-autonomous only a workspace credential-file read, such as

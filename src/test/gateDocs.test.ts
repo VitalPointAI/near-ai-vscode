@@ -204,6 +204,9 @@ test('the old fully-autonomous wording is gone from SECURITY.md and README, and 
   assert.match(row, /publishing and destruction still ask/);
   assert.match(row, /the key folder and credential stores are refused/);
   assert.match(row, /there is no sandbox around the shell yet/);
+  // Owner decision after PR #74 (D-18): a credential read holds what could send it out.
+  assert.match(row, /After it reads such a file, anything that could send data off this computer asks too/);
+  assert.ok(flat(floorSection).includes('Once a run has read such a file, in any mode, a call that could send data off this computer asks in every mode, `fully-autonomous` included, with no **Always allow** and no grant for the rest of the run, and is refused when nobody is there to answer'));
   assert.match(readmeActionPolicy, /publishing and destruction still ask/);
   assert.match(readmeActionPolicy, /the key folder and credential stores are refused/);
   assert.doesNotMatch(readmeActionPolicy, /writes into `\.git\/` \(only for throwaway/);

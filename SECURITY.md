@@ -159,6 +159,18 @@ first in every mode except `fully-autonomous`, where it runs without asking (see
 Known limitations). The holds after outside content apply in every mode (see
 "Outside content and prompt injection").
 
+Once a run has read such a file, in any mode, a call that could send data off
+this computer asks in every mode, `fully-autonomous` included, with no
+**Always allow** and no grant for the rest of the run, and is refused when
+nobody is there to answer: a network command, a download, publishing or
+sending, a web fetch or search, a call to an add-on server with a web address,
+and any shell command the checks do not know to be local. Only commands the
+safety rules call safe, and plain local readers such as `cat`, `grep` or
+`head`, still run unasked. A command that reads such a file and could send in
+the same line is held the same way. The read is seen as the other checks see
+one: a file the command or tool names, or a path that resolves to one; a
+recursive search, a glob or a path built while the command runs is not.
+
 The checks that keep agents out of key and credential folders read the text of
 a command, following the shell's folder and any cd or pushd earlier in the same
 command. They cannot see a path built while the command runs (from a variable
@@ -827,7 +839,7 @@ messages.
 | Project memory has a searchable list, not a graph view | A team's own knowledge graph (see "Where your data goes") is shown as a network in Team Studio; members also get project memory and their own private memory |
 | Agent reputation is recorded per role but does not yet change which model a role uses | Routing comes from team `model:` lines and the deep/standard/fast settings |
 | **Revert** restores files changed by the agent's file tools, not changes made by shell commands it ran | Use git for command side effects; documented in the chat |
-| Under `fully-autonomous`, the agent runs commands and reads likely credential files inside the project without asking | Writes into `.git/`, `.planning/.near-ai/` and `.near-ai/`, publishing and destruction still ask, with no "always allow", and the key folder and credential stores are refused. The command checks read text, and there is no sandbox around the shell yet, so a command whose words they cannot see, such as one built at run time, runs; one too deep or too long to read asks (see "What the agent can do without asking"). Intended for throwaway workspaces |
+| Under `fully-autonomous`, the agent runs commands and reads likely credential files inside the project without asking | Writes into `.git/`, `.planning/.near-ai/` and `.near-ai/`, publishing and destruction still ask, with no "always allow", and the key folder and credential stores are refused. After it reads such a file, anything that could send data off this computer asks too. The command checks read text, and there is no sandbox around the shell yet, so a command whose words they cannot see, such as one built at run time, runs; one too deep or too long to read asks (see "What the agent can do without asking"). Intended for throwaway workspaces |
 | Facts the agent saves with Remember are not reviewed when saved, and later runs start with the relevant ones | Each fact is labeled "verify before relying on it"; review, correct or reset memory with **Manage Project Memory** |
 | Spend limits use NEAR's published prices for estimates; the actual charge arrives from billing after the run | Each run, with all its sub-agents, stops before a model turn once its estimate reaches `nearAi.agent.maxRunCostUsd` (default $5), what is left of `nearAi.dailySpendLimitUsd`, or `nearAi.agent.maxRunTokens`; an agent repeating the same action is nudged and then stopped |
 
