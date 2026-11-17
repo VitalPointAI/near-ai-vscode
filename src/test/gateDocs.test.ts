@@ -6,7 +6,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
 import { CLEARANCE_SELF_ASSERTED_TEXT } from '../domain/gate/labels';
-import { FLOOR_CANNOT_SEE_TEXT, FLOOR_EFFECTS_CANNOT_SEE_TEXT } from '../domain/gate/floor';
+import { FLOOR_CANNOT_SEE_TEXT, FLOOR_EFFECTS_CANNOT_SEE_TEXT, namesCredentialStore } from '../domain/gate/floor';
 import { classifyCommand, MAX_COMMAND_LENGTH, MAX_NESTING } from '../agent/commandSafety';
 import { BUNDLE_FAILURES } from '../domain/gate/bundle';
 import { MANIFEST_IS_A_CLAIM_TEXT, RUNS_ON_THIS_MACHINE_TEXT } from '../domain/gate/words';
@@ -150,6 +150,14 @@ test('SECURITY.md carries both of the floor\'s own statements of what it cannot 
   assert.ok(flat(floorSection).includes(FLOOR_EFFECTS_CANNOT_SEE_TEXT), 'the publishing and destruction checks');
   // The credential text no longer claims a folder change followed by a bare file name is missed: plan 16 catches `cd ~ && cat .netrc`.
   assert.doesNotMatch(FLOOR_CANNOT_SEE_TEXT, /a folder change followed by a bare file name/);
+  // PR #74 review round 7: the credential-store check reads text, so a command that only mentions a store is refused too, with nothing to approve. The
+  // text says so and says what to do, and it is true of the code.
+  assert.match(FLOOR_CANNOT_SEE_TEXT, /a command that only mentions one of these folders \(a commit message that names ~\/\.ssh, say\) is refused too, with nothing to approve: rephrase the command so it does not name the folder, or do that step yourself\./);
+  assert.ok(namesCredentialStore('git commit -m "stop reading ~/.ssh in the deploy script"'), 'a commit message that names ~/.ssh is refused, as the text says');
+  // The "false alarm costs one card" sentence is about the publishing and destruction checks only; the credential-store check refuses with no card.
+  const floorWords = flat(floorSection);
+  assert.match(floorWords, /here a false alarm costs one card and a miss would run unasked\. The check of key and credential folders above is stricter: a mention there is refused, with no card\./);
+  assert.doesNotMatch(floorWords, /: a false alarm costs one card, a miss would run unasked\./);
 });
 
 test('each gap the publishing and destruction text names is a real gap today, so the text is not out of date in either direction', () => {

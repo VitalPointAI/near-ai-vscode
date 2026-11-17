@@ -139,7 +139,10 @@ or $(...)), what a script or an npm script the command starts does, a program
 that reads a store for you (for example git credential fill), a walk down from
 a parent folder, or anything an add-on server or the cyber host tools do inside
 themselves. There is no operating-system sandbox around the shell yet, so a
-determined command can still get past them.
+determined command can still get past them. Because they read text, a command
+that only mentions one of these folders (a commit message that names ~/.ssh,
+say) is refused too, with nothing to approve: rephrase the command so it does
+not name the folder, or do that step yourself.
 
 The checks that find publishing, destruction and protected writes in a shell
 command also read its text, through npm, yarn, pnpm and bun scripts (from the
@@ -155,7 +158,9 @@ program they do not know with a command they would flag among the words after
 it, is not guessed at: it asks, and it is refused when nobody is there to
 answer. That last case also asks when the words
 only mention such a command (for example `mytool git push`, where `git push` is
-text the program reads): a false alarm costs one card, a miss would run unasked.
+text the program reads): here a false alarm costs one card and a miss would run
+unasked. The check of key and credential folders above is stricter: a mention
+there is refused, with no card.
 
 The project's key folder, `.near-ai/state/keys/` (and the `keys/` folder of an older
 `state.previous-*` or `state.adopt-*` copy), is off limits to agents in every mode, with no

@@ -18,7 +18,9 @@ to undo, and no mode lets an agent near the places where your keys and passwords
   folder, SSH keys, cloud and registry credential files, keychain commands that print a secret, VS
   Code's own secrets database and this extension's identity and policy files are refused with no
   card, whether the agent uses a file tool or a shell command. A file in your project that only has
-  the same name as VS Code's secrets database is yours to use.
+  the same name as VS Code's secrets database is yours to use. The check reads the command's text,
+  so a command that only mentions one of these places, such as a commit message naming `~/.ssh`, is
+  refused too: rephrase it, or do that step yourself.
 - **A command the checks cannot read whole asks.** A shell command nested more than four levels
   deep, too long to check, or started by a program the checks do not know with a command such as
   git push after it, asks first in Full auto too, and is refused when nobody is there to answer,
