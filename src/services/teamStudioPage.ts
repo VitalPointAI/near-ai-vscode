@@ -983,7 +983,8 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
       case 'use-team': {
         // One at a time (PR #75 review): a second Use as is while one is still asking or writing is ignored, so a double click never asks twice or writes
         // twice. The page also waits for the answer before it offers the buttons again.
-        if (usingTeam) return;
+        // A second request is answered too (PR #75 review): a page that lost its waiting state, after a reload say, is told rather than left silent.
+        if (usingTeam) { post({ type: 'error', text: 'Still working on the team you chose. Wait for it to finish.' }); return; }
         usingTeam = true;
         const use = message;
         try {
@@ -1060,6 +1061,9 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
             post({ type: 'used', text: `Saved "${name}" to My teams, and /team:${slug} is in the chat box. Type your task after it and send.`, focus: `user:${slugify(slug)}` });
             return;
           })();
+        } catch (error) {
+          // A confirm or write that fails still answers, so the page never waits with its buttons off (PR #75 review).
+          post({ type: 'error', text: `Not used: ${(error as Error).message || 'the team could not be written.'}` });
         } finally { usingTeam = false; }
         return;
       }
@@ -1349,8 +1353,9 @@ function savedWizard(value: unknown): SavedWizard | undefined {
 
 /** "2026-10-29T14-03-12-345Z.md" (or "...-345Z-2.md", the second taken in that millisecond) → "2026-10-29 14:03:12 UTC". */
 export function versionLabel(ref: string): string {
-  const match = /^(\d{4}-\d\d-\d\d)T(\d\d)-(\d\d)-(\d\d)-\d+Z(?:-\d+)?\.md$/.exec(ref);
-  return match ? `${match[1]} ${match[2]}:${match[3]}:${match[4]} UTC` : ref.replace(/\.md$/, '');
+  // Versions taken in the same millisecond carry a number (-2, -3); the label keeps it, so History never shows two identical entries (PR #75 review).
+  const match = /^(\d{4}-\d\d-\d\d)T(\d\d)-(\d\d)-(\d\d)-\d+Z(?:-(\d+))?\.md$/.exec(ref);
+  return match ? `${match[1]} ${match[2]}:${match[3]}:${match[4]} UTC${match[5] ? ` (${match[5]})` : ''}` : ref.replace(/\.md$/, '');
 }
 
 function displayPath(file: string, root: string | undefined): string {

@@ -2591,7 +2591,7 @@ test('page: Use as is and Clone and modify wait for the host\'s answer, so a dou
   assert.equal(page.byLabel('Use Web team as is')!.disabled, false);
 });
 
-test('host: a second Use as is while one is still running is ignored: one question, one write, one answer', async () => {
+test('host: a second Use as is while one is still running does not run: one question, one write, and it is told to wait', async () => {
   const h = await harness();
   await h.library.create('Web team', teamMarkdown(draft()));
   await h.send({ type: 'ready' });
@@ -2602,10 +2602,29 @@ test('host: a second Use as is while one is still running is ignored: one questi
   await Promise.all([h.send({ type: 'use-team', id: 'gsd:review' }), h.send({ type: 'use-team', id: 'gsd:review' })]);
   assert.equal(h.confirmed.length, 1, 'asked once');
   assert.equal((await h.library.versions(projectFile)).length, before + 2, 'the old team kept once and the new one written once');
-  assert.deepEqual(h.posted.slice(posted).filter((message) => ['team', 'used', 'error', 'notice'].includes(message.type)).map((message) => message.type), ['team']);
+  const answers = h.posted.slice(posted).filter((message) => ['team', 'used', 'error', 'notice'].includes(message.type));
+  assert.deepEqual(answers.map((message) => message.type).sort(), ['error', 'team'], 'the first is answered with the team, the second is told to wait');
+  assert.match(answers.find((message) => message.type === 'error')!.text, /^Still working on the team you chose\./);
   // Once it has answered, the next one runs.
   h.confirmAnswer.value = false;
   assert.deepEqual((await answersTo(h, { type: 'use-team', id: 'lib:web-team' })).map((answer) => answer.declined), [true]);
+  h.close();
+});
+
+test('host: a Use as is whose write fails answers with an error, and the next one runs', async () => {
+  const h = await harness();
+  await h.library.create('Web team', teamMarkdown(draft()));
+  await h.send({ type: 'ready' });
+  await h.send({ type: 'use-team', id: 'lib:web-team' });
+  const snapshot = h.library.snapshot.bind(h.library);
+  h.library.snapshot = async () => { throw new Error('the disk is full.'); };
+  const posted = h.posted.length;
+  await h.send({ type: 'use-team', id: 'gsd:review' });
+  const answers = h.posted.slice(posted).filter((message) => ['team', 'used', 'error', 'notice'].includes(message.type));
+  assert.deepEqual(answers.map((message) => [message.type, message.text]), [['error', 'Not used: the disk is full.']]);
+  h.library.snapshot = snapshot;
+  h.confirmAnswer.value = false;
+  assert.deepEqual((await answersTo(h, { type: 'use-team', id: 'lib:web-team' })).map((answer) => answer.declined), [true], 'the next request runs');
   h.close();
 });
 
@@ -2622,7 +2641,8 @@ test('versions: a burst within one millisecond is named after that millisecond, 
     for (let n = 1; n <= 25; n += 1) { await writeFile(file, `v${n}`); await library.snapshot(file); }
     const names = (await library.versions(file)).map((version) => path.basename(version));
     assert.equal(names.length, 20, 'the latest 20 are kept');
-    assert.deepEqual([...new Set(names.map((name) => versionLabel(name)))], ['2023-11-14 22:13:20 UTC'], 'never named after a later time than it was taken');
+    assert.deepEqual([...new Set(names.map((name) => versionLabel(name).replace(/ \(\d+\)$/, '')))], ['2023-11-14 22:13:20 UTC'], 'never named after a later time than it was taken');
+    assert.equal(new Set(names.map((name) => versionLabel(name))).size, names.length, 'and no two History labels are the same');
     assert.deepEqual(await contents(), Array.from({ length: 20 }, (_, index) => `v${25 - index}`), 'newest first, and the oldest five were the ones dropped');
     Date.now = () => at + 1;
     await writeFile(file, 'a moment later');
