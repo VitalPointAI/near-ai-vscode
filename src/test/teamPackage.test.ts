@@ -198,14 +198,15 @@ const TEAMS: LibraryTeam[] = [
 
 test('the picker lists the person\'s saved teams and the built-in ones, with where each came from, under All, My teams and Built-in', () => {
   const entries = teamPicker(POINTS, TEAMS);
-  assert.deepEqual(entries.map((entry) => [entry.id, entry.source]), [['lib:web-crew', 'mine'], ['lib:shared', 'mine'], ['recommend', 'builtin'], ['type:software', 'builtin'], ['gsd:review', 'builtin'], ['empty', 'builtin']]);
+  // 0.4.30: the recommendation is on the builder's first screen, so the picker leaves it out.
+  assert.deepEqual(entries.map((entry) => [entry.id, entry.source]), [['lib:web-crew', 'mine'], ['lib:shared', 'mine'], ['type:software', 'builtin'], ['gsd:review', 'builtin'], ['empty', 'builtin']]);
   const web = entries[0]!;
   assert.deepEqual([web.label, web.description, web.memberCount, web.members, web.origin, web.teamId], ['Web crew', 'Builds pages', 2, ['lead', 'dev'], 'My team, saved 2026-11-01', 'user:web-crew']);
   assert.deepEqual([entries[1]!.origin, entries[1]!.imported], ['Imported, not approved yet', true]);
   assert.equal(entries.find((entry) => entry.id === 'type:software')!.origin, 'Built in: project type');
   assert.deepEqual(filterPicker(entries, 'all').map((entry) => entry.id), entries.map((entry) => entry.id));
   assert.deepEqual(filterPicker(entries, 'mine').map((entry) => entry.id), ['lib:web-crew', 'lib:shared', 'empty']);
-  assert.deepEqual(filterPicker(entries, 'builtin').map((entry) => entry.id), ['recommend', 'type:software', 'gsd:review', 'empty']);
+  assert.deepEqual(filterPicker(entries, 'builtin').map((entry) => entry.id), ['type:software', 'gsd:review', 'empty']);
   // No saved teams: My teams shows only "Start empty", and the page says how to get one.
   assert.deepEqual(filterPicker(teamPicker(POINTS, [TEAMS[0]!]), 'mine').map((entry) => entry.id), ['empty']);
   assert.match(NO_SAVED_TEAMS_TEXT, /^You have no saved teams yet\. Save a team as one of your teams in Team Studio/);
