@@ -100,6 +100,9 @@ test('a call reading two trusted-folder files names both in its record, and a li
 test('trustedReadsName: one name is itself, several are listed, and a list past the bound ends with how many more', async () => {
   const { trustedReadsName } = await import('../agent/gateAdapter');
   assert.equal(trustedReadsName(['a/x.md']), 'a/x.md');
+  const long = trustedReadsName([`a/${'x'.repeat(400)}.md`]);
+  assert.ok(long.startsWith('a/xxx') && !/ and \d+ more$/.test(long), `one over-long name is cut by shownName first, so it fits and carries no count (review round 12 checked): ${long.slice(-30)}`);
+  assert.match(trustedReadsName([`a/${'x'.repeat(400)}.md`, 'b/y.md']), / and 1 more$/);
   assert.equal(trustedReadsName(['a/x.md', 'a/y.md', 'b/z.md']), 'a/x.md, a/y.md, b/z.md');
   const many = Array.from({ length: 40 }, (_, index) => `runtime/docs/file-${index}.md`);
   const named = trustedReadsName(many);
