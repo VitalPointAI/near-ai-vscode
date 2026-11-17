@@ -2797,3 +2797,65 @@ test('host: Recommend shows the team Use as is would save, from the same answers
   ]) assert.equal(parseStudioMessage(message), undefined, JSON.stringify(message));
   h.close();
 });
+
+// ---------- 0.4.30: every team card is the same size (owner, 2026-11-17) ----------
+
+const LONG_DESCRIPTION = 'Researches a market from primary sources, weighs every claim against at least two of them, and writes a short brief with a citation for each sentence, then checks the brief for plagiarism and tone before it is handed over to the person who asked for it.';
+const MEMBER = (name: string) => ({ name, role: name, tier: 'deep', model: 'z-ai/glm-5.3', privacy: 'tee', privacyText: 'TEE' });
+const LONG_CARD = { ...WEB_CARD, id: 'user:market', name: 'Market team', description: LONG_DESCRIPTION, command: '/team:market ', members: ['lead', 'researcher', 'analyst', 'writer', 'editor', 'checker', 'designer'].map(MEMBER) };
+
+test('page: library cards clamp a long description to three lines with Show more for that card only, and clamp the member list too', async () => {
+  const page = await runPage();
+  page.dispatch({ type: 'state', context: context(), library: { teams: [LONG_CARD, WEB_CARD], archived: [] } });
+  const card = (id: string) => page.doc.body.all().find((node) => node.tagName === 'li' && node.dataset.id === id)!;
+  const long = card('user:market');
+  const desc = long.all().find((node) => node.className.split(/\s+/).includes('desc'))!;
+  assert.ok(desc.className.split(/\s+/).includes('clamp'), 'the description is clamped');
+  assert.ok(desc.id, 'the description has an id for Show more to control');
+  const more = page.byLabel('Show more about Market team')!;
+  assert.equal(more.tagName, 'button', 'a real button: reachable with Tab, works with Enter and Space');
+  assert.equal(more.textContent, 'Show more');
+  assert.equal(more.getAttribute('aria-expanded'), 'false');
+  assert.equal(more.getAttribute('aria-controls'), desc.id);
+  assert.equal(more.hidden, false);
+  const chips = (id: string) => card(id).all().filter((node) => node.className.split(/\s+/).includes('chip')).map((node) => node.textContent);
+  assert.equal(chips('user:market').length, 5, 'four members and a count of the rest');
+  assert.equal(chips('user:market').at(-1), '+3 more');
+  assert.match(long.textContent, /7 members/);
+  // The short card has nothing hidden, so it offers nothing to show.
+  const short = page.byLabel('Show more about Web team');
+  assert.ok(!short || short.hidden, 'nothing to show on a short card');
+  more.click();
+  const less = page.byLabel('Show less about Market team')!;
+  assert.equal(less.getAttribute('aria-expanded'), 'true');
+  assert.equal(less.textContent, 'Show less');
+  assert.ok(card('user:market').className.split(/\s+/).includes('expanded'));
+  assert.equal(card('user:web').className.split(/\s+/).includes('expanded'), false, 'only that card');
+  assert.deepEqual(chips('user:market'), ['lead', 'researcher', 'analyst', 'writer', 'editor', 'checker', 'designer']);
+  assert.equal(page.doc.activeElement, less, 'focus stays on the button');
+  // Still open after the library is listed again; Show less closes it.
+  page.dispatch({ type: 'library', library: { teams: [LONG_CARD, WEB_CARD], archived: [] } });
+  assert.ok(page.byLabel('Show less about Market team'));
+  page.byLabel('Show less about Market team')!.click();
+  assert.equal(page.byLabel('Show more about Market team')!.getAttribute('aria-expanded'), 'false');
+  assert.equal(chips('user:market').length, 5);
+  for (const message of page.posts) assert.ok(parseStudioMessage(message), JSON.stringify(message));
+});
+
+test('page: picker cards clamp the same way, and Show more opens only that card without selecting it', async () => {
+  const page = await builderPage({ teams: [LONG_CARD, WEB_CARD] });
+  page.byLabel('New team')!.click();
+  page.byLabel('Use an existing team')!.click();
+  const cell = (id: string) => page.radios('starting-point').find((node) => node.value === id)!.parent!.parent!;
+  const desc = cell('lib:market').all().find((node) => node.className.split(/\s+/).includes('clamp'))!;
+  assert.ok(desc, 'the description is clamped');
+  const more = page.byLabel('Show more about Market team')!;
+  assert.equal(more.getAttribute('aria-expanded'), 'false');
+  assert.equal(more.parent, cell('lib:market'), 'beside the choice, not inside its label, so it never picks the team');
+  more.click();
+  assert.equal(page.byLabel('Show less about Market team')!.getAttribute('aria-expanded'), 'true');
+  assert.ok(cell('lib:market').className.split(/\s+/).includes('expanded'));
+  assert.equal(cell('lib:web').className.split(/\s+/).includes('expanded'), false);
+  assert.equal(page.radios('starting-point').some((node) => node.checked), false, 'nothing selected');
+  assert.equal(page.byLabel('Use Market team as is'), undefined);
+});
