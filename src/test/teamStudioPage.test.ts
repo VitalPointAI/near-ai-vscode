@@ -3110,3 +3110,157 @@ test('host: Use as is makes a saved team the project team with its icon; a team 
   assert.equal((await h.library.iconVersions(project)).length, 1, 'the old icon is kept');
   h.close();
 });
+
+// ---------- 0.4.30: an icon made by an image model ----------
+
+const IMAGE_MODEL = { id: 'black-forest-labs/FLUX.2-klein-4B', privacyBoundary: 'cloud' as const, outputModalities: ['image'], imagePricePerUnit: 0.013 };
+const LOCAL_IMAGE_MODEL = { id: 'local/sdxl', privacyBoundary: 'local' as const, outputModalities: ['image'] };
+
+/** fakeAi with image models and a recorded image call; `image` is what the model returns (or throws). */
+function fakeImageAi(models: Array<Record<string, unknown>>, image: Uint8Array | Error | Promise<Uint8Array> | undefined = JPEG, settings: Partial<{ privacyMode: 'standard' | 'tee-only'; dailySpendLimitUsd: number; spent: number; emergencyStop: boolean }> = {}) {
+  const { ai } = fakeAi([TEE_MODEL, ...models] as never, [], settings);
+  const made: Array<{ model: string; prompt: string; signal?: AbortSignal }> = [];
+  Object.assign(ai, {
+    imageModel: IMAGE_MODEL.id,
+    settings: { ...ai.settings, actionPolicy: { mode: 'approve-risky', emergencyStop: settings.emergencyStop === true } },
+    generateImage: async (model: string, prompt: string, signal?: AbortSignal) => {
+      made.push({ model, prompt, signal });
+      const next = await image;
+      if (next instanceof Error) throw next;
+      return { bytes: next };
+    }
+  });
+  return { ai, made };
+}
+
+async function openForIcon(h: Harness, team: TeamDraft = draft()) {
+  await h.library.create(team.name, teamMarkdown(team));
+  await h.send({ type: 'ready' });
+  await h.send({ type: 'open', id: `user:${slugify(team.name)}` });
+  return `user:${slugify(team.name)}`;
+}
+
+test('host: Generate with AI names the image model and its cost before anything is sent, asks, sends only the team\'s name and purpose, and the picture goes through the same checks', async () => {
+  const h = await harness();
+  const { ai, made } = fakeImageAi([IMAGE_MODEL]);
+  h.deps.teamAi = async () => ai;
+  const id = await openForIcon(h);
+  assert.deepEqual(last(h, 'team').iconAi, { available: true, model: IMAGE_MODEL.id, private: false, estimate: 'about $0.02 (one image)' });
+  // Asked first: said no, nothing is made.
+  await h.send({ type: 'icon-generate', id });
+  const question = h.asked.at(-1)!;
+  assert.deepEqual(question.actions, ['Generate icon']);
+  assert.match(question.message, /Make an icon for "Web team" with black-forest-labs\/FLUX\.2-klein-4B \(about \$0\.02 \(one image\)\)\?/);
+  assert.match(question.message, /sends the team's name and what it is for to black-forest-labs\/FLUX\.2-klein-4B, which is not a private model/);
+  assert.equal(made.length, 0);
+  assert.deepEqual(last(h, 'icon-done'), { type: 'icon-done', id, text: 'Nothing was generated.' });
+  // Agreed: one image, from the name and purpose only.
+  h.chooseAnswer.value = 'Generate icon';
+  await h.send({ type: 'icon-generate', id });
+  assert.equal(made.length, 1);
+  assert.equal(made[0]!.model, IMAGE_MODEL.id);
+  assert.match(made[0]!.prompt, /"Web team"/);
+  assert.match(made[0]!.prompt, /Builds pages/);
+  assert.doesNotMatch(made[0]!.prompt, /Plan the work|Build it|lead|dev/, 'no members or instructions');
+  const source = last(h, 'icon-source');
+  assert.deepEqual([source.id, source.mime, source.data], [id, 'image/jpeg', JPEG.toString('base64')]);
+  const icon = png(128, 128, { seed: 11 });
+  await h.send({ type: 'icon-set', seq: source.seq, id, png: icon.toString('base64') });
+  assert.equal(last(h, 'icon-updated').icon, `data:image/png;base64,${icon.toString('base64')}`);
+  // Something that is not a picture is not passed on.
+  const odd = fakeImageAi([IMAGE_MODEL], SVG);
+  h.deps.teamAi = async () => odd.ai;
+  await h.send({ type: 'icon-generate', id });
+  assert.match(last(h, 'error').text, /not a PNG, JPEG or WebP picture/);
+  const none = fakeImageAi([IMAGE_MODEL], new Uint8Array(0));
+  h.deps.teamAi = async () => none.ai;
+  await h.send({ type: 'icon-generate', id });
+  assert.match(last(h, 'error').text, /returned no picture/);
+  const failing = fakeImageAi([IMAGE_MODEL], new Error('The provider is busy.'));
+  h.deps.teamAi = async () => failing.ai;
+  await h.send({ type: 'icon-generate', id });
+  assert.match(last(h, 'error').text, /The icon was not made: The provider is busy\./);
+  h.close();
+});
+
+test('host: one icon at a time, and the outbound check (spend limit, Emergency stop, TEE-only) decides before the person is asked', async () => {
+  const h = await harness();
+  let release: (bytes: Uint8Array) => void = () => undefined;
+  const slow = fakeImageAi([IMAGE_MODEL], new Promise<Uint8Array>((resolve) => { release = resolve; }));
+  h.deps.teamAi = async () => slow.ai;
+  h.chooseAnswer.value = 'Generate icon';
+  const id = await openForIcon(h);
+  const first = h.send({ type: 'icon-generate', id });
+  await h.settle();
+  await h.send({ type: 'icon-generate', id });
+  assert.match(last(h, 'error').text, /Still working on an icon/);
+  await h.send({ type: 'icon-upload', id });
+  assert.match(last(h, 'error').text, /Still working on an icon/);
+  release(JPEG);
+  await first;
+  assert.equal(slow.made.length, 1, 'one image made');
+  assert.ok(last(h, 'icon-source'));
+  for (const [settings, words] of [[{ dailySpendLimitUsd: 1, spent: 1 }, /daily limit/], [{ emergencyStop: true }, /Emergency stop is on/]] as const) {
+    const blocked = fakeImageAi([IMAGE_MODEL], JPEG, settings);
+    h.deps.teamAi = async () => blocked.ai;
+    const asked = h.asked.length;
+    await h.send({ type: 'icon-generate', id });
+    assert.match(last(h, 'error').text, words);
+    assert.equal(h.asked.length, asked, 'not asked about a call that cannot be made');
+    assert.equal(blocked.made.length, 0);
+  }
+  const teeOnly = fakeImageAi([IMAGE_MODEL], JPEG, { privacyMode: 'tee-only' });
+  h.deps.teamAi = async () => teeOnly.ai;
+  await h.send({ type: 'open', id });
+  assert.equal(last(h, 'team').iconAi.available, false);
+  assert.match(last(h, 'team').iconAi.reason, /TEE-only mode is on/);
+  h.close();
+});
+
+test('host: a private team, a team whose members are all private, or a project with a knowledge base may only use a private image model', async () => {
+  const h = await harness();
+  const cloudOnly = fakeImageAi([IMAGE_MODEL]);
+  h.deps.teamAi = async () => cloudOnly.ai;
+  h.chooseAnswer.value = 'Generate icon';
+  const marked = await openForIcon(h, draft({ name: 'Client team', private: true }));
+  const off = last(h, 'team').iconAi;
+  assert.equal(off.available, false);
+  assert.match(off.reason, /^This team is private, so its icon can only be made by a private image model \(one in a NEAR TEE or on this computer\), and none is available on this profile\. Upload an icon instead\.$/);
+  await h.send({ type: 'icon-generate', id: marked });
+  assert.equal(last(h, 'error').text, off.reason, 'the host checks again, whatever the page sends');
+  assert.equal(cloudOnly.made.length, 0);
+  const allPrivate = draft({ name: 'Quiet team', members: draft().members.map((member) => ({ ...member, privacy: 'private' as const })) });
+  await openForIcon(h, allPrivate);
+  assert.equal(last(h, 'team').iconAi.available, false);
+  // A private image model on this computer is used, and costs nothing.
+  const local = fakeImageAi([IMAGE_MODEL, LOCAL_IMAGE_MODEL]);
+  h.deps.teamAi = async () => local.ai;
+  await h.send({ type: 'open', id: marked });
+  assert.deepEqual(last(h, 'team').iconAi, { available: true, model: LOCAL_IMAGE_MODEL.id, private: true, estimate: 'free: it runs on this computer' });
+  await h.send({ type: 'icon-generate', id: marked });
+  assert.equal(local.made[0]!.model, LOCAL_IMAGE_MODEL.id);
+  assert.match(h.asked.at(-1)!.message, /a private model/);
+  // In a project with a knowledge base every team is private here.
+  await mkdir(path.join(h.root, '.near-kb'), { recursive: true });
+  h.deps.teamAi = async () => cloudOnly.ai;
+  const open = await openForIcon(h, draft({ name: 'Open team' }));
+  assert.match(last(h, 'team').iconAi.reason, /^This project has a knowledge base, so its teams' icons can only be made by a private image model/);
+  await h.send({ type: 'icon-generate', id: open });
+  assert.match(last(h, 'error').text, /knowledge base/);
+  assert.equal(cloudOnly.made.length, 0);
+  h.close();
+});
+
+test('page: Generate with AI is offered when the host allows it, says which model and cost, and waits for the answer', async () => {
+  const page = await iconPage();
+  page.dispatch(openTeam({ iconAi: { available: true, model: IMAGE_MODEL.id, private: false, estimate: 'about $0.02 (one image)' } }));
+  assert.match(page.text(), /Generate with AI sends the team's name and what it is for to black-forest-labs\/FLUX\.2-klein-4B \(about \$0\.02 \(one image\)\)\. You are asked first\./);
+  const generate = page.byLabel('Generate an icon for Web team with AI')!;
+  assert.equal(generate.disabled, false);
+  generate.click();
+  assert.deepEqual(page.posts.at(-1), { type: 'icon-generate', id: 'user:web' });
+  assert.equal(page.byLabel('Generate an icon for Web team with AI')!.disabled, true);
+  page.dispatch({ type: 'icon-done', id: 'user:web', text: 'Nothing was generated.' });
+  assert.equal(page.byLabel('Generate an icon for Web team with AI')!.disabled, false);
+  assert.match(page.doc.getElementById('banner')!.textContent, /Nothing was generated/);
+});
