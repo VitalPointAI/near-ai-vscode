@@ -1447,6 +1447,12 @@
         { const focus = setupKit.applyWelcomeState(document, setupKit.welcomeState(value), welcomeMemory); if (focus && !welcome.hidden) focus.focus(); }
         break;
       }
+      case 'chat-label': {
+        // CLAS-01, D-33: the chat's label beside the model while it is above the default label; text only, never markup from the label.
+        const chip = $('chat-label');
+        if (chip) { chip.textContent = typeof m.text === 'string' && m.text ? 'Label: ' + m.text : ''; chip.hidden = !(typeof m.text === 'string' && m.text); }
+        break;
+      }
       case 'assistant-start': settleContinue(false); runInfo = { model: m.model, privacy: m.privacy }; setBusy(true); if (!current) startAssistant(); if (m.status) status.textContent = m.status; break;
       case 'assistant-delta':
         if (!current) startAssistant();

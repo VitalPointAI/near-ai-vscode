@@ -474,3 +474,6 @@ body.vscode-high-contrast #sync:hover, body.vscode-high-contrast-light #sync:hov
   /* Close buttons show on the open conversation, on hover and with keyboard focus (Delete closes too). */
   .conversation-tab:not([aria-selected="true"]):not(:hover):not(:focus-within) .tab-close { display: none; }
 }
+
+/* The chat's label beside the model (D-33), shown only above the default label. */
+.chat-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 40%; }
