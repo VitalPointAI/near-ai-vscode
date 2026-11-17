@@ -176,10 +176,10 @@ test('each gap the publishing and destruction text names is a real gap today, so
     assert.equal(classifyCommand(hidden, context).effectsUnknown, undefined, `${hidden} is read, and nothing in it is a publish the checks know`);
   }
   // PR #74 review: what the text says asks. Five levels deep, or too long to read, is not "no tag": its effects are unknown, and the gate asks about it.
-  for (const stopped of [nested(5), `git status # ${'x'.repeat(MAX_COMMAND_LENGTH)}`, 'chronic git push', 'ionice -c3 rm -rf src']) {
+  for (const stopped of [nested(5), `git status # ${'x'.repeat(MAX_COMMAND_LENGTH)}`, 'chronic git push', 'ionice -c3 rm -rf src', 'git push origin main; echo "', 'env -i git push', 'git -frob x push']) {
     assert.equal(typeof classifyCommand(stopped, context).effectsUnknown, 'string', `${stopped.slice(0, 40)}: its effects are unknown, as the text says`);
   }
-  assert.match(FLOOR_EFFECTS_CANNOT_SEE_TEXT, /nested more than four levels deep, too long to read, running a package script in a folder they cannot tell or whose package\.json they cannot read, or started by a program they do not know with a command they would flag among the words after it, is not guessed at: it asks/);
+  assert.match(FLOOR_EFFECTS_CANNOT_SEE_TEXT, /nested more than four levels deep, too long to read, one they cannot parse \(a quote left open, say\), one with an option they do not know where they would read what it runs, running a package script in a folder they cannot tell or whose package\.json they cannot read, or started by a program they do not know with a command they would flag among the words after it, is not guessed at: it asks/);
   assert.match(FLOOR_EFFECTS_CANNOT_SEE_TEXT, /from the package\.json of the folder the command runs in, after any cd on the line/);
   // PR #74 review round 4: a package script in a folder the line cannot show asks, as the text says; one in a folder it can show is read there.
   for (const stopped of ['cd "$D" && npm test', 'cd .. && npm run build', 'npm --prefix "$P" run build']) {

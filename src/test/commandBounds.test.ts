@@ -165,7 +165,7 @@ test('source: every recursive call in the classifier goes one level deeper, and 
   }
   const allowed = new Set(['classifyText -> classifyStructure', 'classifyStructure -> classifyWords', 'classifyWords -> classifyProgram', 'classifyProgram -> noteRunsAs',
     'classifyProgram -> classifyPackageManager', 'classifyProgram -> classifyNpx', 'classifyProgram -> noteInlineScript', 'classifyPackageManager -> classifyPackageManagerIn', 'classifyPackageManagerIn -> checkScript',
-    'classifyWords -> unknownProgram', 'classifyProgram -> unknownProgram', 'classifyProgram -> classifyAfterGlobals', 'classifyAfterGlobals -> classifyProgram']);
+    'classifyWords -> unknownProgram', 'classifyProgram -> unknownProgram', 'classifyProgram -> classifyAfterGlobals', 'classifyAfterGlobals -> classifyProgram', 'classifyNpx -> unknownProgram']);
   // The one same-level call back into classifyProgram reads the words after the global options: strictly fewer, and none of them a leading option, so it
   // cannot come back to classifyAfterGlobals (PR #74 review round 7).
   assert.match(bodies.get('classifyAfterGlobals') ?? '', /classifyProgram\(name, program, found\.rest,/);

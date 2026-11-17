@@ -24,7 +24,8 @@ to undo, and no mode lets an agent near the places where your keys and passwords
 - **A command the checks cannot read whole asks.** A shell command nested more than four levels
   deep, too long to check, or started by a program the checks do not know with a command such as
   git push after it, asks first in Full auto too, and is refused when nobody is there to answer,
-  instead of running unread. Commands run through stdbuf, flock or watch are read like any other.
+  instead of running unread. So does one the checks cannot parse, such as a line with a quote left
+  open. Commands run through stdbuf, flock or watch are read like any other.
   The scripts that `npm run` and the like start are read from the package.json of the folder the
   command runs in, so `cd sub && npm run sync` is read as sub's script; when that folder cannot be
   told, the command asks too.

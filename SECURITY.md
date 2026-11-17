@@ -152,8 +152,9 @@ flock and watch. They do not see a command built while it runs (bash -c
 "$CMD"), a file run with source or piped into sh, or a script written or
 changed earlier on the same line (it is read as it was before the line ran).
 Under fully-autonomous such a command runs without asking. A command nested
-more than four levels deep, too long to read, running a package script in a
-folder they cannot tell or whose package.json they cannot read, or started by a
+more than four levels deep, too long to read, one they cannot parse (a quote
+left open, say), one with an option they do not know where they would read
+what it runs, running a package script in a folder they cannot tell or whose package.json they cannot read, or started by a
 program they do not know with a command they would flag among the words after
 it, is not guessed at: it asks, and it is refused when nobody is there to
 answer. That last case also asks when the words
