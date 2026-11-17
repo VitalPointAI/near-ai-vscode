@@ -261,3 +261,51 @@ test('in every mode, with a person and with nobody, a new store and a token prin
   });
   assert.equal(read.decision.rule, 'floor.credential-store');
 });
+
+// PR #76 review: an option before the verb hid a token printer. `npm token --otp 123 list` read `123` as the verb, so the command was only a credential
+// change (an ask) and, approved, printed a stored token. A printer is now refused unless the command is positively read as something that prints nothing
+// (`npm token revoke`), and an option the rules do not know before the verb never turns a printer into an ask: it is refused too.
+const PRINTERS_WITH_OPTIONS = [
+  'npm token --otp 123 list', 'npm token --otp=123 create', 'npm token --registry https://registry.example.test list', 'npm token --cidr 10.0.0.0/8 create',
+  'npm token --read-only create', 'npm token --json', 'npm --otp 123 token list', 'npm --weird token list', 'npm token --weird x revoke abc', 'npm token $VERB',
+  'npm --prefix "$P" token list', 'pnpm token --otp 1 list', 'yarn token --otp 1 list', 'bun token --otp 1 list',
+  'gh auth --hostname github.example.test token', 'gh auth -h github.example.test token', 'gh auth token -h github.example.test', 'gh --weird auth token', 'gh auth --weird token',
+  'gh auth status --hostname github.example.test -t', 'gh auth -h github.example.test status --show-token', 'gh -R acme/app auth token', 'glab auth --weird token',
+  'gcloud auth --verbosity debug print-access-token', 'gcloud auth --weird print-access-token', 'gcloud auth application-default --weird print-access-token',
+  'gcloud --weird auth print-identity-token', 'gcloud config --weird config-helper', 'gcloud auth --account=a@example.test print-refresh-token',
+  'az account --weird get-access-token', 'az --weird account get-access-token', 'az account get-access-token --resource https://example.test', 'az acr --weird login --expose-token',
+  'aws sts --weird get-session-token', 'aws --weird sts get-session-token', 'aws configure --weird get region', 'aws configure --profile dev get region',
+  'aws ecr --weird get-login-password', 'aws codeartifact --weird get-authorization-token --domain d', 'aws sts --region us-east-1 assume-role --role-arn x --role-session-name y',
+  'aws configure --weird export-credentials', 'docker-credential-desktop --weird get'
+];
+const NOT_PRINTERS_WITH_OPTIONS = [
+  'npm token revoke abc', 'npm token --otp 123 revoke abc', 'npm token rm abc', 'npm token --otp=1 delete abc', 'npm run token', 'npm run token --silent',
+  'gh issue create --title auth --body token', 'gh auth status --hostname github.example.test', 'gh auth login --hostname github.example.test', 'aws sts get-caller-identity --region x'
+];
+
+test('a token printer is refused whatever options come before its verb, and only a verb positively read as printing nothing is not', async () => {
+  const wrong: string[] = [];
+  for (const command of PRINTERS_WITH_OPTIONS) {
+    const facts = await floorFactsFor({ command, root: ROOT, cwd: ROOT, ...LOCATIONS });
+    if (facts.facts.credentialStore === undefined) wrong.push(`${command} → ${JSON.stringify(facts)}`);
+  }
+  for (const command of NOT_PRINTERS_WITH_OPTIONS) {
+    const facts = await floorFactsFor({ command, root: ROOT, cwd: ROOT, ...LOCATIONS });
+    if (facts.facts.credentialStore !== undefined) wrong.push(`${command} is refused: ${facts.facts.credentialStore}`);
+  }
+  assert.deepEqual(wrong, []);
+  // Revoking a token is a credential change: it asks.
+  for (const command of ['npm token revoke abc', 'npm token --otp 123 revoke abc']) {
+    assert.notEqual((await floorFactsFor({ command, root: ROOT, cwd: ROOT, ...LOCATIONS })).facts.credentialChange, undefined, command);
+  }
+  for (const presence of ['person', 'none'] as const) {
+    for (const command of ['npm token --otp 123 list', 'gh auth --weird token', 'aws --weird sts get-session-token']) {
+      const gated = await gateToolCall({ ...testGateRuntime(presence === 'none' ? { presence, context: 'unattended' } : {}), locations: LOCATIONS }, {
+        tool: bashTool, raw: { command }, root: ROOT, callId: `opt-${presence}-${command}`, command, shell: { cwd: ROOT },
+        policy: { mode: 'approve-risky', emergencyStop: false }, rules: DEFAULT_RULES, grants: new RunGrants(), buildAuto: async () => undefined
+      });
+      assert.equal(gated.decision.outcome, 'deny', `${presence}: ${command}`);
+      assert.equal(gated.decision.rule, 'floor.credential-store', `${presence}: ${command}`);
+    }
+  }
+});

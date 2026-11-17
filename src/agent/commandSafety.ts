@@ -1003,10 +1003,11 @@ function githubAction(args: readonly Word[]): { group?: Word; action?: Word; gro
     if (text === '--') { const next = args[index + 1]; if (group === undefined) { group = next; groupAt = index + 1; continue; } return next === undefined ? { group, groupAt } : next.expansion ? { unknown: 'with an action decided at run time' } : { group, action: next, groupAt }; }
     if (looksLikeOption(text)) {
       if (group?.text === 'api') return { group, groupAt };
-      if (text === '--help' || text === '-h') continue;
+      // Under `auth`, -h names the host (`gh auth token -h github.com`); elsewhere it asks for help.
+      if (text === '--help' || (text === '-h' && group?.text !== 'auth')) continue;
       const equals = text.indexOf('=');
       const option = equals > 0 ? text.slice(0, equals) : text;
-      if (GITHUB_REPO_OPTIONS.has(option)) {
+      if (GITHUB_REPO_OPTIONS.has(option) || option === '--hostname' || (option === '-h' && group?.text === 'auth')) {
         if (equals < 0) { if (args[index + 1] === undefined) return { unknown: `${option} without its value` }; index += 1; }
         continue;
       }
@@ -1428,6 +1429,74 @@ function packageManagerFolder(manager: string, args: Word[], state: SegmentState
 }
 
 /** Subcommands of pnpm and bun that are their own, not a script of the same name. */
+/** `npm token` verbs that print nothing: they remove a token, which changes the stored login. */
+const NON_PRINTING_TOKEN_VERBS: ReadonlySet<string> = new Set(['revoke', 'rm', 'delete']);
+/** `npm token` options that take a value, and those that take none, besides the package manager's own global options. */
+const TOKEN_VALUE_OPTIONS: readonly string[] = ['--otp', '--registry', '--userconfig', '--globalconfig', '--cidr', '--loglevel', '--scope', '--cache', '--color', '--location'];
+const TOKEN_FLAGS: readonly string[] = ['--read-only', '--json', '--parseable', '-p'];
+
+/**
+ * The verb of a package manager's `token` command, read past the options before it, or undefined when it cannot be read for certain: none given (it lists),
+ * one decided at run time, a missing value, or an option the rules do not know before it.
+ */
+function tokenVerb(manager: string, rest: readonly Word[]): string | undefined {
+  const values = new Set([...TOKEN_VALUE_OPTIONS, ...(GLOBAL_OPTIONS[manager]?.values ?? [])]);
+  const flags = new Set([...TOKEN_FLAGS, ...(GLOBAL_OPTIONS[manager]?.flags ?? []), ...UNIVERSAL_FLAGS]);
+  for (let index = 0; index < rest.length; index += 1) {
+    const word = rest[index]!;
+    if (word.text === '--') { const next = rest[index + 1]; return next === undefined || next.expansion ? undefined : next.text; }
+    if (!looksLikeOption(word.text)) return word.expansion ? undefined : word.text;
+    const equals = word.text.indexOf('=');
+    const option = equals > 0 ? word.text.slice(0, equals) : word.text;
+    if (values.has(option)) { if (equals < 0) { if (rest[index + 1] === undefined) return undefined; index += 1; } continue; }
+    if (flags.has(word.text)) continue;
+    return undefined;
+  }
+  return undefined;
+}
+
+/**
+ * A backstop for a line the rules could not read whole (an option they do not know, a folder decided at run time): when its words could make one of the
+ * token printers, it is taken to be that printer and refused, never downgraded to an ask (PR #76 review). Each check reads every word but options, so a
+ * word that is only an option's value can make it match too: that fails closed.
+ */
+function backstopPrinter(name: string, args: readonly Word[]): void {
+  const shown = couldPrintCredential(name, args);
+  if (shown !== undefined) notePrintsCredential(shown);
+}
+
+/** The printer a command's words could make, in any order of options (see backstopPrinter), or undefined. */
+function couldPrintCredential(name: string, args: readonly Word[]): string | undefined {
+  const words = args.filter((arg) => !looksLikeOption(arg.text)).map((arg) => arg.text);
+  const has = (text: string): boolean => args.some((arg) => arg.text === text);
+  const after = (first: string, ...then: string[]): string | undefined => {
+    const at = words.indexOf(first);
+    return at < 0 ? undefined : words.slice(at + 1).find((word) => then.includes(word));
+  };
+  if (PACKAGE_MANAGERS.has(name)) return words.includes('token') ? `${name} token` : undefined;
+  if (name === 'gh' || name === 'glab') {
+    if (after('auth', 'token') !== undefined) return `${name} auth token`;
+    const showsToken = args.some((arg) => arg.text === '--show-token' || (/^-[A-Za-z]*t[A-Za-z]*$/.test(arg.text) && !arg.text.startsWith('--')));
+    return after('auth', 'status') !== undefined && showsToken ? `${name} auth status --show-token` : undefined;
+  }
+  if (name === 'gcloud') {
+    const printer = words.find((word) => /^print-(?:access|identity|refresh)-token$/.test(word));
+    if (printer !== undefined) return `gcloud auth ${printer}`;
+    return words.includes('config-helper') ? 'gcloud config config-helper' : undefined;
+  }
+  if (name === 'az') {
+    if (words.includes('get-access-token')) return 'az account get-access-token';
+    return words.includes('acr') && words.includes('login') && has('--expose-token') ? 'az acr login --expose-token' : undefined;
+  }
+  if (name === 'aws') {
+    const printer = words.find((word) => /^(?:get-session-token|get-federation-token|get-login-password|get-authorization-token|get-login|assume-role(?:-[\w-]+)?)$/.test(word));
+    if (printer !== undefined) return `aws ${printer}`;
+    const configure = after('configure', 'get', 'export-credentials');
+    return configure === undefined ? undefined : `aws configure ${configure}`;
+  }
+  return undefined;
+}
+
 /** Package-manager and registry verbs that sign in or out. */
 const REGISTRY_LOGIN_VERBS: ReadonlySet<string> = new Set(['login', 'logout', 'adduser', 'add-user']);
 /** A package-manager setting that holds a registry login or token (`//registry/:_authToken`, `_auth`, `_password`, yarn's `npmAuthToken`, `npmAuthIdent`). */
@@ -1451,28 +1520,31 @@ function classifyPackageManager(manager: string, givenArgs: Word[], state: Segme
 }
 
 function classifyPackageManagerIn(manager: string, givenArgs: Word[], state: SegmentState, context: CommandContext, depth: number): CommandClassification {
+  // Where the line cannot be read whole, a word that could be the `token` subcommand is taken to be it: a printer is never downgraded to an ask (PR #76).
+  const stopped = (reason: string): CommandClassification => { backstopPrinter(manager, givenArgs); return beyondReach(reason); };
   const located = packageManagerFolder(manager, givenArgs, state, context);
-  if ('unknown' in located) return beyondReach(`${manager}: ${located.unknown}`);
+  if ('unknown' in located) return stopped(`${manager}: ${located.unknown}`);
   const args = located.args;
   const folder = located.folder;
   // A package manager runs the scripts (and the install hooks) of the folder it runs in: one this line cannot show, or one outside the project, is unknown.
-  if (folder === undefined && state.cwdUnknown !== undefined) return beyondReach(`${manager}: ${state.cwdUnknown}`);
-  if (!isInside(context.root, folder ?? state.cwd)) return beyondReach(`${manager} runs in a folder outside the project`);
+  if (folder === undefined && state.cwdUnknown !== undefined) return stopped(`${manager}: ${state.cwdUnknown}`);
+  if (!isInside(context.root, folder ?? state.cwd)) return stopped(`${manager} runs in a folder outside the project`);
   const words = args.map((arg) => arg.text);
   // Its global options are skipped first, so a value option (`npm --tag beta publish`) never hides the subcommand; one the rules do not know makes the
   // effects unknown (PR #74 review round 7).
   const leading = skipGlobals(manager, args);
-  if ('unknown' in leading) return beyondReach(`${manager}: ${leading.unknown}`);
+  if ('unknown' in leading) return stopped(`${manager}: ${leading.unknown}`);
   const first = leading.rest.length > 0 ? args.length - leading.rest.length : -1;
   const sub = first >= 0 ? words[first] ?? '' : '';
   const extra = first >= 0 ? args.slice(first + 1) : [];
   if (first >= 0 && words.slice(first, first + 2).some((word) => word === 'publish' || word === 'unpublish')) return risky(`${manager} ${words.slice(first, first + 2).join(' ')} publishes a package`, publishTo('registry'));
   // Signing in or out, and a token change, rewrite the login kept on this computer: the floor's credential change (owner decision after PR #74).
   if (sub === 'token') {
-    // `token` alone lists the tokens; list and create print them (A5): refused by the floor. Revoking one changes the stored login.
-    const verb = extra.find((arg) => !looksLikeOption(arg.text));
-    if (verb === undefined || verb.expansion || ['list', 'ls', 'create'].includes(verb.text)) {
-      notePrintsCredential(`${manager} token${verb === undefined ? '' : ` ${verb.text}`}`);
+    // `token` alone lists the tokens, and list and create print them (A5). Fail closed (PR #76): it is a printer, refused by the floor, unless its verb is
+    // read for certain, past the options before it, as one that prints nothing; revoking a token then changes the stored login (an ask).
+    const verb = tokenVerb(manager, extra);
+    if (verb === undefined || !NON_PRINTING_TOKEN_VERBS.has(verb)) {
+      notePrintsCredential(`${manager} token${verb === undefined ? '' : ` ${verb}`}`);
       return risky(`${manager} token prints your registry tokens`);
     }
   }
@@ -1780,7 +1852,7 @@ function deleteEffects(name: string, targets: readonly Word[], args: readonly Wo
  */
 function classifyAfterGlobals(name: string, program: string, args: Word[], state: SegmentState, context: CommandContext, depth: number, viaNpx: boolean): CommandClassification {
   const found = skipGlobals(name, args);
-  if ('unknown' in found) return beyondReach(found.unknown);
+  if ('unknown' in found) { backstopPrinter(name, args); return beyondReach(found.unknown); }
   let moved = state;
   if (found.folder !== undefined) {
     if (found.folder.expansion || found.folder.glob) return beyondReach(`${name} works in a folder decided at run time`);
@@ -1801,13 +1873,26 @@ function setsGcConfig(globals: readonly Word[]): boolean {
   for (let index = 0; index < globals.length; index += 1) {
     const word = globals[index]!;
     let value: Word | undefined;
-    if (word.text === '-c' || word.text === '--config-env') value = globals[index + 1];
-    else if (word.text.startsWith('--config-env=')) value = { ...word, text: word.text.slice('--config-env='.length) };
+    let fromEnvironment = false;
+    if (word.text === '-c') value = globals[index + 1];
+    else if (word.text === '--config-env') { value = globals[index + 1]; fromEnvironment = true; }
+    else if (word.text.startsWith('--config-env=')) { value = { ...word, text: word.text.slice('--config-env='.length) }; fromEnvironment = true; }
     else if (/^-c./.test(word.text)) value = { ...word, text: word.text.slice(2) };
-    if (value !== undefined && (value.expansion || /^gc\./i.test(value.text))) return true;
+    if (value === undefined) continue;
+    // A setting decided at run time could be any of them.
+    if (value.expansion) return true;
+    const equals = value.text.indexOf('=');
+    const key = equals < 0 ? value.text : value.text.slice(0, equals);
+    // Only the expiry settings decide what gc and prune remove (PR #76 review): pruning now or under a day, a value taken from the environment, or one
+    // not given (git reads that as true, not an age) prunes without the grace period. Any other setting changes nothing removed.
+    if (!GC_EXPIRY_SETTING.test(key)) continue;
+    if (fromEnvironment || equals < 0 || !GRACE_PERIOD.test(value.text.slice(equals + 1))) return true;
   }
   return false;
 }
+
+/** git settings that decide how old an unreachable object or reflog entry must be before gc or prune removes it, per ref pattern too. */
+const GC_EXPIRY_SETTING = /^gc\.(?:pruneExpire|worktreePruneExpire|(?:.+\.)?reflogExpire(?:Unreachable)?)$/i;
 
 /**
  * The files a download that is not plain writes, read from its options (PR #74 review round 8, refinement): curl's `-o`/`--output`, `-O` (the URL's file
@@ -2051,7 +2136,7 @@ const READ_ONLY_GH = new Set([
     // The group and the action, past `-R`/`--repo` wherever they sit (owner decision after PR #74): an option the rules do not know before the action, or
     // a group or action the shell decides at run time, cannot be told apart from what it would run, so the effects are unknown.
     const found = githubAction(args);
-    if ('unknown' in found) return unknown(`${name} ${found.unknown}`);
+    if ('unknown' in found) { backstopPrinter(name, args); return unknown(`${name} ${found.unknown}`); }
     const group = found.group?.text;
     const action = found.action?.text;
     // Signing in or out, refreshing the token, or switching account changes the login kept on this computer (owner decision after PR #74).
@@ -2117,8 +2202,9 @@ const READ_ONLY_GH = new Set([
   if (name === 'aws' || name === 'gcloud' || name === 'az') {
     // Signing in or out of the cloud account, or changing its stored keys, rewrites the credentials kept on this computer (owner decision after PR #74).
     const read = cloudWords(name, args);
-    if ('unknown' in read) return unknown(`${name} ${read.unknown}`);
-    const printer = cloudCredentialPrinter(name, read.words, args);
+    if ('unknown' in read) { backstopPrinter(name, args); return unknown(`${name} ${read.unknown}`); }
+    // The printers' verbs are their own words, so they are looked for among all the words too: an option before them never hides one (PR #76 review).
+    const printer = cloudCredentialPrinter(name, read.words, args) ?? couldPrintCredential(name, args);
     if (printer !== undefined) {
       notePrintsCredential(printer);
       return risky(`${printer} prints your ${CLOUD_NAMES[name]} credentials`);

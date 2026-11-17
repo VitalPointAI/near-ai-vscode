@@ -326,14 +326,19 @@ test('routine git maintenance is not destruction; pruning now, starting a rebase
   const notDestroy = [
     'git gc', 'git gc --auto', 'git gc --aggressive', 'git gc --quiet', 'git gc --prune', 'git gc --no-prune', 'git gc --prune=2.weeks.ago', 'git gc --prune=3.days.ago',
     'git gc --auto --quiet', 'git prune --expire=2.weeks.ago', 'git prune --expire 1.month.ago', 'git prune -n', 'git prune --dry-run', 'git prune --expire=never',
-    'git rebase --continue', 'git rebase --abort', 'git rebase --skip', 'git rebase --quit', 'git rebase --edit-todo', 'git -C sub rebase --continue', 'git --no-pager gc'
+    'git rebase --continue', 'git rebase --abort', 'git rebase --skip', 'git rebase --quit', 'git rebase --edit-todo', 'git -C sub rebase --continue', 'git --no-pager gc',
+    // PR #76 review: a gc setting that keeps a grace period, or one that does not decide what is pruned, is routine too.
+    'git -c gc.pruneExpire=2.weeks.ago gc', 'git -c gc.reflogExpire=90.days.ago gc', 'git -c gc.reflogExpireUnreachable=never gc', 'git -c gc.auto=0 gc',
+    'git -c gc.aggressiveDepth=50 gc --aggressive', 'git -c core.pager=cat gc', 'git -cgc.worktreePruneExpire=3.months.ago gc', 'git --config-env=gc.auto=GC_AUTO gc'
   ];
   const destroys = [
     'git gc --prune=now', 'git gc --prune=all', 'git gc --prune=1.hour.ago', 'git gc --prune="2026-01-01"', 'git gc --prune=$WHEN', 'git gc --unknown-option',
     'git prune', 'git prune --expire=now', 'git prune --expire now', 'git prune --expire=all', 'git prune --expire=10.minutes.ago', 'git prune --expire=yesterday',
     'git prune -v', 'git rebase main', 'git rebase -i HEAD~3', 'git rebase --continue main', 'git rebase --onto main topic', 'git rebase --abort --continue',
     'git reflog expire --expire=now --all', 'git reflog expire --all', 'git reflog delete HEAD@{1}', 'git -c gc.pruneExpire=now gc', 'git -c gc.reflogExpire=now gc --auto',
-    'git -c gc.pruneexpire=now prune --expire=2.weeks.ago'
+    'git -c gc.pruneexpire=now prune --expire=2.weeks.ago', 'git -c gc.pruneExpire=1.hour.ago gc', 'git -c gc.worktreePruneExpire=now gc',
+    'git -c gc.main.reflogExpireUnreachable=now gc', 'git -c gc.pruneExpire=2026-01-01 gc', 'git --config-env=gc.pruneExpire=WHEN gc', 'git -c gc.pruneExpire="$W" gc',
+    'git -c gc.pruneExpire gc', 'git -c "$SETTING" gc'
   ];
   const wrong: string[] = [];
   for (const command of notDestroy) if ((classify(command).effects ?? []).some((effect) => effect.verb === 'destroy')) wrong.push(`${command} is tagged destroy`);
