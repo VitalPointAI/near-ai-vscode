@@ -216,28 +216,40 @@ function floorClassifierContext(input: FloorFactsInput): CommandContext {
 /** How many words of a command are resolved through links when looking for a credential file it reads. */
 const CREDENTIAL_FILE_LINK_CHECKS = 64;
 
+/** A word that looks like a path, so it is worth resolving through links: it has a `/`, or starts with `~` or `.` (PR #76 review round 2). */
+function pathLike(word: string): boolean {
+  return word.includes('/') || word.startsWith('~') || word.startsWith('.');
+}
+
 /**
  * The file that may hold credentials a shell command reads, as written, or undefined (owner decision after PR #74, D-18): one its text names (`.env`, a key
- * file, `.ssh/`), or a word that resolves to one from the shell's folder, links followed. Text and paths only: nothing is opened. A command past the
- * classifier's bounds, or one that cannot be read, is taken to read one (fail closed). A read the text does not show (a recursive search, a glob, a path
- * built while the command runs) is not seen.
+ * file, `.ssh/`), a word that is one by its name, or a path-like word that resolves to one from the shell's folder, links followed (each resolved once per
+ * call). Text and paths only: nothing is opened. Only the part of a command within the classifier's bounds is read word by word; its length alone is not a
+ * read (the command already asks, its effects being unknown). A read the text does not show (a recursive search, a glob, a path built while the command
+ * runs, a bare name that is a link) is not seen.
  */
 export async function shellReadsCredentialFile(command: string, context: { root: string; shell?: { workingDirectory: string } }, options: { realpath?: (target: string) => Promise<string> } = {}): Promise<string | undefined> {
   if (command.trim() === '') return undefined;
   const named = namesCredentialFile(command);
   if (named !== undefined) return named;
-  if (command.length > MAX_COMMAND_LENGTH) return 'a file the command may read';
-  const words = command.split(/[\s'"`;&|()<>=]+/).filter((word) => word !== '' && !word.startsWith('-') && !word.includes('$'));
-  if (words.length > MAX_COMMAND_WORDS) return 'a file the command may read';
+  const readable = command.slice(0, MAX_COMMAND_LENGTH);
+  const words = readable.split(/[\s'"`;&|()<>=]+/).filter((word) => word !== '' && !word.startsWith('-') && !word.includes('$')).slice(0, MAX_COMMAND_WORDS);
   const cwd = context.shell?.workingDirectory ?? context.root;
-  let checks = 0;
+  const resolved = new Map<string, Promise<string | undefined>>();
+  const resolve = (absolute: string): Promise<string | undefined> => {
+    let found = resolved.get(absolute);
+    if (found === undefined) {
+      found = (options.realpath ?? realpath)(absolute).then((real) => real, () => undefined);
+      resolved.set(absolute, found);
+    }
+    return found;
+  };
   for (const word of words) {
     const absolute = path.resolve(cwd, word);
     if (isSensitivePath(word) || isSensitivePath(absolute)) return word.slice(0, 120);
-    if (checks >= CREDENTIAL_FILE_LINK_CHECKS || /[*?[]/.test(word)) continue;
-    checks += 1;
-    let real: string | undefined;
-    try { real = await (options.realpath ?? realpath)(absolute); } catch { real = undefined; }
+    if (!pathLike(word) || /[*?[]/.test(word)) continue;
+    if (!resolved.has(absolute) && resolved.size >= CREDENTIAL_FILE_LINK_CHECKS) continue;
+    const real = await resolve(absolute);
     if (real !== undefined && real !== absolute && isSensitivePath(real)) return word.slice(0, 120);
   }
   return undefined;

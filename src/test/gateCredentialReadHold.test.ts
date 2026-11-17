@@ -191,3 +191,34 @@ test('through a real Full auto run: reading .env with the Read tool or the shell
     }
   }
 });
+
+// PR #76 review round 2: a command past the classifier's bounds was taken to read a credential file, so one long harmless command marked the whole run.
+// Length alone is not a read (the command itself already asks, its effects being unknown); a credential file it names is still one.
+test('a long command is not a credential read by its length; one that names a credential file still is', async () => {
+  const { shellReadsCredentialFile } = await import('../agent/gateAdapter');
+  const { MAX_COMMAND_LENGTH, MAX_COMMAND_WORDS } = await import('../agent/commandSafety');
+  const at = { root: ROOT, shell: { workingDirectory: ROOT } };
+  assert.equal(await shellReadsCredentialFile(`echo ${'x'.repeat(MAX_COMMAND_LENGTH + 10)}`, at), undefined);
+  assert.equal(await shellReadsCredentialFile(`ls ${Array.from({ length: MAX_COMMAND_WORDS + 5 }, (_, i) => `f${i}`).join(' ')}`, at), undefined);
+  assert.notEqual(await shellReadsCredentialFile(`cat .env && echo ${'x'.repeat(MAX_COMMAND_LENGTH + 10)}`, at), undefined);
+  assert.notEqual(await shellReadsCredentialFile(`cat .env ${Array.from({ length: MAX_COMMAND_WORDS + 5 }, (_, i) => `f${i}`).join(' ')}`, at), undefined);
+});
+
+// PR #76 review round 2: every word of every shell command was resolved through links. Only a word that looks like a path is, once per call.
+test('only path-like words are resolved, each once per call, and a path-like link to a credential file is still found', async () => {
+  const { shellReadsCredentialFile } = await import('../agent/gateAdapter');
+  const { symlinkSync, mkdirSync } = await import('node:fs');
+  const at = { root: ROOT, shell: { workingDirectory: ROOT } };
+  let calls = 0;
+  const counting = { realpath: async (target: string) => { calls += 1; return (await import('node:fs/promises')).realpath(target); } };
+  for (const command of ['npm test', 'git status', 'npm run build -- --watch', 'make all']) {
+    calls = 0;
+    assert.equal(await shellReadsCredentialFile(command, at, counting), undefined, command);
+    assert.equal(calls, 0, `${command}: nothing resolved`);
+  }
+  mkdirSync(path.join(ROOT, 'keys'), { recursive: true });
+  symlinkSync(path.join(ROOT, '.env'), path.join(ROOT, 'keys', 'settings'));
+  calls = 0;
+  assert.equal(await shellReadsCredentialFile('cat keys/settings keys/settings ./keys/settings', at, counting), 'keys/settings');
+  assert.ok(calls >= 1 && calls <= 2, `resolved ${calls} times`);
+});
