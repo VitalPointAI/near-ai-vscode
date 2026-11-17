@@ -680,7 +680,10 @@ until it runs out aren't shown.
   again. **Create a new team** starts **From scratch**, from
   **Clone an existing team** (the same list, to clone only), or from
   **Describe it, and AI drafts it** (say what the team should produce; AI
-  proposes a team for you to look over before anything is saved). Only a new team or a clone asks for its
+  proposes a team for you to look over before anything is saved; a drafted
+  team waits on the main page and the New team screens until you use or
+  discard it, even after Team Studio is closed, and reviewing it while you
+  have unsaved changes asks about them first). Only a new team or a clone asks for its
   name, what it is for, **Private team** and **Save it as**. **Back** returns
   to the screen before from every step, and a saved draft opens on the step
   you left it. Saved as the project's team, a team is asked about before it

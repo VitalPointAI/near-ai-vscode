@@ -48,6 +48,8 @@ const VIEW_KEY = 'nearAi.teamStudio.view';
  * where the project's files go (a code push included). This computer only, like the role tests.
  */
 const RATINGS_KEY = 'nearAi.teamStudio.ratings';
+/** A team the AI drafted and the person has not used or discarded yet (PR 86 review, round 2), so it outlives the tab. This computer only. */
+const PROPOSAL_KEY = 'nearAi.teamStudio.proposal';
 let current: { panel: vscode.WebviewPanel; startWizard(target: StudioTarget): Promise<void> } | undefined;
 
 /**
@@ -175,6 +177,7 @@ export async function openTeamStudio(context: vscode.ExtensionContext, auth: Aut
     },
     roleTests: { get: () => context.globalState.get(ROLE_TESTS_KEY), set: (value) => Promise.resolve(context.globalState.update(ROLE_TESTS_KEY, value)) },
     ratings: { get: () => context.globalState.get(RATINGS_KEY), set: (value) => Promise.resolve(context.globalState.update(RATINGS_KEY, value)) },
+    proposal: { get: () => context.globalState.get(PROPOSAL_KEY), set: (value) => Promise.resolve(context.globalState.update(PROPOSAL_KEY, value)) },
     view: { get: () => context.globalState.get(VIEW_KEY), set: (value) => Promise.resolve(context.globalState.update(VIEW_KEY, value)) },
     confirm: async (message, action) => (await vscode.window.showWarningMessage(message, { modal: true }, action)) === action,
     choose: async (message, ...actions) => vscode.window.showWarningMessage(message, { modal: true }, ...actions),

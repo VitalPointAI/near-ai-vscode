@@ -27,8 +27,11 @@
   **Rating** or **Name**, or show only the teams that need attention; Team Studio remembers your
   choice. Running now and the stats change as soon as a team run starts or ends.
 - **The AI box moved into New team.** "What should this team be able to produce?" is now under
-  **New team**, **Create a new team**, **Describe it, and AI drafts it**. A drafted team that
-  arrives after you left that screen is offered from a banner. The toolbar is **New team**,
+  **New team**, **Create a new team**, **Describe it, and AI drafts it**. A drafted team waits on
+  the main page and the **New team** screens until you use it or discard it, even if you were busy
+  with something else when it arrived or closed Team Studio. If you have unsaved changes when you
+  review it, you are asked about them first, and keeping them keeps the drafted team too. A star
+  you choose just before you close Team Studio is still saved. The toolbar is **New team**,
   **Optimise all teams**, **Import…** and **Refresh**. A project with no team gets a card that says
   so, with **Set up**, and an empty library shows **New team** and **Set up a team for this
   project**.

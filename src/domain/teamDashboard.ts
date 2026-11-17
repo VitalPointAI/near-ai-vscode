@@ -295,7 +295,8 @@ export function buildDashboard(input: { now: number; history: boolean; sessions:
   }
   const runningRun = new Map<string, string>();
   for (const run of input.running) {
-    const team = (run.file ? input.teams.find((entry) => sameFile(entry.file, run.file!)) : undefined) ?? (run.slug && !run.file ? teamForSlug(input.teams, run.slug) : undefined);
+    // By its file first; a file that matches no listed team (another case, a link, a path that moved) falls back to the name it runs under.
+    const team = (run.file ? input.teams.find((entry) => sameFile(entry.file, run.file!)) : undefined) ?? (run.slug ? teamForSlug(input.teams, run.slug) : undefined);
     if (team && !runningRun.has(team.id)) runningRun.set(team.id, run.runId);
   }
   const cards: Record<string, DashboardCard> = {};

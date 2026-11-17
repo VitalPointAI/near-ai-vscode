@@ -449,8 +449,9 @@
     actions.append(
       // A team drafted from the builder keeps where that builder was saving to (its entry point, or the person's choice there); one drafted from the
       // library's own box is one of the person's teams, as before (PR #75 review).
-      button('Use this team', () => { const from = proposal; const target = askTarget; proposal = null; askTarget = 'user'; startWizard(target, null, from); }, { primary: true }),
-      button('Start over', () => { proposal = null; drafting = false; askTarget = 'user'; render(); }, { link: true })
+      // Either ends the wait: the host stops keeping the drafted team.
+      button('Use this team', () => { const from = proposal; const target = askTarget; proposal = null; askTarget = 'user'; vscode.postMessage({ type: 'proposal-done' }); startWizard(target, null, from); }, { primary: true }),
+      button('Start over', () => { proposal = null; drafting = false; askTarget = 'user'; vscode.postMessage({ type: 'proposal-done' }); render(); }, { link: true })
     );
     box.append(actions);
     return box;
@@ -542,6 +543,8 @@
       resume.append(button('Resume', () => startWizard(savedDraft.target, savedDraft), { primary: true }), button('Discard draft', () => { vscode.postMessage({ type: 'discard-draft' }); savedDraft = null; render(); }, { link: true }));
       root.append(resume);
     }
+    const waiting = draftWaiting();
+    if (waiting) root.append(waiting);
 
     if (!lib.teams.length) {
       // The first run: no summary of nothing, just the two ways in.
@@ -803,12 +806,17 @@
       if (stars && glyph && glyph.className === 'glyph') glyph.textContent = lit ? '★' : '☆';
     }
     if (ratingTimer) clearTimeout(ratingTimer);
-    ratingTimer = setTimeout(() => {
-      ratingTimer = null;
-      for (const [id, rating] of ratingQueue) vscode.postMessage({ type: 'rate', id, rating });
-      ratingQueue.clear();
-    }, 300);
+    ratingTimer = setTimeout(sendRatings, 300);
   }
+
+  /** Sends the ratings waiting for their choice to settle. Also when the tab is hidden or closed, so a star chosen just before is not lost. */
+  function sendRatings() {
+    if (ratingTimer) { clearTimeout(ratingTimer); ratingTimer = null; }
+    for (const [id, rating] of ratingQueue) vscode.postMessage({ type: 'rate', id, rating });
+    ratingQueue.clear();
+  }
+  window.addEventListener('pagehide', () => sendRatings());
+  if (typeof document.addEventListener === 'function') document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') sendRatings(); });
 
   // ---------- sections shared by the wizard and the editor ----------
   // The team as a picture: who answers to whom, and a card for each member. It reads the saved team, not the unsaved draft, and says so, so a card
@@ -970,6 +978,7 @@
 
   function renderStart(root) {
     const titles = { start: 'How do you want to start?', new: 'Create a new team', recommend: 'Recommend a team for me', ai: 'Describe it, and AI drafts it', pick: work.pickMode === 'existing' ? 'Use an existing team' : 'Clone an existing team' };
+    if (work.stage === 'start' || work.stage === 'new') { const waiting = draftWaiting(); if (waiting) root.append(waiting); }
     const panel = el('section', 'panel start'); panel.setAttribute('aria-labelledby', 'step-heading');
     const heading = el('h2', '', titles[work.stage]); heading.id = 'step-heading'; heading.setAttribute('tabindex', '-1');
     panel.append(heading);
@@ -1242,10 +1251,32 @@
   }
 
   /** A drafted team that arrived after the person left the AI start: back to it, unless something unsaved is open. */
+  /**
+   * Review it (PR 86 review, round 2: a drafted team waiting for review is state, not a banner). With unsaved work open the host asks first, as leaving
+   * does (Discard changes, or Save draft / Save); staying keeps both the work and the waiting team, and leaving opens the AI start on it.
+   */
   function reviewDrafted() {
-    hideBanner();
-    if (isDirty() || isWizardDirty()) { showBanner('Save or discard your changes first, then review the drafted team.', 'warning'); return; }
-    openAiStage(askTarget);
+    const target = work && work.mode === 'wizard' ? work.target : askTarget;
+    if (isDirty() || isWizardDirty()) { pendingAsk = target; leaveWork(); return; }
+    openAiStage(target);
+  }
+
+  function discardDrafted() {
+    proposal = null;
+    vscode.postMessage({ type: 'proposal-done' });
+    announce('The drafted team was discarded.');
+    focusMain();
+    render();
+  }
+
+  /** Where a drafted team waits: on the main page and the New team screens, until it is used or discarded. Never a banner, which another can replace. */
+  function draftWaiting() {
+    if (!proposal || drafting) return null;
+    const box = el('div', 'resume draft-waiting'); box.setAttribute('role', 'region'); box.setAttribute('aria-label', 'A drafted team');
+    const name = (proposal.proposal && proposal.proposal.name) || (proposal.draft && proposal.draft.name) || 'New team';
+    box.append(icon('team'), el('span', '', 'A team you described is drafted: "' + name + '". Review it before anything is saved.'));
+    box.append(button('Review it', reviewDrafted, { primary: true, label: 'Review the drafted team' }), button('Discard', discardDrafted, { link: true, label: 'Discard the drafted team' }));
+    return box;
   }
 
   function renderHeaderName() { if (work && work.mode === 'editor') { const crumbs = $('crumbs'); const last = crumbs.children && crumbs.children[crumbs.children.length - 1]; if (last) last.textContent = work.draft.name || 'Team'; } }
@@ -2172,6 +2203,8 @@
       case 'state':
         ctx = message.context; lib = message.library; savedDraft = message.savedDraft || null; picker = message.picker || null; dash = message.dashboard || null;
         applyView(message.view);
+        // A drafted team the host kept (null: none waiting); an older host says nothing, and the page keeps what it has.
+        if ('proposal' in message) proposal = message.proposal ? { proposal: message.proposal.proposal || {}, draft: message.proposal.draft || null, problems: message.proposal.problems || [] } : null;
         render();
         if (work) requestReview();
         if (message.kept) showKept(message.kept);
@@ -2270,9 +2303,10 @@
           render();
           announce('The team has been drafted. Review it, then use it or start over.');
         } else {
-          // The person left the AI start while it was drafting: the team is kept and offered, never dropped and never forced on screen.
-          showBanner('The team you described is drafted.', 'info', [button('Review it', reviewDrafted, { primary: true, label: 'Review the drafted team' })]);
-          announce('The team you described is drafted. Review it from the banner.');
+          // The person left the AI start while it was drafting: the team waits on the main page and the New team screens (the host keeps it too), never
+          // dropped and never forced on screen; an open editor or builder step is left as it is.
+          if (!work || (work.mode === 'wizard' && work.stage !== 'steps')) render();
+          announce('The team you described is drafted. Review it from Team Studio\'s main page or New team.');
         }
         break;
       case 'improve-checked': {

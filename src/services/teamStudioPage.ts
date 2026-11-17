@@ -301,7 +301,8 @@ export async function listLibrary(library: TeamLibrary, root: string | undefined
     const legacyRating = text !== undefined ? teamRating(text) : undefined;
     let check: CheckCounts | undefined;
     if (text !== undefined) {
-      const key = hash(text);
+      // The file and its content: the check reads the file's name too, so two files with the same text are each checked (PR 86 review, round 2).
+      const key = `${path.resolve(entry.file)}\n${hash(text)}`;
       if (options.checks?.has(key)) check = options.checks.get(key);
       else { check = checkCounts(text, entry.file); options.checks?.set(key, check); }
     }
@@ -378,6 +379,8 @@ const RISKS = ['low', 'medium', 'high'] as const;
 
 export type StudioMessage =
   | { type: 'ready' } | { type: 'refresh' } | { type: 'import' } | { type: 'discard-draft' } | { type: 'discard-kept' }
+  /** The drafted team waiting for review was used (Use this team) or discarded (Discard, Start over): it is no longer kept. */
+  | { type: 'proposal-done' }
   /** Watch it live (Team Live): `id`, the team whose run to show; without one, the newest run. */
   | { type: 'watch-live'; id?: string }
   /** The person's own rating of a team, 1 to 5 stars; 0 clears it. */
@@ -475,7 +478,7 @@ export function parseStudioMessage(value: unknown): StudioMessage | undefined {
   const message = value;
   const id = () => typeof message.id === 'string' && TEAM_ID.test(message.id);
   switch (message.type) {
-    case 'ready': case 'refresh': case 'import': case 'discard-draft': case 'discard-kept':
+    case 'ready': case 'refresh': case 'import': case 'discard-draft': case 'discard-kept': case 'proposal-done':
       return exactKeys(message, ['type']) ? { type: message.type } : undefined;
     case 'watch-live':
       if (!exactKeys(message, ['type'], ['id'])) return undefined;
@@ -643,6 +646,8 @@ export interface TeamStudioDeps {
   onDidChangeRuns?(listener: () => void): { dispose(): void };
   /** The last role test of each team, as Optimise all teams kept it (scores only, keyed by a hash of the team file's path). */
   roleTests?: { get(): unknown; set?(value: Record<string, RoleTestRecord>): Promise<void> };
+  /** A drafted team waiting for the person to review it (Describe it, and AI drafts it), kept in this extension's storage on this computer. */
+  proposal?: { get(): unknown; set(value: KeptProposal | undefined): Promise<void> };
   /** The person's own ratings of their teams, kept by each team's identity in this extension's storage on this computer (never in a team file). */
   ratings?: { get(): unknown; set(value: Record<string, RatingRecord>): Promise<void> };
   /** The dashboard's sort and filter, kept for the person in this extension's storage on this computer. */
@@ -815,6 +820,8 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
    */
   let historyRead: Promise<{ history: boolean; sessions: ActivitySessionSummary[] }> | undefined;
   const forgetHistory = () => { historyRead = undefined; };
+  /** Rating writes, one after another. */
+  let ratingWrites: Promise<unknown> = Promise.resolve();
   /** The dashboard last worked out, which Watch it live reads its run from. */
   let lastDashboard: TeamDashboard | undefined;
   const load = async () => {
@@ -831,7 +838,9 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
     // team's changes stay kept until the user reopens or discards them.
     if (kept?.kind === 'wizard' || (kept?.kind === 'editor' && !library.teams.some((team) => team.id === kept.id))) await deps.kept?.set(undefined);
     const view = dashboardView(deps.view?.get());
-    post({ type: 'state', library: pageLibrary(library), dashboard: await dashboardOf(), ...(view ? { view } : {}), context, picker: teamPicker(context!.startingPoints, library.teams), ...(saved ? { savedDraft: saved } : {}), ...(kept?.kind === 'wizard' && saved ? { kept: { kind: 'wizard', text: KEPT_WIZARD_TEXT } } : kept?.kind === 'editor' && library.teams.some((team) => team.id === kept.id) ? { kept: { ...kept, text: `Your unsaved changes to "${kept.name || 'the team'}" were kept as a draft.` } } : {}) });
+    // A host with somewhere to keep a drafted team always says whether one is waiting (null: none), so a page holding one that was used elsewhere drops it.
+    const waiting = deps.proposal ? { proposal: keptProposal(deps.proposal.get()) ?? null } : {};
+    post({ type: 'state', library: pageLibrary(library), dashboard: await dashboardOf(), ...(view ? { view } : {}), ...waiting, context, picker: teamPicker(context!.startingPoints, library.teams), ...(saved ? { savedDraft: saved } : {}), ...(kept?.kind === 'wizard' && saved ? { kept: { kind: 'wizard', text: KEPT_WIZARD_TEXT } } : kept?.kind === 'editor' && library.teams.some((team) => team.id === kept.id) ? { kept: { ...kept, text: `Your unsaved changes to "${kept.name || 'the team'}" were kept as a draft.` } } : {}) });
   };
   const refreshLibrary = async () => {
     if (!input) return;
@@ -1132,7 +1141,11 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
           if (!reply.ok) throw new Error(knowledgeBase && !message.private && reply.reason.startsWith('It needs a private model') ? `${KNOWLEDGE_BASE_PRIVATE} ${reply.reason}` : reply.reason);
           const drafted = parseProposal(reply.text, brief);
           // A team asked for as private stays private once it is a draft, so saving it keeps every member on a private model.
-          post({ type: 'team-proposal', proposal: drafted.proposal, draft: { ...proposalDraft(drafted.proposal), ...(message.private ? { private: true } : {}) }, text: proposalText(drafted.proposal), problems: drafted.problems });
+          const waiting: KeptProposal = { proposal: drafted.proposal as unknown as Record<string, unknown>, draft: { ...proposalDraft(drafted.proposal), ...(message.private ? { private: true } : {}) }, problems: drafted.problems };
+          // PR 86 review, round 2: a drafted team cost a model call, so it is kept until the person uses or discards it, whatever else happens (a banner,
+          // unsaved work, the studio closing).
+          await deps.proposal?.set(waiting).catch(() => undefined);
+          post({ type: 'team-proposal', ...waiting, text: proposalText(drafted.proposal) });
         } catch (error) { post({ type: 'error', text: `The team could not be drafted: ${(error as Error).message}` }); }
         return;
       }
@@ -1436,6 +1449,7 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
         return;
       }
       case 'discard-draft': await deps.drafts.set(undefined); return;
+      case 'proposal-done': await deps.proposal?.set(undefined); return;
       case 'watch-live': {
         // The team's own run when it has one going now (the listing's ids only); otherwise the newest run, as before.
         // The run is read from the dashboard the page was last sent, not by reading the history again (PR 86 review).
@@ -1452,9 +1466,11 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
         if (team.error) { post({ type: 'error', text: 'Fix this team file first, then rate it.' }); return; }
         const key = await keyOf(team);
         if (!deps.ratings || !key) { post({ type: 'error', text: 'Ratings cannot be kept here.' }); return; }
-        try {
-          await deps.ratings.set(withRating(parseRatings(deps.ratings.get()), key, message.rating, new Date().toISOString()));
-        } catch { post({ type: 'error', text: 'The rating could not be saved. Nothing was changed.' }); return; }
+        // One write after another (PR 86 review, round 2): two ratings sent together each read the store the other wrote, so neither is lost.
+        const store = deps.ratings;
+        const write = ratingWrites.then(() => store.set(withRating(parseRatings(store.get()), key, message.rating, new Date().toISOString())));
+        ratingWrites = write.catch(() => undefined);
+        try { await write; } catch { post({ type: 'error', text: 'The rating could not be saved. Nothing was changed.' }); return; }
         if (message.rating) team.rating = message.rating; else delete team.rating;
         await postLibrary(lastDashboard ?? await dashboardOf());
         post({ type: 'rated', id: message.id, rating: message.rating, text: message.rating ? `Rated ${team.name} ${message.rating} out of 5.` : `Cleared your rating of ${team.name}.` });
@@ -1779,6 +1795,21 @@ function keptWork(value: unknown): KeptWork | undefined {
   if (value.kind !== 'editor') return undefined;
   const edit = openEdit({ id: value.id, draft: value.draft, base: value.base });
   return edit ? { kind: 'editor', name, ...edit } : undefined;
+}
+
+/** A drafted team waiting for review: the proposal the page shows, the draft Use this team starts from, and what was repaired in it. */
+export interface KeptProposal { proposal: Record<string, unknown>; draft: TeamDraft; problems: string[] }
+
+/** A kept drafted team read back, checked: the draft as strictly as one from the page, and the proposal's shape; anything else is not offered. */
+export function keptProposal(value: unknown): KeptProposal | undefined {
+  if (!isPlain(value) || !exactKeys(value, ['proposal', 'draft', 'problems'])) return undefined;
+  const proposal = value.proposal;
+  if (!isPlain(proposal) || !text(proposal.name, 120) || !Array.isArray(proposal.members) || !Array.isArray(proposal.outputs ?? [])) return undefined;
+  if (!(proposal.members as unknown[]).every((member) => isPlain(member) && ['name', 'role', 'model', 'produces'].every((key) => member[key] === undefined || text(member[key], 12_000)))) return undefined;
+  const draft = parseDraft(value.draft);
+  const problems = value.problems;
+  if (!draft || !Array.isArray(problems) || problems.length > 40 || !problems.every((problem) => text(problem, 600))) return undefined;
+  return { proposal, draft, problems: problems as string[] };
 }
 
 function savedWizard(value: unknown): SavedWizard | undefined {
