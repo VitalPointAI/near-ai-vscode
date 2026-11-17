@@ -104,7 +104,8 @@ async function teamAiDeps(auth: AuthService, runtimeOf: (root: string) => Promis
     generateImage: async (model, prompt, signal) => {
       // Its own name: the route check reads the work handed to withSessionRoute by name, so the two in this file must differ.
       const sendImage = () => withSpendTag({ kind: 'generation' }, () => clientFor(active, model).client.generateImage(model, prompt, { count: 1 }, signal));
-      const runtime = await gateHost?.runtimeFor({ root, actor: { kind: 'person', sessionId: 'team-studio' }, presence: 'person', context: 'interactive' });
+      // The same per-panel runtime as the text requests above (PR #81 review): the host is asked once per folder, not before each image.
+      const runtime = await runtimeOf(root);
       return withSessionRoute(runtime ? sessionRouteFrom(runtime) : defaultSessionRoute(), sendImage);
     }
   };
