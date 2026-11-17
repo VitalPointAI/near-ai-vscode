@@ -113,12 +113,14 @@ test('every call the loop forbids is recorded as refused with a reason, never al
 test('a call the loop forbids that no gate rule would refuse (its effects are unknown while the floor is enforced) is recorded denied with the loop\'s own rule and reason, not asked', async () => {
   const read = CORE_TOOLS.find((tool) => tool.name === 'Read') as AgentTool<any>;
   const reason = 'Planted: this tool refuses this call itself.';
-  const planted: AgentTool<any> = { ...read, name: 'Planted', forbidden: async () => reason };
+  // A manifest that lists no effect (a damaged stored one, hand-made because the parsers refuse it) cannot be filled, so the gate alone would ask (or refuse
+  // with nobody there) with manifest.effects-unknown. (This used a path outside the project; since the owner decision after PR #74 the gate refuses that
+  // itself as call.outside-workspace, so it no longer shows a call no gate rule would refuse.)
+  const undeclared = { manifestVersion: 1, tool: 'Planted', effects: [], hosts: [], credentials: [], contexts: ['interactive', 'unattended'], untrusted: false, runsOn: 'this-machine' } as unknown as AgentTool<any>['manifest'];
+  const planted: AgentTool<any> = { ...read, name: 'Planted', manifest: undeclared, forbidden: async () => reason };
   for (const presence of ['person', 'none'] as const) {
     const runtime = runtimeFor({ presence });
-    // A path outside the folder cannot be read by the manifest, so the gate alone would ask (or refuse with nobody there) with manifest.effects-unknown.
-    const outside = path.join(tmpdir(), 'near-ai-gate-refusal-outside', 'x.txt');
-    const ran = await runCall(runtime, [call('p1', 'Planted', { file_path: outside })], { tools: [planted] });
+    const ran = await runCall(runtime, [call('p1', 'Planted', { file_path: 'notes.md' })], { tools: [planted] });
     assert.equal(ran.outputs[0], `Not allowed: ${reason}`);
     assert.equal(ran.approvals, 0);
     assert.equal(runtime.records.length, 1);

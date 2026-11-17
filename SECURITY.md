@@ -102,12 +102,27 @@ run** or an allow-list entry that matches:
   command;
 - writing into `.planning/.near-ai/` (other than its `team.md`) or into
   `.near-ai/` (other than its `scratch/` and `attachments/` folders);
-- publishing: git push, package and extension publishing, release creation,
-  container image push, deploy commands, and sending email;
+- publishing: git push, merging a pull request (`gh pr merge`), a write
+  through `gh api` (a writing method, a field or a body), package and
+  extension publishing, release creation, container image push, deploy
+  commands, and sending email;
+- signing in or out: registry and account logins, logouts and token changes,
+  which change the logins and tokens kept on this computer (`npm`, `yarn`,
+  `pnpm` and `bun` login, logout and token; `cargo login` and `logout`;
+  `docker`, `podman` and `buildah` login and logout; `helm registry login`;
+  `gh auth login`, `logout`, `refresh`, `setup-git` and `switch`;
+  `gcloud auth login` and the like; `az login`; `aws configure` and
+  `aws sso login`);
 - destruction: recursive deletes outside scratch and build folders,
   `git reset --hard`, `git clean`, discarding uncommitted changes, history
-  rewrites (`git commit --amend`, `git rebase` including `--continue`,
-  `git gc` and the like), and deleting branches and tags;
+  rewrites (`git commit --amend`, starting a `git rebase`, and removing
+  unreachable commits at once with `git gc --prune=now`, a bare `git prune`
+  or `git reflog expire`), and deleting branches and tags. Routine
+  maintenance is not destruction: `git gc` and `git prune` that keep git's
+  grace period of days or more, and `git rebase --continue`, `--abort`,
+  `--skip`, `--quit` or `--edit-todo` on a rebase already under way. The
+  grace period is judged from the command line only: a `gc.pruneExpire` set
+  in a git config file is not seen, so a plain `git gc` there still runs;
 - writing to the knowledge your team shares (the Learn tool).
 
 Approving one of these runs that one call. When a helper agent's card is
@@ -121,16 +136,60 @@ In every mode these are refused, with no card: the project's key folder (below),
 the NEAR key folder in your home folder (`~/.near-credentials`), SSH keys
 (`~/.ssh`), cloud and registry credential files (`~/.aws`, `~/.config/gcloud`,
 `~/.azure`, `~/.docker/config.json`, `~/.kube`, `~/.netrc`, `~/.git-credentials`,
-`~/.gnupg`, `~/.npmrc`, `~/.pypirc`), operating-system keychain commands that
-print a secret, VS Code's own secrets database, and this extension's own
-identity and policy files in its storage. This holds for the file tools and for
-shell commands alike.
+`~/.gnupg`, `~/.npmrc`, `~/.pypirc`, `~/.config/gh` (the GitHub CLI's folder, which holds its login),
+`~/.cargo/credentials` and `credentials.toml`,
+`~/.terraform.d/credentials.tfrc.json`, `~/.config/glab-cli`, `~/.config/hub`,
+`~/.gem/credentials`, `~/.local/share/keyrings`, `~/.yarnrc.yml`; a project's
+own `.npmrc` or `.yarnrc.yml` is the project's), operating-system keychain
+commands that print a secret, commands that print a stored login or token
+(`gh auth token`, `gh auth status --show-token`, `gcloud auth
+print-access-token` and `print-identity-token`, `az account get-access-token`,
+`aws configure get` of a key, token or secret, `aws sts get-session-token`,
+`aws ecr get-login-password` and the like, `npm token list` and `create`, and the `docker-credential-*`
+helpers), VS Code's own secrets database, and this extension's own identity
+and policy files in its storage. This holds for the file tools and for shell
+commands alike. For aws, gcloud and az, a word that looks like a command that
+prints a token (such as `get-session-token`, `print-access-token` or
+`get-access-token`) anywhere among the arguments, even as an option's value,
+makes the command refused as one: rename that word, or run that step yourself.
+
+A file tool's path outside the project and every folder that tool may use (a
+folder NEAR AI trusts for reading, such as the managed Open-GSD runtime, is for
+reading only) is refused at once, in every mode, with the tool's own "outside
+the workspace" message and no card, because the tool would refuse it anyway.
 
 Reading a file inside the project that looks like a credential (`.env`, private
 keys, SSH, AWS, or NEAR credential files), through any path or symlink, asks
 first in every mode except `fully-autonomous`, where it runs without asking (see
 Known limitations). The holds after outside content apply in every mode (see
 "Outside content and prompt injection").
+
+Once a run has read such a file, in any mode, a call that could send data off
+this computer asks in every mode, `fully-autonomous` included, with no
+**Always allow** and no grant for the rest of the run, and is refused when
+nobody is there to answer: publishing or sending, a web fetch or search, a
+call to an add-on server with a web address (or a local one declared to reach
+a host), and a shell command the checks know reaches the network (curl or wget
+other than a plain download, http and xh, nc, socat, telnet, ssh, scp, sftp,
+rsync to another machine, git push, fetch, pull, clone and ls-remote, gh and
+glab, the cloud and cluster tools, a container registry push, pull or login,
+an install that names a remote address (a URL other than `file://`, or a
+version-control address) with npm, yarn, pnpm, bun, pip, `python -m pip`, uv,
+pipx, cargo, gem or composer, `cargo install` or `gem install` from another
+registry or source, `go get` and `go install` of a module path, network code
+an interpreter runs from the line), as well as one the checks cannot read
+whole. An install of a package by name from the default registry is not
+held. A command that reads such a file and could send in
+the same line is held the same way. Local work still runs unasked: builds,
+tests, `npm run` scripts, `make`, and `node` or `python` running a script.
+A program the agent starts can still read the credential and send it itself,
+and a plain download's address could carry it; only the planned sandbox around
+the shell closes that. The read is seen as the other checks see one: a file the
+command or tool names, or a path that resolves to one; a recursive search, a
+glob, a path built while the command runs, or a link named without a folder
+(`cat notes` where `notes` is a link to `.env`) is not. A command that only
+mentions a credential file (`echo .env`, a commit message that names it) marks
+the run as a read does, and the mark lasts until the run ends.
 
 The checks that keep agents out of key and credential folders read the text of
 a command, following the shell's folder and any cd or pushd earlier in the same
@@ -211,7 +270,10 @@ is what that file and the records beside it do in this version.
 - **No network.** Nothing in a decision needs the network, so the policy
   works the same offline.
 - **Decision records.** Each decision, allowed, asked or refused, is written
-  to a record for the project in this extension's storage. A record names what
+  to a record for the project in this extension's storage. A call refused
+  before it could be judged (a tool the run does not have, arguments that are
+  not valid JSON or do not fit the tool, or a tool's own check that failed) is
+  recorded too, naming the tool and never its arguments. A record names what
   was asked for, what was decided and why, never file contents. A command is
   named by its first line only, and before a record is written NEAR AI removes
   from every text in it: known token shapes (such as `sk-`, `ghp_`, AWS access
@@ -221,7 +283,8 @@ is what that file and the records beside it do in this version.
   `--proxy-user` or `-U` when it holds a colon (a numeric user and group, such
   as `1000:1000`, is kept), the value of an option named
   for a password, passphrase, token, secret, API key or credential (such as
-  `--password=...`, `--token ...` or `-storepass ...`), the value of an
+  `--password=...`, `--token ...` or `-storepass ...`; a number given to a
+  count of tokens, such as `--max-tokens 4096`, is kept), the value of an
   `Authorization`, `Proxy-Authorization`, `Cookie`, `Private-Token` or
   `X-...-Token` or `-Key` header, and the value of an environment assignment,
   URL query parameter or form field named for one (such as `GITHUB_TOKEN=...`,
@@ -698,7 +761,25 @@ Brave Search, or Tavily (keys in SecretStorage). It is off until you choose.
   version behave as they did, with one exception: a tool that changes data on a
   local server (one started by a command, with no web address) now asks before
   every call in every mode, even on a server marked trusted, because NEAR AI
-  cannot tell what it reaches.
+  cannot tell what it reaches, until you declare what it may do (below).
+- **Declaring what a local server may do.** In your user settings,
+  `nearAi.mcp.localServerEffects` names, per server id, what the tools of a
+  server with no web address may do: `"read"`, `{ "workspaceWrite": [paths] }`
+  (writes inside the project on those paths) and `{ "network": [hosts] }`
+  (reaches those hosts, named exactly). A declaration is your statement that you trust what that server's tools do: the gate does not check each call's arguments against it, so a declared tool runs without asking in Full auto. Only declare servers you trust like your own code. What a declared tool
+  does with its arguments (which file it writes, what it reads, where it
+  sends) is the server's own business: NEAR AI sees only what you declared,
+  so a declared server could still write into `.git/` or read a credential
+  store. A declaration only narrows which tools it covers: it decides the
+  server's tools that themselves say they neither delete nor reach the open
+  world (MCP's `destructiveHint` and `openWorldHint` both false); a tool that
+  says it may delete or reach the open world, or says neither way, keeps
+  asking whatever is declared. The setting itself refuses to name publishing,
+  deleting, sending, shell commands, `.git/`, `.planning/` or `.near-ai/`, the
+  whole project or a wildcard at its top, and after a credential read a
+  declared host still asks. A declaration that cannot be read is ignored with
+  a warning, and the server keeps asking. A workspace's settings cannot
+  declare it.
 - **Declaring what a tool does.** The MCP page has a "What it does" menu for
   each tool of a connected server: it only reads, it changes data on the server,
   or you do not know. That decides how the tool is treated from then on.
@@ -796,7 +877,7 @@ messages.
 | Project memory has a searchable list, not a graph view | A team's own knowledge graph (see "Where your data goes") is shown as a network in Team Studio; members also get project memory and their own private memory |
 | Agent reputation is recorded per role but does not yet change which model a role uses | Routing comes from team `model:` lines and the deep/standard/fast settings |
 | **Revert** restores files changed by the agent's file tools, not changes made by shell commands it ran | Use git for command side effects; documented in the chat |
-| Under `fully-autonomous`, the agent runs commands and reads likely credential files inside the project without asking | Writes into `.git/`, `.planning/.near-ai/` and `.near-ai/`, publishing and destruction still ask, with no "always allow", and the key folder and credential stores are refused. The command checks read text, and there is no sandbox around the shell yet, so a command whose words they cannot see, such as one built at run time, runs; one too deep or too long to read asks (see "What the agent can do without asking"). Intended for throwaway workspaces |
+| Under `fully-autonomous`, the agent runs commands and reads likely credential files inside the project without asking | Writes into `.git/`, `.planning/.near-ai/` and `.near-ai/`, publishing and destruction still ask, with no "always allow", and the key folder and credential stores are refused. After it reads such a file, anything that could send data off this computer asks too. The command checks read text, and there is no sandbox around the shell yet, so a command whose words they cannot see, such as one built at run time, runs; one too deep or too long to read asks (see "What the agent can do without asking"). Intended for throwaway workspaces |
 | Facts the agent saves with Remember are not reviewed when saved, and later runs start with the relevant ones | Each fact is labeled "verify before relying on it"; review, correct or reset memory with **Manage Project Memory** |
 | Spend limits use NEAR's published prices for estimates; the actual charge arrives from billing after the run | Each run, with all its sub-agents, stops before a model turn once its estimate reaches `nearAi.agent.maxRunCostUsd` (default $5), what is left of `nearAi.dailySpendLimitUsd`, or `nearAi.agent.maxRunTokens`; an agent repeating the same action is nudged and then stopped |
 

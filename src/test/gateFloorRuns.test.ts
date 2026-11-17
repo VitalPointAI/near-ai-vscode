@@ -145,6 +145,13 @@ const CASES: readonly FloorCase[] = [
     ran: (w) => readFileSync(path.join(w.root, 'tracked.txt'), 'utf8') === 'one\n' || !existsSync(path.join(w.root, 'untracked.txt'))
   },
   {
+    // Owner decision after PR #74: a registry or account login or logout changes the credentials kept on this computer. It would only reach the
+    // stand-in home's own npm settings if it ran; the test asserts it never does.
+    rule: 'floor.credential-change',
+    calls: () => [call('cc1', 'Bash', { command: 'npm logout --registry http://127.0.0.1:9' })],
+    ran: (_w, outputs) => outputs.some((text) => /\[(?:exit code|killed)/.test(text))
+  },
+  {
     rule: 'floor.shared-write',
     calls: () => [call('l1', 'Learn', { nodes: [{ label: 'Halden Ports', kind: 'organisation' }] })],
     ran: (w) => w.learned() > 0,
@@ -246,7 +253,7 @@ test('every floor rule, in every mode, with a person and with nobody: refusals s
     }
   }
   assert.deepEqual([...rulesSeen].sort(), [...FLOOR_RULE_ORDER].sort(), 'every floor rule is exercised');
-  assert.equal(checked, 7 * 4 * 2, '7 floor rules x 4 modes x 2 presences, besides the add-on server tool\'s 8');
+  assert.equal(checked, 8 * 4 * 2, '8 floor rules x 4 modes x 2 presences, besides the add-on server tool\'s 8');
 });
 
 test('a person approving a floor card runs that one call; "for this run" grants nothing, so the next identical call asks again', async () => {
@@ -464,15 +471,16 @@ test('a file-tool read in the trusted Open-GSD folder runs with no card in every
         const read = gate.records.find((record) => record.api.request.uid === 't1');
         assert.equal(ruleOf(read!), 'settings.read-plan', `${where}: a known read, decided as a read`);
         assert.equal(read?.resources[0]?.name, `${path.basename(realpathSync(gsdHome))}/bin/gsd-tools.cjs`, `${where}: the record names the file by its folder, not the machine path`);
-        // A write there is never a known write: with nobody here the gate refuses it, and with a person the Write tool refuses the path itself (its card
-        // preview cannot be built for a path outside the project), as it always has. The trusted folder is for reading only.
-        assert.match(outputs[3] ?? '', presence === 'none' ? /^Not allowed: NEAR AI cannot tell what Write would do/ : /outside the workspace/, `${where}: ${outputs[3]}`);
+        // A write there is never a known write: the trusted folder is for reading only, so the Write tool would refuse the path. Owner decision after
+        // PR #74 (changed deliberately): the gate refuses it up front with the tool's own words, with a person and with nobody, and shows no card.
+        assert.match(outputs[3] ?? '', /^Not allowed: .*is outside the workspace/, `${where}: ${outputs[3]}`);
         assert.equal(existsSync(path.join(gsdHome, 'bin', 'planted.cjs')), false, `${where}: nothing was written into the trusted folder`);
         assert.doesNotMatch(outputs[4] ?? '', /outside-marker/, `${where}: a file outside every trusted folder was not read`);
         const outsideRead = gate.records.find((entry) => entry.api.request.uid === 't5');
-        assert.equal(ruleOf(outsideRead!), 'manifest.effects-unknown', `${where}: a read outside every trusted folder is still a call whose effects are unknown`);
+        assert.equal(ruleOf(outsideRead!), 'call.outside-workspace', `${where}: a read outside every trusted folder is refused up front`);
+        assert.equal(ruleOf(gate.records.find((entry) => entry.api.request.uid === 't4')!), 'call.outside-workspace', `${where}: so is the write into the trusted folder`);
         const fileCards = cards.filter((card) => card.tool !== 'Bash');
-        assert.deepEqual(fileCards.map((card) => card.tool), presence === 'person' ? ['Read'] : [], `${where}: of the file tools, only the outside read asked`);
+        assert.deepEqual(fileCards.map((card) => card.tool), [], `${where}: no file tool asked`);
         for (const card of fileCards) {
           assert.equal(card.grant, undefined, where);
           assert.equal(card.allowRule, undefined, where);

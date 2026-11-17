@@ -12,6 +12,7 @@ export const FLOOR_RULES = Object.freeze({
   'floor.identity-files': 'refuse',
   'floor.protected-write': 'ask',
   'floor.publish': 'ask',
+  'floor.credential-change': 'ask',
   'floor.destroy': 'ask',
   'floor.shared-write': 'ask'
 } as const);
@@ -23,7 +24,8 @@ export type FloorKind = (typeof FLOOR_RULES)[FloorRule];
  * each group the order is the order they are listed here.
  */
 export const FLOOR_RULE_ORDER: readonly FloorRule[] = Object.freeze([
-  'floor.state-keys', 'floor.credential-store', 'floor.identity-files', 'floor.protected-write', 'floor.publish', 'floor.destroy', 'floor.shared-write'
+  'floor.state-keys', 'floor.credential-store', 'floor.identity-files', 'floor.protected-write', 'floor.publish', 'floor.credential-change', 'floor.destroy',
+  'floor.shared-write'
 ] as const);
 
 const TEAM_SETTINGS_FILE = '.planning/.near-ai/team.md';
@@ -59,11 +61,13 @@ export interface FloorVerdict {
 
 // The credential stores outside the project (D-16, research 4.2). Home-relative, so each is matched after `~/`, `$HOME/`, `${HOME}/` or the literal home folder.
 // A whole folder is named by its folder; a single file by its file. Workspace files such as `.env` are not here: they stay with the settings layer (D-18).
-// The research's "proposed additions" (A5: gh hosts.yml, cargo credentials, terraform credentials, keyring folders, token printers) are NOT added: they are
-// an owner question carried to the PR 3 body.
+// The research's additions (A5) were approved by the owner after PR #74: the GitHub CLI's hosts file, cargo's credentials, terraform's, the GitLab and hub
+// CLIs', RubyGems', the desktop keyring folder and yarn's home settings (which can hold a registry token).
 export const CREDENTIAL_STORES: readonly string[] = Object.freeze([
   '.near-credentials', '.ssh', '.aws', '.config/gcloud', '.azure', '.docker/config.json', '.netrc', '.git-credentials', '.gnupg', '.kube', '.npmrc', '.pypirc',
-  '.near-kb', '.kbkey'
+  '.near-kb', '.kbkey',
+  '.config/gh', '.cargo/credentials', '.cargo/credentials.toml', '.terraform.d/credentials.tfrc.json', '.config/glab-cli', '.config/hub', '.gem/credentials',
+  '.local/share/keyrings', '.yarnrc.yml'
 ]);
 
 /**
@@ -160,6 +164,11 @@ export const KEYCHAIN_COMMANDS: readonly string[] = Object.freeze([
   'security find-generic-password', 'security find-internet-password', 'security dump-keychain', 'security export', 'secret-tool lookup', 'secret-tool search'
 ]);
 
+/** The plain reason for a command that prints a stored login or token (refused as `floor.credential-store`). */
+export function printerReason(shown: string): string {
+  return `${shown} prints a stored password, key or token. Agents may not run it, in any approval mode.`;
+}
+
 /** The folders of this extension's global storage that hold its identity and its gate files (the signing key history and lock, the policy bundle and the logs). */
 export const EXTENSION_STORAGE_FOLDERS: readonly string[] = Object.freeze(['identity', 'gate']);
 
@@ -236,6 +245,8 @@ export function namesCredentialStore(text: string, locations: FloorLocations = {
   const stores = new RegExp(`${homePrefix(locations)}(?:${CREDENTIAL_STORES.map(escapeRegExp).join('|')})${NAME_END}`, 'i');
   const keychain = new RegExp(`(?<![\\w.-])(?:${KEYCHAIN_COMMANDS.map((command) => command.split(' ').map(escapeRegExp).join('\\s+')).join('|')})(?![\\w-])`, 'i');
   const shown = firstMatch(stores, flat) ?? namesVscodeSecrets(flat, locations, workspace) ?? firstMatch(keychain, flat);
+  // The commands that print a stored token are found by how the command runs (the classifier's printsCredential), not by their words anywhere in the
+  // text, so a commit message or a search that mentions one is not refused (PR #76 review round 3).
   return shown === undefined ? undefined : credentialReason(shown);
 }
 
@@ -259,6 +270,11 @@ export interface FloorFacts {
   readonly protectedWrite?: string;
   /** Set from `fromActionCapability` when the shorthand was `sharedWrite` (the shared team knowledge store). */
   readonly sharedWrite?: boolean;
+  /**
+   * The command signs in or out of a registry or account, or changes a stored login or token (owner decision after PR #74): what it is, in a sentence.
+   * It is not an effect of the vocabulary (it may send nothing anywhere); it changes the credentials kept on this computer, so a person is asked.
+   */
+  readonly credentialChange?: string;
 }
 
 /** What `floorFor` reads from a request. The gate's own request type extends this. */
@@ -301,6 +317,7 @@ function protectedWriteMatch(input: FloorInput): string | undefined {
 
 const PUBLISH_REASON = 'This sends or publishes something outside this computer, where it may not be undone. It always needs a person to approve it, in every mode.';
 const DESTROY_REASON = 'This deletes or rewrites something that may not come back. It always needs a person to approve it, in every mode.';
+const CREDENTIAL_CHANGE_REASON = 'It changes the logins or tokens kept on this computer. It always needs a person to approve it, in every mode.';
 const SHARED_WRITE_REASON = 'This writes to knowledge your team shares, which every member and later run reads. It always needs a person to approve it, in every mode.';
 
 function effectMatch(input: FloorInput, matches: (effect: Capability) => boolean, reason: string): string | undefined {
@@ -321,6 +338,7 @@ export function floorFor(input: FloorInput, locations: FloorLocations = {}): Flo
   set('floor.identity-files', facts?.identityFiles ?? (command === undefined ? undefined : namesIdentityFiles(command, locations)));
   set('floor.protected-write', protectedWriteMatch(input));
   set('floor.publish', effectMatch(input, (effect) => effect.verb === 'publish' || effect.verb === 'send', PUBLISH_REASON));
+  set('floor.credential-change', facts?.credentialChange === undefined ? undefined : `${facts.credentialChange} ${CREDENTIAL_CHANGE_REASON}`);
   set('floor.destroy', effectMatch(input, (effect) => effect.verb === 'destroy', DESTROY_REASON));
   set('floor.shared-write', facts?.sharedWrite === true ? SHARED_WRITE_REASON : effectMatch(input, (effect) => effect.verb === 'skill.write' && effect.scope === 'team', SHARED_WRITE_REASON));
   for (const rule of FLOOR_RULE_ORDER) {

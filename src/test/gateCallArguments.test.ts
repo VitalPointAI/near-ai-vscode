@@ -48,7 +48,8 @@ test('a renaming tool\'s read in a trusted folder is a known read, and its manif
   assert.equal(gated.decision.outcome, 'allow', `not ${gated.decision.rule}`);
 });
 
-test('a renaming tool\'s read outside the project and every trusted folder still has unknown effects', async () => {
+// Owner decision after PR #74 (changed deliberately): such a read still has unknown effects, and the gate now refuses it up front as the tool would.
+test('a renaming tool\'s read outside the project and every trusted folder has unknown effects and is refused up front', async () => {
   const outside = path.join(base, 'elsewhere.md');
   writeFileSync(outside, 'x');
   const gated = await gateToolCall(testGateRuntime({ presence: 'none', context: 'unattended' }), {
@@ -56,7 +57,7 @@ test('a renaming tool\'s read outside the project and every trusted folder still
     grants: new RunGrants(), readOnlyRoots: [TRUSTED], buildAuto: async () => undefined
   });
   assert.deepEqual(gated.effects, []);
-  assert.equal(gated.decision.rule, 'manifest.effects-unknown');
+  assert.equal(gated.decision.rule, 'call.outside-workspace');
 });
 
 test('a renaming tool\'s read inside the project is the project path', async () => {

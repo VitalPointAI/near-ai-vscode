@@ -225,3 +225,38 @@ test('the cyber panel\'s permission path never runs the classifier without its c
   // cyberRun calls decidePermission with no auto context, so the classifier is never asked and a named script is not judged safe.
   assert.equal(decidePermission('shell', 'npm run sync', { mode: 'auto', emergencyStop: false }, DEFAULT_RULES, new RunGrants(), undefined).decision, 'ask');
 });
+
+// PR #74 last review: the reader read a package.json of any size for every decision. Past PACKAGE_JSON_MAX_BYTES it is not read at all: it is
+// `unreadable`, so a package script there has unknown effects and the gate asks (with nobody, refuses), never a parse of a file that size.
+test('a package.json larger than the cap is unreadable without being read, and a command running its scripts asks', async () => {
+  const { PACKAGE_JSON_MAX_BYTES } = await import('../agent/packageScripts');
+  assert.equal(PACKAGE_JSON_MAX_BYTES, 1024 * 1024);
+  const root = realpathSync(mkdtempSync(path.join(tmpdir(), 'near-ai-pkgbig-')));
+  const big = path.join(root, 'big');
+  mkdirSync(big);
+  const padding = 'x'.repeat(PACKAGE_JSON_MAX_BYTES);
+  writeFileSync(path.join(big, 'package.json'), JSON.stringify({ name: 'big', description: padding, scripts: { sync: 'echo fine' } }));
+  const atCap = path.join(root, 'at-cap');
+  mkdirSync(atCap);
+  const small = JSON.stringify({ name: 'at-cap', scripts: { sync: 'echo fine' } });
+  writeFileSync(path.join(atCap, 'package.json'), `${small}${' '.repeat(PACKAGE_JSON_MAX_BYTES - Buffer.byteLength(small))}`);
+  let reads = 0;
+  const reader = new PackageScriptsReader({ statSync, readFileSync: ((file: string, encoding: BufferEncoding) => { reads += 1; return readFileSync(file, encoding); }) as typeof readFileSync });
+  assert.equal(reader.at(big, root).kind, 'unreadable');
+  assert.equal(reads, 0, 'a file past the cap is never read');
+  assert.equal(reader.at(atCap, root).kind, 'found', 'a file exactly at the cap is read');
+  // A file that grows past the cap between the size check and the read is still refused.
+  const growing = new PackageScriptsReader({ statSync: ((file: string) => ({ ...statSync(file), size: 10, isFile: () => true })) as unknown as typeof statSync, readFileSync });
+  assert.equal(growing.at(big, root).kind, 'unreadable');
+  const facts = await floorFactsFor({ command: 'cd big && npm run sync', root, cwd: root, packageScriptsAt: (folder) => reader.at(folder, root) });
+  assert.equal(typeof facts.effectsUnknown, 'string');
+  for (const presence of ['person', 'none'] as const) {
+    const gated = await gateToolCall(testGateRuntime(presence === 'none' ? { presence, context: 'unattended' } : {}), {
+      tool: bashTool, raw: { command: 'cd big && npm run sync' }, root, callId: `big-${presence}`, command: 'cd big && npm run sync',
+      shell: { cwd: root, packageScriptsAt: (folder) => reader.at(folder, root) }, policy: { mode: 'fully-autonomous', emergencyStop: false },
+      rules: DEFAULT_RULES, grants: new RunGrants(), buildAuto: async () => undefined
+    });
+    assert.equal(gated.decision.outcome, presence === 'person' ? 'ask' : 'deny', presence);
+    assert.equal(gated.decision.rule, 'manifest.effects-unknown');
+  }
+});

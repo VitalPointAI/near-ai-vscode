@@ -281,7 +281,11 @@ test('GATE_RULE_IDS lists every rule id once, including the floor, bundle, manif
     'settings.risk.outside-workspace', 'settings.risk.installs', 'settings.safety-model', 'settings.sensitive-read', 'settings.mcp-approval', 'settings.tool-forbidden'
   ]) assert.ok(GATE_RULE_IDS.includes(rule), rule);
   for (const rule of PRE_GATE_RULES) assert.ok(GATE_RULE_IDS.includes(rule), rule);
-  assert.equal(GATE_RULE_IDS.length, FLOOR_RULE_ORDER.length + 7 + 3 + ROUTE_RULES.length + 1 + 19 + PRE_GATE_RULES.length);
+  // Owner decisions after PR #74: a file tool's path outside the project is refused up front, and a call that can send data after a credential read is
+  // held, each under a rule of its own.
+  assert.ok(GATE_RULE_IDS.includes('call.outside-workspace'));
+  assert.ok(GATE_RULE_IDS.includes('taint.credential-read'));
+  assert.equal(GATE_RULE_IDS.length, FLOOR_RULE_ORDER.length + 7 + 3 + ROUTE_RULES.length + 2 + 19 + PRE_GATE_RULES.length + 1);
 });
 
 // ---- Effects unknown: an empty effect list fails closed (PR 1 review fold-in) ----

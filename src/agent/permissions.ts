@@ -138,6 +138,15 @@ export class RunGrants {
    * is recorded, because that content may have shaped it.
    */
   public readonly scratchWrites = new Map<string, number>();
+  /**
+   * The first file this run read that may hold credentials (a project `.env`, a key file), as the agent named it (owner decision after PR #74, D-18). Full
+   * auto reads such a file without asking; from then on, a call that can send data off this computer asks in every mode (`taint.credential-read`).
+   * Shared with every sub-agent through these grants, and never cleared during the run.
+   */
+  public credentialRead: string | undefined;
+  public noteCredentialRead(shown: string): void {
+    this.credentialRead ??= shown.replace(/[\u0000-\u001F\u007F]/g, ' ').trim().slice(0, 120) || 'a file that may hold credentials';
+  }
   public get tainted(): boolean { return this.wasTainted; }
   public set tainted(value: boolean) {
     if (value && !this.wasTainted) this.taintedAt = Date.now();

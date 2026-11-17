@@ -55,6 +55,17 @@ export interface GateRequest extends FloorInput {
    * bundle state and the floor's own refusals still come first.
    */
   readonly settingsRefusal?: { readonly rule: string; readonly reason: string };
+  /**
+   * The tool's own message when a file tool's path is outside the project and every folder it may use for that call (owner decision after PR #74): the
+   * tool would refuse the call, so the gate refuses it as `call.outside-workspace` instead of asking, after the emergency stop, the bundle state, the
+   * floor's refusals and a settings refusal.
+   */
+  readonly outsideWorkspace?: string;
+  /**
+   * Set, with the plain reason, when the run (or this call) has read a file that may hold credentials and this call can send data off this computer (owner
+   * decision after PR #74, D-18): it asks in every mode, fully-autonomous included, with no "always allow" and no grant, and is refused with nobody here.
+   */
+  readonly credentialHold?: string;
 }
 
 export interface SettingsAnswer {
@@ -110,10 +121,17 @@ export interface GateRuntime {
 
 /**
  * The rules of a call refused before the gate could be asked, which the loop still records so no refused call is missing from the log: a tool name the run
- * does not have, and a tool's own check (its forbidden, sensitive, risky or preview hook) that threw, so the call could not be judged and did not run.
+ * does not have, a tool's own check (its forbidden, sensitive, risky or preview hook) that threw, so the call could not be judged and did not run, and
+ * arguments that could not be read (not JSON, not an object, or refused by the tool), so nothing could be judged either.
  */
-export const PRE_GATE_RULES = Object.freeze(['call.unknown-tool', 'call.check-failed'] as const);
+export const PRE_GATE_RULES = Object.freeze(['call.unknown-tool', 'call.check-failed', 'call.bad-arguments'] as const);
 export type PreGateRule = (typeof PRE_GATE_RULES)[number];
+
+/** A call that can send data off this computer after the run read a file that may hold credentials (GateRequest.credentialHold). */
+export const CREDENTIAL_HOLD_RULE = 'taint.credential-read';
+
+/** A file tool's path outside the project and every folder the tool may use: the tool would refuse it, so the gate does, with no card. */
+export const OUTSIDE_WORKSPACE_RULE = 'call.outside-workspace';
 
 /** Every rule id the gate can record: the floor, the bundle and manifest checks, labels, routing, taint, the settings rules of the migration table, and the calls refused before the gate. */
 export const GATE_RULE_IDS: readonly string[] = Object.freeze([
@@ -121,12 +139,12 @@ export const GATE_RULE_IDS: readonly string[] = Object.freeze([
   'bundle.failed-closed', 'bundle.unavailable', 'bundle.ceiling.context', 'bundle.ceiling.mode', 'bundle.ceiling.unattended-mcp', 'manifest.context', 'manifest.effects-unknown',
   'label.dominance', 'label.no-agent-tools', 'label.network-at-mark',
   ...ROUTE_RULES,
-  'taint.held',
+  'taint.held', CREDENTIAL_HOLD_RULE,
   'settings.emergency-stop', 'settings.read-plan', 'settings.auto-safe-tool', 'settings.mode.edits', 'settings.run-grant.edits', 'settings.deny-list',
   'settings.engagement-grant', 'settings.run-grant.command', 'settings.allow-rule', 'settings.mode.fully-autonomous', 'settings.mode.other',
   'settings.auto.classifier', 'settings.unattended-verification', 'settings.risk.outside-workspace', 'settings.risk.installs', 'settings.safety-model',
   'settings.sensitive-read', 'settings.mcp-approval', 'settings.tool-forbidden',
-  ...PRE_GATE_RULES
+  ...PRE_GATE_RULES, OUTSIDE_WORKSPACE_RULE
 ]);
 
 /**
@@ -218,6 +236,8 @@ export async function decide(request: GateRequest, bundleState: BundleState, set
     if (named !== undefined && named.kind === 'refuse') return make('deny', named.rule, 'approve-risky', { reason: named.reason, floor: true });
     // The deny list decides before a person is asked about effects nobody can read (D-10): a denied command is never put in front of a person.
     if (request.settingsRefusal !== undefined) return make('deny', request.settingsRefusal.rule, 'approve-risky', { reason: request.settingsRefusal.reason });
+    // A path the tool itself would refuse is refused here, with the tool's own words, rather than shown on a card that could only end in that refusal.
+    if (request.outsideWorkspace !== undefined) return make('deny', OUTSIDE_WORKSPACE_RULE, 'approve-risky', { reason: request.outsideWorkspace });
     const person = request.presence === 'person' && request.context === 'interactive';
     return person
       ? make('ask', 'manifest.effects-unknown', 'approve-risky', { reason: `NEAR AI cannot tell what ${shown(request.tool)} would do with this call, so it needs your answer.` })
@@ -233,6 +253,7 @@ export async function decide(request: GateRequest, bundleState: BundleState, set
   if (request.labelVerdict !== undefined) return make('deny', request.labelVerdict.rule, mode, { reason: request.labelVerdict.reason });
   // A refusal the settings layer has already made decides here, before every ask below, whatever the layer would answer now (D-10).
   if (request.settingsRefusal !== undefined) return make('deny', request.settingsRefusal.rule, mode, { reason: request.settingsRefusal.reason });
+  if (request.outsideWorkspace !== undefined) return make('deny', OUTSIDE_WORKSPACE_RULE, mode, { reason: request.outsideWorkspace });
   const answer = await settings(request, { ...policy, mode });
   if (answer.decision === 'deny') return make('deny', answer.rule, mode, answer.reason === undefined ? {} : { reason: answer.reason });
   if (verdict !== undefined && verdict.kind === 'ask') {
@@ -240,6 +261,12 @@ export async function decide(request: GateRequest, bundleState: BundleState, set
     return request.presence === 'none'
       ? make('deny', verdict.rule, mode, { reason: `${NOBODY_HERE}${verdict.reason}`, floor: true })
       : make('ask', verdict.rule, mode, { reason: verdict.reason, floor: true });
+  }
+  // After a credential read, a call that can send data out asks in every mode with no shortcut, and with nobody here it is refused (D-18, after PR #74).
+  if (request.credentialHold !== undefined && request.credentialHold !== '') {
+    return request.presence === 'none'
+      ? make('deny', CREDENTIAL_HOLD_RULE, mode, { reason: `${NOBODY_HERE}${request.credentialHold}` })
+      : make('ask', CREDENTIAL_HOLD_RULE, mode, { reason: request.credentialHold });
   }
   // Today's loop, line 631: a held action asks in every mode and offers no run-wide grant; a sensitive call that would be allowed asks unless the mode is
   // fully-autonomous. A protected write never gets here (the floor asked above), so in fully-autonomous only a workspace credential-file read, such as

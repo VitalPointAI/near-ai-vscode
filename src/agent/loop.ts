@@ -6,8 +6,9 @@ import * as path from 'node:path';
 import type { ActionCapability, ActionPolicy } from '../domain/policy';
 import type { AgentMessage, CompletionEvent, ToolCall, ToolDefinition, UsageMetadata } from '../services/nearAiClient';
 import { AutoApprovalContext, allowRuleBlocker, isAutoAllowed, PermissionRules, RunGrants, suggestAllowRule } from './permissions';
+import { CREDENTIAL_HOLD_RULE, OUTSIDE_WORKSPACE_RULE } from '../domain/gate/decide';
 import type { GateRuntime } from '../domain/gate/decide';
-import { TOOL_FORBIDDEN_RULE, gateToolCall, recordApprovalReply, recordRefusedBeforeGate, unavailableGateRuntime } from './gateAdapter';
+import { TOOL_FORBIDDEN_RULE, gateToolCall, recordApprovalReply, recordRefusedBeforeGate, shellReadsCredentialFile, unavailableGateRuntime } from './gateAdapter';
 import type { FloorShellContext } from './gateAdapter';
 import { PackageScriptsReader } from './packageScripts';
 import { PREAMBLE_START, resolveGsdRun } from '../gsd/preamble';
@@ -97,6 +98,8 @@ export const AWAITING_APPROVAL_PREFIX = 'Awaiting approval:';
 
 /** The reason recorded when a tool's own check threw: fixed words, so an error's text (which could name anything) never reaches a record. */
 const CHECK_FAILED_REASON = 'The tool\'s own check of this call could not finish, so the call was not run.';
+const BAD_JSON_REASON = 'The call\'s arguments were not valid JSON, so nothing could be judged and nothing ran.';
+const BAD_ARGUMENTS_REASON = 'The call\'s arguments did not fit the tool, so nothing could be judged and nothing ran.';
 const AWAITING_APPROVAL_TEXT = `${AWAITING_APPROVAL_PREFIX} this action has not run. It is queued for the user to approve, and they have been notified. Do not retry it now and do not wait for it: carry on with work that does not depend on it, and list it under "Waiting for approval" in your report.`;
 
 /**
@@ -200,6 +203,8 @@ export interface AgentRunOptions {
   safety?: CommandSafetyCheck;
   /** 0.4.17: the kinds of risk this project has already allowed, read once per run (shared with sub-agents). */
   riskSwitches?: { outsideWorkspace: boolean; installs: boolean };
+  /** How a shell command is checked for a credential-file read (D-18): shellReadsCredentialFile, unless a test counts the calls. */
+  readsCredentialFile?: typeof shellReadsCredentialFile;
   /** PERF-01: this is a sub-agent nobody watches; its safe and verification commands run without a card in auto and mostly-autonomous. */
   unattended?: UnattendedScope;
   /**
@@ -652,6 +657,9 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
       title = tool.title(input, context);
     } catch (error) {
       const message = error instanceof SyntaxError ? `Arguments are not valid JSON: ${error.message}` : (error as Error).message;
+      // Refused before the gate could be asked, and on the record like every such refusal (owner decision after PR #74): the record names the tool and a
+      // fixed reason, never the arguments or the parser's message about them.
+      recordRefusedBeforeGate(this.gate, { tool: tool.name, callId: call.id, rule: 'call.bad-arguments', reason: error instanceof SyntaxError ? BAD_JSON_REASON : BAD_ARGUMENTS_REASON, capability: tool.capability }, { model: this.options.model });
       this.options.emit({ type: 'tool-start', callId: call.id, tool: tool.name, title, input: call.function.arguments });
       this.options.emit({ type: 'tool-end', callId: call.id, ok: false, output: message });
       return `Error: ${message}`;
@@ -661,13 +669,15 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
     let sensitive: string | undefined;
     let risky: string | undefined;
     let forbidden: string | undefined;
+    // The file that may hold credentials this call reads, when it reads one (owner decision after PR #74, D-18): set on the run once the call runs.
+    let readsCredential: string | undefined;
     try { forbidden = await tool.forbidden?.(input, context); } catch (error) { return checkFailed(error); }
     // The floor reads every shell command, in every mode, with a cheap context of its own (Pitfall 5).
     const floorShell = command === undefined ? undefined : await this.floorShellContext(context);
     // What the gate is told about this call. The three hooks are today's own; `buildAuto` builds auto approve's context for the mode the settings layer is asked with.
     const gateInput = (): Parameters<typeof gateToolCall>[1] => ({
       tool, raw, root: context.root, callId: call.id, ...(command === undefined ? {} : { command }), ...(floorShell === undefined ? {} : { shell: floorShell }),
-      ...(forbidden ? { forbidden } : {}), ...(sensitive ? { sensitive } : {}), ...(risky ? { risky } : {}),
+      ...(forbidden ? { forbidden } : {}), ...(sensitive ? { sensitive } : {}), ...(risky ? { risky } : {}), ...(readsCredential ? { readsCredential } : {}),
       policy: this.options.policy, rules: this.options.rules, grants: this.grants,
       ...(context.readOnlyRoots === undefined || context.readOnlyRoots.length === 0 ? {} : { readOnlyRoots: context.readOnlyRoots }),
       // Auto's context is built for every gated call, because a tool that marks itself autoSafe (the web tools) needs it as well as a shell command.
@@ -685,6 +695,12 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
       return this.finish(call.id, false, `Not allowed: ${forbidden}`);
     }
     try { sensitive = await tool.sensitive?.(input, context); risky = await tool.risky?.(input, context); } catch (error) { return checkFailed(error); }
+    // A read tool's own sensitive check is its credential read; a shell command's is found from its text and paths (a check that fails counts as one).
+    // Once the run is marked, nothing more is learned from another read, so no command is checked again (PR #76 review round 5).
+    if (this.grants.credentialRead === undefined) {
+      if (command !== undefined) readsCredential = await (this.options.readsCredentialFile ?? shellReadsCredentialFile)(command, context).catch(() => 'a file the command may read');
+      else if (tool.capability === 'read' && sensitive) readsCredential = credentialShown(input, tool.name);
+    }
     // The gate decides, with today's permission logic as its settings layer. A risky action asks in every mode, and an earlier "allow this command" does
     // not cover it; a sensitive read that would be allowed asks unless the mode is fully-autonomous (today's line 631, now inside decide()).
     const gateCall = await gateToolCall(this.gate, gateInput(), { model: this.options.model });
@@ -692,7 +708,8 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
     if (risky) context.onSecurity?.({ kind: 'held', source: title, detail: risky });
     const gated = tool.capability !== 'read' && tool.capability !== 'plan';
     if (gated && decision.outcome !== 'ask') this.options.emit({ type: 'permission', tool: tool.name, decision: decision.outcome === 'deny' ? 'denied' : 'auto-allowed' });
-    if (decision.outcome === 'deny') return this.finish(call.id, false, `Not allowed: ${decision.reason}`);
+    // A path outside the project: the agent is told the tool's own words, which the record never carries (PR #76 review round 4).
+    if (decision.outcome === 'deny') return this.finish(call.id, false, `Not allowed: ${decision.rule === OUTSIDE_WORKSPACE_RULE && gateCall.toolMessage !== undefined ? gateCall.toolMessage : decision.reason}`);
     // A floor call the person approved once, late, runs now with no new card; the gate has used that approval up, so the next identical call asks again.
     if (decision.outcome === 'ask' && !gateCall.approvedOnce) {
       let preview: ToolPreview | undefined;
@@ -710,7 +727,7 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
       // keeps the settings layer's own words when it would have asked anyway (what the command does, in plain words) and adds why it always asks.
       const settingsSaid = gateCall.settings;
       const settingsReason = settingsSaid?.decision === 'ask' ? settingsSaid.reason : undefined;
-      const reason = decision.floor
+      const reason = decision.floor || decision.rule === CREDENTIAL_HOLD_RULE
         ? (settingsReason && decision.reason && !settingsReason.includes(decision.reason) ? `${settingsReason} ${decision.reason}` : decision.reason ?? settingsReason)
         : settingsSaid === undefined ? decision.reason : settingsSaid.decision === 'ask' ? settingsSaid.reason : risky ?? sensitive;
       // Owner decision 2026-11-05 (0.4.17): the card says what the safety issue is in plain words, can show the whole command or code, and offers
@@ -764,6 +781,9 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
         try { await this.options.rememberAllowRule?.(allowRule); } catch { /* still allowed for this run; the setting could not be saved */ }
       }
     }
+    // The call runs: from now on this run has read a file that may hold credentials, and what can send data off this computer asks (D-18).
+    const credentialFile = readsCredential ?? gateCall.readsCredential;
+    if (credentialFile !== undefined) this.grants.noteCredentialRead(credentialFile);
     const ranAt = Date.now();
     const cwdBefore = context.shell?.workingDirectory ?? context.root;
     try {
@@ -894,6 +914,12 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
     this.options.emit({ type: 'tool-end', callId, ok, output: bounded.length > UI_OUTPUT_CHARS ? `${bounded.slice(0, UI_OUTPUT_CHARS)}\n…` : bounded });
     return bounded;
   }
+}
+
+/** The path a read tool was given, for the credential-read hold's reason; the tool's name when there is none. */
+function credentialShown(input: unknown, fallback: string): string {
+  const given = (input as { path?: unknown } | undefined)?.path;
+  return typeof given === 'string' && given.trim() !== '' ? given : fallback;
 }
 
 const LEADING_CD = /^cd\s+(?:--\s+)?(?:"[^"]*"|'[^']*'|[^\s;&|]+)\s*(?:&&|;)\s*/;

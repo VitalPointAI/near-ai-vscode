@@ -53,10 +53,21 @@ const NUMERIC_USER_GROUP = /^\d+:\d+$/;
 
 /** An option, `-x` or `--x`, then `=` or spaces, then its value: a quoted string or one word that does not start another option. */
 const OPTION_WITH_VALUE = /(^|[\s;&|(])(--?[A-Za-z][\w-]*)(=|\s+)("[^"\n]*"|'[^'\n]*'|(?!-)[^\s;&|)]+)/g;
+/**
+ * An option that is a count or a limit of tokens, never a credential (PR #74 last review): `--max-tokens`, `--max-output-tokens`, `--max_new_tokens`,
+ * `--min-tokens`, `--num-tokens`, `--total-tokens`, `--tokens-per-minute`. Only these words may sit between the count word and `tokens`, so a credential
+ * option that merely starts the same way (`--max-auth-token`) is not one.
+ */
+const TOKEN_COUNT_OPTION = /^(?:(?:max|min|num|total)(?:[-_](?:output|input|new|prompt|completion|context|response|reasoning|thinking|generated|gen))*[-_]tokens?|tokens?[-_]per[-_][a-z]+)$/i;
+/** A count as written: digits, with `_` or `,` between groups and an optional k or m. */
+const COUNT_VALUE = /^["']?\d[\d_,]*[kKmM]?["']?$/;
+
 /** An option named for a credential: a password, passphrase, secret or credential anywhere in its name, a token or API key at its end, `pass` as its last word (`--pass`, `--db-pass`, keytool's `-storepass`), or `--auth`. */
-function credentialOption(option: string): boolean {
+function credentialOption(option: string, value = ''): boolean {
   const name = option.replace(/^-+/, '');
   if (CREDENTIAL_LOCATION.test(name)) return false;
+  // A count of tokens given a number is a count; given anything else it is treated as the credential its name could be.
+  if (TOKEN_COUNT_OPTION.test(name) && COUNT_VALUE.test(value)) return false;
   return /password|passwd|passphrase|secret|credential/i.test(name) || /(?:tokens?|api[-_]?key|apikey)$/i.test(name) || /(?:^|[-_]|store|key)pass$/i.test(name) || /^auth$/i.test(name);
 }
 /** An option named for a credential but whose value is where one is kept, never the credential itself: a file, a path, a variable's name, and the like. */
@@ -104,7 +115,7 @@ export function redactCredentialArguments(text: string): string {
     .replace(USER_OPTION, (match, before: string, option: string, double?: string, single?: string, bare?: string) =>
       (NUMERIC_USER_GROUP.test(double ?? single ?? bare ?? '') ? match : `${before}${option}${double !== undefined ? `"${REDACTED}"` : single !== undefined ? `'${REDACTED}'` : REDACTED}`))
     .replace(OPTION_WITH_VALUE, (match, before: string, option: string, joiner: string, value: string) =>
-      (credentialOption(option) ? `${before}${option}${joiner}${replaced(value)}` : match))
+      (credentialOption(option, value) ? `${before}${option}${joiner}${replaced(value)}` : match))
     .replace(CREDENTIAL_HEADER, (_match, name: string, colon: string) => `${name}${colon}${REDACTED}`)
     .replace(ENV_ASSIGNMENT, (match, before: string, name: string, value: string) => {
       const inner = value.replace(/^(["'])(.*)\1$/, '$2');
