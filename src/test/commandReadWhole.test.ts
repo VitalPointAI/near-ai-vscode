@@ -56,6 +56,8 @@ const REACH: Readonly<Record<string, { readonly input: string; readonly reason: 
   "unknownRead:'git switch changes the checked-out branch'": { input: 'git switch -q main', reason: /git switch changes the checked-out branch/ },
   'unknownRead:`${label} from a URL or path instead of a named remote`': { input: 'git fetch https://example.test/repo.git', reason: /git fetch from a URL or path/ },
   'unknownRead:`${label} with options that can rewrite or remove local work`': { input: 'git pull --rebase', reason: /git pull with options that can rewrite/ },
+  'unknownRead:`git rebase ${words[0]} finishes, leaves or edits a rebase already under way`': { input: 'git rebase --continue', reason: /git rebase --continue finishes, leaves or edits a rebase/ },
+  'unknownRead:`${label} tidies the repository and keeps recent unreachable commits`': { input: 'git gc --auto', reason: /git gc tidies the repository/ },
   "unknownRead:'git merge with a strategy option'": { input: 'git merge -s ours main', reason: /git merge with a strategy option/ },
   "unknownRead:'git merge'": { input: 'git merge --squash', reason: /^git merge with a strategy option$|^git merge$/ },
   "unknownRead:'git branch with arguments'": { input: 'git branch feature', reason: /git branch with arguments/ },

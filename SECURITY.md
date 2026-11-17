@@ -106,8 +106,12 @@ run** or an allow-list entry that matches:
   container image push, deploy commands, and sending email;
 - destruction: recursive deletes outside scratch and build folders,
   `git reset --hard`, `git clean`, discarding uncommitted changes, history
-  rewrites (`git commit --amend`, `git rebase` including `--continue`,
-  `git gc` and the like), and deleting branches and tags;
+  rewrites (`git commit --amend`, starting a `git rebase`, and removing
+  unreachable commits at once with `git gc --prune=now`, a bare `git prune`
+  or `git reflog expire`), and deleting branches and tags. Routine
+  maintenance is not destruction: `git gc` and `git prune` that keep git's
+  grace period of days or more, and `git rebase --continue`, `--abort`,
+  `--skip`, `--quit` or `--edit-todo` on a rebase already under way;
 - writing to the knowledge your team shares (the Learn tool).
 
 Approving one of these runs that one call. When a helper agent's card is

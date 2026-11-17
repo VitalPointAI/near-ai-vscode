@@ -313,3 +313,43 @@ test('git branch: a plain rename or copy is not destruction, a forced one is', (
     assert.deepEqual(classify(command).effects, [destroy()], `${command}: destruction`);
   }
 });
+
+// Owner decision after PR #74: routine git maintenance is not destruction. `git gc` that keeps git's grace period for unreachable objects, `git prune`
+// with a grace period of days or more, and finishing or leaving a rebase already under way carry no destroy tag, so Full auto runs them; pruning now,
+// starting a rebase and expiring or deleting reflog entries still destroy. A bare `git prune` keeps no grace period (it removes every unreachable object
+// at once), so it stays destruction; so does any form the rules cannot read as keeping one.
+test('routine git maintenance is not destruction; pruning now, starting a rebase and expiring the reflog still are', async () => {
+  const notDestroy = [
+    'git gc', 'git gc --auto', 'git gc --aggressive', 'git gc --quiet', 'git gc --prune', 'git gc --no-prune', 'git gc --prune=2.weeks.ago', 'git gc --prune=3.days.ago',
+    'git gc --auto --quiet', 'git prune --expire=2.weeks.ago', 'git prune --expire 1.month.ago', 'git prune -n', 'git prune --dry-run', 'git prune --expire=never',
+    'git rebase --continue', 'git rebase --abort', 'git rebase --skip', 'git rebase --quit', 'git rebase --edit-todo', 'git -C sub rebase --continue', 'git --no-pager gc'
+  ];
+  const destroys = [
+    'git gc --prune=now', 'git gc --prune=all', 'git gc --prune=1.hour.ago', 'git gc --prune="2026-01-01"', 'git gc --prune=$WHEN', 'git gc --unknown-option',
+    'git prune', 'git prune --expire=now', 'git prune --expire now', 'git prune --expire=all', 'git prune --expire=10.minutes.ago', 'git prune --expire=yesterday',
+    'git prune -v', 'git rebase main', 'git rebase -i HEAD~3', 'git rebase --continue main', 'git rebase --onto main topic', 'git rebase --abort --continue',
+    'git reflog expire --expire=now --all', 'git reflog expire --all', 'git reflog delete HEAD@{1}', 'git -c gc.pruneExpire=now gc', 'git -c gc.reflogExpire=now gc --auto',
+    'git -c gc.pruneexpire=now prune --expire=2.weeks.ago'
+  ];
+  const wrong: string[] = [];
+  for (const command of notDestroy) if ((classify(command).effects ?? []).some((effect) => effect.verb === 'destroy')) wrong.push(`${command} is tagged destroy`);
+  for (const command of destroys) {
+    const result = classify(command);
+    if (!(result.effects ?? []).some((effect) => effect.verb === 'destroy') && result.effectsUnknown === undefined) wrong.push(`${command} → ${JSON.stringify(result)}`);
+  }
+  assert.deepEqual(wrong, []);
+  // Never newly safe: what ran asking under the settings layer still does.
+  for (const command of notDestroy) assert.notEqual(classify(command).verdict, 'safe', command);
+  // Through the gate in Full auto: maintenance runs; pruning now asks (refused with nobody).
+  const root = project();
+  for (const presence of ['person', 'none'] as const) {
+    for (const [command, outcome] of [['git gc', 'allow'], ['git rebase --continue', 'allow'], ['git gc --prune=now', presence === 'person' ? 'ask' : 'deny'], ['git rebase main', presence === 'person' ? 'ask' : 'deny']] as const) {
+      const gated = await gateToolCall(testGateRuntime(presence === 'none' ? { presence, context: 'unattended' } : {}), {
+        tool: bashTool, raw: { command }, root, callId: `${presence}-${command}`, command, policy: { mode: 'fully-autonomous', emergencyStop: false },
+        rules: DEFAULT_RULES, grants: new RunGrants(), shell: { cwd: root }, buildAuto: async () => undefined
+      });
+      assert.equal(gated.decision.outcome, outcome, `${presence}: ${command}`);
+      if (outcome !== 'allow') assert.equal(gated.decision.rule, 'floor.destroy', `${presence}: ${command}`);
+    }
+  }
+});

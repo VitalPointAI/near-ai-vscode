@@ -923,6 +923,41 @@ const GIT_BUILTINS: ReadonlySet<string> = new Set(['init', 'clone', 'worktree', 
   'ls-remote', 'name-rev', 'request-pull', 'diff-tree', 'diff-files', 'diff-index', 'for-each-ref', 'hash-object', 'help', 'version', 'var', 'column', 'interpret-trailers',
   'mailinfo', 'mailsplit', 'patch-id', 'pack-refs', 'repack', 'rerere', 'citool', 'gui', 'instaweb', 'lfs', 'fast-export']);
 
+/** `git rebase` words that finish, leave or edit a rebase already under way, rather than start one. */
+const REBASE_IN_PROGRESS: ReadonlySet<string> = new Set(['--continue', '--abort', '--skip', '--quit', '--edit-todo']);
+/** An age that keeps a grace period: days or more ago (`2.weeks.ago`, `3 days ago`), or `never`. Hours, minutes, `now`, `all` and dates do not count. */
+const GRACE_PERIOD = /^(?:never|0*[1-9]\d*[. ](?:day|week|month|year)s?[. ]ago)$/i;
+/** `git gc` options that neither prune nor change what is kept. */
+const GC_ROUTINE = new Set(['--auto', '--aggressive', '--quiet', '-q', '--force', '--no-prune', '--prune', '--detach', '--no-detach', '--cruft', '--no-cruft', '--keep-largest-pack']);
+
+/**
+ * Whether `git gc` or `git prune` keeps git's grace period for unreachable objects: gc with only routine options and, if any, a `--prune=` age that keeps
+ * one; prune as a dry run, or with an `--expire` age that keeps one. A word the shell decides at run time, or one not listed, does not.
+ */
+function keepsGracePeriod(sub: string, rest: readonly Word[]): boolean {
+  if (rest.some((word) => word.expansion || word.glob)) return false;
+  const words = rest.map((word) => word.text);
+  if (sub === 'gc') {
+    return words.every((word) => GC_ROUTINE.has(word) || /^--max-cruft-size=\d+[kmg]?$/i.test(word) || (word.startsWith('--prune=') && GRACE_PERIOD.test(word.slice('--prune='.length))));
+  }
+  let dryRun = false;
+  let grace = false;
+  for (let index = 0; index < words.length; index += 1) {
+    const word = words[index]!;
+    if (word === '-n' || word === '--dry-run') { dryRun = true; continue; }
+    if (word === '-v' || word === '--verbose' || word === '--progress' || word === '--no-progress' || word === '--') continue;
+    if (word === '--expire' || word.startsWith('--expire=')) {
+      const value = word === '--expire' ? words[(index += 1)] : word.slice('--expire='.length);
+      if (value === undefined || !GRACE_PERIOD.test(value)) return false;
+      grace = true;
+      continue;
+    }
+    if (looksLikeOption(word)) return false;
+    // A head named on the line is kept reachable: it only ever prunes less.
+  }
+  return dryRun || grace;
+}
+
 function classifyGit(args: Word[], state: SegmentState, context: CommandContext): CommandClassification {
   let index = 0;
   while (index < args.length && args[index].text === '--no-pager') index += 1;
@@ -945,7 +980,12 @@ function classifyGit(args: Word[], state: SegmentState, context: CommandContext)
   switch (sub) {
     case 'push': return risky('git push changes a remote repository', publishTo('git-remote'));
     case 'send-email': return risky('git send-email sends data off this machine', [{ verb: 'send', channel: 'email' }]);
-    case 'rebase': case 'filter-branch': case 'filter-repo': case 'replace': return risky(`${label} rewrites history`, DESTROY_ALL);
+    case 'rebase':
+      // Finishing, leaving or editing a rebase already under way is routine (owner decision after PR #74): it starts no rewrite of its own. Exactly one of
+      // these words and nothing else; starting a rebase, with any other word, still destroys.
+      if (rest.length === 1 && !rest[0]!.expansion && REBASE_IN_PROGRESS.has(words[0]!)) return unknownRead(`git rebase ${words[0]} finishes, leaves or edits a rebase already under way`);
+      return risky(`${label} rewrites history`, DESTROY_ALL);
+    case 'filter-branch': case 'filter-repo': case 'replace': return risky(`${label} rewrites history`, DESTROY_ALL);
     case 'reset': return has('--hard', '--merge', '--keep') ? risky('git reset --hard discards uncommitted changes', DESTROY_ALL) : unknownRead('git reset moves the branch or unstages changes');
     case 'clean': {
       if (words.length && words.every((word) => word === '-n' || word === '--dry-run' || !looksLikeOption(word)) && has('-n', '--dry-run')) return unknownRead('git clean --dry-run');
@@ -1027,7 +1067,12 @@ function classifyGit(args: Word[], state: SegmentState, context: CommandContext)
         return writeResult('git config changes repository settings', [file ?? { text: path.join(path.relative(state.cwd, context.root) || '.', '.git', 'config'), quoted: false, glob: false, expansion: false }], state, context);
       }
     case 'reflog': return words[0] === 'expire' || words[0] === 'delete' ? risky('git reflog expire or delete destroys recovery points', DESTROY_ALL) : safe('git reflog only reads');
-    case 'gc': case 'prune': return risky(`${label} can permanently remove unreachable commits`, DESTROY_ALL);
+    case 'gc': case 'prune':
+      // Routine maintenance keeps git's grace period for unreachable objects, so recent work stays recoverable (owner decision after PR #74). Pruning now, a
+      // bare `git prune` (it keeps no grace period) and any word the rules do not read as keeping one still destroy.
+      return keepsGracePeriod(sub, rest)
+        ? unknownRead(`${label} tidies the repository and keeps recent unreachable commits`)
+        : risky(`${label} can permanently remove unreachable commits`, DESTROY_ALL);
     case 'update-ref': return risky('git update-ref rewrites references directly', DESTROY_ALL);
     case 'status': case 'diff': case 'log': case 'show': case 'blame': case 'shortlog': case 'describe': case 'rev-parse': case 'ls-files': case 'grep': case 'whatchanged': case 'show-ref': case 'ls-tree': case 'cat-file': case 'merge-base': case 'rev-list':
       if (writesOrEscapes) return outputWrite() ?? unknown(`${label} ${writesOrEscapes} can write files or read outside the repository`);
@@ -1483,11 +1528,26 @@ function classifyAfterGlobals(name: string, program: string, args: Word[], state
     moved = { ...state, cwd: path.resolve(state.cwd, found.folder.text) };
   }
   if (found.rest.length === 0) return unknownRead(`${name} ${found.skipped.join(' ')}`.trim());
+  // `git -c gc.pruneExpire=now gc` prunes now whatever its own words say: a gc setting given on the line makes gc and prune destruction.
+  if (name === 'git' && ['gc', 'prune'].includes(found.rest[0]!.text) && setsGcConfig(args.slice(0, args.length - found.rest.length))) noteEffects(DESTROY_ALL);
   // Strictly fewer words and none of them a leading option, so this reads the subcommand and cannot come back here.
   const inner = classifyProgram(name, program, found.rest, moved, context, depth, viaNpx);
   if (inner.verdict !== 'safe') return inner;
   const strict = ['git', 'docker', 'podman', 'go'].includes(name) && !found.skipped.every((option) => option === '--no-pager');
   return found.valued || strict ? unknownRead(`${name} with options before its subcommand acts on something they name`) : inner;
+}
+
+/** Whether git's global options set a `gc.` setting (`-c gc.x=y`, `-cgc.x=y`, `--config-env=gc.x=VAR`), or one decided at run time. */
+function setsGcConfig(globals: readonly Word[]): boolean {
+  for (let index = 0; index < globals.length; index += 1) {
+    const word = globals[index]!;
+    let value: Word | undefined;
+    if (word.text === '-c' || word.text === '--config-env') value = globals[index + 1];
+    else if (word.text.startsWith('--config-env=')) value = { ...word, text: word.text.slice('--config-env='.length) };
+    else if (/^-c./.test(word.text)) value = { ...word, text: word.text.slice(2) };
+    if (value !== undefined && (value.expansion || /^gc\./i.test(value.text))) return true;
+  }
+  return false;
 }
 
 /**
