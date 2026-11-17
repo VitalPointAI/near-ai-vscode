@@ -190,6 +190,8 @@
     work.stage = stage;
     if (pickMode) work.pickMode = pickMode;
     work.awaitingStart = null;
+    // A request left behind is no longer waited on here (PR #75 review): the buttons are offered again, and the host still answers a second request.
+    work.busy = false;
     focusLater('step-heading');
     render();
   }
@@ -610,7 +612,8 @@
         const cell = el('div', 'choice-cell' + (selected ? ' selected' : ''));
         const option = el('label', 'choice' + (selected ? ' selected' : ''));
         const radio = el('input'); radio.type = 'radio'; radio.name = 'starting-point'; radio.value = point.id; radio.checked = selected; radio.id = 'pick-' + point.id.replace(/[^a-z0-9-]/g, '-');
-        radio.addEventListener('change', () => { work.pick = point.id; render(); });
+        // What the team is for belongs to the team it was typed for (PR #75 review): choosing another one starts it empty.
+        radio.addEventListener('change', () => { if (work.pick !== point.id) work.options.goal = ''; work.pick = point.id; render(); });
         option.append(radio, el('span', 'choice-label', point.label));
         if (point.origin) option.append(badge(point.origin, point.imported ? 'kind imported' : 'kind'));
         if (point.description) option.append(el('span', 'hint', point.description));

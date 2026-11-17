@@ -2093,6 +2093,9 @@ test('page: selecting an existing team offers Use as is and Clone and modify; Us
   page.select('type:software');
   assert.ok(page.doc.getElementById('f-goal') && page.doc.getElementById('f-locality'));
   assert.equal(page.doc.getElementById('f-shape'), null);
+  // What was typed for the recommended team is not carried to another team (PR #75 review).
+  assert.equal(page.doc.getElementById('f-goal')!.value, '', 'another team starts with its own empty answer');
+  page.type('f-goal', 'Ship it');
   // With unsaved work in the builder, Use as is says so, and the host asks before discarding it.
   page.byLabel('Clone Software development team and modify it')!.click();
   page.dispatch({ type: 'starting-point', id: 'type:software', projectType: 'software', draft: { name: '', description: 'A team', members: [{ name: 'architect', role: '', model: '', tools: null, instructions: 'Design.' }] } });
@@ -2100,8 +2103,22 @@ test('page: selecting an existing team offers Use as is and Clone and modify; Us
   page.byLabel('Back')!.click();
   assert.equal(page.heading(), 'Use an existing team');
   page.byLabel('Use Software development team as is')!.click();
-  assert.deepEqual(page.posts.at(-1), { type: 'use-team', id: 'type:software', goal: 'Add billing', locality: 'cloud', discard: true });
+  assert.deepEqual(page.posts.at(-1), { type: 'use-team', id: 'type:software', goal: 'Ship it', locality: 'cloud', discard: true });
   for (const message of page.posts) assert.ok(parseStudioMessage(message), JSON.stringify(message));
+});
+
+test('page: leaving the picker while a request is waiting does not leave its buttons off when you come back', async () => {
+  const page = await builderPage();
+  page.byLabel('New team')!.click();
+  page.byLabel('Use an existing team')!.click();
+  page.select('lib:web');
+  page.byLabel('Clone Web team and modify it')!.click();
+  assert.equal((page.byLabel('Use Web team as is') as unknown as { disabled: boolean }).disabled, true, 'waiting for the answer');
+  page.byLabel('Back')!.click();
+  page.byLabel('Use an existing team')!.click();
+  page.select('lib:web');
+  assert.equal((page.byLabel('Use Web team as is') as unknown as { disabled: boolean }).disabled, false, 'offered again');
+  assert.equal((page.byLabel('Clone Web team and modify it') as unknown as { disabled: boolean }).disabled, false);
 });
 
 test('page: with no project open, Use as is says it opens the team in chat, and the library shows what happened', async () => {
