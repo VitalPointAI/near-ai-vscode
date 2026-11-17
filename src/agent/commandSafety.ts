@@ -1136,20 +1136,42 @@ function deleteEffects(name: string, targets: readonly Word[], args: readonly Wo
   const temporary = temporaryCandidates(context).filter((candidate) => candidate !== path.parse(candidate).root && !(home !== undefined && isInside(candidate, home)));
   const temporaryPath = (absolute: string): boolean =>
     temporary.some((folder) => absolute !== folder && isInside(folder, absolute)) && !isInside(absolute, root) && !(home !== undefined && isInside(absolute, home));
+  // Where a delete really lands: the folders on the way resolved through links (rm does not follow the last part, unless it ends with a slash).
+  const landsAt = (arg: Word): string => {
+    const absolute = facts(arg).absolute;
+    return /\/\.?$/.test(arg.text) ? realPathOrSelf(absolute) : path.join(realPathOrSelf(path.dirname(absolute)), path.basename(absolute));
+  };
+  // The project's own scratch folder (PR #74 review round 5): strictly inside it, named with no `..`, and landing inside it however links resolve. Never
+  // the folder itself, its parents or the project.
+  const projectScratch = path.join(root, '.near-ai', 'scratch');
+  const realScratch = realPathOrSelf(projectScratch);
+  const inProjectScratch = (arg: Word): boolean => {
+    if (arg.glob || arg.expansion || arg.text.split(/[\\/]/).includes('..')) return false;
+    const absolute = facts(arg).absolute;
+    const real = realPathOrSelf(absolute);
+    const strictly = (folder: string, target: string): boolean => target !== folder && isInside(folder, target);
+    return strictly(projectScratch, absolute) && strictly(realScratch, landsAt(arg)) && strictly(realScratch, real);
+  };
   const recursive = name === 'rm' && args.some((arg) => /^-(?:[A-Za-z]*[rR][A-Za-z]*)$|^--recursive$/.test(arg.text));
   if (recursive) {
-    if (targets.every((arg) => !arg.glob && !arg.expansion && temporaryPath(facts(arg).absolute))) return [];
-    const regenerable = targets.every((arg) => {
+    // Every target is scratch work: a temporary folder's contents, the project's scratch folder's contents, or build output the project makes again.
+    const excused = targets.every((arg) => {
+      if (arg.glob || arg.expansion) return false;
       const found = facts(arg);
-      return !arg.glob && !arg.expansion && found.inside && found.absolute !== root && !found.protectedWrite && BUILD_OUTPUT.has(path.basename(found.absolute));
+      if (temporaryPath(found.absolute) || inProjectScratch(arg)) return true;
+      return found.inside && found.absolute !== root && !found.protectedWrite && BUILD_OUTPUT.has(path.basename(found.absolute));
     });
-    if (regenerable) return [];
+    if (excused) return [];
     return destroyPaths(targets.map((arg) => (arg.glob && !isWorkspaceGlob(arg, state, context) ? '**' : effectPath(arg, state, context))));
   }
+  // A plain delete is destruction outside the project, where it really lands (a link on the way out of the project counts), unless that is scratch.
+  const realRoot = realPathOrSelf(root);
   const outside = targets.some((arg) => {
     if (arg.expansion) return false;
     const found = facts(arg);
-    return !found.inside && !found.device && !found.scratch && !temporaryPath(found.absolute);
+    if (found.device || inProjectScratch(arg)) return false;
+    const leaves = !found.inside || !isInside(realRoot, landsAt(arg));
+    return leaves && !(found.scratch && !found.inside) && !temporaryPath(found.absolute) && !temporaryPath(landsAt(arg));
   });
   return [...(outside ? DESTROY_ALL : []), ...protectedWriteEffects(targets, state, context)];
 }

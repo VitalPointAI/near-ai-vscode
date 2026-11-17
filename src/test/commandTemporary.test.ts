@@ -3,7 +3,7 @@
 // path, TMPDIR when set), so the pure classifier reads no environment for them. Nothing here runs a command, and every folder made is under the test run's
 // own temporary folder.
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, realpathSync, symlinkSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -83,4 +83,35 @@ test('the temporary folders are worked out once and again only when the temporar
   tmp = '/stand-in/os-tmp-2';
   assert.ok(roots().includes('/stand-in/os-tmp-2'), 'a new temporary folder is seen');
   assert.equal(resolved, 12, 'worked out once per change');
+});
+
+// PR #74 review round 5: the project's own scratch folder (.near-ai/scratch) is scratch for recursive deletes too, as SECURITY.md and the changelog say:
+// a delete strictly inside it is not destruction. The folder itself, its parents, the project, and a path that leaves it by `..` or through a link are.
+test('a delete inside the project\'s scratch folder is not destruction, plain or recursive; the folder itself and a path that leaves it are', () => {
+  const base = realpathSync(mkdtempSync(path.join(tmpdir(), 'near-ai-scratchdel-')));
+  const root = path.join(base, 'project');
+  const scratch = path.join(root, '.near-ai', 'scratch');
+  mkdirSync(path.join(scratch, 'work', 'deep'), { recursive: true });
+  mkdirSync(path.join(root, 'src'));
+  mkdirSync(path.join(base, 'outside'));
+  writeFileSync(path.join(scratch, 'file.txt'), 'x');
+  symlinkSync(path.join(root, 'src'), path.join(scratch, 'link'));
+  symlinkSync(path.join(base, 'outside'), path.join(scratch, 'outlink'));
+  // No temporary folder counts here, so only the project's scratch folder can excuse a delete.
+  const inProject: CommandContext = { root, cwd: root, home: path.join(base, 'home'), temporaryRoots: [] };
+  const tags = (command: string, cwd = root) => classifyCommand(command, { ...inProject, cwd }).effects;
+  for (const command of ['rm -rf .near-ai/scratch/work', 'rm -r .near-ai/scratch/work .near-ai/scratch/file.txt', 'rm -rf .near-ai/scratch/work/deep', `rm -rf ${path.join(scratch, 'work')}`,
+    'rm .near-ai/scratch/file.txt', 'rm -f .near-ai/scratch/work/x.log']) {
+    assert.equal(tags(command), undefined, `${command}: scratch work`);
+  }
+  assert.equal(tags('rm -rf work', scratch), undefined, 'from a shell already in the scratch folder');
+  for (const [command, why] of [
+    ['rm -rf .near-ai/scratch', 'the scratch folder itself'], ['rm -rf .near-ai', 'its parent'], ['rm -rf .near-ai/scratch/..', 'its parent, by ..'],
+    ['rm -rf .near-ai/scratch/../../src', 'a path that leaves it by ..'], ['rm -rf .near-ai/scratch/link/', 'a link into the project'],
+    ['rm -rf .near-ai/scratch/outlink/', 'a link out of the project'], ['rm -rf .near-ai/scratch/outlink/sub', 'through a link out of the project'],
+    ['rm .near-ai/scratch/outlink/notes.txt', 'a plain delete through a link out of the project'], ['rm .near-ai/scratch/../../../outside/notes.txt', 'a plain delete that leaves by ..']
+  ] as const) {
+    const effects = tags(command) ?? [];
+    assert.ok(effects.some((effect) => effect.verb === 'destroy' || effect.verb === 'workspaceWrite'), `${command} (${why}) → ${JSON.stringify(effects)}`);
+  }
 });
