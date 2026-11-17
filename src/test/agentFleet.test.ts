@@ -373,8 +373,8 @@ test('with one parallel slot, a sub-agent that starts its own foreground agent d
 });
 
 test('with one parallel slot, a sub-agent that starts a BACKGROUND agent finishes and frees its slot, and the background agent then runs', { timeout: 20_000 }, async () => {
-  // A background call returns at once and no tool lets a sub-agent block on its report, so the sub-agent ends its own turn and releases the slot;
-  // the background agent queues behind it rather than deadlocking.
+  // A background call returns at once; when the sub-agent's turn ends it waits for the report with its slot handed back (0.4.28), so the background
+  // agent gets the slot rather than deadlocking behind it.
   const { gsd, posted, conversation } = await project();
   const nested: GsdContext = { ...gsd, agents: [
     { name: 'gsd-lead', description: 'Leads', tools: ['Read', 'Agent'], body: 'You are the lead.', file: path.join(gsd.home, 'agents', 'gsd-lead.md') },
@@ -411,4 +411,79 @@ test('at the critical threshold when summarizing cannot free space, the user is 
   const notices = posted.filter((message) => message.type === 'notice' && /summarizing could not free space/.test(String(message.text)));
   assert.equal(notices.length, 1, 'one notice across the run\'s three turns');
   assert.ok(!posted.some((message) => message.type === 'notice' && /summarized to stay within/.test(String(message.text))));
+});
+
+// 0.4.28: a background agent that a SUB-AGENT starts reports to that sub-agent, which waits for it before it ends, not to the run's lead. Before, every
+// background report went to the run's shared inbox, so the sub-agent ended with "started the planner" and the planner's report reached the lead, which
+// had not asked for it. With one parallel slot the sub-agent hands its slot back while it waits, so the helper can run.
+for (const maxParallelAgents of [1, 4]) {
+  test(`a nested background agent reports to the sub-agent that started it (${maxParallelAgents} slot${maxParallelAgents === 1 ? '' : 's'})`, { timeout: 20_000 }, async () => {
+    const { gsd, posted, conversation } = await project();
+    const nested: GsdContext = { ...gsd, agents: [
+      { name: 'gsd-lead', description: 'Leads', tools: ['Read', 'Agent'], body: 'You are the lead.', file: path.join(gsd.home, 'agents', 'gsd-lead.md') },
+      ...gsd.agents
+    ] };
+    const counters = { parent: 0, lead: 0, planner: 0 };
+    const parentSaw: string[] = [];
+    const client = {
+      async *streamCompletion(_model: string, messages: AgentMessage[]): AsyncGenerator<CompletionEvent> {
+        const system = String(messages[0]?.content);
+        const who = system.startsWith('You are the lead.') ? 'lead' : system.startsWith('You are the planner.') ? 'planner' : 'parent';
+        const turn = counters[who]++;
+        const reply = (content: string | null, calls?: ToolCall[]): CompletionEvent => ({ type: 'done', message: { role: 'assistant', content, ...(calls ? { tool_calls: calls } : {}) }, finishReason: calls ? 'tool_calls' : 'stop', usage });
+        if (who === 'parent') { parentSaw.push(...messages.map((message) => String(message.content ?? ''))); yield turn === 0 ? reply(null, [call('p1', 'Agent', { subagent_type: 'gsd-lead', prompt: 'lead it' })]) : reply('all done'); }
+        else if (who === 'lead') {
+          const heard = messages.filter((message) => String(message.content ?? '').includes('<agent-notification')).map((message) => String(message.content));
+          yield turn === 0 ? reply(null, [call('l1', 'Agent', { subagent_type: 'gsd-planner', description: 'Plan it', prompt: 'plan it', run_in_background: true })]) : reply(heard.length ? `lead report with ${heard.join(' ')}` : 'lead started the planner');
+        } else yield reply('planner report');
+      },
+      async actualCostsUsd() { return undefined; }
+    };
+    try {
+      await conversation.send(request(client as never, nested, { maxParallelAgents }));
+      const leadResult = String(posted.find((message) => message.type === 'tool-end' && message.callId === 'p1')?.output);
+      assert.match(leadResult, /lead report with <agent-notification id="gsd-planner-[a-f0-9]{6}" agent="gsd-planner" status="finished">\nplanner report/, 'the lead read its helper\'s report before it ended');
+      assert.equal(counters.planner, 1);
+      assert.ok(!parentSaw.some((text) => text.startsWith('<agent-notification') && text.includes('agent="gsd-planner"')), 'the run\'s lead never got a report it did not ask for');
+    } finally {
+      conversation.dispose();
+    }
+  });
+}
+
+test('a lead waiting for a background sub-agent keeps waiting while that sub-agent waits for its own helper', { timeout: 20_000 }, async () => {
+  // The helper finishes first and reports to the sub-agent, so when the lead wakes nothing is there for it yet: it must wait on, not end the run under
+  // the sub-agent that is still working.
+  const { gsd, conversation } = await project();
+  const nested: GsdContext = { ...gsd, agents: [
+    { name: 'gsd-lead', description: 'Leads', tools: ['Read', 'Agent'], body: 'You are the lead.', file: path.join(gsd.home, 'agents', 'gsd-lead.md') },
+    ...gsd.agents
+  ] };
+  const parentHeard: string[] = [];
+  let leadDone = false;
+  const client = {
+    async *streamCompletion(_model: string, messages: AgentMessage[]): AsyncGenerator<CompletionEvent> {
+      const system = String(messages[0]?.content);
+      const role = system.startsWith('You are the lead.') ? 'lead' : system.startsWith('You are the planner.') ? 'planner' : 'parent';
+      const reply = (content: string | null, calls?: ToolCall[]): CompletionEvent => ({ type: 'done', message: { role: 'assistant', content, ...(calls ? { tool_calls: calls } : {}) }, finishReason: calls ? 'tool_calls' : 'stop', usage });
+      const notes = messages.filter((message) => String(message.content ?? '').startsWith('<agent-notification')).map((message) => String(message.content));
+      if (role === 'planner') { yield reply('planner report'); return; }
+      if (role === 'lead') {
+        if (notes.length) { await new Promise((resolve) => setTimeout(resolve, 30)); leadDone = true; yield reply(`lead report after ${notes.length} helper report`); return; }
+        yield messages.some((message) => message.role === 'tool') ? reply('lead waiting') : reply(null, [call('l1', 'Agent', { subagent_type: 'gsd-planner', prompt: 'plan it', run_in_background: true })]);
+        return;
+      }
+      parentHeard.push(...notes);
+      yield notes.length ? reply('all done') : messages.some((message) => message.role === 'tool') ? reply('waiting for the lead') : reply(null, [call('p1', 'Agent', { subagent_type: 'gsd-lead', prompt: 'lead it', run_in_background: true })]);
+    },
+    async actualCostsUsd() { return undefined; }
+  };
+  try {
+    await conversation.send(request(client as never, nested));
+    assert.equal(leadDone, true, 'the run did not end before the lead finished');
+    assert.equal(parentHeard.length, 1, 'the lead got one report: the sub-agent\'s');
+    assert.match(parentHeard[0], /agent="gsd-lead" status="finished">\nlead report after 1 helper report/);
+  } finally {
+    conversation.dispose();
+  }
 });

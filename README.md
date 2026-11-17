@@ -319,6 +319,58 @@ details** saves the prompts, replies, and tool calls still kept in memory (for
 `nearAi.activity.retentionMinutes`, 60, and up to `nearAi.activity.maxMegabytes`,
 8 MB; secrets masked) as Markdown or JSON, for debugging.
 
+**Now** also says what an agent waiting for you waits for (an approval, an
+answer to a question, or an image to review), and shows an agent waiting for a
+free slot as queued. An agent started by another agent is marked with an arrow
+and names the agent that started it.
+
+### Team Live
+
+**Team Live** lets you watch a team work. Open it with **Watch the team** under
+the running agents in the chat (next to a row of dots, one per agent, that
+shows each one's state), with **Watch the team** in Agent Activity's **Now**,
+with **Watch it live** on Team Studio's **Team shape** tab while that team is
+running, or with **NEAR AI: Watch the Team Live**. It shows the newest team run
+in the conversation on screen; when two runs go at once, pick one at the top.
+Plain runs that start agents (an Open-GSD workflow, for example) show too.
+
+- **The picture.** The lead is at the top and the members hang under whoever
+  they report to. Members not asked to do anything yet are dimmed. Agents that
+  are not members of the team (general-purpose helpers, Open-GSD agents) are
+  smaller dashed cards in a row under the tree, each marked with who started
+  it. A member asked several times is one card with a count. Cards never move
+  while the run goes. In a narrow panel, or with **List**, the same team is an
+  indented list.
+- **Hand-offs.** When an agent is given a task, a dot carrying a short label
+  of the task travels down the line to it, and the card wakes when it
+  arrives. A working card breathes slowly and shows the tool it is using, what
+  it is doing, how long it has worked, its model, and where the model runs
+  (TEE, Local or Cloud). When it finishes, a dot travels back up with "Report
+  ready" or "Did not finish". The lead counts the reports it has read.
+- **States.** Queued, working, waiting for its helpers, needs you (amber, with
+  **Answer in chat**), paused, retrying, done, failed, and stopped. Each has
+  its own icon and words, so you never need to tell them apart by colour.
+- **A card.** Click a card (or press Enter on it) for the member's card from
+  Team Studio, this run's figures (task, model, time, turns, tool calls,
+  approvals, cost), **Pause**, **Resume** and **Stop**, and the end of the
+  agent's latest reply (the last 280 characters, with secrets removed).
+  Escape closes it.
+- **Calm.** Nothing moves when your system asks for reduced motion, or when
+  you turn on **Calm** on the page (it is remembered). States still change, in
+  words and icons. High-contrast themes drop the glow.
+- **Keyboard and screen readers.** The team is a tree: arrow keys move
+  between cards (Right to the first card under this one, Left to the one
+  above), Home and End jump to the first and last. Hand-offs, waits for you
+  and endings are announced politely; what an agent is doing moment to moment
+  is not.
+- **After a reload,** the last run in the project is drawn as it ended, from
+  the activity history. An agent that was still working when VS Code
+  reloaded shows as interrupted.
+
+The page never shows prompts, files or tool results. Task labels are the short
+descriptions the lead gives each agent, with secrets removed and cut to 80
+characters.
+
 **NEAR AI: Show Run Performance Report** opens, for this project, where its runs'
 time went (model wait, tools and sub-agents, approval wait, idle), tokens in,
 cached and out, model latency (p50, p90, max), input tokens per call, unanswered
@@ -515,9 +567,11 @@ until it runs out aren't shown.
   removes only the team's line, and you remove a member's line yourself. A
   `privacy: tee` or `privacy: local` line you wrote by hand also keeps the
   team private; the studio shows it and leaves it alone. A
-  team whose members are all private counts as private too, and in a project
-  with a knowledge base every team does (including one you are drafting with
-  AI). Team Studio sends a
+  team whose members are all private counts as private too. In a project
+  with a knowledge base, Team Studio also treats every team as private when
+  it asks AI about it (including one you are drafting with AI), and will not
+  save a member on a model forwarded outside NEAR's TEE; the team is not
+  marked private for runs unless you tick the box. Team Studio sends a
   private team only to a private model: a NEAR TEE model on NEAR AI Cloud's
   own endpoint whose attestation NEAR reports as supported or verified (a
   failed, unverified or unreported attestation does not count), or a model on
@@ -554,7 +608,8 @@ until it runs out aren't shown.
   so; any other team any model your settings allow. TEE-only mode, the daily
   spend limit and Emergency stop apply as they do in chat, and when no model
   is allowed the review says why and the local check still works. The panel
-  names the model and the most the review can cost before you ask. An
+  names the model and the most the review can cost before you ask, or says
+  the cost is unknown when NEAR gives no price for that model. An
   imported team you have not approved is reviewed as untrusted text. The
   model may add its own rating of the team before and after its suggestions;
   it is shown as the model's own opinion, not a measurement. **Cancel**,

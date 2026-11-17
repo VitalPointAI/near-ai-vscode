@@ -313,7 +313,11 @@ export function parseRefinement(text: string, draft: TeamDraft, options: ParseOp
         break;
       }
       case 'reports-to': {
-        const written = (str(entry.proposed, 60) ?? '').trim();
+        // 0.4.28 (PR #69 review): a suggestion with no `proposed` at all is a malformed one, not a request to report to nobody (that is an empty string).
+        // An over-long name is dropped the same way rather than cut to nothing.
+        if (typeof entry.proposed !== 'string') { dropped.push(`A reports-to line for ${memberName} was dropped: it did not say who ${memberName} should report to.`); break; }
+        const written = str(entry.proposed, 60)?.trim();
+        if (written === undefined) { dropped.push(`A reports-to line for ${memberName} was dropped: the name it gave is too long to be a member.`); break; }
         const proposed = reportsToKey(written);
         if (proposed && !byName.has(proposed)) { dropped.push(`A reports-to line for ${memberName} was dropped: ${written.slice(0, 40)} is not on the team.`); break; }
         if (proposed === reportsToKey(member.reportsTo)) break;

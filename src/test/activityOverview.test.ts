@@ -242,3 +242,15 @@ test('the store keeps many runs for the overview but events only for the newest'
   assert.equal(listed.length, 5);
   assert.deepEqual(listed.map((item) => item.events.length), [1, 1, 0, 0, 0]);
 });
+
+test('0.4.28: Agent Activity\'s "Watch the team" asks for Team Live, and Now shows what a waiting agent waits for and a queued one', () => {
+  const { parseActivityViewMessage } = withVscodeStub(() => require('../services/activityView') as typeof import('../services/activityView'));
+  assert.deepEqual(parseActivityViewMessage({ type: 'open-team-live', runId: '../x' }), { type: 'open-team-live' });
+  const live = [
+    { agentId: 'main-run-a', agent: 'agent', runId: 'run-a', model: 'm', status: 'running', phase: 'waiting-you', waitingKind: 'question', phaseSince: 0, startedAt: 1, turns: 0, toolCalls: 0 },
+    { agentId: 'writer-abc123', agent: 'writer', runId: 'run-a', parentId: 'main-run-a', model: 'm', status: 'running', phase: 'queued', phaseSince: 0, startedAt: 2, turns: 0, toolCalls: 0 }
+  ] as never;
+  assert.deepEqual(nowRows(live).map((row) => [row.phase, row.waitingKind ?? '', row.sub]), [['waiting-you', 'question', false], ['queued', '', true]]);
+  // 0.4.28 (review of PR 72): a started agent names who started it; the run's own agent names nobody.
+  assert.deepEqual(nowRows(live).map((row) => row.startedBy), [undefined, 'agent']);
+});

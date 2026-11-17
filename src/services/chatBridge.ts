@@ -57,6 +57,8 @@ export type ChatWebviewMessage =
   /** The spend line's token link: the host decides what it runs (set the token, or turn NEAR's total back on). */
   | { type: 'reporting-token' }
   | { type: 'open-activity'; agentId?: string }
+  /** 0.4.28: "Watch the team" in the running-agents list opens Team Live. */
+  | { type: 'open-team-live' }
   | { type: 'select-profile' }
   /** The welcome's "Set up a new profile": runs the NEAR AI key setup. */
   | { type: 'new-profile' }
@@ -352,6 +354,7 @@ export function parseChatWebviewMessage(value: unknown): ChatWebviewMessage | un
   }
   if (message.type === 'attach-files' && Object.keys(message).length === 1) return { type: 'attach-files' };
   if (message.type === 'attachment-remove' && typeof message.id === 'string' && /^att-[a-f0-9]{12}$/.test(message.id) && Object.keys(message).length === 2) return { type: 'attachment-remove', id: message.id };
+  if (message.type === 'open-team-live' && Object.keys(message).length === 1) return { type: 'open-team-live' };
   if (message.type === 'open-activity') {
     if (Object.keys(message).some((key) => key !== 'type' && key !== 'agentId')) return undefined;
     if (message.agentId === undefined) return { type: 'open-activity' };

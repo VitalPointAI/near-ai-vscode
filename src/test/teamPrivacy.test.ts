@@ -221,3 +221,30 @@ test('a capitalised Privacy line is the same key: ticking never adds a second on
     assert.equal(keys(unticked.slice(0, unticked.indexOf('\n---', 4))), 0, `${line}: unticking removes it`);
   }
 });
+
+// 0.4.28 (PR #69 review): a member's privacy line with a note after it (`privacy: private  # client data`) was not found, so marking the team private
+// added a second privacy line under it. The line is now read the same way by the run and by Team Studio: a one-word value with an optional `# note`.
+test('a member privacy line with a note after it counts, and marking the team private never doubles it', () => {
+  const keys = (text: string) => (text.match(/^privacy:/gim) ?? []).length;
+  const withLine = (line: string) => FILE.replace('tools: Read, Write\n\nRead the files.', `tools: Read, Write\n${line}\n\nRead the files.`);
+  const section = (text: string) => text.slice(text.indexOf('## analyst'), text.indexOf('## writer'));
+  // Already private with a note: the run reads it as private, and the line is kept as written.
+  const noted = withLine('privacy: private  # client data');
+  assert.equal(parseTeam(noted, 'clients.md').members[0].privacy, 'private');
+  assert.equal(parseTeam(noted, 'clients.md').members[0].instructions, 'Read the files. Write the summary to the file the task names.');
+  const keptTicked = teamMarkdown({ ...draftFromMarkdown(noted, 'clients.md'), private: true }, noted);
+  assert.equal(keys(section(keptTicked)), 1);
+  assert.match(section(keptTicked), /^privacy: private {2}# client data$/m);
+  // Any, with a note: replaced in place by privacy: private.
+  const any = withLine('Privacy: any # for now');
+  assert.equal(parseTeam(any, 'clients.md').members[0].privacy, undefined);
+  const anyTicked = teamMarkdown({ ...draftFromMarkdown(any, 'clients.md'), private: true }, any);
+  assert.equal(keys(section(anyTicked)), 1);
+  assert.match(section(anyTicked), /^tools: Read, Write\nprivacy: private\n\nRead the files\./m);
+  // A sentence that starts with "Privacy:" stays instructions, for the run and for the studio: it is never taken for the setting or replaced.
+  const sentence = withLine('Privacy: handle client data carefully.');
+  assert.match(parseTeam(sentence, 'clients.md').members[0].instructions, /^Privacy: handle client data carefully\./);
+  const sentenceTicked = teamMarkdown({ ...draftFromMarkdown(sentence, 'clients.md'), private: true }, sentence);
+  assert.match(section(sentenceTicked), /^tools: Read, Write\nprivacy: private\nPrivacy: handle client data carefully\.\n\nRead the files\./m);
+  assert.match(parseTeam(sentenceTicked, 'clients.md').members[0].instructions, /^Privacy: handle client data carefully\./);
+});

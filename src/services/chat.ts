@@ -703,6 +703,10 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
       await vscode.commands.executeCommand('nearAi.openAgentActivity', message.agentId);
       return;
     }
+    if (message.type === 'open-team-live') {
+      await vscode.commands.executeCommand('nearAi.openTeamLive');
+      return;
+    }
     if (message.type === 'open-tools') {
       await vscode.commands.executeCommand('nearAi.openTools');
       return;

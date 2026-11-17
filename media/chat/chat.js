@@ -779,7 +779,25 @@
     agentClock ??= setInterval(() => { const rows = agentPanel.querySelectorAll('.agent-status'); if (!rows.length) { clearInterval(agentClock); agentClock = undefined; } rows.forEach(updateAgentStatus); }, 1000);
     const title = el('div', 'todo-title');
     title.append(panelToggle(list, 'agents-list', 'agentsCollapsed', `Agents running · ${agents.length}`, 'running agents'), ' ', textButton('Activity', () => post({ type: 'open-activity' })));
-    agentPanel.replaceChildren(title, list);
+    agentPanel.replaceChildren(title, teamPulse(agents), list);
+  }
+
+  // 0.4.28: a row of state dots, one per running agent (the lead's own state is in the chat itself), and "Watch the team", which opens Team Live. Each dot has its state in words for a screen reader and
+  // as a tooltip; its shape changes with the state, so colour is never the only sign. Nothing moves here.
+  // The host sends each agent's state as a word (review of PR 72); the page never reads it back from the activity wording.
+  const DOT_WORDS = { paused: 'paused', 'needs-you': 'needs you', queued: 'queued', waiting: 'waiting for helpers', working: 'working' };
+  function agentDotState(agent) {
+    const state = Object.prototype.hasOwnProperty.call(DOT_WORDS, agent.state) ? agent.state : agent.paused ? 'paused' : 'working';
+    return [state, DOT_WORDS[state]];
+  }
+  function teamPulse(agents) {
+    const line = el('div', 'team-pulse');
+    const dots = el('ul', 'team-dots');
+    dots.setAttribute('aria-label', 'Team state');
+    const dot = (state, words) => { const item = el('li', 'team-dot dot-' + state); item.title = words; item.append(el('span', 'visually-hidden', words)); return item; };
+    dots.append(...agents.map((agent) => { const [state, words] = agentDotState(agent); return dot(state, agent.label + ': ' + words); }));
+    line.append(dots, textButton('Watch the team', () => post({ type: 'open-team-live' })));
+    return line;
   }
 
   // A panel's list can be collapsed to its title line; the choice is remembered across reloads.

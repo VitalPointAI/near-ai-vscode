@@ -58,6 +58,8 @@ export type ActivityViewMessage =
   | { type: 'history-page'; page: number }
   | { type: 'agent-control'; agentId: string; action: 'pause' | 'resume' | 'stop' }
   | { type: 'show-in-chat' }
+  /** 0.4.28: "Watch the team" in Now opens Team Live. */
+  | { type: 'open-team-live' }
   | { type: 'open-conversation'; conversationId: string }
   | { type: 'export'; format: 'markdown' | 'json' }
   | { type: 'export-usage' }
@@ -76,7 +78,7 @@ const WINDOWS: OverviewWindow[] = ['conversation', 'today', 'week'];
 export function parseActivityViewMessage(value: unknown): ActivityViewMessage | undefined {
   if (!value || typeof value !== 'object') return undefined;
   const message = value as Record<string, unknown>;
-  if (message.type === 'ready' || message.type === 'show-in-chat' || message.type === 'export-usage' || message.type === 'reporting-token' || message.type === 'test-token' || message.type === 'fix-token' || message.type === 'open-console') return { type: message.type };
+  if (message.type === 'ready' || message.type === 'show-in-chat' || message.type === 'open-team-live' || message.type === 'export-usage' || message.type === 'reporting-token' || message.type === 'test-token' || message.type === 'fix-token' || message.type === 'open-console') return { type: message.type };
   if (message.type === 'set-window' && WINDOWS.includes(message.window as OverviewWindow)) return { type: 'set-window', window: message.window as OverviewWindow };
   if (message.type === 'history-page' && Number.isInteger(message.page) && (message.page as number) >= 0 && (message.page as number) < 10_000) return { type: 'history-page', page: message.page as number };
   if (message.type === 'agent-control' && typeof message.agentId === 'string' && AGENT_ID.test(message.agentId) && (message.action === 'pause' || message.action === 'resume' || message.action === 'stop')) return { type: 'agent-control', agentId: message.agentId, action: message.action };
@@ -215,6 +217,7 @@ export function openAgentActivity(context: vscode.ExtensionContext, agentId?: st
       schedule();
     }
     else if (message.type === 'show-in-chat') await vscode.commands.executeCommand('nearAi.openChat');
+    else if (message.type === 'open-team-live') await vscode.commands.executeCommand('nearAi.openTeamLive');
     else if (message.type === 'open-conversation') await chat?.request({ type: 'resume-conversation', id: message.conversationId });
     else if (message.type === 'export') await exportActivity(activity, message.format);
     else if (message.type === 'export-usage') await vscode.commands.executeCommand('nearAi.exportAnalytics');
@@ -312,7 +315,7 @@ export function activityHtml(webview: Pick<vscode.Webview, 'asWebviewUri' | 'csp
 </header>
 <main>
 <section aria-labelledby="now-heading">
-  <h2 id="now-heading">Now</h2>
+  <div class="section-head"><h2 id="now-heading">Now</h2><button id="watch-team" type="button" class="link" title="See the team as a tree, with each hand-off as it happens" hidden>Watch the team</button></div>
   <p id="now-empty" class="hint">No agents are running. Send a message or run a workflow in the NEAR AI chat.</p>
   <div class="table-wrap" id="now-wrap" hidden><table id="now" class="stack-narrow stack-medium" aria-labelledby="now-heading"><thead><tr>
     <th scope="col">Agent</th><th scope="col">Model</th><th scope="col">State</th><th scope="col" class="num col-secondary">Elapsed</th><th scope="col" class="num col-secondary">Turns</th><th scope="col" class="num col-secondary">Tool calls</th><th scope="col" class="num">Cost so far</th><th scope="col"><span class="sr-only">Controls</span></th>

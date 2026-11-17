@@ -217,6 +217,15 @@ details.agent-tool .state { color: var(--vscode-errorForeground); }
 .panel-toggle[aria-expanded="false"]::before { content: '▸'; }
 .panel-toggle:focus-visible { outline: 1px solid var(--vscode-focusBorder); }
 #agents .agent { display: flex; align-items: center; gap: 6px; padding: 2px 0; }
+/* 0.4.28: the team's state dots and "Watch the team". The shape differs by state (a ring, a filled dot, a square, a diamond), so colour is not the
+   only sign; each dot also carries its state in words. */
+#agents .team-pulse { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin: 2px 0 4px; }
+#agents .team-dots { display: flex; flex-wrap: wrap; gap: 4px; margin: 0; padding: 0; list-style: none; }
+#agents .team-dot { width: 9px; height: 9px; border-radius: 50%; border: 1.5px solid var(--vscode-charts-blue, #3794ff); background: var(--vscode-charts-blue, #3794ff); }
+#agents .team-dot.dot-queued { background: none; border-style: dashed; border-color: var(--vscode-descriptionForeground); }
+#agents .team-dot.dot-paused { border-radius: 1px; background: none; border-color: var(--vscode-descriptionForeground); }
+#agents .team-dot.dot-waiting { background: none; border-color: var(--vscode-charts-purple, #b180d7); }
+#agents .team-dot.dot-needs-you { border-radius: 1px; transform: rotate(45deg); background: var(--vscode-editorWarning-foreground, #cca700); border-color: var(--vscode-editorWarning-foreground, #cca700); }
 #agents .agent-body { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 #agents .agent-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; padding: 0; border: none; background: none; color: var(--vscode-textLink-foreground); font: inherit; cursor: pointer; }
 #agents .agent-label:hover { text-decoration: underline; }

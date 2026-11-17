@@ -287,7 +287,7 @@ const WORK_SHAPES = ['feature', 'bugfix', 'refactor', 'research', 'release'] as 
 const RISKS = ['low', 'medium', 'high'] as const;
 
 export type StudioMessage =
-  | { type: 'ready' } | { type: 'refresh' } | { type: 'import' } | { type: 'discard-draft' } | { type: 'discard-kept' }
+  | { type: 'ready' } | { type: 'refresh' } | { type: 'import' } | { type: 'discard-draft' } | { type: 'discard-kept' } | { type: 'watch-live' }
   /** Cancel or "All teams" in the guided builder with unsaved changes: the host asks Discard changes / Save draft. */
   | { type: 'leave-wizard'; wizard: SavedWizard }
   /** "All teams" in the editor with unsaved changes: the host asks Discard changes / Save. */
@@ -339,7 +339,7 @@ export function parseStudioMessage(value: unknown): StudioMessage | undefined {
   const message = value;
   const id = () => typeof message.id === 'string' && TEAM_ID.test(message.id);
   switch (message.type) {
-    case 'ready': case 'refresh': case 'import': case 'discard-draft': case 'discard-kept':
+    case 'ready': case 'refresh': case 'import': case 'discard-draft': case 'discard-kept': case 'watch-live':
       return exactKeys(message, ['type']) ? { type: message.type } : undefined;
     case 'leave-wizard': {
       const wizard = exactKeys(message, ['type', 'wizard']) ? savedWizard(message.wizard) : undefined;
@@ -458,6 +458,9 @@ export interface TeamStudioDeps {
   openSetting(key: string): Promise<unknown>;
   /** Runs Update Team on a team file (preview, choices, and confirmation happen there). */
   updateTeam?(file: string): Promise<unknown>;
+  /** 0.4.28: whether a run of the team with this slug is going now, and opening Team Live to watch it. */
+  liveRun?(slug: string): boolean;
+  watchLive?(): Promise<unknown>;
   confirm(message: string, action: string): Promise<boolean>;
   ask(prompt: string, value: string): Promise<string | undefined>;
   /** Where to save a team's share file (`<team>.near-team.json`); undefined when the person cancelled. */
@@ -530,7 +533,8 @@ const MESSAGE_OVERHEAD_TOKENS = 200;
 function estimateFor(ai: TeamAiDeps, model: string): { estimate?: string } {
   const info = ai.models.find((candidate) => candidate.id === model);
   if (info?.privacyBoundary === 'local') return { estimate: 'free: it runs on this computer' };
-  if (info?.inputPricePerMillion === undefined && info?.outputPricePerMillion === undefined) return {};
+  // 0.4.28 (PR #69 review): a model with no price information says so, rather than leaving the cost out as if it were free.
+  if (info?.inputPricePerMillion === undefined && info?.outputPricePerMillion === undefined) return { estimate: 'cost unknown: NEAR gives no price for this model' };
   const inputTokens = Buffer.byteLength(REFINE_PROMPT, 'utf8') + MAX_REFINE_BYTES + MESSAGE_OVERHEAD_TOKENS;
   const cost = (inputTokens * (info.inputPricePerMillion ?? 0) + REFINE_MAX_TOKENS * (info.outputPricePerMillion ?? 0)) / 1_000_000;
   // Rounded up, so the figure shown is never below the ceiling.
@@ -623,7 +627,9 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
     const entry = teamFor(id);
     // A hand-written private value (tee, local) is shown as it is; the Private team box only ever writes or removes privacy: private (PR #69 review).
     const teamPrivacy = handWrittenTeamPrivacy(textNow);
-    post({ type: 'team', id, kind: entry?.kind ?? (id === 'project' ? 'project' : 'user'), file: displayPath(file, deps.root), command: entry?.command ?? '', draft, base: open.base, ...(teamPrivacy ? { teamPrivacy } : {}), versions: await versionsOf(file), graph: graphOf(textNow, file), knowledge: await knowledgeOf(file), ...(notice ? { notice } : {}) });
+    // 0.4.28: while a run of this team is going, the Team shape tab links to Team Live.
+    const live = deps.liveRun?.(slugify(path.basename(file, '.md'))) === true;
+    post({ type: 'team', id, kind: entry?.kind ?? (id === 'project' ? 'project' : 'user'), file: displayPath(file, deps.root), command: entry?.command ?? '', draft, base: open.base, ...(teamPrivacy ? { teamPrivacy } : {}), ...(live ? { liveRun: true } : {}), versions: await versionsOf(file), graph: graphOf(textNow, file), knowledge: await knowledgeOf(file), ...(notice ? { notice } : {}) });
   };
 
   /**
@@ -806,10 +812,12 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
         if (!plan.ok || !ai) { result('blocked', plan.ok ? 'No model is available here.' : plan.reason); return; }
         if (!input || !context) await load();
         const prompt = refinePrompt(draft, { findings, tools: context!.tools.map((tool) => ({ name: tool.name, description: tool.description })), skipped: plan.skipped, ...(message.member ? { member: message.member } : {}), untrusted: await untrustedFor(draft, message.id) });
-        // The cap holds for every review (a one-member one too), so the cost ceiling shown before asking is a true ceiling.
-        if (Buffer.byteLength(prompt, 'utf8') > MAX_REFINE_BYTES) { result('blocked', message.member ? `${message.member}'s instructions are too long to review in one go. Shorten them first.` : 'This team is too large to review in one go. Review one member at a time.'); return; }
+        // A Cancel (or a newer request) that came while the model was being chosen wins over every later check (0.4.28, PR #69 review): the person is
+        // told it was cancelled, not that the team is too large.
         if (refine !== current) return;
         if (controller.signal.aborted) { result('cancelled', 'Cancelled. Nothing changed.'); return; }
+        // The cap holds for every review (a one-member one too), so the cost ceiling shown before asking is a true ceiling.
+        if (Buffer.byteLength(prompt, 'utf8') > MAX_REFINE_BYTES) { result('blocked', message.member ? `${message.member}'s instructions are too long to review in one go. Shorten them first.` : 'This team is too large to review in one go. Review one member at a time.'); return; }
         post({ type: 'improve-state', seq, state: 'requesting', model: plan.model, private: plan.private });
         let reply: Awaited<ReturnType<typeof teamModelCall>>;
         try {
@@ -978,6 +986,7 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
         return;
       }
       case 'discard-draft': await deps.drafts.set(undefined); return;
+      case 'watch-live': await deps.watchLive?.(); return;
       case 'use-in-chat': {
         const team = teamFor(message.id);
         if (team?.command) await deps.sidebar.prefill(team.command);

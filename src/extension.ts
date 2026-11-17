@@ -23,6 +23,7 @@ import { chatHandoff, runApprovedCommand } from './services/cyberHandoff';
 import { panelCyberRunStarter } from './services/cyberAssembly';
 import { openOnboarding } from './services/onboarding';
 import { registerAgentActivity } from './services/activityView';
+import { registerTeamLive } from './services/teamLiveView';
 import { registerRunReport } from './services/runReportCommand';
 import { registerResearchVerifiers } from './services/researchProfileCommand';
 import { registerUsageExport } from './services/usageExport';
@@ -130,6 +131,7 @@ export function activate(context: vscode.ExtensionContext): NearAiTestApi | unde
   const gate = registerGate(context);
   const sidebar = new NearAiPanelViewProvider(context, auth, gate);
   registerAgentActivity(context, sidebar);
+  registerTeamLive(context, sidebar);
   registerUsageExport(context);
   registerSecurityScanning(context);
   registerWebSearchSetup(context);

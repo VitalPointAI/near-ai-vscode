@@ -1,5 +1,5 @@
 import { ActivitySessionSummary, addSessionStats, emptySessionStats, ModelCounters, RunSplit, SessionOutcome, SessionStats } from '../domain/activity';
-import { AgentBoundary, AgentPhase, AgentStats, redactForDisplay, timeBreakdown } from './agentActivity';
+import { AgentBoundary, AgentPhase, AgentStats, redactForDisplay, timeBreakdown, WaitingKind } from './agentActivity';
 import { DayBoundary, dayStart, nanoToUsd, SpendFilter, SpendTotals, totalNanoUsd } from './spendLedger';
 
 // The Agent Activity page's figures, built from what is persisted (the project's ActivityStore
@@ -71,10 +71,14 @@ export interface NowRow {
   runId: string;
   label: string;
   sub: boolean;
+  /** 0.4.28: the label of the agent that started this one, when that agent is still listed. */
+  startedBy?: string;
   model: string;
   boundary?: AgentBoundary;
   phase: AgentPhase;
   phaseSince: number;
+  /** 0.4.28: what a `waiting-you` agent waits for. */
+  waitingKind?: WaitingKind;
   coolUntil?: number;
   coolReason?: 'rate-limited' | 'error';
   tool?: string;
@@ -135,7 +139,7 @@ export function sessionsIn(sessions: ActivitySessionSummary[], window: OverviewW
 /** Live agents whose counters are not in the history yet and that belong to the window. */
 function liveIn(live: AgentStats[], window: OverviewWindow, now: number, boundary: DayBoundary, conversationId?: string): AgentStats[] {
   const since = windowStart(window, now, boundary);
-  return live.filter((stat) => !stat.persisted && (window === 'conversation' ? Boolean(conversationId) && stat.conversationId === conversationId : stat.startedAt >= (since ?? 0)));
+  return live.filter((stat) => !stat.persisted && !stat.neverStarted && (window === 'conversation' ? Boolean(conversationId) && stat.conversationId === conversationId : stat.startedAt >= (since ?? 0)));
 }
 
 export function buildWindowSummary(input: OverviewInput): WindowSummary {
@@ -172,11 +176,13 @@ export function buildWindowSummary(input: OverviewInput): WindowSummary {
 
 /** The agents running now, oldest first, with their spend so far from the ledger. */
 export function nowRows(live: AgentStats[], spend?: OverviewSpend): NowRow[] {
+  const labels = new Map(live.map((stat) => [stat.agentId, stat.agent]));
   return live.filter((stat) => stat.status === 'running').sort((a, b) => a.startedAt - b.startedAt).map((stat) => {
     const totals = spend?.totals({ agentId: stat.agentId });
+    const startedBy = stat.parentId ? labels.get(stat.parentId) : undefined;
     return {
-      agentId: stat.agentId, runId: stat.runId, label: stat.agent, sub: Boolean(stat.parentId), model: stat.model, ...(stat.boundary ? { boundary: stat.boundary } : {}),
-      phase: stat.phase, phaseSince: stat.phaseSince, ...(stat.coolUntil ? { coolUntil: stat.coolUntil } : {}), ...(stat.coolReason ? { coolReason: stat.coolReason } : {}), ...(stat.tool ? { tool: stat.tool } : {}),
+      agentId: stat.agentId, runId: stat.runId, label: stat.agent, sub: Boolean(stat.parentId), ...(startedBy ? { startedBy } : {}), model: stat.model, ...(stat.boundary ? { boundary: stat.boundary } : {}),
+      phase: stat.phase, phaseSince: stat.phaseSince, ...(stat.waitingKind ? { waitingKind: stat.waitingKind } : {}), ...(stat.coolUntil ? { coolUntil: stat.coolUntil } : {}), ...(stat.coolReason ? { coolReason: stat.coolReason } : {}), ...(stat.tool ? { tool: stat.tool } : {}),
       startedAt: stat.startedAt, turns: stat.turns, toolCalls: stat.toolCalls, ...(totals?.requests ? { costUsd: nanoToUsd(totalNanoUsd(totals)) } : {})
     };
   });

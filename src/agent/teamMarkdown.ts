@@ -1,5 +1,5 @@
 import { parseFrontmatter } from '../gsd/library';
-import { DEFAULT_TOOLS, parsePrivacy, parseTeam, parseTeamPrivacy, renderTeam, reportsToKey, resolveMemberTools, slugify } from './teams';
+import { DEFAULT_TOOLS, MEMBER_PRIVACY_LINE, parsePrivacy, parseTeam, parseTeamPrivacy, renderTeam, reportsToKey, resolveMemberTools, slugify } from './teams';
 
 // The Team Studio edits a team as a draft, but the Markdown file stays the source of truth: saving
 // a draft over an existing file rewrites only what the draft changed. Unknown frontmatter keys,
@@ -20,7 +20,9 @@ export interface TeamParts { frontmatter?: { open: string; inner: string; close:
 
 const FRONTMATTER = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/;
 const SECTION_START = /^##\s+/gm;
-const FIELD = /^(role|model|tools|reports-to|privacy):\s*(.*)$/i;
+const FIELD = /^(role|model|tools|reports-to):\s*(.*)$/i;
+/** One field line, read exactly as parseTeam reads it, so a section and the member it describes always agree on where the instructions start. */
+const fieldOf = (line: string) => FIELD.exec(line) ?? MEMBER_PRIVACY_LINE.exec(line);
 
 /** Splits a team file the same way parseTeam reads it, keeping each part's exact text. */
 function privacyOf(value: string | undefined): 'private' | undefined {
@@ -44,7 +46,7 @@ export function splitTeam(text: string): TeamParts {
     const fields: Record<string, string> = {};
     let line = 0;
     while (line < rest.length) {
-      const field = FIELD.exec(rest[line].trim());
+      const field = fieldOf(rest[line].trim());
       if (!field) { if (rest[line].trim()) break; line += 1; continue; }
       fields[field[1].toLowerCase()] = field[2].trim();
       line += 1;
@@ -100,7 +102,9 @@ function renderSection(member: ReturnType<typeof renderMembers>[number]): string
 }
 
 const MEMBER_FIELD = /^(?:role|model|tools|reports-to):\s*.*$/i;
-const PRIVACY_FIELD = /^privacy:\s*\S*\s*$/i;
+// The member's privacy setting line as parseTeam reads it, a `# note` after the value included (0.4.28, PR #69 review): it is replaced, never doubled.
+// A sentence such as "Privacy: handle client data carefully" is instructions to parseTeam, so it is left alone here too.
+const PRIVACY_FIELD = MEMBER_PRIVACY_LINE;
 
 /** A member section with privacy: private as its last setting line (an existing privacy line is replaced in place); every other byte is kept. */
 function withPrivateLine(raw: string): string {

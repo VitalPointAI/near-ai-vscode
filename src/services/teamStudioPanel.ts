@@ -3,6 +3,7 @@ import { stat } from 'node:fs/promises';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { layoutProbeAsset, registerLayoutProbe, sharedMedia } from './layoutProbe';
+import { sharedActivityFeed } from './activityView';
 import { applyProjectType } from '../agent/projectTypes';
 import { applyResearchProfile, usesResearchProfile } from '../gsd/researchProfile';
 import { slugify, TeamLibrary } from '../agent/teams';
@@ -119,6 +120,8 @@ export async function openTeamStudio(context: vscode.ExtensionContext, auth: Aut
     openFile: async (file) => vscode.window.showTextDocument(await vscode.workspace.openTextDocument(vscode.Uri.file(file)), { preview: false, viewColumn: vscode.ViewColumn.Beside }),
     openSetting: (key) => Promise.resolve(vscode.commands.executeCommand('workbench.action.openSettings', key)),
     updateTeam: (file) => Promise.resolve(vscode.commands.executeCommand('nearAi.updateTeam', file)),
+    liveRun: (slug) => sharedActivityFeed().agentStats().some((stat) => stat.team === slug && stat.status === 'running' && stat.agentId === `main-${stat.runId}`),
+    watchLive: () => Promise.resolve(vscode.commands.executeCommand('nearAi.openTeamLive')),
     confirm: async (message, action) => (await vscode.window.showWarningMessage(message, { modal: true }, action)) === action,
     choose: async (message, ...actions) => vscode.window.showWarningMessage(message, { modal: true }, ...actions),
     // The tested model for each role, from the comparisons this machine has run, so a saved team is checked against evidence rather than defaults.

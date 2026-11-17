@@ -43,9 +43,10 @@ export interface GsdServices {
   ask(questions: Question[], signal: AbortSignal, agentId?: string): Promise<string[]>;
   /**
    * Runs a sub-agent. In the foreground it resolves with the final report; in the background it
-   * resolves at once with the agent's id, and the report reaches the caller when it finishes.
+   * resolves at once with the agent's id, and the report reaches the caller when it finishes. `parentId` (0.4.28) is the agent making the call: the run's
+   * main agent, or a sub-agent that starts its own helper.
    */
-  spawn(request: { type: string; agent?: GsdAgent; prompt: string; description: string; model?: string; background: boolean; isolation?: 'worktree'; task?: string }, signal: AbortSignal): Promise<string>;
+  spawn(request: { type: string; agent?: GsdAgent; prompt: string; description: string; model?: string; background: boolean; isolation?: 'worktree'; task?: string; parentId?: string }, signal: AbortSignal): Promise<string>;
 }
 
 
@@ -123,10 +124,10 @@ export function gsdTools(services: GsdServices): AgentTool<any>[] {
     }
   };
 
-  const agentRun = async (raw: { type: string; prompt: string; description: string; model?: string; background: boolean; isolation?: 'worktree'; task?: string }, signal: AbortSignal) => {
+  const agentRun = async (raw: { type: string; prompt: string; description: string; model?: string; background: boolean; isolation?: 'worktree'; task?: string }, signal: AbortSignal, parentId?: string) => {
     const agent = services.agents.find((candidate) => candidate.name === raw.type);
     if (!agent && raw.type && raw.type !== 'general-purpose') throw new ToolError(`No agent definition named "${raw.type}". Available: ${services.agents.map((candidate) => candidate.name).join(', ')}, or general-purpose.`);
-    return services.spawn({ type: raw.type || 'general-purpose', agent, prompt: raw.prompt, description: raw.description, model: raw.model, background: raw.background, ...(raw.isolation ? { isolation: raw.isolation } : {}), ...(raw.task ? { task: raw.task } : {}) }, signal);
+    return services.spawn({ type: raw.type || 'general-purpose', agent, prompt: raw.prompt, description: raw.description, model: raw.model, background: raw.background, ...(raw.isolation ? { isolation: raw.isolation } : {}), ...(raw.task ? { task: raw.task } : {}), ...(parentId ? { parentId } : {}) }, signal);
   };
 
   const agentParse = (raw: Record<string, unknown>) => {
@@ -154,7 +155,7 @@ export function gsdTools(services: GsdServices): AgentTool<any>[] {
     manifestInput: withDefaultAgent,
     parse: agentParse,
     title: (input) => `${input.type || 'Agent'}: ${input.description || input.prompt.slice(0, 60)}`,
-    run: (input, context) => agentRun(input, context.signal)
+    run: (input, context) => agentRun(input, context.signal, context.agentId)
   };
   // Earlier Claude Code releases named this tool Task; GSD workflows may use either name.
   const taskTool: AgentTool<ReturnType<typeof agentParse>> = { ...agentTool, name: 'Task', manifest: declareManifest({ tool: 'Task', effects: [{ verb: 'spawn', agent: fromArgument('subagent_type', 'literal') }], contexts: INTERACTIVE_AND_UNATTENDED }) };

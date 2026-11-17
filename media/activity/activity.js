@@ -4,7 +4,8 @@
 (function () {
   const vscode = acquireVsCodeApi();
   const $ = (id) => document.getElementById(id);
-  const PHASE = { starting: 'Starting', thinking: 'Thinking', generating: 'Writing', tool: 'Running', 'waiting-you': 'Waiting for you', 'cooling-down': 'Cooling down', paused: 'Paused', 'waiting-agents': 'Waiting for agents' };
+  const WAITING = { approval: 'Waiting for your approval', question: 'Waiting for your answer', image: 'Waiting for your image review' };
+  const PHASE = { queued: 'Waiting for a free slot', starting: 'Starting', thinking: 'Thinking', generating: 'Writing', tool: 'Running', 'waiting-you': 'Waiting for you', 'cooling-down': 'Cooling down', paused: 'Paused', 'waiting-agents': 'Waiting for agents' };
   const OUTCOME = { running: 'Running', completed: 'Completed', 'max-turns': 'Turn limit', stuck: 'Stuck', cancelled: 'Stopped', failed: 'Failed', 'setup-blocked': 'Setup needed' };
   const BOUNDARY = { tee: ['TEE', 'Runs inside NEAR AI’s attested TEE'], local: ['Local', 'Runs on this machine'], cloud: ['Forwarded', 'NEAR forwards it to another provider'] };
   const TIME = [['generateMs', 'Generating', 'seg-generate'], ['toolMs', 'Tools and sub-agents', 'seg-tool'], ['userWaitMs', 'Waiting for you', 'seg-user'], ['nearWaitMs', 'Waiting on NEAR', 'seg-near']];
@@ -56,10 +57,13 @@
       return (agent.coolReason === 'rate-limited' ? 'Rate limited' : 'Cooling down') + (left !== undefined ? ' · retry in ' + duration(left) : '');
     }
     if (agent.phase === 'tool') return 'Running ' + (agent.tool || 'a tool');
+    if (agent.phase === 'waiting-you' && WAITING[agent.waitingKind]) return WAITING[agent.waitingKind] + ' · ' + duration(now - agent.phaseSince);
     return (PHASE[agent.phase] || agent.phase) + (agent.phase === 'waiting-you' || agent.phase === 'paused' ? ' · ' + duration(now - agent.phaseSince) : '');
   }
 
   function renderNow(running) {
+    // 0.4.28: a run with agents of its own can be watched as a team.
+    $('watch-team').hidden = !running.some((agent) => agent.sub);
     $('now-empty').hidden = running.length > 0;
     $('now-wrap').hidden = running.length === 0;
     syncRows($('now').querySelector('tbody'), running, (agent) => agent.agentId, (row, agent) => {
@@ -84,7 +88,7 @@
       row.dataset.paused = String(agent.phase === 'paused');
       row.dataset.since = String(agent.startedAt);
       row.className = 'phase-' + agent.phase + (state.focus === agent.agentId ? ' focused' : '');
-      setText(row.children[0].firstChild, (agent.sub ? '↳ ' : '') + agent.label);
+      setText(row.children[0].firstChild, (agent.sub ? '↳ ' : '') + agent.label + (agent.startedBy ? ' (started by ' + agent.startedBy + ')' : ''));
       // On a narrow panel the hidden columns' values show under the agent's name.
       setText(row.children[0].lastChild, duration(now - agent.startedAt) + ' · ' + number(agent.turns) + ' turns · ' + number(agent.toolCalls) + ' tool calls');
       setText(row.children[1].firstChild, agent.model);
@@ -282,6 +286,7 @@
     const next = choices[(index + (event.key === 'ArrowRight' ? 1 : choices.length - 1)) % choices.length];
     next.focus(); next.click(); event.preventDefault();
   });
+  $('watch-team').addEventListener('click', () => vscode.postMessage({ type: 'open-team-live' }));
   ['prev', 'next'].forEach((id) => $(id).addEventListener('click', () => vscode.postMessage({ type: 'history-page', page: Number($(id).dataset.page) })));
   const menu = $('export-menu');
   const details = $('export-details');
