@@ -312,9 +312,10 @@ is what that file and the records beside it do in this version.
   chat, a helper agent, an attached file being read, the chat view in VS Code,
   Team Studio, a cybersecurity scan or a model comparison, NEAR AI checks the
   request against the routing tiers in the policy file, using only what is on
-  this computer. A label does not change where content is sent yet, so every
-  request is at the policy's default label, which may go to any model, and on
-  a fresh install nothing changes where requests go. A request the routing does not allow is
+  this computer. Each chat's label decides where its requests may go (see
+  [Classification labels and routing](#classification-labels-and-routing)); a
+  chat that read nothing labelled is at the policy's default label, which may
+  go to any model, so on a fresh install nothing changes where requests go. A request the routing does not allow is
   not sent, and you are told why in plain words. Until NEAR AI can prove that a
   connection to NEAR AI Cloud ends inside its private hardware, content at a
   level whose tier needs an attested cloud model stays on this computer for
@@ -356,11 +357,74 @@ is what that file and the records beside it do in this version.
   in the project. Content
   with no label takes your policy's default label, so a policy with no
   clearance on that scale cannot read it. Decision records hold the labels
-  involved and stay on this computer. A label does not change where content is
-  sent yet: every model request is routed by the default label and the routing
-  tiers. Labels and routing are an organizational control that helps prevent mistakes. They check what NEAR AI itself sends to a model and what its own file tools read, and they cannot see everything a shell command or an add-on server does. They do not make this device accredited for classified information. Until verified credentials arrive, your clearance is the one you declared yourself, so it is not an enforced boundary.
-- **Labelled text in network calls.** While a chat holds content whose label may not go to any cloud (Internal, Confidential or higher by default), NEAR AI keeps fingerprints of the labelled text its agents read, never the text itself, only in memory and never in a record, and refuses a web fetch, a web search, an add-on server call or a command that could send data off this computer when what it would send carries some of that text. This catches labelled text copied or quoted into a request. It does not catch a paraphrase, an encoding such as base64, or a program the agent starts that reads the file and sends it itself; the sandbox planned for Phase 72 is the stronger fix.
+  involved and stay on this computer. Where a labelled chat's content may be
+  sent is in [Classification labels and routing](#classification-labels-and-routing). Labels and routing are an organizational control that helps prevent mistakes. They check what NEAR AI itself sends to a model and what its own file tools read, and they cannot see everything a shell command or an add-on server does. They do not make this device accredited for classified information. Until verified credentials arrive, your clearance is the one you declared yourself, so it is not an enforced boundary.
 - **Your clearance is your own word.** Until verified credentials arrive, your clearance comes from your own policy file, which your own device key signs, so it is self-declared. It is not an enforced clearance boundary.
+
+### Classification labels and routing
+
+**What a label is.** A label is a level on a scale (for example `org/Confidential`),
+with optional compartments and handling flags. **NEAR AI: Set Label** labels a
+file, a folder or the project; the labels are kept in
+`.planning/.near-ai/labels.json`, signed with your device key, and travel with
+the project, so anyone who can read the project can read its labels.
+
+**Scales.** Four scales ship with the policy: `org` (Public, Internal,
+Confidential, Restricted), `ca-protected` (Protected A, B and C),
+`ca-classified` (Confidential, Secret, Top Secret) and `nato` (NATO
+Unclassified to Cosmic Top Secret). The NATO levels come from secondary copies, and treating the Canadian Protected and Classified families as two scales is how NEAR AI reads them. Your organization's security officer should confirm both before you rely on them.
+
+**Clearances.** An agent reads a labelled file only when a clearance in your
+policy covers its label; add one with **NEAR AI: Edit Policy** and **NEAR AI:
+Apply Policy Draft**. Until verified credentials arrive, your clearance comes from your own policy file, which your own device key signs, so it is self-declared. It is not an enforced clearance boundary.
+
+**The chat's label.** Each chat has a label that rises with what its agents,
+helpers included, read: reading a Confidential file makes the chat
+Confidential. It is kept with the chat and synced with it, encrypted like the
+rest of the chat. A sync never lowers a chat's label: two copies merge to the
+higher label. Only you lower it, with **NEAR AI: Lower This Chat's Label** and
+a reason that is recorded. A lowering reaches your other computers only as a
+declassification signed with your device key that they can check, and only
+when it undoes no raise made there; outside Team Mode your other computers
+cannot check it yet, so the higher label stays there and the chat says why.
+
+**What a labelled chat writes.** A file a labelled chat writes takes the chat's
+label in the label file, never a lower one, so a later chat that reads it is
+labelled too. A label file that is not signed by this computer is never signed
+again for this without you: you are asked once, with Sign Again.
+
+**Routing tiers.** Each level maps to one tier:
+
+| Tier | What it allows | Levels by default |
+| --- | --- | --- |
+| any-cloud | any model you have set up | `org/Public` |
+| attested-cloud | a private model on NEAR AI Cloud, over a connection proven to end inside its private hardware | `org/Internal`, `org/Confidential`, `ca-protected/Protected A`, `nato/NATO Unclassified` |
+| local-only | a model on this computer | `org/Restricted`, `ca-protected/Protected B`, `ca-protected/Protected C`, `ca-classified/Confidential`, `ca-classified/Secret`, `ca-classified/Top Secret`, `nato/NATO Restricted`, `nato/NATO Confidential`, `nato/NATO Secret`, `nato/Cosmic Top Secret` |
+| deny | no model | none by default |
+
+A chat that holds labels on several scales goes by the strictest tier among
+them.
+
+**Attested cloud in this version.** Levels whose tier is attested-cloud
+(Internal, Confidential, Protected A and NATO Unclassified by default) need a
+private NEAR AI Cloud model reached over a connection proven to end inside its
+private hardware. This version cannot prove that yet, so content at these
+levels stays on this computer: a local model serves it, and with no local model
+the request is refused. Protected B stays on this computer because no CCCS
+Medium assessment of NEAR AI Cloud was found, unless your organization changes
+its policy.
+
+**Local means this computer.** Local-only means a model on this computer
+(localhost, 127.0.0.1 or [::1]) unless your organization names another host in
+its policy.
+
+**Calls that could send data off this computer.** While a chat's label is
+local-only or deny, a web fetch, a web search, an add-on server call or a
+command that could send data off this computer is refused, whatever the mode,
+and a refused request names **NEAR AI: Lower This Chat's Label** as the way out
+when what the chat read allows it. While a chat holds content whose label may not go to any cloud (Internal, Confidential or higher by default), NEAR AI keeps fingerprints of the labelled text its agents read, never the text itself, only in memory and never in a record, and refuses a web fetch, a web search, an add-on server call or a command that could send data off this computer when what it would send carries some of that text. This catches labelled text copied or quoted into a request. It does not catch a paraphrase, an encoding such as base64, or a program the agent starts that reads the file and sends it itself; the sandbox planned for Phase 72 is the stronger fix.
+
+Labels and routing are an organizational control that helps prevent mistakes. They check what NEAR AI itself sends to a model and what its own file tools read, and they cannot see everything a shell command or an add-on server does. They do not make this device accredited for classified information. Until verified credentials arrive, your clearance is the one you declared yourself, so it is not an enforced boundary.
 
 ### Sub-agents nobody is watching
 
@@ -936,6 +1000,12 @@ messages.
 | **Revert** restores files changed by the agent's file tools, not changes made by shell commands it ran | Use git for command side effects; documented in the chat |
 | Under `fully-autonomous`, the agent runs commands and reads likely credential files inside the project without asking | Writes into `.git/`, `.planning/.near-ai/` and `.near-ai/`, publishing and destruction still ask, with no "always allow", and the key folder and credential stores are refused. After it reads such a file, anything that could send data off this computer asks too. The command checks read text, and there is no sandbox around the shell yet, so a command whose words they cannot see, such as one built at run time, runs; one too deep or too long to read asks (see "What the agent can do without asking"). Intended for throwaway workspaces |
 | Facts the agent saves with Remember are not reviewed when saved, and later runs start with the relevant ones | Each fact is labeled "verify before relying on it"; review, correct or reset memory with **Manage Project Memory** |
+| Shell reads and network exits are checked from a command's text: a path built in a variable, or a program that reads a labelled file and sends it itself, is not seen | The planned sandbox (Phase 72) |
+| Local-only trusts the address your local runtime is configured with, unless it is loopback | Name only hosts you control in the policy |
+| Labels and the policy are signed by your own key, so they protect against mistakes, not against you | Verified credentials and organization-signed policies are planned |
+| An MCP server's and the cybersecurity host tools' effects are their declarations | A server or tool that does more than it declares is not seen |
+| The label file is readable by anyone who can read the project | Do not use a compartment name that is itself secret |
+| The outbound check catches labelled text copied into a network call, not a paraphrase or an encoding | The planned sandbox (Phase 72) |
 | Spend limits use NEAR's published prices for estimates; the actual charge arrives from billing after the run | Each run, with all its sub-agents, stops before a model turn once its estimate reaches `nearAi.agent.maxRunCostUsd` (default $5), what is left of `nearAi.dailySpendLimitUsd`, or `nearAi.agent.maxRunTokens`; an agent repeating the same action is nudged and then stopped |
 
 ## How changes reach a release

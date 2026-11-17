@@ -1124,9 +1124,11 @@ copy of Open-GSD to a project that doesn't already have one.
 - **Labels and clearances.** **NEAR AI: Set Label** labels a file, a folder or
   the project, and agents cannot read what your clearances do not cover. Add a
   clearance with **NEAR AI: Edit Policy** and **NEAR AI: Apply Policy Draft**.
-  A label does not change where content is sent yet. Labels and routing are an
-  organizational control that helps prevent mistakes. See
-  [Your policy file and decision records](SECURITY.md#your-policy-file-and-decision-records).
+  A chat's label rises with what its agents read and decides where its content
+  is sent; only you lower it, with **NEAR AI: Lower This Chat's Label** and a
+  reason. Labels and routing are an organizational control that helps prevent
+  mistakes. See [Classification labels and routing](SECURITY.md#classification-labels-and-routing)
+  and [Your policy file and decision records](SECURITY.md#your-policy-file-and-decision-records).
 - API keys live in VS Code's encrypted **SecretStorage**, scoped to each
   project. They are never written to settings, workspace files, logs, history,
   or exports.
