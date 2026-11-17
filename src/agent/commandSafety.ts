@@ -907,6 +907,21 @@ function packageManagerFolder(manager: string, args: Word[], state: SegmentState
 const PNPM_BUN_COMMANDS = new Set(['add', 'install', 'i', 'remove', 'rm', 'uninstall', 'update', 'up', 'upgrade', 'link', 'unlink', 'dlx', 'x', 'exec', 'create', 'init', 'pack', 'publish', 'outdated', 'list', 'ls', 'why', 'store', 'config', 'set', 'get', 'audit', 'import', 'prune', 'patch', 'rebuild', 'root', 'bin', 'env', 'setup', 'server', 'fetch', 'deploy', 'build', 'test', 't', 'run', 'start', 'pm', 'repl', 'help']);
 
 function classifyPackageManager(manager: string, givenArgs: Word[], state: SegmentState, context: CommandContext, depth: number): CommandClassification {
+  const result = classifyPackageManagerIn(manager, givenArgs, state, context, depth);
+  // Reading the right folder's scripts never makes a command newly safe (PR #74 review round 4): a folder option, npm start, stop and restart, and a pnpm or
+  // bun script by name were never safe before, so a safe reading of one stays unknown, as it was; a risky one is risky.
+  if (result.verdict !== 'safe') return result;
+  const words = givenArgs.map((arg) => arg.text);
+  const first = words.findIndex((word) => !looksLikeOption(word));
+  const sub = first >= 0 ? words[first] : '';
+  const folderOption = words.some((word) => /^(?:--prefix|-C|--cwd|--dir|--workspace|-w)(?:=|$)/.test(word));
+  const newlyRead = (manager === 'npm' && ['start', 'stop', 'restart'].includes(sub)) || ((manager === 'pnpm' || manager === 'bun') && sub !== '' && !PNPM_BUN_COMMANDS.has(sub));
+  if (folderOption) return unknown(`${manager} with a folder option runs in another folder`);
+  if (newlyRead) return unknown(`${manager} ${sub} can install or run code the rules cannot check`);
+  return result;
+}
+
+function classifyPackageManagerIn(manager: string, givenArgs: Word[], state: SegmentState, context: CommandContext, depth: number): CommandClassification {
   const located = packageManagerFolder(manager, givenArgs, state, context);
   if ('unknown' in located) return beyondReach(`${manager}: ${located.unknown}`);
   const args = located.args;

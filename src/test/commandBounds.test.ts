@@ -155,7 +155,7 @@ test('source: every recursive call in the classifier goes one level deeper, and 
   // and classifyText handing its own text to classifyStructure.
   const sameLevel: string[] = [];
   for (const [name, body] of bodies) {
-    for (const call of body.matchAll(/\b(classifyText|classifyWords|classifyStructure|classifyProgram|classifyPackageManager|classifyNpx|checkScript|noteRunsAs|noteInlineScript|unknownProgram)\(/g)) {
+    for (const call of body.matchAll(/\b(classifyText|classifyWords|classifyStructure|classifyProgram|classifyPackageManager|classifyPackageManagerIn|classifyNpx|checkScript|noteRunsAs|noteInlineScript|unknownProgram)\(/g)) {
       if (call.index !== undefined && body.slice(Math.max(0, call.index - 9), call.index) === 'function ') continue;
       const args = argumentsAt(body, (call.index ?? 0) + call[0].length);
       if (/depth \+ 1\b/.test(args)) continue;
@@ -164,7 +164,7 @@ test('source: every recursive call in the classifier goes one level deeper, and 
     }
   }
   const allowed = new Set(['classifyText -> classifyStructure', 'classifyStructure -> classifyWords', 'classifyWords -> classifyProgram', 'classifyProgram -> noteRunsAs',
-    'classifyProgram -> classifyPackageManager', 'classifyProgram -> classifyNpx', 'classifyProgram -> noteInlineScript', 'classifyPackageManager -> checkScript',
+    'classifyProgram -> classifyPackageManager', 'classifyProgram -> classifyNpx', 'classifyProgram -> noteInlineScript', 'classifyPackageManager -> classifyPackageManagerIn', 'classifyPackageManagerIn -> checkScript',
     'classifyWords -> unknownProgram', 'classifyProgram -> unknownProgram']);
   const unexpected = [...new Set(sameLevel)].filter((call) => !allowed.has(call));
   assert.deepEqual(unexpected, [], 'a call that does not go deeper, outside the known descents from one level to its parts');

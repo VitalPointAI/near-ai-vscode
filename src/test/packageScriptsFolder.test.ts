@@ -122,3 +122,17 @@ test('through the gate in Full auto: cd into a package whose script pushes is a 
   const facts = await floorFactsFor({ command: 'npm --prefix sub run sync', root, packageScriptsAt: (folder) => reader.at(folder, root) });
   assert.ok(has(facts.effects, PUSH));
 });
+
+test('reading the right folder never makes a command newly safe: folder options, npm start and pnpm scripts by name stay unknown when harmless', () => {
+  const root = project();
+  packageJson(path.join(root, 'quiet'), { check: 'echo fine', start: 'echo fine' });
+  const classify = classifierIn(root);
+  for (const command of ['npm --prefix quiet run check', 'pnpm -C quiet run check', 'yarn --cwd quiet check', 'cd quiet && npm start', 'cd quiet && pnpm check', 'npm ci --prefix quiet']) {
+    const result = classify(command);
+    assert.equal(result.verdict, 'unknown', `${command} → ${JSON.stringify(result)}`);
+    assert.equal(result.effects, undefined, command);
+  }
+  // A plain run in the folder it names is read as it always was.
+  assert.equal(classify('cd quiet && npm run check').verdict, 'safe');
+  assert.equal(classify('npm --prefix sub run sync').verdict, 'risky');
+});
