@@ -2087,6 +2087,8 @@ test('page: selecting an existing team offers Use as is and Clone and modify; Us
   assert.equal(page.doc.getElementById('f-goal')!.value, 'Add billing', 'what was typed survives a redraw');
   page.byLabel('Use Recommended team as is')!.click();
   assert.deepEqual(page.posts.at(-1), { type: 'use-team', id: 'recommend', goal: 'Add billing', locality: 'cloud', workShape: 'feature', riskLevel: 'high' });
+  // The host answers (here: the person kept the project's team) before the buttons work again.
+  page.dispatch({ type: 'used', declined: true, text: 'Not changed. This project\'s team is as it was.' });
   // A project type asks what the team is for and where models run, but not the recommendation's questions.
   page.select('type:software');
   assert.ok(page.doc.getElementById('f-goal') && page.doc.getElementById('f-locality'));
@@ -2631,5 +2633,5 @@ test('versions: a burst within one millisecond is named after that millisecond, 
   const dir = path.dirname((await library.versions(file))[0]!);
   await writeFile(path.join(dir, `${new Date(at + 5).toISOString().replace(/[:.]/g, '-')}.md`), 'old style, later');
   assert.equal((await contents())[0], 'old style, later');
-  assert.equal((await contents()).length, 22);
+  assert.equal((await contents()).length, 21, 'the 20 kept, and the one written by hand');
 });

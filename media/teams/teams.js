@@ -166,10 +166,12 @@
     selectedNode = null;
     openCard = null;
     const options = { locality: 'cloud', workShape: 'feature', riskLevel: 'medium', goal: '' };
+    // Another builder: a draft aimed at the project from an earlier one is forgotten. (A proposal being used has already taken its target.)
+    askTarget = 'user';
+    pendingAsk = null;
     if (resume) work = { mode: 'wizard', stage: 'steps', target: resume.target, step: resume.step, maxStep: resume.step, draft: clone(resume.draft), startingPoint: resume.startingPoint || 'recommend', path: resume.path || null, defaultName: '', options, review: null };
     else if (fromProposal) work = { mode: 'wizard', stage: 'steps', target: target === 'project' && ctx && ctx.hasProject ? 'project' : 'user', step: 0, maxStep: 0, draft: clone(fromProposal.draft || fallbackDraft(fromProposal.proposal || fromProposal)), startingPoint: 'empty', path: null, defaultName: '', options, review: null };
     else {
-      askTarget = 'user';
       const name = target === 'project' ? 'Project team' : '';
       work = { mode: 'wizard', stage: 'start', target: target === 'project' && ctx && ctx.hasProject ? 'project' : 'user', step: 0, maxStep: 0, draft: { name, description: '', members: [] }, startingPoint: 'empty', path: null, defaultName: name, options, review: null };
     }
@@ -234,6 +236,8 @@
   function leaveWork() {
     if (isWizardDirty()) { vscode.postMessage({ type: 'leave-wizard', wizard: wizardState() }); return; }
     if (isDirty()) { vscode.postMessage({ type: 'leave-editor', edit: { id: work.id, draft: work.draft, base: work.base } }); return; }
+    askTarget = 'user';
+    pendingAsk = null;
     work = null;
     render();
     focusMain();
@@ -253,8 +257,11 @@
   let lastFormat = '';
   let lastDepth = 'thorough';
   let lastPrivate = false;
-  // Where a team drafted by AI is saved: 'project' when the person came from a builder saving to this project's team (Describe it, and AI drafts it).
+  // Where a team drafted by AI is saved: 'project' only when the person came straight from a builder saving to this project's team (Describe it, and
+  // AI drafts it). Forgotten whenever the builder is left another way, a team or another builder is opened, or the proposal is discarded (PR #75
+  // review), so a later draft from the library's own box is one of the person's teams. `pendingAsk` holds it while the host asks about unsaved work.
   let askTarget = 'user';
+  let pendingAsk = null;
 
   // The host computes the draft from the proposal (src/agent/teamBuilder.ts) and sends it with the proposal, so the two cannot drift. This is only a
   // fallback for an older host that does not send it: the page must never throw, even then.
@@ -274,6 +281,7 @@
     if (drafting) { box.append(el('p', 'hint', 'Drafting the team from what you wrote...')); return box; }
     box.append(el('h2', '', 'What should this team be able to produce?'));
     box.append(el('p', 'hint', 'Describe it in your own words. The team is drafted from this: its name, its members and their roles, what each one hands back, and the outputs you get.'));
+    if (askTarget === 'project') box.append(el('p', 'hint', 'The team you draft here is saved as this project\'s team unless you choose otherwise.'));
     const idea = el('textarea', 'ask-idea', '');
     idea.id = 'ask-idea'; idea.rows = 3;
     idea.value = lastIdea;
@@ -340,7 +348,7 @@
       // A team drafted from the builder keeps where that builder was saving to (its entry point, or the person's choice there); one drafted from the
       // library's own box is one of the person's teams, as before (PR #75 review).
       button('Use this team', () => { const from = proposal; const target = askTarget; proposal = null; askTarget = 'user'; startWizard(target, null, from); }, { primary: true }),
-      button('Start over', () => { proposal = null; drafting = false; render(); }, { link: true })
+      button('Start over', () => { proposal = null; drafting = false; askTarget = 'user'; render(); }, { link: true })
     );
     box.append(actions);
     return box;
@@ -637,8 +645,9 @@
       box.append(fields);
     }
     const actions = el('div', 'actions');
-    if (existing) actions.append(button('Use as is', () => useAsIs(point), { primary: true, label: 'Use ' + name + ' as is', id: 'use-as-is' }));
-    actions.append(button('Clone and modify', () => cloneEntry(point), { primary: !existing, label: 'Clone ' + name + ' and modify it', id: 'clone-team' }));
+    if (existing) actions.append(button('Use as is', () => useAsIs(point), { primary: true, label: 'Use ' + name + ' as is', id: 'use-as-is', disabled: work.busy }));
+    actions.append(button('Clone and modify', () => cloneEntry(point), { primary: !existing, label: 'Clone ' + name + ' and modify it', id: 'clone-team', disabled: work.busy }));
+    if (work.busy) { box.setAttribute('aria-busy', 'true'); actions.append(el('span', 'hint', 'Waiting for the answer…')); }
     box.append(actions);
     if (existing) {
       box.append(el('p', 'hint', ctx && ctx.hasProject
@@ -661,18 +670,25 @@
 
   /** Use as is: the host makes it this project's team, or puts it in the chat. Unsaved work in the builder is only dropped after the host asks. */
   function useAsIs(point) {
+    if (work.busy) return;
     const message = startAnswers(point, { type: 'use-team', id: point.id });
     if (isWizardDirty()) message.discard = true;
     announce('Using ' + entryName(point) + ' as it is.');
     vscode.postMessage(message);
+    // Until the host answers (the team, used, declined, or an error), Use as is and Clone and modify wait, so a double click sends one request.
+    work.busy = true;
+    render();
   }
 
   /** Clone and modify: the host sends the team's members, and the Purpose step opens with the copy's name and description filled in. */
   function cloneEntry(point) {
+    if (work.busy) return;
     const label = entryName(point);
     work.awaitingStart = { id: point.id, clone: true, path: work.pickMode === 'existing' ? 'existing' : 'clone', label, name: point.cloneName || label, goal: point.source === 'builtin' ? work.options.goal : '' };
     const message = startAnswers(point, { type: 'starting-point', id: point.id, goal: '', locality: work.options.locality });
     vscode.postMessage(message);
+    work.busy = true;
+    render();
   }
 
   /** From scratch: no members. Members, a name and a description that a clone filled in are cleared; anything the person wrote is kept. */
@@ -695,8 +711,9 @@
 
   /** Describe it, and AI drafts it: the library's AI box (leaving the builder asks first when something is unsaved). */
   function describeToAi() {
+    // With unsaved work the host asks first: the target is kept only if the person then leaves for the AI box.
+    if (isWizardDirty()) { pendingAsk = work.target; leaveWork(); return; }
     askTarget = work.target;
-    if (isWizardDirty()) { leaveWork(); return; }
     work = null;
     focusLater('ask-idea');
     render();
@@ -1608,15 +1625,20 @@
         if (work) requestReview();
         if (message.kept) showKept(message.kept);
         break;
-      case 'left':
-        // The host's answer to leaving with unsaved changes: stay, or go back to the library.
+      case 'left': {
+        // The host's answer to leaving with unsaved changes: stay, or go back to the library (to the AI box when that is where the person was going).
+        const toAsk = pendingAsk;
+        pendingAsk = null;
         if (message.choice === 'stay' || !work) break;
+        askTarget = toAsk || 'user';
         work = null;
         if (message.savedDraft) savedDraft = message.savedDraft;
+        if (toAsk) focusLater('ask-idea');
         render();
         if (message.notice) { showBanner(message.notice, 'info'); announce(message.notice); }
-        focusMain();
+        if (!toAsk) focusMain();
         break;
+      }
       case 'library':
         lib = message.library;
         if (message.picker) picker = message.picker;
@@ -1635,6 +1657,8 @@
         currentLive = message.liveRun === true;
         currentKnowledge = message.knowledge || null;
         selectedNode = null;
+        askTarget = 'user';
+        pendingAsk = null;
         openEditor(message, true);
         if (keptEdit && keptEdit.id === message.id) {
           // Reopening a team whose changes were kept: they come back as unsaved changes.
@@ -1745,6 +1769,8 @@
         updateDirty();
         break;
       case 'starting-point': {
+        // Any reply frees Use as is and Clone and modify again, even one that is dropped below.
+        if (work && work.mode === 'wizard' && work.busy) { work.busy = false; if (work.stage === 'pick') render(); }
         // Only the reply to the request still waiting: one for a screen the person has left (Back, another team) is dropped.
         const pending = work && work.mode === 'wizard' ? work.awaitingStart : null;
         if (!pending || pending.id !== message.id) break;
@@ -1783,7 +1809,9 @@
       }
       case 'used':
         // Use as is was declined (the project's team, or the builder's unsaved work, is kept): nothing changed, so the builder stays where it is.
-        if (message.declined) { if (message.text) { showBanner(message.text, 'info'); announce(message.text); } break; }
+        if (message.declined) { if (work && work.mode === 'wizard') { work.busy = false; render(); } if (message.text) { showBanner(message.text, 'info'); announce(message.text); } break; }
+        askTarget = 'user';
+        pendingAsk = null;
         // Use as is finished without a project team to open (a saved team put in the chat, or a built-in saved to My teams first): back to the library.
         if (work && work.mode === 'wizard') work = null;
         flash = message.focus || null;
@@ -1827,8 +1855,8 @@
         // A failed draft leaves the ask box replaced by "Drafting the team..." with no way back, because only team-proposal cleared this: clear it and
         // draw the box again so the person can retry or change what they wrote.
         if (drafting) { drafting = false; if (!work) render(); }
-        // A starting point that could not be read: its buttons work again.
-        if (work && work.mode === 'wizard') work.awaitingStart = null;
+        // A starting point that could not be read, or a Use as is that failed: their buttons work again.
+        if (work && work.mode === 'wizard') { work.awaitingStart = null; if (work.busy) { work.busy = false; render(); } }
         break;
     }
   });

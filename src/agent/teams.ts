@@ -527,12 +527,8 @@ export class TeamLibrary {
   public async snapshot(file: string): Promise<number> {
     const dir = this.versionsDir(this.versionKey(file));
     await mkdir(dir, { recursive: true });
-    // Named after the time, or the next free millisecond: two versions taken within the same millisecond (the one kept just before the project's team
-    // is replaced, then the new team) used to share a name, so the second overwrote the first and the old team was lost.
-    for (let stamp = Date.now(); ; stamp += 1) {
-      try { await copyFile(file, path.join(dir, `${new Date(stamp).toISOString().replace(/[:.]/g, '-')}.md`), fsConstants.COPYFILE_EXCL); break; } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error; }
-    }
-    const versions = (await readdir(dir)).sort();
+    await copyAsVersion(file, dir, '.md');
+    const versions = (await readdir(dir)).sort(compareVersionNames);
     for (const old of versions.slice(0, Math.max(0, versions.length - MAX_VERSIONS))) await rm(path.join(dir, old), { force: true });
     return Math.min(versions.length, MAX_VERSIONS);
   }
@@ -541,14 +537,12 @@ export class TeamLibrary {
   public async backup(teamFile: string, file: string, label: string): Promise<string> {
     const dir = path.join(this.directory, '.versions', `${this.versionKey(teamFile)}-${label}`);
     await mkdir(dir, { recursive: true });
-    const target = path.join(dir, `${new Date().toISOString().replace(/[:.]/g, '-')}${path.extname(file) || '.md'}`);
-    await copyFile(file, target);
-    return target;
+    return copyAsVersion(file, dir, path.extname(file) || '.md');
   }
 
   public async versions(file: string): Promise<string[]> {
     const dir = this.versionsDir(this.versionKey(file));
-    return (await readdir(dir).catch(() => [])).sort().reverse().map((name) => path.join(dir, name));
+    return (await readdir(dir).catch(() => [])).sort(compareVersionNames).reverse().map((name) => path.join(dir, name));
   }
 
   /** Moves a team into the archive; an earlier archived team of the same name is kept, never overwritten. */
@@ -609,6 +603,38 @@ export class TeamLibrary {
     const file = await this.create(name, text);
     await this.markImported(file);
     return file;
+  }
+}
+
+/** A version's file name: the millisecond it was taken, then its place within that millisecond (none for the first, as every name before 0.4.29). */
+const VERSION_NAME = /^(\d{4}-\d\d-\d\dT\d\d-\d\d-\d\d-\d{3}Z)(?:-(\d+))?(\.[^.]+)$/;
+
+/**
+ * Orders version file names oldest first: by the millisecond each was taken, then by its place within it. A name is never moved to a later time to
+ * make room (PR #75 review: bumping the millisecond named a burst of versions after times still to come, so a later version could sort before them).
+ * A name that is not a version's sorts first, by its text.
+ */
+export function compareVersionNames(a: string, b: string): number {
+  const one = VERSION_NAME.exec(a);
+  const two = VERSION_NAME.exec(b);
+  if (!one || !two) return one ? 1 : two ? -1 : a < b ? -1 : a > b ? 1 : 0;
+  if (one[1] !== two[1]) return one[1]! < two[1]! ? -1 : 1;
+  return Number(one[2] ?? 1) - Number(two[2] ?? 1);
+}
+
+/**
+ * Copies a file into a versions folder under the time it was taken. Two copies in the same millisecond (the old project team kept just before it is
+ * replaced, then the new one) used to share a name, so the second overwrote the first; the copy is exclusive, and the next takes the next place
+ * (`<time>-2`, `<time>-3`...).
+ */
+async function copyAsVersion(file: string, dir: string, extension: string): Promise<string> {
+  const stamp = new Date(Date.now()).toISOString().replace(/[:.]/g, '-');
+  // After the highest place already used in this millisecond, not the first free one: a place freed when the oldest versions were dropped would
+  // otherwise be taken again and sort as the oldest.
+  const used = (await readdir(dir).catch(() => [] as string[])).map((name) => VERSION_NAME.exec(name)).filter((match) => match !== null && match[1] === stamp).map((match) => Number(match![2] ?? 1));
+  for (let place = used.length ? Math.max(...used) + 1 : 1; ; place += 1) {
+    const target = path.join(dir, `${stamp}${place === 1 ? '' : `-${place}`}${extension}`);
+    try { await copyFile(file, target, fsConstants.COPYFILE_EXCL); return target; } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error; }
   }
 }
 

@@ -610,6 +610,8 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
   let library: LibraryState = { teams: [], archived: [] };
   let open: OpenTeam | undefined;
   let pendingWizard: StudioTarget | undefined;
+  /** A Use as is is running (asking, or writing): another is ignored until it has answered. */
+  let usingTeam = false;
   let pageReady = false;
   let markReady: () => void = () => undefined;
   const ready = new Promise<void>((resolve) => { markReady = resolve; });
@@ -979,76 +981,86 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
         return;
       }
       case 'use-team': {
-        // Use as is (owner, 2026-11-17): the team exactly as it is, with no name, description or "Save it as" to fill in. With a project open it becomes
-        // the project's team; with none it goes to the chat. The same checks a save runs apply, so Use as is is never a way round them.
-        if (!input || !context) await load();
-        const root = deps.root();
-        let saved: LibraryTeam | undefined;
-        let name: string;
-        let markdown: string;
-        let members: DraftMember[];
-        let fromType: ProjectType | undefined;
-        const goal = (message.goal ?? '').trim().slice(0, 400);
-        if (message.id.startsWith('lib:')) {
-          // One of the person's saved teams, found in the current listing (never by a path from the page), copied byte for byte.
-          saved = teamFor(`user:${message.id.slice('lib:'.length)}`);
-          if (!saved || saved.error) { post({ type: 'error', text: 'That team is no longer in your teams. Pick another one.' }); return; }
-          markdown = await readFile(saved.file, 'utf8');
-          const draft = draftFromMarkdown(markdown, saved.file);
-          const review = reviewDraft(draft, markdown, input!, context!);
-          if (review.errors.length) { post({ type: 'error', text: `Not used: ${review.errors[0]!.message} Choose Clone and modify to change it.` }); return; }
-          name = saved.name;
-          members = draft.members;
-        } else {
-          // A built-in: made from its template under its own name. With no project it is saved to My teams, so its name is made unique there.
-          const point = context!.startingPoints.find((candidate) => candidate.id === message.id);
-          // startRequest accepts only ids that are listed, so this cannot happen today; it still answers rather than leave the page waiting.
-          if (!point) { post({ type: 'error', text: 'That built-in team is not available here. Pick another one.' }); return; }
-          const result = startingPointDraft({ id: message.id, goal, locality: message.locality ?? 'cloud', ...(message.workShape ? { workShape: message.workShape } : {}), ...(message.riskLevel ? { riskLevel: message.riskLevel } : {}) }, context!);
-          name = root ? startingPointTeamName(point) : uniqueTeamName(startingPointTeamName(point), library.teams);
-          const draft = { ...result.draft, name };
-          const review = reviewDraft(draft, undefined, input!, context!);
-          if (review.errors.length) { post({ type: 'error', text: `Not used: ${review.errors[0]!.message} Choose Clone and modify to change it.` }); return; }
-          fromType = result.projectType ? PROJECT_TYPES.find((candidate) => candidate.id === result.projectType) : undefined;
-          markdown = fromType ? stampTeam(review.markdown, fromType) : review.markdown;
-          members = draft.members;
-        }
-        // Every outcome gets exactly one answer (PR #75 review): the project team opened (team), used, declined (used, with declined), or an error.
-        // Anything that writes a team first checks where its members came from, before anything is asked.
-        let unapprovedFrom: string | undefined;
-        if (root || !saved) {
-          const origin = await importOrigin(members, 'used');
-          if (!origin) return;
-          unapprovedFrom = origin.from;
-        }
-        // The builder had unsaved work: it is dropped only when the person agrees, as leaving the builder asks.
-        if (message.discard && await choose(`Use "${name}" as is? The team you were building is not saved, so it will be discarded.`, 'Use as is') !== 'Use as is') {
-          post({ type: 'used', declined: true, text: 'Not changed. The team you were building is still here.' });
-          return;
-        }
-        if (root) {
-          const file = await writeProjectTeam(root, markdown, unapprovedFrom, fromType ? { type: fromType, goal: goal || 'the work in this project' } : undefined);
-          if (!file) { post({ type: 'used', declined: true, text: 'Not changed. This project\'s team is as it was.' }); return; }
-          unsaved = {};
-          await refreshLibrary();
-          const unapprovedNote = unapprovedFrom === undefined ? '' : ` It has members from the imported team "${unapprovedFrom}", which you have not approved, so you are asked before it first runs.`;
-          await sendTeam('project', file, `"${name}" is now this project's team. Run it with /team:project <task>.${fromType ? ' AGENTS.md now has this project type\'s guidance.' : ''}${unapprovedNote}`);
-          return;
-        }
-        if (saved) {
-          await deps.sidebar.prefill(saved.command ?? `/team:${message.id.slice('lib:'.length)} `);
-          unsaved = {};
-          post({ type: 'used', text: `${(saved.command ?? '').trim()} is in the chat box. Type your task after it and send.`, focus: saved.id });
-          return;
-        }
-        // A built-in with no project: chat runs teams by their file, so it is saved to My teams first, under its own name.
-        const file = await deps.library.create(name, markdown);
-        if (unapprovedFrom !== undefined) await deps.library.markImported(file, 'derived', unapprovedFrom);
-        const slug = path.basename(file, '.md');
-        unsaved = {};
-        await refreshLibrary();
-        await deps.sidebar.prefill(`/team:${slug} `);
-        post({ type: 'used', text: `Saved "${name}" to My teams, and /team:${slug} is in the chat box. Type your task after it and send.`, focus: `user:${slugify(slug)}` });
+        // One at a time (PR #75 review): a second Use as is while one is still asking or writing is ignored, so a double click never asks twice or writes
+        // twice. The page also waits for the answer before it offers the buttons again.
+        if (usingTeam) return;
+        usingTeam = true;
+        const use = message;
+        try {
+          await (async () => {
+            // Use as is (owner, 2026-11-17): the team exactly as it is, with no name, description or "Save it as" to fill in. With a project open it becomes
+            // the project's team; with none it goes to the chat. The same checks a save runs apply, so Use as is is never a way round them.
+            if (!input || !context) await load();
+            const root = deps.root();
+            let saved: LibraryTeam | undefined;
+            let name: string;
+            let markdown: string;
+            let members: DraftMember[];
+            let fromType: ProjectType | undefined;
+            const goal = (use.goal ?? '').trim().slice(0, 400);
+            if (use.id.startsWith('lib:')) {
+              // One of the person's saved teams, found in the current listing (never by a path from the page), copied byte for byte.
+              saved = teamFor(`user:${use.id.slice('lib:'.length)}`);
+              if (!saved || saved.error) { post({ type: 'error', text: 'That team is no longer in your teams. Pick another one.' }); return; }
+              markdown = await readFile(saved.file, 'utf8');
+              const draft = draftFromMarkdown(markdown, saved.file);
+              const review = reviewDraft(draft, markdown, input!, context!);
+              if (review.errors.length) { post({ type: 'error', text: `Not used: ${review.errors[0]!.message} Choose Clone and modify to change it.` }); return; }
+              name = saved.name;
+              members = draft.members;
+            } else {
+              // A built-in: made from its template under its own name. With no project it is saved to My teams, so its name is made unique there.
+              const point = context!.startingPoints.find((candidate) => candidate.id === use.id);
+              // startRequest accepts only ids that are listed, so this cannot happen today; it still answers rather than leave the page waiting.
+              if (!point) { post({ type: 'error', text: 'That built-in team is not available here. Pick another one.' }); return; }
+              const result = startingPointDraft({ id: use.id, goal, locality: use.locality ?? 'cloud', ...(use.workShape ? { workShape: use.workShape } : {}), ...(use.riskLevel ? { riskLevel: use.riskLevel } : {}) }, context!);
+              name = root ? startingPointTeamName(point) : uniqueTeamName(startingPointTeamName(point), library.teams);
+              const draft = { ...result.draft, name };
+              const review = reviewDraft(draft, undefined, input!, context!);
+              if (review.errors.length) { post({ type: 'error', text: `Not used: ${review.errors[0]!.message} Choose Clone and modify to change it.` }); return; }
+              fromType = result.projectType ? PROJECT_TYPES.find((candidate) => candidate.id === result.projectType) : undefined;
+              markdown = fromType ? stampTeam(review.markdown, fromType) : review.markdown;
+              members = draft.members;
+            }
+            // Every outcome gets exactly one answer (PR #75 review): the project team opened (team), used, declined (used, with declined), or an error.
+            // Anything that writes a team first checks where its members came from, before anything is asked.
+            let unapprovedFrom: string | undefined;
+            if (root || !saved) {
+              const origin = await importOrigin(members, 'used');
+              if (!origin) return;
+              unapprovedFrom = origin.from;
+            }
+            // The builder had unsaved work: it is dropped only when the person agrees, as leaving the builder asks.
+            if (use.discard && await choose(`Use "${name}" as is? The team you were building is not saved, so it will be discarded.`, 'Use as is') !== 'Use as is') {
+              post({ type: 'used', declined: true, text: 'Not changed. The team you were building is still here.' });
+              return;
+            }
+            if (root) {
+              const file = await writeProjectTeam(root, markdown, unapprovedFrom, fromType ? { type: fromType, goal: goal || 'the work in this project' } : undefined);
+              if (!file) { post({ type: 'used', declined: true, text: 'Not changed. This project\'s team is as it was.' }); return; }
+              unsaved = {};
+              await refreshLibrary();
+              const unapprovedNote = unapprovedFrom === undefined ? '' : ` It has members from the imported team "${unapprovedFrom}", which you have not approved, so you are asked before it first runs.`;
+              await sendTeam('project', file, `"${name}" is now this project's team. Run it with /team:project <task>.${fromType ? ' AGENTS.md now has this project type\'s guidance.' : ''}${unapprovedNote}`);
+              return;
+            }
+            if (saved) {
+              await deps.sidebar.prefill(saved.command ?? `/team:${use.id.slice('lib:'.length)} `);
+              unsaved = {};
+              post({ type: 'used', text: `${(saved.command ?? '').trim()} is in the chat box. Type your task after it and send.`, focus: saved.id });
+              return;
+            }
+            // A built-in with no project: chat runs teams by their file, so it is saved to My teams first, under its own name.
+            const file = await deps.library.create(name, markdown);
+            if (unapprovedFrom !== undefined) await deps.library.markImported(file, 'derived', unapprovedFrom);
+            const slug = path.basename(file, '.md');
+            unsaved = {};
+            await refreshLibrary();
+            await deps.sidebar.prefill(`/team:${slug} `);
+            post({ type: 'used', text: `Saved "${name}" to My teams, and /team:${slug} is in the chat box. Type your task after it and send.`, focus: `user:${slugify(slug)}` });
+            return;
+          })();
+        } finally { usingTeam = false; }
         return;
       }
       case 'open': {
@@ -1335,9 +1347,9 @@ function savedWizard(value: unknown): SavedWizard | undefined {
   return parsed?.type === 'save-draft' ? { draft: parsed.draft, step: parsed.step, target: parsed.target, ...(parsed.startingPoint ? { startingPoint: parsed.startingPoint } : {}), ...(parsed.path ? { path: parsed.path } : {}) } : undefined;
 }
 
-/** "2026-10-29T14-03-12-345Z.md" → "2026-10-29 14:03:12 UTC". */
+/** "2026-10-29T14-03-12-345Z.md" (or "...-345Z-2.md", the second taken in that millisecond) → "2026-10-29 14:03:12 UTC". */
 export function versionLabel(ref: string): string {
-  const match = /^(\d{4}-\d\d-\d\d)T(\d\d)-(\d\d)-(\d\d)-\d+Z\.md$/.exec(ref);
+  const match = /^(\d{4}-\d\d-\d\d)T(\d\d)-(\d\d)-(\d\d)-\d+Z(?:-\d+)?\.md$/.exec(ref);
   return match ? `${match[1]} ${match[2]}:${match[3]}:${match[4]} UTC` : ref.replace(/\.md$/, '');
 }
 
