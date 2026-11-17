@@ -8,7 +8,7 @@
 import { randomUUID } from 'node:crypto';
 import { failedClosed } from '../domain/gate/bundle';
 import type { BundleState, GateContextName } from '../domain/gate/bundle';
-import type { ActorRef, FloorMode, GateRuntime, Presence } from '../domain/gate/decide';
+import type { ActorRef, GateRuntime, Presence } from '../domain/gate/decide';
 import { buildDecisionRecord } from '../domain/gate/record';
 import type { DecisionOutcome, DecisionRecord } from '../domain/gate/record';
 import type { SecretStorageLike } from '../services/auth';
@@ -20,6 +20,13 @@ import { DecisionLog, INSTALL_LOG_KEY, projectLogKey } from './decisionLog';
 const DEVICE_UNKNOWN = 'device-unknown';
 const POLICY_SESSION = 'policy';
 const START_FAILED_DETAIL = 'The policy check threw before it could finish.';
+
+/**
+ * The most project logs the host keeps open at once. A log is a small object with a write queue, but a long session that opens folder after folder would
+ * otherwise keep one per folder for good: past this many, the one used longest ago is let go (after its queued records are written), and a later record
+ * for that folder opens it again. Folder changes let go of closed folders' logs sooner (retainProjectLogs).
+ */
+export const MAX_PROJECT_LOGS = 8;
 
 /** How long a run waits for the policy check at activation before it is refused as "not loaded": long enough for a healthy start, short enough that a stuck one does not hang the run. */
 export const RUNTIME_START_WAIT_MS = 5000;
@@ -39,15 +46,16 @@ export interface GateHostOptions {
   readonly now?: () => Date;
   /** How long `runtimeFor` waits for the start to finish. Defaults to RUNTIME_START_WAIT_MS; tests pass a short one. */
   readonly startWaitMs?: number;
+  /** The person's home folder, for the floor's credential-store checks of shell commands (D-16). The activation adapter passes it; a test leaves it out or gives a stand-in. */
+  readonly home?: string;
 }
 
 export interface RuntimeRequest {
-  /** The open project, whose log receives the run's records. None for a window with no folder: the bundle is per install, so the run is still decided by it, and its records have no project log to go to. */
+  /** The open project, whose log receives the run's records. None (or empty) for a window with no folder: the bundle is per install, so the run is still decided by it, and its records go to the install log. */
   readonly root?: string;
   readonly actor: Omit<ActorRef, 'deviceFingerprint'>;
   readonly presence: Presence;
   readonly context: GateContextName;
-  readonly floorMode: FloorMode;
 }
 
 function detailOf(error: unknown): string {
@@ -61,7 +69,13 @@ export class GateHost {
   private settled = false;
   /** The latest time this host has seen (the clock marker's time, then every clock reading). It never decreases, so a clock set back cannot revive an expired policy. */
   private highWater = 0;
+  /** Open logs by key, in the order they were last used (the install log included; it is never let go). */
   private readonly logs = new Map<string, DecisionLog>();
+  /**
+   * Logs let go while records were still queued, by key, until their queue is written: flush() waits for them, and a reopen of the same key takes the log
+   * back instead of making a second writer for the file (PR #74 review round 4).
+   */
+  private readonly retiring = new Map<string, { readonly log: DecisionLog; readonly pending: Promise<void> }>();
   private readonly listeners = new Set<() => void>();
 
   public constructor(private readonly options: GateHostOptions) {}
@@ -98,26 +112,32 @@ export class GateHost {
   }
 
   /**
-   * The runtime of one run: who is acting, whether a person is there, the context and the floor mode, over this host's state and the project's log. It waits
+   * The runtime of one run: who is acting, whether a person is there and the context, over this host's state and the project's log. It waits
    * (for at most `startWaitMs`) for the start to finish, so a run begun during activation is decided with the real bundle. A start that fails or does not
    * finish in time gives a runtime that is failed closed with a plain sentence, until the start does finish.
    */
   public async runtimeFor(request: RuntimeRequest): Promise<GateRuntime> {
     const notLoaded = await this.waitForStart();
-    let log: DecisionLog | undefined;
+    // Every runtime has a log (PR #74 review round 2): the project's for a run in a folder, the install log for a window with no folder. The key is resolved
+    // once, here, and the log is found again by it at each record rather than held, so a log the host has let go (its folder was closed, or too many were
+    // open) is opened again by the run's next record, and flush() always waits for it.
+    const root = request.root === undefined || request.root === '' ? undefined : request.root;
+    const key = root === undefined ? INSTALL_LOG_KEY : projectLogKey(root);
+    let usable = true;
     try {
-      log = request.root === undefined ? undefined : this.logFor(request.root);
+      this.logWithKey(key, root);
     } catch (error) {
       // A log that cannot be set up (its folder lies inside the project) is reported once; decisions carry on unrecorded rather than fail.
+      usable = false;
       try { this.options.onProblem?.(error instanceof Error ? error.message : 'NEAR AI could not set up its record of what was allowed or refused.'); } catch { /* ignored */ }
     }
     return {
       bundleState: () => (notLoaded !== undefined && !this.settled ? notLoaded : this.bundleState()),
-      sink: { record: (record) => { void log?.append(record); } },
+      sink: { record: (record) => { if (usable) { try { void this.logWithKey(key, root).append(record); } catch { /* reported once above */ } } } },
       actor: { ...request.actor, deviceFingerprint: this.deviceFingerprint() },
       presence: request.presence,
       context: request.context,
-      floorMode: request.floorMode,
+      locations: { globalStorage: this.options.globalStorageDir, ...(this.options.home === undefined ? {} : { home: this.options.home }) },
       productVersion: this.options.productVersion,
       clock: () => this.now(),
       newRecordId: () => randomUUID()
@@ -140,9 +160,25 @@ export class GateHost {
     return () => { this.listeners.delete(listener); };
   }
 
-  /** Resolves when every record queued so far has been written or has failed. */
+  /** Resolves when every record queued so far has been written or has failed, including those of logs already let go. */
   public async flush(): Promise<void> {
-    await Promise.all([...this.logs.values()].map((log) => log.flush()));
+    await Promise.all([...[...this.logs.values()].map((log) => log.flush()), ...[...this.retiring.values()].map((retired) => retired.pending)]);
+  }
+
+  /**
+   * Lets go of the log of every project that is not among `openRoots` (the folders open now) and is not the open project, called when the window's folders
+   * change. A run still going in a closed folder opens its log again with its next record, so none of its records is lost.
+   */
+  public retainProjectLogs(openRoots: readonly string[]): void {
+    const keep = new Set([INSTALL_LOG_KEY, ...openRoots.filter((root) => root !== '').map((root) => projectLogKey(root))]);
+    const open = this.projectRootNow();
+    if (open !== undefined) keep.add(projectLogKey(open));
+    for (const key of [...this.logs.keys()]) if (!keep.has(key)) this.retire(key);
+  }
+
+  /** The keys of the logs held open now, install log included, least recently used first. For tests and diagnostics. */
+  public openLogKeys(): string[] {
+    return [...this.logs.keys()];
   }
 
   /** Waits for the start, up to the bound. Undefined when it finished; otherwise the failed-closed state for a run that began before the policy was loaded. */
@@ -202,7 +238,9 @@ export class GateHost {
   }
 
   private logWithKey(key: string, projectRoot?: string): DecisionLog {
-    let log = this.logs.get(key);
+    // One log per key: a log being let go is taken back, so its queue and the new records stay in one writer's order.
+    let log = this.logs.get(key) ?? this.retiring.get(key)?.log;
+    this.retiring.delete(key);
     if (log === undefined) {
       log = new DecisionLog({
         globalStorageDir: this.options.globalStorageDir,
@@ -210,9 +248,24 @@ export class GateHost {
         ...(projectRoot === undefined ? {} : { projectRoot }),
         onWriteFailure: (message) => { try { this.options.onProblem?.(message); } catch { /* the report never fails a decision */ } }
       });
-      this.logs.set(key, log);
     }
+    // Most recently used goes last, so the first project key in the map is the one to let go when there are too many.
+    this.logs.delete(key);
+    this.logs.set(key, log);
+    const projects = [...this.logs.keys()].filter((each) => each !== INSTALL_LOG_KEY);
+    for (const oldest of projects.slice(0, Math.max(0, projects.length - MAX_PROJECT_LOGS))) this.retire(oldest);
     return log;
+  }
+
+  // Drops a log from the map; its queued records are still written, and flush() waits for them.
+  private retire(key: string): void {
+    if (key === INSTALL_LOG_KEY) return;
+    const log = this.logs.get(key);
+    if (log === undefined) return;
+    this.logs.delete(key);
+    // Let go for good only once its queue is written, and only if nothing has taken it back meanwhile.
+    const pending: Promise<void> = log.flush().catch(() => undefined).finally(() => { if (this.retiring.get(key)?.pending === pending) this.retiring.delete(key); });
+    this.retiring.set(key, { log, pending });
   }
 
   private async begin(): Promise<BundleState> {
@@ -273,9 +326,9 @@ export class GateHost {
 }
 
 /**
- * The runtime of a run nobody watches (a comparison task, a role test): presence none, an unattended context, the floor in shadow. `root` is the open project,
+ * The runtime of a run nobody watches (a comparison task, a role test): presence none and an unattended context, so a floor ask is refused. `root` is the open project,
  * or none (undefined or empty) for a window with no folder: the per-install policy is still the real one, only the project log is missing.
  */
 export function unattendedRuntimeFor(host: Pick<GateHost, 'runtimeFor'>, root: string | undefined, sessionId: string, agentLabel: string): Promise<GateRuntime> {
-  return host.runtimeFor({ ...(root ? { root } : {}), actor: { kind: 'agent', sessionId, agentLabel }, presence: 'none', context: 'unattended', floorMode: 'shadow' });
+  return host.runtimeFor({ ...(root ? { root } : {}), actor: { kind: 'agent', sessionId, agentLabel }, presence: 'none', context: 'unattended' });
 }

@@ -53,6 +53,7 @@ export function createVscodeStub(): VscodeStub {
   const config = new Map<string, unknown>();
   const windowListeners = new Set<(state: { focused: boolean; active: boolean }) => void>();
   const configListeners = new Set<ConfigListener>();
+  const folderListeners = new Set<(event: { added: unknown[]; removed: unknown[] }) => void>();
   const windowState = { focused: true, active: true };
 
   const message = (level: 'info' | 'warn' | 'error') => async (text: string, ...actions: string[]): Promise<string | undefined> => {
@@ -156,6 +157,10 @@ export function createVscodeStub(): VscodeStub {
       onDidChangeConfiguration: (listener: ConfigListener) => {
         configListeners.add(listener);
         return { dispose: (): void => { configListeners.delete(listener); } };
+      },
+      onDidChangeWorkspaceFolders: (listener: (event: { added: unknown[]; removed: unknown[] }) => void) => {
+        folderListeners.add(listener);
+        return { dispose: (): void => { folderListeners.delete(listener); } };
       }
     },
     commands: {
@@ -177,7 +182,12 @@ export function createVscodeStub(): VscodeStub {
   return {
     vscode, outputChannels, statusBarItems, notifications, notificationActions, configUpdates, setContextCalls, contextKeys, commands, inputAnswers, inputRequests, messageAnswers, shownDocuments, contentProviders,
     setWorkspaceFolders(paths: string[]): void {
+      const before = workspaceFolders ?? [];
       workspaceFolders = paths.length === 0 ? undefined : paths.map((fsPath, index) => ({ uri: { fsPath }, name: fsPath.split('/').pop() ?? '', index }));
+      const after = workspaceFolders ?? [];
+      const added = after.filter((folder) => !before.some((old) => old.uri.fsPath === folder.uri.fsPath));
+      const removed = before.filter((folder) => !after.some((now) => now.uri.fsPath === folder.uri.fsPath));
+      if (added.length > 0 || removed.length > 0) for (const listener of [...folderListeners]) listener({ added, removed });
     },
     setConfig(key: string, value: unknown): void {
       config.set(key, value);

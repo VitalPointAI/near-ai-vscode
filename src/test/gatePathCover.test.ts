@@ -20,7 +20,6 @@ import type { Capability } from '../domain/gate/vocabulary';
 const NOW = Date.parse('2026-11-16T12:00:00.000Z');
 const ACTOR: ActorRef = { kind: 'agent', deviceFingerprint: 'dev-00000000000000000000000000000000', sessionId: 'session-1', agentId: 'agent-1' };
 const tool = (name: string): AgentTool<any> => CORE_TOOLS.find((candidate) => candidate.name === name) as AgentTool<any>;
-const SHADOW = { floorMode: 'shadow' } as const;
 const ROOT = path.join(tmpdir(), 'near-ai-gate-cover');
 
 function validState(): BundleState {
@@ -72,7 +71,7 @@ test('the project root is unchanged: `.`, `./`, an empty name and `**` cover eve
 
 test('a Glob or Grep given a folder names the folder and its contents; with no folder it names the whole project as before', () => {
   for (const name of ['Glob', 'Grep']) {
-    const call = (raw: Record<string, unknown>): string[] => reads(effectsOfCall(SHADOW, tool(name), { pattern: 'x', ...raw }, ROOT));
+    const call = (raw: Record<string, unknown>): string[] => reads(effectsOfCall(tool(name), { pattern: 'x', ...raw }, ROOT));
     assert.deepEqual(call({ path: 'src' }), ['src', 'src/**'], `${name} src`);
     assert.deepEqual(call({ path: 'src/' }), ['src', 'src/**'], `${name} src/`);
     assert.deepEqual(call({ path: 'src/deep' }), ['src/deep', 'src/deep/**'], `${name} src/deep`);
@@ -91,8 +90,8 @@ test('a Glob or Grep given a folder names the folder and its contents; with no f
 });
 
 function effectsFor(name: string, raw: Record<string, unknown>): readonly Capability[] | undefined {
-  // Enforced mode returns no effects for a call it cannot fill, which is what "refused" means here.
-  const effects = effectsOfCall({ floorMode: 'enforce' }, tool(name), raw, ROOT);
+  // No effects for a call the manifest cannot fill, which is what "refused" means here.
+  const effects = effectsOfCall(tool(name), raw, ROOT);
   return effects.length === 0 ? undefined : effects;
 }
 
@@ -102,8 +101,8 @@ test('manifestArguments writes an absolute folder relative to the project and th
   assert.deepEqual(manifestArguments(glob, { pattern: '*.ts', path: '.' }, ROOT), { pattern: '*.ts', path: '**' });
   assert.deepEqual(manifestArguments(glob, { pattern: '*.ts', path: path.join(ROOT, 'src') }, ROOT), { pattern: '*.ts', path: 'src' });
   assert.deepEqual(manifestArguments(glob, { pattern: '*.ts', path: '/' }, ROOT), { pattern: '*.ts', path: '/' }, 'the machine\'s root is not the project\'s');
-  assert.deepEqual(reads(effectsOfCall(SHADOW, glob, { pattern: '*.ts', path: '/' }, ROOT)), ['**'], 'it is never read as the project root; shadow mode keeps today\'s widest stand-in');
-  assert.equal(effectsFor('Glob', { pattern: '*.ts', path: '/' }), undefined, 'enforced, it is a call whose effects are unknown');
+  assert.deepEqual(effectsOfCall(glob, { pattern: '*.ts', path: '/' }, ROOT), [], 'it is never read as the project root, and no stand-in is invented');
+  assert.equal(effectsFor('Glob', { pattern: '*.ts', path: '/' }), undefined, 'it is a call whose effects are unknown');
   assert.equal(effectsFor('Glob', { pattern: '*.ts', path: 'C:\\' }), undefined);
 });
 
@@ -111,8 +110,8 @@ test('a call on `src` reaches decide() with effects a rule on `src/**` covers, a
   let seen: readonly Capability[] = [];
   const spy: SettingsLayer = async (request) => { seen = request.effects; return { decision: 'allow', rule: 'settings.mode.fully-autonomous' }; };
   for (const name of ['Glob', 'Grep']) {
-    const effects = effectsOfCall(SHADOW, tool(name), { pattern: 'x', path: 'src' }, ROOT);
-    const decided = await decide(requestFor(effects, { tool: name }), validState(), spy, { floorMode: 'shadow' });
+    const effects = effectsOfCall(tool(name), { pattern: 'x', path: 'src' }, ROOT);
+    const decided = await decide(requestFor(effects, { tool: name }), validState(), spy);
     assert.equal(decided.outcome, 'allow', name);
     const applies = (rule: string): boolean => seen.some((effect) => effect.verb === 'read' && effect.paths.some((shown) => globToRegExp(rule).test(shown)));
     assert.equal(applies('src/**'), true, `${name}: a rule on src/** applies to a call on src`);
@@ -123,9 +122,9 @@ test('a call on `src` reaches decide() with effects a rule on `src/**` covers, a
 
 test('a Glob or Grep on the key folder is still refused by the floor whether the folder or its contents is named', async () => {
   for (const name of ['Glob', 'Grep']) {
-    const effects = effectsOfCall(SHADOW, tool(name), { pattern: 'x', path: '.near-ai/state/keys' }, ROOT);
+    const effects = effectsOfCall(tool(name), { pattern: 'x', path: '.near-ai/state/keys' }, ROOT);
     assert.deepEqual(reads(effects), ['.near-ai/state/keys', '.near-ai/state/keys/**']);
-    const decided = await decide(requestFor(effects, { tool: name }), validState(), async () => ({ decision: 'allow', rule: 'settings.mode.fully-autonomous' }), { floorMode: 'shadow' });
+    const decided = await decide(requestFor(effects, { tool: name }), validState(), async () => ({ decision: 'allow', rule: 'settings.mode.fully-autonomous' }));
     assert.equal(decided.outcome, 'deny', name);
     assert.equal(decided.rule, 'floor.state-keys', name);
   }

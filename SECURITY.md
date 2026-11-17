@@ -92,18 +92,76 @@ file changes and commands ask first. A command runs without asking only if it
 matches `nearAi.agent.allowCommands` and is written as plain words. That rules
 out quotes, `~`, variables, globs, newlines, pipes, redirects and substitution.
 It must also use no absolute or `..` paths, and no git options that write files,
-read outside the repository, or delete refs. In every mode except
-`fully-autonomous`, these always ask, even after **Allow edits for this run**:
+read outside the repository, or delete refs.
 
-- reading a file that looks like a credential, through any path or symlink;
+In every mode, `fully-autonomous` included, these always ask, with no **Always
+allow** and no grant for the rest of the run, even after **Allow edits for this
+run** or an allow-list entry that matches:
+
 - writing into `.git/`, where hooks and config would run on the next git
   command;
 - writing into `.planning/.near-ai/` (other than its `team.md`) or into
-  `.near-ai/` (other than its `scratch/` and `attachments/` folders).
+  `.near-ai/` (other than its `scratch/` and `attachments/` folders);
+- publishing: git push, package and extension publishing, release creation,
+  container image push, deploy commands, and sending email;
+- destruction: recursive deletes outside scratch and build folders,
+  `git reset --hard`, `git clean`, discarding uncommitted changes, history
+  rewrites (`git commit --amend`, `git rebase` including `--continue`,
+  `git gc` and the like), and deleting branches and tags;
+- writing to the knowledge your team shares (the Learn tool).
 
-Under `fully-autonomous` they run without asking (see Known limitations). What
-still applies there: the deny list, the key folder below, and the holds after
-outside content (see "Outside content and prompt injection").
+Approving one of these runs that one call. When a helper agent's card is
+approved after the helper has moved on, that exact call (the same tool and
+arguments, from the same folder) may run once more; the next one asks again.
+In a run with nobody to answer (a model comparison, a role test, a benchmark),
+they are refused. The deny list still refuses a command first, and the emergency
+stop refuses everything.
+
+In every mode these are refused, with no card: the project's key folder (below),
+the NEAR key folder in your home folder (`~/.near-credentials`), SSH keys
+(`~/.ssh`), cloud and registry credential files (`~/.aws`, `~/.config/gcloud`,
+`~/.azure`, `~/.docker/config.json`, `~/.kube`, `~/.netrc`, `~/.git-credentials`,
+`~/.gnupg`, `~/.npmrc`, `~/.pypirc`), operating-system keychain commands that
+print a secret, VS Code's own secrets database, and this extension's own
+identity and policy files in its storage. This holds for the file tools and for
+shell commands alike.
+
+Reading a file inside the project that looks like a credential (`.env`, private
+keys, SSH, AWS, or NEAR credential files), through any path or symlink, asks
+first in every mode except `fully-autonomous`, where it runs without asking (see
+Known limitations). The holds after outside content apply in every mode (see
+"Outside content and prompt injection").
+
+The checks that keep agents out of key and credential folders read the text of
+a command, following the shell's folder and any cd or pushd earlier in the same
+command. They cannot see a path built while the command runs (from a variable
+or $(...)), what a script or an npm script the command starts does, a program
+that reads a store for you (for example git credential fill), a walk down from
+a parent folder, or anything an add-on server or the cyber host tools do inside
+themselves. There is no operating-system sandbox around the shell yet, so a
+determined command can still get past them. Because they read text, a command
+that only mentions one of these folders (a commit message that names ~/.ssh,
+say) is refused too, with nothing to approve: rephrase the command so it does
+not name the folder, or do that step yourself.
+
+The checks that find publishing, destruction and protected writes in a shell
+command also read its text, through npm, yarn, pnpm and bun scripts (from the
+package.json of the folder the command runs in, after any cd on the line) and
+wrappers such as bash -c, sudo, xargs, pipes, subshells, timeout, nice, stdbuf,
+flock and watch. They do not see a command built while it runs (bash -c
+"$CMD"), a file run with source or piped into sh, or a script written or
+changed earlier on the same line (it is read as it was before the line ran).
+Under fully-autonomous such a command runs without asking. A command nested
+more than four levels deep, too long to read, one they cannot parse (a quote
+left open, say), one with an option they do not know where they would read
+what it runs, running a package script in a folder they cannot tell or whose package.json they cannot read, or started by a
+program they do not know with a command they would flag among the words after
+it, is not guessed at: it asks, and it is refused when nobody is there to
+answer. That last case also asks when the words
+only mention such a command (for example `mytool git push`, where `git push` is
+text the program reads): here a false alarm costs one card and a miss would run
+unasked. The check of key and credential folders above is stricter: a mention
+there is refused, with no card.
 
 The project's key folder, `.near-ai/state/keys/` (and the `keys/` folder of an older
 `state.previous-*` or `state.adopt-*` copy), is off limits to agents in every mode, with no
@@ -154,15 +212,32 @@ is what that file and the records beside it do in this version.
   works the same offline.
 - **Decision records.** Each decision, allowed, asked or refused, is written
   to a record for the project in this extension's storage. A record names what
-  was asked for, what was decided and why, never file contents, and secrets are
-  removed from it. Records are not synced and are not put in your project, in
+  was asked for, what was decided and why, never file contents. A command is
+  named by its first line only, and before a record is written NEAR AI removes
+  from every text in it: known token shapes (such as `sk-`, `ghp_`, AWS access
+  keys and JSON web tokens), bearer tokens, a value given to a name such as
+  `password`, `secret` or `api_key`, the user part of a URL
+  (`https://user:password@host`), the value of `-u`, `--user`,
+  `--proxy-user` or `-U` when it holds a colon (a numeric user and group, such
+  as `1000:1000`, is kept), the value of an option named
+  for a password, passphrase, token, secret, API key or credential (such as
+  `--password=...`, `--token ...` or `-storepass ...`), the value of an
+  `Authorization`, `Proxy-Authorization`, `Cookie`, `Private-Token` or
+  `X-...-Token` or `-Key` header, and the value of an environment assignment,
+  URL query parameter or form field named for one (such as `GITHUB_TOKEN=...`,
+  `?api_key=...` or `-d "password=..."`). It does not remove a password passed as a plain argument
+  (`sshpass -p`, `mysql -p...`, `htpasswd -b`), one a script receives or
+  reads, one built by command substitution, or one under an option or name
+  not listed here, so do not put a password in a command's first line.
+  Records are not synced and are not put in your project, in
   the chat history or in the project's synced state. Each project's log rolls
   over at about 5 MB and keeps the last four older files. What happens to the
   policy itself (it was created, renewed, reset, loaded, or could not be
   trusted) belongs to this install and not to a project, so it is written to
   a separate log for the install in the same storage, whether or not a folder
   is open, and also to the open project's record when there is one. That log
-  rolls over the same way.
+  rolls over the same way. The decisions of a run in a window with no folder
+  open are written to that install log too.
 - **What this version does not use yet.** The file also holds scales,
   clearances and routing tiers. This version stores and shows them and does not
   use them yet.
@@ -617,10 +692,13 @@ Brave Search, or Tavily (keys in SecretStorage). It is off until you choose.
   mode, including fully-autonomous), *ask before every call*, or *trusted*.
   Tools can be switched off one by one.
 - **Servers added from this version on** start with every tool undeclared. An
-  undeclared tool asks before it runs in every mode except `fully-autonomous`
-  (a tool the server marks as changing data still asks in every mode, as
-  above), and it runs only while you are there: a run with nobody present does
-  not call it. Servers you added before this version behave as they did.
+  undeclared tool asks before every call in every mode, `fully-autonomous`
+  included, with no **Always allow**, and it runs only while you are there: a
+  run with nobody present does not call it. Servers you added before this
+  version behave as they did, with one exception: a tool that changes data on a
+  local server (one started by a command, with no web address) now asks before
+  every call in every mode, even on a server marked trusted, because NEAR AI
+  cannot tell what it reaches.
 - **Declaring what a tool does.** The MCP page has a "What it does" menu for
   each tool of a connected server: it only reads, it changes data on the server,
   or you do not know. That decides how the tool is treated from then on.
@@ -718,7 +796,7 @@ messages.
 | Project memory has a searchable list, not a graph view | A team's own knowledge graph (see "Where your data goes") is shown as a network in Team Studio; members also get project memory and their own private memory |
 | Agent reputation is recorded per role but does not yet change which model a role uses | Routing comes from team `model:` lines and the deep/standard/fast settings |
 | **Revert** restores files changed by the agent's file tools, not changes made by shell commands it ran | Use git for command side effects; documented in the chat |
-| Under `fully-autonomous`, the agent runs commands, reads likely credential files, and writes protected files (`.git/`, `.planning/.near-ai/`, `.near-ai/`) without asking | Only the deny list, the key folder refusal and the holds after outside content apply; the deny list is a substring backstop, not a sandbox. Intended for throwaway workspaces |
+| Under `fully-autonomous`, the agent runs commands and reads likely credential files inside the project without asking | Writes into `.git/`, `.planning/.near-ai/` and `.near-ai/`, publishing and destruction still ask, with no "always allow", and the key folder and credential stores are refused. The command checks read text, and there is no sandbox around the shell yet, so a command whose words they cannot see, such as one built at run time, runs; one too deep or too long to read asks (see "What the agent can do without asking"). Intended for throwaway workspaces |
 | Facts the agent saves with Remember are not reviewed when saved, and later runs start with the relevant ones | Each fact is labeled "verify before relying on it"; review, correct or reset memory with **Manage Project Memory** |
 | Spend limits use NEAR's published prices for estimates; the actual charge arrives from billing after the run | Each run, with all its sub-agents, stops before a model turn once its estimate reaches `nearAi.agent.maxRunCostUsd` (default $5), what is left of `nearAi.dailySpendLimitUsd`, or `nearAi.agent.maxRunTokens`; an agent repeating the same action is nudged and then stopped |
 

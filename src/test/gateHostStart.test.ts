@@ -13,7 +13,7 @@ import { GateHost, RUNTIME_START_WAIT_MS } from '../gate/host';
 import type { GateHostOptions, RuntimeRequest } from '../gate/host';
 import { MemorySecrets } from './helpers/teamHarness';
 
-const REQUEST: RuntimeRequest = { root: path.join(tmpdir(), 'near-ai-gate-start-project'), actor: { kind: 'agent', sessionId: 's' }, presence: 'person', context: 'interactive', floorMode: 'shadow' };
+const REQUEST: RuntimeRequest = { root: path.join(tmpdir(), 'near-ai-gate-start-project'), actor: { kind: 'agent', sessionId: 's' }, presence: 'person', context: 'interactive' };
 const POLICY = { mode: 'fully-autonomous', emergencyStop: false } as const;
 
 /** Secrets whose reads finish a little late, so the host's start is still running when a run asks for its runtime. */
@@ -32,7 +32,7 @@ async function writeDecision(runtime: GateRuntime): Promise<ReturnType<typeof de
   const request: GateRequest = {
     actor: runtime.actor, tool: 'Write', callId: 'c1', effects: [{ verb: 'workspaceWrite', paths: ['out.md'] }], context: runtime.context, presence: runtime.presence, policy: POLICY
   };
-  return decide(request, runtime.bundleState(), async () => ({ decision: 'allow', rule: 'settings.mode.fully-autonomous' }), { floorMode: runtime.floorMode });
+  return decide(request, runtime.bundleState(), async () => ({ decision: 'allow', rule: 'settings.mode.fully-autonomous' }));
 }
 
 function sentenceOf(state: BundleState): string {
@@ -95,7 +95,7 @@ test('a start that never ends fails the run closed once the bound has passed, an
   assert.equal(sentenceOf(runtime.bundleState()), BUNDLE_FAILURES['not-loaded']);
   const reading = await decide({
     actor: runtime.actor, tool: 'Read', callId: 'c2', effects: [{ verb: 'read', paths: ['a.ts'] }], context: runtime.context, presence: runtime.presence, policy: POLICY
-  }, runtime.bundleState(), async () => ({ decision: 'allow', rule: 'settings.read-plan' }), { floorMode: runtime.floorMode });
+  }, runtime.bundleState(), async () => ({ decision: 'allow', rule: 'settings.read-plan' }));
   assert.equal(reading.outcome, 'allow', 'reading and planning still run');
   assert.equal((await writeDecision(runtime)).outcome, 'deny');
 });

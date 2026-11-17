@@ -31,6 +31,8 @@ import type { DirectoryInput } from '../services/toolsDirectory';
 
 
 const EM_DASH = String.fromCharCode(0x2014);
+/** The search provider directoryInput() says is set up, so the catalog compared with the page is built the same way. */
+const CONFIGURED_SEARCH = { name: 'searxng', label: 'configured provider', host: 'search.example', search: async () => [] } as const;
 
 function directoryInput(): DirectoryInput {
   return {
@@ -120,7 +122,7 @@ test('the core tools\' effects are filled from the call, with the whole project 
 test('the Tools page lists the catalog and each tool\'s notes carry its manifest words after today\'s notes', () => {
   const directory = buildToolsDirectory(directoryInput());
   const listed = new Map(directory.tools.map((entry) => [entry.name, entry]));
-  for (const tool of builtInTools()) {
+  for (const tool of builtInTools({ webSearch: CONFIGURED_SEARCH })) {
     const entry = listed.get(tool.name);
     assert.ok(entry, `${tool.name} is on the page`);
     const words = describeManifest(tool.manifest!);
@@ -229,7 +231,10 @@ test('the effects of the web, graphics, image, memory and security tools are fil
   };
   assert.deepEqual(effects('WebFetch', { url: 'https://Example.com/a?b=1' }), [{ verb: 'network', hosts: ['example.com'] }]);
   assert.equal(effectsFor(byName.get('WebFetch')!.manifest!, { url: 'not a url' }).ok, false);
-  assert.deepEqual(effects('WebSearch', { query: 'x' }), [{ verb: 'network', hosts: ['search.example'] }]);
+  // With no provider set up, WebSearch reaches no host (it says search is not set up); with one, the provider's own host, never a placeholder.
+  assert.deepEqual(effects('WebSearch', { query: 'x' }), [{ verb: 'plan' }]);
+  const configured = builtInTools({ webSearch: { name: 'brave', label: 'Brave Search', host: 'api.search.brave.com', search: async () => [] } }).find((tool) => tool.name === 'WebSearch')!;
+  assert.deepEqual(effectsFor(configured.manifest!, { query: 'x' }), { ok: true, value: [{ verb: 'network', hosts: ['api.search.brave.com'] }] });
   assert.deepEqual(effects('CheckCitations', { citations: [] }), [{ verb: 'plan' }]);
   assert.deepEqual(effects('CheckOriginality', { path: 'draft.md' }), [{ verb: 'plan' }, { verb: 'read', paths: ['draft.md'] }]);
   assert.deepEqual(effects('CheckOriginality', { text: 'a draft' }), [{ verb: 'plan' }, { verb: 'read', paths: ['**'] }]);
@@ -258,6 +263,7 @@ test('WebSearch names the host of the provider it was built with, and reaches no
   }
   const none = webSearchTool(undefined);
   assert.deepEqual(none.manifest!.effects, [{ verb: 'plan' }]);
+  assert.equal(none.capability, shorthandFor(none.manifest!), 'with no provider the shorthand is plan, as the manifest says');
   assert.deepEqual(none.manifest!.hosts, []);
   assert.equal(none.manifest!.untrusted, true, 'its results are outside content either way');
 });
@@ -310,7 +316,7 @@ test('a team member card says, in the manifest\'s words, what each of its tools 
   assert.ok(byName.get('Agent')!.words.includes('Starts other agents'));
   assert.ok(byName.get('Task')!.words.includes('Starts other agents'));
   assert.ok(byName.get('Write')!.words.includes('Can change files in this project'));
-  for (const tool of builtInTools()) {
+  for (const tool of builtInTools({ webSearch: CONFIGURED_SEARCH })) {
     const entry = byName.get(tool.name);
     if (entry) assert.deepEqual(entry.words, describeManifest(tool.manifest!), `${tool.name}: the card and the Tools page use the same sentences`);
   }
@@ -502,4 +508,60 @@ test('the fixtures give a hand-built tool the manifest its shorthand implies, an
   const home = fakeHome();
   assert.notEqual(home, process.env.HOME);
   assert.ok(path.resolve(home).startsWith(path.resolve(tmpdir()) + path.sep));
+});
+
+// PR #70 review carry-over: the catalog built WebSearch with a stand-in provider on a placeholder host when no search was set up, so that host could reach
+// a manifest, the Tools page and a decision record. There is no stand-in now; the absence of a provider is explicit (no host at all).
+/** A name reserved for examples and tests (RFC 2606, RFC 6761): never a host a real tool reaches. */
+const PLACEHOLDER_HOST = /(?:^|\.)(?:example|invalid|test)$|(?:^|\.)example\.(?:com|net|org)$/i;
+
+function declaredHosts(tool: AgentTool<any>): string[] {
+  const manifest = tool.manifest!;
+  const fromEffects = manifest.effects.flatMap((entry) => ('hosts' in entry && Array.isArray(entry.hosts) ? entry.hosts as string[] : []));
+  return [...(manifest.hosts ?? []), ...fromEffects];
+}
+
+test('no tool the catalog builds without a configured provider names a placeholder host, and WebSearch then names no host at all', () => {
+  for (const stubs of [{}, { webSearch: null }] as const) {
+    for (const tool of builtInTools(stubs)) {
+      for (const host of declaredHosts(tool)) assert.ok(!PLACEHOLDER_HOST.test(host), `${tool.name} names ${host}`);
+    }
+    const search = builtInTools(stubs).find((tool) => tool.name === 'WebSearch')!;
+    assert.deepEqual(declaredHosts(search), [], 'no provider, no host');
+    assert.deepEqual(effectsFor(search.manifest!, { query: 'x' }), { ok: true, value: [{ verb: 'plan' }] });
+  }
+  assert.ok(PLACEHOLDER_HOST.test('search.example') && PLACEHOLDER_HOST.test('api.example.com') && !PLACEHOLDER_HOST.test('api.search.brave.com'), 'the check knows a placeholder');
+});
+
+test('the Tools page with web search off, or on with no host, lists WebSearch with no host and its set-up step', () => {
+  for (const extra of [{ webSearch: false }, { webSearch: true, webSearchHost: undefined }] as const) {
+    const directory = buildToolsDirectory({ ...directoryInput(), ...extra } as DirectoryInput);
+    const entry = directory.tools.find((tool) => tool.name === 'WebSearch')!;
+    assert.ok(!entry.notes.some((line) => line.includes('search.example')), entry.notes.join(' | '));
+    assert.ok(!entry.words.some((line) => /search\.example/.test(line)), entry.words.join(' | '));
+  }
+});
+
+test('the source of the catalog and the Tools page names no placeholder host, so none can come back as a default', () => {
+  for (const file of ['src/agent/toolCatalog.ts', 'src/services/toolsDirectory.ts']) {
+    const text = readFileSync(path.join(__dirname, '..', '..', file), 'utf8');
+    const hosts = [...text.matchAll(/host:\s*['"`]([^'"`]+)['"`]/g)].map((match) => match[1] as string);
+    for (const host of hosts) assert.ok(!PLACEHOLDER_HOST.test(host), `${file} names ${host}`);
+  }
+});
+
+test('a WebSearch call with no provider set up is recorded as a plan that reaches no host, and is not asked about', async () => {
+  const { gateToolCall } = await import('../agent/gateAdapter');
+  const { testGateRuntime } = await import('./helpers/gatedRuns');
+  const runtime = testGateRuntime();
+  const search = builtInTools().find((tool) => tool.name === 'WebSearch')!;
+  const gated = await gateToolCall(runtime, {
+    tool: search, raw: { query: 'x' }, root: mkdtempSync(path.join(tmpdir(), 'near-ai-search-none-')), callId: 'c1',
+    policy: { mode: 'approve-risky', emergencyStop: false }, rules: DEFAULT_RULES, grants: new RunGrants(), buildAuto: async () => undefined
+  });
+  assert.equal(gated.decision.outcome, 'allow');
+  const record = runtime.records[0]!;
+  assert.equal(record.api.operation, 'plan');
+  assert.ok(!JSON.stringify(record).includes('search.example'));
+  assert.deepEqual(record.resources, [{ name: 'WebSearch', type: 'tool' }]);
 });

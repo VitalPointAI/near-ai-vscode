@@ -450,7 +450,13 @@ export const KEPT_WIZARD_TEXT = 'Your unsaved team was kept as a draft. Resume i
 
 export interface TeamStudioDeps {
   library: TeamLibrary;
-  root?: string;
+  /**
+   * The open project folder, or undefined with none. Asked each time it is used, never kept, so a folder opened, closed or changed while the studio is open
+   * is the one listed, saved to and tested in (PR #70 review carry-over: it was read once, when the panel opened).
+   */
+  root(): string | undefined;
+  /** The window's folders changed: the studio lists the library again for the folder open now. */
+  onDidChangeFolder?(listener: () => void): { dispose(): void };
   gather(): Promise<DirectoryInput>;
   knowledgeBase(): Promise<boolean>;
   sidebar: { prefill(text: string): Promise<void> };
@@ -568,8 +574,8 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
 
   const load = async () => {
     input = await deps.gather();
-    context = buildStudioContext(input, { hasProject: Boolean(deps.root), knowledgeBase: await deps.knowledgeBase().catch(() => false) });
-    library = await listLibrary(deps.library, deps.root, input);
+    context = buildStudioContext(input, { hasProject: Boolean(deps.root()), knowledgeBase: await deps.knowledgeBase().catch(() => false) });
+    library = await listLibrary(deps.library, deps.root(), input);
   };
   const refresh = async () => {
     await load();
@@ -582,7 +588,7 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
   };
   const refreshLibrary = async () => {
     if (!input) return;
-    library = await listLibrary(deps.library, deps.root, input);
+    library = await listLibrary(deps.library, deps.root(), input);
     post({ type: 'library', library, ...(context ? { picker: teamPicker(context.startingPoints, library.teams) } : {}) });
   };
   const soon = () => {
@@ -629,7 +635,7 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
     const teamPrivacy = handWrittenTeamPrivacy(textNow);
     // 0.4.28: while a run of this team is going, the Team shape tab links to Team Live.
     const live = deps.liveRun?.(slugify(path.basename(file, '.md'))) === true;
-    post({ type: 'team', id, kind: entry?.kind ?? (id === 'project' ? 'project' : 'user'), file: displayPath(file, deps.root), command: entry?.command ?? '', draft, base: open.base, ...(teamPrivacy ? { teamPrivacy } : {}), ...(live ? { liveRun: true } : {}), versions: await versionsOf(file), graph: graphOf(textNow, file), knowledge: await knowledgeOf(file), ...(notice ? { notice } : {}) });
+    post({ type: 'team', id, kind: entry?.kind ?? (id === 'project' ? 'project' : 'user'), file: displayPath(file, deps.root()), command: entry?.command ?? '', draft, base: open.base, ...(teamPrivacy ? { teamPrivacy } : {}), ...(live ? { liveRun: true } : {}), versions: await versionsOf(file), graph: graphOf(textNow, file), knowledge: await knowledgeOf(file), ...(notice ? { notice } : {}) });
   };
 
   /**
@@ -710,7 +716,7 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
 
   const startWizard = async (target: StudioTarget) => {
     if (!pageReady) { pendingWizard = target; return; }
-    post({ type: 'start-wizard', target: target === 'project' && !deps.root ? 'user' : target });
+    post({ type: 'start-wizard', target: target === 'project' && !deps.root() ? 'user' : target });
   };
 
   const handle = async (message: StudioMessage) => {
@@ -727,7 +733,7 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
         // On demand, for every team at once (owner, 2026-11-08: "we can do a model optimization recommendation for all teams whenever the user wants").
         // The whole cost is worked out and asked about ONCE, before any run, and the notice after each team shows the work moving rather than a long silence.
         if (!deps.optimiseTeam) { post({ type: 'error', text: 'No model is available to test the teams. Set up a NEAR AI profile first.' }); return; }
-        const all = await deps.library.list(deps.root);
+        const all = await deps.library.list(deps.root());
         const teams = all.flatMap((entry) => entry.team ? [{ name: entry.team.name, file: entry.file, members: entry.team.members.map((member) => ({ name: member.name, ...(member.role ? { role: member.role } : {}), ...(member.model ? { model: member.model } : {}) })) }] : []);
         if (!teams.length) { post({ type: 'notice', text: 'There are no teams to test yet.' }); return; }
         const candidates = await deps.optimiseCandidates?.().catch(() => undefined) ?? [];
@@ -943,8 +949,10 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
         // pasted in) stays unapproved however it was made. Checked on the content, so no path round it depends on how the draft was built.
         const unapprovedFrom = await deps.library.unapprovedSource(message.draft.members).catch(() => undefined);
         if (message.target === 'project') {
-          if (!deps.root) { post({ type: 'error', text: 'Open a project folder to save a project team, or save it to My teams.' }); return; }
-          file = TeamLibrary.projectTeamFile(deps.root);
+          // The folder open now, read once for the whole save, so the file and the project type go to the same folder.
+          const root = deps.root();
+          if (!root) { post({ type: 'error', text: 'Open a project folder to save a project team, or save it to My teams.' }); return; }
+          file = TeamLibrary.projectTeamFile(root);
           if (await exists(file)) {
             if (!await deps.confirm('This project already has a team. Replace it? Its earlier versions stay in the team history.', 'Replace')) return;
             await deps.library.snapshot(file);
@@ -955,7 +963,7 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
           id = 'project';
           // The project's own consent is asked before it first runs, as for any project team; its question says the members came from that import.
           await deps.library.setProjectDerived(file, unapprovedFrom);
-          if (fromType) await deps.applyProjectType(deps.root, fromType, message.projectType!.goal.trim().slice(0, 400) || message.draft.description.trim());
+          if (fromType) await deps.applyProjectType(root, fromType, message.projectType!.goal.trim().slice(0, 400) || message.draft.description.trim());
         } else {
           file = await deps.library.create(message.draft.name.trim(), markdown);
           if (unapprovedFrom !== undefined) await deps.library.markImported(file, 'derived', unapprovedFrom);
@@ -1121,6 +1129,7 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
     // Emergency stop cancels an AI review in progress, as it cancels the role tests.
     ...(deps.onStop ? [deps.onStop(() => cancelRefine())] : []),
     ...(deps.onDidChangeSettings ? [deps.onDidChangeSettings(() => { void refresh(); })] : []),
+    ...(deps.onDidChangeFolder ? [deps.onDidChangeFolder(() => { void refresh(); })] : []),
     host.webview.onDidReceiveMessage(async (value) => {
       const message = parseStudioMessage(value);
       if (!message) return;

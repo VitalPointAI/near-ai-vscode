@@ -16,7 +16,8 @@ import { AgentMessage, CompletionEvent, ModelInfo, NearAiClient, ToolCall } from
 import { newTestRun } from './helpers/gatedRuns';
 
 const auto: ActionPolicy = { mode: 'auto', emergencyStop: false };
-const where = { root: '/work/app', cwd: '/work/app', home: '/home/dev' };
+// The project's only package.json is its root's, with no scripts (PR #74 review round 6: scripts nobody read are unknown, so a fixture says what it read).
+const where: Pick<AutoApprovalContext, 'root' | 'cwd' | 'home' | 'packageScriptsAt'> = { root: '/work/app', cwd: '/work/app', home: '/home/dev', packageScriptsAt: () => ({ kind: 'found', folder: '/work/app', scripts: {} }) };
 
 /** A safety check that records what it was asked and answers from a fixed verdict. */
 function fakeSafety(allow: boolean, reason = allow ? 'Safety model: fine.' : 'Safety model: not sure.') {

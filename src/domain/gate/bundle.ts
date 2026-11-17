@@ -24,6 +24,13 @@ export const BUNDLE_VERSION = 1;
 export const GATE_CONTEXTS = Object.freeze(['interactive', 'unattended', 'relay', 'routine'] as const);
 export type GateContextName = (typeof GATE_CONTEXTS)[number];
 
+/**
+ * The policy's own events, written to the decision logs as records of their own (the record's rule and operation): the policy was created, renewed, reset
+ * by the person, or loaded at start. They are events, not rules a decision applies, so they are kept apart from GATE_RULE_IDS; RECORD_RULE_IDS joins both.
+ */
+export const POLICY_EVENT_IDS = Object.freeze(['policy.created', 'policy.renewed', 'policy.reset', 'policy.load'] as const);
+export type PolicyEventId = (typeof POLICY_EVENT_IDS)[number];
+
 const ACTION_MODES: readonly ActionPolicyMode[] = Object.freeze(['approve-risky', 'mostly-autonomous', 'auto', 'fully-autonomous'] as const);
 
 export interface BundleIssuer {

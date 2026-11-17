@@ -66,8 +66,94 @@ export const CREDENTIAL_STORES: readonly string[] = Object.freeze([
   '.near-kb', '.kbkey'
 ]);
 
-/** VS Code's own secrets database, matched by file name anywhere: it holds the encrypted SecretStorage, which includes the device key. */
+/**
+ * VS Code's own secrets database: it holds the encrypted SecretStorage, which includes the device key. Matched only where VS Code keeps it (PR #74 review),
+ * never by file name anywhere, so a project file of the same name is the project's: in a folder named `globalStorage`, or `workspaceStorage/<id>`, in any
+ * VS Code's layout, and anywhere under this VS Code's own user-data folder when its global storage is known (vscodeStorageRoots).
+ */
 export const VSCODE_SECRET_FILES: readonly string[] = Object.freeze(['state.vscdb', 'state.vscdb.backup']);
+
+/**
+ * The folders where this VS Code keeps its secrets database, from this extension's global storage (`<user data>/User/globalStorage/<extension id>`): the
+ * global storage folder that holds it, and, in that standard layout, the user-data folder above (which also holds `workspaceStorage`). Forward slashes.
+ */
+export function vscodeStorageRoots(globalStorage: string | undefined): string[] {
+  const storage = trimmedFolder(globalStorage);
+  if (storage === undefined) return [];
+  const parent = storage.slice(0, storage.lastIndexOf('/'));
+  if (parent === '') return [];
+  const roots = [parent];
+  const grandparent = parent.slice(0, parent.lastIndexOf('/'));
+  if (parent.slice(parent.lastIndexOf('/') + 1).toLowerCase() === 'globalstorage' && grandparent !== '') roots.push(grandparent);
+  return roots;
+}
+
+/** The folder a call works in, and the shell's folder for a command: a path that resolves inside the project is the project's own (PR #74 review round 11). */
+export interface FloorWorkspace {
+  readonly root: string;
+  readonly cwd?: string;
+}
+
+/**
+ * Whether a path as written resolves inside the project: from the shell's folder (or the project) for a relative path, with `~` and `$HOME` read as the
+ * home folder. Another variable, or a home folder nobody gave, is not known to be inside. Text only: nothing is opened. Forward slashes throughout.
+ */
+export function resolvesInsideWorkspace(written: string, workspace: FloorWorkspace, locations: FloorLocations = {}): boolean {
+  let text = forwardSlashes(written.trim().replace(/^["']+|["']+$/g, ''));
+  const home = trimmedFolder(locations.home);
+  const homeForm = /^(?:~|\$\{HOME\}|\$HOME)(?=\/|$)/.exec(text);
+  if (homeForm) {
+    if (home === undefined) return false;
+    text = `${home}${text.slice(homeForm[0].length)}`;
+  }
+  if (text.includes('$') || text === '') return false;
+  const root = trimmedFolder(workspace.root);
+  if (root === undefined) return false;
+  const absolute = text.startsWith('/') || /^[A-Za-z]:\//.test(text);
+  const base = trimmedFolder(workspace.cwd) ?? root;
+  const resolved = normalizeSlashes(absolute ? text : `${base}/${text}`);
+  return resolved === root || resolved.startsWith(`${root}/`);
+}
+
+/** `a/./b/../c` as `a/c`, on forward slashes, keeping a leading `/` or drive. */
+function normalizeSlashes(text: string): string {
+  const lead = /^(?:[A-Za-z]:)?\/?/.exec(text)?.[0] ?? '';
+  const parts: string[] = [];
+  for (const part of text.slice(lead.length).split('/')) {
+    if (part === '' || part === '.') continue;
+    if (part === '..') { parts.pop(); continue; }
+    parts.push(part);
+  }
+  return `${lead}${parts.join('/')}`.replace(/\/+$/, '') || lead;
+}
+
+/** The written path a match sits in: the match back to the start of its word (a space, a quote, a shell operator, `=`). */
+function wordAround(text: string, index: number, end: number): string {
+  let start = index;
+  while (start > 0 && !/[\s'"`;&|()<>=]/.test(text[start - 1]!)) start -= 1;
+  return text.slice(start, end);
+}
+
+/**
+ * VS Code's secrets database where VS Code keeps it: after its storage folder names in any VS Code's layout (unless the path resolves inside the project,
+ * where a folder of that name is the project's own), or under one of this VS Code's own storage folders. The match as written, or undefined.
+ */
+function namesVscodeSecrets(text: string, locations: FloorLocations, workspace: FloorWorkspace | undefined): string | undefined {
+  const names = VSCODE_SECRET_FILES.map(escapeRegExp).sort((a, b) => b.length - a.length).join('|');
+  const real = vscodeStorageRoots(locations.globalStorage).map((root) => `(?<![\\w./-])${escapeRegExp(root)}/+(?:[^\\s'"]*/+)?`);
+  if (real.length > 0) {
+    const own = firstMatch(new RegExp(`(?:${real.join('|')})(?:${names})${NAME_END}`, 'i'), text);
+    if (own !== undefined) return own;
+  }
+  const portable = new RegExp(`(?<![\\w.-])(?:globalStorage|workspaceStorage/+[^/\\s'"]+)/+(?:${names})${NAME_END}`, 'gi');
+  for (const match of text.matchAll(portable)) {
+    const at = match.index ?? 0;
+    const written = wordAround(text, at, at + match[0].length);
+    if (workspace !== undefined && resolvesInsideWorkspace(written, workspace, locations)) continue;
+    return written.trim().slice(0, 120);
+  }
+  return undefined;
+}
 
 /** Commands that print a secret from the operating system's keychain. */
 export const KEYCHAIN_COMMANDS: readonly string[] = Object.freeze([
@@ -80,9 +166,21 @@ export const EXTENSION_STORAGE_FOLDERS: readonly string[] = Object.freeze(['iden
 /** The portable form of the extension's storage folder: VS Code lowercases the extension id (publisher VitalPoint, name near-ai-vscode). */
 export const EXTENSION_STORAGE_TEXT = 'globalStorage/vitalpoint.near-ai-vscode';
 
-/** What the floor's text checks cannot see, in the floor's own words (the same honesty as namesStateKeys). Shown wherever the floor is described. */
+/**
+ * What the floor's checks of key and credential folders cannot see, in the floor's own words (the same honesty as namesStateKeys). Shown wherever the floor
+ * is described; SECURITY.md carries it word for word. It says what the code does: the text of the command, each word resolved from the shell's folder and from
+ * any `cd` or `pushd` earlier in the same command (shellReachesCredentialStore), and nothing a script or program does once it runs.
+ */
 export const FLOOR_CANNOT_SEE_TEXT =
-  'The checks that keep agents out of key and credential folders read the text of a command. They cannot see a path built while the command runs, a program that reads a store for you (for example git credential fill), a walk down from a parent folder or a folder change followed by a bare file name, or anything an add-on server or the cyber host tools do inside themselves. There is no operating-system sandbox around the shell yet, so a determined command can still get past them.';
+  'The checks that keep agents out of key and credential folders read the text of a command, following the shell\'s folder and any cd or pushd earlier in the same command. They cannot see a path built while the command runs (from a variable or $(...)), what a script or an npm script the command starts does, a program that reads a store for you (for example git credential fill), a walk down from a parent folder, or anything an add-on server or the cyber host tools do inside themselves. There is no operating-system sandbox around the shell yet, so a determined command can still get past them. Because they read text, a command that only mentions one of these folders (a commit message that names ~/.ssh, say) is refused too, with nothing to approve: rephrase the command so it does not name the folder, or do that step yourself.';
+
+/**
+ * What the checks that find publishing, destruction and protected writes in a shell command cannot see (classifyCommand's effect tags, plan 16): a command
+ * they cannot read has no tag, so under fully-autonomous it runs without asking. One they stop reading (the nesting bound, the length caps, a program they
+ * do not know with a flagged command after it) has unknown effects instead, and asks (PR #74 review). SECURITY.md carries it word for word; gateDocs checks each named gap is real and each named stop asks.
+ */
+export const FLOOR_EFFECTS_CANNOT_SEE_TEXT =
+  'The checks that find publishing, destruction and protected writes in a shell command also read its text, through npm, yarn, pnpm and bun scripts (from the package.json of the folder the command runs in, after any cd on the line) and wrappers such as bash -c, sudo, xargs, pipes, subshells, timeout, nice, stdbuf, flock and watch. They do not see a command built while it runs (bash -c "$CMD"), a file run with source or piped into sh, or a script written or changed earlier on the same line (it is read as it was before the line ran). Under fully-autonomous such a command runs without asking. A command nested more than four levels deep, too long to read, one they cannot parse (a quote left open, say), one with an option they do not know where they would read what it runs, running a package script in a folder they cannot tell or whose package.json they cannot read, or started by a program they do not know with a command they would flag among the words after it, is not guessed at: it asks, and it is refused when nobody is there to answer.';
 
 /** Where the person's home folder and this extension's global storage are, as the adapter knows them. Both are optional: the portable text forms always match. */
 export interface FloorLocations {
@@ -118,21 +216,26 @@ function firstMatch(pattern: RegExp, text: string): string | undefined {
   return found === null ? undefined : found[0].trim().slice(0, 120);
 }
 
-function credentialReason(shown: string): string {
+/** The plain reason for `floor.credential-store`, naming the store as the command reached it. */
+export function credentialReason(shown: string): string {
   return `${shown} names a place where passwords, keys or tokens are kept. Agents may not read, write, list or run anything there, in any approval mode.`;
+}
+
+/** The plain reason for `floor.identity-files`, naming the folder as the command reached it. */
+export function identityFilesReason(shown: string): string {
+  return `${shown} is where NEAR AI keeps this device's signing keys and its policy and decision records. Agents may not read, write, list or run anything there, in any approval mode.`;
 }
 
 /**
  * Whether the text of a command names a credential store outside the project: a store folder or file after `~/`, `$HOME/`, `${HOME}/` or the literal home
- * folder, VS Code's secrets database by name, or a keychain command that prints a secret. A heuristic, and an honest one (see FLOOR_CANNOT_SEE_TEXT): it
+ * folder, VS Code's secrets database where VS Code keeps it, or a keychain command that prints a secret. A heuristic, and an honest one (see FLOOR_CANNOT_SEE_TEXT): it
  * reads text only and never runs anything. Returns a plain reason, or undefined.
  */
-export function namesCredentialStore(text: string, locations: FloorLocations = {}): string | undefined {
+export function namesCredentialStore(text: string, locations: FloorLocations = {}, workspace?: FloorWorkspace): string | undefined {
   const flat = forwardSlashes(text);
   const stores = new RegExp(`${homePrefix(locations)}(?:${CREDENTIAL_STORES.map(escapeRegExp).join('|')})${NAME_END}`, 'i');
-  const secrets = new RegExp(`(?<![\\w.-])(?:${VSCODE_SECRET_FILES.map(escapeRegExp).sort((a, b) => b.length - a.length).join('|')})${NAME_END}`, 'i');
   const keychain = new RegExp(`(?<![\\w.-])(?:${KEYCHAIN_COMMANDS.map((command) => command.split(' ').map(escapeRegExp).join('\\s+')).join('|')})(?![\\w-])`, 'i');
-  const shown = firstMatch(stores, flat) ?? firstMatch(secrets, flat) ?? firstMatch(keychain, flat);
+  const shown = firstMatch(stores, flat) ?? namesVscodeSecrets(flat, locations, workspace) ?? firstMatch(keychain, flat);
   return shown === undefined ? undefined : credentialReason(shown);
 }
 
@@ -145,7 +248,7 @@ export function namesIdentityFiles(text: string, locations: FloorLocations = {})
   if (real !== undefined) bases.push(escapeRegExp(real));
   const pattern = new RegExp(`(?:${bases.join('|')})/+(?:${folders})${NAME_END}`, 'i');
   const shown = firstMatch(pattern, flat);
-  return shown === undefined ? undefined : `${shown} is where NEAR AI keeps this device's signing keys and its policy and decision records. Agents may not read, write, list or run anything there, in any approval mode.`;
+  return shown === undefined ? undefined : identityFilesReason(shown);
 }
 
 /** Facts the caller already knows. Each carries the plain reason, or is true for the one that needs none. */
@@ -166,6 +269,8 @@ export interface FloorInput {
   /** Today's `tool.forbidden` hook: the reason the key folder was named. */
   readonly forbidden?: string;
   readonly floorFacts?: FloorFacts;
+  /** The project and the shell's folder, so a path inside the project named like VS Code's storage is read as the project's own. */
+  readonly workspace?: FloorWorkspace;
 }
 
 function pathsOf(capability: Capability): readonly string[] {
@@ -212,7 +317,7 @@ export function floorFor(input: FloorInput, locations: FloorLocations = {}): Flo
   const matched = new Map<FloorRule, string>();
   const set = (rule: FloorRule, reason: string | undefined): void => { if (reason !== undefined) matched.set(rule, reason); };
   set('floor.state-keys', stateKeysMatch(input));
-  set('floor.credential-store', facts?.credentialStore ?? (command === undefined ? undefined : namesCredentialStore(command, locations)));
+  set('floor.credential-store', facts?.credentialStore ?? (command === undefined ? undefined : namesCredentialStore(command, locations, input.workspace)));
   set('floor.identity-files', facts?.identityFiles ?? (command === undefined ? undefined : namesIdentityFiles(command, locations)));
   set('floor.protected-write', protectedWriteMatch(input));
   set('floor.publish', effectMatch(input, (effect) => effect.verb === 'publish' || effect.verb === 'send', PUBLISH_REASON));

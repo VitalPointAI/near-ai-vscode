@@ -7,7 +7,9 @@ import type { ActionCapability, ActionPolicy } from '../domain/policy';
 import type { AgentMessage, CompletionEvent, ToolCall, ToolDefinition, UsageMetadata } from '../services/nearAiClient';
 import { AutoApprovalContext, allowRuleBlocker, isAutoAllowed, PermissionRules, RunGrants, suggestAllowRule } from './permissions';
 import type { GateRuntime } from '../domain/gate/decide';
-import { TOOL_FORBIDDEN_RULE, gateToolCall, recordApprovalReply, unavailableGateRuntime } from './gateAdapter';
+import { TOOL_FORBIDDEN_RULE, gateToolCall, recordApprovalReply, recordRefusedBeforeGate, unavailableGateRuntime } from './gateAdapter';
+import type { FloorShellContext } from './gateAdapter';
+import { PackageScriptsReader } from './packageScripts';
 import { PREAMBLE_START, resolveGsdRun } from '../gsd/preamble';
 import type { CommandSafetyCheck } from './safetyModel';
 import type { UnattendedScope } from './unattended';
@@ -78,6 +80,11 @@ export interface ApprovalRequest {
    * command for a shell call, edits for a file write. Undefined when nothing may be granted (a risky action, which asks every time).
    */
   grant?: { command?: string; edits?: boolean };
+  /**
+   * Set on a card the floor asked (GATE-05, D-43): publishing, destruction, or a write into `.git/` or NEAR AI's state, in any mode. Such a card never has a
+   * `grant` or an `allowRule`; an allow runs this one call, and a late allow (a sub-agent's parked card) lets this exact call (`callKey`) run once more.
+   */
+  floor?: { callKey: string };
 }
 /**
  * `pending` (PERF-01): nobody answered within the agent's wait. The action did not run and its card stays queued for the person; the agent is told so and
@@ -87,6 +94,21 @@ export interface ApprovalReply { decision: 'allow' | 'allow-run' | 'allow-always
 
 /** How a tool result that is waiting on an approval begins, so the activity log can count it (PERF-01, PERF-07). */
 export const AWAITING_APPROVAL_PREFIX = 'Awaiting approval:';
+
+/** The reason recorded when a tool's own check threw: fixed words, so an error's text (which could name anything) never reaches a record. */
+const CHECK_FAILED_REASON = 'The tool\'s own check of this call could not finish, so the call was not run.';
+const AWAITING_APPROVAL_TEXT = `${AWAITING_APPROVAL_PREFIX} this action has not run. It is queued for the user to approve, and they have been notified. Do not retry it now and do not wait for it: carry on with work that does not depend on it, and list it under "Waiting for approval" in your report.`;
+
+/**
+ * What the agent is told when nobody answered a card in time, read from the card itself, so the words and the card can never disagree (PR #74 review round
+ * 6). A floor card is approved for one call only (D-43, Pitfall 4); a card that carries a grant lets the same call run for the rest of the run; any other
+ * card (effects the gate cannot read, an action held after outside content) grants nothing ahead of time.
+ */
+export function awaitingApprovalMessage(card: Pick<ApprovalRequest, 'floor' | 'grant'>): string {
+  if (card.floor !== undefined) return `${AWAITING_APPROVAL_TEXT} This kind of action needs a person every time: if the user approves it, this exact call (the same tool and arguments, from the same folder) is allowed once, not for the rest of this run.`;
+  if (card.grant !== undefined) return `${AWAITING_APPROVAL_TEXT} If the user approves it, the same call is allowed for the rest of this run.`;
+  return `${AWAITING_APPROVAL_TEXT} This card grants nothing ahead of time: if the user approves it you will be told, and running the call again asks again.`;
+}
 
 export type AgentEvent =
   | { type: 'text'; text: string }
@@ -297,6 +319,9 @@ export class AgentRun {
   private readonly gate: GateRuntime;
   /** When this run was created: a script changed after it was written by the run (PERF-01). */
   private readonly startedAt = Date.now();
+  /** The package scripts the floor reads, by project folder: read once per run, and again only when package.json has changed since (Pitfall 5). */
+  /** package.json scripts by file, for every folder a command runs a package manager in; each read for every decision, its parse kept by content (PR #74 review rounds 4 and 8). */
+  private readonly packageScripts = new PackageScriptsReader();
   private readonly byName: Map<string, AgentTool<any>>;
   private readonly definitions: ToolDefinition[];
 
@@ -601,7 +626,16 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
     await this.options.beforeTool?.(signal);
     if (signal.aborted) return 'Cancelled before this tool ran.';
     const tool = this.byName.get(call.function.name);
-    if (!tool) return `Error: unknown tool "${call.function.name}". Available tools: ${[...this.byName.keys()].join(', ')}.`;
+    if (!tool) {
+      // Refused before the gate could be asked, and still on the record (PR #70 review carry-over): a log that skips these would not show every refusal.
+      recordRefusedBeforeGate(this.gate, { tool: call.function.name, callId: call.id, rule: 'call.unknown-tool', reason: 'This run has no tool by that name, so nothing ran.' }, { model: this.options.model });
+      return `Error: unknown tool "${call.function.name}". Available tools: ${[...this.byName.keys()].join(', ')}.`;
+    }
+    // A tool's own check that throws: the call cannot be judged, so it does not run, and the refusal is recorded like any other.
+    const checkFailed = (error: unknown): string => {
+      recordRefusedBeforeGate(this.gate, { tool: tool.name, callId: call.id, rule: 'call.check-failed', reason: CHECK_FAILED_REASON, capability: tool.capability }, { model: this.options.model });
+      return this.finish(call.id, false, `Error: ${(error as Error).message}`);
+    };
     const context: ToolContext = {
       ...this.options.context, signal, onTodos: (todos) => this.options.emit({ type: 'todos', todos }),
       tainted: () => this.grants.tainted,
@@ -627,12 +661,15 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
     let sensitive: string | undefined;
     let risky: string | undefined;
     let forbidden: string | undefined;
-    try { forbidden = await tool.forbidden?.(input, context); } catch (error) { return this.finish(call.id, false, `Error: ${(error as Error).message}`); }
+    try { forbidden = await tool.forbidden?.(input, context); } catch (error) { return checkFailed(error); }
+    // The floor reads every shell command, in every mode, with a cheap context of its own (Pitfall 5).
+    const floorShell = command === undefined ? undefined : await this.floorShellContext(context);
     // What the gate is told about this call. The three hooks are today's own; `buildAuto` builds auto approve's context for the mode the settings layer is asked with.
     const gateInput = (): Parameters<typeof gateToolCall>[1] => ({
-      tool, raw, root: context.root, callId: call.id, ...(command === undefined ? {} : { command }),
+      tool, raw, root: context.root, callId: call.id, ...(command === undefined ? {} : { command }), ...(floorShell === undefined ? {} : { shell: floorShell }),
       ...(forbidden ? { forbidden } : {}), ...(sensitive ? { sensitive } : {}), ...(risky ? { risky } : {}),
       policy: this.options.policy, rules: this.options.rules, grants: this.grants,
+      ...(context.readOnlyRoots === undefined || context.readOnlyRoots.length === 0 ? {} : { readOnlyRoots: context.readOnlyRoots }),
       // Auto's context is built for every gated call, because a tool that marks itself autoSafe (the web tools) needs it as well as a shell command.
       buildAuto: async (effective) => {
         const unattended = this.options.unattended && (effective.mode === 'auto' || effective.mode === 'mostly-autonomous') && command !== undefined;
@@ -647,7 +684,7 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
       if (tool.capability !== 'read' && tool.capability !== 'plan') this.options.emit({ type: 'permission', tool: tool.name, decision: 'denied' });
       return this.finish(call.id, false, `Not allowed: ${forbidden}`);
     }
-    try { sensitive = await tool.sensitive?.(input, context); risky = await tool.risky?.(input, context); } catch (error) { return this.finish(call.id, false, `Error: ${(error as Error).message}`); }
+    try { sensitive = await tool.sensitive?.(input, context); risky = await tool.risky?.(input, context); } catch (error) { return checkFailed(error); }
     // The gate decides, with today's permission logic as its settings layer. A risky action asks in every mode, and an earlier "allow this command" does
     // not cover it; a sensitive read that would be allowed asks unless the mode is fully-autonomous (today's line 631, now inside decide()).
     const gateCall = await gateToolCall(this.gate, gateInput(), { model: this.options.model });
@@ -656,7 +693,8 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
     const gated = tool.capability !== 'read' && tool.capability !== 'plan';
     if (gated && decision.outcome !== 'ask') this.options.emit({ type: 'permission', tool: tool.name, decision: decision.outcome === 'deny' ? 'denied' : 'auto-allowed' });
     if (decision.outcome === 'deny') return this.finish(call.id, false, `Not allowed: ${decision.reason}`);
-    if (decision.outcome === 'ask') {
+    // A floor call the person approved once, late, runs now with no new card; the gate has used that approval up, so the next identical call asks again.
+    if (decision.outcome === 'ask' && !gateCall.approvedOnce) {
       let preview: ToolPreview | undefined;
       try {
         if (risky) {
@@ -667,10 +705,14 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
         } else {
           preview = sensitive ? { kind: 'note', text: sensitive } : await tool.preview?.(input, context);
         }
-      } catch (error) { return this.finish(call.id, false, `Error: ${(error as Error).message}`); }
-      // The card keeps the reason the settings layer gave; a question the gate itself asked (a floor ask, effects it cannot read) carries the gate's own.
+      } catch (error) { return checkFailed(error); }
+      // The card keeps the reason the settings layer gave; a question the gate itself asked (effects it cannot read) carries the gate's own. A floor ask
+      // keeps the settings layer's own words when it would have asked anyway (what the command does, in plain words) and adds why it always asks.
       const settingsSaid = gateCall.settings;
-      const reason = decision.floor || settingsSaid === undefined ? decision.reason : settingsSaid.decision === 'ask' ? settingsSaid.reason : risky ?? sensitive;
+      const settingsReason = settingsSaid?.decision === 'ask' ? settingsSaid.reason : undefined;
+      const reason = decision.floor
+        ? (settingsReason && decision.reason && !settingsReason.includes(decision.reason) ? `${settingsReason} ${decision.reason}` : decision.reason ?? settingsReason)
+        : settingsSaid === undefined ? decision.reason : settingsSaid.decision === 'ask' ? settingsSaid.reason : risky ?? sensitive;
       // Owner decision 2026-11-05 (0.4.17): the card says what the safety issue is in plain words, can show the whole command or code, and offers
       // "always allow" for every command, a held one included, because a held command is exactly the one a project should learn about. The entry
       // names the exact command up to its first option (exactRuleFor), so the same command is never asked again and a different one still is.
@@ -688,7 +730,7 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
       const allowRule = command === undefined || this.options.rememberAllowRule === undefined || !decision.offerAlwaysAllow
         ? undefined
         : offeredRule(command, risk.kind, [...this.options.rules.allowCommands, ...this.grants.allowRules]);
-      const reply = await this.options.requestApproval({
+      const card: ApprovalRequest = {
         callId: call.id, tool: tool.name, title, capability: tool.capability, preview,
         ...(reason ? { reason } : {}),
         ...(reason && risk.detail !== reason ? { reasonShort: risk.detail } : {}),
@@ -697,8 +739,10 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
         ...(reason ? { risk: { kind: risk.kind, headline: risk.headline } } : {}),
         ...(allowRule ? { allowRule } : {}),
         ...(command ? { subject: command } : {}),
+        ...(decision.floor && gateCall.callKey !== undefined ? { floor: { callKey: gateCall.callKey } } : {}),
         ...(decision.allowGrant && command !== undefined && command.trim() ? { grant: { command: command.trim() } } : decision.allowGrant && tool.capability === 'workspaceWrite' ? { grant: { edits: true } } : {})
-      });
+      };
+      const reply = await this.options.requestApproval(card);
       // The card only carried the question: the answer goes back into the gate, which records it against this call and, for an allow, asks the layers that
       // outrank the person again (emergency stop, bundle state, the floor's refusals, the ceiling) before anything runs (D-09).
       const answered = await recordApprovalReply(this.gate, gateCall, reply, { model: this.options.model });
@@ -708,7 +752,7 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
       }
       // PERF-01: nobody answered in time. Nothing ran; the card stays queued, and the agent works on rather than waiting.
       if (reply.decision === 'pending') {
-        return this.finish(call.id, false, `${AWAITING_APPROVAL_PREFIX} this action has not run. It is queued for the user to approve, and they have been notified. Do not retry it now and do not wait for it: carry on with work that does not depend on it, and list it under "Waiting for approval" in your report. If the user approves it, the same call is allowed for the rest of this run.`);
+        return this.finish(call.id, false, awaitingApprovalMessage(card));
       }
       if (!answered.proceed) return this.finish(call.id, false, `Not allowed: ${answered.reason}`);
       if ((reply.decision === 'allow-run' || reply.decision === 'allow-always') && decision.allowGrant) {
@@ -735,6 +779,18 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
     }
   }
 
+  /** Where a shell command runs and what the project's scripts run, for the floor. No safety model and no runtime check: it must be cheap for every call. */
+  private async floorShellContext(context: ToolContext): Promise<FloorShellContext> {
+    const root = context.root;
+    return {
+      cwd: context.shell?.workingDirectory ?? root,
+      // The scripts of the folder each package manager in the command really runs in, not only the project root's.
+      packageScriptsAt: (folder) => this.packageScripts.at(folder, root),
+      ...(context.trustedToolRoots === undefined ? {} : { trustedRoots: context.trustedToolRoots }),
+      ...(context.gsdRuntime?.preambles.length ? { gsdPreambles: context.gsdRuntime.preambles } : {})
+    };
+  }
+
   /** Where a shell command would run, and what the project's npm scripts run, for the auto mode's checks. */
   private async autoContext(context: ToolContext, command = ''): Promise<AutoApprovalContext> {
     const root = context.root;
@@ -758,7 +814,7 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
       ? { gsdPreambles: runtime.preambles, gsdRun: await resolveGsdRun(cwd, runtime.home, context.shell?.environment ?? process.env) }
       : {};
     return {
-      root, cwd, home: homedir(), packageScripts, trustedToolRoots: context.trustedToolRoots, writtenScratch: await this.unchangedScratchWrites(), ...gsd, safety: this.options.safety, signal: context.signal,
+      root, cwd, home: homedir(), packageScripts, packageScriptsAt: (folder: string) => this.packageScripts.at(folder, root), trustedToolRoots: context.trustedToolRoots, writtenScratch: await this.unchangedScratchWrites(), ...gsd, safety: this.options.safety, signal: context.signal,
       ...(this.options.riskSwitches ? { riskSwitches: this.options.riskSwitches } : {}),
       ...(this.options.unattended ? { unattended: { runStartedAt: this.startedAt, ...(this.grants.taintedAt !== undefined ? { taintedAt: this.grants.taintedAt } : {}), ...this.options.unattended } } : {})
     };

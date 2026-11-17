@@ -9,7 +9,7 @@
 import { createHash } from 'node:crypto';
 import { appendFile, mkdir, open, rename, rm, stat } from 'node:fs/promises';
 import * as path from 'node:path';
-import { redactRecord, validateDecisionRecord } from '../domain/gate/record';
+import { redactRecord, validateDecisionRecord, withKnownRule } from '../domain/gate/record';
 import type { DecisionRecord } from '../domain/gate/record';
 import { withFileLock } from '../services/stateMirrorLock';
 import { GATE_DIR_NAME } from './bundleStore';
@@ -157,7 +157,10 @@ export class DecisionLog {
       }
       const sequence = this.lastSequence + 1;
       // The record that is checked is exactly the record that is stored: the real sequence goes in first, then the check, then the line is made from it.
-      const stored: DecisionRecord = { ...clean, metadata: { ...clean.metadata, sequence } };
+      // A rule nobody knows is kept under record.unknown-rule with the id beside it, never dropped (PR #74 review round 11); the log says so once.
+      const known = withKnownRule(clean);
+      if (known !== clean) this.fail(new RecordRefused('A decision record named a rule NEAR AI does not know, so it was kept under record.unknown-rule. Your work is not affected.'));
+      const stored: DecisionRecord = { ...known, metadata: { ...known.metadata, sequence } };
       const checked = validateDecisionRecord(stored);
       if (!checked.ok) throw new RecordRefused('A decision record was not valid, so it was not saved. Your work is not affected.');
       const line = `${JSON.stringify(checked.value)}\n`;

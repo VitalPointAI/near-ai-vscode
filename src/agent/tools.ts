@@ -1,10 +1,13 @@
 import { execFile } from 'node:child_process';
-import { mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, realpath, stat, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import * as path from 'node:path';
+import { MAX_COMMAND_LENGTH, MAX_COMMAND_WORDS } from '../domain/commandBounds';
 import type { ActionCapability } from '../domain/policy';
 import { parseToolManifest } from '../domain/gate/manifest';
 import { contentsOf } from '../domain/gate/pathCover';
+import { CREDENTIAL_STORES, EXTENSION_STORAGE_FOLDERS, VSCODE_SECRET_FILES, credentialReason, identityFilesReason, namesCredentialStore, namesIdentityFiles } from '../domain/gate/floor';
+import type { FloorLocations } from '../domain/gate/floor';
 import type { InputAs, RunsOn, ToolManifest } from '../domain/gate/manifest';
 import type { GateContextName } from '../domain/gate/bundle';
 import { namesStateKeys, protectedWriteReason, STATE_FOLDER_PATH, STATE_KEYS_PATH, stateKeysReason } from '../domain/protectedPaths';
@@ -604,6 +607,104 @@ export async function shellReachesStateKeys(command: string, context: ToolContex
     }
   }
   return undefined;
+}
+
+/** What a command reaches outside the project that the floor refuses (D-16): a credential store, or this extension's identity and gate folders. */
+export interface CredentialReach {
+  readonly credentialStore?: string;
+  readonly identityFiles?: string;
+  /** Set, with the reason, when the command is past the bounds the classifier reads (MAX_COMMAND_LENGTH, MAX_COMMAND_WORDS): its words were not resolved. */
+  readonly unreadable?: string;
+}
+
+/** Whether a path, split into segments, is at or under `place` (also split), each segment equal to the place's or a glob that could match it. */
+function reachesPlace(segments: readonly string[], place: readonly string[]): boolean {
+  if (segments.length < place.length) return false;
+  return place.every((name, index) => {
+    const segment = segments[index];
+    return segment.toLowerCase() === name.toLowerCase() || (globSegment(segment)?.test(name) ?? false);
+  });
+}
+
+/** The path below `base`, in segments, or undefined when `absolute` is not inside it (the base itself is not inside it either). */
+function segmentsBelow(base: string, absolute: string): string[] | undefined {
+  const relative = path.relative(base, absolute);
+  if (relative === '' || relative.startsWith('..') || path.isAbsolute(relative)) return undefined;
+  return relative.split(path.sep).filter(Boolean);
+}
+
+/** The real path of a file, or of its folder with the file's name after it when the file does not exist; undefined when neither resolves. Reads no file. */
+async function realPathLoose(absolute: string, resolve: (target: string) => Promise<string> = realpath): Promise<string | undefined> {
+  try { return await resolve(absolute); } catch { /* not there: try its folder */ }
+  try { return path.join(await resolve(path.dirname(absolute)), path.basename(absolute)); } catch { return undefined; }
+}
+
+/**
+ * Whether a command line reaches a credential store or this extension's own identity and gate folders (D-16), outside the project, where the file tools
+ * cannot go. The text checks of the floor come first (a store after `~`, `$HOME` or the home folder, VS Code's secrets database, a keychain command); then
+ * every word is resolved, as shellReachesStateKeys does for the key folder, against the shell's folder and each folder a `cd` or `pushd` (or a bare `cd`,
+ * which goes home) moves to, with `~`, `$HOME` and `${HOME}` expanded to `locations.home`, braces expanded and globs read as reaching a store when they
+ * could; the first SHELL_LINK_CHECKS words are also resolved through links. It only reads the command's text and resolves paths: it never opens or lists a
+ * file. Still a heuristic, with the limits FLOOR_CANNOT_SEE_TEXT names: a path built at run time or a walk down from a parent folder is not seen.
+ */
+export async function shellReachesCredentialStore(command: string, context: { root: string; shell?: { workingDirectory: string } }, locations: FloorLocations = {}, options: { realpath?: (target: string) => Promise<string> } = {}): Promise<CredentialReach> {
+  const found: { credentialStore?: string; identityFiles?: string; unreadable?: string } = {};
+  if (command.trim() === '') return found;
+  // A path inside the project named like VS Code's storage is the project's own (PR #74 review round 11): read from the shell's folder.
+  const byText = namesCredentialStore(command, locations, { root: context.root, cwd: context.shell?.workingDirectory ?? context.root });
+  if (byText !== undefined) found.credentialStore = byText;
+  const identityByText = namesIdentityFiles(command, locations);
+  if (identityByText !== undefined) found.identityFiles = identityByText;
+  if (found.credentialStore !== undefined && found.identityFiles !== undefined) return found;
+  // The classifier's own bounds (PR #74 review round 11): past them, no word is resolved, and the command's effects are unknown to the gate.
+  if (command.length > MAX_COMMAND_LENGTH) return { ...found, unreadable: 'the command is too long to check for credential folders' };
+  if (command.split(/[\s'"`;&|()<>=]+/).length > MAX_COMMAND_WORDS) return { ...found, unreadable: 'the command has too many words to check for credential folders' };
+  const resolveLoose = (target: string): Promise<string | undefined> => realPathLoose(target, options.realpath);
+  const home = locations.home ? path.resolve(locations.home) : undefined;
+  const storage = locations.globalStorage ? path.resolve(locations.globalStorage) : undefined;
+  const homes = home === undefined ? [] : [...new Set([home, (await resolveLoose(home)) ?? home])];
+  const storages = storage === undefined ? [] : [...new Set([storage, (await resolveLoose(storage)) ?? storage])];
+  const stores = CREDENTIAL_STORES.map((store) => store.split('/'));
+  // VS Code's secrets database only where VS Code keeps it (PR #74 review): its storage folder names, or this VS Code's own storage folders, as the global
+  // storage is written and as it resolves. A project file of the same name is the project's.
+  const secretsAt = storages.length === 0 ? [{}] : storages.map((globalStorage) => ({ globalStorage }));
+  const isStore = (absolute: string): boolean => {
+    if (VSCODE_SECRET_FILES.some((name) => name.toLowerCase() === path.basename(absolute).toLowerCase()) && secretsAt.some((at) => namesCredentialStore(absolute, at, { root: context.root }) !== undefined)) return true;
+    return homes.some((base) => { const below = segmentsBelow(base, absolute); return below !== undefined && stores.some((store) => reachesPlace(below, store)); });
+  };
+  const isIdentity = (absolute: string): boolean => storages.some((base) => {
+    const below = segmentsBelow(base, absolute);
+    return below !== undefined && EXTENSION_STORAGE_FOLDERS.some((folder) => reachesPlace(below, [folder]));
+  });
+  const expandHome = (word: string): string => (home === undefined ? word : word.replace(/^(?:~|\$\{HOME\}|\$HOME)(?=\/|$)/, home));
+  const start = context.shell?.workingDirectory ?? context.root;
+  const bases = [start];
+  // A bare `cd` (or `cd ~`) goes home: later words are read from there too.
+  if (home !== undefined && /(?:^|[;&|(\n]\s*)(?:cd|pushd)\s*(?=$|[;&|)\n])/.test(command)) bases.push(home);
+  // Each word as written (for the reason) and with the home folder put in (for resolving); a word the shell still expands at run time is not read.
+  const words = command.split(/[\s'"`;&|()<>=]+/).filter((word) => word && !word.startsWith('-'))
+    .map((shown) => ({ shown, word: expandHome(shown) })).filter(({ word }) => !word.includes('$'));
+  let linkChecks = 0;
+  for (let index = 0; index < words.length; index += 1) {
+    const { shown, word } = words[index];
+    for (const expanded of expandBraces(word)) {
+      for (const base of bases) {
+        const absolute = path.resolve(base, expanded);
+        let real: string | undefined;
+        if (found.credentialStore === undefined || found.identityFiles === undefined) {
+          if (!/[*?[]/.test(absolute) && linkChecks < SHELL_LINK_CHECKS) { linkChecks += 1; real = await resolveLoose(absolute); }
+        }
+        if (found.credentialStore === undefined && (isStore(absolute) || (real !== undefined && isStore(real)))) found.credentialStore = credentialReason(shown);
+        if (found.identityFiles === undefined && (isIdentity(absolute) || (real !== undefined && isIdentity(real)))) found.identityFiles = identityFilesReason(shown);
+        if (found.credentialStore !== undefined && found.identityFiles !== undefined) return found;
+      }
+    }
+    const previous = words[index - 1]?.word;
+    if ((previous === 'cd' || previous === 'pushd') && bases.length < SHELL_CD_BASES) {
+      for (const base of [...bases]) if (bases.length < SHELL_CD_BASES) bases.push(path.resolve(base, word));
+    }
+  }
+  return found;
 }
 
 export const bashTool: AgentTool<{ command: string; timeoutMs: number; background: boolean; description?: string }> = {

@@ -1,5 +1,45 @@
 # Changelog
 
+## Unreleased
+
+Full auto still runs your work without asking, but it now stops for the few things that are hard
+to undo, and no mode lets an agent near the places where your keys and passwords are kept.
+
+- **Full auto asks before what is hard to undo.** In every approval mode, Full auto included, the
+  agent asks before it writes into git's own folder (`.git/`) or NEAR AI's own folders
+  (`.planning/.near-ai/`, other than the team file, and `.near-ai/`, other than its scratch and
+  attachments folders), before it publishes (git push, package and extension publishing, releases,
+  container images, deploys, sending email) and before it destroys work (recursive deletes outside
+  scratch and build folders, `git reset --hard`, `git clean`, discarding changes, rewriting history,
+  deleting branches and tags). These cards have no **Always allow** and approving one allows only
+  that call. In a run with nobody to answer, such as a model comparison or a benchmark, they are
+  refused. Everything else still runs without asking.
+- **Key and credential stores are off limits in every mode.** The NEAR key folder in your home
+  folder, SSH keys, cloud and registry credential files, keychain commands that print a secret, VS
+  Code's own secrets database and this extension's identity and policy files are refused with no
+  card, whether the agent uses a file tool or a shell command. A file in your project that only has
+  the same name as VS Code's secrets database is yours to use. The check reads the command's text,
+  so a command that only mentions one of these places, such as a commit message naming `~/.ssh`, is
+  refused too: rephrase it, or do that step yourself.
+- **A command the checks cannot read whole asks.** A shell command nested more than four levels
+  deep, too long to check, or started by a program the checks do not know with a command such as
+  git push after it, asks first in Full auto too, and is refused when nobody is there to answer,
+  instead of running unread. So does one the checks cannot parse, such as a line with a quote left
+  open. Commands run through stdbuf, flock or watch are read like any other.
+  The scripts that `npm run` and the like start are read from the package.json of the folder the
+  command runs in, so `cd sub && npm run sync` is read as sub's script; when that folder cannot be
+  told, the command asks too.
+- **Approving a helper's card late runs that call once.** When you approve a helper agent's card
+  after the helper has moved on, that exact call may run once; the next one like it asks again.
+- **Web search with no search provider set up no longer asks first.** Such a call only says that
+  web search is not set up, so it runs like reading and planning.
+- **Decision records leave out passwords and tokens by kind.** The command kept in a decision
+  record has them removed wherever they sit: in a web address, after options such as `--user`,
+  `--password` or `--token`, in headers such as `Authorization` and `Cookie`, and in a variable or
+  query parameter named for one. SECURITY.md lists what is removed and what is not.
+- **Team Studio follows the folder you have open.** Open another folder while Team Studio is open
+  and it lists, tests and saves that folder's team.
+
 ## 0.4.28
 
 This release adds Team Live, a panel where you watch your team work: the lead hands out tasks,

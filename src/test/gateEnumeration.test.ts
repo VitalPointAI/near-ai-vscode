@@ -23,6 +23,7 @@ import { GATE_RULE_IDS } from '../domain/gate/decide';
 import { EFFECTS_NOT_DECLARED_TEXT, describeManifest } from '../domain/gate/words';
 import type { GateRuntime } from '../domain/gate/decide';
 import type { ToolManifest } from '../domain/gate/manifest';
+import { validateDecisionRecord } from '../domain/gate/record';
 import type { DecisionRecord } from '../domain/gate/record';
 import type { ActionPolicy } from '../domain/policy';
 import { GateHost } from '../gate/host';
@@ -52,6 +53,9 @@ import { loadBenchmarkTasks } from '../benchmark/tasks';
 import { testGateRuntime } from './helpers/gatedRuns';
 import { configuredFiles, countByFile, findToolRunSites, programFor } from './helpers/toolRunScan';
 import type { RunSite } from './helpers/toolRunScan';
+
+// The name of the floor option PR 2 had, built so that a search of src for it finds only product code that brings it back.
+const OLD_FLOOR_OPTION = ['floor', 'Mode'].join('');
 
 const call = (id: string, name: string, args: Record<string, unknown>): ToolCall => ({ id, type: 'function', function: { name, arguments: JSON.stringify(args) } });
 const usage = { inputTokens: 10, outputTokens: 5, verificationStatus: 'unknown' as const, latencyMs: 1 };
@@ -144,7 +148,7 @@ test('tracer: activation starts the gate, and a chat run\'s Write is decided in 
   let seenWhenAsked: DecisionRecord[] = [];
   let existedWhenAsked: boolean | undefined;
   const setup = runWith(root, [{ calls: [call('w1', 'Write', { file_path: 'out.md', content: 'hello' })] }, { text: 'Written.' }], {
-    gate: await started.host.runtimeFor({ root, actor: { kind: 'agent', sessionId: 'conv-1', agentId: 'main-1', agentLabel: 'agent' }, presence: 'person', context: 'interactive', floorMode: 'shadow' }),
+    gate: await started.host.runtimeFor({ root, actor: { kind: 'agent', sessionId: 'conv-1', agentId: 'main-1', agentLabel: 'agent' }, presence: 'person', context: 'interactive' }),
     answer: async () => {
       // The card is being shown: the record of the question must already be on disk, and the file must not exist yet.
       seenWhenAsked = await logOf(started, root);
@@ -187,7 +191,7 @@ test('a changed bundle file fails closed: a Write is refused with the bundle\'s 
   const setup = runWith(root, [
     { calls: [call('w1', 'Write', { file_path: 'out.md', content: 'nope' }), call('r1', 'Read', { file_path: 'a.ts' })] },
     { text: 'ok' }
-  ], { gate: await second.host.runtimeFor({ root, actor: { kind: 'agent', sessionId: 'conv-2', agentId: 'main-2' }, presence: 'person', context: 'interactive', floorMode: 'shadow' }), mode: 'fully-autonomous' });
+  ], { gate: await second.host.runtimeFor({ root, actor: { kind: 'agent', sessionId: 'conv-2', agentId: 'main-2' }, presence: 'person', context: 'interactive' }), mode: 'fully-autonomous' });
   try {
     await go(setup);
   } finally {
@@ -205,7 +209,7 @@ test('a changed bundle file fails closed: a Write is refused with the bundle\'s 
 test('with a valid bundle the gate changes no decision: Edit asks in approve-risky, the same call runs unasked in mostly-autonomous, a Read never asks', async () => {
   const started = await startedHost();
   const root = await project();
-  const runtime = (): Promise<GateRuntime> => started.host.runtimeFor({ root, actor: { kind: 'agent', sessionId: 'c', agentId: 'm' }, presence: 'person', context: 'interactive', floorMode: 'shadow' });
+  const runtime = (): Promise<GateRuntime> => started.host.runtimeFor({ root, actor: { kind: 'agent', sessionId: 'c', agentId: 'm' }, presence: 'person', context: 'interactive' });
   const edit = (id: string): ToolCall => call(id, 'Edit', { file_path: 'a.ts', old_string: 'value = 1', new_string: 'value = 2' });
   const asking = runWith(root, [{ calls: [call('r1', 'Read', { file_path: 'a.ts' }), edit('e1')] }, { text: 'done' }], { gate: await runtime() });
   try {
@@ -228,12 +232,12 @@ test('with a valid bundle the gate changes no decision: Edit asks in approve-ris
 
 // ---- the loop passes the model's raw arguments, and an absolute path inside the project is read as its project path ----
 
-test('a Write named by an absolute path inside the project is judged as that project path: the floor would ask, shadow keeps today\'s decision and records the floor rule beside it', async () => {
+test('a Write named by an absolute path inside the project is judged as that project path: the floor asks in fully-autonomous, and the record names the floor rule and the project path', async () => {
   const started = await startedHost();
   const root = await project();
   const hooks = path.join(root, '.git', 'hooks');
   const setup = runWith(root, [{ calls: [call('w1', 'Write', { file_path: path.join(hooks, 'pre-commit'), content: '#!/bin/sh\n' })] }, { text: 'ok' }], {
-    gate: await started.host.runtimeFor({ root, actor: { kind: 'agent', sessionId: 'c', agentId: 'm' }, presence: 'person', context: 'interactive', floorMode: 'shadow' }),
+    gate: await started.host.runtimeFor({ root, actor: { kind: 'agent', sessionId: 'c', agentId: 'm' }, presence: 'person', context: 'interactive' }),
     mode: 'fully-autonomous'
   });
   try {
@@ -241,11 +245,15 @@ test('a Write named by an absolute path inside the project is judged as that pro
   } finally {
     setup.shell.dispose();
   }
-  // Today's loop asks for a protected write only through the tool's own sensitive hook; the gate records what the floor would have said.
+  // The floor asked, with no shortcut on the card; the person's allow ran that one call, and both decisions are on record against it.
+  assert.equal(setup.approvals.length, 1);
+  assert.equal(setup.approvals[0]?.grant, undefined);
+  assert.equal(setup.approvals[0]?.allowRule, undefined);
   const records = await logOf(started, root);
   const first = records.find((record) => callIdOf(record) === 'w1');
   assert.ok(first);
-  assert.equal(first.unmapped.nearAi.shadowFloor, 'floor.protected-write');
+  assert.equal(first.authorizations[0]?.policy.name, 'floor.protected-write');
+  assert.equal(first.unmapped.nearAi.shadowFloor, undefined, 'nothing is only reported any more');
   assert.equal(first.resources[0]?.name, '.git/hooks/pre-commit');
 });
 
@@ -261,58 +269,52 @@ test('manifestArguments writes an absolute path inside the folder as a project p
 
 // ---- effects the gate cannot read ----
 
-test('a call whose effects cannot be filled keeps today\'s decision while the floor only reports, and asks or refuses with manifest.effects-unknown once it is enforced', async () => {
+test('a call whose effects cannot be filled asks with manifest.effects-unknown when a person is here and is refused when nobody is, with no stand-in', async () => {
   const root = await project();
   const outside = path.join(tmpdir(), 'near-ai-gate-outside', 'x.txt');
   const read = CORE_TOOLS.find((tool) => tool.name === 'Read') as AgentTool<any>;
-  const input = (gate: GateRuntime) => ({
+  const input = {
     tool: read, raw: { file_path: outside }, root, callId: 'r1', policy: { mode: 'approve-risky', emergencyStop: false } as ActionPolicy,
-    rules: DEFAULT_RULES, grants: new RunGrants(), buildAuto: async () => undefined, ...(gate ? {} : {})
-  });
-  const shadow = testGateRuntime();
-  assert.ok(effectsOfCall(shadow, read, { file_path: outside }, root).length > 0, 'the stand-in is never an empty list');
-  const kept = await gateToolCall(shadow, input(shadow));
-  assert.equal(kept.decision.outcome, 'allow');
-  assert.equal(kept.decision.rule, 'settings.read-plan');
-  const enforced: GateRuntime = { ...testGateRuntime(), floorMode: 'enforce' };
-  assert.deepEqual(effectsOfCall(enforced, read, { file_path: outside }, root), []);
-  const asked = await gateToolCall(enforced, input(enforced));
+    rules: DEFAULT_RULES, grants: new RunGrants(), buildAuto: async () => undefined
+  };
+  assert.deepEqual(effectsOfCall(read, { file_path: outside }, root), []);
+  const asked = await gateToolCall(testGateRuntime(), input);
   assert.equal(asked.decision.outcome, 'ask');
   assert.equal(asked.decision.rule, 'manifest.effects-unknown');
   assert.equal(asked.decision.offerAlwaysAllow, false);
   assert.equal(asked.decision.allowGrant, false);
-  const nobody = await gateToolCall({ ...enforced, presence: 'none' }, input(enforced));
+  const nobody = await gateToolCall(testGateRuntime({ presence: 'none', context: 'unattended' }), input);
   assert.equal(nobody.decision.outcome, 'deny');
   assert.equal(nobody.decision.rule, 'manifest.effects-unknown');
 });
 
-test('a tool whose manifest lists no effect is effects-unknown at the gate, as its words say: asked with a person here, refused with nobody, in shadow and enforce, never the widest shorthand', async () => {
+test('a tool whose manifest lists no effect is effects-unknown at the gate, as its words say: asked with a person here, refused with nobody, never the widest shorthand', async () => {
   const root = await project();
   const read = CORE_TOOLS.find((tool) => tool.name === 'Read') as AgentTool<any>;
   // The parsers refuse an empty effect list, so a hand-made manifest stands in for a damaged stored one.
   const manifest = { manifestVersion: 1, tool: 'Undeclared', effects: [], hosts: [], credentials: [], contexts: ['interactive', 'unattended'], untrusted: false, runsOn: 'this-machine' } as unknown as ToolManifest;
   const undeclared: AgentTool<any> = { ...read, name: 'Undeclared', manifest };
   const input = { tool: undeclared, raw: { file_path: 'a.ts' }, root, callId: 'u1', policy: { mode: 'fully-autonomous', emergencyStop: false } as ActionPolicy, rules: DEFAULT_RULES, grants: new RunGrants(), buildAuto: async () => undefined };
-  assert.deepEqual(effectsOfCall(testGateRuntime(), undeclared, input.raw, root), [], 'no stand-in is invented for it');
-  for (const floorMode of ['shadow', 'enforce'] as const) {
-    const asked = await gateToolCall({ ...testGateRuntime(), floorMode }, input);
-    assert.equal(asked.decision.outcome, 'ask', floorMode);
-    assert.equal(asked.decision.rule, 'manifest.effects-unknown', floorMode);
-    const nobody = await gateToolCall({ ...testGateRuntime({ presence: 'none', context: 'unattended' }), floorMode }, input);
-    assert.equal(nobody.decision.outcome, 'deny', floorMode);
-    assert.equal(nobody.decision.rule, 'manifest.effects-unknown', floorMode);
-  }
+  assert.deepEqual(effectsOfCall(undeclared, input.raw, root), [], 'no stand-in is invented for it');
+  const asked = await gateToolCall(testGateRuntime(), input);
+  assert.equal(asked.decision.outcome, 'ask');
+  assert.equal(asked.decision.rule, 'manifest.effects-unknown');
+  const nobody = await gateToolCall(testGateRuntime({ presence: 'none', context: 'unattended' }), input);
+  assert.equal(nobody.decision.outcome, 'deny');
+  assert.equal(nobody.decision.rule, 'manifest.effects-unknown');
   assert.ok(describeManifest(manifest).includes(EFFECTS_NOT_DECLARED_TEXT), 'the Tools page says the same thing');
 });
 
-test('no built-in tool declares an empty effect list: every manifest has a template, and an unreadable call still gets a non-empty stand-in while the floor reports', () => {
-  const shadow = testGateRuntime();
+test('no built-in tool declares an empty effect list, and a call missing the fields its manifest reads is unknown, never a stand-in', () => {
   const root = path.join(tmpdir(), 'near-ai-gate-catalog');
   const tools = builtInTools();
   assert.ok(tools.length >= 40);
   for (const tool of tools) {
     assert.ok(tool.manifest.effects.some((entry) => !('from' in entry)), `${tool.name} declares at least one effect of its own`);
-    assert.ok(effectsOfCall(shadow, tool, {}, root).length > 0, `${tool.name} never reaches decide() with an empty list`);
+    const readsInput = JSON.stringify(tool.manifest.effects).includes('"from":"input"');
+    const filled = effectsOfCall(tool, {}, root);
+    if (readsInput && tool.manifestInput === undefined) assert.deepEqual(filled, [], `${tool.name}: a call with none of its fields has unknown effects`);
+    else if (!readsInput) assert.ok(filled.length > 0, `${tool.name} names no input, so its effects are always known`);
   }
 });
 
@@ -341,7 +343,7 @@ test('every rule id a settings answer is given is a rule id the gate can record'
 test('a card answered allow gives asked then approved for the same call id; answered deny gives asked then denied and the call does not run', async () => {
   const started = await startedHost();
   const root = await project();
-  const runtime = (): Promise<GateRuntime> => started.host.runtimeFor({ root, actor: { kind: 'agent', sessionId: 'c', agentId: 'm' }, presence: 'person', context: 'interactive', floorMode: 'shadow' });
+  const runtime = (): Promise<GateRuntime> => started.host.runtimeFor({ root, actor: { kind: 'agent', sessionId: 'c', agentId: 'm' }, presence: 'person', context: 'interactive' });
   const allowed = runWith(root, [{ calls: [call('a1', 'Write', { file_path: 'yes.md', content: 'y' })] }, { text: 'ok' }], { gate: await runtime(), answer: () => ({ decision: 'allow' }) });
   const denied = runWith(root, [{ calls: [call('d1', 'Write', { file_path: 'no.md', content: 'n' })] }, { text: 'ok' }], { gate: await runtime(), answer: () => ({ decision: 'deny' }) });
   try {
@@ -363,7 +365,7 @@ test('if the emergency stop is switched on between the card and the answer, an a
   const root = await project();
   let setup: RunSetup | undefined;
   setup = runWith(root, [{ calls: [call('w1', 'Write', { file_path: 'late.md', content: 'x' })] }, { text: 'ok' }], {
-    gate: await started.host.runtimeFor({ root, actor: { kind: 'agent', sessionId: 'c', agentId: 'm' }, presence: 'person', context: 'interactive', floorMode: 'shadow' }),
+    gate: await started.host.runtimeFor({ root, actor: { kind: 'agent', sessionId: 'c', agentId: 'm' }, presence: 'person', context: 'interactive' }),
     answer: () => { (setup as RunSetup).policy.emergencyStop = true; return { decision: 'allow' }; }
   });
   try {
@@ -380,7 +382,7 @@ test('if the emergency stop is switched on between the card and the answer, an a
 test('if the bundle fails between the card and the answer, an allow is re-checked and refused with the bundle\'s sentence', async () => {
   const root = await project();
   const fresh = await startedHost();
-  const live = await fresh.host.runtimeFor({ root, actor: { kind: 'agent', sessionId: 'c', agentId: 'm' }, presence: 'person', context: 'interactive', floorMode: 'shadow' });
+  const live = await fresh.host.runtimeFor({ root, actor: { kind: 'agent', sessionId: 'c', agentId: 'm' }, presence: 'person', context: 'interactive' });
   const valid = live.bundleState();
   let state: BundleState = valid;
   const gate: GateRuntime = { ...live, bundleState: () => state };
@@ -435,6 +437,53 @@ test('a call with unparseable arguments reaches no decision and no execution, an
     quiet.shell.dispose();
   }
   assert.equal(none.records.length, 0);
+});
+
+// PR #70 review carry-over: a call refused before the gate could be asked wrote no record, so the log did not show every refusal.
+test('a call to a tool the run does not have is refused and recorded denied with call.unknown-tool, naming the tool and never its arguments', async () => {
+  const root = await project();
+  const runtime = testGateRuntime();
+  const setup = runWith(root, [{ calls: [{ id: 'ghost', type: 'function', function: { name: 'DeleteEverything', arguments: '{"path":"secret-plan.md"}' } }] }, { text: 'ok' }], { gate: runtime });
+  try {
+    await go(setup);
+  } finally {
+    setup.shell.dispose();
+  }
+  assert.equal(runtime.records.length, 1);
+  const record = runtime.records[0]!;
+  assert.equal(record.authorizations[0]!.policy.name, 'call.unknown-tool');
+  assert.ok(GATE_RULE_IDS.includes('call.unknown-tool'));
+  assert.equal(record.api.request.uid, 'ghost');
+  assert.equal(record.action_id, 2, 'denied');
+  assert.deepEqual(record.resources, [{ name: 'DeleteEverything', type: 'tool' }]);
+  assert.ok(!JSON.stringify(record).includes('secret-plan'), 'the arguments are not recorded');
+  assert.equal(validateDecisionRecord(record).ok, true);
+});
+
+test('a tool whose own check throws is not run and is recorded denied with call.check-failed, for the forbidden, sensitive, risky and preview hooks', async () => {
+  const write = CORE_TOOLS.find((tool) => tool.name === 'Write') as AgentTool<any>;
+  for (const hook of ['forbidden', 'sensitive', 'risky', 'preview'] as const) {
+    const root = await project();
+    const runtime = testGateRuntime();
+    let ran = false;
+    const broken: AgentTool<any> = { ...write, [hook]: async () => { throw new Error(`the ${hook} check fell over at /private/detail`); }, run: async () => { ran = true; return 'ran'; } };
+    const setup = runWith(root, [{ calls: [{ id: `call-${hook}`, type: 'function', function: { name: 'Write', arguments: JSON.stringify({ file_path: 'out.md', content: 'x' }) } }] }, { text: 'ok' }], { gate: runtime, tools: [broken], answer: () => ({ decision: 'allow' }) });
+    try {
+      await go(setup);
+    } finally {
+      setup.shell.dispose();
+    }
+    assert.equal(ran, false, `${hook}: the call did not run`);
+    assert.match(toolOutputs(setup)[0] ?? '', /fell over/, `${hook}: the model is told why`);
+    const last = runtime.records.at(-1)!;
+    assert.equal(last.authorizations[0]!.policy.name, 'call.check-failed', hook);
+    assert.equal(last.api.request.uid, `call-${hook}`);
+    assert.equal(last.action_id, 2, `${hook}: denied`);
+    assert.equal(last.api.operation, 'workspaceWrite', `${hook}: named by the tool's own shorthand`);
+    assert.ok(!JSON.stringify(last).includes('/private/detail'), `${hook}: the error's text is not recorded`);
+    // The preview runs after the gate asked, so its record follows the ask and closes it; the other hooks run before the gate, so theirs is the only one.
+    assert.deepEqual(runtime.records.map((entry) => entry.unmapped.nearAi.outcome ?? entry.action_id), hook === 'preview' ? ['asked', 2] : [2], hook);
+  }
 });
 
 test('in a batch of concurrent lookups each call gets its own decision before its own run', async () => {
@@ -503,8 +552,8 @@ test('a sub-agent spawn is decided like any call, and the child\'s own calls are
     conversation.dispose();
   }
   assert.equal(existsSync(path.join(root, 'helper.md')), true);
-  assert.deepEqual(host.requests.map((request) => [request.actor.kind, request.presence, request.context, request.floorMode]), [
-    ['agent', 'person', 'interactive', 'shadow'], ['sub-agent', 'person', 'interactive', 'shadow']
+  assert.deepEqual(host.requests.map((request) => [request.actor.kind, request.presence, request.context, OLD_FLOOR_OPTION in request]), [
+    ['agent', 'person', 'interactive', false], ['sub-agent', 'person', 'interactive', false]
   ]);
   const records = await logOf({ host, storage, secrets: new MemorySecrets(), problems: [] }, root);
   const byCall = (id: string): DecisionRecord | undefined => records.find((record) => callIdOf(record) === id);
@@ -519,7 +568,7 @@ test('a sub-agent spawn is decided like any call, and the child\'s own calls are
 
 test('a card for a floor decision carries no run-wide grant and no "always allow", and with nobody present the same call is refused with no card (floor enforced)', async () => {
   const root = await project();
-  const enforced = (presence: 'person' | 'none'): GateRuntime => ({ ...testGateRuntime({ presence }), floorMode: 'enforce' });
+  const enforced = (presence: 'person' | 'none'): GateRuntime => testGateRuntime({ presence });
   const hook = call('f1', 'Write', { file_path: '.git/hooks/pre-commit', content: '#!/bin/sh\n' });
   const asked = runWith(root, [{ calls: [hook] }, { text: 'ok' }], { gate: enforced('person'), mode: 'fully-autonomous', answer: () => ({ decision: 'allow-always' }) });
   const refused = runWith(root, [{ calls: [hook] }, { text: 'ok' }], { gate: enforced('none'), mode: 'fully-autonomous' });
@@ -649,7 +698,7 @@ test('a run nobody watches is decided with presence none and context unattended,
   const nobody = runGateFor({}) as ReturnType<typeof testGateRuntime>;
   assert.equal(nobody.presence, 'none');
   assert.equal(nobody.context, 'unattended');
-  assert.equal(nobody.floorMode, 'shadow');
+  assert.equal(OLD_FLOOR_OPTION in nobody, false, 'no runtime carries a floor mode: the floor is always enforced');
   const asked = runGateFor({ requestApproval: async () => ({ decision: 'allow' }) });
   assert.equal(asked.presence, 'person');
   assert.equal(asked.context, 'interactive');
@@ -675,7 +724,7 @@ test('with a host runtime passed in, a benchmark run\'s decisions land in the ho
   const started = await startedHost();
   const root = await project();
   const logged = await mkdtemp(path.join(tmpdir(), 'near-ai-bench-root-'));
-  const gate = await started.host.runtimeFor({ root, actor: { kind: 'agent', sessionId: 'bench-1', agentLabel: 'benchmark' }, presence: 'none', context: 'unattended', floorMode: 'shadow' });
+  const gate = await started.host.runtimeFor({ root, actor: { kind: 'agent', sessionId: 'bench-1', agentLabel: 'benchmark' }, presence: 'none', context: 'unattended' });
   await runAgentInFolder(benchmarkClient([{ calls: [call('r1', 'Read', { file_path: 'a.ts' }), call('w1', 'Write', { file_path: 'made.md', content: 'x' })] }, { text: 'done' }]), 'm', logged, 'go', { maxTurns: 4, rules: DEFAULT_RULES, gate });
   const records = await logOf(started, root);
   assert.deepEqual(records.map((record) => [callIdOf(record), outcomeOf(record), ruleOf(record)]), [['r1', 'allowed', 'settings.read-plan'], ['w1', 'allowed', 'settings.mode.edits']]);
@@ -691,7 +740,7 @@ test('a comparison passes each task run its own gate, and the decisions reach th
   await runComparison({
     runId: 'run-gate', plan: planComparison(['m1'], tasks, 1, 'rerun', new Map()), tasks, runsPerTask: 1, clientFor: () => benchmarkClient([{ calls: [call('c1', 'Read', { file_path: 'slug.js' })] }, { text: 'Done.' }]),
     rules: DEFAULT_RULES, emergencyStopped: () => false, signal: new AbortController().signal, onRow: (row) => { rows.push(row); },
-    gateFor: async (run) => { made.push(`${run.model}/${run.task}`); return await started.host.runtimeFor({ root, actor: { kind: 'agent', sessionId: 'compare-1' }, presence: 'none', context: 'unattended', floorMode: 'shadow' }); }
+    gateFor: async (run) => { made.push(`${run.model}/${run.task}`); return await started.host.runtimeFor({ root, actor: { kind: 'agent', sessionId: 'compare-1' }, presence: 'none', context: 'unattended' }); }
   });
   assert.deepEqual(made, ['m1/implement']);
   assert.equal(rows.length, 1);
@@ -707,7 +756,7 @@ test('the role suite gives each role run its own gate, so the studio\'s decision
   const outcomes = await runRoleSuite(plan, {
     clientFor: () => benchmarkClient([{ calls: [call('t1', 'Glob', { pattern: '*' })] }, { text: 'Done.' }]),
     rules: DEFAULT_RULES, signal: new AbortController().signal,
-    gateFor: async (run) => { asked.push(`${run.member}/${run.model}`); return await started.host.runtimeFor({ root, actor: { kind: 'agent', sessionId: 'roles-1' }, presence: 'none', context: 'unattended', floorMode: 'shadow' }); }
+    gateFor: async (run) => { asked.push(`${run.member}/${run.model}`); return await started.host.runtimeFor({ root, actor: { kind: 'agent', sessionId: 'roles-1' }, presence: 'none', context: 'unattended' }); }
   });
   assert.equal(outcomes.length, 1);
   assert.deepEqual(asked, ['reviewer/m1']);
@@ -943,13 +992,21 @@ const PLANTED: ReadonlyArray<{ name: string; source: string; expected: Partial<R
   { name: 'a destructured parameter', source: 'export const f = async ({ run }: AgentTool<any>) => run({}, ctx);', expected: { destructure: 1 } },
   { name: 'a bracket access with the name written out', source: 'export async function f(tool: AgentTool<any>) { return tool["run"]({}, ctx); }', expected: { read: 1 } },
   { name: 'a bracket access through a constant', source: 'const key = "run" as const; export async function f(tool: AgentTool<any>) { return tool[key]({}, ctx); }', expected: { read: 1 } },
-  { name: 'a bracket access whose key is any text', source: 'export function f(tool: AgentTool<any>, member: string) { return (tool as any as { [key: string]: unknown })[member] ?? tool[member as never]; }', expected: { 'dynamic-key': 1 } },
+  { name: 'a bracket access whose key is any text', source: 'export function f(tool: AgentTool<any>, member: string) { return (tool as any as { [key: string]: unknown })[member] ?? tool[member as never]; }', expected: { 'dynamic-key': 1, cast: 1 } },
   { name: 'a bracket access whose key could be run', source: 'export function f(tool: AgentTool<any>, member: keyof AgentTool<any>) { return tool[member]; }', expected: { read: 1 } },
   { name: 'a function taken off the tool', source: 'export function f(tool: AgentTool<any>) { return [tool.run.bind(tool), tool.run.call(tool, {}, ctx), tool.run]; }', expected: { read: 3 } },
   { name: 'an optional call', source: 'export async function f(tool?: AgentTool<any>) { return tool?.run({}, ctx); }', expected: { read: 1 } },
   { name: 'a type that extends AgentTool and a generic', source: 'interface Named extends AgentTool<any> { extra: string }\nexport async function f<T extends AgentTool<any>>(a: Named, b: T) { return [await a.run({}, ctx), await b.run({}, ctx)]; }', expected: { read: 2 } },
   { name: 'a value typed any', source: 'export async function f(value: any) { return value.run({}, ctx); }', expected: { untyped: 1 } },
-  { name: 'a value cast to any', source: 'export async function f(tool: AgentTool<any>) { return (tool as any).run({}, ctx); }', expected: { read: 0, untyped: 1 } },
+  { name: 'a value cast to any', source: 'export async function f(tool: AgentTool<any>) { return (tool as any).run({}, ctx); }', expected: { read: 0, untyped: 1, cast: 1 } },
+  // PR #70 review carry-over: reflection, and a cast that drops the type, reach a run with no name the checker follows, so each is reported where it is written.
+  { name: 'Reflect.get with the name written out', source: 'export async function f(tool: AgentTool<any>) { return Reflect.get(tool, "run")({}, ctx); }', expected: { reflect: 1 } },
+  { name: 'Reflect.apply over a run read off the tool', source: 'export async function f(tool: AgentTool<any>) { return Reflect.apply(tool.run, tool, [{}, ctx]); }', expected: { read: 1, reflect: 1 } },
+  { name: 'Reflect over a table of tools and a value the checker cannot type', source: 'export async function f(table: Record<string, AgentTool<any>>, name: string, loose: unknown) { const t = Reflect.get(table, name); return [Reflect.get(t, "run"), Reflect.ownKeys(loose as object)]; }', expected: { reflect: 2 } },
+  { name: 'Object.values and Object.entries over a tool and a tool table', source: 'export async function f(tool: AgentTool<any>, table: Record<string, AgentTool<any>>, list: AgentTool<any>[]) { return [Object.values(tool), Object.entries(table), Object.getOwnPropertyDescriptor(tool, "run"), Object.values(list), Object.assign({}, tool)]; }', expected: { reflect: 5 } },
+  { name: 'a computed key on a tool table, then its run', source: 'export async function f(table: Record<string, AgentTool<any>>, name: string) { return table[name]!.run({}, ctx); }', expected: { read: 1 } },
+  { name: 'a cast that drops the type of a tool or a table', source: 'export function f(tool: AgentTool<any>, table: AgentTool<any>[]) { return [tool as unknown, table as unknown[], <Record<string, unknown>><unknown>tool]; }', expected: { cast: 3 } },
+  { name: 'reflection that reaches no tool', source: 'export function f(config: { a: number }, tool: AgentTool<any>) { return [Object.keys(tool), Object.entries(config), Reflect.has(config, "a"), tool as AgentTool<any>]; }', expected: {} },
   { name: 'things that are not a tool run', source: 'declare const shell: { run(command: string): Promise<string> };\nexport async function f(tool: AgentTool<any>) { const own = { run() { return 1; } }; const wrapped: AgentTool<any> = { ...tool, run: async () => "x" }; return [await shell.run("ls"), own.run(), wrapped.name]; }', expected: {} }
 ];
 
@@ -970,14 +1027,14 @@ async function plantedRunSites(): Promise<{ dir: string; sites: RunSite[] }> {
   return plantedProgram;
 }
 
-test('every production read of an AgentTool\'s run is at a listed site, found with the type checker, and none is untyped or reached by an unknown key', () => {
+test('every production read of an AgentTool\'s run is at a listed site, found with the type checker, and none is untyped, reached by an unknown key, by reflection or through a cast', () => {
   const { files, sites } = productionRunSites();
   assert.ok(files.length > 200 && files.every((file) => !file.includes(`${path.sep}test${path.sep}`)), 'the scan covers all of src and leaves src/test out');
-  assert.deepEqual(sites.filter((site) => site.kind !== 'read').map((site) => `${site.file}:${site.line} ${site.kind} ${site.text}`), [], 'no destructured, untyped or dynamic reach of a tool\'s run');
+  assert.deepEqual(sites.filter((site) => site.kind !== 'read').map((site) => `${site.file}:${site.line} ${site.kind} ${site.text}`), [], 'no destructured, untyped, dynamic, reflective or cast reach of a tool\'s run');
   assert.deepEqual(countByFile(sites), TOOL_RUN_SITES, sites.map((site) => `${site.file}:${site.line}`).join(' '));
 });
 
-test('the type-checked scan finds an alias, an array element, a destructured name, a bracket access and the rest, and not a run that is only defined or is a shell\'s', async () => {
+test('the type-checked scan finds an alias, an array element, a destructured name, a bracket access, reflection, a cast that drops the type and the rest, and not a run that is only defined or is a shell\'s', async () => {
   const { dir, sites } = await plantedRunSites();
   try {
     for (const [index, planted] of PLANTED.entries()) {

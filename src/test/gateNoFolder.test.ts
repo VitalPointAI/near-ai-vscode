@@ -35,7 +35,7 @@ test('a run nobody watches in a window with no folder is decided by the install\
     const decided = await decide({
       actor: runtime.actor, tool: 'Write', callId: 'c1', effects: [{ verb: 'workspaceWrite', paths: ['out.md'] }], context: runtime.context, presence: runtime.presence,
       policy: { mode: 'fully-autonomous', emergencyStop: false }
-    }, runtime.bundleState(), async () => ({ decision: 'allow', rule: 'settings.mode.fully-autonomous' }), { floorMode: runtime.floorMode });
+    }, runtime.bundleState(), async () => ({ decision: 'allow', rule: 'settings.mode.fully-autonomous' }));
     assert.equal(decided.outcome, 'allow');
   }
   await host.flush();

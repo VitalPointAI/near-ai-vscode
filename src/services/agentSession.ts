@@ -6,7 +6,7 @@ import * as path from 'node:path';
 import { RunCheckpoints } from '../agent/checkpoints';
 import { compactConversation, contextAction, contextStatus, DEFAULT_COMPACT_AT_TOKENS, DEFAULT_CONTEXT_WINDOW, DEFAULT_THRESHOLDS, estimateTokens, trimOldToolResults } from '../agent/context';
 import type { GateHost } from '../gate/host';
-import { recordLateApproval } from '../agent/gateAdapter';
+import { approveFloorCallLate, endFloorApprovals, recordLateApproval } from '../agent/gateAdapter';
 import { AgentEvent, AgentRun, AgentRunError, ApprovalReply, ApprovalRequest, AWAITING_APPROVAL_PREFIX, DEFAULT_MAX_TURNS, RunInput, RunOutcome, RunResult } from '../agent/loop';
 import { countersOf, runSplitOf } from './activityOverview';
 import { PermissionRules, RunGrants } from '../agent/permissions';
@@ -436,7 +436,7 @@ export class AgentConversation {
     let taskCheckSent = false;
     let mainTurns = 0;
     // The gate has finished its start-up check before the first call is decided; the main run is an agent working for a person who is here.
-    const gate = await this.gateHost?.runtimeFor({ root: this.root, actor: { kind: 'agent', sessionId: this.conversationId, agentId: mainId, agentLabel: 'agent' }, presence: 'person', context: 'interactive', floorMode: 'shadow' });
+    const gate = await this.gateHost?.runtimeFor({ root: this.root, actor: { kind: 'agent', sessionId: this.conversationId, agentId: mainId, agentLabel: 'agent' }, presence: 'person', context: 'interactive' });
     const run = new AgentRun({
       client: request.client,
       model: request.model,
@@ -555,6 +555,8 @@ export class AgentConversation {
       this.releasePending();
       this.markerRun = undefined;
       this.steerRun = undefined;
+      // The turn is over: a floor card approved late for it lets nothing run any more (PR #74 review round 5).
+      endFloorApprovals(grants);
       // Stopped or failed runs are reconciled too: NEAR bills what they used.
       if (account && !costAsked) void account.settleNow((entry) => entry.runId === runId);
       await this.runMarkers?.end(conversationId, runId, ended);
@@ -1055,7 +1057,7 @@ export class AgentConversation {
             if (agent.paused) this.activity?.setPaused(agent.id, true);
             this.inboxes.set(agent.id, inbox);
             // A sub-agent of a person's run is interactive with the person present, even though its PERF-01 unattended flag below is set (D-43): its cards queue for them.
-            const childGate = await this.gateHost?.runtimeFor({ root: this.root, actor: { kind: 'sub-agent', sessionId: this.conversationId, agentId: agent.id, agentLabel: label }, presence: 'person', context: 'interactive', floorMode: 'shadow' });
+            const childGate = await this.gateHost?.runtimeFor({ root: this.root, actor: { kind: 'sub-agent', sessionId: this.conversationId, agentId: agent.id, agentLabel: label }, presence: 'person', context: 'interactive' });
             const child = new AgentRun({
               client: request.client, model, tools, context: agentContext, policy: request.policy, rules: request.rules, grants, safety: this.runSafety, maxTurns: request.maxTurns, maxOutputTokens: request.maxOutputTokens,
               ...(childGate ? { gate: childGate } : {}),
@@ -1098,7 +1100,7 @@ export class AgentConversation {
               // happens only if they allow it, and the sub-agent works on meanwhile instead of holding the run.
               requestApproval: (approval) => this.askApproval({ ...approval, callId: `${agent.id}:${approval.callId}`, title: `${label} › ${approval.title}` }, agent.abort.signal, label, agent.id, {
                 waitMs: this.subagentApprovalWaitMs,
-                onLate: (reply) => { if (childGate) recordLateApproval(childGate, approval.callId, reply, { model }); this.lateApproval(label, approval, reply, grants, request.rememberAllowRule); }
+                onLate: (reply) => { if (childGate) recordLateApproval(childGate, approval.callId, reply, { model }); this.lateApproval(label, approval, reply, grants, request.rememberAllowRule, childGate?.clock ?? Date.now); }
               }, grants),
               rememberAllowRule: request.rememberAllowRule,
               emit: (event) => {
@@ -1575,9 +1577,23 @@ export class AgentConversation {
     if (announce) this.post({ type: 'notice', text: 'Resumed.' });
   }
 
-  /** A queued sub-agent approval answered after the agent moved on: an allow grants that exact command for the run, and the lead is told either way. */
-  private lateApproval(label: string, approval: ApprovalRequest, reply: ApprovalReply, grants: RunGrants, remember?: (rule: string) => void | Promise<void>): void {
+  /**
+   * A queued sub-agent approval answered after the agent moved on: an allow grants that exact command for the run, and the lead is told either way. A floor
+   * card (publishing, destruction, a write into `.git/` or NEAR AI's state) grants nothing for the run: an allow lets that exact call run once, and the
+   * next identical call asks again (D-43, Pitfall 4).
+   */
+  private lateApproval(label: string, approval: ApprovalRequest, reply: ApprovalReply, grants: RunGrants, remember: ((rule: string) => void | Promise<void>) | undefined, clock: () => number): void {
     const allowed = reply.decision === 'allow' || reply.decision === 'allow-run' || reply.decision === 'allow-always';
+    if (approval.floor) {
+      // Never grants.commands, grants.edits or an allow rule: the approval is kept beside the grants and is used up by the one call it names.
+      // Stamped with the clock of the gate that will check it (the runtime's), so the approval's time limit is read on one clock.
+      if (allowed) approveFloorCallLate(grants, approval.floor.callKey, clock);
+      const shown = approval.subject ? `\`${approval.subject.slice(0, 300)}\`` : `"${approval.title.slice(0, 200)}"`;
+      this.notifications.push({ role: 'user', content: allowed
+        ? `<approval-update agent="${label}" decision="allowed-once">\nThe user approved ${shown}, which ${label} had queued. This kind of action needs a person every time, so it is allowed once: run that exact call again (the same tool and arguments, from the same folder) if it is still needed. Any further run of it asks again.\n</approval-update>`
+        : `<approval-update agent="${label}" decision="declined">\nThe user declined ${shown}, which ${label} had queued.${reply.feedback ? ` Their note: ${reply.feedback}` : ''} Do not run it; adjust instead.\n</approval-update>` });
+      return;
+    }
     // "Always allow" on a parked card saves its allow entry, exactly as it does on a card answered in time (owner, 2026-11-14): before, a late answer
     // only granted the command for the run, so the same command asked again in the next run. Only the entry the card offered is saved: the offer was
     // already checked to cover this command and nothing wider, and a held (risky) card offers none.
@@ -1690,7 +1706,9 @@ export class AgentConversation {
       this.openPrompt(request.callId, {
         type: 'approval-request', callId: request.callId, tool: request.tool, title: request.title, preview: request.preview,
         ...(request.reason ? { reason: request.reason } : {}), ...(request.allowRule ? { allowRule: request.allowRule } : {}), ...(agent ? { agent } : {}),
-        ...(request.risk ? { risk: request.risk } : {}), ...(request.reasonShort ? { reasonShort: request.reasonShort } : {}), ...(request.subject ? { subject: request.subject } : {})
+        ...(request.risk ? { risk: request.risk } : {}), ...(request.reasonShort ? { reasonShort: request.reasonShort } : {}), ...(request.subject ? { subject: request.subject } : {}),
+        // A floor card offers one call only: the page shows no "for this run" choice for it (GATE-04, D-43).
+        ...(request.floor ? { floor: true } : {})
       });
     });
   }

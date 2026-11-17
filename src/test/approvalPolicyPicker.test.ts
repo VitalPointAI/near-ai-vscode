@@ -62,7 +62,8 @@ test('the picker menu shows each mode as a label with a one-line summary, from t
     ['Ask before edits', 'Reads run; edits and commands ask first.'],
     ['Edits auto', 'Edits run; commands ask unless on your allow list.'],
     ['Auto', 'Edits and ordinary commands run; risky or unclear ones ask, with the reason.'],
-    ['Full auto', 'Everything runs except your deny list. Throwaway workspaces only.']
+    // Phase 70 plan 17 (D-19): the floor is enforced in Full auto too, so its one-line summary says what still asks.
+    ['Full auto', 'Runs without asking; publishing, deleting and .git writes still ask. Throwaway only.']
   ]);
   for (const option of POLICY_OPTIONS) assert.ok(option.summary.length <= 90 && !option.summary.includes('\n'), option.mode);
   const configuration = { get: <T>(_key: string, fallback: T) => fallback, inspect: () => undefined, update: async () => undefined };

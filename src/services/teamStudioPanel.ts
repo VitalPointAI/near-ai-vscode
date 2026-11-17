@@ -103,7 +103,8 @@ export async function openTeamStudio(context: vscode.ExtensionContext, auth: Aut
     if (options.wizard) void current.startWizard(options.wizard);
     return;
   }
-  const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  // The folder open now, asked each time it is used: a folder opened, closed or changed while the tab is open is followed (PR #70 review carry-over).
+  const rootNow = (): string | undefined => vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   const library = new TeamLibrary(teamLibraryDir(homeFolder()));
   const media = vscode.Uri.joinPath(context.extensionUri, 'media', 'teams');
   const shared = sharedMedia(context.extensionUri);
@@ -113,9 +114,10 @@ export async function openTeamStudio(context: vscode.ExtensionContext, auth: Aut
   panel.webview.html = teamStudioHtml({ cspSource: panel.webview.cspSource, nonce: randomBytes(16).toString('base64'), script: asset('teams.js'), style: asset('teams.css'), network: asset('network.css'), base: panel.webview.asWebviewUri(vscode.Uri.joinPath(shared, 'base.css')).toString(), probe: layoutProbeAsset(panel.webview, shared) });
   registerLayoutProbe('teams', panel.webview);
   const studio = attachTeamStudio(panel, {
-    library, root,
+    library, root: rootNow,
+    onDidChangeFolder: (listener) => vscode.workspace.onDidChangeWorkspaceFolders(() => listener()),
     gather: () => gatherDirectoryInput(context, auth),
-    knowledgeBase: async () => Boolean(root && await stat(path.join(root, '.near-kb')).catch(() => undefined)),
+    knowledgeBase: async () => { const root = rootNow(); return Boolean(root && await stat(path.join(root, '.near-kb')).catch(() => undefined)); },
     sidebar,
     openFile: async (file) => vscode.window.showTextDocument(await vscode.workspace.openTextDocument(vscode.Uri.file(file)), { preview: false, viewColumn: vscode.ViewColumn.Beside }),
     openSetting: (key) => Promise.resolve(vscode.commands.executeCommand('workbench.action.openSettings', key)),
@@ -131,6 +133,8 @@ export async function openTeamStudio(context: vscode.ExtensionContext, auth: Aut
     // The final step of adding a team: measure each member's role on a few candidate models, then write the winner into the team file. The person is
     // asked first, because this spends real time and tokens, and skipping it leaves exactly the team they wrote.
     optimiseTeam: async (members, teamName, options = {}) => {
+      // The folder open when the tests start: the team file and the runs' decision log both follow it for this whole run.
+      const root = rootNow();
       const setup = await optimisationSetup(auth, context);
       if (!setup) return undefined;
       const { active, candidates } = setup;
@@ -214,7 +218,7 @@ export async function openTeamStudio(context: vscode.ExtensionContext, auth: Aut
     },
     ask: (prompt, value) => Promise.resolve(vscode.window.showInputBox({ title: 'Team Studio', prompt, value, validateInput: (text) => text.trim() ? undefined : 'Enter a name.' })),
     // A share file is <team>.near-team.json; the dialog filters on its last extension, json. A team .md file can be imported too.
-    pickShareTarget: async (name) => (await vscode.window.showSaveDialog({ defaultUri: vscode.Uri.file(path.join(root ?? homeFolder(), name)), filters: { 'NEAR AI team': ['json'] }, title: 'Share team: save it as one file to send' }))?.fsPath,
+    pickShareTarget: async (name) => (await vscode.window.showSaveDialog({ defaultUri: vscode.Uri.file(path.join(rootNow() ?? homeFolder(), name)), filters: { 'NEAR AI team': ['json'] }, title: 'Share team: save it as one file to send' }))?.fsPath,
     pickImportSource: async () => (await vscode.window.showOpenDialog({ filters: { 'NEAR AI team': ['json', 'md'] }, title: 'Import a NEAR AI team', canSelectMany: false }))?.[0]?.fsPath,
     home: homeFolder(),
     applyProjectType: async (projectRoot, type, goal) => {
@@ -226,10 +230,21 @@ export async function openTeamStudio(context: vscode.ExtensionContext, auth: Aut
     drafts: { get: () => context.globalState.get(DRAFT_KEY), set: (value) => Promise.resolve(context.globalState.update(DRAFT_KEY, value)) },
     kept: { get: () => context.globalState.get(KEPT_KEY), set: (value) => Promise.resolve(context.globalState.update(KEPT_KEY, value)) },
     watch: (listener) => {
-      const watchers = [new vscode.RelativePattern(vscode.Uri.file(library.directory), '{*.md,.archived/*.md}'), ...(root ? [new vscode.RelativePattern(vscode.Uri.file(path.dirname(TeamLibrary.projectTeamFile(root))), 'team.md')] : [])]
-        .map((pattern) => vscode.workspace.createFileSystemWatcher(pattern));
-      const subscriptions = watchers.flatMap((watcher) => [watcher.onDidChange((uri) => listener(uri.fsPath)), watcher.onDidCreate((uri) => listener(uri.fsPath)), watcher.onDidDelete((uri) => listener(uri.fsPath)), watcher]);
-      return { dispose: () => subscriptions.forEach((subscription) => subscription.dispose()) };
+      const watching = (pattern: vscode.RelativePattern): vscode.Disposable[] => {
+        const watcher = vscode.workspace.createFileSystemWatcher(pattern);
+        return [watcher.onDidChange((uri) => listener(uri.fsPath)), watcher.onDidCreate((uri) => listener(uri.fsPath)), watcher.onDidDelete((uri) => listener(uri.fsPath)), watcher];
+      };
+      const libraryWatch = watching(new vscode.RelativePattern(vscode.Uri.file(library.directory), '{*.md,.archived/*.md}'));
+      // The project team file of the folder open now; pointed at the new folder's when the window's folders change.
+      let projectWatch: vscode.Disposable[] = [];
+      const watchProject = () => {
+        projectWatch.forEach((subscription) => subscription.dispose());
+        const root = rootNow();
+        projectWatch = root ? watching(new vscode.RelativePattern(vscode.Uri.file(path.dirname(TeamLibrary.projectTeamFile(root))), 'team.md')) : [];
+      };
+      watchProject();
+      const folders = vscode.workspace.onDidChangeWorkspaceFolders(() => watchProject());
+      return { dispose: () => { [...libraryWatch, ...projectWatch, folders].forEach((subscription) => subscription.dispose()); } };
     },
     onDidChangeSettings: (listener) => {
       const subscriptions = [vscode.workspace.onDidChangeConfiguration((event) => { if (event.affectsConfiguration('nearAi')) listener(); }), onDidChangeEmergencyStop(() => listener())];

@@ -180,16 +180,36 @@ test('credential stores: the confirmed list is named, and each form of the home 
     'cat ~/.ssh/id_ed25519', 'cat $HOME/.aws/credentials', 'cat ${HOME}/.aws/credentials', 'cat "$HOME"/.ssh/config', 'cat "$HOME/.ssh/id_rsa"',
     'cat ~/.near-credentials/mainnet/example.json', `cat ${HOME}/.near-credentials/mainnet/example.json`, `ls ${HOME}/.gnupg`, 'cat ~/.config/gcloud/credentials.db',
     'cat ~/.azure/accessTokens.json', 'cat ~/.docker/config.json', 'cat ~/.netrc', 'cat ~/.git-credentials', 'ls ~/.kube', 'cat ~/.npmrc', 'cat ~/.pypirc',
-    'cat ~/.near-kb', 'cat ~/.kbkey', 'cp ~/.ssh/* /tmp/x', 'tar czf x.tgz ~/.ssh', 'sqlite3 /x/state.vscdb .dump', 'cp state.vscdb.backup /x',
+    'cat ~/.near-kb', 'cat ~/.kbkey', 'cp ~/.ssh/* /tmp/x', 'tar czf x.tgz ~/.ssh', 'sqlite3 ~/.config/Code/User/globalStorage/state.vscdb .dump',
+    'cp ~/.config/Code/User/globalStorage/state.vscdb.backup /x',
     'secret-tool lookup service x', 'secret-tool search service x', 'security find-generic-password -s x', 'security  find-internet-password -s x',
     'security dump-keychain', 'security export -k x', 'CAT ~/.SSH/ID_RSA'
   ];
   for (const text of hits) assert.match(namesCredentialStore(text, locations) ?? '', /names a place where passwords, keys or tokens are kept/, text);
   const misses = [
     'cat ~/.sshconfig-notes', 'cat docs/.ssh.md', 'ls ~/projects', 'cat .env', 'git status', 'cat ~/.awsome/readme', 'echo $HOMER/.ssh', 'ls /other/home/.ssh',
-    'cat mystate.vscdb', 'security audit', 'secret-tool store x', 'cat ~/.kubernetes', 'cat src/.npmrc.example'
+    'cat mystate.vscdb', 'security audit', 'secret-tool store x', 'cat ~/.kubernetes', 'cat src/.npmrc.example',
+    // PR #74 review: a file named like VS Code's secrets database is only refused where VS Code keeps it (see the test below), not anywhere.
+    'sqlite3 /x/state.vscdb .dump', 'cp state.vscdb.backup /x'
   ];
   for (const text of misses) assert.equal(namesCredentialStore(text, locations), undefined, text);
+});
+
+// PR #74 review: VS Code's secrets database is refused where VS Code keeps it (its global storage folder, and the user-data folder above it), in any VS
+// Code's layout by the folder names, and in this VS Code's by the real folder; a project file that happens to have the same name is not refused.
+test('VS Code\'s secrets database is refused only under VS Code\'s storage folders, not as a file name anywhere', () => {
+  const user = path.join(os.tmpdir(), 'gate-floor-fake-user-data', 'User');
+  const locations = { globalStorage: path.join(user, 'globalStorage', 'vitalpoint.near-ai-vscode') };
+  for (const text of [
+    'sqlite3 ~/.config/Code/User/globalStorage/state.vscdb .dump', 'cat "$HOME/Library/Application Support/Code/User/globalStorage/state.vscdb"',
+    'type C:\\Users\\dev\\AppData\\Roaming\\Code\\User\\globalStorage\\state.vscdb', 'cp ~/.vscode-server/data/User/globalStorage/state.vscdb.backup /x',
+    'sqlite3 ~/.config/Code/User/workspaceStorage/0a1b2c3d/state.vscdb', 'cat ~/.config/Code/User/GLOBALSTORAGE/STATE.VSCDB',
+    `sqlite3 ${path.join(user, 'globalStorage', 'state.vscdb')}`, `cp ${path.join(user, 'workspaceStorage', 'abc', 'state.vscdb.backup')} /x`
+  ]) assert.match(namesCredentialStore(text, locations) ?? '', /names a place where passwords, keys or tokens are kept/, text);
+  for (const text of [
+    'sqlite3 state.vscdb .dump', 'cat fixtures/state.vscdb', 'cp test/data/state.vscdb.backup out/', 'sqlite3 /work/app/state.vscdb', `cat ${path.join(os.tmpdir(), 'state.vscdb')}`,
+    'cat ~/.config/Code/User/globalStorage/state.vscdb.notes', 'cat ~/notes/globalStorage-state.vscdb'
+  ]) assert.equal(namesCredentialStore(text, locations), undefined, text);
 });
 
 test('the text check reads the command and never runs it', () => {

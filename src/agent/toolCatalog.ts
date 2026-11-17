@@ -43,7 +43,10 @@ export const SHORTHAND_EXCEPTIONS: ReadonlyMap<string, string> = new Map([
  * the tools with stand-ins, and a run builds them with the real client, memory and provider in `agentSession.toolsFor`.
  */
 export interface CatalogStubs {
-  /** The configured search provider; `null` means none is set up (the default is a stand-in provider on a placeholder host). */
+  /**
+   * The configured search provider. Absent or `null` means none is set up: WebSearch is then built with no provider, its manifest declares no host, and
+   * its run says search is not set up. There is no stand-in provider, so no placeholder host can reach a manifest, the Tools page or a decision record.
+   */
   webSearch?: SearchProvider | null;
   /** The client the image tool sends through, and the model it is built for. */
   imageClient?: NearAiClient;
@@ -56,8 +59,6 @@ export interface CatalogStubs {
 
 /** The gsd tools' names: the Tools page offers them once Open-GSD is installed, so it needs to tell them from the rest. */
 export const GSD_TOOL_NAMES: ReadonlySet<string> = new Set(['Skill', 'SlashCommand', 'AskUserQuestion', 'Agent', 'Task']);
-
-const STAND_IN_SEARCH: SearchProvider = { name: 'searxng', label: 'stand-in', host: 'search.example', search: async () => [] };
 
 /**
  * Every source file (outside the tests) whose text mentions `AgentTool<`, so a new file that defines tools fails the catalog test until it is listed here,
@@ -80,7 +81,7 @@ async function unavailable(): Promise<never> {
 
 /** The built-in tools, in the order `toolsFor` gives them to a run. */
 export function builtInTools(stubs: CatalogStubs = {}): AgentTool<any>[] {
-  const search = stubs.webSearch === null ? undefined : (stubs.webSearch ?? STAND_IN_SEARCH);
+  const search = stubs.webSearch ?? undefined;
   return [
     ...CORE_TOOLS,
     webFetchTool,

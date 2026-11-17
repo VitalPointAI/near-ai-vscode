@@ -3,10 +3,10 @@
 // undone by a later one: emergency stop, bundle state, floor, bundle ceiling, labels, then the settings layer. A floor refusal has no card and no way
 // through; a floor ask is a card with no "always allow" and no run-wide grant; a deny from the settings layer (the deny list) still beats a floor ask.
 import type { ActionPolicy, ActionPolicyMode } from '../policy';
-import { FAILED_CLOSED_VERBS } from './bundle';
+import { FAILED_CLOSED_VERBS, POLICY_EVENT_IDS } from './bundle';
 import type { BundleState, GateContextName } from './bundle';
 import { FLOOR_RULE_ORDER, floorFor } from './floor';
-import type { FloorInput, FloorLocations, FloorVerdict } from './floor';
+import type { FloorInput, FloorLocations } from './floor';
 import type { DecisionRecord } from './record';
 import { ROUTE_RULES } from './routing';
 
@@ -48,6 +48,13 @@ export interface GateRequest extends FloorInput {
   /** The MCP server id, when the tool is an MCP tool. */
   readonly mcpServer?: string;
   readonly labelVerdict?: LabelVerdict;
+  /**
+   * A refusal the settings layer makes whatever else is true, worked out by the caller before the gate runs: the deny list for a shell command, or a
+   * settings answer that is already a deny (an engagement's scope). It is decided before every step that could only ask (unknown effects, the floor's
+   * asks, holds, the settings layer's own ask), so a person is never shown a card for a call it refuses (D-10, PR #74 review). The emergency stop, the
+   * bundle state and the floor's own refusals still come first.
+   */
+  readonly settingsRefusal?: { readonly rule: string; readonly reason: string };
 }
 
 export interface SettingsAnswer {
@@ -60,11 +67,11 @@ export interface SettingsAnswer {
 /** Today's decidePermissionAsync (modes, allow and deny lists, run grants, classifier, safety model, taint holds), handed in so this file stays pure. */
 export type SettingsLayer = (request: GateRequest, effectivePolicy: ActionPolicy) => Promise<SettingsAnswer>;
 
-/** `shadow` decides as today's loop does and only reports what the floor would have done; `enforce` is the default. */
-export type FloorMode = 'shadow' | 'enforce';
-
+/**
+ * What decide() is told besides the request. There is no option that turns the floor off or makes it only report (D-19, GATE-05): the floor applies to every
+ * call, in every mode and context, and nothing a caller, a setting or a bundle passes here changes that.
+ */
 export interface GateOptions {
-  readonly floorMode?: FloorMode;
   /** The home folder and global storage the floor's text checks may name; both optional. */
   readonly locations?: FloorLocations;
 }
@@ -80,8 +87,6 @@ export interface GateDecision {
   /** Whether the card may carry a run-wide grant. Never true for a floor rule. */
   readonly allowGrant: boolean;
   readonly effectiveMode: ActionPolicyMode;
-  /** What the floor would have done, set only in shadow mode when a floor rule matched. */
-  readonly shadowFloor?: FloorVerdict;
 }
 
 /** Where a record goes. `record` must never throw: a record that cannot be kept must not change a decision. */
@@ -95,14 +100,22 @@ export interface GateRuntime {
   readonly actor: ActorRef;
   readonly presence: Presence;
   readonly context: GateContextName;
-  readonly floorMode: FloorMode;
+  /** The person's home folder and this extension's global storage, for the floor's checks of shell commands. The host sets them; a test runtime gives a stand-in or none. */
+  readonly locations?: FloorLocations;
   /** What a record needs and the pure domain cannot know. The host sets them; a runtime built for a test may leave them out. */
   readonly productVersion?: string;
   readonly clock?: () => number;
   readonly newRecordId?: () => string;
 }
 
-/** Every rule id the gate can record: the floor, the bundle and manifest checks, labels, routing, taint, and the settings rules of the migration table. */
+/**
+ * The rules of a call refused before the gate could be asked, which the loop still records so no refused call is missing from the log: a tool name the run
+ * does not have, and a tool's own check (its forbidden, sensitive, risky or preview hook) that threw, so the call could not be judged and did not run.
+ */
+export const PRE_GATE_RULES = Object.freeze(['call.unknown-tool', 'call.check-failed'] as const);
+export type PreGateRule = (typeof PRE_GATE_RULES)[number];
+
+/** Every rule id the gate can record: the floor, the bundle and manifest checks, labels, routing, taint, the settings rules of the migration table, and the calls refused before the gate. */
 export const GATE_RULE_IDS: readonly string[] = Object.freeze([
   ...FLOOR_RULE_ORDER,
   'bundle.failed-closed', 'bundle.unavailable', 'bundle.ceiling.context', 'bundle.ceiling.mode', 'bundle.ceiling.unattended-mcp', 'manifest.context', 'manifest.effects-unknown',
@@ -112,8 +125,21 @@ export const GATE_RULE_IDS: readonly string[] = Object.freeze([
   'settings.emergency-stop', 'settings.read-plan', 'settings.auto-safe-tool', 'settings.mode.edits', 'settings.run-grant.edits', 'settings.deny-list',
   'settings.engagement-grant', 'settings.run-grant.command', 'settings.allow-rule', 'settings.mode.fully-autonomous', 'settings.mode.other',
   'settings.auto.classifier', 'settings.unattended-verification', 'settings.risk.outside-workspace', 'settings.risk.installs', 'settings.safety-model',
-  'settings.sensitive-read', 'settings.mcp-approval', 'settings.tool-forbidden'
+  'settings.sensitive-read', 'settings.mcp-approval', 'settings.tool-forbidden',
+  ...PRE_GATE_RULES
 ]);
+
+/**
+ * The rule a record carries when the one it was given is not known (PR #74 review round 11): the record is kept, with the id it was given beside it in
+ * `unmapped.nearAi.unknownRule`, so no decision is ever missing from the log. In a test run the gate's test helper makes it fail the test instead.
+ */
+export const RECORD_UNKNOWN_RULE = 'record.unknown-rule';
+
+/**
+ * Every id a decision record may carry as its rule (`authorizations[].policy.name`): the gate's rules, the policy's own events, and RECORD_UNKNOWN_RULE.
+ * validateDecisionRecord refuses any other, and the builder and the decision log put an unknown one under RECORD_UNKNOWN_RULE, so none is ever dropped.
+ */
+export const RECORD_RULE_IDS: readonly string[] = Object.freeze([...GATE_RULE_IDS, ...POLICY_EVENT_IDS, RECORD_UNKNOWN_RULE]);
 
 const MODE_ORDER: readonly ActionPolicyMode[] = Object.freeze(['approve-risky', 'mostly-autonomous', 'auto', 'fully-autonomous'] as const);
 const NOBODY_HERE = 'Nobody is here to approve this, and it always needs a person: ';
@@ -135,7 +161,7 @@ function ownList<T>(table: Readonly<Partial<Record<string, readonly T[]>>>, key:
   return Object.prototype.hasOwnProperty.call(table, key) ? table[key] : undefined;
 }
 
-type Extra = Partial<Pick<GateDecision, 'reason' | 'floor' | 'offerAlwaysAllow' | 'allowGrant' | 'shadowFloor'>>;
+type Extra = Partial<Pick<GateDecision, 'reason' | 'floor' | 'offerAlwaysAllow' | 'allowGrant'>>;
 
 function make(outcome: GateDecision['outcome'], rule: string, mode: ActionPolicyMode, extra: Extra = {}): GateDecision {
   return { outcome, rule, floor: false, offerAlwaysAllow: false, allowGrant: false, effectiveMode: mode, ...extra };
@@ -164,24 +190,34 @@ function ceilingRefusal(request: GateRequest, bundleState: Extract<BundleState, 
 }
 
 /**
- * The one decision (GATE-04). `bundleState` is what the caller last verified; `settings` is today's permission logic; `options.floorMode` is `shadow` only
- * while the floor is being introduced (it returns exactly today's decision and reports the floor's verdict in `shadowFloor`) and `enforce` by default.
- * Order: emergency stop, bundle state, floor, bundle ceiling, labels, settings layer. A refusal from an earlier layer is never undone by a later one, and
+ * The one decision (GATE-04). `bundleState` is what the caller last verified; `settings` is today's permission logic. The floor is always enforced (D-19):
+ * a floor refusal has no card, and a floor ask has no "always allow" and no run-wide grant, in every mode, fully-autonomous included.
+ * Order: emergency stop, bundle state, unknown effects (after the floor's refusals of what such a call names and a settings refusal on the request), the
+ * floor's refusals, bundle ceiling, labels, a settings refusal on the request, settings layer, the floor's asks. A refusal from an earlier layer is never undone by a later one, and
  * a deny from the settings layer (the deny list) still beats a floor ask.
  */
 export async function decide(request: GateRequest, bundleState: BundleState, settings: SettingsLayer, options: GateOptions = {}): Promise<GateDecision> {
-  const floorMode: FloorMode = options.floorMode ?? 'enforce';
   const policy = request.policy;
   if (policy.emergencyStop) return make('deny', 'settings.emergency-stop', policy.mode, { reason: 'Emergency stop is on.' });
   if (bundleState.state === 'failed-closed') {
     const onlyReadOrPlan = request.effects.length > 0 && request.effects.every((effect) => (FAILED_CLOSED_VERBS as readonly string[]).includes(effect.verb));
     // A run built with no host at all (no policy was ever read for it) has its own rule id, so a record tells it apart from a policy that failed to verify.
-    if (!onlyReadOrPlan) return make('deny', bundleState.reason === 'unavailable' ? 'bundle.unavailable' : 'bundle.failed-closed', 'approve-risky', { reason: bundleState.sentence });
+    if (!onlyReadOrPlan) {
+      // Both refuse; a refusal the person's own settings already made (the deny list) is the one named, as it is everywhere else (D-10).
+      if (request.settingsRefusal !== undefined) return make('deny', request.settingsRefusal.rule, 'approve-risky', { reason: request.settingsRefusal.reason });
+      return make('deny', bundleState.reason === 'unavailable' ? 'bundle.unavailable' : 'bundle.failed-closed', 'approve-risky', { reason: bundleState.sentence });
+    }
   }
-  // A request that names no effect is a request whose effects are unknown. Nothing later can judge what it does, so it never reaches the floor, the ceiling
-  // or the settings layer (which would read "no effects" as "nothing to worry about"): with a person here it asks, without one it is refused. A
+  // A request that names no effect is a request whose effects are unknown. Nothing later can judge what it does, so it never reaches the floor's asks, the
+  // ceiling or the settings layer (which would read "no effects" as "nothing to worry about"): with a person here it asks, without one it is refused. A
   // failed-closed bundle has already refused it above with its own sentence, so no answer can get past that.
   if (request.effects.length === 0) {
+    // What the call itself names is still read: a path or command that reaches a credential store or the identity folders is refused with no card, not
+    // asked about. (The loop's own `forbidden` refusal is the loop's, and it refuses that call itself.)
+    const named = floorFor({ effects: [], ...(request.command === undefined ? {} : { command: request.command }), ...(request.floorFacts === undefined ? {} : { floorFacts: request.floorFacts }), ...(request.workspace === undefined ? {} : { workspace: request.workspace }) }, options.locations);
+    if (named !== undefined && named.kind === 'refuse') return make('deny', named.rule, 'approve-risky', { reason: named.reason, floor: true });
+    // The deny list decides before a person is asked about effects nobody can read (D-10): a denied command is never put in front of a person.
+    if (request.settingsRefusal !== undefined) return make('deny', request.settingsRefusal.rule, 'approve-risky', { reason: request.settingsRefusal.reason });
     const person = request.presence === 'person' && request.context === 'interactive';
     return person
       ? make('ask', 'manifest.effects-unknown', 'approve-risky', { reason: `NEAR AI cannot tell what ${shown(request.tool)} would do with this call, so it needs your answer.` })
@@ -189,35 +225,34 @@ export async function decide(request: GateRequest, bundleState: BundleState, set
   }
   const mode: ActionPolicyMode = bundleState.state === 'valid' ? effectiveMode(policy.mode, bundleState.bundle.ceiling.maxMode[request.context]) : 'approve-risky';
   const verdict = floorFor(request, options.locations);
-  const shadow = floorMode === 'shadow' && verdict !== undefined ? { shadowFloor: verdict } : {};
-  // Shadow mode keeps today's one refusal, the key folder, and only reports the rest.
-  if (verdict !== undefined && verdict.kind === 'refuse' && (floorMode === 'enforce' || verdict.rule === 'floor.state-keys')) {
-    return make('deny', verdict.rule, mode, { reason: verdict.reason, floor: true, ...shadow });
-  }
+  if (verdict !== undefined && verdict.kind === 'refuse') return make('deny', verdict.rule, mode, { reason: verdict.reason, floor: true });
   if (bundleState.state === 'valid') {
     const refusal = ceilingRefusal(request, bundleState);
-    if (refusal !== undefined) return make('deny', refusal.rule, mode, { reason: refusal.reason, ...shadow });
+    if (refusal !== undefined) return make('deny', refusal.rule, mode, { reason: refusal.reason });
   }
-  if (request.labelVerdict !== undefined) return make('deny', request.labelVerdict.rule, mode, { reason: request.labelVerdict.reason, ...shadow });
+  if (request.labelVerdict !== undefined) return make('deny', request.labelVerdict.rule, mode, { reason: request.labelVerdict.reason });
+  // A refusal the settings layer has already made decides here, before every ask below, whatever the layer would answer now (D-10).
+  if (request.settingsRefusal !== undefined) return make('deny', request.settingsRefusal.rule, mode, { reason: request.settingsRefusal.reason });
   const answer = await settings(request, { ...policy, mode });
-  if (answer.decision === 'deny') return make('deny', answer.rule, mode, { ...(answer.reason === undefined ? {} : { reason: answer.reason }), ...shadow });
-  if (verdict !== undefined && verdict.kind === 'ask' && floorMode === 'enforce') {
+  if (answer.decision === 'deny') return make('deny', answer.rule, mode, answer.reason === undefined ? {} : { reason: answer.reason });
+  if (verdict !== undefined && verdict.kind === 'ask') {
     // No person to answer means no way through: a floor ask is refused, never approved by default (D-43).
     return request.presence === 'none'
       ? make('deny', verdict.rule, mode, { reason: `${NOBODY_HERE}${verdict.reason}`, floor: true })
       : make('ask', verdict.rule, mode, { reason: verdict.reason, floor: true });
   }
-  // Today's loop, line 631: a held action asks in every mode and offers no run-wide grant; a sensitive read that would be allowed asks unless fully-autonomous.
+  // Today's loop, line 631: a held action asks in every mode and offers no run-wide grant; a sensitive call that would be allowed asks unless the mode is
+  // fully-autonomous. A protected write never gets here (the floor asked above), so in fully-autonomous only a workspace credential-file read, such as
+  // `.env`, runs without asking (D-18, D-19).
   if (request.risky !== undefined && request.risky !== '') {
-    return make('ask', 'taint.held', mode, { reason: request.risky, offerAlwaysAllow: true, ...shadow });
+    return make('ask', 'taint.held', mode, { reason: request.risky, offerAlwaysAllow: true });
   }
   if (request.sensitive !== undefined && request.sensitive !== '' && answer.decision === 'allow' && mode !== 'fully-autonomous') {
-    return make('ask', 'settings.sensitive-read', mode, { reason: request.sensitive, offerAlwaysAllow: true, allowGrant: true, ...shadow });
+    return make('ask', 'settings.sensitive-read', mode, { reason: request.sensitive, offerAlwaysAllow: true, allowGrant: true });
   }
   const capped = mode !== policy.mode && answer.decision === 'ask' && answer.rule.startsWith('settings.mode.');
   return make(answer.decision, capped ? 'bundle.ceiling.mode' : answer.rule, mode, {
     ...(answer.reason === undefined ? {} : { reason: answer.reason }),
-    ...(answer.decision === 'ask' ? { offerAlwaysAllow: true, allowGrant: true } : {}),
-    ...shadow
+    ...(answer.decision === 'ask' ? { offerAlwaysAllow: true, allowGrant: true } : {})
   });
 }

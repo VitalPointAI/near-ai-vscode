@@ -396,8 +396,8 @@ export function panelCyberRunStarter(
     const result = await startCyberRunInPanel(
       {
         ...assembly, grants, tools: assembly.tools(request.engagement), externalFindings: collected, limiter, budget,
-        // A person starts a scan and answers its cards: presence person, interactive; the floor only reports for now, as for chat (D-43).
-        ...(options.gateHost ? { gate: await options.gateHost.runtimeFor({ ...(options.root ? { root: options.root } : {}), actor: { kind: 'agent', sessionId: `cyber-${request.engagement.id}`, agentLabel: 'cyber panel' }, presence: 'person', context: 'interactive', floorMode: 'shadow' }) } : {})
+        // A person starts a scan and answers its cards: presence person, interactive; the floor is enforced here as in chat (D-43).
+        ...(options.gateHost ? { gate: await options.gateHost.runtimeFor({ ...(options.root ? { root: options.root } : {}), actor: { kind: 'agent', sessionId: `cyber-${request.engagement.id}`, agentLabel: 'cyber panel' }, presence: 'person', context: 'interactive' }) } : {})
       },
       request
     );

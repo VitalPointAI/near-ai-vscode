@@ -2,13 +2,16 @@
 // later audit chain can sign it unchanged. "Shaped after" is deliberate: this file checks only what the shape needs and never claims full OCSF schema
 // validity (assumption A1 of the research). Pure: no I/O, no clock (the caller passes epoch milliseconds), no vscode, no package. A record carries names and
 // paths, never file contents, prompts or model output.
-import { redactSecrets } from '../redaction';
+import { redactCredentialArguments, redactSecrets } from '../redaction';
 import { canonicalize } from '../team/canonical';
 import { findSecrets } from '../team/secrets';
+import { POLICY_EVENT_IDS } from './bundle';
+import { RECORD_RULE_IDS, RECORD_UNKNOWN_RULE } from './decide';
 import type { ActorRef, GateDecision } from './decide';
 import type { Label } from './labels';
 import { isRecord, ownValue, refused } from './shape';
-import type { Parsed } from './shape';
+import type { Parsed, Refusal } from './shape';
+import { CAPABILITY_VERBS } from './vocabulary';
 import type { Capability } from './vocabulary';
 
 export const RECORD_VERSION = 1;
@@ -71,8 +74,28 @@ export interface DecisionRecordInput {
   readonly tier?: string;
   /** Set when a denial was a failed clearance check, which records disposition 26 (Unauthorized). */
   readonly clearanceFailure?: boolean;
-  /** The floor rule the enforced floor would have applied while it only reports (shadow mode). */
+  /** The floor rule a shadow floor would have applied. Only 0.4.28, whose floor only reported, wrote it; the floor is enforced now and nothing sets it. Kept so records of that version still read. */
   readonly shadowFloor?: string;
+}
+
+/**
+ * Who hears that a record was given a rule nobody knows. Nothing listens in the product (the record is kept under RECORD_UNKNOWN_RULE, with the id beside
+ * it); the gate's test helper listens and throws, so a writer with a new id fails the test that runs it (PR #74 review round 11).
+ */
+export const unknownRuleListeners = new Set<(id: string) => void>();
+
+/** The record's rule, known: an unknown one becomes RECORD_UNKNOWN_RULE with the id it was given (shown plainly, at most 120 characters) beside it. */
+export function withKnownRule(record: DecisionRecord): DecisionRecord {
+  const entry = record.authorizations[0];
+  const rule = entry?.policy.name;
+  if (entry === undefined || typeof rule !== 'string' || RECORD_RULE_IDS.includes(rule)) return record;
+  for (const listener of [...unknownRuleListeners]) listener(rule);
+  const shown = rule.replace(/[\u0000-\u001F\u007F]/g, ' ').slice(0, 120);
+  return {
+    ...record,
+    authorizations: [{ ...entry, policy: { ...entry.policy, name: RECORD_UNKNOWN_RULE } }, ...record.authorizations.slice(1)],
+    unmapped: { ...record.unmapped, nearAi: { ...record.unmapped.nearAi, unknownRule: shown } }
+  };
 }
 
 export interface DecisionRecord {
@@ -119,6 +142,8 @@ export interface DecisionRecord {
       readonly label?: Label;
       readonly tier?: string;
       readonly shadowFloor?: string;
+      /** The rule a writer gave that nobody knows; the record's rule is then RECORD_UNKNOWN_RULE. */
+      readonly unknownRule?: string;
     };
   };
 }
@@ -155,8 +180,13 @@ export function outcomeOf(decision: Pick<GateDecision, 'outcome' | 'floor'>): De
   return decision.floor ? 'refused-by-floor' : 'denied';
 }
 
+/** One string as a record keeps it: credentials carried as command arguments removed by class, then every known token shape. */
+function redactString(value: string): string {
+  return redactSecrets(redactCredentialArguments(value));
+}
+
 function redactValue(value: unknown): unknown {
-  if (typeof value === 'string') return redactSecrets(value);
+  if (typeof value === 'string') return redactString(value);
   if (Array.isArray(value)) return value.map(redactValue);
   if (isRecord(value)) {
     const out: Record<string, unknown> = {};
@@ -166,7 +196,11 @@ function redactValue(value: unknown): unknown {
   return value;
 }
 
-/** A copy of the record with `redactSecrets` run over every string, so a token that slipped into a reason or a name never reaches a file. */
+/**
+ * A copy of the record with every string redacted: credentials a command carries in its arguments (redactCredentialArguments: a URL's user part, `-u
+ * user:pass`, `--password=`/`--token`-style options, credential headers, `NAME_TOKEN=` assignments) and every known token shape (redactSecrets), so a
+ * credential in a command's first line, a reason or a name never reaches a file.
+ */
 export function redactRecord(record: DecisionRecord): DecisionRecord {
   return redactValue(record) as DecisionRecord;
 }
@@ -232,7 +266,7 @@ export function buildDecisionRecord(input: DecisionRecordInput): DecisionRecord 
       }
     }
   };
-  return redactRecord(record);
+  return withKnownRule(redactRecord(record));
 }
 
 type Kind = 'int' | 'string' | 'array';
@@ -259,9 +293,35 @@ function kindOk(value: unknown, kind: Kind): boolean {
   return Array.isArray(value);
 }
 
+/** Whether any string in the value still holds a credential argument that redactCredentialArguments would remove. */
+function carriesCredentialArgument(value: unknown): boolean {
+  if (typeof value === 'string') return redactCredentialArguments(value) !== value;
+  if (Array.isArray(value)) return value.some(carriesCredentialArgument);
+  if (isRecord(value)) return Object.keys(value).some((key) => carriesCredentialArgument(value[key]));
+  return false;
+}
+
+/** What `api.operation` may name: a capability verb, or one of the policy's own events. */
+const RECORD_OPERATIONS: ReadonlySet<string> = new Set<string>([...CAPABILITY_VERBS, ...POLICY_EVENT_IDS]);
+const RECORD_RULES: ReadonlySet<string> = new Set(RECORD_RULE_IDS);
+
+/** Every rule a record carries is one of RECORD_RULE_IDS, and its operation is a verb or a policy event, so no writer can put an id nobody knows on file. */
+function idsKnown(value: Record<string, unknown>): Refusal | undefined {
+  const authorizations = value.authorizations;
+  if (!Array.isArray(authorizations)) return refused('wrong-type', 'authorizations');
+  for (const [index, entry] of authorizations.entries()) {
+    const rule = readPath(entry, 'policy.name');
+    if (typeof rule !== 'string' || !RECORD_RULES.has(rule)) return refused('not-allowed-here', `authorizations[${index}].policy.name`);
+  }
+  const operation = readPath(value, 'api.operation');
+  if (typeof operation !== 'string' || !RECORD_OPERATIONS.has(operation)) return refused('not-allowed-here', 'api.operation');
+  return undefined;
+}
+
 /**
  * Check a record only for what its shape needs: the class arithmetic (class 6003, category 6, type_uid = 600300 + activity_id), every required key with
- * the right kind, the record version, whole numbers only and no secret-like string. Nothing here claims the record is valid against the full OCSF schema.
+ * the right kind, the record version, a known rule and operation, whole numbers only, no secret-like string and no credential argument left in any string. Nothing here claims the record is valid
+ * against the full OCSF schema.
  */
 export function validateDecisionRecord(value: unknown): Parsed<DecisionRecord> {
   if (!isRecord(value)) return refused('wrong-type', '');
@@ -274,6 +334,8 @@ export function validateDecisionRecord(value: unknown): Parsed<DecisionRecord> {
   if (typeof value.activity_id !== 'number' || value.type_uid !== OCSF_API_ACTIVITY.class_uid * 100 + value.activity_id) return refused('not-allowed-here', 'type_uid');
   if (readPath(value, 'metadata.version') !== OCSF_VERSION) return refused('unknown-version', 'metadata.version');
   if (readPath(value, 'unmapped.nearAi.recordVersion') !== RECORD_VERSION) return refused('unknown-version', 'unmapped.nearAi.recordVersion');
+  const unknownId = idsKnown(value);
+  if (unknownId !== undefined) return unknownId;
   // Whole numbers only (D-35): the canonical form refuses a fraction, negative zero, undefined and anything that is not plain data.
   try {
     canonicalize(value);
@@ -281,5 +343,6 @@ export function validateDecisionRecord(value: unknown): Parsed<DecisionRecord> {
     return refused('wrong-type', 'canonical');
   }
   if (findSecrets(value).length > 0) return refused('not-allowed-here', 'secret');
+  if (carriesCredentialArgument(value)) return refused('not-allowed-here', 'credential-argument');
   return { ok: true, value: value as unknown as DecisionRecord };
 }
