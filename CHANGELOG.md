@@ -2,24 +2,11 @@
 
 ## Unreleased
 
-Every request to a model is now checked before it is sent and leaves a short record of its own,
-and you can label files, folders and the project so that agents cannot read what your clearance
-does not cover. On a fresh install nothing changes where your requests go. Routing by label, where
-a chat that has read labelled files may only use the models its label allows, comes in a later
-release.
+You can now label files, folders and the project, so that agents cannot read what your clearance
+does not cover, and change your own policy through a signed, recorded draft. A label does not
+change where a request is sent yet: every model request is still routed by your policy's default
+label, and routing by label comes in a later release.
 
-- **Every model request is checked before it is sent.** Whatever sends it (the chat, a helper
-  agent, reading an attached file, the NEAR AI chat in VS Code's own chat view, Team Studio, a
-  cybersecurity scan or a model comparison), the request is checked against the routing in your
-  policy, using only what is on this computer. A label does not change where a request is sent
-  yet, so every request is at your policy's default label, which may go to any model. A request the routing does not allow
-  is not sent, and you are told why in plain words.
-- **Each model request leaves a record in a log of its own.** Next to the records of what the agent
-  was allowed or refused, a separate log in this extension's storage keeps one record per model
-  request: when, who asked, which model and provider, the rule that allowed it and a fingerprint of
-  your policy. A routine request leaves a short record, about 1 KB. Records never hold what was
-  sent, the address of the model server or a file path. The log rolls over at about 5 MB and keeps
-  the last four older files, like the decision log, and it is never synced or put in your project.
 - **Show Policy says what is in use.** **NEAR AI: Show Policy** now says that your clearances are
   checked when an agent reads a labelled file, that every model request is routed by your
   policy's default label and its routing tiers, and that content with no label takes the default
@@ -45,6 +32,29 @@ release.
 - **A local runtime counts as local only on this computer.** For content that must stay on this
   computer, only a runtime on this computer (`localhost`, `127.0.0.1` or `[::1]`) counts as local,
   unless your organization names its host in the policy. The local runtime setup prompt says so.
+
+## 0.4.30
+
+Every request to a model is now checked before it is sent and leaves a short record of its own;
+on a fresh install nothing changes where your requests go. Routing by label, where a chat that has
+read labelled files may only use the models its label allows, comes in a later release. Team
+Studio also gets a simpler start, same-size team cards and team icons.
+
+- **Every model request is checked before it is sent.** Whatever sends it (the chat, a helper
+  agent, reading an attached file, the NEAR AI chat in VS Code's own chat view, Team Studio, a
+  cybersecurity scan or a model comparison), the request is checked against the routing in your
+  policy, using only what is on this computer. Nothing can be labelled yet, so every request is
+  at your policy's default label, which may go to any model. A request the routing does not allow
+  is not sent, and you are told why in plain words.
+- **Each model request leaves a record in a log of its own.** Next to the records of what the agent
+  was allowed or refused, a separate log in this extension's storage keeps one record per model
+  request: when, who asked, which model and provider, the rule that allowed it and a fingerprint of
+  your policy. A routine request leaves a short record, about 1 KB. Records never hold what was
+  sent, the address of the model server or a file path. The log rolls over at about 5 MB and keeps
+  the last four older files, like the decision log, and it is never synced or put in your project.
+- **Show Policy says the routing is in use.** **NEAR AI: Show Policy** now says that every model
+  request is checked against the routing it lists; the scales and clearances it lists are still
+  kept for later.
 - **Recommend a team for me is on the first screen.** Building a team now offers three ways to
   start: **Use an existing team**, **Create a new team** and **Recommend a team for me**. The
   recommendation asks the kind of work, its risk, where models may run and, if you like, what the
