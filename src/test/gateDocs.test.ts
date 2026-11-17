@@ -6,6 +6,8 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
 import { CLEARANCE_SELF_ASSERTED_TEXT } from '../domain/gate/labels';
+import { FLOOR_CANNOT_SEE_TEXT, FLOOR_EFFECTS_CANNOT_SEE_TEXT } from '../domain/gate/floor';
+import { classifyCommand } from '../agent/commandSafety';
 import { BUNDLE_FAILURES } from '../domain/gate/bundle';
 import { MANIFEST_IS_A_CLAIM_TEXT, RUNS_ON_THIS_MACHINE_TEXT } from '../domain/gate/words';
 import { MAX_DECISION_LOG_BYTES, MAX_ROTATED_FILES } from '../gate/decisionLog';
@@ -100,7 +102,8 @@ test('SECURITY.md\'s MCP section says what plan 10 shipped: declared tools, rest
   assert.ok(mcpSection.includes(RUNS_ON_THIS_MACHINE_TEXT));
   assert.match(mcpSection, /Servers added from this version on/);
   assert.match(mcpSection, /"What it does" menu/);
-  assert.match(flat(mcpSection), /every mode except `fully-autonomous`/);
+  assert.match(flat(mcpSection), /An undeclared tool asks before every call in every mode, `fully-autonomous` included/);
+  assert.doesNotMatch(flat(mcpSection), /every mode except `fully-autonomous`/);
   assert.match(mcpSection, /behave as they did/);
 });
 
@@ -108,17 +111,79 @@ test('README names the two commands, points to the SECURITY.md section, and repe
   assert.ok(readmePolicy.includes('(SECURITY.md#your-policy-file-and-decision-records)'));
   assert.ok(readmeMcp.includes(MANIFEST_IS_A_CLAIM_TEXT));
   assert.match(flat(readmeMcp), /with your permissions/);
-  assert.match(flat(readmeMcp), /every mode except `fully-autonomous`/);
+  assert.match(flat(readmeMcp), /an undeclared tool asks before every call in every mode, `fully-autonomous` included/);
+  assert.doesNotMatch(flat(readmeMcp), /every mode except `fully-autonomous`/);
 });
 
-test('this plan leaves the floor text and the fully-autonomous limitation as they were (plan 17 changes them with the code)', () => {
-  assert.ok(flat(SECURITY).includes('Under `fully-autonomous` they run without asking (see Known limitations).'));
-  assert.ok(SECURITY.includes('| Under `fully-autonomous`, the agent runs commands, reads likely credential files, and writes protected files'));
-  assert.ok(flat(SECURITY).includes('every other tool asks in every mode, including fully-autonomous'));
+// Plan 17 (D-19, D-34): the floor is enforced, and SECURITY.md and README say so in the same change. The old wording is held here as literals, so it cannot
+// come back unnoticed.
+const OLD_FLOOR_SENTENCE = 'Under `fully-autonomous` they run without asking (see Known limitations).';
+const OLD_LIMITATION_ROW = '| Under `fully-autonomous`, the agent runs commands, reads likely credential files, and writes protected files (`.git/`, `.planning/.near-ai/`, `.near-ai/`) without asking |';
+const OLD_README_ROW = 'including credential-file reads and writes into `.git/` (only for throwaway workspaces';
+const OLD_GUARD_RAILS = 'in every mode except Full auto, where these run without asking';
+const floorSection = sectionOf(SECURITY, '### What the agent can do without asking');
+const limitations = sectionOf(SECURITY, '## Known limitations');
+const readmeActionPolicy = README.split('\n').find((line) => line.startsWith('| `nearAi.actionPolicy` |')) ?? '';
+
+test('SECURITY.md describes the enforced floor: every mode asks before protected writes, publishing and destruction, with no shortcut, and refuses the key and credential stores', () => {
+  const text = flat(floorSection);
+  for (const phrase of [
+    'In every mode, `fully-autonomous` included, these always ask, with no **Always allow** and no grant for the rest of the run',
+    'writing into `.git/`',
+    'writing into `.planning/.near-ai/` (other than its `team.md`) or into `.near-ai/` (other than its `scratch/` and `attachments/` folders)',
+    'publishing: git push, package and extension publishing, release creation, container image push, deploy commands, and sending email',
+    'destruction: recursive deletes outside scratch and build folders',
+    '`git reset --hard`', '`git clean`', 'discarding uncommitted changes', 'deleting branches and tags',
+    'In a run with nobody to answer',
+    'that exact call (the same tool and arguments, from the same folder) may run once more; the next one asks again',
+    'In every mode these are refused, with no card',
+    '`~/.near-credentials`', 'SSH keys', 'operating-system keychain commands', "this extension's own identity and policy files",
+    'asks first in every mode except `fully-autonomous`, where it runs without asking'
+  ]) assert.ok(text.includes(phrase), phrase);
+  assert.ok(flat(SECURITY).includes('no **Always allow** and no grant'));
+  assert.ok(flat(SECURITY).includes('In a run with nobody to answer'));
+});
+
+test('SECURITY.md carries both of the floor\'s own statements of what it cannot see, word for word', () => {
+  assert.ok(flat(floorSection).includes(FLOOR_CANNOT_SEE_TEXT), 'the key and credential folder checks');
+  assert.ok(flat(floorSection).includes(FLOOR_EFFECTS_CANNOT_SEE_TEXT), 'the publishing and destruction checks');
+  // The credential text no longer claims a folder change followed by a bare file name is missed: plan 16 catches `cd ~ && cat .netrc`.
+  assert.doesNotMatch(FLOOR_CANNOT_SEE_TEXT, /a folder change followed by a bare file name/);
+});
+
+test('each gap the publishing and destruction text names is a real gap today, so the text is not out of date in either direction', () => {
+  const context = { root: '/work/app', cwd: '/work/app', home: '/home/dev' };
+  const tags = (command: string) => classifyCommand(command, context).effects ?? [];
+  assert.ok(tags('git push').length > 0, 'the plain command is tagged');
+  const nested = (levels: number): string => {
+    let command = 'git push';
+    for (let level = 0; level < levels; level += 1) command = `sh -c ${JSON.stringify(command)}`;
+    return command;
+  };
+  assert.ok(tags(nested(4)).length > 0, 'four levels deep is still read');
+  for (const hidden of ['bash -c "$CMD"', 'source deploy.sh', 'cat deploy.sh | sh', 'stdbuf -oL git push', 'flock /tmp/lock git push', 'watch git push', nested(5)]) {
+    assert.deepEqual(tags(hidden), [], `${hidden} is not seen, as the text says`);
+  }
+  for (const seen of ['sudo git push', 'bash -c "git push"', 'echo x | xargs git push', '(git push)']) assert.ok(tags(seen).length > 0, `${seen} is seen, as the text says`);
+});
+
+test('the old fully-autonomous wording is gone from SECURITY.md and README, and the new rows say what still asks', () => {
+  assert.equal(flat(SECURITY).includes(OLD_FLOOR_SENTENCE), false, 'the sentence that said these run without asking under fully-autonomous');
+  assert.equal(SECURITY.includes(OLD_LIMITATION_ROW), false, 'the Known limitations row that said protected files are written without asking');
+  assert.equal(README.includes(OLD_README_ROW), false, 'the README row that said fully-autonomous writes into .git/');
+  assert.equal(flat(README).includes(OLD_GUARD_RAILS), false, 'the README guard rails that said protected writes run without asking in Full auto');
+  const row = limitations.split('\n').find((line) => line.startsWith('| Under `fully-autonomous`')) ?? '';
+  assert.match(row, /runs commands and reads likely credential files inside the project without asking/);
+  assert.match(row, /publishing and destruction still ask/);
+  assert.match(row, /the key folder and credential stores are refused/);
+  assert.match(row, /there is no sandbox around the shell yet/);
+  assert.match(readmeActionPolicy, /publishing and destruction still ask/);
+  assert.match(readmeActionPolicy, /the key folder and credential stores are refused/);
+  assert.doesNotMatch(readmeActionPolicy, /writes into `\.git\/` \(only for throwaway/);
 });
 
 test('the new sections have no em-dash and never say NEAR organization', () => {
-  for (const [name, text] of [['policy section', policySection], ['MCP section', mcpSection], ['README policy', readmePolicy], ['README MCP', readmeMcp]] as const) {
+  for (const [name, text] of [['policy section', policySection], ['MCP section', mcpSection], ['README policy', readmePolicy], ['README MCP', readmeMcp], ['floor section', floorSection], ['README actionPolicy row', readmeActionPolicy], ['floor texts', `${FLOOR_CANNOT_SEE_TEXT} ${FLOOR_EFFECTS_CANNOT_SEE_TEXT}`]] as const) {
     assert.ok(text.length > 100, name);
     assert.ok(!text.includes(EM_DASH), `${name} has no em-dash`);
     assert.doesNotMatch(text, /NEAR organization/i, name);

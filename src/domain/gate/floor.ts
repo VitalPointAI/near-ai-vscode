@@ -80,9 +80,20 @@ export const EXTENSION_STORAGE_FOLDERS: readonly string[] = Object.freeze(['iden
 /** The portable form of the extension's storage folder: VS Code lowercases the extension id (publisher VitalPoint, name near-ai-vscode). */
 export const EXTENSION_STORAGE_TEXT = 'globalStorage/vitalpoint.near-ai-vscode';
 
-/** What the floor's text checks cannot see, in the floor's own words (the same honesty as namesStateKeys). Shown wherever the floor is described. */
+/**
+ * What the floor's checks of key and credential folders cannot see, in the floor's own words (the same honesty as namesStateKeys). Shown wherever the floor
+ * is described; SECURITY.md carries it word for word. It says what the code does: the text of the command, each word resolved from the shell's folder and from
+ * any `cd` or `pushd` earlier in the same command (shellReachesCredentialStore), and nothing a script or program does once it runs.
+ */
 export const FLOOR_CANNOT_SEE_TEXT =
-  'The checks that keep agents out of key and credential folders read the text of a command. They cannot see a path built while the command runs, a program that reads a store for you (for example git credential fill), a walk down from a parent folder or a folder change followed by a bare file name, or anything an add-on server or the cyber host tools do inside themselves. There is no operating-system sandbox around the shell yet, so a determined command can still get past them.';
+  'The checks that keep agents out of key and credential folders read the text of a command, following the shell\'s folder and any cd or pushd earlier in the same command. They cannot see a path built while the command runs (from a variable or $(...)), what a script or an npm script the command starts does, a program that reads a store for you (for example git credential fill), a walk down from a parent folder, or anything an add-on server or the cyber host tools do inside themselves. There is no operating-system sandbox around the shell yet, so a determined command can still get past them.';
+
+/**
+ * What the checks that find publishing, destruction and protected writes in a shell command cannot see (classifyCommand's effect tags, plan 16): a command
+ * they cannot read has no tag, so under fully-autonomous it runs without asking. SECURITY.md carries it word for word; gateDocs checks each named gap is real.
+ */
+export const FLOOR_EFFECTS_CANNOT_SEE_TEXT =
+  'The checks that find publishing, destruction and protected writes in a shell command also read its text, through npm run scripts and wrappers such as bash -c, sudo, xargs, pipes and subshells. They do not see a command built while it runs (bash -c "$CMD"), a file run with source or piped into sh, a script written or changed earlier on the same line (it is read as it was before the line ran), commands nested more than four levels deep, or wrappers they do not know, such as stdbuf, flock or watch. Under fully-autonomous such a command runs without asking.';
 
 /** Where the person's home folder and this extension's global storage are, as the adapter knows them. Both are optional: the portable text forms always match. */
 export interface FloorLocations {

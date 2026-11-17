@@ -476,3 +476,20 @@ test('a file tool path that names a credential store or the identity folders is 
     }
   }
 });
+
+test('an allow-list entry that matches a floor action does not get past the floor: it still asks, with no shortcut', async () => {
+  for (const mode of MODES) {
+    const w = world();
+    try {
+      const rules: PermissionRules = { allowCommands: ['git push'], denyCommands: DEFAULT_RULES.denyCommands };
+      const ran = await runIn(w, [call('g1', 'Bash', { command: 'git push origin HEAD:refs/heads/listed' })], { mode, presence: 'person', rules });
+      assert.equal(ran.cards.length, 1, mode);
+      assert.equal(ran.cards[0]?.allowRule, undefined, mode);
+      assert.equal(ran.cards[0]?.grant, undefined, mode);
+      assert.equal(ruleOf(ran.records[0]!), 'floor.publish', mode);
+      assert.equal(remoteHas(w.remote, 'refs/heads/listed'), false, mode);
+    } finally {
+      w.shell.dispose();
+    }
+  }
+});
