@@ -7,6 +7,7 @@ import test from 'node:test';
 import { checkTeamIcon, decodeIconBase64, iconDataUri, iconReference, iconSourceType, MAX_TEAM_ICON_BYTES, teamIconPrompt, withIconReference } from '../agent/teamIcon';
 import { draftFromMarkdown, teamMarkdown } from '../agent/teamMarkdown';
 import { parseTeam, renderTeam, TeamLibrary } from '../agent/teams';
+import { parseFrontmatter } from '../gsd/library';
 import { JPEG, png, SVG, WEBP } from './iconFixtures';
 
 // Team icons (0.4.30, owner 2026-11-17: "give user ability to upload or AI generate an icon for the team. Ensure there's a default icon available if none
@@ -219,4 +220,35 @@ test('library: a failed team-file write puts the icon back as it was; a failed p
   patched.setReference = async () => { throw new Error('disk full'); };
   patched.restoreIconFile = async () => { throw new Error('gone'); };
   await assert.rejects(() => lib.setIcon(file, png(128, 128, { seed: 22 })), (error: Error) => error.name === 'TeamIconPartialError' && /The new icon file was written, but the team file could not be changed to name it, and the earlier icon file could not be put back/.test(error.message));
+});
+
+// ---------- PR #82 review, round 2: the icon line never lands inside a value ----------
+
+test('the icon line goes after a one-line description, never inside a block or quoted value, and the team reads the same', () => {
+  const body = '\n## dev\n\nBuild it.\n';
+  const cases: Array<[string, string]> = [
+    ['one line', '---\nname: Web team\ndescription: Builds pages\nowner: me\n---\n'],
+    ['a literal block', '---\nname: Web team\ndescription: |\n  Builds pages\n  and tests them\nowner: me\n---\n'],
+    ['a folded block', '---\nname: Web team\ndescription: >-\n  Builds pages\n  and tests them\n---\n'],
+    ['a quoted value over two lines', '---\nname: Web team\ndescription: "Builds pages\n  and tests them"\nowner: me\n---\n'],
+    ['a plain value over two lines', '---\nname: Web team\ndescription: Builds pages\n  and tests them\n---\n'],
+    ['no description', '---\nname: Web team\nowner: me\n---\n']
+  ];
+  for (const [what, head] of cases) {
+    const text = `${head}${body}`;
+    const after = withIconReference(text, 'web-team.icon.png');
+    assert.equal(iconReference(after), 'web-team.icon.png', what);
+    const { icon, ...rest } = parseFrontmatter(after).data;
+    assert.equal(icon, 'web-team.icon.png', what);
+    assert.deepEqual(rest, parseFrontmatter(text).data, `${what}: every other key reads the same`);
+    assert.deepEqual(parseTeam(after, '/t/web-team.md'), parseTeam(text, '/t/web-team.md'), what);
+    // The lines of the description's value stay together, with the icon line outside them.
+    const lines = after.split('\n');
+    const at = lines.indexOf('icon: web-team.icon.png');
+    assert.ok(at > 0, what);
+    assert.doesNotMatch(lines[at + 1] ?? '', /^\s+\S/, `${what}: no indented value line follows the icon line`);
+    const described = lines.findIndex((line) => line.startsWith('description:'));
+    if (described >= 0 && /^description: \S[^"|>]*$/.test(lines[described]!) && !/^\s/.test(lines[described + 1] ?? '')) assert.equal(at, described + 1, `${what}: right after a one-line description`);
+    assert.equal(withIconReference(after, undefined), text, `${what}: removing it gives back the file`);
+  }
 });

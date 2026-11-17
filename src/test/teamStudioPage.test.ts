@@ -2690,6 +2690,8 @@ test('versions: a burst within one millisecond is named after that millisecond, 
 
 // ---------- 0.4.30: the first screen offers the recommendation (owner, 2026-11-17) ----------
 
+/** The answers a recommend request was made from, as the host echoes them with its reply (PR #82 review, round 2). */
+const answersOf = (request: Record<string, any>) => ({ goal: request.goal, locality: request.locality, workShape: request.workShape, riskLevel: request.riskLevel });
 const RECOMMENDATION = { name: 'Recommended team', cloneName: 'Recommended team', description: 'Planner, implementer, security, tester and reviewer.', members: [{ name: 'planner', role: 'planner' }, { name: 'implementer', role: 'implementer' }, { name: 'security', role: 'security' }, { name: 'tester', role: 'tester' }, { name: 'reviewer', role: 'reviewer' }] };
 
 test('page: the first screen offers three choices, and Recommend a team for me asks its questions, shows the team with Use as is and Clone and modify, and Back returns from each screen', async () => {
@@ -2716,9 +2718,9 @@ test('page: the first screen offers three choices, and Recommend a team for me a
   assert.deepEqual(asked, { type: 'recommend', seq: asked.seq, goal: 'Add billing', locality: 'cloud', workShape: 'feature', riskLevel: 'high' });
   assert.equal(page.byLabel('Recommend a team')!.disabled, true, 'waiting for the answer');
   // A reply to another request is dropped; the one asked for shows the team.
-  page.dispatch({ type: 'recommendation', seq: asked.seq + 7, ...RECOMMENDATION, name: 'Wrong team' });
+  page.dispatch({ type: 'recommendation', seq: asked.seq + 7, answers: answersOf(asked), ...RECOMMENDATION, name: 'Wrong team' });
   assert.doesNotMatch(page.text(), /Wrong team/);
-  page.dispatch({ type: 'recommendation', seq: asked.seq, ...RECOMMENDATION });
+  page.dispatch({ type: 'recommendation', seq: asked.seq, answers: answersOf(asked), ...RECOMMENDATION });
   assert.match(page.text(), /Recommended team.*5 members.*planner.*implementer.*security.*tester.*reviewer/);
   assert.equal(page.byLabel('Recommend a team')!.disabled, false);
   page.byLabel('Use Recommended team as is')!.click();
@@ -2750,7 +2752,7 @@ test('page: the first screen offers three choices, and Recommend a team for me a
   page.byLabel('Recommend a team')!.click();
   const late = page.posts.at(-1)!;
   page.byLabel('Back')!.click();
-  page.dispatch({ type: 'recommendation', seq: late.seq, ...RECOMMENDATION });
+  page.dispatch({ type: 'recommendation', seq: late.seq, answers: answersOf(late), ...RECOMMENDATION });
   assert.equal(page.heading(), 'How do you want to start?');
   page.byLabel('Recommend a team for me')!.click();
   assert.equal(page.byLabel('Use Recommended team as is'), undefined, 'the late reply was not shown');
@@ -2787,6 +2789,7 @@ test('host: Recommend shows the team Use as is would save, from the same answers
   await h.send({ type: 'recommend', seq: 4, goal: 'Add billing', locality: 'cloud', workShape: 'feature', riskLevel: 'high' });
   const shown = last(h, 'recommendation');
   assert.equal(shown.seq, 4);
+  assert.deepEqual(shown.answers, { goal: 'Add billing', locality: 'cloud', workShape: 'feature', riskLevel: 'high' }, 'the answers it was made from, so the page can tell it is current');
   assert.equal(shown.name, 'Recommended team');
   assert.deepEqual(shown.members.map((member: { name: string }) => member.name), ['planner', 'implementer', 'security', 'tester', 'reviewer']);
   assert.doesNotMatch(JSON.stringify(shown), new RegExp(h.root.replace(/[/\\]/g, '.')), 'no path');
@@ -3435,6 +3438,121 @@ test('host: a Use as is whose team file cannot be written leaves the project\'s 
     await h.send({ type: 'use-team', id: 'lib:web-team' });
     assert.match(last(h, 'error').text, /^Not used: /);
     assert.deepEqual(await h.library.readIcon(project), old, 'the old team still shows its own icon');
+  } finally { await chmod(project, 0o644); }
+  h.close();
+});
+
+// ---------- PR #82 review, round 2 ----------
+
+test('page: an answer changed while a recommendation is on its way drops that reply, and Use as is and Clone send exactly the answers the shown team was made from', async () => {
+  const page = await builderPage();
+  page.byLabel('New team')!.click();
+  page.byLabel('Recommend a team for me')!.click();
+  const count = (type: string) => page.posts.filter((message) => message.type === type).length;
+  // A select changed in flight: the request is over, the reply is dropped, and Recommend works again at once.
+  page.byLabel('Recommend a team')!.click();
+  const first = page.posts.at(-1)!;
+  page.type('f-risk', 'high', 'change');
+  assert.equal(page.byLabel('Recommend a team')!.disabled, false, 'the old request is no longer waited on');
+  page.dispatch({ type: 'recommendation', seq: first.seq, answers: answersOf(first), ...RECOMMENDATION });
+  assert.equal(page.byLabel('Use Recommended team as is'), undefined, 'made from the old answers, so not shown');
+  assert.match(page.text(), /Recommend again/);
+  // The goal typed in flight (the field keeps its caret, nothing is redrawn): the same.
+  page.byLabel('Recommend a team')!.click();
+  const second = page.posts.at(-1)!;
+  assert.equal(second.riskLevel, 'high');
+  page.type('f-goal', 'Ship');
+  page.dispatch({ type: 'recommendation', seq: second.seq, answers: answersOf(second), ...RECOMMENDATION });
+  assert.equal(page.byLabel('Use Recommended team as is'), undefined);
+  // A reply whose answers are not the ones on screen is dropped even with the right number.
+  page.byLabel('Recommend a team')!.click();
+  const third = page.posts.at(-1)!;
+  assert.equal(third.goal, 'Ship');
+  page.dispatch({ type: 'recommendation', seq: third.seq, answers: { ...answersOf(third), workShape: 'release' }, ...RECOMMENDATION });
+  assert.equal(page.byLabel('Use Recommended team as is'), undefined);
+  // The reply for the answers on screen is shown, and its buttons send exactly those answers.
+  page.byLabel('Recommend a team')!.click();
+  const fourth = page.posts.at(-1)!;
+  page.dispatch({ type: 'recommendation', seq: fourth.seq, answers: answersOf(fourth), ...RECOMMENDATION });
+  page.byLabel('Use Recommended team as is')!.click();
+  assert.deepEqual(page.posts.at(-1), { type: 'use-team', id: 'recommend', ...answersOf(fourth) });
+  page.dispatch({ type: 'used', declined: true, text: 'Not changed.' });
+  page.byLabel('Clone Recommended team and modify it')!.click();
+  assert.deepEqual(page.posts.at(-1), { type: 'starting-point', id: 'recommend', ...answersOf(fourth) });
+  page.dispatch({ type: 'error', text: 'Try again.' });
+  // Changed after it is shown: the team and its buttons go until it is recommended again.
+  page.type('f-locality', 'local', 'change');
+  assert.equal(page.byLabel('Use Recommended team as is'), undefined);
+  assert.equal(page.byLabel('Clone Recommended team and modify it'), undefined);
+  page.type('f-locality', 'cloud', 'change');
+  assert.equal(page.byLabel('Use Recommended team as is'), undefined, 'changing it back does not bring back a team nobody asked for');
+  assert.equal(count('use-team'), 1);
+  for (const message of page.posts) assert.ok(parseStudioMessage(message), JSON.stringify(message));
+});
+
+test('host: an icon that cannot be saved during Import still adds the team, lists it, and says the icon was not added', async () => {
+  const h = await harness();
+  const file = await h.library.create('Web team', teamMarkdown(draft()));
+  await h.library.setIcon(file, png(128, 128, { seed: 25 }));
+  await h.send({ type: 'ready' });
+  const out = await mkdtemp(path.join(tmpdir(), 'near-ai-import-icon-fail-'));
+  h.shareTarget.value = path.join(out, 'web-team.near-team.json');
+  await h.send({ type: 'share', id: 'user:web-team' });
+  const other = await harness();
+  await other.send({ type: 'ready' });
+  other.importSource.value = h.shareTarget.value;
+  other.chooseAnswer.value = 'Add to my teams';
+  const library = other.library as unknown as { setIcon: (...args: unknown[]) => Promise<unknown> };
+  library.setIcon = async () => { throw new Error(`ENOSPC: no space left on device, open '${other.library.directory}/web-team.icon.png'`); };
+  await other.send({ type: 'import' });
+  const added = path.join(other.library.directory, 'web-team.md');
+  assert.ok(existsSync(added), 'the team is added');
+  const notice = last(other, 'team').notice as string;
+  assert.match(notice, /^Added "Web team" to your teams\./);
+  assert.match(notice, /Its icon could not be saved, so it shows the default icon\./);
+  assert.equal(notice.includes(other.library.directory), false, 'no path');
+  assert.ok(last(other, 'library').library.teams.some((team: any) => team.id === 'user:web-team'), 'the list shows it');
+  assert.equal(other.posted.some((message) => message.type === 'error'), false);
+  h.close(); other.close();
+});
+
+test('host: Remove and Restore say History holds the old icon only when one was put there', async () => {
+  const h = await harness();
+  const file = await h.library.create('Web team', teamMarkdown(draft()));
+  await h.send({ type: 'ready' });
+  // A team file that names its icon, with no icon file: Remove takes the line away, and nothing went to History.
+  await writeFile(file, withIconReference(await readFile(file, 'utf8'), 'web-team.icon.png'));
+  await h.send({ type: 'icon-remove', id: 'user:web-team' });
+  const lineOnly = last(h, 'icon-updated').text as string;
+  assert.doesNotMatch(lineOnly, /History/);
+  assert.match(lineOnly, /default icon/);
+  // A real icon: Remove says it is in History.
+  await h.library.setIcon(file, png(128, 128, { seed: 26 }));
+  await h.send({ type: 'icon-remove', id: 'user:web-team' });
+  assert.match(last(h, 'icon-updated').text, /the old one is in History/);
+  // Restore with no icon in place: nothing goes to History, so it does not say so; with one in place it does.
+  const ref = path.basename((await h.library.iconVersions(file))[0]!);
+  await h.send({ type: 'icon-restore', id: 'user:web-team', ref });
+  assert.doesNotMatch(last(h, 'icon-updated').text, /History/);
+  await h.send({ type: 'icon-restore', id: 'user:web-team', ref });
+  assert.match(last(h, 'icon-updated').text, /The one before it is in History/);
+  h.close();
+});
+
+test('host: a Use as is that cannot write the team file says what went wrong in plain words, without the file\'s path', async () => {
+  const h = await harness();
+  await h.library.create('Web team', teamMarkdown(draft()));
+  const project = TeamLibrary.projectTeamFile(h.root);
+  await mkdir(path.dirname(project), { recursive: true });
+  await writeFile(project, renderTeam('Old team', 'x', [{ name: 'dev', instructions: 'Do.' }]));
+  const { chmod } = await import('node:fs/promises');
+  await chmod(project, 0o444);
+  try {
+    await h.send({ type: 'ready' });
+    await h.send({ type: 'use-team', id: 'lib:web-team' });
+    const text = last(h, 'error').text as string;
+    assert.equal(text, 'Not used: the team file could not be written (permission was denied).');
+    assert.equal(text.includes(h.root), false);
   } finally { await chmod(project, 0o644); }
   h.close();
 });
