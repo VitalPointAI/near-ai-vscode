@@ -80,6 +80,9 @@ test('machine paths are replaced only at path boundaries', () => {
   const folders = { project: '/work/app', home: '/home/dev' };
   assert.equal(withoutMachinePaths('cat /work/app/a.txt "/work/app" (/work/app) x=/work/app:/home/dev/.bashrc', folders), 'cat <project>/a.txt "<project>" (<project>) x=<project>:~/.bashrc');
   assert.equal(withoutMachinePaths('/work/app', folders), '<project>');
+  // Sentence punctuation after a whole path ends it; a longer name that only starts like it is left alone.
+  assert.equal(withoutMachinePaths('Refused in /work/app. Then /work/app, and /work/app; [/work/app] {/home/dev}', folders), 'Refused in <project>. Then <project>, and <project>; [<project>] {~}');
+  assert.equal(withoutMachinePaths('/work/app.bak /work/app,old', folders), '/work/app.bak /work/app,old');
   for (const kept of ['cat /work/application/x', 'ls /work/app2', 'cd /home/dev2/x', 'cat x/home/dev/y', 'cat /srv/work/app/a', 'echo prefix/work/app']) {
     assert.equal(withoutMachinePaths(kept, folders), kept, kept);
   }

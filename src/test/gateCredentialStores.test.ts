@@ -186,7 +186,7 @@ test('a project\'s own globalStorage/state.vscdb is the project\'s; VS Code\'s r
 // mode, like the stores before them. Each is checked against the stand-in home: by text, from the shell's folder after a cd, and through the gate. A
 // project's own file of the same name, and the harmless neighbours of each store, are not refused. Nothing is run.
 const NEW_STORES: ReadonlyArray<readonly [string, string]> = [
-  ['.config/gh/hosts.yml', 'cat ~/.config/gh/hosts.yml'], ['.cargo/credentials', 'cat ~/.cargo/credentials'], ['.cargo/credentials.toml', 'cat $HOME/.cargo/credentials.toml'],
+  ['.config/gh', 'cat ~/.config/gh/hosts.yml'], ['.config/gh', 'cat ~/.config/gh/*'], ['.config/gh', 'grep -r . ~/.config/gh'], ['.config/gh', 'cat ~/.config/gh/hosts.y*'], ['.cargo/credentials', 'cat ~/.cargo/credentials'], ['.cargo/credentials.toml', 'cat $HOME/.cargo/credentials.toml'],
   ['.terraform.d/credentials.tfrc.json', 'cat ~/.terraform.d/credentials.tfrc.json'], ['.config/glab-cli', 'cat ~/.config/glab-cli/config.yml'],
   ['.config/hub', 'cat ~/.config/hub'], ['.gem/credentials', 'cat ~/.gem/credentials'], ['.local/share/keyrings', 'ls ~/.local/share/keyrings'],
   ['.yarnrc.yml', 'cat ~/.yarnrc.yml']
@@ -194,7 +194,7 @@ const NEW_STORES: ReadonlyArray<readonly [string, string]> = [
 // Already on the list before, named by the owner: still refused.
 const NAMED_BEFORE = ['cat ~/.docker/config.json', 'cat ~/.npmrc', 'cat ~/.pypirc', 'cat ~/.netrc', 'ls ~/.config/gcloud', 'cat ~/.azure/msal_token_cache.json', 'cat ~/.kube/config'];
 const STORE_NEIGHBOURS = [
-  'cat ~/.config/gh/config.yml', 'ls ~/.config/gh', 'cat ~/.cargo/config.toml', 'cat ~/.cargo/credentials-notes.md', 'ls ~/.cargo/bin', 'cat ~/.terraform.d/plugins/x',
+  'cat ~/.cargo/config.toml', 'cat ~/.cargo/credentials-notes.md', 'ls ~/.cargo/bin', 'cat ~/.terraform.d/plugins/x',
   'cat ~/.gem/specs/x', 'cat ~/.yarnrc', 'cat .yarnrc.yml', 'cat .npmrc', 'cat .cargo/credentials.toml', 'cat config/gh/hosts.yml'
 ];
 

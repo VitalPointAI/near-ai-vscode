@@ -177,7 +177,7 @@ test('credential stores: the confirmed list is named, and each form of the home 
   assert.deepEqual([...CREDENTIAL_STORES], [
     '.near-credentials', '.ssh', '.aws', '.config/gcloud', '.azure', '.docker/config.json', '.netrc', '.git-credentials', '.gnupg', '.kube', '.npmrc', '.pypirc',
     '.near-kb', '.kbkey',
-    '.config/gh/hosts.yml', '.cargo/credentials', '.cargo/credentials.toml', '.terraform.d/credentials.tfrc.json', '.config/glab-cli', '.config/hub', '.gem/credentials',
+    '.config/gh', '.cargo/credentials', '.cargo/credentials.toml', '.terraform.d/credentials.tfrc.json', '.config/glab-cli', '.config/hub', '.gem/credentials',
     '.local/share/keyrings', '.yarnrc.yml'
   ]);
   const locations = { home: HOME };

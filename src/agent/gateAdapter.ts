@@ -607,7 +607,8 @@ export function withoutMachinePaths(text: string, folders: { readonly project?: 
   // Only a whole path: where a path starts (the text's start, a space, a quote, `(`, `:` or `=`) and ends (a separator, a path list's `:`, a quote, a space, `)` or the end).
   for (const [folder, label] of pairs.sort((a, b) => b[0].length - a[0].length)) {
     const escaped = folder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    out = out.replace(new RegExp(`(^|[\\s'"(:=])${escaped}(?=$|[/\\\\\\s'"):])`, 'g'), (_match, before: string) => `${before}${label}`);
+    // Sentence punctuation ends a path too when a space or the end follows it (`in /work/app.` or `/work/app, then`), never `/work/app.bak`.
+    out = out.replace(new RegExp(`(^|[\\s'"(\\[{:=])${escaped}(?=$|[/\\\\\\s'"):\\]}]|[.,;](?:\\s|$))`, 'g'), (_match, before: string) => `${before}${label}`);
   }
   return out;
 }

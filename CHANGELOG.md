@@ -49,9 +49,9 @@ to undo, and no mode lets an agent near the places where your keys and passwords
   and a `gh api` call that writes (a writing method, a field or a body) count as publishing.
   Opening a pull request and commenting follow your settings, as before.
 - **Signing in and out asks in every mode.** Logging in or out of a package registry, a container
-  registry, GitHub, Google Cloud, Azure or AWS, and changing a stored token, ask first, because they
-  change the logins kept on your computer.
-- **More credential stores and token commands are off limits.** The GitHub CLI's login file,
+  registry, GitHub, Google Cloud, Azure or AWS, and revoking a stored token, ask first, because they
+  change the logins kept on your computer. Commands that print a stored token are refused (below).
+- **More credential stores and token commands are off limits.** The GitHub CLI's folder (which holds its login),
   cargo's, terraform's and RubyGems' credentials, your desktop keyring and your home `.yarnrc.yml`
   join the stores agents may not touch, and so do commands that print a stored token when they run,
   such as `gh auth token`, `gcloud auth print-access-token`, `aws sts get-session-token` and `npm

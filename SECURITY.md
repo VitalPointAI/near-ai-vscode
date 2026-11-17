@@ -120,7 +120,9 @@ run** or an allow-list entry that matches:
   or `git reflog expire`), and deleting branches and tags. Routine
   maintenance is not destruction: `git gc` and `git prune` that keep git's
   grace period of days or more, and `git rebase --continue`, `--abort`,
-  `--skip`, `--quit` or `--edit-todo` on a rebase already under way;
+  `--skip`, `--quit` or `--edit-todo` on a rebase already under way. The
+  grace period is judged from the command line only: a `gc.pruneExpire` set
+  in a git config file is not seen, so a plain `git gc` there still runs;
 - writing to the knowledge your team shares (the Learn tool).
 
 Approving one of these runs that one call. When a helper agent's card is
@@ -134,7 +136,7 @@ In every mode these are refused, with no card: the project's key folder (below),
 the NEAR key folder in your home folder (`~/.near-credentials`), SSH keys
 (`~/.ssh`), cloud and registry credential files (`~/.aws`, `~/.config/gcloud`,
 `~/.azure`, `~/.docker/config.json`, `~/.kube`, `~/.netrc`, `~/.git-credentials`,
-`~/.gnupg`, `~/.npmrc`, `~/.pypirc`, `~/.config/gh/hosts.yml`,
+`~/.gnupg`, `~/.npmrc`, `~/.pypirc`, `~/.config/gh` (the GitHub CLI's folder, which holds its login),
 `~/.cargo/credentials` and `credentials.toml`,
 `~/.terraform.d/credentials.tfrc.json`, `~/.config/glab-cli`, `~/.config/hub`,
 `~/.gem/credentials`, `~/.local/share/keyrings`, `~/.yarnrc.yml`; a project's
