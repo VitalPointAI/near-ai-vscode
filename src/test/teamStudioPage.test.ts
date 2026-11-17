@@ -267,7 +267,7 @@ test('the page HTML is one nonce script and two stylesheets (shared base, then i
 
 // ---------- the host controller, on a real TeamLibrary ----------
 
-interface Harness { posted: Array<Record<string, any>>; send(message: unknown): Promise<void>; deps: TeamStudioDeps; storage: string; root: string; library: TeamLibrary; prefills: string[]; opened: string[]; applied: string[]; drafts: { value?: SavedWizard }; watch(file: string): void; confirmAnswer: { value: boolean }; askAnswer: { value: string | undefined }; shareTarget: { value?: string }; importSource: { value?: string }; confirmed: string[]; settle(): Promise<void>; chooseAnswer: { value?: string }; asked: Array<{ message: string; actions: string[] }>; kept: { value?: KeptWork }; close(): void }
+interface Harness { posted: Array<Record<string, any>>; send(message: unknown): Promise<void>; deps: TeamStudioDeps; storage: string; root: string; library: TeamLibrary; prefills: string[]; opened: string[]; applied: string[]; drafts: { value?: SavedWizard }; watch(file: string): void; confirmAnswer: { value: boolean }; askAnswer: { value: string | undefined }; shareTarget: { value?: string }; importSource: { value?: string }; confirmed: string[]; settle(): Promise<void>; chooseAnswer: { value?: string }; asked: Array<{ message: string; actions: string[] }>; kept: { value?: KeptWork }; close(): void; setRoot(root: string | undefined, notify?: boolean): void }
 
 async function harness(): Promise<Harness> {
   const base = await mkdtemp(path.join(tmpdir(), 'near-ai-studio-'));
@@ -284,10 +284,14 @@ async function harness(): Promise<Harness> {
   const shareTarget: { value?: string } = {}; const importSource: { value?: string } = {}; const confirmed: string[] = [];
   const chooseAnswer: { value?: string } = {}; const asked: Array<{ message: string; actions: string[] }> = []; const kept: { value?: KeptWork } = {};
   let disposed: (() => void) | undefined;
+  // The folder open now: a test may change it, as a person opening another folder would, and the studio is told.
+  let openRoot: string | undefined = root;
+  let folderChanged: (() => void) | undefined;
   const deps: TeamStudioDeps = {
-    library, root,
+    library, root: () => openRoot,
+    onDidChangeFolder: (listener) => { folderChanged = listener; return { dispose() { folderChanged = undefined; } }; },
     gather: async () => input(),
-    knowledgeBase: async () => existsSync(path.join(root, '.near-kb')),
+    knowledgeBase: async () => openRoot !== undefined && existsSync(path.join(openRoot, '.near-kb')),
     sidebar: { prefill: async (text) => { prefills.push(text); } },
     openFile: async (file) => { opened.push(file); },
     openSetting: async () => undefined,
@@ -304,7 +308,7 @@ async function harness(): Promise<Harness> {
   };
   attachTeamStudio({ webview: { postMessage: async (message) => { posted.push(message as Record<string, any>); return true; }, onDidReceiveMessage: (listener) => { receive = listener; return { dispose() {} }; } }, onDidDispose: (listener) => { disposed = listener; return { dispose() {} }; } }, deps);
   const settle = () => new Promise<void>((resolve) => setTimeout(resolve, 20));
-  return { posted, send: async (message) => { await receive!(message); }, deps, storage, root, library, prefills, opened, applied, drafts, watch: (file) => watcher!(file), confirmAnswer, askAnswer, shareTarget, importSource, confirmed, settle, chooseAnswer, asked, kept, close: () => disposed!() };
+  return { posted, send: async (message) => { await receive!(message); }, deps, storage, root, library, prefills, opened, applied, drafts, watch: (file) => watcher!(file), confirmAnswer, askAnswer, shareTarget, importSource, confirmed, settle, chooseAnswer, asked, kept, close: () => disposed!(), setRoot: (next, notify = true) => { openRoot = next; if (notify) folderChanged?.(); } };
 }
 const last = (h: Harness, type: string) => [...h.posted].reverse().find((message) => message.type === type)!;
 
@@ -937,7 +941,7 @@ test('host path: Manage Teams opens one Team Studio tab; Set Up Project Team sta
     workspace: {
       workspaceFolders: [{ uri: { fsPath: root }, name: 'demo' }], name: 'demo',
       getConfiguration: () => ({ get: (_key: string, fallback?: unknown) => fallback, inspect: () => undefined }),
-      onDidChangeConfiguration: () => disposable, onDidSaveTextDocument: () => disposable,
+      onDidChangeConfiguration: () => disposable, onDidSaveTextDocument: () => disposable, onDidChangeWorkspaceFolders: () => disposable,
       createFileSystemWatcher: (pattern: { base: string; pattern: string }) => { watchers.push(`${pattern.base}|${pattern.pattern}`); return { onDidChange: () => disposable, onDidCreate: () => disposable, onDidDelete: () => disposable, dispose() {} }; }
     },
     window: { createWebviewPanel: () => { created += 1; return panel; }, createStatusBarItem: () => ({ show() {}, hide() {} }), showInformationMessage: () => undefined, showWarningMessage: () => undefined },
@@ -1014,7 +1018,7 @@ test('host path: the questions are VS Code modals, and closing the tab with an u
     workspace: {
       workspaceFolders: [{ uri: { fsPath: root }, name: 'demo' }], name: 'demo',
       getConfiguration: () => ({ get: (_key: string, fallback?: unknown) => fallback, inspect: () => undefined }),
-      onDidChangeConfiguration: () => disposable, onDidSaveTextDocument: () => disposable,
+      onDidChangeConfiguration: () => disposable, onDidSaveTextDocument: () => disposable, onDidChangeWorkspaceFolders: () => disposable,
       createFileSystemWatcher: () => ({ onDidChange: () => disposable, onDidCreate: () => disposable, onDidDelete: () => disposable, dispose() {} })
     },
     window: { createWebviewPanel: () => makePanel(), createStatusBarItem: () => ({ show() {}, hide() {} }), showInformationMessage: () => undefined, showWarningMessage: async (...args: unknown[]) => { warnings.push(args); return answer; } },
@@ -1863,4 +1867,108 @@ test('host: an open team says when a run of it is going, and Watch it live opens
   assert.equal(parseStudioMessage({ type: 'watch-live', id: 'user:web-team' }), undefined);
   await h.send({ type: 'watch-live' });
   assert.deepEqual(watched, ['team-live']);
+});
+
+// PR #70 review carry-over: the studio read its folder once, when the tab opened, so a folder opened or changed later was never seen: the project team of
+// the old folder stayed listed and a new project team was saved into the old folder. It now asks for the folder each time it uses one.
+test('host: a folder change while the studio is open lists the new folder\'s project team, and a project team is saved into the folder open now', async () => {
+  const h = await harness();
+  await mkdir(path.dirname(TeamLibrary.projectTeamFile(h.root)), { recursive: true });
+  await writeFile(TeamLibrary.projectTeamFile(h.root), teamMarkdown(draft({ name: 'First project' })));
+  const second = path.join(path.dirname(h.root), 'second');
+  await mkdir(path.dirname(TeamLibrary.projectTeamFile(second)), { recursive: true });
+  await writeFile(TeamLibrary.projectTeamFile(second), teamMarkdown(draft({ name: 'Second project' })));
+  await h.send({ type: 'ready' });
+  const projectName = () => last(h, 'state').library.teams.find((team: any) => team.id === 'project')?.name;
+  assert.equal(projectName(), 'First project');
+  h.setRoot(second);
+  await h.settle();
+  assert.equal(projectName(), 'Second project', 'the change is seen without reopening the tab');
+  assert.equal(last(h, 'state').context.hasProject, true);
+  h.setRoot(undefined);
+  await h.settle();
+  assert.equal(projectName(), undefined, 'no folder, no project team');
+  assert.equal(last(h, 'state').context.hasProject, false);
+  await h.send({ type: 'create', draft: draft({ name: 'Nowhere' }), target: 'project' });
+  assert.equal(last(h, 'error').text, 'Open a project folder to save a project team, or save it to My teams.');
+  // Opened again (as a person would) without telling the studio: the save still goes to the folder open now, and the project type is applied there too.
+  const third = path.join(path.dirname(h.root), 'third');
+  await mkdir(third, { recursive: true });
+  h.setRoot(third, false);
+  await h.send({ type: 'create', draft: draft({ name: 'Third project' }), target: 'project', projectType: { id: 'software', goal: 'Ship it' } });
+  assert.ok(existsSync(TeamLibrary.projectTeamFile(third)), 'saved in the folder open now');
+  assert.equal(parseTeam(await readFile(TeamLibrary.projectTeamFile(h.root), 'utf8'), 'x.md').name, 'First project', 'the first folder is untouched');
+});
+
+test('host path: the real panel follows a folder change: its project team watcher moves to the new folder and the page is listed again', async () => {
+  const base = await mkdtemp(path.join(tmpdir(), 'near-ai-studio-folders-'));
+  const storage = path.join(base, '.global');
+  const first = path.join(base, 'first');
+  const second = path.join(base, 'second');
+  await mkdir(path.join(storage, 'teams'), { recursive: true });
+  for (const [folder, name] of [[first, 'First project'], [second, 'Second project']] as const) {
+    await mkdir(path.dirname(TeamLibrary.projectTeamFile(folder)), { recursive: true });
+    await writeFile(TeamLibrary.projectTeamFile(folder), teamMarkdown(draft({ name })));
+  }
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (request: string | URL | Request) => { throw new Error(`Team Studio must not call the network: ${String(request)}`); }) as typeof fetch;
+  const previousTeamsDir = process.env.NEAR_AI_TEAMS_DIR;
+  process.env.NEAR_AI_TEAMS_DIR = storage;
+  const posted: Array<Record<string, any>> = [];
+  const watchers: Array<{ at: string; disposed: boolean }> = [];
+  const folderListeners = new Set<() => void>();
+  let receive: ((message: unknown) => Promise<void>) | undefined;
+  const disposable = { dispose() {} };
+  const panel = {
+    webview: { html: '', cspSource: 'vscode-webview://test', asWebviewUri: (uri: { fsPath: string }) => ({ toString: () => uri.fsPath }), postMessage: async (message: Record<string, any>) => { posted.push(message); return true; }, onDidReceiveMessage: (handler: (message: unknown) => Promise<void>) => { receive = handler; return disposable; } },
+    onDidDispose: () => disposable, reveal: () => undefined, iconPath: undefined as unknown
+  };
+  const workspace = {
+    workspaceFolders: [{ uri: { fsPath: first }, name: 'first' }] as Array<{ uri: { fsPath: string }; name: string }>,
+    getConfiguration: () => ({ get: (_key: string, fallback?: unknown) => fallback, inspect: () => undefined }),
+    onDidChangeConfiguration: () => disposable, onDidSaveTextDocument: () => disposable,
+    onDidChangeWorkspaceFolders: (listener: () => void) => { folderListeners.add(listener); return { dispose: () => { folderListeners.delete(listener); } }; },
+    createFileSystemWatcher: (pattern: { base: string; pattern: string }) => {
+      const entry = { at: `${pattern.base}|${pattern.pattern}`, disposed: false };
+      watchers.push(entry);
+      return { onDidChange: () => disposable, onDidCreate: () => disposable, onDidDelete: () => disposable, dispose() { entry.disposed = true; } };
+    }
+  };
+  const vscodeStub = {
+    workspace,
+    window: { createWebviewPanel: () => panel, createStatusBarItem: () => ({ show() {}, hide() {} }), showInformationMessage: () => undefined, showWarningMessage: () => undefined },
+    commands: { executeCommand: async () => undefined, registerCommand: () => disposable },
+    RelativePattern: class { constructor(public base: { fsPath: string } | string, public pattern: string) { this.base = typeof base === 'string' ? base : base.fsPath; } },
+    ThemeColor: class {}, StatusBarAlignment: { Left: 1, Right: 2 }, ViewColumn: { Active: -1, Beside: -2 },
+    Uri: { joinPath: (root: { fsPath: string }, ...parts: string[]) => ({ fsPath: path.join(root.fsPath, ...parts) }), file: (fsPath: string) => ({ fsPath }) }
+  };
+  const nodeModule = require('node:module') as { _load: (request: string, parent: unknown, isMain: boolean) => unknown };
+  const originalLoad = nodeModule._load;
+  nodeModule._load = (request, parent, isMain) => request === 'vscode' ? vscodeStub : originalLoad(request, parent, isMain);
+  try {
+    delete require.cache[require.resolve('../services/teamStudioPanel')];
+    const { openTeamStudio } = require('../services/teamStudioPanel') as typeof import('../services/teamStudioPanel');
+    const { initEmergencyStop } = require('../services/emergencyStop') as typeof import('../services/emergencyStop');
+    const { AuthService } = require('../services/auth') as typeof import('../services/auth');
+    const secrets = { values: new Map<string, string>(), get(key: string) { return Promise.resolve(this.values.get(key)); }, store(key: string, value: string) { this.values.set(key, value); return Promise.resolve(); }, delete(key: string) { this.values.delete(key); return Promise.resolve(); } };
+    const memento = () => { const values = new Map<string, unknown>(); return { get: (key: string) => values.get(key), update: async (key: string, value: unknown) => { values.set(key, value); }, keys: () => [...values.keys()] }; };
+    const context = { subscriptions: [] as unknown[], globalStorageUri: { fsPath: storage }, extensionUri: { fsPath: base }, secrets, globalState: memento(), workspaceState: memento() };
+    initEmergencyStop(context as never);
+    await openTeamStudio(context as never, new AuthService(secrets), { prefill: async () => undefined });
+    await receive!({ type: 'ready' });
+    const projectName = () => [...posted].reverse().find((message) => message.type === 'state')!.library.teams.find((team: any) => team.id === 'project')?.name;
+    const projectWatch = (folder: string) => watchers.find((entry) => entry.at === `${path.dirname(TeamLibrary.projectTeamFile(folder))}|team.md`);
+    assert.equal(projectName(), 'First project');
+    assert.equal(projectWatch(first)?.disposed, false);
+    workspace.workspaceFolders = [{ uri: { fsPath: second }, name: 'second' }];
+    for (const listener of [...folderListeners]) listener();
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    assert.equal(projectName(), 'Second project', 'listed again for the new folder');
+    assert.equal(projectWatch(first)?.disposed, true, 'the old folder is no longer watched');
+    assert.equal(projectWatch(second)?.disposed, false, 'the new folder\'s team file is watched');
+  } finally {
+    nodeModule._load = originalLoad;
+    globalThis.fetch = originalFetch;
+    if (previousTeamsDir === undefined) delete process.env.NEAR_AI_TEAMS_DIR; else process.env.NEAR_AI_TEAMS_DIR = previousTeamsDir;
+  }
 });
