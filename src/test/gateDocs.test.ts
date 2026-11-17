@@ -207,7 +207,9 @@ test('the old fully-autonomous wording is gone from SECURITY.md and README, and 
   // Owner decision after PR #74 (D-18): a credential read holds what could send it out.
   assert.match(row, /After it reads such a file, anything that could send data off this computer asks too/);
   assert.ok(flat(floorSection).includes('Once a run has read such a file, in any mode, a call that could send data off this computer asks in every mode, `fully-autonomous` included, with no **Always allow** and no grant for the rest of the run, and is refused when nobody is there to answer'));
-  assert.match(readmeActionPolicy, /publishing and destruction still ask/);
+  // Owner decisions after PR #74: signing in or out asks too, and a credential read holds what could send it out.
+  assert.match(readmeActionPolicy, /publishing, signing in or out and destruction still ask/);
+  assert.match(readmeActionPolicy, /after a credential read anything that could send data out asks too/);
   assert.match(readmeActionPolicy, /the key folder and credential stores are refused/);
   assert.doesNotMatch(readmeActionPolicy, /writes into `\.git\/` \(only for throwaway/);
 });
@@ -261,7 +263,10 @@ test('CHANGELOG.md says, in plain words, what Full auto now asks about and refus
   for (const phrase of [
     /Full auto included/, /`\.git\/`/, /`\.planning\/\.near-ai\/`/, /publish/i, /git push/, /`git reset --hard`/, /no \*\*Always allow\*\*/,
     /nobody to answer[^.]*refused|refused[^.]*nobody/i, /Everything else still runs without asking/, /NEAR key folder/, /VS Code's own secrets database/,
-    /identity and policy files/, /nested more than four levels deep, too long to check, or started by a program the checks do not know/, /search provider/i, /decision record/i
+    /identity and policy files/, /nested more than four levels deep, too long to check, or started by a program the checks do not know/, /search provider/i, /decision record/i,
+    // Owner decisions after PR #74.
+    /After reading a credential file, sending asks/, /`gh pr merge`/, /Signing in and out asks in every mode/, /`gh auth token`/, /Routine git upkeep/,
+    /A file outside your project is refused at once/, /`nearAi\.mcp\.localServerEffects`/, /arguments could not be read/, /`--max-tokens 4096`/
   ]) assert.match(entry, phrase);
   for (const line of section.split('\n').filter((text) => text.startsWith('- '))) assert.match(line, /^- \*\*[^*]+\*\*/, `each bullet leads with a bold sentence: ${line.slice(0, 60)}`);
   assert.ok(!entry.includes(EM_DASH), 'no em-dash');

@@ -39,6 +39,35 @@ to undo, and no mode lets an agent near the places where your keys and passwords
   query parameter named for one. SECURITY.md lists what is removed and what is not.
 - **Team Studio follows the folder you have open.** Open another folder while Team Studio is open
   and it lists, tests and saves that folder's team.
+- **After reading a credential file, sending asks.** Full auto still reads your project's `.env`
+  and key files without asking. Once a run has read one, anything that could send data off your
+  computer asks first in every mode: a network command, a download, publishing, a web fetch or
+  search, a call to an add-on server with a web address, and any command the checks do not know
+  to be local. These cards have no **Always allow**, and with nobody to answer they are refused.
+- **Merging a pull request and writing through the GitHub API ask in every mode.** `gh pr merge`
+  and a `gh api` call that writes (a writing method, a field or a body) count as publishing.
+  Opening a pull request and commenting follow your settings, as before.
+- **Signing in and out asks in every mode.** Logging in or out of a package registry, a container
+  registry, GitHub, Google Cloud, Azure or AWS, and changing a stored token, ask first, because they
+  change the logins kept on your computer.
+- **More credential stores and token commands are off limits.** The GitHub CLI's login file,
+  cargo's, terraform's and RubyGems' credentials, your desktop keyring and your home `.yarnrc.yml`
+  join the stores agents may not touch, and so do commands that print a stored token, such as
+  `gh auth token`, `gcloud auth print-access-token`, `aws sts get-session-token` and `npm token
+  list`. A project's own `.npmrc` or `.yarnrc.yml` is still yours to use.
+- **Routine git upkeep no longer asks in Full auto.** `git gc` and `git prune` that keep git's
+  grace period, and continuing, skipping or leaving a rebase already under way, run like other
+  work. Pruning at once, starting a rebase and expiring the reflog still ask.
+- **A file outside your project is refused at once.** When an agent names a file outside the
+  project and every folder it may use, it is told so straight away instead of you seeing a card
+  the tool would refuse anyway.
+- **Local add-on servers can say what they do.** For a server that runs on your computer, the new
+  `nearAi.mcp.localServerEffects` setting declares once what its tools may do: read, write named
+  project paths, reach named hosts. Until you declare it, its tools that change data keep asking.
+  Publishing, deleting and writes into git's and NEAR AI's folders cannot be declared.
+- **Every refused call is on the record.** A call whose arguments could not be read is now
+  recorded too, naming the tool and never its arguments. Decision records also keep a number given
+  to a token limit, such as `--max-tokens 4096`, while still removing tokens themselves.
 
 ## 0.4.28
 
