@@ -21,6 +21,13 @@ const DEVICE_UNKNOWN = 'device-unknown';
 const POLICY_SESSION = 'policy';
 const START_FAILED_DETAIL = 'The policy check threw before it could finish.';
 
+/**
+ * The most project logs the host keeps open at once. A log is a small object with a write queue, but a long session that opens folder after folder would
+ * otherwise keep one per folder for good: past this many, the one used longest ago is let go (after its queued records are written), and a later record
+ * for that folder opens it again. Folder changes let go of closed folders' logs sooner (retainProjectLogs).
+ */
+export const MAX_PROJECT_LOGS = 8;
+
 /** How long a run waits for the policy check at activation before it is refused as "not loaded": long enough for a healthy start, short enough that a stuck one does not hang the run. */
 export const RUNTIME_START_WAIT_MS = 5000;
 
@@ -62,7 +69,10 @@ export class GateHost {
   private settled = false;
   /** The latest time this host has seen (the clock marker's time, then every clock reading). It never decreases, so a clock set back cannot revive an expired policy. */
   private highWater = 0;
+  /** Open logs by key, in the order they were last used (the install log included; it is never let go). */
   private readonly logs = new Map<string, DecisionLog>();
+  /** Logs let go while records were still queued: flush() still waits for them. */
+  private readonly retiring = new Set<Promise<void>>();
   private readonly listeners = new Set<() => void>();
 
   public constructor(private readonly options: GateHostOptions) {}
@@ -112,9 +122,12 @@ export class GateHost {
       // A log that cannot be set up (its folder lies inside the project) is reported once; decisions carry on unrecorded rather than fail.
       try { this.options.onProblem?.(error instanceof Error ? error.message : 'NEAR AI could not set up its record of what was allowed or refused.'); } catch { /* ignored */ }
     }
+    // The log is found again at each record rather than held, so a log the host has let go (its folder was closed, or too many were open) is opened again
+    // by the run's next record, and flush() always waits for it.
+    const root = log === undefined ? undefined : request.root;
     return {
       bundleState: () => (notLoaded !== undefined && !this.settled ? notLoaded : this.bundleState()),
-      sink: { record: (record) => { void log?.append(record); } },
+      sink: { record: (record) => { if (root !== undefined) { try { void this.logFor(root).append(record); } catch { /* reported once above */ } } } },
       actor: { ...request.actor, deviceFingerprint: this.deviceFingerprint() },
       presence: request.presence,
       context: request.context,
@@ -141,9 +154,25 @@ export class GateHost {
     return () => { this.listeners.delete(listener); };
   }
 
-  /** Resolves when every record queued so far has been written or has failed. */
+  /** Resolves when every record queued so far has been written or has failed, including those of logs already let go. */
   public async flush(): Promise<void> {
-    await Promise.all([...this.logs.values()].map((log) => log.flush()));
+    await Promise.all([...[...this.logs.values()].map((log) => log.flush()), ...this.retiring]);
+  }
+
+  /**
+   * Lets go of the log of every project that is not among `openRoots` (the folders open now) and is not the open project, called when the window's folders
+   * change. A run still going in a closed folder opens its log again with its next record, so none of its records is lost.
+   */
+  public retainProjectLogs(openRoots: readonly string[]): void {
+    const keep = new Set([INSTALL_LOG_KEY, ...openRoots.filter((root) => root !== '').map((root) => projectLogKey(root))]);
+    const open = this.projectRootNow();
+    if (open !== undefined) keep.add(projectLogKey(open));
+    for (const key of [...this.logs.keys()]) if (!keep.has(key)) this.retire(key);
+  }
+
+  /** The keys of the logs held open now, install log included, least recently used first. For tests and diagnostics. */
+  public openLogKeys(): string[] {
+    return [...this.logs.keys()];
   }
 
   /** Waits for the start, up to the bound. Undefined when it finished; otherwise the failed-closed state for a run that began before the policy was loaded. */
@@ -211,9 +240,23 @@ export class GateHost {
         ...(projectRoot === undefined ? {} : { projectRoot }),
         onWriteFailure: (message) => { try { this.options.onProblem?.(message); } catch { /* the report never fails a decision */ } }
       });
-      this.logs.set(key, log);
     }
+    // Most recently used goes last, so the first project key in the map is the one to let go when there are too many.
+    this.logs.delete(key);
+    this.logs.set(key, log);
+    const projects = [...this.logs.keys()].filter((each) => each !== INSTALL_LOG_KEY);
+    for (const oldest of projects.slice(0, Math.max(0, projects.length - MAX_PROJECT_LOGS))) this.retire(oldest);
     return log;
+  }
+
+  // Drops a log from the map; its queued records are still written, and flush() waits for them.
+  private retire(key: string): void {
+    if (key === INSTALL_LOG_KEY) return;
+    const log = this.logs.get(key);
+    if (log === undefined) return;
+    this.logs.delete(key);
+    const pending = log.flush().finally(() => { this.retiring.delete(pending); });
+    this.retiring.add(pending);
   }
 
   private async begin(): Promise<BundleState> {

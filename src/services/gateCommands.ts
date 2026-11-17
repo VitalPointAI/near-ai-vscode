@@ -182,6 +182,13 @@ export function registerGate(context: GateActivationContext, options: RegisterGa
     try { return host.now(); } catch { return Date.now(); }
   };
   registerPolicySurfaces(context, host, tell, clock, options.statusTimers);
+  // A closed folder's decision log is let go when the window's folders change, so a long session does not keep one per folder it ever opened.
+  try {
+    const subscription = vscode.workspace.onDidChangeWorkspaceFolders(() => {
+      try { host.retainProjectLogs((vscode.workspace.workspaceFolders ?? []).map((folder) => folder.uri.fsPath)); } catch { /* the cap still bounds the logs */ }
+    });
+    context.subscriptions?.push(subscription);
+  } catch { /* an editor with no folder events still has the cap (MAX_PROJECT_LOGS) */ }
   void host.start().then((state) => {
     if (state.state === 'failed-closed') tell(state.sentence);
   }).catch(() => undefined);
