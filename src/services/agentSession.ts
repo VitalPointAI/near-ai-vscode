@@ -270,6 +270,8 @@ export class AgentConversation {
    * person's Lower This Chat's Label is the one way down.
    */
   private chatMark: SessionMark | undefined;
+  /** Set by prepareLowering for the one change the person's lowering makes. */
+  private pendingLowering: unknown;
   /** Stops saving and showing the current mark's changes (a new chat or a reopened one replaces the mark). */
   private stopMarkListener: (() => void) | undefined;
   /** The policy's default label as the last run read it: the chat's label is shown only above it (D-33). */
@@ -360,6 +362,9 @@ export class AgentConversation {
     private readonly activity?: ActivityFeed
   ) {}
 
+  /** The project the chat works in. */
+  public get projectRoot(): string { return this.root; }
+
   /** The chat's mark, or undefined before its first run (a new chat then starts at the project's label). */
   public get mark(): SessionMark | undefined { return this.chatMark; }
 
@@ -381,7 +386,12 @@ export class AgentConversation {
     this.stopMarkListener = undefined;
     this.chatMark = mark;
     if (mark !== undefined) {
-      this.stopMarkListener = mark.onDidChange((next) => { void this.saveLabel(next); this.showLabel(); });
+      this.stopMarkListener = mark.onDidChange((next) => {
+        const lowering = this.pendingLowering;
+        this.pendingLowering = undefined;
+        void this.saveLabel(next, lowering);
+        this.showLabel();
+      });
       void this.saveLabel(mark.current());
     }
     this.showLabel();
@@ -407,19 +417,12 @@ export class AgentConversation {
   }
 
   /**
-   * The person's Lower This Chat's Label (CLAS-04, D-29): lowers the mark to `to` with a reason, saves the lowering with the chat (with its signed
-   * declassification, or `true` when this install could not sign one) and shows the new label. Returns the mark it replaced. Only the command calls it.
+   * The person's Lower This Chat's Label (CLAS-04, D-29) is about to lower the mark: the next change is saved as that lowering (with its signed
+   * declassification, or `true` when this install could not sign one) rather than joined with what is stored. Only the command calls it, right before
+   * SessionMark.lowerByPerson.
    */
-  public async lowerLabel(to: Mark, reason: string, signed: unknown): Promise<Mark> {
-    if (this.chatMark === undefined) throw new RangeError('This chat has no label yet.');
-    const stop = this.stopMarkListener;
-    this.stopMarkListener = undefined;
-    stop?.();
-    const before = this.chatMark.lowerByPerson(to, reason);
-    await this.saveLabel(this.chatMark.current(), signed);
-    this.stopMarkListener = this.chatMark.onDidChange((next) => { void this.saveLabel(next); this.showLabel(); });
-    this.showLabel();
-    return before;
+  public prepareLowering(signed: unknown): void {
+    this.pendingLowering = signed;
   }
 
   /** The policy's default label as this chat last read it. */

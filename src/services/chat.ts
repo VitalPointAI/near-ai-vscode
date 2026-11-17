@@ -57,6 +57,9 @@ import type { GateHost } from '../gate/host';
 import { defaultSessionRoute, sessionRouteFrom, withSessionRoute } from '../gate/sessionMark';
 import type { RouteAttestation, SessionRoute } from '../gate/sessionMark';
 import { WaitingNotices } from './waitingNotices';
+import { chatLabelChanged, clearChatInView, setChatInView } from './chatInView';
+import type { ChatInView } from './chatInView';
+import { SHIPPED_DEFAULT_LABEL } from '../domain/gate/bundle';
 import { latestOnly, PROJECT_TEAM_WATCH_PATHS, projectHasTeam, SETUP_NUDGE_DISMISSED_KEY, shouldShowSetupNudge } from './setupSteps';
 
 /** What the chat says when a message, Resume or Continue reaches a conversation that another editor is running right now. */
@@ -298,6 +301,8 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
       // Waiting on the person, and the run's state just saved, are quiet points: project sync may run then, so a long run does not hold it back (owner, 2026-11-14).
       tab.agent.onWaitingChange = (count) => { sendSummary(); runWaiting(root, tab.id, count > 0); };
       tab.agent.onRunStateSaved = () => runQuiet(root);
+      // D-33: the status bar shows the label of the chat in view, so it hears when this chat's label changes.
+      tab.agent.onLabelChange = () => chatLabelChanged(tab.id);
       // A message Stop hands back to the composer gets its attachments back too, ready to send again.
       tab.agent.onReturned = (items) => {
         for (const attachment of items.flatMap((item) => item.staged ?? [])) { state.attachments.set(attachment.id, attachment); postStaged(attachment); }
@@ -305,9 +310,19 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     }
     return tab.agent;
   };
+  /** What the label surfaces need of a conversation (D-33): its id, project, mark, default label and the way its lowering is saved. */
+  const inView = (tab: ChatTab): ChatInView => ({
+    id: tab.id,
+    root: tab.agent?.projectRoot ?? workspaceRoot() ?? '',
+    mark: () => tab.agent?.mark,
+    defaultLabel: () => tab.agent?.chatDefaultLabel ?? SHIPPED_DEFAULT_LABEL,
+    prepareLowering: (signed) => { tab.agent?.prepareLowering(signed); }
+  });
   /** Puts a conversation on screen: the view clears, then gets everything the conversation showed, with its prompts pinned again. */
   const show = (tab: ChatTab): void => {
     activeId = tab.id;
+    // D-33: the chat in view is the one the status bar's label and Lower This Chat's Label act on.
+    setChatInView(inView(tab));
     tab.unread = false;
     feed.focusConversation(tab.id);
     void panel.webview.postMessage({ type: 'conversation-show', id: tab.id, title: tab.title, ...(tab.model ? { model: tab.model } : {}) });
@@ -1050,7 +1065,7 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
   const windowWatch = typeof vscode.window.onDidChangeWindowState === 'function' ? vscode.window.onDidChangeWindowState((window) => { if (window.focused) for (const tab of tabs) tab.focusRegained?.(); }) : undefined;
   // The "no team yet" card goes away as soon as Team Studio (or anyone) saves the project's team.
   const teamWatch = watchProjectTeam(() => { if (!disposed) void setupNudge.refresh(); });
-  panel.onDidDispose(() => { disposed = true; stopAllFollowing(); openTabSources.delete(openTabs); retentionWatch.dispose(); pickupWatch.dispose(); syncWatch.dispose(); for (const tab of tabs) tab.agent?.dispose(); policyWatch.dispose(); tokenWatch.dispose(); windowWatch?.dispose(); teamWatch?.dispose(); state.spendWatch?.dispose(); if (state.spendTimer) clearTimeout(state.spendTimer); }, undefined, context.subscriptions);
+  panel.onDidDispose(() => { disposed = true; clearChatInView(activeId); stopAllFollowing(); openTabSources.delete(openTabs); retentionWatch.dispose(); pickupWatch.dispose(); syncWatch.dispose(); for (const tab of tabs) tab.agent?.dispose(); policyWatch.dispose(); tokenWatch.dispose(); windowWatch?.dispose(); teamWatch?.dispose(); state.spendWatch?.dispose(); if (state.spendTimer) clearTimeout(state.spendTimer); }, undefined, context.subscriptions);
   // The emergency stop stops every conversation's run; the composer's Stop stops only the one on screen.
   onDidChangeEmergencyStop(async (engaged) => {
     sendPolicyState(panel);

@@ -18,6 +18,26 @@ import { chatPage } from './helpers/chatPage';
 import { testGateHost } from './helpers/gatedRuns';
 import { call, keys, label, labelledProject, scripted } from './helpers/markFixtures';
 import { MemorySecrets } from './helpers/stateFixtures';
+import { createVscodeStub, installVscodeStub } from './helpers/vscodeStub';
+import { mkdtempSync, readdirSync, realpathSync, existsSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { SessionMark } from '../domain/gate/dominance';
+import type { Mark } from '../domain/gate/dominance';
+import { SCALE_PRESETS } from '../domain/gate/labels';
+import { setLabelEntry, setProjectLabel } from '../domain/gate/labelMap';
+import type { DecisionRecord } from '../domain/gate/record';
+import { GateHost } from '../gate/host';
+import { DECISIONS_DIR, projectLogKey } from '../gate/decisionLog';
+import { chatInView, onChatInViewChange, setChatInView } from '../services/chatInView';
+import type { ChatInView } from '../services/chatInView';
+import { SHIPPED_DEFAULT_LABEL } from '../domain/gate/bundle';
+
+const stub = createVscodeStub();
+const uninstall = installVscodeStub(stub);
+// Loaded after the stub: these modules import vscode.
+const gateCommands = require('../services/gateCommands') as typeof import('../services/gateCommands');
+const statusBar = require('../services/gateStatusBar') as typeof import('../services/gateStatusBar');
+test.after(() => { uninstall(); });
 
 const PUBLIC = label('org', 'Public');
 const CONFIDENTIAL = label('org', 'Confidential');
@@ -135,4 +155,116 @@ test('the page shows the label beside the model with text only, and hides it at 
 test('a route refusal reaches the page as its own plain sentence', () => {
   const error = new RouteRefusedError('route.no-local-model', 'Nothing was sent. This chat has read content that may only go to a model running on this computer.');
   assert.equal(providerErrorMessage(error), error.message);
+});
+
+// ---- Task 2: only a person lowers a chat's label, with a recorded reason; the status bar shows the chat in view ----
+
+/** A gate host on temporary storage, its label file signed by this install, for the chat label tests. */
+async function labelHost(root: string, project?: Label): Promise<{ host: GateHost; storage: string }> {
+  const storage = realpathSync(mkdtempSync(path.join(tmpdir(), 'near-ai-chat-label-storage-')));
+  const host = new GateHost({ globalStorageDir: storage, secrets: new MemorySecrets(), productVersion: '0.4.30-test', projectRoot: root, home: storage });
+  assert.equal((await host.start()).state, 'valid');
+  if (project !== undefined) await host.changeLabels(root, (map) => setProjectLabel(map, project));
+  return { host, storage };
+}
+
+async function recordsOf(host: GateHost, storage: string, root: string): Promise<DecisionRecord[]> {
+  await host.flush();
+  const file = path.join(storage, 'gate', DECISIONS_DIR, `${projectLogKey(root)}.jsonl`);
+  if (!existsSync(file)) return [];
+  return readFileSync(file, 'utf8').split('\n').filter((line) => line !== '').map((line) => JSON.parse(line) as DecisionRecord);
+}
+
+/** A chat in view over a SessionMark at `mark`, recording what it was told to save. */
+function viewOf(root: string, mark: Mark, id = 'conv-in-view-1'): ChatInView & { lowered: unknown[]; session: SessionMark } {
+  const session = new SessionMark(mark);
+  const lowered: unknown[] = [];
+  return { id, root, mark: () => session, defaultLabel: () => SHIPPED_DEFAULT_LABEL, prepareLowering: (signed) => { lowered.push(signed); }, lowered, session };
+}
+
+function resetUi(): void {
+  stub.quickPickAnswers.length = 0;
+  stub.quickPickRequests.length = 0;
+  stub.inputAnswers.length = 0;
+  stub.notifications.length = 0;
+}
+
+test('Lower This Chat\'s Label offers only labels below the chat\'s mark, down to the project\'s label; with no chat in view it says so and changes nothing', async () => {
+  const root = realpathSync(mkdtempSync(path.join(tmpdir(), 'near-ai-chat-label-project-')));
+  const { host } = await labelHost(root, label('org', 'Internal'));
+  resetUi();
+  setChatInView(undefined);
+  assert.equal(await gateCommands.lowerChatLabel(host), false);
+  assert.ok(stub.notifications.some((entry) => entry.message === gateCommands.NO_CHAT_IN_VIEW_TEXT));
+  const chat = viewOf(root, [RESTRICTED]);
+  resetUi();
+  assert.equal(await gateCommands.lowerChatLabel(host, chat), false, 'dismissed: nothing changes');
+  assert.deepEqual(stub.quickPickRequests[0]?.items.map((item) => item.label), ['org/Confidential', 'org/Internal']);
+  assert.deepEqual(keys(chat.session.current()), ['org/Restricted']);
+  assert.deepEqual(gateCommands.lowerChoices([RESTRICTED], [label('org', 'Restricted')], SCALE_PRESETS), [], 'never below the project');
+});
+
+test('with an empty reason nothing changes and nothing is recorded; with a reason the mark is lowered, the chat keeps it, and label.declassify holds both labels and the reason', async () => {
+  const root = labelledProject();
+  const { host, storage } = await labelHost(root);
+  const store = storeFor(root);
+  const conversation = await chatIn(root, store);
+  await conversation.send(request([call('r1', 'Read', { file_path: 'docs/plan.md' })]));
+  assert.deepEqual(keys(conversation.mark!.current()), ['org/Restricted']);
+  const chat: ChatInView = { id: conversation.id, root, mark: () => conversation.mark, defaultLabel: () => conversation.chatDefaultLabel, prepareLowering: (signed) => conversation.prepareLowering(signed) };
+  resetUi();
+  stub.quickPickAnswers.push('org/Internal');
+  stub.inputAnswers.push('   ');
+  assert.equal(await gateCommands.lowerChatLabel(host, chat), false);
+  assert.deepEqual(keys(conversation.mark!.current()), ['org/Restricted']);
+  assert.equal((await recordsOf(host, storage, root)).filter((record) => record.authorizations[0]?.policy.name === 'label.declassify').length, 0);
+  resetUi();
+  stub.quickPickAnswers.push('org/Internal');
+  stub.inputAnswers.push('Reviewed: the plan was published last week.');
+  assert.equal(await gateCommands.lowerChatLabel(host, chat), true);
+  assert.deepEqual(keys(conversation.mark!.current()), ['org/Internal']);
+  for (let wait = 0; wait < 50 && markOf((await store.meta(conversation.id))!).join() !== 'org/Internal'; wait += 1) await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.deepEqual(markOf((await store.meta(conversation.id))!), ['org/Internal'], 'the chat\'s meta holds the lowered mark');
+  const records = (await recordsOf(host, storage, root)).filter((record) => record.authorizations[0]?.policy.name === 'label.declassify');
+  assert.equal(records.length, 1);
+  const record = records[0]!;
+  assert.equal(record.unmapped.nearAi.label?.level, 'Internal', 'the new label');
+  assert.deepEqual(record.unmapped.nearAi.mark?.map((each) => each.level), ['Restricted'], 'the old label');
+  assert.ok(JSON.stringify(record).includes('Reviewed: the plan was published last week.'), 'the reason given');
+  assert.match(stub.inputRequests.at(-1)?.prompt ?? '', /travels with its encrypted metadata to your other computers/);
+});
+
+test('gateStatusText shows the chat in view\'s label above the default, and nothing for it at the default or with no chat; showing another chat changes it', () => {
+  const state = undefined;
+  const plain = statusBar.gateStatusText(state, 0);
+  assert.equal(statusBar.gateStatusText(state, 0, { mark: [CONFIDENTIAL], defaultLabel: PUBLIC }).text, `${plain.text} · org/Confidential`);
+  assert.match(statusBar.gateStatusText(state, 0, { mark: [CONFIDENTIAL], defaultLabel: PUBLIC }).tooltip, /The chat in view is labelled org\/Confidential/);
+  assert.equal(statusBar.gateStatusText(state, 0, { mark: [PUBLIC], defaultLabel: PUBLIC }).text, plain.text);
+  assert.equal(statusBar.gateStatusText(state, 0, undefined).text, plain.text);
+  let told = 0;
+  const stop = onChatInViewChange(() => { told += 1; });
+  const first = viewOf('/project', [CONFIDENTIAL], 'conv-first-1');
+  const second = viewOf('/project', [RESTRICTED], 'conv-second-1');
+  setChatInView(first);
+  assert.equal(chatInView()?.id, 'conv-first-1');
+  setChatInView(second);
+  assert.deepEqual(keys(chatInView()!.mark()!.current()), ['org/Restricted']);
+  setChatInView(undefined);
+  stop();
+  assert.equal(told, 3);
+});
+
+test('no agent tool can lower a chat\'s label: lowerByPerson is called only from gateCommands.ts', () => {
+  const src = path.join(__dirname, '..', '..', 'src');
+  const files: string[] = [];
+  const walk = (dir: string): void => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (entry.isDirectory()) { if (entry.name !== 'test') walk(path.join(dir, entry.name)); } else if (entry.name.endsWith('.ts')) files.push(path.join(dir, entry.name));
+    }
+  };
+  walk(src);
+  const callers = files.filter((file) => /\.lowerByPerson\(/.test(readFileSync(file, 'utf8'))).map((file) => path.relative(src, file).split(path.sep).join('/'));
+  assert.deepEqual(callers, ['services/gateCommands.ts']);
+  const manifest = JSON.parse(readFileSync(path.join(__dirname, '..', '..', 'package.json'), 'utf8')) as { contributes: { commands: Array<{ command: string; title: string; category?: string }> } };
+  assert.deepEqual(manifest.contributes.commands.find((command) => command.command === 'nearAi.label.lowerChat'), { command: 'nearAi.label.lowerChat', title: "Lower This Chat's Label", category: 'NEAR AI' });
 });

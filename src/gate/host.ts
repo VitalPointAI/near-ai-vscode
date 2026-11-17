@@ -310,7 +310,7 @@ export class GateHost {
    * Records a label event (GATE-07) in the project's log, the way the policy's events are written: the event as the operation, the project-relative path as
    * the resource (`project` for the project itself, never a machine path), the new label, and the reason a person gave.
    */
-  public recordLabelEvent(root: string, event: { readonly event: LabelEventId; readonly path: string; readonly label?: Label; readonly reason?: string }): void {
+  public recordLabelEvent(root: string, event: { readonly event: LabelEventId; readonly path: string; readonly label?: Label; readonly reason?: string; readonly mark?: Mark }): void {
     try {
       const record = buildDecisionRecord({
         recordId: randomUUID(),
@@ -325,7 +325,8 @@ export class GateHost {
         rule: event.event,
         ...(event.reason === undefined || event.reason === '' ? {} : { reason: event.reason.slice(0, 500) }),
         bundleHash: this.current.state === 'valid' ? this.current.hash : '',
-        ...(event.label === undefined ? {} : { label: event.label })
+        ...(event.label === undefined ? {} : { label: event.label }),
+        ...(event.mark === undefined || event.mark.length === 0 ? {} : { mark: event.mark })
       });
       void this.logFor(root).append({ ...record, api: { ...record.api, operation: event.event } });
     } catch {

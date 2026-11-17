@@ -13,7 +13,10 @@ import { CAPABILITY_VERBS } from '../domain/gate/vocabulary';
 import type { BundleState } from '../domain/gate/bundle';
 import { CLEARANCE_SELF_ASSERTED_TEXT, HANDLING_FLAGS, LABELS_NOT_ACCREDITATION_TEXT, LABEL_TOKEN_PATTERN, SCALE_PRESETS_CAVEAT_TEXT, labelKey, parseLabel } from '../domain/gate/labels';
 import type { Label } from '../domain/gate/labels';
-import { dominates, raiseMark } from '../domain/gate/dominance';
+import { dominates, raiseMark, sameMark } from '../domain/gate/dominance';
+import type { Mark } from '../domain/gate/dominance';
+import { chatInView, onChatInViewChange } from './chatInView';
+import type { ChatInView } from './chatInView';
 import { holdsReads, labelMapKey, resolveLabel, setLabelEntry, setProjectLabel } from '../domain/gate/labelMap';
 import type { LabelMapPayload } from '../domain/gate/labelMap';
 import { BundleStoreError, POLICY_DRAFT_BASE_FILE, POLICY_DRAFT_FILE, gateDir } from '../gate/bundleStore';
@@ -249,9 +252,16 @@ function registerPolicySurfaces(context: GateActivationContext, host: GateHost, 
   };
   attempt('the policy status', () => {
     // The bar reads the host again when its words are due to change (the renewal window opening, the policy ending), so it never waits for a host change.
-    const bar = createGateStatusBar({ read: () => ({ state: host.bundleState(), now: clock() }), ...(statusTimers === undefined ? {} : { timers: statusTimers }) });
+    const chatMark = (): { mark: Mark; defaultLabel: Label } | undefined => {
+      const chat = chatInView();
+      const mark = chat?.mark()?.current();
+      return chat === undefined || mark === undefined ? undefined : { mark, defaultLabel: chat.defaultLabel() };
+    };
+    const bar = createGateStatusBar({ read: () => ({ state: host.bundleState(), now: clock() }), chatMark, ...(statusTimers === undefined ? {} : { timers: statusTimers }) });
     keep({ dispose: () => { bar.dispose(); } });
     keep({ dispose: host.onDidChange(() => { bar.update(host.bundleState(), clock()); }) });
+    // D-33: the item shows the label of the chat in view, so it changes when another chat is shown or that chat's label changes.
+    keep({ dispose: onChatInViewChange(() => { bar.update(host.bundleState(), clock()); }) });
   });
   attempt('the policy view', () => {
     const changed = new vscode.EventEmitter<vscode.Uri>();
@@ -292,12 +302,101 @@ function registerPolicySurfaces(context: GateActivationContext, host: GateHost, 
       return setLabel(host, target);
     }));
   });
+  attempt('Lower This Chat\'s Label', () => {
+    keep(vscode.commands.registerCommand(LOWER_CHAT_LABEL_COMMAND, () => lowerChatLabel(host)));
+  });
   attempt('label rename tracking', () => {
     keep(vscode.workspace.onDidRenameFiles((event) => followRenames(host, event.files)));
   });
   attempt('the policy setup step', () => {
     keep(registerSetupStep(policySetupStep(host, clock)));
   });
+}
+
+// ---------------------------------------------------------------------------------------------------------------------------------------------------
+// Lower This Chat's Label (CLAS-04, D-29, D-58, GATE-07)
+
+export const LOWER_CHAT_LABEL_COMMAND = 'nearAi.label.lowerChat';
+export const NO_CHAT_IN_VIEW_TEXT = "Nothing was changed: open the chat whose label you want to lower in the NEAR AI chat view first.";
+export const NOTHING_LOWER_TEXT = "Nothing was changed: this chat's label is already the project's label, and a chat is never lowered below its project.";
+export const LOWER_CHAT_REASON_PROMPT = "Why may this chat's content now go where a lower label allows? The reason is kept with the chat, and travels with its encrypted metadata to your other computers.";
+
+function labelsShown(mark: Mark): string {
+  return mark.map((label) => labelShown(label)).join(', ');
+}
+
+/** `next` is lower than `mark`: raising it by every label of `mark` gives `mark` back, and it is not `mark` itself. */
+function isLowerMark(next: Mark, mark: Mark, scales: Parameters<typeof raiseMark>[2]): boolean {
+  let raised: Mark = next;
+  for (const label of mark) raised = raiseMark(raised, label, scales);
+  return sameMark(raised, mark) && !sameMark(next, mark);
+}
+
+/** `mark` holds the project's label: raising it by the project's labels changes nothing (a chat is never lowered below its project). */
+function coversProject(mark: Mark, project: Mark, scales: Parameters<typeof raiseMark>[2]): boolean {
+  let raised: Mark = mark;
+  for (const label of project) raised = raiseMark(raised, label, scales);
+  return sameMark(raised, mark);
+}
+
+/** The labels a chat at `mark` may be lowered to: each lower level of each of its scales (compartments dropped), and the project's own label, never below it. */
+export function lowerChoices(mark: Mark, project: Mark, scales: Parameters<typeof raiseMark>[2]): Mark[] {
+  const out: Mark[] = [];
+  const add = (next: Mark): void => {
+    if (!isLowerMark(next, mark, scales) || !coversProject(next, project, scales)) return;
+    if (out.some((known) => sameMark(known, next))) return;
+    out.push(next);
+  };
+  for (const held of mark) {
+    const levels = scales[held.scale]?.levels ?? [];
+    for (let index = levels.indexOf(held.level); index >= 0; index -= 1) {
+      const lowered: Label = { scale: held.scale, level: levels[index]!, compartments: [], releasability: [], handling: [] };
+      add(Object.freeze(mark.map((label) => (label === held ? lowered : label))));
+    }
+  }
+  add(project);
+  return out;
+}
+
+/**
+ * NEAR AI: Lower This Chat's Label (CLAS-04, D-29): the only way a person lowers a chat's mark. It acts on the chat in view, offers only labels below its
+ * mark down to the project's label, requires a non-empty reason, lowers the mark, saves the lowering with the chat and records label.declassify with the old
+ * label, the new one and the reason. Returns true when the label was lowered.
+ */
+export async function lowerChatLabel(host: GateHost, chat: ChatInView | undefined = chatInView()): Promise<boolean> {
+  const mark = chat?.mark();
+  if (chat === undefined || mark === undefined) {
+    void Promise.resolve(vscode.window.showInformationMessage(NO_CHAT_IN_VIEW_TEXT)).catch(() => undefined);
+    return false;
+  }
+  await host.state();
+  const policy = host.labelPolicy();
+  const view = await host.labelsFor(chat.root).view(policy.scales);
+  const project = view.resolve('', policy.defaultLabel).mark;
+  const current = mark.current();
+  const choices = lowerChoices(current, project, policy.scales);
+  if (choices.length === 0) {
+    void Promise.resolve(vscode.window.showInformationMessage(NOTHING_LOWER_TEXT)).catch(() => undefined);
+    return false;
+  }
+  type Item = vscode.QuickPickItem & { readonly mark: Mark };
+  const items: Item[] = choices.map((choice) => ({ label: labelsShown(choice), ...(sameMark(choice, project) ? { description: "the project's label" } : {}), mark: choice }));
+  const picked = await vscode.window.showQuickPick(items, { title: `Lower this chat's label from ${labelsShown(current)}`, placeHolder: LABELS_NOT_ACCREDITATION_TEXT });
+  if (picked === undefined) return false;
+  const given = await vscode.window.showInputBox({ prompt: LOWER_CHAT_REASON_PROMPT, title: `Lower this chat's label to ${picked.label}`, validateInput: (value: string) => (value.trim() === '' ? 'A reason is needed to lower a chat\'s label.' : undefined) });
+  if (given === undefined || given.trim() === '') return false;
+  const reason = given.trim();
+  // The chat may have read more while the person chose: lower only from what it holds now, and only if the choice is still lower and still covers the project.
+  const now = mark.current();
+  if (!isLowerMark(picked.mark, now, policy.scales) || !coversProject(picked.mark, project, policy.scales)) {
+    void Promise.resolve(vscode.window.showWarningMessage(`Nothing was changed: this chat read more meanwhile, and its label is now ${labelsShown(now)}. Run NEAR AI: Lower This Chat's Label again.`)).catch(() => undefined);
+    return false;
+  }
+  chat.prepareLowering(true);
+  const before = mark.lowerByPerson(picked.mark, reason);
+  host.recordLabelEvent(chat.root, { event: 'label.declassify', path: `chat ${chat.id}`, label: picked.mark[0]!, mark: before, reason: `Lowered from ${labelsShown(before)} to ${labelsShown(picked.mark)}: ${reason}` });
+  void Promise.resolve(vscode.window.showInformationMessage(`This chat's label is now ${labelsShown(picked.mark)}.`)).catch(() => undefined);
+  return true;
 }
 
 // ---------------------------------------------------------------------------------------------------------------------------------------------------

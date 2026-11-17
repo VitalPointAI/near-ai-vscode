@@ -1371,6 +1371,7 @@
         break;
       case 'conversation-show': {
         draftsLive = false;
+        { const chip = $('chat-label'); if (chip) { chip.textContent = ''; chip.hidden = true; } }
         activeId = m.id;
         saved.activeConversation = m.id;
         vscode.setState(saved);

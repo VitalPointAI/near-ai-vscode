@@ -319,6 +319,11 @@
         "category": "NEAR AI"
       },
       {
+        "command": "nearAi.label.lowerChat",
+        "title": "Lower This Chat's Label",
+        "category": "NEAR AI"
+      },
+      {
         "command": "nearAi.policy.edit",
         "title": "Edit Policy",
         "category": "NEAR AI"
