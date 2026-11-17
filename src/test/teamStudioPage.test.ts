@@ -1385,7 +1385,8 @@ test('page: the new-team picker filters All / My teams / Built-in, shows where e
   page.byLabel('Use an existing team')!.click();
   const radios = (name: string) => page.doc.body.all().filter((node) => node.tagName === 'input' && node.name === name);
   const shown = () => radios('starting-point').map((node) => node.value);
-  assert.deepEqual(shown().slice(0, 2), ['lib:web', 'recommend'], 'saved teams first, then the built-in ones');
+  // 0.4.30: the recommendation is on the first screen, not in the picker, so the first built-in team is a project type's.
+  assert.deepEqual(shown().slice(0, 2), ['lib:web', 'type:software'], 'saved teams first, then the built-in ones');
   assert.match(page.text(), /All \(\d+\).*My teams \(1\).*Built-in \(\d+\)/);
   assert.match(page.text(), /My teams.*Web team.*Imported, not approved yet.*Builds pages.*2 members: lead, dev/);
   const filter = (value: string) => { const radio = radios('picker-filter').find((node) => node.value === value)!; radio.checked = true; radio.fire('change'); };
@@ -2076,24 +2077,25 @@ test('page: selecting an existing team offers Use as is and Clone and modify; Us
   page.dispatch({ type: 'team', id: 'project', kind: 'project', file: '.planning/.near-ai/team.md', command: '/team:project ', draft: draft(), base: 'b'.repeat(64), versions: [], notice: '"Web team" is now this project\'s team. Run it with /team:project <task>.' });
   assert.match(page.doc.getElementById('banner')!.textContent, /is now this project's team/);
   assert.equal(page.doc.getElementById('step-heading'), null, 'out of the builder');
-  // A built-in that is made from answers asks only those, inline, before Use as is.
+  // A built-in that is made from answers asks only those, inline, before Use as is. (0.4.30: the recommendation and its kind-of-work and risk
+  // questions moved to the first screen, so an Open-GSD team stands in for it here.)
   page.byLabel('Back to all teams')!.click();
   page.byLabel('New team')!.click();
   page.byLabel('Use an existing team')!.click();
-  page.select('recommend');
-  for (const id of ['f-goal', 'f-locality', 'f-shape', 'f-risk']) assert.ok(page.doc.getElementById(id), id);
+  page.select('gsd:review');
+  for (const id of ['f-goal', 'f-locality']) assert.ok(page.doc.getElementById(id), id);
   page.type('f-goal', 'Add billing');
-  page.type('f-risk', 'high', 'change');
+  page.type('f-locality', 'cloud', 'change');
   assert.equal(page.doc.getElementById('f-goal')!.value, 'Add billing', 'what was typed survives a redraw');
-  page.byLabel('Use Recommended team as is')!.click();
-  assert.deepEqual(page.posts.at(-1), { type: 'use-team', id: 'recommend', goal: 'Add billing', locality: 'cloud', workShape: 'feature', riskLevel: 'high' });
+  page.byLabel('Use Review team as is')!.click();
+  assert.deepEqual(page.posts.at(-1), { type: 'use-team', id: 'gsd:review', goal: 'Add billing', locality: 'cloud' });
   // The host answers (here: the person kept the project's team) before the buttons work again.
   page.dispatch({ type: 'used', declined: true, text: 'Not changed. This project\'s team is as it was.' });
   // A project type asks what the team is for and where models run, but not the recommendation's questions.
   page.select('type:software');
   assert.ok(page.doc.getElementById('f-goal') && page.doc.getElementById('f-locality'));
   assert.equal(page.doc.getElementById('f-shape'), null);
-  // What was typed for the recommended team is not carried to another team (PR #75 review).
+  // What was typed for one built-in team is not carried to another team (PR #75 review).
   assert.equal(page.doc.getElementById('f-goal')!.value, '', 'another team starts with its own empty answer');
   page.type('f-goal', 'Ship it');
   // With unsaved work in the builder, Use as is says so, and the host asks before discarding it.
@@ -2671,4 +2673,127 @@ test('versions: a burst within one millisecond is named after that millisecond, 
   await writeFile(path.join(dir, `${new Date(at + 5).toISOString().replace(/[:.]/g, '-')}.md`), 'old style, later');
   assert.equal((await contents())[0], 'old style, later');
   assert.equal((await contents()).length, 21, 'the 20 kept, and the one written by hand');
+});
+
+// ---------- 0.4.30: the first screen offers the recommendation (owner, 2026-11-17) ----------
+
+const RECOMMENDATION = { name: 'Recommended team', cloneName: 'Recommended team', description: 'Planner, implementer, security, tester and reviewer.', members: [{ name: 'planner', role: 'planner' }, { name: 'implementer', role: 'implementer' }, { name: 'security', role: 'security' }, { name: 'tester', role: 'tester' }, { name: 'reviewer', role: 'reviewer' }] };
+
+test('page: the first screen offers three choices, and Recommend a team for me asks its questions, shows the team with Use as is and Clone and modify, and Back returns from each screen', async () => {
+  const page = await builderPage();
+  page.byLabel('New team')!.click();
+  assert.equal(page.heading(), 'How do you want to start?');
+  for (const label of ['Use an existing team', 'Create a new team', 'Recommend a team for me']) assert.ok(page.byLabel(label), label);
+  page.byLabel('Recommend a team for me')!.click();
+  assert.equal(page.heading(), 'Recommend a team for me');
+  assert.equal(page.doc.activeElement, page.doc.getElementById('step-heading'), 'focus moves to the new screen\'s heading');
+  for (const id of ['f-shape', 'f-risk', 'f-locality', 'f-goal']) assert.ok(page.doc.getElementById(id), id);
+  assert.equal(page.doc.getElementById('f-name'), null, 'no name to give');
+  assert.equal(page.byLabel('Use Recommended team as is'), undefined, 'nothing to use before the studio has recommended a team');
+  page.byLabel('Back')!.click();
+  assert.equal(page.heading(), 'How do you want to start?');
+  page.byLabel('Recommend a team for me')!.click();
+  page.type('f-risk', 'high', 'change');
+  page.type('f-goal', 'Add billing');
+  const count = (type: string) => page.posts.filter((message) => message.type === type).length;
+  page.byLabel('Recommend a team')!.click();
+  page.byLabel('Recommend a team')!.click();
+  assert.equal(count('recommend'), 1, 'one request at a time');
+  const asked = page.posts.at(-1)!;
+  assert.deepEqual(asked, { type: 'recommend', seq: asked.seq, goal: 'Add billing', locality: 'cloud', workShape: 'feature', riskLevel: 'high' });
+  assert.equal(page.byLabel('Recommend a team')!.disabled, true, 'waiting for the answer');
+  // A reply to another request is dropped; the one asked for shows the team.
+  page.dispatch({ type: 'recommendation', seq: asked.seq + 7, ...RECOMMENDATION, name: 'Wrong team' });
+  assert.doesNotMatch(page.text(), /Wrong team/);
+  page.dispatch({ type: 'recommendation', seq: asked.seq, ...RECOMMENDATION });
+  assert.match(page.text(), /Recommended team.*5 members.*planner.*implementer.*security.*tester.*reviewer/);
+  assert.equal(page.byLabel('Recommend a team')!.disabled, false);
+  page.byLabel('Use Recommended team as is')!.click();
+  assert.deepEqual(page.posts.at(-1), { type: 'use-team', id: 'recommend', goal: 'Add billing', locality: 'cloud', workShape: 'feature', riskLevel: 'high' });
+  assert.equal(page.byLabel('Clone Recommended team and modify it')!.disabled, true, 'waiting for the host');
+  page.dispatch({ type: 'used', declined: true, text: 'Not changed. This project\'s team is as it was.' });
+  assert.equal(page.heading(), 'Recommend a team for me', 'a declined Use as is stays here');
+  assert.equal(page.byLabel('Use Recommended team as is')!.disabled, false);
+  // Clone and modify: the Purpose step with the host's name and the goal, and Back returns here with the team still shown.
+  page.byLabel('Clone Recommended team and modify it')!.click();
+  assert.deepEqual(page.posts.at(-1), { type: 'starting-point', id: 'recommend', goal: 'Add billing', locality: 'cloud', workShape: 'feature', riskLevel: 'high' });
+  page.dispatch({ type: 'starting-point', id: 'recommend', cloneName: 'Recommended team', draft: { name: '', description: 'x', members: [{ name: 'planner', role: 'planner', model: 'standard', tools: null, instructions: 'Plan.' }] } });
+  assert.equal(page.heading(), 'Purpose');
+  assert.equal(page.doc.getElementById('f-name')!.value, 'Recommended team');
+  assert.equal(page.doc.getElementById('f-desc')!.value, 'Add billing');
+  page.byLabel('Save draft')!.click();
+  const saved = page.posts.at(-1)!;
+  assert.deepEqual([saved.type, saved.startingPoint, saved.path], ['save-draft', 'recommend', 'existing'], 'a draft path older versions also read');
+  page.byLabel('Back')!.click();
+  assert.equal(page.heading(), 'Recommend a team for me', 'back to the screen it came from');
+  assert.match(page.text(), /5 members/);
+  assert.equal(page.doc.getElementById('f-goal')!.value, 'Add billing', 'the answers are kept');
+  // Changing an answer: the team shown no longer matches, so it is cleared until recommended again.
+  page.type('f-shape', 'research', 'change');
+  assert.equal(page.byLabel('Use Recommended team as is'), undefined);
+  assert.match(page.text(), /Recommend again/);
+  page.type('f-goal', 'Add billing and invoices');
+  // A reply that comes after the person left this screen is dropped, and the button works again on return.
+  page.byLabel('Recommend a team')!.click();
+  const late = page.posts.at(-1)!;
+  page.byLabel('Back')!.click();
+  page.dispatch({ type: 'recommendation', seq: late.seq, ...RECOMMENDATION });
+  assert.equal(page.heading(), 'How do you want to start?');
+  page.byLabel('Recommend a team for me')!.click();
+  assert.equal(page.byLabel('Use Recommended team as is'), undefined, 'the late reply was not shown');
+  assert.equal(page.byLabel('Recommend a team')!.disabled, false);
+  // An error frees the button too.
+  page.byLabel('Recommend a team')!.click();
+  page.dispatch({ type: 'error', text: 'The team could not be recommended.' });
+  assert.equal(page.byLabel('Recommend a team')!.disabled, false);
+  for (const message of page.posts) assert.ok(parseStudioMessage(message), JSON.stringify(message));
+});
+
+test('page: the picker no longer offers the recommendation, and a draft cloned from it before 0.4.30 goes back to the recommendation screen', async () => {
+  const page = await builderPage();
+  page.byLabel('New team')!.click();
+  page.byLabel('Use an existing team')!.click();
+  const values = () => page.radios('starting-point').map((node) => node.value);
+  assert.ok(values().length > 3);
+  assert.equal(values().includes('recommend'), false, 'offered once, on the first screen');
+  assert.doesNotMatch(page.text(), /Recommended/);
+  // A draft saved by 0.4.29 after Use an existing team > Recommended team > Clone and modify.
+  const old = await builderPage({ savedDraft: { draft: draft(), step: 0, target: 'user', startingPoint: 'recommend', path: 'existing' } });
+  old.byLabel('Resume')!.click();
+  assert.equal(old.heading(), 'Purpose');
+  old.byLabel('Back')!.click();
+  assert.equal(old.heading(), 'Recommend a team for me');
+  old.byLabel('Back')!.click();
+  assert.equal(old.heading(), 'How do you want to start?');
+});
+
+test('host: Recommend shows the team Use as is would save, from the same answers; the picker leaves it out; the request is strictly validated', async () => {
+  const h = await harness();
+  await h.send({ type: 'ready' });
+  assert.equal((last(h, 'state').picker as Array<{ id: string }>).some((entry) => entry.id === 'recommend'), false, 'the picker leaves the recommendation out');
+  await h.send({ type: 'recommend', seq: 4, goal: 'Add billing', locality: 'cloud', workShape: 'feature', riskLevel: 'high' });
+  const shown = last(h, 'recommendation');
+  assert.equal(shown.seq, 4);
+  assert.equal(shown.name, 'Recommended team');
+  assert.deepEqual(shown.members.map((member: { name: string }) => member.name), ['planner', 'implementer', 'security', 'tester', 'reviewer']);
+  assert.doesNotMatch(JSON.stringify(shown), new RegExp(h.root.replace(/[/\\]/g, '.')), 'no path');
+  // With no project open, Use as is saves it to My teams under the name it showed.
+  h.setRoot(undefined, false);
+  await h.library.create('Recommended team', teamMarkdown(draft({ name: 'Recommended team' })));
+  await h.send({ type: 'refresh' });
+  await h.send({ type: 'recommend', seq: 5, goal: 'Add billing', locality: 'cloud', workShape: 'feature', riskLevel: 'high' });
+  const unique = last(h, 'recommendation');
+  assert.equal(unique.name, 'Recommended team 2');
+  await h.send({ type: 'use-team', id: 'recommend', goal: 'Add billing', locality: 'cloud', workShape: 'feature', riskLevel: 'high' });
+  const file = path.join(h.library.directory, 'recommended-team-2.md');
+  const team = parseTeam(await readFile(file, 'utf8'), file);
+  assert.equal(team.name, unique.name);
+  assert.deepEqual(team.members.map((member) => member.name), unique.members.map((member: { name: string }) => member.name));
+  for (const message of [{ type: 'recommend', seq: 1, goal: '', locality: 'local', workShape: 'research', riskLevel: 'low' }]) assert.ok(parseStudioMessage(message), JSON.stringify(message));
+  for (const message of [
+    { type: 'recommend' }, { type: 'recommend', seq: 1, goal: '', locality: 'cloud', workShape: 'feature' }, { type: 'recommend', seq: 1, goal: '', locality: 'mars', workShape: 'feature', riskLevel: 'low' },
+    { type: 'recommend', seq: 1, goal: '', locality: 'cloud', workShape: 'feature', riskLevel: 'extreme' }, { type: 'recommend', seq: 'one', goal: '', locality: 'cloud', workShape: 'feature', riskLevel: 'low' },
+    { type: 'recommend', seq: 1, goal: 'x'.repeat(401), locality: 'cloud', workShape: 'feature', riskLevel: 'low' }, { type: 'recommend', seq: 1, goal: '', locality: 'cloud', workShape: 'feature', riskLevel: 'low', id: 'lib:web' }
+  ]) assert.equal(parseStudioMessage(message), undefined, JSON.stringify(message));
+  h.close();
 });
