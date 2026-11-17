@@ -204,14 +204,20 @@ function hostnameOf(host: string): string | undefined {
 }
 
 /**
- * Whether an endpoint counts as this machine or a host your organization names (D-37): a loopback host, or one matching an entry of `localHosts`
- * (an exact host, or `*.example.com` for any host below example.com). A host that cannot be read is not local.
+ * Whether an endpoint counts as this machine or a host your organization names (D-37): a loopback host (localhost, 127.0.0.1, [::1], exactly), or one
+ * matching an entry of `localHosts` (an exact host, or `*.example.com` for any host below example.com), compared in lowercase. The host is the URL parser's
+ * own, so a userinfo trick names the host after the `@`, and a trailing dot or another loopback address (127.0.0.2) is not local. A host that cannot be read
+ * is not local.
  */
 export function isLocalRouteHost(host: string, localHosts: readonly HostPattern[]): boolean {
   const name = hostnameOf(host);
   if (name === undefined) return false;
   if (isLoopbackHost(name)) return true;
-  return localHosts.some((pattern) => (pattern.startsWith('*.') ? name.endsWith(pattern.slice(1)) && name.length > pattern.length - 1 : name === pattern));
+  // Both sides in lowercase: the URL parser lowercases the endpoint's host, so a name the policy writes in capitals means the same host (D-37).
+  return localHosts.some((given) => {
+    const pattern = given.toLowerCase();
+    return pattern.startsWith('*.') ? name.endsWith(pattern.slice(1)) && name.length > pattern.length - 1 : name === pattern;
+  });
 }
 
 /**
