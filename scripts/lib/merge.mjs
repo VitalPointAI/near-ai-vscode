@@ -55,7 +55,15 @@ export async function mergePr(repo, number, { dryRun = false, noTag = false, log
 
   // --repo keeps gh from touching local branches (it skips local branch deletion and checkout),
   // so no worktree or local main is changed. --match-head-commit refuses if the head moved.
-  gh(['pr', 'merge', String(number), '--repo', repo, '--squash', '--delete-branch', '--match-head-commit', pr.headRefOid, '--subject', `${pr.title} (#${pr.number})`]);
+  try {
+    gh(['pr', 'merge', String(number), '--repo', repo, '--squash', '--delete-branch', '--match-head-commit', pr.headRefOid, '--subject', `${pr.title} (#${pr.number})`]);
+  } catch (error) {
+    // A repository that deletes merged branches itself leaves gh's --delete-branch nothing to delete: the merge happened and only
+    // that last step failed. Anything else is a real failure. Either way the state check below decides, so nothing is tagged
+    // unless GitHub reports the PR merged.
+    if (!branchAlreadyGone(error)) throw error;
+    log('GitHub had already deleted the branch after the merge; checking the merge itself.');
+  }
   let mergeSha;
   let problem;
   for (let attempt = 0; attempt < 5; attempt += 1) {
@@ -74,4 +82,10 @@ export async function mergePr(repo, number, { dryRun = false, noTag = false, log
     tag = await tagRelease(repo, version, mergeSha, { wait: true, log, ci: { wait, ...ci } });
   }
   return { merged: true, mergeSha, tag };
+}
+
+/** True for gh's failure to delete a branch that no longer exists (HTTP 404 on the branch ref), and nothing else. */
+export function branchAlreadyGone(error) {
+  const text = String(error?.message ?? error);
+  return /failed to delete remote branch/.test(text) && /HTTP 404|Reference does not exist/.test(text);
 }

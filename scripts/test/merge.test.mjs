@@ -88,6 +88,21 @@ test('merge-pr squash-merges a PR whose gates pass, matching the head it checked
   assert.equal(fake.called(/git\/(tags|refs)/).length, 0, 'a normal PR is not tagged');
 });
 
+test('merge-pr goes on when the repository already deleted the branch, and still tags a release only once GitHub confirms the merge', async () => {
+  const fake = install(readyToMerge({ prs: { 9: openPr(9, 'release/1.2.3', HEAD) }, branchAlreadyDeleted: true, files: releaseFiles(HEAD, SQUASH), commits: { [HEAD]: greenCommit(), [SQUASH]: greenCommit({ review: false, event: 'push' }) }, mainContains: new Set([SQUASH]) }));
+  const result = await mergePr(REPO, '9', { ...quiet, ci: { wait: noWait } });
+  assert.equal(result.merged, true);
+  assert.equal(result.mergeSha, SQUASH);
+  assert.equal(result.tag, 'v1.2.3', 'the release is tagged after the confirmed merge');
+  assert.equal(fake.world.tags['v1.2.3'], SQUASH);
+});
+
+test('merge-pr still fails on any other merge error, and tags nothing', async () => {
+  const fake = install(readyToMerge({ prs: { 9: openPr(9, 'release/1.2.3', HEAD) }, mergeFails: true, files: releaseFiles(HEAD) }));
+  await assert.rejects(mergePr(REPO, '9', quiet), /Base branch was modified/);
+  assert.equal(fake.called(/git\/(tags|refs)/).length, 0);
+});
+
 test('merge-pr refuses with every reason and merges nothing when a gate fails', async () => {
   const commit = greenCommit({ reviewer: 'someone-else' });
   commit.checkRuns[2].conclusion = 'failure';
