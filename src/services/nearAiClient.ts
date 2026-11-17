@@ -1,8 +1,10 @@
 import { createHash } from 'node:crypto';
 import { sha256Hex, verifyResponse, type ResponseEvidence, type VerificationResult } from './attestation';
 import { isNearCloudEndpoint, isSecureEndpoint } from '../domain/config';
-import { decideRoute, routeCheckFailed } from '../domain/gate/routing';
-import type { ConnectionBindingFact, RouteDecision, RouteFacts, RouteRule } from '../domain/gate/routing';
+import { decideRoute, routeCheckFailed, routingWhileFailedClosed } from '../domain/gate/routing';
+import type { ConnectionBindingFact, RouteDecision, RouteFacts, RouteRule, RoutingTable } from '../domain/gate/routing';
+import { SHIPPED_DEFAULT_LABEL } from '../domain/gate/bundle';
+import type { Label } from '../domain/gate/labels';
 import type { Mark } from '../domain/gate/dominance';
 import { currentSessionRoute, defaultSessionRoute, routeRecordFor, routingOf } from '../gate/sessionMark';
 import type { SessionRoute } from '../gate/sessionMark';
@@ -955,7 +957,11 @@ export class NearAiClient {
   private checkRoute(model: string | undefined): ConnectionBindingFact | undefined {
     const inSession = currentSessionRoute();
     const route = inSession ?? defaultSessionRoute();
-    const { routing, defaultLabel, bundleHash } = routingOf(route);
+    // Until the route's policy has been read, the record names the failed-closed routing and no policy hash (PR #81 review: a state that cannot be read for
+    // its routing is refused and recorded below, never thrown past the check).
+    let routing: RoutingTable = routingWhileFailedClosed();
+    let defaultLabel: Label = SHIPPED_DEFAULT_LABEL;
+    let bundleHash = '';
     const host = this.options.baseUrl;
     const fact = this.bindingFact(host);
     const info = model === undefined ? undefined : this.models.get(model);
@@ -964,7 +970,7 @@ export class NearAiClient {
       host,
       nearEndpoint: isNearCloudEndpoint(host),
       model: info === undefined ? undefined : { id: info.id, ...(info.privacyBoundary === undefined ? {} : { privacyBoundary: info.privacyBoundary }) },
-      attestationFailed: route.attestation.failed === true,
+      attestationFailed: attestationFailedOf(route),
       binding: fact,
       now: clockOf(route),
       localModelAvailable: this.options.localModelAvailable === true,
@@ -974,10 +980,11 @@ export class NearAiClient {
     let mark: Mark = [];
     let checkFailed = false;
     try {
+      ({ routing, defaultLabel, bundleHash } = routingOf(route));
       mark = route.markOf();
       decision = decideRoute(mark, routing, facts, defaultLabel);
     } catch {
-      // A mark that cannot be read, or a routing table that throws, means the route cannot be worked out: it is refused with a fixed rule and a plain
+      // A policy state, a mark or a routing table that cannot be read means the route cannot be worked out: it is refused with a fixed rule and a plain
       // sentence, and recorded, rather than guessed or left to throw something nobody can read (PR 4a review).
       mark = [];
       checkFailed = true;
@@ -1238,6 +1245,15 @@ function parseSseLine(line: string, metadata: UsageMetadata, model?: ModelInfo):
  */
 export function completionRequestBody(model: string, messages: AgentMessage[], tools: ToolDefinition[], maxTokens: number): string {
   return JSON.stringify({ model, messages, stream: true, stream_options: { include_usage: true }, max_tokens: maxTokens, ...(tools.length ? { tools, tool_choice: 'auto' } : {}) });
+}
+
+/** Whether the route's shared answer check has failed. A route whose state cannot be read counts as failed, so it never makes a model count as private. */
+function attestationFailedOf(route: SessionRoute): boolean {
+  try {
+    return route.attestation.failed !== false;
+  } catch {
+    return true;
+  }
 }
 
 /** The time of a route decision: the route's clock, or the system clock when the route has none or its clock throws. */

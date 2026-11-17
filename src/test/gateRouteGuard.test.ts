@@ -937,3 +937,19 @@ test('a routing table that throws is refused with a fixed rule and a plain sente
   assert.equal(validateDecisionRecord(records[0]).ok, true);
   assert.match(ROUTE_CHECK_FAILED_TEXT, /^Nothing was sent\. /);
 });
+
+test('a policy state that cannot be read for its routing (valid, with no bundle in it) is refused as route.deny, recorded, and nothing is sent', async () => {
+  const records: DecisionRecord[] = [];
+  const near = await nearClient();
+  // A malformed state: it says valid but carries no bundle, so reading its routing table throws inside the route check.
+  const malformed = recordingRoute([], records, { bundleState: () => ({ state: 'valid' }) as never });
+  await assert.rejects(
+    () => withSessionRoute(malformed, () => ask(near.client, 'cloud-model')),
+    (error: unknown) => error instanceof RouteRefusedError && error.rule === 'route.deny' && error.message === ROUTE_CHECK_FAILED_TEXT
+  );
+  assert.equal(near.content.length, 0);
+  assert.equal(records.length, 1, 'the refusal is on record');
+  assert.equal(records[0]?.authorizations[0]?.policy.name, 'route.deny');
+  assert.equal(records[0]?.unmapped.nearAi.bundleHash, '', 'no policy hash could be read');
+  assert.equal(validateDecisionRecord(records[0]).ok, true);
+});
