@@ -440,3 +440,21 @@ test('host: Share and Import leave out the person\'s own rating, so it is never 
   await h.send({ type: 'import' });
   assert.equal(teamRating(await readFile(path.join(h.library.directory, 'incoming-team.md'), 'utf8')), undefined);
 });
+
+test('host: the dashboard\'s sort and filter are kept for the person, so the tab opens as it was left even after it was closed', async () => {
+  const h = await host();
+  const kept: { value?: unknown } = {};
+  h.deps.view = { get: () => kept.value, set: async (value) => { kept.value = value; } };
+  await h.library.create('Web team', TEAM);
+  await h.send({ type: 'ready' });
+  assert.equal('view' in h.latest('state'), false, 'nothing kept yet');
+  await h.send({ type: 'view', sort: 'rating', attention: true });
+  assert.deepEqual(kept.value, { sort: 'rating', attention: true });
+  await h.send({ type: 'refresh' });
+  assert.deepEqual(h.latest('state').view, { sort: 'rating', attention: true });
+  // Strictly validated, and anything odd that was kept is not sent.
+  for (const bad of [{ type: 'view', sort: 'loudest', attention: true }, { type: 'view', sort: 'name', attention: 'yes' }, { type: 'view', sort: 'name' }, { type: 'view', sort: 'name', attention: false, more: 1 }]) assert.equal(parseStudioMessage(bad), undefined, JSON.stringify(bad));
+  kept.value = { sort: 'loudest', attention: 1 };
+  await h.send({ type: 'refresh' });
+  assert.equal('view' in h.latest('state'), false);
+});
