@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process';
 import { mkdir, readFile, readdir, realpath, stat, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import * as path from 'node:path';
+import { MAX_COMMAND_LENGTH, MAX_COMMAND_WORDS } from '../domain/commandBounds';
 import type { ActionCapability } from '../domain/policy';
 import { parseToolManifest } from '../domain/gate/manifest';
 import { contentsOf } from '../domain/gate/pathCover';
@@ -612,6 +613,8 @@ export async function shellReachesStateKeys(command: string, context: ToolContex
 export interface CredentialReach {
   readonly credentialStore?: string;
   readonly identityFiles?: string;
+  /** Set, with the reason, when the command is past the bounds the classifier reads (MAX_COMMAND_LENGTH, MAX_COMMAND_WORDS): its words were not resolved. */
+  readonly unreadable?: string;
 }
 
 /** Whether a path, split into segments, is at or under `place` (also split), each segment equal to the place's or a glob that could match it. */
@@ -631,9 +634,9 @@ function segmentsBelow(base: string, absolute: string): string[] | undefined {
 }
 
 /** The real path of a file, or of its folder with the file's name after it when the file does not exist; undefined when neither resolves. Reads no file. */
-async function realPathLoose(absolute: string): Promise<string | undefined> {
-  try { return await realpath(absolute); } catch { /* not there: try its folder */ }
-  try { return path.join(await realpath(path.dirname(absolute)), path.basename(absolute)); } catch { return undefined; }
+async function realPathLoose(absolute: string, resolve: (target: string) => Promise<string> = realpath): Promise<string | undefined> {
+  try { return await resolve(absolute); } catch { /* not there: try its folder */ }
+  try { return path.join(await resolve(path.dirname(absolute)), path.basename(absolute)); } catch { return undefined; }
 }
 
 /**
@@ -644,18 +647,22 @@ async function realPathLoose(absolute: string): Promise<string | undefined> {
  * could; the first SHELL_LINK_CHECKS words are also resolved through links. It only reads the command's text and resolves paths: it never opens or lists a
  * file. Still a heuristic, with the limits FLOOR_CANNOT_SEE_TEXT names: a path built at run time or a walk down from a parent folder is not seen.
  */
-export async function shellReachesCredentialStore(command: string, context: { root: string; shell?: { workingDirectory: string } }, locations: FloorLocations = {}): Promise<CredentialReach> {
-  const found: { credentialStore?: string; identityFiles?: string } = {};
+export async function shellReachesCredentialStore(command: string, context: { root: string; shell?: { workingDirectory: string } }, locations: FloorLocations = {}, options: { realpath?: (target: string) => Promise<string> } = {}): Promise<CredentialReach> {
+  const found: { credentialStore?: string; identityFiles?: string; unreadable?: string } = {};
   if (command.trim() === '') return found;
   const byText = namesCredentialStore(command, locations);
   if (byText !== undefined) found.credentialStore = byText;
   const identityByText = namesIdentityFiles(command, locations);
   if (identityByText !== undefined) found.identityFiles = identityByText;
   if (found.credentialStore !== undefined && found.identityFiles !== undefined) return found;
+  // The classifier's own bounds (PR #74 review round 11): past them, no word is resolved, and the command's effects are unknown to the gate.
+  if (command.length > MAX_COMMAND_LENGTH) return { ...found, unreadable: 'the command is too long to check for credential folders' };
+  if (command.split(/[\s'"`;&|()<>=]+/).length > MAX_COMMAND_WORDS) return { ...found, unreadable: 'the command has too many words to check for credential folders' };
+  const resolveLoose = (target: string): Promise<string | undefined> => realPathLoose(target, options.realpath);
   const home = locations.home ? path.resolve(locations.home) : undefined;
   const storage = locations.globalStorage ? path.resolve(locations.globalStorage) : undefined;
-  const homes = home === undefined ? [] : [...new Set([home, (await realPathLoose(home)) ?? home])];
-  const storages = storage === undefined ? [] : [...new Set([storage, (await realPathLoose(storage)) ?? storage])];
+  const homes = home === undefined ? [] : [...new Set([home, (await resolveLoose(home)) ?? home])];
+  const storages = storage === undefined ? [] : [...new Set([storage, (await resolveLoose(storage)) ?? storage])];
   const stores = CREDENTIAL_STORES.map((store) => store.split('/'));
   // VS Code's secrets database only where VS Code keeps it (PR #74 review): its storage folder names, or this VS Code's own storage folders, as the global
   // storage is written and as it resolves. A project file of the same name is the project's.
@@ -684,7 +691,7 @@ export async function shellReachesCredentialStore(command: string, context: { ro
         const absolute = path.resolve(base, expanded);
         let real: string | undefined;
         if (found.credentialStore === undefined || found.identityFiles === undefined) {
-          if (!/[*?[]/.test(absolute) && linkChecks < SHELL_LINK_CHECKS) { linkChecks += 1; real = await realPathLoose(absolute); }
+          if (!/[*?[]/.test(absolute) && linkChecks < SHELL_LINK_CHECKS) { linkChecks += 1; real = await resolveLoose(absolute); }
         }
         if (found.credentialStore === undefined && (isStore(absolute) || (real !== undefined && isStore(real)))) found.credentialStore = credentialReason(shown);
         if (found.identityFiles === undefined && (isIdentity(absolute) || (real !== undefined && isIdentity(real)))) found.identityFiles = identityFilesReason(shown);

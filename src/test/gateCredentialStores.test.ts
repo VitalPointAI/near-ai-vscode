@@ -120,3 +120,37 @@ test('in every mode, a command that reaches a credential store or the identity f
     }
   }
 });
+
+// PR #74 review round 11: the credential-store check resolves a command word by word, so it has the classifier's own bounds (shared constants). A command
+// past them is not resolved at all: the check says it could not read it, and the gate treats the call's effects as unknown (asks with a person, refuses
+// with nobody). The text checks still run, so a store the text names is still refused.
+test('a command longer than the classifier reads is not resolved word by word: the check says so, and the gate asks', async () => {
+  const { MAX_COMMAND_LENGTH, MAX_COMMAND_WORDS } = await import('../agent/commandSafety');
+  let resolved = 0;
+  const counting = { realpath: async (target: string) => { resolved += 1; return target; } };
+  const manyWords = `ls ${Array.from({ length: MAX_COMMAND_WORDS + 5 }, (_, index) => `src/f${index}`).join(' ')}`;
+  const longText = `ls src/a # ${'x'.repeat(MAX_COMMAND_LENGTH)}`;
+  for (const command of [manyWords, longText]) {
+    resolved = 0;
+    const reach = await shellReachesCredentialStore(command, at(), LOCATIONS, counting);
+    assert.equal(typeof reach.unreadable, 'string', 'it says it could not read the command');
+    assert.equal(resolved, 0, 'nothing was resolved');
+    const facts = await floorFactsFor({ command, root: ROOT, cwd: ROOT, ...LOCATIONS });
+    assert.equal(typeof facts.effectsUnknown, 'string');
+  }
+  // Within the bounds, words are resolved as before.
+  resolved = 0;
+  await shellReachesCredentialStore('cat src/a.txt notes.md', at(), LOCATIONS, counting);
+  assert.ok(resolved > 0);
+  // A store the text names is refused whatever the length.
+  assert.notEqual((await shellReachesCredentialStore(`cat ~/.ssh/id_rsa ${'a '.repeat(MAX_COMMAND_WORDS)}`, at(), LOCATIONS, counting)).credentialStore, undefined);
+  for (const presence of ['person', 'none'] as const) {
+    const runtime = testGateRuntime({ presence, context: presence === 'none' ? 'unattended' : 'interactive' });
+    const gated = await gateToolCall(runtime, {
+      tool: bashTool, raw: { command: manyWords }, root: ROOT, callId: `long-${presence}`, command: manyWords, policy: { mode: 'fully-autonomous', emergencyStop: false },
+      rules: DEFAULT_RULES, grants: new RunGrants(), shell: { cwd: ROOT }, buildAuto: async () => undefined
+    });
+    assert.equal(gated.decision.outcome, presence === 'person' ? 'ask' : 'deny', presence);
+    assert.equal(gated.decision.rule, 'manifest.effects-unknown');
+  }
+});

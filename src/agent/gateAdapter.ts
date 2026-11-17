@@ -174,6 +174,8 @@ export async function floorFactsFor(input: FloorFactsInput, readers: FloorReader
     reach = {};
     lost = 'the check for credential stores could not read this command';
   }
+  // Past the bounds the classifier reads, the check did not resolve the command's words: what it reaches is unknown (PR #74 review round 11).
+  lost ??= reach.unreadable;
   const facts = {
     ...(reach.credentialStore === undefined ? {} : { credentialStore: reach.credentialStore }),
     ...(reach.identityFiles === undefined ? {} : { identityFiles: reach.identityFiles })
