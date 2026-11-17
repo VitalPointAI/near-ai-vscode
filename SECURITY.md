@@ -741,7 +741,19 @@ Brave Search, or Tavily (keys in SecretStorage). It is off until you choose.
   version behave as they did, with one exception: a tool that changes data on a
   local server (one started by a command, with no web address) now asks before
   every call in every mode, even on a server marked trusted, because NEAR AI
-  cannot tell what it reaches.
+  cannot tell what it reaches, until you declare what it may do (below).
+- **Declaring what a local server may do.** In your user settings,
+  `nearAi.mcp.localServerEffects` names, per server id, what the tools of a
+  server with no web address may do: `"read"`, `{ "workspaceWrite": [paths] }`
+  (writes inside the project on those paths) and `{ "network": [hosts] }`
+  (reaches those hosts, named exactly). Its tools are then decided by that
+  declaration like any tool whose effects are known; a trusted server's tools
+  stop asking where your mode lets such an action run. Publishing, deleting,
+  sending, shell commands, writes into `.git/`, `.planning/` or `.near-ai/`,
+  the whole project and wildcards at its top cannot be declared, so the floor
+  still decides them, and after a credential read a declared host still asks.
+  A declaration that cannot be read is ignored with a warning, and the server
+  keeps asking. A workspace's settings cannot declare it.
 - **Declaring what a tool does.** The MCP page has a "What it does" menu for
   each tool of a connected server: it only reads, it changes data on the server,
   or you do not know. That decides how the tool is treated from then on.

@@ -13,7 +13,9 @@ let panel: vscode.WebviewPanel | undefined;
 
 export function mcpRegistry(context: vscode.ExtensionContext): McpRegistry {
   if (!registry) {
-    registry = new McpRegistry(context.globalState, context.workspaceState, context.secrets, vscode.workspace.workspaceFolders?.[0]?.uri.fsPath);
+    // What a local server may do is read from the person's own user settings only: a workspace's settings cannot declare it.
+    registry = new McpRegistry(context.globalState, context.workspaceState, context.secrets, vscode.workspace.workspaceFolders?.[0]?.uri.fsPath, undefined,
+      () => vscode.workspace.getConfiguration('nearAi').inspect('mcp.localServerEffects')?.globalValue);
     const current = registry;
     context.subscriptions.push({ dispose: () => { void current.dispose(); } });
   }

@@ -1,6 +1,7 @@
 import * as path from 'node:path';
 import { ToolError } from '../agent/workspace';
 import type { McpManifest } from '../domain/gate/manifest';
+import type { Capability } from '../domain/gate/vocabulary';
 
 // A connection to one MCP server through the official SDK's client (vendored in vendor/mcp):
 // a local command over stdio, or a remote server over Streamable HTTP with an SSE fallback.
@@ -22,6 +23,11 @@ export interface McpServerConfig {
    * configured before has none, which means today's behaviour (D-38, no data migration). It is a claim by the person, never checked against the server.
    */
   manifest?: McpManifest;
+  /**
+   * What the person declared, once, that a local server's tools may do (`nearAi.mcp.localServerEffects`, parsed with parseMcpServerEffects). Filled by
+   * the registry from the user setting when it builds the tools, never stored with the server, and used only for a server with no web address.
+   */
+  localEffects?: readonly Capability[];
 }
 
 /** Values kept in SecretStorage: a remote URL may carry the access token itself. */

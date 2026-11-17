@@ -7,7 +7,8 @@ import { GATE_CONTEXTS } from './bundle';
 import type { GateContextName } from './bundle';
 import { checkKeys, childPath, isRecord, ownValue, refused } from './shape';
 import type { Fields, Parsed } from './shape';
-import { contentsOf } from './pathCover';
+import { contentsOf, coversPath } from './pathCover';
+import { isFloorProtectedWrite } from './floor';
 import { CREDENTIAL_HANDLE_PATTERN, GATE_VOCABULARY_VERSION, isCapabilityVerb, parseCapability, parseHostPattern, parsePathPattern } from './vocabulary';
 import type { Capability, CapabilityVerb, HostPattern } from './vocabulary';
 import { findSecrets } from '../team/secrets';
@@ -508,6 +509,98 @@ export function parseMcpManifest(value: unknown): Parsed<McpManifest> {
   };
 }
 
+// What a local add-on server's tools may do, declared once by the person (owner decision after PR #74): the user setting `nearAi.mcp.localServerEffects`
+// maps a server id to a list of these. `"read"` reads (on this computer); `{ "workspaceWrite": [paths] }` writes inside the project on those project paths;
+// `{ "network": [hosts] }` reaches those hosts. Nothing else can be declared, so nothing declared takes a call off the floor: publishing, sending, deleting
+// and shell commands cannot be named, and a write path that could reach `.git/`, `.planning/` or `.near-ai/`, the whole project or a wildcard at its top
+// is refused. The whole declaration is refused at its first fault, and the caller then ignores it (the server keeps asking).
+
+const MAX_SERVER_EFFECTS = 16;
+const MAX_SERVER_EFFECT_ITEMS = 32;
+/** Folders a declared write may never name or reach: the protected places and the project's planning folder. */
+const DECLARED_WRITE_NEVER = /^\.(?:git|near-ai|planning)$/i;
+/** One path in each protected place, which a declared write pattern must not cover. */
+const PROTECTED_SAMPLES: readonly string[] = Object.freeze([
+  '.git', '.git/config', '.git/hooks/pre-commit', '.planning/.near-ai', '.planning/.near-ai/settings.json', '.planning/.near-ai/team.md', '.near-ai', '.near-ai/state/meta.json',
+  '.near-ai/state/keys/local.key'
+]);
+
+/** Whether a declared write pattern could reach a protected place, the whole project, or anything at the top of the project by wildcard. */
+function declaredWriteReachesTooFar(pattern: string): boolean {
+  if (/[{}]/.test(pattern)) return true;
+  const segments = pattern.split('/');
+  const first = segments[0] ?? '';
+  if (first === '' || /[*?[\]]/.test(first)) return true;
+  if (segments.some((segment) => DECLARED_WRITE_NEVER.test(segment))) return true;
+  return isFloorProtectedWrite(pattern) || PROTECTED_SAMPLES.some((sample) => coversPath(pattern, sample));
+}
+
+function parseDeclaredList<T>(raw: unknown, path: string, item: (value: unknown, at: string) => Parsed<T>): Parsed<readonly T[]> {
+  if (!Array.isArray(raw)) return refused('wrong-type', path);
+  if (raw.length === 0) return refused('empty-list', path);
+  if (raw.length > MAX_SERVER_EFFECT_ITEMS) return refused('not-allowed-here', path);
+  const out: T[] = [];
+  const seen = new Set<string>();
+  for (let index = 0; index < raw.length; index += 1) {
+    const at = `${path}[${index}]`;
+    if (!(index in raw)) return refused('wrong-type', at);
+    const parsed = item(raw[index], at);
+    if (!parsed.ok) return parsed;
+    const key = JSON.stringify(parsed.value);
+    if (seen.has(key)) return refused('duplicate', at);
+    seen.add(key);
+    out.push(parsed.value);
+  }
+  return { ok: true, value: Object.freeze(out) };
+}
+
+/** Parses what a local add-on server's tools may do (see above). Strict: an unknown entry, key, shape or value refuses the whole declaration. */
+export function parseMcpServerEffects(value: unknown): Parsed<readonly Capability[]> {
+  if (!Array.isArray(value)) return refused('wrong-type', '');
+  if (value.length === 0) return refused('empty-list', '');
+  if (value.length > MAX_SERVER_EFFECTS) return refused('not-allowed-here', '');
+  const out: Capability[] = [];
+  const seen = new Set<string>();
+  for (let index = 0; index < value.length; index += 1) {
+    const at = `[${index}]`;
+    if (!(index in value)) return refused('wrong-type', at);
+    const entry: unknown = value[index];
+    let capability: Capability;
+    if (entry === 'read') {
+      capability = { verb: 'read', paths: Object.freeze(['**']) };
+    } else if (isRecord(entry)) {
+      const keys = Object.keys(entry);
+      if (keys.length !== 1) return refused('not-allowed-here', at);
+      const key = keys[0]!;
+      const where = childPath(at, key);
+      if (key === 'workspaceWrite') {
+        const paths = parseDeclaredList(ownValue(entry, key), where, (raw, itemAt) => {
+          const parsed = parsePathPattern(raw, itemAt);
+          if (!parsed.ok) return parsed;
+          return declaredWriteReachesTooFar(parsed.value) ? refused('not-allowed-here', itemAt) : parsed;
+        });
+        if (!paths.ok) return paths;
+        capability = { verb: 'workspaceWrite', paths: paths.value };
+      } else if (key === 'network') {
+        const hosts = parseDeclaredList(ownValue(entry, key), where, (raw, itemAt) => parseHostPattern(raw, itemAt, 'request'));
+        if (!hosts.ok) return hosts;
+        capability = { verb: 'network', hosts: hosts.value };
+      } else {
+        return refused('not-allowed-here', where);
+      }
+    } else {
+      return refused(typeof entry === 'string' ? 'not-allowed-here' : 'wrong-type', at);
+    }
+    const parsed = parseCapability(capability, { vocabulary: GATE_VOCABULARY_VERSION, mode: 'request' });
+    if (!parsed.ok) return parsed.path === '' ? refused(parsed.reason, at) : refused(parsed.reason, childPath(at, parsed.path));
+    const key = JSON.stringify(parsed.value);
+    if (seen.has(key)) return refused('duplicate', at);
+    seen.add(key);
+    out.push(parsed.value);
+  }
+  return { ok: true, value: Object.freeze(out) };
+}
+
 /** The facts the MCP registry already has about one tool of one server. `readOnly` and `destructive` are the tool's own hints. */
 export interface McpToolFacts {
   readonly server: string;
@@ -518,9 +611,12 @@ export interface McpToolFacts {
   readonly destructive: boolean;
   readonly approval: McpApprovalSetting;
   readonly transport: McpTransport;
+  /** What the person declared this server's tools may do (parseMcpServerEffects), used only for a local server: see mcpToolEffects. */
+  readonly localEffects?: readonly Capability[];
 }
 
-export type McpDefaultsUsed = 'declared' | 'restrictive' | 'legacy';
+/** `server`: a local server's tool decided by what the person declared for the whole server (`nearAi.mcp.localServerEffects`). */
+export type McpDefaultsUsed = 'declared' | 'restrictive' | 'legacy' | 'server';
 
 export interface McpToolEffects {
   readonly effects: readonly Capability[];
@@ -548,6 +644,20 @@ function hasOwnTool(tools: Readonly<Record<string, McpToolEntry>>, name: string)
  * (a `*`, a control character, too long) is never matched loosely: it gets RESTRICTIVE_EFFECTS too.
  */
 export function mcpToolEffects(manifest: McpManifest | undefined, facts: McpToolFacts): McpToolEffects {
+  const base = baseMcpToolEffects(manifest, facts);
+  // A local server's tool whose effects reach past the call itself (a host nobody named, or the restrictive "anything") is decided by what the person
+  // declared for the whole server, when they did: the call on the server, then the declared effects (owner decision after PR #74). A tool that only calls
+  // the server needs nothing more, and a name the vocabulary cannot hold keeps the restrictive effects.
+  const declared = facts.transport === 'stdio' ? facts.localEffects : undefined;
+  if (declared === undefined || declared.length === 0) return base;
+  if (base.effects.length > 0 && base.effects.every((effect) => effect.verb === 'mcp')) return base;
+  const call = parseCapability({ verb: 'mcp', server: facts.server, tools: [facts.tool] }, { vocabulary: GATE_VOCABULARY_VERSION, mode: 'ceiling' });
+  if (!call.ok || facts.server.includes('*') || facts.tool.includes('*')) return base;
+  const shorthand = shorthandFor({ effects: declared });
+  return { effects: Object.freeze([call.value, ...declared]), contexts: base.contexts, shorthand: shorthand === 'plan' ? 'read' : shorthand, defaults: 'server' };
+}
+
+function baseMcpToolEffects(manifest: McpManifest | undefined, facts: McpToolFacts): McpToolEffects {
   if (manifest !== undefined && hasOwnTool(manifest.tools, facts.tool)) {
     const entry = manifest.tools[facts.tool];
     if (entry !== undefined) {

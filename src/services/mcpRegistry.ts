@@ -1,7 +1,7 @@
 import type { AgentTool } from '../agent/tools';
 import { displayHost, McpConnection, McpSecrets, McpServerConfig, McpToolInfo } from '../mcp/client';
 import { mcpAgentTools, newServerManifest, serverManifest } from '../mcp/tools';
-import { defaultMcpContexts, mcpToolEffects, parseMcpManifest } from '../domain/gate/manifest';
+import { defaultMcpContexts, mcpToolEffects, parseMcpManifest, parseMcpServerEffects } from '../domain/gate/manifest';
 import type { McpManifest } from '../domain/gate/manifest';
 import { describeMcpManifest, describeMcpTools, mcpToolChoiceOf } from '../domain/gate/words';
 import type { McpToolChoice } from '../domain/gate/words';
@@ -64,6 +64,8 @@ export async function declareOrReport(run: () => Promise<void>, show: (text: str
 }
 
 const SERVERS_KEY = 'nearAi.mcp.servers';
+/** The user setting that declares what a local server's tools may do. */
+export const LOCAL_EFFECTS_SETTING = 'nearAi.mcp.localServerEffects';
 const ENABLED_KEY = 'nearAi.mcp.enabled';
 const secretKey = (id: string) => `nearAi.mcp.server.${id}`;
 export const SERVER_ID = /^[a-z0-9][a-z0-9-]{0,30}$/;
@@ -85,7 +87,11 @@ export class McpRegistry {
   private readonly live = new Map<string, Live>();
   private readonly listeners = new Set<() => void>();
 
-  public constructor(private readonly global: KeyValueStore, private readonly workspace: KeyValueStore, private readonly secrets: SecretStore, private readonly cwd?: string, private readonly connect: (config: McpServerConfig, secrets: McpSecrets, cwd?: string) => McpConnection = (config, values, root) => new McpConnection(config, values, root)) {}
+  /**
+   * `localServerEffects` reads the user setting `nearAi.mcp.localServerEffects` (only the person's own user value: a workspace cannot declare what a server
+   * may do), when the tools are built; absent, nothing is declared.
+   */
+  public constructor(private readonly global: KeyValueStore, private readonly workspace: KeyValueStore, private readonly secrets: SecretStore, private readonly cwd?: string, private readonly connect: (config: McpServerConfig, secrets: McpSecrets, cwd?: string) => McpConnection = (config, values, root) => new McpConnection(config, values, root), private readonly localServerEffects: () => unknown = () => undefined) {}
 
   public onDidChange(listener: () => void): { dispose(): void } { this.listeners.add(listener); return { dispose: () => { this.listeners.delete(listener); } }; }
   private changed(): void { for (const listener of this.listeners) listener(); }
@@ -98,7 +104,9 @@ export class McpRegistry {
   }
 
   /** Adds or replaces a server. Secret fields left undefined keep their stored values. */
-  public async save(config: McpServerConfig, secrets: Partial<McpSecrets>): Promise<void> {
+  public async save(given: McpServerConfig, secrets: Partial<McpSecrets>): Promise<void> {
+    // What a local server may do comes from the user setting each time the tools are built; it is never stored with the server.
+    const { localEffects: _declared, ...config } = given;
     if (!SERVER_ID.test(config.id)) throw new Error('A server id is 1-31 lowercase letters, digits, or dashes.');
     const previous = await this.secretsFor(config.id);
     const stored = this.withManifest(config);
@@ -217,8 +225,10 @@ export class McpRegistry {
   public async agentTools(): Promise<{ tools: AgentTool<any>[]; problems: string[] }> {
     const tools: AgentTool<any>[] = [];
     const problems: string[] = [];
+    const declarations = this.localDeclarations(problems);
     await Promise.all(this.enabledHere().map(async (id) => {
-      const config = this.servers().find((server) => server.id === id)!;
+      const stored = this.servers().find((server) => server.id === id)!;
+      const config = this.withLocalEffects(stored, declarations, problems);
       try {
         const connection = await this.connectServer(id);
         tools.push(...mcpAgentTools(config, connection, displayHost(await this.secretsFor(id)), { onCall: (serverId, ok, ms) => this.recordCall(serverId, ok, ms) }));
@@ -227,6 +237,37 @@ export class McpRegistry {
       }
     }));
     return { tools, problems };
+  }
+
+  /** The user setting's declarations by server id; one that is not an object is ignored with a warning. */
+  private localDeclarations(problems: string[]): Readonly<Record<string, unknown>> {
+    let raw: unknown;
+    try { raw = this.localServerEffects(); } catch { raw = undefined; }
+    if (raw === undefined || raw === null) return {};
+    if (typeof raw !== 'object' || Array.isArray(raw)) {
+      problems.push(`${LOCAL_EFFECTS_SETTING} is not a list of server ids with what each may do, so it is ignored and local servers' tools that change data still ask before every call.`);
+      return {};
+    }
+    return raw as Record<string, unknown>;
+  }
+
+  /**
+   * The server with what the person declared for it (owner decision after PR #74). Only a local server's declaration is used; a declaration for a server
+   * with a web address, or one that does not parse, is ignored with a warning, and the server's tools decide as they did (a data-changing one keeps asking).
+   */
+  private withLocalEffects(config: McpServerConfig, declarations: Readonly<Record<string, unknown>>, problems: string[]): McpServerConfig {
+    const { localEffects: _stale, ...clean } = config;
+    if (!Object.prototype.hasOwnProperty.call(declarations, config.id)) return clean;
+    if (config.transport !== 'stdio') {
+      problems.push(`${config.name} has a web address, so what ${LOCAL_EFFECTS_SETTING} declares for it is ignored; it is only for servers that run on this computer.`);
+      return clean;
+    }
+    const parsed = parseMcpServerEffects(declarations[config.id]);
+    if (!parsed.ok) {
+      problems.push(`What ${LOCAL_EFFECTS_SETTING} declares for ${config.name} could not be read (${parsed.reason} at ${parsed.path || 'the top'}), so it is ignored and the server's tools that change data still ask before every call.`);
+      return clean;
+    }
+    return { ...clean, localEffects: parsed.value };
   }
 
   private recordCall(id: string, ok: boolean, ms: number): void {

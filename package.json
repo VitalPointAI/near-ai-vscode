@@ -781,6 +781,24 @@
           },
           "markdownDescription": "Model for each agent role: a tier (`deep`, `standard`, `fast`) or a NEAR model ID, by agent name or a `*` pattern. Research and mapping roles read large inputs in parallel, so they default to the cheaper fast tier; bulk fetch and extract roles do too. Planner, plan-checker, verifier, analyst, editor and red-team roles default to the deep tier, because their judgement decides the outcome. A team member's own `model:` line wins, and an agent never uses a model less private than the chat's. A model chosen for this project in Compare Models is used instead of this setting until you clear it there or with NEAR AI: Clear This Project's Model Choices."
         },
+        "nearAi.mcp.localServerEffects": {
+          "type": "object",
+          "default": {},
+          "scope": "application",
+          "additionalProperties": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 16,
+            "items": {
+              "anyOf": [
+                { "type": "string", "enum": ["read"] },
+                { "type": "object", "properties": { "workspaceWrite": { "type": "array", "items": { "type": "string" }, "minItems": 1, "maxItems": 32 } }, "required": ["workspaceWrite"], "additionalProperties": false },
+                { "type": "object", "properties": { "network": { "type": "array", "items": { "type": "string" }, "minItems": 1, "maxItems": 32 } }, "required": ["network"], "additionalProperties": false }
+              ]
+            }
+          },
+          "markdownDescription": "What the tools of an MCP server that runs on this computer (a command, no web address) may do, by server id, declared once: `\"read\"`, `{ \"workspaceWrite\": [\"docs/**\"] }` (writes inside the project on those paths) and `{ \"network\": [\"api.example.com\"] }` (reaches those hosts). Until a server is declared here, its tools that change data ask before every call in every mode. Publishing, deleting, sending, shell commands, and writes into `.git/`, `.planning/` or `.near-ai/` cannot be declared, so they still ask. A declaration that cannot be read is ignored with a warning. Read from your user settings only. This is what you declare the server does; NEAR AI cannot check what a server does inside itself."
+        },
         "nearAi.team.pollSeconds": {
           "type": "number",
           "default": 15,

@@ -49,7 +49,10 @@ export function serverManifest(config: McpServerConfig): McpManifest | undefined
 
 /** The effects, contexts and shorthand of one tool of one server, from the server's manifest (exact tool name only) or, with none, from today's rules. */
 export function mcpToolDecision(config: McpServerConfig, tool: McpToolInfo, host: string): McpToolEffects {
-  return mcpToolEffects(serverManifest(config), { server: config.id, tool: tool.name, host, readOnly: tool.readOnly, destructive: tool.destructive, approval: config.approval, transport: config.transport });
+  return mcpToolEffects(serverManifest(config), {
+    server: config.id, tool: tool.name, host, readOnly: tool.readOnly, destructive: tool.destructive, approval: config.approval, transport: config.transport,
+    ...(config.localEffects === undefined ? {} : { localEffects: config.localEffects })
+  });
 }
 
 /**
@@ -59,6 +62,8 @@ export function mcpToolDecision(config: McpServerConfig, tool: McpToolInfo, host
  */
 export function mcpToolCapability(config: McpServerConfig, tool: McpToolInfo, host: string): ActionCapability {
   const decision = mcpToolDecision(config, tool, host);
+  // A local server's tool decided by the person's declaration for the server: what was declared says it, unless the server asks before every call.
+  if (decision.defaults === 'server') return config.approval === 'ask-every-call' ? 'network' : decision.shorthand;
   if (serverManifest(config) === undefined || decision.defaults === 'legacy') {
     const readOnly = tool.readOnly && !tool.destructive;
     return readOnly && config.approval !== 'ask-every-call' ? 'read' : 'network';
