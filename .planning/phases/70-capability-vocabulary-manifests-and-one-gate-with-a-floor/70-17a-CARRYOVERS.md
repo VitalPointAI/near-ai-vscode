@@ -341,3 +341,48 @@ Five commits on `feat/gate-floor`, on top of the coordinator's `29a82e3` and `25
   change) rather than once per host or run: the answer depends only on the process's environment.
 - Test (`commandTemporary.test.ts`): a stand-in source that counts resolves: four on the first call, none on the next hundred, four more after each
   change.
+
+## Review round 5 (PR #74)
+
+Three commits on `feat/gate-floor`, one per minor finding; the nit was skipped as instructed. Every new test was seen failing first: the scratch and
+late-approval tests against the unchanged source, the git branch test against a mutant that tags `-m`/`-c` (the behaviour itself was already right).
+
+### Results
+
+- Lint (`tsc --noEmit`): clean.
+- Full `npm test` (6G cap): 3363 tests, 3354 passed, 0 failed, 0 cancelled, 9 skipped (the same 9).
+- `node scripts/secret-scan.mjs --range origin/main..HEAD`: clean. No package changes. No activation or webview code changed, so e2e was not run.
+
+### 1. Recursive deletes in the project's scratch folder asked
+
+- Commit `4e2c9d8`.
+- A delete target strictly inside `.near-ai/scratch`, named with no `..`, that lands inside it however links resolve, is scratch for plain and
+  recursive deletes alike: no tag. Never the folder itself, its parents or the project. Each target of a recursive delete is now excused on its own (a
+  temporary folder's contents, the scratch folder's contents, or build output), so a mix of them is excused too.
+- Where a delete lands: the folders on the way resolved through links, and the last part too when it ends with a slash (rm then follows it). A plain
+  delete through a link that leaves the project is now destruction (before, it was judged by its text only).
+- Test (`commandTemporary.test.ts`, a real project): plain and recursive deletes inside scratch (by relative and absolute path, and from a shell in the
+  scratch folder) carry no tag; the folder itself, its parent (also by `..`), a `..` escape, a link into the project and a link out of it (with a
+  trailing slash, and through it), and plain deletes through a link or `..` out of the project are destruction.
+
+### 2. A late floor approval could outlive its call
+
+- Commit `7572aa7`.
+- Every decision of a call now takes that exact call's late approval, whatever its outcome; it lets the call run only when the decision is a floor ask.
+  A refusal in between (the emergency stop, the caller's own refusal, a failed-closed policy, a deny) uses it up.
+- `FloorApprovalsOnce` replaces the bare set: an approval expires after `FLOOR_APPROVAL_TTL_MS` (five minutes, against the runtime's clock), and all end
+  with the lead's turn (`endFloorApprovals`, called where agentSession finishes the turn); one given after the end is not kept.
+- Tests (`gateLateApproval.test.ts`, injectable clock): once and not twice; used up by the emergency stop, by the caller's refusal and by a
+  failed-closed policy; expired one millisecond past the TTL and still good one millisecond before; nothing after the turn ends. The existing
+  late-approval run in `gateFloorRuns.test.ts` passes unchanged.
+- Known gap (unchanged): a call refused before the gate (an unknown tool, a check that throws) does not reach a decision, so it does not use up an
+  approval; the TTL and the turn's end still bound it.
+
+### 3. git branch comment and tests
+
+- Commit `ec05a9e`.
+- Behaviour kept: `-M`, `-C`, and `--move`/`--copy` with `--force` (they overwrite an existing branch of the new name, whose commits can be lost),
+  `-d`/`-D`/`--delete` and `-f`/`--force` are destruction; `-m`, `-c`, `--move`, `--copy`, upstream and description changes are not (still risky,
+  so they ask in the asking modes). The comment now says exactly this.
+- Test (`commandEffects.test.ts`): `-m`, `-c`, `--move`, `--copy` and `-m new` carry no tag; `-M`, `-C`, `--move --force`, `--copy --force`,
+  `-mf`, `-cf`, `-f` and `-D` are destruction.
