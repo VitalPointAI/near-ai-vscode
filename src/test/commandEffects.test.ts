@@ -243,3 +243,58 @@ test('every tag is a capability the vocabulary accepts as a request', async () =
   const refused = all.filter((effect) => !parseCapability(effect, { vocabulary: 1, mode: 'request' }).ok);
   assert.deepEqual(refused, []);
 });
+
+// PR #74 review round 2: wrappers. stdbuf, flock and watch run the command after their own options, as timeout and nice do, so every tag survives them,
+// with each one's option syntax (stdbuf's -i/-o/-e modes, flock's lock file then a command or -c, watch's -n interval and flags).
+const KNOWN_RUNNERS: ReadonlyArray<{ readonly name: string; readonly wrap: (command: string) => string }> = [
+  { name: 'stdbuf -oL', wrap: (command) => `stdbuf -oL ${command}` },
+  { name: 'stdbuf -o L -e 0', wrap: (command) => `stdbuf -o L -e 0 ${command}` },
+  { name: 'stdbuf --output=L', wrap: (command) => `stdbuf --output=L ${command}` },
+  { name: 'flock lockfile', wrap: (command) => `flock /tmp/app.lock ${command}` },
+  { name: 'flock -n -w 5', wrap: (command) => `flock -n -w 5 /tmp/app.lock ${command}` },
+  { name: 'flock -c', wrap: (command) => `flock /tmp/app.lock -c ${quoted(command)}` },
+  { name: 'flock -x -c', wrap: (command) => `flock -x /tmp/app.lock --command ${quoted(command)}` },
+  { name: 'watch', wrap: (command) => `watch ${command}` },
+  { name: 'watch -n 5 -d', wrap: (command) => `watch -n 5 -d ${command}` },
+  { name: 'watch --interval=5 -x', wrap: (command) => `watch --interval=5 -x ${command}` }
+];
+
+test('every tag survives stdbuf, flock and watch, with each one\'s options', () => {
+  const wrong: string[] = [];
+  for (const { command, effects, extra } of ROWS) {
+    for (const runner of KNOWN_RUNNERS) {
+      const wrapped = runner.wrap(command);
+      const got = classify(wrapped, extra);
+      const missing = effects.filter((effect) => !(got.effects ?? []).some((found) => key(found) === key(effect)));
+      if (missing.length || got.effectsUnknown !== undefined) wrong.push(`${runner.name}: ${wrapped} → ${JSON.stringify(got)}`);
+    }
+  }
+  assert.deepEqual(wrong, []);
+  assert.notEqual(classify('stdbuf -oL ls').verdict, 'safe', 'a known runner still changes how the command runs');
+  // watch hands one quoted word to sh -c, so a whole command line in it is read as one; flock's lock file in a protected place is a write there.
+  assert.deepEqual(classify("watch 'git status; git push'").effects, [PUSH]);
+  assert.deepEqual(classify('watch -n 2 "git fetch && git push"').effects, [PUSH]);
+  assert.deepEqual(classify('flock .git/app.lock true').effects, [write('.git/app.lock')]);
+  assert.equal(classify('flock /tmp/app.lock').verdict, 'unknown', 'flock with no command');
+});
+
+// The class: a wrapper the rules do not know (chronic, ionice, a project's own script) may run the words after it, so when those words are a command the
+// rules tag, the command's effects are unknown (the gate asks), never "no tag". Words that tag nothing, after an unknown program, change nothing.
+test('a program the rules do not know, followed by any tagged command, has unknown effects rather than no tag', () => {
+  const wrong: string[] = [];
+  for (const { command, effects, extra } of ROWS) {
+    for (const wrapper of ['chronic', 'ionice -c3', 'unknown-runner --retries 3', '/usr/local/bin/with-lock']) {
+      const wrapped = `${wrapper} ${command}`;
+      const got = classify(wrapped, extra);
+      const tagged = effects.every((effect) => (got.effects ?? []).some((found) => key(found) === key(effect)));
+      if (got.effectsUnknown === undefined && !tagged) wrong.push(`${wrapped} → ${JSON.stringify(got)}`);
+    }
+  }
+  assert.deepEqual(wrong, []);
+  for (const command of ['chronic git push', 'ionice -c3 npm publish', 'mytool rm -rf src', 'mytool --then git reset --hard']) {
+    assert.equal(typeof classify(command).effectsUnknown, 'string', command);
+  }
+  for (const command of ['chronic git status', 'mytool --format json build', 'mytool rm', 'mytool ls src', 'mytool']) {
+    assert.equal(classify(command).effectsUnknown, undefined, `${command}: nothing tagged follows`);
+  }
+});

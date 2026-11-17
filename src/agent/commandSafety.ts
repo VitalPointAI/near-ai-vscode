@@ -588,6 +588,27 @@ const RUNS_WHAT_FOLLOWS = new Set(['{', '!', 'if', 'then', 'else', 'elif', 'whil
 const PRIVILEGE_VALUE_OPTIONS = new Set(['-u', '-g', '-C', '-h', '-p', '-U', '-r', '-t', '-T', '-D', '-R', '--user', '--group', '--close-from', '--host', '--prompt', '--other-user', '--role', '--type', '--command-timeout', '--chdir', '--chroot']);
 /** Shells whose `-c` script is read for what it does (fish and the csh family too: their scripts are read as sh, which is enough to see a push). */
 const SHELLS = new Set(['sh', 'bash', 'zsh', 'dash', 'ksh', 'fish', 'csh', 'tcsh']);
+/**
+ * Programs whose command the rules can tag (publishing, destruction, a protected write), or that run one the rules read (a runner, a shell, a privilege
+ * wrapper). After a program the rules do not know, one of these among its later words may be what it runs, so it is read there; if it tags anything,
+ * the whole command's effects are unknown (PR #74 review round 2: the next wrapper nobody listed fails closed, not open).
+ */
+const TAGGED_PROGRAMS: ReadonlySet<string> = new Set([
+  'git', 'npm', 'pnpm', 'yarn', 'bun', 'npx', 'docker', 'podman', 'kubectl', 'helm', 'oc', 'terraform', 'tofu', 'pulumi', 'cdk', 'serverless', 'sls', 'gh', 'glab',
+  'aws', 'az', 'gcloud', 'gsutil', 'near', 'cargo', 'gem', 'make', 'gmake', 'find', 'sed', 'gsed', 'gsd_run', 'gsd-tools.cjs',
+  'env', 'time', 'timeout', 'nice', 'nohup', 'command', 'stdbuf', 'flock', 'watch', ...RUNS_WHAT_FOLLOWS,
+  ...Object.keys(PUBLISH_TOOL_TARGETS), ...DISK_DESTROYERS, ...DELETERS, ...WORKSPACE_WRITERS, ...PRIVILEGE, ...INTERPRETERS, ...SHELLS
+]);
+/** More candidate words than this after an unknown program are not each read: the effects are unknown. */
+const MAX_RUNNER_PROBES = 16;
+/** stdbuf's mode options: `-o L` takes its mode as the next word, `-oL` and `--output=L` carry it. */
+const STDBUF_OPTION = /^-[ioe].+$|^--(?:input|output|error)=.+$/;
+/** flock's options that take a value as the next word, and its flags. */
+const FLOCK_VALUE_OPTIONS = new Set(['-w', '--wait', '--timeout', '-E', '--conflict-exit-code']);
+const FLOCK_FLAGS = /^-[sxenuoF]+$|^--(?:shared|exclusive|nonblock|nb|unlock|close|no-fork|verbose)$|^--(?:wait|timeout|conflict-exit-code)=\S+$|^-[wE]\d+$/;
+/** watch's options that take a value as the next word, and its flags. */
+const WATCH_VALUE_OPTIONS = new Set(['-n', '--interval', '-q', '--equexit']);
+const WATCH_FLAGS = /^-[dtbegcCxpwr]+$|^--(?:differences(?:=\w+)?|no-title|beep|errexit|chgexit|color|no-color|exec|precise|no-wrap|no-rerun)$|^--(?:interval|equexit)=\S+$|^-n[\d.]+$/;
 
 interface SegmentState { cwd: string }
 
@@ -922,8 +943,51 @@ function classifyWords(words: Word[], state: SegmentState, context: CommandConte
   let program = words[index].text;
   let args = words.slice(index + 1);
   // Wrappers that run the next command as is.
-  while (program === 'time' || program === 'env' || program === 'timeout' || program === 'nice' || program === 'nohup' || program === 'command') {
-    if (program === 'env') {
+  while (['time', 'env', 'timeout', 'nice', 'nohup', 'command', 'stdbuf', 'flock', 'watch'].includes(program)) {
+    if (program === 'stdbuf') {
+      let next = 0;
+      while (next < args.length && looksLikeOption(args[next].text)) {
+        if (/^-[ioe]$/.test(args[next].text)) next += 2;
+        else if (STDBUF_OPTION.test(args[next].text)) next += 1;
+        else return unknownProgram('stdbuf', args.slice(next), state, context, depth);
+      }
+      prefixReason = prefixReason ?? 'stdbuf changes how the command runs';
+      args = args.slice(next);
+    } else if (program === 'flock' || program === 'watch') {
+      // flock [options] <lock file> <command> | -c '<command>'; watch [options] <command> (run by sh -c unless -x). Options may follow flock's lock file.
+      const valueOptions = program === 'flock' ? FLOCK_VALUE_OPTIONS : WATCH_VALUE_OPTIONS;
+      const flags = program === 'flock' ? FLOCK_FLAGS : WATCH_FLAGS;
+      let next = 0;
+      let lock: Word | undefined;
+      let script: Word | undefined;
+      let exec = false;
+      while (next < args.length) {
+        const text = args[next].text;
+        if (program === 'flock' && lock !== undefined && (text === '-c' || text === '--command')) { script = args[next + 1]; next = args.length; break; }
+        if (valueOptions.has(text)) { next += 2; continue; }
+        if (looksLikeOption(text)) {
+          if (!flags.test(text)) return unknownProgram(program, args.slice(next), state, context, depth);
+          if (program === 'watch' && (text === '--exec' || /^-[a-z]*x/.test(text))) exec = true;
+          next += 1;
+          continue;
+        }
+        if (program === 'flock' && lock === undefined) { lock = args[next]; next += 1; continue; }
+        break;
+      }
+      // flock creates its lock file when it is missing: a lock file in a protected place is a write there.
+      if (lock !== undefined) noteEffects(protectedWriteEffects([lock], state, context));
+      prefixReason = prefixReason ?? (program === 'flock' ? 'flock runs the command under a lock' : 'watch runs the command again and again');
+      // watch hands its words to sh -c (unless -x): one quoted word that holds a whole command line is read as one; separate words are read as words.
+      const rest = args.slice(next);
+      const inline = program === 'flock' ? script : !exec && rest.length === 1 && /[\s;&|]/.test(rest[0].text) ? rest[0] : undefined;
+      if (inline !== undefined) {
+        if (inline.expansion) return unknown(`${program} runs a command decided at run time`);
+        const inner = classifyText(inline.text, { ...context, cwd: state.cwd }, depth + 1);
+        return inner.verdict === 'safe' ? unknown(prefixReason) : inner;
+      }
+      if (program === 'flock' && script === undefined && args.slice(next).length === 0) return unknown('flock without a command');
+      args = args.slice(next);
+    } else if (program === 'env') {
       let next = 0;
       while (next < args.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(args[next].text)) { const name = args[next].text.split('=')[0]; if (!HARMLESS_ENV.has(name)) prefixReason = prefixReason ?? `it sets ${name}`; next += 1; }
       if (next < args.length && looksLikeOption(args[next].text)) return unknown('env with options');
@@ -1240,7 +1304,29 @@ const READ_ONLY_GH = new Set([
     return checkWrites(args, state, context, name);
   }
   if (name === 'cd') return unknown('cd'); // handled by the caller
-  return unknown(`${name} is not a command the rules know`);
+  // `if`, `then`, `{`, `exec` and the like: classifyWords has already read the words after them.
+  if (RUNS_WHAT_FOLLOWS.has(name)) return unknown(`${name} is not a command the rules know`);
+  return unknownProgram(name, args, state, context, depth);
+}
+
+/**
+ * A program the rules do not know: it may be a wrapper that runs the words after it (chronic, ionice, a project's own runner). Each later word that names a
+ * program the rules can tag is read from there; if what follows tags anything, the command's effects are unknown, so the gate asks rather than reading "no
+ * tag" (PR #74 review round 2). More candidates than MAX_RUNNER_PROBES are not each read: the effects are unknown then too.
+ */
+function unknownProgram(name: string, args: readonly Word[], state: SegmentState, context: CommandContext, depth: number): CommandClassification {
+  const reason = `${name} is not a command the rules know`;
+  const candidates = args.flatMap((arg, index) => {
+    const candidate = programName(arg.text);
+    return !arg.expansion && !looksLikeOption(arg.text) && (TAGGED_PROGRAMS.has(candidate) || /^mkfs(?:\.|$)/.test(candidate)) ? [index] : [];
+  });
+  if (candidates.length > MAX_RUNNER_PROBES) return beyondReach(`${reason}, and too many of the words after it are commands to check`);
+  for (const index of candidates) {
+    const mark = effectMark();
+    classifyWords(args.slice(index), state, context, depth + 1);
+    if (effectsSince(mark).length > 0) return beyondReach(`${reason}, and it may run ${args.slice(index, index + 2).map((arg) => arg.text).join(' ')}`);
+  }
+  return unknown(reason);
 }
 
 

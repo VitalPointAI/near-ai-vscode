@@ -117,11 +117,11 @@ export const FLOOR_CANNOT_SEE_TEXT =
 
 /**
  * What the checks that find publishing, destruction and protected writes in a shell command cannot see (classifyCommand's effect tags, plan 16): a command
- * they cannot read has no tag, so under fully-autonomous it runs without asking. One they stop reading (the nesting bound, the length caps) has unknown
- * effects instead, and asks (PR #74 review). SECURITY.md carries it word for word; gateDocs checks each named gap is real and each named stop asks.
+ * they cannot read has no tag, so under fully-autonomous it runs without asking. One they stop reading (the nesting bound, the length caps, a program they
+ * do not know with a flagged command after it) has unknown effects instead, and asks (PR #74 review). SECURITY.md carries it word for word; gateDocs checks each named gap is real and each named stop asks.
  */
 export const FLOOR_EFFECTS_CANNOT_SEE_TEXT =
-  'The checks that find publishing, destruction and protected writes in a shell command also read its text, through npm run scripts and wrappers such as bash -c, sudo, xargs, pipes and subshells. They do not see a command built while it runs (bash -c "$CMD"), a file run with source or piped into sh, a script written or changed earlier on the same line (it is read as it was before the line ran), or wrappers they do not know, such as stdbuf, flock or watch. Under fully-autonomous such a command runs without asking. A command nested more than four levels deep, or too long to read, is not guessed at: it asks, and it is refused when nobody is there to answer.';
+  'The checks that find publishing, destruction and protected writes in a shell command also read its text, through npm run scripts and wrappers such as bash -c, sudo, xargs, pipes, subshells, timeout, nice, stdbuf, flock and watch. They do not see a command built while it runs (bash -c "$CMD"), a file run with source or piped into sh, or a script written or changed earlier on the same line (it is read as it was before the line ran). Under fully-autonomous such a command runs without asking. A command nested more than four levels deep, too long to read, or started by a program they do not know with a command they would flag among the words after it, is not guessed at: it asks, and it is refused when nobody is there to answer.';
 
 /** Where the person's home folder and this extension's global storage are, as the adapter knows them. Both are optional: the portable text forms always match. */
 export interface FloorLocations {

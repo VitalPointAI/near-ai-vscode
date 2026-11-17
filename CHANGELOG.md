@@ -20,8 +20,9 @@ to undo, and no mode lets an agent near the places where your keys and passwords
   card, whether the agent uses a file tool or a shell command. A file in your project that only has
   the same name as VS Code's secrets database is yours to use.
 - **A command the checks cannot read whole asks.** A shell command nested more than four levels
-  deep, or too long to check, asks first in Full auto too, and is refused when nobody is there to
-  answer, instead of running unread.
+  deep, too long to check, or started by a program the checks do not know with a command such as
+  git push after it, asks first in Full auto too, and is refused when nobody is there to answer,
+  instead of running unread. Commands run through stdbuf, flock or watch are read like any other.
 - **Approving a helper's card late runs that call once.** When you approve a helper agent's card
   after the helper has moved on, that exact call may run once; the next one like it asks again.
 - **Web search with no search provider set up no longer asks first.** Such a call only says that

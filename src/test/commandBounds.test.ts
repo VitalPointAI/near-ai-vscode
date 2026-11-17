@@ -129,6 +129,16 @@ test('a megabyte of command is turned away quickly instead of being read', () =>
   assert.ok(Date.now() - started < 2000, `took ${Date.now() - started} ms`);
 });
 
+/** The text of a call's arguments, from just after its opening parenthesis to the one that closes it (nested parentheses counted). */
+function argumentsAt(body: string, start: number): string {
+  let depth = 1;
+  for (let index = start; index < body.length; index += 1) {
+    if (body[index] === '(') depth += 1;
+    else if (body[index] === ')') { depth -= 1; if (depth === 0) return body.slice(start, index).trim(); }
+  }
+  return body.slice(start);
+}
+
 // The invariant behind the enumerated kinds: every place the classifier reads a command inside another passes a deeper level, and both entry points check
 // the bound before they read anything. A new recursion site that passes the same depth (and could loop) or a new entry point without the check fails here.
 test('source: every recursive call in the classifier goes one level deeper, and both entry points check the one bound first', () => {
@@ -145,22 +155,25 @@ test('source: every recursive call in the classifier goes one level deeper, and 
   // and classifyText handing its own text to classifyStructure.
   const sameLevel: string[] = [];
   for (const [name, body] of bodies) {
-    for (const call of body.matchAll(/\b(classifyText|classifyWords|classifyStructure|classifyProgram|classifyPackageManager|classifyNpx|checkScript|noteRunsAs|noteInlineScript)\(([^;]*?)\)(?=[;,)\s]|$)/g)) {
+    for (const call of body.matchAll(/\b(classifyText|classifyWords|classifyStructure|classifyProgram|classifyPackageManager|classifyNpx|checkScript|noteRunsAs|noteInlineScript|unknownProgram)\(/g)) {
       if (call.index !== undefined && body.slice(Math.max(0, call.index - 9), call.index) === 'function ') continue;
-      const args = call[2];
+      const args = argumentsAt(body, (call.index ?? 0) + call[0].length);
       if (/depth \+ 1\b/.test(args)) continue;
       if (/,\s*0\)?$/.test(args) && name === 'classifyCommand') continue;
       sameLevel.push(`${name} -> ${call[1]}`);
     }
   }
   const allowed = new Set(['classifyText -> classifyStructure', 'classifyStructure -> classifyWords', 'classifyWords -> classifyProgram', 'classifyProgram -> noteRunsAs',
-    'classifyProgram -> classifyPackageManager', 'classifyProgram -> classifyNpx', 'classifyProgram -> noteInlineScript', 'classifyPackageManager -> checkScript']);
+    'classifyProgram -> classifyPackageManager', 'classifyProgram -> classifyNpx', 'classifyProgram -> noteInlineScript', 'classifyPackageManager -> checkScript',
+    'classifyWords -> unknownProgram', 'classifyProgram -> unknownProgram']);
   const unexpected = [...new Set(sameLevel)].filter((call) => !allowed.has(call));
   assert.deepEqual(unexpected, [], 'a call that does not go deeper, outside the known descents from one level to its parts');
   // Each of the allowed descents ends in a call that does go deeper: none of these functions calls back up the list at the same level.
-  for (const name of ['noteRunsAs', 'noteInlineScript', 'classifyNpx', 'checkScript']) {
+  for (const name of ['noteRunsAs', 'noteInlineScript', 'classifyNpx', 'checkScript', 'unknownProgram']) {
     const body = bodies.get(name) ?? '';
-    for (const call of body.matchAll(/\b(classifyText|classifyWords)\(([^;]*?)\)(?=[;,)\s]|$)/g)) assert.match(call[2], /depth \+ 1\b/, `${name} -> ${call[1]} goes one level deeper`);
+    for (const call of body.matchAll(/\b(classifyText|classifyWords)\(/g)) {
+      assert.match(argumentsAt(body, (call.index ?? 0) + call[0].length), /depth \+ 1\b/, `${name} -> ${call[1]} goes one level deeper`);
+    }
   }
 });
 
