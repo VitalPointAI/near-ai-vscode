@@ -547,3 +547,29 @@ and applied back by SHA).
 - Tests (`packageScriptsFolder.test.ts`): a same-size rewrite with its time set back to the same value is seen by the reader and by the floor; the
   file is read for every decision and unchanged content gives the same parse. The round 4 cache test (which pinned the size-and-time key) is replaced.
 - No SECURITY.md wording described the cache; the loop's comment now says how it reads.
+
+### Refinement: writes the command names are tagged, not unknown (GATE-06)
+
+- Commit `ff28d0b`, asked for by the coordinator to keep Full auto usable.
+- `writesNamed`/`writeResult`: a write whose target the text names (after cd, `-C` and `env -C` folder moves; a wildcard as a project-relative
+  pattern) is a `workspaceWrite` on that path, with complete effects. A protected place (`.git/`, `.near-ai/`) is then a floor ask, as any write there
+  is. Effects stay unknown only for a target decided at run time, one outside the project and not scratch, or an option the rules do not read.
+- Programs: chmod/chown/chgrp/chattr, ln, git rm/mv -f, git `--output`/`-o`, git config (a setting writes `.git/config`, so the floor asks; a read
+  writes nothing; `--file` names the file), rsync (destination; `--delete` destroys it; `-e` not read), tsc and the other dev tools (output options;
+  config and plugin options not read), sort -o, sed -i on a wildcard, find -fprint, awk printing to a file its program names, curl and wget (`-o`,
+  `-O`, `--output-dir`, `-P`, the URL's file name, a recursive fetch's host folder; `-K`, `-e`, `--config` not read). A plain `curl -o` inside the
+  project was untagged before this PR's round 8: a download into `.git/` now asks.
+- env and timeout options are read through to the command they run (env `-i`, `-u`, `-C`, `-S`; timeout `-s`, `-k`, `--preserve-status`,
+  `--foreground`); an unknown option still leaves the effects unknown.
+- A curl or wget word decided at run time (it reached plainDownload as empty text) is not a plain download.
+- Tests (`commandNamedWrites.test.ts`): per program, a literal in-project target is a write on that path and runs with no card in Full auto with nobody
+  present; a `$VAR` target is unknown and asks, refused with nobody; a `.git/` or `.near-ai/` target is a floor ask. git config read and write, rsync
+  `--delete`, env/timeout read through, downloads to the terminal. The read-whole table follows the new and removed calls. Seen failing against the
+  round 8 classifier first.
+- Full suite: 3395 tests, 3386 passed, 0 failed, 9 skipped; lint clean; secret scan clean. No existing Full auto test asks.
+- Survey of common commands in Full auto with nobody present, after this: npm test/run/install/ci, npx, node and python scripts, git status/add/commit/
+  checkout/pull/fetch/log/diff/stash/merge/tag, rm -rf of build output, mkdir/touch/cp/mv/chmod/ln/sed -i inside the project, redirects, curl and
+  wget downloads, docker build/run/compose, make, cargo, go, env/timeout wrappers, cd, bash -c, gh pr create/view all run with no card. Still asking
+  (or refused with nobody): publishing (git push, docker push, kubectl apply, make deploy, gh release create), destruction (git rebase, reset --hard,
+  clean, branch -D, commit --amend, rm -rf of project folders), writes into `.git/` or `.near-ai/` (git config set), and unknown effects (a git alias
+  such as `git lg`, a write to a `$VAR` target, an unparseable line, an option the rules do not read).
