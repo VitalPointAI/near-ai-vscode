@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { realpath } from 'node:fs/promises';
 import * as path from 'node:path';
 import type { ActivitySessionSummary } from './activity';
 
@@ -10,7 +11,9 @@ import type { ActivitySessionSummary } from './activity';
 //   counted here, and with no folder open there is no history at all (`history: false`).
 // - Spend: each run's own figure in that history, which the run writes from the spend ledger (all its requests, sub-agents included, tagged with its run
 //   id) when it ends; NEAR's reconciled figure when there is one. A run with no figure is not counted as $0.
-// - Health: the free local team check (Improve with AI's first step) and the last role test Optimise all teams ran for the team's file.
+// - Health: the free local team check (Improve with AI's first step) and the last role test Optimise all teams ran for the team.
+// - Teams are kept (role tests, ratings) by a stable identity (PR 86 review), never by the path to their file: `user:<slug>` for a team in My teams,
+//   `project:<hash>` for a project's team, from the project folder's real path (a link to it is the same project; case-folded on Windows).
 // - Status: running now (from the live activity feed), needs attention (with the reason), ready (has run, nothing wrong) or never run.
 
 export const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
@@ -69,6 +72,8 @@ export interface DashboardTeam {
   derived?: boolean;
   check?: CheckCounts;
   members: Array<{ name: string; model?: string; available?: boolean }>;
+  /** The team's stable identity (teamKey); a project team has none when its folder could not be named. */
+  key?: string;
 }
 
 export interface RunningTeam { runId: string; slug?: string; file?: string }
@@ -159,15 +164,78 @@ export function teamHealth(check: CheckCounts | undefined, roleTest?: RoleTestRe
 
 /** What a role test came to, from its outcomes: the best usable score of each member (a failed or untested member is 0), as a percentage. */
 export function roleTestSummary<T extends { results: ReadonlyArray<{ score: number; outOf: number; failed: boolean }> }>(outcomes: readonly T[], members: number, at: string): RoleTestRecord {
-  const best = outcomes.map((outcome) => Math.max(0, ...outcome.results.filter((result) => !result.failed && result.outOf > 0).map((result) => result.score / result.outOf)));
+  // Each member's share is held to 0..1 (PR 86 review: a grader scoring past its total made a record over 100, which reading it back then dropped).
+  const share = (value: number) => Math.min(1, Math.max(0, Number.isFinite(value) ? value : 0));
+  const best = outcomes.map((outcome) => Math.max(0, ...outcome.results.filter((result) => !result.failed && result.outOf > 0).map((result) => share(result.score / result.outOf))));
   const tested = outcomes.filter((outcome) => outcome.results.some((result) => !result.failed && result.outOf > 0)).length;
   const count = Math.max(members, outcomes.length);
-  return { at, members: count, tested, score: count ? Math.round((100 * best.reduce((sum, value) => sum + value, 0)) / count) : 0 };
+  const score = count ? Math.round((100 * best.reduce((sum, value) => sum + value, 0)) / count) : 0;
+  return { at, members: Math.min(100, count), tested: Math.min(100, tested), score: Math.min(100, Math.max(0, score)) };
 }
 
-/** The key a team's role test is kept under: a hash of its file's path, so no path is stored. */
-export function roleTestKey(file: string): string {
+/** The key role tests were kept under before PR 86's review: a hash of the team file's path. Read only, to move them to the team's identity once. */
+export function legacyRoleTestKey(file: string): string {
   return createHash('sha256').update(path.resolve(file)).digest('hex').slice(0, 16);
+}
+
+/** A folder's identity from its real path: trailing separators dropped, case folded on Windows (as file comparisons there are), hashed. */
+export function folderIdentity(real: string, platform: NodeJS.Platform = process.platform): string {
+  const trimmed = real.length > 1 ? real.replace(/[\\/]+$/, '') || real : real;
+  const folded = platform === 'win32' ? trimmed.toLowerCase() : trimmed;
+  return createHash('sha256').update(folded).digest('hex').slice(0, 16);
+}
+
+/** A project's identity: its folder's real path (a link to it is the same project), or its absolute path when that cannot be resolved. */
+export async function projectIdentity(root: string): Promise<string> {
+  const real = await realpath(root).catch(() => path.resolve(root));
+  return folderIdentity(real);
+}
+
+/** The stable key a team is kept under: `user:<slug>` in My teams, `project:<identity>` for a project's team (undefined without the identity). */
+export function teamKey(team: { kind: 'project' | 'user'; slug: string }, project?: string): string | undefined {
+  if (team.kind === 'project') return project ? `project:${project}` : undefined;
+  return `user:${team.slug}`;
+}
+
+const TEAM_KEY = /^(?:user:[a-z0-9][a-z0-9-]{0,60}|project:[0-9a-f]{16})$/;
+const LEGACY_KEY = /^[0-9a-f]{16}$/;
+
+/** Role tests kept under the old path keys, moved to the teams' identities: a record already under the new key (newer) is kept. Done once. */
+export function migrateRoleTests(records: Record<string, RoleTestRecord>, moves: ReadonlyArray<{ from: string; to: string }>): { records: Record<string, RoleTestRecord>; changed: boolean } {
+  const next = { ...records };
+  let changed = false;
+  for (const { from, to } of moves) {
+    const old = next[from];
+    if (!old || from === to) continue;
+    if (!next[to]) next[to] = old;
+    delete next[from];
+    changed = true;
+  }
+  return { records: next, changed };
+}
+
+/** The person's own rating of a team, kept on this computer by the team's identity: 1 to 5 stars, or 0 when they cleared it. */
+export interface RatingRecord { rating: number; at: string }
+export const MAX_RATINGS = 500;
+
+/** The kept ratings with this one set (0 clears it, and is kept so a rating line from an earlier build is not read again), the oldest dropped past 500. */
+export function withRating(records: Record<string, RatingRecord>, key: string, rating: number, at: string, max = MAX_RATINGS): Record<string, RatingRecord> {
+  if (!Number.isInteger(rating) || rating < 0 || rating > 5) throw new Error('A rating is a whole number of stars from 0 to 5.');
+  const entries = Object.entries({ ...records, [key]: { rating, at } }).sort((a, b) => a[1].at.localeCompare(b[1].at));
+  return Object.fromEntries(entries.slice(Math.max(0, entries.length - max)));
+}
+
+/** The kept ratings read back: anything that is not a team's key with a whole number from 0 to 5 is dropped. */
+export function parseRatings(value: unknown): Record<string, RatingRecord> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  const records: Record<string, RatingRecord> = {};
+  for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+    if (!TEAM_KEY.test(key) || !entry || typeof entry !== 'object') continue;
+    const record = entry as Record<string, unknown>;
+    if (typeof record.at !== 'string' || time(record.at) === undefined || !count(record.rating, 5)) continue;
+    records[key] = { rating: record.rating, at: record.at };
+  }
+  return records;
 }
 
 export const MAX_ROLE_TESTS = 200;
@@ -185,7 +253,7 @@ export function parseRoleTests(value: unknown): Record<string, RoleTestRecord> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
   const records: Record<string, RoleTestRecord> = {};
   for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
-    if (!/^[\w-]{1,64}$/.test(key) || !entry || typeof entry !== 'object') continue;
+    if (!(TEAM_KEY.test(key) || LEGACY_KEY.test(key)) || !entry || typeof entry !== 'object') continue;
     const record = entry as Record<string, unknown>;
     if (typeof record.at !== 'string' || time(record.at) === undefined || !count(record.members, 100) || !count(record.tested, 100) || !count(record.score, 100)) continue;
     records[key] = { at: record.at, members: record.members, tested: record.tested, score: record.score };
@@ -237,7 +305,7 @@ export function buildDashboard(input: { now: number; history: boolean; sessions:
     const attention = attentionOf(team);
     const runId = runningRun.get(team.id);
     const status: TeamStatus = runId ? 'running' : attention.length ? 'attention' : stats.runs ? 'ready' : 'never-run';
-    cards[team.id] = { id: team.id, status, ...(runId ? { runId } : {}), attention, stats, health: teamHealth(team.check, input.roleTests[roleTestKey(team.file)], team.error) };
+    cards[team.id] = { id: team.id, status, ...(runId ? { runId } : {}), attention, stats, health: teamHealth(team.check, team.key ? input.roleTests[team.key] : undefined, team.error) };
     if (runId) summary.running += 1;
     if (attention.length) summary.attention += 1;
     summary.runsThisWeek += stats.runsThisWeek;

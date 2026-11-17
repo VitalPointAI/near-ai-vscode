@@ -784,7 +784,7 @@
       radio.addEventListener('change', () => { if (radio.checked) chooseRating(team, value, group); });
       group.append(radio, label);
     }
-    const hint = el('p', 'hint small', 'Only yours: kept in the team file, and left out when you share it.'); hint.id = hintId;
+    const hint = el('p', 'hint small', 'Only yours: kept on this computer, never in the team file or the project.'); hint.id = hintId;
     group.append(hint);
     return group;
   }
@@ -2205,9 +2205,8 @@
         if (!work) render();
         break;
       case 'rated':
+        // The host kept it on this computer (never in the team file, so an open editor has nothing to catch up on).
         pendingRating.delete(message.id);
-        // The team file gained its rating line: an editor on the version before moves to this one, as for an icon change.
-        if (message.base && work && work.mode === 'editor' && work.id === message.id) work.base = message.base;
         if (message.text) announce(message.text);
         break;
       case 'start-wizard':

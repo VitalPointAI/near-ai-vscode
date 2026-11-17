@@ -19,9 +19,10 @@
   that runs are kept per project.
 - **A health score and your own rating.** Each card shows a health score made from the free local
   check and the last role test that **Optimise all teams** ran, with the score of each part. You
-  can give a team 1 to 5 stars on its card, with the keyboard or the mouse. The rating is one
-  `rating:` line in the team file, kept as a new version like any save, and left out when you share
-  a team or import one.
+  can give a team 1 to 5 stars on its card, with the keyboard or the mouse. Your rating is kept on
+  this computer only, never in the team file, so a project team's rating never goes into the
+  project or a code push. Teams are kept by a stable name (a project's team by its folder, even
+  when opened through a link), so ratings and role tests stay with the team.
 - **Sort, filter, and live updates.** Sort the cards by **Most used**, **Recently run**,
   **Rating** or **Name**, or show only the teams that need attention; Team Studio remembers your
   choice. Running now and the stats change as soon as a team run starts or ends.

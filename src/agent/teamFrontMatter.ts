@@ -1,6 +1,7 @@
 import { parseFrontmatter } from '../gsd/library';
 
-// One-line keys the studio writes into a team file's front matter: `icon:` (0.4.30) and `rating:` (the person's own 1 to 5 stars). Both follow one rule
+// One-line keys in a team file's front matter: `icon:` (0.4.30), which the studio writes, and `rating:`, which only a development build wrote (PR 86
+// review: a rating is kept on this computer now, never in a file); it is read once and taken out of shared and imported teams. Both follow one rule
 // (PR #82 review): the first `<key>:` line is the value, any later one is a leftover that every write removes, a new line goes right after a description
 // that is complete on its one line (never inside a block scalar or a quoted value left open), else at the end of the front matter, and every other byte,
 // line endings included, is kept. No VS Code imports, and nothing here reads or writes a file.

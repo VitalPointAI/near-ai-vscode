@@ -644,9 +644,13 @@ until it runs out aren't shown.
   health score is made from the local team check and the last role test that
   **Optimise all teams** ran (its scores only, kept on this computer), and
   shows each part. Your own 1 to 5 stars are set on the card (a group of radio
-  buttons: Tab to it, then the arrow keys) and saved as one `rating:` line in
-  the team file, with a version kept; sharing or importing a team leaves it
-  out. Sort by **Most used**, **Recently run**, **Rating** or **Name**, or
+  buttons: Tab to it, then the arrow keys) and kept in this extension's
+  storage on this computer, never in the team file, so a project team's
+  rating never goes into the project or a code push. Ratings and role tests
+  are kept by the team's identity: a team in My teams by its name there, a
+  project's team by the project folder's real path. A `rating:` line an
+  earlier build wrote into a team file is read once and left in place;
+  sharing or importing a team leaves such a line out. Sort by **Most used**, **Recently run**, **Rating** or **Name**, or
   show only the teams that need attention; Team Studio remembers your choice
   on this computer. Running
   now and the stats change as a team run starts or ends. With a project open
