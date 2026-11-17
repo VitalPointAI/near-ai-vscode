@@ -2,15 +2,17 @@
 
 ## Unreleased
 
-Every request to a model is now checked before it is sent and leaves a short record of its own.
-On a fresh install nothing changes where your requests go. Routing by label, where a chat that has
-read labelled files may only use the models its label allows, comes in a later release.
+Every request to a model is now checked before it is sent and leaves a short record of its own,
+and you can label files, folders and the project so that agents cannot read what your clearance
+does not cover. On a fresh install nothing changes where your requests go. Routing by label, where
+a chat that has read labelled files may only use the models its label allows, comes in a later
+release.
 
 - **Every model request is checked before it is sent.** Whatever sends it (the chat, a helper
   agent, reading an attached file, the NEAR AI chat in VS Code's own chat view, Team Studio, a
   cybersecurity scan or a model comparison), the request is checked against the routing in your
-  policy, using only what is on this computer. Nothing can be labelled yet, so every request is
-  at your policy's default label, which may go to any model. A request the routing does not allow
+  policy, using only what is on this computer. A label does not change where a request is sent
+  yet, so every request is at your policy's default label, which may go to any model. A request the routing does not allow
   is not sent, and you are told why in plain words.
 - **Each model request leaves a record in a log of its own.** Next to the records of what the agent
   was allowed or refused, a separate log in this extension's storage keeps one record per model
@@ -18,9 +20,31 @@ read labelled files may only use the models its label allows, comes in a later r
   your policy. A routine request leaves a short record, about 1 KB. Records never hold what was
   sent, the address of the model server or a file path. The log rolls over at about 5 MB and keeps
   the last four older files, like the decision log, and it is never synced or put in your project.
-- **Show Policy says the routing is in use.** **NEAR AI: Show Policy** now says that every model
-  request is checked against the routing it lists; the scales and clearances it lists are still
-  kept for later.
+- **Show Policy says what is in use.** **NEAR AI: Show Policy** now says that your clearances are
+  checked when an agent reads a labelled file, that every model request is routed by your
+  policy's default label and its routing tiers, and that content with no label takes the default
+  label.
+- **Label files, folders and the project.** **NEAR AI: Set Label**, from the Explorer's right-click
+  menu or the Command Palette, labels a file, a folder or the whole project on one of the scales
+  your policy holds. Labels are kept in `.planning/.near-ai/labels.json`, signed with this
+  computer's key, and travel with the project, so anyone who can read the project can read them.
+  Before you pick, it says that labels are an organizational control, not an accreditation. You
+  can only set a label your own clearance covers, and lowering one asks you why.
+- **Agents cannot read files above your clearance.** A file tool, a search or a shell command that
+  names a file whose label your clearances do not cover is refused, with a sentence that says
+  which label and why. Searches leave such files out and say how many they hid. A label file
+  changed by hand or signed on another computer only ever makes a label stricter, and NEAR AI
+  signs it again only after you confirm. If the label file cannot be read or was deleted, or a
+  branch switch puts back an older one, agents stop reading the project until you put it back or
+  choose **Use this branch's labels**.
+- **Edit your own policy.** **NEAR AI: Edit Policy** opens a draft of your policy, kept in this
+  extension's storage and never in your project, and **NEAR AI: Apply Policy Draft** checks it,
+  signs it with this computer's key and records the change. That is how you add a clearance you
+  hold. A clearance comes from your own policy, so it is self-declared until verified credentials
+  arrive. A draft that is not valid, or that was made before the policy changed, changes nothing.
+- **A local runtime counts as local only on this computer.** For content that must stay on this
+  computer, only a runtime on this computer (`localhost`, `127.0.0.1` or `[::1]`) counts as local,
+  unless your organization names its host in the policy. The local runtime setup prompt says so.
 - **Recommend a team for me is on the first screen.** Building a team now offers three ways to
   start: **Use an existing team**, **Create a new team** and **Recommend a team for me**. The
   recommendation asks the kind of work, its risk, where models may run and, if you like, what the
