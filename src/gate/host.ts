@@ -265,7 +265,24 @@ export class GateHost {
     const policy = this.labelPolicy();
     const view = await this.labelsFor(root).view(policy.scales);
     if (view.state !== 'other-revision') return false;
-    const written = await this.changeLabels(root, (map) => map, async (question) => question === 'accept');
+    // The check above is outside the writer's lock, so the file can change before the write (PR #85 review). The writer reads it again under its lock and
+    // asks `accept` only when it is still another revision; the change writes only after that question, so nothing is signed, and no accept recorded,
+    // for a file that is no longer the one the person accepted.
+    let asked = false;
+    let written: LabelMapWrite;
+    try {
+      written = await this.changeLabels(root, (map) => {
+        if (!asked) throw new LabelMapError('Nothing was written: the label file changed before it could be accepted.');
+        return map;
+      }, async (question) => {
+        if (question !== 'accept') return false;
+        asked = true;
+        return true;
+      });
+    } catch (error) {
+      if (!asked && error instanceof LabelMapError) return false;
+      throw error;
+    }
     this.recordLabelEvent(root, { event: 'label.branch-accepted', path: '', reason: `A person accepted the project's signed label file (for example another branch's) as current. It is now revision ${String(written.revision)}.` });
     return true;
   }

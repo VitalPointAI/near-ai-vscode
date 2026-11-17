@@ -689,3 +689,28 @@ test('PR #85 carry-over 1: over another branch\'s label file, Set Label asks for
   assert.equal(await setLabelVia(s.root, 'secret/plan.md', { scale: 'ca-protected', level: 'Protected A', confirm: USE_BRANCH_LABELS_ACTION }), false, 'no reason given, nothing changed');
   assert.equal(await stateOf(s), 'other-revision');
 });
+
+test('PR #85 carry-over 2: when the label file changes between the check and the write, acceptBranchLabels writes nothing and records no accept', async () => {
+  const s = await labelled();
+  const file = path.join(s.root, LABEL_MAP_FILE);
+  const older = await readFile(file, 'utf8');
+  assert.equal(await setLabelVia(s.root, 'notes.md', { scale: 'org', level: 'Internal' }), true);
+  const newer = await readFile(file, 'utf8');
+  await writeFile(file, older);
+  assert.equal(await stateOf(s), 'other-revision');
+  const reader = s.host.labelsFor(s.root);
+  const view = reader.view.bind(reader);
+  let raced = false;
+  reader.view = async (scales) => {
+    const seen = await view(scales);
+    // Another window (or git) puts the current file back right after the check.
+    if (!raced && seen.state === 'other-revision') { raced = true; await writeFile(file, newer); reader.invalidate(); }
+    return seen;
+  };
+  const before = (await readLabelMarker(s.storage, s.secrets, s.root)).marker;
+  assert.equal(await s.host.acceptBranchLabels(s.root), false, 'nothing was accepted');
+  assert.ok(raced);
+  assert.equal(await readFile(file, 'utf8'), newer, 'the file is as the other writer left it');
+  assert.equal((await readLabelMarker(s.storage, s.secrets, s.root)).marker?.revision, before?.revision, 'the marker did not move');
+  assert.equal((await projectRecords(s)).some((record) => ruleOf(record) === 'label.branch-accepted'), false, 'no accept on record');
+});
