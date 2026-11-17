@@ -7,7 +7,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
 import { gateToolCall } from '../agent/gateAdapter';
-import { MAX_OUTBOUND_FINGERPRINTS, OUTBOUND_FULL_TEXT, OUTBOUND_LIMITS_TEXT, OUTBOUND_MATCH_TEXT, OUTBOUND_UNREADABLE_TEXT, OutboundFingerprints, outboundPayload } from '../agent/outboundCheck';
+import { MAX_OUTBOUND_FINGERPRINTS, OUTBOUND_EARLIER_TEXT, OUTBOUND_FULL_TEXT, OUTBOUND_LIMITS_TEXT, OUTBOUND_MATCH_TEXT, OUTBOUND_UNREADABLE_TEXT, OutboundFingerprints, outboundPayload } from '../agent/outboundCheck';
 import { DEFAULT_RULES } from '../agent/permissions';
 import type { RunGrants } from '../agent/permissions';
 import { bashTool } from '../agent/tools';
@@ -18,8 +18,13 @@ import type { McpConnection } from '../mcp/client';
 import { mcpAgentTools } from '../mcp/tools';
 import { GATE_RULE_IDS } from '../domain/gate/decide';
 import type { MemoryGateRuntime } from '../agent/gateAdapter';
-import { testGateRuntime } from './helpers/gatedRuns';
-import { call, grantsAt, keys, label, labelledProject, runWith } from './helpers/markFixtures';
+import { testGateHost, testGateRuntime } from './helpers/gatedRuns';
+import { call, grantsAt, keys, label, labelledProject, runWith, scripted } from './helpers/markFixtures';
+import { AgentConversation } from '../services/agentSession';
+import { stateHomeFor } from '../services/stateHome';
+import { stateKeysFor } from '../services/stateKeys';
+import { ThreadStore } from '../services/threadStore';
+import { MemorySecrets } from './helpers/stateFixtures';
 
 const MEMO = 'The northern depot closes on the ninth of March and the staff move to the river office before the audit begins.';
 const LINE = 'Quarterly figures show the river office spent four hundred thousand on contractors last year.';
@@ -125,4 +130,39 @@ test('only labelled reads are fingerprinted: reading a public file at an Interna
   await runWith(root, [call('r2', 'Read', { file_path: 'notes.md' })], grants, runtime);
   assert.equal(grants.outbound!.size, before);
   assert.ok(readFileSync(path.join(root, 'notes.md'), 'utf8').length > 0);
+});
+
+// ---- PR #87 review round 1 ----
+
+test('review 2: at an attested-cloud mark, a run with no fingerprint set refuses a call that may send (fail closed)', async () => {
+  const { root, runtime } = await afterReadingMemo();
+  const grants = grantsAt([label('org', 'Internal')]);
+  grants.outbound = undefined;
+  const fetched = await decide(root, grants, runtime, webFetchTool, { url: 'https://example.test/?q=weather' });
+  assert.equal(fetched.decision.rule, 'label.outbound-match');
+  assert.equal(fetched.decision.reason, OUTBOUND_UNREADABLE_TEXT);
+});
+
+test('review 3: a reopened chat treats its earlier results as labelled and says so truly, not that it read labelled content', async () => {
+  const root = labelledProject();
+  const store = new ThreadStore(stateHomeFor(root), stateKeysFor(root, new MemorySecrets()), { writer: 'edA.1' });
+  const chat = new AgentConversation(root, () => undefined, path.join(root, '.ckpt'), undefined, store);
+  chat.gateHost = testGateHost();
+  await chat.send({ text: 'go', client: scripted([call('r1', 'Read', { file_path: 'notes.md' })]) as never, model: 'm', privacy: 'Private', policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES });
+  await store.setChatLabel(chat.id, [label('org', 'Internal')]);
+  const reopened = new AgentConversation(root, () => undefined, path.join(root, '.ckpt'), undefined, store);
+  assert.ok(await reopened.restore(chat.id));
+  const grants = grantsAt([label('org', 'Internal')]);
+  grants.outbound = reopened.outbound;
+  const quoted = await decide(root, grants, testGateRuntime(), webFetchTool, { url: `https://example.test/?q=${encodeURIComponent('PUBLIC notes anyone may read')}` });
+  assert.equal(quoted.decision.rule, 'label.outbound-match', 'still refused (fail closed)');
+  assert.equal(quoted.decision.reason, OUTBOUND_EARLIER_TEXT);
+  assert.doesNotMatch(OUTBOUND_EARLIER_TEXT, /has read labelled content/);
+  // Text read as labelled in this window keeps the labelled sentence.
+  const prints = new OutboundFingerprints();
+  prints.addEarlier('an earlier public result with plenty of ordinary words in it');
+  prints.add(LINE);
+  assert.equal(prints.match([LINE]), 'labelled');
+  assert.equal(prints.match(['an earlier public result with plenty of ordinary words in it']), 'earlier');
+  assert.equal(prints.match(['nothing in common here at all with anything']), undefined);
 });

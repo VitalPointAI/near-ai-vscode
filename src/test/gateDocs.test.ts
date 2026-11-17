@@ -14,7 +14,7 @@ import { BUNDLE_FAILURES } from '../domain/gate/bundle';
 import { MANIFEST_IS_A_CLAIM_TEXT, RUNS_ON_THIS_MACHINE_TEXT } from '../domain/gate/words';
 import { MAX_DECISION_LOG_BYTES, MAX_ROTATED_FILES, MODEL_REQUESTS_DIR } from '../gate/decisionLog';
 import { redactCredentialArguments } from '../domain/redaction';
-import { OUTBOUND_LIMITS_TEXT } from '../agent/outboundCheck';
+import { OUTBOUND_EARLIER_TEXT, OUTBOUND_LIMITS_TEXT, OUTBOUND_REOPENED_DOCS_TEXT } from '../agent/outboundCheck';
 
 const ROOT = path.resolve(__dirname, '..', '..');
 const SECURITY = readFileSync(path.join(ROOT, 'SECURITY.md'), 'utf8');
@@ -475,4 +475,14 @@ test('README carries the first sentence of LABELS_NOT_ACCREDITATION_TEXT and the
   for (const id of ['nearAi.label.set', 'nearAi.label.lowerChat', 'nearAi.policy.edit']) assert.ok(words.includes(commandName(id)), id);
   const commands = readFileSync(path.join(ROOT, 'src', 'services', 'gateCommands.ts'), 'utf8');
   assert.ok(commands.includes('placeHolder: LABELS_NOT_ACCREDITATION_TEXT'), 'Set Label shows the constant itself');
+});
+
+test('PR #87 review: SECURITY.md says how a reopened chat treats its earlier results, and the refusal for them says so truly, with the way out', () => {
+  assert.ok(flat(sectionOf(SECURITY, '### Classification labels and routing')).includes(flat(OUTBOUND_REOPENED_DOCS_TEXT)));
+  assert.match(OUTBOUND_EARLIER_TEXT, /cannot tell which of its earlier results came from labelled files/);
+  assert.match(OUTBOUND_EARLIER_TEXT, /NEAR AI: Lower This Chat's Label/);
+  for (const text of [OUTBOUND_REOPENED_DOCS_TEXT, OUTBOUND_EARLIER_TEXT]) {
+    assert.ok(!text.includes(EM_DASH));
+    assert.doesNotMatch(text, /NEAR organization|Phase \d/);
+  }
 });

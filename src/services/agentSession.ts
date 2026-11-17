@@ -898,7 +898,7 @@ export class AgentConversation {
     if (read.kind === 'unreadable') this.post({ type: 'notice', text: UNREADABLE_CHAT_LABEL_TEXT });
     const mark = this.chatMark!.current();
     if (!isDefaultMark(mark, SHIPPED_DEFAULT_LABEL)) {
-      for (const message of this.messages) if (message.role === 'tool' && typeof message.content === 'string') this.outboundPrints.add(message.content);
+      for (const message of this.messages) if (message.role === 'tool' && typeof message.content === 'string') this.outboundPrints.addEarlier(message.content);
     }
   }
 

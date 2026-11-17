@@ -21,7 +21,7 @@ import { fromActionCapability } from '../domain/gate/vocabulary';
 import type { Capability } from '../domain/gate/vocabulary';
 import { classifyCommand, commandMaySend, downloadSegments, namesCredentialFile } from './commandSafety';
 import { commandWords, labelCheckFor, linkResolver, pathLike, readEffectPaths, scalesOf } from './gateLabels';
-import { OUTBOUND_FULL_TEXT, OUTBOUND_MATCH_TEXT, OUTBOUND_UNREADABLE_TEXT, outboundPayload } from './outboundCheck';
+import { OUTBOUND_EARLIER_TEXT, OUTBOUND_FULL_TEXT, OUTBOUND_MATCH_TEXT, OUTBOUND_UNREADABLE_TEXT, outboundPayload } from './outboundCheck';
 import type { OutboundFingerprints } from './outboundCheck';
 import type { LabelVerdict } from '../domain/gate/decide';
 import type { Mark, SessionMark } from '../domain/gate/dominance';
@@ -955,7 +955,8 @@ export function markVerdictFor(runtime: GateRuntime, mark: Mark | undefined, may
   if (tier === 'any-cloud') return undefined;
   const label = strictestLabel(runtime, mark);
   if (tier === 'local-only' || tier === 'deny') return { rule: 'label.network-at-mark', reason: NETWORK_AT_MARK_TEXT, ...(label === undefined ? {} : { label }) };
-  if (outbound === undefined) return undefined;
+  // A run with no fingerprint set cannot check what it would send, so at this mark the call is refused (fail closed, PR #87 review).
+  if (outbound === undefined) return { rule: 'label.outbound-match', reason: OUTBOUND_UNREADABLE_TEXT, ...(label === undefined ? {} : { label }) };
   // Past its bound the set cannot vouch for anything: refused, saying why and what to do (fail closed, owner answer after D-60).
   if (outbound.full) return { rule: 'label.outbound-match', reason: OUTBOUND_FULL_TEXT, ...(label === undefined ? {} : { label }) };
   let texts: readonly string[];
@@ -964,7 +965,9 @@ export function markVerdictFor(runtime: GateRuntime, mark: Mark | undefined, may
   } catch {
     return { rule: 'label.outbound-match', reason: OUTBOUND_UNREADABLE_TEXT, ...(label === undefined ? {} : { label }) };
   }
-  return outbound.matches(texts) ? { rule: 'label.outbound-match', reason: OUTBOUND_MATCH_TEXT, ...(label === undefined ? {} : { label }) } : undefined;
+  const found = outbound.match(texts);
+  if (found === undefined) return undefined;
+  return { rule: 'label.outbound-match', reason: found === 'earlier' ? OUTBOUND_EARLIER_TEXT : OUTBOUND_MATCH_TEXT, ...(label === undefined ? {} : { label }) };
 }
 
 /**
