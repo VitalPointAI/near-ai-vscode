@@ -220,6 +220,8 @@ export async function openTeamStudio(context: vscode.ExtensionContext, auth: Aut
     // A share file is <team>.near-team.json; the dialog filters on its last extension, json. A team .md file can be imported too.
     pickShareTarget: async (name) => (await vscode.window.showSaveDialog({ defaultUri: vscode.Uri.file(path.join(rootNow() ?? homeFolder(), name)), filters: { 'NEAR AI team': ['json'] }, title: 'Share team: save it as one file to send' }))?.fsPath,
     pickImportSource: async () => (await vscode.window.showOpenDialog({ filters: { 'NEAR AI team': ['json', 'md'] }, title: 'Import a NEAR AI team', canSelectMany: false }))?.[0]?.fsPath,
+    // 0.4.30: a picture for a team's icon. The host checks it by its bytes (PNG, JPEG or WebP, at most 2 MB); SVG is never offered or accepted.
+    pickIconSource: async () => (await vscode.window.showOpenDialog({ filters: { Images: ['png', 'jpg', 'jpeg', 'webp'] }, title: 'Choose a picture for the team icon', canSelectMany: false, openLabel: 'Use as icon' }))?.[0]?.fsPath,
     home: homeFolder(),
     applyProjectType: async (projectRoot, type, goal) => {
       const applied = await applyProjectType(projectRoot, type, goal);

@@ -70,6 +70,51 @@
   };
   const badge = (text, kind, title) => { const node = el('span', 'badge' + (kind ? ' ' + kind : ''), text); if (title) node.title = title; return node; };
   const privacyBadge = (privacy, title) => badge(PRIVACY_LABEL[privacy] || 'Unknown', 'privacy ' + privacy, title);
+
+  // ---------- team icons (0.4.30, owner 2026-11-17) ----------
+  // A team's own icon is a 128 x 128 PNG the host checked and sends as a data URI; anything else is never loaded (the policy allows only data: images,
+  // and this only a PNG one). A team without one, built-in teams included, gets a default drawn here: its initials on a colour picked from its name, so
+  // every card always has an icon and the same team always looks the same. The colours all keep white initials at a contrast of at least 4.5 to 1;
+  // high contrast themes draw it with the theme's own colours and a border instead (teams.css).
+  const ICON_COLOURS = ['#1f5fa8', '#6f3fb0', '#a3316a', '#a8401f', '#2b7139', '#0e6a74', '#7e5500', '#4a5568'];
+  const ICON_SIZE = 128;
+  const MAX_ICON_BYTES = 64 * 1024;
+  const PNG_URI = /^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/;
+  function initials(name) {
+    const words = String(name || '').split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+    const named = words.length > 1 ? words.filter((word) => word.toLowerCase() !== 'team') : words;
+    return (named.slice(0, 2).map((word) => Array.from(word)[0]).join('') || 'T').toUpperCase();
+  }
+  function iconColour(name) {
+    let hash = 2166136261;
+    for (const char of String(name || '').toLowerCase()) { hash ^= char.codePointAt(0); hash = Math.imul(hash, 16777619) >>> 0; }
+    return ICON_COLOURS[hash % ICON_COLOURS.length];
+  }
+  /**
+   * The team's icon: its own PNG, or the default. `label`: a name for a screen reader (the icon on its own, as in the editor); without one it is
+   * decorative, because the team's name is written beside it.
+   */
+  function teamIcon(name, uri, label, size) {
+    const big = size === 'large';
+    if (typeof uri === 'string' && PNG_URI.test(uri)) {
+      const image = el('img', 'team-icon' + (big ? ' large' : ''));
+      image.src = uri; image.alt = label ? 'Icon for ' + name : ''; image.width = big ? 64 : 32; image.height = big ? 64 : 32;
+      return image;
+    }
+    const svg = document.createElementNS(SVG, 'svg');
+    svg.setAttribute('viewBox', '0 0 32 32'); svg.setAttribute('width', big ? '64' : '32'); svg.setAttribute('height', big ? '64' : '32');
+    svg.setAttribute('class', 'team-icon team-icon-default' + (big ? ' large' : ''));
+    if (label) { svg.setAttribute('role', 'img'); svg.setAttribute('aria-label', 'Default icon for ' + name); } else svg.setAttribute('aria-hidden', 'true');
+    const box = document.createElementNS(SVG, 'rect');
+    box.setAttribute('width', '32'); box.setAttribute('height', '32'); box.setAttribute('rx', '7'); box.setAttribute('fill', iconColour(name));
+    const letters = document.createElementNS(SVG, 'text');
+    const text = initials(name);
+    letters.setAttribute('x', '16'); letters.setAttribute('y', '16'); letters.setAttribute('dy', '0.35em'); letters.setAttribute('text-anchor', 'middle');
+    letters.setAttribute('font-size', text.length > 1 ? '13' : '16'); letters.setAttribute('font-weight', '600'); letters.setAttribute('fill', '#ffffff');
+    letters.textContent = text;
+    svg.append(box, letters);
+    return svg;
+  }
   let uid = 0;
   const nextId = (prefix) => prefix + '-' + (++uid);
   function field(labelText, control, hint) {
@@ -469,7 +514,7 @@
     const card = el('li', 'card'); card.dataset.id = team.id;
     const head = el('div', 'card-head');
     const title = el('h3', 'card-title', team.name); title.id = nextId('team');
-    head.append(icon('team'), title, badge(team.kind === 'project' ? 'This project' : 'My team', team.kind === 'project' ? 'kind project' : 'kind'));
+    head.append(teamIcon(team.name, team.icon), title, badge(team.kind === 'project' ? 'This project' : 'My team', team.kind === 'project' ? 'kind project' : 'kind'));
     // An imported team runs only once the person approves it; the first run asks.
     if (team.imported) head.append(team.derived
       ? badge('Made from an import: not approved yet', 'kind imported', 'Made from an imported team you have not approved. The first time it runs you are asked to approve it.')
@@ -550,6 +595,7 @@
     root.append(field('Team name', input(draft.name, (value) => { draft.name = value.replace(/[\r\n]+/g, ' '); renderHeaderName(); changed(false); }, { id: 'f-name', maxlength: '80', autocomplete: 'off' }), work.mode === 'editor' ? 'Renaming keeps the file and its /team: command.' : 'Shown in the library and when the team runs.'));
     root.append(field('What the team is for', textarea(draft.description, (value, node) => { const clean = value.replace(/[\r\n]+/g, ' '); if (clean !== value) node.value = clean; draft.description = clean; changed(false); }, 2, 'f-desc'), 'One or two sentences. The lead agent reads this.'));
     root.append(privateToggle(draft));
+    if (work.mode === 'editor') root.append(iconField());
     if (work.mode !== 'wizard') return;
     const where = el('fieldset', 'choices');
     where.append(el('legend', '', 'Save it as'));
@@ -563,6 +609,69 @@
     });
     root.append(where);
     if ((work.startingPoint || '').startsWith('type:')) root.append(el('p', 'hint', 'Saving this as the project team also writes this project type\'s guidance to AGENTS.md (plan, execute, red team, verify, audit, release).'));
+  }
+
+  /**
+   * The saved team's icon (0.4.30): Upload (VS Code's file picker; the host checks the picture and this page makes it a 128 x 128 PNG), Generate with AI
+   * (offered when an image model may be used for this team; the cost is asked first), and Remove (back to the default). One request at a time.
+   */
+  function iconField() {
+    const name = work.draft.name || 'this team';
+    const wrap = el('div', 'field icon-field');
+    const heading = el('span', 'field-label', 'Team icon'); heading.id = 'icon-label';
+    const row = el('div', 'icon-row');
+    const preview = teamIcon(name, work.icon, true, 'large'); preview.id = 'icon-preview';
+    const actions = el('div', 'actions'); actions.setAttribute('role', 'group'); actions.setAttribute('aria-labelledby', 'icon-label');
+    const busy = Boolean(work.iconBusy);
+    const ai = work.iconAi || { available: false, reason: 'Checking whether an image model can be used…' };
+    actions.append(button('Upload icon…', () => iconRequest('icon-upload'), { id: 'icon-upload', label: 'Upload an icon for ' + name + ' (PNG, JPEG or WebP)', disabled: busy }));
+    const generate = button('Generate with AI…', () => iconRequest('icon-generate'), { id: 'icon-generate', label: 'Generate an icon for ' + name + ' with AI', disabled: busy || !ai.available });
+    actions.append(generate);
+    if (work.icon) actions.append(button('Remove icon', () => iconRequest('icon-remove'), { id: 'icon-remove', label: 'Remove the icon of ' + name + ' and use the default', link: true, disabled: busy }));
+    row.append(preview, actions);
+    wrap.append(heading, row);
+    wrap.append(el('p', 'hint', 'PNG, JPEG or WebP, up to 2 MB. It is cropped to a square and saved as a 128 x 128 PNG beside the team file. Without one, the team shows its initials.'));
+    const why = el('p', 'hint', ai.available ? 'Generate with AI sends the team\'s name and what it is for to ' + ai.model + (ai.private ? ', a private model' : '') + (ai.estimate ? ' (' + ai.estimate + ')' : '') + '. You are asked first.' : 'Generate with AI: ' + (ai.reason || 'not available here.'));
+    why.id = 'icon-generate-hint'; generate.setAttribute('aria-describedby', why.id);
+    wrap.append(why);
+    if (busy) { const working = el('p', 'hint', 'Working on the icon…'); working.setAttribute('role', 'status'); wrap.append(working); }
+    return wrap;
+  }
+
+  function iconRequest(type) {
+    if (!work || work.mode !== 'editor' || work.iconBusy) return;
+    work.iconBusy = true;
+    vscode.postMessage({ type, id: work.id });
+    render();
+  }
+
+  /** The picture the host checked, made into the icon: the centre square, scaled to 128 x 128, encoded as a PNG of at most 64 KB. */
+  async function normaliseIcon(mime, data) {
+    const binary = atob(data);
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+    const bitmap = await createImageBitmap(new Blob([bytes], { type: mime }));
+    try {
+      const side = Math.min(bitmap.width, bitmap.height);
+      if (!side) throw new Error('empty image');
+      const canvas = document.createElement('canvas');
+      canvas.width = ICON_SIZE; canvas.height = ICON_SIZE;
+      const context = canvas.getContext('2d');
+      context.imageSmoothingEnabled = true; context.imageSmoothingQuality = 'high';
+      context.drawImage(bitmap, (bitmap.width - side) / 2, (bitmap.height - side) / 2, side, side, 0, 0, ICON_SIZE, ICON_SIZE);
+      // A busy photo can still be larger than an icon may be: its colours are simplified a step at a time until it fits.
+      for (const step of [0, 8, 16, 32]) {
+        if (step) {
+          const image = context.getImageData(0, 0, ICON_SIZE, ICON_SIZE);
+          for (let index = 0; index < image.data.length; index += 1) image.data[index] = Math.min(255, Math.round(image.data[index] / step) * step);
+          context.putImageData(image, 0, 0);
+        }
+        const uri = canvas.toDataURL('image/png');
+        const encoded = uri.slice(uri.indexOf(',') + 1);
+        if (/^data:image\/png;base64,/.test(uri) && Math.floor(encoded.length * 3 / 4) <= MAX_ICON_BYTES) return encoded;
+      }
+      throw new Error('too large');
+    } finally { if (bitmap.close) bitmap.close(); }
   }
 
   // The team's own private marking (owner, 2026-11-16): every member runs only on a private model, and the team is sent only to a private model when the
@@ -684,7 +793,9 @@
         const radio = el('input'); radio.type = 'radio'; radio.name = 'starting-point'; radio.value = point.id; radio.checked = selected; radio.id = 'pick-' + point.id.replace(/[^a-z0-9-]/g, '-');
         // What the team is for belongs to the team it was typed for (PR #75 review): choosing another one starts it empty.
         radio.addEventListener('change', () => { if (work.pick !== point.id) work.options.goal = ''; work.pick = point.id; render(); });
-        option.append(radio, el('span', 'choice-label', point.label));
+        const label = el('span', 'choice-label');
+        label.append(teamIcon(entryName(point), point.icon), document.createTextNode(point.label));
+        option.append(radio, label);
         if (point.origin) option.append(badge(point.origin, point.imported ? 'kind imported' : 'kind'));
         const descId = 'pdesc-' + point.id.replace(/[^A-Za-z0-9_-]/g, '-');
         const desc = el('span', 'hint clamp', point.description || ''); desc.id = descId;
@@ -771,7 +882,7 @@
       const title = el('h3', '', shown.name); title.id = 'recommendation-title';
       result.setAttribute('aria-labelledby', title.id);
       const head = el('div', 'card-head');
-      head.append(icon('team'), title, badge('Built in', 'kind'));
+      head.append(teamIcon(shown.name), title, badge('Built in', 'kind'));
       result.append(head);
       if (shown.description) result.append(el('p', 'desc', shown.description));
       result.append(el('p', 'meta', shown.members.length + ' member' + (shown.members.length === 1 ? '' : 's')));
@@ -1098,6 +1209,7 @@
 
   function sectionHistory(root) {
     root.append(el('p', 'hint', 'Every save is kept as a version (the latest 20). View one to compare it with the file now, or restore it.'));
+    iconHistory(root);
     const versions = work.versions || [];
     if (!versions.length) { root.append(el('p', 'hint', 'No versions yet.')); return; }
     const list = el('ul', 'rows');
@@ -1122,6 +1234,24 @@
       }
       root.append(el('p', 'hint', changes ? changes + ' changed line' + (changes === 1 ? '' : 's') + ' (- only in that version, + only in the file now).' : 'No differences: the file now matches this version.'), diff);
     }
+  }
+
+  /** Earlier icons (0.4.30): each one the team had before a change or Remove, newest first, with Restore. */
+  function iconHistory(root) {
+    const earlier = work.iconHistory || [];
+    if (!earlier.length) return;
+    root.append(el('h3', '', 'Earlier icons'));
+    const list = el('ul', 'rows icon-history');
+    for (const entry of earlier) {
+      const row = el('li', 'row');
+      row.append(teamIcon(work.draft.name, entry.icon), el('span', 'name', entry.label));
+      const actions = el('span', 'row-actions');
+      actions.append(button('Restore', () => { if (work.iconBusy) return; work.iconBusy = true; vscode.postMessage({ type: 'icon-restore', id: work.id, ref: entry.ref }); render(); }, { label: 'Restore the icon from ' + entry.label, disabled: Boolean(work.iconBusy) }));
+      row.append(actions);
+      list.append(row);
+    }
+    root.append(list);
+    root.append(el('h3', '', 'Team file versions'));
   }
 
   // ---------- review results ----------
@@ -1250,7 +1380,7 @@
   function renderEditor(root) {
     const head = el('div', 'editor-head');
     const title = el('div', 'editor-title');
-    title.append(el('h2', '', work.draft.name || 'Team'), el('code', 'hint', work.file));
+    title.append(teamIcon(work.draft.name || 'Team', work.icon), el('h2', '', work.draft.name || 'Team'), el('code', 'hint', work.file));
     const dirty = el('span', 'dirty'); dirty.id = 'dirty'; dirty.setAttribute('aria-live', 'polite');
     title.append(dirty);
     const actions = el('div', 'actions');
@@ -1446,7 +1576,8 @@
   function openEditor(message, keepTab) {
     const same = keepTab && work && work.mode === 'editor' && work.id === message.id;
     // The same team reopened after a Save keeps its Improve panel: pending suggestions stay, and any whose field changed show as Stale.
-    work = { mode: 'editor', id: message.id, kind: message.kind, file: message.file, command: message.command, base: message.base, draft: message.draft, clean: JSON.stringify(message.draft), teamPrivacy: message.teamPrivacy || null, tab: same ? work.tab : 0, versions: message.versions || [], review: null, versionView: null, improve: same ? work.improve : null };
+    work = { mode: 'editor', id: message.id, kind: message.kind, file: message.file, command: message.command, base: message.base, draft: message.draft, clean: JSON.stringify(message.draft), teamPrivacy: message.teamPrivacy || null, tab: same ? work.tab : 0, versions: message.versions || [], review: null, versionView: null, improve: same ? work.improve : null,
+      icon: message.icon || null, iconHistory: Array.isArray(message.iconHistory) ? message.iconHistory : [], iconAi: message.iconAi || null, iconBusy: false };
   }
 
   // ---------- Improve with AI (0.4.27) ----------
@@ -1966,6 +2097,35 @@
         render();
         if (message.text) { showBanner(message.text, 'info'); announce(message.text); }
         break;
+      case 'icon-source': {
+        // The picture the host checked: made into the icon here, then sent back to be checked again and saved. A picture this page cannot read is
+        // reported, and the host is told so it stops waiting.
+        if (!work || work.mode !== 'editor' || work.id !== message.id) break;
+        const seq = message.seq;
+        normaliseIcon(String(message.mime || ''), String(message.data || '')).then((png) => {
+          vscode.postMessage({ type: 'icon-set', seq, id: message.id, png });
+        }, () => {
+          vscode.postMessage({ type: 'icon-failed', seq });
+          if (work && work.mode === 'editor') { work.iconBusy = false; render(); }
+          showBanner('The picture could not be read as an image, so the icon was not changed. Try a PNG, JPEG or WebP image.', 'error');
+        });
+        break;
+      }
+      case 'icon-updated':
+        if (work && work.mode === 'editor' && work.id === message.id) {
+          work.icon = message.icon || null;
+          work.iconHistory = Array.isArray(message.iconHistory) ? message.iconHistory : [];
+          // The team file gained or lost its icon line; the host moved this editor to that version, so a save is not taken for an outside edit.
+          if (message.base) work.base = message.base;
+          work.iconBusy = false;
+          render();
+        }
+        if (message.text) { showBanner(message.text, 'info'); announce(message.text); }
+        break;
+      case 'icon-done':
+        if (work && work.mode === 'editor' && work.id === message.id && work.iconBusy) { work.iconBusy = false; render(); }
+        if (message.text) { showBanner(message.text, 'info'); announce(message.text); }
+        break;
       case 'external-change': {
         if (!work || work.mode !== 'editor' || work.id !== message.id) break;
         work.versions = message.versions || work.versions;
@@ -2005,6 +2165,8 @@
         if (drafting) { drafting = false; if (!work) render(); }
         // A starting point that could not be read, or a Use as is that failed: their buttons work again.
         if (work && work.mode === 'wizard') { work.awaitingStart = null; work.recommendSeq = null; if (work.busy) { work.busy = false; render(); } }
+        // An icon request that was refused or failed: its buttons work again.
+        if (work && work.mode === 'editor' && work.iconBusy) { work.iconBusy = false; render(); }
         break;
     }
   });

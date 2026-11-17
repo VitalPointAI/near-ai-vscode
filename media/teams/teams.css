@@ -118,7 +118,16 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--vscode-button-
 .card.flash { border-color: var(--accent); }
 .card-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .card-head .badge { margin-left: auto; }
-.card-title { margin: 0; font-size: 1.05em; overflow-wrap: anywhere; }
+.card-title { margin: 0; font-size: 1.05em; overflow-wrap: anywhere; min-width: 0; flex: 1 1 8em; }
+/* Team icons (0.4.30): the team's own 128 x 128 PNG, or a default (initials on a colour), always the same size. */
+.team-icon { width: 32px; height: 32px; flex: none; border-radius: 7px; object-fit: cover; }
+.team-icon.large { width: 64px; height: 64px; border-radius: 12px; }
+.choice-label .team-icon { width: 20px; height: 20px; border-radius: 5px; margin-right: 6px; vertical-align: -5px; }
+.choice-label { display: inline-flex; align-items: center; min-width: 0; overflow-wrap: anywhere; }
+.icon-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
+.field-label { display: block; font-weight: 600; margin: 0 0 4px; }
+.editor-title .team-icon { align-self: center; }
+.icon-history .team-icon { width: 24px; height: 24px; border-radius: 5px; }
 .desc { margin: 0; }
 /* One size of card (0.4.30): a description is clamped to three lines, and the space for three is kept even when it is shorter, so the cards in a row line
    up; Show more (button.more) opens one card. The grid stretches every card in a row to the tallest, and the actions sit at the bottom. */
@@ -233,6 +242,9 @@ table.grid tbody th { font-weight: 600; overflow-wrap: anywhere; }
 /* High contrast: rely on borders, not fills */
 body.vscode-high-contrast .card, body.vscode-high-contrast .panel, body.vscode-high-contrast .choice, body.vscode-high-contrast button.start-choice { border-color: var(--vscode-contrastBorder, var(--border)); }
 body.vscode-high-contrast .choice.selected, body.vscode-high-contrast .tabs .tab.active { outline: 1px solid var(--vscode-contrastActiveBorder, var(--accent)); }
+body.vscode-high-contrast .team-icon { outline: 1px solid var(--vscode-contrastBorder, var(--border)); outline-offset: 1px; }
+body.vscode-high-contrast .team-icon-default rect { fill: var(--vscode-editor-background); }
+body.vscode-high-contrast .team-icon-default text { fill: var(--vscode-foreground); }
 
 @media (max-width: 520px) {
   body { padding: 0 10px 36px; }

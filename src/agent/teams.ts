@@ -5,6 +5,7 @@ import * as path from 'node:path';
 import type { AgentDiscoveryAnswers } from '../domain/agents';
 import { parseFrontmatter, type GsdAgent } from '../gsd/library';
 import { recommendAgentTeam } from '../services/agentTeams';
+import { checkTeamIcon, iconReference, MAX_TEAM_ICON_BYTES, TEAM_ICON_SUFFIX, TeamIconError, withIconReference } from './teamIcon';
 
 // Agent teams as Markdown files the user edits in VS Code. Frontmatter names the team; each
 // `## member` section is a member with optional `role:`, `model:`, and `tools:` lines followed by
@@ -54,6 +55,8 @@ export function resolveMemberTools(tools: string[]): string[] {
   return [...tools, ...DOCUMENT_OUTPUT_TOOLS.filter((tool) => !tools.includes(tool))];
 }
 const MAX_VERSIONS = 20;
+/** Earlier icons kept per team (0.4.30), as many as team versions. */
+const MAX_ICON_VERSIONS = 20;
 
 export function slugify(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'team';
@@ -428,11 +431,109 @@ export class TeamLibrary {
   }
 
   public async duplicate(file: string, name: string): Promise<string> {
-    const team = parseTeam(await readFile(file, 'utf8'), file);
+    const text = await readFile(file, 'utf8');
+    const team = parseTeam(text, file);
     const copy = await this.create(name, renderTeam(name, team.description, team.members, { private: team.private }));
     // A copy of an imported team that was never approved is still that team: it stays unapproved, so copying it is never a way round the question.
     if (await this.isPendingImport(file)) await this.markImported(copy, 'derived', team.name);
+    // The copy looks the same in the library: it gets its own copy of the icon (0.4.30).
+    const icon = await this.readIcon(file, text);
+    if (icon) await this.setIcon(copy, icon);
     return copy;
+  }
+
+  // ---- icons (0.4.30) ----
+  // A team's icon is `<team file name>.icon.png` beside the team file, named in its front matter. Only that file is ever read for the team, whatever the
+  // line says, so a hand-edited or imported reference can never show another team's icon or reach outside the folder. Changing or removing an icon keeps
+  // the old one in the team's icon history (the latest 20), the way every save keeps a version of the team file.
+
+  /** The icon file name a team file may name: `web-team.icon.png` for `web-team.md`, `team.icon.png` for a project's `team.md`. */
+  public static iconName(teamFile: string): string { return `${path.basename(teamFile, '.md')}${TEAM_ICON_SUFFIX}`; }
+  public iconFile(teamFile: string): string { return path.join(path.dirname(teamFile), TeamLibrary.iconName(teamFile)); }
+  /** Under `.versions/.icons/`: a slug never starts with a dot, so no team's versions folder can be this one. */
+  private iconVersionsDir(teamFile: string): string { return path.join(this.directory, '.versions', '.icons', this.versionKey(teamFile)); }
+
+  /** The team's icon, checked (checkTeamIcon), or undefined: no icon line, one naming any other file, or a file that is not a valid icon. Never throws. */
+  public async readIcon(teamFile: string, text?: string): Promise<Buffer | undefined> {
+    const content = text ?? await readFile(teamFile, 'utf8').catch(() => undefined);
+    if (content === undefined || iconReference(content) !== TeamLibrary.iconName(teamFile)) return undefined;
+    const file = this.iconFile(teamFile);
+    const size = (await stat(file).catch(() => undefined))?.size;
+    if (size === undefined || size > MAX_TEAM_ICON_BYTES) return undefined;
+    const bytes = await readFile(file).catch(() => undefined);
+    return bytes && checkTeamIcon(bytes) === undefined ? bytes : undefined;
+  }
+
+  /** The team's earlier icons, newest first. */
+  public async iconVersions(teamFile: string): Promise<string[]> {
+    const dir = this.iconVersionsDir(teamFile);
+    return (await readdir(dir).catch(() => [])).filter((name) => name.endsWith('.png')).sort(compareVersionNames).reverse().map((name) => path.join(dir, name));
+  }
+
+  /** Moves (or copies) whatever icon file the team has now into its icon history, and drops the oldest beyond the limit. */
+  private async keepIcon(teamFile: string, move: boolean): Promise<boolean> {
+    const file = this.iconFile(teamFile);
+    if (!await exists(file)) return false;
+    const dir = this.iconVersionsDir(teamFile);
+    await mkdir(dir, { recursive: true });
+    await copyAsVersion(file, dir, '.png');
+    if (move) await rm(file, { force: true });
+    const versions = (await readdir(dir)).filter((name) => name.endsWith('.png')).sort(compareVersionNames);
+    for (const old of versions.slice(0, Math.max(0, versions.length - MAX_ICON_VERSIONS))) await rm(path.join(dir, old), { force: true });
+    return true;
+  }
+
+  /** Writes the team file when its icon line changes, as a new version like any save. */
+  private async setReference(teamFile: string, name: string | undefined): Promise<{ text: string; textChanged: boolean }> {
+    const before = await readFile(teamFile, 'utf8');
+    const text = withIconReference(before, name);
+    if (text === before) return { text, textChanged: false };
+    await writeFile(teamFile, text, 'utf8');
+    await this.snapshot(teamFile);
+    return { text, textChanged: true };
+  }
+
+  /**
+   * Makes this PNG the team's icon. It is checked first (TeamIconError says why it is refused, and nothing is written); the icon it replaces is kept in
+   * the history; the file is written whole, then the team file names it.
+   */
+  public async setIcon(teamFile: string, png: Uint8Array): Promise<{ text: string; textChanged: boolean }> {
+    const problem = checkTeamIcon(png);
+    if (problem) throw new TeamIconError(problem);
+    const file = this.iconFile(teamFile);
+    await this.keepIcon(teamFile, false);
+    const temporary = `${file}.${process.pid}-${Date.now()}.tmp`;
+    await writeFile(temporary, png);
+    await rename(temporary, file).catch(async (error) => { await rm(temporary, { force: true }); throw error; });
+    return this.setReference(teamFile, TeamLibrary.iconName(teamFile));
+  }
+
+  /** Back to the default icon: the icon file moves into the history and the team file's icon line is removed. `removed` is false when there was none. */
+  public async removeIcon(teamFile: string): Promise<{ text: string; textChanged: boolean; removed: boolean }> {
+    const removed = await this.keepIcon(teamFile, true);
+    return { ...await this.setReference(teamFile, undefined), removed };
+  }
+
+  /** Makes an earlier icon (by its name in the history) the team's icon again; the current one goes into the history. */
+  public async restoreIcon(teamFile: string, ref: string): Promise<{ text: string; textChanged: boolean }> {
+    const version = (await this.iconVersions(teamFile)).find((candidate) => path.basename(candidate) === ref);
+    if (!version) throw new TeamIconError('There is no such icon in this team\'s history.');
+    return this.setIcon(teamFile, await readFile(version));
+  }
+
+  /**
+   * Moves a team's icon with the team file (archive and restore), keeping its reference right: a team renamed on the way (web-team.md archived as
+   * web-team-2.md) has its icon renamed and its icon line rewritten. A file already at the target is kept in that name's history first.
+   */
+  private async moveIcon(from: string, to: string): Promise<void> {
+    const source = this.iconFile(from);
+    if (!await exists(source)) return;
+    const target = this.iconFile(to);
+    if (source === target) return;
+    await this.keepIcon(to, true);
+    await rename(source, target);
+    const text = await readFile(to, 'utf8').catch(() => undefined);
+    if (text !== undefined && iconReference(text) === TeamLibrary.iconName(from) && TeamLibrary.iconName(from) !== TeamLibrary.iconName(to)) await writeFile(to, withIconReference(text, TeamLibrary.iconName(to)), 'utf8');
   }
 
   /**
@@ -553,6 +654,7 @@ export class TeamLibrary {
     for (let n = 2; await exists(target); n += 1) target = path.join(this.archiveDir, `${base}-${n}.md`);
     await rename(file, target);
     await this.moveImportMarker(file, target);
+    await this.moveIcon(file, target);
     return target;
   }
 
@@ -579,6 +681,7 @@ export class TeamLibrary {
     if (await exists(target)) throw new Error(`A team named ${path.basename(target, '.md')} already exists.`);
     await rename(archivedFile, target);
     await this.moveImportMarker(archivedFile, target);
+    await this.moveIcon(archivedFile, target);
     return target;
   }
 
@@ -586,6 +689,8 @@ export class TeamLibrary {
     await rm(file, { force: true });
     await rm(this.importMarker(file), { force: true });
     await rm(this.versionsDir(this.versionKey(file)), { recursive: true, force: true });
+    await rm(this.iconFile(file), { force: true });
+    await rm(this.iconVersionsDir(file), { recursive: true, force: true });
   }
 
   /** Imports a team .md file from anywhere after checking it parses; like importTeam, it stays unapproved until the person approves it. */

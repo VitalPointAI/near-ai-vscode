@@ -17,6 +17,7 @@ import { gradingCoverage } from '../domain/teamKnowledge';
 import { knowledgeFile, loadKnowledge } from './teamKnowledgeStore';
 import { buildTeamPackage, cleanKnowledge, importQuestion, MAX_TEAM_PACKAGE_BYTES, readTeamMarkdown, readTeamPackage, shareProblems, TEAM_PACKAGE_EXTENSION, TeamPackageError, type ReadPackage } from '../agent/teamPackage';
 import type { TeamKnowledge } from '../domain/teamKnowledge';
+import { checkTeamIcon, decodeIconBase64, iconDataUri, iconSourceProblem, iconSourceType, MAX_ICON_SOURCE_BYTES, TeamIconError, withIconReference, type IconSourceType } from '../agent/teamIcon';
 
 /** The facts, relations and grading of each node, so the page can show a card without being sent the whole graph twice. */
 function nodeDetails(graph: { nodes: Array<{ id: string; facts: Array<{ text: string; source?: string }>; functions: string[]; grading?: unknown; origin: string; mentions: number }>; edges: Array<{ from: string; to: string; kind: string; tension: number | null; basis?: string; grading?: unknown }> }): Record<string, unknown> {
@@ -63,7 +64,8 @@ export interface StudioContext {
 export interface StudioMemberModel { tier: string; model: string; privacy: DirectoryModel['privacy']; privacyText: string; available?: boolean }
 /** `update`: the built-in template the team was made from and whether a newer version exists, so the card can offer Update Team. */
 /** `imported`: added with Import team and not yet approved to run; the person is asked the first time it would run. */
-export interface LibraryTeam { id: string; kind: 'project' | 'user'; name: string; description: string; command?: string; file: string; savedAt?: string; error?: string; imported?: boolean; derived?: boolean; /** 0.4.27: marked private, or every member private. */ private?: boolean; update?: { template: string; from?: number; to: number; available: boolean }; members: Array<{ name: string; role?: string } & StudioMemberModel> }
+/** `icon` (0.4.30): the team's own icon as a PNG data URI, checked; absent when the team shows the default (initials on a colour, drawn by the page). */
+export interface LibraryTeam { id: string; kind: 'project' | 'user'; name: string; description: string; command?: string; file: string; savedAt?: string; error?: string; imported?: boolean; derived?: boolean; /** 0.4.27: marked private, or every member private. */ private?: boolean; update?: { template: string; from?: number; to: number; available: boolean }; icon?: string; members: Array<{ name: string; role?: string } & StudioMemberModel> }
 export interface LibraryArchived { id: string; name: string; file: string; savedAt?: string }
 export interface LibraryState { teams: LibraryTeam[]; archived: LibraryArchived[] }
 
@@ -75,7 +77,7 @@ export interface LibraryState { teams: LibraryTeam[]; archived: LibraryArchived[
 export interface PickerEntry { id: string; source: 'mine' | 'builtin'; group: StudioStartingPoint['group'] | 'library'; label: string; /** The team's own name. */ name: string;
   /** What Clone and modify names the copy ("Copy of" a saved team, a built-in's own name), made unique among the person's saved teams. */ cloneName: string;
   /** A built-in only: the name Use as is saves it to My teams under when no project is open, made unique the same way. The page shows it, never works it out. */ saveAs?: string;
-  description: string; members: string[]; memberCount: number; origin: string; imported?: boolean; teamId?: string }
+  description: string; members: string[]; memberCount: number; origin: string; imported?: boolean; teamId?: string; /** A saved team's icon (a PNG data URI); built-in teams show the default. */ icon?: string }
 export type PickerFilter = 'all' | 'mine' | 'builtin';
 
 /**
@@ -108,7 +110,7 @@ export function teamPicker(startingPoints: StudioStartingPoint[], teams: Library
     id: `lib:${team.id.slice('user:'.length)}`, source: 'mine', group: 'library', label: team.name, name: team.name, cloneName: cloneNameFor(team.name, 'mine', teams), description: team.description,
     members: team.members.map((member) => member.name), memberCount: team.members.length,
     origin: team.imported ? (team.derived ? 'Made from an import, not approved yet' : 'Imported, not approved yet') : `My team${team.savedAt ? `, saved ${team.savedAt.slice(0, 10)}` : ''}`,
-    ...(team.imported ? { imported: true } : {}), teamId: team.id
+    ...(team.imported ? { imported: true } : {}), teamId: team.id, ...(team.icon ? { icon: team.icon } : {})
   }));
   // The recommendation is made from answers on its own screen (0.4.30), so the picker does not offer it a second time.
   const builtin = startingPoints.filter((point) => point.id !== 'recommend').map((point): PickerEntry => ({
@@ -285,7 +287,10 @@ export async function listLibrary(library: TeamLibrary, root: string | undefined
   const teams = await Promise.all(entries.map(async (entry): Promise<LibraryTeam> => {
     const slug = slugify(path.basename(entry.file, '.md'));
     const team = entry.team;
-    const template = team ? await readFile(entry.file, 'utf8').then((text) => detectTemplate(text), () => undefined) : undefined;
+    const text = team ? await readFile(entry.file, 'utf8').catch(() => undefined) : undefined;
+    const template = text !== undefined ? detectTemplate(text) : undefined;
+    // 0.4.30: the team's own icon, checked, as a data URI; the page draws the default for a team without one.
+    const icon = text !== undefined ? await library.readIcon(entry.file, text) : undefined;
     return {
       id: entry.project ? 'project' : `user:${slug}`, kind: entry.project ? 'project' : 'user', file: entry.file,
       name: team?.name ?? slug, description: team?.description ?? '',
@@ -295,6 +300,7 @@ export async function listLibrary(library: TeamLibrary, root: string | undefined
       ...(!entry.project && pending.has(path.resolve(entry.file)) ? { imported: true, ...((await library.pendingKind(entry.file))?.kind === 'derived' ? { derived: true } : {}) } : {}),
       ...(template ? { update: { template: template.label, ...(template.fromVersion ? { from: template.fromVersion } : {}), to: template.toVersion, available: !template.stamped || template.fromVersion !== template.toVersion } } : {}),
       ...(await mtime(entry.file) ? { savedAt: await mtime(entry.file) } : {}),
+      ...(icon ? { icon: iconDataUri(icon) } : {}),
       members: (team?.members ?? []).map((member) => ({ name: member.name, ...(member.role ? { role: member.role } : {}), ...memberModel(member, input) }))
     };
   }));
@@ -310,6 +316,9 @@ export async function listLibrary(library: TeamLibrary, root: string | undefined
 
 const TEAM_ID = /^(?:project|user:[a-z0-9][a-z0-9-]{0,60}|archived:[a-z0-9][a-z0-9-]{0,60})$/;
 const VERSION_REF = /^[\w.-]{1,80}\.md$/;
+const ICON_VERSION_REF = /^[\w.-]{1,80}\.png$/;
+/** A team whose icon may change: the project's or one of the person's (an archived team's id is not one). */
+const ICON_TEAM_ID = /^(?:project|user:[a-z0-9][a-z0-9-]{0,60})$/;
 const TOOL_NAME = /^[A-Za-z][A-Za-z0-9_-]{0,79}$/;
 const LOCALITIES = ['cloud', 'local', 'hybrid'] as const;
 const WORK_SHAPES = ['feature', 'bugfix', 'refactor', 'research', 'release'] as const;
@@ -349,7 +358,17 @@ export type StudioMessage =
   | { type: 'improve-ai'; seq: number; draft: TeamDraft; id?: string; member?: string }
   | { type: 'improve-cancel'; seq: number }
   /** Accept suggestions (by the ids the host gave) into the page's current draft; `edited` is the person's own wording for a single suggestion. */
-  | { type: 'improve-accept'; seq: number; ids: string[]; draft: TeamDraft; id?: string; edited?: string };
+  | { type: 'improve-accept'; seq: number; ids: string[]; draft: TeamDraft; id?: string; edited?: string }
+  /**
+   * Team icons (0.4.30). Upload: the host asks for a picture with VS Code's own file picker and checks it (PNG, JPEG or WebP by its bytes, at most 2 MB);
+   * Generate: an image model makes one, after the cost is shown and the person agrees. Either way the host sends the picture to the page (icon-source),
+   * which crops it to a square and re-encodes it as a 128 x 128 PNG, and answers with icon-set (or icon-failed); the host checks that PNG again before
+   * it writes it. Remove goes back to the default; Restore brings back an earlier icon from the team's history, by its name there.
+   */
+  | { type: 'icon-upload' | 'icon-generate' | 'icon-remove'; id: string }
+  | { type: 'icon-set'; seq: number; id: string; png: Buffer }
+  | { type: 'icon-failed'; seq: number }
+  | { type: 'icon-restore'; id: string; ref: string };
 
 type Plain = Record<string, unknown>;
 const isPlain = (value: unknown): value is Plain => Boolean(value) && typeof value === 'object' && !Array.isArray(value) && Object.getPrototypeOf(value) === Object.prototype;
@@ -490,6 +509,17 @@ export function parseStudioMessage(value: unknown): StudioMessage | undefined {
       const draft = parseDraft(message.draft);
       return draft ? { type: 'improve-accept', seq: message.seq as number, ids: ids as string[], draft, ...(message.id !== undefined ? { id: message.id as string } : {}), ...(message.edited !== undefined ? { edited: message.edited as string } : {}) } : undefined;
     }
+    case 'icon-upload': case 'icon-generate': case 'icon-remove':
+      return exactKeys(message, ['type', 'id']) && typeof message.id === 'string' && ICON_TEAM_ID.test(message.id) ? { type: message.type, id: message.id } : undefined;
+    case 'icon-set': {
+      if (!exactKeys(message, ['type', 'seq', 'id', 'png']) || !Number.isSafeInteger(message.seq) || typeof message.id !== 'string' || !ICON_TEAM_ID.test(message.id)) return undefined;
+      const png = decodeIconBase64(message.png);
+      return png ? { type: 'icon-set', seq: message.seq as number, id: message.id, png } : undefined;
+    }
+    case 'icon-failed':
+      return exactKeys(message, ['type', 'seq']) && Number.isSafeInteger(message.seq) ? { type: 'icon-failed', seq: message.seq as number } : undefined;
+    case 'icon-restore':
+      return exactKeys(message, ['type', 'id', 'ref']) && typeof message.id === 'string' && ICON_TEAM_ID.test(message.id) && typeof message.ref === 'string' && ICON_VERSION_REF.test(message.ref) ? { type: 'icon-restore', id: message.id, ref: message.ref } : undefined;
     case 'open-setting':
       return exactKeys(message, ['type', 'key']) && typeof message.key === 'string' && /^nearAi\.(?:defaultModel|actionPolicy|agent\.(?:deepModel|standardModel|fastModel|roleModels))$/.test(message.key) ? { type: 'open-setting', key: message.key } : undefined;
     default:
@@ -540,6 +570,8 @@ export interface TeamStudioDeps {
   pickShareTarget?(defaultName: string): Promise<string | undefined>;
   /** A share file (.near-team.json) or a team .md file to import. */
   pickImportSource(): Promise<string | undefined>;
+  /** A picture to make the team's icon from (0.4.30): VS Code's own file picker. Its path stays here; the page is only ever sent the picture. */
+  pickIconSource?(): Promise<string | undefined>;
   /** The person's home folder, so a share never carries a path inside it. */
   home?: string;
   applyProjectType(root: string, type: ProjectType, goal: string): Promise<unknown>;
@@ -623,6 +655,14 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
   let pendingWizard: StudioTarget | undefined;
   /** A Use as is is running (asking, or writing): another is ignored until it has answered. */
   let usingTeam = false;
+  /**
+   * Team icons (0.4.30). `iconWorking`: the host is choosing, asking about or making a picture now (a file picker, the cost question, an image model);
+   * another icon request is refused until it has answered. `iconWaiting`: the picture was sent to the page, which answers with its PNG for that number;
+   * a newer request replaces it, so a page that never answers cannot block the next one.
+   */
+  let iconSeq = 0;
+  let iconWorking = false;
+  let iconWaiting: { seq: number; id: string; file: string } | undefined;
   let pageReady = false;
   let markReady: () => void = () => undefined;
   const ready = new Promise<void>((resolve) => { markReady = resolve; });
@@ -695,6 +735,13 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
   };
 
   const versionsOf = async (file: string) => (await deps.library.versions(file)).map((version) => ({ ref: path.basename(version), label: versionLabel(path.basename(version)) }));
+  /** The team's icon now (a data URI), checked; undefined for the default. */
+  const iconOf = async (file: string, text?: string) => { const bytes = await deps.library.readIcon(file, text); return bytes ? iconDataUri(bytes) : undefined; };
+  /** The team's earlier icons, newest first, each checked before it is shown (one that is not a valid icon is left out). */
+  const iconHistoryOf = async (file: string) => (await Promise.all((await deps.library.iconVersions(file)).map(async (version) => {
+    const bytes = await readFile(version).catch(() => undefined);
+    return bytes && checkTeamIcon(bytes) === undefined ? { ref: path.basename(version), label: versionLabel(path.basename(version)), icon: iconDataUri(bytes) } : undefined;
+  }))).filter((entry): entry is { ref: string; label: string; icon: string } => entry !== undefined);
 
   const sendTeam = async (id: string, file: string, notice?: string) => {
     const textNow = await readFile(file, 'utf8');
@@ -705,7 +752,8 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
     const teamPrivacy = handWrittenTeamPrivacy(textNow);
     // 0.4.28: while a run of this team is going, the Team shape tab links to Team Live.
     const live = deps.liveRun?.(slugify(path.basename(file, '.md'))) === true;
-    post({ type: 'team', id, kind: entry?.kind ?? (id === 'project' ? 'project' : 'user'), file: displayPath(file, deps.root()), command: entry?.command ?? '', draft, base: open.base, ...(teamPrivacy ? { teamPrivacy } : {}), ...(live ? { liveRun: true } : {}), versions: await versionsOf(file), graph: graphOf(textNow, file), knowledge: await knowledgeOf(file), ...(notice ? { notice } : {}) });
+    const icon = await iconOf(file, textNow);
+    post({ type: 'team', id, kind: entry?.kind ?? (id === 'project' ? 'project' : 'user'), file: displayPath(file, deps.root()), command: entry?.command ?? '', draft, base: open.base, ...(teamPrivacy ? { teamPrivacy } : {}), ...(live ? { liveRun: true } : {}), versions: await versionsOf(file), ...(icon ? { icon } : {}), iconHistory: await iconHistoryOf(file), graph: graphOf(textNow, file), knowledge: await knowledgeOf(file), ...(notice ? { notice } : {}) });
   };
 
   /**
@@ -800,15 +848,18 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
    * Writes the project's team, the one way a save or Use as is replaces it: an existing team is replaced only after the person agrees, and is kept as a
    * version first (so it can be restored from History); the new team is versioned too. Undefined when the person kept the old one.
    */
-  const writeProjectTeam = async (root: string, markdown: string, unapprovedFrom: string | undefined, projectType?: { type: ProjectType; goal: string }): Promise<string | undefined> => {
+  const writeProjectTeam = async (root: string, markdown: string, unapprovedFrom: string | undefined, projectType?: { type: ProjectType; goal: string }, icon?: Buffer): Promise<string | undefined> => {
     const file = TeamLibrary.projectTeamFile(root);
     if (await exists(file)) {
       if (!await deps.confirm('This project already has a team. Replace it? Its earlier versions stay in the team history.', 'Replace')) return undefined;
       await deps.library.snapshot(file);
     }
     await mkdir(path.dirname(file), { recursive: true });
-    await writeFile(file, markdown, 'utf8');
+    // 0.4.30: the new team's icon goes beside it (a saved team used as is keeps its look), and an icon the old team had goes into the icon history, so
+    // the new team never shows the old one's. The icon line names the project team's own file, whatever the team text said.
+    await writeFile(file, withIconReference(markdown, icon ? TeamLibrary.iconName(file) : undefined), 'utf8');
     await deps.library.snapshot(file);
+    if (icon) await deps.library.setIcon(file, icon); else await deps.library.removeIcon(file);
     // The project's own consent is asked before it first runs, as for any project team; its question says the members came from that import.
     await deps.library.setProjectDerived(file, unapprovedFrom);
     if (projectType) await deps.applyProjectType(root, projectType.type, projectType.goal);
@@ -1015,6 +1066,7 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
             if (!input || !context) await load();
             const root = deps.root();
             let saved: LibraryTeam | undefined;
+            let savedIcon: Buffer | undefined;
             let name: string;
             let markdown: string;
             let members: DraftMember[];
@@ -1025,6 +1077,7 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
               saved = teamFor(`user:${use.id.slice('lib:'.length)}`);
               if (!saved || saved.error) { post({ type: 'error', text: 'That team is no longer in your teams. Pick another one.' }); return; }
               markdown = await readFile(saved.file, 'utf8');
+              savedIcon = await deps.library.readIcon(saved.file, markdown);
               const draft = draftFromMarkdown(markdown, saved.file);
               const review = reviewDraft(draft, markdown, input!, context!);
               if (review.errors.length) { post({ type: 'error', text: `Not used: ${review.errors[0]!.message} Choose Clone and modify to change it.` }); return; }
@@ -1058,7 +1111,7 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
               return;
             }
             if (root) {
-              const file = await writeProjectTeam(root, markdown, unapprovedFrom, fromType ? { type: fromType, goal: goal || 'the work in this project' } : undefined);
+              const file = await writeProjectTeam(root, markdown, unapprovedFrom, fromType ? { type: fromType, goal: goal || 'the work in this project' } : undefined, savedIcon);
               if (!file) { post({ type: 'used', declined: true, text: 'Not changed. This project\'s team is as it was.' }); return; }
               unsaved = {};
               await refreshLibrary();
@@ -1314,8 +1367,88 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
         await sendTeam(message.id, file, `Restored the version from ${versionLabel(message.ref)}.`);
         return;
       }
+      case 'icon-upload': {
+        const file = fileFor(message.id);
+        if (!file) { post({ type: 'error', text: 'That team is no longer in your teams.' }); return; }
+        if (iconWorking) { post({ type: 'error', text: 'Still working on an icon. Wait for it to finish.' }); return; }
+        if (!deps.pickIconSource) { post({ type: 'error', text: 'Uploading an icon is not available here.' }); return; }
+        iconWorking = true;
+        try {
+          const source = await deps.pickIconSource();
+          if (!source) { post({ type: 'icon-done', id: message.id }); return; }
+          // Its size first, so a huge file is never read; then its bytes decide what it is, never its name. Its path is never sent or shown.
+          const size = (await stat(source)).size;
+          if (size > MAX_ICON_SOURCE_BYTES) { post({ type: 'error', text: 'The image is larger than 2 MB. Choose a smaller one.' }); return; }
+          const bytes = await readFile(source);
+          const problem = iconSourceProblem(bytes);
+          if (problem) { post({ type: 'error', text: problem }); return; }
+          sendIconSource(message.id, file, iconSourceType(bytes)!, bytes);
+        } catch {
+          // A file-system error names the file's path, so it is not passed on.
+          post({ type: 'error', text: 'The image could not be read. Choose another one.' });
+        } finally { iconWorking = false; }
+        return;
+      }
+      case 'icon-set': {
+        const waiting = iconWaiting;
+        if (!waiting || waiting.seq !== message.seq || waiting.id !== message.id || fileFor(message.id) !== waiting.file) {
+          post({ type: 'error', text: 'Not saved: the studio is no longer waiting for an icon for this team. Try again.' });
+          return;
+        }
+        iconWaiting = undefined;
+        const problem = checkTeamIcon(message.png);
+        if (problem) { post({ type: 'error', text: `Not saved: ${problem}` }); return; }
+        const had = Boolean(await deps.library.readIcon(waiting.file));
+        await changeIcon(message.id, waiting.file, (file) => deps.library.setIcon(file, message.png), `The icon is saved.${had ? ' The one before it is in History.' : ''}`);
+        return;
+      }
+      case 'icon-failed': if (iconWaiting?.seq === message.seq) iconWaiting = undefined; return;
+      case 'icon-remove': {
+        const file = fileFor(message.id);
+        if (!file) { post({ type: 'error', text: 'That team is no longer in your teams.' }); return; }
+        if (iconWorking) { post({ type: 'error', text: 'Still working on an icon. Wait for it to finish.' }); return; }
+        await changeIcon(message.id, file, (teamFile) => deps.library.removeIcon(teamFile), 'Removed the icon. The team shows its default icon again; the old one is in History.');
+        return;
+      }
+      case 'icon-restore': {
+        const file = fileFor(message.id);
+        if (!file) { post({ type: 'error', text: 'That team is no longer in your teams.' }); return; }
+        if (iconWorking) { post({ type: 'error', text: 'Still working on an icon. Wait for it to finish.' }); return; }
+        await changeIcon(message.id, file, (teamFile) => deps.library.restoreIcon(teamFile, message.ref), `Restored the icon from ${versionLabel(message.ref)}. The one before it is in History.`);
+        return;
+      }
       case 'open-setting': await deps.openSetting(message.key); return;
     }
+  };
+
+  /** Sends a checked picture to the page, which makes it a 128 x 128 PNG and answers with icon-set for this number. */
+  const sendIconSource = (id: string, file: string, mime: IconSourceType, bytes: Uint8Array) => {
+    iconSeq += 1;
+    iconWaiting = { seq: iconSeq, id, file };
+    post({ type: 'icon-source', seq: iconSeq, id, mime, data: Buffer.from(bytes).toString('base64') });
+  };
+
+  /**
+   * Changes a team's icon and tells the page: the cards (listed again) and the open team (icon-updated). The team file gains or loses its icon line, so a
+   * team open in the editor moves to the new version (`base`) when it was on the one before, and a later save is not taken for an outside edit. Nothing
+   * changed (no icon to remove) gets icon-done. A refusal says why in plain words, never with a path.
+   */
+  const changeIcon = async (id: string, file: string, change: (file: string) => Promise<{ text: string; textChanged: boolean; removed?: boolean }>, text: string) => {
+    let result: { text: string; textChanged: boolean; removed?: boolean };
+    let before: string;
+    try {
+      before = await readFile(file, 'utf8');
+      result = await change(file);
+    } catch (error) {
+      post({ type: 'error', text: error instanceof TeamIconError ? `Not changed: ${error.message}` : 'The icon could not be changed. Nothing was changed.' });
+      return;
+    }
+    if (result.removed === false && !result.textChanged) { post({ type: 'icon-done', id }); return; }
+    const rebase = open?.file === file && hash(before) === open.base;
+    if (rebase && result.textChanged) open = { ...open!, text: result.text, base: hash(result.text) };
+    await refreshLibrary();
+    const icon = await iconOf(file, result.text);
+    post({ type: 'icon-updated', id, ...(icon ? { icon } : {}), iconHistory: await iconHistoryOf(file), ...(rebase ? { base: open!.base } : {}), text });
   };
 
   const subscriptions = [
@@ -1375,8 +1508,9 @@ function savedWizard(value: unknown): SavedWizard | undefined {
 /** "2026-10-29T14-03-12-345Z.md" (or "...-345Z-2.md", the second taken in that millisecond) → "2026-10-29 14:03:12 UTC". */
 export function versionLabel(ref: string): string {
   // Versions taken in the same millisecond carry a number (-2, -3); the label keeps it, so History never shows two identical entries (PR #75 review).
-  const match = /^(\d{4}-\d\d-\d\d)T(\d\d)-(\d\d)-(\d\d)-\d+Z(?:-(\d+))?\.md$/.exec(ref);
-  return match ? `${match[1]} ${match[2]}:${match[3]}:${match[4]} UTC${match[5] ? ` (${match[5]})` : ''}` : ref.replace(/\.md$/, '');
+  // 0.4.30: an earlier icon's name in the history (.png) reads the same way.
+  const match = /^(\d{4}-\d\d-\d\d)T(\d\d)-(\d\d)-(\d\d)-\d+Z(?:-(\d+))?\.(?:md|png)$/.exec(ref);
+  return match ? `${match[1]} ${match[2]}:${match[3]}:${match[4]} UTC${match[5] ? ` (${match[5]})` : ''}` : ref.replace(/\.(?:md|png)$/, '');
 }
 
 function displayPath(file: string, root: string | undefined): string {
@@ -1385,10 +1519,13 @@ function displayPath(file: string, root: string | undefined): string {
 
 export type { TeamDefinition };
 
-/** The page's HTML: one nonce script and two stylesheets (the shared base, then its own); everything else is rendered by the script with textContent. */
+/**
+ * The page's HTML: one nonce script and two stylesheets (the shared base, then its own); everything else is rendered by the script with textContent.
+ * Images (0.4.30, team icons) only as data: URIs, which the host builds from icons it checked; the page never loads a path or a web address.
+ */
 export function teamStudioHtml(options: { cspSource: string; nonce: string; script: string; style: string; network: string; base: string; probe?: string }): string {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${options.cspSource}; script-src 'nonce-${options.nonce}';">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${options.cspSource}; script-src 'nonce-${options.nonce}'; img-src data:;">
 <link rel="stylesheet" href="${options.base}"><link rel="stylesheet" href="${options.style}"><link rel="stylesheet" href="${options.network}"><title>NEAR AI Team Studio</title></head><body>
 <a class="skip" href="#main">Skip to content</a>
 <header class="top"><div class="title"><h1 id="title">Team Studio</h1><p id="subtitle" class="hint">Build and manage agent teams. Each team is a Markdown file; the studio reads and writes it for you.</p></div><nav id="crumbs" aria-label="Breadcrumb"></nav></header>

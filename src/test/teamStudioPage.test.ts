@@ -2912,7 +2912,8 @@ async function iconPage(options: { size?: [number, number]; fail?: boolean; out?
     ? { width: 0, height: 0, getContext: () => ({ drawImage: (...args: unknown[]) => drawn.push(args), getImageData: () => ({ data: new Uint8ClampedArray(128 * 128 * 4) }), putImageData() {} }), toDataURL: (type: string) => `data:${type};base64,${out.toString('base64')}` }
     : make(tag);
   page.dispatch({ type: 'state', context: context(), library: { teams: [WEB_CARD], archived: [] } });
-  return { ...page, drawn, out };
+  const type = (id: string, value: string, event = 'input') => { const node = page.doc.getElementById(id)!; node.value = value; node.fire(event); };
+  return { ...page, drawn, out, type };
 }
 
 const HISTORY = [{ ref: '2026-11-17T10-00-00-000Z.png', label: '2026-11-17 10:00:00 UTC', icon: ICON_URI }];
@@ -2938,7 +2939,7 @@ test('page: a saved team\'s Purpose tab uploads an icon (cropped to a square and
   page.dispatch({ type: 'icon-source', seq: 3, id: 'user:web', mime: 'image/jpeg', data: JPEG.toString('base64') });
   await page.wait();
   assert.deepEqual(page.drawn[0]!.slice(1), [50, 0, 200, 200, 0, 0, 128, 128], 'the centre square, scaled to 128 x 128');
-  assert.deepEqual(page.posts.at(-1), { type: 'icon-set', seq: 3, id: 'user:web', png: page.out.toString('base64') });
+  assert.deepEqual(page.posts.filter((message) => message.type === 'icon-set'), [{ type: 'icon-set', seq: 3, id: 'user:web', png: page.out.toString('base64') }]);
   page.dispatch({ type: 'icon-updated', id: 'user:web', icon: ICON_URI, iconHistory: HISTORY, base: 'c'.repeat(64), text: 'The icon is saved. The one before it is in History.' });
   const shown = page.doc.getElementById('icon-preview')!;
   assert.equal(shown.tagName, 'img');
@@ -2966,7 +2967,7 @@ test('page: an image the page cannot read is reported, and the host is told so i
   page.byLabel('Upload an icon for Web team (PNG, JPEG or WebP)')!.click();
   page.dispatch({ type: 'icon-source', seq: 4, id: 'user:web', mime: 'image/webp', data: WEBP.toString('base64') });
   await page.wait();
-  assert.deepEqual(page.posts.at(-1), { type: 'icon-failed', seq: 4 });
+  assert.deepEqual(page.posts.filter((message) => message.type.startsWith('icon-')).at(-1), { type: 'icon-failed', seq: 4 });
   assert.match(page.doc.getElementById('banner')!.textContent, /could not be read as an image/);
   assert.equal(page.byLabel('Upload an icon for Web team (PNG, JPEG or WebP)')!.disabled, false);
   // An answer for another team, or none at all (an error), frees the buttons too.
@@ -3024,7 +3025,8 @@ test('host: Upload checks the file by its bytes and size before the page sees it
   assert.deepEqual(await readFile(path.join(h.library.directory, 'web-team.icon.png')), icon);
   assert.match(await readFile(file, 'utf8'), /\nicon: web-team\.icon\.png\n/);
   assert.equal(last(h, 'library').library.teams[0].icon, updated.icon, 'the cards show it');
-  assert.equal(JSON.stringify(h.posted).includes(h.storage), false, 'no path of the icon reaches the page');
+  assert.equal(JSON.stringify(h.posted).includes(path.join(h.library.directory, 'web-team.icon.png')), false, 'no path of the icon reaches the page');
+  assert.equal(JSON.stringify(h.posted).includes('.icons'), false, 'nor of its history');
   // The open editor moves to the new version of the file, so its next save is not a conflict.
   assert.match(updated.base, /^[0-9a-f]{64}$/);
   await h.send({ type: 'save', id: 'user:web-team', draft: draft({ description: 'Builds and tests pages' }), base: updated.base });
@@ -3081,4 +3083,30 @@ test('message parsing: the icon messages take exact keys, a team id, strict base
     { type: 'icon-set', seq: 'one', id: 'user:web', png: good }, { type: 'icon-set', seq: 1, id: 'user:web', png: good, mime: 'image/svg+xml' },
     { type: 'icon-failed' }, { type: 'icon-restore', id: 'user:web', ref: '../web.md' }, { type: 'icon-restore', id: 'user:web', ref: 'x.md' }, { type: 'icon-generate', id: 'user:web', prompt: 'a cat' }
   ]) assert.equal(parseStudioMessage(message), undefined, JSON.stringify(message).slice(0, 80));
+});
+
+test('the page may show data: images and nothing else: an icon is never loaded from a path or the web', () => {
+  const html = teamStudioHtml({ cspSource: 'vscode-webview://test', nonce: 'n0nce', script: 'teams.js', style: 'teams.css', network: 'network.css', base: 'base.css' });
+  const policy = /http-equiv="Content-Security-Policy" content="([^"]+)"/.exec(html)![1]!;
+  assert.match(policy, /(?:^|; )img-src data:;/);
+  assert.doesNotMatch(policy, /img-src[^;]*(?:vscode|https?:|\*|blob:)/);
+  assert.match(policy, /^default-src 'none';/);
+});
+
+test('host: Use as is makes a saved team the project team with its icon; a team without one leaves the old icon in History, not on the new team', async () => {
+  const h = await harness();
+  const file = await h.library.create('Web team', teamMarkdown(draft()));
+  const icon = png(128, 128, { seed: 8 });
+  await h.library.setIcon(file, icon);
+  await h.send({ type: 'ready' });
+  await h.send({ type: 'use-team', id: 'lib:web-team' });
+  const project = TeamLibrary.projectTeamFile(h.root);
+  assert.deepEqual(await h.library.readIcon(project), icon);
+  assert.match(await readFile(project, 'utf8'), /\nicon: team\.icon\.png\n/);
+  assert.equal(last(h, 'team').icon, `data:image/png;base64,${icon.toString('base64')}`);
+  await h.send({ type: 'use-team', id: 'gsd:review' });
+  assert.equal(await h.library.readIcon(project), undefined, 'the new team shows the default');
+  assert.equal(existsSync(path.join(path.dirname(project), 'team.icon.png')), false);
+  assert.equal((await h.library.iconVersions(project)).length, 1, 'the old icon is kept');
+  h.close();
 });

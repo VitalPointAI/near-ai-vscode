@@ -294,4 +294,8 @@ test('Team Studio cards are one size per row: a flex column whose actions sit at
   assert.match(sheet, /\.cards \{[^}]*grid-template-columns: repeat\(auto-fill, minmax\(min\(\d+px, 100%\), 1fr\)\);/, 'cards narrow with the panel');
   assert.doesNotMatch(sheet, /\.cards \{[^}]*align-items: start/, 'cards in a row stretch to the same height');
   assert.match(sheet, /\.choice-cell \{[^}]*height: 100%;/, 'picker cards fill their row too');
+  // 0.4.30: every card has an icon of one size; in a high contrast theme the default icon takes the theme's colours and a border.
+  assert.match(sheet, /\.team-icon \{[^}]*width: 32px; height: 32px;[^}]*flex: none;/);
+  assert.match(sheet, /body\.vscode-high-contrast \.team-icon-default rect \{[^}]*fill: var\(--vscode-editor-background\)/);
+  assert.match(sheet, /body\.vscode-high-contrast \.team-icon \{[^}]*outline: 1px solid var\(--vscode-contrastBorder/);
 });
