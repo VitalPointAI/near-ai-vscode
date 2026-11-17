@@ -337,14 +337,19 @@ function checkCounts(text: string, file: string): CheckCounts | undefined {
   } catch { return undefined; }
 }
 
+/** What the page shows for a team file whose reason names a path. */
+export const UNREADABLE_TEAM = 'The team file cannot be read as a team. Open it as Markdown to fix it.';
+
 /**
- * Why a team file is not usable, in words the page may show (PR 86 review, round 3): a file-system error names the file's path, so it becomes the plain
- * reason fileProblem gives; any other message has the file's path replaced by its name.
+ * Why a team file is not usable, in words the page may show (PR 86 review, rounds 3 and 4). A file-system error is mapped by its code (fileProblem),
+ * whatever the spelling of the path it carries; any other reason that names a path (a separator, or a drive letter) is replaced by a fixed sentence,
+ * so no spelling of a path on this computer ever reaches the page. The team loader's own reasons name no path and pass through.
  */
-export function plainTeamError(message: string, file: string): string {
+export function plainTeamError(message: string, _file?: string): string {
   const code = /^(E[A-Z]+):/.exec(message)?.[1];
   if (code) return `The team file could not be read${fileProblem({ code })}.`;
-  return [file, path.resolve(file), path.dirname(file)].reduce((text, part) => text.split(part).join(part === path.dirname(file) ? '' : path.basename(file)), message);
+  if (/[\\/]|(?:^|[^A-Za-z])[A-Za-z]:(?=[\\/])/.test(message)) return UNREADABLE_TEAM;
+  return message;
 }
 
 /** The listing as the page gets it: everything but the files' paths, which stay here (the page names teams only by the ids it was given). */

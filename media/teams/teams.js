@@ -530,19 +530,20 @@
     const heading = el('h2', '', 'Your teams'); heading.id = 'library-title';
     const actions = el('div', 'actions');
     // New team goes to the builder's first screen: Use an existing team, Create a new team, or Recommend a team for me.
-    actions.append(button('New team', () => startWizard('user'), { primary: true, icon: 'plus' }));
+    // Every control on the dashboard has a stable id, so focus comes back to it whenever the page is drawn again (PR 86 review, round 4).
+    actions.append(button('New team', () => startWizard('user'), { primary: true, icon: 'plus', id: 'new-team' }));
     // On demand, for every team at once: test each and set its member models from what the tests found.
     // 0.4.19 review: it said "This takes a few minutes", and six members on three models can run for hours. The host asks first and states the ceiling
     // worked out from the runs, so the button only says the run is coming, not how long it takes.
-    actions.append(button('Optimise all teams', () => { announce('Testing every team to set its models. The cost and the longest it can take are asked before anything runs.'); vscode.postMessage({ type: 'optimise-all' }); }, { label: 'Test every team and set each member model from what the tests found, after asking about the cost' }));
-    actions.append(button('Import…', () => vscode.postMessage({ type: 'import' })), button('Refresh', () => vscode.postMessage({ type: 'refresh' }), { link: true }));
+    actions.append(button('Optimise all teams', () => { announce('Testing every team to set its models. The cost and the longest it can take are asked before anything runs.'); vscode.postMessage({ type: 'optimise-all' }); }, { label: 'Test every team and set each member model from what the tests found, after asking about the cost', id: 'optimise-all' }));
+    actions.append(button('Import…', () => vscode.postMessage({ type: 'import' }), { id: 'import-team' }), button('Refresh', () => vscode.postMessage({ type: 'refresh' }), { link: true, id: 'refresh' }));
     bar.append(heading, actions);
     root.append(bar);
 
     if (savedDraft) {
       const resume = el('div', 'resume');
       resume.append(icon('warn'), el('span', '', 'You have an unfinished team' + (savedDraft.draft.name ? ' "' + savedDraft.draft.name + '"' : '') + ' (step ' + (savedDraft.step + 1) + ' of 5).'));
-      resume.append(button('Resume', () => startWizard(savedDraft.target, savedDraft), { primary: true }), button('Discard draft', () => { vscode.postMessage({ type: 'discard-draft' }); savedDraft = null; render(); }, { link: true }));
+      resume.append(button('Resume', () => startWizard(savedDraft.target, savedDraft), { primary: true, id: 'resume-draft' }), button('Discard draft', () => { vscode.postMessage({ type: 'discard-draft' }); savedDraft = null; render(); }, { link: true, id: 'discard-draft' }));
       root.append(resume);
     }
     const waiting = draftWaiting();
@@ -554,8 +555,8 @@
       const art = icon('team'); art.setAttribute('class', 'icon large');
       empty.append(art, el('h3', '', 'Create your first team'), el('p', 'hint', 'A team is a few agents with their own roles, models, and tools. A lead agent hands them the work and puts their results together. Start from a team the extension provides, build your own, or let the studio recommend one.'));
       const go = el('div', 'actions center');
-      go.append(button('New team', () => startWizard('user'), { primary: true, icon: 'plus', label: FIRST_TEAM_LABEL }));
-      if (ctx && ctx.hasProject) go.append(button('Set up a team for this project', () => startWizard('project')));
+      go.append(button('New team', () => startWizard('user'), { primary: true, icon: 'plus', label: FIRST_TEAM_LABEL, id: 'first-team' }));
+      if (ctx && ctx.hasProject) go.append(button('Set up a team for this project', () => startWizard('project'), { id: 'first-project-team' }));
       empty.append(go);
       root.append(empty);
     } else {
@@ -580,7 +581,7 @@
         const row = el('li', 'row');
         row.append(el('span', 'name', entry.name), el('span', 'hint', entry.savedAt ? 'archived ' + when(entry.savedAt) : ''));
         const actions = el('span', 'row-actions');
-        actions.append(button('Restore', () => vscode.postMessage({ type: 'restore', id: entry.id }), { label: 'Restore ' + entry.name }), button('Open as Markdown', () => vscode.postMessage({ type: 'open-markdown', id: entry.id }), { link: true, label: 'Open archived ' + entry.name + ' as Markdown' }));
+        actions.append(button('Restore', () => vscode.postMessage({ type: 'restore', id: entry.id }), { label: 'Restore ' + entry.name, id: 'restore-' + keyOf(entry.id) }), button('Open as Markdown', () => vscode.postMessage({ type: 'open-markdown', id: entry.id }), { link: true, label: 'Open archived ' + entry.name + ' as Markdown', id: 'archived-md-' + keyOf(entry.id) }));
         row.append(actions);
         list.append(row);
       }
@@ -651,7 +652,7 @@
     card.setAttribute('aria-labelledby', title.id);
     card.append(head, el('p', 'desc', 'A project team works on this folder and runs with /team:project. Set one up from a team you have, a new one, or a recommendation.'));
     const actions = el('div', 'card-actions');
-    actions.append(button('Set up', () => startWizard('project'), { primary: true, label: 'Set up a team for this project' }));
+    actions.append(button('Set up', () => startWizard('project'), { primary: true, label: 'Set up a team for this project', id: 'project-setup' }));
     card.append(actions);
     return card;
   }
@@ -677,14 +678,15 @@
     // The status, as words in a pill (never colour alone), and Watch it live while it runs.
     const status = el('p', 'status-line');
     status.append(el('span', 'pill ' + info.status, STATUS_TEXT[info.status] || 'Never run'));
-    if (info.status === 'running') status.append(button('Watch it live', () => vscode.postMessage({ type: 'watch-live', id: team.id }), { link: true, label: 'Watch ' + team.name + ' live in Team Live' }));
+    const cardKey = keyOf(team.id);
+    if (info.status === 'running') status.append(button('Watch it live', () => vscode.postMessage({ type: 'watch-live', id: team.id }), { link: true, label: 'Watch ' + team.name + ' live in Team Live', id: 'watch-' + cardKey }));
     card.append(status);
     if (team.error) {
       const problem = el('p', 'error'); problem.append(icon('error'), document.createTextNode(' Needs fixing: ' + team.error));
       card.append(problem);
       const actions = el('div', 'card-actions');
-      actions.append(button('Open as Markdown', () => vscode.postMessage({ type: 'open-markdown', id: team.id }), { primary: true, label: 'Open ' + team.name + ' as Markdown to fix it' }));
-      if (team.kind === 'user') actions.append(button('Archive', () => vscode.postMessage({ type: 'archive', id: team.id }), { label: 'Archive ' + team.name }));
+      actions.append(button('Open as Markdown', () => vscode.postMessage({ type: 'open-markdown', id: team.id }), { primary: true, label: 'Open ' + team.name + ' as Markdown to fix it', id: 'fix-' + cardKey }));
+      if (team.kind === 'user') actions.append(button('Archive', () => vscode.postMessage({ type: 'archive', id: team.id }), { label: 'Archive ' + team.name, id: 'archive-' + cardKey }));
       card.append(actions);
       return card;
     }
@@ -722,14 +724,14 @@
     const actions = el('div', 'card-actions');
     actions.append(
       button('Open', () => vscode.postMessage({ type: 'open', id: team.id }), { primary: true, label: 'Open ' + team.name, id: 'open-' + team.id }),
-      button('Use in chat', () => vscode.postMessage({ type: 'use-in-chat', id: team.id }), { label: 'Use ' + team.name + ' in chat' }),
-      button('Duplicate', () => vscode.postMessage({ type: 'duplicate', id: team.id }), { label: 'Duplicate ' + team.name }),
+      button('Use in chat', () => vscode.postMessage({ type: 'use-in-chat', id: team.id }), { label: 'Use ' + team.name + ' in chat', id: 'chat-' + cardKey }),
+      button('Duplicate', () => vscode.postMessage({ type: 'duplicate', id: team.id }), { label: 'Duplicate ' + team.name, id: 'duplicate-' + cardKey }),
       // Share is the one way to send a team (owner, 2026-11-16): the raw Markdown copy (Export) was dropped. Open as Markdown still shows the file.
-      button('Share…', () => vscode.postMessage({ type: 'share', id: team.id }), { label: 'Share ' + team.name })
+      button('Share…', () => vscode.postMessage({ type: 'share', id: team.id }), { label: 'Share ' + team.name, id: 'share-' + cardKey })
     );
     // A team made from a built-in project type can be brought up to date; the host previews every change and asks first.
     if (team.update) actions.append(button(team.update.available ? 'Update team…' : 'Check for updates…', () => vscode.postMessage({ type: 'update-team', id: team.id }), { label: (team.update.available ? 'Update ' : 'Check for updates to ') + team.name + ' (' + team.update.template + ' template' + (team.update.from ? ' v' + team.update.from : '') + (team.update.available ? ' → v' + team.update.to : '') + ')', id: 'update-' + team.id }));
-    if (team.kind === 'user') actions.append(button('Archive', () => vscode.postMessage({ type: 'archive', id: team.id }), { label: 'Archive ' + team.name }));
+    if (team.kind === 'user') actions.append(button('Archive', () => vscode.postMessage({ type: 'archive', id: team.id }), { label: 'Archive ' + team.name, id: 'archive-' + cardKey }));
     card.append(actions);
     return card;
   }
@@ -794,12 +796,12 @@
     return group;
   }
 
-  function chooseRating(team, value, group) {
-    pendingRating.set(team.id, value);
-    ratingQueue.set(team.id, value);
-    // The stars light up at once, in place, so focus stays on the star the person is on.
+  /** Shows `value` stars in a card's star group, in place: the radio checked, the stars lit (filled) up to it. Focus is not touched. */
+  function paintStars(group, value) {
     for (const node of group.children) {
-      if (node.tagName !== 'label' && node.tagName !== 'LABEL') continue;
+      const tag = String(node.tagName).toLowerCase();
+      if (tag === 'input') { node.checked = Number(node.value) === value; continue; }
+      if (tag !== 'label') continue;
       const stars = Number((node.getAttribute('for') || '').split('-').pop());
       const base = node.className.replace(/\s*\bon\b/g, '');
       const lit = Boolean(stars && stars <= value);
@@ -807,6 +809,30 @@
       const glyph = node.children && node.children[0];
       if (stars && glyph && glyph.className === 'glyph') glyph.textContent = lit ? '★' : '☆';
     }
+  }
+
+  /**
+   * The teams listed again with only ratings changed (the host's answer to a rating): each card's stars are updated in place, so the page is not drawn
+   * again under the person and focus stays exactly where it is (PR 86 review, round 4). Sorted by rating the cards move, so the page is drawn again.
+   */
+  function onlyRatingsChanged(next) {
+    if (work || dashSort === 'rating' || !next || !Array.isArray(next.teams)) return false;
+    const strip = (state) => JSON.stringify({ teams: (state.teams || []).map((team) => Object.assign({}, team, { rating: undefined })), archived: state.archived || [] });
+    return strip(next) === strip(lib);
+  }
+  function repaintRatings() {
+    for (const team of lib.teams) {
+      const radio = $('rate-' + keyOf(team.id) + '-0');
+      const group = radio && (radio.parentElement || radio.parentNode || radio.parent);
+      if (group) paintStars(group, ratingOf(team));
+    }
+  }
+
+  function chooseRating(team, value, group) {
+    pendingRating.set(team.id, value);
+    ratingQueue.set(team.id, value);
+    // The stars light up at once, in place, so focus stays on the star the person is on.
+    paintStars(group, value);
     if (ratingTimer) clearTimeout(ratingTimer);
     ratingTimer = setTimeout(sendRatings, 300);
   }
@@ -1277,7 +1303,7 @@
     const box = el('div', 'resume draft-waiting'); box.setAttribute('role', 'region'); box.setAttribute('aria-label', 'A drafted team');
     const name = (proposal.proposal && proposal.proposal.name) || (proposal.draft && proposal.draft.name) || 'New team';
     box.append(icon('team'), el('span', '', 'A team you described is drafted: "' + name + '". Review it before anything is saved.'));
-    box.append(button('Review it', reviewDrafted, { primary: true, label: 'Review the drafted team' }), button('Discard', discardDrafted, { link: true, label: 'Discard the drafted team' }));
+    box.append(button('Review it', reviewDrafted, { primary: true, label: 'Review the drafted team', id: 'review-drafted' }), button('Discard', discardDrafted, { link: true, label: 'Discard the drafted team', id: 'discard-drafted' }));
     return box;
   }
 
@@ -2227,6 +2253,12 @@
         break;
       }
       case 'library':
+        if (onlyRatingsChanged(message.library) && (!message.dashboard || JSON.stringify(message.dashboard) === JSON.stringify(dash))) {
+          lib = message.library;
+          if (message.picker) picker = message.picker;
+          repaintRatings();
+          break;
+        }
         lib = message.library;
         if (message.picker) picker = message.picker;
         if (message.dashboard) dash = message.dashboard;
