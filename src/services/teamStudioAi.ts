@@ -1,6 +1,6 @@
 import type { NearAiSettings } from '../domain/config';
 import { routeAllows, type PrivateRoute } from './agentSession';
-import type { AgentMessage, ModelInfo } from './nearAiClient';
+import { estimateImageCostUsd, type AgentMessage, type ModelInfo } from './nearAiClient';
 import { OutboundGuard } from './outboundGuard';
 
 // Every model call Team Studio makes (drafting a team from a description, Improve with AI) goes through here, so it passes the same outbound check as
@@ -87,6 +87,10 @@ export interface TeamAiDeps extends TeamAiInput {
   /** Today's spend from the key's ledger, as chat reads it. */
   spentTodayUsd(): Promise<number>;
   complete(model: string, messages: AgentMessage[], options: { maxTokens: number; signal?: AbortSignal; noThinking?: boolean }): Promise<{ text: string; finishReason?: string }>;
+  /** 0.4.30, team icons: the image model the settings name (nearAi.agent.imageModel), tried first. */
+  imageModel?: string;
+  /** Makes one image with this model, the way GenerateImage does (the client records what it costs). Absent where images cannot be made. */
+  generateImage?(model: string, prompt: string, signal?: AbortSignal): Promise<{ bytes?: Uint8Array }>;
 }
 
 export type TeamAiResult =
@@ -107,4 +111,61 @@ export async function teamModelCall(deps: TeamAiDeps, call: TeamAiCall): Promise
   if (call.signal?.aborted) return { ok: false, blocked: true, model: choice.model, reason: 'Cancelled.' };
   const reply = await deps.complete(choice.model, call.messages, { maxTokens: call.maxTokens, ...(call.signal ? { signal: call.signal } : {}), noThinking: true });
   return { ok: true, text: reply.text, model: choice.model, private: choice.private, ...(reply.finishReason ? { finishReason: reply.finishReason } : {}) };
+}
+
+// ---- team icons (0.4.30) ----
+// An icon made by an image model goes through the same rules as every other Team Studio call: the model is chosen here (a private team only ever gets a
+// private one), the outbound check runs on exactly the prompt that would be sent (emergency stop, the daily spend limit, TEE-only mode, the privacy
+// preflight), and nothing is sent unless it allows it. The person is asked first, with the model and its cost (imageEstimate); the studio does that.
+
+const imageOut = (model: ModelInfo) => (model.outputModalities ?? []).includes('image');
+
+/**
+ * The image model an icon would be made with. The one the settings name comes first, then the key's other image models. For a private need, only one that
+ * runs in NEAR's TEE (attested, on NEAR's endpoint) or on this computer; with TEE-only mode on, only a TEE or local one. `why` opens the refusal for a
+ * private need ("This team is private, so its icon", or the project's knowledge base).
+ */
+export function chooseImageModel(need: TeamAiNeed, input: Pick<TeamAiDeps, 'models' | 'routeFor' | 'privacyMode' | 'imageModel' | 'generateImage'>, why = 'This team is private, so its icon'): TeamAiChoice {
+  if (!input.generateImage) return { ok: false, reason: 'Making images is not available here. Upload an icon instead.' };
+  const images = input.models.filter(imageOut);
+  const ordered = [...images.filter((model) => model.id === input.imageModel), ...images.filter((model) => model.id !== input.imageModel)];
+  if (!ordered.length) return { ok: false, reason: 'Your NEAR AI key lists no image models, so an icon cannot be made with AI. Upload one instead.' };
+  const isPrivate = (model: ModelInfo) => routeAllows(input.routeFor(model), model) && attestationProblem(model) === undefined;
+  if (need === 'private') {
+    const chosen = ordered.find(isPrivate);
+    if (chosen) return { ok: true, model: chosen.id, info: chosen, private: true };
+    return { ok: false, reason: `${why} can only be made by a private image model (one in a NEAR TEE or on this computer), and none is available on this profile. Upload an icon instead.` };
+  }
+  const allowed = input.privacyMode === 'tee-only' ? ordered.filter((model) => model.privacyBoundary === 'tee' || model.privacyBoundary === 'local') : ordered;
+  const chosen = allowed[0];
+  if (!chosen) return { ok: false, reason: 'TEE-only mode is on, and none of your key\'s image models runs in NEAR\'s TEE or on this computer. Upload an icon instead, or turn off nearAi.privacyMode.' };
+  return { ok: true, model: chosen.id, info: chosen, private: isPrivate(chosen) };
+}
+
+/** What one icon costs at most, said before the person agrees: free on this computer, NEAR's price for one image rounded up to the cent, or unknown. */
+export function imageEstimate(model: ModelInfo): string {
+  if (model.privacyBoundary === 'local') return 'free: it runs on this computer';
+  const cost = estimateImageCostUsd(model, 1);
+  if (cost === undefined) return 'cost unknown: NEAR gives no price for this model';
+  return `about $${Math.max(0.01, Math.ceil(cost * 100) / 100).toFixed(2)} (one image)`;
+}
+
+/** Why the outbound check would refuse this prompt to this model now, or undefined when it may be sent. Run before the person is asked, and again before sending. */
+export async function imageCallBlocked(deps: TeamAiDeps, choice: Extract<TeamAiChoice, { ok: true }>, prompt: string): Promise<string | undefined> {
+  const verdict = new OutboundGuard(deps.settings).check({ model: choice.model, modelInfo: choice.info, text: prompt }, await deps.spentTodayUsd());
+  return verdict.outcome === 'allow' ? undefined : `${verdict.reason}${verdict.outcome === 'confirm' ? ' Team Studio cannot send it; remove it and try again.' : ''}`;
+}
+
+export type TeamImageResult = { ok: true; bytes: Uint8Array; model: string; private: boolean } | { ok: false; reason: string; model?: string };
+
+/** Chooses the image model, runs the outbound check on the prompt, then makes one image. Nothing reaches a provider unless the check allows it. */
+export async function teamImageCall(deps: TeamAiDeps, call: { need: TeamAiNeed; prompt: string; signal?: AbortSignal; why?: string }): Promise<TeamImageResult> {
+  const choice = chooseImageModel(call.need, deps, call.why);
+  if (!choice.ok) return { ok: false, reason: choice.reason };
+  const blocked = await imageCallBlocked(deps, choice, call.prompt);
+  if (blocked) return { ok: false, reason: blocked, model: choice.model };
+  if (call.signal?.aborted) return { ok: false, reason: 'Cancelled.', model: choice.model };
+  const result = await deps.generateImage!(choice.model, call.prompt, call.signal);
+  if (!result.bytes?.length) return { ok: false, reason: 'The image model returned no picture.', model: choice.model };
+  return { ok: true, bytes: result.bytes, model: choice.model, private: choice.private };
 }

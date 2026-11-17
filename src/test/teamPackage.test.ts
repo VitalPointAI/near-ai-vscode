@@ -8,6 +8,7 @@ import { PROJECT_TYPES, projectTypeTeam } from '../agent/projectTypes';
 import { buildTeamPackage, cleanKnowledge, findLocalPaths, importQuestion, readTeamMarkdown, readTeamPackage, shareProblems, TEAM_PACKAGE_FORMAT, TEAM_PACKAGE_VERSION, TeamPackageError } from '../agent/teamPackage';
 import { importedTeamQuestion, libraryTeamAllowed, newTeamTemplate, parseTeam, renderTeam, TeamLibrary, workingTeamFor } from '../agent/teams';
 import { emptyKnowledge, type TeamKnowledge } from '../domain/teamKnowledge';
+import { png, SVG } from './iconFixtures';
 import { filterPicker, teamPicker, NO_SAVED_TEAMS_TEXT, type LibraryTeam, type StudioStartingPoint } from '../services/teamStudioPage';
 
 const TEAM = renderTeam('Web crew', 'Builds pages', [
@@ -108,7 +109,8 @@ test('a tampered or malformed share file is refused with a plain message', () =>
     ['knowledge of the wrong shape', JSON.stringify({ ...pkg, knowledge: { nodes: 'x' } }), damaged],
     ['not JSON', 'not json at all', /^This file is not a NEAR AI team\./],
     ['another format', JSON.stringify({ ...pkg, format: 'something-else' }), /^This file is not a NEAR AI team\./],
-    ['a newer version', JSON.stringify({ ...pkg, formatVersion: 2 }), /^This team was shared from a newer version of NEAR AI\. Update the extension, then import it again\.$/],
+    // 0.4.30: version 2 (a share file that carries the team's icon) is read now, so the first newer version is 3.
+    ['a newer version', JSON.stringify({ ...pkg, formatVersion: 3 }), /^This team was shared from a newer version of NEAR AI\. Update the extension, then import it again\.$/],
     ['too large', `${' '.repeat(3 * 1024 * 1024)}{}`, /too large/]
   ];
   for (const [what, text, message] of cases) {
@@ -198,14 +200,15 @@ const TEAMS: LibraryTeam[] = [
 
 test('the picker lists the person\'s saved teams and the built-in ones, with where each came from, under All, My teams and Built-in', () => {
   const entries = teamPicker(POINTS, TEAMS);
-  assert.deepEqual(entries.map((entry) => [entry.id, entry.source]), [['lib:web-crew', 'mine'], ['lib:shared', 'mine'], ['recommend', 'builtin'], ['type:software', 'builtin'], ['gsd:review', 'builtin'], ['empty', 'builtin']]);
+  // 0.4.30: the recommendation is on the builder's first screen, so the picker leaves it out.
+  assert.deepEqual(entries.map((entry) => [entry.id, entry.source]), [['lib:web-crew', 'mine'], ['lib:shared', 'mine'], ['type:software', 'builtin'], ['gsd:review', 'builtin'], ['empty', 'builtin']]);
   const web = entries[0]!;
   assert.deepEqual([web.label, web.description, web.memberCount, web.members, web.origin, web.teamId], ['Web crew', 'Builds pages', 2, ['lead', 'dev'], 'My team, saved 2026-11-01', 'user:web-crew']);
   assert.deepEqual([entries[1]!.origin, entries[1]!.imported], ['Imported, not approved yet', true]);
   assert.equal(entries.find((entry) => entry.id === 'type:software')!.origin, 'Built in: project type');
   assert.deepEqual(filterPicker(entries, 'all').map((entry) => entry.id), entries.map((entry) => entry.id));
   assert.deepEqual(filterPicker(entries, 'mine').map((entry) => entry.id), ['lib:web-crew', 'lib:shared', 'empty']);
-  assert.deepEqual(filterPicker(entries, 'builtin').map((entry) => entry.id), ['recommend', 'type:software', 'gsd:review', 'empty']);
+  assert.deepEqual(filterPicker(entries, 'builtin').map((entry) => entry.id), ['type:software', 'gsd:review', 'empty']);
   // No saved teams: My teams shows only "Start empty", and the page says how to get one.
   assert.deepEqual(filterPicker(teamPicker(POINTS, [TEAMS[0]!]), 'mine').map((entry) => entry.id), ['empty']);
   assert.match(NO_SAVED_TEAMS_TEXT, /^You have no saved teams yet\. Save a team as one of your teams in Team Studio/);
@@ -312,4 +315,61 @@ test('a share file whose knowledge graph is malformed anywhere inside is refused
   for (const [what, value] of broken) {
     assert.throws(() => readTeamPackage(buildTeamPackage(TEAM, '/t/web.md', value as never)), (error: unknown) => error instanceof TeamPackageError && /^This team file was changed or damaged after it was shared/.test(error.message), what);
   }
+});
+
+// ---------- 0.4.30: the team's icon travels with it ----------
+
+const DAMAGED_FILE = (error: unknown) => error instanceof TeamPackageError && /^This team file was changed or damaged after it was shared, so it was not imported\. Ask for the file again\.$/.test(error.message);
+/** A share file as a sender could make it, with its digest right, whatever the icon holds. */
+function forged(icon: unknown, formatVersion = 2): string {
+  const { createHash } = require('node:crypto') as typeof import('node:crypto');
+  const team = { name: 'Web crew', description: 'Builds pages', members: 2, markdown: TEAM };
+  const integrity = `sha256-${createHash('sha256').update(JSON.stringify(formatVersion === 2 ? [TEAM, null, icon] : [TEAM, null])).digest('base64')}`;
+  return JSON.stringify({ format: TEAM_PACKAGE_FORMAT, formatVersion, team, knowledge: null, icon, listing: null, integrity });
+}
+
+test('a share file carries the team\'s icon as format 2; one without an icon stays format 1, which older versions read', () => {
+  const icon = png(128, 128, { seed: 12 });
+  const text = buildTeamPackage(TEAM, '/t/web-crew.md', undefined, icon);
+  const pkg = JSON.parse(text);
+  assert.deepEqual(Object.keys(pkg), ['format', 'formatVersion', 'team', 'knowledge', 'icon', 'listing', 'integrity']);
+  assert.equal(pkg.formatVersion, 2);
+  assert.equal(pkg.icon, icon.toString('base64'));
+  const read = readTeamPackage(text);
+  assert.deepEqual(read.icon, icon);
+  assert.equal(read.iconProblem, undefined);
+  assert.match(importQuestion(read), /It comes with its own icon\. It stays untrusted/);
+  const plain = JSON.parse(buildTeamPackage(TEAM, '/t/web-crew.md'));
+  assert.equal(plain.formatVersion, TEAM_PACKAGE_VERSION);
+  assert.equal(TEAM_PACKAGE_VERSION, 1);
+  assert.equal('icon' in plain, false, 'exactly the version 1 shape');
+  // The icon is covered by the digest: one swapped after export is a damaged file.
+  assert.throws(() => readTeamPackage(JSON.stringify({ ...pkg, icon: png(128, 128, { seed: 13 }).toString('base64') })), DAMAGED_FILE);
+  assert.throws(() => readTeamPackage(JSON.stringify({ ...plain, icon: pkg.icon })), DAMAGED_FILE, 'version 1 has no icon');
+  const { icon: _icon, ...missing } = pkg;
+  assert.throws(() => readTeamPackage(JSON.stringify(missing)), DAMAGED_FILE, 'version 2 always says whether it has one');
+  // Building one refuses an icon that is not one.
+  assert.throws(() => buildTeamPackage(TEAM, '/t/web-crew.md', undefined, png(64, 64)), /64 x 64/);
+});
+
+test('an imported icon is checked like any other, and one that is not a valid icon is left out with the reason, never refusing the team', () => {
+  const cases: Array<[string, unknown, RegExp]> = [
+    ['an SVG', SVG.toString('base64'), /not a PNG/],
+    ['a picture of the wrong size', png(64, 64).toString('base64'), /64 x 64 pixels/],
+    ['a PNG carrying text', png(128, 128, { extra: [['tEXt', Buffer.from('Comment\0hello')]] }).toString('base64'), /other than the picture/],
+    ['too large to be an icon', png(128, 128, { noise: true }).toString('base64'), /not a usable picture|larger than 64 KB/],
+    ['not base64', 'not base64!', /not a usable picture/],
+    ['not text', 42, /not a usable picture/]
+  ];
+  for (const [what, icon, reason] of cases) {
+    const read = readTeamPackage(forged(icon));
+    assert.equal(read.team.name, 'Web crew', what);
+    assert.equal(read.icon, undefined, what);
+    assert.match(read.iconProblem!, reason, what);
+    assert.match(importQuestion(read), /Its icon is left out: /, what);
+  }
+  const none = readTeamPackage(forged(null));
+  assert.equal(none.icon, undefined);
+  assert.equal(none.iconProblem, undefined);
+  assert.doesNotMatch(importQuestion(none), /icon/);
 });

@@ -70,6 +70,51 @@
   };
   const badge = (text, kind, title) => { const node = el('span', 'badge' + (kind ? ' ' + kind : ''), text); if (title) node.title = title; return node; };
   const privacyBadge = (privacy, title) => badge(PRIVACY_LABEL[privacy] || 'Unknown', 'privacy ' + privacy, title);
+
+  // ---------- team icons (0.4.30, owner 2026-11-17) ----------
+  // A team's own icon is a 128 x 128 PNG the host checked and sends as a data URI; anything else is never loaded (the policy allows only data: images,
+  // and this only a PNG one). A team without one, built-in teams included, gets a default drawn here: its initials on a colour picked from its name, so
+  // every card always has an icon and the same team always looks the same. The colours all keep white initials at a contrast of at least 4.5 to 1;
+  // high contrast themes draw it with the theme's own colours and a border instead (teams.css).
+  const ICON_COLOURS = ['#1f5fa8', '#6f3fb0', '#a3316a', '#a8401f', '#2b7139', '#0e6a74', '#7e5500', '#4a5568'];
+  const ICON_SIZE = 128;
+  const MAX_ICON_BYTES = 64 * 1024;
+  const PNG_URI = /^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/;
+  function initials(name) {
+    const words = String(name || '').split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+    const named = words.length > 1 ? words.filter((word) => word.toLowerCase() !== 'team') : words;
+    return (named.slice(0, 2).map((word) => Array.from(word)[0]).join('') || 'T').toUpperCase();
+  }
+  function iconColour(name) {
+    let hash = 2166136261;
+    for (const char of String(name || '').toLowerCase()) { hash ^= char.codePointAt(0); hash = Math.imul(hash, 16777619) >>> 0; }
+    return ICON_COLOURS[hash % ICON_COLOURS.length];
+  }
+  /**
+   * The team's icon: its own PNG, or the default. `label`: a name for a screen reader (the icon on its own, as in the editor); without one it is
+   * decorative, because the team's name is written beside it.
+   */
+  function teamIcon(name, uri, label, size) {
+    const big = size === 'large';
+    if (typeof uri === 'string' && PNG_URI.test(uri)) {
+      const image = el('img', 'team-icon' + (big ? ' large' : ''));
+      image.src = uri; image.alt = label ? 'Icon for ' + name : ''; image.width = big ? 64 : 32; image.height = big ? 64 : 32;
+      return image;
+    }
+    const svg = document.createElementNS(SVG, 'svg');
+    svg.setAttribute('viewBox', '0 0 32 32'); svg.setAttribute('width', big ? '64' : '32'); svg.setAttribute('height', big ? '64' : '32');
+    svg.setAttribute('class', 'team-icon team-icon-default' + (big ? ' large' : ''));
+    if (label) { svg.setAttribute('role', 'img'); svg.setAttribute('aria-label', 'Default icon for ' + name); } else svg.setAttribute('aria-hidden', 'true');
+    const box = document.createElementNS(SVG, 'rect');
+    box.setAttribute('width', '32'); box.setAttribute('height', '32'); box.setAttribute('rx', '7'); box.setAttribute('fill', iconColour(name));
+    const letters = document.createElementNS(SVG, 'text');
+    const text = initials(name);
+    letters.setAttribute('x', '16'); letters.setAttribute('y', '16'); letters.setAttribute('dy', '0.35em'); letters.setAttribute('text-anchor', 'middle');
+    letters.setAttribute('font-size', text.length > 1 ? '13' : '16'); letters.setAttribute('font-weight', '600'); letters.setAttribute('fill', '#ffffff');
+    letters.textContent = text;
+    svg.append(box, letters);
+    return svg;
+  }
   let uid = 0;
   const nextId = (prefix) => prefix + '-' + (++uid);
   function field(labelText, control, hint) {
@@ -154,6 +199,8 @@
   //   start -> new (Create a new team) -> From scratch -> steps
   //                                    -> pick (Clone an existing team) -> Clone and modify -> steps
   //                                    -> Describe it, and AI drafts it -> the library's AI box
+  //   start -> recommend (Recommend a team for me, 0.4.30: moved here from the picker) -> the answers -> the recommended team -> Use as is | Clone and
+  //            modify, as for a picked team. Changing an answer clears the team shown, so what is used is always what was shown for these answers.
   // Back goes one screen up from each of them: from the Purpose step to the screen the team was started from (work.path), and to Create a new team for
   // a draft saved before this change (no path) or a team the AI drafted. Cancel and "All teams" leave from any of them, asking first when something
   // is unsaved. A resumed draft opens straight on its step.
@@ -176,8 +223,11 @@
       work = { mode: 'wizard', stage: 'start', target: target === 'project' && ctx && ctx.hasProject ? 'project' : 'user', step: 0, maxStep: 0, draft: { name, description: '', members: [] }, startingPoint: 'empty', path: null, defaultName: name, options, review: null };
     }
     work.pickMode = 'existing';
-    // A draft cloned from a team goes back to the picker with that team still selected.
-    work.pick = resume && resume.path && resume.startingPoint && resume.startingPoint !== 'empty' ? resume.startingPoint : null;
+    // A draft cloned from a team goes back to the picker with that team still selected (the recommendation is not in the picker: its draft goes back
+    // to its own screen, see backFromPurpose).
+    work.pick = resume && resume.path && resume.startingPoint && resume.startingPoint !== 'empty' && resume.startingPoint !== 'recommend' ? resume.startingPoint : null;
+    work.recommendation = null;
+    work.recommendSeq = null;
     work.cloned = null;
     work.clean = JSON.stringify(work.draft);
     focusLater('step-heading');
@@ -192,13 +242,17 @@
     work.awaitingStart = null;
     // A request left behind is no longer waited on here (PR #75 review): the buttons are offered again, and the host still answers a second request.
     work.busy = false;
+    // The same for a recommendation asked for on a screen the person has left: its reply is dropped.
+    work.recommendSeq = null;
     focusLater('step-heading');
     render();
   }
 
   /** Back from the Purpose step: the screen the team was started from. */
   function backFromPurpose() {
-    if (work.path === 'existing') goStage('pick', 'existing');
+    // The recommendation, cloned on its own screen (path existing, as a 0.4.29 build also reads it) or from the 0.4.29 picker: back to its screen.
+    if (work.startingPoint === 'recommend' && (work.path === 'existing' || work.path === 'clone')) goStage('recommend');
+    else if (work.path === 'existing') goStage('pick', 'existing');
     else if (work.path === 'clone') goStage('pick', 'clone');
     else goStage('new');
   }
@@ -246,6 +300,50 @@
   }
 
   function focusMain() { const main = $('main'); if (main && main.focus) main.focus(); }
+
+  // ---------- one size of card (0.4.30, owner 2026-11-17: "ensure each of the team cards are standard size (truncate/show more for description if it's
+  // too long)") ----------
+  // A card's description is clamped to three lines and its member list to four names; Show more opens that card alone (aria-expanded), and the cards
+  // open stay open while the page is drawn again. Whether anything is clamped is worked out from the text first, then measured once the page is laid out,
+  // so a description that wraps to four lines in a narrow panel still gets its button.
+  const MEMBER_CHIPS = 4;
+  const CLAMP_CHARS = 120;
+  const expandedCards = new Set();
+
+  /** The Show more / Show less button for one card. `key` names the card (its team id; picker cards are prefixed), `controls` the clamped part. */
+  function moreButton(key, name, controls, hiddenMembers, longText) {
+    const open = expandedCards.has(key);
+    const node = button(open ? 'Show less' : 'Show more', () => {
+      if (expandedCards.has(key)) expandedCards.delete(key); else expandedCards.add(key);
+      focusLater(node.id);
+      render();
+    }, { link: true, label: (open ? 'Show less about ' : 'Show more about ') + name, id: 'more-' + key.replace(/[^A-Za-z0-9_-]/g, '-') });
+    node.className += ' more';
+    node.setAttribute('aria-expanded', open ? 'true' : 'false');
+    node.setAttribute('aria-controls', controls);
+    node.dataset.hiddenMembers = String(hiddenMembers);
+    node.hidden = !(open || hiddenMembers > 0 || longText);
+    return node;
+  }
+
+  /** After layout: a card whose text is cut off shows its button, one whose text fits does not. Only in a real page (the tests' small DOM has no layout). */
+  function measureClamps() {
+    const main = $('main');
+    if (!main || typeof main.querySelectorAll !== 'function') return;
+    for (const node of main.querySelectorAll('button.more')) {
+      if (node.getAttribute('aria-expanded') === 'true') { node.hidden = false; continue; }
+      const holder = node.closest('.card, .choice-cell');
+      const cut = holder ? [...holder.querySelectorAll('.clamp')].some((part) => part.scrollHeight > part.clientHeight + 1) : false;
+      node.hidden = !(cut || Number(node.dataset.hiddenMembers || 0) > 0);
+    }
+  }
+  let measureQueued = false;
+  function measureSoon() {
+    if (measureQueued || typeof requestAnimationFrame !== 'function') return;
+    measureQueued = true;
+    requestAnimationFrame(() => { measureQueued = false; measureClamps(); });
+  }
+  window.addEventListener('resize', () => measureSoon());
 
   // ---------- library ----------
   // ---------- the AI start ----------
@@ -416,7 +514,7 @@
     const card = el('li', 'card'); card.dataset.id = team.id;
     const head = el('div', 'card-head');
     const title = el('h3', 'card-title', team.name); title.id = nextId('team');
-    head.append(icon('team'), title, badge(team.kind === 'project' ? 'This project' : 'My team', team.kind === 'project' ? 'kind project' : 'kind'));
+    head.append(teamIcon(team.name, team.icon), title, badge(team.kind === 'project' ? 'This project' : 'My team', team.kind === 'project' ? 'kind project' : 'kind'));
     // An imported team runs only once the person approves it; the first run asks.
     if (team.imported) head.append(team.derived
       ? badge('Made from an import: not approved yet', 'kind imported', 'Made from an imported team you have not approved. The first time it runs you are asked to approve it.')
@@ -434,10 +532,19 @@
       card.append(actions);
       return card;
     }
-    if (team.description) card.append(el('p', 'desc', team.description));
+    const key = team.id;
+    const open = expandedCards.has(key);
+    if (open) card.className += ' expanded';
+    const desc = el('p', 'desc clamp', team.description || '');
+    desc.id = 'desc-' + key.replace(/[^A-Za-z0-9_-]/g, '-');
+    card.append(desc);
     const chips = el('ul', 'chips'); chips.setAttribute('aria-label', 'Members');
-    for (const member of team.members) chips.append(el('li', 'chip', member.name + (member.role && member.role !== member.name ? ' · ' + member.role : '')));
+    const shownMembers = open ? team.members : team.members.slice(0, MEMBER_CHIPS);
+    for (const member of shownMembers) chips.append(el('li', 'chip', member.name + (member.role && member.role !== member.name ? ' · ' + member.role : '')));
+    const hiddenMembers = team.members.length - shownMembers.length;
+    if (hiddenMembers > 0) chips.append(el('li', 'chip more-chip', '+' + hiddenMembers + ' more'));
     card.append(chips);
+    if (team.description || hiddenMembers > 0 || open) card.append(moreButton(key, team.name, desc.id, hiddenMembers, (team.description || '').length > CLAMP_CHARS));
     const counts = {};
     team.members.forEach((member) => { counts[member.privacy] = (counts[member.privacy] || 0) + 1; });
     const models = el('div', 'models');
@@ -488,6 +595,7 @@
     root.append(field('Team name', input(draft.name, (value) => { draft.name = value.replace(/[\r\n]+/g, ' '); renderHeaderName(); changed(false); }, { id: 'f-name', maxlength: '80', autocomplete: 'off' }), work.mode === 'editor' ? 'Renaming keeps the file and its /team: command.' : 'Shown in the library and when the team runs.'));
     root.append(field('What the team is for', textarea(draft.description, (value, node) => { const clean = value.replace(/[\r\n]+/g, ' '); if (clean !== value) node.value = clean; draft.description = clean; changed(false); }, 2, 'f-desc'), 'One or two sentences. The lead agent reads this.'));
     root.append(privateToggle(draft));
+    if (work.mode === 'editor') root.append(iconField());
     if (work.mode !== 'wizard') return;
     const where = el('fieldset', 'choices');
     where.append(el('legend', '', 'Save it as'));
@@ -501,6 +609,72 @@
     });
     root.append(where);
     if ((work.startingPoint || '').startsWith('type:')) root.append(el('p', 'hint', 'Saving this as the project team also writes this project type\'s guidance to AGENTS.md (plan, execute, red team, verify, audit, release).'));
+  }
+
+  /**
+   * The saved team's icon (0.4.30): Upload (VS Code's file picker; the host checks the picture and this page makes it a 128 x 128 PNG), Generate with AI
+   * (offered when an image model may be used for this team; the cost is asked first), and Remove (back to the default). One request at a time.
+   */
+  function iconField() {
+    const name = work.draft.name || 'this team';
+    const wrap = el('div', 'field icon-field');
+    const heading = el('span', 'field-label', 'Team icon'); heading.id = 'icon-label';
+    const row = el('div', 'icon-row');
+    const preview = teamIcon(name, work.icon, true, 'large'); preview.id = 'icon-preview';
+    const actions = el('div', 'actions'); actions.setAttribute('role', 'group'); actions.setAttribute('aria-labelledby', 'icon-label');
+    const busy = Boolean(work.iconBusy);
+    const ai = work.iconAi || { available: false, reason: 'Checking whether an image model can be used…' };
+    actions.append(button('Upload icon…', () => iconRequest('icon-upload'), { id: 'icon-upload', label: 'Upload an icon for ' + name + ' (PNG, JPEG or WebP)', disabled: busy }));
+    const generate = button('Generate with AI…', () => iconRequest('icon-generate'), { id: 'icon-generate', label: 'Generate an icon for ' + name + ' with AI', disabled: busy || !ai.available });
+    actions.append(generate);
+    if (work.icon) actions.append(button('Remove icon', () => iconRequest('icon-remove'), { id: 'icon-remove', label: 'Remove the icon of ' + name + ' and use the default', link: true, disabled: busy }));
+    row.append(preview, actions);
+    wrap.append(heading, row);
+    wrap.append(el('p', 'hint', 'PNG, JPEG or WebP, up to 2 MB. It is cropped to a square and saved as a 128 x 128 PNG beside the team file. Without one, the team shows its initials.'));
+    const why = el('p', 'hint', ai.available ? 'Generate with AI sends the team\'s name and what it is for to ' + ai.model + (ai.private ? ', a private model' : '') + (ai.estimate ? ' (' + ai.estimate + ')' : '') + '. You are asked first.' : 'Generate with AI: ' + (ai.reason || 'not available here.'));
+    why.id = 'icon-generate-hint'; generate.setAttribute('aria-describedby', why.id);
+    wrap.append(why);
+    if (busy) { const working = el('p', 'hint', 'Working on the icon…'); working.setAttribute('role', 'status'); wrap.append(working); }
+    return wrap;
+  }
+
+  function iconRequest(type) {
+    if (!work || work.mode !== 'editor' || work.iconBusy) return;
+    work.iconBusy = true;
+    vscode.postMessage({ type, id: work.id });
+    render();
+  }
+
+  /** The picture the host checked, made into the icon: the centre square, scaled to 128 x 128, encoded as a PNG of at most 64 KB. */
+  /** A picture that is still larger than an icon may be after its colours were simplified: too detailed, not unreadable (PR #82 review). */
+  class IconTooDetailed extends Error {}
+
+  async function normaliseIcon(mime, data) {
+    const binary = atob(data);
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+    const bitmap = await createImageBitmap(new Blob([bytes], { type: mime }));
+    try {
+      const side = Math.min(bitmap.width, bitmap.height);
+      if (!side) throw new Error('empty image');
+      const canvas = document.createElement('canvas');
+      canvas.width = ICON_SIZE; canvas.height = ICON_SIZE;
+      const context = canvas.getContext('2d');
+      context.imageSmoothingEnabled = true; context.imageSmoothingQuality = 'high';
+      context.drawImage(bitmap, (bitmap.width - side) / 2, (bitmap.height - side) / 2, side, side, 0, 0, ICON_SIZE, ICON_SIZE);
+      // A busy photo can still be larger than an icon may be: its colours are simplified a step at a time until it fits.
+      for (const step of [0, 8, 16, 32]) {
+        if (step) {
+          const image = context.getImageData(0, 0, ICON_SIZE, ICON_SIZE);
+          for (let index = 0; index < image.data.length; index += 1) image.data[index] = Math.min(255, Math.round(image.data[index] / step) * step);
+          context.putImageData(image, 0, 0);
+        }
+        const uri = canvas.toDataURL('image/png');
+        const encoded = uri.slice(uri.indexOf(',') + 1);
+        if (/^data:image\/png;base64,/.test(uri) && Math.floor(encoded.length * 3 / 4) <= MAX_ICON_BYTES) return encoded;
+      }
+      throw new IconTooDetailed();
+    } finally { if (bitmap.close) bitmap.close(); }
   }
 
   // The team's own private marking (owner, 2026-11-16): every member runs only on a private model, and the team is sent only to a private model when the
@@ -529,9 +703,13 @@
     // Names come from the host (PR #75 review): the page has no naming rules of its own, so what it shows is what the host saves.
     return (ctx ? ctx.startingPoints : []).map((point) => ({ id: point.id, source: 'builtin', group: point.group, label: point.label, name: point.name || point.label, cloneName: point.name || point.label, description: point.description, members: point.members, memberCount: point.members.length, origin: 'Built in' }));
   }
-  /** The teams the picker offers under the current filter. "Start empty" is not a team: From scratch is its own choice now. */
+  /**
+   * The teams the picker offers under the current filter. "Start empty" is not a team: From scratch is its own choice now. The recommendation is not
+   * either: it is made from answers, on its own screen (0.4.30), so it is never offered twice.
+   */
+  const inPicker = (entry) => entry.id !== 'empty' && entry.id !== 'recommend';
   function visibleEntries() {
-    return pickerEntries().filter((entry) => entry.id !== 'empty' && (pickerFilter === 'all' || entry.source === pickerFilter));
+    return pickerEntries().filter((entry) => inPicker(entry) && (pickerFilter === 'all' || entry.source === pickerFilter));
   }
   const entryName = (entry) => entry.name || entry.label;
 
@@ -551,15 +729,16 @@
   }
 
   function renderStart(root) {
-    const titles = { start: 'How do you want to start?', new: 'Create a new team', pick: work.pickMode === 'existing' ? 'Use an existing team' : 'Clone an existing team' };
+    const titles = { start: 'How do you want to start?', new: 'Create a new team', recommend: 'Recommend a team for me', pick: work.pickMode === 'existing' ? 'Use an existing team' : 'Clone an existing team' };
     const panel = el('section', 'panel start'); panel.setAttribute('aria-labelledby', 'step-heading');
     const heading = el('h2', '', titles[work.stage]); heading.id = 'step-heading'; heading.setAttribute('tabindex', '-1');
     panel.append(heading);
     if (work.stage === 'start') {
-      panel.append(el('p', 'hint', 'Use a team that already exists, or make a new one with its own name.'));
+      panel.append(el('p', 'hint', 'Use a team that already exists, make a new one with its own name, or let the studio suggest one.'));
       panel.append(startChoices([
         ['start-existing', 'Use an existing team', 'One of your saved teams, or one the extension provides. Use it as it is, or clone it and change it.', () => goStage('pick', 'existing')],
-        ['start-new', 'Create a new team', 'Give it a name and its members: from scratch, or from a copy of an existing team.', () => goStage('new')]
+        ['start-new', 'Create a new team', 'Give it a name and its members: from scratch, or from a copy of an existing team.', () => goStage('new')],
+        ['start-recommend', 'Recommend a team for me', 'Answer a few questions about the work. The studio suggests a team sized to it; use it as it is, or clone it and change it.', () => goStage('recommend')]
       ]));
     } else if (work.stage === 'new') {
       panel.append(el('p', 'hint', 'A new team gets its own name, and you choose where to save it.'));
@@ -568,7 +747,8 @@
         ['new-clone', 'Clone an existing team', 'Start from a copy of one of your teams or a built-in one, then change it.', () => goStage('pick', 'clone')],
         ['new-ai', 'Describe it, and AI drafts it', 'Say what the team should produce. AI proposes a team for you to look over before anything is saved.', describeToAi]
       ]));
-    } else sectionPicker(panel);
+    } else if (work.stage === 'recommend') sectionRecommend(panel);
+    else sectionPicker(panel);
     root.append(panel);
     const footer = el('div', 'footer');
     if (work.stage !== 'start') footer.append(button('Back', () => goStage(work.stage === 'pick' && work.pickMode === 'clone' ? 'new' : 'start'), {}));
@@ -580,7 +760,7 @@
   function sectionPicker(root) {
     const existing = work.pickMode === 'existing';
     root.append(el('p', 'hint', existing ? 'Pick a team. Use it as it is, or clone it into a new team and change it.' : 'Pick the team to copy. You name the copy, and can change everything in it before it is saved.'));
-    const entries = pickerEntries().filter((entry) => entry.id !== 'empty');
+    const entries = pickerEntries().filter(inPicker);
     // All, My teams (saved from any project) or Built-in (provided by the extension).
     const filter = el('div', 'picker-filter'); filter.setAttribute('role', 'radiogroup'); filter.setAttribute('aria-label', 'Show teams');
     for (const [value, label] of PICKER_FILTERS) {
@@ -597,7 +777,7 @@
       filter.append(option);
     }
     root.append(filter);
-    const groups = [['library', 'My teams'], ['recommend', 'Recommended'], ['project-type', 'For this kind of project'], ['gsd', 'Built from Open-GSD roles']];
+    const groups = [['library', 'My teams'], ['project-type', 'For this kind of project'], ['gsd', 'Built from Open-GSD roles']];
     const visible = visibleEntries();
     if (pickerFilter === 'mine' && !visible.length) root.append(el('p', 'hint empty-picker', NO_SAVED_TEAMS));
     // The radios share one name, so they are one group to the keyboard and a screen reader; the selected team's buttons and answers sit beside them.
@@ -609,16 +789,29 @@
       const grid = el('div', 'choice-grid');
       for (const point of points) {
         const selected = work.pick === point.id;
-        const cell = el('div', 'choice-cell' + (selected ? ' selected' : ''));
+        const key = 'pick:' + point.id;
+        const open = expandedCards.has(key);
+        const cell = el('div', 'choice-cell' + (selected ? ' selected' : '') + (open ? ' expanded' : ''));
         const option = el('label', 'choice' + (selected ? ' selected' : ''));
         const radio = el('input'); radio.type = 'radio'; radio.name = 'starting-point'; radio.value = point.id; radio.checked = selected; radio.id = 'pick-' + point.id.replace(/[^a-z0-9-]/g, '-');
         // What the team is for belongs to the team it was typed for (PR #75 review): choosing another one starts it empty.
         radio.addEventListener('change', () => { if (work.pick !== point.id) work.options.goal = ''; work.pick = point.id; render(); });
-        option.append(radio, el('span', 'choice-label', point.label));
+        const label = el('span', 'choice-label');
+        // A saved team's icon comes with the library listing (sent once, not again for the picker); built-in teams show the default.
+        const listed = point.teamId ? (lib.teams || []).find((team) => team.id === point.teamId) : null;
+        label.append(teamIcon(entryName(point), listed ? listed.icon : null), document.createTextNode(point.label));
+        option.append(radio, label);
         if (point.origin) option.append(badge(point.origin, point.imported ? 'kind imported' : 'kind'));
-        if (point.description) option.append(el('span', 'hint', point.description));
-        if (point.members.length) option.append(el('span', 'hint small', point.memberCount + ' member' + (point.memberCount === 1 ? '' : 's') + ': ' + point.members.join(', ')));
+        const descId = 'pdesc-' + point.id.replace(/[^A-Za-z0-9_-]/g, '-');
+        const desc = el('span', 'hint clamp', point.description || ''); desc.id = descId;
+        option.append(desc);
+        // The same rule as a library card (PR #82 review): the first four members, then a count of the rest; Show more lists them all.
+        const shownMembers = open ? point.members : point.members.slice(0, MEMBER_CHIPS);
+        const hiddenMembers = point.members.length - shownMembers.length;
+        if (point.members.length) option.append(el('span', 'hint small', point.memberCount + ' member' + (point.memberCount === 1 ? '' : 's') + ': ' + shownMembers.join(', ') + (hiddenMembers > 0 ? ' +' + hiddenMembers + ' more' : '')));
         cell.append(option);
+        // Beside the choice, not inside its label, so opening a card never selects the team.
+        if (point.description || point.members.length) cell.append(moreButton(key, entryName(point), descId, hiddenMembers, (point.description || '').length > CLAMP_CHARS));
         // A saved team can be shared from here too (one portable file to send; the host checks it and asks about the knowledge graph).
         if (point.teamId) cell.append(button('Share…', () => vscode.postMessage({ type: 'share', id: point.teamId }), { link: true, label: 'Share ' + point.label }));
         if (selected) cell.append(pickActions(point));
@@ -630,23 +823,26 @@
   }
 
   /**
-   * What can be done with the selected team. A built-in team is made from a few answers (what it is for, where its models run, and for the
-   * recommendation the kind of work and its risk), so those are asked here, before Use as is or Clone and modify, and nothing else is.
+   * What can be done with the selected team. A built-in team is made from a few answers (what it is for and where its models run), so those are asked
+   * here, before Use as is or Clone and modify, and nothing else is. (The recommendation's own questions are on its screen, sectionRecommend.)
    */
   function pickActions(point) {
-    const existing = work.pickMode === 'existing';
-    const name = entryName(point);
     const box = el('div', 'pick-details');
     if (point.source === 'builtin') {
       const fields = el('div', 'inline-fields');
-      fields.append(field('What the team is for', input(work.options.goal, (value) => { work.options.goal = value.replace(/[\r\n]+/g, ' '); }, { id: 'f-goal', maxlength: '400', autocomplete: 'off' }), 'Optional. It is written into the members\' instructions.'));
-      fields.append(field('Where models may run', select([{ value: 'cloud', label: 'NEAR AI Cloud' }, { value: 'local', label: 'Local runtime only' }, { value: 'hybrid', label: 'Both' }], work.options.locality, (value) => { work.options.locality = value; }, 'f-locality')));
-      if (point.id === 'recommend') {
-        fields.append(field('Kind of work', select(['feature', 'bugfix', 'refactor', 'research', 'release'].map((value) => ({ value, label: value[0].toUpperCase() + value.slice(1) })), work.options.workShape, (value) => { work.options.workShape = value; }, 'f-shape')));
-        fields.append(field('Risk', select([{ value: 'low', label: 'Low' }, { value: 'medium', label: 'Medium' }, { value: 'high', label: 'High (adds a security member)' }], work.options.riskLevel, (value) => { work.options.riskLevel = value; }, 'f-risk')));
-      }
+      fields.append(goalField(), localityField());
       box.append(fields);
     }
+    pickButtons(box, point, work.pickMode === 'existing');
+    return box;
+  }
+
+  const goalField = (onInput) => field('What the team is for', input(work.options.goal, (value) => { work.options.goal = value.replace(/[\r\n]+/g, ' '); if (onInput) onInput(); }, { id: 'f-goal', maxlength: '400', autocomplete: 'off' }), 'Optional. It is written into the members\' instructions.');
+  const localityField = (onChange) => field('Where models may run', select([{ value: 'cloud', label: 'NEAR AI Cloud' }, { value: 'local', label: 'Local runtime only' }, { value: 'hybrid', label: 'Both' }], work.options.locality, (value) => { work.options.locality = value; if (onChange) onChange(); }, 'f-locality'));
+
+  /** Use as is (when using an existing team) and Clone and modify for a team, with what each will do. */
+  function pickButtons(box, point, existing) {
+    const name = entryName(point);
     const actions = el('div', 'actions');
     if (existing) actions.append(button('Use as is', () => useAsIs(point), { primary: true, label: 'Use ' + name + ' as is', id: 'use-as-is', disabled: work.busy }));
     actions.append(button('Clone and modify', () => cloneEntry(point), { primary: !existing, label: 'Clone ' + name + ' and modify it', id: 'clone-team', disabled: work.busy }));
@@ -660,11 +856,76 @@
     const count = work.draft.members.length;
     if (count) box.append(el('p', 'hint', 'Clone and modify replaces the ' + count + ' member' + (count === 1 ? '' : 's') + ' your team has now.'));
     if (point.id.startsWith('type:')) box.append(el('p', 'hint', 'As this project\'s team it also writes this project type\'s guidance to AGENTS.md (plan, execute, red team, verify, audit, release).'));
-    return box;
+  }
+
+  // ---------- Recommend a team for me (0.4.30: moved from the picker to the first screen) ----------
+  let recommendSeq = 0;
+
+  /** The answers changed: a team shown for the old ones no longer applies, so it is cleared (and the person is told) until recommended again. */
+  // PR #82 review, round 2: every change of an answer ends the request in flight too (its reply is for the old answers), not only a team already shown;
+  // a reply is taken only when its number and its answers match the answers on screen; and Use as is and Clone send the answers the shown team was made
+  // from, never whatever the fields hold now.
+  const currentAnswers = () => ({ goal: work.options.goal.slice(0, 400), locality: work.options.locality, workShape: work.options.workShape, riskLevel: work.options.riskLevel });
+  const sameAnswers = (one, two) => Boolean(one && two) && ['goal', 'locality', 'workShape', 'riskLevel'].every((key) => one[key] === two[key]);
+
+  function answersChanged(redraw) {
+    const waiting = work.recommendSeq !== null;
+    if (waiting) { work.recommendSeq = null; work.busy = false; }
+    if (!work.recommendation && !waiting) return;
+    work.recommendation = null;
+    work.recommendStale = true;
+    // A request that was waiting had its button off: draw the screen again so Recommend works at once.
+    if (redraw || waiting) { render(); return; }
+    // While typing: the shown team is replaced in place, so the field keeps its caret.
+    const box = $('recommendation');
+    if (box) box.replaceChildren(el('p', 'hint', STALE_RECOMMENDATION));
+  }
+  const STALE_RECOMMENDATION = 'Your answers changed. Recommend again to see the team for them.';
+
+  function sectionRecommend(root) {
+    root.append(el('p', 'hint', 'Answer these about the work. The studio suggests a team sized to it, and shows it before anything is saved.'));
+    const fields = el('div', 'inline-fields');
+    fields.append(field('Kind of work', select(['feature', 'bugfix', 'refactor', 'research', 'release'].map((value) => ({ value, label: value[0].toUpperCase() + value.slice(1) })), work.options.workShape, (value) => { work.options.workShape = value; answersChanged(true); }, 'f-shape')));
+    fields.append(field('Risk', select([{ value: 'low', label: 'Low' }, { value: 'medium', label: 'Medium' }, { value: 'high', label: 'High (adds a security member)' }], work.options.riskLevel, (value) => { work.options.riskLevel = value; answersChanged(true); }, 'f-risk')));
+    fields.append(localityField(() => answersChanged(true)), goalField(() => answersChanged(false)));
+    root.append(fields);
+    const actions = el('div', 'actions');
+    actions.append(button('Recommend a team', requestRecommendation, { primary: !work.recommendation, id: 'recommend-go', disabled: work.busy }));
+    if (work.busy && work.recommendSeq !== null) actions.append(el('span', 'hint', 'Waiting for the answer…'));
+    root.append(actions);
+    const result = el('section', 'recommendation'); result.id = 'recommendation'; result.setAttribute('aria-live', 'polite');
+    const shown = work.recommendation;
+    if (shown) {
+      const title = el('h3', '', shown.name); title.id = 'recommendation-title';
+      result.setAttribute('aria-labelledby', title.id);
+      const head = el('div', 'card-head');
+      head.append(teamIcon(shown.name), title, badge('Built in', 'kind'));
+      result.append(head);
+      if (shown.description) result.append(el('p', 'desc', shown.description));
+      result.append(el('p', 'meta', shown.members.length + ' member' + (shown.members.length === 1 ? '' : 's')));
+      const chips = el('ul', 'chips'); chips.setAttribute('aria-label', 'Members');
+      for (const member of shown.members) chips.append(el('li', 'chip', member.name + (member.role && member.role !== member.name ? ' · ' + member.role : '')));
+      result.append(chips);
+      const point = { id: 'recommend', source: 'builtin', name: shown.name, cloneName: shown.cloneName, ...(shown.saveAs ? { saveAs: shown.saveAs } : {}), members: shown.members.map((member) => member.name), answers: shown.answers };
+      pickButtons(result, point, true);
+    } else if (work.recommendStale) result.append(el('p', 'hint', STALE_RECOMMENDATION));
+    root.append(result);
+  }
+
+  /** One request at a time; the reply is matched by its number, so one for an older request or a screen the person left is dropped. */
+  function requestRecommendation() {
+    if (work.busy) return;
+    recommendSeq += 1;
+    work.recommendSeq = recommendSeq;
+    work.busy = true;
+    vscode.postMessage(Object.assign({ type: 'recommend', seq: recommendSeq }, currentAnswers()));
+    render();
   }
 
   function startAnswers(point, message) {
     if (point.source !== 'builtin') return message;
+    // The recommendation shown carries the answers it was made from, and sends exactly those.
+    if (point.answers) return Object.assign(message, point.answers);
     message.goal = work.options.goal.slice(0, 400);
     message.locality = work.options.locality;
     if (point.id === 'recommend') { message.workShape = work.options.workShape; message.riskLevel = work.options.riskLevel; }
@@ -687,7 +948,9 @@
   function cloneEntry(point) {
     if (work.busy) return;
     const label = entryName(point);
-    work.awaitingStart = { id: point.id, clone: true, path: work.pickMode === 'existing' ? 'existing' : 'clone', label, name: point.cloneName || label, goal: point.source === 'builtin' ? work.options.goal : '' };
+    // The recommendation is cloned on its own screen; its path is `existing`, which a 0.4.29 build also reads, and Back finds its screen from the starting
+    // point (backFromPurpose).
+    work.awaitingStart = { id: point.id, clone: true, stage: work.stage, path: work.stage === 'recommend' || work.pickMode === 'existing' ? 'existing' : 'clone', label, name: point.cloneName || label, goal: point.answers ? point.answers.goal : point.source === 'builtin' ? work.options.goal : '' };
     const message = startAnswers(point, { type: 'starting-point', id: point.id, goal: '', locality: work.options.locality });
     vscode.postMessage(message);
     work.busy = true;
@@ -965,6 +1228,7 @@
 
   function sectionHistory(root) {
     root.append(el('p', 'hint', 'Every save is kept as a version (the latest 20). View one to compare it with the file now, or restore it.'));
+    iconHistory(root);
     const versions = work.versions || [];
     if (!versions.length) { root.append(el('p', 'hint', 'No versions yet.')); return; }
     const list = el('ul', 'rows');
@@ -989,6 +1253,24 @@
       }
       root.append(el('p', 'hint', changes ? changes + ' changed line' + (changes === 1 ? '' : 's') + ' (- only in that version, + only in the file now).' : 'No differences: the file now matches this version.'), diff);
     }
+  }
+
+  /** Earlier icons (0.4.30): each one the team had before a change or Remove, newest first, with Restore. */
+  function iconHistory(root) {
+    const earlier = work.iconHistory || [];
+    if (!earlier.length) return;
+    root.append(el('h3', '', 'Earlier icons'));
+    const list = el('ul', 'rows icon-history');
+    for (const entry of earlier) {
+      const row = el('li', 'row');
+      row.append(teamIcon(work.draft.name, entry.icon), el('span', 'name', entry.label));
+      const actions = el('span', 'row-actions');
+      actions.append(button('Restore', () => { if (work.iconBusy) return; work.iconBusy = true; vscode.postMessage({ type: 'icon-restore', id: work.id, ref: entry.ref }); render(); }, { label: 'Restore the icon from ' + entry.label, disabled: Boolean(work.iconBusy) }));
+      row.append(actions);
+      list.append(row);
+    }
+    root.append(list);
+    root.append(el('h3', '', 'Team file versions'));
   }
 
   // ---------- review results ----------
@@ -1117,7 +1399,7 @@
   function renderEditor(root) {
     const head = el('div', 'editor-head');
     const title = el('div', 'editor-title');
-    title.append(el('h2', '', work.draft.name || 'Team'), el('code', 'hint', work.file));
+    title.append(teamIcon(work.draft.name || 'Team', work.icon), el('h2', '', work.draft.name || 'Team'), el('code', 'hint', work.file));
     const dirty = el('span', 'dirty'); dirty.id = 'dirty'; dirty.setAttribute('aria-live', 'polite');
     title.append(dirty);
     const actions = el('div', 'actions');
@@ -1313,7 +1595,8 @@
   function openEditor(message, keepTab) {
     const same = keepTab && work && work.mode === 'editor' && work.id === message.id;
     // The same team reopened after a Save keeps its Improve panel: pending suggestions stay, and any whose field changed show as Stale.
-    work = { mode: 'editor', id: message.id, kind: message.kind, file: message.file, command: message.command, base: message.base, draft: message.draft, clean: JSON.stringify(message.draft), teamPrivacy: message.teamPrivacy || null, tab: same ? work.tab : 0, versions: message.versions || [], review: null, versionView: null, improve: same ? work.improve : null };
+    work = { mode: 'editor', id: message.id, kind: message.kind, file: message.file, command: message.command, base: message.base, draft: message.draft, clean: JSON.stringify(message.draft), teamPrivacy: message.teamPrivacy || null, tab: same ? work.tab : 0, versions: message.versions || [], review: null, versionView: null, improve: same ? work.improve : null,
+      icon: message.icon || null, iconHistory: Array.isArray(message.iconHistory) ? message.iconHistory : [], iconAi: message.iconAi || null, iconBusy: false };
   }
 
   // ---------- Improve with AI (0.4.27) ----------
@@ -1603,6 +1886,7 @@
     pendingFocus = null;
     const node = target && $(target);
     if (node && node.focus) node.focus();
+    measureSoon();
   }
 
   function showKept(kept) {
@@ -1773,12 +2057,12 @@
         break;
       case 'starting-point': {
         // Any reply frees Use as is and Clone and modify again, even one that is dropped below.
-        if (work && work.mode === 'wizard' && work.busy) { work.busy = false; if (work.stage === 'pick') render(); }
+        if (work && work.mode === 'wizard' && work.busy) { work.busy = false; if (work.stage === 'pick' || work.stage === 'recommend') render(); }
         // Only the reply to the request still waiting: one for a screen the person has left (Back, another team) is dropped.
         const pending = work && work.mode === 'wizard' ? work.awaitingStart : null;
         if (!pending || pending.id !== message.id) break;
         // The person left the picker: this reply is dropped for good, so a later one cannot move the builder either (PR #75 review).
-        if (pending.clone && work.stage !== 'pick') { work.awaitingStart = null; break; }
+        if (pending.clone && work.stage !== (pending.stage || 'pick')) { work.awaitingStart = null; break; }
         work.awaitingStart = null;
         const draft = message.draft;
         work.projectType = message.projectType || null;
@@ -1810,6 +2094,19 @@
         requestReview();
         break;
       }
+      case 'recommendation': {
+        // Only the reply to the request still waiting, on the screen it was asked from.
+        if (!work || work.mode !== 'wizard' || work.stage !== 'recommend' || work.recommendSeq === null || message.seq !== work.recommendSeq) break;
+        // Made from answers that are no longer the ones on screen: not shown (answersChanged has normally ended the request already).
+        if (!sameAnswers(message.answers, currentAnswers())) { work.recommendSeq = null; work.busy = false; work.recommendStale = true; render(); break; }
+        work.recommendSeq = null;
+        work.busy = false;
+        work.recommendStale = false;
+        work.recommendation = { answers: currentAnswers(), name: String(message.name || ''), cloneName: String(message.cloneName || message.name || ''), ...(message.saveAs ? { saveAs: String(message.saveAs) } : {}), description: String(message.description || ''), members: Array.isArray(message.members) ? message.members.map((member) => ({ name: String(member.name || ''), role: String(member.role || '') })) : [] };
+        render();
+        announce('Recommended ' + work.recommendation.name + ': ' + work.recommendation.members.length + ' members. Use it as it is, or clone it and change it.');
+        break;
+      }
       case 'used':
         // Use as is was declined (the project's team, or the builder's unsaved work, is kept): nothing changed, so the builder stays where it is.
         if (message.declined) { if (work && work.mode === 'wizard') { work.busy = false; render(); } if (message.text) { showBanner(message.text, 'info'); announce(message.text); } break; }
@@ -1819,6 +2116,37 @@
         if (work && work.mode === 'wizard') work = null;
         flash = message.focus || null;
         render();
+        if (message.text) { showBanner(message.text, 'info'); announce(message.text); }
+        break;
+      case 'icon-source': {
+        // The picture the host checked: made into the icon here, then sent back to be checked again and saved. A picture this page cannot read is
+        // reported, and the host is told so it stops waiting.
+        if (!work || work.mode !== 'editor' || work.id !== message.id) break;
+        const seq = message.seq;
+        normaliseIcon(String(message.mime || ''), String(message.data || '')).then((png) => {
+          vscode.postMessage({ type: 'icon-set', seq, id: message.id, png });
+        }, (error) => {
+          vscode.postMessage({ type: 'icon-failed', seq });
+          if (work && work.mode === 'editor') { work.iconBusy = false; render(); }
+          showBanner(error instanceof IconTooDetailed
+            ? 'The picture is too detailed to use as an icon, even with fewer colours, so the icon was not changed. Choose a simpler picture, such as a logo or a symbol on a plain background.'
+            : 'The picture could not be read as an image, so the icon was not changed. Try a PNG, JPEG or WebP image.', 'error');
+        });
+        break;
+      }
+      case 'icon-updated':
+        if (work && work.mode === 'editor' && work.id === message.id) {
+          work.icon = message.icon || null;
+          work.iconHistory = Array.isArray(message.iconHistory) ? message.iconHistory : [];
+          // The team file gained or lost its icon line; the host moved this editor to that version, so a save is not taken for an outside edit.
+          if (message.base) work.base = message.base;
+          work.iconBusy = false;
+          render();
+        }
+        if (message.text) { showBanner(message.text, 'info'); announce(message.text); }
+        break;
+      case 'icon-done':
+        if (work && work.mode === 'editor' && work.id === message.id && work.iconBusy) { work.iconBusy = false; render(); }
         if (message.text) { showBanner(message.text, 'info'); announce(message.text); }
         break;
       case 'external-change': {
@@ -1843,7 +2171,7 @@
         showBanner('Not saved: ' + (message.errors[0] ? message.errors[0].message : 'fix the problems listed under Checks.'), 'error');
         break;
       case 'versions':
-        if (work && work.mode === 'editor' && work.id === message.id) { work.versions = message.versions; if (work.tab === 6) render(); }
+        if (work && work.mode === 'editor' && work.id === message.id) { work.versions = message.versions; if (work.tab === TAB_HISTORY) render(); }
         break;
       case 'version':
         if (work && work.mode === 'editor' && work.id === message.id) { work.versionView = { ref: message.ref, label: message.label, diff: message.diff }; render(); }
@@ -1859,7 +2187,9 @@
         // draw the box again so the person can retry or change what they wrote.
         if (drafting) { drafting = false; if (!work) render(); }
         // A starting point that could not be read, or a Use as is that failed: their buttons work again.
-        if (work && work.mode === 'wizard') { work.awaitingStart = null; if (work.busy) { work.busy = false; render(); } }
+        if (work && work.mode === 'wizard') { work.awaitingStart = null; work.recommendSeq = null; if (work.busy) { work.busy = false; render(); } }
+        // An icon request that was refused or failed: its buttons work again.
+        if (work && work.mode === 'editor' && work.iconBusy) { work.iconBusy = false; render(); }
         break;
     }
   });

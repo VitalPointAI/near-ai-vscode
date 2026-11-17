@@ -17,6 +17,8 @@ import type { ActionCapability, ActionPolicyMode } from '../domain/policy';
 import type { Suggestion } from '../agent/teamRefine';
 import { attachTeamStudio, buildStudioContext, KEPT_WIZARD_TEXT, optimiseTarget, parseStudioMessage, reviewDraft, teamPicker, teamStudioHtml, type KeptWork, type SavedWizard, type StudioContext, type TeamStudioDeps } from '../services/teamStudioPage';
 import type { DirectoryInput } from '../services/toolsDirectory';
+import { JPEG, png, SVG, WEBP } from './iconFixtures';
+import { withIconReference } from '../agent/teamIcon';
 
 // Team Studio: a visual builder and manager for the Markdown team files, which stay the source of truth.
 
@@ -670,11 +672,12 @@ class FakeDoc {
   createTextNode(text: string) { const node = new FakeNode('#text', this); node.textContent = text; return node; }
 }
 
-async function runPage() {
+/** `extra`: more globals for the page (the icon tests give it a fake image decoder). */
+async function runPage(extra: Record<string, unknown> = {}) {
   const doc = new FakeDoc();
   const posts: Array<Record<string, any>> = [];
   const listeners: Array<(event: { data: unknown }) => void> = [];
-  const sandbox = vm.createContext({ document: doc, window: { addEventListener: (_type: string, listener: (event: { data: unknown }) => void) => listeners.push(listener) }, acquireVsCodeApi: () => ({ postMessage: (message: Record<string, any>) => posts.push(JSON.parse(JSON.stringify(message))) }), setTimeout, clearTimeout, JSON, Map, Set, Date, String, Boolean, Object, isNaN, Math, Option: function Option(text: string, value: string) { const node = doc.createElement('option'); node.textContent = text; node.value = value; return node; } });
+  const sandbox = vm.createContext({ ...extra, document: doc, window: { addEventListener: (_type: string, listener: (event: { data: unknown }) => void) => listeners.push(listener) }, acquireVsCodeApi: () => ({ postMessage: (message: Record<string, any>) => posts.push(JSON.parse(JSON.stringify(message))) }), setTimeout, clearTimeout, JSON, Map, Set, Date, String, Boolean, Object, isNaN, Math, Option: function Option(text: string, value: string) { const node = doc.createElement('option'); node.textContent = text; node.value = value; return node; } });
   vm.runInContext(await readFile(SCRIPT, 'utf8'), sandbox, { timeout: 1000 });
   const byLabel = (label: string) => doc.body.all().find((node) => node.tagName === 'button' && (node.getAttribute('aria-label') === label || (!node.getAttribute('aria-label') && node.textContent === label)));
   return { doc, posts, dispatch: (data: unknown) => listeners.forEach((listener) => listener({ data })), byLabel, text: () => doc.getElementById('main')!.textContent, wait: () => new Promise((resolve) => setTimeout(resolve, 200)) };
@@ -773,6 +776,16 @@ test('page: the wizard walks five steps, asks the host to check the draft, and s
   assert.equal(page.doc.getElementById('save')!.disabled, true);
   assert.equal(page.doc.getElementById('checks')!.getAttribute('aria-live'), 'polite');
   for (const message of page.posts) assert.ok(parseStudioMessage(message), JSON.stringify(message));
+});
+
+test('page: a new list of versions redraws History while it is open', async () => {
+  const page = await runPage();
+  page.dispatch({ type: 'state', context: context(), library: { teams: [], archived: [] } });
+  page.dispatch({ type: 'team', id: 'user:web', kind: 'user', file: 'My teams/web.md', command: '/team:web ', draft: draft(), base: 'b'.repeat(64), versions: [{ ref: '2026-10-29T10-00-00-000Z.md', label: '2026-10-29 10:00:00 UTC' }] });
+  page.byLabel('History')!.click();
+  assert.match(page.text(), /2026-10-29 10:00:00 UTC/);
+  page.dispatch({ type: 'versions', id: 'user:web', versions: [{ ref: '2026-11-17T09-00-00-000Z.md', label: '2026-11-17 09:00:00 UTC' }, { ref: '2026-10-29T10-00-00-000Z.md', label: '2026-10-29 10:00:00 UTC' }] });
+  assert.match(page.text(), /2026-11-17 09:00:00 UTC/, 'the open History tab shows the new version');
 });
 
 test('page: the editor tracks unsaved changes, saves with its base, and handles outside edits', async () => {
@@ -1385,7 +1398,8 @@ test('page: the new-team picker filters All / My teams / Built-in, shows where e
   page.byLabel('Use an existing team')!.click();
   const radios = (name: string) => page.doc.body.all().filter((node) => node.tagName === 'input' && node.name === name);
   const shown = () => radios('starting-point').map((node) => node.value);
-  assert.deepEqual(shown().slice(0, 2), ['lib:web', 'recommend'], 'saved teams first, then the built-in ones');
+  // 0.4.30: the recommendation is on the first screen, not in the picker, so the first built-in team is a project type's.
+  assert.deepEqual(shown().slice(0, 2), ['lib:web', 'type:software'], 'saved teams first, then the built-in ones');
   assert.match(page.text(), /All \(\d+\).*My teams \(1\).*Built-in \(\d+\)/);
   assert.match(page.text(), /My teams.*Web team.*Imported, not approved yet.*Builds pages.*2 members: lead, dev/);
   const filter = (value: string) => { const radio = radios('picker-filter').find((node) => node.value === value)!; radio.checked = true; radio.fire('change'); };
@@ -2076,24 +2090,25 @@ test('page: selecting an existing team offers Use as is and Clone and modify; Us
   page.dispatch({ type: 'team', id: 'project', kind: 'project', file: '.planning/.near-ai/team.md', command: '/team:project ', draft: draft(), base: 'b'.repeat(64), versions: [], notice: '"Web team" is now this project\'s team. Run it with /team:project <task>.' });
   assert.match(page.doc.getElementById('banner')!.textContent, /is now this project's team/);
   assert.equal(page.doc.getElementById('step-heading'), null, 'out of the builder');
-  // A built-in that is made from answers asks only those, inline, before Use as is.
+  // A built-in that is made from answers asks only those, inline, before Use as is. (0.4.30: the recommendation and its kind-of-work and risk
+  // questions moved to the first screen, so an Open-GSD team stands in for it here.)
   page.byLabel('Back to all teams')!.click();
   page.byLabel('New team')!.click();
   page.byLabel('Use an existing team')!.click();
-  page.select('recommend');
-  for (const id of ['f-goal', 'f-locality', 'f-shape', 'f-risk']) assert.ok(page.doc.getElementById(id), id);
+  page.select('gsd:review');
+  for (const id of ['f-goal', 'f-locality']) assert.ok(page.doc.getElementById(id), id);
   page.type('f-goal', 'Add billing');
-  page.type('f-risk', 'high', 'change');
+  page.type('f-locality', 'cloud', 'change');
   assert.equal(page.doc.getElementById('f-goal')!.value, 'Add billing', 'what was typed survives a redraw');
-  page.byLabel('Use Recommended team as is')!.click();
-  assert.deepEqual(page.posts.at(-1), { type: 'use-team', id: 'recommend', goal: 'Add billing', locality: 'cloud', workShape: 'feature', riskLevel: 'high' });
+  page.byLabel('Use Review team as is')!.click();
+  assert.deepEqual(page.posts.at(-1), { type: 'use-team', id: 'gsd:review', goal: 'Add billing', locality: 'cloud' });
   // The host answers (here: the person kept the project's team) before the buttons work again.
   page.dispatch({ type: 'used', declined: true, text: 'Not changed. This project\'s team is as it was.' });
   // A project type asks what the team is for and where models run, but not the recommendation's questions.
   page.select('type:software');
   assert.ok(page.doc.getElementById('f-goal') && page.doc.getElementById('f-locality'));
   assert.equal(page.doc.getElementById('f-shape'), null);
-  // What was typed for the recommended team is not carried to another team (PR #75 review).
+  // What was typed for one built-in team is not carried to another team (PR #75 review).
   assert.equal(page.doc.getElementById('f-goal')!.value, '', 'another team starts with its own empty answer');
   page.type('f-goal', 'Ship it');
   // With unsaved work in the builder, Use as is says so, and the host asks before discarding it.
@@ -2634,11 +2649,12 @@ test('host: a Use as is whose write fails answers with an error, and the next on
   await h.send({ type: 'ready' });
   await h.send({ type: 'use-team', id: 'lib:web-team' });
   const snapshot = h.library.snapshot.bind(h.library);
-  h.library.snapshot = async () => { throw new Error('the disk is full.'); };
+  // PR #82 review, round 2: a file-system error is said in plain words, never passed on with the path its message carries.
+  h.library.snapshot = async () => { throw Object.assign(new Error(`ENOSPC: no space left on device, copyfile '${h.root}/.planning/.near-ai/team.md'`), { code: 'ENOSPC' }); };
   const posted = h.posted.length;
   await h.send({ type: 'use-team', id: 'gsd:review' });
   const answers = h.posted.slice(posted).filter((message) => ['team', 'used', 'error', 'notice'].includes(message.type));
-  assert.deepEqual(answers.map((message) => [message.type, message.text]), [['error', 'Not used: the disk is full.']]);
+  assert.deepEqual(answers.map((message) => [message.type, message.text]), [['error', 'Not used: the team file could not be written (the disk is full).']]);
   h.library.snapshot = snapshot;
   h.confirmAnswer.value = false;
   assert.deepEqual((await answersTo(h, { type: 'use-team', id: 'lib:web-team' })).map((answer) => answer.declined), [true], 'the next request runs');
@@ -2671,4 +2687,873 @@ test('versions: a burst within one millisecond is named after that millisecond, 
   await writeFile(path.join(dir, `${new Date(at + 5).toISOString().replace(/[:.]/g, '-')}.md`), 'old style, later');
   assert.equal((await contents())[0], 'old style, later');
   assert.equal((await contents()).length, 21, 'the 20 kept, and the one written by hand');
+});
+
+// ---------- 0.4.30: the first screen offers the recommendation (owner, 2026-11-17) ----------
+
+/** The answers a recommend request was made from, as the host echoes them with its reply (PR #82 review, round 2). */
+const answersOf = (request: Record<string, any>) => ({ goal: request.goal, locality: request.locality, workShape: request.workShape, riskLevel: request.riskLevel });
+const RECOMMENDATION = { name: 'Recommended team', cloneName: 'Recommended team', description: 'Planner, implementer, security, tester and reviewer.', members: [{ name: 'planner', role: 'planner' }, { name: 'implementer', role: 'implementer' }, { name: 'security', role: 'security' }, { name: 'tester', role: 'tester' }, { name: 'reviewer', role: 'reviewer' }] };
+
+test('page: the first screen offers three choices, and Recommend a team for me asks its questions, shows the team with Use as is and Clone and modify, and Back returns from each screen', async () => {
+  const page = await builderPage();
+  page.byLabel('New team')!.click();
+  assert.equal(page.heading(), 'How do you want to start?');
+  for (const label of ['Use an existing team', 'Create a new team', 'Recommend a team for me']) assert.ok(page.byLabel(label), label);
+  page.byLabel('Recommend a team for me')!.click();
+  assert.equal(page.heading(), 'Recommend a team for me');
+  assert.equal(page.doc.activeElement, page.doc.getElementById('step-heading'), 'focus moves to the new screen\'s heading');
+  for (const id of ['f-shape', 'f-risk', 'f-locality', 'f-goal']) assert.ok(page.doc.getElementById(id), id);
+  assert.equal(page.doc.getElementById('f-name'), null, 'no name to give');
+  assert.equal(page.byLabel('Use Recommended team as is'), undefined, 'nothing to use before the studio has recommended a team');
+  page.byLabel('Back')!.click();
+  assert.equal(page.heading(), 'How do you want to start?');
+  page.byLabel('Recommend a team for me')!.click();
+  page.type('f-risk', 'high', 'change');
+  page.type('f-goal', 'Add billing');
+  const count = (type: string) => page.posts.filter((message) => message.type === type).length;
+  page.byLabel('Recommend a team')!.click();
+  page.byLabel('Recommend a team')!.click();
+  assert.equal(count('recommend'), 1, 'one request at a time');
+  const asked = page.posts.at(-1)!;
+  assert.deepEqual(asked, { type: 'recommend', seq: asked.seq, goal: 'Add billing', locality: 'cloud', workShape: 'feature', riskLevel: 'high' });
+  assert.equal(page.byLabel('Recommend a team')!.disabled, true, 'waiting for the answer');
+  // A reply to another request is dropped; the one asked for shows the team.
+  page.dispatch({ type: 'recommendation', seq: asked.seq + 7, answers: answersOf(asked), ...RECOMMENDATION, name: 'Wrong team' });
+  assert.doesNotMatch(page.text(), /Wrong team/);
+  page.dispatch({ type: 'recommendation', seq: asked.seq, answers: answersOf(asked), ...RECOMMENDATION });
+  assert.match(page.text(), /Recommended team.*5 members.*planner.*implementer.*security.*tester.*reviewer/);
+  assert.equal(page.byLabel('Recommend a team')!.disabled, false);
+  page.byLabel('Use Recommended team as is')!.click();
+  assert.deepEqual(page.posts.at(-1), { type: 'use-team', id: 'recommend', goal: 'Add billing', locality: 'cloud', workShape: 'feature', riskLevel: 'high' });
+  assert.equal(page.byLabel('Clone Recommended team and modify it')!.disabled, true, 'waiting for the host');
+  page.dispatch({ type: 'used', declined: true, text: 'Not changed. This project\'s team is as it was.' });
+  assert.equal(page.heading(), 'Recommend a team for me', 'a declined Use as is stays here');
+  assert.equal(page.byLabel('Use Recommended team as is')!.disabled, false);
+  // Clone and modify: the Purpose step with the host's name and the goal, and Back returns here with the team still shown.
+  page.byLabel('Clone Recommended team and modify it')!.click();
+  assert.deepEqual(page.posts.at(-1), { type: 'starting-point', id: 'recommend', goal: 'Add billing', locality: 'cloud', workShape: 'feature', riskLevel: 'high' });
+  page.dispatch({ type: 'starting-point', id: 'recommend', cloneName: 'Recommended team', draft: { name: '', description: 'x', members: [{ name: 'planner', role: 'planner', model: 'standard', tools: null, instructions: 'Plan.' }] } });
+  assert.equal(page.heading(), 'Purpose');
+  assert.equal(page.doc.getElementById('f-name')!.value, 'Recommended team');
+  assert.equal(page.doc.getElementById('f-desc')!.value, 'Add billing');
+  page.byLabel('Save draft')!.click();
+  const saved = page.posts.at(-1)!;
+  assert.deepEqual([saved.type, saved.startingPoint, saved.path], ['save-draft', 'recommend', 'existing'], 'a draft path older versions also read');
+  page.byLabel('Back')!.click();
+  assert.equal(page.heading(), 'Recommend a team for me', 'back to the screen it came from');
+  assert.match(page.text(), /5 members/);
+  assert.equal(page.doc.getElementById('f-goal')!.value, 'Add billing', 'the answers are kept');
+  // Changing an answer: the team shown no longer matches, so it is cleared until recommended again.
+  page.type('f-shape', 'research', 'change');
+  assert.equal(page.byLabel('Use Recommended team as is'), undefined);
+  assert.match(page.text(), /Recommend again/);
+  page.type('f-goal', 'Add billing and invoices');
+  // A reply that comes after the person left this screen is dropped, and the button works again on return.
+  page.byLabel('Recommend a team')!.click();
+  const late = page.posts.at(-1)!;
+  page.byLabel('Back')!.click();
+  page.dispatch({ type: 'recommendation', seq: late.seq, answers: answersOf(late), ...RECOMMENDATION });
+  assert.equal(page.heading(), 'How do you want to start?');
+  page.byLabel('Recommend a team for me')!.click();
+  assert.equal(page.byLabel('Use Recommended team as is'), undefined, 'the late reply was not shown');
+  assert.equal(page.byLabel('Recommend a team')!.disabled, false);
+  // An error frees the button too.
+  page.byLabel('Recommend a team')!.click();
+  page.dispatch({ type: 'error', text: 'The team could not be recommended.' });
+  assert.equal(page.byLabel('Recommend a team')!.disabled, false);
+  for (const message of page.posts) assert.ok(parseStudioMessage(message), JSON.stringify(message));
+});
+
+test('page: the picker no longer offers the recommendation, and a draft cloned from it before 0.4.30 goes back to the recommendation screen', async () => {
+  const page = await builderPage();
+  page.byLabel('New team')!.click();
+  page.byLabel('Use an existing team')!.click();
+  const values = () => page.radios('starting-point').map((node) => node.value);
+  assert.ok(values().length > 3);
+  assert.equal(values().includes('recommend'), false, 'offered once, on the first screen');
+  assert.doesNotMatch(page.text(), /Recommended/);
+  // A draft saved by 0.4.29 after Use an existing team > Recommended team > Clone and modify.
+  const old = await builderPage({ savedDraft: { draft: draft(), step: 0, target: 'user', startingPoint: 'recommend', path: 'existing' } });
+  old.byLabel('Resume')!.click();
+  assert.equal(old.heading(), 'Purpose');
+  old.byLabel('Back')!.click();
+  assert.equal(old.heading(), 'Recommend a team for me');
+  old.byLabel('Back')!.click();
+  assert.equal(old.heading(), 'How do you want to start?');
+});
+
+test('host: Recommend shows the team Use as is would save, from the same answers; the picker leaves it out; the request is strictly validated', async () => {
+  const h = await harness();
+  await h.send({ type: 'ready' });
+  assert.equal((last(h, 'state').picker as Array<{ id: string }>).some((entry) => entry.id === 'recommend'), false, 'the picker leaves the recommendation out');
+  await h.send({ type: 'recommend', seq: 4, goal: 'Add billing', locality: 'cloud', workShape: 'feature', riskLevel: 'high' });
+  const shown = last(h, 'recommendation');
+  assert.equal(shown.seq, 4);
+  assert.deepEqual(shown.answers, { goal: 'Add billing', locality: 'cloud', workShape: 'feature', riskLevel: 'high' }, 'the answers it was made from, so the page can tell it is current');
+  assert.equal(shown.name, 'Recommended team');
+  assert.deepEqual(shown.members.map((member: { name: string }) => member.name), ['planner', 'implementer', 'security', 'tester', 'reviewer']);
+  assert.doesNotMatch(JSON.stringify(shown), new RegExp(h.root.replace(/[/\\]/g, '.')), 'no path');
+  // With no project open, Use as is saves it to My teams under the name it showed.
+  h.setRoot(undefined, false);
+  await h.library.create('Recommended team', teamMarkdown(draft({ name: 'Recommended team' })));
+  await h.send({ type: 'refresh' });
+  await h.send({ type: 'recommend', seq: 5, goal: 'Add billing', locality: 'cloud', workShape: 'feature', riskLevel: 'high' });
+  const unique = last(h, 'recommendation');
+  assert.equal(unique.name, 'Recommended team 2');
+  await h.send({ type: 'use-team', id: 'recommend', goal: 'Add billing', locality: 'cloud', workShape: 'feature', riskLevel: 'high' });
+  const file = path.join(h.library.directory, 'recommended-team-2.md');
+  const team = parseTeam(await readFile(file, 'utf8'), file);
+  assert.equal(team.name, unique.name);
+  assert.deepEqual(team.members.map((member) => member.name), unique.members.map((member: { name: string }) => member.name));
+  for (const message of [{ type: 'recommend', seq: 1, goal: '', locality: 'local', workShape: 'research', riskLevel: 'low' }]) assert.ok(parseStudioMessage(message), JSON.stringify(message));
+  for (const message of [
+    { type: 'recommend' }, { type: 'recommend', seq: 1, goal: '', locality: 'cloud', workShape: 'feature' }, { type: 'recommend', seq: 1, goal: '', locality: 'mars', workShape: 'feature', riskLevel: 'low' },
+    { type: 'recommend', seq: 1, goal: '', locality: 'cloud', workShape: 'feature', riskLevel: 'extreme' }, { type: 'recommend', seq: 'one', goal: '', locality: 'cloud', workShape: 'feature', riskLevel: 'low' },
+    { type: 'recommend', seq: 1, goal: 'x'.repeat(401), locality: 'cloud', workShape: 'feature', riskLevel: 'low' }, { type: 'recommend', seq: 1, goal: '', locality: 'cloud', workShape: 'feature', riskLevel: 'low', id: 'lib:web' }
+  ]) assert.equal(parseStudioMessage(message), undefined, JSON.stringify(message));
+  h.close();
+});
+
+// ---------- 0.4.30: every team card is the same size (owner, 2026-11-17) ----------
+
+const LONG_DESCRIPTION = 'Researches a market from primary sources, weighs every claim against at least two of them, and writes a short brief with a citation for each sentence, then checks the brief for plagiarism and tone before it is handed over to the person who asked for it.';
+const MEMBER = (name: string) => ({ name, role: name, tier: 'deep', model: 'z-ai/glm-5.3', privacy: 'tee', privacyText: 'TEE' });
+const LONG_CARD = { ...WEB_CARD, id: 'user:market', name: 'Market team', description: LONG_DESCRIPTION, command: '/team:market ', members: ['lead', 'researcher', 'analyst', 'writer', 'editor', 'checker', 'designer'].map(MEMBER) };
+
+test('page: library cards clamp a long description to three lines with Show more for that card only, and clamp the member list too', async () => {
+  const page = await runPage();
+  page.dispatch({ type: 'state', context: context(), library: { teams: [LONG_CARD, WEB_CARD], archived: [] } });
+  const card = (id: string) => page.doc.body.all().find((node) => node.tagName === 'li' && node.dataset.id === id)!;
+  const long = card('user:market');
+  const desc = long.all().find((node) => node.className.split(/\s+/).includes('desc'))!;
+  assert.ok(desc.className.split(/\s+/).includes('clamp'), 'the description is clamped');
+  assert.ok(desc.id, 'the description has an id for Show more to control');
+  const more = page.byLabel('Show more about Market team')!;
+  assert.equal(more.tagName, 'button', 'a real button: reachable with Tab, works with Enter and Space');
+  assert.equal(more.textContent, 'Show more');
+  assert.equal(more.getAttribute('aria-expanded'), 'false');
+  assert.equal(more.getAttribute('aria-controls'), desc.id);
+  assert.equal(more.hidden, false);
+  const chips = (id: string) => card(id).all().filter((node) => node.className.split(/\s+/).includes('chip')).map((node) => node.textContent);
+  assert.equal(chips('user:market').length, 5, 'four members and a count of the rest');
+  assert.equal(chips('user:market').at(-1), '+3 more');
+  assert.match(long.textContent, /7 members/);
+  // The short card has nothing hidden, so it offers nothing to show.
+  const short = page.byLabel('Show more about Web team');
+  assert.ok(!short || short.hidden, 'nothing to show on a short card');
+  more.click();
+  const less = page.byLabel('Show less about Market team')!;
+  assert.equal(less.getAttribute('aria-expanded'), 'true');
+  assert.equal(less.textContent, 'Show less');
+  assert.ok(card('user:market').className.split(/\s+/).includes('expanded'));
+  assert.equal(card('user:web').className.split(/\s+/).includes('expanded'), false, 'only that card');
+  assert.deepEqual(chips('user:market'), ['lead', 'researcher', 'analyst', 'writer', 'editor', 'checker', 'designer']);
+  assert.equal(page.doc.activeElement, less, 'focus stays on the button');
+  // Still open after the library is listed again; Show less closes it.
+  page.dispatch({ type: 'library', library: { teams: [LONG_CARD, WEB_CARD], archived: [] } });
+  assert.ok(page.byLabel('Show less about Market team'));
+  page.byLabel('Show less about Market team')!.click();
+  assert.equal(page.byLabel('Show more about Market team')!.getAttribute('aria-expanded'), 'false');
+  assert.equal(chips('user:market').length, 5);
+  for (const message of page.posts) assert.ok(parseStudioMessage(message), JSON.stringify(message));
+});
+
+test('page: picker cards clamp the same way, and Show more opens only that card without selecting it', async () => {
+  const page = await builderPage({ teams: [LONG_CARD, WEB_CARD] });
+  page.byLabel('New team')!.click();
+  page.byLabel('Use an existing team')!.click();
+  const cell = (id: string) => page.radios('starting-point').find((node) => node.value === id)!.parent!.parent!;
+  const desc = cell('lib:market').all().find((node) => node.className.split(/\s+/).includes('clamp'))!;
+  assert.ok(desc, 'the description is clamped');
+  const more = page.byLabel('Show more about Market team')!;
+  assert.equal(more.getAttribute('aria-expanded'), 'false');
+  assert.equal(more.parent, cell('lib:market'), 'beside the choice, not inside its label, so it never picks the team');
+  more.click();
+  assert.equal(page.byLabel('Show less about Market team')!.getAttribute('aria-expanded'), 'true');
+  assert.ok(cell('lib:market').className.split(/\s+/).includes('expanded'));
+  assert.equal(cell('lib:web').className.split(/\s+/).includes('expanded'), false);
+  assert.equal(page.radios('starting-point').some((node) => node.checked), false, 'nothing selected');
+  assert.equal(page.byLabel('Use Market team as is'), undefined);
+});
+
+// ---------- 0.4.30: team icons (owner, 2026-11-17) ----------
+
+const ICON_URI = `data:image/png;base64,${png(128, 128, { seed: 2 }).toString('base64')}`;
+
+test('page: every card has an icon: the team\'s own, or a default made from its name (initials on a colour from the name), built-in teams too', async () => {
+  const page = await builderPage({ teams: [{ ...WEB_CARD, icon: ICON_URI }, LONG_CARD, { ...WEB_CARD, id: 'user:forged', name: 'Forged team', icon: 'data:image/svg+xml;base64,PHN2Zz4=' }, { ...WEB_CARD, id: 'user:script', name: 'Script team', icon: 'javascript:alert(1)' }] });
+  const card = (id: string) => page.doc.body.all().find((node) => node.tagName === 'li' && node.dataset.id === id)!;
+  const iconOf = (node: FakeNode) => node.all().find((child) => child.className.split(/\s+/).includes('team-icon'))!;
+  const own = iconOf(card('user:web'));
+  assert.equal(own.tagName, 'img');
+  assert.equal((own as unknown as { src: string }).src, ICON_URI);
+  assert.equal((own as unknown as { alt: string }).alt, '', 'decorative: the name is beside it');
+  const fallback = iconOf(card('user:market'));
+  assert.equal(fallback.tagName, 'svg');
+  assert.ok(fallback.className.split(/\s+/).includes('team-icon-default'));
+  assert.equal(fallback.getAttribute('aria-hidden'), 'true');
+  assert.equal(fallback.textContent, 'M', 'initials from the name, without the word "team"');
+  const colour = fallback.all().find((node) => node.tagName === 'rect')!.getAttribute('fill');
+  assert.match(colour!, /^#[0-9a-f]{6}$/);
+  // Anything but a PNG data URI is never loaded: the default is shown.
+  for (const id of ['user:forged', 'user:script']) {
+    assert.equal(iconOf(card(id)).tagName, 'svg', id);
+    assert.equal(card(id).all().some((node) => node.tagName === 'img'), false, id);
+  }
+  // The same name always gets the same colour; the picker shows the same icons, and built-in teams get the default.
+  page.byLabel('New team')!.click();
+  page.byLabel('Use an existing team')!.click();
+  const cell = (id: string) => page.radios('starting-point').find((node) => node.value === id)!.parent!.parent!;
+  assert.equal(iconOf(cell('lib:web')).tagName, 'img');
+  assert.equal(iconOf(cell('lib:market')).all().find((node) => node.tagName === 'rect')!.getAttribute('fill'), colour);
+  assert.equal(iconOf(cell('type:software')).tagName, 'svg');
+  assert.equal(iconOf(cell('type:software')).textContent, 'SD');
+  assert.equal(iconOf(cell('gsd:review')).textContent, 'R');
+});
+
+/** A page with a fake image decoder and canvas: the decoder reports `size`, the canvas returns `out` and records what was drawn. */
+async function iconPage(options: { size?: [number, number]; fail?: boolean; out?: Buffer } = {}) {
+  const drawn: unknown[][] = [];
+  const out = options.out ?? png(128, 128, { seed: 5 });
+  const page = await runPage({
+    atob: (text: string) => Buffer.from(text, 'base64').toString('latin1'),
+    Blob: class { constructor(public parts: unknown[], public options: unknown) {} },
+    Uint8Array,
+    createImageBitmap: async () => { if (options.fail) throw new Error('not an image'); return { width: options.size?.[0] ?? 300, height: options.size?.[1] ?? 200, close() {} }; }
+  });
+  const make = page.doc.createElement.bind(page.doc);
+  (page.doc as unknown as { createElement: (tag: string) => unknown }).createElement = (tag: string) => tag === 'canvas'
+    ? { width: 0, height: 0, getContext: () => ({ drawImage: (...args: unknown[]) => drawn.push(args), getImageData: () => ({ data: new Uint8ClampedArray(128 * 128 * 4) }), putImageData() {} }), toDataURL: (type: string) => `data:${type};base64,${out.toString('base64')}` }
+    : make(tag);
+  page.dispatch({ type: 'state', context: context(), library: { teams: [WEB_CARD], archived: [] } });
+  const type = (id: string, value: string, event = 'input') => { const node = page.doc.getElementById(id)!; node.value = value; node.fire(event); };
+  return { ...page, drawn, out, type };
+}
+
+const HISTORY = [{ ref: '2026-11-17T10-00-00-000Z.png', label: '2026-11-17 10:00:00 UTC', icon: ICON_URI }];
+const openTeam = (overrides: Record<string, unknown> = {}) => ({ type: 'team', id: 'user:web', kind: 'user', file: 'My teams/web.md', command: '/team:web ', draft: draft(), base: 'b'.repeat(64), versions: [], iconHistory: [], iconAi: { available: false, reason: 'This team is private, so its icon can only be made by a private image model, and none is available.' }, ...overrides });
+
+test('page: a saved team\'s Purpose tab uploads an icon (cropped to a square and made a 128 x 128 PNG here), removes it, and History restores an earlier one', async () => {
+  const page = await iconPage();
+  page.dispatch(openTeam({ iconHistory: HISTORY }));
+  const preview = page.doc.getElementById('icon-preview')!;
+  assert.equal(preview.tagName, 'svg', 'the default until one is set');
+  assert.equal(preview.getAttribute('role'), 'img');
+  assert.equal(preview.getAttribute('aria-label'), 'Default icon for Web team');
+  assert.equal(page.byLabel('Remove the icon of Web team and use the default'), undefined, 'nothing to remove');
+  // Generate is offered only when allowed, and says why not.
+  const generate = page.byLabel('Generate an icon for Web team with AI')!;
+  assert.equal(generate.disabled, true);
+  assert.match(page.text(), /This team is private, so its icon can only be made by a private image model/);
+  page.byLabel('Upload an icon for Web team (PNG, JPEG or WebP)')!.click();
+  assert.deepEqual(page.posts.at(-1), { type: 'icon-upload', id: 'user:web' });
+  assert.equal(page.byLabel('Upload an icon for Web team (PNG, JPEG or WebP)')!.disabled, true, 'one request at a time');
+  assert.match(page.text(), /Working on the icon/);
+  // The host checked the file and sends its bytes; the page crops the middle square and re-encodes it as a 128 x 128 PNG.
+  page.dispatch({ type: 'icon-source', seq: 3, id: 'user:web', mime: 'image/jpeg', data: JPEG.toString('base64') });
+  await page.wait();
+  assert.deepEqual(page.drawn[0]!.slice(1), [50, 0, 200, 200, 0, 0, 128, 128], 'the centre square, scaled to 128 x 128');
+  assert.deepEqual(page.posts.filter((message) => message.type === 'icon-set'), [{ type: 'icon-set', seq: 3, id: 'user:web', png: page.out.toString('base64') }]);
+  page.dispatch({ type: 'icon-updated', id: 'user:web', icon: ICON_URI, iconHistory: HISTORY, base: 'c'.repeat(64), text: 'The icon is saved. The one before it is in History.' });
+  const shown = page.doc.getElementById('icon-preview')!;
+  assert.equal(shown.tagName, 'img');
+  assert.equal((shown as unknown as { src: string }).src, ICON_URI);
+  assert.equal((shown as unknown as { alt: string }).alt, 'Icon for Web team');
+  assert.match(page.doc.getElementById('banner')!.textContent, /The icon is saved/);
+  assert.equal(page.byLabel('Upload an icon for Web team (PNG, JPEG or WebP)')!.disabled, false);
+  // The team file gained its icon line, so the next save goes from the new version, not a conflict.
+  page.type('f-desc', 'Builds and tests pages');
+  page.byLabel('Save')!.click();
+  assert.equal(page.posts.at(-1)!.base, 'c'.repeat(64));
+  page.byLabel('Remove the icon of Web team and use the default')!.click();
+  assert.deepEqual(page.posts.at(-1), { type: 'icon-remove', id: 'user:web' });
+  page.dispatch({ type: 'icon-done', id: 'user:web' });
+  page.byLabel('History')!.click();
+  assert.match(page.text(), /Earlier icons/);
+  page.byLabel('Restore the icon from 2026-11-17 10:00:00 UTC')!.click();
+  assert.deepEqual(page.posts.at(-1), { type: 'icon-restore', id: 'user:web', ref: HISTORY[0]!.ref });
+  for (const message of page.posts) assert.ok(parseStudioMessage(message), JSON.stringify(message));
+});
+
+test('page: an image the page cannot read is reported, and the host is told so it stops waiting', async () => {
+  const page = await iconPage({ fail: true });
+  page.dispatch(openTeam());
+  page.byLabel('Upload an icon for Web team (PNG, JPEG or WebP)')!.click();
+  page.dispatch({ type: 'icon-source', seq: 4, id: 'user:web', mime: 'image/webp', data: WEBP.toString('base64') });
+  await page.wait();
+  assert.deepEqual(page.posts.filter((message) => message.type.startsWith('icon-')).at(-1), { type: 'icon-failed', seq: 4 });
+  assert.match(page.doc.getElementById('banner')!.textContent, /could not be read as an image/);
+  assert.equal(page.byLabel('Upload an icon for Web team (PNG, JPEG or WebP)')!.disabled, false);
+  // An answer for another team, or none at all (an error), frees the buttons too.
+  page.byLabel('Upload an icon for Web team (PNG, JPEG or WebP)')!.click();
+  page.dispatch({ type: 'error', text: 'SVG images can carry scripts, so they are not accepted.' });
+  assert.equal(page.byLabel('Upload an icon for Web team (PNG, JPEG or WebP)')!.disabled, false);
+});
+
+test('host: Upload checks the file by its bytes and size before the page sees it, never sends a path, and checks the page\'s PNG again before saving it', async () => {
+  const h = await harness();
+  await h.library.create('Web team', teamMarkdown(draft()));
+  const file = path.join(h.library.directory, 'web-team.md');
+  await h.send({ type: 'ready' });
+  await h.send({ type: 'open', id: 'user:web-team' });
+  assert.equal(last(h, 'team').icon, undefined);
+  assert.deepEqual(last(h, 'team').iconHistory, []);
+  const pick: { value?: string } = {};
+  h.deps.pickIconSource = async () => pick.value;
+  const dir = await mkdtemp(path.join(tmpdir(), 'near-ai-icon-source-'));
+  const upload = async (name: string | undefined, bytes?: Buffer) => {
+    if (name && bytes) await writeFile(path.join(dir, name), bytes);
+    pick.value = name ? path.join(dir, name) : undefined;
+    const before = h.posted.length;
+    await h.send({ type: 'icon-upload', id: 'user:web-team' });
+    return h.posted.slice(before);
+  };
+  assert.deepEqual(await upload(undefined), [{ type: 'icon-done', id: 'user:web-team' }], 'cancelled: one answer, nothing else');
+  assert.match((await upload('logo.svg', SVG))[0]!.text, /SVG images can carry scripts/);
+  assert.match((await upload('logo.png', SVG))[0]!.text, /SVG images can carry scripts/, 'judged by its bytes, not its name');
+  assert.match((await upload('notes.png', Buffer.from('hello')))[0]!.text, /Use a PNG, JPEG or WebP image/);
+  assert.match((await upload('huge.jpg', Buffer.concat([JPEG, Buffer.alloc(2 * 1024 * 1024)])))[0]!.text, /larger than 2 MB/);
+  const sent = await upload('photo.jpg', JPEG);
+  assert.deepEqual(sent.map((message) => message.type), ['icon-source']);
+  const source = sent[0]!;
+  assert.deepEqual([source.id, source.mime, source.data], ['user:web-team', 'image/jpeg', JPEG.toString('base64')]);
+  assert.ok(Number.isSafeInteger(source.seq));
+  assert.equal(JSON.stringify(h.posted).includes(dir), false, 'no path of the file reaches the page');
+  // The page's answer is checked again: a wrong size, or an answer to another request, writes nothing.
+  await h.send({ type: 'icon-set', seq: source.seq, id: 'user:web-team', png: png(64, 64).toString('base64') });
+  assert.match(last(h, 'error').text, /Not saved: .*64 x 64/);
+  assert.equal(existsSync(path.join(h.library.directory, 'web-team.icon.png')), false);
+  await h.send({ type: 'icon-set', seq: source.seq, id: 'user:web-team', png: png().toString('base64') });
+  assert.match(last(h, 'error').text, /no longer waiting for an icon/i, 'that request is over');
+  const again = (await upload('photo.webp', WEBP))[0]!;
+  assert.equal(again.mime, 'image/webp');
+  await h.send({ type: 'icon-set', seq: again.seq + 1, id: 'user:web-team', png: png().toString('base64') });
+  assert.match(last(h, 'error').text, /no longer waiting for an icon/i);
+  const third = (await upload('photo.jpg', JPEG))[0]!;
+  const icon = png(128, 128, { seed: 4 });
+  await h.send({ type: 'icon-set', seq: third.seq, id: 'user:web-team', png: icon.toString('base64') });
+  const updated = last(h, 'icon-updated');
+  assert.equal(updated.id, 'user:web-team');
+  assert.equal(updated.icon, `data:image/png;base64,${icon.toString('base64')}`);
+  assert.match(updated.text, /icon is saved/i);
+  assert.deepEqual(await readFile(path.join(h.library.directory, 'web-team.icon.png')), icon);
+  assert.match(await readFile(file, 'utf8'), /\nicon: web-team\.icon\.png\n/);
+  assert.equal(last(h, 'library').library.teams[0].icon, updated.icon, 'the cards show it');
+  assert.equal(JSON.stringify(h.posted).includes(path.join(h.library.directory, 'web-team.icon.png')), false, 'no path of the icon reaches the page');
+  assert.equal(JSON.stringify(h.posted).includes('.icons'), false, 'nor of its history');
+  // The open editor moves to the new version of the file, so its next save is not a conflict.
+  assert.match(updated.base, /^[0-9a-f]{64}$/);
+  await h.send({ type: 'save', id: 'user:web-team', draft: draft({ description: 'Builds and tests pages' }), base: updated.base });
+  assert.match(last(h, 'team').notice, /^Saved/);
+  assert.match(await readFile(file, 'utf8'), /description: Builds and tests pages\nicon: web-team\.icon\.png\n/);
+  assert.equal(last(h, 'team').icon, updated.icon, 'the editor shows it after a save');
+  // Listed again from disk, it is still there.
+  await h.send({ type: 'refresh' });
+  assert.equal(last(h, 'state').library.teams[0].icon, updated.icon);
+  assert.equal((last(h, 'state').picker as Array<{ id: string; teamId?: string; icon?: string }>).find((entry) => entry.id === 'lib:web-team')!.teamId, 'user:web-team', 'the picker shows the icon listed for that team, not a second copy');
+  h.close();
+});
+
+test('host: Remove returns to the default and keeps the icon in History; Restore brings an earlier one back; each request gets one answer', async () => {
+  const h = await harness();
+  const file = await h.library.create('Web team', teamMarkdown(draft()));
+  const first = png(128, 128, { seed: 6 });
+  await h.library.setIcon(file, first);
+  await h.send({ type: 'ready' });
+  await h.send({ type: 'open', id: 'user:web-team' });
+  assert.equal(last(h, 'team').icon, `data:image/png;base64,${first.toString('base64')}`);
+  await h.send({ type: 'icon-remove', id: 'user:web-team' });
+  const removed = last(h, 'icon-updated');
+  assert.equal(removed.icon, undefined);
+  assert.match(removed.text, /default icon/);
+  assert.equal(removed.iconHistory.length, 1);
+  assert.match(removed.iconHistory[0].ref, /^[\w.-]+\.png$/);
+  assert.match(removed.iconHistory[0].label, /UTC/);
+  assert.equal(removed.iconHistory[0].icon, `data:image/png;base64,${first.toString('base64')}`);
+  assert.equal(last(h, 'library').library.teams[0].icon, undefined);
+  assert.doesNotMatch(await readFile(file, 'utf8'), /icon:/);
+  const before = h.posted.length;
+  await h.send({ type: 'icon-remove', id: 'user:web-team' });
+  assert.deepEqual(h.posted.slice(before), [{ type: 'icon-done', id: 'user:web-team' }], 'nothing to remove');
+  await h.send({ type: 'icon-restore', id: 'user:web-team', ref: removed.iconHistory[0].ref });
+  assert.equal(last(h, 'icon-updated').icon, removed.iconHistory[0].icon);
+  assert.deepEqual(await readFile(path.join(h.library.directory, 'web-team.icon.png')), first);
+  await h.send({ type: 'icon-restore', id: 'user:web-team', ref: '2020-01-01T00-00-00-000Z.png' });
+  assert.match(last(h, 'error').text, /no such icon/i);
+  // An archived team's id is not a team with an icon to change.
+  for (const message of [{ type: 'icon-upload', id: 'archived:web-team' }, { type: 'icon-remove', id: '../x' }]) assert.equal(parseStudioMessage(message), undefined);
+  h.close();
+});
+
+test('message parsing: the icon messages take exact keys, a team id, strict base64 within the cap, and a version name', () => {
+  const good = png().toString('base64');
+  for (const message of [
+    { type: 'icon-upload', id: 'user:web' }, { type: 'icon-upload', id: 'project' }, { type: 'icon-generate', id: 'user:web' }, { type: 'icon-remove', id: 'project' },
+    { type: 'icon-set', seq: 1, id: 'user:web', png: good }, { type: 'icon-failed', seq: 2 }, { type: 'icon-restore', id: 'user:web', ref: '2026-11-17T10-00-00-000Z.png' }
+  ]) assert.ok(parseStudioMessage(message), JSON.stringify(message).slice(0, 80));
+  for (const message of [
+    { type: 'icon-upload' }, { type: 'icon-upload', id: 'user:web', path: '/tmp/x.png' }, { type: 'icon-upload', id: '/home/x/web.md' },
+    { type: 'icon-set', seq: 1, id: 'user:web' }, { type: 'icon-set', seq: 1, id: 'user:web', png: 'not base64!' }, { type: 'icon-set', seq: 1, id: 'user:web', png: 'A'.repeat(200_000) },
+    { type: 'icon-set', seq: 'one', id: 'user:web', png: good }, { type: 'icon-set', seq: 1, id: 'user:web', png: good, mime: 'image/svg+xml' },
+    { type: 'icon-failed' }, { type: 'icon-restore', id: 'user:web', ref: '../web.md' }, { type: 'icon-restore', id: 'user:web', ref: 'x.md' }, { type: 'icon-generate', id: 'user:web', prompt: 'a cat' }
+  ]) assert.equal(parseStudioMessage(message), undefined, JSON.stringify(message).slice(0, 80));
+});
+
+test('the page may show data: images and nothing else: an icon is never loaded from a path or the web', () => {
+  const html = teamStudioHtml({ cspSource: 'vscode-webview://test', nonce: 'n0nce', script: 'teams.js', style: 'teams.css', network: 'network.css', base: 'base.css' });
+  const policy = /http-equiv="Content-Security-Policy" content="([^"]+)"/.exec(html)![1]!;
+  assert.match(policy, /(?:^|; )img-src data:;/);
+  assert.doesNotMatch(policy, /img-src[^;]*(?:vscode|https?:|\*|blob:)/);
+  assert.match(policy, /^default-src 'none';/);
+});
+
+test('host: Use as is makes a saved team the project team with its icon; a team without one leaves the old icon in History, not on the new team', async () => {
+  const h = await harness();
+  const file = await h.library.create('Web team', teamMarkdown(draft()));
+  const icon = png(128, 128, { seed: 8 });
+  await h.library.setIcon(file, icon);
+  await h.send({ type: 'ready' });
+  await h.send({ type: 'use-team', id: 'lib:web-team' });
+  const project = TeamLibrary.projectTeamFile(h.root);
+  assert.deepEqual(await h.library.readIcon(project), icon);
+  assert.match(await readFile(project, 'utf8'), /\nicon: team\.icon\.png\n/);
+  assert.equal(last(h, 'team').icon, `data:image/png;base64,${icon.toString('base64')}`);
+  await h.send({ type: 'use-team', id: 'gsd:review' });
+  assert.equal(await h.library.readIcon(project), undefined, 'the new team shows the default');
+  assert.equal(existsSync(path.join(path.dirname(project), 'team.icon.png')), false);
+  assert.equal((await h.library.iconVersions(project)).length, 1, 'the old icon is kept');
+  h.close();
+});
+
+// ---------- 0.4.30: an icon made by an image model ----------
+
+const IMAGE_MODEL = { id: 'black-forest-labs/FLUX.2-klein-4B', privacyBoundary: 'cloud' as const, outputModalities: ['image'], imagePricePerUnit: 0.013 };
+const LOCAL_IMAGE_MODEL = { id: 'local/sdxl', privacyBoundary: 'local' as const, outputModalities: ['image'] };
+
+/** fakeAi with image models and a recorded image call; `image` is what the model returns (or throws). */
+function fakeImageAi(models: Array<Record<string, unknown>>, image: Uint8Array | Error | Promise<Uint8Array> | undefined = JPEG, settings: Partial<{ privacyMode: 'standard' | 'tee-only'; dailySpendLimitUsd: number; spent: number; emergencyStop: boolean }> = {}) {
+  const { ai } = fakeAi([TEE_MODEL, ...models] as never, [], settings);
+  const made: Array<{ model: string; prompt: string; signal?: AbortSignal }> = [];
+  Object.assign(ai, {
+    imageModel: IMAGE_MODEL.id,
+    settings: { ...ai.settings, actionPolicy: { mode: 'approve-risky', emergencyStop: settings.emergencyStop === true } },
+    generateImage: async (model: string, prompt: string, signal?: AbortSignal) => {
+      made.push({ model, prompt, signal });
+      const next = await image;
+      if (next instanceof Error) throw next;
+      return { bytes: next };
+    }
+  });
+  return { ai, made };
+}
+
+async function openForIcon(h: Harness, team: TeamDraft = draft()) {
+  await h.library.create(team.name, teamMarkdown(team));
+  await h.send({ type: 'ready' });
+  await h.send({ type: 'open', id: `user:${slugify(team.name)}` });
+  return `user:${slugify(team.name)}`;
+}
+
+test('host: Generate with AI names the image model and its cost before anything is sent, asks, sends only the team\'s name and purpose, and the picture goes through the same checks', async () => {
+  const h = await harness();
+  const { ai, made } = fakeImageAi([IMAGE_MODEL]);
+  h.deps.teamAi = async () => ai;
+  const id = await openForIcon(h);
+  assert.deepEqual(last(h, 'team').iconAi, { available: true, model: IMAGE_MODEL.id, private: false, estimate: 'about $0.02 (one image)' });
+  // Asked first: said no, nothing is made.
+  await h.send({ type: 'icon-generate', id });
+  const question = h.asked.at(-1)!;
+  assert.deepEqual(question.actions, ['Generate icon']);
+  assert.match(question.message, /Make an icon for "Web team" with black-forest-labs\/FLUX\.2-klein-4B \(about \$0\.02 \(one image\)\)\?/);
+  assert.match(question.message, /sends the team's name and what it is for to black-forest-labs\/FLUX\.2-klein-4B, which is not a private model/);
+  assert.equal(made.length, 0);
+  assert.deepEqual(last(h, 'icon-done'), { type: 'icon-done', id, text: 'Nothing was generated.' });
+  // Agreed: one image, from the name and purpose only.
+  h.chooseAnswer.value = 'Generate icon';
+  await h.send({ type: 'icon-generate', id });
+  assert.equal(made.length, 1);
+  assert.equal(made[0]!.model, IMAGE_MODEL.id);
+  assert.match(made[0]!.prompt, /"Web team"/);
+  assert.match(made[0]!.prompt, /Builds pages/);
+  assert.doesNotMatch(made[0]!.prompt, /Plan the work|Build it|lead|dev/, 'no members or instructions');
+  const source = last(h, 'icon-source');
+  assert.deepEqual([source.id, source.mime, source.data], [id, 'image/jpeg', JPEG.toString('base64')]);
+  const icon = png(128, 128, { seed: 11 });
+  await h.send({ type: 'icon-set', seq: source.seq, id, png: icon.toString('base64') });
+  assert.equal(last(h, 'icon-updated').icon, `data:image/png;base64,${icon.toString('base64')}`);
+  // Something that is not a picture is not passed on.
+  const odd = fakeImageAi([IMAGE_MODEL], SVG);
+  h.deps.teamAi = async () => odd.ai;
+  await h.send({ type: 'icon-generate', id });
+  assert.match(last(h, 'error').text, /not a PNG, JPEG or WebP picture/);
+  const none = fakeImageAi([IMAGE_MODEL], new Uint8Array(0));
+  h.deps.teamAi = async () => none.ai;
+  await h.send({ type: 'icon-generate', id });
+  assert.match(last(h, 'error').text, /returned no picture/);
+  const failing = fakeImageAi([IMAGE_MODEL], new Error('The provider is busy.'));
+  h.deps.teamAi = async () => failing.ai;
+  await h.send({ type: 'icon-generate', id });
+  assert.match(last(h, 'error').text, /The icon was not made: The provider is busy\./);
+  h.close();
+});
+
+test('host: one icon at a time, and the outbound check (spend limit, Emergency stop, TEE-only) decides before the person is asked', async () => {
+  const h = await harness();
+  let release: (bytes: Uint8Array) => void = () => undefined;
+  const slow = fakeImageAi([IMAGE_MODEL], new Promise<Uint8Array>((resolve) => { release = resolve; }));
+  h.deps.teamAi = async () => slow.ai;
+  h.chooseAnswer.value = 'Generate icon';
+  const id = await openForIcon(h);
+  const first = h.send({ type: 'icon-generate', id });
+  await h.settle();
+  await h.send({ type: 'icon-generate', id });
+  assert.match(last(h, 'error').text, /Still working on an icon/);
+  await h.send({ type: 'icon-upload', id });
+  assert.match(last(h, 'error').text, /Still working on an icon/);
+  release(JPEG);
+  await first;
+  assert.equal(slow.made.length, 1, 'one image made');
+  assert.ok(last(h, 'icon-source'));
+  for (const [settings, words] of [[{ dailySpendLimitUsd: 1, spent: 1 }, /daily limit/], [{ emergencyStop: true }, /Emergency stop is on/]] as const) {
+    const blocked = fakeImageAi([IMAGE_MODEL], JPEG, settings);
+    h.deps.teamAi = async () => blocked.ai;
+    const asked = h.asked.length;
+    await h.send({ type: 'icon-generate', id });
+    assert.match(last(h, 'error').text, words);
+    assert.equal(h.asked.length, asked, 'not asked about a call that cannot be made');
+    assert.equal(blocked.made.length, 0);
+  }
+  const teeOnly = fakeImageAi([IMAGE_MODEL], JPEG, { privacyMode: 'tee-only' });
+  h.deps.teamAi = async () => teeOnly.ai;
+  await h.send({ type: 'open', id });
+  assert.equal(last(h, 'team').iconAi.available, false);
+  assert.match(last(h, 'team').iconAi.reason, /TEE-only mode is on/);
+  h.close();
+});
+
+test('host: a private team, a team whose members are all private, or a project with a knowledge base may only use a private image model', async () => {
+  const h = await harness();
+  const cloudOnly = fakeImageAi([IMAGE_MODEL]);
+  h.deps.teamAi = async () => cloudOnly.ai;
+  h.chooseAnswer.value = 'Generate icon';
+  const marked = await openForIcon(h, draft({ name: 'Client team', private: true }));
+  const off = last(h, 'team').iconAi;
+  assert.equal(off.available, false);
+  assert.match(off.reason, /^This team is private, so its icon can only be made by a private image model \(one in a NEAR TEE or on this computer\), and none is available on this profile\. Upload an icon instead\.$/);
+  await h.send({ type: 'icon-generate', id: marked });
+  assert.equal(last(h, 'error').text, off.reason, 'the host checks again, whatever the page sends');
+  assert.equal(cloudOnly.made.length, 0);
+  const allPrivate = draft({ name: 'Quiet team', members: draft().members.map((member) => ({ ...member, privacy: 'private' as const })) });
+  await openForIcon(h, allPrivate);
+  assert.equal(last(h, 'team').iconAi.available, false);
+  // A private image model on this computer is used, and costs nothing.
+  const local = fakeImageAi([IMAGE_MODEL, LOCAL_IMAGE_MODEL]);
+  h.deps.teamAi = async () => local.ai;
+  await h.send({ type: 'open', id: marked });
+  assert.deepEqual(last(h, 'team').iconAi, { available: true, model: LOCAL_IMAGE_MODEL.id, private: true, estimate: 'free: it runs on this computer' });
+  await h.send({ type: 'icon-generate', id: marked });
+  assert.equal(local.made[0]!.model, LOCAL_IMAGE_MODEL.id);
+  assert.match(h.asked.at(-1)!.message, /a private model/);
+  // In a project with a knowledge base every team is private here.
+  await mkdir(path.join(h.root, '.near-kb'), { recursive: true });
+  h.deps.teamAi = async () => cloudOnly.ai;
+  const open = await openForIcon(h, draft({ name: 'Open team' }));
+  assert.match(last(h, 'team').iconAi.reason, /^This project has a knowledge base, so its teams' icons can only be made by a private image model/);
+  await h.send({ type: 'icon-generate', id: open });
+  assert.match(last(h, 'error').text, /knowledge base/);
+  assert.equal(cloudOnly.made.length, 0);
+  h.close();
+});
+
+test('page: Generate with AI is offered when the host allows it, says which model and cost, and waits for the answer', async () => {
+  const page = await iconPage();
+  page.dispatch(openTeam({ iconAi: { available: true, model: IMAGE_MODEL.id, private: false, estimate: 'about $0.02 (one image)' } }));
+  assert.match(page.text(), /Generate with AI sends the team's name and what it is for to black-forest-labs\/FLUX\.2-klein-4B \(about \$0\.02 \(one image\)\)\. You are asked first\./);
+  const generate = page.byLabel('Generate an icon for Web team with AI')!;
+  assert.equal(generate.disabled, false);
+  generate.click();
+  assert.deepEqual(page.posts.at(-1), { type: 'icon-generate', id: 'user:web' });
+  assert.equal(page.byLabel('Generate an icon for Web team with AI')!.disabled, true);
+  page.dispatch({ type: 'icon-done', id: 'user:web', text: 'Nothing was generated.' });
+  assert.equal(page.byLabel('Generate an icon for Web team with AI')!.disabled, false);
+  assert.match(page.doc.getElementById('banner')!.textContent, /Nothing was generated/);
+});
+
+test('host: Share carries the team\'s icon; Import adds it beside the new team, or leaves out one that is not a valid icon and says so', async () => {
+  const h = await harness();
+  const file = await h.library.create('Web team', teamMarkdown(draft()));
+  const icon = png(128, 128, { seed: 14 });
+  await h.library.setIcon(file, icon);
+  await h.send({ type: 'ready' });
+  const out = await mkdtemp(path.join(tmpdir(), 'near-ai-share-icon-'));
+  h.shareTarget.value = path.join(out, 'web-team.near-team.json');
+  await h.send({ type: 'share', id: 'user:web-team' });
+  const shared = JSON.parse(await readFile(h.shareTarget.value, 'utf8'));
+  assert.equal(shared.icon, icon.toString('base64'));
+  assert.match(last(h, 'notice').text, /with its icon/);
+  // Into another library that already has a team with the same name: the new team gets its own file name, and the icon follows it.
+  const other = await harness();
+  await other.library.create('Web team', teamMarkdown(draft()));
+  await other.send({ type: 'ready' });
+  other.importSource.value = h.shareTarget.value;
+  other.chooseAnswer.value = 'Add to my teams';
+  await other.send({ type: 'import' });
+  assert.match(other.asked.at(-1)!.message, /It comes with its own icon\./);
+  const added = path.join(other.library.directory, 'web-team-2.md');
+  assert.deepEqual(await other.library.readIcon(added), icon);
+  assert.match(await readFile(added, 'utf8'), /\nicon: web-team-2\.icon\.png\n/);
+  assert.match(last(other, 'team').notice, /Its icon was added too\./);
+  assert.equal(last(other, 'library').library.teams.find((team: any) => team.id === 'user:web-team-2').icon, `data:image/png;base64,${icon.toString('base64')}`);
+  // A file whose icon is not a valid one: the team is added, the icon left out, and the person is told why.
+  const { createHash } = await import('node:crypto');
+  const markdown = shared.team.markdown as string;
+  const bad = png(64, 64).toString('base64');
+  const forgedFile = path.join(out, 'odd.near-team.json');
+  await writeFile(forgedFile, JSON.stringify({ ...shared, icon: bad, integrity: `sha256-${createHash('sha256').update(JSON.stringify([markdown, null, bad])).digest('base64')}` }));
+  other.importSource.value = forgedFile;
+  await other.send({ type: 'import' });
+  const third = path.join(other.library.directory, 'web-team-3.md');
+  assert.equal(await other.library.readIcon(third), undefined);
+  assert.doesNotMatch(await readFile(third, 'utf8'), /icon:/, 'no line naming an icon it does not have');
+  assert.match(last(other, 'team').notice, /Its icon was left out: It is 64 x 64 pixels/);
+  // A team .md that names an icon (here, one left beside the file it will be saved as) shows the default, never that file.
+  await writeFile(path.join(other.library.directory, 'odd-team.icon.png'), png(128, 128, { seed: 15 }));
+  const md = path.join(out, 'odd-team.md');
+  await writeFile(md, withIconReference(renderTeam('Odd team', 'x', [{ name: 'dev', instructions: 'Do.' }]), 'odd-team.icon.png'));
+  other.importSource.value = md;
+  await other.send({ type: 'import' });
+  assert.equal(await other.library.readIcon(path.join(other.library.directory, 'odd-team.md')), undefined);
+  h.close(); other.close();
+});
+
+test('host: the latest icon request wins: a picture the page sends back after Remove or Restore is not used', async () => {
+  const h = await harness();
+  const file = await h.library.create('Web team', teamMarkdown(draft()));
+  await h.library.setIcon(file, png(128, 128, { seed: 16 }));
+  await h.library.setIcon(file, png(128, 128, { seed: 17 }));
+  await h.send({ type: 'ready' });
+  const dir = await mkdtemp(path.join(tmpdir(), 'near-ai-icon-race-'));
+  await writeFile(path.join(dir, 'a.jpg'), JPEG);
+  h.deps.pickIconSource = async () => path.join(dir, 'a.jpg');
+  for (const next of [{ type: 'icon-remove', id: 'user:web-team' }, { type: 'icon-restore', id: 'user:web-team', ref: path.basename((await h.library.iconVersions(file))[0]!) }]) {
+    await h.send({ type: 'icon-upload', id: 'user:web-team' });
+    const source = last(h, 'icon-source');
+    await h.send(next);
+    const shown = await h.library.readIcon(file);
+    await h.send({ type: 'icon-set', seq: source.seq, id: 'user:web-team', png: png(128, 128, { seed: 18 }).toString('base64') });
+    assert.match(last(h, 'error').text, /no longer waiting for an icon/, next.type);
+    assert.deepEqual(await h.library.readIcon(file), shown, `${next.type}: the icon stays as that request left it`);
+  }
+  h.close();
+});
+
+// ---------- PR #82 review ----------
+
+test('page: picker cards show members the way library cards do: the first four, then a count of the rest, all of them after Show more', async () => {
+  const page = await builderPage({ teams: [{ ...LONG_CARD, description: 'Short.' }, WEB_CARD] });
+  page.byLabel('New team')!.click();
+  page.byLabel('Use an existing team')!.click();
+  const cell = (id: string) => page.radios('starting-point').find((node) => node.value === id)!.parent!.parent!;
+  assert.match(cell('lib:market').textContent, /7 members: lead, researcher, analyst, writer \+3 more/);
+  assert.doesNotMatch(cell('lib:market').textContent, /editor|checker|designer/);
+  assert.match(cell('lib:web').textContent, /2 members: lead, dev/);
+  assert.doesNotMatch(cell('lib:web').textContent, /\+\d+ more/);
+  assert.equal(page.byLabel('Show more about Web team')!.hidden, true, 'nothing hidden on a short card');
+  const more = page.byLabel('Show more about Market team')!;
+  assert.equal(more.hidden, false, 'members are hidden, so Show more is offered even for a short description');
+  more.click();
+  assert.match(cell('lib:market').textContent, /7 members: lead, researcher, analyst, writer, editor, checker, designer/);
+  assert.doesNotMatch(cell('lib:market').textContent, /\+3 more/);
+});
+
+test('page: a picture still too large after its colours are simplified is called too detailed, not unreadable', async () => {
+  const page = await iconPage({ out: png(128, 128, { noise: true }) });
+  page.dispatch(openTeam());
+  page.byLabel('Upload an icon for Web team (PNG, JPEG or WebP)')!.click();
+  page.dispatch({ type: 'icon-source', seq: 5, id: 'user:web', mime: 'image/png', data: png(300, 300, { noise: true }).toString('base64') });
+  await page.wait();
+  assert.deepEqual(page.posts.filter((message) => message.type.startsWith('icon-')).at(-1), { type: 'icon-failed', seq: 5 });
+  const banner = page.doc.getElementById('banner')!.textContent;
+  assert.match(banner, /too detailed to use as an icon/);
+  assert.match(banner, /simpler picture/);
+  assert.doesNotMatch(banner, /could not be read/);
+});
+
+test('host: one Use as is records one version of the project team, with its icon line, whether or not the team has an icon', async () => {
+  const h = await harness();
+  const file = await h.library.create('Web team', teamMarkdown(draft()));
+  await h.library.setIcon(file, png(128, 128, { seed: 19 }));
+  await h.send({ type: 'ready' });
+  const project = TeamLibrary.projectTeamFile(h.root);
+  await h.send({ type: 'use-team', id: 'lib:web-team' });
+  const first = await h.library.versions(project);
+  assert.equal(first.length, 1, 'one version for one Use as is');
+  assert.equal(await readFile(first[0]!, 'utf8'), await readFile(project, 'utf8'), 'and it is the file as written, icon line included');
+  assert.match(await readFile(project, 'utf8'), /\nicon: team\.icon\.png\n/);
+  // Replacing it keeps the old team (as before) and adds one version for the new one, not a second for its icon.
+  await h.send({ type: 'use-team', id: 'gsd:review' });
+  const second = await h.library.versions(project);
+  assert.equal(second.length, 3, 'the old team kept, and one for the new team');
+  assert.equal(await readFile(second[0]!, 'utf8'), await readFile(project, 'utf8'));
+  assert.doesNotMatch(await readFile(project, 'utf8'), /icon:/);
+  h.close();
+});
+
+test('host: when the team file cannot be changed to name its icon, nothing is left behind, and the person is told exactly that', async () => {
+  const h = await harness();
+  const file = await h.library.create('Web team', teamMarkdown(draft()));
+  await h.send({ type: 'ready' });
+  await h.send({ type: 'open', id: 'user:web-team' });
+  const dir = await mkdtemp(path.join(tmpdir(), 'near-ai-icon-fail-'));
+  await writeFile(path.join(dir, 'a.jpg'), JPEG);
+  h.deps.pickIconSource = async () => path.join(dir, 'a.jpg');
+  const before = await readFile(file, 'utf8');
+  const library = h.library as unknown as { setReference: (...args: unknown[]) => Promise<unknown>; undoIcon?: unknown };
+  const real = library.setReference.bind(h.library);
+  library.setReference = async () => { throw new Error(`EACCES: permission denied, open '${file}'`); };
+  await h.send({ type: 'icon-upload', id: 'user:web-team' });
+  await h.send({ type: 'icon-set', seq: last(h, 'icon-source').seq, id: 'user:web-team', png: png().toString('base64') });
+  assert.equal(last(h, 'error').text, 'The icon could not be changed. Nothing was changed.');
+  assert.equal(last(h, 'error').text.includes(file), false, 'no path');
+  assert.equal(existsSync(path.join(h.library.directory, 'web-team.icon.png')), false, 'no icon file left without a name');
+  assert.equal(await readFile(file, 'utf8'), before);
+  assert.deepEqual(await h.library.iconVersions(file), []);
+  library.setReference = real;
+  h.close();
+});
+
+test('host: a Use as is whose team file cannot be written leaves the project\'s icon as it was', async () => {
+  const h = await harness();
+  const file = await h.library.create('Web team', teamMarkdown(draft()));
+  await h.library.setIcon(file, png(128, 128, { seed: 23 }));
+  const project = TeamLibrary.projectTeamFile(h.root);
+  await mkdir(path.dirname(project), { recursive: true });
+  await writeFile(project, renderTeam('Old team', 'x', [{ name: 'dev', instructions: 'Do.' }]));
+  const old = png(128, 128, { seed: 24 });
+  await h.library.setIcon(project, old);
+  const { chmod } = await import('node:fs/promises');
+  await chmod(project, 0o444);
+  try {
+    await h.send({ type: 'ready' });
+    await h.send({ type: 'use-team', id: 'lib:web-team' });
+    assert.match(last(h, 'error').text, /^Not used: /);
+    assert.deepEqual(await h.library.readIcon(project), old, 'the old team still shows its own icon');
+  } finally { await chmod(project, 0o644); }
+  h.close();
+});
+
+// ---------- PR #82 review, round 2 ----------
+
+test('page: an answer changed while a recommendation is on its way drops that reply, and Use as is and Clone send exactly the answers the shown team was made from', async () => {
+  const page = await builderPage();
+  page.byLabel('New team')!.click();
+  page.byLabel('Recommend a team for me')!.click();
+  const count = (type: string) => page.posts.filter((message) => message.type === type).length;
+  // A select changed in flight: the request is over, the reply is dropped, and Recommend works again at once.
+  page.byLabel('Recommend a team')!.click();
+  const first = page.posts.at(-1)!;
+  page.type('f-risk', 'high', 'change');
+  assert.equal(page.byLabel('Recommend a team')!.disabled, false, 'the old request is no longer waited on');
+  page.dispatch({ type: 'recommendation', seq: first.seq, answers: answersOf(first), ...RECOMMENDATION });
+  assert.equal(page.byLabel('Use Recommended team as is'), undefined, 'made from the old answers, so not shown');
+  assert.match(page.text(), /Recommend again/);
+  // The goal typed in flight (the field keeps its caret, nothing is redrawn): the same.
+  page.byLabel('Recommend a team')!.click();
+  const second = page.posts.at(-1)!;
+  assert.equal(second.riskLevel, 'high');
+  page.type('f-goal', 'Ship');
+  page.dispatch({ type: 'recommendation', seq: second.seq, answers: answersOf(second), ...RECOMMENDATION });
+  assert.equal(page.byLabel('Use Recommended team as is'), undefined);
+  // A reply whose answers are not the ones on screen is dropped even with the right number.
+  page.byLabel('Recommend a team')!.click();
+  const third = page.posts.at(-1)!;
+  assert.equal(third.goal, 'Ship');
+  page.dispatch({ type: 'recommendation', seq: third.seq, answers: { ...answersOf(third), workShape: 'release' }, ...RECOMMENDATION });
+  assert.equal(page.byLabel('Use Recommended team as is'), undefined);
+  // The reply for the answers on screen is shown, and its buttons send exactly those answers.
+  page.byLabel('Recommend a team')!.click();
+  const fourth = page.posts.at(-1)!;
+  page.dispatch({ type: 'recommendation', seq: fourth.seq, answers: answersOf(fourth), ...RECOMMENDATION });
+  page.byLabel('Use Recommended team as is')!.click();
+  assert.deepEqual(page.posts.at(-1), { type: 'use-team', id: 'recommend', ...answersOf(fourth) });
+  page.dispatch({ type: 'used', declined: true, text: 'Not changed.' });
+  page.byLabel('Clone Recommended team and modify it')!.click();
+  assert.deepEqual(page.posts.at(-1), { type: 'starting-point', id: 'recommend', ...answersOf(fourth) });
+  page.dispatch({ type: 'error', text: 'Try again.' });
+  // Changed after it is shown: the team and its buttons go until it is recommended again.
+  page.type('f-locality', 'local', 'change');
+  assert.equal(page.byLabel('Use Recommended team as is'), undefined);
+  assert.equal(page.byLabel('Clone Recommended team and modify it'), undefined);
+  page.type('f-locality', 'cloud', 'change');
+  assert.equal(page.byLabel('Use Recommended team as is'), undefined, 'changing it back does not bring back a team nobody asked for');
+  assert.equal(count('use-team'), 1);
+  for (const message of page.posts) assert.ok(parseStudioMessage(message), JSON.stringify(message));
+});
+
+test('host: an icon that cannot be saved during Import still adds the team, lists it, and says the icon was not added', async () => {
+  const h = await harness();
+  const file = await h.library.create('Web team', teamMarkdown(draft()));
+  await h.library.setIcon(file, png(128, 128, { seed: 25 }));
+  await h.send({ type: 'ready' });
+  const out = await mkdtemp(path.join(tmpdir(), 'near-ai-import-icon-fail-'));
+  h.shareTarget.value = path.join(out, 'web-team.near-team.json');
+  await h.send({ type: 'share', id: 'user:web-team' });
+  const other = await harness();
+  await other.send({ type: 'ready' });
+  other.importSource.value = h.shareTarget.value;
+  other.chooseAnswer.value = 'Add to my teams';
+  const library = other.library as unknown as { setIcon: (...args: unknown[]) => Promise<unknown> };
+  library.setIcon = async () => { throw new Error(`ENOSPC: no space left on device, open '${other.library.directory}/web-team.icon.png'`); };
+  await other.send({ type: 'import' });
+  const added = path.join(other.library.directory, 'web-team.md');
+  assert.ok(existsSync(added), 'the team is added');
+  const notice = last(other, 'team').notice as string;
+  assert.match(notice, /^Added "Web team" to your teams\./);
+  assert.match(notice, /Its icon could not be saved, so it shows the default icon\./);
+  assert.equal(notice.includes(other.library.directory), false, 'no path');
+  assert.ok(last(other, 'library').library.teams.some((team: any) => team.id === 'user:web-team'), 'the list shows it');
+  assert.equal(other.posted.some((message) => message.type === 'error'), false);
+  h.close(); other.close();
+});
+
+test('host: Remove and Restore say History holds the old icon only when one was put there', async () => {
+  const h = await harness();
+  const file = await h.library.create('Web team', teamMarkdown(draft()));
+  await h.send({ type: 'ready' });
+  // A team file that names its icon, with no icon file: Remove takes the line away, and nothing went to History.
+  await writeFile(file, withIconReference(await readFile(file, 'utf8'), 'web-team.icon.png'));
+  await h.send({ type: 'icon-remove', id: 'user:web-team' });
+  const lineOnly = last(h, 'icon-updated').text as string;
+  assert.doesNotMatch(lineOnly, /History/);
+  assert.match(lineOnly, /default icon/);
+  // A real icon: Remove says it is in History.
+  await h.library.setIcon(file, png(128, 128, { seed: 26 }));
+  await h.send({ type: 'icon-remove', id: 'user:web-team' });
+  assert.match(last(h, 'icon-updated').text, /the old one is in History/);
+  // Restore with no icon in place: nothing goes to History, so it does not say so; with one in place it does.
+  const ref = path.basename((await h.library.iconVersions(file))[0]!);
+  await h.send({ type: 'icon-restore', id: 'user:web-team', ref });
+  assert.doesNotMatch(last(h, 'icon-updated').text, /History/);
+  await h.send({ type: 'icon-restore', id: 'user:web-team', ref });
+  assert.match(last(h, 'icon-updated').text, /The one before it is in History/);
+  h.close();
+});
+
+test('host: a Use as is that cannot write the team file says what went wrong in plain words, without the file\'s path', async () => {
+  const h = await harness();
+  await h.library.create('Web team', teamMarkdown(draft()));
+  const project = TeamLibrary.projectTeamFile(h.root);
+  await mkdir(path.dirname(project), { recursive: true });
+  await writeFile(project, renderTeam('Old team', 'x', [{ name: 'dev', instructions: 'Do.' }]));
+  const { chmod } = await import('node:fs/promises');
+  await chmod(project, 0o444);
+  try {
+    await h.send({ type: 'ready' });
+    await h.send({ type: 'use-team', id: 'lib:web-team' });
+    const text = last(h, 'error').text as string;
+    assert.equal(text, 'Not used: the team file could not be written (permission was denied).');
+    assert.equal(text.includes(h.root), false);
+  } finally { await chmod(project, 0o644); }
+  h.close();
 });
