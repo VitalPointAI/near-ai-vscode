@@ -155,7 +155,7 @@ test('source: every recursive call in the classifier goes one level deeper, and 
   // and classifyText handing its own text to classifyStructure.
   const sameLevel: string[] = [];
   for (const [name, body] of bodies) {
-    for (const call of body.matchAll(/\b(classifyText|classifyWords|classifyStructure|classifyProgram|classifyPackageManager|classifyPackageManagerIn|classifyNpx|checkScript|noteRunsAs|noteInlineScript|unknownProgram)\(/g)) {
+    for (const call of body.matchAll(/\b(classifyText|classifyWords|classifyStructure|classifyProgram|classifyPackageManager|classifyPackageManagerIn|classifyNpx|checkScript|noteRunsAs|noteInlineScript|unknownProgram|classifyAfterGlobals)\(/g)) {
       if (call.index !== undefined && body.slice(Math.max(0, call.index - 9), call.index) === 'function ') continue;
       const args = argumentsAt(body, (call.index ?? 0) + call[0].length);
       if (/depth \+ 1\b/.test(args)) continue;
@@ -165,7 +165,10 @@ test('source: every recursive call in the classifier goes one level deeper, and 
   }
   const allowed = new Set(['classifyText -> classifyStructure', 'classifyStructure -> classifyWords', 'classifyWords -> classifyProgram', 'classifyProgram -> noteRunsAs',
     'classifyProgram -> classifyPackageManager', 'classifyProgram -> classifyNpx', 'classifyProgram -> noteInlineScript', 'classifyPackageManager -> classifyPackageManagerIn', 'classifyPackageManagerIn -> checkScript',
-    'classifyWords -> unknownProgram', 'classifyProgram -> unknownProgram']);
+    'classifyWords -> unknownProgram', 'classifyProgram -> unknownProgram', 'classifyProgram -> classifyAfterGlobals', 'classifyAfterGlobals -> classifyProgram']);
+  // The one same-level call back into classifyProgram reads the words after the global options: strictly fewer, and none of them a leading option, so it
+  // cannot come back to classifyAfterGlobals (PR #74 review round 7).
+  assert.match(bodies.get('classifyAfterGlobals') ?? '', /classifyProgram\(name, program, found\.rest,/);
   const unexpected = [...new Set(sameLevel)].filter((call) => !allowed.has(call));
   assert.deepEqual(unexpected, [], 'a call that does not go deeper, outside the known descents from one level to its parts');
   // Each of the allowed descents ends in a call that does go deeper: none of these functions calls back up the list at the same level.

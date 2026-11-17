@@ -567,6 +567,148 @@ function valuePart(text: string): string {
 
 const looksLikeOption = (text: string) => /^-/.test(text) && text !== '-' && text !== '--';
 
+/**
+ * A program's own global options, which come before its subcommand: those that take a value (as the next word, or after `=`), the flags that take none,
+ * and the ones among the value options that move the folder the subcommand works in.
+ */
+export interface GlobalOptions {
+  readonly values: readonly string[];
+  readonly flags: readonly string[];
+  readonly moves?: readonly string[];
+}
+
+const PACKAGE_MANAGER_FLAGS = ['-g', '--global', '-s', '--silent', '-q', '--quiet', '-d', '--verbose', '-y', '--yes', '--dry-run', '--force', '-f', '--json', '--offline',
+  '--prefer-offline', '--ignore-scripts', '--legacy-peer-deps', '--no-audit', '--no-fund', '--no-progress', '--no-color', '--frozen-lockfile', '--immutable', '--production'];
+
+/**
+ * Every program the classifier tags by its subcommand, with its global options (PR #74 review round 7). A value option hid the subcommand
+ * (`docker --context prod push`, `git -C repo push`, `kubectl -n prod apply`), so the subcommand is read only after these are skipped; an option before
+ * the subcommand that is not listed here makes the command's effects unknown. `--help`, `-h` and `--version` are flags of every one of them. npm, pnpm,
+ * yarn and bun skip theirs in classifyPackageManager, after their folder options (--prefix, -C, --cwd, --dir, --workspace) are read there.
+ */
+export const GLOBAL_OPTIONS: Readonly<Record<string, GlobalOptions>> = Object.freeze({
+  git: {
+    values: ['-C', '-c', '--git-dir', '--work-tree', '--namespace', '--super-prefix', '--config-env', '--attr-source'],
+    flags: ['--no-pager', '-p', '--paginate', '-P', '--bare', '--no-replace-objects', '--literal-pathspecs', '--glob-pathspecs', '--noglob-pathspecs', '--icase-pathspecs',
+      '--no-optional-locks', '--no-lazy-fetch', '--no-advice'],
+    moves: ['-C']
+  },
+  docker: {
+    values: ['--config', '-c', '--context', '-H', '--host', '-l', '--log-level', '--tlscacert', '--tlscert', '--tlskey'],
+    flags: ['-D', '--debug', '--tls', '--tlsverify']
+  },
+  podman: {
+    values: ['--connection', '-c', '--url', '--identity', '--log-level', '--root', '--runroot', '--storage-driver', '--storage-opt', '--cgroup-manager', '--events-backend',
+      '--hooks-dir', '--network-cmd-path', '--runtime', '--tmpdir', '--module', '--conmon', '--imagestore', '--network-config-dir', '--volumepath', '--ssh'],
+    flags: ['-r', '--remote', '--syslog', '--noout']
+  },
+  kubectl: {
+    values: ['--context', '--cluster', '--user', '-n', '--namespace', '--kubeconfig', '-s', '--server', '--token', '--as', '--as-group', '--as-uid', '--request-timeout', '-v', '--v',
+      '--certificate-authority', '--client-certificate', '--client-key', '--cache-dir', '--password', '--username', '--profile', '--profile-output', '--tls-server-name',
+      '--log-flush-frequency', '--vmodule', '--log-file'],
+    flags: ['--insecure-skip-tls-verify', '--match-server-version', '--warnings-as-errors', '--disable-compression']
+  },
+  oc: {
+    values: ['--context', '--cluster', '--user', '-n', '--namespace', '--kubeconfig', '-s', '--server', '--token', '--as', '--as-group', '--request-timeout', '-v', '--v',
+      '--certificate-authority', '--client-certificate', '--client-key', '--cache-dir'],
+    flags: ['--insecure-skip-tls-verify', '--match-server-version']
+  },
+  helm: {
+    values: ['--kube-context', '--kubeconfig', '-n', '--namespace', '--kube-apiserver', '--kube-as-user', '--kube-as-group', '--kube-ca-file', '--kube-token', '--registry-config',
+      '--repository-cache', '--repository-config', '--burst-limit', '--qps', '--kube-tls-server-name'],
+    flags: ['--debug', '--kube-insecure-skip-tls-verify']
+  },
+  terraform: { values: ['-chdir'], flags: [], moves: ['-chdir'] },
+  tofu: { values: ['-chdir'], flags: [], moves: ['-chdir'] },
+  pulumi: {
+    values: ['-C', '--cwd', '--color', '-v', '--verbose', '--tracing', '--profiling', '--memprofilerate'],
+    flags: ['--non-interactive', '--emoji', '--disable-integrity-checking', '--logtostderr', '--logflow', '-e'],
+    moves: ['-C', '--cwd']
+  },
+  cdk: {
+    values: ['-a', '--app', '-c', '--context', '--profile', '--proxy', '--ca-bundle-path', '-o', '--output', '--role-arn', '--plugin', '-p'],
+    flags: ['-v', '--verbose', '--debug', '--json', '-j', '--strict', '--ci', '--no-color', '--lookups', '--ignore-errors', '--trace']
+  },
+  serverless: { values: ['--stage', '-s', '--region', '-r', '--config', '-c', '--aws-profile', '--param', '--org', '--app'], flags: ['--verbose', '--debug'] },
+  sls: { values: ['--stage', '-s', '--region', '-r', '--config', '-c', '--aws-profile', '--param', '--org', '--app'], flags: ['--verbose', '--debug'] },
+  gh: { values: ['-R', '--repo', '--hostname'], flags: [] },
+  glab: { values: ['-R', '--repo'], flags: [] },
+  cargo: { values: ['--color', '--config', '-Z', '-C'], flags: ['-v', '-vv', '--verbose', '-q', '--quiet', '--frozen', '--locked', '--offline'], moves: ['-C'] },
+  vsce: { values: [], flags: [] },
+  ovsx: { values: [], flags: [] },
+  gem: { values: [], flags: ['-q', '--quiet', '--verbose', '--backtrace', '--debug', '--norc'] },
+  aws: {
+    values: ['--profile', '--region', '--output', '--endpoint-url', '--query', '--color', '--cli-read-timeout', '--cli-connect-timeout', '--ca-bundle', '--cli-binary-format'],
+    flags: ['--debug', '--no-verify-ssl', '--no-paginate', '--no-sign-request', '--no-cli-pager', '--no-cli-auto-prompt', '--cli-auto-prompt']
+  },
+  gcloud: {
+    values: ['--project', '--account', '--configuration', '--verbosity', '--format', '--flags-file', '--impersonate-service-account', '--billing-project', '--trace-token'],
+    flags: ['--quiet', '-q', '--log-http', '--user-output-enabled', '--no-user-output-enabled']
+  },
+  az: { values: ['--subscription', '--output', '-o', '--query'], flags: ['--debug', '--verbose', '--only-show-errors'] },
+  gsutil: { values: ['-o', '-h', '-u', '-i'], flags: ['-m', '-D', '-DD', '-d', '-q'] },
+  npm: { values: ['--registry', '--userconfig', '--globalconfig', '--location', '--loglevel', '--tag', '--access', '--otp', '--scope', '--cache', '--color'], flags: PACKAGE_MANAGER_FLAGS },
+  pnpm: { values: ['--registry', '--loglevel', '--reporter', '--tag', '--access', '--otp', '--color'], flags: PACKAGE_MANAGER_FLAGS },
+  yarn: { values: ['--registry', '--loglevel', '--cache-folder', '--modules-folder'], flags: PACKAGE_MANAGER_FLAGS },
+  bun: { values: ['--registry', '--tag', '--access', '--otp'], flags: PACKAGE_MANAGER_FLAGS }
+} satisfies Record<string, GlobalOptions>);
+
+/** Flags every program in GLOBAL_OPTIONS takes before a subcommand (or instead of one). */
+const UNIVERSAL_FLAGS: ReadonlySet<string> = new Set(['--help', '-h', '--version']);
+/** The package managers, whose global options classifyPackageManager skips itself (after their folder options). */
+const PACKAGE_MANAGERS: ReadonlySet<string> = new Set(['npm', 'pnpm', 'yarn', 'bun']);
+
+/**
+ * The words after a program's global options (GLOBAL_OPTIONS), which begin with its subcommand; whether any of the options took a value, and the folder an
+ * option moves the subcommand to. An option that is not listed is reported: what follows it cannot be told apart from its value.
+ */
+function skipGlobals(name: string, args: readonly Word[]): { rest: Word[]; valued: boolean; skipped: string[]; folder?: Word } | { unknown: string } {
+  const spec = GLOBAL_OPTIONS[name];
+  if (spec === undefined) return { rest: [...args], valued: false, skipped: [] };
+  const values = new Set(spec.values);
+  const flags = new Set([...spec.flags, ...UNIVERSAL_FLAGS]);
+  const shortValues = spec.values.filter((option) => /^-[A-Za-z]$/.test(option)).map((option) => option[1]!);
+  const shortFlags = spec.flags.filter((option) => /^-[A-Za-z]$/.test(option)).map((option) => option[1]!);
+  const skipped: string[] = [];
+  let valued = false;
+  let folder: Word | undefined;
+  let index = 0;
+  while (index < args.length) {
+    const word = args[index]!;
+    const text = word.text;
+    if (text === '--') { index += 1; break; }
+    // cargo +nightly publish: a toolchain comes before the subcommand.
+    if (name === 'cargo' && index === 0 && /^\+[\w.-]+$/.test(text)) { skipped.push(text); index += 1; continue; }
+    if (!looksLikeOption(text)) break;
+    const equals = text.indexOf('=');
+    const option = equals > 0 ? text.slice(0, equals) : text;
+    if (values.has(option)) {
+      const value = equals > 0 ? { ...word, text: text.slice(equals + 1) } : args[index + 1];
+      if (value === undefined) return { unknown: `${option} without its value` };
+      if (spec.moves?.includes(option)) folder = value;
+      skipped.push(option);
+      valued = true;
+      index += equals > 0 ? 1 : 2;
+      continue;
+    }
+    if (flags.has(text)) { skipped.push(text); index += 1; continue; }
+    // -nprod (a short value attached) and -qv (short flags together).
+    if (/^-[A-Za-z]/.test(text) && !text.startsWith('--') && equals < 0) {
+      const letters = text.slice(1);
+      if (letters.length > 1 && shortValues.includes(letters[0]!)) {
+        if (spec.moves?.includes(`-${letters[0]}`)) folder = { ...word, text: letters.slice(1) };
+        skipped.push(`-${letters[0]}`);
+        valued = true;
+        index += 1;
+        continue;
+      }
+      if ([...letters].every((letter) => shortFlags.includes(letter))) { skipped.push(text); index += 1; continue; }
+    }
+    return { unknown: `${text} is an option of ${name} the rules do not know, so its subcommand cannot be told` };
+  }
+  return { rest: args.slice(index), valued, skipped, ...(folder === undefined ? {} : { folder }) };
+}
+
 /** The raw text names a credential or knowledge-base path anywhere (also inside quotes and substitutions). */
 const SENSITIVE_TEXT_BASE = /\.near-credentials|\.near-kb\b|\.kbkey\b|state\.vscdb|(?:^|[\s/'"=:])\.ssh(?:\/|\b)|(?:^|[\s/'"=:])\.aws(?:\/|\b)|(?:^|[\s/'"=:<>])\.env(?:\.[\w.-]+)?(?=$|[\s'"/;&|)<>])|\bid_(?:rsa|dsa|ecdsa|ed25519)\b|\.git-credentials|\.netrc\b|\.npmrc\b|\.pypirc\b/i;
 /** Plus the project's state folder (its keys must not reach a model request through a recursive read or a copy). */
@@ -938,12 +1080,16 @@ function classifyPackageManagerIn(manager: string, givenArgs: Word[], state: Seg
   if (folder === undefined && state.cwdUnknown !== undefined) return beyondReach(`${manager}: ${state.cwdUnknown}`);
   if (!isInside(context.root, folder ?? state.cwd)) return beyondReach(`${manager} runs in a folder outside the project`);
   const words = args.map((arg) => arg.text);
-  if (words.some((word) => /^--(?:prefix|global|location|userconfig|globalconfig|registry)(?:=|$)/.test(word) || word === '-g')) return unknown(`${manager} with --prefix, --global, or a registry option acts outside the workspace`);
-  const first = words.findIndex((word) => !looksLikeOption(word));
-  const sub = first >= 0 ? words[first] : '';
+  // Its global options are skipped first, so a value option (`npm --tag beta publish`) never hides the subcommand; one the rules do not know makes the
+  // effects unknown (PR #74 review round 7).
+  const leading = skipGlobals(manager, args);
+  if ('unknown' in leading) return beyondReach(`${manager}: ${leading.unknown}`);
+  const first = leading.rest.length > 0 ? args.length - leading.rest.length : -1;
+  const sub = first >= 0 ? words[first] ?? '' : '';
   const extra = first >= 0 ? args.slice(first + 1) : [];
-  if (words.slice(first, first + 2).some((word) => word === 'publish' || word === 'unpublish')) return risky(`${manager} ${words.slice(first, first + 2).join(' ')} publishes a package`, publishTo('registry'));
+  if (first >= 0 && words.slice(first, first + 2).some((word) => word === 'publish' || word === 'unpublish')) return risky(`${manager} ${words.slice(first, first + 2).join(' ')} publishes a package`, publishTo('registry'));
   if (['publish', 'unpublish', 'deprecate', 'dist-tag', 'owner', 'adduser', 'login', 'logout', 'token', 'access', 'team', 'org', 'star', 'hook', 'npm-publish'].includes(sub)) return risky(`${manager} ${sub} changes a package registry or your account`, publishTo('registry'));
+  if (words.some((word) => /^--(?:prefix|global|location|userconfig|globalconfig|registry)(?:=|$)/.test(word) || word === '-g')) return unknown(`${manager} with --prefix, --global, or a registry option acts outside the workspace`);
   if (sub === 'config' || sub === 'set') return risky(`${manager} ${sub} changes package-manager settings outside the workspace`);
   if (sub === 'version' && extra.length) return unknown(`${manager} version changes the version and may tag a release`);
   // Installing exactly what the lockfile declares (no package names); adding packages goes to the safety model.
@@ -1182,6 +1328,28 @@ function deleteEffects(name: string, targets: readonly Word[], args: readonly Wo
   return [...(outside ? DESTROY_ALL : []), ...protectedWriteEffects(targets, state, context)];
 }
 
+/**
+ * A program tagged by its subcommand, read after its global options. An option the rules do not know there makes the effects unknown. An option that moves
+ * the folder (git -C, terraform -chdir, pulumi --cwd, cargo -C) moves it for the subcommand's paths; a folder decided at run time is unknown. The verdict
+ * is never newly safe: options that take a value (or any but --no-pager for git, docker and podman, which never read past an option before) leave a
+ * harmless subcommand unknown, as it was.
+ */
+function classifyAfterGlobals(name: string, program: string, args: Word[], state: SegmentState, context: CommandContext, depth: number, viaNpx: boolean): CommandClassification {
+  const found = skipGlobals(name, args);
+  if ('unknown' in found) return beyondReach(found.unknown);
+  let moved = state;
+  if (found.folder !== undefined) {
+    if (found.folder.expansion || found.folder.glob) return beyondReach(`${name} works in a folder decided at run time`);
+    moved = { ...state, cwd: path.resolve(state.cwd, found.folder.text) };
+  }
+  if (found.rest.length === 0) return unknown(`${name} ${found.skipped.join(' ')}`.trim());
+  // Strictly fewer words and none of them a leading option, so this reads the subcommand and cannot come back here.
+  const inner = classifyProgram(name, program, found.rest, moved, context, depth, viaNpx);
+  if (inner.verdict !== 'safe') return inner;
+  const strict = ['git', 'docker', 'podman', 'go'].includes(name) && !found.skipped.every((option) => option === '--no-pager');
+  return found.valued || strict ? unknown(`${name} with options before its subcommand acts on something they name`) : inner;
+}
+
 /** What `sudo`, `doas`, `pkexec` or `su -c` would run, read for its effects; the privilege itself is already risky. */
 function noteRunsAs(name: string, args: readonly Word[], state: SegmentState, context: CommandContext, depth: number): void {
   if (name === 'su') {
@@ -1229,6 +1397,11 @@ function classifyProgram(name: string, program: string, args: Word[], state: Seg
   if (program === 'gsd_run' && context.gsdRunDefined) return classifyGsdTools(args, state, context);
   // The managed Open-GSD runtime's own launcher, named by its absolute path.
   if (program.includes('/') && isTrustedGsdTool({ text: program, quoted: false, glob: false, expansion: false }, state, context)) return classifyGsdTools(args, state, context);
+  // A program tagged by its subcommand, with global options before it: they are skipped, so the subcommand is read (PR #74 review round 7).
+  const leading = args[0];
+  if (GLOBAL_OPTIONS[name] !== undefined && !PACKAGE_MANAGERS.has(name) && leading !== undefined && (looksLikeOption(leading.text) || (name === 'cargo' && leading.text.startsWith('+')))) {
+    return classifyAfterGlobals(name, program, args, state, context, depth, viaNpx);
+  }
   // Risky whatever the path.
   if (PRIVILEGE.has(name)) {
     noteRunsAs(name, args, state, context, depth);
@@ -1362,7 +1535,11 @@ const READ_ONLY_GH = new Set([
     return unknown(`go ${sub}`.trim());
   }
   if (name === 'make' || name === 'gmake') {
-    if (words.some((word) => /^-(?:C|f|I|-directory|-file|-makefile|-include-dir)(?:=|$)|^-[A-Za-z]*[CfI]$/.test(word))) return unknown('make with -C or -f runs another makefile');
+    // A release-like target is a publish whatever makefile it is in, so it is tagged before -C or -f is looked at (PR #74 review round 7).
+    const releaseTarget = words.find((word) => !looksLikeOption(word) && RELEASE_NAME.test(word));
+    if (words.some((word) => /^-(?:C|f|I|-directory|-file|-makefile|-include-dir)(?:=|$)|^-[A-Za-z]*[CfI]$/.test(word))) {
+      return releaseTarget ? risky(`make ${releaseTarget} looks like a publish, release, or deploy target`, publishTo('release')) : unknown('make with -C or -f runs another makefile');
+    }
     const target = words.find((word) => RELEASE_NAME.test(word) || /^(?:install|uninstall|clean|distclean)$/.test(word));
     if (target) return RELEASE_NAME.test(target) ? risky(`make ${target} looks like a publish, release, or deploy target`, publishTo('release')) : unknown(`make ${target} may change files outside the workspace`);
     if (words.some((word) => word.includes('='))) return unknown('make with variable overrides');
