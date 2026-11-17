@@ -5,8 +5,8 @@
   "phases": [
     {
       "number": "27",
-      "name": "Project state follows the project (0.4.20; shipped, owner host check open)",
-      "status": "in_progress"
+      "name": "Project state follows the project (0.4.20; shipped, owner host check passed 2026-11-17)",
+      "status": "complete"
     },
     {
       "number": "28",

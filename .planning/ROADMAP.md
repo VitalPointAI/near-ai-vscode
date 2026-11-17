@@ -4,7 +4,7 @@
 
 - Milestone 1: Phases 1-6 (SHIPPED)
 - **v0.4.0 A working core and a native NEAR agent runner**: Phases 7-12 (SHIPPED)
-- **0.4.x line**: ongoing releases on top of v0.4.0 (current; 0.4.22 published 2026-11-14; 0.4.23 published 2026-11-15 (PR #51, release PR #52); 0.4.24 patch next; Phase 27 shipped as 0.4.20 with its record still open; Phases 28 and 29 planned)
+- **0.4.x line**: ongoing releases on top of v0.4.0 (current; 0.4.29 published 2026-11-17 (release PR #77, tag v0.4.29); 0.4.23 to 0.4.28 published before it; Phase 27 shipped as 0.4.20 and its record closed 2026-11-17; Phases 28 and 29 planned)
 - **v0.5.0 Trusted-source knowledge base**: PAUSED 2026-10-29 and moving to a separate project. Its roadmap, requirements, research and Phase 13 plans are archived in `.planning/milestones/v0.5.0-paused/`; the Phase 13 code lives on the local branch `gsd/phase-13-sovereignty-gate-post-quantum-cryptography-and-the-encrypted`.
 - **v0.6.0 Team Mode**: Phases 60-67 on the unmerged, local-only branch `feat/team-fix-pass` (Phase 60 complete, 61 and 62 built with re-tests open, 63-67 not started). Its identity and signed-event core lands on `main` in v0.7.0 Phase 69; the rest is the later milestone L2 (disposition table there).
 - **v0.7.0 Governed agent platform and messaging relay**: Phases 68-84 (Phase 68 complete: merged as PR #50, 052d5cf, and `relay` is a required check on main since the owner's D-19 step, 2026-11-15; replanned 2026-11-15 from the owner's platform direction; relay phases renumbered)
@@ -71,8 +71,8 @@ Plans:
   4. Turning sync on shows a high-entropy recovery code once (never stored or logged); on a second machine with the same project cloned, entering it restores chats, runs, comparisons, model choices and the NEAR AI key without re-entering the key, through an encrypted bundle on a dedicated branch of the project's own git remote (never `main`); a leak test proves no plaintext transcript, key or prompt reaches the remote. (SYNC-04, SYNC-05)
   5. Opening the project on a different interface or machine shows a "Pick up where you left off" card (last chat, last run state, current GSD phase and next step); one click reopens it and nothing re-runs or spends money. (SYNC-07)
   6. All git work for sync is done by the extension and reported in plain words; conflicts from two machines merge per record with no lost entries (tested). 0.4.20 ships through the release PR with CHANGELOG and README updated. (SYNC-05, SYNC-08)
-**Plans:** 35/36 plans executed (11 waves; gap closure 27-19 to 27-25 from 27-UAT.md, then 27-26 to 27-36 from the PR #40 review 27-REVIEW.md in 5 waves, all before 27-16)
-**Status (checked 2026-11-15)**: in progress (state `in_progress`, 35/36 plans): the code shipped. PR #40 merged and release 0.4.20 was cut through release PR #41 on 2026-11-14 (fixes followed in 0.4.21 and 0.4.22), so SYNC-08 is met. What remains of 27-16 is the record: the owner's check on the real host (27-UAT.md stops at test 8, "your own old chats open in both real editors") and the 27-16 summary.
+**Plans:** 36/36 plans executed (11 waves; gap closure 27-19 to 27-25 from 27-UAT.md, then 27-26 to 27-36 from the PR #40 review 27-REVIEW.md in 5 waves, all before 27-16)
+**Status (checked 2026-11-17)**: complete (36/36 plans). PR #40 merged and release 0.4.20 was cut through release PR #41 on 2026-11-14 (fixes followed in 0.4.21 and 0.4.22), so SYNC-08 is met. The owner passed the real-host check on 2026-11-17 (27-UAT.md test 8, "your own old chats open in both real editors", with 0.4.29); every UAT gap is resolved; 27-16-SUMMARY.md is written and 27-VERIFICATION.md is passed.
 
 Plans:
 - [x] 27-01-PLAN.md — Wire format and crypto core: recovery code, scrypt wrap, padded AEAD objects, sealed manifest, every refusal (owner confirms the contract first)
@@ -110,7 +110,7 @@ Plans:
 - [x] 27-34-PLAN.md — Review run liveness: hold sends to a conversation running elsewhere and follow it; migrated markers; activity re-check; migration back-off
 - [x] 27-35-PLAN.md — Review minors: hidden chat view drains; Chat-view footer kept as a notice; hex digests not redacted; repo names never gh options
 - [x] 27-36-PLAN.md — Review docs and the one full gate: README, SECURITY.md, CHANGELOG honest and complete; full review dispositions
-- [ ] 27-16-PLAN.md — Phase gate, owner check on the real host, README/SECURITY, feature PR and release 0.4.20 (feature PR and release done 2026-11-14; owner host check and summary open)
+- [x] 27-16-PLAN.md — Phase gate, owner check on the real host, README/SECURITY, feature PR and release 0.4.20 (feature PR and release done 2026-11-14; owner host check passed 2026-11-17)
 
 ### Phase 28: Secure development workflow setup step
 **Goal**: A person with no git knowledge turns on a protected way of working for a software project in one guided Project Setup step: CI on every pull request as required checks, an independent automatic review before anything reaches the default branch, and releases that wait for their approval, adapted to their project from this repository's own kit.
@@ -161,7 +161,7 @@ Plans:
 |------|------|----------|
 | 1 | **0.4.23** (PR #51 and release PR #52): done, published 2026-11-15 | It closes a live gap (agents could read the project's key folder) and `main` is strict, so the extension line goes first. |
 | 2 | **PR #50** (Phase 68): merged 2026-11-15 as 052d5cf; the owner added `relay` to branch protection the same day (D-19, done); then a small relay housekeeping PR: the relay's README, Compose file, build script and tests point at the new phase numbers, and the Signal sidecar re-check date (2026-12-10, now before the Signal phase) is met by re-pinning (owner, 2026-11-15) | The foundation is done; leaving it open blocks every relay phase, and the date falls due long before Phase 82. |
-| 3 | **0.4.24 patch**: the four #46 review minors and the three doc mismatches; **Phase 27 record close** (the owner's check on the real host, 27-UAT test 8 onward, then the 27-16 summary) | Small debt, cleared before the engine changes; SECURITY.md and README must agree before Phase 70 changes the floor. |
+| 3 | **0.4.24 patch**: the four #46 review minors and the three doc mismatches; **Phase 27 record close** (done 2026-11-17: the owner's check on the real host passed, 27-16 summary written) | Small debt, cleared before the engine changes; SECURITY.md and README must agree before Phase 70 changes the floor. |
 | 4 | **Phase 69, Team Mode reconciliation** (`feat/team-fix-pass` archived on GitHub at 4207080) | Phase 70's signed policy, Phase 71's grants and Phase 80's approvals all need device identities and the signed log. Building them a second time would leave two trust cores. |
 | 4a | In parallel: **Phase 28** (secure development workflow setup step) and the **OpenShell spike** (done, see openshell-spike.md) | Phase 28 touches only setup and templates; the spike feeds Phase 72. |
 | 5 | **Stage 1, Phases 70 to 74**: gate, manifests and classification labels, identities, credentials and delegation, execution backends, credential broker, run contracts. **Phase 29** (cleanup member and CleanUp tool) follows Phase 70 | The vocabulary and the gate come first because everything else is checked by them; delegation narrows what the gate checks; backends make protected folders absent; the broker needs the backends' network fence; contracts refer to capabilities, grants and backends. |
@@ -796,7 +796,7 @@ Also carried: the shared code-server follow-ups (owner, 2026-11-05). Phase 27 al
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 27. Project state follows the project (0.4.20) | 35/36 | In Progress: shipped in 0.4.20; owner host check and 27-16 summary open | 2026-11-14 (release) |
+| 27. Project state follows the project (0.4.20) | 36/36 | Complete: shipped in 0.4.20; owner host check passed | 2026-11-17 (released 2026-11-14) |
 | 28. Secure development workflow setup step | 0/TBD | Not started | - |
 | 29. A cleanup member with a safe CleanUp tool | 0/TBD | Not started (after Phase 70) | - |
 | 68. Relay foundation | 8/8 | Complete; merged as PR #50 (052d5cf); `relay` required on main (D-19) | 2026-11-15 |
