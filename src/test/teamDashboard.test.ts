@@ -693,3 +693,18 @@ test('host: archiving a team takes its stars and health with it, a new team of t
   await h.send({ type: 'import' });
   assert.equal(ratings()['user:incoming-team'], undefined);
 });
+
+// ---------- PR 86 review, round 4 ----------
+
+test('a file-system error never reaches the page as raw text, whatever the spelling of its path; any other reason that names a path is replaced', async () => {
+  const { plainTeamError } = await import('../services/teamStudioPage');
+  // A Windows path in another case than the one the library knows.
+  assert.equal(plainTeamError("EACCES: permission denied, open 'C:\\Users\\Someone\\Teams\\web.md'", 'c:\\users\\someone\\teams\\web.md'), 'The team file could not be read (permission was denied).');
+  assert.equal(plainTeamError("EBUSY: resource busy or locked, open 'C:\\TEAMS\\WEB.MD'", 'c:\\teams\\web.md'), 'The team file could not be read (the file is in use).');
+  assert.equal(plainTeamError('EWHATEVER: odd, open /x/y.md', '/x/y.md'), 'The team file could not be read.');
+  for (const raw of ['Cannot parse C:\\USERS\\SOMEONE\\TEAMS\\WEB.MD at line 3', 'Could not read d:/teams/web.md', 'Bad file /home/someone/teams/web.md', 'Bad file teams\\web.md']) {
+    assert.equal(plainTeamError(raw, 'c:\\users\\someone\\teams\\web.md'), 'The team file cannot be read as a team. Open it as Markdown to fix it.', raw);
+  }
+  // The team loader's own reasons name no path, and pass through unchanged.
+  for (const reason of ['The team needs a name in its frontmatter (name: My team).', 'The team has "privacy: odd" in its frontmatter; use privacy: private or privacy: any.']) assert.equal(plainTeamError(reason, '/x/y.md'), reason);
+});

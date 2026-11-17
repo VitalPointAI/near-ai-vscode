@@ -4045,3 +4045,50 @@ test('host: a drafted team is kept until it is used or discarded, so it survives
   assert.deepEqual(parseStudioMessage({ type: 'proposal-done' }), { type: 'proposal-done' });
   assert.equal(parseStudioMessage({ type: 'proposal-done', extra: 1 }), undefined);
 });
+
+// ---------- PR 86 review, round 4: focus is never lost when the dashboard is drawn again ----------
+
+test('page: arrowing through the stars keeps focus on the chosen star after the host answers; a rating alone updates that card in place', async () => {
+  const page = await dashboardPage();
+  const card = page.card('user:web')!;
+  for (const value of ['1', '2', '3']) {
+    // The arrow keys move focus to the next star and check it.
+    const star = page.stars('user:web').find((node) => node.value === value)!;
+    star.focus(); star.checked = true; star.fire('change');
+  }
+  const chosen = page.doc.activeElement;
+  await page.wait(); await page.wait();
+  assert.deepEqual(page.posts.filter((message) => message.type === 'rate'), [{ type: 'rate', id: 'user:web', rating: 3 }]);
+  // The host lists the teams again with the new rating, then says it was kept.
+  const teams = page.fixture.library.teams.map((team) => (team.id === 'user:web' ? { ...team, rating: 3 } : team));
+  page.dispatch({ type: 'library', library: { ...page.fixture.library, teams }, dashboard: page.fixture.dashboard });
+  page.dispatch({ type: 'rated', id: 'user:web', rating: 3, text: 'Rated Web team 3 out of 5.' });
+  // Identity checks (assert.ok): a diff of two fake DOM nodes would print the whole page.
+  assert.ok(page.doc.activeElement === chosen, 'the very same star still has focus');
+  assert.ok(page.card('user:web') === card, 'the card was updated in place, not drawn again');
+  assert.equal(page.stars('user:web').find((node) => node.checked)!.value, '3');
+  assert.deepEqual(card.all().filter((node) => node.className === 'glyph').map((node) => node.textContent), ['★', '★', '★', '☆', '☆']);
+  // Sorted by rating, the cards move: the page is drawn again, and focus comes back to the same star.
+  const sort = page.doc.getElementById('dash-sort')!;
+  sort.value = 'rating'; sort.fire('change');
+  const star = page.stars('user:web').find((node) => node.value === '5')!;
+  star.focus(); star.checked = true; star.fire('change');
+  await page.wait(); await page.wait();
+  page.dispatch({ type: 'library', library: { ...page.fixture.library, teams: teams.map((team) => (team.id === 'user:web' ? { ...team, rating: 5 } : team)) }, dashboard: page.fixture.dashboard });
+  assert.equal(page.doc.activeElement?.id, star.id);
+  assert.equal(page.cardIds()[0], 'user:web', 'now first');
+});
+
+test('page: a full refresh while any card button is focused keeps focus on that button', async () => {
+  const page = await dashboardPage();
+  for (const label of ['Share Web team', 'Use Web team in chat', 'Duplicate Web team', 'Archive Web team', 'Watch Web team live in Team Live', 'Open Web team', 'Show more about Fresh team']) {
+    const before = page.byLabel(label)!;
+    before.focus();
+    page.dispatch({ type: 'state', context: page.studio, library: page.fixture.library, dashboard: page.fixture.dashboard });
+    const after = page.byLabel(label)!;
+    assert.ok(after && after !== before, `${label}: drawn again`);
+    assert.ok(page.doc.activeElement === after, `${label}: focus kept (on ${page.doc.activeElement?.id || 'nothing'})`);
+    page.dispatch({ type: 'dashboard', dashboard: page.fixture.dashboard });
+    assert.ok(page.doc.activeElement === page.byLabel(label), `${label}: focus kept after a dashboard update`);
+  }
+});
