@@ -3,7 +3,7 @@
 // undone by a later one: emergency stop, bundle state, floor, bundle ceiling, labels, then the settings layer. A floor refusal has no card and no way
 // through; a floor ask is a card with no "always allow" and no run-wide grant; a deny from the settings layer (the deny list) still beats a floor ask.
 import type { ActionPolicy, ActionPolicyMode } from '../policy';
-import { FAILED_CLOSED_VERBS } from './bundle';
+import { FAILED_CLOSED_VERBS, POLICY_EVENT_IDS } from './bundle';
 import type { BundleState, GateContextName } from './bundle';
 import { FLOOR_RULE_ORDER, floorFor } from './floor';
 import type { FloorInput, FloorLocations } from './floor';
@@ -113,6 +113,12 @@ export const GATE_RULE_IDS: readonly string[] = Object.freeze([
   'settings.auto.classifier', 'settings.unattended-verification', 'settings.risk.outside-workspace', 'settings.risk.installs', 'settings.safety-model',
   'settings.sensitive-read', 'settings.mcp-approval', 'settings.tool-forbidden'
 ]);
+
+/**
+ * Every id a decision record may carry as its rule (`authorizations[].policy.name`): the gate's rules and the policy's own events. The decision log refuses a
+ * record whose rule is not here (validateDecisionRecord), so a writer that invents an id is caught by the first record it writes, not by a reader later.
+ */
+export const RECORD_RULE_IDS: readonly string[] = Object.freeze([...GATE_RULE_IDS, ...POLICY_EVENT_IDS]);
 
 const MODE_ORDER: readonly ActionPolicyMode[] = Object.freeze(['approve-risky', 'mostly-autonomous', 'auto', 'fully-autonomous'] as const);
 const NOBODY_HERE = 'Nobody is here to approve this, and it always needs a person: ';

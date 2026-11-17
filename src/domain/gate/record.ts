@@ -5,10 +5,13 @@
 import { redactSecrets } from '../redaction';
 import { canonicalize } from '../team/canonical';
 import { findSecrets } from '../team/secrets';
+import { POLICY_EVENT_IDS } from './bundle';
+import { RECORD_RULE_IDS } from './decide';
 import type { ActorRef, GateDecision } from './decide';
 import type { Label } from './labels';
 import { isRecord, ownValue, refused } from './shape';
-import type { Parsed } from './shape';
+import type { Parsed, Refusal } from './shape';
+import { CAPABILITY_VERBS } from './vocabulary';
 import type { Capability } from './vocabulary';
 
 export const RECORD_VERSION = 1;
@@ -259,9 +262,27 @@ function kindOk(value: unknown, kind: Kind): boolean {
   return Array.isArray(value);
 }
 
+/** What `api.operation` may name: a capability verb, or one of the policy's own events. */
+const RECORD_OPERATIONS: ReadonlySet<string> = new Set<string>([...CAPABILITY_VERBS, ...POLICY_EVENT_IDS]);
+const RECORD_RULES: ReadonlySet<string> = new Set(RECORD_RULE_IDS);
+
+/** Every rule a record carries is one of RECORD_RULE_IDS, and its operation is a verb or a policy event, so no writer can put an id nobody knows on file. */
+function idsKnown(value: Record<string, unknown>): Refusal | undefined {
+  const authorizations = value.authorizations;
+  if (!Array.isArray(authorizations)) return refused('wrong-type', 'authorizations');
+  for (const [index, entry] of authorizations.entries()) {
+    const rule = readPath(entry, 'policy.name');
+    if (typeof rule !== 'string' || !RECORD_RULES.has(rule)) return refused('not-allowed-here', `authorizations[${index}].policy.name`);
+  }
+  const operation = readPath(value, 'api.operation');
+  if (typeof operation !== 'string' || !RECORD_OPERATIONS.has(operation)) return refused('not-allowed-here', 'api.operation');
+  return undefined;
+}
+
 /**
  * Check a record only for what its shape needs: the class arithmetic (class 6003, category 6, type_uid = 600300 + activity_id), every required key with
- * the right kind, the record version, whole numbers only and no secret-like string. Nothing here claims the record is valid against the full OCSF schema.
+ * the right kind, the record version, a known rule and operation, whole numbers only and no secret-like string. Nothing here claims the record is valid
+ * against the full OCSF schema.
  */
 export function validateDecisionRecord(value: unknown): Parsed<DecisionRecord> {
   if (!isRecord(value)) return refused('wrong-type', '');
@@ -274,6 +295,8 @@ export function validateDecisionRecord(value: unknown): Parsed<DecisionRecord> {
   if (typeof value.activity_id !== 'number' || value.type_uid !== OCSF_API_ACTIVITY.class_uid * 100 + value.activity_id) return refused('not-allowed-here', 'type_uid');
   if (readPath(value, 'metadata.version') !== OCSF_VERSION) return refused('unknown-version', 'metadata.version');
   if (readPath(value, 'unmapped.nearAi.recordVersion') !== RECORD_VERSION) return refused('unknown-version', 'unmapped.nearAi.recordVersion');
+  const unknownId = idsKnown(value);
+  if (unknownId !== undefined) return unknownId;
   // Whole numbers only (D-35): the canonical form refuses a fraction, negative zero, undefined and anything that is not plain data.
   try {
     canonicalize(value);

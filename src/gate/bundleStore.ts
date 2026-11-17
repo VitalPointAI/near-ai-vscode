@@ -23,7 +23,7 @@ import * as path from 'node:path';
 import type { SecretStorageLike } from '../services/auth';
 import { withFileLock } from '../services/stateMirrorLock';
 import { SELF_SIGNED_LIFETIME_DAYS, defaultBundlePayload, effectiveNow, failedClosed, verifyBundleEnvelope } from '../domain/gate/bundle';
-import type { BundleState, PolicyBundle } from '../domain/gate/bundle';
+import type { BundleState, PolicyBundle, PolicyEventId } from '../domain/gate/bundle';
 import { MAX_PAYLOAD_BYTES, PayloadError, signPayload } from '../domain/team/signedPayload';
 import type { SignedPayload } from '../domain/team/signedPayload';
 import { identityDir, loadDeviceIdentity, loadOrCreateDeviceIdentity } from '../team/identity';
@@ -51,8 +51,8 @@ export class BundleStoreError extends Error {
   }
 }
 
-/** What happened to the file during a call, for the caller to record. Absent when nothing was written. */
-export type BundleEvent = 'policy.created' | 'policy.renewed' | 'policy.reset';
+/** What happened to the file during a call, for the caller to record. Absent when nothing was written. One of POLICY_EVENT_IDS. */
+export type BundleEvent = Exclude<PolicyEventId, 'policy.load'>;
 
 export interface BundleResult {
   readonly state: BundleState;
