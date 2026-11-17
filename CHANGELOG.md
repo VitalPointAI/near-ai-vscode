@@ -1,10 +1,11 @@
 # Changelog
 
-## Unreleased
+## 0.4.30
 
-Every request to a model is now checked before it is sent and leaves a short record of its own.
-On a fresh install nothing changes where your requests go. Routing by label, where a chat that has
-read labelled files may only use the models its label allows, comes in a later release.
+Every request to a model is now checked before it is sent and leaves a short record of its own;
+on a fresh install nothing changes where your requests go. Routing by label, where a chat that has
+read labelled files may only use the models its label allows, comes in a later release. Team
+Studio also gets a simpler start, same-size team cards and team icons.
 
 - **Every model request is checked before it is sent.** Whatever sends it (the chat, a helper
   agent, reading an attached file, the NEAR AI chat in VS Code's own chat view, Team Studio, a
