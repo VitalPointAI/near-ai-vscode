@@ -573,3 +573,63 @@ and applied back by SHA).
   (or refused with nobody): publishing (git push, docker push, kubectl apply, make deploy, gh release create), destruction (git rebase, reset --hard,
   clean, branch -D, commit --amend, rm -rf of project folders), writes into `.git/` or `.near-ai/` (git config set), and unknown effects (a git alias
   such as `git lg`, a write to a `$VAR` target, an unparseable line, an option the rules do not read).
+
+## Review rounds 9 to 11 (PR #74)
+
+Rounds 9 and 10 were fixed by the coordinator directly; round 11 here, three commits, one per finding. Every new round 11 test was seen failing first
+against the unchanged source (set aside with a tagged stash and applied back by SHA).
+
+### Round 9 (coordinator, commit `c87b0ef`)
+
+- The package.json walk stops at the project root: no metadata above the workspace is read, and a package.json found there is reported as outside, so
+  the command's effects are unknown.
+- `retire()` catches its flush, so a log that fails while being let go cannot become an unhandled rejection.
+
+### Round 10 (coordinator, commit `dd4b5d3`)
+
+- A plain download whose output lands outside the project and scratch has unknown effects, like any other named write there, instead of a complete
+  empty list Full auto ran unasked.
+- git format-patch (`-o`/`--output-directory`, or the current folder), git archive (`-o`/`--output`) and git bundle create tag their output as a named
+  write, so a target in `.git/` is a floor ask. The test row that claimed format-patch but ran `git log -o` now runs format-patch (how the gap was found).
+- `FloorApprovalsOnce` drops expired approvals on `add` and `has`, not only on `take`.
+
+### Round 11
+
+Results: lint clean; full `npm test` (6G cap) 3401 tests, 3392 passed, 0 failed, 0 cancelled, 9 skipped (the same 9); secret scan clean; no package
+changes; e2e not run (no activation or webview code changed). The full run also shows the new loud guard (below) fired in no gate test.
+
+#### 1. The credential-store resolver had no length bound
+
+- Commit `89a0773`.
+- `MAX_NESTING`, `MAX_COMMAND_LENGTH` and `MAX_COMMAND_WORDS` move to `src/domain/commandBounds.ts`, shared by the classifier (which re-exports them)
+  and `shellReachesCredentialStore`. Past them the resolver resolves no word and reports `unreadable`; `floorFactsFor` turns that into unknown effects,
+  so the gate asks with a person and refuses with nobody. The text checks still run first, so a store the text names is still refused at any length.
+- Test (`gateCredentialStores.test.ts`, the resolver handed in to count calls): a command past the word cap and one past the length cap resolve
+  nothing, are unreadable, and the gate asks (person) and refuses (nobody) with `manifest.effects-unknown`; within the bounds words are resolved; a
+  named store is refused whatever the length.
+
+#### 2. A project's own `globalStorage/state.vscdb` was refused
+
+- Commit `ea2386d`.
+- `resolvesInsideWorkspace` (floor.ts) reads a path as written from the shell's folder (or the project), with `~` and `$HOME` as the home folder; any
+  other variable is not known to be inside. The portable match (`globalStorage/...`, `workspaceStorage/<id>/...`) skips a path that resolves inside the
+  project; this VS Code's own storage folders are still refused wherever they are.
+- One helper for every caller: decide()'s text check (`FloorInput`/`GateRequest.workspace`, set by `gateToolCall` with the shell's folder and by
+  `gateStep`), `readCallPaths` for the file tools, and the shell resolver (`shellReachesCredentialStore`, by text and per resolved word).
+- Tests: the project's own file is allowed by the text check, by a shell read and by the Read tool in Full auto; `../globalStorage/state.vscdb` (shell
+  and Read), VS Code's real storage, an absolute path elsewhere and a `$HOME` path are refused, through the gate as `floor.credential-store`.
+
+#### 3. Unknown record rules were dropped, and the scan knew only fixed namespaces
+
+- Commit `65ef156`.
+- No decision is lost: a record given a rule nobody knows is kept under `record.unknown-rule` (`RECORD_UNKNOWN_RULE`, added to `RECORD_RULE_IDS`), with
+  the id it was given in `unmapped.nearAi.unknownRule` (plain, at most 120 characters), by the builder and by the decision log for a record put together
+  by hand; the log says so once. `validateDecisionRecord` still refuses an unknown rule, so the invariant on file is unchanged.
+- Loud in tests: `unknownRuleListeners` hears every such id; the gate's test helper (`helpers/gatedRuns.ts`) throws on it, so a writer with a new id
+  fails the test that runs it (nothing listens in the product).
+- A namespace-free scan (`gateRecordIds.test.ts`): every literal in a rule position (a `rule:` property, a rule comparison, decide()'s `make(outcome,
+  rule)`, the literals a `*Rule*` function returns) and every `operation:` literal, in every file that writes or decides records (src/gate,
+  src/domain/gate, the adapter, and every file importing them), is a known id or operation; a planted id in five new namespaces is found. It found one
+  literal to name (`agent.allowCommands`, a setting key). The existing namespace scan stays.
+- Changed tests (this PR's own): the log test now expects the unknown-rule record kept (two kept, said once) instead of dropped; the validity test
+  checks the validator's refusal on a hand-changed record (the builder no longer produces one); `RECORD_RULE_IDS` now includes the fallback id.
