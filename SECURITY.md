@@ -162,14 +162,21 @@ Known limitations). The holds after outside content apply in every mode (see
 Once a run has read such a file, in any mode, a call that could send data off
 this computer asks in every mode, `fully-autonomous` included, with no
 **Always allow** and no grant for the rest of the run, and is refused when
-nobody is there to answer: a network command, a download, publishing or
-sending, a web fetch or search, a call to an add-on server with a web address,
-and any shell command the checks do not know to be local. Only commands the
-safety rules call safe, and plain local readers such as `cat`, `grep` or
-`head`, still run unasked. A command that reads such a file and could send in
-the same line is held the same way. The read is seen as the other checks see
-one: a file the command or tool names, or a path that resolves to one; a
-recursive search, a glob or a path built while the command runs is not.
+nobody is there to answer: publishing or sending, a web fetch or search, a
+call to an add-on server with a web address (or a local one declared to reach
+a host), and a shell command the checks know reaches the network (curl or wget
+other than a plain download, http and xh, nc, socat, telnet, ssh, scp, sftp,
+rsync to another machine, git push, fetch, pull, clone and ls-remote, gh and
+glab, the cloud and cluster tools, a container registry push, pull or login,
+an install from an address, network code written inline), as well as one the
+checks cannot read whole. A command that reads such a file and could send in
+the same line is held the same way. Local work still runs unasked: builds,
+tests, `npm run` scripts, `make`, and `node` or `python` running a script.
+A program the agent starts can still read the credential and send it itself,
+and a plain download's address could carry it; only the planned sandbox around
+the shell closes that. The read is seen as the other checks see one: a file the
+command or tool names, or a path that resolves to one; a recursive search, a
+glob or a path built while the command runs is not.
 
 The checks that keep agents out of key and credential folders read the text of
 a command, following the shell's folder and any cd or pushd earlier in the same

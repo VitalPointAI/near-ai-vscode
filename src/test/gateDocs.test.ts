@@ -207,6 +207,8 @@ test('the old fully-autonomous wording is gone from SECURITY.md and README, and 
   // Owner decision after PR #74 (D-18): a credential read holds what could send it out.
   assert.match(row, /After it reads such a file, anything that could send data off this computer asks too/);
   assert.ok(flat(floorSection).includes('Once a run has read such a file, in any mode, a call that could send data off this computer asks in every mode, `fully-autonomous` included, with no **Always allow** and no grant for the rest of the run, and is refused when nobody is there to answer'));
+  // What the hold does not see, said plainly: a program the agent starts, and a plain download's address (coordinator, after the first report).
+  assert.ok(flat(floorSection).includes('Local work still runs unasked: builds, tests, `npm run` scripts, `make`, and `node` or `python` running a script. A program the agent starts can still read the credential and send it itself, and a plain download\'s address could carry it; only the planned sandbox around the shell closes that.'));
   // Owner decisions after PR #74: signing in or out asks too, and a credential read holds what could send it out.
   assert.match(readmeActionPolicy, /publishing, signing in or out and destruction still ask/);
   assert.match(readmeActionPolicy, /after a credential read anything that could send data out asks too/);

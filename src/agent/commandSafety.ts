@@ -6,7 +6,6 @@ import { normalizeRelative, PROTECTED_WRITE, STATE_FOLDER_PATH, STATE_FOLDER_TEX
 import { parsePathPattern } from '../domain/gate/vocabulary';
 import type { Capability, PublishTarget } from '../domain/gate/vocabulary';
 import { isSensitivePath } from './tools';
-import { NETWORK_COMMAND as NETWORK_TEXT } from './untrusted';
 
 // The deterministic half of the `auto` approval mode. It decides the clear cases on its own:
 // ordinary build, test, and read-only commands inside the workspace are `safe`; commands that can
@@ -48,6 +47,12 @@ export interface CommandClassification {
    * `docker-credential-*` helper): the floor refuses it like a credential store (owner decision after PR #74, A5). Found wherever it sits.
    */
   printsCredential?: string;
+  /**
+   * Set, with the reason, when the rules know the command reaches the network (a non-plain download, a network client, a remote copy, git with a remote,
+   * gh, a cloud or cluster CLI, a registry push or pull, an install from an address, inline network code): after a credential read the gate holds it
+   * (owner decision after PR #74, D-18). Found wherever it sits, like the effects. A plain download is not noted.
+   */
+  reachesNetwork?: string;
 }
 
 // The bounds are shared with the credential-store check (src/domain/commandBounds.ts), so neither reads what the other gives up on.
@@ -114,8 +119,14 @@ export type PackageScriptsAt =
 // (`npm run x`, `xargs`, `find -exec`, a substitution) or decides on one part and stops, and a tag carried by hand through each of those would be lost in the
 // next one somebody writes (Pitfall 2). Classification is synchronous, so the frame on top of this stack is always the call being made.
 // The frame also keeps whether the classifier stopped reading somewhere (the bound, the caps): wherever that happens, the whole command's effects are unknown.
-interface EffectFrame { effects: CommandEffect[]; unknown?: string; credentialChange?: string; printsCredential?: string }
+interface EffectFrame { effects: CommandEffect[]; unknown?: string; credentialChange?: string; printsCredential?: string; reachesNetwork?: string }
 const effectFrames: EffectFrame[] = [];
+
+/** The command reaches the network, as the rules know it (reachesNetwork). The first reason is kept. */
+function noteNetwork(reason: string): void {
+  const frame = effectFrames[effectFrames.length - 1];
+  if (frame !== undefined) frame.reachesNetwork ??= reason;
+}
 
 /** The command prints a stored login or token: the floor refuses it (printsCredential). The first one is kept. */
 function notePrintsCredential(shown: string): void {
@@ -786,34 +797,25 @@ function skipGlobals(name: string, args: readonly Word[]): { rest: Word[]; value
   return { rest: args.slice(index), valued, skipped, ...(folder === undefined ? {} : { folder }) };
 }
 
-/** Moving the shell's folder runs nothing. */
-const FOLDER_MOVES: ReadonlySet<string> = new Set(['cd', 'pushd', 'popd']);
-
 /** The credential or knowledge-base path a command's text names (SENSITIVE_TEXT_BASE: not the project's state folder, which is not a credential file), as written, or undefined. */
 export function namesCredentialFile(command: string): string | undefined {
   const found = SENSITIVE_TEXT_BASE.exec(command);
   return found === null ? undefined : found[0].replace(/^[\s'"=:<>/]+/, '').slice(0, 120);
 }
 
+/** Network code written inline for an interpreter (`node -e "fetch(...)"`, Python's requests), and bash's own network files. */
+const INLINE_NETWORK = /\b(?:requests|urllib|http\.client|fetch|axios|net\.connect|socket)\b.{0,40}(?:post|get|send|connect|request|\(|https?:)|\/dev\/(?:tcp|udp)\//i;
+
 /**
- * Whether a shell command can send data off this computer, read whole and failing closed (owner decision after PR #74, D-18): it cannot only when the
- * rules call it safe, or when every part of it is a plain local reader (`cat`, `grep`, `head`, ...) with no substitution, and in either case it has no
- * network program, no download, no publish or send, and nothing the rules did not read. Used to hold such a command after the run read a credential file.
+ * Whether a shell command can send data off this computer as the rules know it (owner decision after PR #74, D-18): it publishes or sends, the classifier
+ * noted that it reaches the network, it carries inline network code, or it was not read whole. A read-whole local command with no network effect (a
+ * build, a test run, `node app.js`) is not: what a program it starts does is not seen here (SECURITY.md says so). A plain download is not either.
  */
 export function commandMaySend(command: string, context: CommandContext): boolean {
-  if (NETWORK_TEXT.test(command) || downloadSegments(command).length > 0) return true;
+  if (INLINE_NETWORK.test(command)) return true;
   const classified = classifyCommand(command, context);
-  if (classified.effectsUnknown !== undefined) return true;
-  if ((classified.effects ?? []).some((effect) => effect.verb === 'publish' || effect.verb === 'send' || effect.verb === 'network')) return true;
-  if (classified.verdict === 'safe') return false;
-  const lexed = lex(command.trim());
-  if (lexed.broken !== undefined || lexed.substitutions.length > 0 || lexed.segments.length === 0) return true;
-  return !lexed.segments.every((segment) => {
-    // Past any leading `NAME=value` assignments, the program must be a plain local reader, named as written.
-    const first = segment.words.findIndex((word) => !/^[A-Za-z_][A-Za-z0-9_]*=/.test(word.text));
-    const program = first < 0 ? undefined : segment.words[first];
-    return program !== undefined && !program.expansion && !program.glob && (READ_ONLY.has(programName(program.text)) || FOLDER_MOVES.has(program.text));
-  });
+  if (classified.effectsUnknown !== undefined || classified.reachesNetwork !== undefined) return true;
+  return (classified.effects ?? []).some((effect) => effect.verb === 'publish' || effect.verb === 'send' || effect.verb === 'network');
 }
 
 /** The raw text names a credential or knowledge-base path anywhere (also inside quotes and substitutions). */
@@ -1185,9 +1187,16 @@ function keepsGracePeriod(sub: string, rest: readonly Word[]): boolean {
   return dryRun || grace;
 }
 
+/** git commands that talk to another repository over the network (D-18). */
+const GIT_REMOTE_COMMANDS: ReadonlySet<string> = new Set(['push', 'fetch', 'pull', 'clone', 'ls-remote', 'send-email', 'request-pull']);
+
 function classifyGit(args: Word[], state: SegmentState, context: CommandContext): CommandClassification {
   let index = 0;
   while (index < args.length && args[index].text === '--no-pager') index += 1;
+  const named = args[index]?.text ?? '';
+  if (GIT_REMOTE_COMMANDS.has(named) || (named === 'archive' && args.some((arg) => /^--remote(?:=|$)/.test(arg.text))) || (named === 'submodule' && args.some((arg) => arg.text === 'update'))) {
+    noteNetwork(`git ${named} talks to another repository`);
+  }
   if (index < args.length && looksLikeOption(args[index].text)) return unknown('git options before the subcommand (-C, -c, --git-dir) change what it acts on');
   const sub = args[index]?.text ?? '';
   const rest = args.slice(index + 1);
@@ -1480,6 +1489,8 @@ function classifyPackageManagerIn(manager: string, givenArgs: Word[], state: Seg
   if (sub === 'version' && extra.length) return unknown(`${manager} version changes the version and may tag a release`);
   // Installing exactly what the lockfile declares (no package names); adding packages goes to the safety model.
   const installs = sub === 'ci' || sub === 'install' || sub === 'i' || (manager === 'yarn' && !sub);
+  // Installing from an address the line names reaches that address (D-18).
+  if (['install', 'i', 'add'].includes(sub) && extra.some((arg) => /:\/\/|^git\+|^(?:github|gitlab|bitbucket):/.test(arg.text))) noteNetwork(`${manager} ${sub} installs from an address`);
   if (installs && words.every((word) => word === sub || LOCKFILE_INSTALL_OPTIONS.test(word))) return safe(`${manager} ${sub || 'install'} installs what the project's lockfile already lists`);
   const extraCheck = checkReads(extra.filter((arg) => arg.text !== '--'), state, context, `${manager} ${sub}`);
   if (extraCheck.verdict !== 'safe') return extraCheck;
@@ -1903,7 +1914,7 @@ function classifyProgram(name: string, program: string, args: Word[], state: Seg
   }
   if (POWER.has(name)) return risky(`${name} stops or restarts the machine`);
   if (DISK_DESTROYERS.has(name) || /^mkfs(?:\.|$)/.test(name)) return risky(`${name} can destroy file or disk contents beyond recovery`, DESTROY_ALL);
-  if (NETWORK_SENDERS.has(name)) return risky(`${name} can send data off this machine`);
+  if (NETWORK_SENDERS.has(name)) { noteNetwork(`${name} can send data off this machine`); return risky(`${name} can send data off this machine`); }
   if (name === 'rm' || name === 'rmdir' || name === 'unlink') {
     const targets = args.filter((arg) => !looksLikeOption(arg.text) && arg.text !== '--');
     noteEffects(deleteEffects(name, targets, args, state, context));
@@ -1962,8 +1973,8 @@ function classifyProgram(name: string, program: string, args: Word[], state: Seg
     return words.some((word) => word === '-1' || word === '0' || word === '-0') ? risky('kill -1 or kill 0 kills every process it can') : unknownRead('kill stops a process');
   }
   if (name === 'curl' || name === 'wget' || name === 'http' || name === 'https' || name === 'httpie' || name === 'xh') {
-    if (anyFlag(/^-(?:[A-Za-z]*[dFT][A-Za-z]*)$|^--(?:data|data-binary|data-raw|data-urlencode|form|form-string|upload-file|json|post-data|post-file|body-data|body-file|method)(?:=|$)/) || words.some((word, at) => (word === '-X' || word === '--request') && /^(?:POST|PUT|PATCH|DELETE)$/i.test(words[at + 1] ?? '')) || /^-X(?:POST|PUT|PATCH|DELETE)$/i.test(words.find((word) => /^-X./.test(word)) ?? '')) return risky(`${name} sends data off this machine`);
-    if (name === 'http' || name === 'https' || name === 'xh') return risky(`${name} can send data off this machine`);
+    if (anyFlag(/^-(?:[A-Za-z]*[dFT][A-Za-z]*)$|^--(?:data|data-binary|data-raw|data-urlencode|form|form-string|upload-file|json|post-data|post-file|body-data|body-file|method)(?:=|$)/) || words.some((word, at) => (word === '-X' || word === '--request') && /^(?:POST|PUT|PATCH|DELETE)$/i.test(words[at + 1] ?? '')) || /^-X(?:POST|PUT|PATCH|DELETE)$/i.test(words.find((word) => /^-X./.test(word)) ?? '')) { noteNetwork(`${name} sends data off this machine`); return risky(`${name} sends data off this machine`); }
+    if (name === 'http' || name === 'https' || name === 'xh') { noteNetwork(`${name} can send data off this machine`); return risky(`${name} can send data off this machine`); }
     // 0.4.18: a download is safe when it is a PLAIN one: one http(s) URL and only flags known to send nothing (src/domain/plainDownload.ts). The rule
     // fails closed, so a flag curl adds later, or one nobody thought of, asks instead of slipping through. Anything that carries data is risky above.
     // A word the shell decides at run time ($O, $(...)) reaches plainDownload as empty text, so it is not a plain download: where it writes, or what it
@@ -1987,10 +1998,11 @@ function classifyProgram(name: string, program: string, args: Word[], state: Seg
       return safe(`${name} downloads a page and sends nothing of this run's with it`);
     }
     // 0.4.18 review: say why, rather than falling through to "not a command the rules know", which would be a wrong explanation for `curl --netrc`.
+    noteNetwork(`${name} ${download.reason ?? 'is not a plain download'}`);
     return downloadWrites(name, args, state, context, `${name} ${download.reason ?? 'is not a plain download'}`);
   }
   if (name === 'rsync') {
-    if (words.some((word) => !looksLikeOption(word) && /^[^/]*:|^[\w.-]+@/.test(word))) return risky('rsync copies to or from another machine');
+    if (words.some((word) => !looksLikeOption(word) && /^[^/]*:|^[\w.-]+@/.test(word))) { noteNetwork('rsync copies to or from another machine'); return risky('rsync copies to or from another machine'); }
     // The destination is the last operand; --delete removes what is there and is not in the source. Options with a value as the next word are skipped.
     const valued = new Set(['-e', '--rsh', '--exclude', '--include', '--filter', '-f', '--exclude-from', '--include-from', '--files-from', '--chmod', '--chown', '--log-file', '--partial-dir', '--temp-dir', '-T', '--backup-dir', '--suffix', '--compare-dest', '--copy-dest', '--link-dest']);
     if (args.some((arg) => /^(?:-e|--rsh)(?:=|$)/.test(arg.text))) return unknown('rsync runs a remote shell the rules do not check');
@@ -2007,6 +2019,8 @@ function classifyProgram(name: string, program: string, args: Word[], state: Seg
   if (name === 'crontab') return words.length === 1 && words[0] === '-l' ? unknownRead('crontab -l') : risky('crontab changes scheduled jobs');
   if (name === 'systemctl' || name === 'service' || name === 'launchctl') return words.some((word) => /^(?:start|stop|restart|reload|enable|disable|mask|unmask|kill|load|unload|bootstrap|bootout|daemon-reload)$/.test(word)) ? risky(`${name} changes system services`) : unknownRead(`${name}`);
   if (name === 'docker' || name === 'podman' || name === 'buildah') {
+    // Talking to a registry reaches the network (D-18): push, pull, login, logout, search.
+    if (/^(?:push|pull|login|logout|search)$/.test(words[0] ?? '') || (words[0] === 'image' && /^(?:push|pull)$/.test(words[1] ?? ''))) noteNetwork(`${name} ${words[0]} talks to a container registry`);
     // A push publishes an image; login and logout change the credentials kept on this computer, which the floor asks about (owner decision after PR #74).
     const pushes = words[0] === 'push' || (words[0] === 'image' && words[1] === 'push');
     if (words[0] === 'login' || words[0] === 'logout') noteCredentialChange(`${name} ${words[0]} signs in or out of a container registry.`);
@@ -2017,6 +2031,8 @@ function classifyProgram(name: string, program: string, args: Word[], state: Seg
     noteCredentialChange(`helm registry ${words.filter((word) => !looksLikeOption(word))[1]} signs in or out of a chart registry.`);
     return risky('helm registry changes your registry login');
   }
+  // A cluster, cloud or infrastructure command talks to a remote service, whatever it does there (D-18).
+  if (['kubectl', 'helm', 'oc', 'terraform', 'tofu', 'pulumi', 'cdk', 'serverless', 'sls', 'aws', 'gcloud', 'az', 'gsutil', 'near', 'gh', 'glab'].includes(name)) noteNetwork(`${name} talks to a remote service`);
   if (name === 'kubectl' || name === 'helm' || name === 'oc') return /^(?:apply|create|delete|replace|patch|rollout|scale|set|edit|exec|cp|drain|cordon|taint|label|annotate|install|upgrade|uninstall|rollback)$/.test(words.find((word) => !looksLikeOption(word)) ?? '') ? risky(`${name} changes a cluster`, publishTo('deploy')) : unknownRead(name);
   if (name === 'terraform' || name === 'tofu' || name === 'pulumi' || name === 'cdk' || name === 'serverless' || name === 'sls') return /^(?:apply|destroy|import|up|deploy|remove|refresh|taint|untaint|state)$/.test(words.find((word) => !looksLikeOption(word)) ?? '') ? risky(`${name} changes deployed infrastructure`, publishTo('deploy')) : unknownRead(name);
 /**
@@ -2517,6 +2533,7 @@ export function classifyCommand(command: string, context: CommandContext): Comma
   return {
     ...verdict, ...(effects.length > 0 ? { effects } : {}), ...(frame.unknown === undefined ? {} : { effectsUnknown: frame.unknown }),
     ...(frame.credentialChange === undefined ? {} : { credentialChange: frame.credentialChange }),
-    ...(frame.printsCredential === undefined ? {} : { printsCredential: frame.printsCredential })
+    ...(frame.printsCredential === undefined ? {} : { printsCredential: frame.printsCredential }),
+    ...(frame.reachesNetwork === undefined ? {} : { reachesNetwork: frame.reachesNetwork })
   };
 }

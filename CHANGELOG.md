@@ -41,9 +41,10 @@ to undo, and no mode lets an agent near the places where your keys and passwords
   and it lists, tests and saves that folder's team.
 - **After reading a credential file, sending asks.** Full auto still reads your project's `.env`
   and key files without asking. Once a run has read one, anything that could send data off your
-  computer asks first in every mode: a network command, a download, publishing, a web fetch or
-  search, a call to an add-on server with a web address, and any command the checks do not know
-  to be local. These cards have no **Always allow**, and with nobody to answer they are refused.
+  computer asks first in every mode: a command the checks know reaches the network (such as curl
+  sending data, ssh, git fetch or push, gh, or a cloud tool), publishing, a web fetch or search,
+  and a call to an add-on server with a web address. Builds, tests and your own scripts still run.
+  These cards have no **Always allow**, and with nobody to answer they are refused.
 - **Merging a pull request and writing through the GitHub API ask in every mode.** `gh pr merge`
   and a `gh api` call that writes (a writing method, a field or a body) count as publishing.
   Opening a pull request and commenting follow your settings, as before.
