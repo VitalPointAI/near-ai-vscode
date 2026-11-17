@@ -44,6 +44,8 @@ function sites(): Site[] {
  */
 const REACH: Readonly<Record<string, { readonly input: string; readonly reason: RegExp; readonly tags?: unknown[]; readonly extra?: Partial<CommandContext> }>> = {
   // Read whole: the classifier interpreted every word, and only cannot judge the command.
+  "unknownRead:'git archive writes to its output stream'": { input: 'git archive HEAD', reason: /writes to its output stream/ },
+  "unknownRead:`git bundle ${rest[0]?.text ?? ''} reads a bundle`.trim()": { input: 'git bundle verify repo.bundle', reason: /git bundle verify reads a bundle/ },
   'unknownRead:`${label} names ${value}, which is outside the workspace`': { input: 'cat /srv/data.txt', reason: /cat names \/srv\/data\.txt, which is outside the workspace/ },
   "unknownRead:'gsd-tools --config-dir works on another configuration folder'": { input: `${GSD_TOOLS} state --config-dir x`, reason: /--config-dir works on another configuration folder/ },
   'unknownRead:`gsd-tools --${option[1]} points outside the workspace`': { input: `${GSD_TOOLS} state --cwd /srv`, reason: /gsd-tools --cwd points outside the workspace/ },
@@ -86,7 +88,6 @@ const REACH: Readonly<Record<string, { readonly input: string; readonly reason: 
   'unknownRead:`${name} deletes files matched at run time`': { input: 'rm src/*.log', reason: /rm deletes files matched at run time/ },
   "unknownRead:'find -exec runs a command for every match'": { input: 'find . -exec wc -l \\;', reason: /find -exec runs a command for every match/ },
   "unknownRead:'kill stops a process'": { input: 'kill 1234', reason: /kill stops a process/ },
-  'unknownRead:`${name} downloads a file to ${download.output}, which is outside the project`': { input: 'curl -sS -o /srv/x.tgz https://example.test/x.tgz', reason: /downloads a file to \/srv\/x\.tgz, which is outside the project/ },
   "unknownRead:'crontab -l'": { input: 'crontab -l', reason: /^crontab -l$/ },
   'unknownRead:`${name}`': { input: 'systemctl status app', reason: /^systemctl$/ },
   "unknownRead:`${name} ${words[0] ?? ''}`.trim()": { input: 'docker ps', reason: /^docker ps$/ },
@@ -130,6 +131,10 @@ const REACH: Readonly<Record<string, { readonly input: string; readonly reason: 
   "unknownRead:'ln without a target'": { input: 'ln -s', reason: /ln without a target/ },
   "unknownRead:'printf -v sets a shell variable'": { input: 'printf -v x %s y', reason: /printf -v sets a shell variable/ },
   // Not read whole: the effects are unknown.
+  'unknown:`${label} with an option that runs programs or reaches outside the repository`': { input: 'git archive --remote=origin -o x.tar HEAD', reason: /git archive with an option that runs programs/ },
+  'unknown:`${label} without its output`': { input: 'git archive -o', reason: /git archive without its output/ },
+  "unknown:'git bundle create without a file'": { input: 'git bundle create', reason: /git bundle create without a file/ },
+  'unknown:`${name} downloads a file to ${download.output}, which is outside the project`': { input: 'curl -sS -o /srv/x.tgz https://example.test/x.tgz', reason: /downloads a file to \/srv\/x\.tgz, which is outside the project/ },
   'unknown:`${reason}, to a place decided at run time or outside the project`': { input: 'ln -s a /srv/link', reason: /to a place decided at run time or outside the project/ },
   "unknown:'git config with an option the rules do not check'": { input: 'git config --frob a b', reason: /git config with an option the rules do not check/ },
   "unknown:'awk without a program'": { input: 'awk', reason: /awk without a program/ },

@@ -7,7 +7,7 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { approveFloorCallLate, endFloorApprovals, FLOOR_APPROVAL_TTL_MS, floorApprovalsOnce, floorCallKey, gateToolCall } from '../agent/gateAdapter';
+import { approveFloorCallLate, endFloorApprovals, FLOOR_APPROVAL_TTL_MS, FloorApprovalsOnce, floorApprovalsOnce, floorCallKey, gateToolCall } from '../agent/gateAdapter';
 import type { GateCallInput } from '../agent/gateAdapter';
 import { DEFAULT_RULES, RunGrants } from '../agent/permissions';
 import { writeTool } from '../agent/tools';
@@ -105,4 +105,14 @@ test('a late approval is stamped with the runtime\'s clock, the one the gate che
   approveFloorCallLate(grants, key, runtime.clock!);
   advance(FLOOR_APPROVAL_TTL_MS);
   assert.equal((await gateToolCall(runtime, input())).approvedOnce, undefined, 'expired by that clock');
+});
+
+test('an expired late approval is dropped when another is added or checked, not only when its own call is retried', () => {
+  const once = new FloorApprovalsOnce();
+  once.add('old call', 0);
+  assert.equal(once.size, 1);
+  once.add('new call', FLOOR_APPROVAL_TTL_MS + 1);
+  assert.equal(once.size, 1, 'adding drops the expired one');
+  assert.equal(once.has('other call', 2 * FLOOR_APPROVAL_TTL_MS + 2), false);
+  assert.equal(once.size, 0, 'checking drops the expired one');
 });

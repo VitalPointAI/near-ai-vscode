@@ -1052,6 +1052,25 @@ function classifyGit(args: Word[], state: SegmentState, context: CommandContext)
       if (writesOrEscapes) return outputWrite() ?? unknown(`${label} ${writesOrEscapes}`);
       return words.some((word) => !looksLikeOption(word) && isSensitivePath(word)) ? risky('git commit names a credential file') : safe('git commit records changes locally');
     // A git command of its own (git init, git worktree, ...) is read; any other name may be an alias that runs anything (`!git push`).
+    case 'format-patch': case 'archive': {
+      // These write files the text names (PR #74 review round 10): format-patch into -o/--output-directory (or the current folder), archive into -o/--output.
+      if (words.some((word) => /^--(?:no-index|ext-diff|exec|upload-pack|receive-pack|git-dir|work-tree|remote)(?:=|$)/.test(word))) return unknown(`${label} with an option that runs programs or reaches outside the repository`);
+      const option = sub === 'format-patch' ? /^(?:-o|--output-directory)$/ : /^(?:-o|--output)$/;
+      const inline = sub === 'format-patch' ? /^(?:--output-directory=|-o)(.+)$/ : /^(?:--output=|-o)(.+)$/;
+      const at = rest.findIndex((arg) => option.test(arg.text) || inline.test(arg.text));
+      if (at < 0) {
+        if (sub === 'archive') return unknownRead('git archive writes to its output stream');
+        return writeResult('git format-patch writes patch files into the current folder', [{ text: '.', quoted: false, glob: false, expansion: false }], state, context);
+      }
+      const match = inline.exec(rest[at]!.text);
+      const target = option.test(rest[at]!.text) ? rest[at + 1] : { ...rest[at]!, text: match![1]! };
+      return target === undefined ? unknown(`${label} without its output`) : writeResult(`${label} writes its output to ${target.text}`, [target], state, context);
+    }
+    case 'bundle': {
+      if (rest[0]?.text !== 'create') return unknownRead(`git bundle ${rest[0]?.text ?? ''} reads a bundle`.trim());
+      const file = rest.slice(1).find((arg) => !looksLikeOption(arg.text));
+      return file === undefined ? unknown('git bundle create without a file') : writeResult(`git bundle create writes ${file.text}`, [file], state, context);
+    }
     default: return GIT_BUILTINS.has(sub) ? unknownRead(`git ${sub} is not one the rules know`) : unknown(`git ${sub || '(no subcommand)'} is not one the rules know`);
   }
 }
@@ -1650,7 +1669,8 @@ function classifyProgram(name: string, program: string, args: Word[], state: Seg
       if (download.output !== undefined) {
         const target = pathFacts(download.output, state.cwd, context);
         if (!target.inside && !scratchFacts(download.output, target.absolute, target.sensitive, context)) {
-          return unknownRead(`${name} downloads a file to ${download.output}, which is outside the project`);
+          // Outside the project and scratch, the write is not one the run may make: effects unknown, as for every other named write there.
+          return unknown(`${name} downloads a file to ${download.output}, which is outside the project`);
         }
         // The file it writes inside the project is a write there (a protected place asks, PR #74 review round 8). The word as written says whether the
         // shell decides it at run time.

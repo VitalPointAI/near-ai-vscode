@@ -685,11 +685,13 @@ export class FloorApprovalsOnce {
   /** A person approved this exact call once, late, at `now` by the runtime's clock (the one the gate checks it with). */
   public add(key: string, now: number): void {
     if (this.ended) return;
+    this.prune(now);
     this.expiries.set(key, now + FLOOR_APPROVAL_TTL_MS);
   }
 
   /** Whether an approval of this exact call is waiting and has not expired. */
   public has(key: string, now: number): boolean {
+    this.prune(now);
     const expires = this.expiries.get(key);
     return !this.ended && expires !== undefined && now < expires;
   }
@@ -702,8 +704,12 @@ export class FloorApprovalsOnce {
   public take(key: string, now: number): boolean {
     const good = this.has(key, now);
     this.expiries.delete(key);
-    for (const [other, expires] of [...this.expiries]) if (now >= expires) this.expiries.delete(other);
     return good;
+  }
+
+  /** Drops every approval that has expired by `now`, so ones never retried do not wait for the end of the turn. */
+  private prune(now: number): void {
+    for (const [other, expires] of [...this.expiries]) if (now >= expires) this.expiries.delete(other);
   }
 
   /** The run's turn is over: nothing waiting is kept, and nothing given later is. */
