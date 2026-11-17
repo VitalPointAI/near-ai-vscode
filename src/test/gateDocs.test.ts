@@ -106,6 +106,15 @@ test('SECURITY.md\'s MCP section says what plan 10 shipped: declared tools, rest
   assert.match(flat(mcpSection), /An undeclared tool asks before every call in every mode, `fully-autonomous` included/);
   assert.doesNotMatch(flat(mcpSection), /every mode except `fully-autonomous`/);
   assert.match(mcpSection, /behave as they did/);
+  // PR #76 review round 3: a local server's declaration is a statement of trust, said plainly, and never claimed to keep the floor in charge of its calls.
+  const trust = 'A declaration is your statement that you trust what that server\'s tools do: the gate does not check each call\'s arguments against it, so a declared tool runs without asking in Full auto. Only declare servers you trust like your own code.';
+  assert.ok(flat(mcpSection).includes(trust), 'SECURITY.md');
+  assert.ok(flat(readmeMcp).includes(trust), 'README MCP section');
+  assert.ok(flat(README).includes(`| \`nearAi.mcp.localServerEffects\` | \`{}\` |`) && flat(README).includes(trust), 'README settings row');
+  assert.doesNotMatch(flat(SECURITY), /cannot be declared, so the floor still decides them/);
+  const setting = (JSON.parse(readFileSync(path.join(ROOT, 'package.json'), 'utf8')) as { contributes: { configuration: { properties: Record<string, { markdownDescription?: string }> } | Array<{ properties: Record<string, { markdownDescription?: string }> }> } }).contributes.configuration;
+  const described = (Array.isArray(setting) ? setting : [setting]).map((block) => block.properties['nearAi.mcp.localServerEffects']?.markdownDescription).find((text) => text !== undefined) ?? '';
+  assert.match(described, /^A declaration here is your statement that you trust what that server's tools do: the gate does not check each call's arguments against it, so a declared tool runs without asking in Full auto; only declare servers you trust like your own code\./);
 });
 
 test('README names the two commands, points to the SECURITY.md section, and repeats the MCP changes in its own words', () => {

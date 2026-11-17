@@ -791,13 +791,50 @@
             "maxItems": 16,
             "items": {
               "anyOf": [
-                { "type": "string", "enum": ["read"] },
-                { "type": "object", "properties": { "workspaceWrite": { "type": "array", "items": { "type": "string" }, "minItems": 1, "maxItems": 32 } }, "required": ["workspaceWrite"], "additionalProperties": false },
-                { "type": "object", "properties": { "network": { "type": "array", "items": { "type": "string" }, "minItems": 1, "maxItems": 32 } }, "required": ["network"], "additionalProperties": false }
+                {
+                  "type": "string",
+                  "enum": [
+                    "read"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "workspaceWrite": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "minItems": 1,
+                      "maxItems": 32
+                    }
+                  },
+                  "required": [
+                    "workspaceWrite"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "network": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "minItems": 1,
+                      "maxItems": 32
+                    }
+                  },
+                  "required": [
+                    "network"
+                  ],
+                  "additionalProperties": false
+                }
               ]
             }
           },
-          "markdownDescription": "What the tools of an MCP server that runs on this computer (a command, no web address) may do, by server id, declared once: `\"read\"`, `{ \"workspaceWrite\": [\"docs/**\"] }` (writes inside the project on those paths) and `{ \"network\": [\"api.example.com\"] }` (reaches those hosts). Until a server is declared here, its tools that change data ask before every call in every mode. A declaration only narrows: it decides the tools that say they neither delete nor reach the open world (MCP's destructiveHint and openWorldHint both false); any other tool keeps asking. Publishing, deleting, sending, shell commands, and writes into `.git/`, `.planning/` or `.near-ai/` cannot be declared, so they still ask. A declaration that cannot be read is ignored with a warning. Read from your user settings only. This is what you declare the server does; NEAR AI cannot check what a server does inside itself."
+          "markdownDescription": "A declaration here is your statement that you trust what that server's tools do: the gate does not check each call's arguments against it, so a declared tool runs without asking in Full auto; only declare servers you trust like your own code. By server id, what the tools of an MCP server that runs on this computer (a command, no web address) may do: `\"read\"`, `{ \"workspaceWrite\": [\"docs/**\"] }`, `{ \"network\": [\"api.example.com\"] }`. Until a server is declared, its tools that change data ask before every call in every mode, and a tool that says it may delete or reach the open world (MCP's destructiveHint or openWorldHint), or does not say, keeps asking. A declaration that cannot be read is ignored with a warning. Read from your user settings only."
         },
         "nearAi.team.pollSeconds": {
           "type": "number",

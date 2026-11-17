@@ -776,7 +776,8 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
       }
     }
     // The call runs: from now on this run has read a file that may hold credentials, and what can send data off this computer asks (D-18).
-    if (readsCredential !== undefined) this.grants.noteCredentialRead(readsCredential);
+    const credentialFile = readsCredential ?? gateCall.readsCredential;
+    if (credentialFile !== undefined) this.grants.noteCredentialRead(credentialFile);
     const ranAt = Date.now();
     const cwdBefore = context.shell?.workingDirectory ?? context.root;
     try {

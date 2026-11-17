@@ -164,20 +164,6 @@ export const KEYCHAIN_COMMANDS: readonly string[] = Object.freeze([
   'security find-generic-password', 'security find-internet-password', 'security dump-keychain', 'security export', 'secret-tool lookup', 'secret-tool search'
 ]);
 
-/**
- * Commands that print a stored login or token (owner decision after PR #74, A5), matched in the text like the keychain commands, so one named inside a
- * script string is refused too. The classifier also finds them structurally (past global options, through wrappers): see `printsCredential`.
- */
-export const TOKEN_PRINTER_COMMANDS: readonly string[] = Object.freeze([
-  'gh auth token', 'gcloud auth print-access-token', 'gcloud auth print-identity-token', 'gcloud auth print-refresh-token', 'gcloud auth application-default print-access-token',
-  'gcloud config config-helper', 'az account get-access-token', 'aws configure get', 'aws configure export-credentials', 'aws sts get-session-token', 'aws sts assume-role',
-  'aws sts assume-role-with-saml', 'aws sts assume-role-with-web-identity', 'aws sts get-federation-token', 'aws ecr get-login-password', 'aws ecr get-authorization-token',
-  'aws ecr get-login', 'aws ecr-public get-login-password', 'aws ecr-public get-authorization-token', 'aws codeartifact get-authorization-token', 'npm token list',
-  'npm token create', 'pnpm token list', 'pnpm token create'
-]);
-/** Docker's credential helpers (`docker-credential-desktop get`), which print what a registry login stored. */
-const DOCKER_CREDENTIAL_HELPER = '(?<![\\w.-])docker-credential-[\\w.-]+';
-
 /** The plain reason for a command that prints a stored login or token (refused as `floor.credential-store`). */
 export function printerReason(shown: string): string {
   return `${shown} prints a stored password, key or token. Agents may not run it, in any approval mode.`;
@@ -259,10 +245,9 @@ export function namesCredentialStore(text: string, locations: FloorLocations = {
   const stores = new RegExp(`${homePrefix(locations)}(?:${CREDENTIAL_STORES.map(escapeRegExp).join('|')})${NAME_END}`, 'i');
   const keychain = new RegExp(`(?<![\\w.-])(?:${KEYCHAIN_COMMANDS.map((command) => command.split(' ').map(escapeRegExp).join('\\s+')).join('|')})(?![\\w-])`, 'i');
   const shown = firstMatch(stores, flat) ?? namesVscodeSecrets(flat, locations, workspace) ?? firstMatch(keychain, flat);
-  if (shown !== undefined) return credentialReason(shown);
-  const printers = new RegExp(`(?<![\\w.-])(?:${TOKEN_PRINTER_COMMANDS.map((command) => command.split(' ').map(escapeRegExp).join('\\s+')).join('|')})(?![\\w-])|${DOCKER_CREDENTIAL_HELPER}`, 'i');
-  const printer = firstMatch(printers, flat);
-  return printer === undefined ? undefined : printerReason(printer);
+  // The commands that print a stored token are found by how the command runs (the classifier's printsCredential), not by their words anywhere in the
+  // text, so a commit message or a search that mentions one is not refused (PR #76 review round 3).
+  return shown === undefined ? undefined : credentialReason(shown);
 }
 
 /** Whether the text of a command names the identity or gate folder of this extension's global storage, by the portable form or by the real folder. */

@@ -107,6 +107,8 @@ export interface FloorCommandFacts {
    * credential-store check threw. The call's effects are then unknown, so decide() asks with a person there and refuses with nobody (PR #74 review).
    */
   readonly effectsUnknown?: string;
+  /** A file that may hold credentials the command reads, as the classifier read it: its own words, a script it runs, a `bash -c` (D-18, PR #76 review round 3). */
+  readonly credentialFile?: string;
 }
 
 /** Where the system's temporary folders are, for systemTemporaryRoots; a test gives a stand-in. */
@@ -196,7 +198,10 @@ export async function floorFactsFor(input: FloorFactsInput, readers: FloorReader
   // A command that prints a stored token is refused like a credential store (A5); the text check above may already have named it.
   const printer = facts.credentialStore === undefined && classified.printsCredential !== undefined ? { credentialStore: printerReason(classified.printsCredential) } : {};
   const read = { ...facts, ...printer, ...(classified.credentialChange === undefined ? {} : { credentialChange: classified.credentialChange }) };
-  return { effects: classified.effects ?? [], facts: read, ...(unknownWhy === undefined ? {} : { effectsUnknown: unknownWhy }) };
+  return {
+    effects: classified.effects ?? [], facts: read, ...(unknownWhy === undefined ? {} : { effectsUnknown: unknownWhy }),
+    ...(classified.credentialFile === undefined ? {} : { credentialFile: classified.credentialFile })
+  };
 }
 
 /** The classifier's context for the floor's own reading of a command: cheap, with no safety model, no allow list and no scratch record. */
@@ -296,6 +301,8 @@ export interface GatedCall {
   readonly callKey?: string;
   /** True when a person had already approved this exact floor call once, after the run moved on: it runs this time, and the next identical call asks again. */
   readonly approvedOnce?: boolean;
+  /** The file that may hold credentials this call reads, when it reads one: the run is marked with it once the call runs (D-18). */
+  readonly readsCredential?: string;
 }
 
 function productVersionOf(runtime: GateRuntime): string {
@@ -701,7 +708,9 @@ export async function gateToolCall(runtime: GateRuntime, input: GateCallInput, o
   const denied = input.tool.capability === 'shell' && input.command !== undefined ? denyListReason(input.command, input.rules) : undefined;
   // After a credential read (this run's, or this very call's), a call that can send data off this computer is held in every mode (owner decision after
   // PR #74, D-18). Worked out only then, so other calls pay nothing for it.
-  const credentialRead = input.grants.credentialRead ?? input.readsCredential;
+  // This call's own read: its words and paths (the loop's check), or a script or `bash -c` the classifier read for it.
+  const readsCredential = input.readsCredential ?? read?.credentialFile;
+  const credentialRead = input.grants.credentialRead ?? readsCredential;
   const credentialHold = credentialRead === undefined ? undefined
     : (input.command === undefined ? callSendsOffMachine(input.tool, effects) : read?.effectsUnknown !== undefined || shellMaySend(input.command, { command: input.command, root: input.root, ...(input.shell ?? {}), ...(runtime.locations ?? {}) }))
       ? credentialHoldReason(credentialRead, input.command !== undefined) : undefined;
@@ -735,7 +744,10 @@ export async function gateToolCall(runtime: GateRuntime, input: GateCallInput, o
   const exactCall = floorCallKey(input);
   const approvedLate = takeFloorApproval(input.grants, exactCall, (runtime.clock ?? Date.now)());
   const callKey = floorAsk ? exactCall : undefined;
-  const gated: GatedCall = { decision, settings: captured.value, request, effects, ...(resource === undefined ? {} : { resource }), ...(callKey === undefined ? {} : { callKey }) };
+  const gated: GatedCall = {
+    decision, settings: captured.value, request, effects, ...(resource === undefined ? {} : { resource }), ...(callKey === undefined ? {} : { callKey }),
+    ...(readsCredential === undefined ? {} : { readsCredential })
+  };
   const model = options.model === undefined ? undefined : { name: options.model, provider: MODEL_PROVIDER };
   // A floor ask a person already approved once, late (a sub-agent's parked card): this exact call runs this time only. decide() has just been asked again,
   // so the emergency stop, the policy, the floor's refusals and the deny list all still came first (D-43, Pitfall 4).

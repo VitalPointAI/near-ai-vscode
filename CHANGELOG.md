@@ -53,9 +53,9 @@ to undo, and no mode lets an agent near the places where your keys and passwords
   change the logins kept on your computer.
 - **More credential stores and token commands are off limits.** The GitHub CLI's login file,
   cargo's, terraform's and RubyGems' credentials, your desktop keyring and your home `.yarnrc.yml`
-  join the stores agents may not touch, and so do commands that print a stored token, such as
-  `gh auth token`, `gcloud auth print-access-token`, `aws sts get-session-token` and `npm token
-  list`. A project's own `.npmrc` or `.yarnrc.yml` is still yours to use.
+  join the stores agents may not touch, and so do commands that print a stored token when they run,
+  such as `gh auth token`, `gcloud auth print-access-token`, `aws sts get-session-token` and `npm
+  token list` (a message or search that only mentions one is fine). A project's own `.npmrc` or `.yarnrc.yml` is still yours to use.
 - **Routine git upkeep no longer asks in Full auto.** `git gc` and `git prune` that keep git's
   grace period, and continuing, skipping or leaving a rebase already under way, run like other
   work. Pruning at once, starting a rebase and expiring the reflog still ask.
@@ -64,9 +64,11 @@ to undo, and no mode lets an agent near the places where your keys and passwords
   the tool would refuse anyway.
 - **Local add-on servers can say what they do.** For a server that runs on your computer, the new
   `nearAi.mcp.localServerEffects` setting declares once what its tools may do: read, write named
-  project paths, reach named hosts. Until you declare it, its tools that change data keep asking, and a
-  tool that says it may delete or reach the open world, or does not say, keeps asking after it too.
-  Publishing, deleting and writes into git's and NEAR AI's folders cannot be declared.
+  project paths, reach named hosts. A declaration is your statement that you trust what that
+  server's tools do: NEAR AI does not check each call against it, so a declared tool runs without
+  asking in Full auto. Only declare servers you trust like your own code. Until you declare it, its
+  tools that change data keep asking, and a tool that says it may delete or reach the open world,
+  or does not say, keeps asking after it too.
 - **Every refused call is on the record.** A call whose arguments could not be read is now
   recorded too, naming the tool and never its arguments. Decision records also keep a number given
   to a token limit, such as `--max-tokens 4096`, while still removing tokens themselves.

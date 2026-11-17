@@ -53,6 +53,11 @@ export interface CommandClassification {
    * (owner decision after PR #74, D-18). Found wherever it sits, like the effects. A plain download is not noted.
    */
   reachesNetwork?: string;
+  /**
+   * The file that may hold credentials the command names, wherever the classifier reads text: the command, a script `npm run` runs (from the folder's
+   * package.json), `bash -c`, a substitution (D-18, PR #76 review round 3). After it runs, the run is marked as having read a credential file.
+   */
+  credentialFile?: string;
 }
 
 // The bounds are shared with the credential-store check (src/domain/commandBounds.ts), so neither reads what the other gives up on.
@@ -119,7 +124,7 @@ export type PackageScriptsAt =
 // (`npm run x`, `xargs`, `find -exec`, a substitution) or decides on one part and stops, and a tag carried by hand through each of those would be lost in the
 // next one somebody writes (Pitfall 2). Classification is synchronous, so the frame on top of this stack is always the call being made.
 // The frame also keeps whether the classifier stopped reading somewhere (the bound, the caps): wherever that happens, the whole command's effects are unknown.
-interface EffectFrame { effects: CommandEffect[]; unknown?: string; credentialChange?: string; printsCredential?: string; reachesNetwork?: string }
+interface EffectFrame { effects: CommandEffect[]; unknown?: string; credentialChange?: string; printsCredential?: string; reachesNetwork?: string; credentialFile?: string }
 const effectFrames: EffectFrame[] = [];
 
 /** The command reaches the network, as the rules know it (reachesNetwork). The first reason is kept. */
@@ -1122,11 +1127,19 @@ function cloudWords(name: string, args: readonly Word[]): { words: string[] } | 
   return { words: out };
 }
 
+/** An AWS setting that holds a key, token or secret (`aws_secret_access_key`, `profile.dev.aws_session_token`), by its last dotted part. */
+function secretSetting(key: string): boolean {
+  const name = key.slice(key.lastIndexOf('.') + 1);
+  return /secret|token|password|credential|access_key|key_id|private/i.test(name);
+}
+
 /** The command as shown, when aws, gcloud or az prints a stored login, key or token (A5); undefined otherwise. */
 function cloudCredentialPrinter(name: string, words: readonly string[], args: readonly Word[]): string | undefined {
   const [first = '', second = '', third = ''] = words;
   if (name === 'aws') {
-    if (first === 'configure' && (second === 'get' || second === 'export-credentials')) return `aws configure ${second}`;
+    if (first === 'configure' && second === 'export-credentials') return 'aws configure export-credentials';
+    // `aws configure get` prints one setting: refused for a key, token or secret, or one the rules cannot read (PR #76 review round 3).
+    if (first === 'configure' && second === 'get' && (third === '' || secretSetting(third) || args.some((arg) => arg.expansion))) return 'aws configure get';
     if (first === 'sts' && (/^assume-role/.test(second) || second === 'get-session-token' || second === 'get-federation-token')) return `aws sts ${second}`;
     if ((first === 'ecr' || first === 'ecr-public') && /^get-(?:login|login-password|authorization-token)$/.test(second)) return `aws ${first} ${second}`;
     if (first === 'codeartifact' && second === 'get-authorization-token') return 'aws codeartifact get-authorization-token';
@@ -1501,8 +1514,13 @@ function couldPrintCredential(name: string, args: readonly Word[]): string | und
   if (name === 'aws') {
     const printer = words.find((word) => /^(?:get-session-token|get-federation-token|get-login-password|get-authorization-token|get-login|assume-role(?:-[\w-]+)?)$/.test(word));
     if (printer !== undefined) return `aws ${printer}`;
-    const configure = after('configure', 'get', 'export-credentials');
-    return configure === undefined ? undefined : `aws configure ${configure}`;
+    if (after('configure', 'export-credentials') !== undefined) return 'aws configure export-credentials';
+    // Any word after `get` (an option's value included) that is a secret's name, or one decided at run time, or none at all, fails closed.
+    const at = words.indexOf('configure');
+    const get = at < 0 ? -1 : words.indexOf('get', at + 1);
+    if (get < 0) return undefined;
+    const keys = args.filter((arg) => !looksLikeOption(arg.text)).slice(get + 1);
+    return keys.length === 0 || keys.some((arg) => arg.expansion || secretSetting(arg.text)) ? 'aws configure get' : undefined;
   }
   return undefined;
 }
@@ -2445,6 +2463,9 @@ function classifyText(command: string, context: CommandContext, depth: number): 
   const deep = tooDeep(depth);
   if (deep) return deep;
   if (!raw) return unknownRead('the command is empty');
+  // Every text the classifier reads (a script body, `bash -c`, a substitution) is checked for a credential file it names (D-18).
+  const named = namesCredentialFile(raw);
+  if (named !== undefined) { const frame = effectFrames[effectFrames.length - 1]; if (frame !== undefined) frame.credentialFile ??= named; }
   // These two decide the verdict on their own, but the rest of the command is still read, so what it publishes or destroys is seen (Pitfall 2).
   const early = /:\(\)\s*\{/.test(raw) ? risky('it defines a fork bomb') : DOWNLOAD_TO_SHELL.test(raw) ? risky('it runs code downloaded from the network') : undefined;
   const result = classifyStructure(raw, context, depth);
@@ -2630,6 +2651,7 @@ export function classifyCommand(command: string, context: CommandContext): Comma
     ...verdict, ...(effects.length > 0 ? { effects } : {}), ...(frame.unknown === undefined ? {} : { effectsUnknown: frame.unknown }),
     ...(frame.credentialChange === undefined ? {} : { credentialChange: frame.credentialChange }),
     ...(frame.printsCredential === undefined ? {} : { printsCredential: frame.printsCredential }),
-    ...(frame.reachesNetwork === undefined ? {} : { reachesNetwork: frame.reachesNetwork })
+    ...(frame.reachesNetwork === undefined ? {} : { reachesNetwork: frame.reachesNetwork }),
+    ...(frame.credentialFile === undefined ? {} : { credentialFile: frame.credentialFile })
   };
 }

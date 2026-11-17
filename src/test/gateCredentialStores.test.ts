@@ -217,12 +217,16 @@ test('the stores the owner named, and their kin, are refused by text, from the s
 const PRINTERS = [
   'gh auth token', 'gh auth token --hostname github.example.test', 'gh auth status --show-token', 'gh auth status -t', 'gcloud auth print-access-token', 'gcloud auth print-identity-token',
   'gcloud auth application-default print-access-token', 'gcloud --account bob@example.test auth print-access-token', 'az account get-access-token', 'az acr login -n reg --expose-token',
-  'aws configure get aws_secret_access_key', 'aws --profile dev configure get region', 'aws configure export-credentials', 'aws sts get-session-token', 'aws sts assume-role --role-arn x --role-session-name y',
+  'aws configure get aws_secret_access_key', 'aws --profile dev configure get aws_session_token', 'aws configure get profile.dev.aws_access_key_id',
+  'aws configure get "$KEY"', 'aws configure get', 'aws configure get --profile region aws_secret_access_key', 'aws configure export-credentials', 'aws sts get-session-token', 'aws sts assume-role --role-arn x --role-session-name y',
   'aws sts get-federation-token --name x', 'aws ecr get-login-password --region us-east-1', 'aws ecr-public get-login-password', 'aws codeartifact get-authorization-token --domain d',
   'npm token list', 'npm token create', 'pnpm token list', 'docker-credential-desktop get', 'docker-credential-pass list', 'echo https://index.docker.io/v1/ | docker-credential-osxkeychain get',
-  'bash -c "gh auth token"', 'TOKEN=$(gh auth token)', 'sudo aws sts get-session-token', 'mywrapper gcloud auth print-access-token', 'python3 -c "import os; os.system(\'gh auth token\')"'
+  'bash -c "gh auth token"', 'TOKEN=$(gh auth token)', 'sudo aws sts get-session-token', 'mywrapper gcloud auth print-access-token'
+  // (PR #76 review round 3: a printer is found by how the command runs, not by its words anywhere in the text, so `python3 -c "os.system('gh auth token')"`
+  // is no longer refused by its text: what a program it starts does is a documented gap of every check here.)
 ];
-const NOT_PRINTERS = ['gh auth status', 'gh auth login', 'aws configure list', 'aws sts get-caller-identity', 'gcloud auth list', 'az account show', 'npm token revoke abc', 'docker login', 'npm whoami', 'docker credential ls'];
+const NOT_PRINTERS = ['git commit -m "document npm token list and gh auth token"', 'grep -rn "aws sts get-session-token" docs', 'echo docker-credential-desktop get',
+  'aws configure get region', 'aws configure get output --profile dev', 'aws --profile dev configure get sso_start_url', 'gh auth status', 'gh auth login', 'aws configure list', 'aws sts get-caller-identity', 'gcloud auth list', 'az account show', 'npm token revoke abc', 'docker login', 'npm whoami', 'docker credential ls'];
 
 test('the commands that print a stored token are refused with no card; the commands beside them are not', async () => {
   const wrong: string[] = [];
@@ -274,7 +278,7 @@ const PRINTERS_WITH_OPTIONS = [
   'gcloud auth --verbosity debug print-access-token', 'gcloud auth --weird print-access-token', 'gcloud auth application-default --weird print-access-token',
   'gcloud --weird auth print-identity-token', 'gcloud config --weird config-helper', 'gcloud auth --account=a@example.test print-refresh-token',
   'az account --weird get-access-token', 'az --weird account get-access-token', 'az account get-access-token --resource https://example.test', 'az acr --weird login --expose-token',
-  'aws sts --weird get-session-token', 'aws --weird sts get-session-token', 'aws configure --weird get region', 'aws configure --profile dev get region',
+  'aws sts --weird get-session-token', 'aws --weird sts get-session-token', 'aws configure --weird get aws_secret_access_key', 'aws configure --profile dev get aws_session_token',
   'aws ecr --weird get-login-password', 'aws codeartifact --weird get-authorization-token --domain d', 'aws sts --region us-east-1 assume-role --role-arn x --role-session-name y',
   'aws configure --weird export-credentials', 'docker-credential-desktop --weird get'
 ];

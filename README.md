@@ -271,10 +271,8 @@ included, and it runs only while you are there. Servers you added before behave
 as they did, except that a tool that changes data on a local server now asks
 before every call in every mode, even on a trusted server, until you declare
 what that server's tools may do in `nearAi.mcp.localServerEffects` (read, write
-named project paths, reach named hosts; publishing, deleting and writes into
-NEAR AI's and git's folders cannot be declared). A declaration only narrows: a
-tool that says it may delete or reach the open world, or says neither way,
-keeps asking.
+named project paths, reach named hosts). A declaration is your statement that you trust what that server's tools do: the gate does not check each call's arguments against it, so a declared tool runs without asking in Full auto. Only declare servers you trust like your own code. A tool that says it
+may delete or reach the open world, or says neither way, keeps asking.
 The MCP page has a "What it does" menu for each tool, so you can say whether it
 only reads or changes data on the server. A local server runs on this machine
 with your permissions. This is what you or the server declared it does. NEAR AI cannot check what a server does inside itself.
@@ -1137,7 +1135,7 @@ Read the full [security and trust report](SECURITY.md).
 | `nearAi.spend.dayBoundary` | `local` | When "today" starts for spend figures and the daily limit: local midnight, or `utc`. |
 | `nearAi.spend.useNearUsageTotal` | `true` | With a usage reporting token set, show NEAR's own total (and check the daily limit against it). Its description links to **Set usage reporting token** and **Clear**; the token itself lives in secret storage. |
 | `nearAi.autoInstallGsd` | `true` | Install Open-GSD when a workflow needs it and keep it current in NEAR AI projects. |
-| `nearAi.mcp.localServerEffects` | `{}` | What the tools of an MCP server that runs on this computer may do, by server id, declared once: `"read"`, `{ "workspaceWrite": ["docs/**"] }`, `{ "network": ["api.example.com"] }`. Until a local server is declared, its tools that change data ask before every call in every mode. It decides only tools that say they neither delete nor reach the open world; the others keep asking. Publishing, deleting, sending, shell commands and writes into `.git/`, `.planning/` or `.near-ai/` cannot be declared. A declaration that cannot be read is ignored with a warning. User settings only. See SECURITY.md, "MCP connections". |
+| `nearAi.mcp.localServerEffects` | `{}` | What the tools of an MCP server that runs on this computer may do, by server id, declared once: `"read"`, `{ "workspaceWrite": ["docs/**"] }`, `{ "network": ["api.example.com"] }`. A declaration is your statement that you trust what that server's tools do: the gate does not check each call's arguments against it, so a declared tool runs without asking in Full auto. Only declare servers you trust like your own code. Until a local server is declared, its tools that change data ask before every call in every mode, and a tool that says it may delete or reach the open world, or does not say, keeps asking. A declaration that cannot be read is ignored with a warning. User settings only. See SECURITY.md, "MCP connections". |
 | `nearAi.team.preview` | `false` | Shows **NEAR AI: Enable Team Mode** in the Command Palette. Team Mode is an early preview, and for now a team holds only its owner (see [Team Mode](#team-mode-preview)). |
 | `nearAi.team.pollSeconds` | `15` | How often, in seconds, Team Mode checks the team log while this window is focused (5 to 3600); unfocused windows check every 2 minutes. |
 
