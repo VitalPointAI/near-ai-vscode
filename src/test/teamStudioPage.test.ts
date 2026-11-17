@@ -3343,3 +3343,97 @@ test('host: the latest icon request wins: a picture the page sends back after Re
   }
   h.close();
 });
+
+// ---------- PR #82 review ----------
+
+test('page: picker cards show members the way library cards do: the first four, then a count of the rest, all of them after Show more', async () => {
+  const page = await builderPage({ teams: [{ ...LONG_CARD, description: 'Short.' }, WEB_CARD] });
+  page.byLabel('New team')!.click();
+  page.byLabel('Use an existing team')!.click();
+  const cell = (id: string) => page.radios('starting-point').find((node) => node.value === id)!.parent!.parent!;
+  assert.match(cell('lib:market').textContent, /7 members: lead, researcher, analyst, writer \+3 more/);
+  assert.doesNotMatch(cell('lib:market').textContent, /editor|checker|designer/);
+  assert.match(cell('lib:web').textContent, /2 members: lead, dev/);
+  assert.doesNotMatch(cell('lib:web').textContent, /more/);
+  const more = page.byLabel('Show more about Market team')!;
+  assert.equal(more.hidden, false, 'members are hidden, so Show more is offered even for a short description');
+  more.click();
+  assert.match(cell('lib:market').textContent, /7 members: lead, researcher, analyst, writer, editor, checker, designer/);
+  assert.doesNotMatch(cell('lib:market').textContent, /\+3 more/);
+});
+
+test('page: a picture still too large after its colours are simplified is called too detailed, not unreadable', async () => {
+  const page = await iconPage({ out: png(128, 128, { noise: true }) });
+  page.dispatch(openTeam());
+  page.byLabel('Upload an icon for Web team (PNG, JPEG or WebP)')!.click();
+  page.dispatch({ type: 'icon-source', seq: 5, id: 'user:web', mime: 'image/png', data: png(300, 300, { noise: true }).toString('base64') });
+  await page.wait();
+  assert.deepEqual(page.posts.filter((message) => message.type.startsWith('icon-')).at(-1), { type: 'icon-failed', seq: 5 });
+  const banner = page.doc.getElementById('banner')!.textContent;
+  assert.match(banner, /too detailed to use as an icon/);
+  assert.match(banner, /simpler picture/);
+  assert.doesNotMatch(banner, /could not be read/);
+});
+
+test('host: one Use as is records one version of the project team, with its icon line, whether or not the team has an icon', async () => {
+  const h = await harness();
+  const file = await h.library.create('Web team', teamMarkdown(draft()));
+  await h.library.setIcon(file, png(128, 128, { seed: 19 }));
+  await h.send({ type: 'ready' });
+  const project = TeamLibrary.projectTeamFile(h.root);
+  await h.send({ type: 'use-team', id: 'lib:web-team' });
+  const first = await h.library.versions(project);
+  assert.equal(first.length, 1, 'one version for one Use as is');
+  assert.equal(await readFile(first[0]!, 'utf8'), await readFile(project, 'utf8'), 'and it is the file as written, icon line included');
+  assert.match(await readFile(project, 'utf8'), /\nicon: team\.icon\.png\n/);
+  // Replacing it keeps the old team (as before) and adds one version for the new one, not a second for its icon.
+  await h.send({ type: 'use-team', id: 'gsd:review' });
+  const second = await h.library.versions(project);
+  assert.equal(second.length, 3, 'the old team kept, and one for the new team');
+  assert.equal(await readFile(second[0]!, 'utf8'), await readFile(project, 'utf8'));
+  assert.doesNotMatch(await readFile(project, 'utf8'), /icon:/);
+  h.close();
+});
+
+test('host: when the team file cannot be changed to name its icon, nothing is left behind, and the person is told exactly that', async () => {
+  const h = await harness();
+  const file = await h.library.create('Web team', teamMarkdown(draft()));
+  await h.send({ type: 'ready' });
+  await h.send({ type: 'open', id: 'user:web-team' });
+  const dir = await mkdtemp(path.join(tmpdir(), 'near-ai-icon-fail-'));
+  await writeFile(path.join(dir, 'a.jpg'), JPEG);
+  h.deps.pickIconSource = async () => path.join(dir, 'a.jpg');
+  const before = await readFile(file, 'utf8');
+  const library = h.library as unknown as { setReference: (...args: unknown[]) => Promise<unknown>; undoIcon?: unknown };
+  const real = library.setReference.bind(h.library);
+  library.setReference = async () => { throw new Error(`EACCES: permission denied, open '${file}'`); };
+  await h.send({ type: 'icon-upload', id: 'user:web-team' });
+  await h.send({ type: 'icon-set', seq: last(h, 'icon-source').seq, id: 'user:web-team', png: png().toString('base64') });
+  assert.equal(last(h, 'error').text, 'The icon could not be changed. Nothing was changed.');
+  assert.equal(last(h, 'error').text.includes(file), false, 'no path');
+  assert.equal(existsSync(path.join(h.library.directory, 'web-team.icon.png')), false, 'no icon file left without a name');
+  assert.equal(await readFile(file, 'utf8'), before);
+  assert.deepEqual(await h.library.iconVersions(file), []);
+  library.setReference = real;
+  h.close();
+});
+
+test('host: a Use as is whose team file cannot be written leaves the project\'s icon as it was', async () => {
+  const h = await harness();
+  const file = await h.library.create('Web team', teamMarkdown(draft()));
+  await h.library.setIcon(file, png(128, 128, { seed: 23 }));
+  const project = TeamLibrary.projectTeamFile(h.root);
+  await mkdir(path.dirname(project), { recursive: true });
+  await writeFile(project, renderTeam('Old team', 'x', [{ name: 'dev', instructions: 'Do.' }]));
+  const old = png(128, 128, { seed: 24 });
+  await h.library.setIcon(project, old);
+  const { chmod } = await import('node:fs/promises');
+  await chmod(project, 0o444);
+  try {
+    await h.send({ type: 'ready' });
+    await h.send({ type: 'use-team', id: 'lib:web-team' });
+    assert.match(last(h, 'error').text, /^Not used: /);
+    assert.deepEqual(await h.library.readIcon(project), old, 'the old team still shows its own icon');
+  } finally { await chmod(project, 0o644); }
+  h.close();
+});

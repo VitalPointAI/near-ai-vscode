@@ -4,7 +4,7 @@ import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { checkTeamIcon, decodeIconBase64, iconDataUri, iconSourceType, MAX_TEAM_ICON_BYTES, teamIconPrompt, withIconReference } from '../agent/teamIcon';
+import { checkTeamIcon, decodeIconBase64, iconDataUri, iconReference, iconSourceType, MAX_TEAM_ICON_BYTES, teamIconPrompt, withIconReference } from '../agent/teamIcon';
 import { draftFromMarkdown, teamMarkdown } from '../agent/teamMarkdown';
 import { parseTeam, renderTeam, TeamLibrary } from '../agent/teams';
 import { JPEG, png, SVG, WEBP } from './iconFixtures';
@@ -172,4 +172,51 @@ test('library: archive moves the icon with the team (renaming its reference when
   assert.deepEqual(await lib.readIcon(copy), icon, 'a duplicate has the same icon');
   assert.match(await readFile(copy, 'utf8'), /\nicon: web-copy\.icon\.png\n/);
   assert.deepEqual((await readdir(lib.directory)).filter((name) => name.endsWith('.png')).sort(), ['web-copy.icon.png', 'web-team.icon.png']);
+});
+
+// ---------- PR #82 review ----------
+
+test('the icon line: one parser picks the first icon: line for reading and writing, and writing leaves exactly one', () => {
+  const lines = (text: string) => text.split('\n').filter((line) => line.startsWith('icon:'));
+  // Zero lines.
+  assert.equal(iconReference(TEAM), undefined);
+  assert.deepEqual(lines(withIconReference(TEAM, 'a.icon.png')), ['icon: a.icon.png']);
+  // One line.
+  const one = withIconReference(TEAM, 'a.icon.png');
+  assert.equal(iconReference(one), 'a.icon.png');
+  assert.deepEqual(lines(withIconReference(one, 'b.icon.png')), ['icon: b.icon.png']);
+  assert.deepEqual(lines(withIconReference(one, undefined)), []);
+  // Two lines (a hand edit): the first is the reference, and any write leaves one line.
+  const two = one.replace('icon: a.icon.png\n', 'icon: a.icon.png\nicon: stale.icon.png\n');
+  assert.equal(iconReference(two), 'a.icon.png', 'the first line, for reading as for writing');
+  assert.deepEqual(lines(withIconReference(two, 'a.icon.png')), ['icon: a.icon.png'], 'normalised even when the first already says so');
+  assert.deepEqual(lines(withIconReference(two, 'b.icon.png')), ['icon: b.icon.png']);
+  assert.deepEqual(lines(withIconReference(two, undefined)), []);
+  assert.equal(withIconReference(two, undefined), TEAM);
+});
+
+test('library: a failed team-file write puts the icon back as it was; a failed put-back says exactly what is left', async () => {
+  const { lib } = await library();
+  const file = await lib.create('Web team', TEAM);
+  const patched = lib as unknown as { setReference: (...args: unknown[]) => Promise<unknown>; restoreIconFile: (...args: unknown[]) => Promise<unknown> };
+  const realReference = patched.setReference.bind(lib);
+  patched.setReference = async () => { throw new Error('disk full'); };
+  // No icon before: none after.
+  await assert.rejects(() => lib.setIcon(file, png()), /disk full/);
+  assert.equal(existsSync(path.join(lib.directory, 'web-team.icon.png')), false);
+  assert.deepEqual(await lib.iconVersions(file), []);
+  // An icon before (named in the file): it is still there, and nothing was added to History.
+  patched.setReference = realReference;
+  const first = png(128, 128, { seed: 21 });
+  await lib.setIcon(file, first);
+  patched.setReference = async () => { throw new Error('disk full'); };
+  await assert.rejects(() => lib.removeIcon(file), /disk full/);
+  assert.deepEqual(await lib.readIcon(file), first, 'Remove that failed leaves the icon');
+  assert.deepEqual(await lib.iconVersions(file), []);
+  // The put-back fails too: the error says what is on disk now.
+  patched.setReference = realReference;
+  await writeFile(file, withIconReference(await readFile(file, 'utf8'), undefined));
+  patched.setReference = async () => { throw new Error('disk full'); };
+  patched.restoreIconFile = async () => { throw new Error('gone'); };
+  await assert.rejects(() => lib.setIcon(file, png(128, 128, { seed: 22 })), (error: Error) => error.name === 'TeamIconPartialError' && /The new icon file was written, but the team file could not be changed to name it, and the earlier icon file could not be put back/.test(error.message));
 });
