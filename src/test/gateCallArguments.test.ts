@@ -110,3 +110,21 @@ test('trustedReadsName: one name is itself, several are listed, and a list past 
   const huge = trustedReadsName([`${'x'.repeat(300)}.md`, 'b.md']);
   assert.ok(huge.length <= 200 && huge.endsWith(' and 1 more'), huge);
 });
+
+// PR #74 review round 6: the project's folder and the trusted folders are resolved once per call, not once per path field. A call with two path fields
+// and two trusted folders resolves three folders (the project and each trusted folder), not six.
+test('readCallPaths resolves the project and the trusted folders once per call, however many path fields it reads', async () => {
+  const second = path.join(base, 'second-runtime');
+  mkdirSync(second, { recursive: true });
+  writeFileSync(path.join(TRUSTED, 'docs', 'notes.md'), 'notes');
+  const resolved: string[] = [];
+  const realpathOnce = async (folder: string) => { resolved.push(folder); return realpathSync(folder); };
+  const paths = await readCallPaths(twoReads, { first: path.join(TRUSTED, 'docs', 'guide.md'), second: path.join(TRUSTED, 'docs', 'notes.md') }, ROOT, [second, TRUSTED], {}, { realpath: realpathOnce });
+  assert.deepEqual(paths.trustedReads, ['trusted-runtime/docs/guide.md', 'trusted-runtime/docs/notes.md']);
+  assert.equal(resolved.length, 3, `resolved: ${resolved.join(', ')}`);
+  assert.deepEqual([...new Set(resolved)].sort(), [ROOT, second, TRUSTED].sort());
+  // A call that names no path resolves nothing.
+  resolved.length = 0;
+  await readCallPaths(twoReads, {}, ROOT, [TRUSTED], {}, { realpath: realpathOnce });
+  assert.equal(resolved.length, 0);
+});

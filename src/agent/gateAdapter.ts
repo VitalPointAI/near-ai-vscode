@@ -338,8 +338,15 @@ function insideFolder(folder: string, target: string): boolean {
  *   a read of the widest project path, so every later layer judges it at least as strictly as a read of the project, and the record names the file. An
  *   argument any write or destroy effect reads is never rewritten, and a path outside the project and every trusted folder stays unknown.
  */
-export async function readCallPaths(tool: AgentTool<any>, raw: Record<string, unknown>, root: string, readOnlyRoots: readonly string[] = [], locations: FloorLocations = {}): Promise<CallPaths> {
+export async function readCallPaths(tool: AgentTool<any>, raw: Record<string, unknown>, root: string, readOnlyRoots: readonly string[] = [], locations: FloorLocations = {}, options: { realpath?: (folder: string) => Promise<string> } = {}): Promise<CallPaths> {
   const given = tool.manifestInput?.(raw) ?? raw;
+  // The project's folder and the trusted folders, resolved through links once for the whole call (PR #74 review round 6), and only when a path needs them.
+  const resolveFolder = (folder: string): Promise<string> => (options.realpath ?? realpath)(folder).catch(() => path.resolve(folder));
+  let folders: Promise<{ readonly root: string; readonly trusted: ReadonlyArray<{ readonly real: string }> }> | undefined;
+  const resolvedFolders = () => (folders ??= (async () => ({
+    root: await resolveFolder(root),
+    trusted: await Promise.all(readOnlyRoots.filter((folder) => path.isAbsolute(folder)).map(async (folder) => ({ real: await resolveFolder(folder) })))
+  }))());
   const fields = pathFieldVerbs(tool);
   let out: Record<string, unknown> | undefined;
   const trustedReads: string[] = [];
@@ -359,11 +366,9 @@ export async function readCallPaths(tool: AgentTool<any>, raw: Record<string, un
       identityFiles ??= namesIdentityFiles(shown, locations);
     }
     if (resolved === undefined || ![...verbs].every((verb) => verb === 'read')) continue;
-    const realRoot = await realFolder(root);
-    if (insideFolder(realRoot, resolved)) continue;
-    for (const folder of readOnlyRoots) {
-      if (!path.isAbsolute(folder)) continue;
-      const real = await realFolder(folder);
+    const known = await resolvedFolders();
+    if (insideFolder(known.root, resolved)) continue;
+    for (const { real } of known.trusted) {
       if (!insideFolder(real, resolved)) continue;
       // The arguments in the manifest's shape with this one field rewritten: the effects are filled from these, so manifestInput runs once per call.
       out ??= { ...given };
@@ -380,9 +385,6 @@ export async function readCallPaths(tool: AgentTool<any>, raw: Record<string, un
   };
 }
 
-async function realFolder(folder: string): Promise<string> {
-  return realpath(folder).catch(() => path.resolve(folder));
-}
 
 // ---------------------------------------------------------------------------------------------------------------------------------------------------
 // The settings layer: today's decidePermissionAsync, with a stable rule id for what it answered.
