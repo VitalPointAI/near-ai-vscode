@@ -108,3 +108,34 @@ test('activation lets go of a folder\'s log when the window\'s folders change an
     stub.setWorkspaceFolders([]);
   }
 });
+
+// PR #74 review round 2: every runtime the host hands out keeps its records, whatever kind of run it is for. A window with no folder used to record nothing
+// (its sink wrote only when the request named a folder), though its log is the install log. Each kind is listed here, and each record is found on disk in
+// the log the runtime's key names.
+test('every kind of runtime the host hands out writes its records to disk: folder, no folder, sub-agent, nobody present, with and without a folder', async () => {
+  const { host, storage } = await newHost();
+  const project = path.join(storage, 'project-kinds');
+  const { unattendedRuntimeFor } = await import('../gate/host');
+  const kinds: Array<[string, Promise<GateRuntime>, string]> = [
+    ['folder', host.runtimeFor({ root: project, actor: { kind: 'agent', sessionId: 'lead' }, presence: 'person', context: 'interactive' }), projectLogKey(project)],
+    ['no folder', host.runtimeFor({ actor: { kind: 'agent', sessionId: 'lead' }, presence: 'person', context: 'interactive' }), INSTALL_LOG_KEY],
+    ['sub-agent', host.runtimeFor({ root: project, actor: { kind: 'sub-agent', sessionId: 'lead', agentId: 'helper-1' }, presence: 'person', context: 'interactive' }), projectLogKey(project)],
+    ['sub-agent, no folder', host.runtimeFor({ actor: { kind: 'sub-agent', sessionId: 'lead', agentId: 'helper-2' }, presence: 'person', context: 'interactive' }), INSTALL_LOG_KEY],
+    ['nobody present', unattendedRuntimeFor(host, project, 'compare', 'comparison'), projectLogKey(project)],
+    ['nobody present, no folder', unattendedRuntimeFor(host, undefined, 'compare', 'comparison'), INSTALL_LOG_KEY],
+    ['nobody present, empty folder', unattendedRuntimeFor(host, '', 'compare', 'comparison'), INSTALL_LOG_KEY]
+  ];
+  for (const [name, runtime] of kinds) record(await runtime, `kind-${name}`);
+  await host.flush();
+  for (const [name, , key] of kinds) {
+    const file = path.join(storage, GATE_DIR_NAME, DECISIONS_DIR, `${key}.jsonl`);
+    const text = await readFile(file, 'utf8').catch(() => '');
+    assert.ok(text.includes(`"kind-${name}"`), `${name}: its record is in ${key === INSTALL_LOG_KEY ? 'the install log' : 'the project log'}`);
+  }
+  // A no-folder runtime whose install log was never opened before still opens it by its key at its first record (nothing is held from setup time).
+  const fresh = await newHost();
+  record(await fresh.host.runtimeFor({ actor: { kind: 'agent', sessionId: 'x' }, presence: 'person', context: 'interactive' }), 'first-no-folder');
+  await fresh.host.flush();
+  const installText = await readFile(path.join(fresh.storage, GATE_DIR_NAME, DECISIONS_DIR, `${INSTALL_LOG_KEY}.jsonl`), 'utf8');
+  assert.ok(installText.includes('"first-no-folder"'));
+});

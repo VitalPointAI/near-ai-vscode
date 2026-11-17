@@ -223,7 +223,8 @@ is what that file and the records beside it do in this version.
   trusted) belongs to this install and not to a project, so it is written to
   a separate log for the install in the same storage, whether or not a folder
   is open, and also to the open project's record when there is one. That log
-  rolls over the same way.
+  rolls over the same way. The decisions of a run in a window with no folder
+  open are written to that install log too.
 - **What this version does not use yet.** The file also holds scales,
   clearances and routing tiers. This version stores and shows them and does not
   use them yet.

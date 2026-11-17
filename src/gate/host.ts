@@ -51,7 +51,7 @@ export interface GateHostOptions {
 }
 
 export interface RuntimeRequest {
-  /** The open project, whose log receives the run's records. None for a window with no folder: the bundle is per install, so the run is still decided by it, and its records have no project log to go to. */
+  /** The open project, whose log receives the run's records. None (or empty) for a window with no folder: the bundle is per install, so the run is still decided by it, and its records go to the install log. */
   readonly root?: string;
   readonly actor: Omit<ActorRef, 'deviceFingerprint'>;
   readonly presence: Presence;
@@ -115,19 +115,22 @@ export class GateHost {
    */
   public async runtimeFor(request: RuntimeRequest): Promise<GateRuntime> {
     const notLoaded = await this.waitForStart();
-    let log: DecisionLog | undefined;
+    // Every runtime has a log (PR #74 review round 2): the project's for a run in a folder, the install log for a window with no folder. The key is resolved
+    // once, here, and the log is found again by it at each record rather than held, so a log the host has let go (its folder was closed, or too many were
+    // open) is opened again by the run's next record, and flush() always waits for it.
+    const root = request.root === undefined || request.root === '' ? undefined : request.root;
+    const key = root === undefined ? INSTALL_LOG_KEY : projectLogKey(root);
+    let usable = true;
     try {
-      log = request.root === undefined ? undefined : this.logFor(request.root);
+      this.logWithKey(key, root);
     } catch (error) {
       // A log that cannot be set up (its folder lies inside the project) is reported once; decisions carry on unrecorded rather than fail.
+      usable = false;
       try { this.options.onProblem?.(error instanceof Error ? error.message : 'NEAR AI could not set up its record of what was allowed or refused.'); } catch { /* ignored */ }
     }
-    // The log is found again at each record rather than held, so a log the host has let go (its folder was closed, or too many were open) is opened again
-    // by the run's next record, and flush() always waits for it.
-    const root = log === undefined ? undefined : request.root;
     return {
       bundleState: () => (notLoaded !== undefined && !this.settled ? notLoaded : this.bundleState()),
-      sink: { record: (record) => { if (root !== undefined) { try { void this.logFor(root).append(record); } catch { /* reported once above */ } } } },
+      sink: { record: (record) => { if (usable) { try { void this.logWithKey(key, root).append(record); } catch { /* reported once above */ } } } },
       actor: { ...request.actor, deviceFingerprint: this.deviceFingerprint() },
       presence: request.presence,
       context: request.context,
