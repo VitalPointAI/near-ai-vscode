@@ -61,17 +61,18 @@ export const SCALE_PRESETS: ScaleTable = Object.freeze({
 export const DEFAULT_SCALE: ScaleId = 'org';
 
 /**
+ * The label events written to the decision log as records of their own, with the event as the record's operation, the way the policy's events are: a label
+ * set on a file or folder (plan 20), another branch's signed label file accepted as current by a person (D-61), a session mark raised by what it read
+ * (plan 22), a chat's label lowered with a reason (plan 23), and a lowering from another copy of a chat that was not applied (D-58, D-64). Named now so a
+ * record written by a later version is never one this version cannot name (D-49).
+ */
+export const LABEL_EVENT_IDS = Object.freeze(['label.set', 'label.branch-accepted', 'label.mark-raised', 'label.declassify', 'label.declassify-rejected'] as const);
+export type LabelEventId = (typeof LABEL_EVENT_IDS)[number];
+
+/**
  * The v1 handling flags (D-47). Both only tighten: `local-only` keeps content on the machine and `no-agent-tools` keeps agent tools away from it.
  * There is deliberately no flag that relaxes a routing tier, so a label can never make content easier to send.
  */
-/**
- * The label events written to the decision log as records of their own, with the event as the record's operation, the way the policy's events are: a label
- * set on a file or folder (plan 20), a session mark raised by what it read (plan 22), and a chat's label lowered with a reason (plan 23). Named now so a
- * record written by a later version is never one this version cannot name (D-49).
- */
-export const LABEL_EVENT_IDS = Object.freeze(['label.set', 'label.mark-raised', 'label.declassify'] as const);
-export type LabelEventId = (typeof LABEL_EVENT_IDS)[number];
-
 export const HANDLING_FLAGS = Object.freeze(['local-only', 'no-agent-tools'] as const);
 export type HandlingFlag = (typeof HANDLING_FLAGS)[number];
 

@@ -204,14 +204,20 @@ function hostnameOf(host: string): string | undefined {
 }
 
 /**
- * Whether an endpoint counts as this machine or a host your organization names (D-37): a loopback host, or one matching an entry of `localHosts`
- * (an exact host, or `*.example.com` for any host below example.com). A host that cannot be read is not local.
+ * Whether an endpoint counts as this machine or a host your organization names (D-37): a loopback host (localhost, 127.0.0.1, [::1], exactly), or one
+ * matching an entry of `localHosts` (an exact host, or `*.example.com` for any host below example.com), compared in lowercase. The host is the URL parser's
+ * own, so a userinfo trick names the host after the `@`, and a trailing dot or another loopback address (127.0.0.2) is not local. A host that cannot be read
+ * is not local.
  */
 export function isLocalRouteHost(host: string, localHosts: readonly HostPattern[]): boolean {
   const name = hostnameOf(host);
   if (name === undefined) return false;
   if (isLoopbackHost(name)) return true;
-  return localHosts.some((pattern) => (pattern.startsWith('*.') ? name.endsWith(pattern.slice(1)) && name.length > pattern.length - 1 : name === pattern));
+  // Both sides in lowercase: the URL parser lowercases the endpoint's host, so a name the policy writes in capitals means the same host (D-37).
+  return localHosts.some((given) => {
+    const pattern = given.toLowerCase();
+    return pattern.startsWith('*.') ? name.endsWith(pattern.slice(1)) && name.length > pattern.length - 1 : name === pattern;
+  });
 }
 
 /**
@@ -310,7 +316,7 @@ export const ROUTE_REFUSALS: Readonly<Record<RefusingRouteRule, string>> = Objec
   'route.not-tee': 'Nothing was sent. This chat has read content that may only go to a model running in private hardware on NEAR AI Cloud\'s own endpoint, and this model or endpoint is not confirmed to do that. Choose a private model on NEAR AI Cloud or a local model, or start a new chat that has not read this content.',
   'route.attestation-failed': 'Nothing was sent. The private hardware check on NEAR AI Cloud failed earlier in this session, so its models cannot count as private now. Switch to a local model, or try again in a new session.',
   'route.no-session': 'Nothing was sent. This request did not say which route it uses, so no model can be confirmed private. Start the run again from the chat, or choose a local model.',
-  'route.connection-not-bound': 'Nothing was sent. Content at this level may go to NEAR AI Cloud only over a connection proven to end inside its private hardware, and this connection is not proven. Choose a local model for this chat, or start a new chat that has not read this content.'
+  'route.connection-not-bound': 'Nothing was sent. Content at this level may go to NEAR AI Cloud only over a connection proven to end inside its private hardware, and this connection is not proven, so it stays on this computer. Choose a local model for this chat.'
 });
 
 /** The reason of a request whose route could not be worked out (a mark that cannot be read, a routing table that throws): refused, never guessed. */

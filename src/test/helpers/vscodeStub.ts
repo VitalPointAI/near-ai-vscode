@@ -24,6 +24,14 @@ export interface VscodeStub {
   shownDocuments: Array<{ uri: string; text: string }>;
   // The content providers registered by scheme.
   contentProviders: Map<string, { provideTextDocumentContent(uri: unknown): string | Promise<string> }>;
+  // Answers handed to showQuickPick, in order: an item's label (or a list of labels for a multi-pick). An empty queue answers undefined (dismissed).
+  quickPickAnswers: Array<string | string[] | undefined>;
+  // What each showQuickPick call was shown: its items' labels, details and the options.
+  quickPickRequests: Array<{ items: Array<{ label: string; description?: string; detail?: string }>; placeHolder?: string; title?: string; canPickMany?: boolean }>;
+  // The options of each show*Message call that passed any (modal, detail), in order.
+  messageOptions: Array<{ message: string; modal?: boolean; detail?: string }>;
+  // Fires workspace.onDidRenameFiles with these renames (absolute paths).
+  fireRename(files: Array<{ from: string; to: string }>): Promise<void>;
   setConfig(key: string, value: unknown): void;
   // The folders the window reports; an empty list means no folder is open.
   setWorkspaceFolders(paths: string[]): void;
@@ -56,9 +64,16 @@ export function createVscodeStub(): VscodeStub {
   const folderListeners = new Set<(event: { added: unknown[]; removed: unknown[] }) => void>();
   const windowState = { focused: true, active: true };
 
-  const message = (level: 'info' | 'warn' | 'error') => async (text: string, ...actions: string[]): Promise<string | undefined> => {
+  const quickPickAnswers: VscodeStub['quickPickAnswers'] = [];
+  const quickPickRequests: VscodeStub['quickPickRequests'] = [];
+  const messageOptions: VscodeStub['messageOptions'] = [];
+  const renameListeners = new Set<(event: { files: Array<{ oldUri: { fsPath: string }; newUri: { fsPath: string } }> }) => unknown>();
+  const message = (level: 'info' | 'warn' | 'error') => async (text: string, ...rest: unknown[]): Promise<string | undefined> => {
+    const first = rest[0];
+    const options = typeof first === 'object' && first !== null ? first as { modal?: boolean; detail?: string } : undefined;
+    if (options !== undefined) messageOptions.push({ message: text, ...(options.modal === undefined ? {} : { modal: options.modal }), ...(options.detail === undefined ? {} : { detail: options.detail }) });
     notifications.push({ level, message: text });
-    notificationActions.push(actions);
+    notificationActions.push(rest as string[]);
     return messageAnswers.shift();
   };
 
@@ -68,6 +83,7 @@ export function createVscodeStub(): VscodeStub {
     ConfigurationTarget: { Global: 1, Workspace: 2, WorkspaceFolder: 3 },
     ThemeColor: class ThemeColor { public constructor(public readonly id: string) {} },
     Uri: {
+      file: (fsPath: string) => ({ scheme: 'file', fsPath, path: fsPath, toString: (): string => `file://${fsPath}` }),
       parse: (value: string) => {
         const colon = value.indexOf(':');
         const scheme = value.slice(0, colon);
@@ -122,6 +138,14 @@ export function createVscodeStub(): VscodeStub {
       showInformationMessage: message('info'),
       showWarningMessage: message('warn'),
       showErrorMessage: message('error'),
+      showQuickPick: async (items: Array<{ label: string; description?: string; detail?: string }>, options?: { placeHolder?: string; title?: string; canPickMany?: boolean }): Promise<unknown> => {
+        const list = await Promise.resolve(items);
+        quickPickRequests.push({ items: list.map((item) => ({ label: item.label, ...(item.description === undefined ? {} : { description: item.description }), ...(item.detail === undefined ? {} : { detail: item.detail }) })), ...(options ?? {}) });
+        const answer = quickPickAnswers.shift();
+        if (answer === undefined) return undefined;
+        if (Array.isArray(answer)) return list.filter((item) => answer.includes(item.label));
+        return list.find((item) => item.label === answer);
+      },
       showInputBox: async (options?: { prompt?: string; title?: string; value?: string; placeHolder?: string }): Promise<string | undefined> => {
         inputRequests.push({ ...options });
         return inputAnswers.shift();
@@ -161,7 +185,12 @@ export function createVscodeStub(): VscodeStub {
       onDidChangeWorkspaceFolders: (listener: (event: { added: unknown[]; removed: unknown[] }) => void) => {
         folderListeners.add(listener);
         return { dispose: (): void => { folderListeners.delete(listener); } };
-      }
+      },
+      onDidRenameFiles: (listener: (event: { files: Array<{ oldUri: { fsPath: string }; newUri: { fsPath: string } }> }) => unknown) => {
+        renameListeners.add(listener);
+        return { dispose: (): void => { renameListeners.delete(listener); } };
+      },
+      getWorkspaceFolder: (uri: { fsPath: string }) => (workspaceFolders ?? []).find((folder) => uri.fsPath === folder.uri.fsPath || uri.fsPath.startsWith(`${folder.uri.fsPath}/`))
     },
     commands: {
       registerCommand: (name: string, handler: (...args: unknown[]) => unknown) => {
@@ -181,6 +210,11 @@ export function createVscodeStub(): VscodeStub {
 
   return {
     vscode, outputChannels, statusBarItems, notifications, notificationActions, configUpdates, setContextCalls, contextKeys, commands, inputAnswers, inputRequests, messageAnswers, shownDocuments, contentProviders,
+    quickPickAnswers, quickPickRequests, messageOptions,
+    async fireRename(files: Array<{ from: string; to: string }>): Promise<void> {
+      const event = { files: files.map((file) => ({ oldUri: { fsPath: file.from }, newUri: { fsPath: file.to } })) };
+      await Promise.all([...renameListeners].map((listener) => Promise.resolve(listener(event))));
+    },
     setWorkspaceFolders(paths: string[]): void {
       const before = workspaceFolders ?? [];
       workspaceFolders = paths.length === 0 ? undefined : paths.map((fsPath, index) => ({ uri: { fsPath }, name: fsPath.split('/').pop() ?? '', index }));

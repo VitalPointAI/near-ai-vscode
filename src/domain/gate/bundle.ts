@@ -342,6 +342,28 @@ function parseSetList<T>(
   return list;
 }
 
+/**
+ * A draft's clearances and mappings put in the order the parser requires (D-41): a person adding a clearance by hand need not know the canonical order,
+ * which changes nothing about what the policy says. Anything that is not a list of objects is left as it is for the parser to refuse. Pure; never throws.
+ */
+export function inBundleOrder(draft: unknown): unknown {
+  if (!isRecord(draft)) return draft;
+  const sortBy = (list: unknown, keyOf: (item: Record<string, unknown>) => string): unknown => {
+    if (!Array.isArray(list) || !list.every((item) => isRecord(item))) return list;
+    return [...(list as Array<Record<string, unknown>>)].sort((a, b) => { const left = keyOf(a); const right = keyOf(b); return left < right ? -1 : left > right ? 1 : 0; });
+  };
+  const ref = (value: unknown, key: string): unknown => (isRecord(value) ? ownValue(value, key) : undefined);
+  // Own properties only, through fromEntries, so a key named __proto__ stays a plain field for the parser to refuse (T-70-01).
+  const out: Record<string, unknown> = Object.fromEntries(Object.keys(draft).map((key) => [key, ownValue(draft, key)]));
+  if (Object.prototype.hasOwnProperty.call(draft, 'clearances')) {
+    out['clearances'] = sortBy(ownValue(draft, 'clearances'), (item) => JSON.stringify([ownValue(item, 'scale'), ownValue(item, 'level'), ownValue(item, 'compartments'), ownValue(item, 'releasability'), ownValue(item, 'expiresAt') ?? '']));
+  }
+  if (Object.prototype.hasOwnProperty.call(draft, 'mappings')) {
+    out['mappings'] = sortBy(ownValue(draft, 'mappings'), (item) => JSON.stringify([ref(ownValue(item, 'from'), 'scale'), ref(ownValue(item, 'from'), 'level'), ref(ownValue(item, 'covers'), 'scale'), ref(ownValue(item, 'covers'), 'level')]));
+  }
+  return out;
+}
+
 /** A clearance's identity is all of its content: scale, level, both lists and the expiry (absent sorts first). */
 function clearanceKey(clearance: Clearance): string {
   return JSON.stringify([clearance.scale, clearance.level, clearance.compartments, clearance.releasability, clearance.expiresAt ?? '']);

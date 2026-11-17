@@ -3,7 +3,7 @@
 // outside the floor every outcome equals what the loop decided before, and the floor is always enforced (D-19). No vscode import here.
 import { randomUUID } from 'node:crypto';
 import { realpathSync } from 'node:fs';
-import { realpath } from 'node:fs/promises';
+import { lstat, realpath } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import type { ActionCapability, ActionPolicy } from '../domain/policy';
@@ -19,7 +19,8 @@ import { buildDecisionRecord, outcomeOf } from '../domain/gate/record';
 import type { DecisionOutcome, DecisionRecord, DecisionResource } from '../domain/gate/record';
 import { fromActionCapability } from '../domain/gate/vocabulary';
 import type { Capability } from '../domain/gate/vocabulary';
-import { classifyCommand, commandMaySend, downloadSegments, MAX_COMMAND_LENGTH, MAX_COMMAND_WORDS, namesCredentialFile } from './commandSafety';
+import { classifyCommand, commandMaySend, downloadSegments, namesCredentialFile } from './commandSafety';
+import { commandWords, labelVerdictFor, linkResolver, pathLike, readEffectPaths } from './gateLabels';
 import type { CommandContext, CommandEffect, PackageScriptsAt } from './commandSafety';
 import { decidePermissionAsync, denyListReason, isAutoAllowed } from './permissions';
 import type { AutoApprovalContext, PermissionDecision, PermissionRules, RunGrants } from './permissions';
@@ -218,14 +219,6 @@ function floorClassifierContext(input: FloorFactsInput): CommandContext {
   };
 }
 
-/** How many words of a command are resolved through links when looking for a credential file it reads. */
-const CREDENTIAL_FILE_LINK_CHECKS = 64;
-
-/** A word that looks like a path, so it is worth resolving through links: it has a `/`, or starts with `~` or `.` (PR #76 review round 2). */
-function pathLike(word: string): boolean {
-  return word.includes('/') || word.startsWith('~') || word.startsWith('.');
-}
-
 /**
  * The file that may hold credentials a shell command reads, as written, or undefined (owner decision after PR #74, D-18): one its text names (`.env`, a key
  * file, `.ssh/`), a word that is one by its name, or a path-like word that resolves to one from the shell's folder, links followed (each resolved once per
@@ -237,23 +230,13 @@ export async function shellReadsCredentialFile(command: string, context: { root:
   if (command.trim() === '') return undefined;
   const named = namesCredentialFile(command);
   if (named !== undefined) return named;
-  const readable = command.slice(0, MAX_COMMAND_LENGTH);
-  const words = readable.split(/[\s'"`;&|()<>=]+/).filter((word) => word !== '' && !word.startsWith('-') && !word.includes('$')).slice(0, MAX_COMMAND_WORDS);
+  // The same words and the same link bound as the label check (gateLabels.ts), so the two never disagree about what a command names.
   const cwd = context.shell?.workingDirectory ?? context.root;
-  const resolved = new Map<string, Promise<string | undefined>>();
-  const resolve = (absolute: string): Promise<string | undefined> => {
-    let found = resolved.get(absolute);
-    if (found === undefined) {
-      found = (options.realpath ?? realpath)(absolute).then((real) => real, () => undefined);
-      resolved.set(absolute, found);
-    }
-    return found;
-  };
-  for (const word of words) {
+  const resolve = linkResolver(options.realpath === undefined ? {} : { realpath: options.realpath });
+  for (const word of commandWords(command)) {
     const absolute = path.resolve(cwd, word);
     if (isSensitivePath(word) || isSensitivePath(absolute)) return word.slice(0, 120);
     if (!pathLike(word) || /[*?[]/.test(word)) continue;
-    if (!resolved.has(absolute) && resolved.size >= CREDENTIAL_FILE_LINK_CHECKS) continue;
     const real = await resolve(absolute);
     if (real !== undefined && real !== absolute && isSensitivePath(real)) return word.slice(0, 120);
   }
@@ -395,6 +378,12 @@ export interface CallPaths {
   readonly input: Record<string, unknown>;
   /** The trusted-folder files read, named by the folder's own name and the path inside it (never the full machine path). */
   readonly trustedReads: readonly string[];
+  /**
+   * The project-relative real paths (links followed, as the tools resolve them) of the paths read-only fields name inside the project, for the label check
+   * (D-63): a path whose real place is in the project keeps the project's labels however it was named, so a link from the Open-GSD runtime into the project
+   * cannot launder a label.
+   */
+  readonly projectReads: readonly string[];
   readonly facts: Pick<FloorFacts, 'credentialStore' | 'identityFiles'>;
   /**
    * When a path is outside the project and every folder the tool may use for it (a trusted folder only for a read): the tool would refuse the call, so the
@@ -437,6 +426,7 @@ export async function readCallPaths(tool: AgentTool<any>, raw: Record<string, un
   const fields = pathFieldVerbs(tool);
   let out: Record<string, unknown> | undefined;
   const trustedReads: string[] = [];
+  const projectReads: string[] = [];
   let credentialStore: string | undefined;
   let identityFiles: string | undefined;
   let outside: { reason: string; toolMessage: string } | undefined;
@@ -459,9 +449,14 @@ export async function readCallPaths(tool: AgentTool<any>, raw: Record<string, un
       if (credentialStore === undefined && namesCredentialStore(resolved, locations, { root }) !== undefined) credentialStore = credentialReason(shownName(value).slice(0, 120));
       if (identityFiles === undefined && namesIdentityFiles(resolved, locations) !== undefined) identityFiles = identityFilesReason(shownName(value).slice(0, 120));
     }
-    if (resolved === undefined || ![...verbs].every((verb) => verb === 'read')) continue;
+    if (resolved === undefined) continue;
     const known = await resolvedFolders();
-    if (insideFolder(known.root, resolved)) continue;
+    // Every field a read effect reads, whatever else the call does with it (PR #85 review): its real place in the project is checked against the labels.
+    if (insideFolder(known.root, resolved)) {
+      if (verbs.has('read')) projectReads.push(path.relative(known.root, resolved).split(path.sep).join('/'));
+      continue;
+    }
+    if (![...verbs].every((verb) => verb === 'read')) continue;
     for (const { real } of known.trusted) {
       if (!insideFolder(real, resolved)) continue;
       // The arguments in the manifest's shape with this one field rewritten: the effects are filled from these, so manifestInput runs once per call.
@@ -475,6 +470,7 @@ export async function readCallPaths(tool: AgentTool<any>, raw: Record<string, un
   return {
     input: out ?? given,
     trustedReads,
+    projectReads,
     facts: { ...(credentialStore === undefined ? {} : { credentialStore }), ...(identityFiles === undefined ? {} : { identityFiles }) },
     ...(outside === undefined ? {} : { outside })
   };
@@ -633,7 +629,10 @@ function recordFor(runtime: GateRuntime, gated: GatedCall, outcome: DecisionOutc
     outcome,
     rule,
     ...(reason === undefined || reason === '' ? {} : { reason }),
-    bundleHash: bundleHashOf(runtime)
+    bundleHash: bundleHashOf(runtime),
+    // A refusal for a label names the label that decided it; a failed clearance check is recorded as such (GATE-07).
+    ...(rule.startsWith('label.') && gated.request.labelVerdict?.label !== undefined ? { label: gated.request.labelVerdict.label } : {}),
+    ...(rule === 'label.dominance' ? { clearanceFailure: true } : {})
   });
 }
 
@@ -748,6 +747,18 @@ export async function gateToolCall(runtime: GateRuntime, input: GateCallInput, o
   const credentialHold = credentialRead === undefined ? undefined
     : (input.command === undefined ? callSendsOffMachine(input.tool, effects) : read?.effectsUnknown !== undefined || shellMaySend(input.command, { command: input.command, root: input.root, ...(input.shell ?? {}), ...(runtime.locations ?? {}) }))
       ? credentialHoldReason(credentialRead, input.command !== undefined) : undefined;
+  // The label verdict (CLAS-03, D-28): every path the call reads, and for a command every path its words name, checked against the clearances here, so
+  // decide() stays pure. A command, or a call whose effects are unknown, may read anything, so a label file that is held holds it too (D-53, D-59).
+  // D-63: a read in the Open-GSD runtime (a trusted folder, resolved through links) is judged at the default label, not as the project-wide read its
+  // effects are written as; every read whose real place is in the project is judged by that place.
+  const trusted = paths.trustedReads.length > 0;
+  const labelVerdict = await labelVerdictFor(runtime, {
+    root: input.root,
+    reads: [...new Set([...(trusted ? [] : readEffectPaths(effects.length > 0 ? effects : declared)), ...paths.projectReads])],
+    ...(trusted ? { defaultReads: true } : {}),
+    ...(input.command === undefined ? {} : { command: input.command, cwd: input.shell?.cwd ?? input.root }),
+    mayReadAnything: input.command !== undefined || effects.length === 0
+  });
   const request: GateRequest = {
     actor: runtime.actor,
     tool: input.tool.name,
@@ -757,6 +768,7 @@ export async function gateToolCall(runtime: GateRuntime, input: GateCallInput, o
     presence: runtime.presence,
     policy: input.policy,
     manifestContexts: input.tool.manifest.contexts,
+    ...(labelVerdict === undefined ? {} : { labelVerdict }),
     ...(input.command === undefined ? {} : { command: input.command }),
     ...(input.forbidden === undefined || input.forbidden === '' ? {} : { forbidden: input.forbidden }),
     ...(input.sensitive === undefined || input.sensitive === '' ? {} : { sensitive: input.sensitive }),
@@ -792,6 +804,37 @@ export async function gateToolCall(runtime: GateRuntime, input: GateCallInput, o
   }
   keep(runtime, recordFor(runtime, gated, outcomeOf(decision), decision.rule, decision.reason, model));
   return gated;
+}
+
+/**
+ * Labels follow an agent's rename (D-26, D-42): after a shell command ran, the classifier's own parse says which `mv` or `git mv` it made (after global
+ * options, wrappers and `--`). Exactly one rename, with one source and one target inside the project, is followed, and only when the source is gone and the
+ * target exists; a move into an existing folder lands under it. Anything else is not followed, and the missing-path report covers it. Never throws.
+ */
+export async function followCommandMoves(runtime: GateRuntime, input: FloorFactsInput): Promise<void> {
+  try {
+    const source = runtime.labels?.(input.root);
+    if (source?.followMove === undefined) return;
+    const read = classifyCommand(input.command, floorClassifierContext(input));
+    if (read.movesUnfollowable === true || read.moves === undefined || read.moves.length !== 1) return;
+    const move = read.moves[0]!;
+    const kind = async (relative: string): Promise<'file' | 'folder' | undefined> => {
+      try {
+        return (await lstat(path.join(input.root, ...relative.split('/')))).isDirectory() ? 'folder' : 'file';
+      } catch {
+        return undefined;
+      }
+    };
+    if (await kind(move.from) !== undefined) return;
+    let target = move.to;
+    const into = `${move.to}/${path.posix.basename(move.from)}`;
+    if (await kind(move.to) === 'folder' && await kind(into) !== undefined) target = into;
+    const landed = await kind(target);
+    if (landed === undefined) return;
+    await source.followMove(landed === 'folder' ? `${move.from}/` : move.from, landed === 'folder' ? `${target}/` : target);
+  } catch {
+    // A rename that cannot be followed leaves the old entry, which the missing-path report names.
+  }
 }
 
 const APPROVED_ONCE_REASON = 'A person approved this exact call once, after the run had moved on.';
@@ -953,11 +996,19 @@ export async function gateStep(runtime: GateRuntime, input: GateStepInput, optio
     : await floorFactsFor({ command: input.command, root: input.root, ...(runtime.locations ?? {}) }, options.floorReaders);
   const effects = effectsWithReading(input.effects, read);
   const floorFacts = { ...(input.floorFacts ?? {}), ...(read?.facts ?? {}) };
+  // A cyber step's reads are checked against the labels exactly as a chat call's are (CLAS-03).
+  const labelVerdict = input.root === undefined ? undefined : await labelVerdictFor(runtime, {
+    root: input.root,
+    reads: readEffectPaths(effects.length > 0 ? effects : input.effects),
+    ...(input.command === undefined ? {} : { command: input.command }),
+    mayReadAnything: input.command !== undefined || effects.length === 0
+  });
   const request: GateRequest = {
     actor: runtime.actor,
     tool: input.tool,
     callId: input.callId,
     effects,
+    ...(labelVerdict === undefined ? {} : { labelVerdict }),
     context: runtime.context,
     presence: runtime.presence,
     policy: input.policy,

@@ -382,3 +382,26 @@ test('a failed-closed policy and a deny-list refusal: the deny list is named', a
   const plain = await decide(requestFor([], { tool: 'Bash', command: 'ls' }), failedClosed('unavailable'), allows);
   assert.equal(plain.rule, 'bundle.unavailable', 'without a deny-list refusal the policy\'s own rule is named');
 });
+
+// D-53: a call whose effects are unknown still has its label verdict read, right after the floor's refusals of what it names: a command nobody can read
+// that names a file above your clearance is refused, never put on a card.
+test('unknown effects with a label verdict: denied with the verdict, after a floor refusal by name, before a settings refusal, the outside-workspace refusal and the ask', async () => {
+  const verdict = { rule: 'label.dominance' as const, reason: 'This file is labelled ca-protected/Protected B, and your policy gives you no clearance on that scale.' };
+  for (const presence of ['person', 'none'] as const) {
+    const refused = await decide(requestFor([], { presence, tool: 'Bash', command: 'python3 -c "$X" secret/plan.md', labelVerdict: verdict }), validBundleState(), allows);
+    assert.equal(refused.outcome, 'deny', presence);
+    assert.equal(refused.rule, 'label.dominance', presence);
+    assert.equal(refused.reason, verdict.reason);
+    assert.equal(refused.floor, false);
+  }
+  // The floor's refusal of what the call names still comes first.
+  const floor = await decide(requestFor([], { floorFacts: { credentialStore: 'That names ~/.ssh.' }, labelVerdict: verdict }), validBundleState(), allows);
+  assert.equal(floor.rule, 'floor.credential-store');
+  // The verdict comes before a settings refusal and the outside-workspace refusal.
+  const both = await decide(requestFor([], { labelVerdict: verdict, settingsRefusal: { rule: 'settings.deny-list', reason: 'Denied.' }, outsideWorkspace: 'Outside.' }), validBundleState(), allows);
+  assert.equal(both.rule, 'label.dominance');
+  // Without the verdict the same request still asks, as before.
+  const asked = await decide(requestFor([], { tool: 'Bash', command: 'python3 -c "$X" secret/plan.md' }), validBundleState(), allows);
+  assert.equal(asked.outcome, 'ask');
+  assert.equal(asked.rule, 'manifest.effects-unknown');
+});

@@ -12,16 +12,25 @@ import type { ActorRef, GateRuntime, Presence } from '../domain/gate/decide';
 import { buildDecisionRecord } from '../domain/gate/record';
 import type { DecisionOutcome, DecisionRecord } from '../domain/gate/record';
 import type { SecretStorageLike } from '../services/auth';
-import { ensurePolicyBundle, resetPolicyToDefaults } from './bundleStore';
-import type { BundleEvent, BundleResult } from './bundleStore';
+import { applyPolicyDraft, ensurePolicyBundle, resetPolicyToDefaults } from './bundleStore';
+import type { BundleEvent, BundleResult, PolicyEditResult } from './bundleStore';
 import { readLastValid } from './clockMarker';
 import { isModelRequestRecord } from '../domain/gate/record';
 import { DecisionLog, INSTALL_LOG_KEY, projectLogKey } from './decisionLog';
 import type { LogKind } from './decisionLog';
 import type { SessionRoute } from './sessionMark';
+import { SHIPPED_DEFAULT_LABEL } from '../domain/gate/bundle';
+import { moveLabelEntry } from '../domain/gate/labelMap';
+import type { LabelMapPayload } from '../domain/gate/labelMap';
+import { SCALE_PRESETS } from '../domain/gate/labels';
+import type { Clearance, Label, LabelEventId, ScaleMapping, ScaleTable } from '../domain/gate/labels';
+import { LabelMapError, LabelReader, updateLabelMap } from './labelMapStore';
+import type { LabelMapQuestion, LabelMapWrite } from './labelMapStore';
+import type { LabelMapState } from '../domain/gate/labelMap';
 
 const DEVICE_UNKNOWN = 'device-unknown';
 const POLICY_SESSION = 'policy';
+const LABEL_SESSION = 'labels';
 /** The session id of a model request made outside every session route. */
 export const NO_SESSION_ID = 'no-session';
 const START_FAILED_DETAIL = 'The policy check threw before it could finish.';
@@ -73,6 +82,11 @@ export interface GateHostOptions {
   readonly startWaitMs?: number;
   /** The person's home folder, for the floor's credential-store checks of shell commands (D-16). The activation adapter passes it; a test leaves it out or gives a stand-in. */
   readonly home?: string;
+  /**
+   * Where a label file's state that needs the person goes (unverified, unreadable, rolled back, another branch's), once per window, with the project, so the
+   * activation adapter can offer the one-click accept of D-61. Without it the message goes to onProblem.
+   */
+  readonly onLabelNotice?: (root: string, state: LabelMapState, message: string) => void;
 }
 
 export interface RuntimeRequest {
@@ -105,6 +119,10 @@ export class GateHost {
    */
   private readonly retiring = new Map<string, { readonly log: DecisionLog; readonly pending: Promise<void> }>();
   private readonly listeners = new Set<() => void>();
+  /** Label readers by project key, kept and let go with the project's logs (CLAS-01). */
+  private readonly labelReaders = new Map<string, LabelReader>();
+  /** Problems with automatic label writes already told this window, so each is said once. */
+  private readonly toldLabelProblems = new Set<string>();
 
   public constructor(private readonly options: GateHostOptions) {}
 
@@ -169,8 +187,127 @@ export class GateHost {
       locations: { globalStorage: this.options.globalStorageDir, ...(this.options.home === undefined ? {} : { home: this.options.home }) },
       productVersion: this.options.productVersion,
       clock: () => this.now(),
-      newRecordId: () => randomUUID()
+      newRecordId: () => randomUUID(),
+      // Each folder the run works in has its own reader (a sub-agent's worktree included), kept by the host and read again only when the file changes.
+      labels: (folder: string) => this.labelsFor(folder)
     };
+  }
+
+  /**
+   * The label reader of a project (CLAS-01, D-25): one per root, kept like the project's logs (let go by retainProjectLogs), read again only when the file
+   * or its marker changes. Its notices (a map that does not verify, cannot be read or was rolled back, labelled paths that are gone) are said once.
+   */
+  public labelsFor(root: string): LabelReader {
+    const key = projectLogKey(root);
+    let reader = this.labelReaders.get(key);
+    if (reader === undefined) {
+      reader = new LabelReader(root, {
+        globalStorageDir: this.options.globalStorageDir,
+        secrets: this.options.secrets,
+        onNotice: (message, state) => {
+          try {
+            if (state !== undefined && this.options.onLabelNotice !== undefined) this.options.onLabelNotice(root, state, message);
+            else this.options.onProblem?.(message);
+          } catch { /* a notice never changes a decision */ }
+        },
+        move: (from, to) => this.followRename(root, from, to)
+      });
+    }
+    this.labelReaders.delete(key);
+    this.labelReaders.set(key, reader);
+    for (const old of [...this.labelReaders.keys()].slice(0, Math.max(0, this.labelReaders.size - MAX_PROJECT_LOGS))) this.labelReaders.delete(old);
+    return reader;
+  }
+
+  /** What labels are judged by now: the valid policy's scales, mappings, clearances and default label, or a failed-closed policy's (no clearances). */
+  public labelPolicy(): { readonly valid: boolean; readonly scales: ScaleTable; readonly mappings: readonly ScaleMapping[]; readonly clearances: readonly Clearance[]; readonly defaultLabel: Label } {
+    const state = this.bundleState();
+    if (state.state === 'valid') return { valid: true, scales: state.bundle.scales, mappings: state.bundle.mappings, clearances: state.bundle.clearances, defaultLabel: state.bundle.defaultLabel };
+    return { valid: false, scales: SCALE_PRESETS, mappings: [], clearances: [], defaultLabel: SHIPPED_DEFAULT_LABEL };
+  }
+
+  /**
+   * Changes a project's labels through the one writer (updateLabelMap), with this policy's scales, and has the project's reader read the file again.
+   * `confirm` is the person's answer before an unverified map is signed again or the last verified labels are restored; with none, such a write is refused.
+   */
+  public async changeLabels(root: string, change: (map: LabelMapPayload) => LabelMapPayload, confirm?: (question: LabelMapQuestion) => Promise<boolean>): Promise<LabelMapWrite> {
+    await this.start();
+    const policy = this.labelPolicy();
+    try {
+      return await updateLabelMap(root, change, {
+        globalStorageDir: this.options.globalStorageDir,
+        secrets: this.options.secrets,
+        scales: policy.scales,
+        defaultLabel: policy.defaultLabel,
+        ...(confirm === undefined ? {} : { confirm }),
+        ...(this.options.now === undefined ? {} : { now: this.options.now })
+      });
+    } finally {
+      this.labelReaders.get(projectLogKey(root))?.invalidate();
+    }
+  }
+
+  /**
+   * D-61: the person accepts the signed label file in the project now (another branch's, say) as current. Only a file in the `other-revision` state is
+   * accepted: it is signed again at a revision above the marker, the marker moves, and `label.branch-accepted` is recorded. Returns false, writing nothing,
+   * when the file is in any other state.
+   */
+  public async acceptBranchLabels(root: string): Promise<boolean> {
+    const policy = this.labelPolicy();
+    const view = await this.labelsFor(root).view(policy.scales);
+    if (view.state !== 'other-revision') return false;
+    const written = await this.changeLabels(root, (map) => map, async (question) => question === 'accept');
+    this.recordLabelEvent(root, { event: 'label.branch-accepted', path: '', reason: `A person accepted the project's signed label file (for example another branch's) as current. It is now revision ${String(written.revision)}.` });
+    return true;
+  }
+
+  /**
+   * Records a label event (GATE-07) in the project's log, the way the policy's events are written: the event as the operation, the project-relative path as
+   * the resource (`project` for the project itself, never a machine path), the new label, and the reason a person gave.
+   */
+  public recordLabelEvent(root: string, event: { readonly event: LabelEventId; readonly path: string; readonly label?: Label; readonly reason?: string }): void {
+    try {
+      const record = buildDecisionRecord({
+        recordId: randomUUID(),
+        sequence: 0,
+        time: this.now(),
+        productVersion: this.options.productVersion,
+        actor: { kind: 'person', deviceFingerprint: this.deviceFingerprint(), sessionId: LABEL_SESSION },
+        callId: `${event.event}-${this.now()}`,
+        capability: { verb: 'plan' },
+        resource: { name: event.path === '' ? 'project' : event.path.slice(0, 300), type: 'label' },
+        outcome: 'allowed',
+        rule: event.event,
+        ...(event.reason === undefined || event.reason === '' ? {} : { reason: event.reason.slice(0, 500) }),
+        bundleHash: this.current.state === 'valid' ? this.current.hash : '',
+        ...(event.label === undefined ? {} : { label: event.label })
+      });
+      void this.logFor(root).append({ ...record, api: { ...record.api, operation: event.event } });
+    } catch {
+      // A record that cannot be kept never changes the label.
+    }
+  }
+
+  /** An agent's rename moves the entry (D-26), when an entry is there; an automatic write never signs a map that does not verify, and says so once. */
+  public async followRename(root: string, from: string, to: string): Promise<void> {
+    let moved = false;
+    try {
+      await this.changeLabels(root, (map) => {
+        const folder = from.endsWith('/');
+        const affected = Object.keys(map.entries).some((key) => (folder ? key.startsWith(from) : key === from));
+        if (!affected) return map;
+        moved = true;
+        return moveLabelEntry(map, from, to);
+      });
+    } catch (error) {
+      const message = error instanceof LabelMapError ? `A label was not moved with a renamed file. ${error.message}` : 'A label was not moved with a renamed file.';
+      if (!this.toldLabelProblems.has(message)) {
+        this.toldLabelProblems.add(message);
+        try { this.options.onProblem?.(message); } catch { /* ignored */ }
+      }
+      return;
+    }
+    if (moved) this.recordLabelEvent(root, { event: 'label.set', path: to, reason: `The label moved with the file, renamed from ${from}.` });
   }
 
   /**
@@ -211,6 +348,21 @@ export class GateHost {
     return result;
   }
 
+  /**
+   * NEAR AI: Apply Policy Draft (D-41, D-53). Applies a draft made from the policy whose hash is `baseHash`, the way reset() replaces the policy: every runtime
+   * and the status bar read the new policy from the next decision on, the listeners are told, and policy.edit is recorded with the old and new hashes. A
+   * refused draft throws a plain BundleStoreError and changes nothing.
+   */
+  public async applyPolicyDraft(draftText: string, baseHash: string): Promise<PolicyEditResult> {
+    await this.start();
+    const result = await applyPolicyDraft(this.options.globalStorageDir, this.options.secrets, draftText, { baseHash }, this.storeOptions());
+    await this.seedFromMarker();
+    this.current = result.state;
+    this.announce(result.event ?? 'policy.edit', result.state, `The policy changed from ${result.oldHash} to ${result.newHash}.`);
+    this.changed();
+    return result;
+  }
+
   public onDidChange(listener: () => void): () => void {
     this.listeners.add(listener);
     return () => { this.listeners.delete(listener); };
@@ -231,6 +383,7 @@ export class GateHost {
     if (open !== undefined) keep.add(projectLogKey(open));
     // Both kinds of log follow the same rule: a project's model-request log is let go with its decision log.
     for (const slot of [...this.logs.keys()]) if (!keep.has(keyOfSlot(slot))) this.retire(slot);
+    for (const key of [...this.labelReaders.keys()]) if (!keep.has(key)) this.labelReaders.delete(key);
   }
 
   /** The keys of the decision logs held open now, install log included, least recently used first. For tests and diagnostics. */
@@ -350,13 +503,13 @@ export class GateHost {
 
   // The bundle's own events are per install: they go to the install-level log in global storage whether or not a folder is open, and also to the open
   // project's log when there is one, as `policy.*` records, so a failed-closed start is on the record with its reason.
-  private announce(event: BundleEvent | undefined, state: BundleState): void {
+  private announce(event: BundleEvent | undefined, state: BundleState, detail?: string): void {
     try {
       const failed = state.state === 'failed-closed';
       const name = event ?? 'policy.load';
       const outcome: DecisionOutcome = failed ? 'denied' : 'allowed';
       const rule = failed ? 'bundle.failed-closed' : name;
-      const reason = failed ? state.sentence : undefined;
+      const reason = failed ? state.sentence : detail;
       const record: DecisionRecord = buildDecisionRecord({
         recordId: randomUUID(),
         sequence: 0,
@@ -396,4 +549,23 @@ export class GateHost {
  */
 export function unattendedRuntimeFor(host: Pick<GateHost, 'runtimeFor'>, root: string | undefined, sessionId: string, agentLabel: string): Promise<GateRuntime> {
   return host.runtimeFor({ ...(root ? { root } : {}), actor: { kind: 'agent', sessionId, agentLabel }, presence: 'none', context: 'unattended' });
+}
+
+/**
+ * A runtime per folder, asked of the host once and reused for every later call in that folder (PR #81 review): a panel that makes many model calls (Team
+ * Studio) waits for the host's start at most once, never before each call. The runtime reads the host's policy at each decision, so a reused one is never
+ * stale. With no host it gives none, and the caller decides with the default route. A request that fails is not kept, so the next call asks again.
+ */
+export function runtimePerRoot(host: Pick<GateHost, 'runtimeFor'> | undefined, request: (root: string) => RuntimeRequest): (root: string) => Promise<GateRuntime | undefined> {
+  const kept = new Map<string, Promise<GateRuntime>>();
+  return async (root) => {
+    if (host === undefined) return undefined;
+    let found = kept.get(root);
+    if (found === undefined) {
+      found = host.runtimeFor(request(root));
+      kept.set(root, found);
+      found.catch(() => { if (kept.get(root) === found) kept.delete(root); });
+    }
+    return found;
+  };
 }
