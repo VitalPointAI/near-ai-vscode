@@ -9,9 +9,10 @@ import type { Mark } from '../domain/gate/dominance';
 import { SCALE_PRESETS } from '../domain/gate/labels';
 import type { Label } from '../domain/gate/labels';
 import {
-  DEFAULT_ROUTING, ROUTE_REFUSALS, ROUTE_RULES, TIER_ORDER, decideRoute, isLocalRouteHost, parseRouting, tierForLabel, tierForMark
+  BINDING_MAX_AGE_MS, BINDING_REFUSALS, CONNECTION_BINDING_STATES, DEFAULT_ROUTING, ROUTE_EVENT_IDS, ROUTE_REFUSALS, ROUTE_RULES, TIER_ORDER, decideRoute,
+  isBindingFresh, isLocalRouteHost, parseRouting, routingWhileFailedClosed, tierForLabel, tierForMark
 } from '../domain/gate/routing';
-import type { RouteFacts, RoutingTable } from '../domain/gate/routing';
+import type { ConnectionBindingFact, RouteFacts, RoutingTable } from '../domain/gate/routing';
 
 function label(scale: string, level: string, extra: Partial<Label> = {}): Label {
   return { scale, level, compartments: [], releasability: [], handling: [], ...extra };
@@ -24,6 +25,11 @@ const NEAR_TEE: RouteFacts = {
   clientRoute: 'near', host: 'https://cloud-api.near.ai/v1', nearEndpoint: true, model: { id: 'tee-model', privacyBoundary: 'tee' }, attestationFailed: false
 };
 const NEAR_CLOUD: RouteFacts = { ...NEAR_TEE, model: { id: 'cloud-model', privacyBoundary: 'cloud' } };
+// D-50: an attested-cloud request through a NEAR client goes only with a fresh bound connection fact for its host. No NEAR client has a source before plan
+// 25, so a case that expects NEAR AI Cloud to be allowed at attested-cloud gives the fact here, and a twin without it expects the refusal.
+const NOW = Date.parse('2026-11-17T12:00:00.000Z');
+const BOUND: ConnectionBindingFact = { state: 'bound', host: 'https://cloud-api.near.ai/v1', checkedAt: NOW - 60_000, fingerprint: 'f'.repeat(64) };
+const NEAR_TEE_BOUND: RouteFacts = { ...NEAR_TEE, binding: BOUND, now: NOW };
 const LOCAL_OK: RouteFacts = {
   clientRoute: 'local', host: 'http://127.0.0.1:11434', nearEndpoint: false, model: { id: 'local-model', privacyBoundary: 'local' }, attestationFailed: false
 };
@@ -41,7 +47,10 @@ test('tracer: a mark goes to a tier and the client, endpoint and model are judge
   assert.deepEqual({ allowed: open.allowed, tier: open.tier, rule: open.rule }, { allowed: true, tier: 'any-cloud', rule: 'route.any-cloud' });
   assert.equal(open.reason, undefined);
 
-  assert.equal(decideRoute(markOf(org('Confidential')), DEFAULT_ROUTING, NEAR_TEE).allowed, true);
+  assert.equal(decideRoute(markOf(org('Confidential')), DEFAULT_ROUTING, NEAR_TEE_BOUND).allowed, true);
+  // The twin without a binding fact (D-50): refused, and with no local model available the refusal names the missing local model.
+  const unbound = decideRoute(markOf(org('Confidential')), DEFAULT_ROUTING, NEAR_TEE);
+  assert.deepEqual({ allowed: unbound.allowed, tier: unbound.tier, rule: unbound.rule }, { allowed: false, tier: 'attested-cloud', rule: 'route.no-local-model' });
   const notTee = decideRoute(markOf(org('Confidential')), DEFAULT_ROUTING, NEAR_CLOUD);
   assert.equal(notTee.allowed, false);
   assert.equal(notTee.rule, 'route.not-tee');
@@ -66,7 +75,10 @@ test('every rule id can be reached, and every refusing rule has one plain senten
   const reached = new Set<string>();
   const cases: Array<[Mark, RoutingTable, RouteFacts]> = [
     [markOf(org('Public')), DEFAULT_ROUTING, NEAR_CLOUD],
+    [markOf(org('Internal')), DEFAULT_ROUTING, NEAR_TEE_BOUND],
     [markOf(org('Internal')), DEFAULT_ROUTING, NEAR_TEE],
+    [markOf(org('Internal')), DEFAULT_ROUTING, { ...NEAR_TEE, localModelAvailable: true }],
+    [markOf(org('Public')), DEFAULT_ROUTING, { ...NEAR_CLOUD, sessionless: true }],
     [markOf(org('Restricted')), DEFAULT_ROUTING, LOCAL_OK],
     [markOf(org('Restricted', { handling: ['local-only'] })), withDenyRestricted(), LOCAL_OK],
     [markOf(org('Restricted')), DEFAULT_ROUTING, NEAR_TEE],
@@ -77,7 +89,7 @@ test('every rule id can be reached, and every refusing rule has one plain senten
   ];
   for (const [mark, routing, facts] of cases) reached.add(decideRoute(mark, routing, facts).rule);
   assert.deepEqual([...reached].sort(), [...ROUTE_RULES].sort());
-  assert.deepEqual(Object.keys(ROUTE_REFUSALS).sort(), ROUTE_RULES.filter((rule) => !['route.any-cloud', 'route.attested-cloud', 'route.local-only'].includes(rule)).sort());
+  assert.deepEqual(Object.keys(ROUTE_REFUSALS).sort(), ROUTE_RULES.filter((rule) => !['route.any-cloud', 'route.attested-cloud', 'route.local-only', 'route.default-session'].includes(rule)).sort());
   for (const sentence of Object.values(ROUTE_REFUSALS)) {
     assert.match(sentence, /^Nothing was sent\. /);
     assert.ok(!sentence.includes(String.fromCharCode(0x2014)), 'no em-dash');
@@ -250,4 +262,86 @@ test('routing keys are scale/level with the exact level names, spaces kept and c
   // A label whose level is spelled another way has no entry in a valid table, so it is denied, never routed as another level.
   assert.equal(tierForLabel(label('ca-protected', 'protected b'), DEFAULT_ROUTING), 'deny');
   assert.equal(tierForLabel(label('ca-protected', 'Protected B'), DEFAULT_ROUTING), 'local-only');
+});
+
+// ---- D-50: attested-cloud needs a fresh bound connection fact; D-53: a failed-closed policy routes labelled content local-only ----
+
+test('a binding is fresh only when bound, both times are known, and it is younger than ten minutes', () => {
+  assert.deepEqual([...CONNECTION_BINDING_STATES], ['bound', 'not-bound', 'unavailable', 'unknown']);
+  assert.equal(BINDING_MAX_AGE_MS, 600_000);
+  assert.equal(isBindingFresh(BOUND, NOW), true);
+  assert.equal(isBindingFresh({ ...BOUND, checkedAt: NOW }, NOW), true, 'checked this instant');
+  assert.equal(isBindingFresh({ ...BOUND, checkedAt: NOW - BINDING_MAX_AGE_MS + 1 }, NOW), true, 'one millisecond short of the limit');
+  assert.equal(isBindingFresh({ ...BOUND, checkedAt: NOW - BINDING_MAX_AGE_MS }, NOW), false, 'at the limit it is stale');
+  assert.equal(isBindingFresh({ ...BOUND, checkedAt: NOW + 1 }, NOW), false, 'a check from the future is not trusted');
+  assert.equal(isBindingFresh(undefined, NOW), false, 'no fact');
+  assert.equal(isBindingFresh(BOUND, undefined), false, 'no clock');
+  assert.equal(isBindingFresh({ state: 'bound', host: BOUND.host }, NOW), false, 'no time of check');
+  assert.equal(isBindingFresh({ ...BOUND, checkedAt: Number.NaN }, NOW), false);
+  for (const state of ['not-bound', 'unavailable', 'unknown'] as const) assert.equal(isBindingFresh({ ...BOUND, state }, NOW), false, state);
+});
+
+test('CLAS-05 (D-50): a NEAR client at attested-cloud is refused without a fresh bound fact for its own host, naming the cause first', () => {
+  const internal = markOf(org('Internal'));
+  const cases: Array<[string, RouteFacts, keyof typeof BINDING_REFUSALS]> = [
+    ['no fact', NEAR_TEE, 'unknown'],
+    ['no clock', { ...NEAR_TEE, binding: BOUND }, 'unknown'],
+    ['stale', { ...NEAR_TEE_BOUND, binding: { ...BOUND, checkedAt: NOW - BINDING_MAX_AGE_MS - 1 } }, 'unknown'],
+    ['unknown', { ...NEAR_TEE_BOUND, binding: { state: 'unknown', host: BOUND.host } }, 'unknown'],
+    ['another host', { ...NEAR_TEE_BOUND, binding: { ...BOUND, host: 'https://other.example.org' } }, 'unknown'],
+    ['not bound', { ...NEAR_TEE_BOUND, binding: { state: 'not-bound', host: BOUND.host, checkedAt: NOW } }, 'not-bound'],
+    ['unavailable', { ...NEAR_TEE_BOUND, binding: { state: 'unavailable', host: BOUND.host, checkedAt: NOW } }, 'unavailable']
+  ];
+  for (const [name, facts, cause] of cases) {
+    const alone = decideRoute(internal, DEFAULT_ROUTING, facts);
+    assert.equal(alone.allowed, false, name);
+    assert.equal(alone.rule, 'route.no-local-model', name);
+    assert.ok(alone.reason?.startsWith(BINDING_REFUSALS[cause]), `${name}: ${alone.reason ?? ''}`);
+    const withLocal = decideRoute(internal, DEFAULT_ROUTING, { ...facts, localModelAvailable: true });
+    assert.equal(withLocal.rule, 'route.connection-not-bound', name);
+    assert.ok(withLocal.reason?.startsWith(BINDING_REFUSALS[cause]), name);
+    assert.equal((withLocal.reason?.match(/Nothing was sent\./g) ?? []).length, 1, 'said once');
+  }
+  // The earlier rules still come first: a model that is not TEE, another endpoint, and a failed attestation are refused for that reason, bound or not.
+  assert.equal(decideRoute(internal, DEFAULT_ROUTING, { ...NEAR_TEE_BOUND, model: { id: 'c', privacyBoundary: 'cloud' } }).rule, 'route.not-tee');
+  assert.equal(decideRoute(internal, DEFAULT_ROUTING, { ...NEAR_TEE_BOUND, attestationFailed: true }).rule, 'route.attestation-failed');
+  // A local model on this computer needs no binding; any-cloud, local-only and deny never read the fact.
+  assert.equal(decideRoute(internal, DEFAULT_ROUTING, LOCAL_OK).allowed, true);
+  assert.equal(decideRoute(markOf(org('Public')), DEFAULT_ROUTING, NEAR_CLOUD).allowed, true);
+  assert.equal(decideRoute(markOf(org('Restricted')), DEFAULT_ROUTING, NEAR_TEE_BOUND).rule, 'route.no-local-model');
+  assert.equal(decideRoute(markOf(org('Restricted')), withDenyRestricted(), NEAR_TEE_BOUND).rule, 'route.deny');
+  for (const sentence of Object.values(BINDING_REFUSALS)) {
+    assert.match(sentence, /^Nothing was sent\. /);
+    assert.match(sentence, /stays on this computer\.$/);
+    assert.ok(!sentence.includes(String.fromCharCode(0x2014)), 'no em-dash');
+    assert.ok(!/background|later check/i.test(sentence), 'no sentence promises a check that does not exist yet');
+  }
+});
+
+test('an allowed request decided outside any session is route.default-session; a refused one keeps its refusing rule', () => {
+  assert.equal(decideRoute(markOf(org('Public')), DEFAULT_ROUTING, { ...NEAR_CLOUD, sessionless: true }).rule, 'route.default-session');
+  assert.equal(decideRoute(markOf(org('Restricted')), DEFAULT_ROUTING, { ...LOCAL_OK, sessionless: true }).rule, 'route.default-session');
+  assert.equal(decideRoute(markOf(org('Restricted')), DEFAULT_ROUTING, { ...NEAR_TEE, sessionless: true }).rule, 'route.no-local-model');
+  assert.equal(decideRoute(markOf(org('Restricted')), DEFAULT_ROUTING, { ...NEAR_TEE, clientRoute: undefined, sessionless: true }).rule, 'route.no-session');
+  assert.deepEqual([...ROUTE_EVENT_IDS], ['route.attestation-checked', 'route.attestation-cleared']);
+  for (const event of ROUTE_EVENT_IDS) assert.ok(!(ROUTE_RULES as readonly string[]).includes(event), `${event} is an event, not a rule`);
+});
+
+test('D-53: while the policy is failed closed every tier above any-cloud is at least local-only and no host is named local', () => {
+  const closed = routingWhileFailedClosed();
+  assert.deepEqual(closed.localHosts, []);
+  for (const key of Object.keys(DEFAULT_ROUTING.levels)) {
+    const shipped = DEFAULT_ROUTING.levels[key]!;
+    const now = closed.levels[key]!;
+    if (shipped === 'any-cloud') assert.equal(now, 'any-cloud', key);
+    else assert.ok(TIER_ORDER[now] >= TIER_ORDER['local-only'] && TIER_ORDER[now] >= TIER_ORDER[shipped], key);
+  }
+  assert.equal(closed.levels['org/Internal'], 'local-only');
+  assert.equal(closed.handling['local-only'], 'local-only');
+  assert.ok(Object.isFrozen(closed) && Object.isFrozen(closed.levels));
+  // The default label still goes where it goes today; labelled content never leaves this computer, even on a host the policy would have named.
+  assert.equal(decideRoute(markOf(org('Public')), closed, NEAR_CLOUD).allowed, true);
+  assert.equal(decideRoute(markOf(org('Internal')), closed, NEAR_TEE_BOUND).rule, 'route.no-local-model');
+  assert.equal(decideRoute(markOf(org('Internal')), closed, LOCAL_OK).rule, 'route.local-only');
+  assert.equal(decideRoute(markOf(org('Restricted')), closed, LOCAL_REMOTE).rule, 'route.local-host-not-local');
 });

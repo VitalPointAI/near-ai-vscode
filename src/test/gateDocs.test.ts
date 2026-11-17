@@ -10,7 +10,7 @@ import { FLOOR_CANNOT_SEE_TEXT, FLOOR_EFFECTS_CANNOT_SEE_TEXT, namesCredentialSt
 import { classifyCommand, MAX_COMMAND_LENGTH, MAX_NESTING } from '../agent/commandSafety';
 import { BUNDLE_FAILURES } from '../domain/gate/bundle';
 import { MANIFEST_IS_A_CLAIM_TEXT, RUNS_ON_THIS_MACHINE_TEXT } from '../domain/gate/words';
-import { MAX_DECISION_LOG_BYTES, MAX_ROTATED_FILES } from '../gate/decisionLog';
+import { MAX_DECISION_LOG_BYTES, MAX_ROTATED_FILES, MODEL_REQUESTS_DIR } from '../gate/decisionLog';
 import { redactCredentialArguments } from '../domain/redaction';
 
 const ROOT = path.resolve(__dirname, '..', '..');
@@ -311,4 +311,39 @@ test('the decision record paragraph says exactly what is removed from a command 
   // PR #74 review round 2: the numeric user and group the paragraph says is kept is kept.
   assert.ok(words.includes('(a numeric user and group, such as `1000:1000`, is kept)'));
   assert.equal(redactCredentialArguments('docker run --user 1000:1000 img'), 'docker run --user 1000:1000 img');
+});
+
+// PR 4a (plan 70-19, close-out 70-28a): every model request passes the route check and leaves a record in a log of its own, and the docs say so in the
+// same change. The old sentence that said routing was not used is held here as a literal, so it cannot come back.
+const OLD_ROUTING_NOT_USED = 'The file also holds scales, clearances and routing tiers. This version stores and shows them and does not use them yet.';
+
+test('SECURITY.md says every model request is checked against the routing tiers and recorded in its own log, and what a routine record holds', () => {
+  const words = flat(policySection);
+  assert.equal(words.includes(OLD_ROUTING_NOT_USED), false, 'routing is used now');
+  for (const phrase of [
+    '**Model requests.** Before anything is sent to a model',
+    'checks the request against the routing tiers in the policy file, using only what is on this computer',
+    'Nothing can be labelled yet, so every request is at the policy\'s default label',
+    'on a fresh install nothing changes where requests go',
+    'A request the routing does not allow is not sent',
+    'content at a level whose tier needs an attested cloud model stays on this computer for now',
+    `in a log of its own, \`gate/${MODEL_REQUESTS_DIR}/\` in this extension's storage`,
+    'rolls over the same way, is never synced and is never put in your project',
+    'A routine record holds the time, who asked, the model and its provider, the routing tier, the rule that allowed it and the policy\'s hash',
+    'never the content, the endpoint\'s address or a file path',
+    // PR 4a review round 1: a refusal always names the label that decided it, the default label included; a route that cannot be worked out names none.
+    'a refused request\'s record also holds the plain reason and the label that decided it, which is the policy\'s default label when nothing raised the label',
+    'A request whose route cannot be worked out is refused with a fixed reason and no label',
+    'The file also holds scales and clearances. This version stores and shows them and does not use them yet.'
+  ]) assert.ok(words.includes(phrase), phrase);
+  assert.equal(MODEL_REQUESTS_DIR, 'model-requests');
+  assert.ok(!policySection.includes(EM_DASH));
+  assert.doesNotMatch(policySection, /NEAR organization/);
+});
+
+test('README\'s policy bullet says every model request is checked and recorded in a log of its own, and nothing changes on a fresh install', () => {
+  const words = flat(readmePolicy);
+  for (const phrase of ['Every model request is checked against its routing before anything is sent', 'leaves a record in a log of its own', 'on a fresh install nothing changes where requests go']) {
+    assert.ok(words.includes(phrase), phrase);
+  }
 });

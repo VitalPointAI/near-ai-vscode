@@ -6,8 +6,8 @@
 //
 // What it looks at, in order, and stops at the first hit:
 //   1. a policy file or a kept-aside copy of one in the gate folder (a file that exists and does not verify is never the start of a new install);
-//   2. a decision log in the gate folder holding a record that names a bundle hash (a policy was valid once; a log of failed starts names none, so a start
-//      that failed before it ever had a policy does not lock the install out);
+//   2. a decision log or a model-request log in the gate folder holding a record that names a bundle hash (a policy was valid once; a log of failed starts
+//      names none, so a start that failed before it ever had a policy does not lock the install out);
 //   3. a key history with records in the identity folder while the secret store holds no device key (the key was lost, the history was not).
 // A key history with the device key still present is NOT evidence: Team Mode installs that never had a policy have one and must keep starting normally.
 // Node I/O only: this module never imports vscode, and it never writes.
@@ -19,6 +19,8 @@ import { loadDeviceIdentity } from '../team/identity';
 
 /** The folder name the decision logs live in under the gate folder. src/gate/decisionLog.ts owns the name; a test keeps the two equal. */
 export const DECISION_LOGS_FOLDER = 'decisions';
+/** The folder name the model-request logs live in under the gate folder (decisionLog.ts owns it as MODEL_REQUESTS_DIR; a test keeps the two equal). */
+export const MODEL_REQUEST_LOGS_FOLDER = 'model-requests';
 /** The policy file's name and the prefix of a kept-aside copy (bundleStore.ts owns them; a test keeps them equal). */
 const POLICY_FILE = 'policy-bundle.json';
 const ASIDE_MARK = `${POLICY_FILE}.replaced-`;
@@ -79,14 +81,17 @@ export async function earlierInstallEvidence(gateFolder: string, identityFolder:
   const names = await namesIn(gateFolder);
   if (names === 'unreadable') return 'the policy folder could not be read';
   if (names.some((name) => name === POLICY_FILE || name.startsWith(ASIDE_MARK))) return 'a policy file is already stored here';
-  const logsFolder = path.join(gateFolder, DECISION_LOGS_FOLDER);
-  const logs = await namesIn(logsFolder);
-  if (logs === 'unreadable') return 'the decision logs could not be read';
-  for (const name of logs.filter((entry) => entry.endsWith('.jsonl')).sort().slice(0, MAX_LOG_FILES)) {
-    try {
-      if (await logNamesABundle(path.join(logsFolder, name))) return 'a decision log records an earlier valid policy';
-    } catch {
-      return 'a decision log could not be read';
+  // Both kinds of log name the policy's hash, so either one remembers an earlier valid policy.
+  for (const folder of [DECISION_LOGS_FOLDER, MODEL_REQUEST_LOGS_FOLDER]) {
+    const logsFolder = path.join(gateFolder, folder);
+    const logs = await namesIn(logsFolder);
+    if (logs === 'unreadable') return 'the decision logs could not be read';
+    for (const name of logs.filter((entry) => entry.endsWith('.jsonl')).sort().slice(0, MAX_LOG_FILES)) {
+      try {
+        if (await logNamesABundle(path.join(logsFolder, name))) return 'a decision log records an earlier valid policy';
+      } catch {
+        return 'a decision log could not be read';
+      }
     }
   }
   const history = await historyHasRecords(identityFolder);

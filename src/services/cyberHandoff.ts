@@ -15,6 +15,8 @@ import {
   type PanelRunRequest
 } from './cyberAssembly';
 import { isEmergencyStopped } from './emergencyStop';
+import type { GateRuntime } from '../domain/gate/decide';
+import { defaultSessionRoute, sessionRouteFrom, withSessionRoute } from '../gate/sessionMark';
 
 // The panel's host-side wiring: the install executor, the extension-side assembly (the real client
 // and the global emergency stop), and the Run starter. Everything that can run without VS Code lives
@@ -60,6 +62,8 @@ export function cyberAssembly(context: {
   workspaceRoot?: string;
   client?: CompletionClient;
   model?: string;
+  /** The run's gate: each role call runs inside its session route (CLAS-06). Without one it is decided with the default route. */
+  gate?: GateRuntime;
   policy?: CyberRunInput['policy'];
   toolContext: CyberRunInput['toolContext'];
   tools(engagement: CyberRunInput['engagement']): CyberRunInput['tools'];
@@ -68,8 +72,10 @@ export function cyberAssembly(context: {
   const storeDirectory = `${context.globalStorageUri.fsPath}/cyber/${key}`;
   const model = options.model ?? 'z-ai/glm-5.3';
   const complete = async (requested: string, messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>, signal?: AbortSignal): Promise<string> => {
-    if (!options.client) return '';
-    const reply = await options.client.completeOnce(requested, messages as never, { maxTokens: 4_000, ...(signal ? { signal } : {}) });
+    const client = options.client;
+    if (!client) return '';
+    const send = () => client.completeOnce(requested, messages as never, { maxTokens: 4_000, ...(signal ? { signal } : {}) });
+    const reply = await withSessionRoute(options.gate ? sessionRouteFrom(options.gate) : defaultSessionRoute(), send);
     return reply.text;
   };
   const version = String(context.extension?.packageJSON?.version ?? '0.0.0');

@@ -10,12 +10,12 @@ import { BUNDLE_FAILURES, bundleHash, defaultBundlePayload } from '../domain/gat
 import type { BundleFailureReason, PolicyBundle } from '../domain/gate/bundle';
 import { buildDecisionRecord } from '../domain/gate/record';
 import { signPayload } from '../domain/team/signedPayload';
-import { POLICY_BUNDLE_FILE, ensurePolicyBundle, gateDir, loadPolicyBundle, resetPolicyToDefaults } from '../gate/bundleStore';
+import { GATE_DIR_NAME, POLICY_BUNDLE_FILE, ensurePolicyBundle, gateDir, loadPolicyBundle, resetPolicyToDefaults } from '../gate/bundleStore';
 import type { BundleResult } from '../gate/bundleStore';
 import { LAST_VALID_SECRET, readLastValid, writeLastValid } from '../gate/clockMarker';
-import { DECISIONS_DIR, DecisionLog, projectLogKey } from '../gate/decisionLog';
+import { DECISIONS_DIR, DecisionLog, MODEL_REQUESTS_DIR, projectLogKey } from '../gate/decisionLog';
 import { GateHost } from '../gate/host';
-import { DECISION_LOGS_FOLDER } from '../gate/installEvidence';
+import { DECISION_LOGS_FOLDER, MODEL_REQUEST_LOGS_FOLDER } from '../gate/installEvidence';
 import { DEVICE_KEY_SECRET, createDeviceIdentity, identityDir, loadDeviceIdentity, loadOrCreateDeviceIdentity } from '../team/identity';
 import type { DeviceIdentity } from '../team/identity';
 import { KEY_HISTORY_HEAD_SECRET } from '../team/keyHistory';
@@ -313,6 +313,25 @@ test('secret store wiped, the file and the key history gone, but a decision log 
   });
 });
 
+test('secret store wiped, the file and the key history gone, but only a model-request log names an earlier valid policy: failed closed', async () => {
+  await withStorage(async (storage) => {
+    const { secrets, hash } = await wipedInstall(storage);
+    await rm(path.join(storage, 'identity'), { recursive: true, force: true });
+    const log = new DecisionLog({ globalStorageDir: storage, projectKey: projectLogKey('/x/p'), kind: 'model-requests', onWriteFailure: (message) => { throw new Error(message); } });
+    // A short infer record (the routine one): it names the policy's hash once, in unmapped.nearAi.bundleHash.
+    await log.append(buildDecisionRecord({
+      recordId: 'r1', sequence: 0, time: T0, productVersion: '0.0.0-test', actor: { kind: 'person', deviceFingerprint: 'device', sessionId: 's' }, callId: 'infer',
+      capability: { verb: 'infer', tier: 'any-cloud', provider: 'near-ai', model: 'm' }, resource: { name: 'm', type: 'model' }, outcome: 'allowed', rule: 'route.any-cloud',
+      bundleHash: hash, short: true
+    }));
+    await log.flush();
+    await assert.rejects(stat(path.join(storage, GATE_DIR_NAME, DECISIONS_DIR)), { code: 'ENOENT' }, 'no decision log at all');
+    closed(await ensurePolicyBundle(storage, secrets, { now: at(T0 + DAY) }), 'missing');
+    await assert.rejects(stat(fileOf(storage)), { code: 'ENOENT' });
+    assert.equal(secrets.values.size, 0);
+  });
+});
+
 test('secret store wiped and only a kept-aside copy of an old policy file left: failed closed', async () => {
   await withStorage(async (storage) => {
     const { secrets } = await wipedInstall(storage);
@@ -343,6 +362,7 @@ test('secret store wiped with the policy file still there: unknown-key, and Rese
 
 test('the decision log folder name the install-evidence check reads is the folder the decision log writes', () => {
   assert.equal(DECISION_LOGS_FOLDER, DECISIONS_DIR);
+  assert.equal(MODEL_REQUEST_LOGS_FOLDER, MODEL_REQUESTS_DIR);
 });
 
 // ---------------------------------------------------------------------------------------------------------------------------------------------------

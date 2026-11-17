@@ -13,6 +13,8 @@ import { CyberProtocolDriver } from '../agent/cyberProtocolDriver';
 import { RunCheckpoints } from '../agent/checkpoints';
 import { ShellSession } from '../agent/shell';
 import type { GateHost } from '../gate/host';
+import { defaultSessionRoute, sessionRouteFrom, withSessionRoute } from '../gate/sessionMark';
+import type { SessionRoute } from '../gate/sessionMark';
 
 /**
  * The one rule for where a workspace's cyber store lives. The panel and the run stack both use it,
@@ -205,6 +207,8 @@ export function cyberAssembly(context: {
   stopped?: () => boolean;
   requestApproval?: CyberRunInput['requestApproval'];
   policy?: CyberRunInput['policy'];
+  /** The run's session route: every role call runs inside it (CLAS-06). Without one, the default route. */
+  route?: SessionRoute;
   toolContext: CyberRunInput['toolContext'];
   tools(engagement: CyberRunInput['engagement']): CyberRunInput['tools'];
 }): CyberRunAssembly {
@@ -219,7 +223,9 @@ export function cyberAssembly(context: {
     // event, which reads as a frozen panel rather than a failure.
     const timeout = AbortSignal.timeout(ROLE_CALL_TIMEOUT_MS);
     const bounded = signal ? AbortSignal.any([signal, timeout]) : timeout;
-    const reply = await options.client.completeOnce(requested, messages as never, { maxTokens: 4_000, signal: bounded });
+    const client = options.client;
+    // CLAS-06: the role call runs inside the scan's session route, decided at the client and recorded in the run's log.
+    const reply = await withSessionRoute(options.route ?? defaultSessionRoute(), () => client.completeOnce(requested, messages as never, { maxTokens: 4_000, signal: bounded }));
     return reply.text;
   };
   return cyberAssemblyCore({
@@ -374,8 +380,11 @@ export function panelCyberRunStarter(
       { startedAt: Date.parse(startedAt), budgetMs: profile.budgetMs, planned: { hosts: request.engagement.resolvedScope.hosts, checks: profile.checks, completed: { hosts: [], checks: [] } } },
       Date.now()
     );
+    // A person starts a scan and answers its cards: presence person, interactive; the floor is enforced here as in chat (D-43).
+    const gate = options.gateHost ? await options.gateHost.runtimeFor({ ...(options.root ? { root: options.root } : {}), actor: { kind: 'agent', sessionId: `cyber-${request.engagement.id}`, agentLabel: 'cyber panel' }, presence: 'person', context: 'interactive' }) : undefined;
     const assembly = cyberAssembly(host, {
       ...(options.root ? { workspaceRoot: options.root } : {}),
+      ...(gate ? { route: sessionRouteFrom(gate) } : {}),
       ...(client ? { client } : {}),
       ...(model ? { model } : {}),
       toolContext,
@@ -393,14 +402,7 @@ export function panelCyberRunStarter(
         ...(security ? { security } : {})
       })
     });
-    const result = await startCyberRunInPanel(
-      {
-        ...assembly, grants, tools: assembly.tools(request.engagement), externalFindings: collected, limiter, budget,
-        // A person starts a scan and answers its cards: presence person, interactive; the floor is enforced here as in chat (D-43).
-        ...(options.gateHost ? { gate: await options.gateHost.runtimeFor({ ...(options.root ? { root: options.root } : {}), actor: { kind: 'agent', sessionId: `cyber-${request.engagement.id}`, agentLabel: 'cyber panel' }, presence: 'person', context: 'interactive' }) } : {})
-      },
-      request
-    );
+    const result = await startCyberRunInPanel({ ...assembly, grants, tools: assembly.tools(request.engagement), externalFindings: collected, limiter, budget, ...(gate ? { gate } : {}) }, request);
     // The run record is what makes Export, replay and the diff work; nothing wrote one before.
     if (options.recordRun) await options.recordRun(request.engagement, result.runId, startedAt, request.mode, request.depth, model).catch(() => undefined);
     return result;
