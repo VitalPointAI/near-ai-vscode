@@ -36,6 +36,12 @@ export interface CommandClassification {
    * the command's effects as unknown (it asks with a person there and refuses with nobody), never as "none" (PR #74 review).
    */
   effectsUnknown?: string;
+  /**
+   * Set, with the reason, when the command signs in or out of a registry or account, or changes a stored login or token (`npm login`, `docker logout`,
+   * `gh auth login`, `aws configure`): the floor asks about it in every mode (`floor.credential-change`, owner decision after PR #74). Found wherever it
+   * sits, like the effects.
+   */
+  credentialChange?: string;
 }
 
 // The bounds are shared with the credential-store check (src/domain/commandBounds.ts), so neither reads what the other gives up on.
@@ -102,8 +108,14 @@ export type PackageScriptsAt =
 // (`npm run x`, `xargs`, `find -exec`, a substitution) or decides on one part and stops, and a tag carried by hand through each of those would be lost in the
 // next one somebody writes (Pitfall 2). Classification is synchronous, so the frame on top of this stack is always the call being made.
 // The frame also keeps whether the classifier stopped reading somewhere (the bound, the caps): wherever that happens, the whole command's effects are unknown.
-interface EffectFrame { effects: CommandEffect[]; unknown?: string }
+interface EffectFrame { effects: CommandEffect[]; unknown?: string; credentialChange?: string }
 const effectFrames: EffectFrame[] = [];
+
+/** The command signs in or out, or changes a stored login or token: the floor asks (credentialChange). The first reason is kept. */
+function noteCredentialChange(reason: string): void {
+  const frame = effectFrames[effectFrames.length - 1];
+  if (frame !== undefined) frame.credentialChange ??= reason;
+}
 
 function noteEffects(effects: readonly CommandEffect[] | undefined): void {
   const frame = effectFrames[effectFrames.length - 1];
@@ -685,6 +697,11 @@ export const GLOBAL_OPTIONS: Readonly<Record<string, GlobalOptions>> = Object.fr
   vsce: { values: [], flags: [] },
   ovsx: { values: [], flags: [] },
   gem: { values: [], flags: ['-q', '--quiet', '--verbose', '--backtrace', '--debug', '--norc'] },
+  buildah: {
+    values: ['--root', '--runroot', '--storage-driver', '--storage-opt', '--log-level', '--registries-conf', '--registries-conf-dir', '--short-name-alias-conf',
+      '--userns-uid-map', '--userns-gid-map', '--cgroup-manager', '--cpu-profile', '--memory-profile'],
+    flags: ['--debug']
+  },
   aws: {
     values: ['--profile', '--region', '--output', '--endpoint-url', '--query', '--color', '--cli-read-timeout', '--cli-connect-timeout', '--ca-bundle', '--cli-binary-format'],
     flags: ['--debug', '--no-verify-ssl', '--no-paginate', '--no-sign-request', '--no-cli-pager', '--no-cli-auto-prompt', '--cli-auto-prompt']
@@ -804,7 +821,7 @@ const SHELLS = new Set(['sh', 'bash', 'zsh', 'dash', 'ksh', 'fish', 'csh', 'tcsh
  * the whole command's effects are unknown (PR #74 review round 2: the next wrapper nobody listed fails closed, not open).
  */
 const TAGGED_PROGRAMS: ReadonlySet<string> = new Set([
-  'git', 'npm', 'pnpm', 'yarn', 'bun', 'npx', 'docker', 'podman', 'kubectl', 'helm', 'oc', 'terraform', 'tofu', 'pulumi', 'cdk', 'serverless', 'sls', 'gh', 'glab',
+  'git', 'npm', 'pnpm', 'yarn', 'bun', 'npx', 'docker', 'podman', 'buildah', 'kubectl', 'helm', 'oc', 'terraform', 'tofu', 'pulumi', 'cdk', 'serverless', 'sls', 'gh', 'glab',
   'aws', 'az', 'gcloud', 'gsutil', 'near', 'cargo', 'gem', 'make', 'gmake', 'find', 'sed', 'gsed', 'gsd_run', 'gsd-tools.cjs',
   'env', 'time', 'timeout', 'nice', 'nohup', 'command', 'stdbuf', 'flock', 'watch', ...RUNS_WHAT_FOLLOWS,
   ...Object.keys(PUBLISH_TOOL_TARGETS), ...DISK_DESTROYERS, ...DELETERS, ...WORKSPACE_WRITERS, ...PRIVILEGE, ...INTERPRETERS, ...SHELLS
@@ -1012,6 +1029,60 @@ function githubApiWrites(args: readonly Word[]): { writes: boolean; releases: bo
   // GraphQL: a query written on the line that has no mutation reads; anything read from elsewhere, or a mutation, writes.
   if (endpoint === 'graphql' && !fromFile && query !== undefined && !/\bmutation\b/i.test(query)) return { writes: false, releases };
   return { writes: true, releases };
+}
+
+const CLOUD_NAMES: Readonly<Record<string, string>> = Object.freeze({ aws: 'AWS', gcloud: 'Google Cloud', az: 'Azure' });
+/** Options of aws, gcloud and az that take a value and may sit anywhere among the command's words. */
+const CLOUD_VALUE_OPTIONS: Readonly<Record<string, readonly string[]>> = Object.freeze({
+  aws: [...GLOBAL_OPTIONS.aws!.values],
+  gcloud: [...GLOBAL_OPTIONS.gcloud!.values],
+  az: [...GLOBAL_OPTIONS.az!.values, '-n', '--name', '-g', '--resource-group', '--username', '-u', '--tenant', '-t', '--scope', '--identity', '--key-file', '--profile']
+});
+
+/**
+ * The first three command words of aws, gcloud or az (the service or group, and what to do), with their known value options skipped wherever they sit. An
+ * option the rules do not know before the words that say what the command does, or one of those words decided at run time, is reported.
+ */
+function cloudWords(name: string, args: readonly Word[]): { words: string[] } | { unknown: string } {
+  const values = new Set(CLOUD_VALUE_OPTIONS[name] ?? []);
+  const flags = new Set([...(GLOBAL_OPTIONS[name]?.flags ?? []), ...UNIVERSAL_FLAGS]);
+  const out: string[] = [];
+  for (let index = 0; index < args.length && out.length < 3; index += 1) {
+    const word = args[index]!;
+    const text = word.text;
+    if (!looksLikeOption(text)) {
+      if (word.expansion) return { unknown: 'with a command word decided at run time' };
+      out.push(text);
+      continue;
+    }
+    const option = text.includes('=') ? text.slice(0, text.indexOf('=')) : text;
+    if (values.has(option)) { if (!text.includes('=')) index += 1; continue; }
+    if (flags.has(text)) continue;
+    // Past the words that pick the command, its own options do not change what it is.
+    if (out.length >= 2) break;
+    return { unknown: `with ${text} before what it does, an option the rules do not know` };
+  }
+  return { words: out };
+}
+
+/** The command as shown, when aws, gcloud or az signs in or out or changes stored keys; undefined otherwise. */
+function cloudCredentialChange(name: string, words: readonly string[]): string | undefined {
+  const [first = '', second = '', third = ''] = words;
+  if (name === 'aws') {
+    if (first === 'configure' && !['get', 'list', 'list-profiles', 'export-credentials'].includes(second)) return `aws configure${second === '' ? '' : ` ${second}`}`;
+    if (first === 'sso' && (second === 'login' || second === 'logout')) return `aws sso ${second}`;
+    return undefined;
+  }
+  if (name === 'gcloud') {
+    if (first !== 'auth') return undefined;
+    if (['login', 'revoke', 'activate-service-account', 'configure-docker'].includes(second)) return `gcloud auth ${second}`;
+    if (second === 'application-default' && ['login', 'revoke', 'set-quota-project'].includes(third)) return `gcloud auth application-default ${third}`;
+    return undefined;
+  }
+  if (first === 'login' || first === 'logout') return `az ${first}`;
+  if (first === 'account' && second === 'clear') return 'az account clear';
+  if (first === 'acr' && second === 'login') return 'az acr login';
+  return undefined;
 }
 
 /** `git rebase` words that finish, leave or edit a rebase already under way, rather than start one. */
@@ -1283,6 +1354,11 @@ function packageManagerFolder(manager: string, args: Word[], state: SegmentState
 }
 
 /** Subcommands of pnpm and bun that are their own, not a script of the same name. */
+/** Package-manager and registry verbs that sign in or out. */
+const REGISTRY_LOGIN_VERBS: ReadonlySet<string> = new Set(['login', 'logout', 'adduser', 'add-user']);
+/** A package-manager setting that holds a registry login or token (`//registry/:_authToken`, `_auth`, `_password`, yarn's `npmAuthToken`, `npmAuthIdent`). */
+const REGISTRY_AUTH_KEY = /(?:^|[:/])_(?:auth|authToken|password)\b|\bnpmAuth(?:Token|Ident)\b/i;
+
 const PNPM_BUN_COMMANDS = new Set(['add', 'install', 'i', 'remove', 'rm', 'uninstall', 'update', 'up', 'upgrade', 'link', 'unlink', 'dlx', 'x', 'exec', 'create', 'init', 'pack', 'publish', 'outdated', 'list', 'ls', 'why', 'store', 'config', 'set', 'get', 'audit', 'import', 'prune', 'patch', 'rebuild', 'root', 'bin', 'env', 'setup', 'server', 'fetch', 'deploy', 'build', 'test', 't', 'run', 'start', 'pm', 'repl', 'help']);
 
 function classifyPackageManager(manager: string, givenArgs: Word[], state: SegmentState, context: CommandContext, depth: number): CommandClassification {
@@ -1317,7 +1393,15 @@ function classifyPackageManagerIn(manager: string, givenArgs: Word[], state: Seg
   const sub = first >= 0 ? words[first] ?? '' : '';
   const extra = first >= 0 ? args.slice(first + 1) : [];
   if (first >= 0 && words.slice(first, first + 2).some((word) => word === 'publish' || word === 'unpublish')) return risky(`${manager} ${words.slice(first, first + 2).join(' ')} publishes a package`, publishTo('registry'));
-  if (['publish', 'unpublish', 'deprecate', 'dist-tag', 'owner', 'adduser', 'login', 'logout', 'token', 'access', 'team', 'org', 'star', 'hook', 'npm-publish'].includes(sub)) return risky(`${manager} ${sub} changes a package registry or your account`, publishTo('registry'));
+  // Signing in or out, and a token change, rewrite the login kept on this computer: the floor's credential change (owner decision after PR #74).
+  const signs = REGISTRY_LOGIN_VERBS.has(sub) || (manager === 'yarn' && sub === 'npm' && REGISTRY_LOGIN_VERBS.has(words[first + 1] ?? '')) || sub === 'token';
+  if (signs) {
+    const shown = sub === 'npm' ? `${manager} npm ${words[first + 1]}` : `${manager} ${sub}`;
+    noteCredentialChange(`${shown} signs in or out of a package registry, or changes a stored token.`);
+    return risky(`${shown} changes your package registry login`);
+  }
+  if ((sub === 'config' || sub === 'set') && extra.some((arg) => REGISTRY_AUTH_KEY.test(arg.text))) noteCredentialChange(`${manager} ${sub} sets a stored registry login or token.`);
+  if (['publish', 'unpublish', 'deprecate', 'dist-tag', 'owner', 'access', 'team', 'org', 'star', 'hook', 'npm-publish'].includes(sub)) return risky(`${manager} ${sub} changes a package registry or your account`, publishTo('registry'));
   if (words.some((word) => /^--(?:prefix|global|location|userconfig|globalconfig|registry)(?:=|$)/.test(word) || word === '-g')) return unknownRead(`${manager} with --prefix, --global, or a registry option acts outside the workspace`);
   if (sub === 'config' || sub === 'set') return risky(`${manager} ${sub} changes package-manager settings outside the workspace`);
   if (sub === 'version' && extra.length) return unknown(`${manager} version changes the version and may tag a release`);
@@ -1844,11 +1928,16 @@ function classifyProgram(name: string, program: string, args: Word[], state: Seg
   }
   if (name === 'crontab') return words.length === 1 && words[0] === '-l' ? unknownRead('crontab -l') : risky('crontab changes scheduled jobs');
   if (name === 'systemctl' || name === 'service' || name === 'launchctl') return words.some((word) => /^(?:start|stop|restart|reload|enable|disable|mask|unmask|kill|load|unload|bootstrap|bootout|daemon-reload)$/.test(word)) ? risky(`${name} changes system services`) : unknownRead(`${name}`);
-  if (name === 'docker' || name === 'podman') {
-    // A push publishes an image; login and logout change your credentials and publish nothing (D-46).
+  if (name === 'docker' || name === 'podman' || name === 'buildah') {
+    // A push publishes an image; login and logout change the credentials kept on this computer, which the floor asks about (owner decision after PR #74).
     const pushes = words[0] === 'push' || (words[0] === 'image' && words[1] === 'push');
+    if (words[0] === 'login' || words[0] === 'logout') noteCredentialChange(`${name} ${words[0]} signs in or out of a container registry.`);
     if (['push', 'login', 'logout'].includes(words[0] ?? '') || (words[0] === 'image' && words[1] === 'push')) return risky(`${name} ${words[0]} changes a registry or your credentials`, pushes ? publishTo('container-registry') : undefined);
     return unknownRead(`${name} ${words[0] ?? ''}`.trim());
+  }
+  if (name === 'helm' && words.filter((word) => !looksLikeOption(word))[0] === 'registry' && REGISTRY_LOGIN_VERBS.has(words.filter((word) => !looksLikeOption(word))[1] ?? '')) {
+    noteCredentialChange(`helm registry ${words.filter((word) => !looksLikeOption(word))[1]} signs in or out of a chart registry.`);
+    return risky('helm registry changes your registry login');
   }
   if (name === 'kubectl' || name === 'helm' || name === 'oc') return /^(?:apply|create|delete|replace|patch|rollout|scale|set|edit|exec|cp|drain|cordon|taint|label|annotate|install|upgrade|uninstall|rollback)$/.test(words.find((word) => !looksLikeOption(word)) ?? '') ? risky(`${name} changes a cluster`, publishTo('deploy')) : unknownRead(name);
   if (name === 'terraform' || name === 'tofu' || name === 'pulumi' || name === 'cdk' || name === 'serverless' || name === 'sls') return /^(?:apply|destroy|import|up|deploy|remove|refresh|taint|untaint|state)$/.test(words.find((word) => !looksLikeOption(word)) ?? '') ? risky(`${name} changes deployed infrastructure`, publishTo('deploy')) : unknownRead(name);
@@ -1871,6 +1960,8 @@ const READ_ONLY_GH = new Set([
     if ('unknown' in found) return unknown(`${name} ${found.unknown}`);
     const group = found.group?.text;
     const action = found.action?.text;
+    // Signing in or out, refreshing the token, or switching account changes the login kept on this computer (owner decision after PR #74).
+    if (group === 'auth' && action !== undefined && /^(?:login|logout|refresh|setup-git|switch)$/.test(action)) noteCredentialChange(`${name} auth ${action} changes your ${name === 'gh' ? 'GitHub' : 'GitLab'} login.`);
     if (group === 'api') {
       // A writing method, or a field or a body (which make the request a POST), changes data on GitHub: publishing (owner decision after PR #74).
       const api = githubApiWrites(args.slice(found.groupAt + 1));
@@ -1896,7 +1987,11 @@ const READ_ONLY_GH = new Set([
   }
   if (name === 'cargo') {
     const sub = words.find((word) => !looksLikeOption(word)) ?? '';
-    if (['publish', 'yank', 'owner', 'login', 'logout'].includes(sub)) return risky(`cargo ${sub} changes crates.io`, publishTo('registry'));
+    if (sub === 'login' || sub === 'logout') {
+      noteCredentialChange(`cargo ${sub} signs in or out of a crate registry.`);
+      return risky(`cargo ${sub} changes your crates.io login`);
+    }
+    if (['publish', 'yank', 'owner'].includes(sub)) return risky(`cargo ${sub} changes crates.io`, publishTo('registry'));
     if (['build', 'test', 'check', 'clippy', 'fmt', 'bench', 'doc', 'tree', 'metadata'].includes(sub) && !words.some((word) => /^--(?:manifest-path|target-dir|config|out-dir)(?:=|$)|^-Z$/.test(word))) return safe(`cargo ${sub} builds or tests the project`);
     return unknownRead(`cargo ${sub}`.trim());
   }
@@ -1920,6 +2015,16 @@ const READ_ONLY_GH = new Set([
   if (name === 'npx' || (name === 'pnpm' && words[0] === 'dlx')) return classifyNpx(args, state, context, depth);
   if (name === 'git') return program !== 'git' ? unknown(`${program} is not the usual git`) : classifyGit(args, state, context);
   if (name === 'near') return words.some((word) => /delete|deploy|send|transfer|sign|add-key|create-account|stake|call-function|as-transaction|tokens|import-account|export-account|login/i.test(word)) ? risky('near can sign transactions or change keys on NEAR', publishTo('chain')) : unknownRead('near contacts the NEAR network');
+  if (name === 'aws' || name === 'gcloud' || name === 'az') {
+    // Signing in or out of the cloud account, or changing its stored keys, rewrites the credentials kept on this computer (owner decision after PR #74).
+    const read = cloudWords(name, args);
+    if ('unknown' in read) return unknown(`${name} ${read.unknown}`);
+    const change = cloudCredentialChange(name, read.words);
+    if (change !== undefined) {
+      noteCredentialChange(`${change} changes your ${CLOUD_NAMES[name]} login or stored keys.`);
+      return risky(`${change} changes your ${CLOUD_NAMES[name]} login`);
+    }
+  }
   if (name === 'aws' || name === 'gcloud' || name === 'az' || name === 'gsutil') return /^(?:cp|sync|mv|rm|rb|mb|put-object|delete|deploy|create|update|upload)/.test(words.slice(1).find((word) => !looksLikeOption(word)) ?? '') || words.some((word) => /^(?:deploy|delete|rm|cp|sync)$/.test(word)) ? risky(`${name} changes or uploads to cloud resources`, publishTo('deploy')) : unknownRead(name);
   if (name === 'xargs') {
     const inner = xargsCommand(args);
@@ -2047,8 +2152,11 @@ function unknownProgram(name: string, args: readonly Word[], state: SegmentState
   if (candidates.length > MAX_RUNNER_PROBES) return beyondReach(`${reason}, and too many of the words after it are commands to check`);
   for (const index of candidates) {
     const mark = effectMark();
+    const changedBefore = effectFrames[effectFrames.length - 1]?.credentialChange;
     classifyWords(args.slice(index), state, context, depth + 1);
-    if (effectsSince(mark).length > 0) return beyondReach(`${reason}, and it may run ${args.slice(index, index + 2).map((arg) => arg.text).join(' ')}`);
+    // A credential change is a tag too: what the program runs is not read whole, so the effects are unknown (the change is still noted).
+    const changed = changedBefore === undefined && effectFrames[effectFrames.length - 1]?.credentialChange !== undefined;
+    if (effectsSince(mark).length > 0 || changed) return beyondReach(`${reason}, and it may run ${args.slice(index, index + 2).map((arg) => arg.text).join(' ')}`);
   }
   // Every word was probed: what it may run that the rules tag would have been found. The program itself is one the rules cannot judge.
   return unknownRead(reason);
@@ -2317,5 +2425,8 @@ export function classifyCommand(command: string, context: CommandContext): Comma
   // A command the classifier did not read whole is never safe, wherever it stopped (a script that runs scripts past the bound, say): what it did not read
   // could be anything.
   const verdict = frame.unknown !== undefined && plain.verdict === 'safe' ? { verdict: 'unknown' as const, reason: frame.unknown } : plain;
-  return { ...verdict, ...(effects.length > 0 ? { effects } : {}), ...(frame.unknown === undefined ? {} : { effectsUnknown: frame.unknown }) };
+  return {
+    ...verdict, ...(effects.length > 0 ? { effects } : {}), ...(frame.unknown === undefined ? {} : { effectsUnknown: frame.unknown }),
+    ...(frame.credentialChange === undefined ? {} : { credentialChange: frame.credentialChange })
+  };
 }

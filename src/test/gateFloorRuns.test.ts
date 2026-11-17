@@ -145,6 +145,13 @@ const CASES: readonly FloorCase[] = [
     ran: (w) => readFileSync(path.join(w.root, 'tracked.txt'), 'utf8') === 'one\n' || !existsSync(path.join(w.root, 'untracked.txt'))
   },
   {
+    // Owner decision after PR #74: a registry or account login or logout changes the credentials kept on this computer. It would only reach the
+    // stand-in home's own npm settings if it ran; the test asserts it never does.
+    rule: 'floor.credential-change',
+    calls: () => [call('cc1', 'Bash', { command: 'npm logout --registry http://127.0.0.1:9' })],
+    ran: (_w, outputs) => outputs.some((text) => /\[(?:exit code|killed)/.test(text))
+  },
+  {
     rule: 'floor.shared-write',
     calls: () => [call('l1', 'Learn', { nodes: [{ label: 'Halden Ports', kind: 'organisation' }] })],
     ran: (w) => w.learned() > 0,
@@ -246,7 +253,7 @@ test('every floor rule, in every mode, with a person and with nobody: refusals s
     }
   }
   assert.deepEqual([...rulesSeen].sort(), [...FLOOR_RULE_ORDER].sort(), 'every floor rule is exercised');
-  assert.equal(checked, 7 * 4 * 2, '7 floor rules x 4 modes x 2 presences, besides the add-on server tool\'s 8');
+  assert.equal(checked, 8 * 4 * 2, '8 floor rules x 4 modes x 2 presences, besides the add-on server tool\'s 8');
 });
 
 test('a person approving a floor card runs that one call; "for this run" grants nothing, so the next identical call asks again', async () => {

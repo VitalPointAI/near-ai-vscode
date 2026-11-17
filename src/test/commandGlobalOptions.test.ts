@@ -16,6 +16,7 @@ const TAGGED: Readonly<Record<string, readonly string[]>> = {
   git: ['push origin main', 'push', 'reset --hard', 'rebase main', 'commit --amend -m x', 'branch -D old', 'send-email 0001.patch'],
   docker: ['push app:1', 'image push app:1'],
   podman: ['push app:1', 'image push app:1'],
+  buildah: ['push app:1'],
   kubectl: ['apply -f k8s.yaml', 'delete pod app-1', 'rollout restart deploy/app', 'scale deploy/app --replicas=2'],
   oc: ['apply -f k8s.yaml', 'delete pod app-1'],
   helm: ['upgrade app ./chart', 'install app ./chart', 'uninstall app', 'rollback app 1'],

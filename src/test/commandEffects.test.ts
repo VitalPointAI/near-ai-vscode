@@ -94,7 +94,9 @@ const PUBLISH_ROWS: readonly Row[] = [
   { command: 'npm run ship', effects: [publish('registry')], extra: { packageScripts: { ship: 'npm publish' } } },
   row('npm publish', publish('registry')), row('npm unpublish pkg@1.0.0', publish('registry')), row('pnpm publish --access public', publish('registry')),
   row('yarn npm publish', publish('registry')), row('bun publish', publish('registry')),
-  ...['deprecate pkg "old"', 'dist-tag add pkg@1.0.0 latest', 'owner add bob pkg', 'adduser', 'login', 'logout', 'token create', 'access public', 'team ls org:dev', 'org set org bob', 'star pkg', 'hook add pkg https://example.test x', 'npm-publish']
+  // Owner decision after PR #74: adduser, login, logout and token change the stored login, not the registry, so they are the floor's credential change
+  // (commandCredentialChanges.test.ts), not publishing.
+  ...['deprecate pkg "old"', 'dist-tag add pkg@1.0.0 latest', 'owner add bob pkg', 'access public', 'team ls org:dev', 'org set org bob', 'star pkg', 'hook add pkg https://example.test x', 'npm-publish']
     .map((verb) => row(`npm ${verb}`, publish('registry'))),
   row('npx vsce publish', publish('registry')), row('npx ovsx publish', publish('registry')), row('npx @vscode/vsce unpublish', publish('registry')),
   ...['semantic-release', 'np', 'release-it', 'changeset publish', 'lerna publish'].map((tool) => row(`npx ${tool}`, publish('release'))),
@@ -114,7 +116,7 @@ const PUBLISH_ROWS: readonly Row[] = [
   row('gem push app.gem', publish('registry')), row('gem yank app -v 1.0.0', publish('registry')),
   ...['vercel --prod', 'netlify deploy', 'firebase deploy', 'wrangler deploy', 'fly deploy', 'flyctl deploy', 'heroku container:release web', 'gh-pages -d dist'].map((tool) => row(tool, publish('deploy'))),
   ...['semantic-release', 'release-it', 'np'].map((tool) => row(tool, publish('release'))),
-  ...['publish', 'yank --version 1.0.0', 'owner --add bob', 'login', 'logout'].map((verb) => row(`cargo ${verb}`, publish('registry'))),
+  ...['publish', 'yank --version 1.0.0', 'owner --add bob'].map((verb) => row(`cargo ${verb}`, publish('registry'))),
   row('make release', publish('release')), row('make deploy', publish('release')),
   row('near send alice.near bob.near 1', publish('chain')), row('near deploy app.near out/app.wasm', publish('chain')),
   row('aws s3 cp out s3://bucket/ --recursive', publish('deploy')), row('gcloud app deploy', publish('deploy')), row('gsutil cp a.txt gs://bucket/', publish('deploy'))

@@ -137,6 +137,7 @@ const REACH: Readonly<Record<string, { readonly input: string; readonly reason: 
   'unknown:`${label} without its output`': { input: 'git archive -o', reason: /git archive without its output/ },
   'unknown:`${name} ${found.unknown}`': { input: 'gh pr --weird merge 12', reason: /gh with --weird before its action/ },
   'unknown:`${name} api ${api.unknown}`': { input: 'gh api --brand-new repos/acme/app', reason: /gh api with --brand-new, an option the rules do not know/ },
+  'unknown:`${name} ${read.unknown}`': { input: 'aws sts --brand-new get-caller-identity', reason: /aws with --brand-new before what it does/ },
   "unknown:'git bundle create without a file'": { input: 'git bundle create', reason: /git bundle create without a file/ },
   'unknown:`${name} downloads a file to ${download.output}, which is outside the project`': { input: 'curl -sS -o /srv/x.tgz https://example.test/x.tgz', reason: /downloads a file to \/srv\/x\.tgz, which is outside the project/ },
   'unknown:`${reason}, to a place decided at run time or outside the project`': { input: 'ln -s a /srv/link', reason: /to a place decided at run time or outside the project/ },

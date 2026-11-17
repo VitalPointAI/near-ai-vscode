@@ -12,6 +12,7 @@ export const FLOOR_RULES = Object.freeze({
   'floor.identity-files': 'refuse',
   'floor.protected-write': 'ask',
   'floor.publish': 'ask',
+  'floor.credential-change': 'ask',
   'floor.destroy': 'ask',
   'floor.shared-write': 'ask'
 } as const);
@@ -23,7 +24,8 @@ export type FloorKind = (typeof FLOOR_RULES)[FloorRule];
  * each group the order is the order they are listed here.
  */
 export const FLOOR_RULE_ORDER: readonly FloorRule[] = Object.freeze([
-  'floor.state-keys', 'floor.credential-store', 'floor.identity-files', 'floor.protected-write', 'floor.publish', 'floor.destroy', 'floor.shared-write'
+  'floor.state-keys', 'floor.credential-store', 'floor.identity-files', 'floor.protected-write', 'floor.publish', 'floor.credential-change', 'floor.destroy',
+  'floor.shared-write'
 ] as const);
 
 const TEAM_SETTINGS_FILE = '.planning/.near-ai/team.md';
@@ -259,6 +261,11 @@ export interface FloorFacts {
   readonly protectedWrite?: string;
   /** Set from `fromActionCapability` when the shorthand was `sharedWrite` (the shared team knowledge store). */
   readonly sharedWrite?: boolean;
+  /**
+   * The command signs in or out of a registry or account, or changes a stored login or token (owner decision after PR #74): what it is, in a sentence.
+   * It is not an effect of the vocabulary (it may send nothing anywhere); it changes the credentials kept on this computer, so a person is asked.
+   */
+  readonly credentialChange?: string;
 }
 
 /** What `floorFor` reads from a request. The gate's own request type extends this. */
@@ -301,6 +308,7 @@ function protectedWriteMatch(input: FloorInput): string | undefined {
 
 const PUBLISH_REASON = 'This sends or publishes something outside this computer, where it may not be undone. It always needs a person to approve it, in every mode.';
 const DESTROY_REASON = 'This deletes or rewrites something that may not come back. It always needs a person to approve it, in every mode.';
+const CREDENTIAL_CHANGE_REASON = 'It changes the logins or tokens kept on this computer. It always needs a person to approve it, in every mode.';
 const SHARED_WRITE_REASON = 'This writes to knowledge your team shares, which every member and later run reads. It always needs a person to approve it, in every mode.';
 
 function effectMatch(input: FloorInput, matches: (effect: Capability) => boolean, reason: string): string | undefined {
@@ -321,6 +329,7 @@ export function floorFor(input: FloorInput, locations: FloorLocations = {}): Flo
   set('floor.identity-files', facts?.identityFiles ?? (command === undefined ? undefined : namesIdentityFiles(command, locations)));
   set('floor.protected-write', protectedWriteMatch(input));
   set('floor.publish', effectMatch(input, (effect) => effect.verb === 'publish' || effect.verb === 'send', PUBLISH_REASON));
+  set('floor.credential-change', facts?.credentialChange === undefined ? undefined : `${facts.credentialChange} ${CREDENTIAL_CHANGE_REASON}`);
   set('floor.destroy', effectMatch(input, (effect) => effect.verb === 'destroy', DESTROY_REASON));
   set('floor.shared-write', facts?.sharedWrite === true ? SHARED_WRITE_REASON : effectMatch(input, (effect) => effect.verb === 'skill.write' && effect.scope === 'team', SHARED_WRITE_REASON));
   for (const rule of FLOOR_RULE_ORDER) {

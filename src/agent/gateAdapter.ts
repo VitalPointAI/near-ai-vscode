@@ -96,7 +96,7 @@ export interface FloorFactsInput extends Partial<FloorShellContext> {
  */
 export interface FloorCommandFacts {
   readonly effects: readonly CommandEffect[];
-  readonly facts: Pick<FloorFacts, 'credentialStore' | 'identityFiles'>;
+  readonly facts: Pick<FloorFacts, 'credentialStore' | 'identityFiles' | 'credentialChange'>;
   /**
    * Set, with the reason, when the floor could not read the whole command: the classifier stopped (nested too deep, too long) or threw, or the
    * credential-store check threw. The call's effects are then unknown, so decide() asks with a person there and refuses with nobody (PR #74 review).
@@ -197,7 +197,8 @@ export async function floorFactsFor(input: FloorFactsInput, readers: FloorReader
     return { effects: [], facts, effectsUnknown: 'the command could not be read' };
   }
   const unknownWhy = lost ?? classified.effectsUnknown;
-  return { effects: classified.effects ?? [], facts, ...(unknownWhy === undefined ? {} : { effectsUnknown: unknownWhy }) };
+  const read = { ...facts, ...(classified.credentialChange === undefined ? {} : { credentialChange: classified.credentialChange }) };
+  return { effects: classified.effects ?? [], facts: read, ...(unknownWhy === undefined ? {} : { effectsUnknown: unknownWhy }) };
 }
 
 /** What decide() is told by the runtime: when the host knows them, the home folder and global storage the floor's text checks may name. Nothing turns the floor off. */

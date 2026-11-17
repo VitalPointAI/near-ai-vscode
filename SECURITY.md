@@ -106,6 +106,13 @@ run** or an allow-list entry that matches:
   through `gh api` (a writing method, a field or a body), package and
   extension publishing, release creation, container image push, deploy
   commands, and sending email;
+- signing in or out: registry and account logins, logouts and token changes,
+  which change the logins and tokens kept on this computer (`npm`, `yarn`,
+  `pnpm` and `bun` login, logout and token; `cargo login` and `logout`;
+  `docker`, `podman` and `buildah` login and logout; `helm registry login`;
+  `gh auth login`, `logout`, `refresh`, `setup-git` and `switch`;
+  `gcloud auth login` and the like; `az login`; `aws configure` and
+  `aws sso login`);
 - destruction: recursive deletes outside scratch and build folders,
   `git reset --hard`, `git clean`, discarding uncommitted changes, history
   rewrites (`git commit --amend`, starting a `git rebase`, and removing
