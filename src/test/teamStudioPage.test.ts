@@ -2307,3 +2307,14 @@ test('host: a builder draft keeps how the team was started', async () => {
   assert.deepEqual(h.drafts.value, { draft: draft(), step: 1, target: 'user', path: 'scratch' });
   h.close();
 });
+
+// Replacing the project's team keeps the old one as a version taken just before the new one is written. Two versions taken within the same millisecond
+// used to share a file name, so the second overwrote the first and the old team was lost.
+test('versions taken in the same millisecond are all kept, in order', async () => {
+  const library = new TeamLibrary(await mkdtemp(path.join(tmpdir(), 'near-ai-teams-')));
+  const file = TeamLibrary.projectTeamFile(await mkdtemp(path.join(tmpdir(), 'p-')));
+  await mkdir(path.dirname(file), { recursive: true });
+  for (let n = 1; n <= 5; n += 1) { await writeFile(file, `version ${n}`); await library.snapshot(file); }
+  const versions = (await library.versions(file)).sort();
+  assert.deepEqual(await Promise.all(versions.map((version) => readFile(version, 'utf8'))), ['version 1', 'version 2', 'version 3', 'version 4', 'version 5']);
+});
