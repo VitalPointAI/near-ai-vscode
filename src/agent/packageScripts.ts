@@ -51,8 +51,10 @@ export class PackageScriptsReader {
         this.cache.set(file, { hash, result });
         return result;
       }
+      // Never look above the project: no metadata outside the workspace is read. A package manager would go on to a
+      // package.json above it, which these checks cannot see, so that is reported as outside (effects unknown).
       const parent = path.dirname(current);
-      if (parent === current) return { kind: 'none' };
+      if (current === project || parent === current) return { kind: 'outside', folder: parent };
       current = parent;
     }
   }

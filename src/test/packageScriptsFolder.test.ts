@@ -106,6 +106,19 @@ test('the reader reads each package.json for every decision and keeps only its p
   assert.equal(reader.at(path.join(root, '..'), root).kind, 'outside');
 });
 
+test('the reader never looks above the project: a project with no package.json is outside, and nothing above it is read', () => {
+  const parent = mkdtempSync(path.join(tmpdir(), 'near-ai-pkg-walk-'));
+  writeFileSync(path.join(parent, 'package.json'), JSON.stringify({ scripts: { sync: 'git push' } }));
+  const root = path.join(parent, 'project');
+  mkdirSync(path.join(root, 'sub'), { recursive: true });
+  const looked: string[] = [];
+  const reader = new PackageScriptsReader({ statSync: ((file: string) => { looked.push(path.resolve(file)); return statSync(file); }) as typeof statSync, readFileSync });
+  const found = reader.at(path.join(root, 'sub'), root);
+  assert.equal(found.kind, 'outside', 'a package.json a package manager would find above the project is not read, so it is unknown');
+  assert.deepEqual(looked.filter((file) => !file.startsWith(root + path.sep)), [], 'no file outside the project was looked at');
+  assert.deepEqual(classifyCommand('cd sub && npm run sync', { root, cwd: root, packageScriptsAt: (folder) => reader.at(folder, root) }).effectsUnknown !== undefined, true, 'so its effects are unknown');
+});
+
 test('a rewrite of the same size with the same time is seen', () => {
   const root = project();
   const reader = new PackageScriptsReader();

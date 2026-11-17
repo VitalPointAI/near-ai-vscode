@@ -264,7 +264,7 @@ export class GateHost {
     if (log === undefined) return;
     this.logs.delete(key);
     // Let go for good only once its queue is written, and only if nothing has taken it back meanwhile.
-    const pending: Promise<void> = log.flush().finally(() => { if (this.retiring.get(key)?.pending === pending) this.retiring.delete(key); });
+    const pending: Promise<void> = log.flush().catch(() => undefined).finally(() => { if (this.retiring.get(key)?.pending === pending) this.retiring.delete(key); });
     this.retiring.set(key, { log, pending });
   }
 
