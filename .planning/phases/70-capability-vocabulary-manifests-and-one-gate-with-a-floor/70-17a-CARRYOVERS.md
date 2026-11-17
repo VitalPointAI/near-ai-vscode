@@ -386,3 +386,57 @@ late-approval tests against the unchanged source, the git branch test against a 
   so they ask in the asking modes). The comment now says exactly this.
 - Test (`commandEffects.test.ts`): `-m`, `-c`, `--move`, `--copy` and `-m new` carry no tag; `-M`, `-C`, `--move --force`, `--copy --force`,
   `-mf`, `-cf`, `-f` and `-D` are destruction.
+
+## Review round 6 (PR #74)
+
+Four commits on `feat/gate-floor`, one per finding (the nit included, as asked). Every new test was seen failing first: the no-reader tests against
+the unchanged classifier (set aside with a tagged stash and applied back by SHA), the others against the unchanged source.
+
+### Results
+
+- Lint (`tsc --noEmit`): clean.
+- Full `npm test` (6G cap): 3372 tests, 3363 passed, 0 failed, 0 cancelled, 9 skipped (the same 9).
+- `node scripts/secret-scan.mjs --range origin/main..HEAD`: clean. No package changes. No activation or webview code changed, so e2e was not run.
+
+### 1. Scripts nobody read were an empty set
+
+- Commit `9315d9e`.
+- `scriptsIn`: with no reader, only root scripts the caller read (`packageScripts`) are known; with none read, a named script, in the root or a
+  subfolder, is unknown with unknown effects (never safe). A release-like name still tags `publish{release}` on its own word, as it does when the
+  scripts are known.
+- Audit of every caller of the classifier: the loop gives the floor and the auto mode's checks a reader (round 4); `decidePermission`/
+  `decidePermissionAsync` classify only with the auto context the loop builds; the unattended check takes that same context; the gate's floor reads
+  through `floorFactsFor` (reader from the loop) and its rule naming uses the auto context; `cyberRun` calls `decidePermission` with no auto context,
+  so the classifier is never asked there (a shell step asks in auto). `toolsDirectory` passes no command.
+- Tests (`packageScriptsFolder.test.ts`), one per caller kind with no reader: the classifier (root, subfolder, yarn, pnpm, npm start; the release name;
+  root scripts read and a subfolder's not), auto approval and permissions (the command goes to the safety model, and with none it asks), the
+  unattended check (not allowed), the gate in Full auto (asks with a person, refused with nobody, `manifest.effects-unknown`), and the cyber
+  permission path (asks).
+- Test fixtures: the shared contexts of `commandSafety.test.ts`, `commandEffects.test.ts` and `autoApproval.test.ts` described a project but said
+  nothing of its scripts, which the old code read as "none". They now state it (a reader for a root package.json with no scripts), and a test that
+  names root scripts is read with those. Every expectation in those files is unchanged.
+
+### 2. A card with no grant told the agent "allowed for the rest of this run"
+
+- Commit `a99e349`.
+- `awaitingApprovalMessage` takes the card that was sent, built once in the loop: a floor card is allowed once; a card that carries a grant (a command
+  or edits) is allowed for the rest of the run; any other card (effects the gate cannot read, a held action) grants nothing ahead of time, and running
+  the call again asks again. This matches what a late answer does (agentSession tells the lead "approved-once" when no grant took effect).
+- Tests (`gateFloorRuns.test.ts`): each card kind; through a real run, an effects-unknown card nobody answers (no grant on the card, no "rest of this
+  run" in the message) and a grantable one (a grant on the card and the words). The existing floor-message test now passes card shapes; its
+  expectations hold.
+
+### 3. readCallPaths resolved folders per path field
+
+- Commit `4a3e717`.
+- The project and the trusted folders are resolved through links once per call, and only when a path needs them. The resolver can be handed in.
+- Test (`gateCallArguments.test.ts`): two path fields and two trusted folders resolve three folders, not six; a call naming no path resolves none.
+
+### 4. (nit) Late approvals read two clocks
+
+- Commit `82a3083`.
+- `FloorApprovalsOnce.add` and `has` take the time, with no default. `approveFloorCallLate(grants, callKey, clock)` stamps an approval with the clock
+  of the runtime whose gate checks it; agentSession passes the sub-agent's runtime clock (the host's; `Date.now` only when a run has no gate runtime,
+  which is also what the gate then reads).
+- Test (`gateLateApproval.test.ts`): with a runtime clock a day past the fixed start, an approval given through it is honoured by the gate and has
+  expired a TTL later by that clock. The store test in `gateFloorRuns.test.ts` passes explicit times.
