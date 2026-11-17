@@ -165,7 +165,8 @@ function ceilingRefusal(request: GateRequest, bundleState: Extract<BundleState, 
 /**
  * The one decision (GATE-04). `bundleState` is what the caller last verified; `settings` is today's permission logic. The floor is always enforced (D-19):
  * a floor refusal has no card, and a floor ask has no "always allow" and no run-wide grant, in every mode, fully-autonomous included.
- * Order: emergency stop, bundle state, floor, bundle ceiling, labels, settings layer. A refusal from an earlier layer is never undone by a later one, and
+ * Order: emergency stop, bundle state, unknown effects (after the floor's refusals of what such a call names), the floor's refusals, bundle ceiling, labels,
+ * settings layer, the floor's asks. A refusal from an earlier layer is never undone by a later one, and
  * a deny from the settings layer (the deny list) still beats a floor ask.
  */
 export async function decide(request: GateRequest, bundleState: BundleState, settings: SettingsLayer, options: GateOptions = {}): Promise<GateDecision> {
@@ -176,10 +177,14 @@ export async function decide(request: GateRequest, bundleState: BundleState, set
     // A run built with no host at all (no policy was ever read for it) has its own rule id, so a record tells it apart from a policy that failed to verify.
     if (!onlyReadOrPlan) return make('deny', bundleState.reason === 'unavailable' ? 'bundle.unavailable' : 'bundle.failed-closed', 'approve-risky', { reason: bundleState.sentence });
   }
-  // A request that names no effect is a request whose effects are unknown. Nothing later can judge what it does, so it never reaches the floor, the ceiling
-  // or the settings layer (which would read "no effects" as "nothing to worry about"): with a person here it asks, without one it is refused. A
+  // A request that names no effect is a request whose effects are unknown. Nothing later can judge what it does, so it never reaches the floor's asks, the
+  // ceiling or the settings layer (which would read "no effects" as "nothing to worry about"): with a person here it asks, without one it is refused. A
   // failed-closed bundle has already refused it above with its own sentence, so no answer can get past that.
   if (request.effects.length === 0) {
+    // What the call itself names is still read: a path or command that reaches a credential store or the identity folders is refused with no card, not
+    // asked about. (The loop's own `forbidden` refusal is the loop's, and it refuses that call itself.)
+    const named = floorFor({ effects: [], ...(request.command === undefined ? {} : { command: request.command }), ...(request.floorFacts === undefined ? {} : { floorFacts: request.floorFacts }) }, options.locations);
+    if (named !== undefined && named.kind === 'refuse') return make('deny', named.rule, 'approve-risky', { reason: named.reason, floor: true });
     const person = request.presence === 'person' && request.context === 'interactive';
     return person
       ? make('ask', 'manifest.effects-unknown', 'approve-risky', { reason: `NEAR AI cannot tell what ${shown(request.tool)} would do with this call, so it needs your answer.` })

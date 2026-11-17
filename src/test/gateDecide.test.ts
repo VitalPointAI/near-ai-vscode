@@ -324,3 +324,17 @@ test('an empty effect list is never asked past a failed-closed bundle, keeps its
   assert.equal(stopped.outcome, 'deny');
   assert.equal(settings.calls(), 0);
 });
+
+test('a call whose effects are unknown is still refused with no card when what it names reaches a credential store or the identity folders', async () => {
+  for (const presence of ['person', 'none'] as const) {
+    const store = await decide(requestFor([], { presence, floorFacts: { credentialStore: 'That names ~/.ssh.' } }), validBundleState(), allows);
+    assert.equal(store.outcome, 'deny', presence);
+    assert.equal(store.rule, 'floor.credential-store');
+    assert.equal(store.floor, true);
+    const identity = await decide(requestFor([], { presence, floorFacts: { identityFiles: 'That names the identity folder.' } }), validBundleState(), allows);
+    assert.equal(identity.rule, 'floor.identity-files', presence);
+  }
+  // The loop's own `forbidden` refusal is the loop's: with unknown effects the gate still asks, and the loop refuses the call itself.
+  const forbidden = await decide(requestFor([], { forbidden: 'Planted.' }), validBundleState(), allows);
+  assert.equal(forbidden.rule, 'manifest.effects-unknown');
+});
