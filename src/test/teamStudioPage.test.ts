@@ -2543,7 +2543,26 @@ test('page: the team keeps the entry point\'s Save it as on every path: from scr
     page.byLabel('Use this team')!.click();
     assert.equal(target(), entry, `${entry}: drafted by AI`);
     leave();
-    // A drafted team that arrives with no builder open (0.4.31: the main page has no AI box) is offered from a banner, and saves to My teams as before.
+    // PR 86 review, round 3: nothing inside the AI start changes where it saves. Start over, then a second draft, from either entry point.
+    start(); page.byLabel('Create a new team')!.click(); page.byLabel('Describe it, and AI drafts it')!.click();
+    page.dispatch({ type: 'team-proposal', ...proposal });
+    page.byLabel('Start over')!.click();
+    assert.equal(/saved as this project's team/.test(page.text()), entry === 'project', `${entry}: the hint stays after Start over`);
+    page.dispatch({ type: 'team-proposal', ...proposal });
+    page.byLabel('Use this team')!.click();
+    assert.equal(target(), entry, `${entry}: a second draft after Start over`);
+    leave();
+    // Discard a waiting draft, then draft again from the same entry point: still that entry point's target.
+    start(); page.byLabel('Create a new team')!.click(); page.byLabel('Describe it, and AI drafts it')!.click();
+    page.byLabel('Back to all teams')!.click();
+    page.dispatch({ type: 'team-proposal', ...proposal });
+    page.byLabel('Discard the drafted team')!.click();
+    start(); page.byLabel('Create a new team')!.click(); page.byLabel('Describe it, and AI drafts it')!.click();
+    page.dispatch({ type: 'team-proposal', ...proposal });
+    page.byLabel('Use this team')!.click();
+    assert.equal(target(), entry, `${entry}: drafted again after Discard`);
+    leave();
+    // A drafted team that arrives with no builder open (0.4.31: the main page has no AI box) is offered on the main page, and saves to My teams as before.
     page.dispatch({ type: 'team-proposal', ...proposal });
     page.byLabel('Review the drafted team')!.click();
     page.byLabel('Use this team')!.click();
@@ -2598,11 +2617,13 @@ test('page: a team drafted by AI is aimed at the project only straight from a pr
   page.dispatch({ type: 'left', choice: 'discard' });
   assert.doesNotMatch(page.text(), /saved as this project's team/);
   assert.equal(draftedTarget(), 'user', 'stayed, then left with Cancel');
-  // Starting over (the proposal discarded): forgotten.
+  // Starting over stays on the AI start, so it keeps where that builder saves (PR 86 review, round 3: it reset the target, and a team drafted again
+  // in a project builder went to My teams).
   toDescribe(false);
   page.dispatch({ type: 'team-proposal', ...PROPOSAL });
   page.byLabel('Start over')!.click();
-  assert.equal(draftedTarget(), 'user', 'started over');
+  assert.match(page.text(), /saved as this project's team/);
+  assert.equal(draftedTarget(), 'project', 'started over, then drafted again');
   // Opening a team, or another builder, before using the draft: forgotten.
   toDescribe(false);
   page.dispatch({ type: 'team', id: 'user:web', kind: 'user', file: 'My teams/web.md', command: '/team:web ', draft: draft(), base: 'b'.repeat(64), versions: [] });

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -85,17 +85,21 @@ test('stats with no runs say none yet: nothing is invented', () => {
 
 // ---------- health: the local check and the last role test ----------
 
+const CLEAN_CHECK = { block: 0, warning: 0, advice: 0 };
+
 test('health: the local check and the last role test, each shown with its own score; with no role test only the check counts', () => {
   const clean = teamHealth({ block: 0, warning: 0, advice: 0 });
   assert.equal(clean.score, 100);
   assert.deepEqual(clean.parts.map((part) => [part.id, part.score]), [['check', 100], ['role-tests', undefined]]);
   assert.match(clean.parts[0]!.detail, /No problems found/);
   assert.match(clean.parts[1]!.detail, /Not tested yet.*Optimise all teams/);
-  const warned = teamHealth({ block: 0, warning: 2, advice: 1 }, { at: ago(DAY), members: 3, tested: 2, score: 60 });
+  const warned = teamHealth({ block: 0, warning: 2, advice: 1 }, { at: ago(DAY), members: 3, tested: 2, passed: 1, score: 60 });
   assert.deepEqual(warned.parts.map((part) => part.score), [65, 60]);
   assert.equal(warned.score, 63, 'the average of the parts, rounded');
   assert.match(warned.parts[0]!.detail, /2 problems.*1 suggestion/);
-  assert.match(warned.parts[1]!.detail, /2 of 3 members passed.*60%/);
+  assert.match(warned.parts[1]!.detail, /1 of 3 members passed their role test, 60% on average/);
+  // A record from before passes were counted says only how many were tested.
+  assert.match(teamHealth(CLEAN_CHECK, { at: ago(DAY), members: 3, tested: 2, score: 60 }).parts[1]!.detail, /2 of 3 members were tested, 60% on average/);
   // Something that looks like a key: the check scores nothing.
   assert.equal(teamHealth({ block: 1, warning: 0, advice: 0 }).parts[0]!.score, 0);
   assert.match(teamHealth({ block: 1, warning: 0, advice: 0 }).parts[0]!.detail, /looks like a key/);
@@ -110,7 +114,7 @@ test('role tests: a summary of the scores only (no model names, no task text), k
     { member: 'lead', role: 'planner', results: [{ model: 'a/x', score: 8, outOf: 10, seconds: 3, failed: false, misses: ['secret words'] }, { model: 'b/y', score: 10, outOf: 10, seconds: 9, failed: false, misses: [] }], written: true },
     { member: 'dev', role: 'implementer', results: [{ model: 'a/x', score: 9, outOf: 10, seconds: 3, failed: true, misses: [] }], written: true }
   ], 3, ago(HOUR));
-  assert.deepEqual(summary, { at: ago(HOUR), members: 3, tested: 1, score: 33 }, 'the best of each member, a failed run is 0, an untested member is 0');
+  assert.deepEqual(summary, { at: ago(HOUR), members: 3, tested: 1, passed: 1, score: 33 }, 'the best of each member, a failed run is 0, an untested member is 0');
   assert.doesNotMatch(JSON.stringify(summary), /a\/x|secret|planner/);
   let records = {};
   for (let index = 0; index < 205; index += 1) records = withRoleTest(records, `user:k${index}`, { ...summary, at: new Date(NOW + index).toISOString() });
@@ -124,9 +128,9 @@ test('role tests: a summary of the scores only (no model names, no task text), k
 
 test('a role test summary is clamped to 0..100, so a grader that scores past its total never drops the record', () => {
   const over = roleTestSummary([{ results: [{ score: 14, outOf: 10, failed: false }] }, { results: [{ score: -3, outOf: 10, failed: false }] }], 2, ago(HOUR));
-  assert.deepEqual(over, { at: ago(HOUR), members: 2, tested: 2, score: 50 }, 'a member past its total counts as 100%, one below 0 as 0%');
+  assert.deepEqual(over, { at: ago(HOUR), members: 2, tested: 2, passed: 1, score: 50 }, 'a member past its total counts as 100%, one below 0 as 0%');
   const many = roleTestSummary(Array.from({ length: 150 }, () => ({ results: [{ score: 1, outOf: 1, failed: false }] })), 150, ago(HOUR));
-  assert.deepEqual([many.members, many.tested, many.score], [100, 100, 100]);
+  assert.deepEqual([many.members, many.tested, many.passed, many.score], [100, 100, 100, 100]);
   for (const record of [over, many]) assert.deepEqual(parseRoleTests({ 'user:web': record }), { 'user:web': record }, 'read back whole');
 });
 
@@ -614,4 +618,78 @@ test('host: rating writes are made one after another, so two ratings sent togeth
   await Promise.all([h.send({ type: 'rate', id: 'user:web-team', rating: 4 }), h.send({ type: 'rate', id: 'user:api-team', rating: 2 })]);
   const kept = h.state.ratings as Record<string, { rating: number }>;
   assert.deepEqual([kept['user:web-team']?.rating, kept['user:api-team']?.rating], [4, 2]);
+});
+
+// ---------- PR 86 review, round 3 ----------
+
+test('a member passes its role test only with full marks, the comparisons\' own pass mark; a member that scored nothing was tested but did not pass', () => {
+  const summary = roleTestSummary([
+    { results: [{ score: 0, outOf: 10, failed: false }] },
+    { results: [{ score: 7, outOf: 10, failed: false }] },
+    { results: [{ score: 10, outOf: 10, failed: false }] }
+  ], 3, ago(HOUR));
+  assert.deepEqual([summary.tested, summary.passed], [3, 1]);
+  assert.match(teamHealth(CLEAN_CHECK, summary).parts[1]!.detail, /^1 of 3 members passed their role test/);
+  assert.deepEqual(parseRoleTests({ 'user:web': { ...summary, passed: 5 } }), {}, 'more passed than tested is not a record');
+});
+
+test('host: a team file that cannot be read is named in plain words on the dashboard, and no message the page gets holds a path on this computer', async () => {
+  const h = await host();
+  await h.library.create('Web team', TEAM);
+  const locked = path.join(h.library.directory, 'locked.md');
+  await writeFile(locked, TEAM);
+  await chmod(locked, 0o000);
+  try {
+    await h.send({ type: 'ready' });
+    await h.send({ type: 'refresh' });
+    const state = h.latest('state');
+    const listed = state.library.teams.find((entry: any) => entry.id === 'user:locked');
+    assert.match(listed.error, /^The team file could not be read \(permission was denied\)\.$/);
+    assert.match(state.dashboard.cards['user:locked'].attention.join(' '), /The team file needs fixing: The team file could not be read \(permission was denied\)\./);
+    const root = new RegExp(h.base.replace(/[\\^$.*+?()[\]{}|]/g, '\\$&'));
+    for (const message of h.posted) assert.doesNotMatch(JSON.stringify(message), root, message.type);
+  } finally { await chmod(locked, 0o644); }
+});
+
+test('host: archiving a team takes its stars and health with it, a new team of the same name starts with none, and Restore brings them back', async () => {
+  const h = await host();
+  const first = await h.library.create('Web team', TEAM);
+  const record = { at: new Date().toISOString(), members: 1, tested: 1, passed: 1, score: 90 };
+  h.state.roleTests = { 'user:web-team': record };
+  await h.send({ type: 'ready' });
+  await h.send({ type: 'rate', id: 'user:web-team', rating: 5 });
+  await h.send({ type: 'archive', id: 'user:web-team' });
+  const ratings = () => h.state.ratings as Record<string, { rating: number }>;
+  assert.equal(ratings()['user:web-team'], undefined);
+  assert.equal(ratings()['archived:web-team']!.rating, 5);
+  assert.deepEqual((h.state.roleTests as Record<string, unknown>)['archived:web-team'], record);
+  // A new team under the same name: no stars, no role test.
+  h.state.ratings = { ...ratings(), 'user:web-team': { rating: 3, at: new Date().toISOString() } };
+  h.state.roleTests = { ...(h.state.roleTests as object), 'user:web-team': record };
+  await h.send({ type: 'create', target: 'user', draft: { name: 'Web team', description: 'Another one', members: [{ name: 'dev', role: 'implementer', model: '', tools: null, instructions: 'Build it. Report what changed.' }] } });
+  const created = h.latest('library').library.teams.find((entry: any) => entry.id === 'user:web-team');
+  assert.ok(created, 'the new team is listed');
+  assert.equal('rating' in created, false, 'a record left under its name from before is not the new team\'s');
+  assert.equal(h.latest('library').dashboard.cards['user:web-team'].health.parts[1].score, undefined);
+  assert.equal(ratings()['user:web-team'], undefined);
+  // The new team goes; the first comes back with its stars and its health.
+  await h.send({ type: 'archive', id: 'user:web-team' });
+  await h.send({ type: 'restore', id: 'archived:web-team' });
+  const restored = h.latest('library').library.teams.find((entry: any) => entry.id === 'user:web-team');
+  assert.equal(restored.rating, 5);
+  assert.equal(h.latest('library').dashboard.cards['user:web-team'].health.parts[1].score, 90);
+  assert.equal(await readFile(first, 'utf8'), TEAM, 'the first team\'s own file is back');
+  // A duplicate or an import is a new team too.
+  h.state.ratings = { ...ratings(), 'user:web-copy': { rating: 4, at: new Date().toISOString() } };
+  h.deps.ask = async () => 'Web copy';
+  await h.send({ type: 'duplicate', id: 'user:web-team' });
+  assert.equal(ratings()['user:web-copy'], undefined);
+  assert.equal('rating' in h.latest('library').library.teams.find((entry: any) => entry.id === 'user:web-copy'), false);
+  h.state.ratings = { ...ratings(), 'user:incoming-team': { rating: 4, at: new Date().toISOString() } };
+  const source = path.join(h.base, 'incoming.md');
+  await writeFile(source, renderTeam('Incoming team', 'From elsewhere', [{ name: 'dev', instructions: 'Build it.' }]));
+  h.deps.pickImportSource = async () => source;
+  h.deps.choose = async (_message, ...actions) => actions[0];
+  await h.send({ type: 'import' });
+  assert.equal(ratings()['user:incoming-team'], undefined);
 });
