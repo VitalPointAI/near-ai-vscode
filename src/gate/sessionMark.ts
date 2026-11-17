@@ -115,6 +115,8 @@ export function defaultSessionRoute(): SessionRoute {
 const ROUTINE_RULES: ReadonlySet<string> = new Set(['route.any-cloud', 'route.default-session']);
 const UNKNOWN_PRODUCT_VERSION = '0.0.0';
 const UNKNOWN_MODEL = 'unknown-model';
+/** The request id of a short record: the model request has no id of its own before it is sent, and the record id already identifies the record. */
+const SHORT_CALL_ID = 'infer';
 
 /** What the request was, beside the decision and its facts. */
 export interface RouteRequest {
@@ -144,7 +146,8 @@ function isDefaultMark(mark: Mark, defaultLabel: Label): boolean {
 /**
  * The infer record of one model request, built the way a tool call's record is (product version, clock and record id from the route): the capability
  * `infer` with the tier, provider and model, the model as the resource, the outcome and the rule, the policy's hash. A routine allowed request (route.any-cloud,
- * or route.default-session outside every route) gets the short record: no reason and, while the mark is the default label, no label. The connection state
+ * or route.default-session outside every route) gets the short record: no reason, the model and the policy's hash written once each, and, while the mark is
+ * the default label, no label. The connection state
  * is kept only when the tier read it (attested-cloud). Never a host, a URL, a path or a fingerprint: the facts' host and binding fingerprint are not read here.
  */
 export function routeRecordFor(route: SessionRoute, decision: RouteDecision, facts: RouteFacts, request: RouteRequest, context: { readonly mark: Mark; readonly defaultLabel: Label; readonly bundleHash: string }): DecisionRecord {
@@ -162,10 +165,13 @@ export function routeRecordFor(route: SessionRoute, decision: RouteDecision, fac
     time: clockOf(route),
     productVersion: route.productVersion ?? UNKNOWN_PRODUCT_VERSION,
     actor: route.actor,
-    model: { name: model, provider },
-    callId: `infer-${recordId}`,
+    // The short record names the model and provider once, in the capability (owner decision after PR 4a's measurement): no agent model entry, no
+    // resource entry, no policy uid beside the bundle hash, and no request id that only repeats the record id.
+    ...(routine ? {} : { model: { name: model, provider } }),
+    callId: routine ? SHORT_CALL_ID : `infer-${recordId}`,
     capability: { verb: 'infer', tier: asked, provider, model },
     resource: { name: model, type: 'model' },
+    ...(routine ? { short: true } : {}),
     outcome: decision.allowed ? 'allowed' : 'denied',
     rule: decision.rule,
     ...(decision.reason === undefined || routine ? {} : { reason: decision.reason }),

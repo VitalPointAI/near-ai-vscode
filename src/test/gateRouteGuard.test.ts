@@ -20,13 +20,13 @@ import type { Mark } from '../domain/gate/dominance';
 import type { Label } from '../domain/gate/labels';
 import { BINDING_REFUSALS } from '../domain/gate/routing';
 import type { ActorRef, DecisionSink } from '../domain/gate/decide';
-import { validateDecisionRecord } from '../domain/gate/record';
+import { buildDecisionRecord, isModelRequestRecord, validateDecisionRecord } from '../domain/gate/record';
 import type { DecisionRecord } from '../domain/gate/record';
 import type { Capability } from '../domain/gate/vocabulary';
 import { GATE_DIR_NAME } from '../gate/bundleStore';
-import { DECISIONS_DIR, DecisionLog, projectLogKey } from '../gate/decisionLog';
-import { GateHost, NO_SESSION_ID } from '../gate/host';
-import { currentSessionRoute, defaultSessionRoute, recordedModelName, setDefaultSessionRoute, withSessionRoute } from '../gate/sessionMark';
+import { DECISIONS_DIR, DecisionLog, INSTALL_LOG_KEY, MODEL_REQUESTS_DIR, projectLogKey } from '../gate/decisionLog';
+import { GateHost, MAX_PROJECT_LOGS, NO_SESSION_ID } from '../gate/host';
+import { currentSessionRoute, defaultSessionRoute, recordedModelName, routeRecordFor, sessionRouteFrom, setDefaultSessionRoute, withSessionRoute } from '../gate/sessionMark';
 import type { SessionRoute } from '../gate/sessionMark';
 import { NearAiClient, NearAiError, RouteRefusedError } from '../services/nearAiClient';
 import type { SpendSink } from '../services/spendAccount';
@@ -160,6 +160,8 @@ test('the provider factory says each client\'s route: a local profile and a hybr
 // ---- Task 2: every production request site runs inside a session route, and three scans keep it that way ----
 
 const REPO = path.resolve(__dirname, '..', '..');
+/** The most a short infer record may take in the log with real-sized ids (owner decision after PR 4a: it was 1,350 bytes before its repeats were dropped). */
+const SHORT_RECORD_BUDGET_BYTES = 1_100;
 const SRC = path.join(REPO, 'src');
 
 /** Every production source, keyed by its repository path (src/...), with whole-line and trailing comments removed. */
@@ -410,12 +412,15 @@ test('each content request inside a session writes one infer record; a refused o
   for (const record of records) assert.equal(validateDecisionRecord(record).ok, true, JSON.stringify(record));
   const [open, refused, onLocal] = records as [DecisionRecord, DecisionRecord, DecisionRecord];
   assert.deepEqual(inferOf(open), { verb: 'infer', tier: 'any-cloud', provider: 'near-ai', model: 'cloud-model' });
-  assert.deepEqual(open.resources, [{ name: 'cloud-model', type: 'model' }]);
+  // The routine record is the short one: the capability names the model and provider once (owner decision after PR 4a's measurement).
+  assert.deepEqual(open.resources, []);
   assert.equal(open.api.operation, 'infer');
   assert.equal(open.authorizations[0]?.policy.name, 'route.any-cloud');
   assert.equal(open.action_id, 1);
-  assert.equal(open.ai_agent?.ai_model?.name, 'cloud-model', 'an agent\'s record names the model');
-  assert.equal(open.ai_agent?.ai_model?.ai_provider, 'near-ai');
+  assert.equal(open.ai_agent?.ai_model, undefined, 'the short record names the model once, in the capability');
+  // A full record keeps the model as its resource and, for an agent, as its model.
+  assert.deepEqual(refused.resources, [{ name: 'tee-model', type: 'model' }]);
+  assert.deepEqual(refused.ai_agent?.ai_model, { name: 'tee-model', ai_provider: 'near-ai' });
   assert.equal(refused.authorizations[0]?.policy.name, 'route.no-local-model');
   assert.equal(refused.action_id, 2);
   assert.match(refused.status_detail ?? '', /^Nothing was sent\./);
@@ -443,13 +448,13 @@ test('D-52: a routine allowed request writes the short record, smaller than a fu
   assert.equal(full.unmapped.nearAi.connection, 'unknown');
   assert.ok(full.status_detail?.startsWith(BINDING_REFUSALS.unknown));
   assert.deepEqual(full.metadata.data_classifications?.map((entry) => entry.confidentiality), ['org/Internal']);
-  // Measured as the log stores them: one JSON line each, with the sequence the log writes.
+  // Measured as the model-request log stores them: one JSON line each, with the sequence the log writes.
   const storage = await mkdtemp(path.join(tmpdir(), 'near-ai-route-size-'));
   const problems: string[] = [];
-  const log = new DecisionLog({ globalStorageDir: storage, projectKey: projectLogKey(path.join(storage, 'project')), onWriteFailure: (message) => problems.push(message) });
+  const log = new DecisionLog({ globalStorageDir: storage, projectKey: projectLogKey(path.join(storage, 'project')), kind: 'model-requests', onWriteFailure: (message) => problems.push(message) });
   await log.append(short);
   await log.append(full);
-  const dir = path.join(storage, GATE_DIR_NAME, DECISIONS_DIR);
+  const dir = path.join(storage, GATE_DIR_NAME, MODEL_REQUESTS_DIR);
   const [file] = await readdir(dir);
   const [shortLine, fullLine] = (await readFile(path.join(dir, file as string), 'utf8')).split('\n');
   const shortBytes = Buffer.byteLength(`${shortLine ?? ''}\n`);
@@ -457,6 +462,47 @@ test('D-52: a routine allowed request writes the short record, smaller than a fu
   assert.deepEqual(problems, []);
   assert.ok(shortBytes > 0 && shortBytes < fullBytes, `short ${shortBytes} bytes, full ${fullBytes} bytes`);
   t.diagnostic(`infer record bytes: short ${shortBytes}, full ${fullBytes}`);
+});
+
+/** Every leaf path of a record, sorted, so a test can pin exactly which fields a record has. */
+function leafPaths(value: unknown, prefix = ''): string[] {
+  if (Array.isArray(value)) return value.length === 0 ? [`${prefix}[]`] : value.flatMap((entry, index) => leafPaths(entry, `${prefix}[${index}]`));
+  if (value !== null && typeof value === 'object') return Object.keys(value).flatMap((key) => leafPaths((value as Record<string, unknown>)[key], prefix === '' ? key : `${prefix}.${key}`));
+  return [prefix];
+}
+
+test('the short record writes nothing twice, has exactly its pinned fields, and stays within its byte budget with real-sized ids', () => {
+  // Real-sized ids: a 36-character model id, a 64-hex device fingerprint and policy hash, today's conversation and agent id shapes, a UUID record id.
+  const model = 'deepseek-ai/DeepSeek-V4.1-Flash-1017';
+  const hash = 'a'.repeat(64);
+  const facts = { clientRoute: 'near' as const, host: NEAR, nearEndpoint: true, model: { id: model, privacyBoundary: 'cloud' }, attestationFailed: false };
+  const decision = { allowed: true, tier: 'any-cloud' as const, rule: 'route.any-cloud' as const };
+  const context = { mark: [], defaultLabel: org('Public'), bundleHash: hash };
+  const actors: ActorRef[] = [
+    { kind: 'agent', deviceFingerprint: 'f'.repeat(64), sessionId: 'conv-mvxrqmdo-f6c69e9e', agentId: 'main-run-1793536426359-a48b19', agentLabel: 'agent' },
+    { kind: 'sub-agent', deviceFingerprint: 'f'.repeat(64), sessionId: 'conv-mvxrqmdo-f6c69e9e', agentId: 'gsd-planner-mvxrqmdo-1a2b3c', agentLabel: 'gsd-planner' },
+    { kind: 'person', deviceFingerprint: 'f'.repeat(64), sessionId: 'conv-mvxrqmdo-f6c69e9e' }
+  ];
+  for (const actor of actors) {
+    const route = routeAt([], { actor, clock: () => 1_794_830_400_000, productVersion: '0.4.30', newRecordId: () => '0b4c1d2e-3f40-4a5b-8c6d-7e8f9a0b1c2d' });
+    const record = routeRecordFor(route, decision, facts, { model }, context);
+    assert.equal(validateDecisionRecord(record).ok, true);
+    const text = JSON.stringify({ ...record, metadata: { ...record.metadata, sequence: 123_456 } });
+    assert.equal(text.split(model).length - 1, 1, 'the model id is written once');
+    assert.equal(text.split(hash).length - 1, 1, 'the policy hash is written once');
+    assert.equal(text.split('0b4c1d2e-3f40-4a5b-8c6d-7e8f9a0b1c2d').length - 1, 1, 'the record id is written once');
+    const bytes = Buffer.byteLength(`${text}\n`);
+    assert.ok(bytes <= SHORT_RECORD_BUDGET_BYTES, `${actor.kind}: ${bytes} bytes, budget ${SHORT_RECORD_BUDGET_BYTES}`);
+    const agentFields = actor.kind === 'person' ? [] : ['ai_agent.instance_uid', 'ai_agent.name', 'ai_agent.uid'];
+    assert.deepEqual(leafPaths(record).sort(), [
+      'action_id', 'activity_id', 'activity_name', 'actor.session.uid', 'actor.user.uid', ...agentFields, 'api.operation', 'api.request.uid',
+      'authorizations[0].decision', 'authorizations[0].policy.is_applied', 'authorizations[0].policy.name', 'authorizations[0].policy.version', 'category_uid',
+      'class_uid', 'disposition_id', 'metadata.product.name', 'metadata.product.vendor_name', 'metadata.product.version', 'metadata.profiles[0]', 'metadata.sequence',
+      'metadata.uid', 'metadata.version', 'resources[]', 'severity_id', 'src_endpoint.name', 'status_id', 'time', 'type_uid', 'unmapped.nearAi.bundleHash',
+      'unmapped.nearAi.capability.model', 'unmapped.nearAi.capability.provider', 'unmapped.nearAi.capability.tier', 'unmapped.nearAi.capability.verb',
+      'unmapped.nearAi.recordVersion'
+    ].sort(), actor.kind);
+  }
 });
 
 test('no infer record carries a host, a URL or a path: a LAN runtime, the NEAR endpoint, and a model named by its file', async () => {
@@ -521,15 +567,82 @@ test('the gate host\'s route for requests outside every session writes to the op
     setDefaultSessionRoute(undefined);
   }
   await host.flush();
-  const dir = path.join(storage, GATE_DIR_NAME, DECISIONS_DIR);
-  const lines = (await readFile(path.join(dir, `${projectLogKey(project)}.jsonl`), 'utf8')).trim().split('\n').map((line) => JSON.parse(line) as DecisionRecord);
-  const infer = lines.filter((record) => record.api.operation === 'infer');
+  const read = async (folder: string): Promise<DecisionRecord[]> => (await readFile(path.join(storage, GATE_DIR_NAME, folder, `${projectLogKey(project)}.jsonl`), 'utf8'))
+    .trim().split('\n').map((line) => JSON.parse(line) as DecisionRecord);
+  // The model request is in the project's model-request log; its decision log holds only the policy's own events.
+  const infer = await read(MODEL_REQUESTS_DIR);
   assert.equal(infer.length, 1);
   assert.equal(validateDecisionRecord(infer[0]).ok, true);
   assert.equal(infer[0]?.authorizations[0]?.policy.name, 'route.default-session');
   assert.equal(infer[0]?.actor.session.uid, NO_SESSION_ID);
   assert.notEqual(infer[0]?.actor.user.uid, 'device-unknown', 'the device the started policy names');
-  assert.ok(infer[0]?.authorizations[0]?.policy.uid, 'the policy hash');
+  assert.match(infer[0]?.unmapped.nearAi.bundleHash ?? '', /^[0-9a-f]{64}$/, 'the policy hash, written once');
+  assert.ok((await read(DECISIONS_DIR)).every((record) => record.api.operation.startsWith('policy.')));
+});
+
+test('an infer record never lands in the decision log, and a tool or policy record never in the model-request log', async () => {
+  const storage = await mkdtemp(path.join(tmpdir(), 'near-ai-route-split-'));
+  const project = path.join(storage, 'project');
+  const problems: string[] = [];
+  const host = new GateHost({ globalStorageDir: storage, secrets: new MemorySecrets(), productVersion: '0.4.30-test', projectRoot: () => project, onProblem: (message) => problems.push(message) });
+  await host.start();
+  // One run's runtime receives both kinds through its one sink, as a run does: its tool calls, and (through its session route) its model requests.
+  const runtime = await host.runtimeFor({ root: project, actor: ACTOR, presence: 'person', context: 'interactive' });
+  const near = await nearClient();
+  await withSessionRoute(sessionRouteFrom(runtime), () => ask(near.client, 'cloud-model'));
+  await assert.rejects(() => withSessionRoute(sessionRouteFrom(runtime, { markOf: () => [org('Restricted')] }), () => ask(near.client, 'tee-model')), RouteRefusedError);
+  const tool = buildDecisionRecord({
+    recordId: 'tool-1', sequence: 0, time: 1, productVersion: '0.4.30-test', actor: runtime.actor, callId: 'call-1', capability: { verb: 'infer', tier: 'any-cloud', provider: 'near-ai', model: 'image-model' },
+    resource: { name: 'GenerateImage', type: 'tool' }, outcome: 'allowed', rule: 'settings.mode.other', bundleHash: ''
+  });
+  runtime.sink.record(tool);
+  await host.flush();
+  const dir = (folder: string) => path.join(storage, GATE_DIR_NAME, folder, `${projectLogKey(project)}.jsonl`);
+  const decisions = (await readFile(dir(DECISIONS_DIR), 'utf8')).trim().split('\n').map((line) => JSON.parse(line) as DecisionRecord);
+  const requests = (await readFile(dir(MODEL_REQUESTS_DIR), 'utf8')).trim().split('\n').map((line) => JSON.parse(line) as DecisionRecord);
+  assert.deepEqual(requests.map((record) => record.authorizations[0]?.policy.name), ['route.any-cloud', 'route.no-local-model']);
+  assert.ok(requests.every((record) => isModelRequestRecord(record)), 'only model requests in the model-request log');
+  assert.ok(decisions.every((record) => !isModelRequestRecord(record)), 'no model request in the decision log');
+  assert.ok(decisions.some((record) => record.metadata.uid === 'tool-1'), 'a tool decision whose effect is infer stays in the decision log');
+  assert.equal(problems.length, 0, problems.join('; '));
+  // The log itself refuses the wrong kind, whoever offers it, and says so once; nothing is written to the wrong file.
+  const wrongDecisions = new DecisionLog({ globalStorageDir: storage, projectKey: projectLogKey(path.join(storage, 'other')), onWriteFailure: (message) => problems.push(message) });
+  await wrongDecisions.append(requests[0]!);
+  const wrongRequests = new DecisionLog({ globalStorageDir: storage, projectKey: projectLogKey(path.join(storage, 'other')), kind: 'model-requests', onWriteFailure: (message) => problems.push(message) });
+  await wrongRequests.append(tool);
+  assert.equal(problems.length, 2, problems.join('\n'));
+  for (const folder of [DECISIONS_DIR, MODEL_REQUESTS_DIR]) {
+    await assert.rejects(readFile(path.join(storage, GATE_DIR_NAME, folder, `${projectLogKey(path.join(storage, 'other'))}.jsonl`)), { code: 'ENOENT' });
+  }
+});
+
+test('model-request logs follow the host\'s log rules: let go with their folder, at most MAX_PROJECT_LOGS per kind, one writer per key, and flush waits for them', async () => {
+  const storage = await mkdtemp(path.join(tmpdir(), 'near-ai-route-retain-'));
+  const host = new GateHost({ globalStorageDir: storage, secrets: new MemorySecrets(), productVersion: '0.4.30-test' });
+  await host.start();
+  const near = await nearClient();
+  const roots = Array.from({ length: MAX_PROJECT_LOGS + 2 }, (_unused, index) => path.join(storage, `project-${index}`));
+  for (const root of roots) {
+    const runtime = await host.runtimeFor({ root, actor: ACTOR, presence: 'person', context: 'interactive' });
+    await withSessionRoute(sessionRouteFrom(runtime), () => ask(near.client, 'cloud-model'));
+  }
+  const projectRequestLogs = host.openModelRequestLogKeys().filter((key) => key !== INSTALL_LOG_KEY);
+  assert.equal(projectRequestLogs.length, MAX_PROJECT_LOGS, 'the oldest model-request logs were let go');
+  assert.deepEqual(projectRequestLogs, roots.slice(2).map((root) => projectLogKey(root)), 'least recently used first, the two oldest gone');
+  assert.equal(host.openLogKeys().filter((key) => key !== INSTALL_LOG_KEY).length, MAX_PROJECT_LOGS, 'the decision logs keep their own count');
+  // A closed folder's model-request log is let go with its decision log; the open ones stay.
+  host.retainProjectLogs([roots[9]!]);
+  assert.deepEqual(host.openModelRequestLogKeys().filter((key) => key !== INSTALL_LOG_KEY), [projectLogKey(roots[9]!)]);
+  // A record after it was let go opens it again, and flush waits for every one of them, the let-go ones included.
+  const again = await host.runtimeFor({ root: roots[2]!, actor: ACTOR, presence: 'person', context: 'interactive' });
+  await withSessionRoute(sessionRouteFrom(again), () => ask(near.client, 'cloud-model'));
+  await host.flush();
+  for (const root of roots) {
+    const lines = (await readFile(path.join(storage, GATE_DIR_NAME, MODEL_REQUESTS_DIR, `${projectLogKey(root)}.jsonl`), 'utf8')).trim().split('\n');
+    const sequences = lines.map((line) => (JSON.parse(line) as DecisionRecord).metadata.sequence);
+    assert.deepEqual(sequences, sequences.map((_unused, index) => index + 1), 'one writer per key: the sequence never repeats or skips');
+    assert.equal(lines.length, root === roots[2] ? 2 : 1);
+  }
 });
 
 test('CLAS-06 concurrency: sibling contexts in parallel are each decided by their own mark, and a mark that rises during a retry is seen by the next request', async () => {

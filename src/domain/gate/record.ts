@@ -10,6 +10,7 @@ import { RECORD_RULE_IDS, RECORD_UNKNOWN_RULE } from './decide';
 import type { ActorRef, GateDecision } from './decide';
 import { LABEL_EVENT_IDS } from './labels';
 import type { Label } from './labels';
+import { ROUTE_EVENT_IDS, ROUTE_RULES } from './routing';
 import type { ConnectionBindingState } from './routing';
 import { isRecord, ownValue, refused } from './shape';
 import type { Parsed, Refusal } from './shape';
@@ -87,6 +88,12 @@ export interface DecisionRecordInput {
   readonly attestation?: 'verified' | 'failed' | 'unavailable';
   /** The connection binding state the route read (D-50). Never the host or the fingerprint. */
   readonly connection?: ConnectionBindingState;
+  /**
+   * The short form of a routine record (D-52, owner decision after PR 4a's measurement): nothing is written twice. The resource list is empty because the
+   * capability names what was used, and the policy entry carries no uid because `unmapped.nearAi.bundleHash` holds the policy's hash. Every field the record
+   * check needs is still there, so the record stays version 1.
+   */
+  readonly short?: boolean;
 }
 
 /**
@@ -140,7 +147,8 @@ export interface DecisionRecord {
   readonly resources: readonly DecisionResource[];
   readonly authorizations: readonly {
     readonly decision: string;
-    readonly policy: { readonly name: string; readonly uid: string; readonly version: string; readonly is_applied: boolean };
+    /** `uid` is the policy's hash; a short record leaves it out, since unmapped.nearAi.bundleHash holds the same hash. */
+    readonly policy: { readonly name: string; readonly uid?: string; readonly version: string; readonly is_applied: boolean };
   }[];
   readonly src_endpoint: { readonly name: string };
   readonly unmapped: {
@@ -260,12 +268,14 @@ export function buildDecisionRecord(input: DecisionRecordInput): DecisionRecord 
         }
       }),
     api: { operation: input.capability.verb, request: { uid: input.callId } },
-    resources: [input.resource.uid === undefined
+    resources: input.short === true ? [] : [input.resource.uid === undefined
       ? { name: input.resource.name, type: input.resource.type }
       : { name: input.resource.name, type: input.resource.type, uid: input.resource.uid }],
     authorizations: [{
       decision: allowed ? 'Allowed' : input.outcome === 'asked' ? 'Observed' : 'Denied',
-      policy: { name: input.rule, uid: input.bundleHash, version: 'bundle-1', is_applied: true }
+      policy: input.short === true
+        ? { name: input.rule, version: 'bundle-1', is_applied: true }
+        : { name: input.rule, uid: input.bundleHash, version: 'bundle-1', is_applied: true }
     }],
     src_endpoint: { name: SOURCE_NAME },
     unmapped: {
@@ -316,6 +326,19 @@ function carriesCredentialArgument(value: unknown): boolean {
   if (Array.isArray(value)) return value.some(carriesCredentialArgument);
   if (isRecord(value)) return Object.keys(value).some((key) => carriesCredentialArgument(value[key]));
   return false;
+}
+
+/** The rules of a model request's record (the route rules) and of the events about a session's routing: the records the model-request log holds. */
+const MODEL_REQUEST_RULES: ReadonlySet<string> = new Set<string>([...ROUTE_RULES, ...ROUTE_EVENT_IDS]);
+
+/**
+ * Whether a record is about a model request (an infer record, or a route event) rather than a tool call or the policy. Model-request records have a log of
+ * their own (owner decision after PR 4a's measurement); everything else stays in the decision log. Decided by the rule, the one thing every writer sets
+ * from a closed list: no tool decision carries a route rule, and a tool whose effect is `infer` still has a tool rule.
+ */
+export function isModelRequestRecord(record: Pick<DecisionRecord, 'authorizations'>): boolean {
+  const rule = record.authorizations[0]?.policy.name;
+  return typeof rule === 'string' && MODEL_REQUEST_RULES.has(rule);
 }
 
 /** What `api.operation` may name: a capability verb, one of the policy's own events, or a label event (D-49). Route events use the operation `infer`. */

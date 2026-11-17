@@ -2,6 +2,11 @@
 // hash, so no path appears in a file name, and nothing is ever written into the workspace, the transcripts or the synced project state. Node I/O only:
 // this module never imports vscode.
 //
+// Model requests have a log of their own beside it (owner decision after PR 4a's measurement: a model request per turn would roll a busy project's decision
+// log over in about a day): <globalStorage>/gate/model-requests/<project key>.jsonl, the same class with the same rotation, retention and locking. A log
+// holds only its own kind: a model-request record (isModelRequestRecord) offered to a decision log, or any other record offered to a model-request log, is
+// refused and reported, never written to the wrong place.
+//
 // Writing a record never blocks or fails a decision (D-21): append never throws or rejects, a failure is reported once through onWriteFailure with a plain
 // message, and the caller does not need to wait for the returned promise. Appends keep their order (one chain in this process, and one file lock across
 // processes), metadata.sequence strictly increases per log, and a full file is renamed whole to <key>.1.jsonl (older ones shift up, at most
@@ -9,12 +14,16 @@
 import { createHash } from 'node:crypto';
 import { appendFile, mkdir, open, rename, rm, stat } from 'node:fs/promises';
 import * as path from 'node:path';
-import { redactRecord, validateDecisionRecord, withKnownRule } from '../domain/gate/record';
+import { isModelRequestRecord, redactRecord, validateDecisionRecord, withKnownRule } from '../domain/gate/record';
 import type { DecisionRecord } from '../domain/gate/record';
 import { withFileLock } from '../services/stateMirrorLock';
 import { GATE_DIR_NAME } from './bundleStore';
 
 export const DECISIONS_DIR = 'decisions';
+/** The folder of the model-request logs, beside DECISIONS_DIR under the gate folder. */
+export const MODEL_REQUESTS_DIR = 'model-requests';
+/** Which records a log holds: tool calls and the policy's events, or model requests and the route's events. */
+export type LogKind = 'decisions' | 'model-requests';
 export const MAX_DECISION_LOG_BYTES = 5 * 1024 * 1024;
 export const MAX_ROTATED_FILES = 4;
 /** One record is a name, a path, a rule id and a sentence, never contents; a line larger than this is not written. */
@@ -45,6 +54,8 @@ export interface DecisionLogOptions {
   readonly maxBytes?: number;
   /** When given, the constructor refuses a global storage folder that lies inside it (GATE-07: nothing is written into the workspace). */
   readonly projectRoot?: string;
+  /** Which records the log holds. Defaults to `decisions`. */
+  readonly kind?: LogKind;
 }
 
 function errorCode(error: unknown): string | undefined {
@@ -96,6 +107,7 @@ export class DecisionLog {
   private readonly file: string;
   private readonly maxBytes: number;
   private readonly onWriteFailure: (message: string) => void;
+  private readonly kind: LogKind;
   private tail: Promise<void> = Promise.resolve();
   private reported = false;
   // What this process last saw of the file, so another window's appends are noticed by a size that does not match.
@@ -108,7 +120,8 @@ export class DecisionLog {
       throw new Error('The decision log folder must be outside the project, so records never land in the workspace.');
     }
     this.key = options.projectKey;
-    this.dir = path.join(options.globalStorageDir, GATE_DIR_NAME, DECISIONS_DIR);
+    this.kind = options.kind ?? 'decisions';
+    this.dir = path.join(options.globalStorageDir, GATE_DIR_NAME, this.kind === 'decisions' ? DECISIONS_DIR : MODEL_REQUESTS_DIR);
     this.file = path.join(this.dir, `${this.key}.jsonl`);
     this.maxBytes = options.maxBytes ?? MAX_DECISION_LOG_BYTES;
     this.onWriteFailure = options.onWriteFailure;
@@ -142,6 +155,11 @@ export class DecisionLog {
   }
 
   private async write(record: DecisionRecord): Promise<void> {
+    if (isModelRequestRecord(record) !== (this.kind === 'model-requests')) {
+      throw new RecordRefused(this.kind === 'decisions'
+        ? 'A record of a model request was offered to the decision log, so it was not saved there. Your work is not affected.'
+        : 'A record that is not about a model request was offered to the model-request log, so it was not saved there. Your work is not affected.');
+    }
     const clean = redactRecord(record);
     await mkdir(this.dir, { recursive: true, mode: 0o700 });
     await withFileLock(this.dir, `${this.key}.lock`, async () => {
