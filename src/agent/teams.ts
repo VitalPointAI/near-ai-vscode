@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { constants as fsConstants } from 'node:fs';
 import { copyFile, mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import * as path from 'node:path';
 import type { AgentDiscoveryAnswers } from '../domain/agents';
@@ -526,7 +527,11 @@ export class TeamLibrary {
   public async snapshot(file: string): Promise<number> {
     const dir = this.versionsDir(this.versionKey(file));
     await mkdir(dir, { recursive: true });
-    await copyFile(file, path.join(dir, `${new Date().toISOString().replace(/[:.]/g, '-')}.md`));
+    // Named after the time, or the next free millisecond: two versions taken within the same millisecond (the one kept just before the project's team
+    // is replaced, then the new team) used to share a name, so the second overwrote the first and the old team was lost.
+    for (let stamp = Date.now(); ; stamp += 1) {
+      try { await copyFile(file, path.join(dir, `${new Date(stamp).toISOString().replace(/[:.]/g, '-')}.md`), fsConstants.COPYFILE_EXCL); break; } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error; }
+    }
     const versions = (await readdir(dir)).sort();
     for (const old of versions.slice(0, Math.max(0, versions.length - MAX_VERSIONS))) await rm(path.join(dir, old), { force: true });
     return Math.min(versions.length, MAX_VERSIONS);
