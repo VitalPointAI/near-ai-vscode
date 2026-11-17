@@ -44,7 +44,7 @@ function project(): string {
   return mkdtempSync(path.join(tmpdir(), 'near-ai-effects-'));
 }
 
-test('the gate sees git push as a shadow publish in fully-autonomous, with a person or none, and decides exactly as today', async () => {
+test('the gate sees git push as a publish in fully-autonomous: with a person it asks with no shortcut, with nobody it is refused', async () => {
   const root = project();
   for (const presence of ['person', 'none'] as const) {
     const runtime: GateRuntime & { records: unknown[] } = testGateRuntime({ presence, context: presence === 'none' ? 'unattended' : 'interactive' });
@@ -56,14 +56,15 @@ test('the gate sees git push as a shadow publish in fully-autonomous, with a per
         shell: { cwd: root, ...(scripts === undefined ? {} : { packageScripts: scripts }) },
         buildAuto: async () => { asked += 1; return undefined; }
       });
-      assert.equal(gated.decision.outcome, 'allow', `${presence} ${command}: today's fully-autonomous allows it`);
-      assert.equal(gated.decision.rule, 'settings.mode.fully-autonomous');
-      assert.equal(gated.decision.floor, false);
-      assert.equal(gated.decision.shadowFloor?.rule, 'floor.publish', `${presence} ${command}: the floor would ask`);
+      assert.equal(gated.decision.outcome, presence === 'person' ? 'ask' : 'deny', `${presence} ${command}: the floor decides in fully-autonomous too`);
+      assert.equal(gated.decision.rule, 'floor.publish');
+      assert.equal(gated.decision.floor, true);
+      assert.equal(gated.decision.offerAlwaysAllow, false);
+      assert.equal(gated.decision.allowGrant, false);
       assert.ok(gated.effects.some((effect) => effect.verb === 'publish' && effect.target === 'git-remote'), 'the request carries the tag');
       assert.equal(gated.effects[0]?.verb, 'shell', 'the manifest\'s own effect stays first, so the record names it as before');
     }
-    assert.equal(asked, 2, 'the settings layer was asked as today');
+    assert.equal(asked, 2, 'the settings layer was still asked, so the deny list can beat a floor ask');
   }
 });
 

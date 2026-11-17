@@ -76,8 +76,8 @@ async function runCall(runtime: ReturnType<typeof testGateRuntime>, calls: ToolC
   return { outputs, approvals };
 }
 
-function runtimeFor(options: { floorMode: 'shadow' | 'enforce'; presence: 'person' | 'none' }): ReturnType<typeof testGateRuntime> {
-  return { ...testGateRuntime(options.presence === 'none' ? { presence: 'none', context: 'unattended' } : {}), floorMode: options.floorMode };
+function runtimeFor(options: { presence: 'person' | 'none' }): ReturnType<typeof testGateRuntime> {
+  return testGateRuntime(options.presence === 'none' ? { presence: 'none', context: 'unattended' } : {});
 }
 
 // Every reason the loop produces today: each tool that has a `forbidden` hook, named by a call that reaches the key folder.
@@ -90,13 +90,13 @@ const FORBIDDEN_CALLS: Array<[string, string, Record<string, unknown>]> = [
   ['a shell command that names the key folder', 'Bash', { command: `cat ${KEYS}` }]
 ];
 
-test('every call the loop forbids is recorded as refused with a reason, never allowed or asked, in shadow and enforce, with a person here or not, and no card is shown', async () => {
+test('every call the loop forbids is recorded as refused with a reason, never allowed or asked, with a person here or not, and no card is shown', async () => {
   for (const [label, name, args] of FORBIDDEN_CALLS) {
-    for (const floorMode of ['shadow', 'enforce'] as const) {
+    {
       for (const presence of ['person', 'none'] as const) {
-        const runtime = runtimeFor({ floorMode, presence });
+        const runtime = runtimeFor({ presence });
         const ran = await runCall(runtime, [call('f1', name, args)], { mode: 'fully-autonomous' });
-        const where = `${label} (${floorMode}, ${presence})`;
+        const where = `${label} (${presence})`;
         assert.match(ran.outputs[0] ?? '', /^Not allowed: /, where);
         assert.equal(ran.approvals, 0, `${where}: no card`);
         assert.equal(runtime.records.length, 1, `${where}: exactly one record`);
@@ -115,7 +115,7 @@ test('a call the loop forbids that no gate rule would refuse (its effects are un
   const reason = 'Planted: this tool refuses this call itself.';
   const planted: AgentTool<any> = { ...read, name: 'Planted', forbidden: async () => reason };
   for (const presence of ['person', 'none'] as const) {
-    const runtime = runtimeFor({ floorMode: 'enforce', presence });
+    const runtime = runtimeFor({ presence });
     // A path outside the folder cannot be read by the manifest, so the gate alone would ask (or refuse with nobody there) with manifest.effects-unknown.
     const outside = path.join(tmpdir(), 'near-ai-gate-refusal-outside', 'x.txt');
     const ran = await runCall(runtime, [call('p1', 'Planted', { file_path: outside })], { tools: [planted] });
@@ -137,14 +137,14 @@ test('a refusal handed to gateToolCall is denied whatever the settings would hav
   const read = CORE_TOOLS.find((tool) => tool.name === 'Read') as AgentTool<any>;
   const refusal = { rule: TOOL_FORBIDDEN_RULE, reason: 'Refused by the caller.' };
   for (const mode of ['approve-risky', 'mostly-autonomous', 'auto', 'fully-autonomous'] as const) {
-    for (const floorMode of ['shadow', 'enforce'] as const) {
-      const runtime: GateRuntime & { records: DecisionRecord[] } = { ...testGateRuntime(), floorMode };
+    {
+      const runtime: GateRuntime & { records: DecisionRecord[] } = testGateRuntime();
       let asked = 0;
       const gated = await gateToolCall(runtime, {
         tool: read, raw: { file_path: 'a.ts' }, root, callId: 'r1', policy: { mode, emergencyStop: false }, rules: DEFAULT_RULES, grants: new RunGrants(),
         buildAuto: async () => { asked += 1; return undefined; }
       }, { refusal });
-      assert.equal(gated.decision.outcome, 'deny', `${mode} ${floorMode}`);
+      assert.equal(gated.decision.outcome, 'deny', mode);
       assert.equal(gated.decision.rule, TOOL_FORBIDDEN_RULE);
       assert.equal(gated.decision.reason, refusal.reason);
       assert.equal(asked, 0, 'the permission logic was not run for a call that will not run');

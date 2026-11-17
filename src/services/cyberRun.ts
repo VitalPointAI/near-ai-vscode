@@ -369,9 +369,11 @@ async function cyberRun(input: CyberRunInput): Promise<CyberRunResult> {
       // The one gate decides on top of that answer, and records the decision before the step's tool or host tool runs (GATE-04, D-08).
       const callId = `${runId}/${step.id}`;
       const settings = settingsAnswerFor(decision, capability, command, input.policy, rules, input.grants, intrusive);
-      const stepEffects = hostTool ? hostToolEffects(target) : effectsOfStep(gate, selected!.tool, stepRaw(selected!, step), input.toolContext.root, standInFor(capability, target));
+      // A file probe reads inside the engagement's resolved scope paths (its own scope check confines it there), so a read there is a known read.
+      const stepEffects = hostTool ? { effects: hostToolEffects(target), floorFacts: {} } : await effectsOfStep(selected!.tool, stepRaw(selected!, step), input.toolContext.root, scope.paths, gate.locations ?? {});
       const gated = await gateStep(gate, {
-        tool: step.tool, callId, effects: stepEffects, policy: input.policy, settings,
+        tool: step.tool, callId, effects: stepEffects.effects, floorFacts: stepEffects.floorFacts, policy: input.policy, settings,
+        ...('resource' in stepEffects && stepEffects.resource !== undefined ? { resource: stepEffects.resource } : {}),
         ...(command === undefined ? {} : { command }), ...(hostTool ? {} : { manifestContexts: selected!.tool.manifest.contexts })
       });
       let outcome = gated.decision.outcome;
@@ -466,7 +468,7 @@ async function cyberRun(input: CyberRunInput): Promise<CyberRunResult> {
 
 // ---- The gate's view of a step (GATE-04) -----------------------------------------------------------
 
-/** What a step at `target` does when its tool's manifest cannot be filled: the widest honest form of its shorthand, on that target. */
+/** The widest honest form of a step's shorthand on `target`: what a catalogued host tool does (it has no manifest of its own). */
 function standInFor(capability: 'read' | 'shell', target: string): readonly Capability[] {
   const network = fromActionCapability('network', { hosts: [hostOf(target)] }).capabilities;
   return capability === 'shell' ? [...fromActionCapability('shell', { cwd: 'anywhere' }).capabilities, ...network] : network;
@@ -482,7 +484,7 @@ function scopeRefusalEffects(target: string): readonly Capability[] {
   return fromActionCapability('network', { hosts: [hostOf(target)] }).capabilities;
 }
 
-/** The arguments a step's tool will be given, as the manifest reads them. A step whose input cannot be built has none, and its effects stand in. */
+/** The arguments a step's tool will be given, as the manifest reads them. A step whose input cannot be built has none, and its effects are unknown. */
 function stepRaw(selected: RunTool, step: Step): Record<string, unknown> {
   try {
     return selected.input ? selected.input(step) : toolInputFor(step.tool, step);

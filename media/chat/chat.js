@@ -619,7 +619,8 @@
     const allow = textButton('Allow this time', () => answer('allow'), true);
     choices.append(allow);
     if (m.allowRule) choices.append(textButton('Allow every time', () => answer('allow-always')));
-    const runnable = m.allowRule === undefined && m.tool === 'Bash';
+    // A floor card (publishing, destruction, a write into .git/ or NEAR AI's state) needs a person every time, so it offers this one call only.
+    const runnable = m.allowRule === undefined && m.tool === 'Bash' && !m.floor;
     if (runnable) choices.append(textButton('Allow this command for this run', () => answer('allow-run')));
     choices.append(textButton('Deny', () => answer('deny')));
     // Enter in the feedback box declines with those instructions.

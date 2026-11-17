@@ -79,6 +79,11 @@ export interface ApprovalRequest {
    * command for a shell call, edits for a file write. Undefined when nothing may be granted (a risky action, which asks every time).
    */
   grant?: { command?: string; edits?: boolean };
+  /**
+   * Set on a card the floor asked (GATE-05, D-43): publishing, destruction, or a write into `.git/` or NEAR AI's state, in any mode. Such a card never has a
+   * `grant` or an `allowRule`; an allow runs this one call, and a late allow (a sub-agent's parked card) lets this exact call (`callKey`) run once more.
+   */
+  floor?: { callKey: string };
 }
 /**
  * `pending` (PERF-01): nobody answered within the agent's wait. The action did not run and its card stays queued for the person; the agent is told so and
@@ -88,6 +93,15 @@ export interface ApprovalReply { decision: 'allow' | 'allow-run' | 'allow-always
 
 /** How a tool result that is waiting on an approval begins, so the activity log can count it (PERF-01, PERF-07). */
 export const AWAITING_APPROVAL_PREFIX = 'Awaiting approval:';
+
+const AWAITING_APPROVAL_TEXT = `${AWAITING_APPROVAL_PREFIX} this action has not run. It is queued for the user to approve, and they have been notified. Do not retry it now and do not wait for it: carry on with work that does not depend on it, and list it under "Waiting for approval" in your report.`;
+
+/** What the agent is told when nobody answered a card in time. A floor card is approved for one call only, so the agent is told exactly that (D-43, Pitfall 4). */
+export function awaitingApprovalMessage(floor: boolean): string {
+  return floor
+    ? `${AWAITING_APPROVAL_TEXT} This kind of action needs a person every time: if the user approves it, this exact call (the same tool and arguments, from the same folder) is allowed once, not for the rest of this run.`
+    : `${AWAITING_APPROVAL_TEXT} If the user approves it, the same call is allowed for the rest of this run.`;
+}
 
 export type AgentEvent =
   | { type: 'text'; text: string }
@@ -638,6 +652,7 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
       tool, raw, root: context.root, callId: call.id, ...(command === undefined ? {} : { command }), ...(floorShell === undefined ? {} : { shell: floorShell }),
       ...(forbidden ? { forbidden } : {}), ...(sensitive ? { sensitive } : {}), ...(risky ? { risky } : {}),
       policy: this.options.policy, rules: this.options.rules, grants: this.grants,
+      ...(context.readOnlyRoots === undefined || context.readOnlyRoots.length === 0 ? {} : { readOnlyRoots: context.readOnlyRoots }),
       // Auto's context is built for every gated call, because a tool that marks itself autoSafe (the web tools) needs it as well as a shell command.
       buildAuto: async (effective) => {
         const unattended = this.options.unattended && (effective.mode === 'auto' || effective.mode === 'mostly-autonomous') && command !== undefined;
@@ -661,7 +676,8 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
     const gated = tool.capability !== 'read' && tool.capability !== 'plan';
     if (gated && decision.outcome !== 'ask') this.options.emit({ type: 'permission', tool: tool.name, decision: decision.outcome === 'deny' ? 'denied' : 'auto-allowed' });
     if (decision.outcome === 'deny') return this.finish(call.id, false, `Not allowed: ${decision.reason}`);
-    if (decision.outcome === 'ask') {
+    // A floor call the person approved once, late, runs now with no new card; the gate has used that approval up, so the next identical call asks again.
+    if (decision.outcome === 'ask' && !gateCall.approvedOnce) {
       let preview: ToolPreview | undefined;
       try {
         if (risky) {
@@ -673,9 +689,13 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
           preview = sensitive ? { kind: 'note', text: sensitive } : await tool.preview?.(input, context);
         }
       } catch (error) { return this.finish(call.id, false, `Error: ${(error as Error).message}`); }
-      // The card keeps the reason the settings layer gave; a question the gate itself asked (a floor ask, effects it cannot read) carries the gate's own.
+      // The card keeps the reason the settings layer gave; a question the gate itself asked (effects it cannot read) carries the gate's own. A floor ask
+      // keeps the settings layer's own words when it would have asked anyway (what the command does, in plain words) and adds why it always asks.
       const settingsSaid = gateCall.settings;
-      const reason = decision.floor || settingsSaid === undefined ? decision.reason : settingsSaid.decision === 'ask' ? settingsSaid.reason : risky ?? sensitive;
+      const settingsReason = settingsSaid?.decision === 'ask' ? settingsSaid.reason : undefined;
+      const reason = decision.floor
+        ? (settingsReason && decision.reason && !settingsReason.includes(decision.reason) ? `${settingsReason} ${decision.reason}` : decision.reason ?? settingsReason)
+        : settingsSaid === undefined ? decision.reason : settingsSaid.decision === 'ask' ? settingsSaid.reason : risky ?? sensitive;
       // Owner decision 2026-11-05 (0.4.17): the card says what the safety issue is in plain words, can show the whole command or code, and offers
       // "always allow" for every command, a held one included, because a held command is exactly the one a project should learn about. The entry
       // names the exact command up to its first option (exactRuleFor), so the same command is never asked again and a different one still is.
@@ -702,6 +722,7 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
         ...(reason ? { risk: { kind: risk.kind, headline: risk.headline } } : {}),
         ...(allowRule ? { allowRule } : {}),
         ...(command ? { subject: command } : {}),
+        ...(decision.floor && gateCall.callKey !== undefined ? { floor: { callKey: gateCall.callKey } } : {}),
         ...(decision.allowGrant && command !== undefined && command.trim() ? { grant: { command: command.trim() } } : decision.allowGrant && tool.capability === 'workspaceWrite' ? { grant: { edits: true } } : {})
       });
       // The card only carried the question: the answer goes back into the gate, which records it against this call and, for an allow, asks the layers that
@@ -713,7 +734,7 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
       }
       // PERF-01: nobody answered in time. Nothing ran; the card stays queued, and the agent works on rather than waiting.
       if (reply.decision === 'pending') {
-        return this.finish(call.id, false, `${AWAITING_APPROVAL_PREFIX} this action has not run. It is queued for the user to approve, and they have been notified. Do not retry it now and do not wait for it: carry on with work that does not depend on it, and list it under "Waiting for approval" in your report. If the user approves it, the same call is allowed for the rest of this run.`);
+        return this.finish(call.id, false, awaitingApprovalMessage(decision.floor));
       }
       if (!answered.proceed) return this.finish(call.id, false, `Not allowed: ${answered.reason}`);
       if ((reply.decision === 'allow-run' || reply.decision === 'allow-always') && decision.allowGrant) {

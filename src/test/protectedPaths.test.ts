@@ -14,7 +14,7 @@ import { resolveInWorkspace } from '../agent/workspace';
 import type { AgentMessage, CompletionEvent, ToolCall } from '../services/nearAiClient';
 import { namesStateKeys, PROTECTED_WRITE, protectedWriteReason, STATE_FOLDER_PATH, STATE_FOLDER_TEXT } from '../domain/protectedPaths';
 import { ShellSession } from '../agent/shell';
-import { newTestRun } from './helpers/gatedRuns';
+import { newTestRun, testGateRuntime } from './helpers/gatedRuns';
 
 const shellContext: CommandContext = { root: '/work/app', cwd: '/work/app', home: '/home/dev' };
 
@@ -299,10 +299,12 @@ test('the script scan reports a word that resolves into the key folder instead o
   }
 });
 
-// PR #55 review: SECURITY.md ("What the agent can do without asking", Known limitations) and the README's nearAi.actionPolicy row say that under
-// fully-autonomous credential-file reads and writes into .git/, .planning/.near-ai/ and .near-ai/ run without asking, and that every other mode asks.
-// This pins today's behaviour (src/agent/loop.ts: a `sensitive` call asks only when the mode is not fully-autonomous), so the docs stay backed by code.
-test('fully-autonomous reads credential files and writes into .git/, .planning/.near-ai/ and .near-ai/ without asking; the other modes ask', async () => {
+// D-19 (Phase 70, plan 17): the floor is enforced in every mode. This test once pinned that fully-autonomous wrote into .git/, .planning/.near-ai/ and
+// .near-ai/ without asking; it was changed on purpose, and is the one existing test changed for that. Fully-autonomous still reads credential files inside
+// the project without asking (D-18: `.env`, deploy/id_ed25519, .near-ai/state/meta.json and `cat .env` run with no card), but each of those writes is now a
+// card with no "always allow" and no run-wide grant, and with nobody to answer (a benchmark or comparison run) each is refused and nothing is written.
+// SECURITY.md ("What the agent can do without asking", Known limitations) and the README's nearAi.actionPolicy row describe exactly this.
+test('fully-autonomous reads credential files without asking but asks before writing into .git/, .planning/.near-ai/ and .near-ai/; the other modes ask', async () => {
   const calls = [
     { name: 'Read', args: { file_path: '.env' } },
     { name: 'Read', args: { file_path: 'deploy/id_ed25519' } },
@@ -319,21 +321,67 @@ test('fully-autonomous reads credential files and writes into .git/, .planning/.
     await writeFile(path.join(context.root, 'deploy', 'id_ed25519'), 'ssh-secret\n');
     await writeFile(path.join(context.root, '.near-ai', 'state', 'meta.json'), '{"v":"v1"}');
   };
+  const fullCalls = [...calls, { name: 'Bash', args: { command: 'cat .env' } }, { name: 'Bash', args: { command: 'printf x > .git/hooks/post-commit' } }];
+  // The same scripted run, under the explicit test policy, with a person who declines every card or with nobody there; every card is kept whole.
+  const fullRun = async (context: ToolContext, presence: 'person' | 'none', cards: Array<{ title: string; allowRule?: string; grant?: unknown; floor?: unknown }>): Promise<string[]> => {
+    let turn = 0;
+    const client = {
+      async *streamCompletion(_model: string, _messages: AgentMessage[]): AsyncGenerator<CompletionEvent> {
+        const usage = { verificationStatus: 'unknown' as const, latencyMs: 1 };
+        const next = fullCalls[turn];
+        turn += 1;
+        if (!next) { yield { type: 'done', message: { role: 'assistant', content: 'done' }, finishReason: 'stop', usage }; return; }
+        const call: ToolCall = { id: `c${turn}`, type: 'function', function: { name: next.name, arguments: JSON.stringify(next.args) } };
+        yield { type: 'done', message: { role: 'assistant', content: null, tool_calls: [call] }, finishReason: 'tool_calls', usage };
+      }
+    };
+    const run = newTestRun({
+      client: client as never, model: 'm', tools: [readTool, writeTool, editTool, globTool, grepTool, bashTool], context, policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES,
+      gate: testGateRuntime(presence === 'none' ? { presence: 'none', context: 'unattended' } : {}),
+      requestApproval: async (approval: { title: string; allowRule?: string; grant?: unknown; floor?: unknown }) => { cards.push(approval); return { decision: 'deny' }; },
+      rememberAllowRule: () => undefined,
+      emit: () => undefined
+    } as never);
+    const result = await run.run([{ role: 'system', content: 's' }, { role: 'user', content: 'go' }], new AbortController().signal);
+    return result.messages.filter((message) => message.role === 'tool').map((message) => String(message.content));
+  };
+  const unchanged = async (context: ToolContext, where: string) => {
+    assert.equal(await readFile(path.join(context.root, '.git', 'hooks', 'pre-commit'), 'utf8').catch(() => 'absent'), 'absent', `${where}: the .git/ write did not run`);
+    assert.equal(await readFile(path.join(context.root, '.planning', '.near-ai', 'settings.json'), 'utf8').catch(() => 'absent'), 'absent', `${where}: settings.json was not written`);
+    assert.equal(await readFile(path.join(context.root, '.near-ai', 'state', 'meta.json'), 'utf8'), '{"v":"v1"}', `${where}: the state file was not edited`);
+    assert.equal(await readFile(path.join(context.root, '.git', 'hooks', 'post-commit'), 'utf8').catch(() => 'absent'), 'absent', `${where}: the shell write did not run`);
+  };
   const full = await project();
   try {
     await seed(full);
-    const approvals: string[] = [];
-    const results = await runCalls(full, [...calls, { name: 'Bash', args: { command: 'cat .env && printf x > .git/hooks/post-commit' } }], 'fully-autonomous', approvals);
-    assert.deepEqual(approvals, [], 'nothing asked');
-    assert.match(results[0], /env-secret/, 'the credential file was read');
+    const cards: Array<{ title: string; allowRule?: string; grant?: unknown; floor?: unknown }> = [];
+    const results = await fullRun(full, 'person', cards);
+    assert.match(results[0], /env-secret/, 'the credential file was read with no card');
     assert.match(results[1], /ssh-secret/);
-    assert.equal(await readFile(path.join(full.root, '.git', 'hooks', 'pre-commit'), 'utf8'), '#!/bin/sh\nexit 0\n', 'the .git/ write ran');
-    assert.equal(await readFile(path.join(full.root, '.planning', '.near-ai', 'settings.json'), 'utf8'), '{}');
-    assert.equal(await readFile(path.join(full.root, '.near-ai', 'state', 'meta.json'), 'utf8'), '{"v":"v2"}', results[5]);
+    assert.match(results[4], /"v":"v1"/, 'the state file was read with no card');
     assert.match(results[6], /env-secret/, 'a shell command reading one runs too');
-    assert.equal(await readFile(path.join(full.root, '.git', 'hooks', 'post-commit'), 'utf8'), 'x');
+    assert.equal(cards.length, 4, `exactly the four writes asked: ${cards.map((card) => card.title).join(' | ')}`);
+    for (const card of cards) {
+      assert.equal(card.allowRule, undefined, `${card.title}: no "always allow"`);
+      assert.equal(card.grant, undefined, `${card.title}: no run-wide grant`);
+      assert.notEqual(card.floor, undefined, `${card.title}: marked as a floor card`);
+    }
+    for (const index of [2, 3, 5, 7]) assert.match(results[index] ?? '', /declined/, `call ${index}: ${results[index]}`);
+    await unchanged(full, 'declined');
   } finally {
     full.shell.dispose();
+  }
+  const nobody = await project();
+  try {
+    await seed(nobody);
+    const cards: Array<{ title: string }> = [];
+    const results = await fullRun(nobody, 'none', cards);
+    assert.equal(cards.length, 0, 'with nobody to answer no card is shown');
+    assert.match(results[0], /env-secret/, 'the credential read still runs');
+    for (const index of [2, 3, 5, 7]) assert.match(results[index] ?? '', /^Not allowed: Nobody is here to approve this/, `call ${index}: ${results[index]}`);
+    await unchanged(nobody, 'nobody there');
+  } finally {
+    nobody.shell.dispose();
   }
   for (const mode of ['auto', 'approve-risky'] as const) {
     const context = await project();

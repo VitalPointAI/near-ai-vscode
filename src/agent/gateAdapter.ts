@@ -1,14 +1,16 @@
 // The loop's side of the one gate (GATE-04, D-08, D-09, D-10, D-43). It builds a GateRequest from a tool call (the manifest's effects and today's forbidden,
-// sensitive and risky hooks), hands today's decidePermissionAsync to decide() as its settings layer, and records the decision. It decides nothing itself, so
-// with a valid bundle and the shadow floor every outcome equals what the loop decided before. No vscode import here.
+// sensitive and risky hooks), hands today's decidePermissionAsync to decide() as its settings layer, and records the decision. It decides nothing itself:
+// outside the floor every outcome equals what the loop decided before, and the floor is always enforced (D-19). No vscode import here.
 import { randomUUID } from 'node:crypto';
+import { realpath } from 'node:fs/promises';
 import * as path from 'node:path';
 import type { ActionCapability, ActionPolicy } from '../domain/policy';
 import { failedClosed } from '../domain/gate/bundle';
 import type { BundleState, GateContextName } from '../domain/gate/bundle';
 import { decide } from '../domain/gate/decide';
 import type { ActorRef, GateDecision, GateOptions, GateRequest, GateRuntime, SettingsAnswer, SettingsLayer } from '../domain/gate/decide';
-import type { FloorFacts } from '../domain/gate/floor';
+import { namesCredentialStore, namesIdentityFiles } from '../domain/gate/floor';
+import type { FloorFacts, FloorLocations } from '../domain/gate/floor';
 import { effectsFor } from '../domain/gate/manifest';
 import type { InputFieldSource } from '../domain/gate/manifest';
 import { buildDecisionRecord, outcomeOf } from '../domain/gate/record';
@@ -21,6 +23,7 @@ import { decidePermissionAsync, isAutoAllowed } from './permissions';
 import type { AutoApprovalContext, PermissionDecision, PermissionRules, RunGrants } from './permissions';
 import { shellReachesCredentialStore } from './tools';
 import type { AgentTool } from './tools';
+import { resolveInWorkspace } from './workspace';
 
 const DEFAULT_PRODUCT_VERSION = '0.0.0';
 const MAX_RESOURCE_NAME = 200;
@@ -52,6 +55,11 @@ export interface GateCallInput {
    * included, with the package scripts read once per run. Absent, the command is read as running at `root` with no scripts.
    */
   readonly shell?: FloorShellContext;
+  /**
+   * The folders outside the project that the file tools may read (`ToolContext.readOnlyRoots`: the managed Open-GSD runtime). A read the tools' own resolver
+   * places inside one of them is a known read, not an unknown effect; nothing here widens what may be written.
+   */
+  readonly readOnlyRoots?: readonly string[];
 }
 
 /** The cheap part of the classifier's context the floor needs: no safety model, no Open-GSD runtime check, nothing that asks a person. */
@@ -116,9 +124,9 @@ export async function floorFactsFor(input: FloorFactsInput): Promise<FloorComman
   return { effects: classified.effects ?? [], facts };
 }
 
-/** What decide() is told by the runtime: the floor's mode and, when the host knows them, the home folder and global storage its text checks may name. */
+/** What decide() is told by the runtime: when the host knows them, the home folder and global storage the floor's text checks may name. Nothing turns the floor off. */
 function gateOptionsOf(runtime: GateRuntime): GateOptions {
-  return { floorMode: runtime.floorMode, ...(runtime.locations === undefined ? {} : { locations: runtime.locations }) };
+  return runtime.locations === undefined ? {} : { locations: runtime.locations };
 }
 
 /** The manifest's effects with the command's own after them, each once. Unknown effects (an empty list) stay unknown: the command cannot make them known. */
@@ -142,6 +150,12 @@ export interface GatedCall {
   readonly settings: PermissionDecision | undefined;
   readonly request: GateRequest;
   readonly effects: readonly Capability[];
+  /** What the record names when the effects alone would not say it (a read in a trusted folder outside the project). */
+  readonly resource?: DecisionResource;
+  /** The exact call, as `floorApprovalsOnce` keys it. Set on a floor ask, so a card for it can be approved once, late (D-43, Pitfall 4). */
+  readonly callKey?: string;
+  /** True when a person had already approved this exact floor call once, after the run moved on: it runs this time, and the next identical call asks again. */
+  readonly approvedOnce?: boolean;
 }
 
 function productVersionOf(runtime: GateRuntime): string {
@@ -159,23 +173,31 @@ function bundleHashOf(runtime: GateRuntime): string {
 
 const WIDEST_SHORTHAND = (capability: ActionCapability): readonly Capability[] => fromActionCapability(capability).capabilities;
 
-/** The names of the arguments a manifest reads as project paths. */
-function pathFields(tool: AgentTool<any>): string[] {
-  const names = new Set<string>();
-  const take = (value: unknown): void => {
-    if (value === null || typeof value !== 'object' || Array.isArray(value)) return;
-    const source = value as Partial<InputFieldSource>;
-    if (source.from === 'input' && (source.as === 'path' || source.as === 'folder') && typeof source.field === 'string') names.add(source.field);
-  };
+/** The names of the arguments a manifest reads as project paths, with the verbs of the effects that read each one. */
+function pathFieldVerbs(tool: AgentTool<any>): Map<string, Set<string>> {
+  const names = new Map<string, Set<string>>();
   for (const entry of tool.manifest.effects) {
     if ('from' in entry) continue;
+    const take = (value: unknown): void => {
+      if (value === null || typeof value !== 'object' || Array.isArray(value)) return;
+      const source = value as Partial<InputFieldSource>;
+      if (source.from !== 'input' || (source.as !== 'path' && source.as !== 'folder') || typeof source.field !== 'string') return;
+      const verbs = names.get(source.field) ?? new Set<string>();
+      verbs.add(entry.verb);
+      names.set(source.field, verbs);
+    };
     for (const key of Object.keys(entry)) {
       const value: unknown = entry[key];
       if (Array.isArray(value)) value.forEach(take);
       else take(value);
     }
   }
-  return [...names];
+  return names;
+}
+
+/** The names of the arguments a manifest reads as project paths. */
+function pathFields(tool: AgentTool<any>): string[] {
+  return [...pathFieldVerbs(tool).keys()];
 }
 
 /**
@@ -198,14 +220,81 @@ export function manifestArguments(tool: AgentTool<any>, raw: Record<string, unkn
 }
 
 /**
- * The call's effects. A call the manifest cannot fill (a path outside the project, a missing field) has unknown effects. While the floor only reports (shadow),
- * the widest form of the tool's own shorthand stands in, so today's decision is kept; once the floor is enforced the list is empty and decide() refuses or asks
- * with `manifest.effects-unknown`.
+ * The call's effects. A call the manifest cannot fill (a path outside the project and every trusted folder, a missing field) has unknown effects: the list is
+ * empty, and decide() asks a person about it or, with nobody here, refuses it with `manifest.effects-unknown`. No stand-in is invented.
  */
-export function effectsOfCall(runtime: Pick<GateRuntime, 'floorMode'>, tool: AgentTool<any>, raw: Record<string, unknown>, root: string): readonly Capability[] {
+export function effectsOfCall(tool: AgentTool<any>, raw: Record<string, unknown>, root: string): readonly Capability[] {
   const filled = effectsFor(tool.manifest, manifestArguments(tool, raw, root));
-  if (filled.ok) return filled.value;
-  return runtime.floorMode === 'enforce' ? [] : WIDEST_SHORTHAND(tool.capability);
+  return filled.ok ? filled.value : [];
+}
+
+/** What reading the call's paths showed: the arguments with each trusted-folder read written as a project read, and what the floor must know about them. */
+export interface CallPaths {
+  readonly raw: Record<string, unknown>;
+  /** The trusted-folder files read, named by the folder's own name and the path inside it (never the full machine path). */
+  readonly trustedReads: readonly string[];
+  readonly facts: Pick<FloorFacts, 'credentialStore' | 'identityFiles'>;
+}
+
+function insideFolder(folder: string, target: string): boolean {
+  const relative = path.relative(folder, target);
+  return relative === '' || (!path.isAbsolute(relative) && relative !== '..' && !relative.startsWith(`..${path.sep}`));
+}
+
+/**
+ * The paths a file tool's call names, read before the manifest is filled (the carried-forward PR #70 review item). Two things come out of it:
+ *
+ * - The floor's refusals come first: a path naming a credential store or this extension's identity and gate folders (D-16), as written or as it resolves,
+ *   becomes a floor fact, so the call is refused with no card in every mode, wherever the tool would have looked.
+ * - A read in a trusted folder outside the project (`readOnlyRoots`, the managed Open-GSD runtime the tools may read) keeps running as it always has: an
+ *   argument read only by `read` effects whose real path (links followed, exactly as the tool resolves it) lies inside such a folder is written as `**`,
+ *   a read of the widest project path, so every later layer judges it at least as strictly as a read of the project, and the record names the file. An
+ *   argument any write or destroy effect reads is never rewritten, and a path outside the project and every trusted folder stays unknown.
+ */
+export async function readCallPaths(tool: AgentTool<any>, raw: Record<string, unknown>, root: string, readOnlyRoots: readonly string[] = [], locations: FloorLocations = {}): Promise<CallPaths> {
+  const given = tool.manifestInput?.(raw) ?? raw;
+  const fields = pathFieldVerbs(tool);
+  let out: Record<string, unknown> | undefined;
+  const trustedReads: string[] = [];
+  let credentialStore: string | undefined;
+  let identityFiles: string | undefined;
+  for (const [field, verbs] of fields) {
+    const value = given[field];
+    if (typeof value !== 'string' || value.trim() === '') continue;
+    let resolved: string | undefined;
+    try {
+      resolved = await resolveInWorkspace(root, value, [...readOnlyRoots]);
+    } catch {
+      resolved = undefined; // outside the project and every trusted folder, or the key folder: the tool refuses it, and its effects stay unknown
+    }
+    for (const shown of resolved === undefined || resolved === value ? [value] : [value, resolved]) {
+      credentialStore ??= namesCredentialStore(shown, locations);
+      identityFiles ??= namesIdentityFiles(shown, locations);
+    }
+    if (resolved === undefined || ![...verbs].every((verb) => verb === 'read')) continue;
+    const realRoot = await realFolder(root);
+    if (insideFolder(realRoot, resolved)) continue;
+    for (const folder of readOnlyRoots) {
+      if (!path.isAbsolute(folder)) continue;
+      const real = await realFolder(folder);
+      if (!insideFolder(real, resolved)) continue;
+      // The model's own arguments with this one field rewritten, so the tool's manifestInput runs once, as it does for every other call.
+      out ??= { ...raw };
+      out[field] = '**';
+      const inside = path.relative(real, resolved).split(path.sep).join('/');
+      trustedReads.push(inside === '' ? path.basename(real) : `${path.basename(real)}/${inside}`);
+      break;
+    }
+  }
+  return {
+    raw: out ?? raw,
+    trustedReads,
+    facts: { ...(credentialStore === undefined ? {} : { credentialStore }), ...(identityFiles === undefined ? {} : { identityFiles }) }
+  };
+}
+
+async function realFolder(folder: string): Promise<string> {
+  return realpath(folder).catch(() => path.resolve(folder));
 }
 
 // ---------------------------------------------------------------------------------------------------------------------------------------------------
@@ -304,7 +393,6 @@ function resourceOf(tool: string, effects: readonly Capability[], command: strin
 
 function recordFor(runtime: GateRuntime, gated: GatedCall, outcome: DecisionOutcome, rule: string, reason: string | undefined, model: { name: string; provider: string } | undefined): DecisionRecord {
   const capability = gated.effects[0] ?? WIDEST_SHORTHAND('plan')[0] as Capability;
-  const decision = gated.decision;
   return buildDecisionRecord({
     recordId: (runtime.newRecordId ?? randomUUID)(),
     // The log numbers each line as it writes it; this is replaced there.
@@ -315,12 +403,11 @@ function recordFor(runtime: GateRuntime, gated: GatedCall, outcome: DecisionOutc
     ...(model === undefined ? {} : { model }),
     callId: gated.request.callId,
     capability,
-    resource: resourceOf(gated.request.tool, gated.effects, gated.request.command),
+    resource: gated.resource ?? resourceOf(gated.request.tool, gated.effects, gated.request.command),
     outcome,
     rule,
     ...(reason === undefined || reason === '' ? {} : { reason }),
-    bundleHash: bundleHashOf(runtime),
-    ...(decision.shadowFloor === undefined ? {} : { shadowFloor: decision.shadowFloor.rule })
+    bundleHash: bundleHashOf(runtime)
   });
 }
 
@@ -359,7 +446,7 @@ function refusalLayer(refusal: Refusal): SettingsLayer {
 /** The gate's decision for a call the caller refuses: its own deny when it made one, otherwise the caller's refusal. Never an allow or an ask. */
 function refusedDecision(decision: GateDecision | undefined, refusal: Refusal, mode: ActionPolicy['mode']): GateDecision {
   if (decision !== undefined && decision.outcome === 'deny') return decision;
-  return { outcome: 'deny', rule: refusal.rule, reason: refusal.reason, floor: false, offerAlwaysAllow: false, allowGrant: false, effectiveMode: decision?.effectiveMode ?? mode, ...(decision?.shadowFloor === undefined ? {} : { shadowFloor: decision.shadowFloor }) };
+  return { outcome: 'deny', rule: refusal.rule, reason: refusal.reason, floor: false, offerAlwaysAllow: false, allowGrant: false, effectiveMode: decision?.effectiveMode ?? mode };
 }
 
 async function decideOrRefuse(refusal: Refusal | undefined, mode: ActionPolicy['mode'], run: () => Promise<GateDecision>): Promise<GateDecision> {
@@ -378,11 +465,13 @@ async function decideOrRefuse(refusal: Refusal | undefined, mode: ActionPolicy['
  * decided) and returns it. The record is queued before this returns, so it is always ahead of the call's own run.
  */
 export async function gateToolCall(runtime: GateRuntime, input: GateCallInput, options: GateCallOptions = {}): Promise<GatedCall> {
-  const declared = effectsOfCall(runtime, input.tool, input.raw, input.root);
+  // The paths a file tool names are read first: a credential store or the identity folders is a floor fact, and a read in a trusted folder is a known read.
+  const paths = await readCallPaths(input.tool, input.raw, input.root, input.readOnlyRoots ?? [], runtime.locations ?? {});
+  const declared = effectsOfCall(input.tool, paths.raw, input.root);
   // A shell call's command is read by the floor in every mode (Pitfall 5); what it tags joins the manifest's own effects.
   const read = input.command === undefined ? undefined : await floorFactsFor({ command: input.command, root: input.root, ...(input.shell ?? {}), ...(runtime.locations ?? {}) });
   const effects = withCommandEffects(declared, read?.effects ?? []);
-  const floorFacts: FloorFacts = { ...(input.tool.capability === 'sharedWrite' ? { sharedWrite: true } : {}), ...(read?.facts ?? {}) };
+  const floorFacts: FloorFacts = { ...(input.tool.capability === 'sharedWrite' ? { sharedWrite: true } : {}), ...paths.facts, ...(read?.facts ?? {}) };
   const request: GateRequest = {
     actor: runtime.actor,
     tool: input.tool.name,
@@ -401,9 +490,50 @@ export async function gateToolCall(runtime: GateRuntime, input: GateCallInput, o
   const captured: { value?: PermissionDecision } = {};
   const layer = options.refusal === undefined ? settingsLayerFor(input, captured) : refusalLayer(options.refusal);
   const decision = await decideOrRefuse(options.refusal, input.policy.mode, () => decide(request, runtime.bundleState(), layer, gateOptionsOf(runtime)));
-  const gated: GatedCall = { decision, settings: captured.value, request, effects };
-  keep(runtime, recordFor(runtime, gated, outcomeOf(decision), decision.rule, decision.reason, options.model === undefined ? undefined : { name: options.model, provider: MODEL_PROVIDER }));
+  const resource: DecisionResource | undefined = input.command === undefined && paths.trustedReads.length > 0 ? { name: shownName(paths.trustedReads[0] ?? ''), type: 'file' } : undefined;
+  const floorAsk = decision.outcome === 'ask' && decision.floor;
+  const callKey = floorAsk ? floorCallKey(input) : undefined;
+  const gated: GatedCall = { decision, settings: captured.value, request, effects, ...(resource === undefined ? {} : { resource }), ...(callKey === undefined ? {} : { callKey }) };
+  const model = options.model === undefined ? undefined : { name: options.model, provider: MODEL_PROVIDER };
+  // A floor ask a person already approved once, late (a sub-agent's parked card): this exact call runs this time only. decide() has just been asked again,
+  // so the emergency stop, the policy, the floor's refusals and the deny list all still came first (D-43, Pitfall 4).
+  if (callKey !== undefined && takeFloorApproval(input.grants, callKey)) {
+    keep(runtime, recordFor(runtime, gated, 'approved', decision.rule, APPROVED_ONCE_REASON, model));
+    return { ...gated, approvedOnce: true };
+  }
+  keep(runtime, recordFor(runtime, gated, outcomeOf(decision), decision.rule, decision.reason, model));
   return gated;
+}
+
+const APPROVED_ONCE_REASON = 'A person approved this exact call once, after the run had moved on.';
+
+// Floor calls a person approved late, once each, by the run's grants (D-43, Pitfall 4). Kept beside RunGrants rather than in it, so no grant, allow rule or
+// saved setting can ever carry a floor approval: an entry is only added by a late allow of a floor card and is used up by the one call it names.
+const FLOOR_APPROVALS_ONCE = new WeakMap<RunGrants, Set<string>>();
+
+/** The exact floor calls of this run a person approved once, late. A call key is added when a parked floor card is allowed and removed when that call runs. */
+export function floorApprovalsOnce(grants: RunGrants): Set<string> {
+  let once = FLOOR_APPROVALS_ONCE.get(grants);
+  if (once === undefined) { once = new Set(); FLOOR_APPROVALS_ONCE.set(grants, once); }
+  return once;
+}
+
+function takeFloorApproval(grants: RunGrants, key: string): boolean {
+  const once = FLOOR_APPROVALS_ONCE.get(grants);
+  return once !== undefined && once.delete(key);
+}
+
+function canonical(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonical);
+  if (value === null || typeof value !== 'object') return value;
+  const out: Record<string, unknown> = {};
+  for (const key of Object.keys(value as Record<string, unknown>).sort()) out[key] = canonical((value as Record<string, unknown>)[key]);
+  return out;
+}
+
+/** One exact call: the tool, the folder it works in (a sub-agent's worktree is its own), the shell's folder for a command, and the arguments in a fixed order. */
+export function floorCallKey(input: Pick<GateCallInput, 'tool' | 'root' | 'raw' | 'shell'>): string {
+  return JSON.stringify([input.tool.name, input.root, input.shell?.cwd ?? '', canonical(input.raw)]);
 }
 
 /**
@@ -420,13 +550,28 @@ export interface GateStepInput {
   readonly policy: ActionPolicy;
   /** Today's answer for this step, with the stable rule id that gave it. */
   readonly settings: SettingsAnswer;
+  /** What the floor must know about the paths the step names (a credential store, the identity folders). */
+  readonly floorFacts?: Pick<FloorFacts, 'credentialStore' | 'identityFiles'>;
+  /** What the record names when the effects alone would not say it. */
+  readonly resource?: DecisionResource;
 }
 
-/** The effects of a step that runs a tool: its manifest's, filled from the arguments, or `standIn` while the floor only reports. Empty once it is enforced. */
-export function effectsOfStep(runtime: Pick<GateRuntime, 'floorMode'>, tool: AgentTool<any>, raw: Record<string, unknown>, root: string, standIn: readonly Capability[]): readonly Capability[] {
-  const filled = effectsFor(tool.manifest, manifestArguments(tool, raw, root));
-  if (filled.ok) return filled.value;
-  return runtime.floorMode === 'enforce' ? [] : standIn;
+/** What the gate knows about a step that runs a tool: its effects and the floor's facts about the paths it names. */
+export interface StepEffects {
+  readonly effects: readonly Capability[];
+  readonly floorFacts: Pick<FloorFacts, 'credentialStore' | 'identityFiles'>;
+  readonly resource?: DecisionResource;
+}
+
+/**
+ * The effects of a step that runs a tool: its manifest's, filled from the arguments, read the way a chat call is (`readCallPaths`). `readOnlyRoots` are the
+ * folders outside the project the step may read (an engagement's resolved scope paths, which its file probes are confined to). A step the manifest cannot
+ * fill has unknown effects (an empty list).
+ */
+export async function effectsOfStep(tool: AgentTool<any>, raw: Record<string, unknown>, root: string, readOnlyRoots: readonly string[] = [], locations: FloorLocations = {}): Promise<StepEffects> {
+  const paths = await readCallPaths(tool, raw, root, readOnlyRoots, locations);
+  const first = paths.trustedReads[0];
+  return { effects: effectsOfCall(tool, paths.raw, root), floorFacts: paths.facts, ...(first === undefined ? {} : { resource: { name: shownName(first), type: 'file' } }) };
 }
 
 /**
@@ -443,11 +588,12 @@ export async function gateStep(runtime: GateRuntime, input: GateStepInput, optio
     presence: runtime.presence,
     policy: input.policy,
     ...(input.manifestContexts === undefined ? {} : { manifestContexts: input.manifestContexts }),
-    ...(input.command === undefined ? {} : { command: input.command })
+    ...(input.command === undefined ? {} : { command: input.command }),
+    ...(input.floorFacts === undefined || Object.keys(input.floorFacts).length === 0 ? {} : { floorFacts: input.floorFacts })
   };
   const answered: SettingsAnswer = options.refusal === undefined ? input.settings : { decision: 'deny', reason: options.refusal.reason, rule: options.refusal.rule };
   const decision = await decideOrRefuse(options.refusal, input.policy.mode, () => decide(request, runtime.bundleState(), async () => answered, gateOptionsOf(runtime)));
-  const gated: GatedCall = { decision, settings: undefined, request, effects: input.effects };
+  const gated: GatedCall = { decision, settings: undefined, request, effects: input.effects, ...(input.resource === undefined ? {} : { resource: input.resource }) };
   keep(runtime, recordFor(runtime, gated, outcomeOf(decision), decision.rule, decision.reason, options.model === undefined ? undefined : { name: options.model, provider: MODEL_PROVIDER }));
   return gated;
 }
@@ -531,7 +677,6 @@ export function unavailableGateRuntime(options: { presence?: GateRuntime['presen
     actor: options.actor ?? UNAVAILABLE_ACTOR,
     presence: options.presence ?? 'person',
     context: options.context ?? 'interactive',
-    floorMode: 'shadow',
     records
   };
 }

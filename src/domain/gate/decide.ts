@@ -6,7 +6,7 @@ import type { ActionPolicy, ActionPolicyMode } from '../policy';
 import { FAILED_CLOSED_VERBS } from './bundle';
 import type { BundleState, GateContextName } from './bundle';
 import { FLOOR_RULE_ORDER, floorFor } from './floor';
-import type { FloorInput, FloorLocations, FloorVerdict } from './floor';
+import type { FloorInput, FloorLocations } from './floor';
 import type { DecisionRecord } from './record';
 import { ROUTE_RULES } from './routing';
 
@@ -60,11 +60,11 @@ export interface SettingsAnswer {
 /** Today's decidePermissionAsync (modes, allow and deny lists, run grants, classifier, safety model, taint holds), handed in so this file stays pure. */
 export type SettingsLayer = (request: GateRequest, effectivePolicy: ActionPolicy) => Promise<SettingsAnswer>;
 
-/** `shadow` decides as today's loop does and only reports what the floor would have done; `enforce` is the default. */
-export type FloorMode = 'shadow' | 'enforce';
-
+/**
+ * What decide() is told besides the request. There is no option that turns the floor off or makes it only report (D-19, GATE-05): the floor applies to every
+ * call, in every mode and context, and nothing a caller, a setting or a bundle passes here changes that.
+ */
 export interface GateOptions {
-  readonly floorMode?: FloorMode;
   /** The home folder and global storage the floor's text checks may name; both optional. */
   readonly locations?: FloorLocations;
 }
@@ -80,8 +80,6 @@ export interface GateDecision {
   /** Whether the card may carry a run-wide grant. Never true for a floor rule. */
   readonly allowGrant: boolean;
   readonly effectiveMode: ActionPolicyMode;
-  /** What the floor would have done, set only in shadow mode when a floor rule matched. */
-  readonly shadowFloor?: FloorVerdict;
 }
 
 /** Where a record goes. `record` must never throw: a record that cannot be kept must not change a decision. */
@@ -95,7 +93,6 @@ export interface GateRuntime {
   readonly actor: ActorRef;
   readonly presence: Presence;
   readonly context: GateContextName;
-  readonly floorMode: FloorMode;
   /** The person's home folder and this extension's global storage, for the floor's checks of shell commands. The host sets them; a test runtime gives a stand-in or none. */
   readonly locations?: FloorLocations;
   /** What a record needs and the pure domain cannot know. The host sets them; a runtime built for a test may leave them out. */
@@ -137,7 +134,7 @@ function ownList<T>(table: Readonly<Partial<Record<string, readonly T[]>>>, key:
   return Object.prototype.hasOwnProperty.call(table, key) ? table[key] : undefined;
 }
 
-type Extra = Partial<Pick<GateDecision, 'reason' | 'floor' | 'offerAlwaysAllow' | 'allowGrant' | 'shadowFloor'>>;
+type Extra = Partial<Pick<GateDecision, 'reason' | 'floor' | 'offerAlwaysAllow' | 'allowGrant'>>;
 
 function make(outcome: GateDecision['outcome'], rule: string, mode: ActionPolicyMode, extra: Extra = {}): GateDecision {
   return { outcome, rule, floor: false, offerAlwaysAllow: false, allowGrant: false, effectiveMode: mode, ...extra };
@@ -166,13 +163,12 @@ function ceilingRefusal(request: GateRequest, bundleState: Extract<BundleState, 
 }
 
 /**
- * The one decision (GATE-04). `bundleState` is what the caller last verified; `settings` is today's permission logic; `options.floorMode` is `shadow` only
- * while the floor is being introduced (it returns exactly today's decision and reports the floor's verdict in `shadowFloor`) and `enforce` by default.
+ * The one decision (GATE-04). `bundleState` is what the caller last verified; `settings` is today's permission logic. The floor is always enforced (D-19):
+ * a floor refusal has no card, and a floor ask has no "always allow" and no run-wide grant, in every mode, fully-autonomous included.
  * Order: emergency stop, bundle state, floor, bundle ceiling, labels, settings layer. A refusal from an earlier layer is never undone by a later one, and
  * a deny from the settings layer (the deny list) still beats a floor ask.
  */
 export async function decide(request: GateRequest, bundleState: BundleState, settings: SettingsLayer, options: GateOptions = {}): Promise<GateDecision> {
-  const floorMode: FloorMode = options.floorMode ?? 'enforce';
   const policy = request.policy;
   if (policy.emergencyStop) return make('deny', 'settings.emergency-stop', policy.mode, { reason: 'Emergency stop is on.' });
   if (bundleState.state === 'failed-closed') {
@@ -191,35 +187,32 @@ export async function decide(request: GateRequest, bundleState: BundleState, set
   }
   const mode: ActionPolicyMode = bundleState.state === 'valid' ? effectiveMode(policy.mode, bundleState.bundle.ceiling.maxMode[request.context]) : 'approve-risky';
   const verdict = floorFor(request, options.locations);
-  const shadow = floorMode === 'shadow' && verdict !== undefined ? { shadowFloor: verdict } : {};
-  // Shadow mode keeps today's one refusal, the key folder, and only reports the rest.
-  if (verdict !== undefined && verdict.kind === 'refuse' && (floorMode === 'enforce' || verdict.rule === 'floor.state-keys')) {
-    return make('deny', verdict.rule, mode, { reason: verdict.reason, floor: true, ...shadow });
-  }
+  if (verdict !== undefined && verdict.kind === 'refuse') return make('deny', verdict.rule, mode, { reason: verdict.reason, floor: true });
   if (bundleState.state === 'valid') {
     const refusal = ceilingRefusal(request, bundleState);
-    if (refusal !== undefined) return make('deny', refusal.rule, mode, { reason: refusal.reason, ...shadow });
+    if (refusal !== undefined) return make('deny', refusal.rule, mode, { reason: refusal.reason });
   }
-  if (request.labelVerdict !== undefined) return make('deny', request.labelVerdict.rule, mode, { reason: request.labelVerdict.reason, ...shadow });
+  if (request.labelVerdict !== undefined) return make('deny', request.labelVerdict.rule, mode, { reason: request.labelVerdict.reason });
   const answer = await settings(request, { ...policy, mode });
-  if (answer.decision === 'deny') return make('deny', answer.rule, mode, { ...(answer.reason === undefined ? {} : { reason: answer.reason }), ...shadow });
-  if (verdict !== undefined && verdict.kind === 'ask' && floorMode === 'enforce') {
+  if (answer.decision === 'deny') return make('deny', answer.rule, mode, answer.reason === undefined ? {} : { reason: answer.reason });
+  if (verdict !== undefined && verdict.kind === 'ask') {
     // No person to answer means no way through: a floor ask is refused, never approved by default (D-43).
     return request.presence === 'none'
       ? make('deny', verdict.rule, mode, { reason: `${NOBODY_HERE}${verdict.reason}`, floor: true })
       : make('ask', verdict.rule, mode, { reason: verdict.reason, floor: true });
   }
-  // Today's loop, line 631: a held action asks in every mode and offers no run-wide grant; a sensitive read that would be allowed asks unless fully-autonomous.
+  // Today's loop, line 631: a held action asks in every mode and offers no run-wide grant; a sensitive call that would be allowed asks unless the mode is
+  // fully-autonomous. A protected write never gets here (the floor asked above), so in fully-autonomous only a workspace credential-file read, such as
+  // `.env`, runs without asking (D-18, D-19).
   if (request.risky !== undefined && request.risky !== '') {
-    return make('ask', 'taint.held', mode, { reason: request.risky, offerAlwaysAllow: true, ...shadow });
+    return make('ask', 'taint.held', mode, { reason: request.risky, offerAlwaysAllow: true });
   }
   if (request.sensitive !== undefined && request.sensitive !== '' && answer.decision === 'allow' && mode !== 'fully-autonomous') {
-    return make('ask', 'settings.sensitive-read', mode, { reason: request.sensitive, offerAlwaysAllow: true, allowGrant: true, ...shadow });
+    return make('ask', 'settings.sensitive-read', mode, { reason: request.sensitive, offerAlwaysAllow: true, allowGrant: true });
   }
   const capped = mode !== policy.mode && answer.decision === 'ask' && answer.rule.startsWith('settings.mode.');
   return make(answer.decision, capped ? 'bundle.ceiling.mode' : answer.rule, mode, {
     ...(answer.reason === undefined ? {} : { reason: answer.reason }),
-    ...(answer.decision === 'ask' ? { offerAlwaysAllow: true, allowGrant: true } : {}),
-    ...shadow
+    ...(answer.decision === 'ask' ? { offerAlwaysAllow: true, allowGrant: true } : {})
   });
 }

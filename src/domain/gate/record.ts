@@ -71,7 +71,7 @@ export interface DecisionRecordInput {
   readonly tier?: string;
   /** Set when a denial was a failed clearance check, which records disposition 26 (Unauthorized). */
   readonly clearanceFailure?: boolean;
-  /** The floor rule the enforced floor would have applied while it only reports (shadow mode). */
+  /** The floor rule a shadow floor would have applied. Only 0.4.28, whose floor only reported, wrote it; the floor is enforced now and nothing sets it. Kept so records of that version still read. */
   readonly shadowFloor?: string;
 }
 

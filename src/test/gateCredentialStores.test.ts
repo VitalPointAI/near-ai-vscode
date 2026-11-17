@@ -88,7 +88,7 @@ test('floorFactsFor gives the credential-store and identity facts for a shell ca
   }
 });
 
-test('in shadow, every mode decides as today and records what the floor would have refused', async () => {
+test('in every mode, a command that reaches a credential store or the identity folders is refused by the floor with no card', async () => {
   const cases: Array<[string, string]> = [['cd ~ && cat .netrc', 'floor.credential-store'], ['cat ~/.ss*/id_rsa', 'floor.credential-store'], [`cd ${STORAGE} && cat gate/policy-bundle.json`, 'floor.identity-files']];
   for (const mode of ['approve-risky', 'mostly-autonomous', 'auto', 'fully-autonomous'] as const) {
     for (const [command, rule] of cases) {
@@ -97,9 +97,10 @@ test('in shadow, every mode decides as today and records what the floor would ha
         tool: bashTool, raw: { command }, root: ROOT, callId: `${mode}-${command}`, command, shell: { cwd: ROOT },
         policy: { mode, emergencyStop: false }, rules: DEFAULT_RULES, grants: new RunGrants(), buildAuto: async () => undefined
       });
-      assert.equal(gated.decision.outcome, gated.settings?.decision, `${mode} ${command}: today's settings layer decides`);
-      assert.equal(gated.decision.floor, false);
-      assert.equal(gated.decision.shadowFloor?.rule, rule, `${mode} ${command}`);
+      assert.equal(gated.decision.outcome, 'deny', `${mode} ${command}`);
+      assert.equal(gated.decision.rule, rule, `${mode} ${command}`);
+      assert.equal(gated.decision.floor, true);
+      assert.equal(gated.settings, undefined, `${mode} ${command}: refused before the settings layer is asked`);
     }
   }
 });

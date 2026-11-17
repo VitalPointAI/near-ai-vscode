@@ -8,7 +8,7 @@
 import { randomUUID } from 'node:crypto';
 import { failedClosed } from '../domain/gate/bundle';
 import type { BundleState, GateContextName } from '../domain/gate/bundle';
-import type { ActorRef, FloorMode, GateRuntime, Presence } from '../domain/gate/decide';
+import type { ActorRef, GateRuntime, Presence } from '../domain/gate/decide';
 import { buildDecisionRecord } from '../domain/gate/record';
 import type { DecisionOutcome, DecisionRecord } from '../domain/gate/record';
 import type { SecretStorageLike } from '../services/auth';
@@ -49,7 +49,6 @@ export interface RuntimeRequest {
   readonly actor: Omit<ActorRef, 'deviceFingerprint'>;
   readonly presence: Presence;
   readonly context: GateContextName;
-  readonly floorMode: FloorMode;
 }
 
 function detailOf(error: unknown): string {
@@ -100,7 +99,7 @@ export class GateHost {
   }
 
   /**
-   * The runtime of one run: who is acting, whether a person is there, the context and the floor mode, over this host's state and the project's log. It waits
+   * The runtime of one run: who is acting, whether a person is there and the context, over this host's state and the project's log. It waits
    * (for at most `startWaitMs`) for the start to finish, so a run begun during activation is decided with the real bundle. A start that fails or does not
    * finish in time gives a runtime that is failed closed with a plain sentence, until the start does finish.
    */
@@ -119,7 +118,6 @@ export class GateHost {
       actor: { ...request.actor, deviceFingerprint: this.deviceFingerprint() },
       presence: request.presence,
       context: request.context,
-      floorMode: request.floorMode,
       locations: { globalStorage: this.options.globalStorageDir, ...(this.options.home === undefined ? {} : { home: this.options.home }) },
       productVersion: this.options.productVersion,
       clock: () => this.now(),
@@ -276,9 +274,9 @@ export class GateHost {
 }
 
 /**
- * The runtime of a run nobody watches (a comparison task, a role test): presence none, an unattended context, the floor in shadow. `root` is the open project,
+ * The runtime of a run nobody watches (a comparison task, a role test): presence none and an unattended context, so a floor ask is refused. `root` is the open project,
  * or none (undefined or empty) for a window with no folder: the per-install policy is still the real one, only the project log is missing.
  */
 export function unattendedRuntimeFor(host: Pick<GateHost, 'runtimeFor'>, root: string | undefined, sessionId: string, agentLabel: string): Promise<GateRuntime> {
-  return host.runtimeFor({ ...(root ? { root } : {}), actor: { kind: 'agent', sessionId, agentLabel }, presence: 'none', context: 'unattended', floorMode: 'shadow' });
+  return host.runtimeFor({ ...(root ? { root } : {}), actor: { kind: 'agent', sessionId, agentLabel }, presence: 'none', context: 'unattended' });
 }

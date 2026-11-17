@@ -1,5 +1,7 @@
 // decide() tests (GATE-04, GATE-05, GATE-06, D-08, D-10, D-19, D-43): the layers, in order, over a stubbed settings layer. No key, token or real path is written here.
 import assert from 'node:assert/strict';
+import { readdirSync, readFileSync } from 'node:fs';
+import * as path from 'node:path';
 import test from 'node:test';
 import type { ActionPolicy } from '../domain/policy';
 import { bundleHash, defaultBundlePayload, failedClosed } from '../domain/gate/bundle';
@@ -71,7 +73,7 @@ test('a plain edit with no floor fact is decided by the settings layer alone', a
   assert.equal(decided.floor, false);
 });
 
-// ---- Task 2: failed-closed bundles, the ceiling, presence, shadow mode and the rule list ----
+// ---- Task 2: failed-closed bundles, the ceiling, presence, the always-enforced floor and the rule list ----
 
 const SHELL: Capability = { verb: 'shell', cwd: 'anywhere' };
 
@@ -106,7 +108,7 @@ test('a run with no gate host (the unavailable state) is refused everything but 
   const read = await decide(requestFor([{ verb: 'read', paths: ['src/**'] }, { verb: 'plan' }]), none, allows);
   assert.equal(read.outcome, 'allow');
   for (const effects of [[write(['src/app.ts'])], [SHELL], [{ verb: 'read', paths: ['a'] } as Capability, write(['a'])], []]) {
-    const denied = await decide(requestFor(effects), none, allows, { floorMode: 'shadow' });
+    const denied = await decide(requestFor(effects), none, allows);
     assert.equal(denied.outcome, 'deny');
     assert.equal(denied.rule, 'bundle.unavailable');
     assert.equal(denied.reason, none.sentence);
@@ -191,48 +193,79 @@ test('a label refusal from the caller denies with its own rule and reason', asyn
   assert.equal(decided.reason, 'This file is labelled above your clearance.');
 });
 
-test('shadow mode returns the decision of today\'s loop and reports the enforced floor verdict beside it', async () => {
-  const shadow = { floorMode: 'shadow' } as const;
-  // A protected write that is also "sensitive" today: asks outside fully-autonomous, allowed inside it.
+// The shadow-mode cases of PR 2, kept with the same inputs: the option that made them only report is gone (D-19), so each now asserts the enforced outcome.
+test('the floor is always enforced: the inputs that shadow mode only reported now ask or refuse in every mode, and everything else decides as before', async () => {
+  // A protected write that is also "sensitive" today: the floor asks in approve-risky, with no grant and no always-allow.
   const sensitive = 'That writes into .git.';
   const write1 = requestFor([write(['.git/hooks/pre-commit'])], { sensitive, policy: policyOf('approve-risky') });
-  const asks = await decide(write1, validBundleState(), async () => ({ decision: 'allow', rule: 'settings.mode.other' }), shadow);
+  const asks = await decide(write1, validBundleState(), async () => ({ decision: 'allow', rule: 'settings.mode.other' }));
   assert.equal(asks.outcome, 'ask');
-  assert.equal(asks.rule, 'settings.sensitive-read');
-  assert.equal(asks.floor, false);
-  assert.equal(asks.shadowFloor?.rule, 'floor.protected-write');
-  const quiet = await decide(requestFor([write(['.git/hooks/pre-commit'])], { sensitive }), validBundleState(), allows, shadow);
-  assert.equal(quiet.outcome, 'allow', 'today, fully-autonomous writes into .git without asking');
-  assert.equal(quiet.shadowFloor?.rule, 'floor.protected-write');
-  assert.equal(quiet.floor, false);
-  // A held action asks in every mode, with no run-wide grant.
-  const held = await decide(requestFor([SHELL], { command: 'curl x', tool: 'Bash', risky: 'This run read outside content.' }), validBundleState(), allows, shadow);
+  assert.equal(asks.rule, 'floor.protected-write');
+  assert.equal(asks.floor, true);
+  assert.equal(asks.offerAlwaysAllow, false);
+  assert.equal(asks.allowGrant, false);
+  // Fully-autonomous no longer writes into .git without asking.
+  const quiet = await decide(requestFor([write(['.git/hooks/pre-commit'])], { sensitive }), validBundleState(), allows);
+  assert.equal(quiet.outcome, 'ask', 'fully-autonomous asks before writing into .git');
+  assert.equal(quiet.rule, 'floor.protected-write');
+  assert.equal(quiet.floor, true);
+  assert.equal(quiet.allowGrant, false);
+  // A held action asks in every mode, with no run-wide grant, as before.
+  const held = await decide(requestFor([SHELL], { command: 'curl x', tool: 'Bash', risky: 'This run read outside content.' }), validBundleState(), allows);
   assert.equal(held.outcome, 'ask');
   assert.equal(held.rule, 'taint.held');
   assert.equal(held.allowGrant, false);
-  // The key folder is still refused with no card, exactly as tool.forbidden does today.
-  const keys = await decide(requestFor([SHELL], { command: 'cat .near-ai/state/keys/local.key', tool: 'Bash', forbidden: 'That names the key folder.' }), validBundleState(), allows, shadow);
+  // The key folder is refused with no card, as before.
+  const keys = await decide(requestFor([SHELL], { command: 'cat .near-ai/state/keys/local.key', tool: 'Bash', forbidden: 'That names the key folder.' }), validBundleState(), allows);
   assert.equal(keys.outcome, 'deny');
   assert.equal(keys.rule, 'floor.state-keys');
-  assert.equal(keys.shadowFloor?.rule, 'floor.state-keys');
-  // The credential store, publish and destroy are only reported.
-  for (const [rule, shape] of [
-    ['floor.credential-store', { effects: [SHELL], command: 'cat ~/.ssh/id_rsa', tool: 'Bash' }],
-    ['floor.publish', { effects: [{ verb: 'publish', target: 'registry' } as Capability] }],
-    ['floor.destroy', { effects: [{ verb: 'destroy', paths: ['build/**'] } as Capability] }]
+  assert.equal(keys.floor, true);
+  // The credential store is refused; publish and destroy ask, in fully-autonomous too.
+  for (const [rule, outcome, shape] of [
+    ['floor.credential-store', 'deny', { effects: [SHELL], command: 'cat ~/.ssh/id_rsa', tool: 'Bash' }],
+    ['floor.publish', 'ask', { effects: [{ verb: 'publish', target: 'registry' } as Capability] }],
+    ['floor.destroy', 'ask', { effects: [{ verb: 'destroy', paths: ['build/**'] } as Capability] }]
   ] as const) {
-    const reported = await decide(requestFor([...shape.effects], shape), validBundleState(), allows, shadow);
-    assert.equal(reported.outcome, 'allow', rule);
-    assert.equal(reported.shadowFloor?.rule, rule);
+    const enforced = await decide(requestFor([...shape.effects], shape), validBundleState(), allows);
+    assert.equal(enforced.outcome, outcome, rule);
+    assert.equal(enforced.rule, rule);
+    assert.equal(enforced.floor, true, rule);
+    assert.equal(enforced.offerAlwaysAllow, false, rule);
+    assert.equal(enforced.allowGrant, false, rule);
   }
-  const none = await decide(requestFor([write(['src/a.ts'])]), validBundleState(), allows, shadow);
-  assert.equal(none.shadowFloor, undefined);
+  const none = await decide(requestFor([write(['src/a.ts'])]), validBundleState(), allows);
+  assert.equal(none.outcome, 'allow', 'a write the floor does not cover runs in fully-autonomous as before');
+  assert.equal(none.floor, false);
 });
 
-test('enforce is the default and reports no shadowFloor', async () => {
-  const decided = await decide(requestFor([write(['.git/hooks/pre-commit'])]), validBundleState(), allows);
+test('no option turns the floor off: decide() ignores a floorMode it is handed, and no runtime or request carries one', async () => {
+  const sneaky = { floorMode: 'shadow' } as unknown as Parameters<typeof decide>[3];
+  const decided = await decide(requestFor([write(['.git/hooks/pre-commit'])]), validBundleState(), allows, sneaky);
   assert.equal(decided.outcome, 'ask');
-  assert.equal(decided.shadowFloor, undefined);
+  assert.equal(decided.rule, 'floor.protected-write');
+  assert.equal('shadowFloor' in decided, false);
+});
+
+test('source scan: no production file under src names a floor mode, so nothing can put the floor in shadow again (GATE-05, D-19)', () => {
+  const src = path.resolve(__dirname, '..', '..', 'src');
+  const offenders: string[] = [];
+  let scanned = 0;
+  const walk = (folder: string): void => {
+    for (const entry of readdirSync(folder, { withFileTypes: true })) {
+      const full = path.join(folder, entry.name);
+      // The tests name the old option on purpose, to prove it is ignored or absent; every other file is the product.
+      if (entry.isDirectory()) { if (full !== path.join(src, 'test')) walk(full); continue; }
+      if (!/\.(ts|tsx|js|mjs|cjs)$/.test(entry.name)) continue;
+      scanned += 1;
+      const text = readFileSync(full, 'utf8');
+      for (const needle of ['floorMode', 'FloorMode', "'shadow' | 'enforce'", "floorMode: 'shadow'"]) {
+        if (text.includes(needle)) offenders.push(`${path.relative(src, full)}: ${needle}`);
+      }
+    }
+  };
+  walk(src);
+  assert.ok(scanned > 100, `the scan read the product's files (${scanned})`);
+  assert.deepEqual(offenders, []);
 });
 
 test('GATE_RULE_IDS lists every rule id once, including the floor, bundle, manifest, label, route, taint and settings ids', () => {
@@ -279,13 +312,13 @@ test('an empty effect list with nobody present, or in an unattended context, is 
   }
 });
 
-test('an empty effect list is never asked past a failed-closed bundle, is the same rule in either floor mode, and the emergency stop still comes first', async () => {
+test('an empty effect list is never asked past a failed-closed bundle, keeps its own rule over a valid bundle, and the emergency stop still comes first', async () => {
   const settings = countingSettings();
   const closed = await decide(requestFor([]), failedClosed('missing'), settings.layer);
   assert.equal(closed.rule, 'bundle.failed-closed');
   assert.equal(closed.outcome, 'deny');
-  const shadowed = await decide(requestFor([]), validBundleState(), settings.layer, { floorMode: 'shadow' });
-  assert.equal(shadowed.rule, 'manifest.effects-unknown');
+  const enforced = await decide(requestFor([]), validBundleState(), settings.layer);
+  assert.equal(enforced.rule, 'manifest.effects-unknown');
   const stopped = await decide(requestFor([], { policy: { mode: 'fully-autonomous', emergencyStop: true } }), validBundleState(), settings.layer);
   assert.equal(stopped.rule, 'settings.emergency-stop');
   assert.equal(stopped.outcome, 'deny');

@@ -38,7 +38,7 @@ function reasonOf(state: BundleState): string | undefined {
 test('a policy that has expired stays expired when the clock is set back, for the host, a run\'s runtime and the host\'s own time', async () => {
   await withHost(async ({ host, setNow }) => {
     assert.equal((await host.start()).state, 'valid');
-    const runtime = await host.runtimeFor({ actor: { kind: 'agent', sessionId: 's' }, presence: 'person', context: 'interactive', floorMode: 'shadow' });
+    const runtime = await host.runtimeFor({ actor: { kind: 'agent', sessionId: 's' }, presence: 'person', context: 'interactive' });
     const expired = T0 + (SELF_SIGNED_LIFETIME_DAYS + 1) * DAY;
     setNow(expired);
     assert.equal(reasonOf(host.bundleState()), 'expired');
