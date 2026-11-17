@@ -8,7 +8,9 @@
 //     "formatVersion": 1,                 a reader refuses a newer version with a plain message instead of guessing
 //     "team": { "name", "description", "members", "markdown" },   the team file exactly as Team Studio saves it, plus a summary to check it against
 //     "knowledge": null | { ... },        the team's knowledge graph, only when the person chose to include it (off by default), cleaned first
-//     "listing": null,                    reserved for a later agent marketplace listing; always null in version 1
+//     "icon": "<base64>" | null,          version 2 only (0.4.30): the team's icon, a 128 x 128 PNG; a team without one is shared as version 1, which
+//                                         every earlier build reads
+//     "listing": null,                    reserved for a later agent marketplace listing; always null
 //     "integrity": "sha256-<base64>"      a digest of the team text and the knowledge, in the Subresource Integrity form npm lockfiles use
 //   }
 //
@@ -26,25 +28,33 @@ import { findSecrets } from '../domain/team/secrets';
 import { redactSecrets } from '../domain/redaction';
 import type { TeamKnowledge } from '../domain/teamKnowledge';
 import { parseTeam, type TeamDefinition } from './teams';
+import { checkTeamIcon, decodeIconBase64, TeamIconError } from './teamIcon';
 
 export const TEAM_PACKAGE_FORMAT = 'near-ai-team';
 export const TEAM_PACKAGE_VERSION = 1;
+/** The format of a share file that carries the team's icon (0.4.30). A build that reads only version 1 says it was shared from a newer version. */
+export const TEAM_PACKAGE_ICON_VERSION = 2;
 export const TEAM_PACKAGE_EXTENSION = '.near-team.json';
 /** Larger than any team file Team Studio can save with a knowledge graph; anything bigger is refused before it is parsed. */
 export const MAX_TEAM_PACKAGE_BYTES = 2 * 1024 * 1024;
 
 export interface TeamPackage {
   format: typeof TEAM_PACKAGE_FORMAT;
-  formatVersion: typeof TEAM_PACKAGE_VERSION;
+  formatVersion: typeof TEAM_PACKAGE_VERSION | typeof TEAM_PACKAGE_ICON_VERSION;
   team: { name: string; description: string; members: number; markdown: string };
   knowledge: TeamKnowledge | null;
+  /** Version 2 only: the team's icon as base64, or null. */
+  icon?: string | null;
   /** Reserved for a listing in the agent marketplace exchange, which is not built. Always null in version 1. */
   listing: null;
   integrity: string;
 }
 
-/** What an import shows the person before asking: the team as parsed, and how much knowledge comes with it. */
-export interface ReadPackage { markdown: string; team: TeamDefinition; knowledge: TeamKnowledge | null; facts: number }
+/**
+ * What an import shows the person before asking: the team as parsed, and how much knowledge comes with it. `icon`: the team's icon, checked like any
+ * other; `iconProblem`: why one the file carried was left out (the team is still imported).
+ */
+export interface ReadPackage { markdown: string; team: TeamDefinition; knowledge: TeamKnowledge | null; facts: number; icon?: Buffer; iconProblem?: string }
 
 // ---- local paths ----
 
@@ -119,21 +129,28 @@ export function cleanKnowledge(knowledge: TeamKnowledge, home?: string): TeamKno
   return findSecrets(result).length ? undefined : result;
 }
 
-function integrityOf(markdown: string, knowledge: TeamKnowledge | null): string {
-  return `sha256-${createHash('sha256').update(JSON.stringify([markdown, knowledge])).digest('base64')}`;
+/** The digest: of the team text and the knowledge in version 1, and of the icon too in version 2, so an icon swapped after export is caught. */
+function integrityOf(markdown: string, knowledge: TeamKnowledge | null, icon?: unknown): string {
+  return `sha256-${createHash('sha256').update(JSON.stringify(icon === undefined ? [markdown, knowledge] : [markdown, knowledge, icon])).digest('base64')}`;
 }
 
-/** The share file for a team, as text. `knowledge` must already be cleaned (cleanKnowledge) and is included only when given. */
-export function buildTeamPackage(markdown: string, file: string, knowledge?: TeamKnowledge): string {
+/**
+ * The share file for a team, as text. `knowledge` must already be cleaned (cleanKnowledge) and is included only when given. `icon` (0.4.30) is the team's
+ * icon, checked again here; with one the file is version 2, without one exactly the version 1 file every earlier build reads.
+ */
+export function buildTeamPackage(markdown: string, file: string, knowledge?: TeamKnowledge, icon?: Uint8Array): string {
   const team = parseTeam(markdown, file);
   const included = knowledge ?? null;
+  if (icon) { const problem = checkTeamIcon(icon); if (problem) throw new TeamIconError(problem); }
+  const encoded = icon ? Buffer.from(icon).toString('base64') : undefined;
   const pkg: TeamPackage = {
     format: TEAM_PACKAGE_FORMAT,
-    formatVersion: TEAM_PACKAGE_VERSION,
+    formatVersion: encoded ? TEAM_PACKAGE_ICON_VERSION : TEAM_PACKAGE_VERSION,
     team: { name: team.name, description: team.description, members: team.members.length, markdown },
     knowledge: included,
+    ...(encoded ? { icon: encoded } : {}),
     listing: null,
-    integrity: integrityOf(markdown, included)
+    integrity: integrityOf(markdown, included, encoded)
   };
   return `${JSON.stringify(pkg, null, 2)}\n`;
 }
@@ -213,22 +230,33 @@ export function readTeamPackage(text: string): ReadPackage {
   try { value = JSON.parse(text); } catch { throw new TeamPackageError(NOT_A_TEAM); }
   if (!isPlain(value) || value.format !== TEAM_PACKAGE_FORMAT) throw new TeamPackageError(NOT_A_TEAM);
   if (typeof value.formatVersion !== 'number' || !Number.isInteger(value.formatVersion)) throw new TeamPackageError(NOT_A_TEAM);
-  if (value.formatVersion > TEAM_PACKAGE_VERSION) throw new TeamPackageError('This team was shared from a newer version of NEAR AI. Update the extension, then import it again.');
-  if (value.formatVersion !== TEAM_PACKAGE_VERSION) throw new TeamPackageError(NOT_A_TEAM);
-  const keys = ['format', 'formatVersion', 'team', 'knowledge', 'listing', 'integrity'];
+  if (value.formatVersion > TEAM_PACKAGE_ICON_VERSION) throw new TeamPackageError('This team was shared from a newer version of NEAR AI. Update the extension, then import it again.');
+  if (value.formatVersion !== TEAM_PACKAGE_VERSION && value.formatVersion !== TEAM_PACKAGE_ICON_VERSION) throw new TeamPackageError(NOT_A_TEAM);
+  const withIcon = value.formatVersion === TEAM_PACKAGE_ICON_VERSION;
+  // Version 2 always says whether it has an icon (the key is there, null for none); version 1 never has the key.
+  const keys = ['format', 'formatVersion', 'team', 'knowledge', ...(withIcon ? ['icon'] : []), 'listing', 'integrity'];
   if (Object.keys(value).some((key) => !keys.includes(key)) || keys.some((key) => !(key in value))) throw new TeamPackageError(DAMAGED);
   const team = value.team;
   if (!isPlain(team) || Object.keys(team).sort().join() !== 'description,markdown,members,name' || typeof team.markdown !== 'string' || typeof team.name !== 'string' || typeof team.description !== 'string' || typeof team.members !== 'number') throw new TeamPackageError(DAMAGED);
   if (value.listing !== null) throw new TeamPackageError(DAMAGED);
   if (value.knowledge !== null && !knowledgeShape(value.knowledge)) throw new TeamPackageError(DAMAGED);
   const knowledge = value.knowledge as TeamKnowledge | null;
-  if (typeof value.integrity !== 'string' || value.integrity !== integrityOf(team.markdown, knowledge)) throw new TeamPackageError(DAMAGED);
+  if (typeof value.integrity !== 'string' || value.integrity !== integrityOf(team.markdown, knowledge, withIcon ? value.icon : undefined)) throw new TeamPackageError(DAMAGED);
   let parsed: TeamDefinition;
   try { parsed = parseTeam(team.markdown, 'imported.md'); } catch (error) { throw new TeamPackageError(`This team file can't be used: ${(error as Error).message}`); }
   if (parsed.name !== team.name || parsed.description !== team.description || parsed.members.length !== team.members) throw new TeamPackageError(DAMAGED);
   if (findSecrets(team.markdown).length || (knowledge && findSecrets(knowledge).length)) throw new TeamPackageError('This team file holds something that looks like a key, token or password, so it was not imported. Ask the sender to remove it and share the team again.');
   const factCount = knowledge ? knowledge.nodes.reduce((total, node) => total + node.facts.length, 0) : 0;
-  return { markdown: team.markdown, team: parsed, knowledge, facts: factCount };
+  return { markdown: team.markdown, team: parsed, knowledge, facts: factCount, ...(withIcon ? sharedIcon(value.icon) : {}) };
+}
+
+/** The icon a share file carries, checked like any icon (it came from someone else): kept when it is one, otherwise left out with the reason. */
+function sharedIcon(value: unknown): { icon?: Buffer; iconProblem?: string } {
+  if (value === null) return {};
+  const bytes = decodeIconBase64(value);
+  if (!bytes) return { iconProblem: 'it is not a usable picture.' };
+  const problem = checkTeamIcon(bytes);
+  return problem ? { iconProblem: problem } : { icon: bytes };
 }
 
 /** A plain team .md file brought in with Import team: the same checks a share file's team text gets. */
@@ -254,5 +282,6 @@ export function memberSummary(team: TeamDefinition): string {
 export function importQuestion(read: ReadPackage): string {
   const team = read.team;
   const plain = (text: string, max: number) => text.replace(/[\u0000-\u001f\u007f\u2028\u2029]+/g, ' ').trim().slice(0, max);
-  return `Add the team "${plain(team.name, 80)}" to your teams?${team.description ? ` ${plain(team.description, 200)}.` : ''} ${team.members.length} member${team.members.length === 1 ? '' : 's'}: ${memberSummary(team)}.${read.facts ? ` It comes with a knowledge graph of ${read.facts} fact${read.facts === 1 ? '' : 's'}.` : ''} It stays untrusted: the first time it runs you are asked to approve it.`;
+  const icon = read.icon ? ' It comes with its own icon.' : read.iconProblem ? ` Its icon is left out: ${read.iconProblem}` : '';
+  return `Add the team "${plain(team.name, 80)}" to your teams?${team.description ? ` ${plain(team.description, 200)}.` : ''} ${team.members.length} member${team.members.length === 1 ? '' : 's'}: ${memberSummary(team)}.${read.facts ? ` It comes with a knowledge graph of ${read.facts} fact${read.facts === 1 ? '' : 's'}.` : ''}${icon} It stays untrusted: the first time it runs you are asked to approve it.`;
 }

@@ -1322,6 +1322,14 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
         }
         if (await choose(importQuestion(read), 'Add to my teams') !== 'Add to my teams') { post({ type: 'notice', text: 'Nothing was imported.' }); return; }
         const file = await deps.library.importTeam(read.team.name, read.markdown);
+        // 0.4.30: the icon the file carried, checked when it was read, goes beside the new team under its own name. Without one, the imported text's
+        // icon line is removed, so it can never show an icon file it happens to name (one left in the library folder, say).
+        let iconNote = '';
+        if (read.icon) { await deps.library.setIcon(file, read.icon); iconNote = ' Its icon was added too.'; }
+        else {
+          await deps.library.removeIcon(file);
+          if (read.iconProblem) iconNote = ` Its icon was left out: ${read.iconProblem}`;
+        }
         let knowledgeNote = '';
         if (read.knowledge) {
           const target = knowledgeFile(deps.library.directory, teamKnowledgeKey(file));
@@ -1333,7 +1341,7 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
           }
         }
         await refreshLibrary();
-        await sendTeam(`user:${slugify(path.basename(file, '.md'))}`, file, `Added "${read.team.name}" to your teams. It is not trusted yet: the first time it runs, you are asked to approve it.${knowledgeNote}`);
+        await sendTeam(`user:${slugify(path.basename(file, '.md'))}`, file, `Added "${read.team.name}" to your teams. It is not trusted yet: the first time it runs, you are asked to approve it.${knowledgeNote}${iconNote}`);
         return;
       }
       case 'share': {
@@ -1359,8 +1367,11 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
         }
         const target = await deps.pickShareTarget(`${message.id === 'project' ? 'project-team' : path.basename(file, '.md')}${TEAM_PACKAGE_EXTENSION}`);
         if (!target) return;
-        await writeFile(target, buildTeamPackage(markdown, file, knowledge), 'utf8');
-        post({ type: 'notice', text: `Saved "${entry.name}" to ${path.basename(target)}${knowledge ? ' with its knowledge graph' : ''}. Send that file to share the team; whoever imports it sees what it contains and is asked before it is added or run.` });
+        // 0.4.30: the team's icon goes with it (checked again as it is read); a team without one is shared as a version 1 file every build reads.
+        const icon = await deps.library.readIcon(file, markdown);
+        await writeFile(target, buildTeamPackage(markdown, file, knowledge, icon), 'utf8');
+        const extras = [...(knowledge ? ['its knowledge graph'] : []), ...(icon ? ['its icon'] : [])];
+        post({ type: 'notice', text: `Saved "${entry.name}" to ${path.basename(target)}${extras.length ? ` with ${extras.join(' and ')}` : ''}. Send that file to share the team; whoever imports it sees what it contains and is asked before it is added or run.` });
         return;
       }
       case 'versions': {

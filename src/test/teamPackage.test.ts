@@ -319,7 +319,7 @@ test('a share file whose knowledge graph is malformed anywhere inside is refused
 
 // ---------- 0.4.30: the team's icon travels with it ----------
 
-const DAMAGED_FILE = /^This team file was changed or damaged after it was shared, so it was not imported\. Ask for the file again\.$/;
+const DAMAGED_FILE = (error: unknown) => error instanceof TeamPackageError && /^This team file was changed or damaged after it was shared, so it was not imported\. Ask for the file again\.$/.test(error.message);
 /** A share file as a sender could make it, with its digest right, whatever the icon holds. */
 function forged(icon: unknown, formatVersion = 2): string {
   const { createHash } = require('node:crypto') as typeof import('node:crypto');
