@@ -6,6 +6,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
 import { CLEARANCE_SELF_ASSERTED_TEXT, LABELS_NOT_ACCREDITATION_TEXT } from '../domain/gate/labels';
+import { USE_BRANCH_LABELS_ACTION } from '../gate/labelMapStore';
 import { FLOOR_CANNOT_SEE_TEXT, FLOOR_EFFECTS_CANNOT_SEE_TEXT, namesCredentialStore } from '../domain/gate/floor';
 import { classifyCommand, MAX_COMMAND_LENGTH, MAX_NESTING } from '../agent/commandSafety';
 import { BUNDLE_FAILURES } from '../domain/gate/bundle';
@@ -360,7 +361,7 @@ test('SECURITY.md\'s labels bullet says what 4b makes live, carries both texts w
   const words = flat(policySection);
   for (const phrase of [setLabel, edit, applyDraft, '`.planning/.near-ai/labels.json`, signed with your device key, and travel with the project',
     'anyone who can read the project can read its labels, compartment names included', 'only ever makes a label stricter', 'signed again only after you confirm',
-    'deleted or replaced by an older copy, stops agents reading the project', 'through the file tools, searches or a command that names it',
+    'or that was deleted, stops agents reading the project', 'through the file tools, searches or a command that names it',
     'Decision records hold the labels involved and stay on this computer', 'A label does not change where content is sent yet']) {
     assert.ok(words.includes(phrase), phrase);
   }
@@ -376,4 +377,18 @@ test('README names Set Label, Edit Policy and Apply Policy Draft, says labels do
   assert.ok(words.includes('(SECURITY.md#your-policy-file-and-decision-records)'));
   assert.ok(!readmePolicy.includes(EM_DASH));
   assert.doesNotMatch(readmePolicy, /NEAR organization/);
+});
+
+// D-61, D-62, D-63: the owner's answers to PR 4b's questions, said in the policy section in the code's own words.
+test('SECURITY.md says a branch switch holds reads with Use this branch\'s labels, the marker is in secret storage, and the Open-GSD runtime is read at the default label', () => {
+  const words = flat(policySection);
+  for (const phrase of [
+    `with one button, ${USE_BRANCH_LABELS_ACTION}, that makes its labels the current ones`,
+    'for example after switching branches',
+    "in this computer's secret storage, so deleting files does not make it forget",
+    'for example with git restore',
+    "Reading NEAR AI's own Open-GSD runtime files is judged at the default label",
+    "a link from there into the project keeps the project file's label"
+  ]) assert.ok(words.includes(phrase), phrase);
+  assert.ok(!policySection.includes(EM_DASH));
 });

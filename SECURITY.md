@@ -335,9 +335,16 @@ is what that file and the records beside it do in this version.
   secret. A label file NEAR AI cannot verify (changed by hand, merged, or signed
   on another computer) only ever makes a label stricter, and it is signed
   again only after you confirm. A label file that cannot be read, or that was
-  deleted or replaced by an older copy, stops agents reading the project until
-  you put it back or sign the labels this computer last checked again with
-  **NEAR AI: Set Label**. You can set only a label your own clearance covers;
+  deleted, stops agents reading the project until you put it back (for example
+  with git restore) or sign the labels this computer last checked again with
+  **NEAR AI: Set Label**. A signed label file that is older than, or different
+  from, the one this computer last checked (for example after switching
+  branches) also stops agent reads, with one button, Use this branch's labels,
+  that makes its labels the current ones. NEAR AI remembers the label file it
+  last checked in this computer's secret storage, so deleting files does not
+  make it forget. Reading NEAR AI's own Open-GSD runtime files is judged at the
+  default label; a link from there into the project keeps the project file's
+  label. You can set only a label your own clearance covers;
   to add a clearance, use **NEAR AI: Edit Policy** and **NEAR AI: Apply Policy
   Draft**. An agent cannot read a file whose label your clearances do not
   cover, through the file tools, searches or a command that names it; a read
