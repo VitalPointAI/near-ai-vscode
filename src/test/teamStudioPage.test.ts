@@ -19,6 +19,9 @@ import { attachTeamStudio, buildStudioContext, KEPT_WIZARD_TEXT, optimiseTarget,
 import type { DirectoryInput } from '../services/toolsDirectory';
 import { JPEG, png, SVG, WEBP } from './iconFixtures';
 import { withIconReference } from '../agent/teamIcon';
+import { buildDashboard, type DashboardTeam } from '../domain/teamDashboard';
+import type { ActivitySessionSummary } from '../domain/activity';
+import { withTeamRating } from '../agent/teamFrontMatter';
 
 // Team Studio: a visual builder and manager for the Markdown team files, which stay the source of truth.
 
@@ -676,14 +679,16 @@ class FakeDoc {
 }
 
 /** `extra`: more globals for the page (the icon tests give it a fake image decoder). */
-async function runPage(extra: Record<string, unknown> = {}) {
+/** `webviewState`: what the page keeps with VS Code's webview state (getState / setState), so a test can open a page with it and read it back. */
+async function runPage(extra: Record<string, unknown> = {}, options: { state?: unknown } = {}) {
   const doc = new FakeDoc();
   const posts: Array<Record<string, any>> = [];
   const listeners: Array<(event: { data: unknown }) => void> = [];
-  const sandbox = vm.createContext({ ...extra, document: doc, window: { addEventListener: (_type: string, listener: (event: { data: unknown }) => void) => listeners.push(listener) }, acquireVsCodeApi: () => ({ postMessage: (message: Record<string, any>) => posts.push(JSON.parse(JSON.stringify(message))) }), setTimeout, clearTimeout, JSON, Map, Set, Date, String, Boolean, Object, isNaN, Math, Option: function Option(text: string, value: string) { const node = doc.createElement('option'); node.textContent = text; node.value = value; return node; } });
+  const webviewState: { value: unknown } = { value: options.state };
+  const sandbox = vm.createContext({ ...extra, document: doc, window: { addEventListener: (_type: string, listener: (event: { data: unknown }) => void) => listeners.push(listener) }, acquireVsCodeApi: () => ({ postMessage: (message: Record<string, any>) => posts.push(JSON.parse(JSON.stringify(message))), getState: () => webviewState.value, setState: (value: unknown) => { webviewState.value = JSON.parse(JSON.stringify(value)); } }), setTimeout, clearTimeout, JSON, Map, Set, Date, String, Boolean, Object, isNaN, Math, Number, Option: function Option(text: string, value: string) { const node = doc.createElement('option'); node.textContent = text; node.value = value; return node; } });
   vm.runInContext(await readFile(SCRIPT, 'utf8'), sandbox, { timeout: 1000 });
   const byLabel = (label: string) => doc.body.all().find((node) => node.tagName === 'button' && (node.getAttribute('aria-label') === label || (!node.getAttribute('aria-label') && node.textContent === label)));
-  return { doc, posts, dispatch: (data: unknown) => listeners.forEach((listener) => listener({ data })), byLabel, text: () => doc.getElementById('main')!.textContent, wait: () => new Promise((resolve) => setTimeout(resolve, 200)) };
+  return { doc, posts, webviewState, dispatch: (data: unknown) => listeners.forEach((listener) => listener({ data })), byLabel, text: () => doc.getElementById('main')!.textContent, wait: () => new Promise((resolve) => setTimeout(resolve, 200)) };
 }
 
 test('page: the library shows cards with actions, an empty state, and "Use in chat" posts the team id', async () => {
@@ -3561,4 +3566,319 @@ test('host: a Use as is that cannot write the team file says what went wrong in 
     assert.equal(text.includes(h.root), false);
   } finally { await chmod(project, 0o644); }
   h.close();
+});
+
+// ---------- the main page is a dashboard of the person's teams (owner, 2026-11-17) ----------
+// "The Team Studio main page needs to be more of a dashboard of existing teams and their statuses, model setups, stats about them, rating, etc." New team
+// leads to the builder's first screen; the "What should this team be able to produce?" box moved into it (Create a new team > Describe it, and AI drafts it).
+
+const FIRST_TEAM = 'New team: create your first team';
+const MINUTE = 60_000;
+const HOUR_MS = 60 * MINUTE;
+
+function dashSession(id: string, title: string, startedAgo: number, extra: Partial<ActivitySessionSummary> = {}): ActivitySessionSummary {
+  const now = Date.now();
+  return { version: 1, sessionId: `session-${id}-0000`, project: 'p', plans: [], agents: {} as never, models: [], approvals: { required: 0, approved: 0, pending: 0 }, startedAt: new Date(now - startedAgo).toISOString(), updatedAt: new Date(now).toISOString(), outcome: 'completed', continuationAvailable: false, context: { userTurns: 1, assistantTurns: 1 }, events: [], runId: `run-${id}-000000`, title, ...extra };
+}
+const ended = (startedAgo: number, outcome: 'completed' | 'failed' | 'cancelled', cost?: number): Partial<ActivitySessionSummary> => ({ runOutcome: outcome, endedAt: new Date(Date.now() - startedAgo + MINUTE).toISOString(), ...(cost !== undefined ? { estimatedCostUsd: cost } : {}) });
+
+const member = (name: string, privacy: 'tee' | 'forwarded' | 'unknown', extra: Record<string, unknown> = {}) => ({ name, tier: 'deep', model: privacy === 'forwarded' ? 'deepseek/flash' : 'z-ai/glm-5.3', privacy, privacyText: privacy, available: true, ...extra });
+const CLEAN = { block: 0, warning: 0, advice: 0 };
+/** Five teams as the host lists them (no file paths), and the dashboard the host works out for them from a run history. */
+function dashFixture(options: { history?: boolean; running?: boolean } = {}) {
+  const teams = [
+    { id: 'project', kind: 'project', name: 'Project team', description: 'For this repo', command: '/team:project ', rating: 4, check: CLEAN, members: [member('dev', 'tee', { role: 'implementer' })] },
+    { id: 'user:web', kind: 'user', name: 'Web team', description: 'Builds pages', command: '/team:web ', private: true, check: CLEAN, members: [member('lead', 'tee', { role: 'planner' }), member('dev', 'forwarded', { tier: 'standard' })] },
+    { id: 'user:market', kind: 'user', name: 'Market team', description: 'Researches markets', command: '/team:market ', imported: true, check: CLEAN, members: [member('researcher', 'tee')] },
+    { id: 'user:old', kind: 'user', name: 'Old team', description: 'Writes old things', command: '/team:old ', rating: 2, check: { block: 0, warning: 1, advice: 0 }, members: [member('writer', 'unknown', { tier: 'model', model: 'vendor/gone', available: false })] },
+    { id: 'user:fresh', kind: 'user', name: 'Fresh team', description: 'Never used', command: '/team:fresh ', check: CLEAN, members: [member('dev', 'tee'), member('qa', 'tee'), member('docs', 'tee'), member('ops', 'tee'), member('sec', 'tee')] }
+  ];
+  const sessions = [
+    dashSession('p1', '/team:project ship it', 2 * HOUR_MS, ended(2 * HOUR_MS, 'completed', 0.2)),
+    dashSession('p2', '/team:team fix it', 2 * 24 * HOUR_MS, ended(2 * 24 * HOUR_MS, 'completed', 0.1)),
+    dashSession('p3', '/team:project again', 3 * 24 * HOUR_MS, ended(3 * 24 * HOUR_MS, 'failed', 0.15)),
+    dashSession('w1', '/team:web build', 10 * 24 * HOUR_MS, ended(10 * 24 * HOUR_MS, 'completed')),
+    dashSession('x1', 'not a team run', HOUR_MS, ended(HOUR_MS, 'completed', 9))
+  ];
+  const dashboard = buildDashboard({
+    now: Date.now(), history: options.history ?? true, sessions, roleTests: {},
+    running: options.running === false ? [] : [{ runId: 'run-web-123456', slug: 'web' }],
+    teams: teams.map((team): DashboardTeam => ({ id: team.id, kind: team.kind as 'project' | 'user', slug: team.kind === 'project' ? 'team' : team.id.slice(5), file: `/x/${team.id}.md`, ...(team.imported ? { imported: true } : {}), check: team.check, members: team.members }))
+  });
+  return { library: { teams, archived: [{ id: 'archived:gone', name: 'Gone team' }] }, dashboard };
+}
+
+async function dashboardPage(options: { history?: boolean; running?: boolean; hasProject?: boolean; teams?: unknown[]; state?: unknown } = {}) {
+  const page = await runPage({}, { state: options.state });
+  const fixture = dashFixture(options);
+  const library = options.teams ? { teams: options.teams, archived: [] } : fixture.library;
+  const studio = buildStudioContext(input(), { hasProject: options.hasProject ?? true, knowledgeBase: false });
+  page.dispatch({ type: 'state', context: studio, library, dashboard: fixture.dashboard, picker: teamPicker(studio.startingPoints, library.teams as never) });
+  const card = (id: string) => page.doc.body.all().find((node) => node.tagName === 'li' && node.dataset.id === id);
+  const cardIds = () => page.doc.body.all().filter((node) => node.tagName === 'li' && node.dataset.id).map((node) => node.dataset.id);
+  const tile = (id: string) => page.doc.getElementById(id)?.textContent;
+  const stars = (id: string) => page.doc.body.all().filter((node) => node.tagName === 'input' && node.name === `rate-${id.replace(/[^A-Za-z0-9_-]/g, '-')}`);
+  return { ...page, fixture, studio, card, cardIds, tile, stars };
+}
+
+test('page: the main page is a dashboard: a summary row, then one card per team with its identity, status, models, stats, health and rating', async () => {
+  const page = await dashboardPage();
+  assert.equal(page.doc.getElementById('library-title')!.textContent, 'Your teams');
+  // The summary row, every number from the records.
+  assert.equal(page.tile('sum-teams'), '5');
+  assert.equal(page.tile('sum-running'), '1');
+  assert.equal(page.tile('sum-runs'), '3', 'the project team\'s three runs in the last seven days; a run of no team is not counted');
+  assert.equal(page.tile('sum-spend'), '$0.45');
+  assert.equal(page.tile('sum-attention'), '2');
+  // A card for each saved team and the project team; built-in teams are not on the dashboard.
+  assert.deepEqual(page.cardIds().sort(), ['project', 'user:fresh', 'user:market', 'user:old', 'user:web']);
+  const project = page.card('project')!.textContent;
+  assert.match(project, /Project team.*Project team.*Ready.*For this repo/, 'name, kind, status, description');
+  assert.match(project, /dev.*glm-5\.3 \(deep\).*Private/, 'each member\'s model or tier, and its privacy');
+  assert.match(project, /Runs3.*Last run2 hours ago.*Success67% \(2 of 3\).*Average time1 min.*Spend\$0\.45 total, \$0\.15 a run/);
+  assert.match(project, /Health100 out of 100.*Local check: 100\. No problems found\..*Role tests: Not tested yet/);
+  assert.match(project, /Your rating/);
+  assert.equal(page.stars('project').find((node) => node.checked)!.value, '4', 'the rating from the team file');
+  // Identity: one of your teams, imported, private.
+  assert.match(page.card('user:web')!.textContent, /Web team.*One of your teams.*Private/);
+  assert.match(page.card('user:market')!.textContent, /Market team.*Imported/);
+  assert.match(page.card('user:web')!.textContent, /dev.*flash \(standard\).*Cloud/, 'a forwarded model is cloud, not private');
+  // A model that is not in the model directory is flagged on the member.
+  assert.match(page.card('user:old')!.textContent, /writer.*gone.*not in the model directory/);
+  // Five members: four shown, then a count; Show more lists them all.
+  assert.match(page.card('user:fresh')!.textContent, /dev.*qa.*docs.*ops.*\+1 more/);
+  assert.doesNotMatch(page.card('user:fresh')!.textContent, /sec/);
+  page.byLabel('Show more about Fresh team')!.click();
+  assert.match(page.card('user:fresh')!.textContent, /sec/);
+  // The archived teams, collapsed.
+  const archived = page.doc.body.all().find((node) => node.tagName === 'details' && node.className === 'archived')!;
+  assert.equal(archived.open, false);
+  assert.match(archived.textContent, /Archived teams \(1\).*Gone team/);
+  for (const message of page.posts) assert.ok(parseStudioMessage(message), JSON.stringify(message));
+});
+
+test('page: each status: Running now with Watch it live, Ready, Needs attention with the reason, and Never run', async () => {
+  const page = await dashboardPage();
+  const pill = (id: string) => page.card(id)!.all().find((node) => node.classList.contains('pill'))!;
+  assert.deepEqual(['project', 'user:web', 'user:market', 'user:old', 'user:fresh'].map((id) => pill(id).textContent), ['Ready', 'Running now', 'Needs attention', 'Needs attention', 'Never run']);
+  assert.ok(pill('user:web').classList.contains('running'));
+  page.byLabel('Watch Web team live in Team Live')!.click();
+  assert.deepEqual(page.posts.at(-1), { type: 'watch-live', id: 'user:web' });
+  assert.equal(page.byLabel('Watch Project team live in Team Live'), undefined, 'only a team that is running');
+  assert.match(page.card('user:market')!.textContent, /Imported and not approved yet/);
+  assert.match(page.card('user:old')!.textContent, /local check found 1 problem.*writer's model vendor\/gone is not available with your key/);
+  // The fresh team has no runs: its stats say none yet, not zeros.
+  assert.match(page.card('user:fresh')!.textContent, /Runsnone yet.*Last runnever.*Successnone yet.*Average timenone yet.*Spendnone yet/);
+  // A run recorded with no spend: not recorded, never $0.
+  assert.match(page.card('user:web')!.textContent, /Runs1.*Success100% \(1 of 1\).*Spendnot recorded/);
+  // A broken team file: needs attention, Open as Markdown to fix it.
+  const broken = await dashboardPage({ teams: [{ id: 'user:broken', kind: 'user', name: 'broken', description: '', file: '/s/broken.md', error: 'The team needs a name in its frontmatter (name: My team).', members: [] }] });
+  assert.match(broken.card('user:broken')!.textContent, /Needs fixing: The team needs a name/);
+  assert.ok(broken.byLabel('Open broken as Markdown to fix it'));
+});
+
+test('page: with no project folder open the stats say runs are kept per project, and the summary says not recorded', async () => {
+  const page = await dashboardPage({ history: false, running: false, hasProject: false });
+  assert.equal(page.tile('sum-runs'), 'not recorded');
+  assert.equal(page.tile('sum-spend'), 'not recorded');
+  assert.match(page.text(), /Runs and spend are kept per project\. Open a project folder to see them\./);
+  assert.doesNotMatch(page.card('project')!.textContent, /Runs3/);
+});
+
+test('page: the health score shows the parts it is made of: the local check and the last role test', async () => {
+  const page = await runPage();
+  const studio = context();
+  const teams = [{ id: 'user:web', kind: 'user', name: 'Web team', description: 'Builds pages', command: '/team:web ', check: { block: 0, warning: 2, advice: 1 }, members: [member('lead', 'tee')] }];
+  const dashboard = buildDashboard({ now: Date.now(), history: true, sessions: [], running: [], roleTests: { k: { at: '2026-11-10T00:00:00.000Z', members: 1, tested: 1, score: 70 } }, teams: [{ id: 'user:web', kind: 'user', slug: 'web', file: '/x/web.md', check: teams[0]!.check, members: [] }] });
+  dashboard.cards['user:web']!.health = (await import('../domain/teamDashboard')).teamHealth(teams[0]!.check, { at: '2026-11-10T00:00:00.000Z', members: 1, tested: 1, score: 70 });
+  page.dispatch({ type: 'state', context: studio, library: { teams, archived: [] }, dashboard });
+  const text = page.text();
+  assert.match(text, /Health68 out of 100/);
+  assert.match(text, /Local check: 65\. 2 problems and 1 suggestion\. Open the team to see them\./);
+  assert.match(text, /Role tests: 70\. 1 of 1 members passed a role test, 70% on average \(2026-11-10\)\./);
+});
+
+test('page: the star rating is set on the card, saved through the host, kept after a reload, and works from the keyboard and a screen reader', async () => {
+  const page = await dashboardPage();
+  const group = page.doc.body.all().find((node) => node.tagName === 'fieldset' && node.className.includes('stars') && page.card('user:web')!.all().includes(node))!;
+  assert.equal(group.children.find((node) => node.tagName === 'legend')!.textContent, 'Your rating');
+  const stars = page.stars('user:web');
+  // Native radio buttons: one Tab stop, the arrow keys move between them, and each has a name a screen reader says.
+  assert.deepEqual(stars.map((node) => node.type), ['radio', 'radio', 'radio', 'radio', 'radio', 'radio']);
+  const labels = page.card('user:web')!.all().filter((node) => node.tagName === 'label' && node.className.includes('star')).map((node) => node.textContent);
+  assert.deepEqual(labels.map((label) => label.replace('★', '').trim()), ['No rating', '1 star', '2 stars', '3 stars', '4 stars', '5 stars']);
+  assert.equal(stars.find((node) => node.checked)!.value, '0', 'not rated yet');
+  // Choosing 3 stars: shown at once, sent once the choice settles (the arrow keys pass through 1 and 2 on the way).
+  for (const value of ['1', '2', '3']) { const star = stars.find((node) => node.value === value)!; star.checked = true; star.fire('change'); }
+  assert.equal(page.posts.filter((message) => message.type === 'rate').length, 0);
+  await page.wait(); await page.wait();
+  assert.deepEqual(page.posts.filter((message) => message.type === 'rate'), [{ type: 'rate', id: 'user:web', rating: 3 }]);
+  page.dispatch({ type: 'rated', id: 'user:web', rating: 3, text: 'Rated Web team 3 out of 5.' });
+  assert.equal(page.doc.getElementById('announce')!.textContent, 'Rated Web team 3 out of 5.');
+  // A reload (the host lists the team again, now with its rating).
+  const teams = page.fixture.library.teams.map((team) => (team.id === 'user:web' ? { ...team, rating: 3 } : team));
+  page.dispatch({ type: 'library', library: { teams, archived: [] }, dashboard: page.fixture.dashboard });
+  assert.equal(page.stars('user:web').find((node) => node.checked)!.value, '3');
+  assert.match(page.card('user:web')!.all().find((node) => node.tagName === 'fieldset')!.getAttribute('aria-describedby') ? 'described' : '', /described/);
+  // Clearing it.
+  const none = page.stars('user:web').find((node) => node.value === '0')!;
+  none.checked = true; none.fire('change');
+  await page.wait(); await page.wait();
+  assert.deepEqual(page.posts.filter((message) => message.type === 'rate').at(-1), { type: 'rate', id: 'user:web', rating: 0 });
+  // A broken team cannot be rated.
+  const broken = await dashboardPage({ teams: [{ id: 'user:broken', kind: 'user', name: 'broken', description: '', error: 'Bad file.', members: [] }] });
+  assert.equal(broken.stars('user:broken').length, 0);
+  for (const message of page.posts) assert.ok(parseStudioMessage(message), JSON.stringify(message));
+});
+
+test('page: sort by Most used, Recently run, Rating or Name, filter to Needs attention, and the choice is remembered', async () => {
+  const page = await dashboardPage();
+  const sort = page.doc.getElementById('dash-sort')!;
+  assert.deepEqual(sort.children.map((node) => node.textContent), ['Most used', 'Recently run', 'Rating', 'Name']);
+  assert.equal(sort.value, 'used');
+  assert.deepEqual(page.cardIds(), ['project', 'user:web', 'user:fresh', 'user:market', 'user:old'], 'most used first, then by name');
+  const choose = (value: string) => { sort.value = value; sort.fire('change'); };
+  choose('recent');
+  assert.deepEqual(page.cardIds(), ['project', 'user:web', 'user:fresh', 'user:market', 'user:old'], 'the newest run first; teams that never ran last, by name');
+  choose('rating');
+  assert.deepEqual(page.cardIds(), ['project', 'user:old', 'user:fresh', 'user:market', 'user:web'], 'highest rated first; unrated by health, then name');
+  choose('name');
+  assert.deepEqual(page.cardIds(), ['user:fresh', 'user:market', 'user:old', 'project', 'user:web']);
+  const attention = page.doc.getElementById('dash-attention')!;
+  assert.match(page.text(), /Needs attention only \(2\)/);
+  attention.checked = true; attention.fire('change');
+  assert.deepEqual(page.cardIds(), ['user:market', 'user:old']);
+  assert.deepEqual(page.webviewState.value, { dashSort: 'name', dashAttention: true });
+  // Opened again with what was kept: the same order and filter.
+  const again = await dashboardPage({ state: page.webviewState.value });
+  assert.equal(again.doc.getElementById('dash-sort')!.value, 'name');
+  assert.equal(again.doc.getElementById('dash-attention')!.checked, true);
+  assert.deepEqual(again.cardIds(), ['user:market', 'user:old']);
+  // Nothing needs attention: it says so.
+  const calm = await dashboardPage({ teams: [dashFixture().library.teams[0]], state: { dashAttention: true } });
+  assert.match(calm.text(), /No team needs attention\./);
+  // A kept value that is not a choice is ignored.
+  const odd = await dashboardPage({ state: { dashSort: 'nonsense', dashAttention: 'yes' } });
+  assert.equal(odd.doc.getElementById('dash-sort')!.value, 'used');
+  assert.equal(odd.doc.getElementById('dash-attention')!.checked, false);
+});
+
+test('page: the toolbar: New team opens the builder\'s first screen; Optimise all teams, Import and Refresh ask the host; no project-team button there', async () => {
+  const page = await dashboardPage();
+  const toolbar = page.doc.body.all().find((node) => node.className === 'toolbar')!;
+  assert.deepEqual(toolbar.all().filter((node) => node.tagName === 'button').map((node) => node.textContent), ['New team', 'Optimise all teams', 'Import…', 'Refresh']);
+  for (const [label, type] of [['Import…', 'import'], ['Refresh', 'refresh']] as const) { page.byLabel(label)!.click(); assert.equal(page.posts.at(-1)!.type, type); }
+  page.byLabel('Test every team and set each member model from what the tests found, after asking about the cost')!.click();
+  assert.equal(page.posts.at(-1)!.type, 'optimise-all');
+  page.byLabel('New team')!.click();
+  assert.equal(page.doc.getElementById('step-heading')!.textContent, 'How do you want to start?');
+  assert.ok(page.byLabel('Use an existing team') && page.byLabel('Create a new team') && page.byLabel('Recommend a team for me'));
+});
+
+test('page: the "What should this team be able to produce?" box is not on the main page; it is New team > Create a new team > Describe it, and AI drafts it', async () => {
+  const page = await dashboardPage();
+  assert.equal(page.doc.getElementById('ask-idea'), null);
+  assert.doesNotMatch(page.text(), /What should this team be able to produce/);
+  page.byLabel('New team')!.click();
+  page.byLabel('Create a new team')!.click();
+  page.byLabel('Describe it, and AI drafts it')!.click();
+  assert.equal(page.doc.getElementById('step-heading')!.textContent, 'Describe it, and AI drafts it');
+  assert.match(page.text(), /What should this team be able to produce\?/);
+  assert.equal(page.doc.activeElement, page.doc.getElementById('ask-idea'));
+  const idea = page.doc.getElementById('ask-idea')!;
+  idea.value = 'A team that writes release notes'; idea.fire('input');
+  page.byLabel('Draft the team')!.click();
+  assert.deepEqual(page.posts.at(-1), { type: 'draft-team', idea: 'A team that writes release notes', depth: 'thorough' });
+  assert.match(page.text(), /Drafting the team/);
+  page.dispatch({ type: 'team-proposal', ...PROPOSAL });
+  assert.match(page.text(), /Client team.*Use this team/);
+  // Back: Create a new team.
+  page.byLabel('Back')!.click();
+  assert.equal(page.doc.getElementById('step-heading')!.textContent, 'Create a new team');
+  // A drafted team that arrives after the person left the builder is offered, not lost.
+  page.byLabel('Cancel')!.click();
+  page.dispatch({ type: 'team-proposal', ...PROPOSAL });
+  assert.match(page.doc.getElementById('banner')!.textContent, /The team you described is drafted/);
+  page.byLabel('Review the drafted team')!.click();
+  assert.equal(page.doc.getElementById('step-heading')!.textContent, 'Describe it, and AI drafts it');
+  assert.ok(page.byLabel('Use this team'));
+  for (const message of page.posts) assert.ok(parseStudioMessage(message), JSON.stringify(message));
+});
+
+test('page: with a project open and no project team, the first card says so and Set up starts the project team\'s builder', async () => {
+  const page = await dashboardPage({ teams: dashFixture().library.teams.slice(1) });
+  assert.equal(page.cardIds()[0], 'project-empty');
+  assert.match(page.card('project-empty')!.textContent, /No team for this project yet/);
+  page.byLabel('Set up a team for this project')!.click();
+  assert.equal(page.doc.getElementById('step-heading')!.textContent, 'How do you want to start?');
+  assert.match(page.doc.getElementById('crumbs')!.textContent, /New team/);
+  page.byLabel('Create a new team')!.click();
+  page.byLabel('From scratch')!.click();
+  assert.equal(page.doc.body.all().find((node) => node.tagName === 'input' && node.name === 'target' && node.checked)!.value, 'project', 'it saves to this project');
+  // No folder open: no project card at all.
+  const none = await dashboardPage({ teams: dashFixture().library.teams.slice(1), hasProject: false });
+  assert.equal(none.card('project-empty'), undefined);
+  // Filtered to Needs attention: the empty card is not a team that needs it.
+  const filtered = await dashboardPage({ teams: dashFixture().library.teams.slice(1), state: { dashAttention: true } });
+  assert.equal(filtered.card('project-empty'), undefined);
+});
+
+test('page: an empty library is a friendly first run: New team and Set up a team for this project, and no summary of nothing', async () => {
+  const page = await dashboardPage({ teams: [] });
+  assert.match(page.text(), /Create your first team/);
+  assert.equal(page.doc.getElementById('sum-teams'), null);
+  assert.equal(page.doc.getElementById('dash-sort'), null);
+  page.byLabel(FIRST_TEAM)!.click();
+  assert.equal(page.doc.getElementById('step-heading')!.textContent, 'How do you want to start?');
+  page.byLabel('Cancel')!.click();
+  page.byLabel('Set up a team for this project')!.click();
+  assert.equal(page.doc.getElementById('step-heading')!.textContent, 'How do you want to start?');
+  page.byLabel('Cancel')!.click();
+  const noFolder = await dashboardPage({ teams: [], hasProject: false });
+  assert.ok(noFolder.byLabel(FIRST_TEAM));
+  assert.equal(noFolder.byLabel('Set up a team for this project'), undefined);
+});
+
+test('page: Running now and the stats follow the host\'s dashboard updates as runs start and end, without leaving the builder', async () => {
+  const page = await dashboardPage({ running: false });
+  const pill = (id: string) => page.card(id)!.all().find((node) => node.classList.contains('pill'))!.textContent;
+  assert.equal(pill('user:web'), 'Ready');
+  assert.equal(page.tile('sum-running'), '0');
+  page.dispatch({ type: 'dashboard', dashboard: dashFixture({ running: true }).dashboard });
+  assert.equal(pill('user:web'), 'Running now');
+  assert.equal(page.tile('sum-running'), '1');
+  assert.ok(page.byLabel('Watch Web team live in Team Live'));
+  // In the builder the update is kept for later; the builder is not redrawn under the person.
+  page.byLabel('New team')!.click();
+  page.dispatch({ type: 'dashboard', dashboard: dashFixture({ running: false }).dashboard });
+  assert.equal(page.doc.getElementById('step-heading')!.textContent, 'How do you want to start?');
+  page.byLabel('Cancel')!.click();
+  assert.equal(pill('user:web'), 'Ready');
+});
+
+test('page: the saved-draft banner stays on the dashboard, above the cards', async () => {
+  const page = await runPage();
+  const fixture = dashFixture();
+  page.dispatch({ type: 'state', context: context(), library: fixture.library, dashboard: fixture.dashboard, savedDraft: { draft: { name: 'Kept', description: '', members: [] }, step: 1, target: 'user' } });
+  assert.match(page.text(), /You have an unfinished team "Kept" \(step 2 of 5\).*Your teams|Your teams.*You have an unfinished team "Kept"/);
+  page.byLabel('Resume')!.click();
+  assert.equal(page.doc.getElementById('step-heading')!.textContent, 'Members');
+});
+
+test('host to page: the dashboard the host lists for real team files and a real history draws as cards on the page', async () => {
+  const h = await harness();
+  const web = await h.library.create('Web team', withTeamRating(teamMarkdown(draft()), 5));
+  await h.library.create('Lonely team', renderTeam('Lonely team', 'Waits', [{ name: 'dev', role: 'implementer', instructions: 'Build it. Report what changed.' }]));
+  const now = Date.now();
+  h.deps.history = async () => [dashSession('a', '/team:web-team build', HOUR_MS, ended(HOUR_MS, 'completed', 0.3)), dashSession('b', '/team:web-team again', 2 * HOUR_MS, ended(2 * HOUR_MS, 'cancelled', 0.1))];
+  h.deps.runningTeams = () => [{ runId: 'run-x-123456', slug: 'web-team', file: web }];
+  await h.send({ type: 'ready' });
+  const page = await runPage();
+  page.dispatch(last(h, 'state'));
+  const card = (id: string) => page.doc.body.all().find((node) => node.tagName === 'li' && node.dataset.id === id)!;
+  assert.match(card('user:web-team').textContent, /Web team.*Running now.*Runs2.*Success50% \(1 of 2\).*Spend\$0\.40 total, \$0\.20 a run/);
+  assert.equal(card('user:web-team').all().find((node) => node.tagName === 'input' && node.checked && node.name.startsWith('rate-'))!.value, '5');
+  assert.match(card('user:lonely-team').textContent, /Never run/);
+  assert.equal(page.doc.getElementById('sum-runs')!.textContent, '2');
+  assert.ok(now);
 });
