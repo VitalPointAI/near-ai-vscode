@@ -82,15 +82,16 @@ export async function earlierInstallEvidence(gateFolder: string, identityFolder:
   if (names === 'unreadable') return 'the policy folder could not be read';
   if (names.some((name) => name === POLICY_FILE || name.startsWith(ASIDE_MARK))) return 'a policy file is already stored here';
   // Both kinds of log name the policy's hash, so either one remembers an earlier valid policy.
-  for (const folder of [DECISION_LOGS_FOLDER, MODEL_REQUEST_LOGS_FOLDER]) {
+  // Each reason names the kind of log it is about (PR #81 review), so a diagnostic never blames the decision logs for the model-request folder.
+  for (const [folder, kind] of [[DECISION_LOGS_FOLDER, 'decision'], [MODEL_REQUEST_LOGS_FOLDER, 'model-request']] as const) {
     const logsFolder = path.join(gateFolder, folder);
     const logs = await namesIn(logsFolder);
-    if (logs === 'unreadable') return 'the decision logs could not be read';
+    if (logs === 'unreadable') return `the ${kind} logs could not be read`;
     for (const name of logs.filter((entry) => entry.endsWith('.jsonl')).sort().slice(0, MAX_LOG_FILES)) {
       try {
-        if (await logNamesABundle(path.join(logsFolder, name))) return 'a decision log records an earlier valid policy';
+        if (await logNamesABundle(path.join(logsFolder, name))) return `a ${kind} log records an earlier valid policy`;
       } catch {
-        return 'a decision log could not be read';
+        return `a ${kind} log could not be read`;
       }
     }
   }
