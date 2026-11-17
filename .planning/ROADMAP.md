@@ -321,7 +321,7 @@ Plans:
   8. Every cloud answer shows a plain trust badge (Verified private model; Model verified, connection not proven; Not verified) with the full attestation on request, checked automatically on every answer from a TEE model (one signature request per answer, the attestation report reused for 10 minutes; owner, 2026-11-16), and a level that requires attested cloud is sent only after a pre-send check that the connection is bound to the enclave. (CLAS-05, CLAS-08)
 **Research flags**: (1) The capability grammar: start from IronClaw's manifest fields and the Hermes grammar (both in `.planning/research/platform-direction/`), version it, refuse unknown verbs, and reserve verbs for inference routes and GPU devices so later milestones need no grammar change. (2) Migration: approval modes, auto-allow switches, allow rules, protected paths (`src/domain/protectedPaths.ts`) and unattended rules (`src/agent/unattended.ts`) map into the bundle with no change in behaviour except the floor. (3) The relay reuses the vocabulary, but its workspace test lets only `relay/src/runner` import extension code: decide how the types are shared. (4) Labels and routing (`identity-research.md`, section 4): the default label of a fresh install must keep routing as it is today (no behaviour change but the floor); where file and folder labels are stored (a map in the project, not file attributes) and how a label follows a copy, a rename and Phase 72's copy-and-apply; the `attested-cloud` tier reuses the per-request attestation and signature check in `src/services/attestation.ts`, and `local-only` builds on today's local and hybrid profiles. (5) Presets: the NATO list comes only from secondary copies, and modelling the Canadian Protected and Classified families as two scales is the plan's reading, so your organization's security officer confirms both before release; no CCCS Medium (formerly PBMM) assessment of NEAR AI Cloud was found, so Protected B stays local only by default. (6) Not accreditation (research risk 9): the wording of CLAS-07 is checked against what the gate actually guarantees.
 **Undo cost**: High. The vocabulary, the label format and the bundle format are what edge devices hold offline and what anchored roots will commit to (only roots go on chain): settle them before they ship.
-**Plans:** 28 plans (one per wave; after the planning PR, PR 1 is plans 01-07 on `feat/gate-vocabulary`, PR 2 is plans 08-15 on `feat/gate-shadow`, PR 3 is plans 16-18 on `feat/gate-floor`, PR 4 is plans 19-28 on `feat/gate-labels`)
+**Plans:** 32 plans (one per wave; after the planning PR, PR 1 is plans 01-07 on `feat/gate-vocabulary`, PR 2 is plans 08-15 on `feat/gate-shadow`, PR 3 is plans 16-18 on `feat/gate-floor`; part 4 is five PRs (replanned 2026-11-17, D-49): 4a is plans 19 and 28a on `feat/gate-route-check`, 4b is plans 20, 21 and 28b on `feat/gate-labels`, 4c is plans 22, 23, 24 and 28c on `feat/gate-session-mark`, 4d is plans 25 and 28d on `feat/gate-attested-routing`, 4e is plans 26, 27 and 28e on `feat/gate-trust-badge`)
 **UI hint**: yes
 
 Plans:
@@ -380,34 +380,46 @@ Plans:
 - [ ] 70-18-PLAN.md — automated check that PR 2 is on main, rebase, gate, open PR 3 with the owner's open questions
 
 **Wave 19** *(blocked on Wave 18 completion)*
-- [ ] 70-19-PLAN.md — the route check in NearAiClient.request with a session context at every request site (PR 4)
+- [ ] 70-19-PLAN.md: the route check in NearAiClient.request with a session route at every request site, a record for every model request, attested-cloud held to a proven binding, part 4's ids (PR 4a)
 
 **Wave 20** *(blocked on Wave 19 completion)*
-- [ ] 70-20-PLAN.md — signed label maps, Set Label, clearance checks on reads, labels that follow renames (PR 4)
+- [ ] 70-28a-PLAN.md: automated check that PR #76 is on main, rebase, log growth measured, gate, open PR 4a with the D-48 release blocker
 
 **Wave 21** *(blocked on Wave 20 completion)*
-- [ ] 70-21-PLAN.md — Edit Policy and Apply Policy Draft, clearance texts in Show Policy (PR 4)
+- [ ] 70-20-PLAN.md: signed label maps, Set Label, clearance checks on every read path, labels that follow renames, no silent re-signing (PR 4b)
 
 **Wave 22** *(blocked on Wave 21 completion)*
-- [ ] 70-22-PLAN.md — the session high-water mark: raised by reads, shared with sub-agents, written to files, network tools held (PR 4)
+- [ ] 70-21-PLAN.md: Edit Policy and Apply Policy Draft with a stale-draft check, clearance texts in Show Policy, 4b docs (PR 4b)
 
 **Wave 23** *(blocked on Wave 22 completion)*
-- [ ] 70-23-PLAN.md — the chat keeps and shows its label, Lower This Chat's Label with a recorded reason (PR 4)
+- [ ] 70-28b-PLAN.md: automated check that PR 4a is on main, rebase, gate, open PR 4b (names the label map format and the D-48 release blocker)
 
 **Wave 24** *(blocked on Wave 23 completion)*
-- [ ] 70-24-PLAN.md — routing tiers live: attested-cloud checked after each answer, local-only on this computer, SECURITY.md labels section (PR 4)
+- [ ] 70-22-PLAN.md: the session high-water mark: raised at the shared hook, shared with sub-agents, written to files, calls that could leave this computer held (PR 4c)
 
 **Wave 25** *(blocked on Wave 24 completion)*
-- [ ] 70-25-PLAN.md — the pre-send connection binding: research what NEAR AI Cloud's attestation exposes, attested-cloud only over a connection bound to the enclave, else local-only (PR 4)
+- [ ] 70-23-PLAN.md: the chat keeps and shows its label, a merge never lowers it, Lower This Chat's Label with a recorded reason (PR 4c)
 
 **Wave 26** *(blocked on Wave 25 completion)*
-- [ ] 70-26-PLAN.md — the trust badge on every cloud answer: three states from checks that ran, details and full attestation, theme-aware (PR 4)
+- [ ] 70-24-PLAN.md: local-only on this computer, Protected B and Confidential kept local, SECURITY.md labels and routing section (PR 4c)
 
 **Wave 27** *(blocked on Wave 26 completion)*
-- [ ] 70-27-PLAN.md — trust badges kept across reloads, the end-to-end badge check, SECURITY.md and README badge text (PR 4)
+- [ ] 70-28c-PLAN.md: automated check that PR 4b is on main, rebase, gate, open PR 4c (names the routing meanings and the D-48 release blocker)
 
 **Wave 28** *(blocked on Wave 27 completion)*
-- [ ] 70-28-PLAN.md — automated check that PR 3 is on main, rebase, gate, open PR 4 (names the label map format, the connection binding finding, the trust badge and the D-48 release blocker)
+- [ ] 70-25-PLAN.md: the pre-send connection binding (research, NEAR AI Cloud source, pinned connection) and the after-answer check with Check again (PR 4d)
+
+**Wave 29** *(blocked on Wave 28 completion)*
+- [ ] 70-28d-PLAN.md: automated check that PR 4c is on main, rebase, gate, open PR 4d (quotes the connection binding finding, names the D-48 release blocker)
+
+**Wave 30** *(blocked on Wave 29 completion)*
+- [ ] 70-26-PLAN.md: the trust badge on every cloud answer: three states from checks that ran, a timeout, details and full attestation, theme-aware (PR 4e)
+
+**Wave 31** *(blocked on Wave 30 completion)*
+- [ ] 70-27-PLAN.md: trust badges kept across reloads, the end-to-end badge check, SECURITY.md and README badge text (PR 4e)
+
+**Wave 32** *(blocked on Wave 31 completion)*
+- [ ] 70-28e-PLAN.md: automated check that PR 4d is on main, rebase, phase coverage and validation records, gate, open PR 4e (closes Phase 70)
 
 **Cross-cutting constraints:** <!-- gsd:generated -->
 - The full gate passes once inside the cap: lint and suite, e2e under xvfb with the Wayland variables removed, verify:release and the range secret scan (D-34).
