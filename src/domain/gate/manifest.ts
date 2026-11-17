@@ -613,6 +613,9 @@ export interface McpToolFacts {
   readonly transport: McpTransport;
   /** What the person declared this server's tools may do (parseMcpServerEffects), used only for a local server: see mcpToolEffects. */
   readonly localEffects?: readonly Capability[];
+  /** The tool's own MCP hints as the server sent them; unset is MCP's default, true (it may delete, it may reach the open world). */
+  readonly destructiveHint?: boolean;
+  readonly openWorldHint?: boolean;
 }
 
 /** `server`: a local server's tool decided by what the person declared for the whole server (`nearAi.mcp.localServerEffects`). */
@@ -651,6 +654,9 @@ export function mcpToolEffects(manifest: McpManifest | undefined, facts: McpTool
   const declared = facts.transport === 'stdio' ? facts.localEffects : undefined;
   if (declared === undefined || declared.length === 0) return base;
   if (base.effects.length > 0 && base.effects.every((effect) => effect.verb === 'mcp')) return base;
+  // A declaration only narrows (PR #76 review round 2): it decides a tool that itself says it neither deletes nor reaches the open world. A tool that
+  // flags either, or says neither way (MCP's default for both is true), and a tool the person declared on its own, keep their own effects and keep asking.
+  if (base.defaults === 'declared' || facts.destructive || facts.destructiveHint !== false || facts.openWorldHint !== false) return base;
   const call = parseCapability({ verb: 'mcp', server: facts.server, tools: [facts.tool] }, { vocabulary: GATE_VOCABULARY_VERSION, mode: 'ceiling' });
   if (!call.ok || facts.server.includes('*') || facts.tool.includes('*')) return base;
   const shorthand = shorthandFor({ effects: declared });

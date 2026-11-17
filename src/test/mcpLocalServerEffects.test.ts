@@ -18,7 +18,8 @@ import { McpRegistry } from '../services/mcpRegistry';
 import { testGateRuntime } from './helpers/gatedRuns';
 
 const ROOT = mkdtempSync(path.join(tmpdir(), 'near-ai-mcp-local-'));
-const UPDATE: McpToolInfo = { name: 'update', description: 'Update', inputSchema: { type: 'object' }, readOnly: false, destructive: false };
+// A tool that says it neither deletes nor reaches the open world (MCP's destructiveHint and openWorldHint both false): the only kind a declaration narrows.
+const UPDATE: McpToolInfo = { name: 'update', description: 'Update', inputSchema: { type: 'object' }, readOnly: false, destructive: false, hints: { destructive: false, openWorld: false } };
 const connection = { connected: true, tools: [UPDATE], connect: async () => undefined, close: async () => undefined, call: async () => 'ok' } as unknown as McpConnection;
 const local = (approval: McpServerConfig['approval'] = 'trusted'): McpServerConfig => ({ id: 'notes', name: 'Notes', transport: 'stdio', command: 'notes-server', args: [], approval });
 
@@ -123,4 +124,29 @@ test('the registry reads the user setting for each local server; an invalid decl
   const remoteResult = await remote.agentTools();
   assert.equal(remoteResult.problems.length, 1);
   assert.match(remoteResult.problems[0]!, /web address/);
+});
+
+// PR #76 review round 2: a declaration replaced a tool's own effects, so a tool the server flags as deleting (or reaching the open world) ran unasked in
+// Full auto once the server was declared `read`. A declaration only narrows: a tool that flags deleting or the open world, or says neither way (MCP's
+// defaults for an unannotated tool are both true), keeps its own effects and keeps asking, whatever the server is declared to do.
+test('a declaration never widens: a destructive, an open-world or an unannotated tool on a declared server keeps asking in every mode', async () => {
+  const tools: McpToolInfo[] = [
+    { name: 'wipe', description: 'Delete', inputSchema: { type: 'object' }, readOnly: false, destructive: true, hints: { destructive: true, openWorld: false } },
+    { name: 'browse', description: 'Web', inputSchema: { type: 'object' }, readOnly: false, destructive: false, hints: { destructive: false, openWorld: true } },
+    { name: 'plain', description: 'No hints', inputSchema: { type: 'object' }, readOnly: false, destructive: false },
+    { name: 'half', description: 'One hint', inputSchema: { type: 'object' }, readOnly: false, destructive: false, hints: { destructive: false } }
+  ];
+  const many = { ...connection, tools } as unknown as McpConnection;
+  const declaredTools = mcpAgentTools({ ...local(), localEffects: [{ verb: 'read', paths: ['**'] }] }, many, '');
+  assert.equal(declaredTools.length, tools.length);
+  for (const tool of declaredTools) {
+    assert.ok(!tool.manifest.effects.every((effect) => 'verb' in effect && (effect.verb === 'mcp' || effect.verb === 'read')), `${tool.name} keeps its own effects`);
+    for (const mode of ['approve-risky', 'mostly-autonomous', 'auto', 'fully-autonomous'] as const) {
+      const gated = await decideTool(tool, mode);
+      assert.equal(gated.decision.outcome, 'ask', `${tool.name} (${mode})`);
+    }
+  }
+  // The same server's tool that says it neither deletes nor reaches the open world is decided by the declaration.
+  const narrowed = mcpAgentTools({ ...local(), localEffects: [{ verb: 'read', paths: ['**'] }] }, connection, '')[0]!;
+  assert.equal((await decideTool(narrowed, 'approve-risky')).decision.outcome, 'allow');
 });

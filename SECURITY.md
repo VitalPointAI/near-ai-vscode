@@ -176,7 +176,8 @@ A program the agent starts can still read the credential and send it itself,
 and a plain download's address could carry it; only the planned sandbox around
 the shell closes that. The read is seen as the other checks see one: a file the
 command or tool names, or a path that resolves to one; a recursive search, a
-glob or a path built while the command runs is not.
+glob, a path built while the command runs, or a link named without a folder
+(`cat notes` where `notes` is a link to `.env`) is not.
 
 The checks that keep agents out of key and credential folders read the text of
 a command, following the shell's folder and any cd or pushd earlier in the same
@@ -753,9 +754,12 @@ Brave Search, or Tavily (keys in SecretStorage). It is off until you choose.
   `nearAi.mcp.localServerEffects` names, per server id, what the tools of a
   server with no web address may do: `"read"`, `{ "workspaceWrite": [paths] }`
   (writes inside the project on those paths) and `{ "network": [hosts] }`
-  (reaches those hosts, named exactly). Its tools are then decided by that
-  declaration like any tool whose effects are known; a trusted server's tools
-  stop asking where your mode lets such an action run. Publishing, deleting,
+  (reaches those hosts, named exactly). A declaration only narrows: it decides
+  the server's tools that themselves say they neither delete nor reach the
+  open world (MCP's `destructiveHint` and `openWorldHint` both false), like any
+  tool whose effects are known, so a trusted server's tools stop asking where
+  your mode lets such an action run. A tool that says it may delete or reach
+  the open world, or says neither way, keeps asking whatever is declared. Publishing, deleting,
   sending, shell commands, writes into `.git/`, `.planning/` or `.near-ai/`,
   the whole project and wildcards at its top cannot be declared, so the floor
   still decides them, and after a credential read a declared host still asks.

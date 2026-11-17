@@ -51,7 +51,9 @@ export function serverManifest(config: McpServerConfig): McpManifest | undefined
 export function mcpToolDecision(config: McpServerConfig, tool: McpToolInfo, host: string): McpToolEffects {
   return mcpToolEffects(serverManifest(config), {
     server: config.id, tool: tool.name, host, readOnly: tool.readOnly, destructive: tool.destructive, approval: config.approval, transport: config.transport,
-    ...(config.localEffects === undefined ? {} : { localEffects: config.localEffects })
+    ...(config.localEffects === undefined ? {} : { localEffects: config.localEffects }),
+    ...(tool.hints?.destructive === undefined ? {} : { destructiveHint: tool.hints.destructive }),
+    ...(tool.hints?.openWorld === undefined ? {} : { openWorldHint: tool.hints.openWorld })
   });
 }
 

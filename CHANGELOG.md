@@ -64,7 +64,8 @@ to undo, and no mode lets an agent near the places where your keys and passwords
   the tool would refuse anyway.
 - **Local add-on servers can say what they do.** For a server that runs on your computer, the new
   `nearAi.mcp.localServerEffects` setting declares once what its tools may do: read, write named
-  project paths, reach named hosts. Until you declare it, its tools that change data keep asking.
+  project paths, reach named hosts. Until you declare it, its tools that change data keep asking, and a
+  tool that says it may delete or reach the open world, or does not say, keeps asking after it too.
   Publishing, deleting and writes into git's and NEAR AI's folders cannot be declared.
 - **Every refused call is on the record.** A call whose arguments could not be read is now
   recorded too, naming the tool and never its arguments. Decision records also keep a number given
