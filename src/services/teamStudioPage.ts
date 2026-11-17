@@ -337,6 +337,12 @@ function checkCounts(text: string, file: string): CheckCounts | undefined {
   } catch { return undefined; }
 }
 
+/**
+ * An actual path in a message (PR 86 review, round 5): an absolute Unix path of two or more parts, a drive letter, a home path (~/), or any backslash
+ * (a Windows or UNC path). A model id (vendor/model) or a /team: command is not one.
+ */
+const NAMES_A_PATH = /\\|(?:^|[\s'"(\[=,])(?:\/[^\s/'"]+\/[^\s'"]*|~\/|[A-Za-z]:\/)/;
+
 /** What the page shows for a team file whose reason names a path. */
 export const UNREADABLE_TEAM = 'The team file cannot be read as a team. Open it as Markdown to fix it.';
 
@@ -348,7 +354,7 @@ export const UNREADABLE_TEAM = 'The team file cannot be read as a team. Open it 
 export function plainTeamError(message: string, _file?: string): string {
   const code = /^(E[A-Z]+):/.exec(message)?.[1];
   if (code) return `The team file could not be read${fileProblem({ code })}.`;
-  if (/[\\/]|(?:^|[^A-Za-z])[A-Za-z]:(?=[\\/])/.test(message)) return UNREADABLE_TEAM;
+  if (NAMES_A_PATH.test(message)) return UNREADABLE_TEAM;
   return message;
 }
 
@@ -659,7 +665,7 @@ export interface TeamStudioDeps {
   runningTeams?(): RunningTeam[];
   /** A team run started or ended (the activity feed's own notification, never a timer), so the dashboard is listed again. */
   onDidChangeRuns?(listener: () => void): { dispose(): void };
-  /** The last role test of each team, as Optimise all teams kept it (scores only, keyed by a hash of the team file's path). */
+  /** The last role test of each team, as Optimise all teams kept it: scores only, keyed by the team's identity (user:<slug>, archived:<slug>, project:<hash>). */
   roleTests?: { get(): unknown; set?(value: Record<string, RoleTestRecord>): Promise<void> };
   /** A drafted team waiting for the person to review it (Describe it, and AI drafts it), kept in this extension's storage on this computer. */
   proposal?: { get(): unknown; set(value: KeptProposal | undefined): Promise<void> };
@@ -835,6 +841,16 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
    */
   let historyRead: Promise<{ history: boolean; sessions: ActivitySessionSummary[] }> | undefined;
   const forgetHistory = () => { historyRead = undefined; };
+  /**
+   * A `rating:` line an earlier build wrote, dropped from what is saved once the rating is kept on this computer (PR 86 review, round 5), so the next save
+   * of the team through the studio takes it out of the file, a project team's included. A host with nowhere to keep ratings leaves it: it is the only copy.
+   */
+  const withoutAdoptedRating = async (markdown: string, id: string): Promise<string> => {
+    const team = teamFor(id);
+    const key = team ? await keyOf(team) : undefined;
+    if (!deps.ratings || !key || !(key in parseRatings(deps.ratings.get()))) return markdown;
+    return withTeamRating(markdown, undefined);
+  };
   /** Rating writes, one after another. */
   let ratingWrites: Promise<unknown> = Promise.resolve();
   /**
@@ -1056,7 +1072,7 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
     }
     const review = reviewDraft(edit.draft, disk, input!, context!);
     if (review.errors.length) { post({ type: 'save-failed', id: edit.id, errors: review.errors }); return undefined; }
-    await writeFile(file, review.markdown, 'utf8');
+    await writeFile(file, await withoutAdoptedRating(review.markdown, edit.id), 'utf8');
     const version = await deps.library.snapshot(file);
     await refreshLibrary();
     return { file, notice: `Saved "${edit.draft.name.trim()}" as version ${version}.` };
@@ -1268,7 +1284,9 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
       case 'review': {
         if (!input || !context) await load();
         const original = message.id && open?.id === message.id ? open.text : undefined;
-        post({ type: 'review', seq: message.seq, ...reviewDraft(message.draft, original, input!, context!) });
+        const review = reviewDraft(message.draft, original, input!, context!);
+        // What the preview shows is what Save writes, the old rating line's removal included.
+        post({ type: 'review', seq: message.seq, ...review, ...(message.id ? { markdown: await withoutAdoptedRating(review.markdown, message.id) } : {}) });
         return;
       }
       case 'starting-point': {

@@ -181,6 +181,15 @@ export function roleTestSummary<T extends { results: ReadonlyArray<{ score: numb
   return { at, members: Math.min(100, count), tested: Math.min(100, tested), passed: Math.min(100, passed), score: Math.min(100, Math.max(0, score)) };
 }
 
+/**
+ * The kept role tests with this run's added, or undefined when nothing is to be written: no identity to keep it under, nothing ran, or the run was
+ * cancelled part-way (it would count the members it never reached as failing).
+ */
+export function keptRoleTests<T extends { results: ReadonlyArray<{ score: number; outOf: number; failed: boolean }> }>(records: unknown, key: string | undefined, outcomes: readonly T[], members: number, cancelled: boolean, at: string): Record<string, RoleTestRecord> | undefined {
+  if (!key || cancelled || !outcomes.length) return undefined;
+  return withRoleTest(parseRoleTests(records), key, roleTestSummary(outcomes, members, at));
+}
+
 /** The key role tests were kept under before PR 86's review: a hash of the team file's path. Read only, to move them to the team's identity once. */
 export function legacyRoleTestKey(file: string): string {
   return createHash('sha256').update(path.resolve(file)).digest('hex').slice(0, 16);

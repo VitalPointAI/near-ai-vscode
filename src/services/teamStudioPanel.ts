@@ -28,7 +28,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { onDidChangeEmergencyStop } from './emergencyStop';
 import { homeFolder, teamLibraryDir, teamsMoveInFlight, whenTeamsMoved } from '../domain/teamStorage';
 import { ActivityStore } from './activityStore';
-import { parseRoleTests, projectIdentity, roleTestSummary, teamKey, withRoleTest } from '../domain/teamDashboard';
+import { keptRoleTests, projectIdentity, teamKey } from '../domain/teamDashboard';
 
 // The NEAR AI Team Studio tab. One tab at a time; opening it again shows it (and, for the project
 // team setup, starts the guided builder).
@@ -228,7 +228,10 @@ export async function openTeamStudio(context: vscode.ExtensionContext, auth: Aut
       // Kept for the dashboard's health before anything else happens to the team, whatever the tests found (scores only; no model or task text).
       // A run cancelled part-way is not the team's last role test: it would count the members it never reached as failing.
       const testedKey = teamKey({ kind: teamEntry?.project ? 'project' : 'user', slug: slugify(path.basename(file, '.md')) }, teamEntry?.project && root ? await projectIdentity(root) : undefined);
-      if (testedKey && outcomes.length && !options.signal?.aborted) await context.globalState.update(ROLE_TESTS_KEY, withRoleTest(parseRoleTests(context.globalState.get(ROLE_TESTS_KEY)), testedKey, roleTestSummary(outcomes, plan.members, new Date().toISOString()))).then(undefined, () => undefined);
+      const keptBefore = context.globalState.get(ROLE_TESTS_KEY);
+      const testedAt = new Date().toISOString();
+      const nextRoleTests = keptRoleTests(keptBefore, testedKey, outcomes, plan.members, options.signal?.aborted === true, testedAt);
+      if (nextRoleTests) await context.globalState.update(ROLE_TESTS_KEY, nextRoleTests).then(undefined, () => undefined);
       const picks = bestOf(outcomes);
       if (!picks.length) return { applied: 0, text: options.signal?.aborted ? `${teamName}: cancelled, so its models were left alone.` : 'Every role test failed, so the team is unchanged. Run Compare Models to see why.' };
       // Which picks really matched a member, collected where the write happens, so the notice below cannot claim a write that did not happen.

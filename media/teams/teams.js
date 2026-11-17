@@ -720,17 +720,17 @@
     rating.append(el('h4', '', 'Rating'), healthBlock(info.health), ratingField(team));
     card.append(rating);
     card.append(el('p', 'meta', team.members.length + ' member' + (team.members.length === 1 ? '' : 's') + (team.savedAt ? ' · saved ' + when(team.savedAt) : '') + (team.command ? ' · ' + team.command.trim() : '')));
-    if (flash === team.id) { card.className += ' flash'; pendingFocus = 'open-' + team.id; }
+    if (flash === team.id) { card.className += ' flash'; pendingFocus = 'open-' + cardKey; }
     const actions = el('div', 'card-actions');
     actions.append(
-      button('Open', () => vscode.postMessage({ type: 'open', id: team.id }), { primary: true, label: 'Open ' + team.name, id: 'open-' + team.id }),
+      button('Open', () => vscode.postMessage({ type: 'open', id: team.id }), { primary: true, label: 'Open ' + team.name, id: 'open-' + cardKey }),
       button('Use in chat', () => vscode.postMessage({ type: 'use-in-chat', id: team.id }), { label: 'Use ' + team.name + ' in chat', id: 'chat-' + cardKey }),
       button('Duplicate', () => vscode.postMessage({ type: 'duplicate', id: team.id }), { label: 'Duplicate ' + team.name, id: 'duplicate-' + cardKey }),
       // Share is the one way to send a team (owner, 2026-11-16): the raw Markdown copy (Export) was dropped. Open as Markdown still shows the file.
       button('Share…', () => vscode.postMessage({ type: 'share', id: team.id }), { label: 'Share ' + team.name, id: 'share-' + cardKey })
     );
     // A team made from a built-in project type can be brought up to date; the host previews every change and asks first.
-    if (team.update) actions.append(button(team.update.available ? 'Update team…' : 'Check for updates…', () => vscode.postMessage({ type: 'update-team', id: team.id }), { label: (team.update.available ? 'Update ' : 'Check for updates to ') + team.name + ' (' + team.update.template + ' template' + (team.update.from ? ' v' + team.update.from : '') + (team.update.available ? ' → v' + team.update.to : '') + ')', id: 'update-' + team.id }));
+    if (team.update) actions.append(button(team.update.available ? 'Update team…' : 'Check for updates…', () => vscode.postMessage({ type: 'update-team', id: team.id }), { label: (team.update.available ? 'Update ' : 'Check for updates to ') + team.name + ' (' + team.update.template + ' template' + (team.update.from ? ' v' + team.update.from : '') + (team.update.available ? ' → v' + team.update.to : '') + ')', id: 'update-' + cardKey }));
     if (team.kind === 'user') actions.append(button('Archive', () => vscode.postMessage({ type: 'archive', id: team.id }), { label: 'Archive ' + team.name, id: 'archive-' + cardKey }));
     card.append(actions);
     return card;
