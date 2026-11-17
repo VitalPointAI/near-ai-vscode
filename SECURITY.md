@@ -146,9 +146,10 @@ command also read its text, through npm run scripts and wrappers such as bash
 -c, sudo, xargs, pipes and subshells. They do not see a command built while it
 runs (bash -c "$CMD"), a file run with source or piped into sh, a script written
 or changed earlier on the same line (it is read as it was before the line ran),
-commands nested more than four levels deep, or wrappers they do not know, such
-as stdbuf, flock or watch. Under fully-autonomous such a command runs without
-asking.
+or wrappers they do not know, such as stdbuf, flock or watch. Under
+fully-autonomous such a command runs without asking. A command nested more than
+four levels deep, or too long to read, is not guessed at: it asks, and it is
+refused when nobody is there to answer.
 
 The project's key folder, `.near-ai/state/keys/` (and the `keys/` folder of an older
 `state.previous-*` or `state.adopt-*` copy), is off limits to agents in every mode, with no

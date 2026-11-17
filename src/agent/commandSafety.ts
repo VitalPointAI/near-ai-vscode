@@ -29,7 +29,23 @@ export interface CommandClassification {
    * none. It never changes the verdict or the reason; it only says what the command would do.
    */
   effects?: CommandEffect[];
+  /**
+   * Set, with the reason, when the classifier did not read the whole command: it nests deeper than MAX_NESTING, or it is longer than MAX_COMMAND_LENGTH
+   * or has more than MAX_COMMAND_WORDS words. `effects` is then only what was read before it stopped, not all the command does, so the gate must treat
+   * the command's effects as unknown (it asks with a person there and refuses with nobody), never as "none" (PR #74 review).
+   */
+  effectsUnknown?: string;
 }
+
+/** How many levels deep the classifier reads a command inside another (a wrapper, a script, a substitution, an inline shell). One bound for every path. */
+export const MAX_NESTING = 4;
+/** A command longer than this is not read at all: its effects are unknown. Reading is linear but not free, and the extension host waits for it. */
+export const MAX_COMMAND_LENGTH = 100_000;
+/**
+ * A command line (or a script it runs) with more words than this is not read: a word can be resolved as a path, so the cost grows with the words (about
+ * a third of a second at the cap). Well above ordinary work: a 1,500-line here-document, whose text the lexer reads as words, is about 6,000.
+ */
+export const MAX_COMMAND_WORDS = 10_000;
 
 export interface CommandContext {
   /** The workspace root (absolute). */
@@ -69,20 +85,37 @@ export interface CommandContext {
 // Effects are gathered for the whole classifyCommand call, not handed back result by result: the classifier often rebuilds a result from an inner one
 // (`npm run x`, `xargs`, `find -exec`, a substitution) or decides on one part and stops, and a tag carried by hand through each of those would be lost in the
 // next one somebody writes (Pitfall 2). Classification is synchronous, so the frame on top of this stack is always the call being made.
-const effectFrames: CommandEffect[][] = [];
+// The frame also keeps whether the classifier stopped reading somewhere (the bound, the caps): wherever that happens, the whole command's effects are unknown.
+interface EffectFrame { effects: CommandEffect[]; unknown?: string }
+const effectFrames: EffectFrame[] = [];
 
 function noteEffects(effects: readonly CommandEffect[] | undefined): void {
   const frame = effectFrames[effectFrames.length - 1];
-  if (frame !== undefined && effects !== undefined) frame.push(...effects);
+  if (frame !== undefined && effects !== undefined) frame.effects.push(...effects);
 }
 
 /** Where the current frame ends now, so a caller can see what one inner classification added. */
 function effectMark(): number {
-  return effectFrames[effectFrames.length - 1]?.length ?? 0;
+  return effectFrames[effectFrames.length - 1]?.effects.length ?? 0;
 }
 
 function effectsSince(mark: number): readonly CommandEffect[] {
-  return effectFrames[effectFrames.length - 1]?.slice(mark) ?? [];
+  return effectFrames[effectFrames.length - 1]?.effects.slice(mark) ?? [];
+}
+
+/**
+ * The classifier stops reading here. The verdict is unknown, and the command's effects are unknown too: what it has found so far is not everything the
+ * command does, so the gate must not read the tags it has as the whole story (fail closed, PR #74 review).
+ */
+function beyondReach(reason: string): CommandClassification {
+  const frame = effectFrames[effectFrames.length - 1];
+  if (frame !== undefined) frame.unknown ??= reason;
+  return unknown(reason);
+}
+
+/** The one nesting bound, checked first by both entry points every recursive path goes through (classifyText and classifyWords). */
+function tooDeep(depth: number): CommandClassification | undefined {
+  return depth > MAX_NESTING ? beyondReach('the command nests too deeply to check') : undefined;
 }
 
 function classification(verdict: CommandVerdict, reason: string, effects?: readonly CommandEffect[]): CommandClassification {
@@ -748,7 +781,8 @@ function checkScript(name: string, state: SegmentState, context: CommandContext,
   const mark = effectMark();
   for (const key of [`pre${name}`, name, `post${name}`]) {
     const body = scripts[key];
-    if (typeof body !== 'string' || depth >= 3) continue;
+    if (typeof body !== 'string') continue;
+    // A script that runs scripts (or itself) stops at the one bound, inside classifyText, with its effects unknown.
     const inner = classifyText(body, { ...context, cwd: state.cwd }, depth + 1);
     if (inner.verdict === 'risky') decided ??= risky(`${runner} ${name} runs the "${key}" script (${body.length > 120 ? `${body.slice(0, 120)}…` : body}), and ${inner.reason}`, inner.effects);
   }
@@ -794,7 +828,7 @@ function classifyNpx(args: Word[], state: SegmentState, context: CommandContext,
   if (tool === 'vsce' || tool === '@vscode/vsce' || tool === 'ovsx') return rest[0]?.text === 'publish' || rest[0]?.text === 'unpublish' ? risky(`npx ${tool} publish publishes an extension`, publishTo('registry')) : unknown(`npx ${tool}`);
   if (/^(?:semantic-release|np|release-it|changeset|lerna|gh-pages|vercel|netlify|firebase|wrangler|serverless|sls|cdk)$/.test(tool) || RELEASE_NAME.test(rest.map((arg) => arg.text).join(' '))) return risky(`npx ${tool} can publish, release, or deploy`, publishTo(PUBLISH_TOOL_TARGETS[tool] ?? 'release'));
   if (!DEV_TOOLS.has(tool)) return unknown(`npx ${tool} may download and run a package`);
-  return classifyWords([{ text: tool, quoted: false, glob: false, expansion: false }, ...rest], state, context, depth, true);
+  return classifyWords([{ text: tool, quoted: false, glob: false, expansion: false }, ...rest], state, context, depth + 1, true);
 }
 
 /** A tool in the workspace's own node_modules/.bin, run by path. */
@@ -854,6 +888,8 @@ function classifyAwk(args: Word[], state: SegmentState, context: CommandContext)
 
 /** Classifies one simple command (no operators). */
 function classifyWords(words: Word[], state: SegmentState, context: CommandContext, depth: number, viaNpx = false): CommandClassification {
+  const deep = tooDeep(depth);
+  if (deep) return deep;
   if (!words.length) return safe('nothing to run');
   // `{ git push; }`, `then git push`, `exec git push`: the words after are a command too, read here for what they do.
   if (RUNS_WHAT_FOLLOWS.has(words[0].text) && !(words[0].quoted && words[0].text !== '{')) {
@@ -1268,8 +1304,9 @@ function splitWords(text: string): string[] {
 
 function classifyText(command: string, context: CommandContext, depth: number): CommandClassification {
   const raw = command.trim();
+  const deep = tooDeep(depth);
+  if (deep) return deep;
   if (!raw) return unknown('the command is empty');
-  if (depth > 4) return unknown('the command nests too deeply to check');
   // These two decide the verdict on their own, but the rest of the command is still read, so what it publishes or destroys is seen (Pitfall 2).
   const early = /:\(\)\s*\{/.test(raw) ? risky('it defines a fork bomb') : DOWNLOAD_TO_SHELL.test(raw) ? risky('it runs code downloaded from the network') : undefined;
   const result = classifyStructure(raw, context, depth);
@@ -1310,6 +1347,7 @@ function classifyStructure(raw: string, context: CommandContext, depth: number):
     if (inner.verdict === 'risky') return risky(`a command inside a substitution is risky: ${inner.reason}`);
   }
   const lexed = lex(raw);
+  if (lexed.segments.reduce((total, segment) => total + segment.words.length, 0) > MAX_COMMAND_WORDS) return beyondReach('the command has too many words to check');
   if (lexed.broken) {
     if (SENSITIVE_TEXT.test(raw)) return risky('it names a credential or knowledge-base path');
     return unknown(`it has ${lexed.broken}`);
@@ -1422,7 +1460,12 @@ function substitutionAssignment(raw: string): { name: string; inner: string } | 
  * it reads no files and runs nothing.
  */
 export function classifyCommand(command: string, context: CommandContext): CommandClassification {
-  const frame: CommandEffect[] = [];
+  // Too long to read at all: nothing is read, so nothing is known about what it does.
+  if (command.length > MAX_COMMAND_LENGTH) {
+    const reason = 'the command is too long to check';
+    return { verdict: 'unknown', reason, effectsUnknown: reason };
+  }
+  const frame: EffectFrame = { effects: [] };
   effectFrames.push(frame);
   let result: CommandClassification;
   try {
@@ -1430,7 +1473,10 @@ export function classifyCommand(command: string, context: CommandContext): Comma
   } finally {
     effectFrames.pop();
   }
-  const effects = distinctEffects([...(result.effects ?? []), ...frame]);
-  const { effects: _own, ...plain } = result;
-  return effects.length > 0 ? { ...plain, effects } : plain;
+  const effects = distinctEffects([...(result.effects ?? []), ...frame.effects]);
+  const { effects: _own, effectsUnknown: _unknown, ...plain } = result;
+  // A command the classifier did not read whole is never safe, wherever it stopped (a script that runs scripts past the bound, say): what it did not read
+  // could be anything.
+  const verdict = frame.unknown !== undefined && plain.verdict === 'safe' ? { verdict: 'unknown' as const, reason: frame.unknown } : plain;
+  return { ...verdict, ...(effects.length > 0 ? { effects } : {}), ...(frame.unknown === undefined ? {} : { effectsUnknown: frame.unknown }) };
 }

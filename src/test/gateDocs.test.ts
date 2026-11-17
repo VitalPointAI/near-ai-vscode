@@ -7,7 +7,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { CLEARANCE_SELF_ASSERTED_TEXT } from '../domain/gate/labels';
 import { FLOOR_CANNOT_SEE_TEXT, FLOOR_EFFECTS_CANNOT_SEE_TEXT } from '../domain/gate/floor';
-import { classifyCommand } from '../agent/commandSafety';
+import { classifyCommand, MAX_COMMAND_LENGTH, MAX_NESTING } from '../agent/commandSafety';
 import { BUNDLE_FAILURES } from '../domain/gate/bundle';
 import { MANIFEST_IS_A_CLAIM_TEXT, RUNS_ON_THIS_MACHINE_TEXT } from '../domain/gate/words';
 import { MAX_DECISION_LOG_BYTES, MAX_ROTATED_FILES } from '../gate/decisionLog';
@@ -162,9 +162,17 @@ test('each gap the publishing and destruction text names is a real gap today, so
     return command;
   };
   assert.ok(tags(nested(4)).length > 0, 'four levels deep is still read');
-  for (const hidden of ['bash -c "$CMD"', 'source deploy.sh', 'cat deploy.sh | sh', 'stdbuf -oL git push', 'flock /tmp/lock git push', 'watch git push', nested(5)]) {
+  assert.equal(classifyCommand(nested(4), context).effectsUnknown, undefined, 'four levels deep is read whole');
+  for (const hidden of ['bash -c "$CMD"', 'source deploy.sh', 'cat deploy.sh | sh', 'stdbuf -oL git push', 'flock /tmp/lock git push', 'watch git push']) {
     assert.deepEqual(tags(hidden), [], `${hidden} is not seen, as the text says`);
+    assert.equal(classifyCommand(hidden, context).effectsUnknown, undefined, `${hidden} is read, and nothing in it is a publish the checks know`);
   }
+  // PR #74 review: what the text says asks. Five levels deep, or too long to read, is not "no tag": its effects are unknown, and the gate asks about it.
+  for (const stopped of [nested(5), `git status # ${'x'.repeat(MAX_COMMAND_LENGTH)}`]) {
+    assert.equal(typeof classifyCommand(stopped, context).effectsUnknown, 'string', `${stopped.slice(0, 40)}: its effects are unknown, as the text says`);
+  }
+  assert.match(FLOOR_EFFECTS_CANNOT_SEE_TEXT, /nested more than four levels deep, or too long to read, is not guessed at: it asks/);
+  assert.equal(MAX_NESTING, 4, 'the text says four levels');
   for (const seen of ['sudo git push', 'bash -c "git push"', 'echo x | xargs git push', '(git push)']) assert.ok(tags(seen).length > 0, `${seen} is seen, as the text says`);
 });
 

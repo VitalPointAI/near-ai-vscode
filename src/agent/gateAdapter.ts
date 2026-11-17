@@ -91,6 +91,17 @@ export interface FloorFactsInput extends Partial<FloorShellContext> {
 export interface FloorCommandFacts {
   readonly effects: readonly CommandEffect[];
   readonly facts: Pick<FloorFacts, 'credentialStore' | 'identityFiles'>;
+  /**
+   * Set, with the reason, when the floor could not read the whole command: the classifier stopped (nested too deep, too long) or threw, or the
+   * credential-store check threw. The call's effects are then unknown, so decide() asks with a person there and refuses with nobody (PR #74 review).
+   */
+  readonly effectsUnknown?: string;
+}
+
+/** The two readers the floor uses on a command. Given only by tests (a reader that throws) and by nothing else; each defaults to the real one. */
+export interface FloorReaders {
+  readonly classify?: typeof classifyCommand;
+  readonly reach?: typeof shellReachesCredentialStore;
 }
 
 /**
@@ -98,19 +109,30 @@ export interface FloorCommandFacts {
  * publishes, destroys or writes in every mode, including the ones that never build auto approve's context, and the credential-store check with the
  * command's words resolved from the shell's folder. It only reads the command's text and resolves paths; it runs nothing and opens no file.
  */
-export async function floorFactsFor(input: FloorFactsInput): Promise<FloorCommandFacts> {
+export async function floorFactsFor(input: FloorFactsInput, readers: FloorReaders = {}): Promise<FloorCommandFacts> {
   if (input.command.trim() === '') return { effects: [], facts: {} };
-  const reach = await shellReachesCredentialStore(input.command, { root: input.root, shell: { workingDirectory: input.cwd ?? input.root } }, {
-    ...(input.home === undefined ? {} : { home: input.home }),
-    ...(input.globalStorage === undefined ? {} : { globalStorage: input.globalStorage })
-  }).catch(() => ({}) as Awaited<ReturnType<typeof shellReachesCredentialStore>>);
+  const classify = readers.classify ?? classifyCommand;
+  const reachOf = readers.reach ?? shellReachesCredentialStore;
+  // Either reader failing leaves the floor not knowing what the command does or reaches, so the call's effects are unknown: never "nothing found" (fail
+  // closed). The text checks decide() runs on the command itself still refuse a credential store it names.
+  let lost: string | undefined;
+  let reach: Awaited<ReturnType<typeof shellReachesCredentialStore>>;
+  try {
+    reach = await reachOf(input.command, { root: input.root, shell: { workingDirectory: input.cwd ?? input.root } }, {
+      ...(input.home === undefined ? {} : { home: input.home }),
+      ...(input.globalStorage === undefined ? {} : { globalStorage: input.globalStorage })
+    });
+  } catch {
+    reach = {};
+    lost = 'the check for credential stores could not read this command';
+  }
   const facts = {
     ...(reach.credentialStore === undefined ? {} : { credentialStore: reach.credentialStore }),
     ...(reach.identityFiles === undefined ? {} : { identityFiles: reach.identityFiles })
   };
   let classified: ReturnType<typeof classifyCommand>;
   try {
-    classified = classifyCommand(input.command, {
+    classified = classify(input.command, {
       root: input.root,
       cwd: input.cwd ?? input.root,
       ...(input.home === undefined ? {} : { home: input.home }),
@@ -119,9 +141,11 @@ export async function floorFactsFor(input: FloorFactsInput): Promise<FloorComman
       ...(input.gsdPreambles === undefined ? {} : { gsdPreambles: [...input.gsdPreambles] })
     });
   } catch {
-    return { effects: [], facts }; // the classifier is pure and should never throw; if it does, the call is decided on its manifest alone
+    // The classifier is pure and should never throw; if it does, nothing is known about what the command does.
+    return { effects: [], facts, effectsUnknown: 'the command could not be read' };
   }
-  return { effects: classified.effects ?? [], facts };
+  const unknownWhy = lost ?? classified.effectsUnknown;
+  return { effects: classified.effects ?? [], facts, ...(unknownWhy === undefined ? {} : { effectsUnknown: unknownWhy }) };
 }
 
 /** What decide() is told by the runtime: when the host knows them, the home folder and global storage the floor's text checks may name. Nothing turns the floor off. */
@@ -473,6 +497,8 @@ export interface GateCallOptions {
    * call that did not run is never on record as one that could (PR #70 third review).
    */
   readonly refusal?: Refusal;
+  /** The floor's readers of a shell command; only tests pass them (a reader that throws must leave the call's effects unknown). */
+  readonly floorReaders?: FloorReaders;
 }
 
 /** The settings layer of a call the caller refuses: today's permission logic is not asked (it could run a classifier or a model about a call that will not run). */
@@ -506,8 +532,9 @@ export async function gateToolCall(runtime: GateRuntime, input: GateCallInput, o
   const paths = await readCallPaths(input.tool, input.raw, input.root, input.readOnlyRoots ?? [], runtime.locations ?? {});
   const declared = effectsOfCall(input.tool, paths.raw, input.root);
   // A shell call's command is read by the floor in every mode (Pitfall 5); what it tags joins the manifest's own effects.
-  const read = input.command === undefined ? undefined : await floorFactsFor({ command: input.command, root: input.root, ...(input.shell ?? {}), ...(runtime.locations ?? {}) });
-  const effects = withCommandEffects(declared, read?.effects ?? []);
+  const read = input.command === undefined ? undefined : await floorFactsFor({ command: input.command, root: input.root, ...(input.shell ?? {}), ...(runtime.locations ?? {}) }, options.floorReaders);
+  // A command the floor could not read whole has unknown effects, whatever the manifest says: decide() asks about it with a person and refuses it with nobody.
+  const effects = read?.effectsUnknown !== undefined ? [] : withCommandEffects(declared, read?.effects ?? []);
   const floorFacts: FloorFacts = { ...(input.tool.capability === 'sharedWrite' ? { sharedWrite: true } : {}), ...paths.facts, ...(read?.facts ?? {}) };
   const request: GateRequest = {
     actor: runtime.actor,
