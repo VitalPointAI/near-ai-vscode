@@ -67,3 +67,46 @@ test('a renaming tool\'s read inside the project is the project path', async () 
   });
   assert.deepEqual(gated.effects, [{ verb: 'read', paths: ['notes.md'] }]);
 });
+
+// PR #74 review round 4: a call that reads more than one file in a trusted folder names every one in its record, as many as fit, and says how many more.
+const twoReads: AgentTool<{ a: string; b: string }> = {
+  ...readTool,
+  name: 'TwoReads',
+  manifest: declareManifest({ tool: 'TwoReads', effects: [{ verb: 'read', paths: [fromArgument('first'), fromArgument('second')] }], contexts: INTERACTIVE_AND_UNATTENDED }),
+  parse: (raw: Record<string, unknown>) => ({ a: String(raw.first), b: String(raw.second) })
+} as unknown as AgentTool<{ a: string; b: string }>;
+
+test('a call reading two trusted-folder files names both in its record, and a list too long to fit says how many more', async () => {
+  writeFileSync(path.join(TRUSTED, 'docs', 'notes.md'), 'notes');
+  const runtime = testGateRuntime({ presence: 'none', context: 'unattended' });
+  const gated = await gateToolCall(runtime, {
+    tool: twoReads, raw: { first: path.join(TRUSTED, 'docs', 'guide.md'), second: path.join(TRUSTED, 'docs', 'notes.md') }, root: ROOT, callId: 'two',
+    policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES, grants: new RunGrants(), readOnlyRoots: [TRUSTED], buildAuto: async () => undefined
+  });
+  assert.equal(gated.decision.outcome, 'allow');
+  assert.deepEqual(gated.resource, { name: 'trusted-runtime/docs/guide.md, trusted-runtime/docs/notes.md', type: 'file' });
+  assert.equal(runtime.records.at(-1)?.resources?.[0]?.name, 'trusted-runtime/docs/guide.md, trusted-runtime/docs/notes.md');
+  // Names too long to list together: as many as fit, then how many more.
+  const long = `${'n'.repeat(150)}.md`;
+  writeFileSync(path.join(TRUSTED, 'docs', long), 'x');
+  const both = await gateToolCall(runtime, {
+    tool: twoReads, raw: { first: path.join(TRUSTED, 'docs', long), second: path.join(TRUSTED, 'docs', 'notes.md') }, root: ROOT, callId: 'two-long',
+    policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES, grants: new RunGrants(), readOnlyRoots: [TRUSTED], buildAuto: async () => undefined
+  });
+  assert.equal(both.resource?.name, `trusted-runtime/docs/${long} and 1 more`);
+  assert.ok((both.resource?.name.length ?? 0) <= 200);
+});
+
+test('trustedReadsName: one name is itself, several are listed, and a list past the bound ends with how many more', async () => {
+  const { trustedReadsName } = await import('../agent/gateAdapter');
+  assert.equal(trustedReadsName(['a/x.md']), 'a/x.md');
+  assert.equal(trustedReadsName(['a/x.md', 'a/y.md', 'b/z.md']), 'a/x.md, a/y.md, b/z.md');
+  const many = Array.from({ length: 40 }, (_, index) => `runtime/docs/file-${index}.md`);
+  const named = trustedReadsName(many);
+  assert.ok(named.length <= 200, named);
+  assert.match(named, /^runtime\/docs\/file-0\.md, .* and \d+ more$/);
+  const listed = named.replace(/ and \d+ more$/, '').split(', ').length;
+  assert.equal(Number(/ and (\d+) more$/.exec(named)?.[1]), 40 - listed, 'the count is what was left out');
+  const huge = trustedReadsName([`${'x'.repeat(300)}.md`, 'b.md']);
+  assert.ok(huge.length <= 200 && huge.endsWith(' and 1 more'), huge);
+});

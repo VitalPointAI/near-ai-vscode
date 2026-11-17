@@ -437,6 +437,26 @@ function shownName(text: string): string {
   return flat.length > MAX_RESOURCE_NAME ? flat.slice(0, MAX_RESOURCE_NAME) : flat;
 }
 
+/**
+ * The trusted-folder files a call reads, for its record's resource name (PR #74 review round 4): every one, as many as fit in MAX_RESOURCE_NAME, then how
+ * many more. One file is its own name.
+ */
+export function trustedReadsName(reads: readonly string[]): string {
+  const names = reads.map(shownName);
+  const listed: string[] = [];
+  for (const [index, name] of names.entries()) {
+    const left = names.length - index - 1;
+    const candidate = [...listed, name].join(', ');
+    const tail = left > 0 ? ` and ${left} more` : '';
+    if (candidate.length + tail.length > MAX_RESOURCE_NAME) break;
+    listed.push(name);
+  }
+  if (listed.length === names.length) return listed.join(', ');
+  const more = ` and ${names.length - Math.max(listed.length, 1)} more`;
+  // Even the first name does not fit beside the count: it is cut to make room.
+  return listed.length > 0 ? `${listed.join(', ')}${more}` : `${(names[0] ?? '').slice(0, MAX_RESOURCE_NAME - more.length)}${more}`;
+}
+
 /** What the call touched, for the record: a path, a host, a server, or the command's first line. Names only, never contents. */
 function resourceOf(tool: string, effects: readonly Capability[], command: string | undefined): DecisionResource {
   if (command !== undefined && command !== '') return { name: shownName(command.split('\n')[0] ?? command), type: 'command' };
@@ -601,7 +621,7 @@ export async function gateToolCall(runtime: GateRuntime, input: GateCallInput, o
   const captured: { value?: PermissionDecision } = {};
   const layer = options.refusal === undefined ? settingsLayerFor(input, captured) : refusalLayer(options.refusal);
   const decision = await decideOrRefuse(options.refusal, input.policy.mode, () => decide(request, runtime.bundleState(), layer, gateOptionsOf(runtime)));
-  const resource: DecisionResource | undefined = input.command === undefined && paths.trustedReads.length > 0 ? { name: shownName(paths.trustedReads[0] ?? ''), type: 'file' } : undefined;
+  const resource: DecisionResource | undefined = input.command === undefined && paths.trustedReads.length > 0 ? { name: trustedReadsName(paths.trustedReads), type: 'file' } : undefined;
   const floorAsk = decision.outcome === 'ask' && decision.floor;
   const callKey = floorAsk ? floorCallKey(input) : undefined;
   const gated: GatedCall = { decision, settings: captured.value, request, effects, ...(resource === undefined ? {} : { resource }), ...(callKey === undefined ? {} : { callKey }) };
@@ -681,8 +701,7 @@ export interface StepEffects {
  */
 export async function effectsOfStep(tool: AgentTool<any>, raw: Record<string, unknown>, root: string, readOnlyRoots: readonly string[] = [], locations: FloorLocations = {}): Promise<StepEffects> {
   const paths = await readCallPaths(tool, raw, root, readOnlyRoots, locations);
-  const first = paths.trustedReads[0];
-  return { effects: effectsOfArguments(tool, paths.input, root), floorFacts: paths.facts, ...(first === undefined ? {} : { resource: { name: shownName(first), type: 'file' } }) };
+  return { effects: effectsOfArguments(tool, paths.input, root), floorFacts: paths.facts, ...(paths.trustedReads.length === 0 ? {} : { resource: { name: trustedReadsName(paths.trustedReads), type: 'file' } }) };
 }
 
 /**
