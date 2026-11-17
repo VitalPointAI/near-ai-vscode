@@ -12,7 +12,9 @@ import type { ActivitySessionSummary } from '../domain/activity';
 import { attachTeamStudio, parseStudioMessage, type TeamStudioDeps } from '../services/teamStudioPage';
 import type { DirectoryInput } from '../services/toolsDirectory';
 import { DEFAULT_RULES } from '../agent/permissions';
-import { buildDashboard, parseRoleTests, roleTestKey, roleTestSummary, runTeamSlug, teamHealth, teamRunStats, withRoleTest, type DashboardTeam } from '../domain/teamDashboard';
+import { buildDashboard, folderIdentity, legacyRoleTestKey, migrateRoleTests, parseRatings, parseRoleTests, projectIdentity, roleTestSummary, runTeamSlug, teamHealth, teamKey, teamRunStats, withRating, withRoleTest, type DashboardTeam } from '../domain/teamDashboard';
+import { symlink } from 'node:fs/promises';
+import { listLibrary } from '../services/teamStudioPage';
 
 // Team Studio's main page is a dashboard of the person's teams (owner, 2026-11-17: "a dashboard of existing teams and their statuses, model setups, stats
 // about them, rating"). Every figure comes from what the extension already keeps: the project's activity history (one entry per run, with its outcome,
@@ -110,22 +112,76 @@ test('role tests: a summary of the scores only (no model names, no task text), k
   ], 3, ago(HOUR));
   assert.deepEqual(summary, { at: ago(HOUR), members: 3, tested: 1, score: 33 }, 'the best of each member, a failed run is 0, an untested member is 0');
   assert.doesNotMatch(JSON.stringify(summary), /a\/x|secret|planner/);
-  const key = roleTestKey('/home/someone/teams/web.md');
-  assert.match(key, /^[0-9a-f]{16}$/);
-  assert.notEqual(key, roleTestKey('/home/someone/teams/web-2.md'));
   let records = {};
-  for (let index = 0; index < 205; index += 1) records = withRoleTest(records, `k${index}`, { ...summary, at: new Date(NOW + index).toISOString() });
+  for (let index = 0; index < 205; index += 1) records = withRoleTest(records, `user:k${index}`, { ...summary, at: new Date(NOW + index).toISOString() });
   assert.equal(Object.keys(records).length, 200);
-  assert.equal('k0' in records, false, 'the oldest go first');
-  // Whatever is read back is checked: anything else is dropped.
-  assert.deepEqual(parseRoleTests({ good: summary, bad: { at: 'x', members: -1 }, worse: 'nope', big: { ...summary, score: 400 } }), { good: summary });
+  assert.equal('user:k0' in records, false, 'the oldest go first');
+  // Whatever is read back is checked: anything else is dropped, a key that names no team included.
+  assert.deepEqual(parseRoleTests({ 'user:good': summary, 'user:bad': { at: 'x', members: -1 }, 'user:worse': 'nope', 'user:big': { ...summary, score: 400 }, '../x': summary }), { 'user:good': summary });
   assert.deepEqual(parseRoleTests(undefined), {});
   assert.deepEqual(parseRoleTests([summary]), {});
 });
 
+test('a role test summary is clamped to 0..100, so a grader that scores past its total never drops the record', () => {
+  const over = roleTestSummary([{ results: [{ score: 14, outOf: 10, failed: false }] }, { results: [{ score: -3, outOf: 10, failed: false }] }], 2, ago(HOUR));
+  assert.deepEqual(over, { at: ago(HOUR), members: 2, tested: 2, score: 50 }, 'a member past its total counts as 100%, one below 0 as 0%');
+  const many = roleTestSummary(Array.from({ length: 150 }, () => ({ results: [{ score: 1, outOf: 1, failed: false }] })), 150, ago(HOUR));
+  assert.deepEqual([many.members, many.tested, many.score], [100, 100, 100]);
+  for (const record of [over, many]) assert.deepEqual(parseRoleTests({ 'user:web': record }), { 'user:web': record }, 'read back whole');
+});
+
+test('a team is kept by a stable identity: a library team by its name in My teams, the project team by its project\'s folder, never by the path to its file', async () => {
+  assert.equal(teamKey({ kind: 'user', slug: 'web' }), 'user:web');
+  assert.equal(teamKey({ kind: 'project', slug: 'team' }, '0123456789abcdef'), 'project:0123456789abcdef');
+  assert.equal(teamKey({ kind: 'project', slug: 'team' }), undefined, 'no project identity, nothing to key by');
+  // The project's identity is its folder's real path: a symlink to it, or a trailing separator, is the same project; another folder is not.
+  const base = await mkdtemp(path.join(tmpdir(), 'near-ai-identity-'));
+  const real = path.join(base, 'project');
+  await mkdir(real);
+  await symlink(real, path.join(base, 'link'));
+  const id = await projectIdentity(real);
+  assert.match(id, /^[0-9a-f]{16}$/);
+  assert.equal(await projectIdentity(path.join(base, 'link')), id);
+  assert.equal(await projectIdentity(`${real}${path.sep}`), id);
+  await mkdir(path.join(base, 'other'));
+  assert.notEqual(await projectIdentity(path.join(base, 'other')), id);
+  // A folder that cannot be resolved still has an identity (its absolute path).
+  assert.match(await projectIdentity(path.join(base, 'gone')), /^[0-9a-f]{16}$/);
+  // On Windows the same folder can be spelled with different case: it is folded, as file comparisons there are.
+  assert.equal(folderIdentity('C:\\Work\\Repo', 'win32'), folderIdentity('c:\\work\\repo', 'win32'));
+  assert.notEqual(folderIdentity('/Work/Repo', 'linux'), folderIdentity('/work/repo', 'linux'));
+});
+
+test('role tests kept under the old path keys move once to the stable keys; a newer record is never overwritten', () => {
+  const old = { at: ago(2 * DAY), members: 1, tested: 1, score: 40 };
+  const newer = { at: ago(DAY), members: 1, tested: 1, score: 90 };
+  const legacy = { [legacyRoleTestKey('/lib/web.md')]: old, [legacyRoleTestKey('/lib/api.md')]: old, [legacyRoleTestKey('/lib/gone.md')]: old };
+  const moved = migrateRoleTests({ ...legacy, 'user:api': newer }, [{ from: legacyRoleTestKey('/lib/web.md'), to: 'user:web' }, { from: legacyRoleTestKey('/lib/api.md'), to: 'user:api' }]);
+  assert.equal(moved.changed, true);
+  assert.deepEqual(moved.records['user:web'], old);
+  assert.deepEqual(moved.records['user:api'], newer, 'the newer record stays');
+  assert.equal(legacyRoleTestKey('/lib/web.md') in moved.records, false);
+  assert.equal(legacyRoleTestKey('/lib/api.md') in moved.records, false);
+  assert.ok(legacyRoleTestKey('/lib/gone.md') in moved.records, 'a record for a team not listed now is left alone');
+  const again = migrateRoleTests(moved.records, [{ from: legacyRoleTestKey('/lib/web.md'), to: 'user:web' }]);
+  assert.equal(again.changed, false, 'once');
+});
+
+test('ratings are kept by team identity on this computer, checked when read back, 0 meaning cleared, at most 500', () => {
+  let records = {};
+  records = withRating(records, 'user:web', 4, ago(HOUR));
+  records = withRating(records, 'project:0123456789abcdef', 0, ago(HOUR));
+  assert.deepEqual(parseRatings(records), { 'user:web': { rating: 4, at: ago(HOUR) }, 'project:0123456789abcdef': { rating: 0, at: ago(HOUR) } });
+  assert.deepEqual(parseRatings({ 'user:a': { rating: 6, at: ago(1) }, 'user:b': { rating: 2.5, at: ago(1) }, 'user:c': 3, '../d': { rating: 3, at: ago(1) }, 'user:e': { rating: 3, at: 'x' } }), {});
+  assert.deepEqual(parseRatings('nope'), {});
+  for (let index = 0; index < 505; index += 1) records = withRating(records, `user:t${index}`, 3, new Date(NOW + index).toISOString());
+  assert.equal(Object.keys(records).length, 500);
+  assert.throws(() => withRating({}, 'user:web', 7, ago(1)), /0 to 5/);
+});
+
 // ---------- status and the summary row ----------
 
-const team = (overrides: Partial<DashboardTeam> & Pick<DashboardTeam, 'id'>): DashboardTeam => ({ kind: 'user', slug: overrides.id.replace(/^user:/, ''), file: `/lib/${overrides.id.replace(/^user:/, '')}.md`, members: [{ name: 'dev', available: true }], check: { block: 0, warning: 0, advice: 0 }, ...overrides });
+const team = (overrides: Partial<DashboardTeam> & Pick<DashboardTeam, 'id'>): DashboardTeam => ({ kind: 'user', slug: overrides.id.replace(/^user:/, ''), key: overrides.id, file: `/lib/${overrides.id.replace(/^user:/, '')}.md`, members: [{ name: 'dev', available: true }], check: { block: 0, warning: 0, advice: 0 }, ...overrides });
 
 test('status: running now, needs attention (with the reason), ready, or never run', () => {
   const sessions = [session('a', '/team:web x', { runOutcome: 'completed', endedAt: ago(DAY - 1000) }), session('b', '/team:team y', { runOutcome: 'failed', endedAt: ago(DAY - 1000), estimatedCostUsd: 0.5 })];
@@ -188,9 +244,9 @@ test('no project folder open: there is no run history, and the dashboard says so
   assert.equal(dashboard.summary.spendThisWeekUsd, undefined);
 });
 
-test('the health on a card uses the role test recorded for that team\'s file', () => {
+test('the health on a card uses the role test recorded for that team\'s identity', () => {
   const record = { at: ago(DAY), members: 1, tested: 1, score: 90 };
-  const dashboard = buildDashboard({ now: NOW, history: true, sessions: [], roleTests: { [roleTestKey('/lib/web.md')]: record }, running: [], teams: [team({ id: 'user:web' }), team({ id: 'user:other' })] });
+  const dashboard = buildDashboard({ now: NOW, history: true, sessions: [], roleTests: { 'user:web': record }, running: [], teams: [team({ id: 'user:web' }), team({ id: 'user:other' })] });
   assert.equal(dashboard.cards['user:web']!.health.score, 95);
   assert.equal(dashboard.cards['user:other']!.health.score, 100);
   assert.equal(dashboard.cards['user:other']!.health.parts[1]!.score, undefined);
@@ -255,27 +311,6 @@ test('the rating line goes after a one-line description, never inside a block or
   }
 });
 
-test('library: setting the rating writes the one line and keeps a version, as an icon change does; the same rating writes nothing', async () => {
-  const base = await mkdtemp(path.join(tmpdir(), 'near-ai-rating-'));
-  const lib = new TeamLibrary(path.join(base, 'global'));
-  const file = await lib.create('Web team', TEAM);
-  const before = (await lib.versions(file)).length;
-  const set = await lib.setRating(file, 4);
-  assert.equal(set.textChanged, true);
-  assert.equal(teamRating(await readFile(file, 'utf8')), 4);
-  assert.equal((await lib.versions(file)).length, before + 1, 'a version is kept');
-  assert.equal((await lib.setRating(file, 4)).textChanged, false);
-  assert.equal((await lib.versions(file)).length, before + 1);
-  await lib.setRating(file, undefined);
-  assert.equal(await readFile(file, 'utf8'), TEAM);
-  // A project team too.
-  const root = path.join(base, 'project');
-  await mkdir(path.dirname(TeamLibrary.projectTeamFile(root)), { recursive: true });
-  await writeFile(TeamLibrary.projectTeamFile(root), TEAM);
-  await lib.setRating(TeamLibrary.projectTeamFile(root), 2);
-  assert.equal(teamRating(await readFile(TeamLibrary.projectTeamFile(root), 'utf8')), 2);
-});
-
 // ---------- the host: the dashboard in every listing, the rating, Watch it live, live updates ----------
 
 
@@ -287,7 +322,7 @@ function directoryInput(): DirectoryInput {
   };
 }
 
-async function host(options: { sessions?: ActivitySessionSummary[]; running?: Array<{ runId: string; slug?: string; file?: string }>; roleTests?: unknown; noRoot?: boolean } = {}) {
+async function host(options: { sessions?: ActivitySessionSummary[]; running?: Array<{ runId: string; slug?: string; file?: string }>; roleTests?: unknown; ratings?: unknown; noRoot?: boolean } = {}) {
   const base = await mkdtemp(path.join(tmpdir(), 'near-ai-dashboard-'));
   const root = path.join(base, 'project');
   await mkdir(root, { recursive: true });
@@ -295,7 +330,7 @@ async function host(options: { sessions?: ActivitySessionSummary[]; running?: Ar
   const posted: Array<Record<string, any>> = [];
   let receive: ((message: unknown) => unknown) | undefined;
   let runsChanged: (() => void) | undefined;
-  const state = { sessions: options.sessions ?? [], running: options.running ?? [], historyReads: 0, watched: [] as Array<string | undefined> };
+  const state = { sessions: options.sessions ?? [], running: options.running ?? [], historyReads: 0, watched: [] as Array<string | undefined>, ratings: options.ratings as unknown, ratingWrites: 0, roleTests: options.roleTests as unknown, roleTestWrites: 0 };
   const deps: TeamStudioDeps = {
     library, root: () => (options.noRoot ? undefined : root), gather: async () => directoryInput(), knowledgeBase: async () => false,
     sidebar: { prefill: async () => undefined }, openFile: async () => undefined, openSetting: async () => undefined, confirm: async () => true, ask: async () => undefined,
@@ -304,7 +339,8 @@ async function host(options: { sessions?: ActivitySessionSummary[]; running?: Ar
     runningTeams: () => state.running,
     onDidChangeRuns: (listener) => { runsChanged = listener; return { dispose() { runsChanged = undefined; } }; },
     watchLive: async (runId?: string) => { state.watched.push(runId); },
-    roleTests: { get: () => options.roleTests }
+    roleTests: { get: () => state.roleTests, set: async (value) => { state.roleTestWrites += 1; state.roleTests = value; } },
+    ratings: { get: () => state.ratings, set: async (value) => { state.ratingWrites += 1; state.ratings = value; } }
   };
   attachTeamStudio({ webview: { postMessage: async (message) => { posted.push(message as Record<string, any>); return true; }, onDidReceiveMessage: (listener) => { receive = listener; return { dispose() {} }; } }, onDidDispose: () => ({ dispose() {} }) }, deps);
   const send = async (message: unknown) => { await receive!(message); };
@@ -327,27 +363,33 @@ test('host: the listing carries the dashboard, computed from the history, the ru
   assert.equal(state.dashboard.summary.teams, 2);
   assert.equal(state.dashboard.history, true);
   const listed = state.library.teams.find((entry: any) => entry.id === 'user:web-team');
-  assert.equal(listed.rating, 4, 'the rating is read from the team file');
+  assert.equal(listed.rating, 4, 'a rating line from an earlier build is read once into the store');
+  assert.equal((h.state.ratings as Record<string, { rating: number }>)['user:web-team']!.rating, 4);
+  assert.equal(teamRating(await readFile(web, 'utf8')), 4, 'and nothing is removed from the file');
   // No message the page is sent holds a path on this computer (owner rule: the page never receives file paths).
   for (const message of h.posted) assert.doesNotMatch(JSON.stringify(message), new RegExp(h.base.replace(/[\\^$.*+?()[\]{}|]/g, '\\$&')), message.type);
   assert.equal(listed.file, undefined);
   assert.ok(web);
 });
 
-test('host: Rate writes the rating line, keeps a version, lists the team again, and answers; anything else is refused', async () => {
+test('host: Rate keeps the rating on this computer by the team\'s identity, never in the team file; anything else is refused', async () => {
   const h = await host();
   const file = await h.library.create('Web team', TEAM);
   await h.send({ type: 'ready' });
   const versions = (await h.library.versions(file)).length;
   await h.send({ type: 'rate', id: 'user:web-team', rating: 5 });
-  assert.equal(teamRating(await readFile(file, 'utf8')), 5);
-  assert.equal((await h.library.versions(file)).length, versions + 1);
+  assert.equal(await readFile(file, 'utf8'), TEAM, 'the team file is not touched');
+  assert.equal((await h.library.versions(file)).length, versions, 'and no version is made');
+  assert.equal((h.state.ratings as Record<string, { rating: number }>)['user:web-team']!.rating, 5);
   assert.equal(h.latest('library').library.teams[0].rating, 5);
   assert.deepEqual([h.latest('rated').id, h.latest('rated').rating], ['user:web-team', 5]);
   assert.match(h.latest('rated').text, /Rated Web team 5 out of 5/);
+  assert.equal('base' in h.latest('rated'), false, 'nothing for an open editor to catch up on');
   await h.send({ type: 'rate', id: 'user:web-team', rating: 0 });
-  assert.equal(await readFile(file, 'utf8'), TEAM, 'cleared: the line is gone and nothing else changed');
+  assert.equal((h.state.ratings as Record<string, { rating: number }>)['user:web-team']!.rating, 0, 'cleared, and kept as cleared');
+  assert.equal('rating' in h.latest('library').library.teams[0], false);
   assert.match(h.latest('rated').text, /Cleared/);
+  assert.equal(await readFile(file, 'utf8'), TEAM);
   // Strict parsing: an id the page was given, and a whole number from 0 (clear) to 5.
   for (const bad of [{ type: 'rate', id: 'user:web-team', rating: 6 }, { type: 'rate', id: 'user:web-team', rating: 2.5 }, { type: 'rate', id: 'user:web-team', rating: '3' }, { type: 'rate', id: '../x', rating: 3 }, { type: 'rate', id: 'archived:web-team', rating: 3 }, { type: 'rate', id: 'user:web-team', rating: 3, extra: 1 }]) assert.equal(parseStudioMessage(bad), undefined, JSON.stringify(bad));
   assert.deepEqual(parseStudioMessage({ type: 'rate', id: 'project', rating: 0 }), { type: 'rate', id: 'project', rating: 0 });
@@ -357,19 +399,76 @@ test('host: Rate writes the rating line, keeps a version, lists the team again, 
   assert.match(h.posted.slice(count).map((message) => message.text).join(' '), /no longer in your teams/);
 });
 
-test('host: rating the team open in the editor moves the editor to the new version, so its next save is not taken for an outside edit', async () => {
+test('host: rating the project team never changes its file in the project, so a code push can never carry it; a line from an earlier build is read once and left in place', async () => {
+  const h = await host();
+  const projectFile = TeamLibrary.projectTeamFile(h.root);
+  await mkdir(path.dirname(projectFile), { recursive: true });
+  const legacy = withTeamRating(renderTeam('Project team', 'For this repo', [{ name: 'dev', role: 'implementer', instructions: 'Build it. Report what changed.' }]), 2);
+  await writeFile(projectFile, legacy);
+  await h.send({ type: 'ready' });
+  const key = `project:${await projectIdentity(h.root)}`;
+  assert.equal(h.latest('state').library.teams.find((entry: any) => entry.id === 'project').rating, 2, 'read once from the old line');
+  assert.equal((h.state.ratings as Record<string, { rating: number }>)[key]!.rating, 2);
+  const versions = (await h.library.versions(projectFile)).length;
+  for (const rating of [5, 0, 3]) await h.send({ type: 'rate', id: 'project', rating });
+  assert.equal(await readFile(projectFile, 'utf8'), legacy, 'byte for byte, the old line included');
+  assert.equal((await h.library.versions(projectFile)).length, versions);
+  assert.equal((h.state.ratings as Record<string, { rating: number }>)[key]!.rating, 3);
+  // Cleared stays cleared: the old line is not read again.
+  await h.send({ type: 'rate', id: 'project', rating: 0 });
+  await h.send({ type: 'refresh' });
+  assert.equal('rating' in h.latest('state').library.teams.find((entry: any) => entry.id === 'project'), false);
+  // The project is known by its folder's real path: opened through a link, it is the same project and keeps its rating.
+  await h.send({ type: 'rate', id: 'project', rating: 4 });
+  const link = path.join(h.base, 'link');
+  await symlink(h.root, link);
+  const other = await host({ ratings: h.state.ratings });
+  (other.deps as { root: () => string }).root = () => link;
+  await other.send({ type: 'ready' });
+  assert.equal(other.latest('state').library.teams.find((entry: any) => entry.id === 'project').rating, 4);
+});
+
+test('host: rating the team open in the editor leaves its file and the editor\'s version as they were', async () => {
   const h = await host();
   await h.library.create('Web team', TEAM);
   await h.send({ type: 'ready' });
   await h.send({ type: 'open', id: 'user:web-team' });
   const opened = h.latest('team');
   await h.send({ type: 'rate', id: 'user:web-team', rating: 3 });
-  const rated = h.latest('rated');
-  assert.ok(rated.base && rated.base !== opened.base);
-  await h.send({ type: 'save', id: 'user:web-team', base: rated.base, draft: { ...opened.draft, description: 'Builds and tests pages' } });
+  await h.send({ type: 'save', id: 'user:web-team', base: opened.base, draft: { ...opened.draft, description: 'Builds and tests pages' } });
+  assert.equal(h.posted.filter((message) => message.type === 'external-change').length, 0, 'the save was not taken for an outside edit');
   const saved = await readFile(path.join(h.library.directory, 'web-team.md'), 'utf8');
   assert.match(saved, /description: Builds and tests pages/);
-  assert.equal(teamRating(saved), 3, 'the save keeps the rating');
+  assert.equal(teamRating(saved), undefined, 'no rating in the file');
+});
+
+test('host: the run history is read once per listing and again only when a run starts or ends, the folder changes or Refresh is asked; the local check runs again only for a changed file', async () => {
+  const h = await host({ running: [{ runId: 'run-web-123456', slug: 'web-team' }] });
+  await h.library.create('Web team', TEAM);
+  await h.send({ type: 'ready' });
+  assert.equal(h.state.historyReads, 1);
+  // Messages that list the teams or the dashboard again use the history already read.
+  await h.send({ type: 'rate', id: 'user:web-team', rating: 4 });
+  await h.send({ type: 'rate', id: 'user:web-team', rating: 2 });
+  await h.send({ type: 'watch-live', id: 'user:web-team' });
+  await h.send({ type: 'archive', id: 'user:nope' });
+  assert.equal(h.state.historyReads, 1);
+  assert.deepEqual(h.state.watched, ['run-web-123456'], 'Watch it live finds the run in the listing it holds');
+  // A run starting or ending, and Refresh, read it again.
+  h.runsChanged();
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  assert.equal(h.state.historyReads, 2);
+  await h.send({ type: 'refresh' });
+  assert.equal(h.state.historyReads, 3);
+  // The local check: one run per file content, reused while the file is unchanged.
+  const cache = new Map();
+  const first = await listLibrary(h.library, h.root, directoryInput(), { checks: cache });
+  const second = await listLibrary(h.library, h.root, directoryInput(), { checks: cache });
+  assert.equal(cache.size, 1);
+  assert.equal(second.teams[0]!.check, first.teams[0]!.check, 'the same result, not checked again');
+  await writeFile(path.join(h.library.directory, 'web-team.md'), TEAM.replace('Build it.', 'Build it. Report what changed.'));
+  const third = await listLibrary(h.library, h.root, directoryInput(), { checks: cache });
+  assert.notEqual(third.teams[0]!.check, first.teams[0]!.check, 'a changed file is checked again');
 });
 
 test('host: Watch it live opens Team Live on that team\'s run; a run starting or ending lists the dashboard again from the history', async () => {
@@ -404,13 +503,18 @@ test('host: the role test recorded for a team counts in its health; a broken rec
   await h.send({ type: 'ready' });
   assert.equal(h.latest('state').dashboard.cards['user:web-team'].health.parts[1].score, undefined);
   const record = { at: new Date().toISOString(), members: 1, tested: 1, score: 80 };
-  h.deps.roleTests = { get: () => ({ [roleTestKey(path.join(h.base, 'elsewhere.md'))]: record }) };
+  h.state.roleTests = { 'user:elsewhere': record };
   await h.send({ type: 'refresh' });
-  assert.equal(h.latest('state').dashboard.cards['user:web-team'].health.parts[1].score, undefined, 'a record for another file is not this team\'s');
-  h.deps.roleTests = { get: () => ({ [roleTestKey(file)]: record }) };
+  assert.equal(h.latest('state').dashboard.cards['user:web-team'].health.parts[1].score, undefined, 'a record for another team is not this team\'s');
+  // A record kept under the old path key (an earlier build) moves to the team's identity once, and counts.
+  h.state.roleTests = { [legacyRoleTestKey(file)]: record };
   await h.send({ type: 'refresh' });
+  assert.deepEqual(h.state.roleTests, { 'user:web-team': record });
+  assert.equal(h.state.roleTestWrites, 1);
+  await h.send({ type: 'refresh' });
+  assert.equal(h.state.roleTestWrites, 1, 'once');
   const health = h.latest('state').dashboard.cards['user:web-team'].health;
-  assert.equal(health.parts[1].score, 80);
+  assert.equal(health.parts[1].score, 80, 'from the moved record');
   assert.equal(health.parts[0].score, 95, 'the local check: one suggestion (dev has no role)');
   assert.equal(health.score, 88, 'the average of 95 and 80, rounded');
 });
@@ -463,10 +567,8 @@ test('host: Optimise all teams from the dashboard lists the dashboard again for 
   const h = await host();
   await h.library.create('Web team', TEAM);
   const record = { at: new Date().toISOString(), members: 1, tested: 1, score: 75 };
-  let records: Record<string, unknown> = {};
-  h.deps.roleTests = { get: () => records };
   h.deps.optimiseCandidates = async () => ['fast'];
-  h.deps.optimiseTeam = async (_members, team, options) => { records = { [roleTestKey(options!.file!)]: record }; return { applied: 1, text: `${team}: set 1 model.` }; };
+  h.deps.optimiseTeam = async (_members, team) => { h.state.roleTests = { 'user:web-team': record }; return { applied: 1, text: `${team}: set 1 model.` }; };
   h.deps.choose = async (_message, ...actions) => actions[0];
   await h.send({ type: 'ready' });
   const before = h.posted.length;

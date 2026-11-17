@@ -3718,6 +3718,8 @@ test('page: the star rating is set on the card, saved through the host, kept aft
   // A filled star or an outline one, never colour alone.
   assert.deepEqual(page.card('user:web')!.all().filter((node) => node.className === 'glyph').map((node) => node.textContent), ['☆', '☆', '☆', '☆', '☆']);
   assert.equal(stars.find((node) => node.checked)!.value, '0', 'not rated yet');
+  // Review of PR 86: the rating is kept on this computer, never in the team file (a project team's file goes wherever the project goes).
+  assert.match(page.card('user:web')!.textContent, /Only yours: kept on this computer, never in the team file or the project\./);
   // Choosing 3 stars: shown at once, sent once the choice settles (the arrow keys pass through 1 and 2 on the way).
   for (const value of ['1', '2', '3']) { const star = stars.find((node) => node.value === value)!; star.checked = true; star.fire('change'); }
   assert.equal(page.posts.filter((message) => message.type === 'rate').length, 0);
