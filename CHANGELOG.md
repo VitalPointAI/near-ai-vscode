@@ -48,7 +48,8 @@ to undo, and no mode lets an agent near the places where your keys and passwords
   name first. A built-in team that is made from your answers asks only those, next to the buttons.
   **Create a new team** starts from scratch, from a clone of an existing team, or from a description
   the AI drafts a team from. Only a new team or a clone asks for a name, what it is for and where to
-  save it; a clone starts as "Copy of" the team. Back returns to the screen before at every step,
+  save it; a clone of one of your teams starts as "Copy of" that team, and a clone of a built-in team
+  starts under the built-in's name. Back returns to the screen before at every step,
   and a draft you saved earlier opens on the step you left it.
 - **Replacing a project's team always keeps the old one.** When the old team and the new one were
   kept as versions within the same millisecond, the new version could overwrite the old one.

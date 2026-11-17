@@ -2340,7 +2340,12 @@ test('versions taken in the same millisecond are all kept, in order', async () =
   const library = new TeamLibrary(await mkdtemp(path.join(tmpdir(), 'near-ai-teams-')));
   const file = TeamLibrary.projectTeamFile(await mkdtemp(path.join(tmpdir(), 'p-')));
   await mkdir(path.dirname(file), { recursive: true });
-  for (let n = 1; n <= 5; n += 1) { await writeFile(file, `version ${n}`); await library.snapshot(file); }
+  // The clock is frozen, so every snapshot falls in the same millisecond and the collision is certain, however fast the file system is.
+  const realNow = Date.now;
+  Date.now = () => 1_700_000_000_000;
+  try {
+    for (let n = 1; n <= 5; n += 1) { await writeFile(file, `version ${n}`); await library.snapshot(file); }
+  } finally { Date.now = realNow; }
   const versions = (await library.versions(file)).sort();
   assert.deepEqual(await Promise.all(versions.map((version) => readFile(version, 'utf8'))), ['version 1', 'version 2', 'version 3', 'version 4', 'version 5']);
 });

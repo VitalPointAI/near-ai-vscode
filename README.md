@@ -631,8 +631,9 @@ until it runs out aren't shown.
   the team history; with no folder open it is put in the chat, and a
   built-in team is saved to My teams under its own name first (with a number
   added if that name is taken). **Clone and modify** opens the new team's
-  Purpose step with the members filled in, the name set to "Copy of" the
-  team and its description copied. A built-in team made from your answers
+  Purpose step with the members filled in and its description copied; a
+  saved team's copy is named "Copy of" the team, and a built-in team's copy
+  keeps the built-in's name (with a number added if that name is taken). A built-in team made from your answers
   (such as **Recommend a team for me**) asks what the team is for, where its
   models may run and, for the recommendation, the kind of work and its risk,
   next to the buttons. **Create a new team** starts **From scratch**, from

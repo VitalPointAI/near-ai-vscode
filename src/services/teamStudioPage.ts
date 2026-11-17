@@ -978,7 +978,8 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
         } else {
           // A built-in: made from its template under its own name. With no project it is saved to My teams, so its name is made unique there.
           const point = context!.startingPoints.find((candidate) => candidate.id === message.id);
-          if (!point) return;
+          // startRequest accepts only ids that are listed, so this cannot happen today; it still answers rather than leave the page waiting.
+          if (!point) { post({ type: 'error', text: 'That built-in team is not available here. Pick another one.' }); return; }
           const result = startingPointDraft({ id: message.id, goal, locality: message.locality ?? 'cloud', ...(message.workShape ? { workShape: message.workShape } : {}), ...(message.riskLevel ? { riskLevel: message.riskLevel } : {}) }, context!);
           name = root ? startingPointTeamName(point) : uniqueTeamName(startingPointTeamName(point), library.teams);
           const draft = { ...result.draft, name };
