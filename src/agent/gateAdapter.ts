@@ -7,7 +7,8 @@ import type { ActionCapability, ActionPolicy } from '../domain/policy';
 import { failedClosed } from '../domain/gate/bundle';
 import type { BundleState, GateContextName } from '../domain/gate/bundle';
 import { decide } from '../domain/gate/decide';
-import type { ActorRef, GateDecision, GateRequest, GateRuntime, SettingsAnswer, SettingsLayer } from '../domain/gate/decide';
+import type { ActorRef, GateDecision, GateOptions, GateRequest, GateRuntime, SettingsAnswer, SettingsLayer } from '../domain/gate/decide';
+import type { FloorFacts } from '../domain/gate/floor';
 import { effectsFor } from '../domain/gate/manifest';
 import type { InputFieldSource } from '../domain/gate/manifest';
 import { buildDecisionRecord, outcomeOf } from '../domain/gate/record';
@@ -18,6 +19,7 @@ import { classifyCommand, downloadSegments } from './commandSafety';
 import type { CommandEffect } from './commandSafety';
 import { decidePermissionAsync, isAutoAllowed } from './permissions';
 import type { AutoApprovalContext, PermissionDecision, PermissionRules, RunGrants } from './permissions';
+import { shellReachesCredentialStore } from './tools';
 import type { AgentTool } from './tools';
 
 const DEFAULT_PRODUCT_VERSION = '0.0.0';
@@ -68,21 +70,36 @@ export interface FloorFactsInput extends Partial<FloorShellContext> {
   readonly command: string;
   /** The folder this call works in. */
   readonly root: string;
-  /** The person's home folder, for `~`. */
+  /** The person's home folder, for `~`, `$HOME` and the credential stores in it. */
   readonly home?: string;
+  /** This extension's global storage, whose identity and gate folders the floor refuses. */
+  readonly globalStorage?: string;
 }
 
-/** What the floor learns from a shell command's text: the effects the classifier tagged. */
+/**
+ * What the floor learns from a shell command's text: the effects the classifier tagged (publish, destroy, a protected write, which the floor turns into
+ * `floor.publish`, `floor.destroy` and `floor.protected-write`), and whether it reaches a credential store or the identity files (D-16).
+ */
 export interface FloorCommandFacts {
   readonly effects: readonly CommandEffect[];
+  readonly facts: Pick<FloorFacts, 'credentialStore' | 'identityFiles'>;
 }
 
 /**
  * The floor's own reading of a shell command (GATE-05, Pitfall 5): the classifier run with a cheap context of its own, so the floor sees what a command
- * publishes, destroys or writes in every mode, including the ones that never build auto approve's context. It only reads the command's text; it runs nothing.
+ * publishes, destroys or writes in every mode, including the ones that never build auto approve's context, and the credential-store check with the
+ * command's words resolved from the shell's folder. It only reads the command's text and resolves paths; it runs nothing and opens no file.
  */
 export async function floorFactsFor(input: FloorFactsInput): Promise<FloorCommandFacts> {
-  if (input.command.trim() === '') return { effects: [] };
+  if (input.command.trim() === '') return { effects: [], facts: {} };
+  const reach = await shellReachesCredentialStore(input.command, { root: input.root, shell: { workingDirectory: input.cwd ?? input.root } }, {
+    ...(input.home === undefined ? {} : { home: input.home }),
+    ...(input.globalStorage === undefined ? {} : { globalStorage: input.globalStorage })
+  }).catch(() => ({}) as Awaited<ReturnType<typeof shellReachesCredentialStore>>);
+  const facts = {
+    ...(reach.credentialStore === undefined ? {} : { credentialStore: reach.credentialStore }),
+    ...(reach.identityFiles === undefined ? {} : { identityFiles: reach.identityFiles })
+  };
   let classified: ReturnType<typeof classifyCommand>;
   try {
     classified = classifyCommand(input.command, {
@@ -94,9 +111,14 @@ export async function floorFactsFor(input: FloorFactsInput): Promise<FloorComman
       ...(input.gsdPreambles === undefined ? {} : { gsdPreambles: [...input.gsdPreambles] })
     });
   } catch {
-    return { effects: [] }; // the classifier is pure and should never throw; if it does, the call is decided on its manifest alone
+    return { effects: [], facts }; // the classifier is pure and should never throw; if it does, the call is decided on its manifest alone
   }
-  return { effects: classified.effects ?? [] };
+  return { effects: classified.effects ?? [], facts };
+}
+
+/** What decide() is told by the runtime: the floor's mode and, when the host knows them, the home folder and global storage its text checks may name. */
+function gateOptionsOf(runtime: GateRuntime): GateOptions {
+  return { floorMode: runtime.floorMode, ...(runtime.locations === undefined ? {} : { locations: runtime.locations }) };
 }
 
 /** The manifest's effects with the command's own after them, each once. Unknown effects (an empty list) stay unknown: the command cannot make them known. */
@@ -358,8 +380,9 @@ async function decideOrRefuse(refusal: Refusal | undefined, mode: ActionPolicy['
 export async function gateToolCall(runtime: GateRuntime, input: GateCallInput, options: GateCallOptions = {}): Promise<GatedCall> {
   const declared = effectsOfCall(runtime, input.tool, input.raw, input.root);
   // A shell call's command is read by the floor in every mode (Pitfall 5); what it tags joins the manifest's own effects.
-  const floorFacts = input.command === undefined ? undefined : await floorFactsFor({ command: input.command, root: input.root, ...(input.shell ?? {}) });
-  const effects = withCommandEffects(declared, floorFacts?.effects ?? []);
+  const read = input.command === undefined ? undefined : await floorFactsFor({ command: input.command, root: input.root, ...(input.shell ?? {}), ...(runtime.locations ?? {}) });
+  const effects = withCommandEffects(declared, read?.effects ?? []);
+  const floorFacts: FloorFacts = { ...(input.tool.capability === 'sharedWrite' ? { sharedWrite: true } : {}), ...(read?.facts ?? {}) };
   const request: GateRequest = {
     actor: runtime.actor,
     tool: input.tool.name,
@@ -373,11 +396,11 @@ export async function gateToolCall(runtime: GateRuntime, input: GateCallInput, o
     ...(input.forbidden === undefined || input.forbidden === '' ? {} : { forbidden: input.forbidden }),
     ...(input.sensitive === undefined || input.sensitive === '' ? {} : { sensitive: input.sensitive }),
     ...(input.risky === undefined || input.risky === '' ? {} : { risky: input.risky }),
-    ...(input.tool.capability === 'sharedWrite' ? { floorFacts: { sharedWrite: true } } : {})
+    ...(Object.keys(floorFacts).length === 0 ? {} : { floorFacts })
   };
   const captured: { value?: PermissionDecision } = {};
   const layer = options.refusal === undefined ? settingsLayerFor(input, captured) : refusalLayer(options.refusal);
-  const decision = await decideOrRefuse(options.refusal, input.policy.mode, () => decide(request, runtime.bundleState(), layer, { floorMode: runtime.floorMode }));
+  const decision = await decideOrRefuse(options.refusal, input.policy.mode, () => decide(request, runtime.bundleState(), layer, gateOptionsOf(runtime)));
   const gated: GatedCall = { decision, settings: captured.value, request, effects };
   keep(runtime, recordFor(runtime, gated, outcomeOf(decision), decision.rule, decision.reason, options.model === undefined ? undefined : { name: options.model, provider: MODEL_PROVIDER }));
   return gated;
@@ -423,7 +446,7 @@ export async function gateStep(runtime: GateRuntime, input: GateStepInput, optio
     ...(input.command === undefined ? {} : { command: input.command })
   };
   const answered: SettingsAnswer = options.refusal === undefined ? input.settings : { decision: 'deny', reason: options.refusal.reason, rule: options.refusal.rule };
-  const decision = await decideOrRefuse(options.refusal, input.policy.mode, () => decide(request, runtime.bundleState(), async () => answered, { floorMode: runtime.floorMode }));
+  const decision = await decideOrRefuse(options.refusal, input.policy.mode, () => decide(request, runtime.bundleState(), async () => answered, gateOptionsOf(runtime)));
   const gated: GatedCall = { decision, settings: undefined, request, effects: input.effects };
   keep(runtime, recordFor(runtime, gated, outcomeOf(decision), decision.rule, decision.reason, options.model === undefined ? undefined : { name: options.model, provider: MODEL_PROVIDER }));
   return gated;
@@ -456,7 +479,7 @@ export async function recordApprovalReply(runtime: GateRuntime, gated: GatedCall
   }
   let again: GateDecision;
   try {
-    again = await decide(gated.request, runtime.bundleState(), ANSWERED, { floorMode: runtime.floorMode });
+    again = await decide(gated.request, runtime.bundleState(), ANSWERED, gateOptionsOf(runtime));
   } catch {
     again = { outcome: 'deny', rule: 'bundle.failed-closed', reason: 'NEAR AI could not check this call again, so it was not run.', floor: false, offerAlwaysAllow: false, allowGrant: false, effectiveMode: 'approve-risky' };
   }

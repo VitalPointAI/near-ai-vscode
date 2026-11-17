@@ -5,6 +5,7 @@
 // It also owns what the person sees of the policy (OFFL-02, D-13, D-33, D-41): the status bar item, NEAR AI: Show Policy (a read-only virtual document, so
 // nothing is ever written by looking), NEAR AI: Reset Policy to Defaults (confirmed in a modal, recorded, the only path that re-signs a bundle that failed
 // verification) and the Policy step in the setup view.
+import { homedir } from 'node:os';
 import * as vscode from 'vscode';
 import { CAPABILITY_VERBS } from '../domain/gate/vocabulary';
 import type { BundleState } from '../domain/gate/bundle';
@@ -169,6 +170,8 @@ export function registerGate(context: GateActivationContext, options: RegisterGa
     globalStorageDir: context.globalStorageUri.fsPath,
     secrets: context.secrets,
     productVersion: String(context.extension?.packageJSON?.version ?? '0.0.0'),
+    // The floor reads shell commands for the credential stores in the person's home folder (D-16); it only resolves paths, it never opens one.
+    home: homedir(),
     projectRoot,
     onProblem: tell,
     ...(options.now === undefined ? {} : { now: options.now })

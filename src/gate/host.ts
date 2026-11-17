@@ -39,6 +39,8 @@ export interface GateHostOptions {
   readonly now?: () => Date;
   /** How long `runtimeFor` waits for the start to finish. Defaults to RUNTIME_START_WAIT_MS; tests pass a short one. */
   readonly startWaitMs?: number;
+  /** The person's home folder, for the floor's credential-store checks of shell commands (D-16). The activation adapter passes it; a test leaves it out or gives a stand-in. */
+  readonly home?: string;
 }
 
 export interface RuntimeRequest {
@@ -118,6 +120,7 @@ export class GateHost {
       presence: request.presence,
       context: request.context,
       floorMode: request.floorMode,
+      locations: { globalStorage: this.options.globalStorageDir, ...(this.options.home === undefined ? {} : { home: this.options.home }) },
       productVersion: this.options.productVersion,
       clock: () => this.now(),
       newRecordId: () => randomUUID()

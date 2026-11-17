@@ -118,8 +118,14 @@ function firstMatch(pattern: RegExp, text: string): string | undefined {
   return found === null ? undefined : found[0].trim().slice(0, 120);
 }
 
-function credentialReason(shown: string): string {
+/** The plain reason for `floor.credential-store`, naming the store as the command reached it. */
+export function credentialReason(shown: string): string {
   return `${shown} names a place where passwords, keys or tokens are kept. Agents may not read, write, list or run anything there, in any approval mode.`;
+}
+
+/** The plain reason for `floor.identity-files`, naming the folder as the command reached it. */
+export function identityFilesReason(shown: string): string {
+  return `${shown} is where NEAR AI keeps this device's signing keys and its policy and decision records. Agents may not read, write, list or run anything there, in any approval mode.`;
 }
 
 /**
@@ -145,7 +151,7 @@ export function namesIdentityFiles(text: string, locations: FloorLocations = {})
   if (real !== undefined) bases.push(escapeRegExp(real));
   const pattern = new RegExp(`(?:${bases.join('|')})/+(?:${folders})${NAME_END}`, 'i');
   const shown = firstMatch(pattern, flat);
-  return shown === undefined ? undefined : `${shown} is where NEAR AI keeps this device's signing keys and its policy and decision records. Agents may not read, write, list or run anything there, in any approval mode.`;
+  return shown === undefined ? undefined : identityFilesReason(shown);
 }
 
 /** Facts the caller already knows. Each carries the plain reason, or is true for the one that needs none. */

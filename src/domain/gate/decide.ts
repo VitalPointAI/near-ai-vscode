@@ -96,6 +96,8 @@ export interface GateRuntime {
   readonly presence: Presence;
   readonly context: GateContextName;
   readonly floorMode: FloorMode;
+  /** The person's home folder and this extension's global storage, for the floor's checks of shell commands. The host sets them; a test runtime gives a stand-in or none. */
+  readonly locations?: FloorLocations;
   /** What a record needs and the pure domain cannot know. The host sets them; a runtime built for a test may leave them out. */
   readonly productVersion?: string;
   readonly clock?: () => number;
