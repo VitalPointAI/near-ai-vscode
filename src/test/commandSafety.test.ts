@@ -2,8 +2,10 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { classifyCommand, CommandContext, CommandVerdict } from '../agent/commandSafety';
 
-const context: CommandContext = { root: '/work/app', cwd: '/work/app', home: '/home/dev' };
-const verdict = (command: string, extra: Partial<CommandContext> = {}) => classifyCommand(command, { ...context, ...extra });
+// The project's only package.json is its root's, with no scripts (PR #74 review round 6: scripts nobody read are unknown, so a fixture says what it read).
+const context: CommandContext = { root: '/work/app', cwd: '/work/app', home: '/home/dev', packageScriptsAt: () => ({ kind: 'found', folder: '/work/app', scripts: {} }) };
+/** A test that names the root's scripts (packageScripts) is read with those, not with the fixture's reader. */
+const verdict = (command: string, extra: Partial<CommandContext> = {}) => classifyCommand(command, { ...context, ...(extra.packageScripts === undefined ? {} : { packageScriptsAt: undefined }), ...extra });
 
 function table(expected: CommandVerdict, commands: string[], extra: Partial<CommandContext> = {}): void {
   const wrong = commands.map((command) => ({ command, result: verdict(command, extra) })).filter(({ result }) => result.verdict !== expected || !result.reason);

@@ -843,9 +843,11 @@ function scriptsIn(folder: string | undefined, state: SegmentState, context: Com
   const at = path.resolve(folder ?? state.cwd);
   if (!isInside(context.root, at)) return { unknown: 'it runs scripts from a folder outside the project' };
   if (context.packageScriptsAt === undefined) {
-    // No reader: only the project root's scripts are known (the caller's packageScripts), as before.
-    if (at !== path.resolve(context.root) && context.packageScripts !== undefined) return { unknown: 'it runs the scripts of a folder whose package.json was not read' };
-    return { scripts: context.packageScripts ?? {}, folder: at };
+    // No reader: only the project root's scripts are known, and only when the caller read them (packageScripts). Scripts nobody read are unknown, never an
+    // empty set (PR #74 review round 6): an empty set would read every script name as a harmless project script.
+    if (context.packageScripts === undefined) return { unknown: 'the package.json it would run scripts from was not read' };
+    if (at !== path.resolve(context.root)) return { unknown: 'it runs the scripts of a folder whose package.json was not read' };
+    return { scripts: context.packageScripts, folder: at };
   }
   const found = context.packageScriptsAt(at);
   if (found.kind === 'none') return { scripts: {}, folder: at };
@@ -856,7 +858,11 @@ function scriptsIn(folder: string | undefined, state: SegmentState, context: Com
 
 function checkScript(name: string, state: SegmentState, context: CommandContext, runner: string, depth: number, folder?: string): CommandClassification {
   const source = scriptsIn(folder, state, context);
-  if ('unknown' in source) return beyondReach(`${runner} ${name}: ${source.unknown}`);
+  if ('unknown' in source) {
+    const stopped = beyondReach(`${runner} ${name}: ${source.unknown}`);
+    // A release-like name still says what it does on its own word, as it does when the scripts are known.
+    return RELEASE_NAME.test(name) ? risky(`${runner} ${name} looks like a publish, release, or deploy script`, publishTo('release')) : stopped;
+  }
   const scripts = source.scripts;
   // Every script npm would run is read, even after one has decided the verdict, so what the later ones publish or destroy is still seen.
   let decided: CommandClassification | undefined;

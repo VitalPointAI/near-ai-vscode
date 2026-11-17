@@ -14,8 +14,10 @@ import { bashTool } from '../agent/tools';
 import type { GateRuntime } from '../domain/gate/decide';
 import { testGateRuntime } from './helpers/gatedRuns';
 
-const context: CommandContext = { root: '/work/app', cwd: '/work/app', home: '/home/dev' };
-const classify = (command: string, extra: Partial<CommandContext> = {}) => classifyCommand(command, { ...context, ...extra });
+// The project's only package.json is its root's, with no scripts (PR #74 review round 6: scripts nobody read are unknown, so a fixture says what it read).
+const context: CommandContext = { root: '/work/app', cwd: '/work/app', home: '/home/dev', packageScriptsAt: () => ({ kind: 'found', folder: '/work/app', scripts: {} }) };
+/** A test that names the root's scripts (packageScripts) is read with those, not with the fixture's reader. */
+const classify = (command: string, extra: Partial<CommandContext> = {}) => classifyCommand(command, { ...context, ...(extra.packageScripts === undefined ? {} : { packageScriptsAt: undefined }), ...extra });
 const PUSH: CommandEffect = { verb: 'publish', target: 'git-remote' };
 
 test('git push is tagged publish to a git remote, and its verdict and reason are what they were', () => {

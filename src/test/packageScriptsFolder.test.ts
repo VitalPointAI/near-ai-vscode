@@ -136,3 +136,58 @@ test('reading the right folder never makes a command newly safe: folder options,
   assert.equal(classify('cd quiet && npm run check').verdict, 'safe');
   assert.equal(classify('npm --prefix sub run sync').verdict, 'risky');
 });
+
+// PR #74 review round 6: scripts nobody read are unknown, never an empty set. A caller that hands the classifier no reader and no root scripts used to have
+// `npm test` (or `cd sub && npm run x`) read as a harmless project script. One test per kind of caller of the classifier.
+test('with no reader and no scripts, a named script is unknown in the root and in a subfolder, for the classifier itself', () => {
+  const bare: CommandContext = { root: '/work/app', cwd: '/work/app', home: '/home/dev' };
+  for (const command of ['npm test', 'npm run sync', 'cd sub && npm run sync', 'yarn build', 'pnpm test', 'cd sub && npm start']) {
+    const result = classifyCommand(command, bare);
+    assert.notEqual(result.verdict, 'safe', `${command} → ${JSON.stringify(result)}`);
+    assert.equal(typeof result.effectsUnknown, 'string', command);
+  }
+  // A release-like name still says what it does on its own word.
+  assert.deepEqual(classifyCommand('npm run release', bare).effects, [{ verb: 'publish', target: 'release' }]);
+  // Root scripts the caller read are read; a subfolder's, which nobody read, are not.
+  assert.equal(classifyCommand('npm test', { ...bare, packageScripts: { test: 'echo ok' } }).verdict, 'safe');
+  assert.equal(typeof classifyCommand('cd sub && npm test', { ...bare, packageScripts: { test: 'echo ok' } }).effectsUnknown, 'string');
+});
+
+test('auto approval and permissions with no reader: a named script is not run without the safety model, and with none it asks', async () => {
+  const { decidePermissionAsync } = await import('../agent/permissions');
+  const asked: string[] = [];
+  const safety = { async check(command: string) { asked.push(command); return { allow: false, reason: 'Safety model: not checked here.' }; } };
+  const bare = { root: '/work/app', cwd: '/work/app', home: '/home/dev' };
+  const withModel = await decidePermissionAsync('shell', 'npm run sync', { mode: 'auto', emergencyStop: false }, DEFAULT_RULES, new RunGrants(), { ...bare, safety });
+  assert.equal(withModel.decision, 'ask');
+  assert.deepEqual(asked, ['npm run sync'], 'it went to the safety model: the rules did not call it safe');
+  const none = await decidePermissionAsync('shell', 'npm test', { mode: 'auto', emergencyStop: false }, DEFAULT_RULES, new RunGrants(), bare);
+  assert.equal(none.decision, 'ask');
+});
+
+test('the unattended check with no reader does not let a named script run', async () => {
+  const { unattendedDecision } = await import('../agent/unattended');
+  for (const command of ['npm test', 'npm run sync', 'cd sub && npm run build']) {
+    assert.equal((await unattendedDecision(command, { root: '/work/app', cwd: '/work/app' }, false)).allow, false, command);
+  }
+});
+
+test('the gate with no reader and no scripts: a named script has unknown effects, so Full auto asks with a person and refuses with nobody', async () => {
+  const root = project();
+  const facts = await floorFactsFor({ command: 'npm run sync', root });
+  assert.equal(typeof facts.effectsUnknown, 'string');
+  for (const presence of ['person', 'none'] as const) {
+    const gated = await gateToolCall(testGateRuntime({ presence, context: presence === 'none' ? 'unattended' : 'interactive' }), {
+      tool: bashTool, raw: { command: 'npm run sync' }, root, callId: `bare-${presence}`, command: 'npm run sync', policy: { mode: 'fully-autonomous', emergencyStop: false },
+      rules: DEFAULT_RULES, grants: new RunGrants(), shell: { cwd: root }, buildAuto: async () => undefined
+    });
+    assert.equal(gated.decision.outcome, presence === 'person' ? 'ask' : 'deny', presence);
+    assert.equal(gated.decision.rule, 'manifest.effects-unknown');
+  }
+});
+
+test('the cyber panel\'s permission path never runs the classifier without its context: in auto a shell step asks', async () => {
+  const { decidePermission } = await import('../agent/permissions');
+  // cyberRun calls decidePermission with no auto context, so the classifier is never asked and a named script is not judged safe.
+  assert.equal(decidePermission('shell', 'npm run sync', { mode: 'auto', emergencyStop: false }, DEFAULT_RULES, new RunGrants(), undefined).decision, 'ask');
+});
