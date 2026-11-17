@@ -1235,6 +1235,48 @@ function keepsGracePeriod(sub: string, rest: readonly Word[]): boolean {
   return dryRun || grace;
 }
 
+/**
+ * A word that names a remote address: a URL other than file://, a version-control address (`git+https://`, `git@host:`, `ssh://`), or a hosting
+ * shorthand (`github:`), alone or after `name@` or `--option=` (PR #76 review round 5).
+ */
+function isRemoteAddress(text: string): boolean {
+  const value = text.replace(/^--?[\w-]+=/, '').replace(/^[^\s/:@]+@(?=(?:git\+|[a-z][a-z0-9+.-]*:\/\/|github:|gitlab:|bitbucket:))/i, '');
+  if (/^file:/i.test(value) || /^git\+file:/i.test(value)) return false;
+  return /^(?:git\+)?[a-z][a-z0-9+.-]*:\/\//i.test(value) || /^[\w.-]+@[\w.-]+:/.test(value) || /^(?:github|gitlab|bitbucket|gist):/i.test(value);
+}
+
+/** Installers that fetch from a remote address the line names (D-18), and Go, whose module paths are remote. The first network reason, or undefined. */
+function installerReachesNetwork(name: string, args: readonly Word[]): string | undefined {
+  const words = args.map((arg) => arg.text);
+  const positional = args.filter((arg) => !looksLikeOption(arg.text) && !arg.text.startsWith('+'));
+  const sub = positional[0]?.text ?? '';
+  const anyAddress = (): boolean => args.some((arg) => isRemoteAddress(arg.text));
+  if (name === 'pip' || name === 'pip3' || name === 'pipx') {
+    return ['install', 'download', 'wheel', 'inject', 'run'].includes(sub) && anyAddress() ? `${name} ${sub} fetches from an address` : undefined;
+  }
+  if (name === 'uv') {
+    const verb = sub === 'pip' || sub === 'tool' ? `${sub} ${positional[1]?.text ?? ''}` : sub;
+    return /^(?:add|pip install|pip download|tool install|tool run|run)$/.test(verb) && anyAddress() ? `uv ${verb} fetches from an address` : undefined;
+  }
+  if (name === 'cargo') {
+    return sub === 'install' && (words.some((word) => /^--(?:git|registry|index)(?:=|$)/.test(word)) || anyAddress()) ? 'cargo install fetches from another registry or repository' : undefined;
+  }
+  if (name === 'gem') {
+    return sub === 'install' && (words.some((word) => /^(?:-s|--source|--clear-sources)(?:=|$)/.test(word)) || anyAddress()) ? 'gem install fetches from a source' : undefined;
+  }
+  if (name === 'composer') {
+    return ['require', 'create-project'].includes(sub) && (words.some((word) => /^--repository(?:-url)?(?:=|$)/.test(word)) || anyAddress()) ? `composer ${sub} fetches from a repository` : undefined;
+  }
+  if (name === 'go' && (sub === 'get' || sub === 'install')) {
+    // A module path is remote; a local package (`./cmd/app`, `.`, `../x`, an absolute path) or none at all (go install of the folder) is not. go get with no
+    // path updates the module's dependencies, which reaches the network.
+    const paths = positional.slice(1).map((arg) => arg.text);
+    if (sub === 'get' && paths.length === 0) return 'go get fetches modules';
+    return paths.some((target) => !/^(?:\.{1,2}(?:\/|$)|\/)/.test(target)) ? `go ${sub} fetches a module` : undefined;
+  }
+  return undefined;
+}
+
 /** git commands that talk to another repository over the network (D-18). */
 const GIT_REMOTE_COMMANDS: ReadonlySet<string> = new Set(['push', 'fetch', 'pull', 'clone', 'ls-remote', 'send-email', 'request-pull']);
 
@@ -1614,7 +1656,7 @@ function classifyPackageManagerIn(manager: string, givenArgs: Word[], state: Seg
   // Installing exactly what the lockfile declares (no package names); adding packages goes to the safety model.
   const installs = sub === 'ci' || sub === 'install' || sub === 'i' || (manager === 'yarn' && !sub);
   // Installing from an address the line names reaches that address (D-18).
-  if (['install', 'i', 'add'].includes(sub) && extra.some((arg) => /:\/\/|^git\+|^(?:github|gitlab|bitbucket):/.test(arg.text))) noteNetwork(`${manager} ${sub} installs from an address`);
+  if (['install', 'i', 'add'].includes(sub) && extra.some((arg) => isRemoteAddress(arg.text))) noteNetwork(`${manager} ${sub} installs from an address`);
   if (installs && words.every((word) => word === sub || LOCKFILE_INSTALL_OPTIONS.test(word))) return safe(`${manager} ${sub || 'install'} installs what the project's lockfile already lists`);
   const extraCheck = checkReads(extra.filter((arg) => arg.text !== '--'), state, context, `${manager} ${sub}`);
   if (extraCheck.verdict !== 'safe') return extraCheck;
@@ -2033,6 +2075,9 @@ function noteRedirectWrites(redirects: readonly Redirect[], state: SegmentState,
 
 function classifyProgram(name: string, program: string, args: Word[], state: SegmentState, context: CommandContext, depth: number, viaNpx: boolean): CommandClassification {
   const words = args.map((arg) => arg.text);
+  // An install from a remote address reaches it (D-18); `python -m pip` is pip.
+  const installer = (INTERPRETERS.has(name) && /^python/.test(name) && words[0] === '-m' && words[1] === 'pip') ? installerReachesNetwork('pip', args.slice(2)) : installerReachesNetwork(name, args);
+  if (installer !== undefined) noteNetwork(installer);
   const flags = words.filter(looksLikeOption);
   const anyFlag = (pattern: RegExp) => flags.some((flag) => pattern.test(flag));
   // `gsd_run` as a trusted Open-GSD preamble just defined it: the managed gsd-tools.

@@ -203,6 +203,8 @@ export interface AgentRunOptions {
   safety?: CommandSafetyCheck;
   /** 0.4.17: the kinds of risk this project has already allowed, read once per run (shared with sub-agents). */
   riskSwitches?: { outsideWorkspace: boolean; installs: boolean };
+  /** How a shell command is checked for a credential-file read (D-18): shellReadsCredentialFile, unless a test counts the calls. */
+  readsCredentialFile?: typeof shellReadsCredentialFile;
   /** PERF-01: this is a sub-agent nobody watches; its safe and verification commands run without a card in auto and mostly-autonomous. */
   unattended?: UnattendedScope;
   /**
@@ -694,8 +696,11 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
     }
     try { sensitive = await tool.sensitive?.(input, context); risky = await tool.risky?.(input, context); } catch (error) { return checkFailed(error); }
     // A read tool's own sensitive check is its credential read; a shell command's is found from its text and paths (a check that fails counts as one).
-    if (command !== undefined) readsCredential = await shellReadsCredentialFile(command, context).catch(() => 'a file the command may read');
-    else if (tool.capability === 'read' && sensitive) readsCredential = credentialShown(input, tool.name);
+    // Once the run is marked, nothing more is learned from another read, so no command is checked again (PR #76 review round 5).
+    if (this.grants.credentialRead === undefined) {
+      if (command !== undefined) readsCredential = await (this.options.readsCredentialFile ?? shellReadsCredentialFile)(command, context).catch(() => 'a file the command may read');
+      else if (tool.capability === 'read' && sensitive) readsCredential = credentialShown(input, tool.name);
+    }
     // The gate decides, with today's permission logic as its settings layer. A risky action asks in every mode, and an earlier "allow this command" does
     // not cover it; a sensitive read that would be allowed asks unless the mode is fully-autonomous (today's line 631, now inside decide()).
     const gateCall = await gateToolCall(this.gate, gateInput(), { model: this.options.model });

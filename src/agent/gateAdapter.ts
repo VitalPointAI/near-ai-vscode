@@ -597,14 +597,18 @@ function resourceOf(tool: string, effects: readonly Capability[], command: strin
 
 /**
  * A record's words with the project's folder and the home folder written as `<project>` and `~` (PR #76 review round 4): a reason that names the shell's
- * folder, or a command typed with a machine path, never puts that path on record. The longer folder is replaced first.
+ * folder, or a command typed with a machine path, never puts that path on record. The longer folder is replaced first, and only as a whole path (round 5).
  */
 export function withoutMachinePaths(text: string, folders: { readonly project?: string; readonly home?: string }): string {
   const pairs: Array<[string, string]> = [];
   if (folders.project !== undefined && folders.project.length > 1) pairs.push([folders.project, '<project>']);
   if (folders.home !== undefined && folders.home.length > 1) pairs.push([folders.home, '~']);
   let out = text;
-  for (const [folder, label] of pairs.sort((a, b) => b[0].length - a[0].length)) out = out.split(folder).join(label);
+  // Only a whole path: where a path starts (the text's start, a space, a quote, `(`, `:` or `=`) and ends (a separator, a path list's `:`, a quote, a space, `)` or the end).
+  for (const [folder, label] of pairs.sort((a, b) => b[0].length - a[0].length)) {
+    const escaped = folder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    out = out.replace(new RegExp(`(^|[\\s'"(:=])${escaped}(?=$|[/\\\\\\s'"):])`, 'g'), (_match, before: string) => `${before}${label}`);
+  }
   return out;
 }
 

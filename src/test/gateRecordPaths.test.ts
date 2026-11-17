@@ -13,6 +13,7 @@ import { ShellSession } from '../agent/shell';
 import { bashTool, globTool, readTool, writeTool } from '../agent/tools';
 import type { ToolContext } from '../agent/tools';
 import type { DecisionRecord } from '../domain/gate/record';
+import { withoutMachinePaths } from '../agent/gateAdapter';
 import { fakeHome } from './helpers/gateFixtures';
 import { newTestRun, testGateRuntime } from './helpers/gatedRuns';
 
@@ -72,4 +73,15 @@ test('no refusal writes the project root, the home folder or the temporary folde
   } finally {
     shell.dispose();
   }
+});
+
+// PR #76 review round 5: the project and home folders are replaced only where a path starts and ends, never inside a longer name.
+test('machine paths are replaced only at path boundaries', () => {
+  const folders = { project: '/work/app', home: '/home/dev' };
+  assert.equal(withoutMachinePaths('cat /work/app/a.txt "/work/app" (/work/app) x=/work/app:/home/dev/.bashrc', folders), 'cat <project>/a.txt "<project>" (<project>) x=<project>:~/.bashrc');
+  assert.equal(withoutMachinePaths('/work/app', folders), '<project>');
+  for (const kept of ['cat /work/application/x', 'ls /work/app2', 'cd /home/dev2/x', 'cat x/home/dev/y', 'cat /srv/work/app/a', 'echo prefix/work/app']) {
+    assert.equal(withoutMachinePaths(kept, folders), kept, kept);
+  }
+  assert.equal(withoutMachinePaths('cd /home/dev && ls /home/dev/work', folders), 'cd ~ && ls ~/work');
 });

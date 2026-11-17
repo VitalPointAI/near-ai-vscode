@@ -171,8 +171,13 @@ a host), and a shell command the checks know reaches the network (curl or wget
 other than a plain download, http and xh, nc, socat, telnet, ssh, scp, sftp,
 rsync to another machine, git push, fetch, pull, clone and ls-remote, gh and
 glab, the cloud and cluster tools, a container registry push, pull or login,
-an install from an address, network code written inline), as well as one the
-checks cannot read whole. A command that reads such a file and could send in
+an install that names a remote address (a URL other than `file://`, or a
+version-control address) with npm, yarn, pnpm, bun, pip, `python -m pip`, uv,
+pipx, cargo, gem or composer, `cargo install` or `gem install` from another
+registry or source, `go get` and `go install` of a module path, network code
+an interpreter runs from the line), as well as one the checks cannot read
+whole. An install of a package by name from the default registry is not
+held. A command that reads such a file and could send in
 the same line is held the same way. Local work still runs unasked: builds,
 tests, `npm run` scripts, `make`, and `node` or `python` running a script.
 A program the agent starts can still read the credential and send it itself,
