@@ -75,6 +75,12 @@ export interface CommandContext {
   /** Set while classifying what follows a trusted preamble: `gsd_run` is the managed gsd-tools. */
   gsdRunDefined?: boolean;
   /**
+   * The system's temporary folders, absolute, as the caller resolved them (the temporary folder, its real path, and TMPDIR when set: systemTemporaryRoots in
+   * the gate adapter). Given, the classifier reads no environment for them; absent, it falls back to `/tmp`, `/var/tmp` and TMPDIR, as it always has. A
+   * delete inside one (not of the folder itself, nor of a folder holding the project or the home folder) is scratch work, not destruction (PR #74 review).
+   */
+  temporaryRoots?: readonly string[];
+  /**
    * Whether one simple command (plain words, no operators) is on the user's allow list
    * (nearAi.agent.allowCommands, including "always allow" choices). Each part of a chained
    * command is checked on its own, so `cd app && git push` is covered by "git push".
@@ -473,13 +479,20 @@ function realPathOrSelf(target: string): string {
   try { return realpathSync(target); } catch { return target; }
 }
 
+/** The temporary folders the caller named, or the old fallback (`/tmp`, `/var/tmp`, TMPDIR) for a caller that names none. Absolute, unfiltered. */
+function temporaryCandidates(context: CommandContext): string[] {
+  const given = context.temporaryRoots;
+  if (given !== undefined) return given.filter((entry) => entry !== '' && path.isAbsolute(entry)).map((entry) => path.resolve(entry));
+  return ['/tmp', '/var/tmp', ...(process.env.TMPDIR ? [process.env.TMPDIR] : [])].map((entry) => path.resolve(entry));
+}
+
 function scratchRoots(context: CommandContext): string[] {
   // 0.4.18 review: the run is told to keep its helpers in the project's own scratch folder (.near-ai/scratch/), so that folder must count as scratch
   // too. It is inside the workspace, so it is already allowed for reads and writes; this makes a SCRIPT there runnable once the run itself wrote it.
   const projectScratch = path.join(path.resolve(context.root), '.near-ai', 'scratch');
   const home = context.home ? path.resolve(context.home) : undefined;
   const root = path.resolve(context.root);
-  const candidates = ['/tmp', '/var/tmp', ...(process.env.TMPDIR ? [process.env.TMPDIR] : [])].map((entry) => path.resolve(entry));
+  const candidates = temporaryCandidates(context);
   // 0.4.18 review: TMPDIR comes from the extension's own environment, so a TMPDIR of the home folder or of `/` would make the whole home or the whole
   // filesystem "scratch". A root is accepted only when it is a real temporary folder: not `/`, not the home folder, not the workspace, and not an
   // ancestor of either.
@@ -941,7 +954,12 @@ function deleteEffects(name: string, targets: readonly Word[], args: readonly Wo
   if (!targets.length) return [];
   const root = path.resolve(context.root);
   const facts = (arg: Word): PathFacts => pathFacts(arg.text, state.cwd, context);
-  const temporaryPath = (absolute: string): boolean => /^\/tmp\/[^/]+/.test(absolute);
+  // Inside a temporary folder (never the folder itself), and holding neither the project nor the home folder. A temporary folder that is `/` or holds the
+  // home folder (a TMPDIR set that way) counts for nothing.
+  const home = context.home ? path.resolve(context.home) : undefined;
+  const temporary = temporaryCandidates(context).filter((candidate) => candidate !== path.parse(candidate).root && !(home !== undefined && isInside(candidate, home)));
+  const temporaryPath = (absolute: string): boolean =>
+    temporary.some((folder) => absolute !== folder && isInside(folder, absolute)) && !isInside(absolute, root) && !(home !== undefined && isInside(absolute, home));
   const recursive = name === 'rm' && args.some((arg) => /^-(?:[A-Za-z]*[rR][A-Za-z]*)$|^--recursive$/.test(arg.text));
   if (recursive) {
     if (targets.every((arg) => !arg.glob && !arg.expansion && temporaryPath(facts(arg).absolute))) return [];

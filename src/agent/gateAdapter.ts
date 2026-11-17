@@ -2,7 +2,9 @@
 // sensitive and risky hooks), hands today's decidePermissionAsync to decide() as its settings layer, and records the decision. It decides nothing itself:
 // outside the floor every outcome equals what the loop decided before, and the floor is always enforced (D-19). No vscode import here.
 import { randomUUID } from 'node:crypto';
+import { realpathSync } from 'node:fs';
 import { realpath } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import type { ActionCapability, ActionPolicy } from '../domain/policy';
 import { failedClosed } from '../domain/gate/bundle';
@@ -76,6 +78,8 @@ export interface FloorShellContext {
 
 export interface FloorFactsInput extends Partial<FloorShellContext> {
   readonly command: string;
+  /** The system's temporary folders; absent, systemTemporaryRoots() is asked. A delete inside one is scratch work, not destruction. */
+  readonly temporaryRoots?: readonly string[];
   /** The folder this call works in. */
   readonly root: string;
   /** The person's home folder, for `~`, `$HOME` and the credential stores in it. */
@@ -96,6 +100,28 @@ export interface FloorCommandFacts {
    * credential-store check threw. The call's effects are then unknown, so decide() asks with a person there and refuses with nobody (PR #74 review).
    */
   readonly effectsUnknown?: string;
+}
+
+/** Where the system's temporary folders are, for systemTemporaryRoots; a test gives a stand-in. */
+export interface TemporarySource {
+  readonly tmpdir: () => string;
+  readonly env: Readonly<Record<string, string | undefined>>;
+}
+
+/**
+ * The system's temporary folders, absolute, each once: the temporary folder (os.tmpdir(): /var/folders/…/T on macOS), TMPDIR when set, `/tmp` and
+ * `/var/tmp` (where Open-GSD keeps its helpers), each as written and as it resolves (`/private/var/folders/…`, `/private/tmp`). The classifier is handed
+ * these rather than reading the environment itself (PR #74 review). Reads no file: realpath only.
+ */
+export function systemTemporaryRoots(source: TemporarySource = { tmpdir, env: process.env }): string[] {
+  const written = [source.tmpdir(), source.env.TMPDIR, '/tmp', '/var/tmp'].filter((entry): entry is string => typeof entry === 'string' && entry !== '' && path.isAbsolute(entry)).map((entry) => path.resolve(entry));
+  const out: string[] = [];
+  for (const entry of written) {
+    let real: string | undefined;
+    try { real = realpathSync(entry); } catch { real = undefined; }
+    for (const folder of real === undefined ? [entry] : [entry, real]) if (!out.includes(folder)) out.push(folder);
+  }
+  return out;
 }
 
 /** The two readers the floor uses on a command. Given only by tests (a reader that throws) and by nothing else; each defaults to the real one. */
@@ -138,7 +164,8 @@ export async function floorFactsFor(input: FloorFactsInput, readers: FloorReader
       ...(input.home === undefined ? {} : { home: input.home }),
       ...(input.packageScripts === undefined ? {} : { packageScripts: { ...input.packageScripts } }),
       ...(input.trustedRoots === undefined ? {} : { trustedToolRoots: [...input.trustedRoots] }),
-      ...(input.gsdPreambles === undefined ? {} : { gsdPreambles: [...input.gsdPreambles] })
+      ...(input.gsdPreambles === undefined ? {} : { gsdPreambles: [...input.gsdPreambles] }),
+      temporaryRoots: input.temporaryRoots === undefined ? systemTemporaryRoots() : [...input.temporaryRoots]
     });
   } catch {
     // The classifier is pure and should never throw; if it does, nothing is known about what the command does.
