@@ -9,7 +9,7 @@ import type { AgentDiscoveryAnswers } from '../domain/agents';
 import { buildTeamGraph } from '../agent/teamGraph';
 import { checkTeam, checkWarnings } from '../agent/teamCheck';
 import { ACCEPT_ALL_KINDS, applySuggestion, KNOWLEDGE_BASE_PRIVATE, MAX_REFINE_BYTES, parseRefinement, REFINE_PROMPT, refinePlan, refinePrompt, type RefinePlan, type Suggestion } from '../agent/teamRefine';
-import { chooseTeamModel, teamModelCall, type TeamAiDeps } from './teamStudioAi';
+import { chooseImageModel, chooseTeamModel, imageCallBlocked, imageEstimate, teamImageCall, teamModelCall, type TeamAiDeps } from './teamStudioAi';
 import { CUSTOM_PLAGIARISM_CHECKER } from '../agent/researchIntegrity';
 import { builderPrompt, parseProposal, proposalDraft, proposalText, TEAM_BUILDER_PROMPT } from '../agent/teamBuilder';
 import { layoutNetwork } from '../domain/networkLayout';
@@ -17,7 +17,7 @@ import { gradingCoverage } from '../domain/teamKnowledge';
 import { knowledgeFile, loadKnowledge } from './teamKnowledgeStore';
 import { buildTeamPackage, cleanKnowledge, importQuestion, MAX_TEAM_PACKAGE_BYTES, readTeamMarkdown, readTeamPackage, shareProblems, TEAM_PACKAGE_EXTENSION, TeamPackageError, type ReadPackage } from '../agent/teamPackage';
 import type { TeamKnowledge } from '../domain/teamKnowledge';
-import { checkTeamIcon, decodeIconBase64, iconDataUri, iconSourceProblem, iconSourceType, MAX_ICON_SOURCE_BYTES, TeamIconError, withIconReference, type IconSourceType } from '../agent/teamIcon';
+import { checkTeamIcon, decodeIconBase64, iconDataUri, iconSourceProblem, iconSourceType, MAX_GENERATED_IMAGE_BYTES, MAX_ICON_SOURCE_BYTES, TeamIconError, teamIconPrompt, withIconReference, type IconSourceType } from '../agent/teamIcon';
 
 /** The facts, relations and grading of each node, so the page can show a card without being sent the whole graph twice. */
 function nodeDetails(graph: { nodes: Array<{ id: string; facts: Array<{ text: string; source?: string }>; functions: string[]; grading?: unknown; origin: string; mentions: number }>; edges: Array<{ from: string; to: string; kind: string; tension: number | null; basis?: string; grading?: unknown }> }): Record<string, unknown> {
@@ -735,6 +735,26 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
   };
 
   const versionsOf = async (file: string) => (await deps.library.versions(file)).map((version) => ({ ref: path.basename(version), label: versionLabel(path.basename(version)) }));
+  /**
+   * What an icon made with AI would need (0.4.30): a private image model for a private team (marked private, or every member private) or for any team in
+   * a project with a knowledge base, decided here from the saved team file and the workspace, never from the page. `why` opens the refusal.
+   */
+  const iconNeed = async (team: TeamDefinition): Promise<{ need: 'private' | 'any'; why?: string }> => {
+    if (teamIsPrivate(team)) return { need: 'private' };
+    if (await hostKnowledgeBase()) return { need: 'private', why: 'This project has a knowledge base, so its teams\' icons' };
+    return { need: 'any' };
+  };
+  /** Whether Generate with AI can be offered for this saved team, with which model and at what cost, or the plain reason it cannot. */
+  const iconAiFor = async (text: string, file: string): Promise<{ available: boolean; reason?: string; model?: string; private?: boolean; estimate?: string }> => {
+    if (!deps.teamAi) return { available: false, reason: 'No model is available here. Set up a NEAR AI profile for this project first.' };
+    let ai: TeamAiDeps;
+    try { ai = await deps.teamAi(); } catch (error) { return { available: false, reason: (error as Error).message }; }
+    let team: TeamDefinition;
+    try { team = parseTeam(text, file); } catch { return { available: false, reason: 'This team file needs fixing first.' }; }
+    const { need, why } = await iconNeed(team);
+    const choice = chooseImageModel(need, ai, why);
+    return choice.ok ? { available: true, model: choice.model, private: choice.private, estimate: imageEstimate(choice.info) } : { available: false, reason: choice.reason };
+  };
   /** The team's icon now (a data URI), checked; undefined for the default. */
   const iconOf = async (file: string, text?: string) => { const bytes = await deps.library.readIcon(file, text); return bytes ? iconDataUri(bytes) : undefined; };
   /** The team's earlier icons, newest first, each checked before it is shown (one that is not a valid icon is left out). */
@@ -753,7 +773,7 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
     // 0.4.28: while a run of this team is going, the Team shape tab links to Team Live.
     const live = deps.liveRun?.(slugify(path.basename(file, '.md'))) === true;
     const icon = await iconOf(file, textNow);
-    post({ type: 'team', id, kind: entry?.kind ?? (id === 'project' ? 'project' : 'user'), file: displayPath(file, deps.root()), command: entry?.command ?? '', draft, base: open.base, ...(teamPrivacy ? { teamPrivacy } : {}), ...(live ? { liveRun: true } : {}), versions: await versionsOf(file), ...(icon ? { icon } : {}), iconHistory: await iconHistoryOf(file), graph: graphOf(textNow, file), knowledge: await knowledgeOf(file), ...(notice ? { notice } : {}) });
+    post({ type: 'team', id, kind: entry?.kind ?? (id === 'project' ? 'project' : 'user'), file: displayPath(file, deps.root()), command: entry?.command ?? '', draft, base: open.base, ...(teamPrivacy ? { teamPrivacy } : {}), ...(live ? { liveRun: true } : {}), versions: await versionsOf(file), ...(icon ? { icon } : {}), iconHistory: await iconHistoryOf(file), iconAi: await iconAiFor(textNow, file), graph: graphOf(textNow, file), knowledge: await knowledgeOf(file), ...(notice ? { notice } : {}) });
   };
 
   /**
@@ -1387,6 +1407,46 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
           // A file-system error names the file's path, so it is not passed on.
           post({ type: 'error', text: 'The image could not be read. Choose another one.' });
         } finally { iconWorking = false; }
+        return;
+      }
+      case 'icon-generate': {
+        // An icon made by an image model from the team's name and what it is for (nothing else from the team). The model, the privacy rule and the
+        // outbound check are decided here, before the person is asked about the cost; the check runs again just before the call (teamImageCall).
+        const file = fileFor(message.id);
+        if (!file) { post({ type: 'error', text: 'That team is no longer in your teams.' }); return; }
+        if (iconWorking) { post({ type: 'error', text: 'Still working on an icon. Wait for it to finish.' }); return; }
+        if (!deps.teamAi) { post({ type: 'error', text: 'No model is available here. Set up a NEAR AI profile for this project first.' }); return; }
+        iconWorking = true;
+        const stop = new AbortController();
+        const stopping = deps.onStop?.(() => stop.abort());
+        try {
+          const team = parseTeam(await readFile(file, 'utf8'), file);
+          let ai: TeamAiDeps;
+          try { ai = await deps.teamAi(); } catch (error) { post({ type: 'error', text: (error as Error).message }); return; }
+          const { need, why } = await iconNeed(team);
+          const prompt = teamIconPrompt(team);
+          const choice = chooseImageModel(need, ai, why);
+          if (!choice.ok) { post({ type: 'error', text: choice.reason }); return; }
+          const blocked = await imageCallBlocked(ai, choice, prompt);
+          if (blocked) { post({ type: 'error', text: `The icon was not made: ${blocked}` }); return; }
+          const shown = team.name.replace(/[\u0000-\u001f\u007f\u2028\u2029]+/g, ' ').slice(0, 80);
+          const where = choice.private ? `${choice.model}, a private model (NEAR TEE or this computer)` : `${choice.model}, which is not a private model`;
+          if (await choose(`Make an icon for "${shown}" with ${choice.model} (${imageEstimate(choice.info)})? It sends the team's name and what it is for to ${where}; nothing else from the team. You can still change or remove the icon afterwards.`, 'Generate icon') !== 'Generate icon') {
+            post({ type: 'icon-done', id: message.id, text: 'Nothing was generated.' });
+            return;
+          }
+          const result = await teamImageCall(ai, { need, prompt, signal: stop.signal, ...(why ? { why } : {}) });
+          if (!result.ok) { post({ type: 'error', text: `The icon was not made: ${result.reason}` }); return; }
+          if (fileFor(message.id) !== file) { post({ type: 'error', text: 'That team is no longer in your teams, so the icon was not used.' }); return; }
+          const type = iconSourceType(result.bytes);
+          if (!type || result.bytes.length > MAX_GENERATED_IMAGE_BYTES) { post({ type: 'error', text: 'The image model returned something that is not a PNG, JPEG or WebP picture, so the icon was not changed.' }); return; }
+          sendIconSource(message.id, file, type, result.bytes);
+        } catch (error) {
+          post({ type: 'error', text: `The icon was not made: ${stop.signal.aborted ? 'it was cancelled.' : (error as Error).message}` });
+        } finally {
+          stopping?.dispose();
+          iconWorking = false;
+        }
         return;
       }
       case 'icon-set': {

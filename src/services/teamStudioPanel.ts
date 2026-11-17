@@ -16,7 +16,8 @@ import { comparisonStoreFor } from '../benchmark/store';
 import { loadBenchmarkTasks } from '../benchmark/tasks';
 import { leaderboardRows, suggestForTeam } from './modelComparisonPage';
 import { activeProvider, clientFor, privateRouteFor, type ActiveProvider } from './providerCache';
-import { readAgentRules, readModelTiers, readSettings } from './settings';
+import { readAgentModels, readAgentRules, readModelTiers, readSettings } from './settings';
+import { withSpendTag } from './spendLedger';
 import { spendAccountOf } from './agentSession';
 import type { TeamAiDeps } from './teamStudioAi';
 import { bestOf, planRoleSuite, runRoleSuite } from '../benchmark/roleSuite';
@@ -87,7 +88,11 @@ async function teamAiDeps(auth: AuthService): Promise<TeamAiDeps> {
       await account?.ledger.refresh();
       return account?.spentTodayUsd().usd ?? 0;
     },
-    complete: (model, messages, options) => clientFor(active, model).client.completeOnce(model, messages, options)
+    complete: (model, messages, options) => clientFor(active, model).client.completeOnce(model, messages, options),
+    // 0.4.30, team icons: the image model the settings name, and one image made the way GenerateImage makes it (the client records its cost, tagged as
+    // generation like every other image).
+    imageModel: readAgentModels().imageModel,
+    generateImage: (model, prompt, signal) => withSpendTag({ kind: 'generation' }, () => clientFor(active, model).client.generateImage(model, prompt, { count: 1 }, signal))
   };
 }
 
