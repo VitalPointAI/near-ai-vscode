@@ -619,19 +619,34 @@ until it runs out aren't shown.
   model may add its own rating of the team before and after its suggestions;
   it is shown as the model's own opinion, not a measurement. **Cancel**,
   Emergency stop, or opening another team stops a review in progress.
-- **Reusing your teams in a new project.** When you set up a team (**Set Up
-  Project Team**, or **New team** in Team Studio), the starting points list
+- **Building a team.** **New team** in Team Studio (and **Set Up Project
+  Team**) first asks how you want to start. **Use an existing team** lists
   your own saved teams, from any project, next to the ones the extension
-  provides. Filter them with **All**, **My teams** or **Built-in**; each shows
-  its name, description, member count and where it came from. Choosing one of
-  your teams copies its members into the new team for you to review and save,
-  the same way a built-in starting point does. Saved as the project's team,
-  it is asked about before it first runs, like any project team. With no
-  saved teams yet, **My teams** says so: save a team as one of your teams in
-  Team Studio to reuse it anywhere.
+  provides; filter them with **All**, **My teams** or **Built-in**, and each
+  shows its name, description, member count and where it came from. Select
+  one for two buttons. **Use as is** asks for no name or description: with a
+  project folder open the team becomes this project's team
+  (`.planning/.near-ai/team.md`, run with `/team:project`), and if the
+  project already has a team you are asked first and the old one stays in
+  the team history; with no folder open it is put in the chat, and a
+  built-in team is saved to My teams under its own name first (with a number
+  added if that name is taken). **Clone and modify** opens the new team's
+  Purpose step with the members filled in, the name set to "Copy of" the
+  team and its description copied. A built-in team made from your answers
+  (such as **Recommend a team for me**) asks what the team is for, where its
+  models may run and, for the recommendation, the kind of work and its risk,
+  next to the buttons. **Create a new team** starts **From scratch**, from
+  **Clone an existing team** (the same list, to clone only), or from
+  **Describe it, and AI drafts it**. Only a new team or a clone asks for its
+  name, what it is for, **Private team** and **Save it as**. **Back** returns
+  to the screen before from every step, and a saved draft opens on the step
+  you left it. Saved as the project's team, a team is asked about before it
+  first runs, like any project team. With no saved teams yet, **My teams**
+  says so: save a team as one of your teams in Team Studio to reuse it
+  anywhere.
 - **Sharing a team.** **Share…** on a team's card in Team Studio (or next to
-  it in the starting points) is the way to send a team (**Open as Markdown**
-  opens the file itself). It saves the team as one file,
+  it when you build a team from an existing one) is the way to send a team
+  (**Open as Markdown** opens the file itself). It saves the team as one file,
   `<team>.near-team.json`, for you to send. The file holds the team file
   exactly as saved, a short summary, a format version and a checksum; no
   file path from your computer, no setting, key or token. A team that holds
@@ -644,8 +659,8 @@ until it runs out aren't shown.
   teams only when you agree. A file changed after it was shared, or one that
   is not a team, is refused with a plain message. An imported team stays
   untrusted: the first time it would run, you are asked to approve it. Anything
-  made from it before you approve it (a copy, a team built from it as a
-  starting point or with a member copied from it, or a project team) is asked
+  made from it before you approve it (a copy or clone, a team with a member
+  copied from it, or a project team, including one made with Use as is) is asked
   about on its own, and a project team's question says where it came from. The checksum catches a
   damaged or hand-edited file but is not a signature; signed team files may
   come later. The `.near-team.json` format is JSON with `format`
