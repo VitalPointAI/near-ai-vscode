@@ -72,6 +72,10 @@ pending: 0
 skipped: 0
 blocked: 0
 
+## Gap closure method
+
+Tests 2, 4 and 6 keep `result: issue`. Their gaps are marked resolved because each fix was checked in the code on main and its automated tests passed on 2026-11-17 (unit tests and the extension-host suite in a real VS Code window). The by-hand UAT steps of tests 2, 4 and 6 were not repeated; G-27-6a's live check on GitHub is the owner's optional re-check.
+
 ## Gaps
 
 - gap_id: G-27-2
