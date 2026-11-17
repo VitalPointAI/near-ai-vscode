@@ -440,3 +440,65 @@ the unchanged classifier (set aside with a tagged stash and applied back by SHA)
   which is also what the gate then reads).
 - Test (`gateLateApproval.test.ts`): with a runtime clock a day past the fixed start, an approval given through it is honoured by the gate and has
   expired a TTL later by that clock. The store test in `gateFloorRuns.test.ts` passes explicit times.
+
+## Review round 7 (PR #74)
+
+Four commits on `feat/gate-floor`, one per finding. Every new test was seen failing first: the classifier and gate tests against the unchanged source
+(set aside with a tagged stash and applied back by SHA), the docs pins against the old words.
+
+### Results
+
+- Lint (`tsc --noEmit`): clean.
+- Full `npm test` (6G cap): 3383 tests, 3374 passed, 0 failed, 0 cancelled, 9 skipped (the same 9).
+- `node scripts/secret-scan.mjs --range origin/main..HEAD`: clean. No package changes. No activation or webview code changed, so e2e was not run.
+
+### 1. [BLOCKER] Global options hid the subcommand
+
+- Commit `a1367c9`.
+- `GLOBAL_OPTIONS` lists every program the classifier tags by its subcommand, found from the code: git, docker, podman, kubectl, oc, helm, terraform,
+  tofu, pulumi, cdk, serverless, sls, gh, glab, cargo, vsce, ovsx, gem, aws, gcloud, az, gsutil, npm, pnpm, yarn, bun. For each: the options that take a
+  value (`--opt value`, `--opt=value`, a short one attached as `-nvalue`), the flags (short ones also together, `-qv`), and those that move the folder
+  (git `-C`, terraform/tofu `-chdir`, pulumi `-C`/`--cwd`, cargo `-C`); `--help`, `-h` and `--version` everywhere; cargo's `+toolchain`. They are
+  skipped before the subcommand is read (`skipGlobals`, `classifyAfterGlobals`); the package managers skip theirs in `classifyPackageManager`, after
+  their folder options, and their registry verbs are now read before the `--global`/`--registry` early answer.
+- Backstop: an option before the subcommand that is not listed, or a folder option decided at run time, makes the effects unknown (asks). git `-C`
+  moves the folder for the subcommand's paths (`git -C sub clean -fd build` destroys `sub/build`).
+- Never newly safe: after a value option, or any option but `--no-pager` for git, docker, podman and go (which never read past an option before), a
+  harmless subcommand stays unknown.
+- make: the targets are read anywhere already; a release-like target is now tagged even with `-C` or `-f` (it returned unknown, untagged, before).
+- near reads every word, so no option hides its verbs; it is not in the table.
+- Tests (`commandGlobalOptions.test.ts`): every tagged subcommand of every program keeps its exact tags after each value option in both forms and after
+  each flag (several hundred combinations, counted); an unknown option before it gives unknown effects; the review's examples; git `-C` paths and a
+  run-time folder; harmless subcommands after options stay non-safe. The source scan in `commandBounds.test.ts` knows the one new same-level call
+  (`classifyAfterGlobals -> classifyProgram`, with strictly fewer words and no leading option).
+
+### 2. [MINOR] A cyber step's command was never read by the floor
+
+- Commit `26adbd0`.
+- `gateStep` reads a step's command with `floorFactsFor`, as `gateToolCall` does, and both join the command's tags to the declared effects through one
+  helper (`effectsWithReading`); a command the floor cannot read whole, or one with no folder to read it in, has unknown effects. `cyberRun` passes the
+  project's folder (`GateStepInput.root`).
+- Found with it: a project kept in a temporary folder had its own files read as temporary scratch (`rm -rf src` there carried no tag); a path inside
+  the project is never temporary now. And with a failed-closed policy, a call the deny list also refuses is refused by the deny list's rule (both
+  refuse; the person's own rule is named, as everywhere else) — this kept `cyberRun.test.ts`'s deny-list step naming the deny list, unchanged.
+- Tests (`gateCyberStep.test.ts`): a step running `git push` or `rm -rf src` is `floor.publish` / `floor.destroy`, asked with a person and refused with
+  nobody in Full auto; a too-deep command and one with no folder have unknown effects; `nmap` does not. `commandTemporary.test.ts`: the project in a
+  temporary folder. `gateDecide.test.ts`: the deny list named over a failed-closed policy.
+
+### 3. [MINOR] A credential after a quote was kept in records
+
+- Commit `933028b`.
+- A quote and a comma start a name=value too (`&`, `?`, `;` already did), and an unquoted value ends at a quote or a comma, so the quote around a form
+  body stays. Idempotent (tested).
+- SECURITY.md names form fields (`-d "password=..."`); gateDocs checks the words and runs the example.
+- Tests (`gateRecordRedaction.test.ts`): double and single quotes, after `&`, `,` and `;`, quotes kept, applied twice, look-alike names kept.
+
+### 4. [MINOR] The docs did not say a mere mention of a credential store is refused
+
+- Commit `e8d722d`.
+- Kept as a refusal. `FLOOR_CANNOT_SEE_TEXT` (and SECURITY.md word for word): because the checks read text, a command that only mentions one of these
+  folders (a commit message naming ~/.ssh) is refused too, with nothing to approve; rephrase it so it does not name the folder, or do that step yourself.
+  The CHANGELOG bullet says the same.
+- The "a false alarm costs one card" sentence is scoped to the publishing and destruction checks ("here ..."), followed by "The check of key and
+  credential folders above is stricter: a mention there is refused, with no card."
+- gateDocs pins both sentences, checks the old unscoped sentence is gone, and checks that a commit message naming `~/.ssh` is refused by the code.
