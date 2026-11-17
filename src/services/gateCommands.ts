@@ -5,7 +5,7 @@
 // It also owns what the person sees of the policy (OFFL-02, D-13, D-33, D-41): the status bar item, NEAR AI: Show Policy (a read-only virtual document, so
 // nothing is ever written by looking), NEAR AI: Reset Policy to Defaults (confirmed in a modal, recorded, the only path that re-signs a bundle that failed
 // verification) and the Policy step in the setup view.
-import { stat } from 'node:fs/promises';
+import { readFile, rm, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
@@ -15,7 +15,8 @@ import { CLEARANCE_SELF_ASSERTED_TEXT, HANDLING_FLAGS, LABELS_NOT_ACCREDITATION_
 import type { Label } from '../domain/gate/labels';
 import { dominates, raiseMark } from '../domain/gate/dominance';
 import { labelMapKey, setLabelEntry, setProjectLabel } from '../domain/gate/labelMap';
-import { BundleStoreError } from '../gate/bundleStore';
+import { BundleStoreError, POLICY_DRAFT_BASE_FILE, POLICY_DRAFT_FILE, gateDir } from '../gate/bundleStore';
+import { writeFileAtomic } from '../team/teamFile';
 import { GateHost } from '../gate/host';
 import { LABEL_MAP_RESIGN_QUESTION, LABEL_MAP_RESTORE_QUESTION, LabelMapError } from '../gate/labelMapStore';
 import { setDefaultSessionRoute } from '../gate/sessionMark';
@@ -27,6 +28,23 @@ import type { SetupStep } from './setupSteps';
 
 export const RESET_POLICY_COMMAND = 'nearAi.policy.reset';
 export const SET_LABEL_COMMAND = 'nearAi.label.set';
+export const EDIT_POLICY_COMMAND = 'nearAi.policy.edit';
+export const APPLY_POLICY_DRAFT_COMMAND = 'nearAi.policy.applyDraft';
+export const APPLY_DRAFT_ACTION = 'Apply';
+export const DISCARD_DRAFT_ACTION = 'Discard';
+
+/** Pitfall 14: unlabelled content takes the default label, so a policy with no clearance on that scale cannot read it. */
+export function unlabelledDefaultText(defaultLabel: Label): string {
+  return `Content with no label takes your policy's default label, ${labelKey(defaultLabel)}, so a policy with no clearance on the ${defaultLabel.scale} scale cannot read it.`;
+}
+
+/** What Edit Policy says beside the draft it opens (D-27, D-41, CLAS-07). */
+export function editPolicyNotice(defaultLabel: Label): string {
+  return `Your policy draft is open. Change it, then choose Apply, or run NEAR AI: Apply Policy Draft. NEAR AI signs and records the change and sets the signer and the dates itself. ${unlabelledDefaultText(defaultLabel)} ${CLEARANCE_SELF_ASSERTED_TEXT} ${LABELS_NOT_ACCREDITATION_TEXT}`;
+}
+
+export const POLICY_APPLIED_TEXT = `Your policy was changed, signed with this computer's key and recorded. ${CLEARANCE_SELF_ASSERTED_TEXT}`;
+export const NO_DRAFT_TEXT = 'There is no policy draft to apply. Run NEAR AI: Edit Policy first.';
 export const POLICY_SCHEME = 'near-ai-policy';
 export const POLICY_DOCUMENT_URI = `${POLICY_SCHEME}:/NEAR-AI-Policy.txt`;
 
@@ -248,6 +266,10 @@ function registerPolicySurfaces(context: GateActivationContext, host: GateHost, 
   attempt('Reset Policy to Defaults', () => {
     keep(vscode.commands.registerCommand(RESET_POLICY_COMMAND, () => resetPolicy(host)));
   });
+  attempt('Edit Policy', () => {
+    keep(vscode.commands.registerCommand(EDIT_POLICY_COMMAND, () => editPolicy(host, context.globalStorageUri.fsPath).catch(() => { tell('NEAR AI could not open a policy draft.'); return undefined; })));
+    keep(vscode.commands.registerCommand(APPLY_POLICY_DRAFT_COMMAND, () => applyPolicyDraftCommand(host, context.globalStorageUri.fsPath)));
+  });
   attempt('Set Label', () => {
     keep(vscode.commands.registerCommand(SET_LABEL_COMMAND, async (uri?: unknown) => {
       const target = await labelTargetOf(uri);
@@ -409,6 +431,77 @@ async function followRenames(host: GateHost, files: ReadonlyArray<{ readonly old
     const isFolder = (await stat(file.newUri.fsPath).catch(() => undefined))?.isDirectory() === true;
     await host.followRename(folder.uri.fsPath, isFolder ? `${from}/` : from, isFolder ? `${to}/` : to);
   }
+}
+
+// ---------------------------------------------------------------------------------------------------------------------------------------------------
+// Edit Policy and Apply Policy Draft (D-41, D-53)
+
+function draftFiles(globalStorageDir: string): { readonly draft: string; readonly base: string } {
+  return { draft: path.join(gateDir(globalStorageDir), POLICY_DRAFT_FILE), base: path.join(gateDir(globalStorageDir), POLICY_DRAFT_BASE_FILE) };
+}
+
+/**
+ * NEAR AI: Edit Policy. Writes the policy in force, pretty-printed and unsigned, to this extension's storage (never the project) with the hash of that
+ * policy beside it, opens it, and says what Apply does, with the self-declared clearance words. Show Policy stays read-only. Returns the draft's path.
+ */
+export async function editPolicy(host: GateHost, globalStorageDir: string): Promise<string | undefined> {
+  await host.state();
+  const state = host.bundleState();
+  if (state.state !== 'valid') {
+    void Promise.resolve(vscode.window.showWarningMessage(`Your policy cannot be edited while it cannot be trusted. ${state.sentence}`)).catch(() => undefined);
+    return undefined;
+  }
+  const files = draftFiles(globalStorageDir);
+  await writeFileAtomic(files.draft, `${JSON.stringify(state.bundle, null, 2)}\n`);
+  await writeFileAtomic(files.base, `${state.hash}\n`);
+  await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(vscode.Uri.file(files.draft)), { preview: false });
+  void Promise.resolve(vscode.window.showInformationMessage(editPolicyNotice(state.bundle.defaultLabel), APPLY_DRAFT_ACTION, DISCARD_DRAFT_ACTION)).then(async (answer) => {
+    if (answer === APPLY_DRAFT_ACTION) await applyPolicyDraftCommand(host, globalStorageDir);
+    else if (answer === DISCARD_DRAFT_ACTION) await discardDraft(globalStorageDir);
+  }).catch(() => undefined);
+  return files.draft;
+}
+
+async function discardDraft(globalStorageDir: string): Promise<void> {
+  const files = draftFiles(globalStorageDir);
+  await rm(files.draft, { force: true });
+  await rm(files.base, { force: true });
+}
+
+/**
+ * NEAR AI: Apply Policy Draft. Reads the draft and the hash it was made from and hands them to the host, which applies it only when it was made from the
+ * policy in force (D-53). A refused draft shows the plain reasons and changes nothing; an applied one is signed, recorded as policy.edit and its draft files
+ * are removed. Returns true when the policy changed.
+ */
+export async function applyPolicyDraftCommand(host: GateHost, globalStorageDir: string): Promise<boolean> {
+  const files = draftFiles(globalStorageDir);
+  // A draft open in the editor with changes not yet saved is saved first, so what is applied is what the person sees.
+  try {
+    const open = vscode.workspace.textDocuments?.find((document) => document.uri.fsPath === files.draft);
+    if (open?.isDirty === true) await open.save();
+  } catch { /* the saved draft on disk is applied */ }
+  let draft: string;
+  let base: string;
+  try {
+    draft = await readFile(files.draft, 'utf8');
+    base = (await readFile(files.base, 'utf8')).trim();
+  } catch {
+    void Promise.resolve(vscode.window.showWarningMessage(NO_DRAFT_TEXT)).catch(() => undefined);
+    return false;
+  }
+  try {
+    const result = await host.applyPolicyDraft(draft, base);
+    if (result.state.state !== 'valid') {
+      void Promise.resolve(vscode.window.showWarningMessage(result.state.sentence)).catch(() => undefined);
+      return false;
+    }
+  } catch (error) {
+    void Promise.resolve(vscode.window.showWarningMessage(error instanceof BundleStoreError ? error.message : 'Nothing was changed: NEAR AI could not apply your policy draft.')).catch(() => undefined);
+    return false;
+  }
+  await discardDraft(globalStorageDir).catch(() => undefined);
+  void Promise.resolve(vscode.window.showInformationMessage(POLICY_APPLIED_TEXT)).catch(() => undefined);
+  return true;
 }
 
 /** The only path that re-signs a bundle that failed verification: a modal the person confirms, then host.reset(), which records policy.reset. */

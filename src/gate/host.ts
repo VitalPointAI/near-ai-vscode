@@ -12,8 +12,8 @@ import type { ActorRef, GateRuntime, Presence } from '../domain/gate/decide';
 import { buildDecisionRecord } from '../domain/gate/record';
 import type { DecisionOutcome, DecisionRecord } from '../domain/gate/record';
 import type { SecretStorageLike } from '../services/auth';
-import { ensurePolicyBundle, resetPolicyToDefaults } from './bundleStore';
-import type { BundleEvent, BundleResult } from './bundleStore';
+import { applyPolicyDraft, ensurePolicyBundle, resetPolicyToDefaults } from './bundleStore';
+import type { BundleEvent, BundleResult, PolicyEditResult } from './bundleStore';
 import { readLastValid } from './clockMarker';
 import { isModelRequestRecord } from '../domain/gate/record';
 import { DecisionLog, INSTALL_LOG_KEY, projectLogKey } from './decisionLog';
@@ -323,6 +323,21 @@ export class GateHost {
     return result;
   }
 
+  /**
+   * NEAR AI: Apply Policy Draft (D-41, D-53). Applies a draft made from the policy whose hash is `baseHash`, the way reset() replaces the policy: every runtime
+   * and the status bar read the new policy from the next decision on, the listeners are told, and policy.edit is recorded with the old and new hashes. A
+   * refused draft throws a plain BundleStoreError and changes nothing.
+   */
+  public async applyPolicyDraft(draftText: string, baseHash: string): Promise<PolicyEditResult> {
+    await this.start();
+    const result = await applyPolicyDraft(this.options.globalStorageDir, this.options.secrets, draftText, { baseHash }, this.storeOptions());
+    await this.seedFromMarker();
+    this.current = result.state;
+    this.announce(result.event ?? 'policy.edit', result.state, `The policy changed from ${result.oldHash} to ${result.newHash}.`);
+    this.changed();
+    return result;
+  }
+
   public onDidChange(listener: () => void): () => void {
     this.listeners.add(listener);
     return () => { this.listeners.delete(listener); };
@@ -463,13 +478,13 @@ export class GateHost {
 
   // The bundle's own events are per install: they go to the install-level log in global storage whether or not a folder is open, and also to the open
   // project's log when there is one, as `policy.*` records, so a failed-closed start is on the record with its reason.
-  private announce(event: BundleEvent | undefined, state: BundleState): void {
+  private announce(event: BundleEvent | undefined, state: BundleState, detail?: string): void {
     try {
       const failed = state.state === 'failed-closed';
       const name = event ?? 'policy.load';
       const outcome: DecisionOutcome = failed ? 'denied' : 'allowed';
       const rule = failed ? 'bundle.failed-closed' : name;
-      const reason = failed ? state.sentence : undefined;
+      const reason = failed ? state.sentence : detail;
       const record: DecisionRecord = buildDecisionRecord({
         recordId: randomUUID(),
         sequence: 0,

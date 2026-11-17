@@ -317,6 +317,16 @@
         "command": "nearAi.label.set",
         "title": "Set Label",
         "category": "NEAR AI"
+      },
+      {
+        "command": "nearAi.policy.edit",
+        "title": "Edit Policy",
+        "category": "NEAR AI"
+      },
+      {
+        "command": "nearAi.policy.applyDraft",
+        "title": "Apply Policy Draft",
+        "category": "NEAR AI"
       }
     ],
     "viewsContainers": {

@@ -22,7 +22,7 @@ import { mkdir, readFile, rename, stat } from 'node:fs/promises';
 import * as path from 'node:path';
 import type { SecretStorageLike } from '../services/auth';
 import { withFileLock } from '../services/stateMirrorLock';
-import { SELF_SIGNED_LIFETIME_DAYS, defaultBundlePayload, effectiveNow, failedClosed, verifyBundleEnvelope } from '../domain/gate/bundle';
+import { SELF_SIGNED_LIFETIME_DAYS, defaultBundlePayload, effectiveNow, failedClosed, inBundleOrder, parseBundle, verifyBundleEnvelope } from '../domain/gate/bundle';
 import type { BundleState, PolicyBundle, PolicyEventId } from '../domain/gate/bundle';
 import { MAX_PAYLOAD_BYTES, PayloadError, signPayload } from '../domain/team/signedPayload';
 import type { SignedPayload } from '../domain/team/signedPayload';
@@ -37,6 +37,12 @@ import { earlierInstallEvidence } from './installEvidence';
 export const GATE_DIR_NAME = 'gate';
 export const POLICY_BUNDLE_FILE = 'policy-bundle.json';
 export const BUNDLE_LOCK_FILE = 'bundle.lock';
+/** The unsigned draft Edit Policy writes, in this extension's storage (never the project), and the hash of the policy it was made from beside it (D-41, D-53). */
+export const POLICY_DRAFT_FILE = 'policy-draft.json';
+export const POLICY_DRAFT_BASE_FILE = 'policy-draft.base';
+
+/** Said when a draft was made from a policy that is no longer the one in force (D-53). */
+export const STALE_DRAFT_TEXT = 'Your policy changed after this draft was made. Run NEAR AI: Edit Policy again to start from the policy in force.';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 /** A file larger than this is not read at all; the verifier's own limit applies to what is signed, this one protects memory. */
@@ -359,5 +365,62 @@ export async function resetPolicyToDefaults(globalStorageDir: string, secrets: S
     if (state.state !== 'valid') return { state };
     const kept = await remember(secrets, state, effective);
     return kept.state === 'valid' ? { state: kept, event: 'policy.reset' } : { state: kept };
+  });
+}
+
+export interface PolicyEditResult extends BundleResult {
+  readonly oldHash: string;
+  readonly newHash: string;
+}
+
+/**
+ * NEAR AI: Apply Policy Draft (D-41, D-53). Under bundle.lock: the policy stored now must be valid and its hash must equal `baseHash` (the hash of the policy
+ * the draft was made from), so an old draft never undoes another window's edit or a reset; the draft is parsed as JSON and by parseBundle, with this
+ * extension setting the issuer (this install's key) and the dates itself, so a draft cannot sign a policy in another device's name or with a past or
+ * far-future date (D-12); then it is signed with the one signer, written, read back, verified and remembered. Every refusal is a BundleStoreError with a plain
+ * message, and nothing is written then. Returns policy.edit with the old and new hashes.
+ */
+export async function applyPolicyDraft(globalStorageDir: string, secrets: SecretStorageLike, draftText: string, input: { readonly baseHash: string }, options: BundleStoreOptions = {}): Promise<PolicyEditResult> {
+  const nowMs = clockOf(options)().getTime();
+  if (Number.isNaN(nowMs)) throw new BundleStoreError('Nothing was changed: the clock gave no valid time.');
+  const dir = gateDir(globalStorageDir);
+  await mkdir(dir, { recursive: true, mode: 0o700 });
+  return withFileLock(dir, BUNDLE_LOCK_FILE, async (): Promise<PolicyEditResult> => {
+    let marker: LastValid;
+    try {
+      marker = await readLastValid(secrets);
+    } catch (error) {
+      throw new BundleStoreError('Nothing was changed: NEAR AI could not read its record of your policy in this computer\'s secret storage.', { cause: error });
+    }
+    const stored = (await verifyDisk(globalStorageDir, secrets, nowMs, marker)).state;
+    if (stored.state !== 'valid') throw new BundleStoreError(`Nothing was changed: your policy cannot be trusted right now, so it cannot be edited. ${stored.sentence}`);
+    if (stored.hash !== input.baseHash) throw new BundleStoreError(`Nothing was changed. ${STALE_DRAFT_TEXT}`);
+    let draft: unknown;
+    try {
+      draft = JSON.parse(draftText);
+    } catch (error) {
+      throw new BundleStoreError(`Nothing was changed: the draft is not valid JSON (${error instanceof Error ? error.message.slice(0, 160) : 'parse error'}).`);
+    }
+    if (typeof draft !== 'object' || draft === null || Array.isArray(draft)) throw new BundleStoreError('Nothing was changed: the draft must be one JSON object, the policy as Edit Policy wrote it.');
+    let identity: DeviceIdentity;
+    try {
+      identity = await identityFor(globalStorageDir, secrets, options);
+    } catch (error) {
+      throw new BundleStoreError('Nothing was changed: NEAR AI could not use its signing key on this computer.', { cause: error });
+    }
+    const effective = effectiveNow(nowMs, lastValidAtOf(marker));
+    const owned = {
+      ...(inBundleOrder(draft) as Record<string, unknown>),
+      issuer: { fingerprint: identity.fingerprint, publicKey: identity.publicKey },
+      issuedAt: new Date(effective).toISOString(),
+      expiresAt: new Date(effective + SELF_SIGNED_LIFETIME_DAYS * DAY_MS).toISOString()
+    };
+    const parsed = parseBundle(owned);
+    if (!parsed.ok) throw new BundleStoreError(`Nothing was changed: the draft is not a policy this version can use. ${parsed.message}`);
+    const state = await install(globalStorageDir, secrets, sign(identity, parsed.value, new Date(effective)), nowMs, marker);
+    if (state.state !== 'valid') throw new BundleStoreError(`Nothing was changed: the new policy did not verify. ${state.sentence}`);
+    const kept = await remember(secrets, state, effective);
+    if (kept.state !== 'valid') return { state: kept, oldHash: stored.hash, newHash: state.hash };
+    return { state: kept, event: 'policy.edit', oldHash: stored.hash, newHash: state.hash };
   });
 }
