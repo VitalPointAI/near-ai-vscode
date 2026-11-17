@@ -110,7 +110,8 @@ export function teamPicker(startingPoints: StudioStartingPoint[], teams: Library
     origin: team.imported ? (team.derived ? 'Made from an import, not approved yet' : 'Imported, not approved yet') : `My team${team.savedAt ? `, saved ${team.savedAt.slice(0, 10)}` : ''}`,
     ...(team.imported ? { imported: true } : {}), teamId: team.id
   }));
-  const builtin = startingPoints.map((point): PickerEntry => ({
+  // The recommendation is made from answers on its own screen (0.4.30), so the picker does not offer it a second time.
+  const builtin = startingPoints.filter((point) => point.id !== 'recommend').map((point): PickerEntry => ({
     id: point.id, source: 'builtin', group: point.group, label: point.label, name: startingPointTeamName(point), cloneName: cloneNameFor(startingPointTeamName(point), 'builtin', teams), saveAs: uniqueTeamName(startingPointTeamName(point), teams), description: point.description, members: point.members, memberCount: point.members.length,
     origin: point.group === 'project-type' ? 'Built in: project type' : point.group === 'gsd' ? 'Built in: Open-GSD roles' : 'Built in'
   }));
@@ -336,6 +337,11 @@ export type StudioMessage =
    * goes to the chat (a built-in is saved to My teams first). `discard`: the builder holds unsaved work, so the host asks before it is dropped.
    */
   | { type: 'use-team'; id: string; goal?: string; locality?: 'cloud' | 'local' | 'hybrid'; workShape?: AgentDiscoveryAnswers['workShape']; riskLevel?: AgentDiscoveryAnswers['riskLevel']; discard?: true }
+  /**
+   * Recommend a team for me (0.4.30, on the builder's first screen): the team these answers make, shown before Use as is or Clone and modify, which send
+   * the same answers. `seq` matches the reply to the request.
+   */
+  | { type: 'recommend'; seq: number; goal: string; locality: 'cloud' | 'local' | 'hybrid'; workShape: AgentDiscoveryAnswers['workShape']; riskLevel: AgentDiscoveryAnswers['riskLevel'] }
   | { type: 'open-setting'; key: string }
   /** Improve with AI (0.4.27): the free local check and whether an AI review is possible, for this draft. */
   | { type: 'improve-check'; seq: number; draft: TeamDraft; id?: string }
@@ -458,6 +464,11 @@ export function parseStudioMessage(value: unknown): StudioMessage | undefined {
       if (message.discard !== undefined && message.discard !== true) return undefined;
       const start = startRequest(message, false);
       return start ? { type: 'use-team', ...start, ...(typeof message.goal === 'string' ? { goal: message.goal } : {}), ...(message.discard === true ? { discard: true as const } : {}) } : undefined;
+    }
+    case 'recommend': {
+      if (!exactKeys(message, ['type', 'seq', 'goal', 'locality', 'workShape', 'riskLevel']) || !Number.isSafeInteger(message.seq) || !text(message.goal, 400)) return undefined;
+      if (!(LOCALITIES as readonly unknown[]).includes(message.locality) || !(WORK_SHAPES as readonly unknown[]).includes(message.workShape) || !(RISKS as readonly unknown[]).includes(message.riskLevel)) return undefined;
+      return { type: 'recommend', seq: message.seq as number, goal: message.goal, locality: message.locality as 'cloud', workShape: message.workShape as 'feature', riskLevel: message.riskLevel as 'low' };
     }
     case 'improve-check': case 'improve-ai': {
       if (!exactKeys(message, ['type', 'seq', 'draft'], message.type === 'improve-ai' ? ['id', 'member'] : ['id']) || !Number.isSafeInteger(message.seq) || (message.id !== undefined && !id())) return undefined;
@@ -978,6 +989,16 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
         const point = context!.startingPoints.find((candidate) => candidate.id === message.id);
         // The name a clone starts with is worked out here, from the library as it is now, so the page never applies naming rules of its own.
         post({ type: 'starting-point', id: message.id, ...(point ? { cloneName: cloneNameFor(startingPointTeamName(point), 'builtin', library.teams) } : {}), draft: result.draft, ...(result.projectType ? { projectType: result.projectType } : {}) });
+        return;
+      }
+      case 'recommend': {
+        // The team Use as is would make from these answers, under the name it would get, so what is shown is what is used.
+        if (!input || !context) await load();
+        const point = context!.startingPoints.find((candidate) => candidate.id === 'recommend')!;
+        const result = startingPointDraft({ id: 'recommend', goal: message.goal, locality: message.locality, workShape: message.workShape, riskLevel: message.riskLevel }, context!);
+        const own = startingPointTeamName(point);
+        const name = deps.root() ? own : uniqueTeamName(own, library.teams);
+        post({ type: 'recommendation', seq: message.seq, name, cloneName: cloneNameFor(own, 'builtin', library.teams), ...(deps.root() ? {} : { saveAs: name }), description: result.draft.description, members: result.draft.members.map((member) => ({ name: member.name, role: member.role })) });
         return;
       }
       case 'use-team': {

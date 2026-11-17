@@ -154,6 +154,8 @@
   //   start -> new (Create a new team) -> From scratch -> steps
   //                                    -> pick (Clone an existing team) -> Clone and modify -> steps
   //                                    -> Describe it, and AI drafts it -> the library's AI box
+  //   start -> recommend (Recommend a team for me, 0.4.30: moved here from the picker) -> the answers -> the recommended team -> Use as is | Clone and
+  //            modify, as for a picked team. Changing an answer clears the team shown, so what is used is always what was shown for these answers.
   // Back goes one screen up from each of them: from the Purpose step to the screen the team was started from (work.path), and to Create a new team for
   // a draft saved before this change (no path) or a team the AI drafted. Cancel and "All teams" leave from any of them, asking first when something
   // is unsaved. A resumed draft opens straight on its step.
@@ -176,8 +178,11 @@
       work = { mode: 'wizard', stage: 'start', target: target === 'project' && ctx && ctx.hasProject ? 'project' : 'user', step: 0, maxStep: 0, draft: { name, description: '', members: [] }, startingPoint: 'empty', path: null, defaultName: name, options, review: null };
     }
     work.pickMode = 'existing';
-    // A draft cloned from a team goes back to the picker with that team still selected.
-    work.pick = resume && resume.path && resume.startingPoint && resume.startingPoint !== 'empty' ? resume.startingPoint : null;
+    // A draft cloned from a team goes back to the picker with that team still selected (the recommendation is not in the picker: its draft goes back
+    // to its own screen, see backFromPurpose).
+    work.pick = resume && resume.path && resume.startingPoint && resume.startingPoint !== 'empty' && resume.startingPoint !== 'recommend' ? resume.startingPoint : null;
+    work.recommendation = null;
+    work.recommendSeq = null;
     work.cloned = null;
     work.clean = JSON.stringify(work.draft);
     focusLater('step-heading');
@@ -192,13 +197,17 @@
     work.awaitingStart = null;
     // A request left behind is no longer waited on here (PR #75 review): the buttons are offered again, and the host still answers a second request.
     work.busy = false;
+    // The same for a recommendation asked for on a screen the person has left: its reply is dropped.
+    work.recommendSeq = null;
     focusLater('step-heading');
     render();
   }
 
   /** Back from the Purpose step: the screen the team was started from. */
   function backFromPurpose() {
-    if (work.path === 'existing') goStage('pick', 'existing');
+    // The recommendation, cloned on its own screen (path existing, as a 0.4.29 build also reads it) or from the 0.4.29 picker: back to its screen.
+    if (work.startingPoint === 'recommend' && (work.path === 'existing' || work.path === 'clone')) goStage('recommend');
+    else if (work.path === 'existing') goStage('pick', 'existing');
     else if (work.path === 'clone') goStage('pick', 'clone');
     else goStage('new');
   }
@@ -529,9 +538,13 @@
     // Names come from the host (PR #75 review): the page has no naming rules of its own, so what it shows is what the host saves.
     return (ctx ? ctx.startingPoints : []).map((point) => ({ id: point.id, source: 'builtin', group: point.group, label: point.label, name: point.name || point.label, cloneName: point.name || point.label, description: point.description, members: point.members, memberCount: point.members.length, origin: 'Built in' }));
   }
-  /** The teams the picker offers under the current filter. "Start empty" is not a team: From scratch is its own choice now. */
+  /**
+   * The teams the picker offers under the current filter. "Start empty" is not a team: From scratch is its own choice now. The recommendation is not
+   * either: it is made from answers, on its own screen (0.4.30), so it is never offered twice.
+   */
+  const inPicker = (entry) => entry.id !== 'empty' && entry.id !== 'recommend';
   function visibleEntries() {
-    return pickerEntries().filter((entry) => entry.id !== 'empty' && (pickerFilter === 'all' || entry.source === pickerFilter));
+    return pickerEntries().filter((entry) => inPicker(entry) && (pickerFilter === 'all' || entry.source === pickerFilter));
   }
   const entryName = (entry) => entry.name || entry.label;
 
@@ -551,15 +564,16 @@
   }
 
   function renderStart(root) {
-    const titles = { start: 'How do you want to start?', new: 'Create a new team', pick: work.pickMode === 'existing' ? 'Use an existing team' : 'Clone an existing team' };
+    const titles = { start: 'How do you want to start?', new: 'Create a new team', recommend: 'Recommend a team for me', pick: work.pickMode === 'existing' ? 'Use an existing team' : 'Clone an existing team' };
     const panel = el('section', 'panel start'); panel.setAttribute('aria-labelledby', 'step-heading');
     const heading = el('h2', '', titles[work.stage]); heading.id = 'step-heading'; heading.setAttribute('tabindex', '-1');
     panel.append(heading);
     if (work.stage === 'start') {
-      panel.append(el('p', 'hint', 'Use a team that already exists, or make a new one with its own name.'));
+      panel.append(el('p', 'hint', 'Use a team that already exists, make a new one with its own name, or let the studio suggest one.'));
       panel.append(startChoices([
         ['start-existing', 'Use an existing team', 'One of your saved teams, or one the extension provides. Use it as it is, or clone it and change it.', () => goStage('pick', 'existing')],
-        ['start-new', 'Create a new team', 'Give it a name and its members: from scratch, or from a copy of an existing team.', () => goStage('new')]
+        ['start-new', 'Create a new team', 'Give it a name and its members: from scratch, or from a copy of an existing team.', () => goStage('new')],
+        ['start-recommend', 'Recommend a team for me', 'Answer a few questions about the work. The studio suggests a team sized to it; use it as it is, or clone it and change it.', () => goStage('recommend')]
       ]));
     } else if (work.stage === 'new') {
       panel.append(el('p', 'hint', 'A new team gets its own name, and you choose where to save it.'));
@@ -568,7 +582,8 @@
         ['new-clone', 'Clone an existing team', 'Start from a copy of one of your teams or a built-in one, then change it.', () => goStage('pick', 'clone')],
         ['new-ai', 'Describe it, and AI drafts it', 'Say what the team should produce. AI proposes a team for you to look over before anything is saved.', describeToAi]
       ]));
-    } else sectionPicker(panel);
+    } else if (work.stage === 'recommend') sectionRecommend(panel);
+    else sectionPicker(panel);
     root.append(panel);
     const footer = el('div', 'footer');
     if (work.stage !== 'start') footer.append(button('Back', () => goStage(work.stage === 'pick' && work.pickMode === 'clone' ? 'new' : 'start'), {}));
@@ -580,7 +595,7 @@
   function sectionPicker(root) {
     const existing = work.pickMode === 'existing';
     root.append(el('p', 'hint', existing ? 'Pick a team. Use it as it is, or clone it into a new team and change it.' : 'Pick the team to copy. You name the copy, and can change everything in it before it is saved.'));
-    const entries = pickerEntries().filter((entry) => entry.id !== 'empty');
+    const entries = pickerEntries().filter(inPicker);
     // All, My teams (saved from any project) or Built-in (provided by the extension).
     const filter = el('div', 'picker-filter'); filter.setAttribute('role', 'radiogroup'); filter.setAttribute('aria-label', 'Show teams');
     for (const [value, label] of PICKER_FILTERS) {
@@ -597,7 +612,7 @@
       filter.append(option);
     }
     root.append(filter);
-    const groups = [['library', 'My teams'], ['recommend', 'Recommended'], ['project-type', 'For this kind of project'], ['gsd', 'Built from Open-GSD roles']];
+    const groups = [['library', 'My teams'], ['project-type', 'For this kind of project'], ['gsd', 'Built from Open-GSD roles']];
     const visible = visibleEntries();
     if (pickerFilter === 'mine' && !visible.length) root.append(el('p', 'hint empty-picker', NO_SAVED_TEAMS));
     // The radios share one name, so they are one group to the keyboard and a screen reader; the selected team's buttons and answers sit beside them.
@@ -630,23 +645,26 @@
   }
 
   /**
-   * What can be done with the selected team. A built-in team is made from a few answers (what it is for, where its models run, and for the
-   * recommendation the kind of work and its risk), so those are asked here, before Use as is or Clone and modify, and nothing else is.
+   * What can be done with the selected team. A built-in team is made from a few answers (what it is for and where its models run), so those are asked
+   * here, before Use as is or Clone and modify, and nothing else is. (The recommendation's own questions are on its screen, sectionRecommend.)
    */
   function pickActions(point) {
-    const existing = work.pickMode === 'existing';
-    const name = entryName(point);
     const box = el('div', 'pick-details');
     if (point.source === 'builtin') {
       const fields = el('div', 'inline-fields');
-      fields.append(field('What the team is for', input(work.options.goal, (value) => { work.options.goal = value.replace(/[\r\n]+/g, ' '); }, { id: 'f-goal', maxlength: '400', autocomplete: 'off' }), 'Optional. It is written into the members\' instructions.'));
-      fields.append(field('Where models may run', select([{ value: 'cloud', label: 'NEAR AI Cloud' }, { value: 'local', label: 'Local runtime only' }, { value: 'hybrid', label: 'Both' }], work.options.locality, (value) => { work.options.locality = value; }, 'f-locality')));
-      if (point.id === 'recommend') {
-        fields.append(field('Kind of work', select(['feature', 'bugfix', 'refactor', 'research', 'release'].map((value) => ({ value, label: value[0].toUpperCase() + value.slice(1) })), work.options.workShape, (value) => { work.options.workShape = value; }, 'f-shape')));
-        fields.append(field('Risk', select([{ value: 'low', label: 'Low' }, { value: 'medium', label: 'Medium' }, { value: 'high', label: 'High (adds a security member)' }], work.options.riskLevel, (value) => { work.options.riskLevel = value; }, 'f-risk')));
-      }
+      fields.append(goalField(), localityField());
       box.append(fields);
     }
+    pickButtons(box, point, work.pickMode === 'existing');
+    return box;
+  }
+
+  const goalField = (onInput) => field('What the team is for', input(work.options.goal, (value) => { work.options.goal = value.replace(/[\r\n]+/g, ' '); if (onInput) onInput(); }, { id: 'f-goal', maxlength: '400', autocomplete: 'off' }), 'Optional. It is written into the members\' instructions.');
+  const localityField = (onChange) => field('Where models may run', select([{ value: 'cloud', label: 'NEAR AI Cloud' }, { value: 'local', label: 'Local runtime only' }, { value: 'hybrid', label: 'Both' }], work.options.locality, (value) => { work.options.locality = value; if (onChange) onChange(); }, 'f-locality'));
+
+  /** Use as is (when using an existing team) and Clone and modify for a team, with what each will do. */
+  function pickButtons(box, point, existing) {
+    const name = entryName(point);
     const actions = el('div', 'actions');
     if (existing) actions.append(button('Use as is', () => useAsIs(point), { primary: true, label: 'Use ' + name + ' as is', id: 'use-as-is', disabled: work.busy }));
     actions.append(button('Clone and modify', () => cloneEntry(point), { primary: !existing, label: 'Clone ' + name + ' and modify it', id: 'clone-team', disabled: work.busy }));
@@ -660,7 +678,61 @@
     const count = work.draft.members.length;
     if (count) box.append(el('p', 'hint', 'Clone and modify replaces the ' + count + ' member' + (count === 1 ? '' : 's') + ' your team has now.'));
     if (point.id.startsWith('type:')) box.append(el('p', 'hint', 'As this project\'s team it also writes this project type\'s guidance to AGENTS.md (plan, execute, red team, verify, audit, release).'));
-    return box;
+  }
+
+  // ---------- Recommend a team for me (0.4.30: moved from the picker to the first screen) ----------
+  let recommendSeq = 0;
+
+  /** The answers changed: a team shown for the old ones no longer applies, so it is cleared (and the person is told) until recommended again. */
+  function answersChanged(redraw) {
+    if (!work.recommendation) return;
+    work.recommendation = null;
+    work.recommendStale = true;
+    if (redraw) { render(); return; }
+    // While typing: the shown team is replaced in place, so the field keeps its caret.
+    const box = $('recommendation');
+    if (box) box.replaceChildren(el('p', 'hint', STALE_RECOMMENDATION));
+  }
+  const STALE_RECOMMENDATION = 'Your answers changed. Recommend again to see the team for them.';
+
+  function sectionRecommend(root) {
+    root.append(el('p', 'hint', 'Answer these about the work. The studio suggests a team sized to it, and shows it before anything is saved.'));
+    const fields = el('div', 'inline-fields');
+    fields.append(field('Kind of work', select(['feature', 'bugfix', 'refactor', 'research', 'release'].map((value) => ({ value, label: value[0].toUpperCase() + value.slice(1) })), work.options.workShape, (value) => { work.options.workShape = value; answersChanged(true); }, 'f-shape')));
+    fields.append(field('Risk', select([{ value: 'low', label: 'Low' }, { value: 'medium', label: 'Medium' }, { value: 'high', label: 'High (adds a security member)' }], work.options.riskLevel, (value) => { work.options.riskLevel = value; answersChanged(true); }, 'f-risk')));
+    fields.append(localityField(() => answersChanged(true)), goalField(() => answersChanged(false)));
+    root.append(fields);
+    const actions = el('div', 'actions');
+    actions.append(button('Recommend a team', requestRecommendation, { primary: !work.recommendation, id: 'recommend-go', disabled: work.busy }));
+    if (work.busy && work.recommendSeq !== null) actions.append(el('span', 'hint', 'Waiting for the answer…'));
+    root.append(actions);
+    const result = el('section', 'recommendation'); result.id = 'recommendation'; result.setAttribute('aria-live', 'polite');
+    const shown = work.recommendation;
+    if (shown) {
+      const title = el('h3', '', shown.name); title.id = 'recommendation-title';
+      result.setAttribute('aria-labelledby', title.id);
+      const head = el('div', 'card-head');
+      head.append(icon('team'), title, badge('Built in', 'kind'));
+      result.append(head);
+      if (shown.description) result.append(el('p', 'desc', shown.description));
+      result.append(el('p', 'meta', shown.members.length + ' member' + (shown.members.length === 1 ? '' : 's')));
+      const chips = el('ul', 'chips'); chips.setAttribute('aria-label', 'Members');
+      for (const member of shown.members) chips.append(el('li', 'chip', member.name + (member.role && member.role !== member.name ? ' · ' + member.role : '')));
+      result.append(chips);
+      const point = { id: 'recommend', source: 'builtin', name: shown.name, cloneName: shown.cloneName, ...(shown.saveAs ? { saveAs: shown.saveAs } : {}), members: shown.members.map((member) => member.name) };
+      pickButtons(result, point, true);
+    } else if (work.recommendStale) result.append(el('p', 'hint', STALE_RECOMMENDATION));
+    root.append(result);
+  }
+
+  /** One request at a time; the reply is matched by its number, so one for an older request or a screen the person left is dropped. */
+  function requestRecommendation() {
+    if (work.busy) return;
+    recommendSeq += 1;
+    work.recommendSeq = recommendSeq;
+    work.busy = true;
+    vscode.postMessage({ type: 'recommend', seq: recommendSeq, goal: work.options.goal.slice(0, 400), locality: work.options.locality, workShape: work.options.workShape, riskLevel: work.options.riskLevel });
+    render();
   }
 
   function startAnswers(point, message) {
@@ -687,7 +759,9 @@
   function cloneEntry(point) {
     if (work.busy) return;
     const label = entryName(point);
-    work.awaitingStart = { id: point.id, clone: true, path: work.pickMode === 'existing' ? 'existing' : 'clone', label, name: point.cloneName || label, goal: point.source === 'builtin' ? work.options.goal : '' };
+    // The recommendation is cloned on its own screen; its path is `existing`, which a 0.4.29 build also reads, and Back finds its screen from the starting
+    // point (backFromPurpose).
+    work.awaitingStart = { id: point.id, clone: true, stage: work.stage, path: work.stage === 'recommend' || work.pickMode === 'existing' ? 'existing' : 'clone', label, name: point.cloneName || label, goal: point.source === 'builtin' ? work.options.goal : '' };
     const message = startAnswers(point, { type: 'starting-point', id: point.id, goal: '', locality: work.options.locality });
     vscode.postMessage(message);
     work.busy = true;
@@ -1773,12 +1847,12 @@
         break;
       case 'starting-point': {
         // Any reply frees Use as is and Clone and modify again, even one that is dropped below.
-        if (work && work.mode === 'wizard' && work.busy) { work.busy = false; if (work.stage === 'pick') render(); }
+        if (work && work.mode === 'wizard' && work.busy) { work.busy = false; if (work.stage === 'pick' || work.stage === 'recommend') render(); }
         // Only the reply to the request still waiting: one for a screen the person has left (Back, another team) is dropped.
         const pending = work && work.mode === 'wizard' ? work.awaitingStart : null;
         if (!pending || pending.id !== message.id) break;
         // The person left the picker: this reply is dropped for good, so a later one cannot move the builder either (PR #75 review).
-        if (pending.clone && work.stage !== 'pick') { work.awaitingStart = null; break; }
+        if (pending.clone && work.stage !== (pending.stage || 'pick')) { work.awaitingStart = null; break; }
         work.awaitingStart = null;
         const draft = message.draft;
         work.projectType = message.projectType || null;
@@ -1808,6 +1882,17 @@
         focusLater('step-heading');
         render();
         requestReview();
+        break;
+      }
+      case 'recommendation': {
+        // Only the reply to the request still waiting, on the screen it was asked from.
+        if (!work || work.mode !== 'wizard' || work.stage !== 'recommend' || work.recommendSeq === null || message.seq !== work.recommendSeq) break;
+        work.recommendSeq = null;
+        work.busy = false;
+        work.recommendStale = false;
+        work.recommendation = { name: String(message.name || ''), cloneName: String(message.cloneName || message.name || ''), ...(message.saveAs ? { saveAs: String(message.saveAs) } : {}), description: String(message.description || ''), members: Array.isArray(message.members) ? message.members.map((member) => ({ name: String(member.name || ''), role: String(member.role || '') })) : [] };
+        render();
+        announce('Recommended ' + work.recommendation.name + ': ' + work.recommendation.members.length + ' members. Use it as it is, or clone it and change it.');
         break;
       }
       case 'used':
@@ -1859,7 +1944,7 @@
         // draw the box again so the person can retry or change what they wrote.
         if (drafting) { drafting = false; if (!work) render(); }
         // A starting point that could not be read, or a Use as is that failed: their buttons work again.
-        if (work && work.mode === 'wizard') { work.awaitingStart = null; if (work.busy) { work.busy = false; render(); } }
+        if (work && work.mode === 'wizard') { work.awaitingStart = null; work.recommendSeq = null; if (work.busy) { work.busy = false; render(); } }
         break;
     }
   });
