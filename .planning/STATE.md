@@ -13,10 +13,10 @@ progress:
   total_plans: 95
   completed_plans: 67
   percent: 5
-last_activity: 2026-11-16
+last_activity: 2026-11-17
 current_phase: 70
 current_phase_name: "Capability vocabulary, manifests and one gate with a floor"
-last_activity_desc: Phase 70 plans 08 to 15 executed and PR 2 opened as #70 (all required checks green, agent review PASS with 1 major and 4 minor findings to settle before PR 3 enforces the floor) (manifests on every tool, MCP manifests, the signed policy file and decision log, the gate on every execution path in shadow, an empty effect list fails closed, status bar, Show Policy and Reset Policy to Defaults); before that: Phase 70 plans 01 to 07 executed, PR 1 merged as #66 with the owner-directed review fixes (vocabulary v1, labels v1 and presets, policy bundle v1, route decision and label map v1, tool and MCP manifests v1, the floor, decide() and the decision record); before that: Owner's agent authorization decisions recorded (PROJECT.md Platform direction 14-17; CRED-08 added to Phase 73, 134 requirements; L4 drafts ANCH-09..15 for function-call keys on on-chain calls only) and PR #63's leftover review points fixed in the Phase 70 files
+last_activity_desc: Phase 27 record closed (owner's test 8 passed on 0.4.29, #80); 0.4.29 published (floor #74, Build a team #75, gate answers #76); Phase 70 part 4 replanned into five PRs (#78); PR 4a opened as #81
 ---
 
 # Project State
