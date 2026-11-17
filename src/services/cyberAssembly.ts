@@ -1,6 +1,11 @@
 import { cyberRunPrompt, startCyberRun, type CyberRunInput, type CyberRunResult } from './cyberRun';
 import { CyberEvidenceStore, CyberLedgerStore } from './cyberLedgerStore';
 import { RunGrants } from '../agent/permissions';
+import { unavailableGateRuntime } from '../agent/gateAdapter';
+import { projectLabelOf } from '../agent/gateLabels';
+import { OutboundFingerprints } from '../agent/outboundCheck';
+import { SHIPPED_DEFAULT_LABEL } from '../domain/gate/bundle';
+import { SessionMark } from '../domain/gate/dominance';
 import { regionEntry, scopeFingerprint } from '../domain/cyberLegal';
 import type { Engagement, Finding, ResolvedScope, SandboxTier } from '../domain/cyber';
 import { isoTimestamp, PROFILE_CONTENT } from '../domain/cyber';
@@ -382,9 +387,14 @@ export function panelCyberRunStarter(
     );
     // A person starts a scan and answers its cards: presence person, interactive; the floor is enforced here as in chat (D-43).
     const gate = options.gateHost ? await options.gateHost.runtimeFor({ ...(options.root ? { root: options.root } : {}), actor: { kind: 'agent', sessionId: `cyber-${request.engagement.id}`, agentLabel: 'cyber panel' }, presence: 'person', context: 'interactive' }) : undefined;
+    // A cyber run has no chat: it starts at the project's resolved label with a mark of its own, raised by its steps' reads and read by its own route (D-54).
+    const runGate = gate ?? unavailableGateRuntime();
+    const mark = new SessionMark(options.root ? await projectLabelOf(runGate, options.root) : [SHIPPED_DEFAULT_LABEL]);
+    grants.mark = mark;
+    grants.outbound = new OutboundFingerprints();
     const assembly = cyberAssembly(host, {
       ...(options.root ? { workspaceRoot: options.root } : {}),
-      ...(gate ? { route: sessionRouteFrom(gate) } : {}),
+      ...(gate ? { route: sessionRouteFrom(gate, { markOf: () => mark.current() }) } : {}),
       ...(client ? { client } : {}),
       ...(model ? { model } : {}),
       toolContext,

@@ -2,7 +2,7 @@ import * as path from 'node:path';
 import { beginRun } from '../agent/runActivity';
 import type { AgentTool, ToolContext } from '../agent/tools';
 import { DEFAULT_RULES, RunGrants, decidePermission, intrusiveGrantDecision, type IntrusiveStep, type PermissionDecision, type PermissionRules } from '../agent/permissions';
-import { effectsOfStep, gateStep, recordApprovalReply, unavailableGateRuntime } from '../agent/gateAdapter';
+import { effectsOfStep, gateStep, raiseRunMark, recordApprovalReply, unavailableGateRuntime } from '../agent/gateAdapter';
 import type { GateRuntime, SettingsAnswer } from '../domain/gate/decide';
 import { fromActionCapability } from '../domain/gate/vocabulary';
 import type { Capability } from '../domain/gate/vocabulary';
@@ -373,6 +373,7 @@ async function cyberRun(input: CyberRunInput): Promise<CyberRunResult> {
       const stepEffects = hostTool ? { effects: hostToolEffects(target), floorFacts: {} } : await effectsOfStep(selected!.tool, stepRaw(selected!, step), input.toolContext.root, scope.paths, gate.locations ?? {});
       const gated = await gateStep(gate, {
         tool: step.tool, callId, effects: stepEffects.effects, floorFacts: stepEffects.floorFacts, policy: input.policy, settings,
+        ...(input.grants.mark === undefined ? {} : { mark: input.grants.mark }), ...(input.grants.outbound === undefined ? {} : { outbound: input.grants.outbound }),
         ...('resource' in stepEffects && stepEffects.resource !== undefined ? { resource: stepEffects.resource } : {}),
         ...(command === undefined ? {} : { command, root: input.toolContext.root }), ...(hostTool ? {} : { manifestContexts: selected!.tool.manifest.contexts })
       });
@@ -401,6 +402,8 @@ async function cyberRun(input: CyberRunInput): Promise<CyberRunResult> {
         continue;
       }
 
+      // The step runs: what it reads raises the run's own mark before it runs, as a chat call's does at the loop's hook (D-54).
+      raiseRunMark(gate, input.grants.mark, gated.readLabels, step.tool);
       emit({ type: 'step-started', step });
       const started = now().getTime();
       let output: string;

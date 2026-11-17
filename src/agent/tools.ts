@@ -52,6 +52,11 @@ export interface ToolContext {
    * The loop builds it from the run's labels before a read tool runs; Glob and Grep leave such paths out and say how many they hid. Absent means no check.
    */
   canRead?: (relativePath: string) => boolean;
+  /**
+   * Raises the session's mark by the labels of the project-relative paths a search returns (CLAS-04, D-54). Glob and Grep call it before their results
+   * reach the model; when it throws, the search fails rather than return results whose labels could not be counted.
+   */
+  noteRead?: (relativePaths: readonly string[]) => Promise<void>;
 }
 
 /** The plain note a search adds when it left out results for their labels. */
@@ -408,6 +413,7 @@ export const globTool: AgentTool<{ pattern: string; path?: string }> = {
       found.push({ relative, absolute });
     }, context.signal, unskipped);
     const labelNote = labelHidden > 0 ? `\n\n[${labelHiddenNote(labelHidden, 'file')}]` : '';
+    if (found.length) await context.noteRead?.(found.map((file) => path.relative(context.root, file.absolute).split(path.sep).join('/')));
     if (!found.length) return labelHidden > 0 ? `No files matched that you may read. ${labelHiddenNote(labelHidden, 'file')}` : 'No files matched.';
     const withTimes = await Promise.all(found.slice(0, 5_000).map(async (file) => ({ ...file, mtime: (await stat(file.absolute).catch(() => undefined))?.mtimeMs ?? 0 })));
     withTimes.sort((a, b) => b.mtime - a.mtime);
@@ -446,6 +452,8 @@ export const grepTool: AgentTool<{ pattern: string; path?: string; glob?: string
     const labelHidden = safe.length - kept.length;
     const labelNote = labelHidden > 0 ? `\n\n[${labelHiddenNote(labelHidden, 'line')}]` : '';
     const hidden = output.length - safe.length;
+    const files = [...new Set(kept.flatMap((line) => (line.file === undefined ? [] : [path.relative(context.root, path.resolve(context.root, line.file)).split(path.sep).join('/')])))];
+    if (files.length) await context.noteRead?.(files);
     const lines = kept.map((line) => (line.file === undefined ? line.text : `${displayPath(context.root, line.file)}${line.text}`));
     if (!lines.length) {
       if (labelHidden > 0) return `No matches you may read. ${labelHiddenNote(labelHidden, 'line')}`;

@@ -8,7 +8,11 @@ import { compactConversation, contextAction, contextStatus, DEFAULT_COMPACT_AT_T
 import type { GateHost } from '../gate/host';
 import { currentSessionRoute, defaultSessionRoute, sessionRouteFrom, withSessionRoute } from '../gate/sessionMark';
 import type { RouteAttestation } from '../gate/sessionMark';
-import { approveFloorCallLate, endFloorApprovals, recordLateApproval } from '../agent/gateAdapter';
+import { approveFloorCallLate, endFloorApprovals, recordLateApproval, unavailableGateRuntime } from '../agent/gateAdapter';
+import { projectLabelOf, scalesOf } from '../agent/gateLabels';
+import { OutboundFingerprints } from '../agent/outboundCheck';
+import { SessionMark } from '../domain/gate/dominance';
+import type { GateRuntime } from '../domain/gate/decide';
 import { AgentEvent, AgentRun, AgentRunError, ApprovalReply, ApprovalRequest, AWAITING_APPROVAL_PREFIX, DEFAULT_MAX_TURNS, RunInput, RunOutcome, RunResult } from '../agent/loop';
 import { countersOf, runSplitOf } from './activityOverview';
 import { PermissionRules, RunGrants } from '../agent/permissions';
@@ -248,6 +252,14 @@ export class AgentConversation {
    * it, so an answer check that fails stops attested-cloud for the chat and its helpers alike (plan 25 sets it).
    */
   public readonly routeAttestation: RouteAttestation = { failed: false };
+  /**
+   * The chat's high-water mark (CLAS-04, D-29, D-54): set at the project's resolved label when the chat's first run starts (or at its stored mark when it
+   * was reopened), raised by what any of its agents read, and read by every session route of the chat before each model request. It only rises; the
+   * person's Lower This Chat's Label is the one way down.
+   */
+  private chatMark: SessionMark | undefined;
+  /** The fingerprints of the labelled text this chat's agents read (D-60): in memory beside the mark, shared with sub-agents, never on record. */
+  public readonly outbound = new OutboundFingerprints();
   private readonly verifiable = new Map<string, { model: string; evidence: ResponseEvidence; client: NearAiClient }>();
   /** What the user typed, keyed by a hash of the message the model saw (survives compaction). */
   private display = new Map<string, string>();
@@ -328,6 +340,17 @@ export class AgentConversation {
     private readonly transcripts?: ConversationStore,
     private readonly activity?: ActivityFeed
   ) {}
+
+  /** The chat's mark, or undefined before its first run (a new chat then starts at the project's label). */
+  public get mark(): SessionMark | undefined { return this.chatMark; }
+
+  /** The chat's mark for a run starting now: made at the project's resolved label the first time, and raised by that label every time after. */
+  private async markForRun(gate: GateRuntime): Promise<SessionMark> {
+    const projectLabel = await projectLabelOf(gate, this.root);
+    if (this.chatMark === undefined) this.chatMark = new SessionMark(projectLabel);
+    else this.chatMark.raise(projectLabel, scalesOf(gate));
+    return this.chatMark;
+  }
 
   /** The one gate (GATE-04): the chat sets it, and every tool call of a run, a sub-agent's included, is decided through it. Without one a run is failed closed: only reading and planning run, and no policy is guessed. */
   public gateHost: Pick<GateHost, 'runtimeFor'> | undefined;
@@ -444,6 +467,10 @@ export class AgentConversation {
     let mainTurns = 0;
     // The gate has finished its start-up check before the first call is decided; the main run is an agent working for a person who is here.
     const gate = await this.gateHost?.runtimeFor({ root: this.root, actor: { kind: 'agent', sessionId: this.conversationId, agentId: mainId, agentLabel: 'agent' }, presence: 'person', context: 'interactive' });
+    // The chat's mark starts at the project's resolved label and never below it: a project labelled since the last run raises it (CLAS-04, edge empty).
+    const mark = await this.markForRun(gate ?? unavailableGateRuntime());
+    grants.mark = mark;
+    grants.outbound = this.outbound;
     const run = new AgentRun({
       client: request.client,
       model: request.model,
@@ -508,7 +535,7 @@ export class AgentConversation {
         // Every NEAR request the run makes (sub-agents, safety checks, summaries included) is tagged with it.
         // CLAS-06: and every one of them is routed by the run's session route, decided at the client before anything is sent and recorded in the run's log.
         // With no gate host (a test) the run is wrapped in the default route, so the call is wrapped either way (PR 4a review).
-        const runRoute = gate ? sessionRouteFrom(gate, { attestation: this.routeAttestation }) : defaultSessionRoute();
+        const runRoute = gate ? sessionRouteFrom(gate, { attestation: this.routeAttestation, markOf: () => mark.current() }) : defaultSessionRoute();
         result = await withSpendTag({ kind: 'main', runId, conversationId: this.conversationId, agentId: mainId }, () => withSessionRoute(runRoute, () => run.run(this.messages, abort.signal)));
       } catch (error) {
         this.activity?.agentEnded(mainId, 'failed', error instanceof Error ? error.message : String(error));

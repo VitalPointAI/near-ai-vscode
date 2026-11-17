@@ -8,6 +8,10 @@ import { ShellSession } from '../agent/shell';
 import { agentSystemPrompt } from '../agent/systemPrompt';
 import { CORE_TOOLS } from '../agent/tools';
 import { unavailableGateRuntime } from '../agent/gateAdapter';
+import { projectLabelOf } from '../agent/gateLabels';
+import { OutboundFingerprints } from '../agent/outboundCheck';
+import { RunGrants } from '../agent/permissions';
+import { SessionMark } from '../domain/gate/dominance';
 import type { GateRuntime } from '../domain/gate/decide';
 import type { ActionPolicy } from '../domain/policy';
 import { SpendLimitError, StreamInterruptedError, type AgentMessage, type UsageMetadata } from '../services/nearAiClient';
@@ -54,19 +58,24 @@ export async function runAgentInFolder(client: BenchmarkClient, model: string, r
   const checkpoints = new RunCheckpoints(`benchmark-${Date.now()}`);
   const gate = runGateFor(options);
   try {
+    // A run with no chat starts at the project's resolved label with a mark of its own, raised by its reads and read by its own route (D-54).
+    const grants = new RunGrants();
+    const mark = new SessionMark(await projectLabelOf(gate, root));
+    grants.mark = mark;
+    grants.outbound = new OutboundFingerprints();
     const run = new AgentRun({
       client, model, tools: CORE_TOOLS, maxTurns: options.maxTurns,
       context: { root, checkpoints, shell, readFiles: new Set() },
       policy: options.policy ?? { mode: 'fully-autonomous', emergencyStop: false }, rules: options.rules,
       requestApproval: options.requestApproval ?? UNATTENDED, emit: (event) => options.onEvent?.(event),
-      gate,
+      gate, grants,
       ...(options.beforeTurn ? { beforeTurn: options.beforeTurn } : {})
     });
     // The production system prompt, so the benchmark measures models as the extension runs them.
     const messages: AgentMessage[] = [{ role: 'system', content: agentSystemPrompt({ root, platform: `${process.platform} ${process.arch}`, date: new Date().toISOString().slice(0, 10), isGitRepo: false, model }) }, { role: 'user', content: prompt }];
     // CLAS-06: every model request of the run (comparison, benchmark and role-suite runs all come here) is routed by a session route built from the run's own
     // gate, so a run with no gate host is decided by the failed-closed policy, and its requests are recorded where its decisions are.
-    const result = await withSessionRoute(sessionRouteFrom(gate), () => run.run(messages, options.signal ?? new AbortController().signal));
+    const result = await withSessionRoute(sessionRouteFrom(gate, { markOf: () => mark.current() }), () => run.run(messages, options.signal ?? new AbortController().signal));
     const answer = [...result.messages].reverse().find((message) => message.role === 'assistant' && message.content)?.content ?? '';
     return { outcome: result.outcome, answer: String(answer), usage: result.usage, ms: Date.now() - started, changed: checkpoints.changedFiles };
   } finally {
