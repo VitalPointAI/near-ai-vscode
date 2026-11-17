@@ -166,10 +166,30 @@ export interface NearAiClientOptions {
 }
 
 /**
+ * A list of paths no caller can change (PR #81 review): a frozen view over a set only this function holds, so neither `add` nor `Set.prototype.add.call`
+ * can put a path on it or take one off. A content path added at run time would otherwise skip the route check.
+ */
+function readOnlyPaths(paths: readonly string[]): ReadonlySet<string> {
+  const held = new Set(paths);
+  const view: ReadonlySet<string> = Object.freeze({
+    has: (value: string): boolean => held.has(value),
+    get size(): number { return held.size; },
+    forEach: (callback: (value: string, value2: string, set: ReadonlySet<string>) => void, thisArg?: unknown): void => {
+      for (const value of held) callback.call(thisArg, value, value, view);
+    },
+    entries: () => new Set(held).entries(),
+    keys: () => new Set(held).keys(),
+    values: () => new Set(held).values(),
+    [Symbol.iterator]: () => new Set(held).values()
+  });
+  return view;
+}
+
+/**
  * The requests that carry content to a model (a POST to one of these). The one list of them: BILLABLE_PATHS is this same set, because NEAR AI bills exactly
  * the requests that carry content, so the spend check and the route check can never disagree about a path (PR 4a review).
  */
-export const CONTENT_PATHS: ReadonlySet<string> = new Set(['/chat/completions', '/images/generations', '/images/edits', '/audio/transcriptions']);
+export const CONTENT_PATHS: ReadonlySet<string> = readOnlyPaths(['/chat/completions', '/images/generations', '/images/edits', '/audio/transcriptions']);
 
 /** Endpoints NEAR bills for; every 2xx answer from one is recorded in the spend ledger. The same set as CONTENT_PATHS, never a copy of it. */
 export const BILLABLE_PATHS: ReadonlySet<string> = CONTENT_PATHS;
@@ -178,7 +198,7 @@ export const BILLABLE_PATHS: ReadonlySet<string> = CONTENT_PATHS;
  * The only requests other than a GET that the client sends without a route check: billing lookups and the key check, which carry request ids and nothing
  * else. Every other request that is not a GET is route checked, so a content path someone adds and forgets to list is checked, never sent unchecked.
  */
-export const NON_CONTENT_POST_PATHS: ReadonlySet<string> = new Set(['/billing/costs', '/check_api_key']);
+export const NON_CONTENT_POST_PATHS: ReadonlySet<string> = readOnlyPaths(['/billing/costs', '/check_api_key']);
 
 /** Whether a request is route checked: every method but GET and HEAD, except the listed non-content paths. */
 export function needsRouteCheck(path: string, method: string | undefined): boolean {
@@ -1027,7 +1047,7 @@ export class NearAiClient {
     const responseTimeoutMs = Math.max(1, this.options.responseTimeoutMs ?? DEFAULT_RESPONSE_TIMEOUT_MS);
     if (!isSecureEndpoint(url)) throw new NearAiError(0, 'NEAR AI endpoint must use HTTPS; plain HTTP is only allowed for localhost.', false);
     const model = overrides.model;
-    // CLAS-06: the route is decided once, here, for every content request, before the spend check, before a concurrency slot is taken and before the first
+    // CLAS-06: the route is decided once, here, for every content request, before the spend check, before the cooldown probe slot is taken and before the first
     // byte is sent, whether or not spend tracking is on. A retry below is the same request and is not decided again.
     const connection = needsRouteCheck(path, init.method) ? this.checkRoute(model) : undefined;
     const billable = BILLABLE_PATHS.has(path) && (init.method ?? 'GET') === 'POST' && this.options.spend !== undefined;

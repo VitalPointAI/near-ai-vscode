@@ -963,7 +963,7 @@ test('CLAS-06 concurrency: sibling contexts in parallel are each decided by thei
   assert.deepEqual(retried.map((record) => record.authorizations[0]?.policy.name), ['route.any-cloud', 'route.no-local-model']);
 });
 
-test('CLAS-06 ordering: a refused request leaves the spend ledger untouched, takes no concurrency slot and is not held by a cooling model', async () => {
+test('CLAS-06 ordering: a refused request leaves the spend ledger untouched, takes no cooldown probe slot and is not held by a cooling model', async () => {
   let limitChecks = 0;
   let began = 0;
   const spend: SpendSink = {
@@ -972,8 +972,9 @@ test('CLAS-06 ordering: a refused request leaves the spend ledger untouched, tak
     attach: () => undefined
   };
   let cools = true;
+  let clock = 1_000_000;
   const fake = fakeFetch({ tee: ['tee-model'] });
-  const client = new NearAiClient({ baseUrl: NEAR, apiKey: 'k', route: 'near', spend, fetchFn: (async (input: string | URL | Request, init?: RequestInit) => {
+  const client = new NearAiClient({ baseUrl: NEAR, apiKey: 'k', route: 'near', spend, now: () => clock, fetchFn: (async (input: string | URL | Request, init?: RequestInit) => {
     if ((init?.method ?? 'GET') === 'POST' && cools) { cools = false; return new Response('', { status: 429, headers: { 'retry-after': '60' } }); }
     return fake.fetchFn(input, init);
   }) as typeof fetch });
@@ -988,6 +989,14 @@ test('CLAS-06 ordering: a refused request leaves the spend ledger untouched, tak
   assert.equal(limitChecks, checksBefore, 'the daily limit was not even checked');
   assert.equal(began, beganBefore, 'nothing was entered in the ledger');
   assert.equal(fake.content.length, 0);
+  // The client's only request slot is the one probe a model gets after its cooldown (admit). Once the cooldown is over, a refused request must not have
+  // taken it: the next allowed request is that probe and is sent at once, rather than waiting on a probe that never settles.
+  clock += 120_000;
+  await assert.rejects(() => withSessionRoute(routeAt([org('Restricted')]), () => ask(client, 'tee-model')), RouteRefusedError);
+  const probe = withSessionRoute(routeAt([]), () => ask(client, 'tee-model'));
+  const settled = await Promise.race([probe.then(() => 'sent'), new Promise((resolve) => setTimeout(() => resolve('held'), 2000))]);
+  assert.equal(settled, 'sent', 'the probe slot was free');
+  assert.equal(fake.content.length, 1);
   // A local client with no spend sink is checked too: the route check does not depend on spend tracking.
   const local = await localClient();
   await withSessionRoute(routeAt([org('Restricted')]), () => ask(local.client, 'local-model'));
@@ -1147,4 +1156,19 @@ test('Team Studio asks the gate host for its runtime once per panel and folder, 
   await resolve('/work/b');
   assert.equal(asked, 2, 'another folder has its own runtime');
   assert.equal(await runtimePerRoot(undefined, () => ({ actor: { kind: 'person', sessionId: 's' }, presence: 'person', context: 'interactive' }))('/work/a'), undefined, 'no host, no runtime');
+});
+
+test('the lists of content and non-content paths cannot be changed by a caller', () => {
+  for (const list of [CONTENT_PATHS, BILLABLE_PATHS, NON_CONTENT_POST_PATHS]) {
+    const before = [...(list as Iterable<string>)];
+    const asSet = list as unknown as Partial<Set<string>>;
+    for (const change of [() => asSet.add?.('/models'), () => asSet.delete?.('/chat/completions'), () => asSet.clear?.(), () => Set.prototype.add.call(list, '/models')]) {
+      try { change(); } catch { /* refused, as it should be */ }
+    }
+    assert.deepEqual([...(list as Iterable<string>)], before, 'unchanged');
+    assert.equal(list.has('/models'), false);
+    assert.ok(Object.isFrozen(list));
+  }
+  assert.equal(needsRouteCheck('/chat/completions', 'POST'), true);
+  assert.equal(needsRouteCheck('/billing/costs', 'POST'), false, 'the non-content list still works');
 });
