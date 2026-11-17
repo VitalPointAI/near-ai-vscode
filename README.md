@@ -1093,6 +1093,12 @@ copy of Open-GSD to a project that doesn't already have one.
   file. Every model request is checked against its routing before anything is
   sent and leaves a record in a log of its own; on a fresh install nothing
   changes where requests go. See [Your policy file and decision records](SECURITY.md#your-policy-file-and-decision-records).
+- **Labels and clearances.** **NEAR AI: Set Label** labels a file, a folder or
+  the project, and agents cannot read what your clearances do not cover. Add a
+  clearance with **NEAR AI: Edit Policy** and **NEAR AI: Apply Policy Draft**.
+  A label does not change where content is sent yet. Labels and routing are an
+  organizational control that helps prevent mistakes. See
+  [Your policy file and decision records](SECURITY.md#your-policy-file-and-decision-records).
 - API keys live in VS Code's encrypted **SecretStorage**, scoped to each
   project. They are never written to settings, workspace files, logs, history,
   or exports.

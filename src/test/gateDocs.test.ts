@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
-import { CLEARANCE_SELF_ASSERTED_TEXT } from '../domain/gate/labels';
+import { CLEARANCE_SELF_ASSERTED_TEXT, LABELS_NOT_ACCREDITATION_TEXT } from '../domain/gate/labels';
 import { FLOOR_CANNOT_SEE_TEXT, FLOOR_EFFECTS_CANNOT_SEE_TEXT, namesCredentialStore } from '../domain/gate/floor';
 import { classifyCommand, MAX_COMMAND_LENGTH, MAX_NESTING } from '../agent/commandSafety';
 import { BUNDLE_FAILURES } from '../domain/gate/bundle';
@@ -70,7 +70,7 @@ test('the commands the docs name are the ones package.json contributes, and the 
   }
 });
 
-test('the policy section says what the code does: own storage not the project, own device key (created at activation in every folder), default allows what settings allow, only the command re-signs, no network, records redacted and not synced, labels not used yet', () => {
+test('the policy section says what the code does: own storage not the project, own device key (created at activation in every folder), default allows what settings allow, only the command re-signs, no network, records redacted and not synced, labels do not change routing yet', () => {
   for (const phrase of [
     "this extension's own storage",
     'never in your project',
@@ -86,7 +86,7 @@ test('the policy section says what the code does: own storage not the project, o
     'Nothing in a decision needs the network',
     'before a record is written NEAR AI removes',
     'Records are not synced',
-    'does not use them yet'
+    'does not change where content is sent yet'
   ]) {
     assert.ok(flat(policySection).includes(phrase), phrase);
   }
@@ -323,7 +323,7 @@ test('SECURITY.md says every model request is checked against the routing tiers 
   for (const phrase of [
     '**Model requests.** Before anything is sent to a model',
     'checks the request against the routing tiers in the policy file, using only what is on this computer',
-    'Nothing can be labelled yet, so every request is at the policy\'s default label',
+    'A label does not change where content is sent yet, so every request is at the policy\'s default label',
     'on a fresh install nothing changes where requests go',
     'A request the routing does not allow is not sent',
     'content at a level whose tier needs an attested cloud model stays on this computer for now',
@@ -333,8 +333,7 @@ test('SECURITY.md says every model request is checked against the routing tiers 
     'never the content, the endpoint\'s address or a file path',
     // PR 4a review round 1: a refusal always names the label that decided it, the default label included; a route that cannot be worked out names none.
     'a refused request\'s record also holds the plain reason and the label that decided it, which is the policy\'s default label when nothing raised the label',
-    'A request whose route cannot be worked out is refused with a fixed reason and no label',
-    'The file also holds scales and clearances. This version stores and shows them and does not use them yet.'
+    'A request whose route cannot be worked out is refused with a fixed reason and no label'
   ]) assert.ok(words.includes(phrase), phrase);
   assert.equal(MODEL_REQUESTS_DIR, 'model-requests');
   assert.ok(!policySection.includes(EM_DASH));
@@ -346,4 +345,35 @@ test('README\'s policy bullet says every model request is checked and recorded i
   for (const phrase of ['Every model request is checked against its routing before anything is sent', 'leaves a record in a log of its own', 'on a fresh install nothing changes where requests go']) {
     assert.ok(words.includes(phrase), phrase);
   }
+});
+
+// PR 4b (plan 21 Task 3): what labels and clearances do in this version, word for word with the code, and nothing more.
+test('SECURITY.md\'s labels bullet says what 4b makes live, carries both texts word for word, and names the commands package.json contributes', () => {
+  assert.equal(SECURITY.split('What this version does not use yet').length - 1, 0);
+  assert.equal(SECURITY.split('Labels and clearances in this version').length - 1, 1);
+  assert.ok(policySection.includes(LABELS_NOT_ACCREDITATION_TEXT), 'LABELS_NOT_ACCREDITATION_TEXT word for word');
+  assert.ok(policySection.includes(CLEARANCE_SELF_ASSERTED_TEXT), 'CLEARANCE_SELF_ASSERTED_TEXT word for word');
+  const setLabel = commandName('nearAi.label.set');
+  const edit = commandName('nearAi.policy.edit');
+  const applyDraft = commandName('nearAi.policy.applyDraft');
+  assert.deepEqual([setLabel, edit, applyDraft], ['NEAR AI: Set Label', 'NEAR AI: Edit Policy', 'NEAR AI: Apply Policy Draft']);
+  const words = flat(policySection);
+  for (const phrase of [setLabel, edit, applyDraft, '`.planning/.near-ai/labels.json`, signed with your device key, and travel with the project',
+    'anyone who can read the project can read its labels, compartment names included', 'only ever makes a label stricter', 'signed again only after you confirm',
+    'deleted or replaced by an older copy, stops agents reading the project', 'through the file tools, searches or a command that names it',
+    'Decision records hold the labels involved and stay on this computer', 'A label does not change where content is sent yet']) {
+    assert.ok(words.includes(phrase), phrase);
+  }
+  assert.ok(!policySection.includes(EM_DASH));
+  assert.doesNotMatch(policySection, /NEAR organization/);
+});
+
+test('README names Set Label, Edit Policy and Apply Policy Draft, says labels do not change where content is sent yet, and links the policy section', () => {
+  const words = flat(readmePolicy);
+  for (const id of ['nearAi.label.set', 'nearAi.policy.edit', 'nearAi.policy.applyDraft']) assert.ok(words.includes(commandName(id)), id);
+  assert.ok(words.includes('A label does not change where content is sent yet'));
+  assert.ok(words.includes(LABELS_NOT_ACCREDITATION_TEXT.split('. ')[0] ?? ''), 'the first sentence of LABELS_NOT_ACCREDITATION_TEXT');
+  assert.ok(words.includes('(SECURITY.md#your-policy-file-and-decision-records)'));
+  assert.ok(!readmePolicy.includes(EM_DASH));
+  assert.doesNotMatch(readmePolicy, /NEAR organization/);
 });
