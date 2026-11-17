@@ -708,3 +708,56 @@ test('a file-system error never reaches the page as raw text, whatever the spell
   // The team loader's own reasons name no path, and pass through unchanged.
   for (const reason of ['The team needs a name in its frontmatter (name: My team).', 'The team has "privacy: odd" in its frontmatter; use privacy: private or privacy: any.']) assert.equal(plainTeamError(reason, '/x/y.md'), reason);
 });
+
+// ---------- PR 86 review, round 5 ----------
+
+test('a rating line an earlier build wrote is dropped the next time the team is saved through Team Studio, once it is kept on this computer', async () => {
+  const h = await host();
+  const legacy = withTeamRating(renderTeam('Project team', 'For this repo', [{ name: 'dev', role: 'implementer', instructions: 'Build it. Report what changed.' }]), 4);
+  const projectFile = TeamLibrary.projectTeamFile(h.root);
+  await mkdir(path.dirname(projectFile), { recursive: true });
+  await writeFile(projectFile, legacy);
+  const web = await h.library.create('Web team', withTeamRating(TEAM, 2));
+  await h.send({ type: 'ready' });
+  for (const [id, file, rating] of [['project', projectFile, 4], ['user:web-team', web, 2]] as const) {
+    await h.send({ type: 'open', id });
+    const opened = h.latest('team');
+    const draft = { ...opened.draft, description: 'Changed' };
+    // The preview the editor shows is what Save writes: without the line.
+    await h.send({ type: 'review', seq: 7, id, draft });
+    assert.equal(teamRating(h.latest('review').markdown), undefined, `${id}: preview`);
+    await h.send({ type: 'save', id, base: opened.base, draft });
+    const saved = await readFile(file, 'utf8');
+    assert.equal(teamRating(saved), undefined, `${id}: the line is gone from the file`);
+    assert.match(saved, /description: Changed/);
+    assert.equal(h.latest('library').library.teams.find((entry: any) => entry.id === id).rating, rating, `${id}: still rated, from this computer`);
+  }
+  // A host with nowhere to keep ratings leaves the line, since it would be the only copy.
+  const bare = await host();
+  bare.deps.ratings = undefined;
+  const kept = await bare.library.create('Web team', withTeamRating(TEAM, 3));
+  await bare.send({ type: 'ready' });
+  await bare.send({ type: 'open', id: 'user:web-team' });
+  const opened = bare.latest('team');
+  await bare.send({ type: 'save', id: 'user:web-team', base: opened.base, draft: { ...opened.draft, description: 'Changed' } });
+  assert.equal(teamRating(await readFile(kept, 'utf8')), 3);
+});
+
+test('a reason that names an actual path is replaced, and one that only mentions a model id or a command passes through', async () => {
+  const { plainTeamError, UNREADABLE_TEAM } = await import('../services/teamStudioPage');
+  for (const reason of ['dev: z-ai/glm-5.3 is not a tier or a model id.', 'Tell the team what to do: /team:web <task>', 'Use vendor/model-name or deep.', 'The team needs a name in its frontmatter (name: My team).']) assert.equal(plainTeamError(reason), reason, reason);
+  for (const raw of ['Bad file /home/someone/teams/web.md', "Could not open '/tmp/x/team.md'", 'Bad file C:\\Teams\\web.md', 'Bad file d:/teams/web.md', 'Bad file \\\\server\\share\\web.md', 'Bad file ~/teams/web.md', 'Bad file teams\\web.md']) assert.equal(plainTeamError(raw), UNREADABLE_TEAM, raw);
+});
+
+test('a role test cancelled part-way is not kept as the team\'s last role test; a finished one is', async () => {
+  const { keptRoleTests } = await import('../domain/teamDashboard');
+  const outcomes = [{ results: [{ score: 10, outOf: 10, failed: false }] }];
+  const before = { 'user:other': { at: ago(DAY), members: 1, tested: 1, passed: 1, score: 100 } };
+  assert.equal(keptRoleTests(before, 'user:web', outcomes, 1, true, ago(HOUR)), undefined, 'cancelled: nothing written');
+  assert.equal(keptRoleTests(before, 'user:web', [], 1, false, ago(HOUR)), undefined, 'nothing ran');
+  assert.equal(keptRoleTests(before, undefined, outcomes, 1, false, ago(HOUR)), undefined, 'no identity');
+  assert.deepEqual(keptRoleTests(before, 'user:web', outcomes, 1, false, ago(HOUR)), { ...before, 'user:web': { at: ago(HOUR), members: 1, tested: 1, passed: 1, score: 100 } });
+  // The panel decides with the run's own signal.
+  const panel = await readFile(path.join(__dirname, '..', '..', 'src', 'services', 'teamStudioPanel.ts'), 'utf8');
+  assert.match(panel, /keptRoleTests\([^)]*options\.signal\?\.aborted === true/);
+});

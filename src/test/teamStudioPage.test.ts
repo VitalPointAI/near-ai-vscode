@@ -2171,8 +2171,9 @@ test('page: with no project open, Use as is says it opens the team in chat, and 
   page.dispatch({ type: 'used', text: 'Saved "Review team" to My teams, and /team:review-team is in the chat box.', focus: 'user:review-team' });
   assert.equal(page.doc.getElementById('step-heading'), null, 'back in the library');
   assert.match(page.doc.getElementById('banner')!.textContent, /Saved "Review team" to My teams/);
-  assert.equal(page.doc.activeElement, page.doc.getElementById('open-user:review-team'), 'the team it saved is in focus');
-  assert.equal(page.doc.getElementById('open-user:review-team')!.parent!.parent!.className.includes('flash'), true);
+  // PR 86 review, round 5: every card control's id is made from the card's key, Open included.
+  assert.equal(page.doc.activeElement, page.doc.getElementById('open-user-review-team'), 'the team it saved is in focus');
+  assert.equal(page.doc.getElementById('open-user-review-team')!.parent!.parent!.className.includes('flash'), true);
 });
 
 test('page: Clone and modify fills the Purpose step with "Copy of" a unique name, the description and Save it as, and Back returns to the picker', async () => {
@@ -4091,4 +4092,20 @@ test('page: a full refresh while any card button is focused keeps focus on that 
     page.dispatch({ type: 'dashboard', dashboard: page.fixture.dashboard });
     assert.ok(page.doc.activeElement === page.byLabel(label), `${label}: focus kept after a dashboard update`);
   }
+});
+
+// ---------- PR 86 review, round 5 ----------
+
+test('page: Open and Update team have ids made from the card key like every other control, and keep focus through a redraw', async () => {
+  const teams = dashFixture().library.teams.map((team) => (team.id === 'user:web' ? { ...team, update: { template: 'Software', from: 1, to: 2, available: true } } : team));
+  const page = await dashboardPage({ teams });
+  const open = page.byLabel('Open Web team')!;
+  const update = page.byLabel('Update Web team (Software template v1 → v2)')!;
+  assert.deepEqual([open.id, update.id], ['open-user-web', 'update-user-web']);
+  for (const label of ['Open Web team', 'Update Web team (Software template v1 → v2)']) {
+    page.byLabel(label)!.focus();
+    page.dispatch({ type: 'state', context: page.studio, library: { teams, archived: [] }, dashboard: page.fixture.dashboard });
+    assert.ok(page.doc.activeElement === page.byLabel(label), `${label}: focus kept`);
+  }
+  assert.doesNotMatch(await readFile(SCRIPT, 'utf8'), /id: '(?:open|update)-' \+ team\.id/, 'no control id is made from the raw team id');
 });
