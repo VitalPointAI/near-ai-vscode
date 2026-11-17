@@ -99,11 +99,15 @@ export const AWAITING_APPROVAL_PREFIX = 'Awaiting approval:';
 const CHECK_FAILED_REASON = 'The tool\'s own check of this call could not finish, so the call was not run.';
 const AWAITING_APPROVAL_TEXT = `${AWAITING_APPROVAL_PREFIX} this action has not run. It is queued for the user to approve, and they have been notified. Do not retry it now and do not wait for it: carry on with work that does not depend on it, and list it under "Waiting for approval" in your report.`;
 
-/** What the agent is told when nobody answered a card in time. A floor card is approved for one call only, so the agent is told exactly that (D-43, Pitfall 4). */
-export function awaitingApprovalMessage(floor: boolean): string {
-  return floor
-    ? `${AWAITING_APPROVAL_TEXT} This kind of action needs a person every time: if the user approves it, this exact call (the same tool and arguments, from the same folder) is allowed once, not for the rest of this run.`
-    : `${AWAITING_APPROVAL_TEXT} If the user approves it, the same call is allowed for the rest of this run.`;
+/**
+ * What the agent is told when nobody answered a card in time, read from the card itself, so the words and the card can never disagree (PR #74 review round
+ * 6). A floor card is approved for one call only (D-43, Pitfall 4); a card that carries a grant lets the same call run for the rest of the run; any other
+ * card (effects the gate cannot read, an action held after outside content) grants nothing ahead of time.
+ */
+export function awaitingApprovalMessage(card: Pick<ApprovalRequest, 'floor' | 'grant'>): string {
+  if (card.floor !== undefined) return `${AWAITING_APPROVAL_TEXT} This kind of action needs a person every time: if the user approves it, this exact call (the same tool and arguments, from the same folder) is allowed once, not for the rest of this run.`;
+  if (card.grant !== undefined) return `${AWAITING_APPROVAL_TEXT} If the user approves it, the same call is allowed for the rest of this run.`;
+  return `${AWAITING_APPROVAL_TEXT} This card grants nothing ahead of time: if the user approves it you will be told, and running the call again asks again.`;
 }
 
 export type AgentEvent =
@@ -726,7 +730,7 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
       const allowRule = command === undefined || this.options.rememberAllowRule === undefined || !decision.offerAlwaysAllow
         ? undefined
         : offeredRule(command, risk.kind, [...this.options.rules.allowCommands, ...this.grants.allowRules]);
-      const reply = await this.options.requestApproval({
+      const card: ApprovalRequest = {
         callId: call.id, tool: tool.name, title, capability: tool.capability, preview,
         ...(reason ? { reason } : {}),
         ...(reason && risk.detail !== reason ? { reasonShort: risk.detail } : {}),
@@ -737,7 +741,8 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
         ...(command ? { subject: command } : {}),
         ...(decision.floor && gateCall.callKey !== undefined ? { floor: { callKey: gateCall.callKey } } : {}),
         ...(decision.allowGrant && command !== undefined && command.trim() ? { grant: { command: command.trim() } } : decision.allowGrant && tool.capability === 'workspaceWrite' ? { grant: { edits: true } } : {})
-      });
+      };
+      const reply = await this.options.requestApproval(card);
       // The card only carried the question: the answer goes back into the gate, which records it against this call and, for an allow, asks the layers that
       // outrank the person again (emergency stop, bundle state, the floor's refusals, the ceiling) before anything runs (D-09).
       const answered = await recordApprovalReply(this.gate, gateCall, reply, { model: this.options.model });
@@ -747,7 +752,7 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
       }
       // PERF-01: nobody answered in time. Nothing ran; the card stays queued, and the agent works on rather than waiting.
       if (reply.decision === 'pending') {
-        return this.finish(call.id, false, awaitingApprovalMessage(decision.floor));
+        return this.finish(call.id, false, awaitingApprovalMessage(card));
       }
       if (!answered.proceed) return this.finish(call.id, false, `Not allowed: ${answered.reason}`);
       if ((reply.decision === 'allow-run' || reply.decision === 'allow-always') && decision.allowGrant) {

@@ -306,11 +306,39 @@ test('the deny list beats a floor ask, and the emergency stop refuses every floo
 });
 
 test('when nobody answers a floor card in time, the agent is told the call is allowed once if approved, not for the rest of the run', () => {
-  const floor = awaitingApprovalMessage(true);
+  const floor = awaitingApprovalMessage({ floor: { callKey: 'k' } });
   assert.ok(floor.startsWith(AWAITING_APPROVAL_PREFIX));
   assert.match(floor, /allowed once, not for the rest of this run/);
   assert.doesNotMatch(floor, /allowed for the rest of this run\./);
-  assert.match(awaitingApprovalMessage(false), /allowed for the rest of this run\./, 'every other card keeps its words');
+  assert.match(awaitingApprovalMessage({ grant: { command: 'npm install' } }), /allowed for the rest of this run\./, 'a card that offers a grant keeps its words');
+});
+
+// PR #74 review round 6: what the agent is told follows what the card offers. A card with no grant (effects the gate cannot read, a held action) grants
+// nothing, so the agent is not told the call would be allowed for the rest of the run; only a card that carries a grant says that.
+test('the waiting message matches the card: floor once, a grant for the rest of the run, no grant nothing ahead of time', () => {
+  const none = awaitingApprovalMessage({});
+  assert.ok(none.startsWith(AWAITING_APPROVAL_PREFIX));
+  assert.doesNotMatch(none, /for the rest of this run\./);
+  assert.doesNotMatch(none, /allowed once/);
+  assert.match(none, /grants nothing ahead of time/);
+  assert.match(awaitingApprovalMessage({ grant: { edits: true } }), /allowed for the rest of this run\./);
+  assert.match(awaitingApprovalMessage({ floor: { callKey: 'k' }, grant: { command: 'x' } }), /allowed once/, 'a floor card never carries a grant; if it did, once wins');
+});
+
+test('through a real run: an effects-unknown card nobody answers tells the agent nothing is granted, and a grantable one says the rest of the run', async () => {
+  const w = world();
+  try {
+    const unknown = await runIn(w, [call('u1', w.tools[5]!.name, { id: 'x' })], { mode: 'fully-autonomous', presence: 'person', answer: () => ({ decision: 'pending' }) });
+    assert.equal(unknown.cards.length, 1);
+    assert.equal(unknown.cards[0]!.grant, undefined, 'the card offers no grant');
+    assert.match(unknown.outputs[0] ?? '', /grants nothing ahead of time/);
+    assert.doesNotMatch(unknown.outputs[0] ?? '', /for the rest of this run/);
+    const grantable = await runIn(w, [call('g1', 'Bash', { command: 'npm install left-pad' })], { mode: 'approve-risky', presence: 'person', answer: () => ({ decision: 'pending' }) });
+    assert.notEqual(grantable.cards[0]?.grant, undefined, 'this card offers a grant');
+    assert.match(grantable.outputs[0] ?? '', /allowed for the rest of this run\./);
+  } finally {
+    w.shell.dispose();
+  }
 });
 
 async function until<T>(find: () => T | undefined, ms = 10_000): Promise<T> {
