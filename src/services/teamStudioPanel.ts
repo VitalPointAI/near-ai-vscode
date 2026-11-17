@@ -77,11 +77,6 @@ async function teamAiDeps(auth: AuthService, gateHost?: GateHost): Promise<TeamA
   if (!active) throw new Error('Set up a NEAR AI profile for this project first.');
   const tiers = readModelTiers();
   const settings = readSettings();
-  /** Runs one model request routed and recorded as the person's (CLAS-06). */
-  const asPerson = async <T>(send: () => Promise<T>): Promise<T> => {
-    const runtime = await gateHost?.runtimeFor({ root, actor: { kind: 'person', sessionId: 'team-studio' }, presence: 'person', context: 'interactive' });
-    return withSessionRoute(runtime ? sessionRouteFrom(runtime) : defaultSessionRoute(), send);
-  };
   return {
     models: active.models,
     preferred: [tiers.deep, tiers.standard, settings.defaultModel],
@@ -96,11 +91,20 @@ async function teamAiDeps(auth: AuthService, gateHost?: GateHost): Promise<TeamA
     },
     // CLAS-06: a person drafts and improves the team here, so each request is routed (and recorded) as the person's, in the project's log. With no gate host
     // it is decided with the default route.
-    complete: (model, messages, options) => asPerson(() => clientFor(active, model).client.completeOnce(model, messages, options)),
+    complete: async (model, messages, options) => {
+      const send = () => clientFor(active, model).client.completeOnce(model, messages, options);
+      const runtime = await gateHost?.runtimeFor({ root, actor: { kind: 'person', sessionId: 'team-studio' }, presence: 'person', context: 'interactive' });
+      return withSessionRoute(runtime ? sessionRouteFrom(runtime) : defaultSessionRoute(), send);
+    },
     // 0.4.30, team icons: the image model the settings name, and one image made the way GenerateImage makes it (the client records its cost, tagged as
     // generation like every other image), routed and recorded as the person's like the requests above.
     imageModel: readAgentModels().imageModel,
-    generateImage: (model, prompt, signal) => asPerson(() => withSpendTag({ kind: 'generation' }, () => clientFor(active, model).client.generateImage(model, prompt, { count: 1 }, signal)))
+    generateImage: async (model, prompt, signal) => {
+      // Its own name: the route check reads the work handed to withSessionRoute by name, so the two in this file must differ.
+      const sendImage = () => withSpendTag({ kind: 'generation' }, () => clientFor(active, model).client.generateImage(model, prompt, { count: 1 }, signal));
+      const runtime = await gateHost?.runtimeFor({ root, actor: { kind: 'person', sessionId: 'team-studio' }, presence: 'person', context: 'interactive' });
+      return withSessionRoute(runtime ? sessionRouteFrom(runtime) : defaultSessionRoute(), sendImage);
+    }
   };
 }
 
