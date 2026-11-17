@@ -567,7 +567,8 @@ export function pathInScope(paths: string[], target: string): boolean {
 
 /** A finding built from a probe tool's output, when the tool supports one. */
 function extractFinding(tool: RunTool, output: string, step: Step): Finding | undefined {
-  const maybe = (tool.tool as { findingFrom?(output: string): Finding | undefined }).findingFrom;
+  // Widened, never narrowed: the cast keeps the tool's own type, so the scan of tool runs still sees what this value is (PR #70 review carry-over).
+  const maybe = (tool.tool as typeof tool.tool & { findingFrom?(output: string): Finding | undefined }).findingFrom;
   if (maybe) return maybe.call(tool.tool, output);
   const checkId = step.tool.replace(/^Cyber/, '').replace(/Probe$/, '').toLowerCase();
   if (!/missing-hsts|missing-x-content|server-version|tls-|robots-|committed-secret|iac-|vulnerable-dependency|open-port|dns-/.test(output)) return undefined;

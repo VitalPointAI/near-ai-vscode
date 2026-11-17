@@ -992,13 +992,21 @@ const PLANTED: ReadonlyArray<{ name: string; source: string; expected: Partial<R
   { name: 'a destructured parameter', source: 'export const f = async ({ run }: AgentTool<any>) => run({}, ctx);', expected: { destructure: 1 } },
   { name: 'a bracket access with the name written out', source: 'export async function f(tool: AgentTool<any>) { return tool["run"]({}, ctx); }', expected: { read: 1 } },
   { name: 'a bracket access through a constant', source: 'const key = "run" as const; export async function f(tool: AgentTool<any>) { return tool[key]({}, ctx); }', expected: { read: 1 } },
-  { name: 'a bracket access whose key is any text', source: 'export function f(tool: AgentTool<any>, member: string) { return (tool as any as { [key: string]: unknown })[member] ?? tool[member as never]; }', expected: { 'dynamic-key': 1 } },
+  { name: 'a bracket access whose key is any text', source: 'export function f(tool: AgentTool<any>, member: string) { return (tool as any as { [key: string]: unknown })[member] ?? tool[member as never]; }', expected: { 'dynamic-key': 1, cast: 1 } },
   { name: 'a bracket access whose key could be run', source: 'export function f(tool: AgentTool<any>, member: keyof AgentTool<any>) { return tool[member]; }', expected: { read: 1 } },
   { name: 'a function taken off the tool', source: 'export function f(tool: AgentTool<any>) { return [tool.run.bind(tool), tool.run.call(tool, {}, ctx), tool.run]; }', expected: { read: 3 } },
   { name: 'an optional call', source: 'export async function f(tool?: AgentTool<any>) { return tool?.run({}, ctx); }', expected: { read: 1 } },
   { name: 'a type that extends AgentTool and a generic', source: 'interface Named extends AgentTool<any> { extra: string }\nexport async function f<T extends AgentTool<any>>(a: Named, b: T) { return [await a.run({}, ctx), await b.run({}, ctx)]; }', expected: { read: 2 } },
   { name: 'a value typed any', source: 'export async function f(value: any) { return value.run({}, ctx); }', expected: { untyped: 1 } },
-  { name: 'a value cast to any', source: 'export async function f(tool: AgentTool<any>) { return (tool as any).run({}, ctx); }', expected: { read: 0, untyped: 1 } },
+  { name: 'a value cast to any', source: 'export async function f(tool: AgentTool<any>) { return (tool as any).run({}, ctx); }', expected: { read: 0, untyped: 1, cast: 1 } },
+  // PR #70 review carry-over: reflection, and a cast that drops the type, reach a run with no name the checker follows, so each is reported where it is written.
+  { name: 'Reflect.get with the name written out', source: 'export async function f(tool: AgentTool<any>) { return Reflect.get(tool, "run")({}, ctx); }', expected: { reflect: 1 } },
+  { name: 'Reflect.apply over a run read off the tool', source: 'export async function f(tool: AgentTool<any>) { return Reflect.apply(tool.run, tool, [{}, ctx]); }', expected: { read: 1, reflect: 1 } },
+  { name: 'Reflect over a table of tools and a value the checker cannot type', source: 'export async function f(table: Record<string, AgentTool<any>>, name: string, loose: unknown) { const t = Reflect.get(table, name); return [Reflect.get(t, "run"), Reflect.ownKeys(loose as object)]; }', expected: { reflect: 2 } },
+  { name: 'Object.values and Object.entries over a tool and a tool table', source: 'export async function f(tool: AgentTool<any>, table: Record<string, AgentTool<any>>, list: AgentTool<any>[]) { return [Object.values(tool), Object.entries(table), Object.getOwnPropertyDescriptor(tool, "run"), Object.values(list), Object.assign({}, tool)]; }', expected: { reflect: 5 } },
+  { name: 'a computed key on a tool table, then its run', source: 'export async function f(table: Record<string, AgentTool<any>>, name: string) { return table[name]!.run({}, ctx); }', expected: { read: 1 } },
+  { name: 'a cast that drops the type of a tool or a table', source: 'export function f(tool: AgentTool<any>, table: AgentTool<any>[]) { return [tool as unknown, table as unknown[], <Record<string, unknown>><unknown>tool]; }', expected: { cast: 3 } },
+  { name: 'reflection that reaches no tool', source: 'export function f(config: { a: number }, tool: AgentTool<any>) { return [Object.keys(tool), Object.entries(config), Reflect.has(config, "a"), tool as AgentTool<any>]; }', expected: {} },
   { name: 'things that are not a tool run', source: 'declare const shell: { run(command: string): Promise<string> };\nexport async function f(tool: AgentTool<any>) { const own = { run() { return 1; } }; const wrapped: AgentTool<any> = { ...tool, run: async () => "x" }; return [await shell.run("ls"), own.run(), wrapped.name]; }', expected: {} }
 ];
 
@@ -1019,14 +1027,14 @@ async function plantedRunSites(): Promise<{ dir: string; sites: RunSite[] }> {
   return plantedProgram;
 }
 
-test('every production read of an AgentTool\'s run is at a listed site, found with the type checker, and none is untyped or reached by an unknown key', () => {
+test('every production read of an AgentTool\'s run is at a listed site, found with the type checker, and none is untyped, reached by an unknown key, by reflection or through a cast', () => {
   const { files, sites } = productionRunSites();
   assert.ok(files.length > 200 && files.every((file) => !file.includes(`${path.sep}test${path.sep}`)), 'the scan covers all of src and leaves src/test out');
-  assert.deepEqual(sites.filter((site) => site.kind !== 'read').map((site) => `${site.file}:${site.line} ${site.kind} ${site.text}`), [], 'no destructured, untyped or dynamic reach of a tool\'s run');
+  assert.deepEqual(sites.filter((site) => site.kind !== 'read').map((site) => `${site.file}:${site.line} ${site.kind} ${site.text}`), [], 'no destructured, untyped, dynamic, reflective or cast reach of a tool\'s run');
   assert.deepEqual(countByFile(sites), TOOL_RUN_SITES, sites.map((site) => `${site.file}:${site.line}`).join(' '));
 });
 
-test('the type-checked scan finds an alias, an array element, a destructured name, a bracket access and the rest, and not a run that is only defined or is a shell\'s', async () => {
+test('the type-checked scan finds an alias, an array element, a destructured name, a bracket access, reflection, a cast that drops the type and the rest, and not a run that is only defined or is a shell\'s', async () => {
   const { dir, sites } = await plantedRunSites();
   try {
     for (const [index, planted] of PLANTED.entries()) {
