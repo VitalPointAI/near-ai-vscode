@@ -633,8 +633,8 @@ until it runs out aren't shown.
   extension provides; filter them with **All**, **My teams** or **Built-in**.
   Every card, here and in the team list, is the same size: the team's icon,
   name, where it came from, its member count, the first three lines of its
-  description and its first four members, with **Show more** to open that
-  card. Select one for two buttons. **Use as is** asks for no name or description: with a
+  description and its first four members with a count of the rest, with
+  **Show more** to open that card and list every member. Select one for two buttons. **Use as is** asks for no name or description: with a
   project folder open the team becomes this project's team
   (`.planning/.near-ai/team.md`, run with `/team:project`), and if the
   project already has a team you are asked first and the old one stays in

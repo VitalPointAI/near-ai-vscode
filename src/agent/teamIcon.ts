@@ -27,6 +27,14 @@ export class TeamIconError extends Error {
   }
 }
 
+/** A change that failed half way and could not be undone: its message says exactly what is on disk now (PR #82 review). */
+export class TeamIconPartialError extends TeamIconError {
+  public constructor(message: string) {
+    super(message);
+    this.name = 'TeamIconPartialError';
+  }
+}
+
 const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
 
 /** What a picture is, from its first bytes (never its name or a type the page claims): PNG, JPEG or WebP, or undefined for anything else, SVG included. */
@@ -129,43 +137,48 @@ export function teamIconPrompt(team: { name: string; description: string }): str
 const FRONTMATTER = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/;
 const ICON_LINE = /^icon:/;
 
-/** The `icon:` value in a team file's front matter, or undefined. */
-export function iconReference(text: string): string | undefined {
+/**
+ * The one reading of a team file's icon lines (PR #82 review: reading took the last `icon:` line and writing changed the first, so a hand edit with two
+ * lines kept a stale one). The first `icon:` line in the front matter is the reference; any later one is a leftover that every write removes.
+ */
+function iconLines(text: string): { match: RegExpExecArray; lines: string[]; at: number[] } | undefined {
   const match = FRONTMATTER.exec(text);
   if (!match) return undefined;
-  const line = match[1]!.split(/\r?\n/).filter((entry) => ICON_LINE.test(entry)).pop();
-  if (line === undefined) return undefined;
-  const value = line.replace(ICON_LINE, '').trim().replace(/^(['"])(.*)\1$/, '$2');
+  const lines = match[1]!.split(/\r?\n/);
+  return { match, lines, at: lines.flatMap((line, index) => (ICON_LINE.test(line) ? [index] : [])) };
+}
+
+/** The `icon:` value in a team file's front matter (its first icon line), or undefined. */
+export function iconReference(text: string): string | undefined {
+  const found = iconLines(text);
+  if (!found || !found.at.length) return undefined;
+  const value = found.lines[found.at[0]!]!.replace(ICON_LINE, '').trim().replace(/^(['"])(.*)\1$/, '$2');
   return value || undefined;
 }
 
 /**
- * The team file with its front matter naming this icon (after the description), or without an icon line when `name` is undefined. Every other byte is
- * kept, line endings included; a file with no front matter (not a usable team) is returned as it is.
+ * The team file with exactly one icon line naming this icon (where the first one was, or after the description), or with none when `name` is
+ * undefined. Every other byte is kept, line endings included; a file with no front matter (not a usable team) is returned as it is.
  */
 export function withIconReference(text: string, name: string | undefined): string {
-  const match = FRONTMATTER.exec(text);
-  if (!match) return text;
+  const found = iconLines(text);
+  if (!found) return text;
+  const { match, lines, at } = found;
+  const line = name === undefined ? undefined : `icon: ${name}`;
+  if (line === undefined ? !at.length : at.length === 1 && lines[at[0]!] === line) return text;
   const inner = match[1]!;
   const open = /^---\r?\n/.exec(match[0])![0];
   const close = match[0].slice(open.length + inner.length);
   const eol = inner.includes('\r\n') || open.includes('\r\n') ? '\r\n' : '\n';
-  const lines = inner.split(/\r?\n/);
-  const at = lines.findIndex((line) => ICON_LINE.test(line));
-  if (name === undefined) {
-    if (at < 0) return text;
-    lines.splice(at, 1);
-  } else {
-    const line = `icon: ${name}`;
-    if (at >= 0) {
-      if (lines[at] === line) return text;
-      lines[at] = line;
-    } else {
-      const description = lines.findIndex((entry) => /^description:/.test(entry));
-      lines.splice(description >= 0 ? description + 1 : lines.length, 0, line);
+  const kept = lines.filter((_, index) => !at.includes(index));
+  if (line !== undefined) {
+    if (at.length) kept.splice(at[0]!, 0, line);
+    else {
+      const description = kept.findIndex((entry) => /^description:/.test(entry));
+      kept.splice(description >= 0 ? description + 1 : kept.length, 0, line);
     }
   }
-  return `${open}${lines.join(eol)}${close}${text.slice(match[0].length)}`;
+  return `${open}${kept.join(eol)}${close}${text.slice(match[0].length)}`;
 }
 
 // ---- small helpers ----

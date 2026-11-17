@@ -17,7 +17,7 @@ import { gradingCoverage } from '../domain/teamKnowledge';
 import { knowledgeFile, loadKnowledge } from './teamKnowledgeStore';
 import { buildTeamPackage, cleanKnowledge, importQuestion, MAX_TEAM_PACKAGE_BYTES, readTeamMarkdown, readTeamPackage, shareProblems, TEAM_PACKAGE_EXTENSION, TeamPackageError, type ReadPackage } from '../agent/teamPackage';
 import type { TeamKnowledge } from '../domain/teamKnowledge';
-import { checkTeamIcon, decodeIconBase64, iconDataUri, iconSourceProblem, iconSourceType, MAX_GENERATED_IMAGE_BYTES, MAX_ICON_SOURCE_BYTES, TeamIconError, teamIconPrompt, withIconReference, type IconSourceType } from '../agent/teamIcon';
+import { checkTeamIcon, decodeIconBase64, iconDataUri, iconSourceProblem, iconSourceType, MAX_GENERATED_IMAGE_BYTES, MAX_ICON_SOURCE_BYTES, TeamIconError, TeamIconPartialError, teamIconPrompt, withIconReference, type IconSourceType } from '../agent/teamIcon';
 
 /** The facts, relations and grading of each node, so the page can show a card without being sent the whole graph twice. */
 function nodeDetails(graph: { nodes: Array<{ id: string; facts: Array<{ text: string; source?: string }>; functions: string[]; grading?: unknown; origin: string; mentions: number }>; edges: Array<{ from: string; to: string; kind: string; tension: number | null; basis?: string; grading?: unknown }> }): Record<string, unknown> {
@@ -876,10 +876,16 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
     }
     await mkdir(path.dirname(file), { recursive: true });
     // 0.4.30: the new team's icon goes beside it (a saved team used as is keeps its look), and an icon the old team had goes into the icon history, so
-    // the new team never shows the old one's. The icon line names the project team's own file, whatever the team text said.
-    await writeFile(file, withIconReference(markdown, icon ? TeamLibrary.iconName(file) : undefined), 'utf8');
+    // the new team never shows the old one's. The icon file is put in place first, then the team file is written once, naming it (its own file name,
+    // whatever the team text said), and kept as one version (PR #82 review). If the team file cannot be written, the icon is put back as it was.
+    const undo = icon ? await deps.library.placeIcon(file, icon) : await deps.library.retireIcon(file);
+    try {
+      await writeFile(file, withIconReference(markdown, icon ? TeamLibrary.iconName(file) : undefined), 'utf8');
+    } catch (error) {
+      if (undo) await undo().catch(() => { throw new TeamIconPartialError(`This project's team was not changed, but its icon could not be put back as it was: it shows ${icon ? 'the new team\'s icon' : 'its default icon'}. Its earlier icon is in History.`); });
+      throw error;
+    }
     await deps.library.snapshot(file);
-    if (icon) await deps.library.setIcon(file, icon); else await deps.library.removeIcon(file);
     // The project's own consent is asked before it first runs, as for any project team; its question says the members came from that import.
     await deps.library.setProjectDerived(file, unapprovedFrom);
     if (projectType) await deps.applyProjectType(root, projectType.type, projectType.goal);
@@ -1514,7 +1520,8 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
       before = await readFile(file, 'utf8');
       result = await change(file);
     } catch (error) {
-      post({ type: 'error', text: error instanceof TeamIconError ? `Not changed: ${error.message}` : 'The icon could not be changed. Nothing was changed.' });
+      // The library undoes a half-done change (PR #82 review), so "nothing was changed" is true unless it says otherwise, and then it says what is left.
+      post({ type: 'error', text: error instanceof TeamIconPartialError ? error.message : error instanceof TeamIconError ? `Not changed: ${error.message}` : 'The icon could not be changed. Nothing was changed.' });
       return;
     }
     if (result.removed === false && !result.textChanged) { post({ type: 'icon-done', id }); return; }

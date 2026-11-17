@@ -646,6 +646,9 @@
   }
 
   /** The picture the host checked, made into the icon: the centre square, scaled to 128 x 128, encoded as a PNG of at most 64 KB. */
+  /** A picture that is still larger than an icon may be after its colours were simplified: too detailed, not unreadable (PR #82 review). */
+  class IconTooDetailed extends Error {}
+
   async function normaliseIcon(mime, data) {
     const binary = atob(data);
     const bytes = new Uint8Array(binary.length);
@@ -670,7 +673,7 @@
         const encoded = uri.slice(uri.indexOf(',') + 1);
         if (/^data:image\/png;base64,/.test(uri) && Math.floor(encoded.length * 3 / 4) <= MAX_ICON_BYTES) return encoded;
       }
-      throw new Error('too large');
+      throw new IconTooDetailed();
     } finally { if (bitmap.close) bitmap.close(); }
   }
 
@@ -802,10 +805,13 @@
         const descId = 'pdesc-' + point.id.replace(/[^A-Za-z0-9_-]/g, '-');
         const desc = el('span', 'hint clamp', point.description || ''); desc.id = descId;
         option.append(desc);
-        if (point.members.length) option.append(el('span', 'hint small clamp clamp-2', point.memberCount + ' member' + (point.memberCount === 1 ? '' : 's') + ': ' + point.members.join(', ')));
+        // The same rule as a library card (PR #82 review): the first four members, then a count of the rest; Show more lists them all.
+        const shownMembers = open ? point.members : point.members.slice(0, MEMBER_CHIPS);
+        const hiddenMembers = point.members.length - shownMembers.length;
+        if (point.members.length) option.append(el('span', 'hint small', point.memberCount + ' member' + (point.memberCount === 1 ? '' : 's') + ': ' + shownMembers.join(', ') + (hiddenMembers > 0 ? ' +' + hiddenMembers + ' more' : '')));
         cell.append(option);
         // Beside the choice, not inside its label, so opening a card never selects the team.
-        if (point.description || point.members.length) cell.append(moreButton(key, entryName(point), descId, 0, (point.description || '').length > CLAMP_CHARS || point.members.join(', ').length > CLAMP_CHARS));
+        if (point.description || point.members.length) cell.append(moreButton(key, entryName(point), descId, hiddenMembers, (point.description || '').length > CLAMP_CHARS));
         // A saved team can be shared from here too (one portable file to send; the host checks it and asks about the knowledge graph).
         if (point.teamId) cell.append(button('Share…', () => vscode.postMessage({ type: 'share', id: point.teamId }), { link: true, label: 'Share ' + point.label }));
         if (selected) cell.append(pickActions(point));
@@ -2106,10 +2112,12 @@
         const seq = message.seq;
         normaliseIcon(String(message.mime || ''), String(message.data || '')).then((png) => {
           vscode.postMessage({ type: 'icon-set', seq, id: message.id, png });
-        }, () => {
+        }, (error) => {
           vscode.postMessage({ type: 'icon-failed', seq });
           if (work && work.mode === 'editor') { work.iconBusy = false; render(); }
-          showBanner('The picture could not be read as an image, so the icon was not changed. Try a PNG, JPEG or WebP image.', 'error');
+          showBanner(error instanceof IconTooDetailed
+            ? 'The picture is too detailed to use as an icon, even with fewer colours, so the icon was not changed. Choose a simpler picture, such as a logo or a symbol on a plain background.'
+            : 'The picture could not be read as an image, so the icon was not changed. Try a PNG, JPEG or WebP image.', 'error');
         });
         break;
       }

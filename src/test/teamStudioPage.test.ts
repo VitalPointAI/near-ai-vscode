@@ -3354,7 +3354,8 @@ test('page: picker cards show members the way library cards do: the first four, 
   assert.match(cell('lib:market').textContent, /7 members: lead, researcher, analyst, writer \+3 more/);
   assert.doesNotMatch(cell('lib:market').textContent, /editor|checker|designer/);
   assert.match(cell('lib:web').textContent, /2 members: lead, dev/);
-  assert.doesNotMatch(cell('lib:web').textContent, /more/);
+  assert.doesNotMatch(cell('lib:web').textContent, /\+\d+ more/);
+  assert.equal(page.byLabel('Show more about Web team')!.hidden, true, 'nothing hidden on a short card');
   const more = page.byLabel('Show more about Market team')!;
   assert.equal(more.hidden, false, 'members are hidden, so Show more is offered even for a short description');
   more.click();

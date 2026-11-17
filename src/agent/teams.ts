@@ -5,7 +5,7 @@ import * as path from 'node:path';
 import type { AgentDiscoveryAnswers } from '../domain/agents';
 import { parseFrontmatter, type GsdAgent } from '../gsd/library';
 import { recommendAgentTeam } from '../services/agentTeams';
-import { checkTeamIcon, iconReference, MAX_TEAM_ICON_BYTES, TEAM_ICON_SUFFIX, TeamIconError, withIconReference } from './teamIcon';
+import { checkTeamIcon, iconReference, MAX_TEAM_ICON_BYTES, TEAM_ICON_SUFFIX, TeamIconError, TeamIconPartialError, withIconReference } from './teamIcon';
 
 // Agent teams as Markdown files the user edits in VS Code. Frontmatter names the team; each
 // `## member` section is a member with optional `role:`, `model:`, and `tools:` lines followed by
@@ -470,17 +470,48 @@ export class TeamLibrary {
     return (await readdir(dir).catch(() => [])).filter((name) => name.endsWith('.png')).sort(compareVersionNames).reverse().map((name) => path.join(dir, name));
   }
 
-  /** Moves (or copies) whatever icon file the team has now into its icon history, and drops the oldest beyond the limit. */
-  private async keepIcon(teamFile: string, move: boolean): Promise<boolean> {
+  /**
+   * Moves (or copies) whatever icon file the team has now into its icon history, and drops the oldest beyond the limit. Returns the copy in the history,
+   * or undefined when there was no icon file.
+   */
+  private async keepIcon(teamFile: string, move: boolean): Promise<string | undefined> {
     const file = this.iconFile(teamFile);
-    if (!await exists(file)) return false;
+    if (!await exists(file)) return undefined;
     const dir = this.iconVersionsDir(teamFile);
     await mkdir(dir, { recursive: true });
-    await copyAsVersion(file, dir, '.png');
+    const kept = await copyAsVersion(file, dir, '.png');
     if (move) await rm(file, { force: true });
     const versions = (await readdir(dir)).filter((name) => name.endsWith('.png')).sort(compareVersionNames);
     for (const old of versions.slice(0, Math.max(0, versions.length - MAX_ICON_VERSIONS))) await rm(path.join(dir, old), { force: true });
-    return true;
+    return kept;
+  }
+
+  /** Undoes placeIcon or retireIcon: the history copy goes back to being the icon file (so History is as it was), or the icon file goes when there was none. */
+  private async restoreIconFile(teamFile: string, kept: string | undefined): Promise<void> {
+    if (kept) await rename(kept, this.iconFile(teamFile));
+    else await rm(this.iconFile(teamFile), { force: true });
+  }
+
+  /**
+   * Puts this PNG in place as the team's icon file, without touching the team file: the one it replaces is kept in the history, and the new file is
+   * written whole. Checked first (TeamIconError, nothing written). Returns how to undo it, for a caller whose next step fails (PR #82 review: a team file
+   * that could not be written left an icon file nothing named).
+   */
+  public async placeIcon(teamFile: string, png: Uint8Array): Promise<() => Promise<void>> {
+    const problem = checkTeamIcon(png);
+    if (problem) throw new TeamIconError(problem);
+    const file = this.iconFile(teamFile);
+    const kept = await this.keepIcon(teamFile, false);
+    const temporary = `${file}.${process.pid}-${Date.now()}.tmp`;
+    await writeFile(temporary, png);
+    await rename(temporary, file).catch(async (error) => { await rm(temporary, { force: true }); throw error; });
+    return () => this.restoreIconFile(teamFile, kept);
+  }
+
+  /** Moves the team's icon file into its history, without touching the team file. Returns how to undo it, or undefined when there was none. */
+  public async retireIcon(teamFile: string): Promise<(() => Promise<void>) | undefined> {
+    const kept = await this.keepIcon(teamFile, true);
+    return kept ? () => this.restoreIconFile(teamFile, kept) : undefined;
   }
 
   /** Writes the team file when its icon line changes, as a new version like any save. */
@@ -498,20 +529,25 @@ export class TeamLibrary {
    * the history; the file is written whole, then the team file names it.
    */
   public async setIcon(teamFile: string, png: Uint8Array): Promise<{ text: string; textChanged: boolean }> {
-    const problem = checkTeamIcon(png);
-    if (problem) throw new TeamIconError(problem);
-    const file = this.iconFile(teamFile);
-    await this.keepIcon(teamFile, false);
-    const temporary = `${file}.${process.pid}-${Date.now()}.tmp`;
-    await writeFile(temporary, png);
-    await rename(temporary, file).catch(async (error) => { await rm(temporary, { force: true }); throw error; });
-    return this.setReference(teamFile, TeamLibrary.iconName(teamFile));
+    const undo = await this.placeIcon(teamFile, png);
+    try {
+      return await this.setReference(teamFile, TeamLibrary.iconName(teamFile));
+    } catch (error) {
+      // The team file could not be changed: the icon goes back as it was, so a failure leaves neither change. When even that fails, say what is left.
+      await undo().catch(() => { throw new TeamIconPartialError('The new icon file was written, but the team file could not be changed to name it, and the earlier icon file could not be put back. The team shows its default icon; set the icon again, or restore an earlier one from History.'); });
+      throw error;
+    }
   }
 
   /** Back to the default icon: the icon file moves into the history and the team file's icon line is removed. `removed` is false when there was none. */
   public async removeIcon(teamFile: string): Promise<{ text: string; textChanged: boolean; removed: boolean }> {
-    const removed = await this.keepIcon(teamFile, true);
-    return { ...await this.setReference(teamFile, undefined), removed };
+    const undo = await this.retireIcon(teamFile);
+    try {
+      return { ...await this.setReference(teamFile, undefined), removed: undo !== undefined };
+    } catch (error) {
+      if (undo) await undo().catch(() => { throw new TeamIconPartialError('The icon was moved to History, but the team file could not be changed, and the icon could not be put back. The team shows its default icon; restore the icon from History to get it back.'); });
+      throw error;
+    }
   }
 
   /** Makes an earlier icon (by its name in the history) the team's icon again; the current one goes into the history. */

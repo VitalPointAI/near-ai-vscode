@@ -132,7 +132,6 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--vscode-button-
 /* One size of card (0.4.30): a description is clamped to three lines, and the space for three is kept even when it is shorter, so the cards in a row line
    up; Show more (button.more) opens one card. The grid stretches every card in a row to the tallest, and the actions sit at the bottom. */
 .clamp { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3; overflow: hidden; overflow-wrap: anywhere; }
-.clamp.clamp-2 { -webkit-line-clamp: 2; line-clamp: 2; }
 .expanded .clamp { display: block; -webkit-line-clamp: unset; line-clamp: none; overflow: visible; }
 .card .desc { min-height: calc(3 * 1.45em); }
 button.more { align-self: flex-start; padding: 0 4px; font-size: 0.9em; }

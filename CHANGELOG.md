@@ -10,8 +10,8 @@
   you ask again. It is no longer listed among the existing teams, so it is offered once.
 - **Every team card is the same size.** In the team list and when you pick a team, each card
   shows the team's icon, name, where it came from, its member count and the first three lines of
-  its description, with the first four members. **Show more** opens that card only, and
-  **Show less** closes it again.
+  its description, with the first four members and a count of the rest. **Show more** opens that
+  card only, listing every member, and **Show less** closes it again.
 - **Teams have icons.** On a saved team's Purpose tab, **Upload icon…** takes a PNG, JPEG or WebP
   picture of up to 2 MB, crops it to a square and keeps it as a small 128 x 128 PNG beside the team
   file. SVG pictures are refused, because they can carry scripts. **Generate with AI…** asks an
