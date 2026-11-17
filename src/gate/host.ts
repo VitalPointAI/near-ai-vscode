@@ -71,8 +71,11 @@ export class GateHost {
   private highWater = 0;
   /** Open logs by key, in the order they were last used (the install log included; it is never let go). */
   private readonly logs = new Map<string, DecisionLog>();
-  /** Logs let go while records were still queued: flush() still waits for them. */
-  private readonly retiring = new Set<Promise<void>>();
+  /**
+   * Logs let go while records were still queued, by key, until their queue is written: flush() waits for them, and a reopen of the same key takes the log
+   * back instead of making a second writer for the file (PR #74 review round 4).
+   */
+  private readonly retiring = new Map<string, { readonly log: DecisionLog; readonly pending: Promise<void> }>();
   private readonly listeners = new Set<() => void>();
 
   public constructor(private readonly options: GateHostOptions) {}
@@ -159,7 +162,7 @@ export class GateHost {
 
   /** Resolves when every record queued so far has been written or has failed, including those of logs already let go. */
   public async flush(): Promise<void> {
-    await Promise.all([...[...this.logs.values()].map((log) => log.flush()), ...this.retiring]);
+    await Promise.all([...[...this.logs.values()].map((log) => log.flush()), ...[...this.retiring.values()].map((retired) => retired.pending)]);
   }
 
   /**
@@ -235,7 +238,9 @@ export class GateHost {
   }
 
   private logWithKey(key: string, projectRoot?: string): DecisionLog {
-    let log = this.logs.get(key);
+    // One log per key: a log being let go is taken back, so its queue and the new records stay in one writer's order.
+    let log = this.logs.get(key) ?? this.retiring.get(key)?.log;
+    this.retiring.delete(key);
     if (log === undefined) {
       log = new DecisionLog({
         globalStorageDir: this.options.globalStorageDir,
@@ -258,8 +263,9 @@ export class GateHost {
     const log = this.logs.get(key);
     if (log === undefined) return;
     this.logs.delete(key);
-    const pending = log.flush().finally(() => { this.retiring.delete(pending); });
-    this.retiring.add(pending);
+    // Let go for good only once its queue is written, and only if nothing has taken it back meanwhile.
+    const pending: Promise<void> = log.flush().finally(() => { if (this.retiring.get(key)?.pending === pending) this.retiring.delete(key); });
+    this.retiring.set(key, { log, pending });
   }
 
   private async begin(): Promise<BundleState> {

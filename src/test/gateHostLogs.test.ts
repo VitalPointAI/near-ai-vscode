@@ -139,3 +139,24 @@ test('every kind of runtime the host hands out writes its records to disk: folde
   const installText = await readFile(path.join(fresh.storage, GATE_DIR_NAME, DECISIONS_DIR, `${INSTALL_LOG_KEY}.jsonl`), 'utf8');
   assert.ok(installText.includes('"first-no-folder"'));
 });
+
+// PR #74 review round 4: one log per key. A log let go with records still queued used to be replaced at once by a new log for the same key, so two writers
+// queued records for one file and the order on disk could differ from the order the records were made in. Now a reopen takes back the log being let go,
+// and it is let go for good only after its queue is written.
+test('a log let go and reopened at once keeps one writer: records land in the order they were made, numbered without a gap', async () => {
+  const { host, storage } = await newHost();
+  const root = path.join(storage, 'project-reopen');
+  const runtime = await runtimeIn(host, root);
+  const made: string[] = [];
+  for (let round = 0; round < 4; round += 1) {
+    for (let index = 0; index < 25; index += 1) { const id = `r${round}-${index}`; made.push(id); record(runtime, id); }
+    host.retainProjectLogs([]); // the folder is closed with records still queued
+    for (let index = 0; index < 25; index += 1) { const id = `r${round}-again-${index}`; made.push(id); record(runtime, id); }
+  }
+  await host.flush();
+  const file = path.join(storage, GATE_DIR_NAME, DECISIONS_DIR, `${projectLogKey(root)}.jsonl`);
+  const lines = (await readFile(file, 'utf8')).trim().split('\n').map((line) => JSON.parse(line) as { api: { request: { uid: string } }; metadata: { sequence: number } });
+  assert.deepEqual(lines.map((line) => line.api.request.uid), made, 'one writer: the order on disk is the order the records were made');
+  assert.deepEqual(lines.map((line) => line.metadata.sequence), made.map((_id, index) => index + 1), 'numbered 1, 2, 3, ... with no gap or repeat');
+  assert.ok(host.openLogKeys().includes(projectLogKey(root)), 'the reopened log is held');
+});
