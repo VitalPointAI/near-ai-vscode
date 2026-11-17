@@ -18,6 +18,7 @@ import type { Suggestion } from '../agent/teamRefine';
 import { attachTeamStudio, buildStudioContext, KEPT_WIZARD_TEXT, optimiseTarget, parseStudioMessage, reviewDraft, teamPicker, teamStudioHtml, type KeptWork, type SavedWizard, type StudioContext, type TeamStudioDeps } from '../services/teamStudioPage';
 import type { DirectoryInput } from '../services/toolsDirectory';
 import { JPEG, png, SVG, WEBP } from './iconFixtures';
+import { withIconReference } from '../agent/teamIcon';
 
 // Team Studio: a visual builder and manager for the Markdown team files, which stay the source of truth.
 
@@ -3263,4 +3264,51 @@ test('page: Generate with AI is offered when the host allows it, says which mode
   page.dispatch({ type: 'icon-done', id: 'user:web', text: 'Nothing was generated.' });
   assert.equal(page.byLabel('Generate an icon for Web team with AI')!.disabled, false);
   assert.match(page.doc.getElementById('banner')!.textContent, /Nothing was generated/);
+});
+
+test('host: Share carries the team\'s icon; Import adds it beside the new team, or leaves out one that is not a valid icon and says so', async () => {
+  const h = await harness();
+  const file = await h.library.create('Web team', teamMarkdown(draft()));
+  const icon = png(128, 128, { seed: 14 });
+  await h.library.setIcon(file, icon);
+  await h.send({ type: 'ready' });
+  const out = await mkdtemp(path.join(tmpdir(), 'near-ai-share-icon-'));
+  h.shareTarget.value = path.join(out, 'web-team.near-team.json');
+  await h.send({ type: 'share', id: 'user:web-team' });
+  const shared = JSON.parse(await readFile(h.shareTarget.value, 'utf8'));
+  assert.equal(shared.icon, icon.toString('base64'));
+  assert.match(last(h, 'notice').text, /with its icon/);
+  // Into another library that already has a team with the same name: the new team gets its own file name, and the icon follows it.
+  const other = await harness();
+  await other.library.create('Web team', teamMarkdown(draft()));
+  await other.send({ type: 'ready' });
+  other.importSource.value = h.shareTarget.value;
+  other.chooseAnswer.value = 'Add to my teams';
+  await other.send({ type: 'import' });
+  assert.match(other.asked.at(-1)!.message, /It comes with its own icon\./);
+  const added = path.join(other.library.directory, 'web-team-2.md');
+  assert.deepEqual(await other.library.readIcon(added), icon);
+  assert.match(await readFile(added, 'utf8'), /\nicon: web-team-2\.icon\.png\n/);
+  assert.match(last(other, 'team').notice, /Its icon was added too\./);
+  assert.equal(last(other, 'library').library.teams.find((team: any) => team.id === 'user:web-team-2').icon, `data:image/png;base64,${icon.toString('base64')}`);
+  // A file whose icon is not a valid one: the team is added, the icon left out, and the person is told why.
+  const { createHash } = await import('node:crypto');
+  const markdown = shared.team.markdown as string;
+  const bad = png(64, 64).toString('base64');
+  const forgedFile = path.join(out, 'odd.near-team.json');
+  await writeFile(forgedFile, JSON.stringify({ ...shared, icon: bad, integrity: `sha256-${createHash('sha256').update(JSON.stringify([markdown, null, bad])).digest('base64')}` }));
+  other.importSource.value = forgedFile;
+  await other.send({ type: 'import' });
+  const third = path.join(other.library.directory, 'web-team-3.md');
+  assert.equal(await other.library.readIcon(third), undefined);
+  assert.doesNotMatch(await readFile(third, 'utf8'), /icon:/, 'no line naming an icon it does not have');
+  assert.match(last(other, 'team').notice, /Its icon was left out: It is 64 x 64 pixels/);
+  // A team .md that names an icon (here, one left beside the file it will be saved as) shows the default, never that file.
+  await writeFile(path.join(other.library.directory, 'odd-team.icon.png'), png(128, 128, { seed: 15 }));
+  const md = path.join(out, 'odd-team.md');
+  await writeFile(md, withIconReference(renderTeam('Odd team', 'x', [{ name: 'dev', instructions: 'Do.' }]), 'odd-team.icon.png'));
+  other.importSource.value = md;
+  await other.send({ type: 'import' });
+  assert.equal(await other.library.readIcon(path.join(other.library.directory, 'odd-team.md')), undefined);
+  h.close(); other.close();
 });
