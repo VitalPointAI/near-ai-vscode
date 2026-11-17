@@ -103,6 +103,22 @@ test('merge-pr still fails on any other merge error, and tags nothing', async ()
   assert.equal(fake.called(/git\/(tags|refs)/).length, 0);
 });
 
+test('only a failure to delete this PR\'s own, already deleted branch counts as done', async () => {
+  const { branchAlreadyGone } = await import('../lib/merge.mjs');
+  const gone = 'gh pr merge 9 failed: failed to delete remote branch release/1.2.3: HTTP 404: Reference does not exist';
+  assert.equal(branchAlreadyGone(new Error(gone), 'release/1.2.3'), true);
+  assert.equal(branchAlreadyGone(new Error('gh pr merge 9 failed: HTTP 404: Not Found (https://api.github.com/graphql)'), 'release/1.2.3'), false, 'a 404 from the merge itself');
+  assert.equal(branchAlreadyGone(new Error(gone.replace('release/1.2.3', 'release/9.9.9')), 'release/1.2.3'), false, 'another branch');
+  assert.equal(branchAlreadyGone(new Error('gh pr merge 9 failed: failed to delete remote branch release/1.2.3: HTTP 403: Forbidden'), 'release/1.2.3'), false, 'a refusal is not a branch that is gone');
+  assert.equal(branchAlreadyGone(new Error(gone), undefined), false);
+});
+
+test('merge-pr fails on a server error from the merge itself, and tags nothing', async () => {
+  const fake = install(readyToMerge({ prs: { 9: openPr(9, 'release/1.2.3', HEAD) }, files: releaseFiles(HEAD), failOn: /^pr merge/ }));
+  await assert.rejects(mergePr(REPO, '9', quiet), /failed/);
+  assert.equal(fake.called(/git\/(tags|refs)/).length, 0);
+});
+
 test('merge-pr refuses with every reason and merges nothing when a gate fails', async () => {
   const commit = greenCommit({ reviewer: 'someone-else' });
   commit.checkRuns[2].conclusion = 'failure';
