@@ -47,7 +47,7 @@ export interface LabelMapPayload {
 /** The key that names the project entry in `removed` and in an entry count. No path key can be it, because a path key never starts with `(`. */
 export const PROJECT_ENTRY_KEY = '(project)';
 
-/** The most keys one revision may name as removed; a larger removal is split by the writer into several revisions. */
+/** The most keys one revision may name as removed; the writer refuses a larger removal with a plain message (change fewer labels at once), writing nothing. */
 export const MAX_REMOVED_KEYS = 5000;
 
 /** Where a resolved label came from. */
