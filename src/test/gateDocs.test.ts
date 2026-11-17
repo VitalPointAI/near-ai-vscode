@@ -403,7 +403,7 @@ test('SECURITY.md says a branch switch holds reads with Use this branch\'s label
 
 test('D-60: SECURITY.md says, word for word with the code, what the outbound check of labelled text catches and what it does not', () => {
   assert.ok(flat(SECURITY).includes(flat(OUTBOUND_LIMITS_TEXT)), 'the limits text is in SECURITY.md');
-  for (const phrase of ['copied or quoted', 'does not catch a paraphrase', 'an encoding such as base64', 'a program the agent starts', 'Phase 72', 'never in a record']) {
+  for (const phrase of ['copied or quoted', 'does not catch a paraphrase', 'an encoding such as base64', 'a program the agent starts', 'a planned sandbox around the shell', 'never in a record']) {
     assert.ok(OUTBOUND_LIMITS_TEXT.includes(phrase), phrase);
   }
   assert.ok(!OUTBOUND_LIMITS_TEXT.includes(EM_DASH));
@@ -432,7 +432,7 @@ test('SECURITY.md\'s labels and routing section carries the scales caveat, the c
   assert.ok(at[at.length - 1]! < block);
   for (const phrase of ['`.planning/.near-ai/labels.json`', 'anyone who can read the project can read its labels', 'A sync never lowers a chat\'s label',
     'Only you lower it, with **NEAR AI: Lower This Chat\'s Label** and a reason that is recorded', 'declassification signed with your device key that they can check',
-    'only when it undoes no raise made there', 'outside Team Mode your other computers cannot check it yet', 'takes the chat\'s label in the label file, never a lower one',
+    'only when it undoes no raise made there', 'In this version your other computers cannot check another computer\'s key yet, in or outside Team Mode', 'a lowering made on one computer is not applied on the others', 'takes the chat\'s label in the label file, never a lower one',
     'This version cannot prove that yet, so content at these levels stays on this computer',
     'Protected B stays on this computer because no CCCS Medium assessment of NEAR AI Cloud was found, unless your organization changes its policy',
     'unless your organization names another host', 'is refused, whatever the mode']) {
@@ -440,6 +440,11 @@ test('SECURITY.md\'s labels and routing section carries the scales caveat, the c
   }
   assert.ok(!section.includes(EM_DASH));
   assert.doesNotMatch(section, /NEAR organization/);
+  // Owner answer (2026-11-17): user-facing text names no phase numbers.
+  assert.doesNotMatch(section, /Phase \d/);
+  assert.doesNotMatch(OUTBOUND_LIMITS_TEXT, /Phase \d/);
+  assert.doesNotMatch(sectionOf(SECURITY, '## Known limitations'), /Phase \d/);
+  assert.doesNotMatch(readmePolicy, /Phase \d/);
 });
 
 test('the section\'s routing table is the default routing table, level by level', () => {

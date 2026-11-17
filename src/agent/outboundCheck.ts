@@ -4,7 +4,7 @@
 //
 // What it catches: labelled text copied or quoted into a URL, a query, a body, an add-on server's arguments or a command line, in any case, spacing or
 // punctuation, URL-encoded or not. What it does not catch: a paraphrase, an encoding (base64, a cipher), or a program the agent starts that reads the file
-// and sends it itself. SECURITY.md says so; the Phase 72 sandbox is the stronger fix. No vscode import; nothing here writes a file or a record.
+// and sends it itself. SECURITY.md says so; a planned sandbox around the shell is the stronger fix. No vscode import; nothing here writes a file or a record.
 
 /** Words per window: long enough that ordinary phrases rarely match, short enough that a quoted sentence does. */
 export const OUTBOUND_WINDOW_WORDS = 8;
@@ -147,10 +147,17 @@ export function outboundPayload(raw: Record<string, unknown>, command?: string):
 export const OUTBOUND_MATCH_TEXT =
   "This chat has read labelled content, and this call would send some of that text off this computer, so it is refused. A paraphrase is not caught, so do not retry it reworded: keep the content on this computer.";
 
+/**
+ * The sentence when the chat has read more labelled text than the fingerprint set holds (MAX_OUTBOUND_FINGERPRINTS): nothing more can be checked, so every
+ * call that could send data off this computer is refused (fail closed), and the person is told why and what to do.
+ */
+export const OUTBOUND_FULL_TEXT =
+  "This chat has read more labelled content than NEAR AI can keep track of, so it can no longer check what a call would send, and calls that could send data off this computer are refused in this chat. Start a new chat for this work, or, if what this chat read allows it, use NEAR AI: Lower This Chat's Label with a reason.";
+
 /** The sentence when the payload could not be read for checking (fail closed). */
 export const OUTBOUND_UNREADABLE_TEXT =
   'This chat has read labelled content, and what this call would send could not be checked for it, so it is refused rather than guessed.';
 
 /** What SECURITY.md says of this check, word for word (gateDocs pins it): what it catches and what it does not. */
 export const OUTBOUND_LIMITS_TEXT =
-  'While a chat holds content whose label may not go to any cloud (Internal, Confidential or higher by default), NEAR AI keeps fingerprints of the labelled text its agents read, never the text itself, only in memory and never in a record, and refuses a web fetch, a web search, an add-on server call or a command that could send data off this computer when what it would send carries some of that text. This catches labelled text copied or quoted into a request. It does not catch a paraphrase, an encoding such as base64, or a program the agent starts that reads the file and sends it itself; the sandbox planned for Phase 72 is the stronger fix.';
+  'While a chat holds content whose label may not go to any cloud (Internal, Confidential or higher by default), NEAR AI keeps fingerprints of the labelled text its agents read, never the text itself, only in memory and never in a record, and refuses a web fetch, a web search, an add-on server call or a command that could send data off this computer when what it would send carries some of that text. This catches labelled text copied or quoted into a request. It does not catch a paraphrase, an encoding such as base64, or a program the agent starts that reads the file and sends it itself; a planned sandbox around the shell is the stronger fix.';

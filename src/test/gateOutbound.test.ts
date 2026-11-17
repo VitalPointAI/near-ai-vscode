@@ -7,7 +7,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
 import { gateToolCall } from '../agent/gateAdapter';
-import { MAX_OUTBOUND_FINGERPRINTS, OUTBOUND_LIMITS_TEXT, OUTBOUND_MATCH_TEXT, OUTBOUND_UNREADABLE_TEXT, OutboundFingerprints, outboundPayload } from '../agent/outboundCheck';
+import { MAX_OUTBOUND_FINGERPRINTS, OUTBOUND_FULL_TEXT, OUTBOUND_LIMITS_TEXT, OUTBOUND_MATCH_TEXT, OUTBOUND_UNREADABLE_TEXT, OutboundFingerprints, outboundPayload } from '../agent/outboundCheck';
 import { DEFAULT_RULES } from '../agent/permissions';
 import type { RunGrants } from '../agent/permissions';
 import { bashTool } from '../agent/tools';
@@ -107,6 +107,11 @@ test('fail closed: arguments that cannot be read, and a full fingerprint set, ar
   grants.outbound = full;
   const anything = await decide(root, grants, runtime, webSearchTool(braveSearch('stand-in-key')), { query: 'weather' });
   assert.equal(anything.decision.rule, 'label.outbound-match', 'a full set counts as a match');
+  // Owner answer: past the limit the refusal says why and what to do.
+  assert.equal(anything.decision.reason, OUTBOUND_FULL_TEXT);
+  assert.match(OUTBOUND_FULL_TEXT, /more labelled content than NEAR AI can keep track of/);
+  assert.match(OUTBOUND_FULL_TEXT, /Start a new chat/);
+  assert.match(OUTBOUND_FULL_TEXT, /NEAR AI: Lower This Chat's Label/);
   // At an any-cloud mark the payload is not checked, even with fingerprints held.
   const open = grantsAt([label('org', 'Public')]);
   open.outbound!.add(LINE);

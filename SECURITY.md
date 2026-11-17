@@ -385,8 +385,10 @@ rest of the chat. A sync never lowers a chat's label: two copies merge to the
 higher label. Only you lower it, with **NEAR AI: Lower This Chat's Label** and
 a reason that is recorded. A lowering reaches your other computers only as a
 declassification signed with your device key that they can check, and only
-when it undoes no raise made there; outside Team Mode your other computers
-cannot check it yet, so the higher label stays there and the chat says why.
+when it undoes no raise made there. In this version your other computers
+cannot check another computer's key yet, in or outside Team Mode, so a
+lowering made on one computer is not applied on the others: the higher label
+stays there and the chat says why. Lower it there too if you need to.
 
 **What a labelled chat writes.** A file a labelled chat writes takes the chat's
 label in the label file, never a lower one, so a later chat that reads it is
@@ -422,7 +424,7 @@ its policy.
 local-only or deny, a web fetch, a web search, an add-on server call or a
 command that could send data off this computer is refused, whatever the mode,
 and a refused request names **NEAR AI: Lower This Chat's Label** as the way out
-when what the chat read allows it. While a chat holds content whose label may not go to any cloud (Internal, Confidential or higher by default), NEAR AI keeps fingerprints of the labelled text its agents read, never the text itself, only in memory and never in a record, and refuses a web fetch, a web search, an add-on server call or a command that could send data off this computer when what it would send carries some of that text. This catches labelled text copied or quoted into a request. It does not catch a paraphrase, an encoding such as base64, or a program the agent starts that reads the file and sends it itself; the sandbox planned for Phase 72 is the stronger fix.
+when what the chat read allows it. While a chat holds content whose label may not go to any cloud (Internal, Confidential or higher by default), NEAR AI keeps fingerprints of the labelled text its agents read, never the text itself, only in memory and never in a record, and refuses a web fetch, a web search, an add-on server call or a command that could send data off this computer when what it would send carries some of that text. This catches labelled text copied or quoted into a request. It does not catch a paraphrase, an encoding such as base64, or a program the agent starts that reads the file and sends it itself; a planned sandbox around the shell is the stronger fix.
 
 Labels and routing are an organizational control that helps prevent mistakes. They check what NEAR AI itself sends to a model and what its own file tools read, and they cannot see everything a shell command or an add-on server does. They do not make this device accredited for classified information. Until verified credentials arrive, your clearance is the one you declared yourself, so it is not an enforced boundary.
 
@@ -1000,12 +1002,12 @@ messages.
 | **Revert** restores files changed by the agent's file tools, not changes made by shell commands it ran | Use git for command side effects; documented in the chat |
 | Under `fully-autonomous`, the agent runs commands and reads likely credential files inside the project without asking | Writes into `.git/`, `.planning/.near-ai/` and `.near-ai/`, publishing and destruction still ask, with no "always allow", and the key folder and credential stores are refused. After it reads such a file, anything that could send data off this computer asks too. The command checks read text, and there is no sandbox around the shell yet, so a command whose words they cannot see, such as one built at run time, runs; one too deep or too long to read asks (see "What the agent can do without asking"). Intended for throwaway workspaces |
 | Facts the agent saves with Remember are not reviewed when saved, and later runs start with the relevant ones | Each fact is labeled "verify before relying on it"; review, correct or reset memory with **Manage Project Memory** |
-| Shell reads and network exits are checked from a command's text: a path built in a variable, or a program that reads a labelled file and sends it itself, is not seen | The planned sandbox (Phase 72) |
+| Shell reads and network exits are checked from a command's text: a path built in a variable, or a program that reads a labelled file and sends it itself, is not seen | A planned sandbox around the shell |
 | Local-only trusts the address your local runtime is configured with, unless it is loopback | Name only hosts you control in the policy |
 | Labels and the policy are signed by your own key, so they protect against mistakes, not against you | Verified credentials and organization-signed policies are planned |
 | An MCP server's and the cybersecurity host tools' effects are their declarations | A server or tool that does more than it declares is not seen |
 | The label file is readable by anyone who can read the project | Do not use a compartment name that is itself secret |
-| The outbound check catches labelled text copied into a network call, not a paraphrase or an encoding | The planned sandbox (Phase 72) |
+| The outbound check catches labelled text copied into a network call, not a paraphrase or an encoding | A planned sandbox around the shell |
 | Spend limits use NEAR's published prices for estimates; the actual charge arrives from billing after the run | Each run, with all its sub-agents, stops before a model turn once its estimate reaches `nearAi.agent.maxRunCostUsd` (default $5), what is left of `nearAi.dailySpendLimitUsd`, or `nearAi.agent.maxRunTokens`; an agent repeating the same action is nudged and then stopped |
 
 ## How changes reach a release

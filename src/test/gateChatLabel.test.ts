@@ -240,6 +240,8 @@ test('with an empty reason nothing changes and nothing is recorded; with a reaso
   assert.deepEqual(record.unmapped.nearAi.mark?.map((each) => each.level), ['Restricted'], 'the old label');
   assert.ok(JSON.stringify(record).includes('Reviewed: the plan was published last week.'), 'the reason given');
   assert.match(stub.inputRequests.at(-1)?.prompt ?? '', /travels with its encrypted metadata to your other computers/);
+  // Owner answer: other computers cannot check this key yet, so the person is told the copies there keep the higher label.
+  assert.ok(stub.notifications.some((entry) => entry.message.includes(gateCommands.LOWERED_HERE_ONLY_TEXT)));
 });
 
 test('gateStatusText shows the chat in view\'s label above the default, and nothing for it at the default or with no chat; showing another chat changes it', () => {

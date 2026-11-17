@@ -21,7 +21,7 @@ import { fromActionCapability } from '../domain/gate/vocabulary';
 import type { Capability } from '../domain/gate/vocabulary';
 import { classifyCommand, commandMaySend, downloadSegments, namesCredentialFile } from './commandSafety';
 import { commandWords, labelCheckFor, linkResolver, pathLike, readEffectPaths, scalesOf } from './gateLabels';
-import { OUTBOUND_MATCH_TEXT, OUTBOUND_UNREADABLE_TEXT, outboundPayload } from './outboundCheck';
+import { OUTBOUND_FULL_TEXT, OUTBOUND_MATCH_TEXT, OUTBOUND_UNREADABLE_TEXT, outboundPayload } from './outboundCheck';
 import type { OutboundFingerprints } from './outboundCheck';
 import type { LabelVerdict } from '../domain/gate/decide';
 import type { Mark, SessionMark } from '../domain/gate/dominance';
@@ -956,6 +956,8 @@ export function markVerdictFor(runtime: GateRuntime, mark: Mark | undefined, may
   const label = strictestLabel(runtime, mark);
   if (tier === 'local-only' || tier === 'deny') return { rule: 'label.network-at-mark', reason: NETWORK_AT_MARK_TEXT, ...(label === undefined ? {} : { label }) };
   if (outbound === undefined) return undefined;
+  // Past its bound the set cannot vouch for anything: refused, saying why and what to do (fail closed, owner answer after D-60).
+  if (outbound.full) return { rule: 'label.outbound-match', reason: OUTBOUND_FULL_TEXT, ...(label === undefined ? {} : { label }) };
   let texts: readonly string[];
   try {
     texts = payload();
