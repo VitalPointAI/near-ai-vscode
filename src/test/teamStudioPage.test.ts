@@ -15,7 +15,7 @@ import { DEFAULT_TOOLS, parseTeam, renderTeam, slugify, TeamLibrary, teamKnowled
 import { addKnowledge } from '../services/teamKnowledgeStore';
 import type { ActionCapability, ActionPolicyMode } from '../domain/policy';
 import type { Suggestion } from '../agent/teamRefine';
-import { attachTeamStudio, buildStudioContext, KEPT_WIZARD_TEXT, optimiseTarget, parseStudioMessage, reviewDraft, teamStudioHtml, type KeptWork, type SavedWizard, type StudioContext, type TeamStudioDeps } from '../services/teamStudioPage';
+import { attachTeamStudio, buildStudioContext, KEPT_WIZARD_TEXT, optimiseTarget, parseStudioMessage, reviewDraft, teamPicker, teamStudioHtml, type KeptWork, type SavedWizard, type StudioContext, type TeamStudioDeps } from '../services/teamStudioPage';
 import type { DirectoryInput } from '../services/toolsDirectory';
 
 // Team Studio: a visual builder and manager for the Markdown team files, which stay the source of truth.
@@ -711,18 +711,24 @@ test('page: the wizard walks five steps, asks the host to check the draft, and s
   const page = await runPage();
   page.dispatch({ type: 'state', context: context(), library: { teams: [], archived: [] } });
   page.byLabel('Create your first team')!.click();
+  // 2026-11-17: the builder asks how to start first. A new team cloned from an Open-GSD starting point: the page asks the host for its members, with
+  // what the team is for, and then opens the five steps.
+  page.byLabel('Create a new team')!.click();
+  page.byLabel('Clone an existing team')!.click();
+  const radio = page.doc.body.all().find((node) => node.tagName === 'input' && node.value === 'gsd:build-test')!;
+  radio.checked = true; radio.fire('change');
+  const goal = page.doc.getElementById('f-goal')!;
+  goal.value = 'Ships features'; goal.fire('input');
+  page.byLabel('Clone Build & test team and modify it')!.click();
+  assert.deepEqual(page.posts.at(-1), { type: 'starting-point', id: 'gsd:build-test', goal: 'Ships features', locality: 'cloud' });
+  page.dispatch({ type: 'starting-point', id: 'gsd:build-test', draft: { name: '', description: '', members: [{ name: 'planner', role: 'gsd-planner', model: 'deep', tools: ['Read'], instructions: 'Plan.' }] } });
   assert.match(page.text(), /1\. Purpose.*2\. Members.*5\. Instructions & review/);
   const name = page.doc.getElementById('f-name')!;
   name.value = 'Build crew'; name.fire('input');
   const desc = page.doc.getElementById('f-desc')!;
   desc.value = 'Ships\nfeatures'; desc.fire('input');
   assert.equal(desc.value, 'Ships features', 'one line');
-  // Pick an Open-GSD starting point and go next: the page asks the host for its members.
-  const radio = page.doc.body.all().find((node) => node.tagName === 'input' && node.value === 'gsd:build-test')!;
-  radio.checked = true; radio.fire('change');
   page.byLabel('Next: Members')!.click();
-  assert.deepEqual(page.posts.at(-1), { type: 'starting-point', id: 'gsd:build-test', goal: 'Ships features', locality: 'cloud' });
-  page.dispatch({ type: 'starting-point', id: 'gsd:build-test', draft: { name: '', description: '', members: [{ name: 'planner', role: 'gsd-planner', model: 'deep', tools: ['Read'], instructions: 'Plan.' }] } });
   assert.match(page.text(), /Member 1/);
   assert.equal(page.doc.getElementById('m-name-0')!.value, 'planner');
   // Add a member, choose a role: its suggested instructions, tier, and tools fill in.
@@ -824,13 +830,15 @@ test('page: Cancel and "All teams" leave at once when nothing changed, and ask t
   page.byLabel('Back to all teams')!.click();
   assert.match(page.text(), /Create your first team/);
   assert.equal(page.posts.some((message) => message.type === 'leave-wizard'), false);
-  // A change: the page asks the host and stays until it answers.
+  // A change: the page asks the host and stays until it answers. (2026-11-17: a new team is named after choosing how to start it.)
   page.byLabel('Create your first team')!.click();
+  page.byLabel('Create a new team')!.click();
+  page.byLabel('From scratch')!.click();
   const name = page.doc.getElementById('f-name')!;
   name.value = 'Half built'; name.fire('input');
-  assert.deepEqual(page.posts.at(-1), { type: 'unsaved', wizard: { draft: { name: 'Half built', description: '', members: [] }, step: 0, target: 'user', startingPoint: 'recommend' } }, 'the host always knows what is unsaved');
+  assert.deepEqual(page.posts.at(-1), { type: 'unsaved', wizard: { draft: { name: 'Half built', description: '', members: [] }, step: 0, target: 'user', startingPoint: 'empty', path: 'scratch' } }, 'the host always knows what is unsaved');
   page.byLabel('Cancel')!.click();
-  assert.deepEqual(page.posts.at(-1), { type: 'leave-wizard', wizard: { draft: { name: 'Half built', description: '', members: [] }, step: 0, target: 'user', startingPoint: 'recommend' } });
+  assert.deepEqual(page.posts.at(-1), { type: 'leave-wizard', wizard: { draft: { name: 'Half built', description: '', members: [] }, step: 0, target: 'user', startingPoint: 'empty', path: 'scratch' } });
   assert.match(page.text(), /1\. Purpose/, 'still in the builder');
   page.dispatch({ type: 'left', choice: 'stay' });
   assert.match(page.text(), /1\. Purpose/);
@@ -841,9 +849,11 @@ test('page: Cancel and "All teams" leave at once when nothing changed, and ask t
   assert.deepEqual(page.posts.at(-1), { type: 'unsaved' }, 'nothing unsaved any more');
   // Save draft: back to the library, with the draft to resume.
   page.byLabel('Create your first team')!.click();
+  page.byLabel('Create a new team')!.click();
+  page.byLabel('From scratch')!.click();
   page.doc.getElementById('f-name')!.value = 'Kept'; page.doc.getElementById('f-name')!.fire('input');
   page.byLabel('Cancel')!.click();
-  const saved = { draft: { name: 'Kept', description: '', members: [] }, step: 0, target: 'user', startingPoint: 'recommend' };
+  const saved = { draft: { name: 'Kept', description: '', members: [] }, step: 0, target: 'user', startingPoint: 'empty', path: 'scratch' };
   page.dispatch({ type: 'left', choice: 'save-draft', savedDraft: saved, notice: 'Draft saved. Pick it up again from Team Studio at any time.' });
   assert.match(page.text(), /You have an unfinished team "Kept" \(step 1 of 5\)/);
   assert.match(page.doc.getElementById('banner')!.textContent, /Draft saved/);
@@ -1371,6 +1381,8 @@ test('page: the new-team picker filters All / My teams / Built-in, shows where e
   page.byLabel('Share Web team')!.click();
   assert.deepEqual(page.posts.at(-1), { type: 'share', id: 'user:web' });
   page.dispatch({ type: 'start-wizard', target: 'project' });
+  // 2026-11-17: the picker is the "Use an existing team" screen now, not part of the Purpose step.
+  page.byLabel('Use an existing team')!.click();
   const radios = (name: string) => page.doc.body.all().filter((node) => node.tagName === 'input' && node.name === name);
   const shown = () => radios('starting-point').map((node) => node.value);
   assert.deepEqual(shown().slice(0, 2), ['lib:web', 'recommend'], 'saved teams first, then the built-in ones');
@@ -1378,24 +1390,26 @@ test('page: the new-team picker filters All / My teams / Built-in, shows where e
   assert.match(page.text(), /My teams.*Web team.*Imported, not approved yet.*Builds pages.*2 members: lead, dev/);
   const filter = (value: string) => { const radio = radios('picker-filter').find((node) => node.value === value)!; radio.checked = true; radio.fire('change'); };
   filter('mine');
-  assert.deepEqual(shown(), ['lib:web', 'empty']);
+  assert.deepEqual(shown(), ['lib:web'], '"Start empty" is From scratch now, not a team in the picker');
   filter('builtin');
   assert.ok(!shown().includes('lib:web') && shown().includes('type:software') && shown().includes('gsd:review'));
   filter('mine');
-  // Choose the saved team and go on: the page asks the host for its members.
+  // Choose the saved team and clone it: the page asks the host for its members.
   const mine = radios('starting-point').find((node) => node.value === 'lib:web')!;
   mine.checked = true; mine.fire('change');
-  page.byLabel('Next: Members')!.click();
+  page.byLabel('Clone Web team and modify it')!.click();
   assert.deepEqual(page.posts.at(-1), { type: 'starting-point', id: 'lib:web', goal: '', locality: 'cloud' });
   page.dispatch({ type: 'starting-point', id: 'lib:web', draft: { name: '', description: 'Builds pages', members: [{ name: 'lead', role: 'planner', model: 'deep', tools: ['Read'], instructions: 'Plan.' }] } });
+  page.byLabel('Next: Members')!.click();
   assert.equal(page.doc.getElementById('m-name-0')!.value, 'lead');
+  page.byLabel('Back')!.click();
   page.byLabel('Back')!.click();
   page.byLabel('Share Web team')!.click();
   assert.deepEqual(page.posts.at(-1), { type: 'share', id: 'user:web' }, 'Share from the picker');
   // No saved teams: My teams says how to get one.
   page.dispatch({ type: 'library', library: { teams: [], archived: [] }, picker: teamPicker(studio.startingPoints, []) });
   assert.match(page.text(), /You have no saved teams yet\. Save a team as one of your teams in Team Studio to reuse it in any project\./);
-  assert.deepEqual(shown(), ['empty']);
+  assert.deepEqual(shown(), []);
   for (const message of page.posts) assert.ok(parseStudioMessage(message), JSON.stringify(message));
 });
 
@@ -1977,4 +1991,684 @@ test('host path: the real panel follows a folder change: its project team watche
     globalThis.fetch = originalFetch;
     if (previousTeamsDir === undefined) delete process.env.NEAR_AI_TEAMS_DIR; else process.env.NEAR_AI_TEAMS_DIR = previousTeamsDir;
   }
+});
+
+// ---------- Build a team: how to start (owner, 2026-11-17) ----------
+// "If I select an existing team I shouldn't have to name it and give it a description." The builder now asks how to start: use an existing team (as is,
+// or cloned and changed) or create a new one (from scratch, or cloned). Name, description and Save it as appear only when a new team is being made.
+
+const WEB_CARD = { id: 'user:web', kind: 'user', name: 'Web team', description: 'Builds pages', command: '/team:web ', file: '/s/web.md', members: [{ name: 'lead', role: 'planner', tier: 'deep', model: 'z-ai/glm-5.3', privacy: 'tee', privacyText: 'TEE' }, { name: 'dev', tier: 'inherit', model: 'z-ai/glm-5.3', privacy: 'tee', privacyText: 'TEE' }] };
+
+async function builderPage(options: { teams?: unknown[]; hasProject?: boolean; savedDraft?: unknown } = {}) {
+  const page = await runPage();
+  const studio = buildStudioContext(input(), { hasProject: options.hasProject ?? true, knowledgeBase: false });
+  const library = { teams: options.teams ?? [WEB_CARD], archived: [] };
+  page.dispatch({ type: 'state', context: studio, library, picker: teamPicker(studio.startingPoints, library.teams as never), ...(options.savedDraft ? { savedDraft: options.savedDraft } : {}) });
+  const heading = () => page.doc.getElementById('step-heading')?.textContent;
+  const radios = (name: string) => page.doc.body.all().filter((node) => node.tagName === 'input' && node.name === name);
+  const select = (id: string) => { const radio = radios('starting-point').find((node) => node.value === id)!; radio.checked = true; radio.fire('change'); };
+  const type = (id: string, value: string, event = 'input') => { const node = page.doc.getElementById(id)!; node.value = value; node.fire(event); };
+  return { ...page, studio, heading, radios, select, type };
+}
+
+test('page: Build a team asks how to start first, with no name to fill in, and Back returns from every screen', async () => {
+  const page = await builderPage();
+  page.byLabel('New team')!.click();
+  assert.equal(page.heading(), 'How do you want to start?');
+  assert.equal(page.doc.activeElement, page.doc.getElementById('step-heading'), 'focus moves to the new screen\'s heading');
+  assert.equal(page.doc.getElementById('f-name'), null, 'no name on the first screen');
+  assert.doesNotMatch(page.text(), /Team name|What the team is for|Save it as/);
+  assert.ok(page.byLabel('Use an existing team') && page.byLabel('Create a new team'));
+  assert.equal(page.byLabel('Back'), undefined, 'the first screen has nothing to go back to');
+  // Use an existing team: the picker, still with no name to fill in. Back: the first screen.
+  page.byLabel('Use an existing team')!.click();
+  assert.equal(page.heading(), 'Use an existing team');
+  assert.equal(page.doc.activeElement, page.doc.getElementById('step-heading'));
+  assert.equal(page.doc.getElementById('f-name'), null);
+  assert.ok(page.radios('starting-point').length > 3, 'saved and built-in teams');
+  page.byLabel('Back')!.click();
+  assert.equal(page.heading(), 'How do you want to start?');
+  // Create a new team: from scratch, a clone, or described to the AI.
+  page.byLabel('Create a new team')!.click();
+  assert.equal(page.heading(), 'Create a new team');
+  assert.ok(page.byLabel('From scratch') && page.byLabel('Clone an existing team') && page.byLabel('Describe it, and AI drafts it'));
+  page.byLabel('Clone an existing team')!.click();
+  assert.equal(page.heading(), 'Clone an existing team');
+  page.byLabel('Back')!.click();
+  assert.equal(page.heading(), 'Create a new team');
+  // From scratch: the Purpose step, with the name, description, Private team and Save it as, and no picker on it any more.
+  page.byLabel('From scratch')!.click();
+  assert.equal(page.heading(), 'Purpose');
+  assert.equal(page.doc.activeElement, page.doc.getElementById('step-heading'));
+  assert.ok(page.doc.getElementById('f-name'));
+  assert.match(page.text(), /Team name.*What the team is for.*Private team.*Save it as/);
+  assert.doesNotMatch(page.text(), /Starting point/);
+  page.byLabel('Next: Members')!.click();
+  assert.equal(page.heading(), 'Members');
+  assert.equal(page.doc.getElementById('m-name-0'), null, 'blank members');
+  page.byLabel('Back')!.click();
+  assert.equal(page.heading(), 'Purpose');
+  page.byLabel('Back')!.click();
+  assert.equal(page.heading(), 'Create a new team');
+  page.byLabel('Back')!.click();
+  assert.equal(page.heading(), 'How do you want to start?');
+  page.byLabel('Cancel')!.click();
+  assert.ok(page.byLabel('New team'), 'back in the library, nothing asked');
+  assert.equal(page.posts.some((message) => message.type === 'leave-wizard'), false);
+  // Setting up the project's team starts at the same first screen.
+  page.dispatch({ type: 'start-wizard', target: 'project' });
+  assert.equal(page.heading(), 'How do you want to start?');
+  for (const message of page.posts) assert.ok(parseStudioMessage(message), JSON.stringify(message));
+});
+
+test('page: selecting an existing team offers Use as is and Clone and modify; Use as is asks for no name, and a built-in asks only what it needs', async () => {
+  const page = await builderPage();
+  page.byLabel('New team')!.click();
+  page.byLabel('Use an existing team')!.click();
+  assert.equal(page.byLabel('Use Web team as is'), undefined, 'nothing to use until a team is selected');
+  page.select('lib:web');
+  assert.ok(page.byLabel('Clone Web team and modify it'));
+  assert.match(page.text(), /makes it this project's team/i);
+  assert.equal(page.doc.getElementById('f-name'), null, 'no name to give');
+  page.byLabel('Use Web team as is')!.click();
+  assert.deepEqual(page.posts.at(-1), { type: 'use-team', id: 'lib:web' });
+  // The host made it this project's team and opens it.
+  page.dispatch({ type: 'team', id: 'project', kind: 'project', file: '.planning/.near-ai/team.md', command: '/team:project ', draft: draft(), base: 'b'.repeat(64), versions: [], notice: '"Web team" is now this project\'s team. Run it with /team:project <task>.' });
+  assert.match(page.doc.getElementById('banner')!.textContent, /is now this project's team/);
+  assert.equal(page.doc.getElementById('step-heading'), null, 'out of the builder');
+  // A built-in that is made from answers asks only those, inline, before Use as is.
+  page.byLabel('Back to all teams')!.click();
+  page.byLabel('New team')!.click();
+  page.byLabel('Use an existing team')!.click();
+  page.select('recommend');
+  for (const id of ['f-goal', 'f-locality', 'f-shape', 'f-risk']) assert.ok(page.doc.getElementById(id), id);
+  page.type('f-goal', 'Add billing');
+  page.type('f-risk', 'high', 'change');
+  assert.equal(page.doc.getElementById('f-goal')!.value, 'Add billing', 'what was typed survives a redraw');
+  page.byLabel('Use Recommended team as is')!.click();
+  assert.deepEqual(page.posts.at(-1), { type: 'use-team', id: 'recommend', goal: 'Add billing', locality: 'cloud', workShape: 'feature', riskLevel: 'high' });
+  // The host answers (here: the person kept the project's team) before the buttons work again.
+  page.dispatch({ type: 'used', declined: true, text: 'Not changed. This project\'s team is as it was.' });
+  // A project type asks what the team is for and where models run, but not the recommendation's questions.
+  page.select('type:software');
+  assert.ok(page.doc.getElementById('f-goal') && page.doc.getElementById('f-locality'));
+  assert.equal(page.doc.getElementById('f-shape'), null);
+  // What was typed for the recommended team is not carried to another team (PR #75 review).
+  assert.equal(page.doc.getElementById('f-goal')!.value, '', 'another team starts with its own empty answer');
+  page.type('f-goal', 'Ship it');
+  // With unsaved work in the builder, Use as is says so, and the host asks before discarding it.
+  page.byLabel('Clone Software development team and modify it')!.click();
+  page.dispatch({ type: 'starting-point', id: 'type:software', projectType: 'software', draft: { name: '', description: 'A team', members: [{ name: 'architect', role: '', model: '', tools: null, instructions: 'Design.' }] } });
+  page.type('f-name', 'My own');
+  page.byLabel('Back')!.click();
+  assert.equal(page.heading(), 'Use an existing team');
+  page.byLabel('Use Software development team as is')!.click();
+  assert.deepEqual(page.posts.at(-1), { type: 'use-team', id: 'type:software', goal: 'Ship it', locality: 'cloud', discard: true });
+  for (const message of page.posts) assert.ok(parseStudioMessage(message), JSON.stringify(message));
+});
+
+test('page: leaving the picker while a request is waiting does not leave its buttons off when you come back', async () => {
+  const page = await builderPage();
+  page.byLabel('New team')!.click();
+  page.byLabel('Use an existing team')!.click();
+  page.select('lib:web');
+  page.byLabel('Clone Web team and modify it')!.click();
+  assert.equal((page.byLabel('Use Web team as is') as unknown as { disabled: boolean }).disabled, true, 'waiting for the answer');
+  page.byLabel('Back')!.click();
+  page.byLabel('Use an existing team')!.click();
+  page.select('lib:web');
+  assert.equal((page.byLabel('Use Web team as is') as unknown as { disabled: boolean }).disabled, false, 'offered again');
+  assert.equal((page.byLabel('Clone Web team and modify it') as unknown as { disabled: boolean }).disabled, false);
+});
+
+test('page: with no project open, Use as is says it opens the team in chat, and the library shows what happened', async () => {
+  const page = await builderPage({ hasProject: false });
+  page.byLabel('New team')!.click();
+  page.byLabel('Use an existing team')!.click();
+  page.select('lib:web');
+  assert.match(page.text(), /opens it in chat/);
+  page.select('gsd:review');
+  assert.match(page.text(), /saves it to My teams as "Review team"/);
+  page.byLabel('Use Review team as is')!.click();
+  assert.deepEqual(page.posts.at(-1), { type: 'use-team', id: 'gsd:review', goal: '', locality: 'cloud' });
+  page.dispatch({ type: 'library', library: { teams: [WEB_CARD, { ...WEB_CARD, id: 'user:review-team', name: 'Review team', command: '/team:review-team ' }], archived: [] } });
+  page.dispatch({ type: 'used', text: 'Saved "Review team" to My teams, and /team:review-team is in the chat box.', focus: 'user:review-team' });
+  assert.equal(page.doc.getElementById('step-heading'), null, 'back in the library');
+  assert.match(page.doc.getElementById('banner')!.textContent, /Saved "Review team" to My teams/);
+  assert.equal(page.doc.activeElement, page.doc.getElementById('open-user:review-team'), 'the team it saved is in focus');
+  assert.equal(page.doc.getElementById('open-user:review-team')!.parent!.parent!.className.includes('flash'), true);
+});
+
+test('page: Clone and modify fills the Purpose step with "Copy of" a unique name, the description and Save it as, and Back returns to the picker', async () => {
+  const page = await builderPage({ teams: [WEB_CARD, { ...WEB_CARD, id: 'user:copy-of-web-team', name: 'Copy of Web team' }] });
+  page.byLabel('New team')!.click();
+  page.byLabel('Use an existing team')!.click();
+  page.select('lib:web');
+  page.byLabel('Clone Web team and modify it')!.click();
+  assert.deepEqual(page.posts.at(-1), { type: 'starting-point', id: 'lib:web', goal: '', locality: 'cloud' });
+  page.dispatch({ type: 'starting-point', id: 'lib:web', draft: { name: '', description: 'Builds pages', members: [{ name: 'lead', role: 'planner', model: 'deep', tools: ['Read'], instructions: 'Plan.' }] } });
+  assert.equal(page.heading(), 'Purpose');
+  assert.equal(page.doc.activeElement, page.doc.getElementById('step-heading'));
+  assert.equal(page.doc.getElementById('f-name')!.value, 'Copy of Web team 2', 'unique among your teams');
+  assert.equal(page.doc.getElementById('f-desc')!.value, 'Builds pages');
+  assert.match(page.text(), /Save it as/);
+  assert.match(page.doc.getElementById('announce')!.textContent, /Cloned Web team/);
+  page.byLabel('Next: Members')!.click();
+  assert.equal(page.doc.getElementById('m-name-0')!.value, 'lead');
+  page.byLabel('Back')!.click();
+  page.byLabel('Back')!.click();
+  assert.equal(page.heading(), 'Use an existing team', 'back to the picker it came from');
+  assert.equal(page.radios('starting-point').find((node) => node.value === 'lib:web')!.checked, true);
+  // Create a new team > Clone an existing team: only Clone, and a built-in's goal becomes what the team is for.
+  page.byLabel('Back')!.click();
+  page.byLabel('Create a new team')!.click();
+  page.byLabel('Clone an existing team')!.click();
+  page.select('type:software');
+  assert.equal(page.byLabel('Use Software development team as is'), undefined, 'no Use as is when creating a new team');
+  assert.match(page.text(), /replaces the 1 member/i, 'says the members it would replace');
+  page.type('f-goal', 'Ship billing');
+  page.byLabel('Clone Software development team and modify it')!.click();
+  assert.deepEqual(page.posts.at(-1), { type: 'starting-point', id: 'type:software', goal: 'Ship billing', locality: 'cloud' });
+  page.dispatch({ type: 'starting-point', id: 'type:software', projectType: 'software', draft: { name: '', description: 'A software development team. Goal: Ship billing', members: [{ name: 'architect', role: '', model: '', tools: null, instructions: 'Design.' }] } });
+  assert.equal(page.doc.getElementById('f-name')!.value, 'Software development team', 'the name it filled in before is replaced, since it was not changed');
+  assert.equal(page.doc.getElementById('f-desc')!.value, 'Ship billing');
+  // Saved as the project's team, a project type still writes its AGENTS.md guidance.
+  const project = page.radios('target').find((node) => node.value === 'project')!;
+  project.checked = true; project.fire('change');
+  assert.match(page.text(), /AGENTS\.md/);
+  for (const step of ['Members', 'Models', 'Tools & permissions', 'Instructions & review']) page.byLabel(`Next: ${step}`)!.click();
+  page.byLabel('Save project team')!.click();
+  assert.deepEqual(page.posts.at(-1), { type: 'create', draft: { name: 'Software development team', description: 'Ship billing', members: [{ name: 'architect', role: '', model: '', tools: null, instructions: 'Design.' }] }, target: 'project', projectType: { id: 'software', goal: 'Ship billing' } });
+  // From scratch after a clone starts blank again.
+  page.byLabel('Step 1 of 5: Purpose (done)')!.click();
+  page.byLabel('Back')!.click();
+  assert.equal(page.heading(), 'Clone an existing team');
+  page.byLabel('Back')!.click();
+  page.byLabel('From scratch')!.click();
+  assert.equal(page.doc.getElementById('f-name')!.value, '');
+  assert.equal(page.doc.getElementById('f-desc')!.value, '');
+  page.byLabel('Next: Members')!.click();
+  assert.equal(page.doc.getElementById('m-name-0'), null, 'the cloned members are gone');
+  for (const message of page.posts) assert.ok(parseStudioMessage(message), JSON.stringify(message));
+});
+
+test('page: drafts keep how the team was started, an old draft resumes straight into its step, and the AI draft stays reachable', async () => {
+  const page = await builderPage();
+  page.byLabel('New team')!.click();
+  page.byLabel('Create a new team')!.click();
+  page.byLabel('From scratch')!.click();
+  page.type('f-name', 'Kept');
+  page.byLabel('Save draft')!.click();
+  assert.deepEqual(page.posts.at(-1), { type: 'save-draft', draft: { name: 'Kept', description: '', members: [] }, step: 0, target: 'user', startingPoint: 'empty', path: 'scratch' });
+  page.byLabel('Cancel')!.click();
+  // An old draft (saved before this change, so without a path) at Models resumes on Models.
+  const old = await builderPage({ savedDraft: { draft: draft(), step: 2, target: 'user', startingPoint: 'gsd:build-test' } });
+  old.byLabel('Resume')!.click();
+  assert.equal(old.heading(), 'Models');
+  // An old draft on Purpose whose starting point was never applied: Next fills its members as before.
+  const purpose = await builderPage({ savedDraft: { draft: { name: 'Old', description: 'Ship', members: [] }, step: 0, target: 'user', startingPoint: 'recommend' } });
+  purpose.byLabel('Resume')!.click();
+  assert.equal(purpose.heading(), 'Purpose');
+  purpose.byLabel('Next: Members')!.click();
+  assert.deepEqual(purpose.posts.at(-1), { type: 'starting-point', id: 'recommend', goal: 'Ship', locality: 'cloud', workShape: 'feature', riskLevel: 'medium' });
+  purpose.dispatch({ type: 'starting-point', id: 'recommend', draft: { name: '', description: 'x', members: [{ name: 'planner', role: 'planner', model: 'standard', tools: null, instructions: 'Plan.' }] } });
+  assert.equal(purpose.heading(), 'Members');
+  assert.equal(purpose.doc.getElementById('m-name-0')!.value, 'planner');
+  purpose.byLabel('Back')!.click();
+  purpose.byLabel('Back')!.click();
+  assert.equal(purpose.heading(), 'Create a new team', 'an old draft goes back to Create a new team');
+  // Its members were not cloned here, so From scratch says it keeps them, and does.
+  assert.match(purpose.text(), /Keep the 1 member your team has now/);
+  purpose.byLabel('From scratch')!.click();
+  purpose.byLabel('Next: Members')!.click();
+  assert.equal(purpose.doc.getElementById('m-name-0')!.value, 'planner');
+  // A new draft made with Use an existing team > Clone and modify goes back to that picker.
+  const cloned = await builderPage({ savedDraft: { draft: draft(), step: 0, target: 'user', startingPoint: 'lib:web', path: 'existing' } });
+  cloned.byLabel('Resume')!.click();
+  cloned.byLabel('Back')!.click();
+  assert.equal(cloned.heading(), 'Use an existing team');
+  assert.equal(cloned.radios('starting-point').find((node) => node.value === 'lib:web')!.checked, true, 'with the team it was cloned from selected');
+  // Describe it, and AI drafts it: the library's AI box, ready to type in.
+  const ai = await builderPage();
+  ai.byLabel('New team')!.click();
+  ai.byLabel('Create a new team')!.click();
+  ai.byLabel('Describe it, and AI drafts it')!.click();
+  assert.equal(ai.doc.getElementById('step-heading'), null);
+  assert.equal(ai.doc.activeElement, ai.doc.getElementById('ask-idea'));
+  for (const message of [...page.posts, ...old.posts, ...purpose.posts, ...cloned.posts, ...ai.posts]) assert.ok(parseStudioMessage(message), JSON.stringify(message));
+});
+
+test('message parsing: use-team and the builder path take exact keys and known values', () => {
+  for (const message of [
+    { type: 'use-team', id: 'lib:web' }, { type: 'use-team', id: 'recommend', goal: 'Ship', locality: 'cloud', workShape: 'feature', riskLevel: 'high' },
+    { type: 'use-team', id: 'type:software', goal: '', locality: 'local', discard: true }, { type: 'use-team', id: 'gsd:review' },
+    { type: 'save-draft', draft: draft(), step: 0, target: 'user', startingPoint: 'empty', path: 'scratch' },
+    { type: 'save-draft', draft: draft(), step: 0, target: 'user', path: 'clone' }, { type: 'save-draft', draft: draft(), step: 1, target: 'project', path: 'existing' },
+    { type: 'unsaved', wizard: { draft: draft(), step: 0, target: 'user', path: 'existing' } }
+  ]) assert.ok(parseStudioMessage(message), JSON.stringify(message));
+  for (const message of [
+    { type: 'use-team' }, { type: 'use-team', id: 'empty' }, { type: 'use-team', id: 'gsd:unknown' }, { type: 'use-team', id: '/abs/web.md' },
+    { type: 'use-team', id: 'lib:web', name: 'Renamed' }, { type: 'use-team', id: 'recommend', locality: 'mars' }, { type: 'use-team', id: 'recommend', riskLevel: 'extreme' },
+    { type: 'use-team', id: 'lib:web', discard: false }, { type: 'use-team', id: 'recommend', goal: 'x'.repeat(401) },
+    { type: 'save-draft', draft: draft(), step: 0, target: 'user', path: 'somewhere' }
+  ]) assert.equal(parseStudioMessage(message), undefined, JSON.stringify(message));
+});
+
+test('host: Use as is with a project open makes the team this project\'s team with no name asked, and replacing one asks first and keeps the old one in the history', async () => {
+  const h = await harness();
+  const web = await h.library.create('Web team', HANDWRITTEN);
+  await h.send({ type: 'ready' });
+  await h.send({ type: 'use-team', id: 'lib:web-team' });
+  const projectFile = TeamLibrary.projectTeamFile(h.root);
+  assert.equal(await readFile(projectFile, 'utf8'), await readFile(web, 'utf8'), 'exactly as saved');
+  assert.deepEqual(h.confirmed, [], 'no project team yet: nothing to ask');
+  const opened = last(h, 'team');
+  assert.equal(opened.id, 'project');
+  assert.match(opened.notice, /^"Web team" is now this project's team\. Run it with \/team:project <task>\.$/);
+  assert.equal((await h.library.versions(projectFile)).length, 1);
+  // Replacing it asks first; No changes nothing and says so.
+  h.confirmAnswer.value = false;
+  await h.send({ type: 'use-team', id: 'type:software', goal: 'Ship billing', locality: 'local' });
+  assert.match(h.confirmed.at(-1)!, /^This project already has a team\. Replace it\? Its earlier versions stay in the team history\.$/);
+  assert.equal(await readFile(projectFile, 'utf8'), await readFile(web, 'utf8'));
+  assert.deepEqual(last(h, 'used'), { type: 'used', declined: true, text: 'Not changed. This project\'s team is as it was.' });
+  assert.deepEqual(h.applied, []);
+  // Yes: replaced by the built-in under its own name, stamped, with its AGENTS.md guidance, and the old one is a version to restore.
+  h.confirmAnswer.value = true;
+  await h.send({ type: 'use-team', id: 'type:software', goal: 'Ship billing', locality: 'local' });
+  const replaced = parseTeam(await readFile(projectFile, 'utf8'), projectFile);
+  assert.equal(replaced.name, 'Software development team');
+  assert.match(await readFile(projectFile, 'utf8'), /\ntemplate: software\n/);
+  assert.ok(replaced.members.some((member) => member.name === 'red-team'));
+  assert.deepEqual(h.applied, ['software:Ship billing']);
+  assert.match(last(h, 'team').notice, /^"Software development team" is now this project's team\. Run it with \/team:project <task>\. AGENTS\.md now has this project type's guidance\.$/);
+  const versions = await h.library.versions(projectFile);
+  assert.equal(versions.length, 3, 'the old team, then the new one');
+  assert.ok((await Promise.all(versions.map((file) => readFile(file, 'utf8')))).includes(await readFile(web, 'utf8')), 'the old team is kept in the history');
+  // A builder with unsaved work: asked before it is discarded; dismissing changes nothing.
+  h.chooseAnswer.value = undefined;
+  await h.send({ type: 'use-team', id: 'lib:web-team', discard: true });
+  assert.match(h.asked.at(-1)!.message, /^Use "Web team" as is\? The team you were building is not saved, so it will be discarded\.$/);
+  assert.deepEqual(h.asked.at(-1)!.actions, ['Use as is']);
+  assert.equal(parseTeam(await readFile(projectFile, 'utf8'), projectFile).name, 'Software development team');
+  // A team that is gone is said plainly, and nothing is written.
+  await h.send({ type: 'use-team', id: 'lib:nope' });
+  assert.match(last(h, 'error').text, /^That team is no longer in your teams\./);
+  // A project with a knowledge base refuses a team with a forwarded model, as a save does.
+  await writeFile(path.join(h.root, '.near-kb'), '');
+  await h.library.create('Forwarded', renderTeam('Forwarded', 'x', [{ name: 'dev', model: 'deepseek/flash', instructions: 'Build it. Report it.' }]));
+  await h.send({ type: 'refresh' });
+  await h.send({ type: 'use-team', id: 'lib:forwarded' });
+  assert.match(last(h, 'error').text, /^Not used: dev: this project has a knowledge base/);
+  assert.equal(parseTeam(await readFile(projectFile, 'utf8'), projectFile).name, 'Software development team');
+  // An imported team you have not approved stays unapproved as the project's team: its question says where it came from.
+  await h.library.importTeam('Shared crew', teamMarkdown(draft({ name: 'Shared crew' })));
+  await h.send({ type: 'refresh' });
+  await h.send({ type: 'use-team', id: 'lib:shared-crew' });
+  assert.equal(await h.library.projectDerivedFrom(projectFile), 'Shared crew');
+  assert.match(last(h, 'team').notice, /It has members from the imported team "Shared crew", which you have not approved, so you are asked before it first runs\.$/);
+  h.close();
+});
+
+test('host: Use as is with no project open puts a saved team in the chat, and saves a built-in to My teams under its own unique name first', async () => {
+  const h = await harness();
+  await h.library.create('Web team', teamMarkdown(draft()));
+  h.setRoot(undefined, false);
+  await h.send({ type: 'ready' });
+  await h.send({ type: 'use-team', id: 'lib:web-team' });
+  assert.deepEqual(h.prefills, ['/team:web-team ']);
+  assert.deepEqual(last(h, 'used'), { type: 'used', text: '/team:web-team is in the chat box. Type your task after it and send.', focus: 'user:web-team' });
+  assert.deepEqual((await h.library.list()).map((entry) => path.basename(entry.file)), ['web-team.md'], 'nothing new saved');
+  await h.send({ type: 'use-team', id: 'gsd:review', goal: '', locality: 'cloud' });
+  const review = path.join(h.library.directory, 'review-team.md');
+  assert.equal(parseTeam(await readFile(review, 'utf8'), review).name, 'Review team');
+  assert.deepEqual(h.prefills.at(-1), '/team:review-team ');
+  assert.equal(last(h, 'used').text, 'Saved "Review team" to My teams, and /team:review-team is in the chat box. Type your task after it and send.');
+  assert.equal(last(h, 'used').focus, 'user:review-team');
+  assert.ok(last(h, 'library').library.teams.some((team: any) => team.id === 'user:review-team'));
+  // The name is taken now, so the next one is made unique.
+  await h.send({ type: 'use-team', id: 'gsd:review', goal: '', locality: 'cloud' });
+  const second = path.join(h.library.directory, 'review-team-2.md');
+  assert.equal(parseTeam(await readFile(second, 'utf8'), second).name, 'Review team 2');
+  assert.equal(h.prefills.at(-1), '/team:review-team-2 ');
+  // The recommendation, from its answers.
+  await h.send({ type: 'use-team', id: 'recommend', goal: 'Add billing', locality: 'cloud', workShape: 'feature', riskLevel: 'high' });
+  const recommended = path.join(h.library.directory, 'recommended-team.md');
+  assert.deepEqual(parseTeam(await readFile(recommended, 'utf8'), recommended).members.map((member) => member.name), ['planner', 'implementer', 'security', 'tester', 'reviewer']);
+  assert.equal(h.confirmed.length, 0, 'nothing to replace');
+  assert.equal(existsSync(path.join(h.root, '.planning')), false, 'no project team written');
+  h.close();
+});
+
+test('host: a builder draft keeps how the team was started', async () => {
+  const h = await harness();
+  await h.send({ type: 'ready' });
+  await h.send({ type: 'save-draft', draft: draft(), step: 0, target: 'user', startingPoint: 'lib:web', path: 'existing' });
+  assert.deepEqual(h.drafts.value, { draft: draft(), step: 0, target: 'user', startingPoint: 'lib:web', path: 'existing' });
+  await h.send({ type: 'refresh' });
+  assert.equal(last(h, 'state').savedDraft.path, 'existing');
+  h.chooseAnswer.value = 'Save draft';
+  await h.send({ type: 'leave-wizard', wizard: { draft: draft(), step: 1, target: 'user', path: 'scratch' } });
+  assert.deepEqual(h.drafts.value, { draft: draft(), step: 1, target: 'user', path: 'scratch' });
+  h.close();
+});
+
+// Replacing the project's team keeps the old one as a version taken just before the new one is written. Two versions taken within the same millisecond
+// used to share a file name, so the second overwrote the first and the old team was lost.
+test('versions taken in the same millisecond are all kept, in order', async () => {
+  const library = new TeamLibrary(await mkdtemp(path.join(tmpdir(), 'near-ai-teams-')));
+  const file = TeamLibrary.projectTeamFile(await mkdtemp(path.join(tmpdir(), 'p-')));
+  await mkdir(path.dirname(file), { recursive: true });
+  // The clock is frozen, so every snapshot falls in the same millisecond and the collision is certain, however fast the file system is.
+  const realNow = Date.now;
+  Date.now = () => 1_700_000_000_000;
+  try {
+    for (let n = 1; n <= 5; n += 1) { await writeFile(file, `version ${n}`); await library.snapshot(file); }
+  } finally { Date.now = realNow; }
+  // versions() is newest first; file names alone do not sort by time once a millisecond holds more than one version.
+  const versions = (await library.versions(file)).reverse();
+  assert.deepEqual(await Promise.all(versions.map((version) => readFile(version, 'utf8'))), ['version 1', 'version 2', 'version 3', 'version 4', 'version 5']);
+});
+
+// ---------- PR #75 review ----------
+
+/** The host's answers to one message: what the page acts on (never more than one per use-team). */
+async function answersTo(h: Harness, message: unknown): Promise<Array<Record<string, any>>> {
+  const before = h.posted.length;
+  await h.send(message);
+  return h.posted.slice(before).filter((posted) => ['team', 'used', 'error', 'notice'].includes(posted.type));
+}
+
+test('host: when it cannot tell whether a team came from an unapproved import, Use as is and Save fail closed: an error, and nothing written', async () => {
+  const h = await harness();
+  await h.library.create('Web team', teamMarkdown(draft()));
+  await h.send({ type: 'ready' });
+  h.library.unapprovedSource = async () => { throw new Error('the imports folder could not be read'); };
+  const projectFile = TeamLibrary.projectTeamFile(h.root);
+  const used = await answersTo(h, { type: 'use-team', id: 'lib:web-team' });
+  assert.deepEqual(used.map((answer) => answer.type), ['error']);
+  assert.match(used[0]!.text, /^Not used: it could not be checked whether this team has members from an imported team you have not approved \(the imports folder could not be read\)\. Nothing was changed\.$/);
+  assert.equal(existsSync(projectFile), false, 'no project team written');
+  assert.deepEqual(h.confirmed, [], 'nothing asked before the check');
+  // Saving a new team fails closed the same way.
+  const saved = await answersTo(h, { type: 'create', draft: draft({ name: 'New crew' }), target: 'user' });
+  assert.deepEqual(saved.map((answer) => answer.type), ['error']);
+  assert.match(saved[0]!.text, /^Not saved: it could not be checked/);
+  assert.equal(existsSync(path.join(h.library.directory, 'new-crew.md')), false);
+  // With no project, a built-in is not saved to My teams either; a saved team only goes to the chat, which writes nothing, so it still works.
+  h.setRoot(undefined, false);
+  const builtin = await answersTo(h, { type: 'use-team', id: 'gsd:review' });
+  assert.deepEqual(builtin.map((answer) => answer.type), ['error']);
+  assert.equal(existsSync(path.join(h.library.directory, 'review-team.md')), false);
+  assert.deepEqual((await answersTo(h, { type: 'use-team', id: 'lib:web-team' })).map((answer) => answer.type), ['used']);
+  // Improve with AI treats such a team as untrusted rather than trusted.
+  const { ai, sent } = fakeAi([TEE_MODEL], [{ text: JSON.stringify({ suggestions: [] }) }]);
+  h.deps.teamAi = async () => ai;
+  await h.send({ type: 'improve-ai', seq: 1, draft: draft() });
+  assert.match(sent[0]!.messages[1]!.content!, /imported from a file and its owner has not approved it yet/);
+  h.close();
+});
+
+test('host: every Use as is gets exactly one answer: the team, used, declined, or an error', async () => {
+  const h = await harness();
+  await h.library.create('Web team', teamMarkdown(draft()));
+  await h.send({ type: 'ready' });
+  const kinds = async (message: unknown) => (await answersTo(h, message)).map((answer) => answer.declined ? 'declined' : answer.type);
+  assert.deepEqual(await kinds({ type: 'use-team', id: 'lib:web-team' }), ['team'], 'made the project team');
+  h.confirmAnswer.value = false;
+  const replace = await answersTo(h, { type: 'use-team', id: 'gsd:review' });
+  assert.deepEqual(replace.map((answer) => [answer.type, answer.declined]), [['used', true]], 'replace declined');
+  assert.equal(replace[0]!.text, 'Not changed. This project\'s team is as it was.');
+  h.chooseAnswer.value = undefined;
+  const discard = await answersTo(h, { type: 'use-team', id: 'gsd:review', discard: true });
+  assert.deepEqual(discard.map((answer) => [answer.type, answer.declined]), [['used', true]], 'discarding the builder declined');
+  assert.equal(discard[0]!.text, 'Not changed. The team you were building is still here.');
+  assert.deepEqual(await kinds({ type: 'use-team', id: 'lib:nope' }), ['error'], 'a team that is gone');
+  await writeFile(path.join(h.root, '.near-kb'), '');
+  await h.library.create('Forwarded', renderTeam('Forwarded', 'x', [{ name: 'dev', model: 'deepseek/flash', instructions: 'Build it. Report it.' }]));
+  await h.send({ type: 'refresh' });
+  assert.deepEqual(await kinds({ type: 'use-team', id: 'lib:forwarded' }), ['error'], 'a check fails');
+  // The folder is closed (the studio is told, as VS Code tells it), so the knowledge base no longer applies.
+  h.setRoot(undefined);
+  await h.settle();
+  assert.deepEqual(await kinds({ type: 'use-team', id: 'lib:web-team' }), ['used'], 'to the chat');
+  assert.deepEqual(await kinds({ type: 'use-team', id: 'gsd:review' }), ['used'], 'saved to My teams, then the chat');
+  h.close();
+});
+
+test('page: a declined Use as is says Not changed and stays on the picker', async () => {
+  const page = await builderPage();
+  page.byLabel('New team')!.click();
+  page.byLabel('Use an existing team')!.click();
+  page.select('lib:web');
+  page.byLabel('Use Web team as is')!.click();
+  page.dispatch({ type: 'used', declined: true, text: 'Not changed. This project\'s team is as it was.' });
+  assert.equal(page.heading(), 'Use an existing team');
+  assert.match(page.doc.getElementById('announce')!.textContent, /^Not changed\./);
+  assert.equal(page.radios('starting-point').find((node) => node.value === 'lib:web')!.checked, true);
+});
+
+test('host: the picker carries the names Use as is saves under and a clone starts from, and they match what is saved, taken names included', async () => {
+  const h = await harness();
+  await h.library.create('Web team', teamMarkdown(draft()));
+  await h.library.create('Copy of Web team', teamMarkdown(draft({ name: 'Copy of Web team' })));
+  await h.library.create('Review team', teamMarkdown(draft({ name: 'Review team' })));
+  h.setRoot(undefined, false);
+  await h.send({ type: 'ready' });
+  const entry = (id: string, from = last(h, 'state').picker) => (from as any[]).find((candidate) => candidate.id === id);
+  assert.deepEqual([entry('gsd:review').saveAs, entry('gsd:review').cloneName], ['Review team 2', 'Review team 2']);
+  assert.deepEqual([entry('lib:web-team').cloneName, entry('lib:web-team').saveAs], ['Copy of Web team 2', undefined], 'a saved team is not saved again');
+  assert.equal(entry('type:software').saveAs, 'Software development team');
+  const preview = entry('gsd:review').saveAs;
+  await h.send({ type: 'use-team', id: 'gsd:review' });
+  assert.match(last(h, 'used').text, new RegExp(`^Saved "${preview}" to My teams`));
+  assert.equal(parseTeam(await readFile(path.join(h.library.directory, 'review-team-2.md'), 'utf8'), 'x.md').name, preview);
+  assert.equal(entry('gsd:review', last(h, 'library').picker).saveAs, 'Review team 3', 'the next preview moves on');
+  // A clone's name comes with its members, resolved when it is made.
+  await h.send({ type: 'starting-point', id: 'lib:web-team', goal: '', locality: 'cloud' });
+  assert.equal(last(h, 'starting-point').cloneName, 'Copy of Web team 2');
+  await h.send({ type: 'starting-point', id: 'gsd:review', goal: '', locality: 'cloud' });
+  assert.equal(last(h, 'starting-point').cloneName, 'Review team 3');
+  h.close();
+});
+
+test('page: the names it shows and fills in are the host\'s, not its own', async () => {
+  const page = await builderPage({ hasProject: false, teams: [WEB_CARD, { ...WEB_CARD, id: 'user:review-team', name: 'Review team' }] });
+  page.byLabel('New team')!.click();
+  page.byLabel('Use an existing team')!.click();
+  page.select('gsd:review');
+  assert.match(page.text(), /saves it to My teams as "Review team 2"/, 'the preview the host resolved');
+  page.select('lib:web');
+  page.byLabel('Clone Web team and modify it')!.click();
+  page.dispatch({ type: 'starting-point', id: 'lib:web', cloneName: 'Copy of Web team 7', draft: { name: '', description: 'Builds pages', members: [] } });
+  assert.equal(page.doc.getElementById('f-name')!.value, 'Copy of Web team 7');
+  assert.doesNotMatch(await readFile(SCRIPT, 'utf8'), /function uniqueName|'Recommended team'|' team'\)/, 'no naming rules of its own');
+});
+
+test('page: the team keeps the entry point\'s Save it as on every path: from scratch, cloned, cloned from an existing team, and drafted by AI', async () => {
+  const proposal = { proposal: { name: 'Client team', mission: 'm', description: 'd', members: [{ name: 'a', role: 'writer', model: 'standard', produces: 'p', instructions: 'Write it.' }], outputs: [], notes: [] }, draft: { name: 'Client team', description: 'd', members: [{ name: 'a', role: 'writer', model: 'standard', tools: null, instructions: 'Write it.' }] }, problems: [] };
+  for (const entry of ['user', 'project'] as const) {
+    const page = await builderPage();
+    const start = () => { if (entry === 'project') page.dispatch({ type: 'start-wizard', target: 'project' }); else page.byLabel('New team')!.click(); };
+    const target = () => page.radios('target').find((node) => node.checked)?.value;
+    const leave = () => { page.byLabel('Back to all teams')!.click(); if (page.posts.at(-1)!.type === 'leave-wizard') page.dispatch({ type: 'left', choice: 'discard' }); };
+    const cloned = () => { page.select('lib:web'); page.byLabel('Clone Web team and modify it')!.click(); page.dispatch({ type: 'starting-point', id: 'lib:web', cloneName: 'Copy of Web team', draft: { name: '', description: 'Builds pages', members: [] } }); };
+    start(); page.byLabel('Create a new team')!.click(); page.byLabel('From scratch')!.click();
+    assert.equal(target(), entry, `${entry}: from scratch`);
+    leave();
+    start(); page.byLabel('Create a new team')!.click(); page.byLabel('Clone an existing team')!.click(); cloned();
+    assert.equal(target(), entry, `${entry}: clone`);
+    leave();
+    start(); page.byLabel('Use an existing team')!.click(); cloned();
+    assert.equal(target(), entry, `${entry}: clone and modify`);
+    leave();
+    start(); page.byLabel('Create a new team')!.click(); page.byLabel('Describe it, and AI drafts it')!.click();
+    page.dispatch({ type: 'team-proposal', ...proposal });
+    page.byLabel('Use this team')!.click();
+    assert.equal(target(), entry, `${entry}: drafted by AI`);
+    leave();
+    // The library's own AI box, not reached from the builder, saves to My teams as before.
+    page.dispatch({ type: 'team-proposal', ...proposal });
+    page.byLabel('Use this team')!.click();
+    assert.equal(target(), 'user', `${entry}: the library's AI box afterwards`);
+    leave();
+  }
+});
+
+test('page: a clone reply that comes after the person left the picker is dropped for good', async () => {
+  const page = await builderPage();
+  page.byLabel('New team')!.click();
+  page.byLabel('Use an existing team')!.click();
+  page.select('lib:web');
+  page.byLabel('Clone Web team and modify it')!.click();
+  page.byLabel('Back')!.click();
+  const reply = { type: 'starting-point', id: 'lib:web', cloneName: 'Copy of Web team', draft: { name: '', description: 'Builds pages', members: [{ name: 'lead', role: '', model: '', tools: null, instructions: 'Plan.' }] } };
+  page.dispatch(reply);
+  assert.equal(page.heading(), 'How do you want to start?', 'the late reply does not move the builder');
+  page.byLabel('Use an existing team')!.click();
+  page.dispatch(reply);
+  assert.equal(page.heading(), 'Use an existing team', 'nor does it later, back on the picker');
+});
+
+// ---------- PR #75 review, round 2 ----------
+
+const PROPOSAL = { proposal: { name: 'Client team', mission: 'm', description: 'd', members: [{ name: 'a', role: 'writer', model: 'standard', produces: 'p', instructions: 'Write it.' }], outputs: [], notes: [] }, draft: { name: 'Client team', description: 'd', members: [{ name: 'a', role: 'writer', model: 'standard', tools: null, instructions: 'Write it.' }] }, problems: [] };
+
+test('page: a team drafted by AI is aimed at the project only straight from a project builder; staying, leaving another way, or starting over forgets it', async () => {
+  const page = await builderPage();
+  const target = () => page.radios('target').find((node) => node.checked)?.value;
+  const draftedTarget = () => { page.dispatch({ type: 'team-proposal', ...PROPOSAL }); page.byLabel('Use this team')!.click(); const value = target(); page.byLabel('Back to all teams')!.click(); if (page.posts.at(-1)!.type === 'leave-wizard') page.dispatch({ type: 'left', choice: 'discard' }); return value; };
+  const toDescribe = (dirty: boolean) => {
+    page.dispatch({ type: 'start-wizard', target: 'project' });
+    page.byLabel('Create a new team')!.click();
+    if (dirty) { page.byLabel('From scratch')!.click(); page.type('f-name', 'Half built'); page.byLabel('Back')!.click(); }
+    page.byLabel('Describe it, and AI drafts it')!.click();
+  };
+  // Straight there: the AI box says so, and the drafted team is saved as this project's team.
+  toDescribe(false);
+  assert.match(page.text(), /saved as this project's team/);
+  assert.equal(draftedTarget(), 'project');
+  // With unsaved work the host asks first; leaving through that question still goes to the AI box for the project.
+  toDescribe(true);
+  assert.equal(page.posts.at(-1)!.type, 'leave-wizard');
+  page.dispatch({ type: 'left', choice: 'discard' });
+  assert.equal(draftedTarget(), 'project');
+  // Staying in the builder, then leaving another way: forgotten.
+  toDescribe(true);
+  page.dispatch({ type: 'left', choice: 'stay' });
+  page.byLabel('Cancel')!.click();
+  page.dispatch({ type: 'left', choice: 'discard' });
+  assert.doesNotMatch(page.text(), /saved as this project's team/);
+  assert.equal(draftedTarget(), 'user', 'stayed, then left with Cancel');
+  // Starting over (the proposal discarded): forgotten.
+  toDescribe(false);
+  page.dispatch({ type: 'team-proposal', ...PROPOSAL });
+  page.byLabel('Start over')!.click();
+  assert.equal(draftedTarget(), 'user', 'started over');
+  // Opening a team, or another builder, before using the draft: forgotten.
+  toDescribe(false);
+  page.dispatch({ type: 'team', id: 'user:web', kind: 'user', file: 'My teams/web.md', command: '/team:web ', draft: draft(), base: 'b'.repeat(64), versions: [] });
+  page.byLabel('Back to all teams')!.click();
+  assert.equal(draftedTarget(), 'user', 'opened a team');
+  toDescribe(false);
+  page.byLabel('New team')!.click();
+  page.byLabel('Cancel')!.click();
+  assert.equal(draftedTarget(), 'user', 'started and left another builder');
+});
+
+test('page: Use as is and Clone and modify wait for the host\'s answer, so a double click sends one request', async () => {
+  const page = await builderPage();
+  page.byLabel('New team')!.click();
+  page.byLabel('Use an existing team')!.click();
+  page.select('lib:web');
+  const count = (type: string) => page.posts.filter((message) => message.type === type).length;
+  page.byLabel('Use Web team as is')!.click();
+  page.byLabel('Use Web team as is')!.click();
+  assert.equal(count('use-team'), 1, 'one request');
+  assert.equal(page.byLabel('Use Web team as is')!.disabled, true);
+  assert.equal(page.byLabel('Clone Web team and modify it')!.disabled, true);
+  // Each kind of answer frees them: declined, then an error.
+  page.dispatch({ type: 'used', declined: true, text: 'Not changed. This project\'s team is as it was.' });
+  assert.equal(page.byLabel('Use Web team as is')!.disabled, false);
+  page.byLabel('Use Web team as is')!.click();
+  page.dispatch({ type: 'error', text: 'That team is no longer in your teams. Pick another one.' });
+  assert.equal(page.byLabel('Use Web team as is')!.disabled, false);
+  assert.equal(count('use-team'), 2);
+  // Clone and modify: one request until its members come back (or an error).
+  page.byLabel('Clone Web team and modify it')!.click();
+  page.byLabel('Clone Web team and modify it')!.click();
+  assert.equal(count('starting-point'), 1);
+  page.dispatch({ type: 'error', text: 'That team is no longer in your teams. Pick another one.' });
+  assert.equal(page.byLabel('Clone Web team and modify it')!.disabled, false);
+  // A reply dropped because the person left the picker frees them too.
+  page.byLabel('Clone Web team and modify it')!.click();
+  page.byLabel('Back')!.click();
+  page.dispatch({ type: 'starting-point', id: 'lib:web', cloneName: 'Copy of Web team', draft: { name: '', description: '', members: [] } });
+  page.byLabel('Use an existing team')!.click();
+  assert.equal(page.byLabel('Use Web team as is')!.disabled, false);
+});
+
+test('host: a second Use as is while one is still running does not run: one question, one write, and it is told to wait', async () => {
+  const h = await harness();
+  await h.library.create('Web team', teamMarkdown(draft()));
+  await h.send({ type: 'ready' });
+  await h.send({ type: 'use-team', id: 'lib:web-team' });
+  const projectFile = TeamLibrary.projectTeamFile(h.root);
+  const before = (await h.library.versions(projectFile)).length;
+  const posted = h.posted.length;
+  await Promise.all([h.send({ type: 'use-team', id: 'gsd:review' }), h.send({ type: 'use-team', id: 'gsd:review' })]);
+  assert.equal(h.confirmed.length, 1, 'asked once');
+  assert.equal((await h.library.versions(projectFile)).length, before + 2, 'the old team kept once and the new one written once');
+  const answers = h.posted.slice(posted).filter((message) => ['team', 'used', 'error', 'notice'].includes(message.type));
+  assert.deepEqual(answers.map((message) => message.type).sort(), ['error', 'team'], 'the first is answered with the team, the second is told to wait');
+  assert.match(answers.find((message) => message.type === 'error')!.text, /^Still working on the team you chose\./);
+  // Once it has answered, the next one runs.
+  h.confirmAnswer.value = false;
+  assert.deepEqual((await answersTo(h, { type: 'use-team', id: 'lib:web-team' })).map((answer) => answer.declined), [true]);
+  h.close();
+});
+
+test('host: a Use as is whose write fails answers with an error, and the next one runs', async () => {
+  const h = await harness();
+  await h.library.create('Web team', teamMarkdown(draft()));
+  await h.send({ type: 'ready' });
+  await h.send({ type: 'use-team', id: 'lib:web-team' });
+  const snapshot = h.library.snapshot.bind(h.library);
+  h.library.snapshot = async () => { throw new Error('the disk is full.'); };
+  const posted = h.posted.length;
+  await h.send({ type: 'use-team', id: 'gsd:review' });
+  const answers = h.posted.slice(posted).filter((message) => ['team', 'used', 'error', 'notice'].includes(message.type));
+  assert.deepEqual(answers.map((message) => [message.type, message.text]), [['error', 'Not used: the disk is full.']]);
+  h.library.snapshot = snapshot;
+  h.confirmAnswer.value = false;
+  assert.deepEqual((await answersTo(h, { type: 'use-team', id: 'lib:web-team' })).map((answer) => answer.declined), [true], 'the next request runs');
+  h.close();
+});
+
+test('versions: a burst within one millisecond is named after that millisecond, the newest stay when old ones are dropped, and one taken a moment later is the latest', async () => {
+  const library = new TeamLibrary(await mkdtemp(path.join(tmpdir(), 'near-ai-teams-')));
+  const file = TeamLibrary.projectTeamFile(await mkdtemp(path.join(tmpdir(), 'p-')));
+  await mkdir(path.dirname(file), { recursive: true });
+  const { versionLabel } = await import('../services/teamStudioPage');
+  const realNow = Date.now;
+  const at = 1_700_000_000_000;
+  const contents = async () => Promise.all((await library.versions(file)).map((version) => readFile(version, 'utf8')));
+  try {
+    Date.now = () => at;
+    for (let n = 1; n <= 25; n += 1) { await writeFile(file, `v${n}`); await library.snapshot(file); }
+    const names = (await library.versions(file)).map((version) => path.basename(version));
+    assert.equal(names.length, 20, 'the latest 20 are kept');
+    assert.deepEqual([...new Set(names.map((name) => versionLabel(name).replace(/ \(\d+\)$/, '')))], ['2023-11-14 22:13:20 UTC'], 'never named after a later time than it was taken');
+    assert.equal(new Set(names.map((name) => versionLabel(name))).size, names.length, 'and no two History labels are the same');
+    assert.deepEqual(await contents(), Array.from({ length: 20 }, (_, index) => `v${25 - index}`), 'newest first, and the oldest five were the ones dropped');
+    Date.now = () => at + 1;
+    await writeFile(file, 'a moment later');
+    await library.snapshot(file);
+    assert.equal((await contents())[0], 'a moment later', 'the latest');
+  } finally { Date.now = realNow; }
+  // A version named the old way (before sequence numbers) is read and ordered by its time.
+  const dir = path.dirname((await library.versions(file))[0]!);
+  await writeFile(path.join(dir, `${new Date(at + 5).toISOString().replace(/[:.]/g, '-')}.md`), 'old style, later');
+  assert.equal((await contents())[0], 'old style, later');
+  assert.equal((await contents()).length, 21, 'the 20 kept, and the one written by hand');
 });
