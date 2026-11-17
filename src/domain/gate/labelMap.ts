@@ -32,7 +32,23 @@ export interface LabelMapPayload {
   readonly project?: Label;
   /** Keyed by normalised project-relative path; a folder's key ends with `/`. */
   readonly entries: Readonly<Record<string, Label>>;
+  /**
+   * The map's revision (D-59): a whole number every signed write raises by one, so an older signed copy put back is told apart from the newest. Absent
+   * means 0. Inside the signed bytes like everything else.
+   */
+  readonly revision?: number;
+  /**
+   * The keys this revision dropped from the one before it (D-59): a removal or a rename is a signed change that names what it took away, so a map that
+   * drops a key without naming it is held as rolled back. The project entry is PROJECT_ENTRY_KEY. Absent means none.
+   */
+  readonly removed?: readonly string[];
 }
+
+/** The key that names the project entry in `removed` and in an entry count. No path key can be it, because a path key never starts with `(`. */
+export const PROJECT_ENTRY_KEY = '(project)';
+
+/** The most keys one revision may name as removed; a larger removal is split by the writer into several revisions. */
+export const MAX_REMOVED_KEYS = 5000;
 
 /** Where a resolved label came from. */
 export type LabelOrigin = 'file' | 'folder' | 'project' | 'default';
@@ -74,7 +90,7 @@ function entriesOf(pairs: ReadonlyArray<readonly [string, Label]>): Readonly<Rec
 /** Parses a label map payload. Unknown fields, a key that is not canonical, and a label that does not parse against the scales are each refused. */
 export function parseLabelMap(value: unknown, scales: ScaleTable, path = ''): Parsed<LabelMapPayload> {
   if (!isRecord(value)) return refused('wrong-type', path);
-  const keys = checkKeys(value, path, ['labelMapVersion', 'vocabulary', 'entries'], ['project']);
+  const keys = checkKeys(value, path, ['labelMapVersion', 'vocabulary', 'entries'], ['project', 'revision', 'removed']);
   if (keys !== undefined) return keys;
   for (const [field, expected] of [['labelMapVersion', LABEL_MAP_VERSION], ['vocabulary', LABEL_MAP_VOCABULARY]] as const) {
     const found = ownValue(value, field);
@@ -98,8 +114,51 @@ export function parseLabelMap(value: unknown, scales: ScaleTable, path = ''): Pa
     if (!label.ok) return label;
     pairs.push([key, label.value]);
   }
-  const payload = { labelMapVersion: LABEL_MAP_VERSION, vocabulary: LABEL_MAP_VOCABULARY, entries: entriesOf(pairs) } as const;
-  return { ok: true, value: Object.freeze(project === undefined ? payload : { ...payload, project }) };
+  let revision: number | undefined;
+  if (Object.prototype.hasOwnProperty.call(value, 'revision')) {
+    const found = ownValue(value, 'revision');
+    if (typeof found !== 'number' || !Number.isSafeInteger(found) || found < 0) return refused('wrong-type', childPath(path, 'revision'));
+    revision = found;
+  }
+  let removed: readonly string[] | undefined;
+  if (Object.prototype.hasOwnProperty.call(value, 'removed')) {
+    const found = ownValue(value, 'removed');
+    if (!Array.isArray(found) || found.length > MAX_REMOVED_KEYS) return refused('wrong-type', childPath(path, 'removed'));
+    const keysRemoved: string[] = [];
+    for (const [index, key] of found.entries()) {
+      if (typeof key !== 'string' || (key !== PROJECT_ENTRY_KEY && !canonicalKey(key).ok)) return refused('wrong-type', `${childPath(path, 'removed')}[${String(index)}]`);
+      keysRemoved.push(key);
+    }
+    removed = Object.freeze(keysRemoved);
+  }
+  return { ok: true, value: build(project, pairs, revision, removed) };
+}
+
+/** The map's revision: 0 when it carries none. */
+export function labelMapRevision(map: LabelMapPayload): number {
+  return map.revision ?? 0;
+}
+
+/** Every key the map holds, the project entry as PROJECT_ENTRY_KEY, sorted: what an entry count and a removal check compare. */
+export function labelMapKeys(map: LabelMapPayload): readonly string[] {
+  return Object.freeze([...Object.keys(map.entries), ...(map.project === undefined ? [] : [PROJECT_ENTRY_KEY])].sort());
+}
+
+/**
+ * The next signed revision after `previous`: `next` with its revision one above the previous one and `removed` naming every key of `previous` it no longer
+ * holds (D-59). Only a writer calls this; a reader never trusts a revision it did not verify.
+ */
+export function nextRevision(previous: LabelMapPayload | undefined, next: LabelMapPayload): LabelMapPayload {
+  const kept = new Set(labelMapKeys(next));
+  const dropped = previous === undefined ? [] : labelMapKeys(previous).filter((key) => !kept.has(key));
+  return withRevision(next, (previous === undefined ? 0 : labelMapRevision(previous)) + 1, dropped);
+}
+
+/** `map` at the given revision, naming `removed` (none when empty). */
+export function withRevision(map: LabelMapPayload, revision: number, removed: readonly string[]): LabelMapPayload {
+  if (!Number.isSafeInteger(revision) || revision < 0) throw new RangeError('A revision is a whole number from 0.');
+  const named = [...new Set(removed)].sort();
+  return build(map.project, pairsOf(map), revision, named.length === 0 ? undefined : named);
 }
 
 /** The keys that could hold a label for this path, nearest first: the file's own key, then each ancestor folder up to the top. */
@@ -162,9 +221,16 @@ function assertKey(key: string): void {
   if (!canonicalKey(key).ok) throw new RangeError('That path cannot be used as a label map key.');
 }
 
-function build(project: Label | undefined, pairs: ReadonlyArray<readonly [string, Label]>): LabelMapPayload {
-  const payload = { labelMapVersion: LABEL_MAP_VERSION, vocabulary: LABEL_MAP_VOCABULARY, entries: entriesOf(pairs) } as const;
-  return Object.freeze(project === undefined ? payload : { ...payload, project });
+/** A frozen map. `revision` and `removed` are kept only when given, so a map written before D-59 keeps its exact bytes. */
+function build(project: Label | undefined, pairs: ReadonlyArray<readonly [string, Label]>, revision?: number, removed?: readonly string[]): LabelMapPayload {
+  return Object.freeze({
+    labelMapVersion: LABEL_MAP_VERSION,
+    vocabulary: LABEL_MAP_VOCABULARY,
+    ...(project === undefined ? {} : { project }),
+    entries: entriesOf(pairs),
+    ...(revision === undefined ? {} : { revision }),
+    ...(removed === undefined ? {} : { removed: Object.freeze([...removed]) })
+  });
 }
 
 function pairsOf(map: LabelMapPayload): Array<readonly [string, Label]> {
@@ -207,4 +273,28 @@ export function moveLabelEntry(map: LabelMapPayload, from: string, to: string): 
 /** The keys of entries whose path `exists` says is gone (a folder key keeps its trailing `/`), in sorted order, so a person can be asked what to do. */
 export function missingLabelPaths(map: LabelMapPayload, exists: (key: string) => boolean): readonly string[] {
   return Object.freeze(Object.keys(map.entries).filter((key) => !exists(key)).sort());
+}
+
+/**
+ * What a project's label map says, as a reader on disk found it (D-25, D-53, D-59): `none` (no map and nothing verified before), `verified`, `unverified`
+ * (it only raises, over what this computer last verified), `unreadable` and `rolled-back` (missing or older than what this computer last verified). The last
+ * two hold agent reads in the project.
+ */
+export const LABEL_MAP_STATES = Object.freeze(['none', 'verified', 'unverified', 'unreadable', 'rolled-back'] as const);
+export type LabelMapState = (typeof LABEL_MAP_STATES)[number];
+
+/** A map read under one set of scales: its state, the sentence the person needs when there is one, the labelled paths that are gone, and the resolution. */
+export interface LabelView {
+  readonly state: LabelMapState;
+  readonly problem?: string;
+  readonly missing: readonly string[];
+  /** The label of a project-relative path (a folder ends with `/`, the project is the empty path), the bundle's default label last. */
+  resolve(relativePath: string, defaultLabel: Label): ResolvedLabel;
+}
+
+/** Where a runtime reads a project's labels. The host gives one per project; it is read again only when the file changes. */
+export interface LabelSource {
+  view(scales: ScaleTable): Promise<LabelView>;
+  /** Moves the entry of a path an agent's command renamed (D-26), signed by the host; absent where nothing can sign. */
+  followMove?(from: string, to: string): Promise<void>;
 }

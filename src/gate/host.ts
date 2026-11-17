@@ -19,9 +19,17 @@ import { isModelRequestRecord } from '../domain/gate/record';
 import { DecisionLog, INSTALL_LOG_KEY, projectLogKey } from './decisionLog';
 import type { LogKind } from './decisionLog';
 import type { SessionRoute } from './sessionMark';
+import { SHIPPED_DEFAULT_LABEL } from '../domain/gate/bundle';
+import { moveLabelEntry } from '../domain/gate/labelMap';
+import type { LabelMapPayload } from '../domain/gate/labelMap';
+import { SCALE_PRESETS } from '../domain/gate/labels';
+import type { Clearance, Label, LabelEventId, ScaleMapping, ScaleTable } from '../domain/gate/labels';
+import { LabelMapError, LabelReader, updateLabelMap } from './labelMapStore';
+import type { LabelMapWrite } from './labelMapStore';
 
 const DEVICE_UNKNOWN = 'device-unknown';
 const POLICY_SESSION = 'policy';
+const LABEL_SESSION = 'labels';
 /** The session id of a model request made outside every session route. */
 export const NO_SESSION_ID = 'no-session';
 const START_FAILED_DETAIL = 'The policy check threw before it could finish.';
@@ -105,6 +113,10 @@ export class GateHost {
    */
   private readonly retiring = new Map<string, { readonly log: DecisionLog; readonly pending: Promise<void> }>();
   private readonly listeners = new Set<() => void>();
+  /** Label readers by project key, kept and let go with the project's logs (CLAS-01). */
+  private readonly labelReaders = new Map<string, LabelReader>();
+  /** Problems with automatic label writes already told this window, so each is said once. */
+  private readonly toldLabelProblems = new Set<string>();
 
   public constructor(private readonly options: GateHostOptions) {}
 
@@ -169,8 +181,108 @@ export class GateHost {
       locations: { globalStorage: this.options.globalStorageDir, ...(this.options.home === undefined ? {} : { home: this.options.home }) },
       productVersion: this.options.productVersion,
       clock: () => this.now(),
-      newRecordId: () => randomUUID()
+      newRecordId: () => randomUUID(),
+      // Each folder the run works in has its own reader (a sub-agent's worktree included), kept by the host and read again only when the file changes.
+      labels: (folder: string) => this.labelsFor(folder)
     };
+  }
+
+  /**
+   * The label reader of a project (CLAS-01, D-25): one per root, kept like the project's logs (let go by retainProjectLogs), read again only when the file
+   * or its marker changes. Its notices (a map that does not verify, cannot be read or was rolled back, labelled paths that are gone) are said once.
+   */
+  public labelsFor(root: string): LabelReader {
+    const key = projectLogKey(root);
+    let reader = this.labelReaders.get(key);
+    if (reader === undefined) {
+      reader = new LabelReader(root, {
+        globalStorageDir: this.options.globalStorageDir,
+        secrets: this.options.secrets,
+        onNotice: (message) => { try { this.options.onProblem?.(message); } catch { /* a notice never changes a decision */ } },
+        move: (from, to) => this.followRename(root, from, to)
+      });
+    }
+    this.labelReaders.delete(key);
+    this.labelReaders.set(key, reader);
+    for (const old of [...this.labelReaders.keys()].slice(0, Math.max(0, this.labelReaders.size - MAX_PROJECT_LOGS))) this.labelReaders.delete(old);
+    return reader;
+  }
+
+  /** What labels are judged by now: the valid policy's scales, mappings, clearances and default label, or a failed-closed policy's (no clearances). */
+  public labelPolicy(): { readonly valid: boolean; readonly scales: ScaleTable; readonly mappings: readonly ScaleMapping[]; readonly clearances: readonly Clearance[]; readonly defaultLabel: Label } {
+    const state = this.bundleState();
+    if (state.state === 'valid') return { valid: true, scales: state.bundle.scales, mappings: state.bundle.mappings, clearances: state.bundle.clearances, defaultLabel: state.bundle.defaultLabel };
+    return { valid: false, scales: SCALE_PRESETS, mappings: [], clearances: [], defaultLabel: SHIPPED_DEFAULT_LABEL };
+  }
+
+  /**
+   * Changes a project's labels through the one writer (updateLabelMap), with this policy's scales, and has the project's reader read the file again.
+   * `confirm` is the person's answer before an unverified map is signed again or the last verified labels are restored; with none, such a write is refused.
+   */
+  public async changeLabels(root: string, change: (map: LabelMapPayload) => LabelMapPayload, confirm?: (question: 'resign' | 'restore') => Promise<boolean>): Promise<LabelMapWrite> {
+    await this.start();
+    const policy = this.labelPolicy();
+    try {
+      return await updateLabelMap(root, change, {
+        globalStorageDir: this.options.globalStorageDir,
+        secrets: this.options.secrets,
+        scales: policy.scales,
+        defaultLabel: policy.defaultLabel,
+        ...(confirm === undefined ? {} : { confirm }),
+        ...(this.options.now === undefined ? {} : { now: this.options.now })
+      });
+    } finally {
+      this.labelReaders.get(projectLogKey(root))?.invalidate();
+    }
+  }
+
+  /**
+   * Records a label event (GATE-07) in the project's log, the way the policy's events are written: the event as the operation, the project-relative path as
+   * the resource (`project` for the project itself, never a machine path), the new label, and the reason a person gave.
+   */
+  public recordLabelEvent(root: string, event: { readonly event: LabelEventId; readonly path: string; readonly label?: Label; readonly reason?: string }): void {
+    try {
+      const record = buildDecisionRecord({
+        recordId: randomUUID(),
+        sequence: 0,
+        time: this.now(),
+        productVersion: this.options.productVersion,
+        actor: { kind: 'person', deviceFingerprint: this.deviceFingerprint(), sessionId: LABEL_SESSION },
+        callId: `${event.event}-${this.now()}`,
+        capability: { verb: 'plan' },
+        resource: { name: event.path === '' ? 'project' : event.path.slice(0, 300), type: 'label' },
+        outcome: 'allowed',
+        rule: event.event,
+        ...(event.reason === undefined || event.reason === '' ? {} : { reason: event.reason.slice(0, 500) }),
+        bundleHash: this.current.state === 'valid' ? this.current.hash : '',
+        ...(event.label === undefined ? {} : { label: event.label })
+      });
+      void this.logFor(root).append({ ...record, api: { ...record.api, operation: event.event } });
+    } catch {
+      // A record that cannot be kept never changes the label.
+    }
+  }
+
+  /** An agent's rename moves the entry (D-26), when an entry is there; an automatic write never signs a map that does not verify, and says so once. */
+  public async followRename(root: string, from: string, to: string): Promise<void> {
+    let moved = false;
+    try {
+      await this.changeLabels(root, (map) => {
+        const folder = from.endsWith('/');
+        const affected = Object.keys(map.entries).some((key) => (folder ? key.startsWith(from) : key === from));
+        if (!affected) return map;
+        moved = true;
+        return moveLabelEntry(map, from, to);
+      });
+    } catch (error) {
+      const message = error instanceof LabelMapError ? `A label was not moved with a renamed file. ${error.message}` : 'A label was not moved with a renamed file.';
+      if (!this.toldLabelProblems.has(message)) {
+        this.toldLabelProblems.add(message);
+        try { this.options.onProblem?.(message); } catch { /* ignored */ }
+      }
+      return;
+    }
+    if (moved) this.recordLabelEvent(root, { event: 'label.set', path: to, reason: `The label moved with the file, renamed from ${from}.` });
   }
 
   /**
@@ -231,6 +343,7 @@ export class GateHost {
     if (open !== undefined) keep.add(projectLogKey(open));
     // Both kinds of log follow the same rule: a project's model-request log is let go with its decision log.
     for (const slot of [...this.logs.keys()]) if (!keep.has(keyOfSlot(slot))) this.retire(slot);
+    for (const key of [...this.labelReaders.keys()]) if (!keep.has(key)) this.labelReaders.delete(key);
   }
 
   /** The keys of the decision logs held open now, install log included, least recently used first. For tests and diagnostics. */

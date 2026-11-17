@@ -19,7 +19,8 @@ import { buildDecisionRecord, outcomeOf } from '../domain/gate/record';
 import type { DecisionOutcome, DecisionRecord, DecisionResource } from '../domain/gate/record';
 import { fromActionCapability } from '../domain/gate/vocabulary';
 import type { Capability } from '../domain/gate/vocabulary';
-import { classifyCommand, commandMaySend, downloadSegments, MAX_COMMAND_LENGTH, MAX_COMMAND_WORDS, namesCredentialFile } from './commandSafety';
+import { classifyCommand, commandMaySend, downloadSegments, namesCredentialFile } from './commandSafety';
+import { commandWords, labelVerdictFor, linkResolver, pathLike, readEffectPaths } from './gateLabels';
 import type { CommandContext, CommandEffect, PackageScriptsAt } from './commandSafety';
 import { decidePermissionAsync, denyListReason, isAutoAllowed } from './permissions';
 import type { AutoApprovalContext, PermissionDecision, PermissionRules, RunGrants } from './permissions';
@@ -218,14 +219,6 @@ function floorClassifierContext(input: FloorFactsInput): CommandContext {
   };
 }
 
-/** How many words of a command are resolved through links when looking for a credential file it reads. */
-const CREDENTIAL_FILE_LINK_CHECKS = 64;
-
-/** A word that looks like a path, so it is worth resolving through links: it has a `/`, or starts with `~` or `.` (PR #76 review round 2). */
-function pathLike(word: string): boolean {
-  return word.includes('/') || word.startsWith('~') || word.startsWith('.');
-}
-
 /**
  * The file that may hold credentials a shell command reads, as written, or undefined (owner decision after PR #74, D-18): one its text names (`.env`, a key
  * file, `.ssh/`), a word that is one by its name, or a path-like word that resolves to one from the shell's folder, links followed (each resolved once per
@@ -237,23 +230,13 @@ export async function shellReadsCredentialFile(command: string, context: { root:
   if (command.trim() === '') return undefined;
   const named = namesCredentialFile(command);
   if (named !== undefined) return named;
-  const readable = command.slice(0, MAX_COMMAND_LENGTH);
-  const words = readable.split(/[\s'"`;&|()<>=]+/).filter((word) => word !== '' && !word.startsWith('-') && !word.includes('$')).slice(0, MAX_COMMAND_WORDS);
+  // The same words and the same link bound as the label check (gateLabels.ts), so the two never disagree about what a command names.
   const cwd = context.shell?.workingDirectory ?? context.root;
-  const resolved = new Map<string, Promise<string | undefined>>();
-  const resolve = (absolute: string): Promise<string | undefined> => {
-    let found = resolved.get(absolute);
-    if (found === undefined) {
-      found = (options.realpath ?? realpath)(absolute).then((real) => real, () => undefined);
-      resolved.set(absolute, found);
-    }
-    return found;
-  };
-  for (const word of words) {
+  const resolve = linkResolver(options.realpath === undefined ? {} : { realpath: options.realpath });
+  for (const word of commandWords(command)) {
     const absolute = path.resolve(cwd, word);
     if (isSensitivePath(word) || isSensitivePath(absolute)) return word.slice(0, 120);
     if (!pathLike(word) || /[*?[]/.test(word)) continue;
-    if (!resolved.has(absolute) && resolved.size >= CREDENTIAL_FILE_LINK_CHECKS) continue;
     const real = await resolve(absolute);
     if (real !== undefined && real !== absolute && isSensitivePath(real)) return word.slice(0, 120);
   }
@@ -633,7 +616,10 @@ function recordFor(runtime: GateRuntime, gated: GatedCall, outcome: DecisionOutc
     outcome,
     rule,
     ...(reason === undefined || reason === '' ? {} : { reason }),
-    bundleHash: bundleHashOf(runtime)
+    bundleHash: bundleHashOf(runtime),
+    // A refusal for a label names the label that decided it; a failed clearance check is recorded as such (GATE-07).
+    ...(rule.startsWith('label.') && gated.request.labelVerdict?.label !== undefined ? { label: gated.request.labelVerdict.label } : {}),
+    ...(rule === 'label.dominance' ? { clearanceFailure: true } : {})
   });
 }
 
@@ -748,6 +734,13 @@ export async function gateToolCall(runtime: GateRuntime, input: GateCallInput, o
   const credentialHold = credentialRead === undefined ? undefined
     : (input.command === undefined ? callSendsOffMachine(input.tool, effects) : read?.effectsUnknown !== undefined || shellMaySend(input.command, { command: input.command, root: input.root, ...(input.shell ?? {}), ...(runtime.locations ?? {}) }))
       ? credentialHoldReason(credentialRead, input.command !== undefined) : undefined;
+  // The label verdict (CLAS-03, D-28): every path the call reads, and for a command every path its words name, checked against the clearances here, so
+  // decide() stays pure. A command, or a call whose effects are unknown, may read anything, so a label file that is held holds it too (D-53, D-59).
+  const labelVerdict = await labelVerdictFor(runtime, {
+    root: input.root,
+    reads: readEffectPaths(effects.length > 0 ? effects : declared),
+    mayReadAnything: input.command !== undefined || effects.length === 0
+  });
   const request: GateRequest = {
     actor: runtime.actor,
     tool: input.tool.name,
@@ -757,6 +750,7 @@ export async function gateToolCall(runtime: GateRuntime, input: GateCallInput, o
     presence: runtime.presence,
     policy: input.policy,
     manifestContexts: input.tool.manifest.contexts,
+    ...(labelVerdict === undefined ? {} : { labelVerdict }),
     ...(input.command === undefined ? {} : { command: input.command }),
     ...(input.forbidden === undefined || input.forbidden === '' ? {} : { forbidden: input.forbidden }),
     ...(input.sensitive === undefined || input.sensitive === '' ? {} : { sensitive: input.sensitive }),

@@ -9,6 +9,8 @@ import { FLOOR_RULE_ORDER, floorFor } from './floor';
 import type { FloorInput, FloorLocations } from './floor';
 import type { DecisionRecord } from './record';
 import { LABEL_EVENT_IDS } from './labels';
+import type { Label } from './labels';
+import type { LabelSource } from './labelMap';
 import { ROUTE_EVENT_IDS, ROUTE_RULES } from './routing';
 
 /** Whether a person can answer a card right now. A sub-agent of a chat run still has a person, so this is not the same idea as `unattended` (Pitfall 3). */
@@ -30,6 +32,8 @@ export interface ActorRef {
 export interface LabelVerdict {
   readonly rule: 'label.dominance' | 'label.no-agent-tools' | 'label.network-at-mark';
   readonly reason: string;
+  /** The label that decided it, for the record; absent when no single label did (a label file that cannot be read). */
+  readonly label?: Label;
 }
 
 export interface GateRequest extends FloorInput {
@@ -118,6 +122,12 @@ export interface GateRuntime {
   readonly productVersion?: string;
   readonly clock?: () => number;
   readonly newRecordId?: () => string;
+  /**
+   * The labels of a folder the run works in (CLAS-01, CLAS-03): the host gives every runtime the reader it keeps for each root, so a sub-agent in its own
+   * worktree reads that worktree's file. Only unavailableGateRuntime and a test runtime that gives none leave it out; a caller then reads the folder's label
+   * file trusting no key, so a label it holds only raises (fail closed).
+   */
+  readonly labels?: (root: string) => LabelSource;
 }
 
 /**

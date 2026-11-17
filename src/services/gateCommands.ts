@@ -5,13 +5,19 @@
 // It also owns what the person sees of the policy (OFFL-02, D-13, D-33, D-41): the status bar item, NEAR AI: Show Policy (a read-only virtual document, so
 // nothing is ever written by looking), NEAR AI: Reset Policy to Defaults (confirmed in a modal, recorded, the only path that re-signs a bundle that failed
 // verification) and the Policy step in the setup view.
+import { stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
+import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { CAPABILITY_VERBS } from '../domain/gate/vocabulary';
 import type { BundleState } from '../domain/gate/bundle';
-import { CLEARANCE_SELF_ASSERTED_TEXT, SCALE_PRESETS_CAVEAT_TEXT, labelKey } from '../domain/gate/labels';
+import { CLEARANCE_SELF_ASSERTED_TEXT, HANDLING_FLAGS, LABELS_NOT_ACCREDITATION_TEXT, LABEL_TOKEN_PATTERN, SCALE_PRESETS_CAVEAT_TEXT, labelKey, parseLabel } from '../domain/gate/labels';
+import type { Label } from '../domain/gate/labels';
+import { dominates, raiseMark } from '../domain/gate/dominance';
+import { labelMapKey, setLabelEntry, setProjectLabel } from '../domain/gate/labelMap';
 import { BundleStoreError } from '../gate/bundleStore';
 import { GateHost } from '../gate/host';
+import { LABEL_MAP_RESIGN_QUESTION, LABEL_MAP_RESTORE_QUESTION, LabelMapError } from '../gate/labelMapStore';
 import { setDefaultSessionRoute } from '../gate/sessionMark';
 import type { SecretStorageLike } from './auth';
 import { SHOW_POLICY_COMMAND, createGateStatusBar, expiryDate, policyProblem } from './gateStatusBar';
@@ -20,6 +26,7 @@ import { registerSetupStep } from './setupSteps';
 import type { SetupStep } from './setupSteps';
 
 export const RESET_POLICY_COMMAND = 'nearAi.policy.reset';
+export const SET_LABEL_COMMAND = 'nearAi.label.set';
 export const POLICY_SCHEME = 'near-ai-policy';
 export const POLICY_DOCUMENT_URI = `${POLICY_SCHEME}:/NEAR-AI-Policy.txt`;
 
@@ -241,9 +248,151 @@ function registerPolicySurfaces(context: GateActivationContext, host: GateHost, 
   attempt('Reset Policy to Defaults', () => {
     keep(vscode.commands.registerCommand(RESET_POLICY_COMMAND, () => resetPolicy(host)));
   });
+  attempt('Set Label', () => {
+    keep(vscode.commands.registerCommand(SET_LABEL_COMMAND, async (uri?: unknown) => {
+      const target = await labelTargetOf(uri);
+      if (target === undefined) {
+        tell('Open a folder first: labels are kept in the project.');
+        return false;
+      }
+      return setLabel(host, target);
+    }));
+  });
   attempt('the policy setup step', () => {
     keep(registerSetupStep(policySetupStep(host, clock)));
   });
+}
+
+// ---------------------------------------------------------------------------------------------------------------------------------------------------
+// Set Label (CLAS-01, CLAS-02, CLAS-07, D-25, D-27, D-33, GATE-07)
+
+/** The scales whose levels come from secondary copies or a reading of their families, which the caveat is shown beside (D-23). */
+const CAVEAT_SCALES: ReadonlySet<string> = new Set(['ca-protected', 'ca-classified', 'nato']);
+
+export const REMOVE_LABEL_ITEM = 'Remove this label';
+export const SIGN_AGAIN_ACTION = 'Sign Again';
+export const LOWER_REASON_PROMPT = 'This lowers the label. Say why, in a few words. The reason is kept in this project\'s decision record.';
+export const COMPARTMENTS_PROMPT = 'Compartments (optional): capital letters and digits, separated by spaces. Leave empty for none.';
+export const HANDLING_PLACEHOLDER = 'Handling (optional): local-only keeps it on this computer, no-agent-tools keeps agents from reading it.';
+
+/** The words of the refusal when the person's own clearance does not cover the label they chose (D-27). */
+export function notYourClearanceText(label: Label): string {
+  return `You cannot set ${labelKey(label)}: your policy gives you no clearance that covers it, so you could not read what you label. Add a clearance with NEAR AI: Edit Policy first. ${CLEARANCE_SELF_ASSERTED_TEXT}`;
+}
+
+/** What Set Label acts on: a project, and a project-relative path in it (a folder ends with `/`, the project itself is the empty path). */
+export interface LabelTarget {
+  readonly root: string;
+  readonly path: string;
+}
+
+function labelShown(label: Label): string {
+  const parts = [labelKey(label)];
+  if (label.compartments.length > 0) parts.push(`compartments ${label.compartments.join(', ')}`);
+  if (label.handling.length > 0) parts.push(label.handling.join(', '));
+  return parts.join(', ');
+}
+
+/** True when `next` is lower than `current` on some scale: raising `next` by every label of `current` changes it. */
+function lowers(current: readonly Label[], next: Label | undefined, scales: Parameters<typeof raiseMark>[2]): boolean {
+  if (next === undefined) return current.length > 0;
+  let raised: readonly Label[] = [next];
+  for (const label of current) raised = raiseMark(raised, label, scales);
+  return JSON.stringify(raised) !== JSON.stringify([next]);
+}
+
+/**
+ * NEAR AI: Set Label. Before the first pick the person sees LABELS_NOT_ACCREDITATION_TEXT (CLAS-07), and beside the government and NATO scales the scales
+ * caveat (CLAS-02). The person picks a scale, a level, optional compartments and handling flags. A label their own clearance does not cover is refused with
+ * the Edit Policy hint (D-27); lowering a label asks for a reason. The change is signed into the project's label file and recorded as label.set.
+ * Returns true when a label was set or removed.
+ */
+export async function setLabel(host: GateHost, target: LabelTarget): Promise<boolean> {
+  await host.state();
+  const policy = host.labelPolicy();
+  const key = target.path === '' ? '' : labelMapKey(target.path.replace(/\/$/, ''), target.path.endsWith('/'));
+  if (typeof key !== 'string' && !key.ok) {
+    void Promise.resolve(vscode.window.showWarningMessage('NEAR AI cannot label that path. Pick a file or folder inside the project.')).catch(() => undefined);
+    return false;
+  }
+  const keyText = typeof key === 'string' ? key : key.value;
+  const view = await host.labelsFor(target.root).view(policy.scales);
+  const current = view.resolve(keyText, policy.defaultLabel);
+  const own = current.origin === (keyText === '' ? 'project' : keyText.endsWith('/') ? 'folder' : 'file');
+  const shownTarget = keyText === '' ? 'this project' : keyText;
+  type ScaleItem = vscode.QuickPickItem & { readonly scale?: string; readonly remove?: true };
+  const scaleItems: ScaleItem[] = Object.keys(policy.scales).sort().map((scale) => ({
+    label: scale,
+    description: policy.scales[scale]?.name ?? scale,
+    ...(CAVEAT_SCALES.has(scale) ? { detail: SCALE_PRESETS_CAVEAT_TEXT } : {}),
+    scale
+  }));
+  if (own) scaleItems.push({ label: REMOVE_LABEL_ITEM, description: `now ${labelShown(current.mark[0]!)}`, remove: true });
+  // CLAS-07: the not-accreditation words come before the first choice, even on a fresh install with no label anywhere.
+  const scalePick = await vscode.window.showQuickPick(scaleItems, { title: `Set the label of ${shownTarget}`, placeHolder: LABELS_NOT_ACCREDITATION_TEXT });
+  if (scalePick === undefined) return false;
+  let label: Label | undefined;
+  if (scalePick.remove !== true) {
+    const scale = scalePick.scale!;
+    const levels = policy.scales[scale]?.levels ?? [];
+    const levelPick = await vscode.window.showQuickPick(levels.map((level) => ({ label: level })), { title: `Level on ${scale}`, placeHolder: CAVEAT_SCALES.has(scale) ? SCALE_PRESETS_CAVEAT_TEXT : 'Pick a level, lowest first.' });
+    if (levelPick === undefined) return false;
+    const typed = await vscode.window.showInputBox({ prompt: COMPARTMENTS_PROMPT, title: 'Compartments', validateInput: (value: string) => (value.trim() === '' || value.trim().split(/\s+/).every((token) => LABEL_TOKEN_PATTERN.test(token)) ? undefined : 'Use capital letters and digits, with - or _ after the first one, up to 32 characters each.') });
+    if (typed === undefined) return false;
+    const compartments = [...new Set(typed.trim() === '' ? [] : typed.trim().split(/\s+/))].sort();
+    const handlingPick = await vscode.window.showQuickPick(HANDLING_FLAGS.map((flag) => ({ label: flag })), { title: 'Handling', placeHolder: HANDLING_PLACEHOLDER, canPickMany: true });
+    if (handlingPick === undefined) return false;
+    const handling = (handlingPick as readonly vscode.QuickPickItem[]).map((item) => item.label).sort();
+    const parsed = parseLabel({ scale, level: levelPick.label, compartments, releasability: [], handling }, policy.scales);
+    if (!parsed.ok) {
+      void Promise.resolve(vscode.window.showWarningMessage('Nothing was changed: that label is not one your policy knows.')).catch(() => undefined);
+      return false;
+    }
+    label = parsed.value;
+    // D-27: a person labels only what their own clearance covers, so they never lock themselves out of their own files by mistake.
+    const context = { scales: policy.scales, mappings: policy.mappings, now: host.now() };
+    if (!policy.valid || !policy.clearances.some((clearance) => dominates(clearance, label!, context))) {
+      void Promise.resolve(vscode.window.showWarningMessage(notYourClearanceText(label))).catch(() => undefined);
+      return false;
+    }
+  }
+  let reason: string | undefined;
+  if (lowers(current.origin === 'default' ? [] : current.mark, label, policy.scales)) {
+    const given = await vscode.window.showInputBox({ prompt: LOWER_REASON_PROMPT, title: `Lower the label of ${shownTarget}`, validateInput: (value: string) => (value.trim() === '' ? 'A reason is needed to lower a label.' : undefined) });
+    if (given === undefined || given.trim() === '') return false;
+    reason = given.trim();
+  }
+  const confirm = async (question: 'resign' | 'restore'): Promise<boolean> => {
+    const text = question === 'resign' ? LABEL_MAP_RESIGN_QUESTION : LABEL_MAP_RESTORE_QUESTION;
+    const detail = question === 'resign'
+      ? 'The label file is not signed by this computer. Signing it again keeps the labels this computer checked, plus only the labels in the file that are stricter.'
+      : 'The label file is missing, older than the one this computer last checked, or cannot be read. Signing again writes the labels this computer last checked.';
+    return (await vscode.window.showWarningMessage(text, { modal: true, detail }, SIGN_AGAIN_ACTION)) === SIGN_AGAIN_ACTION;
+  };
+  try {
+    await host.changeLabels(target.root, (map) => (keyText === '' ? setProjectLabel(map, label) : setLabelEntry(map, keyText, label)), confirm);
+  } catch (error) {
+    void Promise.resolve(vscode.window.showWarningMessage(error instanceof LabelMapError ? error.message : 'Nothing was changed: NEAR AI could not save the label.')).catch(() => undefined);
+    return false;
+  }
+  host.recordLabelEvent(target.root, { event: 'label.set', path: keyText, ...(label === undefined ? {} : { label }), ...(reason === undefined ? {} : { reason }) });
+  void Promise.resolve(vscode.window.showInformationMessage(label === undefined ? `The label of ${shownTarget} was removed.` : `${shownTarget} is labelled ${labelShown(label)}.`)).catch(() => undefined);
+  return true;
+}
+
+/** The project and project-relative path of what the Explorer gave (a file or a folder), or the open project from the Command Palette. */
+async function labelTargetOf(uri: unknown): Promise<LabelTarget | undefined> {
+  const fsPath = typeof uri === 'object' && uri !== null && typeof (uri as { fsPath?: unknown }).fsPath === 'string' ? (uri as { fsPath: string }).fsPath : undefined;
+  if (fsPath === undefined) {
+    const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    return root === undefined ? undefined : { root, path: '' };
+  }
+  const folder = vscode.workspace.getWorkspaceFolder(uri as vscode.Uri);
+  if (folder === undefined) return undefined;
+  const relative = path.relative(folder.uri.fsPath, fsPath).split(path.sep).join('/');
+  if (relative === '') return { root: folder.uri.fsPath, path: '' };
+  const isFolder = (await stat(fsPath).catch(() => undefined))?.isDirectory() === true;
+  return { root: folder.uri.fsPath, path: isFolder ? `${relative}/` : relative };
 }
 
 /** The only path that re-signs a bundle that failed verification: a modal the person confirms, then host.reset(), which records policy.reset. */

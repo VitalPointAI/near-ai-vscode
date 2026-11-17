@@ -8,6 +8,7 @@ import { bundleHash, defaultBundlePayload } from '../../domain/gate/bundle';
 import type { BundleState } from '../../domain/gate/bundle';
 import type { ActorRef, GateRuntime } from '../../domain/gate/decide';
 import type { DecisionRecord } from '../../domain/gate/record';
+import type { LabelSource } from '../../domain/gate/labelMap';
 import { unknownRuleListeners } from '../../domain/gate/record';
 import type { GateHost } from '../../gate/host';
 import { AgentConversation } from '../../services/agentSession';
@@ -28,7 +29,7 @@ export function testBundleState(): BundleState {
 }
 
 /** An explicit test runtime: the default policy, the floor (always enforced) and an in-memory sink. */
-export function testGateRuntime(options: { presence?: GateRuntime['presence']; context?: GateRuntime['context']; actor?: ActorRef } = {}): MemoryGateRuntime {
+export function testGateRuntime(options: { presence?: GateRuntime['presence']; context?: GateRuntime['context']; actor?: ActorRef; labels?: (root: string) => LabelSource } = {}): MemoryGateRuntime {
   const records: DecisionRecord[] = [];
   const state = testBundleState();
   return {
@@ -37,14 +38,15 @@ export function testGateRuntime(options: { presence?: GateRuntime['presence']; c
     actor: options.actor ?? { kind: 'agent', deviceFingerprint: TEST_DEVICE, sessionId: 'test-session' },
     presence: options.presence ?? 'person',
     context: options.context ?? 'interactive',
+    ...(options.labels === undefined ? {} : { labels: options.labels }),
     records
   };
 }
 
 /** A stand-in for the gate host: every runtime it gives is a test runtime for the request's own presence and context. */
-export function testGateHost(): Pick<GateHost, 'runtimeFor'> {
+export function testGateHost(options: { labels?: (root: string) => LabelSource } = {}): Pick<GateHost, 'runtimeFor'> {
   return {
-    runtimeFor: async (request) => testGateRuntime({ presence: request.presence, context: request.context, actor: { ...request.actor, deviceFingerprint: TEST_DEVICE } })
+    runtimeFor: async (request) => testGateRuntime({ presence: request.presence, context: request.context, actor: { ...request.actor, deviceFingerprint: TEST_DEVICE }, ...(options.labels === undefined ? {} : { labels: options.labels }) })
   };
 }
 

@@ -312,6 +312,11 @@
         "command": "nearAi.policy.reset",
         "title": "Reset Policy to Defaults",
         "category": "NEAR AI"
+      },
+      {
+        "command": "nearAi.label.set",
+        "title": "Set Label",
+        "category": "NEAR AI"
       }
     ],
     "viewsContainers": {
@@ -861,6 +866,12 @@
         {
           "command": "nearAi.team.verifyLog",
           "when": "config.nearAi.team.preview || nearAi.team.active"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "nearAi.label.set",
+          "group": "7_modification"
         }
       ],
       "view/title": [
