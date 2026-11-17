@@ -676,6 +676,11 @@ class FakeDoc {
   createElement(tag: string) { return new FakeNode(tag, this); }
   createElementNS(_ns: string, tag: string) { return new FakeNode(tag, this); }
   createTextNode(text: string) { const node = new FakeNode('#text', this); node.textContent = text; return node; }
+  /** The page's own document events (visibilitychange), fired by a test with fire(). */
+  visibilityState = 'visible';
+  private readonly events = new Map<string, Array<() => void>>();
+  addEventListener(type: string, listener: () => void) { this.events.set(type, [...(this.events.get(type) ?? []), listener]); }
+  fire(type: string) { for (const listener of this.events.get(type) ?? []) listener(); }
 }
 
 /** `extra`: more globals for the page (the icon tests give it a fake image decoder). */
@@ -688,10 +693,12 @@ async function runPage(extra: Record<string, unknown> = {}, options: { state?: u
   const posts: Array<Record<string, any>> = [];
   const listeners: Array<(event: { data: unknown }) => void> = [];
   const webviewState: { value: unknown } = { value: options.state };
-  const sandbox = vm.createContext({ ...extra, document: doc, window: { addEventListener: (_type: string, listener: (event: { data: unknown }) => void) => listeners.push(listener) }, acquireVsCodeApi: () => ({ postMessage: (message: Record<string, any>) => posts.push(JSON.parse(JSON.stringify(message))), getState: () => webviewState.value, setState: (value: unknown) => { webviewState.value = JSON.parse(JSON.stringify(value)); } }), setTimeout, clearTimeout, JSON, Map, Set, Date, String, Boolean, Object, isNaN, Math, Number, Option: function Option(text: string, value: string) { const node = doc.createElement('option'); node.textContent = text; node.value = value; return node; } });
+  // Window events other than messages (resize, pagehide), fired by a test with fireWindow().
+  const windowEvents = new Map<string, Array<(event: { data: unknown }) => void>>();
+  const sandbox = vm.createContext({ ...extra, document: doc, window: { addEventListener: (type: string, listener: (event: { data: unknown }) => void) => { if (type === 'message') listeners.push(listener); else windowEvents.set(type, [...(windowEvents.get(type) ?? []), listener]); } }, acquireVsCodeApi: () => ({ postMessage: (message: Record<string, any>) => posts.push(JSON.parse(JSON.stringify(message))), getState: () => webviewState.value, setState: (value: unknown) => { webviewState.value = JSON.parse(JSON.stringify(value)); } }), setTimeout, clearTimeout, JSON, Map, Set, Date, String, Boolean, Object, isNaN, Math, Number, Option: function Option(text: string, value: string) { const node = doc.createElement('option'); node.textContent = text; node.value = value; return node; } });
   vm.runInContext(await readFile(SCRIPT, 'utf8'), sandbox, { timeout: 1000 });
   const byLabel = (label: string) => doc.body.all().find((node) => node.tagName === 'button' && (node.getAttribute('aria-label') === label || (!node.getAttribute('aria-label') && node.textContent === label)));
-  return { doc, posts, webviewState, dispatch: (data: unknown) => listeners.forEach((listener) => listener({ data })), byLabel, text: () => doc.getElementById('main')!.textContent, wait: () => new Promise((resolve) => setTimeout(resolve, 200)) };
+  return { doc, posts, webviewState, fireWindow: (type: string) => (windowEvents.get(type) ?? []).forEach((listener) => listener({ data: undefined })), dispatch: (data: unknown) => listeners.forEach((listener) => listener({ data })), byLabel, text: () => doc.getElementById('main')!.textContent, wait: () => new Promise((resolve) => setTimeout(resolve, 200)) };
 }
 
 test('page: the library shows cards with actions, an empty state, and "Use in chat" posts the team id', async () => {
@@ -3626,7 +3633,9 @@ async function dashboardPage(options: { history?: boolean; running?: boolean; ha
   const cardIds = () => page.doc.body.all().filter((node) => node.tagName === 'li' && node.dataset.id).map((node) => node.dataset.id);
   const tile = (id: string) => page.doc.getElementById(id)?.textContent;
   const stars = (id: string) => page.doc.body.all().filter((node) => node.tagName === 'input' && node.name === `rate-${id.replace(/[^A-Za-z0-9_-]/g, '-')}`);
-  return { ...page, fixture, studio, card, cardIds, tile, stars };
+  const heading = () => page.doc.getElementById('step-heading')?.textContent;
+  const type = (id: string, value: string) => { const node = page.doc.getElementById(id)!; node.value = value; node.fire('input'); };
+  return { ...page, fixture, studio, card, cardIds, tile, stars, heading, type };
 }
 
 test('page: the main page is a dashboard: a summary row, then one card per team with its identity, status, models, stats, health and rating', async () => {
@@ -3820,7 +3829,8 @@ test('page: the "What should this team be able to produce?" box is not on the ma
   // A drafted team that arrives after the person left the builder is offered, not lost.
   page.byLabel('Cancel')!.click();
   page.dispatch({ type: 'team-proposal', ...PROPOSAL });
-  assert.match(page.doc.getElementById('banner')!.textContent, /The team you described is drafted/);
+  // PR 86 review, round 2: it waits on the main page itself (not in a banner another message can replace).
+  assert.match(page.text(), /A team you described is drafted: "Client team"/);
   page.byLabel('Review the drafted team')!.click();
   assert.equal(page.doc.getElementById('step-heading')!.textContent, 'Describe it, and AI drafts it');
   assert.ok(page.byLabel('Use this team'));
@@ -3903,4 +3913,113 @@ test('host to page: the dashboard the host lists for real team files and a real 
   assert.match(card('user:lonely-team').textContent, /Never run/);
   assert.equal(page.doc.getElementById('sum-runs')!.textContent, '2');
   assert.ok(now);
+});
+
+// ---------- PR 86 review, round 2: a drafted team waiting for review is state, not a banner ----------
+
+test('page: a drafted team that arrives while unsaved work is open waits on the main page and the New team screens; reviewing it asks about the open work first, and keeping that work keeps the draft', async () => {
+  const page = await dashboardPage();
+  const base = 'b'.repeat(64);
+  page.dispatch({ type: 'team', id: 'user:web', kind: 'user', file: 'My teams/web.md', command: '/team:web ', draft: draft(), base, versions: [] });
+  const desc = page.doc.getElementById('f-desc')!;
+  desc.value = 'Changed'; desc.fire('input');
+  page.dispatch({ type: 'team-proposal', ...PROPOSAL });
+  // Another banner does not take it away.
+  page.dispatch({ type: 'notice', text: 'Something else happened.' });
+  page.dispatch({ type: 'error', text: 'And something went wrong.' });
+  assert.match(page.text(), /Unsaved changes/, 'the editor is left as it is');
+  page.byLabel('Back to all teams')!.click();
+  page.dispatch({ type: 'left', choice: 'stay' });
+  page.byLabel('Back to all teams')!.click();
+  page.dispatch({ type: 'left', choice: 'discard' });
+  assert.match(page.text(), /A team you described is drafted: "Client team"/);
+  // On the New team screens too.
+  page.byLabel('New team')!.click();
+  assert.match(page.text(), /A team you described is drafted: "Client team"/);
+  page.byLabel('Create a new team')!.click();
+  assert.match(page.text(), /A team you described is drafted: "Client team"/);
+  // With unsaved work in the builder, Review it asks the host first (Discard changes / Save draft); staying keeps both.
+  page.byLabel('From scratch')!.click();
+  page.type('f-name', 'Half built');
+  page.byLabel('Back')!.click();
+  page.byLabel('Review the drafted team')!.click();
+  assert.equal(page.posts.at(-1)!.type, 'leave-wizard');
+  page.dispatch({ type: 'left', choice: 'stay' });
+  assert.equal(page.heading(), 'Create a new team');
+  assert.match(page.text(), /A team you described is drafted: "Client team"/, 'kept for later');
+  page.byLabel('Review the drafted team')!.click();
+  page.dispatch({ type: 'left', choice: 'save-draft', savedDraft: { draft: { name: 'Half built', description: '', members: [] }, step: 0, target: 'user', startingPoint: 'empty', path: 'scratch' } });
+  assert.equal(page.heading(), 'Describe it, and AI drafts it');
+  assert.ok(page.byLabel('Use this team'));
+  // Using it ends the wait.
+  page.byLabel('Use this team')!.click();
+  assert.equal(page.posts.filter((message) => message.type === 'proposal-done').length, 1);
+  for (const message of page.posts) assert.ok(parseStudioMessage(message), JSON.stringify(message));
+});
+
+test('page: a drafted team waiting when the studio is opened again is offered, and Discard removes it', async () => {
+  const page = await runPage();
+  const fixture = dashFixture();
+  page.dispatch({ type: 'state', context: context(), library: fixture.library, dashboard: fixture.dashboard, proposal: { proposal: PROPOSAL.proposal, draft: PROPOSAL.draft, problems: [] } });
+  assert.match(page.text(), /A team you described is drafted: "Client team"/);
+  page.byLabel('Discard the drafted team')!.click();
+  assert.deepEqual(page.posts.at(-1), { type: 'proposal-done' });
+  assert.doesNotMatch(page.text(), /A team you described is drafted/);
+  // A state without one (the host discarded it) clears it; a state from an older host (no proposal key) leaves what the page has.
+  const again = await runPage();
+  again.dispatch({ type: 'state', context: context(), library: fixture.library, dashboard: fixture.dashboard, proposal: { proposal: PROPOSAL.proposal, draft: PROPOSAL.draft, problems: [] } });
+  again.dispatch({ type: 'state', context: context(), library: fixture.library, dashboard: fixture.dashboard });
+  assert.match(again.text(), /A team you described is drafted/);
+  again.dispatch({ type: 'state', context: context(), library: fixture.library, dashboard: fixture.dashboard, proposal: null });
+  assert.doesNotMatch(again.text(), /A team you described is drafted/);
+  // Start over in the AI start discards it too.
+  const start = await runPage();
+  start.dispatch({ type: 'state', context: context(), library: fixture.library, dashboard: fixture.dashboard, proposal: { proposal: PROPOSAL.proposal, draft: PROPOSAL.draft, problems: [] } });
+  start.byLabel('Review the drafted team')!.click();
+  start.byLabel('Start over')!.click();
+  assert.deepEqual(start.posts.at(-1), { type: 'proposal-done' });
+});
+
+test('page: a star chosen just before the tab is hidden or closed is sent at once, not lost with the timer', async () => {
+  for (const leave of ['pagehide', 'hidden'] as const) {
+    const page = await dashboardPage();
+    const star = page.stars('user:web').find((node) => node.value === '4')!;
+    star.checked = true; star.fire('change');
+    assert.equal(page.posts.filter((message) => message.type === 'rate').length, 0);
+    if (leave === 'pagehide') page.fireWindow('pagehide');
+    else { page.doc.visibilityState = 'hidden'; page.doc.fire('visibilitychange'); }
+    assert.deepEqual(page.posts.filter((message) => message.type === 'rate'), [{ type: 'rate', id: 'user:web', rating: 4 }], leave);
+    await page.wait(); await page.wait();
+    assert.equal(page.posts.filter((message) => message.type === 'rate').length, 1, `${leave}: sent once`);
+  }
+  // Becoming visible sends nothing.
+  const page = await dashboardPage();
+  page.doc.visibilityState = 'visible'; page.doc.fire('visibilitychange');
+  assert.equal(page.posts.filter((message) => message.type === 'rate').length, 0);
+});
+
+test('host: a drafted team is kept until it is used or discarded, so it survives the studio closing; the messages are strict', async () => {
+  const h = await harness();
+  const kept: { value?: unknown } = {};
+  h.deps.proposal = { get: () => kept.value, set: async (value) => { kept.value = value; } };
+  const reply = { text: JSON.stringify({ name: 'Client team', mission: 'm', description: 'd', members: [{ name: 'a', role: 'writer', model: 'standard', produces: 'p', instructions: 'Write it. Report it.' }], outputs: [] }) };
+  const { ai } = fakeAi([TEE_MODEL], [reply]);
+  h.deps.teamAi = async () => ai;
+  await h.send({ type: 'ready' });
+  assert.equal(last(h, 'state').proposal, null, 'none waiting');
+  await h.send({ type: 'draft-team', idea: 'Client briefs' });
+  const proposal = last(h, 'team-proposal');
+  assert.deepEqual(kept.value, { proposal: proposal.proposal, draft: proposal.draft, problems: proposal.problems });
+  await h.send({ type: 'refresh' });
+  assert.deepEqual(last(h, 'state').proposal, kept.value, 'offered again after the studio is opened again');
+  await h.send({ type: 'proposal-done' });
+  assert.equal(kept.value, undefined);
+  await h.send({ type: 'refresh' });
+  assert.equal(last(h, 'state').proposal, null);
+  // Whatever was kept is checked before it is offered.
+  kept.value = { proposal: { name: 'x' }, draft: { name: 'x', description: '', members: 'nope' }, problems: [] };
+  await h.send({ type: 'refresh' });
+  assert.equal(last(h, 'state').proposal, null);
+  assert.deepEqual(parseStudioMessage({ type: 'proposal-done' }), { type: 'proposal-done' });
+  assert.equal(parseStudioMessage({ type: 'proposal-done', extra: 1 }), undefined);
 });

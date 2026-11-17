@@ -584,3 +584,34 @@ test('host: Optimise all teams from the dashboard lists the dashboard again for 
   assert.deepEqual(later.filter((message) => message.type === 'team' || message.type === 'error'), []);
   assert.ok(later.some((message) => message.type === 'library'));
 });
+
+// ---------- PR 86 review, round 2 ----------
+
+test('a running run whose file matches no listed team (another case, a link, a stale path) is matched by its name', () => {
+  const dashboard = buildDashboard({ now: NOW, history: true, sessions: [], roleTests: {}, running: [{ runId: 'run-a-000000', slug: 'web', file: '/LIB/Web.md' }, { runId: 'run-b-000000', slug: 'team', file: '/old/place/.planning/.near-ai/team.md' }], teams: [team({ id: 'user:web' }), team({ id: 'project', kind: 'project', slug: 'team', file: '/p/.planning/.near-ai/team.md' })] });
+  assert.equal(dashboard.cards['user:web']!.status, 'running');
+  assert.equal(dashboard.cards['user:web']!.runId, 'run-a-000000');
+  assert.equal(dashboard.cards['project']!.runId, 'run-b-000000');
+});
+
+test('the local check cache is keyed by the file and its content: two teams with the same text in different files are each checked', async () => {
+  const h = await host();
+  await h.library.create('One team', TEAM);
+  await h.library.create('Two team', TEAM);
+  const cache = new Map();
+  const listed = await listLibrary(h.library, h.root, directoryInput(), { checks: cache });
+  assert.equal(cache.size, 2);
+  assert.notEqual(listed.teams[0]!.check, listed.teams[1]!.check, 'each its own result');
+});
+
+test('host: rating writes are made one after another, so two ratings sent together are both kept', async () => {
+  const h = await host();
+  await h.library.create('Web team', TEAM);
+  await h.library.create('Api team', TEAM);
+  // A store that applies each write a moment later, as a real one may.
+  h.deps.ratings = { get: () => h.state.ratings, set: async (value) => { await new Promise((resolve) => setTimeout(resolve, 20)); h.state.ratings = value; } };
+  await h.send({ type: 'ready' });
+  await Promise.all([h.send({ type: 'rate', id: 'user:web-team', rating: 4 }), h.send({ type: 'rate', id: 'user:api-team', rating: 2 })]);
+  const kept = h.state.ratings as Record<string, { rating: number }>;
+  assert.deepEqual([kept['user:web-team']?.rating, kept['user:api-team']?.rating], [4, 2]);
+});
