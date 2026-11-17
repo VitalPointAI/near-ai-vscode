@@ -263,15 +263,66 @@ function onlyHandedToWithSessionRoute(source: ts.SourceFile, declaration: ts.Var
   return uses.length > 0 && uses.every((use) => isWithSessionRoute(use.parent) && use.parent.arguments.indexOf(use as ts.Expression) >= 1);
 }
 
+/** What the scan knows about AgentRun (src/agent/loop.ts): the methods run() reaches, and the options (hooks) those methods read. */
+interface ScanContext {
+  /** Set only while reading loop.ts itself: an AgentRun method counts as inside the run's route only when run() reaches it. */
+  readonly agentRunReached?: ReadonlySet<string>;
+  /** The AgentRun options that a method run() reaches reads (`this.options.<name>`): only a function given under one of these names is called by the run. */
+  readonly hooks: ReadonlySet<string>;
+}
+
+const LOOP_FILE = 'src/agent/loop.ts';
+
+/** The methods of a class declared in the file, by name. */
+function classMethods(source: ts.SourceFile, className: string): Map<string, ts.MethodDeclaration> {
+  const out = new Map<string, ts.MethodDeclaration>();
+  for (const declaration of nodesOf(source, (node): node is ts.ClassDeclaration => ts.isClassDeclaration(node) && node.name?.text === className)) {
+    for (const member of declaration.members) if (ts.isMethodDeclaration(member)) out.set(member.name.getText(source), member);
+  }
+  return out;
+}
+
+/** The methods of `className` reached from `start`, following every `this.<method>` (a call or a reference handed on) from a method already reached. */
+function reachedMethods(source: ts.SourceFile, className: string, start: string): Set<string> {
+  const methods = classMethods(source, className);
+  const reached = new Set<string>();
+  const queue = methods.has(start) ? [start] : [];
+  while (queue.length > 0) {
+    const name = queue.shift()!;
+    if (reached.has(name)) continue;
+    reached.add(name);
+    const body = methods.get(name)!;
+    for (const access of nodesOf(body, (node): node is ts.PropertyAccessExpression => ts.isPropertyAccessExpression(node) && node.expression.kind === ts.SyntaxKind.ThisKeyword)) {
+      const next = access.name.text;
+      if (methods.has(next) && !reached.has(next)) queue.push(next);
+    }
+  }
+  return reached;
+}
+
+/** The options the reached AgentRun methods read (`this.options.<name>`). */
+function hooksRead(source: ts.SourceFile, reached: ReadonlySet<string>): Set<string> {
+  const methods = classMethods(source, 'AgentRun');
+  const out = new Set<string>();
+  for (const name of reached) {
+    const body = methods.get(name);
+    if (body === undefined) continue;
+    for (const access of nodesOf(body, (node): node is ts.PropertyAccessExpression => ts.isPropertyAccessExpression(node) && ts.isPropertyAccessExpression(node.expression)
+      && node.expression.expression.kind === ts.SyntaxKind.ThisKeyword && node.expression.name.text === 'options')) out.add(access.name.text);
+  }
+  return out;
+}
+
 /**
  * Whether a node runs only inside a session route, by the shape of the code around it:
  * (a) it is inside the work given to withSessionRoute (any argument after the route);
  * (b) it is inside a function kept in a local name whose every use is the work given to withSessionRoute;
- * (c) it is inside a hook of `new AgentRun({ ... })` (beforeTurn and the rest), which the run calls only from run(), whose own call is checked;
+ * (c) it is inside a hook of `new AgentRun({ ... })` under a name that a method run() reaches reads (beforeTurn and the rest), so the run calls it only
+ *     from run(), whose own call is checked; a function under any other name is not a hook (PR #81 review);
  * (d) it is inside a method of the file's class whose every `this.<method>(` call is itself covered;
- * (e) in loop.ts only, it is inside a method of AgentRun other than the constructor: those run only from run().
+ * (e) in loop.ts only, it is inside a method of AgentRun that run() reaches (PR #81 review: not every method, since a public one could be called from outside).
  */
-function wrappedIn(source: ts.SourceFile, node: ts.Node, agentRunMethods: boolean, seen: ReadonlySet<string> = new Set()): boolean {
+function wrappedIn(source: ts.SourceFile, node: ts.Node, context: ScanContext, seen: ReadonlySet<string> = new Set()): boolean {
   let child: ts.Node = node;
   let parent: ts.Node | undefined = node.parent;
   while (parent !== undefined) {
@@ -279,15 +330,15 @@ function wrappedIn(source: ts.SourceFile, node: ts.Node, agentRunMethods: boolea
     if (isFunctionLike(child)) {
       if (ts.isVariableDeclaration(parent) && parent.initializer === child && onlyHandedToWithSessionRoute(source, parent)) return true;
       if (ts.isPropertyAssignment(parent) && ts.isObjectLiteralExpression(parent.parent) && ts.isNewExpression(parent.parent.parent)
-        && parent.parent.parent.expression.getText(source) === 'AgentRun') return true;
+        && parent.parent.parent.expression.getText(source) === 'AgentRun' && context.hooks.has(parent.name.getText(source))) return true;
     }
     if (ts.isMethodDeclaration(child) && ts.isClassDeclaration(parent)) {
-      if (agentRunMethods && parent.name?.text === 'AgentRun') return true;
       const name = child.name.getText(source);
+      if (context.agentRunReached !== undefined && parent.name?.text === 'AgentRun') return context.agentRunReached.has(name);
       if (seen.has(name)) return false;
       const calls = nodesOf(source, (each): each is ts.CallExpression => ts.isCallExpression(each) && each.expression.getText(source) === `this.${name}`);
       const next = new Set([...seen, name]);
-      return calls.length > 0 && calls.every((call) => wrappedIn(source, call, agentRunMethods, next));
+      return calls.length > 0 && calls.every((call) => wrappedIn(source, call, context, next));
     }
     child = parent;
     parent = parent.parent;
@@ -299,6 +350,52 @@ function lineOf(source: ts.SourceFile, node: ts.Node): number {
   return source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1;
 }
 
+/** The top-level functions of a file reached from `start`, following every name of another top-level function used in a body already reached. */
+function reachedFunctions(source: ts.SourceFile, start: string): Set<ts.FunctionDeclaration> {
+  const functions = new Map<string, ts.FunctionDeclaration>();
+  for (const statement of source.statements) if (ts.isFunctionDeclaration(statement) && statement.name !== undefined) functions.set(statement.name.text, statement);
+  const reached = new Set<ts.FunctionDeclaration>();
+  const queue = functions.has(start) ? [functions.get(start)!] : [];
+  while (queue.length > 0) {
+    const fn = queue.shift()!;
+    if (reached.has(fn)) continue;
+    reached.add(fn);
+    for (const id of nodesOf(fn, (node): node is ts.Identifier => ts.isIdentifier(node))) {
+      const next = functions.get(id.text);
+      if (next !== undefined && !reached.has(next)) queue.push(next);
+    }
+  }
+  return reached;
+}
+
+function within(node: ts.Node, container: ts.Node): boolean {
+  return node.getStart() >= container.getStart() && node.getEnd() <= container.getEnd();
+}
+
+/** The class in `file` that has a method named after a dotted entry's last part (`run.run` names AgentRun.run), if any. */
+function entryClass(source: ts.SourceFile, via: string): { readonly name: string; readonly method: string } | undefined {
+  const method = via.split('.').pop() ?? '';
+  for (const declaration of nodesOf(source, (node): node is ts.ClassDeclaration => ts.isClassDeclaration(node) && node.name !== undefined)) {
+    if (declaration.members.some((member) => ts.isMethodDeclaration(member) && member.name.getText(source) === method)) return { name: declaration.name!.text, method };
+  }
+  return undefined;
+}
+
+/** The names a file calls `via` (a function exported by `target`) under: the name itself, an alias it was imported as, or `<namespace>.<name>`. */
+function namesFor(source: ts.SourceFile, from: string, target: string, via: string): string[] {
+  const names = new Set<string>([via]);
+  for (const declaration of nodesOf(source, (node): node is ts.ImportDeclaration => ts.isImportDeclaration(node))) {
+    if (!ts.isStringLiteral(declaration.moduleSpecifier)) continue;
+    const resolved = path.posix.normalize(path.posix.join(path.posix.dirname(from), declaration.moduleSpecifier.text));
+    if (`${resolved}.ts` !== target) continue;
+    const bindings = declaration.importClause?.namedBindings;
+    if (bindings === undefined) continue;
+    if (ts.isNamespaceImport(bindings)) names.add(`${bindings.name.text}.${via}`);
+    else for (const element of bindings.elements) if ((element.propertyName ?? element.name).text === via) names.add(element.name.text);
+  }
+  return [...names];
+}
+
 /** What breaks the rule that every model request runs inside a session route. Empty when it holds. */
 function siteViolations(sources: ReadonlyMap<string, string>, sites: Readonly<Record<string, Placement>>): string[] {
   const out: string[] = [];
@@ -308,6 +405,11 @@ function siteViolations(sources: ReadonlyMap<string, string>, sites: Readonly<Re
     if (found === undefined) { found = parsed(file, sources.get(file) ?? ''); trees.set(file, found); }
     return found;
   };
+  const reached = reachedMethods(tree(LOOP_FILE), 'AgentRun', 'run');
+  const hooks = hooksRead(tree(LOOP_FILE), reached);
+  const contextFor = (file: string): ScanContext => (file === LOOP_FILE ? { agentRunReached: reached, hooks } : { hooks });
+  const identifierEntries = new Set<string>();
+  for (const placement of Object.values(sites)) if ('inside' in placement) for (const entry of placement.inside) for (const via of entry.via) if (!via.includes('.')) identifierEntries.add(via);
   for (const file of sources.keys()) {
     if (file === CLIENT_FILE || requestCalls(tree(file)).length === 0) continue;
     if (!Object.prototype.hasOwnProperty.call(sites, file)) out.push(`${file} calls a model request method and is not on the list of request sites`);
@@ -316,9 +418,35 @@ function siteViolations(sources: ReadonlyMap<string, string>, sites: Readonly<Re
     const text = sources.get(file);
     if (text === undefined || requestCalls(tree(file)).length === 0) { out.push(`${file} is listed but makes no model request (remove it)`); continue; }
     if ('self' in placement) {
-      for (const call of requestCalls(tree(file))) if (!wrappedIn(tree(file), call, false)) out.push(`${file}:${lineOf(tree(file), call)} makes a model request outside withSessionRoute`);
+      for (const call of requestCalls(tree(file))) if (!wrappedIn(tree(file), call, contextFor(file))) out.push(`${file}:${lineOf(tree(file), call)} makes a model request outside withSessionRoute`);
     }
     if ('inside' in placement) {
+      const callers = new Set(placement.inside.map((entry) => entry.caller));
+      // The file's own requests: each one must be inside what an entry reaches (a function named by it and what that calls, or the methods a class's entry
+      // method reaches), so a new export of the file that requests directly is caught. An entry the file does not declare (a tool's run) is left to its own scan.
+      let ownChecked = false;
+      for (const entry of placement.inside) {
+        for (const via of entry.via) {
+          if (ownChecked) break;
+          const own = tree(file);
+          const owner = via.includes('.') ? entryClass(own, via) : undefined;
+          const containers: ts.Node[] = owner !== undefined
+            ? [...reachedMethods(own, owner.name, owner.method)].map((name) => classMethods(own, owner.name).get(name)!).filter(Boolean)
+            : !via.includes('.') ? [...reachedFunctions(own, via)] : [];
+          if (containers.length === 0) continue;
+          ownChecked = true;
+          for (const call of requestCalls(own)) if (!containers.some((container) => within(call, container))) out.push(`${file}:${lineOf(own, call)} makes a model request that ${via} does not reach`);
+          // Whoever makes the class an entry runs must be a listed caller: a new module that builds its own and runs it is outside every route.
+          if (owner !== undefined) {
+            for (const other of sources.keys()) {
+              if (other === file || callers.has(other)) continue;
+              for (const made of nodesOf(tree(other), (node): node is ts.NewExpression => ts.isNewExpression(node) && node.expression.getText(tree(other)) === owner.name)) {
+                if (importsModule(sources.get(other) ?? '', other, file)) out.push(`${other}:${lineOf(tree(other), made)} makes an ${owner.name} (${file}) and is not a listed caller`);
+              }
+            }
+          }
+        }
+      }
       for (const entry of placement.inside) {
         const caller = tree(entry.caller);
         if (entry.imports && !importsModule(sources.get(entry.caller) ?? '', entry.caller, file)) out.push(`${entry.caller} does not import ${file}`);
@@ -326,7 +454,21 @@ function siteViolations(sources: ReadonlyMap<string, string>, sites: Readonly<Re
           const sitesOf = entrySites(caller, via);
           if (sitesOf.length === 0) out.push(`${entry.caller} never reaches ${via} (update the list)`);
           for (const site of sitesOf) {
-            if (!wrappedIn(caller, site, entry.caller === 'src/agent/loop.ts')) out.push(`${entry.caller}:${lineOf(caller, site)} reaches ${via} (${file}) outside withSessionRoute`);
+            if (!wrappedIn(caller, site, contextFor(entry.caller))) out.push(`${entry.caller}:${lineOf(caller, site)} reaches ${via} (${file}) outside withSessionRoute`);
+          }
+        }
+      }
+      // A function entry is checked wherever it is called (PR #81 review): every call of it, under any name it was imported as, in a file that is not one of
+      // its listed callers must be wrapped, or be inside a function that is itself a listed entry.
+      for (const via of new Set(placement.inside.flatMap((entry) => entry.via).filter((each) => !each.includes('.')))) {
+        for (const other of sources.keys()) {
+          if (other === file || callers.has(other)) continue;
+          const source = tree(other);
+          const names = namesFor(source, other, file, via);
+          for (const call of nodesOf(source, (node): node is ts.CallExpression => ts.isCallExpression(node) && names.includes(node.expression.getText(source)))) {
+            if (wrappedIn(source, call, contextFor(other))) continue;
+            const enclosing = nodesOf(source, (node): node is ts.FunctionDeclaration => ts.isFunctionDeclaration(node) && node.name !== undefined && identifierEntries.has(node.name.text)).some((fn) => within(call, fn));
+            if (!enclosing) out.push(`${other}:${lineOf(source, call)} reaches ${via} (${file}) outside withSessionRoute`);
           }
         }
       }
@@ -359,6 +501,37 @@ test('CLAS-06: every model request call site runs inside a session route, read f
   assert.ok(has(/^src\/services\/teamStudioPanel\.ts:\d+ makes a model request outside withSessionRoute/), found.join('\n'));
   assert.ok(has(/^src\/services\/cyberHandoff\.ts:\d+ makes a model request outside withSessionRoute/), found.join('\n'));
   assert.equal(found.length, 5, found.join('\n'));
+});
+
+test('CLAS-06: a request entry is checked wherever it is reached, an AgentRun method counts only when run() reaches it, and only a hook the run calls counts as wrapped', () => {
+  const sources = productionSources();
+  const planted = new Map(sources);
+  const with_ = (file: string, extra: string): void => { planted.set(file, `${sources.get(file) ?? ''}\n${extra}\n`); };
+  const loop = sources.get('src/agent/loop.ts') ?? '';
+  assert.ok(loop.includes('  public async run(messages'), 'AgentRun.run is where the planted methods go');
+  // An AgentRun method nothing in run() reaches: a model call, a tool run and the safety check made there are outside every session route.
+  planted.set('src/agent/loop.ts', loop.replace('  public async run(messages', [
+    '  public async plantedSummary(messages: AgentMessage[], signal: AbortSignal): Promise<unknown> { return this.options.client.streamCompletion(this.options.model, messages, [], signal); }',
+    '  public async plantedTool(tool: AgentTool<any>, context: ToolContext): Promise<unknown> { return tool.run({}, context); }',
+    '  public plantedSafety(): unknown { return this.options.safety; }',
+    '  public async run(messages'
+  ].join('\n')));
+  // A new module that calls a request entry directly, with and without an alias, and one that runs an AgentRun of its own.
+  planted.set('src/services/plantedAttach.ts', "import { prepareAttachments } from '../agent/attachments';\nexport function go() { return prepareAttachments([], {} as never); }");
+  planted.set('src/services/plantedCompact.ts', "import { compactConversation as squeeze } from '../agent/context';\nexport function go() { return squeeze({} as never, 'm', [], new AbortController().signal); }");
+  planted.set('src/services/plantedRun.ts', "import { AgentRun } from '../agent/loop';\nexport function go() { return new AgentRun({} as never).run([], new AbortController().signal); }");
+  // A function in `new AgentRun({ ... })` under a name the run never calls is not a hook, so it is not inside the run's route.
+  with_('src/services/agentSession.ts', 'export function plantedHook() { return new AgentRun({ notAHook: async () => compactConversation({} as never, \'m\', [], new AbortController().signal) } as never); }');
+  const found = siteViolations(planted, REQUEST_SITES);
+  const has = (pattern: RegExp): boolean => found.some((line) => pattern.test(line));
+  assert.ok(has(/^src\/agent\/loop\.ts:\d+ makes a model request that run\.run does not reach/), found.join('\n'));
+  assert.ok(has(/^src\/agent\/loop\.ts:\d+ reaches tool\.run \(src\/agent\/extraTools\.ts\) outside withSessionRoute/), found.join('\n'));
+  assert.ok(has(/^src\/agent\/loop\.ts:\d+ reaches this\.options\.safety \(src\/agent\/safetyModel\.ts\) outside withSessionRoute/), found.join('\n'));
+  assert.ok(has(/^src\/services\/plantedAttach\.ts:\d+ reaches prepareAttachments \(src\/agent\/attachments\.ts\) outside withSessionRoute/), found.join('\n'));
+  assert.ok(has(/^src\/services\/plantedCompact\.ts:\d+ reaches compactConversation \(src\/agent\/context\.ts\) outside withSessionRoute/), found.join('\n'));
+  assert.ok(has(/^src\/services\/plantedRun\.ts:\d+ makes an AgentRun \(src\/agent\/loop\.ts\) and is not a listed caller/), found.join('\n'));
+  assert.ok(has(/^src\/services\/agentSession\.ts:\d+ reaches compactConversation \(src\/agent\/context\.ts\) outside withSessionRoute/), found.join('\n'));
+  assert.equal(found.length, 7, found.join('\n'));
 });
 
 /** The modules a module imports at run time (type-only imports are erased), resolved to repository paths. */
