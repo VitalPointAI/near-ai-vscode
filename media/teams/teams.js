@@ -2460,7 +2460,8 @@
         // A starting point that could not be read, or a Use as is that failed: their buttons work again.
         if (work && work.mode === 'wizard') { work.awaitingStart = null; work.recommendSeq = null; if (work.busy) { work.busy = false; render(); } }
         // A rating that was not saved: the cards show the saved ratings again.
-        if (pendingRating.size) { pendingRating.clear(); ratingQueue.clear(); if (!work) render(); }
+        // (One still waiting to be sent is kept: the error was about something else.)
+        if (pendingRating.size) { for (const id of [...pendingRating.keys()]) if (!ratingQueue.has(id)) pendingRating.delete(id); if (!work) render(); }
         // An icon request that was refused or failed: its buttons work again.
         if (work && work.mode === 'editor' && work.iconBusy) { work.iconBusy = false; render(); }
         break;

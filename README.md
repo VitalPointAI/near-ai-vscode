@@ -626,6 +626,30 @@ until it runs out aren't shown.
   model may add its own rating of the team before and after its suggestions;
   it is shown as the model's own opinion, not a measurement. **Cancel**,
   Emergency stop, or opening another team stops a review in progress.
+- **Team Studio's dashboard.** Team Studio opens on your teams: a summary
+  row (teams, running now, team runs and spend this week, and how many need
+  attention), then a card for each of your saved teams and this project's
+  team, all the same size (built-in teams are offered under **New team**).
+  Each card shows the team's icon, name and kind, whether it is private, and
+  its status: **Running now** (with **Watch it live**), **Ready**, **Needs
+  attention** with the reason (an imported team not approved yet, problems
+  the local check found, a member model your key does not offer, or a file
+  that needs fixing) or **Never run**. It lists each member's model or tier,
+  private or cloud, and flags a model that is not in the model directory.
+  Its stats (runs, last run, success, average time, spend in total and per
+  run) come from this project's run history: a run counts for a team when it
+  was started with that team's `/team:` command, and its spend is the run's
+  own figure from the spend ledger. Where nothing was recorded the card says
+  "none yet" or "not recorded"; with no folder open there is no history. The
+  health score is made from the local team check and the last role test that
+  **Optimise all teams** ran (its scores only, kept on this computer), and
+  shows each part. Your own 1 to 5 stars are set on the card (a group of radio
+  buttons: Tab to it, then the arrow keys) and saved as one `rating:` line in
+  the team file, with a version kept; sharing or importing a team leaves it
+  out. Sort by **Most used**, **Recently run**, **Rating** or **Name**, or
+  show only the teams that need attention; the choice is remembered. Running
+  now and the stats change as a team run starts or ends. With a project open
+  and no project team, the first card says so and **Set up** starts one.
 - **Building a team.** **New team** in Team Studio (and **Set Up Project
   Team**) first asks how you want to start: **Use an existing team**,
   **Create a new team** or **Recommend a team for me**. **Use an existing
@@ -650,7 +674,8 @@ until it runs out aren't shown.
   with the same two buttons; changing an answer clears it until you ask
   again. **Create a new team** starts **From scratch**, from
   **Clone an existing team** (the same list, to clone only), or from
-  **Describe it, and AI drafts it**. Only a new team or a clone asks for its
+  **Describe it, and AI drafts it** (say what the team should produce; AI
+  proposes a team for you to look over before anything is saved). Only a new team or a clone asks for its
   name, what it is for, **Private team** and **Save it as**. **Back** returns
   to the screen before from every step, and a saved draft opens on the step
   you left it. Saved as the project's team, a team is asked about before it

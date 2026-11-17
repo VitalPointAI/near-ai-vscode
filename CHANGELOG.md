@@ -1,5 +1,37 @@
 # Changelog
 
+## Unreleased
+
+- **Team Studio opens on a dashboard of your teams.** The main page now shows a summary row (how
+  many teams you have, how many are running now, team runs and spend this week, and how many need
+  attention), then one card for each of your saved teams and this project's team. Built-in teams
+  are not on it; they stay in **New team**.
+- **Each card says how the team is doing.** A card shows the team's icon, name and kind (the
+  project team, one of your teams, or imported), whether it is private, and its status: **Running
+  now** with **Watch it live**, **Ready**, **Needs attention** with the reason (an imported team
+  not approved yet, problems the local check found, a member model your key does not offer, or a
+  team file that needs fixing), or **Never run**. It lists each member's model or tier and whether
+  it is private or cloud, and flags a model that is not in the model directory.
+- **Stats come from what was recorded, nothing else.** Each card shows the team's runs, its last
+  run, how many succeeded, the average time and the spend (in total and per run), from this
+  project's run history. Spend is each run's own figure from the spend ledger. Where nothing was
+  recorded the card says "none yet" or "not recorded", and with no project folder open it says
+  that runs are kept per project.
+- **A health score and your own rating.** Each card shows a health score made from the free local
+  check and the last role test that **Optimise all teams** ran, with the score of each part. You
+  can give a team 1 to 5 stars on its card, with the keyboard or the mouse. The rating is one
+  `rating:` line in the team file, kept as a new version like any save, and left out when you share
+  a team or import one.
+- **Sort, filter, and live updates.** Sort the cards by **Most used**, **Recently run**,
+  **Rating** or **Name**, or show only the teams that need attention; Team Studio remembers your
+  choice. Running now and the stats change as soon as a team run starts or ends.
+- **The AI box moved into New team.** "What should this team be able to produce?" is now under
+  **New team**, **Create a new team**, **Describe it, and AI drafts it**. A drafted team that
+  arrives after you left that screen is offered from a banner. The toolbar is **New team**,
+  **Optimise all teams**, **Import…** and **Refresh**. A project with no team gets a card that says
+  so, with **Set up**, and an empty library shows **New team** and **Set up a team for this
+  project**.
+
 ## 0.4.30
 
 Every request to a model is now checked before it is sent and leaves a short record of its own;
