@@ -57,7 +57,7 @@ import type { GateHost } from '../gate/host';
 import { defaultSessionRoute, sessionRouteFrom, withSessionRoute } from '../gate/sessionMark';
 import type { RouteAttestation, SessionRoute } from '../gate/sessionMark';
 import { WaitingNotices } from './waitingNotices';
-import { chatLabelChanged, clearChatInView, setChatInView } from './chatInView';
+import { chatLabelChanged, clearChatInView, onChatNotice, setChatInView, takeChatNotices } from './chatInView';
 import type { ChatInView } from './chatInView';
 import { SHIPPED_DEFAULT_LABEL } from '../domain/gate/bundle';
 import { latestOnly, PROJECT_TEAM_WATCH_PATHS, projectHasTeam, SETUP_NUDGE_DISMISSED_KEY, shouldShowSetupNudge } from './setupSteps';
@@ -323,6 +323,8 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     activeId = tab.id;
     // D-33: the chat in view is the one the status bar's label and Lower This Chat's Label act on.
     setChatInView(inView(tab));
+    // D-58: a lowering made on another copy of this chat that was not applied here is said once, when the chat is shown.
+    for (const text of takeChatNotices(tab.id)) tab.post({ type: 'notice', text });
     tab.unread = false;
     feed.focusConversation(tab.id);
     void panel.webview.postMessage({ type: 'conversation-show', id: tab.id, title: tab.title, ...(tab.model ? { model: tab.model } : {}) });
@@ -1065,7 +1067,8 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
   const windowWatch = typeof vscode.window.onDidChangeWindowState === 'function' ? vscode.window.onDidChangeWindowState((window) => { if (window.focused) for (const tab of tabs) tab.focusRegained?.(); }) : undefined;
   // The "no team yet" card goes away as soon as Team Studio (or anyone) saves the project's team.
   const teamWatch = watchProjectTeam(() => { if (!disposed) void setupNudge.refresh(); });
-  panel.onDidDispose(() => { disposed = true; clearChatInView(activeId); stopAllFollowing(); openTabSources.delete(openTabs); retentionWatch.dispose(); pickupWatch.dispose(); syncWatch.dispose(); for (const tab of tabs) tab.agent?.dispose(); policyWatch.dispose(); tokenWatch.dispose(); windowWatch?.dispose(); teamWatch?.dispose(); state.spendWatch?.dispose(); if (state.spendTimer) clearTimeout(state.spendTimer); }, undefined, context.subscriptions);
+  const stopNotices = onChatNotice((chatId) => { const tab = tabs.find((each) => each.id === chatId); if (tab !== undefined && chatId === activeId && !disposed) for (const text of takeChatNotices(chatId)) tab.post({ type: 'notice', text }); });
+  panel.onDidDispose(() => { disposed = true; clearChatInView(activeId); stopNotices(); stopAllFollowing(); openTabSources.delete(openTabs); retentionWatch.dispose(); pickupWatch.dispose(); syncWatch.dispose(); for (const tab of tabs) tab.agent?.dispose(); policyWatch.dispose(); tokenWatch.dispose(); windowWatch?.dispose(); teamWatch?.dispose(); state.spendWatch?.dispose(); if (state.spendTimer) clearTimeout(state.spendTimer); }, undefined, context.subscriptions);
   // The emergency stop stops every conversation's run; the composer's Stop stops only the one on screen.
   onDidChangeEmergencyStop(async (engaged) => {
     sendPolicyState(panel);

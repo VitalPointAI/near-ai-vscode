@@ -31,6 +31,15 @@ import type { Clearance, Label, LabelEventId, ScaleMapping, ScaleTable } from '.
 import { LabelMapError, LabelReader, lastVerifiedLabelMap, updateLabelMap } from './labelMapStore';
 import type { LabelMapQuestion, LabelMapWrite } from './labelMapStore';
 import type { LabelMapState } from '../domain/gate/labelMap';
+import { NO_KNOWN_KEYS } from '../domain/team/keyStatus';
+import type { KeyStatusLookup } from '../domain/team/keyStatus';
+import { PayloadError } from '../domain/team/signedPayload';
+import type { SignedPayload } from '../domain/team/signedPayload';
+import { identityDir, loadDeviceIdentity } from '../team/identity';
+import { localKeyStatus } from '../team/keyHistory';
+import { registerLabelLoweringJudge, registerLoweringOutcomes } from '../domain/gate/lowerings';
+import { chatLoweringKeys, judgeChatLowering, loweringRejectedText, signChatLowering } from './chatLabel';
+import type { ChatLowering } from './chatLabel';
 
 const DEVICE_UNKNOWN = 'device-unknown';
 const POLICY_SESSION = 'policy';
@@ -98,6 +107,8 @@ export interface GateHostOptions {
   readonly onLabelRaiseRefused?: (root: string, message: string) => void;
   /** How long a written file's label raise waits to be written with others (RAISE_WRITE_DELAY_MS); tests pass a short one. */
   readonly raiseDelayMs?: number;
+  /** Told, once per signature per window, when a merge did not apply a lowering made on another copy of a chat, with the sentence for that chat (D-58). */
+  readonly onLoweringRejected?: (chatId: string, sentence: string) => void;
 }
 
 /** Said once when a raise a labelled chat's write needs cannot be written automatically. */
@@ -138,6 +149,10 @@ export class GateHost {
   private readonly labelReaders = new Map<string, LabelReader>();
   /** Problems with automatic label writes already told this window, so each is said once. */
   private readonly toldLabelProblems = new Set<string>();
+  /** The key sources signed chat lowerings are checked against (D-58): this install's key history, loaded by refreshLoweringKeys. */
+  private loweringKeys: KeyStatusLookup = NO_KNOWN_KEYS;
+  /** Signed lowerings already recorded this window, by signature, so each is recorded and said once. */
+  private readonly judgedLowerings = new Set<string>();
   /** Raises an automatic write could not make (an unverified label file), by project, kept for Sign Again. */
   private readonly refusedRaises = new Map<string, Map<string, Label[]>>();
 
@@ -393,6 +408,55 @@ export class GateHost {
   private routingNow(): RoutingTable {
     const state = this.bundleState();
     return state.state === 'valid' ? state.bundle.routing : DEFAULT_ROUTING;
+  }
+
+  /**
+   * Makes every thread merge in this window judge signed lowerings with this host's key sources (D-58), and records each one it judged: an applied one as
+   * label.declassify, a rejected one as label.declassify-rejected with its cause, once per signature per window, in the open project's log. Returns a
+   * function that undoes the registration (the activation disposes it).
+   */
+  public registerLabelLowerings(): () => void {
+    void this.refreshLoweringKeys();
+    const stopJudge = registerLabelLoweringJudge((lowering, context) => judgeChatLowering(lowering, context, this.loweringKeys));
+    const stopOutcomes = registerLoweringOutcomes((outcome) => {
+      const sig = (outcome.lowering as { sig?: unknown } | null)?.sig;
+      const key = `${outcome.chatId}:${typeof sig === 'string' ? sig : JSON.stringify(outcome.lowering ?? null).slice(0, 200)}`;
+      if (this.judgedLowerings.has(key)) return;
+      this.judgedLowerings.add(key);
+      const root = this.projectRootNow() ?? '';
+      const payload = (outcome.lowering as { payload?: Partial<ChatLowering> } | null)?.payload;
+      if (outcome.applied) {
+        this.recordLabelEvent(root, { event: 'label.declassify', path: `chat ${outcome.chatId}`, ...(payload?.to?.[0] === undefined ? {} : { label: payload.to[0] }), reason: `Lowered on another copy of this chat: ${typeof payload?.reason === 'string' ? payload.reason : 'no reason given'}` });
+        return;
+      }
+      const sentence = loweringRejectedText(outcome.cause ?? 'does-not-verify');
+      this.recordLabelEvent(root, { event: 'label.declassify-rejected', path: `chat ${outcome.chatId}`, reason: sentence });
+      try { this.options.onLoweringRejected?.(outcome.chatId, sentence); } catch { /* a notice never changes a merge */ }
+    });
+    return () => { stopJudge(); stopOutcomes(); };
+  }
+
+  /** Reads this install's key history again for the lowering judge (at registration, and after this install signs a lowering). */
+  public async refreshLoweringKeys(): Promise<void> {
+    try {
+      this.loweringKeys = chatLoweringKeys(await localKeyStatus(identityDir(this.options.globalStorageDir), this.options.secrets));
+    } catch {
+      this.loweringKeys = NO_KNOWN_KEYS;
+    }
+  }
+
+  /** Signs a person's lowering with this install's device key (D-58), or undefined when this install cannot sign (the chat is still lowered here). */
+  public async signChatLowering(lowering: ChatLowering): Promise<SignedPayload<ChatLowering> | undefined> {
+    try {
+      const identity = await loadDeviceIdentity(this.options.secrets);
+      if (identity === undefined) return undefined;
+      const signed = signChatLowering(identity, lowering);
+      await this.refreshLoweringKeys();
+      return signed;
+    } catch (error) {
+      if (error instanceof PayloadError) return undefined;
+      return undefined;
+    }
   }
 
   /** An agent's rename moves the entry (D-26), when an entry is there; an automatic write never signs a map that does not verify, and says so once. */

@@ -12,7 +12,15 @@ import { AgentConversation, UNREADABLE_CHAT_LABEL_TEXT } from '../services/agent
 import { RouteRefusedError } from '../services/nearAiClient';
 import { stateHomeFor } from '../services/stateHome';
 import { stateKeysFor } from '../services/stateKeys';
-import { ThreadStore, chatLabelOf, mergeMeta, validMeta } from '../services/threadStore';
+import { ThreadStore, chatLabelOf, mergeMeta, registerLabelLoweringJudge, registerLoweringOutcomes, validMeta } from '../services/threadStore';
+import { chatLoweringKeys, judgeChatLowering, signChatLowering } from '../gate/chatLabel';
+import type { ChatLowering } from '../gate/chatLabel';
+import { NO_KNOWN_KEYS } from '../domain/team/keyStatus';
+import type { KeyStatusLookup } from '../domain/team/keyStatus';
+import { signPayload } from '../domain/team/signedPayload';
+import type { SignedPayload } from '../domain/team/signedPayload';
+import { createDeviceIdentity } from '../team/identity';
+import type { DeviceIdentity } from '../team/identity';
 import type { ThreadMeta } from '../services/threadStore';
 import { chatPage } from './helpers/chatPage';
 import { testGateHost } from './helpers/gatedRuns';
@@ -28,7 +36,7 @@ import { setLabelEntry, setProjectLabel } from '../domain/gate/labelMap';
 import type { DecisionRecord } from '../domain/gate/record';
 import { GateHost } from '../gate/host';
 import { DECISIONS_DIR, projectLogKey } from '../gate/decisionLog';
-import { chatInView, onChatInViewChange, setChatInView } from '../services/chatInView';
+import { chatInView, onChatInViewChange, queueChatNotice, setChatInView, takeChatNotices } from '../services/chatInView';
 import type { ChatInView } from '../services/chatInView';
 import { SHIPPED_DEFAULT_LABEL } from '../domain/gate/bundle';
 
@@ -267,4 +275,141 @@ test('no agent tool can lower a chat\'s label: lowerByPerson is called only from
   assert.deepEqual(callers, ['services/gateCommands.ts']);
   const manifest = JSON.parse(readFileSync(path.join(__dirname, '..', '..', 'package.json'), 'utf8')) as { contributes: { commands: Array<{ command: string; title: string; category?: string }> } };
   assert.deepEqual(manifest.contributes.commands.find((command) => command.command === 'nearAi.label.lowerChat'), { command: 'nearAi.label.lowerChat', title: "Lower This Chat's Label", category: 'NEAR AI' });
+});
+
+// ---- Task 3: a lowering reaches another copy only as a signed declassification that copy can check, and never undoes a raise ----
+
+const CHAT = 'conv-signed-lower-1';
+const T0 = '2026-11-17T10:00:00.000Z';
+const AT = '2026-11-17T11:00:00.000Z';
+const LATER = '2026-11-17T12:00:00.000Z';
+const ACTIVE_FOR = (fingerprint: string): KeyStatusLookup => (key) => (key.fingerprint === fingerprint ? { state: 'active' } : { state: 'unknown' });
+
+async function signerOf(): Promise<DeviceIdentity> {
+  return createDeviceIdentity(new MemorySecrets());
+}
+
+function lowered(identity: DeviceIdentity, from: Mark, to: Mark, extra: Partial<ChatLowering> = {}): SignedPayload<ChatLowering> {
+  return signChatLowering(identity, { chatId: CHAT, from, to, reason: 'reviewed and cleared', at: AT, ...extra });
+}
+
+/** The copy that was lowered (used at LATER, after the lowering) and the other copy (last used at `otherUsed`). */
+function copies(lowering: unknown, otherMark: Mark, otherUsed = T0): [ThreadMeta, ThreadMeta] {
+  return [meta(CHAT, LATER, { mark: [PUBLIC], lowerings: [lowering] }), meta(CHAT, otherUsed, { mark: [...otherMark] })];
+}
+
+/** Runs `work` with a judge over `keys` registered, collecting what it judged; clears both registrations after. */
+function judged<T>(keys: KeyStatusLookup | undefined, work: () => T): { result: T; outcomes: Array<{ applied: boolean; cause?: string }> } {
+  const outcomes: Array<{ applied: boolean; cause?: string }> = [];
+  const stopJudge = keys === undefined ? () => undefined : registerLabelLoweringJudge((lowering, context) => judgeChatLowering(lowering, context, keys));
+  const stopOutcomes = registerLoweringOutcomes((outcome) => outcomes.push({ applied: outcome.applied, ...(outcome.cause === undefined ? {} : { cause: outcome.cause }) }));
+  try {
+    return { result: work(), outcomes };
+  } finally {
+    stopJudge();
+    stopOutcomes();
+  }
+}
+
+test('a valid signed lowering whose from-mark covers the other copy, unused since, is applied in both orders; a higher other mark or a from-mark below it keeps the join', async () => {
+  const identity = await signerOf();
+  const keys = ACTIVE_FOR(identity.fingerprint);
+  const valid = lowered(identity, [RESTRICTED], [PUBLIC]);
+  const [low, high] = copies(valid, [RESTRICTED]);
+  const applied = judged(keys, () => both(low, high));
+  for (const merged of applied.result) assert.deepEqual(markOf(merged), ['org/Public']);
+  assert.deepEqual(applied.result[0], applied.result[1], 'both orders give the same meta');
+  assert.ok(applied.outcomes.every((outcome) => outcome.applied));
+  const compartment = judged(keys, () => both(...copies(valid, [label('org', 'Restricted', ['X'])])));
+  for (const merged of compartment.result) assert.deepEqual(markOf(merged), ['org/Restricted+X']);
+  assert.deepEqual(compartment.outcomes.map((outcome) => outcome.cause), ['higher-mark', 'higher-mark']);
+  const fromBelow = judged(keys, () => both(...copies(lowered(identity, [CONFIDENTIAL], [PUBLIC]), [RESTRICTED])));
+  for (const merged of fromBelow.result) assert.deepEqual(markOf(merged), ['org/Restricted']);
+});
+
+test('a lowering is not applied when the other copy was used after it', async () => {
+  const identity = await signerOf();
+  const outcome = judged(ACTIVE_FOR(identity.fingerprint), () => both(...copies(lowered(identity, [RESTRICTED], [PUBLIC]), [RESTRICTED], LATER)));
+  for (const merged of outcome.result) assert.deepEqual(markOf(merged), ['org/Restricted']);
+  assert.deepEqual([...new Set(outcome.outcomes.map((each) => each.cause))], ['used-after']);
+});
+
+test('a changed byte, another purpose, another chat and a bare time with no signature are each ignored with their cause, and the join wins', async () => {
+  const identity = await signerOf();
+  const keys = ACTIVE_FOR(identity.fingerprint);
+  const valid = lowered(identity, [RESTRICTED], [PUBLIC]);
+  const changed = { ...valid, payload: { ...valid.payload, reason: 'changed after signing' } };
+  const purpose = signPayload(identity, 'label-map', valid.payload, { now: () => new Date(AT) });
+  const elsewhere = lowered(identity, [RESTRICTED], [PUBLIC], { chatId: 'conv-another-chat-1' });
+  for (const [lowering, cause] of [[changed, 'does-not-verify'], [purpose, 'another-purpose'], [elsewhere, 'another-chat'], [{ at: AT }, 'no-signature']] as const) {
+    const outcome = judged(keys, () => both(...copies(lowering, [RESTRICTED])));
+    for (const merged of outcome.result) assert.deepEqual(markOf(merged), ['org/Restricted'], cause);
+    assert.deepEqual([...new Set(outcome.outcomes.map((each) => each.cause))], [cause]);
+  }
+});
+
+test('a key this computer has revoked, one replaced before the signing time, and one it does not know are each refused with their cause', async () => {
+  const identity = await signerOf();
+  const valid = lowered(identity, [RESTRICTED], [PUBLIC]);
+  const revoked: KeyStatusLookup = () => ({ state: 'revoked' });
+  const rotated: KeyStatusLookup = () => ({ state: 'rotated', since: T0 });
+  for (const [keys, cause] of [[revoked, 'key-revoked'], [rotated, 'key-rotated'], [NO_KNOWN_KEYS, 'key-unknown']] as const) {
+    const outcome = judged(keys, () => both(...copies(valid, [RESTRICTED])));
+    for (const merged of outcome.result) assert.deepEqual(markOf(merged), ['org/Restricted'], cause);
+    assert.deepEqual([...new Set(outcome.outcomes.map((each) => each.cause))], [cause]);
+  }
+  // Team Mode: only this person's own devices count, never a teammate's.
+  const roster = { members: new Map([['member-me', { devices: [] }], ['member-other', { devices: [{ fingerprint: identity.fingerprint, publicKey: identity.publicKey }] }]]), deviceIndex: new Map([[identity.fingerprint, 'member-other']]) };
+  const teamKeys = chatLoweringKeys(NO_KNOWN_KEYS, { state: roster as never, memberId: 'member-me' });
+  assert.equal(teamKeys({ fingerprint: identity.fingerprint, publicKey: identity.publicKey }).state, 'unknown', 'a teammate\'s device does not vouch for my lowering');
+});
+
+test('with no judge registered every lowering from another copy is rejected, and the merged meta keeps the union of signed lowerings, newest 20', async () => {
+  const identity = await signerOf();
+  const valid = lowered(identity, [RESTRICTED], [PUBLIC]);
+  const outcome = judged(undefined, () => both(...copies(valid, [RESTRICTED])));
+  for (const merged of outcome.result) assert.deepEqual(markOf(merged), ['org/Restricted']);
+  assert.ok(outcome.outcomes.every((each) => each.cause === 'no-judge'));
+  const many = Array.from({ length: 25 }, (_, index) => lowered(identity, [RESTRICTED], [PUBLIC], { at: new Date(Date.parse(T0) - (25 - index) * 60_000).toISOString() }));
+  const left = meta(CHAT, T0, { mark: [RESTRICTED], lowerings: many.slice(0, 15) });
+  const right = meta(CHAT, T0, { mark: [RESTRICTED], lowerings: many.slice(10) });
+  const merged = judged(undefined, () => both(left, right)).result;
+  assert.deepEqual(merged[0], merged[1]);
+  const kept = (merged[0].label as unknown as { lowerings: Array<{ sig: string }> }).lowerings;
+  assert.equal(kept.length, 20);
+  assert.deepEqual(kept.map((each) => each.sig), many.slice(5).map((each) => each.sig), 'the newest 20, oldest first');
+});
+
+test('the gate host records an applied lowering once as label.declassify, a rejected one once as label.declassify-rejected, and the chat is told once naming the Lower command', async () => {
+  const root = realpathSync(mkdtempSync(path.join(tmpdir(), 'near-ai-chat-lower-host-')));
+  const storage = realpathSync(mkdtempSync(path.join(tmpdir(), 'near-ai-chat-lower-storage-')));
+  const secrets = new MemorySecrets();
+  const told: Array<[string, string]> = [];
+  const host = new GateHost({ globalStorageDir: storage, secrets, productVersion: '0.4.30-test', projectRoot: root, home: storage, onLoweringRejected: (chatId, sentence) => { told.push([chatId, sentence]); queueChatNotice(chatId, sentence); } });
+  assert.equal((await host.start()).state, 'valid');
+  const signed = await host.signChatLowering({ chatId: CHAT, from: [RESTRICTED], to: [PUBLIC], reason: 'reviewed and cleared', at: AT });
+  assert.ok(signed !== undefined, 'this install signs its own lowering');
+  const stop = host.registerLabelLowerings();
+  try {
+    await host.refreshLoweringKeys();
+    const [low, high] = copies(signed, [RESTRICTED]);
+    for (const merged of both(low, high)) assert.deepEqual(markOf(merged), ['org/Public']);
+    both(low, high);
+    const stranger = lowered(await signerOf(), [RESTRICTED], [PUBLIC]);
+    for (const merged of both(...copies(stranger, [RESTRICTED]))) assert.deepEqual(markOf(merged), ['org/Restricted']);
+    both(...copies(stranger, [RESTRICTED]));
+  } finally {
+    stop();
+  }
+  const records = await recordsOf(host, storage, root);
+  const rule = (record: DecisionRecord): string => record.authorizations[0]?.policy.name ?? '';
+  assert.equal(records.filter((record) => rule(record) === 'label.declassify').length, 1, 'applied, recorded once');
+  assert.match(JSON.stringify(records.find((record) => rule(record) === 'label.declassify')), /another copy of this chat/);
+  const rejected = records.filter((record) => rule(record) === 'label.declassify-rejected');
+  assert.equal(rejected.length, 1, 'rejected, recorded once');
+  assert.match(JSON.stringify(rejected[0]), /unknown to this computer/);
+  assert.equal(told.length, 1);
+  assert.match(told[0]![1], /NEAR AI: Lower This Chat's Label/);
+  assert.deepEqual(takeChatNotices(CHAT), [told[0]![1]], 'the chat shows it once when it is open or next opened');
+  assert.deepEqual(takeChatNotices(CHAT), []);
 });

@@ -46,6 +46,32 @@ export function chatLabelChanged(id: string): void {
   if (current?.id === id) tell();
 }
 
+const notices = new Map<string, string[]>();
+const noticeListeners = new Set<(chatId: string) => void>();
+
+/** Keeps a one-time sentence for a chat (a lowering made on another copy was not applied, D-58): shown when that chat is open, or the next time it is. */
+export function queueChatNotice(chatId: string, text: string): void {
+  const held = notices.get(chatId) ?? [];
+  if (!held.includes(text)) held.push(text);
+  notices.set(chatId, held);
+  for (const listener of [...noticeListeners]) {
+    try { listener(chatId); } catch { /* a listener never loses the notice */ }
+  }
+}
+
+/** Takes the sentences kept for a chat, so each is shown once. */
+export function takeChatNotices(chatId: string): string[] {
+  const held = notices.get(chatId) ?? [];
+  notices.delete(chatId);
+  return held;
+}
+
+/** Told the chat id whenever a sentence is kept for it; returns a function that stops telling. */
+export function onChatNotice(listener: (chatId: string) => void): () => void {
+  noticeListeners.add(listener);
+  return () => { noticeListeners.delete(listener); };
+}
+
 /** Told whenever the chat in view, or its label, changes; returns a function that stops telling. */
 export function onChatInViewChange(listener: () => void): () => void {
   listeners.add(listener);

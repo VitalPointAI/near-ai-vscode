@@ -15,7 +15,7 @@ import { CLEARANCE_SELF_ASSERTED_TEXT, HANDLING_FLAGS, LABELS_NOT_ACCREDITATION_
 import type { Label } from '../domain/gate/labels';
 import { dominates, raiseMark, sameMark } from '../domain/gate/dominance';
 import type { Mark } from '../domain/gate/dominance';
-import { chatInView, onChatInViewChange } from './chatInView';
+import { chatInView, onChatInViewChange, queueChatNotice } from './chatInView';
 import type { ChatInView } from './chatInView';
 import { holdsReads, labelMapKey, resolveLabel, setLabelEntry, setProjectLabel } from '../domain/gate/labelMap';
 import type { LabelMapPayload } from '../domain/gate/labelMap';
@@ -218,6 +218,7 @@ export function registerGate(context: GateActivationContext, options: RegisterGa
     onProblem: tell,
     onLabelNotice: (root, state, message) => { void labelNotice(host, root, state, message, tell).catch(() => undefined); },
     onLabelRaiseRefused: (root, message) => { void labelRaiseRefused(host, root, message).catch(() => undefined); },
+    onLoweringRejected: (chatId, sentence) => { queueChatNotice(chatId, sentence); },
     ...(options.now === undefined ? {} : { now: options.now })
   });
   // Every surface reads the host's own time (the later of the clock and the latest time it has seen), so none shows a policy as valid that a decision refuses
@@ -229,6 +230,8 @@ export function registerGate(context: GateActivationContext, options: RegisterGa
   // CLAS-06: a model request made outside every session route is still decided by this host's policy and recorded in the open project's log.
   // It is cleared at deactivation (the context's subscriptions are disposed then), and only while it is still this host's (PR 4a review).
   const clearDefaultRoute = setDefaultSessionRoute(host.sessionRouteWithoutContext());
+  // D-58: every thread merge in this window judges signed lowerings with this host's key sources, and each is recorded once.
+  try { context.subscriptions?.push({ dispose: host.registerLabelLowerings() }); } catch { /* with no judge every lowering from another copy is rejected */ }
   try { context.subscriptions?.push({ dispose: clearDefaultRoute }); } catch { /* an editor that cannot take it still replaces the route at the next activation */ }
   // A closed folder's decision log is let go when the window's folders change, so a long session does not keep one per folder it ever opened.
   try {
@@ -319,6 +322,7 @@ function registerPolicySurfaces(context: GateActivationContext, host: GateHost, 
 export const LOWER_CHAT_LABEL_COMMAND = 'nearAi.label.lowerChat';
 export const NO_CHAT_IN_VIEW_TEXT = "Nothing was changed: open the chat whose label you want to lower in the NEAR AI chat view first.";
 export const NOTHING_LOWER_TEXT = "Nothing was changed: this chat's label is already the project's label, and a chat is never lowered below its project.";
+export const LOWERING_NOT_SIGNED_TEXT = "This chat's label was lowered on this computer, but NEAR AI could not sign the lowering, so it will not reach your other computers: they keep the higher label.";
 export const LOWER_CHAT_REASON_PROMPT = "Why may this chat's content now go where a lower label allows? The reason is kept with the chat, and travels with its encrypted metadata to your other computers.";
 
 function labelsShown(mark: Mark): string {
@@ -392,8 +396,11 @@ export async function lowerChatLabel(host: GateHost, chat: ChatInView | undefine
     void Promise.resolve(vscode.window.showWarningMessage(`Nothing was changed: this chat read more meanwhile, and its label is now ${labelsShown(now)}. Run NEAR AI: Lower This Chat's Label again.`)).catch(() => undefined);
     return false;
   }
-  chat.prepareLowering(true);
+  // D-58: the lowering travels to this person's other copies of the chat only signed with this install's device key; with no key it is lowered here only.
+  const signed = await host.signChatLowering({ chatId: chat.id, from: [...now], to: [...picked.mark], reason, at: new Date(host.now()).toISOString() });
+  chat.prepareLowering(signed ?? true);
   const before = mark.lowerByPerson(picked.mark, reason);
+  if (signed === undefined) void Promise.resolve(vscode.window.showWarningMessage(LOWERING_NOT_SIGNED_TEXT)).catch(() => undefined);
   host.recordLabelEvent(chat.root, { event: 'label.declassify', path: `chat ${chat.id}`, label: picked.mark[0]!, mark: before, reason: `Lowered from ${labelsShown(before)} to ${labelsShown(picked.mark)}: ${reason}` });
   void Promise.resolve(vscode.window.showInformationMessage(`This chat's label is now ${labelsShown(picked.mark)}.`)).catch(() => undefined);
   return true;

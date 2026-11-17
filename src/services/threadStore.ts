@@ -20,6 +20,10 @@ import { SCALE_PRESETS, parseLabel } from '../domain/gate/labels';
 import type { Label } from '../domain/gate/labels';
 import { raiseMark, sameMark } from '../domain/gate/dominance';
 import type { Mark } from '../domain/gate/dominance';
+import { judgeLowering, reportLowering } from '../domain/gate/lowerings';
+import type { LoweringVerdict } from '../domain/gate/lowerings';
+export { registerLabelLoweringJudge, registerLoweringOutcomes } from '../domain/gate/lowerings';
+export type { LabelLoweringJudge, LoweringContext, LoweringOutcomeListener, LoweringVerdict } from '../domain/gate/lowerings';
 import { ProjectStateHome, stateHomeFor, writeFileAtomic } from './stateHome';
 import { stateKeysFor, type SecretsLike, type StateKeys } from './stateKeys';
 import { archiveMeta, readArchive, unarchiveThread, type ArchiveBundle } from './threadArchive';
@@ -98,29 +102,6 @@ export function joinMarks(a: Mark, b: Mark): Mark {
   return out;
 }
 
-/** What the judge of a signed lowering is told about the copy it would lower (D-58). */
-export interface LoweringContext {
-  readonly chatId: string;
-  /** The other copy's mark, which the lowering's from-mark must cover. */
-  readonly otherMark: Mark;
-  /** When the other copy was last used; it must not be after the lowering. */
-  readonly otherLastUsedAt: string;
-}
-
-/** The judge's answer: apply the lowering, or the plain cause it was not applied. */
-export type LoweringVerdict = { readonly apply: true } | { readonly apply: false; readonly cause: string };
-
-/** Judges a signed lowering one copy of a chat holds and the other does not (registered by the gate host, src/gate/chatLabel.ts). */
-export type LabelLoweringJudge = (lowering: unknown, context: LoweringContext) => LoweringVerdict;
-
-let loweringJudge: LabelLoweringJudge | undefined;
-
-/** Registers (or, with undefined, clears) the judge every merge uses; returns a function that clears it while it is still this one. */
-export function registerLabelLoweringJudge(judge: LabelLoweringJudge | undefined): () => void {
-  loweringJudge = judge;
-  return () => { if (loweringJudge === judge) loweringJudge = undefined; };
-}
-
 /** The signature of a signed lowering, which tells two copies' lowerings apart; undefined for a value with none. */
 function loweringKey(lowering: unknown): string | undefined {
   const sig = (lowering as { sig?: unknown } | null)?.sig;
@@ -137,20 +118,6 @@ function unionLowerings(a: readonly unknown[], b: readonly unknown[]): unknown[]
   const byKey = new Map<string, unknown>();
   for (const lowering of [...a, ...b]) { const key = loweringKey(lowering); if (key !== undefined && !byKey.has(key)) byKey.set(key, lowering); }
   return [...byKey.values()].sort((x, y) => signedAtOf(x).localeCompare(signedAtOf(y))).slice(-MAX_CHAT_LOWERINGS);
-}
-
-/** Told each lowering a merge applied or rejected, with its cause (the gate host records them once per signature per window). */
-export type LoweringOutcomeListener = (outcome: { readonly chatId: string; readonly lowering: unknown; readonly applied: boolean; readonly cause?: string }) => void;
-let loweringOutcomes: LoweringOutcomeListener | undefined;
-
-/** Registers where the merge reports each lowering it judged; returns a function that clears it while it is still this one. */
-export function registerLoweringOutcomes(listener: LoweringOutcomeListener | undefined): () => void {
-  loweringOutcomes = listener;
-  return () => { if (loweringOutcomes === listener) loweringOutcomes = undefined; };
-}
-
-function report(chatId: string, lowering: unknown, verdict: LoweringVerdict): void {
-  try { loweringOutcomes?.({ chatId, lowering, applied: verdict.apply, ...(verdict.apply ? {} : { cause: verdict.cause }) }); } catch { /* a report never changes a merge */ }
 }
 
 /**
@@ -184,28 +151,19 @@ export function mergeChatLabel(a: ThreadMeta, b: ThreadMeta): ChatLabelState | u
     const fresh = holder === 'left' ? onlyLeft : onlyRight;
     let all = true;
     for (const lowering of fresh) {
-      const verdict: LoweringVerdict = loweringJudge === undefined ? { apply: false, cause: 'no-judge' }
-        : safeJudge(lowering, { chatId: a.id, otherMark: other.mark, otherLastUsedAt: otherMeta.lastUsedAt });
-      report(a.id, lowering, verdict);
+      const verdict: LoweringVerdict = judgeLowering(lowering, { chatId: a.id, otherMark: other.mark, otherLastUsedAt: otherMeta.lastUsedAt });
+      reportLowering(a.id, lowering, verdict);
       if (!verdict.apply) all = false;
     }
     return all ? own.mark : undefined;
   };
   // Exactly one copy may bring lowerings the other lacks; when both do, neither copy's lowering can be told to come after the other's raise, so the join wins.
   if (onlyLeft.length > 0 && onlyRight.length > 0) {
-    for (const lowering of [...onlyLeft, ...onlyRight]) report(a.id, lowering, { apply: false, cause: 'both-lowered' });
+    for (const lowering of [...onlyLeft, ...onlyRight]) reportLowering(a.id, lowering, { apply: false, cause: 'both-lowered' });
     return result(joined);
   }
   const lowered = judge(onlyLeft.length > 0 ? 'left' : 'right');
   return result(lowered ?? joined);
-}
-
-function safeJudge(lowering: unknown, context: LoweringContext): LoweringVerdict {
-  try {
-    return loweringJudge?.(lowering, context) ?? { apply: false, cause: 'no-judge' };
-  } catch {
-    return { apply: false, cause: 'does-not-verify' };
-  }
 }
 
 /** Where an archived thread's content is kept: `local` in this state home's archive folder, `remote` only in the project's synced state until it is opened. */
