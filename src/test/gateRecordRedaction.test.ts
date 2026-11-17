@@ -161,3 +161,23 @@ test('a credential assignment right after a quote, an ampersand, a comma or a se
   // Names that are not credentials stay, quoted or not.
   for (const command of ['curl -d "user=alice&page=2" https://api.example.test', "tool --data 'mode=fast,level=3'"]) assert.equal(redactCredentialArguments(command), command, command);
 });
+
+// PR #74 last review: an option that is clearly a count or a limit of tokens (`--max-tokens 4096`) is not a credential, and removing its value made a
+// record useless for no reason. Its value is kept when the option is one of these names and the value is a number; a credential option whose name only
+// looks close (`--token`, `--api-token`, `--auth-tokens`, `--max-auth-token`), or a count option given something that is not a number, still loses it.
+test('a count or limit of tokens keeps its number; a credential option that only looks close still loses its value', () => {
+  for (const command of [
+    'llm run --max-tokens 4096', 'llm run --max-tokens=4096', 'llm run --max-output-tokens 512', 'llm --max_new_tokens 256 x', 'llm --max-completion-tokens=1,024',
+    'llm --min-tokens 10', 'llm --num-tokens 8k', 'llm --total-tokens 100000', 'llm --tokens-per-minute 90000', 'llm --tokens-per-request=2048', 'llm --max-prompt-tokens 2_000'
+  ]) {
+    assert.equal(redactCredentialArguments(command), command, `${command}: a count, kept whole`);
+  }
+  assertGone(`tool --token ${SECRET}`);
+  assertGone(`tool --api-token=${SECRET}`);
+  assertGone(`tool --auth-tokens ${SECRET}`);
+  assertGone(`tool --access-tokens ${SECRET}`);
+  assertGone(`tool --max-auth-token ${SECRET}`);
+  assertGone(`tool --session-tokens=${SECRET}`);
+  assertGone(`tool --max-tokens ${SECRET}`, ['--max-tokens']);
+  assertGone(`tool --max-output-tokens="${SECRET}"`);
+});

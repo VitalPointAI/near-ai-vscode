@@ -14,6 +14,9 @@ export interface PackageScriptsFs {
   readonly readFileSync: typeof nodeReadFileSync;
 }
 
+/** The largest package.json the reader reads (1 MiB). A bigger one is `unreadable`, so a script there has unknown effects and the gate asks. */
+export const PACKAGE_JSON_MAX_BYTES = 1024 * 1024;
+
 interface Cached { readonly hash: string; readonly result: PackageScriptsAt }
 
 export class PackageScriptsReader {
@@ -37,6 +40,8 @@ export class PackageScriptsReader {
       if (info !== undefined) {
         if (!inside(project, current)) return { kind: 'outside', folder: current };
         if (!info.isFile()) return { kind: 'unreadable', folder: current };
+        // A file past the cap is not read at all (PR #74 last review): its scripts are unknown, so the gate asks rather than parsing a file that size.
+        if (info.size > PACKAGE_JSON_MAX_BYTES) return { kind: 'unreadable', folder: current };
         // Read for every decision; parsed again only when the content differs from the last read.
         let text: string;
         try {
@@ -44,6 +49,8 @@ export class PackageScriptsReader {
         } catch {
           return { kind: 'unreadable', folder: current };
         }
+        // It may have grown since its size was read: what was read is measured too.
+        if (Buffer.byteLength(text, 'utf8') > PACKAGE_JSON_MAX_BYTES) return { kind: 'unreadable', folder: current };
         const hash = createHash('sha256').update(text).digest('hex');
         const cached = this.cache.get(file);
         if (cached !== undefined && cached.hash === hash) return cached.result;

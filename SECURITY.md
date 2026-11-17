@@ -221,7 +221,8 @@ is what that file and the records beside it do in this version.
   `--proxy-user` or `-U` when it holds a colon (a numeric user and group, such
   as `1000:1000`, is kept), the value of an option named
   for a password, passphrase, token, secret, API key or credential (such as
-  `--password=...`, `--token ...` or `-storepass ...`), the value of an
+  `--password=...`, `--token ...` or `-storepass ...`; a number given to a
+  count of tokens, such as `--max-tokens 4096`, is kept), the value of an
   `Authorization`, `Proxy-Authorization`, `Cookie`, `Private-Token` or
   `X-...-Token` or `-Key` header, and the value of an environment assignment,
   URL query parameter or form field named for one (such as `GITHUB_TOKEN=...`,
