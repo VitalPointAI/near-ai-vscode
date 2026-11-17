@@ -103,7 +103,7 @@ The tool-decision figures are an estimate (one decision per agent turn, a lower 
 | Lint and suite | `npm run lint && npm test` (6G, 1800 s) | exit 0; 3,499 tests, 3,490 pass, 0 fail, 0 cancelled, 9 skipped (live tests that need a key) |
 | e2e | `xvfb-run -a npm run test:e2e`, `WAYLAND_DISPLAY`, `WAYLAND_SOCKET` and `XDG_SESSION_TYPE` unset (6G, 1800 s) | exit 0; 21 passing across both scenarios (16 project, 5 plain), 0 failing; `NODE_OPTIONS` was accepted by the launch |
 | Release content | `npm run verify:release` (4G, 900 s) | exit 0; "Release content verified: 393 entries, 313 runtime JavaScript files, and 50 required release assets." |
-| Secret scan | `node scripts/secret-scan.mjs --range origin/main..HEAD` | see Self-Check (run after this SUMMARY's commit, so it covers it) |
+| Secret scan | `node scripts/secret-scan.mjs --range origin/main..HEAD` (4G, 900 s) | exit 0; "Secret scan clean: 1252 tracked files and 10 commit(s)", 9 allowlisted fixtures |
 
 ## Budget
 
@@ -134,6 +134,6 @@ The PR number is not known here.
 4. **Docs beyond the plan's file list** (coordinator): SECURITY.md, README.md and the Show Policy line were updated in this close-out, with new pins in gateDocs and gateCommands. The plan listed only CHANGELOG.md.
 5. **Correction to 70-19-SUMMARY.md:** the e2e count there now reads 21 tests. The earlier "23" and "26" counted VS Code download lines.
 
-## Self-Check
+## Self-Check: PASSED
 
-Self-Check is written below after the secret scan on the final range.
+Commits `d7952a5`, `761da37` and `c07924a` and this SUMMARY's commit are on HEAD. CHANGELOG.md has exactly one `## Unreleased`. The four gates exited 0. The range secret scan ran after the SUMMARY was committed, so it covers all 10 commits.
