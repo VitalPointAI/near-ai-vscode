@@ -367,3 +367,14 @@ test('a settings refusal on the request beats every ask, and the emergency stop 
     assert.equal(stopped.rule, 'settings.emergency-stop', `${name}: the emergency stop first`);
   }
 });
+
+// PR #74 review round 7: with a failed-closed policy, a call the person's own deny list refuses is refused by the deny list's rule (both refuse; the
+// person's own rule is the one named, as it is everywhere else).
+test('a failed-closed policy and a deny-list refusal: the deny list is named', async () => {
+  const refusal = { rule: 'settings.deny-list', reason: '"rm -rf /" is on your deny list (nearAi.agent.denyCommands).' };
+  const decided = await decide(requestFor([], { tool: 'Bash', command: 'rm -rf /', settingsRefusal: refusal }), failedClosed('unavailable'), allows);
+  assert.equal(decided.outcome, 'deny');
+  assert.equal(decided.rule, 'settings.deny-list');
+  const plain = await decide(requestFor([], { tool: 'Bash', command: 'ls' }), failedClosed('unavailable'), allows);
+  assert.equal(plain.rule, 'bundle.unavailable', 'without a deny-list refusal the policy\'s own rule is named');
+});

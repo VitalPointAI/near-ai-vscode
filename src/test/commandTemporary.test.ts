@@ -115,3 +115,15 @@ test('a delete inside the project\'s scratch folder is not destruction, plain or
     assert.ok(effects.some((effect) => effect.verb === 'destroy' || effect.verb === 'workspaceWrite'), `${command} (${why}) → ${JSON.stringify(effects)}`);
   }
 });
+
+// PR #74 review round 7: a project kept in a temporary folder is still the project. A delete inside it is judged as a project delete, never excused as
+// temporary scratch, while a neighbour in the temporary folder still is.
+test('a project inside the temporary folder: its own files are not temporary scratch', () => {
+  const base = realpathSync(mkdtempSync(path.join(tmpdir(), 'near-ai-tmpproject-')));
+  const root = path.join(base, 'project');
+  mkdirSync(path.join(root, 'src'), { recursive: true });
+  // The home folder is elsewhere: a temporary folder that holds the home folder counts for nothing.
+  const inTemp: CommandContext = { root, cwd: root, home: '/stand-in/home', temporaryRoots: [base] };
+  assert.deepEqual(classifyCommand('rm -rf src', inTemp).effects, [{ verb: 'destroy', paths: ['src'] }]);
+  assert.equal(classifyCommand(`rm -rf ${path.join(base, 'other-scratch')}`, inTemp).effects, undefined, 'a neighbour in the temporary folder is scratch');
+});

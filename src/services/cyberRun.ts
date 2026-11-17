@@ -374,7 +374,7 @@ async function cyberRun(input: CyberRunInput): Promise<CyberRunResult> {
       const gated = await gateStep(gate, {
         tool: step.tool, callId, effects: stepEffects.effects, floorFacts: stepEffects.floorFacts, policy: input.policy, settings,
         ...('resource' in stepEffects && stepEffects.resource !== undefined ? { resource: stepEffects.resource } : {}),
-        ...(command === undefined ? {} : { command }), ...(hostTool ? {} : { manifestContexts: selected!.tool.manifest.contexts })
+        ...(command === undefined ? {} : { command, root: input.toolContext.root }), ...(hostTool ? {} : { manifestContexts: selected!.tool.manifest.contexts })
       });
       let outcome = gated.decision.outcome;
       if (outcome === 'ask') {

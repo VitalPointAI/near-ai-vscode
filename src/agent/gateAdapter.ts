@@ -217,6 +217,15 @@ function withCommandEffects(effects: readonly Capability[], extra: readonly Capa
   return out;
 }
 
+/**
+ * A call's declared effects joined with the floor's reading of its command (floorFactsFor), for chat calls and cyber steps alike (PR #74 review round 7):
+ * the command's tags follow the declared effects, and a command the floor could not read whole has unknown effects, whatever was declared, so decide()
+ * asks about it with a person and refuses it with nobody.
+ */
+function effectsWithReading(declared: readonly Capability[], read: FloorCommandFacts | undefined): readonly Capability[] {
+  return read?.effectsUnknown !== undefined ? [] : withCommandEffects(declared, read?.effects ?? []);
+}
+
 /** One decided call: the decision, what today's settings layer said (when it was asked), and what is needed to record the person's answer. */
 export interface GatedCall {
   readonly decision: GateDecision;
@@ -618,8 +627,7 @@ export async function gateToolCall(runtime: GateRuntime, input: GateCallInput, o
   const declared = effectsOfArguments(input.tool, paths.input, input.root);
   // A shell call's command is read by the floor in every mode (Pitfall 5); what it tags joins the manifest's own effects.
   const read = input.command === undefined ? undefined : await floorFactsFor({ command: input.command, root: input.root, ...(input.shell ?? {}), ...(runtime.locations ?? {}) }, options.floorReaders);
-  // A command the floor could not read whole has unknown effects, whatever the manifest says: decide() asks about it with a person and refuses it with nobody.
-  const effects = read?.effectsUnknown !== undefined ? [] : withCommandEffects(declared, read?.effects ?? []);
+  const effects = effectsWithReading(declared, read);
   const floorFacts: FloorFacts = { ...(input.tool.capability === 'sharedWrite' ? { sharedWrite: true } : {}), ...paths.facts, ...(read?.facts ?? {}) };
   // The deny list is read here, before the gate, so it refuses a shell command before any step that could only ask, unknown effects included (D-10). It
   // reads the whole text, so a command too long or too deep for the classifier is still matched.
@@ -753,7 +761,10 @@ export interface GateStepInput {
   readonly callId: string;
   /** What the step does. An empty list means unknown, which decide() asks about or refuses. */
   readonly effects: readonly Capability[];
+  /** The command the step runs, which the floor reads as it reads a chat's shell call (PR #74 review round 7). */
   readonly command?: string;
+  /** The folder the step's command runs in. A command with no folder to read it in has unknown effects. */
+  readonly root?: string;
   readonly manifestContexts?: readonly GateContextName[];
   readonly policy: ActionPolicy;
   /** Today's answer for this step, with the stable rule id that gave it. */
@@ -786,23 +797,29 @@ export async function effectsOfStep(tool: AgentTool<any>, raw: Record<string, un
  * for a path that does not build its answer from an AgentTool.
  */
 export async function gateStep(runtime: GateRuntime, input: GateStepInput, options: GateCallOptions = {}): Promise<GatedCall> {
+  // A step's command is read by the floor exactly as a chat's shell call is: one code path, floorFactsFor.
+  const read = input.command === undefined ? undefined
+    : input.root === undefined ? { effects: [], facts: {}, effectsUnknown: 'the step names no folder to read its command in' }
+    : await floorFactsFor({ command: input.command, root: input.root, ...(runtime.locations ?? {}) }, options.floorReaders);
+  const effects = effectsWithReading(input.effects, read);
+  const floorFacts = { ...(input.floorFacts ?? {}), ...(read?.facts ?? {}) };
   const request: GateRequest = {
     actor: runtime.actor,
     tool: input.tool,
     callId: input.callId,
-    effects: input.effects,
+    effects,
     context: runtime.context,
     presence: runtime.presence,
     policy: input.policy,
     ...(input.manifestContexts === undefined ? {} : { manifestContexts: input.manifestContexts }),
     ...(input.command === undefined ? {} : { command: input.command }),
-    ...(input.floorFacts === undefined || Object.keys(input.floorFacts).length === 0 ? {} : { floorFacts: input.floorFacts }),
+    ...(Object.keys(floorFacts).length === 0 ? {} : { floorFacts }),
     // A step the caller's settings already refuse (its deny list, an engagement's scope) is refused before any ask, unknown effects included (D-10).
     ...(input.settings.decision === 'deny' ? { settingsRefusal: { rule: input.settings.rule, reason: input.settings.reason ?? 'Your settings refuse this step.' } } : {})
   };
   const answered: SettingsAnswer = options.refusal === undefined ? input.settings : { decision: 'deny', reason: options.refusal.reason, rule: options.refusal.rule };
   const decision = await decideOrRefuse(options.refusal, input.policy.mode, () => decide(request, runtime.bundleState(), async () => answered, gateOptionsOf(runtime)));
-  const gated: GatedCall = { decision, settings: undefined, request, effects: input.effects, ...(input.resource === undefined ? {} : { resource: input.resource }) };
+  const gated: GatedCall = { decision, settings: undefined, request, effects, ...(input.resource === undefined ? {} : { resource: input.resource }) };
   keep(runtime, recordFor(runtime, gated, outcomeOf(decision), decision.rule, decision.reason, options.model === undefined ? undefined : { name: options.model, provider: MODEL_PROVIDER }));
   return gated;
 }

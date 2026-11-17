@@ -196,7 +196,11 @@ export async function decide(request: GateRequest, bundleState: BundleState, set
   if (bundleState.state === 'failed-closed') {
     const onlyReadOrPlan = request.effects.length > 0 && request.effects.every((effect) => (FAILED_CLOSED_VERBS as readonly string[]).includes(effect.verb));
     // A run built with no host at all (no policy was ever read for it) has its own rule id, so a record tells it apart from a policy that failed to verify.
-    if (!onlyReadOrPlan) return make('deny', bundleState.reason === 'unavailable' ? 'bundle.unavailable' : 'bundle.failed-closed', 'approve-risky', { reason: bundleState.sentence });
+    if (!onlyReadOrPlan) {
+      // Both refuse; a refusal the person's own settings already made (the deny list) is the one named, as it is everywhere else (D-10).
+      if (request.settingsRefusal !== undefined) return make('deny', request.settingsRefusal.rule, 'approve-risky', { reason: request.settingsRefusal.reason });
+      return make('deny', bundleState.reason === 'unavailable' ? 'bundle.unavailable' : 'bundle.failed-closed', 'approve-risky', { reason: bundleState.sentence });
+    }
   }
   // A request that names no effect is a request whose effects are unknown. Nothing later can judge what it does, so it never reaches the floor's asks, the
   // ceiling or the settings layer (which would read "no effects" as "nothing to worry about"): with a person here it asks, without one it is refused. A

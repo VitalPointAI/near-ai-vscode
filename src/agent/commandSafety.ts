@@ -1286,8 +1286,9 @@ function deleteEffects(name: string, targets: readonly Word[], args: readonly Wo
   // home folder (a TMPDIR set that way) counts for nothing.
   const home = context.home ? path.resolve(context.home) : undefined;
   const temporary = temporaryCandidates(context).filter((candidate) => candidate !== path.parse(candidate).root && !(home !== undefined && isInside(candidate, home)));
+  // Never a path inside the project either: a project kept in a temporary folder is still the project (PR #74 review round 7).
   const temporaryPath = (absolute: string): boolean =>
-    temporary.some((folder) => absolute !== folder && isInside(folder, absolute)) && !isInside(absolute, root) && !(home !== undefined && isInside(absolute, home));
+    temporary.some((folder) => absolute !== folder && isInside(folder, absolute)) && !isInside(absolute, root) && !isInside(root, absolute) && !(home !== undefined && isInside(absolute, home));
   // Where a delete really lands: the folders on the way resolved through links (rm does not follow the last part, unless it ends with a slash).
   const landsAt = (arg: Word): string => {
     const absolute = facts(arg).absolute;
