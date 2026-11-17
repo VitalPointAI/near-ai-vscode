@@ -9,7 +9,7 @@ import test from 'node:test';
 import { floorFactsFor, gateToolCall } from '../agent/gateAdapter';
 import { DEFAULT_RULES, RunGrants } from '../agent/permissions';
 import { bashTool, readTool, shellReachesCredentialStore } from '../agent/tools';
-import { namesCredentialStore } from '../domain/gate/floor';
+import { CREDENTIAL_STORES, namesCredentialStore } from '../domain/gate/floor';
 import type { GateRuntime } from '../domain/gate/decide';
 import { fakeHome } from './helpers/gateFixtures';
 import { testGateRuntime } from './helpers/gatedRuns';
@@ -180,4 +180,136 @@ test('a project\'s own globalStorage/state.vscdb is the project\'s; VS Code\'s r
   assert.equal((await decideIn(readTool, { file_path: 'globalStorage/state.vscdb' })).decision.outcome, 'allow', 'the Read tool on the project\'s file');
   assert.equal((await decideIn(bashTool, { command: 'cat ../globalStorage/state.vscdb' }, 'cat ../globalStorage/state.vscdb')).decision.rule, 'floor.credential-store', 'an escape out of the project');
   assert.equal((await decideIn(readTool, { file_path: '../globalStorage/state.vscdb' })).decision.rule, 'floor.credential-store', 'the Read tool escaping out of the project');
+});
+
+// Owner decision after PR #74 (A5): more credential stores in the home folder, and the commands that print a stored token, are refused with no card in every
+// mode, like the stores before them. Each is checked against the stand-in home: by text, from the shell's folder after a cd, and through the gate. A
+// project's own file of the same name, and the harmless neighbours of each store, are not refused. Nothing is run.
+const NEW_STORES: ReadonlyArray<readonly [string, string]> = [
+  ['.config/gh', 'cat ~/.config/gh/hosts.yml'], ['.config/gh', 'cat ~/.config/gh/*'], ['.config/gh', 'grep -r . ~/.config/gh'], ['.config/gh', 'cat ~/.config/gh/hosts.y*'], ['.cargo/credentials', 'cat ~/.cargo/credentials'], ['.cargo/credentials.toml', 'cat $HOME/.cargo/credentials.toml'],
+  ['.terraform.d/credentials.tfrc.json', 'cat ~/.terraform.d/credentials.tfrc.json'], ['.config/glab-cli', 'cat ~/.config/glab-cli/config.yml'],
+  ['.config/hub', 'cat ~/.config/hub'], ['.gem/credentials', 'cat ~/.gem/credentials'], ['.local/share/keyrings', 'ls ~/.local/share/keyrings'],
+  ['.yarnrc.yml', 'cat ~/.yarnrc.yml']
+];
+// Already on the list before, named by the owner: still refused.
+const NAMED_BEFORE = ['cat ~/.docker/config.json', 'cat ~/.npmrc', 'cat ~/.pypirc', 'cat ~/.netrc', 'ls ~/.config/gcloud', 'cat ~/.azure/msal_token_cache.json', 'cat ~/.kube/config'];
+const STORE_NEIGHBOURS = [
+  'cat ~/.cargo/config.toml', 'cat ~/.cargo/credentials-notes.md', 'ls ~/.cargo/bin', 'cat ~/.terraform.d/plugins/x',
+  'cat ~/.gem/specs/x', 'cat ~/.yarnrc', 'cat .yarnrc.yml', 'cat .npmrc', 'cat .cargo/credentials.toml', 'cat config/gh/hosts.yml'
+];
+
+test('the stores the owner named, and their kin, are refused by text, from the shell\'s folder and through a link; their neighbours and the project\'s own files are not', async () => {
+  const wrong: string[] = [];
+  for (const [store, command] of NEW_STORES) {
+    if (!CREDENTIAL_STORES.includes(store)) wrong.push(`${store} is not on the list`);
+    if ((await shellReachesCredentialStore(command, at(), LOCATIONS)).credentialStore === undefined) wrong.push(`${command} is not refused`);
+    const folder = path.posix.dirname(store);
+    const leaf = path.posix.basename(store);
+    const fromFolder = folder === '.' ? `cd ~ && cat ${leaf}` : `cd ~/${folder} && cat ${leaf}`;
+    if ((await shellReachesCredentialStore(fromFolder, at(), LOCATIONS)).credentialStore === undefined) wrong.push(`${fromFolder} is not refused`);
+    if ((await shellReachesCredentialStore(`cat ${path.join(HOME, store)}`, at(), LOCATIONS)).credentialStore === undefined) wrong.push(`the literal home path of ${store} is not refused`);
+  }
+  for (const command of NAMED_BEFORE) if ((await shellReachesCredentialStore(command, at(), LOCATIONS)).credentialStore === undefined) wrong.push(`${command} is not refused`);
+  for (const command of STORE_NEIGHBOURS) if ((await shellReachesCredentialStore(command, at(), LOCATIONS)).credentialStore !== undefined) wrong.push(`${command} is refused`);
+  assert.deepEqual(wrong, []);
+});
+
+const PRINTERS = [
+  'gh auth token', 'gh auth token --hostname github.example.test', 'gh auth status --show-token', 'gh auth status -t', 'gcloud auth print-access-token', 'gcloud auth print-identity-token',
+  'gcloud auth application-default print-access-token', 'gcloud --account bob@example.test auth print-access-token', 'az account get-access-token', 'az acr login -n reg --expose-token',
+  'aws configure get aws_secret_access_key', 'aws --profile dev configure get aws_session_token', 'aws configure get profile.dev.aws_access_key_id',
+  'aws configure get "$KEY"', 'aws configure get', 'aws configure get --profile region aws_secret_access_key', 'aws configure export-credentials', 'aws sts get-session-token', 'aws sts assume-role --role-arn x --role-session-name y',
+  'aws sts get-federation-token --name x', 'aws ecr get-login-password --region us-east-1', 'aws ecr-public get-login-password', 'aws codeartifact get-authorization-token --domain d',
+  'npm token list', 'npm token create', 'pnpm token list', 'docker-credential-desktop get', 'docker-credential-pass list', 'echo https://index.docker.io/v1/ | docker-credential-osxkeychain get',
+  'bash -c "gh auth token"', 'TOKEN=$(gh auth token)', 'sudo aws sts get-session-token', 'mywrapper gcloud auth print-access-token'
+  // (PR #76 review round 3: a printer is found by how the command runs, not by its words anywhere in the text, so `python3 -c "os.system('gh auth token')"`
+  // is no longer refused by its text: what a program it starts does is a documented gap of every check here.)
+];
+const NOT_PRINTERS = ['git commit -m "document npm token list and gh auth token"', 'grep -rn "aws sts get-session-token" docs', 'echo docker-credential-desktop get',
+  'aws configure get region', 'aws configure get output --profile dev', 'aws --profile dev configure get sso_start_url', 'gh auth status', 'gh auth login', 'aws configure list', 'aws sts get-caller-identity', 'gcloud auth list', 'az account show', 'npm token revoke abc', 'docker login', 'npm whoami', 'docker credential ls'];
+
+test('the commands that print a stored token are refused with no card; the commands beside them are not', async () => {
+  const wrong: string[] = [];
+  for (const command of PRINTERS) {
+    const facts = await floorFactsFor({ command, root: ROOT, cwd: ROOT, ...LOCATIONS });
+    if (facts.facts.credentialStore === undefined) wrong.push(`${command} → ${JSON.stringify(facts)}`);
+  }
+  for (const command of NOT_PRINTERS) {
+    const facts = await floorFactsFor({ command, root: ROOT, cwd: ROOT, ...LOCATIONS });
+    if (facts.facts.credentialStore !== undefined) wrong.push(`${command} is refused: ${facts.facts.credentialStore}`);
+  }
+  assert.deepEqual(wrong, []);
+  assert.match((await floorFactsFor({ command: 'gh auth token', root: ROOT, cwd: ROOT, ...LOCATIONS })).facts.credentialStore ?? '', /gh auth token prints a stored password, key or token/);
+});
+
+test('in every mode, with a person and with nobody, a new store and a token printer are refused by the floor before the settings layer is asked', async () => {
+  for (const mode of ['approve-risky', 'mostly-autonomous', 'auto', 'fully-autonomous'] as const) {
+    for (const presence of ['person', 'none'] as const) {
+      for (const command of ['cat ~/.config/gh/hosts.yml', 'cat ~/.cargo/credentials.toml', 'gh auth token', 'aws sts get-session-token', 'docker-credential-desktop get']) {
+        const runtime: GateRuntime = { ...testGateRuntime(presence === 'none' ? { presence, context: 'unattended' } : {}), locations: LOCATIONS };
+        const gated = await gateToolCall(runtime, {
+          tool: bashTool, raw: { command }, root: ROOT, callId: `${mode}-${presence}-${command}`, command, shell: { cwd: ROOT },
+          policy: { mode, emergencyStop: false }, rules: DEFAULT_RULES, grants: new RunGrants(), buildAuto: async () => undefined
+        });
+        const where = `${mode}, ${presence}: ${command}`;
+        assert.equal(gated.decision.outcome, 'deny', where);
+        assert.equal(gated.decision.rule, 'floor.credential-store', where);
+        assert.equal(gated.settings, undefined, `${where}: refused before the settings layer is asked`);
+      }
+    }
+  }
+  // The Read tool on a new store is refused the same way.
+  const read = await gateToolCall({ ...testGateRuntime(), locations: LOCATIONS }, {
+    tool: readTool, raw: { file_path: path.join(HOME, '.config', 'gh', 'hosts.yml') }, root: ROOT, callId: 'read-gh', policy: { mode: 'fully-autonomous', emergencyStop: false },
+    rules: DEFAULT_RULES, grants: new RunGrants(), buildAuto: async () => undefined
+  });
+  assert.equal(read.decision.rule, 'floor.credential-store');
+});
+
+// PR #76 review: an option before the verb hid a token printer. `npm token --otp 123 list` read `123` as the verb, so the command was only a credential
+// change (an ask) and, approved, printed a stored token. A printer is now refused unless the command is positively read as something that prints nothing
+// (`npm token revoke`), and an option the rules do not know before the verb never turns a printer into an ask: it is refused too.
+const PRINTERS_WITH_OPTIONS = [
+  'npm token --otp 123 list', 'npm token --otp=123 create', 'npm token --registry https://registry.example.test list', 'npm token --cidr 10.0.0.0/8 create',
+  'npm token --read-only create', 'npm token --json', 'npm --otp 123 token list', 'npm --weird token list', 'npm token --weird x revoke abc', 'npm token $VERB',
+  'npm --prefix "$P" token list', 'pnpm token --otp 1 list', 'yarn token --otp 1 list', 'bun token --otp 1 list',
+  'gh auth --hostname github.example.test token', 'gh auth -h github.example.test token', 'gh auth token -h github.example.test', 'gh --weird auth token', 'gh auth --weird token',
+  'gh auth status --hostname github.example.test -t', 'gh auth -h github.example.test status --show-token', 'gh -R acme/app auth token', 'glab auth --weird token',
+  'gcloud auth --verbosity debug print-access-token', 'gcloud auth --weird print-access-token', 'gcloud auth application-default --weird print-access-token',
+  'gcloud --weird auth print-identity-token', 'gcloud config --weird config-helper', 'gcloud auth --account=a@example.test print-refresh-token',
+  'az account --weird get-access-token', 'az --weird account get-access-token', 'az account get-access-token --resource https://example.test', 'az acr --weird login --expose-token',
+  'aws sts --weird get-session-token', 'aws --weird sts get-session-token', 'aws configure --weird get aws_secret_access_key', 'aws configure --profile dev get aws_session_token',
+  'aws ecr --weird get-login-password', 'aws codeartifact --weird get-authorization-token --domain d', 'aws sts --region us-east-1 assume-role --role-arn x --role-session-name y',
+  'aws configure --weird export-credentials', 'docker-credential-desktop --weird get'
+];
+const NOT_PRINTERS_WITH_OPTIONS = [
+  'npm token revoke abc', 'npm token --otp 123 revoke abc', 'npm token rm abc', 'npm token --otp=1 delete abc', 'npm run token', 'npm run token --silent',
+  'gh issue create --title auth --body token', 'gh auth status --hostname github.example.test', 'gh auth login --hostname github.example.test', 'aws sts get-caller-identity --region x'
+];
+
+test('a token printer is refused whatever options come before its verb, and only a verb positively read as printing nothing is not', async () => {
+  const wrong: string[] = [];
+  for (const command of PRINTERS_WITH_OPTIONS) {
+    const facts = await floorFactsFor({ command, root: ROOT, cwd: ROOT, ...LOCATIONS });
+    if (facts.facts.credentialStore === undefined) wrong.push(`${command} → ${JSON.stringify(facts)}`);
+  }
+  for (const command of NOT_PRINTERS_WITH_OPTIONS) {
+    const facts = await floorFactsFor({ command, root: ROOT, cwd: ROOT, ...LOCATIONS });
+    if (facts.facts.credentialStore !== undefined) wrong.push(`${command} is refused: ${facts.facts.credentialStore}`);
+  }
+  assert.deepEqual(wrong, []);
+  // Revoking a token is a credential change: it asks.
+  for (const command of ['npm token revoke abc', 'npm token --otp 123 revoke abc']) {
+    assert.notEqual((await floorFactsFor({ command, root: ROOT, cwd: ROOT, ...LOCATIONS })).facts.credentialChange, undefined, command);
+  }
+  for (const presence of ['person', 'none'] as const) {
+    for (const command of ['npm token --otp 123 list', 'gh auth --weird token', 'aws --weird sts get-session-token']) {
+      const gated = await gateToolCall({ ...testGateRuntime(presence === 'none' ? { presence, context: 'unattended' } : {}), locations: LOCATIONS }, {
+        tool: bashTool, raw: { command }, root: ROOT, callId: `opt-${presence}-${command}`, command, shell: { cwd: ROOT },
+        policy: { mode: 'approve-risky', emergencyStop: false }, rules: DEFAULT_RULES, grants: new RunGrants(), buildAuto: async () => undefined
+      });
+      assert.equal(gated.decision.outcome, 'deny', `${presence}: ${command}`);
+      assert.equal(gated.decision.rule, 'floor.credential-store', `${presence}: ${command}`);
+    }
+  }
 });

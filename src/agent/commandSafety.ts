@@ -36,6 +36,28 @@ export interface CommandClassification {
    * the command's effects as unknown (it asks with a person there and refuses with nobody), never as "none" (PR #74 review).
    */
   effectsUnknown?: string;
+  /**
+   * Set, with the reason, when the command signs in or out of a registry or account, or changes a stored login or token (`npm login`, `docker logout`,
+   * `gh auth login`, `aws configure`): the floor asks about it in every mode (`floor.credential-change`, owner decision after PR #74). Found wherever it
+   * sits, like the effects.
+   */
+  credentialChange?: string;
+  /**
+   * Set, with the command as shown, when the command prints a stored login or token (`gh auth token`, `aws sts get-session-token`, `npm token list`, a
+   * `docker-credential-*` helper): the floor refuses it like a credential store (owner decision after PR #74, A5). Found wherever it sits.
+   */
+  printsCredential?: string;
+  /**
+   * Set, with the reason, when the rules know the command reaches the network (a non-plain download, a network client, a remote copy, git with a remote,
+   * gh, a cloud or cluster CLI, a registry push or pull, an install from an address, inline network code): after a credential read the gate holds it
+   * (owner decision after PR #74, D-18). Found wherever it sits, like the effects. A plain download is not noted.
+   */
+  reachesNetwork?: string;
+  /**
+   * The file that may hold credentials the command names, wherever the classifier reads text: the command, a script `npm run` runs (from the folder's
+   * package.json), `bash -c`, a substitution (D-18, PR #76 review round 3). After it runs, the run is marked as having read a credential file.
+   */
+  credentialFile?: string;
 }
 
 // The bounds are shared with the credential-store check (src/domain/commandBounds.ts), so neither reads what the other gives up on.
@@ -102,8 +124,26 @@ export type PackageScriptsAt =
 // (`npm run x`, `xargs`, `find -exec`, a substitution) or decides on one part and stops, and a tag carried by hand through each of those would be lost in the
 // next one somebody writes (Pitfall 2). Classification is synchronous, so the frame on top of this stack is always the call being made.
 // The frame also keeps whether the classifier stopped reading somewhere (the bound, the caps): wherever that happens, the whole command's effects are unknown.
-interface EffectFrame { effects: CommandEffect[]; unknown?: string }
+interface EffectFrame { effects: CommandEffect[]; unknown?: string; credentialChange?: string; printsCredential?: string; reachesNetwork?: string; credentialFile?: string }
 const effectFrames: EffectFrame[] = [];
+
+/** The command reaches the network, as the rules know it (reachesNetwork). The first reason is kept. */
+function noteNetwork(reason: string): void {
+  const frame = effectFrames[effectFrames.length - 1];
+  if (frame !== undefined) frame.reachesNetwork ??= reason;
+}
+
+/** The command prints a stored login or token: the floor refuses it (printsCredential). The first one is kept. */
+function notePrintsCredential(shown: string): void {
+  const frame = effectFrames[effectFrames.length - 1];
+  if (frame !== undefined) frame.printsCredential ??= shown;
+}
+
+/** The command signs in or out, or changes a stored login or token: the floor asks (credentialChange). The first reason is kept. */
+function noteCredentialChange(reason: string): void {
+  const frame = effectFrames[effectFrames.length - 1];
+  if (frame !== undefined) frame.credentialChange ??= reason;
+}
 
 function noteEffects(effects: readonly CommandEffect[] | undefined): void {
   const frame = effectFrames[effectFrames.length - 1];
@@ -685,6 +725,11 @@ export const GLOBAL_OPTIONS: Readonly<Record<string, GlobalOptions>> = Object.fr
   vsce: { values: [], flags: [] },
   ovsx: { values: [], flags: [] },
   gem: { values: [], flags: ['-q', '--quiet', '--verbose', '--backtrace', '--debug', '--norc'] },
+  buildah: {
+    values: ['--root', '--runroot', '--storage-driver', '--storage-opt', '--log-level', '--registries-conf', '--registries-conf-dir', '--short-name-alias-conf',
+      '--userns-uid-map', '--userns-gid-map', '--cgroup-manager', '--cpu-profile', '--memory-profile'],
+    flags: ['--debug']
+  },
   aws: {
     values: ['--profile', '--region', '--output', '--endpoint-url', '--query', '--color', '--cli-read-timeout', '--cli-connect-timeout', '--ca-bundle', '--cli-binary-format'],
     flags: ['--debug', '--no-verify-ssl', '--no-paginate', '--no-sign-request', '--no-cli-pager', '--no-cli-auto-prompt', '--cli-auto-prompt']
@@ -757,6 +802,51 @@ function skipGlobals(name: string, args: readonly Word[]): { rest: Word[]; value
   return { rest: args.slice(index), valued, skipped, ...(folder === undefined ? {} : { folder }) };
 }
 
+/** The credential or knowledge-base path a command's text names (SENSITIVE_TEXT_BASE: not the project's state folder, which is not a credential file), as written, or undefined. */
+export function namesCredentialFile(command: string): string | undefined {
+  const found = SENSITIVE_TEXT_BASE.exec(command);
+  return found === null ? undefined : found[0].replace(/^[\s'"=:<>/]+/, '').slice(0, 120);
+}
+
+/**
+ * Network code written inline for an interpreter (`node -e "fetch(...)"`, Python's requests, Ruby's and Perl's sockets, PHP's fsockopen), and bash's own
+ * network files. Looked for only in code an interpreter or a shell's `-c` runs (PR #76 review round 4), never in a message or a search pattern.
+ */
+const INLINE_NETWORK = /\b(?:requests|urllib|http\.client|fetch|axios|net\.connect|socket|TCPSocket|IO::Socket|fsockopen|stream_socket_client|curl_exec)\b.{0,40}(?:post|get|send|connect|request|new|\(|https?:|:\d)|\/dev\/(?:tcp|udp)\//i;
+/** An interpreter's options that run code written on the line, by interpreter. */
+const INLINE_CODE_OPTIONS: Readonly<Record<string, readonly string[]>> = Object.freeze({
+  node: ['-e', '--eval', '-p', '--print'], bun: ['-e', '--eval', '-p', '--print'], python: ['-c'], python2: ['-c'], python3: ['-c'], ruby: ['-e'], perl: ['-e', '-E'],
+  php: ['-r'], pwsh: ['-c', '-Command'], powershell: ['-c', '-Command']
+});
+
+/** The code an interpreter runs from the line (`node -e CODE`, `python -c CODE`, `deno eval CODE`), each piece, or none. */
+function inlineCode(name: string, args: readonly Word[]): string[] {
+  if (name === 'deno') return args[0]?.text === 'eval' ? args.slice(1).filter((arg) => !looksLikeOption(arg.text)).map((arg) => arg.text) : [];
+  const options = INLINE_CODE_OPTIONS[name];
+  if (options === undefined) return [];
+  const out: string[] = [];
+  for (let index = 0; index < args.length; index += 1) {
+    const text = args[index]!.text;
+    const equals = text.indexOf('=');
+    const option = equals > 0 ? text.slice(0, equals) : text;
+    if (!options.includes(option)) continue;
+    const code = equals > 0 ? text.slice(equals + 1) : args[index + 1]?.text;
+    if (code !== undefined) out.push(code);
+  }
+  return out;
+}
+
+/**
+ * Whether a shell command can send data off this computer as the rules know it (owner decision after PR #74, D-18): it publishes or sends, the classifier
+ * noted that it reaches the network, it carries inline network code, or it was not read whole. A read-whole local command with no network effect (a
+ * build, a test run, `node app.js`) is not: what a program it starts does is not seen here (SECURITY.md says so). A plain download is not either.
+ */
+export function commandMaySend(command: string, context: CommandContext): boolean {
+  const classified = classifyCommand(command, context);
+  if (classified.effectsUnknown !== undefined || classified.reachesNetwork !== undefined) return true;
+  return (classified.effects ?? []).some((effect) => effect.verb === 'publish' || effect.verb === 'send' || effect.verb === 'network');
+}
+
 /** The raw text names a credential or knowledge-base path anywhere (also inside quotes and substitutions). */
 const SENSITIVE_TEXT_BASE = /\.near-credentials|\.near-kb\b|\.kbkey\b|state\.vscdb|(?:^|[\s/'"=:])\.ssh(?:\/|\b)|(?:^|[\s/'"=:])\.aws(?:\/|\b)|(?:^|[\s/'"=:<>])\.env(?:\.[\w.-]+)?(?=$|[\s'"/;&|)<>])|\bid_(?:rsa|dsa|ecdsa|ed25519)\b|\.git-credentials|\.netrc\b|\.npmrc\b|\.pypirc\b/i;
 /** Plus the project's state folder (its keys must not reach a model request through a recursive read or a copy). */
@@ -804,11 +894,13 @@ const SHELLS = new Set(['sh', 'bash', 'zsh', 'dash', 'ksh', 'fish', 'csh', 'tcsh
  * the whole command's effects are unknown (PR #74 review round 2: the next wrapper nobody listed fails closed, not open).
  */
 const TAGGED_PROGRAMS: ReadonlySet<string> = new Set([
-  'git', 'npm', 'pnpm', 'yarn', 'bun', 'npx', 'docker', 'podman', 'kubectl', 'helm', 'oc', 'terraform', 'tofu', 'pulumi', 'cdk', 'serverless', 'sls', 'gh', 'glab',
+  'git', 'npm', 'pnpm', 'yarn', 'bun', 'npx', 'docker', 'podman', 'buildah', 'kubectl', 'helm', 'oc', 'terraform', 'tofu', 'pulumi', 'cdk', 'serverless', 'sls', 'gh', 'glab',
   'aws', 'az', 'gcloud', 'gsutil', 'near', 'cargo', 'gem', 'make', 'gmake', 'find', 'sed', 'gsed', 'gsd_run', 'gsd-tools.cjs',
   'env', 'time', 'timeout', 'nice', 'nohup', 'command', 'stdbuf', 'flock', 'watch', ...RUNS_WHAT_FOLLOWS,
   ...Object.keys(PUBLISH_TOOL_TARGETS), ...DISK_DESTROYERS, ...DELETERS, ...WORKSPACE_WRITERS, ...PRIVILEGE, ...INTERPRETERS, ...SHELLS
 ]);
+/** Docker's credential helpers, by program name. */
+const DOCKER_CREDENTIAL_HELPER = /^docker-credential-[\w.-]+$/;
 /** More candidate words than this after an unknown program are not each read: the effects are unknown. */
 const MAX_RUNNER_PROBES = 16;
 /** stdbuf's mode options: `-o L` takes its mode as the next word, `-oL` and `--output=L` carry it. */
@@ -923,9 +1015,278 @@ const GIT_BUILTINS: ReadonlySet<string> = new Set(['init', 'clone', 'worktree', 
   'ls-remote', 'name-rev', 'request-pull', 'diff-tree', 'diff-files', 'diff-index', 'for-each-ref', 'hash-object', 'help', 'version', 'var', 'column', 'interpret-trailers',
   'mailinfo', 'mailsplit', 'patch-id', 'pack-refs', 'repack', 'rerere', 'citool', 'gui', 'instaweb', 'lfs', 'fast-export']);
 
+/** The options of gh and glab that take a value and may sit before the action: the repository. */
+const GITHUB_REPO_OPTIONS: ReadonlySet<string> = new Set(['-R', '--repo']);
+
+/**
+ * The group and action of a gh or glab command (`pr merge`), with the index of the group among `args`. `-R`/`--repo` and their values are skipped wherever
+ * they sit before the action, as are `--help` and `-h`; any other option there, a missing value, or a group or action the shell decides at run time is
+ * reported. Once the group is `api`, its own options are read by githubApiWrites.
+ */
+function githubAction(args: readonly Word[]): { group?: Word; action?: Word; groupAt: number } | { unknown: string } {
+  let group: Word | undefined;
+  let groupAt = -1;
+  for (let index = 0; index < args.length; index += 1) {
+    const word = args[index]!;
+    const text = word.text;
+    // `--` ends the options: the words after it are the group (if not read yet) and the action, read once each (PR #76 review round 2).
+    if (text === '--') {
+      const after = args.slice(index + 1);
+      const groupWord = group === undefined ? after[0] : group;
+      const groupIndex = group === undefined ? index + 1 : groupAt;
+      const action = group === undefined ? after[1] : after[0];
+      if (groupWord === undefined) return { groupAt };
+      if (groupWord.expansion) return { unknown: 'with a command decided at run time' };
+      if (groupWord.text === 'api' || action === undefined) return { group: groupWord, groupAt: groupIndex };
+      return action.expansion ? { unknown: 'with an action decided at run time' } : { group: groupWord, action, groupAt: groupIndex };
+    }
+    if (looksLikeOption(text)) {
+      if (group?.text === 'api') return { group, groupAt };
+      // Under `auth`, -h names the host (`gh auth token -h github.com`); elsewhere it asks for help.
+      if (text === '--help' || (text === '-h' && group?.text !== 'auth')) continue;
+      const equals = text.indexOf('=');
+      const option = equals > 0 ? text.slice(0, equals) : text;
+      if (GITHUB_REPO_OPTIONS.has(option) || option === '--hostname' || (option === '-h' && group?.text === 'auth')) {
+        if (equals < 0) { if (args[index + 1] === undefined) return { unknown: `${option} without its value` }; index += 1; }
+        continue;
+      }
+      if (/^-R./.test(text)) continue;
+      return { unknown: `with ${text} before its action, an option the rules do not know` };
+    }
+    if (word.expansion) return { unknown: `with a ${group === undefined ? 'command' : 'action'} decided at run time` };
+    if (group === undefined) { group = word; groupAt = index; if (text === 'api') return { group, groupAt }; continue; }
+    return { group, action: word, groupAt };
+  }
+  return group === undefined ? { groupAt } : { group, groupAt };
+}
+
+/** gh and glab api options that take a value, and those that take none. */
+const GITHUB_API_VALUES: ReadonlySet<string> = new Set(['-X', '--method', '-H', '--header', '-f', '--raw-field', '-F', '--field', '--input', '-q', '--jq', '-t', '--template', '--cache', '-p', '--preview', '--hostname', '-R', '--repo']);
+const GITHUB_API_FLAGS: ReadonlySet<string> = new Set(['-i', '--include', '--paginate', '--silent', '--slurp', '--verbose', '--help', '-h']);
+const GITHUB_API_FIELDS: ReadonlySet<string> = new Set(['-f', '--raw-field', '-F', '--field']);
+
+/**
+ * Whether a gh or glab api call writes: a method other than GET or HEAD, or, with no method, a field or a body (they make it a POST). A GraphQL call is a
+ * POST either way; one whose every field is written on the line and whose query has no `mutation` only reads. `releases` when the endpoint is a release.
+ * An option the rules do not know, a missing value, or a method decided at run time is reported.
+ */
+function githubApiWrites(args: readonly Word[]): { writes: boolean; releases: boolean } | { unknown: string } {
+  let method: string | undefined;
+  let body = false;
+  let fromFile = false;
+  let query: string | undefined;
+  const positionals: string[] = [];
+  for (let index = 0; index < args.length; index += 1) {
+    const word = args[index]!;
+    const text = word.text;
+    if (text === '--') { positionals.push(...args.slice(index + 1).map((arg) => arg.text)); break; }
+    if (!looksLikeOption(text)) { positionals.push(text); continue; }
+    if (GITHUB_API_FLAGS.has(text)) continue;
+    const equals = text.indexOf('=');
+    let option = equals > 0 ? text.slice(0, equals) : text;
+    let value: Word | undefined;
+    if (GITHUB_API_VALUES.has(option)) {
+      value = equals > 0 ? { ...word, text: text.slice(equals + 1) } : args[(index += 1)];
+    } else if (/^-[XHfFqtpR]./.test(text) && equals !== 2) {
+      option = text.slice(0, 2);
+      value = { ...word, text: text.slice(2) };
+    } else {
+      return { unknown: `with ${text}, an option the rules do not know` };
+    }
+    if (value === undefined) return { unknown: `${option} without its value` };
+    if (option === '-X' || option === '--method') {
+      if (value.expansion) return { unknown: 'with a method decided at run time' };
+      method = value.text.toUpperCase();
+      continue;
+    }
+    if (option === '--input') { body = true; fromFile = true; continue; }
+    if (GITHUB_API_FIELDS.has(option)) {
+      body = true;
+      const field = /^([^=]*)=(.*)$/s.exec(value.text);
+      // `-F name=@file` reads the value from a file the line does not show; a value the shell decides at run time is not shown either.
+      if (value.expansion || field === null || (option !== '-f' && option !== '--raw-field' && field[2]!.startsWith('@'))) fromFile = true;
+      else if (field[1] === 'query') query = field[2];
+    }
+  }
+  const endpoint = positionals[0] ?? '';
+  const releases = /(?:^|\/)releases(?:[/?]|$)/.test(endpoint);
+  if (method !== undefined) return { writes: method !== 'GET' && method !== 'HEAD', releases };
+  if (!body) return { writes: false, releases };
+  // GraphQL: a query written on the line that has no mutation reads; anything read from elsewhere, or a mutation, writes.
+  if (endpoint === 'graphql' && !fromFile && query !== undefined && !/\bmutation\b/i.test(query)) return { writes: false, releases };
+  return { writes: true, releases };
+}
+
+const CLOUD_NAMES: Readonly<Record<string, string>> = Object.freeze({ aws: 'AWS', gcloud: 'Google Cloud', az: 'Azure' });
+/** Options of aws, gcloud and az that take a value and may sit anywhere among the command's words. */
+const CLOUD_VALUE_OPTIONS: Readonly<Record<string, readonly string[]>> = Object.freeze({
+  aws: [...GLOBAL_OPTIONS.aws!.values],
+  gcloud: [...GLOBAL_OPTIONS.gcloud!.values],
+  az: [...GLOBAL_OPTIONS.az!.values, '-n', '--name', '-g', '--resource-group', '--username', '-u', '--tenant', '-t', '--scope', '--identity', '--key-file', '--profile']
+});
+
+/**
+ * The first three command words of aws, gcloud or az (the service or group, and what to do), with their known value options skipped wherever they sit. An
+ * option the rules do not know before the words that say what the command does, or one of those words decided at run time, is reported.
+ */
+function cloudWords(name: string, args: readonly Word[]): { words: string[] } | { unknown: string } {
+  const values = new Set(CLOUD_VALUE_OPTIONS[name] ?? []);
+  const flags = new Set([...(GLOBAL_OPTIONS[name]?.flags ?? []), ...UNIVERSAL_FLAGS]);
+  const out: string[] = [];
+  for (let index = 0; index < args.length && out.length < 3; index += 1) {
+    const word = args[index]!;
+    const text = word.text;
+    if (!looksLikeOption(text)) {
+      if (word.expansion) return { unknown: 'with a command word decided at run time' };
+      out.push(text);
+      continue;
+    }
+    const option = text.includes('=') ? text.slice(0, text.indexOf('=')) : text;
+    if (values.has(option)) { if (!text.includes('=')) index += 1; continue; }
+    if (flags.has(text)) continue;
+    // Past the words that pick the command, its own options do not change what it is.
+    if (out.length >= 2) break;
+    return { unknown: `with ${text} before what it does, an option the rules do not know` };
+  }
+  return { words: out };
+}
+
+/** An AWS setting that holds a key, token or secret (`aws_secret_access_key`, `profile.dev.aws_session_token`), by its last dotted part. */
+function secretSetting(key: string): boolean {
+  const name = key.slice(key.lastIndexOf('.') + 1);
+  return /secret|token|password|credential|access_key|key_id|private/i.test(name);
+}
+
+/** The command as shown, when aws, gcloud or az prints a stored login, key or token (A5); undefined otherwise. */
+function cloudCredentialPrinter(name: string, words: readonly string[], args: readonly Word[]): string | undefined {
+  const [first = '', second = '', third = ''] = words;
+  if (name === 'aws') {
+    if (first === 'configure' && second === 'export-credentials') return 'aws configure export-credentials';
+    // `aws configure get` prints one setting: refused for a key, token or secret, or one the rules cannot read (PR #76 review round 3).
+    if (first === 'configure' && second === 'get' && (third === '' || secretSetting(third) || args.some((arg) => arg.expansion))) return 'aws configure get';
+    if (first === 'sts' && (/^assume-role/.test(second) || second === 'get-session-token' || second === 'get-federation-token')) return `aws sts ${second}`;
+    if ((first === 'ecr' || first === 'ecr-public') && /^get-(?:login|login-password|authorization-token)$/.test(second)) return `aws ${first} ${second}`;
+    if (first === 'codeartifact' && second === 'get-authorization-token') return 'aws codeartifact get-authorization-token';
+    return undefined;
+  }
+  if (name === 'gcloud') {
+    if (first === 'auth' && /^print-(?:access|identity|refresh)-token$/.test(second)) return `gcloud auth ${second}`;
+    if (first === 'auth' && second === 'application-default' && third === 'print-access-token') return 'gcloud auth application-default print-access-token';
+    if (first === 'config' && second === 'config-helper') return 'gcloud config config-helper';
+    return undefined;
+  }
+  if (first === 'account' && second === 'get-access-token') return 'az account get-access-token';
+  if (first === 'acr' && second === 'login' && args.some((arg) => arg.text === '--expose-token')) return 'az acr login --expose-token';
+  return undefined;
+}
+
+/** The command as shown, when aws, gcloud or az signs in or out or changes stored keys; undefined otherwise. */
+function cloudCredentialChange(name: string, words: readonly string[]): string | undefined {
+  const [first = '', second = '', third = ''] = words;
+  if (name === 'aws') {
+    if (first === 'configure' && !['get', 'list', 'list-profiles', 'export-credentials'].includes(second)) return `aws configure${second === '' ? '' : ` ${second}`}`;
+    if (first === 'sso' && (second === 'login' || second === 'logout')) return `aws sso ${second}`;
+    return undefined;
+  }
+  if (name === 'gcloud') {
+    if (first !== 'auth') return undefined;
+    if (['login', 'revoke', 'activate-service-account', 'configure-docker'].includes(second)) return `gcloud auth ${second}`;
+    if (second === 'application-default' && ['login', 'revoke', 'set-quota-project'].includes(third)) return `gcloud auth application-default ${third}`;
+    return undefined;
+  }
+  if (first === 'login' || first === 'logout') return `az ${first}`;
+  if (first === 'account' && second === 'clear') return 'az account clear';
+  if (first === 'acr' && second === 'login') return 'az acr login';
+  return undefined;
+}
+
+/** `git rebase` words that finish, leave or edit a rebase already under way, rather than start one. */
+const REBASE_IN_PROGRESS: ReadonlySet<string> = new Set(['--continue', '--abort', '--skip', '--quit', '--edit-todo']);
+/** An age that keeps a grace period: days or more ago (`2.weeks.ago`, `3 days ago`), or `never`. Hours, minutes, `now`, `all` and dates do not count. */
+const GRACE_PERIOD = /^(?:never|0*[1-9]\d*[. ](?:day|week|month|year)s?[. ]ago)$/i;
+/** `git gc` options that neither prune nor change what is kept. */
+const GC_ROUTINE = new Set(['--auto', '--aggressive', '--quiet', '-q', '--force', '--no-prune', '--prune', '--detach', '--no-detach', '--cruft', '--no-cruft', '--keep-largest-pack']);
+
+/**
+ * Whether `git gc` or `git prune` keeps git's grace period for unreachable objects: gc with only routine options and, if any, a `--prune=` age that keeps
+ * one; prune as a dry run, or with an `--expire` age that keeps one. A word the shell decides at run time, or one not listed, does not.
+ */
+function keepsGracePeriod(sub: string, rest: readonly Word[]): boolean {
+  if (rest.some((word) => word.expansion || word.glob)) return false;
+  const words = rest.map((word) => word.text);
+  if (sub === 'gc') {
+    return words.every((word) => GC_ROUTINE.has(word) || /^--max-cruft-size=\d+[kmg]?$/i.test(word) || (word.startsWith('--prune=') && GRACE_PERIOD.test(word.slice('--prune='.length))));
+  }
+  let dryRun = false;
+  let grace = false;
+  for (let index = 0; index < words.length; index += 1) {
+    const word = words[index]!;
+    if (word === '-n' || word === '--dry-run') { dryRun = true; continue; }
+    if (word === '-v' || word === '--verbose' || word === '--progress' || word === '--no-progress' || word === '--') continue;
+    if (word === '--expire' || word.startsWith('--expire=')) {
+      const value = word === '--expire' ? words[(index += 1)] : word.slice('--expire='.length);
+      if (value === undefined || !GRACE_PERIOD.test(value)) return false;
+      grace = true;
+      continue;
+    }
+    if (looksLikeOption(word)) return false;
+    // A head named on the line is kept reachable: it only ever prunes less.
+  }
+  return dryRun || grace;
+}
+
+/**
+ * A word that names a remote address: a URL other than file://, a version-control address (`git+https://`, `git@host:`, `ssh://`), or a hosting
+ * shorthand (`github:`), alone or after `name@` or `--option=` (PR #76 review round 5).
+ */
+function isRemoteAddress(text: string): boolean {
+  const value = text.replace(/^--?[\w-]+=/, '').replace(/^[^\s/:@]+@(?=(?:git\+|[a-z][a-z0-9+.-]*:\/\/|github:|gitlab:|bitbucket:))/i, '');
+  if (/^file:/i.test(value) || /^git\+file:/i.test(value)) return false;
+  return /^(?:git\+)?[a-z][a-z0-9+.-]*:\/\//i.test(value) || /^[\w.-]+@[\w.-]+:/.test(value) || /^(?:github|gitlab|bitbucket|gist):/i.test(value);
+}
+
+/** Installers that fetch from a remote address the line names (D-18), and Go, whose module paths are remote. The first network reason, or undefined. */
+function installerReachesNetwork(name: string, args: readonly Word[]): string | undefined {
+  const words = args.map((arg) => arg.text);
+  const positional = args.filter((arg) => !looksLikeOption(arg.text) && !arg.text.startsWith('+'));
+  const sub = positional[0]?.text ?? '';
+  const anyAddress = (): boolean => args.some((arg) => isRemoteAddress(arg.text));
+  if (name === 'pip' || name === 'pip3' || name === 'pipx') {
+    return ['install', 'download', 'wheel', 'inject', 'run'].includes(sub) && anyAddress() ? `${name} ${sub} fetches from an address` : undefined;
+  }
+  if (name === 'uv') {
+    const verb = sub === 'pip' || sub === 'tool' ? `${sub} ${positional[1]?.text ?? ''}` : sub;
+    return /^(?:add|pip install|pip download|tool install|tool run|run)$/.test(verb) && anyAddress() ? `uv ${verb} fetches from an address` : undefined;
+  }
+  if (name === 'cargo') {
+    return sub === 'install' && (words.some((word) => /^--(?:git|registry|index)(?:=|$)/.test(word)) || anyAddress()) ? 'cargo install fetches from another registry or repository' : undefined;
+  }
+  if (name === 'gem') {
+    return sub === 'install' && (words.some((word) => /^(?:-s|--source|--clear-sources)(?:=|$)/.test(word)) || anyAddress()) ? 'gem install fetches from a source' : undefined;
+  }
+  if (name === 'composer') {
+    return ['require', 'create-project'].includes(sub) && (words.some((word) => /^--repository(?:-url)?(?:=|$)/.test(word)) || anyAddress()) ? `composer ${sub} fetches from a repository` : undefined;
+  }
+  if (name === 'go' && (sub === 'get' || sub === 'install')) {
+    // A module path is remote; a local package (`./cmd/app`, `.`, `../x`, an absolute path) or none at all (go install of the folder) is not. go get with no
+    // path updates the module's dependencies, which reaches the network.
+    const paths = positional.slice(1).map((arg) => arg.text);
+    if (sub === 'get' && paths.length === 0) return 'go get fetches modules';
+    return paths.some((target) => !/^(?:\.{1,2}(?:\/|$)|\/)/.test(target)) ? `go ${sub} fetches a module` : undefined;
+  }
+  return undefined;
+}
+
+/** git commands that talk to another repository over the network (D-18). */
+const GIT_REMOTE_COMMANDS: ReadonlySet<string> = new Set(['push', 'fetch', 'pull', 'clone', 'ls-remote', 'send-email', 'request-pull']);
+
 function classifyGit(args: Word[], state: SegmentState, context: CommandContext): CommandClassification {
   let index = 0;
   while (index < args.length && args[index].text === '--no-pager') index += 1;
+  const named = args[index]?.text ?? '';
+  if (GIT_REMOTE_COMMANDS.has(named) || (named === 'archive' && args.some((arg) => /^--remote(?:=|$)/.test(arg.text))) || (named === 'submodule' && args.some((arg) => arg.text === 'update'))) {
+    noteNetwork(`git ${named} talks to another repository`);
+  }
   if (index < args.length && looksLikeOption(args[index].text)) return unknown('git options before the subcommand (-C, -c, --git-dir) change what it acts on');
   const sub = args[index]?.text ?? '';
   const rest = args.slice(index + 1);
@@ -945,7 +1306,12 @@ function classifyGit(args: Word[], state: SegmentState, context: CommandContext)
   switch (sub) {
     case 'push': return risky('git push changes a remote repository', publishTo('git-remote'));
     case 'send-email': return risky('git send-email sends data off this machine', [{ verb: 'send', channel: 'email' }]);
-    case 'rebase': case 'filter-branch': case 'filter-repo': case 'replace': return risky(`${label} rewrites history`, DESTROY_ALL);
+    case 'rebase':
+      // Finishing, leaving or editing a rebase already under way is routine (owner decision after PR #74): it starts no rewrite of its own. Exactly one of
+      // these words and nothing else; starting a rebase, with any other word, still destroys.
+      if (rest.length === 1 && !rest[0]!.expansion && REBASE_IN_PROGRESS.has(words[0]!)) return unknownRead(`git rebase ${words[0]} finishes, leaves or edits a rebase already under way`);
+      return risky(`${label} rewrites history`, DESTROY_ALL);
+    case 'filter-branch': case 'filter-repo': case 'replace': return risky(`${label} rewrites history`, DESTROY_ALL);
     case 'reset': return has('--hard', '--merge', '--keep') ? risky('git reset --hard discards uncommitted changes', DESTROY_ALL) : unknownRead('git reset moves the branch or unstages changes');
     case 'clean': {
       if (words.length && words.every((word) => word === '-n' || word === '--dry-run' || !looksLikeOption(word)) && has('-n', '--dry-run')) return unknownRead('git clean --dry-run');
@@ -1027,7 +1393,12 @@ function classifyGit(args: Word[], state: SegmentState, context: CommandContext)
         return writeResult('git config changes repository settings', [file ?? { text: path.join(path.relative(state.cwd, context.root) || '.', '.git', 'config'), quoted: false, glob: false, expansion: false }], state, context);
       }
     case 'reflog': return words[0] === 'expire' || words[0] === 'delete' ? risky('git reflog expire or delete destroys recovery points', DESTROY_ALL) : safe('git reflog only reads');
-    case 'gc': case 'prune': return risky(`${label} can permanently remove unreachable commits`, DESTROY_ALL);
+    case 'gc': case 'prune':
+      // Routine maintenance keeps git's grace period for unreachable objects, so recent work stays recoverable (owner decision after PR #74). Pruning now, a
+      // bare `git prune` (it keeps no grace period) and any word the rules do not read as keeping one still destroy.
+      return keepsGracePeriod(sub, rest)
+        ? unknownRead(`${label} tidies the repository and keeps recent unreachable commits`)
+        : risky(`${label} can permanently remove unreachable commits`, DESTROY_ALL);
     case 'update-ref': return risky('git update-ref rewrites references directly', DESTROY_ALL);
     case 'status': case 'diff': case 'log': case 'show': case 'blame': case 'shortlog': case 'describe': case 'rev-parse': case 'ls-files': case 'grep': case 'whatchanged': case 'show-ref': case 'ls-tree': case 'cat-file': case 'merge-base': case 'rev-list':
       if (writesOrEscapes) return outputWrite() ?? unknown(`${label} ${writesOrEscapes} can write files or read outside the repository`);
@@ -1147,6 +1518,84 @@ function packageManagerFolder(manager: string, args: Word[], state: SegmentState
 }
 
 /** Subcommands of pnpm and bun that are their own, not a script of the same name. */
+/** `npm token` verbs that print nothing: they remove a token, which changes the stored login. */
+const NON_PRINTING_TOKEN_VERBS: ReadonlySet<string> = new Set(['revoke', 'rm', 'delete']);
+/** `npm token` options that take a value, and those that take none, besides the package manager's own global options. */
+const TOKEN_VALUE_OPTIONS: readonly string[] = ['--otp', '--registry', '--userconfig', '--globalconfig', '--cidr', '--loglevel', '--scope', '--cache', '--color', '--location'];
+const TOKEN_FLAGS: readonly string[] = ['--read-only', '--json', '--parseable', '-p'];
+
+/**
+ * The verb of a package manager's `token` command, read past the options before it, or undefined when it cannot be read for certain: none given (it lists),
+ * one decided at run time, a missing value, or an option the rules do not know before it.
+ */
+function tokenVerb(manager: string, rest: readonly Word[]): string | undefined {
+  const values = new Set([...TOKEN_VALUE_OPTIONS, ...(GLOBAL_OPTIONS[manager]?.values ?? [])]);
+  const flags = new Set([...TOKEN_FLAGS, ...(GLOBAL_OPTIONS[manager]?.flags ?? []), ...UNIVERSAL_FLAGS]);
+  for (let index = 0; index < rest.length; index += 1) {
+    const word = rest[index]!;
+    if (word.text === '--') { const next = rest[index + 1]; return next === undefined || next.expansion ? undefined : next.text; }
+    if (!looksLikeOption(word.text)) return word.expansion ? undefined : word.text;
+    const equals = word.text.indexOf('=');
+    const option = equals > 0 ? word.text.slice(0, equals) : word.text;
+    if (values.has(option)) { if (equals < 0) { if (rest[index + 1] === undefined) return undefined; index += 1; } continue; }
+    if (flags.has(word.text)) continue;
+    return undefined;
+  }
+  return undefined;
+}
+
+/**
+ * A backstop for a line the rules could not read whole (an option they do not know, a folder decided at run time): when its words could make one of the
+ * token printers, it is taken to be that printer and refused, never downgraded to an ask (PR #76 review). Each check reads every word but options, so a
+ * word that is only an option's value can make it match too: that fails closed.
+ */
+function backstopPrinter(name: string, args: readonly Word[]): void {
+  const shown = couldPrintCredential(name, args);
+  if (shown !== undefined) notePrintsCredential(shown);
+}
+
+/** The printer a command's words could make, in any order of options (see backstopPrinter), or undefined. */
+function couldPrintCredential(name: string, args: readonly Word[]): string | undefined {
+  const words = args.filter((arg) => !looksLikeOption(arg.text)).map((arg) => arg.text);
+  const has = (text: string): boolean => args.some((arg) => arg.text === text);
+  const after = (first: string, ...then: string[]): string | undefined => {
+    const at = words.indexOf(first);
+    return at < 0 ? undefined : words.slice(at + 1).find((word) => then.includes(word));
+  };
+  if (PACKAGE_MANAGERS.has(name)) return words.includes('token') ? `${name} token` : undefined;
+  if (name === 'gh' || name === 'glab') {
+    if (after('auth', 'token') !== undefined) return `${name} auth token`;
+    const showsToken = args.some((arg) => arg.text === '--show-token' || (/^-[A-Za-z]*t[A-Za-z]*$/.test(arg.text) && !arg.text.startsWith('--')));
+    return after('auth', 'status') !== undefined && showsToken ? `${name} auth status --show-token` : undefined;
+  }
+  if (name === 'gcloud') {
+    const printer = words.find((word) => /^print-(?:access|identity|refresh)-token$/.test(word));
+    if (printer !== undefined) return `gcloud auth ${printer}`;
+    return words.includes('config-helper') ? 'gcloud config config-helper' : undefined;
+  }
+  if (name === 'az') {
+    if (words.includes('get-access-token')) return 'az account get-access-token';
+    return words.includes('acr') && words.includes('login') && has('--expose-token') ? 'az acr login --expose-token' : undefined;
+  }
+  if (name === 'aws') {
+    const printer = words.find((word) => /^(?:get-session-token|get-federation-token|get-login-password|get-authorization-token|get-login|assume-role(?:-[\w-]+)?)$/.test(word));
+    if (printer !== undefined) return `aws ${printer}`;
+    if (after('configure', 'export-credentials') !== undefined) return 'aws configure export-credentials';
+    // Any word after `get` (an option's value included) that is a secret's name, or one decided at run time, or none at all, fails closed.
+    const at = words.indexOf('configure');
+    const get = at < 0 ? -1 : words.indexOf('get', at + 1);
+    if (get < 0) return undefined;
+    const keys = args.filter((arg) => !looksLikeOption(arg.text)).slice(get + 1);
+    return keys.length === 0 || keys.some((arg) => arg.expansion || secretSetting(arg.text)) ? 'aws configure get' : undefined;
+  }
+  return undefined;
+}
+
+/** Package-manager and registry verbs that sign in or out. */
+const REGISTRY_LOGIN_VERBS: ReadonlySet<string> = new Set(['login', 'logout', 'adduser', 'add-user']);
+/** A package-manager setting that holds a registry login or token (`//registry/:_authToken`, `_auth`, `_password`, yarn's `npmAuthToken`, `npmAuthIdent`). */
+const REGISTRY_AUTH_KEY = /(?:^|[:/])_(?:auth|authToken|password)\b|\bnpmAuth(?:Token|Ident)\b/i;
+
 const PNPM_BUN_COMMANDS = new Set(['add', 'install', 'i', 'remove', 'rm', 'uninstall', 'update', 'up', 'upgrade', 'link', 'unlink', 'dlx', 'x', 'exec', 'create', 'init', 'pack', 'publish', 'outdated', 'list', 'ls', 'why', 'store', 'config', 'set', 'get', 'audit', 'import', 'prune', 'patch', 'rebuild', 'root', 'bin', 'env', 'setup', 'server', 'fetch', 'deploy', 'build', 'test', 't', 'run', 'start', 'pm', 'repl', 'help']);
 
 function classifyPackageManager(manager: string, givenArgs: Word[], state: SegmentState, context: CommandContext, depth: number): CommandClassification {
@@ -1165,28 +1614,49 @@ function classifyPackageManager(manager: string, givenArgs: Word[], state: Segme
 }
 
 function classifyPackageManagerIn(manager: string, givenArgs: Word[], state: SegmentState, context: CommandContext, depth: number): CommandClassification {
+  // Where the line cannot be read whole, a word that could be the `token` subcommand is taken to be it: a printer is never downgraded to an ask (PR #76).
+  const stopped = (reason: string): CommandClassification => { backstopPrinter(manager, givenArgs); return beyondReach(reason); };
   const located = packageManagerFolder(manager, givenArgs, state, context);
-  if ('unknown' in located) return beyondReach(`${manager}: ${located.unknown}`);
+  if ('unknown' in located) return stopped(`${manager}: ${located.unknown}`);
   const args = located.args;
   const folder = located.folder;
   // A package manager runs the scripts (and the install hooks) of the folder it runs in: one this line cannot show, or one outside the project, is unknown.
-  if (folder === undefined && state.cwdUnknown !== undefined) return beyondReach(`${manager}: ${state.cwdUnknown}`);
-  if (!isInside(context.root, folder ?? state.cwd)) return beyondReach(`${manager} runs in a folder outside the project`);
+  if (folder === undefined && state.cwdUnknown !== undefined) return stopped(`${manager}: ${state.cwdUnknown}`);
+  if (!isInside(context.root, folder ?? state.cwd)) return stopped(`${manager} runs in a folder outside the project`);
   const words = args.map((arg) => arg.text);
   // Its global options are skipped first, so a value option (`npm --tag beta publish`) never hides the subcommand; one the rules do not know makes the
   // effects unknown (PR #74 review round 7).
   const leading = skipGlobals(manager, args);
-  if ('unknown' in leading) return beyondReach(`${manager}: ${leading.unknown}`);
+  if ('unknown' in leading) return stopped(`${manager}: ${leading.unknown}`);
   const first = leading.rest.length > 0 ? args.length - leading.rest.length : -1;
   const sub = first >= 0 ? words[first] ?? '' : '';
   const extra = first >= 0 ? args.slice(first + 1) : [];
   if (first >= 0 && words.slice(first, first + 2).some((word) => word === 'publish' || word === 'unpublish')) return risky(`${manager} ${words.slice(first, first + 2).join(' ')} publishes a package`, publishTo('registry'));
-  if (['publish', 'unpublish', 'deprecate', 'dist-tag', 'owner', 'adduser', 'login', 'logout', 'token', 'access', 'team', 'org', 'star', 'hook', 'npm-publish'].includes(sub)) return risky(`${manager} ${sub} changes a package registry or your account`, publishTo('registry'));
+  // Signing in or out, and a token change, rewrite the login kept on this computer: the floor's credential change (owner decision after PR #74).
+  if (sub === 'token') {
+    // `token` alone lists the tokens, and list and create print them (A5). Fail closed (PR #76): it is a printer, refused by the floor, unless its verb is
+    // read for certain, past the options before it, as one that prints nothing; revoking a token then changes the stored login (an ask).
+    const verb = tokenVerb(manager, extra);
+    if (verb === undefined || !NON_PRINTING_TOKEN_VERBS.has(verb)) {
+      notePrintsCredential(`${manager} token${verb === undefined ? '' : ` ${verb}`}`);
+      return risky(`${manager} token prints your registry tokens`);
+    }
+  }
+  const signs = REGISTRY_LOGIN_VERBS.has(sub) || (manager === 'yarn' && sub === 'npm' && REGISTRY_LOGIN_VERBS.has(words[first + 1] ?? '')) || sub === 'token';
+  if (signs) {
+    const shown = sub === 'npm' ? `${manager} npm ${words[first + 1]}` : `${manager} ${sub}`;
+    noteCredentialChange(`${shown} signs in or out of a package registry, or changes a stored token.`);
+    return risky(`${shown} changes your package registry login`);
+  }
+  if ((sub === 'config' || sub === 'set') && extra.some((arg) => REGISTRY_AUTH_KEY.test(arg.text))) noteCredentialChange(`${manager} ${sub} sets a stored registry login or token.`);
+  if (['publish', 'unpublish', 'deprecate', 'dist-tag', 'owner', 'access', 'team', 'org', 'star', 'hook', 'npm-publish'].includes(sub)) return risky(`${manager} ${sub} changes a package registry or your account`, publishTo('registry'));
   if (words.some((word) => /^--(?:prefix|global|location|userconfig|globalconfig|registry)(?:=|$)/.test(word) || word === '-g')) return unknownRead(`${manager} with --prefix, --global, or a registry option acts outside the workspace`);
   if (sub === 'config' || sub === 'set') return risky(`${manager} ${sub} changes package-manager settings outside the workspace`);
   if (sub === 'version' && extra.length) return unknown(`${manager} version changes the version and may tag a release`);
   // Installing exactly what the lockfile declares (no package names); adding packages goes to the safety model.
   const installs = sub === 'ci' || sub === 'install' || sub === 'i' || (manager === 'yarn' && !sub);
+  // Installing from an address the line names reaches that address (D-18).
+  if (['install', 'i', 'add'].includes(sub) && extra.some((arg) => isRemoteAddress(arg.text))) noteNetwork(`${manager} ${sub} installs from an address`);
   if (installs && words.every((word) => word === sub || LOCKFILE_INSTALL_OPTIONS.test(word))) return safe(`${manager} ${sub || 'install'} installs what the project's lockfile already lists`);
   const extraCheck = checkReads(extra.filter((arg) => arg.text !== '--'), state, context, `${manager} ${sub}`);
   if (extraCheck.verdict !== 'safe') return extraCheck;
@@ -1476,19 +1946,47 @@ function deleteEffects(name: string, targets: readonly Word[], args: readonly Wo
  */
 function classifyAfterGlobals(name: string, program: string, args: Word[], state: SegmentState, context: CommandContext, depth: number, viaNpx: boolean): CommandClassification {
   const found = skipGlobals(name, args);
-  if ('unknown' in found) return beyondReach(found.unknown);
+  if ('unknown' in found) { backstopPrinter(name, args); return beyondReach(found.unknown); }
   let moved = state;
   if (found.folder !== undefined) {
     if (found.folder.expansion || found.folder.glob) return beyondReach(`${name} works in a folder decided at run time`);
     moved = { ...state, cwd: path.resolve(state.cwd, found.folder.text) };
   }
   if (found.rest.length === 0) return unknownRead(`${name} ${found.skipped.join(' ')}`.trim());
+  // `git -c gc.pruneExpire=now gc` prunes now whatever its own words say: a gc setting given on the line makes gc and prune destruction.
+  if (name === 'git' && ['gc', 'prune'].includes(found.rest[0]!.text) && setsGcConfig(args.slice(0, args.length - found.rest.length))) noteEffects(DESTROY_ALL);
   // Strictly fewer words and none of them a leading option, so this reads the subcommand and cannot come back here.
   const inner = classifyProgram(name, program, found.rest, moved, context, depth, viaNpx);
   if (inner.verdict !== 'safe') return inner;
   const strict = ['git', 'docker', 'podman', 'go'].includes(name) && !found.skipped.every((option) => option === '--no-pager');
   return found.valued || strict ? unknownRead(`${name} with options before its subcommand acts on something they name`) : inner;
 }
+
+/** Whether git's global options set a `gc.` setting (`-c gc.x=y`, `-cgc.x=y`, `--config-env=gc.x=VAR`), or one decided at run time. */
+function setsGcConfig(globals: readonly Word[]): boolean {
+  for (let index = 0; index < globals.length; index += 1) {
+    const word = globals[index]!;
+    let value: Word | undefined;
+    let fromEnvironment = false;
+    if (word.text === '-c') value = globals[index + 1];
+    else if (word.text === '--config-env') { value = globals[index + 1]; fromEnvironment = true; }
+    else if (word.text.startsWith('--config-env=')) { value = { ...word, text: word.text.slice('--config-env='.length) }; fromEnvironment = true; }
+    else if (/^-c./.test(word.text)) value = { ...word, text: word.text.slice(2) };
+    if (value === undefined) continue;
+    // A setting decided at run time could be any of them.
+    if (value.expansion) return true;
+    const equals = value.text.indexOf('=');
+    const key = equals < 0 ? value.text : value.text.slice(0, equals);
+    // Only the expiry settings decide what gc and prune remove (PR #76 review): pruning now or under a day, a value taken from the environment, or one
+    // not given (git reads that as true, not an age) prunes without the grace period. Any other setting changes nothing removed.
+    if (!GC_EXPIRY_SETTING.test(key)) continue;
+    if (fromEnvironment || equals < 0 || !GRACE_PERIOD.test(value.text.slice(equals + 1))) return true;
+  }
+  return false;
+}
+
+/** git settings that decide how old an unreachable object or reflog entry must be before gc or prune removes it, per ref pattern too. */
+const GC_EXPIRY_SETTING = /^gc\.(?:pruneExpire|worktreePruneExpire|(?:.+\.)?reflogExpire(?:Unreachable)?)$/i;
 
 /**
  * The files a download that is not plain writes, read from its options (PR #74 review round 8, refinement): curl's `-o`/`--output`, `-O` (the URL's file
@@ -1553,17 +2051,22 @@ function noteInlineScript(name: string, args: readonly Word[], state: SegmentSta
     if (text.trim()) classifyText(text, { ...context, cwd: state.cwd }, depth + 1);
     return;
   }
+  // Network code an interpreter runs from the line (D-18): looked for in that code only.
+  if (inlineCode(name, args).some((code) => INLINE_NETWORK.test(code))) noteNetwork(`${name} runs code written on the line that reaches the network`);
   if (!SHELLS.has(name)) return;
   const at = args.findIndex((arg) => /^-[A-Za-z]*c[A-Za-z]*$/.test(arg.text));
   if (at < 0) return;
   let index = at + 1;
   while (index < args.length && (looksLikeOption(args[index].text) || args[index].text === '--')) index += 1;
   const script = args[index];
+  if (script !== undefined && INLINE_NETWORK.test(script.text)) noteNetwork(`${name} -c runs code that reaches the network`);
   if (script !== undefined && !script.expansion) classifyText(script.text, { ...context, cwd: state.cwd }, depth + 1);
 }
 
 /** The protected places a segment's redirects write, tagged whatever else decides the segment (D-44). */
 function noteRedirectWrites(redirects: readonly Redirect[], state: SegmentState, context: CommandContext): void {
+  // A redirect to or from bash's own network files reaches the network (D-18).
+  if (redirects.some((redirect) => redirect.target !== undefined && /^\/dev\/(?:tcp|udp)\//.test(redirect.target.text))) noteNetwork('it redirects to or from a network connection');
   const targets = redirects
     .filter((redirect) => redirect.op !== '<' && redirect.op !== '<<' && redirect.op !== '<<<' && !(redirect.op.endsWith('&') && redirect.target && /^[0-9-]+$/.test(redirect.target.text)))
     .flatMap((redirect) => (redirect.target === undefined || redirect.target.glob ? [] : [redirect.target]));
@@ -1572,6 +2075,9 @@ function noteRedirectWrites(redirects: readonly Redirect[], state: SegmentState,
 
 function classifyProgram(name: string, program: string, args: Word[], state: SegmentState, context: CommandContext, depth: number, viaNpx: boolean): CommandClassification {
   const words = args.map((arg) => arg.text);
+  // An install from a remote address reaches it (D-18); `python -m pip` is pip.
+  const installer = (INTERPRETERS.has(name) && /^python/.test(name) && words[0] === '-m' && words[1] === 'pip') ? installerReachesNetwork('pip', args.slice(2)) : installerReachesNetwork(name, args);
+  if (installer !== undefined) noteNetwork(installer);
   const flags = words.filter(looksLikeOption);
   const anyFlag = (pattern: RegExp) => flags.some((flag) => pattern.test(flag));
   // `gsd_run` as a trusted Open-GSD preamble just defined it: the managed gsd-tools.
@@ -1583,6 +2089,11 @@ function classifyProgram(name: string, program: string, args: Word[], state: Seg
   if (GLOBAL_OPTIONS[name] !== undefined && !PACKAGE_MANAGERS.has(name) && leading !== undefined && (looksLikeOption(leading.text) || (name === 'cargo' && leading.text.startsWith('+')))) {
     return classifyAfterGlobals(name, program, args, state, context, depth, viaNpx);
   }
+  // Docker's credential helpers print what a registry login stored (A5): refused by the floor.
+  if (DOCKER_CREDENTIAL_HELPER.test(name)) {
+    notePrintsCredential(`${name}${args[0] === undefined ? '' : ` ${args[0].text}`}`);
+    return risky(`${name} prints a stored registry login`);
+  }
   // Risky whatever the path.
   if (PRIVILEGE.has(name)) {
     noteRunsAs(name, args, state, context, depth);
@@ -1590,7 +2101,7 @@ function classifyProgram(name: string, program: string, args: Word[], state: Seg
   }
   if (POWER.has(name)) return risky(`${name} stops or restarts the machine`);
   if (DISK_DESTROYERS.has(name) || /^mkfs(?:\.|$)/.test(name)) return risky(`${name} can destroy file or disk contents beyond recovery`, DESTROY_ALL);
-  if (NETWORK_SENDERS.has(name)) return risky(`${name} can send data off this machine`);
+  if (NETWORK_SENDERS.has(name)) { noteNetwork(`${name} can send data off this machine`); return risky(`${name} can send data off this machine`); }
   if (name === 'rm' || name === 'rmdir' || name === 'unlink') {
     const targets = args.filter((arg) => !looksLikeOption(arg.text) && arg.text !== '--');
     noteEffects(deleteEffects(name, targets, args, state, context));
@@ -1649,8 +2160,8 @@ function classifyProgram(name: string, program: string, args: Word[], state: Seg
     return words.some((word) => word === '-1' || word === '0' || word === '-0') ? risky('kill -1 or kill 0 kills every process it can') : unknownRead('kill stops a process');
   }
   if (name === 'curl' || name === 'wget' || name === 'http' || name === 'https' || name === 'httpie' || name === 'xh') {
-    if (anyFlag(/^-(?:[A-Za-z]*[dFT][A-Za-z]*)$|^--(?:data|data-binary|data-raw|data-urlencode|form|form-string|upload-file|json|post-data|post-file|body-data|body-file|method)(?:=|$)/) || words.some((word, at) => (word === '-X' || word === '--request') && /^(?:POST|PUT|PATCH|DELETE)$/i.test(words[at + 1] ?? '')) || /^-X(?:POST|PUT|PATCH|DELETE)$/i.test(words.find((word) => /^-X./.test(word)) ?? '')) return risky(`${name} sends data off this machine`);
-    if (name === 'http' || name === 'https' || name === 'xh') return risky(`${name} can send data off this machine`);
+    if (anyFlag(/^-(?:[A-Za-z]*[dFT][A-Za-z]*)$|^--(?:data|data-binary|data-raw|data-urlencode|form|form-string|upload-file|json|post-data|post-file|body-data|body-file|method)(?:=|$)/) || words.some((word, at) => (word === '-X' || word === '--request') && /^(?:POST|PUT|PATCH|DELETE)$/i.test(words[at + 1] ?? '')) || /^-X(?:POST|PUT|PATCH|DELETE)$/i.test(words.find((word) => /^-X./.test(word)) ?? '')) { noteNetwork(`${name} sends data off this machine`); return risky(`${name} sends data off this machine`); }
+    if (name === 'http' || name === 'https' || name === 'xh') { noteNetwork(`${name} can send data off this machine`); return risky(`${name} can send data off this machine`); }
     // 0.4.18: a download is safe when it is a PLAIN one: one http(s) URL and only flags known to send nothing (src/domain/plainDownload.ts). The rule
     // fails closed, so a flag curl adds later, or one nobody thought of, asks instead of slipping through. Anything that carries data is risky above.
     // A word the shell decides at run time ($O, $(...)) reaches plainDownload as empty text, so it is not a plain download: where it writes, or what it
@@ -1674,10 +2185,11 @@ function classifyProgram(name: string, program: string, args: Word[], state: Seg
       return safe(`${name} downloads a page and sends nothing of this run's with it`);
     }
     // 0.4.18 review: say why, rather than falling through to "not a command the rules know", which would be a wrong explanation for `curl --netrc`.
+    noteNetwork(`${name} ${download.reason ?? 'is not a plain download'}`);
     return downloadWrites(name, args, state, context, `${name} ${download.reason ?? 'is not a plain download'}`);
   }
   if (name === 'rsync') {
-    if (words.some((word) => !looksLikeOption(word) && /^[^/]*:|^[\w.-]+@/.test(word))) return risky('rsync copies to or from another machine');
+    if (words.some((word) => !looksLikeOption(word) && /^[^/]*:|^[\w.-]+@/.test(word))) { noteNetwork('rsync copies to or from another machine'); return risky('rsync copies to or from another machine'); }
     // The destination is the last operand; --delete removes what is there and is not in the source. Options with a value as the next word are skipped.
     const valued = new Set(['-e', '--rsh', '--exclude', '--include', '--filter', '-f', '--exclude-from', '--include-from', '--files-from', '--chmod', '--chown', '--log-file', '--partial-dir', '--temp-dir', '-T', '--backup-dir', '--suffix', '--compare-dest', '--copy-dest', '--link-dest']);
     if (args.some((arg) => /^(?:-e|--rsh)(?:=|$)/.test(arg.text))) return unknown('rsync runs a remote shell the rules do not check');
@@ -1693,12 +2205,21 @@ function classifyProgram(name: string, program: string, args: Word[], state: Seg
   }
   if (name === 'crontab') return words.length === 1 && words[0] === '-l' ? unknownRead('crontab -l') : risky('crontab changes scheduled jobs');
   if (name === 'systemctl' || name === 'service' || name === 'launchctl') return words.some((word) => /^(?:start|stop|restart|reload|enable|disable|mask|unmask|kill|load|unload|bootstrap|bootout|daemon-reload)$/.test(word)) ? risky(`${name} changes system services`) : unknownRead(`${name}`);
-  if (name === 'docker' || name === 'podman') {
-    // A push publishes an image; login and logout change your credentials and publish nothing (D-46).
+  if (name === 'docker' || name === 'podman' || name === 'buildah') {
+    // Talking to a registry reaches the network (D-18): push, pull, login, logout, search.
+    if (/^(?:push|pull|login|logout|search)$/.test(words[0] ?? '') || (words[0] === 'image' && /^(?:push|pull)$/.test(words[1] ?? ''))) noteNetwork(`${name} ${words[0]} talks to a container registry`);
+    // A push publishes an image; login and logout change the credentials kept on this computer, which the floor asks about (owner decision after PR #74).
     const pushes = words[0] === 'push' || (words[0] === 'image' && words[1] === 'push');
+    if (words[0] === 'login' || words[0] === 'logout') noteCredentialChange(`${name} ${words[0]} signs in or out of a container registry.`);
     if (['push', 'login', 'logout'].includes(words[0] ?? '') || (words[0] === 'image' && words[1] === 'push')) return risky(`${name} ${words[0]} changes a registry or your credentials`, pushes ? publishTo('container-registry') : undefined);
     return unknownRead(`${name} ${words[0] ?? ''}`.trim());
   }
+  if (name === 'helm' && words.filter((word) => !looksLikeOption(word))[0] === 'registry' && REGISTRY_LOGIN_VERBS.has(words.filter((word) => !looksLikeOption(word))[1] ?? '')) {
+    noteCredentialChange(`helm registry ${words.filter((word) => !looksLikeOption(word))[1]} signs in or out of a chart registry.`);
+    return risky('helm registry changes your registry login');
+  }
+  // A cluster, cloud or infrastructure command talks to a remote service, whatever it does there (D-18).
+  if (['kubectl', 'helm', 'oc', 'terraform', 'tofu', 'pulumi', 'cdk', 'serverless', 'sls', 'aws', 'gcloud', 'az', 'gsutil', 'near', 'gh', 'glab'].includes(name)) noteNetwork(`${name} talks to a remote service`);
   if (name === 'kubectl' || name === 'helm' || name === 'oc') return /^(?:apply|create|delete|replace|patch|rollout|scale|set|edit|exec|cp|drain|cordon|taint|label|annotate|install|upgrade|uninstall|rollback)$/.test(words.find((word) => !looksLikeOption(word)) ?? '') ? risky(`${name} changes a cluster`, publishTo('deploy')) : unknownRead(name);
   if (name === 'terraform' || name === 'tofu' || name === 'pulumi' || name === 'cdk' || name === 'serverless' || name === 'sls') return /^(?:apply|destroy|import|up|deploy|remove|refresh|taint|untaint|state)$/.test(words.find((word) => !looksLikeOption(word)) ?? '') ? risky(`${name} changes deployed infrastructure`, publishTo('deploy')) : unknownRead(name);
 /**
@@ -1714,12 +2235,31 @@ const READ_ONLY_GH = new Set([
 ]);
 
   if (name === 'gh' || name === 'glab') {
-    const [group, action] = words.filter((word) => !looksLikeOption(word));
-    // Only release creation and its changes are publishing on the floor; other GitHub writes stay with the settings layer (D-46, an owner question).
-    const onReleases = words.some((word) => !looksLikeOption(word) && /(?:^|\/)releases(?:[/?]|$)/.test(word));
-    if (group === 'api') return words.some((word, at) => (word === '-X' || word === '--method') && !/^GET$/i.test(words[at + 1] ?? '')) || anyFlag(/^-(?:f|F)$|^--(?:field|raw-field|input)(?:=|$)/) ? risky(`${name} api changes data on GitHub`, onReleases ? publishTo('release') : undefined) : unknownRead(`${name} api`);
+    // The group and the action, past `-R`/`--repo` wherever they sit (owner decision after PR #74): an option the rules do not know before the action, or
+    // a group or action the shell decides at run time, cannot be told apart from what it would run, so the effects are unknown.
+    const found = githubAction(args);
+    if ('unknown' in found) { backstopPrinter(name, args); return unknown(`${name} ${found.unknown}`); }
+    const group = found.group?.text;
+    const action = found.action?.text;
+    // Signing in or out, refreshing the token, or switching account changes the login kept on this computer (owner decision after PR #74).
+    if (group === 'auth' && action !== undefined && /^(?:login|logout|refresh|setup-git|switch)$/.test(action)) noteCredentialChange(`${name} auth ${action} changes your ${name === 'gh' ? 'GitHub' : 'GitLab'} login.`);
+    // Printing the stored token (A5): refused by the floor.
+    if (group === 'auth' && (action === 'token' || (action === 'status' && args.some((arg) => arg.text === '-t' || arg.text === '--show-token' || /^-[A-Za-z]*t[A-Za-z]*$/.test(arg.text) && !arg.text.startsWith('--'))))) {
+      notePrintsCredential(`${name} auth ${action}${action === 'status' ? ' --show-token' : ''}`);
+      return risky(`${name} auth ${action} prints your ${name === 'gh' ? 'GitHub' : 'GitLab'} token`);
+    }
+    if (group === 'api') {
+      // A writing method, or a field or a body (which make the request a POST), changes data on GitHub: publishing (owner decision after PR #74).
+      const api = githubApiWrites(args.slice(found.groupAt + 1));
+      if ('unknown' in api) return unknown(`${name} api ${api.unknown}`);
+      if (!api.writes) return unknownRead(`${name} api`);
+      return risky(`${name} api changes data on GitHub`, publishTo(api.releases ? 'release' : 'git-remote'));
+    }
     const releases = group === 'release' && /^(?:create|upload|edit|delete|delete-asset)$/.test(action ?? '');
-    if (/^(?:create|edit|delete|merge|close|reopen|comment|review|upload|ready|lock|unlock|transfer|archive|rename|fork|sync|set|add|remove|enable|disable|run|cancel|rerun|login|logout|setup-git|refresh)$/.test(action ?? '') || group === 'release' && action !== 'list' && action !== 'view') return risky(`${name} ${group} ${action} changes data on GitHub`, releases ? publishTo('release') : undefined);
+    // Merging a pull request (a merge request on GitLab) changes a branch on the remote: publishing (owner decision after PR #74). Creating one and
+    // commenting stay with the settings layer (D-46).
+    const merges = action === 'merge' && (group === 'pr' || group === 'mr');
+    if (/^(?:create|edit|delete|merge|close|reopen|comment|review|upload|ready|lock|unlock|transfer|archive|rename|fork|sync|set|add|remove|enable|disable|run|cancel|rerun|login|logout|setup-git|refresh)$/.test(action ?? '') || group === 'release' && action !== 'list' && action !== 'view') return risky(`${name} ${group} ${action} changes data on GitHub`, releases ? publishTo('release') : merges ? publishTo('git-remote') : undefined);
     // 0.4.18 review: a run waiting for CI polls with exactly these, and the waiting guidance tells it to. Leaving them unknown would make every poll a
     // question in an asking mode, which is the wait the Check now button exists to end. They only read: no verb here writes to GitHub.
     if (name === 'gh' && READ_ONLY_GH.has(`${group ?? ''} ${action ?? ''}`.trim())) return safe(`${name} reads from GitHub and changes nothing`);
@@ -1733,7 +2273,11 @@ const READ_ONLY_GH = new Set([
   }
   if (name === 'cargo') {
     const sub = words.find((word) => !looksLikeOption(word)) ?? '';
-    if (['publish', 'yank', 'owner', 'login', 'logout'].includes(sub)) return risky(`cargo ${sub} changes crates.io`, publishTo('registry'));
+    if (sub === 'login' || sub === 'logout') {
+      noteCredentialChange(`cargo ${sub} signs in or out of a crate registry.`);
+      return risky(`cargo ${sub} changes your crates.io login`);
+    }
+    if (['publish', 'yank', 'owner'].includes(sub)) return risky(`cargo ${sub} changes crates.io`, publishTo('registry'));
     if (['build', 'test', 'check', 'clippy', 'fmt', 'bench', 'doc', 'tree', 'metadata'].includes(sub) && !words.some((word) => /^--(?:manifest-path|target-dir|config|out-dir)(?:=|$)|^-Z$/.test(word))) return safe(`cargo ${sub} builds or tests the project`);
     return unknownRead(`cargo ${sub}`.trim());
   }
@@ -1757,6 +2301,22 @@ const READ_ONLY_GH = new Set([
   if (name === 'npx' || (name === 'pnpm' && words[0] === 'dlx')) return classifyNpx(args, state, context, depth);
   if (name === 'git') return program !== 'git' ? unknown(`${program} is not the usual git`) : classifyGit(args, state, context);
   if (name === 'near') return words.some((word) => /delete|deploy|send|transfer|sign|add-key|create-account|stake|call-function|as-transaction|tokens|import-account|export-account|login/i.test(word)) ? risky('near can sign transactions or change keys on NEAR', publishTo('chain')) : unknownRead('near contacts the NEAR network');
+  if (name === 'aws' || name === 'gcloud' || name === 'az') {
+    // Signing in or out of the cloud account, or changing its stored keys, rewrites the credentials kept on this computer (owner decision after PR #74).
+    const read = cloudWords(name, args);
+    if ('unknown' in read) { backstopPrinter(name, args); return unknown(`${name} ${read.unknown}`); }
+    // The printers' verbs are their own words, so they are looked for among all the words too: an option before them never hides one (PR #76 review).
+    const printer = cloudCredentialPrinter(name, read.words, args) ?? couldPrintCredential(name, args);
+    if (printer !== undefined) {
+      notePrintsCredential(printer);
+      return risky(`${printer} prints your ${CLOUD_NAMES[name]} credentials`);
+    }
+    const change = cloudCredentialChange(name, read.words);
+    if (change !== undefined) {
+      noteCredentialChange(`${change} changes your ${CLOUD_NAMES[name]} login or stored keys.`);
+      return risky(`${change} changes your ${CLOUD_NAMES[name]} login`);
+    }
+  }
   if (name === 'aws' || name === 'gcloud' || name === 'az' || name === 'gsutil') return /^(?:cp|sync|mv|rm|rb|mb|put-object|delete|deploy|create|update|upload)/.test(words.slice(1).find((word) => !looksLikeOption(word)) ?? '') || words.some((word) => /^(?:deploy|delete|rm|cp|sync)$/.test(word)) ? risky(`${name} changes or uploads to cloud resources`, publishTo('deploy')) : unknownRead(name);
   if (name === 'xargs') {
     const inner = xargsCommand(args);
@@ -1879,13 +2439,17 @@ function unknownProgram(name: string, args: readonly Word[], state: SegmentState
   const reason = said ?? `${name} is not a command the rules know`;
   const candidates = args.flatMap((arg, index) => {
     const candidate = programName(arg.text);
-    return !arg.expansion && !looksLikeOption(arg.text) && (TAGGED_PROGRAMS.has(candidate) || /^mkfs(?:\.|$)/.test(candidate)) ? [index] : [];
+    return !arg.expansion && !looksLikeOption(arg.text) && (TAGGED_PROGRAMS.has(candidate) || /^mkfs(?:\.|$)/.test(candidate) || DOCKER_CREDENTIAL_HELPER.test(candidate)) ? [index] : [];
   });
   if (candidates.length > MAX_RUNNER_PROBES) return beyondReach(`${reason}, and too many of the words after it are commands to check`);
   for (const index of candidates) {
     const mark = effectMark();
+    const top = effectFrames[effectFrames.length - 1];
+    const changedBefore = top?.credentialChange ?? top?.printsCredential;
     classifyWords(args.slice(index), state, context, depth + 1);
-    if (effectsSince(mark).length > 0) return beyondReach(`${reason}, and it may run ${args.slice(index, index + 2).map((arg) => arg.text).join(' ')}`);
+    // A credential change or printer is a tag too: what the program runs is not read whole, so the effects are unknown (the note is still kept).
+    const changed = changedBefore === undefined && (top?.credentialChange !== undefined || top?.printsCredential !== undefined);
+    if (effectsSince(mark).length > 0 || changed) return beyondReach(`${reason}, and it may run ${args.slice(index, index + 2).map((arg) => arg.text).join(' ')}`);
   }
   // Every word was probed: what it may run that the rules tag would have been found. The program itself is one the rules cannot judge.
   return unknownRead(reason);
@@ -1973,6 +2537,9 @@ function classifyText(command: string, context: CommandContext, depth: number): 
   const deep = tooDeep(depth);
   if (deep) return deep;
   if (!raw) return unknownRead('the command is empty');
+  // Every text the classifier reads (a script body, `bash -c`, a substitution) is checked for a credential file it names (D-18).
+  const named = namesCredentialFile(raw);
+  if (named !== undefined) { const frame = effectFrames[effectFrames.length - 1]; if (frame !== undefined) frame.credentialFile ??= named; }
   // These two decide the verdict on their own, but the rest of the command is still read, so what it publishes or destroys is seen (Pitfall 2).
   const early = /:\(\)\s*\{/.test(raw) ? risky('it defines a fork bomb') : DOWNLOAD_TO_SHELL.test(raw) ? risky('it runs code downloaded from the network') : undefined;
   const result = classifyStructure(raw, context, depth);
@@ -2154,5 +2721,11 @@ export function classifyCommand(command: string, context: CommandContext): Comma
   // A command the classifier did not read whole is never safe, wherever it stopped (a script that runs scripts past the bound, say): what it did not read
   // could be anything.
   const verdict = frame.unknown !== undefined && plain.verdict === 'safe' ? { verdict: 'unknown' as const, reason: frame.unknown } : plain;
-  return { ...verdict, ...(effects.length > 0 ? { effects } : {}), ...(frame.unknown === undefined ? {} : { effectsUnknown: frame.unknown }) };
+  return {
+    ...verdict, ...(effects.length > 0 ? { effects } : {}), ...(frame.unknown === undefined ? {} : { effectsUnknown: frame.unknown }),
+    ...(frame.credentialChange === undefined ? {} : { credentialChange: frame.credentialChange }),
+    ...(frame.printsCredential === undefined ? {} : { printsCredential: frame.printsCredential }),
+    ...(frame.reachesNetwork === undefined ? {} : { reachesNetwork: frame.reachesNetwork }),
+    ...(frame.credentialFile === undefined ? {} : { credentialFile: frame.credentialFile })
+  };
 }

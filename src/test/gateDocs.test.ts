@@ -106,6 +106,15 @@ test('SECURITY.md\'s MCP section says what plan 10 shipped: declared tools, rest
   assert.match(flat(mcpSection), /An undeclared tool asks before every call in every mode, `fully-autonomous` included/);
   assert.doesNotMatch(flat(mcpSection), /every mode except `fully-autonomous`/);
   assert.match(mcpSection, /behave as they did/);
+  // PR #76 review round 3: a local server's declaration is a statement of trust, said plainly, and never claimed to keep the floor in charge of its calls.
+  const trust = 'A declaration is your statement that you trust what that server\'s tools do: the gate does not check each call\'s arguments against it, so a declared tool runs without asking in Full auto. Only declare servers you trust like your own code.';
+  assert.ok(flat(mcpSection).includes(trust), 'SECURITY.md');
+  assert.ok(flat(readmeMcp).includes(trust), 'README MCP section');
+  assert.ok(flat(README).includes(`| \`nearAi.mcp.localServerEffects\` | \`{}\` |`) && flat(README).includes(trust), 'README settings row');
+  assert.doesNotMatch(flat(SECURITY), /cannot be declared, so the floor still decides them/);
+  const setting = (JSON.parse(readFileSync(path.join(ROOT, 'package.json'), 'utf8')) as { contributes: { configuration: { properties: Record<string, { markdownDescription?: string }> } | Array<{ properties: Record<string, { markdownDescription?: string }> }> } }).contributes.configuration;
+  const described = (Array.isArray(setting) ? setting : [setting]).map((block) => block.properties['nearAi.mcp.localServerEffects']?.markdownDescription).find((text) => text !== undefined) ?? '';
+  assert.match(described, /^A declaration here is your statement that you trust what that server's tools do: the gate does not check each call's arguments against it, so a declared tool runs without asking in Full auto; only declare servers you trust like your own code\./);
 });
 
 test('README names the two commands, points to the SECURITY.md section, and repeats the MCP changes in its own words', () => {
@@ -132,7 +141,8 @@ test('SECURITY.md describes the enforced floor: every mode asks before protected
     'In every mode, `fully-autonomous` included, these always ask, with no **Always allow** and no grant for the rest of the run',
     'writing into `.git/`',
     'writing into `.planning/.near-ai/` (other than its `team.md`) or into `.near-ai/` (other than its `scratch/` and `attachments/` folders)',
-    'publishing: git push, package and extension publishing, release creation, container image push, deploy commands, and sending email',
+    'publishing: git push, merging a pull request (`gh pr merge`), a write through `gh api` (a writing method, a field or a body), package and extension publishing, release creation, container image push, deploy commands, and sending email',
+    'signing in or out: registry and account logins, logouts and token changes, which change the logins and tokens kept on this computer',
     'destruction: recursive deletes outside scratch and build folders',
     '`git reset --hard`', '`git clean`', 'discarding uncommitted changes', 'deleting branches and tags',
     'In a run with nobody to answer',
@@ -203,7 +213,20 @@ test('the old fully-autonomous wording is gone from SECURITY.md and README, and 
   assert.match(row, /publishing and destruction still ask/);
   assert.match(row, /the key folder and credential stores are refused/);
   assert.match(row, /there is no sandbox around the shell yet/);
-  assert.match(readmeActionPolicy, /publishing and destruction still ask/);
+  // Owner decision after PR #74 (D-18): a credential read holds what could send it out.
+  assert.match(row, /After it reads such a file, anything that could send data off this computer asks too/);
+  assert.ok(flat(floorSection).includes('Once a run has read such a file, in any mode, a call that could send data off this computer asks in every mode, `fully-autonomous` included, with no **Always allow** and no grant for the rest of the run, and is refused when nobody is there to answer'));
+  // PR #76 review round 5: the install claim says exactly what is held.
+  assert.ok(flat(floorSection).includes('an install that names a remote address (a URL other than `file://`, or a version-control address) with npm, yarn, pnpm, bun, pip, `python -m pip`, uv, pipx, cargo, gem or composer, `cargo install` or `gem install` from another registry or source, `go get` and `go install` of a module path'));
+  assert.ok(flat(floorSection).includes('An install of a package by name from the default registry is not held.'));
+  // PR #76 review round 4: two behaviours that surprise, said plainly.
+  assert.ok(flat(floorSection).includes('A command that only mentions a credential file (`echo .env`, a commit message that names it) marks the run as a read does, and the mark lasts until the run ends.'));
+  assert.ok(flat(floorSection).includes('For aws, gcloud and az, a word that looks like a command that prints a token (such as `get-session-token`, `print-access-token` or `get-access-token`) anywhere among the arguments, even as an option\'s value, makes the command refused as one: rename that word, or run that step yourself.'));
+  // What the hold does not see, said plainly: a program the agent starts, and a plain download's address (coordinator, after the first report).
+  assert.ok(flat(floorSection).includes('Local work still runs unasked: builds, tests, `npm run` scripts, `make`, and `node` or `python` running a script. A program the agent starts can still read the credential and send it itself, and a plain download\'s address could carry it; only the planned sandbox around the shell closes that.'));
+  // Owner decisions after PR #74: signing in or out asks too, and a credential read holds what could send it out.
+  assert.match(readmeActionPolicy, /publishing, signing in or out and destruction still ask/);
+  assert.match(readmeActionPolicy, /after a credential read anything that could send data out asks too/);
   assert.match(readmeActionPolicy, /the key folder and credential stores are refused/);
   assert.doesNotMatch(readmeActionPolicy, /writes into `\.git\/` \(only for throwaway/);
 });
@@ -257,7 +280,10 @@ test('CHANGELOG.md says, in plain words, what Full auto now asks about and refus
   for (const phrase of [
     /Full auto included/, /`\.git\/`/, /`\.planning\/\.near-ai\/`/, /publish/i, /git push/, /`git reset --hard`/, /no \*\*Always allow\*\*/,
     /nobody to answer[^.]*refused|refused[^.]*nobody/i, /Everything else still runs without asking/, /NEAR key folder/, /VS Code's own secrets database/,
-    /identity and policy files/, /nested more than four levels deep, too long to check, or started by a program the checks do not know/, /search provider/i, /decision record/i
+    /identity and policy files/, /nested more than four levels deep, too long to check, or started by a program the checks do not know/, /search provider/i, /decision record/i,
+    // Owner decisions after PR #74.
+    /After reading a credential file, sending asks/, /`gh pr merge`/, /Signing in and out asks in every mode/, /`gh auth token`/, /Routine git upkeep/,
+    /A file outside your project is refused at once/, /`nearAi\.mcp\.localServerEffects`/, /arguments could not be read/, /`--max-tokens 4096`/
   ]) assert.match(entry, phrase);
   for (const line of section.split('\n').filter((text) => text.startsWith('- '))) assert.match(line, /^- \*\*[^*]+\*\*/, `each bullet leads with a bold sentence: ${line.slice(0, 60)}`);
   assert.ok(!entry.includes(EM_DASH), 'no em-dash');

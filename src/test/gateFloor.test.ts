@@ -45,15 +45,17 @@ const CASES: Readonly<Record<FloorRule, Partial<GateRequest> & { effects: Capabi
   'floor.identity-files': { effects: [SHELL], command: `cat ${EXTENSION_STORAGE_TEXT}/identity/key-history.json`, tool: 'Bash' },
   'floor.protected-write': { effects: [{ verb: 'workspaceWrite', paths: ['.git/hooks/pre-commit'] }] },
   'floor.publish': { effects: [{ verb: 'publish', target: 'git-remote' }] },
+  'floor.credential-change': { effects: [SHELL], command: 'docker login', tool: 'Bash', floorFacts: { credentialChange: 'docker login signs in or out of a container registry.' } },
   'floor.destroy': { effects: [{ verb: 'destroy', paths: ['build/**'] }] },
   'floor.shared-write': { effects: [{ verb: 'skill.write', scope: 'team' }] }
 };
 
-test('the floor has seven rules in a fixed order, refusals first', () => {
+// Owner decision after PR #74: signing in and out is a floor rule of its own (floor.credential-change), so the floor has eight rules.
+test('the floor has eight rules in a fixed order, refusals first', () => {
   assert.deepEqual([...FLOOR_RULE_ORDER], [
-    'floor.state-keys', 'floor.credential-store', 'floor.identity-files', 'floor.protected-write', 'floor.publish', 'floor.destroy', 'floor.shared-write'
+    'floor.state-keys', 'floor.credential-store', 'floor.identity-files', 'floor.protected-write', 'floor.publish', 'floor.credential-change', 'floor.destroy', 'floor.shared-write'
   ]);
-  assert.deepEqual(FLOOR_RULE_ORDER.map((rule) => FLOOR_RULES[rule]), ['refuse', 'refuse', 'refuse', 'ask', 'ask', 'ask', 'ask']);
+  assert.deepEqual(FLOOR_RULE_ORDER.map((rule) => FLOOR_RULES[rule]), ['refuse', 'refuse', 'refuse', 'ask', 'ask', 'ask', 'ask', 'ask']);
   assert.deepEqual(Object.keys(CASES).sort(), [...FLOOR_RULE_ORDER].sort());
 });
 
@@ -82,7 +84,7 @@ test('floor matrix: every rule in every mode and both presences, with no shortcu
       }
     }
   }
-  assert.equal(cases, 56, '7 rules x 4 modes x 2 presences');
+  assert.equal(cases, 64, '8 rules x 4 modes x 2 presences');
 });
 
 test('a sub-agent of a person run stays an ask with a person present, never a refusal (D-43)', async () => {
@@ -171,9 +173,12 @@ test('fully-autonomous means no approval within the grant: a plain command is al
 });
 
 test('credential stores: the confirmed list is named, and each form of the home folder is matched in text only', () => {
+  // Owner decision after PR #74 (A5): the second line was added.
   assert.deepEqual([...CREDENTIAL_STORES], [
     '.near-credentials', '.ssh', '.aws', '.config/gcloud', '.azure', '.docker/config.json', '.netrc', '.git-credentials', '.gnupg', '.kube', '.npmrc', '.pypirc',
-    '.near-kb', '.kbkey'
+    '.near-kb', '.kbkey',
+    '.config/gh', '.cargo/credentials', '.cargo/credentials.toml', '.terraform.d/credentials.tfrc.json', '.config/glab-cli', '.config/hub', '.gem/credentials',
+    '.local/share/keyrings', '.yarnrc.yml'
   ]);
   const locations = { home: HOME };
   const hits = [

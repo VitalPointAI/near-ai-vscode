@@ -11,7 +11,7 @@ import { failedClosed } from '../domain/gate/bundle';
 import type { BundleState, GateContextName } from '../domain/gate/bundle';
 import { decide } from '../domain/gate/decide';
 import type { ActorRef, GateDecision, GateOptions, GateRequest, GateRuntime, PreGateRule, SettingsAnswer, SettingsLayer } from '../domain/gate/decide';
-import { namesCredentialStore, namesIdentityFiles } from '../domain/gate/floor';
+import { credentialReason, identityFilesReason, namesCredentialStore, namesIdentityFiles, printerReason } from '../domain/gate/floor';
 import type { FloorFacts, FloorLocations } from '../domain/gate/floor';
 import { effectsFor } from '../domain/gate/manifest';
 import type { InputFieldSource } from '../domain/gate/manifest';
@@ -19,13 +19,13 @@ import { buildDecisionRecord, outcomeOf } from '../domain/gate/record';
 import type { DecisionOutcome, DecisionRecord, DecisionResource } from '../domain/gate/record';
 import { fromActionCapability } from '../domain/gate/vocabulary';
 import type { Capability } from '../domain/gate/vocabulary';
-import { classifyCommand, downloadSegments } from './commandSafety';
-import type { CommandEffect, PackageScriptsAt } from './commandSafety';
+import { classifyCommand, commandMaySend, downloadSegments, MAX_COMMAND_LENGTH, MAX_COMMAND_WORDS, namesCredentialFile } from './commandSafety';
+import type { CommandContext, CommandEffect, PackageScriptsAt } from './commandSafety';
 import { decidePermissionAsync, denyListReason, isAutoAllowed } from './permissions';
 import type { AutoApprovalContext, PermissionDecision, PermissionRules, RunGrants } from './permissions';
-import { shellReachesCredentialStore } from './tools';
+import { isSensitivePath, shellReachesCredentialStore } from './tools';
 import type { AgentTool } from './tools';
-import { resolveInWorkspace } from './workspace';
+import { OutsideWorkspaceError, resolveInWorkspace } from './workspace';
 
 const DEFAULT_PRODUCT_VERSION = '0.0.0';
 const MAX_RESOURCE_NAME = 200;
@@ -62,6 +62,11 @@ export interface GateCallInput {
    * places inside one of them is a known read, not an unknown effect; nothing here widens what may be written.
    */
   readonly readOnlyRoots?: readonly string[];
+  /**
+   * Set, with the file as the agent named it, when this call itself reads a file that may hold credentials (a Read of `.env`, `cat .env`): a call that
+   * reads one and can send data in the same line is held as one that runs after such a read (owner decision after PR #74, D-18).
+   */
+  readonly readsCredential?: string;
 }
 
 /** The cheap part of the classifier's context the floor needs: no safety model, no Open-GSD runtime check, nothing that asks a person. */
@@ -96,12 +101,14 @@ export interface FloorFactsInput extends Partial<FloorShellContext> {
  */
 export interface FloorCommandFacts {
   readonly effects: readonly CommandEffect[];
-  readonly facts: Pick<FloorFacts, 'credentialStore' | 'identityFiles'>;
+  readonly facts: Pick<FloorFacts, 'credentialStore' | 'identityFiles' | 'credentialChange'>;
   /**
    * Set, with the reason, when the floor could not read the whole command: the classifier stopped (nested too deep, too long) or threw, or the
    * credential-store check threw. The call's effects are then unknown, so decide() asks with a person there and refuses with nobody (PR #74 review).
    */
   readonly effectsUnknown?: string;
+  /** A file that may hold credentials the command reads, as the classifier read it: its own words, a script it runs, a `bash -c` (D-18, PR #76 review round 3). */
+  readonly credentialFile?: string;
 }
 
 /** Where the system's temporary folders are, for systemTemporaryRoots; a test gives a stand-in. */
@@ -182,22 +189,75 @@ export async function floorFactsFor(input: FloorFactsInput, readers: FloorReader
   };
   let classified: ReturnType<typeof classifyCommand>;
   try {
-    classified = classify(input.command, {
-      root: input.root,
-      cwd: input.cwd ?? input.root,
-      ...(input.home === undefined ? {} : { home: input.home }),
-      ...(input.packageScripts === undefined ? {} : { packageScripts: { ...input.packageScripts } }),
-      ...(input.packageScriptsAt === undefined ? {} : { packageScriptsAt: input.packageScriptsAt }),
-      ...(input.trustedRoots === undefined ? {} : { trustedToolRoots: [...input.trustedRoots] }),
-      ...(input.gsdPreambles === undefined ? {} : { gsdPreambles: [...input.gsdPreambles] }),
-      temporaryRoots: input.temporaryRoots === undefined ? processTemporaryRoots() : input.temporaryRoots
-    });
+    classified = classify(input.command, floorClassifierContext(input));
   } catch {
     // The classifier is pure and should never throw; if it does, nothing is known about what the command does.
     return { effects: [], facts, effectsUnknown: 'the command could not be read' };
   }
   const unknownWhy = lost ?? classified.effectsUnknown;
-  return { effects: classified.effects ?? [], facts, ...(unknownWhy === undefined ? {} : { effectsUnknown: unknownWhy }) };
+  // A command that prints a stored token is refused like a credential store (A5); the text check above may already have named it.
+  const printer = facts.credentialStore === undefined && classified.printsCredential !== undefined ? { credentialStore: printerReason(classified.printsCredential) } : {};
+  const read = { ...facts, ...printer, ...(classified.credentialChange === undefined ? {} : { credentialChange: classified.credentialChange }) };
+  return {
+    effects: classified.effects ?? [], facts: read, ...(unknownWhy === undefined ? {} : { effectsUnknown: unknownWhy }),
+    ...(classified.credentialFile === undefined ? {} : { credentialFile: classified.credentialFile })
+  };
+}
+
+/** The classifier's context for the floor's own reading of a command: cheap, with no safety model, no allow list and no scratch record. */
+function floorClassifierContext(input: FloorFactsInput): CommandContext {
+  return {
+    root: input.root,
+    cwd: input.cwd ?? input.root,
+    ...(input.home === undefined ? {} : { home: input.home }),
+    ...(input.packageScripts === undefined ? {} : { packageScripts: { ...input.packageScripts } }),
+    ...(input.packageScriptsAt === undefined ? {} : { packageScriptsAt: input.packageScriptsAt }),
+    ...(input.trustedRoots === undefined ? {} : { trustedToolRoots: [...input.trustedRoots] }),
+    ...(input.gsdPreambles === undefined ? {} : { gsdPreambles: [...input.gsdPreambles] }),
+    temporaryRoots: input.temporaryRoots === undefined ? processTemporaryRoots() : input.temporaryRoots
+  };
+}
+
+/** How many words of a command are resolved through links when looking for a credential file it reads. */
+const CREDENTIAL_FILE_LINK_CHECKS = 64;
+
+/** A word that looks like a path, so it is worth resolving through links: it has a `/`, or starts with `~` or `.` (PR #76 review round 2). */
+function pathLike(word: string): boolean {
+  return word.includes('/') || word.startsWith('~') || word.startsWith('.');
+}
+
+/**
+ * The file that may hold credentials a shell command reads, as written, or undefined (owner decision after PR #74, D-18): one its text names (`.env`, a key
+ * file, `.ssh/`), a word that is one by its name, or a path-like word that resolves to one from the shell's folder, links followed (each resolved once per
+ * call). Text and paths only: nothing is opened. Only the part of a command within the classifier's bounds is read word by word; its length alone is not a
+ * read (the command already asks, its effects being unknown). A read the text does not show (a recursive search, a glob, a path built while the command
+ * runs, a bare name that is a link) is not seen.
+ */
+export async function shellReadsCredentialFile(command: string, context: { root: string; shell?: { workingDirectory: string } }, options: { realpath?: (target: string) => Promise<string> } = {}): Promise<string | undefined> {
+  if (command.trim() === '') return undefined;
+  const named = namesCredentialFile(command);
+  if (named !== undefined) return named;
+  const readable = command.slice(0, MAX_COMMAND_LENGTH);
+  const words = readable.split(/[\s'"`;&|()<>=]+/).filter((word) => word !== '' && !word.startsWith('-') && !word.includes('$')).slice(0, MAX_COMMAND_WORDS);
+  const cwd = context.shell?.workingDirectory ?? context.root;
+  const resolved = new Map<string, Promise<string | undefined>>();
+  const resolve = (absolute: string): Promise<string | undefined> => {
+    let found = resolved.get(absolute);
+    if (found === undefined) {
+      found = (options.realpath ?? realpath)(absolute).then((real) => real, () => undefined);
+      resolved.set(absolute, found);
+    }
+    return found;
+  };
+  for (const word of words) {
+    const absolute = path.resolve(cwd, word);
+    if (isSensitivePath(word) || isSensitivePath(absolute)) return word.slice(0, 120);
+    if (!pathLike(word) || /[*?[]/.test(word)) continue;
+    if (!resolved.has(absolute) && resolved.size >= CREDENTIAL_FILE_LINK_CHECKS) continue;
+    const real = await resolve(absolute);
+    if (real !== undefined && real !== absolute && isSensitivePath(real)) return word.slice(0, 120);
+  }
+  return undefined;
 }
 
 /** What decide() is told by the runtime: when the host knows them, the home folder and global storage the floor's text checks may name. Nothing turns the floor off. */
@@ -241,6 +301,10 @@ export interface GatedCall {
   readonly callKey?: string;
   /** True when a person had already approved this exact floor call once, after the run moved on: it runs this time, and the next identical call asks again. */
   readonly approvedOnce?: boolean;
+  /** The file that may hold credentials this call reads, when it reads one: the run is marked with it once the call runs (D-18). */
+  readonly readsCredential?: string;
+  /** The tool's own words for a path outside the project, which the agent is told when the call is refused for it; never put on record. */
+  readonly toolMessage?: string;
 }
 
 function productVersionOf(runtime: GateRuntime): string {
@@ -332,6 +396,18 @@ export interface CallPaths {
   /** The trusted-folder files read, named by the folder's own name and the path inside it (never the full machine path). */
   readonly trustedReads: readonly string[];
   readonly facts: Pick<FloorFacts, 'credentialStore' | 'identityFiles'>;
+  /**
+   * When a path is outside the project and every folder the tool may use for it (a trusted folder only for a read): the tool would refuse the call, so the
+   * gate refuses it up front (`call.outside-workspace`, owner decision after PR #74) instead of showing a card. `reason` is what the record says, in fixed
+   * words with the path as the agent gave it (only its name, when that was a machine path); `toolMessage` is the tool's own words, for the agent only.
+   */
+  readonly outside?: { readonly reason: string; readonly toolMessage: string };
+}
+
+/** The reason on record for a path outside the project: fixed words, and never a machine path (PR #76 review round 4). */
+function outsideReason(given: string): string {
+  const shown = path.isAbsolute(given) || /^[A-Za-z]:[\\/]/.test(given) || given.startsWith('~') ? `A file named ${shownName(path.basename(given))}` : shownName(given);
+  return `${shown} is outside the project and every folder this tool may use, so the tool would refuse it.`;
 }
 
 function insideFolder(folder: string, target: string): boolean {
@@ -363,18 +439,25 @@ export async function readCallPaths(tool: AgentTool<any>, raw: Record<string, un
   const trustedReads: string[] = [];
   let credentialStore: string | undefined;
   let identityFiles: string | undefined;
+  let outside: { reason: string; toolMessage: string } | undefined;
   for (const [field, verbs] of fields) {
     const value = given[field];
     if (typeof value !== 'string' || value.trim() === '') continue;
+    // A trusted folder is for reading: a field any other effect uses is resolved as the tools resolve a write, against the project alone.
+    const readOnly = [...verbs].every((verb) => verb === 'read');
     let resolved: string | undefined;
     try {
-      resolved = await resolveInWorkspace(root, value, [...readOnlyRoots]);
-    } catch {
+      resolved = await resolveInWorkspace(root, value, readOnly ? [...readOnlyRoots] : []);
+    } catch (error) {
       resolved = undefined; // outside the project and every trusted folder, or the key folder: the tool refuses it, and its effects stay unknown
+      if (error instanceof OutsideWorkspaceError) outside ??= { reason: outsideReason(value), toolMessage: error.message };
     }
-    for (const shown of resolved === undefined || resolved === value ? [value] : [value, resolved]) {
-      credentialStore ??= namesCredentialStore(shown, locations, { root });
-      identityFiles ??= namesIdentityFiles(shown, locations);
+    // The path as the agent gave it names the store in the reason; one reached only through a link is named by what the agent gave, never the machine path.
+    credentialStore ??= namesCredentialStore(value, locations, { root });
+    identityFiles ??= namesIdentityFiles(value, locations);
+    if (resolved !== undefined && resolved !== value) {
+      if (credentialStore === undefined && namesCredentialStore(resolved, locations, { root }) !== undefined) credentialStore = credentialReason(shownName(value).slice(0, 120));
+      if (identityFiles === undefined && namesIdentityFiles(resolved, locations) !== undefined) identityFiles = identityFilesReason(shownName(value).slice(0, 120));
     }
     if (resolved === undefined || ![...verbs].every((verb) => verb === 'read')) continue;
     const known = await resolvedFolders();
@@ -392,7 +475,8 @@ export async function readCallPaths(tool: AgentTool<any>, raw: Record<string, un
   return {
     input: out ?? given,
     trustedReads,
-    facts: { ...(credentialStore === undefined ? {} : { credentialStore }), ...(identityFiles === undefined ? {} : { identityFiles }) }
+    facts: { ...(credentialStore === undefined ? {} : { credentialStore }), ...(identityFiles === undefined ? {} : { identityFiles }) },
+    ...(outside === undefined ? {} : { outside })
   };
 }
 
@@ -511,8 +595,30 @@ function resourceOf(tool: string, effects: readonly Capability[], command: strin
   }
 }
 
-function recordFor(runtime: GateRuntime, gated: GatedCall, outcome: DecisionOutcome, rule: string, reason: string | undefined, model: { name: string; provider: string } | undefined): DecisionRecord {
+/**
+ * A record's words with the project's folder and the home folder written as `<project>` and `~` (PR #76 review round 4): a reason that names the shell's
+ * folder, or a command typed with a machine path, never puts that path on record. The longer folder is replaced first, and only as a whole path (round 5).
+ */
+export function withoutMachinePaths(text: string, folders: { readonly project?: string; readonly home?: string }): string {
+  const pairs: Array<[string, string]> = [];
+  if (folders.project !== undefined && folders.project.length > 1) pairs.push([folders.project, '<project>']);
+  if (folders.home !== undefined && folders.home.length > 1) pairs.push([folders.home, '~']);
+  let out = text;
+  // Only a whole path: where a path starts (the text's start, a space, a quote, `(`, `:` or `=`) and ends (a separator, a path list's `:`, a quote, a space, `)` or the end).
+  for (const [folder, label] of pairs.sort((a, b) => b[0].length - a[0].length)) {
+    const escaped = folder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    // Sentence punctuation ends a path too when a space or the end follows it (`in /work/app.` or `/work/app, then`), never `/work/app.bak`.
+    out = out.replace(new RegExp(`(^|[\\s'"(\\[{:=])${escaped}(?=$|[/\\\\\\s'"):\\]}]|[.,;](?:\\s|$))`, 'g'), (_match, before: string) => `${before}${label}`);
+  }
+  return out;
+}
+
+function recordFor(runtime: GateRuntime, gated: GatedCall, outcome: DecisionOutcome, rule: string, givenReason: string | undefined, model: { name: string; provider: string } | undefined): DecisionRecord {
   const capability = gated.effects[0] ?? WIDEST_SHORTHAND('plan')[0] as Capability;
+  const folders = { ...(gated.request.workspace === undefined ? {} : { project: gated.request.workspace.root }), ...(runtime.locations?.home === undefined ? {} : { home: runtime.locations.home }) };
+  const reason = givenReason === undefined ? undefined : withoutMachinePaths(givenReason, folders);
+  const given = gated.resource ?? resourceOf(gated.request.tool, gated.effects, gated.request.command);
+  const resource = { ...given, name: withoutMachinePaths(given.name, folders) };
   return buildDecisionRecord({
     recordId: (runtime.newRecordId ?? randomUUID)(),
     // The log numbers each line as it writes it; this is replaced there.
@@ -523,7 +629,7 @@ function recordFor(runtime: GateRuntime, gated: GatedCall, outcome: DecisionOutc
     ...(model === undefined ? {} : { model }),
     callId: gated.request.callId,
     capability,
-    resource: gated.resource ?? resourceOf(gated.request.tool, gated.effects, gated.request.command),
+    resource,
     outcome,
     rule,
     ...(reason === undefined || reason === '' ? {} : { reason }),
@@ -634,6 +740,14 @@ export async function gateToolCall(runtime: GateRuntime, input: GateCallInput, o
   // The deny list is read here, before the gate, so it refuses a shell command before any step that could only ask, unknown effects included (D-10). It
   // reads the whole text, so a command too long or too deep for the classifier is still matched.
   const denied = input.tool.capability === 'shell' && input.command !== undefined ? denyListReason(input.command, input.rules) : undefined;
+  // After a credential read (this run's, or this very call's), a call that can send data off this computer is held in every mode (owner decision after
+  // PR #74, D-18). Worked out only then, so other calls pay nothing for it.
+  // This call's own read: its words and paths (the loop's check), or a script or `bash -c` the classifier read for it.
+  const readsCredential = input.readsCredential ?? read?.credentialFile;
+  const credentialRead = input.grants.credentialRead ?? readsCredential;
+  const credentialHold = credentialRead === undefined ? undefined
+    : (input.command === undefined ? callSendsOffMachine(input.tool, effects) : read?.effectsUnknown !== undefined || shellMaySend(input.command, { command: input.command, root: input.root, ...(input.shell ?? {}), ...(runtime.locations ?? {}) }))
+      ? credentialHoldReason(credentialRead, input.command !== undefined) : undefined;
   const request: GateRequest = {
     actor: runtime.actor,
     tool: input.tool.name,
@@ -650,6 +764,9 @@ export async function gateToolCall(runtime: GateRuntime, input: GateCallInput, o
     ...(Object.keys(floorFacts).length === 0 ? {} : { floorFacts }),
     // The project and the shell's folder, for the floor's text check of the command (a project's own globalStorage/ folder is the project's).
     workspace: { root: input.root, cwd: input.shell?.cwd ?? input.root },
+    // A path the tool would refuse as outside the project: refused up front, after the floor's own refusals, the emergency stop and the deny list.
+    ...(paths.outside === undefined ? {} : { outsideWorkspace: paths.outside.reason }),
+    ...(credentialHold === undefined ? {} : { credentialHold }),
     ...(denied === undefined ? {} : { settingsRefusal: { rule: 'settings.deny-list', reason: denied } })
   };
   const captured: { value?: PermissionDecision } = {};
@@ -661,7 +778,11 @@ export async function gateToolCall(runtime: GateRuntime, input: GateCallInput, o
   const exactCall = floorCallKey(input);
   const approvedLate = takeFloorApproval(input.grants, exactCall, (runtime.clock ?? Date.now)());
   const callKey = floorAsk ? exactCall : undefined;
-  const gated: GatedCall = { decision, settings: captured.value, request, effects, ...(resource === undefined ? {} : { resource }), ...(callKey === undefined ? {} : { callKey }) };
+  const gated: GatedCall = {
+    decision, settings: captured.value, request, effects, ...(resource === undefined ? {} : { resource }), ...(callKey === undefined ? {} : { callKey }),
+    ...(readsCredential === undefined ? {} : { readsCredential }),
+    ...(paths.outside === undefined ? {} : { toolMessage: paths.outside.toolMessage })
+  };
   const model = options.model === undefined ? undefined : { name: options.model, provider: MODEL_PROVIDER };
   // A floor ask a person already approved once, late (a sub-agent's parked card): this exact call runs this time only. decide() has just been asked again,
   // so the emergency stop, the policy, the floor's refusals and the deny list all still came first (D-43, Pitfall 4).
@@ -674,6 +795,25 @@ export async function gateToolCall(runtime: GateRuntime, input: GateCallInput, o
 }
 
 const APPROVED_ONCE_REASON = 'A person approved this exact call once, after the run had moved on.';
+
+/** Whether a call that is not a shell command can send data off this computer: its tool runs elsewhere, or it reaches the network, sends or publishes. */
+function callSendsOffMachine(tool: AgentTool<any>, effects: readonly Capability[]): boolean {
+  if (tool.manifest.runsOn === 'remote') return true;
+  return effects.some((effect) => effect.verb === 'network' || effect.verb === 'send' || effect.verb === 'publish');
+}
+
+/** commandMaySend with the floor's own context; a reader that throws counts as "may send" (fail closed). */
+function shellMaySend(command: string, input: FloorFactsInput): boolean {
+  try {
+    return commandMaySend(command, floorClassifierContext(input));
+  } catch {
+    return true;
+  }
+}
+
+function credentialHoldReason(file: string, command: boolean): string {
+  return `This run has read ${shownName(file).slice(0, 120)}, which may hold credentials, and this ${command ? 'command' : 'call'} may send data off this computer. It asks in every mode after such a read; approve it only if you expect it.`;
+}
 
 /** How long a late floor approval waits for its call (PR #74 review round 5): long enough for the lead to retry it, short enough not to linger. */
 export const FLOOR_APPROVAL_TTL_MS = 5 * 60_000;

@@ -94,7 +94,9 @@ const PUBLISH_ROWS: readonly Row[] = [
   { command: 'npm run ship', effects: [publish('registry')], extra: { packageScripts: { ship: 'npm publish' } } },
   row('npm publish', publish('registry')), row('npm unpublish pkg@1.0.0', publish('registry')), row('pnpm publish --access public', publish('registry')),
   row('yarn npm publish', publish('registry')), row('bun publish', publish('registry')),
-  ...['deprecate pkg "old"', 'dist-tag add pkg@1.0.0 latest', 'owner add bob pkg', 'adduser', 'login', 'logout', 'token create', 'access public', 'team ls org:dev', 'org set org bob', 'star pkg', 'hook add pkg https://example.test x', 'npm-publish']
+  // Owner decision after PR #74: adduser, login, logout and token change the stored login, not the registry, so they are the floor's credential change
+  // (commandCredentialChanges.test.ts), not publishing.
+  ...['deprecate pkg "old"', 'dist-tag add pkg@1.0.0 latest', 'owner add bob pkg', 'access public', 'team ls org:dev', 'org set org bob', 'star pkg', 'hook add pkg https://example.test x', 'npm-publish']
     .map((verb) => row(`npm ${verb}`, publish('registry'))),
   row('npx vsce publish', publish('registry')), row('npx ovsx publish', publish('registry')), row('npx @vscode/vsce unpublish', publish('registry')),
   ...['semantic-release', 'np', 'release-it', 'changeset publish', 'lerna publish'].map((tool) => row(`npx ${tool}`, publish('release'))),
@@ -108,11 +110,13 @@ const PUBLISH_ROWS: readonly Row[] = [
   row('gh release create v1.0.0', publish('release')), row('gh release upload v1.0.0 app.vsix', publish('release')), row('gh release edit v1.0.0 --draft=false', publish('release')),
   row('gh release delete v1.0.0', publish('release')), row('glab release create v1.0.0', publish('release')),
   row('gh api -X POST repos/acme/app/releases', publish('release')), row('gh api repos/acme/app/releases -f tag_name=v1', publish('release')),
+  // Owner decision after PR #74: merging a pull request and writing through the API publish to the remote.
+  row('gh pr merge 12 --squash', publish('git-remote')), row('gh api -X POST repos/acme/app/issues -f title=x', publish('git-remote')),
   row('vsce publish', publish('registry')), row('ovsx publish app.vsix', publish('registry')), row('twine upload dist/app.whl', publish('registry')),
   row('gem push app.gem', publish('registry')), row('gem yank app -v 1.0.0', publish('registry')),
   ...['vercel --prod', 'netlify deploy', 'firebase deploy', 'wrangler deploy', 'fly deploy', 'flyctl deploy', 'heroku container:release web', 'gh-pages -d dist'].map((tool) => row(tool, publish('deploy'))),
   ...['semantic-release', 'release-it', 'np'].map((tool) => row(tool, publish('release'))),
-  ...['publish', 'yank --version 1.0.0', 'owner --add bob', 'login', 'logout'].map((verb) => row(`cargo ${verb}`, publish('registry'))),
+  ...['publish', 'yank --version 1.0.0', 'owner --add bob'].map((verb) => row(`cargo ${verb}`, publish('registry'))),
   row('make release', publish('release')), row('make deploy', publish('release')),
   row('near send alice.near bob.near 1', publish('chain')), row('near deploy app.near out/app.wasm', publish('chain')),
   row('aws s3 cp out s3://bucket/ --recursive', publish('deploy')), row('gcloud app deploy', publish('deploy')), row('gsutil cp a.txt gs://bucket/', publish('deploy'))
@@ -202,16 +206,16 @@ test('every tag survives every wrapper: npm run, bash -c, sh -c, xargs, a pipe, 
   assert.deepEqual(wrong, []);
 });
 
-test('the D-46 GitHub writes, docker login and logout, scratch and build-output deletes and dry runs carry no tag; their verdicts are as before', () => {
+test('the GitHub writes that stay with the settings layer (D-46), docker login and logout, scratch and build-output deletes and dry runs carry no tag; their verdicts are as before', () => {
   const none = [
-    'gh pr create --fill', 'gh pr merge 12 --squash', 'gh issue comment 3 -b hi', 'gh api -X POST repos/acme/app/issues -f title=x', 'gh release download v1',
+    'gh pr create --fill', 'gh issue comment 3 -b hi', 'gh release download v1',
     'docker login', 'docker logout', 'podman login registry.example.test',
     'rm -rf dist', 'rm -rf node_modules coverage', 'rm -rf /tmp/build-x', 'rm /tmp/helper.py', 'rm notes.txt', 'rm -r',
     'git restore --staged a.ts', 'git clean -n', 'git clean --dry-run', 'git branch -m renamed', 'git branch -u origin/main', 'git checkout -b fix-1', 'git stash',
     'git stash pop', 'git commit -m "x"', 'echo x > notes.txt', 'echo x > .near-ai/scratch/a.txt', 'cat .git/config', 'npm run build'
   ];
   assert.deepEqual(none.filter((command) => classify(command, { packageScripts: { build: 'tsc -p .' } }).effects !== undefined), []);
-  assert.equal(classify('gh pr merge 12 --squash').verdict, 'risky', 'still asks under today\'s settings layer');
+  assert.equal(classify('gh pr create --fill').verdict, 'risky', 'still asks under today\'s settings layer');
   assert.equal(classify('docker login').verdict, 'risky');
 });
 
@@ -311,5 +315,50 @@ test('git branch: a plain rename or copy is not destruction, a forced one is', (
   }
   for (const command of ['git branch -M old new', 'git branch -C old new', 'git branch --move --force old new', 'git branch --copy --force old new', 'git branch -mf old new', 'git branch -cf old new', 'git branch -f main HEAD~1', 'git branch -D old']) {
     assert.deepEqual(classify(command).effects, [destroy()], `${command}: destruction`);
+  }
+});
+
+// Owner decision after PR #74: routine git maintenance is not destruction. `git gc` that keeps git's grace period for unreachable objects, `git prune`
+// with a grace period of days or more, and finishing or leaving a rebase already under way carry no destroy tag, so Full auto runs them; pruning now,
+// starting a rebase and expiring or deleting reflog entries still destroy. A bare `git prune` keeps no grace period (it removes every unreachable object
+// at once), so it stays destruction; so does any form the rules cannot read as keeping one.
+test('routine git maintenance is not destruction; pruning now, starting a rebase and expiring the reflog still are', async () => {
+  const notDestroy = [
+    'git gc', 'git gc --auto', 'git gc --aggressive', 'git gc --quiet', 'git gc --prune', 'git gc --no-prune', 'git gc --prune=2.weeks.ago', 'git gc --prune=3.days.ago',
+    'git gc --auto --quiet', 'git prune --expire=2.weeks.ago', 'git prune --expire 1.month.ago', 'git prune -n', 'git prune --dry-run', 'git prune --expire=never',
+    'git rebase --continue', 'git rebase --abort', 'git rebase --skip', 'git rebase --quit', 'git rebase --edit-todo', 'git -C sub rebase --continue', 'git --no-pager gc',
+    // PR #76 review: a gc setting that keeps a grace period, or one that does not decide what is pruned, is routine too.
+    'git -c gc.pruneExpire=2.weeks.ago gc', 'git -c gc.reflogExpire=90.days.ago gc', 'git -c gc.reflogExpireUnreachable=never gc', 'git -c gc.auto=0 gc',
+    'git -c gc.aggressiveDepth=50 gc --aggressive', 'git -c core.pager=cat gc', 'git -cgc.worktreePruneExpire=3.months.ago gc', 'git --config-env=gc.auto=GC_AUTO gc'
+  ];
+  const destroys = [
+    'git gc --prune=now', 'git gc --prune=all', 'git gc --prune=1.hour.ago', 'git gc --prune="2026-01-01"', 'git gc --prune=$WHEN', 'git gc --unknown-option',
+    'git prune', 'git prune --expire=now', 'git prune --expire now', 'git prune --expire=all', 'git prune --expire=10.minutes.ago', 'git prune --expire=yesterday',
+    'git prune -v', 'git rebase main', 'git rebase -i HEAD~3', 'git rebase --continue main', 'git rebase --onto main topic', 'git rebase --abort --continue',
+    'git reflog expire --expire=now --all', 'git reflog expire --all', 'git reflog delete HEAD@{1}', 'git -c gc.pruneExpire=now gc', 'git -c gc.reflogExpire=now gc --auto',
+    'git -c gc.pruneexpire=now prune --expire=2.weeks.ago', 'git -c gc.pruneExpire=1.hour.ago gc', 'git -c gc.worktreePruneExpire=now gc',
+    'git -c gc.main.reflogExpireUnreachable=now gc', 'git -c gc.pruneExpire=2026-01-01 gc', 'git --config-env=gc.pruneExpire=WHEN gc', 'git -c gc.pruneExpire="$W" gc',
+    'git -c gc.pruneExpire gc', 'git -c "$SETTING" gc'
+  ];
+  const wrong: string[] = [];
+  for (const command of notDestroy) if ((classify(command).effects ?? []).some((effect) => effect.verb === 'destroy')) wrong.push(`${command} is tagged destroy`);
+  for (const command of destroys) {
+    const result = classify(command);
+    if (!(result.effects ?? []).some((effect) => effect.verb === 'destroy') && result.effectsUnknown === undefined) wrong.push(`${command} → ${JSON.stringify(result)}`);
+  }
+  assert.deepEqual(wrong, []);
+  // Never newly safe: what ran asking under the settings layer still does.
+  for (const command of notDestroy) assert.notEqual(classify(command).verdict, 'safe', command);
+  // Through the gate in Full auto: maintenance runs; pruning now asks (refused with nobody).
+  const root = project();
+  for (const presence of ['person', 'none'] as const) {
+    for (const [command, outcome] of [['git gc', 'allow'], ['git rebase --continue', 'allow'], ['git gc --prune=now', presence === 'person' ? 'ask' : 'deny'], ['git rebase main', presence === 'person' ? 'ask' : 'deny']] as const) {
+      const gated = await gateToolCall(testGateRuntime(presence === 'none' ? { presence, context: 'unattended' } : {}), {
+        tool: bashTool, raw: { command }, root, callId: `${presence}-${command}`, command, policy: { mode: 'fully-autonomous', emergencyStop: false },
+        rules: DEFAULT_RULES, grants: new RunGrants(), shell: { cwd: root }, buildAuto: async () => undefined
+      });
+      assert.equal(gated.decision.outcome, outcome, `${presence}: ${command}`);
+      if (outcome !== 'allow') assert.equal(gated.decision.rule, 'floor.destroy', `${presence}: ${command}`);
+    }
   }
 });

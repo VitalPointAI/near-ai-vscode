@@ -11,6 +11,8 @@ export class ToolError extends Error {
 
 /** A path that resolves into the project's key folder, which no agent tool may use (0.4.23). */
 export class StateKeysError extends ToolError {}
+/** A path outside the project and every folder the tool may read: the gate refuses the call up front with this message (owner decision after PR #74). */
+export class OutsideWorkspaceError extends ToolError {}
 
 /**
  * Resolves a tool's path argument to an absolute path inside the workspace. Relative paths are
@@ -28,7 +30,7 @@ export async function resolveInWorkspace(root: string, requested: string, readOn
   if (within(realRoot)) return resolved;
   // Extra roots (the Open-GSD runtime) can be read but are never passed for writes.
   for (const extra of readOnlyRoots) if (within(await realpath(extra).catch(() => extra))) return resolved;
-  throw new ToolError(`${requested} is outside the workspace. Tools can only use files under ${realRoot}.`);
+  throw new OutsideWorkspaceError(`${requested} is outside the workspace. Tools can only use files under ${realRoot}.`);
 }
 
 export function displayPath(root: string, absolute: string): string {

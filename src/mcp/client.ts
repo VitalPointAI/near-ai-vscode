@@ -1,6 +1,7 @@
 import * as path from 'node:path';
 import { ToolError } from '../agent/workspace';
 import type { McpManifest } from '../domain/gate/manifest';
+import type { Capability } from '../domain/gate/vocabulary';
 
 // A connection to one MCP server through the official SDK's client (vendored in vendor/mcp):
 // a local command over stdio, or a remote server over Streamable HTTP with an SSE fallback.
@@ -22,12 +23,21 @@ export interface McpServerConfig {
    * configured before has none, which means today's behaviour (D-38, no data migration). It is a claim by the person, never checked against the server.
    */
   manifest?: McpManifest;
+  /**
+   * What the person declared, once, that a local server's tools may do (`nearAi.mcp.localServerEffects`, parsed with parseMcpServerEffects). Filled by
+   * the registry from the user setting when it builds the tools, never stored with the server, and used only for a server with no web address.
+   */
+  localEffects?: readonly Capability[];
 }
 
 /** Values kept in SecretStorage: a remote URL may carry the access token itself. */
 export interface McpSecrets { url?: string; headers?: Record<string, string>; env?: Record<string, string> }
 
-export interface McpToolInfo { name: string; description: string; inputSchema: Record<string, unknown>; readOnly: boolean; destructive: boolean }
+export interface McpToolInfo {
+  name: string; description: string; inputSchema: Record<string, unknown>; readOnly: boolean; destructive: boolean;
+  /** The tool's own hints as the server sent them, unset when it sent none (MCP reads a missing destructiveHint and openWorldHint as true). */
+  hints?: { destructive?: boolean; openWorld?: boolean };
+}
 
 type Sdk = {
   Client: new (info: { name: string; version: string }, options: { capabilities: Record<string, unknown> }) => SdkClient;
@@ -39,11 +49,19 @@ type Sdk = {
 type SdkTransport = { close(): Promise<void> };
 type SdkClient = {
   connect(transport: SdkTransport, options?: { timeout?: number }): Promise<void>;
-  listTools(params?: { cursor?: string }, options?: { timeout?: number }): Promise<{ tools: Array<{ name: string; description?: string; inputSchema?: Record<string, unknown>; annotations?: { readOnlyHint?: boolean; destructiveHint?: boolean } }>; nextCursor?: string }>;
+  listTools(params?: { cursor?: string }, options?: { timeout?: number }): Promise<{ tools: Array<{ name: string; description?: string; inputSchema?: Record<string, unknown>; annotations?: { readOnlyHint?: boolean; destructiveHint?: boolean; openWorldHint?: boolean } }>; nextCursor?: string }>;
   callTool(params: { name: string; arguments?: Record<string, unknown> }, schema?: unknown, options?: { signal?: AbortSignal; timeout?: number }): Promise<{ content?: Array<Record<string, unknown>>; structuredContent?: unknown; isError?: boolean }>;
   getServerVersion(): { name: string; version: string } | undefined;
   close(): Promise<void>;
 };
+
+/** The tool's own deleting and open-world hints, only where the server sent a boolean. */
+function toolHints(annotations: { destructiveHint?: unknown; openWorldHint?: unknown } | undefined): McpToolInfo['hints'] {
+  return {
+    ...(typeof annotations?.destructiveHint === 'boolean' ? { destructive: annotations.destructiveHint } : {}),
+    ...(typeof annotations?.openWorldHint === 'boolean' ? { openWorld: annotations.openWorldHint } : {})
+  };
+}
 
 const CONNECT_TIMEOUT_MS = 30_000;
 const CALL_TIMEOUT_MS = 120_000;
@@ -127,7 +145,7 @@ export class McpConnection {
     let cursor: string | undefined;
     do {
       const page = await this.client.listTools(cursor ? { cursor } : undefined, { timeout: CONNECT_TIMEOUT_MS });
-      for (const tool of page.tools) tools.push({ name: tool.name, description: (tool.description ?? '').slice(0, 2_000), inputSchema: tool.inputSchema && typeof tool.inputSchema === 'object' ? tool.inputSchema : { type: 'object', properties: {} }, readOnly: tool.annotations?.readOnlyHint === true, destructive: tool.annotations?.destructiveHint === true });
+      for (const tool of page.tools) tools.push({ name: tool.name, description: (tool.description ?? '').slice(0, 2_000), inputSchema: tool.inputSchema && typeof tool.inputSchema === 'object' ? tool.inputSchema : { type: 'object', properties: {} }, readOnly: tool.annotations?.readOnlyHint === true, destructive: tool.annotations?.destructiveHint === true, hints: toolHints(tool.annotations) });
       cursor = page.nextCursor;
     } while (cursor && tools.length < MAX_TOOLS);
     this.tools = tools.slice(0, MAX_TOOLS);
