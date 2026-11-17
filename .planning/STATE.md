@@ -36,7 +36,7 @@ Agent authorization on NEAR (owner, 2026-11-16; PROJECT.md Platform direction de
 
 Next, in order:
 1. The Phase 69 planning PR is merged (PR #57, c1730bf). The relay housekeeping PR (`fix/relay-housekeeping`) carries: new phase numbers in the relay README, Compose file, build script and tests; the Signal sidecar re-pin (by 2026-12-10); and PR #50's second-review minors (the `relay` check skips when `relay/package.json` is missing on any branch, so key the skip to hotfix branches; redactor field-name collisions after normalising; README promises tenant key files nothing reads yet; 68-VALIDATION.md still draft; ackMessage id check).
-2. The 0.4.24 patch (the #46 review minors, the three documentation mismatches, and PR #51's deferred image-review minors). The owner's Phase 27 host check is done (27-UAT test 8 passed 2026-11-17; 27-16 summary written).
+2. Done: the 0.4.24 patch shipped (PR #55, release PR #56), and 0.4.25 to 0.4.29 after it. The owner's Phase 27 host check is done (27-UAT test 8 passed 2026-11-17; 27-16 summary written).
 3. Phase 69 is planned (15 plans, two PRs): merge its planning PR, then `/gsd-execute-phase 69`.
 4. In parallel when wanted: `/gsd-plan-phase 28` (secure development workflow step). Phase 72 plans from the OpenShell spike result.
 5. Owner action (open, acknowledged 2026-11-15): ask NEAR in writing, through your NEAR AI contact, whether the private shard will accept third-party contracts and data, and when account view keys ship. The answer decides when L4's confidential anchor backend (ANCH-07) is built.
