@@ -4,7 +4,7 @@
 
 - Milestone 1: Phases 1-6 (SHIPPED)
 - **v0.4.0 A working core and a native NEAR agent runner**: Phases 7-12 (SHIPPED)
-- **0.4.x line**: ongoing releases on top of v0.4.0 (current; 0.4.22 published 2026-11-14; 0.4.23 published 2026-11-15 (PR #51, release PR #52); 0.4.24 patch next; Phase 27 shipped as 0.4.20 and its record closed 2026-11-17; Phases 28 and 29 planned)
+- **0.4.x line**: ongoing releases on top of v0.4.0 (current; 0.4.29 published 2026-11-17 (release PR #77, tag v0.4.29); 0.4.23 to 0.4.28 published before it; Phase 27 shipped as 0.4.20 and its record closed 2026-11-17; Phases 28 and 29 planned)
 - **v0.5.0 Trusted-source knowledge base**: PAUSED 2026-10-29 and moving to a separate project. Its roadmap, requirements, research and Phase 13 plans are archived in `.planning/milestones/v0.5.0-paused/`; the Phase 13 code lives on the local branch `gsd/phase-13-sovereignty-gate-post-quantum-cryptography-and-the-encrypted`.
 - **v0.6.0 Team Mode**: Phases 60-67 on the unmerged, local-only branch `feat/team-fix-pass` (Phase 60 complete, 61 and 62 built with re-tests open, 63-67 not started). Its identity and signed-event core lands on `main` in v0.7.0 Phase 69; the rest is the later milestone L2 (disposition table there).
 - **v0.7.0 Governed agent platform and messaging relay**: Phases 68-84 (Phase 68 complete: merged as PR #50, 052d5cf, and `relay` is a required check on main since the owner's D-19 step, 2026-11-15; replanned 2026-11-15 from the owner's platform direction; relay phases renumbered)

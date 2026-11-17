@@ -88,7 +88,7 @@ blocked: 0
 
 - gap_id: G-27-6a
   truth: "Giving a project an online home leaves the person's own branch as the repository's default branch; the encrypted sync branch is never the default"
-  status: resolved
+  status: resolved (fixed in code and tested on a fake GitHub API and a local bare remote; the live default-branch move is the owner's optional re-check)
   resolved_by: 27-23-PLAN.md
   also_resolved_by: 27-20-PLAN.md
   resolved_at: 2026-11-17

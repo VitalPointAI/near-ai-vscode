@@ -121,7 +121,7 @@ Plan frontmatter IDs: SYNC-01 (plans 02, 03, 04, 05, 06, 07, 08, 10, 13), SYNC-0
 | SYNC-05 | 01, 02, 11-13, 15, 18 | Git sync, merge, leak test, anonymous identity | SATISFIED | Truths 4, 6, 7 |
 | SYNC-06 | 09 | Model choices follow the project | SATISFIED | Truth 1; 27-UAT tests 1, 2, 8 |
 | SYNC-07 | 04, 14 | Pick-up card | SATISFIED | Truth 5; 27-UAT test 3 |
-| SYNC-08 | 16 | Release 0.4.20 with CHANGELOG and README | SATISFIED | Re-verified 2026-11-17: feature PR #40 (765fb96) and release PR #41 (4eac510) squash-merged on 2026-11-14; `## 0.4.20` in CHANGELOG.md with the spend-limit, sub-agent, 2 MiB and recovery-code limits; README names the three settings, the file-permissions sentence and the online home; tag v0.4.20; publish approved by the owner. REQUIREMENTS.md marks SYNC-08 met |
+| SYNC-08 | 16 | Release 0.4.20 with CHANGELOG and README | SATISFIED | Re-verified 2026-11-17: feature PR #40 (765fb96) and release PR #41 (4eac510) squash-merged on 2026-11-14; `## 0.4.20` in CHANGELOG.md with the spend-limit, sub-agent, 2 MiB and recovery-code limits; README names the three settings, the file-permissions sentence and the online home; tag v0.4.20; publish approved by the owner. REQUIREMENTS.md marks SYNC-08 met (`- [x] **SYNC-08**`, met 2026-11-14) |
 | SYNC-09 | 15, 17, 18 | Online home in one click | SATISFIED | Truth 8; 27-UAT tests 6, 7 |
 
 ### Anti-Patterns Found
