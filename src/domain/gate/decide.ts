@@ -110,9 +110,10 @@ export interface GateRuntime {
 
 /**
  * The rules of a call refused before the gate could be asked, which the loop still records so no refused call is missing from the log: a tool name the run
- * does not have, and a tool's own check (its forbidden, sensitive, risky or preview hook) that threw, so the call could not be judged and did not run.
+ * does not have, a tool's own check (its forbidden, sensitive, risky or preview hook) that threw, so the call could not be judged and did not run, and
+ * arguments that could not be read (not JSON, not an object, or refused by the tool), so nothing could be judged either.
  */
-export const PRE_GATE_RULES = Object.freeze(['call.unknown-tool', 'call.check-failed'] as const);
+export const PRE_GATE_RULES = Object.freeze(['call.unknown-tool', 'call.check-failed', 'call.bad-arguments'] as const);
 export type PreGateRule = (typeof PRE_GATE_RULES)[number];
 
 /** Every rule id the gate can record: the floor, the bundle and manifest checks, labels, routing, taint, the settings rules of the migration table, and the calls refused before the gate. */

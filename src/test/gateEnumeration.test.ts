@@ -417,17 +417,29 @@ test('a card answer never decides or grants on its own: it goes through recordAp
   assert.deepEqual(await recordApprovalReply(runtime, allowed, { decision: 'allow-run' }), { proceed: true });
 });
 
-test('a call with unparseable arguments reaches no decision and no execution, and a run with no tool calls writes no tool decision record', async () => {
+// Owner decision after PR #74 (changed deliberately): a call whose arguments cannot be read is refused before the gate, like an unknown tool, and the log
+// shows it. It was "writes no tool decision record"; it now writes one denied record under call.bad-arguments, naming the tool and never the arguments.
+test('a call with unparseable arguments reaches no execution and is recorded denied with call.bad-arguments; a run with no tool calls writes no tool decision record', async () => {
   const root = await project();
   const runtime = testGateRuntime();
-  const setup = runWith(root, [{ calls: [{ id: 'bad', type: 'function', function: { name: 'Write', arguments: '{not json' } }] }, { text: 'sorry' }], { gate: runtime });
+  const setup = runWith(root, [{ calls: [{ id: 'bad', type: 'function', function: { name: 'Write', arguments: '{"file_path":"secret-plan.md", not json' } }] }, { text: 'sorry' }], { gate: runtime });
   try {
     await go(setup);
   } finally {
     setup.shell.dispose();
   }
   assert.match(toolOutputs(setup)[0] ?? '', /^Arguments are not valid JSON/);
-  assert.equal(runtime.records.length, 0);
+  assert.equal(existsSync(path.join(root, 'secret-plan.md')), false, 'nothing ran');
+  assert.equal(runtime.records.length, 1);
+  const record = runtime.records[0]!;
+  assert.equal(record.authorizations[0]!.policy.name, 'call.bad-arguments');
+  assert.ok(GATE_RULE_IDS.includes('call.bad-arguments'));
+  assert.equal(record.api.request.uid, 'bad');
+  assert.equal(record.action_id, 2, 'denied');
+  assert.deepEqual(record.resources, [{ name: 'Write', type: 'tool' }]);
+  assert.ok(!JSON.stringify(record).includes('secret-plan'), 'the arguments are not recorded');
+  assert.ok(!JSON.stringify(record).includes('not json'), 'nor the parser\'s message about them');
+  assert.equal(validateDecisionRecord(record).ok, true);
   const none = testGateRuntime();
   const quiet = runWith(root, [{ text: 'Nothing to do.' }], { gate: none });
   try {
@@ -437,6 +449,28 @@ test('a call with unparseable arguments reaches no decision and no execution, an
     quiet.shell.dispose();
   }
   assert.equal(none.records.length, 0);
+});
+
+// The same class: arguments that are JSON but not an object, and an object the tool itself refuses (a missing field), are refused before the gate too.
+test('arguments that are not an object, or that the tool refuses, are recorded denied with call.bad-arguments, naming the tool and never the arguments', async () => {
+  const root = await project();
+  for (const [id, args] of [['array', '["secret-plan.md"]'], ['missing', '{"content":"secret-plan"}']] as const) {
+    const runtime = testGateRuntime();
+    const setup = runWith(root, [{ calls: [{ id, type: 'function', function: { name: 'Write', arguments: args } }] }, { text: 'sorry' }], { gate: runtime });
+    try {
+      await go(setup);
+    } finally {
+      setup.shell.dispose();
+    }
+    assert.notEqual(toolOutputs(setup)[0] ?? '', '', `${id}: the model is told why`);
+    assert.equal(runtime.records.length, 1, id);
+    const record = runtime.records[0]!;
+    assert.equal(record.authorizations[0]!.policy.name, 'call.bad-arguments', id);
+    assert.equal(record.action_id, 2, id);
+    assert.deepEqual(record.resources, [{ name: 'Write', type: 'tool' }], id);
+    assert.ok(!JSON.stringify(record).includes('secret-plan'), `${id}: the arguments are not recorded`);
+    assert.equal(validateDecisionRecord(record).ok, true, id);
+  }
 });
 
 // PR #70 review carry-over: a call refused before the gate could be asked wrote no record, so the log did not show every refusal.

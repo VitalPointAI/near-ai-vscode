@@ -211,7 +211,10 @@ is what that file and the records beside it do in this version.
 - **No network.** Nothing in a decision needs the network, so the policy
   works the same offline.
 - **Decision records.** Each decision, allowed, asked or refused, is written
-  to a record for the project in this extension's storage. A record names what
+  to a record for the project in this extension's storage. A call refused
+  before it could be judged (a tool the run does not have, arguments that are
+  not valid JSON or do not fit the tool, or a tool's own check that failed) is
+  recorded too, naming the tool and never its arguments. A record names what
   was asked for, what was decided and why, never file contents. A command is
   named by its first line only, and before a record is written NEAR AI removes
   from every text in it: known token shapes (such as `sk-`, `ghp_`, AWS access

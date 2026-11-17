@@ -97,6 +97,8 @@ export const AWAITING_APPROVAL_PREFIX = 'Awaiting approval:';
 
 /** The reason recorded when a tool's own check threw: fixed words, so an error's text (which could name anything) never reaches a record. */
 const CHECK_FAILED_REASON = 'The tool\'s own check of this call could not finish, so the call was not run.';
+const BAD_JSON_REASON = 'The call\'s arguments were not valid JSON, so nothing could be judged and nothing ran.';
+const BAD_ARGUMENTS_REASON = 'The call\'s arguments did not fit the tool, so nothing could be judged and nothing ran.';
 const AWAITING_APPROVAL_TEXT = `${AWAITING_APPROVAL_PREFIX} this action has not run. It is queued for the user to approve, and they have been notified. Do not retry it now and do not wait for it: carry on with work that does not depend on it, and list it under "Waiting for approval" in your report.`;
 
 /**
@@ -652,6 +654,9 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
       title = tool.title(input, context);
     } catch (error) {
       const message = error instanceof SyntaxError ? `Arguments are not valid JSON: ${error.message}` : (error as Error).message;
+      // Refused before the gate could be asked, and on the record like every such refusal (owner decision after PR #74): the record names the tool and a
+      // fixed reason, never the arguments or the parser's message about them.
+      recordRefusedBeforeGate(this.gate, { tool: tool.name, callId: call.id, rule: 'call.bad-arguments', reason: error instanceof SyntaxError ? BAD_JSON_REASON : BAD_ARGUMENTS_REASON, capability: tool.capability }, { model: this.options.model });
       this.options.emit({ type: 'tool-start', callId: call.id, tool: tool.name, title, input: call.function.arguments });
       this.options.emit({ type: 'tool-end', callId: call.id, ok: false, output: message });
       return `Error: ${message}`;
