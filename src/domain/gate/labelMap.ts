@@ -311,4 +311,11 @@ export interface LabelSource {
   view(scales: ScaleTable): Promise<LabelView>;
   /** Moves the entry of a path an agent's command renamed (D-26), signed by the host; absent where nothing can sign. */
   followMove?(from: string, to: string): Promise<void>;
+  /**
+   * Queues a raise of a written file's entry to the session's mark (D-26, D-29): joined per path, written at most every RAISE_WRITE_DELAY_MS and when the
+   * run ends, and only where the mark is above the path's label now. Absent where nothing can sign.
+   */
+  queueRaise?(relativePath: string, mark: Mark): void;
+  /** Writes the raises queued so far now (a run's end). */
+  flushRaises?(): Promise<void>;
 }

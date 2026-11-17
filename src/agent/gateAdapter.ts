@@ -924,6 +924,11 @@ function markOnRecord(runtime: GateRuntime, mark: Mark | undefined): Mark | unde
   }
 }
 
+/** True when a mark is above the runtime's default label: only then does what a session writes take it (D-26). */
+export function markAboveDefault(runtime: GateRuntime, mark: Mark): boolean {
+  return markOnRecord(runtime, mark) !== undefined;
+}
+
 /** The label of the mark that needs the strictest tier: the one a refusal for the mark names. */
 function strictestLabel(runtime: GateRuntime, mark: Mark): Label | undefined {
   const { routing } = routingOfRuntime(runtime);

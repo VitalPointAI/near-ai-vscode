@@ -4,7 +4,7 @@
 // is under the temporary folder, every label file is unsigned (read the way a run with no gate host reads one: every label only raises), and every fetch is
 // a counting stub. Nothing reaches the network.
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { mkdir, mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -15,7 +15,7 @@ import type { AgentEvent } from '../agent/loop';
 import { OutboundFingerprints } from '../agent/outboundCheck';
 import { DEFAULT_RULES, RunGrants } from '../agent/permissions';
 import { ShellSession } from '../agent/shell';
-import { bashTool, globTool, grepTool, readTool } from '../agent/tools';
+import { bashTool, globTool, grepTool, readTool, writeTool } from '../agent/tools';
 import type { AgentTool } from '../agent/tools';
 import { webFetchTool, webSearchTool } from '../agent/webTools';
 import { braveSearch } from '../agent/webSearch';
@@ -28,6 +28,9 @@ import type { GateRuntime } from '../domain/gate/decide';
 import type { DecisionRecord } from '../domain/gate/record';
 import { validateDecisionRecord } from '../domain/gate/record';
 import { LABEL_MAP_FILE } from '../gate/labelMapStore';
+import { GateHost } from '../gate/host';
+import { setLabelEntry } from '../domain/gate/labelMap';
+import { MemorySecrets } from './helpers/teamHarness';
 import { currentSessionRoute } from '../gate/sessionMark';
 import type { SessionRoute } from '../gate/sessionMark';
 import type { McpConnection } from '../mcp/client';
@@ -40,7 +43,7 @@ import { AgentConversation } from '../services/agentSession';
 import { TranscriptStore } from '../services/transcripts';
 import type { MemoryGateRuntime } from '../agent/gateAdapter';
 import { testGateRuntime } from './helpers/gatedRuns';
-import { call, grantsAt, keys, label, labelledProject, runWith } from './helpers/markFixtures';
+import { call, grantsAt, keys, label, labelledProject, runWith, scripted } from './helpers/markFixtures';
 
 const NEAR = 'https://cloud-api.near.ai/v1';
 const raised = (records: readonly DecisionRecord[]): DecisionRecord[] => records.filter((record) => record.authorizations[0]?.policy.name === 'label.mark-raised');
@@ -356,4 +359,107 @@ test('a cyber step\'s read raises that cyber run\'s own mark, and at a strict ma
     settings: { decision: 'allow', rule: 'settings.mode.fully-autonomous' }, mark: strict
   });
   assert.equal(scan.decision.rule, 'label.network-at-mark');
+});
+
+// ---- Task 3: what the session writes takes the mark, batched; an unverified label map is never signed automatically ----
+
+/** A gate host on temporary storage with an in-memory secret store, its label file signed by this install, and runtimes for the project. */
+async function hostWithLabels(entries: Record<string, Label>, options: { raiseDelayMs?: number } = {}): Promise<{ host: GateHost; root: string; problems: string[]; refused: string[]; runtime: () => Promise<GateRuntime> }> {
+  const root = realpathSync(mkdtempSync(path.join(tmpdir(), 'near-ai-mark-writes-')));
+  writeFileSync(path.join(root, 'conf.md'), 'CONFIDENTIAL budget lines for the next year\n');
+  writeFileSync(path.join(root, 'notes.md'), 'PUBLIC notes anyone may read\n');
+  const storage = realpathSync(mkdtempSync(path.join(tmpdir(), 'near-ai-mark-storage-')));
+  const problems: string[] = [];
+  const refused: string[] = [];
+  const host = new GateHost({ globalStorageDir: storage, secrets: new MemorySecrets(), productVersion: '0.4.30-test', projectRoot: root, home: storage, onProblem: (message) => problems.push(message), onLabelRaiseRefused: (_root, message) => refused.push(message), raiseDelayMs: options.raiseDelayMs ?? 60_000 });
+  assert.equal((await host.start()).state, 'valid');
+  if (Object.keys(entries).length > 0) await host.changeLabels(root, (map) => Object.entries(entries).reduce((out, [key, value]) => setLabelEntry(out, key, value), map));
+  return { host, root, problems, refused, runtime: () => host.runtimeFor({ root, actor: { kind: 'agent', sessionId: 'mark-writes' }, presence: 'person', context: 'interactive' }) };
+}
+
+function revisionOf(root: string): number | undefined {
+  const file = path.join(root, ...LABEL_MAP_FILE.split('/'));
+  if (!existsSync(file)) return undefined;
+  return (JSON.parse(readFileSync(file, 'utf8')) as { payload: { revision?: number } }).payload.revision ?? 0;
+}
+
+async function labelOfPath(host: GateHost, root: string, relative: string): Promise<string> {
+  const policy = host.labelPolicy();
+  return keys((await host.labelsFor(root).view(policy.scales)).resolve(relative, policy.defaultLabel).mark).join('+');
+}
+
+test('a Write after the mark reached Confidential raises that file\'s entry at the run\'s end; with the default mark labels.json is never written', async () => {
+  const { host, root } = await hostWithLabels({ 'conf.md': label('org', 'Confidential') });
+  const conversation = new AgentConversation(root, () => undefined, path.join(root, '.ckpt'), undefined, new TranscriptStore(path.join(root, '.store'), root));
+  conversation.gateHost = host;
+  await conversation.send({ text: 'go', client: scripted([call('r1', 'Read', { file_path: 'conf.md' }), call('w1', 'Write', { file_path: 'summary.md', content: 'a summary' })]) as never, model: 'm', privacy: 'Private', policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES });
+  assert.equal(await labelOfPath(host, root, 'summary.md'), 'org/Confidential', 'the derived file took the chat\'s label');
+  assert.equal((await host.labelsFor(root).view(host.labelPolicy().scales)).state, 'verified');
+  // A chat that read nothing labelled writes with the default mark: the project has no label file at all afterwards.
+  const plain = await hostWithLabels({});
+  const chat = new AgentConversation(plain.root, () => undefined, path.join(plain.root, '.ckpt'), undefined, new TranscriptStore(path.join(plain.root, '.store'), plain.root));
+  chat.gateHost = plain.host;
+  await chat.send({ text: 'go', client: scripted([call('r1', 'Read', { file_path: 'notes.md' }), call('w1', 'Write', { file_path: 'out.md', content: 'x' })]) as never, model: 'm', privacy: 'Private', policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES });
+  assert.equal(existsSync(path.join(plain.root, ...LABEL_MAP_FILE.split('/'))), false, 'labels.json does not exist after the run');
+});
+
+test('ten writes in a row make one label write in the window, and the run\'s end writes what came after', async () => {
+  const { host, root } = await hostWithLabels({ 'conf.md': label('org', 'Confidential') }, { raiseDelayMs: 40 });
+  const start = revisionOf(root)!;
+  const reader = host.labelsFor(root);
+  for (let index = 0; index < 10; index += 1) reader.queueRaise(`out-${index}.md`, [label('org', 'Confidential')]);
+  for (let wait = 0; wait < 100 && revisionOf(root) === start; wait += 1) await new Promise((resolve) => setTimeout(resolve, 10));
+  await reader.flushRaises();
+  assert.equal(revisionOf(root), start + 1, 'one write for the ten');
+  assert.equal(await labelOfPath(host, root, 'out-9.md'), 'org/Confidential');
+  reader.queueRaise('late.md', [label('org', 'Confidential')]);
+  await reader.flushRaises();
+  assert.equal(revisionOf(root), start + 2, 'the run\'s end writes the rest');
+});
+
+test('a write to a path already at or above the mark queues nothing that writes', async () => {
+  const { host, root } = await hostWithLabels({ 'conf.md': label('org', 'Confidential'), 'top.md': label('org', 'Restricted') });
+  const start = revisionOf(root);
+  const reader = host.labelsFor(root);
+  reader.queueRaise('conf.md', [label('org', 'Confidential')]);
+  reader.queueRaise('top.md', [label('org', 'Internal')]);
+  await reader.flushRaises();
+  assert.equal(revisionOf(root), start, 'nothing was written');
+  assert.equal(await labelOfPath(host, root, 'top.md'), 'org/Restricted', 'never lowered');
+});
+
+test('with a label map that does not verify, the raise is not written, the bytes are unchanged, the person is told once with Sign Again, and the chat keeps its mark', async () => {
+  const { host, root, refused } = await hostWithLabels({ 'conf.md': label('org', 'Confidential') });
+  const file = path.join(root, ...LABEL_MAP_FILE.split('/'));
+  const envelope = JSON.parse(readFileSync(file, 'utf8')) as { payload: { entries: Record<string, unknown> } };
+  envelope.payload.entries['notes.md'] = label('org', 'Internal');
+  writeFileSync(file, `${JSON.stringify(envelope, null, 2)}\n`);
+  const bytes = readFileSync(file, 'utf8');
+  const runtime = await host.runtimeFor({ root, actor: { kind: 'agent', sessionId: 'unverified' }, presence: 'person', context: 'interactive' });
+  const grants = grantsAt([label('org', 'Confidential')]);
+  const ran = await runWith(root, [call('w1', 'Write', { file_path: 'out.md', content: 'x' }), call('w2', 'Write', { file_path: 'out2.md', content: 'y' })], grants, runtime, [writeTool]);
+  assert.equal(ran.outputs.length, 2, 'both writes ran');
+  await host.labelsFor(root).flushRaises();
+  host.labelsFor(root).queueRaise('out3.md', [label('org', 'Confidential')]);
+  await host.labelsFor(root).flushRaises();
+  assert.equal(readFileSync(file, 'utf8'), bytes, 'the map\'s bytes are unchanged');
+  assert.equal(refused.length, 1, 'told once');
+  assert.match(refused[0]!, /Sign Again/);
+  assert.deepEqual(keys(grants.mark!.current()), ['org/Confidential'], 'the chat\'s own mark still protects what it holds');
+  // Sign Again signs the file keeping only what raises, then writes the kept raises.
+  assert.equal(await host.signAgainForRaises(root), true);
+  assert.equal(await labelOfPath(host, root, 'out.md'), 'org/Confidential');
+  assert.equal(await labelOfPath(host, root, 'out3.md'), 'org/Confidential');
+  assert.equal(await labelOfPath(host, root, 'notes.md'), 'org/Internal', 'the hand-edited raise was kept, as Sign Again keeps raises');
+});
+
+test('Bash writes the classifier tags (cp, tee) take the mark like Write and Edit', async () => {
+  const { host, root } = await hostWithLabels({ 'conf.md': label('org', 'Confidential') });
+  const runtime = await host.runtimeFor({ root, actor: { kind: 'agent', sessionId: 'bash-writes' }, presence: 'person', context: 'interactive' });
+  const grants = grantsAt([label('org', 'Public')]);
+  await runWith(root, [call('b1', 'Bash', { command: 'cp conf.md copy.md' }), call('b2', 'Bash', { command: 'echo hi | tee out.txt' })], grants, runtime);
+  await host.labelsFor(root).flushRaises();
+  assert.deepEqual(keys(grants.mark!.current()), ['org/Confidential'], 'the copy read raised the mark first');
+  assert.equal(await labelOfPath(host, root, 'copy.md'), 'org/Confidential');
+  assert.equal(await labelOfPath(host, root, 'out.txt'), 'org/Confidential');
 });

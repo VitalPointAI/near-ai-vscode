@@ -10,7 +10,8 @@ import { CREDENTIAL_HOLD_RULE, OUTSIDE_WORKSPACE_RULE } from '../domain/gate/dec
 import type { GateRuntime } from '../domain/gate/decide';
 import { labelReadFilter, labelsOfPaths } from './gateLabels';
 import type { Label } from '../domain/gate/labels';
-import { TOOL_FORBIDDEN_RULE, followCommandMoves, gateToolCall, markTierOf, raiseRunMark, recordApprovalReply, recordRefusedBeforeGate, shellReadsCredentialFile, unavailableGateRuntime } from './gateAdapter';
+import type { Capability } from '../domain/gate/vocabulary';
+import { TOOL_FORBIDDEN_RULE, followCommandMoves, gateToolCall, markAboveDefault, markTierOf, raiseRunMark, recordApprovalReply, recordRefusedBeforeGate, shellReadsCredentialFile, unavailableGateRuntime } from './gateAdapter';
 import type { FloorShellContext } from './gateAdapter';
 import { PackageScriptsReader } from './packageScripts';
 import { PREAMBLE_START, resolveGsdRun } from '../gsd/preamble';
@@ -806,6 +807,8 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
       // A rename the command made carries its label with it (D-26, D-42).
       if (command !== undefined) await followCommandMoves(this.gate, { command, root: context.root, ...(floorShell ?? {}) });
       if (tool.untrusted) this.grants.tainted = true;
+      // What the session writes takes its mark (D-26): each file the call wrote is queued to be raised to it, never lowered, and written in a batch.
+      this.queueWriteRaises(gateCall.effects, context.root, command === undefined ? [] : await shellWrittenFiles(command, ranAt, context, cwdBefore));
       // A scratch file this command wrote is recorded now that it succeeded, and only if the file is really there (0.4.18 review).
       if (command !== undefined) await this.noteScratchWrites(command, ranAt, context, cwdBefore);
       else await this.noteToolScratchWrite(tool, input, ranAt, context);
@@ -819,6 +822,23 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
   /** Raises the run's mark (the chat's, shared with every sub-agent) and records the rise once, when it really rose (GATE-07, D-54). */
   private raiseMark(labels: readonly Label[], source: string): void {
     raiseRunMark(this.gate, this.grants.mark, labels, source, { model: this.options.model });
+  }
+
+  /** Queues a raise of every file a successful call wrote (its workspaceWrite effects, the classifier's for a command) to the mark, above the default only. */
+  private queueWriteRaises(effects: readonly Capability[], root: string, shellWritten: readonly string[]): void {
+    const mark = this.grants.mark?.current();
+    if (mark === undefined || !markAboveDefault(this.gate, mark)) return;
+    const source = this.gate.labels?.(root);
+    if (source?.queueRaise === undefined) return;
+    for (const relative of shellWritten) source.queueRaise(relative, mark);
+    for (const effect of effects) {
+      if (effect.verb !== 'workspaceWrite') continue;
+      for (const written of effect.paths) {
+        const relative = String(written).replace(/^\.\//, '');
+        if (relative === '' || relative === '**' || /[*?[{]/.test(relative) || relative.endsWith('/') || relative.split('/').includes('..')) continue;
+        source.queueRaise(relative, mark);
+      }
+    }
   }
 
   /** Keeps the fingerprints of a call's output when what it read has a label whose tier is not any-cloud (D-60). Never the text itself. */
@@ -892,9 +912,7 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
         if ((path.isAbsolute(text) && inScratch(file)) || isScratchPath(context.root, file)) candidates.add(file);
       }
     };
-    // `> /tmp/x`, `>> /tmp/x`, and `cp|mv|install|tee` (the destination is the last word on the line).
-    for (const match of command.matchAll(/>>?\s*([^\s;&|]+)/g)) if (match[1]) note(match[1]);
-    for (const match of command.matchAll(/\b(?:cp|mv|install|tee)\b[^;&|]*\s([^\s;&|]+)\s*$/g)) if (match[1]) note(match[1]);
+    for (const target of commandWriteTargets(command)) note(target);
     for (const file of candidates) await this.noteScratchFile(file, startedAt);
   }
 
@@ -943,6 +961,36 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
     this.options.emit({ type: 'tool-end', callId, ok, output: bounded.length > UI_OUTPUT_CHARS ? `${bounded.slice(0, UI_OUTPUT_CHARS)}\n…` : bounded });
     return bounded;
   }
+}
+
+/** What a command's text says it writes to: `> x`, `>> x`, and the last word of a `cp`, `mv`, `install` or `tee` (0.4.18, shared with the scratch check). */
+function commandWriteTargets(command: string): string[] {
+  const out: string[] = [];
+  for (const match of command.matchAll(/>>?\s*([^\s;&|]+)/g)) if (match[1]) out.push(match[1]);
+  for (const match of command.matchAll(/\b(?:cp|mv|install|tee)\b[^;&|]*\s([^\s;&|]+)\s*$/g)) if (match[1]) out.push(match[1]);
+  return out;
+}
+
+/**
+ * The project files a shell command wrote, as far as its text shows (D-26): each write target, from the shell's folder before and after the command, that
+ * is inside the project, is a file, and was changed since the command started. A write the text does not show is not seen (the documented shell limit).
+ */
+async function shellWrittenFiles(command: string, startedAt: number, context: ToolContext, cwdBefore: string): Promise<string[]> {
+  const out = new Set<string>();
+  const cwdAfter = context.shell?.workingDirectory ?? context.root;
+  for (const target of commandWriteTargets(command)) {
+    if (target.includes('$') || target.split(/[/\\]/).includes('..')) continue;
+    for (const cwd of new Set([cwdBefore, cwdAfter])) {
+      const file = path.resolve(cwd, target);
+      const relative = path.relative(context.root, file);
+      if (relative === '' || relative.startsWith('..') || path.isAbsolute(relative)) continue;
+      try {
+        const info = await stat(file);
+        if (info.isFile() && info.mtimeMs >= startedAt - 1000) out.add(relative.split(path.sep).join('/'));
+      } catch { /* not there: nothing was written where the text says */ }
+    }
+  }
+  return [...out];
 }
 
 /** The path a read tool was given, for the credential-read hold's reason; the tool's name when there is none. */

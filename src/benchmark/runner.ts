@@ -80,6 +80,7 @@ export async function runAgentInFolder(client: BenchmarkClient, model: string, r
     return { outcome: result.outcome, answer: String(answer), usage: result.usage, ms: Date.now() - started, changed: checkpoints.changedFiles };
   } finally {
     shell.dispose();
+    await gate.labels?.(root).flushRaises?.().catch(() => undefined);
   }
 }
 

@@ -214,6 +214,7 @@ export function registerGate(context: GateActivationContext, options: RegisterGa
     projectRoot,
     onProblem: tell,
     onLabelNotice: (root, state, message) => { void labelNotice(host, root, state, message, tell).catch(() => undefined); },
+    onLabelRaiseRefused: (root, message) => { void labelRaiseRefused(host, root, message).catch(() => undefined); },
     ...(options.now === undefined ? {} : { now: options.now })
   });
   // Every surface reads the host's own time (the later of the clock and the latest time it has seen), so none shows a policy as valid that a decision refuses
@@ -567,6 +568,22 @@ export async function labelNotice(host: GateHost, root: string, state: LabelMapS
     return accepted;
   } catch (error) {
     void Promise.resolve(vscode.window.showWarningMessage(error instanceof LabelMapError ? error.message : "Nothing was changed: NEAR AI could not use this branch's labels.")).catch(() => undefined);
+    return false;
+  }
+}
+
+/**
+ * A labelled chat's write could not raise the written file's label automatically (the label file does not verify, or is held): the person is told once with
+ * Sign Again, which signs the label file again with this computer's key (keeping only what raises) and then writes the kept raises (D-53). Returns whether
+ * they were written.
+ */
+export async function labelRaiseRefused(host: GateHost, root: string, message: string): Promise<boolean> {
+  const answer = await vscode.window.showWarningMessage(message, SIGN_AGAIN_ACTION);
+  if (answer !== SIGN_AGAIN_ACTION) return false;
+  try {
+    return await host.signAgainForRaises(root);
+  } catch (error) {
+    void Promise.resolve(vscode.window.showWarningMessage(error instanceof LabelMapError ? error.message : 'Nothing was changed: NEAR AI could not sign the label file.')).catch(() => undefined);
     return false;
   }
 }

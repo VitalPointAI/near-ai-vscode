@@ -563,6 +563,9 @@ export async function lastVerifiedLabelMap(globalStorageDir: string, secrets: Se
   return parsedOrUndefined((await readLabelMarker(globalStorageDir, secrets, root)).base, scales);
 }
 
+/** How long a write's label raise waits, so the raises of many writes in a row go into one signed write of the label file (D-26). */
+export const RAISE_WRITE_DELAY_MS = 3000;
+
 /**
  * The label reader of one project (D-25): reads the file and the marker again only when either one's size or modification time changes, and gives a view
  * under the scales asked for. A reader with no storage folder (a run with no gate host) trusts no key and keeps no marker, so every label it finds only raises.
@@ -576,7 +579,39 @@ export class LabelReader implements LabelSource {
     readonly onNotice?: (message: string, state?: LabelMapState) => void;
     /** Moves an entry after a rename the extension saw (an agent's mv). Set by the host, which can sign. */
     readonly move?: (from: string, to: string) => Promise<void>;
+    /** Writes queued raises (D-26). Set by the host, which can sign; a reader without it queues nothing. */
+    readonly writeRaises?: (raises: ReadonlyMap<string, readonly Label[]>) => Promise<void>;
+    /** How long raises wait to be written together (RAISE_WRITE_DELAY_MS; tests pass a short one). */
+    readonly raiseDelayMs?: number;
   } = {}) {}
+
+  private pendingRaises = new Map<string, Label[]>();
+  private raiseTimer: ReturnType<typeof setTimeout> | undefined;
+  private raising: Promise<void> = Promise.resolve();
+
+  /** Queues a raise of a written file's entry to the mark (D-26, D-29); the first one of a window starts its timer. */
+  public queueRaise(relativePath: string, mark: readonly Label[]): void {
+    if (this.options.writeRaises === undefined || mark.length === 0) return;
+    const held = this.pendingRaises.get(relativePath) ?? [];
+    held.push(...mark);
+    this.pendingRaises.set(relativePath, held);
+    if (this.raiseTimer === undefined) {
+      this.raiseTimer = setTimeout(() => { this.raiseTimer = undefined; void this.flushRaises(); }, this.options.raiseDelayMs ?? RAISE_WRITE_DELAY_MS);
+      this.raiseTimer.unref?.();
+    }
+  }
+
+  /** Writes every raise queued so far, one write for all of them, after any write already going. Never throws. */
+  public async flushRaises(): Promise<void> {
+    if (this.raiseTimer !== undefined) { clearTimeout(this.raiseTimer); this.raiseTimer = undefined; }
+    const batch = this.pendingRaises;
+    this.pendingRaises = new Map();
+    if (batch.size > 0 && this.options.writeRaises !== undefined) {
+      const write = this.options.writeRaises;
+      this.raising = this.raising.then(() => write(batch)).catch(() => undefined);
+    }
+    await this.raising;
+  }
 
   public async view(scales: ScaleTable): Promise<LabelView> {
     const signature = await this.signature();

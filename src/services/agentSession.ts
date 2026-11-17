@@ -547,6 +547,8 @@ export class AgentConversation {
       } finally {
         // Whatever way the run ended, a list it touched and left unfinished is shown as not confirmed done.
         this.settleTaskList(tasksAtStart);
+        // The label raises its writes queued are written now, at the run's end (D-26); a write that fails never fails the run.
+        await gate?.labels?.(this.root).flushRaises?.().catch(() => undefined);
       }
       this.activity?.agentEnded(mainId, result.outcome);
       await this.recordRunSplit(request, mainId, [...result.usage, ...extraUsage]);

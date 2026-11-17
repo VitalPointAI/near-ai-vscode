@@ -20,7 +20,11 @@ import { DecisionLog, INSTALL_LOG_KEY, projectLogKey } from './decisionLog';
 import type { LogKind } from './decisionLog';
 import type { SessionRoute } from './sessionMark';
 import { SHIPPED_DEFAULT_LABEL } from '../domain/gate/bundle';
-import { moveLabelEntry } from '../domain/gate/labelMap';
+import { labelMapKey, moveLabelEntry, setLabelEntry } from '../domain/gate/labelMap';
+import { joinLabels, raiseMark, sameMark } from '../domain/gate/dominance';
+import type { Mark } from '../domain/gate/dominance';
+import { DEFAULT_ROUTING, TIER_ORDER, tierForLabel } from '../domain/gate/routing';
+import type { RoutingTable } from '../domain/gate/routing';
 import type { LabelMapPayload } from '../domain/gate/labelMap';
 import { SCALE_PRESETS } from '../domain/gate/labels';
 import type { Clearance, Label, LabelEventId, ScaleMapping, ScaleTable } from '../domain/gate/labels';
@@ -87,7 +91,18 @@ export interface GateHostOptions {
    * activation adapter can offer the one-click accept of D-61. Without it the message goes to onProblem.
    */
   readonly onLabelNotice?: (root: string, state: LabelMapState, message: string) => void;
+  /**
+   * Where the refusal of an automatic label raise goes (the label file does not verify, or is held), once per window per project, so the activation adapter
+   * can offer Sign Again (D-53). Without it the message goes to onProblem.
+   */
+  readonly onLabelRaiseRefused?: (root: string, message: string) => void;
+  /** How long a written file's label raise waits to be written with others (RAISE_WRITE_DELAY_MS); tests pass a short one. */
+  readonly raiseDelayMs?: number;
 }
+
+/** Said once when a raise a labelled chat's write needs cannot be written automatically. */
+export const LABEL_RAISE_REFUSED_TEXT =
+  "A file a labelled chat wrote could not take the chat's label, because the label file is not one this computer can sign automatically. The chat itself keeps its label. Choose Sign Again to sign the label file with this computer's key and add the label.";
 
 export interface RuntimeRequest {
   /** The open project, whose log receives the run's records. None (or empty) for a window with no folder: the bundle is per install, so the run is still decided by it, and its records go to the install log. */
@@ -123,6 +138,8 @@ export class GateHost {
   private readonly labelReaders = new Map<string, LabelReader>();
   /** Problems with automatic label writes already told this window, so each is said once. */
   private readonly toldLabelProblems = new Set<string>();
+  /** Raises an automatic write could not make (an unverified label file), by project, kept for Sign Again. */
+  private readonly refusedRaises = new Map<string, Map<string, Label[]>>();
 
   public constructor(private readonly options: GateHostOptions) {}
 
@@ -210,7 +227,9 @@ export class GateHost {
             else this.options.onProblem?.(message);
           } catch { /* a notice never changes a decision */ }
         },
-        move: (from, to) => this.followRename(root, from, to)
+        move: (from, to) => this.followRename(root, from, to),
+        writeRaises: (raises) => this.writeRaises(root, raises).then(() => undefined),
+        ...(this.options.raiseDelayMs === undefined ? {} : { raiseDelayMs: this.options.raiseDelayMs })
       });
     }
     this.labelReaders.delete(key);
@@ -312,6 +331,67 @@ export class GateHost {
     } catch {
       // A record that cannot be kept never changes the label.
     }
+  }
+
+  /**
+   * Writes the label raises a labelled chat's writes queued (D-26, D-29): each written file's entry takes the chat's mark where the mark is above the file's
+   * label now, never lower, in one signed write. Nothing is written when nothing rises, so with the default mark the label file is never touched. A file
+   * that does not verify (or holds reads) is never signed automatically (D-53): nothing is written, the raises are kept for Sign Again, and the person is
+   * told once. Returns whether a write was made.
+   */
+  public async writeRaises(root: string, raises: ReadonlyMap<string, readonly Label[]>): Promise<boolean> {
+    const policy = this.labelPolicy();
+    const routing = this.routingNow();
+    const view = await this.labelsFor(root).view(policy.scales);
+    const next = new Map<string, Label>();
+    for (const [relative, mark] of raises) {
+      const key = labelMapKey(relative, false);
+      if (!key.ok) continue;
+      const current = view.resolve(key.value, policy.defaultLabel);
+      const label = raisedEntryLabel(current.origin === 'default' ? [] : current.mark, mark, policy.scales, routing);
+      if (label !== undefined) next.set(key.value, label);
+    }
+    if (next.size === 0) return false;
+    try {
+      await this.changeLabels(root, (map) => {
+        let out = map;
+        for (const [key, label] of next) out = setLabelEntry(out, key, label);
+        return out;
+      });
+    } catch (error) {
+      const kept = this.refusedRaises.get(projectLogKey(root)) ?? new Map<string, Label[]>();
+      for (const [relative, mark] of raises) kept.set(relative, [...(kept.get(relative) ?? []), ...mark]);
+      this.refusedRaises.set(projectLogKey(root), kept);
+      const told = `raise-refused:${projectLogKey(root)}`;
+      if (!this.toldLabelProblems.has(told)) {
+        this.toldLabelProblems.add(told);
+        const message = error instanceof LabelMapError ? `${LABEL_RAISE_REFUSED_TEXT} ${error.message}` : LABEL_RAISE_REFUSED_TEXT;
+        try {
+          if (this.options.onLabelRaiseRefused !== undefined) this.options.onLabelRaiseRefused(root, message);
+          else this.options.onProblem?.(message);
+        } catch { /* a notice never changes a decision */ }
+      }
+      return false;
+    }
+    for (const [key, label] of next) this.recordLabelEvent(root, { event: 'label.set', path: key, label, reason: 'A file a labelled chat wrote took the chat\'s label.' });
+    return true;
+  }
+
+  /**
+   * Sign Again after a refused raise (D-53): the person confirmed, so the label file is signed again keeping only what raises (or the labels this computer
+   * last verified are restored), then the raises kept for it are written. Returns whether they were.
+   */
+  public async signAgainForRaises(root: string): Promise<boolean> {
+    await this.changeLabels(root, (map) => map, async (question) => question === 'resign' || question === 'restore');
+    const kept = this.refusedRaises.get(projectLogKey(root));
+    this.refusedRaises.delete(projectLogKey(root));
+    this.toldLabelProblems.delete(`raise-refused:${projectLogKey(root)}`);
+    return kept === undefined ? false : this.writeRaises(root, kept);
+  }
+
+  private routingNow(): RoutingTable {
+    const state = this.bundleState();
+    return state.state === 'valid' ? state.bundle.routing : DEFAULT_ROUTING;
   }
 
   /** An agent's rename moves the entry (D-26), when an entry is there; an automatic write never signs a map that does not verify, and says so once. */
@@ -594,4 +674,35 @@ export function runtimePerRoot(host: Pick<GateHost, 'runtimeFor'> | undefined, r
     }
     return found;
   };
+}
+
+/**
+ * The one label a written file's entry takes from the chat's mark (D-26, D-29): undefined when the mark is not above the file's label now. A label map entry
+ * holds one label, so of the mark's labels joined onto the file's own scale, and the mark's labels on other scales, the one whose routing tier is strictest
+ * is written (the file's own scale wins a tie); a label on another scale replaces the file's own only when its tier is stricter, so a write never makes
+ * where the file's content may go any wider.
+ */
+export function raisedEntryLabel(current: Mark, mark: readonly Label[], scales: ScaleTable, routing: RoutingTable): Label | undefined {
+  let raised: Mark = current;
+  for (const label of mark) raised = raiseMark(raised, label, scales);
+  if (current.length > 0 && sameMark(raised, current)) return undefined;
+  const tier = (label: Label): number => {
+    try { return TIER_ORDER[tierForLabel(label, routing)]; } catch { return TIER_ORDER.deny; }
+  };
+  const own = current[0];
+  let sameScale: Label | undefined = own;
+  const others: Label[] = [];
+  for (const label of mark) {
+    if (own !== undefined && label.scale === own.scale) sameScale = joinLabels(sameScale ?? label, label, scales) ?? sameScale;
+    else others.push(label);
+  }
+  let best = sameScale;
+  for (const label of others) {
+    let joined = label;
+    for (const other of others) if (other !== label && other.scale === label.scale) joined = joinLabels(joined, other, scales) ?? joined;
+    if (best === undefined || tier(joined) > tier(best)) best = joined;
+  }
+  if (best === undefined) return undefined;
+  if (current.length > 0 && sameMark([best], current)) return undefined;
+  return best;
 }
