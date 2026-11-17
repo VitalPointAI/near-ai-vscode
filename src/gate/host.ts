@@ -24,7 +24,7 @@ import { moveLabelEntry } from '../domain/gate/labelMap';
 import type { LabelMapPayload } from '../domain/gate/labelMap';
 import { SCALE_PRESETS } from '../domain/gate/labels';
 import type { Clearance, Label, LabelEventId, ScaleMapping, ScaleTable } from '../domain/gate/labels';
-import { LabelMapError, LabelReader, updateLabelMap } from './labelMapStore';
+import { LabelMapError, LabelReader, lastVerifiedLabelMap, updateLabelMap } from './labelMapStore';
 import type { LabelMapQuestion, LabelMapWrite } from './labelMapStore';
 import type { LabelMapState } from '../domain/gate/labelMap';
 
@@ -244,6 +244,15 @@ export class GateHost {
       });
     } finally {
       this.labelReaders.get(projectLogKey(root))?.invalidate();
+    }
+  }
+
+  /** The labels this computer last verified for a project, or undefined (PR #85 review: Set Label judges a lowering against them over a held file). */
+  public async lastVerifiedLabels(root: string): Promise<LabelMapPayload | undefined> {
+    try {
+      return await lastVerifiedLabelMap(this.options.globalStorageDir, this.options.secrets, root, this.labelPolicy().scales);
+    } catch {
+      return undefined;
     }
   }
 

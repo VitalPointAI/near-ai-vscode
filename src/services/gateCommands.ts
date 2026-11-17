@@ -14,7 +14,8 @@ import type { BundleState } from '../domain/gate/bundle';
 import { CLEARANCE_SELF_ASSERTED_TEXT, HANDLING_FLAGS, LABELS_NOT_ACCREDITATION_TEXT, LABEL_TOKEN_PATTERN, SCALE_PRESETS_CAVEAT_TEXT, labelKey, parseLabel } from '../domain/gate/labels';
 import type { Label } from '../domain/gate/labels';
 import { dominates, raiseMark } from '../domain/gate/dominance';
-import { labelMapKey, setLabelEntry, setProjectLabel } from '../domain/gate/labelMap';
+import { holdsReads, labelMapKey, resolveLabel, setLabelEntry, setProjectLabel } from '../domain/gate/labelMap';
+import type { LabelMapPayload } from '../domain/gate/labelMap';
 import { BundleStoreError, POLICY_DRAFT_BASE_FILE, POLICY_DRAFT_FILE, gateDir } from '../gate/bundleStore';
 import { writeFileAtomic } from '../team/teamFile';
 import { GateHost } from '../gate/host';
@@ -338,6 +339,9 @@ function labelShown(label: Label): string {
   return parts.join(', ');
 }
 
+/** Said when the label file changed under Set Label so that the change became a lowering no reason was given for: nothing is written. */
+export const LOWER_NEEDS_REASON_TEXT = 'Nothing was written: this change lowers a label, and no reason was given for it. Run NEAR AI: Set Label again to give one.';
+
 /** True when `next` is lower than `current` on some scale: raising `next` by every label of `current` changes it. */
 function lowers(current: readonly Label[], next: Label | undefined, scales: Parameters<typeof raiseMark>[2]): boolean {
   if (next === undefined) return current.length > 0;
@@ -406,10 +410,20 @@ export async function setLabel(host: GateHost, target: LabelTarget): Promise<boo
     }
   }
   let reason: string | undefined;
-  if (lowers(current.origin === 'default' ? [] : current.mark, label, policy.scales)) {
+  const askReason = async (): Promise<string | undefined> => {
     const given = await vscode.window.showInputBox({ prompt: LOWER_REASON_PROMPT, title: `Lower the label of ${shownTarget}`, validateInput: (value: string) => (value.trim() === '' ? 'A reason is needed to lower a label.' : undefined) });
-    if (given === undefined || given.trim() === '') return false;
-    reason = given.trim();
+    return given === undefined || given.trim() === '' ? undefined : given.trim();
+  };
+  // The label the write will replace (PR #85 review): while the file holds reads, the view reads every path at the default label, but the write restores
+  // (or accepts) a signed map, so the label is judged against the labels this computer last verified too. The change re-checks against the map it is given.
+  const ownLabel = (map: LabelMapPayload): readonly Label[] => {
+    const resolved = resolveLabel(keyText, { verified: map, bundleDefault: policy.defaultLabel, scales: policy.scales });
+    return resolved.origin === 'default' ? [] : resolved.mark;
+  };
+  const restored = holdsReads(view.state) ? await host.lastVerifiedLabels(target.root) : undefined;
+  if (lowers([...(current.origin === 'default' ? [] : current.mark), ...(restored === undefined ? [] : ownLabel(restored))], label, policy.scales)) {
+    reason = await askReason();
+    if (reason === undefined) return false;
   }
   const confirm = async (question: LabelMapQuestion): Promise<boolean> => {
     if (question === 'accept') {
@@ -423,7 +437,11 @@ export async function setLabel(host: GateHost, target: LabelTarget): Promise<boo
     return (await vscode.window.showWarningMessage(text, { modal: true, detail }, SIGN_AGAIN_ACTION)) === SIGN_AGAIN_ACTION;
   };
   try {
-    await host.changeLabels(target.root, (map) => (keyText === '' ? setProjectLabel(map, label) : setLabelEntry(map, keyText, label)), confirm);
+    await host.changeLabels(target.root, (map) => {
+      // Re-checked against the map the write is really made over, so no lowering is ever signed without a reason (fail closed: nothing is written).
+      if (reason === undefined && lowers(ownLabel(map), label, policy.scales)) throw new LabelMapError(LOWER_NEEDS_REASON_TEXT);
+      return keyText === '' ? setProjectLabel(map, label) : setLabelEntry(map, keyText, label);
+    }, confirm);
   } catch (error) {
     void Promise.resolve(vscode.window.showWarningMessage(error instanceof LabelMapError ? error.message : 'Nothing was changed: NEAR AI could not save the label.')).catch(() => undefined);
     return false;

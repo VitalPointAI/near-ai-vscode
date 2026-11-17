@@ -556,6 +556,14 @@ export async function updateLabelMap(root: string, change: (map: LabelMapPayload
 }
 
 /**
+ * The labels this computer last verified for a project (the marker's base copy, D-59, D-62), or undefined when there is none or it no longer matches the
+ * marker. Set Label judges a lowering against them while the file in the project holds reads, since a write then restores them (PR #85 review).
+ */
+export async function lastVerifiedLabelMap(globalStorageDir: string, secrets: SecretStorageLike, root: string, scales: ScaleTable): Promise<LabelMapPayload | undefined> {
+  return parsedOrUndefined((await readLabelMarker(globalStorageDir, secrets, root)).base, scales);
+}
+
+/**
  * The label reader of one project (D-25): reads the file and the marker again only when either one's size or modification time changes, and gives a view
  * under the scales asked for. A reader with no storage folder (a run with no gate host) trusts no key and keeps no marker, so every label it finds only raises.
  */
