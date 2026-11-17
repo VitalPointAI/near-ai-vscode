@@ -269,15 +269,23 @@ test('manifestArguments writes an absolute path inside the folder as a project p
 
 // ---- effects the gate cannot read ----
 
+// A path outside the project used to be this test's unfillable call; since the owner decision after PR #74 the gate refuses that up front
+// (call.outside-workspace, asserted at the end), so the call here is one with its path missing, which the manifest cannot fill either.
 test('a call whose effects cannot be filled asks with manifest.effects-unknown when a person is here and is refused when nobody is, with no stand-in', async () => {
   const root = await project();
   const outside = path.join(tmpdir(), 'near-ai-gate-outside', 'x.txt');
   const read = CORE_TOOLS.find((tool) => tool.name === 'Read') as AgentTool<any>;
   const input = {
-    tool: read, raw: { file_path: outside }, root, callId: 'r1', policy: { mode: 'approve-risky', emergencyStop: false } as ActionPolicy,
+    tool: read, raw: {}, root, callId: 'r1', policy: { mode: 'approve-risky', emergencyStop: false } as ActionPolicy,
     rules: DEFAULT_RULES, grants: new RunGrants(), buildAuto: async () => undefined
   };
+  assert.deepEqual(effectsOfCall(read, {}, root), []);
   assert.deepEqual(effectsOfCall(read, { file_path: outside }, root), []);
+  for (const presence of ['person', 'none'] as const) {
+    const refused = await gateToolCall(testGateRuntime(presence === 'none' ? { presence, context: 'unattended' } : {}), { ...input, raw: { file_path: outside } });
+    assert.equal(refused.decision.outcome, 'deny', presence);
+    assert.equal(refused.decision.rule, 'call.outside-workspace', presence);
+  }
   const asked = await gateToolCall(testGateRuntime(), input);
   assert.equal(asked.decision.outcome, 'ask');
   assert.equal(asked.decision.rule, 'manifest.effects-unknown');

@@ -25,7 +25,7 @@ import { decidePermissionAsync, denyListReason, isAutoAllowed } from './permissi
 import type { AutoApprovalContext, PermissionDecision, PermissionRules, RunGrants } from './permissions';
 import { shellReachesCredentialStore } from './tools';
 import type { AgentTool } from './tools';
-import { resolveInWorkspace } from './workspace';
+import { OutsideWorkspaceError, resolveInWorkspace } from './workspace';
 
 const DEFAULT_PRODUCT_VERSION = '0.0.0';
 const MAX_RESOURCE_NAME = 200;
@@ -335,6 +335,11 @@ export interface CallPaths {
   /** The trusted-folder files read, named by the folder's own name and the path inside it (never the full machine path). */
   readonly trustedReads: readonly string[];
   readonly facts: Pick<FloorFacts, 'credentialStore' | 'identityFiles'>;
+  /**
+   * The tool's own message when a path is outside the project and every folder the tool may use for it (a trusted folder only for a read): the tool would
+   * refuse the call, so the gate refuses it up front (`call.outside-workspace`, owner decision after PR #74) instead of showing a card.
+   */
+  readonly outside?: string;
 }
 
 function insideFolder(folder: string, target: string): boolean {
@@ -366,14 +371,18 @@ export async function readCallPaths(tool: AgentTool<any>, raw: Record<string, un
   const trustedReads: string[] = [];
   let credentialStore: string | undefined;
   let identityFiles: string | undefined;
+  let outside: string | undefined;
   for (const [field, verbs] of fields) {
     const value = given[field];
     if (typeof value !== 'string' || value.trim() === '') continue;
+    // A trusted folder is for reading: a field any other effect uses is resolved as the tools resolve a write, against the project alone.
+    const readOnly = [...verbs].every((verb) => verb === 'read');
     let resolved: string | undefined;
     try {
-      resolved = await resolveInWorkspace(root, value, [...readOnlyRoots]);
-    } catch {
+      resolved = await resolveInWorkspace(root, value, readOnly ? [...readOnlyRoots] : []);
+    } catch (error) {
       resolved = undefined; // outside the project and every trusted folder, or the key folder: the tool refuses it, and its effects stay unknown
+      if (error instanceof OutsideWorkspaceError) outside ??= error.message;
     }
     for (const shown of resolved === undefined || resolved === value ? [value] : [value, resolved]) {
       credentialStore ??= namesCredentialStore(shown, locations, { root });
@@ -395,7 +404,8 @@ export async function readCallPaths(tool: AgentTool<any>, raw: Record<string, un
   return {
     input: out ?? given,
     trustedReads,
-    facts: { ...(credentialStore === undefined ? {} : { credentialStore }), ...(identityFiles === undefined ? {} : { identityFiles }) }
+    facts: { ...(credentialStore === undefined ? {} : { credentialStore }), ...(identityFiles === undefined ? {} : { identityFiles }) },
+    ...(outside === undefined ? {} : { outside })
   };
 }
 
@@ -653,6 +663,8 @@ export async function gateToolCall(runtime: GateRuntime, input: GateCallInput, o
     ...(Object.keys(floorFacts).length === 0 ? {} : { floorFacts }),
     // The project and the shell's folder, for the floor's text check of the command (a project's own globalStorage/ folder is the project's).
     workspace: { root: input.root, cwd: input.shell?.cwd ?? input.root },
+    // A path the tool would refuse as outside the project: refused up front, after the floor's own refusals, the emergency stop and the deny list.
+    ...(paths.outside === undefined ? {} : { outsideWorkspace: paths.outside }),
     ...(denied === undefined ? {} : { settingsRefusal: { rule: 'settings.deny-list', reason: denied } })
   };
   const captured: { value?: PermissionDecision } = {};

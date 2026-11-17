@@ -148,6 +148,11 @@ helpers), VS Code's own secrets database, and this extension's own identity
 and policy files in its storage. This holds for the file tools and for shell
 commands alike.
 
+A file tool's path outside the project and every folder that tool may use (a
+folder NEAR AI trusts for reading, such as the managed Open-GSD runtime, is for
+reading only) is refused at once, in every mode, with the tool's own "outside
+the workspace" message and no card, because the tool would refuse it anyway.
+
 Reading a file inside the project that looks like a credential (`.env`, private
 keys, SSH, AWS, or NEAR credential files), through any path or symlink, asks
 first in every mode except `fully-autonomous`, where it runs without asking (see
