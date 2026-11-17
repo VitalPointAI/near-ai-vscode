@@ -11,6 +11,7 @@ import { classifyCommand } from '../agent/commandSafety';
 import { BUNDLE_FAILURES } from '../domain/gate/bundle';
 import { MANIFEST_IS_A_CLAIM_TEXT, RUNS_ON_THIS_MACHINE_TEXT } from '../domain/gate/words';
 import { MAX_DECISION_LOG_BYTES, MAX_ROTATED_FILES } from '../gate/decisionLog';
+import { redactCredentialArguments } from '../domain/redaction';
 
 const ROOT = path.resolve(__dirname, '..', '..');
 const SECURITY = readFileSync(path.join(ROOT, 'SECURITY.md'), 'utf8');
@@ -83,7 +84,7 @@ test('the policy section says what the code does: own storage not the project, o
     'keeps the old file beside the new one',
     'records the reset',
     'Nothing in a decision needs the network',
-    'secrets are removed',
+    'before a record is written NEAR AI removes',
     'Records are not synced',
     'does not use them yet'
   ]) {
@@ -216,4 +217,23 @@ test('CHANGELOG.md has an Unreleased section above the newest release (or the en
   ]) assert.match(entry, phrase);
   assert.ok(!entry.includes(EM_DASH), 'no em-dash');
   assert.ok(!/NEAR organization/i.test(entry), 'your organization, never NEAR organization');
+});
+
+// PR #70 review carry-over: the record section said "secrets are removed" while only token shapes were. It now says what is removed and what is not, and
+// each example it gives is checked against the code that removes it.
+test('the decision record paragraph says exactly what is removed from a command and what is not, and each example holds for the code', () => {
+  const words = flat(policySection);
+  assert.ok(!words.includes('and secrets are removed from it'), 'the old overclaim is gone');
+  for (const named of ['first line only', '`-u`, `--user`, `--proxy-user` or `-U` when it holds a colon', '`--password=...`, `--token ...` or `-storepass ...`',
+    '`Authorization`, `Proxy-Authorization`, `Cookie`, `Private-Token`', '`GITHUB_TOKEN=...`', '`?api_key=...`', '(`https://user:password@host`)',
+    'It does not remove a password passed as a plain argument (`sshpass -p`, `mysql -p...`, `htpasswd -b`)', 'command substitution']) {
+    assert.ok(words.includes(named), named);
+  }
+  const removed = (command: string): boolean => !redactCredentialArguments(command).includes('pw-1');
+  for (const command of ['curl https://user:pw-1@host.example.test', 'curl -u user:pw-1 x', 'curl --user user:pw-1 x', 'curl --proxy-user user:pw-1 x', 'curl -U user:pw-1 x',
+    'tool --password=pw-1', 'tool --token pw-1', 'keytool -storepass pw-1', 'curl -H "Authorization: Basic pw-1"', 'curl -H "Proxy-Authorization: Basic pw-1"',
+    'curl -H "Cookie: s=pw-1"', 'curl -H "Private-Token: pw-1"', 'curl -H "X-Service-Token: pw-1"', 'curl -H "X-Api-Key: pw-1"', 'GITHUB_TOKEN=pw-1 gh', 'curl "https://h.example.test/?api_key=pw-1"']) {
+    assert.ok(removed(command), command);
+  }
+  for (const command of ['sshpass -p pw-1 ssh h', 'mysql -ppw-1 app', 'htpasswd -b users alice pw-1', 'curl -u "$(cat pw-1)" x']) assert.ok(!removed(command), command);
 });

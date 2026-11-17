@@ -199,8 +199,23 @@ is what that file and the records beside it do in this version.
   works the same offline.
 - **Decision records.** Each decision, allowed, asked or refused, is written
   to a record for the project in this extension's storage. A record names what
-  was asked for, what was decided and why, never file contents, and secrets are
-  removed from it. Records are not synced and are not put in your project, in
+  was asked for, what was decided and why, never file contents. A command is
+  named by its first line only, and before a record is written NEAR AI removes
+  from every text in it: known token shapes (such as `sk-`, `ghp_`, AWS access
+  keys and JSON web tokens), bearer tokens, a value given to a name such as
+  `password`, `secret` or `api_key`, the user part of a URL
+  (`https://user:password@host`), the value of `-u`, `--user`,
+  `--proxy-user` or `-U` when it holds a colon, the value of an option named
+  for a password, passphrase, token, secret, API key or credential (such as
+  `--password=...`, `--token ...` or `-storepass ...`), the value of an
+  `Authorization`, `Proxy-Authorization`, `Cookie`, `Private-Token` or
+  `X-...-Token` or `-Key` header, and the value of an environment assignment
+  or URL query parameter named for one (such as `GITHUB_TOKEN=...` or
+  `?api_key=...`). It does not remove a password passed as a plain argument
+  (`sshpass -p`, `mysql -p...`, `htpasswd -b`), one a script receives or
+  reads, one built by command substitution, or one under an option or name
+  not listed here, so do not put a password in a command's first line.
+  Records are not synced and are not put in your project, in
   the chat history or in the project's synced state. Each project's log rolls
   over at about 5 MB and keeps the last four older files. What happens to the
   policy itself (it was created, renewed, reset, loaded, or could not be

@@ -2,7 +2,7 @@
 // later audit chain can sign it unchanged. "Shaped after" is deliberate: this file checks only what the shape needs and never claims full OCSF schema
 // validity (assumption A1 of the research). Pure: no I/O, no clock (the caller passes epoch milliseconds), no vscode, no package. A record carries names and
 // paths, never file contents, prompts or model output.
-import { redactSecrets } from '../redaction';
+import { redactCredentialArguments, redactSecrets } from '../redaction';
 import { canonicalize } from '../team/canonical';
 import { findSecrets } from '../team/secrets';
 import { POLICY_EVENT_IDS } from './bundle';
@@ -158,8 +158,13 @@ export function outcomeOf(decision: Pick<GateDecision, 'outcome' | 'floor'>): De
   return decision.floor ? 'refused-by-floor' : 'denied';
 }
 
+/** One string as a record keeps it: credentials carried as command arguments removed by class, then every known token shape. */
+function redactString(value: string): string {
+  return redactSecrets(redactCredentialArguments(value));
+}
+
 function redactValue(value: unknown): unknown {
-  if (typeof value === 'string') return redactSecrets(value);
+  if (typeof value === 'string') return redactString(value);
   if (Array.isArray(value)) return value.map(redactValue);
   if (isRecord(value)) {
     const out: Record<string, unknown> = {};
@@ -169,7 +174,11 @@ function redactValue(value: unknown): unknown {
   return value;
 }
 
-/** A copy of the record with `redactSecrets` run over every string, so a token that slipped into a reason or a name never reaches a file. */
+/**
+ * A copy of the record with every string redacted: credentials a command carries in its arguments (redactCredentialArguments: a URL's user part, `-u
+ * user:pass`, `--password=`/`--token`-style options, credential headers, `NAME_TOKEN=` assignments) and every known token shape (redactSecrets), so a
+ * credential in a command's first line, a reason or a name never reaches a file.
+ */
 export function redactRecord(record: DecisionRecord): DecisionRecord {
   return redactValue(record) as DecisionRecord;
 }
@@ -262,6 +271,14 @@ function kindOk(value: unknown, kind: Kind): boolean {
   return Array.isArray(value);
 }
 
+/** Whether any string in the value still holds a credential argument that redactCredentialArguments would remove. */
+function carriesCredentialArgument(value: unknown): boolean {
+  if (typeof value === 'string') return redactCredentialArguments(value) !== value;
+  if (Array.isArray(value)) return value.some(carriesCredentialArgument);
+  if (isRecord(value)) return Object.keys(value).some((key) => carriesCredentialArgument(value[key]));
+  return false;
+}
+
 /** What `api.operation` may name: a capability verb, or one of the policy's own events. */
 const RECORD_OPERATIONS: ReadonlySet<string> = new Set<string>([...CAPABILITY_VERBS, ...POLICY_EVENT_IDS]);
 const RECORD_RULES: ReadonlySet<string> = new Set(RECORD_RULE_IDS);
@@ -281,7 +298,7 @@ function idsKnown(value: Record<string, unknown>): Refusal | undefined {
 
 /**
  * Check a record only for what its shape needs: the class arithmetic (class 6003, category 6, type_uid = 600300 + activity_id), every required key with
- * the right kind, the record version, a known rule and operation, whole numbers only and no secret-like string. Nothing here claims the record is valid
+ * the right kind, the record version, a known rule and operation, whole numbers only, no secret-like string and no credential argument left in any string. Nothing here claims the record is valid
  * against the full OCSF schema.
  */
 export function validateDecisionRecord(value: unknown): Parsed<DecisionRecord> {
@@ -304,5 +321,6 @@ export function validateDecisionRecord(value: unknown): Parsed<DecisionRecord> {
     return refused('wrong-type', 'canonical');
   }
   if (findSecrets(value).length > 0) return refused('not-allowed-here', 'secret');
+  if (carriesCredentialArgument(value)) return refused('not-allowed-here', 'credential-argument');
   return { ok: true, value: value as unknown as DecisionRecord };
 }
