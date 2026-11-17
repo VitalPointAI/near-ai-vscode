@@ -627,11 +627,14 @@ until it runs out aren't shown.
   it is shown as the model's own opinion, not a measurement. **Cancel**,
   Emergency stop, or opening another team stops a review in progress.
 - **Building a team.** **New team** in Team Studio (and **Set Up Project
-  Team**) first asks how you want to start. **Use an existing team** lists
-  your own saved teams, from any project, next to the ones the extension
-  provides; filter them with **All**, **My teams** or **Built-in**, and each
-  shows its name, description, member count and where it came from. Select
-  one for two buttons. **Use as is** asks for no name or description: with a
+  Team**) first asks how you want to start: **Use an existing team**,
+  **Create a new team** or **Recommend a team for me**. **Use an existing
+  team** lists your own saved teams, from any project, next to the ones the
+  extension provides; filter them with **All**, **My teams** or **Built-in**.
+  Every card, here and in the team list, is the same size: the team's icon,
+  name, where it came from, its member count, the first three lines of its
+  description and its first four members, with **Show more** to open that
+  card. Select one for two buttons. **Use as is** asks for no name or description: with a
   project folder open the team becomes this project's team
   (`.planning/.near-ai/team.md`, run with `/team:project`), and if the
   project already has a team you are asked first and the old one stays in
@@ -641,9 +644,11 @@ until it runs out aren't shown.
   Purpose step with the members filled in and its description copied; a
   saved team's copy is named "Copy of" the team, and a built-in team's copy
   keeps the built-in's name (with a number added if that name is taken). A built-in team made from your answers
-  (such as **Recommend a team for me**) asks what the team is for, where its
-  models may run and, for the recommendation, the kind of work and its risk,
-  next to the buttons. **Create a new team** starts **From scratch**, from
+  asks what the team is for and where its models may run, next to the
+  buttons. **Recommend a team for me** asks the kind of work, its risk, where
+  models may run and what the team is for, then shows the team it suggests,
+  with the same two buttons; changing an answer clears it until you ask
+  again. **Create a new team** starts **From scratch**, from
   **Clone an existing team** (the same list, to clone only), or from
   **Describe it, and AI drafts it**. Only a new team or a clone asks for its
   name, what it is for, **Private team** and **Save it as**. **Back** returns
@@ -652,6 +657,25 @@ until it runs out aren't shown.
   first runs, like any project team. With no saved teams yet, **My teams**
   says so: save a team as one of your teams in Team Studio to reuse it
   anywhere.
+- **Team icons.** Every team has an icon. On a saved team's Purpose tab,
+  **Upload icon…** takes a PNG, JPEG or WebP picture of up to 2 MB (SVG is
+  refused, because it can carry scripts); the picture is cropped to a square
+  and kept as a 128 x 128 PNG of at most 64 KB beside the team file
+  (`<team>.icon.png` next to your team's file, or
+  `.planning/.near-ai/team.icon.png` beside a project's team), and the team
+  file's frontmatter names it (`icon: <team>.icon.png`; older versions of the
+  extension ignore the line). **Generate with AI…** asks an image model for
+  one, starting with `nearAi.agent.imageModel`: it names the model and the
+  cost first and makes the icon only when you agree, sending only the team's
+  name and what it is for. A private team, a team whose members are all
+  private, or any team in a project with a knowledge base can only use a
+  private image model (a NEAR TEE model or one on this computer), and the
+  button says why when there is none; TEE-only mode, the daily spend limit
+  and Emergency stop apply as they do in chat. **Remove icon** goes back to
+  the default; changing or removing an icon keeps the old one, and the
+  **History** tab can restore it. A team without an icon, built-in teams
+  included, shows its initials on a colour that comes from its name. Archive,
+  restore, duplicate and **Use as is** keep a team's icon with it.
 - **Sharing a team.** **Share…** on a team's card in Team Studio (or next to
   it when you build a team from an existing one) is the way to send a team
   (**Open as Markdown** opens the file itself). It saves the team as one file,
@@ -672,10 +696,14 @@ until it runs out aren't shown.
   about on its own, and a project team's question says where it came from. The checksum catches a
   damaged or hand-edited file but is not a signature; signed team files may
   come later. The `.near-team.json` format is JSON with `format`
-  (`near-ai-team`), `formatVersion` (1), `team` (`name`, `description`,
-  `members`, `markdown`), `knowledge` (null unless included), `listing`
-  (reserved, always null) and `integrity` (`sha256-` and the base64 SHA-256
-  of the team text and knowledge).
+  (`near-ai-team`), `formatVersion` (1, or 2 when it carries the team's icon),
+  `team` (`name`, `description`, `members`, `markdown`), `knowledge` (null
+  unless included), in version 2 `icon` (the icon as base64, or null),
+  `listing` (reserved, always null) and `integrity` (`sha256-` and the base64
+  SHA-256 of the team text and knowledge, and in version 2 the icon). A team
+  without an icon is shared as version 1, which earlier versions of the
+  extension import. Import checks a shared icon like any other and leaves out
+  one that is not a valid icon, saying why, while still adding the team.
 - **Update Team.** A team made from a built-in project type records where it
   came from in its frontmatter (`template`, `templateVersion`, and a
   `templateBase` list with a fingerprint of each member as generated), so it

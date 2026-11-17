@@ -1,5 +1,31 @@
 # Changelog
 
+## Unreleased
+
+- **Recommend a team for me is on the first screen.** Building a team now offers three ways to
+  start: **Use an existing team**, **Create a new team** and **Recommend a team for me**. The
+  recommendation asks the kind of work, its risk, where models may run and, if you like, what the
+  team is for, then shows the team it suggests before anything is saved, with **Use as is** and
+  **Clone and modify** as for any team you pick. Changing an answer clears the team shown until
+  you ask again. It is no longer listed among the existing teams, so it is offered once.
+- **Every team card is the same size.** In the team list and when you pick a team, each card
+  shows the team's icon, name, where it came from, its member count and the first three lines of
+  its description, with the first four members. **Show more** opens that card only, and
+  **Show less** closes it again.
+- **Teams have icons.** On a saved team's Purpose tab, **Upload icon…** takes a PNG, JPEG or WebP
+  picture of up to 2 MB, crops it to a square and keeps it as a small 128 x 128 PNG beside the team
+  file. SVG pictures are refused, because they can carry scripts. **Generate with AI…** asks an
+  image model for one, after showing the model and what it costs; it sends only the team's name
+  and what it is for. A private team, a team whose members are all private, or any team in a
+  project with a knowledge base can only use a private image model, and the button says why when
+  there is none. **Remove icon** goes back to the default, and History keeps earlier icons to
+  restore. A team without an icon, built-in teams included, shows its initials on a colour that
+  comes from its name.
+- **Shared teams keep their icon.** **Share…** includes the team's icon, and **Import…** checks
+  it like any icon: one that is not a valid icon is left out, with the reason, and the team is
+  still added. A team without an icon is shared in the same format as before, so earlier versions
+  still import it; one with an icon needs this version or later.
+
 ## 0.4.29
 
 Full auto still runs your work without asking, but it now stops for the few things that are hard
