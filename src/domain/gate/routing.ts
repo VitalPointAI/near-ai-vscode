@@ -313,6 +313,9 @@ export const ROUTE_REFUSALS: Readonly<Record<RefusingRouteRule, string>> = Objec
   'route.connection-not-bound': 'Nothing was sent. Content at this level may go to NEAR AI Cloud only over a connection proven to end inside its private hardware, and this connection is not proven. Choose a local model for this chat, or start a new chat that has not read this content.'
 });
 
+/** The reason of a request whose route could not be worked out (a mark that cannot be read, a routing table that throws): refused, never guessed. */
+export const ROUTE_CHECK_FAILED_TEXT = 'Nothing was sent. The route for this request could not be worked out, so it was refused rather than guessed. Try again; if it keeps happening, reload the window or run NEAR AI: Reset Policy to Defaults.';
+
 export interface RouteDecision {
   readonly allowed: boolean;
   /** The tier the mark needs. */
@@ -320,6 +323,11 @@ export interface RouteDecision {
   readonly rule: RouteRule;
   /** Present exactly when the request is refused. */
   readonly reason?: string;
+}
+
+/** The decision for a request whose route could not be worked out: deny, under the fixed rule route.deny, with ROUTE_CHECK_FAILED_TEXT. */
+export function routeCheckFailed(): RouteDecision {
+  return { allowed: false, tier: 'deny', rule: 'route.deny', reason: ROUTE_CHECK_FAILED_TEXT };
 }
 
 function allow(tier: RoutingTier, rule: RouteRule, facts?: RouteFacts): RouteDecision {

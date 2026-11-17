@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { sha256Hex, verifyResponse, type ResponseEvidence, type VerificationResult } from './attestation';
 import { isNearCloudEndpoint, isSecureEndpoint } from '../domain/config';
-import { decideRoute } from '../domain/gate/routing';
+import { decideRoute, routeCheckFailed } from '../domain/gate/routing';
 import type { ConnectionBindingFact, RouteDecision, RouteFacts, RouteRule } from '../domain/gate/routing';
 import type { Mark } from '../domain/gate/dominance';
 import { currentSessionRoute, defaultSessionRoute, routeRecordFor, routingOf } from '../gate/sessionMark';
@@ -163,14 +163,27 @@ export interface NearAiClientOptions {
   localModelAvailable?: boolean;
 }
 
-/** Endpoints NEAR bills for; every 2xx answer from one is recorded in the spend ledger. */
-const BILLABLE_PATHS = new Set(['/chat/completions', '/images/generations', '/images/edits', '/audio/transcriptions']);
-
 /**
- * The requests that carry content to a model (a POST to one of these): each is routed before anything is sent (CLAS-06). The same four paths as
- * BILLABLE_PATHS, named for what they carry rather than what they cost, so the route check never depends on whether spend tracking is on.
+ * The requests that carry content to a model (a POST to one of these). The one list of them: BILLABLE_PATHS is this same set, because NEAR AI bills exactly
+ * the requests that carry content, so the spend check and the route check can never disagree about a path (PR 4a review).
  */
 export const CONTENT_PATHS: ReadonlySet<string> = new Set(['/chat/completions', '/images/generations', '/images/edits', '/audio/transcriptions']);
+
+/** Endpoints NEAR bills for; every 2xx answer from one is recorded in the spend ledger. The same set as CONTENT_PATHS, never a copy of it. */
+export const BILLABLE_PATHS: ReadonlySet<string> = CONTENT_PATHS;
+
+/**
+ * The only requests other than a GET that the client sends without a route check: billing lookups and the key check, which carry request ids and nothing
+ * else. Every other request that is not a GET is route checked, so a content path someone adds and forgets to list is checked, never sent unchecked.
+ */
+export const NON_CONTENT_POST_PATHS: ReadonlySet<string> = new Set(['/billing/costs', '/check_api_key']);
+
+/** Whether a request is route checked: every method but GET and HEAD, except the listed non-content paths. */
+export function needsRouteCheck(path: string, method: string | undefined): boolean {
+  const verb = (method ?? 'GET').toUpperCase();
+  if (verb === 'GET' || verb === 'HEAD') return false;
+  return !NON_CONTENT_POST_PATHS.has(path.replace(/[?#].*$/, ''));
+}
 
 /** A model request the session's route does not allow (CLAS-06): thrown before anything is sent, with the plain sentence that says so. */
 export class RouteRefusedError extends Error {
@@ -959,18 +972,21 @@ export class NearAiClient {
     };
     let decision: RouteDecision;
     let mark: Mark = [];
+    let checkFailed = false;
     try {
       mark = route.markOf();
       decision = decideRoute(mark, routing, facts, defaultLabel);
     } catch {
-      // A mark that cannot be read means nothing is known about what the session has read: nothing above the default can be assumed, so it is refused.
+      // A mark that cannot be read, or a routing table that throws, means the route cannot be worked out: it is refused with a fixed rule and a plain
+      // sentence, and recorded, rather than guessed or left to throw something nobody can read (PR 4a review).
       mark = [];
-      decision = decideRoute([], routing, facts);
+      checkFailed = true;
+      decision = routeCheckFailed();
     }
     // GATE-07, D-52: every model request leaves one record, allowed or refused, through the route's sink. A record that cannot be built or kept never changes
     // the request (D-21).
     try {
-      route.sink?.record(routeRecordFor(route, decision, facts, model === undefined ? {} : { model }, { mark, defaultLabel, bundleHash }));
+      route.sink?.record(routeRecordFor(route, decision, facts, model === undefined ? {} : { model }, { mark, defaultLabel, bundleHash, routing, checkFailed }));
     } catch { /* see above */ }
     if (!decision.allowed) throw new RouteRefusedError(decision.rule, decision.reason ?? 'Nothing was sent.');
     return this.options.binding === undefined ? undefined : fact;
@@ -1006,7 +1022,7 @@ export class NearAiClient {
     const model = overrides.model;
     // CLAS-06: the route is decided once, here, for every content request, before the spend check, before a concurrency slot is taken and before the first
     // byte is sent, whether or not spend tracking is on. A retry below is the same request and is not decided again.
-    const connection = CONTENT_PATHS.has(path) && (init.method ?? 'GET') === 'POST' ? this.checkRoute(model) : undefined;
+    const connection = needsRouteCheck(path, init.method) ? this.checkRoute(model) : undefined;
     const billable = BILLABLE_PATHS.has(path) && (init.method ?? 'GET') === 'POST' && this.options.spend !== undefined;
     if (billable) {
       // The daily limit is checked before every billable request, whoever sends it.

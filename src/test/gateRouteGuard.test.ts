@@ -12,13 +12,14 @@ import { mkdir, mkdtemp, readFile, readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import * as ts from 'typescript';
 import { DEFAULT_RULES } from '../agent/permissions';
 import { runAgentInFolder } from '../benchmark/runner';
 import { createProjectCredentialScope } from '../domain/auth';
 import type { OrganizationProfile } from '../domain/auth';
 import type { Mark } from '../domain/gate/dominance';
 import type { Label } from '../domain/gate/labels';
-import { BINDING_REFUSALS } from '../domain/gate/routing';
+import { BINDING_REFUSALS, DEFAULT_ROUTING, ROUTE_CHECK_FAILED_TEXT } from '../domain/gate/routing';
 import type { ActorRef, DecisionSink } from '../domain/gate/decide';
 import { buildDecisionRecord, isModelRequestRecord, validateDecisionRecord } from '../domain/gate/record';
 import type { DecisionRecord } from '../domain/gate/record';
@@ -28,7 +29,7 @@ import { DECISIONS_DIR, DecisionLog, INSTALL_LOG_KEY, MODEL_REQUESTS_DIR, projec
 import { GateHost, MAX_PROJECT_LOGS, NO_SESSION_ID } from '../gate/host';
 import { currentSessionRoute, defaultSessionRoute, recordedModelName, routeRecordFor, sessionRouteFrom, setDefaultSessionRoute, withSessionRoute } from '../gate/sessionMark';
 import type { SessionRoute } from '../gate/sessionMark';
-import { NearAiClient, NearAiError, RouteRefusedError } from '../services/nearAiClient';
+import { BILLABLE_PATHS, CONTENT_PATHS, NON_CONTENT_POST_PATHS, NearAiClient, NearAiError, RouteRefusedError, needsRouteCheck } from '../services/nearAiClient';
 import type { SpendSink } from '../services/spendAccount';
 import type { AgentMessage, CompletionEvent, NearAiClientOptions } from '../services/nearAiClient';
 import type { AgentTurnRequest, GsdContext } from '../services/agentSession';
@@ -164,14 +165,14 @@ const REPO = path.resolve(__dirname, '..', '..');
 const SHORT_RECORD_BUDGET_BYTES = 1_100;
 const SRC = path.join(REPO, 'src');
 
-/** Every production source, keyed by its repository path (src/...), with whole-line and trailing comments removed. */
+/** Every production source, keyed by its repository path (src/...), as written (the syntax-tree scans skip comments themselves). */
 function productionSources(): Map<string, string> {
   const found = new Map<string, string>();
   const walk = (dir: string): void => {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       const full = path.join(dir, entry.name);
       if (entry.isDirectory()) { if (full !== path.join(SRC, 'test')) walk(full); continue; }
-      if (entry.name.endsWith('.ts') && !entry.name.endsWith('.d.ts')) found.set(path.relative(REPO, full).split(path.sep).join('/'), withoutComments(readFileSync(full, 'utf8')));
+      if (entry.name.endsWith('.ts') && !entry.name.endsWith('.d.ts')) found.set(path.relative(REPO, full).split(path.sep).join('/'), readFileSync(full, 'utf8'));
     }
   };
   walk(SRC);
@@ -184,20 +185,29 @@ function withoutComments(text: string): string {
 
 /** The client methods that send content to a model. Every other client method sends none (lists, billing, key checks, verification GETs). */
 const REQUEST_METHODS = ['streamCompletion', 'completeOnce', 'generateImage', 'editImage', 'describeImage', 'transcribeAudio', 'streamChat', 'streamChatEvents'];
-const REQUEST_CALL = new RegExp(String.raw`\.\s*(?:${REQUEST_METHODS.join('|')})\s*\(`);
 const CLIENT_FILE = 'src/services/nearAiClient.ts';
 
 /**
- * The files that call a model request method, and how each runs inside a session route: it wraps its own calls (`self`), it runs only inside a caller that
- * does (`inside`: each caller imports it and contains withSessionRoute), or nothing in the extension reaches it (`dormant`, checked by the import scan).
+ * The files that call a model request method, and how each one's requests run inside a session route (PR 4a review: the call site itself, not the file):
+ * - `self`: every request call in the file is wrapped where it is written;
+ * - `inside`: the file's requests run only inside the listed callers, and in each caller every call of the listed entry (`via`) is wrapped; the caller imports
+ *   the file, or reaches it through an object the run is given (a tool, the safety check), which loop.ts only touches inside AgentRun's methods;
+ * - `dormant`: nothing in the extension reaches it (the import scan below).
+ * "Wrapped" is read from the syntax tree, never from the text: see wrappedIn.
  */
-type Placement = { readonly self: true } | { readonly inside: readonly string[] } | { readonly dormant: true };
+type Entry = { readonly caller: string; readonly via: readonly string[]; readonly imports: boolean };
+type Placement = { readonly self: true } | { readonly inside: readonly Entry[] } | { readonly dormant: true };
 const REQUEST_SITES: Readonly<Record<string, Placement>> = {
-  'src/agent/attachments.ts': { inside: ['src/services/chat.ts'] },
-  'src/agent/context.ts': { inside: ['src/services/agentSession.ts'] },
-  'src/agent/extraTools.ts': { inside: ['src/services/agentSession.ts'] },
-  'src/agent/loop.ts': { inside: ['src/services/agentSession.ts', 'src/benchmark/runner.ts'] },
-  'src/agent/safetyModel.ts': { inside: ['src/services/agentSession.ts'] },
+  'src/agent/attachments.ts': { inside: [{ caller: 'src/services/chat.ts', via: ['prepareAttachments'], imports: true }] },
+  'src/agent/context.ts': { inside: [{ caller: 'src/services/agentSession.ts', via: ['compactConversation'], imports: true }] },
+  // The image tool's request runs when the run calls the tool; toolRunScan.ts holds that a tool's run is reached only in loop.ts.
+  'src/agent/extraTools.ts': { inside: [{ caller: 'src/agent/loop.ts', via: ['tool.run'], imports: false }] },
+  'src/agent/loop.ts': { inside: [
+    { caller: 'src/services/agentSession.ts', via: ['run.run', 'child.run'], imports: true },
+    { caller: 'src/benchmark/runner.ts', via: ['run.run'], imports: true }
+  ] },
+  // The run hands the safety check to the command checks only from inside its own methods.
+  'src/agent/safetyModel.ts': { inside: [{ caller: 'src/agent/loop.ts', via: ['this.options.safety'], imports: false }] },
   'src/services/chatParticipant.ts': { self: true },
   'src/services/cyberAssembly.ts': { self: true },
   'src/services/cyberHandoff.ts': { self: true },
@@ -205,49 +215,150 @@ const REQUEST_SITES: Readonly<Record<string, Placement>> = {
   'src/services/generationService.ts': { dormant: true }
 };
 
-const WRAPS = /\bwithSessionRoute\(/;
-
 function importsModule(source: string, from: string, target: string): boolean {
   const relative = path.posix.relative(path.posix.dirname(from), target).replace(/\.ts$/, '');
   const spec = relative.startsWith('.') ? relative : `./${relative}`;
   return new RegExp(String.raw`from\s+'${spec.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}'`).test(source);
 }
 
+function parsed(file: string, text: string): ts.SourceFile {
+  return ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+}
+
+/** Every node of the tree that `pick` accepts. */
+function nodesOf<T extends ts.Node>(root: ts.Node, pick: (node: ts.Node) => node is T): T[] {
+  const out: T[] = [];
+  const visit = (node: ts.Node): void => {
+    if (pick(node)) out.push(node);
+    ts.forEachChild(node, visit);
+  };
+  visit(root);
+  return out;
+}
+
+/** The calls of a model request method: `<anything>.streamCompletion(`, `.completeOnce(` and the rest. */
+function requestCalls(source: ts.SourceFile): ts.CallExpression[] {
+  return nodesOf(source, (node): node is ts.CallExpression => ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression) && REQUEST_METHODS.includes(node.expression.name.text));
+}
+
+/** The places an entry is reached: a call whose callee is written `via`, or (for a member such as `this.options.safety`) a read of it. */
+function entrySites(source: ts.SourceFile, via: string): ts.Node[] {
+  return nodesOf(source, (node): node is ts.Node => (ts.isCallExpression(node) && node.expression.getText(source) === via)
+    || (ts.isPropertyAccessExpression(node) && node.getText(source) === via && !(ts.isCallExpression(node.parent) && node.parent.expression === node)));
+}
+
+function isWithSessionRoute(node: ts.Node): node is ts.CallExpression {
+  return ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === 'withSessionRoute';
+}
+
+function isFunctionLike(node: ts.Node): boolean {
+  return ts.isArrowFunction(node) || ts.isFunctionExpression(node);
+}
+
+/** True when every use of a local name, other than where it is declared, is the work handed to withSessionRoute (`withSessionRoute(route, prepare)`). */
+function onlyHandedToWithSessionRoute(source: ts.SourceFile, declaration: ts.VariableDeclaration): boolean {
+  if (!ts.isIdentifier(declaration.name)) return false;
+  const name = declaration.name.text;
+  const uses = nodesOf(source, (node): node is ts.Identifier => ts.isIdentifier(node) && node.text === name && node !== declaration.name);
+  return uses.length > 0 && uses.every((use) => isWithSessionRoute(use.parent) && use.parent.arguments.indexOf(use as ts.Expression) >= 1);
+}
+
+/**
+ * Whether a node runs only inside a session route, by the shape of the code around it:
+ * (a) it is inside the work given to withSessionRoute (any argument after the route);
+ * (b) it is inside a function kept in a local name whose every use is the work given to withSessionRoute;
+ * (c) it is inside a hook of `new AgentRun({ ... })` (beforeTurn and the rest), which the run calls only from run(), whose own call is checked;
+ * (d) it is inside a method of the file's class whose every `this.<method>(` call is itself covered;
+ * (e) in loop.ts only, it is inside a method of AgentRun other than the constructor: those run only from run().
+ */
+function wrappedIn(source: ts.SourceFile, node: ts.Node, agentRunMethods: boolean, seen: ReadonlySet<string> = new Set()): boolean {
+  let child: ts.Node = node;
+  let parent: ts.Node | undefined = node.parent;
+  while (parent !== undefined) {
+    if (isWithSessionRoute(parent) && parent.arguments.indexOf(child as ts.Expression) >= 1) return true;
+    if (isFunctionLike(child)) {
+      if (ts.isVariableDeclaration(parent) && parent.initializer === child && onlyHandedToWithSessionRoute(source, parent)) return true;
+      if (ts.isPropertyAssignment(parent) && ts.isObjectLiteralExpression(parent.parent) && ts.isNewExpression(parent.parent.parent)
+        && parent.parent.parent.expression.getText(source) === 'AgentRun') return true;
+    }
+    if (ts.isMethodDeclaration(child) && ts.isClassDeclaration(parent)) {
+      if (agentRunMethods && parent.name?.text === 'AgentRun') return true;
+      const name = child.name.getText(source);
+      if (seen.has(name)) return false;
+      const calls = nodesOf(source, (each): each is ts.CallExpression => ts.isCallExpression(each) && each.expression.getText(source) === `this.${name}`);
+      const next = new Set([...seen, name]);
+      return calls.length > 0 && calls.every((call) => wrappedIn(source, call, agentRunMethods, next));
+    }
+    child = parent;
+    parent = parent.parent;
+  }
+  return false;
+}
+
+function lineOf(source: ts.SourceFile, node: ts.Node): number {
+  return source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1;
+}
+
 /** What breaks the rule that every model request runs inside a session route. Empty when it holds. */
 function siteViolations(sources: ReadonlyMap<string, string>, sites: Readonly<Record<string, Placement>>): string[] {
   const out: string[] = [];
-  for (const [file, text] of sources) {
-    if (file === CLIENT_FILE || !REQUEST_CALL.test(text)) continue;
+  const trees = new Map<string, ts.SourceFile>();
+  const tree = (file: string): ts.SourceFile => {
+    let found = trees.get(file);
+    if (found === undefined) { found = parsed(file, sources.get(file) ?? ''); trees.set(file, found); }
+    return found;
+  };
+  for (const file of sources.keys()) {
+    if (file === CLIENT_FILE || requestCalls(tree(file)).length === 0) continue;
     if (!Object.prototype.hasOwnProperty.call(sites, file)) out.push(`${file} calls a model request method and is not on the list of request sites`);
   }
   for (const [file, placement] of Object.entries(sites)) {
     const text = sources.get(file);
-    if (text === undefined || !REQUEST_CALL.test(text)) { out.push(`${file} is listed but makes no model request (remove it)`); continue; }
-    if ('self' in placement && !WRAPS.test(text)) out.push(`${file} makes model requests and never calls withSessionRoute`);
+    if (text === undefined || requestCalls(tree(file)).length === 0) { out.push(`${file} is listed but makes no model request (remove it)`); continue; }
+    if ('self' in placement) {
+      for (const call of requestCalls(tree(file))) if (!wrappedIn(tree(file), call, false)) out.push(`${file}:${lineOf(tree(file), call)} makes a model request outside withSessionRoute`);
+    }
     if ('inside' in placement) {
-      for (const caller of placement.inside) {
-        const callerText = sources.get(caller) ?? '';
-        if (!WRAPS.test(callerText)) out.push(`${file} runs inside ${caller}, which never calls withSessionRoute`);
-        if (!importsModule(callerText, caller, file)) out.push(`${caller} does not import ${file}`);
+      for (const entry of placement.inside) {
+        const caller = tree(entry.caller);
+        if (entry.imports && !importsModule(sources.get(entry.caller) ?? '', entry.caller, file)) out.push(`${entry.caller} does not import ${file}`);
+        for (const via of entry.via) {
+          const sitesOf = entrySites(caller, via);
+          if (sitesOf.length === 0) out.push(`${entry.caller} never reaches ${via} (update the list)`);
+          for (const site of sitesOf) {
+            if (!wrappedIn(caller, site, entry.caller === 'src/agent/loop.ts')) out.push(`${entry.caller}:${lineOf(caller, site)} reaches ${via} (${file}) outside withSessionRoute`);
+          }
+        }
       }
     }
   }
   return out;
 }
 
-test('CLAS-06: every file that makes a model request runs it inside a session route, and a planted violation is reported', () => {
+test('CLAS-06: every model request call site runs inside a session route, read from the syntax tree, and planted unwrapped calls are reported', () => {
   const sources = productionSources();
   assert.ok(sources.size > 200, 'the scan read all of src');
   assert.deepEqual(siteViolations(sources, REQUEST_SITES), []);
-  // Planted: a new file that calls the client, a listed self site that stops wrapping, and a caller that stops wrapping.
   const planted = new Map(sources);
+  const with_ = (file: string, extra: string): void => { planted.set(file, `${sources.get(file) ?? ''}\n${extra}\n`); };
+  // A new file that calls the client.
   planted.set('src/services/newFeature.ts', "export async function go(client) { return client.completeOnce('m', [], { maxTokens: 1 }); }");
-  planted.set('src/services/teamStudioPanel.ts', (sources.get('src/services/teamStudioPanel.ts') ?? '').replace(/withSessionRoute\(/g, 'somethingElse('));
-  planted.set('src/benchmark/runner.ts', (sources.get('src/benchmark/runner.ts') ?? '').replace(/withSessionRoute\(/g, 'somethingElse('));
+  // A run started outside any route, in a file that wraps other calls (the old text scan passed this).
+  with_('src/services/agentSession.ts', 'export function planted(run: { run(): unknown }) { return run.run(); }');
+  // Attachments read outside the route, beside the wrapped read.
+  with_('src/services/chat.ts', 'export function plantedRead() { return prepareAttachments([], {} as never); }');
+  // A self site whose work is also called directly, so the name is not only handed to withSessionRoute.
+  planted.set('src/services/teamStudioPanel.ts', (sources.get('src/services/teamStudioPanel.ts') ?? '').replace('return withSessionRoute(', 'void send(); return withSessionRoute('));
+  // A request in a self site written outside the wrap.
+  with_('src/services/cyberHandoff.ts', "export function plantedRole(client: { completeOnce(m: string, x: never[], o: { maxTokens: number }): unknown }) { return client.completeOnce('m', [], { maxTokens: 1 }); }");
   const found = siteViolations(planted, REQUEST_SITES);
-  assert.ok(found.some((line) => line.startsWith('src/services/newFeature.ts calls a model request method')), found.join('\n'));
-  assert.ok(found.some((line) => line.startsWith('src/services/teamStudioPanel.ts makes model requests and never calls')), found.join('\n'));
-  assert.ok(found.some((line) => line === 'src/agent/loop.ts runs inside src/benchmark/runner.ts, which never calls withSessionRoute'), found.join('\n'));
+  const has = (pattern: RegExp): boolean => found.some((line) => pattern.test(line));
+  assert.ok(has(/^src\/services\/newFeature\.ts calls a model request method/), found.join('\n'));
+  assert.ok(has(/^src\/services\/agentSession\.ts:\d+ reaches run\.run \(src\/agent\/loop\.ts\) outside withSessionRoute/), found.join('\n'));
+  assert.ok(has(/^src\/services\/chat\.ts:\d+ reaches prepareAttachments \(src\/agent\/attachments\.ts\) outside withSessionRoute/), found.join('\n'));
+  assert.ok(has(/^src\/services\/teamStudioPanel\.ts:\d+ makes a model request outside withSessionRoute/), found.join('\n'));
+  assert.ok(has(/^src\/services\/cyberHandoff\.ts:\d+ makes a model request outside withSessionRoute/), found.join('\n'));
+  assert.equal(found.length, 5, found.join('\n'));
 });
 
 /** The modules a module imports at run time (type-only imports are erased), resolved to repository paths. */
@@ -323,7 +434,7 @@ function clientViolations(sources: ReadonlyMap<string, string>): string[] {
   const out: string[] = [];
   for (const [file, text] of sources) {
     if (file === CLIENT_FILE) continue;
-    const unrouted = clientConstructions(text).filter((args) => !/\broute\s*:/.test(args)).length;
+    const unrouted = clientConstructions(withoutComments(text)).filter((args) => !/\broute\s*:/.test(args)).length;
     const allowed = ROUTELESS_CLIENTS[file] ?? 0;
     if (unrouted !== allowed) out.push(`${file}: ${unrouted} client(s) built without a route, ${allowed} named`);
   }
@@ -477,7 +588,7 @@ test('the short record writes nothing twice, has exactly its pinned fields, and 
   const hash = 'a'.repeat(64);
   const facts = { clientRoute: 'near' as const, host: NEAR, nearEndpoint: true, model: { id: model, privacyBoundary: 'cloud' }, attestationFailed: false };
   const decision = { allowed: true, tier: 'any-cloud' as const, rule: 'route.any-cloud' as const };
-  const context = { mark: [], defaultLabel: org('Public'), bundleHash: hash };
+  const context = { mark: [], defaultLabel: org('Public'), bundleHash: hash, routing: DEFAULT_ROUTING };
   const actors: ActorRef[] = [
     { kind: 'agent', deviceFingerprint: 'f'.repeat(64), sessionId: 'conv-mvxrqmdo-f6c69e9e', agentId: 'main-run-1793536426359-a48b19', agentLabel: 'agent' },
     { kind: 'sub-agent', deviceFingerprint: 'f'.repeat(64), sessionId: 'conv-mvxrqmdo-f6c69e9e', agentId: 'gsd-planner-mvxrqmdo-1a2b3c', agentLabel: 'gsd-planner' },
@@ -751,4 +862,78 @@ test('OFFL-01: with fetch, net, dns, http and https stubbed to throw, route deci
     for (const undo of restore.reverse()) undo();
   }
   assert.deepEqual(calls, []);
+});
+
+// ---- PR 4a review round 1 ----
+
+test('one list of content paths: billing is the same set, every POST the client writes is a content path or a named non-content one, and any other request but a GET is route checked', async () => {
+  assert.equal(BILLABLE_PATHS, CONTENT_PATHS, 'the same set, never a copy that could drift');
+  const source = parsed(CLIENT_FILE, readFileSync(path.join(REPO, CLIENT_FILE), 'utf8'));
+  const requests = nodesOf(source, (node): node is ts.CallExpression => ts.isCallExpression(node) && node.expression.getText(source) === 'this.request');
+  let posts = 0;
+  for (const call of requests) {
+    const [target, init] = call.arguments;
+    const method = init !== undefined && ts.isObjectLiteralExpression(init)
+      ? init.properties.find((property): property is ts.PropertyAssignment => ts.isPropertyAssignment(property) && property.name.getText(source) === 'method')?.initializer.getText(source)
+      : undefined;
+    if (method === "'GET'") continue;
+    posts += 1;
+    assert.ok(target !== undefined && ts.isStringLiteral(target), `${call.getText(source).slice(0, 80)}: a request that is not a GET names its path as a literal`);
+    assert.ok(CONTENT_PATHS.has(target.text) || NON_CONTENT_POST_PATHS.has(target.text), `${target.text} is neither a content path nor a named non-content one`);
+  }
+  assert.ok(posts >= 8, `${posts} requests that are not GETs`);
+  assert.equal(needsRouteCheck('/chat/completions', 'POST'), true);
+  assert.equal(needsRouteCheck('/responses', 'POST'), true, 'a path nobody listed is checked, never sent unchecked');
+  assert.equal(needsRouteCheck('/responses', 'put'), true);
+  assert.equal(needsRouteCheck('/check_api_key', 'POST'), false);
+  assert.equal(needsRouteCheck('/billing/costs?x=1', 'POST'), false);
+  assert.equal(needsRouteCheck('/models', 'GET'), false);
+  assert.equal(needsRouteCheck('/models', undefined), false);
+  // Behaviour: a POST to a path nobody listed is refused like a content request; the key check is not checked.
+  const near = await nearClient();
+  const raw = near.client as unknown as { request(target: string, init: RequestInit, overrides: object): Promise<Response> };
+  await assert.rejects(() => withSessionRoute(routeAt([org('Restricted')]), () => raw.request('/responses', { method: 'POST', body: '{}' }, { model: 'tee-model' })), RouteRefusedError);
+  assert.equal(near.content.length, 0);
+  await withSessionRoute(routeAt([org('Restricted')]), () => raw.request('/check_api_key', { method: 'POST' }, {}));
+  assert.deepEqual(near.content, ['POST /v1/check_api_key']);
+});
+
+/** The test policy with one routing level changed, or with a routing table that is not one. */
+function routeWithRouting(mark: Mark, records: DecisionRecord[], routing: unknown): SessionRoute {
+  const state = testBundleState();
+  if (state.state !== 'valid') throw new Error('unreachable');
+  const changed = { ...state, bundle: { ...state.bundle, routing: routing as typeof state.bundle.routing } };
+  return recordingRoute(mark, records, { bundleState: () => changed });
+}
+
+test('a refused request always records the label that decided it: the default label when nothing raised the mark, otherwise the mark\'s deciding label', async () => {
+  const records: DecisionRecord[] = [];
+  const near = await nearClient();
+  // A policy whose default label (org Public) is local-only: refused at the default label, with an empty mark.
+  const strict = { ...DEFAULT_ROUTING, levels: { ...DEFAULT_ROUTING.levels, 'org/Public': 'local-only' } };
+  await assert.rejects(() => withSessionRoute(routeWithRouting([], records, strict), () => ask(near.client, 'tee-model')), RouteRefusedError);
+  await assert.rejects(() => withSessionRoute(recordingRoute([org('Internal'), org('Restricted')], records), () => ask(near.client, 'tee-model')), RouteRefusedError);
+  const [atDefault, raised] = records as [DecisionRecord, DecisionRecord];
+  assert.deepEqual(atDefault.unmapped.nearAi.label, org('Public'));
+  assert.deepEqual(atDefault.metadata.data_classifications?.map((entry) => entry.confidentiality), ['org/Public']);
+  assert.equal(atDefault.unmapped.nearAi.mark, undefined, 'the mark is the default, so it is not written');
+  assert.deepEqual(raised.unmapped.nearAi.label, org('Restricted'), 'the label whose tier decided');
+  assert.deepEqual(raised.metadata.data_classifications?.map((entry) => entry.confidentiality), ['org/Restricted', 'org/Internal'], 'each level once');
+  for (const record of records) assert.equal(validateDecisionRecord(record).ok, true);
+});
+
+test('a routing table that throws is refused with a fixed rule and a plain sentence, recorded, and nothing is sent', async () => {
+  const records: DecisionRecord[] = [];
+  const near = await nearClient();
+  await assert.rejects(
+    () => withSessionRoute(routeWithRouting([], records, { levels: null, handling: null, compartments: null, localHosts: null }), () => ask(near.client, 'cloud-model')),
+    (error: unknown) => error instanceof RouteRefusedError && error.rule === 'route.deny' && error.message === ROUTE_CHECK_FAILED_TEXT
+  );
+  assert.equal(near.content.length, 0);
+  assert.equal(records.length, 1);
+  assert.equal(records[0]?.authorizations[0]?.policy.name, 'route.deny');
+  assert.equal(records[0]?.status_detail, ROUTE_CHECK_FAILED_TEXT);
+  assert.equal(records[0]?.unmapped.nearAi.label, undefined, 'no label decided it');
+  assert.equal(validateDecisionRecord(records[0]).ok, true);
+  assert.match(ROUTE_CHECK_FAILED_TEXT, /^Nothing was sent\. /);
 });

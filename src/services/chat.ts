@@ -54,7 +54,7 @@ import { editorWriter, type MementoLike, stateHomeFor } from './stateHome';
 import { ensureMigrated } from './stateMigration';
 import { autoResumeChoice, autoResumeNotice, cutOffNotice, HEARTBEAT_MS, ownEditorMarkers, resumePrompt, RunMarker, RunMarkers, shouldAutoResume } from './runMarkers';
 import type { GateHost } from '../gate/host';
-import { sessionRouteFrom, withSessionRoute } from '../gate/sessionMark';
+import { defaultSessionRoute, sessionRouteFrom, withSessionRoute } from '../gate/sessionMark';
 import type { RouteAttestation, SessionRoute } from '../gate/sessionMark';
 import { WaitingNotices } from './waitingNotices';
 import { latestOnly, PROJECT_TEAM_WATCH_PATHS, projectHasTeam, SETUP_NUDGE_DISMISSED_KEY, shouldShowSetupNudge } from './setupSteps';
@@ -1100,10 +1100,10 @@ function attachmentTeeBlock(staged: StagedAttachment[], modelInfo: ModelInfo | u
   return forwarded ? `TEE-only mode is on, and ${forwarded}, which would read your attachment, does not run in NEAR's TEE.` : undefined;
 }
 
-/** CLAS-06: a person sent these files, so their reads are routed (and recorded) as the person's, with the chat's attestation state. None without a gate host. */
-async function attachmentRoute(options: { root: string; conversationId: string; gateHost?: Pick<GateHost, 'runtimeFor'>; attestation?: RouteAttestation }): Promise<SessionRoute | undefined> {
+/** CLAS-06: a person sent these files, so their reads are routed (and recorded) as the person's, with the chat's attestation state. The default route without a gate host. */
+async function attachmentRoute(options: { root: string; conversationId: string; gateHost?: Pick<GateHost, 'runtimeFor'>; attestation?: RouteAttestation }): Promise<SessionRoute> {
   const runtime = await options.gateHost?.runtimeFor({ root: options.root, actor: { kind: 'person', sessionId: options.conversationId }, presence: 'person', context: 'interactive' });
-  return runtime ? sessionRouteFrom(runtime, options.attestation ? { attestation: options.attestation } : {}) : undefined;
+  return runtime ? sessionRouteFrom(runtime, options.attestation ? { attestation: options.attestation } : {}) : defaultSessionRoute();
 }
 
 /**
@@ -1123,7 +1123,8 @@ async function readAttachments(staged: StagedAttachment[], options: { client: Ne
     if (known?.key === key) { parts.push(known.prepared); continue; }
     const prepare = () => prepareAttachments([item], { client: options.client, model: options.model, models: options.models, visionModel: agentModels.visionModel, transcriptionModel: agentModels.transcriptionModel, question: options.question });
     route ??= await attachmentRoute(options);
-    const read = await withSpendTag({ kind: 'attachment', runId: options.runId, conversationId: options.conversationId }, () => (route ? withSessionRoute(route, prepare) : prepare()));
+    const itemRoute = route;
+    const read = await withSpendTag({ kind: 'attachment', runId: options.runId, conversationId: options.conversationId }, () => withSessionRoute(itemRoute, prepare));
     preparedReads.set(item, { key, prepared: read });
     parts.push(read);
   }

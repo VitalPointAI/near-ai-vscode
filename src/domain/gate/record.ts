@@ -234,8 +234,9 @@ export function buildDecisionRecord(input: DecisionRecordInput): DecisionRecord 
   const detail = detailFor(input);
   const disposition = input.clearanceFailure === true && input.outcome === 'denied' ? CLEARANCE_DISPOSITION : outcome.disposition_id;
   const allowed = outcome.action_id === 1;
-  const classifications = [...(input.label === undefined ? [] : [input.label]), ...(input.mark ?? [])]
-    .map((label) => ({ confidentiality: `${label.scale}/${label.level}`, confidentiality_id: 99, category_id: 99 }));
+  // One entry per distinct level: the label and the mark often name the same one (a refusal names the label of its mark that decided it).
+  const classifications = [...new Set([...(input.label === undefined ? [] : [input.label]), ...(input.mark ?? [])].map((label) => `${label.scale}/${label.level}`))]
+    .map((confidentiality) => ({ confidentiality, confidentiality_id: 99, category_id: 99 }));
   const record: DecisionRecord = {
     metadata: {
       version: OCSF_VERSION,

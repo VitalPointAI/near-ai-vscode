@@ -317,8 +317,10 @@ is what that file and the records beside it do in this version.
   project. A routine record holds the time, who asked, the model and its
   provider, the routing tier, the rule that allowed it and the policy's hash,
   each once; a refused request's record also holds the plain reason and the
-  label that decided it. A record of a model request names never the content,
-  the endpoint's address or a file path.
+  label that decided it, which is the policy's default label when nothing
+  raised the label. A request whose route cannot be worked out is refused with
+  a fixed reason and no label. A record of a model request names never the
+  content, the endpoint's address or a file path.
 - **What this version does not use yet.** The file also holds scales and
   clearances. This version stores and shows them and does not use them yet.
 - **Your clearance is your own word.** Until verified credentials arrive, your clearance comes from your own policy file, which your own device key signs, so it is self-declared. It is not an enforced clearance boundary.

@@ -331,6 +331,9 @@ test('SECURITY.md says every model request is checked against the routing tiers 
     'rolls over the same way, is never synced and is never put in your project',
     'A routine record holds the time, who asked, the model and its provider, the routing tier, the rule that allowed it and the policy\'s hash',
     'never the content, the endpoint\'s address or a file path',
+    // PR 4a review round 1: a refusal always names the label that decided it, the default label included; a route that cannot be worked out names none.
+    'a refused request\'s record also holds the plain reason and the label that decided it, which is the policy\'s default label when nothing raised the label',
+    'A request whose route cannot be worked out is refused with a fixed reason and no label',
     'The file also holds scales and clearances. This version stores and shows them and does not use them yet.'
   ]) assert.ok(words.includes(phrase), phrase);
   assert.equal(MODEL_REQUESTS_DIR, 'model-requests');

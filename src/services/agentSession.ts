@@ -6,7 +6,7 @@ import * as path from 'node:path';
 import { RunCheckpoints } from '../agent/checkpoints';
 import { compactConversation, contextAction, contextStatus, DEFAULT_COMPACT_AT_TOKENS, DEFAULT_CONTEXT_WINDOW, DEFAULT_THRESHOLDS, estimateTokens, trimOldToolResults } from '../agent/context';
 import type { GateHost } from '../gate/host';
-import { currentSessionRoute, sessionRouteFrom, withSessionRoute } from '../gate/sessionMark';
+import { currentSessionRoute, defaultSessionRoute, sessionRouteFrom, withSessionRoute } from '../gate/sessionMark';
 import type { RouteAttestation } from '../gate/sessionMark';
 import { approveFloorCallLate, endFloorApprovals, recordLateApproval } from '../agent/gateAdapter';
 import { AgentEvent, AgentRun, AgentRunError, ApprovalReply, ApprovalRequest, AWAITING_APPROVAL_PREFIX, DEFAULT_MAX_TURNS, RunInput, RunOutcome, RunResult } from '../agent/loop';
@@ -507,9 +507,9 @@ export class AgentConversation {
       try {
         // Every NEAR request the run makes (sub-agents, safety checks, summaries included) is tagged with it.
         // CLAS-06: and every one of them is routed by the run's session route, decided at the client before anything is sent and recorded in the run's log.
-        // With no gate host (a test) the requests are decided with the default route.
-        const runRoute = gate ? sessionRouteFrom(gate, { attestation: this.routeAttestation }) : undefined;
-        result = await withSpendTag({ kind: 'main', runId, conversationId: this.conversationId, agentId: mainId }, () => (runRoute ? withSessionRoute(runRoute, () => run.run(this.messages, abort.signal)) : run.run(this.messages, abort.signal)));
+        // With no gate host (a test) the run is wrapped in the default route, so the call is wrapped either way (PR 4a review).
+        const runRoute = gate ? sessionRouteFrom(gate, { attestation: this.routeAttestation }) : defaultSessionRoute();
+        result = await withSpendTag({ kind: 'main', runId, conversationId: this.conversationId, agentId: mainId }, () => withSessionRoute(runRoute, () => run.run(this.messages, abort.signal)));
       } catch (error) {
         this.activity?.agentEnded(mainId, 'failed', error instanceof Error ? error.message : String(error));
         await this.recordRunSplit(request, mainId, extraUsage);
@@ -1125,9 +1125,9 @@ export class AgentConversation {
             // The sub-agent's own route names it in its records, and shares the parent's mark and attestation state, so a helper is routed as its lead is
             // (research 9.1); outside a parent route (a test) it starts from the chat's own state.
             const parentRoute = currentSessionRoute();
-            const childRoute = childGate ? sessionRouteFrom(childGate, { ...(parentRoute ? { markOf: parentRoute.markOf } : {}), attestation: parentRoute?.attestation ?? this.routeAttestation }) : undefined;
+            const childRoute = childGate ? sessionRouteFrom(childGate, { ...(parentRoute ? { markOf: parentRoute.markOf } : {}), attestation: parentRoute?.attestation ?? this.routeAttestation }) : parentRoute ?? defaultSessionRoute();
             const childMessages: AgentMessage[] = [{ role: 'system', content: system }, { role: 'user', content: spawn.prompt }];
-            const result = await withSpendTag({ kind: 'sub-agent', agentId: agent.id }, () => (childRoute ? withSessionRoute(childRoute, () => child.run(childMessages, agent.abort.signal)) : child.run(childMessages, agent.abort.signal)));
+            const result = await withSpendTag({ kind: 'sub-agent', agentId: agent.id }, () => withSessionRoute(childRoute, () => child.run(childMessages, agent.abort.signal)));
             this.activity?.agentEnded(agent.id, result.outcome);
             await this.persistAgent(request, agent.id);
             const total = sumUsage(usage);

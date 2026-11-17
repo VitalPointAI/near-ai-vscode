@@ -16,7 +16,7 @@ import {
 } from './cyberAssembly';
 import { isEmergencyStopped } from './emergencyStop';
 import type { GateRuntime } from '../domain/gate/decide';
-import { sessionRouteFrom, withSessionRoute } from '../gate/sessionMark';
+import { defaultSessionRoute, sessionRouteFrom, withSessionRoute } from '../gate/sessionMark';
 
 // The panel's host-side wiring: the install executor, the extension-side assembly (the real client
 // and the global emergency stop), and the Run starter. Everything that can run without VS Code lives
@@ -75,7 +75,7 @@ export function cyberAssembly(context: {
     const client = options.client;
     if (!client) return '';
     const send = () => client.completeOnce(requested, messages as never, { maxTokens: 4_000, ...(signal ? { signal } : {}) });
-    const reply = await (options.gate ? withSessionRoute(sessionRouteFrom(options.gate), send) : send());
+    const reply = await withSessionRoute(options.gate ? sessionRouteFrom(options.gate) : defaultSessionRoute(), send);
     return reply.text;
   };
   const version = String(context.extension?.packageJSON?.version ?? '0.0.0');

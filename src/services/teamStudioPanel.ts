@@ -10,7 +10,7 @@ import { slugify, TeamLibrary } from '../agent/teams';
 import { AuthService } from './auth';
 import { unattendedRuntimeFor } from '../gate/host';
 import type { GateHost } from '../gate/host';
-import { sessionRouteFrom, withSessionRoute } from '../gate/sessionMark';
+import { defaultSessionRoute, sessionRouteFrom, withSessionRoute } from '../gate/sessionMark';
 import { attachTeamStudio, optimiseTarget, StudioTarget, teamStudioHtml, versionLabel } from './teamStudioPage';
 import { ChatPrefill, gatherDirectoryInput } from './toolsPage';
 import { comparisonStoreFor } from '../benchmark/store';
@@ -93,7 +93,7 @@ async function teamAiDeps(auth: AuthService, gateHost?: GateHost): Promise<TeamA
     complete: async (model, messages, options) => {
       const send = () => clientFor(active, model).client.completeOnce(model, messages, options);
       const runtime = await gateHost?.runtimeFor({ root, actor: { kind: 'person', sessionId: 'team-studio' }, presence: 'person', context: 'interactive' });
-      return runtime ? withSessionRoute(sessionRouteFrom(runtime), send) : send();
+      return withSessionRoute(runtime ? sessionRouteFrom(runtime) : defaultSessionRoute(), send);
     }
   };
 }

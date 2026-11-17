@@ -17,7 +17,7 @@ import { PARTICIPANT_ID, recordParticipantTurn, recordSeed, resolveParticipantTh
 import { editorWriter } from './stateHome';
 import { threadStoreFor } from './threadStore';
 import type { GateHost } from '../gate/host';
-import { sessionRouteFrom, withSessionRoute } from '../gate/sessionMark';
+import { defaultSessionRoute, sessionRouteFrom, withSessionRoute } from '../gate/sessionMark';
 
 export { PARTICIPANT_ID };
 
@@ -136,7 +136,7 @@ async function answerWithNearAi(auth: AuthService, root: string | undefined, pro
     // CLAS-06: a person asked here, so the request is routed (and recorded) as the person's, in the project's log. With no gate host it is decided with the
     // default route.
     const runtime = await gateHost?.runtimeFor({ root, actor: { kind: 'person', sessionId: session.sessionId }, presence: 'person', context: 'interactive' });
-    const sessionRoute = runtime ? sessionRouteFrom(runtime) : undefined;
+    const sessionRoute = runtime ? sessionRouteFrom(runtime) : defaultSessionRoute();
     const send = async (): Promise<void> => {
       for await (const event of route.client.streamChatEvents(model, [...history, { role: 'user', content: prompt }], abort.signal)) {
         if (event.type === 'text') response.answer(event.text);
@@ -165,7 +165,7 @@ async function answerWithNearAi(auth: AuthService, root: string | undefined, pro
       }
     };
     // Recorded in the key's spend ledger as a chat view request.
-    await withSpendTag({ kind: 'participant', conversationId: session.sessionId }, () => (sessionRoute ? withSessionRoute(sessionRoute, send) : send()));
+    await withSpendTag({ kind: 'participant', conversationId: session.sessionId }, () => withSessionRoute(sessionRoute, send));
   } catch (error) {
     if (!abort.signal.aborted) {
       failed = true;

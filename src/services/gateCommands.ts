@@ -187,7 +187,9 @@ export function registerGate(context: GateActivationContext, options: RegisterGa
   };
   registerPolicySurfaces(context, host, tell, clock, options.statusTimers);
   // CLAS-06: a model request made outside every session route is still decided by this host's policy and recorded in the open project's log.
-  setDefaultSessionRoute(host.sessionRouteWithoutContext());
+  // It is cleared at deactivation (the context's subscriptions are disposed then), and only while it is still this host's (PR 4a review).
+  const clearDefaultRoute = setDefaultSessionRoute(host.sessionRouteWithoutContext());
+  try { context.subscriptions?.push({ dispose: clearDefaultRoute }); } catch { /* an editor that cannot take it still replaces the route at the next activation */ }
   // A closed folder's decision log is let go when the window's folders change, so a long session does not keep one per folder it ever opened.
   try {
     const subscription = vscode.workspace.onDidChangeWorkspaceFolders(() => {

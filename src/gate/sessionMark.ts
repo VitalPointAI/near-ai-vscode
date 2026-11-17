@@ -15,7 +15,7 @@ import { labelKey } from '../domain/gate/labels';
 import type { Label } from '../domain/gate/labels';
 import { buildDecisionRecord } from '../domain/gate/record';
 import type { DecisionRecord } from '../domain/gate/record';
-import { routingWhileFailedClosed } from '../domain/gate/routing';
+import { routingWhileFailedClosed, tierForLabel } from '../domain/gate/routing';
 import type { RouteDecision, RouteFacts, RoutingTable } from '../domain/gate/routing';
 import type { InferTier } from '../domain/gate/vocabulary';
 
@@ -99,9 +99,14 @@ const NO_HOST_ROUTE: SessionRoute = Object.freeze({
 
 let fallback: SessionRoute | undefined;
 
-/** Sets (or, with undefined, clears) the route a request outside every route is decided with. The gate's activation sets the host's. */
-export function setDefaultSessionRoute(route: SessionRoute | undefined): void {
+/**
+ * Sets (or, with undefined, clears) the route a request outside every route is decided with. The gate's activation sets the host's and disposes the returned
+ * function at deactivation (PR 4a review). The function clears the route only while it is still the one set, so a host that was replaced never clears its
+ * replacement's.
+ */
+export function setDefaultSessionRoute(route: SessionRoute | undefined): () => void {
   fallback = route;
+  return () => { if (fallback === route) fallback = undefined; };
 }
 
 /** The route a request outside every route is decided with: the one the activation set, or a failed-closed route that records nowhere. */
@@ -150,7 +155,30 @@ function isDefaultMark(mark: Mark, defaultLabel: Label): boolean {
  * the default label, no label. The connection state
  * is kept only when the tier read it (attested-cloud). Never a host, a URL, a path or a fingerprint: the facts' host and binding fingerprint are not read here.
  */
-export function routeRecordFor(route: SessionRoute, decision: RouteDecision, facts: RouteFacts, request: RouteRequest, context: { readonly mark: Mark; readonly defaultLabel: Label; readonly bundleHash: string }): DecisionRecord {
+/**
+ * The label that decided a refusal: the policy's default label when the mark is empty (nothing raised it), otherwise the first label of the mark whose own
+ * tier is the decision's tier. Undefined when none can be named, which only a routing table that cannot be read leaves.
+ */
+function decidingLabel(mark: Mark, routing: RoutingTable, defaultLabel: Label, tier: RouteDecision['tier']): Label | undefined {
+  if (mark.length === 0) return defaultLabel;
+  try {
+    return mark.find((label) => tierForLabel(label, routing) === tier);
+  } catch {
+    return undefined;
+  }
+}
+
+export interface RouteRecordContext {
+  readonly mark: Mark;
+  readonly defaultLabel: Label;
+  readonly bundleHash: string;
+  /** The routing the decision used, to name the label that decided a refusal. */
+  readonly routing: RoutingTable;
+  /** True when the route could not be worked out at all: refused with a fixed reason, and no label decided it. */
+  readonly checkFailed?: boolean;
+}
+
+export function routeRecordFor(route: SessionRoute, decision: RouteDecision, facts: RouteFacts, request: RouteRequest, context: RouteRecordContext): DecisionRecord {
   const recordId = (route.newRecordId ?? randomUUID)();
   const provider = facts.clientRoute === 'local' ? 'local' : facts.clientRoute === 'near' ? 'near-ai' : 'unknown';
   const model = recordedModelName(request.model);
@@ -158,6 +186,8 @@ export function routeRecordFor(route: SessionRoute, decision: RouteDecision, fac
   const asked: InferTier = decision.tier === 'deny' ? 'local-only' : decision.tier;
   const routine = decision.allowed && ROUTINE_RULES.has(decision.rule);
   const marked = !isDefaultMark(context.mark, context.defaultLabel);
+  // A refusal always names the label that decided it (PR 4a review), the default label included; a route that could not be worked out names none.
+  const decided = decision.allowed || context.checkFailed === true ? undefined : decidingLabel(context.mark, context.routing, context.defaultLabel, decision.tier);
   return buildDecisionRecord({
     recordId,
     // The log numbers each line as it writes it; this is replaced there.
@@ -177,6 +207,7 @@ export function routeRecordFor(route: SessionRoute, decision: RouteDecision, fac
     ...(decision.reason === undefined || routine ? {} : { reason: decision.reason }),
     bundleHash: context.bundleHash,
     ...(routine || decision.tier === asked ? {} : { tier: decision.tier }),
+    ...(decided === undefined ? {} : { label: decided }),
     ...(marked ? { mark: context.mark } : {}),
     ...(decision.tier === 'attested-cloud' ? { connection: facts.binding?.state ?? 'unknown' } : {})
   });
