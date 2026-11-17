@@ -341,6 +341,16 @@ function dashboardTeam(team: LibraryTeam): DashboardTeam {
   };
 }
 
+/** The dashboard's sort orders. */
+export const DASHBOARD_SORTS = ['used', 'recent', 'rating', 'name'] as const;
+export type DashboardSort = typeof DASHBOARD_SORTS[number];
+
+/** A kept dashboard view read back: exactly a known sort and a yes or no, or nothing. */
+export function dashboardView(value: unknown): { sort: DashboardSort; attention: boolean } | undefined {
+  if (!isPlain(value) || !exactKeys(value, ['sort', 'attention']) || !(DASHBOARD_SORTS as readonly unknown[]).includes(value.sort) || typeof value.attention !== 'boolean') return undefined;
+  return { sort: value.sort as DashboardSort, attention: value.attention };
+}
+
 // ---- Messages from the page: strictly validated; anything else is ignored. ----
 
 const TEAM_ID = /^(?:project|user:[a-z0-9][a-z0-9-]{0,60}|archived:[a-z0-9][a-z0-9-]{0,60})$/;
@@ -359,6 +369,8 @@ export type StudioMessage =
   | { type: 'watch-live'; id?: string }
   /** The person's own rating of a team, 1 to 5 stars; 0 clears it. */
   | { type: 'rate'; id: string; rating: number }
+  /** How the person last sorted and filtered the dashboard, kept so the tab opens that way again. */
+  | { type: 'view'; sort: DashboardSort; attention: boolean }
   /** Cancel or "All teams" in the guided builder with unsaved changes: the host asks Discard changes / Save draft. */
   | { type: 'leave-wizard'; wizard: SavedWizard }
   /** "All teams" in the editor with unsaved changes: the host asks Discard changes / Save. */
@@ -456,6 +468,11 @@ export function parseStudioMessage(value: unknown): StudioMessage | undefined {
       if (!exactKeys(message, ['type'], ['id'])) return undefined;
       if (message.id === undefined) return { type: 'watch-live' };
       return typeof message.id === 'string' && ICON_TEAM_ID.test(message.id) ? { type: 'watch-live', id: message.id } : undefined;
+    case 'view': {
+      if (!exactKeys(message, ['type', 'sort', 'attention'])) return undefined;
+      const view = dashboardView({ sort: message.sort, attention: message.attention });
+      return view ? { type: 'view', ...view } : undefined;
+    }
     case 'rate':
       return exactKeys(message, ['type', 'id', 'rating']) && typeof message.id === 'string' && ICON_TEAM_ID.test(message.id) && Number.isInteger(message.rating) && (message.rating as number) >= 0 && (message.rating as number) <= 5
         ? { type: 'rate', id: message.id, rating: message.rating as number } : undefined;
@@ -613,6 +630,8 @@ export interface TeamStudioDeps {
   onDidChangeRuns?(listener: () => void): { dispose(): void };
   /** The last role test of each team, as Optimise all teams kept it (scores only, keyed by a hash of the team file's path). */
   roleTests?: { get(): unknown };
+  /** The dashboard's sort and filter, kept for the person in this extension's storage on this computer. */
+  view?: { get(): unknown; set(value: { sort: DashboardSort; attention: boolean }): Promise<void> };
   confirm(message: string, action: string): Promise<boolean>;
   ask(prompt: string, value: string): Promise<string | undefined>;
   /** Where to save a team's share file (`<team>.near-team.json`); undefined when the person cancelled. */
@@ -742,7 +761,8 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
     // The builder's draft is already the resumable draft: say once that it was kept. An open
     // team's changes stay kept until the user reopens or discards them.
     if (kept?.kind === 'wizard' || (kept?.kind === 'editor' && !library.teams.some((team) => team.id === kept.id))) await deps.kept?.set(undefined);
-    post({ type: 'state', library: pageLibrary(library), dashboard: await dashboardOf(), context, picker: teamPicker(context!.startingPoints, library.teams), ...(saved ? { savedDraft: saved } : {}), ...(kept?.kind === 'wizard' && saved ? { kept: { kind: 'wizard', text: KEPT_WIZARD_TEXT } } : kept?.kind === 'editor' && library.teams.some((team) => team.id === kept.id) ? { kept: { ...kept, text: `Your unsaved changes to "${kept.name || 'the team'}" were kept as a draft.` } } : {}) });
+    const view = dashboardView(deps.view?.get());
+    post({ type: 'state', library: pageLibrary(library), dashboard: await dashboardOf(), ...(view ? { view } : {}), context, picker: teamPicker(context!.startingPoints, library.teams), ...(saved ? { savedDraft: saved } : {}), ...(kept?.kind === 'wizard' && saved ? { kept: { kind: 'wizard', text: KEPT_WIZARD_TEXT } } : kept?.kind === 'editor' && library.teams.some((team) => team.id === kept.id) ? { kept: { ...kept, text: `Your unsaved changes to "${kept.name || 'the team'}" were kept as a draft.` } } : {}) });
   };
   const refreshLibrary = async () => {
     if (!input) return;
@@ -1345,6 +1365,7 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
         await (run ? deps.watchLive?.(run) : deps.watchLive?.());
         return;
       }
+      case 'view': await deps.view?.set({ sort: message.sort, attention: message.attention }); return;
       case 'rate': {
         const file = fileFor(message.id);
         const team = teamFor(message.id);

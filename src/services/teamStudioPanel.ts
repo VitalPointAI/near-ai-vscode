@@ -36,10 +36,12 @@ const DRAFT_KEY = 'nearAi.teamStudio.draft';
 /** Unsaved work kept when the tab was closed (VS Code cannot ask before a webview panel closes). */
 const KEPT_KEY = 'nearAi.teamStudio.kept';
 /**
- * The last role test of each team (the dashboard's health): scores only, keyed by a hash of the team file's path, at most 200. This window's own storage on
- * this computer: VS Code syncs a key of globalState only when told to, and this one is not.
+ * The last role test of each team (the dashboard's health): scores only, keyed by a hash of the team file's path, at most 200. This extension's own storage
+ * on this computer: VS Code syncs a key of globalState only when told to, and this one is not.
  */
 const ROLE_TESTS_KEY = 'nearAi.teamStudio.roleTests';
+/** How the person last sorted and filtered the dashboard, so the tab opens that way again (this computer only, like the role tests). */
+const VIEW_KEY = 'nearAi.teamStudio.view';
 let current: { panel: vscode.WebviewPanel; startWizard(target: StudioTarget): Promise<void> } | undefined;
 
 /**
@@ -166,6 +168,7 @@ export async function openTeamStudio(context: vscode.ExtensionContext, auth: Aut
       return { dispose: () => subscription.dispose() };
     },
     roleTests: { get: () => context.globalState.get(ROLE_TESTS_KEY) },
+    view: { get: () => context.globalState.get(VIEW_KEY), set: (value) => Promise.resolve(context.globalState.update(VIEW_KEY, value)) },
     confirm: async (message, action) => (await vscode.window.showWarningMessage(message, { modal: true }, action)) === action,
     choose: async (message, ...actions) => vscode.window.showWarningMessage(message, { modal: true }, ...actions),
     // The tested model for each role, from the comparisons this machine has run, so a saved team is checked against evidence rather than defaults.
@@ -208,7 +211,8 @@ export async function openTeamStudio(context: vscode.ExtensionContext, auth: Aut
         ...(gateHost ? { gateFor: (run: { member: string; model: string }) => unattendedRuntimeFor(gateHost, root, `team-roles-${teamName}`, `${run.member} on ${run.model}`) } : {})
       });
       // Kept for the dashboard's health before anything else happens to the team, whatever the tests found (scores only; no model or task text).
-      if (outcomes.length) await context.globalState.update(ROLE_TESTS_KEY, withRoleTest(parseRoleTests(context.globalState.get(ROLE_TESTS_KEY)), roleTestKey(file), roleTestSummary(outcomes, plan.members, new Date().toISOString()))).then(undefined, () => undefined);
+      // A run cancelled part-way is not the team's last role test: it would count the members it never reached as failing.
+      if (outcomes.length && !options.signal?.aborted) await context.globalState.update(ROLE_TESTS_KEY, withRoleTest(parseRoleTests(context.globalState.get(ROLE_TESTS_KEY)), roleTestKey(file), roleTestSummary(outcomes, plan.members, new Date().toISOString()))).then(undefined, () => undefined);
       const picks = bestOf(outcomes);
       if (!picks.length) return { applied: 0, text: options.signal?.aborted ? `${teamName}: cancelled, so its models were left alone.` : 'Every role test failed, so the team is unchanged. Run Compare Models to see why.' };
       // Which picks really matched a member, collected where the write happens, so the notice below cannot claim a write that did not happen.

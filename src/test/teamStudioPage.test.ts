@@ -3760,6 +3760,15 @@ test('page: sort by Most used, Recently run, Rating or Name, filter to Needs att
   attention.checked = true; attention.fire('change');
   assert.deepEqual(page.cardIds(), ['user:market', 'user:old']);
   assert.deepEqual(page.webviewState.value, { dashSort: 'name', dashAttention: true });
+  // And the host keeps it for the person, so it survives the tab being closed.
+  assert.deepEqual(page.posts.filter((message) => message.type === 'view').at(-1), { type: 'view', sort: 'name', attention: true });
+  for (const message of page.posts) assert.ok(parseStudioMessage(message), JSON.stringify(message));
+  // A new tab (no webview state) opens with what the host kept.
+  const reopened = await runPage();
+  const fixture = dashFixture();
+  reopened.dispatch({ type: 'state', context: context(), library: fixture.library, dashboard: fixture.dashboard, view: { sort: 'rating', attention: false } });
+  assert.equal(reopened.doc.getElementById('dash-sort')!.value, 'rating');
+  assert.deepEqual(reopened.doc.body.all().filter((node) => node.tagName === 'li' && node.dataset.id).map((node) => node.dataset.id), ['project', 'user:old', 'user:fresh', 'user:market', 'user:web']);
   // Opened again with what was kept: the same order and filter.
   const again = await dashboardPage({ state: page.webviewState.value });
   assert.equal(again.doc.getElementById('dash-sort')!.value, 'name');

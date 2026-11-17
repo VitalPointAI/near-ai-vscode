@@ -647,7 +647,8 @@ until it runs out aren't shown.
   buttons: Tab to it, then the arrow keys) and saved as one `rating:` line in
   the team file, with a version kept; sharing or importing a team leaves it
   out. Sort by **Most used**, **Recently run**, **Rating** or **Name**, or
-  show only the teams that need attention; the choice is remembered. Running
+  show only the teams that need attention; Team Studio remembers your choice
+  on this computer. Running
   now and the stats change as a team run starts or ends. With a project open
   and no project team, the first card says so and **Set up** starts one.
 - **Building a team.** **New team** in Team Studio (and **Set Up Project

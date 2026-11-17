@@ -465,12 +465,22 @@
   const PRIVACY_WORD = { tee: 'Private', local: 'Private', forwarded: 'Cloud', unknown: 'Privacy unknown' };
   const FIRST_TEAM_LABEL = 'New team: create your first team';
   const NO_HISTORY = 'Runs and spend are kept per project. Open a project folder to see them.';
-  /** The sort and the Needs attention filter, kept with the webview's own state (per person, on this computer), so the tab opens as it was left. */
+  /** The sort and the Needs attention filter: the webview's own state when this tab is reloaded, else what the host kept for the person (applyView). */
   const viewState = (() => { try { const value = vscode.getState ? vscode.getState() : null; return value && typeof value === 'object' ? value : {}; } catch (error) { return {}; } })();
   let dash = null;
   let dashSort = SORTS.some(([value]) => value === viewState.dashSort) ? viewState.dashSort : 'used';
   let dashAttention = viewState.dashAttention === true;
-  function rememberView() { try { if (vscode.setState) vscode.setState({ dashSort, dashAttention }); } catch (error) { /* the view still works, it is only not remembered */ } }
+  /** Kept twice: in the webview's state (for a reload of this tab) and by the host for the person (for the next time the tab opens). */
+  function rememberView() {
+    try { if (vscode.setState) vscode.setState({ dashSort, dashAttention }); } catch (error) { /* the view still works, it is only not remembered here */ }
+    vscode.postMessage({ type: 'view', sort: dashSort, attention: dashAttention });
+  }
+  /** The view the host kept for the person, when it is one of the known choices. */
+  function applyView(view) {
+    if (!view || typeof view !== 'object') return;
+    if (SORTS.some(([value]) => value === view.sort)) dashSort = view.sort;
+    if (typeof view.attention === 'boolean') dashAttention = view.attention;
+  }
   /** Ratings chosen on a card and not yet confirmed by the host (team id -> stars, 0 for none), shown at once; sent once the choice settles. */
   const pendingRating = new Map();
   const ratingQueue = new Map();
@@ -2161,6 +2171,7 @@
     switch (message.type) {
       case 'state':
         ctx = message.context; lib = message.library; savedDraft = message.savedDraft || null; picker = message.picker || null; dash = message.dashboard || null;
+        applyView(message.view);
         render();
         if (work) requestReview();
         if (message.kept) showKept(message.kept);
