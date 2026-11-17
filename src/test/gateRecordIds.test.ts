@@ -8,6 +8,8 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { POLICY_EVENT_IDS } from '../domain/gate/bundle';
+import { LABEL_EVENT_IDS } from '../domain/gate/labels';
+import { ROUTE_EVENT_IDS } from '../domain/gate/routing';
 import { GATE_RULE_IDS, RECORD_RULE_IDS, RECORD_UNKNOWN_RULE } from '../domain/gate/decide';
 import { buildDecisionRecord, unknownRuleListeners, validateDecisionRecord } from '../domain/gate/record';
 import type { DecisionRecordInput } from '../domain/gate/record';
@@ -28,9 +30,9 @@ function input(rule: string, extra: Partial<DecisionRecordInput> = {}): Decision
 }
 
 test('the policy events are a list of their own, kept apart from the gate\'s rules, and both are known to a record', () => {
-  assert.deepEqual([...POLICY_EVENT_IDS], ['policy.created', 'policy.renewed', 'policy.reset', 'policy.load']);
+  assert.deepEqual([...POLICY_EVENT_IDS], ['policy.created', 'policy.renewed', 'policy.reset', 'policy.load', 'policy.edit']);
   for (const event of POLICY_EVENT_IDS) assert.ok(!GATE_RULE_IDS.includes(event), `${event} is an event, not a rule`);
-  assert.deepEqual([...RECORD_RULE_IDS].sort(), [...GATE_RULE_IDS, ...POLICY_EVENT_IDS, RECORD_UNKNOWN_RULE].sort());
+  assert.deepEqual([...RECORD_RULE_IDS].sort(), [...GATE_RULE_IDS, ...POLICY_EVENT_IDS, ...LABEL_EVENT_IDS, ...ROUTE_EVENT_IDS, RECORD_UNKNOWN_RULE].sort());
   assert.equal(RECORD_UNKNOWN_RULE, 'record.unknown-rule');
   assert.equal(new Set(RECORD_RULE_IDS).size, RECORD_RULE_IDS.length, 'no id is on both lists');
 });
@@ -43,7 +45,7 @@ test('a record is valid with every known rule, and refused with a rule or an ope
   assert.equal(invented.ok, false);
   assert.equal(invented.ok ? '' : invented.path, 'authorizations[0].policy.name');
   const record = buildDecisionRecord(input('policy.load'));
-  for (const operation of [...CAPABILITY_VERBS, ...POLICY_EVENT_IDS]) {
+  for (const operation of [...CAPABILITY_VERBS, ...POLICY_EVENT_IDS, ...LABEL_EVENT_IDS]) {
     assert.equal(validateDecisionRecord({ ...record, api: { ...record.api, operation } }).ok, true, operation);
   }
   const strange = validateDecisionRecord({ ...record, api: { ...record.api, operation: 'policy.invented' } });
@@ -185,7 +187,7 @@ export function recordIdLiterals(text: string): Array<{ kind: 'rule' | 'operatio
 }
 
 test('every literal that becomes a record rule or operation, in any namespace, is a known id', () => {
-  const operations = new Set<string>([...CAPABILITY_VERBS, ...POLICY_EVENT_IDS]);
+  const operations = new Set<string>([...CAPABILITY_VERBS, ...POLICY_EVENT_IDS, ...LABEL_EVENT_IDS]);
   const wrong: string[] = [];
   let seen = 0;
   // The files that write records or decide what they say: the gate's own (src/gate, src/domain/gate, the adapter) and every file that imports from them.

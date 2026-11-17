@@ -6,13 +6,18 @@
 // A request made outside any route is decided with the default route (setDefaultSessionRoute), which the gate's activation sets; with none set, the route is
 // failed closed, which routes the default label exactly as today and keeps anything labelled on this computer (D-53).
 import { AsyncLocalStorage } from 'node:async_hooks';
+import { randomUUID } from 'node:crypto';
 import { SHIPPED_DEFAULT_LABEL, failedClosed } from '../domain/gate/bundle';
 import type { BundleState } from '../domain/gate/bundle';
 import type { ActorRef, DecisionSink, GateRuntime } from '../domain/gate/decide';
 import type { Mark } from '../domain/gate/dominance';
+import { labelKey } from '../domain/gate/labels';
 import type { Label } from '../domain/gate/labels';
+import { buildDecisionRecord } from '../domain/gate/record';
+import type { DecisionRecord } from '../domain/gate/record';
 import { routingWhileFailedClosed } from '../domain/gate/routing';
-import type { RoutingTable } from '../domain/gate/routing';
+import type { RouteDecision, RouteFacts, RoutingTable } from '../domain/gate/routing';
+import type { InferTier } from '../domain/gate/vocabulary';
 
 /** Shared by a chat and every route it builds, so a failed answer check stops attested-cloud for the chat and its helpers alike (plan 25 sets it). */
 export interface RouteAttestation {
@@ -102,4 +107,79 @@ export function setDefaultSessionRoute(route: SessionRoute | undefined): void {
 /** The route a request outside every route is decided with: the one the activation set, or a failed-closed route that records nowhere. */
 export function defaultSessionRoute(): SessionRoute {
   return fallback ?? NO_HOST_ROUTE;
+}
+
+// ---- The record of a model request (GATE-07, D-20, D-52) ----
+
+/** The rules of a routine allowed request, whose record is the short one: no reason, no tier beside the capability's, and no label at the default mark. */
+const ROUTINE_RULES: ReadonlySet<string> = new Set(['route.any-cloud', 'route.default-session']);
+const UNKNOWN_PRODUCT_VERSION = '0.0.0';
+const UNKNOWN_MODEL = 'unknown-model';
+
+/** What the request was, beside the decision and its facts. */
+export interface RouteRequest {
+  /** The model id the request names; absent for a request that names none. */
+  readonly model?: string;
+}
+
+/**
+ * The name a record keeps for a model id: the id itself, except that an id that is a path or an address (a local runtime may name a model by its file) is
+ * kept as its last part, so a record never carries a host, a URL or a folder of this computer (D-52).
+ */
+export function recordedModelName(id: string | undefined): string {
+  const text = (id ?? '').trim();
+  if (text === '') return UNKNOWN_MODEL;
+  const looksLikePlace = text.includes('://') || text.includes('\\') || text.startsWith('/') || text.startsWith('~') || /^[A-Za-z]:/.test(text);
+  if (!looksLikePlace) return text.slice(0, 128);
+  const last = text.split(/[\\/]/).filter((part) => part !== '').pop() ?? '';
+  return (last === '' || last.includes(':') ? UNKNOWN_MODEL : last).slice(0, 128);
+}
+
+/** True when the mark says no more than the policy's default label: empty, or exactly that one label. */
+function isDefaultMark(mark: Mark, defaultLabel: Label): boolean {
+  return mark.length === 0 || (mark.length === 1 && mark[0] !== undefined && labelKey(mark[0]) === labelKey(defaultLabel)
+    && mark[0].compartments.length === 0 && mark[0].releasability.length === 0 && mark[0].handling.length === 0);
+}
+
+/**
+ * The infer record of one model request, built the way a tool call's record is (product version, clock and record id from the route): the capability
+ * `infer` with the tier, provider and model, the model as the resource, the outcome and the rule, the policy's hash. A routine allowed request (route.any-cloud,
+ * or route.default-session outside every route) gets the short record: no reason and, while the mark is the default label, no label. The connection state
+ * is kept only when the tier read it (attested-cloud). Never a host, a URL, a path or a fingerprint: the facts' host and binding fingerprint are not read here.
+ */
+export function routeRecordFor(route: SessionRoute, decision: RouteDecision, facts: RouteFacts, request: RouteRequest, context: { readonly mark: Mark; readonly defaultLabel: Label; readonly bundleHash: string }): DecisionRecord {
+  const recordId = (route.newRecordId ?? randomUUID)();
+  const provider = facts.clientRoute === 'local' ? 'local' : facts.clientRoute === 'near' ? 'near-ai' : 'unknown';
+  const model = recordedModelName(request.model);
+  // `deny` is a decision, not a tier a request can ask for: the capability names the strictest requestable tier, and the record's tier says deny.
+  const asked: InferTier = decision.tier === 'deny' ? 'local-only' : decision.tier;
+  const routine = decision.allowed && ROUTINE_RULES.has(decision.rule);
+  const marked = !isDefaultMark(context.mark, context.defaultLabel);
+  return buildDecisionRecord({
+    recordId,
+    // The log numbers each line as it writes it; this is replaced there.
+    sequence: 0,
+    time: clockOf(route),
+    productVersion: route.productVersion ?? UNKNOWN_PRODUCT_VERSION,
+    actor: route.actor,
+    model: { name: model, provider },
+    callId: `infer-${recordId}`,
+    capability: { verb: 'infer', tier: asked, provider, model },
+    resource: { name: model, type: 'model' },
+    outcome: decision.allowed ? 'allowed' : 'denied',
+    rule: decision.rule,
+    ...(decision.reason === undefined || routine ? {} : { reason: decision.reason }),
+    bundleHash: context.bundleHash,
+    ...(routine || decision.tier === asked ? {} : { tier: decision.tier }),
+    ...(marked ? { mark: context.mark } : {}),
+    ...(decision.tier === 'attested-cloud' ? { connection: facts.binding?.state ?? 'unknown' } : {})
+  });
+}
+
+function clockOf(route: SessionRoute): number {
+  try {
+    const now = route.clock?.();
+    if (typeof now === 'number' && Number.isFinite(now)) return Math.floor(now);
+  } catch { /* the system clock below */ }
+  return Date.now();
 }

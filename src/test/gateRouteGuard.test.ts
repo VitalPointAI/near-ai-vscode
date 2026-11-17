@@ -2,8 +2,13 @@
 // NearAiClient.request, from the session route it runs inside and local facts only, before anything is sent. Every fetch here is a counting stub; nothing
 // reaches the network and no key is read.
 import assert from 'node:assert/strict';
+// `import x = require()` hands back the real module object, which the OFFL-01 stubs can replace; an `import * as` namespace is a read-only copy.
+import dns = require('node:dns');
+import http = require('node:http');
+import https = require('node:https');
+import net = require('node:net');
 import { readFileSync, readdirSync } from 'node:fs';
-import { mkdir, mkdtemp } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -14,10 +19,17 @@ import type { OrganizationProfile } from '../domain/auth';
 import type { Mark } from '../domain/gate/dominance';
 import type { Label } from '../domain/gate/labels';
 import { BINDING_REFUSALS } from '../domain/gate/routing';
-import type { ActorRef } from '../domain/gate/decide';
-import { currentSessionRoute, withSessionRoute } from '../gate/sessionMark';
+import type { ActorRef, DecisionSink } from '../domain/gate/decide';
+import { validateDecisionRecord } from '../domain/gate/record';
+import type { DecisionRecord } from '../domain/gate/record';
+import type { Capability } from '../domain/gate/vocabulary';
+import { GATE_DIR_NAME } from '../gate/bundleStore';
+import { DECISIONS_DIR, DecisionLog, projectLogKey } from '../gate/decisionLog';
+import { GateHost, NO_SESSION_ID } from '../gate/host';
+import { currentSessionRoute, defaultSessionRoute, recordedModelName, setDefaultSessionRoute, withSessionRoute } from '../gate/sessionMark';
 import type { SessionRoute } from '../gate/sessionMark';
-import { NearAiClient, RouteRefusedError } from '../services/nearAiClient';
+import { NearAiClient, NearAiError, RouteRefusedError } from '../services/nearAiClient';
+import type { SpendSink } from '../services/spendAccount';
 import type { AgentMessage, CompletionEvent, NearAiClientOptions } from '../services/nearAiClient';
 import type { AgentTurnRequest, GsdContext } from '../services/agentSession';
 import { TranscriptStore } from '../services/transcripts';
@@ -372,4 +384,258 @@ test('runAgentInFolder (comparison, benchmark and role-suite runs) requests insi
   await runAgentInFolder(client, 'm', root, 'do it', { maxTurns: 2, rules: DEFAULT_RULES });
   assert.ok(routes[1], 'a run with no gate host still runs inside a route');
   assert.equal(routes[1]?.bundleState().state, 'failed-closed');
+});
+
+// ---- Task 3: every model request leaves a record (GATE-07, D-52), and the edges of CLAS-06 and OFFL-01 ----
+
+/** A route over the test policy whose records land in `records`. */
+function recordingRoute(mark: Mark, records: DecisionRecord[], extra: Partial<SessionRoute> = {}): SessionRoute {
+  return routeAt(mark, { sink: { record: (record) => { records.push(record); } }, clock: () => 1_794_830_400_000, productVersion: '0.4.30-test', ...extra });
+}
+
+function inferOf(record: DecisionRecord): Extract<Capability, { verb: 'infer' }> {
+  const capability = record.unmapped.nearAi.capability;
+  assert.equal(capability.verb, 'infer');
+  return capability as Extract<Capability, { verb: 'infer' }>;
+}
+
+test('each content request inside a session writes one infer record; a refused one writes a denied record with the sentence', async () => {
+  const records: DecisionRecord[] = [];
+  const near = await nearClient();
+  await withSessionRoute(recordingRoute([], records), () => ask(near.client, 'cloud-model'));
+  await assert.rejects(() => withSessionRoute(recordingRoute([org('Restricted')], records), () => ask(near.client, 'tee-model')), RouteRefusedError);
+  const local = await localClient();
+  await withSessionRoute(recordingRoute([org('Restricted')], records), () => ask(local.client, 'local-model'));
+  assert.equal(records.length, 3);
+  for (const record of records) assert.equal(validateDecisionRecord(record).ok, true, JSON.stringify(record));
+  const [open, refused, onLocal] = records as [DecisionRecord, DecisionRecord, DecisionRecord];
+  assert.deepEqual(inferOf(open), { verb: 'infer', tier: 'any-cloud', provider: 'near-ai', model: 'cloud-model' });
+  assert.deepEqual(open.resources, [{ name: 'cloud-model', type: 'model' }]);
+  assert.equal(open.api.operation, 'infer');
+  assert.equal(open.authorizations[0]?.policy.name, 'route.any-cloud');
+  assert.equal(open.action_id, 1);
+  assert.equal(open.ai_agent?.ai_model?.name, 'cloud-model', 'an agent\'s record names the model');
+  assert.equal(open.ai_agent?.ai_model?.ai_provider, 'near-ai');
+  assert.equal(refused.authorizations[0]?.policy.name, 'route.no-local-model');
+  assert.equal(refused.action_id, 2);
+  assert.match(refused.status_detail ?? '', /^Nothing was sent\./);
+  assert.deepEqual(inferOf(refused), { verb: 'infer', tier: 'local-only', provider: 'near-ai', model: 'tee-model' });
+  assert.deepEqual(refused.unmapped.nearAi.mark, [org('Restricted')], 'a mark above the default label is kept');
+  assert.equal(onLocal.authorizations[0]?.policy.name, 'route.local-only');
+  assert.equal(inferOf(onLocal).provider, 'local');
+});
+
+test('D-52: a routine allowed request writes the short record, smaller than a full one, and the sizes are what the log grows by', async (t) => {
+  const records: DecisionRecord[] = [];
+  const near = await nearClient();
+  await withSessionRoute(recordingRoute([], records), () => ask(near.client, 'cloud-model'));
+  await withSessionRoute(recordingRoute([org('Public')], records), () => ask(near.client, 'cloud-model'));
+  await assert.rejects(() => withSessionRoute(recordingRoute([org('Internal')], records), () => ask(near.client, 'tee-model')), RouteRefusedError);
+  const [short, publicMark, full] = records as [DecisionRecord, DecisionRecord, DecisionRecord];
+  for (const record of [short, publicMark]) {
+    assert.equal(record.status_detail, undefined, 'no reason');
+    assert.equal(record.metadata.data_classifications, undefined, 'no label');
+    assert.equal(record.unmapped.nearAi.mark, undefined, 'no mark at the default label');
+    assert.equal(record.unmapped.nearAi.tier, undefined, 'the capability already names the tier');
+    assert.equal(record.unmapped.nearAi.connection, undefined, 'any-cloud does not read the connection');
+  }
+  // The full record: the reason, the mark, and the connection state attested-cloud read.
+  assert.equal(full.unmapped.nearAi.connection, 'unknown');
+  assert.ok(full.status_detail?.startsWith(BINDING_REFUSALS.unknown));
+  assert.deepEqual(full.metadata.data_classifications?.map((entry) => entry.confidentiality), ['org/Internal']);
+  // Measured as the log stores them: one JSON line each, with the sequence the log writes.
+  const storage = await mkdtemp(path.join(tmpdir(), 'near-ai-route-size-'));
+  const problems: string[] = [];
+  const log = new DecisionLog({ globalStorageDir: storage, projectKey: projectLogKey(path.join(storage, 'project')), onWriteFailure: (message) => problems.push(message) });
+  await log.append(short);
+  await log.append(full);
+  const dir = path.join(storage, GATE_DIR_NAME, DECISIONS_DIR);
+  const [file] = await readdir(dir);
+  const [shortLine, fullLine] = (await readFile(path.join(dir, file as string), 'utf8')).split('\n');
+  const shortBytes = Buffer.byteLength(`${shortLine ?? ''}\n`);
+  const fullBytes = Buffer.byteLength(`${fullLine ?? ''}\n`);
+  assert.deepEqual(problems, []);
+  assert.ok(shortBytes > 0 && shortBytes < fullBytes, `short ${shortBytes} bytes, full ${fullBytes} bytes`);
+  t.diagnostic(`infer record bytes: short ${shortBytes}, full ${fullBytes}`);
+});
+
+test('no infer record carries a host, a URL or a path: a LAN runtime, the NEAR endpoint, and a model named by its file', async () => {
+  const records: DecisionRecord[] = [];
+  const lanFake = fakeFetch({ local: ['/home/someone/models/llama-3-8b.gguf', 'qwen3:8b'] });
+  const lan = new NearAiClient({ baseUrl: 'https://192.168.1.5:11434/v1', apiKey: '', fetchFn: lanFake.fetchFn, route: 'local' });
+  await lan.listLocalModels();
+  await withSessionRoute(recordingRoute([], records), () => ask(lan, '/home/someone/models/llama-3-8b.gguf'));
+  await withSessionRoute(recordingRoute([], records), () => ask(lan, 'qwen3:8b'));
+  // Restricted on a host the policy does not name as local: refused, and the record still names no host.
+  await assert.rejects(() => withSessionRoute(recordingRoute([org('Restricted')], records), () => ask(lan, 'qwen3:8b')), (error: unknown) => error instanceof RouteRefusedError && error.rule === 'route.local-host-not-local');
+  const near = await nearClient();
+  await withSessionRoute(recordingRoute([], records), () => ask(near.client, 'cloud-model'));
+  await assert.rejects(() => withSessionRoute(recordingRoute([org('Internal')], records), () => ask(near.client, 'tee-model')), RouteRefusedError);
+  assert.equal(records.length, 5);
+  for (const record of records) {
+    const text = JSON.stringify(record);
+    for (const forbidden of ['192.168.1.5', 'cloud-api.near.ai', '://', '/home/someone', 'someone']) assert.ok(!text.includes(forbidden), `${forbidden} in ${text}`);
+  }
+  assert.equal(inferOf(records[0]!).model, 'llama-3-8b.gguf');
+  assert.equal(inferOf(records[1]!).model, 'qwen3:8b');
+  assert.equal(recordedModelName('C:\\models\\x.gguf'), 'x.gguf');
+  assert.equal(recordedModelName('https://models.example.org/v1/m'), 'm');
+  assert.equal(recordedModelName('~/m.gguf'), 'm.gguf');
+  assert.equal(recordedModelName('z-ai/glm-5.3'), 'z-ai/glm-5.3', 'a provider/model id is a name, not a place');
+  assert.equal(recordedModelName(undefined), 'unknown-model');
+  // Plain http to a host that is not this computer is refused before the route is decided: nothing is sent and nothing is recorded.
+  const plain = new NearAiClient({ baseUrl: 'http://192.168.1.5:11434/v1', apiKey: '', fetchFn: lanFake.fetchFn, route: 'local' });
+  await assert.rejects(() => withSessionRoute(recordingRoute([], records), () => ask(plain, 'qwen3:8b')), (error: unknown) => error instanceof NearAiError && !(error instanceof RouteRefusedError));
+  assert.equal(records.length, 5);
+});
+
+test('a content request outside any session is decided with the default route and recorded under route.default-session, or its refusing rule', async () => {
+  const records: DecisionRecord[] = [];
+  const near = await nearClient();
+  try {
+    setDefaultSessionRoute(recordingRoute([], records));
+    await ask(near.client, 'cloud-model');
+    setDefaultSessionRoute(recordingRoute([org('Restricted')], records));
+    await assert.rejects(() => ask(near.client, 'tee-model'), (error: unknown) => error instanceof RouteRefusedError && error.rule === 'route.no-local-model');
+  } finally {
+    setDefaultSessionRoute(undefined);
+  }
+  assert.deepEqual(records.map((record) => record.authorizations[0]?.policy.name), ['route.default-session', 'route.no-local-model']);
+  assert.equal(records[0]?.status_detail, undefined, 'routine: the short record');
+  // With nothing set the default route is failed closed: the default label goes where it always did, labelled content does not leave, nothing is recorded.
+  assert.equal(defaultSessionRoute().bundleState().state, 'failed-closed');
+  assert.equal(defaultSessionRoute().sink, undefined);
+  assert.equal((await ask(near.client, 'cloud-model')).text, 'ok');
+});
+
+test('the gate host\'s route for requests outside every session writes to the open project\'s log, as a person with no session', async () => {
+  const storage = await mkdtemp(path.join(tmpdir(), 'near-ai-route-host-'));
+  const project = path.join(storage, 'project');
+  const host = new GateHost({ globalStorageDir: storage, secrets: new MemorySecrets(), productVersion: '0.4.30-test', projectRoot: () => project });
+  await host.start();
+  const near = await nearClient();
+  try {
+    setDefaultSessionRoute(host.sessionRouteWithoutContext());
+    assert.equal((await ask(near.client, 'cloud-model')).text, 'ok');
+  } finally {
+    setDefaultSessionRoute(undefined);
+  }
+  await host.flush();
+  const dir = path.join(storage, GATE_DIR_NAME, DECISIONS_DIR);
+  const lines = (await readFile(path.join(dir, `${projectLogKey(project)}.jsonl`), 'utf8')).trim().split('\n').map((line) => JSON.parse(line) as DecisionRecord);
+  const infer = lines.filter((record) => record.api.operation === 'infer');
+  assert.equal(infer.length, 1);
+  assert.equal(validateDecisionRecord(infer[0]).ok, true);
+  assert.equal(infer[0]?.authorizations[0]?.policy.name, 'route.default-session');
+  assert.equal(infer[0]?.actor.session.uid, NO_SESSION_ID);
+  assert.notEqual(infer[0]?.actor.user.uid, 'device-unknown', 'the device the started policy names');
+  assert.ok(infer[0]?.authorizations[0]?.policy.uid, 'the policy hash');
+});
+
+test('CLAS-06 concurrency: sibling contexts in parallel are each decided by their own mark, and a mark that rises during a retry is seen by the next request', async () => {
+  const records: DecisionRecord[] = [];
+  const near = await nearClient();
+  const lead = recordingRoute([], records, { actor: { ...ACTOR, agentId: 'lead' } });
+  const helper = recordingRoute([org('Restricted')], records, { actor: { ...ACTOR, kind: 'sub-agent', agentId: 'helper' } });
+  const results = await Promise.allSettled([
+    withSessionRoute(lead, async () => { await new Promise((resolve) => setTimeout(resolve, 5)); return ask(near.client, 'cloud-model'); }),
+    withSessionRoute(helper, () => ask(near.client, 'cloud-model')),
+    withSessionRoute(lead, () => ask(near.client, 'cloud-model'))
+  ]);
+  assert.deepEqual(results.map((result) => result.status), ['fulfilled', 'rejected', 'fulfilled']);
+  const byAgent = (id: string) => records.filter((record) => record.ai_agent?.uid === id).map((record) => record.authorizations[0]?.policy.name);
+  assert.deepEqual(byAgent('lead'), ['route.any-cloud', 'route.any-cloud']);
+  assert.deepEqual(byAgent('helper'), ['route.no-local-model']);
+
+  // A request retried once inside request() is decided once and recorded once; the mark raised during its backoff is read by the next request.
+  let mark: Mark = [];
+  const retried: DecisionRecord[] = [];
+  let attempts = 0;
+  const fake = fakeFetch({ cloud: ['cloud-model'] });
+  const flaky = new NearAiClient({ baseUrl: NEAR, apiKey: 'k', route: 'near', retryBaseDelayMs: 0, fetchFn: (async (input: string | URL | Request, init?: RequestInit) => {
+    if ((init?.method ?? 'GET') === 'POST' && attempts++ === 0) { mark = [org('Restricted')]; return new Response('', { status: 502 }); }
+    return fake.fetchFn(input, init);
+  }) as typeof fetch });
+  await flaky.listModels();
+  const route = recordingRoute([], retried, { markOf: () => mark });
+  const sent = await withSessionRoute(route, () => flaky.streamChatEvents('cloud-model', [{ role: 'user', content: 'hi' }]).next());
+  assert.equal(sent.done, false, 'the retried request went through');
+  assert.equal(attempts, 2);
+  assert.deepEqual(retried.map((record) => record.authorizations[0]?.policy.name), ['route.any-cloud']);
+  await assert.rejects(() => withSessionRoute(route, () => ask(flaky, 'cloud-model')), RouteRefusedError);
+  assert.deepEqual(retried.map((record) => record.authorizations[0]?.policy.name), ['route.any-cloud', 'route.no-local-model']);
+});
+
+test('CLAS-06 ordering: a refused request leaves the spend ledger untouched, takes no concurrency slot and is not held by a cooling model', async () => {
+  let limitChecks = 0;
+  let began = 0;
+  const spend: SpendSink = {
+    begin: () => { began += 1; return () => undefined; },
+    limitReached: () => { limitChecks += 1; return undefined; },
+    attach: () => undefined
+  };
+  let cools = true;
+  const fake = fakeFetch({ tee: ['tee-model'] });
+  const client = new NearAiClient({ baseUrl: NEAR, apiKey: 'k', route: 'near', spend, fetchFn: (async (input: string | URL | Request, init?: RequestInit) => {
+    if ((init?.method ?? 'GET') === 'POST' && cools) { cools = false; return new Response('', { status: 429, headers: { 'retry-after': '60' } }); }
+    return fake.fetchFn(input, init);
+  }) as typeof fetch });
+  await client.listModels();
+  // The model is now cooling for a minute after a 429.
+  await assert.rejects(() => withSessionRoute(routeAt([]), () => ask(client, 'tee-model')), (error: unknown) => error instanceof NearAiError && error.status === 429);
+  assert.ok(client.cooldownRemainingMs('tee-model') > 0);
+  const checksBefore = limitChecks;
+  const beganBefore = began;
+  // Refused at once by the route, not held or refused by the cooldown, and the spend check is never reached.
+  await assert.rejects(() => withSessionRoute(routeAt([org('Restricted')]), () => ask(client, 'tee-model')), RouteRefusedError);
+  assert.equal(limitChecks, checksBefore, 'the daily limit was not even checked');
+  assert.equal(began, beganBefore, 'nothing was entered in the ledger');
+  assert.equal(fake.content.length, 0);
+  // A local client with no spend sink is checked too: the route check does not depend on spend tracking.
+  const local = await localClient();
+  await withSessionRoute(routeAt([org('Restricted')]), () => ask(local.client, 'local-model'));
+  const lanLocal = new NearAiClient({ baseUrl: 'https://models.example.org/v1', apiKey: '', route: 'local', fetchFn: fakeFetch({ local: ['m'] }).fetchFn });
+  await lanLocal.listLocalModels();
+  await assert.rejects(() => withSessionRoute(routeAt([org('Restricted')]), () => ask(lanLocal, 'm')), (error: unknown) => error instanceof RouteRefusedError && error.rule === 'route.local-host-not-local');
+});
+
+test('a sink that throws leaves the request\'s outcome unchanged', async () => {
+  const throwing: DecisionSink = { record: () => { throw new Error('disk full'); } };
+  const near = await nearClient();
+  assert.equal((await withSessionRoute(routeAt([], { sink: throwing }), () => ask(near.client, 'cloud-model'))).text, 'ok');
+  await assert.rejects(() => withSessionRoute(routeAt([org('Restricted')], { sink: throwing }), () => ask(near.client, 'tee-model')), RouteRefusedError);
+  const markThrows = routeAt([], { markOf: () => { throw new Error('unreadable'); } });
+  await assert.rejects(() => withSessionRoute(markThrows, () => ask(near.client, 'cloud-model')), (error: unknown) => error instanceof RouteRefusedError && error.rule === 'route.deny');
+});
+
+test('OFFL-01: with fetch, net, dns, http and https stubbed to throw, route decisions complete from local data, including one right after a verifyResponse call', async () => {
+  const calls: string[] = [];
+  const restore: Array<() => void> = [];
+  const stub = (owner: object, key: string, name: string): void => {
+    const original = (owner as Record<string, unknown>)[key];
+    (owner as Record<string, unknown>)[key] = (): never => { calls.push(name); throw new Error(`${name} was called by a route decision`); };
+    restore.push(() => { (owner as Record<string, unknown>)[key] = original; });
+  };
+  const near = await nearClient();
+  const local = await localClient();
+  stub(globalThis, 'fetch', 'fetch');
+  stub(net, 'connect', 'net.connect');
+  stub(net, 'createConnection', 'net.createConnection');
+  stub(dns, 'lookup', 'dns.lookup');
+  stub(dns.promises, 'lookup', 'dns.promises.lookup');
+  stub(http, 'request', 'http.request');
+  stub(https, 'request', 'https.request');
+  try {
+    const records: DecisionRecord[] = [];
+    // The answer check goes through the client's own fetchFn (here, the fake); it finishes, unverified, and the next decision is still local.
+    const verification = await near.client.verifyResponse('tee-model', { chatId: 'chat-1', requestHash: 'a'.repeat(64), responseHash: 'b'.repeat(64) });
+    assert.notEqual(verification.outcome, 'verified');
+    await assert.rejects(() => withSessionRoute(recordingRoute([org('Confidential')], records), () => ask(near.client, 'tee-model')), RouteRefusedError);
+    await withSessionRoute(recordingRoute([], records), () => ask(near.client, 'cloud-model'));
+    await withSessionRoute(recordingRoute([org('Restricted')], records), () => ask(local.client, 'local-model'));
+    assert.equal(records.length, 3);
+  } finally {
+    for (const undo of restore.reverse()) undo();
+  }
+  assert.deepEqual(calls, []);
 });

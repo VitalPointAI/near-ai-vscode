@@ -8,7 +8,8 @@ import type { BundleState, GateContextName } from './bundle';
 import { FLOOR_RULE_ORDER, floorFor } from './floor';
 import type { FloorInput, FloorLocations } from './floor';
 import type { DecisionRecord } from './record';
-import { ROUTE_RULES } from './routing';
+import { LABEL_EVENT_IDS } from './labels';
+import { ROUTE_EVENT_IDS, ROUTE_RULES } from './routing';
 
 /** Whether a person can answer a card right now. A sub-agent of a chat run still has a person, so this is not the same idea as `unattended` (Pitfall 3). */
 export type Presence = 'person' | 'none';
@@ -154,10 +155,12 @@ export const GATE_RULE_IDS: readonly string[] = Object.freeze([
 export const RECORD_UNKNOWN_RULE = 'record.unknown-rule';
 
 /**
- * Every id a decision record may carry as its rule (`authorizations[].policy.name`): the gate's rules, the policy's own events, and RECORD_UNKNOWN_RULE.
- * validateDecisionRecord refuses any other, and the builder and the decision log put an unknown one under RECORD_UNKNOWN_RULE, so none is ever dropped.
+ * Every id a decision record may carry as its rule (`authorizations[].policy.name`): the gate's rules, the policy's own events, the label events, the route
+ * events, and RECORD_UNKNOWN_RULE. validateDecisionRecord refuses any other, and the builder and the decision log put an unknown one under
+ * RECORD_UNKNOWN_RULE, so none is ever dropped. Every event part 4 writes is on a list from 0.4.30 on (D-49), so a later PR rolled back never leaves a record
+ * this version cannot name.
  */
-export const RECORD_RULE_IDS: readonly string[] = Object.freeze([...GATE_RULE_IDS, ...POLICY_EVENT_IDS, RECORD_UNKNOWN_RULE]);
+export const RECORD_RULE_IDS: readonly string[] = Object.freeze([...GATE_RULE_IDS, ...POLICY_EVENT_IDS, ...LABEL_EVENT_IDS, ...ROUTE_EVENT_IDS, RECORD_UNKNOWN_RULE]);
 
 const MODE_ORDER: readonly ActionPolicyMode[] = Object.freeze(['approve-risky', 'mostly-autonomous', 'auto', 'fully-autonomous'] as const);
 const NOBODY_HERE = 'Nobody is here to approve this, and it always needs a person: ';

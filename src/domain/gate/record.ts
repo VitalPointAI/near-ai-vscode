@@ -8,7 +8,9 @@ import { findSecrets } from '../team/secrets';
 import { POLICY_EVENT_IDS } from './bundle';
 import { RECORD_RULE_IDS, RECORD_UNKNOWN_RULE } from './decide';
 import type { ActorRef, GateDecision } from './decide';
+import { LABEL_EVENT_IDS } from './labels';
 import type { Label } from './labels';
+import type { ConnectionBindingState } from './routing';
 import { isRecord, ownValue, refused } from './shape';
 import type { Parsed, Refusal } from './shape';
 import { CAPABILITY_VERBS } from './vocabulary';
@@ -76,6 +78,15 @@ export interface DecisionRecordInput {
   readonly clearanceFailure?: boolean;
   /** The floor rule a shadow floor would have applied. Only 0.4.28, whose floor only reported, wrote it; the floor is enforced now and nothing sets it. Kept so records of that version still read. */
   readonly shadowFloor?: string;
+  /**
+   * The session's whole mark, when it is not the policy's default label (D-52): one `data_classifications` entry and one `unmapped.nearAi.mark` entry per
+   * label, beside the single `label` field. Optional, so the record stays version 1.
+   */
+  readonly mark?: readonly Label[];
+  /** What the answer check after a response found (plan 25). Never a report, a key or a fingerprint. */
+  readonly attestation?: 'verified' | 'failed' | 'unavailable';
+  /** The connection binding state the route read (D-50). Never the host or the fingerprint. */
+  readonly connection?: ConnectionBindingState;
 }
 
 /**
@@ -144,6 +155,9 @@ export interface DecisionRecord {
       readonly shadowFloor?: string;
       /** The rule a writer gave that nobody knows; the record's rule is then RECORD_UNKNOWN_RULE. */
       readonly unknownRule?: string;
+      readonly mark?: readonly Label[];
+      readonly attestation?: 'verified' | 'failed' | 'unavailable';
+      readonly connection?: ConnectionBindingState;
     };
   };
 }
@@ -212,6 +226,8 @@ export function buildDecisionRecord(input: DecisionRecordInput): DecisionRecord 
   const detail = detailFor(input);
   const disposition = input.clearanceFailure === true && input.outcome === 'denied' ? CLEARANCE_DISPOSITION : outcome.disposition_id;
   const allowed = outcome.action_id === 1;
+  const classifications = [...(input.label === undefined ? [] : [input.label]), ...(input.mark ?? [])]
+    .map((label) => ({ confidentiality: `${label.scale}/${label.level}`, confidentiality_id: 99, category_id: 99 }));
   const record: DecisionRecord = {
     metadata: {
       version: OCSF_VERSION,
@@ -219,9 +235,7 @@ export function buildDecisionRecord(input: DecisionRecordInput): DecisionRecord 
       profiles: ['ai_operation'],
       uid: input.recordId,
       sequence: input.sequence,
-      ...(input.label === undefined
-        ? {}
-        : { data_classifications: [{ confidentiality: `${input.label.scale}/${input.label.level}`, confidentiality_id: 99, category_id: 99 }] })
+      ...(classifications.length === 0 ? {} : { data_classifications: classifications })
     },
     time: input.time,
     severity_id: outcome.severity_id,
@@ -262,7 +276,10 @@ export function buildDecisionRecord(input: DecisionRecordInput): DecisionRecord 
         ...(outcome.action_id === 99 ? { outcome: input.outcome } : {}),
         ...(input.label === undefined ? {} : { label: copyLabel(input.label) }),
         ...(input.tier === undefined ? {} : { tier: input.tier }),
-        ...(input.shadowFloor === undefined ? {} : { shadowFloor: input.shadowFloor })
+        ...(input.shadowFloor === undefined ? {} : { shadowFloor: input.shadowFloor }),
+        ...(input.mark === undefined ? {} : { mark: input.mark.map(copyLabel) }),
+        ...(input.attestation === undefined ? {} : { attestation: input.attestation }),
+        ...(input.connection === undefined ? {} : { connection: input.connection })
       }
     }
   };
@@ -301,11 +318,11 @@ function carriesCredentialArgument(value: unknown): boolean {
   return false;
 }
 
-/** What `api.operation` may name: a capability verb, or one of the policy's own events. */
-const RECORD_OPERATIONS: ReadonlySet<string> = new Set<string>([...CAPABILITY_VERBS, ...POLICY_EVENT_IDS]);
+/** What `api.operation` may name: a capability verb, one of the policy's own events, or a label event (D-49). Route events use the operation `infer`. */
+const RECORD_OPERATIONS: ReadonlySet<string> = new Set<string>([...CAPABILITY_VERBS, ...POLICY_EVENT_IDS, ...LABEL_EVENT_IDS]);
 const RECORD_RULES: ReadonlySet<string> = new Set(RECORD_RULE_IDS);
 
-/** Every rule a record carries is one of RECORD_RULE_IDS, and its operation is a verb or a policy event, so no writer can put an id nobody knows on file. */
+/** Every rule a record carries is one of RECORD_RULE_IDS, and its operation is a verb, a policy event or a label event, so no writer can put an id nobody knows on file. */
 function idsKnown(value: Record<string, unknown>): Refusal | undefined {
   const authorizations = value.authorizations;
   if (!Array.isArray(authorizations)) return refused('wrong-type', 'authorizations');

@@ -26,9 +26,9 @@ export type GateContextName = (typeof GATE_CONTEXTS)[number];
 
 /**
  * The policy's own events, written to the decision logs as records of their own (the record's rule and operation): the policy was created, renewed, reset
- * by the person, or loaded at start. They are events, not rules a decision applies, so they are kept apart from GATE_RULE_IDS; RECORD_RULE_IDS joins both.
+ * by the person, loaded at start, or changed through Edit Policy (`policy.edit`, written from plan 21 on and named here first, D-49). They are events, not rules a decision applies, so they are kept apart from GATE_RULE_IDS; RECORD_RULE_IDS joins both.
  */
-export const POLICY_EVENT_IDS = Object.freeze(['policy.created', 'policy.renewed', 'policy.reset', 'policy.load'] as const);
+export const POLICY_EVENT_IDS = Object.freeze(['policy.created', 'policy.renewed', 'policy.reset', 'policy.load', 'policy.edit'] as const);
 export type PolicyEventId = (typeof POLICY_EVENT_IDS)[number];
 
 /** The label of anything nobody labelled, as a fresh install's policy names it: org Public, whose tier is any-cloud, so nothing changes where it goes (D-24). */

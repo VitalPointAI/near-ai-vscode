@@ -3,7 +3,8 @@ import { sha256Hex, verifyResponse, type ResponseEvidence, type VerificationResu
 import { isNearCloudEndpoint, isSecureEndpoint } from '../domain/config';
 import { decideRoute } from '../domain/gate/routing';
 import type { ConnectionBindingFact, RouteDecision, RouteFacts, RouteRule } from '../domain/gate/routing';
-import { currentSessionRoute, defaultSessionRoute, routingOf } from '../gate/sessionMark';
+import type { Mark } from '../domain/gate/dominance';
+import { currentSessionRoute, defaultSessionRoute, routeRecordFor, routingOf } from '../gate/sessionMark';
 import type { SessionRoute } from '../gate/sessionMark';
 import type { ConnectionBindingSource } from './connectionBinding';
 import { redactSecrets } from '../domain/redaction';
@@ -941,7 +942,7 @@ export class NearAiClient {
   private checkRoute(model: string | undefined): ConnectionBindingFact | undefined {
     const inSession = currentSessionRoute();
     const route = inSession ?? defaultSessionRoute();
-    const { routing, defaultLabel } = routingOf(route);
+    const { routing, defaultLabel, bundleHash } = routingOf(route);
     const host = this.options.baseUrl;
     const fact = this.bindingFact(host);
     const info = model === undefined ? undefined : this.models.get(model);
@@ -957,12 +958,20 @@ export class NearAiClient {
       sessionless: inSession === undefined
     };
     let decision: RouteDecision;
+    let mark: Mark = [];
     try {
-      decision = decideRoute(route.markOf(), routing, facts, defaultLabel);
+      mark = route.markOf();
+      decision = decideRoute(mark, routing, facts, defaultLabel);
     } catch {
       // A mark that cannot be read means nothing is known about what the session has read: nothing above the default can be assumed, so it is refused.
+      mark = [];
       decision = decideRoute([], routing, facts);
     }
+    // GATE-07, D-52: every model request leaves one record, allowed or refused, through the route's sink. A record that cannot be built or kept never changes
+    // the request (D-21).
+    try {
+      route.sink?.record(routeRecordFor(route, decision, facts, model === undefined ? {} : { model }, { mark, defaultLabel, bundleHash }));
+    } catch { /* see above */ }
     if (!decision.allowed) throw new RouteRefusedError(decision.rule, decision.reason ?? 'Nothing was sent.');
     return this.options.binding === undefined ? undefined : fact;
   }
