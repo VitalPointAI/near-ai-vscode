@@ -2150,7 +2150,7 @@
         showBanner('Not saved: ' + (message.errors[0] ? message.errors[0].message : 'fix the problems listed under Checks.'), 'error');
         break;
       case 'versions':
-        if (work && work.mode === 'editor' && work.id === message.id) { work.versions = message.versions; if (work.tab === 6) render(); }
+        if (work && work.mode === 'editor' && work.id === message.id) { work.versions = message.versions; if (work.tab === TAB_HISTORY) render(); }
         break;
       case 'version':
         if (work && work.mode === 'editor' && work.id === message.id) { work.versionView = { ref: message.ref, label: message.label, diff: message.diff }; render(); }

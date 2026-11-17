@@ -778,6 +778,16 @@ test('page: the wizard walks five steps, asks the host to check the draft, and s
   for (const message of page.posts) assert.ok(parseStudioMessage(message), JSON.stringify(message));
 });
 
+test('page: a new list of versions redraws History while it is open', async () => {
+  const page = await runPage();
+  page.dispatch({ type: 'state', context: context(), library: { teams: [], archived: [] } });
+  page.dispatch({ type: 'team', id: 'user:web', kind: 'user', file: 'My teams/web.md', command: '/team:web ', draft: draft(), base: 'b'.repeat(64), versions: [{ ref: '2026-10-29T10-00-00-000Z.md', label: '2026-10-29 10:00:00 UTC' }] });
+  page.byLabel('History')!.click();
+  assert.match(page.text(), /2026-10-29 10:00:00 UTC/);
+  page.dispatch({ type: 'versions', id: 'user:web', versions: [{ ref: '2026-11-17T09-00-00-000Z.md', label: '2026-11-17 09:00:00 UTC' }, { ref: '2026-10-29T10-00-00-000Z.md', label: '2026-10-29 10:00:00 UTC' }] });
+  assert.match(page.text(), /2026-11-17 09:00:00 UTC/, 'the open History tab shows the new version');
+});
+
 test('page: the editor tracks unsaved changes, saves with its base, and handles outside edits', async () => {
   const page = await runPage();
   page.dispatch({ type: 'state', context: context(), library: { teams: [], archived: [] } });
