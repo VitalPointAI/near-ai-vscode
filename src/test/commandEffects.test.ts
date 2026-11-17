@@ -108,6 +108,8 @@ const PUBLISH_ROWS: readonly Row[] = [
   row('gh release create v1.0.0', publish('release')), row('gh release upload v1.0.0 app.vsix', publish('release')), row('gh release edit v1.0.0 --draft=false', publish('release')),
   row('gh release delete v1.0.0', publish('release')), row('glab release create v1.0.0', publish('release')),
   row('gh api -X POST repos/acme/app/releases', publish('release')), row('gh api repos/acme/app/releases -f tag_name=v1', publish('release')),
+  // Owner decision after PR #74: merging a pull request and writing through the API publish to the remote.
+  row('gh pr merge 12 --squash', publish('git-remote')), row('gh api -X POST repos/acme/app/issues -f title=x', publish('git-remote')),
   row('vsce publish', publish('registry')), row('ovsx publish app.vsix', publish('registry')), row('twine upload dist/app.whl', publish('registry')),
   row('gem push app.gem', publish('registry')), row('gem yank app -v 1.0.0', publish('registry')),
   ...['vercel --prod', 'netlify deploy', 'firebase deploy', 'wrangler deploy', 'fly deploy', 'flyctl deploy', 'heroku container:release web', 'gh-pages -d dist'].map((tool) => row(tool, publish('deploy'))),
@@ -202,16 +204,16 @@ test('every tag survives every wrapper: npm run, bash -c, sh -c, xargs, a pipe, 
   assert.deepEqual(wrong, []);
 });
 
-test('the D-46 GitHub writes, docker login and logout, scratch and build-output deletes and dry runs carry no tag; their verdicts are as before', () => {
+test('the GitHub writes that stay with the settings layer (D-46), docker login and logout, scratch and build-output deletes and dry runs carry no tag; their verdicts are as before', () => {
   const none = [
-    'gh pr create --fill', 'gh pr merge 12 --squash', 'gh issue comment 3 -b hi', 'gh api -X POST repos/acme/app/issues -f title=x', 'gh release download v1',
+    'gh pr create --fill', 'gh issue comment 3 -b hi', 'gh release download v1',
     'docker login', 'docker logout', 'podman login registry.example.test',
     'rm -rf dist', 'rm -rf node_modules coverage', 'rm -rf /tmp/build-x', 'rm /tmp/helper.py', 'rm notes.txt', 'rm -r',
     'git restore --staged a.ts', 'git clean -n', 'git clean --dry-run', 'git branch -m renamed', 'git branch -u origin/main', 'git checkout -b fix-1', 'git stash',
     'git stash pop', 'git commit -m "x"', 'echo x > notes.txt', 'echo x > .near-ai/scratch/a.txt', 'cat .git/config', 'npm run build'
   ];
   assert.deepEqual(none.filter((command) => classify(command, { packageScripts: { build: 'tsc -p .' } }).effects !== undefined), []);
-  assert.equal(classify('gh pr merge 12 --squash').verdict, 'risky', 'still asks under today\'s settings layer');
+  assert.equal(classify('gh pr create --fill').verdict, 'risky', 'still asks under today\'s settings layer');
   assert.equal(classify('docker login').verdict, 'risky');
 });
 

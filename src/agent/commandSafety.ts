@@ -923,6 +923,97 @@ const GIT_BUILTINS: ReadonlySet<string> = new Set(['init', 'clone', 'worktree', 
   'ls-remote', 'name-rev', 'request-pull', 'diff-tree', 'diff-files', 'diff-index', 'for-each-ref', 'hash-object', 'help', 'version', 'var', 'column', 'interpret-trailers',
   'mailinfo', 'mailsplit', 'patch-id', 'pack-refs', 'repack', 'rerere', 'citool', 'gui', 'instaweb', 'lfs', 'fast-export']);
 
+/** The options of gh and glab that take a value and may sit before the action: the repository. */
+const GITHUB_REPO_OPTIONS: ReadonlySet<string> = new Set(['-R', '--repo']);
+
+/**
+ * The group and action of a gh or glab command (`pr merge`), with the index of the group among `args`. `-R`/`--repo` and their values are skipped wherever
+ * they sit before the action, as are `--help` and `-h`; any other option there, a missing value, or a group or action the shell decides at run time is
+ * reported. Once the group is `api`, its own options are read by githubApiWrites.
+ */
+function githubAction(args: readonly Word[]): { group?: Word; action?: Word; groupAt: number } | { unknown: string } {
+  let group: Word | undefined;
+  let groupAt = -1;
+  for (let index = 0; index < args.length; index += 1) {
+    const word = args[index]!;
+    const text = word.text;
+    if (text === '--') { const next = args[index + 1]; if (group === undefined) { group = next; groupAt = index + 1; continue; } return next === undefined ? { group, groupAt } : next.expansion ? { unknown: 'with an action decided at run time' } : { group, action: next, groupAt }; }
+    if (looksLikeOption(text)) {
+      if (group?.text === 'api') return { group, groupAt };
+      if (text === '--help' || text === '-h') continue;
+      const equals = text.indexOf('=');
+      const option = equals > 0 ? text.slice(0, equals) : text;
+      if (GITHUB_REPO_OPTIONS.has(option)) {
+        if (equals < 0) { if (args[index + 1] === undefined) return { unknown: `${option} without its value` }; index += 1; }
+        continue;
+      }
+      if (/^-R./.test(text)) continue;
+      return { unknown: `with ${text} before its action, an option the rules do not know` };
+    }
+    if (word.expansion) return { unknown: `with a ${group === undefined ? 'command' : 'action'} decided at run time` };
+    if (group === undefined) { group = word; groupAt = index; if (text === 'api') return { group, groupAt }; continue; }
+    return { group, action: word, groupAt };
+  }
+  return group === undefined ? { groupAt } : { group, groupAt };
+}
+
+/** gh and glab api options that take a value, and those that take none. */
+const GITHUB_API_VALUES: ReadonlySet<string> = new Set(['-X', '--method', '-H', '--header', '-f', '--raw-field', '-F', '--field', '--input', '-q', '--jq', '-t', '--template', '--cache', '-p', '--preview', '--hostname', '-R', '--repo']);
+const GITHUB_API_FLAGS: ReadonlySet<string> = new Set(['-i', '--include', '--paginate', '--silent', '--slurp', '--verbose', '--help', '-h']);
+const GITHUB_API_FIELDS: ReadonlySet<string> = new Set(['-f', '--raw-field', '-F', '--field']);
+
+/**
+ * Whether a gh or glab api call writes: a method other than GET or HEAD, or, with no method, a field or a body (they make it a POST). A GraphQL call is a
+ * POST either way; one whose every field is written on the line and whose query has no `mutation` only reads. `releases` when the endpoint is a release.
+ * An option the rules do not know, a missing value, or a method decided at run time is reported.
+ */
+function githubApiWrites(args: readonly Word[]): { writes: boolean; releases: boolean } | { unknown: string } {
+  let method: string | undefined;
+  let body = false;
+  let fromFile = false;
+  let query: string | undefined;
+  const positionals: string[] = [];
+  for (let index = 0; index < args.length; index += 1) {
+    const word = args[index]!;
+    const text = word.text;
+    if (text === '--') { positionals.push(...args.slice(index + 1).map((arg) => arg.text)); break; }
+    if (!looksLikeOption(text)) { positionals.push(text); continue; }
+    if (GITHUB_API_FLAGS.has(text)) continue;
+    const equals = text.indexOf('=');
+    let option = equals > 0 ? text.slice(0, equals) : text;
+    let value: Word | undefined;
+    if (GITHUB_API_VALUES.has(option)) {
+      value = equals > 0 ? { ...word, text: text.slice(equals + 1) } : args[(index += 1)];
+    } else if (/^-[XHfFqtpR]./.test(text) && equals !== 2) {
+      option = text.slice(0, 2);
+      value = { ...word, text: text.slice(2) };
+    } else {
+      return { unknown: `with ${text}, an option the rules do not know` };
+    }
+    if (value === undefined) return { unknown: `${option} without its value` };
+    if (option === '-X' || option === '--method') {
+      if (value.expansion) return { unknown: 'with a method decided at run time' };
+      method = value.text.toUpperCase();
+      continue;
+    }
+    if (option === '--input') { body = true; fromFile = true; continue; }
+    if (GITHUB_API_FIELDS.has(option)) {
+      body = true;
+      const field = /^([^=]*)=(.*)$/s.exec(value.text);
+      // `-F name=@file` reads the value from a file the line does not show; a value the shell decides at run time is not shown either.
+      if (value.expansion || field === null || (option !== '-f' && option !== '--raw-field' && field[2]!.startsWith('@'))) fromFile = true;
+      else if (field[1] === 'query') query = field[2];
+    }
+  }
+  const endpoint = positionals[0] ?? '';
+  const releases = /(?:^|\/)releases(?:[/?]|$)/.test(endpoint);
+  if (method !== undefined) return { writes: method !== 'GET' && method !== 'HEAD', releases };
+  if (!body) return { writes: false, releases };
+  // GraphQL: a query written on the line that has no mutation reads; anything read from elsewhere, or a mutation, writes.
+  if (endpoint === 'graphql' && !fromFile && query !== undefined && !/\bmutation\b/i.test(query)) return { writes: false, releases };
+  return { writes: true, releases };
+}
+
 /** `git rebase` words that finish, leave or edit a rebase already under way, rather than start one. */
 const REBASE_IN_PROGRESS: ReadonlySet<string> = new Set(['--continue', '--abort', '--skip', '--quit', '--edit-todo']);
 /** An age that keeps a grace period: days or more ago (`2.weeks.ago`, `3 days ago`), or `never`. Hours, minutes, `now`, `all` and dates do not count. */
@@ -1774,12 +1865,24 @@ const READ_ONLY_GH = new Set([
 ]);
 
   if (name === 'gh' || name === 'glab') {
-    const [group, action] = words.filter((word) => !looksLikeOption(word));
-    // Only release creation and its changes are publishing on the floor; other GitHub writes stay with the settings layer (D-46, an owner question).
-    const onReleases = words.some((word) => !looksLikeOption(word) && /(?:^|\/)releases(?:[/?]|$)/.test(word));
-    if (group === 'api') return words.some((word, at) => (word === '-X' || word === '--method') && !/^GET$/i.test(words[at + 1] ?? '')) || anyFlag(/^-(?:f|F)$|^--(?:field|raw-field|input)(?:=|$)/) ? risky(`${name} api changes data on GitHub`, onReleases ? publishTo('release') : undefined) : unknownRead(`${name} api`);
+    // The group and the action, past `-R`/`--repo` wherever they sit (owner decision after PR #74): an option the rules do not know before the action, or
+    // a group or action the shell decides at run time, cannot be told apart from what it would run, so the effects are unknown.
+    const found = githubAction(args);
+    if ('unknown' in found) return unknown(`${name} ${found.unknown}`);
+    const group = found.group?.text;
+    const action = found.action?.text;
+    if (group === 'api') {
+      // A writing method, or a field or a body (which make the request a POST), changes data on GitHub: publishing (owner decision after PR #74).
+      const api = githubApiWrites(args.slice(found.groupAt + 1));
+      if ('unknown' in api) return unknown(`${name} api ${api.unknown}`);
+      if (!api.writes) return unknownRead(`${name} api`);
+      return risky(`${name} api changes data on GitHub`, publishTo(api.releases ? 'release' : 'git-remote'));
+    }
     const releases = group === 'release' && /^(?:create|upload|edit|delete|delete-asset)$/.test(action ?? '');
-    if (/^(?:create|edit|delete|merge|close|reopen|comment|review|upload|ready|lock|unlock|transfer|archive|rename|fork|sync|set|add|remove|enable|disable|run|cancel|rerun|login|logout|setup-git|refresh)$/.test(action ?? '') || group === 'release' && action !== 'list' && action !== 'view') return risky(`${name} ${group} ${action} changes data on GitHub`, releases ? publishTo('release') : undefined);
+    // Merging a pull request (a merge request on GitLab) changes a branch on the remote: publishing (owner decision after PR #74). Creating one and
+    // commenting stay with the settings layer (D-46).
+    const merges = action === 'merge' && (group === 'pr' || group === 'mr');
+    if (/^(?:create|edit|delete|merge|close|reopen|comment|review|upload|ready|lock|unlock|transfer|archive|rename|fork|sync|set|add|remove|enable|disable|run|cancel|rerun|login|logout|setup-git|refresh)$/.test(action ?? '') || group === 'release' && action !== 'list' && action !== 'view') return risky(`${name} ${group} ${action} changes data on GitHub`, releases ? publishTo('release') : merges ? publishTo('git-remote') : undefined);
     // 0.4.18 review: a run waiting for CI polls with exactly these, and the waiting guidance tells it to. Leaving them unknown would make every poll a
     // question in an asking mode, which is the wait the Check now button exists to end. They only read: no verb here writes to GitHub.
     if (name === 'gh' && READ_ONLY_GH.has(`${group ?? ''} ${action ?? ''}`.trim())) return safe(`${name} reads from GitHub and changes nothing`);

@@ -132,7 +132,7 @@ test('SECURITY.md describes the enforced floor: every mode asks before protected
     'In every mode, `fully-autonomous` included, these always ask, with no **Always allow** and no grant for the rest of the run',
     'writing into `.git/`',
     'writing into `.planning/.near-ai/` (other than its `team.md`) or into `.near-ai/` (other than its `scratch/` and `attachments/` folders)',
-    'publishing: git push, package and extension publishing, release creation, container image push, deploy commands, and sending email',
+    'publishing: git push, merging a pull request (`gh pr merge`), a write through `gh api` (a writing method, a field or a body), package and extension publishing, release creation, container image push, deploy commands, and sending email',
     'destruction: recursive deletes outside scratch and build folders',
     '`git reset --hard`', '`git clean`', 'discarding uncommitted changes', 'deleting branches and tags',
     'In a run with nobody to answer',

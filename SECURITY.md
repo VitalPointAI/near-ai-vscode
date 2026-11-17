@@ -102,8 +102,10 @@ run** or an allow-list entry that matches:
   command;
 - writing into `.planning/.near-ai/` (other than its `team.md`) or into
   `.near-ai/` (other than its `scratch/` and `attachments/` folders);
-- publishing: git push, package and extension publishing, release creation,
-  container image push, deploy commands, and sending email;
+- publishing: git push, merging a pull request (`gh pr merge`), a write
+  through `gh api` (a writing method, a field or a body), package and
+  extension publishing, release creation, container image push, deploy
+  commands, and sending email;
 - destruction: recursive deletes outside scratch and build folders,
   `git reset --hard`, `git clean`, discarding uncommitted changes, history
   rewrites (`git commit --amend`, starting a `git rebase`, and removing
