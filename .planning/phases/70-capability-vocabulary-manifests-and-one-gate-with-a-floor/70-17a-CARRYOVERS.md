@@ -281,3 +281,63 @@ Four commits on `feat/gate-floor`, one per finding. Every new test was seen fail
 - Tests (`gateCallArguments.test.ts`): a stand-in tool whose manifestInput renames `file` to `file_path`: a trusted-folder read is a known read and is
   allowed with nobody present, manifestInput runs once for the whole decision, a read outside every trusted folder stays unknown, and a project read is
   its project path.
+
+## Review round 4 (PR #74)
+
+Five commits on `feat/gate-floor`, on top of the coordinator's `29a82e3` and `25174d3`. Every new test was seen failing against the unchanged source first
+(the implementation set aside with a tagged stash and applied back by SHA, or the test run before the code existed).
+
+### Results
+
+- Lint (`tsc --noEmit`): clean.
+- Full `npm test` (6G cap): 3356 tests, 3347 passed, 0 failed, 0 cancelled, 9 skipped (the same 9). An earlier full run in this round failed one test, the
+  source scan in `commandBounds.test.ts`, which correctly reported a new same-level call (`classifyPackageManagerIn -> checkScript`) after the last
+  commit split a function; the scan's list of known descents was updated in that same (unpushed) commit, and the full suite was run again.
+- `node scripts/secret-scan.mjs --range origin/main..HEAD`: clean. No package changes. No activation or webview code changed, so e2e was not run.
+
+### 1. [MAJOR] Package scripts were read only from the project root
+
+- Commits `6805f80` and `93dd67a`.
+- `PackageScriptsReader` (`src/agent/packageScripts.ts`) finds the nearest package.json at or above a folder, as the package managers do, and keeps it by
+  file, read again only when its size or time changes. The loop holds one per run and gives it to the floor (`FloorShellContext.packageScriptsAt`) and to
+  the auto mode's checks (`CommandContext.packageScriptsAt`); `floorPackageScripts` (root only) is gone.
+- The folder a package manager runs in is the shell's folder, moved by cd and pushd earlier on the line, by npm `--prefix`/`-C`, yarn and bun `--cwd`,
+  pnpm `-C`/`--dir`, and npm `--workspace`/`-w` given a package folder. A script is read with its package's folder as the shell's folder. npm
+  start/stop/restart and pnpm/bun scripts by name are read too.
+- Unknown effects (asks), never "a project script": a cd to a run-time folder, `cd -`, a glob, popd, pushd with no folder, a cd inside parentheses, a
+  folder outside the project (including a bare cd to home), a package.json that cannot be read, one above the project, a workspace given by name, every
+  workspace (`--workspaces`, `-ws`), pnpm `-r`/`--filter`/`-w`, yarn `workspace(s)`, bun `--filter`.
+- No verdict is made newly safe by this (`93dd67a`): a safe reading of a folder option, npm start/stop/restart or a pnpm/bun script by name stays
+  `unknown`, as before. `cd sub && npm run x` is now read from sub, which can move a verdict either way (it is the script that really runs).
+- Tests (`packageScriptsFolder.test.ts`): 17 forms that name the folder, the script's own folder for its paths, the nearest package.json for a folder
+  with none, a nested workspace package by cd and by `--workspace`, 23 unknown forms, the cache (one read while unchanged, one more after a change,
+  unreadable, outside), the gate with a person and with nobody, never newly safe. `gateFloorRuns.test.ts`: a real run in Full auto with nobody present,
+  where `cd sub && npm run sync` (sub's script pushes) is refused as `floor.publish` and nothing reaches the remote, and the root's harmless script runs.
+- Docs: `FLOOR_EFFECTS_CANNOT_SEE_TEXT` and SECURITY.md say scripts are read from the package.json of the folder the command runs in, and that a
+  package script in a folder they cannot tell (or whose package.json they cannot read) asks. The coordinator's sentence about the unknown-program case
+  still follows that case, which stays last in the list. The CHANGELOG bullet says the same. gateDocs pins the new words and checks both directions.
+
+### 2. [MINOR] A log let go could be replaced by a second writer for the same file
+
+- Commit `28c3e4b`.
+- The host keeps a log being let go by key until its queue is written; a reopen of that key takes it back, so one instance writes each file. It is let
+  go for good only after its flush resolves and only if nothing took it back; `flush()` still waits for it.
+- Test (`gateHostLogs.test.ts`): four rounds of 25 records, the folder closed with records queued, then 25 more at once: every record on disk in the
+  order made, numbered 1 to 200 with no gap or repeat (red before: the order on disk differed).
+
+### 3. [MINOR] A call reading several trusted-folder files named only the first
+
+- Commit `2c9ccd9`.
+- `trustedReadsName` lists every file, as many as fit in the resource name's 200 characters, then "and N more" (a first name too long to fit is cut to
+  make room). Chat calls and cyber steps both use it.
+- Tests (`gateCallArguments.test.ts`): a stand-in tool reading two trusted files names both in its decision and its record; a long list ends with the
+  count of what was left out.
+
+### 4. [MINOR] The temporary folders were resolved on every shell call
+
+- Commit `df4cdf4`.
+- `temporaryRootsCache` keeps `systemTemporaryRoots()` and works it out again only when the temporary folder or TMPDIR it came from changes; the
+  floor uses the process's cache when its caller names no folders, and a caller or test can still hand in its own. Once per process (and again after a
+  change) rather than once per host or run: the answer depends only on the process's environment.
+- Test (`commandTemporary.test.ts`): a stand-in source that counts resolves: four on the first call, none on the next hundred, four more after each
+  change.
