@@ -77,7 +77,7 @@ export interface LibraryState { teams: LibraryTeam[]; archived: LibraryArchived[
 export interface PickerEntry { id: string; source: 'mine' | 'builtin'; group: StudioStartingPoint['group'] | 'library'; label: string; /** The team's own name. */ name: string;
   /** What Clone and modify names the copy ("Copy of" a saved team, a built-in's own name), made unique among the person's saved teams. */ cloneName: string;
   /** A built-in only: the name Use as is saves it to My teams under when no project is open, made unique the same way. The page shows it, never works it out. */ saveAs?: string;
-  description: string; members: string[]; memberCount: number; origin: string; imported?: boolean; teamId?: string; /** A saved team's icon (a PNG data URI); built-in teams show the default. */ icon?: string }
+  description: string; members: string[]; memberCount: number; origin: string; imported?: boolean; teamId?: string }
 export type PickerFilter = 'all' | 'mine' | 'builtin';
 
 /**
@@ -110,7 +110,7 @@ export function teamPicker(startingPoints: StudioStartingPoint[], teams: Library
     id: `lib:${team.id.slice('user:'.length)}`, source: 'mine', group: 'library', label: team.name, name: team.name, cloneName: cloneNameFor(team.name, 'mine', teams), description: team.description,
     members: team.members.map((member) => member.name), memberCount: team.members.length,
     origin: team.imported ? (team.derived ? 'Made from an import, not approved yet' : 'Imported, not approved yet') : `My team${team.savedAt ? `, saved ${team.savedAt.slice(0, 10)}` : ''}`,
-    ...(team.imported ? { imported: true } : {}), teamId: team.id, ...(team.icon ? { icon: team.icon } : {})
+    ...(team.imported ? { imported: true } : {}), teamId: team.id
   }));
   // The recommendation is made from answers on its own screen (0.4.30), so the picker does not offer it a second time.
   const builtin = startingPoints.filter((point) => point.id !== 'recommend').map((point): PickerEntry => ({
@@ -1478,6 +1478,8 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
         const file = fileFor(message.id);
         if (!file) { post({ type: 'error', text: 'That team is no longer in your teams.' }); return; }
         if (iconWorking) { post({ type: 'error', text: 'Still working on an icon. Wait for it to finish.' }); return; }
+        // The latest request wins: a picture still on its way from the page for an earlier one is not used after this.
+        iconWaiting = undefined;
         await changeIcon(message.id, file, (teamFile) => deps.library.removeIcon(teamFile), 'Removed the icon. The team shows its default icon again; the old one is in History.');
         return;
       }
@@ -1485,6 +1487,7 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
         const file = fileFor(message.id);
         if (!file) { post({ type: 'error', text: 'That team is no longer in your teams.' }); return; }
         if (iconWorking) { post({ type: 'error', text: 'Still working on an icon. Wait for it to finish.' }); return; }
+        iconWaiting = undefined;
         await changeIcon(message.id, file, (teamFile) => deps.library.restoreIcon(teamFile, message.ref), `Restored the icon from ${versionLabel(message.ref)}. The one before it is in History.`);
         return;
       }

@@ -3037,7 +3037,7 @@ test('host: Upload checks the file by its bytes and size before the page sees it
   // Listed again from disk, it is still there.
   await h.send({ type: 'refresh' });
   assert.equal(last(h, 'state').library.teams[0].icon, updated.icon);
-  assert.equal((last(h, 'state').picker as Array<{ id: string; icon?: string }>).find((entry) => entry.id === 'lib:web-team')!.icon, updated.icon);
+  assert.equal((last(h, 'state').picker as Array<{ id: string; teamId?: string; icon?: string }>).find((entry) => entry.id === 'lib:web-team')!.teamId, 'user:web-team', 'the picker shows the icon listed for that team, not a second copy');
   h.close();
 });
 
@@ -3311,4 +3311,25 @@ test('host: Share carries the team\'s icon; Import adds it beside the new team, 
   await other.send({ type: 'import' });
   assert.equal(await other.library.readIcon(path.join(other.library.directory, 'odd-team.md')), undefined);
   h.close(); other.close();
+});
+
+test('host: the latest icon request wins: a picture the page sends back after Remove or Restore is not used', async () => {
+  const h = await harness();
+  const file = await h.library.create('Web team', teamMarkdown(draft()));
+  await h.library.setIcon(file, png(128, 128, { seed: 16 }));
+  await h.library.setIcon(file, png(128, 128, { seed: 17 }));
+  await h.send({ type: 'ready' });
+  const dir = await mkdtemp(path.join(tmpdir(), 'near-ai-icon-race-'));
+  await writeFile(path.join(dir, 'a.jpg'), JPEG);
+  h.deps.pickIconSource = async () => path.join(dir, 'a.jpg');
+  for (const next of [{ type: 'icon-remove', id: 'user:web-team' }, { type: 'icon-restore', id: 'user:web-team', ref: path.basename((await h.library.iconVersions(file))[0]!) }]) {
+    await h.send({ type: 'icon-upload', id: 'user:web-team' });
+    const source = last(h, 'icon-source');
+    await h.send(next);
+    const shown = await h.library.readIcon(file);
+    await h.send({ type: 'icon-set', seq: source.seq, id: 'user:web-team', png: png(128, 128, { seed: 18 }).toString('base64') });
+    assert.match(last(h, 'error').text, /no longer waiting for an icon/, next.type);
+    assert.deepEqual(await h.library.readIcon(file), shown, `${next.type}: the icon stays as that request left it`);
+  }
+  h.close();
 });

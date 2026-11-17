@@ -794,7 +794,9 @@
         // What the team is for belongs to the team it was typed for (PR #75 review): choosing another one starts it empty.
         radio.addEventListener('change', () => { if (work.pick !== point.id) work.options.goal = ''; work.pick = point.id; render(); });
         const label = el('span', 'choice-label');
-        label.append(teamIcon(entryName(point), point.icon), document.createTextNode(point.label));
+        // A saved team's icon comes with the library listing (sent once, not again for the picker); built-in teams show the default.
+        const listed = point.teamId ? (lib.teams || []).find((team) => team.id === point.teamId) : null;
+        label.append(teamIcon(entryName(point), listed ? listed.icon : null), document.createTextNode(point.label));
         option.append(radio, label);
         if (point.origin) option.append(badge(point.origin, point.imported ? 'kind imported' : 'kind'));
         const descId = 'pdesc-' + point.id.replace(/[^A-Za-z0-9_-]/g, '-');
