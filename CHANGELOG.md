@@ -1,9 +1,11 @@
 # Changelog
 
-## Unreleased
+## 0.4.29
 
 Full auto still runs your work without asking, but it now stops for the few things that are hard
-to undo, and no mode lets an agent near the places where your keys and passwords are kept.
+to undo, holds anything that could send your secrets away once it has read one, and no mode lets an
+agent near the places where your keys and passwords are kept. Building a team also gets simpler:
+using a team you already have no longer asks you to name it.
 
 - **Full auto asks before what is hard to undo.** In every approval mode, Full auto included, the
   agent asks before it writes into git's own folder (`.git/`) or NEAR AI's own folders
@@ -51,11 +53,12 @@ to undo, and no mode lets an agent near the places where your keys and passwords
 - **Signing in and out asks in every mode.** Logging in or out of a package registry, a container
   registry, GitHub, Google Cloud, Azure or AWS, and revoking a stored token, ask first, because they
   change the logins kept on your computer. Commands that print a stored token are refused (below).
-- **More credential stores and token commands are off limits.** The GitHub CLI's folder (which holds its login),
-  cargo's, terraform's and RubyGems' credentials, your desktop keyring and your home `.yarnrc.yml`
-  join the stores agents may not touch, and so do commands that print a stored token when they run,
-  such as `gh auth token`, `gcloud auth print-access-token`, `aws sts get-session-token` and `npm
-  token list` (a message or search that only mentions one is fine). A project's own `.npmrc` or `.yarnrc.yml` is still yours to use.
+- **More credential stores and token commands are off limits.** The GitHub CLI's folder (which
+  holds its login), cargo's, terraform's and RubyGems' credentials, your desktop keyring and your
+  home `.yarnrc.yml` join the stores agents may not touch, and so do commands that print a stored
+  token when they run, such as `gh auth token`, `gcloud auth print-access-token`, `aws sts
+  get-session-token` and `npm token list` (a message or search that only mentions one is fine). A
+  project's own `.npmrc` or `.yarnrc.yml` is still yours to use.
 - **Routine git upkeep no longer asks in Full auto.** `git gc` and `git prune` that keep git's
   grace period, and continuing, skipping or leaving a rebase already under way, run like other
   work. Pruning at once, starting a rebase and expiring the reflog still ask.
