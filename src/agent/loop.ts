@@ -8,6 +8,7 @@ import type { AgentMessage, CompletionEvent, ToolCall, ToolDefinition, UsageMeta
 import { AutoApprovalContext, allowRuleBlocker, isAutoAllowed, PermissionRules, RunGrants, suggestAllowRule } from './permissions';
 import type { GateRuntime } from '../domain/gate/decide';
 import { TOOL_FORBIDDEN_RULE, gateToolCall, recordApprovalReply, unavailableGateRuntime } from './gateAdapter';
+import type { FloorShellContext } from './gateAdapter';
 import { PREAMBLE_START, resolveGsdRun } from '../gsd/preamble';
 import type { CommandSafetyCheck } from './safetyModel';
 import type { UnattendedScope } from './unattended';
@@ -297,6 +298,8 @@ export class AgentRun {
   private readonly gate: GateRuntime;
   /** When this run was created: a script changed after it was written by the run (PERF-01). */
   private readonly startedAt = Date.now();
+  /** The package scripts the floor reads, by project folder: read once per run, and again only when package.json has changed since (Pitfall 5). */
+  private readonly floorScripts = new Map<string, { stamp: string; scripts: Record<string, string> | undefined }>();
   private readonly byName: Map<string, AgentTool<any>>;
   private readonly definitions: ToolDefinition[];
 
@@ -628,9 +631,11 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
     let risky: string | undefined;
     let forbidden: string | undefined;
     try { forbidden = await tool.forbidden?.(input, context); } catch (error) { return this.finish(call.id, false, `Error: ${(error as Error).message}`); }
+    // The floor reads every shell command, in every mode, with a cheap context of its own (Pitfall 5).
+    const floorShell = command === undefined ? undefined : await this.floorShellContext(context);
     // What the gate is told about this call. The three hooks are today's own; `buildAuto` builds auto approve's context for the mode the settings layer is asked with.
     const gateInput = (): Parameters<typeof gateToolCall>[1] => ({
-      tool, raw, root: context.root, callId: call.id, ...(command === undefined ? {} : { command }),
+      tool, raw, root: context.root, callId: call.id, ...(command === undefined ? {} : { command }), ...(floorShell === undefined ? {} : { shell: floorShell }),
       ...(forbidden ? { forbidden } : {}), ...(sensitive ? { sensitive } : {}), ...(risky ? { risky } : {}),
       policy: this.options.policy, rules: this.options.rules, grants: this.grants,
       // Auto's context is built for every gated call, because a tool that marks itself autoSafe (the web tools) needs it as well as a shell command.
@@ -733,6 +738,36 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
       if (signal.aborted) return this.finish(call.id, false, 'Cancelled.');
       return this.finish(call.id, false, `Error: ${(error as Error).message}`);
     }
+  }
+
+  /** Where a shell command runs and what the project's scripts run, for the floor. No safety model and no runtime check: it must be cheap for every call. */
+  private async floorShellContext(context: ToolContext): Promise<FloorShellContext> {
+    const root = context.root;
+    const packageScripts = await this.floorPackageScripts(root);
+    return {
+      cwd: context.shell?.workingDirectory ?? root,
+      ...(packageScripts === undefined ? {} : { packageScripts }),
+      ...(context.trustedToolRoots === undefined ? {} : { trustedRoots: context.trustedToolRoots }),
+      ...(context.gsdRuntime?.preambles.length ? { gsdPreambles: context.gsdRuntime.preambles } : {})
+    };
+  }
+
+  /** The project's package.json scripts, read once per run and again only when the file changed (a run can rewrite a script and then run it). */
+  private async floorPackageScripts(root: string): Promise<Record<string, string> | undefined> {
+    const file = path.join(root, 'package.json');
+    const info = await stat(file).catch(() => undefined);
+    const stamp = info === undefined ? 'none' : `${info.mtimeMs}:${info.size}`;
+    const cached = this.floorScripts.get(root);
+    if (cached !== undefined && cached.stamp === stamp) return cached.scripts;
+    let scripts: Record<string, string> | undefined;
+    if (info !== undefined) {
+      try {
+        const manifest = JSON.parse(await readFile(file, 'utf8')) as { scripts?: unknown };
+        if (manifest.scripts && typeof manifest.scripts === 'object' && !Array.isArray(manifest.scripts)) scripts = Object.fromEntries(Object.entries(manifest.scripts as Record<string, unknown>).filter((entry): entry is [string, string] => typeof entry[1] === 'string'));
+      } catch { /* not JSON: no scripts are read */ }
+    }
+    this.floorScripts.set(root, { stamp, scripts });
+    return scripts;
   }
 
   /** Where a shell command would run, and what the project's npm scripts run, for the auto mode's checks. */

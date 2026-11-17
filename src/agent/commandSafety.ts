@@ -2,6 +2,7 @@ import { realpathSync } from 'node:fs';
 import * as path from 'node:path';
 import { plainDownload } from '../domain/plainDownload';
 import { normalizeRelative, PROTECTED_WRITE, STATE_FOLDER_PATH, STATE_FOLDER_TEXT } from '../domain/protectedPaths';
+import type { Capability } from '../domain/gate/vocabulary';
 import { isSensitivePath } from './tools';
 
 // The deterministic half of the `auto` approval mode. It decides the clear cases on its own:
@@ -13,7 +14,21 @@ import { isSensitivePath } from './tools';
 
 export type CommandVerdict = 'safe' | 'risky' | 'unknown';
 
-export interface CommandClassification { verdict: CommandVerdict; reason: string }
+/**
+ * What a command does that the gate's floor must see (GATE-05, D-17, D-46), as a vocabulary capability rather than words in a reason (research 4.1): it
+ * publishes (or sends), it destroys, or it writes a protected place. Paths are project-relative; `**` stands for the whole tree or anything outside it.
+ */
+export type CommandEffect = Extract<Capability, { verb: 'publish' | 'send' | 'destroy' | 'workspaceWrite' | 'network' }>;
+
+export interface CommandClassification {
+  verdict: CommandVerdict;
+  reason: string;
+  /**
+   * Every effect the command shows, wherever it sits: inside a script `npm run` runs, after `&&`, in a substitution, under `bash -c`. Absent when there is
+   * none. It never changes the verdict or the reason; it only says what the command would do.
+   */
+  effects?: CommandEffect[];
+}
 
 export interface CommandContext {
   /** The workspace root (absolute). */
@@ -50,9 +65,48 @@ export interface CommandContext {
   isAllowListed?(command: string): boolean;
 }
 
+// Effects are gathered for the whole classifyCommand call, not handed back result by result: the classifier often rebuilds a result from an inner one
+// (`npm run x`, `xargs`, `find -exec`, a substitution) or decides on one part and stops, and a tag carried by hand through each of those would be lost in the
+// next one somebody writes (Pitfall 2). Classification is synchronous, so the frame on top of this stack is always the call being made.
+const effectFrames: CommandEffect[][] = [];
+
+function noteEffects(effects: readonly CommandEffect[] | undefined): void {
+  const frame = effectFrames[effectFrames.length - 1];
+  if (frame !== undefined && effects !== undefined) frame.push(...effects);
+}
+
+/** Where the current frame ends now, so a caller can see what one inner classification added. */
+function effectMark(): number {
+  return effectFrames[effectFrames.length - 1]?.length ?? 0;
+}
+
+function effectsSince(mark: number): readonly CommandEffect[] {
+  return effectFrames[effectFrames.length - 1]?.slice(mark) ?? [];
+}
+
+function classification(verdict: CommandVerdict, reason: string, effects?: readonly CommandEffect[]): CommandClassification {
+  noteEffects(effects);
+  return effects !== undefined && effects.length > 0 ? { verdict, reason, effects: [...effects] } : { verdict, reason };
+}
+
 const safe = (reason: string): CommandClassification => ({ verdict: 'safe', reason });
-const risky = (reason: string): CommandClassification => ({ verdict: 'risky', reason });
-const unknown = (reason: string): CommandClassification => ({ verdict: 'unknown', reason });
+const risky = (reason: string, effects?: readonly CommandEffect[]): CommandClassification => classification('risky', reason, effects);
+const unknown = (reason: string, effects?: readonly CommandEffect[]): CommandClassification => classification('unknown', reason, effects);
+
+/** One copy of each effect, in the order first seen. */
+function distinctEffects(effects: readonly CommandEffect[]): CommandEffect[] {
+  const seen = new Set<string>();
+  const out: CommandEffect[] = [];
+  for (const effect of effects) {
+    const key = JSON.stringify(effect);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(effect);
+  }
+  return out;
+}
+
+const publishTo = (target: Extract<CommandEffect, { verb: 'publish' }>['target']): CommandEffect[] => [{ verb: 'publish', target }];
 
 // ---------------------------------------------------------------------------------------------
 // Lexing
@@ -536,7 +590,7 @@ function classifyGit(args: Word[], state: SegmentState, context: CommandContext)
   const label = `git ${sub}`;
   const writesOrEscapes = words.find((word) => /^--(?:output|no-index|ext-diff|exec|upload-pack|receive-pack|git-dir|work-tree)(?:=|$)|^-o$/.test(word));
   switch (sub) {
-    case 'push': return risky('git push changes a remote repository');
+    case 'push': return risky('git push changes a remote repository', publishTo('git-remote'));
     case 'send-email': return risky('git send-email sends data off this machine');
     case 'rebase': case 'filter-branch': case 'filter-repo': case 'replace': return risky(`${label} rewrites history`);
     case 'reset': return has('--hard', '--merge', '--keep') ? risky('git reset --hard discards uncommitted changes') : unknown('git reset moves the branch or unstages changes');
@@ -616,15 +670,20 @@ function classifyGit(args: Word[], state: SegmentState, context: CommandContext)
 }
 
 function checkScript(name: string, state: SegmentState, context: CommandContext, runner: string, depth: number): CommandClassification {
-  if (RELEASE_NAME.test(name)) return risky(`${runner} ${name} looks like a publish, release, or deploy script`);
   const scripts = context.packageScripts ?? {};
+  // Every script npm would run is read, even after one has decided the verdict, so what the later ones publish or destroy is still seen.
+  let decided: CommandClassification | undefined;
+  const mark = effectMark();
   for (const key of [`pre${name}`, name, `post${name}`]) {
     const body = scripts[key];
     if (typeof body !== 'string' || depth >= 3) continue;
     const inner = classifyText(body, { ...context, cwd: state.cwd }, depth + 1);
-    if (inner.verdict === 'risky') return risky(`${runner} ${name} runs the "${key}" script (${body.length > 120 ? `${body.slice(0, 120)}…` : body}), and ${inner.reason}`);
+    if (inner.verdict === 'risky') decided ??= risky(`${runner} ${name} runs the "${key}" script (${body.length > 120 ? `${body.slice(0, 120)}…` : body}), and ${inner.reason}`, inner.effects);
   }
-  return safe(`${runner} ${name} runs a project script`);
+  // A release-like name is a publish on its own word; when the script body already says where it publishes, that is the tag.
+  const publishes = effectsSince(mark).some((effect) => effect.verb === 'publish' || effect.verb === 'send');
+  if (RELEASE_NAME.test(name)) return risky(`${runner} ${name} looks like a publish, release, or deploy script`, publishes ? undefined : publishTo('release'));
+  return decided ?? safe(`${runner} ${name} runs a project script`);
 }
 
 function classifyPackageManager(manager: string, args: Word[], state: SegmentState, context: CommandContext, depth: number): CommandClassification {
@@ -1180,5 +1239,15 @@ function substitutionAssignment(raw: string): { name: string; inner: string } | 
  * it reads no files and runs nothing.
  */
 export function classifyCommand(command: string, context: CommandContext): CommandClassification {
-  return classifyText(command, context, 0);
+  const frame: CommandEffect[] = [];
+  effectFrames.push(frame);
+  let result: CommandClassification;
+  try {
+    result = classifyText(command, context, 0);
+  } finally {
+    effectFrames.pop();
+  }
+  const effects = distinctEffects([...(result.effects ?? []), ...frame]);
+  const { effects: _own, ...plain } = result;
+  return effects.length > 0 ? { ...plain, effects } : plain;
 }

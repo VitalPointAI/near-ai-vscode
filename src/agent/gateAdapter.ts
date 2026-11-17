@@ -15,6 +15,7 @@ import type { DecisionOutcome, DecisionRecord, DecisionResource } from '../domai
 import { fromActionCapability } from '../domain/gate/vocabulary';
 import type { Capability } from '../domain/gate/vocabulary';
 import { classifyCommand, downloadSegments } from './commandSafety';
+import type { CommandEffect } from './commandSafety';
 import { decidePermissionAsync, isAutoAllowed } from './permissions';
 import type { AutoApprovalContext, PermissionDecision, PermissionRules, RunGrants } from './permissions';
 import type { AgentTool } from './tools';
@@ -44,6 +45,72 @@ export interface GateCallInput {
   readonly grants: RunGrants;
   /** Builds the context auto approve needs for the mode the settings layer is asked with, or none when that mode needs none. */
   readonly buildAuto: (policy: ActionPolicy) => Promise<AutoApprovalContext | undefined>;
+  /**
+   * Where a shell command runs, for the floor's own look at it (Pitfall 5). The loop builds it for every shell call in every mode, fully-autonomous
+   * included, with the package scripts read once per run. Absent, the command is read as running at `root` with no scripts.
+   */
+  readonly shell?: FloorShellContext;
+}
+
+/** The cheap part of the classifier's context the floor needs: no safety model, no Open-GSD runtime check, nothing that asks a person. */
+export interface FloorShellContext {
+  /** The shell's folder when the command runs (absolute). */
+  readonly cwd: string;
+  /** The project's package.json scripts, so `npm run x` is read as what x runs. */
+  readonly packageScripts?: Readonly<Record<string, string>>;
+  /** The managed Open-GSD runtime's folders, whose gsd-tools verbs the classifier reads. */
+  readonly trustedRoots?: readonly string[];
+  /** The Open-GSD preambles the runtime ships, so what follows one is read as a command. */
+  readonly gsdPreambles?: readonly string[];
+}
+
+export interface FloorFactsInput extends Partial<FloorShellContext> {
+  readonly command: string;
+  /** The folder this call works in. */
+  readonly root: string;
+  /** The person's home folder, for `~`. */
+  readonly home?: string;
+}
+
+/** What the floor learns from a shell command's text: the effects the classifier tagged. */
+export interface FloorCommandFacts {
+  readonly effects: readonly CommandEffect[];
+}
+
+/**
+ * The floor's own reading of a shell command (GATE-05, Pitfall 5): the classifier run with a cheap context of its own, so the floor sees what a command
+ * publishes, destroys or writes in every mode, including the ones that never build auto approve's context. It only reads the command's text; it runs nothing.
+ */
+export async function floorFactsFor(input: FloorFactsInput): Promise<FloorCommandFacts> {
+  if (input.command.trim() === '') return { effects: [] };
+  let classified: ReturnType<typeof classifyCommand>;
+  try {
+    classified = classifyCommand(input.command, {
+      root: input.root,
+      cwd: input.cwd ?? input.root,
+      ...(input.home === undefined ? {} : { home: input.home }),
+      ...(input.packageScripts === undefined ? {} : { packageScripts: { ...input.packageScripts } }),
+      ...(input.trustedRoots === undefined ? {} : { trustedToolRoots: [...input.trustedRoots] }),
+      ...(input.gsdPreambles === undefined ? {} : { gsdPreambles: [...input.gsdPreambles] })
+    });
+  } catch {
+    return { effects: [] }; // the classifier is pure and should never throw; if it does, the call is decided on its manifest alone
+  }
+  return { effects: classified.effects ?? [] };
+}
+
+/** The manifest's effects with the command's own after them, each once. Unknown effects (an empty list) stay unknown: the command cannot make them known. */
+function withCommandEffects(effects: readonly Capability[], extra: readonly Capability[]): readonly Capability[] {
+  if (effects.length === 0 || extra.length === 0) return effects;
+  const seen = new Set(effects.map((effect) => JSON.stringify(effect)));
+  const out = [...effects];
+  for (const effect of extra) {
+    const key = JSON.stringify(effect);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(effect);
+  }
+  return out;
 }
 
 /** One decided call: the decision, what today's settings layer said (when it was asked), and what is needed to record the person's answer. */
@@ -289,7 +356,10 @@ async function decideOrRefuse(refusal: Refusal | undefined, mode: ActionPolicy['
  * decided) and returns it. The record is queued before this returns, so it is always ahead of the call's own run.
  */
 export async function gateToolCall(runtime: GateRuntime, input: GateCallInput, options: GateCallOptions = {}): Promise<GatedCall> {
-  const effects = effectsOfCall(runtime, input.tool, input.raw, input.root);
+  const declared = effectsOfCall(runtime, input.tool, input.raw, input.root);
+  // A shell call's command is read by the floor in every mode (Pitfall 5); what it tags joins the manifest's own effects.
+  const floorFacts = input.command === undefined ? undefined : await floorFactsFor({ command: input.command, root: input.root, ...(input.shell ?? {}) });
+  const effects = withCommandEffects(declared, floorFacts?.effects ?? []);
   const request: GateRequest = {
     actor: runtime.actor,
     tool: input.tool.name,
