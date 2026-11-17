@@ -147,3 +147,17 @@ test('through the gate: a Bash call\'s record names its command with the passwor
   const name = runtime.records[0]!.resources[0]!.name;
   assert.equal(name, 'curl -u [REDACTED] https://api.example.test/status');
 });
+
+// PR #74 review round 7: a credential right after a quote (`curl -d "password=..."`, `'token=...'`) or after `,` was kept. A quote, `&`, `?`, `;` and `,`
+// all start a name=value now, and the closing quote stays where it was.
+test('a credential assignment right after a quote, an ampersand, a comma or a semicolon is removed, and the quotes around it are kept', () => {
+  const kept = (command: string, out: string): void => assert.equal(redactCredentialArguments(command), out, command);
+  kept(`curl -d "password=${SECRET}" https://api.example.test`, 'curl -d "password=[REDACTED]" https://api.example.test');
+  kept(`curl -d 'token=${SECRET}' https://api.example.test`, "curl -d 'token=[REDACTED]' https://api.example.test");
+  kept(`curl -d "user=alice&password=${SECRET}" https://api.example.test`, 'curl -d "user=alice&password=[REDACTED]" https://api.example.test');
+  kept(`tool --data "a=1,secret=${SECRET}"`, 'tool --data "a=1,secret=[REDACTED]"');
+  kept(`tool --data "a=1;api_key=${SECRET};b=2"`, 'tool --data "a=1;api_key=[REDACTED];b=2"');
+  for (const command of [`curl -d "password=${SECRET}" x`, `curl -d 'token=${SECRET}' x`, `tool --data "a=1,secret=${SECRET}"`]) assertGone(command);
+  // Names that are not credentials stay, quoted or not.
+  for (const command of ['curl -d "user=alice&page=2" https://api.example.test', "tool --data 'mode=fast,level=3'"]) assert.equal(redactCredentialArguments(command), command, command);
+});

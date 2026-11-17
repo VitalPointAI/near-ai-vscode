@@ -69,10 +69,11 @@ const CREDENTIAL_LOCATION = /[-_](?:file|path|stdin|env|dir|name|id|type|url|uri
 const CREDENTIAL_HEADER = /(?<![\w-])((?:proxy-)?authorization|cookie|private-token|x-api-key|api-key|x-[\w-]*?(?:token|auth|secret|password|key)[\w-]*)(\s*:\s*)(\[REDACTED\]|[^"'\s][^"'\n]*)/gi;
 
 /**
- * `NAME=value`, at the start of a command or after a space, a separator, `=` or `?` (so `export`, `env`, `set`, `docker -e`, `--env=`, a prefix assignment and
- * a URL's query parameter all match).
+ * `NAME=value`, at the start of a command or after a space, a separator, `=`, `?`, a quote or a comma (so `export`, `env`, `set`, `docker -e`, `--env=`, a
+ * prefix assignment, a URL's query parameter and a form body such as `curl -d "password=..."` all match). An unquoted value ends at a quote or a comma, so
+ * the quote around a form body stays where it was (PR #74 review round 7).
  */
-const ENV_ASSIGNMENT = /(^|[\s;&|(`=?])([A-Za-z_][A-Za-z0-9_]*)=("[^"\n]*"|'[^'\n]*'|[^\s;&|)`]+)/g;
+const ENV_ASSIGNMENT = /(^|[\s;&|(`=?"',])([A-Za-z_][A-Za-z0-9_]*)=("[^"\n]*"|'[^'\n]*'|[^\s;&|)`"',]+)/g;
 /** A variable named for a credential: one of these words as a part of the name between underscores, or a name that contains password, secret or token. */
 const CREDENTIAL_NAME_PART = /^(?:token|secret|password|passwd|pass|passphrase|key|apikey|credential|credentials|auth|pat)$/i;
 const CREDENTIAL_NAME_WORD = /password|passwd|secret|token|apikey/i;

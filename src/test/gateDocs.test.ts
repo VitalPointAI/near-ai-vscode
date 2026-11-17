@@ -263,14 +263,14 @@ test('the decision record paragraph says exactly what is removed from a command 
   const words = flat(policySection);
   assert.ok(!words.includes('and secrets are removed from it'), 'the old overclaim is gone');
   for (const named of ['first line only', '`-u`, `--user`, `--proxy-user` or `-U` when it holds a colon', '`--password=...`, `--token ...` or `-storepass ...`',
-    '`Authorization`, `Proxy-Authorization`, `Cookie`, `Private-Token`', '`GITHUB_TOKEN=...`', '`?api_key=...`', '(`https://user:password@host`)',
+    '`Authorization`, `Proxy-Authorization`, `Cookie`, `Private-Token`', '`GITHUB_TOKEN=...`', '`?api_key=...`', '`-d "password=..."`', '(`https://user:password@host`)',
     'It does not remove a password passed as a plain argument (`sshpass -p`, `mysql -p...`, `htpasswd -b`)', 'command substitution']) {
     assert.ok(words.includes(named), named);
   }
   const removed = (command: string): boolean => !redactCredentialArguments(command).includes('pw-1');
   for (const command of ['curl https://user:pw-1@host.example.test', 'curl -u user:pw-1 x', 'curl --user user:pw-1 x', 'curl --proxy-user user:pw-1 x', 'curl -U user:pw-1 x',
     'tool --password=pw-1', 'tool --token pw-1', 'keytool -storepass pw-1', 'curl -H "Authorization: Basic pw-1"', 'curl -H "Proxy-Authorization: Basic pw-1"',
-    'curl -H "Cookie: s=pw-1"', 'curl -H "Private-Token: pw-1"', 'curl -H "X-Service-Token: pw-1"', 'curl -H "X-Api-Key: pw-1"', 'GITHUB_TOKEN=pw-1 gh', 'curl "https://h.example.test/?api_key=pw-1"']) {
+    'curl -H "Cookie: s=pw-1"', 'curl -H "Private-Token: pw-1"', 'curl -d "password=pw-1" x', 'curl -H "X-Service-Token: pw-1"', 'curl -H "X-Api-Key: pw-1"', 'GITHUB_TOKEN=pw-1 gh', 'curl "https://h.example.test/?api_key=pw-1"']) {
     assert.ok(removed(command), command);
   }
   for (const command of ['sshpass -p pw-1 ssh h', 'mysql -ppw-1 app', 'htpasswd -b users alice pw-1', 'curl -u "$(cat pw-1)" x']) assert.ok(!removed(command), command);

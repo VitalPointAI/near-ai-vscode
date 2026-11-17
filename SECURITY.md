@@ -217,9 +217,9 @@ is what that file and the records beside it do in this version.
   for a password, passphrase, token, secret, API key or credential (such as
   `--password=...`, `--token ...` or `-storepass ...`), the value of an
   `Authorization`, `Proxy-Authorization`, `Cookie`, `Private-Token` or
-  `X-...-Token` or `-Key` header, and the value of an environment assignment
-  or URL query parameter named for one (such as `GITHUB_TOKEN=...` or
-  `?api_key=...`). It does not remove a password passed as a plain argument
+  `X-...-Token` or `-Key` header, and the value of an environment assignment,
+  URL query parameter or form field named for one (such as `GITHUB_TOKEN=...`,
+  `?api_key=...` or `-d "password=..."`). It does not remove a password passed as a plain argument
   (`sshpass -p`, `mysql -p...`, `htpasswd -b`), one a script receives or
   reads, one built by command substitution, or one under an option or name
   not listed here, so do not put a password in a command's first line.
