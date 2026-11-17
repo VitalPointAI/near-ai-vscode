@@ -43,7 +43,8 @@ export type StudioTarget = 'project' | 'user';
 /** `words`: what the tool's manifest says it can do, from the same sentences the Tools page shows (GATE-03, D-07); the member card shows them beside the tool. */
 export interface StudioTool { name: string; description: string; capability: string; status: ToolStatus; statusText: string; words: string[] }
 export interface StudioRole { id: string; label: string; description: string; source: 'team' | 'gsd'; suggestion: string; tools: string[] | null; model: string }
-export interface StudioStartingPoint { id: string; group: 'recommend' | 'project-type' | 'gsd' | 'empty'; label: string; description: string; members: string[] }
+/** `name`: the team's own name (startingPointTeamName), set by buildStudioContext so the page never works one out. */
+export interface StudioStartingPoint { id: string; group: 'recommend' | 'project-type' | 'gsd' | 'empty'; label: string; name?: string; description: string; members: string[] }
 
 export interface StudioContext {
   hasProject: boolean;
@@ -71,7 +72,10 @@ export interface LibraryState { teams: LibraryTeam[]; archived: LibraryArchived[
  * teams ... Need to see all available teams and maybe be able to filter between my teams and those provided by the extension"). `source` is what the
  * filter uses: `mine` for the person's saved teams (from any project), `builtin` for what the extension provides. `origin` says where it came from.
  */
-export interface PickerEntry { id: string; source: 'mine' | 'builtin'; group: StudioStartingPoint['group'] | 'library'; label: string; /** The team's own name: what Use as is saves it under and what Clone and modify starts from. */ name: string; description: string; members: string[]; memberCount: number; origin: string; imported?: boolean; teamId?: string }
+export interface PickerEntry { id: string; source: 'mine' | 'builtin'; group: StudioStartingPoint['group'] | 'library'; label: string; /** The team's own name. */ name: string;
+  /** What Clone and modify names the copy ("Copy of" a saved team, a built-in's own name), made unique among the person's saved teams. */ cloneName: string;
+  /** A built-in only: the name Use as is saves it to My teams under when no project is open, made unique the same way. The page shows it, never works it out. */ saveAs?: string;
+  description: string; members: string[]; memberCount: number; origin: string; imported?: boolean; teamId?: string }
 export type PickerFilter = 'all' | 'mine' | 'builtin';
 
 /**
@@ -82,6 +86,11 @@ export function startingPointTeamName(point: { id: string; label: string }): str
   if (point.id === 'recommend') return 'Recommended team';
   if (point.id === 'empty') return 'New team';
   return /\bteam$/i.test(point.label.trim()) ? point.label.trim() : `${point.label.trim()} team`;
+}
+
+/** The name a clone starts with: "Copy of" a saved team, or a built-in's own name, unique among the person's saved teams. */
+export function cloneNameFor(name: string, source: PickerEntry['source'], teams: ReadonlyArray<Pick<LibraryTeam, 'id' | 'kind' | 'name'>>): string {
+  return uniqueTeamName(source === 'mine' ? `Copy of ${name}` : name, teams);
 }
 
 /** `base`, or `base 2`, `base 3`... : the first that none of the person's saved teams has as its name or its file name. */
@@ -96,13 +105,13 @@ export function uniqueTeamName(base: string, teams: ReadonlyArray<Pick<LibraryTe
 /** Every starting point the picker offers: the person's saved teams first, then the built-in ones. A library team that does not parse is left out. */
 export function teamPicker(startingPoints: StudioStartingPoint[], teams: LibraryTeam[]): PickerEntry[] {
   const mine = teams.filter((team) => team.kind === 'user' && !team.error).map((team): PickerEntry => ({
-    id: `lib:${team.id.slice('user:'.length)}`, source: 'mine', group: 'library', label: team.name, name: team.name, description: team.description,
+    id: `lib:${team.id.slice('user:'.length)}`, source: 'mine', group: 'library', label: team.name, name: team.name, cloneName: cloneNameFor(team.name, 'mine', teams), description: team.description,
     members: team.members.map((member) => member.name), memberCount: team.members.length,
     origin: team.imported ? (team.derived ? 'Made from an import, not approved yet' : 'Imported, not approved yet') : `My team${team.savedAt ? `, saved ${team.savedAt.slice(0, 10)}` : ''}`,
     ...(team.imported ? { imported: true } : {}), teamId: team.id
   }));
   const builtin = startingPoints.map((point): PickerEntry => ({
-    id: point.id, source: 'builtin', group: point.group, label: point.label, name: startingPointTeamName(point), description: point.description, members: point.members, memberCount: point.members.length,
+    id: point.id, source: 'builtin', group: point.group, label: point.label, name: startingPointTeamName(point), cloneName: cloneNameFor(startingPointTeamName(point), 'builtin', teams), saveAs: uniqueTeamName(startingPointTeamName(point), teams), description: point.description, members: point.members, memberCount: point.members.length,
     origin: point.group === 'project-type' ? 'Built in: project type' : point.group === 'gsd' ? 'Built in: Open-GSD roles' : 'Built in'
   }));
   return [...mine, ...builtin];
@@ -188,12 +197,12 @@ export function buildStudioContext(input: DirectoryInput, options: { hasProject:
     tiers: { main: input.settings.mainModel, ...input.settings.tiers },
     models: directory.models,
     ...(directory.modelsProblem ? { modelsProblem: directory.modelsProblem } : {}),
-    startingPoints: [
+    startingPoints: ([
       { id: 'recommend', group: 'recommend', label: 'Recommend a team for me', description: 'Answer three questions about the work and its risk; the studio suggests a team sized to it.', members: [] },
       ...PROJECT_TYPES.map((type) => ({ id: `type:${type.id}`, group: 'project-type' as const, label: type.label, description: type.description, members: type.members.map((member) => member.name) })),
       ...GSD_TEMPLATES.map((template) => ({ id: `gsd:${template.id}`, group: 'gsd' as const, label: template.label, description: `${template.description}${gsdDescription(template.members[0].role) ? '' : ' (Open-GSD roles; installs with your first workflow.)'}`, members: template.members.map((member) => member.name) })),
       { id: 'empty', group: 'empty', label: 'Start empty', description: 'Add every member yourself.', members: [] }
-    ]
+    ] as StudioStartingPoint[]).map((point) => ({ ...point, name: startingPointTeamName(point) }))
   };
 }
 
@@ -668,7 +677,8 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
   /** An imported team (or one made from an import) that is not approved: its text is untrusted, and the refiner is told so. */
   const untrustedFor = async (draft: TeamDraft, id: string | undefined): Promise<boolean> => {
     if (id) return Boolean(teamFor(id)?.imported);
-    return (await deps.library.unapprovedSource(draft.members).catch(() => undefined)) !== undefined;
+    // A check that cannot run counts as untrusted (PR #75 review), so the review never treats such text as the person's own.
+    return (await deps.library.unapprovedSource(draft.members).catch(() => 'unknown')) !== undefined;
   };
 
   const versionsOf = async (file: string) => (await deps.library.versions(file)).map((version) => ({ ref: path.basename(version), label: versionLabel(path.basename(version)) }));
@@ -759,6 +769,18 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
     const version = await deps.library.snapshot(file);
     await refreshLibrary();
     return { file, notice: `Saved "${edit.draft.name.trim()}" as version ${version}.` };
+  };
+
+  /**
+   * Which unapproved imported team any of these members was copied from (0.4.26), for the first-run question. A check that cannot run fails closed
+   * (PR #75 review): it was read as "none", so a team could be written without the question that says where its members came from. The caller says
+   * nothing was changed and writes nothing.
+   */
+  const importOrigin = async (members: ReadonlyArray<{ instructions: string }>, verb: 'used' | 'saved'): Promise<{ from: string | undefined } | undefined> => {
+    try { return { from: await deps.library.unapprovedSource(members) }; } catch (error) {
+      post({ type: 'error', text: `Not ${verb}: it could not be checked whether this team has members from an imported team you have not approved (${(error as Error).message}). Nothing was changed.` });
+      return undefined;
+    }
   };
 
   /**
@@ -947,11 +969,13 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
           const team = teamFor(`user:${message.id.slice('lib:'.length)}`);
           if (!team || team.error) { post({ type: 'error', text: 'That team is no longer in your teams. Pick another starting point.' }); return; }
           const draft = draftFromMarkdown(await readFile(team.file, 'utf8'), team.file);
-          post({ type: 'starting-point', id: message.id, draft: { ...draft, name: '' } });
+          post({ type: 'starting-point', id: message.id, cloneName: cloneNameFor(team.name, 'mine', library.teams), draft: { ...draft, name: '' } });
           return;
         }
         const result = startingPointDraft(message, context!);
-        post({ type: 'starting-point', id: message.id, draft: result.draft, ...(result.projectType ? { projectType: result.projectType } : {}) });
+        const point = context!.startingPoints.find((candidate) => candidate.id === message.id);
+        // The name a clone starts with is worked out here, from the library as it is now, so the page never applies naming rules of its own.
+        post({ type: 'starting-point', id: message.id, ...(point ? { cloneName: cloneNameFor(startingPointTeamName(point), 'builtin', library.teams) } : {}), draft: result.draft, ...(result.projectType ? { projectType: result.projectType } : {}) });
         return;
       }
       case 'use-team': {
@@ -989,12 +1013,22 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
           markdown = fromType ? stampTeam(review.markdown, fromType) : review.markdown;
           members = draft.members;
         }
+        // Every outcome gets exactly one answer (PR #75 review): the project team opened (team), used, declined (used, with declined), or an error.
+        // Anything that writes a team first checks where its members came from, before anything is asked.
+        let unapprovedFrom: string | undefined;
+        if (root || !saved) {
+          const origin = await importOrigin(members, 'used');
+          if (!origin) return;
+          unapprovedFrom = origin.from;
+        }
         // The builder had unsaved work: it is dropped only when the person agrees, as leaving the builder asks.
-        if (message.discard && await choose(`Use "${name}" as is? The team you were building is not saved, so it will be discarded.`, 'Use as is') !== 'Use as is') return;
-        const unapprovedFrom = await deps.library.unapprovedSource(members).catch(() => undefined);
+        if (message.discard && await choose(`Use "${name}" as is? The team you were building is not saved, so it will be discarded.`, 'Use as is') !== 'Use as is') {
+          post({ type: 'used', declined: true, text: 'Not changed. The team you were building is still here.' });
+          return;
+        }
         if (root) {
           const file = await writeProjectTeam(root, markdown, unapprovedFrom, fromType ? { type: fromType, goal: goal || 'the work in this project' } : undefined);
-          if (!file) { post({ type: 'notice', text: 'This project\'s team was not changed.' }); return; }
+          if (!file) { post({ type: 'used', declined: true, text: 'Not changed. This project\'s team is as it was.' }); return; }
           unsaved = {};
           await refreshLibrary();
           const unapprovedNote = unapprovedFrom === undefined ? '' : ` It has members from the imported team "${unapprovedFrom}", which you have not approved, so you are asked before it first runs.`;
@@ -1076,7 +1110,9 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
         const markdown = fromType ? stampTeam(review.markdown, fromType) : review.markdown;
         // 0.4.26: a team with any member copied unchanged from an unapproved import (a saved team used as the starting point, a resumed draft, a member
         // pasted in) stays unapproved however it was made. Checked on the content, so no path round it depends on how the draft was built.
-        const unapprovedFrom = await deps.library.unapprovedSource(message.draft.members).catch(() => undefined);
+        const origin = await importOrigin(message.draft.members, 'saved');
+        if (!origin) return;
+        const unapprovedFrom = origin.from;
         if (message.target === 'project') {
           // The folder open now, read once for the whole save, so the file and the project type go to the same folder.
           const root = deps.root();

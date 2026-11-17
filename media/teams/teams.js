@@ -167,8 +167,9 @@
     openCard = null;
     const options = { locality: 'cloud', workShape: 'feature', riskLevel: 'medium', goal: '' };
     if (resume) work = { mode: 'wizard', stage: 'steps', target: resume.target, step: resume.step, maxStep: resume.step, draft: clone(resume.draft), startingPoint: resume.startingPoint || 'recommend', path: resume.path || null, defaultName: '', options, review: null };
-    else if (fromProposal) work = { mode: 'wizard', stage: 'steps', target: 'user', step: 0, maxStep: 0, draft: clone(fromProposal.draft || fallbackDraft(fromProposal.proposal || fromProposal)), startingPoint: 'empty', path: null, defaultName: '', options, review: null };
+    else if (fromProposal) work = { mode: 'wizard', stage: 'steps', target: target === 'project' && ctx && ctx.hasProject ? 'project' : 'user', step: 0, maxStep: 0, draft: clone(fromProposal.draft || fallbackDraft(fromProposal.proposal || fromProposal)), startingPoint: 'empty', path: null, defaultName: '', options, review: null };
     else {
+      askTarget = 'user';
       const name = target === 'project' ? 'Project team' : '';
       work = { mode: 'wizard', stage: 'start', target: target === 'project' && ctx && ctx.hasProject ? 'project' : 'user', step: 0, maxStep: 0, draft: { name, description: '', members: [] }, startingPoint: 'empty', path: null, defaultName: name, options, review: null };
     }
@@ -198,15 +199,6 @@
     else goStage('new');
   }
 
-  /** `base`, or `base 2`, `base 3`...: the first that none of the person's saved teams has as its name or file name (as the host's uniqueTeamName). */
-  function uniqueName(base) {
-    const clean = String(base || '').replace(/[\r\n]+/g, ' ').trim().slice(0, 80) || 'New team';
-    const slug = (value) => slugify(value) || 'team';
-    const taken = (name) => (lib.teams || []).some((team) => team.kind === 'user' && (String(team.name).trim().toLowerCase() === name.toLowerCase() || team.id === 'user:' + slug(name)));
-    let name = clean;
-    for (let n = 2; taken(name); n += 1) name = clean.slice(0, 76) + ' ' + n;
-    return name;
-  }
 
   function changed(structural) {
     if (structural) render(); else { updateDirty(); updateImprove(); }
@@ -261,6 +253,8 @@
   let lastFormat = '';
   let lastDepth = 'thorough';
   let lastPrivate = false;
+  // Where a team drafted by AI is saved: 'project' when the person came from a builder saving to this project's team (Describe it, and AI drafts it).
+  let askTarget = 'user';
 
   // The host computes the draft from the proposal (src/agent/teamBuilder.ts) and sends it with the proposal, so the two cannot drift. This is only a
   // fallback for an older host that does not send it: the page must never throw, even then.
@@ -343,7 +337,9 @@
     }
     const actions = el('div', 'ask-actions');
     actions.append(
-      button('Use this team', () => { const from = proposal; proposal = null; startWizard('user', null, from); }, { primary: true }),
+      // A team drafted from the builder keeps where that builder was saving to (its entry point, or the person's choice there); one drafted from the
+      // library's own box is one of the person's teams, as before (PR #75 review).
+      button('Use this team', () => { const from = proposal; const target = askTarget; proposal = null; askTarget = 'user'; startWizard(target, null, from); }, { primary: true }),
       button('Start over', () => { proposal = null; drafting = false; render(); }, { link: true })
     );
     box.append(actions);
@@ -520,7 +516,8 @@
   /** The picker's entries from the host; before the first state arrives, the built-in starting points. */
   function pickerEntries() {
     if (picker) return picker;
-    return (ctx ? ctx.startingPoints : []).map((point) => ({ id: point.id, source: 'builtin', group: point.group, label: point.label, name: point.id === 'recommend' ? 'Recommended team' : /\bteam$/i.test(point.label) ? point.label : point.label + ' team', description: point.description, members: point.members, memberCount: point.members.length, origin: 'Built in' }));
+    // Names come from the host (PR #75 review): the page has no naming rules of its own, so what it shows is what the host saves.
+    return (ctx ? ctx.startingPoints : []).map((point) => ({ id: point.id, source: 'builtin', group: point.group, label: point.label, name: point.name || point.label, cloneName: point.name || point.label, description: point.description, members: point.members, memberCount: point.members.length, origin: 'Built in' }));
   }
   /** The teams the picker offers under the current filter. "Start empty" is not a team: From scratch is its own choice now. */
   function visibleEntries() {
@@ -646,7 +643,7 @@
     if (existing) {
       box.append(el('p', 'hint', ctx && ctx.hasProject
         ? 'Use as is makes it this project\'s team (run it with /team:project) without changing it. If the project already has a team, you are asked first, and the old one stays in its history.'
-        : point.source === 'builtin' ? 'Use as is saves it to My teams as "' + uniqueName(name) + '" and opens it in chat.' : 'Use as is opens it in chat.'));
+        : point.source === 'builtin' ? (point.saveAs ? 'Use as is saves it to My teams as "' + point.saveAs + '" and opens it in chat.' : 'Use as is saves it to My teams under its own name and opens it in chat.') : 'Use as is opens it in chat.'));
     }
     const count = work.draft.members.length;
     if (count) box.append(el('p', 'hint', 'Clone and modify replaces the ' + count + ' member' + (count === 1 ? '' : 's') + ' your team has now.'));
@@ -673,7 +670,7 @@
   /** Clone and modify: the host sends the team's members, and the Purpose step opens with the copy's name and description filled in. */
   function cloneEntry(point) {
     const label = entryName(point);
-    work.awaitingStart = { id: point.id, clone: true, path: work.pickMode === 'existing' ? 'existing' : 'clone', label, name: point.source === 'mine' ? 'Copy of ' + label : label, goal: point.source === 'builtin' ? work.options.goal : '' };
+    work.awaitingStart = { id: point.id, clone: true, path: work.pickMode === 'existing' ? 'existing' : 'clone', label, name: point.cloneName || label, goal: point.source === 'builtin' ? work.options.goal : '' };
     const message = startAnswers(point, { type: 'starting-point', id: point.id, goal: '', locality: work.options.locality });
     vscode.postMessage(message);
   }
@@ -698,6 +695,7 @@
 
   /** Describe it, and AI drafts it: the library's AI box (leaving the builder asks first when something is unsaved). */
   function describeToAi() {
+    askTarget = work.target;
     if (isWizardDirty()) { leaveWork(); return; }
     work = null;
     focusLater('ask-idea');
@@ -1749,7 +1747,9 @@
       case 'starting-point': {
         // Only the reply to the request still waiting: one for a screen the person has left (Back, another team) is dropped.
         const pending = work && work.mode === 'wizard' ? work.awaitingStart : null;
-        if (!pending || pending.id !== message.id || (pending.clone && work.stage !== 'pick')) break;
+        if (!pending || pending.id !== message.id) break;
+        // The person left the picker: this reply is dropped for good, so a later one cannot move the builder either (PR #75 review).
+        if (pending.clone && work.stage !== 'pick') { work.awaitingStart = null; break; }
         work.awaitingStart = null;
         const draft = message.draft;
         work.projectType = message.projectType || null;
@@ -1766,7 +1766,8 @@
         // earlier clone filled in, so nothing the person wrote is replaced.
         const before = work.cloned || {};
         const cloned = {};
-        if (!work.draft.name.trim() || work.draft.name === work.defaultName || work.draft.name === before.name) { work.draft.name = uniqueName(pending.name); cloned.name = work.draft.name; }
+        // The copy's name is the host's, resolved against the library when it sent the members.
+        if (!work.draft.name.trim() || work.draft.name === work.defaultName || work.draft.name === before.name) { work.draft.name = (message.cloneName || pending.name).slice(0, 80); cloned.name = work.draft.name; }
         const description = (pending.goal || '').trim() || draft.description || '';
         if (!work.draft.description.trim() || work.draft.description === before.description) { work.draft.description = description.slice(0, 600); cloned.description = work.draft.description; }
         work.draft.members = draft.members;
@@ -1781,6 +1782,8 @@
         break;
       }
       case 'used':
+        // Use as is was declined (the project's team, or the builder's unsaved work, is kept): nothing changed, so the builder stays where it is.
+        if (message.declined) { if (message.text) { showBanner(message.text, 'info'); announce(message.text); } break; }
         // Use as is finished without a project team to open (a saved team put in the chat, or a built-in saved to My teams first): back to the library.
         if (work && work.mode === 'wizard') work = null;
         flash = message.focus || null;

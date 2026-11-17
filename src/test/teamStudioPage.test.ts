@@ -2252,7 +2252,7 @@ test('host: Use as is with a project open makes the team this project\'s team wi
   await h.send({ type: 'use-team', id: 'type:software', goal: 'Ship billing', locality: 'local' });
   assert.match(h.confirmed.at(-1)!, /^This project already has a team\. Replace it\? Its earlier versions stay in the team history\.$/);
   assert.equal(await readFile(projectFile, 'utf8'), await readFile(web, 'utf8'));
-  assert.equal(last(h, 'notice').text, 'This project\'s team was not changed.');
+  assert.deepEqual(last(h, 'used'), { type: 'used', declined: true, text: 'Not changed. This project\'s team is as it was.' });
   assert.deepEqual(h.applied, []);
   // Yes: replaced by the built-in under its own name, stamped, with its AGENTS.md guidance, and the old one is a version to restore.
   h.confirmAnswer.value = true;
@@ -2408,7 +2408,9 @@ test('host: every Use as is gets exactly one answer: the team, used, declined, o
   await h.library.create('Forwarded', renderTeam('Forwarded', 'x', [{ name: 'dev', model: 'deepseek/flash', instructions: 'Build it. Report it.' }]));
   await h.send({ type: 'refresh' });
   assert.deepEqual(await kinds({ type: 'use-team', id: 'lib:forwarded' }), ['error'], 'a check fails');
-  h.setRoot(undefined, false);
+  // The folder is closed (the studio is told, as VS Code tells it), so the knowledge base no longer applies.
+  h.setRoot(undefined);
+  await h.settle();
   assert.deepEqual(await kinds({ type: 'use-team', id: 'lib:web-team' }), ['used'], 'to the chat');
   assert.deepEqual(await kinds({ type: 'use-team', id: 'gsd:review' }), ['used'], 'saved to My teams, then the chat');
   h.close();
