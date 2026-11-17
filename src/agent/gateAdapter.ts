@@ -894,7 +894,7 @@ export function maySendOffMachine(input: MaySendInput): boolean {
 }
 
 /** The sentence of label.network-at-mark (D-29): the chat holds content that must stay here, and this call may send data off this computer. */
-export const NETWORK_AT_MARK_TEXT = 'This chat has read content that must stay on this computer, and this call may send data off it, so it is refused.';
+export const NETWORK_AT_MARK_TEXT = "This chat has read content that must stay on this computer, and this call may send data off it, so it is refused. If what this chat read allows it, use NEAR AI: Lower This Chat's Label.";
 
 /** The routing a runtime decides by now: the valid policy's, or while it is failed closed the shipped default label and every tier above any-cloud kept here. */
 function routingOfRuntime(runtime: GateRuntime): { readonly routing: RoutingTable; readonly defaultLabel: Label } {

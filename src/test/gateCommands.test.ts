@@ -124,16 +124,16 @@ test('Show Policy opens a read-only document with the hash, the self-declared cl
   assert.ok(text.includes(state.hash), 'the bundle hash');
   assert.ok(text.includes(CLEARANCE_SELF_ASSERTED_TEXT));
   assert.ok(text.includes(SCALE_PRESETS_CAVEAT_TEXT));
-  assert.ok(text.includes(gateCommands.POLICY_ROUTING_NOT_LIVE_TEXT));
-  // PR 4b (plan 21): the clearances are checked on reads now; a label does not change where content is sent until plan 24.
-  assert.match(gateCommands.POLICY_ROUTING_NOT_LIVE_TEXT, /checks the clearances below when an agent reads a labelled file/);
-  assert.match(gateCommands.POLICY_ROUTING_NOT_LIVE_TEXT, /does not change where content is sent yet/);
-  assert.doesNotMatch(gateCommands.POLICY_ROUTING_NOT_LIVE_TEXT, /does not use the scales and clearances/);
+  assert.ok(text.includes(gateCommands.POLICY_ROUTING_TEXT));
+  // PR 4c (plan 24): the clearances are checked on reads, and each chat's label decides where its content is sent.
+  assert.match(gateCommands.POLICY_ROUTING_TEXT, /checks the clearances below when an agent reads a labelled file/);
+  assert.match(gateCommands.POLICY_ROUTING_TEXT, /Each chat's label decides where its content is sent/);
+  assert.doesNotMatch(gateCommands.POLICY_ROUTING_TEXT, /does not use the scales and clearances/);
   assert.ok(text.includes(state.bundle.issuer.fingerprint), 'the issuer');
   assert.ok(text.includes(state.expiresAt), 'the expiry');
   assert.ok(text.includes('"bundleVersion": 1'), 'the pretty-printed payload');
   assert.ok(text.includes('anchorRoots') && text.includes('statusLists') && text.includes('maxOfflineAge'), 'the reserved fields');
-  const notUsed = text.indexOf(gateCommands.POLICY_ROUTING_NOT_LIVE_TEXT);
+  const notUsed = text.indexOf(gateCommands.POLICY_ROUTING_TEXT);
   for (const heading of ['\nScales\n', '\nClearances\n', '\nRouting tiers']) {
     const at = text.indexOf(heading);
     assert.ok(at > notUsed, `${heading.trim()} comes after the "not used yet" line`);

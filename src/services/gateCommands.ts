@@ -55,11 +55,11 @@ export const POLICY_SCHEME = 'near-ai-policy';
 export const POLICY_DOCUMENT_URI = `${POLICY_SCHEME}:/NEAR-AI-Policy.txt`;
 
 /**
- * Shown above the scales, clearances and routing (D-49, D-50). From PR 4b the clearances are checked when an agent reads a labelled file; a label does not
- * change where content is sent until plan 24 (PR 4c), which replaces this line when routing by label is live.
+ * Shown above the scales, clearances and routing (D-49, D-50): from PR 4c each chat's label, which rises with what its agents read, decides where its content
+ * is sent. It replaced POLICY_ROUTING_NOT_LIVE_TEXT (PR 4b) when routing by label went live (plan 24).
  */
-export const POLICY_ROUTING_NOT_LIVE_TEXT =
-  'This version checks the clearances below when an agent reads a labelled file. A label does not change where content is sent yet: every model request is routed by the default label and the routing tiers below, and levels that need an attested cloud stay on this computer.';
+export const POLICY_ROUTING_TEXT =
+  "This version checks the clearances below when an agent reads a labelled file. Each chat's label decides where its content is sent, by the routing tiers below. In this version, levels that need an attested cloud stay on this computer.";
 
 export const RESET_CONFIRM_ACTION = 'Reset Policy';
 export const RESET_TITLE = 'Reset your policy to the default?';
@@ -141,7 +141,7 @@ export function policyDocumentText(state: BundleState | undefined, now: number):
   lines.push(
     `  Add-on servers allowed in runs with nobody present: ${bundle.ceiling.unattendedMcp.length === 0 ? 'none' : bundle.ceiling.unattendedMcp.join(', ')}`,
     '',
-    POLICY_ROUTING_NOT_LIVE_TEXT,
+    POLICY_ROUTING_TEXT,
     '',
     `Default label: ${labelKey(bundle.defaultLabel)}`,
     `  ${unlabelledDefaultText(bundle.defaultLabel)}`,
