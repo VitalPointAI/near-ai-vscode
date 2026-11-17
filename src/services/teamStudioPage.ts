@@ -18,7 +18,7 @@ import { knowledgeFile, loadKnowledge } from './teamKnowledgeStore';
 import { buildTeamPackage, cleanKnowledge, importQuestion, MAX_TEAM_PACKAGE_BYTES, readTeamMarkdown, readTeamPackage, shareProblems, TEAM_PACKAGE_EXTENSION, TeamPackageError, type ReadPackage } from '../agent/teamPackage';
 import type { TeamKnowledge } from '../domain/teamKnowledge';
 import { teamRating, withTeamRating } from '../agent/teamFrontMatter';
-import { buildDashboard, legacyRoleTestKey, migrateRoleTests, parseRatings, parseRoleTests, projectIdentity, teamKey, withRating, type CheckCounts, type DashboardTeam, type RatingRecord, type RoleTestRecord, type RunningTeam, type TeamDashboard } from '../domain/teamDashboard';
+import { buildDashboard, legacyRoleTestKey, migrateRoleTests, moveKept, parseRatings, parseRoleTests, projectIdentity, teamKey, withRating, type CheckCounts, type DashboardTeam, type RatingRecord, type RoleTestRecord, type RunningTeam, type TeamDashboard } from '../domain/teamDashboard';
 import type { ActivitySessionSummary } from '../domain/activity';
 import { checkTeamIcon, decodeIconBase64, iconDataUri, iconSourceProblem, iconSourceType, MAX_GENERATED_IMAGE_BYTES, MAX_ICON_SOURCE_BYTES, TeamIconError, TeamIconPartialError, teamIconPrompt, withIconReference, type IconSourceType } from '../agent/teamIcon';
 
@@ -310,7 +310,7 @@ export async function listLibrary(library: TeamLibrary, root: string | undefined
       id: entry.project ? 'project' : `user:${slug}`, kind: entry.project ? 'project' : 'user', file: entry.file,
       name: team?.name ?? slug, description: team?.description ?? '',
       ...(team ? { command: `/team:${entry.project ? 'project' : team.slug} ` } : {}),
-      ...(entry.error ? { error: entry.error } : {}),
+      ...(entry.error ? { error: plainTeamError(entry.error, entry.file) } : {}),
       ...(team && teamIsPrivate(team) ? { private: true } : {}),
       ...(!entry.project && pending.has(path.resolve(entry.file)) ? { imported: true, ...((await library.pendingKind(entry.file))?.kind === 'derived' ? { derived: true } : {}) } : {}),
       ...(template ? { update: { template: template.label, ...(template.fromVersion ? { from: template.fromVersion } : {}), to: template.toVersion, available: !template.stamped || template.fromVersion !== template.toVersion } } : {}),
@@ -335,6 +335,16 @@ function checkCounts(text: string, file: string): CheckCounts | undefined {
     const findings = checkTeam(draftFromMarkdown(text, file), { defaultTools: DEFAULT_TOOLS });
     return { block: findings.filter((finding) => finding.severity === 'block').length, warning: findings.filter((finding) => finding.severity === 'warning').length, advice: findings.filter((finding) => finding.severity === 'advice').length };
   } catch { return undefined; }
+}
+
+/**
+ * Why a team file is not usable, in words the page may show (PR 86 review, round 3): a file-system error names the file's path, so it becomes the plain
+ * reason fileProblem gives; any other message has the file's path replaced by its name.
+ */
+export function plainTeamError(message: string, file: string): string {
+  const code = /^(E[A-Z]+):/.exec(message)?.[1];
+  if (code) return `The team file could not be read${fileProblem({ code })}.`;
+  return [file, path.resolve(file), path.dirname(file)].reduce((text, part) => text.split(part).join(part === path.dirname(file) ? '' : path.basename(file)), message);
 }
 
 /** The listing as the page gets it: everything but the files' paths, which stay here (the page names teams only by the ids it was given). */
@@ -822,6 +832,28 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
   const forgetHistory = () => { historyRead = undefined; };
   /** Rating writes, one after another. */
   let ratingWrites: Promise<unknown> = Promise.resolve();
+  /**
+   * What is kept for a team moves with it (archive, restore), or is dropped for a new team under a name an earlier team had (create, duplicate, import,
+   * a new project team), so a new team never inherits another's stars or health (PR 86 review, round 3). Written in turn with the ratings.
+   */
+  const moveKeptFor = async (from: string | undefined, to: string | undefined) => {
+    if (!from) return;
+    const write = ratingWrites.then(async () => {
+      if (deps.ratings) {
+        const now = parseRatings(deps.ratings.get());
+        const next = moveKept(now, from, to);
+        if (JSON.stringify(next) !== JSON.stringify(now)) await deps.ratings.set(next);
+      }
+      if (deps.roleTests?.set) {
+        const now = parseRoleTests(deps.roleTests.get());
+        const next = moveKept(now, from, to);
+        if (JSON.stringify(next) !== JSON.stringify(now)) await deps.roleTests.set(next as Record<string, RoleTestRecord>);
+      }
+    });
+    ratingWrites = write.catch(() => undefined);
+    await write.catch(() => undefined);
+  };
+  const userKey = (file: string) => `user:${slugify(path.basename(file, '.md'))}`;
   /** The dashboard last worked out, which Watch it live reads its run from. */
   let lastDashboard: TeamDashboard | undefined;
   const load = async () => {
@@ -1061,6 +1093,9 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
     await deps.library.snapshot(file);
     // The project's own consent is asked before it first runs, as for any project team; its question says the members came from that import.
     await deps.library.setProjectDerived(file, unapprovedFrom);
+    // A new project team: the replaced team's stars and health are not its own.
+    const project = await projectId();
+    await moveKeptFor(project ? `project:${project}` : undefined, undefined);
     if (projectType) await deps.applyProjectType(root, projectType.type, projectType.goal);
     return file;
   };
@@ -1334,6 +1369,7 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
             }
             // A built-in with no project: chat runs teams by their file, so it is saved to My teams first, under its own name.
             const file = await deps.library.create(name, markdown);
+            await moveKeptFor(userKey(file), undefined);
             if (unapprovedFrom !== undefined) await deps.library.markImported(file, 'derived', unapprovedFrom);
             const slug = path.basename(file, '.md');
             unsaved = {};
@@ -1421,6 +1457,7 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
           id = 'project';
         } else {
           file = await deps.library.create(message.draft.name.trim(), markdown);
+          await moveKeptFor(userKey(file), undefined);
           if (unapprovedFrom !== undefined) await deps.library.markImported(file, 'derived', unapprovedFrom);
           id = `user:${slugify(path.basename(file, '.md'))}`;
           created = true;
@@ -1498,6 +1535,7 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
         const name = (await deps.ask('Name for the copy', `${team.name} copy`))?.trim();
         if (!name) return;
         const copy = await deps.library.duplicate(file, name.slice(0, 80));
+        await moveKeptFor(userKey(copy), undefined);
         await refreshLibrary();
         post({ type: 'notice', text: `Duplicated as "${name}".`, focus: `user:${slugify(path.basename(copy, '.md'))}` });
         return;
@@ -1506,7 +1544,8 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
         const file = fileFor(message.id, ['user']);
         if (!file) return;
         const name = teamFor(message.id)?.name ?? path.basename(file, '.md');
-        await deps.library.archive(file);
+        const archived = await deps.library.archive(file);
+        await moveKeptFor(userKey(file), `archived:${slugify(path.basename(archived, '.md'))}`);
         if (open?.id === message.id) open = undefined;
         await refreshLibrary();
         post({ type: 'notice', text: `Archived "${name}". Restore it from Archived teams.` });
@@ -1516,6 +1555,7 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
         const file = fileFor(message.id, ['archived']);
         if (!file) return;
         const restored = await deps.library.restore(file);
+        await moveKeptFor(`archived:${slugify(path.basename(file, '.md'))}`, userKey(restored));
         await refreshLibrary();
         post({ type: 'notice', text: `Restored "${path.basename(restored, '.md')}".`, focus: `user:${slugify(path.basename(restored, '.md'))}` });
         return;
@@ -1537,6 +1577,7 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
         if (await choose(importQuestion(read), 'Add to my teams') !== 'Add to my teams') { post({ type: 'notice', text: 'Nothing was imported.' }); return; }
         // Someone else's rating is not the person's own: it is left out, so the card shows only ratings they gave.
         const file = await deps.library.importTeam(read.team.name, withTeamRating(read.markdown, undefined));
+        await moveKeptFor(userKey(file), undefined);
         // 0.4.30: the icon the file carried, checked when it was read, goes beside the new team under its own name. Without one, the imported text's
         // icon line is removed, so it can never show an icon file it happens to name (one left in the library folder, say).
         let iconNote = '';

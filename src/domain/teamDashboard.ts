@@ -42,7 +42,11 @@ export interface TeamRunStats {
 }
 
 /** The last role test of a team (Optimise all teams, or the final step of adding one): scores only, no model names, no task text. */
-export interface RoleTestRecord { at: string; members: number; tested: number; score: number }
+/**
+ * `tested`: members with a usable run; `passed`: members whose best run had full marks, the pass mark the model comparisons count a pass by (PR 86
+ * review, round 3: any finished run counted as passed, a score of 0 included). Absent in a record kept before passes were counted.
+ */
+export interface RoleTestRecord { at: string; members: number; tested: number; passed?: number; score: number }
 export interface CheckCounts { block: number; warning: number; advice: number }
 export interface HealthPart { id: 'check' | 'role-tests'; label: string; score?: number; detail: string }
 export interface TeamHealth { score?: number; parts: HealthPart[] }
@@ -156,7 +160,10 @@ export function teamHealth(check: CheckCounts | undefined, roleTest?: RoleTestRe
     const found = [check.warning ? plural(check.warning, 'problem') : '', check.advice ? plural(check.advice, 'suggestion') : ''].filter(Boolean).join(' and ');
     parts.push({ id: 'check', label: 'Local check', score, detail: found ? `${found}. Open the team to see them.` : 'No problems found.' });
   }
-  if (roleTest && !error) parts.push({ id: 'role-tests', label: 'Role tests', score: roleTest.score, detail: `${roleTest.tested} of ${roleTest.members} members passed a role test, ${roleTest.score}% on average (${roleTest.at.slice(0, 10)}).` });
+  if (roleTest && !error) {
+    const counted = roleTest.passed !== undefined ? `${roleTest.passed} of ${roleTest.members} members passed their role test` : `${roleTest.tested} of ${roleTest.members} members were tested`;
+    parts.push({ id: 'role-tests', label: 'Role tests', score: roleTest.score, detail: `${counted}, ${roleTest.score}% on average (${roleTest.at.slice(0, 10)}).` });
+  }
   else parts.push({ id: 'role-tests', label: 'Role tests', detail: 'Not tested yet. Optimise all teams tests each member\'s role.' });
   const scored = parts.flatMap((part) => (part.score === undefined ? [] : [part.score]));
   return { ...(scored.length ? { score: Math.round(scored.reduce((sum, value) => sum + value, 0) / scored.length) } : {}), parts };
@@ -168,9 +175,10 @@ export function roleTestSummary<T extends { results: ReadonlyArray<{ score: numb
   const share = (value: number) => Math.min(1, Math.max(0, Number.isFinite(value) ? value : 0));
   const best = outcomes.map((outcome) => Math.max(0, ...outcome.results.filter((result) => !result.failed && result.outOf > 0).map((result) => share(result.score / result.outOf))));
   const tested = outcomes.filter((outcome) => outcome.results.some((result) => !result.failed && result.outOf > 0)).length;
+  const passed = outcomes.filter((outcome) => outcome.results.some((result) => !result.failed && result.outOf > 0 && result.score >= result.outOf)).length;
   const count = Math.max(members, outcomes.length);
   const score = count ? Math.round((100 * best.reduce((sum, value) => sum + value, 0)) / count) : 0;
-  return { at, members: Math.min(100, count), tested: Math.min(100, tested), score: Math.min(100, Math.max(0, score)) };
+  return { at, members: Math.min(100, count), tested: Math.min(100, tested), passed: Math.min(100, passed), score: Math.min(100, Math.max(0, score)) };
 }
 
 /** The key role tests were kept under before PR 86's review: a hash of the team file's path. Read only, to move them to the team's identity once. */
@@ -197,7 +205,21 @@ export function teamKey(team: { kind: 'project' | 'user'; slug: string }, projec
   return `user:${team.slug}`;
 }
 
-const TEAM_KEY = /^(?:user:[a-z0-9][a-z0-9-]{0,60}|project:[0-9a-f]{16})$/;
+/** `archived:<slug>`: a team in the archive keeps its rating and role test there, and gets them back on Restore (PR 86 review, round 3). */
+const TEAM_KEY = /^(?:(?:user|archived):[a-z0-9][a-z0-9-]{0,60}|project:[0-9a-f]{16})$/;
+
+/**
+ * What is kept for a team (its rating and role test) moved to another key (archive, restore), or dropped (`to` undefined: a new team under a name a team
+ * had before, which must not inherit it). A record already under `to` is replaced: the team moving there is the one it describes now.
+ */
+export function moveKept<T>(records: Record<string, T>, from: string, to: string | undefined): Record<string, T> {
+  const next = { ...records };
+  const record = next[from];
+  if (to === undefined) { delete next[from]; return next; }
+  delete next[to];
+  if (record !== undefined) { next[to] = record; delete next[from]; }
+  return next;
+}
 const LEGACY_KEY = /^[0-9a-f]{16}$/;
 
 /** Role tests kept under the old path keys, moved to the teams' identities: a record already under the new key (newer) is kept. Done once. */
@@ -256,7 +278,8 @@ export function parseRoleTests(value: unknown): Record<string, RoleTestRecord> {
     if (!(TEAM_KEY.test(key) || LEGACY_KEY.test(key)) || !entry || typeof entry !== 'object') continue;
     const record = entry as Record<string, unknown>;
     if (typeof record.at !== 'string' || time(record.at) === undefined || !count(record.members, 100) || !count(record.tested, 100) || !count(record.score, 100)) continue;
-    records[key] = { at: record.at, members: record.members, tested: record.tested, score: record.score };
+    if (record.passed !== undefined && (!count(record.passed, 100) || record.passed > record.tested)) continue;
+    records[key] = { at: record.at, members: record.members, tested: record.tested, ...(record.passed !== undefined ? { passed: record.passed as number } : {}), score: record.score };
   }
   return records;
 }

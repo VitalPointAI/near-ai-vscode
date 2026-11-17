@@ -3728,12 +3728,13 @@ test('page: the health score shows the parts it is made of: the local check and 
   const studio = context();
   const teams = [{ id: 'user:web', kind: 'user', name: 'Web team', description: 'Builds pages', command: '/team:web ', check: { block: 0, warning: 2, advice: 1 }, members: [member('lead', 'tee')] }];
   const dashboard = buildDashboard({ now: Date.now(), history: true, sessions: [], running: [], roleTests: { k: { at: '2026-11-10T00:00:00.000Z', members: 1, tested: 1, score: 70 } }, teams: [{ id: 'user:web', kind: 'user', slug: 'web', file: '/x/web.md', check: teams[0]!.check, members: [] }] });
-  dashboard.cards['user:web']!.health = (await import('../domain/teamDashboard')).teamHealth(teams[0]!.check, { at: '2026-11-10T00:00:00.000Z', members: 1, tested: 1, score: 70 });
+  dashboard.cards['user:web']!.health = (await import('../domain/teamDashboard')).teamHealth(teams[0]!.check, { at: '2026-11-10T00:00:00.000Z', members: 1, tested: 1, passed: 0, score: 70 });
   page.dispatch({ type: 'state', context: studio, library: { teams, archived: [] }, dashboard });
   const text = page.text();
   assert.match(text, /Health68 out of 100/);
   assert.match(text, /Local check: 65\. 2 problems and 1 suggestion\. Open the team to see them\./);
-  assert.match(text, /Role tests: 70\. 1 of 1 members passed a role test, 70% on average \(2026-11-10\)\./);
+  // PR 86 review, round 3: a member passes with full marks, so 70% is tested, not passed.
+  assert.match(text, /Role tests: 70\. 0 of 1 members passed their role test, 70% on average \(2026-11-10\)\./);
 });
 
 test('page: the star rating is set on the card, saved through the host, kept after a reload, and works from the keyboard and a screen reader', async () => {

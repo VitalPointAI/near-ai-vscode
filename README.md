@@ -649,8 +649,11 @@ until it runs out aren't shown.
   rating never goes into the project or a code push. Ratings and role tests
   are kept by the team's identity: a team in My teams by its name there, a
   project's team by the project folder's real path. A `rating:` line an
-  earlier build wrote into a team file is read once and left in place;
-  sharing or importing a team leaves such a line out. Sort by **Most used**, **Recently run**, **Rating** or **Name**, or
+  earlier build wrote into a team file is read once and left in place.
+  Archiving a team keeps its stars and health for Restore, and a new team
+  under the same name starts without them. A member passes its role test
+  only with full marks, as the model comparisons count a pass.
+  Sharing or importing a team leaves out any `rating:` line. Sort by **Most used**, **Recently run**, **Rating** or **Name**, or
   show only the teams that need attention; Team Studio remembers your choice
   on this computer. Running
   now and the stats change as a team run starts or ends. With a project open

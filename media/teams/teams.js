@@ -451,7 +451,9 @@
       // library's own box is one of the person's teams, as before (PR #75 review).
       // Either ends the wait: the host stops keeping the drafted team.
       button('Use this team', () => { const from = proposal; const target = askTarget; proposal = null; askTarget = 'user'; vscode.postMessage({ type: 'proposal-done' }); startWizard(target, null, from); }, { primary: true }),
-      button('Start over', () => { proposal = null; drafting = false; askTarget = 'user'; vscode.postMessage({ type: 'proposal-done' }); render(); }, { link: true })
+      // Start over stays on the AI start, so it keeps where that start saves (PR 86 review, round 3): only entering the AI start sets the target, and only
+      // leaving it clears it.
+      button('Start over', () => { proposal = null; drafting = false; vscode.postMessage({ type: 'proposal-done' }); render(); }, { link: true })
     );
     box.append(actions);
     return box;

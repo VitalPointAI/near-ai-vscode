@@ -22,7 +22,9 @@
   can give a team 1 to 5 stars on its card, with the keyboard or the mouse. Your rating is kept on
   this computer only, never in the team file, so a project team's rating never goes into the
   project or a code push. Teams are kept by a stable name (a project's team by its folder, even
-  when opened through a link), so ratings and role tests stay with the team.
+  when opened through a link), so ratings and role tests stay with the team. Archiving a team keeps
+  them for **Restore**, and a new team with the same name starts without them. A member counts as
+  passing its role test only with full marks.
 - **Sort, filter, and live updates.** Sort the cards by **Most used**, **Recently run**,
   **Rating** or **Name**, or show only the teams that need attention; Team Studio remembers your
   choice. Running now and the stats change as soon as a team run starts or ends.
