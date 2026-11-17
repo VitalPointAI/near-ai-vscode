@@ -226,3 +226,50 @@ test('a classifier or resolver that throws makes the call ask with a person and 
   const plain = await gated(testGateRuntime({ presence: 'none', context: 'unattended' }), root, 'git status');
   assert.equal(plain.decision.outcome, 'allow');
 });
+
+// ---------------------------------------------------------------------------------------------------------------------------------------------------
+// The deny list and the emergency stop still decide first (D-10): a command whose effects are unknown, for any of the reasons above, is refused, never
+// asked about, when it matches a deny rule or the emergency stop is on. A person must not be able to approve a denied command.
+// ---------------------------------------------------------------------------------------------------------------------------------------------------
+
+/** Every way a shell call's effects become unknown, each with a command that also matches the default deny rule `git push --force`. */
+const UNKNOWN_CAUSES: ReadonlyArray<{ cause: string; command: string; readers?: FloorReaders }> = [
+  { cause: 'nested past the bound', command: `${'if '.repeat(MAX_NESTING + 2)}git push --force` },
+  { cause: 'thousands deep', command: `${'sudo '.repeat(5000)}git push --force` },
+  { cause: 'too long', command: `git push --force # ${'x'.repeat(MAX_COMMAND_LENGTH)}` },
+  { cause: 'too many words', command: `ls ${'a '.repeat(MAX_COMMAND_WORDS)}&& git push --force` },
+  { cause: 'the classifier throws', command: 'git push --force', readers: { classify: () => { throw new RangeError('Maximum call stack size exceeded'); } } },
+  { cause: 'the resolver throws', command: 'git push --force', readers: { reach: async () => { throw new Error('resolver failed'); } } }
+];
+const MODES = ['approve-risky', 'mostly-autonomous', 'auto', 'fully-autonomous'] as const;
+
+async function gatedIn(mode: (typeof MODES)[number], command: string, readers: FloorReaders | undefined, emergencyStop = false, rules = DEFAULT_RULES) {
+  const root = project();
+  return gateToolCall(testGateRuntime({ presence: 'person', context: 'interactive' }), {
+    tool: bashTool, raw: { command }, root, callId: `call-${Math.random()}`, command,
+    policy: { mode, emergencyStop }, rules, grants: new RunGrants(), shell: { cwd: root }, buildAuto: async () => undefined
+  }, readers === undefined ? {} : { floorReaders: readers });
+}
+
+test('the deny rule matches every one of these commands, however long, so the deny list can always be applied', () => {
+  assert.ok(DEFAULT_RULES.denyCommands.includes('git push --force'));
+  for (const { cause, command } of UNKNOWN_CAUSES) assert.ok(command.includes('git push --force'), cause);
+});
+
+for (const { cause, command, readers } of UNKNOWN_CAUSES) {
+  test(`unknown effects (${cause}): a deny-listed command is refused in every mode with a person there, and the emergency stop refuses it too`, async () => {
+    for (const mode of MODES) {
+      const denied = await gatedIn(mode, command, readers);
+      assert.equal(denied.decision.outcome, 'deny', `${cause}, ${mode}: refused, not asked`);
+      assert.equal(denied.decision.rule, 'settings.deny-list', `${cause}, ${mode}`);
+      assert.match(denied.decision.reason ?? '', /deny list/);
+      const stopped = await gatedIn(mode, command, readers, true);
+      assert.equal(stopped.decision.outcome, 'deny', `${cause}, ${mode}, emergency stop`);
+      assert.equal(stopped.decision.rule, 'settings.emergency-stop');
+      // The same command with no deny rule is still asked about (its effects are unknown): the refusal above is the deny list's, not the cause's.
+      const asked = await gatedIn(mode, command, readers, false, { ...DEFAULT_RULES, denyCommands: [] });
+      assert.equal(asked.decision.outcome, 'ask', `${cause}, ${mode}, no deny rule`);
+      assert.equal(asked.decision.rule, 'manifest.effects-unknown');
+    }
+  });
+}

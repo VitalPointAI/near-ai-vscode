@@ -342,3 +342,28 @@ test('a call whose effects are unknown is still refused with no card when what i
   const forbidden = await decide(requestFor([], { forbidden: 'Planted.' }), validBundleState(), allows);
   assert.equal(forbidden.rule, 'manifest.effects-unknown');
 });
+
+// PR #74 review round 1 (D-10): a refusal the settings layer has already made (the deny list, an engagement's scope), handed in on the request, decides
+// before every step that could only ask: unknown effects, a floor ask, a taint hold, a sensitive read and the settings layer's own ask. A person is never
+// shown a card for a call the deny list refuses. The emergency stop still comes first of all.
+test('a settings refusal on the request beats every ask, and the emergency stop beats it', async () => {
+  const refusal = { rule: 'settings.deny-list', reason: '"git push --force" is on your deny list (nearAi.agent.denyCommands).' };
+  const asks: SettingsLayer = async (): Promise<SettingsAnswer> => ({ decision: 'ask', rule: 'settings.mode.other' });
+  const cases: Array<[string, GateRequest, SettingsLayer]> = [
+    ['unknown effects', requestFor([], { tool: 'Bash', command: 'git push --force' }), allows],
+    ['a floor ask', requestFor([write(['.git/hooks/pre-commit'])]), allows],
+    ['a taint hold', requestFor([write(['src/app.ts'])], { risky: 'This run read outside content.' }), allows],
+    ['a sensitive read', requestFor([write(['src/app.ts'])], { sensitive: 'It reads .env.', policy: policyOf('auto') }), allows],
+    ['the settings layer asking', requestFor([write(['src/app.ts'])]), asks]
+  ];
+  for (const [name, request, layer] of cases) {
+    const before = await decide(request, validBundleState(), layer);
+    assert.equal(before.outcome, 'ask', `${name} asks without the refusal`);
+    const refused = await decide({ ...request, settingsRefusal: refusal }, validBundleState(), layer);
+    assert.equal(refused.outcome, 'deny', `${name}: refused`);
+    assert.equal(refused.rule, 'settings.deny-list', name);
+    assert.equal(refused.reason, refusal.reason, name);
+    const stopped = await decide({ ...request, settingsRefusal: refusal, policy: { ...request.policy, emergencyStop: true } }, validBundleState(), layer);
+    assert.equal(stopped.rule, 'settings.emergency-stop', `${name}: the emergency stop first`);
+  }
+});

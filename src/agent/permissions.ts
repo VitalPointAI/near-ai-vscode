@@ -199,10 +199,8 @@ export function decidePermission(capability: ActionCapability, command: string |
     return { decision: 'ask' };
   }
   if (capability === 'shell') {
-    // The deny list is a backstop, not a sandbox: matched with quotes and escapes removed.
-    const unquoted = normalizeCommand((command ?? '').replace(/["'\\]/g, ''));
-    const denied = rules.denyCommands.find((pattern) => pattern && unquoted.includes(normalizeCommand(pattern)));
-    if (denied) return { decision: 'deny', reason: `"${denied}" is on your deny list (nearAi.agent.denyCommands).` };
+    const denied = denyListReason(command, rules);
+    if (denied) return { decision: 'deny', reason: denied };
     // The engagement grant sits between the deny list and the per-command grants: an intrusive
     // step of the granted engagement runs without a card, an out-of-scope one is refused.
     const intrusion = intrusiveGrantDecision(grants, intrusive);
@@ -220,6 +218,17 @@ export function decidePermission(capability: ActionCapability, command: string |
     return { decision: 'ask' };
   }
   return policy.mode === 'fully-autonomous' ? { decision: 'allow' } : { decision: 'ask' };
+}
+
+/**
+ * Why a shell command is on the deny list, or undefined. The deny list is a backstop, not a sandbox: a pattern matches anywhere in the command, with quotes
+ * and escapes removed and spaces collapsed. The match reads the whole text whatever its length (a plain substring search, no cap), so it applies to a
+ * command the classifier is too long or too deep to read; the gate asks it before any step that could only ask (D-10).
+ */
+export function denyListReason(command: string | undefined, rules: Pick<PermissionRules, 'denyCommands'>): string | undefined {
+  const unquoted = normalizeCommand((command ?? '').replace(/["'\\]/g, ''));
+  const denied = rules.denyCommands.find((pattern) => pattern && unquoted.includes(normalizeCommand(pattern)));
+  return denied ? `"${denied}" is on your deny list (nearAi.agent.denyCommands).` : undefined;
 }
 
 /**

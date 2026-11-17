@@ -48,6 +48,13 @@ export interface GateRequest extends FloorInput {
   /** The MCP server id, when the tool is an MCP tool. */
   readonly mcpServer?: string;
   readonly labelVerdict?: LabelVerdict;
+  /**
+   * A refusal the settings layer makes whatever else is true, worked out by the caller before the gate runs: the deny list for a shell command, or a
+   * settings answer that is already a deny (an engagement's scope). It is decided before every step that could only ask (unknown effects, the floor's
+   * asks, holds, the settings layer's own ask), so a person is never shown a card for a call it refuses (D-10, PR #74 review). The emergency stop, the
+   * bundle state and the floor's own refusals still come first.
+   */
+  readonly settingsRefusal?: { readonly rule: string; readonly reason: string };
 }
 
 export interface SettingsAnswer {
@@ -179,8 +186,8 @@ function ceilingRefusal(request: GateRequest, bundleState: Extract<BundleState, 
 /**
  * The one decision (GATE-04). `bundleState` is what the caller last verified; `settings` is today's permission logic. The floor is always enforced (D-19):
  * a floor refusal has no card, and a floor ask has no "always allow" and no run-wide grant, in every mode, fully-autonomous included.
- * Order: emergency stop, bundle state, unknown effects (after the floor's refusals of what such a call names), the floor's refusals, bundle ceiling, labels,
- * settings layer, the floor's asks. A refusal from an earlier layer is never undone by a later one, and
+ * Order: emergency stop, bundle state, unknown effects (after the floor's refusals of what such a call names and a settings refusal on the request), the
+ * floor's refusals, bundle ceiling, labels, a settings refusal on the request, settings layer, the floor's asks. A refusal from an earlier layer is never undone by a later one, and
  * a deny from the settings layer (the deny list) still beats a floor ask.
  */
 export async function decide(request: GateRequest, bundleState: BundleState, settings: SettingsLayer, options: GateOptions = {}): Promise<GateDecision> {
@@ -199,6 +206,8 @@ export async function decide(request: GateRequest, bundleState: BundleState, set
     // asked about. (The loop's own `forbidden` refusal is the loop's, and it refuses that call itself.)
     const named = floorFor({ effects: [], ...(request.command === undefined ? {} : { command: request.command }), ...(request.floorFacts === undefined ? {} : { floorFacts: request.floorFacts }) }, options.locations);
     if (named !== undefined && named.kind === 'refuse') return make('deny', named.rule, 'approve-risky', { reason: named.reason, floor: true });
+    // The deny list decides before a person is asked about effects nobody can read (D-10): a denied command is never put in front of a person.
+    if (request.settingsRefusal !== undefined) return make('deny', request.settingsRefusal.rule, 'approve-risky', { reason: request.settingsRefusal.reason });
     const person = request.presence === 'person' && request.context === 'interactive';
     return person
       ? make('ask', 'manifest.effects-unknown', 'approve-risky', { reason: `NEAR AI cannot tell what ${shown(request.tool)} would do with this call, so it needs your answer.` })
@@ -212,6 +221,8 @@ export async function decide(request: GateRequest, bundleState: BundleState, set
     if (refusal !== undefined) return make('deny', refusal.rule, mode, { reason: refusal.reason });
   }
   if (request.labelVerdict !== undefined) return make('deny', request.labelVerdict.rule, mode, { reason: request.labelVerdict.reason });
+  // A refusal the settings layer has already made decides here, before every ask below, whatever the layer would answer now (D-10).
+  if (request.settingsRefusal !== undefined) return make('deny', request.settingsRefusal.rule, mode, { reason: request.settingsRefusal.reason });
   const answer = await settings(request, { ...policy, mode });
   if (answer.decision === 'deny') return make('deny', answer.rule, mode, answer.reason === undefined ? {} : { reason: answer.reason });
   if (verdict !== undefined && verdict.kind === 'ask') {

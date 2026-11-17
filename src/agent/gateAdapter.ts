@@ -21,7 +21,7 @@ import { fromActionCapability } from '../domain/gate/vocabulary';
 import type { Capability } from '../domain/gate/vocabulary';
 import { classifyCommand, downloadSegments } from './commandSafety';
 import type { CommandEffect } from './commandSafety';
-import { decidePermissionAsync, isAutoAllowed } from './permissions';
+import { decidePermissionAsync, denyListReason, isAutoAllowed } from './permissions';
 import type { AutoApprovalContext, PermissionDecision, PermissionRules, RunGrants } from './permissions';
 import { shellReachesCredentialStore } from './tools';
 import type { AgentTool } from './tools';
@@ -563,6 +563,9 @@ export async function gateToolCall(runtime: GateRuntime, input: GateCallInput, o
   // A command the floor could not read whole has unknown effects, whatever the manifest says: decide() asks about it with a person and refuses it with nobody.
   const effects = read?.effectsUnknown !== undefined ? [] : withCommandEffects(declared, read?.effects ?? []);
   const floorFacts: FloorFacts = { ...(input.tool.capability === 'sharedWrite' ? { sharedWrite: true } : {}), ...paths.facts, ...(read?.facts ?? {}) };
+  // The deny list is read here, before the gate, so it refuses a shell command before any step that could only ask, unknown effects included (D-10). It
+  // reads the whole text, so a command too long or too deep for the classifier is still matched.
+  const denied = input.tool.capability === 'shell' && input.command !== undefined ? denyListReason(input.command, input.rules) : undefined;
   const request: GateRequest = {
     actor: runtime.actor,
     tool: input.tool.name,
@@ -576,7 +579,8 @@ export async function gateToolCall(runtime: GateRuntime, input: GateCallInput, o
     ...(input.forbidden === undefined || input.forbidden === '' ? {} : { forbidden: input.forbidden }),
     ...(input.sensitive === undefined || input.sensitive === '' ? {} : { sensitive: input.sensitive }),
     ...(input.risky === undefined || input.risky === '' ? {} : { risky: input.risky }),
-    ...(Object.keys(floorFacts).length === 0 ? {} : { floorFacts })
+    ...(Object.keys(floorFacts).length === 0 ? {} : { floorFacts }),
+    ...(denied === undefined ? {} : { settingsRefusal: { rule: 'settings.deny-list', reason: denied } })
   };
   const captured: { value?: PermissionDecision } = {};
   const layer = options.refusal === undefined ? settingsLayerFor(input, captured) : refusalLayer(options.refusal);
@@ -680,7 +684,9 @@ export async function gateStep(runtime: GateRuntime, input: GateStepInput, optio
     policy: input.policy,
     ...(input.manifestContexts === undefined ? {} : { manifestContexts: input.manifestContexts }),
     ...(input.command === undefined ? {} : { command: input.command }),
-    ...(input.floorFacts === undefined || Object.keys(input.floorFacts).length === 0 ? {} : { floorFacts: input.floorFacts })
+    ...(input.floorFacts === undefined || Object.keys(input.floorFacts).length === 0 ? {} : { floorFacts: input.floorFacts }),
+    // A step the caller's settings already refuse (its deny list, an engagement's scope) is refused before any ask, unknown effects included (D-10).
+    ...(input.settings.decision === 'deny' ? { settingsRefusal: { rule: input.settings.rule, reason: input.settings.reason ?? 'Your settings refuse this step.' } } : {})
   };
   const answered: SettingsAnswer = options.refusal === undefined ? input.settings : { decision: 'deny', reason: options.refusal.reason, rule: options.refusal.rule };
   const decision = await decideOrRefuse(options.refusal, input.policy.mode, () => decide(request, runtime.bundleState(), async () => answered, gateOptionsOf(runtime)));
