@@ -16,6 +16,8 @@ import { newConversationId, spendAccountOf } from './agentSession';
 import { PARTICIPANT_ID, recordParticipantTurn, recordSeed, resolveParticipantThread, ResponseRecorder, USAGE_FOOTER_TAIL, type ReplyOutcome, type ResolvedThread } from './participantRecorder';
 import { editorWriter } from './stateHome';
 import { threadStoreFor } from './threadStore';
+import type { GateHost } from '../gate/host';
+import { defaultSessionRoute, sessionRouteFrom, withSessionRoute } from '../gate/sessionMark';
 
 export { PARTICIPANT_ID };
 
@@ -31,7 +33,7 @@ export const OPEN_THREAD_TITLE = 'Open this chat in the NEAR AI panel';
  * `@nearAi` in VS Code's built-in Chat view. Plain prompts stream from NEAR AI Cloud;
  * slash commands run the matching Open-GSD workflow in the open workspace.
  */
-export function registerChatParticipant(context: vscode.ExtensionContext, auth: AuthService, runInSidebar: (command: string, args: string) => Promise<void>): void {
+export function registerChatParticipant(context: vscode.ExtensionContext, auth: AuthService, runInSidebar: (command: string, args: string) => Promise<void>, gateHost?: Pick<GateHost, 'runtimeFor'>): void {
   if (typeof vscode.chat?.createChatParticipant !== 'function') return;
   const participant = vscode.chat.createChatParticipant(PARTICIPANT_ID, async (request, chatContext, stream, token): Promise<ParticipantResult> => {
     const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
@@ -54,7 +56,7 @@ export function registerChatParticipant(context: vscode.ExtensionContext, auth: 
         response.button({ command: 'nearAi.openChat', title: 'Show NEAR AI' });
       }
     } else {
-      ({ model, outcome } = await answerWithNearAi(auth, root, request.prompt, historyFromChatContext(chatContext.history), response, token));
+      ({ model, outcome } = await answerWithNearAi(auth, root, request.prompt, historyFromChatContext(chatContext.history), response, token, gateHost));
     }
     if (store && thread) {
       try {
@@ -88,7 +90,7 @@ export function registerChatParticipant(context: vscode.ExtensionContext, auth: 
   context.subscriptions.push(participant);
 }
 
-async function answerWithNearAi(auth: AuthService, root: string | undefined, prompt: string, history: ConversationTurn[], response: ResponseRecorder, token: vscode.CancellationToken): Promise<{ model: string; outcome: ReplyOutcome }> {
+async function answerWithNearAi(auth: AuthService, root: string | undefined, prompt: string, history: ConversationTurn[], response: ResponseRecorder, token: vscode.CancellationToken, gateHost?: Pick<GateHost, 'runtimeFor'>): Promise<{ model: string; outcome: ReplyOutcome }> {
   const notSent = { model: '', outcome: 'not-sent' as const };
   if (!root) {
     response.markdown('Open a folder first. NEAR AI keys and profiles are scoped to a project.');
@@ -131,8 +133,11 @@ async function answerWithNearAi(auth: AuthService, root: string | undefined, pro
   response.progress(`Asking ${model}…`);
   try {
     const route = clientFor(active, model);
-    // Recorded in the key's spend ledger as a chat view request.
-    await withSpendTag({ kind: 'participant', conversationId: session.sessionId }, async () => {
+    // CLAS-06: a person asked here, so the request is routed (and recorded) as the person's, in the project's log. With no gate host it is decided with the
+    // default route.
+    const runtime = await gateHost?.runtimeFor({ root, actor: { kind: 'person', sessionId: session.sessionId }, presence: 'person', context: 'interactive' });
+    const sessionRoute = runtime ? sessionRouteFrom(runtime) : defaultSessionRoute();
+    const send = async (): Promise<void> => {
       for await (const event of route.client.streamChatEvents(model, [...history, { role: 'user', content: prompt }], abort.signal)) {
         if (event.type === 'text') response.answer(event.text);
         else if (event.type === 'done') {
@@ -158,7 +163,9 @@ async function answerWithNearAi(auth: AuthService, root: string | undefined, pro
           await activity.append(session.sessionId, { status: 'cancelled', summary: 'Chat request cancelled by the user.' });
         }
       }
-    });
+    };
+    // Recorded in the key's spend ledger as a chat view request.
+    await withSpendTag({ kind: 'participant', conversationId: session.sessionId }, () => withSessionRoute(sessionRoute, send));
   } catch (error) {
     if (!abort.signal.aborted) {
       failed = true;

@@ -9,6 +9,7 @@ import path from 'node:path';
 import test from 'node:test';
 import type { DecisionRecord } from '../domain/gate/record';
 import { DECISIONS_DIR, projectLogKey } from '../gate/decisionLog';
+import { defaultSessionRoute, setDefaultSessionRoute } from '../gate/sessionMark';
 import { MemorySecrets } from './helpers/teamHarness';
 import { createFakeContext, createVscodeStub, installVscodeStub } from './helpers/vscodeStub';
 
@@ -88,4 +89,28 @@ test('activation starts the gate once, before Team Mode', () => {
   const teamAt = source.indexOf('registerTeamMode(context)');
   assert.equal(source.split('registerGate(').length - 1, 1);
   assert.ok(gateAt > 0 && teamAt > gateAt, 'registerGate comes before registerTeamMode');
+});
+
+// PR 4a review round 1: the default session route is the host's while the extension is active, cleared at deactivation (the context's subscriptions are
+// disposed), and a host that was replaced never clears its replacement's.
+test('the default session route is set at activation, cleared at deactivation, and an old host\'s clearing leaves its replacement\'s', async () => {
+  const storage = await mkdtemp(path.join(tmpdir(), 'near-ai-gate-route-'));
+  const dispose = (context: { subscriptions: Array<{ dispose(): unknown }> }): void => { for (const item of context.subscriptions) item.dispose(); };
+  // The earlier tests in this file activate hosts and never deactivate them, so this one starts from nothing set.
+  setDefaultSessionRoute(undefined);
+  assert.equal(defaultSessionRoute().sink, undefined, 'nothing set: the failed-closed route that records nowhere');
+  const first = createFakeContext(storage, new MemorySecrets());
+  const firstHost = gateCommands.registerGate(first as never, { notify: () => undefined });
+  assert.ok(defaultSessionRoute().sink, 'the host\'s route, which records');
+  dispose(first);
+  assert.equal(defaultSessionRoute().sink, undefined, 'cleared at deactivation');
+  const older = createFakeContext(storage, new MemorySecrets());
+  gateCommands.registerGate(older as never, { notify: () => undefined });
+  const newer = createFakeContext(storage, new MemorySecrets());
+  gateCommands.registerGate(newer as never, { notify: () => undefined });
+  dispose(older);
+  assert.ok(defaultSessionRoute().sink, 'the replaced host did not clear its replacement\'s route');
+  dispose(newer);
+  assert.equal(defaultSessionRoute().sink, undefined);
+  await firstHost.flush();
 });

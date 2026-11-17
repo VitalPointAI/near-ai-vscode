@@ -15,10 +15,15 @@ import type { SecretStorageLike } from '../services/auth';
 import { ensurePolicyBundle, resetPolicyToDefaults } from './bundleStore';
 import type { BundleEvent, BundleResult } from './bundleStore';
 import { readLastValid } from './clockMarker';
+import { isModelRequestRecord } from '../domain/gate/record';
 import { DecisionLog, INSTALL_LOG_KEY, projectLogKey } from './decisionLog';
+import type { LogKind } from './decisionLog';
+import type { SessionRoute } from './sessionMark';
 
 const DEVICE_UNKNOWN = 'device-unknown';
 const POLICY_SESSION = 'policy';
+/** The session id of a model request made outside every session route. */
+export const NO_SESSION_ID = 'no-session';
 const START_FAILED_DETAIL = 'The policy check threw before it could finish.';
 
 /**
@@ -27,6 +32,26 @@ const START_FAILED_DETAIL = 'The policy check threw before it could finish.';
  * for that folder opens it again. Folder changes let go of closed folders' logs sooner (retainProjectLogs).
  */
 export const MAX_PROJECT_LOGS = 8;
+
+/** Where a model-request log sits in the host's map of open logs: its key with this prefix, so it never shares a slot with the decision log of the same key. */
+const MODEL_REQUEST_SLOT = 'model-requests:';
+
+function slotOf(kind: LogKind, key: string): string {
+  return kind === 'decisions' ? key : `${MODEL_REQUEST_SLOT}${key}`;
+}
+
+function kindOfSlot(slot: string): LogKind {
+  return slot.startsWith(MODEL_REQUEST_SLOT) ? 'model-requests' : 'decisions';
+}
+
+function keyOfSlot(slot: string): string {
+  return slot.startsWith(MODEL_REQUEST_SLOT) ? slot.slice(MODEL_REQUEST_SLOT.length) : slot;
+}
+
+/** The log a record belongs in: a model request's (an infer record or a route event) or the decision log for everything else. */
+function kindOfRecord(record: DecisionRecord): LogKind {
+  return isModelRequestRecord(record) ? 'model-requests' : 'decisions';
+}
 
 /** How long a run waits for the policy check at activation before it is refused as "not loaded": long enough for a healthy start, short enough that a stuck one does not hang the run. */
 export const RUNTIME_START_WAIT_MS = 5000;
@@ -69,7 +94,10 @@ export class GateHost {
   private settled = false;
   /** The latest time this host has seen (the clock marker's time, then every clock reading). It never decreases, so a clock set back cannot revive an expired policy. */
   private highWater = 0;
-  /** Open logs by key, in the order they were last used (the install log included; it is never let go). */
+  /**
+   * Open logs by slot (a decision log by its key, a model-request log by its key with MODEL_REQUEST_SLOT before it), in the order they were last used (the
+   * install logs included; they are never let go).
+   */
   private readonly logs = new Map<string, DecisionLog>();
   /**
    * Logs let go while records were still queued, by key, until their queue is written: flush() waits for them, and a reopen of the same key takes the log
@@ -133,7 +161,8 @@ export class GateHost {
     }
     return {
       bundleState: () => (notLoaded !== undefined && !this.settled ? notLoaded : this.bundleState()),
-      sink: { record: (record) => { if (usable) { try { void this.logWithKey(key, root).append(record); } catch { /* reported once above */ } } } },
+      // Each record goes to the log of its own kind (owner decision after PR 4a): model requests to the model-request log, everything else here.
+      sink: { record: (record) => { if (usable) { try { void this.logWithKey(key, root, kindOfRecord(record)).append(record); } catch { /* reported once above */ } } } },
       actor: { ...request.actor, deviceFingerprint: this.deviceFingerprint() },
       presence: request.presence,
       context: request.context,
@@ -141,6 +170,33 @@ export class GateHost {
       productVersion: this.options.productVersion,
       clock: () => this.now(),
       newRecordId: () => randomUUID()
+    };
+  }
+
+  /**
+   * The route a model request made outside every session route is decided with (CLAS-06, D-31): this host's policy now, a person with no session, the empty
+   * mark (the policy's default label), and records written to the project open at the time of each record, or to the install log with no folder open. It is
+   * synchronous, so a request never waits for it; before the start has finished the policy reads as failed closed, which routes the default label as today.
+   */
+  public sessionRouteWithoutContext(): SessionRoute {
+    // The device is read at each record, so a request after the start names the signer the start found.
+    const fingerprint = (): string => this.deviceFingerprint();
+    return {
+      markOf: () => [],
+      bundleState: () => this.bundleState(),
+      get actor() { return { kind: 'person' as const, deviceFingerprint: fingerprint(), sessionId: NO_SESSION_ID }; },
+      sink: {
+        record: (record) => {
+          try {
+            const root = this.projectRootNow();
+            void this.logWithKey(root === undefined ? INSTALL_LOG_KEY : projectLogKey(root), root, kindOfRecord(record)).append(record);
+          } catch { /* a record that cannot be kept never changes a request (D-21) */ }
+        }
+      },
+      clock: () => this.now(),
+      newRecordId: () => randomUUID(),
+      productVersion: this.options.productVersion,
+      attestation: { failed: false }
     };
   }
 
@@ -173,12 +229,18 @@ export class GateHost {
     const keep = new Set([INSTALL_LOG_KEY, ...openRoots.filter((root) => root !== '').map((root) => projectLogKey(root))]);
     const open = this.projectRootNow();
     if (open !== undefined) keep.add(projectLogKey(open));
-    for (const key of [...this.logs.keys()]) if (!keep.has(key)) this.retire(key);
+    // Both kinds of log follow the same rule: a project's model-request log is let go with its decision log.
+    for (const slot of [...this.logs.keys()]) if (!keep.has(keyOfSlot(slot))) this.retire(slot);
   }
 
-  /** The keys of the logs held open now, install log included, least recently used first. For tests and diagnostics. */
+  /** The keys of the decision logs held open now, install log included, least recently used first. For tests and diagnostics. */
   public openLogKeys(): string[] {
-    return [...this.logs.keys()];
+    return [...this.logs.keys()].filter((slot) => kindOfSlot(slot) === 'decisions');
+  }
+
+  /** The keys of the model-request logs held open now, least recently used first. For tests and diagnostics. */
+  public openModelRequestLogKeys(): string[] {
+    return [...this.logs.keys()].filter((slot) => kindOfSlot(slot) === 'model-requests').map(keyOfSlot);
   }
 
   /** Waits for the start, up to the bound. Undefined when it finished; otherwise the failed-closed state for a run that began before the policy was loaded. */
@@ -237,35 +299,38 @@ export class GateHost {
     return this.logWithKey(INSTALL_LOG_KEY);
   }
 
-  private logWithKey(key: string, projectRoot?: string): DecisionLog {
-    // One log per key: a log being let go is taken back, so its queue and the new records stay in one writer's order.
-    let log = this.logs.get(key) ?? this.retiring.get(key)?.log;
-    this.retiring.delete(key);
+  private logWithKey(key: string, projectRoot?: string, kind: LogKind = 'decisions'): DecisionLog {
+    // One log per key and kind: a log being let go is taken back, so its queue and the new records stay in one writer's order.
+    const slot = slotOf(kind, key);
+    let log = this.logs.get(slot) ?? this.retiring.get(slot)?.log;
+    this.retiring.delete(slot);
     if (log === undefined) {
       log = new DecisionLog({
         globalStorageDir: this.options.globalStorageDir,
         projectKey: key,
+        kind,
         ...(projectRoot === undefined ? {} : { projectRoot }),
         onWriteFailure: (message) => { try { this.options.onProblem?.(message); } catch { /* the report never fails a decision */ } }
       });
     }
-    // Most recently used goes last, so the first project key in the map is the one to let go when there are too many.
-    this.logs.delete(key);
-    this.logs.set(key, log);
-    const projects = [...this.logs.keys()].filter((each) => each !== INSTALL_LOG_KEY);
+    // Most recently used goes last, so the first project key in the map is the one to let go when there are too many. Each kind keeps up to
+    // MAX_PROJECT_LOGS project logs, so model requests never push a project's decision log out early.
+    this.logs.delete(slot);
+    this.logs.set(slot, log);
+    const projects = [...this.logs.keys()].filter((each) => kindOfSlot(each) === kind && keyOfSlot(each) !== INSTALL_LOG_KEY);
     for (const oldest of projects.slice(0, Math.max(0, projects.length - MAX_PROJECT_LOGS))) this.retire(oldest);
     return log;
   }
 
   // Drops a log from the map; its queued records are still written, and flush() waits for them.
-  private retire(key: string): void {
-    if (key === INSTALL_LOG_KEY) return;
-    const log = this.logs.get(key);
+  private retire(slot: string): void {
+    if (keyOfSlot(slot) === INSTALL_LOG_KEY) return;
+    const log = this.logs.get(slot);
     if (log === undefined) return;
-    this.logs.delete(key);
+    this.logs.delete(slot);
     // Let go for good only once its queue is written, and only if nothing has taken it back meanwhile.
-    const pending: Promise<void> = log.flush().catch(() => undefined).finally(() => { if (this.retiring.get(key)?.pending === pending) this.retiring.delete(key); });
-    this.retiring.set(key, { log, pending });
+    const pending: Promise<void> = log.flush().catch(() => undefined).finally(() => { if (this.retiring.get(slot)?.pending === pending) this.retiring.delete(slot); });
+    this.retiring.set(slot, { log, pending });
   }
 
   private async begin(): Promise<BundleState> {

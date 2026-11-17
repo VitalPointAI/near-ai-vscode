@@ -214,3 +214,42 @@ test('frozen golden: a fixed input always builds this exact canonical record (re
   assert.equal(canonicalize(record), GOLDEN);
   assert.equal(validateDecisionRecord(JSON.parse(GOLDEN)).ok, true);
 });
+
+// ---- Part 4's record fields (D-49): the whole mark, the answer check and the connection state, each optional, so the record stays version 1 ----
+
+test('a record built with the optional mark, attestation and connection fields validates, keeps one classification per label and stays version 1', () => {
+  const internal = { scale: 'org', level: 'Internal', compartments: [], releasability: [], handling: [] };
+  const protectedA = { scale: 'ca-protected', level: 'Protected A', compartments: ['CEO'], releasability: [], handling: ['local-only'] };
+  const record = buildDecisionRecord(inputFor({ verb: 'infer', tier: 'attested-cloud', provider: 'near-ai', model: 'tee-model' }, {
+    rule: 'route.connection-not-bound', outcome: 'denied', mark: [internal, protectedA], attestation: 'unavailable', connection: 'unknown'
+  }));
+  assert.equal(validateDecisionRecord(record).ok, true);
+  assert.equal(record.unmapped.nearAi.recordVersion, 1);
+  assert.deepEqual(record.metadata.data_classifications?.map((entry) => entry.confidentiality), ['org/Internal', 'ca-protected/Protected A']);
+  assert.deepEqual(record.unmapped.nearAi.mark, [internal, protectedA]);
+  assert.equal(record.unmapped.nearAi.attestation, 'unavailable');
+  assert.equal(record.unmapped.nearAi.connection, 'unknown');
+  // Beside the single label, not instead of it.
+  const both = buildDecisionRecord(inputFor({ verb: 'plan' }, { label: protectedA, mark: [internal] }));
+  assert.deepEqual(both.metadata.data_classifications?.map((entry) => entry.confidentiality), ['ca-protected/Protected A', 'org/Internal']);
+  assert.deepEqual(both.unmapped.nearAi.label, protectedA);
+  // Left out, none of the fields appears.
+  const plain = buildDecisionRecord(inputFor({ verb: 'plan' }));
+  for (const key of ['mark', 'attestation', 'connection'] as const) assert.equal(key in plain.unmapped.nearAi, false, key);
+  assert.equal(plain.metadata.data_classifications, undefined);
+});
+
+test('the label events are record operations and record rules, and route events are rules recorded under the operation infer', () => {
+  for (const event of ['label.set', 'label.mark-raised', 'label.declassify']) {
+    const record = buildDecisionRecord(inputFor({ verb: 'plan' }, { rule: event, outcome: 'allowed' }));
+    assert.equal(record.authorizations[0]?.policy.name, event);
+    assert.equal(validateDecisionRecord({ ...record, api: { ...record.api, operation: event } }).ok, true, event);
+  }
+  for (const event of ['route.attestation-checked', 'route.attestation-cleared', 'policy.edit', 'route.default-session', 'route.connection-not-bound']) {
+    const record = buildDecisionRecord(inputFor({ verb: 'infer', tier: 'attested-cloud', provider: 'near-ai', model: 'tee-model' }, { rule: event, outcome: 'allowed' }));
+    assert.equal(record.authorizations[0]?.policy.name, event, event);
+    assert.equal(validateDecisionRecord(record).ok, true, event);
+  }
+  const record = buildDecisionRecord(inputFor({ verb: 'plan' }, { rule: 'label.set', outcome: 'allowed' }));
+  assert.equal(validateDecisionRecord({ ...record, api: { ...record.api, operation: 'route.attestation-checked' } }).ok, false, 'a route event is not an operation');
+});
