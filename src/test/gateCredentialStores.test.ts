@@ -9,7 +9,7 @@ import test from 'node:test';
 import { floorFactsFor, gateToolCall } from '../agent/gateAdapter';
 import { DEFAULT_RULES, RunGrants } from '../agent/permissions';
 import { bashTool, readTool, shellReachesCredentialStore } from '../agent/tools';
-import { namesCredentialStore } from '../domain/gate/floor';
+import { CREDENTIAL_STORES, namesCredentialStore } from '../domain/gate/floor';
 import type { GateRuntime } from '../domain/gate/decide';
 import { fakeHome } from './helpers/gateFixtures';
 import { testGateRuntime } from './helpers/gatedRuns';
@@ -180,4 +180,84 @@ test('a project\'s own globalStorage/state.vscdb is the project\'s; VS Code\'s r
   assert.equal((await decideIn(readTool, { file_path: 'globalStorage/state.vscdb' })).decision.outcome, 'allow', 'the Read tool on the project\'s file');
   assert.equal((await decideIn(bashTool, { command: 'cat ../globalStorage/state.vscdb' }, 'cat ../globalStorage/state.vscdb')).decision.rule, 'floor.credential-store', 'an escape out of the project');
   assert.equal((await decideIn(readTool, { file_path: '../globalStorage/state.vscdb' })).decision.rule, 'floor.credential-store', 'the Read tool escaping out of the project');
+});
+
+// Owner decision after PR #74 (A5): more credential stores in the home folder, and the commands that print a stored token, are refused with no card in every
+// mode, like the stores before them. Each is checked against the stand-in home: by text, from the shell's folder after a cd, and through the gate. A
+// project's own file of the same name, and the harmless neighbours of each store, are not refused. Nothing is run.
+const NEW_STORES: ReadonlyArray<readonly [string, string]> = [
+  ['.config/gh/hosts.yml', 'cat ~/.config/gh/hosts.yml'], ['.cargo/credentials', 'cat ~/.cargo/credentials'], ['.cargo/credentials.toml', 'cat $HOME/.cargo/credentials.toml'],
+  ['.terraform.d/credentials.tfrc.json', 'cat ~/.terraform.d/credentials.tfrc.json'], ['.config/glab-cli', 'cat ~/.config/glab-cli/config.yml'],
+  ['.config/hub', 'cat ~/.config/hub'], ['.gem/credentials', 'cat ~/.gem/credentials'], ['.local/share/keyrings', 'ls ~/.local/share/keyrings'],
+  ['.yarnrc.yml', 'cat ~/.yarnrc.yml']
+];
+// Already on the list before, named by the owner: still refused.
+const NAMED_BEFORE = ['cat ~/.docker/config.json', 'cat ~/.npmrc', 'cat ~/.pypirc', 'cat ~/.netrc', 'ls ~/.config/gcloud', 'cat ~/.azure/msal_token_cache.json', 'cat ~/.kube/config'];
+const STORE_NEIGHBOURS = [
+  'cat ~/.config/gh/config.yml', 'ls ~/.config/gh', 'cat ~/.cargo/config.toml', 'cat ~/.cargo/credentials-notes.md', 'ls ~/.cargo/bin', 'cat ~/.terraform.d/plugins/x',
+  'cat ~/.gem/specs/x', 'cat ~/.yarnrc', 'cat .yarnrc.yml', 'cat .npmrc', 'cat .cargo/credentials.toml', 'cat config/gh/hosts.yml'
+];
+
+test('the stores the owner named, and their kin, are refused by text, from the shell\'s folder and through a link; their neighbours and the project\'s own files are not', async () => {
+  const wrong: string[] = [];
+  for (const [store, command] of NEW_STORES) {
+    if (!CREDENTIAL_STORES.includes(store)) wrong.push(`${store} is not on the list`);
+    if ((await shellReachesCredentialStore(command, at(), LOCATIONS)).credentialStore === undefined) wrong.push(`${command} is not refused`);
+    const folder = path.posix.dirname(store);
+    const leaf = path.posix.basename(store);
+    const fromFolder = folder === '.' ? `cd ~ && cat ${leaf}` : `cd ~/${folder} && cat ${leaf}`;
+    if ((await shellReachesCredentialStore(fromFolder, at(), LOCATIONS)).credentialStore === undefined) wrong.push(`${fromFolder} is not refused`);
+    if ((await shellReachesCredentialStore(`cat ${path.join(HOME, store)}`, at(), LOCATIONS)).credentialStore === undefined) wrong.push(`the literal home path of ${store} is not refused`);
+  }
+  for (const command of NAMED_BEFORE) if ((await shellReachesCredentialStore(command, at(), LOCATIONS)).credentialStore === undefined) wrong.push(`${command} is not refused`);
+  for (const command of STORE_NEIGHBOURS) if ((await shellReachesCredentialStore(command, at(), LOCATIONS)).credentialStore !== undefined) wrong.push(`${command} is refused`);
+  assert.deepEqual(wrong, []);
+});
+
+const PRINTERS = [
+  'gh auth token', 'gh auth token --hostname github.example.test', 'gh auth status --show-token', 'gh auth status -t', 'gcloud auth print-access-token', 'gcloud auth print-identity-token',
+  'gcloud auth application-default print-access-token', 'gcloud --account bob@example.test auth print-access-token', 'az account get-access-token', 'az acr login -n reg --expose-token',
+  'aws configure get aws_secret_access_key', 'aws --profile dev configure get region', 'aws configure export-credentials', 'aws sts get-session-token', 'aws sts assume-role --role-arn x --role-session-name y',
+  'aws sts get-federation-token --name x', 'aws ecr get-login-password --region us-east-1', 'aws ecr-public get-login-password', 'aws codeartifact get-authorization-token --domain d',
+  'npm token list', 'npm token create', 'pnpm token list', 'docker-credential-desktop get', 'docker-credential-pass list', 'echo https://index.docker.io/v1/ | docker-credential-osxkeychain get',
+  'bash -c "gh auth token"', 'TOKEN=$(gh auth token)', 'sudo aws sts get-session-token', 'mywrapper gcloud auth print-access-token', 'python3 -c "import os; os.system(\'gh auth token\')"'
+];
+const NOT_PRINTERS = ['gh auth status', 'gh auth login', 'aws configure list', 'aws sts get-caller-identity', 'gcloud auth list', 'az account show', 'npm token revoke abc', 'docker login', 'npm whoami', 'docker credential ls'];
+
+test('the commands that print a stored token are refused with no card; the commands beside them are not', async () => {
+  const wrong: string[] = [];
+  for (const command of PRINTERS) {
+    const facts = await floorFactsFor({ command, root: ROOT, cwd: ROOT, ...LOCATIONS });
+    if (facts.facts.credentialStore === undefined) wrong.push(`${command} → ${JSON.stringify(facts)}`);
+  }
+  for (const command of NOT_PRINTERS) {
+    const facts = await floorFactsFor({ command, root: ROOT, cwd: ROOT, ...LOCATIONS });
+    if (facts.facts.credentialStore !== undefined) wrong.push(`${command} is refused: ${facts.facts.credentialStore}`);
+  }
+  assert.deepEqual(wrong, []);
+  assert.match((await floorFactsFor({ command: 'gh auth token', root: ROOT, cwd: ROOT, ...LOCATIONS })).facts.credentialStore ?? '', /gh auth token prints a stored password, key or token/);
+});
+
+test('in every mode, with a person and with nobody, a new store and a token printer are refused by the floor before the settings layer is asked', async () => {
+  for (const mode of ['approve-risky', 'mostly-autonomous', 'auto', 'fully-autonomous'] as const) {
+    for (const presence of ['person', 'none'] as const) {
+      for (const command of ['cat ~/.config/gh/hosts.yml', 'cat ~/.cargo/credentials.toml', 'gh auth token', 'aws sts get-session-token', 'docker-credential-desktop get']) {
+        const runtime: GateRuntime = { ...testGateRuntime(presence === 'none' ? { presence, context: 'unattended' } : {}), locations: LOCATIONS };
+        const gated = await gateToolCall(runtime, {
+          tool: bashTool, raw: { command }, root: ROOT, callId: `${mode}-${presence}-${command}`, command, shell: { cwd: ROOT },
+          policy: { mode, emergencyStop: false }, rules: DEFAULT_RULES, grants: new RunGrants(), buildAuto: async () => undefined
+        });
+        const where = `${mode}, ${presence}: ${command}`;
+        assert.equal(gated.decision.outcome, 'deny', where);
+        assert.equal(gated.decision.rule, 'floor.credential-store', where);
+        assert.equal(gated.settings, undefined, `${where}: refused before the settings layer is asked`);
+      }
+    }
+  }
+  // The Read tool on a new store is refused the same way.
+  const read = await gateToolCall({ ...testGateRuntime(), locations: LOCATIONS }, {
+    tool: readTool, raw: { file_path: path.join(HOME, '.config', 'gh', 'hosts.yml') }, root: ROOT, callId: 'read-gh', policy: { mode: 'fully-autonomous', emergencyStop: false },
+    rules: DEFAULT_RULES, grants: new RunGrants(), buildAuto: async () => undefined
+  });
+  assert.equal(read.decision.rule, 'floor.credential-store');
 });

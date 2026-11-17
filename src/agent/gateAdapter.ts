@@ -11,7 +11,7 @@ import { failedClosed } from '../domain/gate/bundle';
 import type { BundleState, GateContextName } from '../domain/gate/bundle';
 import { decide } from '../domain/gate/decide';
 import type { ActorRef, GateDecision, GateOptions, GateRequest, GateRuntime, PreGateRule, SettingsAnswer, SettingsLayer } from '../domain/gate/decide';
-import { namesCredentialStore, namesIdentityFiles } from '../domain/gate/floor';
+import { namesCredentialStore, namesIdentityFiles, printerReason } from '../domain/gate/floor';
 import type { FloorFacts, FloorLocations } from '../domain/gate/floor';
 import { effectsFor } from '../domain/gate/manifest';
 import type { InputFieldSource } from '../domain/gate/manifest';
@@ -197,7 +197,9 @@ export async function floorFactsFor(input: FloorFactsInput, readers: FloorReader
     return { effects: [], facts, effectsUnknown: 'the command could not be read' };
   }
   const unknownWhy = lost ?? classified.effectsUnknown;
-  const read = { ...facts, ...(classified.credentialChange === undefined ? {} : { credentialChange: classified.credentialChange }) };
+  // A command that prints a stored token is refused like a credential store (A5); the text check above may already have named it.
+  const printer = facts.credentialStore === undefined && classified.printsCredential !== undefined ? { credentialStore: printerReason(classified.printsCredential) } : {};
+  const read = { ...facts, ...printer, ...(classified.credentialChange === undefined ? {} : { credentialChange: classified.credentialChange }) };
   return { effects: classified.effects ?? [], facts: read, ...(unknownWhy === undefined ? {} : { effectsUnknown: unknownWhy }) };
 }
 

@@ -42,6 +42,11 @@ export interface CommandClassification {
    * sits, like the effects.
    */
   credentialChange?: string;
+  /**
+   * Set, with the command as shown, when the command prints a stored login or token (`gh auth token`, `aws sts get-session-token`, `npm token list`, a
+   * `docker-credential-*` helper): the floor refuses it like a credential store (owner decision after PR #74, A5). Found wherever it sits.
+   */
+  printsCredential?: string;
 }
 
 // The bounds are shared with the credential-store check (src/domain/commandBounds.ts), so neither reads what the other gives up on.
@@ -108,8 +113,14 @@ export type PackageScriptsAt =
 // (`npm run x`, `xargs`, `find -exec`, a substitution) or decides on one part and stops, and a tag carried by hand through each of those would be lost in the
 // next one somebody writes (Pitfall 2). Classification is synchronous, so the frame on top of this stack is always the call being made.
 // The frame also keeps whether the classifier stopped reading somewhere (the bound, the caps): wherever that happens, the whole command's effects are unknown.
-interface EffectFrame { effects: CommandEffect[]; unknown?: string; credentialChange?: string }
+interface EffectFrame { effects: CommandEffect[]; unknown?: string; credentialChange?: string; printsCredential?: string }
 const effectFrames: EffectFrame[] = [];
+
+/** The command prints a stored login or token: the floor refuses it (printsCredential). The first one is kept. */
+function notePrintsCredential(shown: string): void {
+  const frame = effectFrames[effectFrames.length - 1];
+  if (frame !== undefined) frame.printsCredential ??= shown;
+}
 
 /** The command signs in or out, or changes a stored login or token: the floor asks (credentialChange). The first reason is kept. */
 function noteCredentialChange(reason: string): void {
@@ -826,6 +837,8 @@ const TAGGED_PROGRAMS: ReadonlySet<string> = new Set([
   'env', 'time', 'timeout', 'nice', 'nohup', 'command', 'stdbuf', 'flock', 'watch', ...RUNS_WHAT_FOLLOWS,
   ...Object.keys(PUBLISH_TOOL_TARGETS), ...DISK_DESTROYERS, ...DELETERS, ...WORKSPACE_WRITERS, ...PRIVILEGE, ...INTERPRETERS, ...SHELLS
 ]);
+/** Docker's credential helpers, by program name. */
+const DOCKER_CREDENTIAL_HELPER = /^docker-credential-[\w.-]+$/;
 /** More candidate words than this after an unknown program are not each read: the effects are unknown. */
 const MAX_RUNNER_PROBES = 16;
 /** stdbuf's mode options: `-o L` takes its mode as the next word, `-oL` and `--output=L` carry it. */
@@ -1063,6 +1076,27 @@ function cloudWords(name: string, args: readonly Word[]): { words: string[] } | 
     return { unknown: `with ${text} before what it does, an option the rules do not know` };
   }
   return { words: out };
+}
+
+/** The command as shown, when aws, gcloud or az prints a stored login, key or token (A5); undefined otherwise. */
+function cloudCredentialPrinter(name: string, words: readonly string[], args: readonly Word[]): string | undefined {
+  const [first = '', second = '', third = ''] = words;
+  if (name === 'aws') {
+    if (first === 'configure' && (second === 'get' || second === 'export-credentials')) return `aws configure ${second}`;
+    if (first === 'sts' && (/^assume-role/.test(second) || second === 'get-session-token' || second === 'get-federation-token')) return `aws sts ${second}`;
+    if ((first === 'ecr' || first === 'ecr-public') && /^get-(?:login|login-password|authorization-token)$/.test(second)) return `aws ${first} ${second}`;
+    if (first === 'codeartifact' && second === 'get-authorization-token') return 'aws codeartifact get-authorization-token';
+    return undefined;
+  }
+  if (name === 'gcloud') {
+    if (first === 'auth' && /^print-(?:access|identity|refresh)-token$/.test(second)) return `gcloud auth ${second}`;
+    if (first === 'auth' && second === 'application-default' && third === 'print-access-token') return 'gcloud auth application-default print-access-token';
+    if (first === 'config' && second === 'config-helper') return 'gcloud config config-helper';
+    return undefined;
+  }
+  if (first === 'account' && second === 'get-access-token') return 'az account get-access-token';
+  if (first === 'acr' && second === 'login' && args.some((arg) => arg.text === '--expose-token')) return 'az acr login --expose-token';
+  return undefined;
 }
 
 /** The command as shown, when aws, gcloud or az signs in or out or changes stored keys; undefined otherwise. */
@@ -1394,6 +1428,14 @@ function classifyPackageManagerIn(manager: string, givenArgs: Word[], state: Seg
   const extra = first >= 0 ? args.slice(first + 1) : [];
   if (first >= 0 && words.slice(first, first + 2).some((word) => word === 'publish' || word === 'unpublish')) return risky(`${manager} ${words.slice(first, first + 2).join(' ')} publishes a package`, publishTo('registry'));
   // Signing in or out, and a token change, rewrite the login kept on this computer: the floor's credential change (owner decision after PR #74).
+  if (sub === 'token') {
+    // `token` alone lists the tokens; list and create print them (A5): refused by the floor. Revoking one changes the stored login.
+    const verb = extra.find((arg) => !looksLikeOption(arg.text));
+    if (verb === undefined || verb.expansion || ['list', 'ls', 'create'].includes(verb.text)) {
+      notePrintsCredential(`${manager} token${verb === undefined ? '' : ` ${verb.text}`}`);
+      return risky(`${manager} token prints your registry tokens`);
+    }
+  }
   const signs = REGISTRY_LOGIN_VERBS.has(sub) || (manager === 'yarn' && sub === 'npm' && REGISTRY_LOGIN_VERBS.has(words[first + 1] ?? '')) || sub === 'token';
   if (signs) {
     const shown = sub === 'npm' ? `${manager} npm ${words[first + 1]}` : `${manager} ${sub}`;
@@ -1818,6 +1860,11 @@ function classifyProgram(name: string, program: string, args: Word[], state: Seg
   if (GLOBAL_OPTIONS[name] !== undefined && !PACKAGE_MANAGERS.has(name) && leading !== undefined && (looksLikeOption(leading.text) || (name === 'cargo' && leading.text.startsWith('+')))) {
     return classifyAfterGlobals(name, program, args, state, context, depth, viaNpx);
   }
+  // Docker's credential helpers print what a registry login stored (A5): refused by the floor.
+  if (DOCKER_CREDENTIAL_HELPER.test(name)) {
+    notePrintsCredential(`${name}${args[0] === undefined ? '' : ` ${args[0].text}`}`);
+    return risky(`${name} prints a stored registry login`);
+  }
   // Risky whatever the path.
   if (PRIVILEGE.has(name)) {
     noteRunsAs(name, args, state, context, depth);
@@ -1962,6 +2009,11 @@ const READ_ONLY_GH = new Set([
     const action = found.action?.text;
     // Signing in or out, refreshing the token, or switching account changes the login kept on this computer (owner decision after PR #74).
     if (group === 'auth' && action !== undefined && /^(?:login|logout|refresh|setup-git|switch)$/.test(action)) noteCredentialChange(`${name} auth ${action} changes your ${name === 'gh' ? 'GitHub' : 'GitLab'} login.`);
+    // Printing the stored token (A5): refused by the floor.
+    if (group === 'auth' && (action === 'token' || (action === 'status' && args.some((arg) => arg.text === '-t' || arg.text === '--show-token' || /^-[A-Za-z]*t[A-Za-z]*$/.test(arg.text) && !arg.text.startsWith('--'))))) {
+      notePrintsCredential(`${name} auth ${action}${action === 'status' ? ' --show-token' : ''}`);
+      return risky(`${name} auth ${action} prints your ${name === 'gh' ? 'GitHub' : 'GitLab'} token`);
+    }
     if (group === 'api') {
       // A writing method, or a field or a body (which make the request a POST), changes data on GitHub: publishing (owner decision after PR #74).
       const api = githubApiWrites(args.slice(found.groupAt + 1));
@@ -2019,6 +2071,11 @@ const READ_ONLY_GH = new Set([
     // Signing in or out of the cloud account, or changing its stored keys, rewrites the credentials kept on this computer (owner decision after PR #74).
     const read = cloudWords(name, args);
     if ('unknown' in read) return unknown(`${name} ${read.unknown}`);
+    const printer = cloudCredentialPrinter(name, read.words, args);
+    if (printer !== undefined) {
+      notePrintsCredential(printer);
+      return risky(`${printer} prints your ${CLOUD_NAMES[name]} credentials`);
+    }
     const change = cloudCredentialChange(name, read.words);
     if (change !== undefined) {
       noteCredentialChange(`${change} changes your ${CLOUD_NAMES[name]} login or stored keys.`);
@@ -2147,15 +2204,16 @@ function unknownProgram(name: string, args: readonly Word[], state: SegmentState
   const reason = said ?? `${name} is not a command the rules know`;
   const candidates = args.flatMap((arg, index) => {
     const candidate = programName(arg.text);
-    return !arg.expansion && !looksLikeOption(arg.text) && (TAGGED_PROGRAMS.has(candidate) || /^mkfs(?:\.|$)/.test(candidate)) ? [index] : [];
+    return !arg.expansion && !looksLikeOption(arg.text) && (TAGGED_PROGRAMS.has(candidate) || /^mkfs(?:\.|$)/.test(candidate) || DOCKER_CREDENTIAL_HELPER.test(candidate)) ? [index] : [];
   });
   if (candidates.length > MAX_RUNNER_PROBES) return beyondReach(`${reason}, and too many of the words after it are commands to check`);
   for (const index of candidates) {
     const mark = effectMark();
-    const changedBefore = effectFrames[effectFrames.length - 1]?.credentialChange;
+    const top = effectFrames[effectFrames.length - 1];
+    const changedBefore = top?.credentialChange ?? top?.printsCredential;
     classifyWords(args.slice(index), state, context, depth + 1);
-    // A credential change is a tag too: what the program runs is not read whole, so the effects are unknown (the change is still noted).
-    const changed = changedBefore === undefined && effectFrames[effectFrames.length - 1]?.credentialChange !== undefined;
+    // A credential change or printer is a tag too: what the program runs is not read whole, so the effects are unknown (the note is still kept).
+    const changed = changedBefore === undefined && (top?.credentialChange !== undefined || top?.printsCredential !== undefined);
     if (effectsSince(mark).length > 0 || changed) return beyondReach(`${reason}, and it may run ${args.slice(index, index + 2).map((arg) => arg.text).join(' ')}`);
   }
   // Every word was probed: what it may run that the rules tag would have been found. The program itself is one the rules cannot judge.
@@ -2427,6 +2485,7 @@ export function classifyCommand(command: string, context: CommandContext): Comma
   const verdict = frame.unknown !== undefined && plain.verdict === 'safe' ? { verdict: 'unknown' as const, reason: frame.unknown } : plain;
   return {
     ...verdict, ...(effects.length > 0 ? { effects } : {}), ...(frame.unknown === undefined ? {} : { effectsUnknown: frame.unknown }),
-    ...(frame.credentialChange === undefined ? {} : { credentialChange: frame.credentialChange })
+    ...(frame.credentialChange === undefined ? {} : { credentialChange: frame.credentialChange }),
+    ...(frame.printsCredential === undefined ? {} : { printsCredential: frame.printsCredential })
   };
 }

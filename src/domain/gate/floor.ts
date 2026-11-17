@@ -61,11 +61,13 @@ export interface FloorVerdict {
 
 // The credential stores outside the project (D-16, research 4.2). Home-relative, so each is matched after `~/`, `$HOME/`, `${HOME}/` or the literal home folder.
 // A whole folder is named by its folder; a single file by its file. Workspace files such as `.env` are not here: they stay with the settings layer (D-18).
-// The research's "proposed additions" (A5: gh hosts.yml, cargo credentials, terraform credentials, keyring folders, token printers) are NOT added: they are
-// an owner question carried to the PR 3 body.
+// The research's additions (A5) were approved by the owner after PR #74: the GitHub CLI's hosts file, cargo's credentials, terraform's, the GitLab and hub
+// CLIs', RubyGems', the desktop keyring folder and yarn's home settings (which can hold a registry token).
 export const CREDENTIAL_STORES: readonly string[] = Object.freeze([
   '.near-credentials', '.ssh', '.aws', '.config/gcloud', '.azure', '.docker/config.json', '.netrc', '.git-credentials', '.gnupg', '.kube', '.npmrc', '.pypirc',
-  '.near-kb', '.kbkey'
+  '.near-kb', '.kbkey',
+  '.config/gh/hosts.yml', '.cargo/credentials', '.cargo/credentials.toml', '.terraform.d/credentials.tfrc.json', '.config/glab-cli', '.config/hub', '.gem/credentials',
+  '.local/share/keyrings', '.yarnrc.yml'
 ]);
 
 /**
@@ -162,6 +164,25 @@ export const KEYCHAIN_COMMANDS: readonly string[] = Object.freeze([
   'security find-generic-password', 'security find-internet-password', 'security dump-keychain', 'security export', 'secret-tool lookup', 'secret-tool search'
 ]);
 
+/**
+ * Commands that print a stored login or token (owner decision after PR #74, A5), matched in the text like the keychain commands, so one named inside a
+ * script string is refused too. The classifier also finds them structurally (past global options, through wrappers): see `printsCredential`.
+ */
+export const TOKEN_PRINTER_COMMANDS: readonly string[] = Object.freeze([
+  'gh auth token', 'gcloud auth print-access-token', 'gcloud auth print-identity-token', 'gcloud auth print-refresh-token', 'gcloud auth application-default print-access-token',
+  'gcloud config config-helper', 'az account get-access-token', 'aws configure get', 'aws configure export-credentials', 'aws sts get-session-token', 'aws sts assume-role',
+  'aws sts assume-role-with-saml', 'aws sts assume-role-with-web-identity', 'aws sts get-federation-token', 'aws ecr get-login-password', 'aws ecr get-authorization-token',
+  'aws ecr get-login', 'aws ecr-public get-login-password', 'aws ecr-public get-authorization-token', 'aws codeartifact get-authorization-token', 'npm token list',
+  'npm token create', 'pnpm token list', 'pnpm token create'
+]);
+/** Docker's credential helpers (`docker-credential-desktop get`), which print what a registry login stored. */
+const DOCKER_CREDENTIAL_HELPER = '(?<![\\w.-])docker-credential-[\\w.-]+';
+
+/** The plain reason for a command that prints a stored login or token (refused as `floor.credential-store`). */
+export function printerReason(shown: string): string {
+  return `${shown} prints a stored password, key or token. Agents may not run it, in any approval mode.`;
+}
+
 /** The folders of this extension's global storage that hold its identity and its gate files (the signing key history and lock, the policy bundle and the logs). */
 export const EXTENSION_STORAGE_FOLDERS: readonly string[] = Object.freeze(['identity', 'gate']);
 
@@ -238,7 +259,10 @@ export function namesCredentialStore(text: string, locations: FloorLocations = {
   const stores = new RegExp(`${homePrefix(locations)}(?:${CREDENTIAL_STORES.map(escapeRegExp).join('|')})${NAME_END}`, 'i');
   const keychain = new RegExp(`(?<![\\w.-])(?:${KEYCHAIN_COMMANDS.map((command) => command.split(' ').map(escapeRegExp).join('\\s+')).join('|')})(?![\\w-])`, 'i');
   const shown = firstMatch(stores, flat) ?? namesVscodeSecrets(flat, locations, workspace) ?? firstMatch(keychain, flat);
-  return shown === undefined ? undefined : credentialReason(shown);
+  if (shown !== undefined) return credentialReason(shown);
+  const printers = new RegExp(`(?<![\\w.-])(?:${TOKEN_PRINTER_COMMANDS.map((command) => command.split(' ').map(escapeRegExp).join('\\s+')).join('|')})(?![\\w-])|${DOCKER_CREDENTIAL_HELPER}`, 'i');
+  const printer = firstMatch(printers, flat);
+  return printer === undefined ? undefined : printerReason(printer);
 }
 
 /** Whether the text of a command names the identity or gate folder of this extension's global storage, by the portable form or by the real folder. */

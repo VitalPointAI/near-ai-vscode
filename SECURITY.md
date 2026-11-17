@@ -134,10 +134,19 @@ In every mode these are refused, with no card: the project's key folder (below),
 the NEAR key folder in your home folder (`~/.near-credentials`), SSH keys
 (`~/.ssh`), cloud and registry credential files (`~/.aws`, `~/.config/gcloud`,
 `~/.azure`, `~/.docker/config.json`, `~/.kube`, `~/.netrc`, `~/.git-credentials`,
-`~/.gnupg`, `~/.npmrc`, `~/.pypirc`), operating-system keychain commands that
-print a secret, VS Code's own secrets database, and this extension's own
-identity and policy files in its storage. This holds for the file tools and for
-shell commands alike.
+`~/.gnupg`, `~/.npmrc`, `~/.pypirc`, `~/.config/gh/hosts.yml`,
+`~/.cargo/credentials` and `credentials.toml`,
+`~/.terraform.d/credentials.tfrc.json`, `~/.config/glab-cli`, `~/.config/hub`,
+`~/.gem/credentials`, `~/.local/share/keyrings`, `~/.yarnrc.yml`; a project's
+own `.npmrc` or `.yarnrc.yml` is the project's), operating-system keychain
+commands that print a secret, commands that print a stored login or token
+(`gh auth token`, `gh auth status --show-token`, `gcloud auth
+print-access-token` and `print-identity-token`, `az account get-access-token`,
+`aws configure get`, `aws sts get-session-token`, `aws ecr get-login-password`
+and the like, `npm token list` and `create`, and the `docker-credential-*`
+helpers), VS Code's own secrets database, and this extension's own identity
+and policy files in its storage. This holds for the file tools and for shell
+commands alike.
 
 Reading a file inside the project that looks like a credential (`.env`, private
 keys, SSH, AWS, or NEAR credential files), through any path or symlink, asks
