@@ -72,6 +72,22 @@ test('look-alikes, the home folder itself and the project\'s own files are not r
   assert.deepEqual(wrong, []);
 });
 
+// PR #74 review: VS Code's secrets database is reached only where VS Code keeps it. The stand-in global storage sits in a stand-in user-data folder
+// (…/globalStorage/vitalpoint.near-ai-vscode), so its secrets database is the folder beside the extension's own; a project file of that name is not one.
+test('VS Code\'s secrets database is reached in VS Code\'s storage folders, by path or from the shell\'s folder, and a project file of that name is not', async () => {
+  const globalStorage = path.dirname(STORAGE);
+  const user = path.dirname(globalStorage);
+  for (const [command, cwd] of [
+    [`sqlite3 ${path.join(globalStorage, 'state.vscdb')} .dump`, ROOT], ['sqlite3 state.vscdb .dump', globalStorage], ['cp state.vscdb.backup /x', globalStorage],
+    [`cd ${globalStorage} && sqlite3 state.vscdb`, ROOT], [`cat ${path.join(user, 'workspaceStorage', 'abc', 'state.vscdb')}`, ROOT]
+  ] as const) {
+    assert.notEqual((await shellReachesCredentialStore(command, at(cwd), LOCATIONS)).credentialStore, undefined, `${command} (from ${cwd === ROOT ? 'the project' : 'global storage'})`);
+  }
+  for (const command of ['sqlite3 state.vscdb .dump', 'cat fixtures/state.vscdb', 'cp state.vscdb.backup out/', `sqlite3 ${path.join(ROOT, 'state.vscdb')}`]) {
+    assert.equal((await shellReachesCredentialStore(command, at(), LOCATIONS)).credentialStore, undefined, `${command}: the project's own file`);
+  }
+});
+
 test('floorFactsFor gives the credential-store and identity facts for a shell call, and none for an empty command', async () => {
   for (const command of STORE_COMMANDS) {
     const facts = await floorFactsFor({ command, root: ROOT, cwd: ROOT, ...LOCATIONS });

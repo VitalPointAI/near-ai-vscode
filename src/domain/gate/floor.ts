@@ -66,8 +66,35 @@ export const CREDENTIAL_STORES: readonly string[] = Object.freeze([
   '.near-kb', '.kbkey'
 ]);
 
-/** VS Code's own secrets database, matched by file name anywhere: it holds the encrypted SecretStorage, which includes the device key. */
+/**
+ * VS Code's own secrets database: it holds the encrypted SecretStorage, which includes the device key. Matched only where VS Code keeps it (PR #74 review),
+ * never by file name anywhere, so a project file of the same name is the project's: in a folder named `globalStorage`, or `workspaceStorage/<id>`, in any
+ * VS Code's layout, and anywhere under this VS Code's own user-data folder when its global storage is known (vscodeStorageRoots).
+ */
 export const VSCODE_SECRET_FILES: readonly string[] = Object.freeze(['state.vscdb', 'state.vscdb.backup']);
+
+/**
+ * The folders where this VS Code keeps its secrets database, from this extension's global storage (`<user data>/User/globalStorage/<extension id>`): the
+ * global storage folder that holds it, and, in that standard layout, the user-data folder above (which also holds `workspaceStorage`). Forward slashes.
+ */
+export function vscodeStorageRoots(globalStorage: string | undefined): string[] {
+  const storage = trimmedFolder(globalStorage);
+  if (storage === undefined) return [];
+  const parent = storage.slice(0, storage.lastIndexOf('/'));
+  if (parent === '') return [];
+  const roots = [parent];
+  const grandparent = parent.slice(0, parent.lastIndexOf('/'));
+  if (parent.slice(parent.lastIndexOf('/') + 1).toLowerCase() === 'globalstorage' && grandparent !== '') roots.push(grandparent);
+  return roots;
+}
+
+/** The pattern of VS Code's secrets database where VS Code keeps it: after its storage folder names, or under one of this VS Code's own storage folders. */
+function vscodeSecretsPattern(locations: FloorLocations): RegExp {
+  const names = VSCODE_SECRET_FILES.map(escapeRegExp).sort((a, b) => b.length - a.length).join('|');
+  const portable = '(?<![\\w.-])(?:globalStorage|workspaceStorage/+[^/\\s\'"]+)/+';
+  const real = vscodeStorageRoots(locations.globalStorage).map((root) => `(?<![\\w./-])${escapeRegExp(root)}/+(?:[^\\s'"]*/+)?`);
+  return new RegExp(`(?:${[portable, ...real].join('|')})(?:${names})${NAME_END}`, 'i');
+}
 
 /** Commands that print a secret from the operating system's keychain. */
 export const KEYCHAIN_COMMANDS: readonly string[] = Object.freeze([
@@ -142,13 +169,13 @@ export function identityFilesReason(shown: string): string {
 
 /**
  * Whether the text of a command names a credential store outside the project: a store folder or file after `~/`, `$HOME/`, `${HOME}/` or the literal home
- * folder, VS Code's secrets database by name, or a keychain command that prints a secret. A heuristic, and an honest one (see FLOOR_CANNOT_SEE_TEXT): it
+ * folder, VS Code's secrets database where VS Code keeps it, or a keychain command that prints a secret. A heuristic, and an honest one (see FLOOR_CANNOT_SEE_TEXT): it
  * reads text only and never runs anything. Returns a plain reason, or undefined.
  */
 export function namesCredentialStore(text: string, locations: FloorLocations = {}): string | undefined {
   const flat = forwardSlashes(text);
   const stores = new RegExp(`${homePrefix(locations)}(?:${CREDENTIAL_STORES.map(escapeRegExp).join('|')})${NAME_END}`, 'i');
-  const secrets = new RegExp(`(?<![\\w.-])(?:${VSCODE_SECRET_FILES.map(escapeRegExp).sort((a, b) => b.length - a.length).join('|')})${NAME_END}`, 'i');
+  const secrets = vscodeSecretsPattern(locations);
   const keychain = new RegExp(`(?<![\\w.-])(?:${KEYCHAIN_COMMANDS.map((command) => command.split(' ').map(escapeRegExp).join('\\s+')).join('|')})(?![\\w-])`, 'i');
   const shown = firstMatch(stores, flat) ?? firstMatch(secrets, flat) ?? firstMatch(keychain, flat);
   return shown === undefined ? undefined : credentialReason(shown);

@@ -657,8 +657,11 @@ export async function shellReachesCredentialStore(command: string, context: { ro
   const homes = home === undefined ? [] : [...new Set([home, (await realPathLoose(home)) ?? home])];
   const storages = storage === undefined ? [] : [...new Set([storage, (await realPathLoose(storage)) ?? storage])];
   const stores = CREDENTIAL_STORES.map((store) => store.split('/'));
+  // VS Code's secrets database only where VS Code keeps it (PR #74 review): its storage folder names, or this VS Code's own storage folders, as the global
+  // storage is written and as it resolves. A project file of the same name is the project's.
+  const secretsAt = storages.length === 0 ? [{}] : storages.map((globalStorage) => ({ globalStorage }));
   const isStore = (absolute: string): boolean => {
-    if (VSCODE_SECRET_FILES.some((name) => name.toLowerCase() === path.basename(absolute).toLowerCase())) return true;
+    if (VSCODE_SECRET_FILES.some((name) => name.toLowerCase() === path.basename(absolute).toLowerCase()) && secretsAt.some((at) => namesCredentialStore(absolute, at) !== undefined)) return true;
     return homes.some((base) => { const below = segmentsBelow(base, absolute); return below !== undefined && stores.some((store) => reachesPlace(below, store)); });
   };
   const isIdentity = (absolute: string): boolean => storages.some((base) => {
