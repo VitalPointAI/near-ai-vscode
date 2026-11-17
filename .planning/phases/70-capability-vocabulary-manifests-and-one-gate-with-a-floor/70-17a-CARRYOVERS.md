@@ -502,3 +502,48 @@ Four commits on `feat/gate-floor`, one per finding. Every new test was seen fail
 - The "a false alarm costs one card" sentence is scoped to the publishing and destruction checks ("here ..."), followed by "The check of key and
   credential folders above is stricter: a mention there is refused, with no card."
 - gateDocs pins both sentences, checks the old unscoped sentence is gone, and checks that a commit message naming `~/.ssh` is refused by the code.
+
+## Review round 8 (PR #74)
+
+Two commits on `feat/gate-floor`, one per finding. Every new test was seen failing first against the unchanged source (set aside with a tagged stash
+and applied back by SHA).
+
+### Results
+
+- Lint (`tsc --noEmit`): clean.
+- Full `npm test` (6G cap): 3389 tests, 3380 passed, 0 failed, 0 cancelled, 9 skipped (the same 9).
+- `node scripts/secret-scan.mjs --range origin/main..HEAD`: clean. No package changes. No activation or webview code changed, so e2e was not run.
+
+### 1. [MAJOR] An early return could still report complete, empty effects
+
+- Commit `71715d8`.
+- The invariant, inverted: `unknown(...)` now marks the command's effects unknown by default; only a path that read the whole command and cannot judge
+  it says so, with `unknownRead(...)`. classifyCommand reports `effectsUnknown` whenever the frame was marked, so every early return is unknown unless it
+  positively says otherwise. lexed.broken marks it too; its sensitive-text `risky` verdict stays where it was.
+- Each of the 100+ calls was decided. Read whole: a known program's own words, judged unknown for safety (git reset, checkout, merge, tag, branch, npm
+  install, outdated, docker ps, kubectl get, gh, cargo run, go run, make install, near, aws, export), a script file or inline code in another language (the
+  documented gap: what a script does), a program the rules do not know whose later words were probed (now also an npx package), a git command of git's
+  own (`GIT_BUILTINS`: init, worktree, clone, ...), shell-structure answers that read every part (cd out of the project, a read outside it, a variable,
+  a subshell). Not read whole (effects unknown, asks in Full auto): an option the rules do not know (sed, awk, git's own globals before the table),
+  a nested command not read (`env -i ...`, `timeout --signal ...`, sed `e`/`w` scripts, awk `system`), a write whose target or folder is decided at run
+  time (a redirect to `$OUT`, `cd "$D"`, `sed -i *.txt`, `find -fprint`), writes the rules do not tag (`git config`, `git rm -f`, `git ... --output`,
+  `chmod`, `ln`, local `rsync`, `tsc --outDir`, `sort -o`, a non-plain `curl`), a name that may be an alias (`git lg`, `alias x=...`), npm or git given
+  by an unusual path, `npm version` (runs version scripts), and an unparseable line.
+- Tests (`commandReadWhole.test.ts`): a source scan lists every `unknown(` and `unknownRead(` call; each has an input that reaches it (checked by its
+  reason), or is listed with why not (the bound and caps, covered by commandBounds; git's old global-option return, now a backstop behind
+  classifyAfterGlobals). Read-whole inputs give complete effects (and the right tags), the others unknown effects. Two property tests: every tagged
+  command (push, delete, publish, image push, reset, apply, a protected write) followed by each of eleven breakages, and a quote or bracket dropped at
+  420 seeded random places, keeps its tag or has unknown effects, never complete and empty. The review's example and the sensitive-text case.
+- Docs: the floor's effects text, SECURITY.md and the CHANGELOG add "one they cannot parse (a quote left open, say), one with an option they do not know
+  where they would read what it runs" to the commands that ask; gateDocs pins it and checks examples (`git push origin main; echo "`, `env -i git
+  push`, `git -frob x push`).
+- UX change to note: in Full auto, the not-read-whole cases above now ask (refused with nobody), where they ran before.
+
+### 2. [MINOR] The package.json cache missed a same-size rewrite
+
+- Commit `a477766`.
+- The reader reads the file for every decision (a package.json is small) and keeps only the parse, keyed by a SHA-256 of the content, so a rewrite is
+  seen whatever its size and time.
+- Tests (`packageScriptsFolder.test.ts`): a same-size rewrite with its time set back to the same value is seen by the reader and by the floor; the
+  file is read for every decision and unchanged content gives the same parse. The round 4 cache test (which pinned the size-and-time key) is replaced.
+- No SECURITY.md wording described the cache; the loop's comment now says how it reads.
