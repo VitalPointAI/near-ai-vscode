@@ -674,14 +674,14 @@ export class FloorApprovalsOnce {
   private readonly expiries = new Map<string, number>();
   private ended = false;
 
-  /** A person approved this exact call once, late, at `now`. */
-  public add(key: string, now: number = Date.now()): void {
+  /** A person approved this exact call once, late, at `now` by the runtime's clock (the one the gate checks it with). */
+  public add(key: string, now: number): void {
     if (this.ended) return;
     this.expiries.set(key, now + FLOOR_APPROVAL_TTL_MS);
   }
 
   /** Whether an approval of this exact call is waiting and has not expired. */
-  public has(key: string, now: number = Date.now()): boolean {
+  public has(key: string, now: number): boolean {
     const expires = this.expiries.get(key);
     return !this.ended && expires !== undefined && now < expires;
   }
@@ -714,6 +714,11 @@ export function floorApprovalsOnce(grants: RunGrants): FloorApprovalsOnce {
   let once = FLOOR_APPROVALS_ONCE.get(grants);
   if (once === undefined) { once = new FloorApprovalsOnce(); FLOOR_APPROVALS_ONCE.set(grants, once); }
   return once;
+}
+
+/** A person approved a floor card late: that exact call may run once, stamped with `clock`, the clock of the runtime whose gate will check it. */
+export function approveFloorCallLate(grants: RunGrants, callKey: string, clock: () => number): void {
+  floorApprovalsOnce(grants).add(callKey, clock());
 }
 
 /** The run's turn has ended: its late floor approvals end with it. */

@@ -408,9 +408,9 @@ test('a late floor approval is kept beside the run\'s grants, never in them, and
   const grants = new RunGrants();
   const once = floorApprovalsOnce(grants);
   assert.equal(once.size, 0);
-  once.add('key');
-  assert.equal(floorApprovalsOnce(grants).has('key'), true, 'the same set for the same run');
-  assert.equal(floorApprovalsOnce(new RunGrants()).has('key'), false, 'another run has its own');
+  once.add('key', 1_000);
+  assert.equal(floorApprovalsOnce(grants).has('key', 1_000), true, 'the same set for the same run');
+  assert.equal(floorApprovalsOnce(new RunGrants()).has('key', 1_000), false, 'another run has its own');
   assert.equal(grants.commands.size + grants.allowRules.size, 0);
   assert.equal(grants.edits, false);
 });

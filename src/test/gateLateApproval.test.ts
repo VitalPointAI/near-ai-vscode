@@ -7,7 +7,7 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { endFloorApprovals, FLOOR_APPROVAL_TTL_MS, floorApprovalsOnce, floorCallKey, gateToolCall } from '../agent/gateAdapter';
+import { approveFloorCallLate, endFloorApprovals, FLOOR_APPROVAL_TTL_MS, floorApprovalsOnce, floorCallKey, gateToolCall } from '../agent/gateAdapter';
 import type { GateCallInput } from '../agent/gateAdapter';
 import { DEFAULT_RULES, RunGrants } from '../agent/permissions';
 import { writeTool } from '../agent/tools';
@@ -92,4 +92,17 @@ test('the approvals end with the run\'s turn: none is kept, and one given after 
   floorApprovalsOnce(grants).add(key, START);
   assert.equal(floorApprovalsOnce(grants).has(key, START), false, 'an approval after the end is not kept');
   assert.equal((await gateToolCall(runtime, input())).approvedOnce, undefined);
+});
+
+// PR #74 review round 6 (nit): an approval is stamped and checked with the same clock, the runtime's, never the machine's own: a runtime whose clock is a day
+// ahead of the machine still honours an approval given through it, and one given a TTL ago by that clock has expired.
+test('a late approval is stamped with the runtime\'s clock, the one the gate checks it with', async () => {
+  const { runtime, grants, input, key, advance } = setup();
+  advance(24 * 60 * 60_000); // the runtime's clock is a day past the fixed start, far from the machine's
+  approveFloorCallLate(grants, key, runtime.clock!);
+  assert.equal(floorApprovalsOnce(grants).has(key, runtime.clock!()), true);
+  assert.equal((await gateToolCall(runtime, input())).approvedOnce, true, 'honoured by the gate, which reads the same clock');
+  approveFloorCallLate(grants, key, runtime.clock!);
+  advance(FLOOR_APPROVAL_TTL_MS);
+  assert.equal((await gateToolCall(runtime, input())).approvedOnce, undefined, 'expired by that clock');
 });

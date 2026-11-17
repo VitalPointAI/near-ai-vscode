@@ -6,7 +6,7 @@ import * as path from 'node:path';
 import { RunCheckpoints } from '../agent/checkpoints';
 import { compactConversation, contextAction, contextStatus, DEFAULT_COMPACT_AT_TOKENS, DEFAULT_CONTEXT_WINDOW, DEFAULT_THRESHOLDS, estimateTokens, trimOldToolResults } from '../agent/context';
 import type { GateHost } from '../gate/host';
-import { endFloorApprovals, floorApprovalsOnce, recordLateApproval } from '../agent/gateAdapter';
+import { approveFloorCallLate, endFloorApprovals, recordLateApproval } from '../agent/gateAdapter';
 import { AgentEvent, AgentRun, AgentRunError, ApprovalReply, ApprovalRequest, AWAITING_APPROVAL_PREFIX, DEFAULT_MAX_TURNS, RunInput, RunOutcome, RunResult } from '../agent/loop';
 import { countersOf, runSplitOf } from './activityOverview';
 import { PermissionRules, RunGrants } from '../agent/permissions';
@@ -1100,7 +1100,7 @@ export class AgentConversation {
               // happens only if they allow it, and the sub-agent works on meanwhile instead of holding the run.
               requestApproval: (approval) => this.askApproval({ ...approval, callId: `${agent.id}:${approval.callId}`, title: `${label} › ${approval.title}` }, agent.abort.signal, label, agent.id, {
                 waitMs: this.subagentApprovalWaitMs,
-                onLate: (reply) => { if (childGate) recordLateApproval(childGate, approval.callId, reply, { model }); this.lateApproval(label, approval, reply, grants, request.rememberAllowRule); }
+                onLate: (reply) => { if (childGate) recordLateApproval(childGate, approval.callId, reply, { model }); this.lateApproval(label, approval, reply, grants, request.rememberAllowRule, childGate?.clock ?? Date.now); }
               }, grants),
               rememberAllowRule: request.rememberAllowRule,
               emit: (event) => {
@@ -1582,11 +1582,12 @@ export class AgentConversation {
    * card (publishing, destruction, a write into `.git/` or NEAR AI's state) grants nothing for the run: an allow lets that exact call run once, and the
    * next identical call asks again (D-43, Pitfall 4).
    */
-  private lateApproval(label: string, approval: ApprovalRequest, reply: ApprovalReply, grants: RunGrants, remember?: (rule: string) => void | Promise<void>): void {
+  private lateApproval(label: string, approval: ApprovalRequest, reply: ApprovalReply, grants: RunGrants, remember: ((rule: string) => void | Promise<void>) | undefined, clock: () => number): void {
     const allowed = reply.decision === 'allow' || reply.decision === 'allow-run' || reply.decision === 'allow-always';
     if (approval.floor) {
       // Never grants.commands, grants.edits or an allow rule: the approval is kept beside the grants and is used up by the one call it names.
-      if (allowed) floorApprovalsOnce(grants).add(approval.floor.callKey);
+      // Stamped with the clock of the gate that will check it (the runtime's), so the approval's time limit is read on one clock.
+      if (allowed) approveFloorCallLate(grants, approval.floor.callKey, clock);
       const shown = approval.subject ? `\`${approval.subject.slice(0, 300)}\`` : `"${approval.title.slice(0, 200)}"`;
       this.notifications.push({ role: 'user', content: allowed
         ? `<approval-update agent="${label}" decision="allowed-once">\nThe user approved ${shown}, which ${label} had queued. This kind of action needs a person every time, so it is allowed once: run that exact call again (the same tool and arguments, from the same folder) if it is still needed. Any further run of it asks again.\n</approval-update>`
