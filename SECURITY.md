@@ -206,7 +206,8 @@ is what that file and the records beside it do in this version.
   keys and JSON web tokens), bearer tokens, a value given to a name such as
   `password`, `secret` or `api_key`, the user part of a URL
   (`https://user:password@host`), the value of `-u`, `--user`,
-  `--proxy-user` or `-U` when it holds a colon, the value of an option named
+  `--proxy-user` or `-U` when it holds a colon (a numeric user and group, such
+  as `1000:1000`, is kept), the value of an option named
   for a password, passphrase, token, secret, API key or credential (such as
   `--password=...`, `--token ...` or `-storepass ...`), the value of an
   `Authorization`, `Proxy-Authorization`, `Cookie`, `Private-Token` or

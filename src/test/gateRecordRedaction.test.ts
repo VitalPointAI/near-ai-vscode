@@ -32,6 +32,22 @@ function assertGone(command: string, keep: readonly string[] = []): string {
   return out;
 }
 
+// PR #74 review round 2: a numeric user and group (`docker run --user 1000:1000`) holds no password, so the command is kept whole; anything else with a
+// colon after these options is still removed, including a numeric user with a non-numeric password and a number-only password after a name.
+test('-u and --user keep a numeric user and group, and still drop every other value with a colon', () => {
+  for (const command of ['docker run --user 1000:1000 node:20 npm test', 'docker run -u 0:0 alpine id', 'docker exec --user=1000:1000 app ls',
+    'docker run --user "1000:1000" img', "podman run -u '33:33' img", 'docker run -u1000:1000 img']) {
+    assert.equal(redactCredentialArguments(command), command, `${command}: a numeric user and group is kept`);
+    assert.equal(redacted(command), command, `${command}: and no token rule touches it`);
+  }
+  assertGone(`curl -u 1000:${SECRET} https://api.example.test`, ['curl -u ']);
+  assertGone('curl -u bob:123456 https://api.example.test'.replace('123456', `${SECRET}`));
+  const numericPassword = redactCredentialArguments('curl -u bob:123456 https://api.example.test');
+  assert.ok(!numericPassword.includes('123456'), `a number-only password after a name is removed: ${numericPassword}`);
+  const userAndNumber = redactCredentialArguments('curl --user 1000:1000x https://api.example.test');
+  assert.ok(!userAndNumber.includes('1000x'), `only digits on both sides are kept: ${userAndNumber}`);
+});
+
 test('the user part of a URL is removed, a password or a token alone', () => {
   assertGone(`git clone https://alice:${SECRET}@git.example.test/repo.git`, ['https://', '@git.example.test/repo.git']);
   assertGone(`git push https://${SECRET}@git.example.test/repo.git main`, ['@git.example.test']);

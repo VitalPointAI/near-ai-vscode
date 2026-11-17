@@ -48,6 +48,9 @@ const URL_USERINFO = /\b([a-z][a-z0-9+.-]*:\/\/)([^\s/?#@'"]+)@/gi;
 /** `-u user:pass`, `-uuser:pass`, `--user user:pass`, `--user=user:pass`, `--proxy-user …`, `-U …` (curl's proxy user): a value with a colon is a password. */
 const USER_OPTION = /(^|[\s;&|(])(--(?:proxy-)?user(?:=|\s+)|-[uU]\s*)(?:"([^"\n]*:[^"\n]*)"|'([^'\n]*:[^'\n]*)'|([^\s"';&|)]*:[^\s"';&|)]*))/g;
 
+/** A numeric user and group (`docker run --user 1000:1000`): no password, so the value is kept (PR #74 review round 2). Digits only on both sides. */
+const NUMERIC_USER_GROUP = /^\d+:\d+$/;
+
 /** An option, `-x` or `--x`, then `=` or spaces, then its value: a quoted string or one word that does not start another option. */
 const OPTION_WITH_VALUE = /(^|[\s;&|(])(--?[A-Za-z][\w-]*)(=|\s+)("[^"\n]*"|'[^'\n]*'|(?!-)[^\s;&|)]+)/g;
 /** An option named for a credential: a password, passphrase, secret or credential anywhere in its name, a token or API key at its end, `pass` as its last word (`--pass`, `--db-pass`, keytool's `-storepass`), or `--auth`. */
@@ -97,8 +100,8 @@ function replaced(value: string): string {
 export function redactCredentialArguments(text: string): string {
   return text
     .replace(URL_USERINFO, (_match, scheme: string) => `${scheme}${REDACTED}@`)
-    .replace(USER_OPTION, (_match, before: string, option: string, double?: string, single?: string) =>
-      `${before}${option}${double !== undefined ? `"${REDACTED}"` : single !== undefined ? `'${REDACTED}'` : REDACTED}`)
+    .replace(USER_OPTION, (match, before: string, option: string, double?: string, single?: string, bare?: string) =>
+      (NUMERIC_USER_GROUP.test(double ?? single ?? bare ?? '') ? match : `${before}${option}${double !== undefined ? `"${REDACTED}"` : single !== undefined ? `'${REDACTED}'` : REDACTED}`))
     .replace(OPTION_WITH_VALUE, (match, before: string, option: string, joiner: string, value: string) =>
       (credentialOption(option) ? `${before}${option}${joiner}${replaced(value)}` : match))
     .replace(CREDENTIAL_HEADER, (_match, name: string, colon: string) => `${name}${colon}${REDACTED}`)

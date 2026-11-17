@@ -265,4 +265,7 @@ test('the decision record paragraph says exactly what is removed from a command 
     assert.ok(removed(command), command);
   }
   for (const command of ['sshpass -p pw-1 ssh h', 'mysql -ppw-1 app', 'htpasswd -b users alice pw-1', 'curl -u "$(cat pw-1)" x']) assert.ok(!removed(command), command);
+  // PR #74 review round 2: the numeric user and group the paragraph says is kept is kept.
+  assert.ok(words.includes('(a numeric user and group, such as `1000:1000`, is kept)'));
+  assert.equal(redactCredentialArguments('docker run --user 1000:1000 img'), 'docker run --user 1000:1000 img');
 });
