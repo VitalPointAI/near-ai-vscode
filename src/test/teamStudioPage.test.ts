@@ -2346,7 +2346,8 @@ test('versions taken in the same millisecond are all kept, in order', async () =
   try {
     for (let n = 1; n <= 5; n += 1) { await writeFile(file, `version ${n}`); await library.snapshot(file); }
   } finally { Date.now = realNow; }
-  const versions = (await library.versions(file)).sort();
+  // versions() is newest first; file names alone do not sort by time once a millisecond holds more than one version.
+  const versions = (await library.versions(file)).reverse();
   assert.deepEqual(await Promise.all(versions.map((version) => readFile(version, 'utf8'))), ['version 1', 'version 2', 'version 3', 'version 4', 'version 5']);
 });
 
@@ -2508,4 +2509,127 @@ test('page: a clone reply that comes after the person left the picker is dropped
   page.byLabel('Use an existing team')!.click();
   page.dispatch(reply);
   assert.equal(page.heading(), 'Use an existing team', 'nor does it later, back on the picker');
+});
+
+// ---------- PR #75 review, round 2 ----------
+
+const PROPOSAL = { proposal: { name: 'Client team', mission: 'm', description: 'd', members: [{ name: 'a', role: 'writer', model: 'standard', produces: 'p', instructions: 'Write it.' }], outputs: [], notes: [] }, draft: { name: 'Client team', description: 'd', members: [{ name: 'a', role: 'writer', model: 'standard', tools: null, instructions: 'Write it.' }] }, problems: [] };
+
+test('page: a team drafted by AI is aimed at the project only straight from a project builder; staying, leaving another way, or starting over forgets it', async () => {
+  const page = await builderPage();
+  const target = () => page.radios('target').find((node) => node.checked)?.value;
+  const draftedTarget = () => { page.dispatch({ type: 'team-proposal', ...PROPOSAL }); page.byLabel('Use this team')!.click(); const value = target(); page.byLabel('Back to all teams')!.click(); if (page.posts.at(-1)!.type === 'leave-wizard') page.dispatch({ type: 'left', choice: 'discard' }); return value; };
+  const toDescribe = (dirty: boolean) => {
+    page.dispatch({ type: 'start-wizard', target: 'project' });
+    page.byLabel('Create a new team')!.click();
+    if (dirty) { page.byLabel('From scratch')!.click(); page.type('f-name', 'Half built'); page.byLabel('Back')!.click(); }
+    page.byLabel('Describe it, and AI drafts it')!.click();
+  };
+  // Straight there: the AI box says so, and the drafted team is saved as this project's team.
+  toDescribe(false);
+  assert.match(page.text(), /saved as this project's team/);
+  assert.equal(draftedTarget(), 'project');
+  // With unsaved work the host asks first; leaving through that question still goes to the AI box for the project.
+  toDescribe(true);
+  assert.equal(page.posts.at(-1)!.type, 'leave-wizard');
+  page.dispatch({ type: 'left', choice: 'discard' });
+  assert.equal(draftedTarget(), 'project');
+  // Staying in the builder, then leaving another way: forgotten.
+  toDescribe(true);
+  page.dispatch({ type: 'left', choice: 'stay' });
+  page.byLabel('Cancel')!.click();
+  page.dispatch({ type: 'left', choice: 'discard' });
+  assert.doesNotMatch(page.text(), /saved as this project's team/);
+  assert.equal(draftedTarget(), 'user', 'stayed, then left with Cancel');
+  // Starting over (the proposal discarded): forgotten.
+  toDescribe(false);
+  page.dispatch({ type: 'team-proposal', ...PROPOSAL });
+  page.byLabel('Start over')!.click();
+  assert.equal(draftedTarget(), 'user', 'started over');
+  // Opening a team, or another builder, before using the draft: forgotten.
+  toDescribe(false);
+  page.dispatch({ type: 'team', id: 'user:web', kind: 'user', file: 'My teams/web.md', command: '/team:web ', draft: draft(), base: 'b'.repeat(64), versions: [] });
+  page.byLabel('Back to all teams')!.click();
+  assert.equal(draftedTarget(), 'user', 'opened a team');
+  toDescribe(false);
+  page.byLabel('New team')!.click();
+  page.byLabel('Cancel')!.click();
+  assert.equal(draftedTarget(), 'user', 'started and left another builder');
+});
+
+test('page: Use as is and Clone and modify wait for the host\'s answer, so a double click sends one request', async () => {
+  const page = await builderPage();
+  page.byLabel('New team')!.click();
+  page.byLabel('Use an existing team')!.click();
+  page.select('lib:web');
+  const count = (type: string) => page.posts.filter((message) => message.type === type).length;
+  page.byLabel('Use Web team as is')!.click();
+  page.byLabel('Use Web team as is')!.click();
+  assert.equal(count('use-team'), 1, 'one request');
+  assert.equal(page.byLabel('Use Web team as is')!.disabled, true);
+  assert.equal(page.byLabel('Clone Web team and modify it')!.disabled, true);
+  // Each kind of answer frees them: declined, then an error.
+  page.dispatch({ type: 'used', declined: true, text: 'Not changed. This project\'s team is as it was.' });
+  assert.equal(page.byLabel('Use Web team as is')!.disabled, false);
+  page.byLabel('Use Web team as is')!.click();
+  page.dispatch({ type: 'error', text: 'That team is no longer in your teams. Pick another one.' });
+  assert.equal(page.byLabel('Use Web team as is')!.disabled, false);
+  assert.equal(count('use-team'), 2);
+  // Clone and modify: one request until its members come back (or an error).
+  page.byLabel('Clone Web team and modify it')!.click();
+  page.byLabel('Clone Web team and modify it')!.click();
+  assert.equal(count('starting-point'), 1);
+  page.dispatch({ type: 'error', text: 'That team is no longer in your teams. Pick another one.' });
+  assert.equal(page.byLabel('Clone Web team and modify it')!.disabled, false);
+  // A reply dropped because the person left the picker frees them too.
+  page.byLabel('Clone Web team and modify it')!.click();
+  page.byLabel('Back')!.click();
+  page.dispatch({ type: 'starting-point', id: 'lib:web', cloneName: 'Copy of Web team', draft: { name: '', description: '', members: [] } });
+  page.byLabel('Use an existing team')!.click();
+  assert.equal(page.byLabel('Use Web team as is')!.disabled, false);
+});
+
+test('host: a second Use as is while one is still running is ignored: one question, one write, one answer', async () => {
+  const h = await harness();
+  await h.library.create('Web team', teamMarkdown(draft()));
+  await h.send({ type: 'ready' });
+  await h.send({ type: 'use-team', id: 'lib:web-team' });
+  const projectFile = TeamLibrary.projectTeamFile(h.root);
+  const before = (await h.library.versions(projectFile)).length;
+  const posted = h.posted.length;
+  await Promise.all([h.send({ type: 'use-team', id: 'gsd:review' }), h.send({ type: 'use-team', id: 'gsd:review' })]);
+  assert.equal(h.confirmed.length, 1, 'asked once');
+  assert.equal((await h.library.versions(projectFile)).length, before + 2, 'the old team kept once and the new one written once');
+  assert.deepEqual(h.posted.slice(posted).filter((message) => ['team', 'used', 'error', 'notice'].includes(message.type)).map((message) => message.type), ['team']);
+  // Once it has answered, the next one runs.
+  h.confirmAnswer.value = false;
+  assert.deepEqual((await answersTo(h, { type: 'use-team', id: 'lib:web-team' })).map((answer) => answer.declined), [true]);
+  h.close();
+});
+
+test('versions: a burst within one millisecond is named after that millisecond, the newest stay when old ones are dropped, and one taken a moment later is the latest', async () => {
+  const library = new TeamLibrary(await mkdtemp(path.join(tmpdir(), 'near-ai-teams-')));
+  const file = TeamLibrary.projectTeamFile(await mkdtemp(path.join(tmpdir(), 'p-')));
+  await mkdir(path.dirname(file), { recursive: true });
+  const { versionLabel } = await import('../services/teamStudioPage');
+  const realNow = Date.now;
+  const at = 1_700_000_000_000;
+  const contents = async () => Promise.all((await library.versions(file)).map((version) => readFile(version, 'utf8')));
+  try {
+    Date.now = () => at;
+    for (let n = 1; n <= 25; n += 1) { await writeFile(file, `v${n}`); await library.snapshot(file); }
+    const names = (await library.versions(file)).map((version) => path.basename(version));
+    assert.equal(names.length, 20, 'the latest 20 are kept');
+    assert.deepEqual([...new Set(names.map((name) => versionLabel(name)))], ['2023-11-14 22:13:20 UTC'], 'never named after a later time than it was taken');
+    assert.deepEqual(await contents(), Array.from({ length: 20 }, (_, index) => `v${25 - index}`), 'newest first, and the oldest five were the ones dropped');
+    Date.now = () => at + 1;
+    await writeFile(file, 'a moment later');
+    await library.snapshot(file);
+    assert.equal((await contents())[0], 'a moment later', 'the latest');
+  } finally { Date.now = realNow; }
+  // A version named the old way (before sequence numbers) is read and ordered by its time.
+  const dir = path.dirname((await library.versions(file))[0]!);
+  await writeFile(path.join(dir, `${new Date(at + 5).toISOString().replace(/[:.]/g, '-')}.md`), 'old style, later');
+  assert.equal((await contents())[0], 'old style, later');
+  assert.equal((await contents()).length, 22);
 });
