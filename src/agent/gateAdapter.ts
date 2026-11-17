@@ -643,12 +643,15 @@ export async function gateToolCall(runtime: GateRuntime, input: GateCallInput, o
   const decision = await decideOrRefuse(options.refusal, input.policy.mode, () => decide(request, runtime.bundleState(), layer, gateOptionsOf(runtime)));
   const resource: DecisionResource | undefined = input.command === undefined && paths.trustedReads.length > 0 ? { name: trustedReadsName(paths.trustedReads), type: 'file' } : undefined;
   const floorAsk = decision.outcome === 'ask' && decision.floor;
-  const callKey = floorAsk ? floorCallKey(input) : undefined;
+  // A late approval of this exact call is used up by this decision, whatever it is (PR #74 review round 5): a refusal in between never leaves it waiting.
+  const exactCall = floorCallKey(input);
+  const approvedLate = takeFloorApproval(input.grants, exactCall, (runtime.clock ?? Date.now)());
+  const callKey = floorAsk ? exactCall : undefined;
   const gated: GatedCall = { decision, settings: captured.value, request, effects, ...(resource === undefined ? {} : { resource }), ...(callKey === undefined ? {} : { callKey }) };
   const model = options.model === undefined ? undefined : { name: options.model, provider: MODEL_PROVIDER };
   // A floor ask a person already approved once, late (a sub-agent's parked card): this exact call runs this time only. decide() has just been asked again,
   // so the emergency stop, the policy, the floor's refusals and the deny list all still came first (D-43, Pitfall 4).
-  if (callKey !== undefined && takeFloorApproval(input.grants, callKey)) {
+  if (callKey !== undefined && approvedLate) {
     keep(runtime, recordFor(runtime, gated, 'approved', decision.rule, APPROVED_ONCE_REASON, model));
     return { ...gated, approvedOnce: true };
   }
@@ -658,20 +661,67 @@ export async function gateToolCall(runtime: GateRuntime, input: GateCallInput, o
 
 const APPROVED_ONCE_REASON = 'A person approved this exact call once, after the run had moved on.';
 
-// Floor calls a person approved late, once each, by the run's grants (D-43, Pitfall 4). Kept beside RunGrants rather than in it, so no grant, allow rule or
-// saved setting can ever carry a floor approval: an entry is only added by a late allow of a floor card and is used up by the one call it names.
-const FLOOR_APPROVALS_ONCE = new WeakMap<RunGrants, Set<string>>();
+/** How long a late floor approval waits for its call (PR #74 review round 5): long enough for the lead to retry it, short enough not to linger. */
+export const FLOOR_APPROVAL_TTL_MS = 5 * 60_000;
 
-/** The exact floor calls of this run a person approved once, late. A call key is added when a parked floor card is allowed and removed when that call runs. */
-export function floorApprovalsOnce(grants: RunGrants): Set<string> {
+/**
+ * Floor calls a person approved late, once each, for one run's turn (D-43, Pitfall 4). Each is used up by the next decision of that exact call, whatever its
+ * outcome, expires after FLOOR_APPROVAL_TTL_MS, and all end with the turn (endFloorApprovals); an approval given after the end is not kept.
+ */
+export class FloorApprovalsOnce {
+  private readonly expiries = new Map<string, number>();
+  private ended = false;
+
+  /** A person approved this exact call once, late, at `now`. */
+  public add(key: string, now: number = Date.now()): void {
+    if (this.ended) return;
+    this.expiries.set(key, now + FLOOR_APPROVAL_TTL_MS);
+  }
+
+  /** Whether an approval of this exact call is waiting and has not expired. */
+  public has(key: string, now: number = Date.now()): boolean {
+    const expires = this.expiries.get(key);
+    return !this.ended && expires !== undefined && now < expires;
+  }
+
+  public get size(): number {
+    return this.expiries.size;
+  }
+
+  /** Uses up the approval of this exact call, if any, and drops every expired one. True when it was waiting and still good. */
+  public take(key: string, now: number): boolean {
+    const good = this.has(key, now);
+    this.expiries.delete(key);
+    for (const [other, expires] of [...this.expiries]) if (now >= expires) this.expiries.delete(other);
+    return good;
+  }
+
+  /** The run's turn is over: nothing waiting is kept, and nothing given later is. */
+  public end(): void {
+    this.ended = true;
+    this.expiries.clear();
+  }
+}
+
+// Kept beside RunGrants rather than in it, so no grant, allow rule or saved setting can ever carry a floor approval: an entry is only added by a late allow
+// of a floor card.
+const FLOOR_APPROVALS_ONCE = new WeakMap<RunGrants, FloorApprovalsOnce>();
+
+/** The exact floor calls of this run a person approved once, late. A call key is added when a parked floor card is allowed. */
+export function floorApprovalsOnce(grants: RunGrants): FloorApprovalsOnce {
   let once = FLOOR_APPROVALS_ONCE.get(grants);
-  if (once === undefined) { once = new Set(); FLOOR_APPROVALS_ONCE.set(grants, once); }
+  if (once === undefined) { once = new FloorApprovalsOnce(); FLOOR_APPROVALS_ONCE.set(grants, once); }
   return once;
 }
 
-function takeFloorApproval(grants: RunGrants, key: string): boolean {
+/** The run's turn has ended: its late floor approvals end with it. */
+export function endFloorApprovals(grants: RunGrants): void {
+  floorApprovalsOnce(grants).end();
+}
+
+function takeFloorApproval(grants: RunGrants, key: string, now: number): boolean {
   const once = FLOOR_APPROVALS_ONCE.get(grants);
-  return once !== undefined && once.delete(key);
+  return once !== undefined && once.take(key, now);
 }
 
 function canonical(value: unknown): unknown {

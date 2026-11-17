@@ -6,7 +6,7 @@ import * as path from 'node:path';
 import { RunCheckpoints } from '../agent/checkpoints';
 import { compactConversation, contextAction, contextStatus, DEFAULT_COMPACT_AT_TOKENS, DEFAULT_CONTEXT_WINDOW, DEFAULT_THRESHOLDS, estimateTokens, trimOldToolResults } from '../agent/context';
 import type { GateHost } from '../gate/host';
-import { floorApprovalsOnce, recordLateApproval } from '../agent/gateAdapter';
+import { endFloorApprovals, floorApprovalsOnce, recordLateApproval } from '../agent/gateAdapter';
 import { AgentEvent, AgentRun, AgentRunError, ApprovalReply, ApprovalRequest, AWAITING_APPROVAL_PREFIX, DEFAULT_MAX_TURNS, RunInput, RunOutcome, RunResult } from '../agent/loop';
 import { countersOf, runSplitOf } from './activityOverview';
 import { PermissionRules, RunGrants } from '../agent/permissions';
@@ -555,6 +555,8 @@ export class AgentConversation {
       this.releasePending();
       this.markerRun = undefined;
       this.steerRun = undefined;
+      // The turn is over: a floor card approved late for it lets nothing run any more (PR #74 review round 5).
+      endFloorApprovals(grants);
       // Stopped or failed runs are reconciled too: NEAR bills what they used.
       if (account && !costAsked) void account.settleNow((entry) => entry.runId === runId);
       await this.runMarkers?.end(conversationId, runId, ended);
