@@ -1090,7 +1090,9 @@ copy of Open-GSD to a project that doesn't already have one.
   narrow it. **NEAR AI: Show Policy** shows it, read only. If it is missing,
   changed or expired, only reading and planning run until you run
   **NEAR AI: Reset Policy to Defaults**, which asks first and keeps your old
-  file. See [Your policy file and decision records](SECURITY.md#your-policy-file-and-decision-records).
+  file. Every model request is checked against its routing before anything is
+  sent and leaves a record in a log of its own; on a fresh install nothing
+  changes where requests go. See [Your policy file and decision records](SECURITY.md#your-policy-file-and-decision-records).
 - API keys live in VS Code's encrypted **SecretStorage**, scoped to each
   project. They are never written to settings, workspace files, logs, history,
   or exports.

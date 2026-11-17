@@ -23,9 +23,12 @@ export const RESET_POLICY_COMMAND = 'nearAi.policy.reset';
 export const POLICY_SCHEME = 'near-ai-policy';
 export const POLICY_DOCUMENT_URI = `${POLICY_SCHEME}:/NEAR-AI-Policy.txt`;
 
-/** Shown above the scales, clearances and routing: this version stores them and does not use them yet. Plan 21 removes it when they are live. */
+/**
+ * Shown above the scales, clearances and routing. From PR 4a the routing is used: every model request is checked against it, at the default label because
+ * nothing can be labelled yet. The scales and clearances are stored and not used yet. Plan 21 removes the rest of this line when they are live.
+ */
 export const POLICY_LABELS_NOT_USED_TEXT =
-  'This version does not use the scales, clearances and routing below yet. They are kept so your policy file does not change when it does.';
+  'This version checks every model request against the routing below, at your policy\'s default label, because nothing can be labelled yet. It does not use the scales and clearances below yet. They are kept so your policy file does not change when it does.';
 
 export const RESET_CONFIRM_ACTION = 'Reset Policy';
 export const RESET_TITLE = 'Reset your policy to the default?';

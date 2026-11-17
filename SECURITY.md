@@ -301,9 +301,26 @@ is what that file and the records beside it do in this version.
   is open, and also to the open project's record when there is one. That log
   rolls over the same way. The decisions of a run in a window with no folder
   open are written to that install log too.
-- **What this version does not use yet.** The file also holds scales,
-  clearances and routing tiers. This version stores and shows them and does not
-  use them yet.
+- **Model requests.** Before anything is sent to a model, whether from the
+  chat, a helper agent, an attached file being read, the chat view in VS Code,
+  Team Studio, a cybersecurity scan or a model comparison, NEAR AI checks the
+  request against the routing tiers in the policy file, using only what is on
+  this computer. Nothing can be labelled yet, so every request is at the
+  policy's default label, which may go to any model, and on a fresh install
+  nothing changes where requests go. A request the routing does not allow is
+  not sent, and you are told why in plain words. Until NEAR AI can prove that a
+  connection to NEAR AI Cloud ends inside its private hardware, content at a
+  level whose tier needs an attested cloud model stays on this computer for
+  now. Every model request, sent or not, leaves a record in a log of its own,
+  `gate/model-requests/` in this extension's storage, beside the decision
+  records: it rolls over the same way, is never synced and is never put in your
+  project. A routine record holds the time, who asked, the model and its
+  provider, the routing tier, the rule that allowed it and the policy's hash,
+  each once; a refused request's record also holds the plain reason and the
+  label that decided it. A record of a model request names never the content,
+  the endpoint's address or a file path.
+- **What this version does not use yet.** The file also holds scales and
+  clearances. This version stores and shows them and does not use them yet.
 - **Your clearance is your own word.** Until verified credentials arrive, your clearance comes from your own policy file, which your own device key signs, so it is self-declared. It is not an enforced clearance boundary.
 
 ### Sub-agents nobody is watching

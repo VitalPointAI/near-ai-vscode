@@ -125,6 +125,10 @@ test('Show Policy opens a read-only document with the hash, the self-declared cl
   assert.ok(text.includes(CLEARANCE_SELF_ASSERTED_TEXT));
   assert.ok(text.includes(SCALE_PRESETS_CAVEAT_TEXT));
   assert.ok(text.includes(gateCommands.POLICY_LABELS_NOT_USED_TEXT));
+  // PR 4a: the routing is used now (every model request is checked against it); the scales and clearances are not yet.
+  assert.match(gateCommands.POLICY_LABELS_NOT_USED_TEXT, /checks every model request against the routing below/);
+  assert.match(gateCommands.POLICY_LABELS_NOT_USED_TEXT, /does not use the scales and clearances below yet/);
+  assert.doesNotMatch(gateCommands.POLICY_LABELS_NOT_USED_TEXT, /does not use the scales, clearances and routing/);
   assert.ok(text.includes(state.bundle.issuer.fingerprint), 'the issuer');
   assert.ok(text.includes(state.expiresAt), 'the expiry');
   assert.ok(text.includes('"bundleVersion": 1'), 'the pretty-printed payload');
