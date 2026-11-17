@@ -10,7 +10,8 @@ import { CORE_TOOLS } from '../agent/tools';
 import { unavailableGateRuntime } from '../agent/gateAdapter';
 import type { GateRuntime } from '../domain/gate/decide';
 import type { ActionPolicy } from '../domain/policy';
-import { SpendLimitError, StreamInterruptedError, type UsageMetadata } from '../services/nearAiClient';
+import { SpendLimitError, StreamInterruptedError, type AgentMessage, type UsageMetadata } from '../services/nearAiClient';
+import { sessionRouteFrom, withSessionRoute } from '../gate/sessionMark';
 import { withSpendTag } from '../services/spendLedger';
 import type { ComparisonPlan, ResultRow, RowOutcome } from './results';
 import { costOf, gradeTask, runMetrics, setUpTask, type BenchmarkTask } from './tasks';
@@ -51,16 +52,21 @@ export async function runAgentInFolder(client: BenchmarkClient, model: string, r
   const shell = new ShellSession(root);
   const started = Date.now();
   const checkpoints = new RunCheckpoints(`benchmark-${Date.now()}`);
+  const gate = runGateFor(options);
   try {
-    const result = await new AgentRun({
+    const run = new AgentRun({
       client, model, tools: CORE_TOOLS, maxTurns: options.maxTurns,
       context: { root, checkpoints, shell, readFiles: new Set() },
       policy: options.policy ?? { mode: 'fully-autonomous', emergencyStop: false }, rules: options.rules,
       requestApproval: options.requestApproval ?? UNATTENDED, emit: (event) => options.onEvent?.(event),
-      gate: runGateFor(options),
+      gate,
       ...(options.beforeTurn ? { beforeTurn: options.beforeTurn } : {})
+    });
     // The production system prompt, so the benchmark measures models as the extension runs them.
-    }).run([{ role: 'system', content: agentSystemPrompt({ root, platform: `${process.platform} ${process.arch}`, date: new Date().toISOString().slice(0, 10), isGitRepo: false, model }) }, { role: 'user', content: prompt }], options.signal ?? new AbortController().signal);
+    const messages: AgentMessage[] = [{ role: 'system', content: agentSystemPrompt({ root, platform: `${process.platform} ${process.arch}`, date: new Date().toISOString().slice(0, 10), isGitRepo: false, model }) }, { role: 'user', content: prompt }];
+    // CLAS-06: every model request of the run (comparison, benchmark and role-suite runs all come here) is routed by a session route built from the run's own
+    // gate, so a run with no gate host is decided by the failed-closed policy, and its requests are recorded where its decisions are.
+    const result = await withSessionRoute(sessionRouteFrom(gate), () => run.run(messages, options.signal ?? new AbortController().signal));
     const answer = [...result.messages].reverse().find((message) => message.role === 'assistant' && message.content)?.content ?? '';
     return { outcome: result.outcome, answer: String(answer), usage: result.usage, ms: Date.now() - started, changed: checkpoints.changedFiles };
   } finally {

@@ -219,7 +219,7 @@ export function activate(context: vscode.ExtensionContext): NearAiTestApi | unde
   registerCodePushCommand(context);
 
   // `@nearAi` in VS Code's built-in Chat view; skipped on hosts without the Chat Participant API.
-  registerChatParticipant(context, auth, (command, args) => sidebar.request({ type: 'open-command', command, ...(args ? { args } : {}) }));
+  registerChatParticipant(context, auth, (command, args) => sidebar.request({ type: 'open-command', command, ...(args ? { args } : {}) }), gate);
   return process.env.NEAR_AI_E2E === '1' ? { auth, sidebar, team: teamModeTestApi(context, teamMode), gate } : undefined;
 }
 

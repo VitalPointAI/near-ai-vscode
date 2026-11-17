@@ -18,10 +18,13 @@ async function clientsFor(options: CreateNearAiProviderOptions): Promise<{ clien
   if (!apiKey && profile.provider !== 'local') throw new Error('The selected profile has no configured credential.');
   // Every billable response of a NEAR AI Cloud key goes to that key's spend ledger; a local runtime bills nothing.
   const spend = profile.provider === 'local' ? undefined : spendAccountFor(profile.baseUrl, apiKey);
-  const client = new NearAiClient({ baseUrl: profile.baseUrl, apiKey, fetchFn, ...(spend ? { spend, spendTag: { projectId: scope.projectId } } : {}) });
-  if (profile.provider !== 'hybrid' || !profile.localBaseUrl) return { client };
+  // CLAS-06: each client says which route it is, so the route check judges the client a request really uses. A hybrid profile's NEAR client knows a local
+  // model is there to use instead. No client gets a connection binding source before plan 25, so attested-cloud levels stay on this computer (D-50).
+  const hybrid = profile.provider === 'hybrid' && Boolean(profile.localBaseUrl);
+  const client = new NearAiClient({ baseUrl: profile.baseUrl, apiKey, fetchFn, route: profile.provider === 'local' ? 'local' : 'near', ...(hybrid ? { localModelAvailable: true } : {}), ...(spend ? { spend, spendTag: { projectId: scope.projectId } } : {}) });
+  if (!hybrid || !profile.localBaseUrl) return { client };
   const localApiKey = await auth.getScopedApiKeyFor(localKeyScope(scope), profile.localBaseUrl) ?? '';
-  return { client, localClient: new NearAiClient({ baseUrl: profile.localBaseUrl, apiKey: localApiKey, fetchFn }) };
+  return { client, localClient: new NearAiClient({ baseUrl: profile.localBaseUrl, apiKey: localApiKey, fetchFn, route: 'local' }) };
 }
 
 export async function createNearAiProvider(options: CreateNearAiProviderOptions): Promise<ResolvedProvider> {

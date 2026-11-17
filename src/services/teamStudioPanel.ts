@@ -10,6 +10,7 @@ import { slugify, TeamLibrary } from '../agent/teams';
 import { AuthService } from './auth';
 import { unattendedRuntimeFor } from '../gate/host';
 import type { GateHost } from '../gate/host';
+import { defaultSessionRoute, sessionRouteFrom, withSessionRoute } from '../gate/sessionMark';
 import { attachTeamStudio, optimiseTarget, StudioTarget, teamStudioHtml, versionLabel } from './teamStudioPage';
 import { ChatPrefill, gatherDirectoryInput } from './toolsPage';
 import { comparisonStoreFor } from '../benchmark/store';
@@ -69,7 +70,7 @@ async function optimisationSetup(auth: AuthService, context: vscode.ExtensionCon
  * What a Team Studio model call needs from the active profile: the catalogue, the tier models in order of preference, each model's route (for the
  * private check), the settings the outbound check reads, and today's spend from the key's ledger. Throws when the project has no profile.
  */
-async function teamAiDeps(auth: AuthService): Promise<TeamAiDeps> {
+async function teamAiDeps(auth: AuthService, gateHost?: GateHost): Promise<TeamAiDeps> {
   const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '';
   const active = await activeProvider(root, auth).catch(() => undefined);
   if (!active) throw new Error('Set up a NEAR AI profile for this project first.');
@@ -87,7 +88,13 @@ async function teamAiDeps(auth: AuthService): Promise<TeamAiDeps> {
       await account?.ledger.refresh();
       return account?.spentTodayUsd().usd ?? 0;
     },
-    complete: (model, messages, options) => clientFor(active, model).client.completeOnce(model, messages, options)
+    // CLAS-06: a person drafts and improves the team here, so each request is routed (and recorded) as the person's, in the project's log. With no gate host
+    // it is decided with the default route.
+    complete: async (model, messages, options) => {
+      const send = () => clientFor(active, model).client.completeOnce(model, messages, options);
+      const runtime = await gateHost?.runtimeFor({ root, actor: { kind: 'person', sessionId: 'team-studio' }, presence: 'person', context: 'interactive' });
+      return withSessionRoute(runtime ? sessionRouteFrom(runtime) : defaultSessionRoute(), send);
+    }
   };
 }
 
@@ -129,7 +136,7 @@ export async function openTeamStudio(context: vscode.ExtensionContext, auth: Aut
     // The tested model for each role, from the comparisons this machine has run, so a saved team is checked against evidence rather than defaults.
     // The studio's only way to a model (0.4.27): drafting a team and Improve with AI both go through teamModelCall with these, and the host decides
     // which model may be used.
-    teamAi: () => teamAiDeps(auth),
+    teamAi: () => teamAiDeps(auth, gateHost),
     // The final step of adding a team: measure each member's role on a few candidate models, then write the winner into the team file. The person is
     // asked first, because this spends real time and tokens, and skipping it leaves exactly the team they wrote.
     optimiseTeam: async (members, teamName, options = {}) => {
