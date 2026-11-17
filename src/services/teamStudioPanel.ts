@@ -18,7 +18,8 @@ import { comparisonStoreFor } from '../benchmark/store';
 import { loadBenchmarkTasks } from '../benchmark/tasks';
 import { leaderboardRows, suggestForTeam } from './modelComparisonPage';
 import { activeProvider, clientFor, privateRouteFor, type ActiveProvider } from './providerCache';
-import { readAgentRules, readModelTiers, readSettings } from './settings';
+import { readAgentModels, readAgentRules, readModelTiers, readSettings } from './settings';
+import { withSpendTag } from './spendLedger';
 import { spendAccountOf } from './agentSession';
 import type { TeamAiDeps } from './teamStudioAi';
 import { bestOf, planRoleSuite, runRoleSuite } from '../benchmark/roleSuite';
@@ -96,6 +97,15 @@ async function teamAiDeps(auth: AuthService, runtimeOf: (root: string) => Promis
       // The panel's runtime for this folder, asked of the host once when the panel first needed it, so no call waits on the host's start again.
       const runtime = await runtimeOf(root);
       return withSessionRoute(runtime ? sessionRouteFrom(runtime) : defaultSessionRoute(), send);
+    },
+    // 0.4.30, team icons: the image model the settings name, and one image made the way GenerateImage makes it (the client records its cost, tagged as
+    // generation like every other image), routed and recorded as the person's like the requests above.
+    imageModel: readAgentModels().imageModel,
+    generateImage: async (model, prompt, signal) => {
+      // Its own name: the route check reads the work handed to withSessionRoute by name, so the two in this file must differ.
+      const sendImage = () => withSpendTag({ kind: 'generation' }, () => clientFor(active, model).client.generateImage(model, prompt, { count: 1 }, signal));
+      const runtime = await gateHost?.runtimeFor({ root, actor: { kind: 'person', sessionId: 'team-studio' }, presence: 'person', context: 'interactive' });
+      return withSessionRoute(runtime ? sessionRouteFrom(runtime) : defaultSessionRoute(), sendImage);
     }
   };
 }
@@ -231,6 +241,8 @@ export async function openTeamStudio(context: vscode.ExtensionContext, auth: Aut
     // A share file is <team>.near-team.json; the dialog filters on its last extension, json. A team .md file can be imported too.
     pickShareTarget: async (name) => (await vscode.window.showSaveDialog({ defaultUri: vscode.Uri.file(path.join(rootNow() ?? homeFolder(), name)), filters: { 'NEAR AI team': ['json'] }, title: 'Share team: save it as one file to send' }))?.fsPath,
     pickImportSource: async () => (await vscode.window.showOpenDialog({ filters: { 'NEAR AI team': ['json', 'md'] }, title: 'Import a NEAR AI team', canSelectMany: false }))?.[0]?.fsPath,
+    // 0.4.30: a picture for a team's icon. The host checks it by its bytes (PNG, JPEG or WebP, at most 2 MB); SVG is never offered or accepted.
+    pickIconSource: async () => (await vscode.window.showOpenDialog({ filters: { Images: ['png', 'jpg', 'jpeg', 'webp'] }, title: 'Choose a picture for the team icon', canSelectMany: false, openLabel: 'Use as icon' }))?.[0]?.fsPath,
     home: homeFolder(),
     applyProjectType: async (projectRoot, type, goal) => {
       const applied = await applyProjectType(projectRoot, type, goal);
