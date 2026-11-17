@@ -39,7 +39,7 @@ Close PR 4c (D-49): check PR 4b is on main, rebase keeping only 4c's commits, wr
 Purpose: D-34, D-29, D-30, D-37, D-48, D-49, D-50, D-54. This is the release where labels first change where content is sent, so its body names the routing meanings for the owner before release.
 Output: PR 4c open from `feat/gate-session-mark` into `main` with green checks; `70-28c-SUMMARY.md`.
 
-Size: 4c is the largest of the five (plans 22, 23 and 24, about 212,000 plan tokens), projected at about 700 KB after review against the ~650 KB target. The client-level local-only tests already moved to 4b by default (D-57), which brought 4c to about 640 KB; PR #78's review then added plan 23 Task 3, the signed lowerings (D-58). This plan reports the measured size and the projection in the PR body; the further split that would bring it under (shipping plan 23 Task 3 in 4d) is an open owner question recorded in COVERAGE.md, not done here.
+Size: 4c is the largest of the five (plans 22, 23 and 24, about 212,000 plan tokens), projected at about 700 KB after review against the ~650 KB target. The client-level local-only tests already moved to 4b by default (D-57), which brought 4c to about 640 KB; the planner then added plan 23 Task 3 (the author's decision, D-58), the signed lowerings (D-58). This plan reports the measured size and the projection in the PR body; the further split that would bring it under (shipping plan 23 Task 3 in 4d) is an open owner question recorded in COVERAGE.md, not done here.
 </objective>
 
 <artifacts_produced>
