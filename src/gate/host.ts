@@ -397,3 +397,22 @@ export class GateHost {
 export function unattendedRuntimeFor(host: Pick<GateHost, 'runtimeFor'>, root: string | undefined, sessionId: string, agentLabel: string): Promise<GateRuntime> {
   return host.runtimeFor({ ...(root ? { root } : {}), actor: { kind: 'agent', sessionId, agentLabel }, presence: 'none', context: 'unattended' });
 }
+
+/**
+ * A runtime per folder, asked of the host once and reused for every later call in that folder (PR #81 review): a panel that makes many model calls (Team
+ * Studio) waits for the host's start at most once, never before each call. The runtime reads the host's policy at each decision, so a reused one is never
+ * stale. With no host it gives none, and the caller decides with the default route. A request that fails is not kept, so the next call asks again.
+ */
+export function runtimePerRoot(host: Pick<GateHost, 'runtimeFor'> | undefined, request: (root: string) => RuntimeRequest): (root: string) => Promise<GateRuntime | undefined> {
+  const kept = new Map<string, Promise<GateRuntime>>();
+  return async (root) => {
+    if (host === undefined) return undefined;
+    let found = kept.get(root);
+    if (found === undefined) {
+      found = host.runtimeFor(request(root));
+      kept.set(root, found);
+      found.catch(() => { if (kept.get(root) === found) kept.delete(root); });
+    }
+    return found;
+  };
+}

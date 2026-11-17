@@ -1126,3 +1126,25 @@ test('a policy state that cannot be read for its routing (valid, with no bundle 
   assert.equal(records[0]?.unmapped.nearAi.bundleHash, '', 'no policy hash could be read');
   assert.equal(validateDecisionRecord(records[0]).ok, true);
 });
+
+test('Team Studio asks the gate host for its runtime once per panel and folder, not before each model call', async () => {
+  const text = readFileSync(path.join(REPO, 'src/services/teamStudioPanel.ts'), 'utf8');
+  const deps = text.slice(text.indexOf('async function teamAiDeps'), text.indexOf('export async function openTeamStudio'));
+  assert.ok(deps.length > 0);
+  assert.ok(!deps.includes('.runtimeFor('), 'no runtime is asked of the host inside a model call');
+  const open = text.slice(text.indexOf('export async function openTeamStudio'));
+  assert.equal(open.match(/runtimePerRoot\(/g)?.length, 1, 'the panel makes one resolver when it opens');
+  // The resolver itself: one host call per folder, however many model calls ask, and a slow start is waited for once.
+  const { runtimePerRoot } = await import('../gate/host');
+  let asked = 0;
+  const slowHost = { runtimeFor: async () => { asked += 1; await new Promise((resolve) => setTimeout(resolve, 30)); return testGateRuntime(); } };
+  const resolve = runtimePerRoot(slowHost, (root) => ({ root, actor: { kind: 'person', sessionId: 'team-studio' }, presence: 'person', context: 'interactive' }));
+  const started = Date.now();
+  await Promise.all([resolve('/work/a'), resolve('/work/a'), resolve('/work/a')]);
+  await resolve('/work/a');
+  assert.equal(asked, 1);
+  assert.ok(Date.now() - started < 1000);
+  await resolve('/work/b');
+  assert.equal(asked, 2, 'another folder has its own runtime');
+  assert.equal(await runtimePerRoot(undefined, () => ({ actor: { kind: 'person', sessionId: 's' }, presence: 'person', context: 'interactive' }))('/work/a'), undefined, 'no host, no runtime');
+});
