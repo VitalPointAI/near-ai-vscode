@@ -458,3 +458,27 @@ test('host: the dashboard\'s sort and filter are kept for the person, so the tab
   await h.send({ type: 'refresh' });
   assert.equal('view' in h.latest('state'), false);
 });
+
+test('host: Optimise all teams from the dashboard lists the dashboard again for the new role tests, and ends without a stray error', async () => {
+  const h = await host();
+  await h.library.create('Web team', TEAM);
+  const record = { at: new Date().toISOString(), members: 1, tested: 1, score: 75 };
+  let records: Record<string, unknown> = {};
+  h.deps.roleTests = { get: () => records };
+  h.deps.optimiseCandidates = async () => ['fast'];
+  h.deps.optimiseTeam = async (_members, team, options) => { records = { [roleTestKey(options!.file!)]: record }; return { applied: 1, text: `${team}: set 1 model.` }; };
+  h.deps.choose = async (_message, ...actions) => actions[0];
+  await h.send({ type: 'ready' });
+  const before = h.posted.length;
+  await h.send({ type: 'optimise-all' });
+  const after = h.posted.slice(before);
+  assert.equal(after.filter((message) => message.type === 'error').length, 0, JSON.stringify(after.filter((message) => message.type === 'error')));
+  assert.equal(h.latest('library').dashboard.cards['user:web-team'].health.parts[1].score, 75);
+  // With a team open, the page is not sent that team again under a made-up id (the panel tells an open editor about new models with external-change).
+  await h.send({ type: 'open', id: 'user:web-team' });
+  const count = h.posted.length;
+  await h.send({ type: 'optimise-all' });
+  const later = h.posted.slice(count);
+  assert.deepEqual(later.filter((message) => message.type === 'team' || message.type === 'error'), []);
+  assert.ok(later.some((message) => message.type === 'library'));
+});
