@@ -30,7 +30,7 @@ import { POLICY_BUNDLE_FILE, gateDir } from '../gate/bundleStore';
 import { writeLastValid } from '../gate/clockMarker';
 import { DECISIONS_DIR, projectLogKey } from '../gate/decisionLog';
 import type { GateHost } from '../gate/host';
-import { LABEL_MAP_FILE, LABEL_MAP_ROLLED_BACK_TEXT, LABEL_MAP_UNREADABLE_TEXT, LABEL_MAP_UNVERIFIED_TEXT, LabelMapError, readLabelMarker, updateLabelMap } from '../gate/labelMapStore';
+import { LABEL_MAP_FILE, LABEL_MAP_OTHER_REVISION_TEXT, LABEL_MARKER_SECRET_PREFIX, LABEL_MARKERS_DIR, USE_BRANCH_LABELS_ACTION, LABEL_MAP_ROLLED_BACK_TEXT, LABEL_MAP_UNREADABLE_TEXT, LABEL_MAP_UNVERIFIED_TEXT, LabelMapError, readLabelMarker, updateLabelMap } from '../gate/labelMapStore';
 import type { AgentMessage, CompletionEvent, ToolCall } from '../services/nearAiClient';
 import { createDeviceIdentity, identityDir, loadDeviceIdentity, loadOrCreateDeviceIdentity } from '../team/identity';
 import { localKeyStatus } from '../team/keyHistory';
@@ -343,24 +343,24 @@ test('D-59 deletion: a deleted map with a marker is rolled back, holds every rea
   assert.equal(await labelOf(s, 'notes.md'), 'org/Internal');
 });
 
-test('D-59 replay: an older signed copy put back, or another map at the same revision, is rolled back', async () => {
+test('D-59, D-61 replay: an older signed copy put back, or another map at the same revision, is another revision and holds reads', async () => {
   const s = await labelled();
   const file = path.join(s.root, LABEL_MAP_FILE);
-  // Revision 1 held only secret/plan.md... then src/a.ts was added at revision 2. Keep revision 2, then sign a revision 3 removing nothing.
+  // Revision 2 holds secret/plan.md and src/a.ts; revision 3 adds notes.md; then revision 2 is put back.
   const second = await readFile(file, 'utf8');
   assert.equal(await setLabelVia(s.root, 'notes.md', { scale: 'org', level: 'Internal' }), true);
   await writeFile(file, second);
-  assert.equal(await stateOf(s), 'rolled-back', 'an older copy signed by this computer\'s own key');
+  assert.equal(await stateOf(s), 'other-revision', 'an older copy signed by this computer\'s own key');
   // The same revision as the marker with other contents, signed by this computer's own key.
-  const marker = await readLabelMarker(s.storage, s.root);
+  const marker = (await readLabelMarker(s.storage, s.secrets, s.root)).marker;
   assert.ok(marker !== undefined);
   const identity = await loadDeviceIdentity(s.secrets);
   assert.ok(identity !== undefined);
-  const forged = { ...(marker.payload as LabelMapPayload), entries: {} };
+  const forged = { labelMapVersion: 1, vocabulary: 1, entries: {}, revision: marker.revision } as LabelMapPayload;
   await writeFile(file, `${JSON.stringify(signPayload(identity, 'label-map', forged), null, 2)}\n`);
-  assert.equal(await stateOf(s), 'rolled-back', 'same revision, another hash');
+  assert.equal(await stateOf(s), 'other-revision', 'same revision, another hash');
   const ran = await agentRun(s, [call('r1', 'Read', { file_path: 'secret/plan.md' })]);
-  assert.equal(ran.outputs[0], `Not allowed: ${LABEL_MAP_ROLLED_BACK_TEXT}`);
+  assert.equal(ran.outputs[0], `Not allowed: ${LABEL_MAP_OTHER_REVISION_TEXT}`);
 });
 
 test('D-59 removal on purpose: Set Label\'s Remove choice signs a removal that names the key, the marker moves, and the file reads at the default label', async () => {
@@ -369,18 +369,18 @@ test('D-59 removal on purpose: Set Label\'s Remove choice signs a removal that n
   const payload = (JSON.parse(await readFile(path.join(s.root, LABEL_MAP_FILE), 'utf8')) as { payload: LabelMapPayload }).payload;
   assert.deepEqual(payload.removed, ['src/a.ts']);
   assert.equal(payload.revision, 3);
-  assert.equal((await readLabelMarker(s.storage, s.root))?.revision, 3);
+  assert.equal((await readLabelMarker(s.storage, s.secrets, s.root)).marker?.revision, 3);
   assert.equal(await stateOf(s), 'verified');
   assert.equal(await labelOf(s, 'src/a.ts'), 'org/Public');
   const records = await projectRecords(s);
   assert.ok(records.some((record) => ruleOf(record) === 'label.set' && record.status_detail === 'No longer internal.'), 'the removal and its reason are on record');
-  // A newer map signed by this computer's key that drops a key without naming it is rolled back.
+  // A newer map signed by this computer's key that drops a key without naming it is another revision (D-61), never verified.
   const identity = await loadDeviceIdentity(s.secrets);
   assert.ok(identity !== undefined);
   const dropped = { ...payload, revision: 4, entries: {} } as LabelMapPayload;
   delete (dropped as { removed?: unknown }).removed;
   await writeFile(path.join(s.root, LABEL_MAP_FILE), `${JSON.stringify(signPayload(identity, 'label-map', dropped), null, 2)}\n`);
-  assert.equal(await stateOf(s), 'rolled-back');
+  assert.equal(await stateOf(s), 'other-revision');
 });
 
 test('VS Code renames move the entry, and a renamed folder moves its whole subtree', async () => {
@@ -508,4 +508,133 @@ test('an agent\'s Write to the label file is a floor ask in every mode: only the
     assert.equal(gated.decision.rule, 'floor.protected-write', mode);
     assert.equal(gated.decision.offerAlwaysAllow, false, mode);
   }
+});
+
+// ---- D-61: a branch's own signed labels are held, and accepted with one click ----
+
+/** A labelled project whose file is then put back to an earlier signed revision, the way checking out an older branch does. */
+async function switchedBranch(): Promise<{ s: Started; older: string }> {
+  const s = await labelled();
+  const file = path.join(s.root, LABEL_MAP_FILE);
+  const older = await readFile(file, 'utf8');
+  assert.equal(await setLabelVia(s.root, 'notes.md', { scale: 'org', level: 'Internal' }), true);
+  await writeFile(file, older);
+  return { s, older };
+}
+
+async function settle(): Promise<void> {
+  for (let index = 0; index < 50; index += 1) await new Promise((resolve) => setImmediate(resolve));
+}
+
+test('D-61 branch switch: an older signed label file holds every agent read with one plain message and one button', async () => {
+  const { s } = await switchedBranch();
+  stub.notifications.length = 0;
+  stub.notificationActions.length = 0;
+  assert.equal(await stateOf(s), 'other-revision');
+  await settle();
+  const shown = stub.notifications.findIndex((entry) => entry.message === LABEL_MAP_OTHER_REVISION_TEXT);
+  assert.ok(shown >= 0, 'the person is told');
+  assert.deepEqual(stub.notificationActions[shown], [USE_BRANCH_LABELS_ACTION], 'with one button');
+  for (const target of ['secret/plan.md', 'notes.md']) {
+    const ran = await agentRun(s, [call('r1', 'Read', { file_path: target })]);
+    assert.equal(ran.outputs[0], `Not allowed: ${LABEL_MAP_OTHER_REVISION_TEXT}`);
+  }
+});
+
+test('D-61 accept: "Use this branch\'s labels" signs that revision as current above the marker, moves the marker and records label.branch-accepted', async () => {
+  const { s } = await switchedBranch();
+  const before = (await readLabelMarker(s.storage, s.secrets, s.root)).marker;
+  assert.ok(before !== undefined);
+  stub.messageAnswers.length = 0;
+  stub.messageAnswers.push(USE_BRANCH_LABELS_ACTION);
+  assert.equal(await stateOf(s), 'other-revision');
+  await settle();
+  for (let index = 0; index < 100 && await stateOf(s) !== 'verified'; index += 1) await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(await stateOf(s), 'verified');
+  const after = (await readLabelMarker(s.storage, s.secrets, s.root)).marker;
+  assert.ok(after !== undefined && after.revision === before.revision + 1, 'a revision above the marker');
+  assert.equal(await labelOf(s, 'notes.md'), 'org/Public', 'this branch\'s labels: notes.md was labelled only on the other one');
+  assert.equal(await labelOf(s, 'secret/plan.md'), 'ca-protected/Protected B');
+  assert.equal(await mapVerifies(s), true);
+  const records = await projectRecords(s);
+  assert.ok(records.some((record) => ruleOf(record) === 'label.branch-accepted'), 'the accept is on record');
+  assert.match(await (await agentRun(s, [call('r1', 'Read', { file_path: 'notes.md' })])).outputs[0] ?? '', /public notes/);
+});
+
+test('D-61 decline: dismissing the message changes nothing, and reads stay held', async () => {
+  const { s, older } = await switchedBranch();
+  stub.messageAnswers.length = 0;
+  assert.equal(await stateOf(s), 'other-revision');
+  await settle();
+  assert.equal(await readFile(path.join(s.root, LABEL_MAP_FILE), 'utf8'), older, 'the file is untouched');
+  assert.equal(await stateOf(s), 'other-revision');
+  assert.equal(await s.host.acceptBranchLabels(s.root).then(() => stateOf(s)), 'verified', 'accepting later still works');
+});
+
+test('D-61 deletion: a deleted label file holds reads with no accept button, offering git restore or signing again by hand', async () => {
+  const s = await labelled();
+  stub.notifications.length = 0;
+  await rm(path.join(s.root, LABEL_MAP_FILE));
+  assert.equal(await stateOf(s), 'rolled-back');
+  await settle();
+  assert.equal(stub.notifications.some((entry) => entry.message === LABEL_MAP_ROLLED_BACK_TEXT), false, 'no message with a button');
+  assert.ok(s.problems.includes(LABEL_MAP_ROLLED_BACK_TEXT), 'the plain message');
+  assert.match(LABEL_MAP_ROLLED_BACK_TEXT, /git restore/);
+  assert.equal(await s.host.acceptBranchLabels(s.root), false, 'there is nothing to accept');
+  assert.equal(await stateOf(s), 'rolled-back');
+});
+
+// ---- D-62: the marker lives in SecretStorage ----
+
+test('D-62: the marker is kept in SecretStorage, so deleting the files on disk does not erase it', async () => {
+  const s = await labelled();
+  const key = `${LABEL_MARKER_SECRET_PREFIX}${projectLogKey(s.root)}`;
+  const stored = await s.secrets.get(key);
+  assert.ok(stored !== undefined && /"revision":2/.test(stored), 'the marker is in SecretStorage');
+  assert.ok(!stored.includes(s.root) && !stored.includes('secret/plan.md'), 'with no path in it');
+  // Delete every label file this extension keeps on disk, and the project's own.
+  await rm(path.join(s.storage, 'gate', LABEL_MARKERS_DIR), { recursive: true, force: true });
+  await rm(path.join(s.root, LABEL_MAP_FILE));
+  s.host.labelsFor(s.root).invalidate();
+  assert.equal(await stateOf(s), 'rolled-back', 'still known as deleted');
+  const ran = await agentRun(s, [call('r1', 'Read', { file_path: 'secret/plan.md' })]);
+  assert.equal(ran.outputs[0], `Not allowed: ${LABEL_MAP_ROLLED_BACK_TEXT}`);
+});
+
+test('D-62: with the base copy gone, the verified file still reads, but a hand-edited one holds reads (a lowering could not be told apart)', async () => {
+  const s = await labelled();
+  await rm(path.join(s.storage, 'gate', LABEL_MARKERS_DIR), { recursive: true, force: true });
+  s.host.labelsFor(s.root).invalidate();
+  assert.equal(await stateOf(s), 'verified');
+  await handEdit(s, (payload) => { delete payload.entries['secret/plan.md']; });
+  assert.equal(await stateOf(s), 'rolled-back');
+  await assert.rejects(() => s.host.changeLabels(s.root, (map) => map, async () => true), (error: unknown) => error instanceof LabelMapError && /git restore/.test(error.message));
+});
+
+test('D-62 migration: a marker an earlier build kept in the storage folder moves into SecretStorage once', async () => {
+  const s = await labelled();
+  const key = `${LABEL_MARKER_SECRET_PREFIX}${projectLogKey(s.root)}`;
+  const kept = await s.secrets.get(key);
+  assert.ok(kept !== undefined);
+  await s.secrets.delete(key);
+  const held = await readLabelMarker(s.storage, s.secrets, s.root);
+  assert.equal(held.marker?.revision, 2, 'read from the storage folder');
+  assert.ok(held.base !== undefined);
+  assert.equal(await s.secrets.get(key), kept, 'and written to SecretStorage');
+});
+
+// ---- D-64: defaults ----
+
+test('D-64: LABEL_EVENT_IDS names label.branch-accepted and label.declassify-rejected, and Set Label says plainly that nothing can be labelled under a broken policy', async () => {
+  const { LABEL_EVENT_IDS } = await import('../domain/gate/labels');
+  assert.ok(LABEL_EVENT_IDS.includes('label.branch-accepted' as never));
+  assert.ok(LABEL_EVENT_IDS.includes('label.declassify-rejected' as never));
+  const s = await started();
+  await writeFile(path.join(gateDir(s.storage), POLICY_BUNDLE_FILE), '{}');
+  const broken = gateCommands.registerGate(createFakeContext(s.storage, s.secrets) as never, { notify: () => undefined });
+  assert.equal((await broken.state()).state, 'failed-closed');
+  assert.equal(await setLabelVia(s.root, 'secret/plan.md', { scale: 'org', level: 'Internal' }), false);
+  assert.ok(stub.notifications.some((entry) => entry.message === gateCommands.NO_LABELS_WHILE_FAILED_TEXT));
+  assert.match(gateCommands.NO_LABELS_WHILE_FAILED_TEXT, /^Nothing can be labelled while your policy cannot be trusted/);
+  assert.equal(existsSync(path.join(s.root, LABEL_MAP_FILE)), false);
 });

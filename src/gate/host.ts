@@ -25,7 +25,8 @@ import type { LabelMapPayload } from '../domain/gate/labelMap';
 import { SCALE_PRESETS } from '../domain/gate/labels';
 import type { Clearance, Label, LabelEventId, ScaleMapping, ScaleTable } from '../domain/gate/labels';
 import { LabelMapError, LabelReader, updateLabelMap } from './labelMapStore';
-import type { LabelMapWrite } from './labelMapStore';
+import type { LabelMapQuestion, LabelMapWrite } from './labelMapStore';
+import type { LabelMapState } from '../domain/gate/labelMap';
 
 const DEVICE_UNKNOWN = 'device-unknown';
 const POLICY_SESSION = 'policy';
@@ -81,6 +82,11 @@ export interface GateHostOptions {
   readonly startWaitMs?: number;
   /** The person's home folder, for the floor's credential-store checks of shell commands (D-16). The activation adapter passes it; a test leaves it out or gives a stand-in. */
   readonly home?: string;
+  /**
+   * Where a label file's state that needs the person goes (unverified, unreadable, rolled back, another branch's), once per window, with the project, so the
+   * activation adapter can offer the one-click accept of D-61. Without it the message goes to onProblem.
+   */
+  readonly onLabelNotice?: (root: string, state: LabelMapState, message: string) => void;
 }
 
 export interface RuntimeRequest {
@@ -198,7 +204,12 @@ export class GateHost {
       reader = new LabelReader(root, {
         globalStorageDir: this.options.globalStorageDir,
         secrets: this.options.secrets,
-        onNotice: (message) => { try { this.options.onProblem?.(message); } catch { /* a notice never changes a decision */ } },
+        onNotice: (message, state) => {
+          try {
+            if (state !== undefined && this.options.onLabelNotice !== undefined) this.options.onLabelNotice(root, state, message);
+            else this.options.onProblem?.(message);
+          } catch { /* a notice never changes a decision */ }
+        },
         move: (from, to) => this.followRename(root, from, to)
       });
     }
@@ -219,7 +230,7 @@ export class GateHost {
    * Changes a project's labels through the one writer (updateLabelMap), with this policy's scales, and has the project's reader read the file again.
    * `confirm` is the person's answer before an unverified map is signed again or the last verified labels are restored; with none, such a write is refused.
    */
-  public async changeLabels(root: string, change: (map: LabelMapPayload) => LabelMapPayload, confirm?: (question: 'resign' | 'restore') => Promise<boolean>): Promise<LabelMapWrite> {
+  public async changeLabels(root: string, change: (map: LabelMapPayload) => LabelMapPayload, confirm?: (question: LabelMapQuestion) => Promise<boolean>): Promise<LabelMapWrite> {
     await this.start();
     const policy = this.labelPolicy();
     try {
@@ -234,6 +245,20 @@ export class GateHost {
     } finally {
       this.labelReaders.get(projectLogKey(root))?.invalidate();
     }
+  }
+
+  /**
+   * D-61: the person accepts the signed label file in the project now (another branch's, say) as current. Only a file in the `other-revision` state is
+   * accepted: it is signed again at a revision above the marker, the marker moves, and `label.branch-accepted` is recorded. Returns false, writing nothing,
+   * when the file is in any other state.
+   */
+  public async acceptBranchLabels(root: string): Promise<boolean> {
+    const policy = this.labelPolicy();
+    const view = await this.labelsFor(root).view(policy.scales);
+    if (view.state !== 'other-revision') return false;
+    const written = await this.changeLabels(root, (map) => map, async (question) => question === 'accept');
+    this.recordLabelEvent(root, { event: 'label.branch-accepted', path: '', reason: `A person accepted the project's signed label file (for example another branch's) as current. It is now revision ${String(written.revision)}.` });
+    return true;
   }
 
   /**

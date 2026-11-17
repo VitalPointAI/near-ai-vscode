@@ -18,7 +18,9 @@ import { labelMapKey, setLabelEntry, setProjectLabel } from '../domain/gate/labe
 import { BundleStoreError, POLICY_DRAFT_BASE_FILE, POLICY_DRAFT_FILE, gateDir } from '../gate/bundleStore';
 import { writeFileAtomic } from '../team/teamFile';
 import { GateHost } from '../gate/host';
-import { LABEL_MAP_RESIGN_QUESTION, LABEL_MAP_RESTORE_QUESTION, LabelMapError } from '../gate/labelMapStore';
+import { LABEL_MAP_RESIGN_QUESTION, LABEL_MAP_RESTORE_QUESTION, LabelMapError, USE_BRANCH_LABELS_ACTION } from '../gate/labelMapStore';
+import type { LabelMapQuestion } from '../gate/labelMapStore';
+import type { LabelMapState } from '../domain/gate/labelMap';
 import { setDefaultSessionRoute } from '../gate/sessionMark';
 import type { SecretStorageLike } from './auth';
 import { SHOW_POLICY_COMMAND, createGateStatusBar, expiryDate, policyProblem } from './gateStatusBar';
@@ -206,6 +208,7 @@ export function registerGate(context: GateActivationContext, options: RegisterGa
     home: homedir(),
     projectRoot,
     onProblem: tell,
+    onLabelNotice: (root, state, message) => { void labelNotice(host, root, state, message, tell).catch(() => undefined); },
     ...(options.now === undefined ? {} : { now: options.now })
   });
   // Every surface reads the host's own time (the later of the clock and the latest time it has seen), so none shows a policy as valid that a decision refuses
@@ -303,6 +306,16 @@ export const LOWER_REASON_PROMPT = 'This lowers the label. Say why, in a few wor
 export const COMPARTMENTS_PROMPT = 'Compartments (optional): capital letters and digits, separated by spaces. Leave empty for none.';
 export const HANDLING_PLACEHOLDER = 'Handling (optional): local-only keeps it on this computer, no-agent-tools keeps agents from reading it.';
 
+/** Set Label while the policy cannot be trusted: it holds no clearances, so nothing can be labelled (D-27, D-64). */
+export const ACCEPT_BRANCH_QUESTION = "Use this branch's labels?";
+export const ACCEPT_BRANCH_DETAIL = 'The label file in this project is signed, but it is not the one this computer last checked (for example after switching branches). Using it makes its labels the current ones, signed again with this computer\'s key.';
+
+export const NO_LABELS_WHILE_FAILED_TEXT =
+  'Nothing can be labelled while your policy cannot be trusted, because a policy in that state holds no clearances. Run NEAR AI: Reset Policy to Defaults, then set the label.';
+
+/** Said after the person accepts another branch's signed labels (D-61). */
+export const BRANCH_LABELS_ACCEPTED_TEXT = "This branch's labels are now the ones NEAR AI checks in this project.";
+
 /** The words of the refusal when the person's own clearance does not cover the label they chose (D-27). */
 export function notYourClearanceText(label: Label): string {
   return `You cannot set ${labelKey(label)}: your policy gives you no clearance that covers it, so you could not read what you label. Add a clearance with NEAR AI: Edit Policy first. ${CLEARANCE_SELF_ASSERTED_TEXT}`;
@@ -379,7 +392,11 @@ export async function setLabel(host: GateHost, target: LabelTarget): Promise<boo
     label = parsed.value;
     // D-27: a person labels only what their own clearance covers, so they never lock themselves out of their own files by mistake.
     const context = { scales: policy.scales, mappings: policy.mappings, now: host.now() };
-    if (!policy.valid || !policy.clearances.some((clearance) => dominates(clearance, label!, context))) {
+    if (!policy.valid) {
+      void Promise.resolve(vscode.window.showWarningMessage(NO_LABELS_WHILE_FAILED_TEXT)).catch(() => undefined);
+      return false;
+    }
+    if (!policy.clearances.some((clearance) => dominates(clearance, label!, context))) {
       void Promise.resolve(vscode.window.showWarningMessage(notYourClearanceText(label))).catch(() => undefined);
       return false;
     }
@@ -390,11 +407,15 @@ export async function setLabel(host: GateHost, target: LabelTarget): Promise<boo
     if (given === undefined || given.trim() === '') return false;
     reason = given.trim();
   }
-  const confirm = async (question: 'resign' | 'restore'): Promise<boolean> => {
+  const confirm = async (question: LabelMapQuestion): Promise<boolean> => {
+    if (question === 'accept') {
+      const asked = await vscode.window.showWarningMessage(ACCEPT_BRANCH_QUESTION, { modal: true, detail: ACCEPT_BRANCH_DETAIL }, USE_BRANCH_LABELS_ACTION);
+      return asked === USE_BRANCH_LABELS_ACTION;
+    }
     const text = question === 'resign' ? LABEL_MAP_RESIGN_QUESTION : LABEL_MAP_RESTORE_QUESTION;
     const detail = question === 'resign'
       ? 'The label file is not signed by this computer. Signing it again keeps the labels this computer checked, plus only the labels in the file that are stricter.'
-      : 'The label file is missing, older than the one this computer last checked, or cannot be read. Signing again writes the labels this computer last checked.';
+      : 'The label file is missing or cannot be read. Signing again writes the labels this computer last checked.';
     return (await vscode.window.showWarningMessage(text, { modal: true, detail }, SIGN_AGAIN_ACTION)) === SIGN_AGAIN_ACTION;
   };
   try {
@@ -505,6 +526,27 @@ export async function applyPolicyDraftCommand(host: GateHost, globalStorageDir: 
   await discardDraft(globalStorageDir).catch(() => undefined);
   void Promise.resolve(vscode.window.showInformationMessage(POLICY_APPLIED_TEXT)).catch(() => undefined);
   return true;
+}
+
+/**
+ * A label file state that needs the person (D-61): another branch's signed labels get one button, Use this branch's labels, which accepts them; a deleted
+ * or unreadable file gets the plain sentence, with no accept. Dismissing changes nothing and agent reads stay held.
+ */
+export async function labelNotice(host: GateHost, root: string, state: LabelMapState, message: string, tell: (message: string) => void): Promise<boolean> {
+  if (state !== 'other-revision') {
+    tell(message);
+    return false;
+  }
+  const answer = await vscode.window.showWarningMessage(message, USE_BRANCH_LABELS_ACTION);
+  if (answer !== USE_BRANCH_LABELS_ACTION) return false;
+  try {
+    const accepted = await host.acceptBranchLabels(root);
+    if (accepted) void Promise.resolve(vscode.window.showInformationMessage(BRANCH_LABELS_ACCEPTED_TEXT)).catch(() => undefined);
+    return accepted;
+  } catch (error) {
+    void Promise.resolve(vscode.window.showWarningMessage(error instanceof LabelMapError ? error.message : "Nothing was changed: NEAR AI could not use this branch's labels.")).catch(() => undefined);
+    return false;
+  }
 }
 
 /** The only path that re-signs a bundle that failed verification: a modal the person confirms, then host.reset(), which records policy.reset. */

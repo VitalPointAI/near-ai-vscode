@@ -62,10 +62,11 @@ export const DEFAULT_SCALE: ScaleId = 'org';
 
 /**
  * The label events written to the decision log as records of their own, with the event as the record's operation, the way the policy's events are: a label
- * set on a file or folder (plan 20), a session mark raised by what it read (plan 22), and a chat's label lowered with a reason (plan 23). Named now so a
+ * set on a file or folder (plan 20), another branch's signed label file accepted as current by a person (D-61), a session mark raised by what it read
+ * (plan 22), a chat's label lowered with a reason (plan 23), and a lowering from another copy of a chat that was not applied (D-58, D-64). Named now so a
  * record written by a later version is never one this version cannot name (D-49).
  */
-export const LABEL_EVENT_IDS = Object.freeze(['label.set', 'label.mark-raised', 'label.declassify'] as const);
+export const LABEL_EVENT_IDS = Object.freeze(['label.set', 'label.branch-accepted', 'label.mark-raised', 'label.declassify', 'label.declassify-rejected'] as const);
 export type LabelEventId = (typeof LABEL_EVENT_IDS)[number];
 
 /**

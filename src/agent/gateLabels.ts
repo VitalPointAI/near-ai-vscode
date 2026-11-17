@@ -12,6 +12,7 @@ import type { BundleState } from '../domain/gate/bundle';
 import type { GateRuntime, LabelVerdict } from '../domain/gate/decide';
 import { whyNotDominated } from '../domain/gate/dominance';
 import type { DominanceContext, DominanceReason, Mark } from '../domain/gate/dominance';
+import { holdsReads } from '../domain/gate/labelMap';
 import type { LabelSource, LabelView } from '../domain/gate/labelMap';
 import { SCALE_PRESETS, labelKey } from '../domain/gate/labels';
 import type { Clearance, Label, ScaleMapping, ScaleTable } from '../domain/gate/labels';
@@ -257,7 +258,7 @@ export async function labelVerdictFor(runtime: GateRuntime, input: LabelCheckInp
     const state = stateOf(runtime);
     const facts = state === undefined ? clearanceFactsOf({ state: 'failed-closed' } as BundleState, nowOf(runtime)) : clearanceFactsOf(state, nowOf(runtime));
     const view = await sourceOf(runtime, input.root).view(facts.scales);
-    if (view.state === 'unreadable' || view.state === 'rolled-back') return { rule: 'label.dominance', reason: view.problem ?? FAILED_CLOSED_LABEL_TEXT };
+    if (holdsReads(view.state)) return { rule: 'label.dominance', reason: view.problem ?? FAILED_CLOSED_LABEL_TEXT };
     for (const relative of paths) {
       const verdict = markVerdict(markOf(view, relative, facts.defaultLabel), facts);
       if (verdict !== undefined) return verdict;
@@ -277,7 +278,7 @@ export async function labelReadFilter(runtime: GateRuntime, root: string): Promi
     const state = stateOf(runtime);
     const facts = state === undefined ? clearanceFactsOf({ state: 'failed-closed' } as BundleState, nowOf(runtime)) : clearanceFactsOf(state, nowOf(runtime));
     const view = await sourceOf(runtime, root).view(facts.scales);
-    if (view.state === 'unreadable' || view.state === 'rolled-back') return () => false;
+    if (holdsReads(view.state)) return () => false;
     return (relativePath) => {
       try {
         return markVerdict(view.resolve(relativePath.split(path.sep).join('/'), facts.defaultLabel).mark, facts) === undefined;

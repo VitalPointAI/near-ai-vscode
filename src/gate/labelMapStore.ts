@@ -50,7 +50,14 @@ export const LABEL_MAP_UNREADABLE_TEXT =
 
 /** The sentence a deleted or older map gives (D-59). */
 export const LABEL_MAP_ROLLED_BACK_TEXT =
-  "This project's label file .planning/.near-ai/labels.json is missing or older than the one this computer last checked, so labels may have been removed without a signature. Agents cannot read files in this project until you put the file back (for example from git) or run NEAR AI: Set Label, which offers to sign the labels this computer last checked again.";
+  "This project's label file .planning/.near-ai/labels.json is missing, or cannot be checked against the one this computer last checked, so labels may have been removed without a signature. Agents cannot read files in this project until you put the file back (for example with git restore) or run NEAR AI: Set Label, which offers to sign the labels this computer last checked again.";
+
+/** The sentence of a signed label file that is not the one this computer last checked, such as another branch's (D-61). */
+export const LABEL_MAP_OTHER_REVISION_TEXT =
+  "This project's label file .planning/.near-ai/labels.json is signed, but it is an older or different copy than the one this computer last checked (for example after switching branches). Agents cannot read files in this project until you choose Use this branch's labels, or switch back.";
+
+/** The button that accepts another branch's signed labels as current (D-61). */
+export const USE_BRANCH_LABELS_ACTION = "Use this branch's labels";
 
 /** The notice for a map that does not verify, told once per window (D-53). */
 export const LABEL_MAP_UNVERIFIED_TEXT =
@@ -70,7 +77,10 @@ export class LabelMapError extends Error {
   }
 }
 
-/** The last map this computer verified for a project (D-59). Kept in this extension's storage, never in the project. */
+/**
+ * The last map this computer verified for a project (D-59, D-62), kept in VS Code's SecretStorage under LABEL_MARKER_SECRET_PREFIX and the project's key,
+ * the way the policy bundle's last-valid marker is, so deleting or replacing files on disk never erases it.
+ */
 export interface LabelMarker {
   readonly v: 1;
   /** Lowercase hex SHA-256 of the canonical envelope. */
@@ -79,8 +89,18 @@ export interface LabelMarker {
   readonly signedAt: string;
   /** How many keys the map held, the project entry included. */
   readonly entries: number;
-  /** The verified payload itself, so a map that does not verify is resolved over it. */
-  readonly payload: unknown;
+  /** Lowercase hex SHA-256 of the canonical verified payload: the base copy in the gate folder is used only when it hashes to this. */
+  readonly payloadHash: string;
+}
+
+/** The SecretStorage key prefix of the label markers (D-62); the project's log key follows it, so no path is in the key. */
+export const LABEL_MARKER_SECRET_PREFIX = 'nearAi.gate.labelMarker.';
+
+/** The marker and, when its copy in the gate folder still matches, the verified payload. */
+interface MarkerState {
+  readonly marker?: LabelMarker;
+  /** The verified payload, from the base copy, only when it hashes to the marker's payloadHash. */
+  readonly base?: unknown;
 }
 
 /** What is on disk, before the scales are known. */
@@ -151,26 +171,67 @@ async function readRaw(root: string, status: KeyStatusLookup): Promise<RawMap> {
   return { kind: 'unverified', payload: envelope['payload'] };
 }
 
-/** The marker, or undefined when there is none. A marker that cannot be read counts as none: only this extension writes it, and agents cannot (the floor). */
-export async function readLabelMarker(globalStorageDir: string, root: string): Promise<LabelMarker | undefined> {
+function payloadHashOf(payload: unknown): string {
+  return createHash('sha256').update(canonicalBytes(payload)).digest('hex');
+}
+
+function markerSecretKey(root: string): string {
+  return `${LABEL_MARKER_SECRET_PREFIX}${projectLogKey(root)}`;
+}
+
+function markerOf(value: unknown): LabelMarker | undefined {
+  if (!isRecord(value) || value['v'] !== MARKER_VERSION || typeof value['hash'] !== 'string' || typeof value['revision'] !== 'number'
+    || typeof value['signedAt'] !== 'string' || typeof value['entries'] !== 'number' || typeof value['payloadHash'] !== 'string') return undefined;
+  return { v: MARKER_VERSION, hash: value['hash'], revision: value['revision'], signedAt: value['signedAt'], entries: value['entries'], payloadHash: value['payloadHash'] };
+}
+
+/** The base copy in the gate folder (the verified payload, with the marker fields beside it), or undefined. */
+async function readBaseCopy(globalStorageDir: string, root: string): Promise<Record<string, unknown> | undefined> {
   try {
     const value: unknown = JSON.parse(await readFile(labelMarkerPath(globalStorageDir, root), 'utf8'));
-    if (!isRecord(value) || value['v'] !== MARKER_VERSION || typeof value['hash'] !== 'string' || typeof value['revision'] !== 'number'
-      || typeof value['signedAt'] !== 'string' || typeof value['entries'] !== 'number' || !isRecord(value['payload'])) return undefined;
-    return value as unknown as LabelMarker;
+    return isRecord(value) && isRecord(value['payload']) ? value : undefined;
   } catch {
     return undefined;
   }
 }
 
-async function writeMarker(globalStorageDir: string, root: string, marker: LabelMarker): Promise<void> {
+/**
+ * The marker from SecretStorage, and the verified payload when its base copy still matches (D-62). With no marker in SecretStorage, a base copy written by
+ * an earlier build of 4b (which kept the marker in the gate folder) is moved into SecretStorage once. A secret store that cannot be read gives no marker for
+ * a reader with no way to write one, and is retried at the next read.
+ */
+export async function readLabelMarker(globalStorageDir: string, secrets: SecretStorageLike, root: string): Promise<MarkerState> {
+  let marker: LabelMarker | undefined;
+  try {
+    const text = await secrets.get(markerSecretKey(root));
+    marker = text === undefined ? undefined : markerOf(JSON.parse(text));
+  } catch {
+    marker = undefined;
+  }
+  const copy = await readBaseCopy(globalStorageDir, root);
+  if (marker === undefined && copy !== undefined) {
+    // Migration: the marker of the storage folder becomes the SecretStorage marker.
+    const legacy = markerOf({ ...copy, payloadHash: payloadHashOf(copy['payload']) });
+    if (legacy !== undefined) {
+      marker = legacy;
+      await Promise.resolve(secrets.store(markerSecretKey(root), JSON.stringify(legacy))).catch(() => undefined);
+    }
+  }
+  if (marker === undefined) return {};
+  const base = copy !== undefined && payloadHashOf(copy['payload']) === marker.payloadHash ? copy['payload'] : undefined;
+  return base === undefined ? { marker } : { marker, base };
+}
+
+/** Writes the base copy first, then the marker in SecretStorage, which is the one that counts. */
+async function writeMarker(globalStorageDir: string, secrets: SecretStorageLike, root: string, marker: LabelMarker, payload: unknown): Promise<void> {
   const file = labelMarkerPath(globalStorageDir, root);
   await mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
-  await writeFileAtomic(file, `${JSON.stringify(marker)}\n`);
+  await writeFileAtomic(file, `${JSON.stringify({ ...marker, payload })}\n`).catch(() => undefined);
+  await secrets.store(markerSecretKey(root), JSON.stringify(marker));
 }
 
 function markerFor(raw: Extract<RawMap, { kind: 'verified' }>): LabelMarker {
-  return { v: MARKER_VERSION, hash: raw.hash, revision: rawRevision(raw.payload), signedAt: raw.signedAt, entries: rawKeys(raw.payload).length, payload: raw.payload };
+  return { v: MARKER_VERSION, hash: raw.hash, revision: rawRevision(raw.payload), signedAt: raw.signedAt, entries: rawKeys(raw.payload).length, payloadHash: payloadHashOf(raw.payload) };
 }
 
 /** What the file and the marker together say (D-53, D-59). `adopt` is set when a verified map is newer than the marker (or there is none) and passes. */
@@ -180,28 +241,41 @@ interface Classified {
   readonly trusted?: unknown;
   /** The file's payload when it does not verify: it may only raise. */
   readonly untrusted?: unknown;
+  /** A verified payload that is not the one the marker names (another branch's labels): used only if the person accepts it (D-61). */
+  readonly candidate?: unknown;
   readonly adopt?: LabelMarker;
 }
 
-function classify(raw: RawMap, marker: LabelMarker | undefined): Classified {
+/**
+ * The states (D-53, D-59, D-61, D-62): no file with a marker is `rolled-back` (deleted); a verified file this computer signed that is older than the marker,
+ * another copy at the same revision, or a newer one that drops a key without a signed removal is `other-revision` (another branch's labels, say), which the
+ * person can accept in one click; a file that does not verify is resolved raise-only over the marker's verified entries, and when those cannot be found
+ * (their base copy was deleted or changed) it is `rolled-back` too, since a lowering could not be told apart.
+ */
+function classify(raw: RawMap, held: MarkerState): Classified {
+  const marker = held.marker;
   switch (raw.kind) {
     case 'missing':
       return { state: marker === undefined ? 'none' : 'rolled-back' };
     case 'unreadable':
       return { state: 'unreadable' };
     case 'unverified':
-      return { state: 'unverified', untrusted: raw.payload, ...(marker === undefined ? {} : { trusted: marker.payload }) };
+      if (marker === undefined) return { state: 'unverified', untrusted: raw.payload };
+      return held.base === undefined ? { state: 'rolled-back' } : { state: 'unverified', untrusted: raw.payload, trusted: held.base };
     case 'verified': {
       const fresh = markerFor(raw);
       if (marker === undefined) return { state: 'verified', trusted: raw.payload, adopt: fresh };
-      if (fresh.revision < marker.revision) return { state: 'rolled-back' };
-      if (fresh.revision === marker.revision) return fresh.hash === marker.hash ? { state: 'verified', trusted: raw.payload } : { state: 'rolled-back' };
-      // Newer: every key the marker holds is still there, or this very revision names it as removed and follows the marker's directly.
+      if (fresh.revision < marker.revision) return { state: 'other-revision', candidate: raw.payload };
+      if (fresh.revision === marker.revision) return fresh.hash === marker.hash ? { state: 'verified', trusted: raw.payload } : { state: 'other-revision', candidate: raw.payload };
+      // Newer: every key the marker holds is still there, or this very revision names it as removed and follows the marker's directly. Without the base
+      // copy the keys the marker held cannot be compared, so a newer map is accepted only when it holds at least as many keys.
       const kept = new Set(rawKeys(raw.payload));
-      const dropped = rawKeys(marker.payload).filter((key) => !kept.has(key));
-      if (dropped.length > 0) {
-        const named = new Set(rawRemoved(raw.payload));
-        if (fresh.revision !== marker.revision + 1 || dropped.some((key) => !named.has(key))) return { state: 'rolled-back' };
+      const named = new Set(rawRemoved(raw.payload));
+      if (held.base === undefined) {
+        if (kept.size < marker.entries && (fresh.revision !== marker.revision + 1 || kept.size + named.size < marker.entries)) return { state: 'other-revision', candidate: raw.payload };
+      } else {
+        const dropped = rawKeys(held.base).filter((key) => !kept.has(key));
+        if (dropped.length > 0 && (fresh.revision !== marker.revision + 1 || dropped.some((key) => !named.has(key)))) return { state: 'other-revision', candidate: raw.payload };
       }
       return { state: 'verified', trusted: raw.payload, adopt: fresh };
     }
@@ -219,6 +293,7 @@ function parsedOrUndefined(payload: unknown, scales: ScaleTable): LabelMapPayloa
 function problemOf(state: LabelMapState): string | undefined {
   if (state === 'unreadable') return LABEL_MAP_UNREADABLE_TEXT;
   if (state === 'rolled-back') return LABEL_MAP_ROLLED_BACK_TEXT;
+  if (state === 'other-revision') return LABEL_MAP_OTHER_REVISION_TEXT;
   if (state === 'unverified') return LABEL_MAP_UNVERIFIED_TEXT;
   return undefined;
 }
@@ -277,19 +352,25 @@ async function missingKeys(root: string, payload: unknown): Promise<string[]> {
  * writing its marker, best effort. Never throws.
  */
 export async function readLabelMap(root: string, scales: ScaleTable, options: LabelMapOptions = {}): Promise<LabelView> {
-  const marker = options.globalStorageDir === undefined ? undefined : await readLabelMarker(options.globalStorageDir, root);
-  const classified = classify(await readRaw(root, await statusOf(options)), marker);
-  if (classified.adopt !== undefined && options.globalStorageDir !== undefined) {
-    await adoptMarker(options.globalStorageDir, root, classified.adopt).catch(() => undefined);
-  }
+  const held = await markerStateOf(options, root);
+  const raw = await readRaw(root, await statusOf(options));
+  const classified = classify(raw, held);
+  if (classified.adopt !== undefined && raw.kind === 'verified') await adoptMarker(options, root, classified.adopt, raw.payload).catch(() => undefined);
   return viewOf(classified, scales, await missingKeys(root, classified.trusted ?? classified.untrusted).catch(() => []));
 }
 
-/** Writes a newer marker under the project's lock, only if the marker on disk is still older (another window may have written a newer one meanwhile). */
-async function adoptMarker(globalStorageDir: string, root: string, marker: LabelMarker): Promise<void> {
+async function markerStateOf(options: LabelMapOptions, root: string): Promise<MarkerState> {
+  if (options.globalStorageDir === undefined || options.secrets === undefined) return {};
+  return readLabelMarker(options.globalStorageDir, options.secrets, root);
+}
+
+/** Writes a newer marker under the project's lock, only if the marker is still older (another window may have written a newer one meanwhile). */
+async function adoptMarker(options: LabelMapOptions, root: string, marker: LabelMarker, payload: unknown): Promise<void> {
+  const { globalStorageDir, secrets } = options;
+  if (globalStorageDir === undefined || secrets === undefined) return;
   await withLabelLock(globalStorageDir, root, async () => {
-    const now = await readLabelMarker(globalStorageDir, root);
-    if (now === undefined || now.revision < marker.revision) await writeMarker(globalStorageDir, root, marker);
+    const now = (await readLabelMarker(globalStorageDir, secrets, root)).marker;
+    if (now === undefined || now.revision < marker.revision) await writeMarker(globalStorageDir, secrets, root, marker, payload);
   });
 }
 
@@ -306,6 +387,8 @@ async function withLabelLock<T>(globalStorageDir: string, root: string, work: ()
 export function raisingOnly(trusted: LabelMapPayload, untrusted: LabelMapPayload, scales: ScaleTable, defaultLabel: Label): LabelMapPayload {
   let out: LabelMapPayload = trusted;
   const entries: Record<string, Label> = { ...trusted.entries };
+  // Own data properties only, so an entry named __proto__ is an entry like any other (T-70-01).
+  const put = (key: string, label: Label): void => { Object.defineProperty(entries, key, { value: label, enumerable: true, writable: true, configurable: true }); };
   const keep = (key: string, given: Label): Label | undefined => {
     const before = resolveLabel(key === PROJECT_ENTRY_KEY ? '' : key, { verified: trusted, bundleDefault: defaultLabel, scales }).mark;
     const raised = raiseMark(before, given, scales);
@@ -314,7 +397,7 @@ export function raisingOnly(trusted: LabelMapPayload, untrusted: LabelMapPayload
   };
   for (const key of Object.keys(untrusted.entries)) {
     const label = keep(key, untrusted.entries[key] as Label);
-    if (label !== undefined) entries[key] = label;
+    if (label !== undefined) put(key, label);
   }
   const project = untrusted.project === undefined ? undefined : keep(PROJECT_ENTRY_KEY, untrusted.project);
   const rebuilt = parseLabelMap({ labelMapVersion: 1, vocabulary: 1, entries, ...((project ?? trusted.project) === undefined ? {} : { project: project ?? trusted.project }) }, scales);
@@ -332,9 +415,15 @@ export interface UpdateLabelMapOptions {
    * Asked before a map that does not verify is signed again with this computer's key, or before the labels this computer last verified are signed again
    * over a missing, older or unreadable file. Absent (an automatic write that cannot ask): nothing is written and a LabelMapError says why.
    */
-  readonly confirm?: (question: 'resign' | 'restore') => Promise<boolean>;
+  readonly confirm?: (question: LabelMapQuestion) => Promise<boolean>;
   readonly now?: () => Date;
 }
+
+/**
+ * What a change may have to ask first: `resign` an unverified file keeping only its raises (D-53), `restore` the labels this computer last checked over a
+ * missing or unreadable file (D-59), or `accept` another signed copy (another branch's labels) as current (D-61).
+ */
+export type LabelMapQuestion = 'resign' | 'restore' | 'accept';
 
 export interface LabelMapWrite {
   readonly payload: LabelMapPayload;
@@ -358,10 +447,14 @@ export async function updateLabelMap(root: string, change: (map: LabelMapPayload
     const identity = await loadDeviceIdentity(options.secrets).catch(() => undefined);
     if (identity === undefined) throw new LabelMapError('Nothing was written: NEAR AI has no signing key on this computer yet. Open the policy with NEAR AI: Show Policy and try again.');
     const status = await statusOf(options);
-    const marker = await readLabelMarker(options.globalStorageDir, root);
+    const held = await readLabelMarker(options.globalStorageDir, options.secrets, root);
     const raw = await readRaw(root, status);
-    const classified = classify(raw, marker);
-    const markerPayload = marker === undefined ? undefined : parsedOrUndefined(marker.payload, options.scales);
+    const classified = classify(raw, held);
+    const basePayload = parsedOrUndefined(held.base, options.scales);
+    const ask = async (question: LabelMapQuestion, refusal: string): Promise<void> => {
+      if (options.confirm === undefined) throw new LabelMapError(`Nothing was written. ${refusal}`);
+      if (!await options.confirm(question)) throw new LabelMapError(question === 'accept' ? "Nothing was written: this branch's labels were not accepted." : question === 'resign' ? 'Nothing was written: the label file was not signed again.' : 'Nothing was written: the labels this computer last checked were not signed again.');
+    };
     let previous: LabelMapPayload | undefined;
     let base: LabelMapPayload;
     switch (classified.state) {
@@ -379,33 +472,42 @@ export async function updateLabelMap(root: string, change: (map: LabelMapPayload
       case 'unverified': {
         const untrusted = parsedOrUndefined(classified.untrusted, options.scales);
         if (untrusted === undefined) throw new LabelMapError(`Nothing was written. ${LABEL_MAP_UNREADABLE_TEXT}`);
-        if (options.confirm === undefined) throw new LabelMapError(`Nothing was written: the label file is not signed by this computer, and it is never signed again without you. ${LABEL_MAP_UNVERIFIED_TEXT}`);
-        if (!await options.confirm('resign')) throw new LabelMapError('Nothing was written: the label file was not signed again.');
-        previous = markerPayload;
-        base = raisingOnly(markerPayload ?? EMPTY_MAP, untrusted, options.scales, options.defaultLabel);
+        await ask('resign', `The label file is not signed by this computer, and it is never signed again without you. ${LABEL_MAP_UNVERIFIED_TEXT}`);
+        previous = basePayload;
+        base = raisingOnly(basePayload ?? EMPTY_MAP, untrusted, options.scales, options.defaultLabel);
+        break;
+      }
+      case 'other-revision': {
+        const candidate = parsedOrUndefined(classified.candidate, options.scales);
+        if (candidate === undefined) throw new LabelMapError(`Nothing was written. ${LABEL_MAP_UNREADABLE_TEXT}`);
+        await ask('accept', LABEL_MAP_OTHER_REVISION_TEXT);
+        previous = basePayload ?? candidate;
+        base = candidate;
         break;
       }
       case 'rolled-back':
       case 'unreadable': {
-        if (markerPayload === undefined) throw new LabelMapError(`Nothing was written. ${LABEL_MAP_UNREADABLE_TEXT}`);
-        if (options.confirm === undefined) throw new LabelMapError(`Nothing was written. ${classified.state === 'rolled-back' ? LABEL_MAP_ROLLED_BACK_TEXT : LABEL_MAP_UNREADABLE_TEXT}`);
-        if (!await options.confirm('restore')) throw new LabelMapError('Nothing was written: the labels this computer last checked were not signed again.');
-        previous = markerPayload;
-        base = markerPayload;
+        if (basePayload === undefined) {
+          throw new LabelMapError('Nothing was written: the labels this computer last checked cannot be found to sign again. Put .planning/.near-ai/labels.json back from git (for example with git restore), then try again.');
+        }
+        await ask('restore', classified.state === 'rolled-back' ? LABEL_MAP_ROLLED_BACK_TEXT : LABEL_MAP_UNREADABLE_TEXT);
+        previous = basePayload;
+        base = basePayload;
         break;
       }
     }
     const changed = nextRevision(previous, change(base));
-    // The revision always passes the marker's, and every key the marker holds that the new map does not is named, so a write never reads back as older
-    // than, or as an unsigned removal from, what this computer verified.
-    // A verified file newer than the marker (adopted now) is the base the next revision follows.
-    const lastVerified = classified.adopt ?? marker;
+    // The revision always passes the marker's, and every key the last verified map holds that the new map does not is named, so a write never reads back
+    // as older than, or as an unsigned removal from, what this computer verified. A verified file newer than the marker (adopted now) is the base the next
+    // revision follows.
+    const lastRevision = classified.adopt?.revision ?? held.marker?.revision;
+    const lastPayload = classified.adopt === undefined ? held.base : classified.trusted;
     let versioned = changed;
-    if (lastVerified !== undefined) {
+    if (lastRevision !== undefined) {
       const kept = new Set(labelMapKeys(changed));
-      const dropped = rawKeys(lastVerified.payload).filter((key) => !kept.has(key));
-      if (labelMapRevision(changed) !== lastVerified.revision + 1 || dropped.some((key) => !(changed.removed ?? []).includes(key))) {
-        versioned = withRevision(changed, lastVerified.revision + 1, [...(changed.removed ?? []), ...dropped]);
+      const dropped = rawKeys(lastPayload).filter((key) => !kept.has(key));
+      if (labelMapRevision(changed) !== lastRevision + 1 || dropped.some((key) => !(changed.removed ?? []).includes(key))) {
+        versioned = withRevision(changed, Math.max(labelMapRevision(changed), lastRevision + 1), [...(changed.removed ?? []), ...dropped]);
       }
     }
     const size = Buffer.byteLength(JSON.stringify(versioned), 'utf8');
@@ -432,7 +534,7 @@ export async function updateLabelMap(root: string, change: (map: LabelMapPayload
       if (before !== undefined) await writeFileAtomic(file, before).catch(() => undefined);
       throw new LabelMapError('The label file was saved but did not read back as written, so the old one was put back.');
     }
-    await writeMarker(options.globalStorageDir, root, markerFor(after));
+    await writeMarker(options.globalStorageDir, options.secrets, root, markerFor(after), after.payload).catch(() => undefined);
     return { payload: versioned, before: previous ?? EMPTY_MAP, hash, revision: labelMapRevision(versioned) };
   });
 }
@@ -447,7 +549,7 @@ export class LabelReader implements LabelSource {
 
   public constructor(private readonly root: string, private readonly options: LabelMapOptions & {
     /** Told once per window for each state that needs the person (unverified, unreadable, rolled-back) and for paths that are gone. */
-    readonly onNotice?: (message: string) => void;
+    readonly onNotice?: (message: string, state?: LabelMapState) => void;
     /** Moves an entry after a rename the extension saw (an agent's mv). Set by the host, which can sign. */
     readonly move?: (from: string, to: string) => Promise<void>;
   } = {}) {}
@@ -455,11 +557,10 @@ export class LabelReader implements LabelSource {
   public async view(scales: ScaleTable): Promise<LabelView> {
     const signature = await this.signature();
     if (this.cached === undefined || this.cached.signature !== signature) {
-      const marker = this.options.globalStorageDir === undefined ? undefined : await readLabelMarker(this.options.globalStorageDir, this.root);
-      const classified = classify(await readRaw(this.root, await statusOf(this.options)), marker);
-      if (classified.adopt !== undefined && this.options.globalStorageDir !== undefined) {
-        await adoptMarker(this.options.globalStorageDir, this.root, classified.adopt).catch(() => undefined);
-      }
+      const held = await markerStateOf(this.options, this.root);
+      const raw = await readRaw(this.root, await statusOf(this.options));
+      const classified = classify(raw, held);
+      if (classified.adopt !== undefined && raw.kind === 'verified') await adoptMarker(this.options, this.root, classified.adopt, raw.payload).catch(() => undefined);
       const missing = await missingKeys(this.root, classified.trusted ?? classified.untrusted).catch(() => []);
       // The signature is taken again after an adoption wrote the marker, so the next view does not read it all again.
       this.cached = { signature: await this.signature(), classified, missing };
@@ -479,12 +580,14 @@ export class LabelReader implements LabelSource {
   }
 
   private notice(view: LabelView): void {
-    const tell = (key: string, message: string): void => {
+    const tell = (key: string, message: string, state?: LabelMapState): void => {
       if (this.told.has(key)) return;
       this.told.add(key);
-      try { this.options.onNotice?.(message); } catch { /* a notice never changes a decision */ }
+      try { this.options.onNotice?.(message, state); } catch { /* a notice never changes a decision */ }
     };
-    if (view.problem !== undefined) tell(view.state, view.problem);
+    // Once the file is fine again, a later problem is told again (another branch switch, say).
+    if (view.state === 'verified' || view.state === 'none') for (const state of ['unverified', 'unreadable', 'rolled-back', 'other-revision']) this.told.delete(state);
+    if (view.problem !== undefined) tell(view.state, view.problem, view.state);
     if (view.missing.length > 0) {
       const shown = view.missing.slice(0, 5).join(', ');
       tell(`missing:${view.missing.join('\n')}`, `Some labelled paths in .planning/.near-ai/labels.json no longer exist: ${shown}${view.missing.length > 5 ? ` and ${String(view.missing.length - 5)} more` : ''}. Their labels are kept. Run NEAR AI: Set Label on the new path, or remove the old one there.`);

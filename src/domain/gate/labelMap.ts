@@ -277,11 +277,20 @@ export function missingLabelPaths(map: LabelMapPayload, exists: (key: string) =>
 
 /**
  * What a project's label map says, as a reader on disk found it (D-25, D-53, D-59): `none` (no map and nothing verified before), `verified`, `unverified`
- * (it only raises, over what this computer last verified), `unreadable` and `rolled-back` (missing or older than what this computer last verified). The last
- * two hold agent reads in the project.
+ * (it only raises, over what this computer last verified), `unreadable`, `rolled-back` (deleted, or not checkable against what this computer last verified)
+ * and `other-revision` (signed, but older than or different from what this computer last verified, such as another branch's, which the person can accept,
+ * D-61). The last three hold agent reads in the project.
  */
-export const LABEL_MAP_STATES = Object.freeze(['none', 'verified', 'unverified', 'unreadable', 'rolled-back'] as const);
+export const LABEL_MAP_STATES = Object.freeze(['none', 'verified', 'unverified', 'unreadable', 'rolled-back', 'other-revision'] as const);
 export type LabelMapState = (typeof LABEL_MAP_STATES)[number];
+
+/** The states that hold every agent read in the project until a person acts: one list, so no reader can forget one (D-53, D-59, D-61). */
+export const READ_HOLDING_STATES: ReadonlySet<LabelMapState> = new Set<LabelMapState>(['unreadable', 'rolled-back', 'other-revision']);
+
+/** Whether a label file in this state holds agent reads. */
+export function holdsReads(state: LabelMapState): boolean {
+  return READ_HOLDING_STATES.has(state);
+}
 
 /** A map read under one set of scales: its state, the sentence the person needs when there is one, the labelled paths that are gone, and the resolution. */
 export interface LabelView {
