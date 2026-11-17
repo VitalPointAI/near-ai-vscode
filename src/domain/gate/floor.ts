@@ -88,12 +88,71 @@ export function vscodeStorageRoots(globalStorage: string | undefined): string[] 
   return roots;
 }
 
-/** The pattern of VS Code's secrets database where VS Code keeps it: after its storage folder names, or under one of this VS Code's own storage folders. */
-function vscodeSecretsPattern(locations: FloorLocations): RegExp {
+/** The folder a call works in, and the shell's folder for a command: a path that resolves inside the project is the project's own (PR #74 review round 11). */
+export interface FloorWorkspace {
+  readonly root: string;
+  readonly cwd?: string;
+}
+
+/**
+ * Whether a path as written resolves inside the project: from the shell's folder (or the project) for a relative path, with `~` and `$HOME` read as the
+ * home folder. Another variable, or a home folder nobody gave, is not known to be inside. Text only: nothing is opened. Forward slashes throughout.
+ */
+export function resolvesInsideWorkspace(written: string, workspace: FloorWorkspace, locations: FloorLocations = {}): boolean {
+  let text = forwardSlashes(written.trim().replace(/^["']+|["']+$/g, ''));
+  const home = trimmedFolder(locations.home);
+  const homeForm = /^(?:~|\$\{HOME\}|\$HOME)(?=\/|$)/.exec(text);
+  if (homeForm) {
+    if (home === undefined) return false;
+    text = `${home}${text.slice(homeForm[0].length)}`;
+  }
+  if (text.includes('$') || text === '') return false;
+  const root = trimmedFolder(workspace.root);
+  if (root === undefined) return false;
+  const absolute = text.startsWith('/') || /^[A-Za-z]:\//.test(text);
+  const base = trimmedFolder(workspace.cwd) ?? root;
+  const resolved = normalizeSlashes(absolute ? text : `${base}/${text}`);
+  return resolved === root || resolved.startsWith(`${root}/`);
+}
+
+/** `a/./b/../c` as `a/c`, on forward slashes, keeping a leading `/` or drive. */
+function normalizeSlashes(text: string): string {
+  const lead = /^(?:[A-Za-z]:)?\/?/.exec(text)?.[0] ?? '';
+  const parts: string[] = [];
+  for (const part of text.slice(lead.length).split('/')) {
+    if (part === '' || part === '.') continue;
+    if (part === '..') { parts.pop(); continue; }
+    parts.push(part);
+  }
+  return `${lead}${parts.join('/')}`.replace(/\/+$/, '') || lead;
+}
+
+/** The written path a match sits in: the match back to the start of its word (a space, a quote, a shell operator, `=`). */
+function wordAround(text: string, index: number, end: number): string {
+  let start = index;
+  while (start > 0 && !/[\s'"`;&|()<>=]/.test(text[start - 1]!)) start -= 1;
+  return text.slice(start, end);
+}
+
+/**
+ * VS Code's secrets database where VS Code keeps it: after its storage folder names in any VS Code's layout (unless the path resolves inside the project,
+ * where a folder of that name is the project's own), or under one of this VS Code's own storage folders. The match as written, or undefined.
+ */
+function namesVscodeSecrets(text: string, locations: FloorLocations, workspace: FloorWorkspace | undefined): string | undefined {
   const names = VSCODE_SECRET_FILES.map(escapeRegExp).sort((a, b) => b.length - a.length).join('|');
-  const portable = '(?<![\\w.-])(?:globalStorage|workspaceStorage/+[^/\\s\'"]+)/+';
   const real = vscodeStorageRoots(locations.globalStorage).map((root) => `(?<![\\w./-])${escapeRegExp(root)}/+(?:[^\\s'"]*/+)?`);
-  return new RegExp(`(?:${[portable, ...real].join('|')})(?:${names})${NAME_END}`, 'i');
+  if (real.length > 0) {
+    const own = firstMatch(new RegExp(`(?:${real.join('|')})(?:${names})${NAME_END}`, 'i'), text);
+    if (own !== undefined) return own;
+  }
+  const portable = new RegExp(`(?<![\\w.-])(?:globalStorage|workspaceStorage/+[^/\\s'"]+)/+(?:${names})${NAME_END}`, 'gi');
+  for (const match of text.matchAll(portable)) {
+    const at = match.index ?? 0;
+    const written = wordAround(text, at, at + match[0].length);
+    if (workspace !== undefined && resolvesInsideWorkspace(written, workspace, locations)) continue;
+    return written.trim().slice(0, 120);
+  }
+  return undefined;
 }
 
 /** Commands that print a secret from the operating system's keychain. */
@@ -172,12 +231,11 @@ export function identityFilesReason(shown: string): string {
  * folder, VS Code's secrets database where VS Code keeps it, or a keychain command that prints a secret. A heuristic, and an honest one (see FLOOR_CANNOT_SEE_TEXT): it
  * reads text only and never runs anything. Returns a plain reason, or undefined.
  */
-export function namesCredentialStore(text: string, locations: FloorLocations = {}): string | undefined {
+export function namesCredentialStore(text: string, locations: FloorLocations = {}, workspace?: FloorWorkspace): string | undefined {
   const flat = forwardSlashes(text);
   const stores = new RegExp(`${homePrefix(locations)}(?:${CREDENTIAL_STORES.map(escapeRegExp).join('|')})${NAME_END}`, 'i');
-  const secrets = vscodeSecretsPattern(locations);
   const keychain = new RegExp(`(?<![\\w.-])(?:${KEYCHAIN_COMMANDS.map((command) => command.split(' ').map(escapeRegExp).join('\\s+')).join('|')})(?![\\w-])`, 'i');
-  const shown = firstMatch(stores, flat) ?? firstMatch(secrets, flat) ?? firstMatch(keychain, flat);
+  const shown = firstMatch(stores, flat) ?? namesVscodeSecrets(flat, locations, workspace) ?? firstMatch(keychain, flat);
   return shown === undefined ? undefined : credentialReason(shown);
 }
 
@@ -211,6 +269,8 @@ export interface FloorInput {
   /** Today's `tool.forbidden` hook: the reason the key folder was named. */
   readonly forbidden?: string;
   readonly floorFacts?: FloorFacts;
+  /** The project and the shell's folder, so a path inside the project named like VS Code's storage is read as the project's own. */
+  readonly workspace?: FloorWorkspace;
 }
 
 function pathsOf(capability: Capability): readonly string[] {
@@ -257,7 +317,7 @@ export function floorFor(input: FloorInput, locations: FloorLocations = {}): Flo
   const matched = new Map<FloorRule, string>();
   const set = (rule: FloorRule, reason: string | undefined): void => { if (reason !== undefined) matched.set(rule, reason); };
   set('floor.state-keys', stateKeysMatch(input));
-  set('floor.credential-store', facts?.credentialStore ?? (command === undefined ? undefined : namesCredentialStore(command, locations)));
+  set('floor.credential-store', facts?.credentialStore ?? (command === undefined ? undefined : namesCredentialStore(command, locations, input.workspace)));
   set('floor.identity-files', facts?.identityFiles ?? (command === undefined ? undefined : namesIdentityFiles(command, locations)));
   set('floor.protected-write', protectedWriteMatch(input));
   set('floor.publish', effectMatch(input, (effect) => effect.verb === 'publish' || effect.verb === 'send', PUBLISH_REASON));

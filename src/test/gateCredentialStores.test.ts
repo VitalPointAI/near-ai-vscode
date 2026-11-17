@@ -2,13 +2,14 @@
 // resolves paths against a stand-in home folder made under the test run's temporary folder: no command is run, nothing in a real home folder is read, and no
 // credential file exists anywhere these tests look.
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, symlinkSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { floorFactsFor, gateToolCall } from '../agent/gateAdapter';
 import { DEFAULT_RULES, RunGrants } from '../agent/permissions';
-import { bashTool, shellReachesCredentialStore } from '../agent/tools';
+import { bashTool, readTool, shellReachesCredentialStore } from '../agent/tools';
+import { namesCredentialStore } from '../domain/gate/floor';
 import type { GateRuntime } from '../domain/gate/decide';
 import { fakeHome } from './helpers/gateFixtures';
 import { testGateRuntime } from './helpers/gatedRuns';
@@ -153,4 +154,30 @@ test('a command longer than the classifier reads is not resolved word by word: t
     assert.equal(gated.decision.outcome, presence === 'person' ? 'ask' : 'deny', presence);
     assert.equal(gated.decision.rule, 'manifest.effects-unknown');
   }
+});
+
+// PR #74 review round 11: VS Code's storage folder names (`globalStorage/`, `workspaceStorage/<id>/`) are matched by name in any VS Code's layout, but a
+// path that resolves inside the project is the project's own file, not VS Code's: a project's own `globalStorage/state.vscdb` is not refused. One helper
+// decides it for the text check and for the file tools; an escape from the project (`../`) into a folder of that name is still refused.
+test('a project\'s own globalStorage/state.vscdb is the project\'s; VS Code\'s real storage and an escape out of the project are refused', async () => {
+  const project = mkdtempSync(path.join(TEMPORARY, 'near-ai-cred-own-'));
+  mkdirSync(path.join(project, 'globalStorage'), { recursive: true });
+  writeFileSync(path.join(project, 'globalStorage', 'state.vscdb'), 'fixture');
+  const workspace = { root: project, cwd: project };
+  // The text check.
+  for (const text of ['sqlite3 globalStorage/state.vscdb .dump', `cat ${path.join(project, 'globalStorage', 'state.vscdb')}`, 'cat ./globalStorage/state.vscdb', 'cat workspaceStorage/abc/state.vscdb']) {
+    assert.equal(namesCredentialStore(text, LOCATIONS, workspace), undefined, `${text}: the project's own file`);
+  }
+  for (const text of ['cat ../globalStorage/state.vscdb', 'cat ~/.config/Code/User/globalStorage/state.vscdb', 'cat /srv/globalStorage/state.vscdb', 'cat "$HOME/x/globalStorage/state.vscdb"']) {
+    assert.notEqual(namesCredentialStore(text, LOCATIONS, workspace), undefined, `${text}: outside the project`);
+  }
+  // Through the gate: a shell call and the Read tool.
+  const decideIn = async (tool: typeof bashTool | typeof readTool, raw: Record<string, unknown>, command?: string) => gateToolCall(testGateRuntime({ presence: 'none', context: 'unattended' }), {
+    tool, raw, root: project, callId: `own-${JSON.stringify(raw)}`, ...(command === undefined ? {} : { command }), policy: { mode: 'fully-autonomous', emergencyStop: false },
+    rules: DEFAULT_RULES, grants: new RunGrants(), shell: { cwd: project }, buildAuto: async () => undefined
+  });
+  assert.equal((await decideIn(bashTool, { command: 'cat globalStorage/state.vscdb' }, 'cat globalStorage/state.vscdb')).decision.outcome, 'allow', 'a shell read of the project\'s file');
+  assert.equal((await decideIn(readTool, { file_path: 'globalStorage/state.vscdb' })).decision.outcome, 'allow', 'the Read tool on the project\'s file');
+  assert.equal((await decideIn(bashTool, { command: 'cat ../globalStorage/state.vscdb' }, 'cat ../globalStorage/state.vscdb')).decision.rule, 'floor.credential-store', 'an escape out of the project');
+  assert.equal((await decideIn(readTool, { file_path: '../globalStorage/state.vscdb' })).decision.rule, 'floor.credential-store', 'the Read tool escaping out of the project');
 });

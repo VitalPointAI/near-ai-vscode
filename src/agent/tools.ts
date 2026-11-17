@@ -650,7 +650,8 @@ async function realPathLoose(absolute: string, resolve: (target: string) => Prom
 export async function shellReachesCredentialStore(command: string, context: { root: string; shell?: { workingDirectory: string } }, locations: FloorLocations = {}, options: { realpath?: (target: string) => Promise<string> } = {}): Promise<CredentialReach> {
   const found: { credentialStore?: string; identityFiles?: string; unreadable?: string } = {};
   if (command.trim() === '') return found;
-  const byText = namesCredentialStore(command, locations);
+  // A path inside the project named like VS Code's storage is the project's own (PR #74 review round 11): read from the shell's folder.
+  const byText = namesCredentialStore(command, locations, { root: context.root, cwd: context.shell?.workingDirectory ?? context.root });
   if (byText !== undefined) found.credentialStore = byText;
   const identityByText = namesIdentityFiles(command, locations);
   if (identityByText !== undefined) found.identityFiles = identityByText;
@@ -668,7 +669,7 @@ export async function shellReachesCredentialStore(command: string, context: { ro
   // storage is written and as it resolves. A project file of the same name is the project's.
   const secretsAt = storages.length === 0 ? [{}] : storages.map((globalStorage) => ({ globalStorage }));
   const isStore = (absolute: string): boolean => {
-    if (VSCODE_SECRET_FILES.some((name) => name.toLowerCase() === path.basename(absolute).toLowerCase()) && secretsAt.some((at) => namesCredentialStore(absolute, at) !== undefined)) return true;
+    if (VSCODE_SECRET_FILES.some((name) => name.toLowerCase() === path.basename(absolute).toLowerCase()) && secretsAt.some((at) => namesCredentialStore(absolute, at, { root: context.root }) !== undefined)) return true;
     return homes.some((base) => { const below = segmentsBelow(base, absolute); return below !== undefined && stores.some((store) => reachesPlace(below, store)); });
   };
   const isIdentity = (absolute: string): boolean => storages.some((base) => {

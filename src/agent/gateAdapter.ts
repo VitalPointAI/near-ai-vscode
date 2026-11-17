@@ -373,7 +373,7 @@ export async function readCallPaths(tool: AgentTool<any>, raw: Record<string, un
       resolved = undefined; // outside the project and every trusted folder, or the key folder: the tool refuses it, and its effects stay unknown
     }
     for (const shown of resolved === undefined || resolved === value ? [value] : [value, resolved]) {
-      credentialStore ??= namesCredentialStore(shown, locations);
+      credentialStore ??= namesCredentialStore(shown, locations, { root });
       identityFiles ??= namesIdentityFiles(shown, locations);
     }
     if (resolved === undefined || ![...verbs].every((verb) => verb === 'read')) continue;
@@ -648,6 +648,8 @@ export async function gateToolCall(runtime: GateRuntime, input: GateCallInput, o
     ...(input.sensitive === undefined || input.sensitive === '' ? {} : { sensitive: input.sensitive }),
     ...(input.risky === undefined || input.risky === '' ? {} : { risky: input.risky }),
     ...(Object.keys(floorFacts).length === 0 ? {} : { floorFacts }),
+    // The project and the shell's folder, for the floor's text check of the command (a project's own globalStorage/ folder is the project's).
+    workspace: { root: input.root, cwd: input.shell?.cwd ?? input.root },
     ...(denied === undefined ? {} : { settingsRefusal: { rule: 'settings.deny-list', reason: denied } })
   };
   const captured: { value?: PermissionDecision } = {};
@@ -822,6 +824,7 @@ export async function gateStep(runtime: GateRuntime, input: GateStepInput, optio
     ...(input.manifestContexts === undefined ? {} : { manifestContexts: input.manifestContexts }),
     ...(input.command === undefined ? {} : { command: input.command }),
     ...(Object.keys(floorFacts).length === 0 ? {} : { floorFacts }),
+    ...(input.root === undefined ? {} : { workspace: { root: input.root } }),
     // A step the caller's settings already refuse (its deny list, an engagement's scope) is refused before any ask, unknown effects included (D-10).
     ...(input.settings.decision === 'deny' ? { settingsRefusal: { rule: input.settings.rule, reason: input.settings.reason ?? 'Your settings refuse this step.' } } : {})
   };

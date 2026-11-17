@@ -214,7 +214,7 @@ export async function decide(request: GateRequest, bundleState: BundleState, set
   if (request.effects.length === 0) {
     // What the call itself names is still read: a path or command that reaches a credential store or the identity folders is refused with no card, not
     // asked about. (The loop's own `forbidden` refusal is the loop's, and it refuses that call itself.)
-    const named = floorFor({ effects: [], ...(request.command === undefined ? {} : { command: request.command }), ...(request.floorFacts === undefined ? {} : { floorFacts: request.floorFacts }) }, options.locations);
+    const named = floorFor({ effects: [], ...(request.command === undefined ? {} : { command: request.command }), ...(request.floorFacts === undefined ? {} : { floorFacts: request.floorFacts }), ...(request.workspace === undefined ? {} : { workspace: request.workspace }) }, options.locations);
     if (named !== undefined && named.kind === 'refuse') return make('deny', named.rule, 'approve-risky', { reason: named.reason, floor: true });
     // The deny list decides before a person is asked about effects nobody can read (D-10): a denied command is never put in front of a person.
     if (request.settingsRefusal !== undefined) return make('deny', request.settingsRefusal.rule, 'approve-risky', { reason: request.settingsRefusal.reason });
