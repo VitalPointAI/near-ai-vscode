@@ -1033,9 +1033,10 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
         } finally { stop?.dispose(); }
         if (controller.signal.aborted && done < teams.length) results.push(`Cancelled after ${done} of ${teams.length} teams; the ones already tested kept their models.`);
         post({ type: 'notice', text: results.join(' ') });
-        // The role tests just run count in each team's health on the dashboard.
+        // The role tests just run count in each team's health on the dashboard. A team open in the editor was already told about its new models
+        // (external-change, from optimiseTeam); it used to be sent again here under the id "library", and with none open this read an empty path and
+        // showed a raw file-system error.
         await refreshLibrary();
-        await sendTeam('library', open?.file ?? '', '');
         return;
       }
       case 'draft-team': {

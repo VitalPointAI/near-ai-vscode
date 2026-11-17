@@ -31,6 +31,9 @@
   **Optimise all teams**, **Import…** and **Refresh**. A project with no team gets a card that says
   so, with **Set up**, and an empty library shows **New team** and **Set up a team for this
   project**.
+- **Optimise all teams ends cleanly.** With no team open it no longer ends with a file error, and
+  with a team open it no longer sends that team to the page a second time; the dashboard shows
+  each team's new role test as soon as it is done.
 
 ## 0.4.30
 
