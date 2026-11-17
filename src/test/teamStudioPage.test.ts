@@ -1582,6 +1582,12 @@ test('host: Improve with AI checks locally, reviews through the guarded call, an
   assert.equal((await h.library.versions(file)).length, 2);
 });
 
+/** Waits until the fake model has been sent `count` requests, so a test never depends on how long the host takes under load. */
+async function sentAtLeast(sent: unknown[], count: number): Promise<void> {
+  for (let tries = 0; sent.length < count && tries < 1000; tries++) await new Promise((resolve) => setTimeout(resolve, 5));
+  assert.ok(sent.length >= count, `the request reached the model (${sent.length} of ${count})`);
+}
+
 test('host: a newer request drops the older reply, Cancel and Emergency stop abort, and failures say so', async () => {
   const h = await harness();
   let stop: (() => void) | undefined;
@@ -1595,7 +1601,7 @@ test('host: a newer request drops the older reply, Cancel and Emergency stop abo
   const { attachTeamStudio: attach } = await import('../services/teamStudioPage');
   attach({ webview: { postMessage: async (message) => { posted.push(message as Record<string, any>); return true; }, onDidReceiveMessage: (listener) => { receive = listener; return { dispose() {} }; } }, onDidDispose: () => ({ dispose() {} }) }, { ...h.deps, teamAi: async () => ai });
   const first = receive!({ type: 'improve-ai', seq: 1, draft: improveDraft() }) as Promise<void>;
-  await new Promise((resolve) => setTimeout(resolve, 10));
+  await sentAtLeast(sent, 1);
   await receive!({ type: 'improve-ai', seq: 2, draft: improveDraft() });
   assert.equal(sent[0].signal?.aborted, true, 'the newer request aborted the older one');
   release!({ text: REPLY });
@@ -1609,7 +1615,7 @@ test('host: a newer request drops the older reply, Cancel and Emergency stop abo
   let receive2: ((message: unknown) => unknown) | undefined;
   attach({ webview: { postMessage: async (message) => { posted2.push(message as Record<string, any>); return true; }, onDidReceiveMessage: (listener) => { receive2 = listener; return { dispose() {} }; } }, onDidDispose: () => ({ dispose() {} }) }, { ...h.deps, teamAi: async () => hanging });
   const pending = receive2!({ type: 'improve-ai', seq: 7, draft: improveDraft() }) as Promise<void>;
-  await new Promise((resolve) => setTimeout(resolve, 10));
+  await sentAtLeast(hangingSent, 1);
   stop!();
   assert.equal(hangingSent[0].signal?.aborted, true, 'Emergency stop aborts the review');
   hang!({ text: REPLY });
