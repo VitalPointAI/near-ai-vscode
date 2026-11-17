@@ -739,6 +739,7 @@ export async function gateToolCall(runtime: GateRuntime, input: GateCallInput, o
   const labelVerdict = await labelVerdictFor(runtime, {
     root: input.root,
     reads: readEffectPaths(effects.length > 0 ? effects : declared),
+    ...(input.command === undefined ? {} : { command: input.command, cwd: input.shell?.cwd ?? input.root }),
     mayReadAnything: input.command !== undefined || effects.length === 0
   });
   const request: GateRequest = {
@@ -978,11 +979,19 @@ export async function gateStep(runtime: GateRuntime, input: GateStepInput, optio
     : await floorFactsFor({ command: input.command, root: input.root, ...(runtime.locations ?? {}) }, options.floorReaders);
   const effects = effectsWithReading(input.effects, read);
   const floorFacts = { ...(input.floorFacts ?? {}), ...(read?.facts ?? {}) };
+  // A cyber step's reads are checked against the labels exactly as a chat call's are (CLAS-03).
+  const labelVerdict = input.root === undefined ? undefined : await labelVerdictFor(runtime, {
+    root: input.root,
+    reads: readEffectPaths(effects.length > 0 ? effects : input.effects),
+    ...(input.command === undefined ? {} : { command: input.command }),
+    mayReadAnything: input.command !== undefined || effects.length === 0
+  });
   const request: GateRequest = {
     actor: runtime.actor,
     tool: input.tool,
     callId: input.callId,
     effects,
+    ...(labelVerdict === undefined ? {} : { labelVerdict }),
     context: runtime.context,
     presence: runtime.presence,
     policy: input.policy,

@@ -57,6 +57,13 @@ export function linkResolver(options: { realpath?: (target: string) => Promise<s
   };
 }
 
+/** The folders a command line changes into with `cd` or `pushd`, as written (a folder named by a variable is not seen). */
+function changedFolders(command: string): string[] {
+  const out: string[] = [];
+  for (const match of command.slice(0, MAX_COMMAND_LENGTH).matchAll(/(?:^|[\s;&|(])(?:cd|pushd)\s+(?:--\s+)?(['"]?)([^\s'";&|()$`]+)\1/g)) out.push(match[2]!);
+  return out;
+}
+
 /** The project-relative form of an absolute path inside `root` ('' for the root itself), or undefined outside it. */
 function insideRelative(root: string, absolute: string): string | undefined {
   const relative = path.relative(path.resolve(root), absolute);
@@ -110,14 +117,19 @@ export async function namedPaths(input: NamedPathsInput): Promise<string[]> {
     }
   }
   if (input.command !== undefined && input.command.trim() !== '') {
+    // Every word is read from the shell's folder and from each folder the command itself changes into (`cd secret && cat plan.md`), so a read written
+    // relative to a folder the line moves to is still seen.
     const cwd = input.cwd ?? input.root;
+    const folders = [cwd, ...changedFolders(input.command).map((folder) => path.resolve(cwd, folder))].slice(0, 8);
     for (const word of commandWords(input.command)) {
       const literal = /[*?[{]/.test(word) ? patternBase(word) : word;
-      const absolute = path.resolve(cwd, literal === '' ? '.' : literal);
-      add(insideRelative(input.root, absolute));
-      if (pathLike(word) && literal === word) {
-        const real = await follow(absolute);
-        if (real !== undefined && real !== absolute) add(insideRelative(input.root, real));
+      for (const folder of folders) {
+        const absolute = path.resolve(folder, literal === '' ? '.' : literal);
+        add(insideRelative(input.root, absolute));
+        if (pathLike(word) && literal === word) {
+          const real = await follow(absolute);
+          if (real !== undefined && real !== absolute) add(insideRelative(input.root, real));
+        }
       }
     }
   }
@@ -210,7 +222,11 @@ function markVerdict(mark: Mark, facts: ClearanceFacts): LabelVerdict | undefine
     }
   }
   for (const label of mark) {
-    if (!facts.valid) continue;
+    // A broken policy holds no clearances: only the shipped default label may be read (D-53).
+    if (!facts.valid) {
+      if (!isShippedDefault(label)) return { rule: 'label.dominance', reason: FAILED_CLOSED_LABEL_TEXT, label };
+      continue;
+    }
     const why = notCoveredReason(label, facts);
     if (why !== undefined) return { rule: 'label.dominance', reason: notCoveredSentence(label, why.reason, why.clearance), label };
   }

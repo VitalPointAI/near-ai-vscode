@@ -85,7 +85,7 @@ async function started(options: { clearances?: Clearance[]; root?: string; stora
     assert.ok(identity !== undefined);
     const base = defaultBundlePayload({ issuer: { fingerprint: identity.fingerprint, publicKey: identity.publicKey }, now: Date.now() });
     const payload: PolicyBundle = { ...base, clearances: [...base.clearances, ...options.clearances].sort((a, b) => (`${a.scale}/${a.level}` < `${b.scale}/${b.level}` ? -1 : 1)) };
-    await writeFile(path.join(gateDir(storage), POLICY_BUNDLE_FILE), `${JSON.stringify(signPayload(identity, 'policy-bundle', payload), null, 2)}\n`);
+    await writeFile(path.join(gateDir(storage), POLICY_BUNDLE_FILE), `${JSON.stringify(signPayload(identity, 'policy-bundle', payload, { now: () => new Date(payload.issuedAt) }), null, 2)}\n`);
     await writeLastValid(secrets, { at: Date.now(), hash: bundleHash(payload) });
     host = gateCommands.registerGate(createFakeContext(storage, secrets) as never, { notify: (message) => problems.push(message) });
     const state = await host.state();

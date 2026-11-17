@@ -47,6 +47,16 @@ export interface ToolContext {
   /** 0.4.23: the agent making the call (its activity id, and a sub-agent's label), so a card it raises in the main chat says who asked. */
   agentId?: string;
   agentLabel?: string;
+  /**
+   * Whether the agent may see a project-relative path in a search's results (CLAS-03): false for a file whose label the person's clearances do not cover.
+   * The loop builds it from the run's labels before a read tool runs; Glob and Grep leave such paths out and say how many they hid. Absent means no check.
+   */
+  canRead?: (relativePath: string) => boolean;
+}
+
+/** The plain note a search adds when it left out results for their labels. */
+export function labelHiddenNote(count: number, what: 'file' | 'line'): string {
+  return `${String(count)} ${what}${count === 1 ? '' : 's'} hidden because ${count === 1 ? 'its file is' : 'their files are'} labelled above your clearance.`;
 }
 
 export interface SecurityEvent { kind: 'injection' | 'hidden-content' | 'held' | 'blocked'; source: string; detail: string }
@@ -389,15 +399,20 @@ export const globTool: AgentTool<{ pattern: string; path?: string }> = {
     const base = await resolveInWorkspace(context.root, input.path ?? '.', context.readOnlyRoots);
     const unskipped = namedSkipDirs(input.pattern);
     const found: Array<{ relative: string; absolute: string }> = [];
+    let labelHidden = 0;
     await walk(context.root, base, (absolute, relative) => {
       const fromBase = path.relative(base, absolute).split(path.sep).join('/');
-      if (matchesGlob(input.pattern, fromBase)) found.push({ relative, absolute });
+      if (!matchesGlob(input.pattern, fromBase)) return;
+      // A file labelled above the clearances is left out, and counted, so the agent learns neither its name nor where it is (CLAS-03).
+      if (context.canRead !== undefined && !context.canRead(path.relative(context.root, absolute).split(path.sep).join('/'))) { labelHidden += 1; return; }
+      found.push({ relative, absolute });
     }, context.signal, unskipped);
-    if (!found.length) return 'No files matched.';
+    const labelNote = labelHidden > 0 ? `\n\n[${labelHiddenNote(labelHidden, 'file')}]` : '';
+    if (!found.length) return labelHidden > 0 ? `No files matched that you may read. ${labelHiddenNote(labelHidden, 'file')}` : 'No files matched.';
     const withTimes = await Promise.all(found.slice(0, 5_000).map(async (file) => ({ ...file, mtime: (await stat(file.absolute).catch(() => undefined))?.mtimeMs ?? 0 })));
     withTimes.sort((a, b) => b.mtime - a.mtime);
     const shown = withTimes.slice(0, 500).map((file) => file.relative);
-    return found.length > shown.length ? `${shown.join('\n')}\n\n[${found.length - shown.length} more files. Narrow the pattern.]` : shown.join('\n');
+    return (found.length > shown.length ? `${shown.join('\n')}\n\n[${found.length - shown.length} more files. Narrow the pattern.]` : shown.join('\n')) + labelNote;
   }
 };
 
@@ -424,11 +439,19 @@ export const grepTool: AgentTool<{ pattern: string; path?: string; glob?: string
     // file apart from the text, so neither a drive letter (C:\) nor a context line (`file-12-text`) can hide which file it is.
     // The key folder is left out even of a search aimed at the state folder (0.4.23): a search aimed at the key folder itself is refused before it runs.
     const aimed = input.path !== undefined && isSensitivePath(input.path);
-    const kept = output.filter((line) => line.file === undefined || ((aimed || !isSensitivePath(line.file)) && !isStateKeysPath(line.file.split(path.sep).join('/'))));
-    const hidden = output.length - kept.length;
+    const safe = output.filter((line) => line.file === undefined || ((aimed || !isSensitivePath(line.file)) && !isStateKeysPath(line.file.split(path.sep).join('/'))));
+    // A line from a file labelled above the clearances is left out the same way, and counted on its own (CLAS-03).
+    const canRead = context.canRead;
+    const kept = canRead === undefined ? safe : safe.filter((line) => line.file === undefined || canRead(path.relative(context.root, path.resolve(context.root, line.file)).split(path.sep).join('/')));
+    const labelHidden = safe.length - kept.length;
+    const labelNote = labelHidden > 0 ? `\n\n[${labelHiddenNote(labelHidden, 'line')}]` : '';
+    const hidden = output.length - safe.length;
     const lines = kept.map((line) => (line.file === undefined ? line.text : `${displayPath(context.root, line.file)}${line.text}`));
-    if (!lines.length) return hidden ? `No matches outside files that look like credentials (${hidden} line${hidden === 1 ? '' : 's'} hidden; search that file by path to include it).` : 'No matches.';
-    return lines.length > input.headLimit ? `${lines.slice(0, input.headLimit).join('\n')}\n\n[${lines.length - input.headLimit} more lines. Narrow the search or raise head_limit.]` : lines.join('\n');
+    if (!lines.length) {
+      if (labelHidden > 0) return `No matches you may read. ${labelHiddenNote(labelHidden, 'line')}`;
+      return hidden ? `No matches outside files that look like credentials (${hidden} line${hidden === 1 ? '' : 's'} hidden; search that file by path to include it).` : 'No matches.';
+    }
+    return (lines.length > input.headLimit ? `${lines.slice(0, input.headLimit).join('\n')}\n\n[${lines.length - input.headLimit} more lines. Narrow the search or raise head_limit.]` : lines.join('\n')) + labelNote;
   }
 };
 
