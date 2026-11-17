@@ -2349,3 +2349,161 @@ test('versions taken in the same millisecond are all kept, in order', async () =
   const versions = (await library.versions(file)).sort();
   assert.deepEqual(await Promise.all(versions.map((version) => readFile(version, 'utf8'))), ['version 1', 'version 2', 'version 3', 'version 4', 'version 5']);
 });
+
+// ---------- PR #75 review ----------
+
+/** The host's answers to one message: what the page acts on (never more than one per use-team). */
+async function answersTo(h: Harness, message: unknown): Promise<Array<Record<string, any>>> {
+  const before = h.posted.length;
+  await h.send(message);
+  return h.posted.slice(before).filter((posted) => ['team', 'used', 'error', 'notice'].includes(posted.type));
+}
+
+test('host: when it cannot tell whether a team came from an unapproved import, Use as is and Save fail closed: an error, and nothing written', async () => {
+  const h = await harness();
+  await h.library.create('Web team', teamMarkdown(draft()));
+  await h.send({ type: 'ready' });
+  h.library.unapprovedSource = async () => { throw new Error('the imports folder could not be read'); };
+  const projectFile = TeamLibrary.projectTeamFile(h.root);
+  const used = await answersTo(h, { type: 'use-team', id: 'lib:web-team' });
+  assert.deepEqual(used.map((answer) => answer.type), ['error']);
+  assert.match(used[0]!.text, /^Not used: it could not be checked whether this team has members from an imported team you have not approved \(the imports folder could not be read\)\. Nothing was changed\.$/);
+  assert.equal(existsSync(projectFile), false, 'no project team written');
+  assert.deepEqual(h.confirmed, [], 'nothing asked before the check');
+  // Saving a new team fails closed the same way.
+  const saved = await answersTo(h, { type: 'create', draft: draft({ name: 'New crew' }), target: 'user' });
+  assert.deepEqual(saved.map((answer) => answer.type), ['error']);
+  assert.match(saved[0]!.text, /^Not saved: it could not be checked/);
+  assert.equal(existsSync(path.join(h.library.directory, 'new-crew.md')), false);
+  // With no project, a built-in is not saved to My teams either; a saved team only goes to the chat, which writes nothing, so it still works.
+  h.setRoot(undefined, false);
+  const builtin = await answersTo(h, { type: 'use-team', id: 'gsd:review' });
+  assert.deepEqual(builtin.map((answer) => answer.type), ['error']);
+  assert.equal(existsSync(path.join(h.library.directory, 'review-team.md')), false);
+  assert.deepEqual((await answersTo(h, { type: 'use-team', id: 'lib:web-team' })).map((answer) => answer.type), ['used']);
+  // Improve with AI treats such a team as untrusted rather than trusted.
+  const { ai, sent } = fakeAi([TEE_MODEL], [{ text: JSON.stringify({ suggestions: [] }) }]);
+  h.deps.teamAi = async () => ai;
+  await h.send({ type: 'improve-ai', seq: 1, draft: draft() });
+  assert.match(sent[0]!.messages[1]!.content!, /imported from a file and its owner has not approved it yet/);
+  h.close();
+});
+
+test('host: every Use as is gets exactly one answer: the team, used, declined, or an error', async () => {
+  const h = await harness();
+  await h.library.create('Web team', teamMarkdown(draft()));
+  await h.send({ type: 'ready' });
+  const kinds = async (message: unknown) => (await answersTo(h, message)).map((answer) => answer.declined ? 'declined' : answer.type);
+  assert.deepEqual(await kinds({ type: 'use-team', id: 'lib:web-team' }), ['team'], 'made the project team');
+  h.confirmAnswer.value = false;
+  const replace = await answersTo(h, { type: 'use-team', id: 'gsd:review' });
+  assert.deepEqual(replace.map((answer) => [answer.type, answer.declined]), [['used', true]], 'replace declined');
+  assert.equal(replace[0]!.text, 'Not changed. This project\'s team is as it was.');
+  h.chooseAnswer.value = undefined;
+  const discard = await answersTo(h, { type: 'use-team', id: 'gsd:review', discard: true });
+  assert.deepEqual(discard.map((answer) => [answer.type, answer.declined]), [['used', true]], 'discarding the builder declined');
+  assert.equal(discard[0]!.text, 'Not changed. The team you were building is still here.');
+  assert.deepEqual(await kinds({ type: 'use-team', id: 'lib:nope' }), ['error'], 'a team that is gone');
+  await writeFile(path.join(h.root, '.near-kb'), '');
+  await h.library.create('Forwarded', renderTeam('Forwarded', 'x', [{ name: 'dev', model: 'deepseek/flash', instructions: 'Build it. Report it.' }]));
+  await h.send({ type: 'refresh' });
+  assert.deepEqual(await kinds({ type: 'use-team', id: 'lib:forwarded' }), ['error'], 'a check fails');
+  h.setRoot(undefined, false);
+  assert.deepEqual(await kinds({ type: 'use-team', id: 'lib:web-team' }), ['used'], 'to the chat');
+  assert.deepEqual(await kinds({ type: 'use-team', id: 'gsd:review' }), ['used'], 'saved to My teams, then the chat');
+  h.close();
+});
+
+test('page: a declined Use as is says Not changed and stays on the picker', async () => {
+  const page = await builderPage();
+  page.byLabel('New team')!.click();
+  page.byLabel('Use an existing team')!.click();
+  page.select('lib:web');
+  page.byLabel('Use Web team as is')!.click();
+  page.dispatch({ type: 'used', declined: true, text: 'Not changed. This project\'s team is as it was.' });
+  assert.equal(page.heading(), 'Use an existing team');
+  assert.match(page.doc.getElementById('announce')!.textContent, /^Not changed\./);
+  assert.equal(page.radios('starting-point').find((node) => node.value === 'lib:web')!.checked, true);
+});
+
+test('host: the picker carries the names Use as is saves under and a clone starts from, and they match what is saved, taken names included', async () => {
+  const h = await harness();
+  await h.library.create('Web team', teamMarkdown(draft()));
+  await h.library.create('Copy of Web team', teamMarkdown(draft({ name: 'Copy of Web team' })));
+  await h.library.create('Review team', teamMarkdown(draft({ name: 'Review team' })));
+  h.setRoot(undefined, false);
+  await h.send({ type: 'ready' });
+  const entry = (id: string, from = last(h, 'state').picker) => (from as any[]).find((candidate) => candidate.id === id);
+  assert.deepEqual([entry('gsd:review').saveAs, entry('gsd:review').cloneName], ['Review team 2', 'Review team 2']);
+  assert.deepEqual([entry('lib:web-team').cloneName, entry('lib:web-team').saveAs], ['Copy of Web team 2', undefined], 'a saved team is not saved again');
+  assert.equal(entry('type:software').saveAs, 'Software development team');
+  const preview = entry('gsd:review').saveAs;
+  await h.send({ type: 'use-team', id: 'gsd:review' });
+  assert.match(last(h, 'used').text, new RegExp(`^Saved "${preview}" to My teams`));
+  assert.equal(parseTeam(await readFile(path.join(h.library.directory, 'review-team-2.md'), 'utf8'), 'x.md').name, preview);
+  assert.equal(entry('gsd:review', last(h, 'library').picker).saveAs, 'Review team 3', 'the next preview moves on');
+  // A clone's name comes with its members, resolved when it is made.
+  await h.send({ type: 'starting-point', id: 'lib:web-team', goal: '', locality: 'cloud' });
+  assert.equal(last(h, 'starting-point').cloneName, 'Copy of Web team 2');
+  await h.send({ type: 'starting-point', id: 'gsd:review', goal: '', locality: 'cloud' });
+  assert.equal(last(h, 'starting-point').cloneName, 'Review team 3');
+  h.close();
+});
+
+test('page: the names it shows and fills in are the host\'s, not its own', async () => {
+  const page = await builderPage({ hasProject: false, teams: [WEB_CARD, { ...WEB_CARD, id: 'user:review-team', name: 'Review team' }] });
+  page.byLabel('New team')!.click();
+  page.byLabel('Use an existing team')!.click();
+  page.select('gsd:review');
+  assert.match(page.text(), /saves it to My teams as "Review team 2"/, 'the preview the host resolved');
+  page.select('lib:web');
+  page.byLabel('Clone Web team and modify it')!.click();
+  page.dispatch({ type: 'starting-point', id: 'lib:web', cloneName: 'Copy of Web team 7', draft: { name: '', description: 'Builds pages', members: [] } });
+  assert.equal(page.doc.getElementById('f-name')!.value, 'Copy of Web team 7');
+  assert.doesNotMatch(await readFile(SCRIPT, 'utf8'), /function uniqueName|'Recommended team'|' team'\)/, 'no naming rules of its own');
+});
+
+test('page: the team keeps the entry point\'s Save it as on every path: from scratch, cloned, cloned from an existing team, and drafted by AI', async () => {
+  const proposal = { proposal: { name: 'Client team', mission: 'm', description: 'd', members: [{ name: 'a', role: 'writer', model: 'standard', produces: 'p', instructions: 'Write it.' }], outputs: [], notes: [] }, draft: { name: 'Client team', description: 'd', members: [{ name: 'a', role: 'writer', model: 'standard', tools: null, instructions: 'Write it.' }] }, problems: [] };
+  for (const entry of ['user', 'project'] as const) {
+    const page = await builderPage();
+    const start = () => { if (entry === 'project') page.dispatch({ type: 'start-wizard', target: 'project' }); else page.byLabel('New team')!.click(); };
+    const target = () => page.radios('target').find((node) => node.checked)?.value;
+    const leave = () => { page.byLabel('Back to all teams')!.click(); if (page.posts.at(-1)!.type === 'leave-wizard') page.dispatch({ type: 'left', choice: 'discard' }); };
+    const cloned = () => { page.select('lib:web'); page.byLabel('Clone Web team and modify it')!.click(); page.dispatch({ type: 'starting-point', id: 'lib:web', cloneName: 'Copy of Web team', draft: { name: '', description: 'Builds pages', members: [] } }); };
+    start(); page.byLabel('Create a new team')!.click(); page.byLabel('From scratch')!.click();
+    assert.equal(target(), entry, `${entry}: from scratch`);
+    leave();
+    start(); page.byLabel('Create a new team')!.click(); page.byLabel('Clone an existing team')!.click(); cloned();
+    assert.equal(target(), entry, `${entry}: clone`);
+    leave();
+    start(); page.byLabel('Use an existing team')!.click(); cloned();
+    assert.equal(target(), entry, `${entry}: clone and modify`);
+    leave();
+    start(); page.byLabel('Create a new team')!.click(); page.byLabel('Describe it, and AI drafts it')!.click();
+    page.dispatch({ type: 'team-proposal', ...proposal });
+    page.byLabel('Use this team')!.click();
+    assert.equal(target(), entry, `${entry}: drafted by AI`);
+    leave();
+    // The library's own AI box, not reached from the builder, saves to My teams as before.
+    page.dispatch({ type: 'team-proposal', ...proposal });
+    page.byLabel('Use this team')!.click();
+    assert.equal(target(), 'user', `${entry}: the library's AI box afterwards`);
+    leave();
+  }
+});
+
+test('page: a clone reply that comes after the person left the picker is dropped for good', async () => {
+  const page = await builderPage();
+  page.byLabel('New team')!.click();
+  page.byLabel('Use an existing team')!.click();
+  page.select('lib:web');
+  page.byLabel('Clone Web team and modify it')!.click();
+  page.byLabel('Back')!.click();
+  const reply = { type: 'starting-point', id: 'lib:web', cloneName: 'Copy of Web team', draft: { name: '', description: 'Builds pages', members: [{ name: 'lead', role: '', model: '', tools: null, instructions: 'Plan.' }] } };
+  page.dispatch(reply);
+  assert.equal(page.heading(), 'How do you want to start?', 'the late reply does not move the builder');
+  page.byLabel('Use an existing team')!.click();
+  page.dispatch(reply);
+  assert.equal(page.heading(), 'Use an existing team', 'nor does it later, back on the picker');
+});
