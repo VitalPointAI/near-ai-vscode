@@ -169,9 +169,9 @@ export function renderTeam(name: string, description: string, members: Array<Omi
 
 export function newTeamTemplate(name: string): string {
   return renderTeam(name, 'What this team is for', [
-    { name: 'planner', role: 'planner', model: 'standard', tools: ['Read', 'Glob', 'Grep', 'TodoWrite', 'Recall'], instructions: 'Read the relevant code and break the task into small, verifiable steps. Do not change files. Report the plan with the files each step touches.' },
-    { name: 'implementer', role: 'implementer', model: 'deep', instructions: 'Make the changes in the plan, matching the project\'s style. Run the relevant tests and fix what you broke. Report what changed and how you verified it.' },
-    { name: 'reviewer', role: 'reviewer', model: 'standard', tools: ['Read', 'Glob', 'Grep', 'Bash'], instructions: 'Review the changes for correctness, regressions, and missing tests. Report concrete findings with file:line, most severe first. Do not edit files.' }
+    { name: 'planner', role: 'planner', model: 'standard', tools: ['Read', 'Glob', 'Grep', 'TodoWrite', 'Recall'], instructions: 'Read the relevant code and break the task into small, verifiable steps, each with its own area (the files it owns), and say which steps can run at the same time. Do not change files. Report the plan with the files each step touches.' },
+    { name: 'implementer', role: 'implementer', model: 'deep', instructions: 'Make the changes in your part of the plan, matching the project\'s style, and leave other areas to their owners. When other members change files at the same time, work in your own git worktree and report your branch for the lead to merge. Run the relevant tests and fix what you broke. Report what changed and how you verified it.' },
+    { name: 'reviewer', role: 'reviewer', model: 'standard', tools: ['Read', 'Glob', 'Grep', 'Bash'], instructions: 'Review the merged changes for correctness, regressions, and missing tests. Report concrete findings with file:line, most severe first. Do not edit files.' }
   ]);
 }
 
@@ -324,6 +324,13 @@ export function noTags(text: string): string {
 }
 
 /**
+ * Owner, 2026-11-18: "teams should typically be built with preference to run agents in parallel vice sequential whenever possible keeping work separated
+ * and then bring together to merge and sort out conflicts." What a run that works with a team (not led as one) is told about running members side by
+ * side and bringing their work together; the lead's prompt says the same at more length.
+ */
+export const PARALLEL_MERGE_NOTE = `When members can work at the same time, start them together, each on its own area (files, modules, or sections) with what it must not touch, and give each member that changes files \`isolation: "worktree"\` so it reports a branch. Then merge their branches one at a time into the run's branch. Resolve a conflict yourself, or hand it to the member who owns that area with both sides. A member whose part fails does not block merging the others. Run the project's checks once after all the merges, and report which branches merged, which conflicts came up and how each was resolved.`;
+
+/**
  * 0.4.21: the team a run works with when it is not led as a team: later messages of a conversation started with /team:<name>, or any run in a project
  * with its own team, GSD workflows included. Before, the team existed only for the one /team message, so a later "make the pictures" never saw the
  * designer and went to general-purpose. Owner, 2026-11-14: "GSD's role is to keep the project on track - like the project manager, contractor, and
@@ -334,6 +341,7 @@ export function teamMembersNote(team: TeamDefinition): string {
 You work with the "${noTags(team.name)}" team. Its members, each available as an Agent subagent_type:
 ${team.members.map((member) => `- ${noTags(member.name)}${member.role ? ` (${noTags(member.role)})` : ''}: ${noTags(member.instructions.split('\n')[0].slice(0, 160))}`).join('\n')}
 Open-GSD runs the project: like a project manager, contractor and quality control, it plans, tracks, checks and verifies. It subcontracts the specialist work to this team. So when a piece of work, or a workflow step, is something a member's role covers (for example building to an implementer, images to a designer, research to a researcher), spawn that member with the Agent tool instead of an Open-GSD agent or general-purpose. Its prompt must be complete: the step's task, everything the workflow requires of it (files to write, commits, checks to run) and the report you need back. Keep Open-GSD's own agents for keeping the project on track (planning, plan checking, verification, progress), and for specialist work no member covers. Use general-purpose only when neither fits.
+${PARALLEL_MERGE_NOTE}
 </team>`;
 }
 
@@ -352,7 +360,15 @@ ${team.members.map((member) => `- ${member.name}${member.role ? ` (${member.role
 - Give each part to the member whose role covers it, never to general-purpose or an Open-GSD agent while a member fits. Open-GSD's own agents keep the project on track (planning, checking, verification); the specialist work is the members'.
 - When two or more members that change files run at the same time in a git repository, start each with \`isolation: "worktree"\` so they cannot overwrite each other; each reports its branch for you to merge. Members that only read or research need no worktree.
 
-Finish with a short summary of what each member did, what ran at the same time, and the outcome.
+# Keep the work separate, then bring it together
+- Give each member its own area: the files, modules, or sections of the deliverable it owns. Say in its prompt what it owns and what it must not touch, so members working at the same time rarely conflict.
+- When the parallel members have finished, merge their branches into this run's branch (the branch checked out where you work) one at a time, not all at once.
+- When a merge conflicts, resolve it yourself where the right answer is clear from both sides. Otherwise hand the conflict to the member who owns that area, with both sides of it and what each branch was for, and merge its answer.
+- A member whose part failed, or that reported no branch, does not block the others: merge the rest, and report the failed part and why.
+- After all the merges, run the project's checks (tests, type checks, linter) once on the merged result, and fix or hand back what they find.
+- Parts that are not branches (findings, sections of a document) are brought together the same way: combine them, settle where they disagree, then check the whole.
+
+Finish with a short summary of what each member did, what ran at the same time, which branches merged, which conflicts came up and how each was resolved, and the outcome.
 
 Task: ${task}`;
 }

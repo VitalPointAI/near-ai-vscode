@@ -49,6 +49,9 @@ Rules:
 - For each member's model, write one of: "deep" for the hardest reasoning, "standard" for most work, "fast" for quick, well-defined tasks. These are tiers; the studio replaces them with a measured model when it can.
 - "produces" must be concrete: what the next member or the person receives.
 - Every member must be able to work INDEPENDENTLY of the others wherever the work allows it: the lead starts all the parts that do not depend on each other at the same time. Design the team so that most members can run concurrently, and where a member must wait for another, say so in its instructions.
+- Keep the work SEPARATE so members working at the same time rarely conflict: give each member its own area (files, modules, or sections of the deliverable). Each member's instructions say what area it owns and what it must not touch. A member that changes files works in its own git worktree and reports its branch.
+- Then BRING IT TOGETHER: a team that produces something from several parts has a clear integration step, done by an integrator or editor member, or by the lead. Whoever does it merges the parts (one branch at a time), resolves the conflicts between them, and checks the whole. Say in that member's instructions that it does this; if no member does, say in the description that the lead merges the work.
+- Put members one after another only where one part truly needs another's output, and state that need in the waiting member's instructions (for example "Starts once the analyst's findings are ready, because it writes from them").
 - "outputs" is what the PERSON gets at the end, with its format. Be specific: "Markdown brief with a citation per claim", not "a report".
 - Write in plain English. No em dashes and no en dashes. British or American spelling is fine, but be consistent.`;
 
@@ -119,9 +122,9 @@ export function parseProposal(text: string, brief: TeamBrief): { proposal: TeamP
   if (!members.length) {
     problems.push('The reply named no members, so a starting team was drafted from the brief.');
     members.push(
-      { name: 'lead', role: 'lead', model: 'deep', produces: 'the finished work, checked', instructions: 'Break the work into the parts the output needs, hand them to the team, check what comes back, and assemble the final deliverable.' },
-      { name: 'researcher', role: 'researcher', model: 'standard', produces: 'verifiable findings with sources', instructions: 'Find and read primary sources. Record every finding with its source and what exactly supports it.' },
-      { name: 'writer', role: 'writer', model: 'standard', produces: 'the draft in the requested format', instructions: 'Write the deliverable from the findings, in the format the person asked for, adding no fact that is not in the research.' }
+      { name: 'lead', role: 'lead', model: 'deep', produces: 'the finished work, checked', instructions: 'Break the work into the parts the output needs, give each member its own part, and start the parts that do not depend on each other at the same time. Then merge what comes back, resolve where the parts conflict, and check the whole before handing over the final deliverable.' },
+      { name: 'researcher', role: 'researcher', model: 'standard', produces: 'verifiable findings with sources', instructions: 'Find and read primary sources. Record every finding with its source and what exactly supports it. Your area is the research notes; leave the draft to the writer.' },
+      { name: 'writer', role: 'writer', model: 'standard', produces: 'the draft in the requested format', instructions: 'Write the deliverable from the findings, in the format the person asked for, adding no fact that is not in the research. Your area is the draft; leave the research notes to the researcher. Starts once the findings are ready, because it writes from them.' }
     );
   }
 

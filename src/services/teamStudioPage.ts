@@ -7,7 +7,7 @@ import { checkDraft, draftFromMarkdown, handWrittenTeamPrivacy, lineDiff, type D
 import { DEFAULT_TOOLS, parseTeam, recommendedProjectTeam, slugify, TeamLibrary, teamIsPrivate, teamKnowledgeKey, type TeamDefinition } from '../agent/teams';
 import type { AgentDiscoveryAnswers } from '../domain/agents';
 import { buildTeamGraph } from '../agent/teamGraph';
-import { checkTeam, checkWarnings } from '../agent/teamCheck';
+import { checkNotes, checkTeam, checkWarnings } from '../agent/teamCheck';
 import { ACCEPT_ALL_KINDS, applySuggestion, KNOWLEDGE_BASE_PRIVATE, MAX_REFINE_BYTES, parseRefinement, REFINE_PROMPT, refinePlan, refinePrompt, type RefinePlan, type Suggestion } from '../agent/teamRefine';
 import { chooseImageModel, chooseTeamModel, imageCallBlocked, imageEstimate, teamImageCall, teamModelCall, type TeamAiDeps, type TeamImageResult } from './teamStudioAi';
 import { CUSTOM_PLAGIARISM_CHECKER } from '../agent/researchIntegrity';
@@ -213,7 +213,8 @@ export function filterPicker(entries: PickerEntry[], filter: PickerFilter): Pick
 
 export const NO_SAVED_TEAMS_TEXT = 'You have no saved teams yet. Save a team as one of your teams in Team Studio to reuse it in any project.';
 
-export interface StudioReview { markdown: string; errors: DraftIssue[]; warnings: DraftIssue[]; members: StudioMemberModel[] }
+/** `notes`: advice shown while editing (the parallel-work notes); never blocks a save. */
+export interface StudioReview { markdown: string; errors: DraftIssue[]; warnings: DraftIssue[]; notes: DraftIssue[]; members: StudioMemberModel[] }
 
 const READ = ['Read', 'Glob', 'Grep', 'TodoWrite', 'Recall', 'Remember'];
 const WEB = ['WebSearch', 'WebFetch', 'CheckCitations'];
@@ -241,22 +242,22 @@ export const TEAM_ROLE_IDS: string[] = TEAM_ROLES.map((role) => role.id);
 /** Starting points built from Open-GSD agent roles. Each member's role names the Open-GSD agent it is modelled on. */
 const GSD_TEMPLATES: Array<{ id: string; label: string; description: string; members: Array<{ name: string; role: string; model: string; tools: string[] | null; fallback: string }> }> = [
   { id: 'research', label: 'Research', description: 'Investigate a question, synthesize the findings, and check them.', members: [
-    { name: 'researcher', role: 'gsd-phase-researcher', model: 'standard', tools: [...READ, ...WEB, 'Write'], fallback: 'Research how to approach the task: read the code and primary sources, and record each finding with where it came from.' },
-    { name: 'synthesizer', role: 'gsd-research-synthesizer', model: 'fast', tools: [...READ, 'Write'], fallback: 'Combine the research notes into one summary with the decisions it supports and the open questions.' },
+    { name: 'researcher', role: 'gsd-phase-researcher', model: 'standard', tools: [...READ, ...WEB, 'Write'], fallback: 'Research how to approach the task: read the code and primary sources, and record each finding with where it came from. Your area is your research notes.' },
+    { name: 'synthesizer', role: 'gsd-research-synthesizer', model: 'fast', tools: [...READ, 'Write'], fallback: 'Starts once the research notes are ready. Combine them into one summary with the decisions it supports and the open questions; the summary is your area.' },
     { name: 'checker', role: 'gsd-verifier', model: 'standard', tools: [...READ, ...WEB], fallback: 'Check the summary against its sources and report anything unsupported or contradicted.' }] },
   { id: 'build-test', label: 'Build & test', description: 'Plan a change, implement it, and verify it works.', members: [
-    { name: 'planner', role: 'gsd-planner', model: 'deep', tools: READ, fallback: 'Create a plan with small, verifiable tasks, the files each touches, and how each will be checked.' },
-    { name: 'executor', role: 'gsd-executor', model: 'deep', tools: null, fallback: 'Carry out the plan task by task with small commits, running the tests as you go.' },
-    { name: 'verifier', role: 'gsd-verifier', model: 'standard', tools: [...READ, 'Bash'], fallback: 'Verify that the result meets the goal: run the checks and report what is shown to work and what is not.' }] },
+    { name: 'planner', role: 'gsd-planner', model: 'deep', tools: READ, fallback: 'Create a plan with small, verifiable tasks, the files each touches, and how each will be checked. Give each task its own area (the files it owns) and mark which tasks can run at the same time.' },
+    { name: 'executor', role: 'gsd-executor', model: 'deep', tools: null, fallback: 'Carry out your tasks in the plan with small commits, running the tests as you go. Work only on the area your tasks own. When other members change files at the same time, work in your own git worktree and report your branch for the lead to merge.' },
+    { name: 'verifier', role: 'gsd-verifier', model: 'standard', tools: [...READ, 'Bash'], fallback: 'Verify that the merged result meets the goal: run the checks and report what is shown to work and what is not.' }] },
   { id: 'review', label: 'Review', description: 'Independent code, security, and integration review.', members: [
-    { name: 'code-reviewer', role: 'gsd-code-reviewer', model: 'standard', tools: [...READ, 'Bash'], fallback: 'Review the changed files for bugs, security issues, and code quality problems. Report findings by severity with file:line.' },
+    { name: 'code-reviewer', role: 'gsd-code-reviewer', model: 'standard', tools: [...READ, 'Bash'], fallback: 'Review the changed files for bugs, security issues, and code quality problems, at the same time as the other reviewers. Your area is your report. Report findings by severity with file:line.' },
     { name: 'security-auditor', role: 'gsd-security-auditor', model: 'deep', tools: [...READ, 'Bash', 'SecurityScan'], fallback: 'Check that the threats the work faces are mitigated in the code. Report open threats with evidence.' },
-    { name: 'integration-checker', role: 'gsd-integration-checker', model: 'standard', tools: [...READ, 'Bash'], fallback: 'Check that the parts connect: follow each user flow end to end and report breaks.' }] },
+    { name: 'integration-checker', role: 'gsd-integration-checker', model: 'standard', tools: [...READ, 'Bash'], fallback: 'Check that the merged parts connect: follow each user flow end to end and report breaks.' }] },
   { id: 'writing', label: 'Writing', description: 'Write documentation and check it against the code.', members: [
-    { name: 'doc-writer', role: 'gsd-doc-writer', model: 'standard', tools: [...READ, ...WRITE, ...DOCS], fallback: 'Write or update the documentation the task asks for, matching the project\'s existing docs.' },
-    { name: 'doc-verifier', role: 'gsd-doc-verifier', model: 'standard', tools: [...READ, 'Bash'], fallback: 'Check every factual claim in the documentation against the code and report what is wrong.' }] },
-  { id: 'analysis', label: 'Analysis', description: 'Map the codebase and surface assumptions and patterns.', members: [
-    { name: 'mapper', role: 'gsd-codebase-mapper', model: 'fast', tools: [...READ, 'Write'], fallback: 'Explore the codebase and write a structured summary of its architecture, conventions, and concerns.' },
+    { name: 'doc-writer', role: 'gsd-doc-writer', model: 'standard', tools: [...READ, ...WRITE, ...DOCS], fallback: 'Write or update the documentation the task asks for, matching the project\'s existing docs. Your area is the documents you are given.' },
+    { name: 'doc-verifier', role: 'gsd-doc-verifier', model: 'standard', tools: [...READ, 'Bash'], fallback: 'Once the documentation is written, check the whole of it: every factual claim against the code. Report what is wrong.' }] },
+  { id: 'analysis', label: 'Analysis', description: 'Map the codebase and surface assumptions and patterns, each in its own report; the lead combines them.', members: [
+    { name: 'mapper', role: 'gsd-codebase-mapper', model: 'fast', tools: [...READ, 'Write'], fallback: 'Explore the codebase and write a structured summary of its architecture, conventions, and concerns. Your area is that summary.' },
     { name: 'assumptions', role: 'gsd-assumptions-analyzer', model: 'standard', tools: READ, fallback: 'List the assumptions the task depends on, with the evidence for each from the code.' },
     { name: 'patterns', role: 'gsd-pattern-mapper', model: 'fast', tools: READ, fallback: 'Find the closest existing patterns in the codebase for the new work and say where each lives.' }] }
 ];
@@ -333,8 +334,10 @@ export function reviewDraft(draft: TeamDraft, original: string | undefined, inpu
   });
   // 0.4.27: the free local team check (tools that do not match the instructions, no deliverable, overlaps, reports-to problems, keys) shows as
   // warnings while editing, so a save never depends on running Improve with AI.
-  warnings.push(...checkWarnings(checkTeam(draft, { defaultTools: DEFAULT_TOOLS })));
-  return { markdown, errors, warnings, members };
+  const findings = checkTeam(draft, { defaultTools: DEFAULT_TOOLS });
+  warnings.push(...checkWarnings(findings));
+  // Owner, 2026-11-18: whether members own separate areas and who brings their parts together, shown as notes so the person editing sees them.
+  return { markdown, errors, warnings, notes: checkNotes(findings), members };
 }
 
 /** A starting point's members (and description) as a draft. */

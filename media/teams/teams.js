@@ -10,7 +10,8 @@
     plus: 'M7.25 2h1.5v5.25H14v1.5H8.75V14h-1.5V8.75H2v-1.5h5.25z',
     warn: 'M8 1.5l7 12.5H1L8 1.5zm-.75 4.5v4h1.5V6h-1.5zm0 5v1.5h1.5V11h-1.5z',
     check: 'M6.2 11.6L2.6 8l1.1-1.1 2.5 2.5 6.1-6.1 1.1 1.1z',
-    error: 'M8 1a7 7 0 1 0 0 14A7 7 0 0 0 8 1zm2.8 8.7l-1.1 1.1L8 9.1l-1.7 1.7-1.1-1.1L6.9 8 5.2 6.3l1.1-1.1L8 6.9l1.7-1.7 1.1 1.1L9.1 8z'
+    error: 'M8 1a7 7 0 1 0 0 14A7 7 0 0 0 8 1zm2.8 8.7l-1.1 1.1L8 9.1l-1.7 1.7-1.1-1.1L6.9 8 5.2 6.3l1.1-1.1L8 6.9l1.7-1.7 1.1 1.1L9.1 8z',
+    info: 'M8 1a7 7 0 1 0 0 14A7 7 0 0 0 8 1zm-.75 3h1.5v1.5h-1.5V4zm0 3h1.5v5h-1.5V7z'
   };
   const STEPS = ['Purpose', 'Members', 'Models', 'Tools & permissions', 'Instructions & review'];
   const TABS = ['Purpose', 'Members', 'Models', 'Tools', 'Instructions', 'Team shape', 'Knowledge', 'Markdown & checks', 'History'];
@@ -1681,6 +1682,14 @@
         review.warnings.forEach((issue) => list.append(issueLine(issue, 'warning')));
         checks.append(el('p', review.errors.length ? 'error' : 'hint', review.errors.length ? review.errors.length + ' problem' + (review.errors.length === 1 ? '' : 's') + ' to fix before saving' + (review.warnings.length ? ', and ' + review.warnings.length + ' warning' + (review.warnings.length === 1 ? '' : 's') : '') + '.' : review.warnings.length + ' warning' + (review.warnings.length === 1 ? '' : 's') + '; you can still save.'), list);
       }
+      // Owner, 2026-11-18: advice on running members side by side (each with its own area) and on who brings their parts together. Notes, not
+      // problems: the team still saves and still shows Ready.
+      const notes = review && Array.isArray(review.notes) ? review.notes : [];
+      if (notes.length) {
+        const list = el('ul', 'issues notes');
+        notes.forEach((issue) => { const line = el('li', 'hint'); line.append(icon('info'), document.createTextNode(' ' + issue.message)); list.append(line); });
+        checks.append(el('p', 'hint', 'Suggestion' + (notes.length === 1 ? '' : 's') + ' for running members side by side (you can still save):'), list);
+      }
     }
     const preview = $('preview');
     if (preview) preview.textContent = review ? review.markdown : '';
@@ -2429,7 +2438,7 @@
       }
       case 'review':
         if (!work || message.seq !== seq) break;
-        work.review = { markdown: message.markdown, errors: message.errors, warnings: message.warnings, members: message.members };
+        work.review = { markdown: message.markdown, errors: message.errors, warnings: message.warnings, notes: Array.isArray(message.notes) ? message.notes : [], members: message.members };
         fillReview();
         updateDirty();
         break;
