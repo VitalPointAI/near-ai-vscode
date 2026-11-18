@@ -35,8 +35,44 @@ export function sha256Hex(text: string): string {
   return createHash('sha256').update(text, 'utf8').digest('hex');
 }
 
-/** Verifies one response. `get` performs an authenticated GET against the provider's /v1 base. */
-export async function verifyResponse(evidence: ResponseEvidence, model: string, get: (path: string) => Promise<unknown>, options: { nonce?: string; trustedRoot?: string; now?: Date } = {}): Promise<VerificationResult> {
+/** How long a verified attestation report counts for its signing address (A3): a long run checks each answer without asking for the report each time. */
+export const REPORT_CACHE_MS = 600_000;
+
+/** What a verified report proved for one signing address, and when. Never the report itself, the quote or a fingerprint. */
+interface CachedReport { readonly role: 'model' | 'gateway'; readonly gpuNonce: boolean | undefined; readonly at: number }
+
+/**
+ * Verified attestation reports by signing address, each counting for REPORT_CACHE_MS (10 minutes) from when it was checked, on an injected clock. A
+ * client owns one for the checks it runs after each answer; a person's Check again never uses it. Holds at most 64 addresses, the oldest dropped first.
+ */
+export class AttestationReportCache {
+  private readonly entries = new Map<string, CachedReport>();
+  public constructor(private readonly now: () => number = Date.now, private readonly maxEntries = 64) {}
+
+  /** The verified report for the address while it is younger than 10 minutes; undefined otherwise (and a clock that went back counts as expired). */
+  public get(address: string): CachedReport | undefined {
+    const key = address.toLowerCase();
+    const entry = this.entries.get(key);
+    if (entry === undefined) return undefined;
+    const age = this.now() - entry.at;
+    if (age >= 0 && age < REPORT_CACHE_MS) return entry;
+    this.entries.delete(key);
+    return undefined;
+  }
+
+  public set(address: string, entry: Omit<CachedReport, 'at'>): void {
+    const key = address.toLowerCase();
+    this.entries.delete(key);
+    this.entries.set(key, { ...entry, at: this.now() });
+    while (this.entries.size > this.maxEntries) this.entries.delete(this.entries.keys().next().value as string);
+  }
+}
+
+/**
+ * Verifies one response. `get` performs an authenticated GET against the provider's /v1 base. With `cache`, a signing address whose report was verified
+ * less than 10 minutes ago skips the report GET and the quote check, and the summary says the report was reused; a newly verified report is stored.
+ */
+export async function verifyResponse(evidence: ResponseEvidence, model: string, get: (path: string) => Promise<unknown>, options: { nonce?: string; trustedRoot?: string; now?: Date; cache?: AttestationReportCache } = {}): Promise<VerificationResult> {
   const nonce = options.nonce ?? randomBytes(32).toString('hex');
   const checks: VerificationResult['checks'] = {};
   const fail = (summary: string, signingAddress?: string): VerificationResult => ({ outcome: 'failed', summary, signingAddress, checks, notChecked: NOT_CHECKED_IN_EDITOR });
@@ -59,12 +95,21 @@ export async function verifyResponse(evidence: ResponseEvidence, model: string, 
   if (!checks.requestHash) return fail('The signed request hash does not match the request this editor sent.', address);
   if (!checks.responseHash) return fail('The signed response hash does not match the response this editor received.', address);
   if (!checks.signature) return fail('The signature does not match the signing address.', address);
+  const cached = options.cache?.get(address);
+  if (cached !== undefined) {
+    checks.genuineQuote = true;
+    checks.addressInQuote = true;
+    checks.nonceInQuote = true;
+    if (cached.gpuNonce !== undefined) checks.gpuNonce = cached.gpuNonce;
+    return { outcome: 'signed', summary: `Signed by ${cached.role === 'gateway' ? 'NEAR AI\'s gateway key' : 'the model\'s key'} ${address}. The genuine Intel TDX quote that binds that key was checked less than 10 minutes ago, and that report was reused.`, signingAddress: address, signer: cached.role, checks, notChecked: NOT_CHECKED_IN_EDITOR };
+  }
 
   let report: Record<string, unknown>;
   try {
     report = await get(`/attestation/report?model=${encodeURIComponent(model)}&nonce=${nonce}&signing_algo=ecdsa&signing_address=${encodeURIComponent(address)}`) as Record<string, unknown>;
   } catch (error) {
-    return fail(`The response is signed, but the attestation report could not be fetched (${(error as Error).message}).`, address);
+    // A report that cannot be fetched (offline, a timeout, an error answer) proves nothing either way: unavailable, never failed (D-55).
+    return { outcome: 'unavailable', summary: `The response is signed, but the attestation report could not be fetched (${(error as Error).message}).`, signingAddress: address, checks, notChecked: NOT_CHECKED_IN_EDITOR };
   }
   const candidates = attestationsIn(report);
   const match = candidates.find((item) => item.attestation.signing_address.toLowerCase() === address.toLowerCase());
@@ -86,6 +131,7 @@ export async function verifyResponse(evidence: ResponseEvidence, model: string, 
   if (!checks.addressInQuote) return fail('The TDX quote does not bind the key that signed this response.', address);
   if (!checks.nonceInQuote) return fail('The TDX quote does not contain this request\'s fresh nonce, so it may be replayed.', address);
   if (checks.gpuNonce === false) return fail('The GPU attestation does not contain this request\'s fresh nonce.', address);
+  options.cache?.set(address, { role: match.role, gpuNonce: checks.gpuNonce });
   return { outcome: 'signed', summary: `Signed by ${match.role === 'gateway' ? 'NEAR AI\'s gateway key' : 'the model\'s key'} ${address}. A genuine Intel TDX quote, fresh for this check, binds that key${checks.gpuNonce ? ', with matching GPU evidence' : ''}.`, signingAddress: address, signer: match.role, checks, notChecked: NOT_CHECKED_IN_EDITOR };
 }
 

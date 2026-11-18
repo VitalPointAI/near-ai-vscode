@@ -16,13 +16,21 @@ import type { Label } from '../domain/gate/labels';
 import { buildDecisionRecord } from '../domain/gate/record';
 import type { DecisionRecord } from '../domain/gate/record';
 import { routingWhileFailedClosed, tierForLabel } from '../domain/gate/routing';
-import type { RouteDecision, RouteFacts, RoutingTable } from '../domain/gate/routing';
+import type { RouteDecision, RouteEventId, RouteFacts, RoutingTable } from '../domain/gate/routing';
+import type { ResponseEvidence, VerificationResult } from '../services/attestation';
 import type { InferTier } from '../domain/gate/vocabulary';
 
-/** Shared by a chat and every route it builds, so a failed answer check stops attested-cloud for the chat and its helpers alike (plan 25 sets it). */
+/**
+ * Shared by a chat and every route it builds, so a failed answer check stops attested-cloud for the chat and its helpers alike (D-55). `closed` is set when
+ * the chat is closed or replaced: a check that settles after that sets nothing on it.
+ */
 export interface RouteAttestation {
   failed: boolean;
+  closed?: boolean;
 }
+
+/** What the client tells a route when the check after one of its answers settles: the answer's chat id, the result, and what was checked. */
+export type AnswerCheckListener = (chatId: string, result: VerificationResult, checked: { readonly model: string; readonly evidence: ResponseEvidence }) => void;
 
 export interface SessionRoute {
   /** The session's mark now. An empty mark means the policy's default label. */
@@ -36,6 +44,8 @@ export interface SessionRoute {
   readonly newRecordId?: () => string;
   readonly productVersion?: string;
   readonly attestation: RouteAttestation;
+  /** Told when the check after an answer at attested-cloud settles (D-36). Never awaited by a request. */
+  readonly onAnswerChecked?: AnswerCheckListener;
 }
 
 /** The empty mark: the session has read nothing above the policy's default label. */
@@ -45,7 +55,7 @@ const EMPTY_MARK: Mark = Object.freeze([]);
  * The route of one run, from its gate runtime: the runtime's policy, actor, sink and clock. `markOf` defaults to the empty mark (the default label);
  * plan 22 gives a chat's runs the chat's mark. `attestation` is the chat's shared object, so a sub-agent and its parent share one route state.
  */
-export function sessionRouteFrom(runtime: GateRuntime, options: { markOf?: () => Mark; attestation?: RouteAttestation } = {}): SessionRoute {
+export function sessionRouteFrom(runtime: GateRuntime, options: { markOf?: () => Mark; attestation?: RouteAttestation; onAnswerChecked?: AnswerCheckListener } = {}): SessionRoute {
   return {
     markOf: options.markOf ?? (() => EMPTY_MARK),
     bundleState: runtime.bundleState,
@@ -54,7 +64,8 @@ export function sessionRouteFrom(runtime: GateRuntime, options: { markOf?: () =>
     ...(runtime.clock === undefined ? {} : { clock: runtime.clock }),
     ...(runtime.newRecordId === undefined ? {} : { newRecordId: runtime.newRecordId }),
     ...(runtime.productVersion === undefined ? {} : { productVersion: runtime.productVersion }),
-    attestation: options.attestation ?? { failed: false }
+    attestation: options.attestation ?? { failed: false },
+    ...(options.onAnswerChecked === undefined ? {} : { onAnswerChecked: options.onAnswerChecked })
   };
 }
 
@@ -209,6 +220,43 @@ export function routeRecordFor(route: SessionRoute, decision: RouteDecision, fac
     ...(decided === undefined ? {} : { label: decided }),
     ...(marked ? { mark: context.mark } : {}),
     ...(decision.tier === 'attested-cloud' ? { connection: facts.binding?.state ?? 'unknown' } : {})
+  });
+}
+
+/** The fixed reason of each answer-check record: plain words, never a signing address, a report or a fingerprint. */
+const ANSWER_CHECK_REASONS: Readonly<Record<'verified' | 'failed' | 'unavailable', string>> = Object.freeze({
+  verified: 'The answer\'s signature and NEAR AI Cloud\'s attestation were checked after the answer and verified.',
+  failed: 'The answer\'s signature or NEAR AI Cloud\'s attestation did not check out, so NEAR AI Cloud\'s models do not count as private for this chat until Check again passes.',
+  unavailable: 'The answer\'s signature and attestation could not be checked (for example offline), so nothing changed.'
+});
+
+/**
+ * The record of an event about a session's routing (GATE-07): `route.attestation-checked` when the check after an answer at attested-cloud settles, and
+ * `route.attestation-cleared` when a person's Check again clears a failed one. The capability is `infer` at attested-cloud on NEAR AI Cloud with the
+ * model; `attestation` says what was found. Never a host, a signing address, a report or a fingerprint.
+ */
+export function routeEventRecordFor(route: SessionRoute, event: RouteEventId, request: { readonly model?: string; readonly attestation: 'verified' | 'failed' | 'unavailable' }): DecisionRecord {
+  const recordId = (route.newRecordId ?? randomUUID)();
+  const model = recordedModelName(request.model);
+  let bundleHash = '';
+  try { bundleHash = routingOf(route).bundleHash; } catch { /* no policy hash then */ }
+  const mark = (() => { try { return route.markOf(); } catch { return EMPTY_MARK; } })();
+  return buildDecisionRecord({
+    recordId,
+    sequence: 0,
+    time: clockOf(route),
+    productVersion: route.productVersion ?? UNKNOWN_PRODUCT_VERSION,
+    actor: route.actor,
+    model: { name: model, provider: 'near-ai' },
+    callId: `${event}-${recordId}`,
+    capability: { verb: 'infer', tier: 'attested-cloud', provider: 'near-ai', model },
+    resource: { name: model, type: 'model' },
+    outcome: 'allowed',
+    rule: event,
+    reason: event === 'route.attestation-cleared' ? 'A person\'s Check again passed, so NEAR AI Cloud\'s models count as private for this chat again.' : ANSWER_CHECK_REASONS[request.attestation],
+    bundleHash,
+    ...(mark.length === 0 ? {} : { mark }),
+    attestation: request.attestation
   });
 }
 

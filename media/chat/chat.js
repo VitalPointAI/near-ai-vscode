@@ -1500,8 +1500,10 @@
         break;
       }
       case 'response-verifiable': {
-        const node = lastReply && lastReply.node;
-        if (!node) break;
+        // Under the run's own answer when the page knows it (a check that failed later offers its row then), else under the newest answer.
+        const reply = (m.runId && replies.get(m.runId)) || lastReply;
+        const node = reply && reply.node;
+        if (!node || document.getElementById('verify-' + m.runId)) break;
         const row = el('div', 'verify');
         row.id = 'verify-' + m.runId;
         row.append(textButton('Verify signature', () => { row.replaceChildren(el('span', '', 'Checking NEAR\u2019s signature and attestation\u2026')); postFor({ type: 'verify-response', runId: m.runId }); }));
@@ -1516,6 +1518,8 @@
         const line = el('span', r.outcome === 'failed' ? 'verify-failed' : r.outcome === 'signed' ? 'verify-ok' : '', icon + (r.summary || ''));
         if (r.notChecked && r.notChecked.length) line.title = 'Not checked in the editor: ' + r.notChecked.join(', ') + '. For a full check use cloud.near.ai/verify or NEAR\u2019s nearai-cloud-verifier.';
         row.replaceChildren(line);
+        // A failed check stops private NEAR AI Cloud models for this chat until a fresh check passes: Check again runs one.
+        if (r.outcome === 'failed') row.append(textButton('Check again', () => { row.replaceChildren(el('span', '', 'Checking NEAR\u2019s signature and attestation again\u2026')); postFor({ type: 'verify-response', runId: m.runId }); }));
         announce(r.summary || 'Verification finished.');
         break;
       }

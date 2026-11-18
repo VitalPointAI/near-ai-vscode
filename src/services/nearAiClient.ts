@@ -1,12 +1,12 @@
 import { createHash } from 'node:crypto';
-import { sha256Hex, verifyResponse, type ResponseEvidence, type VerificationResult } from './attestation';
+import { AttestationReportCache, NOT_CHECKED_IN_EDITOR, sha256Hex, verifyResponse, type ResponseEvidence, type VerificationResult } from './attestation';
 import { isNearCloudEndpoint, isSecureEndpoint } from '../domain/config';
 import { bindingReason, decideRoute, routeCheckFailed, routingWhileFailedClosed } from '../domain/gate/routing';
 import type { ConnectionBindingFact, RouteDecision, RouteFacts, RouteRule, RoutingTable } from '../domain/gate/routing';
 import { SHIPPED_DEFAULT_LABEL } from '../domain/gate/bundle';
 import type { Label } from '../domain/gate/labels';
 import type { Mark } from '../domain/gate/dominance';
-import { currentSessionRoute, defaultSessionRoute, routeRecordFor, routingOf } from '../gate/sessionMark';
+import { currentSessionRoute, defaultSessionRoute, routeEventRecordFor, routeRecordFor, routingOf } from '../gate/sessionMark';
 import type { SessionRoute } from '../gate/sessionMark';
 import { ConnectionNotBoundError } from './connectionBinding';
 import type { ConnectionBindingSource } from './connectionBinding';
@@ -167,6 +167,8 @@ export interface NearAiClientOptions {
   binding?: ConnectionBindingSource;
   /** True when the session can use a local model instead of this client (a hybrid profile's NEAR client), so a refusal names the right fix. */
   localModelAvailable?: boolean;
+  /** For tests: the root the after-answer check trusts instead of Intel's, and the time it checks certificates at. Production leaves it unset. */
+  attestationTrust?: { trustedRoot?: string; now?: () => Date };
 }
 
 /**
@@ -218,6 +220,9 @@ export class RouteRefusedError extends Error {
     this.name = 'RouteRefusedError';
   }
 }
+
+/** How many after-answer checks a client keeps, by chat id: the newest 50. */
+export const ANSWER_CHECKS_KEPT = 50;
 
 /** A bound fact older than this (8 minutes) is checked again in the background, so it is renewed before it stops counting at 10 minutes. */
 export const BINDING_REFRESH_AFTER_MS = 480_000;
@@ -403,6 +408,12 @@ export class NearAiClient {
   private readonly connections = new WeakMap<Response, ConnectionBindingFact>();
   /** The binding refresh running for each host, at most one: a route check that finds the fact missing or old starts one, never waits for it (OFFL-01). */
   private readonly refreshing = new Map<string, Promise<void>>();
+  /** The route of each response its route check allowed at attested-cloud to NEAR AI Cloud: its answer is checked afterwards (D-36). */
+  private readonly attestedAnswers = new WeakMap<Response, SessionRoute>();
+  /** The check after each attested-cloud answer, by the answer's chat id, the newest ANSWER_CHECKS_KEPT. */
+  private readonly answerChecks = new Map<string, Promise<VerificationResult>>();
+  /** Verified attestation reports by signing address for 10 minutes, used only by the checks after each answer (A3). */
+  private readonly reportCache = new AttestationReportCache(() => this.now());
 
   public constructor(private readonly options: NearAiClientOptions) {
     this.fetchFn = options.fetchFn ?? fetch;
@@ -419,6 +430,11 @@ export class NearAiClient {
 
   /** The source that says whether this client's connection is proven to end inside private hardware, when it has one (D-50). */
   public get connectionBinding(): ConnectionBindingSource | undefined { return this.options.binding; }
+
+  /** The check after the attested-cloud answer with this chat id, while it is among the newest ANSWER_CHECKS_KEPT; undefined otherwise. */
+  public answerCheck(chatId: string): Promise<VerificationResult> | undefined {
+    return this.answerChecks.get(chatId);
+  }
 
   /** A private (TEE) model id from this client's cached catalog, or undefined while none is listed. Never fetches. */
   public cachedTeeModel(): string | undefined {
@@ -886,11 +902,14 @@ export class NearAiClient {
     }
     const toolCalls: ToolCall[] = calls.filter((call) => call.name).map((call, index) => ({ id: call.id || `call_${index}`, type: 'function', function: { name: call.name, arguments: call.arguments || '{}' } }));
     this.settleCharge(response, 'completed', usage);
+    const evidence: ResponseEvidence | undefined = chatId ? { chatId, requestHash: sha256Hex(requestBody), responseHash: rawResponse.digest('hex') } : undefined;
+    // D-36: an answer sent at attested-cloud is checked afterwards, in the background; nothing here or in the next decision waits for it (OFFL-01).
+    if (evidence !== undefined) this.checkAnswer(response, model, evidence);
     yield {
       type: 'done',
       message: { role: 'assistant', content: text || null, ...(toolCalls.length ? { tool_calls: toolCalls } : {}) },
       finishReason,
-      usage: { ...usage, latencyMs: Date.now() - started, ...(firstTokenAt !== undefined ? { firstTokenMs: firstTokenAt - started } : {}), reasoningChars, answerChars, ...(chatId ? { evidence: { chatId, requestHash: sha256Hex(requestBody), responseHash: rawResponse.digest('hex') } } : {}) }
+      usage: { ...usage, latencyMs: Date.now() - started, ...(firstTokenAt !== undefined ? { firstTokenMs: firstTokenAt - started } : {}), reasoningChars, answerChars, ...(evidence ? { evidence } : {}) }
     };
     } finally {
       // Stopped or broken off before the end: recorded with what arrived, and reconciled by its inference-id.
@@ -898,8 +917,41 @@ export class NearAiClient {
     }
   }
 
+  /**
+   * The check after an answer whose request the route check allowed at attested-cloud to NEAR AI Cloud (D-36, D-55): started here, never awaited. It goes
+   * through the 10-minute report cache. When it settles the route hears it, a failed one stops attested-cloud for the route's chat (unless the chat was
+   * closed), and route.attestation-checked is recorded with verified, failed or unavailable. Anything thrown is unavailable, never failed.
+   */
+  private checkAnswer(response: Response, model: string, evidence: ResponseEvidence): void {
+    const route = this.attestedAnswers.get(response);
+    if (route === undefined) return;
+    this.attestedAnswers.delete(response);
+    const check = verifyResponse(evidence, model, (path) => this.getJson(path), { cache: this.reportCache, ...this.trustOptions() })
+      .catch((error: unknown): VerificationResult => ({ outcome: 'unavailable', summary: `The answer could not be checked (${error instanceof Error ? error.message : 'unknown error'}).`, checks: {}, notChecked: NOT_CHECKED_IN_EDITOR }));
+    this.answerChecks.delete(evidence.chatId);
+    this.answerChecks.set(evidence.chatId, check);
+    while (this.answerChecks.size > ANSWER_CHECKS_KEPT) this.answerChecks.delete(this.answerChecks.keys().next().value as string);
+    void check.then((result) => {
+      const attestation = result.outcome === 'signed' ? 'verified' : result.outcome;
+      if (attestation === 'failed') {
+        try {
+          const state = route.attestation;
+          if (state !== undefined && state.closed !== true) state.failed = true;
+        } catch { /* a state that cannot be set is read as unproven, which never counts as bound */ }
+      }
+      try { route.onAnswerChecked?.(evidence.chatId, result, { model, evidence }); } catch { /* a listener never changes the check */ }
+      try { route.sink?.record(routeEventRecordFor(route, 'route.attestation-checked', { model, attestation })); } catch { /* D-21 */ }
+    });
+  }
+
+  /** The trust the checks use: Intel's root and the system clock, unless a test set `attestationTrust`. */
+  private trustOptions(): { trustedRoot?: string; now?: Date } {
+    const trust = this.options.attestationTrust;
+    return { ...(trust?.trustedRoot === undefined ? {} : { trustedRoot: trust.trustedRoot }), ...(trust?.now === undefined ? {} : { now: trust.now() }) };
+  }
+
   /** Checks NEAR's signature and attestation for a completion this client received. */
-  public async verifyResponse(model: string, evidence: ResponseEvidence, signal?: AbortSignal, trust: { trustedRoot?: string; now?: Date } = {}): Promise<VerificationResult> {
+  public async verifyResponse(model: string, evidence: ResponseEvidence, signal?: AbortSignal, trust: { trustedRoot?: string; now?: Date } = this.trustOptions()): Promise<VerificationResult> {
     return verifyResponse(evidence, model, (path) => this.getJson(path, signal), trust);
   }
 
@@ -1194,6 +1246,7 @@ export class NearAiClient {
         if (response.ok) {
           if (model) this.cooling.delete(model);
           if (connection !== undefined) this.connections.set(response, connection);
+          if (check?.pinned !== undefined) this.attestedAnswers.set(response, check.route);
           if (billable) this.charge(path, init, model, overrides.spendKind, response, 'open');
           // A stream keeps the caller's stop wired to the connection while its body is read, and its
           // reader can close the connection itself when the stream stalls; the reader releases it.

@@ -6,8 +6,8 @@ import * as path from 'node:path';
 import { RunCheckpoints } from '../agent/checkpoints';
 import { compactConversation, contextAction, contextStatus, DEFAULT_COMPACT_AT_TOKENS, DEFAULT_CONTEXT_WINDOW, DEFAULT_THRESHOLDS, estimateTokens, trimOldToolResults } from '../agent/context';
 import type { GateHost } from '../gate/host';
-import { currentSessionRoute, defaultSessionRoute, sessionRouteFrom, withSessionRoute } from '../gate/sessionMark';
-import type { RouteAttestation } from '../gate/sessionMark';
+import { currentSessionRoute, defaultSessionRoute, routeEventRecordFor, sessionRouteFrom, withSessionRoute } from '../gate/sessionMark';
+import type { AnswerCheckListener, RouteAttestation, SessionRoute } from '../gate/sessionMark';
 import { approveFloorCallLate, endFloorApprovals, recordLateApproval, unavailableGateRuntime } from '../agent/gateAdapter';
 import { projectLabelOf, scalesOf } from '../agent/gateLabels';
 import { OutboundFingerprints } from '../agent/outboundCheck';
@@ -260,10 +260,17 @@ export const UNREADABLE_CHAT_LABEL_TEXT =
 export class AgentConversation {
   private messages: AgentMessage[] = [];
   /**
-   * The chat's one attestation state (CLAS-06): every session route this conversation builds (its runs, their sub-agents, its attachment reads) shares
-   * it, so an answer check that fails stops attested-cloud for the chat and its helpers alike (plan 25 sets it).
+   * The chat's one attestation state (CLAS-06, D-55): every session route this conversation builds (its runs, their sub-agents, its attachment reads)
+   * shares it, so an answer check that fails stops attested-cloud for the chat and its helpers alike. A new chat or a reopened one gets a fresh state, and
+   * the old one is marked closed, so a check that settles late sets nothing on the chat that replaced it.
    */
-  public readonly routeAttestation: RouteAttestation = { failed: false };
+  private chatAttestation: RouteAttestation = { failed: false };
+  public get routeAttestation(): RouteAttestation { return this.chatAttestation; }
+  /**
+   * The checks after each run's attested-cloud answers (D-36, D-55), by run id, the newest 50: the failed ones (what Check again checks afresh), the result
+   * for the run's final answer, and the run's route (where Check again's record goes).
+   */
+  private readonly answerChecks = new Map<string, { route: SessionRoute; failed: Map<string, { model: string; evidence: ResponseEvidence; client: NearAiClient }>; results: Map<string, VerificationResult> }>();
   /**
    * The chat's high-water mark (CLAS-04, D-29, D-54): set at the project's resolved label when the chat's first run starts (or at its stored mark when it
    * was reopened), raised by what any of its agents read, and read by every session route of the chat before each model request. It only rises; the
@@ -611,7 +618,11 @@ export class AgentConversation {
         // Every NEAR request the run makes (sub-agents, safety checks, summaries included) is tagged with it.
         // CLAS-06: and every one of them is routed by the run's session route, decided at the client before anything is sent and recorded in the run's log.
         // With no gate host (a test) the run is wrapped in the default route, so the call is wrapped either way (PR 4a review).
-        const runRoute = gate ? sessionRouteFrom(gate, { attestation: this.routeAttestation, markOf: () => mark.current() }) : defaultSessionRoute();
+        const attestation = this.chatAttestation;
+        let routeOfRun: SessionRoute | undefined;
+        const onAnswerChecked: AnswerCheckListener = (chatId, result, checked) => { if (routeOfRun) this.answerChecked(runId, routeOfRun, attestation, chatId, result, { ...checked, client: request.client }); };
+        const runRoute = gate ? sessionRouteFrom(gate, { attestation, markOf: () => mark.current(), onAnswerChecked }) : defaultSessionRoute();
+        routeOfRun = runRoute;
         result = await withSpendTag({ kind: 'main', runId, conversationId: this.conversationId, agentId: mainId }, () => withSessionRoute(runRoute, () => run.run(this.messages, abort.signal)));
       } catch (error) {
         this.activity?.agentEnded(mainId, 'failed', error instanceof Error ? error.message : String(error));
@@ -649,6 +660,9 @@ export class AgentConversation {
           this.verifiable.set(runId, { model: request.model, evidence, client: request.client });
           for (const old of [...this.verifiable.keys()].slice(0, -20)) this.verifiable.delete(old);
           this.post({ type: 'response-verifiable', runId });
+          // A check after an answer of this run that settled while it ran is shown now: a failed one first, so its row offers Check again.
+          const shown = this.shownCheck(runId, evidence.chatId);
+          if (shown) this.post({ type: 'response-verification', runId, result: shown });
         }
       }
       if (changed.length) this.post({ type: 'run-changes', runId, files: changed });
@@ -827,11 +841,70 @@ export class AgentConversation {
     consumeInterrupt: () => { this.interrupting = false; }
   };
 
-  /** Checks NEAR's signature and TDX attestation for a run's final answer. */
+  /**
+   * Checks NEAR's signature and TDX attestation for a run's final answer, always afresh (never the 10-minute report cache). When a check after one of this
+   * run's answers had failed (D-55), Check again checks each of those answers afresh: when every one is signed, the chat's stop is cleared (if no other run
+   * of the chat still has a failed check) and route.attestation-cleared is recorded; a fresh result that fails again leaves the stop.
+   */
   public async verifyRun(runId: string): Promise<VerificationResult> {
+    const checks = this.answerChecks.get(runId);
+    if (checks && checks.failed.size > 0) {
+      const attestation = this.chatAttestation;
+      let last: VerificationResult | undefined;
+      let model = '';
+      for (const [chatId, failed] of [...checks.failed]) {
+        model = failed.model;
+        last = await failed.client.verifyResponse(failed.model, failed.evidence);
+        if (last.outcome !== 'signed') return last;
+        checks.failed.delete(chatId);
+        checks.results.set(chatId, last);
+      }
+      const stillFailed = [...this.answerChecks.values()].some((entry) => entry.failed.size > 0);
+      if (!stillFailed && attestation === this.chatAttestation && attestation.closed !== true && attestation.failed) {
+        attestation.failed = false;
+        try { checks.route.sink?.record(routeEventRecordFor(checks.route, 'route.attestation-cleared', { model, attestation: 'verified' })); } catch { /* D-21 */ }
+      }
+      const entry = this.verifiable.get(runId);
+      return entry && checks.results.has(entry.evidence.chatId) ? checks.results.get(entry.evidence.chatId)! : last!;
+    }
     const entry = this.verifiable.get(runId);
     if (!entry) return { outcome: 'unavailable', summary: 'This response can no longer be verified from the editor (only the last 20 are kept).', checks: {}, notChecked: NOT_CHECKED_IN_EDITOR };
     return entry.client.verifyResponse(entry.model, entry.evidence);
+  }
+
+  /**
+   * The check after one of a run's attested-cloud answers settled (D-36, D-55). For a closed or replaced chat nothing is posted or set. A failed check is
+   * kept for Check again; the result is shown under the run's answer when the run's row is there (a failed one under that row even when it was for an
+   * earlier turn), or when the run ends.
+   */
+  private answerChecked(runId: string, route: SessionRoute, attestation: RouteAttestation, chatId: string, result: VerificationResult, checked: { model: string; evidence: ResponseEvidence; client: NearAiClient }): void {
+    if (attestation !== this.chatAttestation || attestation.closed === true) return;
+    let checks = this.answerChecks.get(runId);
+    if (!checks) {
+      checks = { route, failed: new Map(), results: new Map() };
+      this.answerChecks.set(runId, checks);
+      for (const old of [...this.answerChecks.keys()].slice(0, -50)) this.answerChecks.delete(old);
+    }
+    checks.results.set(chatId, result);
+    if (result.outcome === 'failed') checks.failed.set(chatId, checked);
+    const entry = this.verifiable.get(runId);
+    if (entry) {
+      // The run has ended and its row is there: its final answer's result, or any failure of the run, is shown on it.
+      if (entry.evidence.chatId === chatId || result.outcome === 'failed') this.post({ type: 'response-verification', runId, result });
+    } else if (result.outcome === 'failed' && this.currentRunId !== runId) {
+      // A run that ended with no row (for example its final answer carried no evidence) gets one, so the failure can be checked again from it.
+      this.verifiable.set(runId, checked);
+      this.post({ type: 'response-verifiable', runId });
+      this.post({ type: 'response-verification', runId, result });
+    }
+  }
+
+  /** What a run's row shows when the run ends: a failed check of any of its answers, else its final answer's result, else nothing yet. */
+  private shownCheck(runId: string, finalChatId: string): VerificationResult | undefined {
+    const checks = this.answerChecks.get(runId);
+    if (!checks) return undefined;
+    const failed = [...checks.failed.keys()][0];
+    return failed !== undefined ? checks.results.get(failed) : checks.results.get(finalChatId);
   }
 
   /** Undoes every file change a run made with the file tools. */
@@ -926,6 +999,10 @@ export class AgentConversation {
     // A new chat starts with no mark (its first run sets it at the project's label) and no fingerprints.
     this.outboundPrints = new OutboundFingerprints();
     this.adoptMark(undefined);
+    // ...and without the stop of a failed answer check (D-55): the old state is closed, so a check of the old chat that settles later sets nothing.
+    this.chatAttestation.closed = true;
+    this.chatAttestation = { failed: false };
+    this.answerChecks.clear();
   }
 
   public dispose(): void { this.reset(); }
@@ -1252,7 +1329,7 @@ export class AgentConversation {
             // The sub-agent's own route names it in its records, and shares the parent's mark and attestation state, so a helper is routed as its lead is
             // (research 9.1); outside a parent route (a test) it starts from the chat's own state.
             const parentRoute = currentSessionRoute();
-            const childRoute = childGate ? sessionRouteFrom(childGate, { ...(parentRoute ? { markOf: parentRoute.markOf } : {}), attestation: parentRoute?.attestation ?? this.routeAttestation }) : parentRoute ?? defaultSessionRoute();
+            const childRoute = childGate ? sessionRouteFrom(childGate, { ...(parentRoute ? { markOf: parentRoute.markOf } : {}), attestation: parentRoute?.attestation ?? this.routeAttestation, ...(parentRoute?.onAnswerChecked ? { onAnswerChecked: parentRoute.onAnswerChecked } : {}) }) : parentRoute ?? defaultSessionRoute();
             const childMessages: AgentMessage[] = [{ role: 'system', content: system }, { role: 'user', content: spawn.prompt }];
             const result = await withSpendTag({ kind: 'sub-agent', agentId: agent.id }, () => withSessionRoute(childRoute, () => child.run(childMessages, agent.abort.signal)));
             this.activity?.agentEnded(agent.id, result.outcome);
