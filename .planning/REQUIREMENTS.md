@@ -1,16 +1,17 @@
 # Requirements: Near AI for VSCode
 
-## Milestone v0.7.0: Governed agent platform (Phases 68-74), and the messaging relay (Phases 75-84)
+## Milestone v0.5.0: Governed agent platform (Phases 68-74), and v0.7.0 Messaging relay (Phases 75-84)
 
 **Defined:** 2026-11-13 (relay). **Replanned:** 2026-11-15 from the owner's platform direction (`.planning/PROJECT.md`, "Platform direction"): the identity and governance core was added, the relay requirements were re-mapped to renumbered phases, and new groups were added (TMR, GATE, OFFL, DLGT, EXEC, CRED, CTRT, CHAN, PAIR, APRV).
 **Amended:** 2026-11-15 with the identity, credential and classification design the owner approved (`.planning/PROJECT.md`, Platform direction decisions 8-13; evidence in `.planning/research/platform-direction/identity-research.md`): CLAS (classification labels and routing, Phase 70) and VCRD (verifiable credentials, Phase 71) added, DLGT-08 added, DLGT-01, DLGT-03, DLGT-07, OFFL-03, OFFL-04 and IDNT-05 revised, and the L4 and L5 drafts revised for roots-only anchoring, the confidential backend interface, HQ's roles and the per-level maximum offline age.
 **Amended:** 2026-11-16 by the owner: CLAS-08 (the trust badge) added and CLAS-05 ratified; then the agent authorization decisions (`.planning/PROJECT.md`, Platform direction decisions 14-17; evidence in `.planning/research/platform-direction/agent-authz-prior-art.md`): CRED-08 added to Phase 73, CLAS-08 notes the automatic check, and L4 drafts ANCH-09 … ANCH-15 added for NEAR function-call access keys on agents' and nodes' on-chain calls only.
-**Split:** 2026-11-18 (owner, data platform decision 2): the relay requirements of Phases 75 to 84 (AUTH, CHAN, IDNT, PAIR, RUNL, CMND, APRV, GRP, BUDG, TEAM, SETUP, SGNL, TGRM, OPS, EXEC-11 and CTRT-07) now belong to the separate Messaging relay milestone, which runs after the data platform milestone. Their ids, text and phase mappings are unchanged, so they stay in this section and its traceability table. v0.7.0 keeps Phases 68 to 74 (67 requirements; RELAY-01 … RELAY-04 stay with Phase 68, which shipped as v0.7.0 Phase 68) and the relay milestone holds 67.
-**Core value:** Every agent works under a governance layer a person can see and check, deciding offline from a signed local policy; and (now the messaging relay milestone) a person in a Microsoft Teams, Signal or Telegram chat asks the team for something and the answer arrives where they already are, without VS Code. The group sees only the finished result, the working thread stays private to whoever asked, and every relay run executes under a contract in a sandbox.
+**Split:** 2026-11-18 (owner, data platform decision 2): the relay requirements of Phases 75 to 84 (AUTH, CHAN, IDNT, PAIR, RUNL, CMND, APRV, GRP, BUDG, TEAM, SETUP, SGNL, TGRM, OPS, EXEC-11 and CTRT-07) now belong to the separate milestone v0.7.0 Messaging relay, which runs after v0.6.0 Data platform. Their ids, text and phase mappings are unchanged, so they stay in this section and its traceability table. v0.5.0 keeps Phases 68 to 74 (67 requirements; RELAY-01 … RELAY-04 stay with Phase 68, which shipped as "v0.7.0 Phase 68", now v0.5.0) and the relay milestone holds 67.
+**Renumbered:** 2026-11-18 (owner: "considering we are on 0.4 now, lower the rest to start at 0.5"): the governed agent platform, v0.7.0 until then, is v0.5.0; the data platform is v0.6.0 and the messaging relay v0.7.0. No id, text or phase mapping changed.
+**Core value:** Every agent works under a governance layer a person can see and check, deciding offline from a signed local policy; and (now v0.7.0 Messaging relay) a person in a Microsoft Teams, Signal or Telegram chat asks the team for something and the answer arrives where they already are, without VS Code. The group sees only the finished result, the working thread stays private to whoever asked, and every relay run executes under a contract in a sandbox.
 
-> **What "relay" means here.** The new messaging relay at `relay/`: receive a chat message, drive an existing agent team, post the result back. **Not** the paused v0.5.0 ciphertext sync relay (RELAY-01/02, archived in `.planning/milestones/v0.5.0-paused/`) and **not** the planned `relayTransport.ts` board sync on the unmerged Team Mode branch. Those are separate, deliberate, unrelated work.
+> **What "relay" means here.** The new messaging relay at `relay/`: receive a chat message, drive an existing agent team, post the result back. **Not** the ciphertext sync relay of the paused former v0.5.0 knowledge-base plan (RELAY-01/02, archived in `.planning/milestones/v0.5.0-paused/`) and **not** the planned `relayTransport.ts` board sync on the unmerged Team Mode branch. Those are separate, deliberate, unrelated work.
 
-> **Id collisions with v0.6.0.** The Team Mode requirements on `feat/team-fix-pass` use TEAM-01..04 (team and identity) and SETUP-01 (guided project setup) with other meanings. In this file TEAM-xx is the Teams channel and SETUP-xx the Messaging setup view; carried v0.6.0 ids take a `TM-` prefix (TMR-04).
+> **Id collisions with the former v0.6.0 Team Mode branch plan.** The Team Mode requirements on `feat/team-fix-pass` use TEAM-01..04 (team and identity) and SETUP-01 (guided project setup) with other meanings. In this file TEAM-xx is the Teams channel and SETUP-xx the Messaging setup view; its carried ids take a `TM-` prefix (TMR-04).
 
 > **Two kinds of credential.** CRED-xx (Phase 73, credential broker) are secrets such as API keys that agents use by handle and never hold. VCRD-xx (Phase 71) are W3C Verifiable Credentials: signed statements about an identity's authority, clearance, roles and compartments. The prefixes differ on purpose.
 
@@ -24,9 +25,9 @@
 ### Team Mode reconciliation (Phase 69)
 
 - [x] **TMR-01**: Before any code moves, `feat/team-fix-pass` is preserved on GitHub as an archive branch and the uncommitted files in its legacy worktree are committed or recorded.
-- [x] **TMR-02**: The Team Mode core verified in v0.6.0 Phase 60 (device identities held in SecretStorage, canonical JSON, the signed append-only event envelope with Lamport ordering, event validation, the deterministic materializer, the role-by-action permission matrix, the git coordination transport and the roster) runs on current `main`, re-verified against Phase 60's success criteria, in `src/domain/team/` and `src/team/` with no `vscode` import and no new runtime dependency.
+- [x] **TMR-02**: The Team Mode core verified in Phase 60 of the former v0.6.0 Team Mode branch plan (device identities held in SecretStorage, canonical JSON, the signed append-only event envelope with Lamport ordering, event validation, the deterministic materializer, the role-by-action permission matrix, the git coordination transport and the roster) runs on current `main`, re-verified against Phase 60's success criteria, in `src/domain/team/` and `src/team/` with no `vscode` import and no new runtime dependency.
 - [x] **TMR-03**: A project with no team file behaves exactly as before, the full suite stays green, and a canary test proves no secret reaches the coordination log, `team.json`, settings or audit.
-- [x] **TMR-04**: Every v0.6.0 phase and requirement has a recorded disposition (landed in Phase 69, carried to the Team Mode milestone, folded into a named v0.7.0 phase, or retired), and carried ids that collide with v0.7.0 ids take a `TM-` prefix.
+- [x] **TMR-04**: Every phase and requirement of the former v0.6.0 Team Mode branch plan has a recorded disposition (landed in Phase 69, carried to the Team Mode milestone, folded into a named phase of the then v0.7.0 plan, or retired), and carried ids that collide with live ids take a `TM-` prefix.
 - [x] **TMR-05**: A person's device identity signs and verifies any canonical payload through one interface (policy bundles, grants, approval answers), and key rotation and revocation are signed events that later checks honour.
 
 ### Capability gate and manifests (Phase 70)
@@ -225,8 +226,8 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| RELAY-01 | Phase 68: Relay foundation *(v0.7.0 RELAY-01: not the archived v0.5.0 ciphertext-sync RELAY-01)* | Complete |
-| RELAY-02 | Phase 68: Relay foundation *(v0.7.0 RELAY-02: not the archived v0.5.0 ciphertext-sync RELAY-02)* | Complete |
+| RELAY-01 | Phase 68: Relay foundation *(Phase 68 RELAY-01: not the archived ciphertext-sync RELAY-01 of the former v0.5.0 knowledge-base plan)* | Complete |
+| RELAY-02 | Phase 68: Relay foundation *(Phase 68 RELAY-02: not the archived ciphertext-sync RELAY-02 of the former v0.5.0 knowledge-base plan)* | Complete |
 | RELAY-03 | Phase 68: Relay foundation | Complete |
 | RELAY-04 | Phase 68: Relay foundation | Complete |
 | TMR-01 | Phase 69: Team Mode reconciliation | Complete |
@@ -361,14 +362,14 @@
 | OPS-06 | Phase 84: Ops, onboarding and release | Pending |
 | OPS-07 | Phase 84: Ops, onboarding and release | Pending |
 
-Coverage: 134 of 134 active v0.7.0 requirements mapped, each to exactly one phase (Phase 68: 4 complete; Phases 69-84: 130 pending). RUNL-05 is retired. Amended 2026-11-15 with the identity design: CLAS-01 … CLAS-07 added to Phase 70, DLGT-08 and VCRD-01 … VCRD-07 added to Phase 71 (117 to 132); nothing was re-mapped. Amended 2026-11-16 by the owner: CLAS-08 (the trust badge) added to Phase 70 and CLAS-05 ratified with the pre-send connection check (132 to 133). Amended 2026-11-16 with the owner's agent authorization decisions: CRED-08 (signed, request-bound invocations checked by the broker) added to Phase 73 (133 to 134); nothing was re-mapped, and the L4 drafts ANCH-09 … ANCH-15 are not counted. Re-mapped on 2026-11-15 from the old numbering: AUTH from 69 to 75, IDNT from 70 to 76, RUNL-01/03 and TEAM from 71 to 77, SETUP from 71.1 to 78, BUDG from 72 to 79, RUNL-02/04/06/07 and CMND from 73 to 80, GRP from 74 to 81, SGNL from 75 to 82, TGRM from 75.1 to 83, OPS from 76 to 84. Split on 2026-11-18 with no re-mapping: 67 in v0.7.0 (Phases 68-74) and 67 in the messaging relay milestone (Phases 75-84).
+Coverage: 134 of 134 active requirements of v0.5.0 and v0.7.0 Messaging relay (one milestone, numbered v0.7.0, until 2026-11-18) mapped, each to exactly one phase (Phase 68: 4 complete; Phases 69-84: 130 pending). RUNL-05 is retired. Amended 2026-11-15 with the identity design: CLAS-01 … CLAS-07 added to Phase 70, DLGT-08 and VCRD-01 … VCRD-07 added to Phase 71 (117 to 132); nothing was re-mapped. Amended 2026-11-16 by the owner: CLAS-08 (the trust badge) added to Phase 70 and CLAS-05 ratified with the pre-send connection check (132 to 133). Amended 2026-11-16 with the owner's agent authorization decisions: CRED-08 (signed, request-bound invocations checked by the broker) added to Phase 73 (133 to 134); nothing was re-mapped, and the L4 drafts ANCH-09 … ANCH-15 are not counted. Re-mapped on 2026-11-15 from the old numbering: AUTH from 69 to 75, IDNT from 70 to 76, RUNL-01/03 and TEAM from 71 to 77, SETUP from 71.1 to 78, BUDG from 72 to 79, RUNL-02/04/06/07 and CMND from 73 to 80, GRP from 74 to 81, SGNL from 75 to 82, TGRM from 75.1 to 83, OPS from 76 to 84. Split on 2026-11-18 with no re-mapping: 67 in v0.5.0 Governed agent platform (Phases 68-74) and 67 in v0.7.0 Messaging relay (Phases 75-84).
 
-## Milestone: Data platform (Phases 85-101)
+## Milestone v0.6.0: Data platform (Phases 85-101)
 
 **Defined:** 2026-11-18 from the owner's requirements R1 to R11 and the design built on them (`.planning/research/data-platform/00-DESIGN.md`), which the owner accepted the same day: decisions 1 to 13 and the 32 settled-in-design choices as recommended, decision 14 changed to one-click connection, and collectors that are simple to install added. The draft (`01-DRAFT-MILESTONE.md`) had 106 requirements; adoption added SPIKE-09, CONN-01 … CONN-04, COLL-01 … COLL-06, KB-15 and FAC-09, and revised SPIKE-01, DATA-14, DATA-17, DATA-20, DSEC-10 and FAC-06 (119). Version set by the owner when the milestone starts.
 **Core value:** Once installed, the platform finds your organization's data wherever it lives, keeps it in sync, describes and labels every item, and lets people and agents use it (search, ask, reports, specialists trained on your organization's own machines) only within their clearance and the source's own permissions, with people asked only on real exceptions.
 
-> **Prefixes.** DSEC (data-centric security), not SEC: SEC-01 … SEC-04 are carried v0.6.0 Team Mode ids, and the paused v0.5.0 used SEC as well. CONN (one-click connection) is not CRED (Phase 73's credential broker) or VCRD (Phase 71's verifiable credentials). None of SPIKE, DATA, CONN, COLL, TAG, DSEC, MARK, HOLD, KB, FAC and OPP is used anywhere else in the plan or in the paused v0.5.0 archive. SPIKE-01 and SPIKE-02 build the lasting host (L1a), not a throwaway.
+> **Prefixes.** DSEC (data-centric security), not SEC: SEC-01 … SEC-04 are carried ids of the former v0.6.0 Team Mode branch plan, and the paused former v0.5.0 knowledge-base plan used SEC as well. CONN (one-click connection) is not CRED (Phase 73's credential broker) or VCRD (Phase 71's verifiable credentials). None of SPIKE, DATA, CONN, COLL, TAG, DSEC, MARK, HOLD, KB, FAC and OPP is used anywhere else in the plan or in the archive of the paused former v0.5.0 knowledge-base plan. SPIKE-01 and SPIKE-02 build the lasting host (L1a), not a throwaway.
 
 > **Decisions.** "Decision N" means decision N of the design's section 10.1, as the owner answered it on 2026-11-18 (the roadmap's data platform section has a table of them).
 
@@ -652,7 +653,7 @@ Added 2026-11-18 (owner: collectors must be super simple to install).
 | OPP-06 | Phase 99: Opportunity agent, data-gap planning and specialists from organization data | Pending |
 | OPP-07 | Phase 99: Opportunity agent, data-gap planning and specialists from organization data | Pending |
 
-Coverage: 119 of 119 data platform requirements mapped, each to exactly one phase, all pending (SPIKE 9, DATA 33, CONN 4, COLL 6, TAG 8, DSEC 13, MARK 5, HOLD 10, KB 15, FAC 9, OPP 7; 17 phases). Nothing in v0.7.0 or the messaging relay was re-mapped.
+Coverage: 119 of 119 data platform requirements mapped, each to exactly one phase, all pending (SPIKE 9, DATA 33, CONN 4, COLL 6, TAG 8, DSEC 13, MARK 5, HOLD 10, KB 15, FAC 9, OPP 7; 17 phases). Nothing in v0.5.0 or v0.7.0 was re-mapped.
 
 ## Phase 25 requirements: Cybersecurity harness (milestone v0.8.0)
 
@@ -688,7 +689,7 @@ Coverage: 119 of 119 data platform requirements mapped, each to exactly one phas
 
 ---
 
-The v0.5.0 requirements (55, trusted-source knowledge base) are archived with the paused milestone in `.planning/milestones/v0.5.0-paused/REQUIREMENTS.md`. Its knowledge base returns as the viewing layer of the data platform milestone (owner, 2026-11-18): the data platform requirements above take over from its ids, and ROADMAP.md (data platform section) records what happened to each paused phase.
+The 55 requirements of the former v0.5.0 knowledge-base plan (trusted-source knowledge base, paused, its number reassigned on 2026-11-18) are archived in `.planning/milestones/v0.5.0-paused/REQUIREMENTS.md`. Its knowledge base returns as the viewing layer of v0.6.0 Data platform (owner, 2026-11-18): the data platform requirements above take over from its ids, and ROADMAP.md (data platform section) records what happened to each paused phase.
 
 ## Phase 26 requirements: Performance — faster agent and research runs
 
@@ -763,7 +764,7 @@ Drafted 2026-11-15 with the outlines in ROADMAP.md, "Later milestones". Ids are 
 
 ### L1 Theia appliance and local inference on one machine
 
-Split 2026-11-18 (owner, data platform decision 1): L1a, the host and local inference, is built in the data platform milestone (Phase 85 and the host parts of Phase 88), where SPIKE-01 and SPIKE-02 meet the AMD and amd64 half of APPL-02, APPL-03 and APPL-05 and the single-machine half of INFR-01 and INFR-03. Everything else below is L1b, the Theia appliance, and stays a later milestone.
+Split 2026-11-18 (owner, data platform decision 1): L1a, the host and local inference, is built in v0.6.0 Data platform (Phase 85 and the host parts of Phase 88), where SPIKE-01 and SPIKE-02 meet the AMD and amd64 half of APPL-02, APPL-03 and APPL-05 and the single-machine half of INFR-01 and INFR-03. Everything else below is L1b, the Theia appliance, and stays a later milestone.
 
 - **APPL-01**: One Compose stack holds Theia in the browser, the agent engine, the relay, a local inference service and an optional OpenShell gateway on the host side; it replaces today's code-server setup, and the current VSIX bridges the first release.
 - **APPL-02**: Images build for arm64 (DGX Spark class GB10) and amd64 (Strix Halo class) from one definition, pinned by manifest-list digest, and install offline from a signed bundle with checksums.
@@ -777,7 +778,7 @@ Split 2026-11-18 (owner, data platform decision 1): L1a, the host and local infe
 
 ### L2 Team Mode on the governed core
 
-- Carried from v0.6.0 (text on the archived `feat/team-fix-pass`, ids prefixed where they collide): TM-TEAM-02, TM-TEAM-03, BOARD-01 … BOARD-04, ASSIGN-01 … ASSIGN-03, CLAIM-01 … CLAIM-05, INTEG-01 … INTEG-03, BUDGET-01 … BUDGET-05, METRIC-01, COLLAB-01, COLLAB-02, SEC-02, SEC-03, FLOW-01, TM-SETUP-01, UX-01. TM-TEAM-01, TM-TEAM-04, SEC-01 and SEC-04 land with Phase 69 (TMR-02, TMR-03). Phase 69 records each disposition (TMR-04). Record: `.planning/research/v0.6.0-disposition.md`.
+- Carried from the former v0.6.0 Team Mode branch plan (text on the archived `feat/team-fix-pass`, ids prefixed where they collide): TM-TEAM-02, TM-TEAM-03, BOARD-01 … BOARD-04, ASSIGN-01 … ASSIGN-03, CLAIM-01 … CLAIM-05, INTEG-01 … INTEG-03, BUDGET-01 … BUDGET-05, METRIC-01, COLLAB-01, COLLAB-02, SEC-02, SEC-03, FLOW-01, TM-SETUP-01, UX-01. TM-TEAM-01, TM-TEAM-04, SEC-01 and SEC-04 land with Phase 69 (TMR-02, TMR-03). Phase 69 records each disposition (TMR-04). Record: `.planning/research/v0.6.0-disposition.md`.
 - **SHRD-01**: On a shared code-server or appliance, each person's editor-wide spend ledger and daily limit are their own.
 - **SHRD-02**: A recovery code shown once unlocks an encrypted backup of the person's device key and own NEAR AI key (strong KDF; the code is never stored or logged; a wrong code and tampering are refused, tested).
 - **SHRD-03**: "Replace my device": the lead accepts a person back as the same member, keeping assignments, history and role.

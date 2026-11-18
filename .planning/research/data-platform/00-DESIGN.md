@@ -3,7 +3,7 @@
 **Written:** 2026-11-18
 **Inputs:** the four research reports in this folder: 01 (connectors, extraction, ETL), 02 (classification, tagging, data-centric security, requests, holds, personal mark), 03 (context graph, search, analytics, knowledge layer), 04 (model factory and opportunity agent). Citations below take the form "01 §1.2".
 **Meets:** the owner's decided requirements of 2026-11-18 (R1 to R11 below).
-**Status:** accepted by the owner on 2026-11-18. Decisions 1 to 13 and the 32 settled-in-design choices as recommended; decision 14 changed to one-click connection; collectors that are simple to install added (section 3.7). The plan of record is now `.planning/ROADMAP.md` (milestone "Data platform", Phases 85 to 101) and `.planning/REQUIREMENTS.md`; the draft milestone `01-DRAFT-MILESTONE.md` is kept as the record of the proposal.
+**Status:** accepted by the owner on 2026-11-18. Decisions 1 to 13 and the 32 settled-in-design choices as recommended; decision 14 changed to one-click connection; collectors that are simple to install added (section 3.7). The plan of record is now `.planning/ROADMAP.md` (milestone "v0.6.0 Data platform", Phases 85 to 101; versions set by the owner on 2026-11-18) and `.planning/REQUIREMENTS.md`; the draft milestone `01-DRAFT-MILESTONE.md` is kept as the record of the proposal.
 
 ---
 
@@ -23,7 +23,7 @@
 
 **What it costs in time.** Cloud quotas set the pace of the first read (days to weeks for a 500-person organization); OCR, audio and model work set the pace of processing (weeks). Full model-written graph extraction of a million documents would take about three months on one box, so the design extracts cheaply for everything and spends model time only where it pays (03 §1.2). Most throughput numbers are estimates until the host spike measures them.
 
-**Where it fits.** A new milestone after Stage 1 (Phases 28, 29, 69 to 74) and before the relay (Stages 2 and 3 move after it). It needs one slice of L1 pulled forward (the host stack and local inference, without Theia or the relay). It absorbs the paused v0.5.0 knowledge base as its viewing layer.
+**Where it fits.** A new milestone after Stage 1 (Phases 28, 29, 69 to 74) and before the relay (Stages 2 and 3 move after it). It needs one slice of L1 pulled forward (the host stack and local inference, without Theia or the relay). It absorbs the knowledge base of the paused former v0.5.0 knowledge-base plan as its viewing layer.
 
 **Easy from the start.** Connecting Microsoft 365 is one click: an administrator signs in once and setup creates your organization's own app registration in its own tenant, with a certificate generated on the host. Google Workspace and file shares work the same way. Endpoint collectors are small signed native packages that your organization's device-management tools push and enrol with no setup on each machine, and Microsoft 365, Google Workspace and file shares need no collector at all (section 3.7).
 
@@ -88,7 +88,7 @@
 | R5 | Data-centric security extending the Phase 70 gate | §6 |
 | R6 | Personal mark, existence record, signed officer override | §4.5, §6.6 |
 | R7 | Access requests, subject requests, legal holds | §4.3, §4.4 |
-| R8 | Analytics, reporting, context graph, ask-anything; v0.5.0 KB as the interaction layer | §3.5, KB phases 96, 97 |
+| R8 | Analytics, reporting, context graph, ask-anything; the former v0.5.0 KB as the interaction layer | §3.5, KB phases 96, 97 |
 | R9 | Model factory, always-watching agent, data-gap planning, own hardware only | §3.6, §4.6, FAC and OPP phases 98, 99 |
 | R10 | Feels like magic: policy once, people on exceptions | §6.5, §7 defaults |
 | R11 | After Stage 1, before the relay | §8, draft milestone |
@@ -442,10 +442,10 @@ Each decision below carries the owner's answer. Decisions 1 to 13 were accepted 
    - Reason: R11 puts the platform before the relay, but L1 depends on the relay. The host slice does not, and building it once avoids two host stacks.
    - **Decided (owner, 2026-11-18):** (a), as recommended. L1a is phase 85 and the host parts of phase 88; L1b stays a later milestone.
 2. **Milestone identity.**
-   - Options: (a) its own milestone between v0.7.0 Stage 1 and the relay, which then becomes a separate milestone; (b) a stage inside v0.7.0.
+   - Options: (a) its own milestone between v0.7.0 (now v0.5.0) Stage 1 and the relay, which then becomes a separate milestone; (b) a stage inside v0.7.0.
    - Recommendation: (a), with phases numbered 85 to 101.
    - Reason: it is larger than all of v0.7.0's relay work, and the relay's own stage gate stays intact.
-   - **Decided (owner, 2026-11-18):** (a), as recommended, with phases 85 to 101. v0.7.0 keeps Phase 68 and Stage 1; the relay stages became their own milestone after this one. Versions are the owner's to set.
+   - **Decided (owner, 2026-11-18):** (a), as recommended, with phases 85 to 101. v0.7.0 (now v0.5.0) keeps Phase 68 and Stage 1; the relay stages became their own milestone after this one. Versions set by the owner the same day: v0.5.0 Governed agent platform, v0.6.0 for this milestone, v0.7.0 Messaging relay.
 3. **Plaintext on the host.**
    - Options: (a) Postgres in plaintext on an encrypted disk, plus per-item keys for erasable content and an encrypted blob store; (b) keep the paused "no plaintext on disk anywhere" promise, which rules out server-side search.
    - Recommendation: (a), stated plainly in SECURITY.md.

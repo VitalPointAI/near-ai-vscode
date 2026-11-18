@@ -1,6 +1,6 @@
-# Draft milestone (adopted 2026-11-18): Data platform (phases 85 to 101)
+# Draft milestone (adopted 2026-11-18): Data platform, now v0.6.0 (phases 85 to 101)
 
-> **Adopted by the owner on 2026-11-18. `.planning/ROADMAP.md` (milestone "Data platform") and `.planning/REQUIREMENTS.md` are now the source of truth.** This file is kept as the record of the draft and is not updated. Changes made on adoption: decision 14 became one-click connection (SPIKE-09 and CONN-01 to CONN-04 added, DATA-14 rewritten); collectors became small signed native packages with zero-config enrolment, and file shares are read from the host (COLL-01 to COLL-06 added, DATA-17 and DATA-20 revised); decision 7's opt-in placeholder got its own requirement (KB-15); training runs only on your organization's own machines or hardware endpoints it controls (FAC-09); SPIKE-01, DSEC-10 and FAC-06 revised; Phases 85, 89, 90 and 91 renamed, and Phase 85 builds the lasting host (L1a). 106 requirements became 119. The relay became its own milestone after this one, and v0.7.0 keeps Phase 68 and Stage 1.
+> **Adopted by the owner on 2026-11-18. `.planning/ROADMAP.md` (milestone "v0.6.0 Data platform") and `.planning/REQUIREMENTS.md` are now the source of truth.** This file is kept as the record of the draft and is not updated. Changes made on adoption: decision 14 became one-click connection (SPIKE-09 and CONN-01 to CONN-04 added, DATA-14 rewritten); collectors became small signed native packages with zero-config enrolment, and file shares are read from the host (COLL-01 to COLL-06 added, DATA-17 and DATA-20 revised); decision 7's opt-in placeholder got its own requirement (KB-15); training runs only on your organization's own machines or hardware endpoints it controls (FAC-09); SPIKE-01, DSEC-10 and FAC-06 revised; Phases 85, 89, 90 and 91 renamed, and Phase 85 builds the lasting host (L1a). 106 requirements became 119. The relay became its own milestone after this one, and v0.7.0 keeps Phase 68 and Stage 1.
 
 **Written:** 2026-11-18. **Status:** adopted 2026-11-18 (it was a proposal for the owner).
 **Design:** `00-DESIGN.md` in this folder. Sections cited as "D §4.1"; research reports cited as "01 §1.2".
@@ -12,7 +12,7 @@
 
 ```
 0.4.x patches ......................................................................>
-Stage 1 (v0.7.0): 69 done -> 70 -> 71 -> 72 -> 73 -> 74     28 and 29 beside it
+Stage 1 (v0.5.0): 69 done -> 70 -> 71 -> 72 -> 73 -> 74     28 and 29 beside it
                                                    |
                                     Stage 1 gate (verified, merged)
                                                    |
@@ -25,13 +25,13 @@ Relay: Stage 2 (75 to 81) -> Stage 3 (82 to 84)    (75 may still start beside St
 Later: L1b Theia appliance, L2, L3, L4, L5, L6     (L1a, the host slice, is absorbed here: D §8.2)
 ```
 
-- **Name and number** (D §10.1-2): its own milestone between Stage 1 and the relay. Phases are numbered 85 to 101 because 84 is the last number used; the relay keeps its numbers 75 to 84 and simply runs later. Version string is the owner's choice. The cybersecurity milestone keeps v0.8.0 and stays deferred.
+- **Name and number** (D §10.1-2): its own milestone between Stage 1 and the relay. Phases are numbered 85 to 101 because 84 is the last number used; the relay keeps its numbers 75 to 84 and simply runs later. Version string is the owner's choice (set 2026-11-18: v0.6.0, with the governed agent platform v0.5.0 and the relay v0.7.0). The cybersecurity milestone keeps v0.8.0 and stays deferred.
 - **Early start:** phases 85 and 86 need no Stage 1 code (a host and a test tenant), so they can run while Phases 72 to 74 finish. Nothing that reads your organization's real data starts before the Stage 1 gate, because it needs verified clearances (Phase 71), the broker (73) and contracts (74).
 - **Relay change:** Phase 77's dependency on Phase 74 is unchanged; it now also waits for the data platform gate (owner priority R11). Phase 75 keeps its permission to start early in its own worktree.
 
-## 2. What it absorbs from the paused v0.5.0
+## 2. What it absorbs from the paused former v0.5.0 knowledge-base plan
 
-| v0.5.0 phase | Disposition | Lands in |
+| Former v0.5.0 phase | Disposition | Lands in |
 |---|---|---|
 | 13 Sovereignty gate, PQ crypto, encrypted log | Carries with changes: PQ primitives, signed segments, the four-timestamp fold, crypto-shredding, canary scan and network spy harnesses carry; envelope v2 for lattice labels; sharded item-key store; per-label routing replaces KB mode; device identity replaces the KB vault (03 §4) | 88 (log and harnesses), 94 (crypto-shredding) |
 | 14 Encrypted scalable store and search | Superseded by the host store (Postgres, pgvector, BM25). "Benchmark first" and "damaged data reported, never replaced by an empty base" carry | 88, 96 |
@@ -48,7 +48,7 @@ Later: L1b Theia appliance, L2, L3, L4, L5, L6     (L1a, the host slice, is abso
 
 The Phase 13 code on its local branch is read with `git show` and ported piece by piece; it is not merged as a branch.
 
-## 3. Ground rules (carried from v0.5.0 and Stage 1)
+## 3. Ground rules (carried from the former v0.5.0 plan and Stage 1)
 
 - A success criterion counts only when a test drives the real path. Source-text tests do not count.
 - Every phase that adds a network destination extends the network-spy test; every phase that adds a place where data is written extends the canary leak scan.

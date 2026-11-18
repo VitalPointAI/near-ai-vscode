@@ -4,6 +4,8 @@ Paused on 2026-10-29: this milestone is moving to a separate project; this repos
 
 **2026-11-18:** the owner brought the knowledge base back to this repository, as the viewing layer of the data platform milestone (Phases 85-101 in `.planning/ROADMAP.md`), instead of a separate project. Each phase's disposition is marked in `ROADMAP.md` here and tabled in the main roadmap's data platform section ("What it absorbs from the paused knowledge base"). The Phase 13 code is read with `git show` and ported piece by piece, never merged as a branch.
 
+**Version number reassigned 2026-11-18:** this plan never shipped, so the owner gave its number to the governed agent platform ("considering we are on 0.4 now, lower the rest to start at 0.5"). v0.5.0 in `.planning/ROADMAP.md` is now the governed agent platform (Phases 68-74), and the data platform is v0.6.0. Read "v0.5.0" in this folder as the former v0.5.0 knowledge-base plan, now part of v0.6.0 Data platform. The folder keeps its name so existing path references still work.
+
 What is here, as it stood when paused:
 
 - `ROADMAP.md`, `REQUIREMENTS.md`, `STATE.md`: the milestone's roadmap (Phases 13-24), its 55 requirements and its state.
