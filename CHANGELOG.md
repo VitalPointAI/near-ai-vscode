@@ -2,35 +2,9 @@
 
 ## Unreleased
 
-## 0.4.32
+Every answer of the lead agent from a cloud model now shows a trust badge saying what the checks
+proved about it: Verified private model; Model verified, connection not proven; or Not verified.
 
-Content at Internal, Confidential and the other levels that need an attested cloud can again use a
-private NEAR AI Cloud model, but only over a connection proven to end inside its private hardware,
-and each such answer is checked afterwards. The chat's label beside the model is now a button that
-lowers it. Teams now run their members side by side, each on its own area, and the lead merges
-their work and sorts out conflicts. A cloned team gets a name and an icon of its own.
-
-- **Private NEAR AI Cloud models over a proven connection.** NEAR AI Cloud's attestation names the
-  key of the certificate its endpoint serves. NEAR AI checks that in the background, never while a
-  request waits: a fresh attestation report, a genuine Intel quote, and the same key on this
-  computer's own connection. Every request at these levels is then sent over a connection that
-  refuses any other key, before a byte is written. When the check has not passed, the content stays
-  on this computer, and with no model on this computer the request is refused with a sentence that
-  says why and to try again in a moment. Before, content at these levels always stayed on this
-  computer.
-- **Every such answer is checked afterwards.** The answer's signature and NEAR AI Cloud's
-  attestation are checked in the background after each answer at these levels, tool-call turns and
-  helper agents included, and the result shows on the answer's trust badge. A report already verified for the
-  same signing key is reused for up to ten minutes. A check that cannot be made, for example
-  offline, changes nothing.
-- **A failed check stops that level for the chat.** Nothing more at these levels goes to NEAR AI
-  Cloud from that chat until **Check again** under the answer passes, which checks it again with a
-  fresh report; a new chat or a window reload also starts without the stop. The failure stays in
-  the decision log, and the refusal names Check again, a local model and **NEAR AI: Lower This
-  Chat's Label**.
-- **Behind a proxy that inspects encrypted traffic** the connection cannot be proven, so content at
-  these levels stays on this computer. SECURITY.md and **NEAR AI: Show Policy** say what these checks
-  prove and what they rely on.
 - **A trust badge on every cloud answer.** Each answer of the lead agent from a cloud model shows
   one of three states under it: **Verified private model** (its signature and NEAR AI Cloud's
   attestation checked out, and the connection was proven to end inside the private enclave),
@@ -49,6 +23,41 @@ their work and sorts out conflicts. A cloned team gets a name and an icon of its
   the signed text, the signing address and which component holds the key, every check, the
   connection and the attestation report in a read-only editor tab, and writes nothing to your
   project. A reopened chat shows each answer's badge as it was when the answer arrived.
+- **Fixes to the checks after each answer.** An answer at a level that needs an attested cloud that
+  cannot be checked at all is still recorded in the decision log, with the reason; Check again on a
+  failed answer from long ago in the chat can still lift the stop (and says when only a new chat
+  can); and Set Label no longer says the chat keeps its label when the new label is as high as the
+  chat's.
+
+## 0.4.32
+
+Content at Internal, Confidential and the other levels that need an attested cloud can again use a
+private NEAR AI Cloud model, but only over a connection proven to end inside its private hardware,
+and each such answer is checked afterwards. The chat's label beside the model is now a button that
+lowers it. Teams now run their members side by side, each on its own area, and the lead merges
+their work and sorts out conflicts. A cloned team gets a name and an icon of its own.
+
+- **Private NEAR AI Cloud models over a proven connection.** NEAR AI Cloud's attestation names the
+  key of the certificate its endpoint serves. NEAR AI checks that in the background, never while a
+  request waits: a fresh attestation report, a genuine Intel quote, and the same key on this
+  computer's own connection. Every request at these levels is then sent over a connection that
+  refuses any other key, before a byte is written. When the check has not passed, the content stays
+  on this computer, and with no model on this computer the request is refused with a sentence that
+  says why and to try again in a moment. Before, content at these levels always stayed on this
+  computer.
+- **Every such answer is checked afterwards.** The answer's signature and NEAR AI Cloud's
+  attestation are checked in the background after each answer at these levels, tool-call turns and
+  helper agents included, and the result shows under the answer. A report already verified for the
+  same signing key is reused for up to ten minutes. A check that cannot be made, for example
+  offline, changes nothing.
+- **A failed check stops that level for the chat.** Nothing more at these levels goes to NEAR AI
+  Cloud from that chat until **Check again** under the answer passes, which checks it again with a
+  fresh report; a new chat or a window reload also starts without the stop. The failure stays in
+  the decision log, and the refusal names Check again, a local model and **NEAR AI: Lower This
+  Chat's Label**.
+- **Behind a proxy that inspects encrypted traffic** the connection cannot be proven, so content at
+  these levels stays on this computer. SECURITY.md and **NEAR AI: Show Policy** say what these checks
+  prove and what they rely on.
 - **Lower This Chat's Label where you look for it.** Click the chat's label beside the model (or
   press Enter or Space on it) to lower it. Every refusal that names **NEAR AI: Lower This Chat's
   Label** now has a button that runs it. Lowering a file's label with **NEAR AI: Set Label** while a
