@@ -1,7 +1,7 @@
 {
   "contract": "1.0.0",
   "flavor": "core",
-  "milestone": "v0.7.0: Governed agent platform and messaging relay",
+  "milestone": "v0.5.0: Governed agent platform",
   "phases": [
     {
       "number": "27",
