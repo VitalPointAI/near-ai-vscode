@@ -376,6 +376,8 @@ async function cyberRun(input: CyberRunInput): Promise<CyberRunResult> {
         ...(input.grants.mark === undefined ? {} : { mark: input.grants.mark }), ...(input.grants.outbound === undefined ? {} : { outbound: input.grants.outbound }),
         // Everything the step would send, for the outbound check (PR #87 review round 3): its tool's arguments, its args and its target, with its command.
         raw: { ...(hostTool ? {} : stepRaw(selected!, step)), args: step.args, target: step.target },
+        // A remote add-on tool can send whatever it declares (PR #87 review round 6): its real remote-ness reaches the gate.
+        runsRemote: selected?.tool.manifest.runsOn === 'remote',
         ...('resource' in stepEffects && stepEffects.resource !== undefined ? { resource: stepEffects.resource } : {}),
         // Every step names the project folder (PR #87 review round 3), so what a probe reads is checked against its labels and raises the scan's mark, as a
         // command's words always were; before, only a step with a command named it.

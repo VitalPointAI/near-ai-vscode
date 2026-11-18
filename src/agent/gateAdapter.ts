@@ -21,10 +21,11 @@ import { fromActionCapability } from '../domain/gate/vocabulary';
 import type { Capability } from '../domain/gate/vocabulary';
 import { classifyCommand, commandMaySend, downloadSegments, namesCredentialFile } from './commandSafety';
 import { commandWords, labelCheckFor, linkResolver, pathLike, readEffectPaths, scalesOf } from './gateLabels';
-import { OUTBOUND_EARLIER_TEXT, OUTBOUND_FULL_TEXT, OUTBOUND_UNCHECKED_TEXT, OUTBOUND_MATCH_TEXT, OUTBOUND_UNREADABLE_TEXT, outboundPayload } from './outboundCheck';
+import { OUTBOUND_EARLIER_TEXT, OUTBOUND_FULL_TEXT, OUTBOUND_READS_AND_SENDS_TEXT, OUTBOUND_UNCHECKED_TEXT, OUTBOUND_MATCH_TEXT, OUTBOUND_UNREADABLE_TEXT, outboundPayload } from './outboundCheck';
 import type { OutboundFingerprints } from './outboundCheck';
 import type { LabelVerdict } from '../domain/gate/decide';
-import type { Mark, SessionMark } from '../domain/gate/dominance';
+import { SessionMark } from '../domain/gate/dominance';
+import type { Mark } from '../domain/gate/dominance';
 import type { Label } from '../domain/gate/labels';
 import { routingWhileFailedClosed, tierForLabel, tierForMark } from '../domain/gate/routing';
 import type { RoutingTable, RoutingTier } from '../domain/gate/routing';
@@ -781,7 +782,7 @@ export async function gateToolCall(runtime: GateRuntime, input: GateCallInput, o
   });
   const markNow = input.grants.mark?.current();
   // A dominance verdict wins; then, at a strict mark, a call that may send is refused (D-29); then labelled text in what it would send (D-60).
-  const labelVerdict = labelCheck.verdict ?? markVerdictFor(runtime, markNow, maySend, () => outboundPayload(input.raw, input.command), input.grants.outbound);
+  const labelVerdict = labelCheck.verdict ?? markVerdictFor(runtime, markNow, maySend, () => outboundPayload(input.raw, input.command), input.grants.outbound, labelCheck.read);
   const request: GateRequest = {
     actor: runtime.actor,
     tool: input.tool.name,
@@ -949,12 +950,21 @@ function strictestLabel(runtime: GateRuntime, mark: Mark): Label | undefined {
  * this computer is refused (label.network-at-mark, D-29); at any other mark that is not any-cloud, a call that may send is refused when what it would send
  * carries labelled text the chat read (label.outbound-match, D-60), and when that cannot be checked. Undefined otherwise.
  */
-export function markVerdictFor(runtime: GateRuntime, mark: Mark | undefined, maySend: boolean, payload: () => readonly string[], outbound: OutboundFingerprints | undefined): LabelVerdict | undefined {
-  if (mark === undefined || !maySend) return undefined;
+export function markVerdictFor(runtime: GateRuntime, before: Mark | undefined, maySend: boolean, payload: () => readonly string[], outbound: OutboundFingerprints | undefined, reads: readonly Label[] = []): LabelVerdict | undefined {
+  if (!maySend) return undefined;
+  // The call is judged with everything it shows (PR #87 review round 6): what it reads itself joins the mark before the verdict, since the mark is raised
+  // only once it runs, and a command that reads a labelled file and sends it in one step must not leave at the mark it had before.
+  const mark = withReads(runtime, before, reads);
+  if (mark === undefined) return undefined;
   const tier = markTierOf(runtime, mark);
   if (tier === 'any-cloud') return undefined;
   const label = strictestLabel(runtime, mark);
   if (tier === 'local-only' || tier === 'deny') return { rule: 'label.network-at-mark', reason: NETWORK_AT_MARK_TEXT, ...(label === undefined ? {} : { label }) };
+  // A call that itself reads content above any-cloud and may send in the same step: what it reads is not fingerprinted yet, so it is refused (fail closed).
+  if (reads.length > 0 && markTierOf(runtime, reads) !== 'any-cloud') {
+    const own = strictestLabel(runtime, reads);
+    return { rule: 'label.outbound-match', reason: OUTBOUND_READS_AND_SENDS_TEXT, ...(own === undefined ? {} : { label: own }) };
+  }
   // A run with no fingerprint set cannot check what it would send, so at this mark the call is refused (fail closed, PR #87 review).
   if (outbound === undefined) return { rule: 'label.outbound-match', reason: OUTBOUND_UNCHECKED_TEXT, ...(label === undefined ? {} : { label }) };
   // A labelled read is open (begun by the shared hook, not yet fingerprinted): what it read cannot be checked yet, so the call is refused (fail closed).
@@ -970,6 +980,14 @@ export function markVerdictFor(runtime: GateRuntime, mark: Mark | undefined, may
   const found = outbound.match(texts);
   if (found === undefined) return undefined;
   return { rule: 'label.outbound-match', reason: found === 'earlier' ? OUTBOUND_EARLIER_TEXT : OUTBOUND_MATCH_TEXT, ...(label === undefined ? {} : { label }) };
+}
+
+/** The mark joined with the labels a call reads itself, without changing the run's mark; undefined when there is neither. */
+function withReads(runtime: GateRuntime, mark: Mark | undefined, reads: readonly Label[]): Mark | undefined {
+  if (reads.length === 0) return mark;
+  const joined = new SessionMark(mark ?? []);
+  joined.raise(reads, scalesOf(runtime));
+  return joined.current();
 }
 
 /** What carries a run's mark and fingerprints: a run's grants, shared with every sub-agent (D-54). */
@@ -1184,6 +1202,8 @@ export interface GateStepInput {
    * command, never the command alone.
    */
   readonly raw?: Record<string, unknown>;
+  /** The step's tool runs elsewhere (a remote add-on server, PR #87 review round 6): it can send data off this computer whatever effects it declares. */
+  readonly runsRemote?: boolean;
   /** The run's fingerprints of labelled text it read (D-60). */
   readonly outbound?: OutboundFingerprints;
 }
@@ -1224,9 +1244,9 @@ export async function gateStep(runtime: GateRuntime, input: GateStepInput, optio
     mayReadAnything: input.command !== undefined || effects.length === 0
   });
   // The run's own mark (a cyber run has one at the project's label, D-54) holds a step that may send at a strict mark, by the same predicate as a chat call.
-  const maySend = maySendOffMachine({ runsRemote: false, effects, ...(input.command === undefined ? {} : { command: input.command }), effectsUnknown: read?.effectsUnknown !== undefined || (input.command === undefined && effects.length === 0), context: { root: input.root ?? '', ...(runtime.locations ?? {}) } });
+  const maySend = maySendOffMachine({ runsRemote: input.runsRemote === true, effects, ...(input.command === undefined ? {} : { command: input.command }), effectsUnknown: read?.effectsUnknown !== undefined || (input.command === undefined && effects.length === 0), context: { root: input.root ?? '', ...(runtime.locations ?? {}) } });
   const markNow = input.mark?.current();
-  const labelVerdict = labelCheck.verdict ?? markVerdictFor(runtime, markNow, maySend, () => outboundPayload(input.raw ?? {}, input.command), input.outbound);
+  const labelVerdict = labelCheck.verdict ?? markVerdictFor(runtime, markNow, maySend, () => outboundPayload(input.raw ?? {}, input.command), input.outbound, labelCheck.read);
   const request: GateRequest = {
     actor: runtime.actor,
     tool: input.tool,

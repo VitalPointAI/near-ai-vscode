@@ -42,7 +42,8 @@ export function pathLike(word: string): boolean {
  */
 export function commandWords(command: string): string[] {
   const readable = command.slice(0, MAX_COMMAND_LENGTH);
-  return readable.split(/[\s'"`;&|()<>=]+/).filter((word) => word !== '' && !word.startsWith('-') && !word.includes('$')).slice(0, MAX_COMMAND_WORDS);
+  // `@` too (PR #87 review round 6), so curl's `-d @file` and `--data-binary @file` name the file they read.
+  return readable.split(/[\s'"`;&|()<>=@]+/).filter((word) => word !== '' && !word.startsWith('-') && !word.includes('$')).slice(0, MAX_COMMAND_WORDS);
 }
 
 /** Resolves a path through links once per call, within the bound; a path past the bound or that cannot be resolved gives undefined. */

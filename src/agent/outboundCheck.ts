@@ -217,6 +217,13 @@ export const OUTBOUND_EARLIER_TEXT =
 export const OUTBOUND_UNCHECKED_TEXT =
   "What this chat's agents read could not be checked for labelled text, so at this chat's label a call that could send data off this computer is refused. If what this chat read allows it, use NEAR AI: Lower This Chat's Label.";
 
+/**
+ * The sentence when one call reads content whose label may not go to any cloud and may send data off this computer in the same step (PR #87 review round
+ * 6): what it reads cannot be checked before it leaves, so it is refused.
+ */
+export const OUTBOUND_READS_AND_SENDS_TEXT =
+  "This call reads labelled content and may send data off this computer in the same step, so what it would send cannot be checked, and it is refused. Read the content in one step and keep it on this computer, or, if the content allows it, use NEAR AI: Lower This Chat's Label.";
+
 /** The sentence when the payload could not be read for checking (fail closed). */
 export const OUTBOUND_UNREADABLE_TEXT =
   'This chat has read labelled content, and what this call would send could not be checked for it, so it is refused rather than guessed.';
