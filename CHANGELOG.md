@@ -1,11 +1,13 @@
 # Changelog
 
-## Unreleased
+## 0.4.31
 
 You can now label files, folders and the project, so that agents cannot read what your clearance
-does not cover, and change your own policy through a signed, recorded draft. Each chat now has a
-label of its own, raised by what its agents read, and that label decides where the chat's
-requests may go.
+does not cover, and add a clearance you hold through a signed, recorded policy draft. Each chat
+now has a label of its own, raised by what its agents read, and that label decides where the
+chat's requests may go: for now, content at a level that not every model may see stays on this
+computer. Team Studio also opens on a dashboard of your teams, with each team's status,
+models, stats, health and your own rating.
 
 - **Show Policy says what is in use.** **NEAR AI: Show Policy** now says that your clearances are
   checked when an agent reads a labelled file, that each chat's label decides where its content is
