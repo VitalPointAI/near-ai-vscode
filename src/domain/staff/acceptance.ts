@@ -57,7 +57,7 @@ export const ACCEPTANCE_PRODUCTS = [
   { section: 'j2', id: 'pir-register', products: ['pir-register'], kind: 'register' },
   { section: 'j5', id: 'mission-analysis-brief', products: ['mission-analysis-brief'], kind: 'brief' },
   { section: 'j5', id: 'coa-statement', products: ['coa-a', 'coa-b'], kind: 'coa-statement' },
-  { section: 'j5', id: 'coa-comparison', products: ['coa-comparison'], kind: 'matrix' }
+  { section: 'j5', id: 'coa-comparison', products: ['comparison-matrix'], kind: 'matrix' }
 ] as const satisfies ReadonlyArray<{ section: StaffSectionId; id: string; products: readonly string[]; kind: ProductKind }>;
 export type AcceptanceProductId = (typeof ACCEPTANCE_PRODUCTS)[number]['id'];
 

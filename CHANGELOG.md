@@ -2,58 +2,68 @@
 
 ## Unreleased
 
-- **Staff products with a person's decision.** Staff section teams get the `staff-products` and
-  `guard-scan` tools: products move from draft through the release-guard's check to a person's
-  decision, recorded in a signed, chained ledger in the project, with the CCIR, RFI, assumptions,
-  annex, synchronization, decision support and targeting registers, a wargame ledger that writes the
-  synchronization matrix and DSM, the J2 tradecraft lint (ICD 203), and the events the Staff Room
-  will draw. Approving, rejecting and releasing are **NEAR AI: Staff:** commands a person runs,
-  signed with this device's key; no agent can do them.
-- **Intel workbench for military staff J2 teams.** A staff team (one whose file has a `staff:`
-  block) gets twelve local tools, `mcp__intel-workbench__*`, that a member uses only when its
-  `tools:` line lists `mcp:intel-workbench`. They keep three registers in `products/j2/`: a source
-  register where reliability (A to F) and credibility (1 to 6) are graded as two separate fields
-  and every item records its origin, so two reports from one origin never count as corroboration;
-  a PIR register where every PIR names its decision point and latest time of value, and only a
-  named person can approve or reject one; and a collection plan that holds recommendations only,
-  refuses tasking wording, and says the J3 approves asset allocation. They also draft INTSUM and
-  INTREP skeletons from the registers, leaving the judgement to the analyst, and check a product
-  for compilation risk, which asks a person and never clears anything. The tools read and write
-  only those files and the project's staff settings, reach no network, and accept exercise labels
-  only (org/Internal, NATO Unclassified or Protected A at most).
-- **An exercise scenario for staff teams.** **NEAR AI: Load Staff Exercise Scenario** loads
-  Exercise IRON LANTERN, a fictional and unclassified starter scenario (a peninsula, a coast and
-  a strait; friendly and adversary orders of battle; a mission with the higher commander's intent;
-  graded and ungraded reports), or a scenario file of your own, into `.planning/staff/scenario/`.
-  Files with classification markings, names on your real-entity list or stray coordinates are
-  refused, and an earlier scenario is archived rather than deleted. J2 and J5 demo scripts in your
-  staff profile's terms are written beside it, each with the headings, terms and citations its
-  products must contain.
-- **J2 intelligence staff team template.** The first military staff section template, written
-  from your project's staff profile (US Joint, US Army or NATO/Canadian) and level: 9 members at
-  strategic level, 12 at operational level, 7 for a brigade and 5 for a battalion. Each member has
-  its doctrinal job, the products it owns with their required headings, a "your output is X, not
-  Y" boundary, what it hands back and to whom, and a rule that it recommends and a named person
-  decides: PIRs, collection allocation and every product's release stay with people. The words
+**Military staff teams.** Set up a J2 intelligence or J5 plans staff team for your project in your
+staff profile's own terms (US Joint, US Army MDMP or NATO/Canadian), load a fictional exercise
+scenario, and let the members draft in parallel while every product passes the team's gates and a
+named person makes every decision. Staff teams are private, unclassified and for exercise and
+fictional data only; labels are not accreditation, and no member has a persona name or a rank.
+
+- **Set Up a Staff Team.** **NEAR AI: Set Up a Staff Team**, also a button in Team Studio, asks
+  for the section (J2 or J5), the doctrine profile, the level, the nation (NATO/Canadian), the
+  planning type and the section's own options, then shows the roster: the person who decides, and
+  each member with its role and who it reports to. It saves the private team to your teams, writes
+  PROFILE.md and the section's skills under `.planning/staff/`, the staff settings in the
+  project's settings and the section's guidance in `AGENTS.md` between markers of its own, then
+  offers to load the starter scenario. An existing team file is archived after you confirm, never
+  deleted. **Update Team** brings a staff team up to date for the project's current staff
+  settings and keeps the members you changed. Staff team cards show a violet badge for the
+  section's agent work and a gold badge naming the person who decides.
+- **J2 intelligence team.** 9 members at strategic level, 12 at operational level, 7 for a
+  brigade and 5 for a battalion, each with its doctrinal job, the products it owns with their
+  required headings, a "your output is X, not Y" boundary, what it hands back and to whom, and
+  what it never decides: PIRs, collection allocation and every release stay with people. The words
   follow the profile (JIPOE or IPB, Annex B or Annex D, J-2, J2, G2 or S-2). Two skills come with
-  it, ICD 203 analytic standards and source grading, with reliability and credibility graded
-  separately, and the section's guidance gives the lead its parallel lanes for every planning
-  step. The team is private and uses exercise data only; no member has a persona name or a rank.
-- **J5 plans staff team template.** A twelve-member plans section for the military staff
-  templates, written for the project's doctrine profile and level (US Joint JPP, US Army MDMP,
-  NATO/Canadian AJP-5 or APP-28): a lead planner who runs the planning steps and the wargame,
-  operational design before the steps, two COA cells given distinct themes and run at the same
-  time, the lead planner alone applying the profile's COA tests (suitable, feasible, acceptable,
-  distinguishable, complete under US Joint), a red cell seat, an independent red team that reports
-  to the human chief of staff, future operations, sustainment, legal support, a plans writer and a
-  release guard. Variants: strategic, operational and tactical; a multidomain convergence planner
-  under US Army; crisis planning names the J3 director as the planning lead. It ships four skills
-  (planning templates, wargame ledger, centre of gravity analysis, assessment framework) and is
-  recorded in the template history. Members recommend; a named person makes every decision.
-- **A staff team's red team and release guard can write only their own files.** In a team with a
-  `staff:` block, the red team may write only its critique and the release guard only its
-  verdicts. Write and Edit refuse every other path, and such a member gets no shell, document,
-  MCP or agent-starting tool even if its tools line lists one.
+  it: ICD 203 analytic standards, and source grading with reliability and credibility graded
+  separately.
+- **J5 plans team.** A lead planner who runs the planning steps and the wargame, design before the
+  steps, two COA cells given distinct themes and run at the same time, the lead planner alone
+  applying the profile's COA tests, a red cell seat, an independent red team that reports to the
+  human chief of staff, future operations, sustainment, legal support, a plans writer and a
+  release guard. Strategic, operational and tactical variants, a multidomain convergence planner
+  under US Army, and the J3 director as planning lead in crisis planning. Four skills: planning
+  templates, wargame ledger, centre of gravity analysis and assessment framework.
+- **Products with a person's decision.** Products live in `.planning/staff/products/<section>/`
+  and move from draft through the gates to a person's decision, recorded in a signed, chained
+  ledger in `.planning/staff/ledger/`. Members use the built-in `mcp:staff-products` tools by role
+  (propose, status and list for owners; submit and withdraw for the section's lead; verdicts for
+  the two gates), with the shared CCIR, RFI, assumptions, annex, synchronization, decision support
+  and targeting registers, the wargame ledger and the step rail. Approving, rejecting and
+  releasing are **NEAR AI: Staff:** commands a person runs, signed with this device's key; no
+  agent tool can do them.
+- **Two blocking gates.** The release guard runs `mcp:guard-scan` (classification and caveat
+  markings, the exercise box, your real-entity list, publications with no public copy, decisions
+  written as made, personal data, secrets and J4 numbers without a calculation) and records
+  CLEARED or HOLD on the exact version. J2 products first need the tradecraft reviewer's SIGN-OFF,
+  held to the one ICD 203 tradecraft lint. An edit voids both verdicts.
+- **Intel workbench.** A J2 team's members granted `mcp:intel-workbench` keep the source register,
+  the PIR register and the collection plan in `.planning/staff/products/j2/`. Reliability (A to F)
+  and credibility (1 to 6) are two fields, reports that share an origin never count as
+  corroboration, every PIR names its decision point and latest time of value and only a named
+  person approves one, and the collection plan holds recommendations only. It drafts INTSUM and
+  INTREP skeletons and checks a product for compilation risk, which always ends with a question
+  for a person. It reaches no network and takes exercise labels only.
+- **Exercise scenarios.** **NEAR AI: Load Staff Exercise Scenario** loads Exercise IRON LANTERN, a
+  fictional, unclassified starter (a peninsula, a coast and a strait, both orders of battle, a
+  mission with the higher commander's intent, graded and ungraded reports), or a scenario file of
+  your own, into `.planning/staff/scenario/` with J2 and J5 demo scripts. Files with
+  classification markings, names on your real-entity list or stray coordinates are refused, and an
+  earlier scenario is archived rather than deleted. The real-entity list is one list, in
+  `.planning/.near-ai/staff-guard.json` and `.planning/staff/real-entities.txt`, used by both the
+  scenario import and guard-scan.
+- **Red team and release guard held to their own files.** In a staff team the red team may write
+  only its critique and the release guard only its gate reports. Write and Edit refuse every other
+  path, and such a member gets no shell, document, agent-starting or other MCP tool, only the staff
+  tools it is granted. The staff tools appear on the Tools page and in the Team Studio tool picker.
 
 ## 0.4.33
 

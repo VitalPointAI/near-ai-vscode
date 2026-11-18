@@ -277,9 +277,10 @@ peninsula with a coast and a strait, friendly and adversary orders of battle,
 a mission with the higher commander's intent, and reports graded for
 reliability and credibility (one left ungraded). You can load a scenario file
 of your own instead; it must be marked as fictional, unclassified exercise
-data, and anything with a classification marking, a name on your
-`.planning/staff/real-entities.txt` list, or coordinates outside the exercise
-area is refused. Beside the starter scenario the command writes J2 and J5
+data, and anything with a classification marking, a name on your real-entity
+list (the one guard-scan uses: `.planning/staff/real-entities.txt` and the
+names in `.planning/.near-ai/staff-guard.json`), or coordinates outside the
+exercise area is refused. Beside the starter scenario the command writes J2 and J5
 demo scripts in `.planning/staff/demo/`: the prompts for each step in your
 staff profile's own terms, with a checklist of the headings, terms and
 citations each product must contain. Loading again moves the earlier
@@ -314,7 +315,8 @@ with your permissions. This is what you or the server declared it does. NEAR AI 
 (a team whose file has a `staff:` block). It runs inside the extension, not as
 a separate program, and reaches no network. A member uses it only when its
 `tools:` line lists `mcp:intel-workbench`. It keeps the source register, the
-PIR register and the collection plan as JSON files in `products/j2/`, one
+PIR register and the collection plan as JSON files in
+`.planning/staff/products/j2/`, one
 entry per line. Reliability and credibility are graded separately; reports
 that share an origin count once; every PIR names the decision point it
 supports and its latest time of value; the collection plan holds
@@ -919,7 +921,10 @@ until it runs out aren't shown.
   verified credentials arrive. **NEAR AI: Staff: Show Products** lists every
   product, what waits for you, and its history. The exercise box and the
   real-entity list are yours to set in `.planning/.near-ai/staff-guard.json`
-  and `.planning/staff/real-entities.txt`.
+  and `.planning/staff/real-entities.txt`. Everything a staff team writes
+  lives under `.planning/staff/`: products in
+  `.planning/staff/products/<section>/`, with each gate's report beside them,
+  and the signed ledger in `.planning/staff/ledger/`.
 
 ### Cybersecurity scans
 

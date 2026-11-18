@@ -16,6 +16,7 @@ import { parseTeam } from '../agent/teams';
 import type { AgentTool, ToolContext } from '../agent/tools';
 import { registerPath } from '../domain/staff/intel';
 import { mergeRealEntities, parseRealEntityList, realEntitiesFromGuardConfig } from '../domain/staff/realEntities';
+import { ACCEPTANCE_PRODUCTS } from '../domain/staff/acceptance';
 import { SHARED_PRODUCTS, writerIn } from '../domain/staff/ownership';
 import { HUMAN_ONLY_EVENTS } from '../domain/staff/release';
 import { staffGuardFolder, staffProductPath } from '../domain/staff/writeLimits';
@@ -164,5 +165,22 @@ test('one real-entity list: a name in either file is refused by the scenario loa
     const loaded = await loadScenarioIntoProject(world.root, starter);
     assert.equal(loaded.ok, false, `${where}: the scenario loader refuses a listed name`);
     assert.deepEqual((await world.host.guardConfig()).realEntities, [place], `${where}: guard-scan holds the same list`);
+  }
+});
+
+test('every product the demo scripts and acceptance fixtures name is a product its section template owns, with one owner in the roster', () => {
+  for (const fixture of ACCEPTANCE_PRODUCTS) {
+    for (const product of fixture.products) {
+      if (fixture.section === 'j2') {
+        const entry = J2_PRODUCTS.find((candidate) => candidate.id === product);
+        assert.ok(entry, `the J2 template has ${product}`);
+        assert.ok(entry!.owners.operational, `${product} has an owner in the operational roster`);
+      } else {
+        for (const options of j5OptionSets().filter((_, index) => index % 4 === 0)) {
+          const owners = j5Template(options).products.filter((candidate) => candidate.product === product);
+          assert.equal(owners.length, 1, `the J5 template has exactly one owner of ${product}`);
+        }
+      }
+    }
   }
 });
