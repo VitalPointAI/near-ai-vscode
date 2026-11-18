@@ -321,7 +321,7 @@ async function streamingLocal(): Promise<{ client: NearAiClient; content: string
 
 interface CheckedChat {
   readonly conversation: AgentConversation;
-  readonly posted: Array<{ type: string; runId?: string; result?: { outcome: string } }>;
+  readonly posted: Array<{ type: string; runId?: string; result?: { outcome: string }; badge?: { state: string; reasons: string[] } }>;
   readonly records: DecisionRecord[];
 }
 
@@ -366,10 +366,13 @@ test('an org/Confidential chat sends to the TEE model over the bound connection;
   assert.equal(attestationOf(records[0]!), 'verified');
   assert.ok(validateDecisionRecord(JSON.parse(JSON.stringify(records[0]))).ok);
   assert.ok(!JSON.stringify(records[0]).includes(SIGNING.address.slice(2)), 'no signing address in the record');
-  const offered = chat.posted.findIndex((message) => message.type === 'response-verifiable');
-  const shown = chat.posted.findIndex((message) => message.type === 'response-verification');
-  assert.ok(offered >= 0 && shown > offered, 'the row is offered first, then shows the result');
-  assert.equal(chat.posted[shown]!.result?.outcome, 'signed');
+  // PR 4e: the trust badge replaced the Verify signature row. It shows Checking now first, then the check's result under the same answer.
+  const badges = chat.posted.filter((message) => message.type === 'trust-badge');
+  assert.equal(badges.length, 2, 'the badge is posted first, then with the result');
+  assert.equal(badges[0]!.badge?.state, 'not-verified');
+  assert.ok(badges[0]!.badge?.reasons.includes('Checking now.'));
+  assert.equal(badges[1]!.badge?.state, 'verified-private', 'signed, over the connection pinned to the bound key');
+  assert.equal(badges[1]!.runId, badges[0]!.runId);
   assert.equal(chat.conversation.routeAttestation.failed, false);
 });
 
@@ -394,8 +397,9 @@ test('a failed check stops attested-cloud for the chat: the next request is refu
   const child = sessionRouteFrom(testGateRuntime(), { attestation: chat.conversation.routeAttestation, markOf: () => [CONFIDENTIAL] });
   await assert.rejects(() => withSessionRoute(child, () => ask(near.client, 'tee-model')), refusedWith('route.attestation-failed'));
   assert.equal(near.content.length, 1);
-  const failedRow = chat.posted.find((message) => message.type === 'response-verification');
-  assert.equal(failedRow?.result?.outcome, 'failed', 'the answer\'s row shows the failure, where Check again is offered');
+  const failedBadge = chat.posted.filter((message) => message.type === 'trust-badge').at(-1);
+  assert.equal(failedBadge?.badge?.state, 'not-verified', 'the answer\'s badge shows the failure, where Check again is offered');
+  assert.ok(failedBadge?.badge?.reasons.some((reason) => reason.startsWith('The check failed:')));
 });
 
 test('a check that cannot reach NEAR AI is unavailable, never failed, and the next request is sent', async () => {
@@ -423,7 +427,7 @@ test('two answers within 10 minutes from one signing key make one report GET, af
   await sendTo(chat, near.client);
   assert.equal(await settled(near, 'chatcmpl-3'), 'signed');
   assert.equal(near.reportGets(), 2, 'the cached report expired after 10 minutes');
-  const runId = chat.posted.filter((message) => message.type === 'response-verifiable').at(-1)!.runId!;
+  const runId = chat.posted.filter((message) => message.type === 'trust-badge').at(-1)!.runId!;
   assert.equal((await chat.conversation.verifyRun(runId)).outcome, 'signed');
   assert.equal(near.reportGets(), 3, 'Check again never uses the cache');
 });
@@ -434,7 +438,7 @@ test('Check again on the failed answer: a signed fresh result clears the stop an
   const chat = checkedChat();
   await sendTo(chat, near.client);
   await settled(near, 'chatcmpl-1');
-  const runId = chat.posted.find((message) => message.type === 'response-verifiable')!.runId!;
+  const runId = chat.posted.find((message) => message.type === 'trust-badge')!.runId!;
   assert.equal((await chat.conversation.verifyRun(runId)).outcome, 'failed', 'still failing');
   assert.equal(chat.conversation.routeAttestation.failed, true, 'the stop stays');
   assert.equal(checkedRecords(chat, 'route.attestation-cleared').length, 0);
@@ -493,15 +497,18 @@ test('the next decision never waits for a check: a check that never settles does
   near.release();
 });
 
-test('a request at any-cloud starts no automatic check', async () => {
+// PR 4e (the owner's decision of 2026-11-16, CLAS-08): every cloud answer from a TEE model is now checked once for its trust badge. At any-cloud that is
+// the badge's own check, never the route's: no route.attestation-checked record, no stop, and exactly one signature request for the answer.
+test('a request at any-cloud starts no route check after the answer; the trust badge\'s one check is its only signature request', async () => {
   const near = await fakeNear();
   const chat = checkedChat(null);
   await sendTo(chat, near.client);
   assert.equal(near.content.length, 1);
   assert.equal(near.client.answerCheck('chatcmpl-1'), undefined);
   await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(near.signatureGets(), 0);
+  assert.equal(near.signatureGets(), 1, 'one signature request, the badge\'s');
   assert.equal(checkedRecords(chat).length, 0);
+  assert.equal(chat.conversation.routeAttestation.failed, false);
 });
 
 // ---- PR #89 review ----
@@ -518,7 +525,7 @@ test('review 89.3: Check again does not clear the stop while a failed answer is 
   await settled(near, 'chatcmpl-1');
   await settled(near, 'chatcmpl-2');
   assert.equal(chat.conversation.routeAttestation.failed, true);
-  const [first, second] = chat.posted.filter((message) => message.type === 'response-verifiable').map((message) => message.runId!);
+  const [first, second] = [...new Set(chat.posted.filter((message) => message.type === 'trust-badge').map((message) => message.runId!))];
   assert.ok(first !== undefined && second !== undefined && first !== second);
   // The first run leaves the newest-50 list, as it would after 50 more runs.
   (chat.conversation as unknown as { answerChecks: Map<string, unknown> }).answerChecks.delete(first);
@@ -537,4 +544,53 @@ test('review 89.2: the conversation keeps answer checks with the fields the gate
   assert.ok(!/VerificationResult/.test(source), 'agentSession works with the gate AnswerCheckResult');
   const gate = readFileSync(path.join(__dirname, '..', '..', 'src', 'gate', 'sessionMark.ts'), 'utf8');
   for (const field of ['readonly outcome:', 'readonly summary:', 'readonly signingAddress?:', 'readonly signer?:', 'readonly checks:', 'readonly notChecked:']) assert.ok(gate.includes(field), field);
+});
+
+test('review 89 minor 3: Check again on a failed answer whose run left the newest 50 still clears the stop, and one no longer kept says a new chat is needed', async () => {
+  const near = await fakeNear();
+  near.mode = 'hang';
+  const chat = checkedChat();
+  await sendTo(chat, near.client);
+  await sendTo(chat, near.client);
+  near.mode = 'bad-signature';
+  near.release();
+  await settled(near, 'chatcmpl-1');
+  await settled(near, 'chatcmpl-2');
+  const [first, second] = [...new Set(chat.posted.filter((message) => message.type === 'trust-badge').map((message) => message.runId!))];
+  // Both runs leave the newest-50 list, as they would after 50 more runs.
+  const internals = chat.conversation as unknown as { answerChecks: Map<string, unknown> };
+  internals.answerChecks.delete(first!);
+  internals.answerChecks.delete(second!);
+  near.mode = 'valid';
+  assert.equal((await chat.conversation.verifyRun(second!)).outcome, 'signed');
+  assert.equal(chat.conversation.routeAttestation.failed, true, 'the first answer\'s failure still holds the stop');
+  assert.equal((await chat.conversation.verifyRun(first!)).outcome, 'signed', 'its own Check again still reaches it');
+  assert.equal(chat.conversation.routeAttestation.failed, false, 'and clears the stop');
+  assert.equal(checkedRecords(chat, 'route.attestation-cleared').length, 1);
+});
+
+test('review 89 minor 3: a failure no longer kept for Check again keeps the stop, and Check again and the badge say plainly that a new chat is needed', async () => {
+  const { CHECK_AGAIN_NEW_CHAT_TEXT } = await import('../services/agentSession');
+  const { TRUST_BADGE_TEXT } = await import('../domain/gate/trustBadge');
+  const near = await fakeNear();
+  near.mode = 'hang';
+  const chat = checkedChat();
+  await sendTo(chat, near.client);
+  await sendTo(chat, near.client);
+  near.mode = 'bad-signature';
+  near.release();
+  await settled(near, 'chatcmpl-1');
+  await settled(near, 'chatcmpl-2');
+  const [, second] = [...new Set(chat.posted.filter((message) => message.type === 'trust-badge').map((message) => message.runId!))];
+  // The first failure went past the bound (FAILED_CHECKS_KEPT): only its chat id is left, holding the stop.
+  (chat.conversation as unknown as { routeFailures: Map<string, unknown> }).routeFailures.delete('chatcmpl-1');
+  near.mode = 'valid';
+  const again = await chat.conversation.verifyRun(second!);
+  assert.equal(again.outcome, 'signed');
+  assert.ok(again.summary.endsWith(CHECK_AGAIN_NEW_CHAT_TEXT), again.summary);
+  assert.equal(chat.conversation.routeAttestation.failed, true, 'the stop stays: nothing can check that answer again');
+  assert.ok(chat.conversation.trustBadge(second!)?.reasons.includes(TRUST_BADGE_TEXT.earlierFailedLost), 'the badge says a new chat is needed');
+  assert.match(CHECK_AGAIN_NEW_CHAT_TEXT, /Start a new chat/);
+  chat.conversation.reset();
+  assert.equal(chat.conversation.routeAttestation.failed, false, 'a new chat clears it');
 });

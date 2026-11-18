@@ -348,6 +348,15 @@ function isLowerMark(next: Mark, mark: Mark, scales: Parameters<typeof raiseMark
   return sameMark(raised, mark) && !sameMark(next, mark);
 }
 
+/**
+ * Whether Set Label tells the chat in view that it keeps its label (PR #89 review): the chat held the file's old label, and the new label is absent or does
+ * not cover the chat's mark. A new label that covers the chat's mark (a raise) leaves nothing for the chat to keep, so nothing is said.
+ */
+export function chatKeepsLabel(held: Mark, oldMark: Mark, newLabel: Label | undefined, scales: Parameters<typeof raiseMark>[2]): boolean {
+  if (!coversProject(held, oldMark, scales)) return false;
+  return newLabel === undefined || !coversProject([newLabel], held, scales);
+}
+
 /** `mark` holds the project's label: raising it by the project's labels changes nothing (a chat is never lowered below its project). */
 function coversProject(mark: Mark, project: Mark, scales: Parameters<typeof raiseMark>[2]): boolean {
   let raised: Mark = mark;
@@ -575,7 +584,7 @@ export async function setLabel(host: GateHost, target: LabelTarget): Promise<boo
   if (reason !== undefined && current.origin !== 'default') {
     const chat = chatInView();
     const held = chat !== undefined && chat.root === target.root ? chat.mark()?.current() : undefined;
-    if (held !== undefined && coversProject(held, current.mark, policy.scales)) {
+    if (held !== undefined && chatKeepsLabel(held, current.mark, label, policy.scales)) {
       void Promise.resolve(vscode.window.showInformationMessage(CHAT_KEEPS_LABEL_TEXT, LOWER_CHAT_LABEL_ACTION))
         .then((picked) => { if (picked === LOWER_CHAT_LABEL_ACTION) void lowerChatLabel(host, chat); }).catch(() => undefined);
     }

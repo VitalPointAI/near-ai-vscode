@@ -2,6 +2,39 @@
 
 ## Unreleased
 
+Every answer of the lead agent from a cloud model now shows a trust badge saying what the checks
+proved about it: Verified private model; Model verified, connection not proven; or Not verified.
+
+- **A trust badge on every cloud answer.** Each answer of the lead agent from a cloud model shows
+  one of three states under it: **Verified private model** (its signature and NEAR AI Cloud's
+  attestation checked out, and the connection was proven to end inside the private enclave),
+  **Model verified, connection not proven**, or **Not verified**, each with its reasons. It is set
+  only from checks that ran and never says more than they proved. It replaces the Verify signature
+  row. An answer from a model on this computer has no badge, and a helper agent's answer has none.
+- **Checked once, automatically.** Each cloud answer from a TEE model is checked once in the
+  background: one signature request per answer, with an attestation report already verified for
+  the same signing key reused for up to ten minutes. A check that has not finished after 20 seconds
+  shows Not verified, so a badge never waits forever (for example offline), and the badge changes
+  if the check finishes later. A model NEAR AI forwards to another provider is never checked, and
+  its badge says where it goes.
+- **Click the badge for the details.** It explains its state and what the editor does not check.
+  **Check again** checks afresh and, on an answer whose failed check stopped the levels that need an
+  attested cloud, lifts that stop when the answer now checks out. **Show full attestation** opens
+  the signed text, the signing address and which component holds the key, every check, the
+  connection and the attestation report in a read-only editor tab, and writes nothing to your
+  project. A reopened chat shows each answer's badge as it was when the answer arrived.
+- **Public chats over the proven connection too.** When a fresh proof of NEAR AI Cloud's
+  connection exists, requests from chats at levels that do not need an attested cloud (Public,
+  for example) also go over the connection held to NEAR AI Cloud's attested key, so their answers
+  from a private model can show Verified private model. If the server presents another key, for
+  example behind a proxy that inspects encrypted traffic, such a request is sent without it instead
+  of being refused, a second record in the decision log says so, and its badge shows Model verified,
+  connection not proven. Levels that need an attested cloud still refuse on a mismatch.
+- **Fixes to the checks after each answer.** An answer at a level that needs an attested cloud that
+  cannot be checked at all is still recorded in the decision log, with the reason; Check again on a
+  failed answer from long ago in the chat can still lift the stop (and says when only a new chat
+  can); and Set Label no longer says the chat keeps its label when the new label is as high as the
+  chat's.
 - When you make a new team, its Purpose step now shows the team's icon: the default icon, with the team's initials on a colour, which changes as you type the name. A cloned team shows this default icon, not the icon of the team you copied. You can upload or generate an icon on the team's Purpose tab after you save it.
 
 ## 0.4.32

@@ -6,7 +6,7 @@ import { webcrypto } from 'node:crypto';
 import * as vm from 'node:vm';
 
 // A DOM just large enough to start the real chat page, so the button is judged by what it does rather than by the words in its source. The page needs
-// only a handful of node methods and the five helper kits panelView loads before it; anything it reaches for that is missing fails the test loudly.
+// only a handful of node methods and the helper kits panelView loads before it (the trust badge kit is the real one); anything it reaches for that is missing fails the test loudly.
 export function chatPage(): { nodes: Map<string, StubNode>; send: (data: unknown) => void; posts: unknown[]; sent: () => unknown[] } {
   focused = undefined;
   const nodes = new Map<string, StubNode>();
@@ -54,6 +54,9 @@ export function chatPage(): { nodes: Map<string, StubNode>; send: (data: unknown
   window.addEventListener = ((type: string, listener: (event: { data: unknown }) => void) => { if (type === 'message') listeners.push(listener); }) as never;
   context.globalThis = context;
   vm.createContext(context);
+  // The real trust badge kit (CLAS-08) runs before the page, as panelView loads it, so a page test judges the real drawing rather than a stub.
+  const kit = readFileSync(path.join(__dirname, '..', '..', '..', 'media', 'chat', 'trustBadge.js'), 'utf8');
+  new vm.Script(kit, { filename: 'trustBadge.js' }).runInContext(context);
   const source = readFileSync(path.join(__dirname, '..', '..', '..', 'media', 'chat', 'chat.js'), 'utf8');
   new vm.Script(source, { filename: 'chat.js' }).runInContext(context);
   // Messages are made inside the page's own context, so they are compared as plain data rather than by prototype.
@@ -85,6 +88,8 @@ export class StubNode {
   public disabled = false;
   public checked = false;
   public constructor(public readonly tagName: string) {}
+  /** The child nodes, as a fragment's caller reads them. */
+  public get childNodes(): StubNode[] { return this.children; }
   /** The node this one is a child of. As in a real DOM, adding a node somewhere moves it there, and `remove()` takes it out. */
   public parent: StubNode | undefined;
   private adopt(node: StubNode | string): StubNode | string { if (node instanceof StubNode) { node.remove(); node.parent = this; } return node; }
@@ -145,6 +150,8 @@ class StubDocument {
   public constructor(private readonly nodes: Map<string, StubNode>) {}
   public createElement(tag: string): StubNode { return new StubNode(tag); }
   public createElementNS(_namespace: string, tag: string): StubNode { return new StubNode(tag); }
+  /** A reopened chat's history is drawn in fragments; here a fragment is a plain node, which keeps what was drawn in it findable. */
+  public createDocumentFragment(): StubNode { return new StubNode('#fragment'); }
   public createTextNode(text: string): StubNode { const node = new StubNode('#text'); node.textContent = text; return node; }
   public getElementById(id: string): StubNode { if (!this.nodes.has(id)) { const node = new StubNode('div'); node.id = id; this.nodes.set(id, node); } return this.nodes.get(id) as StubNode; }
   public querySelector(): undefined { return undefined; }

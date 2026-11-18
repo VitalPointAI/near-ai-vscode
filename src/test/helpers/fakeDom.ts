@@ -15,7 +15,11 @@ export class FakeNode {
   public removeAttribute(name: string): void { this.attributes.delete(name); }
   public addEventListener(type: string, listener: () => void): void { this.listeners.set(type, [...(this.listeners.get(type) ?? []), listener]); }
   public click(): void { for (const listener of this.listeners.get('click') ?? []) listener(); }
+  /** A key press, as the node's own keydown listeners see it. */
+  public press(key: string): void { for (const listener of this.listeners.get('keydown') ?? []) (listener as (event: { key: string; preventDefault(): void }) => void)({ key, preventDefault: () => undefined }); }
+  public focus(): void { this.doc.activeElement = this; }
   public append(...nodes: FakeNode[]): void { for (const node of nodes) { node.parent = this; this.children.push(node); } }
+  public replaceChildren(...nodes: FakeNode[]): void { for (const child of this.children) child.parent = undefined; this.children = []; this.append(...nodes); }
   public prepend(...nodes: FakeNode[]): void { for (const node of nodes) node.parent = this; this.children.unshift(...nodes); }
   public remove(): void { if (this.parent) this.parent.children = this.parent.children.filter((child) => child !== this); this.parent = undefined; }
   public get attached(): boolean { let node: FakeNode | undefined = this; while (node?.parent) node = node.parent; return node === this.doc.body; }

@@ -27,6 +27,10 @@ export interface VerificationResult {
   signer?: 'model' | 'gateway';
   checks: { requestHash?: boolean; responseHash?: boolean; signature?: boolean; genuineQuote?: boolean; addressInQuote?: boolean; nonceInQuote?: boolean; gpuNonce?: boolean };
   notChecked: string[];
+  /** The signed text ("request-hash:response-hash") and its signature, as NEAR AI returned them, when it returned them (Show full attestation, CLAS-08). */
+  signed?: { text: string; signature: string };
+  /** The attestation report this check verified or reused, as NEAR AI returned it. Kept in memory only, to show on request; never written anywhere. */
+  report?: unknown;
 }
 
 export const NOT_CHECKED_IN_EDITOR = ['platform TCB status and certificate revocation (Intel collateral)', 'which code the enclave runs (measurements)', 'NVIDIA GPU attestation verdict'];
@@ -38,8 +42,11 @@ export function sha256Hex(text: string): string {
 /** How long a verified attestation report counts for its signing address (A3): a long run checks each answer without asking for the report each time. */
 export const REPORT_CACHE_MS = 600_000;
 
-/** What a verified report proved for one signing address, and when. Never the report itself, the quote or a fingerprint. */
-interface CachedReport { readonly role: 'model' | 'gateway'; readonly gpuNonce: boolean | undefined; readonly at: number }
+/**
+ * What a verified report proved for one signing address, and when, with the report itself in memory so a reused one can still be shown on request
+ * (CLAS-08). Nothing here is written anywhere or put in a record.
+ */
+interface CachedReport { readonly role: 'model' | 'gateway'; readonly gpuNonce: boolean | undefined; readonly report?: unknown; readonly at: number }
 
 /**
  * Verified attestation reports by signing address, each counting for REPORT_CACHE_MS (10 minutes) from when it was checked, on an injected clock. A
@@ -75,7 +82,9 @@ export class AttestationReportCache {
 export async function verifyResponse(evidence: ResponseEvidence, model: string, get: (path: string) => Promise<unknown>, options: { nonce?: string; trustedRoot?: string; now?: Date; cache?: AttestationReportCache } = {}): Promise<VerificationResult> {
   const nonce = options.nonce ?? randomBytes(32).toString('hex');
   const checks: VerificationResult['checks'] = {};
-  const fail = (summary: string, signingAddress?: string): VerificationResult => ({ outcome: 'failed', summary, signingAddress, checks, notChecked: NOT_CHECKED_IN_EDITOR });
+  // What NEAR AI returned, kept on every result once known (Show full attestation, CLAS-08).
+  const shown: { signed?: { text: string; signature: string }; report?: unknown } = {};
+  const fail = (summary: string, signingAddress?: string): VerificationResult => ({ outcome: 'failed', summary, signingAddress, checks, notChecked: NOT_CHECKED_IN_EDITOR, ...shown });
   let payload: { text?: unknown; signature?: unknown; signing_address?: unknown };
   try {
     payload = await get(`/signature/${encodeURIComponent(evidence.chatId)}?model=${encodeURIComponent(model)}&signing_algo=ecdsa`) as typeof payload;
@@ -84,6 +93,7 @@ export async function verifyResponse(evidence: ResponseEvidence, model: string, 
   }
   if (typeof payload?.text !== 'string' || typeof payload.signature !== 'string' || typeof payload.signing_address !== 'string') return { outcome: 'unavailable', summary: 'NEAR AI returned no signature for this response.', checks, notChecked: NOT_CHECKED_IN_EDITOR };
   const address = payload.signing_address;
+  shown.signed = { text: payload.text, signature: payload.signature };
   const parts = payload.text.split(':');
   if (parts.length !== 2 && parts.length !== 3) return fail('The signed text is not in the expected "request-hash:response-hash" form.', address);
   const [requestHash, responseHash] = parts.slice(-2);
@@ -101,7 +111,7 @@ export async function verifyResponse(evidence: ResponseEvidence, model: string, 
     checks.addressInQuote = true;
     checks.nonceInQuote = true;
     if (cached.gpuNonce !== undefined) checks.gpuNonce = cached.gpuNonce;
-    return { outcome: 'signed', summary: `Signed by ${cached.role === 'gateway' ? 'NEAR AI\'s gateway key' : 'the model\'s key'} ${address}. The genuine Intel TDX quote that binds that key was checked less than 10 minutes ago, and that report was reused.`, signingAddress: address, signer: cached.role, checks, notChecked: NOT_CHECKED_IN_EDITOR };
+    return { outcome: 'signed', summary: `Signed by ${cached.role === 'gateway' ? 'NEAR AI\'s gateway key' : 'the model\'s key'} ${address}. The genuine Intel TDX quote that binds that key was checked less than 10 minutes ago, and that report was reused.`, signingAddress: address, signer: cached.role, checks, notChecked: NOT_CHECKED_IN_EDITOR, ...shown, ...(cached.report === undefined ? {} : { report: cached.report }) };
   }
 
   let report: Record<string, unknown>;
@@ -109,8 +119,9 @@ export async function verifyResponse(evidence: ResponseEvidence, model: string, 
     report = await get(`/attestation/report?model=${encodeURIComponent(model)}&nonce=${nonce}&signing_algo=ecdsa&signing_address=${encodeURIComponent(address)}`) as Record<string, unknown>;
   } catch (error) {
     // A report that cannot be fetched (offline, a timeout, an error answer) proves nothing either way: unavailable, never failed (D-55).
-    return { outcome: 'unavailable', summary: `The response is signed, but the attestation report could not be fetched (${(error as Error).message}).`, signingAddress: address, checks, notChecked: NOT_CHECKED_IN_EDITOR };
+    return { outcome: 'unavailable', summary: `The response is signed, but the attestation report could not be fetched (${(error as Error).message}).`, signingAddress: address, checks, notChecked: NOT_CHECKED_IN_EDITOR, ...shown };
   }
+  shown.report = report;
   const candidates = attestationsIn(report);
   const match = candidates.find((item) => item.attestation.signing_address.toLowerCase() === address.toLowerCase());
   if (!match) {
@@ -131,8 +142,8 @@ export async function verifyResponse(evidence: ResponseEvidence, model: string, 
   if (!checks.addressInQuote) return fail('The TDX quote does not bind the key that signed this response.', address);
   if (!checks.nonceInQuote) return fail('The TDX quote does not contain this request\'s fresh nonce, so it may be replayed.', address);
   if (checks.gpuNonce === false) return fail('The GPU attestation does not contain this request\'s fresh nonce.', address);
-  options.cache?.set(address, { role: match.role, gpuNonce: checks.gpuNonce });
-  return { outcome: 'signed', summary: `Signed by ${match.role === 'gateway' ? 'NEAR AI\'s gateway key' : 'the model\'s key'} ${address}. A genuine Intel TDX quote, fresh for this check, binds that key${checks.gpuNonce ? ', with matching GPU evidence' : ''}.`, signingAddress: address, signer: match.role, checks, notChecked: NOT_CHECKED_IN_EDITOR };
+  options.cache?.set(address, { role: match.role, gpuNonce: checks.gpuNonce, report });
+  return { outcome: 'signed', summary: `Signed by ${match.role === 'gateway' ? 'NEAR AI\'s gateway key' : 'the model\'s key'} ${address}. A genuine Intel TDX quote, fresh for this check, binds that key${checks.gpuNonce ? ', with matching GPU evidence' : ''}.`, signingAddress: address, signer: match.role, checks, notChecked: NOT_CHECKED_IN_EDITOR, ...shown };
 }
 
 type Attestation = Record<string, unknown> & { signing_address: string; intel_quote: string };

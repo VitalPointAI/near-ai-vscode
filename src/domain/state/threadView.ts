@@ -86,7 +86,8 @@ export const VIEW_ARGS_LIMIT = 2_000;
 /** One thing the reopened view shows, in the order it happened. A tool step carries no output: the card asks for it when it is opened. */
 export type ViewItem =
   | { kind: 'user'; text: string }
-  | { kind: 'assistant'; text: string }
+  /** `trust`: the badge this answer settled on when it arrived (CLAS-08), when the chat kept one; the caller decides its shape. */
+  | { kind: 'assistant'; text: string; trust?: object }
   | {
     kind: 'tool';
     /** The id of the tool-call entry: what the card asks the host for. */
@@ -129,13 +130,20 @@ function argumentsText(body: unknown): string {
   return text.length > VIEW_ARGS_LIMIT ? `${text.slice(0, VIEW_ARGS_LIMIT)}…` : text;
 }
 
-function segmentItems(segment: readonly ThreadEntry[]): ViewItem[] {
+/** Finds the kept badge of an answer by its text; passed in, so this folder needs nothing from the gate. */
+export type TrustLookup = (answerText: string) => object | undefined;
+
+function segmentItems(segment: readonly ThreadEntry[], trustFor?: TrustLookup): ViewItem[] {
   const results = pairToolResults(segment);
   const answered = new Set([...results.values()].map((entry) => entry.id));
   const items: ViewItem[] = [];
   for (const entry of segment) {
     if (entry.role === 'user') items.push({ kind: 'user', text: textOf(entry.body) });
-    else if (entry.role === 'assistant') items.push({ kind: 'assistant', text: textOf(entry.body) });
+    else if (entry.role === 'assistant') {
+      const text = textOf(entry.body);
+      const trust = text && trustFor ? trustFor(text) : undefined;
+      items.push({ kind: 'assistant', text, ...(trust === undefined ? {} : { trust }) });
+    }
     else if (entry.role === 'notice') items.push({ kind: 'notice', text: textOf(entry.body) });
     else if (entry.role === 'tool-call') {
       const result = results.get(entry.id);
@@ -156,12 +164,12 @@ function segmentItems(segment: readonly ThreadEntry[]): ViewItem[] {
  * Every entry of a thread as the reopened view shows it, in order: the main line first (a tool call and its result are one card), then each other
  * continuation after a divider. A thread migrated with partial history starts with a note saying so. Nothing is skipped and nothing is cut off.
  */
-export function entriesToView(lines: Pick<ThreadLines, 'main' | 'branches'>, meta: { history?: string } = {}): ViewItem[] {
+export function entriesToView(lines: Pick<ThreadLines, 'main' | 'branches'>, meta: { history?: string; trustFor?: TrustLookup } = {}): ViewItem[] {
   const items: ViewItem[] = [];
   if (meta.history === PARTIAL_HISTORY) items.push({ kind: 'notice', text: PARTIAL_HISTORY_NOTE });
-  items.push(...segmentItems(lines.main));
+  items.push(...segmentItems(lines.main, meta.trustFor));
   for (const branch of lines.branches) {
-    items.push({ kind: 'divider', text: OTHER_CONTINUATION_LABEL }, ...segmentItems(branch.entries));
+    items.push({ kind: 'divider', text: OTHER_CONTINUATION_LABEL }, ...segmentItems(branch.entries, meta.trustFor));
   }
   return items;
 }

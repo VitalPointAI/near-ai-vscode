@@ -34,7 +34,7 @@ const THEME = {
   'textLink-foreground': '#4daafc', 'textCodeBlock-background': '#2b2b2b', 'toolbar-hoverBackground': '#5a5d5e50',
   'icon-foreground': '#cccccc', 'list-hoverBackground': '#2a2d2e', 'quickInput-background': '#222222',
   'quickInputList-focusBackground': '#04395e', 'quickInputList-focusForeground': '#ffffff', 'widget-shadow': '#0000005c',
-  'progressBar-background': '#0078d4', 'testing-iconPassed': '#73c991', errorForeground: '#f85149',
+  'progressBar-background': '#0078d4', 'testing-iconPassed': '#73c991', errorForeground: '#f85149', 'editorWarning-foreground': '#cca700',
   'editorGroupHeader-tabsBackground': '#181818', 'dropdown-background': '#313131', 'dropdown-foreground': '#cccccc'
 };
 const themeCss = `:root{${Object.entries(THEME).map(([key, value]) => `--vscode-${key}:${value}`).join(';')}}`;
@@ -52,10 +52,9 @@ const SCENARIOS = {
     host({type:'tool-start',callId:'c3',tool:'Bash',title:'npm test'});
     host({type:'tool-end',callId:'c3',ok:true,output:'tests 18 · pass 18'});
     host({type:'assistant-delta',text:'Requests now abort after **60 seconds**, and the timer is cleared once headers arrive so long streams are never cut off:\\n\\n\`\`\`ts\\nconst abort = new AbortController();\\nconst timer = setTimeout(() => abort.abort(), 60_000);\\n\`\`\`\\n\\nAll 18 tests pass.'});
-    host({type:'assistant-done',usage:{inputTokens:18400,outputTokens:612,estimatedCostUsd:0.0041,verificationStatus:'unknown'}});
+    host({type:'assistant-done',runId:'run-1-abcdef',usage:{inputTokens:18400,outputTokens:612,estimatedCostUsd:0.0041,verificationStatus:'unknown'}});
     host({type:'run-changes',runId:'run-1-abcdef',files:['src/client.ts']});
-    host({type:'response-verifiable',runId:'run-1-abcdef'});
-    host({type:'response-verification',runId:'run-1-abcdef',result:{outcome:'signed',summary:'Signed by 0x3f2c…91ab. A genuine Intel TDX quote, fresh for this check, binds that key, with matching GPU evidence.',checks:{},notChecked:[]}});`,
+    host({type:'trust-badge',runId:'run-1-abcdef',badge:{state:'verified-private',title:'Verified private model',explanation:'This answer\\'s signature and NEAR AI Cloud\\'s attestation were checked, and the connection that carried your request was proven to end inside NEAR AI Cloud\\'s private enclave.',reasons:[],helpers:'This badge is about the answer above.'}});`,
   workflow: `
     command('plan-phase 7');
     host({type:'assistant-start',model:'z-ai/glm-5.3',privacy:'Private · runs in NEAR TEE'});

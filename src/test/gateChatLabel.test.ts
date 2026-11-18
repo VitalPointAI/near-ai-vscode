@@ -693,7 +693,9 @@ test('review 89.6: lowering a file\'s label with Set Label tells the chat in vie
   }
 });
 
-test('review 89.4: a Verify signature row is placed only under its own run\'s answer, and waits for it rather than going under another one', async () => {
+// PR 4e replaced the Verify signature row with the trust badge (CLAS-08), which keeps this rule: it is placed only under its own run's answer, never under
+// another one. The badge is posted after its answer, so it never waits; one for a run whose answer is not on the page draws nothing.
+test('review 89.4: a trust badge is placed only under its own run\'s answer, never under another one', async () => {
   const page = chatPage();
   const transcript = page.nodes.get('transcript')!;
   const answer = async (runId: string) => {
@@ -702,19 +704,46 @@ test('review 89.4: a Verify signature row is placed only under its own run\'s an
     await new Promise((resolve) => setTimeout(resolve, 5));
     return transcript.children.at(-1) as never as { children: unknown[] };
   };
+  const failed = { state: 'not-verified', title: 'Not verified', explanation: 'NEAR AI could not show that a private model on NEAR AI Cloud sent this answer.', reasons: ['The check failed: The signature does not match the signing address.'], helpers: 'Helpers.' };
   const reply1 = await answer('run-1-aaaaaa');
-  // run-2's row and its failed result arrive before run-2's answer is on the page.
-  page.send({ type: 'response-verifiable', runId: 'run-2-bbbbbb' });
-  page.send({ type: 'response-verification', runId: 'run-2-bbbbbb', result: { outcome: 'failed', summary: 'The signature does not match the signing address.', checks: {}, notChecked: [] } });
-  assert.equal(nodesUnder(transcript as never).filter((node) => node.id === 'verify-run-2-bbbbbb').length, 0, 'not placed under run-1\'s answer, or anywhere');
+  // run-2's badge arrives before run-2's answer is on the page: it goes nowhere, least of all under run-1's answer.
+  page.send({ type: 'trust-badge', runId: 'run-2-bbbbbb', badge: failed });
+  const badges = (root: { children: unknown[] }) => nodesUnder(root).filter((node) => node.tagName === 'button' && node.className === 'trust-badge');
+  assert.equal(badges(transcript as never).length, 0, 'not placed under run-1\'s answer, or anywhere');
   const reply2 = await answer('run-2-bbbbbb');
   assert.notEqual(reply2, reply1);
-  const rows = nodesUnder(reply2).filter((node) => node.id === 'verify-run-2-bbbbbb');
-  assert.equal(rows.length, 1, 'under run-2\'s own answer');
-  assert.equal(nodesUnder(reply1).filter((node) => node.id === 'verify-run-2-bbbbbb').length, 0);
-  assert.match(nodesUnder(rows[0] as never).map((node) => node.textContent).join(' '), /The signature does not match/);
-  assert.ok(nodesUnder(rows[0] as never).some((node) => node.tagName === 'button' && node.textContent === 'Check again'));
-  // A row for a run whose answer is already on the page goes straight under it.
-  page.send({ type: 'response-verifiable', runId: 'run-1-aaaaaa' });
-  assert.equal(nodesUnder(reply1).filter((node) => node.id === 'verify-run-1-aaaaaa').length, 1);
+  page.send({ type: 'trust-badge', runId: 'run-2-bbbbbb', badge: failed });
+  assert.equal(badges(reply2).length, 1, 'under run-2\'s own answer');
+  assert.equal(badges(reply1).length, 0);
+  // A badge for a run whose answer is already on the page goes straight under it.
+  page.send({ type: 'trust-badge', runId: 'run-1-aaaaaa', badge: failed });
+  assert.equal(badges(reply1).length, 1);
+  assert.equal(badges(transcript as never).length, 2);
+});
+
+// ---- PR #89 last review, minor findings ----
+
+test('review 89 minor 1: Set Label says the chat keeps its label only when the new label is absent or does not cover the chat\'s mark; a raise says nothing', () => {
+  const scales = SCALE_PRESETS;
+  const internal = label('org', 'Internal');
+  // The chat held the file's old label (Confidential).
+  assert.equal(gateCommands.chatKeepsLabel([CONFIDENTIAL], [CONFIDENTIAL], internal, scales), true, 'lowered to Internal: the chat keeps Confidential');
+  assert.equal(gateCommands.chatKeepsLabel([CONFIDENTIAL], [CONFIDENTIAL], undefined, scales), true, 'the label removed');
+  assert.equal(gateCommands.chatKeepsLabel([CONFIDENTIAL], [CONFIDENTIAL], RESTRICTED, scales), false, 'a raise to Restricted covers the chat: nothing to keep');
+  assert.equal(gateCommands.chatKeepsLabel([CONFIDENTIAL], [CONFIDENTIAL], CONFIDENTIAL, scales), false, 'the same level covers it too');
+  const nato = label('nato', 'NATO Restricted');
+  assert.equal(gateCommands.chatKeepsLabel([CONFIDENTIAL], [CONFIDENTIAL], nato, scales), true, 'a label on another scale does not cover the chat\'s org label');
+  assert.equal(gateCommands.chatKeepsLabel([PUBLIC], [CONFIDENTIAL], internal, scales), false, 'a chat that did not hold the old label is told nothing');
+  // setLabel decides with it, after its own lowering check.
+  const source = readFileSync(path.join(__dirname, '..', '..', 'src', 'services', 'gateCommands.ts'), 'utf8');
+  assert.match(source, /if \(held !== undefined && chatKeepsLabel\(held, current\.mark, label, policy\.scales\)\)/);
+});
+
+test('review 89 minor 4: the ChatInView doc comment sits directly above its type, and isChatInView has its own', () => {
+  const source = readFileSync(path.join(__dirname, '..', '..', 'src', 'services', 'chatInView.ts'), 'utf8').split('\n');
+  const typeLine = source.findIndex((line) => line.startsWith('export interface ChatInView'));
+  assert.equal(source[typeLine - 1], '/** What the label surfaces need of the chat on screen. */');
+  const guardLine = source.findIndex((line) => line.startsWith('export function isChatInView'));
+  assert.match(source[guardLine - 1]!, /^\/\*\* Whether a value passed to a command is a ChatInView/);
+  assert.equal(source.filter((line) => line === '/** What the label surfaces need of the chat on screen. */').length, 1);
 });

@@ -122,7 +122,10 @@ test('a provider without signatures reports unavailable instead of verified', as
   assert.equal(result.outcome, 'unavailable');
 });
 
-test('the chat offers Verify only for TEE-private cloud answers, and verifies through the client', async () => {
+// CLAS-08 (PR 4e) replaced the Verify signature row, offered only under TEE-private answers, with a trust badge on every cloud answer: the cases below
+// keep the row's checks (a local answer gets nothing; Check again verifies the private answer through the client) and add that a forwarded answer now
+// shows a badge too.
+test('the chat shows a trust badge under each cloud answer and none under a local one, and Check again verifies through the client', async () => {
   const { mkdtemp } = await import('node:fs/promises');
   const { tmpdir } = await import('node:os');
   const path = await import('node:path');
@@ -135,15 +138,15 @@ test('the chat offers Verify only for TEE-private cloud answers, and verifies th
     async actualCostsUsd() { return undefined; },
     async verifyResponse(model: string, given: typeof evidence) { verified.push(`${model}:${given.chatId}`); return { outcome: 'signed' as const, summary: 'Signed by 0xabc.', checks: {}, notChecked: [] }; }
   };
-  const cases: Array<[string, boolean | undefined, boolean]> = [['Private · runs in NEAR TEE', undefined, true], ['Not private · forwarded', undefined, false], ['Local · runs on this machine', true, false]];
-  for (const [privacy, local, offered] of cases) {
+  const cases: Array<[string, boolean | undefined, boolean, boolean]> = [['Private · runs in NEAR TEE', undefined, true, true], ['Not private · forwarded', undefined, true, false], ['Local · runs on this machine', true, false, false]];
+  for (const [privacy, local, offered, checkAgain] of cases) {
     const root = await mkdtemp(path.join(tmpdir(), 'near-ai-verify-'));
     const posted: Array<{ type: string; runId?: string }> = [];
     const conversation = newTestConversation(root, (message) => posted.push(message as never), path.join(root, '.ckpt'));
     await conversation.send({ text: 'hi', client: client as never, model: 'z-ai/glm-5.3', privacy, local, policy: { mode: 'approve-risky', emergencyStop: false }, rules: DEFAULT_RULES });
-    const offer = posted.find((message) => message.type === 'response-verifiable');
+    const offer = posted.find((message) => message.type === 'trust-badge');
     assert.equal(Boolean(offer), offered, privacy);
-    if (offer) assert.equal((await conversation.verifyRun(offer.runId!)).outcome, 'signed');
+    if (offer && checkAgain) assert.equal((await conversation.verifyRun(offer.runId!)).outcome, 'signed');
   }
   assert.deepEqual(verified, ['z-ai/glm-5.3:chatcmpl-1']);
 });
