@@ -82,11 +82,11 @@ export async function updateTeam(library: TeamLibrary, requested?: string): Prom
     afterRun(`update|${library.directory}|${requested ?? ''}`, () => { void vscode.window.showInformationMessage('The run has ended. Update your team now?', 'Update Team…').then((choice) => { if (choice) void updateTeam(library, requested); }); });
     return;
   }
-  const updater = new TeamUpdater(library);
+  const updater = new TeamUpdater(library, undefined, undefined, () => vscode.workspace.workspaceFolders?.[0]?.uri.fsPath);
   let file = requested;
   if (!file) {
     const previews = (await Promise.all((await teamFiles(library)).map((candidate) => updater.preview(candidate).catch(() => undefined)))).filter((preview): preview is TeamUpdatePreview => Boolean(preview));
-    if (!previews.length) { void vscode.window.showInformationMessage('No team here was made from a built-in project type, so there is nothing to update.'); return; }
+    if (!previews.length) { void vscode.window.showInformationMessage('No team here was made from a built-in project type or staff template, so there is nothing to update.'); return; }
     const pick = await vscode.window.showQuickPick(previews.map((preview) => ({ label: preview.name, description: `${preview.plan.template.label} template ${preview.plan.template.fromVersion ? `v${preview.plan.template.fromVersion}` : '(no version recorded)'} → v${preview.plan.template.toVersion}${preview.plan.upToDate ? ' · up to date' : ''}`, detail: preview.file, file: preview.file })), { title: 'Update which team?' });
     if (!pick) return;
     file = pick.file;
@@ -152,7 +152,7 @@ export async function updateTeam(library: TeamLibrary, requested?: string): Prom
 export async function offerTeamUpdates(library: TeamLibrary, notices: UpdateNotices): Promise<void> {
   if (!vscode.workspace.getConfiguration('nearAi').get<boolean>(UPDATE_NOTICE_SETTING, true)) return;
   if (runInProgress()) { afterRun(`offer|${library.directory}`, () => { void offerTeamUpdates(library, notices); }); return; }
-  const updater = new TeamUpdater(library);
+  const updater = new TeamUpdater(library, undefined, undefined, () => vscode.workspace.workspaceFolders?.[0]?.uri.fsPath);
   for (const file of await teamFiles(library)) {
     const preview = await updater.outdated(file);
     if (!preview || !notices.shouldOffer(file, preview.plan.template.toVersion)) continue;
