@@ -379,6 +379,13 @@ export class AgentConversation {
   private trustWrites: Promise<void> = Promise.resolve();
   /** The badge last shown for each run, the newest SHOWN_BADGES_KEPT (as many answers as the page keeps), so Check again on one no longer kept says so. */
   private readonly shownBadges = new Map<string, TrustBadge>();
+  /**
+   * Set by dispose (PR #95 CI): no badge record is written after it, a record queued before it is dropped, and close() waits for the one already being
+   * written, so nothing reaches the thread store once the conversation is closed.
+   */
+  private disposed = false;
+  /** The badge timeouts still running, cleared when the chat is replaced or closed. */
+  private readonly badgeTimerHandles = new Set<unknown>();
   /** The timer the badge's check waits on (D-56); a test gives its own clock. A timer never keeps the extension host alive. */
   public badgeTimers: { set(run: () => void, ms: number): unknown; clear(handle: unknown): void } = {
     set: (run, ms) => { const handle = setTimeout(run, ms); handle.unref?.(); return handle; },
@@ -570,6 +577,8 @@ export class AgentConversation {
   }
 
   public async send(request: AgentTurnRequest): Promise<void> {
+    // A conversation used again after it was closed keeps its badges again.
+    this.disposed = false;
     // Messages queued while this turn was being prepared stay queued: the run delivers them.
     this.halt();
     const abort = new AbortController();
@@ -769,7 +778,12 @@ export class AgentConversation {
       await this.saveTranscript(request.model);
       // CLAS-08: the lead agent's answer through a cloud client gets its trust badge, chosen only from checks that ran. A sub-agent's answer is not shown
       // as an answer and gets none (D-56); an answer through a local client gets none. It comes after the chat is saved, so its record has a chat to go in.
-      if (result.outcome !== 'cancelled' && !request.local) this.startBadge(runId, request, result.usage.at(-1), lastAssistantText(result.messages));
+      if (result.outcome !== 'cancelled' && !request.local) {
+        this.startBadge(runId, request, result.usage.at(-1), lastAssistantText(result.messages));
+        // A badge already settled when the run ends (no check follows) is saved with the chat before the run returns, like the transcript above, so the
+        // run leaves no write of its own behind (PR #95 CI). A badge whose check is still running is saved by that check, which close() drains.
+        await this.trustWrites;
+      }
       const ids = allUsage.map((turn) => turn.requestId).filter((id): id is string => Boolean(id));
       if (account) {
         if (result.outcome !== 'cancelled') { costAsked = true; await this.reportRunCost(account, runId, request.model, record); }
@@ -1070,17 +1084,20 @@ export class AgentConversation {
     const current = () => attestation === this.chatAttestation && attestation.closed !== true;
     let settled = false;
     const timer = this.badgeTimers.set(() => {
+      this.badgeTimerHandles.delete(timer);
       if (settled || entry.verification !== 'pending' || !current()) return;
       entry.verification = 'timed-out';
       this.postBadge(runId, entry);
     }, BADGE_CHECK_TIMEOUT_MS);
+    this.badgeTimerHandles.add(timer);
     let check: Promise<AnswerCheckResult>;
     try { check = entry.client.verificationFor(entry.model, evidence); } catch (error) { check = Promise.reject(error); }
     void check.then((result) => result, (error: unknown): AnswerCheckResult => ({ outcome: 'unavailable', summary: `The answer could not be checked (${error instanceof Error ? error.message : 'unknown error'}).`, checks: {}, notChecked: NOT_CHECKED_IN_EDITOR }))
       .then((result) => {
         settled = true;
         this.badgeTimers.clear(timer);
-        if (!current()) return;
+        this.badgeTimerHandles.delete(timer);
+        if (!current() || this.disposed) return;
         // A person's Check again that finished first already holds the newer result.
         if (entry.verification !== 'pending' && entry.verification !== 'timed-out') return;
         entry.result = result;
@@ -1116,17 +1133,27 @@ export class AgentConversation {
    */
   private keepTrust(runId: string, entry: BadgeEntry, badge: TrustBadge): void {
     const store = this.transcripts;
-    if (!(store instanceof ThreadStore) || entry.answerText === '') return;
+    if (!(store instanceof ThreadStore) || entry.answerText === '' || this.disposed) return;
     const record = trustRecordOf(entry.answerText, badge, new Date());
     const mode = this.trustWriters.get(record.key) === runId ? 'replace' : 'weaker';
     this.trustWriters.set(record.key, runId);
     for (const old of [...this.trustWriters.keys()].slice(0, -SHOWN_BADGES_KEPT)) this.trustWriters.delete(old);
-    const write = this.trustWrites.then(() => store.recordTrust(entry.thread, record, mode)).catch(() => undefined);
+    // Queued behind the writes before it; one still queued when the conversation is closed is dropped, never written later (PR #95 CI).
+    const write = this.trustWrites.then(() => this.disposed ? undefined : store.recordTrust(entry.thread, record, mode)).catch(() => undefined);
     this.trustWrites = write;
   }
 
-  /** Resolves once every badge record this chat started writing has been written (or failed); for tests and an orderly close. */
+  /** Resolves once every badge record this chat started writing has been written, failed or been dropped by a close. */
   public trustRecorded(): Promise<void> { return this.trustWrites; }
+
+  /**
+   * Closes the conversation and waits until nothing of it is still being written to the thread store (PR #95 CI): later badge results and timeouts are
+   * ignored, records still queued are dropped, and the one being written is awaited. The answer checks themselves are not awaited; their results are dropped.
+   */
+  public async close(): Promise<void> {
+    this.dispose();
+    await this.trustWrites;
+  }
 
   /**
    * The check after one of a run's attested-cloud answers settled (D-36, D-55). For a closed or replaced chat nothing is posted or set. A failed check is
@@ -1260,9 +1287,16 @@ export class AgentConversation {
     this.routeFailures = new Map();
     this.badgeFailures = new Map();
     this.droppedBadgeFailures = 0;
+    // The old chat's badge timeouts can post nothing any more.
+    for (const handle of this.badgeTimerHandles) this.badgeTimers.clear(handle);
+    this.badgeTimerHandles.clear();
   }
 
-  public dispose(): void { this.reset(); }
+  /** Closes the conversation: nothing more is posted or written for it (see close() to also wait for a write in progress). */
+  public dispose(): void {
+    this.disposed = true;
+    this.reset();
+  }
 
   /** The agent definitions a run can start; without any, the run has no Agent tool. */
   private spawnableAgents(request: AgentTurnRequest): GsdAgent[] {

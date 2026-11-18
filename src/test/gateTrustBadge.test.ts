@@ -990,3 +990,52 @@ test('review 95.4: a chat\'s badge records are capped in bytes as well as in num
   const small = many.map((record) => ({ ...record, reasons: [] }));
   assert.equal(mergeTrustRecords(small, []).length, MAX_TRUST_RECORDS);
 });
+
+// ---- PR #95 CI: no badge write outlives the conversation ----
+
+test('PR 95 CI: closing a conversation while its answer\'s check is still running writes nothing afterwards, posts nothing, and clears its timeout', async () => {
+  const near = await cloud('bound');
+  near.mode = 'hang';
+  const root = mkdtempSync(path.join(tmpdir(), 'near-ai-badge-close-'));
+  const store = threadStoreFor(root);
+  const posted: Array<{ type: string }> = [];
+  const conversation = new AgentConversation(root, (message) => posted.push(message as never), path.join(root, '.ckpt'), undefined, store);
+  conversation.gateHost = testGateHost();
+  const timers: Array<{ run: () => void; cleared: boolean }> = [];
+  conversation.badgeTimers = { set: (run) => { timers.push({ run, cleared: false }); return timers.length - 1; }, clear: (handle) => { timers[handle as number]!.cleared = true; } };
+  await conversation.send({ text: 'hello', client: near.client, model: 'tee-model', privacy: PRIVATE, policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES });
+  const id = conversation.id;
+  assert.equal(posted.filter((message) => message.type === 'trust-badge').length, 1, 'Checking now');
+  // Every write the store gets from now on is counted.
+  let writesAfterClose = 0;
+  const recordTrust = store.recordTrust.bind(store);
+  store.recordTrust = async (...args: Parameters<ThreadStore['recordTrust']>) => { writesAfterClose += 1; return recordTrust(...args); };
+  await conversation.close();
+  const after = posted.length;
+  assert.equal(timers[0]!.cleared, true, 'the badge timeout was cleared');
+  near.mode = 'valid';
+  near.release();
+  await settle();
+  timers[0]!.run();
+  await settle();
+  assert.equal(writesAfterClose, 0, 'the late result wrote nothing');
+  assert.equal(posted.length, after, 'and posted nothing');
+  assert.equal((await store.meta(id))?.trust, undefined);
+});
+
+test('PR 95 CI: a badge settled when the run ends is saved before send returns, so nothing of the run is still being written after it', async () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'near-ai-badge-settled-'));
+  const store = threadStoreFor(root);
+  let inFlight = 0;
+  const recordTrust = store.recordTrust.bind(store);
+  store.recordTrust = async (...args: Parameters<ThreadStore['recordTrust']>) => { inFlight += 1; try { return await recordTrust(...args); } finally { inFlight -= 1; } };
+  const conversation = new AgentConversation(root, () => undefined, path.join(root, '.ckpt'), undefined, store);
+  conversation.gateHost = testGateHost();
+  await conversation.send({ text: 'hello', client: plainClient() as never, model: 'tee-model', privacy: PRIVATE, policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES });
+  assert.equal(inFlight, 0, 'no record write is still running when send returns');
+  assert.equal((await store.meta(conversation.id))?.trust?.length, 1, 'the not-checked badge is already kept');
+  await conversation.close();
+  // A conversation used again after close keeps its badges again.
+  await conversation.send({ text: 'again', client: plainClient(undefined) as never, model: 'tee-model', privacy: PRIVATE, policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES });
+  assert.equal((await store.meta(conversation.id))?.trust?.length, 1);
+});
