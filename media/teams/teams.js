@@ -265,6 +265,14 @@
     requestReview();
   }
 
+  /**
+   * The team being built was cloned from a team (Clone and modify, from the picker or the recommendation, or a resumed draft that was): its name must be
+   * one no team has, and it starts with the default icon, never the icon of the team it was copied from. From scratch clears it.
+   */
+  function isClone() {
+    return Boolean(work && work.mode === 'wizard' && (work.path === 'clone' || work.path === 'existing') && work.startingPoint && work.startingPoint !== 'empty');
+  }
+
   function requestReview() {
     if (!work) return;
     if (reviewTimer) clearTimeout(reviewTimer);
@@ -275,6 +283,8 @@
       seq += 1;
       const message = { type: 'review', seq, draft: work.draft };
       if (work.mode === 'editor') message.id = work.id;
+      // A clone's name is checked by the host against every team's (owner, 2026-11-18); the page shows what it says and has no naming rules of its own.
+      if (isClone()) message.clone = true;
       vscode.postMessage(message);
     }, 150);
   }
@@ -869,11 +879,20 @@
 
   function sectionPurpose(root) {
     const draft = work.draft;
-    root.append(field('Team name', input(draft.name, (value) => { draft.name = value.replace(/[\r\n]+/g, ' '); renderHeaderName(); changed(false); }, { id: 'f-name', maxlength: '80', autocomplete: 'off' }), work.mode === 'editor' ? 'Renaming keeps the file and its /team: command.' : 'Shown in the library and when the team runs.'));
+    const nameInput = input(draft.name, (value) => { draft.name = value.replace(/[\r\n]+/g, ' '); renderHeaderName(); changed(false); }, { id: 'f-name', maxlength: '80', autocomplete: 'off' });
+    const nameField = field('Team name', nameInput, work.mode === 'editor' ? 'Renaming keeps the file and its /team: command.' : isClone() ? 'Shown in the library and when the team runs. A copy needs a name no other team has.' : 'Shown in the library and when the team runs.');
+    root.append(nameField);
+    // The team's own name problems, under the field (a name another team has, or none): the host's words, from its review.
+    if (work.mode === 'wizard') {
+      const slot = reviewSlot(nameField, 'team', undefined, ['name']);
+      slot.id = 'f-name-issues';
+      nameInput.setAttribute('aria-describedby', [nameInput.getAttribute('aria-describedby'), slot.id].filter(Boolean).join(' '));
+    }
     root.append(field('What the team is for', textarea(draft.description, (value, node) => { const clean = value.replace(/[\r\n]+/g, ' '); if (clean !== value) node.value = clean; draft.description = clean; changed(false); }, 2, 'f-desc'), 'One or two sentences. The lead agent reads this.'));
     root.append(privateToggle(draft));
     if (work.mode === 'editor') root.append(iconField());
     if (work.mode !== 'wizard') return;
+    if (isClone()) root.append(el('p', 'hint', 'Icon: the new team starts with the default icon (its initials on a colour), not the icon of the team you copied. After you save it, upload a picture or generate one on its Purpose tab.'));
     const where = el('fieldset', 'choices');
     where.append(el('legend', '', 'Save it as'));
     [['project', 'This project\'s team', 'Saved in .planning/.near-ai/team.md; run with /team:project.'], ['user', 'One of my teams', 'Reusable in any project; run with /team:<name>.']].forEach(([value, label, hint]) => {
@@ -1640,6 +1659,15 @@
         slot.node.append(line);
         continue;
       }
+      if (slot.kind === 'team') {
+        // The team's own name: its problems are shown under the field, and the field is marked invalid while there is one.
+        const own = (issue) => (issue.member === undefined || issue.member === null) && slot.fields.includes(issue.field);
+        const errors = review.errors.filter(own);
+        const nameInput = $('f-name');
+        if (nameInput) nameInput.setAttribute('aria-invalid', errors.length ? 'true' : 'false');
+        if (errors.length) { const list = el('ul', 'issues'); errors.forEach((issue) => list.append(issueLine(issue, 'error'))); slot.node.append(list); }
+        continue;
+      }
       const issues = [].concat(review.errors.filter((issue) => issue.member === slot.index && slot.fields.includes(issue.field)).map((issue) => issueLine(issue, 'error')), review.warnings.filter((issue) => issue.member === slot.index && slot.fields.includes(issue.field)).map((issue) => issueLine(issue, 'warning')));
       if (issues.length) { const list = el('ul', 'issues'); issues.forEach((item) => list.append(item)); slot.node.append(list); }
     }
@@ -1919,6 +1947,7 @@
     if (!work) return;
     if (work.mode === 'editor') { vscode.postMessage({ type: 'save', draft: work.draft, id: work.id, base: work.base }); return; }
     const message = { type: 'create', draft: work.draft, target: work.target };
+    if (isClone()) message.clone = true;
     if (work.target === 'project' && (work.startingPoint || '').startsWith('type:') && work.projectType) message.projectType = { id: work.projectType, goal: work.draft.description };
     vscode.postMessage(message);
   }

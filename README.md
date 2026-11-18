@@ -683,9 +683,15 @@ until it runs out aren't shown.
   the team history; with no folder open it is put in the chat, and a
   built-in team is saved to My teams under its own name first (with a number
   added if that name is taken). **Clone and modify** opens the new team's
-  Purpose step with the members filled in and its description copied; a
-  saved team's copy is named "Copy of" the team, and a built-in team's copy
-  keeps the built-in's name (with a number added if that name is taken). A built-in team made from your answers
+  Purpose step with the members filled in and its description copied. The
+  copy starts with the name "<team name> copy" (with a number added if that
+  name is taken), and it must keep a name of its own: if you type a name
+  that one of your teams, a built-in team or this project's team already
+  has, the studio says so under the name field and **Save** stays off until
+  you change it. Names are compared ignoring capitals, spaces and
+  punctuation, the way the team's file name is made. A copy never takes the
+  icon of the team it came from: it starts with the default icon, and after
+  you save it you can upload or generate its own on its Purpose tab. A built-in team made from your answers
   asks what the team is for and where its models may run, next to the
   buttons. **Recommend a team for me** asks the kind of work, its risk, where
   models may run and what the team is for, then shows the team it suggests,
@@ -721,7 +727,12 @@ until it runs out aren't shown.
   the default; changing or removing an icon keeps the old one, and the
   **History** tab can restore it. A team without an icon, built-in teams
   included, shows its initials on a colour that comes from its name. Archive,
-  restore, duplicate and **Use as is** keep a team's icon with it.
+  restore, duplicate and **Use as is** keep a team's icon with it; **Clone
+  and modify** does not. Each **Generate with AI…** also asks for a colour
+  scheme and drawing style picked at random, so the same team can get a
+  different picture; if the picture comes out exactly the same as another
+  team's icon, one more is made, and if that one matches too, the icon is
+  left as it was and the studio says so.
 - **Sharing a team.** **Share…** on a team's card in Team Studio (or next to
   it when you build a team from an existing one) is the way to send a team
   (**Open as Markdown** opens the file itself). It saves the team as one file,

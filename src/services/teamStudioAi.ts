@@ -159,9 +159,11 @@ export async function imageCallBlocked(deps: TeamAiDeps, choice: Extract<TeamAiC
 export type TeamImageResult = { ok: true; bytes: Uint8Array; model: string; private: boolean } | { ok: false; reason: string; model?: string };
 
 /** Chooses the image model, runs the outbound check on the prompt, then makes one image. Nothing reaches a provider unless the check allows it. */
-export async function teamImageCall(deps: TeamAiDeps, call: { need: TeamAiNeed; prompt: string; signal?: AbortSignal; why?: string }): Promise<TeamImageResult> {
+/** `model`: the model the person agreed to; when the settings now choose another, nothing is sent and the reason says so. */
+export async function teamImageCall(deps: TeamAiDeps, call: { need: TeamAiNeed; prompt: string; signal?: AbortSignal; why?: string; model?: string }): Promise<TeamImageResult> {
   const choice = chooseImageModel(call.need, deps, call.why);
   if (!choice.ok) return { ok: false, reason: choice.reason };
+  if (call.model !== undefined && choice.model !== call.model) return { ok: false, reason: `the image model would now be ${choice.model}, not ${call.model}, which you agreed to. Generate again to be asked about it.`, model: choice.model };
   const blocked = await imageCallBlocked(deps, choice, call.prompt);
   if (blocked) return { ok: false, reason: blocked, model: choice.model };
   if (call.signal?.aborted) return { ok: false, reason: 'Cancelled.', model: choice.model };

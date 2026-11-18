@@ -51,6 +51,16 @@ Each such answer is checked afterwards, and a failed check stops that level for 
   new wording. While you edit a team, Team Studio adds a suggestion when no member owns an area of
   its own or no one brings the parts together; it is advice only, so your existing teams still
   save and still show Ready.
+- **A cloned team gets a name and an icon of its own.** **Clone and modify** in Team Studio now
+  starts the copy's name as "<team name> copy" (with a number added if that is taken). If you type
+  a name that one of your teams, a built-in team or this project's team already has, ignoring
+  capitals, spaces and punctuation, the studio says so under the name field and **Save** stays off
+  until you change it; the extension checks the name again when it saves. **Duplicate** follows the
+  same naming rule. A clone never takes the icon of the team it came from: it shows the default
+  icon until you upload or generate one on its Purpose tab. **Generate with AI…** now asks for a
+  colour scheme and drawing style picked at random each time, and if the picture is exactly the
+  same as another team's icon, it makes one more; if that matches too, it leaves the icon as it was
+  and says so.
 
 ## 0.4.31
 
