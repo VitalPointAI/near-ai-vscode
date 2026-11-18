@@ -105,6 +105,11 @@ export interface UsageMetadata {
   evidence?: ResponseEvidence;
   /** The connection binding fact the route check read for this request, when the client has a binding source (plan 25 gives NEAR clients one). */
   connection?: ConnectionBindingFact;
+  /**
+   * True only when the request went over a connection pinned to that fact's key, which the route check allows only while the fact is fresh and bound
+   * (D-50). A bound fact alone does not prove the connection: a request sent without the pin may have reached another server (CLAS-08).
+   */
+  connectionPinned?: true;
 }
 
 export interface ImageGenerationOptions {
@@ -406,6 +411,8 @@ export class NearAiClient {
   private readonly streams = new WeakMap<Response, { abort: () => void; release: () => void }>();
   /** The binding fact the route check read for each content response, when the client has a binding source; its usage carries it. */
   private readonly connections = new WeakMap<Response, ConnectionBindingFact>();
+  /** The content responses that came over a connection pinned to a fresh bound fact's key; their usage says so. */
+  private readonly pinnedResponses = new WeakSet<Response>();
   /** The binding refresh running for each host, at most one: a route check that finds the fact missing or old starts one, never waits for it (OFFL-01). */
   private readonly refreshing = new Map<string, Promise<void>>();
   /** The route of each response its route check allowed at attested-cloud to NEAR AI Cloud: its answer is checked afterwards (D-36). */
@@ -424,6 +431,12 @@ export class NearAiClient {
   public get baseHost(): string | undefined {
     try { return new URL(this.options.baseUrl).hostname.toLowerCase() || undefined; } catch { return undefined; }
   }
+
+  /** This client's endpoint is NEAR AI Cloud's own, where a TEE model's answers can be checked (the trust badge reads it, CLAS-08). */
+  public get nearEndpoint(): boolean { return isNearCloudEndpoint(this.options.baseUrl); }
+
+  /** The cached catalog entry of a model, or undefined when the catalog has not listed it. Never fetches. */
+  public catalogEntry(id: string): ModelInfo | undefined { return this.models.get(id); }
 
   /** The key's spend account, when spend tracking is on for this client. */
   public get spend(): SpendSink | undefined { return this.options.spend; }
@@ -1179,7 +1192,7 @@ export class NearAiClient {
   /** The usage a response starts with: its headers, and the binding fact the route check read when there is one. */
   private usageStart(response: Response, started: number): UsageMetadata {
     const connection = this.connections.get(response);
-    return { ...metadataFromHeaders(response.headers, started), ...(connection === undefined ? {} : { connection }) };
+    return { ...metadataFromHeaders(response.headers, started), ...(connection === undefined ? {} : { connection }), ...(this.pinnedResponses.has(response) ? { connectionPinned: true as const } : {}) };
   }
 
   private async request(path: string, init: RequestInit, overrides: { maxRetries?: number; model?: string; failFast?: boolean; spendKind?: SpendKind; secret?: string; stream?: boolean } = {}): Promise<Response> {
@@ -1246,7 +1259,7 @@ export class NearAiClient {
         if (response.ok) {
           if (model) this.cooling.delete(model);
           if (connection !== undefined) this.connections.set(response, connection);
-          if (check?.pinned !== undefined) this.attestedAnswers.set(response, check.route);
+          if (check?.pinned !== undefined) { this.attestedAnswers.set(response, check.route); this.pinnedResponses.add(response); }
           if (billable) this.charge(path, init, model, overrides.spendKind, response, 'open');
           // A stream keeps the caller's stop wired to the connection while its body is read, and its
           // reader can close the connection itself when the stream stalls; the reader releases it.

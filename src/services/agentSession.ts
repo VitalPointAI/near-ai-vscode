@@ -57,6 +57,7 @@ import { ThreadStore } from './threadStore';
 import type { ConversationStore, Transcript } from './transcripts';
 import type { RunEnd, RunMarkers } from './runMarkers';
 import { NOT_CHECKED_IN_EDITOR, type ResponseEvidence } from './attestation';
+import { trustBadgeFor, type TrustBadge, type TrustBadgeFacts, type TrustVerification } from '../domain/gate/trustBadge';
 import { PreparedAttachments, StagedAttachment } from '../agent/attachments';
 import { imageTool, ImageDraft, ImageDraftEntry, ImageReviewDecision, ImageReviewer, memoryPreamble, memoryTools } from '../agent/extraTools';
 import { cleanOldDrafts, DRAFT_ID, draftFile } from '../agent/imageDrafts';
@@ -263,6 +264,52 @@ export const LOWERING_OVERTAKEN_TEXT =
 export const UNREADABLE_CHAT_LABEL_TEXT =
   "This chat's saved label could not be read, so it opens at org/Restricted and its content stays on this computer. If you know it holds nothing that sensitive, use NEAR AI: Lower This Chat's Label.";
 
+/** How many lead answers keep their badge's facts and check result in memory, so Check again and Show full attestation can use them (CLAS-08). */
+export const TRUST_ENTRIES_KEPT = 20;
+
+/** What a lead answer's badge is chosen from, apart from its check and the chat's other checks. */
+type AnswerFacts = Omit<TrustBadgeFacts, 'verification' | 'verificationSummary' | 'earlierCheckFailed'>;
+
+/** One lead answer's badge: the facts it is chosen from, its check as far as it got, and what Check again needs. */
+interface BadgeEntry {
+  readonly model: string;
+  readonly client: NearAiClient;
+  readonly evidence: ResponseEvidence | undefined;
+  readonly facts: AnswerFacts;
+  verification: TrustVerification;
+  result?: AnswerCheckResult;
+}
+
+/** Where a model runs, from the page's own privacy words when no catalog entry says (the words come from the same catalog). */
+function boundaryFromPrivacy(privacy: string): { boundary: AnswerFacts['boundary']; forwardedTo?: string } {
+  if (privacy.startsWith('Private')) return { boundary: 'tee' };
+  if (privacy.startsWith('Local')) return { boundary: 'local' };
+  const forwarded = /^Not private · forwarded(?: to (.+))?$/.exec(privacy);
+  if (forwarded) return { boundary: 'cloud', ...(forwarded[1] ? { forwardedTo: forwarded[1] } : {}) };
+  return { boundary: undefined };
+}
+
+/** The facts of a lead answer that never change after it arrived: where its model runs, its endpoint, its signature id and its connection (CLAS-08). */
+export function answerFactsOf(request: Pick<AgentTurnRequest, 'client' | 'model' | 'privacy' | 'local' | 'modelCatalog'>, usage: UsageMetadata | undefined): AnswerFacts {
+  const client = request.client as Partial<Pick<NearAiClient, 'nearEndpoint' | 'catalogEntry'>>;
+  let entry: ModelInfo | undefined;
+  try { entry = typeof client.catalogEntry === 'function' ? client.catalogEntry(request.model) : undefined; } catch { entry = undefined; }
+  const listed = request.modelCatalog?.find((candidate) => candidate.id === request.model);
+  const known = entry?.privacyBoundary ?? listed?.privacyBoundary;
+  const named: { boundary: AnswerFacts['boundary']; forwardedTo?: string } = known === 'tee' || known === 'cloud' || known === 'local' ? { boundary: known, ...(entry?.forwardedTo ? { forwardedTo: entry.forwardedTo } : {}) } : boundaryFromPrivacy(request.privacy);
+  let nearEndpoint = false;
+  try { nearEndpoint = client.nearEndpoint === true; } catch { nearEndpoint = false; }
+  return {
+    route: request.local ? 'local' : 'near',
+    nearEndpoint,
+    boundary: named.boundary,
+    ...(named.forwardedTo ? { forwardedTo: named.forwardedTo } : {}),
+    hasEvidence: usage?.evidence !== undefined,
+    ...(usage?.connection === undefined ? {} : { connection: usage.connection }),
+    connectionFresh: usage?.connectionPinned === true
+  };
+}
+
 export class AgentConversation {
   private messages: AgentMessage[] = [];
   /**
@@ -300,7 +347,8 @@ export class AgentConversation {
   public get outbound(): OutboundFingerprints { return this.outboundPrints; }
   /** Told the chat's mark whenever it changes, and undefined for a new chat (the status bar shows the label of the chat in view, D-33). */
   public onLabelChange: ((mark: Mark | undefined) => void) | undefined;
-  private readonly verifiable = new Map<string, { model: string; evidence: ResponseEvidence; client: NearAiClient }>();
+  /** Each lead answer's trust badge and what it was chosen from, by run id, the newest TRUST_ENTRIES_KEPT (Check again and Show full attestation use them). */
+  private readonly verifiable = new Map<string, BadgeEntry>();
   /** What the user typed, keyed by a hash of the message the model saw (survives compaction). */
   private display = new Map<string, string>();
   /** Messages already written to the thread log (D-07). A message is logged once, before the model's context can replace it with a trimmed copy or a summary. */
@@ -680,15 +728,9 @@ export class AgentConversation {
         // A run stopped before the model finished says why, and offers Continue (nothing continues without the click).
         const stopped = stopNotice(result);
         if (stopped) this.post({ type: 'run-stopped', reason: result.stop?.kind ?? 'turn-limit', text: stopped, continuable: true });
-        const evidence = result.usage.at(-1)?.evidence;
-        if (evidence && !request.local && request.privacy.startsWith('Private')) {
-          this.verifiable.set(runId, { model: request.model, evidence, client: request.client });
-          for (const old of [...this.verifiable.keys()].slice(0, -20)) this.verifiable.delete(old);
-          this.post({ type: 'response-verifiable', runId });
-          // A check after an answer of this run that settled while it ran is shown now: a failed one first, so its row offers Check again.
-          const shown = this.shownCheck(runId, evidence.chatId);
-          if (shown) this.post({ type: 'response-verification', runId, result: shown });
-        }
+        // CLAS-08: the lead agent's answer through a cloud client gets its trust badge, chosen only from checks that ran. A sub-agent's answer is not shown
+        // as an answer and gets none (D-56); an answer through a local client gets none.
+        if (!request.local) this.startBadge(runId, request, result.usage.at(-1));
       }
       if (changed.length) this.post({ type: 'run-changes', runId, files: changed });
       await record({ status: result.outcome === 'cancelled' ? 'cancelled' : 'completed', kind: 'message', model: request.model, summary: `${request.skill ? `/${request.skill.name} run` : 'Agent run'} ${result.outcome}; ${changed.length} file(s) changed.`, estimatedCostUsd: usage.estimatedCostUsd, inputTokens: usage.inputTokens, outputTokens: usage.outputTokens });
@@ -869,10 +911,12 @@ export class AgentConversation {
   /**
    * Checks NEAR's signature and TDX attestation for a run's final answer, always afresh (never the 10-minute report cache). When a check after one of this
    * run's answers had failed (D-55), Check again checks each of those answers afresh: when every one is signed, the chat's stop is cleared (if no other run
-   * of the chat still has a failed check) and route.attestation-cleared is recorded; a fresh result that fails again leaves the stop.
+   * of the chat still has a failed check) and route.attestation-cleared is recorded; a fresh result that fails again leaves the stop. The run's badge takes
+   * the fresh result (CLAS-08).
    */
   public async verifyRun(runId: string): Promise<AnswerCheckResult> {
     const checks = this.answerChecks.get(runId);
+    const entry = this.verifiable.get(runId);
     if (checks && checks.failed.size > 0) {
       const attestation = this.chatAttestation;
       let last: AnswerCheckResult | undefined;
@@ -880,6 +924,7 @@ export class AgentConversation {
       for (const [chatId, failed] of [...checks.failed]) {
         model = failed.model;
         last = await failed.client.verifyResponse(failed.model, failed.evidence);
+        if (entry?.evidence?.chatId === chatId) { entry.result = last; entry.verification = last.outcome; }
         if (last.outcome !== 'signed') return last;
         checks.failed.delete(chatId);
         if (attestation === this.chatAttestation) this.uncheckedFailures.delete(chatId);
@@ -890,18 +935,53 @@ export class AgentConversation {
         attestation.failed = false;
         try { checks.route.sink?.record(routeEventRecordFor(checks.route, 'route.attestation-cleared', { model, attestation: 'verified' })); } catch { /* D-21 */ }
       }
-      const entry = this.verifiable.get(runId);
-      return entry && checks.results.has(entry.evidence.chatId) ? checks.results.get(entry.evidence.chatId)! : last!;
+      return entry?.evidence && checks.results.has(entry.evidence.chatId) ? checks.results.get(entry.evidence.chatId)! : last!;
     }
+    if (!entry?.evidence) return { outcome: 'unavailable', summary: `This response can no longer be verified from the editor (only the last ${String(TRUST_ENTRIES_KEPT)} are kept).`, checks: {}, notChecked: NOT_CHECKED_IN_EDITOR };
+    const fresh = await entry.client.verifyResponse(entry.model, entry.evidence);
+    entry.result = fresh;
+    entry.verification = fresh.outcome;
+    return fresh;
+  }
+
+  /** The badge a run's lead answer shows now, or undefined when the run's badge is no longer kept or it came through a local client. */
+  public trustBadge(runId: string): TrustBadge | undefined {
     const entry = this.verifiable.get(runId);
-    if (!entry) return { outcome: 'unavailable', summary: 'This response can no longer be verified from the editor (only the last 20 are kept).', checks: {}, notChecked: NOT_CHECKED_IN_EDITOR };
-    return entry.client.verifyResponse(entry.model, entry.evidence);
+    return entry === undefined ? undefined : this.badgeOf(entry);
+  }
+
+  /** Starts a lead answer's badge when its run ends: keeps what it was chosen from and shows it (CLAS-08). */
+  private startBadge(runId: string, request: AgentTurnRequest, usage: UsageMetadata | undefined): void {
+    const facts = answerFactsOf(request, usage);
+    if (facts.route === 'local') return;
+    const evidence = usage?.evidence;
+    // A check follows only for a TEE model on NEAR AI Cloud's own endpoint whose answer carried a signature id; anything else is never checked.
+    const willCheck = facts.boundary === 'tee' && facts.nearEndpoint && evidence !== undefined;
+    const entry: BadgeEntry = { model: request.model, client: request.client, evidence, facts, verification: willCheck ? 'pending' : 'not-run' };
+    this.verifiable.delete(runId);
+    this.verifiable.set(runId, entry);
+    for (const old of [...this.verifiable.keys()].slice(0, -TRUST_ENTRIES_KEPT)) this.verifiable.delete(old);
+    this.postBadge(runId, entry);
+  }
+
+  /** The badge of one entry, chosen by trustBadgeFor alone, with what the editor does not check. */
+  private badgeOf(entry: BadgeEntry): TrustBadge | undefined {
+    const own = entry.evidence?.chatId;
+    const earlierCheckFailed = [...this.uncheckedFailures].some((chatId) => chatId !== own);
+    const badge = trustBadgeFor({ ...entry.facts, verification: entry.verification, ...(entry.result ? { verificationSummary: entry.result.summary } : {}), earlierCheckFailed });
+    return badge === undefined ? undefined : { ...badge, notChecked: entry.result?.notChecked ?? NOT_CHECKED_IN_EDITOR };
+  }
+
+  /** Shows an entry's badge under its own run's answer (never the newest one). */
+  private postBadge(runId: string, entry: BadgeEntry): void {
+    const badge = this.badgeOf(entry);
+    if (badge !== undefined) this.post({ type: 'trust-badge', runId, badge });
   }
 
   /**
    * The check after one of a run's attested-cloud answers settled (D-36, D-55). For a closed or replaced chat nothing is posted or set. A failed check is
-   * kept for Check again; the result is shown under the run's answer when the run's row is there (a failed one under that row even when it was for an
-   * earlier turn), or when the run ends.
+   * kept for Check again; a failure of another answer of the run makes the run's badge say so at once (the final answer's own check updates the badge
+   * itself).
    */
   private answerChecked(runId: string, route: SessionRoute, attestation: RouteAttestation, chatId: string, result: AnswerCheckResult, checked: { model: string; evidence: ResponseEvidence; client: NearAiClient }): void {
     if (attestation !== this.chatAttestation || attestation.closed === true) return;
@@ -914,23 +994,7 @@ export class AgentConversation {
     checks.results.set(chatId, result);
     if (result.outcome === 'failed') { checks.failed.set(chatId, checked); this.uncheckedFailures.add(chatId); }
     const entry = this.verifiable.get(runId);
-    if (entry) {
-      // The run has ended and its row is there: its final answer's result, or any failure of the run, is shown on it.
-      if (entry.evidence.chatId === chatId || result.outcome === 'failed') this.post({ type: 'response-verification', runId, result });
-    } else if (result.outcome === 'failed' && this.currentRunId !== runId) {
-      // A run that ended with no row (for example its final answer carried no evidence) gets one, so the failure can be checked again from it.
-      this.verifiable.set(runId, checked);
-      this.post({ type: 'response-verifiable', runId });
-      this.post({ type: 'response-verification', runId, result });
-    }
-  }
-
-  /** What a run's row shows when the run ends: a failed check of any of its answers, else its final answer's result, else nothing yet. */
-  private shownCheck(runId: string, finalChatId: string): AnswerCheckResult | undefined {
-    const checks = this.answerChecks.get(runId);
-    if (!checks) return undefined;
-    const failed = [...checks.failed.keys()][0];
-    return failed !== undefined ? checks.results.get(failed) : checks.results.get(finalChatId);
+    if (entry && entry.evidence?.chatId !== chatId && result.outcome === 'failed') this.postBadge(runId, entry);
   }
 
   /** Undoes every file change a run made with the file tools. */

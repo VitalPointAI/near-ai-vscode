@@ -47,6 +47,8 @@
   const pickupKit = window.nearPickup || { renderPickupCard: () => undefined };
   // The sync control in the bar and the invitation before sync is on; without its helper the bar keeps its first text and the chat shows no invitation.
   const syncKit = window.nearSyncControl || { renderSyncControl: () => undefined, renderSyncPrompt: () => undefined };
+  // The trust badge under each cloud answer (CLAS-08); without its helper the answers show no badge.
+  const trustKit = window.nearTrustBadge || { renderTrustBadge: () => undefined };
   const syncButton = $('sync');
   const welcomeMemory = {};
   if ($('welcome-new-profile')) $('welcome-new-profile').addEventListener('click', () => post({ type: 'new-profile' }));
@@ -89,20 +91,8 @@
   let lastReply;
   // Replies by run, so a cost NEAR settles later lands on the reply it belongs to.
   const replies = new Map();
-  // Verify signature rows whose run's answer is not on the page yet (PR #89 review), by run id, with the newest result for each: a row is only ever placed
-  // under its own run's answer, never under another one; it appears when that answer does.
-  const pendingVerify = new Map();
   // The Verify signature row of each run, by run id (the newest 50), so a result always finds its own run's row.
   const verifyRows = new Map();
-  function addVerifyRow(runId, node) {
-    if (verifyRows.has(runId)) return;
-    const row = el('div', 'verify');
-    row.id = 'verify-' + runId;
-    row.append(textButton('Verify signature', () => { row.replaceChildren(el('span', '', 'Checking NEAR\u2019s signature and attestation\u2026')); postFor({ type: 'verify-response', runId }); }));
-    node.append(row);
-    verifyRows.set(runId, row);
-    if (verifyRows.size > 50) verifyRows.delete(verifyRows.keys().next().value);
-  }
   function showVerification(runId, r) {
     const row = verifyRows.get(runId);
     if (!row) return;
@@ -546,7 +536,6 @@
   function resetConversation() {
     agentRows.clear();
     replies.clear();
-    pendingVerify.clear();
     verifyRows.clear();
     steerBubbles.clear();
     lastReply = undefined;
@@ -1509,8 +1498,6 @@
         if (m.runId) {
           replies.set(m.runId, lastReply);
           if (replies.size > 50) replies.delete(replies.keys().next().value);
-          // A row (and a result) that arrived before this answer is placed now, under its own answer.
-          if (pendingVerify.has(m.runId)) { const waiting = pendingVerify.get(m.runId); pendingVerify.delete(m.runId); addVerifyRow(m.runId, lastReply.node); if (waiting.result) showVerification(m.runId, waiting.result); }
         }
         finishAssistant(usageLine(m.usage, runInfo.model, runInfo.privacy, undefined, m.spend));
         { const meta = lastReply.node.querySelector('.meta'); if (meta && m.spend) meta.title = COST_TIP; }
@@ -1546,18 +1533,15 @@
         announce('Changes reverted.');
         break;
       }
-      case 'response-verifiable': {
-        if (!m.runId) break;
-        // Only under the run's own answer (PR #89 review): until that answer is on the page, the row waits for it, never placed under another answer.
-        const reply = replies.get(m.runId);
-        if (reply) addVerifyRow(m.runId, reply.node);
-        else if (!pendingVerify.has(m.runId)) { pendingVerify.set(m.runId, {}); if (pendingVerify.size > 50) pendingVerify.delete(pendingVerify.keys().next().value); }
+      case 'trust-badge': {
+        // Drawn only under its own run's answer: a run id with no answer on the page, or a state that is not one of the three, draws nothing.
+        const reply = typeof m.runId === 'string' ? replies.get(m.runId) : undefined;
+        if (reply) trustKit.renderTrustBadge(document, reply.node, m.badge, postFor, m.runId);
         break;
       }
       case 'response-verification': {
         if (!m.runId) break;
         if (verifyRows.has(m.runId)) showVerification(m.runId, m.result || {});
-        else if (pendingVerify.has(m.runId)) pendingVerify.get(m.runId).result = m.result || {};
         break;
       }
       case 'assistant-cost': {
