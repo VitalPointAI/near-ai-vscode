@@ -3,6 +3,8 @@ import { constants as fsConstants } from 'node:fs';
 import { copyFile, mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import * as path from 'node:path';
 import type { AgentDiscoveryAnswers } from '../domain/agents';
+import { readStaffTeamBlock, renderStaffTeamBlock } from '../domain/staff/teamBlock';
+import type { StaffTeamBlock } from '../domain/staff/teamBlock';
 import { parseFrontmatter, type GsdAgent } from '../gsd/library';
 import { recommendAgentTeam } from '../services/agentTeams';
 import { checkTeamIcon, iconReference, MAX_TEAM_ICON_BYTES, TEAM_ICON_SUFFIX, TeamIconError, TeamIconPartialError, withIconReference } from './teamIcon';
@@ -34,7 +36,11 @@ export interface TeamMember {
  * as if each had its own `privacy: private` line, and Team Studio sends the team only to a private model. A team whose members are all private counts as
  * private too (see teamIsPrivate).
  */
-export interface TeamDefinition { slug: string; name: string; description: string; members: TeamMember[]; file: string; private?: boolean }
+export interface TeamDefinition {
+  slug: string; name: string; description: string; members: TeamMember[]; file: string; private?: boolean;
+  /** The optional `staff:` frontmatter block of a military staff section team (staff contract, WP-0); absent in every other team. */
+  staff?: StaffTeamBlock;
+}
 
 const MEMBER_NAME = /^[a-z0-9][a-z0-9-]{0,39}$/;
 /** The tools a member gets when its section has no `tools:` line. */
@@ -124,7 +130,10 @@ export function parseTeam(text: string, file: string): TeamDefinition {
   if (!members.length) throw new Error('Add at least one member as a "## member-name" section.');
   if (members.length > 12) throw new Error('A team can have at most 12 members.');
   const teamPrivacy = parseTeamPrivacy(data.privacy);
-  return { slug: slugify(path.basename(file, '.md')), name, description: typeof data.description === 'string' ? data.description : '', members, file, ...(teamPrivacy ? { private: true } : {}) };
+  // A staff section team's `staff:` block is read strictly: a bad block makes the file unloadable with the field named, rather than half-read.
+  const staff = readStaffTeamBlock(text);
+  if (!staff.ok) throw new Error(`The team's staff: block is not valid. ${staff.message}`);
+  return { slug: slugify(path.basename(file, '.md')), name, description: typeof data.description === 'string' ? data.description : '', members, file, ...(teamPrivacy ? { private: true } : {}), ...(staff.value ? { staff: staff.value } : {}) };
 }
 
 /** The team's own `privacy:` frontmatter line: private (also tee or local) or any (also default or cloud, the same as no line). */
@@ -149,8 +158,8 @@ export function parsePrivacy(value: string | undefined, member: string): 'privat
   throw new Error(`Member ${member} has "privacy: ${value}"; use privacy: private (a NEAR TEE or local model only) or privacy: any.`);
 }
 
-export function renderTeam(name: string, description: string, members: Array<Omit<TeamMember, 'tools'> & { tools?: string[] }>, options: { private?: boolean } = {}): string {
-  const lines = ['---', `name: ${name}`, `description: ${description}`, ...(options.private ? ['privacy: private'] : []), '---', '', '<!-- Each "## name" section is a team member. Optional lines: role, model (a NEAR model ID or deep/standard/fast), tools (comma-separated), reports-to (another member), and last, privacy (private: a NEAR TEE or local model only; any: whatever the run may use). Then the member\'s instructions. Save to create a new version. -->', ''];
+export function renderTeam(name: string, description: string, members: Array<Omit<TeamMember, 'tools'> & { tools?: string[] }>, options: { private?: boolean; staff?: StaffTeamBlock } = {}): string {
+  const lines = ['---', `name: ${name}`, `description: ${description}`, ...(options.private ? ['privacy: private'] : []), ...(options.staff ? renderStaffTeamBlock(options.staff) : []), '---', '', '<!-- Each "## name" section is a team member. Optional lines: role, model (a NEAR model ID or deep/standard/fast), tools (comma-separated), reports-to (another member), and last, privacy (private: a NEAR TEE or local model only; any: whatever the run may use). Then the member\'s instructions. Save to create a new version. -->', ''];
   for (const listed of members) {
     // A team marked private writes privacy: private on every member too (0.4.27), so a build that reads only member lines keeps each one private.
     const member = options.private ? { ...listed, privacy: 'private' as const } : listed;
@@ -449,7 +458,7 @@ export class TeamLibrary {
   public async duplicate(file: string, name: string): Promise<string> {
     const text = await readFile(file, 'utf8');
     const team = parseTeam(text, file);
-    const copy = await this.create(name, renderTeam(name, team.description, team.members, { private: team.private }));
+    const copy = await this.create(name, renderTeam(name, team.description, team.members, { private: team.private, ...(team.staff ? { staff: team.staff } : {}) }));
     // A copy of an imported team that was never approved is still that team: it stays unapproved, so copying it is never a way round the question.
     if (await this.isPendingImport(file)) await this.markImported(copy, 'derived', team.name);
     // The copy looks the same in the library: it gets its own copy of the icon (0.4.30).

@@ -13,6 +13,7 @@ const REPO_ROOT = path.resolve(__dirname, '..', '..');
 const SRC = path.join(REPO_ROOT, 'src');
 const DOMAIN_TEAM = 'domain/team';
 const DOMAIN_GATE = 'domain/gate';
+const DOMAIN_STAFF = 'domain/staff';
 const TEAM = 'team';
 const GATE = 'gate';
 const LOCK_MODULE = 'services/stateMirrorLock';
@@ -60,6 +61,11 @@ const RULES: Readonly<Record<string, Rule>> = {
     name: 'src/domain/gate',
     allows: (target) => under(target, 'domain')
   },
+  // The staff contract (WP-0) is pure domain code like the gate: anything under src/domain, nothing else.
+  [DOMAIN_STAFF]: {
+    name: 'src/domain/staff',
+    allows: (target) => under(target, 'domain')
+  },
   [TEAM]: {
     name: 'src/team',
     allows: (target, typeOnly) => under(target, TEAM) || under(target, 'domain')
@@ -75,7 +81,7 @@ const RULES: Readonly<Record<string, Rule>> = {
 
 // Violations in one file's text, as "file:line specifier  reason". `file` is the path under src with forward slashes, e.g. team/gitTransport.ts.
 export function boundaryViolations(file: string, text: string): string[] {
-  const folder = file.startsWith(`${DOMAIN_TEAM}/`) ? DOMAIN_TEAM : file.startsWith(`${DOMAIN_GATE}/`) ? DOMAIN_GATE : file.startsWith(`${GATE}/`) ? GATE : TEAM;
+  const folder = file.startsWith(`${DOMAIN_TEAM}/`) ? DOMAIN_TEAM : file.startsWith(`${DOMAIN_GATE}/`) ? DOMAIN_GATE : file.startsWith(`${DOMAIN_STAFF}/`) ? DOMAIN_STAFF : file.startsWith(`${GATE}/`) ? GATE : TEAM;
   const rule = RULES[folder] as Rule;
   const problems: string[] = [];
   for (const ref of importsOf(text)) {
@@ -124,6 +130,17 @@ test('no file under src/domain/team imports vscode, a package, or anything beyon
 
 test('no file under src/domain/gate imports vscode, a package, or anything outside src/domain', () => {
   scan(DOMAIN_GATE, 2);
+});
+
+test('no file under src/domain/staff imports vscode, a package, or anything outside src/domain', () => {
+  scan(DOMAIN_STAFF, 8);
+  const planted = boundaryViolations('domain/staff/planted.ts', [
+    "import { ok } from './parse';",
+    "import { parseIsoMillis } from '../gate/shape';",
+    "import { parseTeam } from '../../agent/teams';",
+    "import * as vscode from 'vscode';"
+  ].join('\n')).map((entry) => entry.split('  ')[0]);
+  assert.deepEqual(planted, ['domain/staff/planted.ts:3 ../../agent/teams', 'domain/staff/planted.ts:4 vscode']);
 });
 
 test('no file under src/team imports vscode, a package, or a service other than the type-only auth import and the shared mirror lock', () => {
