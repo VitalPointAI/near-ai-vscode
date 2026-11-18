@@ -28,6 +28,7 @@ import { ShellSession } from '../agent/shell';
 import { agentSystemPrompt, projectInstructions } from '../agent/systemPrompt';
 import { GRAPHICS_TOOLS } from '../agent/graphicsTools';
 import { grantsMcpTool } from '../mcp/tools';
+import { intelWorkbenchTools } from '../agent/intelWorkbench';
 import { checkCitationsTool, checkOriginalityTool, webFetchTool, webSearchTool } from '../agent/webTools';
 import type { SearchProvider } from '../agent/webSearch';
 import { SecurityAccess, securityTool } from '../agent/securityTool';
@@ -1463,11 +1464,13 @@ export class AgentConversation {
           add: async (addition) => addKnowledge(teamLibraryDir(homeFolder()), teamKnowledgeKey(request.team!.file), addition)
         }, 'research')
       : [];
-    // A staff section team's run gets the staff tools (design 10, 6.2): members reach them through their `mcp:staff-products` and `mcp:guard-scan`
-    // grants, and none of them can approve, reject or release anything.
+    // A staff section team's run (its file has a `staff:` block) gets the staff tools (design 10, 6.2) and the intel-workbench, a built-in local
+    // server. Members reach them only through their `mcp:staff-products`, `mcp:guard-scan` and `mcp:intel-workbench` grants, like any connected
+    // server's tools. None of them can approve, reject or release anything, and the workbench reads and writes only the J2 registers, never the network.
     const staffTeam = request.team ? staffTeamInfo(request.team) : undefined;
     const staff = staffTeam ? staffTools({ host: () => staffHostFor(this.root), team: staffTeam, run: runId }) : [];
-    const base = [...CORE_TOOLS, webFetchTool, webSearchTool(request.webSearch), checkCitationsTool, checkOriginalityTool, ...GRAPHICS_TOOLS, ...media, ...(request.security ? [securityTool(request.security)] : []), ...(request.cyber ? request.cyber.tools() : []), ...staff, ...(request.mcpTools ?? []), ...teamKnowledge, ...memoryFor()];
+    const intel = request.team?.staff ? intelWorkbenchTools() : [];
+    const base = [...CORE_TOOLS, webFetchTool, webSearchTool(request.webSearch), checkCitationsTool, checkOriginalityTool, ...GRAPHICS_TOOLS, ...media, ...(request.security ? [securityTool(request.security)] : []), ...(request.cyber ? request.cyber.tools() : []), ...staff, ...(request.mcpTools ?? []), ...intel, ...teamKnowledge, ...memoryFor()];
     const agents = this.spawnableAgents(request);
     if (!agents.length) return base;
     const gsd = request.gsd;

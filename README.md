@@ -277,6 +277,21 @@ The MCP page has a "What it does" menu for each tool, so you can say whether it
 only reads or changes data on the server. A local server runs on this machine
 with your permissions. This is what you or the server declared it does. NEAR AI cannot check what a server does inside itself.
 
+**The intel workbench** is a built-in local server for military staff J2 teams
+(a team whose file has a `staff:` block). It runs inside the extension, not as
+a separate program, and reaches no network. A member uses it only when its
+`tools:` line lists `mcp:intel-workbench`. It keeps the source register, the
+PIR register and the collection plan as JSON files in `products/j2/`, one
+entry per line. Reliability and credibility are graded separately; reports
+that share an origin count once; every PIR names the decision point it
+supports and its latest time of value; the collection plan holds
+recommendations only, because the J3 approves asset allocation; and a PIR is
+approved or rejected only by a named person, never by a tool. It also drafts
+INTSUM and INTREP skeletons and checks a product for compilation risk, which
+always ends with a question for a person and never with a clearance. Entries
+take exercise labels only: org/Public, org/Internal, NATO Unclassified or
+Protected A.
+
 ### Compare Models
 
 **NEAR AI: Compare Models** (also on the Tools page) shows which models do your

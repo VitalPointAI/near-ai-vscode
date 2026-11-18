@@ -2,6 +2,7 @@
 // Doctrine terms live only in doctrine.ts, so a correction to a step name or an annex letter is a one-file change.
 export * from './doctrine';
 export * from './events';
+export * from './intel';
 export * from './ownership';
 export * from './parse';
 export * from './products';
