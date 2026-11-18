@@ -28,7 +28,8 @@ import type { GateRuntime } from '../domain/gate/decide';
 import type { DecisionRecord } from '../domain/gate/record';
 import { validateDecisionRecord } from '../domain/gate/record';
 import { LABEL_LOWERING_REFUSED_TEXT, LABEL_MAP_FILE, LabelMapError } from '../gate/labelMapStore';
-import { GateHost } from '../gate/host';
+import { GateHost, raisedEntryLabel } from '../gate/host';
+import { DEFAULT_ROUTING } from '../domain/gate/routing';
 import { setLabelEntry } from '../domain/gate/labelMap';
 import { MemorySecrets } from './helpers/teamHarness';
 import { currentSessionRoute } from '../gate/sessionMark';
@@ -520,4 +521,11 @@ test('review 1: the writer refuses any write that would lower or drop a label un
   await host.changeLabels(root, (map) => setLabelEntry(map, 'notes.md', label('org', 'Confidential')));
   await host.changeLabels(root, (map) => setLabelEntry(map, 'conf.md', label('org', 'Public')), undefined, { lowering: { kind: 'person', reason: 'cleared for release' } });
   assert.equal(await labelOfPath(host, root, 'conf.md'), 'org/Public');
+});
+
+test('review 2.2: a written file whose label holds several scales still takes the chat\'s label, on the scale that can rise, the strictest by routing tier', () => {
+  const routing = DEFAULT_ROUTING;
+  assert.deepEqual(keys([raisedEntryLabel([label('org', 'Internal'), label('ca-protected', 'Protected A')], [label('org', 'Confidential')], SCALE_PRESETS, routing)!]), ['org/Confidential']);
+  assert.deepEqual(keys([raisedEntryLabel([label('org', 'Internal'), label('ca-protected', 'Protected A')], [label('org', 'Confidential'), label('ca-protected', 'Protected B')], SCALE_PRESETS, routing)!]), ['ca-protected/Protected B']);
+  assert.equal(raisedEntryLabel([label('org', 'Restricted'), label('ca-protected', 'Protected B')], [label('org', 'Internal')], SCALE_PRESETS, routing), undefined, 'nothing rises');
 });

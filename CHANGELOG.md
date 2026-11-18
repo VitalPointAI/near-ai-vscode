@@ -48,7 +48,8 @@ requests may go.
   file is refused. This catches copied or quoted text, not a paraphrase or an encoding.
 - **What a labelled chat writes takes its label.** A file a labelled chat writes is labelled at the
   chat's label in the project's label file, never lower, so a later chat that reads it is labelled
-  too.
+  too. A file holds one label, so a file already labelled on another scale is raised only on that
+  scale.
 - **Only you can lower a chat's label.** **NEAR AI: Lower This Chat's Label** lowers the label of
   the chat in view, never below the project's label, and asks for a reason, which is recorded. The
   label is kept with the chat and synced with it, and a sync never lowers it. A lowering is signed

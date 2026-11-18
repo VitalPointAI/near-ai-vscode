@@ -776,10 +776,16 @@ export function raisedEntryLabel(current: Mark, mark: readonly Label[], scales: 
   };
   const fold = (start: Label, labels: readonly Label[]): Label => labels.reduce((held, label) => (label.scale === held.scale ? joinLabels(held, label, scales) ?? held : held), start);
   if (current.length > 0) {
-    const held = current.find((label) => mark.some((each) => each.scale === label.scale));
-    if (held === undefined || current.length > 1) return undefined;
-    const joined = fold(held, mark);
-    return sameMark([joined], [held]) ? undefined : joined;
+    // Each scale the path's label holds that the mark also holds is joined; a map entry holds one label, so of those that rise, the one whose routing tier
+    // is strictest is written (PR #87 review round 2: a label on several scales no longer means nothing is written).
+    let best: Label | undefined;
+    for (const held of current) {
+      if (!mark.some((each) => each.scale === held.scale)) continue;
+      const joined = fold(held, mark);
+      if (sameMark([joined], [held])) continue;
+      if (best === undefined || tier(joined) > tier(best)) best = joined;
+    }
+    return best;
   }
   let best: Label | undefined;
   for (const label of mark) {

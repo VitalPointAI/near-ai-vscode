@@ -392,8 +392,11 @@ stays there and the chat says why. Lower it there too if you need to.
 
 **What a labelled chat writes.** A file a labelled chat writes takes the chat's
 label in the label file, never a lower one, so a later chat that reads it is
-labelled too. A label file that is not signed by this computer is never signed
-again for this without you: you are asked once, with Sign Again.
+labelled too. A file holds one label, so when its label is on another scale than
+the chat's, it is raised only on the scale it already has, and the chat's own
+label keeps protecting what the chat holds. A label file that is not signed by
+this computer is never signed again for this without you: you are asked once,
+with Sign Again.
 
 **Routing tiers.** Each level maps to one tier:
 
