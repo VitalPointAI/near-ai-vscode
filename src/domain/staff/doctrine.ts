@@ -422,3 +422,169 @@ export const STAFF_SECTIONS: Readonly<Record<StaffSectionId, StaffSection>> = {
   j9: { id: 'j9', number: 9, function: 'Civil-military cooperation' },
   'special-staff': { id: 'special-staff', function: 'Special staff' }
 };
+
+// ---- Intelligence terms (design 10, 3.2, 4.4 and 6.2 skills; research note 02, tables 2, 6 and 10; WP-J2) ----------------------------------------
+// The J2 template and its two skills (icd203-standards, source-grading) read these tables; no other file spells an intelligence process stage, a
+// preparation step, a likelihood term or a grade.
+
+/** The four steps of intelligence preparation, by the name the process uses (design 10, 3.1: JIPOE at joint levels, IPB with OAKOC at tactical level). */
+export interface PreparationSteps {
+  /** The four steps, in order. */
+  readonly steps: readonly [string, string, string, string];
+  /** What the steps call the other side: the adversary at joint levels, the threat at tactical level. */
+  readonly actor: string;
+  readonly source: string;
+}
+
+export const INTELLIGENCE_PREPARATION_STEPS: Readonly<Record<'JIPOE' | 'IPB', PreparationSteps>> = {
+  // JP 2-0 (2022) is CAC-only and JIPOE is now a joint guide; the public reference edition of the method is JP 2-01.3 (21 May 2014) (02 s1 item 3, T1).
+  // AJP-2 (Edition A, 2016) uses the same four steps for NATO JIPOE as far as the public text shows (02 T6); AJP-2's current edition is in design 2.9.
+  JIPOE: {
+    steps: ['Define the operational environment', 'Describe the impact of the operational environment', 'Evaluate the adversary and other relevant actors', 'Determine adversary and other relevant actor courses of action'],
+    actor: 'adversary',
+    source: 'JP 2-01.3 (2014), public reference edition of the JIPOE method; JP 2-0 (2022) by title'
+  },
+  // ATP 2-01.3 (2019 with Change 1, 2021) ch. 1 (02 s1 item 4). The Canadian Army uses the same IPB steps at land tactical level (Land Operations, 2008).
+  IPB: {
+    steps: ['Define the operational environment', 'Describe environmental effects on operations', 'Evaluate the threat', 'Determine threat courses of action'],
+    actor: 'threat',
+    source: 'ATP 2-01.3 (2019 with Change 1)'
+  }
+};
+
+/** The intelligence process a profile names (design 10, 3.2: US Joint uses the six categories, NATO/Canadian the four-stage cycle). */
+export interface IntelligenceProcess {
+  readonly name: string;
+  readonly stages: readonly string[];
+  /** Activities that run through every stage (US Army only). */
+  readonly continuing?: readonly string[];
+  readonly source: string;
+}
+
+/** Intelligence terms that change with the profile (research note 02, tables 2, 6 and 10; design 10, 3.2 and 4.4). */
+export interface IntelligenceTerms {
+  readonly process: IntelligenceProcess;
+  /** How requirements and collection are managed under the profile. */
+  readonly requirementsManagement: string;
+  /** A nation setting that names requirements management differently. */
+  readonly nationRequirementsManagement?: Readonly<Partial<Record<StaffNation, string>>>;
+  /** What the collection plan is called. */
+  readonly collectionPlan: string;
+  /** Where the intelligence estimate sits in the plan, where the profile's sources say. */
+  readonly estimatePlacement?: string;
+  /** The words for credibility grade 1 (the grade tables differ on it: design 10, 4.4). */
+  readonly credibilityOne: string;
+  /** What units below staff level plan with at tactical level, where the profile offers that level. */
+  readonly belowStaffLevel?: string;
+  readonly source: string;
+}
+
+export const INTELLIGENCE_TERMS: Readonly<Record<StaffProfileId, IntelligenceTerms>> = {
+  'us-joint': {
+    // The six categories of JP 2-0 (2013), the public reference edition; JP 2-0 (26 May 2022) is the current text and is CAC-only (02 s1 items 1 and 2).
+    process: {
+      name: 'Joint intelligence process',
+      stages: ['Planning and direction', 'Collection', 'Processing and exploitation', 'Analysis and production', 'Dissemination and integration', 'Evaluation and feedback'],
+      source: 'JP 2-0 (2022) by title; categories from JP 2-0 (2013), public reference edition'
+    },
+    // JP 2-01 (5 July 2017), public reference edition: collection requirements management and collection operations management (02 T6).
+    requirementsManagement: 'Collection requirements management and collection operations management (CRM and COM)',
+    collectionPlan: 'Collection plan',
+    // JP 5-0 (1 July 2025): the J-2 intelligence estimate is appendix 11 to annex B (design 10, 3.2, profile differences).
+    estimatePlacement: 'Appendix 11 to Annex B (Intelligence)',
+    // FM 2-22.3 (2006) app. B and ATP 2-22.9 use "confirmed by other sources" for grade 1; US practice follows them (best judgement; 02 T10).
+    credibilityOne: 'Confirmed by other sources',
+    source: 'JP 2-0 (2013, 2022); JP 2-01 (2017); JP 5-0 (2025)'
+  },
+  'us-army': {
+    // ADP 2-0 (31 July 2019) ch. 4: four steps and two continuing activities. FM 2-0 (Oct 2023) was seen only second-hand (design 10, 2.4); best judgement.
+    process: {
+      name: 'Intelligence process',
+      stages: ['Plan and direct', 'Collect and process', 'Produce', 'Disseminate'],
+      continuing: ['Analyze', 'Assess'],
+      source: 'ADP 2-0 (2019) ch. 4; FM 2-0 (2023) by title'
+    },
+    // FM 3-55 (2013): information collection, and its information collection plan; the brigade collection manager writes it (design 10, 3.2 tactical).
+    requirementsManagement: 'Information collection: requirements management and collection management',
+    collectionPlan: 'Information collection plan',
+    credibilityOne: 'Confirmed by other sources', // FM 2-22.3 (2006) app. B (best judgement; 02 T10)
+    belowStaffLevel: 'Troop leading procedures', // FM 5-0 (2024); ATP 2-01.3 (2019) ch. 2 (02 T4)
+    source: 'ADP 2-0 (2019); FM 3-55 (2013); FM 5-0 (2024)'
+  },
+  'nato-ca': {
+    // AJP-2 (Edition A, 2016) and the 2003 CF intelligence doctrine: a four-stage cycle (02 s1 item 2, T2). The same four stages as CANADIAN_LAND_TERMS.
+    process: {
+      name: 'Intelligence cycle',
+      stages: [...CANADIAN_LAND_TERMS.intelligenceCycle],
+      source: 'AJP-2 (Edition A, 2016); CFJP 2-0 (2003), superseded but the latest public text'
+    },
+    // AJP-2.1 (Edition B, ratification draft): IRM and CM, formerly CCIRM (02 T6). Canadian plans still name CCIRM (CFJP 5.0 ch. 5 annex E, Annex D).
+    requirementsManagement: 'Intelligence requirements management and collection management (IRM and CM, formerly CCIRM)',
+    nationRequirementsManagement: { ca: 'CCIRM (collection coordination and intelligence requirements management; NATO now says IRM and CM)' },
+    collectionPlan: 'Collection plan',
+    // AJP-2.1 (Edition B) grade 1 is "completely credible"; the 2003 CF text reads "confirmed by other sources" (design 10, 4.4; 02 T10).
+    credibilityOne: 'Completely credible',
+    belowStaffLevel: CANADIAN_LAND_TERMS.belowStaffLevel, // Land Operations (2008): battle procedure for commanders without a staff
+    source: 'AJP-2 (2016); AJP-2.1 (Edition B draft); CFJP 5.0 (2008); Land Operations (2008)'
+  }
+};
+
+/** The ICD 203 likelihood terms, with their alternatives and ranges in percent (ICD 203, 2 January 2015, amended 2022; 02 T10). */
+export const ICD203_LIKELIHOOD: ReadonlyArray<{ readonly term: string; readonly alternative: string; readonly low: number; readonly high: number }> = [
+  { term: 'almost no chance', alternative: 'remote', low: 1, high: 5 },
+  { term: 'very unlikely', alternative: 'highly improbable', low: 5, high: 20 },
+  { term: 'unlikely', alternative: 'improbable', low: 20, high: 45 },
+  { term: 'roughly even chance', alternative: 'roughly even odds', low: 45, high: 55 },
+  { term: 'likely', alternative: 'probable', low: 55, high: 80 },
+  { term: 'very likely', alternative: 'highly probable', low: 80, high: 95 },
+  { term: 'almost certain', alternative: 'nearly certain', low: 95, high: 99 }
+];
+
+/** Confidence levels for a judgement, said in a sentence of its own (ICD 203, 2015, tradecraft standard 2; the three levels are ATP 2-33.4, 2020, usage). */
+export const ICD203_CONFIDENCE_LEVELS: readonly string[] = ['high', 'moderate', 'low'];
+
+/** The five analytic standards (ICD 203, 2015, section D.6.a). */
+export const ICD203_ANALYTIC_STANDARDS: readonly string[] = [
+  'Objective', 'Independent of political consideration', 'Timely', 'Based on all available sources of intelligence information', 'Implements and exhibits the analytic tradecraft standards'
+];
+
+/** The nine analytic tradecraft standards (ICD 203, 2015, section D.6.b). */
+export const ICD203_TRADECRAFT_STANDARDS: readonly string[] = [
+  'Properly describes quality and credibility of underlying sources, data, and methodologies',
+  'Properly expresses and explains uncertainties associated with major analytic judgments',
+  'Properly distinguishes between underlying intelligence information and analysts\' assumptions and judgments',
+  'Incorporates analysis of alternatives',
+  'Demonstrates customer relevance and addresses implications',
+  'Uses clear and logical argumentation',
+  'Explains change to or consistency of analytic judgments',
+  'Makes accurate judgments and assessments',
+  'Incorporates effective visual information where appropriate'
+];
+
+/** Source reliability grades A to F, graded apart from the information's credibility (AJP-2.1, Edition B; 02 T10). */
+export const SOURCE_RELIABILITY_GRADES: ReadonlyArray<{ readonly grade: string; readonly meaning: string }> = [
+  { grade: 'A', meaning: 'Completely reliable' },
+  { grade: 'B', meaning: 'Usually reliable' },
+  { grade: 'C', meaning: 'Fairly reliable' },
+  { grade: 'D', meaning: 'Not usually reliable' },
+  { grade: 'E', meaning: 'Unreliable' },
+  { grade: 'F', meaning: 'Reliability cannot be judged' }
+];
+
+/** Information credibility grades 2 to 6 (AJP-2.1, Edition B; 02 T10). Grade 1's words differ by profile: IntelligenceTerms.credibilityOne. */
+export const INFORMATION_CREDIBILITY_GRADES: ReadonlyArray<{ readonly grade: string; readonly meaning: string }> = [
+  { grade: '2', meaning: 'Probably true' },
+  { grade: '3', meaning: 'Possibly true' },
+  { grade: '4', meaning: 'Doubtful' },
+  { grade: '5', meaning: 'Improbable' },
+  { grade: '6', meaning: 'Truth cannot be judged' }
+];
+
+/** The aspects of terrain at tactical level, OAKOC (ATP 2-01.3, 2019, ch. 4; design 10, 3.1). */
+export const TERRAIN_ASPECTS: readonly string[] = ['Observation and fields of fire', 'Avenues of approach', 'Key terrain', 'Obstacles', 'Cover and concealment'];
+
+/** The operational variables, PMESII (JP 2-01.3, 2014, ch. II; JP 5-0, 2025, systems view). */
+export const OPERATIONAL_VARIABLES: readonly string[] = ['Political', 'Military', 'Economic', 'Social', 'Information', 'Infrastructure'];
+
+/** The civil considerations, ASCOPE (ATP 2-01.3, 2019, ch. 3; JP 3-57 uses the same six). */
+export const CIVIL_CONSIDERATIONS: readonly string[] = ['Areas', 'Structures', 'Capabilities', 'Organizations', 'People', 'Events'];
