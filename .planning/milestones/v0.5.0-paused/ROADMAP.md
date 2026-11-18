@@ -10,18 +10,20 @@
 
 **Phase numbering:** integer phases continue across milestones (v0.5.0 starts at 13). Decimal phases (13.1) are urgent insertions and run between their neighbours.
 
-- [ ] **Phase 13: Sovereignty gate, post-quantum cryptography, and the encrypted event log** - TEE-or-local-only knowledge-base projects, hybrid post-quantum keys, and a signed, encrypted, append-only log
-- [ ] **Phase 14: Encrypted scalable store and search** - several-million-entry base on a disk-backed encrypted index, corruption quarantine, keyword and semantic search
-- [ ] **Phase 15: Source and claim intake with agent tools** - agents, analysts, and imports add quote-verified sources and claims; untrusted-on-read; offline geocoding
-- [ ] **Phase 16: Admiralty grading, thresholds, and reports** - A-F / 1-6 grades with strict agent rules, evidence diffs, thresholds, and reports rendered from the base
-- [ ] **Phase 17: RAFT network and slices** - Actors, Relationships, Functions, and Tensions as a network diagram, saved slices, slice-scoped agent runs
-- [ ] **Phase 18: Standing feeds, unattended work, and alerts** - RSS/MCP/folder feeds into a triage inbox, spending limits for background work, tripwires
-- [ ] **Phase 19: Team sharing through git or a shared folder** - signed end-to-end encrypted sync, invites by key, rotation on removal, visible conflicts
-- [ ] **Phase 20: Organisation compartments, roles, and access** - need-to-know compartments with their own keys, roles, Access view, signed snapshots
-- [ ] **Phase 21: Ciphertext relay** - an organisation-hosted relay that sees only ciphertext, plus git-to-relay migration
-- [ ] **Phase 22: Globe, imagery, and timeline replay** - open-source 3D globe with layers, optional imagery, replay of how events unfolded
-- [ ] **Phase 23: Forecasting and calibration** - auditable scenario forecasts and tension trends, local or TEE, scored and recalibrated
-- [ ] **Phase 24: End-to-end hardening and release** - allowlist and plaintext proofs across every flow, scale and accessibility checks, honest copy, 0.5.0 candidate
+> **Disposition (2026-11-18).** This milestone stays paused, and its knowledge base returns as the viewing layer of the data platform milestone (Phases 85-101 in `.planning/ROADMAP.md`). Each phase below is marked with where it went; the main roadmap's data platform section has the full table.
+
+- [ ] **Phase 13: Sovereignty gate, post-quantum cryptography, and the encrypted event log** - TEE-or-local-only knowledge-base projects, hybrid post-quantum keys, and a signed, encrypted, append-only log *(2026-11-18: carried with changes into the data platform: the log and harnesses in Phase 88, crypto-shredding in Phase 94)*
+- [ ] **Phase 14: Encrypted scalable store and search** - several-million-entry base on a disk-backed encrypted index, corruption quarantine, keyword and semantic search *(2026-11-18: superseded by the data platform's host store (Phases 88 and 96); "benchmark first" and "damaged data reported" carry)*
+- [ ] **Phase 15: Source and claim intake with agent tools** - agents, analysts, and imports add quote-verified sources and claims; untrusted-on-read; offline geocoding *(2026-11-18: changed: connectors replace hand intake; evidence, links and the panel shell carry into Phase 96, importers and the gazetteer into Phase 100)*
+- [ ] **Phase 16: Admiralty grading, thresholds, and reports** - A-F / 1-6 grades with strict agent rules, evidence diffs, thresholds, and reports rendered from the base *(2026-11-18: reports carry into Phase 97; Admiralty grading stays an optional layer for after the data platform)*
+- [ ] **Phase 17: RAFT network and slices** - Actors, Relationships, Functions, and Tensions as a network diagram, saved slices, slice-scoped agent runs *(2026-11-18: changed: RAFT becomes one ontology profile and slices become saved scopes (Phase 97))*
+- [ ] **Phase 18: Standing feeds, unattended work, and alerts** - RSS/MCP/folder feeds into a triage inbox, spending limits for background work, tripwires *(2026-11-18: superseded in part: feeds become connectors; the spend governor carries (Phases 92 and 96) and tripwires become insights (Phase 97))*
+- [ ] **Phase 19: Team sharing through git or a shared folder** - signed end-to-end encrypted sync, invites by key, rotation on removal, visible conflicts *(2026-11-18: superseded by milestone L2)*
+- [ ] **Phase 20: Organisation compartments, roles, and access** - need-to-know compartments with their own keys, roles, Access view, signed snapshots *(2026-11-18: changed, and the core of the data platform: label compartments and Phase 71 roles (Phases 88, 93, 96 and 101))*
+- [ ] **Phase 21: Ciphertext relay** - an organisation-hosted relay that sees only ciphertext, plus git-to-relay migration *(2026-11-18: superseded by the Phase 68 messaging relay and milestone L5)*
+- [ ] **Phase 22: Globe, imagery, and timeline replay** - open-source 3D globe with layers, optional imagery, replay of how events unfolded *(2026-11-18: timeline replay carries into Phase 97; the globe is deferred)*
+- [ ] **Phase 23: Forecasting and calibration** - auditable scenario forecasts and tension trends, local or TEE, scored and recalibrated *(2026-11-18: deferred, for intelligence projects only)*
+- [ ] **Phase 24: End-to-end hardening and release** - allowlist and plaintext proofs across every flow, scale and accessibility checks, honest copy, 0.5.0 candidate *(2026-11-18: carries into Phase 101, extended to the database, caches and model server logs)*
 
 ## Milestone v0.5.0: Trusted-source knowledge base
 
