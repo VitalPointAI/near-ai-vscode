@@ -8,3 +8,11 @@ export * from './products';
 export * from './profiles';
 export * from './release';
 export * from './teamBlock';
+// WP-SHARED: the product ledger, registers, wargame ledger, guard-scan, tradecraft lint, read models and the release-guard member.
+export * from './guardScan';
+export * from './ledger';
+export * from './readModels';
+export * from './registers';
+export * from './releaseGuard';
+export * from './tradecraftLint';
+export * from './wargame';

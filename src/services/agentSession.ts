@@ -72,6 +72,8 @@ import type { ContextGraphMemory } from './contextGraphMemory';
 import type { ReputationStore } from './reputation';
 import { SpendAccount } from './spendAccount';
 import { nanoToUsd, totalNanoUsd, withSpendTag } from './spendLedger';
+import { staffTeamInfo, staffTools } from '../agent/staffTools';
+import { staffHostFor } from '../staff/staffHost';
 
 /** What the installed Open-GSD runtime provides to a conversation. */
 export interface GsdContext {
@@ -174,6 +176,21 @@ export interface AgentTurnRequest {
 }
 
 /** The spend account of a client, when spend tracking is on for it. */
+/**
+ * A staff team member's lane on the step board (design 10, 4.5): `staff.lane.started` when it starts and `staff.lane.finished` when it ends. Only for a
+ * member of a staff section team; a lane that cannot be recorded never stops the agent.
+ */
+function staffLane(request: Pick<AgentTurnRequest, 'team'>, root: string, run: string, member: string, teamMember: boolean, status: 'started' | 'done' | 'failed' | 'cancelled'): void {
+  const team = request.team ? staffTeamInfo(request.team) : undefined;
+  const host = team && teamMember && team.members.includes(member) ? staffHostFor(root) : undefined;
+  if (!team || !host) return;
+  const at = new Date().toISOString();
+  const event = status === 'started'
+    ? { type: 'staff.lane.started' as const, run, at, section: team.section, member }
+    : { type: 'staff.lane.finished' as const, run, at, section: team.section, member, outcome: status };
+  void host.record(event).catch(() => undefined);
+}
+
 export function spendAccountOf(client: unknown): SpendAccount | undefined {
   const spend = (client as { spend?: unknown } | undefined)?.spend;
   return spend instanceof SpendAccount ? spend : undefined;
@@ -1446,7 +1463,11 @@ export class AgentConversation {
           add: async (addition) => addKnowledge(teamLibraryDir(homeFolder()), teamKnowledgeKey(request.team!.file), addition)
         }, 'research')
       : [];
-    const base = [...CORE_TOOLS, webFetchTool, webSearchTool(request.webSearch), checkCitationsTool, checkOriginalityTool, ...GRAPHICS_TOOLS, ...media, ...(request.security ? [securityTool(request.security)] : []), ...(request.cyber ? request.cyber.tools() : []), ...(request.mcpTools ?? []), ...teamKnowledge, ...memoryFor()];
+    // A staff section team's run gets the staff tools (design 10, 6.2): members reach them through their `mcp:staff-products` and `mcp:guard-scan`
+    // grants, and none of them can approve, reject or release anything.
+    const staffTeam = request.team ? staffTeamInfo(request.team) : undefined;
+    const staff = staffTeam ? staffTools({ host: () => staffHostFor(this.root), team: staffTeam, run: runId }) : [];
+    const base = [...CORE_TOOLS, webFetchTool, webSearchTool(request.webSearch), checkCitationsTool, checkOriginalityTool, ...GRAPHICS_TOOLS, ...media, ...(request.security ? [securityTool(request.security)] : []), ...(request.cyber ? request.cyber.tools() : []), ...staff, ...(request.mcpTools ?? []), ...teamKnowledge, ...memoryFor()];
     const agents = this.spawnableAgents(request);
     if (!agents.length) return base;
     const gsd = request.gsd;
@@ -1593,6 +1614,7 @@ export class AgentConversation {
             const base = `${this.systemPrompt({ ...request, model }, agentRoot, tools.some((tool) => tool.name === 'Agent' || tool.name === 'Task'))}${isolationNote}`;
             const system = agentBody ? `${agentBody}\n\n${base}` : base;
             this.activity?.agentStarted(identity, spawn.prompt, system);
+            staffLane(request, this.root, runId, label, teamMember, 'started');
             // Paused while it waited for a slot: it starts paused.
             if (agent.paused) this.activity?.setPaused(agent.id, true);
             this.inboxes.set(agent.id, inbox);
@@ -1659,6 +1681,7 @@ export class AgentConversation {
             const childMessages: AgentMessage[] = [{ role: 'system', content: system }, { role: 'user', content: spawn.prompt }];
             const result = await withSpendTag({ kind: 'sub-agent', agentId: agent.id }, () => withSessionRoute(childRoute, () => child.run(childMessages, agent.abort.signal)));
             this.activity?.agentEnded(agent.id, result.outcome);
+            staffLane(request, this.root, runId, label, teamMember, result.outcome === 'cancelled' ? 'cancelled' : result.outcome === 'completed' ? 'done' : 'failed');
             await this.persistAgent(request, agent.id);
             const total = sumUsage(usage);
             const report = [...result.messages].reverse().find((message) => message.role === 'assistant' && message.content)?.content;
@@ -1677,6 +1700,7 @@ export class AgentConversation {
           } catch (error) {
             if (todo) this.moveTask(todo, 'pending');
             this.activity?.agentEnded(agent.id, 'failed', error instanceof Error ? error.message : String(error));
+            staffLane(request, this.root, runId, label, teamMember, 'failed');
             await this.persistAgent(request, agent.id);
             await this.recordReputation(request.reputation, label, -1, agent.id);
             void record({ status: 'failed', kind: 'agent', agentId: agent.id, parentAgentId: parentId, agentRole: label, action: spawn.description, model, summary: `Sub-agent ${label} failed.`, errorCode: error instanceof Error ? error.name : 'unknown', durationMs: Date.now() - started });

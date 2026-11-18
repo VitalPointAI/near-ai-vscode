@@ -314,6 +314,36 @@
         "category": "NEAR AI"
       },
       {
+        "command": "nearAi.staff.approveProduct",
+        "title": "Staff: Approve a Product",
+        "category": "NEAR AI"
+      },
+      {
+        "command": "nearAi.staff.rejectProduct",
+        "title": "Staff: Reject a Product",
+        "category": "NEAR AI"
+      },
+      {
+        "command": "nearAi.staff.releaseProduct",
+        "title": "Staff: Release a Product",
+        "category": "NEAR AI"
+      },
+      {
+        "command": "nearAi.staff.withdrawProduct",
+        "title": "Staff: Withdraw a Product",
+        "category": "NEAR AI"
+      },
+      {
+        "command": "nearAi.staff.showProducts",
+        "title": "Staff: Show Products",
+        "category": "NEAR AI"
+      },
+      {
+        "command": "nearAi.staff.setAsideLedger",
+        "title": "Staff: Set Aside the Product Ledger",
+        "category": "NEAR AI"
+      },
+      {
         "command": "nearAi.label.set",
         "title": "Set Label",
         "category": "NEAR AI"

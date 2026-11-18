@@ -145,26 +145,34 @@ test('the page\'s status still comes from the settings layer\'s shorthand, not f
 });
 
 // The order `agentSession.toolsFor` gives them to a run: the core, web, graphics, image and scan tools, a cyber engagement's probes and exploit steps, a team's
-// knowledge graph, memory, and last the gsd tools (MCP tools sit between the cyber and knowledge tools in a run and are not built-in).
+// staff team's staff-products and guard-scan tools, its knowledge graph, memory, and last the gsd tools (MCP tools sit between the staff and knowledge tools
+// in a run and are not built-in).
 const CYBER_TOOLS = ['CyberHttpProbe', 'CyberTlsProbe', 'CyberDnsProbe', 'CyberTcpProbe', 'CyberRobotsProbe', 'CyberSecretsProbe', 'CyberIacProbe', 'CyberDependencyProbe', 'CyberFingerprintProbe', 'CyberExploitTool', 'CyberPostExploitTool'];
+// A staff section team's run (design 10, 6.2): the staff-products and guard-scan tools, between the cyber and the knowledge tools.
+const STAFF_TOOLS = [
+  'mcp__staff-products__propose', 'mcp__staff-products__verdict', 'mcp__staff-products__submit', 'mcp__staff-products__withdraw', 'mcp__staff-products__status',
+  'mcp__staff-products__list', 'mcp__staff-products__register', 'mcp__staff-products__wargame', 'mcp__staff-products__step', 'mcp__staff-products__lint',
+  'mcp__guard-scan__scan'
+];
 const EXPECTED_ORDER = [
   'Read', 'Write', 'Edit', 'Glob', 'Grep', 'Bash', 'BashOutput', 'KillShell', 'TodoWrite',
   'WebFetch', 'WebSearch', 'CheckCitations', 'CheckOriginality',
   'VectorizeImage', 'RenderSvg', 'CreatePresentation', 'CreatePdf', 'CreateDocument',
   'GenerateImage', 'SecurityScan',
   ...CYBER_TOOLS,
+  ...STAFF_TOOLS,
   'TeamKnowledge', 'Learn',
   'Remember', 'Recall',
   'Skill', 'SlashCommand', 'AskUserQuestion', 'Agent', 'Task'
 ];
 
-test('the catalog holds all 40 built-in tools, once each, in the order a run is given them, and the page lists every one of them in that order', () => {
+test('the catalog holds all 51 built-in tools, once each, in the order a run is given them, and the page lists every one of them in that order', () => {
   const names = builtInTools().map((tool) => tool.name);
-  assert.equal(names.length, 40);
-  assert.equal(new Set(names).size, 40, 'a duplicate name fails the catalog');
+  assert.equal(names.length, 51);
+  assert.equal(new Set(names).size, 51, 'a duplicate name fails the catalog');
   assert.deepEqual(names, EXPECTED_ORDER);
   const listed = buildToolsDirectory(directoryInput()).tools.map((entry) => entry.name);
-  assert.deepEqual(listed, EXPECTED_ORDER, 'the page lists all 40, the cyber, TeamKnowledge and Learn tools included (owner-confirmed, PR #70 review)');
+  assert.deepEqual(listed, EXPECTED_ORDER, 'the page lists all 51, the cyber, staff, TeamKnowledge and Learn tools included (owner-confirmed, PR #70 review)');
 });
 
 test('the 13 tools a run has only in a special setting are on the Tools page with their manifest words, in catalog order, and say whether they need a person', () => {
@@ -460,7 +468,7 @@ function toolsOfARunWithEverythingOn(): AgentTool<any>[] {
     security: { consented: () => true, scan: async () => undefined },
     cyber: { engagement: {}, tools: () => [...cyberProbes({ inScope: () => false }), ...cyberExploitTools({ inScope: () => false, engagementId: 'e', sandboxTier: 'disabled' })], limiter: () => undefined, grant: () => undefined },
     webSearch: { name: 'searxng', label: 'x', host: 'search.example', search: async () => [] },
-    team: { slug: 'team', name: 'Team', description: 'd', file: path.join(root, 'team.md'), members: [] }
+    team: { slug: 'team', name: 'Team', description: 'd', file: path.join(root, 'team.md'), members: [{ name: 'j2-chief', tools: [], instructions: 'x' }], staff: { section: 'j2' } }
   } as unknown as AgentTurnRequest;
   const toolsFor = (conversation as unknown as { toolsFor(...args: unknown[]): AgentTool<any>[] }).toolsFor.bind(conversation);
   return toolsFor(request, { root, cwd: root }, new RunGrants(), [], async () => undefined, new AbortController().signal, 'run-1');
