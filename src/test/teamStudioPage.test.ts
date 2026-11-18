@@ -4214,8 +4214,13 @@ test('host: a saved clone never takes the source team\'s icon: the new team and 
   await h.send({ type: 'use-team', id: 'lib:web-team' });
   const project = TeamLibrary.projectTeamFile(h.root);
   assert.deepEqual(await h.library.readIcon(project), icon);
+  const kept = (await h.library.iconVersions(project)).length;
   await h.send({ type: 'create', draft: draft({ name: 'Shop team' }), target: 'project', clone: true });
   assert.equal(await h.library.readIcon(project), undefined, 'the clone shows the default');
+  // The project team it replaced had an icon: that icon is in History, newest first, and can be restored from there.
+  const versions = await h.library.iconVersions(project);
+  assert.equal(versions.length, kept + 1);
+  assert.deepEqual(await readFile(versions[0]!), icon);
   assert.doesNotMatch(await readFile(project, 'utf8'), /^icon:/m);
   assert.ok(last(h, 'team').notice.endsWith(CLONE_ICON_NOTE));
   h.close();
@@ -4388,4 +4393,137 @@ test('page: From scratch and an AI draft are not clones: no clone check, no icon
   await new Promise((resolve) => setTimeout(resolve, 200));
   assert.equal(page.posts.filter((post) => post.type === 'review').at(-1)!.clone, undefined);
   assert.doesNotMatch(page.text(), /not the icon of the team you copied/);
+});
+
+// ---------- PR #90 review ----------
+
+test('host: a retry after a matching icon goes through the same gate with fresh settings: a spend limit or TEE-only reached since blocks it', async () => {
+  for (const [later, words] of [
+    [{ dailySpendLimitUsd: 1, spent: 1 }, /^The icon was not made: .*daily limit/],
+    [{ privacyMode: 'tee-only' as const }, /^The icon was not made: TEE-only mode is on/]
+  ] as const) {
+    const h = await harness();
+    const source = await h.library.create('Web team', teamMarkdown(draft()));
+    const sourceIcon = png(128, 128, { seed: 8 });
+    await h.library.setIcon(source, sourceIcon);
+    await h.send({ type: 'ready' });
+    await h.send({ type: 'create', draft: draft({ name: 'Web team copy' }), target: 'user', clone: true });
+    const id = 'user:web-team-copy';
+    const first = fakeImageAi([IMAGE_MODEL]);
+    let current = first;
+    let reads = 0;
+    h.deps.teamAi = async () => { reads += 1; return current.ai; };
+    h.deps.random = () => 0;
+    h.chooseAnswer.value = 'Generate icon';
+    await h.send({ type: 'icon-generate', id });
+    assert.equal(first.made.length, 1);
+    const readsBefore = reads;
+    // Since the first picture: the profile's settings changed.
+    current = fakeImageAi([IMAGE_MODEL], JPEG, later);
+    await h.send({ type: 'icon-set', seq: last(h, 'icon-source').seq, id, png: sourceIcon.toString('base64') });
+    assert.ok(reads > readsBefore, 'the settings and spend are read again for the retry');
+    assert.equal(current.made.length, 0, 'nothing was sent');
+    assert.equal(first.made.length, 1, 'the first profile was not used again');
+    assert.match(last(h, 'error').text, words);
+    assert.equal(await h.library.readIcon(path.join(h.library.directory, 'web-team-copy.md')), undefined);
+    h.close();
+  }
+});
+
+test('host: a retry that would now use another image model than the one agreed to is refused, not sent', async () => {
+  const h = await harness();
+  const source = await h.library.create('Web team', teamMarkdown(draft()));
+  const sourceIcon = png(128, 128, { seed: 8 });
+  await h.library.setIcon(source, sourceIcon);
+  await h.send({ type: 'ready' });
+  await h.send({ type: 'create', draft: draft({ name: 'Web team copy' }), target: 'user', clone: true });
+  const id = 'user:web-team-copy';
+  const other = { ...IMAGE_MODEL, id: 'other/image-model' };
+  const first = fakeImageAi([IMAGE_MODEL]);
+  let current = first;
+  h.deps.teamAi = async () => current.ai;
+  h.chooseAnswer.value = 'Generate icon';
+  await h.send({ type: 'icon-generate', id });
+  current = fakeImageAi([other, IMAGE_MODEL]);
+  Object.assign(current.ai, { imageModel: other.id });
+  await h.send({ type: 'icon-set', seq: last(h, 'icon-source').seq, id, png: sourceIcon.toString('base64') });
+  assert.equal(current.made.length, 0);
+  assert.equal(last(h, 'error').text, `The icon was not made: the image model would now be other/image-model, not ${IMAGE_MODEL.id}, which you agreed to. Generate again to be asked about it.`);
+  h.close();
+});
+
+test('host: an upload started while a generated picture is on its way drops it, so the two never overlap', async () => {
+  const h = await harness();
+  const id = await openForIcon(h);
+  const { ai } = fakeImageAi([IMAGE_MODEL]);
+  h.deps.teamAi = async () => ai;
+  h.chooseAnswer.value = 'Generate icon';
+  await h.send({ type: 'icon-generate', id });
+  const seq = last(h, 'icon-source').seq;
+  h.deps.pickIconSource = async () => undefined;
+  await h.send({ type: 'icon-upload', id });
+  await h.send({ type: 'icon-set', seq, id, png: png(128, 128, { seed: 3 }).toString('base64') });
+  assert.equal(last(h, 'error').text, 'Not saved: the studio is no longer waiting for an icon for this team. Try again.');
+  assert.equal(await h.library.readIcon(path.join(h.library.directory, 'web-team.md')), undefined);
+  h.close();
+});
+
+test('host: a draft cloned from a team is name-checked even when the page leaves out clone: true, from this session or a resumed draft', async () => {
+  const h = await harness();
+  await h.library.create('Web team', teamMarkdown(draft()));
+  await h.send({ type: 'ready' });
+  await h.send({ type: 'starting-point', id: 'lib:web-team', goal: '', locality: 'cloud' });
+  const reply = last(h, 'starting-point');
+  await h.send({ type: 'review', seq: 1, draft: { ...reply.draft, name: 'web TEAM' } });
+  assert.match(last(h, 'review').errors[0].message, /^"Web team" is already the name of one of your teams/);
+  await h.send({ type: 'create', draft: { ...reply.draft, name: 'Web-Team' }, target: 'user' });
+  assert.match(last(h, 'save-failed').errors[0].message, /^"Web-Team" is too close to "Web team"/);
+  assert.equal(existsSync(path.join(h.library.directory, 'web-team-2.md')), false);
+  // A built-in's members, too.
+  await h.send({ type: 'starting-point', id: 'gsd:review', goal: '', locality: 'cloud' });
+  await h.send({ type: 'create', draft: { ...last(h, 'starting-point').draft, name: 'Review Team' }, target: 'user' });
+  assert.match(last(h, 'save-failed').errors[0].message, /a built-in team/);
+  h.close();
+  // A new session (VS Code restarted) with a resumed draft that was cloned: nothing was sent as a starting point in it.
+  const resumed = await harness();
+  await resumed.library.create('Web team', teamMarkdown(draft()));
+  resumed.drafts.value = { draft: draft({ name: 'Web team copy' }), step: 0, target: 'user', startingPoint: 'lib:web-team', path: 'existing' };
+  await resumed.send({ type: 'ready' });
+  await resumed.send({ type: 'create', draft: draft({ name: 'WEB TEAM' }), target: 'user' });
+  assert.match(last(resumed, 'save-failed').errors[0].message, /already the name of one of your teams/);
+  // A resumed draft started from scratch is not a clone.
+  resumed.drafts.value = { draft: draft({ name: 'Web team' }), step: 0, target: 'user', startingPoint: 'empty', path: 'scratch' };
+  const other = await harness();
+  await other.library.create('Web team', teamMarkdown(draft()));
+  other.drafts.value = resumed.drafts.value;
+  await other.send({ type: 'ready' });
+  await other.send({ type: 'create', draft: draft({ name: 'Web team' }), target: 'user' });
+  assert.ok(existsSync(path.join(other.library.directory, 'web-team-2.md')), 'saved as before');
+  resumed.close();
+  other.close();
+});
+
+test('host: the real clone path, a saved team with an icon as the starting point and then Save, never carries the source icon', async () => {
+  const h = await harness();
+  const source = await h.library.create('Web team', teamMarkdown(draft()));
+  const icon = png(128, 128, { seed: 8 });
+  await h.library.setIcon(source, icon);
+  await h.send({ type: 'ready' });
+  await h.send({ type: 'starting-point', id: 'lib:web-team', goal: '', locality: 'cloud' });
+  const reply = last(h, 'starting-point');
+  assert.equal(reply.cloneName, 'Web team copy');
+  assert.doesNotMatch(JSON.stringify(reply), /icon|base64/i, 'the starting point sends no icon');
+  assert.deepEqual(reply.draft.members.map((member: { name: string }) => member.name), ['lead', 'dev']);
+  // What the page sends back after the Purpose step, as it is: the reply's draft under the clone's name.
+  await h.send({ type: 'create', draft: { ...reply.draft, name: reply.cloneName }, target: 'user' });
+  const copy = path.join(h.library.directory, 'web-team-copy.md');
+  assert.equal(last(h, 'team').id, 'user:web-team-copy');
+  assert.equal(last(h, 'team').icon, undefined);
+  assert.ok(last(h, 'team').notice.endsWith(CLONE_ICON_NOTE));
+  assert.doesNotMatch(await readFile(copy, 'utf8'), /^icon:/m);
+  assert.equal(await h.library.readIcon(copy), undefined);
+  assert.equal(existsSync(path.join(h.library.directory, 'web-team-copy.icon.png')), false);
+  assert.equal((await h.library.iconVersions(copy)).length, 0, 'not even in its History');
+  assert.deepEqual(await h.library.readIcon(source), icon);
+  h.close();
 });

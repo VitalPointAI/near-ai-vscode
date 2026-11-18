@@ -9,7 +9,7 @@ import type { AgentDiscoveryAnswers } from '../domain/agents';
 import { buildTeamGraph } from '../agent/teamGraph';
 import { checkTeam, checkWarnings } from '../agent/teamCheck';
 import { ACCEPT_ALL_KINDS, applySuggestion, KNOWLEDGE_BASE_PRIVATE, MAX_REFINE_BYTES, parseRefinement, REFINE_PROMPT, refinePlan, refinePrompt, type RefinePlan, type Suggestion } from '../agent/teamRefine';
-import { chooseImageModel, chooseTeamModel, imageCallBlocked, imageEstimate, teamImageCall, teamModelCall, type TeamAiDeps, type TeamAiNeed } from './teamStudioAi';
+import { chooseImageModel, chooseTeamModel, imageCallBlocked, imageEstimate, teamImageCall, teamModelCall, type TeamAiDeps, type TeamImageResult } from './teamStudioAi';
 import { CUSTOM_PLAGIARISM_CHECKER } from '../agent/researchIntegrity';
 import { builderPrompt, parseProposal, proposalDraft, proposalText, TEAM_BUILDER_PROMPT } from '../agent/teamBuilder';
 import { layoutNetwork } from '../domain/networkLayout';
@@ -84,7 +84,8 @@ export interface PickerEntry { id: string; source: 'mine' | 'builtin'; group: St
 export type PickerFilter = 'all' | 'mine' | 'builtin';
 
 /** A generated icon's request, kept until the page sends its PNG back: what to ask again with another variation if it matches another team's icon. */
-interface IconJob { ai: TeamAiDeps; need: TeamAiNeed; why?: string; team: { name: string; description: string }; variation: number; attempt: 1 | 2 }
+/** `model`: the image model the person agreed to; a later call that would use another one is refused rather than sent. */
+interface IconJob { model: string; variation: number; attempt: 1 | 2 }
 
 /**
  * A built-in starting point's own name as a team (owner, 2026-11-17: Use as is saves a built-in "under its own name"). A project type's team is already
@@ -1125,6 +1126,21 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
 
   /** Saves an open team's draft; undefined when it was not saved (the page was told why). */
   /**
+   * Whether a new team's draft is a clone, worked out here rather than taken from the page (PR #90 review): the page's `clone`, or any member whose
+   * instructions are those of a member this host sent as a starting point (Clone and modify, from a saved team, a built-in or the recommendation), or of a
+   * saved builder draft that was cloned (its path is clone or existing and it started from a team). A page that leaves `clone` out is still checked.
+   */
+  const clonedMembers = new Set<string>();
+  const memberKey = (instructions: string) => instructions.replace(/\s+/g, ' ').trim();
+  const rememberClone = (members: ReadonlyArray<{ instructions: string }>) => { for (const member of members) { const key = memberKey(member.instructions); if (key) clonedMembers.add(key); } };
+  const isCloneDraft = (draft: TeamDraft, flag?: true): boolean => {
+    if (flag) return true;
+    const saved = savedWizard(deps.drafts.get());
+    if (saved && (saved.path === 'clone' || saved.path === 'existing') && saved.startingPoint && saved.startingPoint !== 'empty') rememberClone(saved.draft.members);
+    return draft.members.some((member) => clonedMembers.has(memberKey(member.instructions)));
+  };
+
+  /**
    * A clone's name (owner, 2026-11-18): one no saved team, built-in team or this project's team has, compared ignoring case and by the file name it would
    * be saved under. One rule, here, for the page's inline message and for Save; the page has no naming rules of its own.
    */
@@ -1361,7 +1377,7 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
         if (!input || !context) await load();
         const original = message.id && open?.id === message.id ? open.text : undefined;
         const review = reviewDraft(message.draft, original, input!, context!);
-        if (message.clone) review.errors.push(...cloneIssues(message.draft));
+        if (!message.id && isCloneDraft(message.draft, message.clone)) review.errors.push(...cloneIssues(message.draft));
         // What the preview shows is what Save writes, the old rating line's removal included.
         post({ type: 'review', seq: message.seq, ...review, ...(message.id ? { markdown: await withoutAdoptedRating(review.markdown, message.id) } : {}) });
         return;
@@ -1374,10 +1390,12 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
           const team = teamFor(`user:${message.id.slice('lib:'.length)}`);
           if (!team || team.error) { post({ type: 'error', text: 'That team is no longer in your teams. Pick another starting point.' }); return; }
           const draft = draftFromMarkdown(await readFile(team.file, 'utf8'), team.file);
+          rememberClone(draft.members);
           post({ type: 'starting-point', id: message.id, cloneName: cloneNameFor(team.name, takenTeamNames(library.teams, context!.startingPoints)), draft: { ...draft, name: '' } });
           return;
         }
         const result = startingPointDraft(message, context!);
+        rememberClone(result.draft.members);
         const point = context!.startingPoints.find((candidate) => candidate.id === message.id);
         // The name a clone starts with is worked out here, from the library as it is now, so the page never applies naming rules of its own.
         post({ type: 'starting-point', id: message.id, ...(point ? { cloneName: cloneNameFor(startingPointTeamName(point), takenTeamNames(library.teams, context!.startingPoints)) } : {}), draft: result.draft, ...(result.projectType ? { projectType: result.projectType } : {}) });
@@ -1538,7 +1556,8 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
         const review = reviewDraft(message.draft, undefined, input!, context!);
         // A clone's name is checked here too, against the library as it is now, so a page that let Save through (or a team saved meanwhile) cannot
         // give it a name a team already has.
-        if (message.clone) { await listNow(); review.errors.push(...cloneIssues(message.draft)); }
+        const cloned = isCloneDraft(message.draft, message.clone);
+        if (cloned) { await listNow(); review.errors.push(...cloneIssues(message.draft)); }
         if (review.errors.length) { post({ type: 'save-failed', errors: review.errors }); return; }
         let file: string;
         let id: string;
@@ -1568,7 +1587,7 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
         await deps.drafts.set(undefined);
         await refreshLibrary();
         const unapprovedNote = unapprovedFrom === undefined ? '' : ` It has members from the imported team "${unapprovedFrom}", which you have not approved, so you are asked before it first runs.`;
-        await sendTeam(id, file, `${message.target === 'project' ? `Saved the project team. Run it with /team:project <task>.${message.projectType ? ' AGENTS.md now has this project type\'s guidance.' : ''}` : `Saved "${message.draft.name.trim()}". Run it with /team:${path.basename(file, '.md')} <task>.`}${unapprovedNote}${message.clone ? CLONE_ICON_NOTE : ''}`);
+        await sendTeam(id, file, `${message.target === 'project' ? `Saved the project team. Run it with /team:project <task>.${message.projectType ? ' AGENTS.md now has this project type\'s guidance.' : ''}` : `Saved "${message.draft.name.trim()}". Run it with /team:${path.basename(file, '.md')} <task>.`}${cloned ? CLONE_ICON_NOTE : ''}${unapprovedNote}`);
         // A team that was just saved is checked against the model results, so a new member does not silently keep a default model the tests disagree with.
         const saved = draftFromMarkdown(await readFile(file, 'utf8'), file);
         await suggestModelsFor(saved, id);
@@ -1771,6 +1790,8 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
         if (!file) { post({ type: 'error', text: 'That team is no longer in your teams.' }); return; }
         if (iconWorking) { post({ type: 'error', text: 'Still working on an icon. Wait for it to finish.' }); return; }
         if (!deps.pickIconSource) { post({ type: 'error', text: 'Uploading an icon is not available here.' }); return; }
+        // The latest request wins, as for Remove and Restore: a picture still on its way from the page for an earlier one is not used after this.
+        iconWaiting = undefined;
         iconWorking = true;
         try {
           const source = await deps.pickIconSource();
@@ -1795,6 +1816,7 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
         if (!file) { post({ type: 'error', text: 'That team is no longer in your teams.' }); return; }
         if (iconWorking) { post({ type: 'error', text: 'Still working on an icon. Wait for it to finish.' }); return; }
         if (!deps.teamAi) { post({ type: 'error', text: 'No model is available here. Set up a NEAR AI profile for this project first.' }); return; }
+        iconWaiting = undefined;
         iconWorking = true;
         const stop = new AbortController();
         const stopping = deps.onStop?.(() => stop.abort());
@@ -1815,7 +1837,7 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
             post({ type: 'icon-done', id: message.id, text: 'Nothing was generated.' });
             return;
           }
-          await makeIcon(message.id, file, { ai, need, ...(why ? { why } : {}), team: { name: team.name, description: team.description }, variation, attempt: 1 }, stop.signal);
+          await makeIcon(message.id, file, { model: choice.model, variation, attempt: 1 }, stop.signal);
         } catch (error) {
           post({ type: 'error', text: `The icon was not made: ${stop.signal.aborted ? 'it was cancelled.' : (error as Error).message}` });
         } finally {
@@ -1842,7 +1864,8 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
             post({ type: 'error', text: `The icon was not changed: the image model made the same picture as the icon of "${shownTwin}" twice. Upload a picture instead, or change the team's name or what it is for and generate again.` });
             return;
           }
-          if (iconWorking) { post({ type: 'error', text: 'Still working on an icon. Wait for it to finish.' }); return; }
+          // No other icon request can be running here: each one starts by dropping the picture still awaited (iconWaiting), so this reply was
+          // refused above if one had started since.
           iconWorking = true;
           const stop = new AbortController();
           const stopping = deps.onStop?.(() => stop.abort());
@@ -1886,12 +1909,26 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
 
   const random = () => { const value = (deps.random ?? Math.random)(); return Number.isFinite(value) && value >= 0 && value < 1 ? value : 0; };
   /**
+   * The one gate every icon picture goes through, the first one and a retry alike (PR #90 review): the profile's settings and today's spend are read
+   * again (teamAi), the team is read again from its file to decide whether it needs a private model, and teamImageCall runs the outbound check (Emergency
+   * stop, the daily spend limit, TEE-only mode, the privacy check) on exactly the prompt it sends. A call that would now use another model than the one
+   * the person agreed to is refused, not sent.
+   */
+  const iconImageCall = async (file: string, job: IconJob, signal: AbortSignal): Promise<TeamImageResult> => {
+    if (!deps.teamAi) return { ok: false, reason: 'No model is available here. Set up a NEAR AI profile for this project first.' };
+    let ai: TeamAiDeps;
+    try { ai = await deps.teamAi(); } catch (error) { return { ok: false, reason: (error as Error).message }; }
+    const team = parseTeam(await readFile(file, 'utf8'), file);
+    const { need, why } = await iconNeed(team);
+    return teamImageCall(ai, { need, prompt: teamIconPrompt(team, job.variation), signal, model: job.model, ...(why ? { why } : {}) });
+  };
+  /**
    * One image model call for a team's icon, after the person agreed: the team's name and what it is for, with this variation. A picture that passes the
    * checks goes to the page (icon-source), which answers with the PNG it made; anything else is said and nothing changes. Throws only what the caller
    * reports as "The icon was not made".
    */
   const makeIcon = async (id: string, file: string, job: IconJob, signal: AbortSignal) => {
-    const result = await teamImageCall(job.ai, { need: job.need, prompt: teamIconPrompt(job.team, job.variation), signal, ...(job.why ? { why: job.why } : {}) });
+    const result = await iconImageCall(file, job, signal);
     if (!result.ok) { post({ type: 'error', text: `The icon was not made: ${result.reason}` }); return; }
     if (fileFor(id) !== file) { post({ type: 'error', text: 'That team is no longer in your teams, so the icon was not used.' }); return; }
     const type = iconSourceType(result.bytes);
