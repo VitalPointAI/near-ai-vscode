@@ -34,3 +34,6 @@ relay/secrets/
 relay/**/*.db
 relay/**/*.db-wal
 relay/**/*.db-shm
+
+# Reference doctrine kept locally by the owner; never committed.
+docs/references/
