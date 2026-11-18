@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- **Intel workbench for military staff J2 teams.** A staff team (one whose file has a `staff:`
+  block) gets twelve local tools, `mcp__intel-workbench__*`, that a member uses only when its
+  `tools:` line lists `mcp:intel-workbench`. They keep three registers in `products/j2/`: a source
+  register where reliability (A to F) and credibility (1 to 6) are graded as two separate fields
+  and every item records its origin, so two reports from one origin never count as corroboration;
+  a PIR register where every PIR names its decision point and latest time of value, and only a
+  named person can approve or reject one; and a collection plan that holds recommendations only,
+  refuses tasking wording, and says the J3 approves asset allocation. They also draft INTSUM and
+  INTREP skeletons from the registers, leaving the judgement to the analyst, and check a product
+  for compilation risk, which asks a person and never clears anything. The tools read and write
+  only those files and the project's staff settings, reach no network, and accept exercise labels
+  only (org/Internal, NATO Unclassified or Protected A at most).
+
 ## 0.4.33
 
 Every answer of the lead agent from a cloud model now shows a trust badge that says what the

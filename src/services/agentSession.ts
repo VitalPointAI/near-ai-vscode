@@ -28,6 +28,7 @@ import { ShellSession } from '../agent/shell';
 import { agentSystemPrompt, projectInstructions } from '../agent/systemPrompt';
 import { GRAPHICS_TOOLS } from '../agent/graphicsTools';
 import { grantsMcpTool } from '../mcp/tools';
+import { intelWorkbenchTools } from '../agent/intelWorkbench';
 import { checkCitationsTool, checkOriginalityTool, webFetchTool, webSearchTool } from '../agent/webTools';
 import type { SearchProvider } from '../agent/webSearch';
 import { SecurityAccess, securityTool } from '../agent/securityTool';
@@ -1446,7 +1447,10 @@ export class AgentConversation {
           add: async (addition) => addKnowledge(teamLibraryDir(homeFolder()), teamKnowledgeKey(request.team!.file), addition)
         }, 'research')
       : [];
-    const base = [...CORE_TOOLS, webFetchTool, webSearchTool(request.webSearch), checkCitationsTool, checkOriginalityTool, ...GRAPHICS_TOOLS, ...media, ...(request.security ? [securityTool(request.security)] : []), ...(request.cyber ? request.cyber.tools() : []), ...(request.mcpTools ?? []), ...teamKnowledge, ...memoryFor()];
+    // A military staff team (its file has a `staff:` block) gets the intel-workbench, a built-in local server; a member reaches it only through an
+    // `mcp:intel-workbench` grant in its tools line, like any connected server's tools. It reads and writes only the J2 registers and never the network.
+    const staffTools = request.team?.staff ? intelWorkbenchTools() : [];
+    const base = [...CORE_TOOLS, webFetchTool, webSearchTool(request.webSearch), checkCitationsTool, checkOriginalityTool, ...GRAPHICS_TOOLS, ...media, ...(request.security ? [securityTool(request.security)] : []), ...(request.cyber ? request.cyber.tools() : []), ...(request.mcpTools ?? []), ...staffTools, ...teamKnowledge, ...memoryFor()];
     const agents = this.spawnableAgents(request);
     if (!agents.length) return base;
     const gsd = request.gsd;
