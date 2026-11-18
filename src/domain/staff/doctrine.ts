@@ -422,3 +422,37 @@ export const STAFF_SECTIONS: Readonly<Record<StaffSectionId, StaffSection>> = {
   j9: { id: 'j9', number: 9, function: 'Civil-military cooperation' },
   'special-staff': { id: 'special-staff', function: 'Special staff' }
 };
+
+// ---- Analytic standards and restricted publications (design 10, 4.2, 4.4 and 7; WP-SHARED) -----------------------------------------------------------
+
+/**
+ * The ICD 203 expressions of likelihood, lowest first: each pair of words and the range of probability it stands for (ICD 203, Analytic Standards, 2 January
+ * 2015, section D.6.b.(2)(a); 02 T10). A judgement uses one of these words or its alternative, never another estimative word. NATO/Canadian products use the
+ * same table (design 10, 4.4).
+ */
+export const ICD203_LIKELIHOOD: ReadonlyArray<{ readonly terms: readonly string[]; readonly range: readonly [number, number] }> = [
+  { terms: ['almost no chance', 'remote'], range: [1, 5] },
+  { terms: ['very unlikely', 'highly improbable'], range: [5, 20] },
+  { terms: ['unlikely', 'improbable', 'improbably'], range: [20, 45] },
+  { terms: ['roughly even chance', 'roughly even odds'], range: [45, 55] },
+  { terms: ['likely', 'probable', 'probably'], range: [55, 80] },
+  { terms: ['very likely', 'highly probable'], range: [80, 95] },
+  { terms: ['almost certain', 'almost certainly', 'nearly certain'], range: [95, 99] }
+];
+
+/** The ICD 203 confidence levels (ICD 203, section D.6.b.(2)(a); 02 T10). Confidence and likelihood never share a sentence. */
+export const ICD203_CONFIDENCE_LEVELS: readonly string[] = ['high confidence', 'moderate confidence', 'low confidence'];
+
+/**
+ * Estimative words outside the ICD 203 table, which a key judgement must not use because a reader cannot tell what probability they mean (ICD 203, section
+ * D.6.b.(2)(a), "analytic products should use the terms in the table"; 02 T10). The list is the common offenders, not every word in English.
+ */
+export const NON_STANDARD_ESTIMATIVE_WORDS: readonly string[] = [
+  'possible', 'possibly', 'maybe', 'perhaps', 'conceivable', 'conceivably', 'might', 'could well', 'chances are', 'in all likelihood', 'doubtful', 'presumably', 'plausibly'
+];
+
+/**
+ * Publications with no public copy, cited by title and edition only (design 10, 2.4 and 7 item 7; 02 T1; 03 A1, B1, B6). A product that names one is checked
+ * by the release-guard for text taken from it beyond a citation. APP-28 and the COPD are not here: the NATO/Canadian profile names them as its process.
+ */
+export const RESTRICTED_PUBLICATION_TITLES: readonly string[] = ['JP 2-0', 'JP 3-04', 'JP 4-0', 'CJCSM 3130.03', 'JIPOE Joint Guide', 'CFJP 2-0', 'CFJP 4-0'];
