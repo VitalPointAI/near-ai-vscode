@@ -30,14 +30,15 @@ actuals:
   tasks: 3
   commits: 5
 plan_head_before: 0dcfd0c08a1adbfe3f6fab2d5d7e37840917c3ee
-plan_head_after: d65977f2
+plan_head_after: 20393bc8
+rebased_onto: 77ffcaac0e186d6bbd5fc253094d8b1d554c60dc
 ---
 
 # Phase 70 Plan 25: Attested-cloud over a proven connection Summary
 
 NEAR AI Cloud's gateway attestation binds the public key of the certificate its endpoint serves, so content at attested-cloud levels (Internal, Confidential, Protected A, NATO Unclassified) can again go to a private NEAR AI Cloud model, but only after a fresh background check proves that binding and only over a connection pinned to that key; every such answer is checked afterwards, a failed check stops those levels for the chat, and Check again clears it.
 
-PR4D_BASE: `0dcfd0c08a1adbfe3f6fab2d5d7e37840917c3ee` (origin/main after PR 4c, #87, merged as `0dcfd0c`). Branch `feat/gate-attested-routing`, started from that commit.
+PR4D_BASE: `0dcfd0c08a1adbfe3f6fab2d5d7e37840917c3ee` (origin/main after PR 4c, #87, merged as `0dcfd0c`). Branch `feat/gate-attested-routing`, started from that commit. Plan 70-28d rebased it onto `origin/main` at `77ffcaac` (release 0.4.31, #88, landed meanwhile); the hashes below are after that rebase.
 
 ## NEAR AI Cloud connection binding
 
@@ -60,13 +61,13 @@ Researched on 2026-11-18, before any binding code. Downloaded sources were read 
 
 ## What was built
 
-**Task 1 (`f1b82ba2`).** `attestedTlsFingerprint` proves the gateway attestation's `tls_cert_fingerprint` (quote to Intel's root, report_data binds sha256(address, fingerprint) and this check's nonce) through `reportDataBinds`, the one byte check `verifyResponse` also uses. `NearConnectionBinding.refresh` asks for `/attestation/report?model=<a TEE model>&nonce=<new>&signing_algo=ecdsa&include_tls_fingerprint=true`, proves it, opens its own TLS connection and compares the presented public key; one refresh per host, 5-second timeout. `pinnedFetch` runs the normal host name check, then refuses any other key with `ConnectionNotBoundError` before a byte is written; the check is on the request's own options as well as its agent, so VS Code's proxy agent keeps it. The client reads only the cached fact, starts a background refresh when it is missing or old, sends attested-cloud requests through `fetchFor`, and turns a refused handshake into `route.connection-not-bound` (host marked not-bound, the refusal recorded). The provider factory gives a source only to a NEAR client on NEAR AI Cloud's own endpoint. Records hold the connection state only. The quote fixtures moved to `src/test/helpers/attestationFixtures.ts`; `git diff f1b82ba2^..f1b82ba2 -- src/test/attestation.test.ts` shows only import lines and the removed helper bodies.
+**Task 1 (`33d12015`).** `attestedTlsFingerprint` proves the gateway attestation's `tls_cert_fingerprint` (quote to Intel's root, report_data binds sha256(address, fingerprint) and this check's nonce) through `reportDataBinds`, the one byte check `verifyResponse` also uses. `NearConnectionBinding.refresh` asks for `/attestation/report?model=<a TEE model>&nonce=<new>&signing_algo=ecdsa&include_tls_fingerprint=true`, proves it, opens its own TLS connection and compares the presented public key; one refresh per host, 5-second timeout. `pinnedFetch` runs the normal host name check, then refuses any other key with `ConnectionNotBoundError` before a byte is written; the check is on the request's own options as well as its agent, so VS Code's proxy agent keeps it. The client reads only the cached fact, starts a background refresh when it is missing or old, sends attested-cloud requests through `fetchFor`, and turns a refused handshake into `route.connection-not-bound` (host marked not-bound, the refusal recorded). The provider factory gives a source only to a NEAR client on NEAR AI Cloud's own endpoint. Records hold the connection state only. The quote fixtures moved to `src/test/helpers/attestationFixtures.ts`; `git diff 33d12015^..33d12015 -- src/test/attestation.test.ts` shows only import lines and the removed helper bodies.
 
-**Task 2 (`7eacaed8`).** `AttestationReportCache` (10 minutes per signing address, injected clock). The client checks each answer it sent at attested-cloud in the background, keeps the newest 50 checks by chat id (`answerCheck(chatId)`, for plan 26), records `route.attestation-checked` (verified, failed, unavailable) and sets the chat's stop on a failure unless the chat is closed. The conversation's attestation state is replaced (and the old one marked closed) on a new or reopened chat. Check again (`verifyRun`) re-checks the failed answers with a fresh report; when all pass the stop is cleared and `route.attestation-cleared` recorded. The page shows Check again under a failed result.
+**Task 2 (`5ddd0ad6`).** `AttestationReportCache` (10 minutes per signing address, injected clock). The client checks each answer it sent at attested-cloud in the background, keeps the newest 50 checks by chat id (`answerCheck(chatId)`, for plan 26), records `route.attestation-checked` (verified, failed, unavailable) and sets the chat's stop on a failure unless the chat is closed. The conversation's attestation state is replaced (and the old one marked closed) on a new or reopened chat. Check again (`verifyRun`) re-checks the failed answers with a fresh report; when all pass the stop is cleared and `route.attestation-cleared` recorded. The page shows Check again under a failed result.
 
-**Task 3 (`bd28a88e`, `d65977f2`).** `CONNECTION_BINDING_TEXT`; the refusal sentences; Show Policy; SECURITY.md (below).
+**Task 3 (`f0dd08f6`, `20393bc8`).** `CONNECTION_BINDING_TEXT`; the refusal sentences; Show Policy; SECURITY.md (below).
 
-**Review fixes (`c80242f0`), asked for by the coordinator after Task 3:** the nine last findings of PR #87's review, each with a test (see Deviations, item 9).
+**Review fixes (`a9ccd487`), asked for by the coordinator after Task 3:** the nine last findings of PR #87's review, each with a test (see Deviations, item 9).
 
 ## SECURITY.md, as written
 
@@ -111,8 +112,8 @@ The policy section's Model requests bullet now says: "Content at a level whose t
 5. **[Design, recorded] Check again covers every failed answer of the run,** tool-call turns and sub-agents included (a sub-agent's route shares the run's listener); a run that ended without a row gets one when a check fails, so there is always a Check again to press.
 6. **Unknown-binding sentence order.** "NEAR AI checks the connection in the background, so try again in a moment; until then, content at this level stays on this computer." keeps every binding sentence ending in "stays on this computer.", which gateRouting pins.
 7. **Tests that changed with the behaviour (none weakened):** gateRouting's "no sentence promises a check that does not exist yet" now pins that the unknown sentence names the background check that exists, and that the other two promise none; gateDocs drops the interim phrases the plan removes and pins the new ones; gateLabelCommands follows the new `POLICY_ROUTING_TEXT`; gateRouteGuard's fake fetch answers the background report GET and counts it apart from content (the "only the two local requests were sent" assertion is unchanged, and a new one says the only other requests were report GETs).
-8. **[Rule 1] `src/gate/sessionMark.ts` imported types from `services`** (Task 2), which teamBoundaries forbids; it now names the two shapes it needs itself (fixed in `c80242f0`).
-9. **[Coordinator] The last PR #87 review findings, one commit (`c80242f0`), each with a test:**
+8. **[Rule 1] `src/gate/sessionMark.ts` imported types from `services`** (Task 2), which teamBoundaries forbids; it now names the two shapes it needs itself (fixed in `a9ccd487`).
+9. **[Coordinator] The last PR #87 review findings, one commit (`a9ccd487`), each with a test:**
    1. `judgeChatLowering` rejects a verified target that is not below its from-mark (`not-lower`) or is below the project's label as this computer last ran the chat (`below-project`; runs note it with `noteChatProjectMark`).
    2. Lowering times are parsed and compared as times; either one unreadable is `unreadable-time`. The test shows the old text comparison read an earlier use as later.
    3. The outbound check also matches the payload joined in order (object keys placed after the values so consecutive arguments stay adjacent); each text is split into words once and windows of each size slide over them without copying.
@@ -134,4 +135,4 @@ None beyond the plan's register: the new network surface (a background GET of th
 
 ## Self-Check: PASSED
 
-`src/services/connectionBinding.ts`, `src/test/gateConnectionBinding.test.ts` and `src/test/helpers/attestationFixtures.ts` exist; commits `f1b82ba2`, `7eacaed8`, `bd28a88e`, `c80242f0` and `d65977f2` are ancestors of HEAD.
+`src/services/connectionBinding.ts`, `src/test/gateConnectionBinding.test.ts` and `src/test/helpers/attestationFixtures.ts` exist; commits `33d12015`, `5ddd0ad6`, `f0dd08f6`, `a9ccd487` and `20393bc8` are ancestors of HEAD.
