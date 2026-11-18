@@ -77,10 +77,9 @@ export async function verifyResponse(evidence: ResponseEvidence, model: string, 
   try { reportData = verifyTdxQuote(attestation.intel_quote, { trustedRoot: options.trustedRoot, now: options.now }).reportData; } catch (error) { checks.genuineQuote = false; return fail(`The response is signed, but its attestation quote is not genuine: ${(error as Error).message}.`, address); }
   checks.genuineQuote = true;
   const fingerprint = typeof attestation.tls_cert_fingerprint === 'string' ? attestation.tls_cert_fingerprint : undefined;
-  const addressBytes = Buffer.from(address.replace(/^0x/i, ''), 'hex');
-  const expectedFirst = fingerprint ? createHash('sha256').update(addressBytes).update(Buffer.from(fingerprint, 'hex')).digest() : Buffer.concat([addressBytes, Buffer.alloc(32 - addressBytes.length)]);
-  checks.addressInQuote = reportData.subarray(0, 32).equals(expectedFirst);
-  checks.nonceInQuote = reportData.subarray(32, 64).equals(Buffer.from(nonce, 'hex'));
+  const bound = reportDataBinds(reportData, address, fingerprint, nonce);
+  checks.addressInQuote = bound.addressInQuote;
+  checks.nonceInQuote = bound.nonceInQuote;
   if (typeof attestation.nvidia_payload === 'string') {
     try { checks.gpuNonce = String((JSON.parse(attestation.nvidia_payload) as { nonce?: unknown }).nonce).toLowerCase() === nonce.toLowerCase(); } catch { checks.gpuNonce = false; }
   }
@@ -91,6 +90,58 @@ export async function verifyResponse(evidence: ResponseEvidence, model: string, 
 }
 
 type Attestation = Record<string, unknown> & { signing_address: string; intel_quote: string };
+
+/**
+ * The one check of what a quote's report_data binds, used by verifyResponse and by attestedTlsFingerprint, so the two can never disagree. NEAR AI Cloud
+ * (crates/services/src/attestation/report_data.rs in github.com/nearai/cloud-api) lays report_data out as: bytes 0 to 31 the signing address zero-padded to
+ * 32 bytes, or, when the attestation carries a TLS fingerprint, sha256(signing address bytes followed by the fingerprint bytes); bytes 32 to 63 the
+ * caller's fresh nonce.
+ */
+export function reportDataBinds(reportData: Buffer, address: string, fingerprint: string | undefined, nonce: string): { addressInQuote: boolean; nonceInQuote: boolean } {
+  const addressBytes = Buffer.from(address.replace(/^0x/i, ''), 'hex');
+  if (addressBytes.length === 0 || addressBytes.length > 32) return { addressInQuote: false, nonceInQuote: false };
+  const expectedFirst = fingerprint ? createHash('sha256').update(addressBytes).update(Buffer.from(fingerprint, 'hex')).digest() : Buffer.concat([addressBytes, Buffer.alloc(32 - addressBytes.length)]);
+  const nonceBytes = Buffer.from(nonce, 'hex');
+  return { addressInQuote: reportData.subarray(0, 32).equals(expectedFirst), nonceInQuote: nonceBytes.length === 32 && reportData.subarray(32, 64).equals(nonceBytes) };
+}
+
+/**
+ * Which attestation of NEAR AI Cloud's report names the TLS key its endpoint serves: the gateway's. NEAR AI Cloud's gateway (cloud-api) answers
+ * `/v1/attestation/report?include_tls_fingerprint=true` with `gateway_attestation.tls_cert_fingerprint`, the SHA-256 of the DER SubjectPublicKeyInfo of the
+ * certificate it serves (cloud-api, crates/services/src/attestation/environment.rs `compute_spki_hash`; nearai-cloud-verifier, ts/tls_verifier.ts).
+ */
+export const TLS_FINGERPRINT_ROLE = 'gateway' as const;
+
+export type AttestedTlsFingerprint =
+  | { readonly state: 'bound-in-quote'; readonly fingerprint: string; readonly signingAddress: string; readonly role: typeof TLS_FINGERPRINT_ROLE }
+  | { readonly state: 'absent' }
+  | { readonly state: 'invalid'; readonly reason: string };
+
+/**
+ * The TLS key fingerprint NEAR AI Cloud's report binds to its enclave (CLAS-05 as the owner amplified it): the gateway's attestation must carry
+ * `tls_cert_fingerprint` (64 hex characters) and a quote that verifies to Intel's root CA, whose report_data binds sha256(signing address, fingerprint) and
+ * this check's own nonce. `absent` when the report names no fingerprint (the binding is not exposed); `invalid` when it names one that the quote does not
+ * prove. Never fetches anything.
+ */
+export function attestedTlsFingerprint(report: unknown, nonce: string, options: { trustedRoot?: string; now?: Date } = {}): AttestedTlsFingerprint {
+  const record = report !== null && typeof report === 'object' ? report as Record<string, unknown> : undefined;
+  const gateway = record?.gateway_attestation;
+  const attestation = gateway !== null && typeof gateway === 'object' ? gateway as Record<string, unknown> : undefined;
+  const given = attestation?.tls_cert_fingerprint;
+  if (attestation === undefined || given === undefined || given === null || given === '') return { state: 'absent' };
+  if (typeof given !== 'string' || !/^(?:[0-9a-fA-F]{2}:?){31}[0-9a-fA-F]{2}$/.test(given)) return { state: 'invalid', reason: 'The report\'s TLS fingerprint is not a SHA-256 value.' };
+  const fingerprint = given.replace(/:/g, '').toLowerCase();
+  const address = attestation.signing_address;
+  const quote = attestation.intel_quote;
+  if (typeof address !== 'string' || !/^(0x)?[0-9a-fA-F]{2,64}$/.test(address) || address.replace(/^0x/i, '').length % 2 !== 0) return { state: 'invalid', reason: 'The report names no usable signing address.' };
+  if (typeof quote !== 'string') return { state: 'invalid', reason: 'The report carries no quote.' };
+  let reportData: Buffer;
+  try { reportData = verifyTdxQuote(quote, options).reportData; } catch (error) { return { state: 'invalid', reason: `The quote is not genuine: ${(error as Error).message}.` }; }
+  const bound = reportDataBinds(reportData, address, fingerprint, nonce);
+  if (!bound.nonceInQuote) return { state: 'invalid', reason: 'The quote does not contain this check\'s fresh nonce, so it may be replayed.' };
+  if (!bound.addressInQuote) return { state: 'invalid', reason: 'The quote does not bind the TLS fingerprint the report names.' };
+  return { state: 'bound-in-quote', fingerprint, signingAddress: address.toLowerCase(), role: TLS_FINGERPRINT_ROLE };
+}
 
 /**
  * Every attestation in a report that names a signing key and carries a quote: the model's

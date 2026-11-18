@@ -365,7 +365,7 @@ function sameHost(a: string, b: string): boolean {
 }
 
 /** The cause's sentence, then the rule's sentence without its own opening "Nothing was sent.", so the reason says it once. */
-function bindingReason(cause: BindingRefusalCause, rule: 'route.connection-not-bound' | 'route.no-local-model'): string {
+export function bindingReason(cause: BindingRefusalCause, rule: 'route.connection-not-bound' | 'route.no-local-model'): string {
   return `${BINDING_REFUSALS[cause]} ${ROUTE_REFUSALS[rule].replace(/^Nothing was sent\. /, '')}`;
 }
 
