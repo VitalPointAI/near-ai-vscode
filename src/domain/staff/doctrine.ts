@@ -422,3 +422,137 @@ export const STAFF_SECTIONS: Readonly<Record<StaffSectionId, StaffSection>> = {
   j9: { id: 'j9', number: 9, function: 'Civil-military cooperation' },
   'special-staff': { id: 'special-staff', function: 'Special staff' }
 };
+
+// ---- J5 planning terms (design 10, 2.6 and 3.3; research note 05; WP-J5) ----
+// The J5 plans template, its skills and its tests read these tables; none of them spells a planning term of its own.
+
+/** The eight steps of the operational design method. Design runs before the JPP and alongside mission analysis. */
+// JP 5-0 (1 July 2025) ch. III, as recorded in design 10, 2.6 (the 2020 edition had five steps).
+export const OPERATIONAL_DESIGN_METHOD: readonly string[] = [
+  'Understand the strategic direction and guidance', 'Understand the operational environment', 'Define the problem', 'Identify assumptions',
+  'Develop operational approaches', 'Identify decisions and decision points', 'Refine the operational approach', 'Prepare planning guidance'
+];
+
+/** The elements of operational design in their groups. Not every element applies to every plan. */
+// JP 5-0 (1 July 2025) ch. III; AY26 Campaign Planning Handbook ch. 3 (design 10, 2.6 and 2.8 item 10).
+export const OPERATIONAL_DESIGN_ELEMENTS: ReadonlyArray<{ readonly group: string; readonly elements: readonly string[] }> = [
+  { group: 'Overarching', elements: ['Objective', 'Transitions', 'Center of gravity', 'Effects', 'Culmination'] },
+  { group: 'Organizing the operation', elements: ['Lines of operation', 'Lines of effort', 'Decisive points', 'Direct and indirect approach', 'Operational reach'] },
+  { group: 'Time', elements: ['Arranging operations', 'Anticipation'] },
+  { group: 'Forces and functions', elements: ['Forces and functions'] },
+  { group: 'Balancing', elements: ['Balancing'] }
+];
+
+/** The Army design methodology's activities, used at tactical level under US Army when the problem is ill-structured. */
+// FM 5-0 (Nov 2024) 1-54 to 1-56 and ch. 4 introduction (05 s2).
+export const ARMY_DESIGN_METHODOLOGY_ACTIVITIES: readonly string[] = [
+  'Frame the operational environment', 'Frame the problem', 'Develop an operational approach', 'Transition to detailed planning', 'Reframe when the situation changes'
+];
+
+/** How each process does design: its name, when it runs, and its source. */
+export const DESIGN_APPROACHES: Readonly<Record<StaffProcessId, { readonly name: string; readonly when: string; readonly source: string }>> = {
+  jpp: { name: 'Operational design', when: 'before the JPP starts and alongside mission analysis', source: 'JP 5-0 (1 July 2025) ch. III' },
+  mdmp: { name: 'Army design methodology (ADM)', when: 'before or alongside mission analysis when the problem is ill-structured; the commander may start the MDMP without it when time is short', source: 'FM 5-0 (Nov 2024) 1-54 to 1-56, ch. 4' },
+  'ajp-5': { name: 'Operations design', when: 'inside mission analysis', source: 'AJP-5 Edition B 3.19' },
+  // APP-28 has no formal operational design step (05 s3 and s4, from a NATO centre-of-excellence handbook).
+  'app-28': { name: 'Problem framing (no formal operational design step)', when: 'only when the commander asks for it on an ill-structured problem', source: 'APP-28 Edition A as summarised in 05 (S7, S15)' }
+};
+
+/** The centre of gravity analysis terms, spelled as each profile spells them. */
+// JP 5-0 (2020) IV-23 to IV-25 and JP 5-0 (1 July 2025) ch. III (US); AJP-5 Edition B annex B (NATO spelling) (05 T4).
+export const COG_TERMS: Readonly<Record<StaffProfileId, { readonly cog: string; readonly capabilities: string; readonly requirements: string; readonly vulnerabilities: string }>> = {
+  'us-joint': { cog: 'Center of gravity', capabilities: 'Critical capabilities', requirements: 'Critical requirements', vulnerabilities: 'Critical vulnerabilities' },
+  'us-army': { cog: 'Center of gravity', capabilities: 'Critical capabilities', requirements: 'Critical requirements', vulnerabilities: 'Critical vulnerabilities' },
+  'nato-ca': { cog: 'Centre of gravity', capabilities: 'Critical capabilities', requirements: 'Critical requirements', vulnerabilities: 'Critical vulnerabilities' }
+};
+
+/** What design aims at, per profile. JP 5-0 (2025) no longer uses "military end state"; US Army and NATO/Canadian still do. */
+// JP 5-0 (1 July 2025) ch. III; FM 5-0 (Nov 2024); AJP-5 Edition B; design 10, 2.6 and 2.8 item 4.
+export const END_STATE_TERMS: Readonly<Record<StaffProfileId, { readonly term: string; readonly usesMilitaryEndState: boolean }>> = {
+  'us-joint': { term: 'objectives and the conditions that achieve them', usesMilitaryEndState: false },
+  'us-army': { term: 'military end state', usesMilitaryEndState: true },
+  'nato-ca': { term: 'military end state', usesMilitaryEndState: true }
+};
+
+/** What each COA test asks, in plain words. Every test a profile lists has an entry (the J5 tests hold this). */
+// US tests: JP 5-0 (1 July 2025) ch. IV and FM 5-0 (Nov 2024) ch. 5 COA screening criteria. NATO tests: AJP-5 Edition B 3.50, paraphrased.
+export const COA_TEST_MEANINGS: Readonly<Record<string, string>> = {
+  Suitable: 'It accomplishes the mission within the commander\'s intent and planning guidance.',
+  Feasible: 'It can be done with the forces, resources and time available, in the operational environment as it is.',
+  Acceptable: 'The expected result is worth the cost in forces, resources, time and risk, and it stays inside the limitations.',
+  Distinguishable: 'It differs clearly from every other COA in main effort, scheme, task organization, timing or use of forces.',
+  Complete: 'It answers who, what, when, where, why and how, and covers the operation to its end, including sustainment and risk.',
+  Feasibility: 'It can be done with the forces, resources and time available.',
+  Acceptability: 'The expected result is worth its cost and risk, and it stays inside the limitations.',
+  'Completeness and compliance': 'It answers who, what, when, where, why and how, and it complies with the commander\'s planning guidance.',
+  Exclusivity: 'It differs clearly from every other COA.',
+  Suitability: 'It accomplishes the mission and achieves the commander\'s intent.'
+};
+
+/** The wargame turn and the order adversary COAs are played in. */
+// FM 5-0 (Nov 2024) 5-133 to 5-165 (action, reaction, counteraction); AJP-5 Edition B 3.58 (most likely, then most dangerous).
+export const WARGAME_TURN: readonly string[] = ['Action', 'Reaction', 'Counteraction'];
+export const ADVERSARY_COA_ORDER: readonly string[] = ['Most likely adversary COA (MLCOA)', 'Most dangerous adversary COA (MDCOA)'];
+
+/** Branches and sequels, kept apart: branches belong to future operations, sequels to the planners. */
+// JP 5-0 (2020) IV-39; JP 3-33 (2018) IX-1 (05 T7).
+export const BRANCH_AND_SEQUEL = {
+  branch: 'A branch is a contingency option inside the current operation, with the trigger that starts it.',
+  sequel: 'A sequel is a later operation or phase that follows from a possible outcome of the current one.'
+} as const;
+
+/** Measures of performance and effectiveness, kept in separate tables. */
+// JP 5-0 (2020) K-19; JP 5-0 (1 July 2025) app. H; AY26 Campaign Planning Handbook (design 10, 2.8 item 10).
+export const ASSESSMENT_TERMS = {
+  moe: 'Measure of effectiveness (MOE): are we doing the right things, creating the effects and changing the conditions we need?',
+  mop: 'Measure of performance (MOP): are we doing things right, completing the tasks we were given?',
+  indicator: 'Indicator: a specific, observable and collectable item of information that shows progress toward an MOE or MOP.'
+} as const;
+
+/** The joint plan levels (level 3T when a TPFDD is needed). */
+// JP 5-0 (1 July 2025) ch. I (design 10, 2.8 item 5).
+export const JOINT_PLAN_LEVELS: readonly string[] = [
+  'Level 1: commander\'s estimate', 'Level 2: base plan', 'Level 3: concept plan (CONPLAN); 3T when a TPFDD is needed', 'Level 4: operation plan (OPLAN)'
+];
+
+/** Time allocation at tactical level: the planners use at most a third of the time and leave two thirds to subordinates. */
+// FM 5-0 (Nov 2024) 1-118, 5-21 to 5-22 (05 s2).
+export const TIME_RULE = 'One-third, two-thirds rule';
+
+/** Who leads planning at tactical level: never "S-5" unless the person sets it. */
+// FM 5-0 (Nov 2024) 1-76 (05 T7); Land Operations (2008) plans centre (design 10, 2.5).
+export const TACTICAL_PLANS_CELL = {
+  division: 'plans cell led by the G-5',
+  brigade: 'plans cell led by the operations officer (S-3)',
+  battalion: 'no dedicated plans cell; planning and operations are combined'
+} as const;
+
+/** Multidomain operations, the US Army operational concept. It changes what a COA must show, not the planning steps. */
+// FM 3-0 (March 2025) 1-9, 3-7, 3-13 to 3-14; FM 5-0 (Nov 2024) introduction (05 s2).
+export const MDO_TERMS = {
+  concept: 'Multidomain operations',
+  tenets: ['Agility', 'Convergence', 'Endurance', 'Depth'],
+  domains: ['Air', 'Land', 'Maritime', 'Space', 'Cyberspace'],
+  dimensions: ['Physical', 'Informational', 'Human'],
+  convergence: 'Convergence synchronizes joint and Army capabilities against combinations of decisive points across domains to create windows of opportunity.',
+  profiles: ['us-army']
+} as const satisfies { readonly profiles: readonly StaffProfileId[] } & Record<string, unknown>;
+
+/** Profile-specific gates in the J5 workflow, beyond the commander's COA decision. */
+// AJP-5 Edition B 3.51 and Stage 4; CFJP 5.0 art. 405 (design 10, 3.3 workflow table).
+export const J5_PROFILE_GATES: Readonly<Record<StaffProfileId, { readonly afterCoaDevelopment: string; readonly beforeFullPlan?: string }>> = {
+  'us-joint': { afterCoaDevelopment: 'The commander gives guidance on which COAs to analyse.' },
+  'us-army': { afterCoaDevelopment: 'The commander gives guidance on which COAs to analyse.' },
+  'nato-ca': {
+    afterCoaDevelopment: 'The commander gives guidance for the refinement of the tentative COAs (AJP-5 3.51).',
+    beforeFullPlan: 'The CONOPS is approved by the higher commander before the full plan is written (AJP-5 Stage 4; CFJP 5.0 art. 405).'
+  }
+};
+
+/** The red team under each profile. Under NATO/Canadian it is a UK national element, optional, on by default (owner decision Q11). */
+// JP 5-0 (1 July 2025) app. G (red team separate from the J-2 red cell); FM 5-0 (Nov 2024); AJP-5 Edition B UK 2.15.
+export const RED_TEAM_NOTES: Readonly<Record<StaffProfileId, { readonly note: string; readonly optional: boolean }>> = {
+  'us-joint': { note: 'The red team is an independent group, separate from the J-2 red cell, that challenges the planners\' assumptions and logic.', optional: false },
+  'us-army': { note: 'The red team is an independent group, separate from the S-2 or G-2 red cell, that challenges the planners\' assumptions and logic.', optional: false },
+  'nato-ca': { note: 'Red teaming is a UK national element in AJP-5, not NATO doctrine. It is on by default; the commander may switch it off.', optional: true }
+};
