@@ -1,5 +1,7 @@
 # J1 Personnel and J8 Resources: doctrine research for agentic staff teams
 
+> **Edition update (2026-11-18).** This note used JP 5-0 of 1 December 2020. JP 5-0 of 1 July 2025 supersedes it and was read from the owner's reference copy for design note 10. JPP step names are unchanged; US Joint COA tests are now suitable, feasible, acceptable, distinguishable, complete; the fourth planning function is plan evaluation; annex I is Knowledge, Information, and Data Management and annex K is Command, Control, Communications, Computer, and Cybersecurity Systems. See design note 10, sections 2.6, 2.8 and 2.9.
+
 **Researched:** 2026-11-18
 **Scope:** US joint and Army doctrine plus Canadian joint doctrine and policy, used to build two team templates for the NEAR AI VS Code extension: a J1 (manpower and personnel) team, and a J8 (force structure, resources and assessment, or in a JTF, resource management and financial support) team. Both work at strategic, operational and tactical levels. At tactical level the J1 becomes the S1 or G1, and the J8 becomes the S8 or G8 (financial management officer).
 **Sources:** Public and unclassified only. Each claim carries a source tag such as [S5]. The numbered list at the end gives title, publisher, date and URL.

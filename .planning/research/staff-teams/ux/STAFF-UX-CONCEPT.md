@@ -1,6 +1,6 @@
 # Staff Room: UX concept for AI-augmented military staff teams
 
-Date: 2026-11-18. Status: concept for owner review. Nothing here is built yet, except the clickable prototype.
+Date: 2026-11-18. Status: concept with the owner's decisions of 2026-11-18 applied (all questions in section 16 accepted as recommended). Nothing here is built yet, except the clickable prototype.
 
 Prototype: [`prototype/war-room.html`](prototype/war-room.html). Open it in any current browser with no network. Press Play, or add `?autoplay` to the address. It runs about 75 seconds at 1x and stops twice for a person.
 
@@ -119,7 +119,7 @@ The prototype implements screens 5.1 to 5.9 and 5.11. Screens 5.10, 5.12 and 5.1
 - Each card shows the step number, name, status in words (Done, Working now, Next, Waiting for a named person), a progress bar, and chips for the sections working on it. A chip lights violet while that section has an agent working.
 - The decision step (COA approval) is drawn with a dashed border and a gold diamond in its title.
 - **Gates** sit between steps: mission analysis brief, COA decision, plan approval. A gate is a diamond with a lock (not reached), a pulsing gold outline (waiting for a named person), a gold fill with a tick and the person's name on hover (approved), or an amber return arrow (returned to the staff with guidance).
-- **Profile switch:** changing the profile renames steps, product names (JIPOE, IPB or JIPB), COA tests and annex letters. Products already approved keep the profile they were approved under (design 10, section 2.1); the switch never renames anything a person signed.
+- **Profile switch:** changing the profile renames steps, product names (JIPOE or IPB), COA tests and annex letters. Products already approved keep the profile they were approved under (design 10, section 2.1); the switch never renames anything a person signed.
 - **Planning-time budget:** used time against the window, with a gold mark at one third. This is the one-third, two-thirds rule made visible: the staff can see how much time it is leaving its subordinate units.
 
 ### 5.3 The staff squads (team of teams)
@@ -159,7 +159,7 @@ The prototype implements screens 5.1 to 5.9 and 5.11. Screens 5.10, 5.12 and 5.1
 **Purpose:** COA cells working side by side, visibly distinct.
 
 - One pane per COA cell (two by default, matching the J5 template), each with its theme, owner and model, a sketch on its own mini map (the COP plans layer, which never merges into the current picture), the COA statement, the profile's validity tests and the supportability checks from other sections.
-- **Validity tests per profile** (design 10, section 2.2): US Joint: adequate, feasible, acceptable, distinguishable, complete. US Army: feasible, acceptable, suitable, distinguishable, complete. NATO/Canadian: feasibility, acceptability, completeness and compliance, exclusivity, suitability. A failing or risky test shows an amber triangle with the reason.
+- **Validity tests per profile** (design 10, section 2.2): US Joint: suitable, feasible, acceptable, distinguishable, complete (JP 5-0, July 2025). US Army: feasible, acceptable, suitable, distinguishable, complete. NATO/Canadian: feasibility, acceptability, completeness and compliance, exclusivity, suitability. A failing or risky test shows an amber triangle with the reason.
 - **Supportability chips** from J4 (supportable, or the risk and when) and J3 (forces available) arrive as green hand-offs and stay on the pane.
 - **Distinctness check:** when two COAs drift together (the known failure of parallel COA work in JP 5-0), the lead planner's check draws both sketches overlaid and flags "not distinguishable". This is shown, not hidden.
 - Up to four panes at once on a wide screen. A third COA is drafted by the design planner on request.
@@ -208,7 +208,7 @@ The prototype implements screens 5.1 to 5.9 and 5.11. Screens 5.10, 5.12 and 5.1
 
 ### 5.11 Orders and annex assembly
 
-- One row per part of the order: base plan, intelligence annex, operations annex, fires, logistics or sustainment, assessment. Each shows its owner (agent and section), progress and state. **Letters come from the profile** (design 10, section 2.3): US Joint B, C, D; US Army B, C, D (Fires), F (Sustainment), M; NATO/Canadian D (Intelligence), A (Operations), R (Logistics), all marked provisional until the COPD is confirmed.
+- One row per part of the order: base plan, intelligence annex, operations annex, fires, logistics or sustainment, assessment. Each shows its owner (agent and section), progress and state. **Letters come from the profile** (design 10, section 2.3): US Joint B (Intelligence), C (Operations), D (Logistics), N (Assessments), fires as an appendix to C; US Army B, C, D (Fires), F (Sustainment), M (Assessment); NATO/Canadian D (Intelligence), A (Conduct of Operations), R (Logistics).
 - Rows fill in parallel, because each section writes only its own annex in its own branch.
 - **Synchronization check** by the chief of staff after the merges: conflicts (for example a J4 fuel time against a J3 timeline) are sent back to the owning sections as hand-offs, and each section's tag shows `conflict` until it returns a resolution. This is the two-level merge in design 10, section 5.3.
 - **Plan approval** is the last row, gold, "waiting for" the named commander, with the line "Agents cannot mark an order as issued."
@@ -548,13 +548,15 @@ Backup moves: if time is short, press **Next** to skip a beat (it stops at every
 
 ---
 
-## 16. Open questions
+## 16. Owner decisions on the open questions
 
-| # | Question | Who | Recommendation |
-|---|---|---|---|
-| U1 | Is the Staff Room its own panel, or a mode of Team Live? | Owner | Its own panel, sharing Team Live's state code and visual grammar |
-| U2 | Minimum deliberation time at a gate: organization policy, per gate? | Owner | Yes, in the signed policy bundle, per gate kind, default 60 s for a COA decision and 0 for a J2 release |
-| U3 | Should the Staff Room demo mode ship in the extension (replaying a recorded fixture with no model)? | Owner | Yes: it is also the developer playground and the visual test input |
-| U4 | Real-terrain maps for demos: which offline tile source can be bundled or hosted? | Owner | Fictional SVG maps for the public demo; an organization tile server for client pilots |
-| U5 | Human seats in the wargame (people playing a side alongside agents) in the first release, or with the suite? | Owner | With the suite (section 13, stage 2) |
-| U6 | Persona names for agents | Owner | None: role slugs only (notes 00 and 05); the game feel comes from tokens, states and motion, not characters |
+The owner accepted every recommendation below on 2026-11-18.
+
+| # | Question | Who | Recommendation | Decision |
+|---|---|---|---|---|
+| U1 | Is the Staff Room its own panel, or a mode of Team Live? | Owner | Its own panel, sharing Team Live's state code and visual grammar | Accepted (owner, 2026-11-18) |
+| U2 | Minimum deliberation time at a gate: organization policy, per gate? | Owner | Yes, in the signed policy bundle, per gate kind, default 60 s for a COA decision and 0 for a J2 release | Accepted (owner, 2026-11-18) |
+| U3 | Should the Staff Room demo mode ship in the extension (replaying a recorded fixture with no model)? | Owner | Yes: it is also the developer playground and the visual test input | Accepted (owner, 2026-11-18) |
+| U4 | Real-terrain maps for demos: which offline tile source can be bundled or hosted? | Owner | Fictional SVG maps for the public demo; an organization tile server for client pilots | Accepted (owner, 2026-11-18) |
+| U5 | Human seats in the wargame (people playing a side alongside agents) in the first release, or with the suite? | Owner | With the suite (section 13, stage 2) | Accepted (owner, 2026-11-18) |
+| U6 | Persona names for agents | Owner | None: role slugs only (notes 00 and 05); the game feel comes from tokens, states and motion, not characters | Accepted (owner, 2026-11-18) |

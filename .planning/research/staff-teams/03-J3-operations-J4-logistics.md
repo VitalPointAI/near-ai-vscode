@@ -1,5 +1,7 @@
 # J3 Operations and J4 Logistics: doctrine research for agentic staff teams
 
+> **Edition update (2026-11-18).** This note used JP 5-0 of 1 December 2020. JP 5-0 of 1 July 2025 supersedes it and was read from the owner's reference copy for design note 10. JPP step names are unchanged; US Joint COA tests are now suitable, feasible, acceptable, distinguishable, complete; the fourth planning function is plan evaluation; annex I is Knowledge, Information, and Data Management and annex K is Command, Control, Communications, Computer, and Cybersecurity Systems. See design note 10, sections 2.6, 2.8 and 2.9. JP 3-14 (23 August 2023) was read from the owner's extract: the mission-area list in this note is confirmed, and space control, space coordinating authority, space negation and counterspace are removed. The J-3 coordinates crisis planning and the J-5 campaign and contingency planning (JP 5-0, 2025). Canadian land texts use combat service support for logistics and the operational functions Command, Sense, Act, Shield, Sustain (Land Operations, 2008).
+
 **Researched:** 2026-11-18
 **Scope:** US joint and Army doctrine plus Canadian joint doctrine, used to build J3 (operations) and J4 (logistics) agent team templates for the NEAR AI VS Code extension. These are the third and fourth staff teams the owner will demo.
 **Sources:** Public and unclassified only. Each claim carries a source tag such as [S12]. The numbered list is at the end, with title, publisher, date and URL.

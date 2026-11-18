@@ -769,21 +769,21 @@ function anim(node, frames, opts) { if (!motionOK() || !node || !node.animate) r
 
 /* ---------- Doctrine profiles (from research notes 02, 03, 05) ---------- */
 const PROFILES = {
-  'us-joint': { name: 'US Joint (JPP, JP 5-0, 2020)', j2: 'JIPOE', tests: ['Adequate', 'Feasible', 'Acceptable', 'Distinguishable', 'Complete'], feas: 1, segs: [
+  'us-joint': { name: 'US Joint (JPP, JP 5-0, 2025)', j2: 'JIPOE', tests: ['Suitable', 'Feasible', 'Acceptable', 'Distinguishable', 'Complete'], feas: 1, segs: [
     { n: 1, label: 'Planning initiation', w: [0] }, { n: 2, label: 'Mission analysis', w: [1] }, { n: 3, label: 'COA development', w: [2] },
     { n: 4, label: 'COA analysis and wargaming', w: [3] }, { n: 5, label: 'COA comparison', w: [4] }, { n: 6, label: 'COA approval', w: [5], human: true },
     { n: 7, label: 'Plan or order development', w: [6] }],
-    annex: { base: 'Base plan', intel: 'Annex B Intelligence', ops: 'Annex C Operations', log: 'Annex D Logistics', assess: 'Assessment annex (letter to confirm)', fires: 'Fires appendix to Annex C (confirm)' } },
+    annex: { base: 'Base plan', intel: 'Annex B Intelligence', ops: 'Annex C Operations', log: 'Annex D Logistics', assess: 'Annex N Assessments', fires: 'Fires appendix to Annex C' } },
   'us-army': { name: 'US Army (MDMP, FM 5-0, 2024)', j2: 'IPB', tests: ['Feasible', 'Acceptable', 'Suitable', 'Distinguishable', 'Complete'], feas: 0, segs: [
     { n: 1, label: 'Receipt of mission', w: [0] }, { n: 2, label: 'Mission analysis', w: [1] }, { n: 3, label: 'COA development', w: [2] },
     { n: 4, label: 'COA analysis (war game)', w: [3] }, { n: 5, label: 'COA comparison', w: [4] }, { n: 6, label: 'COA approval', w: [5], human: true },
     { n: 7, label: 'Orders production, dissemination and transition', w: [6] }],
     annex: { base: 'OPORD base', intel: 'Annex B Intelligence', ops: 'Annex C Operations', log: 'Annex F Sustainment', assess: 'Annex M Assessment', fires: 'Annex D Fires' } },
-  'nato-ca': { name: 'NATO/Canadian (AJP-5 Ed B, operational)', j2: 'JIPB', tests: ['Feasibility', 'Acceptability', 'Completeness and compliance', 'Exclusivity', 'Suitability'], feas: 0, segs: [
+  'nato-ca': { name: 'NATO/Canadian (AJP-5 Ed B, operational)', j2: 'JIPOE', tests: ['Feasibility', 'Acceptability', 'Completeness and compliance', 'Exclusivity', 'Suitability'], feas: 0, segs: [
     { n: 1, label: 'Planning initiation', w: [0] }, { n: 2, label: 'Mission analysis', w: [1] }, { n: 3, label: 'COA development', w: [2] },
     { n: 4, label: 'COA analysis', w: [3] }, { n: 5, label: 'COA validation and comparison', w: [4] }, { n: 6, label: "Commander's COA decision", w: [5], human: true },
     { n: 7, label: 'Plan development', w: [6] }],
-    annex: { base: 'OPLAN base', intel: 'Annex D Intelligence (provisional)', ops: 'Annex A Conduct of Operations (provisional)', log: 'Annex R Logistics (provisional)', assess: 'Assessment annex (confirm in COPD)', fires: 'Fires annex (confirm in COPD)' } }
+    annex: { base: 'OPLAN base', intel: 'Annex D Intelligence', ops: 'Annex A Conduct of Operations', log: 'Annex R Logistics', assess: 'Assessment in Annex A', fires: 'Fires in Annex A' } }
 };
 const GATES = { ma: { work: 1, name: 'Mission analysis brief' }, coa: { work: 5, name: "Commander's COA decision" }, plan: { work: 6, name: 'Plan approval' } };
 const gateState = { ma: { state: 'approved', by: 'Col A. Demo', at: '0840Z' }, coa: { state: 'locked' }, plan: { state: 'locked' } };

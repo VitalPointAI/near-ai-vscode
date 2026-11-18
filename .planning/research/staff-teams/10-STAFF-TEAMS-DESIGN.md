@@ -1,8 +1,8 @@
 # Design 10: military staff team templates (J2, J5, J3, J4, then the full staff)
 
-Date: 2026-11-18. Status: design for owner review. Nothing here is built yet.
+Date: 2026-11-18. Status: design with the owner's decisions of 2026-11-18 applied (all twelve questions in section 9.3 accepted as recommended) and terms verified against the owner's reference library (section 2.8). Nothing here is built yet.
 
-Inputs: research notes 00 (the earlier staff-cell prototype), 01 (agent exchange), 02 (J2), 03 (J3 and J4) and 05 (J5) in this folder; the extension's team runtime (`src/agent/teams.ts`, `teamCheck.ts`, `projectTypes.ts`, `teamTemplateHistory.ts`), its MCP client (`src/mcp/`) and the Phase 70 gate (`src/domain/gate/`). Notes 06 to 09 did not exist when this was written; where they land later they extend this design rather than replace it. Two public doctrine texts were read in full for this design and are cited directly: CFJP 5.0, The Canadian Forces Operational Planning Process, Change 2, April 2008 (B-GJ-005-500/FP-000, public on the Government of Canada publications site), and AJP-5, Allied Joint Doctrine for the Planning of Operations, Edition B Version 1 with UK national elements (public on the UK government publishing site). No passage of either is copied beyond short phrases.
+Inputs: research notes 00 (the earlier staff-cell prototype), 01 (agent exchange), 02 (J2), 03 (J3 and J4) and 05 (J5) in this folder; the extension's team runtime (`src/agent/teams.ts`, `teamCheck.ts`, `projectTypes.ts`, `teamTemplateHistory.ts`), its MCP client (`src/mcp/`) and the Phase 70 gate (`src/domain/gate/`). Notes 06 to 09 did not exist when this was written; where they land later they extend this design rather than replace it. Two public doctrine texts were read in full for this design and are cited directly: CFJP 5.0, The Canadian Forces Operational Planning Process, Change 2, April 2008 (B-GJ-005-500/FP-000, public on the Government of Canada publications site), and AJP-5, Allied Joint Doctrine for the Planning of Operations, Edition B Version 1 with UK national elements (public on the UK government publishing site). No passage of either is copied beyond short phrases. The owner then supplied a reference library (JP 5-0 of July 2025, a JP 3-0 extract, JP 1 Volume 1, JP 3-14, the Army War College AY26 Campaign Planning Handbook, and Canadian Army publications); section 2.8 lists them by title and edition and records what changed. Section 2.9 lists what they do not settle.
 
 Citations: "02 T12" means note 02, Table 12; "03 A11" means note 03, section A11; "05 T5" means note 05, Table 5; "00 s6" means note 00, section 6; "01 s4" means note 01, section 4. "CFJP 5.0 art. 404" and "AJP-5 3.50" cite the publications by article or paragraph.
 
@@ -19,6 +19,7 @@ Citations: "02 T12" means note 02, Table 12; "03 A11" means note 03, section A11
 7. **Tools.** The templates run today on built-in tools. New local tools (staff-products, cop-map with milsymbol, battle-rhythm, orders, intel-workbench, logstat, movement, consumption calculator, guard-scan) make products structured and checkable. Partner tools wait for one small gate change: a label ceiling per MCP server in the signed policy, plus fenced tool descriptions.
 8. **Demo data: TRADOC ODIN's DATE scenarios and the Worldwide Equipment Guide.** They are public and reachable without a login, and a 2021 TRADOC FOIA reply (seen through a secondary summary) says WEG content is approved for public release. No licence or terms page could be read, and ODIN now redirects to a new address. Recommendation: do not bundle ODIN files; link to them and ship our own small fictional starter scenario, until the owner has written confirmation.
 9. **Roadmap: ship as 0.4.x feature releases now, in three drops** (J2 and J5 with the shared mechanisms; J3 and J4 with the tool servers; team of teams and the full staff), before the remaining v0.5.0 governed-platform phases. The templates need none of Phases 71 to 74; partner MCP use waits for the per-server ceiling, which is a small Phase 70 follow-up.
+10. **Verified against the owner's references** (section 2.8). JP 5-0 of July 2025 replaces the 2020 edition: the US Joint COA tests are now suitable, feasible, acceptable, distinguishable, complete; the fourth planning function is plan evaluation; the J-3 leads crisis planning; most joint annex letters are now filled. JP 3-14 (2023) sets the space planner's vocabulary. The Canadian Army texts move the NATO/Canadian profile from JIPB to JIPOE and IPB and add influence activities and a chaplain rule. Section 2.9 lists what is still to confirm and which item each document would change.
 
 ---
 
@@ -32,7 +33,8 @@ Citations: "02 T12" means note 02, Table 12; "03 A11" means note 03, section A11
 | `staff.level` | `strategic`, `operational`, `tactical` | Same | `operational` |
 | `staff.nation` | `ca`, `nato` (only with `nato-ca`) | Same | `ca` |
 | `staff.horizons` | current ops, future ops, future plans in hours | Same | 24 and 96 hours (03 A3; 05 s1, from JP 3-33 2018). User-editable, never constants |
-| `staff.phases` | free list of phase names | Same | empty: the user names phases (03 A2) |
+| `staff.phases` | free list of phase names | Same | empty: the user names phases (03 A2; JP 5-0 2025 says phases are unique to each operation and the commander sets their number) |
+| `staff.planningType` | `campaign`, `contingency`, `crisis` (JP 5-0, 2025) | Same | `contingency`. `crisis` makes the J3 director the planning lead's decision-for role and allows JPP steps to run at the same time |
 
 Valid combinations, and what each selects:
 
@@ -48,24 +50,24 @@ The profile and level feed three things at run time: the vocabulary file every m
 
 Rows are the work. CFJP 5.0 is a reference column only (owner decision). "Secondary" marks text not read in a primary public copy.
 
-| # | Work | US Joint JPP (JP 5-0, 2020) | US Army MDMP (FM 5-0, 2024) | NATO AJP-5 Ed B (strategic, operational) | NATO APP-28 (tactical; secondary) | CFJP 5.0, 2008 (reference only) | Key outputs |
+| # | Work | US Joint JPP (JP 5-0, July 2025) | US Army MDMP (FM 5-0, 2024) | NATO AJP-5 Ed B (strategic, operational) | NATO APP-28 (tactical; secondary) | CFJP 5.0, 2008 (reference only) | Key outputs |
 |---|---|---|---|---|---|---|---|
 | 1 | Start | 1 Planning initiation | 1 Receipt of mission | 1 Planning initiation (Stage 2 of the operations planning process); commander's initial planning guidance and warning order (AJP-5 3.15) | 1 Receipt of mission | Stage 1 Initiation: commander's initial direction, Wng O (art. 402) | Timeline, warning order, initial guidance, planning group formed |
-| 2 | Understand | 2 Mission analysis | 2 Mission analysis (ADM before or alongside if ill-structured) | 2 Mission analysis, with operations design; restated mission; commander's planning guidance (AJP-5 3.18 to 3.43) | 2 Mission analysis (no formal operational design) | Stage 2 Orientation: mission analysis by the commander and selected staff; mission analysis brief presented by the COS or J5 Plans; Commander's Planning Guidance and Wng O; JIPB (art. 312, 403) | Facts and assumptions, tasks, limitations, COG analysis, CCIRs, criteria, restated mission, intent and guidance |
+| 2 | Understand | 2 Mission analysis (operational design runs before and alongside it; JIPOE feeds it) | 2 Mission analysis (ADM before or alongside if ill-structured) | 2 Mission analysis, with operations design; restated mission; commander's planning guidance (AJP-5 3.18 to 3.43) | 2 Mission analysis (no formal operational design) | Stage 2 Orientation: mission analysis by the commander and selected staff; mission analysis brief presented by the COS or J5 Plans; Commander's Planning Guidance and Wng O; JIPB (art. 312, 403) | Facts and assumptions, tasks, limitations, COG analysis, CCIRs, criteria, restated mission, intent and guidance |
 | 3 | Build options | 3 COA development | 3 COA development | 3 COA development: adversary COAs evaluated first; viability tests (AJP-5 3.45, 3.50) | 3 COA development | Stage 3: staff analysis of factors; enemy COAs first; own COAs; Information Brief; viability (art. 304, 404) | COA statements and sketches; adversary MLCOA and MDCOA |
 | 4 | Test options | 4 COA analysis and wargaming | 4 COA analysis (war game) | 4 COA analysis | 4 COA analysis | Inside Stage 3: COA validation, wargaming (art. 404.8 to 404.9) | Wargamed COAs, sync matrix, decision points, DST and DSM, branches, refined CCIRs |
 | 5 | Compare | 5 COA comparison | 5 COA comparison | 5 COA validation and comparison | 5 COA comparison | Inside Stage 3: compare COAs with a decision matrix (art. 404.10) | Comparison matrix, recommendation with risk |
 | 6 | Decide (human) | 6 COA approval | 6 COA approval | 6 Commander's COA decision | 6 Commander's decision | Inside Stage 3: Decision Brief, commander selects, staff writes CONOPS (art. 404.11 to 404.13) | Decision brief; the decision is a person's |
 | 7 | Write the plan | 7 Plan or order development | 7 Orders production, dissemination and transition | 7 Plan development: CONOPS and OPLAN (Stage 4) | 7 Transition (orders) | Stage 4 Plan Development: CONOPS approved by the initiating authority first; annexes and SUPLANs; branches and sequels; plan approval; Impl O or OP O (art. 405) | Plan or order with annexes, transition brief |
-| 8 | Keep it valid | Plan assessment function; IPRs | Assessment (FM 5-0 ch. 8) | Operations assessment (AJP-3); COPD phases 5 and 6 | Not a step | Stage 5 Plan Review: progress review (supplementary Wng O, Frag O) and periodic review at least every 24 months; a register of plans (art. 406, 315) | Updated plan, branches and sequels, assessment reports |
+| 8 | Keep it valid | Plan evaluation function (refine, adapt, terminate planning, or execute); IPRs; operation assessment (JP 5-0 ch. VI and app. H) | Assessment (FM 5-0 ch. 8) | Operations assessment (AJP-3); COPD phases 5 and 6 | Not a step | Stage 5 Plan Review: progress review (supplementary Wng O, Frag O) and periodic review at least every 24 months; a register of plans (art. 406, 315) | Updated plan, branches and sequels, assessment reports |
 
-Sources: 05 T1 and s1 to s4; 03 A7, A12; 02 T3 to T5; CFJP 5.0 art. 304, 312, 315, 402 to 406; AJP-5 figure 3.1, 3.15, 3.45, 3.50.
+Sources: JP 5-0 (July 2025) figures IV-2 and IV-3 and ch. IV para 3; 05 T1 and s1 to s4; 03 A7, A12; 02 T3 to T5; CFJP 5.0 art. 304, 312, 315, 402 to 406; AJP-5 figure 3.1, 3.15, 3.45, 3.50.
 
 **COA tests per profile** (the J5 lead applies the right list):
 
 | Profile | Tests |
 |---|---|
-| US Joint | Adequate, feasible, acceptable, distinguishable, complete (05 s1, JP 5-0 III-41) |
+| US Joint | Suitable, feasible, acceptable, distinguishable, complete (JP 5-0, July 2025, ch. IV, COA development; the AY26 Campaign Planning Handbook calls it the SFA-DC test). The 2020 edition's first test was "adequate" |
 | US Army | Feasible, acceptable, suitable, distinguishable, complete (FM 5-0; confirm wording in WP-J5) |
 | NATO/Canadian | Feasibility, acceptability, completeness and compliance, exclusivity, suitability (AJP-5 3.50) |
 | CFJP 5.0 reference | Suitability, feasibility, acceptability, compliance, exclusivity, completeness (art. 304) |
@@ -74,39 +76,41 @@ Sources: 05 T1 and s1 to s4; 03 A7, A12; 02 T3 to T5; CFJP 5.0 art. 304, 312, 31
 
 The orders tool takes the annex list from the profile; a member never writes a letter from memory. This is the classic error the research found (03 Summary 4; 05 Summary 9).
 
-| Subject | US Joint (JP 5-0; CJCSM 3130.03) | US Army (FM 5-0, 2024) | NATO/Canadian (provisional) |
+| Subject | US Joint (JP 5-0, 2025; AY26 Campaign Planning Handbook OPORD format) | US Army (FM 5-0, 2024) | NATO/Canadian (CFJP 5.0 Ch 5 Annex E App 1 list) |
 |---|---|---|---|
 | Task organization | A | A | B (Task Organization and Command Relationships) |
 | Intelligence | B | B | D |
 | Operations | C | C | A (Conduct of Operations) |
 | Logistics or sustainment | D (Logistics) | F (Sustainment) | R (Logistics), S (Movements) |
-| Fires | Appendix to C (confirm) | D | Not lettered in the reference list (confirm in COPD) |
-| Rules of engagement | Appendix to C (confirm) | Appendix to C (confirm) | E |
-| Health services | Confirm against CJCSM 3130.03 | Within F | K (HSS) |
-| Information | Confirm | Within C (confirm) | O (Information Operations) |
-| Communications | K (confirm title) | H (Signal) | Q (Communications and Information Systems) |
-| Engineer | Confirm | G | EE |
-| Legal | Confirm | Confirm | AA |
-| Public affairs | Confirm | J | X |
-| Assessment | Confirm | M | Not lettered (confirm) |
-| Contracting and finance | Confirm | W (OCS) | FF (Financial Support, with contracting) |
-| Interagency | V | V | W is CIMIC (confirm interagency) |
+| Fires | No lettered annex; an appendix to C | D | Not lettered; the template carries it in A (Conduct of Operations) |
+| Rules of engagement | Appendix to C | Appendix to C | E |
+| Health services | Q (Health Services) | Within F | K (HSS) |
+| Information | No lettered annex; the template carries it in C. Y is the Commander's Communication Strategy | Within C | O (Information Operations) |
+| Communications | K (Command, Control, Communications, Computer, and Cybersecurity Systems) | H (Signal) | Q (Communications and Information Systems) |
+| Engineer | No lettered annex; L is Environmental Considerations | G | EE |
+| Legal | Appendix to E (Personnel) | SJA tab in F (note 06, FM 6-0) | AA |
+| Public affairs | F | J | X |
+| Assessment | N (Assessments) | M | Not lettered; the template carries it in A |
+| Contracting and finance | W (Operational Contract Support) | W (OCS) | FF (Financial Support, with contracting) |
+| Interagency | V (Interagency-Interorganizational Coordination) | V | No separate annex; W is CIMIC |
 
 Notes:
-- **US Joint**: JP 5-0 confirms A to D and lists A, B, C, D, J, K, S, V and Z for a level 3 CONPLAN (05 s1). The titles of the other letters are in CJCSM 3130.03, which needs a CAC (open question Q8).
+- **US Joint**: JP 5-0 (July 2025) names A (Task Organization), B (Intelligence), C (Operations), D (Logistics), E (Personnel), I (Knowledge, Information, and Data Management), N (Assessments), R (Reports), V (Interagency-Interorganizational Coordination) and W (Operational Contract Support), and lists A, B, C, D, J, K, S, V and Z for a level 3 CONPLAN. The AY26 Campaign Planning Handbook's OPORD format gives the full A to Z list (M not used). The two sources differ on O and P: the handbook has O Host Nation Support and P Foreign Disclosure, the 2020 JP 5-0 appendix read for note 06 has them the other way round. The profile uses the JP 5-0 2020 order (O Foreign Disclosure, P Host-Nation Support) because it came from the doctrine text; section 2.9 names the check. The fires, information, ROE and legal appendix placements come from note 06 (JP 5-0, 2020); 2025 JP 5-0 leaves formats to CJCSM 3130.03.
 - **US Army**: from FM 5-0 Appendix E as read (05 s2).
-- **NATO/Canadian**: AJP-5 does not list annexes; it points to the COPD for the CONOPS and OPLAN formats and list of annexes (AJP-5 footnote 50), and the COPD is not public. The only public list found is CFJP 5.0 Chapter 5 Annex E Appendix 1, which states that its plan format is adapted from the NATO planning guidelines of August 2000. So the NATO/Canadian column is that list, marked provisional. **Intelligence as Annex D is confirmed for the Canadian reference text** (it matches note 02 T5) and is likely for NATO, but must be confirmed against the current COPD (Q2). Note the second trap this exposes: in this scheme Logistics is R and Operations is A, so "Annex D is Logistics" (joint) and "Annex D is Fires" (Army) are both wrong here.
+- **NATO/Canadian**: AJP-5 does not list annexes; it points to the COPD for the CONOPS and OPLAN formats and list of annexes (AJP-5 footnote 50), and the COPD is not public. The only public list found is CFJP 5.0 Chapter 5 Annex E Appendix 1, which states that its plan format is adapted from the NATO planning guidelines of August 2000. So the NATO/Canadian column is that list, and the template uses it as stated (owner decision on Q2). **Intelligence is Annex D** in that list (it matches note 02 T5). If a COPD holder later finds a different letter, the change is one line in the profile file (section 2.9). Note the second trap this exposes: in this scheme Logistics is R and Operations is A, so "Annex D is Logistics" (joint) and "Annex D is Fires" (Army) are both wrong here.
 
 ### 2.4 What is public, and what is not
 
 | Text | Status for this design | What it supports | Confirmation needed |
 |---|---|---|---|
-| JP 5-0 (1 Dec 2020) | Public, read in full (05) | US Joint profile | Check for a newer signed edition before release (05 gap 5) |
-| JP 2-0 (2022), JIPOE Joint Guide, JP 3-0 (2022), JP 4-0 (2023), JP 3-04 (2022), CJCSM 3130.03 | CAC only, or not released (02 T1; 03 A1, B1) | Names and editions only; method from public older editions marked "public reference edition" | Q8: a CAC holder checks step and product names |
+| JP 5-0 (1 July 2025) | Owner's reference copy, read in full (section 2.8). Supersedes the 1 Dec 2020 edition with Change 1 (1 July 2024) that notes 02, 03, 05 to 09 used | US Joint profile | None for step names, COA tests, plan levels and the annex letters it names; formats sit in CJCSM 3130.03 (2.9) |
+| JP 1 Volume 1, Joint Warfighting (27 Aug 2023); JP 3-0 (18 June 2022) chapter VII and appendix D (JADO) extract; JP 3-14 (23 Aug 2023) extract; AY26 Campaign Planning Handbook (Army War College) | Owner's reference copies, read (2.8) | Joint functions, competition continuum, space mission areas, campaign design and assessment, the joint annex list | The rest of JP 3-0 was not in the extract (2.9) |
+| JP 2-0 (2022), JIPOE Joint Guide, JP 4-0 (2023), JP 3-04 (2022), CJCSM 3130.03 | CAC only, or not released (02 T1; 03 A1, B1) | Names and editions only; method from public older editions, cited by title and edition | Section 2.9 |
 | FM 5-0 (Nov 2024), FM 3-0 (Mar 2025), ATP 2-01.3 (2019 with C1) | Public, read (05; 02) | US Army profile | ATP 2-01.3 Change 2 (2024) and FM 2-0 (2023) seen only second-hand (02 s3.8) |
 | AJP-5 Ed B (June 2026) | Public, read in full (05; and for this design) | NATO/Canadian profile at strategic and operational level | Its annex scheme sits in the COPD (Q2) |
 | COPD | Not public (05 Edition check) | Phase names only, from AJP-5's UK annex | Q2 |
-| APP-28 | Restricted; step names from a NATO centre-of-excellence handbook (05; 03 A8) | NATO/Canadian tactical | Q3: a Canadian Army reviewer confirms step names and products |
+| APP-28 | Restricted; step names from a NATO centre-of-excellence handbook (05; 03 A8) | NATO/Canadian tactical | None of the owner's Canadian Army references mentions APP-28 (2.8); section 2.9 |
+| Canadian Army: Land Operations B-GL-300-001/FP-001 (2008) and CADN 16-01 (2016); Canada's Army B-GL-300-000/FP-000 (1998); Army Training for Land Operations B-GL-300-008/FP-001 (2014); CADN 13-01 (2013); Toward Land Operations 2021 (2009); FITE concept paper A-FD-005-000/AG-001 (2019) | Owner's reference copies, read (2.8) | Canadian land terms: planning process at formation level, battle procedure, IPB, operational functions, influence activities, chaplain engagement rules | None is a staff duties, orders or planning guide (2.9) |
 | CFJP 5.0 (2008) | Public, read in full | Reference column; Canadian annex list; functions such as strategic watch | None (reference only) |
 | CFJP 2-0 (2011), CFJP 4-0 (2016) | No public copy found (02 s3.8; 03 B6) | Canadian J2 and J4 terms only through secondary sources | Q4 |
 
@@ -117,6 +121,14 @@ Notes:
 - **Domestic operations.** At strategic level in domestic operations, PIRs are usually replaced by a statement of the intelligence problem that drives the threat assessment (CFJP 5.0, CDS directive format). Collection on persons in Canada is legally restricted (02 Pitfall 11). A domestic switch in the template turns on both rules and the "assistance to civil authorities" framing.
 - **Support structure.** Four lines of support, the JTF Support Component, and the CJOC J4 weekly logistics and ammunition reports replace a US-style daily LOGSTAT as the headline report (03 B6, B12 item 9).
 - **Doctrine order.** Canada puts NATO doctrine first, then the five-nation multilateral doctrine (02 s3.3). This is why the Canadian templates use NATO terms.
+- **Canadian Army land terms** (tactical level, `ca`), from Land Operations (2008) and CADN 16-01 (2016):
+  - Land Operations (2008) has formation headquarters plan with the CF operational planning process (the CFJP 5.0 stages): long-range and mid-range planning in the plans centre, short-range planning (FRAGOs) in the operations centre, and battle procedure for commanders without a staff. Neither it nor CADN 16-01 mentions APP-28. The tactical NATO/Canadian profile still runs APP-28 (owner decision, 2.1); from these texts it takes the plans centre and operations centre split, battle procedure below staff level, and the terms below.
+  - Intelligence at land tactical level is IPB, run by the G2; the intelligence cycle is direction, collection, processing, dissemination.
+  - The five operational functions are Command, Sense, Act, Shield and Sustain. A Canadian J3 running estimate uses them as its headings in place of the seven US joint functions.
+  - Logistics in land tactical text is combat service support (CSS).
+  - "Operational environment" has replaced "battlespace", which is obsolete (CADN 16-01). So the NATO/Canadian profile says JIPOE at joint levels and IPB at tactical level; JIPB appears only in the CFJP 5.0 reference column.
+  - CADN 16-01 sets the information operations umbrella aside for doctrinal purposes and plans influence activities instead (PSYOPS, key leader engagement, civil support, posture, profile and presence, and media relations).
+- **Chaplain support.** Religious leader engagement is chaplain ministry, not intelligence collection and not an influence activity, and a religious area assessment is not intelligence preparation (CADN 13-01). The special staff's `chaplain-support` member therefore takes no tasks from the J2 collection plan or the influence plan; it reports only information that bears on force safety.
 
 ### 2.6 Corrections to the research notes
 
@@ -131,6 +143,15 @@ The research was written before CFJP 5.0 had been read and before the owner's NA
 | 02 T5, 03 B3 | Canadian logistics annex not covered | Canadian reference list: Logistics R, Movements S, HSS K, Legal AA, Financial Support FF | CFJP 5.0 Ch 5 Annex E App 1 |
 | 02, 03 | FM 3-0 dated October 2022 | Current edition is March 2025 | 05 Edition check |
 | 05 s4 | Red teaming is in AJP-5 | Only as a UK national element: AJP-5 says the technique "is not described in NATO doctrine". The J2 red cell is common NATO practice | AJP-5 UK 2.15 |
+| 02, 03, 05 to 09 | JP 5-0 of 1 December 2020 is the current edition | JP 5-0 of 1 July 2025 supersedes it (and its Change 1 of July 2024). Step names are unchanged | JP 5-0 (2025), summary of changes |
+| 05 s1 and T6 step 3a | US Joint COA tests: adequate, feasible, acceptable, distinguishable, complete | Suitable, feasible, acceptable, distinguishable, complete | JP 5-0 (2025) ch. IV |
+| 05 T1, s4 | Fourth planning function is "plan assessment" | Plan evaluation (refine, adapt, terminate planning, or execute); operation assessment is chapter VI | JP 5-0 (2025) ch. I and IV |
+| 05 s1 (operational design) | Elements listed as one block of thirteen, including military end state and termination; method of five steps | Elements grouped as overarching (objective, transitions, COG, effects, culmination), organizing the operation (LOOs, LOEs, decisive points, direct and indirect approach, operational reach), time (arranging operations, anticipation), forces and functions, and balancing. The method has eight steps: understand strategic direction and guidance, understand the OE, define the problem, identify assumptions, develop operational approaches, identify decisions and decision points, refine the operational approach, prepare planning guidance. The 2025 text does not use "military end state"; the AY26 handbook still does | JP 5-0 (2025) ch. III; AY26 handbook ch. 3 |
+| 06 s3.5, 09 | Annex I is Knowledge and Information Management; Annex K is C4 Systems | I is Knowledge, Information, and Data Management; K is Command, Control, Communications, Computer, and Cybersecurity Systems | JP 5-0 (2025) ch. I and VI |
+| 05, 06 | The J5 leads joint planning | The J-5 coordinates staff planning for campaigns and contingencies; the J-3 coordinates it in a crisis. Planning groups are led by the J-5 or the J-3 | JP 5-0 (2025) ch. IV |
+| 03 s A5, 08 | JP 3-14 (2023) rewrite "reported", not read | Read: the space mission areas are space domain awareness, offensive and defensive space operations, PNT, ISR, SATCOM, environmental monitoring, missile warning, nuclear detonation detection, spacecraft operations and spacelift. Space control, space coordinating authority, space negation and counterspace were removed | JP 3-14 (2023) summary of changes, executive summary, ch. III |
+| 02 T3, 10 (earlier draft) | NATO/Canadian profile names the preparation step JIPB | JIPOE at joint level, IPB at tactical level; "battlespace" is obsolete in Canadian Army usage | CADN 16-01; Land Operations (2008) |
+| 03 A5, 10 (earlier draft) | Canadian vocabulary is "information operations" | Canadian Army land planning uses influence activities; Annex O keeps its CFJP 5.0 title | CADN 16-01 |
 
 ### 2.7 Levels and roster scaling
 
@@ -141,6 +162,60 @@ Every section template ships three roster variants. The full tables are in secti
 | Strategic | Longer horizons (months to years); policy, interagency and partner seats grow; targeting and tactical cells drop; J2 warning analysis replaces the watch; products such as the strategic estimate, commander's estimate, campaign inputs (05 T2; 02 T14) |
 | Operational | The full 12 (the default and the demo) |
 | Tactical | G or S codes; IPB, MDMP or APP-28 vocabulary; fewer members (J2: 6 at brigade, 4 at battalion; J3 and J4: about 9; J5 folds into the S-3 plans cell at brigade, none at battalion) (02 T14; 03 A13, B11; 05 T5 scaling) |
+
+### 2.8 Verified against owner references
+
+The owner supplied local copies of the publications below (2026-11-18). They were read for this design; none is copied into the repository and they are cited by title, number and edition only. Some files did not hold what their names suggested; the table records what each one is.
+
+| Reference (title, number, edition, issuing body) | What it is | Supersedes or relation |
+|---|---|---|
+| JP 5-0, Joint Planning, 1 July 2025 (US Joint Chiefs of Staff) | Current joint planning doctrine | Supersedes JP 5-0 of 1 December 2020 with Change 1 of 1 July 2024, the edition notes 02, 03, 05 to 09 used |
+| JP 3-0, Joint Campaigns and Operations, 18 June 2022 (Joint Chiefs of Staff), extract | Chapter VII (campaigns and operations in armed conflict) and appendix D (fundamentals of joint all-domain operations, dated 10 September 2024) only | Same edition the notes named; most of the publication is not in the extract |
+| JP 1 Volume 1, Joint Warfighting, 27 August 2023 (Joint Chiefs of Staff) (file named RM-03) | Capstone joint doctrine | Source for the seven joint functions and the competition continuum |
+| JP 3-14, Joint Space Operations, 23 August 2023 (Joint Chiefs of Staff), extract | Front matter, executive summary and chapter III (planning and assessment of joint space operations) | Revises the 10 April 2018 edition |
+| Campaign Planning Handbook, Academic Year 2026 (US Army War College) | Teaching handbook built on JP 5-0 (2025) | Replaces the AY25 handbook cited in note 02 |
+| B-GL-300-000/FP-000, Canada's Army, 1998 (English and French) | Army capstone of 1998 | Superseded by Land Operations (2008) |
+| B-GL-300-001/FP-001, Land Operations, 1 January 2008 (English; FP-002 French) | Canadian Army capstone doctrine | Supersedes the 1998 capstone |
+| CADN 16-01, Land Operations Doctrine: an updated summary, 27 May 2016 (English and French) | Summary and update of Land Operations (2008) | Amends usage, not the publication |
+| CADN 13-01 (13-1), Religious Leader Engagement, 24 July 2013 | Chaplain engagement doctrine note | None |
+| B-GL-300-008/FP-001, Army Training for Land Operations, 14 June 2014 (English; FP-002 French) | Army training doctrine | Supersedes the 20 July 2010 edition |
+| B-GL-310-001/AF-001, Toward Land Operations 2021: Studies in Support of the Army of Tomorrow Force Employment Concept, 2009 (English; AF-002 French) | Future concept studies, not doctrine | None |
+| A-FD-005-000/AG-001, Future Integrated Training Environment, concept paper, version 1, 1 August 2019 (Canadian Army Doctrine and Training Centre; AG-002 French) | Training and simulation concept | None |
+
+None of the Canadian files is an Army planning, staff duties or orders guide. They do not give a Canadian Army orders format, annex letters, G and S staff titles below the G2, or a battle group staff layout.
+
+What changed in this design because of them:
+1. **JP 5-0 edition.** The US Joint profile now cites JP 5-0 (July 2025). The seven JPP step names are unchanged (planning initiation, mission analysis, COA development, COA analysis and wargaming, COA comparison, COA approval, plan or order development).
+2. **COA validity tests.** US Joint: suitable, feasible, acceptable, distinguishable, complete (the first test was "adequate" in 2020). Changed in 2.2, the J5 instructions, the UX concept and the prototype.
+3. **Planning functions.** Strategic guidance analysis, concept development, plan development and plan evaluation; plan evaluation ends in refine, adapt, terminate planning or execute. Changed in crosswalk row 8.
+4. **Operational design.** Design now comes before the JPP in JP 5-0 and has an eight-step method and grouped elements (2.6). The design-planner instructions follow it; "military end state" is used only in the profiles that still use it.
+5. **Plan levels and orders.** Four levels of planning detail (commander's estimate, base plan, CONPLAN, OPLAN; level 3T when a TPFDD is needed) and the joint orders (WARNORD, PLANORD, ALERTORD, OPORD, PTDO, DEPORD, EXORD, FRAGORD) are as the design assumed. No change.
+6. **Annex letters, US Joint.** Filled from JP 5-0 (2025) and the AY26 handbook: D Logistics, E Personnel, F Public Affairs, I Knowledge, Information, and Data Management, K Command, Control, Communications, Computer, and Cybersecurity Systems, N Assessments, Q Health Services, V Interagency-Interorganizational Coordination, W Operational Contract Support. Changed in 2.3. The O and P conflict is in 2.9.
+7. **J-staff roles.** The J-5 leads campaign and contingency planning and the J-3 crisis planning; planning groups are led by either; plans move from the J-5 to J-3 future operations at transition; the red cell is a J-2 product and the red team a separate body (JP 5-0 appendix G). Added `staff.planningType` (2.1) and the crisis rule (3.1).
+8. **Joint functions and phasing.** Seven joint functions (JP 1 Vol 1, 2023) name the J3 running estimate sections. The competition continuum is cooperation, competition below armed conflict and armed conflict. Phases are named per operation, which keeps `staff.phases` empty by default.
+9. **Space.** The J3 cyber-space-planner uses the JP 3-14 (2023) mission areas and never the retired terms.
+10. **Campaign design and assessment.** The AY26 handbook confirms SFA-DC, the four groups of design elements and the MOE, MOP and indicator definitions the assessment framework uses. No change beyond annex N.
+11. **Canadian land terms.** JIPOE (joint) and IPB (tactical) replace JIPB in the NATO/Canadian profile; influence activities for the Canadian Army; five operational functions; CSS; plans centre and operations centre; the chaplain rule (2.5). The Canadian texts in hand predate APP-28 and do not mention it; the tactical profile still runs APP-28 by owner decision.
+12. **Owner decisions.** All twelve questions in 9.3 and the UX concept's questions are accepted; the NATO/Canadian annex column and the APP-28 tactical profile ship as plain terms.
+
+### 2.9 Still to confirm
+
+Terms the owner's references do not settle. Each line names the document that would settle it and the design items it would change. Until then the design uses the term stated in the item, plainly.
+
+| Document | What it would settle | Design items |
+|---|---|---|
+| CJCSM 3130.03 (current edition), Planning and Execution Formats and Guidance | Joint annex O and P titles (JP 5-0 2020 and the AY26 handbook disagree); placement of fires, ROE, information and legal appendices; annex Y title | 2.3 US Joint column; WP-0 annex data; `orders` tool format checks |
+| NATO COPD (current version), CONOPS and OPLAN annex list | Whether NATO uses the CFJP 5.0 letters (D Intelligence, A Conduct of Operations, R Logistics, S Movements, K HSS, AA Legal, FF Financial Support, O Information Operations, W CIMIC) | 2.3 NATO/Canadian column; UX concept 5.11; prototype labels |
+| APP-28 (full text) | Tactical step names and products; whether "Commander's decision" and "Transition" are the step names | 2.2 APP-28 column; 2.7 tactical variants; J5 and J2 tactical rosters |
+| Current Canadian Army planning and staff publications (a Canadian Army operations process or staff duties manual, and any order adopting APP-28; note 05 reports adoption from August 2026) | Whether the Canadian Army now plans with APP-28 or still the CF OPP; Canadian orders format and annex letters at brigade and battle group; G and S staff titles; battle group staff layout | 2.1 nato-ca tactical; 2.5 Canadian land terms; tactical roster names |
+| CFJP 2-0 (2011) and CFJP 4-0 (2016) | Current Canadian joint intelligence and logistics terms (JIPOE in Canadian joint use; CCIRM; lines of support; weekly logistics reports) | 2.5; J2 and J4 NATO/Canadian vocabulary; 3.5 Canadian report variant |
+| JP 2-0 (2022) and the JIPOE joint guide | US joint intelligence process names, JIPOE step names and products | J2 roster roles `jipoe-analyst` and `threat-analyst`; J2 lead workflow; intel-workbench skeletons |
+| JP 4-0 (2023) | Joint logistics core functions and product names (the seven functions, logistics estimate, concept of support) | J4 roster (one member per core function); 3.5 instructions |
+| JP 3-33 (2022) | JTF staff organization and the current ops, future ops and future plans horizons (the default 24 and 96 hours came from the 2018 edition) | `staff.horizons` default; J3 and J5 boundaries |
+| JP 3-0 (2022) chapters outside the extract | Joint phasing model and campaigning terms beyond chapter VII | `staff.phases` guidance text; J3 strategic variant |
+| FM 5-0 (2024), Appendix E | US Army annex letters for ROE, information and legal placement | 2.3 US Army column |
+| AJP-2 and AJP-10 (current editions) | NATO term for intelligence preparation (JIPOE) and for information activities at joint level | 2.5; J2 and J3 NATO/Canadian vocabulary |
+| TRADOC written reply on WEG and DATE release | Bundling demo data | Section 8 (Q5) |
 
 ---
 
@@ -163,7 +238,7 @@ Every section template ships three roster variants. The full tables are in secti
 **Products** are Markdown files at `products/<section>/<product>.md` with a header block (section 4.1) and fixed headings. Structured registers (PIR register, CCIR register, sync matrix, LOGSTAT) are JSON or CSV beside them, written through the tools so the gates can check them mechanically (02 s3.5).
 
 **Fixes to the earlier prototype**, applied in every template (00 s6):
-- J5 owns the planning products (JPP, MDMP plans cell, JOPG); J35 is future operations under the J3 (branches, 24 to 96 hours); J33 or the JOC is current operations. No duplicate COA developers across teams: COAs are the J5 cells'; J3 and J4 only check them.
+- J5 owns the planning products (JPP, MDMP plans cell, JOPG) for campaign and contingency planning. In crisis planning JP 5-0 (2025) puts the J-3 in charge of staff planning: the planning group template is the same, and its `DECISION FOR` and hand-off lines name the J3 director instead of the J5 director when the run is marked crisis; J35 is future operations under the J3 (branches, 24 to 96 hours); J33 or the JOC is current operations. No duplicate COA developers across teams: COAs are the J5 cells'; J3 and J4 only check them.
 - Role slugs only. No persona names, no ranks, no US-only branch codes.
 - The intelligence estimate (j2-chief) and the INTSUM (j2 watch-officer) each have an owner, as do every other product listed.
 - No agent in a command role. Command decisions appear only as `DECISION FOR` items.
@@ -218,7 +293,7 @@ Based on 02 T8, T9, T12, T13 and s3.6, with the prototype's release officer merg
 | 7 Write the plan | j2-chief annex and estimate ‖ collection-manager final plan ‖ release-guard dissemination plan ‖ watch-officer execution indicator board | j2-chief | Gates; annex to J5 plans-writer |
 | 8 Execute and review | watch-officer INTSUM cycle ‖ requirements-manager PIR review ‖ threat-analyst COA updates | j2-chief | Evaluation and feedback |
 
-Profile differences: US Joint uses the six-category intelligence process; NATO/Canadian uses the four-stage cycle and CCIRM or IRM and CM (02 T2, T6). Tactical uses IPB names and the MDMP or APP-28 table (02 T4).
+Profile differences: US Joint uses the six-category intelligence process; NATO/Canadian uses the four-stage cycle (direction, collection, processing, dissemination) and CCIRM or IRM and CM (02 T2, T6), with JIPOE at joint levels. Tactical uses IPB names and the MDMP or APP-28 table (02 T4); with the Canadian nation setting the tactical section is the G2 (Land Operations, 2008). The J-2 intelligence estimate is appendix 11 to annex B under US Joint (JP 5-0, 2025).
 
 **Level variants** (02 T14, plus the guard in every variant):
 
@@ -262,9 +337,9 @@ Based on 05 T3 to T6, with one change to fit the release-guard in 12: assessment
 
 **Instruction outlines**
 
-- **lead-planner.** Job: run the process and timeline (one-third, two-thirds at tactical level), give each COA cell a distinct theme before it starts, run the validity tests from PROFILE.md, control the wargame, integrate estimates, run the comparison against approved criteria (05 T6). Owns: planning timeline, warning orders, facts and assumptions ledger, proposed restated mission and proposed intent, mission analysis brief, DST and DSM drafts from the wargame, comparison matrix, COA decision brief content, CONOPS, sequel list, transition brief. Boundary: "Your output is a recommendation with risk, not a selected COA." Hands back: the step's products and the `DECISION FOR: commander` list.
+- **lead-planner.** Job: run the process and timeline (one-third, two-thirds at tactical level), give each COA cell a distinct theme before it starts, run the validity tests from PROFILE.md, control the wargame, integrate estimates, run the comparison against approved criteria (05 T6). Under US Joint, apply the five COA validity tests (suitable, feasible, acceptable, distinguishable, complete) and the comparison methods of JP 5-0 appendix E. Owns: planning timeline, warning orders, facts and assumptions ledger, proposed restated mission and proposed intent, mission analysis brief, DST and DSM drafts from the wargame, comparison matrix, COA decision brief content, CONOPS, sequel list, transition brief. Boundary: "Your output is a recommendation with risk, not a selected COA." Hands back: the step's products and the `DECISION FOR: commander` list.
 - **policy-planner.** Job: analyse higher direction and policy; constraints and restraints with legal-support; strategic estimate and commander's estimate at strategic level; interagency inputs; IPR material (05 T3). Owns: guidance analysis, limitations list, strategic estimate (strategic level), interagency annex inputs. Boundary: "Your output is analysis of direction and policy, not operational design and not COAs." Hands back: those products.
-- **design-planner.** Job: frame the environment and problem; COG analysis (capabilities, requirements, vulnerabilities); operational approach; lines of operation and effort; decisive points; objectives and end state conditions; then the assessment framework (objective, effect, MOE, indicator; task, MOP) built from that design (05 T3, Pitfalls MOE and MOP). Under NATO/Canadian, operations design sits in mission analysis (AJP-5 3.19); at tactical level design is off unless the problem is ill-structured (05 Pitfalls). Owns: problem statement, COG analysis, operational approach graphic, LOO and LOE, assessment framework draft. Boundary: "Your output is the design and the measures, not COAs." Hands back: those products; the assessment framework transitions to the J3 assessment-analyst at step 7.
+- **design-planner.** Job: follow the operational design method of JP 5-0 (2025) (understand strategic direction, understand the OE, define the problem, identify assumptions, develop operational approaches, identify decisions and decision points, refine the approach, prepare planning guidance); COG analysis (critical capabilities, requirements, vulnerabilities); operational approach; lines of operation and effort; decisive points; objectives with their conditions and transitions (the term "military end state" only where the profile uses it: US Army, NATO/Canadian and the CFJP 5.0 reference); then the assessment framework (objective, effect, MOE, indicator; task, MOP) built from that design (05 T3, Pitfalls MOE and MOP). Under NATO/Canadian, operations design sits in mission analysis (AJP-5 3.19); at tactical level design is off unless the problem is ill-structured (05 Pitfalls). Owns: problem statement, COG analysis, operational approach graphic, LOO and LOE, assessment framework draft. Boundary: "Your output is the design and the measures, not COAs." Hands back: those products; the assessment framework transitions to the J3 assessment-analyst at step 7.
 - **coa-cell-a and coa-cell-b.** Job: develop the COA in the theme the lead assigned, within the commander's guidance; statement and sketch, initial task organization, deployment concept; self-test against the profile's COA tests (05 T4). Owns: `coa-a` or `coa-b` files only. Boundary: "Your output is one distinct COA; you do not compare COAs." Their instructions differ by theme and file area, which keeps `teamCheck`'s overlap check quiet. Hands back: COA statement, sketch, tests passed or failed.
 - **red-cell-seat.** As the J2 red cell (3.2) at reduced depth: enemy COAs first (CFJP 5.0 art. 404.4; AJP-5 3.45), adversary play in the wargame. Boundary: "Your output is the adversary's view, not a critique of our plan."
 - **red-team.** Job: challenge assumptions, logic, bias and analogies at the end of mission analysis and after each wargame; check for bias toward a favourite COA (05 T6 steps 2a, 4a). Owns: `red-team-critique` only; no write access to plan files. Boundary: "Your output is critique; you never fix the plan." Under NATO/Canadian the member's description says red teaming is a UK national element, not NATO doctrine, and the commander may switch it off. Hands back: numbered findings; dissent is shown in the decision brief, never dropped.
@@ -314,14 +389,14 @@ Based on 03 A9 to A12. Two changes: ROE requests are drafted by the j3-director 
 
 **Instruction outlines**
 
-- **j3-director.** Job: synchronize to intent and battle rhythm; consolidate running estimates (one section per joint function, 03 A2); propose CCIR; draft paragraph 3 and the operations annex (letter from PROFILE.md: C, C or A); draft ROE requests with `LEGAL REVIEW REQUIRED` (CAF reference annex E). Owns: J3 running estimate, CCIR register proposals, operations annex, ROE request matrix. Boundary: "Your output is options with risk; you never approve, release or decide." Running estimates must contain recommendations for anticipated decisions or the director rejects them (03 A14 item 8).
+- **j3-director.** Job: synchronize to intent and battle rhythm; consolidate running estimates (one section per joint function: C2, information, intelligence, fires, movement and maneuver, protection, sustainment, from JP 1 Volume 1, 2023; with the Canadian nation setting, the five operational functions Command, Sense, Act, Shield, Sustain; 03 A2); propose CCIR; draft paragraph 3 and the operations annex (letter from PROFILE.md: C, C or A); draft ROE requests with `LEGAL REVIEW REQUIRED` (CAF reference annex E). Owns: J3 running estimate, CCIR register proposals, operations annex, ROE request matrix. Boundary: "Your output is options with risk; you never approve, release or decide." Running estimates must contain recommendations for anticipated decisions or the director rejects them (03 A14 item 8).
 - **joc-chief.** Job: own the COP operations layer and merge the other layers into the published COP; event log; shift brief; battle drills from checklists; escalate any CCIR match at once; immediate FRAGO drafts for human release. Owns: COP (merge), event log, shift brief, battle rhythm calendar (standalone). Boundary: "Your output is the current picture and drafts; FRAGO release is a human's."
 - **watch-officer.** Job: log reports in standard format (DTG, source, what was reported), match against CCIR and DSM triggers, flag matches. Boundary: "Your output is facts, never interpretation" (03 A14 item 7). Tools exclude Write: it appends only through `mcp:joc-log`.
 - **future-ops-planner.** Job: branches inside the future-operations horizon; DSM current; FRAGO drafts; request J2 and J4 checks for each branch; hand sequels to J5 (03 A3). Owns: branch plans, sync matrix and DST and DSM in execution. Boundary: "Your output is branches; sequels are the J5's."
 - **fires-effects-coordinator.** Job: integrate fires and non-lethal effects into the concept of operations; run the targeting working group; prepare board packages. Owns: concept of fires, fires appendix (Army: Annex D), board packages. Boundary: "Your output is a package carrying `DECISION FOR: commander or delegate` and `LEGAL REVIEW REQUIRED`; you never nominate or approve real targets" (03 A11).
 - **targeting-officer.** Job: keep the notional target list and working group products; track combat assessment with the J2; check every entry against the no-strike and restricted lists the human supplies. Boundary: "Notional entries in the exercise box only."
-- **information-planner.** Job: synchronize information activities (enable, protect, inform, influence, attack, from ADP 3-13) with operations; NATO/Canadian vocabulary uses information operations (CAF reference annex O). Boundary: "Draft inputs only; any outward-facing message needs human and public affairs approval" (03 A5).
-- **cyber-space-planner.** Job: turn needs into support requests to supporting commands; track lead times and convergence windows. Boundary: "State plainly when capability details are unknown or not public; never guess them" (03 A5).
+- **information-planner.** Job: synchronize information activities (enable, protect, inform, influence, attack, from ADP 3-13) with operations; NATO/Canadian vocabulary uses information operations at joint level (annex O in the CAF reference list) and, with the Canadian nation setting at tactical level, influence activities (CADN 16-01). Boundary: "Draft inputs only; any outward-facing message needs human and public affairs approval" (03 A5).
+- **cyber-space-planner.** Job: turn needs into support requests to supporting commands; track lead times and convergence windows. Space requests use the JP 3-14 (2023) mission areas only (space domain awareness, offensive and defensive space operations, PNT, ISR, SATCOM, environmental monitoring, missile warning, nuclear detonation detection, spacecraft operations, spacelift) and name the space products they feed (the space operations directive, master space plan and the weekly combined space tasking order are the space command's, never this member's). Never use the retired terms space control, counterspace, space negation or space coordinating authority. Boundary: "State plainly when capability details are unknown or not public; never guess them" (03 A5).
 - **airspace-maritime-liaison.** Job: collect airspace and maritime coordination needs from all lanes and the J4 (resupply flights), flag conflicts, prepare requests for the responsible human authority. Boundary: "Requests, not control measures."
 - **assessment-analyst.** Job: take the J5's assessment framework at transition; run the assessment working group; recommend changes with evidence; data separated from judgement (03 A6). Owns: MOE and MOP register, data plan, assessment brief. Boundary: "Assessment, not new plans."
 - **liaison-coordinator.** Job: track LNOs, RFIs and suspenses across sections; chase overdue items. Owns: the shared RFI tracker. Boundary: "You never answer an RFI for another section."
@@ -469,7 +544,7 @@ Single writer per product; others propose entries in `.planning/staff/proposals/
 | Synchronization matrix | J5 lead-planner during planning (plans-writer records); J3 future-ops-planner from transition | All sections | All | Transition is a recorded event |
 | DST and DSM | J5 lead-planner from the wargame; J3 future-ops-planner in execution | J2 threat-analyst (NAIs, indicators), J4 log-plans-officer (logistics decision points) | All | The DSM becomes the JOC trigger table: decision point, indicator, NAI, recommended action, decision maker (03 A6) |
 | RFI tracker | J3 liaison-coordinator | Every section | All | Section entries owned by their section (J2 requirements-manager for intelligence RFIs) |
-| Assessment plan | J5 design-planner in planning; J3 assessment-analyst in execution | J2 indicators | All | |
+| Assessment plan | J5 design-planner in planning; J3 assessment-analyst in execution | J2 indicators | All | Annex N (Assessments) under US Joint; the six operation assessment steps of JP 5-0 (2025) appendix H |
 | Facts and assumptions ledger | J5 lead-planner | All | All | Status per assumption, invalidation trigger, owner |
 | Annex tracker | J5 plans-writer | Annex owners | All | Letters from the profile |
 | Battle rhythm calendar | Chief of staff (full staff); J3 joc-chief (standalone) | J4 events, J2 cycles | All | `.ics` through `battle-rhythm` |
@@ -697,7 +772,7 @@ WP-0 lands first because every other package imports its schema; everything afte
 
 | WP | Scope | Worktree | Depends on | Tests |
 |---|---|---|---|---|
-| WP-0 Contract | Profile data (`us-joint`, `us-army`, `nato-ca`) with steps, COA tests, annex letters, codes; level validity; product header schema; member preamble; `staff` project type skeleton with settings in `project.json` | `feat/staff-contract` | None | Profile tables parse; every profile and level combination valid or refused as in 2.1; annex letters per profile (joint D logistics, Army D fires, NATO/Canadian D intelligence, R logistics); schema round trip |
+| WP-0 Contract | Profile data (`us-joint`, `us-army`, `nato-ca`) with steps, COA tests, annex letters, codes; level validity; planning type (crisis switches the planning lead to the J3); product header schema; member preamble; `staff` project type skeleton with settings in `project.json` | `feat/staff-contract` | None | Profile tables parse; every profile and level combination valid or refused as in 2.1; annex letters per profile (joint D logistics, N assessments, Army D fires, NATO/Canadian D intelligence, R logistics); US Joint COA tests start with "suitable", never "adequate"; JP 3-14 retired space terms are rejected by the vocabulary lint; planning type `crisis` names the J3 director and the transition; schema round trip |
 | WP-J2 | J2 template, three level variants, skills (`icd203-standards`, `source-grading`), project guidance, template history entry | `feat/staff-j2` | WP-0 | `parseTeam` passes for every variant; 12-member cap; `checkTeam` has no warnings and no parallel-work advice; every product in 3.2 has exactly one owner; instructions contain the boundary sentence and a deliverable; vocabulary switch (JIPOE versus IPB, Annex B versus D); red-team prompts from the earlier prototype's authority tests (J2 must not task collection, approve PIRs or decide) produce refusals in a scripted run |
 | WP-J5 | J5 template, variants (including MDO and tactical), skills (planning templates, wargame ledger, COG, assessment framework) | `feat/staff-j5` | WP-0 | As WP-J2; COA cells have distinct themes and areas (no `overlap` finding); red-team has no write access to plan files; COA tests per profile; agents never write "selected" in a scripted run |
 | WP-J3 | J3 template and variants | `feat/staff-j3` | WP-0 | As WP-J2; watch-officer has no Write; FRAGO drafts go through the state machine; fires packages carry both review marks |
@@ -721,19 +796,21 @@ Recommendation: **yes, ship as 0.4.x feature releases before the remaining v0.5.
 
 Why: the owner's demo priority; the templates need nothing from Phases 71 to 74 (identities, broker, contracts), only the Phase 70 gate already on main plus one small ceiling change; and the earlier owner decision that v0.5.0 Stage 1 phases ship in 0.4.x as they land means a 0.4.x feature line is the normal vehicle. What waits for v0.5.0: verified approver identities (Phase 71; until then approval is device-key signed and self-declared, said plainly), partner identity and tokens (Phases 71 and 73), and run contracts for unattended staff loops (Phase 74). Fine-tuning of staff specialists comes from the v0.6.0 model factory, which can use the approved product history and gate verdicts as training signals; nothing in this design blocks that.
 
-### 9.3 Open questions for the owner or a subject matter expert
+### 9.3 Owner decisions on the open questions
 
-| # | Question | Who | Recommendation |
-|---|---|---|---|
-| Q1 | Approve the three profiles (US Joint, US Army, NATO/Canadian) and the level settings with JPP not offered at tactical level | Owner | Approve as in 2.1 |
-| Q2 | NATO OPLAN annex letters: is Intelligence Annex D and Logistics Annex R in the current COPD, as in CFJP 5.0's NATO-derived list? | NATO-cleared planner with COPD access | Ship the column marked "provisional" with a visible note until confirmed |
-| Q3 | APP-28 step names and products (restricted text) | Canadian Army reviewer | Mark the tactical NATO/Canadian profile "preview" until confirmed |
-| Q4 | Canadian J2 and J4 terms against CFJP 2-0 (2011) and CFJP 4-0 (2016); JIPOE or JIPB in current Canadian joint usage; CJOC J-branch functions | Canadian SME (intelligence and logistics) | Use AJP-5 and NATO terms until reviewed |
-| Q5 | Written confirmation from TRADOC on WEG and DATE release and attribution | Owner (letter) | Do not bundle until confirmed; ship our own starter scenario |
-| Q6 | J5 fits the release-guard by moving the assessment framework to design-planner in planning and J3 in execution | Owner | Accept |
-| Q7 | Release-guard tier: standard (recommended) versus fast | Owner | Standard: it is the last automated check before a human |
-| Q8 | Step and product names in JP 2-0 (2022), the JIPOE Joint Guide, JP 3-0 (2022), JP 4-0 (2023), and the annex titles in CJCSM 3130.03 | A CAC holder | Cite public editions as "public reference edition" until checked |
-| Q9 | Ship drop 1 as the next 0.4.x feature release | Owner | Yes |
-| Q10 | Should approval of a staff product require the Phase 69 signed identity (device key) now, or a simple named confirmation until Phase 71 | Owner | Device-key signed, with the self-declared notice |
-| Q11 | Red team under the NATO/Canadian profile (UK national element, not NATO doctrine) | Owner and Canadian SME | Keep it, labelled optional, on by default |
-| Q12 | Which later sections come next after the first four (J6 and J1, or the special staff) | Owner | Special staff next (legal, political, public affairs supports), because every planning demo touches them |
+The owner accepted every recommendation below on 2026-11-18. Every term is stated plainly; terms that a later reference may change are listed in 2.9 and change in one place, the profile file.
+
+| # | Question | Who | Recommendation | Decision |
+|---|---|---|---|---|
+| Q1 | Approve the three profiles (US Joint, US Army, NATO/Canadian) and the level settings with JPP not offered at tactical level | Owner | Approve as in 2.1 | Accepted (owner, 2026-11-18) |
+| Q2 | NATO OPLAN annex letters: is Intelligence Annex D and Logistics Annex R in the current COPD, as in CFJP 5.0's NATO-derived list? | NATO-cleared planner with COPD access | Ship the CFJP 5.0 list as the NATO/Canadian column; change the profile file if a COPD holder finds a difference | Accepted (owner, 2026-11-18) |
+| Q3 | APP-28 step names and products (restricted text) | Canadian Army reviewer | Ship the tactical NATO/Canadian profile with the APP-28 step names from secondary sources | Accepted (owner, 2026-11-18) |
+| Q4 | Canadian J2 and J4 terms against CFJP 2-0 (2011) and CFJP 4-0 (2016); JIPOE or JIPB in current Canadian joint usage (JIPOE chosen, 2.5); CJOC J-branch functions | Canadian SME (intelligence and logistics) | Use AJP-5 and NATO terms until reviewed | Accepted (owner, 2026-11-18) |
+| Q5 | Written confirmation from TRADOC on WEG and DATE release and attribution | Owner (letter) | Do not bundle until confirmed; ship our own starter scenario | Accepted (owner, 2026-11-18) |
+| Q6 | J5 fits the release-guard by moving the assessment framework to design-planner in planning and J3 in execution | Owner | Accept | Accepted (owner, 2026-11-18) |
+| Q7 | Release-guard tier: standard (recommended) versus fast | Owner | Standard: it is the last automated check before a human | Accepted (owner, 2026-11-18) |
+| Q8 | Step and product names in JP 2-0 (2022), the JIPOE Joint Guide, JP 4-0 (2023), and the annex titles in CJCSM 3130.03 | A CAC holder | Cite public editions by title and edition. JP 5-0 and JP 3-0 are now settled by the owner's references (2.8); the rest is in 2.9 | Accepted (owner, 2026-11-18) |
+| Q9 | Ship drop 1 as the next 0.4.x feature release | Owner | Yes | Accepted (owner, 2026-11-18) |
+| Q10 | Should approval of a staff product require the Phase 69 signed identity (device key) now, or a simple named confirmation until Phase 71 | Owner | Device-key signed, with the self-declared notice | Accepted (owner, 2026-11-18) |
+| Q11 | Red team under the NATO/Canadian profile (UK national element, not NATO doctrine) | Owner and Canadian SME | Keep it, labelled optional, on by default | Accepted (owner, 2026-11-18) |
+| Q12 | Which later sections come next after the first four (J6 and J1, or the special staff) | Owner | Special staff next (legal, political, public affairs supports), because every planning demo touches them | Accepted (owner, 2026-11-18) |

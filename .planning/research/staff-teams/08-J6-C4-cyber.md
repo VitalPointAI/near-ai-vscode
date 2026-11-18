@@ -1,5 +1,7 @@
 # J6 (C4, communications systems and cyberspace) agent team: doctrine research (US, Canadian, NATO)
 
+> **Edition update (2026-11-18).** This note used JP 5-0 of 1 December 2020. JP 5-0 of 1 July 2025 supersedes it and was read from the owner's reference copy for design note 10. JPP step names are unchanged; US Joint COA tests are now suitable, feasible, acceptable, distinguishable, complete; the fourth planning function is plan evaluation; annex I is Knowledge, Information, and Data Management and annex K is Command, Control, Communications, Computer, and Cybersecurity Systems. See design note 10, sections 2.6, 2.8 and 2.9. JP 3-14 (23 August 2023) has now been read from the owner's extract; its SATCOM and PNT mission areas match the touchpoints below.
+
 Research note for a J6 staff team template in the NEAR AI VS Code extension: command, control, communications and computer systems (C4) and cyberspace, at the strategic, operational and tactical (G6 and S6) levels, under US and Canadian doctrine, aligned with NATO.
 
 - **Researched:** 2026-11-18

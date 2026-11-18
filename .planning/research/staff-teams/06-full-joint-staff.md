@@ -1,5 +1,7 @@
 # 06: The full joint staff as a team of teams
 
+> **Edition update (2026-11-18).** This note used JP 5-0 of 1 December 2020. JP 5-0 of 1 July 2025 supersedes it and was read from the owner's reference copy for design note 10. JPP step names are unchanged; US Joint COA tests are now suitable, feasible, acceptable, distinguishable, complete; the fourth planning function is plan evaluation; annex I is Knowledge, Information, and Data Management and annex K is Command, Control, Communications, Computer, and Cybersecurity Systems. See design note 10, sections 2.6, 2.8 and 2.9. Annex O and P titles differ between the 2020 JP 5-0 appendix used here (O Foreign Disclosure, P Host-Nation Support) and the AY26 Campaign Planning Handbook (O Host Nation Support, P Foreign Disclosure); CJCSM 3130.03 settles it. JP 5-0 (2025) removed the joint plan example appendix.
+
 **Researched:** 2026-11-18
 **Scope:** the whole staff (every J section and its members), at strategic, operational and tactical level, under US, Canadian and NATO doctrine, and a design for running it as a "team of teams" in the NEAR AI VS Code extension.
 **Companion files:** the J2, J5, J3 and J4 teams are researched separately in files 02, 03 and 05 in this folder. This file covers everything else (command group, personal and special staff, J1, J6, J7, J8, J9) and how all sections work as one staff.
