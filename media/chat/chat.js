@@ -91,19 +91,6 @@
   let lastReply;
   // Replies by run, so a cost NEAR settles later lands on the reply it belongs to.
   const replies = new Map();
-  // The Verify signature row of each run, by run id (the newest 50), so a result always finds its own run's row.
-  const verifyRows = new Map();
-  function showVerification(runId, r) {
-    const row = verifyRows.get(runId);
-    if (!row) return;
-    const icon = r.outcome === 'signed' ? '\u2713 ' : r.outcome === 'failed' ? '\u2717 ' : '';
-    const line = el('span', r.outcome === 'failed' ? 'verify-failed' : r.outcome === 'signed' ? 'verify-ok' : '', icon + (r.summary || ''));
-    if (r.notChecked && r.notChecked.length) line.title = 'Not checked in the editor: ' + r.notChecked.join(', ') + '. For a full check use cloud.near.ai/verify or NEAR\u2019s nearai-cloud-verifier.';
-    row.replaceChildren(line);
-    // A failed check stops private NEAR AI Cloud models for this chat until a fresh check passes: Check again runs one.
-    if (r.outcome === 'failed') row.append(textButton('Check again', () => { row.replaceChildren(el('span', '', 'Checking NEAR\u2019s signature and attestation again\u2026')); postFor({ type: 'verify-response', runId }); }));
-    announce(r.summary || 'Verification finished.');
-  }
   // The chat's label chip is a button: a click, or Enter or Space on it, runs Lower This Chat's Label for this chat.
   { const chip = $('chat-label'); if (chip) chip.addEventListener('click', () => postFor({ type: 'lower-chat-label' })); }
   let runInfo = {};
@@ -536,7 +523,6 @@
   function resetConversation() {
     agentRows.clear();
     replies.clear();
-    verifyRows.clear();
     steerBubbles.clear();
     lastReply = undefined;
     runInfo = {};
@@ -1537,11 +1523,6 @@
         // Drawn only under its own run's answer: a run id with no answer on the page, or a state that is not one of the three, draws nothing.
         const reply = typeof m.runId === 'string' ? replies.get(m.runId) : undefined;
         if (reply) trustKit.renderTrustBadge(document, reply.node, m.badge, postFor, m.runId);
-        break;
-      }
-      case 'response-verification': {
-        if (!m.runId) break;
-        if (verifyRows.has(m.runId)) showVerification(m.runId, m.result || {});
         break;
       }
       case 'assistant-cost': {

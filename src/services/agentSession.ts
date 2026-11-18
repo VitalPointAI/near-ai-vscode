@@ -57,7 +57,7 @@ import { ThreadStore } from './threadStore';
 import type { ConversationStore, Transcript } from './transcripts';
 import type { RunEnd, RunMarkers } from './runMarkers';
 import { NOT_CHECKED_IN_EDITOR, type ResponseEvidence } from './attestation';
-import { trustBadgeFor, type TrustBadge, type TrustBadgeFacts, type TrustVerification } from '../domain/gate/trustBadge';
+import { BADGE_CHECK_TIMEOUT_MS, TRUST_BADGE_TEXT, trustBadgeFor, type TrustBadge, type TrustBadgeFacts, type TrustVerification } from '../domain/gate/trustBadge';
 import { PreparedAttachments, StagedAttachment } from '../agent/attachments';
 import { imageTool, ImageDraft, ImageDraftEntry, ImageReviewDecision, ImageReviewer, memoryPreamble, memoryTools } from '../agent/extraTools';
 import { cleanOldDrafts, DRAFT_ID, draftFile } from '../agent/imageDrafts';
@@ -266,6 +266,10 @@ export const UNREADABLE_CHAT_LABEL_TEXT =
 
 /** How many lead answers keep their badge's facts and check result in memory, so Check again and Show full attestation can use them (CLAS-08). */
 export const TRUST_ENTRIES_KEPT = 20;
+/** How many runs' last shown badges are kept: as many answers as the page keeps. */
+const SHOWN_BADGES_KEPT = 50;
+/** How many failed checks a chat keeps for Check again. Failures are few: the first one at an attested level stops further requests at that level. */
+export const FAILED_CHECKS_KEPT = 100;
 
 /** What a lead answer's badge is chosen from, apart from its check and the chat's other checks. */
 type AnswerFacts = Omit<TrustBadgeFacts, 'verification' | 'verificationSummary' | 'earlierCheckFailed'>;
@@ -331,6 +335,11 @@ export class AgentConversation {
    */
   private uncheckedFailures = new Set<string>();
   /**
+   * The trust badge's own failed checks (CLAS-08) of answers the route did not check (at any-cloud), by chat id, for the whole chat, the newest
+   * FAILED_CHECKS_KEPT. They set no stop, but every later badge of the chat says an earlier check failed until Check again on that answer passes.
+   */
+  private badgeFailures = new Map<string, { runId: string; model: string; evidence: ResponseEvidence; client: NearAiClient }>();
+  /**
    * The chat's high-water mark (CLAS-04, D-29, D-54): set at the project's resolved label when the chat's first run starts (or at its stored mark when it
    * was reopened), raised by what any of its agents read, and read by every session route of the chat before each model request. It only rises; the
    * person's Lower This Chat's Label is the one way down.
@@ -349,6 +358,13 @@ export class AgentConversation {
   public onLabelChange: ((mark: Mark | undefined) => void) | undefined;
   /** Each lead answer's trust badge and what it was chosen from, by run id, the newest TRUST_ENTRIES_KEPT (Check again and Show full attestation use them). */
   private readonly verifiable = new Map<string, BadgeEntry>();
+  /** The badge last shown for each run, the newest SHOWN_BADGES_KEPT (as many answers as the page keeps), so Check again on one no longer kept says so. */
+  private readonly shownBadges = new Map<string, TrustBadge>();
+  /** The timer the badge's check waits on (D-56); a test gives its own clock. A timer never keeps the extension host alive. */
+  public badgeTimers: { set(run: () => void, ms: number): unknown; clear(handle: unknown): void } = {
+    set: (run, ms) => { const handle = setTimeout(run, ms); handle.unref?.(); return handle; },
+    clear: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>)
+  };
   /** What the user typed, keyed by a hash of the message the model saw (survives compaction). */
   private display = new Map<string, string>();
   /** Messages already written to the thread log (D-07). A message is logged once, before the model's context can replace it with a trimmed copy or a summary. */
@@ -917,9 +933,9 @@ export class AgentConversation {
   public async verifyRun(runId: string): Promise<AnswerCheckResult> {
     const checks = this.answerChecks.get(runId);
     const entry = this.verifiable.get(runId);
+    const attestation = this.chatAttestation;
+    let last: AnswerCheckResult | undefined;
     if (checks && checks.failed.size > 0) {
-      const attestation = this.chatAttestation;
-      let last: AnswerCheckResult | undefined;
       let model = '';
       for (const [chatId, failed] of [...checks.failed]) {
         model = failed.model;
@@ -927,7 +943,7 @@ export class AgentConversation {
         if (entry?.evidence?.chatId === chatId) { entry.result = last; entry.verification = last.outcome; }
         if (last.outcome !== 'signed') return last;
         checks.failed.delete(chatId);
-        if (attestation === this.chatAttestation) this.uncheckedFailures.delete(chatId);
+        if (attestation === this.chatAttestation) { this.uncheckedFailures.delete(chatId); this.badgeFailures.delete(chatId); }
         checks.results.set(chatId, last);
       }
       // Cleared only when no failed answer of the chat is left unchecked, counted for the whole chat (an evicted run's failure still counts).
@@ -935,19 +951,47 @@ export class AgentConversation {
         attestation.failed = false;
         try { checks.route.sink?.record(routeEventRecordFor(checks.route, 'route.attestation-cleared', { model, attestation: 'verified' })); } catch { /* D-21 */ }
       }
-      return entry?.evidence && checks.results.has(entry.evidence.chatId) ? checks.results.get(entry.evidence.chatId)! : last!;
     }
+    // The badge's own failed checks of this run's answers (CLAS-08) are checked again too; a signed one no longer counts as an earlier failure.
+    for (const [chatId, failed] of [...this.badgeFailures].filter(([, failure]) => failure.runId === runId)) {
+      if (entry?.evidence?.chatId === chatId) continue;
+      const again = await failed.client.verifyResponse(failed.model, failed.evidence);
+      if (attestation === this.chatAttestation && again.outcome === 'signed') this.badgeFailures.delete(chatId);
+    }
+    if (last !== undefined) return entry?.evidence && checks?.results.has(entry.evidence.chatId) ? checks.results.get(entry.evidence.chatId)! : last;
     if (!entry?.evidence) return { outcome: 'unavailable', summary: `This response can no longer be verified from the editor (only the last ${String(TRUST_ENTRIES_KEPT)} are kept).`, checks: {}, notChecked: NOT_CHECKED_IN_EDITOR };
     const fresh = await entry.client.verifyResponse(entry.model, entry.evidence);
     entry.result = fresh;
     entry.verification = fresh.outcome;
+    if (attestation === this.chatAttestation) this.noteBadgeCheck(runId, entry, entry.evidence, fresh);
     return fresh;
+  }
+
+  /** Keeps or clears a badge check's failure of an answer the route did not check (CLAS-08); the route's own failures are kept by answerChecked. */
+  private noteBadgeCheck(runId: string, entry: BadgeEntry, evidence: ResponseEvidence, result: AnswerCheckResult): void {
+    if (result.outcome === 'signed') { this.badgeFailures.delete(evidence.chatId); return; }
+    if (result.outcome !== 'failed' || this.uncheckedFailures.has(evidence.chatId)) return;
+    this.badgeFailures.delete(evidence.chatId);
+    this.badgeFailures.set(evidence.chatId, { runId, model: entry.model, evidence, client: entry.client });
+    for (const old of [...this.badgeFailures.keys()].slice(0, -FAILED_CHECKS_KEPT)) this.badgeFailures.delete(old);
   }
 
   /** The badge a run's lead answer shows now, or undefined when the run's badge is no longer kept or it came through a local client. */
   public trustBadge(runId: string): TrustBadge | undefined {
     const entry = this.verifiable.get(runId);
     return entry === undefined ? undefined : this.badgeOf(entry);
+  }
+
+  /**
+   * A person's Check again on a badge (the page's verify-response): a fresh check of the run's answer, and of every failed check of the run, then the badge
+   * for that run id. An answer no longer kept keeps the state it showed and says it cannot be checked again; undefined when the run never had a badge here.
+   */
+  public async checkAgain(runId: string): Promise<TrustBadge | undefined> {
+    await this.verifyRun(runId);
+    const badge = this.trustBadge(runId);
+    if (badge !== undefined) return badge;
+    const shown = this.shownBadges.get(runId);
+    return shown === undefined ? undefined : { ...shown, reasons: [...shown.reasons.filter((reason) => reason !== TRUST_BADGE_TEXT.notKept), TRUST_BADGE_TEXT.notKept] };
   }
 
   /** Starts a lead answer's badge when its run ends: keeps what it was chosen from and shows it (CLAS-08). */
@@ -962,12 +1006,44 @@ export class AgentConversation {
     this.verifiable.set(runId, entry);
     for (const old of [...this.verifiable.keys()].slice(0, -TRUST_ENTRIES_KEPT)) this.verifiable.delete(old);
     this.postBadge(runId, entry);
+    if (willCheck) this.checkForBadge(runId, entry, evidence);
+  }
+
+  /**
+   * Checks a lead answer once in the background (the owner's decision of 2026-11-16): plan 25's own check of the same chat id when its request was at
+   * attested-cloud, else one through the client's 10-minute report cache. If it has not settled after BADGE_CHECK_TIMEOUT_MS the badge says it could not be
+   * checked in time (D-56); a result that comes later still updates it. Every post names the answer's own run id, so a check that settles after the person
+   * started another run updates only its own answer. A chat that was closed or replaced meanwhile gets nothing.
+   */
+  private checkForBadge(runId: string, entry: BadgeEntry, evidence: ResponseEvidence): void {
+    const attestation = this.chatAttestation;
+    const current = () => attestation === this.chatAttestation && attestation.closed !== true;
+    let settled = false;
+    const timer = this.badgeTimers.set(() => {
+      if (settled || entry.verification !== 'pending' || !current()) return;
+      entry.verification = 'timed-out';
+      this.postBadge(runId, entry);
+    }, BADGE_CHECK_TIMEOUT_MS);
+    let check: Promise<AnswerCheckResult>;
+    try { check = entry.client.verificationFor(entry.model, evidence); } catch (error) { check = Promise.reject(error); }
+    void check.then((result) => result, (error: unknown): AnswerCheckResult => ({ outcome: 'unavailable', summary: `The answer could not be checked (${error instanceof Error ? error.message : 'unknown error'}).`, checks: {}, notChecked: NOT_CHECKED_IN_EDITOR }))
+      .then((result) => {
+        settled = true;
+        this.badgeTimers.clear(timer);
+        if (!current()) return;
+        // A person's Check again that finished first already holds the newer result.
+        if (entry.verification !== 'pending' && entry.verification !== 'timed-out') return;
+        entry.result = result;
+        entry.verification = result.outcome;
+        this.noteBadgeCheck(runId, entry, evidence, result);
+        this.postBadge(runId, entry);
+      });
   }
 
   /** The badge of one entry, chosen by trustBadgeFor alone, with what the editor does not check. */
   private badgeOf(entry: BadgeEntry): TrustBadge | undefined {
     const own = entry.evidence?.chatId;
-    const earlierCheckFailed = [...this.uncheckedFailures].some((chatId) => chatId !== own);
+    const earlierCheckFailed = [...this.uncheckedFailures, ...this.badgeFailures.keys()].some((chatId) => chatId !== own);
     const badge = trustBadgeFor({ ...entry.facts, verification: entry.verification, ...(entry.result ? { verificationSummary: entry.result.summary } : {}), earlierCheckFailed });
     return badge === undefined ? undefined : { ...badge, notChecked: entry.result?.notChecked ?? NOT_CHECKED_IN_EDITOR };
   }
@@ -975,7 +1051,11 @@ export class AgentConversation {
   /** Shows an entry's badge under its own run's answer (never the newest one). */
   private postBadge(runId: string, entry: BadgeEntry): void {
     const badge = this.badgeOf(entry);
-    if (badge !== undefined) this.post({ type: 'trust-badge', runId, badge });
+    if (badge === undefined) return;
+    this.shownBadges.delete(runId);
+    this.shownBadges.set(runId, badge);
+    for (const old of [...this.shownBadges.keys()].slice(0, -SHOWN_BADGES_KEPT)) this.shownBadges.delete(old);
+    this.post({ type: 'trust-badge', runId, badge });
   }
 
   /**
@@ -992,7 +1072,7 @@ export class AgentConversation {
       for (const old of [...this.answerChecks.keys()].slice(0, -50)) this.answerChecks.delete(old);
     }
     checks.results.set(chatId, result);
-    if (result.outcome === 'failed') { checks.failed.set(chatId, checked); this.uncheckedFailures.add(chatId); }
+    if (result.outcome === 'failed') { checks.failed.set(chatId, checked); this.uncheckedFailures.add(chatId); this.badgeFailures.delete(chatId); }
     const entry = this.verifiable.get(runId);
     if (entry && entry.evidence?.chatId !== chatId && result.outcome === 'failed') this.postBadge(runId, entry);
   }
@@ -1094,6 +1174,7 @@ export class AgentConversation {
     this.chatAttestation = { failed: false };
     this.answerChecks.clear();
     this.uncheckedFailures = new Set();
+    this.badgeFailures = new Map();
   }
 
   public dispose(): void { this.reset(); }

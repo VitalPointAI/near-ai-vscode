@@ -2,6 +2,7 @@
 // own run's answer, the session checks each TEE answer once in the background and never leaves a badge at "Checking now", and the badge explains itself.
 // Attestation tests use the recorded fixtures and fake fetches; nothing reaches the network and no key is read.
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -11,10 +12,17 @@ import {
   type TrustBadge, type TrustBadgeFacts, type TrustVerification
 } from '../domain/gate/trustBadge';
 import type { ConnectionBindingFact } from '../domain/gate/routing';
+import type { Label } from '../domain/gate/labels';
 import { DEFAULT_RULES } from '../agent/permissions';
+import { AgentConversation } from '../services/agentSession';
+import { NearAiClient, type AgentMessage, type CompletionEvent, type ToolCall } from '../services/nearAiClient';
+import type { ConnectionBindingSource } from '../services/connectionBinding';
+import { TranscriptStore } from '../services/transcripts';
+import { TEST_ROOT, personalSign, testQuote, testSigner } from './helpers/attestationFixtures';
+import { labelledProject } from './helpers/markFixtures';
 import { chatPage, type StubNode } from './helpers/chatPage';
 import { FakeDocument, type FakeNode } from './helpers/fakeDom';
-import { newTestConversation } from './helpers/gatedRuns';
+import { newTestConversation, testGateHost } from './helpers/gatedRuns';
 
 const ROOT = path.join(__dirname, '..', '..');
 
@@ -233,4 +241,298 @@ test('the session posts one badge for a cloud answer after assistant-done, and n
     }
     assert.ok(!posted.some((message) => message.type === 'response-verifiable'), 'the old Verify signature row is gone');
   }
+});
+
+// ---- Task 2: the badge reflects the checks that actually ran, once per answer, settles even offline, and Check again reruns them ----
+
+const NEAR_URL = 'https://cloud-api.near.ai/v1';
+const SIGNING = testSigner('near-ai-gateway-test-key');
+const IMPOSTOR = testSigner('someone-else');
+const CONFIDENTIAL: Label = { scale: 'org', level: 'Confidential', compartments: [], releasability: [], handling: [] };
+
+interface Cloud {
+  readonly client: NearAiClient;
+  readonly content: string[];
+  /** Signature requests by chat id. */
+  readonly signatures: Map<string, number>;
+  readonly signatureCount: () => number;
+  readonly reportGets: () => number;
+  /** What the signature endpoint does now: sign with the gateway key, sign with another key, throw as when offline, or answer only when released. */
+  mode: 'valid' | 'bad-signature' | 'offline' | 'hang';
+  release: () => void;
+}
+
+/**
+ * A fake NEAR AI Cloud that streams answers and signs them the way NEAR does, from the recorded quote fixtures. `tee-model` runs in a TEE and `fwd-model` is
+ * forwarded to another provider. The connection fact is bound (with a pinned fetch that is this same fake), another state, or absent (no binding source).
+ */
+async function cloud(connection: ConnectionBindingFact['state'] | 'none' = 'bound'): Promise<Cloud> {
+  const content: string[] = [];
+  const answers = new Map<string, { request: string; response: string }>();
+  const signatures = new Map<string, number>();
+  let reports = 0;
+  let released!: () => void;
+  const held = new Promise<void>((resolve) => { released = resolve; });
+  const state: { mode: Cloud['mode'] } = { mode: 'valid' };
+  const fetchFn = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url = new URL(String(input));
+    const method = init?.method ?? 'GET';
+    if (method === 'GET' && url.pathname.endsWith('/models')) return Response.json({ data: [{ id: 'tee-model' }, { id: 'fwd-model' }] });
+    if (method === 'GET' && url.pathname.endsWith('/model/list')) {
+      return Response.json({ models: [
+        { modelId: 'tee-model', metadata: { attestationSupported: true, providerType: 'vllm' } },
+        { modelId: 'fwd-model', metadata: { attestationSupported: false, providerType: 'external', providerConfig: { base_url: 'https://api.example-provider.com/v1' } } }
+      ] });
+    }
+    if (method === 'POST' && url.pathname.endsWith('/chat/completions')) {
+      const chatId = `chatcmpl-${String(content.length + 1)}`;
+      content.push(chatId);
+      const chunk = (value: unknown) => `data: ${JSON.stringify(value)}\n\n`;
+      const response = chunk({ id: chatId, choices: [{ delta: { content: 'done' }, finish_reason: 'stop' }] }) + chunk({ id: chatId, choices: [], usage: { prompt_tokens: 3, completion_tokens: 1 } }) + 'data: [DONE]\n\n';
+      answers.set(chatId, { request: String(init?.body), response });
+      return new Response(response, { headers: { 'content-type': 'text/event-stream', 'inference-id': `inf-${chatId}` } });
+    }
+    if (method === 'GET' && url.pathname.startsWith('/v1/signature/')) {
+      const chatId = decodeURIComponent(url.pathname.slice('/v1/signature/'.length));
+      signatures.set(chatId, (signatures.get(chatId) ?? 0) + 1);
+      if (state.mode === 'offline') throw new TypeError('fetch failed');
+      if (state.mode === 'hang') await held;
+      const answer = answers.get(chatId);
+      if (answer === undefined) return new Response('{}', { status: 404 });
+      const text = `${createHash('sha256').update(answer.request).digest('hex')}:${createHash('sha256').update(answer.response).digest('hex')}`;
+      return Response.json({ text, signature: personalSign(text, (state.mode === 'bad-signature' ? IMPOSTOR : SIGNING).key), signing_address: SIGNING.address, signing_algo: 'ecdsa' });
+    }
+    if (method === 'GET' && url.pathname.endsWith('/attestation/report')) {
+      reports += 1;
+      const reportData = Buffer.alloc(64);
+      Buffer.from(SIGNING.address.slice(2), 'hex').copy(reportData, 0);
+      Buffer.from(url.searchParams.get('nonce') ?? '', 'hex').copy(reportData, 32);
+      return Response.json({ model_attestations: [{ signing_address: SIGNING.address, signing_algo: 'ecdsa', intel_quote: testQuote(reportData) }] });
+    }
+    return new Response('not found', { status: 404 });
+  }) as typeof fetch;
+  const fact = (): ConnectionBindingFact => connection === 'bound' ? { state: 'bound', host: NEAR_URL, checkedAt: Date.now(), fingerprint: 'ab'.repeat(32) } : { state: connection as ConnectionBindingFact['state'], host: NEAR_URL, checkedAt: Date.now() };
+  const binding: ConnectionBindingSource | undefined = connection === 'none' ? undefined : { current: fact, refresh: async () => fact(), markNotBound: () => undefined, fetchFor: () => fetchFn };
+  const client = new NearAiClient({ baseUrl: NEAR_URL, apiKey: 'test-key', fetchFn, route: 'near', ...(binding ? { binding } : {}), maxRetries: 0, attestationTrust: { trustedRoot: TEST_ROOT } });
+  await client.listModels();
+  return {
+    client, content, signatures, signatureCount: () => [...signatures.values()].reduce((sum, count) => sum + count, 0), reportGets: () => reports,
+    get mode() { return state.mode; }, set mode(value) { state.mode = value; },
+    release: () => released()
+  };
+}
+
+interface BadgeChat {
+  readonly conversation: AgentConversation;
+  readonly posted: Array<{ type: string; runId?: string; badge?: TrustBadge }>;
+  readonly badges: () => Array<{ runId: string; badge: TrustBadge }>;
+  /** The badge timers the session set, in order; firing one is BADGE_CHECK_TIMEOUT_MS passing. */
+  readonly timers: Array<{ run: () => void; ms: number; cleared: boolean }>;
+}
+
+/** A chat in a project labelled org/Confidential, or unlabelled (org/Public), whose badge timers are under the test's control. */
+function badgeChat(projectLabel: Label | null = null): BadgeChat {
+  const root = projectLabel === null ? mkdtempSync(path.join(tmpdir(), 'near-ai-badge-')) : labelledProject({ project: projectLabel });
+  const posted: BadgeChat['posted'] = [];
+  const conversation = new AgentConversation(root, (message) => posted.push(message as never), path.join(root, '.ckpt'), undefined, new TranscriptStore(path.join(root, '.store'), root));
+  conversation.gateHost = testGateHost();
+  const timers: BadgeChat['timers'] = [];
+  conversation.badgeTimers = {
+    set: (run, ms) => { timers.push({ run, ms, cleared: false }); return timers.length - 1; },
+    clear: (handle) => { const timer = timers[handle as number]; if (timer) timer.cleared = true; }
+  };
+  const badges = () => posted.filter((message) => message.type === 'trust-badge').map((message) => ({ runId: message.runId!, badge: message.badge! }));
+  return { conversation, posted, badges, timers };
+}
+
+const send = (chat: BadgeChat, client: NearAiClient, model = 'tee-model', privacy = PRIVATE) =>
+  chat.conversation.send({ text: 'hello', client, model, privacy, policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES });
+
+/** Lets every check that can settle settle, and its badge be posted. */
+const settle = async (): Promise<void> => { for (let round = 0; round < 20; round += 1) await new Promise((resolve) => setImmediate(resolve)); };
+
+test('a TEE answer at org/Confidential, over the connection pinned to a fresh bound fact: Checking now, then Verified private model; the route\'s check is reused, one signature request', async () => {
+  const near = await cloud('bound');
+  const chat = badgeChat(CONFIDENTIAL);
+  await send(chat, near.client);
+  await settle();
+  const badges = chat.badges();
+  assert.equal(badges.length, 2);
+  assert.equal(badges[0]!.badge.state, 'not-verified');
+  assert.deepEqual(badges[0]!.badge.reasons, [TRUST_BADGE_TEXT.checking]);
+  assert.equal(badges[1]!.badge.state, 'verified-private');
+  assert.equal(badges[1]!.badge.title, 'Verified private model');
+  assert.equal(badges[1]!.runId, badges[0]!.runId);
+  assert.equal(near.signatures.get('chatcmpl-1'), 1, 'exactly one /signature request for the chat id: the badge used plan 25\'s check');
+  assert.equal(near.signatureCount(), 1);
+  assert.ok(chat.timers[0]!.cleared, 'the timeout was cleared when the check settled');
+  assert.equal(chat.timers[0]!.ms, BADGE_CHECK_TIMEOUT_MS);
+});
+
+test('at org/Public a bound fact alone does not prove the connection: the request was not pinned, so Model verified, connection not proven, with the reason', async () => {
+  const near = await cloud('bound');
+  const chat = badgeChat();
+  await send(chat, near.client);
+  await settle();
+  const last = chat.badges().at(-1)!.badge;
+  assert.equal(last.state, 'model-verified');
+  assert.ok(last.reasons.includes(`${TRUST_BADGE_TEXT.connectionNotProven} ${TRUST_BADGE_TEXT.connection.stale}`), JSON.stringify(last.reasons));
+  assert.equal(near.signatureCount(), 1, 'one signature request for the answer, through the report cache');
+});
+
+test('the connection unavailable, unknown or absent: Model verified, connection not proven, with the cause sentence among its reasons', async () => {
+  for (const [state, cause] of [['unavailable', TRUST_BADGE_TEXT.connection.unavailable], ['unknown', TRUST_BADGE_TEXT.connection.unknown], ['none', TRUST_BADGE_TEXT.connection.unknown]] as const) {
+    const near = await cloud(state);
+    const chat = badgeChat();
+    await send(chat, near.client);
+    await settle();
+    const last = chat.badges().at(-1)!.badge;
+    assert.equal(last.state, 'model-verified', state);
+    assert.ok(last.reasons.includes(`${TRUST_BADGE_TEXT.connectionNotProven} ${cause}`), `${state}: ${JSON.stringify(last.reasons)}`);
+  }
+});
+
+test('a signature that does not match the fixture is Not verified with the failure summary; a check that cannot reach NEAR AI is Not verified, could not be checked', async () => {
+  const bad = await cloud('bound');
+  bad.mode = 'bad-signature';
+  const failedChat = badgeChat();
+  await send(failedChat, bad.client);
+  await settle();
+  const failed = failedChat.badges().at(-1)!.badge;
+  assert.equal(failed.state, 'not-verified');
+  assert.ok(failed.reasons.some((reason) => reason.startsWith(TRUST_BADGE_TEXT.failed) && /signature/i.test(reason)), JSON.stringify(failed.reasons));
+  const offline = await cloud('bound');
+  offline.mode = 'offline';
+  const offlineChat = badgeChat();
+  await send(offlineChat, offline.client);
+  await settle();
+  const unavailable = offlineChat.badges().at(-1)!.badge;
+  assert.equal(unavailable.state, 'not-verified');
+  assert.ok(unavailable.reasons.some((reason) => reason.startsWith(TRUST_BADGE_TEXT.unavailable)), JSON.stringify(unavailable.reasons));
+  assert.equal(offlineChat.conversation.routeAttestation.failed, false, 'a check that cannot run sets nothing');
+});
+
+test('D-56: a check that never settles shows Not verified, could not be checked in time, after BADGE_CHECK_TIMEOUT_MS; when it settles later that run\'s badge updates', async () => {
+  const near = await cloud('bound');
+  near.mode = 'hang';
+  const chat = badgeChat();
+  await send(chat, near.client);
+  await settle();
+  assert.equal(chat.badges().length, 1, 'still Checking now');
+  assert.equal(chat.timers.length, 1);
+  chat.timers[0]!.run();
+  const timedOut = chat.badges().at(-1)!;
+  assert.equal(timedOut.badge.state, 'not-verified');
+  assert.ok(timedOut.badge.reasons.includes(TRUST_BADGE_TEXT.timedOut));
+  assert.ok(!timedOut.badge.reasons.includes(TRUST_BADGE_TEXT.checking), 'no longer Checking now');
+  near.mode = 'valid';
+  near.release();
+  await settle();
+  const late = chat.badges().at(-1)!;
+  assert.equal(late.runId, timedOut.runId);
+  assert.equal(late.badge.state, 'model-verified', 'the late result updates the badge');
+  assert.equal(chat.badges().length, 3);
+});
+
+test('a forwarded model\'s answer is Not verified with the forwarded reason, and the fake server saw no /signature request', async () => {
+  const near = await cloud('bound');
+  const chat = badgeChat();
+  await send(chat, near.client, 'fwd-model', 'Not private · forwarded to example-provider.com');
+  await settle();
+  const badges = chat.badges();
+  assert.equal(badges.length, 1, 'posted once, never checking');
+  assert.equal(badges[0]!.badge.state, 'not-verified');
+  assert.ok(badges[0]!.badge.reasons.includes('This model runs outside a verified enclave: NEAR AI forwards it to example-provider.com.'), JSON.stringify(badges[0]!.badge.reasons));
+  assert.ok(!badges[0]!.badge.reasons.includes(TRUST_BADGE_TEXT.checking));
+  assert.equal(near.signatureCount(), 0);
+  assert.equal(chat.timers.length, 0, 'no check, so no timer');
+});
+
+test('a chat whose check failed earlier: Not verified even when this answer\'s check is signed; Check again on the failed answer clears it for later badges', async () => {
+  const near = await cloud('bound');
+  near.mode = 'bad-signature';
+  const chat = badgeChat();
+  await send(chat, near.client);
+  await settle();
+  const firstRun = chat.badges().at(-1)!.runId;
+  assert.equal(chat.badges().at(-1)!.badge.state, 'not-verified');
+  near.mode = 'valid';
+  await send(chat, near.client);
+  await settle();
+  const second = chat.badges().at(-1)!;
+  assert.notEqual(second.runId, firstRun);
+  assert.equal(second.badge.state, 'not-verified', 'signed, but an earlier check of the chat failed');
+  assert.ok(second.badge.reasons.includes(TRUST_BADGE_TEXT.earlierFailed));
+  // Check again on the first answer passes now: its badge and the second one's no longer carry the earlier failure.
+  const again = await chat.conversation.checkAgain(firstRun);
+  assert.equal(again?.state, 'model-verified');
+  assert.equal(chat.conversation.trustBadge(second.runId)?.state, 'model-verified');
+});
+
+test('Check again reruns the check afresh and gives the updated badge for that run id; on the answer that set the stop, a signed result clears the stop', async () => {
+  const near = await cloud('bound');
+  near.mode = 'bad-signature';
+  const chat = badgeChat(CONFIDENTIAL);
+  await send(chat, near.client);
+  await settle();
+  const runId = chat.badges().at(-1)!.runId;
+  assert.equal(chat.conversation.routeAttestation.failed, true, 'the failed check stopped attested-cloud for the chat');
+  const before = near.signatureCount();
+  near.mode = 'valid';
+  const badge = await chat.conversation.checkAgain(runId);
+  assert.equal(near.signatureCount(), before + 1, 'a fresh check');
+  assert.equal(badge?.state, 'verified-private');
+  assert.equal(chat.conversation.routeAttestation.failed, false, 'the stop is cleared');
+  // A run id the session never badged gives nothing.
+  assert.equal(await chat.conversation.checkAgain('run-9-ffffff'), undefined);
+});
+
+test('edge CLAS-08 concurrency: a check for run A that settles after run B started updates only A\'s badge', async () => {
+  const near = await cloud('bound');
+  near.mode = 'hang';
+  const chat = badgeChat();
+  await send(chat, near.client);
+  const runA = chat.badges().at(-1)!.runId;
+  await send(chat, near.client);
+  const runB = chat.badges().at(-1)!.runId;
+  assert.notEqual(runA, runB);
+  near.mode = 'valid';
+  near.release();
+  await settle();
+  const settledA = chat.badges().filter((entry) => entry.runId === runA);
+  const settledB = chat.badges().filter((entry) => entry.runId === runB);
+  assert.equal(settledA.length, 2, 'A: Checking now, then its own result');
+  assert.equal(settledB.length, 2, 'B: Checking now, then its own result');
+  assert.equal(settledA.at(-1)!.badge.state, 'model-verified');
+  assert.equal(settledB.at(-1)!.badge.state, 'model-verified');
+});
+
+test('a sub-agent\'s answer posts no trust badge: only the lead agent\'s answer has one (D-56)', async () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'near-ai-badge-sub-'));
+  const call: ToolCall = { id: 'a1', type: 'function', function: { name: 'Agent', arguments: JSON.stringify({ subagent_type: 'designer', description: 'design', prompt: 'You are the designer. go' }) } };
+  let subAnswers = 0;
+  const client = {
+    async *streamCompletion(_model: string, messages: AgentMessage[]): AsyncGenerator<CompletionEvent> {
+      const usage = { verificationStatus: 'unknown' as const, latencyMs: 1 };
+      if (/You are the designer\./.test(String(messages[1]?.content ?? '')) && messages[0]!.role === 'system' && messages.length === 2) {
+        subAnswers += 1;
+        yield { type: 'done', message: { role: 'assistant', content: 'designed' }, finishReason: 'stop', usage: { ...usage, evidence: { chatId: 'chatcmpl-sub', requestHash: 'a', responseHash: 'b' } } };
+        return;
+      }
+      if (!messages.some((message) => message.role === 'tool')) { yield { type: 'done', message: { role: 'assistant', content: null, tool_calls: [call] }, finishReason: 'tool_calls', usage }; return; }
+      yield { type: 'done', message: { role: 'assistant', content: 'all done' }, finishReason: 'stop', usage: { ...usage, evidence: EVIDENCE } };
+    },
+    async actualCostsUsd() { return undefined; }
+  };
+  const posted: Array<{ type: string; runId?: string }> = [];
+  const conversation = newTestConversation(root, (message) => posted.push(message as never), path.join(root, '.ckpt'));
+  try {
+    await conversation.send({ text: 'go', client: client as never, model: 'tee-model', privacy: PRIVATE, policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES, gsd: { home: root, skills: [], shellEnv: {}, agents: [{ name: 'designer', description: 'designs', tools: [], body: 'You design.', file: path.join(root, 'agents', 'designer.md') }] } });
+  } finally {
+    conversation.dispose();
+  }
+  assert.equal(subAnswers, 1, 'the sub-agent answered');
+  const badges = posted.filter((message) => message.type === 'trust-badge');
+  assert.equal(badges.length, 1, 'one badge, the lead\'s');
+  assert.equal(badges[0]!.runId, posted.find((message) => message.type === 'assistant-done')!.runId);
 });

@@ -48,6 +48,7 @@ export const TRUST_BADGE_TEXT = Object.freeze({
   notChecked: 'Not checked in the editor: ',
   fullCheck: 'For a full check use cloud.near.ai/verify or NEAR’s nearai-cloud-verifier.',
   keptWhileOpen: 'The full attestation is kept only while the window that checked it is open.',
+  notKept: 'This answer can no longer be checked again from the editor: only the last 20 answers of this window are kept.',
   replayed: 'This shows the check made when the answer arrived.'
 });
 

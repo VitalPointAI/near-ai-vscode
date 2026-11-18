@@ -3,6 +3,7 @@ import * as fs from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
+import { TRUST_BADGE_TEXT, type TrustBadge } from '../domain/gate/trustBadge';
 import { beginRun } from './runActivity';
 import { formatGsdStatusLine, parseGsdPlanningState, statusSnapshot, withLiveStatus } from '../domain/gsdStatus';
 import { GSD_COMMANDS } from '../domain/gsdCommands';
@@ -752,8 +753,12 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
       return;
     }
     if (message.type === 'verify-response') {
-      const result = tab.agent ? await tab.agent.verifyRun(message.runId).catch((error: Error) => ({ outcome: 'unavailable' as const, summary: `Verification failed: ${providerErrorMessage(error)}`, checks: {}, notChecked: [] })) : undefined;
-      tab.post({ type: 'response-verification', runId: message.runId, result: result ?? { outcome: 'unavailable', summary: 'Nothing to verify.', checks: {}, notChecked: [] } });
+      // The badge's Check again (CLAS-08): a fresh check, then the run's badge again, under that run's own answer.
+      let badge: TrustBadge | undefined;
+      let failure: string | undefined;
+      try { badge = tab.agent ? await tab.agent.checkAgain(message.runId) : undefined; } catch (error) { failure = `The answer could not be checked again: ${providerErrorMessage(error)}`; }
+      if (badge) tab.post({ type: 'trust-badge', runId: message.runId, badge });
+      else tab.post({ type: 'notice', text: failure ?? TRUST_BADGE_TEXT.notKept });
       return;
     }
     if (message.type === 'insert-code') {

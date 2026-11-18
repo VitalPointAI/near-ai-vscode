@@ -229,6 +229,11 @@ export class RouteRefusedError extends Error {
 /** How many after-answer checks a client keeps, by chat id: the newest 50. */
 export const ANSWER_CHECKS_KEPT = 50;
 
+/** A check that threw: unavailable, never failed (D-55). */
+function uncheckable(error: unknown): VerificationResult {
+  return { outcome: 'unavailable', summary: `The answer could not be checked (${error instanceof Error ? error.message : 'unknown error'}).`, checks: {}, notChecked: NOT_CHECKED_IN_EDITOR };
+}
+
 /** A bound fact older than this (8 minutes) is checked again in the background, so it is renewed before it stops counting at 10 minutes. */
 export const BINDING_REFRESH_AFTER_MS = 480_000;
 /** A fact that is not bound (no model listed yet, offline, a mismatch) is checked again after this (30 seconds) when a request needs it. */
@@ -419,6 +424,8 @@ export class NearAiClient {
   private readonly attestedAnswers = new WeakMap<Response, SessionRoute>();
   /** The check after each attested-cloud answer, by the answer's chat id, the newest ANSWER_CHECKS_KEPT. */
   private readonly answerChecks = new Map<string, Promise<VerificationResult>>();
+  /** The trust badge's check of each other answer (not checked by the route), by chat id, the newest ANSWER_CHECKS_KEPT (CLAS-08). */
+  private readonly badgeChecks = new Map<string, Promise<VerificationResult>>();
   /** Verified attestation reports by signing address for 10 minutes, used only by the checks after each answer (A3). */
   private readonly reportCache = new AttestationReportCache(() => this.now());
 
@@ -939,8 +946,7 @@ export class NearAiClient {
     const route = this.attestedAnswers.get(response);
     if (route === undefined) return;
     this.attestedAnswers.delete(response);
-    const check = verifyResponse(evidence, model, (path) => this.getJson(path), { cache: this.reportCache, ...this.trustOptions() })
-      .catch((error: unknown): VerificationResult => ({ outcome: 'unavailable', summary: `The answer could not be checked (${error instanceof Error ? error.message : 'unknown error'}).`, checks: {}, notChecked: NOT_CHECKED_IN_EDITOR }));
+    const check = verifyResponse(evidence, model, (path) => this.getJson(path), { cache: this.reportCache, ...this.trustOptions() }).catch(uncheckable);
     this.answerChecks.delete(evidence.chatId);
     this.answerChecks.set(evidence.chatId, check);
     while (this.answerChecks.size > ANSWER_CHECKS_KEPT) this.answerChecks.delete(this.answerChecks.keys().next().value as string);
@@ -955,6 +961,21 @@ export class NearAiClient {
       try { route.onAnswerChecked?.(evidence.chatId, result, { model, evidence }); } catch { /* a listener never changes the check */ }
       try { route.sink?.record(routeEventRecordFor(route, 'route.attestation-checked', { model, attestation })); } catch { /* D-21 */ }
     });
+  }
+
+  /**
+   * The check behind an answer's trust badge (CLAS-08): the route's own check of the same chat id when its request was at attested-cloud (D-36), or else one
+   * check through the same 10-minute report cache, kept so a second call for the answer makes no second signature request. `fresh` (a person's Check
+   * again) always runs a new check without the cache. It never rejects: anything thrown is unavailable, never failed.
+   */
+  public verificationFor(model: string, evidence: ResponseEvidence, options: { fresh?: boolean } = {}): Promise<VerificationResult> {
+    if (options.fresh === true) return this.verifyResponse(model, evidence).catch(uncheckable);
+    const known = this.answerChecks.get(evidence.chatId) ?? this.badgeChecks.get(evidence.chatId);
+    if (known !== undefined) return known;
+    const check = verifyResponse(evidence, model, (path) => this.getJson(path), { cache: this.reportCache, ...this.trustOptions() }).catch(uncheckable);
+    this.badgeChecks.set(evidence.chatId, check);
+    while (this.badgeChecks.size > ANSWER_CHECKS_KEPT) this.badgeChecks.delete(this.badgeChecks.keys().next().value as string);
+    return check;
   }
 
   /** The trust the checks use: Intel's root and the system clock, unless a test set `attestationTrust`. */
