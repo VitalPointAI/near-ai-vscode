@@ -392,9 +392,11 @@ stays there and the chat says why. Lower it there too if you need to.
 
 **What a labelled chat writes.** A file a labelled chat writes takes the chat's
 label in the label file, never a lower one, so a later chat that reads it is
-labelled too. A file holds one label, so when its label is on another scale than
-the chat's, it is raised only on the scale it already has, and the chat's own
-label keeps protecting what the chat holds. A label file that is not signed by
+labelled too. A file holds one label. A file already labelled on a scale the
+chat's label also holds is raised on that scale. A file labelled only on scales
+the chat's label does not hold is left as it is, so it keeps a label whose tier
+may let its content go to a private cloud model once those are allowed. The
+chat's own label keeps protecting what the chat holds. A label file that is not signed by
 this computer is never signed again for this without you: you are asked once,
 with Sign Again.
 

@@ -495,7 +495,15 @@ test('PR #87 review round 2: the refusal of a run whose reading could not be che
   assert.doesNotMatch(OUTBOUND_UNCHECKED_TEXT, /NEAR organization|Phase \d/);
 });
 
-test('PR #87 review round 2: SECURITY.md and CHANGELOG say a written file holds one label and is raised only on the scale it already has', () => {
-  assert.ok(flat(sectionOf(SECURITY, '### Classification labels and routing')).includes('A file holds one label, so when its label is on another scale than the chat\'s, it is raised only on the scale it already has'));
-  assert.ok(flat(CHANGELOG).includes('A file holds one label, so a file already labelled on another scale is raised only on that scale.'));
+test('PR #87 review rounds 2 and 3: SECURITY.md and CHANGELOG say what a written file on another scale really gets, and where a chat starts', () => {
+  const section = flat(sectionOf(SECURITY, '### Classification labels and routing'));
+  for (const phrase of ['A file holds one label. A file already labelled on a scale the chat\'s label also holds is raised on that scale.',
+    'A file labelled only on scales the chat\'s label does not hold is left as it is, so it keeps a label whose tier may let its content go to a private cloud model once those are allowed.']) {
+    assert.ok(section.includes(phrase), phrase);
+  }
+  assert.ok(!section.includes('it is raised only on the scale it already has'), 'the round 2 wording, which was not what the code does, is gone');
+  const changelog = flat(CHANGELOG);
+  assert.ok(changelog.includes('a file already labelled only on a scale the chat\'s label does not hold is left as it is'));
+  assert.ok(changelog.includes('A chat starts at its project\'s label (your policy\'s default label when the project has none), so in an unlabelled project a chat that read nothing labelled works as before.'));
+  assert.ok(!changelog.includes('A chat that read nothing labelled works as before.'));
 });

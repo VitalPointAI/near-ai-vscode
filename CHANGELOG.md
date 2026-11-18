@@ -34,8 +34,9 @@ requests may go.
 - **Each chat has a label.** Reading a labelled file raises the chat's label to that file's
   label, and helper agents share it: what one of them reads raises the label of the whole chat. The
   chat shows its label next to the model, and the status bar shows the label of the chat in view,
-  whenever it is above your policy's default label. A chat that read nothing labelled works as
-  before.
+  whenever it is above your policy's default label. A chat starts at its project's label (your
+  policy's default label when the project has none), so in an unlabelled project a chat that read
+  nothing labelled works as before.
 - **The chat's label decides where its requests go.** Content at Restricted, Protected B and the
   other levels that must stay on this computer goes only to a model on this computer, and in this
   version so does content at the levels that need a private cloud model over a proven connection
@@ -48,8 +49,9 @@ requests may go.
   file is refused. This catches copied or quoted text, not a paraphrase or an encoding.
 - **What a labelled chat writes takes its label.** A file a labelled chat writes is labelled at the
   chat's label in the project's label file, never lower, so a later chat that reads it is labelled
-  too. A file holds one label, so a file already labelled on another scale is raised only on that
-  scale.
+  too. A file holds one label: a file already labelled only on a scale the chat's label does not
+  hold is left as it is, and keeps a label that may let it go to a private cloud model once those
+  are allowed.
 - **Only you can lower a chat's label.** **NEAR AI: Lower This Chat's Label** lowers the label of
   the chat in view, never below the project's label, and asks for a reason, which is recorded. The
   label is kept with the chat and synced with it, and a sync never lowers it. A lowering is signed
