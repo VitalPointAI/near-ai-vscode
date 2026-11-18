@@ -78,7 +78,7 @@ Next, in order:
 - Stage 1 phases ship in 0.4.x releases as they land; 0.7.0 at the milestone's end.
 - v0.8.0 Cybersecurity is deferred until everything else in this plan is finished; it may move to its own product.
 - Everyone must pair before a run (PAIR-02); unpaired people get no default contract.
-- Signal sidecar: re-pin by 2026-12-10 in the relay housekeeping PR.
+- Signal sidecar: owner decision 2026-11-18, the pin is left to lapse (off by default, unused); Phase 82 re-pins it before first start.
 - Later milestones in the order L1-L6; mixed NVIDIA and AMD groups may stop at per-vendor pools with request balancing (POOL-01).
 - GATE-05 accepted: fully-autonomous asks before writes into `.git/` and `.near-ai/` state.
 - v0.7.0 stays one milestone with three stage gates.
@@ -125,7 +125,7 @@ Verbatim in PROJECT.md, Platform direction decisions 14-17; evidence `.planning/
 ### Blockers/Concerns
 
 - `feat/team-fix-pass` is archived on GitHub at 4207080 (its five loose files were committed first); Phase 69 ports from it.
-- Signal sidecar pin: re-checked 2026-11-15 (0.101 is still the newest stable release; signal-cli 0.14.8 expires about 2026-12-10). Next check 2026-12-01; if no newer release exists then, the owner decides how to re-pin before 2026-12-10.
+- Signal sidecar pin: re-checked 2026-11-15 (0.101 is still the newest stable release; signal-cli 0.14.8 expires about 2026-12-10). Re-checked 2026-11-18 (still 0.101; signal-cli itself is at 0.14.10). Owner decision 2026-11-18: let the pin lapse and re-pin in Phase 82; no re-check on 2026-12-01.
 
 ### Quick Tasks Completed
 
