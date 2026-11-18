@@ -339,6 +339,8 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
         void panel.webview.postMessage({ type: 'approval-paused', callId: parkedId, ...tab.paused.get(parkedId), replay: true });
       }
     }
+    // The page clears the chat's label chip when it shows a conversation; this one's label is posted again (PR #87 review round 3), so it never goes blank.
+    void panel.webview.postMessage({ type: 'chat-label', text: tab.agent?.labelText() ?? '' });
     void panel.webview.postMessage({ type: 'conversation-shown', id: tab.id, busy: isRunning(tab) });
     sendSummary(true);
   };
