@@ -26,6 +26,7 @@ import { registerAgentActivity } from './services/activityView';
 import { registerTeamLive } from './services/teamLiveView';
 import { registerRunReport } from './services/runReportCommand';
 import { registerResearchVerifiers } from './services/researchProfileCommand';
+import { registerStaffScenario } from './services/staffScenario';
 import { registerUsageExport } from './services/usageExport';
 import { closeAllConversations } from './services/agentSession';
 import { registerSecurityScanning } from './services/securityScan';
@@ -212,6 +213,7 @@ export function activate(context: vscode.ExtensionContext): NearAiTestApi | unde
 
   registerRunReport(context);
   registerResearchVerifiers(context);
+  registerStaffScenario(context);
   registerWorkspaceCommands(context, (options) => openTeamStudio(context, auth, sidebar, options, gate));
   registerProjectSetup(context, { secrets: context.secrets, chatVisible: () => sidebar.visible });
   registerNewProfile(context, () => configureApiKey(context, auth, sidebar));

@@ -252,6 +252,21 @@ It never asks for or stores a token, and it never changes settings outside
 the repository itself: for branch protection, environments, or secrets it
 writes the exact commands and leaves them for you to approve and run.
 
+For military staff teams, **NEAR AI: Load Staff Exercise Scenario** puts an
+exercise scenario into `.planning/staff/scenario/` for the team to read. The
+starter scenario, Exercise IRON LANTERN, is fictional and unclassified: a
+peninsula with a coast and a strait, friendly and adversary orders of battle,
+a mission with the higher commander's intent, and reports graded for
+reliability and credibility (one left ungraded). You can load a scenario file
+of your own instead; it must be marked as fictional, unclassified exercise
+data, and anything with a classification marking, a name on your
+`.planning/staff/real-entities.txt` list, or coordinates outside the exercise
+area is refused. Beside the starter scenario the command writes J2 and J5
+demo scripts in `.planning/staff/demo/`: the prompts for each step in your
+staff profile's own terms, with a checklist of the headings, terms and
+citations each product must contain. Loading again moves the earlier
+scenario to `.planning/staff/archive/` rather than deleting it.
+
 ### MCP connections
 
 **NEAR AI: Manage MCP Connections** adds Model Context Protocol servers, remote
