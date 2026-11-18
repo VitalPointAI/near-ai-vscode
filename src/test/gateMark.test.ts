@@ -10,7 +10,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { RunCheckpoints } from '../agent/checkpoints';
-import { NETWORK_AT_MARK_TEXT, gateStep, gateToolCall, maySendOffMachine, raiseRunMark } from '../agent/gateAdapter';
+import { NETWORK_AT_MARK_TEXT, beginLabelledRead, gateStep, gateToolCall, maySendOffMachine } from '../agent/gateAdapter';
 import type { AgentEvent } from '../agent/loop';
 import { OutboundFingerprints } from '../agent/outboundCheck';
 import { DEFAULT_RULES, RunGrants } from '../agent/permissions';
@@ -351,7 +351,8 @@ test('a cyber step\'s read raises that cyber run\'s own mark, and at a strict ma
     settings: { decision: 'allow', rule: 'settings.mode.fully-autonomous' }, mark
   });
   assert.equal(step.decision.outcome, 'allow');
-  assert.equal(raiseRunMark(runtime, mark, step.readLabels, 'file-probe'), true);
+  // Through the one shared hook the step engine uses (review round 3): it raises the mark now and fingerprints the output when settled.
+  beginLabelledRead(runtime, { mark }, step.readLabels, step.maySend, 'file-probe').settle('probe output');
   assert.deepEqual(keys(mark.current()), ['org/Confidential']);
   assert.equal(raised(runtime.records).length, 1);
   const strict = new SessionMark([label('org', 'Restricted')]);

@@ -957,6 +957,8 @@ export function markVerdictFor(runtime: GateRuntime, mark: Mark | undefined, may
   if (tier === 'local-only' || tier === 'deny') return { rule: 'label.network-at-mark', reason: NETWORK_AT_MARK_TEXT, ...(label === undefined ? {} : { label }) };
   // A run with no fingerprint set cannot check what it would send, so at this mark the call is refused (fail closed, PR #87 review).
   if (outbound === undefined) return { rule: 'label.outbound-match', reason: OUTBOUND_UNCHECKED_TEXT, ...(label === undefined ? {} : { label }) };
+  // A labelled read is open (begun by the shared hook, not yet fingerprinted): what it read cannot be checked yet, so the call is refused (fail closed).
+  if (outbound.pending > 0) return { rule: 'label.outbound-match', reason: OUTBOUND_UNCHECKED_TEXT, ...(label === undefined ? {} : { label }) };
   // Past its bound the set cannot vouch for anything: refused, saying why and what to do (fail closed, owner answer after D-60).
   if (outbound.full) return { rule: 'label.outbound-match', reason: OUTBOUND_FULL_TEXT, ...(label === undefined ? {} : { label }) };
   let texts: readonly string[];
@@ -970,14 +972,56 @@ export function markVerdictFor(runtime: GateRuntime, mark: Mark | undefined, may
   return { rule: 'label.outbound-match', reason: found === 'earlier' ? OUTBOUND_EARLIER_TEXT : OUTBOUND_MATCH_TEXT, ...(label === undefined ? {} : { label }) };
 }
 
+/** What carries a run's mark and fingerprints: a run's grants, shared with every sub-agent (D-54). */
+export interface MarkCarrier {
+  readonly mark?: SessionMark | undefined;
+  readonly outbound?: OutboundFingerprints | undefined;
+}
+
+/** One read of content, from the shared hook: more labels may join it (a search's results), and it is settled once with what was read. */
+export interface LabelledRead {
+  /** Adds the labels of more of what the call read (Glob and Grep results), raising the mark by them now. */
+  add(labels: readonly Label[]): void;
+  /** The call finished: what it returned is fingerprinted when what it read needs a tier above any-cloud and the call cannot send; undefined when it failed. */
+  settle(output: string | undefined): void;
+}
+
 /**
- * Raises a run's mark by the labels of what a call or step read, at the hook before it runs (D-54), and records the rise once when it really rose. Returns
- * whether it rose. The loop and the cyber step engine both use it, so a chat call and a cyber step raise a mark the same way.
+ * The one shared hook (D-54, PR #87 review round 3) for content a call or step reads: it raises the run's mark by the labels of what is read (recording the
+ * rise once), and it feeds that content's fingerprints when it is settled (D-60), so the mark and the fingerprints never diverge. While a labelled read is
+ * open, the fingerprint set reports it pending and a call that could send is refused. The chat loop, its sub-agents and the cyber step engine all read
+ * through it; no other place raises a mark from content or adds a fingerprint.
  */
-export function raiseRunMark(runtime: GateRuntime, mark: SessionMark | undefined, labels: readonly Label[], source: string, options: Pick<GateCallOptions, 'model'> = {}): boolean {
+export function beginLabelledRead(runtime: GateRuntime, carrier: MarkCarrier, labels: readonly Label[], maySend: boolean, source: string, options: Pick<GateCallOptions, 'model'> = {}): LabelledRead {
+  const read: Label[] = [];
+  let opened = false;
+  let settled = false;
+  const take = (more: readonly Label[]): void => {
+    if (more.length === 0) return;
+    read.push(...more);
+    raiseRunMark(runtime, carrier.mark, more, source, options);
+    if (!opened && !maySend && carrier.outbound !== undefined && markTierOf(runtime, read) !== 'any-cloud') {
+      opened = true;
+      carrier.outbound.open();
+    }
+  };
+  take(labels);
+  return {
+    add: take,
+    settle: (output) => {
+      if (settled) return;
+      settled = true;
+      if (opened) carrier.outbound?.settle(output);
+    }
+  };
+}
+
+/** Raises a run's mark and records the rise once when it really rose. Only the shared hook above calls it. */
+function raiseRunMark(runtime: GateRuntime, mark: SessionMark | undefined, labels: readonly Label[], source: string, options: Pick<GateCallOptions, 'model'> = {}): boolean {
   if (mark === undefined || labels.length === 0) return false;
+  const before = mark.current();
   if (!mark.raise(labels, scalesOf(runtime))) return false;
-  recordMarkRaised(runtime, mark.current(), source, options);
+  recordMarkRaised(runtime, mark.current(), source, options, before);
   return true;
 }
 
@@ -985,7 +1029,7 @@ export function raiseRunMark(runtime: GateRuntime, mark: SessionMark | undefined
  * Records a rise of the session's mark (GATE-07, D-54): one label.mark-raised record with the whole mark, written only when the mark actually rose. `source`
  * names what raised it (the tool), never a path's contents. Never throws.
  */
-export function recordMarkRaised(runtime: GateRuntime, mark: Mark, source: string, options: Pick<GateCallOptions, 'model'> = {}): void {
+export function recordMarkRaised(runtime: GateRuntime, mark: Mark, source: string, options: Pick<GateCallOptions, 'model'> = {}, from?: Mark): void {
   try {
     const record = buildDecisionRecord({
       recordId: (runtime.newRecordId ?? randomUUID)(),
@@ -1001,7 +1045,10 @@ export function recordMarkRaised(runtime: GateRuntime, mark: Mark, source: strin
       rule: 'label.mark-raised',
       reason: 'What an agent of this chat read raised the chat\'s label.',
       bundleHash: bundleHashOf(runtime),
-      mark
+      // Every label event: `mark` is the chat's mark after it, `label` its target (the strictest label of the new mark), `from` the mark before.
+      ...(strictestLabel(runtime, mark) === undefined ? {} : { label: strictestLabel(runtime, mark)! }),
+      mark,
+      ...(from === undefined ? {} : { from })
     });
     keep(runtime, { ...record, api: { ...record.api, operation: 'label.mark-raised' } });
   } catch {
@@ -1132,6 +1179,11 @@ export interface GateStepInput {
   readonly resource?: DecisionResource;
   /** The run's mark (D-54): a cyber run carries one of its own at the project's label. */
   readonly mark?: SessionMark;
+  /**
+   * Everything the step would send (PR #87 review round 3): its tool's arguments, its args and its target. The outbound check reads all of it, with the
+   * command, never the command alone.
+   */
+  readonly raw?: Record<string, unknown>;
   /** The run's fingerprints of labelled text it read (D-60). */
   readonly outbound?: OutboundFingerprints;
 }
@@ -1174,7 +1226,7 @@ export async function gateStep(runtime: GateRuntime, input: GateStepInput, optio
   // The run's own mark (a cyber run has one at the project's label, D-54) holds a step that may send at a strict mark, by the same predicate as a chat call.
   const maySend = maySendOffMachine({ runsRemote: false, effects, ...(input.command === undefined ? {} : { command: input.command }), effectsUnknown: read?.effectsUnknown !== undefined || (input.command === undefined && effects.length === 0), context: { root: input.root ?? '', ...(runtime.locations ?? {}) } });
   const markNow = input.mark?.current();
-  const labelVerdict = labelCheck.verdict ?? markVerdictFor(runtime, markNow, maySend, () => [...(input.command === undefined ? [] : [input.command])], input.outbound);
+  const labelVerdict = labelCheck.verdict ?? markVerdictFor(runtime, markNow, maySend, () => outboundPayload(input.raw ?? {}, input.command), input.outbound);
   const request: GateRequest = {
     actor: runtime.actor,
     tool: input.tool,

@@ -2,7 +2,7 @@ import * as path from 'node:path';
 import { beginRun } from '../agent/runActivity';
 import type { AgentTool, ToolContext } from '../agent/tools';
 import { DEFAULT_RULES, RunGrants, decidePermission, intrusiveGrantDecision, type IntrusiveStep, type PermissionDecision, type PermissionRules } from '../agent/permissions';
-import { effectsOfStep, gateStep, raiseRunMark, recordApprovalReply, unavailableGateRuntime } from '../agent/gateAdapter';
+import { beginLabelledRead, effectsOfStep, gateStep, recordApprovalReply, unavailableGateRuntime } from '../agent/gateAdapter';
 import type { GateRuntime, SettingsAnswer } from '../domain/gate/decide';
 import { fromActionCapability } from '../domain/gate/vocabulary';
 import type { Capability } from '../domain/gate/vocabulary';
@@ -374,8 +374,13 @@ async function cyberRun(input: CyberRunInput): Promise<CyberRunResult> {
       const gated = await gateStep(gate, {
         tool: step.tool, callId, effects: stepEffects.effects, floorFacts: stepEffects.floorFacts, policy: input.policy, settings,
         ...(input.grants.mark === undefined ? {} : { mark: input.grants.mark }), ...(input.grants.outbound === undefined ? {} : { outbound: input.grants.outbound }),
+        // Everything the step would send, for the outbound check (PR #87 review round 3): its tool's arguments, its args and its target, with its command.
+        raw: { ...(hostTool ? {} : stepRaw(selected!, step)), args: step.args, target: step.target },
         ...('resource' in stepEffects && stepEffects.resource !== undefined ? { resource: stepEffects.resource } : {}),
-        ...(command === undefined ? {} : { command, root: input.toolContext.root }), ...(hostTool ? {} : { manifestContexts: selected!.tool.manifest.contexts })
+        // Every step names the project folder (PR #87 review round 3), so what a probe reads is checked against its labels and raises the scan's mark, as a
+        // command's words always were; before, only a step with a command named it.
+        root: input.toolContext.root,
+        ...(command === undefined ? {} : { command }), ...(hostTool ? {} : { manifestContexts: selected!.tool.manifest.contexts })
       });
       let outcome = gated.decision.outcome;
       if (outcome === 'ask') {
@@ -403,7 +408,8 @@ async function cyberRun(input: CyberRunInput): Promise<CyberRunResult> {
       }
 
       // The step runs: what it reads raises the run's own mark before it runs, as a chat call's does at the loop's hook (D-54).
-      raiseRunMark(gate, input.grants.mark, gated.readLabels, step.tool);
+      // The one shared hook (D-54): it raises the mark now and feeds the step's output to the fingerprints when it is settled below (D-60).
+      const read = beginLabelledRead(gate, input.grants, gated.readLabels, gated.maySend, step.tool);
       emit({ type: 'step-started', step });
       const started = now().getTime();
       let output: string;
@@ -421,6 +427,7 @@ async function cyberRun(input: CyberRunInput): Promise<CyberRunResult> {
           emit({ type: 'step-finished', step, result: output.slice(0, 1_000), evidenceHash: host.evidenceHash });
           transcript.push(`$ ${host.provenance.argv.join(' ')}\n${output.slice(0, 600)}`);
           if (host.status === 'absent') emit({ type: 'notice', text: `${hostTool} is not installed: ${host.stdoutText}` });
+          read.settle(output);
           continue;
         }
         const toolInput = selected!.input ? selected!.input(step) : toolInputFor(step.tool, step);
@@ -430,6 +437,7 @@ async function cyberRun(input: CyberRunInput): Promise<CyberRunResult> {
       } catch (error) {
         output = error instanceof HostToolError ? `refused: ${error.message}` : `error: ${(error as Error).message}`;
       }
+      read.settle(output);
       const durationMs = now().getTime() - started;
       const evidenceHash = await input.evidence.put(runId, `[${step.tool}] ${step.target}\n${output}`);
       records.push({ id: step.id, action: step.action, target: step.target, result: output.slice(0, 1_000), reasoning: step.expectedResult, evidenceHashes: [evidenceHash], compacted: false });

@@ -11,7 +11,7 @@ import type { GateRuntime } from '../domain/gate/decide';
 import { labelReadFilter, labelsOfPaths } from './gateLabels';
 import type { Label } from '../domain/gate/labels';
 import type { Capability } from '../domain/gate/vocabulary';
-import { TOOL_FORBIDDEN_RULE, followCommandMoves, gateToolCall, markAboveDefault, markTierOf, raiseRunMark, recordApprovalReply, recordRefusedBeforeGate, shellReadsCredentialFile, unavailableGateRuntime } from './gateAdapter';
+import { TOOL_FORBIDDEN_RULE, followCommandMoves, gateToolCall, beginLabelledRead, markAboveDefault, recordApprovalReply, recordRefusedBeforeGate, shellReadsCredentialFile, unavailableGateRuntime } from './gateAdapter';
 import type { FloorShellContext } from './gateAdapter';
 import { PackageScriptsReader } from './packageScripts';
 import { PREAMBLE_START, resolveGsdRun } from '../gsd/preamble';
@@ -788,22 +788,26 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
     const credentialFile = readsCredential ?? gateCall.readsCredential;
     if (credentialFile !== undefined) this.grants.noteCredentialRead(credentialFile);
     // The same hook raises the chat's mark by the labels of what the call reads, before it runs, so a read that fails or is cancelled still counts (D-54).
-    const readLabels: Label[] = [...gateCall.readLabels];
-    this.raiseMark(readLabels, tool.name);
+    // One shared hook raises the mark and, once the call is done, feeds what it read to the fingerprints (D-54, D-60), so the two never diverge.
+    const read = beginLabelledRead(this.gate, this.grants, gateCall.readLabels, gateCall.maySend, tool.name, { model: this.options.model });
     const ranAt = Date.now();
     const cwdBefore = context.shell?.workingDirectory ?? context.root;
     // A search leaves out what the clearances do not cover, the way it leaves out credential files (CLAS-03).
     if (tool.capability === 'read') context.canRead = await labelReadFilter(this.gate, context.root);
     // What a search returns raises the mark by its paths' labels before the results reach the model (CLAS-04); labels that cannot be read fail the call.
     context.noteRead = async (relativePaths) => {
-      const labels = await labelsOfPaths(this.gate, context.root, relativePaths);
-      readLabels.push(...labels);
-      this.raiseMark(labels, tool.name);
+      read.add(await labelsOfPaths(this.gate, context.root, relativePaths));
     };
     try {
-      const output = await tool.run(input, context);
+      let output: string;
+      try {
+        output = await tool.run(input, context);
+      } catch (error) {
+        read.settle(undefined);
+        throw error;
+      }
       // Labelled text the call read is fingerprinted, so it cannot leave in a later network call's payload (D-60). What a sending call returns is not.
-      if (!gateCall.maySend) this.noteOutbound(readLabels, output);
+      read.settle(output);
       // A rename the command made carries its label with it (D-26, D-42).
       if (command !== undefined) await followCommandMoves(this.gate, { command, root: context.root, ...(floorShell ?? {}) });
       if (tool.untrusted) this.grants.tainted = true;
@@ -817,11 +821,6 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
       if (signal.aborted) return this.finish(call.id, false, 'Cancelled.');
       return this.finish(call.id, false, `Error: ${(error as Error).message}`);
     }
-  }
-
-  /** Raises the run's mark (the chat's, shared with every sub-agent) and records the rise once, when it really rose (GATE-07, D-54). */
-  private raiseMark(labels: readonly Label[], source: string): void {
-    raiseRunMark(this.gate, this.grants.mark, labels, source, { model: this.options.model });
   }
 
   /** Queues a raise of every file a successful call wrote (its workspaceWrite effects, the classifier's for a command) to the mark, above the default only. */
@@ -839,13 +838,6 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
         source.queueRaise(relative, mark);
       }
     }
-  }
-
-  /** Keeps the fingerprints of a call's output when what it read has a label whose tier is not any-cloud (D-60). Never the text itself. */
-  private noteOutbound(labels: readonly Label[], output: string): void {
-    const fingerprints = this.grants.outbound;
-    if (fingerprints === undefined || labels.length === 0) return;
-    if (markTierOf(this.gate, labels) !== 'any-cloud') fingerprints.add(output);
   }
 
   /** Where a shell command runs and what the project's scripts run, for the floor. No safety model and no runtime check: it must be cheap for every call. */

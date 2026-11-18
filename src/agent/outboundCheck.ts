@@ -54,6 +54,24 @@ export class OutboundFingerprints {
   /** The word counts of short texts kept whole, so a payload is checked at those lengths too. */
   readonly #shortLengths = new Set<number>();
   #full = false;
+  /** Labelled reads begun whose content has not been fingerprinted yet (PR #87 review round 3): while any is open, nothing can be vouched for. */
+  #pending = 0;
+
+  /** How many labelled reads are open: begun by the shared hook and not settled. Above 0, a call that could send is refused (fail closed). */
+  public get pending(): number {
+    return this.#pending;
+  }
+
+  /** The shared hook (beginLabelledRead) opens a labelled read; only it calls this. */
+  public open(): void {
+    this.#pending += 1;
+  }
+
+  /** The shared hook settles a labelled read: its content is fingerprinted first, when there is any. */
+  public settle(text: string | undefined): void {
+    if (text !== undefined) this.add(text);
+    this.#pending = Math.max(0, this.#pending - 1);
+  }
 
   /** True once the set reached its bound: every check then counts as a match (fail closed). */
   public get full(): boolean {
