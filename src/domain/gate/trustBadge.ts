@@ -1,6 +1,7 @@
 // The trust badge on each cloud answer (CLAS-08): three plain states, chosen here and only here from the checks that actually ran. The badge never says
 // more than was proven: a check that is still running, timed out, could not run or failed is Not verified, and Verified private model needs every input at
 // its best. Pure: no vscode, no network, nothing outside src/domain.
+import { createHash } from 'node:crypto';
 import type { ConnectionBindingFact } from './routing';
 
 export const TRUST_BADGE_STATES = Object.freeze(['verified-private', 'model-verified', 'not-verified'] as const);
@@ -150,3 +151,92 @@ export function trustBadgeFor(facts: TrustBadgeFacts): TrustBadge | undefined {
   return { state, title: TRUST_BADGE_TITLES[state], explanation: TRUST_BADGE_TEXT.explanation[state], reasons, helpers: TRUST_BADGE_TEXT.helpers };
 }
 
+
+// ---- A badge kept with the chat (plan 27): the state its checks reached when the answer arrived, shown again when the chat reopens ----
+
+/**
+ * One answer's settled badge as the chat's metadata keeps it (ThreadMeta.trust): the state, its plain reasons and when, keyed by a hash of the answer's
+ * text. Never a fingerprint, a signing address or the answer's text, so it syncs with the rest of the chat's metadata and passes the secret scanner.
+ */
+export interface TrustRecord {
+  readonly key: string;
+  readonly state: TrustBadgeState;
+  readonly reasons: readonly string[];
+  readonly at: string;
+}
+
+/** How many badge records a chat keeps: the newest by time. */
+export const MAX_TRUST_RECORDS = 200;
+const MAX_RECORD_REASONS = 12;
+const MAX_REASON_LENGTH = 400;
+/** A run of hex long enough to be a key, an address or a fingerprint: never kept in a record. */
+const LONG_HEX = /(?:0x)?[0-9a-fA-F]{16,}/g;
+const HAS_LONG_HEX = /[0-9a-fA-F]{16,}/;
+
+/** The key of an answer's record: the first 32 hex characters of the SHA-256 of its text. */
+export function trustRecordKey(answerText: string): string {
+  return createHash('sha256').update(answerText, 'utf8').digest('hex').slice(0, 32);
+}
+
+/** A reason as a record keeps it: any long hex run (an address, a fingerprint, a hash) taken out, and the length capped. */
+function recordReason(reason: string): string {
+  const plain = reason.replace(LONG_HEX, '(hidden)');
+  return plain.length > MAX_REASON_LENGTH ? `${plain.slice(0, MAX_REASON_LENGTH - 1)}…` : plain;
+}
+
+/** The record of a settled badge for one answer. */
+export function trustRecordOf(answerText: string, badge: Pick<TrustBadge, 'state' | 'reasons'>, at: Date): TrustRecord {
+  return { key: trustRecordKey(answerText), state: badge.state, reasons: badge.reasons.slice(0, MAX_RECORD_REASONS).map(recordReason), at: at.toISOString() };
+}
+
+/** A record read from stored or synced metadata: undefined unless every field has its type and the state is one of the three. */
+export function parseTrustRecord(value: unknown): TrustRecord | undefined {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const record = value as Record<string, unknown>;
+  if (Object.keys(record).some((name) => !['key', 'state', 'reasons', 'at'].includes(name))) return undefined;
+  if (typeof record.key !== 'string' || !/^[0-9a-f]{32}$/.test(record.key)) return undefined;
+  if (typeof record.state !== 'string' || !(TRUST_BADGE_STATES as readonly string[]).includes(record.state)) return undefined;
+  if (!Array.isArray(record.reasons) || record.reasons.length > MAX_RECORD_REASONS || record.reasons.some((reason) => typeof reason !== 'string' || reason.length > MAX_REASON_LENGTH || HAS_LONG_HEX.test(reason))) return undefined;
+  if (typeof record.at !== 'string' || !Number.isFinite(Date.parse(record.at))) return undefined;
+  return { key: record.key, state: record.state as TrustBadgeState, reasons: [...(record.reasons as string[])], at: record.at };
+}
+
+/** The weaker of two records of one answer: the lower state, and for the same state the newer one. */
+export function weakerTrustRecord(a: TrustRecord, b: TrustRecord): TrustRecord {
+  const rankA = trustBadgeRank(a.state);
+  const rankB = trustBadgeRank(b.state);
+  if (rankA !== rankB) return rankA < rankB ? a : b;
+  return a.at >= b.at ? a : b;
+}
+
+/**
+ * Two copies' records merged: every key of both, and for a key both hold the weaker state whichever copy is newer, so no merge makes a badge stronger
+ * (CLAS-08). Unreadable records are dropped. The newest MAX_TRUST_RECORDS by time are kept.
+ */
+export function mergeTrustRecords(a: readonly unknown[] | undefined, b: readonly unknown[] | undefined): TrustRecord[] {
+  const byKey = new Map<string, TrustRecord>();
+  for (const value of [...(a ?? []), ...(b ?? [])]) {
+    const record = parseTrustRecord(value);
+    if (record === undefined) continue;
+    const held = byKey.get(record.key);
+    byKey.set(record.key, held === undefined ? record : weakerTrustRecord(held, record));
+  }
+  return newestTrustRecords([...byKey.values()]);
+}
+
+/** The newest MAX_TRUST_RECORDS records by time, oldest first. */
+export function newestTrustRecords(records: readonly TrustRecord[]): TrustRecord[] {
+  return [...records].sort((x, y) => x.at.localeCompare(y.at) || x.key.localeCompare(y.key)).slice(-MAX_TRUST_RECORDS);
+}
+
+/** The badge a reopened chat shows for a record: replayed (no Check again, no full attestation), saying it shows the check made when the answer arrived. */
+export function trustBadgeFromRecord(record: TrustRecord): TrustBadge {
+  return {
+    state: record.state,
+    title: TRUST_BADGE_TITLES[record.state],
+    explanation: TRUST_BADGE_TEXT.explanation[record.state],
+    reasons: [...record.reasons, TRUST_BADGE_TEXT.replayed],
+    helpers: TRUST_BADGE_TEXT.helpers,
+    replayed: true
+  };
+}

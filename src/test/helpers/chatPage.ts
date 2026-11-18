@@ -88,6 +88,8 @@ export class StubNode {
   public disabled = false;
   public checked = false;
   public constructor(public readonly tagName: string) {}
+  /** The child nodes, as a fragment's caller reads them. */
+  public get childNodes(): StubNode[] { return this.children; }
   /** The node this one is a child of. As in a real DOM, adding a node somewhere moves it there, and `remove()` takes it out. */
   public parent: StubNode | undefined;
   private adopt(node: StubNode | string): StubNode | string { if (node instanceof StubNode) { node.remove(); node.parent = this; } return node; }
@@ -148,6 +150,8 @@ class StubDocument {
   public constructor(private readonly nodes: Map<string, StubNode>) {}
   public createElement(tag: string): StubNode { return new StubNode(tag); }
   public createElementNS(_namespace: string, tag: string): StubNode { return new StubNode(tag); }
+  /** A reopened chat's history is drawn in fragments; here a fragment is a plain node, which keeps what was drawn in it findable. */
+  public createDocumentFragment(): StubNode { return new StubNode('#fragment'); }
   public createTextNode(text: string): StubNode { const node = new StubNode('#text'); node.textContent = text; return node; }
   public getElementById(id: string): StubNode { if (!this.nodes.has(id)) { const node = new StubNode('div'); node.id = id; this.nodes.set(id, node); } return this.nodes.get(id) as StubNode; }
   public querySelector(): undefined { return undefined; }

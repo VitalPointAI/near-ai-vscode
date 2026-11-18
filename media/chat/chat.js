@@ -1240,6 +1240,8 @@
   // slices of HISTORY_SLICE per animation frame so a long thread never freezes the view (T-27-27), and anything else the host sends meanwhile waits
   // behind them, so what is on screen stays in the order it happened. Tool output is not sent with the step: the card asks for it when it is opened.
   const HISTORY_SLICE = 50;
+  // Numbers the replayed badges of reopened answers, so each one's details have an id of their own.
+  let replayedBadges = 0;
   const historyQueue = [];
   let historyFrame = 0;
   function previewArguments(text) {
@@ -1265,6 +1267,8 @@
       const body = el('div');
       renderMarkdown(body, item.text || '');
       node.append(body);
+      // The badge this answer settled on when it arrived (CLAS-08), shown again as it was proven: replayed, so no Check again and no full attestation.
+      if (item.trust) { replayedBadges += 1; trustKit.renderTrustBadge(document, node, item.trust, postFor, 'replayed-' + replayedBadges); }
       return node;
     }
     if (item.kind === 'tool') return historyToolCard(item);

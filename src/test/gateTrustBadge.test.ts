@@ -8,8 +8,8 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import {
-  BADGE_CHECK_TIMEOUT_MS, TRUST_BADGE_STATES, TRUST_BADGE_TEXT, TRUST_BADGE_TITLES, TRUST_VERIFICATIONS, trustBadgeFor, trustBadgeRank,
-  type TrustBadge, type TrustBadgeFacts, type TrustVerification
+  BADGE_CHECK_TIMEOUT_MS, MAX_TRUST_RECORDS, TRUST_BADGE_STATES, TRUST_BADGE_TEXT, TRUST_BADGE_TITLES, TRUST_VERIFICATIONS, parseTrustRecord, trustBadgeFor, trustBadgeRank,
+  trustRecordKey, trustRecordOf, type TrustBadge, type TrustBadgeFacts, type TrustRecord, type TrustVerification
 } from '../domain/gate/trustBadge';
 import type { ConnectionBindingFact } from '../domain/gate/routing';
 import type { Label } from '../domain/gate/labels';
@@ -18,6 +18,13 @@ import { AgentConversation } from '../services/agentSession';
 import { NearAiClient, type AgentMessage, type CompletionEvent, type ToolCall } from '../services/nearAiClient';
 import type { ConnectionBindingSource } from '../services/connectionBinding';
 import { TranscriptStore } from '../services/transcripts';
+import { ThreadStore, chatLabelOf, mergeMeta, validMeta, type ThreadMeta } from '../services/threadStore';
+import { stateHomeFor } from '../services/stateHome';
+import { stateKeysFor } from '../services/stateKeys';
+import { ConversationLog } from '../services/conversations';
+import { entriesToView } from '../domain/state/threadView';
+import { findSecrets } from '../domain/team/secrets';
+import { MemorySecrets } from './helpers/stateFixtures';
 import { parseChatWebviewMessage } from '../services/chatBridge';
 import { openTrustDetails, TRUST_DETAILS_NOT_KEPT_TEXT } from '../services/trustDetails';
 import { createVscodeStub } from './helpers/vscodeStub';
@@ -724,3 +731,146 @@ function listTree(root: string): string[] {
   walk(root);
   return out.sort();
 }
+
+// ---- Plan 27 Task 1: a reopened chat shows each answer's badge as it was proven, never stronger ----
+
+const threadStoreFor = (root: string): ThreadStore => new ThreadStore(stateHomeFor(root), stateKeysFor(root, new MemorySecrets()), { writer: 'edA.1' });
+
+function record(key: string, state: TrustBadge['state'], at: string, reasons: string[] = []): TrustRecord {
+  return { key, state, reasons, at };
+}
+const KEY = trustRecordKey('The answer.');
+const metaWith = (lastUsedAt: string, extra: Partial<ThreadMeta>): ThreadMeta => ({ id: 'conv-trust-merge-1', title: 'Chat', model: 'm', origin: 'panel', createdAt: '2026-11-01T00:00:00.000Z', lastUsedAt, turns: 1, entries: 2, bytes: 10, tip: 't', ...extra });
+
+async function waitFor<T>(read: () => Promise<T>, done: (value: T) => boolean): Promise<T> {
+  let value = await read();
+  for (let wait = 0; wait < 100 && !done(value); wait += 1) { await new Promise((resolve) => setTimeout(resolve, 10)); value = await read(); }
+  return value;
+}
+
+test('plan 27 tracer: a run whose check settles keeps one record, and the reopened chat shows that badge under the same answer, replayed, in the real page', async () => {
+  const near = await cloud('bound');
+  const root = mkdtempSync(path.join(tmpdir(), 'near-ai-badge-store-'));
+  const store = threadStoreFor(root);
+  const conversation = new AgentConversation(root, () => undefined, path.join(root, '.ckpt'), undefined, store);
+  conversation.gateHost = testGateHost();
+  await conversation.send({ text: 'hello', client: near.client, model: 'tee-model', privacy: PRIVATE, policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES });
+  await settle();
+  await conversation.trustRecorded();
+  const meta = await waitFor(() => store.meta(conversation.id), (value) => (value?.trust ?? []).some((entry) => entry.state === 'model-verified'));
+  assert.equal(meta?.trust?.length, 1, 'one record for the one answer');
+  assert.equal(meta!.trust![0]!.key, trustRecordKey('done'));
+  assert.equal(meta!.trust![0]!.state, 'model-verified');
+  assert.ok(!JSON.stringify(meta!.trust).includes(SIGNING.address.slice(2).toLowerCase()) && !/[0-9a-f]{64}/i.test(JSON.stringify(meta!.trust)), 'no address, no fingerprint');
+  // Reopened, the answer carries the badge it settled on, replayed.
+  const reopened = new AgentConversation(root, () => undefined, path.join(root, '.ckpt'), undefined, store);
+  reopened.gateHost = testGateHost();
+  const view = await reopened.restore(conversation.id) as { items: Array<{ kind: string; text?: string; trust?: TrustBadge }> };
+  const answer = view.items.find((item) => item.kind === 'assistant' && item.text === 'done');
+  assert.equal(answer?.trust?.state, 'model-verified');
+  assert.equal(answer?.trust?.replayed, true);
+  assert.ok(answer?.trust?.reasons.includes(TRUST_BADGE_TEXT.replayed));
+  const page = chatPage();
+  page.send({ type: 'transcript', items: view.items });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  const transcript = page.nodes.get('transcript')!;
+  const badges = badgesUnder(transcript);
+  assert.equal(badges.length, 1);
+  assert.equal(badges[0]!.getAttribute('data-state'), 'model-verified');
+  badges[0]!.click();
+  const shown = textOf(transcript);
+  assert.match(shown, /This shows the check made when the answer arrived\./);
+  assert.match(shown, /The full attestation is kept only while the window that checked it is open\./);
+  assert.ok(!under(transcript).some((node) => node.tagName === 'button' && (node.textContent === 'Check again' || node.textContent === 'Show full attestation')), 'a replayed badge has neither button');
+});
+
+test('two copies of one answer\'s record, one Verified private model and one Not verified, merge to Not verified in both orders, whichever copy is newer', () => {
+  const strong = [record(KEY, 'verified-private', '2026-11-18T10:00:00.000Z')];
+  const weak = [record(KEY, 'not-verified', '2026-11-18T09:00:00.000Z', ['It could not be checked in time. The badge changes if the check finishes later.'])];
+  for (const [newer, older] of [['2026-11-18T12:00:00.000Z', '2026-11-18T11:00:00.000Z'], ['2026-11-18T11:00:00.000Z', '2026-11-18T12:00:00.000Z']]) {
+    const a = metaWith(newer!, { trust: strong });
+    const b = metaWith(older!, { trust: weak });
+    for (const merged of [mergeMeta(a, b), mergeMeta(b, a)]) {
+      assert.equal(merged.trust?.length, 1);
+      assert.equal(merged.trust![0]!.state, 'not-verified', `newer ${newer}`);
+    }
+  }
+  // Keys only one copy holds are all kept.
+  const other = record(trustRecordKey('Another answer.'), 'verified-private', '2026-11-18T10:00:00.000Z');
+  const merged = mergeMeta(metaWith('2026-11-18T12:00:00.000Z', { trust: strong }), metaWith('2026-11-18T11:00:00.000Z', { trust: [other] }));
+  assert.deepEqual(merged.trust!.map((entry) => entry.key).sort(), [KEY, other.key].sort());
+});
+
+test('a record with an unknown state or a numeric reasons is dropped on read, and that answer shows no badge; 250 records keep the newest 200', () => {
+  const good = record(KEY, 'model-verified', '2026-11-18T10:00:00.000Z');
+  const read = validMeta(metaWith('2026-11-18T12:00:00.000Z', { trust: [good, { ...good, key: trustRecordKey('b'), state: 'verified' } as never, { ...good, key: trustRecordKey('c'), reasons: 3 } as never, { ...good, key: 'short' } as never, { ...good, key: trustRecordKey('d'), extra: 1 } as never] }), 'conv-trust-merge-1');
+  assert.deepEqual(read?.trust?.map((entry) => entry.key), [KEY]);
+  assert.equal(parseTrustRecord({ ...good, state: 'verified' }), undefined);
+  assert.equal(parseTrustRecord({ ...good, reasons: 3 }), undefined);
+  assert.equal(parseTrustRecord({ ...good, reasons: ['Signed by 0x' + 'ab'.repeat(20)] }), undefined, 'a reason holding an address is refused');
+  assert.equal(parseTrustRecord({ ...good, at: 'yesterday' }), undefined);
+  assert.equal(validMeta(metaWith('2026-11-18T12:00:00.000Z', { trust: 'all verified' as never }), 'conv-trust-merge-1')?.trust, undefined);
+  const many = Array.from({ length: 250 }, (_, index) => record(trustRecordKey(`answer ${String(index)}`), 'not-verified', new Date(Date.UTC(2026, 10, 18, 0, index)).toISOString()));
+  const kept = validMeta(metaWith('2026-11-18T12:00:00.000Z', { trust: many }), 'conv-trust-merge-1')!.trust!;
+  assert.equal(kept.length, MAX_TRUST_RECORDS);
+  assert.equal(kept[0]!.key, many[50]!.key, 'the oldest 50 went');
+  assert.equal(kept.at(-1)!.key, many[249]!.key);
+  // The view attaches nothing to an answer with no record.
+  const items = entriesToView({ main: [{ id: 'e1', thread: 't', parent: null, at: '', writer: 'w', role: 'assistant', body: { text: 'no record' } }] as never, branches: [] }, { trustFor: () => undefined });
+  assert.deepEqual(items, [{ kind: 'assistant', text: 'no record' }]);
+});
+
+test('a record keeps reasons in plain words with no address or fingerprint, and 200 records pass the secret scanner', () => {
+  const kept = trustRecordOf('An answer.', { state: 'not-verified', reasons: [`The check failed: The response is signed by 0x${'ab'.repeat(20)}, but no quote binds ${'cd'.repeat(32)}.`] }, new Date('2026-11-18T10:00:00.000Z'));
+  assert.equal(kept.reasons[0], 'The check failed: The response is signed by (hidden), but no quote binds (hidden).');
+  assert.ok(parseTrustRecord(kept) !== undefined, 'what is written reads back');
+  const records = Array.from({ length: 200 }, (_, index) => trustRecordOf(`answer ${String(index)}`, { state: TRUST_BADGE_STATES[index % 3]!, reasons: [TRUST_BADGE_TEXT.checking, TRUST_BADGE_TEXT.timedOut, `${TRUST_BADGE_TEXT.connectionNotProven} ${TRUST_BADGE_TEXT.connection.stale}`] }, new Date(Date.UTC(2026, 10, 18, 0, index))));
+  const meta = metaWith('2026-11-18T12:00:00.000Z', { trust: records });
+  assert.deepEqual(findSecrets(meta), []);
+  assert.ok(!/[0-9a-f]{64}/i.test(JSON.stringify(records)), 'no 64-hex string in any record');
+});
+
+test('a meta with both a label and trust records merges each by its own rule', () => {
+  const confidential = { mark: [CONFIDENTIAL] };
+  const publicLabel = { mark: [{ ...CONFIDENTIAL, level: 'Public' }] };
+  const a = metaWith('2026-11-18T12:00:00.000Z', { label: publicLabel as never, trust: [record(KEY, 'verified-private', '2026-11-18T10:00:00.000Z')] });
+  const b = metaWith('2026-11-18T11:00:00.000Z', { label: confidential as never, trust: [record(KEY, 'model-verified', '2026-11-18T09:00:00.000Z')] });
+  for (const merged of [mergeMeta(a, b), mergeMeta(b, a)]) {
+    const read = chatLabelOf(merged);
+    assert.ok(read.kind === 'mark' && read.mark.length === 1 && read.mark[0]!.level === 'Confidential', 'the label joins upward');
+    assert.equal(merged.trust![0]!.state, 'model-verified', 'the badge keeps the weaker state');
+  }
+});
+
+test('a webview reload in the same window replays the logged badges, so the settled state of each run is drawn', async () => {
+  const log = new ConversationLog();
+  log.add({ type: 'assistant-start', model: 'tee-model', privacy: PRIVATE });
+  log.add({ type: 'assistant-done', runId: 'run-1-aaaaaa', usage: { inputTokens: 1, outputTokens: 1 } });
+  log.add({ type: 'trust-badge', runId: 'run-1-aaaaaa', badge: NOT_VERIFIED });
+  log.add({ type: 'trust-badge', runId: 'run-1-aaaaaa', badge: { ...NOT_VERIFIED, state: 'verified-private', title: TRUST_BADGE_TITLES['verified-private'], reasons: [] } });
+  const page = chatPage();
+  for (const message of log.replay(new Map(), new Map())) page.send(message);
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  const badges = badgesUnder(page.nodes.get('transcript')!);
+  assert.equal(badges.length, 1);
+  assert.equal(badges[0]!.getAttribute('data-state'), 'verified-private');
+});
+
+test('a badge kept for one answer is replaced by a newer result of the same answer, and never raised by another run\'s answer with the same text', async () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'near-ai-badge-keep-'));
+  const store = threadStoreFor(root);
+  const chat = new AgentConversation(root, () => undefined, path.join(root, '.ckpt'), undefined, store);
+  chat.gateHost = testGateHost();
+  await chat.send({ text: 'hello', client: plainClient() as never, model: 'tee-model', privacy: PRIVATE, policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES });
+  await chat.trustRecorded();
+  const id = chat.id;
+  const key = trustRecordKey('ok');
+  assert.equal((await store.meta(id))?.trust?.find((entry) => entry.key === key)?.state, 'not-verified');
+  await store.recordTrust(id, record(key, 'verified-private', '2026-11-18T10:00:00.000Z'));
+  assert.equal((await store.meta(id))?.trust?.find((entry) => entry.key === key)?.state, 'not-verified', 'weaker wins for another writer');
+  await store.recordTrust(id, record(key, 'verified-private', '2026-11-18T10:00:00.000Z'), 'replace');
+  assert.equal((await store.meta(id))?.trust?.find((entry) => entry.key === key)?.state, 'verified-private', 'the same answer\'s newer result replaces it');
+  const before = (await store.meta(id))!.lastUsedAt;
+  await store.recordTrust(id, record(trustRecordKey('another'), 'not-verified', '2026-11-18T11:00:00.000Z'));
+  assert.equal((await store.meta(id))!.lastUsedAt, before, 'keeping a badge is not using the chat');
+});

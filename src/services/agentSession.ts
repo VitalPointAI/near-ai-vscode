@@ -58,7 +58,7 @@ import type { ConversationStore, Transcript } from './transcripts';
 import type { RunEnd, RunMarkers } from './runMarkers';
 import { NOT_CHECKED_IN_EDITOR, type ResponseEvidence } from './attestation';
 import { trustDetailsOf } from './trustDetails';
-import { BADGE_CHECK_TIMEOUT_MS, TRUST_BADGE_TEXT, trustBadgeFor, type TrustBadge, type TrustBadgeFacts, type TrustVerification } from '../domain/gate/trustBadge';
+import { BADGE_CHECK_TIMEOUT_MS, TRUST_BADGE_TEXT, trustBadgeFor, trustBadgeFromRecord, trustRecordKey, trustRecordOf, type TrustBadge, type TrustBadgeFacts, type TrustVerification } from '../domain/gate/trustBadge';
 import { PreparedAttachments, StagedAttachment } from '../agent/attachments';
 import { imageTool, ImageDraft, ImageDraftEntry, ImageReviewDecision, ImageReviewer, memoryPreamble, memoryTools } from '../agent/extraTools';
 import { cleanOldDrafts, DRAFT_ID, draftFile } from '../agent/imageDrafts';
@@ -277,6 +277,9 @@ type AnswerFacts = Omit<TrustBadgeFacts, 'verification' | 'verificationSummary' 
 
 /** One lead answer's badge: the facts it is chosen from, its check as far as it got, and what Check again needs. */
 interface BadgeEntry {
+  /** The chat the answer belongs to, and the answer's text: where and under which key its settled badge is kept (plan 27). */
+  readonly thread: string;
+  readonly answerText: string;
   readonly model: string;
   readonly client: NearAiClient;
   readonly evidence: ResponseEvidence | undefined;
@@ -359,6 +362,10 @@ export class AgentConversation {
   public onLabelChange: ((mark: Mark | undefined) => void) | undefined;
   /** Each lead answer's trust badge and what it was chosen from, by run id, the newest TRUST_ENTRIES_KEPT (Check again and Show full attestation use them). */
   private readonly verifiable = new Map<string, BadgeEntry>();
+  /** Which run last wrote each badge record key in this window, so a newer result of the same answer replaces its own record (plan 27). */
+  private readonly trustWriters = new Map<string, string>();
+  /** The badge record writes, one after another so they land in order. */
+  private trustWrites: Promise<void> = Promise.resolve();
   /** The badge last shown for each run, the newest SHOWN_BADGES_KEPT (as many answers as the page keeps), so Check again on one no longer kept says so. */
   private readonly shownBadges = new Map<string, TrustBadge>();
   /** The timer the badge's check waits on (D-56); a test gives its own clock. A timer never keeps the extension host alive. */
@@ -745,13 +752,13 @@ export class AgentConversation {
         // A run stopped before the model finished says why, and offers Continue (nothing continues without the click).
         const stopped = stopNotice(result);
         if (stopped) this.post({ type: 'run-stopped', reason: result.stop?.kind ?? 'turn-limit', text: stopped, continuable: true });
-        // CLAS-08: the lead agent's answer through a cloud client gets its trust badge, chosen only from checks that ran. A sub-agent's answer is not shown
-        // as an answer and gets none (D-56); an answer through a local client gets none.
-        if (!request.local) this.startBadge(runId, request, result.usage.at(-1));
       }
       if (changed.length) this.post({ type: 'run-changes', runId, files: changed });
       await record({ status: result.outcome === 'cancelled' ? 'cancelled' : 'completed', kind: 'message', model: request.model, summary: `${request.skill ? `/${request.skill.name} run` : 'Agent run'} ${result.outcome}; ${changed.length} file(s) changed.`, estimatedCostUsd: usage.estimatedCostUsd, inputTokens: usage.inputTokens, outputTokens: usage.outputTokens });
       await this.saveTranscript(request.model);
+      // CLAS-08: the lead agent's answer through a cloud client gets its trust badge, chosen only from checks that ran. A sub-agent's answer is not shown
+      // as an answer and gets none (D-56); an answer through a local client gets none. It comes after the chat is saved, so its record has a chat to go in.
+      if (result.outcome !== 'cancelled' && !request.local) this.startBadge(runId, request, result.usage.at(-1), lastAssistantText(result.messages));
       const ids = allUsage.map((turn) => turn.requestId).filter((id): id is string => Boolean(id));
       if (account) {
         if (result.outcome !== 'cancelled') { costAsked = true; await this.reportRunCost(account, runId, request.model, record); }
@@ -1003,13 +1010,13 @@ export class AgentConversation {
   }
 
   /** Starts a lead answer's badge when its run ends: keeps what it was chosen from and shows it (CLAS-08). */
-  private startBadge(runId: string, request: AgentTurnRequest, usage: UsageMetadata | undefined): void {
+  private startBadge(runId: string, request: AgentTurnRequest, usage: UsageMetadata | undefined, answerText: string): void {
     const facts = answerFactsOf(request, usage);
     if (facts.route === 'local') return;
     const evidence = usage?.evidence;
     // A check follows only for a TEE model on NEAR AI Cloud's own endpoint whose answer carried a signature id; anything else is never checked.
     const willCheck = facts.boundary === 'tee' && facts.nearEndpoint && evidence !== undefined;
-    const entry: BadgeEntry = { model: request.model, client: request.client, evidence, facts, verification: willCheck ? 'pending' : 'not-run' };
+    const entry: BadgeEntry = { thread: this.conversationId, answerText, model: request.model, client: request.client, evidence, facts, verification: willCheck ? 'pending' : 'not-run' };
     this.verifiable.delete(runId);
     this.verifiable.set(runId, entry);
     for (const old of [...this.verifiable.keys()].slice(0, -TRUST_ENTRIES_KEPT)) this.verifiable.delete(old);
@@ -1064,7 +1071,26 @@ export class AgentConversation {
     this.shownBadges.set(runId, badge);
     for (const old of [...this.shownBadges.keys()].slice(0, -SHOWN_BADGES_KEPT)) this.shownBadges.delete(old);
     this.post({ type: 'trust-badge', runId, badge });
+    if (entry.verification !== 'pending') this.keepTrust(runId, entry, badge);
   }
+
+  /**
+   * Keeps a settled badge in the chat's meta (plan 27), so a reopened chat shows the state its checks reached. Never waits and never fails anything: a write
+   * that fails is ignored. A newer result of the same run's answer replaces what this window wrote for it; anything else keeps the weaker state.
+   */
+  private keepTrust(runId: string, entry: BadgeEntry, badge: TrustBadge): void {
+    const store = this.transcripts;
+    if (!(store instanceof ThreadStore) || entry.answerText === '') return;
+    const record = trustRecordOf(entry.answerText, badge, new Date());
+    const mode = this.trustWriters.get(record.key) === runId ? 'replace' : 'weaker';
+    this.trustWriters.set(record.key, runId);
+    for (const old of [...this.trustWriters.keys()].slice(0, -SHOWN_BADGES_KEPT)) this.trustWriters.delete(old);
+    const write = this.trustWrites.then(() => store.recordTrust(entry.thread, record, mode)).catch(() => undefined);
+    this.trustWrites = write;
+  }
+
+  /** Resolves once every badge record this chat started writing has been written (or failed); for tests and an orderly close. */
+  public trustRecorded(): Promise<void> { return this.trustWrites; }
 
   /**
    * The check after one of a run's attested-cloud answers settled (D-36, D-55). For a closed or replaced chat nothing is posted or set. A failed check is
@@ -1127,7 +1153,14 @@ export class AgentConversation {
         this.messages = [...system, ...entriesToMessages(lines.main)];
         store.cover(id, tip);
       }
-      if (lines?.main.length) items = entriesToView(lines, { history: (await store.meta(id).catch(() => undefined))?.history });
+      if (lines?.main.length) {
+        const meta = await store.meta(id).catch(() => undefined);
+        // Each answer's kept badge (CLAS-08) comes back as it was proven, replayed: no Check again and no full attestation. Answers saved before this
+        // version have no record and show no badge.
+        const kept = new Map((meta?.trust ?? []).map((record) => [record.key, record] as const));
+        const trustFor = (text: string) => { const record = kept.get(trustRecordKey(text)); return record === undefined ? undefined : { ...trustBadgeFromRecord(record), notChecked: NOT_CHECKED_IN_EDITOR }; };
+        items = entriesToView(lines, { history: meta?.history, trustFor });
+      }
     }
     // What was just loaded is already in the log (or is the model's own text); it is never written again.
     for (const message of this.messages) this.logged.add(message);
