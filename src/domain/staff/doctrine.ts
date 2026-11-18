@@ -422,3 +422,68 @@ export const STAFF_SECTIONS: Readonly<Record<StaffSectionId, StaffSection>> = {
   j9: { id: 'j9', number: 9, function: 'Civil-military cooperation' },
   'special-staff': { id: 'special-staff', function: 'Special staff' }
 };
+
+// ---- Intelligence terms (WP-INT; design 10, 3.2, 4.4 and 6.2; research note 02) --------------------------------------------------------------
+
+/** Source reliability on the NATO Admiralty scale: a grade of the source, never of the information (AJP-2.1 Edition B; 02 T10, S24). */
+export const SOURCE_RELIABILITY = {
+  A: 'Completely reliable',
+  B: 'Usually reliable',
+  C: 'Fairly reliable',
+  D: 'Not usually reliable',
+  E: 'Unreliable',
+  F: 'Reliability cannot be judged'
+} as const;
+export type SourceReliability = keyof typeof SOURCE_RELIABILITY;
+export const SOURCE_RELIABILITY_GRADES = Object.keys(SOURCE_RELIABILITY) as readonly SourceReliability[];
+
+/** Information credibility on the NATO Admiralty scale: a grade of the information, assessed separately from the source (AJP-2.1 Edition B; 02 T10, S24). */
+export const INFORMATION_CREDIBILITY = {
+  1: 'Completely credible',
+  2: 'Probably true',
+  3: 'Possibly true',
+  4: 'Doubtful',
+  5: 'Improbable',
+  6: 'Truth cannot be judged'
+} as const;
+export type InformationCredibility = 1 | 2 | 3 | 4 | 5 | 6;
+export const INFORMATION_CREDIBILITY_GRADES: readonly InformationCredibility[] = [1, 2, 3, 4, 5, 6];
+
+/**
+ * Credibility 1 means confirmed by other, independent reporting. The 2003 CF joint intelligence doctrine reads grade 1 as "confirmed by other sources"
+ * (B-GJ-005-200/FP-000, 2003; 02 T10, S18); AJP-2.1 Edition B names it "completely credible" (S24). The workbench applies the stricter reading.
+ */
+export const CONFIRMED_CREDIBILITY: InformationCredibility = 1;
+
+/**
+ * Intelligence disciplines (JP 2-0, 2022, as summarised in 02, S4). HUMINT, SIGINT, MASINT and CI collection needs legal authority and partner systems,
+ * so a template never collects them itself and a collection recommendation for them always needs a partner (02 Summary 8).
+ */
+export const INTELLIGENCE_DISCIPLINES = ['OSINT', 'GEOINT', 'HUMINT', 'SIGINT', 'MASINT', 'TECHINT', 'CI'] as const;
+export type IntelligenceDiscipline = (typeof INTELLIGENCE_DISCIPLINES)[number];
+export const PARTNER_ONLY_DISCIPLINES: readonly IntelligenceDiscipline[] = ['HUMINT', 'SIGINT', 'MASINT', 'CI'];
+
+/** PIR register headings: every PIR names the decision point it supports and a latest time of value (design 10, 3.2; 02 T9, S15). */
+export const PIR_REGISTER_HEADINGS: readonly string[] = ['Requirement', 'Decision point supported', 'Indicators', 'Latest time of value', 'Status'];
+
+/** Collection plan headings and its rule: the J2 recommends, the J3 approves asset allocation (design 10, 3.2; 02 T10, S15). */
+export const COLLECTION_PLAN_HEADINGS: readonly string[] = ['Requirement', 'Indicator', 'NAI', 'Recommended capability', 'Timing', 'Needs J3 approval or partner'];
+export const COLLECTION_PLAN_RULE = 'The J2 recommends; the J3 approves the allocation of collection assets.';
+
+/**
+ * The two standard NATO intelligence reports the CAF also uses (02, S18): the INTSUM, a periodic summary with an assessment of future intent, and the
+ * INTREP, a spontaneous report needing urgent attention, with deductions. Headings from design 10, 3.2 (watch-officer).
+ */
+export const INTEL_REPORTS = {
+  intsum: { name: 'Intelligence summary (INTSUM)', headings: ['Period', 'Significant activity', 'Assessment of intent', 'Changes since last', 'Gaps'] },
+  intrep: { name: 'Intelligence report (INTREP)', headings: ['Event', 'Deduction'] }
+} as const;
+
+/** The date-time group form `DDHHMMZ MON YY`, in UTC (ACP 121, Communication Instructions General; 02 T11 "DTG helpers"). */
+export const DTG_MONTHS = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'] as const;
+
+/**
+ * The template ceiling (design 10, 6): staff templates hold exercise and fictional data at org/Internal, NATO Unclassified or Protected A at most, whatever
+ * the device allows, because labels are not accreditation. Labels are `scale/level` keys from the Phase 70 scale presets.
+ */
+export const STAFF_TEMPLATE_LABELS: readonly string[] = ['org/Public', 'org/Internal', 'nato/NATO Unclassified', 'ca-protected/Protected A'];
