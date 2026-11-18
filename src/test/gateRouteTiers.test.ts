@@ -8,14 +8,20 @@ import path from 'node:path';
 import test from 'node:test';
 import type { Mark } from '../domain/gate/dominance';
 import type { Label } from '../domain/gate/labels';
-import { BINDING_REFUSALS, DEFAULT_ROUTING, isLocalRouteHost } from '../domain/gate/routing';
+import { BINDING_REFUSALS, DEFAULT_ROUTING, ROUTE_REFUSALS, isLocalRouteHost } from '../domain/gate/routing';
+import { NETWORK_AT_MARK_TEXT } from '../agent/gateAdapter';
+import { DEFAULT_RULES } from '../agent/permissions';
+import { AgentConversation } from '../services/agentSession';
+import { providerErrorMessage } from '../services/chatBridge';
+import { TranscriptStore } from '../services/transcripts';
+import { labelledProject } from './helpers/markFixtures';
 import type { ActorRef } from '../domain/gate/decide';
 import type { BundleState } from '../domain/gate/bundle';
 import { withSessionRoute } from '../gate/sessionMark';
 import type { SessionRoute } from '../gate/sessionMark';
 import { NearAiClient, RouteRefusedError } from '../services/nearAiClient';
 import type { NearAiClientOptions } from '../services/nearAiClient';
-import { testBundleState } from './helpers/gatedRuns';
+import { testBundleState, testGateHost } from './helpers/gatedRuns';
 
 const NEAR = 'https://cloud-api.near.ai/v1';
 const ACTOR: ActorRef = { kind: 'agent', deviceFingerprint: 'device-test', sessionId: 'tiers', agentId: 'main', agentLabel: 'agent' };
@@ -177,4 +183,45 @@ test('a missing attestation state: any-cloud and local-only are unaffected, atte
     await assert.rejects(() => withSessionRoute(route([label('org', 'Internal')]), () => ask(near.client, 'tee-model')), refusedWith('route.connection-not-bound', BINDING_REFUSALS.unknown));
     assert.equal(near.content.length, 0);
   }
+});
+
+// ---- Plan 24 (PR 4c): every refusal at a strict label names the way out ----
+
+const LOWER = "NEAR AI: Lower This Chat's Label";
+
+test('a chat raised to Restricted by a read, with no local model, is refused with a sentence that names Lower This Chat\'s Label and still says to add a local model', async () => {
+  const root = labelledProject();
+  const conversation = new AgentConversation(root, () => undefined, path.join(root, '.ckpt'), undefined, new TranscriptStore(path.join(root, '.store'), root));
+  conversation.gateHost = testGateHost();
+  const content: string[] = [];
+  const chunk = (value: unknown) => `data: ${JSON.stringify(value)}\n\n`;
+  const fetchFn = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url = String(input);
+    const method = init?.method ?? 'GET';
+    if (method === 'GET' && url.endsWith('/models')) return new Response(JSON.stringify({ data: [{ id: 'tee-model' }] }), { status: 200 });
+    if (method === 'GET' && url.endsWith('/model/list')) return new Response(JSON.stringify({ models: [{ modelId: 'tee-model', metadata: { attestationSupported: true, providerType: 'vllm' } }] }), { status: 200 });
+    if (method !== 'POST') return new Response('not found', { status: 404 });
+    content.push(url);
+    const delta = { tool_calls: [{ index: 0, id: 'r1', type: 'function', function: { name: 'Read', arguments: JSON.stringify({ file_path: 'docs/plan.md' }) } }] };
+    return new Response(chunk({ id: 'c', choices: [{ delta, finish_reason: 'tool_calls' }] }) + chunk({ id: 'c', choices: [], usage: { prompt_tokens: 3, completion_tokens: 1 } }) + 'data: [DONE]\n\n', { headers: { 'content-type': 'text/event-stream', 'inference-id': 'inf-1' } });
+  }) as typeof fetch;
+  const client = new NearAiClient({ baseUrl: NEAR, apiKey: 'test-key', fetchFn, route: 'near' });
+  await client.listModels();
+  let refused: unknown;
+  await conversation.send({ text: 'read the plan', client, model: 'tee-model', privacy: 'Private', policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES }).catch((error: unknown) => { refused = error; });
+  assert.ok(refused instanceof RouteRefusedError && refused.rule === 'route.no-local-model');
+  const shown = providerErrorMessage(refused);
+  assert.ok(shown.includes(LOWER), 'the page\'s sentence names the Lower command');
+  assert.match(shown, /Add a local model/);
+  assert.equal(content.length, 1, 'the fake fetch was not called again after the read');
+});
+
+test('each refusal at a strict label, and label.network-at-mark, names Lower This Chat\'s Label, and none says to start a new chat', () => {
+  for (const rule of ['route.deny', 'route.no-local-model', 'route.local-host-not-local', 'route.not-tee', 'route.connection-not-bound'] as const) {
+    assert.ok(ROUTE_REFUSALS[rule].includes(LOWER), rule);
+    assert.ok(!/start a new chat/i.test(ROUTE_REFUSALS[rule]), rule);
+  }
+  assert.ok(NETWORK_AT_MARK_TEXT.includes(LOWER));
+  assert.ok(!/start a new chat/i.test(NETWORK_AT_MARK_TEXT));
+  assert.match(ROUTE_REFUSALS['route.no-local-model'], /Add a local model/);
 });

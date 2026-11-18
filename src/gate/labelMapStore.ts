@@ -19,7 +19,7 @@ import type { SecretStorageLike } from '../services/auth';
 import { withFileLock } from '../services/stateMirrorLock';
 import { MAX_LABEL_MAP_BYTES, PROJECT_ENTRY_KEY, labelMapKeys, labelMapRevision, nextRevision, parseLabelMap, resolveLabel, withRevision } from '../domain/gate/labelMap';
 import type { LabelMapPayload, LabelMapState, LabelSource, LabelView, ResolvedLabel } from '../domain/gate/labelMap';
-import { raiseMark } from '../domain/gate/dominance';
+import { raiseMark, sameMark } from '../domain/gate/dominance';
 import type { Label, ScaleTable } from '../domain/gate/labels';
 import { canonicalBytes } from '../domain/team/canonical';
 import { NO_KNOWN_KEYS } from '../domain/team/keyStatus';
@@ -418,6 +418,43 @@ export interface UpdateLabelMapOptions {
    */
   readonly confirm?: (question: LabelMapQuestion) => Promise<boolean>;
   readonly now?: () => Date;
+  /**
+   * Names the one kind of write that may lower or drop a label (PR #87 review): a person's recorded change through Set Label, with its reason, or an
+   * agent's rename that moves an entry. Without it, a write in which any label would drop is refused, writing nothing.
+   */
+  readonly lowering?: LabelLowering;
+}
+
+/** The writes allowed to lower or drop a label: a person's recorded change (Set Label, with its reason), or a rename that moves an entry. */
+export type LabelLowering = { readonly kind: 'person'; readonly reason: string } | { readonly kind: 'move' };
+
+/** Said when a write would lower or drop a label and is not a person's recorded change: nothing is written (PR #87 review, never lower). */
+export const LABEL_LOWERING_REFUSED_TEXT =
+  'Nothing was written: this change would lower or remove a label, and only a person can do that, with NEAR AI: Set Label and a reason.';
+
+/** The key of a label map payload's project label, beside its entries, for the never-lower check. */
+function labelsByKey(map: LabelMapPayload): Map<string, Label> {
+  const out = new Map<string, Label>();
+  if (map.project !== undefined) out.set(PROJECT_ENTRY_KEY, map.project);
+  for (const key of Object.keys(map.entries)) {
+    const label = Object.prototype.hasOwnProperty.call(map.entries, key) ? (map.entries as Record<string, Label>)[key] : undefined;
+    if (label !== undefined) out.set(key, label);
+  }
+  return out;
+}
+
+/**
+ * True when every label `before` holds is still there in `after` and no lower (PR #87 review): a key dropped, or a label that raising by the old one would
+ * change (lower on its scale, or another scale in its place), is a lowering.
+ */
+export function onlyRaises(before: LabelMapPayload, after: LabelMapPayload, scales: ScaleTable): boolean {
+  const next = labelsByKey(after);
+  for (const [key, held] of labelsByKey(before)) {
+    const now = next.get(key);
+    if (now === undefined) return false;
+    if (!sameMark(raiseMark([now], held, scales), [now])) return false;
+  }
+  return true;
 }
 
 /**
@@ -504,6 +541,9 @@ export async function updateLabelMap(root: string, change: (map: LabelMapPayload
       if (error instanceof RangeError) throw new LabelMapError(`Nothing was written: ${error.message} Change fewer labels at once.`, { cause: error });
       throw error;
     }
+    // Never lower (PR #87 review): the change was worked out against `base`, the map read under this lock; unless it is a person's recorded change or a
+    // rename, no label in it may drop.
+    if (options.lowering === undefined && !onlyRaises(base, changed, options.scales)) throw new LabelMapError(LABEL_LOWERING_REFUSED_TEXT);
     // The revision always passes the marker's, and every key the last verified map holds that the new map does not is named, so a write never reads back
     // as older than, or as an unsigned removal from, what this computer verified. A verified file newer than the marker (adopted now) is the base the next
     // revision follows.
@@ -556,6 +596,17 @@ export async function updateLabelMap(root: string, change: (map: LabelMapPayload
 }
 
 /**
+ * The labels this computer last verified for a project (the marker's base copy, D-59, D-62), or undefined when there is none or it no longer matches the
+ * marker. Set Label judges a lowering against them while the file in the project holds reads, since a write then restores them (PR #85 review).
+ */
+export async function lastVerifiedLabelMap(globalStorageDir: string, secrets: SecretStorageLike, root: string, scales: ScaleTable): Promise<LabelMapPayload | undefined> {
+  return parsedOrUndefined((await readLabelMarker(globalStorageDir, secrets, root)).base, scales);
+}
+
+/** How long a write's label raise waits, so the raises of many writes in a row go into one signed write of the label file (D-26). */
+export const RAISE_WRITE_DELAY_MS = 3000;
+
+/**
  * The label reader of one project (D-25): reads the file and the marker again only when either one's size or modification time changes, and gives a view
  * under the scales asked for. A reader with no storage folder (a run with no gate host) trusts no key and keeps no marker, so every label it finds only raises.
  */
@@ -568,7 +619,39 @@ export class LabelReader implements LabelSource {
     readonly onNotice?: (message: string, state?: LabelMapState) => void;
     /** Moves an entry after a rename the extension saw (an agent's mv). Set by the host, which can sign. */
     readonly move?: (from: string, to: string) => Promise<void>;
+    /** Writes queued raises (D-26). Set by the host, which can sign; a reader without it queues nothing. */
+    readonly writeRaises?: (raises: ReadonlyMap<string, readonly Label[]>) => Promise<void>;
+    /** How long raises wait to be written together (RAISE_WRITE_DELAY_MS; tests pass a short one). */
+    readonly raiseDelayMs?: number;
   } = {}) {}
+
+  private pendingRaises = new Map<string, Label[]>();
+  private raiseTimer: ReturnType<typeof setTimeout> | undefined;
+  private raising: Promise<void> = Promise.resolve();
+
+  /** Queues a raise of a written file's entry to the mark (D-26, D-29); the first one of a window starts its timer. */
+  public queueRaise(relativePath: string, mark: readonly Label[]): void {
+    if (this.options.writeRaises === undefined || mark.length === 0) return;
+    const held = this.pendingRaises.get(relativePath) ?? [];
+    held.push(...mark);
+    this.pendingRaises.set(relativePath, held);
+    if (this.raiseTimer === undefined) {
+      this.raiseTimer = setTimeout(() => { this.raiseTimer = undefined; void this.flushRaises(); }, this.options.raiseDelayMs ?? RAISE_WRITE_DELAY_MS);
+      this.raiseTimer.unref?.();
+    }
+  }
+
+  /** Writes every raise queued so far, one write for all of them, after any write already going. Never throws. */
+  public async flushRaises(): Promise<void> {
+    if (this.raiseTimer !== undefined) { clearTimeout(this.raiseTimer); this.raiseTimer = undefined; }
+    const batch = this.pendingRaises;
+    this.pendingRaises = new Map();
+    if (batch.size > 0 && this.options.writeRaises !== undefined) {
+      const write = this.options.writeRaises;
+      this.raising = this.raising.then(() => write(batch)).catch(() => undefined);
+    }
+    await this.raising;
+  }
 
   public async view(scales: ScaleTable): Promise<LabelView> {
     const signature = await this.signature();

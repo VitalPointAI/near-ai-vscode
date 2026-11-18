@@ -1,6 +1,6 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import { ModelInfo, NearAiError, SpendLimitError } from './nearAiClient';
+import { ModelInfo, NearAiError, RouteRefusedError, SpendLimitError } from './nearAiClient';
 import { redactSecrets } from '../domain/redaction';
 import { GSD_COMMANDS } from '../domain/gsdCommands';
 import { ActivitySessionSummary, AttributionSnapshot } from '../domain/activity';
@@ -480,6 +480,8 @@ export function providerErrorMessage(error: unknown): string {
     if (error.status === 429) return `NEAR AI is rate limiting requests${error.model ? ` to ${error.model}` : ''}${error.detail ? ` (NEAR says: ${error.detail})` : ''}. Wait a moment and try again, or switch to another model.${request}`;
     return `${error.message}${request}`;
   }
+  // The route check refused the request before anything was sent (CLAS-06): its plain sentence says why and what to do.
+  if (error instanceof RouteRefusedError) return error.message;
   // The daily limit (nearAi.dailySpendLimitUsd) stopped the request before it was sent.
   if (error instanceof SpendLimitError) return error.message;
   // The agent loop gave up after NEAR kept refusing a model, or after the model kept going quiet

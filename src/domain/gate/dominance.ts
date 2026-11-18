@@ -133,3 +133,72 @@ export function markDominated(clearances: readonly Clearance[], mark: Mark, cont
 export function markLabelKeys(mark: Mark): readonly string[] {
   return Object.freeze(mark.map(labelKey).sort());
 }
+
+function sameLabel(a: Label, b: Label): boolean {
+  return labelKey(a) === labelKey(b) && JSON.stringify([...a.compartments].sort()) === JSON.stringify([...b.compartments].sort())
+    && JSON.stringify([...a.releasability].sort()) === JSON.stringify([...b.releasability].sort()) && JSON.stringify([...a.handling].sort()) === JSON.stringify([...b.handling].sort());
+}
+
+/** True when two marks hold the same labels, in any order. */
+export function sameMark(a: Mark, b: Mark): boolean {
+  return a.length === b.length && a.every((label) => b.some((other) => sameLabel(label, other)));
+}
+
+/**
+ * One chat's high-water mark (CLAS-04, D-29, D-54): what its agents have read, as a mark that only rises. Every run of the chat carries it in its RunGrants,
+ * which reach every sub-agent, so what a helper reads raises the lead's mark too, and every session route of the chat reads it before each model request.
+ * Pure: no I/O, no clock. `raise` never lowers; `lowerByPerson` is the one way down, called only by the person's Lower This Chat's Label command (plan 23).
+ */
+export class SessionMark {
+  private mark: Mark;
+  private readonly listeners = new Set<(mark: Mark) => void>();
+
+  /** A mark that starts at `start`: the project's resolved label for a new chat, the stored mark for a reopened one. */
+  public constructor(start: Mark) {
+    this.mark = Object.freeze([...start]);
+  }
+
+  public current(): Mark {
+    return this.mark;
+  }
+
+  /**
+   * Folds `labels` into the mark with the join of D-29 (raiseMark). Returns true only when the mark rose; a label the mark already covers changes nothing,
+   * and a label whose level the scales cannot order is kept beside once, never again.
+   */
+  public raise(labels: readonly Label[], scales: ScaleTable): boolean {
+    let next = this.mark;
+    for (const label of labels) {
+      if (next.some((held) => sameLabel(held, label))) continue;
+      next = raiseMark(next, label, scales);
+    }
+    if (sameMark(next, this.mark)) return false;
+    this.set(next);
+    return true;
+  }
+
+  /**
+   * The person's declassification (D-29): sets the mark to `to`, which the caller has checked is lower, and returns the mark it replaced. A reason is
+   * required and is the caller's to record (label.declassify); an empty one changes nothing and throws.
+   */
+  public lowerByPerson(to: Mark, reason: string): Mark {
+    if (reason.trim() === '') throw new RangeError('A reason is required to lower a chat\'s label.');
+    if (to.length === 0) throw new RangeError('A chat\'s label cannot be lowered to no label.');
+    const before = this.mark;
+    this.set(Object.freeze([...to]));
+    return before;
+  }
+
+  /** Told the new mark each time it changes; returns a function that stops telling. */
+  public onDidChange(listener: (mark: Mark) => void): () => void {
+    this.listeners.add(listener);
+    return () => { this.listeners.delete(listener); };
+  }
+
+  private set(next: Mark): void {
+    this.mark = next;
+    for (const listener of [...this.listeners]) {
+      try { listener(next); } catch { /* a listener never changes the mark */ }
+    }
+  }
+}

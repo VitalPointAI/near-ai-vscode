@@ -8,8 +8,10 @@ import type { AgentMessage, CompletionEvent, ToolCall, ToolDefinition, UsageMeta
 import { AutoApprovalContext, allowRuleBlocker, isAutoAllowed, PermissionRules, RunGrants, suggestAllowRule } from './permissions';
 import { CREDENTIAL_HOLD_RULE, OUTSIDE_WORKSPACE_RULE } from '../domain/gate/decide';
 import type { GateRuntime } from '../domain/gate/decide';
-import { labelReadFilter } from './gateLabels';
-import { TOOL_FORBIDDEN_RULE, followCommandMoves, gateToolCall, recordApprovalReply, recordRefusedBeforeGate, shellReadsCredentialFile, unavailableGateRuntime } from './gateAdapter';
+import { labelReadFilter, labelsOfPaths } from './gateLabels';
+import type { Label } from '../domain/gate/labels';
+import type { Capability } from '../domain/gate/vocabulary';
+import { TOOL_FORBIDDEN_RULE, followCommandMoves, gateToolCall, beginLabelledRead, markAboveDefault, recordApprovalReply, recordRefusedBeforeGate, shellReadsCredentialFile, unavailableGateRuntime } from './gateAdapter';
 import type { FloorShellContext } from './gateAdapter';
 import { PackageScriptsReader } from './packageScripts';
 import { PREAMBLE_START, resolveGsdRun } from '../gsd/preamble';
@@ -785,15 +787,34 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
     // The call runs: from now on this run has read a file that may hold credentials, and what can send data off this computer asks (D-18).
     const credentialFile = readsCredential ?? gateCall.readsCredential;
     if (credentialFile !== undefined) this.grants.noteCredentialRead(credentialFile);
+    // The same hook raises the chat's mark by the labels of what the call reads, before it runs, so a read that fails or is cancelled still counts (D-54).
+    // One shared hook raises the mark and, once the call is done, feeds what it read to the fingerprints (D-54, D-60), so the two never diverge.
+    // The read is settled in a finally (PR #87 review round 5): no throw between here and the call's end can leave it open, which would refuse every call
+    // that could send for the rest of the chat.
+    const read = beginLabelledRead(this.gate, this.grants, gateCall.readLabels, gateCall.maySend, tool.name, { model: this.options.model });
     const ranAt = Date.now();
     const cwdBefore = context.shell?.workingDirectory ?? context.root;
-    // A search leaves out what the clearances do not cover, the way it leaves out credential files (CLAS-03).
-    if (tool.capability === 'read') context.canRead = await labelReadFilter(this.gate, context.root);
     try {
-      const output = await tool.run(input, context);
+      // A search leaves out what the clearances do not cover, the way it leaves out credential files (CLAS-03).
+      if (tool.capability === 'read') context.canRead = await labelReadFilter(this.gate, context.root);
+      // What a search returns raises the mark by its paths' labels before the results reach the model (CLAS-04); labels that cannot be read fail the call.
+      context.noteRead = async (relativePaths) => {
+        read.add(await labelsOfPaths(this.gate, context.root, relativePaths));
+      };
+      let output: string;
+      try {
+        output = await tool.run(input, context);
+      } catch (error) {
+        read.settle(undefined);
+        throw error;
+      }
+      // Labelled text the call read is fingerprinted, so it cannot leave in a later network call's payload (D-60). What a sending call returns is not.
+      read.settle(output);
       // A rename the command made carries its label with it (D-26, D-42).
       if (command !== undefined) await followCommandMoves(this.gate, { command, root: context.root, ...(floorShell ?? {}) });
       if (tool.untrusted) this.grants.tainted = true;
+      // What the session writes takes its mark (D-26): each file the call wrote is queued to be raised to it, never lowered, and written in a batch.
+      this.queueWriteRaises(gateCall.effects, context.root, command === undefined ? [] : await shellWrittenFiles(command, ranAt, context, cwdBefore));
       // A scratch file this command wrote is recorded now that it succeeded, and only if the file is really there (0.4.18 review).
       if (command !== undefined) await this.noteScratchWrites(command, ranAt, context, cwdBefore);
       else await this.noteToolScratchWrite(tool, input, ranAt, context);
@@ -801,6 +822,25 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
     } catch (error) {
       if (signal.aborted) return this.finish(call.id, false, 'Cancelled.');
       return this.finish(call.id, false, `Error: ${(error as Error).message}`);
+    } finally {
+      read.settle(undefined);
+    }
+  }
+
+  /** Queues a raise of every file a successful call wrote (its workspaceWrite effects, the classifier's for a command) to the mark, above the default only. */
+  private queueWriteRaises(effects: readonly Capability[], root: string, shellWritten: readonly string[]): void {
+    const mark = this.grants.mark?.current();
+    if (mark === undefined || !markAboveDefault(this.gate, mark)) return;
+    const source = this.gate.labels?.(root);
+    if (source?.queueRaise === undefined) return;
+    for (const relative of shellWritten) source.queueRaise(relative, mark);
+    for (const effect of effects) {
+      if (effect.verb !== 'workspaceWrite') continue;
+      for (const written of effect.paths) {
+        const relative = String(written).replace(/^\.\//, '');
+        if (relative === '' || relative === '**' || /[*?[{]/.test(relative) || relative.endsWith('/') || relative.split('/').includes('..')) continue;
+        source.queueRaise(relative, mark);
+      }
     }
   }
 
@@ -868,9 +908,7 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
         if ((path.isAbsolute(text) && inScratch(file)) || isScratchPath(context.root, file)) candidates.add(file);
       }
     };
-    // `> /tmp/x`, `>> /tmp/x`, and `cp|mv|install|tee` (the destination is the last word on the line).
-    for (const match of command.matchAll(/>>?\s*([^\s;&|]+)/g)) if (match[1]) note(match[1]);
-    for (const match of command.matchAll(/\b(?:cp|mv|install|tee)\b[^;&|]*\s([^\s;&|]+)\s*$/g)) if (match[1]) note(match[1]);
+    for (const target of commandWriteTargets(command)) note(target);
     for (const file of candidates) await this.noteScratchFile(file, startedAt);
   }
 
@@ -919,6 +957,36 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
     this.options.emit({ type: 'tool-end', callId, ok, output: bounded.length > UI_OUTPUT_CHARS ? `${bounded.slice(0, UI_OUTPUT_CHARS)}\n…` : bounded });
     return bounded;
   }
+}
+
+/** What a command's text says it writes to: `> x`, `>> x`, and the last word of a `cp`, `mv`, `install` or `tee` (0.4.18, shared with the scratch check). */
+function commandWriteTargets(command: string): string[] {
+  const out: string[] = [];
+  for (const match of command.matchAll(/>>?\s*([^\s;&|]+)/g)) if (match[1]) out.push(match[1]);
+  for (const match of command.matchAll(/\b(?:cp|mv|install|tee)\b[^;&|]*\s([^\s;&|]+)\s*$/g)) if (match[1]) out.push(match[1]);
+  return out;
+}
+
+/**
+ * The project files a shell command wrote, as far as its text shows (D-26): each write target, from the shell's folder before and after the command, that
+ * is inside the project, is a file, and was changed since the command started. A write the text does not show is not seen (the documented shell limit).
+ */
+async function shellWrittenFiles(command: string, startedAt: number, context: ToolContext, cwdBefore: string): Promise<string[]> {
+  const out = new Set<string>();
+  const cwdAfter = context.shell?.workingDirectory ?? context.root;
+  for (const target of commandWriteTargets(command)) {
+    if (target.includes('$') || target.split(/[/\\]/).includes('..')) continue;
+    for (const cwd of new Set([cwdBefore, cwdAfter])) {
+      const file = path.resolve(cwd, target);
+      const relative = path.relative(context.root, file);
+      if (relative === '' || relative.startsWith('..') || path.isAbsolute(relative)) continue;
+      try {
+        const info = await stat(file);
+        if (info.isFile() && info.mtimeMs >= startedAt - 1000) out.add(relative.split(path.sep).join('/'));
+      } catch { /* not there: nothing was written where the text says */ }
+    }
+  }
+  return [...out];
 }
 
 /** The path a read tool was given, for the credential-read hold's reason; the tool's name when there is none. */

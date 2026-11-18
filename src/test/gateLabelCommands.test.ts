@@ -246,16 +246,18 @@ test('a self-added clearance that expires during a chat: the next read of conten
   assert.match(await readAsAgent(s, 'secret/plan.md'), new RegExp(`Not allowed: This file is labelled ca-protected/Protected B, and your clearance for it ended on ${ends.slice(0, 10)}\\.`));
 });
 
-test('Show Policy says what is live: clearances are checked on reads, a label does not change where content is sent yet, and unlabelled content takes the default label', async () => {
+test('Show Policy says what is live: clearances are checked on reads, each chat\'s label decides where its content is sent, and unlabelled content takes the default label', async () => {
   const s = await started();
   stub.shownDocuments.length = 0;
   await stub.commands.get('nearAi.policy.show')?.();
   const text = stub.shownDocuments[0]?.text ?? '';
-  assert.ok(text.includes(gateCommands.POLICY_ROUTING_NOT_LIVE_TEXT));
+  assert.ok(text.includes(gateCommands.POLICY_ROUTING_TEXT));
   assert.equal((gateCommands as Record<string, unknown>)['POLICY_LABELS_NOT_USED_TEXT'], undefined, 'the old sentence is gone');
-  assert.match(gateCommands.POLICY_ROUTING_NOT_LIVE_TEXT, /checks the clearances below when an agent reads a labelled file/);
-  assert.match(gateCommands.POLICY_ROUTING_NOT_LIVE_TEXT, /does not change where content is sent yet/);
-  assert.match(gateCommands.POLICY_ROUTING_NOT_LIVE_TEXT, /levels that need an attested cloud stay on this computer/);
+  assert.equal((gateCommands as Record<string, unknown>)['POLICY_ROUTING_NOT_LIVE_TEXT'], undefined, 'the 4b sentence is gone (plan 24)');
+  assert.ok(!text.includes('does not change where content is sent yet'));
+  assert.match(gateCommands.POLICY_ROUTING_TEXT, /checks the clearances below when an agent reads a labelled file/);
+  assert.match(gateCommands.POLICY_ROUTING_TEXT, /Each chat's label decides where its content is sent/);
+  assert.match(gateCommands.POLICY_ROUTING_TEXT, /levels that need an attested cloud stay on this computer/);
   const pitfall = gateCommands.unlabelledDefaultText({ scale: 'org', level: 'Public', compartments: [], releasability: [], handling: [] });
   assert.ok(text.includes(pitfall), 'the Pitfall 14 sentence');
   assert.ok(text.indexOf('Default label: org/Public') >= 0 && text.indexOf(pitfall) > text.indexOf('Default label: org/Public'), 'beside the default label');

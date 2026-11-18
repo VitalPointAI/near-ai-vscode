@@ -42,7 +42,8 @@ export function pathLike(word: string): boolean {
  */
 export function commandWords(command: string): string[] {
   const readable = command.slice(0, MAX_COMMAND_LENGTH);
-  return readable.split(/[\s'"`;&|()<>=]+/).filter((word) => word !== '' && !word.startsWith('-') && !word.includes('$')).slice(0, MAX_COMMAND_WORDS);
+  // `@` too (PR #87 review round 6), so curl's `-d @file` and `--data-binary @file` name the file they read.
+  return readable.split(/[\s'"`;&|()<>=@]+/).filter((word) => word !== '' && !word.startsWith('-') && !word.includes('$')).slice(0, MAX_COMMAND_WORDS);
 }
 
 /** Resolves a path through links once per call, within the bound; a path past the bound or that cannot be resolved gives undefined. */
@@ -316,38 +317,101 @@ export interface LabelCheckInput extends NamedPathsInput {
   readonly defaultReads?: boolean;
 }
 
+/** The label verdict of a call, and the labels of what it reads (CLAS-04): the labels the session's mark is raised by once the call runs. */
+export interface LabelCheck {
+  readonly verdict?: LabelVerdict;
+  /** One entry per distinct label resolved for the paths the call names (a word read as a file and as a folder gives both). Empty when the call is refused. */
+  readonly read: readonly Label[];
+}
+
+function addLabels(out: Label[], mark: Mark): void {
+  for (const label of mark) if (!out.some((held) => labelKey(held) === labelKey(label) && JSON.stringify(held) === JSON.stringify(label))) out.push(label);
+}
+
 /**
  * The label verdict of a call (CLAS-03, D-28, D-53, D-59), worked out before decide() runs. Undefined when nothing the call names is above the clearances.
  * A project whose label file cannot be read, or was deleted or rolled back, holds every read in it. Never throws: a check that fails refuses.
  */
 export async function labelVerdictFor(runtime: GateRuntime, input: LabelCheckInput): Promise<LabelVerdict | undefined> {
+  return (await labelCheckFor(runtime, input)).verdict;
+}
+
+/**
+ * The label check of a call (CLAS-03, CLAS-04): the verdict labelVerdictFor gives, and the labels of every path it names, globs and an unbounded glob
+ * included, which raise the session's mark when the call runs (D-54). A read the text does not show is not in it (the documented shell limit).
+ */
+export async function labelCheckFor(runtime: GateRuntime, input: LabelCheckInput): Promise<LabelCheck> {
   try {
     const named = await namedReads(input);
     const paths = named.paths;
     const projectNamed = paths.length > 0 || named.patterns.length > 0 || named.unbounded;
-    if (!projectNamed && input.mayReadAnything !== true && input.defaultReads !== true) return undefined;
+    if (!projectNamed && input.mayReadAnything !== true && input.defaultReads !== true) return { read: [] };
     const state = stateOf(runtime);
     const facts = state === undefined ? clearanceFactsOf({ state: 'failed-closed' } as BundleState, nowOf(runtime)) : clearanceFactsOf(state, nowOf(runtime));
     const view = await sourceOf(runtime, input.root).view(facts.scales);
     // A held label file holds every project read, path by path (D-67): a call that names a project path, or may read anything (a command, effects nobody
     // can read), is held; a read of the extension's own Open-GSD runtime alone goes on, judged at the default label below.
-    if (holdsReads(view.state) && (projectNamed || input.mayReadAnything === true)) return { rule: 'label.dominance', reason: view.problem ?? FAILED_CLOSED_LABEL_TEXT };
+    if (holdsReads(view.state) && (projectNamed || input.mayReadAnything === true)) return { verdict: { rule: 'label.dominance', reason: view.problem ?? FAILED_CLOSED_LABEL_TEXT }, read: [] };
+    const read: Label[] = [];
     for (const relative of paths) {
-      const verdict = markVerdict(markOf(view, relative, facts.defaultLabel), facts);
-      if (verdict !== undefined) return verdict;
+      const mark = markOf(view, relative, facts.defaultLabel);
+      const verdict = markVerdict(mark, facts);
+      if (verdict !== undefined) return { verdict, read: [] };
+      addLabels(read, mark);
     }
     // Globs: every entry a glob could match; an unbounded glob: every entry and the project's own label, so the strictest label in scope decides.
     const keys = view.keys();
     const reached = named.unbounded ? ['', ...keys] : named.patterns.flatMap((pattern) => entriesMatching(pattern, keys));
     for (const key of [...new Set(reached)]) {
-      const verdict = markVerdict(view.resolve(key, facts.defaultLabel).mark, facts);
-      if (verdict !== undefined) return verdict;
+      const mark = view.resolve(key, facts.defaultLabel).mark;
+      const verdict = markVerdict(mark, facts);
+      if (verdict !== undefined) return { verdict, read: [] };
+      addLabels(read, mark);
     }
-    if (input.defaultReads === true) return markVerdict([facts.defaultLabel], facts);
-    return undefined;
+    if (input.defaultReads === true) {
+      const verdict = markVerdict([facts.defaultLabel], facts);
+      if (verdict !== undefined) return { verdict, read: [] };
+      addLabels(read, [facts.defaultLabel]);
+    }
+    return { read };
   } catch {
-    return { rule: 'label.dominance', reason: 'NEAR AI could not check the labels of what this call reads, so it was refused rather than guessed. Try again.' };
+    return { verdict: { rule: 'label.dominance', reason: 'NEAR AI could not check the labels of what this call reads, so it was refused rather than guessed. Try again.' }, read: [] };
   }
+}
+
+/**
+ * The labels of project-relative paths a search returned (Glob, Grep), so they raise the session's mark before the results reach the model (CLAS-04,
+ * D-54). A path outside the project (the Open-GSD runtime) is at the default label. Throws when the labels cannot be read, which the caller treats as a
+ * refusal of the results.
+ */
+export async function labelsOfPaths(runtime: GateRuntime, root: string, relativePaths: readonly string[]): Promise<Label[]> {
+  const state = stateOf(runtime);
+  const facts = state === undefined ? clearanceFactsOf({ state: 'failed-closed' } as BundleState, nowOf(runtime)) : clearanceFactsOf(state, nowOf(runtime));
+  const view = await sourceOf(runtime, root).view(facts.scales);
+  const out: Label[] = [];
+  for (const relative of new Set(relativePaths)) {
+    const inside = insideRelative(root, path.resolve(root, relative));
+    addLabels(out, inside === undefined ? [facts.defaultLabel] : view.resolve(inside, facts.defaultLabel).mark);
+  }
+  return out;
+}
+
+/** The project's resolved label (its own entry, or the policy's default label), where a new chat's mark and a run with no chat start (CLAS-04). */
+export async function projectLabelOf(runtime: GateRuntime, root: string): Promise<Mark> {
+  const state = stateOf(runtime);
+  const facts = state === undefined ? clearanceFactsOf({ state: 'failed-closed' } as BundleState, nowOf(runtime)) : clearanceFactsOf(state, nowOf(runtime));
+  try {
+    const view = await sourceOf(runtime, root).view(facts.scales);
+    return view.resolve('', facts.defaultLabel).mark;
+  } catch {
+    return [facts.defaultLabel];
+  }
+}
+
+/** The scales labels are joined on now: the valid policy's, or the shipped presets while it is failed closed. */
+export function scalesOf(runtime: GateRuntime): ScaleTable {
+  const state = stateOf(runtime);
+  return (state === undefined ? clearanceFactsOf({ state: 'failed-closed' } as BundleState, nowOf(runtime)) : clearanceFactsOf(state, nowOf(runtime))).scales;
 }
 
 /**

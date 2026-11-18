@@ -8,7 +8,16 @@ import { compactConversation, contextAction, contextStatus, DEFAULT_COMPACT_AT_T
 import type { GateHost } from '../gate/host';
 import { currentSessionRoute, defaultSessionRoute, sessionRouteFrom, withSessionRoute } from '../gate/sessionMark';
 import type { RouteAttestation } from '../gate/sessionMark';
-import { approveFloorCallLate, endFloorApprovals, recordLateApproval } from '../agent/gateAdapter';
+import { approveFloorCallLate, endFloorApprovals, recordLateApproval, unavailableGateRuntime } from '../agent/gateAdapter';
+import { projectLabelOf, scalesOf } from '../agent/gateLabels';
+import { OutboundFingerprints } from '../agent/outboundCheck';
+import { SessionMark } from '../domain/gate/dominance';
+import type { Mark } from '../domain/gate/dominance';
+import { SHIPPED_DEFAULT_LABEL } from '../domain/gate/bundle';
+import type { Label } from '../domain/gate/labels';
+import { isDefaultMark } from '../gate/sessionMark';
+import { chatLabelOf } from './threadStore';
+import type { GateRuntime } from '../domain/gate/decide';
 import { AgentEvent, AgentRun, AgentRunError, ApprovalReply, ApprovalRequest, AWAITING_APPROVAL_PREFIX, DEFAULT_MAX_TURNS, RunInput, RunOutcome, RunResult } from '../agent/loop';
 import { countersOf, runSplitOf } from './activityOverview';
 import { PermissionRules, RunGrants } from '../agent/permissions';
@@ -241,6 +250,13 @@ function privateRefusal(label: string, tier: string | undefined, route: PrivateR
   return `${label} must run on a private model (its team file says privacy: private), and none of the models this run may use runs in a NEAR TEE or on this machine. Choose a NEAR TEE model for the ${tier ?? 'deep'} tier (setting nearAi.agent.${tier ?? 'deep'}Model), or add a local model, then run again. ${fix}`;
 }
 
+/** Where a chat whose stored label cannot be read opens: the default scale's highest level, never lower than it was (edge CLAS-04 encoding). */
+export const UNREADABLE_CHAT_LABEL: Label = Object.freeze({ scale: 'org', level: 'Restricted', compartments: [], releasability: [], handling: [] });
+
+/** Said when a chat's stored label cannot be read. */
+export const UNREADABLE_CHAT_LABEL_TEXT =
+  "This chat's saved label could not be read, so it opens at org/Restricted and its content stays on this computer. If you know it holds nothing that sensitive, use NEAR AI: Lower This Chat's Label.";
+
 export class AgentConversation {
   private messages: AgentMessage[] = [];
   /**
@@ -248,6 +264,23 @@ export class AgentConversation {
    * it, so an answer check that fails stops attested-cloud for the chat and its helpers alike (plan 25 sets it).
    */
   public readonly routeAttestation: RouteAttestation = { failed: false };
+  /**
+   * The chat's high-water mark (CLAS-04, D-29, D-54): set at the project's resolved label when the chat's first run starts (or at its stored mark when it
+   * was reopened), raised by what any of its agents read, and read by every session route of the chat before each model request. It only rises; the
+   * person's Lower This Chat's Label is the one way down.
+   */
+  private chatMark: SessionMark | undefined;
+  /** Set by prepareLowering for the one change the person's lowering makes. */
+  private pendingLowering: unknown;
+  /** Stops saving and showing the current mark's changes (a new chat or a reopened one replaces the mark). */
+  private stopMarkListener: (() => void) | undefined;
+  /** The policy's default label as the last run read it: the chat's label is shown only above it (D-33). */
+  private defaultLabel: Label = SHIPPED_DEFAULT_LABEL;
+  /** The fingerprints of the labelled text this chat's agents read (D-60): in memory beside the mark, shared with sub-agents, never on record. */
+  private outboundPrints = new OutboundFingerprints();
+  public get outbound(): OutboundFingerprints { return this.outboundPrints; }
+  /** Told the chat's mark whenever it changes, and undefined for a new chat (the status bar shows the label of the chat in view, D-33). */
+  public onLabelChange: ((mark: Mark | undefined) => void) | undefined;
   private readonly verifiable = new Map<string, { model: string; evidence: ResponseEvidence; client: NearAiClient }>();
   /** What the user typed, keyed by a hash of the message the model saw (survives compaction). */
   private display = new Map<string, string>();
@@ -328,6 +361,72 @@ export class AgentConversation {
     private readonly transcripts?: ConversationStore,
     private readonly activity?: ActivityFeed
   ) {}
+
+  /** The project the chat works in. */
+  public get projectRoot(): string { return this.root; }
+
+  /** The chat's mark, or undefined before its first run (a new chat then starts at the project's label). */
+  public get mark(): SessionMark | undefined { return this.chatMark; }
+
+  /** The chat's mark for a run starting now: made at the project's resolved label the first time, and raised by that label every time after. */
+  private async markForRun(gate: GateRuntime): Promise<SessionMark> {
+    const projectLabel = await projectLabelOf(gate, this.root);
+    try {
+      const state = gate.bundleState();
+      this.defaultLabel = state.state === 'valid' ? state.bundle.defaultLabel : SHIPPED_DEFAULT_LABEL;
+    } catch { this.defaultLabel = SHIPPED_DEFAULT_LABEL; }
+    if (this.chatMark === undefined) this.adoptMark(new SessionMark(projectLabel));
+    else this.chatMark.raise(projectLabel, scalesOf(gate));
+    return this.chatMark!;
+  }
+
+  /** Makes `mark` the chat's mark: each change is saved with the chat (raise-only, D-58) and shown on the page and in the status bar (D-33). */
+  private adoptMark(mark: SessionMark | undefined): void {
+    this.stopMarkListener?.();
+    this.stopMarkListener = undefined;
+    this.chatMark = mark;
+    if (mark !== undefined) {
+      this.stopMarkListener = mark.onDidChange((next) => {
+        const lowering = this.pendingLowering;
+        this.pendingLowering = undefined;
+        void this.saveLabel(next, lowering);
+        this.showLabel();
+      });
+      void this.saveLabel(mark.current());
+    }
+    this.showLabel();
+  }
+
+  /** Saves the chat's mark in its thread meta, joined with what is stored (a raise), or, with `lowering`, as the person's lowering. Never throws. */
+  private async saveLabel(mark: Mark, lowering?: unknown): Promise<void> {
+    const store = this.transcripts;
+    if (!(store instanceof ThreadStore)) return;
+    await store.setChatLabel(this.conversationId, mark, lowering).catch(() => undefined);
+  }
+
+  /** The chat's label as the page and the status bar show it: the mark's labels while it is above the policy's default label, otherwise nothing. */
+  public labelText(): string {
+    const mark = this.chatMark?.current();
+    if (mark === undefined || isDefaultMark(mark, this.defaultLabel)) return '';
+    return mark.map((label) => `${label.scale}/${label.level}${label.compartments.length ? ` (${label.compartments.join(', ')})` : ''}`).join(', ');
+  }
+
+  private showLabel(): void {
+    this.post({ type: 'chat-label', text: this.labelText() });
+    try { this.onLabelChange?.(this.chatMark?.current()); } catch { /* a listener never changes the mark */ }
+  }
+
+  /**
+   * The person's Lower This Chat's Label (CLAS-04, D-29) is about to lower the mark: the next change is saved as that lowering (with its signed
+   * declassification, or `true` when this install could not sign one) rather than joined with what is stored. Only the command calls it, right before
+   * SessionMark.lowerByPerson.
+   */
+  public prepareLowering(signed: unknown): void {
+    this.pendingLowering = signed;
+  }
+
+  /** The policy's default label as this chat last read it. */
+  public get chatDefaultLabel(): Label { return this.defaultLabel; }
 
   /** The one gate (GATE-04): the chat sets it, and every tool call of a run, a sub-agent's included, is decided through it. Without one a run is failed closed: only reading and planning run, and no policy is guessed. */
   public gateHost: Pick<GateHost, 'runtimeFor'> | undefined;
@@ -444,6 +543,10 @@ export class AgentConversation {
     let mainTurns = 0;
     // The gate has finished its start-up check before the first call is decided; the main run is an agent working for a person who is here.
     const gate = await this.gateHost?.runtimeFor({ root: this.root, actor: { kind: 'agent', sessionId: this.conversationId, agentId: mainId, agentLabel: 'agent' }, presence: 'person', context: 'interactive' });
+    // The chat's mark starts at the project's resolved label and never below it: a project labelled since the last run raises it (CLAS-04, edge empty).
+    const mark = await this.markForRun(gate ?? unavailableGateRuntime());
+    grants.mark = mark;
+    grants.outbound = this.outbound;
     const run = new AgentRun({
       client: request.client,
       model: request.model,
@@ -508,7 +611,7 @@ export class AgentConversation {
         // Every NEAR request the run makes (sub-agents, safety checks, summaries included) is tagged with it.
         // CLAS-06: and every one of them is routed by the run's session route, decided at the client before anything is sent and recorded in the run's log.
         // With no gate host (a test) the run is wrapped in the default route, so the call is wrapped either way (PR 4a review).
-        const runRoute = gate ? sessionRouteFrom(gate, { attestation: this.routeAttestation }) : defaultSessionRoute();
+        const runRoute = gate ? sessionRouteFrom(gate, { attestation: this.routeAttestation, markOf: () => mark.current() }) : defaultSessionRoute();
         result = await withSpendTag({ kind: 'main', runId, conversationId: this.conversationId, agentId: mainId }, () => withSessionRoute(runRoute, () => run.run(this.messages, abort.signal)));
       } catch (error) {
         this.activity?.agentEnded(mainId, 'failed', error instanceof Error ? error.message : String(error));
@@ -520,6 +623,8 @@ export class AgentConversation {
       } finally {
         // Whatever way the run ended, a list it touched and left unfinished is shown as not confirmed done.
         this.settleTaskList(tasksAtStart);
+        // The label raises its writes queued are written now, at the run's end (D-26); a write that fails never fails the run.
+        await gate?.labels?.(this.root).flushRaises?.().catch(() => undefined);
       }
       this.activity?.agentEnded(mainId, result.outcome);
       await this.recordRunSplit(request, mainId, [...result.usage, ...extraUsage]);
@@ -775,7 +880,26 @@ export class AgentConversation {
     }
     // What was just loaded is already in the log (or is the model's own text); it is never written again.
     for (const message of this.messages) this.logged.add(message);
+    await this.restoreLabel(id);
     return items ? { items } : visibleTurns(transcript.messages, this.display);
+  }
+
+  /**
+   * A reopened chat keeps its label (CLAS-04): its mark starts at the stored mark, or at the default scale's highest level with a sentence naming the
+   * Lower command when the stored value cannot be read. Its fingerprints (D-60) are not stored, so above the shipped default label they are rebuilt from
+   * every tool result in its context (which results were labelled is not stored either, so all of them count: fail closed).
+   */
+  private async restoreLabel(id: string): Promise<void> {
+    const store = this.transcripts;
+    const meta = store instanceof ThreadStore ? await store.meta(id).catch(() => undefined) : undefined;
+    const read = chatLabelOf(meta);
+    if (read.kind === 'none') return;
+    this.adoptMark(new SessionMark(read.kind === 'mark' ? read.mark : [UNREADABLE_CHAT_LABEL]));
+    if (read.kind === 'unreadable') this.post({ type: 'notice', text: UNREADABLE_CHAT_LABEL_TEXT });
+    const mark = this.chatMark!.current();
+    if (!isDefaultMark(mark, SHIPPED_DEFAULT_LABEL)) {
+      for (const message of this.messages) if (message.role === 'tool' && typeof message.content === 'string') this.outboundPrints.addEarlier(message.content);
+    }
   }
 
   /** The stored output of one tool step of this conversation, for a reopened card that was opened (D-07). Only the thread store keeps it. */
@@ -799,6 +923,9 @@ export class AgentConversation {
     this.notifications = [];
     this.shell?.dispose();
     this.shell = undefined;
+    // A new chat starts with no mark (its first run sets it at the project's label) and no fingerprints.
+    this.outboundPrints = new OutboundFingerprints();
+    this.adoptMark(undefined);
   }
 
   public dispose(): void { this.reset(); }

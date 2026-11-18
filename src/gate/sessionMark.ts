@@ -143,7 +143,7 @@ export function recordedModelName(id: string | undefined): string {
 }
 
 /** True when the mark says no more than the policy's default label: empty, or exactly that one label. */
-function isDefaultMark(mark: Mark, defaultLabel: Label): boolean {
+export function isDefaultMark(mark: Mark, defaultLabel: Label): boolean {
   return mark.length === 0 || (mark.length === 1 && mark[0] !== undefined && labelKey(mark[0]) === labelKey(defaultLabel)
     && mark[0].compartments.length === 0 && mark[0].releasability.length === 0 && mark[0].handling.length === 0);
 }

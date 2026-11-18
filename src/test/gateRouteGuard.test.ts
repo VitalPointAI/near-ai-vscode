@@ -651,7 +651,8 @@ test('a main run and its sub-agent each request inside their own route, sharing 
   assert.equal(parent[0]!.route!.attestation, conversation.routeAttestation, 'the run shares the chat\'s attestation state');
   assert.equal(child[0]!.route!.attestation, conversation.routeAttestation, 'the sub-agent shares it too');
   assert.equal(child[0]!.route!.markOf, parent[0]!.route!.markOf, 'the sub-agent reads the lead\'s mark');
-  assert.deepEqual(parent[0]!.route!.markOf(), [], 'the default label until plan 22 gives a chat its mark');
+  // Plan 22: the chat's mark starts at the project's resolved label (here the policy's default label, org/Public), never at an empty mark.
+  assert.deepEqual(parent[0]!.route!.markOf().map((label) => `${label.scale}/${label.level}`), ['org/Public'], 'the chat starts at the project\'s label');
 });
 
 test('runAgentInFolder (comparison, benchmark and role-suite runs) requests inside a route from its gate, and with no gate host from the failed-closed one', async () => {

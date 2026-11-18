@@ -342,6 +342,9 @@ test('sidebar: two conversations run at once with their own transcripts; a backg
     assert.ok(shown.some((message) => message.type === 'assistant-done' && message.replay));
     assert.equal(shown.some((message) => message.type === 'user-turn' && message.text === 'quick question'), false);
     assert.deepEqual(shown.find((message) => message.type === 'conversation-shown'), { type: 'conversation-shown', id: a, busy: false });
+    // PR #87 review round 3: the page clears the chat's label chip on conversation-show, so the shown chat's label is posted again before it is shown.
+    const shownAt = shown.findIndex((message) => message.type === 'conversation-shown');
+    assert.equal(shown[shownAt - 1]?.type, 'chat-label', 'the label is posted again for the conversation shown');
     assert.equal(sidebar.item(a)?.unread, false);
 
     // Each conversation is its own activity (and spend) window.

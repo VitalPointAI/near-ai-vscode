@@ -5,7 +5,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
-import { CLEARANCE_SELF_ASSERTED_TEXT, LABELS_NOT_ACCREDITATION_TEXT } from '../domain/gate/labels';
+import { CLEARANCE_SELF_ASSERTED_TEXT, LABELS_NOT_ACCREDITATION_TEXT, SCALE_PRESETS_CAVEAT_TEXT } from '../domain/gate/labels';
+import { DEFAULT_ROUTING } from '../domain/gate/routing';
 import { USE_BRANCH_LABELS_ACTION } from '../gate/labelMapStore';
 import { FLOOR_CANNOT_SEE_TEXT, FLOOR_EFFECTS_CANNOT_SEE_TEXT, namesCredentialStore } from '../domain/gate/floor';
 import { classifyCommand, MAX_COMMAND_LENGTH, MAX_NESTING } from '../agent/commandSafety';
@@ -13,6 +14,7 @@ import { BUNDLE_FAILURES } from '../domain/gate/bundle';
 import { MANIFEST_IS_A_CLAIM_TEXT, RUNS_ON_THIS_MACHINE_TEXT } from '../domain/gate/words';
 import { MAX_DECISION_LOG_BYTES, MAX_ROTATED_FILES, MODEL_REQUESTS_DIR } from '../gate/decisionLog';
 import { redactCredentialArguments } from '../domain/redaction';
+import { OUTBOUND_EARLIER_TEXT, OUTBOUND_LIMITS_TEXT, OUTBOUND_REOPENED_DOCS_TEXT, OUTBOUND_UNCHECKED_TEXT } from '../agent/outboundCheck';
 
 const ROOT = path.resolve(__dirname, '..', '..');
 const SECURITY = readFileSync(path.join(ROOT, 'SECURITY.md'), 'utf8');
@@ -71,7 +73,7 @@ test('the commands the docs name are the ones package.json contributes, and the 
   }
 });
 
-test('the policy section says what the code does: own storage not the project, own device key (created at activation in every folder), default allows what settings allow, only the command re-signs, no network, records redacted and not synced, labels do not change routing yet', () => {
+test('the policy section says what the code does: own storage not the project, own device key (created at activation in every folder), default allows what settings allow, only the command re-signs, no network, records redacted and not synced, and routing by label is described in its own section', () => {
   for (const phrase of [
     "this extension's own storage",
     'never in your project',
@@ -87,7 +89,7 @@ test('the policy section says what the code does: own storage not the project, o
     'Nothing in a decision needs the network',
     'before a record is written NEAR AI removes',
     'Records are not synced',
-    'does not change where content is sent yet'
+    'Where a labelled chat\'s content may be sent is in [Classification labels and routing](#classification-labels-and-routing)'
   ]) {
     assert.ok(flat(policySection).includes(phrase), phrase);
   }
@@ -324,7 +326,8 @@ test('SECURITY.md says every model request is checked against the routing tiers 
   for (const phrase of [
     '**Model requests.** Before anything is sent to a model',
     'checks the request against the routing tiers in the policy file, using only what is on this computer',
-    'A label does not change where content is sent yet, so every request is at the policy\'s default label',
+    'Each chat\'s label decides where its requests may go',
+    'a chat that read nothing labelled is at the policy\'s default label, which may go to any model',
     'on a fresh install nothing changes where requests go',
     'A request the routing does not allow is not sent',
     'content at a level whose tier needs an attested cloud model stays on this computer for now',
@@ -362,17 +365,19 @@ test('SECURITY.md\'s labels bullet says what 4b makes live, carries both texts w
   for (const phrase of [setLabel, edit, applyDraft, '`.planning/.near-ai/labels.json`, signed with your device key, and travel with the project',
     'anyone who can read the project can read its labels, compartment names included', 'only ever makes a label stricter', 'signed again only after you confirm',
     'or that was deleted, stops agents reading the project', 'through the file tools, searches or a command that names it',
-    'Decision records hold the labels involved and stay on this computer', 'A label does not change where content is sent yet']) {
+    'Decision records hold the labels involved and stay on this computer', 'Where a labelled chat\'s content may be sent is in']) {
     assert.ok(words.includes(phrase), phrase);
   }
   assert.ok(!policySection.includes(EM_DASH));
   assert.doesNotMatch(policySection, /NEAR organization/);
 });
 
-test('README names Set Label, Edit Policy and Apply Policy Draft, says labels do not change where content is sent yet, and links the policy section', () => {
+test('README names Set Label, Lower This Chat\'s Label, Edit Policy and Apply Policy Draft, says a chat\'s label decides where its content is sent, and links the policy section', () => {
   const words = flat(readmePolicy);
-  for (const id of ['nearAi.label.set', 'nearAi.policy.edit', 'nearAi.policy.applyDraft']) assert.ok(words.includes(commandName(id)), id);
-  assert.ok(words.includes('A label does not change where content is sent yet'));
+  for (const id of ['nearAi.label.set', 'nearAi.label.lowerChat', 'nearAi.policy.edit', 'nearAi.policy.applyDraft']) assert.ok(words.includes(commandName(id)), id);
+  assert.ok(words.includes('decides where its content is sent'));
+  assert.ok(!words.includes('does not change where content is sent yet'), 'the 4b sentence is gone');
+  assert.ok(words.includes('(SECURITY.md#classification-labels-and-routing)'));
   assert.ok(words.includes(LABELS_NOT_ACCREDITATION_TEXT.split('. ')[0] ?? ''), 'the first sentence of LABELS_NOT_ACCREDITATION_TEXT');
   assert.ok(words.includes('(SECURITY.md#your-policy-file-and-decision-records)'));
   assert.ok(!readmePolicy.includes(EM_DASH));
@@ -394,4 +399,111 @@ test('SECURITY.md says a branch switch holds reads with Use this branch\'s label
     'a read a command does not show (a path built in a variable) is not seen. A glob in a command (such as `secret/*.md`) is checked against every labelled file it could match, and a glob next to a variable is judged by the strictest label in the project'
   ]) assert.ok(words.includes(phrase), phrase);
   assert.ok(!policySection.includes(EM_DASH));
+});
+
+test('D-60: SECURITY.md says, word for word with the code, what the outbound check of labelled text catches and what it does not', () => {
+  assert.ok(flat(SECURITY).includes(flat(OUTBOUND_LIMITS_TEXT)), 'the limits text is in SECURITY.md');
+  for (const phrase of ['copied or quoted', 'does not catch a paraphrase', 'an encoding such as base64', 'a program the agent starts', 'a planned sandbox around the shell', 'never in a record']) {
+    assert.ok(OUTBOUND_LIMITS_TEXT.includes(phrase), phrase);
+  }
+  assert.ok(!OUTBOUND_LIMITS_TEXT.includes(EM_DASH));
+  assert.ok(!/NEAR organization/.test(OUTBOUND_LIMITS_TEXT));
+});
+
+// Plan 24 (PR 4c, CLAS-07, CLAS-02): the section Classification labels and routing, word for word with the code, in the order of 70-RESEARCH.md section 12.
+const LABELS_HEADING = '### Classification labels and routing';
+
+test('SECURITY.md\'s labels and routing section carries the scales caveat, the clearance sentence and the not-accreditation block word for word, in that order', () => {
+  assert.equal(SECURITY.split(LABELS_HEADING).length - 1, 1);
+  const section = sectionOf(SECURITY, LABELS_HEADING);
+  const words = flat(section);
+  const caveat = words.indexOf(flat(SCALE_PRESETS_CAVEAT_TEXT));
+  const clearance = words.indexOf(flat(CLEARANCE_SELF_ASSERTED_TEXT));
+  const block = section.indexOf(`\n${LABELS_NOT_ACCREDITATION_TEXT}\n`);
+  assert.ok(caveat >= 0, 'SCALE_PRESETS_CAVEAT_TEXT');
+  assert.ok(clearance > caveat, 'CLEARANCE_SELF_ASSERTED_TEXT after the scales');
+  assert.ok(block >= 0, 'LABELS_NOT_ACCREDITATION_TEXT as one block');
+  assert.ok(flat(section.slice(0, block)).length > clearance, 'the block comes last');
+  // The order of what the section says (the must-haves of plan 24).
+  const order = ['**What a label is.**', '**Scales.**', '**Clearances.**', '**The chat\'s label.**', '**What a labelled chat writes.**', '**Routing tiers.**', '**Attested cloud in this version.**', '**Local means this computer.**', '**Calls that could send data off this computer.**'];
+  const at = order.map((heading) => section.indexOf(heading));
+  assert.ok(at.every((index) => index >= 0), JSON.stringify(at));
+  assert.deepEqual([...at].sort((a, b) => a - b), at, 'in order');
+  assert.ok(at[at.length - 1]! < block);
+  for (const phrase of ['`.planning/.near-ai/labels.json`', 'anyone who can read the project can read its labels', 'A sync never lowers a chat\'s label',
+    'Only you lower it, with **NEAR AI: Lower This Chat\'s Label** and a reason that is recorded', 'declassification signed with your device key that they can check',
+    'only when it undoes no raise made there', 'In this version your other computers cannot check another computer\'s key yet, in or outside Team Mode', 'a lowering made on one computer is not applied on the others', 'takes the chat\'s label in the label file, never a lower one',
+    'This version cannot prove that yet, so content at these levels stays on this computer',
+    'Protected B stays on this computer because no CCCS Medium assessment of NEAR AI Cloud was found, unless your organization changes its policy',
+    'unless your organization names another host', 'is refused, whatever the mode']) {
+    assert.ok(words.includes(flat(phrase)), phrase);
+  }
+  assert.ok(!section.includes(EM_DASH));
+  assert.doesNotMatch(section, /NEAR organization/);
+  // Owner answer (2026-11-17): user-facing text names no phase numbers.
+  assert.doesNotMatch(section, /Phase \d/);
+  assert.doesNotMatch(OUTBOUND_LIMITS_TEXT, /Phase \d/);
+  assert.doesNotMatch(sectionOf(SECURITY, '## Known limitations'), /Phase \d/);
+  assert.doesNotMatch(readmePolicy, /Phase \d/);
+});
+
+test('the section\'s routing table is the default routing table, level by level', () => {
+  const section = sectionOf(SECURITY, LABELS_HEADING);
+  const rowOf = (tier: string): string => section.split('\n').find((line) => line.startsWith(`| ${tier} |`)) ?? '';
+  for (const [level, tier] of Object.entries(DEFAULT_ROUTING.levels)) assert.ok(rowOf(tier).includes(`\`${level}\``), `${level} is under ${tier}`);
+  assert.match(rowOf('deny'), /none by default/);
+});
+
+test('the policy section keeps the clearance sentence, and no longer says a label does not change where content is sent', () => {
+  assert.ok(policySection.includes(CLEARANCE_SELF_ASSERTED_TEXT));
+  assert.ok(!flat(policySection).includes('does not change where content is sent yet'));
+  assert.ok(!flat(SECURITY).includes('A label does not change where content is sent yet'));
+});
+
+test('Known limitations lists the section-12 gaps that apply in 4c', () => {
+  const limits = sectionOf(SECURITY, '## Known limitations');
+  for (const phrase of ['Shell reads and network exits are checked from a command\'s text', 'Local-only trusts the address your local runtime is configured with, unless it is loopback',
+    'Labels and the policy are signed by your own key', 'effects are their declarations', 'The label file is readable by anyone who can read the project',
+    'The outbound check catches labelled text copied into a network call, not a paraphrase or an encoding']) {
+    assert.ok(limits.includes(phrase), phrase);
+  }
+});
+
+test('README carries the first sentence of LABELS_NOT_ACCREDITATION_TEXT and the three label commands, and Set Label shows the same constant', () => {
+  const words = flat(readmePolicy);
+  assert.ok(words.includes(LABELS_NOT_ACCREDITATION_TEXT.split('. ')[0] ?? ''));
+  for (const id of ['nearAi.label.set', 'nearAi.label.lowerChat', 'nearAi.policy.edit']) assert.ok(words.includes(commandName(id)), id);
+  const commands = readFileSync(path.join(ROOT, 'src', 'services', 'gateCommands.ts'), 'utf8');
+  assert.ok(commands.includes('placeHolder: LABELS_NOT_ACCREDITATION_TEXT'), 'Set Label shows the constant itself');
+});
+
+test('PR #87 review: SECURITY.md says how a reopened chat treats its earlier results, and the refusal for them says so truly, with the way out', () => {
+  assert.ok(flat(sectionOf(SECURITY, '### Classification labels and routing')).includes(flat(OUTBOUND_REOPENED_DOCS_TEXT)));
+  assert.match(OUTBOUND_EARLIER_TEXT, /cannot tell which of its earlier results came from labelled files/);
+  assert.match(OUTBOUND_EARLIER_TEXT, /NEAR AI: Lower This Chat's Label/);
+  for (const text of [OUTBOUND_REOPENED_DOCS_TEXT, OUTBOUND_EARLIER_TEXT]) {
+    assert.ok(!text.includes(EM_DASH));
+    assert.doesNotMatch(text, /NEAR organization|Phase \d/);
+  }
+});
+
+test('PR #87 review round 2: the refusal of a run whose reading could not be checked says so, names the way out, and never claims labelled content was read', () => {
+  assert.match(OUTBOUND_UNCHECKED_TEXT, /could not be checked for labelled text/);
+  assert.match(OUTBOUND_UNCHECKED_TEXT, /NEAR AI: Lower This Chat's Label/);
+  assert.doesNotMatch(OUTBOUND_UNCHECKED_TEXT, /has read labelled content/);
+  assert.ok(!OUTBOUND_UNCHECKED_TEXT.includes(EM_DASH));
+  assert.doesNotMatch(OUTBOUND_UNCHECKED_TEXT, /NEAR organization|Phase \d/);
+});
+
+test('PR #87 review rounds 2 and 3: SECURITY.md and CHANGELOG say what a written file on another scale really gets, and where a chat starts', () => {
+  const section = flat(sectionOf(SECURITY, '### Classification labels and routing'));
+  for (const phrase of ['A file holds one label. A file already labelled on a scale the chat\'s label also holds is raised on that scale.',
+    'A file labelled only on scales the chat\'s label does not hold is left as it is, so it keeps a label whose tier may let its content go to a private cloud model once those are allowed.']) {
+    assert.ok(section.includes(phrase), phrase);
+  }
+  assert.ok(!section.includes('it is raised only on the scale it already has'), 'the round 2 wording, which was not what the code does, is gone');
+  const changelog = flat(CHANGELOG);
+  assert.ok(changelog.includes('a file already labelled only on a scale the chat\'s label does not hold is left as it is'));
+  assert.ok(changelog.includes('A chat starts at its project\'s label (your policy\'s default label when the project has none), so in an unlabelled project a chat that read nothing labelled works as before.'));
+  assert.ok(!changelog.includes('A chat that read nothing labelled works as before.'));
 });

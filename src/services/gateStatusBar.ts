@@ -4,6 +4,9 @@
 import * as vscode from 'vscode';
 import { RENEW_WINDOW_DAYS, failedClosed, needsRenewal } from '../domain/gate/bundle';
 import type { BundleState } from '../domain/gate/bundle';
+import type { Mark } from '../domain/gate/dominance';
+import type { Label } from '../domain/gate/labels';
+import { isDefaultMark } from '../gate/sessionMark';
 
 export const SHOW_POLICY_COMMAND = 'nearAi.policy.show';
 export const POLICY_STATUS_TEXT = 'Policy';
@@ -37,7 +40,21 @@ export function policyProblem(state: BundleState | undefined, now: number): stri
  * What the item shows for a policy state. `undefined` means the check has not finished yet. A state that says valid but whose end has passed at `now` reads
  * as expired, the same as the gate's own decisions do, so the item never claims a policy the gate would refuse.
  */
-export function gateStatusText(state: BundleState | undefined, now: number): GateStatusShown {
+export function gateStatusText(state: BundleState | undefined, now: number, chatMark?: ChatMarkShown): GateStatusShown {
+  const shown = policyStatusText(state, now);
+  // D-33: the label of the chat in view, beside the policy state, while it is above the default label; nothing for it at the default or with no chat.
+  if (chatMark === undefined || chatMark.mark.length === 0 || isDefaultMark(chatMark.mark, chatMark.defaultLabel)) return shown;
+  const label = chatMark.mark.map((each) => `${each.scale}/${each.level}`).join(', ');
+  return { ...shown, text: `${shown.text} · ${label}`, tooltip: `${shown.tooltip} The chat in view is labelled ${label}: its label decides where its content may be sent.` };
+}
+
+/** The chat in view's mark and the default label it is compared with, for the status bar (D-33). */
+export interface ChatMarkShown {
+  readonly mark: Mark;
+  readonly defaultLabel: Label;
+}
+
+function policyStatusText(state: BundleState | undefined, now: number): GateStatusShown {
   if (state === undefined) return { text: POLICY_CHECKING_TEXT, tooltip: CHECKING_TOOLTIP, warning: false };
   const problem = policyProblem(state, now);
   if (problem !== undefined || state.state !== 'valid') {
@@ -66,6 +83,8 @@ export interface GateStatusTimers {
 export interface GateStatusBarOptions {
   /** The host's state and the time now, read again each time the bar's words are due to change. Without it the bar changes only when `update` is called. */
   read?: () => { state: BundleState | undefined; now: number };
+  /** The chat in view's mark, read each time the item is shown (D-33). */
+  chatMark?: () => ChatMarkShown | undefined;
   timers?: GateStatusTimers;
 }
 
@@ -120,8 +139,11 @@ export function createGateStatusBar(options: GateStatusBarOptions = {}): GateSta
     armed = true;
     handle = timers.set(refresh, Math.min(MAX_TIMER_DELAY_MS, Math.max(1, Math.ceil(delayMs))));
   };
+  const chatMarkNow = (): ChatMarkShown | undefined => {
+    try { return options.chatMark?.(); } catch { return undefined; }
+  };
   const show = (state: BundleState | undefined, now: number): void => {
-    apply(gateStatusText(state, now));
+    apply(gateStatusText(state, now, chatMarkNow()));
     disarm();
     const next = nextStatusChange(state, now);
     if (next !== undefined && !disposed) arm(next - now);

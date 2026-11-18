@@ -20,13 +20,26 @@ import { DecisionLog, INSTALL_LOG_KEY, projectLogKey } from './decisionLog';
 import type { LogKind } from './decisionLog';
 import type { SessionRoute } from './sessionMark';
 import { SHIPPED_DEFAULT_LABEL } from '../domain/gate/bundle';
-import { moveLabelEntry } from '../domain/gate/labelMap';
+import { labelMapKey, moveLabelEntry, resolveLabel, setLabelEntry } from '../domain/gate/labelMap';
+import { joinLabels, raiseMark, sameMark } from '../domain/gate/dominance';
+import type { Mark } from '../domain/gate/dominance';
+import { DEFAULT_ROUTING, TIER_ORDER, tierForLabel } from '../domain/gate/routing';
+import type { RoutingTable } from '../domain/gate/routing';
 import type { LabelMapPayload } from '../domain/gate/labelMap';
 import { SCALE_PRESETS } from '../domain/gate/labels';
 import type { Clearance, Label, LabelEventId, ScaleMapping, ScaleTable } from '../domain/gate/labels';
-import { LabelMapError, LabelReader, updateLabelMap } from './labelMapStore';
-import type { LabelMapQuestion, LabelMapWrite } from './labelMapStore';
+import { LabelMapError, LabelReader, lastVerifiedLabelMap, updateLabelMap } from './labelMapStore';
+import type { LabelLowering, LabelMapQuestion, LabelMapWrite } from './labelMapStore';
 import type { LabelMapState } from '../domain/gate/labelMap';
+import { NO_KNOWN_KEYS } from '../domain/team/keyStatus';
+import type { KeyStatusLookup } from '../domain/team/keyStatus';
+import { PayloadError } from '../domain/team/signedPayload';
+import type { SignedPayload } from '../domain/team/signedPayload';
+import { identityDir, loadDeviceIdentity } from '../team/identity';
+import { localKeyStatus } from '../team/keyHistory';
+import { registerLabelLoweringJudge, registerLoweringOutcomes } from '../domain/gate/lowerings';
+import { chatLoweringKeys, judgeChatLowering, loweringRejectedText, signChatLowering } from './chatLabel';
+import type { ChatLowering } from './chatLabel';
 
 const DEVICE_UNKNOWN = 'device-unknown';
 const POLICY_SESSION = 'policy';
@@ -87,7 +100,23 @@ export interface GateHostOptions {
    * activation adapter can offer the one-click accept of D-61. Without it the message goes to onProblem.
    */
   readonly onLabelNotice?: (root: string, state: LabelMapState, message: string) => void;
+  /**
+   * Where the refusal of an automatic label raise goes (the label file does not verify, or is held), once per window per project, so the activation adapter
+   * can offer Sign Again (D-53). Without it the message goes to onProblem.
+   */
+  readonly onLabelRaiseRefused?: (root: string, message: string) => void;
+  /** How long a written file's label raise waits to be written with others (RAISE_WRITE_DELAY_MS); tests pass a short one. */
+  readonly raiseDelayMs?: number;
+  /** Told, once per signature per window, when a merge did not apply a lowering made on another copy of a chat, with the sentence for that chat (D-58). */
+  readonly onLoweringRejected?: (chatId: string, sentence: string) => void;
 }
+
+/** Thrown inside the writer when, under its lock, nothing would rise: nothing is written. */
+const NOTHING_TO_RAISE = 'Nothing was written: no label would rise.';
+
+/** Said once when a raise a labelled chat's write needs cannot be written automatically. */
+export const LABEL_RAISE_REFUSED_TEXT =
+  "A file a labelled chat wrote could not take the chat's label, because the label file is not one this computer can sign automatically. The chat itself keeps its label. Choose Sign Again to sign the label file with this computer's key and add the label.";
 
 export interface RuntimeRequest {
   /** The open project, whose log receives the run's records. None (or empty) for a window with no folder: the bundle is per install, so the run is still decided by it, and its records go to the install log. */
@@ -123,6 +152,12 @@ export class GateHost {
   private readonly labelReaders = new Map<string, LabelReader>();
   /** Problems with automatic label writes already told this window, so each is said once. */
   private readonly toldLabelProblems = new Set<string>();
+  /** The key sources signed chat lowerings are checked against (D-58): this install's key history, loaded by refreshLoweringKeys. */
+  private loweringKeys: KeyStatusLookup = NO_KNOWN_KEYS;
+  /** Signed lowerings already recorded this window, by signature, so each is recorded and said once. */
+  private readonly judgedLowerings = new Set<string>();
+  /** Raises an automatic write could not make (an unverified label file), by project, kept for Sign Again. */
+  private readonly refusedRaises = new Map<string, Map<string, Label[]>>();
 
   public constructor(private readonly options: GateHostOptions) {}
 
@@ -210,7 +245,9 @@ export class GateHost {
             else this.options.onProblem?.(message);
           } catch { /* a notice never changes a decision */ }
         },
-        move: (from, to) => this.followRename(root, from, to)
+        move: (from, to) => this.followRename(root, from, to),
+        writeRaises: (raises) => this.writeRaises(root, raises).then(() => undefined),
+        ...(this.options.raiseDelayMs === undefined ? {} : { raiseDelayMs: this.options.raiseDelayMs })
       });
     }
     this.labelReaders.delete(key);
@@ -230,7 +267,7 @@ export class GateHost {
    * Changes a project's labels through the one writer (updateLabelMap), with this policy's scales, and has the project's reader read the file again.
    * `confirm` is the person's answer before an unverified map is signed again or the last verified labels are restored; with none, such a write is refused.
    */
-  public async changeLabels(root: string, change: (map: LabelMapPayload) => LabelMapPayload, confirm?: (question: LabelMapQuestion) => Promise<boolean>): Promise<LabelMapWrite> {
+  public async changeLabels(root: string, change: (map: LabelMapPayload) => LabelMapPayload, confirm?: (question: LabelMapQuestion) => Promise<boolean>, options: { readonly lowering?: LabelLowering } = {}): Promise<LabelMapWrite> {
     await this.start();
     const policy = this.labelPolicy();
     try {
@@ -240,10 +277,20 @@ export class GateHost {
         scales: policy.scales,
         defaultLabel: policy.defaultLabel,
         ...(confirm === undefined ? {} : { confirm }),
+        ...(options.lowering === undefined ? {} : { lowering: options.lowering }),
         ...(this.options.now === undefined ? {} : { now: this.options.now })
       });
     } finally {
       this.labelReaders.get(projectLogKey(root))?.invalidate();
+    }
+  }
+
+  /** The labels this computer last verified for a project, or undefined (PR #85 review: Set Label judges a lowering against them over a held file). */
+  public async lastVerifiedLabels(root: string): Promise<LabelMapPayload | undefined> {
+    try {
+      return await lastVerifiedLabelMap(this.options.globalStorageDir, this.options.secrets, root, this.labelPolicy().scales);
+    } catch {
+      return undefined;
     }
   }
 
@@ -256,7 +303,24 @@ export class GateHost {
     const policy = this.labelPolicy();
     const view = await this.labelsFor(root).view(policy.scales);
     if (view.state !== 'other-revision') return false;
-    const written = await this.changeLabels(root, (map) => map, async (question) => question === 'accept');
+    // The check above is outside the writer's lock, so the file can change before the write (PR #85 review). The writer reads it again under its lock and
+    // asks `accept` only when it is still another revision; the change writes only after that question, so nothing is signed, and no accept recorded,
+    // for a file that is no longer the one the person accepted.
+    let asked = false;
+    let written: LabelMapWrite;
+    try {
+      written = await this.changeLabels(root, (map) => {
+        if (!asked) throw new LabelMapError('Nothing was written: the label file changed before it could be accepted.');
+        return map;
+      }, async (question) => {
+        if (question !== 'accept') return false;
+        asked = true;
+        return true;
+      });
+    } catch (error) {
+      if (!asked && error instanceof LabelMapError) return false;
+      throw error;
+    }
     this.recordLabelEvent(root, { event: 'label.branch-accepted', path: '', reason: `A person accepted the project's signed label file (for example another branch's) as current. It is now revision ${String(written.revision)}.` });
     return true;
   }
@@ -265,7 +329,7 @@ export class GateHost {
    * Records a label event (GATE-07) in the project's log, the way the policy's events are written: the event as the operation, the project-relative path as
    * the resource (`project` for the project itself, never a machine path), the new label, and the reason a person gave.
    */
-  public recordLabelEvent(root: string, event: { readonly event: LabelEventId; readonly path: string; readonly label?: Label; readonly reason?: string }): void {
+  public recordLabelEvent(root: string, event: { readonly event: LabelEventId; readonly path: string; readonly label?: Label; readonly reason?: string; readonly mark?: Mark; readonly from?: Mark }): void {
     try {
       const record = buildDecisionRecord({
         recordId: randomUUID(),
@@ -280,11 +344,144 @@ export class GateHost {
         rule: event.event,
         ...(event.reason === undefined || event.reason === '' ? {} : { reason: event.reason.slice(0, 500) }),
         bundleHash: this.current.state === 'valid' ? this.current.hash : '',
-        ...(event.label === undefined ? {} : { label: event.label })
+        ...(event.label === undefined ? {} : { label: event.label }),
+        // One shape for every label event (PR #87 review round 3): `label` the target, `mark` the chat's mark after the event, `from` the mark before it.
+        ...(event.mark === undefined || event.mark.length === 0 ? {} : { mark: event.mark }),
+        ...(event.from === undefined || event.from.length === 0 ? {} : { from: event.from })
       });
       void this.logFor(root).append({ ...record, api: { ...record.api, operation: event.event } });
     } catch {
       // A record that cannot be kept never changes the label.
+    }
+  }
+
+  /**
+   * Writes the label raises a labelled chat's writes queued (D-26, D-29): each written file's entry takes the chat's mark where the mark is above the file's
+   * label now, never lower, in one signed write. Nothing is written when nothing rises, so with the default mark the label file is never touched. A file
+   * that does not verify (or holds reads) is never signed automatically (D-53): nothing is written, the raises are kept for Sign Again, and the person is
+   * told once. Returns whether a write was made.
+   */
+  public async writeRaises(root: string, raises: ReadonlyMap<string, readonly Label[]>): Promise<boolean> {
+    const policy = this.labelPolicy();
+    const routing = this.routingNow();
+    const proposed = new Map<string, readonly Label[]>();
+    for (const [relative, mark] of raises) {
+      const key = labelMapKey(relative, false);
+      if (key.ok) proposed.set(key.value, [...(proposed.get(key.value) ?? []), ...mark]);
+    }
+    // Worked out inside the writer's lock, against the map it reads there (PR #87 review): a label another writer raised meanwhile is the one joined with,
+    // so this write can only keep or raise it. Nothing rises: nothing is written at all.
+    const raised = new Map<string, { readonly label: Label; readonly from: Mark }>();
+    const rise = (map: LabelMapPayload): Map<string, { readonly label: Label; readonly from: Mark }> => {
+      const out = new Map<string, { readonly label: Label; readonly from: Mark }>();
+      for (const [key, mark] of proposed) {
+        const current = resolveLabel(key, { verified: map, bundleDefault: policy.defaultLabel, scales: policy.scales });
+        const from = current.origin === 'default' ? [] : current.mark;
+        const label = raisedEntryLabel(from, mark, policy.scales, routing);
+        if (label !== undefined) out.set(key, { label, from });
+      }
+      return out;
+    };
+    // A cheap look first, at the labels as last read: when nothing would rise, the writer is not asked at all, so a chat at the default mark never touches
+    // labels.json and an unverified map is not reported for nothing. The look decides only whether to ask; what is written is worked out under the lock.
+    const view = await this.labelsFor(root).view(policy.scales);
+    const mightRise = [...proposed].some(([key, mark]) => {
+      const current = view.resolve(key, policy.defaultLabel);
+      return raisedEntryLabel(current.origin === 'default' ? [] : current.mark, mark, policy.scales, routing) !== undefined;
+    });
+    if (!mightRise) return false;
+    try {
+      await this.changeLabels(root, (map) => {
+        let out = map;
+        for (const [key, entry] of rise(map)) { out = setLabelEntry(out, key, entry.label); raised.set(key, entry); }
+        if (raised.size === 0) throw new LabelMapError(NOTHING_TO_RAISE);
+        return out;
+      });
+    } catch (error) {
+      if (error instanceof LabelMapError && error.message === NOTHING_TO_RAISE) return false;
+      const kept = this.refusedRaises.get(projectLogKey(root)) ?? new Map<string, Label[]>();
+      for (const [relative, mark] of raises) kept.set(relative, [...(kept.get(relative) ?? []), ...mark]);
+      this.refusedRaises.set(projectLogKey(root), kept);
+      const told = `raise-refused:${projectLogKey(root)}`;
+      if (!this.toldLabelProblems.has(told)) {
+        this.toldLabelProblems.add(told);
+        const message = error instanceof LabelMapError ? `${LABEL_RAISE_REFUSED_TEXT} ${error.message}` : LABEL_RAISE_REFUSED_TEXT;
+        try {
+          if (this.options.onLabelRaiseRefused !== undefined) this.options.onLabelRaiseRefused(root, message);
+          else this.options.onProblem?.(message);
+        } catch { /* a notice never changes a decision */ }
+      }
+      return false;
+    }
+    for (const [key, entry] of raised) this.recordLabelEvent(root, { event: 'label.set', path: key, label: entry.label, ...(entry.from.length === 0 ? {} : { from: entry.from }), reason: 'A file a labelled chat wrote took the chat\'s label.' });
+    return true;
+  }
+
+  /**
+   * Sign Again after a refused raise (D-53): the person confirmed, so the label file is signed again keeping only what raises (or the labels this computer
+   * last verified are restored), then the raises kept for it are written. Returns whether they were.
+   */
+  public async signAgainForRaises(root: string): Promise<boolean> {
+    await this.changeLabels(root, (map) => map, async (question) => question === 'resign' || question === 'restore');
+    const kept = this.refusedRaises.get(projectLogKey(root));
+    this.refusedRaises.delete(projectLogKey(root));
+    this.toldLabelProblems.delete(`raise-refused:${projectLogKey(root)}`);
+    return kept === undefined ? false : this.writeRaises(root, kept);
+  }
+
+  private routingNow(): RoutingTable {
+    const state = this.bundleState();
+    return state.state === 'valid' ? state.bundle.routing : DEFAULT_ROUTING;
+  }
+
+  /**
+   * Makes every thread merge in this window judge signed lowerings with this host's key sources (D-58), and records each one it judged: an applied one as
+   * label.declassify, a rejected one as label.declassify-rejected with its cause, once per signature per window, in the open project's log. Returns a
+   * function that undoes the registration (the activation disposes it).
+   */
+  public registerLabelLowerings(): () => void {
+    void this.refreshLoweringKeys();
+    const stopJudge = registerLabelLoweringJudge((lowering, context) => judgeChatLowering(lowering, context, this.loweringKeys));
+    const stopOutcomes = registerLoweringOutcomes((outcome) => {
+      const sig = (outcome.lowering as { sig?: unknown } | null)?.sig;
+      const key = `${outcome.chatId}:${typeof sig === 'string' ? sig : JSON.stringify(outcome.lowering ?? null).slice(0, 200)}`;
+      if (this.judgedLowerings.has(key)) return;
+      this.judgedLowerings.add(key);
+      const root = this.projectRootNow() ?? '';
+      const payload = (outcome.lowering as { payload?: Partial<ChatLowering> } | null)?.payload;
+      if (outcome.applied) {
+        // The record names the label the merge put the chat at (the same result, so record and state agree), not a value read from either copy.
+        if (outcome.result === undefined || outcome.result.length === 0) return;
+        this.recordLabelEvent(root, { event: 'label.declassify', path: `chat ${outcome.chatId}`, label: outcome.result[0]!, mark: outcome.result, ...(outcome.from === undefined ? {} : { from: outcome.from }), reason: `Lowered on another copy of this chat: ${typeof payload?.reason === 'string' ? payload.reason : 'no reason given'}` });
+        return;
+      }
+      const sentence = loweringRejectedText(outcome.cause ?? 'does-not-verify');
+      this.recordLabelEvent(root, { event: 'label.declassify-rejected', path: `chat ${outcome.chatId}`, reason: sentence });
+      try { this.options.onLoweringRejected?.(outcome.chatId, sentence); } catch { /* a notice never changes a merge */ }
+    });
+    return () => { stopJudge(); stopOutcomes(); };
+  }
+
+  /** Reads this install's key history again for the lowering judge (at registration, and after this install signs a lowering). */
+  public async refreshLoweringKeys(): Promise<void> {
+    try {
+      this.loweringKeys = chatLoweringKeys(await localKeyStatus(identityDir(this.options.globalStorageDir), this.options.secrets));
+    } catch {
+      this.loweringKeys = NO_KNOWN_KEYS;
+    }
+  }
+
+  /** Signs a person's lowering with this install's device key (D-58), or undefined when this install cannot sign (the chat is still lowered here). */
+  public async signChatLowering(lowering: ChatLowering): Promise<SignedPayload<ChatLowering> | undefined> {
+    try {
+      const identity = await loadDeviceIdentity(this.options.secrets);
+      if (identity === undefined) return undefined;
+      const signed = signChatLowering(identity, lowering);
+      await this.refreshLoweringKeys();
+      return signed;
+    } catch (error) {
+      if (error instanceof PayloadError) return undefined;
+      return undefined;
     }
   }
 
@@ -298,7 +495,7 @@ export class GateHost {
         if (!affected) return map;
         moved = true;
         return moveLabelEntry(map, from, to);
-      });
+      }, undefined, { lowering: { kind: 'move' } });
     } catch (error) {
       const message = error instanceof LabelMapError ? `A label was not moved with a renamed file. ${error.message}` : 'A label was not moved with a renamed file.';
       if (!this.toldLabelProblems.has(message)) {
@@ -568,4 +765,35 @@ export function runtimePerRoot(host: Pick<GateHost, 'runtimeFor'> | undefined, r
     }
     return found;
   };
+}
+
+/**
+ * The one label a written file's entry takes from the chat's mark (D-26, D-29, PR #87 review): undefined when nothing rises. It is always a join, never a
+ * replacement: with a label on the path now (its own entry, or a folder's or the project's), the mark's labels on that label's scale are joined onto it, and
+ * a mark with nothing on that scale changes nothing (a map entry holds one label, and another scale in its place would lower it on its own; the chat's own
+ * mark still keeps what it holds on this computer). With no label on the path, the mark's label whose routing tier is strictest is written.
+ */
+export function raisedEntryLabel(current: Mark, mark: readonly Label[], scales: ScaleTable, routing: RoutingTable): Label | undefined {
+  const tier = (label: Label): number => {
+    try { return TIER_ORDER[tierForLabel(label, routing)]; } catch { return TIER_ORDER.deny; }
+  };
+  const fold = (start: Label, labels: readonly Label[]): Label => labels.reduce((held, label) => (label.scale === held.scale ? joinLabels(held, label, scales) ?? held : held), start);
+  if (current.length > 0) {
+    // Each scale the path's label holds that the mark also holds is joined; a map entry holds one label, so of those that rise, the one whose routing tier
+    // is strictest is written (PR #87 review round 2: a label on several scales no longer means nothing is written).
+    let best: Label | undefined;
+    for (const held of current) {
+      if (!mark.some((each) => each.scale === held.scale)) continue;
+      const joined = fold(held, mark);
+      if (sameMark([joined], [held])) continue;
+      if (best === undefined || tier(joined) > tier(best)) best = joined;
+    }
+    return best;
+  }
+  let best: Label | undefined;
+  for (const label of mark) {
+    const joined = fold(label, mark);
+    if (best === undefined || tier(joined) > tier(best)) best = joined;
+  }
+  return best;
 }

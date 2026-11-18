@@ -125,6 +125,7 @@ export function sidebarHtml(webview: Pick<vscode.Webview, 'asWebviewUri' | 'cspS
       <p id="sync-detail" class="sync-detail" data-must-read hidden></p>
       <span class="bar-break" aria-hidden="true"></span>
       <select id="model" aria-label="Model"><option value="">Loading models…</option></select>
+      <span id="chat-label" class="chip chat-label" role="status" title="This chat's label: it decides where its content may be sent" hidden></span>
       <button id="policy" type="button" aria-haspopup="listbox" aria-expanded="false" aria-controls="policy-menu" title="How much the agent may do without asking">Approval…</button>
       <button id="advance" type="button" aria-haspopup="listbox" aria-expanded="false" aria-controls="advance-menu" hidden title="Whether a workflow carries on to its next step by itself, or stops so you can choose">Stops each step ▾</button>
     <div id="advance-menu" role="listbox" aria-label="Between steps" hidden></div>

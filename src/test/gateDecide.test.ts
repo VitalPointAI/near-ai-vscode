@@ -275,7 +275,7 @@ test('GATE_RULE_IDS lists every rule id once, including the floor, bundle, manif
   assert.equal(new Set(GATE_RULE_IDS).size, GATE_RULE_IDS.length);
   for (const rule of [
     ...FLOOR_RULE_ORDER, 'bundle.failed-closed', 'bundle.unavailable', 'bundle.ceiling.context', 'bundle.ceiling.mode', 'bundle.ceiling.unattended-mcp', 'manifest.context',
-    'manifest.effects-unknown', 'label.dominance', 'label.no-agent-tools', 'label.network-at-mark', 'route.deny', 'route.any-cloud', 'taint.held', 'settings.emergency-stop', 'settings.read-plan',
+    'manifest.effects-unknown', 'label.dominance', 'label.no-agent-tools', 'label.network-at-mark', 'label.outbound-match', 'route.deny', 'route.any-cloud', 'taint.held', 'settings.emergency-stop', 'settings.read-plan',
     'settings.auto-safe-tool', 'settings.mode.edits', 'settings.run-grant.edits', 'settings.deny-list', 'settings.engagement-grant', 'settings.run-grant.command',
     'settings.allow-rule', 'settings.mode.fully-autonomous', 'settings.mode.other', 'settings.auto.classifier', 'settings.unattended-verification',
     'settings.risk.outside-workspace', 'settings.risk.installs', 'settings.safety-model', 'settings.sensitive-read', 'settings.mcp-approval', 'settings.tool-forbidden'
@@ -285,7 +285,7 @@ test('GATE_RULE_IDS lists every rule id once, including the floor, bundle, manif
   // held, each under a rule of its own.
   assert.ok(GATE_RULE_IDS.includes('call.outside-workspace'));
   assert.ok(GATE_RULE_IDS.includes('taint.credential-read'));
-  assert.equal(GATE_RULE_IDS.length, FLOOR_RULE_ORDER.length + 7 + 3 + ROUTE_RULES.length + 2 + 19 + PRE_GATE_RULES.length + 1);
+  assert.equal(GATE_RULE_IDS.length, FLOOR_RULE_ORDER.length + 7 + 4 + ROUTE_RULES.length + 2 + 19 + PRE_GATE_RULES.length + 1);
 });
 
 // ---- Effects unknown: an empty effect list fails closed (PR 1 review fold-in) ----

@@ -84,6 +84,11 @@ export interface DecisionRecordInput {
    * label, beside the single `label` field. Optional, so the record stays version 1.
    */
   readonly mark?: readonly Label[];
+  /**
+   * A label event's previous mark (PR #87 review round 3): on every label event `mark` is the chat's mark after the event, `label` the event's target, and
+   * `from` the mark before it. Optional, so the record stays version 1.
+   */
+  readonly from?: readonly Label[];
   /** What the answer check after a response found (plan 25). Never a report, a key or a fingerprint. */
   readonly attestation?: 'verified' | 'failed' | 'unavailable';
   /** The connection binding state the route read (D-50). Never the host or the fingerprint. */
@@ -164,6 +169,7 @@ export interface DecisionRecord {
       /** The rule a writer gave that nobody knows; the record's rule is then RECORD_UNKNOWN_RULE. */
       readonly unknownRule?: string;
       readonly mark?: readonly Label[];
+      readonly from?: readonly Label[];
       readonly attestation?: 'verified' | 'failed' | 'unavailable';
       readonly connection?: ConnectionBindingState;
     };
@@ -289,6 +295,7 @@ export function buildDecisionRecord(input: DecisionRecordInput): DecisionRecord 
         ...(input.tier === undefined ? {} : { tier: input.tier }),
         ...(input.shadowFloor === undefined ? {} : { shadowFloor: input.shadowFloor }),
         ...(input.mark === undefined ? {} : { mark: input.mark.map(copyLabel) }),
+        ...(input.from === undefined ? {} : { from: input.from.map(copyLabel) }),
         ...(input.attestation === undefined ? {} : { attestation: input.attestation }),
         ...(input.connection === undefined ? {} : { connection: input.connection })
       }

@@ -2,7 +2,7 @@ import * as path from 'node:path';
 import { beginRun } from '../agent/runActivity';
 import type { AgentTool, ToolContext } from '../agent/tools';
 import { DEFAULT_RULES, RunGrants, decidePermission, intrusiveGrantDecision, type IntrusiveStep, type PermissionDecision, type PermissionRules } from '../agent/permissions';
-import { effectsOfStep, gateStep, recordApprovalReply, unavailableGateRuntime } from '../agent/gateAdapter';
+import { beginLabelledRead, effectsOfStep, gateStep, recordApprovalReply, unavailableGateRuntime } from '../agent/gateAdapter';
 import type { GateRuntime, SettingsAnswer } from '../domain/gate/decide';
 import { fromActionCapability } from '../domain/gate/vocabulary';
 import type { Capability } from '../domain/gate/vocabulary';
@@ -373,8 +373,16 @@ async function cyberRun(input: CyberRunInput): Promise<CyberRunResult> {
       const stepEffects = hostTool ? { effects: hostToolEffects(target), floorFacts: {} } : await effectsOfStep(selected!.tool, stepRaw(selected!, step), input.toolContext.root, scope.paths, gate.locations ?? {});
       const gated = await gateStep(gate, {
         tool: step.tool, callId, effects: stepEffects.effects, floorFacts: stepEffects.floorFacts, policy: input.policy, settings,
+        ...(input.grants.mark === undefined ? {} : { mark: input.grants.mark }), ...(input.grants.outbound === undefined ? {} : { outbound: input.grants.outbound }),
+        // Everything the step would send, for the outbound check (PR #87 review round 3): its tool's arguments, its args and its target, with its command.
+        raw: { ...(hostTool ? {} : stepRaw(selected!, step)), args: step.args, target: step.target },
+        // A remote add-on tool can send whatever it declares (PR #87 review round 6): its real remote-ness reaches the gate.
+        runsRemote: selected?.tool.manifest.runsOn === 'remote',
         ...('resource' in stepEffects && stepEffects.resource !== undefined ? { resource: stepEffects.resource } : {}),
-        ...(command === undefined ? {} : { command, root: input.toolContext.root }), ...(hostTool ? {} : { manifestContexts: selected!.tool.manifest.contexts })
+        // Every step names the project folder (PR #87 review round 3), so what a probe reads is checked against its labels and raises the scan's mark, as a
+        // command's words always were; before, only a step with a command named it.
+        root: input.toolContext.root,
+        ...(command === undefined ? {} : { command }), ...(hostTool ? {} : { manifestContexts: selected!.tool.manifest.contexts })
       });
       let outcome = gated.decision.outcome;
       if (outcome === 'ask') {
@@ -401,31 +409,42 @@ async function cyberRun(input: CyberRunInput): Promise<CyberRunResult> {
         continue;
       }
 
-      emit({ type: 'step-started', step });
+      // The step runs: what it reads raises the run's own mark before it runs, as a chat call's does at the loop's hook (D-54).
+      // The one shared hook (D-54): it raises the mark now and feeds the step's output to the fingerprints when it is settled below (D-60).
+      // The read is settled in a finally (PR #87 review round 5), so no throw on the way (an event listener, the tool) can leave it open, which would
+      // refuse every call that could send for the rest of the scan.
+      const read = beginLabelledRead(gate, input.grants, gated.readLabels, gated.maySend, step.tool);
       const started = now().getTime();
-      let output: string;
+      let output = '';
       let finding: Finding | undefined;
       // The host-tool tree's evidence hash, when this step ran one, so the finding can carry it.
       let ranHostTool: { evidenceHash: string } | undefined;
       try {
-        if (hostTool && input.hostTools) {
-          // The tool's own stdout bytes are stored verbatim and hashed; only the text below is trimmed.
-          const host = await runHostTool({ runId, tool: hostTool, target, timeoutMs: step.safetyFlags.maxDurationMs, signal: input.signal }, input.hostTools);
-          ranHostTool = { evidenceHash: host.evidenceHash };
-          output = host.status === 'absent' ? host.stdoutText : `${host.stdoutText}\n\n[${hostTool} ${host.status}; exit ${host.provenance.exitCode ?? 'n/a'}; evidence ${host.evidenceHash.slice(0, 12)}…]`;
-          await record({ tool: step.tool, arguments: JSON.stringify({ argv: host.provenance.argv, version: host.provenance.version, exitCode: host.provenance.exitCode, durationMs: host.provenance.durationMs, format: host.provenance.format, jsonFlagVerified: host.provenance.jsonFlagVerified }), result: output, modelReasoning: step.expectedResult, evidenceHash: host.evidenceHash });
-          records.push({ id: step.id, action: step.action, target: step.target, result: output.slice(0, 1_000), reasoning: step.expectedResult, evidenceHashes: [host.evidenceHash], compacted: false });
-          emit({ type: 'step-finished', step, result: output.slice(0, 1_000), evidenceHash: host.evidenceHash });
-          transcript.push(`$ ${host.provenance.argv.join(' ')}\n${output.slice(0, 600)}`);
-          if (host.status === 'absent') emit({ type: 'notice', text: `${hostTool} is not installed: ${host.stdoutText}` });
-          continue;
+        emit({ type: 'step-started', step });
+        try {
+          if (hostTool && input.hostTools) {
+            // The tool's own stdout bytes are stored verbatim and hashed; only the text below is trimmed.
+            const host = await runHostTool({ runId, tool: hostTool, target, timeoutMs: step.safetyFlags.maxDurationMs, signal: input.signal }, input.hostTools);
+            ranHostTool = { evidenceHash: host.evidenceHash };
+            output = host.status === 'absent' ? host.stdoutText : `${host.stdoutText}\n\n[${hostTool} ${host.status}; exit ${host.provenance.exitCode ?? 'n/a'}; evidence ${host.evidenceHash.slice(0, 12)}…]`;
+            await record({ tool: step.tool, arguments: JSON.stringify({ argv: host.provenance.argv, version: host.provenance.version, exitCode: host.provenance.exitCode, durationMs: host.provenance.durationMs, format: host.provenance.format, jsonFlagVerified: host.provenance.jsonFlagVerified }), result: output, modelReasoning: step.expectedResult, evidenceHash: host.evidenceHash });
+            records.push({ id: step.id, action: step.action, target: step.target, result: output.slice(0, 1_000), reasoning: step.expectedResult, evidenceHashes: [host.evidenceHash], compacted: false });
+            emit({ type: 'step-finished', step, result: output.slice(0, 1_000), evidenceHash: host.evidenceHash });
+            transcript.push(`$ ${host.provenance.argv.join(' ')}\n${output.slice(0, 600)}`);
+            if (host.status === 'absent') emit({ type: 'notice', text: `${hostTool} is not installed: ${host.stdoutText}` });
+            read.settle(output);
+            continue;
+          }
+          const toolInput = selected!.input ? selected!.input(step) : toolInputFor(step.tool, step);
+          const parsed = selected!.tool.parse(toolInput);
+          output = await selected!.tool.run(parsed, runContext(input));
+          finding = selected!.findings?.()[0] ?? extractFinding(selected!, output, step);
+        } catch (error) {
+          output = error instanceof HostToolError ? `refused: ${error.message}` : `error: ${(error as Error).message}`;
         }
-        const toolInput = selected!.input ? selected!.input(step) : toolInputFor(step.tool, step);
-        const parsed = selected!.tool.parse(toolInput);
-        output = await selected!.tool.run(parsed, runContext(input));
-        finding = selected!.findings?.()[0] ?? extractFinding(selected!, output, step);
-      } catch (error) {
-        output = error instanceof HostToolError ? `refused: ${error.message}` : `error: ${(error as Error).message}`;
+        read.settle(output);
+      } finally {
+        read.settle(undefined);
       }
       const durationMs = now().getTime() - started;
       const evidenceHash = await input.evidence.put(runId, `[${step.tool}] ${step.target}\n${output}`);

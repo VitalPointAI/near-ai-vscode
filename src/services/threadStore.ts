@@ -16,6 +16,14 @@ import { isSyntheticMessage, messagesToEntries } from '../domain/state/threadCap
 import { threadLines, threadTip, unionEntries, type ThreadEntry, type ThreadLines, type ThreadRole } from '../domain/state/threadEntries';
 import { PARTIAL_HISTORY, PARTIAL_HISTORY_NOTE, entriesToMessages, pairToolResults } from '../domain/state/threadView';
 import type { AgentMessage } from './nearAiClient';
+import { SCALE_PRESETS, parseLabel } from '../domain/gate/labels';
+import type { Label } from '../domain/gate/labels';
+import { raiseMark, sameMark } from '../domain/gate/dominance';
+import type { Mark } from '../domain/gate/dominance';
+import { judgeLowering, reportLowering } from '../domain/gate/lowerings';
+import type { LoweringVerdict } from '../domain/gate/lowerings';
+export { registerLabelLoweringJudge, registerLoweringOutcomes } from '../domain/gate/lowerings';
+export type { LabelLoweringJudge, LoweringContext, LoweringOutcomeListener, LoweringVerdict } from '../domain/gate/lowerings';
 import { ProjectStateHome, stateHomeFor, writeFileAtomic } from './stateHome';
 import { stateKeysFor, type SecretsLike, type StateKeys } from './stateKeys';
 import { archiveMeta, readArchive, unarchiveThread, type ArchiveBundle } from './threadArchive';
@@ -50,6 +58,124 @@ export interface ThreadMeta {
    * until that run ends). A placeholder never wins a merge against a real meta, and sync never sends it (#48 review).
    */
   placeholder?: true;
+  /**
+   * The chat's label (CLAS-01, CLAS-04, D-29, D-58): its mark as label v1 values, and the newest signed lowerings of this chat (purpose label-declassify).
+   * Read through chatLabelOf only: a value in a shape this version cannot read is kept as it is and opens the chat at the highest org level.
+   */
+  label?: ChatLabelState;
+}
+
+/** A chat's label as kept in its meta. */
+export interface ChatLabelState {
+  readonly mark: readonly Label[];
+  /** Signed declassifications (SignedPayload under label-declassify), newest last, at most MAX_CHAT_LOWERINGS. */
+  readonly lowerings?: readonly unknown[];
+}
+
+/** How many signed lowerings a chat's meta keeps. */
+export const MAX_CHAT_LOWERINGS = 20;
+
+/** What a meta's label says: none, a mark (with its signed lowerings), or a value this version cannot read. */
+export type ChatLabelRead = { readonly kind: 'none' } | { readonly kind: 'mark'; readonly mark: Mark; readonly lowerings: readonly unknown[] } | { readonly kind: 'unreadable' };
+
+/** The one reader of ThreadMeta.label: every entry must be a label v1 value on a known scale, or the whole value is unreadable (never lower). */
+export function chatLabelOf(meta: Pick<ThreadMeta, 'label'> | undefined): ChatLabelRead {
+  const value = meta?.label as unknown;
+  if (value === undefined) return { kind: 'none' };
+  if (value === null || typeof value !== 'object' || !Array.isArray((value as { mark?: unknown }).mark)) return { kind: 'unreadable' };
+  const raw = value as { mark: unknown[]; lowerings?: unknown };
+  if (raw.mark.length === 0 || raw.mark.length > 16) return { kind: 'unreadable' };
+  const mark: Label[] = [];
+  for (const entry of raw.mark) {
+    const parsed = parseLabel(entry, SCALE_PRESETS);
+    if (!parsed.ok) return { kind: 'unreadable' };
+    mark.push(parsed.value);
+  }
+  if (raw.lowerings !== undefined && !Array.isArray(raw.lowerings)) return { kind: 'unreadable' };
+  return { kind: 'mark', mark, lowerings: raw.lowerings ?? [] };
+}
+
+/** The join of two marks (D-29): every label of both, joined per scale. */
+export function joinMarks(a: Mark, b: Mark): Mark {
+  let out: Mark = a;
+  for (const label of b) if (!out.some((held) => sameMark([held], [label]))) out = raiseMark(out, label, SCALE_PRESETS);
+  return out;
+}
+
+/** The signature of a signed lowering, which tells two copies' lowerings apart; undefined for a value with none. */
+function loweringKey(lowering: unknown): string | undefined {
+  const sig = (lowering as { sig?: unknown } | null)?.sig;
+  return typeof sig === 'string' && sig !== '' ? sig : undefined;
+}
+
+function signedAtOf(lowering: unknown): string {
+  const at = (lowering as { signedAt?: unknown } | null)?.signedAt;
+  return typeof at === 'string' ? at : '';
+}
+
+/** The union of two copies' signed lowerings, by signature, the newest MAX_CHAT_LOWERINGS kept, oldest first. */
+function unionLowerings(a: readonly unknown[], b: readonly unknown[]): unknown[] {
+  const byKey = new Map<string, unknown>();
+  for (const lowering of [...a, ...b]) { const key = loweringKey(lowering); if (key !== undefined && !byKey.has(key)) byKey.set(key, lowering); }
+  return [...byKey.values()].sort((x, y) => signedAtOf(x).localeCompare(signedAtOf(y))).slice(-MAX_CHAT_LOWERINGS);
+}
+
+/**
+ * The merged label of two copies of one chat (CLAS-04, D-58): raise-only. The merged mark is the join of both marks whichever copy is newer; an unreadable
+ * value is kept over a readable one. A copy that holds signed lowerings the other does not lowers the merge to its own mark only when exactly one copy holds
+ * such lowerings and the registered judge applies every one of them (signed by a key this computer knows, valid then, naming this chat, its from-mark
+ * covering the other copy's mark, the other copy not used after it); otherwise the join wins. With no judge registered every such lowering is rejected.
+ */
+export function mergeChatLabel(a: ThreadMeta, b: ThreadMeta): ChatLabelState | undefined {
+  const left = chatLabelOf(a);
+  const right = chatLabelOf(b);
+  if (left.kind === 'none' && right.kind === 'none') return undefined;
+  if (left.kind === 'unreadable' || right.kind === 'unreadable') {
+    if (left.kind === 'unreadable' && right.kind === 'unreadable') return (JSON.stringify(a.label) >= JSON.stringify(b.label) ? a.label : b.label);
+    return left.kind === 'unreadable' ? a.label : b.label;
+  }
+  if (left.kind === 'none') return b.label;
+  if (right.kind === 'none') return a.label;
+  const joined = joinMarks(left.mark, right.mark);
+  const lowerings = unionLowerings(left.lowerings, right.lowerings);
+  const leftKeys = new Set(left.lowerings.map(loweringKey).filter((key): key is string => key !== undefined));
+  const rightKeys = new Set(right.lowerings.map(loweringKey).filter((key): key is string => key !== undefined));
+  const onlyLeft = left.lowerings.filter((lowering) => { const key = loweringKey(lowering); return key === undefined || !rightKeys.has(key); });
+  const onlyRight = right.lowerings.filter((lowering) => { const key = loweringKey(lowering); return key === undefined || !leftKeys.has(key); });
+  // Every field of both copies' labels is kept (a later version's included, PR #87 review round 2); only the mark and the lowerings are set here.
+  const aNewer = a.lastUsedAt !== b.lastUsedAt ? a.lastUsedAt > b.lastUsedAt : JSON.stringify(a.label) >= JSON.stringify(b.label);
+  const base = { ...((aNewer ? b.label : a.label) as object), ...((aNewer ? a.label : b.label) as object) } as Record<string, unknown>;
+  const result = (mark: Mark): ChatLabelState => {
+    const { lowerings: _old, ...rest } = base;
+    return { ...rest, mark: [...mark], ...(lowerings.length > 0 ? { lowerings } : {}) } as ChatLabelState;
+  };
+  if (onlyLeft.length === 0 && onlyRight.length === 0) return result(joined);
+  // The result of applying lowerings comes only from the verified signed records (PR #87 review round 2): the newest one's signed target, raised only by
+  // what the lowering copy holds above it (a raise made there after the lowering). A stored mark below the target never lowers the chat further, and
+  // what is reported is the same result, so state and record agree by construction.
+  const judge = (holder: 'left' | 'right'): Mark | undefined => {
+    const own = holder === 'left' ? left : right;
+    const other = holder === 'left' ? right : left;
+    const otherMeta = holder === 'left' ? b : a;
+    const fresh = holder === 'left' ? onlyLeft : onlyRight;
+    const verdicts = fresh.map((lowering) => ({ lowering, verdict: judgeLowering(lowering, { chatId: a.id, otherMark: other.mark, otherLastUsedAt: otherMeta.lastUsedAt }) }));
+    const applied = verdicts.filter((each): each is { lowering: unknown; verdict: Extract<LoweringVerdict, { apply: true }> } => each.verdict.apply);
+    // Each lowering is judged on its own (PR #87 review round 5): the verified ones apply, from the newest one's signed target, and any that do not verify
+    // are rejected with their own cause. A rejected one never stops a verified one, since the result comes only from verified records and never from the
+    // copy's stored mark below the target.
+    const outcome = applied.length > 0
+      ? joinMarks([...applied].sort((x, y) => x.verdict.signedAt.localeCompare(y.verdict.signedAt)).at(-1)!.verdict.to, own.mark)
+      : undefined;
+    for (const each of verdicts) reportLowering(a.id, each.lowering, each.verdict, each.verdict.apply ? outcome : undefined, each.verdict.apply ? joined : undefined);
+    return outcome;
+  };
+  // Exactly one copy may bring lowerings the other lacks; when both do, neither copy's lowering can be told to come after the other's raise, so the join wins.
+  if (onlyLeft.length > 0 && onlyRight.length > 0) {
+    for (const lowering of [...onlyLeft, ...onlyRight]) reportLowering(a.id, lowering, { apply: false, cause: 'both-lowered' });
+    return result(joined);
+  }
+  const lowered = judge(onlyLeft.length > 0 ? 'left' : 'right');
+  return result(lowered ?? joined);
 }
 
 /** Where an archived thread's content is kept: `local` in this state home's archive folder, `remote` only in the project's synced state until it is opened. */
@@ -78,15 +204,23 @@ function assertThreadId(id: string): void {
   if (!THREAD_ID.test(id)) throw new Error('Invalid transcript id.');
 }
 
-/** Two copies of one thread's meta: the newer one's fields win, the last use is the later of the two, and the thread began at the earlier. */
+/**
+ * Two copies of one thread's meta: the newer one's fields win, the last use is the later of the two, and the thread began at the earlier. The chat's label
+ * is the one exception: it is merged raise-only (mergeChatLabel), so no merge site can lower it (CLAS-04, D-58).
+ */
 export function mergeMeta(a: ThreadMeta, b: ThreadMeta): ThreadMeta {
+  const label = a.label === undefined && b.label === undefined ? undefined : mergeChatLabel(a, b);
+  const withLabel = (meta: ThreadMeta): ThreadMeta => {
+    const { label: _drop, ...rest } = meta;
+    return label === undefined ? rest : { ...rest, label };
+  };
   // A placeholder's title ("Conversation") and empty model never replace a real meta's, however new its times look; the times still combine.
   if (Boolean(a.placeholder) !== Boolean(b.placeholder)) {
     const real = a.placeholder ? b : a;
-    return { ...real, createdAt: a.createdAt < b.createdAt ? a.createdAt : b.createdAt, lastUsedAt: a.lastUsedAt > b.lastUsedAt ? a.lastUsedAt : b.lastUsedAt };
+    return withLabel({ ...real, createdAt: a.createdAt < b.createdAt ? a.createdAt : b.createdAt, lastUsedAt: a.lastUsedAt > b.lastUsedAt ? a.lastUsedAt : b.lastUsedAt });
   }
   const newer = a.lastUsedAt !== b.lastUsedAt ? (a.lastUsedAt > b.lastUsedAt ? a : b) : (JSON.stringify(a) >= JSON.stringify(b) ? a : b);
-  return { ...newer, createdAt: a.createdAt < b.createdAt ? a.createdAt : b.createdAt, lastUsedAt: a.lastUsedAt > b.lastUsedAt ? a.lastUsedAt : b.lastUsedAt };
+  return withLabel({ ...newer, createdAt: a.createdAt < b.createdAt ? a.createdAt : b.createdAt, lastUsedAt: a.lastUsedAt > b.lastUsedAt ? a.lastUsedAt : b.lastUsedAt });
 }
 
 /** A thread meta read from a file: only a complete, well-typed one for this thread id. */
@@ -352,6 +486,34 @@ export class ThreadStore implements ConversationStore {
     assertThreadId(id);
     const material = await this.readMaterial();
     return material ? this.readMeta(id, material) : undefined;
+  }
+
+  /**
+   * Saves the chat's label in its meta (CLAS-04, D-29). A raise is joined with what is stored (a copy synced in meanwhile may be higher; an unreadable value
+   * is kept); a person's lowering (`lowering` given: the signed declassification, or `true` when this install could not sign) replaces the mark, keeping
+   * the union of the signed lowerings.
+   */
+  public async setChatLabel(id: string, mark: Mark, lowering?: unknown): Promise<void> {
+    assertThreadId(id);
+    return this.enqueue(async () => {
+      const material = await this.writeMaterial();
+      const existing = await this.readMeta(id, material);
+      const stored = chatLabelOf(existing);
+      let label: ChatLabelState | undefined;
+      if (lowering !== undefined) {
+        const kept = stored.kind === 'mark' ? stored.lowerings : [];
+        const lowerings = unionLowerings(kept, lowering === true ? [] : [lowering]);
+        label = { mark: [...mark], ...(lowerings.length > 0 ? { lowerings } : {}) };
+      } else if (stored.kind === 'unreadable') {
+        return;
+      } else {
+        const joined = stored.kind === 'mark' ? joinMarks(stored.mark, mark) : mark;
+        if (stored.kind === 'mark' && sameMark(joined, stored.mark)) return;
+        label = { mark: [...joined], ...(stored.kind === 'mark' && stored.lowerings.length > 0 ? { lowerings: [...stored.lowerings] } : {}) };
+      }
+      const meta = await this.updateMeta(id, material, { label });
+      await this.indexThread(material, meta);
+    });
   }
 
   private async readMeta(id: string, material: Material): Promise<ThreadMeta | undefined> {

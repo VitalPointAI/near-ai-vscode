@@ -62,7 +62,8 @@ const SAMPLES: Record<PayloadPurpose, unknown> = {
   grant: { capability: 'read', until: '2026-12-01T00:00:00Z', budgetNanoUsd: 5_000_000_000 },
   'approval-answer': { requestDigest: 'a'.repeat(64), answer: 'allow' },
   'key-record': { seq: 1, prev: '', kind: 'created', at: '2026-01-01T00:00:00.000Z' },
-  'label-map': { labelMapVersion: 1, vocabulary: 1, entries: { 'src/': { scale: 'org', level: 'Internal', compartments: [], releasability: [], handling: [] } } }
+  'label-map': { labelMapVersion: 1, vocabulary: 1, entries: { 'src/': { scale: 'org', level: 'Internal', compartments: [], releasability: [], handling: [] } } },
+  'label-declassify': { chatId: 'conv-sample-1', from: [{ scale: 'org', level: 'Restricted', compartments: [], releasability: [], handling: [] }], to: [{ scale: 'org', level: 'Public', compartments: [], releasability: [], handling: [] }], reason: 'reviewed', at: '2026-11-17T00:00:00.000Z' }
 };
 
 function failure(verdict: ReturnType<typeof verifyPayload>): PayloadFailureReason | 'ok' {
@@ -119,7 +120,7 @@ test('every purpose round-trips, signed by the device identity and by a plain ag
     assert.equal(failure(agentVerdict), 'ok', purpose);
     if (agentVerdict.ok) assert.deepEqual(agentVerdict.payload, SAMPLES[purpose]);
   }
-  assert.deepEqual([...PAYLOAD_PURPOSES], ['policy-bundle', 'grant', 'approval-answer', 'key-record', 'label-map']);
+  assert.deepEqual([...PAYLOAD_PURPOSES], ['policy-bundle', 'grant', 'approval-answer', 'key-record', 'label-map', 'label-declassify']);
 });
 
 test('an envelope with a member id and one without both verify, and the one without has no memberId key at all', () => {

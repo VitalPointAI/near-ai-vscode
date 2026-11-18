@@ -7,7 +7,7 @@ import { lstat, realpath } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import type { ActionCapability, ActionPolicy } from '../domain/policy';
-import { failedClosed } from '../domain/gate/bundle';
+import { SHIPPED_DEFAULT_LABEL, failedClosed } from '../domain/gate/bundle';
 import type { BundleState, GateContextName } from '../domain/gate/bundle';
 import { decide } from '../domain/gate/decide';
 import type { ActorRef, GateDecision, GateOptions, GateRequest, GateRuntime, PreGateRule, SettingsAnswer, SettingsLayer } from '../domain/gate/decide';
@@ -20,7 +20,16 @@ import type { DecisionOutcome, DecisionRecord, DecisionResource } from '../domai
 import { fromActionCapability } from '../domain/gate/vocabulary';
 import type { Capability } from '../domain/gate/vocabulary';
 import { classifyCommand, commandMaySend, downloadSegments, namesCredentialFile } from './commandSafety';
-import { commandWords, labelVerdictFor, linkResolver, pathLike, readEffectPaths } from './gateLabels';
+import { commandWords, labelCheckFor, linkResolver, pathLike, readEffectPaths, scalesOf } from './gateLabels';
+import { OUTBOUND_EARLIER_TEXT, OUTBOUND_FULL_TEXT, OUTBOUND_READS_AND_SENDS_TEXT, OUTBOUND_UNCHECKED_TEXT, OUTBOUND_MATCH_TEXT, OUTBOUND_UNREADABLE_TEXT, outboundPayload } from './outboundCheck';
+import type { OutboundFingerprints } from './outboundCheck';
+import type { LabelVerdict } from '../domain/gate/decide';
+import { SessionMark } from '../domain/gate/dominance';
+import type { Mark } from '../domain/gate/dominance';
+import type { Label } from '../domain/gate/labels';
+import { routingWhileFailedClosed, tierForLabel, tierForMark } from '../domain/gate/routing';
+import type { RoutingTable, RoutingTier } from '../domain/gate/routing';
+import { isDefaultMark } from '../gate/sessionMark';
 import type { CommandContext, CommandEffect, PackageScriptsAt } from './commandSafety';
 import { decidePermissionAsync, denyListReason, isAutoAllowed } from './permissions';
 import type { AutoApprovalContext, PermissionDecision, PermissionRules, RunGrants } from './permissions';
@@ -288,6 +297,15 @@ export interface GatedCall {
   readonly readsCredential?: string;
   /** The tool's own words for a path outside the project, which the agent is told when the call is refused for it; never put on record. */
   readonly toolMessage?: string;
+  /**
+   * The labels of what the call reads, as the label check resolved them for the paths it names (CLAS-04): the loop raises the session's mark by them at the
+   * hook where it notes a credential read, before the call runs, so a read that fails or is cancelled still counts (D-54). Empty when it reads nothing named.
+   */
+  readonly readLabels: readonly Label[];
+  /** Whether the call can send data off this computer, by the one predicate the credential-read hold and the mark share (D-54). */
+  readonly maySend: boolean;
+  /** The session's mark when the call was decided, kept only while it is above the policy's default label, for the record. */
+  readonly mark?: Mark;
 }
 
 function productVersionOf(runtime: GateRuntime): string {
@@ -613,7 +631,8 @@ function recordFor(runtime: GateRuntime, gated: GatedCall, outcome: DecisionOutc
   const capability = gated.effects[0] ?? WIDEST_SHORTHAND('plan')[0] as Capability;
   const folders = { ...(gated.request.workspace === undefined ? {} : { project: gated.request.workspace.root }), ...(runtime.locations?.home === undefined ? {} : { home: runtime.locations.home }) };
   const reason = givenReason === undefined ? undefined : withoutMachinePaths(givenReason, folders);
-  const given = gated.resource ?? resourceOf(gated.request.tool, gated.effects, gated.request.command);
+  // A refusal for labelled text in the payload names the tool only, never the command or address that carried the text (D-60).
+  const given = rule === 'label.outbound-match' ? { name: shownName(gated.request.tool), type: 'tool' } : gated.resource ?? resourceOf(gated.request.tool, gated.effects, gated.request.command);
   const resource = { ...given, name: withoutMachinePaths(given.name, folders) };
   return buildDecisionRecord({
     recordId: (runtime.newRecordId ?? randomUUID)(),
@@ -632,7 +651,9 @@ function recordFor(runtime: GateRuntime, gated: GatedCall, outcome: DecisionOutc
     bundleHash: bundleHashOf(runtime),
     // A refusal for a label names the label that decided it; a failed clearance check is recorded as such (GATE-07).
     ...(rule.startsWith('label.') && gated.request.labelVerdict?.label !== undefined ? { label: gated.request.labelVerdict.label } : {}),
-    ...(rule === 'label.dominance' ? { clearanceFailure: true } : {})
+    ...(rule === 'label.dominance' ? { clearanceFailure: true } : {}),
+    // The session's whole mark while it is above the default label (GATE-07, D-52); at the default label the record says nothing of it.
+    ...(gated.mark === undefined ? {} : { mark: gated.mark })
   });
 }
 
@@ -744,21 +765,24 @@ export async function gateToolCall(runtime: GateRuntime, input: GateCallInput, o
   // This call's own read: its words and paths (the loop's check), or a script or `bash -c` the classifier read for it.
   const readsCredential = input.readsCredential ?? read?.credentialFile;
   const credentialRead = input.grants.credentialRead ?? readsCredential;
-  const credentialHold = credentialRead === undefined ? undefined
-    : (input.command === undefined ? callSendsOffMachine(input.tool, effects) : read?.effectsUnknown !== undefined || shellMaySend(input.command, { command: input.command, root: input.root, ...(input.shell ?? {}), ...(runtime.locations ?? {}) }))
-      ? credentialHoldReason(credentialRead, input.command !== undefined) : undefined;
+  // One fail-closed predicate for "can this call send data off this computer" (D-54): the credential-read hold and the mark's network verdict both read it.
+  const maySend = maySendOffMachine({ runsRemote: input.tool.manifest.runsOn === 'remote', effects, ...(input.command === undefined ? {} : { command: input.command }), effectsUnknown: read?.effectsUnknown !== undefined, context: { root: input.root, ...(input.shell ?? {}), ...(runtime.locations ?? {}) } });
+  const credentialHold = credentialRead !== undefined && maySend ? credentialHoldReason(credentialRead, input.command !== undefined) : undefined;
   // The label verdict (CLAS-03, D-28): every path the call reads, and for a command every path its words name, checked against the clearances here, so
   // decide() stays pure. A command, or a call whose effects are unknown, may read anything, so a label file that is held holds it too (D-53, D-59).
   // D-63: a read in the Open-GSD runtime (a trusted folder, resolved through links) is judged at the default label, not as the project-wide read its
   // effects are written as; every read whose real place is in the project is judged by that place.
   const trusted = paths.trustedReads.length > 0;
-  const labelVerdict = await labelVerdictFor(runtime, {
+  const labelCheck = await labelCheckFor(runtime, {
     root: input.root,
     reads: [...new Set([...(trusted ? [] : readEffectPaths(effects.length > 0 ? effects : declared)), ...paths.projectReads])],
     ...(trusted ? { defaultReads: true } : {}),
     ...(input.command === undefined ? {} : { command: input.command, cwd: input.shell?.cwd ?? input.root }),
     mayReadAnything: input.command !== undefined || effects.length === 0
   });
+  const markNow = input.grants.mark?.current();
+  // A dominance verdict wins; then, at a strict mark, a call that may send is refused (D-29); then labelled text in what it would send (D-60).
+  const labelVerdict = labelCheck.verdict ?? markVerdictFor(runtime, markNow, maySend, () => outboundPayload(input.raw, input.command), input.grants.outbound, labelCheck.read);
   const request: GateRequest = {
     actor: runtime.actor,
     tool: input.tool.name,
@@ -790,8 +814,10 @@ export async function gateToolCall(runtime: GateRuntime, input: GateCallInput, o
   const exactCall = floorCallKey(input);
   const approvedLate = takeFloorApproval(input.grants, exactCall, (runtime.clock ?? Date.now)());
   const callKey = floorAsk ? exactCall : undefined;
+  const recordedMark = markOnRecord(runtime, markNow);
   const gated: GatedCall = {
     decision, settings: captured.value, request, effects, ...(resource === undefined ? {} : { resource }), ...(callKey === undefined ? {} : { callKey }),
+    readLabels: labelCheck.read, maySend, ...(recordedMark === undefined ? {} : { mark: recordedMark }),
     ...(readsCredential === undefined ? {} : { readsCredential }),
     ...(paths.outside === undefined ? {} : { toolMessage: paths.outside.toolMessage })
   };
@@ -840,9 +866,212 @@ export async function followCommandMoves(runtime: GateRuntime, input: FloorFacts
 const APPROVED_ONCE_REASON = 'A person approved this exact call once, after the run had moved on.';
 
 /** Whether a call that is not a shell command can send data off this computer: its tool runs elsewhere, or it reaches the network, sends or publishes. */
-function callSendsOffMachine(tool: AgentTool<any>, effects: readonly Capability[]): boolean {
-  if (tool.manifest.runsOn === 'remote') return true;
+function callSendsOffMachine(runsRemote: boolean, effects: readonly Capability[]): boolean {
+  if (runsRemote) return true;
   return effects.some((effect) => effect.verb === 'network' || effect.verb === 'send' || effect.verb === 'publish');
+}
+
+/** What maySendOffMachine reads about a call. */
+export interface MaySendInput {
+  /** The tool's manifest says it runs elsewhere (a remote add-on server). */
+  readonly runsRemote: boolean;
+  readonly effects: readonly Capability[];
+  /** A shell command's text; absent for every other tool. */
+  readonly command?: string;
+  /** True when the classifier could not read the command's effects. */
+  readonly effectsUnknown: boolean;
+  /** Where the command runs, for the classifier. */
+  readonly context: Omit<FloorFactsInput, 'command'>;
+}
+
+/**
+ * "Can this call send data off this computer", the one fail-closed predicate of D-54 that the credential-read hold (taint.credential-read) and the mark's
+ * network verdict (label.network-at-mark) both use: callSendsOffMachine for other tools, and for a shell command, unknown effects or commandMaySend (a reader
+ * that throws counts as "may send").
+ */
+export function maySendOffMachine(input: MaySendInput): boolean {
+  if (input.command === undefined) return callSendsOffMachine(input.runsRemote, input.effects);
+  return input.effectsUnknown || shellMaySend(input.command, { ...input.context, command: input.command });
+}
+
+/** The sentence of label.network-at-mark (D-29): the chat holds content that must stay here, and this call may send data off this computer. */
+export const NETWORK_AT_MARK_TEXT = "This chat has read content that must stay on this computer, and this call may send data off it, so it is refused. If what this chat read allows it, use NEAR AI: Lower This Chat's Label.";
+
+/** The routing a runtime decides by now: the valid policy's, or while it is failed closed the shipped default label and every tier above any-cloud kept here. */
+function routingOfRuntime(runtime: GateRuntime): { readonly routing: RoutingTable; readonly defaultLabel: Label } {
+  try {
+    const state = runtime.bundleState();
+    if (state.state === 'valid') return { routing: state.bundle.routing, defaultLabel: state.bundle.defaultLabel };
+  } catch { /* failed closed below */ }
+  return { routing: routingWhileFailedClosed(), defaultLabel: SHIPPED_DEFAULT_LABEL };
+}
+
+/** The tier a mark needs under the runtime's routing; a mark or table that cannot be read needs `deny` (fail closed). */
+export function markTierOf(runtime: GateRuntime, mark: Mark): RoutingTier {
+  try {
+    const { routing, defaultLabel } = routingOfRuntime(runtime);
+    return tierForMark(mark, routing, defaultLabel);
+  } catch {
+    return 'deny';
+  }
+}
+
+/** The mark a record carries: the mark itself while it is above the policy's default label, otherwise none (D-52). */
+function markOnRecord(runtime: GateRuntime, mark: Mark | undefined): Mark | undefined {
+  if (mark === undefined) return undefined;
+  try {
+    return isDefaultMark(mark, routingOfRuntime(runtime).defaultLabel) ? undefined : mark;
+  } catch {
+    return mark;
+  }
+}
+
+/** True when a mark is above the runtime's default label: only then does what a session writes take it (D-26). */
+export function markAboveDefault(runtime: GateRuntime, mark: Mark): boolean {
+  return markOnRecord(runtime, mark) !== undefined;
+}
+
+/** The label of the mark that needs the strictest tier: the one a refusal for the mark names. */
+function strictestLabel(runtime: GateRuntime, mark: Mark): Label | undefined {
+  const { routing } = routingOfRuntime(runtime);
+  const order: Readonly<Record<RoutingTier, number>> = { 'any-cloud': 0, 'attested-cloud': 1, 'local-only': 2, deny: 3 };
+  let best: Label | undefined;
+  let bestTier = -1;
+  for (const label of mark) {
+    let tier: number;
+    try { tier = order[tierForLabel(label, routing)]; } catch { tier = 3; }
+    if (tier > bestTier) { best = label; bestTier = tier; }
+  }
+  return best;
+}
+
+/**
+ * The verdict the session's mark gives a call, worked out here so decide() stays pure (D-53): at a local-only or deny mark, a call that may send data off
+ * this computer is refused (label.network-at-mark, D-29); at any other mark that is not any-cloud, a call that may send is refused when what it would send
+ * carries labelled text the chat read (label.outbound-match, D-60), and when that cannot be checked. Undefined otherwise.
+ */
+export function markVerdictFor(runtime: GateRuntime, before: Mark | undefined, maySend: boolean, payload: () => readonly string[], outbound: OutboundFingerprints | undefined, reads: readonly Label[] = []): LabelVerdict | undefined {
+  if (!maySend) return undefined;
+  // The call is judged with everything it shows (PR #87 review round 6): what it reads itself joins the mark before the verdict, since the mark is raised
+  // only once it runs, and a command that reads a labelled file and sends it in one step must not leave at the mark it had before.
+  const mark = withReads(runtime, before, reads);
+  if (mark === undefined) return undefined;
+  const tier = markTierOf(runtime, mark);
+  if (tier === 'any-cloud') return undefined;
+  const label = strictestLabel(runtime, mark);
+  if (tier === 'local-only' || tier === 'deny') return { rule: 'label.network-at-mark', reason: NETWORK_AT_MARK_TEXT, ...(label === undefined ? {} : { label }) };
+  // A call that itself reads content above any-cloud and may send in the same step: what it reads is not fingerprinted yet, so it is refused (fail closed).
+  if (reads.length > 0 && markTierOf(runtime, reads) !== 'any-cloud') {
+    const own = strictestLabel(runtime, reads);
+    return { rule: 'label.outbound-match', reason: OUTBOUND_READS_AND_SENDS_TEXT, ...(own === undefined ? {} : { label: own }) };
+  }
+  // A run with no fingerprint set cannot check what it would send, so at this mark the call is refused (fail closed, PR #87 review).
+  if (outbound === undefined) return { rule: 'label.outbound-match', reason: OUTBOUND_UNCHECKED_TEXT, ...(label === undefined ? {} : { label }) };
+  // A labelled read is open (begun by the shared hook, not yet fingerprinted): what it read cannot be checked yet, so the call is refused (fail closed).
+  if (outbound.pending > 0) return { rule: 'label.outbound-match', reason: OUTBOUND_UNCHECKED_TEXT, ...(label === undefined ? {} : { label }) };
+  // Past its bound the set cannot vouch for anything: refused, saying why and what to do (fail closed, owner answer after D-60).
+  if (outbound.full) return { rule: 'label.outbound-match', reason: OUTBOUND_FULL_TEXT, ...(label === undefined ? {} : { label }) };
+  let texts: readonly string[];
+  try {
+    texts = payload();
+  } catch {
+    return { rule: 'label.outbound-match', reason: OUTBOUND_UNREADABLE_TEXT, ...(label === undefined ? {} : { label }) };
+  }
+  const found = outbound.match(texts);
+  if (found === undefined) return undefined;
+  return { rule: 'label.outbound-match', reason: found === 'earlier' ? OUTBOUND_EARLIER_TEXT : OUTBOUND_MATCH_TEXT, ...(label === undefined ? {} : { label }) };
+}
+
+/** The mark joined with the labels a call reads itself, without changing the run's mark; undefined when there is neither. */
+function withReads(runtime: GateRuntime, mark: Mark | undefined, reads: readonly Label[]): Mark | undefined {
+  if (reads.length === 0) return mark;
+  const joined = new SessionMark(mark ?? []);
+  joined.raise(reads, scalesOf(runtime));
+  return joined.current();
+}
+
+/** What carries a run's mark and fingerprints: a run's grants, shared with every sub-agent (D-54). */
+export interface MarkCarrier {
+  readonly mark?: SessionMark | undefined;
+  readonly outbound?: OutboundFingerprints | undefined;
+}
+
+/** One read of content, from the shared hook: more labels may join it (a search's results), and it is settled once with what was read. */
+export interface LabelledRead {
+  /** Adds the labels of more of what the call read (Glob and Grep results), raising the mark by them now. */
+  add(labels: readonly Label[]): void;
+  /** The call finished: what it returned is fingerprinted when what it read needs a tier above any-cloud and the call cannot send; undefined when it failed. */
+  settle(output: string | undefined): void;
+}
+
+/**
+ * The one shared hook (D-54, PR #87 review round 3) for content a call or step reads: it raises the run's mark by the labels of what is read (recording the
+ * rise once), and it feeds that content's fingerprints when it is settled (D-60), so the mark and the fingerprints never diverge. While a labelled read is
+ * open, the fingerprint set reports it pending and a call that could send is refused. The chat loop, its sub-agents and the cyber step engine all read
+ * through it; no other place raises a mark from content or adds a fingerprint.
+ */
+export function beginLabelledRead(runtime: GateRuntime, carrier: MarkCarrier, labels: readonly Label[], maySend: boolean, source: string, options: Pick<GateCallOptions, 'model'> = {}): LabelledRead {
+  const read: Label[] = [];
+  let opened = false;
+  let settled = false;
+  const take = (more: readonly Label[]): void => {
+    if (more.length === 0) return;
+    read.push(...more);
+    raiseRunMark(runtime, carrier.mark, more, source, options);
+    if (!opened && !maySend && carrier.outbound !== undefined && markTierOf(runtime, read) !== 'any-cloud') {
+      opened = true;
+      carrier.outbound.open();
+    }
+  };
+  take(labels);
+  return {
+    add: take,
+    settle: (output) => {
+      if (settled) return;
+      settled = true;
+      if (opened) carrier.outbound?.settle(output);
+    }
+  };
+}
+
+/** Raises a run's mark and records the rise once when it really rose. Only the shared hook above calls it. */
+function raiseRunMark(runtime: GateRuntime, mark: SessionMark | undefined, labels: readonly Label[], source: string, options: Pick<GateCallOptions, 'model'> = {}): boolean {
+  if (mark === undefined || labels.length === 0) return false;
+  const before = mark.current();
+  if (!mark.raise(labels, scalesOf(runtime))) return false;
+  recordMarkRaised(runtime, mark.current(), source, options, before);
+  return true;
+}
+
+/**
+ * Records a rise of the session's mark (GATE-07, D-54): one label.mark-raised record with the whole mark, written only when the mark actually rose. `source`
+ * names what raised it (the tool), never a path's contents. Never throws.
+ */
+export function recordMarkRaised(runtime: GateRuntime, mark: Mark, source: string, options: Pick<GateCallOptions, 'model'> = {}, from?: Mark): void {
+  try {
+    const record = buildDecisionRecord({
+      recordId: (runtime.newRecordId ?? randomUUID)(),
+      sequence: 0,
+      time: (runtime.clock ?? Date.now)(),
+      productVersion: productVersionOf(runtime),
+      actor: runtime.actor,
+      ...(options.model === undefined ? {} : { model: { name: options.model, provider: MODEL_PROVIDER } }),
+      callId: `label.mark-raised-${(runtime.newRecordId ?? randomUUID)()}`,
+      capability: { verb: 'plan' },
+      resource: { name: shownName(source).slice(0, 120), type: 'label' },
+      outcome: 'allowed',
+      rule: 'label.mark-raised',
+      reason: 'What an agent of this chat read raised the chat\'s label.',
+      bundleHash: bundleHashOf(runtime),
+      // Every label event: `mark` is the chat's mark after it, `label` its target (the strictest label of the new mark), `from` the mark before.
+      ...(strictestLabel(runtime, mark) === undefined ? {} : { label: strictestLabel(runtime, mark)! }),
+      mark,
+      ...(from === undefined ? {} : { from })
+    });
+    keep(runtime, { ...record, api: { ...record.api, operation: 'label.mark-raised' } });
+  } catch {
+    // A record that cannot be kept never changes the mark (D-21).
+  }
 }
 
 /** commandMaySend with the floor's own context; a reader that throws counts as "may send" (fail closed). */
@@ -966,6 +1195,17 @@ export interface GateStepInput {
   readonly floorFacts?: Pick<FloorFacts, 'credentialStore' | 'identityFiles'>;
   /** What the record names when the effects alone would not say it. */
   readonly resource?: DecisionResource;
+  /** The run's mark (D-54): a cyber run carries one of its own at the project's label. */
+  readonly mark?: SessionMark;
+  /**
+   * Everything the step would send (PR #87 review round 3): its tool's arguments, its args and its target. The outbound check reads all of it, with the
+   * command, never the command alone.
+   */
+  readonly raw?: Record<string, unknown>;
+  /** The step's tool runs elsewhere (a remote add-on server, PR #87 review round 6): it can send data off this computer whatever effects it declares. */
+  readonly runsRemote?: boolean;
+  /** The run's fingerprints of labelled text it read (D-60). */
+  readonly outbound?: OutboundFingerprints;
 }
 
 /** What the gate knows about a step that runs a tool: its effects and the floor's facts about the paths it names. */
@@ -997,12 +1237,16 @@ export async function gateStep(runtime: GateRuntime, input: GateStepInput, optio
   const effects = effectsWithReading(input.effects, read);
   const floorFacts = { ...(input.floorFacts ?? {}), ...(read?.facts ?? {}) };
   // A cyber step's reads are checked against the labels exactly as a chat call's are (CLAS-03).
-  const labelVerdict = input.root === undefined ? undefined : await labelVerdictFor(runtime, {
+  const labelCheck = input.root === undefined ? { read: [] } : await labelCheckFor(runtime, {
     root: input.root,
     reads: readEffectPaths(effects.length > 0 ? effects : input.effects),
     ...(input.command === undefined ? {} : { command: input.command }),
     mayReadAnything: input.command !== undefined || effects.length === 0
   });
+  // The run's own mark (a cyber run has one at the project's label, D-54) holds a step that may send at a strict mark, by the same predicate as a chat call.
+  const maySend = maySendOffMachine({ runsRemote: input.runsRemote === true, effects, ...(input.command === undefined ? {} : { command: input.command }), effectsUnknown: read?.effectsUnknown !== undefined || (input.command === undefined && effects.length === 0), context: { root: input.root ?? '', ...(runtime.locations ?? {}) } });
+  const markNow = input.mark?.current();
+  const labelVerdict = labelCheck.verdict ?? markVerdictFor(runtime, markNow, maySend, () => outboundPayload(input.raw ?? {}, input.command), input.outbound, labelCheck.read);
   const request: GateRequest = {
     actor: runtime.actor,
     tool: input.tool,
@@ -1021,7 +1265,8 @@ export async function gateStep(runtime: GateRuntime, input: GateStepInput, optio
   };
   const answered: SettingsAnswer = options.refusal === undefined ? input.settings : { decision: 'deny', reason: options.refusal.reason, rule: options.refusal.rule };
   const decision = await decideOrRefuse(options.refusal, input.policy.mode, () => decide(request, runtime.bundleState(), async () => answered, gateOptionsOf(runtime)));
-  const gated: GatedCall = { decision, settings: undefined, request, effects, ...(input.resource === undefined ? {} : { resource: input.resource }) };
+  const recordedMark = markOnRecord(runtime, markNow);
+  const gated: GatedCall = { decision, settings: undefined, request, effects, ...(input.resource === undefined ? {} : { resource: input.resource }), readLabels: labelCheck.read, maySend, ...(recordedMark === undefined ? {} : { mark: recordedMark }) };
   keep(runtime, recordFor(runtime, gated, outcomeOf(decision), decision.rule, decision.reason, options.model === undefined ? undefined : { name: options.model, provider: MODEL_PROVIDER }));
   return gated;
 }

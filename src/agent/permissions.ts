@@ -4,6 +4,8 @@ import { NETWORK_COMMAND } from './untrusted';
 import { riskAllowed } from '../domain/riskSwitches';
 import type { CommandSafetyCheck } from './safetyModel';
 import { unattendedDecision, UnattendedScope } from './unattended';
+import type { SessionMark } from '../domain/gate/dominance';
+import type { OutboundFingerprints } from './outboundCheck';
 
 /** `reason` on an allow names the grant that let it run (the engagement grant names its
  * engagement); `reason` on an ask says why it was not run automatically and the card shows it. */
@@ -144,6 +146,14 @@ export class RunGrants {
    * Shared with every sub-agent through these grants, and never cleared during the run.
    */
   public credentialRead: string | undefined;
+  /**
+   * The chat's high-water mark (CLAS-04, D-54): what any agent of the chat has read, raised at the same hook as the credential read and shared with every
+   * sub-agent through these grants. A chat's runs carry the chat's own mark; a run with no chat (a comparison, a role test, a cyber step) carries one of its
+   * own at the project's label. Absent only in a run built by hand (a test), which raises nothing.
+   */
+  public mark: SessionMark | undefined;
+  /** The fingerprints of the labelled text the chat's agents read (D-60), shared with sub-agents like the mark. Never on record. */
+  public outbound: OutboundFingerprints | undefined;
   public noteCredentialRead(shown: string): void {
     this.credentialRead ??= shown.replace(/[\u0000-\u001F\u007F]/g, ' ').trim().slice(0, 120) || 'a file that may hold credentials';
   }

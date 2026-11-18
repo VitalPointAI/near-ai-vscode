@@ -13,8 +13,12 @@ import { CAPABILITY_VERBS } from '../domain/gate/vocabulary';
 import type { BundleState } from '../domain/gate/bundle';
 import { CLEARANCE_SELF_ASSERTED_TEXT, HANDLING_FLAGS, LABELS_NOT_ACCREDITATION_TEXT, LABEL_TOKEN_PATTERN, SCALE_PRESETS_CAVEAT_TEXT, labelKey, parseLabel } from '../domain/gate/labels';
 import type { Label } from '../domain/gate/labels';
-import { dominates, raiseMark } from '../domain/gate/dominance';
-import { labelMapKey, setLabelEntry, setProjectLabel } from '../domain/gate/labelMap';
+import { dominates, raiseMark, sameMark } from '../domain/gate/dominance';
+import type { Mark } from '../domain/gate/dominance';
+import { chatInView, onChatInViewChange, queueChatNotice } from './chatInView';
+import type { ChatInView } from './chatInView';
+import { holdsReads, labelMapKey, resolveLabel, setLabelEntry, setProjectLabel } from '../domain/gate/labelMap';
+import type { LabelMapPayload } from '../domain/gate/labelMap';
 import { BundleStoreError, POLICY_DRAFT_BASE_FILE, POLICY_DRAFT_FILE, gateDir } from '../gate/bundleStore';
 import { writeFileAtomic } from '../team/teamFile';
 import { GateHost } from '../gate/host';
@@ -51,11 +55,11 @@ export const POLICY_SCHEME = 'near-ai-policy';
 export const POLICY_DOCUMENT_URI = `${POLICY_SCHEME}:/NEAR-AI-Policy.txt`;
 
 /**
- * Shown above the scales, clearances and routing (D-49, D-50). From PR 4b the clearances are checked when an agent reads a labelled file; a label does not
- * change where content is sent until plan 24 (PR 4c), which replaces this line when routing by label is live.
+ * Shown above the scales, clearances and routing (D-49, D-50): from PR 4c each chat's label, which rises with what its agents read, decides where its content
+ * is sent. It replaced POLICY_ROUTING_NOT_LIVE_TEXT (PR 4b) when routing by label went live (plan 24).
  */
-export const POLICY_ROUTING_NOT_LIVE_TEXT =
-  'This version checks the clearances below when an agent reads a labelled file. A label does not change where content is sent yet: every model request is routed by the default label and the routing tiers below, and levels that need an attested cloud stay on this computer.';
+export const POLICY_ROUTING_TEXT =
+  "This version checks the clearances below when an agent reads a labelled file. Each chat's label decides where its content is sent, by the routing tiers below. In this version, levels that need an attested cloud stay on this computer.";
 
 export const RESET_CONFIRM_ACTION = 'Reset Policy';
 export const RESET_TITLE = 'Reset your policy to the default?';
@@ -137,7 +141,7 @@ export function policyDocumentText(state: BundleState | undefined, now: number):
   lines.push(
     `  Add-on servers allowed in runs with nobody present: ${bundle.ceiling.unattendedMcp.length === 0 ? 'none' : bundle.ceiling.unattendedMcp.join(', ')}`,
     '',
-    POLICY_ROUTING_NOT_LIVE_TEXT,
+    POLICY_ROUTING_TEXT,
     '',
     `Default label: ${labelKey(bundle.defaultLabel)}`,
     `  ${unlabelledDefaultText(bundle.defaultLabel)}`,
@@ -213,6 +217,8 @@ export function registerGate(context: GateActivationContext, options: RegisterGa
     projectRoot,
     onProblem: tell,
     onLabelNotice: (root, state, message) => { void labelNotice(host, root, state, message, tell).catch(() => undefined); },
+    onLabelRaiseRefused: (root, message) => { void labelRaiseRefused(host, root, message).catch(() => undefined); },
+    onLoweringRejected: (chatId, sentence) => { queueChatNotice(chatId, sentence); },
     ...(options.now === undefined ? {} : { now: options.now })
   });
   // Every surface reads the host's own time (the later of the clock and the latest time it has seen), so none shows a policy as valid that a decision refuses
@@ -224,6 +230,8 @@ export function registerGate(context: GateActivationContext, options: RegisterGa
   // CLAS-06: a model request made outside every session route is still decided by this host's policy and recorded in the open project's log.
   // It is cleared at deactivation (the context's subscriptions are disposed then), and only while it is still this host's (PR 4a review).
   const clearDefaultRoute = setDefaultSessionRoute(host.sessionRouteWithoutContext());
+  // D-58: every thread merge in this window judges signed lowerings with this host's key sources, and each is recorded once.
+  try { context.subscriptions?.push({ dispose: host.registerLabelLowerings() }); } catch { /* with no judge every lowering from another copy is rejected */ }
   try { context.subscriptions?.push({ dispose: clearDefaultRoute }); } catch { /* an editor that cannot take it still replaces the route at the next activation */ }
   // A closed folder's decision log is let go when the window's folders change, so a long session does not keep one per folder it ever opened.
   try {
@@ -247,9 +255,16 @@ function registerPolicySurfaces(context: GateActivationContext, host: GateHost, 
   };
   attempt('the policy status', () => {
     // The bar reads the host again when its words are due to change (the renewal window opening, the policy ending), so it never waits for a host change.
-    const bar = createGateStatusBar({ read: () => ({ state: host.bundleState(), now: clock() }), ...(statusTimers === undefined ? {} : { timers: statusTimers }) });
+    const chatMark = (): { mark: Mark; defaultLabel: Label } | undefined => {
+      const chat = chatInView();
+      const mark = chat?.mark()?.current();
+      return chat === undefined || mark === undefined ? undefined : { mark, defaultLabel: chat.defaultLabel() };
+    };
+    const bar = createGateStatusBar({ read: () => ({ state: host.bundleState(), now: clock() }), chatMark, ...(statusTimers === undefined ? {} : { timers: statusTimers }) });
     keep({ dispose: () => { bar.dispose(); } });
     keep({ dispose: host.onDidChange(() => { bar.update(host.bundleState(), clock()); }) });
+    // D-33: the item shows the label of the chat in view, so it changes when another chat is shown or that chat's label changes.
+    keep({ dispose: onChatInViewChange(() => { bar.update(host.bundleState(), clock()); }) });
   });
   attempt('the policy view', () => {
     const changed = new vscode.EventEmitter<vscode.Uri>();
@@ -290,12 +305,107 @@ function registerPolicySurfaces(context: GateActivationContext, host: GateHost, 
       return setLabel(host, target);
     }));
   });
+  attempt('Lower This Chat\'s Label', () => {
+    keep(vscode.commands.registerCommand(LOWER_CHAT_LABEL_COMMAND, () => lowerChatLabel(host)));
+  });
   attempt('label rename tracking', () => {
     keep(vscode.workspace.onDidRenameFiles((event) => followRenames(host, event.files)));
   });
   attempt('the policy setup step', () => {
     keep(registerSetupStep(policySetupStep(host, clock)));
   });
+}
+
+// ---------------------------------------------------------------------------------------------------------------------------------------------------
+// Lower This Chat's Label (CLAS-04, D-29, D-58, GATE-07)
+
+export const LOWER_CHAT_LABEL_COMMAND = 'nearAi.label.lowerChat';
+export const NO_CHAT_IN_VIEW_TEXT = "Nothing was changed: open the chat whose label you want to lower in the NEAR AI chat view first.";
+export const NOTHING_LOWER_TEXT = "Nothing was changed: this chat's label is already the project's label, and a chat is never lowered below its project.";
+export const LOWERING_NOT_SIGNED_TEXT = "This chat's label was lowered on this computer, but NEAR AI could not sign the lowering, so it will not reach your other computers: they keep the higher label.";
+/** Said with every lowering: other computers cannot check this computer's key yet (owner answer, verified devices come later), so they keep the higher label. */
+export const LOWERED_HERE_ONLY_TEXT = "Your other computers cannot check this computer's key yet, so the copies of this chat there keep the higher label until you lower it there too.";
+export const LOWER_CHAT_REASON_PROMPT = "Why may this chat's content now go where a lower label allows? The reason is kept with the chat, and travels with its encrypted metadata to your other computers.";
+
+function labelsShown(mark: Mark): string {
+  return mark.map((label) => labelShown(label)).join(', ');
+}
+
+/** `next` is lower than `mark`: raising it by every label of `mark` gives `mark` back, and it is not `mark` itself. */
+function isLowerMark(next: Mark, mark: Mark, scales: Parameters<typeof raiseMark>[2]): boolean {
+  let raised: Mark = next;
+  for (const label of mark) raised = raiseMark(raised, label, scales);
+  return sameMark(raised, mark) && !sameMark(next, mark);
+}
+
+/** `mark` holds the project's label: raising it by the project's labels changes nothing (a chat is never lowered below its project). */
+function coversProject(mark: Mark, project: Mark, scales: Parameters<typeof raiseMark>[2]): boolean {
+  let raised: Mark = mark;
+  for (const label of project) raised = raiseMark(raised, label, scales);
+  return sameMark(raised, mark);
+}
+
+/** The labels a chat at `mark` may be lowered to: each lower level of each of its scales (compartments dropped), and the project's own label, never below it. */
+export function lowerChoices(mark: Mark, project: Mark, scales: Parameters<typeof raiseMark>[2]): Mark[] {
+  const out: Mark[] = [];
+  const add = (next: Mark): void => {
+    if (!isLowerMark(next, mark, scales) || !coversProject(next, project, scales)) return;
+    if (out.some((known) => sameMark(known, next))) return;
+    out.push(next);
+  };
+  for (const held of mark) {
+    const levels = scales[held.scale]?.levels ?? [];
+    for (let index = levels.indexOf(held.level); index >= 0; index -= 1) {
+      const lowered: Label = { scale: held.scale, level: levels[index]!, compartments: [], releasability: [], handling: [] };
+      add(Object.freeze(mark.map((label) => (label === held ? lowered : label))));
+    }
+  }
+  add(project);
+  return out;
+}
+
+/**
+ * NEAR AI: Lower This Chat's Label (CLAS-04, D-29): the only way a person lowers a chat's mark. It acts on the chat in view, offers only labels below its
+ * mark down to the project's label, requires a non-empty reason, lowers the mark, saves the lowering with the chat and records label.declassify with the old
+ * label, the new one and the reason. Returns true when the label was lowered.
+ */
+export async function lowerChatLabel(host: GateHost, chat: ChatInView | undefined = chatInView()): Promise<boolean> {
+  const mark = chat?.mark();
+  if (chat === undefined || mark === undefined) {
+    void Promise.resolve(vscode.window.showInformationMessage(NO_CHAT_IN_VIEW_TEXT)).catch(() => undefined);
+    return false;
+  }
+  await host.state();
+  const policy = host.labelPolicy();
+  const view = await host.labelsFor(chat.root).view(policy.scales);
+  const project = view.resolve('', policy.defaultLabel).mark;
+  const current = mark.current();
+  const choices = lowerChoices(current, project, policy.scales);
+  if (choices.length === 0) {
+    void Promise.resolve(vscode.window.showInformationMessage(NOTHING_LOWER_TEXT)).catch(() => undefined);
+    return false;
+  }
+  type Item = vscode.QuickPickItem & { readonly mark: Mark };
+  const items: Item[] = choices.map((choice) => ({ label: labelsShown(choice), ...(sameMark(choice, project) ? { description: "the project's label" } : {}), mark: choice }));
+  const picked = await vscode.window.showQuickPick(items, { title: `Lower this chat's label from ${labelsShown(current)}`, placeHolder: LABELS_NOT_ACCREDITATION_TEXT });
+  if (picked === undefined) return false;
+  const given = await vscode.window.showInputBox({ prompt: LOWER_CHAT_REASON_PROMPT, title: `Lower this chat's label to ${picked.label}`, validateInput: (value: string) => (value.trim() === '' ? 'A reason is needed to lower a chat\'s label.' : undefined) });
+  if (given === undefined || given.trim() === '') return false;
+  const reason = given.trim();
+  // The chat may have read more while the person chose: lower only from what it holds now, and only if the choice is still lower and still covers the project.
+  const now = mark.current();
+  if (!isLowerMark(picked.mark, now, policy.scales) || !coversProject(picked.mark, project, policy.scales)) {
+    void Promise.resolve(vscode.window.showWarningMessage(`Nothing was changed: this chat read more meanwhile, and its label is now ${labelsShown(now)}. Run NEAR AI: Lower This Chat's Label again.`)).catch(() => undefined);
+    return false;
+  }
+  // D-58: the lowering travels to this person's other copies of the chat only signed with this install's device key; with no key it is lowered here only.
+  const signed = await host.signChatLowering({ chatId: chat.id, from: [...now], to: [...picked.mark], reason, at: new Date(host.now()).toISOString() });
+  chat.prepareLowering(signed ?? true);
+  const before = mark.lowerByPerson(picked.mark, reason);
+  if (signed === undefined) void Promise.resolve(vscode.window.showWarningMessage(LOWERING_NOT_SIGNED_TEXT)).catch(() => undefined);
+  host.recordLabelEvent(chat.root, { event: 'label.declassify', path: `chat ${chat.id}`, label: picked.mark[0]!, mark: picked.mark, from: before, reason: `Lowered from ${labelsShown(before)} to ${labelsShown(picked.mark)}: ${reason}` });
+  void Promise.resolve(vscode.window.showInformationMessage(`${`This chat's label is now ${labelsShown(picked.mark)}.`} ${LOWERED_HERE_ONLY_TEXT}`)).catch(() => undefined);
+  return true;
 }
 
 // ---------------------------------------------------------------------------------------------------------------------------------------------------
@@ -337,6 +447,9 @@ function labelShown(label: Label): string {
   if (label.handling.length > 0) parts.push(label.handling.join(', '));
   return parts.join(', ');
 }
+
+/** Said when the label file changed under Set Label so that the change became a lowering no reason was given for: nothing is written. */
+export const LOWER_NEEDS_REASON_TEXT = 'Nothing was written: this change lowers a label, and no reason was given for it. Run NEAR AI: Set Label again to give one.';
 
 /** True when `next` is lower than `current` on some scale: raising `next` by every label of `current` changes it. */
 function lowers(current: readonly Label[], next: Label | undefined, scales: Parameters<typeof raiseMark>[2]): boolean {
@@ -406,10 +519,20 @@ export async function setLabel(host: GateHost, target: LabelTarget): Promise<boo
     }
   }
   let reason: string | undefined;
-  if (lowers(current.origin === 'default' ? [] : current.mark, label, policy.scales)) {
+  const askReason = async (): Promise<string | undefined> => {
     const given = await vscode.window.showInputBox({ prompt: LOWER_REASON_PROMPT, title: `Lower the label of ${shownTarget}`, validateInput: (value: string) => (value.trim() === '' ? 'A reason is needed to lower a label.' : undefined) });
-    if (given === undefined || given.trim() === '') return false;
-    reason = given.trim();
+    return given === undefined || given.trim() === '' ? undefined : given.trim();
+  };
+  // The label the write will replace (PR #85 review): while the file holds reads, the view reads every path at the default label, but the write restores
+  // (or accepts) a signed map, so the label is judged against the labels this computer last verified too. The change re-checks against the map it is given.
+  const ownLabel = (map: LabelMapPayload): readonly Label[] => {
+    const resolved = resolveLabel(keyText, { verified: map, bundleDefault: policy.defaultLabel, scales: policy.scales });
+    return resolved.origin === 'default' ? [] : resolved.mark;
+  };
+  const restored = holdsReads(view.state) ? await host.lastVerifiedLabels(target.root) : undefined;
+  if (lowers([...(current.origin === 'default' ? [] : current.mark), ...(restored === undefined ? [] : ownLabel(restored))], label, policy.scales)) {
+    reason = await askReason();
+    if (reason === undefined) return false;
   }
   const confirm = async (question: LabelMapQuestion): Promise<boolean> => {
     if (question === 'accept') {
@@ -423,12 +546,17 @@ export async function setLabel(host: GateHost, target: LabelTarget): Promise<boo
     return (await vscode.window.showWarningMessage(text, { modal: true, detail }, SIGN_AGAIN_ACTION)) === SIGN_AGAIN_ACTION;
   };
   try {
-    await host.changeLabels(target.root, (map) => (keyText === '' ? setProjectLabel(map, label) : setLabelEntry(map, keyText, label)), confirm);
+    await host.changeLabels(target.root, (map) => {
+      // Re-checked against the map the write is really made over, so no lowering is ever signed without a reason (fail closed: nothing is written).
+      if (reason === undefined && lowers(ownLabel(map), label, policy.scales)) throw new LabelMapError(LOWER_NEEDS_REASON_TEXT);
+      return keyText === '' ? setProjectLabel(map, label) : setLabelEntry(map, keyText, label);
+      // A person's recorded change (label.set below, with the reason when it lowers): the one path that may lower or remove a label.
+    }, confirm, { lowering: { kind: 'person', reason: reason ?? '' } });
   } catch (error) {
     void Promise.resolve(vscode.window.showWarningMessage(error instanceof LabelMapError ? error.message : 'Nothing was changed: NEAR AI could not save the label.')).catch(() => undefined);
     return false;
   }
-  host.recordLabelEvent(target.root, { event: 'label.set', path: keyText, ...(label === undefined ? {} : { label }), ...(reason === undefined ? {} : { reason }) });
+  host.recordLabelEvent(target.root, { event: 'label.set', path: keyText, ...(label === undefined ? {} : { label }), ...(current.origin === 'default' ? {} : { from: current.mark }), ...(reason === undefined ? {} : { reason }) });
   void Promise.resolve(vscode.window.showInformationMessage(label === undefined ? `The label of ${shownTarget} was removed.` : `${shownTarget} is labelled ${labelShown(label)}.`)).catch(() => undefined);
   return true;
 }
@@ -549,6 +677,22 @@ export async function labelNotice(host: GateHost, root: string, state: LabelMapS
     return accepted;
   } catch (error) {
     void Promise.resolve(vscode.window.showWarningMessage(error instanceof LabelMapError ? error.message : "Nothing was changed: NEAR AI could not use this branch's labels.")).catch(() => undefined);
+    return false;
+  }
+}
+
+/**
+ * A labelled chat's write could not raise the written file's label automatically (the label file does not verify, or is held): the person is told once with
+ * Sign Again, which signs the label file again with this computer's key (keeping only what raises) and then writes the kept raises (D-53). Returns whether
+ * they were written.
+ */
+export async function labelRaiseRefused(host: GateHost, root: string, message: string): Promise<boolean> {
+  const answer = await vscode.window.showWarningMessage(message, SIGN_AGAIN_ACTION);
+  if (answer !== SIGN_AGAIN_ACTION) return false;
+  try {
+    return await host.signAgainForRaises(root);
+  } catch (error) {
+    void Promise.resolve(vscode.window.showWarningMessage(error instanceof LabelMapError ? error.message : 'Nothing was changed: NEAR AI could not sign the label file.')).catch(() => undefined);
     return false;
   }
 }

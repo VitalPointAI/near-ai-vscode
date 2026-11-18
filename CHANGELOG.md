@@ -3,14 +3,13 @@
 ## Unreleased
 
 You can now label files, folders and the project, so that agents cannot read what your clearance
-does not cover, and change your own policy through a signed, recorded draft. A label does not
-change where a request is sent yet: every model request is still routed by your policy's default
-label, and routing by label comes in a later release.
+does not cover, and change your own policy through a signed, recorded draft. Each chat now has a
+label of its own, raised by what its agents read, and that label decides where the chat's
+requests may go.
 
 - **Show Policy says what is in use.** **NEAR AI: Show Policy** now says that your clearances are
-  checked when an agent reads a labelled file, that every model request is routed by your
-  policy's default label and its routing tiers, and that content with no label takes the default
-  label.
+  checked when an agent reads a labelled file, that each chat's label decides where its content is
+  sent by the routing tiers, and that content with no label takes the default label.
 - **Label files, folders and the project.** **NEAR AI: Set Label**, from the Explorer's right-click
   menu or the Command Palette, labels a file, a folder or the whole project on one of the scales
   your policy holds. Labels are kept in `.planning/.near-ai/labels.json`, signed with this
@@ -32,6 +31,32 @@ label, and routing by label comes in a later release.
 - **A local runtime counts as local only on this computer.** For content that must stay on this
   computer, only a runtime on this computer (`localhost`, `127.0.0.1` or `[::1]`) counts as local,
   unless your organization names its host in the policy. The local runtime setup prompt says so.
+- **Each chat has a label.** Reading a labelled file raises the chat's label to that file's
+  label, and helper agents share it: what one of them reads raises the label of the whole chat. The
+  chat shows its label next to the model, and the status bar shows the label of the chat in view,
+  whenever it is above your policy's default label. A chat starts at its project's label (your
+  policy's default label when the project has none), so in an unlabelled project a chat that read
+  nothing labelled works as before.
+- **The chat's label decides where its requests go.** Content at Restricted, Protected B and the
+  other levels that must stay on this computer goes only to a model on this computer, and in this
+  version so does content at the levels that need a private cloud model over a proven connection
+  (Internal, Confidential, Protected A and NATO Unclassified by default). With no local model the
+  request is not sent, and you are told why and how to get out of it.
+- **Calls that could send data off this computer are held at those labels.** While a chat's label
+  must stay on this computer, a web fetch, a web search, an add-on server call or a command that
+  could send data off this computer is refused, in every mode. At Internal and Confidential they
+  still run, but a call whose address, query or body carries text the chat read from a labelled
+  file is refused. This catches copied or quoted text, not a paraphrase or an encoding.
+- **What a labelled chat writes takes its label.** A file a labelled chat writes is labelled at the
+  chat's label in the project's label file, never lower, so a later chat that reads it is labelled
+  too. A file holds one label: a file already labelled only on a scale the chat's label does not
+  hold is left as it is, and keeps a label that may let it go to a private cloud model once those
+  are allowed.
+- **Only you can lower a chat's label.** **NEAR AI: Lower This Chat's Label** lowers the label of
+  the chat in view, never below the project's label, and asks for a reason, which is recorded. The
+  label is kept with the chat and synced with it, and a sync never lowers it. A lowering is signed
+  with this computer's key, but your other computers cannot check that key yet, so the copies of
+  the chat there keep the higher label until you lower it there too.
 - **Team Studio opens on a dashboard of your teams.** The main page now shows a summary row (how
   many teams you have, how many are running now, team runs and spend this week, and how many need
   attention), then one card for each of your saved teams and this project's team. Built-in teams
