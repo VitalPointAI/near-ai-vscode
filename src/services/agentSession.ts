@@ -246,6 +246,8 @@ const headCommit = (root: string): Promise<string | undefined> => new Promise((r
 });
 /** The text of the last assistant message in a transcript, or an empty string when there is none. */
 const lastAssistantText = (transcript: AgentMessage[]): string => { for (let index = transcript.length - 1; index >= 0; index -= 1) { const message = transcript[index]; if (message.role === 'assistant') return message.content ?? ''; } return ''; };
+/** Tool capabilities that change files or run programs: an agent with a write limit keeps none of them except Write and Edit, which check the limit. */
+const WRITING_CAPABILITIES: ReadonlySet<string> = new Set(['workspaceWrite', 'sharedWrite', 'shell', 'mediaGeneration', 'mediaPublication']);
 const minutesSince = (at: number) => { const seconds = Math.max(0, Math.round((Date.now() - at) / 1000)); return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)} min`; };
 
 /**
@@ -1530,7 +1532,11 @@ export class AgentConversation {
         const privateMemory = memoryFor({ kind: 'private-agent', id: `agent-${label}`.slice(0, 80) }, `${runId}-${label}`.slice(0, 100));
         const pool = [...all.filter((tool) => tool.name !== 'Remember' && tool.name !== 'Recall'), ...privateMemory];
         // A listed tool, Task for Agent, and MCP tools by name, mcp:<server>, or a trailing-* pattern.
-        const allowed = spawn.agent?.tools.length ? pool.filter((tool) => spawn.agent!.tools.includes(tool.name) || (tool.name === 'Task' && spawn.agent!.tools.includes('Agent')) || (tool.name.startsWith('mcp__') && grantsMcpTool(spawn.agent!.tools, tool.name))) : pool.filter((tool) => tool.name !== 'Agent' && tool.name !== 'Task');
+        const listed = spawn.agent?.tools.length ? pool.filter((tool) => spawn.agent!.tools.includes(tool.name) || (tool.name === 'Task' && spawn.agent!.tools.includes('Agent')) || (tool.name.startsWith('mcp__') && grantsMcpTool(spawn.agent!.tools, tool.name))) : pool.filter((tool) => tool.name !== 'Agent' && tool.name !== 'Task');
+        // An agent with a write limit (a staff team's red team or guard) keeps only Write and Edit among the tools that change files, since those two
+        // refuse every path outside the limit; a shell, an MCP tool or a document maker could write anywhere, and starting other agents could too.
+        const writeOnly = spawn.agent?.writeOnly;
+        const allowed = writeOnly ? listed.filter((tool) => tool.name === 'Write' || tool.name === 'Edit' || (!WRITING_CAPABILITIES.has(tool.capability) && !tool.name.startsWith('mcp__') && tool.name !== 'Agent' && tool.name !== 'Task')) : listed;
         // The task-list item this agent does, when the call names one that is on the list.
         const todo = spawn.task ? this.moveTask(spawn.task, 'in_progress') : undefined;
         const agent: LiveAgent = { id: `${label}-${randomBytes(3).toString('hex')}`, label, description: spawn.description, model, abort: new AbortController(), paused: false, background: spawn.background, activity: 'Waiting for a free slot', activitySince: Date.now(), startedAt: Date.now(), toolCalls: 0, turns: 0 };
@@ -1612,7 +1618,7 @@ export class AgentConversation {
             // Its own shell, so parallel agents neither queue behind each other's commands nor share a cwd.
             shell = new ShellSession(agentRoot, undefined, request.gsd?.shellEnv ?? {}, request.shellEnvAllow ?? []);
             // Research agents gather outside content; their writes belong in .planning/ (others ask).
-            const agentContext = { ...context, root: agentRoot, shell, readFiles: new Set<string>(), pages: new Map<string, string>(), agentId: agent.id, agentLabel: label, ...(/research|synthesi|red-team/i.test(label) ? { writeScope: '.planning' } : {}) };
+            const agentContext = { ...context, root: agentRoot, shell, readFiles: new Set<string>(), pages: new Map<string, string>(), agentId: agent.id, agentLabel: label, ...(/research|synthesi|red-team/i.test(label) ? { writeScope: '.planning' } : {}), ...(writeOnly ? { writeOnly } : {}) };
             const isolationNote = worktree ? `\n\n# Isolation\nYou are working in an isolated git worktree at ${worktree.path} on branch ${worktree.branch}${worktree.root !== worktree.path ? `, in its copy of the workspace folder, ${worktree.root}` : ''}.${worktree.rootUnmatched ? ` The workspace folder (${this.root}) could not be placed inside the worktree, so you start at its top level: change into the matching subfolder before working.` : ''}${worktree.rootCreatedEmpty ? ` git does not track that folder, so its copy here is empty: files you need from it are only in the main checkout.` : ''} Commit your work on this branch; do not switch branches or touch the main checkout at ${this.root}.` : '';
             const base = `${this.systemPrompt({ ...request, model }, agentRoot, tools.some((tool) => tool.name === 'Agent' || tool.name === 'Task'))}${isolationNote}`;
             const system = agentBody ? `${agentBody}\n\n${base}` : base;

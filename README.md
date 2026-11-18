@@ -576,6 +576,9 @@ until it runs out aren't shown.
   writes `privacy:` as the member's last line before its instructions, so an
   older version that does not know it still reads the member's tools
   correctly; if you write it by hand, put it after `tools:` too.
+  In a military staff team (a team file with a `staff:` block), the red team
+  can write only its critique and the release guard only its verdicts: the
+  extension refuses their other writes and gives them no shell.
   New research teams have `privacy: private` on every member (and presales
   teams on their reviewer), so client material stays on private models;
   change a member's line to `privacy: any` to relax it. Run one with `/team:<name> <task>`

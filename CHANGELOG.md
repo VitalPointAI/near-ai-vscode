@@ -39,6 +39,21 @@
   it, ICD 203 analytic standards and source grading, with reliability and credibility graded
   separately, and the section's guidance gives the lead its parallel lanes for every planning
   step. The team is private and uses exercise data only; no member has a persona name or a rank.
+- **J5 plans staff team template.** A twelve-member plans section for the military staff
+  templates, written for the project's doctrine profile and level (US Joint JPP, US Army MDMP,
+  NATO/Canadian AJP-5 or APP-28): a lead planner who runs the planning steps and the wargame,
+  operational design before the steps, two COA cells given distinct themes and run at the same
+  time, the lead planner alone applying the profile's COA tests (suitable, feasible, acceptable,
+  distinguishable, complete under US Joint), a red cell seat, an independent red team that reports
+  to the human chief of staff, future operations, sustainment, legal support, a plans writer and a
+  release guard. Variants: strategic, operational and tactical; a multidomain convergence planner
+  under US Army; crisis planning names the J3 director as the planning lead. It ships four skills
+  (planning templates, wargame ledger, centre of gravity analysis, assessment framework) and is
+  recorded in the template history. Members recommend; a named person makes every decision.
+- **A staff team's red team and release guard can write only their own files.** In a team with a
+  `staff:` block, the red team may write only its critique and the release guard only its
+  verdicts. Write and Edit refuse every other path, and such a member gets no shell, document,
+  MCP or agent-starting tool even if its tools line lists one.
 
 ## 0.4.33
 
