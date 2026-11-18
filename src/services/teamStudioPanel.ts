@@ -27,6 +27,8 @@ import { draftFromMarkdown, teamMarkdown } from '../agent/teamMarkdown';
 import { readFile, writeFile } from 'node:fs/promises';
 import { onDidChangeEmergencyStop } from './emergencyStop';
 import { homeFolder, teamLibraryDir, teamsMoveInFlight, whenTeamsMoved } from '../domain/teamStorage';
+import { ActivityStore } from './activityStore';
+import { keptRoleTests, projectIdentity, teamKey } from '../domain/teamDashboard';
 
 // The NEAR AI Team Studio tab. One tab at a time; opening it again shows it (and, for the project
 // team setup, starts the guided builder).
@@ -34,6 +36,21 @@ import { homeFolder, teamLibraryDir, teamsMoveInFlight, whenTeamsMoved } from '.
 const DRAFT_KEY = 'nearAi.teamStudio.draft';
 /** Unsaved work kept when the tab was closed (VS Code cannot ask before a webview panel closes). */
 const KEPT_KEY = 'nearAi.teamStudio.kept';
+/**
+ * The last role test of each team (the dashboard's health): scores only, keyed by the team's identity (user:<slug>, or project:<hash of the project
+ * folder's real path>), at most 200. This extension's own storage
+ * on this computer: VS Code syncs a key of globalState only when told to, and this one is not.
+ */
+const ROLE_TESTS_KEY = 'nearAi.teamStudio.roleTests';
+/** How the person last sorted and filtered the dashboard, so the tab opens that way again (this computer only, like the role tests). */
+const VIEW_KEY = 'nearAi.teamStudio.view';
+/**
+ * The person's own rating of each team (PR 86 review): kept here, by the team's identity, and never in a team file, so a project team's rating never goes
+ * where the project's files go (a code push included). This computer only, like the role tests.
+ */
+const RATINGS_KEY = 'nearAi.teamStudio.ratings';
+/** A team the AI drafted and the person has not used or discarded yet (PR 86 review, round 2), so it outlives the tab. This computer only. */
+const PROPOSAL_KEY = 'nearAi.teamStudio.proposal';
 let current: { panel: vscode.WebviewPanel; startWizard(target: StudioTarget): Promise<void> } | undefined;
 
 /**
@@ -145,7 +162,28 @@ export async function openTeamStudio(context: vscode.ExtensionContext, auth: Aut
     openSetting: (key) => Promise.resolve(vscode.commands.executeCommand('workbench.action.openSettings', key)),
     updateTeam: (file) => Promise.resolve(vscode.commands.executeCommand('nearAi.updateTeam', file)),
     liveRun: (slug) => sharedActivityFeed().agentStats().some((stat) => stat.team === slug && stat.status === 'running' && stat.agentId === `main-${stat.runId}`),
-    watchLive: () => Promise.resolve(vscode.commands.executeCommand('nearAi.openTeamLive')),
+    watchLive: (runId) => Promise.resolve(runId ? vscode.commands.executeCommand('nearAi.openTeamLive', runId) : vscode.commands.executeCommand('nearAi.openTeamLive')),
+    // The dashboard (0.4.31): the open project's run history, the team runs going now, and a notification when one starts or ends.
+    history: async () => { const root = rootNow(); return root ? new ActivityStore(root).list() : []; },
+    runningTeams: () => {
+      const feed = sharedActivityFeed();
+      return feed.agentStats().filter((stat) => stat.agentId === `main-${stat.runId}` && stat.status === 'running' && stat.team).map((stat) => {
+        const file = feed.runTeam(stat.runId)?.file;
+        return { runId: stat.runId, ...(stat.team ? { slug: stat.team } : {}), ...(file ? { file } : {}) };
+      });
+    },
+    onDidChangeRuns: (listener) => {
+      // Only a team run starting, ending, or having its end saved to the history (its counters persisted) is news here; tokens and tools are not.
+      const feed = sharedActivityFeed();
+      const runs = () => feed.agentStats().filter((stat) => stat.agentId === `main-${stat.runId}` && stat.team).map((stat) => `${stat.runId}:${stat.status}:${stat.persisted ? 1 : 0}`).sort().join(',');
+      let seen = runs();
+      const subscription = feed.subscribe(() => { const now = runs(); if (now !== seen) { seen = now; listener(); } });
+      return { dispose: () => subscription.dispose() };
+    },
+    roleTests: { get: () => context.globalState.get(ROLE_TESTS_KEY), set: (value) => Promise.resolve(context.globalState.update(ROLE_TESTS_KEY, value)) },
+    ratings: { get: () => context.globalState.get(RATINGS_KEY), set: (value) => Promise.resolve(context.globalState.update(RATINGS_KEY, value)) },
+    proposal: { get: () => context.globalState.get(PROPOSAL_KEY), set: (value) => Promise.resolve(context.globalState.update(PROPOSAL_KEY, value)) },
+    view: { get: () => context.globalState.get(VIEW_KEY), set: (value) => Promise.resolve(context.globalState.update(VIEW_KEY, value)) },
     confirm: async (message, action) => (await vscode.window.showWarningMessage(message, { modal: true }, action)) === action,
     choose: async (message, ...actions) => vscode.window.showWarningMessage(message, { modal: true }, ...actions),
     // The tested model for each role, from the comparisons this machine has run, so a saved team is checked against evidence rather than defaults.
@@ -187,6 +225,13 @@ export async function openTeamStudio(context: vscode.ExtensionContext, auth: Aut
         // Nobody watches a role run: it is decided with presence none in an unattended context, and its decisions reach the project's log (GATE-07, D-43).
         ...(gateHost ? { gateFor: (run: { member: string; model: string }) => unattendedRuntimeFor(gateHost, root, `team-roles-${teamName}`, `${run.member} on ${run.model}`) } : {})
       });
+      // Kept for the dashboard's health before anything else happens to the team, whatever the tests found (scores only; no model or task text).
+      // A run cancelled part-way is not the team's last role test: it would count the members it never reached as failing.
+      const testedKey = teamKey({ kind: teamEntry?.project ? 'project' : 'user', slug: slugify(path.basename(file, '.md')) }, teamEntry?.project && root ? await projectIdentity(root) : undefined);
+      const keptBefore = context.globalState.get(ROLE_TESTS_KEY);
+      const testedAt = new Date().toISOString();
+      const nextRoleTests = keptRoleTests(keptBefore, testedKey, outcomes, plan.members, options.signal?.aborted === true, testedAt);
+      if (nextRoleTests) await context.globalState.update(ROLE_TESTS_KEY, nextRoleTests).then(undefined, () => undefined);
       const picks = bestOf(outcomes);
       if (!picks.length) return { applied: 0, text: options.signal?.aborted ? `${teamName}: cancelled, so its models were left alone.` : 'Every role test failed, so the team is unchanged. Run Compare Models to see why.' };
       // Which picks really matched a member, collected where the write happens, so the notice below cannot claim a write that did not happen.

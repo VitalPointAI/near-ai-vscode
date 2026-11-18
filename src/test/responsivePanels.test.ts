@@ -299,3 +299,40 @@ test('Team Studio cards are one size per row: a flex column whose actions sit at
   assert.match(sheet, /body\.vscode-high-contrast \.team-icon-default rect \{[^}]*fill: var\(--vscode-editor-background\)/);
   assert.match(sheet, /body\.vscode-high-contrast \.team-icon \{[^}]*outline: 1px solid var\(--vscode-contrastBorder/);
 });
+
+test('Team Studio\'s dashboard fits any panel from 220 to 1000px: the summary, the stats, the controls and the stars wrap instead of scrolling sideways', () => {
+  const sheet = css('teams/teams.css');
+  // Grids narrow with the panel: each column asks for at most the whole width.
+  assert.match(sheet, /\.tiles \{[^}]*grid-template-columns: repeat\(auto-fit, minmax\(min\(\d+px, 100%\), 1fr\)\);/);
+  assert.match(sheet, /\.stats \{[^}]*grid-template-columns: repeat\(auto-fit, minmax\(min\(\d+px, 100%\), 1fr\)\);/);
+  // Rows of controls, the status and the stars wrap.
+  for (const rule of ['.dash-controls', '.status-line', '.health-score', '.stars']) assert.match(sheet, new RegExp(`\\${rule} \\{[^}]*display: flex; flex-wrap: wrap;`), rule);
+  // Long names, models, reasons and figures break inside their box.
+  for (const rule of ['.tile dt', '.tile dd', '.reasons li', '.member-model', '.stat dd', '.health-parts']) assert.match(sheet, new RegExp(`\\${rule.replace(' ', ' ')} \\{[^}]*overflow-wrap: anywhere;`), rule);
+  // No rule of the dashboard asks for a fixed width wider than the narrowest panel.
+  const dashboard = sheet.slice(sheet.indexOf('/* The dashboard (0.4.31)'), sheet.indexOf('/* High contrast'));
+  assert.ok(dashboard.length > 500, 'the dashboard rules are found');
+  for (const match of dashboard.matchAll(/(?<![-\w])(?:min-)?width: (\d+)px/g)) assert.ok(Number(match[1]) <= 1, `a fixed width: ${match[0]}`);
+  assert.doesNotMatch(dashboard, /white-space: nowrap;[^}]*(?:width|min-width): \d{3}/);
+  // One card per row in a narrow panel (the cards grid already narrows with the panel).
+  assert.match(sheet, /@media \(max-width: 520px\) \{[\s\S]*?\.cards, \.choice-grid \{ grid-template-columns: 1fr; \}/);
+});
+
+test('Team Studio\'s dashboard reads in light, dark and high contrast themes: theme colours only, words not colours, borders in high contrast', () => {
+  const sheet = css('teams/teams.css');
+  const dashboard = sheet.slice(sheet.indexOf('/* The dashboard (0.4.31)'), sheet.indexOf('/* High contrast'));
+  // Every colour comes from the theme (so light and dark both work); none is written as a raw value.
+  assert.doesNotMatch(dashboard, /#[0-9a-f]{3,8}\b|rgba?\(|hsla?\(/i);
+  for (const match of dashboard.matchAll(/(?:^|[;{\s])(color|background|border-color): ([^;]+);/g)) assert.match(match[2]!, /var\(--|currentColor|transparent|none|inherit/, `${match[1]}: ${match[2]}`);
+  // A status is a word in a pill with a border, so it reads without its colour; a rating is filled or outline stars.
+  assert.match(sheet, /\.pill \{[^}]*border: 1px solid currentColor;/);
+  const script = readFileSync(path.join(MEDIA, 'teams', 'teams.js'), 'utf8');
+  assert.match(script, /const STATUS_TEXT = \{ running: 'Running now', ready: 'Ready', attention: 'Needs attention', 'never-run': 'Never run' \};/);
+  assert.match(script, /value <= current \? '★' : '☆'/);
+  // High contrast: the tiles, pills and flags take the theme's contrast border, a lit star the foreground, and the focus the active border.
+  assert.match(sheet, /body\.vscode-high-contrast \.tile, body\.vscode-high-contrast \.pill, body\.vscode-high-contrast \.flag \{ border-color: var\(--vscode-contrastBorder, currentColor\); \}/);
+  assert.match(sheet, /body\.vscode-high-contrast \.stars label\.star\.on \{ color: var\(--vscode-foreground\); \}/);
+  assert.match(sheet, /body\.vscode-high-contrast \.stars input:focus-visible \+ label \{ outline-color: var\(--vscode-contrastActiveBorder/);
+  // The focus is drawn on the star's label, since the radio itself is not seen.
+  assert.match(sheet, /\.stars input:focus-visible \+ label \{ outline: 1px solid var\(--accent\);/);
+});

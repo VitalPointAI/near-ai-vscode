@@ -796,7 +796,32 @@ function sampleData(name: string, seen: Message[]): Message[] {
     return [{ type: 'state', servers: [server], project: 'a-project-folder-with-a-long-name', saved: false }];
   }
   if (name === 'team-live') return [teamLiveSample()];
+  if (name === 'teams') return [teamsDashboardSample()];
   return [];
+}
+
+/**
+ * 0.4.31: Team Studio's dashboard as its host would send it, with long names, long model ids, every status, reasons, stats and ratings, worked out by
+ * the extension's own code from a made-up run history, so every width from 220 to 1000px is measured with a full page.
+ */
+function teamsDashboardSample(): Message {
+  const extension = vscode.extensions.getExtension(EXTENSION_ID)!;
+  const { buildDashboard } = require(path.join(extension.extensionPath, 'dist/domain/teamDashboard')) as typeof import('../../domain/teamDashboard');
+  const now = Date.now();
+  const member = (name: string, privacy: string, extra: Record<string, unknown> = {}) => ({ name, role: 'researcher', tier: 'deep', model: LONG_MODEL, privacy, privacyText: privacy, available: true, ...extra });
+  const long = 'Finds every competitor in a market, writes a brief with a citation for each claim, checks the brief against its sources and designs a cover for it, then hands it over.';
+  const teams = [
+    { id: 'project', kind: 'project', name: 'Market research team with a rather long name for this project', description: long, command: '/team:project ', rating: 4, check: { block: 0, warning: 0, advice: 1 }, members: [member('research-analyst-with-a-long-name', 'tee'), member('brief-writer', 'forwarded', { tier: 'standard' }), member('reviewer', 'local', { tier: 'fast' }), member('designer', 'tee'), member('checker', 'tee')] },
+    { id: 'user:imported-team-with-a-long-name', kind: 'user', name: 'Imported team with a long name that wraps onto several lines', description: long, command: '/team:imported-team-with-a-long-name ', imported: true, check: { block: 0, warning: 2, advice: 0 }, members: [member('a-member-whose-model-is-gone', 'unknown', { tier: 'model', model: 'vendor/a-model-that-is-no-longer-offered-with-a-long-id', available: false })] },
+    { id: 'user:web', kind: 'user', name: 'Web', description: 'Builds pages', command: '/team:web ', private: true, check: { block: 0, warning: 0, advice: 0 }, members: [member('dev', 'tee')] }
+  ];
+  const session = (id: string, title: string, ago: number, outcome: 'completed' | 'failed', cost: number) => ({ version: 1, sessionId: `session-${id}-0000`, project: 'p', plans: [], agents: {}, models: [], approvals: { required: 0, approved: 0, pending: 0 }, startedAt: new Date(now - ago).toISOString(), updatedAt: new Date(now).toISOString(), outcome: 'completed', continuationAvailable: false, context: { userTurns: 1, assistantTurns: 1 }, events: [], runId: `run-${id}-000000`, title, runOutcome: outcome, endedAt: new Date(now - ago + 754_000).toISOString(), estimatedCostUsd: cost });
+  const dashboard = buildDashboard({
+    now, history: true, roleTests: {}, running: [{ runId: 'run-e2e-000000', slug: 'web' }],
+    sessions: [session('a', '/team:project go', 3_600_000, 'completed', 12.3456), session('b', '/team:team again', 86_400_000, 'failed', 0.0012)] as never,
+    teams: teams.map((team) => ({ id: team.id, kind: team.kind as 'project' | 'user', slug: team.kind === 'project' ? 'team' : team.id.slice(5), file: `/e2e/${team.id}.md`, ...(team.imported ? { imported: true } : {}), check: team.check, members: team.members }))
+  });
+  return { type: 'library', library: { teams, archived: [{ id: 'archived:an-archived-team-with-a-very-long-name', name: 'An archived team with a very long name' }] }, dashboard };
 }
 
 /**
