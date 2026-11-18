@@ -47,8 +47,10 @@ function org(level: string): Label {
 }
 
 /** A fake fetch that serves a catalog and answers every content request, counting the content requests it was given. */
-function fakeFetch(catalog: { tee?: string[]; cloud?: string[]; local?: string[] }): { fetchFn: typeof fetch; content: string[] } {
+function fakeFetch(catalog: { tee?: string[]; cloud?: string[]; local?: string[] }): { fetchFn: typeof fetch; content: string[]; checks: string[] } {
   const content: string[] = [];
+  // The background connection check of a NEAR AI Cloud client (plan 25) asks for an attestation report; it carries no content and is counted apart.
+  const checks: string[] = [];
   const fetchFn = (async (input: string | URL | Request, init?: RequestInit) => {
     const url = String(input);
     const method = init?.method ?? 'GET';
@@ -63,10 +65,14 @@ function fakeFetch(catalog: { tee?: string[]; cloud?: string[]; local?: string[]
       ];
       return new Response(JSON.stringify({ models }), { status: 200 });
     }
+    if (method === 'GET' && new URL(url).pathname.endsWith('/attestation/report')) {
+      checks.push(`${method} ${new URL(url).pathname}`);
+      return new Response('{}', { status: 404 });
+    }
     content.push(`${method} ${new URL(url).pathname}`);
     return new Response(JSON.stringify({ choices: [{ message: { content: 'ok' }, finish_reason: 'stop' }], usage: { prompt_tokens: 3, completion_tokens: 1 } }), { status: 200 });
   }) as typeof fetch;
-  return { fetchFn, content };
+  return { fetchFn, content, checks };
 }
 
 const ACTOR: ActorRef = { kind: 'agent', deviceFingerprint: 'device-test', sessionId: 'session-test', agentId: 'main-1', agentLabel: 'agent' };
@@ -156,6 +162,8 @@ test('the provider factory says each client\'s route: a local profile and a hybr
     (error: unknown) => error instanceof RouteRefusedError && error.rule === 'route.no-local-model'
   );
   assert.deepEqual(fake.content, ['POST /v1/chat/completions', 'POST /v1/chat/completions'], 'only the two local requests were sent');
+  // The two NEAR AI Cloud clients asked for an attestation report in the background (no content), and nothing else was sent.
+  assert.ok(fake.checks.length >= 1 && fake.checks.every((check) => check === 'GET /v1/attestation/report'), fake.checks.join(', '));
 });
 
 // ---- Task 2: every production request site runs inside a session route, and three scans keep it that way ----

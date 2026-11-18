@@ -27,8 +27,9 @@ import type { Label } from '../domain/gate/labels';
 import type { GateRuntime } from '../domain/gate/decide';
 import type { DecisionRecord } from '../domain/gate/record';
 import { validateDecisionRecord } from '../domain/gate/record';
+import { DECISIONS_DIR, projectLogKey } from '../gate/decisionLog';
 import { LABEL_LOWERING_REFUSED_TEXT, LABEL_MAP_FILE, LabelMapError } from '../gate/labelMapStore';
-import { GateHost, raisedEntryLabel } from '../gate/host';
+import { GateHost, JUDGED_LOWERINGS_KEPT, REFUSED_RAISE_PATHS, REFUSED_RAISE_PROJECTS, raisedEntryLabel } from '../gate/host';
 import { DEFAULT_ROUTING } from '../domain/gate/routing';
 import { setLabelEntry } from '../domain/gate/labelMap';
 import { MemorySecrets } from './helpers/teamHarness';
@@ -474,17 +475,16 @@ test('review 1: a label raised by another writer between the auto-raise\'s read 
   // Another window (or Set Label) raises out.md to Restricted right after this host read the labels and before its write.
   const other = new GateHost({ globalStorageDir: (host as unknown as { options: { globalStorageDir: string } }).options.globalStorageDir, secrets: (host as unknown as { options: { secrets: MemorySecrets } }).options.secrets, productVersion: '0.4.30-test', projectRoot: root, home: root });
   assert.equal((await other.start()).state, 'valid');
-  const reader = host.labelsFor(root);
-  const view = reader.view.bind(reader);
+  // PR 4d: writeRaises no longer reads a view before the lock, so the other writer races in right before this host's write takes the lock.
+  const change = host.changeLabels.bind(host);
   let raced = false;
-  reader.view = async (scales) => {
-    const seen = await view(scales);
+  host.changeLabels = (async (...args: Parameters<typeof change>) => {
     if (!raced) { raced = true; await other.changeLabels(root, (map) => setLabelEntry(map, 'out.md', label('org', 'Restricted'))); }
-    return seen;
-  };
+    return change(...args);
+  }) as typeof host.changeLabels;
   await host.writeRaises(root, new Map([['out.md', [label('org', 'Confidential')]]]));
-  reader.view = view;
-  reader.invalidate();
+  host.changeLabels = change;
+  host.labelsFor(root).invalidate();
   assert.equal(await labelOfPath(host, root, 'out.md'), 'org/Restricted', 'the higher label stays');
 });
 
@@ -493,18 +493,17 @@ test('review 1: a synced copy of the label file raised mid-write keeps its raise
   const file = path.join(root, ...LABEL_MAP_FILE.split('/'));
   const other = new GateHost({ globalStorageDir: (host as unknown as { options: { globalStorageDir: string } }).options.globalStorageDir, secrets: (host as unknown as { options: { secrets: MemorySecrets } }).options.secrets, productVersion: '0.4.30-test', projectRoot: root, home: root });
   assert.equal((await other.start()).state, 'valid');
-  const reader = host.labelsFor(root);
-  const view = reader.view.bind(reader);
+  // PR 4d: the copy arrives right before this host's write takes the lock (writeRaises no longer reads a view first).
+  const change = host.changeLabels.bind(host);
   let raced = false;
-  reader.view = async (scales) => {
-    const seen = await view(scales);
+  host.changeLabels = (async (...args: Parameters<typeof change>) => {
     // The copy that arrives raises notes.md and out.md to Restricted.
     if (!raced) { raced = true; await other.changeLabels(root, (map) => setLabelEntry(setLabelEntry(map, 'notes.md', label('org', 'Restricted')), 'out.md', label('org', 'Restricted'))); }
-    return seen;
-  };
+    return change(...args);
+  }) as typeof host.changeLabels;
   await host.writeRaises(root, new Map([['out.md', [label('org', 'Confidential')]], ['notes.md', [label('org', 'Confidential')]]]));
-  reader.view = view;
-  reader.invalidate();
+  host.changeLabels = change;
+  host.labelsFor(root).invalidate();
   assert.ok(existsSync(file));
   assert.equal(await labelOfPath(host, root, 'notes.md'), 'org/Restricted');
   assert.equal(await labelOfPath(host, root, 'out.md'), 'org/Restricted');
@@ -529,4 +528,60 @@ test('review 2.2: a written file whose label holds several scales still takes th
   assert.deepEqual(keys([raisedEntryLabel([label('org', 'Internal'), label('ca-protected', 'Protected A')], [label('org', 'Confidential')], SCALE_PRESETS, routing)!]), ['org/Confidential']);
   assert.deepEqual(keys([raisedEntryLabel([label('org', 'Internal'), label('ca-protected', 'Protected A')], [label('org', 'Confidential'), label('ca-protected', 'Protected B')], SCALE_PRESETS, routing)!]), ['ca-protected/Protected B']);
   assert.equal(raisedEntryLabel([label('org', 'Restricted'), label('ca-protected', 'Protected B')], [label('org', 'Internal')], SCALE_PRESETS, routing), undefined, 'nothing rises');
+});
+
+// ---- PR #87 review, last rounds (fixed in PR 4d): whether a label rises is decided under the writer's lock, and the host's memory is bounded ----
+
+test('review 4.5: a view read before the lock that says the file is already high does not stop a raise the label file needs', async () => {
+  const { host, root } = await hostWithLabels({ 'conf.md': label('org', 'Confidential') });
+  writeFileSync(path.join(root, 'out.md'), 'derived\n');
+  const reader = host.labelsFor(root);
+  const view = reader.view.bind(reader);
+  // A stale view: it says out.md is already Restricted, while the label file holds no label for it.
+  reader.view = async (scales) => {
+    const seen = await view(scales);
+    return { ...seen, resolve: (key: string, fallback: Label) => (key === 'out.md' ? { mark: [label('org', 'Restricted')], origin: 'file' } : seen.resolve(key, fallback)) } as typeof seen;
+  };
+  try {
+    assert.equal(await host.writeRaises(root, new Map([['out.md', [label('org', 'Confidential')]]])), true);
+  } finally {
+    reader.view = view;
+    reader.invalidate();
+  }
+  assert.equal(await labelOfPath(host, root, 'out.md'), 'org/Confidential');
+  // When nothing rises against the file under the lock (conf.md already holds Confidential), nothing is written.
+  const before = revisionOf(root);
+  assert.equal(await host.writeRaises(root, new Map([['conf.md', [label('org', 'Confidential')]]])), false);
+  assert.equal(revisionOf(root), before);
+});
+
+test('review 4.5: the lowerings a window remembers and the raises it keeps for Sign Again are bounded, and a path\'s kept labels are joined, not appended', async () => {
+  const { host, root } = await hostWithLabels({});
+  const internals = host as unknown as { judgedLowerings: Set<string>; refusedRaises: Map<string, { root: string; raises: Map<string, Label[]> }>; keepRefusedRaises: (root: string, raises: ReadonlyMap<string, readonly Label[]>) => void };
+  const projectA = internals.refusedRaises;
+  for (let index = 0; index < 50; index += 1) internals.keepRefusedRaises(root, new Map([['out.md', [label('org', 'Confidential')]]]));
+  const keptFor = () => projectA.get(projectLogKey(root))!.raises;
+  assert.deepEqual(keys(keptFor().get('out.md')!), ['org/Confidential'], 'joined once, not fifty times');
+  for (let index = 0; index < REFUSED_RAISE_PATHS + 10; index += 1) internals.keepRefusedRaises(root, new Map([[`file-${String(index)}.md`, [label('org', 'Internal')]]]));
+  assert.equal(keptFor().size, REFUSED_RAISE_PATHS);
+  // PR #89 review: each raise the bound drops is recorded in the project's log as a denied label.set, so Sign Again not writing it is never silent.
+  await host.flush();
+  const storage = (host as unknown as { options: { globalStorageDir: string } }).options.globalStorageDir;
+  const log = path.join(storage, 'gate', DECISIONS_DIR, `${projectLogKey(root)}.jsonl`);
+  const dropped = readFileSync(log, 'utf8').split('\n').filter((line) => line !== '').map((line) => JSON.parse(line) as DecisionRecord)
+    .filter((record) => record.authorizations[0]?.policy.name === 'label.set' && JSON.stringify(record).includes('was dropped'));
+  assert.equal(dropped.length, 11, 'out.md and the ten oldest files');
+  assert.ok(dropped.every((record) => (record as unknown as { action_id: number }).action_id === 2), 'recorded as denied, never as a label that was set');
+  assert.ok(dropped.some((record) => JSON.stringify(record).includes('"name":"out.md"') && record.unmapped.nearAi.label?.level === 'Confidential'));
+  assert.ok(dropped.every((record) => validateDecisionRecord(JSON.parse(JSON.stringify(record))).ok));
+  for (let index = 0; index < REFUSED_RAISE_PROJECTS + 5; index += 1) internals.keepRefusedRaises(path.join(root, `project-${String(index)}`), new Map([['x.md', [label('org', 'Internal')]]]));
+  assert.equal(internals.refusedRaises.size, REFUSED_RAISE_PROJECTS);
+  const stop = host.registerLabelLowerings();
+  try {
+    const { reportLowering } = await import('../domain/gate/lowerings');
+    for (let index = 0; index < JUDGED_LOWERINGS_KEPT + 20; index += 1) reportLowering(`conv-bound-${String(index)}`, { sig: `s${String(index)}` }, { apply: false, cause: 'key-unknown' });
+    assert.equal(internals.judgedLowerings.size, JUDGED_LOWERINGS_KEPT);
+  } finally {
+    stop();
+  }
 });

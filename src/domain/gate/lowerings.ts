@@ -10,6 +10,28 @@ export interface LoweringContext {
   readonly otherMark: Mark;
   /** When the other copy was last used; it must not be after the lowering. */
   readonly otherLastUsedAt: string;
+  /** The chat's project label as this computer last resolved it, when known: a lowering's target must still hold it (never below the project). */
+  readonly projectMark?: Mark;
+}
+
+/**
+ * The project label each chat last ran at on this computer, by chat id (the newest 200): a run notes it, and a merge gives it to the judge, so a signed
+ * lowering is never applied below the project's label as this computer knows it. A chat this computer has not run has none, and its next run raises its
+ * mark by the project's label anyway.
+ */
+const projectMarks = new Map<string, Mark>();
+const PROJECT_MARKS_KEPT = 200;
+
+/** Notes the project label a chat runs at now. */
+export function noteChatProjectMark(chatId: string, mark: Mark): void {
+  projectMarks.delete(chatId);
+  projectMarks.set(chatId, mark);
+  while (projectMarks.size > PROJECT_MARKS_KEPT) projectMarks.delete(projectMarks.keys().next().value as string);
+}
+
+/** The project label a chat last ran at on this computer, or undefined. */
+export function chatProjectMark(chatId: string): Mark | undefined {
+  return projectMarks.get(chatId);
 }
 
 /**

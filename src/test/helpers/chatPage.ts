@@ -17,13 +17,15 @@ export function chatPage(): { nodes: Map<string, StubNode>; send: (data: unknown
   const context: Record<string, unknown> = {
     document, window, console, setTimeout, clearTimeout, setInterval, clearInterval, Date, Math, JSON, Intl, structuredClone, crypto: webcrypto,
     requestAnimationFrame: (run: () => void) => setTimeout(run, 0),
+    cancelAnimationFrame: (handle: ReturnType<typeof setTimeout>) => clearTimeout(handle),
     getComputedStyle: () => ({ getPropertyValue: () => '' }),
     ResizeObserver: class { public observe(): void {} public unobserve(): void {} public disconnect(): void {} },
     acquireVsCodeApi: () => ({ postMessage: (message: unknown) => { posts.push(message); }, getState: () => undefined, setState: () => undefined })
   };
   // The kits panelView loads before chat.js, stubbed to their published shapes.
   Object.assign(window, {
-    nearMarkdown: { render: (text: string) => text },
+    // parse gives no blocks: an answer's text is not drawn, but its reply node and footer are, so tests can follow replies by run.
+    nearMarkdown: { render: (text: string) => text, parse: () => [] },
     nearTables: { capture: () => ({ wraps: [], scroll: [], focused: -1, inner: -1 }), restore: () => [], syncTabStop: () => undefined, focusLeft: () => undefined, watchSizes: () => ({ observe: () => undefined, release: () => undefined, reset: () => undefined }) },
     // A real queue: the page tracks which prompts are pinned, and a stub that answered nothing would hide a card that never appeared.
     nearPending: {

@@ -35,6 +35,9 @@ export const LOWERING_REJECTION_CAUSES = Object.freeze({
   'higher-mark': 'the other copy of the chat holds a higher label',
   'used-after': 'the chat was used on the other copy after it was lowered',
   'both-lowered': 'both copies hold lowerings the other does not',
+  'not-lower': 'its new label is not below the label it lowered from',
+  'below-project': 'its new label is below the project\'s label',
+  'unreadable-time': 'the time it was signed or the other copy was last used cannot be read',
   'no-judge': 'this window cannot check signed lowerings'
 } as const);
 export type LoweringRejection = keyof typeof LOWERING_REJECTION_CAUSES;
@@ -66,6 +69,18 @@ function markOf(value: unknown): Mark | undefined {
   return out;
 }
 
+/** `mark` raised by every label of `by`. */
+function raiseBy(mark: Mark, by: Mark): Mark {
+  let raised: Mark = mark;
+  for (const label of by) raised = raiseMark(raised, label, SCALE_PRESETS);
+  return raised;
+}
+
+/** Whether `mark` already holds `held`: raising it by `held` changes nothing. */
+function covers(mark: Mark, held: Mark): boolean {
+  return sameMark(raiseBy(mark, held), mark);
+}
+
 /** Judges one signed lowering a copy of the chat holds and the other does not (D-58). Never throws. */
 export function judgeChatLowering(envelope: unknown, context: LoweringContext, keys: KeyStatusLookup = NO_KNOWN_KEYS): LoweringVerdict {
   const reject = (cause: LoweringRejection): LoweringVerdict => ({ apply: false, cause });
@@ -86,11 +101,16 @@ export function judgeChatLowering(envelope: unknown, context: LoweringContext, k
   const to = markOf(payload?.to);
   if (payload === null || typeof payload !== 'object' || from === undefined || to === undefined || typeof payload.chatId !== 'string') return reject('does-not-verify');
   if (payload.chatId !== context.chatId) return reject('another-chat');
+  // The signed target is checked again here, not trusted because it verifies (PR #87 review): it is below its from-mark, and never below the project.
+  if (!covers(from, to) || sameMark(raiseBy(to, from), to)) return reject('not-lower');
+  if (context.projectMark !== undefined && !covers(to, context.projectMark)) return reject('below-project');
   // The from-mark covers the other copy's mark: raising it by that mark changes nothing, so the lowering undoes no raise made there.
-  let raised: Mark = from;
-  for (const label of context.otherMark) raised = raiseMark(raised, label, SCALE_PRESETS);
-  if (!sameMark(raised, from)) return reject('higher-mark');
-  if (context.otherLastUsedAt > verdict.signedAt) return reject('used-after');
+  if (!covers(from, context.otherMark)) return reject('higher-mark');
+  // Times are compared as times, never as text: a time either side cannot read is refused (fail closed).
+  const signed = Date.parse(verdict.signedAt);
+  const otherUsed = Date.parse(context.otherLastUsedAt);
+  if (!Number.isFinite(signed) || !Number.isFinite(otherUsed)) return reject('unreadable-time');
+  if (otherUsed > signed) return reject('used-after');
   return { apply: true, to, signedAt: verdict.signedAt };
 }
 

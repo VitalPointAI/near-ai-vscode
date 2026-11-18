@@ -257,7 +257,7 @@ test('Show Policy says what is live: clearances are checked on reads, each chat\
   assert.ok(!text.includes('does not change where content is sent yet'));
   assert.match(gateCommands.POLICY_ROUTING_TEXT, /checks the clearances below when an agent reads a labelled file/);
   assert.match(gateCommands.POLICY_ROUTING_TEXT, /Each chat's label decides where its content is sent/);
-  assert.match(gateCommands.POLICY_ROUTING_TEXT, /levels that need an attested cloud stay on this computer/);
+  assert.match(gateCommands.POLICY_ROUTING_TEXT, /Levels that need an attested cloud go to a private NEAR AI Cloud model only over a connection proven to end inside its private hardware; otherwise they stay on this computer\./);
   const pitfall = gateCommands.unlabelledDefaultText({ scale: 'org', level: 'Public', compartments: [], releasability: [], handling: [] });
   assert.ok(text.includes(pitfall), 'the Pitfall 14 sentence');
   assert.ok(text.indexOf('Default label: org/Public') >= 0 && text.indexOf(pitfall) > text.indexOf('Default label: org/Public'), 'beside the default label');

@@ -93,6 +93,8 @@ export interface DecisionRecordInput {
   readonly attestation?: 'verified' | 'failed' | 'unavailable';
   /** The connection binding state the route read (D-50). Never the host or the fingerprint. */
   readonly connection?: ConnectionBindingState;
+  /** Which refusal of label.outbound-match this is (match, earlier, unchecked, pending, full, unreadable, reads-and-sends). Optional: record version 1. */
+  readonly outboundCause?: string;
   /**
    * The short form of a routine record (D-52, owner decision after PR 4a's measurement): nothing is written twice. The resource list is empty because the
    * capability names what was used, and the policy entry carries no uid because `unmapped.nearAi.bundleHash` holds the policy's hash. Every field the record
@@ -172,6 +174,7 @@ export interface DecisionRecord {
       readonly from?: readonly Label[];
       readonly attestation?: 'verified' | 'failed' | 'unavailable';
       readonly connection?: ConnectionBindingState;
+      readonly outboundCause?: string;
     };
   };
 }
@@ -297,7 +300,8 @@ export function buildDecisionRecord(input: DecisionRecordInput): DecisionRecord 
         ...(input.mark === undefined ? {} : { mark: input.mark.map(copyLabel) }),
         ...(input.from === undefined ? {} : { from: input.from.map(copyLabel) }),
         ...(input.attestation === undefined ? {} : { attestation: input.attestation }),
-        ...(input.connection === undefined ? {} : { connection: input.connection })
+        ...(input.connection === undefined ? {} : { connection: input.connection }),
+        ...(input.outboundCause === undefined ? {} : { outboundCause: input.outboundCause })
       }
     }
   };
