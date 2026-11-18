@@ -1043,10 +1043,12 @@ Brave Search, or Tavily (keys in SecretStorage). It is off until you choose.
   name, description, input schema and read-only, destructive and open-world
   hints, kept with the server's settings. When the server later lists a new
   tool, or changes any of those for a tool, that tool is not offered to agents,
-  the chat says which tools changed, and the MCP page shows the change with
+  the chat says which tools changed (once per listing, not every turn), and the MCP page shows the change with
   **Approve tool changes**. Approving needs a live connection, so what you
   approve is the listing the page shows. A tool the server no longer lists is
-  reported the same way. The first listing is trusted as it is: read it on the
+  reported the same way. If a server's approval record is lost after it was
+  made, every tool of that server is held until you approve them again; a lost
+  record never counts as a first connection. The first listing is trusted as it is: read it on the
   MCP page before you switch a server on for a project.
 - **A label ceiling per server.** Your policy can name, per server id, the
   highest label the server may ever receive, in `ceiling.mcpLabelCeilings`
@@ -1062,7 +1064,8 @@ Brave Search, or Tavily (keys in SecretStorage). It is off until you choose.
   A chat with no label above the default is judged at the policy's default
   label. Otherwise the call is refused with `label.mcp-ceiling`, the tool never
   runs, the refusal names the label and the ceiling, and a decision record
-  names the rule and the label, never the arguments. An expired ceiling lets
+  names the rule and the label, never the arguments. A ceiling that cannot be
+  checked refuses the call with its own sentence and names no label. An expired ceiling lets
   nothing through. A server with no ceiling behaves as before, and the shipped
   policy names none, so nothing changes until you set one. The ceiling lives
   only in the signed policy, never in a server's settings or manifest, so

@@ -7,7 +7,7 @@ import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { gateStep, gateToolCall, mcpCeilingText, mcpCeilingVerdictFor } from '../agent/gateAdapter';
+import { gateStep, gateToolCall, mcpCeilingText, mcpCeilingUnjudgedText, mcpCeilingVerdictFor } from '../agent/gateAdapter';
 import type { MemoryGateRuntime } from '../agent/gateAdapter';
 import { DEFAULT_RULES, RunGrants } from '../agent/permissions';
 import type { AgentTool } from '../agent/tools';
@@ -301,4 +301,27 @@ test('the refusal sentence is plain: no em-dash, names the server, the label and
   assert.match(text, /org\/Internal, until 2030-01-01T00:00:00\.000Z/);
   assert.match(text, /nothing was sent to it/);
   assert.match(text, /NEAR AI: Edit Policy/);
+});
+
+test('a ceiling that cannot be checked refuses with its own sentence and names no label, in the verdict and in the record', async () => {
+  const parsed = bundleWith((payload) => { payload.ceiling.mcpLabelCeilings = { partner: ceilingOf('org', 'Restricted') }; });
+  // A ceiling whose compartments cannot be read: the check throws, and the call must still be refused (fail closed).
+  const broken = Object.defineProperty({ ...ceilingOf('org', 'Restricted') }, 'compartments', { get: () => { throw new Error('unreadable'); } });
+  const bundle = { ...parsed, ceiling: { ...parsed.ceiling, mcpLabelCeilings: { partner: broken } } } as PolicyBundle;
+  const state: BundleState = { state: 'valid', bundle, hash: bundleHash(parsed), signer: parsed.issuer, expiresAt: parsed.expiresAt, renewDue: false };
+  const runtime: MemoryGateRuntime = { ...testGateRuntime(), bundleState: () => state };
+  const verdict = mcpCeilingVerdictFor(runtime, 'partner', [label('org', 'Public')]);
+  assert.deepEqual(verdict, { rule: 'label.mcp-ceiling', reason: mcpCeilingUnjudgedText('partner') });
+  assert.equal(mcpCeilingUnjudgedText('partner').includes('org/'), false, 'no label is blamed');
+  assert.equal(mcpCeilingUnjudgedText('partner').includes(String.fromCharCode(0x2014)), false);
+  const connection = fakeConnection([LOOKUP]);
+  const [agentTool] = toolsOf(REMOTE, connection);
+  const gated = await decideCall(runtime, agentTool!, [label('org', 'Public')]);
+  assert.equal(gated.decision.rule, 'label.mcp-ceiling');
+  assert.equal(gated.decision.reason, mcpCeilingUnjudgedText('partner'));
+  const record = runtime.records.at(-1)!;
+  assert.equal(validateDecisionRecord(record).ok, true);
+  assert.equal(record.status_detail, mcpCeilingUnjudgedText('partner'));
+  assert.equal(record.unmapped.nearAi.label, undefined);
+  assert.deepEqual(connection.sent, []);
 });

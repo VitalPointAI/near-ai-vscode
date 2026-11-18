@@ -988,6 +988,11 @@ export function mcpCeilingText(server: string, above: Label, ceiling: Clearance)
   return `This chat holds content at ${labelKey(above)}, above the highest label your policy lets the MCP server "${server}" receive (${labelKey(ceiling)}${ceiling.expiresAt === undefined ? '' : `, until ${ceiling.expiresAt}`}), so nothing was sent to it. Use this server from a chat that has not read that content, or change its ceiling with NEAR AI: Edit Policy. If what this chat read allows it, use NEAR AI: Lower This Chat's Label.`;
 }
 
+/** The sentence of label.mcp-ceiling when the ceiling could not be checked (review round 1): the call is refused, fail closed, and no label is blamed. */
+export function mcpCeilingUnjudgedText(server: string): string {
+  return `NEAR AI could not check this chat's label against the highest label your policy lets the MCP server "${server}" receive, so the call was refused and nothing was sent to it. Try again; if it keeps happening, reload the window or check the server's ceiling with NEAR AI: Show Policy.`;
+}
+
 /**
  * The verdict an MCP server's label ceiling gives a call to it (WP-GATE, research note 01 section 4), worked out here so decide() stays pure. Every call to a
  * server the valid policy names in `ceiling.mcpLabelCeilings` is judged, whatever the routing tier and whether or not the call is thought to send off this
@@ -1014,7 +1019,8 @@ export function mcpCeilingVerdictFor(runtime: GateRuntime, server: string | unde
     const above = mark.find((label) => whyNotDominated(ceiling, label, context) !== undefined);
     return above === undefined ? undefined : { rule: 'label.mcp-ceiling', reason: mcpCeilingText(server, above, ceiling), label: above };
   } catch {
-    return { rule: 'label.mcp-ceiling', reason: mcpCeilingText(server, state.bundle.defaultLabel, ceiling) };
+    // Nothing was judged, so no label is named as the one above the ceiling (review round 1): the refusal and its record say the check could not be made.
+    return { rule: 'label.mcp-ceiling', reason: mcpCeilingUnjudgedText(server) };
   }
 }
 

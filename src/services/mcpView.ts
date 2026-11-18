@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto';
 import * as vscode from 'vscode';
 import { layoutProbeAsset, layoutProbeTag, registerLayoutProbe, sharedMedia } from './layoutProbe';
 import { McpApproval, McpServerConfig, validateServerUrl } from '../mcp/client';
-import { MCP_DECLARE_CHOICES, McpDeclareChoice, McpRegistry, SERVER_ID, declareOrReport } from './mcpRegistry';
+import { MCP_DECLARE_CHOICES, McpDeclareChoice, McpRegistry, SERVER_ID, approveOrReport, declareOrReport } from './mcpRegistry';
 
 // The MCP Connections page: add, edit, and remove servers, switch them on for this project,
 // choose how calls are approved, switch tools off, and see what is connected and how it is used.
@@ -92,7 +92,8 @@ ${layoutProbeTag(nonce, layoutProbeAsset(view.webview, shared))}<script nonce="$
           break;
         }
         // The person approves the tools the connected server lists now, after its tools changed (WP-GATE).
-        case 'approve-tools': if (known) await mcp.approveToolChanges(known.id); break;
+        // A failed approval shows a plain message on the page and never rejects this handler (a raw storage error is not echoed).
+        case 'approve-tools': if (known) await approveOrReport(() => mcp.approveToolChanges(known.id), (text) => { void view.webview.postMessage({ type: 'error', text }); }); break;
         case 'connect': if (known) await mcp.connectServer(known.id); break;
         case 'disconnect': if (known) await mcp.disconnect(known.id); break;
       }

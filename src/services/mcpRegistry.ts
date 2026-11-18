@@ -68,6 +68,25 @@ export class McpDeclareRefused extends Error {
   }
 }
 
+/** A refusal of an approval of tool changes whose message is ours, plain and safe to show on the page (review round 1). */
+export class McpApproveRefused extends Error {
+  public constructor(message: string) {
+    super(message);
+    this.name = 'McpApproveRefused';
+  }
+}
+
+export const APPROVE_FAILED_TEXT = 'NEAR AI could not save your approval of these tools, so nothing was changed and they stay held. Try again, or reload the window.';
+
+/** Runs an approval of tool changes for the MCP page and never rejects: our refusal is shown as it is, anything else as APPROVE_FAILED_TEXT. */
+export async function approveOrReport(run: () => Promise<void>, show: (text: string) => void): Promise<void> {
+  try {
+    await run();
+  } catch (error) {
+    try { show(error instanceof McpApproveRefused ? error.message.slice(0, 300) : APPROVE_FAILED_TEXT); } catch { /* a message that cannot be shown changes nothing */ }
+  }
+}
+
 export const DECLARE_FAILED_TEXT = 'NEAR AI could not save what that tool does, so nothing was changed. Try again, or reload the window.';
 
 /**
@@ -86,6 +105,8 @@ const SERVERS_KEY = 'nearAi.mcp.servers';
 /** The user setting that declares what a local server's tools may do. */
 export const LOCAL_EFFECTS_SETTING = 'nearAi.mcp.localServerEffects';
 const ENABLED_KEY = 'nearAi.mcp.enabled';
+/** The ids of servers whose tool approval was ever recorded (review round 1), kept apart from the servers so a lost record is noticed after a reload too. */
+const APPROVED_ONCE_KEY = 'nearAi.mcp.toolsApprovedOnce';
 const secretKey = (id: string) => `nearAi.mcp.server.${id}`;
 export const SERVER_ID = /^[a-z0-9][a-z0-9-]{0,30}$/;
 
@@ -106,6 +127,10 @@ export class McpRegistry {
   private readonly live = new Map<string, Live>();
   /** Description warnings already told in this window, by server, tool and digest, so one description is reported once, not on every message. */
   private readonly toldWarnings = new Set<string>();
+  /** Tool-change notices already told in this window, by server and the digest of the approved and listed tools, so one change is told once, not every turn. */
+  private readonly toldChanges = new Set<string>();
+  /** The tail of the queue of writes to the stored server list. */
+  private writing: Promise<void> = Promise.resolve();
   private readonly listeners = new Set<() => void>();
 
   /**
@@ -130,9 +155,9 @@ export class McpRegistry {
     const { localEffects: _declared, ...config } = given;
     if (!SERVER_ID.test(config.id)) throw new Error('A server id is 1-31 lowercase letters, digits, or dashes.');
     const previous = await this.secretsFor(config.id);
-    const stored = this.withManifest(config);
     await this.secrets.store(secretKey(config.id), JSON.stringify({ ...previous, ...Object.fromEntries(Object.entries(secrets).filter(([, value]) => value !== undefined)) }));
-    await this.global.update(SERVERS_KEY, [...this.servers().filter((server) => server.id !== config.id), stored].sort((a, b) => a.name.localeCompare(b.name)));
+    // The stored form is worked out inside the write, from the list as it is then, so a record another write made meanwhile is carried over.
+    await this.writeServers((servers) => { const stored = this.withManifest(config); return [...servers.filter((server) => server.id !== config.id), stored].sort((a, b) => a.name.localeCompare(b.name)); });
     await this.disconnect(config.id);
   }
 
@@ -179,14 +204,14 @@ export class McpRegistry {
     }
     const parsed = parseMcpManifest({ ...base, tools: Object.fromEntries(entries.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) });
     if (!parsed.ok) throw new McpDeclareRefused(`That declaration was refused (${parsed.reason} at ${parsed.path || 'the top'}).`);
-    await this.global.update(SERVERS_KEY, this.servers().map((server) => (server.id === serverId ? { ...server, manifest: parsed.value } : server)));
+    await this.writeServers((servers) => servers.map((server) => (server.id === serverId ? { ...server, manifest: parsed.value } : server)));
     this.changed();
   }
 
   public async remove(id: string): Promise<void> {
     await this.disconnect(id);
     await this.secrets.delete(secretKey(id));
-    await this.global.update(SERVERS_KEY, this.servers().filter((server) => server.id !== id));
+    await this.writeServers((servers) => servers.filter((server) => server.id !== id), (ids) => ids.filter((entry) => entry !== id));
     await this.workspace.update(ENABLED_KEY, this.enabledHere().filter((entry) => entry !== id));
     this.live.delete(id);
     this.changed();
@@ -201,7 +226,7 @@ export class McpRegistry {
   }
 
   public async update(id: string, change: Partial<Pick<McpServerConfig, 'approval' | 'disabledTools'>>): Promise<void> {
-    await this.global.update(SERVERS_KEY, this.servers().map((server) => (server.id === id ? { ...server, ...change } : server)));
+    await this.writeServers((servers) => servers.map((server) => (server.id === id ? { ...server, ...change } : server)));
     this.changed();
   }
 
@@ -225,7 +250,7 @@ export class McpRegistry {
       live.connection = connection;
       live.state = 'connected';
       // The first connection records the tools the person approved by adding the server (WP-GATE); later changes wait for approveToolChanges.
-      if (config.approvedTools === undefined) await this.recordApprovedTools(id, connection.tools);
+      if (this.approvedFor(this.servers().find((server) => server.id === id) ?? config) === undefined) await this.recordApprovedTools(id, connection.tools);
       return connection;
     } catch (error) {
       live.state = 'error';
@@ -237,9 +262,37 @@ export class McpRegistry {
     }
   }
 
+  /**
+   * Every change to the stored server list goes through here, one at a time (review round 1): each change reads the list as the previous write left it, so
+   * two servers recording their approvals at once (agentTools connects them all together) never overwrite each other's record.
+   */
+  private writeServers(change: (servers: McpServerConfig[]) => McpServerConfig[], approvedOnce?: (ids: string[]) => string[]): Promise<void> {
+    const next = this.writing.then(async () => {
+      await this.global.update(SERVERS_KEY, change(this.servers()));
+      if (approvedOnce !== undefined) await this.global.update(APPROVED_ONCE_KEY, approvedOnce(this.approvedOnce()));
+    });
+    this.writing = next.catch(() => undefined);
+    return next;
+  }
+
+  /**
+   * The approved tool listing the registry goes by (review round 1): the stored one; none for a server never connected (its first connection records it);
+   * and, for a server whose approval was ever recorded (APPROVED_ONCE_KEY) but whose stored record is gone, an empty one, so every tool is held until the person approves
+   * them again. A lost record never reads as a first connection: the trust check fails closed.
+   */
+  private approvedFor(config: McpServerConfig): Record<string, string> | undefined {
+    if (config.approvedTools !== undefined) return config.approvedTools;
+    return this.approvedOnce().includes(config.id) ? {} : undefined;
+  }
+
+  private approvedOnce(): string[] {
+    const ids = this.global.get<unknown>(APPROVED_ONCE_KEY);
+    return Array.isArray(ids) ? ids.filter((id): id is string => typeof id === 'string') : [];
+  }
+
   private async recordApprovedTools(id: string, tools: readonly McpToolInfo[]): Promise<void> {
     const approvedTools = mcpToolDigests(tools);
-    await this.global.update(SERVERS_KEY, this.servers().map((server) => (server.id === id ? { ...server, approvedTools } : server)));
+    await this.writeServers((servers) => servers.map((server) => (server.id === id ? { ...server, approvedTools } : server)), (ids) => (ids.includes(id) ? ids : [...ids, id]));
   }
 
   /**
@@ -248,9 +301,9 @@ export class McpRegistry {
    */
   public async approveToolChanges(id: string): Promise<void> {
     const config = this.servers().find((server) => server.id === id);
-    if (!config) throw new Error(`No MCP server ${id}.`);
+    if (!config) throw new McpApproveRefused(`No MCP server ${id}.`);
     const connection = this.live.get(id)?.connection;
-    if (!connection?.connected) throw new Error(`Connect ${config.name} to see its tools before approving them.`);
+    if (!connection?.connected) throw new McpApproveRefused(`Connect ${config.name} to see its tools before approving them.`);
     await this.recordApprovedTools(id, connection.tools);
     this.changed();
   }
@@ -274,9 +327,15 @@ export class McpRegistry {
       try {
         const connection = await this.connectServer(id);
         // Read after connecting: the first connection records the approved tools on the stored server.
-        const config = this.withLocalEffects(this.servers().find((server) => server.id === id)!, declarations, problems);
-        const changes = mcpToolChanges(config.approvedTools, connection.tools);
-        if (changes !== undefined) problems.push(toolChangesNotice(config.name, changes));
+        const stored = this.servers().find((server) => server.id === id)!;
+        const approved = this.approvedFor(stored);
+        const config = this.withLocalEffects(approved === undefined ? stored : { ...stored, approvedTools: approved }, declarations, problems);
+        const changes = mcpToolChanges(approved, connection.tools);
+        const listing = `${id}\u0000${JSON.stringify(approved ?? {}, Object.keys(approved ?? {}).sort())}\u0000${JSON.stringify(mcpToolDigests(connection.tools), connection.tools.map((tool) => tool.name).sort())}`;
+        if (changes !== undefined && !this.toldChanges.has(listing)) {
+          this.toldChanges.add(listing);
+          problems.push(toolChangesNotice(config.name, changes));
+        }
         const offered = mcpAgentTools(config, connection, displayHost(await this.secretsFor(id)), { onCall: (serverId, ok, ms) => this.recordCall(serverId, ok, ms) });
         const disabled = new Set(config.disabledTools ?? []);
         for (const tool of connection.tools) {
@@ -349,7 +408,7 @@ export class McpRegistry {
         tools: live.connection?.tools ?? [], calls: live.calls, errors: live.errors,
         ...(live.calls ? { averageMs: Math.round(live.totalMs / live.calls) } : {}), ...(live.lastUsed ? { lastUsed: live.lastUsed } : {}),
         ...manifestFacts(config, displayHost(secrets).replace(/:\d+$/, ''), live.connection?.tools ?? []),
-        ...(() => { const changes = live.connection?.connected ? mcpToolChanges(config.approvedTools, live.connection.tools) : undefined; return changes === undefined ? {} : { toolChanges: changes }; })()
+        ...(() => { const changes = live.connection?.connected ? mcpToolChanges(this.approvedFor(config), live.connection.tools) : undefined; return changes === undefined ? {} : { toolChanges: changes }; })()
       };
     }));
   }
