@@ -2,8 +2,13 @@
 
 ## Unreleased
 
-Every answer of the lead agent from a cloud model now shows a trust badge saying what the checks
-proved about it: Verified private model; Model verified, connection not proven; or Not verified.
+## 0.4.33
+
+Every answer of the lead agent from a cloud model now shows a trust badge that says what the
+checks proved about it: Verified private model; Model verified, connection not proven; or Not
+verified. Click it for the reasons and the full attestation. Public chats now also use the proven
+connection to NEAR AI Cloud when there is one, so their answers from a private model can show
+Verified private model. A new or cloned team shows its default icon while you name it.
 
 - **A trust badge on every cloud answer.** Each answer of the lead agent from a cloud model shows
   one of three states under it: **Verified private model** (its signature and NEAR AI Cloud's
@@ -11,7 +16,7 @@ proved about it: Verified private model; Model verified, connection not proven; 
   **Model verified, connection not proven**, or **Not verified**, each with its reasons. It is set
   only from checks that ran and never says more than they proved. It replaces the Verify signature
   row. An answer from a model on this computer has no badge, and a helper agent's answer has none.
-- **Checked once, automatically.** Each cloud answer from a TEE model is checked once in the
+- **Checked once, automatically.** Each cloud answer from a private model is checked once in the
   background: one signature request per answer, with an attestation report already verified for
   the same signing key reused for up to ten minutes. A check that has not finished after 20 seconds
   shows Not verified, so a badge never waits forever (for example offline), and the badge changes
@@ -35,7 +40,11 @@ proved about it: Verified private model; Model verified, connection not proven; 
   failed answer from long ago in the chat can still lift the stop (and says when only a new chat
   can); and Set Label no longer says the chat keeps its label when the new label is as high as the
   chat's.
-- When you make a new team, its Purpose step now shows the team's icon: the default icon, with the team's initials on a colour, which changes as you type the name. A cloned team shows this default icon, not the icon of the team you copied. You can upload or generate an icon on the team's Purpose tab after you save it.
+- **A new team shows its icon while you name it.** The Purpose step of a new or cloned team now
+  shows the team's default icon, its initials on a colour, and it changes as you type the name.
+  A cloned team starts with this default icon, not the icon of the team you copied. Before, the
+  step showed no icon at all. You can upload or generate an icon on the team's Purpose tab after
+  you save it.
 
 ## 0.4.32
 
