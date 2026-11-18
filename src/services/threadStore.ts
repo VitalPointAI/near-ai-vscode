@@ -160,7 +160,10 @@ export function mergeChatLabel(a: ThreadMeta, b: ThreadMeta): ChatLabelState | u
     const fresh = holder === 'left' ? onlyLeft : onlyRight;
     const verdicts = fresh.map((lowering) => ({ lowering, verdict: judgeLowering(lowering, { chatId: a.id, otherMark: other.mark, otherLastUsedAt: otherMeta.lastUsedAt }) }));
     const applied = verdicts.filter((each): each is { lowering: unknown; verdict: Extract<LoweringVerdict, { apply: true }> } => each.verdict.apply);
-    const outcome = applied.length === verdicts.length && applied.length > 0
+    // Each lowering is judged on its own (PR #87 review round 5): the verified ones apply, from the newest one's signed target, and any that do not verify
+    // are rejected with their own cause. A rejected one never stops a verified one, since the result comes only from verified records and never from the
+    // copy's stored mark below the target.
+    const outcome = applied.length > 0
       ? joinMarks([...applied].sort((x, y) => x.verdict.signedAt.localeCompare(y.verdict.signedAt)).at(-1)!.verdict.to, own.mark)
       : undefined;
     for (const each of verdicts) reportLowering(a.id, each.lowering, each.verdict, each.verdict.apply ? outcome : undefined, each.verdict.apply ? joined : undefined);

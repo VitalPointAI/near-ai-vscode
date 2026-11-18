@@ -480,3 +480,25 @@ test('review 3.4: the person\'s lowering and a lowering applied by a merge write
   assert.deepEqual(shape(person), { label: 'Internal', mark: ['Internal'], from: ['Restricted'] });
   assert.deepEqual(shape(merged), { label: 'Public', mark: ['Public'], from: ['Restricted'] });
 });
+
+test('review 5.2: a copy holding one valid and one invalid fresh lowering applies the valid one and records exactly one label.declassify and one label.declassify-rejected', async () => {
+  const root = realpathSync(mkdtempSync(path.join(tmpdir(), 'near-ai-chat-label-mixed-')));
+  const { host, storage } = await labelHost(root);
+  const valid = await host.signChatLowering({ chatId: CHAT, from: [RESTRICTED], to: [PUBLIC], reason: 'reviewed and cleared', at: AT });
+  assert.ok(valid !== undefined);
+  const forged = { ...valid, sig: `${valid.sig.slice(0, -4)}AAAA`, payload: { ...valid.payload, reason: 'changed' } };
+  const stop = host.registerLabelLowerings();
+  let merged: ThreadMeta[];
+  try {
+    await host.refreshLoweringKeys();
+    merged = both(meta(CHAT, LATER, { mark: [PUBLIC], lowerings: [valid, forged] }), meta(CHAT, T0, { mark: [RESTRICTED] }));
+  } finally {
+    stop();
+  }
+  for (const each of merged) assert.deepEqual(markOf(each), ['org/Public'], 'the verified lowering applies, from its signed target');
+  const records = await recordsOf(host, storage, root);
+  const rule = (record: DecisionRecord): string => record.authorizations[0]?.policy.name ?? '';
+  assert.equal(records.filter((record) => rule(record) === 'label.declassify').length, 1);
+  assert.equal(records.filter((record) => rule(record) === 'label.declassify-rejected').length, 1);
+  assert.deepEqual(records.find((record) => rule(record) === 'label.declassify')?.unmapped.nearAi.mark?.map((each) => each.level), ['Public'], 'the record matches the state');
+});
