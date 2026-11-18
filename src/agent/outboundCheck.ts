@@ -192,6 +192,13 @@ export const OUTBOUND_REOPENED_DOCS_TEXT =
 export const OUTBOUND_EARLIER_TEXT =
   "This chat was reopened, and NEAR AI cannot tell which of its earlier results came from labelled files, so it treats all of them as labelled. This call would send text from one of them off this computer, so it is refused. If that text is public, start a new chat for this, or, if what this chat read allows it, use NEAR AI: Lower This Chat's Label.";
 
+/**
+ * The sentence when a run has no fingerprint set at a label that may not go to any cloud (PR #87 review round 2): nothing says it read labelled content,
+ * only that its reading could not be checked, so a call that could send data off this computer is refused at this label (fail closed).
+ */
+export const OUTBOUND_UNCHECKED_TEXT =
+  "What this chat's agents read could not be checked for labelled text, so at this chat's label a call that could send data off this computer is refused. If what this chat read allows it, use NEAR AI: Lower This Chat's Label.";
+
 /** The sentence when the payload could not be read for checking (fail closed). */
 export const OUTBOUND_UNREADABLE_TEXT =
   'This chat has read labelled content, and what this call would send could not be checked for it, so it is refused rather than guessed.';

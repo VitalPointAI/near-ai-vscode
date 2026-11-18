@@ -7,7 +7,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
 import { gateToolCall } from '../agent/gateAdapter';
-import { MAX_OUTBOUND_FINGERPRINTS, OUTBOUND_EARLIER_TEXT, OUTBOUND_FULL_TEXT, OUTBOUND_LIMITS_TEXT, OUTBOUND_MATCH_TEXT, OUTBOUND_UNREADABLE_TEXT, OutboundFingerprints, outboundPayload } from '../agent/outboundCheck';
+import { MAX_OUTBOUND_FINGERPRINTS, OUTBOUND_EARLIER_TEXT, OUTBOUND_UNCHECKED_TEXT, OUTBOUND_FULL_TEXT, OUTBOUND_LIMITS_TEXT, OUTBOUND_MATCH_TEXT, OUTBOUND_UNREADABLE_TEXT, OutboundFingerprints, outboundPayload } from '../agent/outboundCheck';
 import { DEFAULT_RULES } from '../agent/permissions';
 import type { RunGrants } from '../agent/permissions';
 import { bashTool } from '../agent/tools';
@@ -140,7 +140,9 @@ test('review 2: at an attested-cloud mark, a run with no fingerprint set refuses
   grants.outbound = undefined;
   const fetched = await decide(root, grants, runtime, webFetchTool, { url: 'https://example.test/?q=weather' });
   assert.equal(fetched.decision.rule, 'label.outbound-match');
-  assert.equal(fetched.decision.reason, OUTBOUND_UNREADABLE_TEXT);
+  // Review round 2: nothing says this chat read labelled content; the sentence says its reading could not be checked.
+  assert.equal(fetched.decision.reason, OUTBOUND_UNCHECKED_TEXT);
+  assert.doesNotMatch(OUTBOUND_UNCHECKED_TEXT, /has read labelled content/);
 });
 
 test('review 3: a reopened chat treats its earlier results as labelled and says so truly, not that it read labelled content', async () => {

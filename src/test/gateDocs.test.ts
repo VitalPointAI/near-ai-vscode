@@ -14,7 +14,7 @@ import { BUNDLE_FAILURES } from '../domain/gate/bundle';
 import { MANIFEST_IS_A_CLAIM_TEXT, RUNS_ON_THIS_MACHINE_TEXT } from '../domain/gate/words';
 import { MAX_DECISION_LOG_BYTES, MAX_ROTATED_FILES, MODEL_REQUESTS_DIR } from '../gate/decisionLog';
 import { redactCredentialArguments } from '../domain/redaction';
-import { OUTBOUND_EARLIER_TEXT, OUTBOUND_LIMITS_TEXT, OUTBOUND_REOPENED_DOCS_TEXT } from '../agent/outboundCheck';
+import { OUTBOUND_EARLIER_TEXT, OUTBOUND_LIMITS_TEXT, OUTBOUND_REOPENED_DOCS_TEXT, OUTBOUND_UNCHECKED_TEXT } from '../agent/outboundCheck';
 
 const ROOT = path.resolve(__dirname, '..', '..');
 const SECURITY = readFileSync(path.join(ROOT, 'SECURITY.md'), 'utf8');
@@ -485,4 +485,17 @@ test('PR #87 review: SECURITY.md says how a reopened chat treats its earlier res
     assert.ok(!text.includes(EM_DASH));
     assert.doesNotMatch(text, /NEAR organization|Phase \d/);
   }
+});
+
+test('PR #87 review round 2: the refusal of a run whose reading could not be checked says so, names the way out, and never claims labelled content was read', () => {
+  assert.match(OUTBOUND_UNCHECKED_TEXT, /could not be checked for labelled text/);
+  assert.match(OUTBOUND_UNCHECKED_TEXT, /NEAR AI: Lower This Chat's Label/);
+  assert.doesNotMatch(OUTBOUND_UNCHECKED_TEXT, /has read labelled content/);
+  assert.ok(!OUTBOUND_UNCHECKED_TEXT.includes(EM_DASH));
+  assert.doesNotMatch(OUTBOUND_UNCHECKED_TEXT, /NEAR organization|Phase \d/);
+});
+
+test('PR #87 review round 2: SECURITY.md and CHANGELOG say a written file holds one label and is raised only on the scale it already has', () => {
+  assert.ok(flat(sectionOf(SECURITY, '### Classification labels and routing')).includes('A file holds one label, so when its label is on another scale than the chat\'s, it is raised only on the scale it already has'));
+  assert.ok(flat(CHANGELOG).includes('A file holds one label, so a file already labelled on another scale is raised only on that scale.'));
 });
