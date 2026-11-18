@@ -23,11 +23,17 @@ Verified private model. A new or cloned team shows its default icon while you na
   if the check finishes later. A model NEAR AI forwards to another provider is never checked, and
   its badge says where it goes.
 - **Click the badge for the details.** It explains its state and what the editor does not check.
+  Opening the details moves the focus into them. Escape anywhere in the chat, or a click outside,
+  closes them and Escape puts the focus back on the badge; Escape still stops a run from an empty
+  message box and still closes the command and step menus, without also closing the details.
   **Check again** checks afresh and, on an answer whose failed check stopped the levels that need an
   attested cloud, lifts that stop when the answer now checks out. **Show full attestation** opens
   the signed text, the signing address and which component holds the key, every check, the
-  connection and the attestation report in a read-only editor tab, and writes nothing to your
-  project. A reopened chat shows each answer's badge as it was when the answer arrived.
+  connection and the attestation report as read-only JSON in a preview tab named for the answer,
+  such as "Attestation: answer at 14:32, glm-5.3". It is not a file: it cannot be edited, never
+  asks to be saved, and nothing is written to your project or to a record. Answers older than the
+  last 20 say the details are no longer kept. A reopened chat shows each answer's badge as it was
+  when the answer arrived.
 - **Public chats over the proven connection too.** When a fresh proof of NEAR AI Cloud's
   connection exists, requests from chats at levels that do not need an attested cloud (Public,
   for example) also go over the connection held to NEAR AI Cloud's attested key, so their answers

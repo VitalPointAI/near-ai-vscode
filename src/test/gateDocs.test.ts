@@ -564,7 +564,9 @@ test('SECURITY.md states each badge title with its explanation word for word, an
     'The badge is on the lead agent\'s answers only.',
     'each badge\'s details say that helper agents in the run may have used other models, each request routed by the chat\'s label and recorded.',
     'it lifts that stop when the answer now checks out.',
-    '**Show full attestation** opens the details in an editor tab',
+    '**Show full attestation** opens the details as read-only JSON in a preview tab named for the answer',
+    'it cannot be edited and never asks to be saved.',
+    'Escape anywhere in the chat closes them and puts the focus back on the badge, unless that Escape already did something else there, such as stopping a run or closing a menu.',
     'Nothing is written to your project or to a decision record.',
     'shows each answer\'s badge in the state its checks reached when the answer arrived'
   ]) assert.ok(words.includes(flat(phrase)), phrase);

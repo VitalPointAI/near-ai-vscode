@@ -944,7 +944,8 @@
         return;
       }
       if ((event.key === 'Enter' || event.key === 'Tab') && matches[menuIndex]) { event.preventDefault(); chooseCommand(matches[menuIndex]); return; }
-      if (event.key === 'Escape') { menu.hidden = true; return; }
+      // The key is used here, so an open trust badge's details (which close on any unused Escape) stay open.
+      if (event.key === 'Escape') { event.preventDefault(); menu.hidden = true; return; }
     }
     // Ctrl+Enter (Cmd+Enter on a Mac) sends the message as a Steer, interrupting the reply in flight; plain Enter queues it as before.
     if (event.key === 'Enter' && !event.shiftKey && !event.isComposing && (event.ctrlKey || event.metaKey)) {

@@ -324,6 +324,27 @@ function projectTests(): Array<[string, () => Promise<void>]> {
         assert.deepEqual(shown.trustBadges, [{ state: 'not-verified', title: 'Not verified' }], 'one badge, reading Not verified');
         assert.deepEqual(shown.clipped, [], 'nothing clipped');
         assert.deepEqual(shown.offenders, [], 'nothing past the panel\'s edge');
+        // Show full attestation opens a read-only JSON tab on its own scheme, titled by the answer's time and model: no unsaved state, and an edit is refused.
+        await api.sidebar.request({ type: 'trust-details', runId: String(done.runId) });
+        let editor = vscode.window.activeTextEditor;
+        for (let attempt = 0; attempt < 40 && editor?.document.uri.scheme !== 'near-ai-attestation'; attempt += 1) { await pause(250); editor = vscode.window.activeTextEditor; }
+        assert.equal(editor?.document.uri.scheme, 'near-ai-attestation', 'the attestation opened in its own read-only scheme');
+        const attestation = editor!.document;
+        assert.equal(attestation.languageId, 'json');
+        assert.equal((JSON.parse(attestation.getText()) as { answer: { runId: string } }).answer.runId, done.runId);
+        const tab = vscode.window.tabGroups.activeTabGroup.activeTab;
+        assert.match(tab?.label ?? '', /^Attestation: answer at \d\d:\d\d, fake-coder$/, 'the tab is titled by the answer\'s time and model');
+        assert.equal(tab?.isPreview, true, 'a preview tab');
+        // Typing into the focused tab, as a person would, changes nothing: the editor is read-only, so there is nothing to save.
+        const text = attestation.getText();
+        await vscode.window.showTextDocument(attestation, { preview: true, preserveFocus: false });
+        await vscode.commands.executeCommand('type', { text: 'x' });
+        await pause(250);
+        assert.equal(attestation.getText(), text, 'typing does not change the document');
+        assert.equal(attestation.isDirty, false, 'nothing to save');
+        assert.equal(attestation.isUntitled, false);
+        await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
+        await vscode.commands.executeCommand('nearAiChatView.focus');
         // The view reloads; the host replays the conversation when the page says it is ready, and the badge is drawn again.
         const ready = observer.fromView.length;
         await vscode.commands.executeCommand('workbench.action.webview.reloadWebviewAction');

@@ -132,16 +132,22 @@ Cloud's attestation must name the certificate the server presents, and the
 connection that carries your request must present it.
 
 **Check again and Show full attestation.** Click the badge, or press Enter or
-Space on it, to read why it shows its state and what was checked. **Check
-again** checks the answer again with a fresh report, never a reused one. On an
-answer whose failed check stopped the levels that need an attested cloud for
-the chat, it lifts that stop when the answer now checks out. **Show full
-attestation** opens the details in an editor tab as an untitled, read-only JSON
-document: the signed text and signature, the signing address and which
+Space on it, to read why it shows its state and what was checked. Opening the
+details moves the focus into them. Escape anywhere in the chat closes them and
+puts the focus back on the badge, unless that Escape already did something else
+there, such as stopping a run or closing a menu. A click outside the badge
+closes them too. **Check again** checks the answer again with a fresh report,
+never a reused one. On an answer whose failed check stopped the levels that
+need an attested cloud for the chat, it lifts that stop when the answer now
+checks out. **Show full attestation** opens the details as read-only JSON in a
+preview tab named for the answer, such as "Attestation: answer at 14:32,
+glm-5.3": the signed text and signature, the signing address and which
 component holds the key, every check result, the connection fact with its
-fingerprint, and the attestation report the check used. Nothing is written to
-your project or to a decision record. The full attestation is kept for the last
-20 answers of the window that checked them.
+fingerprint, and the attestation report the check used. The tab is served from
+the editor's memory, not a file: it cannot be edited and never asks to be saved.
+Nothing is written to your project or to a decision record. The full
+attestation is kept for the last 20 answers of the window that checked them; an
+older answer says so and offers Check again.
 
 What is **not** checked in the editor, and the details say so:
 

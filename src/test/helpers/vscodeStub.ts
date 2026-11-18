@@ -21,7 +21,7 @@ export interface VscodeStub {
   inputRequests: Array<{ prompt?: string; title?: string; value?: string; placeHolder?: string }>;
   messageAnswers: Array<string | undefined>;
   // The text of every document shown with showTextDocument (opened through a registered content provider), in order.
-  shownDocuments: Array<{ uri: string; text: string }>;
+  shownDocuments: Array<{ uri: string; text: string; languageId?: string; options?: { preview?: boolean; preserveFocus?: boolean; viewColumn?: number } }>;
   // The content providers registered by scheme.
   contentProviders: Map<string, { provideTextDocumentContent(uri: unknown): string | Promise<string> }>;
   // Answers handed to showQuickPick, in order: an item's label (or a list of labels for a multi-pick). An empty queue answers undefined (dismissed).
@@ -82,7 +82,10 @@ export function createVscodeStub(): VscodeStub {
     ProgressLocation: { SourceControl: 1, Window: 10, Notification: 15 },
     ConfigurationTarget: { Global: 1, Workspace: 2, WorkspaceFolder: 3 },
     ThemeColor: class ThemeColor { public constructor(public readonly id: string) {} },
+    ViewColumn: { Active: -1, Beside: -2, One: 1, Two: 2 },
     Uri: {
+      // As VS Code's own Uri.from: the parts are kept, and toString encodes the path and query.
+      from: (parts: { scheme: string; path: string; query?: string }) => ({ scheme: parts.scheme, path: parts.path, query: parts.query ?? '', toString: (): string => `${parts.scheme}:${encodeURI(parts.path).replace(/:/g, '%3A')}${parts.query ? `?${parts.query}` : ''}` }),
       file: (fsPath: string) => ({ scheme: 'file', fsPath, path: fsPath, toString: (): string => `file://${fsPath}` }),
       parse: (value: string) => {
         const colon = value.indexOf(':');
@@ -150,11 +153,15 @@ export function createVscodeStub(): VscodeStub {
         inputRequests.push({ ...options });
         return inputAnswers.shift();
       },
-      showTextDocument: async (document: { uri: { toString(): string }; getText(): string }): Promise<unknown> => {
-        shownDocuments.push({ uri: document.uri.toString(), text: document.getText() });
+      showTextDocument: async (document: { uri: { toString(): string }; getText(): string; languageId?: string }, options?: { preview?: boolean; preserveFocus?: boolean; viewColumn?: number }): Promise<unknown> => {
+        shownDocuments.push({ uri: document.uri.toString(), text: document.getText(), ...(document.languageId === undefined ? {} : { languageId: document.languageId }), ...(options === undefined ? {} : { options }) });
         return undefined;
       },
       withProgress: async <T>(_options: unknown, task: (progress: { report(value: unknown): void }) => PromiseLike<T>): Promise<T> => task({ report: (): void => undefined })
+    },
+    languages: {
+      // VS Code gives back the same document in its new language.
+      setTextDocumentLanguage: async <T extends object>(document: T, languageId: string): Promise<T> => Object.assign(document, { languageId })
     },
     workspace: {
       get workspaceFolders(): typeof workspaceFolders { return workspaceFolders; },

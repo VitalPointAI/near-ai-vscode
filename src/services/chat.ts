@@ -3,7 +3,7 @@ import * as fs from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
-import { checkBadgeAgain, openTrustDetails, TRUST_DETAILS_NOT_KEPT_TEXT } from './trustDetails';
+import { attestationView, checkBadgeAgain, TRUST_DETAILS_NOT_KEPT_TEXT } from './trustDetails';
 import { beginRun } from './runActivity';
 import { formatGsdStatusLine, parseGsdPlanningState, statusSnapshot, withLiveStatus } from '../domain/gsdStatus';
 import { GSD_COMMANDS } from '../domain/gsdCommands';
@@ -146,6 +146,10 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
   const tabs: ChatTab[] = [];
   let activeId = '';
   let disposed = false;
+  // Show full attestation's read-only tabs (CLAS-08): registered now, so a tab restored after a reload reads a note rather than an error. One view per
+  // editor, so asking again gives the same one; if registering fails here the chat still opens, and the first Show full attestation tries again.
+  const attestations = () => attestationView(vscode, (registration) => { context.subscriptions?.push(registration as vscode.Disposable); });
+  try { attestations(); } catch { /* registered on first use instead */ }
   // The "no team yet" card: only the latest answer is posted, so a slow check never undoes "Not now".
   const setupNudge = latestOnly(() => setupNudgeShows(context, auth), (show) => { if (!disposed) void panel.webview.postMessage({ type: 'setup-nudge', show }); });
   const feed = sharedActivityFeed();
@@ -757,9 +761,9 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
       return;
     }
     if (message.type === 'trust-details') {
-      // Show full attestation (CLAS-08): an untitled JSON document in an editor tab, nothing written to the workspace or to a record.
+      // Show full attestation (CLAS-08): a read-only JSON tab served from memory, nothing written to the workspace or to a record.
       const details = tab.agent?.trustDetails(message.runId);
-      if (details) { await openTrustDetails(vscode, details); return; }
+      if (details) { await attestations().open(details); return; }
       const choice = await vscode.window.showInformationMessage(TRUST_DETAILS_NOT_KEPT_TEXT, 'Check again');
       if (choice === 'Check again') await checkBadgeAgain(tab, message.runId, providerErrorMessage);
       return;
