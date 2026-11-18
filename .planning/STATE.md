@@ -39,7 +39,7 @@ Next, in order:
 2. Done: the 0.4.24 patch shipped (PR #55, release PR #56), and 0.4.25 to 0.4.29 after it. The owner's Phase 27 host check is done (27-UAT test 8 passed 2026-11-17; 27-16 summary written).
 3. Phase 69 is planned (15 plans, two PRs): merge its planning PR, then `/gsd-execute-phase 69`.
 4. In parallel when wanted: `/gsd-plan-phase 28` (secure development workflow step). Phase 72 plans from the OpenShell spike result.
-5. Owner action (open, acknowledged 2026-11-15): ask NEAR in writing, through your NEAR AI contact, whether the private shard will accept third-party contracts and data, and when account view keys ship. The answer decides when L4's confidential anchor backend (ANCH-07) is built.
+5. Owner action (closed 2026-11-18): the owner asked NEAR about third-party contracts on the private shard; if it happens, it will not be anytime soon. L4 proceeds on roots-only anchoring on public NEAR as the lasting plan; no confidential anchor backend is scheduled (ANCH-07 keeps the interface).
 
 ## Accumulated Context
 
@@ -249,7 +249,8 @@ Verbatim in PROJECT.md, Platform direction decisions 14-17; evidence `.planning/
 - [Platform, 2026-11-15]: The OpenShell spike's apply-path finding (downloads keep symlinks) makes the guarded apply a requirement (EXEC-03); the prover cannot prove sub-folder narrowing, so generated policies use a fixed file-path vocabulary (EXEC-05)
 - [Platform, 2026-11-15]: Identity, credential and classification design approved by the owner (PROJECT.md, Platform direction decisions 8-13): standard minimal DIDs, VC 2.0 credentials with `eddsa-jcs-2022` and Bitstring Status List in a zero-dependency narrow profile, classification labels with clearance dominance, high-water mark and routing by label, delegation narrowing at every link; folded into Phases 70 and 71 and L4 and L5
 - [Platform, 2026-11-15]: DID methods `did:key` (agents, machines) and `did:webvh` (people, your organization's root) replace `did:near`; owner-confirmed the same day
-- [Platform, 2026-11-15]: Roots-only anchoring on public NEAR behind an anchor interface until NEAR's confidential shard accepts third-party data; owner-confirmed; asking NEAR in writing stays an open owner action
+- [Platform, 2026-11-15]: Roots-only anchoring on public NEAR behind an anchor interface until NEAR's confidential shard accepts third-party data; owner-confirmed
+- [Platform, 2026-11-18]: NEAR's answer (via the owner): third-party contracts on the private shard, if ever, not soon. Roots-only anchoring on public NEAR is the lasting plan; no confidential backend is scheduled; revisit only on a NEAR announcement
 - [Platform, 2026-11-15]: Verifiable credentials get the prefix VCRD because CRED is the credential broker (Phase 73); the `eddsa-jcs-2022` proof is a second proof format on Phase 69's one signer, so Phase 69's plans do not change
 - [Platform, 2026-11-16]: NEAR function-call access keys only for agents' and nodes' on-chain calls (option (a)): per agent or node, on your organization's account, scoped to the registry contract and the grant's methods, small allowance, non-empty subset narrowing, added and removed only by a person's full-access key (or the orchestrator under delegated authority) with the removal command shown, double check in the registry contract, cheap value-free methods, dedicated DID-bound rotated keys (PROJECT.md decision 14; L4 ANCH-09..15)
 - [Platform, 2026-11-16]: Off-chain capabilities stay in private credentials checked by Phase 73's broker, never in the public key list; option (b), a public key registry with hashed names, considered and declined (PROJECT.md decision 15; CRED-08)
