@@ -28,6 +28,11 @@ export interface McpServerConfig {
    * the registry from the user setting when it builds the tools, never stored with the server, and used only for a server with no web address.
    */
   localEffects?: readonly Capability[];
+  /**
+   * The digest of each tool, by name, as the person approved the server's tools (WP-GATE): recorded at the server's first connection, and again only when the
+   * person approves a change on the MCP page. A tool that is new or changed since is not offered to agents. Absent on a server not yet connected.
+   */
+  approvedTools?: Record<string, string>;
 }
 
 /** Values kept in SecretStorage: a remote URL may carry the access token itself. */
