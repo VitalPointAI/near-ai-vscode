@@ -26,6 +26,16 @@ export const STAFF_PRODUCT_TOOL_VERBS = [...AGENT_PRODUCT_VERBS, 'register', 'wa
 
 export const staffToolName = (server: string, verb: string): string => `mcp__${server}__${verb}`;
 
+/**
+ * The staff tools a write-limited member (a staff team's red team or release guard, src/domain/staff/writeLimits.ts) keeps when its tools line lists
+ * them. They write only through the host, which records the ledger, the header and the gate report, never a product body: propose is refused for any
+ * product outside the member's write limit, and verdict only records a gate member's verdict.
+ */
+export const WRITE_LIMITED_STAFF_TOOLS: ReadonlySet<string> = new Set([
+  ...(['propose', 'verdict', 'status', 'list', 'lint'] as const).map((verb) => staffToolName(STAFF_PRODUCTS_SERVER, verb)),
+  staffToolName(GUARD_SCAN_SERVER, 'scan')
+]);
+
 /** Words no staff tool may be named after: the decisions only a person takes. */
 export const HUMAN_ONLY_WORDS: readonly string[] = ['approve', 'reject', 'release', 'supersede', 'decide', 'sign'];
 

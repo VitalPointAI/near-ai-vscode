@@ -19,6 +19,7 @@ import type { ResolvedProfile, StaffSettings } from '../../domain/staff/profiles
 import type { StaffTeamBlock } from '../../domain/staff/teamBlock';
 import { RED_TEAM_PRODUCT, STAFF_FOLDER, staffGuardFolder, staffProductPath } from '../../domain/staff/writeLimits';
 import { renderTeam } from '../teams';
+import { GATE_VERBS, GUARD_SCAN, LEAD_VERBS, OWNER_VERBS, STAFF_REGISTER_TOOL, STAFF_STEP_TOOL, STAFF_WARGAME_TOOL, staffProductTools } from './grants';
 
 export type J5Variant = 'standard' | 'mdo';
 export const J5_VARIANTS: readonly J5Variant[] = ['standard', 'mdo'];
@@ -92,6 +93,14 @@ const READ = ['Read', 'Glob', 'Grep', 'TodoWrite', 'Recall', 'Remember'];
 const WRITE = ['Write', 'Edit'];
 const WEB = ['WebSearch', 'WebFetch', 'CheckCitations'];
 const DOCS = ['CreateDocument', 'CreatePdf', 'CreatePresentation', 'RenderSvg'];
+// The built-in staff servers, by role (grants.ts, the same scheme as the J2): owners register their products and propose rows to the shared registers;
+// the lead-planner, the section's integrator, also submits and withdraws, marks the step and runs the wargame ledger with the plans-writer, who records
+// it; the release guard runs guard-scan and records verdicts. The red team may register only its critique (the host refuses any other product for it).
+const OWNER = [...staffProductTools(OWNER_VERBS), STAFF_REGISTER_TOOL];
+const LEAD = [...staffProductTools(LEAD_VERBS), STAFF_REGISTER_TOOL, STAFF_STEP_TOOL, STAFF_WARGAME_TOOL];
+const RECORDER = [...OWNER, STAFF_WARGAME_TOOL];
+const RED_TEAM_TOOLS = staffProductTools(OWNER_VERBS);
+const GATE = [...staffProductTools(GATE_VERBS), GUARD_SCAN];
 
 /** Why options were refused: a variant or red-team setting the profile does not offer. */
 export class J5TemplateError extends Error {}
@@ -197,7 +206,7 @@ function leadPlanner(ctx: Context): J5Member {
   ].join('\n\n');
   return { name: 'lead-planner', role: ctx.resolved.landTerms
       ? `Chief of plans: ${lowerFirst(ctx.resolved.landTerms.planningCentres[0])}; wargame controller`
-      : tactical ? `Chief of plans: plans cell under the ${ctx.opsCode} at brigade or the ${ctx.plansCode} at division; wargame controller` : `Chief of plans: planning group lead and wargame controller (${ctx.plansCode})`, model: 'deep', tools: [...READ, ...WRITE, ...DOCS], instructions: text };
+      : tactical ? `Chief of plans: plans cell under the ${ctx.opsCode} at brigade or the ${ctx.plansCode} at division; wargame controller` : `Chief of plans: planning group lead and wargame controller (${ctx.plansCode})`, model: 'deep', tools: [...READ, ...WRITE, ...DOCS, ...LEAD], instructions: text };
 }
 
 function policyPlanner(ctx: Context): J5Member {
@@ -214,7 +223,7 @@ function policyPlanner(ctx: Context): J5Member {
     'Boundary: "Your output is analysis of direction and policy, not operational design and not COAs."',
     `Hands back: the guidance analysis with every requirement traced to its source paragraph, the limitations list, the interagency inputs${strategic ? ', the strategic estimate and the review material' : ''}, and any ${decisionFor('<role>')} item a policy question raises.`
   ].join('\n\n');
-  return { name: 'policy-planner', role: 'Strategy and policy planner: higher direction, limitations, interagency', model: 'deep', tools: [...READ, ...(ctx.web ? WEB : []), ...WRITE], reportsTo: 'lead-planner', instructions: text };
+  return { name: 'policy-planner', role: 'Strategy and policy planner: higher direction, limitations, interagency', model: 'deep', tools: [...READ, ...(ctx.web ? WEB : []), ...WRITE, ...OWNER], reportsTo: 'lead-planner', instructions: text };
 }
 
 function designPlanner(ctx: Context): J5Member {
@@ -239,7 +248,7 @@ function designPlanner(ctx: Context): J5Member {
     'Boundary: "Your output is the design and the measures, not COAs."',
     'Hands back: the problem statement, the COG analysis, the operational approach and its graphic, the evaluation criteria and the assessment plan, each with the assumptions it rests on listed for the lead-planner\'s ledger.'
   ].join('\n\n');
-  return { name: 'design-planner', role: `${design.name} and assessment framework`, model: 'deep', tools: [...READ, ...WRITE, 'RenderSvg'], reportsTo: 'lead-planner', instructions: text };
+  return { name: 'design-planner', role: `${design.name} and assessment framework`, model: 'deep', tools: [...READ, ...WRITE, 'RenderSvg', ...OWNER], reportsTo: 'lead-planner', instructions: text };
 }
 
 function coaCellA(ctx: Context): J5Member {
@@ -253,7 +262,7 @@ function coaCellA(ctx: Context): J5Member {
     'Boundary: "Your output is one distinct COA; you do not compare COAs."',
     'Hands back: the COA A statement and sketch, its self-test, the paragraph on how it differs, and the questions it leaves open for the lead-planner.'
   ].join('\n\n');
-  return { name: 'coa-cell-a', role: 'COA development cell A', model: 'standard', tools: [...READ, ...WRITE, 'RenderSvg'], reportsTo: 'lead-planner', instructions: text };
+  return { name: 'coa-cell-a', role: 'COA development cell A', model: 'standard', tools: [...READ, ...WRITE, 'RenderSvg', ...OWNER], reportsTo: 'lead-planner', instructions: text };
 }
 
 function coaCellB(ctx: Context): J5Member {
@@ -267,7 +276,7 @@ function coaCellB(ctx: Context): J5Member {
     'Boundary: "Your output is one distinct COA; you do not compare COAs."',
     'Return: COA B statement, sketch, self-test result, the paragraph separating it from A, and open questions for the lead-planner.'
   ].join('\n\n');
-  return { name: 'coa-cell-b', role: 'COA development cell B', model: 'standard', tools: [...READ, ...WRITE, 'RenderSvg'], reportsTo: 'lead-planner', instructions: text };
+  return { name: 'coa-cell-b', role: 'COA development cell B', model: 'standard', tools: [...READ, ...WRITE, 'RenderSvg', ...OWNER], reportsTo: 'lead-planner', instructions: text };
 }
 
 function convergencePlanner(ctx: Context): J5Member {
@@ -281,7 +290,7 @@ function convergencePlanner(ctx: Context): J5Member {
     'Boundary: "Your output is one distinct COA and the convergence rows; you do not compare COAs."',
     'Hands back: the COA B statement and sketch, its self-test, the convergence matrix with its windows of opportunity and lead times, and the open questions.'
   ].join('\n\n');
-  return { name: 'convergence-planner', role: 'Convergence planner: multidomain COA and windows of opportunity', model: 'standard', tools: [...READ, ...WRITE, 'RenderSvg'], reportsTo: 'lead-planner', instructions: text };
+  return { name: 'convergence-planner', role: 'Convergence planner: multidomain COA and windows of opportunity', model: 'standard', tools: [...READ, ...WRITE, 'RenderSvg', ...OWNER], reportsTo: 'lead-planner', instructions: text };
 }
 
 function redCellSeat(ctx: Context): J5Member {
@@ -294,7 +303,7 @@ function redCellSeat(ctx: Context): J5Member {
     'Boundary: "Your output is the adversary\'s view, not a critique of our plan (that is the red team\'s)."',
     `Hands back: the adversary COA set with the most likely and most dangerous named, the red cell log, and proposed intelligence requirements for the ${ctx.intelCode}.`
   ].join('\n\n');
-  return { name: 'red-cell-seat', role: `${ctx.intelCode} red cell seat: adversary COAs and the adversary in the wargame`, model: 'standard', tools: [...READ, ...WRITE], reportsTo: 'lead-planner', instructions: text };
+  return { name: 'red-cell-seat', role: `${ctx.intelCode} red cell seat: adversary COAs and the adversary in the wargame`, model: 'standard', tools: [...READ, ...WRITE, ...OWNER], reportsTo: 'lead-planner', instructions: text };
 }
 
 function redTeamMember(ctx: Context): J5Member {
@@ -309,7 +318,7 @@ function redTeamMember(ctx: Context): J5Member {
     'Boundary: "Your output is critique; you never fix the plan."',
     'Hands back: numbered findings, each with its severity (critical, high, medium, low), the evidence, the product and version it concerns, and what would change your view; and a one-paragraph dissent for the decision brief when you disagree with the recommendation.'
   ].join('\n\n');
-  return { name: 'red-team', role: 'Independent red team (reports to the human chief of staff)', model: 'deep', tools: [...READ, 'Write'], instructions: text };
+  return { name: 'red-team', role: 'Independent red team (reports to the human chief of staff)', model: 'deep', tools: [...READ, 'Write', ...RED_TEAM_TOOLS], instructions: text };
 }
 
 function operationsSeat(ctx: Context): J5Member {
@@ -327,7 +336,7 @@ function operationsSeat(ctx: Context): J5Member {
     'Boundary: "Your output is branches; sequels belong to the lead-planner."',
     'Hands back: the force availability statement, the branch list with triggers and decision makers, and the transition checklist.'
   ].join('\n\n');
-  return { name, role: who.charAt(0).toUpperCase() + who.slice(1), model: 'standard', tools: [...READ, ...WRITE], reportsTo: 'lead-planner', instructions: text };
+  return { name, role: who.charAt(0).toUpperCase() + who.slice(1), model: 'standard', tools: [...READ, ...WRITE, ...OWNER], reportsTo: 'lead-planner', instructions: text };
 }
 
 function sustainmentSeat(ctx: Context): J5Member {
@@ -340,7 +349,7 @@ function sustainmentSeat(ctx: Context): J5Member {
     `Boundary: "Your output is feasibility evidence, not the concept of support (that is the ${ctx.logCode}'s)."`,
     'Hands back: the logistics estimate inputs, the feasibility judgement per COA with its formulas, the logistics decision points, and the annex inputs.'
   ].join('\n\n');
-  return { name: 'sustainment-seat', role: `${ctx.logCode} sustainment seat: logistics inputs and feasibility`, model: 'standard', tools: [...READ, ...WRITE], reportsTo: 'lead-planner', instructions: text };
+  return { name: 'sustainment-seat', role: `${ctx.logCode} sustainment seat: logistics inputs and feasibility`, model: 'standard', tools: [...READ, ...WRITE, ...OWNER], reportsTo: 'lead-planner', instructions: text };
 }
 
 function legalSupport(ctx: Context): J5Member {
@@ -354,7 +363,7 @@ function legalSupport(ctx: Context): J5Member {
     'Boundary: "Your output is a draft for a qualified legal adviser to review; it is never legal advice and never clears anything."',
     'Hands back: the legal considerations draft per COA and for the plan, and the numbered questions for the legal adviser.'
   ].join('\n\n');
-  return { name: 'legal-support', role: 'Legal support: drafts for the human legal adviser', model: 'standard', tools: [...READ, ...WRITE], reportsTo: 'lead-planner', instructions: text };
+  return { name: 'legal-support', role: 'Legal support: drafts for the human legal adviser', model: 'standard', tools: [...READ, ...WRITE, ...OWNER], reportsTo: 'lead-planner', instructions: text };
 }
 
 function firesSeat(ctx: Context): J5Member {
@@ -367,7 +376,7 @@ function firesSeat(ctx: Context): J5Member {
     'Boundary: "Your output is a concept and inputs; you never nominate or approve a real target."',
     'Hands back: the concept of fires per COA and the fires inputs for the order.'
   ].join('\n\n');
-  return { name: 'fires-seat', role: 'Fires seat: concept of fires per COA', model: 'standard', tools: [...READ, ...WRITE], reportsTo: 'lead-planner', instructions: text };
+  return { name: 'fires-seat', role: 'Fires seat: concept of fires per COA', model: 'standard', tools: [...READ, ...WRITE, ...OWNER], reportsTo: 'lead-planner', instructions: text };
 }
 
 function plansWriter(ctx: Context): J5Member {
@@ -385,13 +394,13 @@ function plansWriter(ctx: Context): J5Member {
     'Boundary: "Your output is the assembled document; annex content belongs to its owners."',
     'Hands back: the wargame record, the annex tracker, the assembled plan or order with its open-items list, and the decks.'
   ].join('\n\n');
-  return { name: 'plans-writer', role: 'Plans writer: orders production, wargame recorder, annex tracker', model: 'standard', tools: [...READ, ...WRITE, ...DOCS], reportsTo: 'lead-planner', instructions: text };
+  return { name: 'plans-writer', role: 'Plans writer: orders production, wargame recorder, annex tracker', model: 'standard', tools: [...READ, ...WRITE, ...DOCS, ...RECORDER], reportsTo: 'lead-planner', instructions: text };
 }
 
 function releaseGuard(_ctx: Context): J5Member {
   const text = [
     preamble(),
-    'Job: you are the blocking release gate. Before any J5 product goes to a person for a decision, check its current version. Use the guard-scan tool first when the project has it, then judge what rules cannot.',
+    'Job: you are the blocking release gate. Before any J5 product goes to a person for a decision, check its current version. Run guard-scan on it first, then judge what rules cannot. Record the verdict with mcp__staff-products__verdict on the exact version you checked; the tool writes your report beside the product.',
     `Hold the product if it contains: a classification or caveat marking of any scale (TOP SECRET, SECRET, CONFIDENTIAL used as a marking, NATO RESTRICTED and above, PROTECTED B or C, CUI, EYES ONLY, REL TO and the like); coordinates outside the exercise box; a name on the project's real-entity list; text from a publication that is not public; a decision written as made ("selected", "approved", "the commander will") instead of marked ${decisionFor('<role>')}; a legal product without ${STAFF_MARKERS.legalReview}; a consumption number with no formula; or personal data.`,
     'Check compilation: whether items that are each releasable reveal more together. A suspected compilation is a HOLD with the question for a person with authority. Check that the red team\'s dissent reached the decision brief unedited.',
     owns(`the verdict files under ${staffGuardFolder('j5')} (one per product version, named <product>-v<version>.md)`),
@@ -399,7 +408,7 @@ function releaseGuard(_ctx: Context): J5Member {
     'Boundary: "Your output is a verdict and reasons; you never release and you never fix."',
     'Hands back: a verdict file that ends with exactly CLEARED or HOLD, with the numbered reasons and the product version it applies to.'
   ].join('\n\n');
-  return { name: 'release-guard', role: 'Release guard: blocking check before any decision', model: 'standard', tools: [...READ, 'Write'], reportsTo: 'lead-planner', instructions: text };
+  return { name: 'release-guard', role: 'Release guard: blocking check before any decision', model: 'standard', tools: [...READ, 'Write', ...GATE], reportsTo: 'lead-planner', instructions: text };
 }
 
 // ---- Products and workflow ---------------------------------------------------------------------------------------------------------------------------

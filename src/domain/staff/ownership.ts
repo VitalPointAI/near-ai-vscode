@@ -12,8 +12,12 @@ export type StaffMode = 'full-staff' | 'standalone';
 export const STAFF_PHASES: readonly StaffPhase[] = ['planning', 'execution'];
 export const STAFF_MODES: readonly StaffMode[] = ['full-staff', 'standalone'];
 
-/** A writer: a section and the member slug in that section's template. */
-export interface StaffWriter { readonly section: StaffSectionId; readonly member: string }
+/**
+ * A writer: a section and the member slug in that section's full roster. A smaller roster folds members together (a strategic J2 has no geoint-analyst, a
+ * brigade S2 has an ipb-analyst for the whole of IPB): `folds` names, in order, the members that hold the job in a roster without `member`, so each
+ * roster the templates render has exactly one writer (writerIn).
+ */
+export interface StaffWriter { readonly section: StaffSectionId; readonly member: string; readonly folds?: readonly string[] }
 
 /** One rule: this writer, in this phase and mode (`any` matches both). */
 export interface OwnerRule { readonly phase: StaffPhase | 'any'; readonly mode: StaffMode | 'any'; readonly writer: StaffWriter }
@@ -29,21 +33,24 @@ export interface SharedProduct {
   readonly note?: string;
 }
 
-const W = (section: StaffSectionId, member: string): StaffWriter => ({ section, member });
+const W = (section: StaffSectionId, member: string, folds?: readonly string[]): StaffWriter => ({ section, member, ...(folds ? { folds } : {}) });
 const ALWAYS = (writer: StaffWriter): OwnerRule[] => [{ phase: 'any', mode: 'any', writer }];
 /** Contributors named by section only. */
 const SECTION = (section: StaffSectionId): StaffWriter => ({ section, member: '*' });
 
+/** Who keeps the PIRs where a roster has no requirements-manager: the brigade's collection-manager, then the battalion's s2-lead. */
+const J2_REQUIREMENTS_FOLDS = ['collection-manager', 's2-lead'];
+
 export const SHARED_PRODUCTS: readonly SharedProduct[] = [
   { product: 'cop', kind: 'map-layer', owners: ALWAYS(W('j3', 'joc-chief')), contributors: [W('j2', 'threat-analyst'), W('j2', 'geoint-analyst'), W('j4', 'jloc-chief'), W('j5', 'lead-planner')], note: 'The published picture: the JOC chief merges the layers. The plans layer never merges into it.' },
   { product: 'cop-operations-layer', kind: 'map-layer', owners: ALWAYS(W('j3', 'joc-chief')), contributors: [SECTION('j3')] },
-  { product: 'cop-threat-layer', kind: 'map-layer', owners: ALWAYS(W('j2', 'threat-analyst')), contributors: [W('j2', 'geoint-analyst'), W('j2', 'watch-officer')] },
-  { product: 'cop-terrain-layer', kind: 'map-layer', owners: ALWAYS(W('j2', 'geoint-analyst')), contributors: [W('j2', 'jipoe-analyst')] },
+  { product: 'cop-threat-layer', kind: 'map-layer', owners: ALWAYS(W('j2', 'threat-analyst', ['ipb-analyst'])), contributors: [W('j2', 'geoint-analyst'), W('j2', 'watch-officer')] },
+  { product: 'cop-terrain-layer', kind: 'map-layer', owners: ALWAYS(W('j2', 'geoint-analyst', ['jipoe-analyst', 'ipb-analyst'])), contributors: [W('j2', 'jipoe-analyst')] },
   { product: 'cop-logistics-layer', kind: 'map-layer', owners: ALWAYS(W('j4', 'jloc-chief')), contributors: [SECTION('j4')] },
   { product: 'cop-plans-layer', kind: 'map-layer', owners: ALWAYS(W('j5', 'lead-planner')), contributors: [W('j5', 'coa-cell-a'), W('j5', 'coa-cell-b')] },
   {
     product: 'ccir-register', kind: 'register', owners: ALWAYS(W('j3', 'j3-director')),
-    parts: { pir: W('j2', 'requirements-manager'), ffir: W('j3', 'j3-director') },
+    parts: { pir: W('j2', 'requirements-manager', J2_REQUIREMENTS_FOLDS), ffir: W('j3', 'j3-director') },
     contributors: [W('j4', 'j4-director')], note: 'The commander approves it through the release state machine.'
   },
   {
@@ -56,7 +63,7 @@ export const SHARED_PRODUCTS: readonly SharedProduct[] = [
     owners: [{ phase: 'planning', mode: 'any', writer: W('j5', 'lead-planner') }, { phase: 'execution', mode: 'any', writer: W('j3', 'future-ops-planner') }],
     contributors: [W('j2', 'threat-analyst'), W('j4', 'log-plans-officer')], note: 'The DSM becomes the JOC trigger table.'
   },
-  { product: 'rfi-tracker', kind: 'register', owners: ALWAYS(W('j3', 'liaison-coordinator')), parts: { intelligence: W('j2', 'requirements-manager') }, contributors: 'all' },
+  { product: 'rfi-tracker', kind: 'register', owners: ALWAYS(W('j3', 'liaison-coordinator')), parts: { intelligence: W('j2', 'requirements-manager', J2_REQUIREMENTS_FOLDS) }, contributors: 'all' },
   {
     product: 'assessment-plan', kind: 'plan',
     owners: [{ phase: 'planning', mode: 'any', writer: W('j5', 'design-planner') }, { phase: 'execution', mode: 'any', writer: W('j3', 'assessment-analyst') }],
@@ -82,16 +89,45 @@ export function sharedProduct(product: string): SharedProduct | undefined {
 export function writerOf(product: string, context: { readonly phase: StaffPhase; readonly mode: StaffMode }, part?: string): StaffWriter | undefined {
   const entry = sharedProduct(product);
   if (!entry) return undefined;
+  const writer = tableWriter(entry, context, part);
+  return writer && { section: writer.section, member: writer.member };
+}
+
+/** The table's writer with its folds. */
+function tableWriter(entry: SharedProduct, context: { readonly phase: StaffPhase; readonly mode: StaffMode }, part?: string): StaffWriter | undefined {
   if (part !== undefined) return entry.parts && Object.prototype.hasOwnProperty.call(entry.parts, part) ? entry.parts[part] : undefined;
   const matches = entry.owners.filter((rule) => (rule.phase === 'any' || rule.phase === context.phase) && (rule.mode === 'any' || rule.mode === context.mode));
-  if (matches.length !== 1) throw new Error(`Shared product ${product} has ${matches.length} writers in ${context.phase} (${context.mode}).`);
+  if (matches.length !== 1) throw new Error(`Shared product ${entry.product} has ${matches.length} writers in ${context.phase} (${context.mode}).`);
   return matches[0].writer;
 }
 
-/** Whether `writer` may write the product (or the part) directly. Anyone else proposes. */
-export function mayWrite(product: string, writer: StaffWriter, context: { readonly phase: StaffPhase; readonly mode: StaffMode }, part?: string): boolean {
-  const owner = writerOf(product, context, part);
-  return owner !== undefined && owner.section === writer.section && owner.member === writer.member;
+/**
+ * The writer resolved for one section team's roster: the named member when the roster has it, else the first of its folds the roster has. For a writer in
+ * another section, or a roster with none of them, the table's member is returned unchanged (the writer is not in this team).
+ */
+export function resolveWriter(writer: StaffWriter, section: StaffSectionId, roster: readonly string[] | undefined): StaffWriter {
+  if (!roster || writer.section !== section || roster.includes(writer.member)) return { section: writer.section, member: writer.member };
+  const fold = writer.folds?.find((member) => roster.includes(member));
+  return { section: writer.section, member: fold ?? writer.member };
+}
+
+/** writerOf, resolved for a section team's roster (its members' slugs). */
+export function writerIn(product: string, context: { readonly phase: StaffPhase; readonly mode: StaffMode }, team: { readonly section: StaffSectionId; readonly members: readonly string[] }, part?: string): StaffWriter | undefined {
+  const entry = sharedProduct(product);
+  const writer = entry && tableWriter(entry, context, part);
+  return writer && resolveWriter(writer, team.section, team.members);
+}
+
+/**
+ * Whether `writer` may write the product (or the part) directly. Anyone else proposes. With the writer's roster, a member that holds a folded job (the
+ * brigade ipb-analyst for the threat layer) is the writer.
+ */
+export function mayWrite(product: string, writer: StaffWriter, context: { readonly phase: StaffPhase; readonly mode: StaffMode }, part?: string, roster?: readonly string[]): boolean {
+  const entry = sharedProduct(product);
+  const table = entry && tableWriter(entry, context, part);
+  if (table === undefined) return false;
+  const owner = resolveWriter(table, writer.section, roster);
+  return owner.section === writer.section && owner.member === writer.member;
 }
 
 /** Where proposals for a shared product go. */

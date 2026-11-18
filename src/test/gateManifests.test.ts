@@ -11,6 +11,7 @@ import { braveSearch, searxngSearch, tavilySearch } from '../agent/webSearch';
 import { webSearchTool } from '../agent/webTools';
 import { imageTool } from '../agent/extraTools';
 import type { NearAiClient } from '../services/nearAiClient';
+import { INTEL_WORKBENCH_TOOL_NAMES } from '../agent/intelWorkbench';
 import { builtInTools, CATALOG_TOOL_FILES, SHORTHAND_EXCEPTIONS, TOOL_DEFINING_FILES } from '../agent/toolCatalog';
 import { effectsFor, parseToolManifest, shorthandFor } from '../domain/gate/manifest';
 import { buildStudioContext, reviewDraft } from '../services/teamStudioPage';
@@ -478,7 +479,12 @@ function toolsOfARunWithEverythingOn(): AgentTool<any>[] {
 
 test('a run with every option on is given exactly the catalog\'s tools, in the catalog\'s order, so a tool added to a run but not to the catalog fails here', () => {
   const given = toolsOfARunWithEverythingOn().map((tool) => tool.name);
-  assert.deepEqual(given, builtInTools().map((tool) => tool.name));
+  // The run is a staff team's, so it also gets the intel-workbench: a built-in local server whose tools, like a connected server's, are not catalog
+  // entries (intelWorkbench.test.ts). They come right after the staff tools; everything else is exactly the catalog.
+  const catalog = builtInTools().map((tool) => tool.name);
+  const after = catalog.indexOf('mcp__guard-scan__scan') + 1;
+  assert.ok(after > 0);
+  assert.deepEqual(given, [...catalog.slice(0, after), ...INTEL_WORKBENCH_TOOL_NAMES, ...catalog.slice(after)]);
 });
 
 function sourceFilesUnder(folder: string): string[] {

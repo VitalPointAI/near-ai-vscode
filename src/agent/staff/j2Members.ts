@@ -4,8 +4,7 @@
 // US Joint, US Army and NATO/Canadian at every level. No member has a persona name or a rank, and no member decides: a named person does.
 import { CIVIL_CONSIDERATIONS, ICD203_CONFIDENCE_LEVELS, OPERATIONAL_VARIABLES, TERRAIN_ASPECTS } from '../../domain/staff/doctrine';
 import { STAFF_MARKERS, staffPreambleText } from '../../domain/staff/products';
-import { AGENT_PRODUCT_VERBS } from '../../domain/staff/release';
-import type { AgentProductVerb } from '../../domain/staff/release';
+import { COP_MAP, GATE_VERBS, GUARD_SCAN, INTEL_WORKBENCH, LEAD_VERBS, OWNER_VERBS, STAFF_LINT_TOOL, staffProductTools } from './grants';
 import { productPath, productsOwnedBy } from './j2Products';
 import { processPhrase } from './j2Vocabulary';
 import type { J2Variant, J2Vocabulary } from './j2Vocabulary';
@@ -16,21 +15,6 @@ const DOCS = ['CreateDocument', 'CreatePdf', 'CreatePresentation', 'RenderSvg'];
 const WEB = ['WebSearch', 'WebFetch', 'CheckCitations'];
 /** Web tools a local-only project's team is generated without. */
 export const J2_WEB_TOOLS: readonly string[] = WEB;
-
-/**
- * The staff-products verbs as MCP tool names (design 10, 4.1 and 6.2; the server is `staff-products`, built by WP-SHARED). Members get only the verbs
- * their job needs, and no member can be given approve, reject, release or supersede: the contract offers agents no such verb.
- */
-export function staffProductTools(verbs: readonly AgentProductVerb[]): string[] {
-  return verbs.filter((verb) => (AGENT_PRODUCT_VERBS as readonly string[]).includes(verb)).map((verb) => `mcp__staff-products__${verb}`);
-}
-const OWNER_VERBS: readonly AgentProductVerb[] = ['propose', 'status', 'list'];
-const LEAD_VERBS: readonly AgentProductVerb[] = ['propose', 'submit', 'withdraw', 'status', 'list'];
-const GATE_VERBS: readonly AgentProductVerb[] = ['verdict', 'status', 'list'];
-/** The local tool servers the design names (6.2): every tool of each, granted by pattern. */
-const INTEL_WORKBENCH = 'mcp__intel-workbench__*';
-const COP_MAP = 'mcp__cop-map__*';
-const GUARD_SCAN = 'mcp__guard-scan__*';
 
 export interface J2MemberSpec {
   readonly name: string;
@@ -274,9 +258,9 @@ const ipbAnalyst: J2MemberSpec = {
 const tradecraftReviewer: J2MemberSpec = {
   name: 'tradecraft-reviewer', model: 'deep', reportsTo: (variant) => (variant === 'brigade' || variant === 'battalion' ? 's2-lead' : 'j2-chief'),
   role: () => 'tradecraft gate',
-  tools: [...READ, 'CheckCitations', 'WebFetch', 'Write', ...staffProductTools(GATE_VERBS), INTEL_WORKBENCH],
+  tools: [...READ, 'CheckCitations', 'WebFetch', 'Write', ...staffProductTools(GATE_VERBS), STAFF_LINT_TOOL, INTEL_WORKBENCH],
   instructions: (v) => compose({
-    job: `You are a blocking gate: no product of the section goes to the release-guard without your SIGN-OFF on its exact version. Review in this order. First the mechanical checks (the intel-workbench lint tool when it is connected, otherwise by hand): only ICD 203 likelihood terms or their alternatives; never a likelihood term and a confidence level in the same sentence; every key judgement marked as a judgement and every fact sourced; every source with a reliability grade and a credibility grade recorded separately, an origin and dates; no two reports of the same origin counted as independent confirmation; every PIR with a decision point and a latest time of value; every high-value target in one of the ${v.actor}'s courses of action; the most likely and most dangerous courses of action both named; and every required heading present. Then your judgement against the five ICD 203 analytic standards and the nine tradecraft standards: sourcing, uncertainty, information kept apart from assumptions and judgements, alternatives, relevance, logical argument, changes in judgement explained, accuracy, and visual information. Run a key assumptions check and devil's advocacy on each key judgement. Check quoted sources with CheckCitations where a judgement rests on them.`,
+    job: `You are a blocking gate: no product of the section goes to the release-guard without your SIGN-OFF on its exact version. Review in this order. First the mechanical checks, with the tradecraft lint (mcp__staff-products__lint, the same rules your verdict is held to): only ICD 203 likelihood terms or their alternatives; never a likelihood term and a confidence level in the same sentence; every key judgement marked as a judgement and every fact sourced; every source with a reliability grade and a credibility grade recorded separately, an origin and dates; no two reports of the same origin counted as independent confirmation; every PIR with a decision point and a latest time of value; every high-value target in one of the ${v.actor}'s courses of action; the most likely and most dangerous courses of action both named; and every required heading present. Then your judgement against the five ICD 203 analytic standards and the nine tradecraft standards: sourcing, uncertainty, information kept apart from assumptions and judgements, alternatives, relevance, logical argument, changes in judgement explained, accuracy, and visual information. Run a key assumptions check and devil's advocacy on each key judgement. Check quoted sources with CheckCitations where a judgement rests on them.`,
     method: `The same gate applies under every profile; the grade words follow .planning/staff/skills/source-grading.md (credibility 1 reads "${v.credibilityOne}" here). You are the section's quality gate, not the command red team, which sits outside the section. ${SKILLS}`,
     owns: ownsText('tradecraft-reviewer', v),
     boundary: 'You check; you never rewrite another member\'s judgement.',

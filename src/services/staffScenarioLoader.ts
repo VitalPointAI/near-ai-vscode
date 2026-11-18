@@ -10,13 +10,14 @@ import { defaultStaffSettings, parseStaffSettings } from '../domain/staff/profil
 import type { StaffSettings } from '../domain/staff/profiles';
 import { parseScenarioText, SCENARIO_DIR, SCENARIO_MAX_FILE, scenarioFiles } from '../domain/staff/scenario';
 import type { Scenario } from '../domain/staff/scenario';
+import { readRealEntities } from '../staff/realEntities';
 
 /** The starter scenario shipped with the extension. */
 export const STARTER_SCENARIO_FILE = path.join(__dirname, '..', '..', 'resources', 'staff', 'scenarios', 'iron-lantern.json');
 export const DEMO_DIR = '.planning/staff/demo';
 export const ARCHIVE_DIR = '.planning/staff/archive';
 /** Your organization's real-entity list for this project: one name per line, `#` starts a note. Optional. */
-export const REAL_ENTITIES_FILE = '.planning/staff/real-entities.txt';
+export { REAL_ENTITIES_FILE } from '../domain/staff/realEntities';
 const PROJECT_FILE = '.planning/.near-ai/project.json';
 
 export type LoadScenarioResult =
@@ -66,14 +67,9 @@ export async function projectStaffSettings(root: string): Promise<{ settings: St
   return { settings: defaultStaffSettings(), from: 'defaults' };
 }
 
-/** The project's real-entity list, or an empty list when it has none. */
+/** The project's real-entity list, the same one guard-scan holds products to (src/staff/realEntities.ts), or an empty list when it has none. */
 export async function projectRealEntities(root: string): Promise<string[]> {
-  try {
-    const text = await readFile(path.join(root, REAL_ENTITIES_FILE), 'utf8');
-    return text.split(/\r?\n/).map((line) => line.replace(/(^|\s)#.*$/, '').trim()).filter((line) => line !== '');
-  } catch {
-    return [];
-  }
+  return readRealEntities(root);
 }
 
 /** Whether the project already holds a loaded scenario. */

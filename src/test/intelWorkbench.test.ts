@@ -254,9 +254,9 @@ test('a broken staff block in project.json stops a draft with the field named; n
 test('compilation_check asks a person when a product ties units to places, and never says cleared', async () => {
   const tools = workbench();
   const { root, context } = folder();
-  mkdirSync(path.join(root, 'products', 'j2'), { recursive: true });
-  writeFileSync(path.join(root, 'products', 'j2', 'risky.md'), '---\nproduct: risky\n---\n\n3rd Armoured Brigade with 40 tanks at 45.4215, -75.6972\n');
-  writeFileSync(path.join(root, 'products', 'j2', 'calm.md'), '---\nproduct: calm\n---\n\nThe weather was clear.\n');
+  mkdirSync(path.join(root, '.planning', 'staff', 'products', 'j2'), { recursive: true });
+  writeFileSync(path.join(root, '.planning', 'staff', 'products', 'j2', 'risky.md'), '---\nproduct: risky\n---\n\n3rd Armoured Brigade with 40 tanks at 45.4215, -75.6972\n');
+  writeFileSync(path.join(root, '.planning', 'staff', 'products', 'j2', 'calm.md'), '---\nproduct: calm\n---\n\nThe weather was clear.\n');
   const risky = await call(tools, 'compilation_check', { path: '.planning/staff/products/j2/risky.md' }, context);
   assert.match(risky, /possible compilation\. A person decides\./);
   assert.match(risky, /line 5 ties unit, location, capability detail together/);

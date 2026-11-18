@@ -591,7 +591,7 @@ export const TEMPLATE_HISTORY: Record<string, TemplateSnapshot[]> = {
   'j2-intelligence': [
     {
       version: 1,
-      definition: '508b0c0392fc15d3',
+      definition: 'cb184a3d95af2978',
       guidance: [
         '8c12c625cdb08b4b',
         'bd0fd1276a805473',
@@ -620,142 +620,277 @@ export const TEMPLATE_HISTORY: Record<string, TemplateSnapshot[]> = {
       ],
       members: {
         'j2-chief': [
-          '60f80dc23d311d52',
-          'c4d519818aca2a0a',
-          'cc508dc6dec19881',
-          'fcf30d9dba2f8800',
-          '73f0246e489ca477',
-          '3c17e96f2127cf19',
-          '444b43439f52a410',
-          '327d3a671ece43b9',
-          '627f174072314ea5',
-          'dfb7f4372712500a',
-          'b3bcf64bf7a9cfcd',
-          '3a84d28ae094b499',
-          'a8669b89dd231551',
-          '4203e5b46495bc74',
-          '35b066e0a6783d28',
-          'bf4fd2603e37a85a',
-          '23fb3334457c9028',
-          '4dbf4646e16a5b41',
-          'ed2c8dab706f6975',
-          '0606b656d8503960'
+          '89cb58b90ea1bd17',
+          'a93bf1e92683485b',
+          'da13e5459ee50a3d',
+          '6d12ea7267b396d4',
+          '35510e71bba2e6c8',
+          '72992d6a6f796c4a',
+          'da75f75e2a0bfbca',
+          'badc5256a0480e63',
+          '61cc3beb64a3257c',
+          'e5e5c768b1d1c1d1',
+          '56b2a486796b4a4d',
+          '388dfbc099f6203a',
+          '90a0bba3dc8ef090',
+          'bc3f4f1c44fff833',
+          'abad9e1a445d28d3',
+          '78547f172217fedb',
+          'f8eb208565d74da2',
+          'e730f8e9e40b9c9b',
+          'c692459f0ec83dd3',
+          'f0d66751d367f95d'
         ],
         'requirements-manager': [
-          'c9aa62eaf926da9d',
-          '33f037b7f78a0c52',
-          '9c815458c46e9f74',
-          '4d4d66d2c045ad33',
-          '2ad01b3ea4432d2c',
-          '512b341350386429'
+          'a7505f756deef82a',
+          '8ef0ae1d3d929f3a',
+          'd428d65c584ea89a',
+          '9dfc3d01c1aafbc6',
+          'fb841cee1cefdd39',
+          '777919be1c390fc7'
         ],
         'collection-manager': [
-          'f6bc92fac846eb1c',
-          'b5a9ab289e3eddae',
-          '34145067d3aaf8a0',
-          '7798a33f73dad031',
-          'b58f693dba3b38e2',
-          'f8273ea2ca15b731',
-          'bffa1aeff26c0d02'
+          '0a88c8e7e90e4320',
+          '8efa15e208a9c210',
+          'd2e361bb52ff8d6d',
+          '99705bedee6463e7',
+          'a70e2e0031b819d0',
+          '691696b35973bf50',
+          '2bcd3d144381018d'
         ],
         'jipoe-analyst': [
-          '59dda2a9683334b5',
-          'faced5a99e56a1b9',
-          'c0ddc533786ac28f',
-          'd6bd3c24005f42ba'
+          '17aaa0fe639fa173',
+          '1209c8f2e86afa9c',
+          'cf03278df023328f',
+          '856abad3cf12926f'
         ],
         'threat-analyst': [
-          'e53dccb9c7b95db2',
-          '26221c88583375d6',
-          'd717c0b0ed88f4f1',
-          '85f4ac8423e79425',
-          '7b41d5f8e8163c7a',
-          '3d847819bac81fba',
-          'c81406d18bc64eef',
-          '90f8e5fa251cacca'
+          '2c2b22c7cb41af42',
+          'e76a0175fd06697e',
+          '79fd68fcaeb808ea',
+          '2734526f74648869',
+          'a9b087302b103873',
+          'a6ac88acb33c3692',
+          '2c0b9cb825165c19',
+          '014630ee884a9e2a'
         ],
         'warning-analyst': [
-          '1c6bb6f2cce1df3c',
-          '269eaee8e3348b25',
-          '2c984b398f391e03',
-          '8cca54f3280fed34'
+          'f280fee949a9f023',
+          '995eb551e95b0e84',
+          '216c27b5086e9f3f',
+          '08bc3f4d32dfcf99'
         ],
         'red-cell': [
-          '024469dae5794812',
-          'fd5438a008d69602',
-          'd0fcb51825085794',
-          '5439daab329fbbdd',
-          '6e702b9b19772b4b',
-          'cf53923ed5222470',
-          '19f4d34875b75af2',
-          'aaff9527711b521c'
+          'e4019a86a5a23a34',
+          '8b8ccad11e70a19a',
+          '55561faadbcef9ae',
+          '037ed07b5a4471f2',
+          '9c56e34b8374a79f',
+          'd5253fe2518043cb',
+          '8e6fdf762b006284',
+          '01d60c9700f1b7c2'
         ],
         'tradecraft-reviewer': [
-          '2c6967495d436cb3',
-          'f554d98b26b7316d',
-          '2e962084fc22b686',
-          'cf9b91850a4f83e4',
-          '5935dd78f311d27b',
-          '0ae1a1e9a0f636a5',
-          '2842281c75970a49',
-          '37a777c4f8b7037c'
+          'cc9a5893b4ea246a',
+          '15e046b57ef48fc6',
+          'a2777214df176834',
+          '7be7d9526387fcfe',
+          'a0332c137262bcb4',
+          'e76ea8b9bf5885f6',
+          '5a2a7d1088246f17',
+          'b2434c4391441b53'
         ],
         'release-guard': [
-          '45f6bc09434395cc',
-          '803264662f797cdf',
-          'd31b8d203af077f6',
-          'e1d0b9b283a7ac52',
-          '9b13384dc9e57560'
+          '47e3009e94ddfaa9',
+          '3b740c9d51c85c2a',
+          '8f18d1e78e05e586',
+          '5242d1d96816960b',
+          'd86137390df3084a'
         ],
         'geoint-analyst': [
-          'a11c6bd71f4aeb4e',
-          '7665c14db2cb5688',
-          '471e5e1d673655b1',
-          '559b758caa581258'
+          '6f9fe0c11f67484d',
+          '1e8545ed7066f127',
+          '0211efda4aba472d',
+          'b4b8e2455f8435e4'
         ],
         'osint-analyst': [
-          '968854283cb53e61',
-          '96cb3692d046f3f2',
-          'f8dbe569ab7f0334',
-          '42481f21532731c0'
+          'e1a4fba2db1db5c4',
+          'ed1a2eb966c123db',
+          '2317abe7bd7a6f0c',
+          '9853fcebfe0b336e'
         ],
         'watch-officer': [
-          '83ec3e8a4485a92d',
-          '7698171b2f987222',
-          '192c5bb41f45fd10',
-          'b3976d9d8718ff30',
-          '49f296938ab7f9bf',
-          '2de963afa04bdcfe',
-          'b4215ee0173f9d59',
-          '2f0d50648abaf265',
-          'fdba415aaa2c1310',
-          'd1f77f4008830354'
+          '21cbd9e4dfc4204d',
+          '23e2fe2577b6c464',
+          '4a56882655ab21a1',
+          'c155542240f546c4',
+          'cb0545969e0872d2',
+          '31429ed72633d747',
+          'a99d9eaad554432e',
+          'b114973d3aecbe5f',
+          '6d7eb92981145bc5',
+          'acca2686889ab218'
         ],
         'target-analyst': [
-          '3ae355c1f43e326b',
-          'a80a2f24468ee07d'
+          'dec983630cabfaae',
+          'b9e131c32367aa7f'
         ],
         's2-lead': [
-          '3768ad804fc6c65e',
-          'ebfb59eed131acd5',
-          'b82968d6b4f303e7',
-          '19410c364254a4db',
-          '51615a626890a00a',
-          '7dacca4b69640d55',
-          '98716e058e1705e2',
-          '2146fca9b13e2910',
-          'e2dc3cf5679066fd',
-          '15b69ed3db5f67b4'
+          'dfefd3e373b63d15',
+          'db8850466734d0b0',
+          'd15007871bc925c8',
+          '88ae01f31f726a77',
+          'b7d79549366330f4',
+          'ad37e56f69f15bf6',
+          '2b51440c99e2bcd1',
+          '044b2a8d33242a18',
+          '4b397703b80f148a',
+          'c4dd10e94c2f31de'
         ],
         'ipb-analyst': [
-          'd291781b42381e2f',
-          '90aa62ea48cff059',
-          '6be72f45285250a4',
-          'e91c097e1b2abda9',
-          '140d4bc20afdbadc',
-          '8aed9e782c117e1d',
-          '0cff652836a202a7',
-          'e3995868f1eba520'
+          '48e8a7f6b608fff3',
+          '732251458ccb265b',
+          '43df5048b397a432',
+          '4d24bb11ac2279eb',
+          '11f148627b95652f',
+          '984deb484b294f57',
+          '4eeb3f82e2cdb825',
+          '0c2b0cbb61666c14'
+        ]
+      }
+    }
+  ],
+  'j5-plans': [
+    {
+      version: 1,
+      definition: '55919bea6e7bd0be',
+      guidance: [
+        '1c14ba20f94496a7',
+        '104f6e7f44235e52',
+        '79b43c9f1112b6f0',
+        '7b446749ba24c5ad',
+        '6b40aa98e0664999',
+        '5db0ed25e761dcf3',
+        '9c0c56371208ad8d',
+        '5f7f6b04807a025d',
+        'abac7b07f18501b7',
+        'aa090c2178bfc471',
+        'a8520fdd6bf7a6a5',
+        'bfda4a857e25e98b',
+        '034675283ba5effc',
+        '77c3fefe1381d383',
+        '269fd7376122d11f',
+        '0c1d6f2d1d78c842',
+        '5db1e1c1a0713cf4',
+        'cc555a25a757640c',
+        '8e0489ed369c7ef2',
+        'c97248feeb46ddbd',
+        'e967a09f15455a38',
+        '22794a0bbed59843',
+        '0b434e25778a1ca9',
+        '6b223ade7e03a9ef',
+        'c308c7dc2042fb5c',
+        'c09bddab4b6c935b',
+        '2c5568e08ca8c6f6',
+        '8bf21c9d633c692b',
+        '30a23d4c2a567145',
+        'ca1c25ebf4bd77b2',
+        '5e995f9505afdb7e',
+        '2128d739bd08a370'
+      ],
+      members: {
+        'lead-planner': [
+          '5379485174ef21e7',
+          '1fb59e709fea0370',
+          '1118ef5242316a6f',
+          'a4a97dc11fcac32c',
+          '77c1c5ce9c431437',
+          '7924d842ad81ac63',
+          '360849548e65072f',
+          '7d2d76e46a1c5c0e',
+          'a0f3661eb39c057d',
+          'bacb8ebac2362508',
+          'ed698832006549a1',
+          '6d308e602bdb0b85',
+          '9b3d8d945674f9a6',
+          '8990269792388fe3',
+          '6e7db070199128c8',
+          '777f178953b55808'
+        ],
+        'policy-planner': [
+          'eadf49a73a0fa838',
+          '8637ac40e42cfb3a',
+          'f07734269867f4f5',
+          '77925ffbd3a91482',
+          '0c489fb755142be1',
+          '60b6b0316c406b55',
+          'b0181bb121229727',
+          '307c8cb92a40f235'
+        ],
+        'design-planner': [
+          '360f3b7008baedfb',
+          '9987006d625f82af',
+          '70d34f0fd04d2587',
+          '7c97a919614fb552'
+        ],
+        'coa-cell-a': [
+          '94fb7fe6357fe4b5',
+          'b44487a227b1bf4d',
+          'da9c4c2624901a2e'
+        ],
+        'coa-cell-b': [
+          '7cf143e23660b2c0',
+          '9a2b2f090e56ecf3',
+          '3b02376d5726985f'
+        ],
+        'red-cell-seat': [
+          '9122e994a2ecfee8',
+          'da3504b103b3febe',
+          '063d8816ffb6f7b5',
+          'cf4b15d66a11ea91'
+        ],
+        'red-team': [
+          '33b629c37c13b09f',
+          '8bdfa94cebb967e2',
+          'ff746314b0f37742'
+        ],
+        'component-seat': [
+          '6b7c36198153f59b',
+          '37d643fba894d699'
+        ],
+        'sustainment-seat': [
+          '1f145deb9db8d221',
+          '636a0adbe0787cbe',
+          'eff58c546d224cc2',
+          '39eaaff922816843'
+        ],
+        'legal-support': [
+          '16be884a2d269c54',
+          '3c7edb7c5970b158',
+          '213d93ede7475ea4'
+        ],
+        'plans-writer': [
+          'aaf6372f1cf6a6ff',
+          'f2a00a330f065b83',
+          '3788c966b91c2374',
+          '2f6ec3eebc418c09',
+          '906c2047a15fb54f'
+        ],
+        'release-guard': [
+          'd45ee62cf30769d8'
+        ],
+        'future-ops-seat': [
+          'f7138542a2ddd475',
+          'a54c8f136db89a61',
+          '77e595ff2c81dd37',
+          '51aef9c113deef5b'
+        ],
+        'fires-seat': [
+          '547fabd5cf26d40b',
+          '00d3badbd0700148'
+        ],
+        'convergence-planner': [
+          '1d84a150fa9b3634'
         ]
       }
     }

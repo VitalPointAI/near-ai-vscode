@@ -41,7 +41,7 @@ export const J2_PRODUCTS: readonly J2Product[] = [
     headings: (v) => ['Operational environment and its effects', `${v.Actor} evaluation and ${v.cog} analysis`, `${v.Actor} courses of action, most likely and most dangerous`, 'Proposed priority intelligence requirements', `Initial ${v.collectionPlan.toLowerCase()}`, 'Gaps and the assumptions that fill them']
   },
   {
-    id: 'pir-ir-register', kind: 'register', tradecraft: true,
+    id: 'pir-register', kind: 'register', tradecraft: true,
     owners: { strategic: 'requirements-manager', operational: 'requirements-manager', brigade: 'collection-manager', battalion: 's2-lead' },
     title: () => 'PIR and IR register',
     headings: () => ['Requirement', 'Decision point supported', 'Indicators', 'Specific information requirements', 'Latest time of value', 'Status']

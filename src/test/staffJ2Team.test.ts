@@ -9,7 +9,8 @@ import { draftFromMarkdown } from '../agent/teamMarkdown';
 import { checkTeam, MAX_INSTRUCTION_WORDS } from '../agent/teamCheck';
 import { TEMPLATE_HISTORY } from '../agent/teamTemplateHistory';
 import { parseTeam, teamIsPrivate } from '../agent/teams';
-import { J2_ROSTERS, staffProductTools } from '../agent/staff/j2Members';
+import { staffProductTools } from '../agent/staff/grants';
+import { J2_ROSTERS } from '../agent/staff/j2Members';
 import { J2_PRODUCTS, missingHeadings, productPath, productsOwnedBy, variantProducts } from '../agent/staff/j2Products';
 import { icd203Skill, sourceGradingSkill } from '../agent/staff/j2Skills';
 import { j2Guidance, j2Renderings, j2Template, j2TeamDescription, j2WorkflowSteps, MAX_TEAM_MEMBERS, renderJ2Team, withJ2Guidance } from '../agent/staff/j2Template';
@@ -110,7 +111,7 @@ test('a member\'s output is checked for its required headings: all present passe
   assert.deepEqual(missingHeadings(estimate, v, full.replace('## 6. Key judgements', '## 6. Main points')), ['Key judgements']);
   const intsum = J2_PRODUCTS.find((product) => product.id === 'intsum')!;
   assert.deepEqual(missingHeadings(intsum, v, '# INTSUM 004\n### Period\n### Significant activity\n### Assessment of intent\n### Gaps\n'), ['Changes since the last INTSUM']);
-  const register = J2_PRODUCTS.find((product) => product.id === 'pir-ir-register')!;
+  const register = J2_PRODUCTS.find((product) => product.id === 'pir-register')!;
   assert.deepEqual(missingHeadings(register, v, '| Requirement | Decision point supported | Indicators | Specific information requirements | Latest time of value | Status |\n|---|---|---|---|---|---|\n'), []);
   // Headings follow the vocabulary: the tactical estimate speaks of the threat, the joint one of the adversary.
   assert.ok(estimate.headings(j2Vocabulary(US_ARMY)).includes('Threat courses of action in order of probability'));
@@ -220,6 +221,8 @@ test('no member can decide: refusals in the instructions, and no tool that appro
       const verdict = entry.tools.includes('mcp__staff-products__verdict');
       assert.equal(verdict, ['tradecraft-reviewer', 'release-guard'].includes(entry.name), `${entry.name}: only the gates record verdicts`);
       assert.equal(entry.tools.includes('mcp__staff-products__submit'), ['j2-chief', 's2-lead'].includes(entry.name), `${entry.name}: only the integrator submits for decision`);
+      // One tradecraft rule set: the gate runs WP-SHARED's lint through staff-products, and nobody else needs it.
+      assert.equal(entry.tools.includes('mcp__staff-products__lint'), entry.name === 'tradecraft-reviewer', `${entry.name}: only the tradecraft gate runs the lint`);
     }
   }
   assert.deepEqual(staffProductTools(['propose', 'approve' as never]), ['mcp__staff-products__propose'], 'a verb outside the contract is never granted');

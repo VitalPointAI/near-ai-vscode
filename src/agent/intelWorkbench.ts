@@ -20,6 +20,7 @@ import type { StaffSettings } from '../domain/staff/profiles';
 import { mcpToolName } from '../mcp/tools';
 import { declareManifest, INTERACTIVE_AND_UNATTENDED, protectedWrite } from './tools';
 import type { AgentTool, ToolContext } from './tools';
+import { lintTradecraft, sourcesFrom } from '../domain/staff/tradecraftLint';
 import { displayPath, resolveInWorkspace, ToolError } from './workspace';
 
 /** The server name a team file grants (`mcp:intel-workbench`). */
@@ -421,7 +422,13 @@ export function intelWorkbenchTools(options: IntelWorkbenchOptions = {}): AgentT
     title: () => 'Check the J2 registers',
     async run(_input, context) {
       const registers = await loadAll(context);
-      const findings = registerFindings(registers, now());
+      // The register rules, then the one tradecraft rule set (tradecraftLint.ts, also mcp__staff-products__lint) on the source register and the PIRs,
+      // so the workbench never keeps rules of its own for what the tradecraft gate checks.
+      const lint = lintTradecraft({ body: '', sources: sourcesFrom(registers.sources), pirs: registers.pirs.map((pir) => ({ id: pir.id, type: 'pir', decisionPoint: pir.decisionPoint, ltiov: pir.ltiov })) });
+      const findings: IntelFinding[] = [
+        ...registerFindings(registers, now()),
+        ...lint.map((finding) => ({ rule: `tradecraft:${finding.rule}`, severity: 'block' as const, subject: 'register', message: finding.message }))
+      ];
       const sizes = `${registers.sources.length} source item${registers.sources.length === 1 ? '' : 's'}, ${registers.pirs.length} PIR${registers.pirs.length === 1 ? '' : 's'}, ${registers.plan.length} collection recommendation${registers.plan.length === 1 ? '' : 's'}.`;
       return findings.length ? [sizes, `${findings.length} finding${findings.length === 1 ? '' : 's'}:`, ...findingLines(findings)].join('\n') : `${sizes} No findings.`;
     }

@@ -18,7 +18,9 @@
 // the VS Code commands (src/services/staffCommands.ts), which alone can approve, reject, release or supersede, signed with this device's key. The state
 // machine refuses a decision from any agent whatever this host is asked, so the two paths never meet.
 import { registerPath } from '../domain/staff/intel';
-import { staffProductPath } from '../domain/staff/writeLimits';
+import { GUARD_CONFIG_FILE } from '../domain/staff/realEntities';
+import { readRealEntities } from './realEntities';
+import { staffProductPath, staffWriteLimit, writeAllowedBy } from '../domain/staff/writeLimits';
 import { mkdir, readFile, readdir, rename, appendFile, writeFile } from 'node:fs/promises';
 import * as path from 'node:path';
 import { signPayload, verifyPayload } from '../domain/team/signedPayload';
@@ -35,7 +37,7 @@ import {
   productHash, projectHeader, RELEASE_GUARD_SLUG, replayLedger, RESERVED_MEMBER_SLUGS, TAMPER_REASONS, TRADECRAFT_REVIEWER_SLUG, TRADECRAFT_SECTIONS
 } from '../domain/staff/ledger';
 import type { DecisionRequestInput, LedgerEntry, LedgerReplay, ProductMetaInput, ProductState, TamperReason } from '../domain/staff/ledger';
-import { mayWrite, proposalFolder, sharedProduct, writerOf } from '../domain/staff/ownership';
+import { mayWrite, proposalFolder, sharedProduct, writerIn, writerOf } from '../domain/staff/ownership';
 import { isOneLine, STAFF_SLUG } from '../domain/staff/parse';
 import { LABEL_PATTERN, parseProductHeader, PRODUCT_KINDS, renderProductHeader, splitProductFile, STAFF_MARKERS } from '../domain/staff/products';
 import type { ProductDependency, ProductHeader, ProductKind } from '../domain/staff/products';
@@ -58,9 +60,7 @@ export const LEDGER_FILE = 'products.jsonl';
 export const EVENTS_FILE = 'events.jsonl';
 export const WARGAME_DIR = '.planning/staff/wargame';
 export const WARGAME_FILE = 'ledger.jsonl';
-export const GUARD_CONFIG_FILE = '.planning/.near-ai/staff-guard.json';
-/** The real-entity list, one name per line (`#` starts a note), shared with the demo scenario's import. */
-export const REAL_ENTITIES_FILE = '.planning/staff/real-entities.txt';
+export { GUARD_CONFIG_FILE, REAL_ENTITIES_FILE } from '../domain/staff/realEntities';
 export const CALCULATOR_DIR = '.planning/staff/calculator';
 /** The source register the tradecraft lint reads when a product carries no sources block of its own (intel-workbench writes it). */
 export const SOURCES_FILE = registerPath('source-register');
@@ -333,20 +333,17 @@ export class StaffHost {
   public async guardConfig(): Promise<GuardConfig> {
     const text = await readText(path.join(this.options.root, GUARD_CONFIG_FILE));
     let box: ExerciseBox | undefined;
-    let entities: string[] = [];
     if (text !== undefined) {
       try {
-        const value = JSON.parse(text) as { exerciseBox?: unknown; realEntities?: unknown };
+        const value = JSON.parse(text) as { exerciseBox?: unknown };
         if (Array.isArray(value.exerciseBox) && value.exerciseBox.length >= 3 && value.exerciseBox.length <= 1000
           && value.exerciseBox.every((point) => Array.isArray(point) && point.length === 2 && point.every((n) => typeof n === 'number' && Number.isFinite(n)))) {
           box = value.exerciseBox.map((point: number[]) => [point[0], point[1]] as const);
         }
-        if (Array.isArray(value.realEntities)) entities = value.realEntities.filter((name): name is string => typeof name === 'string' && name.trim().length >= 2).slice(0, 5000);
       } catch { /* an unreadable file sets no box, so every coordinate is held */ }
     }
-    // The list file beside the scenario adds names; a name in either place is held.
-    const listed = await readText(path.join(this.options.root, REAL_ENTITIES_FILE));
-    if (listed !== undefined) entities = [...entities, ...listed.split(/\r?\n/).map((line) => line.replace(/#.*$/, '').trim()).filter((name) => name.length >= 2)].slice(0, 10000);
+    // The one real-entity list (src/staff/realEntities.ts): the guard settings' names and the list file's, as the scenario loader reads them.
+    const entities = await readRealEntities(this.options.root);
     let records: Set<string> | undefined;
     try { records = new Set((await readdir(path.join(this.options.root, CALCULATOR_DIR))).filter((name) => name.endsWith('.json')).map((name) => name.slice(0, -5))); } catch { records = undefined; }
     return { ...(box ? { exerciseBox: box } : {}), realEntities: entities, ...(records ? { calculatorRecords: records } : {}) };
@@ -374,8 +371,8 @@ export class StaffHost {
   private sharedWriterProblem(product: string, caller: StaffCaller, member: string): StaffResult | undefined {
     if (!sharedProduct(product)) return undefined;
     const context = { phase: 'planning' as const, mode: 'standalone' as const };
-    if (mayWrite(product, { section: caller.team.section, member }, context)) return undefined;
-    const writer = writerOf(product, context);
+    if (mayWrite(product, { section: caller.team.section, member }, context, undefined, caller.team.members)) return undefined;
+    const writer = writerIn(product, context, caller.team);
     return refuse(`${product} is a shared product with one writer (${writer ? `${writer.member} in ${writer.section}` : 'its owner'}). Propose your change as an entry in ${proposalFolder(product)} with the register tool's propose action, and the writer merges it.`);
   }
 
@@ -389,6 +386,9 @@ export class StaffHost {
     const member = this.memberOf(caller);
     if (typeof member !== 'string') return member;
     if (!STAFF_SLUG.test(input.product)) return refuse('A product name is lower case letters, digits and dashes.');
+    // A write-limited member (the red team, the release guard) registers only a product inside its limit: the red team its critique, the guard nothing.
+    const limit = staffWriteLimit({ section: caller.team.section }, member);
+    if (limit && !writeAllowedBy(limit, productPath(caller.team.section, input.product))) return refuse(`${member} may register only ${limit.join(', ')}; report what should change instead.`);
     const shared = this.sharedWriterProblem(input.product, caller, member);
     if (shared) return shared;
     const before = await this.replay();
@@ -660,11 +660,11 @@ export class StaffHost {
     const section = this.registerSection(input.register, caller, replay);
     const state = replay.products.get(input.register);
     const context = { phase: 'planning' as const, mode: 'standalone' as const };
-    const partWriter = input.part !== undefined ? writerOf(input.register, context, input.part) : undefined;
+    const partWriter = input.part !== undefined ? writerIn(input.register, context, caller.team, input.part) : undefined;
     if (input.part !== undefined && (!partWriter || partWriter.member !== member || partWriter.section !== caller.team.section)) return refuse(`You do not write the ${input.part} part of ${input.register}.`);
     const owner = state?.record.roles.owner;
-    const isOwner = input.part === undefined && (state ? owner === member : !sharedProduct(input.register) || mayWrite(input.register, { section: caller.team.section, member }, context));
-    if (!isOwner && input.part === undefined) return refuse(`${input.register} is written by ${owner ?? writerOf(input.register, context)?.member ?? 'its owner'}. Propose your rows with the propose action instead.`);
+    const isOwner = input.part === undefined && (state ? owner === member : !sharedProduct(input.register) || mayWrite(input.register, { section: caller.team.section, member }, context, undefined, caller.team.members));
+    if (!isOwner && input.part === undefined) return refuse(`${input.register} is written by ${owner ?? writerIn(input.register, context, caller.team)?.member ?? 'its owner'}. Propose your rows with the propose action instead.`);
     if (section !== caller.team.section && input.part === undefined) return refuse(`${input.register} belongs to ${section}.`);
     if (state?.tampered) return refuse(`${input.register} cannot be changed: ${state.tampered}`);
     if (!isOwner && state && !(['draft', 'guard-checked', 'awaiting-decision'] as const).some((value) => value === state.record.state)) {
@@ -803,7 +803,7 @@ export class StaffHost {
     const writes: string[] = [];
     for (const [register, rows] of [['sync-matrix', derived.sync], ['dst-dsm', derived.dsm]] as const) {
       if (!rows.length) continue;
-      if (!mayWrite(register, { section: caller.team.section, member }, context)) { writes.push(`${register}: ${rows.length} rows for its writer, ${writerOf(register, context)?.member}`); continue; }
+      if (!mayWrite(register, { section: caller.team.section, member }, context, undefined, caller.team.members)) { writes.push(`${register}: ${rows.length} rows for its writer, ${writerIn(register, context, caller.team)?.member}`); continue; }
       const result = await this.registerWrite(caller, { register, rows });
       writes.push(result.ok ? `${register}: ${rows.length} rows written. ${result.text}` : `${register}: not written. ${result.message}`);
     }

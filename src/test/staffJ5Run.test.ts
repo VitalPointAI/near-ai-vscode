@@ -7,6 +7,7 @@ import { mkdtemp, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { WRITE_LIMITED_STAFF_TOOLS } from '../agent/staffTools';
 import { DEFAULT_RULES } from '../agent/permissions';
 import { renderJ5Team } from '../agent/staff/j5Plans';
 import { parseTeam } from '../agent/teams';
@@ -103,4 +104,8 @@ test('a red team given a shell, Edit and document tools by a hand edit still get
   await conversation.send({ text: 'go', client: client as never, model: 'z-ai/glm-5.3', privacy: 'Private', policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES, team: widened });
   assert.ok(offered.includes('Write') && offered.includes('Edit') && offered.includes('Read'), offered.join(', '));
   for (const name of ['Bash', 'CreateDocument', 'RenderSvg', 'Agent', 'Task']) assert.ok(!offered.includes(name), `${name} is withheld`);
+  // The staff tools it is granted stay: they write only the ledger and headers through the host, which refuses any product outside its limit.
+  assert.ok(offered.includes('mcp__staff-products__propose') && offered.includes('mcp__staff-products__status'), offered.join(', '));
+  for (const name of offered.filter((tool) => tool.startsWith('mcp__'))) assert.ok(WRITE_LIMITED_STAFF_TOOLS.has(name), `${name} is one the write limit allows`);
+  assert.ok(!offered.includes('mcp__staff-products__submit') && !offered.includes('mcp__intel-workbench__source_add'));
 });

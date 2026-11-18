@@ -30,7 +30,7 @@ export function staffProductPath(section: StaffSectionId, product: string): stri
  * The paths a member of a staff team may write, or undefined when the extension sets no limit for that member. An entry ending in `/` is a folder (the
  * folder and everything in it); any other entry is one file. A team without a `staff:` block has no limits here.
  */
-export function staffWriteLimit(block: StaffTeamBlock | undefined, member: string): readonly string[] | undefined {
+export function staffWriteLimit(block: Pick<StaffTeamBlock, 'section'> | undefined, member: string): readonly string[] | undefined {
   if (!block) return undefined;
   if (member === 'red-team') return [staffProductPath(block.section, RED_TEAM_PRODUCT)];
   if (member === 'release-guard') return [staffGuardFolder(block.section)];
