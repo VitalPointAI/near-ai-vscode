@@ -1,0 +1,2049 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>War Room prototype - NEAR AI Staff Room - EXERCISE IRON LANTERN (fictional)</title>
+<!--
+  NEAR AI Staff Room: War Room hero prototype.
+  Self-contained: no network, no external libraries, no fonts fetched. Every place, unit, person and number is fictional
+  and unclassified. Military symbols are hand-drawn SVG frames following MIL-STD-2525 / APP-6 frame shapes and the
+  standard light fill colours (friend 128,224,255; hostile 255,128,128; neutral 170,255,170; unknown 255,255,128).
+  Motion: only transform, opacity and stroke-dashoffset animate, through the Web Animations API. Under
+  prefers-reduced-motion, or with Calm on, nothing travels: hand-offs become still links that fade, and every state
+  change is still shown in words and icons.
+-->
+<style>
+:root {
+  --font: "IBM Plex Sans", "Segoe UI", system-ui, -apple-system, Roboto, sans-serif;
+  --mono: "IBM Plex Mono", "Cascadia Mono", "SFMono-Regular", Consolas, monospace;
+  --fs-xs: 11px; --fs-s: 12px; --fs-m: 13px; --fs-l: 15px; --fs-xl: 18px;
+  --r-s: 4px; --r-m: 8px; --r-l: 12px;
+  /* MIL-STD-2525 / APP-6 light fills: used only for symbol frames on the map, never for interface states. */
+  --aff-friend: #80E0FF; --aff-hostile: #FF8080; --aff-neutral: #AAFFAA; --aff-unknown: #FFFF80;
+  --cls: #1E7B34;
+  --ease-std: cubic-bezier(.2, 0, 0, 1);
+  --ease-exit: cubic-bezier(.3, 0, 1, 1);
+}
+body.night {
+  --bg: #0A1220; --bg2: #0E192B; --card: #111E34; --card2: #16253F; --line: #22324D; --line2: #2E4366;
+  --text: #E6ECF5; --text2: #A9B8CF; --text3: #7F91AC;
+  --human: #D9B44A; --human-soft: #2A2412; --human-text: #F0D27A;
+  --ai: #9D8CFF; --ai-soft: #1D1A3A; --ai-text: #CBC2FF;
+  --ok: #4CC38A; --ok-soft: #10281D; --risk: #F59E5B; --risk-soft: #33200F; --bad: #F06A5F; --bad-soft: #3A1717;
+  --focus: #8CC4FF;
+  --map-sea: #0A1830; --map-sea2: #0D2242; --map-land: #17231E; --map-land2: #1C2B24; --map-contour: #2B4236; --map-ridge: #2F4A3B;
+  --map-river: #3A7DBD; --map-road: #66768C; --map-town: #3A4458; --map-grid: rgba(150, 185, 230, .07); --map-ink: #E8EEF7; --map-halo: #0A1424; --map-label: #8FA2BE;
+  --g-friend: #33BDF0; --g-hostile: #FF4D4F; --g-control: #DDE6F2;
+  --glow-ai: 0 0 0 1px rgba(157, 140, 255, .45), 0 0 22px rgba(157, 140, 255, .28);
+  --glow-human: 0 0 0 1px rgba(217, 180, 74, .6), 0 0 26px rgba(217, 180, 74, .35);
+  --shadow: 0 10px 30px rgba(0, 0, 0, .45);
+  --backdrop: rgba(4, 8, 16, .72);
+}
+body.day {
+  --bg: #E9EEF5; --bg2: #F5F7FB; --card: #FFFFFF; --card2: #F2F5FA; --line: #D3DCE8; --line2: #B4C2D6;
+  --text: #0E1B2E; --text2: #43546D; --text3: #5F7089;
+  --human: #9A7412; --human-soft: #FFF4D6; --human-text: #6B4F00;
+  --ai: #5B4BD6; --ai-soft: #ECE9FF; --ai-text: #3E30B0;
+  --ok: #1F8A57; --ok-soft: #E3F5EC; --risk: #B85A12; --risk-soft: #FDEBDC; --bad: #C2372C; --bad-soft: #FBE4E1;
+  --focus: #0060C0;
+  --map-sea: #C3D8EC; --map-sea2: #B3CDE6; --map-land: #E1E6D8; --map-land2: #D6DDCB; --map-contour: #B7C3A6; --map-ridge: #A9B993;
+  --map-river: #3C7FBF; --map-road: #7A8699; --map-town: #B8BFCB; --map-grid: rgba(30, 50, 80, .08); --map-ink: #0E1B2E; --map-halo: #F5F7FB; --map-label: #4B5B73;
+  --g-friend: #006B8C; --g-hostile: #C80000; --g-control: #1B2635;
+  --glow-ai: 0 0 0 1px rgba(91, 75, 214, .45), 0 0 16px rgba(91, 75, 214, .18);
+  --glow-human: 0 0 0 1px rgba(154, 116, 18, .6), 0 0 18px rgba(154, 116, 18, .25);
+  --shadow: 0 10px 30px rgba(20, 30, 50, .18);
+  --backdrop: rgba(220, 228, 240, .78);
+}
+body.hc {
+  --bg: #000; --bg2: #000; --card: #000; --card2: #0A0A0A; --line: #FFF; --line2: #FFF;
+  --text: #FFF; --text2: #FFF; --text3: #E0E0E0;
+  --human: #FFD700; --human-soft: #000; --human-text: #FFD700;
+  --ai: #C8BEFF; --ai-soft: #000; --ai-text: #C8BEFF;
+  --ok: #3CF08C; --ok-soft: #000; --risk: #FFA64D; --risk-soft: #000; --bad: #FF6B6B; --bad-soft: #000;
+  --focus: #FFD700;
+  --map-sea: #000; --map-sea2: #000; --map-land: #111; --map-land2: #111; --map-contour: #555; --map-ridge: #777;
+  --map-river: #4DA3FF; --map-road: #AAA; --map-town: #444; --map-grid: rgba(255, 255, 255, .12); --map-ink: #FFF; --map-halo: #000; --map-label: #DDD;
+  --g-friend: #4FD2FF; --g-hostile: #FF5A5A; --g-control: #FFF;
+  --glow-ai: none; --glow-human: none; --shadow: none; --backdrop: rgba(0, 0, 0, .85);
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { font: var(--fs-m)/1.4 var(--font); color: var(--text); background: var(--bg); min-width: 1240px; }
+body.night { background: radial-gradient(1200px 600px at 60% -10%, #13284A 0%, transparent 60%), repeating-linear-gradient(0deg, transparent 0 31px, rgba(120, 160, 220, .03) 31px 32px), repeating-linear-gradient(90deg, transparent 0 31px, rgba(120, 160, 220, .03) 31px 32px), var(--bg); }
+button, select, input, textarea { font: inherit; color: inherit; }
+button { cursor: pointer; }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.vh { position: absolute !important; top: 0; left: 0; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.muted { color: var(--text2); }
+.faint { color: var(--text3); }
+[hidden] { display: none !important; }
+
+.app { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto auto auto minmax(0, 1fr) auto auto; height: 100vh; min-height: 760px; }
+.app > * { min-width: 0; }
+.cls { background: var(--cls); color: #fff; font: 700 var(--fs-xs)/1 var(--mono); letter-spacing: .14em; text-align: center; padding: 5px 0; }
+
+/* Header */
+.top { display: flex; align-items: center; gap: 10px; padding: 8px 14px; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--bg2) 88%, transparent); }
+.brand { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: var(--fs-l); white-space: nowrap; }
+.brand-mark { width: 22px; height: 22px; }
+.brand b { color: var(--human-text); font-weight: 600; }
+.op { display: flex; flex-direction: column; min-width: 200px; flex: 0 1 auto; overflow: hidden; }
+.op-name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.op-sub { font-size: var(--fs-s); color: var(--text2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.clock { flex: none; display: flex; flex-direction: column; align-items: flex-start; padding: 2px 10px; border-left: 1px solid var(--line); border-right: 1px solid var(--line); }
+.clock .now { font: 600 var(--fs-l)/1.2 var(--mono); }
+.clock .due { font-size: var(--fs-xs); color: var(--text2); white-space: nowrap; }
+.spacer { flex: 1; }
+.beat { display: flex; flex-direction: column; flex: 0 1 230px; min-width: 120px; }
+.beat-name { font-size: var(--fs-s); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.beat-bar { height: 4px; border-radius: 2px; background: var(--line); overflow: hidden; margin-top: 4px; }
+.beat-fill { height: 100%; width: 100%; background: linear-gradient(90deg, var(--ai), var(--human)); transform-origin: 0 50%; transform: scaleX(0); }
+.ctl { display: flex; align-items: center; gap: 6px; }
+.btn { display: inline-flex; align-items: center; gap: 6px; min-height: 30px; padding: 0 11px; border-radius: var(--r-m); border: 1px solid var(--line2); background: var(--card2); color: var(--text); font-size: var(--fs-s); white-space: nowrap; }
+.btn:hover { border-color: var(--text3); }
+.btn.primary { background: var(--human); border-color: var(--human); color: #0B1422; font-weight: 600; }
+body.hc .btn.primary { color: #000; }
+.btn.ai { border-color: var(--ai); color: var(--ai-text); background: var(--ai-soft); }
+.btn.stop { border-color: var(--bad); color: var(--bad); background: var(--bad-soft); font-weight: 600; }
+.btn[aria-pressed="true"] { border-color: var(--ai); background: var(--ai-soft); color: var(--ai-text); }
+.btn:disabled, .btn[aria-disabled="true"] { opacity: .45; cursor: not-allowed; }
+.btn svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.seg { display: inline-flex; border: 1px solid var(--line2); border-radius: var(--r-m); overflow: hidden; }
+.seg button { border: 0; background: var(--card2); padding: 0 8px; min-height: 28px; font-size: var(--fs-s); color: var(--text2); }
+.seg button[aria-pressed="true"] { background: var(--ai-soft); color: var(--ai-text); font-weight: 600; }
+.sep { width: 1px; height: 24px; background: var(--line); }
+
+/* Process rail */
+.railwrap { display: flex; align-items: stretch; gap: 14px; padding: 10px 14px 8px; }
+.rail { flex: 1; display: flex; align-items: stretch; gap: 0; list-style: none; margin: 0; padding: 0; min-width: 0; }
+.step { position: relative; flex: 1 1 0; min-width: 0; display: grid; grid-template-columns: 1fr auto; grid-template-rows: auto 30px auto; column-gap: 6px; row-gap: 2px; align-items: center; padding: 6px 9px 7px; border: 1px solid var(--line2); background: var(--card); border-radius: var(--r-m); }
+.step + .step, .gate + .step { margin-left: 6px; }
+.step .sn { font: 600 var(--fs-xs)/1 var(--mono); color: var(--text3); letter-spacing: .06em; }
+.step .sl { grid-column: 1 / -1; font-weight: 600; font-size: var(--fs-s); line-height: 1.22; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; align-self: start; }
+.step .ss { grid-column: 1 / -1; font-size: var(--fs-xs); color: var(--text2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.step .bar { grid-column: 1 / -1; height: 3px; border-radius: 2px; background: var(--line); overflow: hidden; }
+.step .fill { height: 100%; width: 100%; background: var(--ai); transform-origin: 0 50%; transform: scaleX(0); transition: transform 450ms var(--ease-std); }
+.step .secs { display: flex; gap: 2px; justify-self: end; }
+.step .sec { font: 600 9.5px/1 var(--mono); padding: 2px 4px; border-radius: 3px; border: 1px solid var(--line2); color: var(--text3); }
+.step .sec.on { border-color: var(--ai); color: var(--ai-text); background: var(--ai-soft); }
+.step.done { border-color: color-mix(in srgb, var(--ok) 55%, var(--line2)); }
+.step.done .fill { background: var(--ok); }
+.step.done .ss { color: var(--ok); }
+.step.now { border-color: var(--ai); box-shadow: var(--glow-ai); }
+.step.now::after { content: ""; position: absolute; inset: -1px; border-radius: var(--r-m); border: 1px solid var(--ai); opacity: 0; pointer-events: none; }
+.step.human { border-style: dashed; }
+.step.human .sl::before { content: "\25C6  "; color: var(--human); }
+.gate { position: relative; flex: none; width: 26px; display: flex; align-items: center; justify-content: center; margin-left: 6px; }
+.gate svg { width: 24px; height: 24px; overflow: visible; }
+.gate .dia { fill: var(--card2); stroke: var(--line2); stroke-width: 1.5; }
+.gate .ico { fill: none; stroke: var(--text3); stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.gate.approved .dia { fill: var(--human); stroke: var(--human); }
+.gate.approved .ico { stroke: #0B1422; }
+.gate.waiting .dia { fill: var(--human-soft); stroke: var(--human); stroke-width: 2; }
+.gate.waiting .ico { stroke: var(--human); }
+.gate.returned .dia { fill: var(--risk-soft); stroke: var(--risk); }
+.gate.returned .ico { stroke: var(--risk); }
+.gate button { all: unset; display: flex; cursor: pointer; border-radius: 4px; }
+.gate button:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
+.railside { flex: none; width: 214px; display: flex; flex-direction: column; gap: 6px; justify-content: center; }
+.railside label { display: flex; flex-direction: column; gap: 2px; font-size: var(--fs-xs); color: var(--text2); }
+.railside select { background: var(--card2); border: 1px solid var(--line2); border-radius: var(--r-s); padding: 3px 6px; font-size: var(--fs-s); color: var(--text); }
+.budget { font-size: var(--fs-xs); color: var(--text2); }
+.budget .meter { position: relative; height: 5px; border-radius: 3px; background: var(--line); margin-top: 3px; overflow: hidden; }
+.budget .used { position: absolute; inset: 0; background: var(--ai); transform-origin: 0 50%; transform: scaleX(.2); transition: transform 450ms var(--ease-std); }
+.budget .third { position: absolute; top: -2px; bottom: -2px; left: 33.3%; width: 2px; background: var(--human); }
+
+/* Squads */
+.squads { display: grid; grid-template-columns: 178px 290px repeat(3, minmax(0, 1fr)); gap: 10px; padding: 0 14px 10px; }
+.pod { position: relative; margin-top: 4px; border: 1px solid var(--line); background: var(--card); border-radius: var(--r-l); padding: 7px 10px 8px; min-width: 0; }
+.pod .nest { position: absolute; top: -8px; right: 10px; font: 600 9.5px/1 var(--mono); letter-spacing: .03em; padding: 2px 6px; border-radius: 4px; border: 1px solid var(--line2); background: var(--card); color: var(--text3); white-space: nowrap; max-width: calc(100% - 20px); overflow: hidden; text-overflow: ellipsis; }
+.pod .nest.running { border-color: var(--ai); color: var(--ai-text); }
+.pod .nest.waiting { border-color: var(--human); color: var(--human-text); }
+.pod .nest.merging, .pod .nest.reporting { border-color: var(--ok); color: var(--ok); }
+.pod .nest.conflict { border-color: var(--risk); color: var(--risk); }
+.pod.active { border-color: color-mix(in srgb, var(--ai) 60%, var(--line)); }
+.pod-h { display: flex; align-items: center; gap: 6px; font-size: var(--fs-s); }
+.pod-h .glyph { width: 16px; height: 16px; flex: none; fill: none; stroke: var(--text2); stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.pod.active .pod-h .glyph { stroke: var(--ai-text); }
+.pod-h b { font-weight: 600; }
+.pod-h b { white-space: nowrap; }
+.pod-h .person { margin-left: auto; min-width: 0; font-size: var(--fs-xs); color: var(--human-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pod-h .person::before { content: "\25C6 "; color: var(--human); }
+.callout .sum { color: var(--text3); }
+.toks { display: flex; gap: 6px; margin: 5px 0 3px; }
+.tok { all: unset; position: relative; display: flex; flex-direction: column; align-items: center; gap: 2px; width: 40px; cursor: pointer; border-radius: 6px; }
+.tok:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.tok svg { width: 36px; height: 36px; overflow: visible; }
+.tok .disc { fill: var(--card2); stroke: var(--line2); stroke-width: 1.5; }
+.tok .abbr { font: 600 11px/1 var(--mono); fill: var(--text2); text-anchor: middle; dominant-baseline: central; }
+.tok .ring { fill: none; stroke: var(--ai); stroke-width: 2.5; stroke-linecap: round; opacity: 0; transform-origin: 18px 18px; }
+.tok .badge { opacity: 0; }
+.tok .badge circle { stroke: var(--card); stroke-width: 1.5; }
+.tok .badge path { fill: none; stroke: #0B1422; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.tok .tl { font-size: 10px; line-height: 1.1; color: var(--text3); white-space: nowrap; max-width: 46px; overflow: hidden; text-overflow: ellipsis; }
+.tok.s-idle svg { opacity: .55; }
+.tok.s-working .disc { stroke: var(--ai); fill: var(--ai-soft); }
+.tok.s-working .abbr { fill: var(--ai-text); }
+.tok.s-working .ring { opacity: 1; animation: spin 1.6s linear infinite; }
+.tok.s-working .tl { color: var(--ai-text); }
+.tok.s-done .disc { stroke: var(--ok); }
+.tok.s-done .badge.ok { opacity: 1; }
+.tok.s-needs .disc { stroke: var(--human); fill: var(--human-soft); stroke-width: 2; }
+.tok.s-needs .abbr { fill: var(--human-text); }
+.tok.s-needs .badge.needs { opacity: 1; }
+.tok.s-waiting .disc { stroke: var(--text3); stroke-dasharray: 3 3; }
+.tok.s-waiting .badge.wait { opacity: 1; }
+.tok.s-paused .badge.wait { opacity: 1; }
+.tok.s-stopped .disc { stroke: var(--bad); }
+.tok.s-stopped .badge.stop { opacity: 1; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.callout { font: var(--fs-xs)/1.3 var(--mono); color: var(--text2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-height: 15px; }
+.callout .cw { color: var(--ai-text); }
+.callout.h .cw { color: var(--human-text); }
+.arrive { animation: arrive 600ms var(--ease-std); }
+@keyframes arrive { 0% { box-shadow: 0 0 0 0 rgba(157, 140, 255, .0); } 30% { box-shadow: 0 0 0 4px rgba(157, 140, 255, .45); } 100% { box-shadow: 0 0 0 10px rgba(157, 140, 255, 0); } }
+
+/* Work area */
+.work { display: grid; grid-template-columns: minmax(0, 1fr) 304px; grid-template-rows: minmax(0, 1fr) auto; gap: 10px; padding: 0 14px 10px; min-height: 0; }
+.stage { grid-row: 1; grid-column: 1; display: flex; flex-direction: column; border: 1px solid var(--line); background: var(--card); border-radius: var(--r-l); min-height: 0; overflow: hidden; }
+.tabs { display: flex; align-items: center; gap: 2px; padding: 6px 8px 0; border-bottom: 1px solid var(--line); }
+.tab { all: unset; cursor: pointer; padding: 6px 12px 7px; font-size: var(--fs-s); color: var(--text2); border-bottom: 2px solid transparent; border-radius: 6px 6px 0 0; white-space: nowrap; }
+.tab:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.tab[aria-selected="true"] { color: var(--text); border-bottom-color: var(--ai); font-weight: 600; }
+.tab .tdot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--ai); margin-left: 6px; vertical-align: middle; opacity: 0; }
+.tab.live .tdot { opacity: 1; }
+.tabs .right { margin-left: auto; display: flex; gap: 6px; align-items: center; padding-bottom: 4px; }
+.panes { position: relative; flex: 1; min-height: 0; }
+.pane { position: absolute; inset: 0; display: none; }
+.pane.on { display: grid; }
+
+/* Map */
+.mapgrid { grid-template-columns: minmax(0, 1fr) 256px; }
+.mapbox { position: relative; min-width: 0; min-height: 0; background: var(--map-sea); }
+.mapbox > svg { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.side { border-left: 1px solid var(--line); overflow: auto; padding: 10px 12px; display: flex; flex-direction: column; gap: 10px; font-size: var(--fs-s); }
+.side h3 { margin: 0; font-size: var(--fs-xs); letter-spacing: .08em; text-transform: uppercase; color: var(--text3); font-weight: 600; }
+.maphud { position: absolute; left: 10px; top: 10px; display: flex; gap: 6px; flex-wrap: wrap; pointer-events: none; }
+.maphud .chip { pointer-events: auto; }
+.chip { display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--line2); border-radius: 999px; padding: 2px 9px; font-size: var(--fs-xs); background: color-mix(in srgb, var(--card) 85%, transparent); color: var(--text2); white-space: nowrap; }
+.chip.ai { border-color: var(--ai); color: var(--ai-text); background: var(--ai-soft); }
+.chip.human { border-color: var(--human); color: var(--human-text); background: var(--human-soft); }
+.chip.ok { border-color: var(--ok); color: var(--ok); background: var(--ok-soft); }
+.chip.risk { border-color: var(--risk); color: var(--risk); background: var(--risk-soft); }
+.chip.cls { border-color: var(--cls); color: #fff; background: var(--cls); font-family: var(--mono); font-weight: 700; letter-spacing: .05em; }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; font-size: var(--fs-xs); color: var(--text2); }
+.legend .faint { flex-basis: 100%; }
+.legend svg { width: 18px; height: 14px; vertical-align: middle; }
+.sw { display: flex; align-items: center; gap: 8px; padding: 3px 0; }
+.sw button[role="switch"] { all: unset; cursor: pointer; width: 28px; height: 15px; border-radius: 8px; background: var(--line2); position: relative; flex: none; }
+.sw button[role="switch"]::after { content: ""; position: absolute; top: 2px; left: 2px; width: 11px; height: 11px; border-radius: 50%; background: var(--text3); transition: transform 200ms var(--ease-std); }
+.sw button[role="switch"][aria-checked="true"] { background: var(--ai); }
+.sw button[role="switch"][aria-checked="true"]::after { transform: translateX(13px); background: #fff; }
+.sw button[role="switch"]:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.sw .src { margin-left: auto; color: var(--text3); font-size: var(--fs-xs); }
+.ecoa { border: 1px solid var(--line); border-radius: var(--r-m); padding: 8px 9px; background: var(--card2); }
+.ecoa .t { display: flex; align-items: center; gap: 6px; font-weight: 600; }
+.ecoa .t .k { font: 700 var(--fs-xs)/1 var(--mono); color: var(--g-hostile); border: 1px solid var(--g-hostile); padding: 2px 4px; border-radius: 3px; }
+.ecoa p { margin: 4px 0 0; }
+.cplan { width: 100%; border-collapse: collapse; font-size: var(--fs-xs); }
+.cplan th { text-align: left; color: var(--text3); font-weight: 500; padding: 3px 4px; border-bottom: 1px solid var(--line); }
+.cplan td { padding: 4px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.cplan tr.new td { background: var(--ai-soft); }
+
+/* Map element styles */
+.sea { fill: var(--map-sea); }
+.land { fill: var(--map-land); stroke: color-mix(in srgb, var(--map-land) 60%, #8fa); stroke-opacity: .25; stroke-width: 1.2; }
+.contour { fill: none; stroke: var(--map-contour); stroke-width: 1; }
+.ridge { fill: var(--map-ridge); opacity: .55; }
+.river { fill: none; stroke: var(--map-river); stroke-width: 3; stroke-linecap: round; opacity: .9; }
+.road { fill: none; stroke: var(--map-road); stroke-width: 2.2; stroke-dasharray: 0; opacity: .8; }
+.road.minor { stroke-width: 1.3; opacity: .6; }
+.town { fill: var(--map-town); }
+.gridl { stroke: var(--map-grid); stroke-width: 1; }
+.glab { font: 9px var(--mono); fill: var(--map-label); opacity: .7; }
+.plab { font: italic 600 11px var(--font); fill: var(--map-label); letter-spacing: .2em; }
+.tlab { font: 600 10.5px var(--font); fill: var(--map-label); paint-order: stroke; stroke: var(--map-halo); stroke-width: 3px; }
+.cm { fill: none; stroke: var(--g-control); stroke-width: 1.6; }
+.cm.pl { stroke-dasharray: none; }
+.cm.obj { fill: color-mix(in srgb, var(--g-control) 6%, transparent); }
+.cm.nai { stroke-width: 1.4; fill: color-mix(in srgb, var(--g-control) 5%, transparent); }
+.cmlab { font: 700 10px var(--mono); fill: var(--g-control); paint-order: stroke; stroke: var(--map-halo); stroke-width: 3px; }
+.sym .fr { stroke: #000; stroke-width: 1.5; }
+.sym.aff-F .fr { fill: var(--aff-friend); }
+.sym.aff-H .fr { fill: var(--aff-hostile); }
+.sym.aff-N .fr { fill: var(--aff-neutral); }
+.sym.aff-U .fr { fill: var(--aff-unknown); }
+.sym.planned .fr { stroke-dasharray: 4 3; }
+.sym .ic { fill: none; stroke: #000; stroke-width: 1.5; }
+.sym .ic.solid { fill: #000; stroke: none; }
+.sym .staff { stroke: var(--map-ink); stroke-width: 1.5; }
+.sym .ech { font: 700 9px var(--mono); fill: var(--map-ink); text-anchor: middle; paint-order: stroke; stroke: var(--map-halo); stroke-width: 2.5px; }
+.sym .des { font: 600 10px var(--font); fill: var(--map-ink); paint-order: stroke; stroke: var(--map-halo); stroke-width: 3px; }
+.sym.dead { opacity: .45; }
+.sym.dead .fr { stroke-dasharray: 2 2; }
+.sym:focus-visible { outline: none; }
+.sym:focus-visible .fr { stroke: var(--focus); stroke-width: 3; }
+.ax-out { fill: none; stroke-linecap: butt; stroke-linejoin: round; }
+.ax-in { fill: none; stroke: var(--map-land); stroke-linejoin: round; opacity: .88; }
+.ax.f .ax-out { stroke: var(--g-friend); }
+.ax.f .head { fill: var(--g-friend); stroke: var(--g-friend); stroke-width: 1.5; }
+.ax.f.support .head { fill: var(--map-land); }
+.ax.h .ax-out { stroke: var(--g-hostile); stroke-dasharray: 10 7; }
+.ax.h .head { fill: var(--g-hostile); }
+.axlab { font: 700 10px var(--mono); paint-order: stroke; stroke: var(--map-halo); stroke-width: 3px; }
+.ax.f .axlab { fill: var(--g-friend); }
+.ax.h .axlab { fill: var(--g-hostile); }
+.dp { fill: none; stroke: var(--human); stroke-width: 1.8; }
+.dplab { font: 700 10px var(--mono); fill: var(--human-text); paint-order: stroke; stroke: var(--map-halo); stroke-width: 3px; }
+.ripple { fill: none; stroke: var(--ai); stroke-width: 2; }
+.fires { fill: none; stroke: var(--g-friend); stroke-width: 2; }
+.trail { fill: none; stroke-width: 1.5; stroke-dasharray: 3 4; opacity: .7; }
+.trail.f { stroke: var(--g-friend); }
+.trail.h { stroke: var(--g-hostile); }
+.hilite { fill: none; stroke: var(--human); stroke-width: 2.5; }
+
+/* COA workspace */
+.coagrid { grid-template-columns: 1fr 1fr; gap: 0; }
+.coa { display: flex; flex-direction: column; min-width: 0; min-height: 0; padding: 10px 12px; gap: 6px; overflow: hidden; }
+.coa + .coa { border-left: 1px solid var(--line); }
+.coa-h { display: flex; align-items: center; gap: 8px; flex: none; }
+.coa-body { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 6px; }
+.coa-text { flex: none; display: flex; flex-direction: column; gap: 6px; }
+.coa-h .k { font: 700 var(--fs-l)/1 var(--mono); color: var(--g-friend); border: 1.5px solid var(--g-friend); border-radius: 5px; padding: 3px 6px; }
+.coa-h .n { font-weight: 600; }
+.coa-h .own { margin-left: auto; font-size: var(--fs-xs); color: var(--text3); }
+.mini { position: relative; flex: 1 1 0; min-height: 96px; border-radius: var(--r-m); overflow: hidden; border: 1px solid var(--line); background: var(--map-sea); flex: none; }
+.mini > svg { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.stmt { font-size: var(--fs-s); line-height: 1.35; min-height: 49px; margin: 0; color: var(--text); flex: none; }
+.stmt .caret { display: inline-block; width: 7px; height: 12px; background: var(--ai); vertical-align: -1px; margin-left: 1px; animation: blink 1s steps(1) infinite; }
+@keyframes blink { 50% { opacity: 0; } }
+.checks { display: flex; flex-wrap: wrap; gap: 4px; flex: none; }
+.vc { display: inline-flex; align-items: center; gap: 4px; font-size: var(--fs-xs); border: 1px solid var(--line2); border-radius: 999px; padding: 1px 8px; color: var(--text3); }
+.vc.ok { border-color: var(--ok); color: var(--ok); background: var(--ok-soft); }
+.vc.risk { border-color: var(--risk); color: var(--risk); background: var(--risk-soft); }
+.supp { display: flex; flex-wrap: wrap; gap: 4px; min-height: 20px; flex: none; }
+
+/* Wargame */
+.wggrid { grid-template-columns: minmax(0, 1fr) 248px; }
+.turnbar { position: absolute; left: 10px; right: 10px; top: 10px; display: flex; align-items: center; gap: 8px; pointer-events: none; }
+.turnbar .tt { font: 600 var(--fs-s) var(--font); background: color-mix(in srgb, var(--card) 88%, transparent); border: 1px solid var(--line2); border-radius: var(--r-m); padding: 4px 9px; }
+.phase { font: 700 var(--fs-xs)/1 var(--mono); letter-spacing: .08em; padding: 5px 8px; border-radius: 4px; border: 1px solid var(--line2); color: var(--text3); background: color-mix(in srgb, var(--card) 88%, transparent); }
+.phase.on.blue { border-color: var(--g-friend); color: var(--g-friend); box-shadow: 0 0 14px color-mix(in srgb, var(--g-friend) 35%, transparent); }
+.phase.on.red { border-color: var(--g-hostile); color: var(--g-hostile); box-shadow: 0 0 14px color-mix(in srgb, var(--g-hostile) 35%, transparent); }
+.phase.done { color: var(--text2); }
+.log { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.log li { border-left: 3px solid var(--line2); padding: 2px 0 2px 8px; }
+.log li.blue { border-color: var(--g-friend); }
+.log li.red { border-color: var(--g-hostile); }
+.log li.res { border-color: var(--human); background: var(--human-soft); padding: 6px 8px; border-radius: 0 6px 6px 0; }
+.log li.j4 { border-color: var(--ok); }
+.log .lk { font: 700 10px var(--mono); letter-spacing: .06em; color: var(--text3); display: block; }
+.roles { font-size: var(--fs-xs); color: var(--text2); display: grid; grid-template-columns: auto 1fr; gap: 2px 8px; }
+
+/* Compare */
+.cmpgrid { grid-template-columns: minmax(0, 1fr) 300px; }
+.cmp { padding: 12px 16px; overflow: auto; }
+.cmp table { width: 100%; border-collapse: collapse; font-size: var(--fs-s); }
+.cmp th { text-align: left; color: var(--text3); font-weight: 500; font-size: var(--fs-xs); padding: 4px 6px; border-bottom: 1px solid var(--line); }
+.cmp td { padding: 7px 6px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+.cmp .w { font-family: var(--mono); color: var(--text2); }
+.sbar { display: flex; align-items: center; gap: 8px; }
+.sbar .track { flex: 1; height: 8px; border-radius: 4px; background: var(--line); overflow: hidden; }
+.sbar .val { height: 100%; width: 100%; transform-origin: 0 50%; transform: scaleX(0); border-radius: 4px; background: var(--g-friend); transition: transform 600ms var(--ease-std); }
+.sbar .num { font: 600 var(--fs-s) var(--mono); width: 18px; text-align: right; }
+.cmp tfoot td { font-weight: 600; border-bottom: 0; padding-top: 10px; }
+.cmp .tot { font: 700 var(--fs-xl) var(--mono); }
+.rec { margin: 12px; border: 1px solid var(--ai); background: var(--ai-soft); border-radius: var(--r-m); padding: 10px 12px; }
+.rec h4, .dis h4 { margin: 0 0 4px; font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: .08em; }
+.rec h4 { color: var(--ai-text); }
+.dis { margin: 0 12px 12px; border: 1px solid var(--line2); border-radius: var(--r-m); padding: 10px 12px; }
+.dis h4 { color: var(--text2); }
+.cmpside { border-left: 1px solid var(--line); overflow: auto; }
+
+/* Orders */
+.ordgrid { grid-template-columns: minmax(0, 1fr); }
+.orders { padding: 12px 16px; overflow: auto; display: flex; flex-direction: column; gap: 8px; }
+.orow { display: grid; grid-template-columns: 210px 170px minmax(0, 1fr) 150px; gap: 12px; align-items: center; padding: 6px 8px; border: 1px solid var(--line); border-radius: var(--r-m); background: var(--card2); }
+.orow .on { font-weight: 600; }
+.orow .ow { font-size: var(--fs-xs); color: var(--text2); font-family: var(--mono); }
+.orow .pb { height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; }
+.orow .pf { height: 100%; width: 100%; background: var(--ai); transform-origin: 0 50%; transform: scaleX(0); }
+.orow.done .pf { background: var(--ok); }
+.orow .st { font-size: var(--fs-xs); text-align: right; color: var(--text2); }
+.orow.done .st { color: var(--ok); }
+.orow.check { border-style: dashed; }
+.orow.gaterow { border-color: var(--human); background: var(--human-soft); }
+.orow.gaterow .st { color: var(--human-text); font-weight: 600; }
+
+/* Sync matrix */
+.matrix { grid-row: 2; grid-column: 1; border: 1px solid var(--line); background: var(--card); border-radius: var(--r-l); padding: 8px 10px 8px; }
+.mx-h { display: flex; align-items: center; gap: 8px; font-size: var(--fs-s); margin-bottom: 4px; }
+.mx-h b { font-weight: 600; }
+.mx-h .r { margin-left: auto; display: flex; gap: 6px; align-items: center; }
+.matrix.collapsed .mx { display: none; }
+.matrix.collapsed { padding-bottom: 6px; }
+.mx-h .btn { min-height: 22px; padding: 0 8px; font-size: var(--fs-xs); }
+.mx { position: relative; display: grid; grid-template-columns: 132px minmax(0, 1fr); row-gap: 3px; font-size: var(--fs-xs); }
+.mx .rl { color: var(--text2); white-space: nowrap; display: flex; align-items: center; gap: 5px; height: 17px; }
+.mx .rl i { font-style: normal; font: 600 9.5px/1 var(--mono); color: var(--text3); border: 1px solid var(--line2); padding: 1px 3px; border-radius: 3px; }
+.mx .lane { position: relative; height: 17px; background: repeating-linear-gradient(90deg, var(--line) 0 1px, transparent 1px calc(100% / 9)); border-radius: 3px; }
+.mx .ticks { position: relative; height: 14px; }
+.mx .tick { position: absolute; top: 0; transform: translateX(-50%); font: 10px var(--mono); color: var(--text3); }
+.mxc { position: absolute; top: 1px; bottom: 1px; border-radius: 4px; padding: 0 6px; display: flex; align-items: center; font-size: 10.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; border: 1px solid; }
+.mxc.J2 { border-color: color-mix(in srgb, var(--g-hostile) 70%, transparent); background: color-mix(in srgb, var(--g-hostile) 14%, var(--card)); color: var(--text); }
+.mxc.J3 { border-color: color-mix(in srgb, var(--g-friend) 70%, transparent); background: color-mix(in srgb, var(--g-friend) 14%, var(--card)); color: var(--text); }
+.mxc.J4 { border-color: color-mix(in srgb, var(--ok) 70%, transparent); background: color-mix(in srgb, var(--ok) 14%, var(--card)); color: var(--text); }
+.mxc.COL { border-color: color-mix(in srgb, var(--ai) 70%, transparent); background: color-mix(in srgb, var(--ai) 14%, var(--card)); color: var(--text); }
+.mxd { position: absolute; top: 1px; width: 17px; height: 17px; transform: translateX(-50%); }
+.mxd svg { width: 17px; height: 17px; }
+.mxd .dpd { fill: var(--human-soft); stroke: var(--human); stroke-width: 1.5; }
+.mxd span { position: absolute; left: 19px; top: 1px; font: 700 10px var(--mono); color: var(--human-text); white-space: nowrap; }
+.cursor { position: absolute; top: 14px; bottom: 0; width: 2px; background: var(--ai); box-shadow: 0 0 10px var(--ai); pointer-events: none; transition: left 900ms var(--ease-std); }
+.cursor span { position: absolute; top: -15px; left: 3px; font: 700 10px var(--mono); color: var(--ai-text); white-space: nowrap; background: var(--card); padding: 0 3px; border-radius: 3px; }
+
+/* Feed */
+.feed { grid-row: 1 / span 2; grid-column: 2; display: flex; flex-direction: column; gap: 10px; min-height: 0; }
+.decide { border: 1px solid var(--human); border-radius: var(--r-l); background: var(--card); overflow: hidden; }
+.decide-h { display: flex; align-items: center; gap: 8px; padding: 8px 10px; background: var(--human-soft); color: var(--human-text); font-weight: 600; font-size: var(--fs-s); }
+.decide-h svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.decide-h .n { margin-left: auto; font: 700 var(--fs-xs)/1 var(--mono); background: var(--human); color: #0B1422; border-radius: 999px; padding: 3px 7px; }
+.decide-list { list-style: none; margin: 0; padding: 4px 10px 8px; display: flex; flex-direction: column; gap: 6px; }
+.dec { padding: 7px 0; border-bottom: 1px solid var(--line); font-size: var(--fs-s); }
+.dec:last-child { border-bottom: 0; }
+.dec .dt { font-weight: 600; }
+.dec .dm { font-size: var(--fs-xs); color: var(--text2); margin: 2px 0 6px; }
+.dec.waiting { animation: none; }
+.dec.done { opacity: .75; }
+.dec.done .dt::before { content: "\2713  "; color: var(--human); }
+.dec .btn.primary.pulse { box-shadow: var(--glow-human); }
+.empty { font-size: var(--fs-s); color: var(--text3); padding: 6px 0; }
+.ledger { flex: 1; min-height: 0; display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: var(--r-l); background: var(--card); overflow: hidden; }
+.ledger-h { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-bottom: 1px solid var(--line); font-size: var(--fs-s); font-weight: 600; }
+.ledger-h .c { margin-left: auto; font-weight: 400; color: var(--text3); font-size: var(--fs-xs); }
+.ledger ol { list-style: none; margin: 0; padding: 0; overflow: auto; flex: 1; }
+.prod { all: unset; display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 2px 8px; padding: 7px 10px; border-bottom: 1px solid var(--line); cursor: pointer; width: 100%; box-sizing: border-box; }
+.prod:hover { background: var(--card2); }
+.prod:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.prod .pi { grid-row: span 2; width: 22px; height: 22px; border-radius: 5px; display: flex; align-items: center; justify-content: center; font: 700 9.5px/1 var(--mono); border: 1px solid var(--line2); color: var(--text2); }
+.prod .pn { font-size: var(--fs-s); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.prod .pm { font-size: var(--fs-xs); color: var(--text2); display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.st-pill { font: 600 9.5px/1 var(--mono); letter-spacing: .04em; text-transform: uppercase; padding: 2px 5px; border-radius: 3px; border: 1px solid var(--line2); color: var(--text2); }
+.st-pill.draft { border-style: dashed; }
+.st-pill.checked { border-color: var(--ai); color: var(--ai-text); }
+.st-pill.released, .st-pill.approved, .st-pill.signed { border-color: var(--human); color: var(--human-text); background: var(--human-soft); }
+.st-pill.awaiting { border-color: var(--human); color: var(--human-text); }
+.st-pill.received { color: var(--text3); }
+.prod.fresh { background: color-mix(in srgb, var(--ai) 10%, var(--card)); }
+.tseal { color: var(--ok); }
+
+/* Footer */
+.status { display: flex; gap: 16px; align-items: center; padding: 5px 14px; border-top: 1px solid var(--line); background: var(--bg2); font-size: var(--fs-xs); color: var(--text2); }
+.status > button { all: unset; white-space: nowrap; cursor: pointer; display: inline-flex; gap: 6px; align-items: center; border-radius: 4px; padding: 1px 4px; }
+.status > button:hover { color: var(--text); }
+.status > button:focus-visible { outline: 2px solid var(--focus); }
+.status .r { margin-left: auto; }
+.status .btn { min-height: 22px; padding: 0 8px; font-size: var(--fs-xs); }
+.status > span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+
+/* Hand-off effects layer */
+.fx { position: fixed; inset: 0; width: 100vw; height: 100vh; pointer-events: none; z-index: 40; overflow: visible; }
+.fx .trailp { fill: none; stroke-width: 1.5; opacity: .35; }
+.fx .comet { fill: none; stroke-width: 3; stroke-linecap: round; }
+.fx .chipbg { stroke-width: 1; }
+.fx .chiptx { font: 600 10.5px var(--font); }
+.fx .k-task .trailp, .fx .k-task .comet { stroke: var(--ai); }
+.fx .k-task .dotc { fill: var(--ai); }
+.fx .k-task .chipbg { fill: var(--ai-soft); stroke: var(--ai); }
+.fx .k-task .chiptx { fill: var(--ai-text); }
+.fx .k-prod .trailp, .fx .k-prod .comet { stroke: var(--ok); }
+.fx .k-prod .dotc { fill: var(--ok); }
+.fx .k-prod .chipbg { fill: var(--ok-soft); stroke: var(--ok); }
+.fx .k-prod .chiptx { fill: var(--ok); }
+.fx .k-human .trailp, .fx .k-human .comet { stroke: var(--human); }
+.fx .k-human .dotc { fill: var(--human); }
+.fx .k-human .chipbg { fill: var(--human-soft); stroke: var(--human); }
+.fx .k-human .chiptx { fill: var(--human-text); }
+.fx .halo { opacity: .25; }
+.fx .still { stroke-dasharray: 4 4; stroke-width: 1.5; fill: none; opacity: .8; }
+
+/* Popover */
+.pop { position: fixed; z-index: 70; width: 330px; max-height: 70vh; overflow: auto; background: var(--card); border: 1px solid var(--line2); border-radius: var(--r-l); box-shadow: var(--shadow); padding: 12px 14px; font-size: var(--fs-s); }
+.pop h3 { margin: 0 0 2px; font-size: var(--fs-l); }
+.pop .sub { color: var(--text2); font-size: var(--fs-xs); margin-bottom: 8px; }
+.pop dl { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 4px 10px; margin: 8px 0; }
+.pop dt { color: var(--text3); }
+.pop dd { margin: 0; }
+.pop .acts { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+.pop .x { position: absolute; right: 8px; top: 8px; }
+.srcs { margin: 4px 0 0; padding-left: 16px; }
+
+/* Gate ceremony */
+.overlay { position: fixed; inset: 0; z-index: 60; background: var(--backdrop); display: flex; align-items: center; justify-content: center; }
+.gatebox { position: relative; width: min(1100px, calc(100vw - 48px)); max-height: calc(100vh - 48px); overflow: auto; display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(0, 1fr); background: var(--card); border: 1px solid var(--human); border-radius: 16px; box-shadow: var(--shadow), var(--glow-human); }
+.gb-l { padding: 18px 20px; border-right: 1px solid var(--line); display: flex; flex-direction: column; gap: 10px; }
+.gb-r { padding: 18px 20px; display: flex; flex-direction: column; gap: 12px; }
+.gb-kicker { font: 700 var(--fs-xs)/1 var(--mono); letter-spacing: .14em; color: var(--human-text); text-transform: uppercase; }
+.gatebox h2 { margin: 0; font-size: var(--fs-xl); }
+.gb-sec h4 { margin: 0 0 3px; font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: .08em; color: var(--text3); }
+.gb-sec p { margin: 0; }
+.thumbs { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.thumb { border: 1px solid var(--line); border-radius: var(--r-m); overflow: hidden; background: var(--map-sea); }
+.thumb .cap { display: flex; justify-content: space-between; align-items: center; padding: 4px 8px; font-size: var(--fs-xs); background: var(--card2); }
+.thumb svg { display: block; width: 100%; height: 130px; }
+.thumb.rec { outline: 2px solid var(--ai); outline-offset: -2px; }
+.who { display: flex; gap: 10px; align-items: center; padding: 10px; border: 1px solid var(--human); background: var(--human-soft); border-radius: var(--r-m); }
+.who svg { width: 30px; height: 30px; fill: none; stroke: var(--human); stroke-width: 1.5; }
+.who b { display: block; }
+.who span { font-size: var(--fs-xs); color: var(--text2); }
+.opts { display: flex; flex-direction: column; gap: 6px; border: 0; margin: 0; padding: 0; }
+.opts legend, .acks legend { font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: .08em; color: var(--text3); margin-bottom: 4px; padding: 0; }
+.opt { display: flex; gap: 8px; align-items: flex-start; padding: 8px 10px; border: 1px solid var(--line2); border-radius: var(--r-m); cursor: pointer; }
+.opt:has(input:checked) { border-color: var(--human); background: var(--human-soft); }
+.opt input { margin-top: 2px; accent-color: var(--human); }
+.opt small { display: block; color: var(--text2); }
+.acks { border: 0; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.ack { display: flex; gap: 8px; align-items: flex-start; font-size: var(--fs-s); }
+.ack input { margin-top: 2px; accent-color: var(--human); }
+textarea.guid { width: 100%; min-height: 54px; resize: vertical; background: var(--card2); border: 1px solid var(--line2); border-radius: var(--r-m); padding: 6px 8px; }
+.delib { display: flex; align-items: center; gap: 10px; font-size: var(--fs-s); color: var(--text2); }
+.delib svg { width: 34px; height: 34px; transform: rotate(-90deg); }
+.delib .tr { fill: none; stroke: var(--line); stroke-width: 3; }
+.delib .pr { fill: none; stroke: var(--human); stroke-width: 3; stroke-linecap: round; }
+.signrow { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.btn.sign { min-height: 38px; padding: 0 18px; font-size: var(--fs-m); }
+.fine { font-size: var(--fs-xs); color: var(--text3); }
+.stamp { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; pointer-events: none; }
+.stamp .seal { width: 280px; height: 280px; border-radius: 50%; border: 4px solid var(--human); color: var(--human-text); background: color-mix(in srgb, var(--human-soft) 92%, transparent); display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; gap: 4px; box-shadow: var(--glow-human); }
+.stamp .seal .a { font: 700 26px/1 var(--mono); letter-spacing: .12em; }
+.stamp .seal .b { font: 600 var(--fs-l) var(--font); }
+.stamp .seal .c { font: var(--fs-xs) var(--mono); color: var(--text2); }
+.burst { position: absolute; width: 280px; height: 280px; border-radius: 50%; border: 2px solid var(--human); }
+
+/* Help and toasts */
+.dialog { position: fixed; z-index: 75; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 460px; background: var(--card); border: 1px solid var(--line2); border-radius: var(--r-l); box-shadow: var(--shadow); padding: 16px 18px; font-size: var(--fs-s); }
+.dialog h2 { margin: 0 0 8px; font-size: var(--fs-l); }
+.dialog table { width: 100%; border-collapse: collapse; }
+.dialog td { padding: 4px 0; border-bottom: 1px solid var(--line); }
+.dialog kbd { font: 600 var(--fs-xs) var(--mono); border: 1px solid var(--line2); border-bottom-width: 2px; border-radius: 4px; padding: 1px 5px; }
+.toast { position: fixed; z-index: 65; left: 50%; bottom: 46px; transform: translateX(-50%); background: var(--card); border: 1px solid var(--line2); border-radius: var(--r-m); box-shadow: var(--shadow); padding: 8px 14px; font-size: var(--fs-s); max-width: 640px; }
+.toast.human { border-color: var(--human); }
+.toast.stop { border-color: var(--bad); }
+.listview { position: absolute; inset: 0; overflow: auto; background: var(--card); padding: 10px 12px; }
+.listview table { width: 100%; border-collapse: collapse; font-size: var(--fs-s); }
+.listview th, .listview td { text-align: left; padding: 4px 6px; border-bottom: 1px solid var(--line); }
+.listview th { color: var(--text3); font-weight: 500; }
+
+/* Calm and reduced motion: nothing travels, nothing spins. States stay in words and icons. */
+body.calm .tok.s-working .ring { animation: none; stroke-dasharray: 30 200; }
+body.calm .stmt .caret { animation: none; }
+body.calm * { transition-duration: 0ms !important; }
+@media (prefers-reduced-motion: reduce) {
+  .tok.s-working .ring { animation: none; stroke-dasharray: 30 200; }
+  .stmt .caret { animation: none; }
+  * { transition-duration: 0ms !important; }
+}
+@media (max-height: 900px) {
+  .railwrap { padding-top: 7px; padding-bottom: 6px; }
+  .step { grid-template-rows: auto 16px auto; padding: 5px 8px 6px; }
+  .step .sl { -webkit-line-clamp: 1; display: block; white-space: nowrap; text-overflow: ellipsis; }
+  .squads { padding-bottom: 8px; }
+  .pod { padding: 5px 9px 6px; }
+  .toks { margin: 3px 0 2px; }
+  .tok { width: 38px; }
+  .tok svg { width: 30px; height: 30px; }
+  .tok .tl { font-size: 9.5px; }
+  .mx .lane, .mx .rl { height: 15px; }
+  .coa-body { flex-direction: row; gap: 10px; }
+  .coa-body .mini { flex: 1.25 1 0; min-height: 0; }
+  .coa-text { flex: 1 1 0; min-width: 0; overflow: auto; }
+  .stmt { min-height: 0; }
+  .mxc { font-size: 10px; }
+}
+body.hc .step.now, body.hc .gatebox, body.hc .stamp .seal { box-shadow: none; }
+body.hc .step.now { border-width: 3px; }
+</style>
+</head>
+<body class="night">
+<div class="app" id="app">
+  <div class="cls" role="note">UNCLASSIFIED // EXERCISE // FICTIONAL DATA</div>
+
+  <header class="top">
+    <div class="brand">
+      <svg class="brand-mark" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2l9 5v10l-9 5-9-5V7z" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M8 15V9l8 6V9" fill="none" stroke="#D9B44A" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <span>NEAR AI <b>Staff Room</b></span>
+    </div>
+    <div class="op">
+      <span class="op-name">EX IRON LANTERN · TF ANVIL Main HQ</span>
+      <span class="op-sub">Kestrel Peninsula (fictional)</span>
+    </div>
+    <div class="clock" aria-live="off">
+      <span class="now mono" id="clockNow">D+2 1205Z</span>
+      <span class="due" id="clockDue">COA decision brief 1400Z · in 1 h 55 min</span>
+    </div>
+    <div class="spacer"></div>
+    <div class="beat" aria-live="off">
+      <span class="beat-name" id="beatName">Ready: press Play</span>
+      <span class="beat-bar"><span class="beat-fill" id="beatFill"></span></span>
+    </div>
+    <div class="ctl" role="group" aria-label="Demo controls">
+      <button class="btn primary" id="btnPlay" type="button" aria-keyshortcuts="Space"><svg viewBox="0 0 16 16" aria-hidden="true"><path id="playIcon" d="M4 3l9 5-9 5z"/></svg><span id="playText">Play</span></button>
+      <button class="btn" id="btnStep" type="button" aria-keyshortcuts="N" title="Skip to the next beat (N)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3l6 5-6 5zM10 3v10"/></svg>Next</button>
+      <div class="seg" role="group" aria-label="Speed">
+        <button type="button" data-speed="1" aria-pressed="true">1x</button><button type="button" data-speed="2" aria-pressed="false">2x</button><button type="button" data-speed="4" aria-pressed="false">4x</button>
+      </div>
+      <button class="btn" id="btnRestart" type="button" aria-keyshortcuts="R" title="Restart the demo (R)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8a5 5 0 1 0 1.5-3.6M3 2.5v3h3"/></svg>Restart</button>
+    </div>
+    <button class="btn stop" id="btnStop" type="button" title="Stops every agent at once. A person restarts them.">■ Stop agents</button>
+  </header>
+
+  <div class="railwrap">
+    <ol class="rail" id="rail" aria-label="Planning process"></ol>
+    <div class="railside">
+      <label>Doctrine profile
+        <select id="profile" aria-describedby="profileHint">
+          <option value="us-joint">US Joint · JPP (JP 5-0)</option>
+          <option value="us-army">US Army · MDMP (FM 5-0)</option>
+          <option value="nato-ca">NATO/Canadian · AJP-5 Ed B</option>
+        </select>
+      </label>
+      <span class="vh" id="profileHint">Renames steps, products, COA tests and annex letters. The work underneath stays the same.</span>
+      <div class="budget"><span id="budgetText" title="Level: operational. At tactical level the profile runs MDMP or APP-28.">Planning time used: 1 h 05 of 6 h</span>
+        <div class="meter" aria-hidden="true"><span class="used" id="budgetUsed"></span><span class="third" title="One-third mark: keep two-thirds for subordinate units"></span></div>
+      </div>
+    </div>
+  </div>
+
+  <section class="squads" id="squads" aria-label="Staff sections and their agents"></section>
+
+  <div class="work">
+    <section class="stage" aria-label="Main view">
+      <div class="tabs" role="tablist" aria-label="Views" id="tabs">
+        <button class="tab" role="tab" id="tab-threat" aria-controls="pane-threat" aria-selected="true" tabindex="0">J2 threat picture<span class="tdot"></span></button>
+        <button class="tab" role="tab" id="tab-coa" aria-controls="pane-coa" aria-selected="false" tabindex="-1">COA workspace<span class="tdot"></span></button>
+        <button class="tab" role="tab" id="tab-wargame" aria-controls="pane-wargame" aria-selected="false" tabindex="-1">Wargame<span class="tdot"></span></button>
+        <button class="tab" role="tab" id="tab-compare" aria-controls="pane-compare" aria-selected="false" tabindex="-1">COA comparison<span class="tdot"></span></button>
+        <button class="tab" role="tab" id="tab-orders" aria-controls="pane-orders" aria-selected="false" tabindex="-1">Orders and annexes<span class="tdot"></span></button>
+        <div class="right">
+          <button class="btn" id="btnFollow" type="button" aria-pressed="true" title="Follow the action: the view changes with the work. Choosing a tab turns it off.">Follow the action</button>
+          <button class="btn" id="btnList" type="button" aria-pressed="false" title="Show the map as a table">Map as table</button>
+        </div>
+      </div>
+      <div class="panes">
+        <div class="pane mapgrid on" id="pane-threat" role="tabpanel" aria-labelledby="tab-threat">
+          <div class="mapbox" id="threatBox">
+            <svg id="threatMap" viewBox="130 24 830 534" preserveAspectRatio="xMidYMid meet" role="img" aria-labelledby="threatMapLabel"><title id="threatMapLabel">Map of the fictional Kestrel Peninsula. Updated as the J2 builds the threat picture; use Map as table for the full list.</title></svg>
+            <div class="maphud"><span class="chip cls">UNCLAS // EX</span><span class="chip ai" id="threatHud">J2 threat layer</span></div>
+            <div class="listview" id="listview" hidden></div>
+          </div>
+          <aside class="side" aria-label="Threat picture details">
+            <h3>Key</h3>
+            <div class="legend" aria-label="Symbol key">
+              <span><svg viewBox="0 0 18 14"><rect x="2" y="2" width="14" height="10" fill="#80E0FF" stroke="#000"/></svg> Friend</span>
+              <span><svg viewBox="0 0 18 14"><path d="M9 0l7 7-7 7-7-7z" fill="#FF8080" stroke="#000"/></svg> Hostile</span>
+              <span><svg viewBox="0 0 18 14"><path d="M6 4a3.2 3.2 0 0 1 6 0a3.2 3.2 0 0 1 0 6a3.2 3.2 0 0 1-6 0a3.2 3.2 0 0 1 0-6z" fill="#FFFF80" stroke="#000"/></svg> Unknown</span>
+              <span><svg viewBox="0 0 18 14"><rect x="3" y="1.5" width="11" height="11" fill="#AAFFAA" stroke="#000"/></svg> Neutral</span>
+              <span class="faint">Dashed frame: planned or anticipated</span>
+            </div>
+            <h3>Layers</h3>
+            <div id="layers"></div>
+            <h3>Enemy courses of action</h3>
+            <div id="ecoas"><p class="faint" id="ecoaEmpty">The threat analyst is still working. Enemy COAs appear here as they are drafted.</p></div>
+            <h3>Collection plan <span class="faint">(J2 recommends, J3 tasks)</span></h3>
+            <table class="cplan" aria-label="Collection plan"><thead><tr><th>PIR</th><th>NAI</th><th>Latest time of value</th></tr></thead><tbody id="cplan"><tr><td colspan="3" class="faint">None yet</td></tr></tbody></table>
+          </aside>
+        </div>
+
+        <div class="pane coagrid" id="pane-coa" role="tabpanel" aria-labelledby="tab-coa">
+          <div class="coa" id="coaA"></div>
+          <div class="coa" id="coaB"></div>
+        </div>
+
+        <div class="pane wggrid" id="pane-wargame" role="tabpanel" aria-labelledby="tab-wargame">
+          <div class="mapbox">
+            <svg id="wgMap" viewBox="290 76 660 476" preserveAspectRatio="xMidYMid meet" role="img" aria-labelledby="wgMapLabel"><title id="wgMapLabel">Wargame map: COA A against the enemy's most dangerous course of action. The turn log on the right lists every move.</title></svg>
+            <div class="turnbar"><span class="tt" id="turnTitle">Wargame not started</span><span class="phase" id="ph-a">ACTION</span><span class="phase" id="ph-r">REACTION</span><span class="phase" id="ph-c">COUNTERACTION</span></div>
+          </div>
+          <aside class="side" aria-label="Wargame log">
+            <h3>At the table</h3>
+            <div class="roles"><span class="faint">Controller</span><span>lead-planner (J5)</span><span class="faint">Enemy</span><span>red-cell (J2) plays to win</span><span class="faint">Friendly</span><span>coa-cell-a, future-ops-planner</span><span class="faint">Sustainment</span><span>log-plans-officer (J4)</span><span class="faint">Recorder</span><span>plans-writer</span></div>
+            <h3>Sequence</h3>
+            <div class="roles" id="wgSeq"><span class="faint">A vs MLCOA</span><span id="seq1">waiting</span><span class="faint">A vs MDCOA</span><span id="seq2">waiting</span><span class="faint">B vs both</span><span id="seq3">waiting</span></div>
+            <h3>Turn log</h3>
+            <ol class="log" id="wgLog" aria-live="off"></ol>
+          </aside>
+        </div>
+
+        <div class="pane cmpgrid" id="pane-compare" role="tabpanel" aria-labelledby="tab-compare">
+          <div class="cmp">
+            <table aria-label="COA comparison">
+              <thead><tr><th>Criterion</th><th>Weight</th><th>COA A · by land</th><th>COA B · from the sea</th><th>Scored by</th></tr></thead>
+              <tbody id="cmpBody"></tbody>
+              <tfoot><tr><td>Weighted total</td><td></td><td><span class="tot" id="totA">0</span></td><td><span class="tot" id="totB">0</span></td><td class="faint">Criteria approved by Col A. Demo, MA brief 0840Z</td></tr></tfoot>
+            </table>
+          </div>
+          <div class="cmpside">
+            <div class="rec" id="rec" hidden><h4>Staff recommendation · drafted by agents</h4><p id="recText"></p></div>
+            <div class="dis" id="dis" hidden><h4>Dissent · red-team, unedited</h4><p id="disText"></p></div>
+            <div class="dis" id="cmpWait"><h4>Who decides</h4><p>The commander. The staff and its agents only recommend. Nothing after this step starts until a named person signs.</p></div>
+          </div>
+        </div>
+
+        <div class="pane ordgrid" id="pane-orders" role="tabpanel" aria-labelledby="tab-orders">
+          <div class="orders" id="orders"><p class="faint">Orders production starts after the commander's COA decision.</p></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="matrix collapsed" id="matrix" aria-labelledby="mxTitle">
+      <div class="mx-h"><b id="mxTitle">Synchronization matrix</b><span class="muted" id="mxSub">COA A · fills as the wargame runs</span>
+        <span class="r"><span class="chip">H-hour = D+3 0600Z</span><span class="chip ai" id="mxCount">0 entries</span><button class="btn" id="btnMx" type="button" aria-expanded="false" aria-controls="mx">Show</button></span></div>
+      <div class="mx" id="mx"></div>
+    </section>
+
+    <aside class="feed" aria-label="Decisions and products">
+      <section class="decide" aria-labelledby="decTitle">
+        <div class="decide-h"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2a2.5 2.5 0 1 0 0 5a2.5 2.5 0 0 0 0-5zM3 14c0-3 2.2-5 5-5s5 2 5 5"/></svg><span id="decTitle">Human decisions</span><span class="n" id="decCount">0</span></div>
+        <ul class="decide-list" id="decList"><li class="empty">Nothing waiting for a person right now.</li></ul>
+      </section>
+      <section class="ledger" aria-labelledby="ledTitle">
+        <div class="ledger-h"><span id="ledTitle">Products and hand-offs</span><span class="c" id="ledCount">0</span></div>
+        <ol id="ledger" aria-live="off"></ol>
+      </section>
+    </aside>
+  </div>
+
+  <footer class="status">
+    <button type="button" id="btnLabel"><span class="chip cls">UNCLASSIFIED</span>Label · clearance self-declared</button>
+    <button type="button" id="btnTrust"><span class="tseal" aria-hidden="true">✓</span>Verified private model · 18 of 18 agents</button>
+    <span>Gates enforced by the extension</span>
+    <span>Every version and hand-off recorded</span>
+    <div class="ctl r" role="group" aria-label="View">
+      <button class="btn" id="btnCalm" type="button" aria-pressed="false" aria-keyshortcuts="C" title="Calm: nothing moves; every change still shows in words (C)">Calm</button>
+      <button class="btn" id="btnTheme" type="button" aria-keyshortcuts="T" title="Theme: Night, Day, High contrast (T)">Night</button>
+      <button class="btn" id="btnSound" type="button" aria-pressed="false" title="Sound is off by default">Sound off</button>
+      <button class="btn" id="btnHelp" type="button" aria-keyshortcuts="?" title="Keyboard shortcuts (?)">Keys ?</button>
+    </div>
+  </footer>
+  <div class="cls" role="note">UNCLASSIFIED // EXERCISE // FICTIONAL DATA</div>
+</div>
+
+<svg class="fx" id="fx" aria-hidden="true"></svg>
+<div id="announcer" class="vh" aria-live="polite"></div>
+<div id="alerter" class="vh" aria-live="assertive"></div>
+
+<script>
+(function () {
+'use strict';
+const SVGNS = 'http://www.w3.org/2000/svg';
+const $ = (sel, root) => (root || document).querySelector(sel);
+const $$ = (sel, root) => Array.from((root || document).querySelectorAll(sel));
+
+/* ---------- Small builders: every text goes in with textContent ---------- */
+function el(tag, cls, text, parent) { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; if (parent) parent.appendChild(n); return n; }
+function sv(tag, attrs, parent) { const n = document.createElementNS(SVGNS, tag); if (attrs) for (const k in attrs) n.setAttribute(k, attrs[k]); if (parent) parent.appendChild(n); return n; }
+function stx(attrs, text, parent) { const n = sv('text', attrs, parent); n.textContent = text; return n; }
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+
+/* ---------- Preferences ---------- */
+const prefs = (() => { try { return JSON.parse(localStorage.getItem('staffroom.prefs') || '{}'); } catch (e) { return {}; } })();
+function savePrefs() { try { localStorage.setItem('staffroom.prefs', JSON.stringify(prefs)); } catch (e) { /* private mode */ } }
+const reduceMQ = window.matchMedia('(prefers-reduced-motion: reduce)');
+
+/* ---------- Motion tokens (ms). The demo speed shortens them. ---------- */
+const D = { quick: 200, move: 450, handoff: 900, draw: 1100, ceremony: 1600 };
+const EASE = { std: 'cubic-bezier(.2,0,0,1)', exit: 'cubic-bezier(.3,0,1,1)', travel: 'cubic-bezier(.45,0,.2,1)', settle: 'cubic-bezier(.34,1.4,.64,1)' };
+
+const S = { t: 0, playing: false, speed: 1, hold: null, fired: 0, follow: true, calm: false, instant: false, profile: 'us-joint', theme: 'night', sound: false, stopped: false, ended: false, rev: 1, decision: null };
+const motionOK = () => !S.calm && !S.instant && !reduceMQ.matches;
+const dur = (ms) => Math.round(ms / Math.max(1, S.speed * 0.75));
+function anim(node, frames, opts) { if (!motionOK() || !node || !node.animate) return null; return node.animate(frames, Object.assign({ easing: EASE.std }, opts, { duration: dur(opts.duration || D.move) })); }
+
+/* ---------- Doctrine profiles (from research notes 02, 03, 05) ---------- */
+const PROFILES = {
+  'us-joint': { name: 'US Joint (JPP, JP 5-0, 2020)', j2: 'JIPOE', tests: ['Adequate', 'Feasible', 'Acceptable', 'Distinguishable', 'Complete'], feas: 1, segs: [
+    { n: 1, label: 'Planning initiation', w: [0] }, { n: 2, label: 'Mission analysis', w: [1] }, { n: 3, label: 'COA development', w: [2] },
+    { n: 4, label: 'COA analysis and wargaming', w: [3] }, { n: 5, label: 'COA comparison', w: [4] }, { n: 6, label: 'COA approval', w: [5], human: true },
+    { n: 7, label: 'Plan or order development', w: [6] }],
+    annex: { base: 'Base plan', intel: 'Annex B Intelligence', ops: 'Annex C Operations', log: 'Annex D Logistics', assess: 'Assessment annex (letter to confirm)', fires: 'Fires appendix to Annex C (confirm)' } },
+  'us-army': { name: 'US Army (MDMP, FM 5-0, 2024)', j2: 'IPB', tests: ['Feasible', 'Acceptable', 'Suitable', 'Distinguishable', 'Complete'], feas: 0, segs: [
+    { n: 1, label: 'Receipt of mission', w: [0] }, { n: 2, label: 'Mission analysis', w: [1] }, { n: 3, label: 'COA development', w: [2] },
+    { n: 4, label: 'COA analysis (war game)', w: [3] }, { n: 5, label: 'COA comparison', w: [4] }, { n: 6, label: 'COA approval', w: [5], human: true },
+    { n: 7, label: 'Orders production, dissemination and transition', w: [6] }],
+    annex: { base: 'OPORD base', intel: 'Annex B Intelligence', ops: 'Annex C Operations', log: 'Annex F Sustainment', assess: 'Annex M Assessment', fires: 'Annex D Fires' } },
+  'nato-ca': { name: 'NATO/Canadian (AJP-5 Ed B, operational)', j2: 'JIPB', tests: ['Feasibility', 'Acceptability', 'Completeness and compliance', 'Exclusivity', 'Suitability'], feas: 0, segs: [
+    { n: 1, label: 'Planning initiation', w: [0] }, { n: 2, label: 'Mission analysis', w: [1] }, { n: 3, label: 'COA development', w: [2] },
+    { n: 4, label: 'COA analysis', w: [3] }, { n: 5, label: 'COA validation and comparison', w: [4] }, { n: 6, label: "Commander's COA decision", w: [5], human: true },
+    { n: 7, label: 'Plan development', w: [6] }],
+    annex: { base: 'OPLAN base', intel: 'Annex D Intelligence (provisional)', ops: 'Annex A Conduct of Operations (provisional)', log: 'Annex R Logistics (provisional)', assess: 'Assessment annex (confirm in COPD)', fires: 'Fires annex (confirm in COPD)' } }
+};
+const GATES = { ma: { work: 1, name: 'Mission analysis brief' }, coa: { work: 5, name: "Commander's COA decision" }, plan: { work: 6, name: 'Plan approval' } };
+const gateState = { ma: { state: 'approved', by: 'Col A. Demo', at: '0840Z' }, coa: { state: 'locked' }, plan: { state: 'locked' } };
+const work = [1, 1, 0, 0, 0, 0, 0, 0];
+let current = 2;
+const STEP_SECS = { 0: ['J5'], 1: ['J2', 'J5', 'J3', 'J4'], 2: ['J2', 'J5', 'J3', 'J4'], 3: ['J5', 'J2', 'J3', 'J4'], 4: ['J5', 'J3', 'J4', 'J2'], 5: ['CDR'], 6: ['J5', 'J2', 'J3', 'J4'], 7: ['J5', 'J3'] };
+
+/* ---------- People (fictional role-players) and agents ---------- */
+const PEOPLE = { cdr: 'Col A. Demo', j2: 'Lt Col K. Sample', cos: 'Lt Col R. Example' };
+const SECTIONS = [
+  { id: 'COS', name: 'Chief of staff', person: PEOPLE.cos, glyph: 'M8 2v3M8 11v3M2 8h3M11 8h3M8 5.5a2.5 2.5 0 1 0 0 5a2.5 2.5 0 0 0 0-5z' },
+  { id: 'J2', slug: 'j2-intelligence', name: 'J2 Intelligence', person: PEOPLE.j2, glyph: 'M1.5 8s2.5-4.5 6.5-4.5S14.5 8 14.5 8s-2.5 4.5-6.5 4.5S1.5 8 1.5 8zM8 6a2 2 0 1 0 0 4a2 2 0 0 0 0-4z' },
+  { id: 'J5', slug: 'j5-plans', name: 'J5 Plans', person: 'J5 director', glyph: 'M8 1.5l1.8 4.7L14.5 8l-4.7 1.8L8 14.5l-1.8-4.7L1.5 8l4.7-1.8z' },
+  { id: 'J3', slug: 'j3-operations', name: 'J3 Operations', person: 'J3 director', glyph: 'M2.5 12l5.5-4.5 5.5 4.5M2.5 8l5.5-4.5 5.5 4.5' },
+  { id: 'J4', slug: 'j4-logistics', name: 'J4 Logistics', person: 'J4 director', glyph: 'M2 5l6-3 6 3v6l-6 3-6-3zM2 5l6 3 6-3M8 8v6' }
+];
+const AGENTS = [
+  { id: 'chief-of-staff', ab: 'CS', tag: 'lead', sec: 'COS', tier: 'deep', role: 'Run lead: sets areas, integrates, escalates decisions' },
+  { id: 'red-team', ab: 'RT', tag: 'red team', sec: 'COS', tier: 'deep', role: 'Independent challenge of assumptions; reports to the COS' },
+  { id: 'j2-chief', ab: 'JC', tag: 'chief', sec: 'J2', tier: 'deep', role: 'Directs intelligence work; assembles the estimate and annex' },
+  { id: 'threat-analyst', ab: 'TA', tag: 'threat', sec: 'J2', tier: 'deep', role: 'Enemy capabilities and COAs (MLCOA, MDCOA), event template' },
+  { id: 'collection-manager', ab: 'CM', tag: 'collect', sec: 'J2', tier: 'standard', role: 'Collection plan; recommends, never tasks' },
+  { id: 'red-cell', ab: 'RC', tag: 'red cell', sec: 'J2', tier: 'deep', role: 'Plays the enemy commander in the wargame' },
+  { id: 'tradecraft-reviewer', ab: 'TR', tag: 'review', sec: 'J2', tier: 'deep', role: 'Blocking ICD 203 tradecraft gate' },
+  { id: 'release-guard', ab: 'RG', tag: 'guard', sec: 'J2', tier: 'standard', role: 'Blocking release gate: markings, geofence, compilation; a verdict, never a release' },
+  { id: 'lead-planner', ab: 'LP', tag: 'lead', sec: 'J5', tier: 'deep', role: 'Chief of plans; wargame controller' },
+  { id: 'coa-cell-a', ab: 'CA', tag: 'COA A', sec: 'J5', tier: 'standard', role: 'Develops COA A to its assigned theme' },
+  { id: 'coa-cell-b', ab: 'CB', tag: 'COA B', sec: 'J5', tier: 'standard', role: 'Develops COA B to its assigned theme' },
+  { id: 'plans-writer', ab: 'PW', tag: 'writer', sec: 'J5', tier: 'standard', role: 'Recorder, decision brief, base plan' },
+  { id: 'future-ops-planner', ab: 'FO', tag: 'fut ops', sec: 'J3', tier: 'deep', role: 'Force availability, branches, sync matrix, DST and DSM' },
+  { id: 'fires-effects-coordinator', ab: 'FE', tag: 'fires', sec: 'J3', tier: 'deep', role: 'Concept of fires per COA; never nominates real targets' },
+  { id: 'assessment-analyst', ab: 'AA', tag: 'assess', sec: 'J3', tier: 'deep', role: 'MOE and MOP framework' },
+  { id: 'log-plans-officer', ab: 'LO', tag: 'plans', sec: 'J4', tier: 'deep', role: 'Logistics estimate, supportability per COA, logistics DPs' },
+  { id: 'supply-planner', ab: 'SP', tag: 'supply', sec: 'J4', tier: 'standard', role: 'Days of supply forecast from user-entered factors' },
+  { id: 'mobility-planner', ab: 'MP', tag: 'mobility', sec: 'J4', tier: 'deep', role: 'Deployment, distribution and movement feasibility' }
+];
+const A = {}; AGENTS.forEach((a) => { A[a.id] = Object.assign(a, { state: 'idle', task: 'Not tasked in this step', node: null }); });
+
+/* ---------- Map data (fictional geography, viewBox 1000 x 560) ---------- */
+const UNITS = {
+  H1: { aff: 'H', icon: 'mech', ech: 'X', hq: true, des: '41 CSTL BDE', x: 664, y: 162, kind: 'Mechanized infantry brigade HQ', src: 'B2' },
+  H2: { aff: 'H', icon: 'mech', ech: 'II', des: '1-41', x: 556, y: 238, kind: 'Mechanized infantry battalion', src: 'B2' },
+  H3: { aff: 'H', icon: 'mech', ech: 'II', des: '2-41', x: 706, y: 216, kind: 'Mechanized infantry battalion', src: 'B3' },
+  H4: { aff: 'H', icon: 'arm', ech: 'I', des: '3-41 ARMD', x: 862, y: 252, kind: 'Armour company', src: 'C3' },
+  H5: { aff: 'H', icon: 'arty', ech: 'II', des: '41 ARTY', x: 748, y: 164, kind: 'Artillery battalion', src: 'B2' },
+  U1: { aff: 'U', icon: 'none', ech: '', des: 'U-1', x: 386, y: 64, kind: 'Unidentified sea surface contact', src: 'C3', sea: true },
+  N1: { aff: 'N', icon: 'none', ech: '', des: 'MV ORLA', x: 870, y: 70, kind: 'Neutral merchant vessel', src: 'A1', sea: true }
+};
+const FRIENDLY = {
+  F0: { aff: 'F', icon: 'mech', ech: 'X', hq: true, des: 'TF ANVIL', x: 436, y: 504, kind: 'Mechanized infantry brigade HQ' },
+  F1: { aff: 'F', icon: 'mech', ech: 'II', des: '1 MECH', x: 478, y: 452, kind: 'Mechanized infantry battalion' },
+  F2: { aff: 'F', icon: 'inf', ech: 'II', des: '2 INF', x: 566, y: 474, kind: 'Infantry battalion' },
+  F3: { aff: 'F', icon: 'arm', ech: 'I', des: 'A SQN', x: 404, y: 446, kind: 'Armour squadron (reserve)' },
+  F4: { aff: 'F', icon: 'recce', ech: 'I', des: 'RECCE', x: 516, y: 396, kind: 'Reconnaissance squadron' },
+  F5: { aff: 'F', icon: 'arty', ech: 'III', des: 'FD REGT', x: 346, y: 486, kind: 'Field artillery regiment' },
+  F6: { aff: 'F', icon: 'inf', ech: 'II', des: '3 AMPH', x: 430, y: 66, kind: 'Amphibious infantry battalion', sea: true }
+};
+const AXES = {
+  MLCOA: { pts: [[556, 226], [572, 200], [596, 180], [622, 166]], side: 'h', w: 5, label: 'MLCOA', lx: 500, ly: 196 },
+  MDCOA: { pts: [[846, 266], [800, 290], [740, 304], [660, 318], [566, 326]], side: 'h', w: 8, label: 'MDCOA' },
+  A_MAIN: { pts: [[478, 436], [500, 382], [520, 332], [548, 270], [584, 216], [616, 178]], side: 'f', w: 14, main: true, label: 'MAIN' },
+  A_SUP: { pts: [[574, 458], [640, 424], [716, 384], [770, 336]], side: 'f', w: 10, label: 'SPT' },
+  B_MAIN: { pts: [[448, 74], [520, 94], [586, 122]], side: 'f', w: 14, main: true, label: 'MAIN' },
+  B_SUP: { pts: [[478, 436], [500, 382], [520, 330]], side: 'f', w: 10, label: 'SPT' }
+};
+const CONTROL = [
+  { kind: 'pl', d: 'M200,214 C320,250 430,296 520,296 C640,296 760,262 1000,236', label: 'PL SLATE', lx: 214, ly: 208 },
+  { kind: 'pl', d: 'M300,172 C420,178 520,204 600,198 C700,192 800,172 990,174', label: 'PL COPPER', lx: 310, ly: 166 },
+  { kind: 'obj', d: 'M588,128 L662,122 L694,150 L680,190 L612,194 L582,162 Z', label: 'OBJ FALCON', lx: 600, ly: 210 },
+  { kind: 'obj', d: 'M758,280 L812,268 L840,300 L818,336 L768,332 Z', label: 'OBJ KITE', lx: 822, ly: 350 },
+  { kind: 'obj', d: 'M380,468 L470,460 L498,500 L472,534 L398,532 L372,500 Z', label: 'AA OAK', lx: 380, ly: 548 }
+];
+const NAIS = [
+  { id: 'NAI 1', cx: 520, cy: 322, rx: 34, ry: 20 }, { id: 'NAI 2', cx: 744, cy: 300, rx: 38, ry: 22 }, { id: 'NAI 3', cx: 606, cy: 118, rx: 40, ry: 16 }
+];
+
+/* ---------- Terrain (built once, cloned into every map) ---------- */
+function terrain() {
+  const g = sv('g', { class: 'terrain' });
+  const defs = sv('defs', null, g);
+  const lg = sv('linearGradient', { id: 'seaGrad', x1: 0, y1: 0, x2: 0, y2: 1 }, defs);
+  sv('stop', { offset: '0', 'stop-color': 'var(--map-sea2)' }, lg); sv('stop', { offset: '1', 'stop-color': 'var(--map-sea)' }, lg);
+  sv('rect', { x: 0, y: 0, width: 1000, height: 560, fill: 'url(#seaGrad)' }, g);
+  for (let i = 0; i < 9; i++) sv('path', { d: `M0,${18 + i * 12} C200,${10 + i * 12} 400,${26 + i * 12} 1000,${14 + i * 12}`, class: 'contour', opacity: 0.25 }, g);
+  sv('path', { class: 'land', d: 'M0,560 L0,318 C46,300 92,268 136,246 C186,221 214,186 268,166 C308,152 338,162 370,150 C410,135 430,108 476,100 C520,92 548,116 584,112 C606,110 616,138 646,138 C676,138 688,106 730,100 C786,92 838,118 880,138 C922,158 962,160 1000,166 L1000,560 Z' }, g);
+  sv('ellipse', { class: 'land', cx: 190, cy: 92, rx: 46, ry: 17 }, g);
+  [[850, 238, 120, 34], [850, 238, 80, 22], [850, 238, 42, 11], [736, 362, 110, 30], [736, 362, 70, 19], [736, 362, 34, 9]].forEach(([cx, cy, rx, ry], i) => {
+    sv('ellipse', { class: i % 3 === 2 ? 'ridge' : 'contour', cx, cy, rx, ry, transform: `rotate(-38 ${cx} ${cy})` }, g);
+  });
+  for (let x = 100; x < 1000; x += 100) sv('line', { class: 'gridl', x1: x, y1: 0, x2: x, y2: 560 }, g);
+  for (let y = 100; y < 560; y += 100) sv('line', { class: 'gridl', x1: 0, y1: y, x2: 1000, y2: y }, g);
+  for (let x = 100, k = 41; x < 1000; x += 100, k++) stx({ class: 'glab', x: x + 3, y: 552 }, 'KQ' + k, g);
+  sv('path', { class: 'river', d: 'M1000,330 C930,322 880,336 830,330 C770,322 720,345 660,340 C600,335 560,322 520,322 C470,322 430,300 390,278 C340,250 300,215 266,170' }, g);
+  sv('path', { class: 'road', d: 'M440,560 C450,520 462,470 480,430 C496,392 508,350 520,322 C534,290 548,262 560,236 C580,196 604,168 628,150' }, g);
+  sv('path', { class: 'road minor', d: 'M200,474 C280,484 360,494 440,502' }, g);
+  sv('path', { class: 'road minor', d: 'M628,150 C680,168 724,188 772,200 C820,210 880,214 1000,206' }, g);
+  [[614, 140, 30, 16], [640, 152, 22, 14], [598, 156, 16, 10], [512, 314, 14, 10], [194, 466, 22, 14], [764, 194, 16, 10]].forEach(([x, y, w, h]) => sv('rect', { class: 'town', x, y, width: w, height: h, rx: 2 }, g));
+  stx({ class: 'plab', x: 196, y: 40 }, 'VARN STRAIT', g);
+  stx({ class: 'plab', x: 720, y: 36 }, 'AUREL SEA', g);
+  stx({ class: 'plab', x: 210, y: 400 }, 'KESTREL PENINSULA', g);
+  stx({ class: 'tlab', x: 606, y: 132 }, 'Port Calder', g);
+  stx({ class: 'tlab', x: 482, y: 344 }, 'Ashby Ford', g);
+  stx({ class: 'tlab', x: 178, y: 494 }, 'Saltmere', g);
+  stx({ class: 'tlab', x: 780, y: 190 }, 'Kell', g);
+  stx({ class: 'tlab', x: 868, y: 196, transform: 'rotate(-38 868 196)' }, 'Harrow Ridge', g);
+  stx({ class: 'tlab', x: 690, y: 362 }, 'R. Brenn', g);
+  stx({ class: 'tlab', x: 162, y: 82 }, 'Gull I.', g);
+  stx({ class: 'tlab', x: 430, y: 548 }, 'ROUTE IRON', g);
+  return g;
+}
+
+/* ---------- MIL-STD-2525 / APP-6 style unit symbols ---------- */
+function symbol(spec, opts) {
+  opts = opts || {};
+  const g = sv('g', { class: `sym aff-${spec.aff}${opts.planned ? ' planned' : ''}`, tabindex: opts.focusable ? 0 : -1, role: opts.focusable ? 'img' : null });
+  if (!opts.focusable) g.removeAttribute('role');
+  if (opts.focusable) g.setAttribute('aria-label', `${affWord(spec.aff)} ${spec.kind}, ${spec.des}`);
+  g.style.transform = `translate(${spec.x}px, ${spec.y}px)`;
+  const b = sv('g', { class: 'sym-body' }, g);
+  let bx, by, top;
+  if (spec.aff === 'F') { sv('rect', { class: 'fr', x: -18, y: -12, width: 36, height: 24 }, b); bx = 18; by = 12; top = -12; }
+  else if (spec.aff === 'H') { sv('path', { class: 'fr', d: 'M0,-17 L17,0 L0,17 L-17,0 Z' }, b); bx = 8.5; by = 8.5; top = -17; }
+  else if (spec.aff === 'U') { sv('path', { class: 'fr', d: 'M-6,-6 A8.5,8.5 0 1 1 6,-6 A8.5,8.5 0 1 1 6,6 A8.5,8.5 0 1 1 -6,6 A8.5,8.5 0 1 1 -6,-6 Z' }, b); bx = 6; by = 6; top = -15; }
+  else { sv('rect', { class: 'fr', x: -12, y: -12, width: 24, height: 24 }, b); bx = 12; by = 12; top = -12; }
+  const ic = spec.icon;
+  if (ic === 'inf' || ic === 'mech') { sv('path', { class: 'ic', d: `M${-bx},${-by} L${bx},${by} M${-bx},${by} L${bx},${-by}` }, b); }
+  if (ic === 'arm' || ic === 'mech') { const k = spec.aff === 'H' ? 1.05 : 0.62; sv('ellipse', { class: 'ic', cx: 0, cy: 0, rx: bx * k, ry: by * (spec.aff === 'H' ? 0.55 : 0.5) }, b); }
+  if (ic === 'arty') sv('circle', { class: 'ic solid', cx: 0, cy: 0, r: 3.6 }, b);
+  if (ic === 'recce') sv('path', { class: 'ic', d: `M${-bx},${by} L${bx},${-by}` }, b);
+  if (spec.ech) stx({ class: 'ech', x: 0, y: top - 4 }, spec.ech, b);
+  if (spec.hq) { if (spec.aff === 'H') sv('path', { class: 'staff', d: 'M-17,0 L-17,22' }, b); else sv('path', { class: 'staff', d: 'M-18,12 L-18,30' }, b); }
+  const right = spec.aff === 'F' ? 18 : spec.aff === 'H' ? 17 : spec.aff === 'U' ? 15 : 12;
+  stx({ class: 'des', x: right + 5, y: 4 }, spec.des, b);
+  g.dataset.id = opts.id || '';
+  return g;
+}
+function affWord(a) { return { F: 'Friendly', H: 'Hostile', U: 'Unknown', N: 'Neutral' }[a]; }
+
+function smooth(pts) {
+  let d = `M${pts[0][0]},${pts[0][1]}`;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const p0 = pts[i - 1] || pts[i], p1 = pts[i], p2 = pts[i + 1], p3 = pts[i + 2] || p2;
+    const c1 = [p1[0] + (p2[0] - p0[0]) / 6, p1[1] + (p2[1] - p0[1]) / 6], c2 = [p2[0] - (p3[0] - p1[0]) / 6, p2[1] - (p3[1] - p1[1]) / 6];
+    d += ` C${c1[0].toFixed(1)},${c1[1].toFixed(1)} ${c2[0].toFixed(1)},${c2[1].toFixed(1)} ${p2[0]},${p2[1]}`;
+  }
+  return d;
+}
+let maskSeq = 0;
+/** An axis of advance. Friendly: double line, filled head for the main attack, open head for a supporting attack. Enemy: dashed (anticipated). */
+function axis(parent, key, opts) {
+  opts = opts || {};
+  const a = AXES[key];
+  const g = sv('g', { class: `ax ${a.side}${a.main ? ' main' : ' support'}` }, parent);
+  const n = a.pts.length, e = a.pts[n - 1], p = a.pts[n - 2];
+  const len = Math.hypot(e[0] - p[0], e[1] - p[1]) || 1, ux = (e[0] - p[0]) / len, uy = (e[1] - p[1]) / len;
+  const hl = a.w * 1.5, hw = a.w * 1.05;
+  const trimmed = a.pts.slice(0, -1).concat([[e[0] - ux * hl * 0.5, e[1] - uy * hl * 0.5]]);
+  const d = smooth(trimmed);
+  const id = 'axm' + (++maskSeq);
+  const mask = sv('mask', { id, maskUnits: 'userSpaceOnUse', x: 0, y: 0, width: 1000, height: 560 }, g);
+  const mp = sv('path', { d, stroke: '#fff', 'stroke-width': a.w + 40, fill: 'none', pathLength: 1, 'stroke-dasharray': '1 1', 'stroke-linecap': 'round' }, mask);
+  const body = sv('g', { mask: `url(#${id})` }, g);
+  sv('path', { class: 'ax-out', d, 'stroke-width': a.side === 'h' ? a.w * 0.55 : a.w }, body);
+  if (a.side === 'f') sv('path', { class: 'ax-in', d, 'stroke-width': a.w - 5 }, body);
+  const bx = e[0] - ux * hl, by = e[1] - uy * hl;
+  const head = sv('path', { class: 'head', d: `M${e[0] + ux * 2},${e[1] + uy * 2} L${bx - uy * hw},${by + ux * hw} L${bx + uy * hw},${by - ux * hw} Z` }, g);
+  const mid = a.pts[Math.floor(n / 2)];
+  const lab = stx({ class: 'axlab', x: a.lx || mid[0] + 12, y: a.ly || mid[1] - 10 }, opts.label || a.label, g);
+  mp.style.strokeDashoffset = '0';
+  const r = anim(mp, [{ strokeDashoffset: 1 }, { strokeDashoffset: 0 }], { duration: D.draw, easing: EASE.std });
+  if (r) { head.style.opacity = '0'; lab.style.opacity = '0'; r.onfinish = () => { head.style.opacity = '1'; lab.style.opacity = '1'; anim(head, [{ opacity: 0, transform: 'scale(.6)' }, { opacity: 1, transform: 'scale(1)' }], { duration: D.quick }); anim(lab, [{ opacity: 0 }, { opacity: 1 }], { duration: D.quick }); }; }
+  return g;
+}
+function control(parent, c) {
+  const g = sv('g', { class: 'cmg' }, parent);
+  sv('path', { class: `cm ${c.kind}`, d: c.d }, g);
+  stx({ class: 'cmlab', x: c.lx, y: c.ly }, c.label, g);
+  return g;
+}
+function nai(parent, n) {
+  const g = sv('g', { class: 'naig' }, parent);
+  sv('ellipse', { class: 'cm nai', cx: n.cx, cy: n.cy, rx: n.rx, ry: n.ry }, g);
+  stx({ class: 'cmlab', x: n.cx - 16, y: n.cy - n.ry - 4 }, n.id, g);
+  anim(g, [{ opacity: 0 }, { opacity: 1 }], { duration: D.move });
+  return g;
+}
+function star(parent, x, y, label) {
+  const g = sv('g', { class: 'dpg' }, parent);
+  const pts = []; for (let i = 0; i < 10; i++) { const r = i % 2 ? 4.2 : 10, ang = -Math.PI / 2 + i * Math.PI / 5; pts.push([x + r * Math.cos(ang), y + r * Math.sin(ang)]); }
+  sv('path', { class: 'dp', d: 'M' + pts.map((p) => p[0].toFixed(1) + ',' + p[1].toFixed(1)).join(' L') + ' Z' }, g);
+  stx({ class: 'dplab', x: x + 13, y: y + 4 }, label, g);
+  anim(g, [{ opacity: 0, transform: `translate(0px, -12px)` }, { opacity: 1, transform: 'translate(0px, 0px)' }], { duration: D.move, easing: EASE.settle });
+  return g;
+}
+function drop(parent, spec, opts) {
+  const g = symbol(spec, opts);
+  parent.appendChild(g);
+  const body = g.firstChild;
+  anim(body, [{ opacity: 0, transform: 'translate(0px,-16px) scale(1.25)' }, { opacity: 1, transform: 'translate(0px,0px) scale(1)' }], { duration: D.move, easing: EASE.settle });
+  if (motionOK()) {
+    const ring = sv('circle', { class: 'ripple', cx: spec.x, cy: spec.y, r: 14 }, parent);
+    const r = anim(ring, [{ opacity: 0.7, transform: 'scale(.5)' }, { opacity: 0, transform: 'scale(2.4)' }], { duration: 700, easing: EASE.std });
+    ring.style.transformOrigin = `${spec.x}px ${spec.y}px`; ring.style.transformBox = 'view-box';
+    if (r) r.onfinish = () => ring.remove(); else ring.remove();
+  }
+  return g;
+}
+function moveSym(g, spec, x, y, parent) {
+  const from = `translate(${spec.x}px, ${spec.y}px)`, to = `translate(${x}px, ${y}px)`;
+  if (parent) {
+    const tr = sv('path', { class: `trail ${spec.aff === 'H' ? 'h' : 'f'}`, d: `M${spec.x},${spec.y} L${x},${y}` }, parent);
+    parent.insertBefore(tr, parent.firstChild);
+  }
+  spec.x = x; spec.y = y;
+  g.style.transform = to;
+  anim(g, [{ transform: from }, { transform: to }], { duration: 1200, easing: EASE.travel });
+}
+function fires(parent, x, y) {
+  for (let i = 0; i < 3; i++) {
+    const c = sv('circle', { class: 'fires', cx: x, cy: y, r: 10 }, parent);
+    c.style.transformOrigin = `${x}px ${y}px`; c.style.transformBox = 'view-box';
+    const r = anim(c, [{ opacity: 0.9, transform: 'scale(.4)' }, { opacity: 0, transform: 'scale(3)' }], { duration: 900, delay: i * 220, easing: EASE.std });
+    if (r) r.onfinish = () => c.remove(); else { c.setAttribute('r', 18 + i * 8); c.style.opacity = String(0.5 - i * 0.12); }
+  }
+}
+
+/* ---------- Hand-off tracers (Team Live grammar: a dot that carries a short label) ---------- */
+const fx = $('#fx');
+let liveTracers = 0; const tracerQueue = [];
+function centerOf(node) { const r = node.getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; }
+function arrive(node, kind) {
+  if (!node) return;
+  if (motionOK()) { node.classList.remove('arrive'); void node.offsetWidth; node.classList.add('arrive'); setTimeout(() => node.classList.remove('arrive'), 650); }
+  if (kind === 'human') sound('human');
+}
+function tracer(from, to, label, kind) {
+  kind = kind || 'task';
+  if (!from || !to || S.instant) return;
+  const fromName = from.dataset && from.dataset.name ? from.dataset.name : '';
+  const toName = to.dataset && to.dataset.name ? to.dataset.name : '';
+  announce(`Hand-off${fromName ? ' from ' + fromName : ''}${toName ? ' to ' + toName : ''}: ${label}.`);
+  if (!motionOK()) return stillLink(from, to, label, kind);
+  if (liveTracers >= 6) { if (tracerQueue.length < 12) tracerQueue.push([from, to, label, kind]); return; }
+  liveTracers++;
+  const [x1, y1] = centerOf(from), [x2, y2] = centerOf(to);
+  const dx = x2 - x1, dy = y2 - y1, dist = Math.hypot(dx, dy) || 1;
+  const lift = Math.min(160, dist * 0.32);
+  const cx = (x1 + x2) / 2 + (dy / dist) * lift, cy = (y1 + y2) / 2 + (-dx / dist) * lift;
+  const g = sv('g', { class: 'k-' + kind }, fx);
+  const d = `M${x1},${y1} Q${cx},${cy} ${x2},${y2}`;
+  const trail = sv('path', { class: 'trailp', d }, g);
+  const comet = sv('path', { class: 'comet', d }, g);
+  const L = trail.getTotalLength(), T = 46;
+  comet.style.strokeDasharray = `${T} ${L + T}`;
+  const head = sv('g', null, g);
+  sv('circle', { class: 'dotc halo', r: 10 }, head); sv('circle', { class: 'dotc', r: 4.5 }, head);
+  const chip = sv('g', { transform: 'translate(10,-22)' }, head);
+  const bg = sv('rect', { class: 'chipbg', x: 0, y: 0, height: 18, rx: 9 }, chip);
+  const tx = stx({ class: 'chiptx', x: 8, y: 12.5 }, label.length > 34 ? label.slice(0, 33) + '…' : label, chip);
+  bg.setAttribute('width', Math.ceil(tx.getComputedTextLength() + 16));
+  const frames = []; const N = 28;
+  for (let i = 0; i <= N; i++) { const pt = trail.getPointAtLength((L * i) / N); frames.push({ transform: `translate(${pt.x}px, ${pt.y}px)` }); }
+  const ms = dur(clamp(520 + dist * 0.8, 700, 1400));
+  head.style.transform = frames[N].transform;
+  head.animate(frames, { duration: ms, easing: EASE.travel });
+  comet.animate([{ strokeDashoffset: T }, { strokeDashoffset: T - L }], { duration: ms, easing: EASE.travel });
+  trail.animate([{ opacity: 0 }, { opacity: 0.35, offset: 0.2 }, { opacity: 0.35 }], { duration: ms });
+  setTimeout(() => {
+    arrive(to, kind);
+    const f = g.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 260, easing: EASE.exit });
+    f.onfinish = () => { g.remove(); liveTracers--; const next = tracerQueue.shift(); if (next) tracer.apply(null, next); };
+  }, ms);
+}
+function stillLink(from, to, label, kind) {
+  const [x1, y1] = centerOf(from), [x2, y2] = centerOf(to);
+  const g = sv('g', { class: 'k-' + kind }, fx);
+  sv('path', { class: 'still', d: `M${x1},${y1} L${x2},${y2}`, stroke: kind === 'human' ? 'var(--human)' : kind === 'prod' ? 'var(--ok)' : 'var(--ai)' }, g);
+  const chip = sv('g', { transform: `translate(${x2 + 8},${y2 - 26})` }, g);
+  const bg = sv('rect', { class: 'chipbg', x: 0, y: 0, height: 18, rx: 9 }, chip);
+  const tx = stx({ class: 'chiptx', x: 8, y: 12.5 }, label, chip);
+  bg.setAttribute('width', Math.ceil(tx.getComputedTextLength() + 16));
+  setTimeout(() => g.remove(), 1800);
+}
+
+/* ---------- Sound (off by default; short tones only for human moments) ---------- */
+let actx = null;
+function sound(kind) {
+  if (!S.sound || S.instant) return;
+  try {
+    actx = actx || new (window.AudioContext || window.webkitAudioContext)();
+    const notes = kind === 'signed' ? [523, 659, 784] : kind === 'human' ? [660, 880] : [1200];
+    notes.forEach((f, i) => {
+      const o = actx.createOscillator(), g = actx.createGain();
+      o.type = 'sine'; o.frequency.value = f; g.gain.value = 0.0001;
+      o.connect(g); g.connect(actx.destination);
+      const t0 = actx.currentTime + i * 0.11;
+      g.gain.exponentialRampToValueAtTime(0.06, t0 + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.28);
+      o.start(t0); o.stop(t0 + 0.3);
+    });
+  } catch (e) { /* no audio */ }
+}
+
+/* ---------- Announcements (polite, batched) ---------- */
+let annQ = [], annT = null;
+function announce(text, urgent) {
+  if (S.instant) return;
+  if (urgent) { $('#alerter').textContent = ''; setTimeout(() => { $('#alerter').textContent = text; }, 30); return; }
+  annQ.push(text);
+  if (!annT) annT = setTimeout(() => { $('#announcer').textContent = annQ.slice(-3).join(' '); annQ = []; annT = null; }, 1200);
+}
+let toastT = null;
+function toast(text, cls) {
+  let t = $('#toast'); if (!t) { t = el('div', 'toast', null, document.body); t.id = 'toast'; t.setAttribute('role', 'status'); }
+  t.className = 'toast' + (cls ? ' ' + cls : ''); t.textContent = text; t.hidden = false;
+  anim(t, [{ opacity: 0, transform: 'translate(-50%, 8px)' }, { opacity: 1, transform: 'translate(-50%, 0px)' }], { duration: D.quick });
+  clearTimeout(toastT); toastT = setTimeout(() => { t.hidden = true; }, 4200);
+}
+
+/* ---------- Process rail ---------- */
+function renderRail() {
+  const P = PROFILES[S.profile];
+  const rail = $('#rail'); rail.replaceChildren();
+  P.segs.forEach((seg, i) => {
+    const prog = seg.w.reduce((s, w) => s + work[w], 0) / seg.w.length;
+    const isNow = seg.w.includes(current) && prog < 1;
+    const done = prog >= 1;
+    const li = el('li', 'step' + (done ? ' done' : '') + (isNow ? ' now' : '') + (seg.human ? ' human' : ''), null, rail);
+    if (isNow) li.setAttribute('aria-current', 'step');
+    el('span', 'sn', 'STEP ' + seg.n, li);
+    const sl = el('span', 'sl', seg.label, li); sl.title = seg.label;
+    let status = done ? 'Done' : isNow ? (seg.human ? 'Waiting for the commander' : 'Working now') : 'Next';
+    if (seg.human && !done) status = gateState.coa.state === 'waiting' ? 'Waiting for ' + PEOPLE.cdr : 'Human decision';
+    el('span', 'ss', status, li);
+    const bar = el('span', 'bar', null, li); const fill = el('span', 'fill', null, bar); fill.style.transform = `scaleX(${prog.toFixed(3)})`;
+    const secs = el('span', 'secs', null, li);
+    const want = new Set(); seg.w.forEach((w) => (STEP_SECS[w] || []).forEach((s) => want.add(s)));
+    want.forEach((s) => { const c = el('span', 'sec', s, secs); c.dataset.sec = s; if (isNow && sectionBusy(s)) c.classList.add('on'); });
+    li.dataset.name = 'step ' + seg.n;
+    Object.keys(GATES).forEach((gk) => { if (seg.w[seg.w.length - 1] === GATES[gk].work) rail.appendChild(gateNode(gk)); });
+  });
+}
+function gateNode(gk) {
+  const gs = gateState[gk];
+  const li = el('li', 'gate ' + gs.state); li.id = 'gate-' + gk; li.dataset.name = GATES[gk].name + ' gate';
+  const b = el('button', null, null, li); b.type = 'button';
+  const label = GATES[gk].name + ': ' + ({ approved: `approved by ${gs.by} at ${gs.at}`, waiting: `waiting for ${PEOPLE.cdr}`, locked: 'not reached; only a person can open it', returned: `returned to the staff by ${gs.by} at ${gs.at}` }[gs.state]);
+  b.setAttribute('aria-label', label); b.title = label;
+  const s = sv('svg', { viewBox: '0 0 24 24' }, b);
+  sv('path', { class: 'dia', d: 'M12 1.5L22.5 12 12 22.5 1.5 12z' }, s);
+  const ico = gs.state === 'approved' ? 'M7.5 12.2l3 3 6-6.2' : gs.state === 'returned' ? 'M15 9H9.5a2.5 2.5 0 0 0 0 5H14M9.5 6.5L7 9l2.5 2.5' : 'M9 11V9.5a3 3 0 0 1 6 0V11M8.5 11h7v5h-7z';
+  sv('path', { class: 'ico', d: ico }, s);
+  b.addEventListener('click', () => { if (gk === 'coa' && gs.state === 'waiting') openGate(); else toast(label, 'human'); });
+  if (gs.state === 'waiting' && motionOK()) s.animate([{ transform: 'scale(1)' }, { transform: 'scale(1.18)' }, { transform: 'scale(1)' }], { duration: 1600, iterations: Infinity, easing: 'ease-in-out' });
+  return li;
+}
+function sectionBusy(sec) { return AGENTS.some((a) => a.sec === sec && (a.state === 'working' || a.state === 'needs')); }
+function setWork(i, v) { work[i] = clamp(v, 0, 1); renderRail(); }
+function advanceTo(i) { for (let k = 0; k < i; k++) work[k] = 1; current = i; renderRail(); updateBudget(); }
+function updateBudget() {
+  const usedH = 1.08 + S.t / 60 * 1.1;
+  $('#budgetText').textContent = `Planning time used: ${Math.floor(usedH)} h ${String(Math.round((usedH % 1) * 60)).padStart(2, '0')} of 6 h`;
+  $('#budgetUsed').style.transform = `scaleX(${clamp(usedH / 6, 0, 1).toFixed(3)})`;
+}
+
+/* ---------- Squads ---------- */
+function renderSquads() {
+  const root = $('#squads'); root.replaceChildren();
+  SECTIONS.forEach((sec) => {
+    const pod = el('div', 'pod', null, root); pod.id = 'pod-' + sec.id; pod.dataset.name = sec.name;
+    const nest = el('span', 'nest', sec.id === 'COS' ? 'staff run lead' : 'team: ' + sec.slug + ' · idle', pod); nest.id = 'nest-' + sec.id; nest.title = sec.id === 'COS' ? 'The chief-of-staff agent leads the staff run; each section is a nested team run' : 'This section is a nested team run (team of teams)';
+    pod.setAttribute('role', 'group'); pod.setAttribute('aria-label', sec.name + ' section');
+    const h = el('div', 'pod-h', null, pod);
+    const gs = sv('svg', { class: 'glyph', viewBox: '0 0 16 16', 'aria-hidden': 'true' }, h); sv('path', { d: sec.glyph }, gs);
+    el('b', null, sec.id === 'COS' ? 'COS cell' : sec.name, h);
+    const per = el('span', 'person', sec.person, h); per.title = 'Human lead: ' + sec.person; per.setAttribute('aria-label', 'Human lead: ' + sec.person);
+    const toks = el('div', 'toks', null, pod);
+    AGENTS.filter((a) => a.sec === sec.id).forEach((a, i) => {
+      const t = el('button', 'tok s-idle', null, toks); t.type = 'button'; t.id = 'tok-' + a.id; t.dataset.name = a.id;
+      t.tabIndex = i === 0 ? 0 : -1;
+      const s = sv('svg', { viewBox: '0 0 36 36', 'aria-hidden': 'true' }, t);
+      sv('circle', { class: 'disc', cx: 18, cy: 18, r: 15 }, s);
+      sv('circle', { class: 'ring', cx: 18, cy: 18, r: 17, 'stroke-dasharray': '26 81' }, s);
+      stx({ class: 'abbr', x: 18, y: 18.5 }, a.ab, s);
+      const bOk = sv('g', { class: 'badge ok', transform: 'translate(28,28)' }, s); sv('circle', { r: 6, fill: 'var(--ok)' }, bOk); sv('path', { d: 'M-2.6,0.2 L-0.6,2.2 L2.8,-1.8' }, bOk);
+      const bN = sv('g', { class: 'badge needs', transform: 'translate(28,28)' }, s); sv('circle', { r: 6, fill: 'var(--human)' }, bN); sv('path', { d: 'M0,-3 L0,0.8 M0,2.6 L0,2.8' }, bN);
+      const bW = sv('g', { class: 'badge wait', transform: 'translate(28,28)' }, s); sv('circle', { r: 6, fill: 'var(--text3)' }, bW); sv('path', { d: 'M-1.6,-2.4 L-1.6,2.4 M1.6,-2.4 L1.6,2.4' }, bW);
+      const bS = sv('g', { class: 'badge stop', transform: 'translate(28,28)' }, s); sv('circle', { r: 6, fill: 'var(--bad)' }, bS); sv('path', { d: 'M-2.2,-2.2 L2.2,-2.2 L2.2,2.2 L-2.2,2.2 Z' }, bS);
+      el('span', 'tl', a.tag, t);
+      t.addEventListener('click', () => openAgentCard(a, t));
+      a.node = t;
+      updateTokLabel(a);
+    });
+    const co = el('div', 'callout', null, pod); co.id = 'co-' + sec.id; el('span', 'sum', 'standing by', co);
+  });
+  rovingToks();
+  refreshPods();
+}
+function setNest(sec, state) {
+  const n = $('#nest-' + sec); if (!n) return; const s2 = SECTIONS.find((x) => x.id === sec);
+  n.className = 'nest ' + state; n.textContent = 'team: ' + s2.slug + ' · ' + state;
+  n.setAttribute('aria-label', s2.name + ' nested team run: ' + state);
+}
+function updateTokLabel(a) {
+  const words = { idle: 'not tasked', working: 'working', done: 'done', needs: 'needs a person', waiting: 'waiting', paused: 'paused', stopped: 'stopped' };
+  a.node.setAttribute('aria-label', `${a.id}, ${words[a.state]}. ${a.task}. ${a.tier} model, private (TEE).`);
+}
+function setAgent(id, state, task) {
+  const a = A[id]; if (!a) return;
+  if (S.stopped && state !== 'stopped') return;
+  a.state = state; if (task) a.task = task;
+  a.node.className = 'tok s-' + state;
+  updateTokLabel(a);
+  if (task && (state === 'working' || state === 'needs')) setCallout(a.sec, a.id, task, state === 'needs');
+  refreshPods();
+}
+let typeTimers = {};
+function setCallout(sec, who, text, human) {
+  const co = $('#co-' + sec); if (!co) return;
+  co.className = 'callout' + (human ? ' h' : '');
+  co.replaceChildren(); el('span', 'sum', (sectionSummary(sec) || '') + ' · ', co); el('span', 'cw', who + ' › ', co); const t = el('span', null, '', co);
+  clearInterval(typeTimers[sec]);
+  if (!motionOK()) { t.textContent = text; return; }
+  let i = 0; typeTimers[sec] = setInterval(() => { i += 2; t.textContent = text.slice(0, i); if (i >= text.length) clearInterval(typeTimers[sec]); }, 18);
+}
+function sectionSummary(id) {
+  const list = AGENTS.filter((a) => a.sec === id);
+  const w = list.filter((a) => a.state === 'working').length, n = list.filter((a) => a.state === 'needs').length, st = list.filter((a) => a.state === 'stopped').length;
+  return st ? `${st} stopped` : n ? `${n} needs a person` : w ? `${w} working` : list.every((a) => a.state === 'done') ? 'all done' : 'standing by';
+}
+function refreshPods() {
+  SECTIONS.forEach((sec) => {
+    const list = AGENTS.filter((a) => a.sec === sec.id);
+    const w = list.filter((a) => a.state === 'working').length, n = list.filter((a) => a.state === 'needs').length;
+    const sum = $('#co-' + sec.id + ' .sum'); if (sum) sum.textContent = sectionSummary(sec.id) + (sum.nextSibling ? ' · ' : '');
+    const pod = $('#pod-' + sec.id); if (pod) pod.classList.toggle('active', w + n > 0);
+  });
+  $$('.step.now .sec').forEach((c) => c.classList.toggle('on', sectionBusy(c.dataset.sec)));
+}
+function rovingToks() {
+  $$('.toks').forEach((row) => row.addEventListener('keydown', (e) => {
+    const list = $$('.tok', row); const i = list.indexOf(document.activeElement); if (i < 0) return;
+    let j = i; if (e.key === 'ArrowRight') j = (i + 1) % list.length; else if (e.key === 'ArrowLeft') j = (i - 1 + list.length) % list.length; else if (e.key === 'Home') j = 0; else if (e.key === 'End') j = list.length - 1; else return;
+    e.preventDefault(); list[i].tabIndex = -1; list[j].tabIndex = 0; list[j].focus();
+  }));
+}
+
+/* ---------- Ledger of products and hand-offs ---------- */
+const products = [];
+function addProduct(p) {
+  p.id = p.id || 'p' + products.length; p.time = p.time || exClock();
+  products.unshift(p);
+  const ol = $('#ledger');
+  const li = el('li'); const b = el('button', 'prod fresh', null, li); b.type = 'button'; b.id = 'prod-' + p.id; b.dataset.name = 'products';
+  const sec = p.sec || 'J5';
+  el('span', 'pi', sec, b);
+  el('span', 'pn', `${p.name}${p.ver ? ' v' + p.ver : ''}`, b);
+  const m = el('span', 'pm', null, b);
+  const pill = el('span', 'st-pill ' + pillClass(p.status), p.status, m); pill.id = 'pill-' + p.id;
+  el('span', null, `${p.by} · ${p.time}`, m);
+  if (p.tee !== false) { const ts = el('span', 'tseal', '✓', m); ts.title = 'Drafted on a verified private model'; ts.setAttribute('aria-label', 'Verified private model'); }
+  b.setAttribute('aria-label', `${p.name}${p.ver ? ' version ' + p.ver : ''}, ${p.status}, by ${p.by} at ${p.time}. Open details.`);
+  b.addEventListener('click', () => openProductCard(p, b));
+  ol.insertBefore(li, ol.firstChild);
+  anim(li, [{ opacity: 0, transform: 'translateX(-14px)' }, { opacity: 1, transform: 'translateX(0px)' }], { duration: D.move });
+  setTimeout(() => b.classList.remove('fresh'), S.instant ? 0 : 2400);
+  $('#ledCount').textContent = products.length + ' items';
+  return b;
+}
+function pillClass(st) { return { 'guard-checked': 'checked', 'awaiting decision': 'awaiting', recorded: 'approved' }[st] || st; }
+function setProductStatus(id, status, by) {
+  const p = products.find((x) => x.id === id); if (!p) return;
+  p.status = status; if (by) p.approvedBy = by;
+  const pill = $('#pill-' + id); if (pill) { pill.className = 'st-pill ' + pillClass(status); pill.textContent = status; anim(pill, [{ transform: 'scale(1.3)' }, { transform: 'scale(1)' }], { duration: D.move, easing: EASE.settle }); }
+}
+
+/* ---------- Human decisions ---------- */
+const decisions = [];
+function addDecision(d) {
+  decisions.push(d);
+  renderDecisions();
+  sound('human');
+  announce(`Decision needed from ${d.owner}: ${d.title}.`, true);
+}
+function renderDecisions() {
+  const ul = $('#decList'); ul.replaceChildren();
+  const waiting = decisions.filter((d) => d.state === 'waiting');
+  $('#decCount').textContent = String(waiting.length);
+  if (!decisions.length) { el('li', 'empty', 'Nothing waiting for a person right now.', ul); return; }
+  decisions.slice().reverse().forEach((d) => {
+    const li = el('li', 'dec ' + d.state, null, ul); li.id = 'dec-' + d.id; li.dataset.name = 'human decisions';
+    el('div', 'dt', d.title, li);
+    el('div', 'dm', d.state === 'waiting' ? `Owner: ${d.owner} · due ${d.due}` : d.result, li);
+    if (d.state === 'waiting' && d.action) {
+      const b = el('button', 'btn primary pulse', d.actionLabel, li); b.type = 'button'; b.id = 'act-' + d.id;
+      b.addEventListener('click', d.action);
+    }
+  });
+}
+function resolveDecision(id, result) { const d = decisions.find((x) => x.id === id); if (d) { d.state = 'done'; d.result = result; renderDecisions(); } }
+
+/* ---------- Tabs ---------- */
+const TABS = ['threat', 'coa', 'wargame', 'compare', 'orders'];
+function showTab(name, byUser) {
+  TABS.forEach((t) => {
+    const on = t === name; const tab = $('#tab-' + t); tab.setAttribute('aria-selected', on ? 'true' : 'false'); tab.tabIndex = on ? 0 : -1;
+    $('#pane-' + t).classList.toggle('on', on);
+  });
+  if (byUser && S.follow) setFollow(false);
+  $('#btnList').hidden = !(name === 'threat');
+  const pane = $('#pane-' + name);
+  anim(pane, [{ opacity: 0 }, { opacity: 1 }], { duration: D.quick });
+}
+function followTo(name) { if (S.follow) showTab(name, false); else $('#tab-' + name).classList.add('live'); }
+function setFollow(on) { S.follow = on; $('#btnFollow').setAttribute('aria-pressed', on ? 'true' : 'false'); if (on) $$('.tab').forEach((t) => t.classList.remove('live')); }
+
+/* ---------- Matrix ---------- */
+function setMatrix(open) { $('#matrix').classList.toggle('collapsed', !open); $('#btnMx').setAttribute('aria-expanded', open ? 'true' : 'false'); $('#btnMx').textContent = open ? 'Hide' : 'Show'; }
+const MX_ROWS = [['enemy', 'Enemy (J2)', 'J2'], ['coll', 'Collection (J2)', 'J2'], ['man', 'Manoeuvre (J3)', 'J3'], ['fires', 'Fires (J3)', 'J3'], ['sust', 'Sustainment (J4)', 'J4'], ['dp', 'Decision points', 'CDR']];
+const H0 = -6, H1 = 48;
+const pct = (h) => ((h - H0) / (H1 - H0)) * 100;
+let mxN = 0;
+function renderMatrix() {
+  const mx = $('#mx'); mx.replaceChildren(); mxN = 0; $('#mxCount').textContent = '0 entries';
+  el('span', null, '', mx);
+  const ticks = el('div', 'ticks', null, mx);
+  [-6, 0, 6, 12, 18, 24, 30, 36, 48].forEach((h) => { const t = el('span', 'tick', h === 0 ? 'H' : (h > 0 ? 'H+' : 'H') + h, ticks); t.style.left = pct(h) + '%'; });
+  MX_ROWS.forEach(([id, label, sec]) => {
+    const rl = el('div', 'rl', null, mx); el('i', null, sec, rl); el('span', null, label.replace(/ \(.*\)/, ''), rl);
+    const lane = el('div', 'lane', null, mx); lane.id = 'lane-' + id; lane.dataset.name = 'synchronization matrix';
+    lane.setAttribute('role', 'list'); lane.setAttribute('aria-label', label);
+  });
+  const cur = el('div', 'cursor', null, mx); cur.id = 'cursor'; cur.hidden = true; el('span', null, '', cur);
+  cur.style.left = 'calc(132px + (100% - 132px) * ' + (pct(0) / 100).toFixed(4) + ')';
+}
+function mxCell(row, from, to, text, cls) {
+  const lane = $('#lane-' + row); if (!lane) return;
+  const c = el('div', 'mxc ' + cls, text, lane); c.setAttribute('role', 'listitem');
+  c.style.left = pct(from) + '%'; c.style.width = (pct(to) - pct(from)) + '%'; c.title = text;
+  c.setAttribute('aria-label', `${text}, from ${hLabel(from)} to ${hLabel(to)}`);
+  anim(c, [{ opacity: 0, transform: 'scaleX(.2)' }, { opacity: 1, transform: 'scaleX(1)' }], { duration: D.move });
+  c.style.transformOrigin = '0 50%';
+  mxN++; $('#mxCount').textContent = mxN + ' entries';
+}
+function mxDP(h, label) {
+  const lane = $('#lane-dp'); const d = el('div', 'mxd', null, lane); d.style.left = pct(h) + '%'; d.setAttribute('role', 'listitem'); d.setAttribute('aria-label', `${label} at ${hLabel(h)}`);
+  const s = sv('svg', { viewBox: '0 0 17 17', 'aria-hidden': 'true' }, d); sv('path', { class: 'dpd', d: 'M8.5 1L16 8.5 8.5 16 1 8.5z' }, s); el('span', null, label, d);
+  anim(d, [{ opacity: 0, transform: 'translateX(-50%) translateY(-8px)' }, { opacity: 1, transform: 'translateX(-50%) translateY(0px)' }], { duration: D.move, easing: EASE.settle });
+  mxN++; $('#mxCount').textContent = mxN + ' entries';
+}
+function cursorTo(h, label) {
+  const c = $('#cursor'); c.hidden = false; c.style.left = 'calc(132px + (100% - 132px) * ' + (pct(h) / 100).toFixed(4) + ')'; c.firstChild.textContent = label || hLabel(h);
+}
+const hLabel = (h) => (h === 0 ? 'H' : h > 0 ? 'H+' + h : 'H' + h);
+
+/* ---------- Threat map ---------- */
+const TM = {};
+function buildThreatMap() {
+  const svgEl = $('#threatMap');
+  $$('#threatMap > g').forEach((n) => n.remove());
+  svgEl.appendChild(terrain());
+  TM.control = sv('g', { class: 'lyr-control' }, svgEl);
+  TM.nai = sv('g', { class: 'lyr-nai' }, svgEl);
+  TM.mlcoa = sv('g', { class: 'lyr-mlcoa' }, svgEl);
+  TM.mdcoa = sv('g', { class: 'lyr-mdcoa' }, svgEl);
+  TM.threat = sv('g', { class: 'lyr-threat' }, svgEl);
+  TM.friendly = sv('g', { class: 'lyr-friendly' }, svgEl);
+  CONTROL.forEach((c) => control(TM.control, c));
+  drop(TM.friendly, Object.assign({}, FRIENDLY.F0), { focusable: true, planned: false });
+  const layers = $('#layers'); layers.replaceChildren();
+  [['threat', 'Threat picture', 'J2', true], ['mlcoa', 'Enemy MLCOA', 'J2', true], ['mdcoa', 'Enemy MDCOA', 'J2', true], ['nai', 'Named areas of interest', 'J2', true], ['friendly', 'Own forces', 'J3', true], ['control', 'Control measures', 'J3', true]].forEach(([k, label, src, on]) => {
+    const row = el('div', 'sw', null, layers);
+    const b = el('button', null, null, row); b.type = 'button'; b.setAttribute('role', 'switch'); b.setAttribute('aria-checked', on ? 'true' : 'false'); b.setAttribute('aria-label', label);
+    el('span', null, label, row); el('span', 'src', src, row);
+    b.addEventListener('click', () => { const v = b.getAttribute('aria-checked') !== 'true'; b.setAttribute('aria-checked', v ? 'true' : 'false'); TM[k].style.display = v ? '' : 'none'; });
+  });
+  $('#ecoas').replaceChildren(el('p', 'faint', 'The threat analyst is still working. Enemy COAs appear here as they are drafted.'));
+  const tb = $('#cplan'); tb.replaceChildren(); const tr = el('tr', null, null, tb); const td = el('td', 'faint', 'None yet', tr); td.colSpan = 3;
+}
+function ecoaCard(key, title, text, likely, conf, src) {
+  const box = $('#ecoas'); if (box.firstChild && box.firstChild.classList.contains('faint')) box.replaceChildren();
+  const c = el('div', 'ecoa', null, box);
+  const t = el('div', 't', null, c); el('span', 'k', key, t); el('span', null, title, t);
+  el('p', null, text, c);
+  el('p', 'muted', likely, c);
+  el('p', 'muted', conf, c);
+  el('p', 'faint', 'Sources: ' + src, c);
+  anim(c, [{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'translateY(0px)' }], { duration: D.move });
+}
+function cplanRow(pir, naiId, ltiov, isNew) {
+  const tb = $('#cplan'); if (tb.firstChild && tb.firstChild.firstChild && tb.firstChild.firstChild.colSpan === 3) tb.replaceChildren();
+  const tr = el('tr', isNew ? 'new' : null, null, tb); el('td', null, pir, tr); el('td', 'mono', naiId, tr); el('td', 'mono', ltiov, tr);
+  anim(tr, [{ opacity: 0 }, { opacity: 1 }], { duration: D.move });
+}
+function renderListView() {
+  const lv = $('#listview'); lv.replaceChildren();
+  el('h3', null, 'Map as a table', lv);
+  const t = el('table', null, null, lv); const hr = el('tr', null, null, el('thead', null, null, t));
+  ['Affiliation', 'Type', 'Designation', 'Echelon', 'Source grade'].forEach((h) => el('th', null, h, hr));
+  const tb = el('tbody', null, null, t);
+  $$('#threatMap .sym').forEach((g) => {
+    const id = g.dataset.id; const u = UNITS[id] || FRIENDLY[id]; if (!u) return;
+    const r = el('tr', null, null, tb); [affWord(u.aff), u.kind, u.des, u.ech || 'none', u.src || 'own report'].forEach((v) => el('td', null, v, r));
+  });
+  const t2 = el('table', null, null, lv); const hr2 = el('tr', null, null, el('thead', null, null, t2));
+  ['Graphic', 'Meaning'].forEach((h) => el('th', null, h, hr2));
+  const tb2 = el('tbody', null, null, t2);
+  const rows = [];
+  if (TM.mlcoa.childNodes.length) rows.push(['MLCOA arrow', 'Enemy most likely COA: delay forward of PL COPPER, then defend Port Calder']);
+  if (TM.mdcoa.childNodes.length) rows.push(['MDCOA arrow', 'Enemy most dangerous COA: armoured counterattack from Harrow Ridge at Ashby Ford']);
+  NAIS.forEach((n) => { if (TM.nai.childNodes.length) rows.push([n.id, 'Named area of interest']); });
+  CONTROL.forEach((c) => rows.push([c.label, c.kind === 'pl' ? 'Phase line' : 'Objective or area']));
+  rows.forEach((r) => { const tr = el('tr', null, null, tb2); r.forEach((v) => el('td', null, v, tr)); });
+}
+
+/* ---------- COA workspace ---------- */
+const COAS = {
+  A: { title: 'By land, via Ashby Ford', cell: 'coa-cell-a', axes: ['A_MAIN', 'A_SUP'], units: ['F0', 'F1', 'F2', 'F3', 'F4', 'F5'],
+    stmt: 'TF ANVIL attacks north along ROUTE IRON. 1 MECH, the main effort, seizes Ashby Ford and then OBJ FALCON (Port Calder). 2 INF seizes OBJ KITE to fix the enemy armour on Harrow Ridge. A SQN is the reserve, ready to defeat a counterattack at PL SLATE.' },
+  B: { title: 'From the sea, at Port Calder', cell: 'coa-cell-b', axes: ['B_MAIN', 'B_SUP'], units: ['F0', 'F6', 'F1', 'F2', 'F5'],
+    stmt: 'TF ANVIL lands 3 AMPH from the Varn Strait on the beaches west of Port Calder as the main effort to seize OBJ FALCON. 1 MECH fixes the enemy along PL SLATE. Success depends on landing craft (assumption A-4) and a strait clear of mines.' }
+};
+const VRES = { A: [], B: [] };
+const CW = {};
+function buildCoaPane(k) {
+  const c = COAS[k]; const root = $('#coa' + k); root.replaceChildren();
+  const h = el('div', 'coa-h', null, root); el('span', 'k', k, h); el('span', 'n', 'COA ' + k + ': ' + c.title, h); el('span', 'own', c.cell + ' · standard · TEE', h);
+  const body = el('div', 'coa-body', null, root);
+  const mini = el('div', 'mini', null, body); mini.id = 'mini' + k; mini.dataset.name = 'COA ' + k;
+  const s = sv('svg', { viewBox: '300 40 660 500', preserveAspectRatio: 'xMidYMid meet', role: 'img', 'aria-label': 'Sketch of COA ' + k + ': ' + c.title }, mini);
+  s.appendChild(terrain());
+  const ctl = sv('g', null, s); CONTROL.forEach((cc) => control(ctl, cc));
+  const enemy = sv('g', { opacity: 0.55 }, s);
+  ['H1', 'H2', 'H3', 'H4', 'H5'].forEach((u) => enemy.appendChild(symbol(Object.assign({}, UNITS[u]))));
+  CW[k] = { svg: s, ax: sv('g', null, s), units: sv('g', null, s) };
+  const txt = el('div', 'coa-text', null, body);
+  const st = el('p', 'stmt', '', txt); st.id = 'stmt' + k;
+  const ch = el('div', 'checks', null, txt); ch.setAttribute('aria-label', 'Validity tests');
+  ch.id = 'checks' + k; drawChecks(k);
+  const sp = el('div', 'supp', null, txt); sp.id = 'supp' + k;
+}
+function typeInto(node, text, ms) {
+  node.replaceChildren();
+  if (!motionOK()) { node.textContent = text; return; }
+  const span = el('span', null, '', node); const caret = el('span', 'caret', null, node);
+  let i = 0; const step = Math.max(1, Math.round(text.length / ((ms || 4000) / 30)));
+  const iv = setInterval(() => { i += step; span.textContent = text.slice(0, i); if (i >= text.length) { clearInterval(iv); caret.remove(); } }, 30);
+}
+function drawChecks(k) {
+  const ch = $('#checks' + k); if (!ch) return; ch.replaceChildren();
+  const P = PROFILES[S.profile]; const risk = VRES[k].find((r) => r && !r.ok);
+  P.tests.forEach((v, i) => { const x = el('span', 'vc', v, ch); x.id = `vc-${k}-${i}`; if (VRES[k][i]) { const onFeas = risk && i === P.feas; paintCheck(x, v, !onFeas, onFeas ? risk.why : null); } });
+}
+function paintCheck(x, v, ok, why) {
+  x.className = 'vc ' + (ok ? 'ok' : 'risk'); x.textContent = (ok ? '✓ ' : '▲ ') + v; if (why) x.title = why;
+  x.setAttribute('aria-label', `${v}: ${ok ? 'passes' : 'risk'}${why ? '. ' + why : ''}`);
+}
+function validity(k, i, ok, why) {
+  VRES[k][i] = { ok, why };
+  const x = $(`#vc-${k}-${i}`); if (!x) return;
+  paintCheck(x, PROFILES[S.profile].tests[i], ok, why);
+  anim(x, [{ transform: 'scale(1.25)' }, { transform: 'scale(1)' }], { duration: D.move, easing: EASE.settle });
+}
+function suppChip(k, text, cls) { const c = el('span', 'chip ' + cls, text, $('#supp' + k)); anim(c, [{ opacity: 0, transform: 'translateY(4px)' }, { opacity: 1, transform: 'translateY(0px)' }], { duration: D.move }); }
+
+/* ---------- Wargame ---------- */
+const WG = {};
+function buildWargame() {
+  const s = $('#wgMap'); $$('#wgMap > g').forEach((n) => n.remove());
+  s.appendChild(terrain());
+  WG.ctl = sv('g', null, s); CONTROL.forEach((c) => control(WG.ctl, c));
+  NAIS.forEach((n) => nai(WG.ctl, n));
+  WG.trails = sv('g', null, s);
+  WG.ax = sv('g', null, s);
+  WG.fx = sv('g', null, s);
+  WG.units = sv('g', null, s);
+  WG.dp = sv('g', null, s);
+  WG.spec = {}; WG.node = {};
+  ['F0', 'F1', 'F2', 'F3', 'F4', 'F5'].forEach((k) => { WG.spec[k] = Object.assign({}, FRIENDLY[k]); WG.node[k] = symbol(WG.spec[k], { focusable: true }); WG.units.appendChild(WG.node[k]); });
+  ['H1', 'H2', 'H3', 'H4', 'H5'].forEach((k) => { WG.spec[k] = Object.assign({}, UNITS[k]); WG.node[k] = symbol(WG.spec[k], { focusable: true }); WG.units.appendChild(WG.node[k]); });
+  $('#wgLog').replaceChildren();
+}
+function phase(which) {
+  ['a', 'r', 'c'].forEach((p) => { const n = $('#ph-' + p); n.className = 'phase' + (p === which ? ' on ' + (p === 'r' ? 'red' : 'blue') : (['a', 'r', 'c'].indexOf(p) < ['a', 'r', 'c'].indexOf(which) ? ' done' : '')); });
+}
+function wlog(kind, k, text) {
+  const li = el('li', kind, null, $('#wgLog')); el('span', 'lk', k, li); el('span', null, text, li);
+  anim(li, [{ opacity: 0, transform: 'translateX(8px)' }, { opacity: 1, transform: 'translateX(0px)' }], { duration: D.move });
+  const side = li.closest('.side'); if (side) side.scrollTop = side.scrollHeight;
+  announce(k + ': ' + text);
+}
+
+/* ---------- Compare ---------- */
+const CRIT = [['Mission accomplishment', 3, 4, 3, 'J5'], ['Risk to force', 2, 3, 2, 'J3'], ['Sustainability', 2, 4, 2, 'J4'], ['Tempo', 1, 3, 4, 'J3'], ['Flexibility', 1, 3, 4, 'J5'], ['Intelligence risk', 1, 3, 2, 'J2']];
+function buildCompare() {
+  const tb = $('#cmpBody'); tb.replaceChildren();
+  CRIT.forEach(([name, w, a, b, by], i) => {
+    const tr = el('tr', null, null, tb); el('td', null, name, tr); el('td', 'w', '×' + w, tr);
+    [a, b].forEach((v, j) => { const td = el('td', null, null, tr); const sb = el('div', 'sbar', null, td); const track = el('div', 'track', null, sb); const val = el('div', 'val', null, track); val.id = `bar-${i}-${j}`; val.dataset.v = v; el('span', 'num', '·', sb).id = `num-${i}-${j}`; });
+    el('td', 'mono faint', by, tr);
+  });
+  $('#totA').textContent = '0'; $('#totB').textContent = '0';
+  $('#rec').hidden = true; $('#dis').hidden = true;
+}
+function scoreRow(i) {
+  [0, 1].forEach((j) => { const v = CRIT[i][2 + j]; const bar = $(`#bar-${i}-${j}`); bar.style.transform = `scaleX(${v / 5})`; if (j === 1) bar.style.background = 'color-mix(in srgb, var(--g-friend) 55%, var(--text3))'; $(`#num-${i}-${j}`).textContent = v; });
+  const tA = CRIT.slice(0, i + 1).reduce((s, c) => s + c[1] * c[2], 0), tB = CRIT.slice(0, i + 1).reduce((s, c) => s + c[1] * c[3], 0);
+  countTo($('#totA'), tA); countTo($('#totB'), tB);
+}
+function countTo(node, v) {
+  const from = parseInt(node.textContent, 10) || 0;
+  if (!motionOK()) { node.textContent = v; return; }
+  const t0 = performance.now(), ms = 450;
+  const f = (now) => { const k = clamp((now - t0) / ms, 0, 1); node.textContent = Math.round(from + (v - from) * (1 - Math.pow(1 - k, 3))); if (k < 1) requestAnimationFrame(f); };
+  requestAnimationFrame(f);
+}
+
+/* ---------- Orders ---------- */
+function buildOrders() {
+  const P = PROFILES[S.profile];
+  const root = $('#orders'); root.replaceChildren();
+  const rows = [['base', P.annex.base, 'plans-writer', 'J5'], ['intel', P.annex.intel, 'j2-chief', 'J2'], ['ops', P.annex.ops, 'future-ops-planner', 'J3'], ['fires', P.annex.fires, 'fires-effects-coordinator', 'J3'], ['log', P.annex.log, 'log-plans-officer', 'J4'], ['assess', P.annex.assess, 'assessment-analyst', 'J3']];
+  rows.forEach(([id, name, who, sec]) => {
+    const r = el('div', 'orow', null, root); r.id = 'or-' + id;
+    el('span', 'on', name, r); el('span', 'ow', who + ' · ' + sec, r);
+    const pb = el('div', 'pb', null, r); el('div', 'pf', null, pb).id = 'pf-' + id; pb.setAttribute('role', 'progressbar'); pb.setAttribute('aria-label', name + ' progress'); pb.setAttribute('aria-valuemin', '0'); pb.setAttribute('aria-valuemax', '100'); pb.setAttribute('aria-valuenow', '0');
+    el('span', 'st', 'queued', r).id = 'os-' + id;
+  });
+  const chk = el('div', 'orow check', null, root); chk.id = 'or-check';
+  el('span', 'on', 'Synchronization check', chk); el('span', 'ow', 'chief-of-staff · COS', chk); const pb = el('div', 'pb', null, chk); el('div', 'pf', null, pb).id = 'pf-check'; el('span', 'st', 'after all annexes', chk).id = 'os-check';
+  const gate = el('div', 'orow gaterow', null, root); gate.id = 'or-gate';
+  el('span', 'on', 'Plan approval', gate); el('span', 'ow', PEOPLE.cdr + ' (person)', gate); el('span', 'faint', 'Agents cannot mark an order as issued. The plan waits for a signature.', gate); el('span', 'st', 'locked', gate).id = 'os-gate';
+}
+function orderProgress(id, v, status) {
+  const f = $('#pf-' + id); if (!f) return;
+  f.style.transform = `scaleX(${v})`;
+  anim(f, [{ transform: `scaleX(${Math.max(0, v - 0.35)})` }, { transform: `scaleX(${v})` }], { duration: 900 });
+  const pb = f.parentNode; if (pb.getAttribute('role')) pb.setAttribute('aria-valuenow', String(Math.round(v * 100)));
+  if (status) $('#os-' + id).textContent = status;
+  if (v >= 1) $('#or-' + id).classList.add('done');
+}
+
+/* ---------- Popovers: agent card and product card ---------- */
+let popAnchor = null;
+function closePop() { const p = $('#pop'); if (p) { p.remove(); if (popAnchor) popAnchor.focus(); popAnchor = null; } }
+function openPop(anchor, build) {
+  closePop(); popAnchor = anchor;
+  const p = el('div', 'pop', null, document.body); p.id = 'pop'; p.setAttribute('role', 'dialog'); p.setAttribute('aria-modal', 'false');
+  const x = el('button', 'btn x', '✕', p); x.type = 'button'; x.setAttribute('aria-label', 'Close'); x.addEventListener('click', closePop);
+  build(p);
+  const r = anchor.getBoundingClientRect();
+  const left = clamp(r.left, 8, window.innerWidth - 340), top = r.bottom + 8 + 330 > window.innerHeight ? Math.max(8, r.top - 8 - p.offsetHeight) : r.bottom + 8;
+  p.style.left = left + 'px'; p.style.top = top + 'px';
+  p.setAttribute('aria-labelledby', 'popTitle');
+  anim(p, [{ opacity: 0, transform: 'translateY(-4px)' }, { opacity: 1, transform: 'translateY(0px)' }], { duration: D.quick });
+  x.focus();
+}
+function dl(p, rows) { const d = el('dl', null, null, p); rows.forEach(([k, v]) => { el('dt', null, k, d); el('dd', null, v, d); }); }
+function openAgentCard(a, anchor) {
+  openPop(anchor, (p) => {
+    el('h3', null, a.id, p).id = 'popTitle';
+    el('div', 'sub', SECTIONS.find((s) => s.id === a.sec).name + ' · agent · ' + a.role, p);
+    dl(p, [['State', { idle: 'Not tasked in this step', working: 'Working', done: 'Done', needs: 'Needs a person', waiting: 'Waiting', paused: 'Paused', stopped: 'Stopped by a person' }[a.state]], ['Current task', a.task], ['Reports to', a.sec === 'COS' ? (a.id === 'red-team' ? 'COS (person), independent of the planners' : 'COS (person)') : (a.tag === 'lead' || a.tag === 'chief' ? 'chief-of-staff, then the ' + a.sec + ' director (person)' : a.sec.toLowerCase() + ' lead')], ['Model', a.tier + ' tier · private'], ['Runs in', 'NEAR AI Cloud TEE · ✓ Verified private model'], ['Reads', 'Only what your clearance covers (Unclassified)'], ['Authority', 'Drafts and recommends. Cannot approve, release or sign.']]);
+    const acts = el('div', 'acts', null, p);
+    const pause = el('button', 'btn', a.state === 'paused' ? 'Resume' : 'Pause', acts); pause.type = 'button';
+    pause.addEventListener('click', () => { setAgent(a.id, a.state === 'paused' ? 'working' : 'paused'); closePop(); });
+    const stop = el('button', 'btn stop', 'Stop this agent', acts); stop.type = 'button';
+    stop.addEventListener('click', () => { a.state = 'stopped'; a.node.className = 'tok s-stopped'; updateTokLabel(a); refreshPods(); closePop(); toast(a.id + ' stopped. A person restarts it.', 'stop'); });
+  });
+}
+function openProductCard(pr, anchor) {
+  openPop(anchor, (p) => {
+    el('h3', null, pr.name + (pr.ver ? ' v' + pr.ver : ''), p).id = 'popTitle';
+    el('div', 'sub', pr.status.toUpperCase() + (pr.approvedBy ? ' by ' + pr.approvedBy : ''), p);
+    dl(p, [['Drafted by', pr.by], ['Section', pr.sec], ['Goes to', (pr.to || ['Planning group']).join(', ')], ['Label', 'UNCLASSIFIED · EXERCISE'], ['Model', pr.tee === false ? 'Not an agent product' : 'Private model in a TEE · ✓ verified'], ['Checks', (pr.checks || ['none recorded']).join(' · ')], ['Recorded', pr.time + ' · every version kept']]);
+    if (pr.sources) { el('div', 'faint', 'Sources, graded separately for reliability (A to F) and credibility (1 to 6):', p); const ul = el('ul', 'srcs', null, p); pr.sources.forEach((s) => el('li', null, s, ul)); }
+  });
+}
+
+/* ---------- The decision gate ceremony ---------- */
+let gateTimer = null;
+function openGate() {
+  if ($('#overlay')) return;
+  const ov = el('div', 'overlay', null, document.body); ov.id = 'overlay';
+  const box = el('div', 'gatebox', null, ov); box.setAttribute('role', 'dialog'); box.setAttribute('aria-modal', 'true'); box.setAttribute('aria-labelledby', 'gateTitle');
+  const L = el('div', 'gb-l', null, box);
+  el('div', 'gb-kicker', 'Decision gate · ' + PROFILES[S.profile].segs.find((s) => s.w.includes(5)).label, L);
+  el('h2', null, 'COA decision brief · TF ANVIL', L).id = 'gateTitle';
+  el('p', 'muted', `The staff stopped at this gate at ${exClock()}. No agent has acted past it. Drafted by plans-writer, integrated by chief-of-staff.`, L);
+  const sec = (h, t) => { const s = el('div', 'gb-sec', null, L); el('h4', null, h, s); el('p', null, t, s); };
+  sec('Mission (approved 0840Z)', 'TF ANVIL seizes Port Calder (OBJ FALCON) by D+4 to reopen the port for relief shipping.');
+  sec('Enemy (J2, released by ' + PEOPLE.j2 + ')', 'MLCOA, likely: delay forward of PL COPPER, then defend Port Calder. MDCOA, unlikely but most dangerous: armoured counterattack from Harrow Ridge at Ashby Ford between H+6 and H+12.');
+  const th = el('div', 'thumbs', null, L);
+  ['A', 'B'].forEach((k) => {
+    const t = el('div', 'thumb' + (k === 'A' ? ' rec' : ''), null, th);
+    const cap = el('div', 'cap', null, t); el('b', null, 'COA ' + k + ' · ' + COAS[k].title, cap); el('span', 'mono', k === 'A' ? '35 pts' : '27 pts', cap);
+    const clone = CW[k] ? CW[k].svg.cloneNode(true) : sv('svg'); clone.removeAttribute('role'); clone.setAttribute('aria-hidden', 'true'); clone.querySelectorAll('mask').forEach((m) => { m.id = m.id + 'g'; }); clone.querySelectorAll('[mask]').forEach((n) => n.setAttribute('mask', n.getAttribute('mask').replace(')', 'g)'))); clone.querySelectorAll('[style]').forEach((n) => { if (n.style.opacity === '0') n.style.opacity = '1'; });
+    t.appendChild(clone);
+  });
+  sec('Staff recommendation (drafted by agents)', 'COA A. It scores higher on mission accomplishment and sustainability. Main risk: the MDCOA counterattack at Ashby Ford, mitigated by DP 1 (commit A SQN when enemy armour crosses PL SLATE, watched at NAI 2).');
+  sec('Dissent (red-team, unedited)', 'COA B keeps more options if the strait is clear. Our confidence that it is clear of mines is low: there is no reporting either way (PIR 4 added).');
+  sec('Sustainment (J4)', 'COA A is supportable with forward resupply at H+30. COA B carries a fuel risk at H+36 that depends on landing craft (assumption A-4).');
+  sec('Legal', 'Legal adviser seat drafted ROE inputs for both COAs. A human legal adviser must review before orders are issued.');
+
+  const R = el('div', 'gb-r', null, box);
+  const who = el('div', 'who', null, R);
+  const ws = sv('svg', { viewBox: '0 0 16 16', 'aria-hidden': 'true' }, who); sv('path', { d: 'M8 2a2.5 2.5 0 1 0 0 5a2.5 2.5 0 0 0 0-5zM3 14c0-3 2.2-5 5-5s5 2 5 5' }, ws);
+  const wd = el('div', null, null, who); el('b', null, PEOPLE.cdr + ' · Commander, TF ANVIL', wd); el('span', null, 'Exercise role-player · signs with this device\'s key · only this person can decide', wd);
+  const fs = el('fieldset', 'opts', null, R); el('legend', null, 'Your decision', fs);
+  const opt = (v, t, sub) => { const l = el('label', 'opt', null, fs); const i = el('input', null, null, l); i.type = 'radio'; i.name = 'dec'; i.value = v; const d = el('span', null, null, l); el('span', null, t, d); el('small', null, sub, d); i.addEventListener('change', check); return i; };
+  opt('A', 'Approve COA A', 'The staff recommendation');
+  opt('B', 'Approve COA B', 'Against the recommendation; the staff will plan it');
+  opt('R', 'Return to the staff with guidance', 'The staff revises and comes back to this gate');
+  const g = el('textarea', 'guid', null, R); g.id = 'guid'; g.placeholder = 'Guidance to the staff (needed when you return it)'; g.setAttribute('aria-label', 'Guidance to the staff'); g.hidden = true; g.addEventListener('input', check);
+  const ak = el('fieldset', 'acks', null, R); el('legend', null, 'Before you sign', ak);
+  ['I have read the red team\'s dissent and the J4 sustainment risk.', 'I accept the risk at Ashby Ford, with DP 1 as the mitigation.', 'This decision will be recorded as supported by AI staff work.'].forEach((t) => { const l = el('label', 'ack', null, ak); const i = el('input', null, null, l); i.type = 'checkbox'; i.addEventListener('change', check); el('span', null, t, l); });
+  const de = el('div', 'delib', null, R); const ds = sv('svg', { viewBox: '0 0 36 36', 'aria-hidden': 'true' }, de); sv('circle', { class: 'tr', cx: 18, cy: 18, r: 15 }, ds); const pr = sv('circle', { class: 'pr', cx: 18, cy: 18, r: 15, 'stroke-dasharray': '94.25', 'stroke-dashoffset': '94.25' }, ds);
+  const dt = el('span', null, '', de); dt.id = 'delibText';
+  const row = el('div', 'signrow', null, R);
+  const sign = el('button', 'btn primary sign', 'Sign decision', row); sign.type = 'button'; sign.setAttribute('aria-disabled', 'true'); sign.id = 'signBtn';
+  const later = el('button', 'btn', 'Not now', row); later.type = 'button';
+  el('p', 'fine', 'Your signature uses this device\'s key and goes into the decision record. Agents cannot sign, approve or release. The demo uses a 10 second minimum deliberation; your organization sets the real one.', R);
+  const MIN = 10; let left = MIN; let t0 = performance.now();
+  const tick = () => { left = Math.max(0, MIN - (performance.now() - t0) / 1000); pr.setAttribute('stroke-dashoffset', String((94.25 * left) / MIN)); dt.textContent = left > 0 ? `Minimum deliberation: ${Math.ceil(left)} s left` : 'Minimum deliberation complete'; check(); if (left > 0) gateTimer = requestAnimationFrame(tick); };
+  gateTimer = requestAnimationFrame(tick);
+  function check() {
+    const choice = (R.querySelector('input[name="dec"]:checked') || {}).value;
+    g.hidden = choice !== 'R';
+    const acks = $$('.acks input', R).every((i) => i.checked);
+    const ok = choice && acks && left <= 0 && (choice !== 'R' || g.value.trim().length > 3);
+    sign.setAttribute('aria-disabled', ok ? 'false' : 'true');
+    sign.textContent = choice === 'A' ? 'Sign: approve COA A' : choice === 'B' ? 'Sign: approve COA B' : choice === 'R' ? 'Sign: return to the staff' : 'Sign decision';
+    return ok ? choice : null;
+  }
+  sign.addEventListener('click', () => { const c = check(); if (!c) { toast(left > 0 ? 'Minimum deliberation is still running.' : 'Choose a decision and tick each box first.', 'human'); return; } signDecision(c, g.value.trim(), box); });
+  later.addEventListener('click', closeGate);
+  ov.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') { e.preventDefault(); closeGate(); }
+    if (e.key === 'Tab') { const f = $$('button, input, textarea', box).filter((n) => !n.hidden && n.offsetParent !== null); const i = f.indexOf(document.activeElement); if (e.shiftKey && i <= 0) { e.preventDefault(); f[f.length - 1].focus(); } else if (!e.shiftKey && i === f.length - 1) { e.preventDefault(); f[0].focus(); } }
+  });
+  anim(box, [{ opacity: 0, transform: 'translateY(16px) scale(.98)' }, { opacity: 1, transform: 'translateY(0px) scale(1)' }], { duration: D.move, easing: EASE.settle });
+  anim(ov, [{ opacity: 0 }, { opacity: 1 }], { duration: D.quick });
+  R.querySelector('input[name="dec"]').focus();
+}
+function closeGate() { cancelAnimationFrame(gateTimer); const ov = $('#overlay'); if (ov) ov.remove(); const b = $('#act-coa'); if (b) b.focus(); }
+function signDecision(choice, guidance, box) {
+  cancelAnimationFrame(gateTimer);
+  const at = exClock();
+  S.decision = choice;
+  const st = el('div', 'stamp', null, box);
+  const seal = el('div', 'seal', null, st);
+  el('span', 'a', choice === 'R' ? 'RETURNED' : 'APPROVED', seal);
+  el('span', 'b', choice === 'R' ? 'Back to the staff with guidance' : 'COA ' + choice, seal);
+  el('span', 'c', PEOPLE.cdr + ' · ' + at + ' · signed', seal);
+  sound('signed');
+  announce(`${PEOPLE.cdr} signed: ${choice === 'R' ? 'returned to the staff' : 'COA ' + choice + ' approved'} at ${at}.`, true);
+  if (motionOK()) {
+    const burst = el('div', 'burst', null, st);
+    burst.animate([{ opacity: 0.9, transform: 'scale(.8)' }, { opacity: 0, transform: 'scale(1.9)' }], { duration: dur(900), easing: EASE.std });
+    seal.animate([{ opacity: 0, transform: 'scale(1.6) rotate(-8deg)' }, { opacity: 1, transform: 'scale(.96) rotate(0deg)', offset: 0.7 }, { opacity: 1, transform: 'scale(1) rotate(0deg)' }], { duration: dur(700), easing: EASE.std });
+  }
+  setTimeout(() => {
+    const ov = $('#overlay'); if (ov) { const f = motionOK() ? ov.animate([{ opacity: 1 }, { opacity: 0 }], { duration: dur(300) }) : null; if (f) f.onfinish = () => ov.remove(); else ov.remove(); }
+    afterDecision(choice, guidance, at);
+  }, motionOK() ? dur(D.ceremony) : 500);
+}
+
+/* ---------- Clock ---------- */
+function exClock() { const m = 12 * 60 + 5 + Math.floor(S.t); return String(Math.floor(m / 60) % 24).padStart(2, '0') + String(m % 60).padStart(2, '0') + 'Z'; }
+function updateClock() {
+  $('#clockNow').textContent = 'D+2 ' + exClock();
+  const left = 14 * 60 - (12 * 60 + 5 + Math.floor(S.t));
+  $('#clockDue').textContent = left > 0 ? `COA decision brief 1400Z · in ${Math.floor(left / 60)} h ${left % 60} min` : 'COA decision brief 1400Z · now';
+  const b = currentBeat();
+  if (b) { const nb = BEATS[BEATS.indexOf(b) + 1]; const span = nb ? nb.t - b.t : 10; $('#beatFill').style.transform = `scaleX(${clamp((S.t - b.t) / span, 0, 1).toFixed(3)})`; }
+  updateBudget();
+}
+
+/* ---------- The timeline ---------- */
+const BEATS = [
+  { t: 0, name: '0 · The staff at work' }, { t: 1.5, name: '1 · J2 builds the threat picture' }, { t: 19, name: '2 · J5 builds two COAs in parallel' },
+  { t: 33, name: '3 · J3 wargames, the red cell fights back' }, { t: 52, name: '4 · COA comparison' }, { t: 63, name: '5 · The commander decides' }, { t: 64, name: '6 · Orders assemble in parallel' }
+];
+function currentBeat() { let b = BEATS[0]; BEATS.forEach((x) => { if (S.t >= x.t) b = x; }); return b; }
+let EV = [];
+const at = (t, fn) => EV.push({ t, fn });
+function hold(kind) { S.hold = kind; $('#beatName').textContent = kind === 'release' ? 'Waiting: the J2 releases the threat picture' : kind === 'gate' ? 'Waiting: the commander decides' : 'Waiting for a person'; }
+function release() { S.hold = null; }
+
+function buildTimeline() {
+  EV = [];
+  const tok = (id) => A[id].node;
+  // Beat 0
+  at(0.05, () => {
+    setAgent('chief-of-staff', 'working', 'Setting areas and deadlines for step 3');
+    ['J2', 'J5', 'J3', 'J4'].forEach((s, i) => setTimeout(() => tracer(tok('chief-of-staff'), $('#pod-' + s), 'Step 3 tasks · due 1330Z', 'task'), S.instant ? 0 : i * 140));
+    ['J2', 'J5', 'J3', 'J4'].forEach((s) => setNest(s, 'ready'));
+  });
+  // Beat 1: J2
+  at(1.5, () => {
+    followTo('threat');
+    setAgent('chief-of-staff', 'waiting', 'Watching the step 3 deadlines');
+    setAgent('j2-chief', 'working', 'Directing step 3 intelligence: final enemy COA set first');
+    setAgent('threat-analyst', 'working', 'Placing 41 Coastal Bde from OOB v4 (14 reports)');
+    setAgent('collection-manager', 'working', 'Linking gaps to PIRs and NAIs');
+    setAgent('red-cell', 'working', 'Preparing the adversary play for the wargame');
+    setNest('J2', 'running');
+  });
+  ['H1', 'H2', 'H3', 'H4', 'H5'].forEach((k, i) => at(2.4 + i * 0.75, () => { drop(TM.threat, Object.assign({}, UNITS[k]), { focusable: true, id: k }).dataset.id = k; announce(`Hostile ${UNITS[k].kind} ${UNITS[k].des} placed.`); }));
+  at(6.4, () => { drop(TM.threat, Object.assign({}, UNITS.U1), { focusable: true, id: 'U1' }).dataset.id = 'U1'; drop(TM.threat, Object.assign({}, UNITS.N1), { focusable: true, id: 'N1' }).dataset.id = 'N1'; $('#threatHud').textContent = 'J2 threat layer · 7 contacts'; });
+  at(7, () => {
+    addProduct({ id: 'oob', name: 'Enemy order of battle', ver: 4, by: 'threat-analyst', sec: 'J2', status: 'draft', to: ['J2'], sources: ['Notional patrol report PR-11 (B2)', 'Notional imagery note IM-04 (B3)', 'Exercise OSINT digest (C3)'], checks: ['in tradecraft review'] });
+    tracer(tok('threat-analyst'), $('#prod-oob'), 'OOB v4', 'prod');
+    setAgent('threat-analyst', 'working', 'Drafting enemy COAs with ACH: MLCOA, MDCOA');
+  });
+  at(8, () => { axis(TM.mlcoa, 'MLCOA'); ecoaCard('MLCOA', 'Delay, then defend Port Calder', 'Delay forward of PL COPPER with 1-41 MECH, then defend Port Calder from prepared positions.', 'Likely (55 to 80 percent).', 'Moderate confidence: 9 sources, 2 of them independent.', 'B2, B3, C3'); });
+  at(10.2, () => { axis(TM.mdcoa, 'MDCOA'); ecoaCard('MDCOA', 'Armoured counterattack at Ashby Ford', 'Counterattack with 3-41 ARMD from Harrow Ridge into the friendly flank at Ashby Ford between H+6 and H+12.', 'Unlikely (20 to 45 percent), but the most dangerous.', 'Low confidence: the armour location rests on one source.', 'C3'); setAgent('threat-analyst', 'done', 'Enemy COA set v2 drafted'); });
+  at(12, () => {
+    NAIS.forEach((n, i) => setTimeout(() => nai(TM.nai, n), S.instant ? 0 : i * 180));
+    cplanRow('PIR 1: Will 3-41 ARMD counterattack across PL SLATE before H+12?', 'NAI 2', 'H+6');
+    cplanRow('PIR 2: Will 1-41 MECH delay at PL COPPER or fall back to Port Calder?', 'NAI 1', 'H+18');
+    cplanRow('PIR 3: Is the harbour covered by coastal artillery?', 'NAI 3', 'H+24');
+    setAgent('collection-manager', 'done', 'Collection plan v1: 3 PIRs, 3 NAIs (recommendations only; J3 tasks assets)');
+    addProduct({ id: 'cp', name: 'PIRs and collection plan', ver: 1, by: 'collection-manager', sec: 'J2', status: 'draft', to: ['J3 (allocates assets)'], checks: ['PIRs need the commander'] });
+  });
+  at(13.4, () => { setAgent('tradecraft-reviewer', 'working', 'ICD 203 check: likelihood words, sources, alternatives'); tracer(tok('threat-analyst'), tok('tradecraft-reviewer'), 'Enemy COA set v2', 'task'); });
+  at(15, () => { setAgent('tradecraft-reviewer', 'done', 'SIGN-OFF: 0 blocking findings, 2 notes'); setAgent('release-guard', 'working', 'guard-scan, then compilation and releasability review'); tracer(tok('tradecraft-reviewer'), tok('release-guard'), 'SIGN-OFF v2', 'prod'); });
+  at(16.5, () => {
+    setAgent('release-guard', 'done', 'CLEARED: guard verdict on version 2');
+    setAgent('j2-chief', 'needs', 'Enemy COA set v2 ready for the J2 to release');
+    addProduct({ id: 'ecoa', name: `${PROFILES[S.profile].j2}: enemy COA set`, ver: 2, by: 'threat-analyst', sec: 'J2', status: 'awaiting decision', to: ['J5 COA cells', 'J3', 'J4'], sources: ['Notional patrol report PR-11 (B2)', 'Notional imagery note IM-04 (B3)', 'Exercise OSINT digest (C3)'], checks: ['tradecraft SIGN-OFF on v2', 'release-guard CLEARED on v2', 'decision for: J2 (release on approval)'] });
+    addDecision({ id: 'rel', title: `Approve and release the ${PROFILES[S.profile].j2} enemy COA set v2`, owner: PEOPLE.j2 + ' (J2)', due: '1250Z', state: 'waiting', actionLabel: 'Approve and release', action: () => releaseThreat() });
+    setNest('J2', 'waiting');
+    hold('release');
+  });
+  at(17.2, () => {
+    setAgent('j2-chief', 'done', 'Enemy COA set v2 released by ' + PEOPLE.j2);
+    ['coa-cell-a', 'coa-cell-b', 'future-ops-planner', 'log-plans-officer'].forEach((id, i) => setTimeout(() => tracer($('#prod-ecoa'), tok(id), i === 3 ? 'Threat to supply routes' : 'Enemy COAs v2', 'prod'), S.instant ? 0 : i * 110));
+    setTimeout(() => tracer(tok('collection-manager'), tok('future-ops-planner'), 'Collection requests: J3 tasks', 'task'), S.instant ? 0 : 520);
+    setAgent('red-cell', 'waiting', 'Ready to play the enemy');
+    setNest('J2', 'reporting'); setTimeout(() => setNest('J2', 'merging'), S.instant ? 0 : 700); setTimeout(() => setNest('J2', 'done'), S.instant ? 0 : 1500);
+  });
+  // Beat 2: J5
+  at(19, () => {
+    followTo('coa');
+    setAgent('lead-planner', 'working', 'Giving each COA cell a distinct theme');
+    tracer(tok('lead-planner'), tok('coa-cell-a'), 'Theme: by land, via Ashby Ford', 'task');
+    setTimeout(() => tracer(tok('lead-planner'), tok('coa-cell-b'), 'Theme: from the sea', 'task'), S.instant ? 0 : 180);
+  });
+  at(20.2, () => {
+    setNest('J5', 'running');
+    setAgent('coa-cell-a', 'working', 'Drafting COA A statement and sketch'); setAgent('coa-cell-b', 'working', 'Drafting COA B statement and sketch');
+    typeInto($('#stmtA'), COAS.A.stmt, 5200); typeInto($('#stmtB'), COAS.B.stmt, 5600);
+  });
+  ['A', 'B'].forEach((k) => {
+    COAS[k].units.forEach((u, i) => at(20.6 + i * 0.5 + (k === 'B' ? 0.25 : 0), () => { CW[k].units.appendChild(symbol(Object.assign({}, FRIENDLY[u]), { planned: u !== 'F0' })); const n = CW[k].units.lastChild; anim(n.firstChild, [{ opacity: 0, transform: 'translate(0px,-12px) scale(1.2)' }, { opacity: 1, transform: 'translate(0px,0px) scale(1)' }], { duration: D.move, easing: EASE.settle }); }));
+    COAS[k].axes.forEach((ax, i) => at(23.6 + i * 1.1 + (k === 'B' ? 0.4 : 0), () => axis(CW[k].ax, ax)));
+  });
+  at(24.2, () => {
+    setAgent('lead-planner', 'waiting', 'Waiting on the COA cells');
+    setAgent('supply-planner', 'working', 'Supportability screen: fuel and ammunition per COA'); setAgent('mobility-planner', 'working', 'Routes, landing craft and lift per COA');
+    setAgent('future-ops-planner', 'working', 'Force availability for COA A and B');
+    setAgent('log-plans-officer', 'working', 'Logistics estimate against both COAs');
+    setNest('J4', 'running'); setNest('J3', 'running');
+  });
+  [0, 1, 2, 3, 4].forEach((i) => at(26 + i * 0.28, () => { const f = i === PROFILES[S.profile].feas; validity('A', i, true); validity('B', i, !f, f ? 'Depends on landing craft (assumption A-4)' : null); }));
+  at(27.6, () => {
+    tracer(tok('mobility-planner'), $('#miniB'), 'Landing craft: assumption A-4', 'prod');
+    tracer(tok('supply-planner'), $('#miniA'), 'Supportable', 'prod');
+    setTimeout(() => { suppChip('A', 'J4 ✓ supportable', 'ok'); suppChip('B', 'J4 ▲ fuel risk at H+36', 'risk'); }, S.instant ? 0 : 900);
+    setAgent('supply-planner', 'done', 'Supportability: A supportable, B fuel risk at H+36'); setAgent('mobility-planner', 'done', 'B depends on landing craft (A-4)');
+  });
+  at(29, () => { setAgent('red-team', 'working', 'Challenging assumptions in both COAs'); });
+  at(30.5, () => {
+    tracer(tok('red-team'), tok('collection-manager'), 'No reporting on sea mines: add a PIR', 'task');
+    setAgent('red-team', 'done', 'Challenge: 3 findings, 1 new PIR');
+    addProduct({ id: 'rt1', name: 'Red team challenge of COAs', ver: 1, by: 'red-team', sec: 'COS', status: 'draft', to: ['COS', 'J5', 'J2'], checks: ['independent of the planners'] });
+    setTimeout(() => { cplanRow('PIR 4: Has the Varn Strait been mined?', 'NAI 3', 'H-6', true); setAgent('collection-manager', 'done', 'PIR 4 added after the red team challenge'); }, S.instant ? 0 : 1000);
+  });
+  at(31.2, () => { tracer(tok('future-ops-planner'), tok('lead-planner'), 'Forces available for A and B', 'prod'); setAgent('future-ops-planner', 'done', 'Forces available for both COAs'); suppChip('A', 'J3 ✓ forces available', 'ok'); suppChip('B', 'J3 ✓ forces available', 'ok'); });
+  at(32.2, () => {
+    setAgent('coa-cell-a', 'done', 'COA A v1: valid'); setAgent('coa-cell-b', 'done', 'COA B v1: valid, one feasibility risk');
+    addProduct({ id: 'coas', name: 'COA statements and sketches A, B', ver: 1, by: 'coa-cell-a, coa-cell-b', sec: 'J5', status: 'guard-checked', to: ['Wargame'], checks: ['5 validity tests each', 'J4 and J3 screens'] });
+    advanceTo(3);
+    ['J5', 'J3', 'J4'].forEach((s) => setNest(s, 'done'));
+  });
+  // Beat 3: wargame
+  at(33, () => {
+    followTo('wargame'); buildWargame(); if (S.follow) setMatrix(true);
+    ['J2', 'J5', 'J3', 'J4'].forEach((s) => setNest(s, 'running'));
+    setAgent('lead-planner', 'working', 'Wargame controller: COA A vs MLCOA, then MDCOA');
+    setAgent('red-cell', 'working', 'Playing the enemy commander to win'); setAgent('coa-cell-a', 'working', 'Playing friendly for COA A');
+    setAgent('plans-writer', 'working', 'Recording the wargame'); setAgent('log-plans-officer', 'working', 'Logistics wargame: consumption per phase');
+    axis(WG.ax, 'A_MAIN'); axis(WG.ax, 'A_SUP');
+    $('#seq1').textContent = '✓ done (summary): delay holds to H+30';
+    $('#seq2').textContent = 'turn 1 now';
+    $('#turnTitle').textContent = 'COA A vs MDCOA · Turn 1 · H to H+12 · Ashby Ford';
+    wlog('', 'SET-UP', 'COA A against the MLCOA first: delay defeated by H+30. Now against the MDCOA, the dangerous case.');
+    $('#mxSub').textContent = 'COA A · fills as the wargame runs';
+    cursorTo(-6);
+    mxCell('fires', -6, 0, 'Counter-battery preparation', 'J3');
+    mxCell('enemy', 18, 36, 'MLCOA: delay to PL COPPER, defend Port Calder', 'J2');
+  });
+  at(33.8, () => { phase('a'); moveSym(WG.node.F1, WG.spec.F1, 514, 344, WG.trails); moveSym(WG.node.F4, WG.spec.F4, 566, 300, WG.trails); wlog('blue', 'ACTION · friendly', '1 MECH attacks along ROUTE IRON and seizes Ashby Ford; RECCE screens toward PL SLATE.'); mxCell('man', 0, 12, 'Main attack seizes Ashby Ford', 'J3'); cursorTo(6); });
+  at(36.2, () => { phase('r'); axis(WG.ax, 'MDCOA'); moveSym(WG.node.H4, WG.spec.H4, 702, 300, WG.trails); wlog('red', 'REACTION · red cell', '3-41 ARMD counterattacks from Harrow Ridge toward the ford. Indicator at NAI 2.'); mxCell('enemy', 6, 12, 'MDCOA: armoured counterattack', 'J2'); mxCell('coll', 0, 12, 'NAI 2 watch (PIR 1)', 'COL'); cursorTo(8); });
+  at(38.6, () => {
+    phase('c'); fires(WG.fx, 702, 300); moveSym(WG.node.F3, WG.spec.F3, 600, 330, WG.trails); star(WG.dp, 690, 282, 'DP 1');
+    wlog('blue', 'COUNTERACTION · friendly', 'Fires on the armour; A SQN, the reserve, blocks at PL SLATE. Decision point DP 1 found.');
+    mxCell('fires', 6, 12, 'Fires on counterattack', 'J3'); mxDP(8, 'DP 1: commit reserve'); mxCell('sust', 6, 12, 'Fuel resupply at AA OAK', 'J4'); cursorTo(12);
+  });
+  at(41, () => { wlog('res', 'RESULT · turn 1', 'Crossing held. DP 1: commit A SQN if enemy armour crosses PL SLATE (watched at NAI 2, PIR 1). Needs the commander\'s approval as a decision point.'); tracer(tok('red-cell'), tok('collection-manager'), 'DP 1 → PIR 1 latest time H+6', 'task'); });
+  at(42.2, () => {
+    phase('a'); $('#turnTitle').textContent = 'COA A vs MDCOA · Turn 2 · H+12 to H+30 · Port Calder';
+    moveSym(WG.node.F1, WG.spec.F1, 598, 200, WG.trails); moveSym(WG.node.F2, WG.spec.F2, 780, 318, WG.trails);
+    wlog('blue', 'ACTION · friendly', '1 MECH advances to PL COPPER; 2 INF attacks OBJ KITE.'); mxCell('man', 12, 30, 'Supporting attack seizes OBJ KITE', 'J3'); cursorTo(18);
+  });
+  at(44.4, () => { phase('r'); moveSym(WG.node.H2, WG.spec.H2, 626, 168, WG.trails); WG.node.H4.classList.add('dead'); WG.node.H4.setAttribute('aria-label', 'Hostile armour company 3-41 ARMD, assessed combat ineffective'); wlog('red', 'REACTION · red cell', '1-41 MECH falls back to Port Calder (the MLCOA). 3-41 ARMD assessed combat ineffective.'); mxCell('coll', 18, 30, 'NAI 3 harbour (PIR 3, 4)', 'COL'); cursorTo(24); });
+  at(46.6, () => {
+    phase('c'); star(WG.dp, 600, 214, 'DP 2');
+    wlog('j4', 'COUNTERACTION · J4', 'Logistics wargame: fuel use at 82 percent of forecast. Forward resupply at H+30 keeps 1 MECH moving onto OBJ FALCON.');
+    mxCell('sust', 28, 34, 'Forward fuel: 82% of forecast', 'J4'); mxDP(30, 'DP 2: assault OBJ FALCON'); mxCell('man', 30, 48, 'Main attack seizes OBJ FALCON', 'J3'); cursorTo(30);
+    tracer(tok('log-plans-officer'), tok('future-ops-planner'), 'Logistics decision point DP 2', 'task');
+  });
+  at(48.6, () => {
+    wlog('res', 'RESULT · turn 2', 'OBJ FALCON seized by H+48 in the dangerous case. Two decision points, both tied to PIRs.');
+    $('#seq2').textContent = '✓ done: 2 turns, 2 decision points';
+    addProduct({ id: 'sync', name: 'Synchronization matrix, COA A', ver: 1, by: 'future-ops-planner', sec: 'J3', status: 'guard-checked', to: ['All sections'], checks: ['recorded by plans-writer'] });
+    addProduct({ id: 'dsm', name: 'DST and DSM inputs', ver: 1, by: 'lead-planner, red-cell', sec: 'J5', status: 'draft', to: ['Commander (DPs)', 'J2 (PIRs)'] });
+    setAgent('log-plans-officer', 'done', 'Logistics wargame done: DP 2 added');
+  });
+  at(49.8, () => {
+    $('#seq3').textContent = '✓ done: same enemy COAs, so results compare';
+    wlog('', 'COA B', 'COA B wargamed against the same MLCOA and MDCOA. Fuel risk at H+36 confirmed; landing craft remain the critical assumption.');
+    setAgent('red-team', 'working', 'Bias check: is COA A the favourite before the evidence?');
+  });
+  at(51, () => {
+    setAgent('red-team', 'done', 'Bias check passed: both COAs met the same enemy COAs');
+    ['red-cell', 'coa-cell-a', 'plans-writer'].forEach((id) => setAgent(id, 'done', 'Wargame complete'));
+    advanceTo(4);
+    ['J2', 'J3', 'J4'].forEach((s) => setNest(s, 'done'));
+  });
+  // Beat 4: compare
+  at(52, () => {
+    followTo('compare'); buildCompare(); if (S.follow) setMatrix(false);
+    setAgent('lead-planner', 'working', 'Applying the approved criteria and weights');
+    tracer(tok('log-plans-officer'), $('#pane-compare'), 'Sustainability scores', 'prod');
+    setTimeout(() => tracer(tok('future-ops-planner'), $('#pane-compare'), 'Risk and tempo scores', 'prod'), S.instant ? 0 : 160);
+    setTimeout(() => tracer(tok('j2-chief'), $('#pane-compare'), 'Intelligence risk', 'prod'), S.instant ? 0 : 320);
+  });
+  CRIT.forEach((c, i) => at(53.2 + i * 0.6, () => scoreRow(i)));
+  at(57.4, () => {
+    const rec = $('#rec'); rec.hidden = false; $('#recText').textContent = 'COA A: 35 against 27. Higher on mission accomplishment and sustainability. Main risk is the MDCOA counterattack at Ashby Ford, mitigated by DP 1. This is a recommendation; the commander decides.';
+    anim(rec, [{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'translateY(0px)' }], { duration: D.move });
+    const dis = $('#dis'); dis.hidden = false; $('#disText').textContent = 'COA B keeps more options if the strait is clear. Our confidence that it is clear of mines is low: there is no reporting either way.';
+    addProduct({ id: 'cmp', name: 'COA comparison and recommendation', ver: 1, by: 'lead-planner', sec: 'J5', status: 'guard-checked', to: ['Commander'], checks: ['criteria approved 0840Z', 'red team dissent attached unedited'] });
+  });
+  at(59, () => { advanceTo(5); setAgent('lead-planner', 'done', 'Recommendation ready'); setAgent('plans-writer', 'working', 'Building the COA decision brief'); setAgent('chief-of-staff', 'working', 'Integrating the brief; checking every section is heard'); });
+  at(61.4, () => {
+    addProduct({ id: 'brief', name: 'COA decision brief', ver: 1, by: 'plans-writer, chief-of-staff', sec: 'J5', status: 'awaiting decision', to: ['Commander'], checks: ['all sections integrated', 'dissent unedited'] });
+    tracer(tok('plans-writer'), $('#decList'), 'COA decision brief v1', 'human');
+    setAgent('plans-writer', 'done', 'Decision brief v1 ready');
+  });
+  // Beat 5: gate
+  at(63, () => {
+    gateState.coa = { state: 'waiting' }; renderRail();
+    AGENTS.forEach((a) => { if (a.state === 'working') setAgent(a.id, 'waiting', 'Stopped at the gate'); });
+    setAgent('chief-of-staff', 'needs', 'Waiting for the commander at the gate');
+    ['J2', 'J5', 'J3', 'J4'].forEach((s) => setNest(s, 'waiting'));
+    addDecision({ id: 'coa', title: 'COA decision · step ' + PROFILES[S.profile].segs.find((s) => s.w.includes(5)).n, owner: PEOPLE.cdr + ' (Commander)', due: '1400Z', state: 'waiting', actionLabel: 'Open the decision brief', action: () => openGate() });
+    toast('The staff has stopped at the gate. Nothing moves past it until ' + PEOPLE.cdr + ' decides.', 'human');
+    hold('gate');
+    if (S.follow && !S.instant) setTimeout(() => { if (S.hold === 'gate') openGate(); }, 1400);
+  });
+  // Beat 6: orders (runs after a signed approval)
+  at(64, () => {
+    followTo('orders'); buildOrders(); if (S.follow) setMatrix(false);
+    setAgent('chief-of-staff', 'working', 'WARNORD 3 and orders production');
+    ['J2', 'J5', 'J3', 'J4'].forEach((s) => setNest(s, 'running'));
+    ['J2', 'J5', 'J3', 'J4'].forEach((s, i) => setTimeout(() => tracer(tok('chief-of-staff'), $('#pod-' + s), 'Write your annex · due 1530Z', 'task'), S.instant ? 0 : i * 130));
+    [['plans-writer', 'Base plan from the approved COA'], ['j2-chief', 'Intelligence annex'], ['future-ops-planner', 'Operations annex and branches'], ['fires-effects-coordinator', 'Concept of fires'], ['log-plans-officer', 'Logistics annex: concept of support'], ['assessment-analyst', 'MOE and MOP annex']].forEach(([id, t]) => setAgent(id, 'working', t));
+  });
+  const ORD = [['base', 2.8], ['intel', 2.2], ['ops', 3.4], ['fires', 2.0], ['log', 3.0], ['assess', 2.5]];
+  ORD.forEach(([id, len]) => { at(65, () => orderProgress(id, 0.35, 'drafting')); at(65 + len * 0.5, () => orderProgress(id, 0.7, 'drafting')); at(65 + len, () => orderProgress(id, 1, 'done · checked')); });
+  at(68.6, () => {
+    ['plans-writer', 'j2-chief', 'future-ops-planner', 'fires-effects-coordinator', 'log-plans-officer', 'assessment-analyst'].forEach((id) => setAgent(id, 'done', 'Annex drafted'));
+    orderProgress('check', 0.6, '2 conflicts found');
+    setNest('J2', 'done'); setNest('J5', 'merging'); setNest('J3', 'conflict'); setNest('J4', 'conflict');
+    tracer(tok('chief-of-staff'), tok('log-plans-officer'), 'Conflict: fuel H+30 vs H+32', 'task');
+    tracer(tok('chief-of-staff'), tok('future-ops-planner'), 'Conflict: Annex C timing', 'task');
+  });
+  at(70.4, () => { orderProgress('check', 1, '✓ resolved by owners'); ['J5', 'J3', 'J4'].forEach((s) => setNest(s, 'done')); addProduct({ id: 'opord', name: 'OPORD package (draft)', ver: 1, by: 'plans-writer, chief-of-staff', sec: 'J5', status: 'awaiting decision', to: ['Commander'], checks: ['synchronization check passed', 'legal review by a person still needed'] }); });
+  at(71.2, () => {
+    gateState.plan = { state: 'waiting' }; renderRail();
+    $('#os-gate').textContent = 'waiting for ' + PEOPLE.cdr;
+    setAgent('chief-of-staff', 'needs', 'Orders package waiting for the commander\'s signature');
+    addDecision({ id: 'plan', title: 'Approve and sign the OPORD', owner: PEOPLE.cdr + ' (Commander)', due: '1600Z', state: 'waiting', actionLabel: 'Open the plan (not in this demo)', action: () => toast('In the product this opens the plan approval. The demo ends here: the plan waits for a person.', 'human') });
+    S.ended = true; S.playing = false; setPlayUi();
+    $('#beatName').textContent = 'End of demo: the plan waits for the commander';
+    toast('End of demo. 18 agents in 4 sections and the COS cell. Two decisions made by named people; the third, the plan, is waiting for one.', 'human');
+  });
+  EV.sort((a, b) => a.t - b.t);
+}
+function releaseThreat() {
+  resolveDecision('rel', 'Released by ' + PEOPLE.j2 + ' at ' + exClock());
+  setProductStatus('ecoa', 'released', PEOPLE.j2);
+  tracer($('#dec-rel') || $('#decList'), $('#prod-ecoa'), 'Released by the J2', 'human');
+  release();
+  if (!S.playing && !S.ended) { S.playing = true; setPlayUi(); }
+}
+function afterDecision(choice, guidance, at2) {
+  if (choice === 'R') {
+    gateState.coa = { state: 'returned', by: PEOPLE.cdr, at: at2 };
+    resolveDecision('coa', 'Returned to the staff by ' + PEOPLE.cdr + ' at ' + at2);
+    tracer($('#decList'), A['lead-planner'].node, 'Guidance: ' + (guidance || 'revise'), 'human');
+    addProduct({ id: 'guid' + S.rev, name: 'Commander\'s guidance on the COAs', by: PEOPLE.cdr, sec: 'CDR', status: 'recorded', to: ['J5', 'COS'], tee: false });
+    S.rev++;
+    work[4] = 0; work[5] = 0; current = 4; renderRail();
+    const idx = EV.findIndex((e) => e.t >= 52);
+    S.fired = idx; S.t = 52; release();
+    setAgent('chief-of-staff', 'working', 'Revising the comparison with the commander\'s guidance');
+    toast('Returned with guidance. The staff revises the comparison (revision ' + S.rev + ') and comes back to the gate.', 'human');
+    return;
+  }
+  gateState.coa = { state: 'approved', by: PEOPLE.cdr, at: at2 };
+  resolveDecision('coa', `COA ${choice} approved by ${PEOPLE.cdr} at ${at2} · signed`);
+  setProductStatus('brief', 'approved', PEOPLE.cdr);
+  setProductStatus('cmp', 'approved', PEOPLE.cdr);
+  addProduct({ id: 'dec', name: `Commander's decision: COA ${choice}`, by: PEOPLE.cdr, sec: 'CDR', status: 'recorded', to: ['All sections'], tee: false, checks: ['signed with the device key'] });
+  advanceTo(6);
+  tracer($('#gate-coa') || $('#decList'), A['chief-of-staff'].node, 'Decision: COA ' + choice, 'human');
+  if (choice === 'B') toast('COA B approved against the recommendation. The staff plans it; the J4 fuel risk becomes a branch to plan.', 'human');
+  release();
+  if (!S.playing) { S.playing = true; setPlayUi(); }
+}
+
+/* ---------- Engine ---------- */
+let lastTs = 0;
+function frame(ts) {
+  const dt = lastTs ? Math.min(0.1, (ts - lastTs) / 1000) : 0; lastTs = ts;
+  if (S.playing && !S.hold && !S.stopped && !document.hidden) { S.t += dt * S.speed; fire(S.t); updateClock(); }
+  requestAnimationFrame(frame);
+}
+function fire(t) {
+  while (S.fired < EV.length && EV[S.fired].t <= t && !S.hold) { const e = EV[S.fired++]; e.fn(); }
+  if (S.hold) { const ev = EV[S.fired - 1]; if (ev) S.t = Math.min(S.t, ev.t); }
+  if (!S.hold && !S.ended && !S.stopped) { const b = currentBeat(); $('#beatName').textContent = b.name; }
+}
+function nextBeat() {
+  if (S.hold) { const b = S.hold === 'gate' ? $('#act-coa') : $('#act-rel'); if (b) { b.focus(); toast('A person must act here first. Agents cannot pass a gate.', 'human'); } return; }
+  if (S.ended) return;
+  const nb = BEATS.find((b) => b.t > S.t + 0.01); if (!nb) return;
+  S.instant = true; fire(nb.t - 0.001); S.instant = false;
+  if (!S.hold) S.t = nb.t - 0.001;
+  liveTracers = 0; tracerQueue.length = 0; fx.replaceChildren();
+  updateClock();
+  if (!S.playing) { S.playing = true; setPlayUi(); }
+}
+function setPlayUi() {
+  $('#playText').textContent = S.playing ? 'Pause' : (S.ended ? 'Ended' : 'Play');
+  $('#playIcon').setAttribute('d', S.playing ? 'M5 3v10M11 3v10' : 'M4 3l9 5-9 5z');
+  $('#btnPlay').setAttribute('aria-label', S.playing ? 'Pause the demo' : 'Play the demo');
+}
+
+/* ---------- Controls ---------- */
+function applyTheme() { document.body.classList.remove('night', 'day', 'hc'); document.body.classList.add(S.theme); $('#btnTheme').textContent = { night: 'Night', day: 'Day', hc: 'High contrast' }[S.theme]; if (S.calm) document.body.classList.add('calm'); }
+function applyCalm() { document.body.classList.toggle('calm', S.calm); $('#btnCalm').setAttribute('aria-pressed', S.calm ? 'true' : 'false'); }
+function wire() {
+  $('#btnPlay').addEventListener('click', () => { if (S.ended) return; if (S.stopped) { resumeAll(); return; } S.playing = !S.playing; setPlayUi(); if (S.playing && S.hold) toast('Waiting for a person: see Human decisions.', 'human'); });
+  $('#btnStep').addEventListener('click', nextBeat);
+  $('#btnRestart').addEventListener('click', () => { try { sessionStorage.setItem('staffroom.autoplay', '1'); } catch (e) { /* ignore */ } location.reload(); });
+  $$('.seg button').forEach((b) => b.addEventListener('click', () => { S.speed = Number(b.dataset.speed); $$('.seg button').forEach((x) => x.setAttribute('aria-pressed', x === b ? 'true' : 'false')); }));
+  $('#btnCalm').addEventListener('click', () => { S.calm = !S.calm; prefs.calm = S.calm; savePrefs(); applyCalm(); toast(S.calm ? 'Calm on: nothing moves. Every change still shows in words and icons.' : 'Calm off.'); });
+  $('#btnTheme').addEventListener('click', () => { S.theme = { night: 'day', day: 'hc', hc: 'night' }[S.theme]; prefs.theme = S.theme; savePrefs(); applyTheme(); });
+  $('#btnSound').addEventListener('click', () => { S.sound = !S.sound; $('#btnSound').setAttribute('aria-pressed', S.sound ? 'true' : 'false'); $('#btnSound').textContent = S.sound ? 'Sound on' : 'Sound off'; if (S.sound) sound('human'); });
+  $('#btnHelp').addEventListener('click', openHelp);
+  $('#btnStop').addEventListener('click', stopAll);
+  $('#btnFollow').addEventListener('click', () => setFollow(!S.follow));
+  $('#btnMx').addEventListener('click', () => setMatrix($('#matrix').classList.contains('collapsed')));
+  $('#btnList').addEventListener('click', () => { const on = $('#btnList').getAttribute('aria-pressed') !== 'true'; $('#btnList').setAttribute('aria-pressed', on ? 'true' : 'false'); $('#listview').hidden = !on; if (on) renderListView(); });
+  $('#profile').addEventListener('change', (e) => { S.profile = e.target.value; renderRail(); const ep = products.find((p) => p.id === 'ecoa'); if (ep) { const n = $('#prod-ecoa .pn'); if (n) n.textContent = `${PROFILES[S.profile].j2}: enemy COA set v2`; } if ($('#or-base')) buildOrders(); drawChecks('A'); drawChecks('B'); toast('Doctrine profile: ' + PROFILES[S.profile].name + '. Steps, products, COA tests and annex letters renamed; the work is unchanged. Approved products keep the profile they were approved under.'); });
+  const tabs = $$('.tab');
+  tabs.forEach((t) => {
+    t.addEventListener('click', () => { showTab(t.id.replace('tab-', ''), true); t.classList.remove('live'); });
+    t.addEventListener('keydown', (e) => { const i = tabs.indexOf(t); let j = -1; if (e.key === 'ArrowRight') j = (i + 1) % tabs.length; if (e.key === 'ArrowLeft') j = (i - 1 + tabs.length) % tabs.length; if (e.key === 'Home') j = 0; if (e.key === 'End') j = tabs.length - 1; if (j >= 0) { e.preventDefault(); tabs[j].focus(); showTab(tabs[j].id.replace('tab-', ''), true); } });
+  });
+  $('#btnTrust').addEventListener('click', (e) => openPop(e.currentTarget, (p) => {
+    el('h3', null, '✓ Verified private model', p).id = 'popTitle';
+    el('div', 'sub', 'All 18 agents in this run', p);
+    el('p', null, 'Every agent runs on a NEAR AI Cloud private model inside a TEE. Each answer is checked from NEAR\'s signature over the exact request and response, and a fresh Intel TDX quote that binds the signing key, over a connection proven to end inside the enclave.', p);
+    el('p', 'faint', 'Not checked in the editor: TCB status, enclave measurements, NVIDIA\'s verdict. For a full check use cloud.near.ai/verify. Sample state in this prototype.', p);
+  }));
+  $('#btnLabel').addEventListener('click', (e) => openPop(e.currentTarget, (p) => {
+    el('h3', null, 'Label: UNCLASSIFIED', p).id = 'popTitle';
+    el('div', 'sub', 'Exercise data only', p);
+    el('p', null, 'The chat\'s label rises with what its agents read and decides where content may be sent. Only a person lowers it, with a reason.', p);
+    el('p', null, 'Your clearance is self-declared in your policy file. Labels are an organizational control that helps prevent mistakes; they do not make this device accredited for classified information. Real operational plans belong on accredited systems.', p);
+  }));
+  document.addEventListener('keydown', onKey);
+  reduceMQ.addEventListener && reduceMQ.addEventListener('change', () => toast(reduceMQ.matches ? 'Reduced motion is on in your system: nothing moves.' : 'Reduced motion is off in your system.'));
+  window.addEventListener('resize', () => { fx.replaceChildren(); liveTracers = 0; tracerQueue.length = 0; });
+}
+let keysOn = true;
+function onKey(e) {
+  if (e.key === 'Escape') { if ($('#pop')) { e.preventDefault(); closePop(); return; } if ($('#help')) { $('#help').remove(); $('#btnHelp').focus(); return; } }
+  if (!keysOn || e.ctrlKey || e.metaKey || e.altKey) return;
+  const tag = (e.target.tagName || '').toLowerCase(); if (tag === 'input' || tag === 'textarea' || tag === 'select' || $('#overlay')) return;
+  if (e.key === ' ' && tag !== 'button') { e.preventDefault(); $('#btnPlay').click(); }
+  else if (e.key === 'n' || e.key === 'N') nextBeat();
+  else if (e.key === 'r' || e.key === 'R') $('#btnRestart').click();
+  else if (e.key === 'c' || e.key === 'C') $('#btnCalm').click();
+  else if (e.key === 't' || e.key === 'T') $('#btnTheme').click();
+  else if (e.key === '?') openHelp();
+  else if (/^[1-5]$/.test(e.key)) { showTab(TABS[Number(e.key) - 1], true); $('#tab-' + TABS[Number(e.key) - 1]).focus(); }
+  else if (e.key === 'd' || e.key === 'D') { const b = $('#act-coa') || $('#act-rel'); if (b) b.focus(); }
+}
+function openHelp() {
+  if ($('#help')) return;
+  const d = el('div', 'dialog', null, document.body); d.id = 'help'; d.setAttribute('role', 'dialog'); d.setAttribute('aria-modal', 'true'); d.setAttribute('aria-labelledby', 'helpTitle');
+  el('h2', null, 'Keyboard', d).id = 'helpTitle';
+  const t = el('table', null, null, d); const tb = el('tbody', null, null, t);
+  [['Space', 'Play or pause'], ['N', 'Next beat (stops at a human gate)'], ['R', 'Restart'], ['1 to 5', 'Views: threat, COAs, wargame, comparison, orders'], ['D', 'Jump to the decision waiting for a person'], ['C', 'Calm: nothing moves'], ['T', 'Theme: Night, Day, High contrast'], ['Arrow keys', 'Move between agents in a section, and between views'], ['Enter', 'Open an agent, product or gate'], ['Escape', 'Close a card or dialog'], ['Tab, Shift+Tab', 'Header, rail, sections, view, matrix, decisions, products']].forEach(([k, v]) => { const r = el('tr', null, null, tb); const td = el('td', null, null, r); el('kbd', null, k, td); el('td', null, v, r); });
+  const row = el('div', 'signrow', null, d); row.style.marginTop = '10px';
+  const tog = el('button', 'btn', keysOn ? 'Turn single-key shortcuts off' : 'Turn single-key shortcuts on', row); tog.type = 'button';
+  tog.addEventListener('click', () => { keysOn = !keysOn; tog.textContent = keysOn ? 'Turn single-key shortcuts off' : 'Turn single-key shortcuts on'; });
+  const c = el('button', 'btn primary', 'Close', row); c.type = 'button'; c.addEventListener('click', () => { d.remove(); $('#btnHelp').focus(); });
+  c.focus();
+}
+function stopAll() {
+  S.stopped = true; S.playing = false; setPlayUi();
+  AGENTS.forEach((a) => { if (a.state === 'working' || a.state === 'waiting' || a.state === 'needs') { a.state = 'stopped'; a.node.className = 'tok s-stopped'; updateTokLabel(a); } });
+  refreshPods(); fx.replaceChildren(); liveTracers = 0; tracerQueue.length = 0;
+  $('#btnStop').textContent = '▶ Resume agents';
+  $('#beatName').textContent = 'All agents stopped by you';
+  toast('All agents stopped by you. Nothing was lost. Resume when ready.', 'stop');
+  announce('All agents stopped.', true);
+  $('#btnStop').onclick = null;
+  $('#btnStop').removeEventListener('click', stopAll); $('#btnStop').addEventListener('click', resumeAll);
+}
+function resumeAll() {
+  S.stopped = false;
+  AGENTS.forEach((a) => { if (a.state === 'stopped') { a.state = 'waiting'; a.node.className = 'tok s-waiting'; updateTokLabel(a); } });
+  refreshPods();
+  $('#btnStop').textContent = '■ Stop agents';
+  $('#btnStop').removeEventListener('click', resumeAll); $('#btnStop').addEventListener('click', stopAll);
+  S.playing = true; setPlayUi(); toast('Agents resumed by you.');
+}
+
+/* ---------- Init ---------- */
+function init() {
+  S.calm = !!prefs.calm; S.theme = prefs.theme || 'night';
+  applyTheme(); applyCalm();
+  renderSquads(); renderRail(); renderMatrix(); buildThreatMap(); buildCoaPane('A'); buildCoaPane('B'); buildCompare();
+  addProduct({ id: 'dir', name: 'Higher HQ planning directive', by: 'Higher HQ', sec: 'HHQ', status: 'received', time: '0605Z', tee: false, to: ['All sections'] });
+  addProduct({ id: 'ma', name: 'Mission analysis brief', ver: 3, by: 'lead-planner, all sections', sec: 'J5', status: 'approved', approvedBy: PEOPLE.cdr, time: '0840Z', to: ['Commander'], checks: ['approved by ' + PEOPLE.cdr] });
+  addProduct({ id: 'cpg', name: 'Commander\'s intent and planning guidance', by: PEOPLE.cdr, sec: 'CDR', status: 'released', time: '0852Z', tee: false, to: ['All sections'] });
+  addProduct({ id: 'crit', name: 'COA evaluation criteria and weights', ver: 2, by: 'lead-planner', sec: 'J5', status: 'approved', approvedBy: PEOPLE.cdr, time: '0852Z', to: ['J5'] });
+  $$('.prod').forEach((b) => b.classList.remove('fresh'));
+  renderDecisions();
+  buildTimeline();
+  wire(); updateClock(); setPlayUi();
+  let auto = false; try { auto = sessionStorage.getItem('staffroom.autoplay') === '1'; sessionStorage.removeItem('staffroom.autoplay'); } catch (e) { /* ignore */ }
+  if (auto || /[?&]autoplay/.test(location.search)) { S.playing = true; setPlayUi(); }
+  requestAnimationFrame(frame);
+  window.__staffroom = { S, nextBeat, fire, EV };
+}
+init();
+})();
+</script>
+</body>
+</html>
