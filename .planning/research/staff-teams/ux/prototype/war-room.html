@@ -522,6 +522,11 @@ textarea.guid { width: 100%; min-height: 54px; resize: vertical; background: var
 .stamp .seal .c { font: var(--fs-xs) var(--mono); color: var(--text2); }
 .burst { position: absolute; width: 280px; height: 280px; border-radius: 50%; border: 2px solid var(--human); }
 
+/* Narration captions */
+.caption { position: fixed; z-index: 66; left: 50%; bottom: 46px; transform: translateX(-50%); width: min(880px, calc(100vw - 48px)); background: color-mix(in srgb, var(--card) 94%, transparent); border: 1px solid var(--ai); border-radius: var(--r-m); box-shadow: var(--shadow); padding: 9px 14px; font-size: var(--fs-l); line-height: 1.45; text-align: center; }
+.caption .who { all: unset; display: block; font: 700 var(--fs-xs)/1 var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--ai-text); margin-bottom: 4px; }
+body.narr .toast { bottom: 118px; }
+
 /* Help and toasts */
 .dialog { position: fixed; z-index: 75; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 460px; background: var(--card); border: 1px solid var(--line2); border-radius: var(--r-l); box-shadow: var(--shadow); padding: 16px 18px; font-size: var(--fs-s); }
 .dialog h2 { margin: 0 0 8px; font-size: var(--fs-l); }
@@ -723,6 +728,7 @@ body.hc .step.now { border-width: 3px; }
     <div class="ctl r" role="group" aria-label="View">
       <button class="btn" id="btnCalm" type="button" aria-pressed="false" aria-keyshortcuts="C" title="Calm: nothing moves; every change still shows in words (C)">Calm</button>
       <button class="btn" id="btnTheme" type="button" aria-keyshortcuts="T" title="Theme: Night, Day, High contrast (T)">Night</button>
+      <button class="btn" id="btnNarr" type="button" aria-pressed="false" aria-keyshortcuts="V" title="Spoken narration with captions (V). Uses your browser's built-in voice; nothing is sent anywhere.">Narration off</button>
       <button class="btn" id="btnSound" type="button" aria-pressed="false" title="Sound is off by default">Sound off</button>
       <button class="btn" id="btnHelp" type="button" aria-keyshortcuts="?" title="Keyboard shortcuts (?)">Keys ?</button>
     </div>
@@ -756,7 +762,7 @@ const reduceMQ = window.matchMedia('(prefers-reduced-motion: reduce)');
 const D = { quick: 200, move: 450, handoff: 900, draw: 1100, ceremony: 1600 };
 const EASE = { std: 'cubic-bezier(.2,0,0,1)', exit: 'cubic-bezier(.3,0,1,1)', travel: 'cubic-bezier(.45,0,.2,1)', settle: 'cubic-bezier(.34,1.4,.64,1)' };
 
-const S = { t: 0, playing: false, speed: 1, hold: null, fired: 0, follow: true, calm: false, instant: false, profile: 'us-joint', theme: 'night', sound: false, stopped: false, ended: false, rev: 1, decision: null, stopAt: null };
+const S = { t: 0, playing: false, speed: 1, hold: null, fired: 0, follow: true, calm: false, instant: false, profile: 'us-joint', theme: 'night', sound: false, stopped: false, ended: false, rev: 1, decision: null, stopAt: null, narr: false, narrIdx: 0 };
 const motionOK = () => !S.calm && !S.instant && !reduceMQ.matches;
 const dur = (ms) => Math.round(S.speed < 1 ? ms / S.speed : ms / Math.max(1, S.speed * 0.75));
 function anim(node, frames, opts) { if (!motionOK() || !node || !node.animate) return null; return node.animate(frames, Object.assign({ easing: EASE.std }, opts, { duration: dur(opts.duration || D.move) })); }
@@ -1666,6 +1672,52 @@ const at = (t, fn) => EV.push({ t, fn });
 function hold(kind) { S.hold = kind; $('#beatName').textContent = kind === 'release' ? 'Waiting: the J2 releases the threat picture' : kind === 'gate' ? 'Waiting: the commander decides' : 'Waiting for a person'; }
 function release() { S.hold = null; }
 
+/* ---------- Narration: built-in browser speech plus captions. Offline; nothing leaves the page. ---------- */
+const NARR = [
+  { t: 0.05, text: 'This is a fictional exercise, Iron Lantern. The chief of staff gives each section its own area and a deadline for step three, course of action development. Watch the violet pulses: those are tasks.' },
+  { t: 1.6, text: 'The J2 section goes first, in parallel. One analyst places the enemy brigade from the order of battle, the collection manager links gaps to intelligence requirements, and the red cell gets ready to play the enemy.' },
+  { t: 7, text: 'The threat analyst drafts the enemy courses of action: the most likely, and the most dangerous. They draw straight onto the map.' },
+  { t: 12, text: 'The collection plan is ready: three priority intelligence requirements and three named areas of interest. These are recommendations only. The J3 decides which assets collect.' },
+  { t: 13.4, text: 'Before anything leaves the section, a tradecraft reviewer checks it against analytic standards: likelihood words, sources, alternatives.' },
+  { t: 15, text: 'Tradecraft signs off. Then the release guard scans for real data, markings and anything that could not be released.' },
+  { t: 16.5, text: 'Now the work stops. Only a person, the J2, can release this product. Gold always means a human decision. Press release to continue.' },
+  { t: 19, text: 'Released. The enemy picture flows to every section at once. The J5 lead planner gives two course of action cells different themes, so the options are genuinely different.' },
+  { t: 24.2, text: 'While the cells draft, J4 and J3 check both options at the same time: fuel and ammunition, landing craft, and which forces are available.' },
+  { t: 27.6, text: 'J4 reports back. Course of action A is supportable. B has a fuel risk thirty six hours in.' },
+  { t: 29, text: 'An independent red team challenges the assumptions in both plans. It finds a gap, and the J2 adds a new requirement: has the strait been mined?' },
+  { t: 33, text: 'Wargame. The planner runs it, the red cell plays the enemy commander to win, and the friendly cell plays course of action A. Action, reaction, counteraction, turn by turn.' },
+  { t: 38.6, text: 'Every move lands on the synchronization matrix as it happens. Decision points appear in gold where the commander will have to choose.' },
+  { t: 48.6, text: 'The logistics wargame runs alongside and adds a second decision point. Then the red team checks for bias: did both options face the same enemy?' },
+  { t: 52, text: 'Comparison. The approved criteria and weights are applied, and the scores fill in. A recommendation forms, and the dissent is kept, not edited out.' },
+  { t: 59, text: 'The plans writer builds the decision brief. The chief of staff makes sure every section has been heard.' },
+  { t: 63, text: 'The decision gate. The agents have stopped. The commander reads the brief and the dissent, acknowledges the risks, takes a moment to think, and signs. No agent can do this step.' },
+  { t: 64, text: 'Decision made. Orders production starts at once, and every section writes its own annex in parallel. Hours of staff work, compressed into minutes, with people deciding every step that matters.' },
+  { t: 71.2, text: 'The orders package is assembled and waiting for the commander to release it. That is the Staff Room.' }
+];
+let narrQueueT = null;
+function speakLine(text) {
+  $('#captionText').textContent = text; $('#caption').hidden = false;
+  if (!('speechSynthesis' in window)) return;
+  const fast = S.speed >= 2;
+  if (fast) speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(text);
+  u.rate = S.speed < 1 ? 0.92 : S.speed > 1 ? 1.25 : 1.04; u.pitch = 1; u.lang = 'en-US';
+  const v = speechSynthesis.getVoices().find((x) => /en-(US|GB|CA)/.test(x.lang) && /natural|neural|google|samantha|daniel/i.test(x.name)) || speechSynthesis.getVoices().find((x) => /^en/.test(x.lang));
+  if (v) u.voice = v;
+  speechSynthesis.speak(u);
+}
+function narrateTo(t) {
+  let last = null;
+  while (S.narrIdx < NARR.length && NARR[S.narrIdx].t <= t + 0.001) last = NARR[S.narrIdx++];
+  if (last && S.narr) { if (S.instant && 'speechSynthesis' in window) speechSynthesis.cancel(); speakLine(last.text); }
+}
+function setNarr(on) {
+  S.narr = on; document.body.classList.toggle('narr', on);
+  $('#btnNarr').setAttribute('aria-pressed', on ? 'true' : 'false'); $('#btnNarr').textContent = on ? 'Narration on' : 'Narration off';
+  if (!on) { $('#caption').hidden = true; if ('speechSynthesis' in window) speechSynthesis.cancel(); return; }
+  const cur = NARR.filter((n) => n.t <= S.t + 0.001).pop(); speakLine(cur ? cur.text : 'Narration on. Press Play, or Next step to go one beat at a time.');
+}
+
 function buildTimeline() {
   EV = [];
   const tok = (id) => A[id].node;
@@ -1923,6 +1975,7 @@ function fire(t) {
   while (S.fired < EV.length && EV[S.fired].t <= t && !S.hold) { const e = EV[S.fired++]; e.fn(); }
   if (S.hold) { const ev = EV[S.fired - 1]; if (ev) S.t = Math.min(S.t, ev.t); }
   if (!S.hold && !S.ended && !S.stopped) { const b = currentBeat(); $('#beatName').textContent = b.name; }
+  narrateTo(Math.min(t, S.t));
 }
 function skipBeat() {
   if (S.hold) { const b = S.hold === 'gate' ? $('#act-coa') : $('#act-rel'); if (b) { b.focus(); toast('A person must act here first. Agents cannot pass a gate.', 'human'); } return; }
@@ -1943,6 +1996,7 @@ function nextBeat(skip) {
   if (!S.playing) { S.playing = true; setPlayUi(); }
 }
 function setPlayUi() {
+  if ('speechSynthesis' in window && S.narr) { if (S.playing) speechSynthesis.resume(); }
   $('#playText').textContent = S.playing ? 'Pause' : (S.ended ? 'Ended' : 'Play');
   $('#playIcon').setAttribute('d', S.playing ? 'M5 3v10M11 3v10' : 'M4 3l9 5-9 5z');
   $('#btnPlay').setAttribute('aria-label', S.playing ? 'Pause the demo' : 'Play the demo');
@@ -1954,11 +2008,12 @@ function applyCalm() { document.body.classList.toggle('calm', S.calm); $('#btnCa
 function wire() {
   $('#btnPlay').addEventListener('click', () => { if (S.ended) return; if (S.stopped) { resumeAll(); return; } S.playing = !S.playing; S.stopAt = null; setPlayUi(); if (S.playing && S.hold) toast('Waiting for a person: see Human decisions.', 'human'); });
   $('#btnStep').addEventListener('click', (e) => nextBeat(e.shiftKey));
-  $('#btnRestart').addEventListener('click', () => { try { sessionStorage.setItem('staffroom.autoplay', '1'); } catch (e) { /* ignore */ } location.reload(); });
+  $('#btnRestart').addEventListener('click', () => { try { sessionStorage.setItem('staffroom.autoplay', '1'); if (S.narr) sessionStorage.setItem('staffroom.narr', '1'); } catch (e) { /* ignore */ } location.reload(); });
   $$('.seg button').forEach((b) => b.addEventListener('click', () => { S.speed = Number(b.dataset.speed); $$('.seg button').forEach((x) => x.setAttribute('aria-pressed', x === b ? 'true' : 'false')); }));
   $('#btnCalm').addEventListener('click', () => { S.calm = !S.calm; prefs.calm = S.calm; savePrefs(); applyCalm(); toast(S.calm ? 'Calm on: nothing moves. Every change still shows in words and icons.' : 'Calm off.'); });
   $('#btnTheme').addEventListener('click', () => { S.theme = { night: 'day', day: 'hc', hc: 'night' }[S.theme]; prefs.theme = S.theme; savePrefs(); applyTheme(); });
   $('#btnSound').addEventListener('click', () => { S.sound = !S.sound; $('#btnSound').setAttribute('aria-pressed', S.sound ? 'true' : 'false'); $('#btnSound').textContent = S.sound ? 'Sound on' : 'Sound off'; if (S.sound) sound('human'); });
+  $('#btnNarr').addEventListener('click', () => setNarr(!S.narr));
   $('#btnHelp').addEventListener('click', openHelp);
   $('#btnStop').addEventListener('click', stopAll);
   $('#btnFollow').addEventListener('click', () => setFollow(!S.follow));
@@ -1995,6 +2050,7 @@ function onKey(e) {
   else if (e.key === 'n' || e.key === 'N') nextBeat(e.shiftKey);
   else if (e.key === 'r' || e.key === 'R') $('#btnRestart').click();
   else if (e.key === 'c' || e.key === 'C') $('#btnCalm').click();
+  else if (e.key === 'v' || e.key === 'V') $('#btnNarr').click();
   else if (e.key === 't' || e.key === 'T') $('#btnTheme').click();
   else if (e.key === '?') openHelp();
   else if (/^[1-5]$/.test(e.key)) { showTab(TABS[Number(e.key) - 1], true); $('#tab-' + TABS[Number(e.key) - 1]).focus(); }
@@ -2005,7 +2061,7 @@ function openHelp() {
   const d = el('div', 'dialog', null, document.body); d.id = 'help'; d.setAttribute('role', 'dialog'); d.setAttribute('aria-modal', 'true'); d.setAttribute('aria-labelledby', 'helpTitle');
   el('h2', null, 'Keyboard', d).id = 'helpTitle';
   const t = el('table', null, null, d); const tb = el('tbody', null, null, t);
-  [['Space', 'Play or pause'], ['N', 'Play to the next beat, then pause (stops at a human gate)'], ['Shift+N', 'Skip straight to the next beat'], ['R', 'Restart'], ['1 to 5', 'Views: threat, COAs, wargame, comparison, orders'], ['D', 'Jump to the decision waiting for a person'], ['C', 'Calm: nothing moves'], ['T', 'Theme: Night, Day, High contrast'], ['Arrow keys', 'Move between agents in a section, and between views'], ['Enter', 'Open an agent, product or gate'], ['Escape', 'Close a card or dialog'], ['Tab, Shift+Tab', 'Header, rail, sections, view, matrix, decisions, products']].forEach(([k, v]) => { const r = el('tr', null, null, tb); const td = el('td', null, null, r); el('kbd', null, k, td); el('td', null, v, r); });
+  [['Space', 'Play or pause'], ['N', 'Play to the next beat, then pause (stops at a human gate)'], ['Shift+N', 'Skip straight to the next beat'], ['V', 'Narration with captions on or off'], ['R', 'Restart'], ['1 to 5', 'Views: threat, COAs, wargame, comparison, orders'], ['D', 'Jump to the decision waiting for a person'], ['C', 'Calm: nothing moves'], ['T', 'Theme: Night, Day, High contrast'], ['Arrow keys', 'Move between agents in a section, and between views'], ['Enter', 'Open an agent, product or gate'], ['Escape', 'Close a card or dialog'], ['Tab, Shift+Tab', 'Header, rail, sections, view, matrix, decisions, products']].forEach(([k, v]) => { const r = el('tr', null, null, tb); const td = el('td', null, null, r); el('kbd', null, k, td); el('td', null, v, r); });
   const row = el('div', 'signrow', null, d); row.style.marginTop = '10px';
   const tog = el('button', 'btn', keysOn ? 'Turn single-key shortcuts off' : 'Turn single-key shortcuts on', row); tog.type = 'button';
   tog.addEventListener('click', () => { keysOn = !keysOn; tog.textContent = keysOn ? 'Turn single-key shortcuts off' : 'Turn single-key shortcuts on'; });
@@ -2047,11 +2103,14 @@ function init() {
   wire(); updateClock(); setPlayUi();
   let auto = false; try { auto = sessionStorage.getItem('staffroom.autoplay') === '1'; sessionStorage.removeItem('staffroom.autoplay'); } catch (e) { /* ignore */ }
   if (auto || /[?&]autoplay/.test(location.search)) { S.playing = true; setPlayUi(); }
+  let narr = false; try { narr = sessionStorage.getItem('staffroom.narr') === '1'; sessionStorage.removeItem('staffroom.narr'); } catch (e) { /* ignore */ }
+  if (narr || /[?&]narrate/.test(location.search)) setNarr(true);
   requestAnimationFrame(frame);
   window.__staffroom = { S, nextBeat, fire, EV };
 }
 init();
 })();
 </script>
+<div class="caption" id="caption" role="status" aria-live="off" hidden><span class="who">Narrator</span><span id="captionText"></span></div>
 </body>
 </html>
