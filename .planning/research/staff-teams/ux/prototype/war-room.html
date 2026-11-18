@@ -590,9 +590,9 @@ body.hc .step.now { border-width: 3px; }
     </div>
     <div class="ctl" role="group" aria-label="Demo controls">
       <button class="btn primary" id="btnPlay" type="button" aria-keyshortcuts="Space"><svg viewBox="0 0 16 16" aria-hidden="true"><path id="playIcon" d="M4 3l9 5-9 5z"/></svg><span id="playText">Play</span></button>
-      <button class="btn" id="btnStep" type="button" aria-keyshortcuts="N" title="Skip to the next beat (N)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3l6 5-6 5zM10 3v10"/></svg>Next</button>
+      <button class="btn" id="btnStep" type="button" aria-keyshortcuts="N" title="Play to the next beat, then pause (N). Shift+N skips straight there."><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3l6 5-6 5zM10 3v10"/></svg>Next step</button>
       <div class="seg" role="group" aria-label="Speed">
-        <button type="button" data-speed="1" aria-pressed="true">1x</button><button type="button" data-speed="2" aria-pressed="false">2x</button><button type="button" data-speed="4" aria-pressed="false">4x</button>
+        <button type="button" data-speed="0.5" aria-pressed="false">0.5x</button><button type="button" data-speed="1" aria-pressed="true">1x</button><button type="button" data-speed="2" aria-pressed="false">2x</button><button type="button" data-speed="4" aria-pressed="false">4x</button>
       </div>
       <button class="btn" id="btnRestart" type="button" aria-keyshortcuts="R" title="Restart the demo (R)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8a5 5 0 1 0 1.5-3.6M3 2.5v3h3"/></svg>Restart</button>
     </div>
@@ -756,9 +756,9 @@ const reduceMQ = window.matchMedia('(prefers-reduced-motion: reduce)');
 const D = { quick: 200, move: 450, handoff: 900, draw: 1100, ceremony: 1600 };
 const EASE = { std: 'cubic-bezier(.2,0,0,1)', exit: 'cubic-bezier(.3,0,1,1)', travel: 'cubic-bezier(.45,0,.2,1)', settle: 'cubic-bezier(.34,1.4,.64,1)' };
 
-const S = { t: 0, playing: false, speed: 1, hold: null, fired: 0, follow: true, calm: false, instant: false, profile: 'us-joint', theme: 'night', sound: false, stopped: false, ended: false, rev: 1, decision: null };
+const S = { t: 0, playing: false, speed: 1, hold: null, fired: 0, follow: true, calm: false, instant: false, profile: 'us-joint', theme: 'night', sound: false, stopped: false, ended: false, rev: 1, decision: null, stopAt: null };
 const motionOK = () => !S.calm && !S.instant && !reduceMQ.matches;
-const dur = (ms) => Math.round(ms / Math.max(1, S.speed * 0.75));
+const dur = (ms) => Math.round(S.speed < 1 ? ms / S.speed : ms / Math.max(1, S.speed * 0.75));
 function anim(node, frames, opts) { if (!motionOK() || !node || !node.animate) return null; return node.animate(frames, Object.assign({ easing: EASE.std }, opts, { duration: dur(opts.duration || D.move) })); }
 
 /* ---------- Doctrine profiles (from research notes 02, 03, 05) ---------- */
@@ -1916,7 +1916,7 @@ function afterDecision(choice, guidance, at2) {
 let lastTs = 0;
 function frame(ts) {
   const dt = lastTs ? Math.min(0.1, (ts - lastTs) / 1000) : 0; lastTs = ts;
-  if (S.playing && !S.hold && !S.stopped && !document.hidden) { S.t += dt * S.speed; fire(S.t); updateClock(); }
+  if (S.playing && !S.hold && !S.stopped && !document.hidden) { S.t += dt * S.speed; if (S.stopAt !== null && S.t >= S.stopAt) { S.t = S.stopAt; S.stopAt = null; fire(S.t); S.playing = false; setPlayUi(); updateClock(); } else { fire(S.t); updateClock(); } }
   requestAnimationFrame(frame);
 }
 function fire(t) {
@@ -1924,7 +1924,7 @@ function fire(t) {
   if (S.hold) { const ev = EV[S.fired - 1]; if (ev) S.t = Math.min(S.t, ev.t); }
   if (!S.hold && !S.ended && !S.stopped) { const b = currentBeat(); $('#beatName').textContent = b.name; }
 }
-function nextBeat() {
+function skipBeat() {
   if (S.hold) { const b = S.hold === 'gate' ? $('#act-coa') : $('#act-rel'); if (b) { b.focus(); toast('A person must act here first. Agents cannot pass a gate.', 'human'); } return; }
   if (S.ended) return;
   const nb = BEATS.find((b) => b.t > S.t + 0.01); if (!nb) return;
@@ -1932,6 +1932,14 @@ function nextBeat() {
   if (!S.hold) S.t = nb.t - 0.001;
   liveTracers = 0; tracerQueue.length = 0; fx.replaceChildren();
   updateClock();
+  if (!S.playing) { S.playing = true; setPlayUi(); }
+}
+function nextBeat(skip) {
+  if (skip) { skipBeat(); return; }
+  if (S.hold) { skipBeat(); return; }
+  if (S.ended) return;
+  const nb = BEATS.find((b) => b.t > S.t + 0.01); if (!nb) return;
+  S.stopAt = nb.t - 0.001; if (S.stopped) return;
   if (!S.playing) { S.playing = true; setPlayUi(); }
 }
 function setPlayUi() {
@@ -1944,8 +1952,8 @@ function setPlayUi() {
 function applyTheme() { document.body.classList.remove('night', 'day', 'hc'); document.body.classList.add(S.theme); $('#btnTheme').textContent = { night: 'Night', day: 'Day', hc: 'High contrast' }[S.theme]; if (S.calm) document.body.classList.add('calm'); }
 function applyCalm() { document.body.classList.toggle('calm', S.calm); $('#btnCalm').setAttribute('aria-pressed', S.calm ? 'true' : 'false'); }
 function wire() {
-  $('#btnPlay').addEventListener('click', () => { if (S.ended) return; if (S.stopped) { resumeAll(); return; } S.playing = !S.playing; setPlayUi(); if (S.playing && S.hold) toast('Waiting for a person: see Human decisions.', 'human'); });
-  $('#btnStep').addEventListener('click', nextBeat);
+  $('#btnPlay').addEventListener('click', () => { if (S.ended) return; if (S.stopped) { resumeAll(); return; } S.playing = !S.playing; S.stopAt = null; setPlayUi(); if (S.playing && S.hold) toast('Waiting for a person: see Human decisions.', 'human'); });
+  $('#btnStep').addEventListener('click', (e) => nextBeat(e.shiftKey));
   $('#btnRestart').addEventListener('click', () => { try { sessionStorage.setItem('staffroom.autoplay', '1'); } catch (e) { /* ignore */ } location.reload(); });
   $$('.seg button').forEach((b) => b.addEventListener('click', () => { S.speed = Number(b.dataset.speed); $$('.seg button').forEach((x) => x.setAttribute('aria-pressed', x === b ? 'true' : 'false')); }));
   $('#btnCalm').addEventListener('click', () => { S.calm = !S.calm; prefs.calm = S.calm; savePrefs(); applyCalm(); toast(S.calm ? 'Calm on: nothing moves. Every change still shows in words and icons.' : 'Calm off.'); });
@@ -1984,7 +1992,7 @@ function onKey(e) {
   if (!keysOn || e.ctrlKey || e.metaKey || e.altKey) return;
   const tag = (e.target.tagName || '').toLowerCase(); if (tag === 'input' || tag === 'textarea' || tag === 'select' || $('#overlay')) return;
   if (e.key === ' ' && tag !== 'button') { e.preventDefault(); $('#btnPlay').click(); }
-  else if (e.key === 'n' || e.key === 'N') nextBeat();
+  else if (e.key === 'n' || e.key === 'N') nextBeat(e.shiftKey);
   else if (e.key === 'r' || e.key === 'R') $('#btnRestart').click();
   else if (e.key === 'c' || e.key === 'C') $('#btnCalm').click();
   else if (e.key === 't' || e.key === 'T') $('#btnTheme').click();
@@ -1997,7 +2005,7 @@ function openHelp() {
   const d = el('div', 'dialog', null, document.body); d.id = 'help'; d.setAttribute('role', 'dialog'); d.setAttribute('aria-modal', 'true'); d.setAttribute('aria-labelledby', 'helpTitle');
   el('h2', null, 'Keyboard', d).id = 'helpTitle';
   const t = el('table', null, null, d); const tb = el('tbody', null, null, t);
-  [['Space', 'Play or pause'], ['N', 'Next beat (stops at a human gate)'], ['R', 'Restart'], ['1 to 5', 'Views: threat, COAs, wargame, comparison, orders'], ['D', 'Jump to the decision waiting for a person'], ['C', 'Calm: nothing moves'], ['T', 'Theme: Night, Day, High contrast'], ['Arrow keys', 'Move between agents in a section, and between views'], ['Enter', 'Open an agent, product or gate'], ['Escape', 'Close a card or dialog'], ['Tab, Shift+Tab', 'Header, rail, sections, view, matrix, decisions, products']].forEach(([k, v]) => { const r = el('tr', null, null, tb); const td = el('td', null, null, r); el('kbd', null, k, td); el('td', null, v, r); });
+  [['Space', 'Play or pause'], ['N', 'Play to the next beat, then pause (stops at a human gate)'], ['Shift+N', 'Skip straight to the next beat'], ['R', 'Restart'], ['1 to 5', 'Views: threat, COAs, wargame, comparison, orders'], ['D', 'Jump to the decision waiting for a person'], ['C', 'Calm: nothing moves'], ['T', 'Theme: Night, Day, High contrast'], ['Arrow keys', 'Move between agents in a section, and between views'], ['Enter', 'Open an agent, product or gate'], ['Escape', 'Close a card or dialog'], ['Tab, Shift+Tab', 'Header, rail, sections, view, matrix, decisions, products']].forEach(([k, v]) => { const r = el('tr', null, null, tb); const td = el('td', null, null, r); el('kbd', null, k, td); el('td', null, v, r); });
   const row = el('div', 'signrow', null, d); row.style.marginTop = '10px';
   const tog = el('button', 'btn', keysOn ? 'Turn single-key shortcuts off' : 'Turn single-key shortcuts on', row); tog.type = 'button';
   tog.addEventListener('click', () => { keysOn = !keysOn; tog.textContent = keysOn ? 'Turn single-key shortcuts off' : 'Turn single-key shortcuts on'; });
