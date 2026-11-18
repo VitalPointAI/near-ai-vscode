@@ -1,5 +1,5 @@
 ---
-product: coa-comparison
+product: comparison-matrix
 kind: matrix
 section: j5
 owner: lead-planner

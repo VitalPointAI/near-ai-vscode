@@ -1,21 +1,21 @@
 ---
-product: coa-comparison
+product: comparison-matrix
 kind: matrix
 section: j5
 owner: lead-planner
-profile: us-joint
-level: operational
+profile: us-army
+level: tactical
 version: 1
 state: draft
 label: org/Internal
 depends_on: [coa-a@1, coa-b@1]
 ---
 
-# J-5 COA comparison, JTF BEACON
+# G-5 COA comparison, TF ANVIL
 
 > UNCLASSIFIED // EXERCISE // FICTIONAL DATA
 
-Method from JP 5-0 appendix E.
+Method from FM 5-0.
 
 ## Criteria
 

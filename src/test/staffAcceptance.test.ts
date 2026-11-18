@@ -151,7 +151,7 @@ test('J5 products must name the higher order, carry every assumption and cite th
 });
 
 test('a decision written as made, a marking, the wrong intelligence preparation or a retired space term fails', () => {
-  const comparison = sample('us-joint-operational', 'coa-comparison');
+  const comparison = sample('us-joint-operational', 'comparison-matrix');
   assert.deepEqual(kinds(`${comparison}\nCOA A is selected.\n`, US_JOINT('coa-comparison')), ['forbidden']);
   assert.deepEqual(kinds(`${comparison}\nWe approve COA A.\n`, US_JOINT('coa-comparison')), ['forbidden']);
   assert.deepEqual(kinds(`${comparison}\nSECRET\n`, US_JOINT('coa-comparison')), ['forbidden']);
