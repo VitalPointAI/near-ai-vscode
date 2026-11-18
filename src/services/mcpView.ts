@@ -91,6 +91,8 @@ ${layoutProbeTag(nonce, layoutProbeAsset(view.webview, shared))}<script nonce="$
           await declareOrReport(() => mcp.declareMcpToolEffects(known.id, tool, choice as McpDeclareChoice), (text) => { void view.webview.postMessage({ type: 'error', text }); });
           break;
         }
+        // The person approves the tools the connected server lists now, after its tools changed (WP-GATE).
+        case 'approve-tools': if (known) await mcp.approveToolChanges(known.id); break;
         case 'connect': if (known) await mcp.connectServer(known.id); break;
         case 'disconnect': if (known) await mcp.disconnect(known.id); break;
       }

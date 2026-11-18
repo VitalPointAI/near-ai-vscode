@@ -51,6 +51,13 @@ export interface BundleCeiling {
   readonly contexts: Readonly<Partial<Record<CapabilityVerb, readonly GateContextName[]>>>;
   /** MCP servers allowed in unattended runs, by id. Empty means none is named. */
   readonly unattendedMcp: readonly string[];
+  /**
+   * The highest label each named MCP server may ever receive, by server id (WP-GATE, research note 01 section 4). A call to a named server is refused, before
+   * anything is sent, when the chat's mark is not dominated by the server's ceiling, at every routing tier. A server with no entry keeps today's behaviour,
+   * and the field is absent from the shipped default, so nothing changes on a fresh install. The ceiling has a clearance's shape (a level on a scale,
+   * compartments, releasability and an optional expiry): an expired ceiling dominates nothing, so the server receives nothing until the policy is renewed.
+   */
+  readonly mcpLabelCeilings?: Readonly<Record<string, Clearance>>;
 }
 
 export interface PolicyBundle {
@@ -175,6 +182,9 @@ const MAX_URI = 2048;
 const MAX_DEPTH = 16;
 const HEX_64 = /^[0-9a-f]{64}$/;
 const PURPOSE_PATTERN = /^[a-z][a-z0-9-]{0,31}$/;
+/** An MCP server id as the MCP page stores it (1 to 31 lowercase letters, digits or dashes); a key like `__proto__` can never match. */
+export const MCP_SERVER_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,30}$/;
+const MAX_MCP_CEILINGS = 256;
 
 function parseTimestamp(value: unknown, path: string): Parsed<string> {
   if (typeof value !== 'string' || Number.isNaN(parseIsoMillis(value))) return refused('wrong-type', path);
@@ -257,9 +267,28 @@ function parseServerIds(value: unknown, path: string): Parsed<readonly string[]>
   return { ok: true, value: Object.freeze(out) };
 }
 
+/**
+ * The MCP label ceilings: each key a server id the MCP page could store, each value a clearance on the bundle's own scales. An unknown scale or level, a
+ * malformed token, the reserved "releasable to no one" token and a server id that is not one are each refused, so a ceiling never means something it does not say.
+ */
+function parseMcpLabelCeilings(value: unknown, scales: ScaleTable, path: string): Parsed<Readonly<Record<string, Clearance>>> {
+  if (!isRecord(value)) return refused('wrong-type', path);
+  const ids = Object.keys(value);
+  if (ids.length > MAX_MCP_CEILINGS) return refused('not-allowed-here', path);
+  const out: Record<string, Clearance> = {};
+  for (const id of ids.sort()) {
+    if (!MCP_SERVER_ID_PATTERN.test(id)) return refused('not-allowed-here', childPath(path, id.slice(0, 40)));
+    const ceiling = parseClearance(ownValue(value, id), scales, childPath(path, id));
+    if (!ceiling.ok) return ceiling;
+    out[id] = ceiling.value;
+  }
+  return { ok: true, value: Object.freeze(out) };
+}
+
 function parseCeiling(value: unknown, path: string): Parsed<BundleCeiling> {
   if (!isRecord(value)) return refused('wrong-type', path);
-  const keys = checkKeys(value, path, ['maxMode', 'contexts', 'unattendedMcp']);
+  // mcpLabelCeilings is read after the scales, in parseBundle, since its levels are the bundle's own.
+  const keys = checkKeys(value, path, ['maxMode', 'contexts', 'unattendedMcp'], ['mcpLabelCeilings']);
   if (keys !== undefined) return keys;
   const maxMode = parseMaxMode(ownValue(value, 'maxMode'), childPath(path, 'maxMode'));
   if (!maxMode.ok) return maxMode;
@@ -490,6 +519,13 @@ export function parseBundle(value: unknown, path = ''): Parsed<PolicyBundle> {
     ownValue(value, 'clearances'), childPath(path, 'clearances'), MAX_CLEARANCES, (item, where) => parseClearance(item, scales.value, where), clearanceKey
   );
   if (!clearances.ok) return clearances;
+  const ceilingValue = ownValue(value, 'ceiling') as Record<string, unknown>;
+  let fullCeiling: BundleCeiling = ceiling.value;
+  if (Object.prototype.hasOwnProperty.call(ceilingValue, 'mcpLabelCeilings')) {
+    const mcpLabelCeilings = parseMcpLabelCeilings(ownValue(ceilingValue, 'mcpLabelCeilings'), scales.value, childPath(childPath(path, 'ceiling'), 'mcpLabelCeilings'));
+    if (!mcpLabelCeilings.ok) return mcpLabelCeilings;
+    fullCeiling = Object.freeze({ ...ceiling.value, mcpLabelCeilings: mcpLabelCeilings.value });
+  }
   const routing = parseRouting(ownValue(value, 'routing'), scales.value, childPath(path, 'routing'));
   if (!routing.ok) return routing;
   const defaultLabel = parseLabel(ownValue(value, 'defaultLabel'), scales.value, childPath(path, 'defaultLabel'));
@@ -508,7 +544,7 @@ export function parseBundle(value: unknown, path = ''): Parsed<PolicyBundle> {
       issuer: issuer.value,
       issuedAt: issuedAt.value,
       expiresAt: expiresAt.value,
-      ceiling: ceiling.value,
+      ceiling: fullCeiling,
       scales: scales.value,
       mappings: mappings.value,
       clearances: clearances.value,

@@ -443,7 +443,12 @@ is what that file and the records beside it do in this version.
   with no label takes your policy's default label, so a policy with no
   clearance on that scale cannot read it. Decision records hold the labels
   involved and stay on this computer. Where a labelled chat's content may be
-  sent is in [Classification labels and routing](#classification-labels-and-routing). Labels and routing are an organizational control that helps prevent mistakes. They check what NEAR AI itself sends to a model and what its own file tools read, and they cannot see everything a shell command or an add-on server does. They do not make this device accredited for classified information. Until verified credentials arrive, your clearance is the one you declared yourself, so it is not an enforced boundary.
+  sent is in [Classification labels and routing](#classification-labels-and-routing). **A ceiling per add-on server.** Your policy can also set the highest label
+each MCP server may receive. A call to that server from a chat whose label is
+above it is refused before anything is sent, at every tier, with
+`label.mcp-ceiling`; see "MCP connections" below.
+
+Labels and routing are an organizational control that helps prevent mistakes. They check what NEAR AI itself sends to a model and what its own file tools read, and they cannot see everything a shell command or an add-on server does. They do not make this device accredited for classified information. Until verified credentials arrive, your clearance is the one you declared yourself, so it is not an enforced boundary.
 - **Your clearance is your own word.** Until verified credentials arrive, your clearance comes from your own policy file, which your own device key signs, so it is self-declared. It is not an enforced clearance boundary.
 
 ### Classification labels and routing
@@ -531,6 +536,11 @@ local-only or deny, a web fetch, a web search, an add-on server call or a
 command that could send data off this computer is refused, whatever the mode,
 and a refused request names **NEAR AI: Lower This Chat's Label** as the way out
 when what the chat read allows it. While a chat holds content whose label may not go to any cloud (Internal, Confidential or higher by default), NEAR AI keeps fingerprints of the labelled text its agents read, never the text itself, only in memory and never in a record, and refuses a web fetch, a web search, an add-on server call or a command that could send data off this computer when what it would send carries some of that text. This catches labelled text copied or quoted into a request. It does not catch a paraphrase, an encoding such as base64, or a program the agent starts that reads the file and sends it itself; a planned sandbox around the shell is the stronger fix. A chat reopened after a reload or a restart cannot tell which of its earlier results came from labelled files, so it treats all of them as labelled: a call that would send text from any of them is refused, and the refusal says why.
+
+**A ceiling per add-on server.** Your policy can also set the highest label
+each MCP server may receive. A call to that server from a chat whose label is
+above it is refused before anything is sent, at every tier, with
+`label.mcp-ceiling`; see "MCP connections" below.
 
 Labels and routing are an organizational control that helps prevent mistakes. They check what NEAR AI itself sends to a model and what its own file tools read, and they cannot see everything a shell command or an add-on server does. They do not make this device accredited for classified information. Until verified credentials arrive, your clearance is the one you declared yourself, so it is not an enforced boundary.
 
@@ -1019,6 +1029,47 @@ Brave Search, or Tavily (keys in SecretStorage). It is off until you choose.
   a local server is a program on your computer with the same access you have.
 - **Results** are outside content: fenced, scanned for injection attempts, and
   shown in Agent Activity.
+- **Tool descriptions** are outside content too. A server's description of each
+  tool reaches the model only inside an `<untrusted-content>` block with a
+  random id, after a line that says it is the server's own words and never
+  instructions. It is cut to 1,024 characters before it is fenced, so the fence
+  is never cut; hidden characters are removed and likely injections are flagged
+  inside the block, and the person is told once per window which tool's
+  description was flagged. The input schema's own field descriptions are not
+  fenced; they are covered by the change check below.
+- **Changed tools are held.** The tools a server lists at its first connection
+  after you add it (or, for a server added before this version, at its next
+  connection) are recorded as the ones you approved: a digest of each tool's
+  name, description, input schema and read-only, destructive and open-world
+  hints, kept with the server's settings. When the server later lists a new
+  tool, or changes any of those for a tool, that tool is not offered to agents,
+  the chat says which tools changed, and the MCP page shows the change with
+  **Approve tool changes**. Approving needs a live connection, so what you
+  approve is the listing the page shows. A tool the server no longer lists is
+  reported the same way. The first listing is trusted as it is: read it on the
+  MCP page before you switch a server on for a project.
+- **A label ceiling per server.** Your policy can name, per server id, the
+  highest label the server may ever receive, in `ceiling.mcpLabelCeilings`
+  (through **NEAR AI: Edit Policy**; for example
+  `{ "partner": { "scale": "org", "level": "Internal", "compartments": [], "releasability": [] } }`).
+  A ceiling has a clearance's shape: a level on one of the policy's scales,
+  compartments, releasability and an optional `expiresAt`. Every call to a
+  named server is checked before anything is sent, at every routing tier and
+  whether the server runs here or elsewhere: each label of the chat (and of
+  what the call itself reads) must be at or under the ceiling, on the same
+  scale or through a mapping in the policy, with every compartment the label
+  has and, when the label restricts releasability, a releasability in common.
+  A chat with no label above the default is judged at the policy's default
+  label. Otherwise the call is refused with `label.mcp-ceiling`, the tool never
+  runs, the refusal names the label and the ceiling, and a decision record
+  names the rule and the label, never the arguments. An expired ceiling lets
+  nothing through. A server with no ceiling behaves as before, and the shipped
+  policy names none, so nothing changes until you set one. The ceiling lives
+  only in the signed policy, never in a server's settings or manifest, so
+  raising or lowering it is a policy change like any other. The policy file
+  refuses a ceiling with an unknown scale or level, an unknown field, or a key
+  that is not a server id, and then fails closed. Set the ceiling on the scale
+  your labels use: a label on another scale with no mapping is above it.
 - **Not yet supported:** servers that require an interactive OAuth sign-in.
   Servers authenticated by a token in the URL or a header work.
 

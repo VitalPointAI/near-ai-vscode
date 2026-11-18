@@ -1,6 +1,7 @@
 import type { AgentTool } from '../agent/tools';
 import { displayHost, McpConnection, McpSecrets, McpServerConfig, McpToolInfo } from '../mcp/client';
-import { mcpAgentTools, newServerManifest, serverManifest } from '../mcp/tools';
+import { mcpAgentTools, mcpToolChanges, mcpToolDescription, mcpToolDigest, mcpToolDigests, newServerManifest, serverManifest } from '../mcp/tools';
+import type { McpToolChanges } from '../mcp/tools';
 import { defaultMcpContexts, mcpToolEffects, parseMcpManifest, parseMcpServerEffects } from '../domain/gate/manifest';
 import type { McpManifest } from '../domain/gate/manifest';
 import { describeMcpManifest, describeMcpTools, mcpToolChoiceOf } from '../domain/gate/words';
@@ -35,6 +36,24 @@ export interface McpServerStatus {
   manifestWords: string[];
   /** What the person has declared for each tool the server lists right now: `unknown` for one with no declaration. */
   toolChoices: Record<string, McpToolChoice>;
+  /** How the tools the server lists now differ from the ones the person approved (WP-GATE); absent when they do not, or nothing is connected. */
+  toolChanges?: McpToolChanges;
+}
+
+/** The notice for a server whose tools changed after the person approved them (WP-GATE). Plain words; names only the tools, never what they say. */
+export function toolChangesNotice(serverName: string, changes: McpToolChanges): string {
+  const parts = [
+    ...(changes.added.length ? [`new: ${changes.added.join(', ')}`] : []),
+    ...(changes.changed.length ? [`changed description, inputs or hints: ${changes.changed.join(', ')}`] : []),
+    ...(changes.removed.length ? [`no longer listed: ${changes.removed.join(', ')}`] : [])
+  ];
+  const held = changes.added.length + changes.changed.length > 0 ? ' New and changed tools are not offered to agents until you approve them.' : '';
+  return `MCP server ${serverName} changed its tools since you approved them (${parts.join('; ')}).${held} Review them with NEAR AI: Manage MCP Connections and choose Approve tool changes.`;
+}
+
+/** The notice for a tool whose description looks like it tries to instruct the assistant (WP-GATE): it is fenced as untrusted, and the person is told. */
+export function descriptionWarningNotice(serverName: string, toolName: string, warnings: readonly string[]): string {
+  return `The description of ${toolName} on MCP server ${serverName} ${warnings.join('; ')}. It is passed to the model only as fenced, untrusted text; check that you trust this server.`;
 }
 
 /** The three things the MCP page lets a person say a tool does (D-06, D-07). */
@@ -85,6 +104,8 @@ function manifestFacts(config: McpServerConfig, host: string, tools: McpToolInfo
 
 export class McpRegistry {
   private readonly live = new Map<string, Live>();
+  /** Description warnings already told in this window, by server, tool and digest, so one description is reported once, not on every message. */
+  private readonly toldWarnings = new Set<string>();
   private readonly listeners = new Set<() => void>();
 
   /**
@@ -121,7 +142,9 @@ export class McpRegistry {
    */
   private withManifest(config: McpServerConfig): McpServerConfig {
     const existing = this.servers().find((server) => server.id === config.id);
-    const { manifest: _ignored, ...rest } = config;
+    const { manifest: _ignored, approvedTools: _approved, ...base } = config;
+    // The approved tool listing is the registry's own record (WP-GATE): an edit from the page carries none, so the stored one is kept.
+    const rest: McpServerConfig = existing?.approvedTools === undefined ? base : { ...base, approvedTools: existing.approvedTools };
     const given = config.manifest ?? existing?.manifest;
     if (given === undefined) return existing ? rest : { ...rest, manifest: newServerManifest(config.id, config.transport) };
     if (existing !== undefined && existing.transport !== config.transport) {
@@ -201,6 +224,8 @@ export class McpRegistry {
       await connection.connect();
       live.connection = connection;
       live.state = 'connected';
+      // The first connection records the tools the person approved by adding the server (WP-GATE); later changes wait for approveToolChanges.
+      if (config.approvedTools === undefined) await this.recordApprovedTools(id, connection.tools);
       return connection;
     } catch (error) {
       live.state = 'error';
@@ -210,6 +235,24 @@ export class McpRegistry {
     } finally {
       this.changed();
     }
+  }
+
+  private async recordApprovedTools(id: string, tools: readonly McpToolInfo[]): Promise<void> {
+    const approvedTools = mcpToolDigests(tools);
+    await this.global.update(SERVERS_KEY, this.servers().map((server) => (server.id === id ? { ...server, approvedTools } : server)));
+  }
+
+  /**
+   * The person approves the tools a connected server lists now, descriptions, inputs and hints included (WP-GATE): from then on they are the ones offered,
+   * and a later change is held again. Only the listing of a live connection can be approved, so what is approved is what the page showed.
+   */
+  public async approveToolChanges(id: string): Promise<void> {
+    const config = this.servers().find((server) => server.id === id);
+    if (!config) throw new Error(`No MCP server ${id}.`);
+    const connection = this.live.get(id)?.connection;
+    if (!connection?.connected) throw new Error(`Connect ${config.name} to see its tools before approving them.`);
+    await this.recordApprovedTools(id, connection.tools);
+    this.changed();
   }
 
   public async disconnect(id: string): Promise<void> {
@@ -227,13 +270,27 @@ export class McpRegistry {
     const problems: string[] = [];
     const declarations = this.localDeclarations(problems);
     await Promise.all(this.enabledHere().map(async (id) => {
-      const stored = this.servers().find((server) => server.id === id)!;
-      const config = this.withLocalEffects(stored, declarations, problems);
+      const name = this.servers().find((server) => server.id === id)!.name;
       try {
         const connection = await this.connectServer(id);
-        tools.push(...mcpAgentTools(config, connection, displayHost(await this.secretsFor(id)), { onCall: (serverId, ok, ms) => this.recordCall(serverId, ok, ms) }));
+        // Read after connecting: the first connection records the approved tools on the stored server.
+        const config = this.withLocalEffects(this.servers().find((server) => server.id === id)!, declarations, problems);
+        const changes = mcpToolChanges(config.approvedTools, connection.tools);
+        if (changes !== undefined) problems.push(toolChangesNotice(config.name, changes));
+        const offered = mcpAgentTools(config, connection, displayHost(await this.secretsFor(id)), { onCall: (serverId, ok, ms) => this.recordCall(serverId, ok, ms) });
+        const disabled = new Set(config.disabledTools ?? []);
+        for (const tool of connection.tools) {
+          if (disabled.has(tool.name)) continue;
+          const warnings = mcpToolDescription(config.name, tool).warnings;
+          const told = `${id}\u0000${tool.name}\u0000${mcpToolDigest(tool)}`;
+          if (warnings.length > 0 && !this.toldWarnings.has(told)) {
+            this.toldWarnings.add(told);
+            problems.push(descriptionWarningNotice(config.name, tool.name, warnings));
+          }
+        }
+        tools.push(...offered);
       } catch (error) {
-        problems.push(`MCP server ${config.name} is unavailable, so its tools are not offered this time: ${(error as Error).message}`);
+        problems.push(`MCP server ${name} is unavailable, so its tools are not offered this time: ${(error as Error).message}`);
       }
     }));
     return { tools, problems };
@@ -291,7 +348,8 @@ export class McpRegistry {
         state: live.state, ...(live.error ? { error: live.error } : {}), ...(live.connection?.serverInfo ? { serverInfo: live.connection.serverInfo } : {}),
         tools: live.connection?.tools ?? [], calls: live.calls, errors: live.errors,
         ...(live.calls ? { averageMs: Math.round(live.totalMs / live.calls) } : {}), ...(live.lastUsed ? { lastUsed: live.lastUsed } : {}),
-        ...manifestFacts(config, displayHost(secrets).replace(/:\d+$/, ''), live.connection?.tools ?? [])
+        ...manifestFacts(config, displayHost(secrets).replace(/:\d+$/, ''), live.connection?.tools ?? []),
+        ...(() => { const changes = live.connection?.connected ? mcpToolChanges(config.approvedTools, live.connection.tools) : undefined; return changes === undefined ? {} : { toolChanges: changes }; })()
       };
     }));
   }

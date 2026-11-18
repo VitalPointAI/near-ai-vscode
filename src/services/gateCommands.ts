@@ -12,7 +12,7 @@ import * as vscode from 'vscode';
 import { CAPABILITY_VERBS } from '../domain/gate/vocabulary';
 import type { BundleState } from '../domain/gate/bundle';
 import { CLEARANCE_SELF_ASSERTED_TEXT, HANDLING_FLAGS, LABELS_NOT_ACCREDITATION_TEXT, LABEL_TOKEN_PATTERN, SCALE_PRESETS_CAVEAT_TEXT, labelKey, parseLabel } from '../domain/gate/labels';
-import type { Label } from '../domain/gate/labels';
+import type { Clearance, Label } from '../domain/gate/labels';
 import { dominates, raiseMark, sameMark } from '../domain/gate/dominance';
 import type { Mark } from '../domain/gate/dominance';
 import { chatInView, isChatInView, onChatInViewChange, queueChatNotice } from './chatInView';
@@ -101,6 +101,21 @@ function sectionList(lines: readonly string[]): string[] {
  * the ceiling, the default label (with what it means for unlabelled content, Pitfall 14), the scales, clearances and routing it holds and the reserved
  * fields. What this version uses of them is said above them, and the clearance is marked as self-declared (D-27), wherever they appear.
  */
+/** The MCP label ceilings in plain words (WP-GATE): one line per named server, or one line saying none is set, so every server keeps today's behaviour. */
+function mcpCeilingLines(ceilings: Readonly<Record<string, Clearance>> | undefined): string[] {
+  const ids = ceilings === undefined ? [] : Object.keys(ceilings).sort();
+  if (ceilings === undefined || ids.length === 0) return ['  Highest label each add-on server may receive: none set, so no server is limited by label'];
+  return ['  Highest label each add-on server may receive (a call from a chat above it is refused):', ...ids.map((id) => {
+    const ceiling = ceilings[id] as Clearance;
+    const extra = [
+      ...(ceiling.compartments.length ? [`compartments ${ceiling.compartments.join(', ')}`] : []),
+      ...(ceiling.releasability.length ? [`releasable to ${ceiling.releasability.join(', ')}`] : []),
+      ...(ceiling.expiresAt === undefined ? [] : [`until ${ceiling.expiresAt}`])
+    ];
+    return `    ${id}: ${labelKey(ceiling)}${extra.length ? ` (${extra.join('; ')})` : ''}`;
+  })];
+}
+
 export function policyDocumentText(state: BundleState | undefined, now: number): string {
   const lines: string[] = ['Your NEAR AI policy', ''];
   if (state === undefined) {
@@ -140,6 +155,7 @@ export function policyDocumentText(state: BundleState | undefined, now: number):
   }
   lines.push(
     `  Add-on servers allowed in runs with nobody present: ${bundle.ceiling.unattendedMcp.length === 0 ? 'none' : bundle.ceiling.unattendedMcp.join(', ')}`,
+    ...mcpCeilingLines(bundle.ceiling.mcpLabelCeilings),
     '',
     POLICY_ROUTING_TEXT,
     '',

@@ -28,9 +28,12 @@ export interface ActorRef {
   readonly agentLabel?: string;
 }
 
-/** The label layer's answer, worked out by the caller from the session mark and the clearances (plans 20 and 22): a refusal with its plain reason. */
+/**
+ * The label layer's answer, worked out by the caller from the session mark and the clearances (plans 20 and 22): a refusal with its plain reason.
+ * `label.mcp-ceiling` is a call to an MCP server whose label ceiling in the policy is below the chat's mark (WP-GATE).
+ */
 export interface LabelVerdict {
-  readonly rule: 'label.dominance' | 'label.no-agent-tools' | 'label.network-at-mark' | 'label.outbound-match';
+  readonly rule: 'label.dominance' | 'label.no-agent-tools' | 'label.network-at-mark' | 'label.outbound-match' | 'label.mcp-ceiling';
   readonly reason: string;
   /** The label that decided it, for the record; absent when no single label did (a label file that cannot be read). */
   readonly label?: Label;
@@ -158,7 +161,7 @@ export const OUTSIDE_WORKSPACE_RULE = 'call.outside-workspace';
 export const GATE_RULE_IDS: readonly string[] = Object.freeze([
   ...FLOOR_RULE_ORDER,
   'bundle.failed-closed', 'bundle.unavailable', 'bundle.ceiling.context', 'bundle.ceiling.mode', 'bundle.ceiling.unattended-mcp', 'manifest.context', 'manifest.effects-unknown',
-  'label.dominance', 'label.no-agent-tools', 'label.network-at-mark', 'label.outbound-match',
+  'label.dominance', 'label.no-agent-tools', 'label.network-at-mark', 'label.outbound-match', 'label.mcp-ceiling',
   ...ROUTE_RULES,
   'taint.held', CREDENTIAL_HOLD_RULE,
   'settings.emergency-stop', 'settings.read-plan', 'settings.auto-safe-tool', 'settings.mode.edits', 'settings.run-grant.edits', 'settings.deny-list',
