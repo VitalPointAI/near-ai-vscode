@@ -14,5 +14,5 @@ Notes are numbered by topic, and the J sections share files, so there is no note
 | 08 | J6 communications and cyber |
 | 09 | J7, J9, the command group and special staff |
 | 10 | The staff teams design (the plan of record for the templates) |
-| 11 | Operational feeds and COP layers (in progress) |
+| 11 | Operational feeds, the knowledge graph and COP layers |
 | ux/ | The Staff Room experience concept and the war-room prototype |
