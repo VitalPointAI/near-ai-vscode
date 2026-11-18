@@ -113,6 +113,19 @@
     approvalBox.append(approval, approvalHint(approval, true));
     controls.append(hereLabel, approvalBox);
     box.append(controls);
+    // The server's tools changed after you approved them (WP-GATE): say what changed, and offer the one way to approve the new listing.
+    if (server.toolChanges) {
+      const changes = server.toolChanges;
+      const notice = el('div', 'tool-changes');
+      notice.setAttribute('role', 'status');
+      notice.append(el('p', '', 'This server changed its tools since you approved them. New and changed tools are not offered to agents until you approve them. Read their descriptions below first: a description is the server\'s own words.'));
+      const list = el('ul');
+      if (changes.added.length) list.append(el('li', '', 'New: ' + changes.added.join(', ')));
+      if (changes.changed.length) list.append(el('li', '', 'Changed description, inputs or hints: ' + changes.changed.join(', ')));
+      if (changes.removed.length) list.append(el('li', '', 'No longer listed: ' + changes.removed.join(', ')));
+      notice.append(list, button('Approve tool changes', () => vscode.postMessage({ type: 'approve-tools', id: server.config.id })));
+      box.append(notice);
+    }
     const stats = el('p', 'stats', server.calls ? server.calls + ' call' + (server.calls === 1 ? '' : 's') + (server.errors ? ' (' + server.errors + ' failed)' : '') + (server.averageMs !== undefined ? ' · ' + server.averageMs + ' ms average' : '') + (server.lastUsed ? ' · last used ' + new Date(server.lastUsed).toLocaleTimeString() : '') : 'Not used this session.');
     box.append(stats);
     if (server.tools.length) {

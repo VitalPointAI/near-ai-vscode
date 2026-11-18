@@ -6,7 +6,7 @@ import { mkdtemp, readFile, readdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { BUNDLE_FAILURES, failedClosed } from '../domain/gate/bundle';
+import { BUNDLE_FAILURES, bundleHash, defaultBundlePayload, failedClosed, parseBundle } from '../domain/gate/bundle';
 import type { BundleState } from '../domain/gate/bundle';
 import { CLEARANCE_SELF_ASSERTED_TEXT, SCALE_PRESETS_CAVEAT_TEXT } from '../domain/gate/labels';
 import type { DecisionRecord } from '../domain/gate/record';
@@ -176,6 +176,25 @@ test('policyDocumentText for a policy that failed is exactly the title, the note
   const silent = { ...failedClosed('bad-signature'), sentence: '' };
   assert.equal(gateCommands.policyDocumentText(silent, 0), expected.slice(0, expected.length - sentence.length - 1));
   assert.ok(!gateCommands.policyDocumentText(silent, 0).endsWith('\n'));
+});
+
+test('policyDocumentText lists each MCP server\'s label ceiling, and says when none is set (WP-GATE)', () => {
+  const issuer = { fingerprint: 'device-test', publicKey: 'A'.repeat(43) };
+  const stateFor = (ceilings: unknown): BundleState => {
+    const payload = JSON.parse(JSON.stringify(defaultBundlePayload({ issuer, now: Date.now() }))) as Record<string, any>;
+    if (ceilings !== undefined) payload.ceiling.mcpLabelCeilings = ceilings;
+    const parsed = parseBundle(payload);
+    assert.ok(parsed.ok);
+    if (!parsed.ok) throw new Error('unreachable');
+    return { state: 'valid', bundle: parsed.value, hash: bundleHash(parsed.value), signer: issuer, expiresAt: parsed.value.expiresAt, renewDue: false };
+  };
+  assert.match(gateCommands.policyDocumentText(stateFor(undefined), Date.now()), /\n  Highest label each add-on server may receive: none set, so no server is limited by label\n/);
+  const set = gateCommands.policyDocumentText(stateFor({
+    partner: { scale: 'org', level: 'Internal', compartments: ['ALPHA'], releasability: ['CAN'], expiresAt: '2030-01-01T00:00:00.000Z' },
+    helper: { scale: 'nato', level: 'NATO Unclassified', compartments: [], releasability: [] }
+  }), Date.now());
+  assert.match(set, /\n  Highest label each add-on server may receive \(a call from a chat above it is refused\):\n {4}helper: nato\/NATO Unclassified\n {4}partner: org\/Internal \(compartments ALPHA; releasable to CAN; until 2030-01-01T00:00:00\.000Z\)\n/);
+  assert.equal(set.includes(String.fromCharCode(0x2014)), false);
 });
 
 test('policyDocumentText is pure: the same state gives the same text, and a check that has not finished says so', () => {
