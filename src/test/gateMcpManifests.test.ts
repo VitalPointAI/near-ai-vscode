@@ -56,6 +56,8 @@ async function connected(id: string, config: McpServerConfig, secrets: { url?: s
 function storeLegacy(global: ReturnType<typeof memory>, config: McpServerConfig) {
   const { manifest: _manifest, ...legacy } = config;
   global.values.set(SERVERS_KEY, [...(global.get<McpServerConfig[]>(SERVERS_KEY) ?? []).filter((server) => server.id !== config.id), legacy]);
+  // A server from before this version also has no tool approval on record (WP-GATE review round 1); its first connection records one.
+  global.values.set('nearAi.mcp.toolsApprovedOnce', (global.get<string[]>('nearAi.mcp.toolsApprovedOnce') ?? []).filter((id) => id !== config.id));
 }
 
 const toolNamed = async (made: { registry: McpRegistry }, id: string, name: string) => {
@@ -295,7 +297,9 @@ test('a stdio server runs outside the interactive context only if its manifest n
   assert.equal(named.manifestWords.at(-1), MANIFEST_IS_A_CLAIM_TEXT);
   assert.deepEqual((await toolNamed({ registry: made }, 'local', 'search')).manifest.contexts, ['interactive', 'unattended']);
   // An undeclared tool of that server still never runs when nobody is watching, whatever the server's contexts name.
-  global.values.set(SERVERS_KEY, [{ ...servers[0], manifest: { ...servers[0].manifest!, contexts: ['interactive', 'unattended'] } }]);
+  // The stored server as it is now, so its tool approval (recorded at its first connection, WP-GATE) is kept: a lost one would hold every tool.
+  const current = global.get<McpServerConfig[]>(SERVERS_KEY)!;
+  global.values.set(SERVERS_KEY, [{ ...current[0], manifest: { ...servers[0].manifest!, contexts: ['interactive', 'unattended'] } }]);
   assert.deepEqual((await toolNamed({ registry: made }, 'local', 'update')).manifest.contexts, ['interactive']);
 });
 

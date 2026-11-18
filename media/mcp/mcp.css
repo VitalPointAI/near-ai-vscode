@@ -44,3 +44,6 @@ code, .error, .hint, .stats, .toggle { overflow-wrap: anywhere; }
 .declare { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; margin: 2px 0 8px; }
 .declare .field-label { display: inline; margin: 0; }
 .declare select { width: auto; max-width: 100%; }
+.tool-changes { margin: 8px 0; padding: 8px 10px; border-left: 3px solid var(--vscode-editorWarning-foreground, var(--vscode-focusBorder)); background: var(--vscode-inputValidation-warningBackground, transparent); }
+.tool-changes p, .tool-changes li { overflow-wrap: anywhere; margin: 4px 0; }
+.tool-changes ul { padding-left: 1.2em; margin: 4px 0 8px; }

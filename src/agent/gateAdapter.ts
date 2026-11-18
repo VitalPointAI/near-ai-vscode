@@ -24,9 +24,10 @@ import { commandWords, labelCheckFor, linkResolver, pathLike, readEffectPaths, s
 import { OUTBOUND_EARLIER_TEXT, OUTBOUND_FULL_TEXT, OUTBOUND_READS_AND_SENDS_TEXT, OUTBOUND_UNCHECKED_TEXT, OUTBOUND_MATCH_TEXT, OUTBOUND_UNREADABLE_TEXT, outboundPayload } from './outboundCheck';
 import type { OutboundFingerprints } from './outboundCheck';
 import type { LabelVerdict } from '../domain/gate/decide';
-import { SessionMark } from '../domain/gate/dominance';
+import { SessionMark, whyNotDominated } from '../domain/gate/dominance';
 import type { Mark } from '../domain/gate/dominance';
-import type { Label } from '../domain/gate/labels';
+import { labelKey } from '../domain/gate/labels';
+import type { Clearance, Label } from '../domain/gate/labels';
 import { routingWhileFailedClosed, strictestLabelOf, tierForLabel, tierForMark } from '../domain/gate/routing';
 import type { RoutingTable, RoutingTier } from '../domain/gate/routing';
 import { isDefaultMark } from '../gate/sessionMark';
@@ -631,9 +632,9 @@ function recordFor(runtime: GateRuntime, gated: GatedCall, outcome: DecisionOutc
   const capability = gated.effects[0] ?? WIDEST_SHORTHAND('plan')[0] as Capability;
   const folders = { ...(gated.request.workspace === undefined ? {} : { project: gated.request.workspace.root }), ...(runtime.locations?.home === undefined ? {} : { home: runtime.locations.home }) };
   const reason = givenReason === undefined ? undefined : withoutMachinePaths(givenReason, folders);
-  // A refusal at a mark (labelled text in the payload, or a call that may send at a local-only mark) names the tool only, never the command or address that
-  // could carry labelled words (D-60, PR #87 review).
-  const given = rule === 'label.outbound-match' || rule === 'label.network-at-mark' ? { name: shownName(gated.request.tool), type: 'tool' } : gated.resource ?? resourceOf(gated.request.tool, gated.effects, gated.request.command);
+  // A refusal at a mark (labelled text in the payload, a call that may send at a local-only mark, or a call to an MCP server above its ceiling) names the tool
+  // only, never the command or address that could carry labelled words (D-60, PR #87 review).
+  const given = rule === 'label.outbound-match' || rule === 'label.network-at-mark' || rule === 'label.mcp-ceiling' ? { name: shownName(gated.request.tool), type: 'tool' } : gated.resource ?? resourceOf(gated.request.tool, gated.effects, gated.request.command);
   const resource = { ...given, name: withoutMachinePaths(given.name, folders) };
   return buildDecisionRecord({
     recordId: (runtime.newRecordId ?? randomUUID)(),
@@ -784,7 +785,9 @@ export async function gateToolCall(runtime: GateRuntime, input: GateCallInput, o
   });
   const markNow = input.grants.mark?.current();
   // A dominance verdict wins; then, at a strict mark, a call that may send is refused (D-29); then labelled text in what it would send (D-60).
-  const labelVerdict = labelCheck.verdict ?? markVerdictFor(runtime, markNow, maySend, () => outboundPayload(input.raw, input.command), input.grants.outbound, labelCheck.read);
+  // An MCP server's label ceiling (WP-GATE) is judged before the mark's network and outbound checks: it holds at every tier, sending or not.
+  const labelVerdict = labelCheck.verdict ?? mcpCeilingVerdictFor(runtime, input.tool.mcpServer, markNow, labelCheck.read)
+    ?? markVerdictFor(runtime, markNow, maySend, () => outboundPayload(input.raw, input.command), input.grants.outbound, labelCheck.read);
   const request: GateRequest = {
     actor: runtime.actor,
     tool: input.tool.name,
@@ -974,6 +977,51 @@ export function markVerdictFor(runtime: GateRuntime, before: Mark | undefined, m
   if (found === undefined) return undefined;
   if (found === 'unreadable') return { rule: 'label.outbound-match', reason: OUTBOUND_UNREADABLE_TEXT, outboundCause: 'unreadable', ...(label === undefined ? {} : { label }) };
   return { rule: 'label.outbound-match', reason: found === 'earlier' ? OUTBOUND_EARLIER_TEXT : OUTBOUND_MATCH_TEXT, outboundCause: found === 'earlier' ? 'earlier' : 'match', ...(label === undefined ? {} : { label }) };
+}
+
+/**
+ * The sentence of label.mcp-ceiling (WP-GATE): the chat's label is above the highest label the policy lets this MCP server receive, so nothing was sent to
+ * it. It names the server, the label that is too high and the ceiling, and the two ways on: a chat that has not read that content, or a policy change. It
+ * names Lower This Chat's Label too, so the chat offers that button under the refusal.
+ */
+export function mcpCeilingText(server: string, above: Label, ceiling: Clearance): string {
+  return `This chat holds content at ${labelKey(above)}, above the highest label your policy lets the MCP server "${server}" receive (${labelKey(ceiling)}${ceiling.expiresAt === undefined ? '' : `, until ${ceiling.expiresAt}`}), so nothing was sent to it. Use this server from a chat that has not read that content, or change its ceiling with NEAR AI: Edit Policy. If what this chat read allows it, use NEAR AI: Lower This Chat's Label.`;
+}
+
+/** The sentence of label.mcp-ceiling when the ceiling could not be checked (review round 1): the call is refused, fail closed, and no label is blamed. */
+export function mcpCeilingUnjudgedText(server: string): string {
+  return `NEAR AI could not check this chat's label against the highest label your policy lets the MCP server "${server}" receive, so the call was refused and nothing was sent to it. Try again; if it keeps happening, reload the window or check the server's ceiling with NEAR AI: Show Policy.`;
+}
+
+/**
+ * The verdict an MCP server's label ceiling gives a call to it (WP-GATE, research note 01 section 4), worked out here so decide() stays pure. Every call to a
+ * server the valid policy names in `ceiling.mcpLabelCeilings` is judged, whatever the routing tier and whether or not the call is thought to send off this
+ * computer, because the server receives the arguments wherever it runs. The chat's mark, joined with what the call reads itself, must be dominated by the
+ * ceiling, label by label; an empty mark is the policy's default label. A server with no ceiling, or a policy that is not valid (which refuses every MCP
+ * call on its own), gives no verdict. A ceiling that cannot be judged (a lookup that throws) refuses: fail closed.
+ */
+export function mcpCeilingVerdictFor(runtime: GateRuntime, server: string | undefined, before: Mark | undefined, reads: readonly Label[] = []): LabelVerdict | undefined {
+  if (server === undefined) return undefined;
+  let state: BundleState;
+  try {
+    state = runtime.bundleState();
+  } catch {
+    return undefined; // decide() asks the same runtime and fails closed on its own
+  }
+  if (state.state !== 'valid') return undefined;
+  const ceilings = state.bundle.ceiling.mcpLabelCeilings;
+  if (ceilings === undefined || !Object.prototype.hasOwnProperty.call(ceilings, server)) return undefined;
+  const ceiling = ceilings[server] as Clearance;
+  try {
+    const joined = withReads(runtime, before, reads);
+    const mark: Mark = joined === undefined || joined.length === 0 ? [state.bundle.defaultLabel] : joined;
+    const context = { scales: state.bundle.scales, mappings: state.bundle.mappings, now: (runtime.clock ?? Date.now)() };
+    const above = mark.find((label) => whyNotDominated(ceiling, label, context) !== undefined);
+    return above === undefined ? undefined : { rule: 'label.mcp-ceiling', reason: mcpCeilingText(server, above, ceiling), label: above };
+  } catch {
+    // Nothing was judged, so no label is named as the one above the ceiling (review round 1): the refusal and its record say the check could not be made.
+    return { rule: 'label.mcp-ceiling', reason: mcpCeilingUnjudgedText(server) };
+  }
 }
 
 /** The mark joined with the labels a call reads itself, without changing the run's mark; undefined when there is neither. */
@@ -1200,6 +1248,8 @@ export interface GateStepInput {
   readonly runsRemote?: boolean;
   /** The run's fingerprints of labelled text it read (D-60). */
   readonly outbound?: OutboundFingerprints;
+  /** The MCP server the step's tool calls, when it is an MCP tool: its label ceiling is judged as a chat call's is (WP-GATE). */
+  readonly mcpServer?: string;
 }
 
 /** What the gate knows about a step that runs a tool: its effects and the floor's facts about the paths it names. */
@@ -1240,7 +1290,8 @@ export async function gateStep(runtime: GateRuntime, input: GateStepInput, optio
   // The run's own mark (a cyber run has one at the project's label, D-54) holds a step that may send at a strict mark, by the same predicate as a chat call.
   const maySend = maySendOffMachine({ runsRemote: input.runsRemote === true, effects, ...(input.command === undefined ? {} : { command: input.command }), effectsUnknown: read?.effectsUnknown !== undefined || (input.command === undefined && effects.length === 0), context: { root: input.root ?? '', ...(runtime.locations ?? {}) } });
   const markNow = input.mark?.current();
-  const labelVerdict = labelCheck.verdict ?? markVerdictFor(runtime, markNow, maySend, () => outboundPayload(input.raw ?? {}, input.command), input.outbound, labelCheck.read);
+  const labelVerdict = labelCheck.verdict ?? mcpCeilingVerdictFor(runtime, input.mcpServer, markNow, labelCheck.read)
+    ?? markVerdictFor(runtime, markNow, maySend, () => outboundPayload(input.raw ?? {}, input.command), input.outbound, labelCheck.read);
   const request: GateRequest = {
     actor: runtime.actor,
     tool: input.tool,
