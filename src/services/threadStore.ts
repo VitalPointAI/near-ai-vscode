@@ -163,7 +163,7 @@ export function mergeChatLabel(a: ThreadMeta, b: ThreadMeta): ChatLabelState | u
     const outcome = applied.length === verdicts.length && applied.length > 0
       ? joinMarks([...applied].sort((x, y) => x.verdict.signedAt.localeCompare(y.verdict.signedAt)).at(-1)!.verdict.to, own.mark)
       : undefined;
-    for (const each of verdicts) reportLowering(a.id, each.lowering, each.verdict, each.verdict.apply ? outcome : undefined);
+    for (const each of verdicts) reportLowering(a.id, each.lowering, each.verdict, each.verdict.apply ? outcome : undefined, each.verdict.apply ? joined : undefined);
     return outcome;
   };
   // Exactly one copy may bring lowerings the other lacks; when both do, neither copy's lowering can be told to come after the other's raise, so the join wins.

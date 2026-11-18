@@ -403,7 +403,7 @@ export async function lowerChatLabel(host: GateHost, chat: ChatInView | undefine
   chat.prepareLowering(signed ?? true);
   const before = mark.lowerByPerson(picked.mark, reason);
   if (signed === undefined) void Promise.resolve(vscode.window.showWarningMessage(LOWERING_NOT_SIGNED_TEXT)).catch(() => undefined);
-  host.recordLabelEvent(chat.root, { event: 'label.declassify', path: `chat ${chat.id}`, label: picked.mark[0]!, mark: before, reason: `Lowered from ${labelsShown(before)} to ${labelsShown(picked.mark)}: ${reason}` });
+  host.recordLabelEvent(chat.root, { event: 'label.declassify', path: `chat ${chat.id}`, label: picked.mark[0]!, mark: picked.mark, from: before, reason: `Lowered from ${labelsShown(before)} to ${labelsShown(picked.mark)}: ${reason}` });
   void Promise.resolve(vscode.window.showInformationMessage(`${`This chat's label is now ${labelsShown(picked.mark)}.`} ${LOWERED_HERE_ONLY_TEXT}`)).catch(() => undefined);
   return true;
 }
@@ -556,7 +556,7 @@ export async function setLabel(host: GateHost, target: LabelTarget): Promise<boo
     void Promise.resolve(vscode.window.showWarningMessage(error instanceof LabelMapError ? error.message : 'Nothing was changed: NEAR AI could not save the label.')).catch(() => undefined);
     return false;
   }
-  host.recordLabelEvent(target.root, { event: 'label.set', path: keyText, ...(label === undefined ? {} : { label }), ...(reason === undefined ? {} : { reason }) });
+  host.recordLabelEvent(target.root, { event: 'label.set', path: keyText, ...(label === undefined ? {} : { label }), ...(current.origin === 'default' ? {} : { from: current.mark }), ...(reason === undefined ? {} : { reason }) });
   void Promise.resolve(vscode.window.showInformationMessage(label === undefined ? `The label of ${shownTarget} was removed.` : `${shownTarget} is labelled ${labelShown(label)}.`)).catch(() => undefined);
   return true;
 }

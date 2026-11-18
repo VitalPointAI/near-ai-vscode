@@ -238,7 +238,9 @@ test('with an empty reason nothing changes and nothing is recorded; with a reaso
   assert.equal(records.length, 1);
   const record = records[0]!;
   assert.equal(record.unmapped.nearAi.label?.level, 'Internal', 'the new label');
-  assert.deepEqual(record.unmapped.nearAi.mark?.map((each) => each.level), ['Restricted'], 'the old label');
+  // Review round 3: every label event has one shape, `mark` the chat's mark after it and `from` the mark before it.
+  assert.deepEqual(record.unmapped.nearAi.mark?.map((each) => each.level), ['Internal'], 'the chat\'s mark after the event');
+  assert.deepEqual(record.unmapped.nearAi.from?.map((each) => each.level), ['Restricted'], 'the old label');
   assert.ok(JSON.stringify(record).includes('Reviewed: the plan was published last week.'), 'the reason given');
   assert.match(stub.inputRequests.at(-1)?.prompt ?? '', /travels with its encrypted metadata to your other computers/);
   // Owner answer: other computers cannot check this key yet, so the person is told the copies there keep the higher label.
@@ -451,4 +453,30 @@ test('review 2.3: a merged label keeps fields this version does not know, with o
     assert.deepEqual(markOf(merged), ['org/Public']);
     assert.equal((merged.label as unknown as { futureLabelField?: string }).futureLabelField, 'kept');
   }
+});
+
+test('review 3.4: the person\'s lowering and a lowering applied by a merge write label events of one shape: label the target, mark after, from before', async () => {
+  const root = realpathSync(mkdtempSync(path.join(tmpdir(), 'near-ai-chat-label-shape-')));
+  const { host, storage } = await labelHost(root);
+  const chat = viewOf(root, [RESTRICTED], 'conv-shape-person-1');
+  resetUi();
+  stub.quickPickAnswers.push('org/Internal');
+  stub.inputAnswers.push('reviewed');
+  assert.equal(await gateCommands.lowerChatLabel(host, chat), true);
+  const signed = await host.signChatLowering({ chatId: CHAT, from: [RESTRICTED], to: [PUBLIC], reason: 'reviewed and cleared', at: AT });
+  assert.ok(signed !== undefined);
+  const stop = host.registerLabelLowerings();
+  try {
+    await host.refreshLoweringKeys();
+    both(...copies(signed, [RESTRICTED]));
+  } finally {
+    stop();
+  }
+  const declassify = (await recordsOf(host, storage, root)).filter((record) => record.authorizations[0]?.policy.name === 'label.declassify');
+  assert.equal(declassify.length, 2);
+  const shape = (record: DecisionRecord) => ({ label: record.unmapped.nearAi.label?.level, mark: record.unmapped.nearAi.mark?.map((each) => each.level), from: record.unmapped.nearAi.from?.map((each) => each.level) });
+  const person = declassify.find((record) => JSON.stringify(record).includes('conv-shape-person-1'))!;
+  const merged = declassify.find((record) => JSON.stringify(record).includes(CHAT))!;
+  assert.deepEqual(shape(person), { label: 'Internal', mark: ['Internal'], from: ['Restricted'] });
+  assert.deepEqual(shape(merged), { label: 'Public', mark: ['Public'], from: ['Restricted'] });
 });

@@ -329,7 +329,7 @@ export class GateHost {
    * Records a label event (GATE-07) in the project's log, the way the policy's events are written: the event as the operation, the project-relative path as
    * the resource (`project` for the project itself, never a machine path), the new label, and the reason a person gave.
    */
-  public recordLabelEvent(root: string, event: { readonly event: LabelEventId; readonly path: string; readonly label?: Label; readonly reason?: string; readonly mark?: Mark }): void {
+  public recordLabelEvent(root: string, event: { readonly event: LabelEventId; readonly path: string; readonly label?: Label; readonly reason?: string; readonly mark?: Mark; readonly from?: Mark }): void {
     try {
       const record = buildDecisionRecord({
         recordId: randomUUID(),
@@ -345,7 +345,9 @@ export class GateHost {
         ...(event.reason === undefined || event.reason === '' ? {} : { reason: event.reason.slice(0, 500) }),
         bundleHash: this.current.state === 'valid' ? this.current.hash : '',
         ...(event.label === undefined ? {} : { label: event.label }),
-        ...(event.mark === undefined || event.mark.length === 0 ? {} : { mark: event.mark })
+        // One shape for every label event (PR #87 review round 3): `label` the target, `mark` the chat's mark after the event, `from` the mark before it.
+        ...(event.mark === undefined || event.mark.length === 0 ? {} : { mark: event.mark }),
+        ...(event.from === undefined || event.from.length === 0 ? {} : { from: event.from })
       });
       void this.logFor(root).append({ ...record, api: { ...record.api, operation: event.event } });
     } catch {
@@ -369,13 +371,14 @@ export class GateHost {
     }
     // Worked out inside the writer's lock, against the map it reads there (PR #87 review): a label another writer raised meanwhile is the one joined with,
     // so this write can only keep or raise it. Nothing rises: nothing is written at all.
-    const raised = new Map<string, Label>();
-    const rise = (map: LabelMapPayload): Map<string, Label> => {
-      const out = new Map<string, Label>();
+    const raised = new Map<string, { readonly label: Label; readonly from: Mark }>();
+    const rise = (map: LabelMapPayload): Map<string, { readonly label: Label; readonly from: Mark }> => {
+      const out = new Map<string, { readonly label: Label; readonly from: Mark }>();
       for (const [key, mark] of proposed) {
         const current = resolveLabel(key, { verified: map, bundleDefault: policy.defaultLabel, scales: policy.scales });
-        const label = raisedEntryLabel(current.origin === 'default' ? [] : current.mark, mark, policy.scales, routing);
-        if (label !== undefined) out.set(key, label);
+        const from = current.origin === 'default' ? [] : current.mark;
+        const label = raisedEntryLabel(from, mark, policy.scales, routing);
+        if (label !== undefined) out.set(key, { label, from });
       }
       return out;
     };
@@ -390,7 +393,7 @@ export class GateHost {
     try {
       await this.changeLabels(root, (map) => {
         let out = map;
-        for (const [key, label] of rise(map)) { out = setLabelEntry(out, key, label); raised.set(key, label); }
+        for (const [key, entry] of rise(map)) { out = setLabelEntry(out, key, entry.label); raised.set(key, entry); }
         if (raised.size === 0) throw new LabelMapError(NOTHING_TO_RAISE);
         return out;
       });
@@ -410,7 +413,7 @@ export class GateHost {
       }
       return false;
     }
-    for (const [key, label] of raised) this.recordLabelEvent(root, { event: 'label.set', path: key, label, reason: 'A file a labelled chat wrote took the chat\'s label.' });
+    for (const [key, entry] of raised) this.recordLabelEvent(root, { event: 'label.set', path: key, label: entry.label, ...(entry.from.length === 0 ? {} : { from: entry.from }), reason: 'A file a labelled chat wrote took the chat\'s label.' });
     return true;
   }
 
@@ -449,7 +452,7 @@ export class GateHost {
       if (outcome.applied) {
         // The record names the label the merge put the chat at (the same result, so record and state agree), not a value read from either copy.
         if (outcome.result === undefined || outcome.result.length === 0) return;
-        this.recordLabelEvent(root, { event: 'label.declassify', path: `chat ${outcome.chatId}`, label: outcome.result[0]!, mark: outcome.result, reason: `Lowered on another copy of this chat: ${typeof payload?.reason === 'string' ? payload.reason : 'no reason given'}` });
+        this.recordLabelEvent(root, { event: 'label.declassify', path: `chat ${outcome.chatId}`, label: outcome.result[0]!, mark: outcome.result, ...(outcome.from === undefined ? {} : { from: outcome.from }), reason: `Lowered on another copy of this chat: ${typeof payload?.reason === 'string' ? payload.reason : 'no reason given'}` });
         return;
       }
       const sentence = loweringRejectedText(outcome.cause ?? 'does-not-verify');
