@@ -20,7 +20,7 @@ their work and sorts out conflicts. A cloned team gets a name and an icon of its
   computer.
 - **Every such answer is checked afterwards.** The answer's signature and NEAR AI Cloud's
   attestation are checked in the background after each answer at these levels, tool-call turns and
-  helper agents included, and the result shows under the answer. A report already verified for the
+  helper agents included, and the result shows on the answer's trust badge. A report already verified for the
   same signing key is reused for up to ten minutes. A check that cannot be made, for example
   offline, changes nothing.
 - **A failed check stops that level for the chat.** Nothing more at these levels goes to NEAR AI
@@ -31,6 +31,24 @@ their work and sorts out conflicts. A cloned team gets a name and an icon of its
 - **Behind a proxy that inspects encrypted traffic** the connection cannot be proven, so content at
   these levels stays on this computer. SECURITY.md and **NEAR AI: Show Policy** say what these checks
   prove and what they rely on.
+- **A trust badge on every cloud answer.** Each answer of the lead agent from a cloud model shows
+  one of three states under it: **Verified private model** (its signature and NEAR AI Cloud's
+  attestation checked out, and the connection was proven to end inside the private enclave),
+  **Model verified, connection not proven**, or **Not verified**, each with its reasons. It is set
+  only from checks that ran and never says more than they proved. It replaces the Verify signature
+  row. An answer from a model on this computer has no badge, and a helper agent's answer has none.
+- **Checked once, automatically.** Each cloud answer from a TEE model is checked once in the
+  background: one signature request per answer, with an attestation report already verified for
+  the same signing key reused for up to ten minutes. A check that has not finished after 20 seconds
+  shows Not verified, so a badge never waits forever (for example offline), and the badge changes
+  if the check finishes later. A model NEAR AI forwards to another provider is never checked, and
+  its badge says where it goes.
+- **Click the badge for the details.** It explains its state and what the editor does not check.
+  **Check again** checks afresh and, on an answer whose failed check stopped the levels that need an
+  attested cloud, lifts that stop when the answer now checks out. **Show full attestation** opens
+  the signed text, the signing address and which component holds the key, every check, the
+  connection and the attestation report in a read-only editor tab, and writes nothing to your
+  project. A reopened chat shows each answer's badge as it was when the answer arrived.
 - **Lower This Chat's Label where you look for it.** Click the chat's label beside the model (or
   press Enter or Space on it) to lower it. Every refusal that names **NEAR AI: Lower This Chat's
   Label** now has a button that runs it. Lowering a file's label with **NEAR AI: Set Label** while a
