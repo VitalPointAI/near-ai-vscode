@@ -28,21 +28,24 @@ actuals:
   tokens: 17300
   tasks: 3
   commits: 3
-plan_head_before: 40b884c9eaa364c7410fa7b14e66280618512744
-plan_head_after: 7a617cf0a0337f9d481d614996fc12984216a447
+plan_head_before: 3ef2814010beaa92cff2e57bc9fd9ce781d3e2a1
+rebased_onto: 0f1938fe03f9a07de9496bed960bc41a5981e350
+plan_head_after: 6d562f1527b749f43f2947f50278698e1d1b9398
 ---
 
 # Phase 70 Plan 27: The trust badge kept, seen end to end, and documented Summary
+
+Plan 70-28e rebased the branch onto `origin/main` at `0f1938fe`; the hashes below are after that rebase.
 
 A reopened chat shows each cloud answer's badge in the state its checks reached when the answer arrived (never stronger, across syncs too), the real chat page shows the badge end to end under xvfb and again after the view reloads, and SECURITY.md and README describe the badge word for word with the code.
 
 ## What was built
 
-**Task 1 (`333d048c`), tracer.** `TrustRecord`, `trustRecordKey` (first 32 hex of the SHA-256 of the answer's text), `trustRecordOf`, `parseTrustRecord`, `weakerTrustRecord`, `mergeTrustRecords`, `newestTrustRecords` and `trustBadgeFromRecord` (replayed, with "This shows the check made when the answer arrived.") in `src/domain/gate/trustBadge.ts`. `ThreadMeta.trust` sits after `label`: `validMeta` keeps only records `parseTrustRecord` accepts; `mergeMeta` unions both copies by key and keeps the weaker state for a shared key whichever meta is newer (the label's raise-only merge is untouched); at most 200, newest by time. `ThreadStore.recordTrust(id, record, mode)` writes through `updateMeta` without moving `lastUsedAt`. The session keeps each badge when it settles (not while Checking now), in order and never blocking the run; it starts the badge after the chat is saved so the record has a meta to go in. `restore` passes `entriesToView` a lookup by `trustRecordKey`, which returns the replayed badge; chat.js draws it for a reopened assistant item. A webview reload in the same window replays the logged `trust-badge` messages.
+**Task 1 (`6b4021b9`), tracer.** `TrustRecord`, `trustRecordKey` (first 32 hex of the SHA-256 of the answer's text), `trustRecordOf`, `parseTrustRecord`, `weakerTrustRecord`, `mergeTrustRecords`, `newestTrustRecords` and `trustBadgeFromRecord` (replayed, with "This shows the check made when the answer arrived.") in `src/domain/gate/trustBadge.ts`. `ThreadMeta.trust` sits after `label`: `validMeta` keeps only records `parseTrustRecord` accepts; `mergeMeta` unions both copies by key and keeps the weaker state for a shared key whichever meta is newer (the label's raise-only merge is untouched); at most 200, newest by time. `ThreadStore.recordTrust(id, record, mode)` writes through `updateMeta` without moving `lastUsedAt`. The session keeps each badge when it settles (not while Checking now), in order and never blocking the run; it starts the badge after the chat is saved so the record has a meta to go in. `restore` passes `entriesToView` a lookup by `trustRecordKey`, which returns the replayed badge; chat.js draws it for a reopened assistant item. A webview reload in the same window replays the logged `trust-badge` messages.
 
-**Task 2 (`70bf9227`).** `LayoutReport.trustBadges` (state and title of each `.trust-badge`). The e2e project scenario's new test: no badge under the earlier local answers; profile `profile-e2e-cloud` (provider `near-ai`, the fake server, key `e2e-key`) selected; "Say hi" sent; `assistant-done` and a `trust-badge` with that run id and state `not-verified`; the probe (after the layout stress font) shows exactly `[{ state: 'not-verified', title: 'Not verified' }]`, `clipped` and `offenders` empty; `workbench.action.webview.reloadWebviewAction`, focus, the page's `chat-ready`, and the probe shows the badge again; the local profile is selected again and the provider cache cleared. The badge button is `data-must-read`, so the clipped check covers its title. The fake server needed no new route.
+**Task 2 (`0e902764`).** `LayoutReport.trustBadges` (state and title of each `.trust-badge`). The e2e project scenario's new test: no badge under the earlier local answers; profile `profile-e2e-cloud` (provider `near-ai`, the fake server, key `e2e-key`) selected; "Say hi" sent; `assistant-done` and a `trust-badge` with that run id and state `not-verified`; the probe (after the layout stress font) shows exactly `[{ state: 'not-verified', title: 'Not verified' }]`, `clipped` and `offenders` empty; `workbench.action.webview.reloadWebviewAction`, focus, the page's `chat-ready`, and the probe shows the badge again; the local profile is selected again and the provider cache cleared. The badge button is `data-must-read`, so the clipped check covers its title. The fake server needed no new route.
 
-**Task 3 (`7a617cf0`).** The SECURITY.md section and README lines below, the Known limitations row, the labels section's link, the screenshot script's badge, and gateDocs.
+**Task 3 (`6d562f15`).** The SECURITY.md section and README lines below, the Known limitations row, the labels section's link, the screenshot script's badge, and gateDocs.
 
 ## E2E record
 
@@ -209,4 +212,4 @@ None beyond the plan's register (T-70-99 to T-70-101).
 
 ## Self-Check: PASSED
 
-Commits `333d048c`, `70bf9227` and `7a617cf0` are ancestors of HEAD; the modified files exist.
+Commits `6b4021b9`, `0e902764` and `6d562f15` are ancestors of HEAD; the modified files exist.
