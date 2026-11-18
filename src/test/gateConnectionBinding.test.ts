@@ -347,3 +347,39 @@ test('the provider factory gives the NEAR AI Cloud client a binding source and s
     NearConnectionBinding.prototype.refresh = original;
   }
 });
+
+// PR #89 review: the pin must hold even when a layer replaces the agent and drops the request's TLS options, as VS Code's proxy support may.
+test('when a layer replaces the agent and ignores the request\'s TLS options, the live socket is checked and a different server gets nothing', async () => {
+  const pinnedServer = await fixtureServer();
+  const otherCert = readFileSync(path.resolve(__dirname, '../../test/fixtures/cyber/certs/vulnerable/server.pem'));
+  const otherKey = readFileSync(path.resolve(__dirname, '../../test/fixtures/cyber/certs/vulnerable/server.key'));
+  let otherRequests = 0;
+  const other = https.createServer({ cert: otherCert, key: otherKey }, (_request, response) => { otherRequests += 1; response.end('other'); });
+  await new Promise<void>((resolve) => other.listen(0, '127.0.0.1', resolve));
+  const otherPort = (other.address() as net.AddressInfo).port;
+  const otherPrint = createHash('sha256').update(new X509Certificate(otherCert).publicKey.export({ type: 'spki', format: 'der' })).digest('hex');
+  assert.notEqual(otherPrint, SERVER_PRINT, 'the two servers present different keys');
+  // Stands in for a proxy layer that patches https.request: it swaps the agent for one with no checks and drops checkServerIdentity and ca.
+  const httpsModule = require('node:https') as { request: typeof https.request };
+  const original = httpsModule.request;
+  const rerouteTo = (port: number | undefined) => ((options: https.RequestOptions, callback?: (response: import('node:http').IncomingMessage) => void) => {
+    const { checkServerIdentity: _check, ca: _ca, agent: _agent, ...rest } = options;
+    return original({ ...rest, ...(port === undefined ? {} : { port }), rejectUnauthorized: false, agent: new https.Agent({ rejectUnauthorized: false }) }, callback);
+  }) as typeof https.request;
+  try {
+    httpsModule.request = rerouteTo(otherPort);
+    const pinned = pinnedFetch(SERVER_PRINT, NEAR_TLS_FINGERPRINT_KIND, { tls: { ca: CA } });
+    await assert.rejects(() => pinned(`${pinnedServer.url}/v1/chat/completions`, { method: 'POST', body: 'labelled content' }), ConnectionNotBoundError);
+    assert.equal(otherRequests, 0, 'the other server received no request, not even its headers');
+    // The same layer reaching the pinned server itself: the live socket matches and the request goes through.
+    httpsModule.request = rerouteTo(undefined);
+    const answer = await pinnedFetch(SERVER_PRINT, NEAR_TLS_FINGERPRINT_KIND, { tls: { ca: CA } })(`${pinnedServer.url}/v1/models`);
+    assert.equal(answer.status, 200);
+    assert.equal(await answer.text(), 'ok');
+  } finally {
+    httpsModule.request = original;
+    other.closeAllConnections();
+    await new Promise<void>((resolve) => other.close(() => resolve()));
+    await pinnedServer.close();
+  }
+});

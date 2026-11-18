@@ -27,6 +27,11 @@ Each such answer is checked afterwards, and a failed check stops that level for 
 - **Behind a proxy that inspects encrypted traffic** the connection cannot be proven, so content at
   these levels stays on this computer. SECURITY.md and **NEAR AI: Show Policy** say what these checks
   prove and what they rely on.
+- **Lower This Chat's Label where you look for it.** Click the chat's label beside the model (or
+  press Enter or Space on it) to lower it. Every refusal that names **NEAR AI: Lower This Chat's
+  Label** now has a button that runs it. Lowering a file's label with **NEAR AI: Set Label** while a
+  chat that read the file is open says that the chat keeps its label, since a chat's label only rises
+  on its own, and offers the same button.
 - **Fixes to chat labels and the outbound check.** A lowering of a chat's label made while a sync
   raised it on another copy keeps the higher label and says so; a lowering is never applied below
   the project's label or compared by time as text; the outbound check also catches labelled text

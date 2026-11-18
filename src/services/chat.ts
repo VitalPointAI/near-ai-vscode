@@ -746,6 +746,11 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
       tab.post({ type: 'run-reverted', runId: message.runId, files: restored });
       return;
     }
+    if (message.type === 'lower-chat-label') {
+      // Runs Lower This Chat's Label for this conversation, whichever chat the status bar shows (the command checks its own chat again).
+      void Promise.resolve(vscode.commands.executeCommand('nearAi.label.lowerChat', inView(tab))).catch(() => undefined);
+      return;
+    }
     if (message.type === 'verify-response') {
       const result = tab.agent ? await tab.agent.verifyRun(message.runId).catch((error: Error) => ({ outcome: 'unavailable' as const, summary: `Verification failed: ${providerErrorMessage(error)}`, checks: {}, notChecked: [] })) : undefined;
       tab.post({ type: 'response-verification', runId: message.runId, result: result ?? { outcome: 'unavailable', summary: 'Nothing to verify.', checks: {}, notChecked: [] } });

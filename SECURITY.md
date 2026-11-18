@@ -395,7 +395,11 @@ helpers included, read: reading a Confidential file makes the chat
 Confidential. It is kept with the chat and synced with it, encrypted like the
 rest of the chat. A sync never lowers a chat's label: two copies merge to the
 higher label. Only you lower it, with **NEAR AI: Lower This Chat's Label** and
-a reason that is recorded. A lowering reaches your other computers only as a
+a reason that is recorded. You reach it from the Command Palette, by clicking
+the chat's label beside the model (or pressing Enter or Space on it), or with
+the button under any refusal that names it. Lowering a file's label with
+**NEAR AI: Set Label** does not lower a chat that read the file: the chat keeps
+its label, says so, and offers the same button. A lowering reaches your other computers only as a
 declassification signed with your device key that they can check, and only
 when it undoes no raise made there. In this version your other computers
 cannot check another computer's key yet, in or outside Team Mode, so a

@@ -28,10 +28,17 @@ export interface RouteAttestation {
   closed?: boolean;
 }
 
-/** What an answer check found, as the client's VerificationResult says it (this folder imports nothing from services). */
+/**
+ * What an answer check found: every field the chat shows and keeps, declared here so the gate side never casts (this folder imports nothing from services;
+ * the client's VerificationResult has exactly this shape).
+ */
 export interface AnswerCheckResult {
   readonly outcome: 'signed' | 'failed' | 'unavailable';
   readonly summary: string;
+  readonly signingAddress?: string;
+  readonly signer?: 'model' | 'gateway';
+  readonly checks: Readonly<Record<string, boolean | undefined>>;
+  readonly notChecked: readonly string[];
 }
 
 /** The hashes an answer check works from (the client's ResponseEvidence): no prompt or answer text. */

@@ -15,7 +15,7 @@ import { CLEARANCE_SELF_ASSERTED_TEXT, HANDLING_FLAGS, LABELS_NOT_ACCREDITATION_
 import type { Label } from '../domain/gate/labels';
 import { dominates, raiseMark, sameMark } from '../domain/gate/dominance';
 import type { Mark } from '../domain/gate/dominance';
-import { chatInView, onChatInViewChange, queueChatNotice } from './chatInView';
+import { chatInView, isChatInView, onChatInViewChange, queueChatNotice } from './chatInView';
 import type { ChatInView } from './chatInView';
 import { holdsReads, labelMapKey, resolveLabel, setLabelEntry, setProjectLabel } from '../domain/gate/labelMap';
 import type { LabelMapPayload } from '../domain/gate/labelMap';
@@ -306,7 +306,8 @@ function registerPolicySurfaces(context: GateActivationContext, host: GateHost, 
     }));
   });
   attempt('Lower This Chat\'s Label', () => {
-    keep(vscode.commands.registerCommand(LOWER_CHAT_LABEL_COMMAND, () => lowerChatLabel(host)));
+    // The chat page passes its own chat (its label chip, a refusal's button); the Command Palette passes nothing, so it acts on the chat in view.
+    keep(vscode.commands.registerCommand(LOWER_CHAT_LABEL_COMMAND, (chat?: unknown) => lowerChatLabel(host, isChatInView(chat) ? chat : chatInView())));
   });
   attempt('label rename tracking', () => {
     keep(vscode.workspace.onDidRenameFiles((event) => followRenames(host, event.files)));
@@ -320,6 +321,13 @@ function registerPolicySurfaces(context: GateActivationContext, host: GateHost, 
 // Lower This Chat's Label (CLAS-04, D-29, D-58, GATE-07)
 
 export const LOWER_CHAT_LABEL_COMMAND = 'nearAi.label.lowerChat';
+/** The button that runs Lower This Chat's Label wherever a message names it (owner, after the 0.4.31 check: the command was hard to find). */
+export const LOWER_CHAT_LABEL_ACTION = "Lower This Chat's Label";
+/**
+ * Said when the person lowers a file's label with Set Label while the chat in view holds that file's old label: the chat keeps its label, since a chat's
+ * label only rises on its own, from what its agents read (D-29). Shown with LOWER_CHAT_LABEL_ACTION.
+ */
+export const CHAT_KEEPS_LABEL_TEXT = "That label is lower now, but the chat in view keeps its own label: a chat's label only rises on its own, from what its agents read. If what this chat read allows it, lower the chat's label too.";
 export const NO_CHAT_IN_VIEW_TEXT = "Nothing was changed: open the chat whose label you want to lower in the NEAR AI chat view first.";
 /** Said for a chat in view that has not run yet: it has no label of its own, and its first run starts at the project's label (PR #87 review). */
 export const CHAT_NOT_RUN_TEXT = "Nothing was changed: this chat has not run yet, so it has no label of its own. Its first run starts at the project's label, and a chat is never lowered below its project.";
@@ -397,7 +405,8 @@ export async function lowerChatLabel(host: GateHost, chat: ChatInView | undefine
   // The chat may have read more while the person chose: lower only from what it holds now, and only if the choice is still lower and still covers the project.
   const now = mark.current();
   if (!isLowerMark(picked.mark, now, policy.scales) || !coversProject(picked.mark, project, policy.scales)) {
-    void Promise.resolve(vscode.window.showWarningMessage(`Nothing was changed: this chat read more meanwhile, and its label is now ${labelsShown(now)}. Run NEAR AI: Lower This Chat's Label again.`)).catch(() => undefined);
+    void Promise.resolve(vscode.window.showWarningMessage(`Nothing was changed: this chat read more meanwhile, and its label is now ${labelsShown(now)}. Run NEAR AI: Lower This Chat's Label again.`, LOWER_CHAT_LABEL_ACTION))
+      .then((picked) => { if (picked === LOWER_CHAT_LABEL_ACTION) void lowerChatLabel(host, chat); }).catch(() => undefined);
     return false;
   }
   // D-58: the lowering travels to this person's other copies of the chat only signed with this install's device key; with no key it is lowered here only.
@@ -561,6 +570,16 @@ export async function setLabel(host: GateHost, target: LabelTarget): Promise<boo
   }
   host.recordLabelEvent(target.root, { event: 'label.set', path: keyText, ...(label === undefined ? {} : { label }), ...(current.origin === 'default' ? {} : { from: current.mark }), ...(reason === undefined ? {} : { reason }) });
   void Promise.resolve(vscode.window.showInformationMessage(label === undefined ? `The label of ${shownTarget} was removed.` : `${shownTarget} is labelled ${labelShown(label)}.`)).catch(() => undefined);
+  // A lowered file does not lower a chat that read it (D-29: a chat's label only rises on its own). When the chat in view, in this project, holds the file's
+  // old label, the person is told so and offered the one way down for the chat.
+  if (reason !== undefined && current.origin !== 'default') {
+    const chat = chatInView();
+    const held = chat !== undefined && chat.root === target.root ? chat.mark()?.current() : undefined;
+    if (held !== undefined && coversProject(held, current.mark, policy.scales)) {
+      void Promise.resolve(vscode.window.showInformationMessage(CHAT_KEEPS_LABEL_TEXT, LOWER_CHAT_LABEL_ACTION))
+        .then((picked) => { if (picked === LOWER_CHAT_LABEL_ACTION) void lowerChatLabel(host, chat); }).catch(() => undefined);
+    }
+  }
   return true;
 }
 

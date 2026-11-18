@@ -89,6 +89,33 @@
   let lastReply;
   // Replies by run, so a cost NEAR settles later lands on the reply it belongs to.
   const replies = new Map();
+  // Verify signature rows whose run's answer is not on the page yet (PR #89 review), by run id, with the newest result for each: a row is only ever placed
+  // under its own run's answer, never under another one; it appears when that answer does.
+  const pendingVerify = new Map();
+  // The Verify signature row of each run, by run id (the newest 50), so a result always finds its own run's row.
+  const verifyRows = new Map();
+  function addVerifyRow(runId, node) {
+    if (verifyRows.has(runId)) return;
+    const row = el('div', 'verify');
+    row.id = 'verify-' + runId;
+    row.append(textButton('Verify signature', () => { row.replaceChildren(el('span', '', 'Checking NEAR\u2019s signature and attestation\u2026')); postFor({ type: 'verify-response', runId }); }));
+    node.append(row);
+    verifyRows.set(runId, row);
+    if (verifyRows.size > 50) verifyRows.delete(verifyRows.keys().next().value);
+  }
+  function showVerification(runId, r) {
+    const row = verifyRows.get(runId);
+    if (!row) return;
+    const icon = r.outcome === 'signed' ? '\u2713 ' : r.outcome === 'failed' ? '\u2717 ' : '';
+    const line = el('span', r.outcome === 'failed' ? 'verify-failed' : r.outcome === 'signed' ? 'verify-ok' : '', icon + (r.summary || ''));
+    if (r.notChecked && r.notChecked.length) line.title = 'Not checked in the editor: ' + r.notChecked.join(', ') + '. For a full check use cloud.near.ai/verify or NEAR\u2019s nearai-cloud-verifier.';
+    row.replaceChildren(line);
+    // A failed check stops private NEAR AI Cloud models for this chat until a fresh check passes: Check again runs one.
+    if (r.outcome === 'failed') row.append(textButton('Check again', () => { row.replaceChildren(el('span', '', 'Checking NEAR\u2019s signature and attestation again\u2026')); postFor({ type: 'verify-response', runId }); }));
+    announce(r.summary || 'Verification finished.');
+  }
+  // The chat's label chip is a button: a click, or Enter or Space on it, runs Lower This Chat's Label for this chat.
+  { const chip = $('chat-label'); if (chip) chip.addEventListener('click', () => postFor({ type: 'lower-chat-label' })); }
   let runInfo = {};
   const agentRows = new Map();
   let tools = new Map();
@@ -393,10 +420,15 @@
     transcript.querySelectorAll('.continue-action').forEach((button) => button.remove());
     if (send) postFor({ type: 'continue-run' });
   }
+  // Lower This Chat's Label, as a button wherever a message names it (owner, after the 0.4.31 check: people looked at the chat, not the Command Palette).
+  const LOWER_NAME = 'NEAR AI: Lower This Chat\u2019s Label';
+  function namesLower(text) { return typeof text === 'string' && (text.includes(LOWER_NAME) || text.includes("NEAR AI: Lower This Chat's Label")); }
+  function lowerButton() { return textButton('Lower This Chat\u2019s Label', () => postFor({ type: 'lower-chat-label' })); }
   function notice(text, actions, isError) {
     const node = el('div', isError ? 'turn notice error' : 'turn notice');
     node.append(el('span', '', text));
     (actions || []).forEach((action) => node.append(action));
+    if (namesLower(text)) node.append(lowerButton());
     append(node);
     announce(text);
   }
@@ -514,6 +546,8 @@
   function resetConversation() {
     agentRows.clear();
     replies.clear();
+    pendingVerify.clear();
+    verifyRows.clear();
     steerBubbles.clear();
     lastReply = undefined;
     runInfo = {};
@@ -558,6 +592,8 @@
     row.state.textContent = m.ok ? '' : 'failed';
     row.log.textContent = m.output || '';
     if (!m.ok) row.details.open = true;
+    // A call refused at the chat's label (label.network-at-mark, label.outbound-match and the like) offers the way out under its output.
+    if (!m.ok && namesLower(m.output) && !row.details.querySelector('.lower-action')) { const button = lowerButton(); button.classList.add('lower-action'); row.details.append(button); }
     // The call ended without an answer (declined elsewhere): nothing is waiting any more. A sub-agent's call that returned "awaiting approval" ends
     // while its card is still open (the host says so), and that card stays until it is answered or the host closes it.
     if (!m.stillWaiting) closePending(m.callId, 'closed');
@@ -1449,9 +1485,15 @@
         break;
       }
       case 'chat-label': {
-        // CLAS-01, D-33: the chat's label beside the model while it is above the default label; text only, never markup from the label.
+        // CLAS-01, D-33: the chat's label beside the model while it is above the default label; text only, never markup from the label. It is a button:
+        // clicking it (or Enter or Space on it) runs Lower This Chat's Label for this chat.
         const chip = $('chat-label');
-        if (chip) { chip.textContent = typeof m.text === 'string' && m.text ? 'Label: ' + m.text : ''; chip.hidden = !(typeof m.text === 'string' && m.text); }
+        if (chip) {
+          const shown = typeof m.text === 'string' && m.text ? m.text : '';
+          if (shown && chip.textContent !== 'Label: ' + shown) announce('This chat\u2019s label is ' + shown + '.');
+          chip.textContent = shown ? 'Label: ' + shown : '';
+          chip.hidden = !shown;
+        }
         break;
       }
       case 'assistant-start': settleContinue(false); runInfo = { model: m.model, privacy: m.privacy }; setBusy(true); if (!current) startAssistant(); if (m.status) status.textContent = m.status; break;
@@ -1464,7 +1506,12 @@
         // A run is several text segments around tool rows; the footer goes after the last one.
         if (!current) startAssistant();
         lastReply = { node: current.node, usage: m.usage, model: runInfo.model, privacy: runInfo.privacy, spend: m.spend };
-        if (m.runId) { replies.set(m.runId, lastReply); if (replies.size > 50) replies.delete(replies.keys().next().value); }
+        if (m.runId) {
+          replies.set(m.runId, lastReply);
+          if (replies.size > 50) replies.delete(replies.keys().next().value);
+          // A row (and a result) that arrived before this answer is placed now, under its own answer.
+          if (pendingVerify.has(m.runId)) { const waiting = pendingVerify.get(m.runId); pendingVerify.delete(m.runId); addVerifyRow(m.runId, lastReply.node); if (waiting.result) showVerification(m.runId, waiting.result); }
+        }
         finishAssistant(usageLine(m.usage, runInfo.model, runInfo.privacy, undefined, m.spend));
         { const meta = lastReply.node.querySelector('.meta'); if (meta && m.spend) meta.title = COST_TIP; }
         announce('Response complete.');
@@ -1500,27 +1547,17 @@
         break;
       }
       case 'response-verifiable': {
-        // Under the run's own answer when the page knows it (a check that failed later offers its row then), else under the newest answer.
-        const reply = (m.runId && replies.get(m.runId)) || lastReply;
-        const node = reply && reply.node;
-        if (!node || document.getElementById('verify-' + m.runId)) break;
-        const row = el('div', 'verify');
-        row.id = 'verify-' + m.runId;
-        row.append(textButton('Verify signature', () => { row.replaceChildren(el('span', '', 'Checking NEAR\u2019s signature and attestation\u2026')); postFor({ type: 'verify-response', runId: m.runId }); }));
-        node.append(row);
+        if (!m.runId) break;
+        // Only under the run's own answer (PR #89 review): until that answer is on the page, the row waits for it, never placed under another answer.
+        const reply = replies.get(m.runId);
+        if (reply) addVerifyRow(m.runId, reply.node);
+        else if (!pendingVerify.has(m.runId)) { pendingVerify.set(m.runId, {}); if (pendingVerify.size > 50) pendingVerify.delete(pendingVerify.keys().next().value); }
         break;
       }
       case 'response-verification': {
-        const row = document.getElementById('verify-' + m.runId);
-        if (!row) break;
-        const r = m.result || {};
-        const icon = r.outcome === 'signed' ? '\u2713 ' : r.outcome === 'failed' ? '\u2717 ' : '';
-        const line = el('span', r.outcome === 'failed' ? 'verify-failed' : r.outcome === 'signed' ? 'verify-ok' : '', icon + (r.summary || ''));
-        if (r.notChecked && r.notChecked.length) line.title = 'Not checked in the editor: ' + r.notChecked.join(', ') + '. For a full check use cloud.near.ai/verify or NEAR\u2019s nearai-cloud-verifier.';
-        row.replaceChildren(line);
-        // A failed check stops private NEAR AI Cloud models for this chat until a fresh check passes: Check again runs one.
-        if (r.outcome === 'failed') row.append(textButton('Check again', () => { row.replaceChildren(el('span', '', 'Checking NEAR\u2019s signature and attestation again\u2026')); postFor({ type: 'verify-response', runId: m.runId }); }));
-        announce(r.summary || 'Verification finished.');
+        if (!m.runId) break;
+        if (verifyRows.has(m.runId)) showVerification(m.runId, m.result || {});
+        else if (pendingVerify.has(m.runId)) pendingVerify.get(m.runId).result = m.result || {};
         break;
       }
       case 'assistant-cost': {

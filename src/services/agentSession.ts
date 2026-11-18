@@ -7,7 +7,7 @@ import { RunCheckpoints } from '../agent/checkpoints';
 import { compactConversation, contextAction, contextStatus, DEFAULT_COMPACT_AT_TOKENS, DEFAULT_CONTEXT_WINDOW, DEFAULT_THRESHOLDS, estimateTokens, trimOldToolResults } from '../agent/context';
 import type { GateHost } from '../gate/host';
 import { currentSessionRoute, defaultSessionRoute, routeEventRecordFor, sessionRouteFrom, withSessionRoute } from '../gate/sessionMark';
-import type { AnswerCheckListener, RouteAttestation, SessionRoute } from '../gate/sessionMark';
+import type { AnswerCheckListener, AnswerCheckResult, RouteAttestation, SessionRoute } from '../gate/sessionMark';
 import { approveFloorCallLate, endFloorApprovals, recordLateApproval, unavailableGateRuntime } from '../agent/gateAdapter';
 import { projectLabelOf, scalesOf } from '../agent/gateLabels';
 import { OutboundFingerprints } from '../agent/outboundCheck';
@@ -56,7 +56,7 @@ import { entriesToMessages, entriesToView, type ViewItem } from '../domain/state
 import { ThreadStore } from './threadStore';
 import type { ConversationStore, Transcript } from './transcripts';
 import type { RunEnd, RunMarkers } from './runMarkers';
-import { NOT_CHECKED_IN_EDITOR, type ResponseEvidence, type VerificationResult } from './attestation';
+import { NOT_CHECKED_IN_EDITOR, type ResponseEvidence } from './attestation';
 import { PreparedAttachments, StagedAttachment } from '../agent/attachments';
 import { imageTool, ImageDraft, ImageDraftEntry, ImageReviewDecision, ImageReviewer, memoryPreamble, memoryTools } from '../agent/extraTools';
 import { cleanOldDrafts, DRAFT_ID, draftFile } from '../agent/imageDrafts';
@@ -276,7 +276,13 @@ export class AgentConversation {
    * The checks after each run's attested-cloud answers (D-36, D-55), by run id, the newest 50: the failed ones (what Check again checks afresh), the result
    * for the run's final answer, and the run's route (where Check again's record goes).
    */
-  private readonly answerChecks = new Map<string, { route: SessionRoute; failed: Map<string, { model: string; evidence: ResponseEvidence; client: NearAiClient }>; results: Map<string, VerificationResult> }>();
+  private readonly answerChecks = new Map<string, { route: SessionRoute; failed: Map<string, { model: string; evidence: ResponseEvidence; client: NearAiClient }>; results: Map<string, AnswerCheckResult> }>();
+  /**
+   * The chat ids of this chat's failed answer checks that no Check again has passed yet (PR #89 review). Kept for the whole chat, apart from the newest-50
+   * list above, so a failure whose run has left that list still holds the stop: only a new chat or a reload clears it then. Failures are few, since the
+   * first one stops further requests at that level.
+   */
+  private uncheckedFailures = new Set<string>();
   /**
    * The chat's high-water mark (CLAS-04, D-29, D-54): set at the project's resolved label when the chat's first run starts (or at its stored mark when it
    * was reopened), raised by what any of its agents read, and read by every session route of the chat before each model request. It only rises; the
@@ -639,8 +645,7 @@ export class AgentConversation {
         // With no gate host (a test) the run is wrapped in the default route, so the call is wrapped either way (PR 4a review).
         const attestation = this.chatAttestation;
         let routeOfRun: SessionRoute | undefined;
-        // The client is the only caller, and it passes its full VerificationResult (src/gate names the fields it needs without importing services).
-        const onAnswerChecked: AnswerCheckListener = (chatId, result, checked) => { if (routeOfRun) this.answerChecked(runId, routeOfRun, attestation, chatId, result as VerificationResult, { ...checked, client: request.client }); };
+        const onAnswerChecked: AnswerCheckListener = (chatId, result, checked) => { if (routeOfRun) this.answerChecked(runId, routeOfRun, attestation, chatId, result, { ...checked, client: request.client }); };
         const runRoute = gate ? sessionRouteFrom(gate, { attestation, markOf: () => mark.current(), onAnswerChecked }) : defaultSessionRoute();
         routeOfRun = runRoute;
         result = await withSpendTag({ kind: 'main', runId, conversationId: this.conversationId, agentId: mainId }, () => withSessionRoute(runRoute, () => run.run(this.messages, abort.signal)));
@@ -866,21 +871,22 @@ export class AgentConversation {
    * run's answers had failed (D-55), Check again checks each of those answers afresh: when every one is signed, the chat's stop is cleared (if no other run
    * of the chat still has a failed check) and route.attestation-cleared is recorded; a fresh result that fails again leaves the stop.
    */
-  public async verifyRun(runId: string): Promise<VerificationResult> {
+  public async verifyRun(runId: string): Promise<AnswerCheckResult> {
     const checks = this.answerChecks.get(runId);
     if (checks && checks.failed.size > 0) {
       const attestation = this.chatAttestation;
-      let last: VerificationResult | undefined;
+      let last: AnswerCheckResult | undefined;
       let model = '';
       for (const [chatId, failed] of [...checks.failed]) {
         model = failed.model;
         last = await failed.client.verifyResponse(failed.model, failed.evidence);
         if (last.outcome !== 'signed') return last;
         checks.failed.delete(chatId);
+        if (attestation === this.chatAttestation) this.uncheckedFailures.delete(chatId);
         checks.results.set(chatId, last);
       }
-      const stillFailed = [...this.answerChecks.values()].some((entry) => entry.failed.size > 0);
-      if (!stillFailed && attestation === this.chatAttestation && attestation.closed !== true && attestation.failed) {
+      // Cleared only when no failed answer of the chat is left unchecked, counted for the whole chat (an evicted run's failure still counts).
+      if (this.uncheckedFailures.size === 0 && attestation === this.chatAttestation && attestation.closed !== true && attestation.failed) {
         attestation.failed = false;
         try { checks.route.sink?.record(routeEventRecordFor(checks.route, 'route.attestation-cleared', { model, attestation: 'verified' })); } catch { /* D-21 */ }
       }
@@ -897,7 +903,7 @@ export class AgentConversation {
    * kept for Check again; the result is shown under the run's answer when the run's row is there (a failed one under that row even when it was for an
    * earlier turn), or when the run ends.
    */
-  private answerChecked(runId: string, route: SessionRoute, attestation: RouteAttestation, chatId: string, result: VerificationResult, checked: { model: string; evidence: ResponseEvidence; client: NearAiClient }): void {
+  private answerChecked(runId: string, route: SessionRoute, attestation: RouteAttestation, chatId: string, result: AnswerCheckResult, checked: { model: string; evidence: ResponseEvidence; client: NearAiClient }): void {
     if (attestation !== this.chatAttestation || attestation.closed === true) return;
     let checks = this.answerChecks.get(runId);
     if (!checks) {
@@ -906,7 +912,7 @@ export class AgentConversation {
       for (const old of [...this.answerChecks.keys()].slice(0, -50)) this.answerChecks.delete(old);
     }
     checks.results.set(chatId, result);
-    if (result.outcome === 'failed') checks.failed.set(chatId, checked);
+    if (result.outcome === 'failed') { checks.failed.set(chatId, checked); this.uncheckedFailures.add(chatId); }
     const entry = this.verifiable.get(runId);
     if (entry) {
       // The run has ended and its row is there: its final answer's result, or any failure of the run, is shown on it.
@@ -920,7 +926,7 @@ export class AgentConversation {
   }
 
   /** What a run's row shows when the run ends: a failed check of any of its answers, else its final answer's result, else nothing yet. */
-  private shownCheck(runId: string, finalChatId: string): VerificationResult | undefined {
+  private shownCheck(runId: string, finalChatId: string): AnswerCheckResult | undefined {
     const checks = this.answerChecks.get(runId);
     if (!checks) return undefined;
     const failed = [...checks.failed.keys()][0];
@@ -1023,6 +1029,7 @@ export class AgentConversation {
     this.chatAttestation.closed = true;
     this.chatAttestation = { failed: false };
     this.answerChecks.clear();
+    this.uncheckedFailures = new Set();
   }
 
   public dispose(): void { this.reset(); }

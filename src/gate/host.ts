@@ -162,10 +162,11 @@ export class GateHost {
   /** Signed lowerings already recorded this window, by signature, so each is recorded and said once: the newest JUDGED_LOWERINGS_KEPT (PR #87 review). */
   private readonly judgedLowerings = new Set<string>();
   /**
-   * Raises an automatic write could not make (an unverified label file), by project, kept for Sign Again: at most REFUSED_RAISE_PROJECTS projects of at most
-   * REFUSED_RAISE_PATHS paths each, each path's labels joined rather than appended, so a long session cannot grow it without bound (PR #87 review).
+   * Raises an automatic write could not make (an unverified label file), by project, kept for Sign Again. Each path's labels are joined, never appended.
+   * It holds at most REFUSED_RAISE_PROJECTS projects of at most REFUSED_RAISE_PATHS paths each (PR #87 review): past either bound the oldest is dropped,
+   * and each raise dropped is recorded in that project's decision log as a label.set that was denied, so Sign Again not writing it is never silent.
    */
-  private readonly refusedRaises = new Map<string, Map<string, Label[]>>();
+  private readonly refusedRaises = new Map<string, { readonly root: string; readonly raises: Map<string, Label[]> }>();
 
   public constructor(private readonly options: GateHostOptions) {}
 
@@ -337,7 +338,7 @@ export class GateHost {
    * Records a label event (GATE-07) in the project's log, the way the policy's events are written: the event as the operation, the project-relative path as
    * the resource (`project` for the project itself, never a machine path), the new label, and the reason a person gave.
    */
-  public recordLabelEvent(root: string, event: { readonly event: LabelEventId; readonly path: string; readonly label?: Label; readonly reason?: string; readonly mark?: Mark; readonly from?: Mark }): void {
+  public recordLabelEvent(root: string, event: { readonly event: LabelEventId; readonly path: string; readonly label?: Label; readonly reason?: string; readonly mark?: Mark; readonly from?: Mark; readonly outcome?: 'allowed' | 'denied' }): void {
     try {
       const record = buildDecisionRecord({
         recordId: randomUUID(),
@@ -348,7 +349,7 @@ export class GateHost {
         callId: `${event.event}-${this.now()}`,
         capability: { verb: 'plan' },
         resource: { name: event.path === '' ? 'project' : event.path.slice(0, 300), type: 'label' },
-        outcome: 'allowed',
+        outcome: event.outcome ?? 'allowed',
         rule: event.event,
         ...(event.reason === undefined || event.reason === '' ? {} : { reason: event.reason.slice(0, 500) }),
         bundleHash: this.current.state === 'valid' ? this.current.hash : '',
@@ -406,7 +407,7 @@ export class GateHost {
       });
     } catch (error) {
       if (error instanceof LabelMapError && error.message === NOTHING_TO_RAISE) return false;
-      this.keepRefusedRaises(projectLogKey(root), raises);
+      this.keepRefusedRaises(root, raises);
       // The person is told only when the labels as last read say something would rise; the raises are kept for Sign Again either way, which works them out
       // under the lock again.
       let worthTelling = true;
@@ -433,19 +434,40 @@ export class GateHost {
   }
 
   /** Keeps refused raises for Sign Again, bounded: each path's labels joined (never appended), the oldest project and path dropped first. */
-  private keepRefusedRaises(project: string, raises: ReadonlyMap<string, readonly Label[]>): void {
-    const kept = this.refusedRaises.get(project) ?? new Map<string, Label[]>();
+  private keepRefusedRaises(root: string, raises: ReadonlyMap<string, readonly Label[]>): void {
+    const project = projectLogKey(root);
+    const kept = this.refusedRaises.get(project)?.raises ?? new Map<string, Label[]>();
     this.refusedRaises.delete(project);
+    const scales = this.labelPolicy().scales;
     for (const [relative, mark] of raises) {
       let joined: Mark = kept.get(relative) ?? [];
-      const scales = this.labelPolicy().scales;
       for (const label of mark) joined = raiseMark(joined, label, scales);
       kept.delete(relative);
       kept.set(relative, [...joined]);
-      while (kept.size > REFUSED_RAISE_PATHS) kept.delete(kept.keys().next().value as string);
+      while (kept.size > REFUSED_RAISE_PATHS) {
+        const oldest = kept.keys().next().value as string;
+        this.recordDroppedRaise(root, oldest, kept.get(oldest) ?? []);
+        kept.delete(oldest);
+      }
     }
-    this.refusedRaises.set(project, kept);
-    while (this.refusedRaises.size > REFUSED_RAISE_PROJECTS) this.refusedRaises.delete(this.refusedRaises.keys().next().value as string);
+    this.refusedRaises.set(project, { root, raises: kept });
+    while (this.refusedRaises.size > REFUSED_RAISE_PROJECTS) {
+      const oldest = this.refusedRaises.keys().next().value as string;
+      const dropped = this.refusedRaises.get(oldest);
+      for (const [relative, labels] of dropped?.raises ?? []) this.recordDroppedRaise(dropped!.root, relative, labels);
+      this.refusedRaises.delete(oldest);
+    }
+  }
+
+  /** Records a refused raise that the bound dropped: Sign Again will not write it, so the log says so, with the label it would have given. */
+  private recordDroppedRaise(root: string, relative: string, labels: readonly Label[]): void {
+    this.recordLabelEvent(root, {
+      event: 'label.set',
+      outcome: 'denied',
+      path: relative,
+      ...(labels.length === 0 ? {} : { mark: labels }),
+      reason: 'A raise this file needed could not be written (the label file did not verify) and was kept for Sign Again, but too many were kept, so it was dropped. Sign Again will not write it: set the label with NEAR AI: Set Label if it is still needed.'
+    });
   }
 
   /**
@@ -454,7 +476,7 @@ export class GateHost {
    */
   public async signAgainForRaises(root: string): Promise<boolean> {
     await this.changeLabels(root, (map) => map, async (question) => question === 'resign' || question === 'restore');
-    const kept = this.refusedRaises.get(projectLogKey(root));
+    const kept = this.refusedRaises.get(projectLogKey(root))?.raises;
     this.refusedRaises.delete(projectLogKey(root));
     this.toldLabelProblems.delete(`raise-refused:${projectLogKey(root)}`);
     return kept === undefined ? false : this.writeRaises(root, kept);

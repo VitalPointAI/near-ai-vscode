@@ -503,3 +503,38 @@ test('a request at any-cloud starts no automatic check', async () => {
   assert.equal(near.signatureGets(), 0);
   assert.equal(checkedRecords(chat).length, 0);
 });
+
+// ---- PR #89 review ----
+
+test('review 89.3: Check again does not clear the stop while a failed answer is unchecked, even after its run left the newest 50', async () => {
+  const near = await fakeNear();
+  near.mode = 'hang';
+  const chat = checkedChat();
+  // Two answers in flight, both of whose checks then fail.
+  await sendTo(chat, near.client);
+  await sendTo(chat, near.client);
+  near.mode = 'bad-signature';
+  near.release();
+  await settled(near, 'chatcmpl-1');
+  await settled(near, 'chatcmpl-2');
+  assert.equal(chat.conversation.routeAttestation.failed, true);
+  const [first, second] = chat.posted.filter((message) => message.type === 'response-verifiable').map((message) => message.runId!);
+  assert.ok(first !== undefined && second !== undefined && first !== second);
+  // The first run leaves the newest-50 list, as it would after 50 more runs.
+  (chat.conversation as unknown as { answerChecks: Map<string, unknown> }).answerChecks.delete(first);
+  near.mode = 'valid';
+  assert.equal((await chat.conversation.verifyRun(second)).outcome, 'signed');
+  assert.equal(chat.conversation.routeAttestation.failed, true, 'the failure of the evicted run still holds the stop');
+  assert.equal(checkedRecords(chat, 'route.attestation-cleared').length, 0);
+  // A new chat still clears it.
+  chat.conversation.reset();
+  assert.equal(chat.conversation.routeAttestation.failed, false);
+});
+
+test('review 89.2: the conversation keeps answer checks with the fields the gate side declares, never by casting the client result', () => {
+  const source = readFileSync(path.join(__dirname, '..', '..', 'src', 'services', 'agentSession.ts'), 'utf8');
+  assert.ok(!/as VerificationResult/.test(source));
+  assert.ok(!/VerificationResult/.test(source), 'agentSession works with the gate AnswerCheckResult');
+  const gate = readFileSync(path.join(__dirname, '..', '..', 'src', 'gate', 'sessionMark.ts'), 'utf8');
+  for (const field of ['readonly outcome:', 'readonly summary:', 'readonly signingAddress?:', 'readonly signer?:', 'readonly checks:', 'readonly notChecked:']) assert.ok(gate.includes(field), field);
+});

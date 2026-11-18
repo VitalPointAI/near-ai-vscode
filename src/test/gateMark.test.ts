@@ -27,6 +27,7 @@ import type { Label } from '../domain/gate/labels';
 import type { GateRuntime } from '../domain/gate/decide';
 import type { DecisionRecord } from '../domain/gate/record';
 import { validateDecisionRecord } from '../domain/gate/record';
+import { DECISIONS_DIR, projectLogKey } from '../gate/decisionLog';
 import { LABEL_LOWERING_REFUSED_TEXT, LABEL_MAP_FILE, LabelMapError } from '../gate/labelMapStore';
 import { GateHost, JUDGED_LOWERINGS_KEPT, REFUSED_RAISE_PATHS, REFUSED_RAISE_PROJECTS, raisedEntryLabel } from '../gate/host';
 import { DEFAULT_ROUTING } from '../domain/gate/routing';
@@ -555,13 +556,25 @@ test('review 4.5: a view read before the lock that says the file is already high
 });
 
 test('review 4.5: the lowerings a window remembers and the raises it keeps for Sign Again are bounded, and a path\'s kept labels are joined, not appended', async () => {
-  const { host } = await hostWithLabels({});
-  const internals = host as unknown as { judgedLowerings: Set<string>; refusedRaises: Map<string, Map<string, Label[]>>; keepRefusedRaises: (project: string, raises: ReadonlyMap<string, readonly Label[]>) => void };
-  for (let index = 0; index < 50; index += 1) internals.keepRefusedRaises('project-a', new Map([['out.md', [label('org', 'Confidential')]]]));
-  assert.deepEqual(keys(internals.refusedRaises.get('project-a')!.get('out.md')!), ['org/Confidential'], 'joined once, not fifty times');
-  for (let index = 0; index < REFUSED_RAISE_PATHS + 10; index += 1) internals.keepRefusedRaises('project-a', new Map([[`file-${String(index)}.md`, [label('org', 'Internal')]]]));
-  assert.equal(internals.refusedRaises.get('project-a')!.size, REFUSED_RAISE_PATHS);
-  for (let index = 0; index < REFUSED_RAISE_PROJECTS + 5; index += 1) internals.keepRefusedRaises(`project-${String(index)}`, new Map([['x.md', [label('org', 'Internal')]]]));
+  const { host, root } = await hostWithLabels({});
+  const internals = host as unknown as { judgedLowerings: Set<string>; refusedRaises: Map<string, { root: string; raises: Map<string, Label[]> }>; keepRefusedRaises: (root: string, raises: ReadonlyMap<string, readonly Label[]>) => void };
+  const projectA = internals.refusedRaises;
+  for (let index = 0; index < 50; index += 1) internals.keepRefusedRaises(root, new Map([['out.md', [label('org', 'Confidential')]]]));
+  const keptFor = () => projectA.get(projectLogKey(root))!.raises;
+  assert.deepEqual(keys(keptFor().get('out.md')!), ['org/Confidential'], 'joined once, not fifty times');
+  for (let index = 0; index < REFUSED_RAISE_PATHS + 10; index += 1) internals.keepRefusedRaises(root, new Map([[`file-${String(index)}.md`, [label('org', 'Internal')]]]));
+  assert.equal(keptFor().size, REFUSED_RAISE_PATHS);
+  // PR #89 review: each raise the bound drops is recorded in the project's log as a denied label.set, so Sign Again not writing it is never silent.
+  await host.flush();
+  const storage = (host as unknown as { options: { globalStorageDir: string } }).options.globalStorageDir;
+  const log = path.join(storage, 'gate', DECISIONS_DIR, `${projectLogKey(root)}.jsonl`);
+  const dropped = readFileSync(log, 'utf8').split('\n').filter((line) => line !== '').map((line) => JSON.parse(line) as DecisionRecord)
+    .filter((record) => record.authorizations[0]?.policy.name === 'label.set' && JSON.stringify(record).includes('was dropped'));
+  assert.equal(dropped.length, 11, 'out.md and the ten oldest files');
+  assert.ok(dropped.every((record) => (record as unknown as { action_id: number }).action_id === 2), 'recorded as denied, never as a label that was set');
+  assert.ok(dropped.some((record) => JSON.stringify(record).includes('"name":"out.md"') && record.unmapped.nearAi.label?.level === 'Confidential'));
+  assert.ok(dropped.every((record) => validateDecisionRecord(JSON.parse(JSON.stringify(record))).ok));
+  for (let index = 0; index < REFUSED_RAISE_PROJECTS + 5; index += 1) internals.keepRefusedRaises(path.join(root, `project-${String(index)}`), new Map([['x.md', [label('org', 'Internal')]]]));
   assert.equal(internals.refusedRaises.size, REFUSED_RAISE_PROJECTS);
   const stop = host.registerLabelLowerings();
   try {

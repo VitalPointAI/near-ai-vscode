@@ -103,9 +103,10 @@ function abortError(signal: AbortSignal | null | undefined): Error {
 /**
  * A fetch whose every TLS handshake runs the normal host name check and then refuses any certificate whose fingerprint (of `kind`) is not `fingerprint`,
  * before a byte of the request is written; the refusal is a ConnectionNotBoundError. It forwards method, headers, body and signal (an abort destroys the
- * request), and resolves a Response with the status, headers and a streamed body. The certificate check travels with the request's own options, so it holds
- * on every route Node and VS Code may give the request: a direct connection, or a CONNECT tunnel through a proxy, where TLS still runs end to end. A proxy
- * that ends TLS itself presents its own certificate and is refused. Only https URLs are sent.
+ * request), and resolves a Response with the status, headers and a streamed body. The check is made twice: in the handshake, through the request's own
+ * TLS options, and again on the live socket the request is given, before anything is written. The second check does not depend on any layer keeping the
+ * request's options, so it holds whatever agent VS Code's proxy support or anything else puts in place: a direct connection, or a CONNECT tunnel through a
+ * proxy, where TLS runs end to end. A proxy that ends TLS itself presents its own certificate and is refused, sending nothing. Only https URLs are sent.
  */
 export function pinnedFetch(fingerprint: string, kind: FingerprintKind, options: { tls?: PinTlsOptions } = {}): typeof fetch {
   const pin = normaliseFingerprint(fingerprint);
@@ -165,8 +166,30 @@ export function pinnedFetch(fingerprint: string, kind: FingerprintKind, options:
         signal?.removeEventListener('abort', onAbort);
         reject(error instanceof ConnectionNotBoundError ? error : (error as { cause?: unknown }).cause instanceof ConnectionNotBoundError ? (error as { cause: ConnectionNotBoundError }).cause : error);
       });
-      // Written only after the handshake: Node holds the body until the socket is connected and the certificate check above has passed.
-      request.end(body);
+      // A second check on the live connection itself (PR #89 review): whatever agent or proxy layer carried the request, and whether or not it kept the
+      // request's TLS options, the socket it gave must present the pinned key. Nothing is written (no headers, no body) until it does: the request is
+      // ended only after this check, and a mismatch destroys it unsent.
+      request.once('socket', (socket) => {
+        let checked = false;
+        const verify = (): void => {
+          if (checked || settled) return;
+          checked = true;
+          const live = socket as tls.TLSSocket;
+          let cert: tls.PeerCertificate | undefined;
+          try { cert = typeof live.getPeerCertificate === 'function' ? live.getPeerCertificate() : undefined; } catch { cert = undefined; }
+          if (peerFingerprint(cert, kind) !== pin) {
+            request.destroy(new ConnectionNotBoundError());
+            return;
+          }
+          request.end(body);
+        };
+        const live = socket as tls.TLSSocket;
+        if (typeof live.getPeerCertificate !== 'function') { verify(); return; }
+        let ready = false;
+        try { ready = live.getPeerCertificate().raw !== undefined; } catch { ready = false; }
+        // A pooled or tunnelled socket has already finished its handshake; a new one is checked once it has.
+        if (ready) verify(); else live.once('secureConnect', verify);
+      });
     });
   }) as typeof fetch;
 }
