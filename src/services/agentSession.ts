@@ -272,6 +272,10 @@ const SHOWN_BADGES_KEPT = 50;
 /** How many failed checks a chat keeps for Check again. Failures are few: the first one at an attested level stops further requests at that level. */
 export const FAILED_CHECKS_KEPT = 100;
 
+/** Said by Check again when the chat's stop holds a failure no longer kept for checking (PR #89 review). */
+export const CHECK_AGAIN_NEW_CHAT_TEXT =
+  'An earlier failed check in this chat can no longer be checked again from the editor, so the levels that need an attested cloud stay stopped for this chat. Start a new chat to send content at those levels to NEAR AI Cloud again.';
+
 /** What a lead answer's badge is chosen from, apart from its check and the chat's other checks. */
 type AnswerFacts = Omit<TrustBadgeFacts, 'verification' | 'verificationSummary' | 'earlierCheckFailed'>;
 
@@ -327,17 +331,19 @@ export class AgentConversation {
    */
   private chatAttestation: RouteAttestation = { failed: false };
   public get routeAttestation(): RouteAttestation { return this.chatAttestation; }
-  /**
-   * The checks after each run's attested-cloud answers (D-36, D-55), by run id, the newest 50: the failed ones (what Check again checks afresh), the result
-   * for the run's final answer, and the run's route (where Check again's record goes).
-   */
-  private readonly answerChecks = new Map<string, { route: SessionRoute; failed: Map<string, { model: string; evidence: ResponseEvidence; client: NearAiClient }>; results: Map<string, AnswerCheckResult> }>();
+  /** The results of the checks after each run's attested-cloud answers (D-36, D-55), by run id, the newest 50, with the run's route. */
+  private readonly answerChecks = new Map<string, { route: SessionRoute; results: Map<string, AnswerCheckResult> }>();
   /**
    * The chat ids of this chat's failed answer checks that no Check again has passed yet (PR #89 review). Kept for the whole chat, apart from the newest-50
-   * list above, so a failure whose run has left that list still holds the stop: only a new chat or a reload clears it then. Failures are few, since the
-   * first one stops further requests at that level.
+   * list above, so a failure whose run has left that list still holds the stop. Failures are few, since the first one stops further requests at that level.
    */
   private uncheckedFailures = new Set<string>();
+  /**
+   * What Check again needs for each of those failures (PR #89 review): the answer's run, model, hashes, client and route, kept for the whole chat apart from
+   * the newest-50 list, so Check again on a failed answer whose run has left that list can still clear it. Bounded at FAILED_CHECKS_KEPT; a failure dropped
+   * past the bound still holds the stop, and Check again then says plainly that a new chat is needed.
+   */
+  private routeFailures = new Map<string, { runId: string; model: string; evidence: ResponseEvidence; client: NearAiClient; route: SessionRoute }>();
   /**
    * The trust badge's own failed checks (CLAS-08) of answers the route did not check (at any-cloud), by chat id, for the whole chat, the newest
    * FAILED_CHECKS_KEPT. They set no stop, but every later badge of the chat says an earlier check failed until Check again on that answer passes.
@@ -939,25 +945,27 @@ export class AgentConversation {
    * the fresh result (CLAS-08).
    */
   public async verifyRun(runId: string): Promise<AnswerCheckResult> {
-    const checks = this.answerChecks.get(runId);
     const entry = this.verifiable.get(runId);
     const attestation = this.chatAttestation;
     let last: AnswerCheckResult | undefined;
-    if (checks && checks.failed.size > 0) {
+    // Every failed check of this run's answers, from the chat-wide list (PR #89 review), so a run that has left the newest-50 list can still be checked.
+    const failures = [...this.routeFailures].filter(([, failure]) => failure.runId === runId);
+    if (failures.length > 0) {
       let model = '';
-      for (const [chatId, failed] of [...checks.failed]) {
+      let route: SessionRoute | undefined;
+      for (const [chatId, failed] of failures) {
         model = failed.model;
         last = await failed.client.verifyResponse(failed.model, failed.evidence);
         if (entry?.evidence?.chatId === chatId) { entry.result = last; entry.verification = last.outcome; }
         if (last.outcome !== 'signed') return last;
-        checks.failed.delete(chatId);
-        if (attestation === this.chatAttestation) { this.uncheckedFailures.delete(chatId); this.badgeFailures.delete(chatId); }
-        checks.results.set(chatId, last);
+        if (attestation === this.chatAttestation) { this.routeFailures.delete(chatId); this.uncheckedFailures.delete(chatId); this.badgeFailures.delete(chatId); }
+        this.answerChecks.get(runId)?.results.set(chatId, last);
+        route = failed.route;
       }
-      // Cleared only when no failed answer of the chat is left unchecked, counted for the whole chat (an evicted run's failure still counts).
+      // Cleared only when no failed answer of the chat is left unchecked, counted for the whole chat.
       if (this.uncheckedFailures.size === 0 && attestation === this.chatAttestation && attestation.closed !== true && attestation.failed) {
         attestation.failed = false;
-        try { checks.route.sink?.record(routeEventRecordFor(checks.route, 'route.attestation-cleared', { model, attestation: 'verified' })); } catch { /* D-21 */ }
+        try { if (route !== undefined) route.sink?.record(routeEventRecordFor(route, 'route.attestation-cleared', { model, attestation: 'verified' })); } catch { /* D-21 */ }
       }
     }
     // The badge's own failed checks of this run's answers (CLAS-08) are checked again too; a signed one no longer counts as an earlier failure.
@@ -966,13 +974,26 @@ export class AgentConversation {
       const again = await failed.client.verifyResponse(failed.model, failed.evidence);
       if (attestation === this.chatAttestation && again.outcome === 'signed') this.badgeFailures.delete(chatId);
     }
-    if (last !== undefined) return entry?.evidence && checks?.results.has(entry.evidence.chatId) ? checks.results.get(entry.evidence.chatId)! : last;
+    if (last !== undefined) {
+      const final = entry?.evidence !== undefined ? this.answerChecks.get(runId)?.results.get(entry.evidence.chatId) : undefined;
+      return this.withLostFailures(final ?? last, attestation);
+    }
     if (!entry?.evidence) return { outcome: 'unavailable', summary: `This response can no longer be verified from the editor (only the last ${String(TRUST_ENTRIES_KEPT)} are kept).`, checks: {}, notChecked: NOT_CHECKED_IN_EDITOR };
     const fresh = await entry.client.verifyResponse(entry.model, entry.evidence);
     entry.result = fresh;
     entry.verification = fresh.outcome;
     if (attestation === this.chatAttestation) this.noteBadgeCheck(runId, entry, entry.evidence, fresh);
-    return fresh;
+    return this.withLostFailures(fresh, attestation);
+  }
+
+  /**
+   * A Check again that passed while the chat's stop still holds a failure no longer kept for checking (past FAILED_CHECKS_KEPT) says plainly that only a new
+   * chat clears it (PR #89 review), rather than leaving the person to press Check again on an answer it cannot reach.
+   */
+  private withLostFailures(result: AnswerCheckResult, attestation: RouteAttestation): AnswerCheckResult {
+    if (result.outcome !== 'signed' || attestation !== this.chatAttestation || !attestation.failed) return result;
+    if (![...this.uncheckedFailures].some((chatId) => !this.routeFailures.has(chatId))) return result;
+    return { ...result, summary: `${result.summary} ${CHECK_AGAIN_NEW_CHAT_TEXT}` };
   }
 
   /** Keeps or clears a badge check's failure of an answer the route did not check (CLAS-08); the route's own failures are kept by answerChecked. */
@@ -1059,7 +1080,8 @@ export class AgentConversation {
   private badgeOf(entry: BadgeEntry): TrustBadge | undefined {
     const own = entry.evidence?.chatId;
     const earlierCheckFailed = [...this.uncheckedFailures, ...this.badgeFailures.keys()].some((chatId) => chatId !== own);
-    const badge = trustBadgeFor({ ...entry.facts, verification: entry.verification, ...(entry.result ? { verificationSummary: entry.result.summary } : {}), earlierCheckFailed });
+    const earlierCheckLost = [...this.uncheckedFailures].some((chatId) => chatId !== own && !this.routeFailures.has(chatId));
+    const badge = trustBadgeFor({ ...entry.facts, verification: entry.verification, ...(entry.result ? { verificationSummary: entry.result.summary } : {}), earlierCheckFailed, ...(earlierCheckLost ? { earlierCheckLost } : {}) });
     return badge === undefined ? undefined : { ...badge, notChecked: entry.result?.notChecked ?? NOT_CHECKED_IN_EDITOR };
   }
 
@@ -1101,12 +1123,18 @@ export class AgentConversation {
     if (attestation !== this.chatAttestation || attestation.closed === true) return;
     let checks = this.answerChecks.get(runId);
     if (!checks) {
-      checks = { route, failed: new Map(), results: new Map() };
+      checks = { route, results: new Map() };
       this.answerChecks.set(runId, checks);
       for (const old of [...this.answerChecks.keys()].slice(0, -50)) this.answerChecks.delete(old);
     }
     checks.results.set(chatId, result);
-    if (result.outcome === 'failed') { checks.failed.set(chatId, checked); this.uncheckedFailures.add(chatId); this.badgeFailures.delete(chatId); }
+    if (result.outcome === 'failed') {
+      this.uncheckedFailures.add(chatId);
+      this.badgeFailures.delete(chatId);
+      this.routeFailures.delete(chatId);
+      this.routeFailures.set(chatId, { runId, ...checked, route });
+      for (const old of [...this.routeFailures.keys()].slice(0, -FAILED_CHECKS_KEPT)) this.routeFailures.delete(old);
+    }
     const entry = this.verifiable.get(runId);
     if (entry && entry.evidence?.chatId !== chatId && result.outcome === 'failed') this.postBadge(runId, entry);
   }
@@ -1215,6 +1243,7 @@ export class AgentConversation {
     this.chatAttestation = { failed: false };
     this.answerChecks.clear();
     this.uncheckedFailures = new Set();
+    this.routeFailures = new Map();
     this.badgeFailures = new Map();
   }
 

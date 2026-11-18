@@ -874,3 +874,35 @@ test('a badge kept for one answer is replaced by a newer result of the same answ
   await store.recordTrust(id, record(trustRecordKey('another'), 'not-verified', '2026-11-18T11:00:00.000Z'));
   assert.equal((await store.meta(id))!.lastUsedAt, before, 'keeping a badge is not using the chat');
 });
+
+// ---- PR #89 last review, minor finding 2: no attested answer goes unrecorded ----
+
+test('review 89 minor 2: an attested answer with no signature id, or one read without hashes, records route.attestation-checked as unavailable with a plain reason', async () => {
+  const { UNCHECKABLE_ANSWER_REASONS, sessionRouteFrom, withSessionRoute } = await import('../gate/sessionMark');
+  const { testGateRuntime } = await import('./helpers/gatedRuns');
+  const records: Array<{ authorizations: Array<{ policy: { name: string } }>; unmapped: { nearAi: { attestation?: string; reason?: string } }; message?: string }> = [];
+  const runtime = testGateRuntime();
+  const route = sessionRouteFrom({ ...runtime, sink: { record: (entry: unknown) => { records.push(entry as never); } } }, { markOf: () => [CONFIDENTIAL] });
+  // A NEAR AI Cloud stream with no chat id (no inference id to check), over the pinned connection.
+  const fetchFn = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url = new URL(String(input));
+    const method = init?.method ?? 'GET';
+    if (method === 'GET' && url.pathname.endsWith('/models')) return Response.json({ data: [{ id: 'tee-model' }] });
+    if (method === 'GET' && url.pathname.endsWith('/model/list')) return Response.json({ models: [{ modelId: 'tee-model', metadata: { attestationSupported: true, providerType: 'vllm' } }] });
+    if (method === 'POST' && JSON.parse(String(init?.body)).stream === false) return Response.json({ choices: [{ message: { content: 'ok' }, finish_reason: 'stop' }], usage: { prompt_tokens: 3, completion_tokens: 1 } });
+    const chunk = (value: unknown) => `data: ${JSON.stringify(value)}\n\n`;
+    return new Response(chunk({ choices: [{ delta: { content: 'done' }, finish_reason: 'stop' }] }) + 'data: [DONE]\n\n', { headers: { 'content-type': 'text/event-stream' } });
+  }) as typeof fetch;
+  const fact = (): ConnectionBindingFact => ({ state: 'bound', host: NEAR_URL, checkedAt: Date.now(), fingerprint: 'ab'.repeat(32) });
+  const client = new NearAiClient({ baseUrl: NEAR_URL, apiKey: 'test-key', fetchFn, route: 'near', binding: { current: fact, refresh: async () => fact(), markNotBound: () => undefined, fetchFor: () => fetchFn }, maxRetries: 0 });
+  await client.listModels();
+  const checked = () => records.filter((entry) => entry.authorizations[0]?.policy.name === 'route.attestation-checked');
+  await withSessionRoute(route, async () => { for await (const event of client.streamCompletion('tee-model', [{ role: 'user', content: 'hi' }], [])) void event; });
+  assert.equal(checked().length, 1, 'the answer is recorded');
+  assert.equal(checked()[0]!.unmapped.nearAi.attestation, 'unavailable');
+  assert.equal(JSON.stringify(checked()[0]).includes(UNCHECKABLE_ANSWER_REASONS['no-signature-id']), true, 'with the plain reason');
+  await withSessionRoute(route, () => client.completeOnce('tee-model', [{ role: 'user', content: 'hi' }], { maxTokens: 16 }));
+  assert.equal(checked().length, 2, 'a non-streamed answer is recorded too');
+  assert.equal(JSON.stringify(checked()[1]).includes(UNCHECKABLE_ANSWER_REASONS['no-hashes']), true);
+  assert.equal(route.attestation.failed, false, 'nothing changed');
+});

@@ -545,3 +545,52 @@ test('review 89.2: the conversation keeps answer checks with the fields the gate
   const gate = readFileSync(path.join(__dirname, '..', '..', 'src', 'gate', 'sessionMark.ts'), 'utf8');
   for (const field of ['readonly outcome:', 'readonly summary:', 'readonly signingAddress?:', 'readonly signer?:', 'readonly checks:', 'readonly notChecked:']) assert.ok(gate.includes(field), field);
 });
+
+test('review 89 minor 3: Check again on a failed answer whose run left the newest 50 still clears the stop, and one no longer kept says a new chat is needed', async () => {
+  const near = await fakeNear();
+  near.mode = 'hang';
+  const chat = checkedChat();
+  await sendTo(chat, near.client);
+  await sendTo(chat, near.client);
+  near.mode = 'bad-signature';
+  near.release();
+  await settled(near, 'chatcmpl-1');
+  await settled(near, 'chatcmpl-2');
+  const [first, second] = [...new Set(chat.posted.filter((message) => message.type === 'trust-badge').map((message) => message.runId!))];
+  // Both runs leave the newest-50 list, as they would after 50 more runs.
+  const internals = chat.conversation as unknown as { answerChecks: Map<string, unknown> };
+  internals.answerChecks.delete(first!);
+  internals.answerChecks.delete(second!);
+  near.mode = 'valid';
+  assert.equal((await chat.conversation.verifyRun(second!)).outcome, 'signed');
+  assert.equal(chat.conversation.routeAttestation.failed, true, 'the first answer\'s failure still holds the stop');
+  assert.equal((await chat.conversation.verifyRun(first!)).outcome, 'signed', 'its own Check again still reaches it');
+  assert.equal(chat.conversation.routeAttestation.failed, false, 'and clears the stop');
+  assert.equal(checkedRecords(chat, 'route.attestation-cleared').length, 1);
+});
+
+test('review 89 minor 3: a failure no longer kept for Check again keeps the stop, and Check again and the badge say plainly that a new chat is needed', async () => {
+  const { CHECK_AGAIN_NEW_CHAT_TEXT } = await import('../services/agentSession');
+  const { TRUST_BADGE_TEXT } = await import('../domain/gate/trustBadge');
+  const near = await fakeNear();
+  near.mode = 'hang';
+  const chat = checkedChat();
+  await sendTo(chat, near.client);
+  await sendTo(chat, near.client);
+  near.mode = 'bad-signature';
+  near.release();
+  await settled(near, 'chatcmpl-1');
+  await settled(near, 'chatcmpl-2');
+  const [, second] = [...new Set(chat.posted.filter((message) => message.type === 'trust-badge').map((message) => message.runId!))];
+  // The first failure went past the bound (FAILED_CHECKS_KEPT): only its chat id is left, holding the stop.
+  (chat.conversation as unknown as { routeFailures: Map<string, unknown> }).routeFailures.delete('chatcmpl-1');
+  near.mode = 'valid';
+  const again = await chat.conversation.verifyRun(second!);
+  assert.equal(again.outcome, 'signed');
+  assert.ok(again.summary.endsWith(CHECK_AGAIN_NEW_CHAT_TEXT), again.summary);
+  assert.equal(chat.conversation.routeAttestation.failed, true, 'the stop stays: nothing can check that answer again');
+  assert.ok(chat.conversation.trustBadge(second!)?.reasons.includes(TRUST_BADGE_TEXT.earlierFailedLost), 'the badge says a new chat is needed');
+  assert.match(CHECK_AGAIN_NEW_CHAT_TEXT, /Start a new chat/);
+  chat.conversation.reset();
+  assert.equal(chat.conversation.routeAttestation.failed, false, 'a new chat clears it');
+});

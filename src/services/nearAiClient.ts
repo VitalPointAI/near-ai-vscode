@@ -6,7 +6,7 @@ import type { ConnectionBindingFact, RouteDecision, RouteFacts, RouteRule, Routi
 import { SHIPPED_DEFAULT_LABEL } from '../domain/gate/bundle';
 import type { Label } from '../domain/gate/labels';
 import type { Mark } from '../domain/gate/dominance';
-import { currentSessionRoute, defaultSessionRoute, routeEventRecordFor, routeRecordFor, routingOf } from '../gate/sessionMark';
+import { currentSessionRoute, defaultSessionRoute, routeEventRecordFor, routeRecordFor, routingOf, UNCHECKABLE_ANSWER_REASONS } from '../gate/sessionMark';
 import type { SessionRoute } from '../gate/sessionMark';
 import { ConnectionNotBoundError } from './connectionBinding';
 import type { ConnectionBindingSource } from './connectionBinding';
@@ -614,6 +614,7 @@ export class NearAiClient {
     const estimate = tokenEstimate !== undefined ? tokenEstimate + (info.imagePricePerUnit ?? 0) * Math.max(1, count) : imageEstimate;
     if (usage.estimatedCostUsd === undefined && estimate !== undefined) usage.estimatedCostUsd = estimate;
     this.settleCharge(response, 'completed', usage, { estimateUsd: usage.estimatedCostUsd });
+    this.answerUncheckable(response, model, 'no-hashes');
     return result;
   }
 
@@ -632,6 +633,7 @@ export class NearAiClient {
     const estimate = usage.inputTokens !== undefined || usage.outputTokens !== undefined ? estimateCostUsd(info ?? { id: '' }, usage.inputTokens, usage.outputTokens, usage.cachedInputTokens) : info?.requestPricePerUnit;
     if (usage.estimatedCostUsd === undefined && estimate !== undefined) usage.estimatedCostUsd = estimate;
     this.settleCharge(response, 'completed', usage);
+    this.answerUncheckable(response, model, 'no-hashes');
     const text = stringValue(body.text);
     if (text === undefined) throw new NearAiError(0, 'The transcription service returned no text.', false);
     return { text, usage };
@@ -651,6 +653,7 @@ export class NearAiClient {
     const usage = usageFromPayload(objectValue(body.usage), this.usageStart(response, started));
     usage.estimatedCostUsd = estimateCostUsd(this.models.get(model) ?? { id: '' }, usage.inputTokens, usage.outputTokens, usage.cachedInputTokens);
     this.settleCharge(response, 'completed', usage);
+    this.answerUncheckable(response, model, 'no-hashes');
     const choice = objectValue(Array.isArray(body.choices) ? body.choices[0] : undefined);
     const text = stringValue(objectValue(choice.message).content);
     if (!text) throw new NearAiError(0, 'The vision model returned no description.', false);
@@ -687,6 +690,7 @@ export class NearAiClient {
     const usage = usageFromPayload(objectValue(body.usage), this.usageStart(response, started));
     usage.estimatedCostUsd = estimateCostUsd(this.models.get(model) ?? { id: '' }, usage.inputTokens, usage.outputTokens, usage.cachedInputTokens);
     this.settleCharge(response, 'completed', usage);
+    this.answerUncheckable(response, model, 'no-hashes');
     return { text, usage, ...(reasoning ? { reasoning } : {}), ...(finishReason ? { finishReason } : {}) };
   }
 
@@ -763,10 +767,11 @@ export class NearAiClient {
         if (event.type === 'done') {
           completed = true;
           this.settleCharge(response, 'completed', event.metadata);
+          this.answerUncheckable(response, model, 'no-hashes');
           yield { text: '', done: true, usage: event.metadata };
         }
       }
-      if (!signal?.aborted && !completed) { this.settleCharge(response, 'completed', latest); yield { text: '', done: true, usage: { ...latest, latencyMs: Date.now() - started } }; }
+      if (!signal?.aborted && !completed) { this.settleCharge(response, 'completed', latest); this.answerUncheckable(response, model, 'no-hashes'); yield { text: '', done: true, usage: { ...latest, latencyMs: Date.now() - started } }; }
     } catch (error) {
       if (signal?.aborted || isAbortError(error)) return;
       throw error;
@@ -808,6 +813,7 @@ export class NearAiClient {
       // The completion carries the usage streamed with the response, not just the response headers.
       const completed = { ...latest, latencyMs: Date.now() - started };
       this.settleCharge(response, 'completed', completed);
+      this.answerUncheckable(response, model, 'no-hashes');
       yield { type: 'status', status: 'completed', metadata: completed };
       yield { type: 'done', metadata: completed };
     } finally {
@@ -925,6 +931,7 @@ export class NearAiClient {
     const evidence: ResponseEvidence | undefined = chatId ? { chatId, requestHash: sha256Hex(requestBody), responseHash: rawResponse.digest('hex') } : undefined;
     // D-36: an answer sent at attested-cloud is checked afterwards, in the background; nothing here or in the next decision waits for it (OFFL-01).
     if (evidence !== undefined) this.checkAnswer(response, model, evidence);
+    else this.answerUncheckable(response, model, 'no-signature-id');
     yield {
       type: 'done',
       message: { role: 'assistant', content: text || null, ...(toolCalls.length ? { tool_calls: toolCalls } : {}) },
@@ -976,6 +983,17 @@ export class NearAiClient {
     this.badgeChecks.set(evidence.chatId, check);
     while (this.badgeChecks.size > ANSWER_CHECKS_KEPT) this.badgeChecks.delete(this.badgeChecks.keys().next().value as string);
     return check;
+  }
+
+  /**
+   * An answer whose request the route allowed at attested-cloud but which cannot be checked (PR #89 review): NEAR AI gave no signature id, or the path that
+   * read it keeps no hashes (a non-streamed answer, an image, a transcription, a plain text stream). route.attestation-checked is recorded as unavailable with the plain reason; nothing else changes (D-55).
+   */
+  private answerUncheckable(response: Response, model: string, cause: keyof typeof UNCHECKABLE_ANSWER_REASONS): void {
+    const route = this.attestedAnswers.get(response);
+    if (route === undefined) return;
+    this.attestedAnswers.delete(response);
+    try { route.sink?.record(routeEventRecordFor(route, 'route.attestation-checked', { model, attestation: 'unavailable', reason: UNCHECKABLE_ANSWER_REASONS[cause] })); } catch { /* D-21 */ }
   }
 
   /** The trust the checks use: Intel's root and the system clock, unless a test set `attestationTrust`. */

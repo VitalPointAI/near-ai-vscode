@@ -40,6 +40,7 @@ export const TRUST_BADGE_TEXT = Object.freeze({
   noSignature: 'NEAR AI returned no signature id for this answer.',
   connectionNotProven: 'The connection was not proven to end inside the private enclave:',
   earlierFailed: 'An earlier check in this chat failed. Use Check again under that answer.',
+  earlierFailedLost: 'An earlier check in this chat failed and can no longer be checked again from the editor. Start a new chat to send content at the levels that need an attested cloud to NEAR AI Cloud again.',
   connection: Object.freeze({
     'not-bound': 'the key the server presented did not match the one NEAR AI Cloud\'s attestation names.',
     unavailable: 'the check of the connection could not be made.',
@@ -78,6 +79,8 @@ export interface TrustBadgeFacts {
   readonly connectionFresh: boolean;
   /** A check of another answer in this chat failed and has not been checked again since. */
   readonly earlierCheckFailed: boolean;
+  /** One of those failures is no longer kept for Check again, so only a new chat clears it (PR #89 review). */
+  readonly earlierCheckLost?: boolean;
 }
 
 export interface TrustBadge {
@@ -139,7 +142,7 @@ export function trustBadgeFor(facts: TrustBadgeFacts): TrustBadge | undefined {
     case 'not-run': if (reasons.length === 0) reasons.push(TRUST_BADGE_TEXT.notRun); break;
     case 'signed': break;
   }
-  if (facts.earlierCheckFailed) reasons.push(TRUST_BADGE_TEXT.earlierFailed);
+  if (facts.earlierCheckFailed) reasons.push(facts.earlierCheckLost === true ? TRUST_BADGE_TEXT.earlierFailedLost : TRUST_BADGE_TEXT.earlierFailed);
   const modelProven = facts.nearEndpoint && facts.boundary === 'tee' && facts.hasEvidence && facts.verification === 'signed' && !facts.earlierCheckFailed;
   let state: TrustBadgeState;
   if (!modelProven) state = 'not-verified';

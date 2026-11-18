@@ -720,3 +720,30 @@ test('review 89.4: a trust badge is placed only under its own run\'s answer, nev
   assert.equal(badges(reply1).length, 1);
   assert.equal(badges(transcript as never).length, 2);
 });
+
+// ---- PR #89 last review, minor findings ----
+
+test('review 89 minor 1: Set Label says the chat keeps its label only when the new label is absent or does not cover the chat\'s mark; a raise says nothing', () => {
+  const scales = SCALE_PRESETS;
+  const internal = label('org', 'Internal');
+  // The chat held the file's old label (Confidential).
+  assert.equal(gateCommands.chatKeepsLabel([CONFIDENTIAL], [CONFIDENTIAL], internal, scales), true, 'lowered to Internal: the chat keeps Confidential');
+  assert.equal(gateCommands.chatKeepsLabel([CONFIDENTIAL], [CONFIDENTIAL], undefined, scales), true, 'the label removed');
+  assert.equal(gateCommands.chatKeepsLabel([CONFIDENTIAL], [CONFIDENTIAL], RESTRICTED, scales), false, 'a raise to Restricted covers the chat: nothing to keep');
+  assert.equal(gateCommands.chatKeepsLabel([CONFIDENTIAL], [CONFIDENTIAL], CONFIDENTIAL, scales), false, 'the same level covers it too');
+  const nato = label('nato', 'NATO Restricted');
+  assert.equal(gateCommands.chatKeepsLabel([CONFIDENTIAL], [CONFIDENTIAL], nato, scales), true, 'a label on another scale does not cover the chat\'s org label');
+  assert.equal(gateCommands.chatKeepsLabel([PUBLIC], [CONFIDENTIAL], internal, scales), false, 'a chat that did not hold the old label is told nothing');
+  // setLabel decides with it, after its own lowering check.
+  const source = readFileSync(path.join(__dirname, '..', '..', 'src', 'services', 'gateCommands.ts'), 'utf8');
+  assert.match(source, /if \(held !== undefined && chatKeepsLabel\(held, current\.mark, label, policy\.scales\)\)/);
+});
+
+test('review 89 minor 4: the ChatInView doc comment sits directly above its type, and isChatInView has its own', () => {
+  const source = readFileSync(path.join(__dirname, '..', '..', 'src', 'services', 'chatInView.ts'), 'utf8').split('\n');
+  const typeLine = source.findIndex((line) => line.startsWith('export interface ChatInView'));
+  assert.equal(source[typeLine - 1], '/** What the label surfaces need of the chat on screen. */');
+  const guardLine = source.findIndex((line) => line.startsWith('export function isChatInView'));
+  assert.match(source[guardLine - 1]!, /^\/\*\* Whether a value passed to a command is a ChatInView/);
+  assert.equal(source.filter((line) => line === '/** What the label surfaces need of the chat on screen. */').length, 1);
+});

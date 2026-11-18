@@ -247,6 +247,12 @@ export function routeRecordFor(route: SessionRoute, decision: RouteDecision, fac
 }
 
 /** The fixed reason of each answer-check record: plain words, never a signing address, a report or a fingerprint. */
+/** Why an answer sent at attested-cloud could not be checked at all (PR #89 review): recorded as unavailable, so no such answer goes unrecorded. */
+export const UNCHECKABLE_ANSWER_REASONS = Object.freeze({
+  'no-signature-id': 'NEAR AI returned no signature id for this answer, so it could not be checked; nothing changed.',
+  'no-hashes': 'The editor kept no hashes of this answer to check it with, so it could not be checked; nothing changed.'
+} as const);
+
 const ANSWER_CHECK_REASONS: Readonly<Record<'verified' | 'failed' | 'unavailable', string>> = Object.freeze({
   verified: 'The answer\'s signature and NEAR AI Cloud\'s attestation were checked after the answer and verified.',
   failed: 'The answer\'s signature or NEAR AI Cloud\'s attestation did not check out, so NEAR AI Cloud\'s models do not count as private for this chat until Check again passes.',
@@ -258,7 +264,7 @@ const ANSWER_CHECK_REASONS: Readonly<Record<'verified' | 'failed' | 'unavailable
  * `route.attestation-cleared` when a person's Check again clears a failed one. The capability is `infer` at attested-cloud on NEAR AI Cloud with the
  * model; `attestation` says what was found. Never a host, a signing address, a report or a fingerprint.
  */
-export function routeEventRecordFor(route: SessionRoute, event: RouteEventId, request: { readonly model?: string; readonly attestation: 'verified' | 'failed' | 'unavailable' }): DecisionRecord {
+export function routeEventRecordFor(route: SessionRoute, event: RouteEventId, request: { readonly model?: string; readonly attestation: 'verified' | 'failed' | 'unavailable'; readonly reason?: string }): DecisionRecord {
   const recordId = (route.newRecordId ?? randomUUID)();
   const model = recordedModelName(request.model);
   let bundleHash = '';
@@ -276,7 +282,7 @@ export function routeEventRecordFor(route: SessionRoute, event: RouteEventId, re
     resource: { name: model, type: 'model' },
     outcome: 'allowed',
     rule: event,
-    reason: event === 'route.attestation-cleared' ? 'A person\'s Check again passed, so NEAR AI Cloud\'s models count as private for this chat again.' : ANSWER_CHECK_REASONS[request.attestation],
+    reason: event === 'route.attestation-cleared' ? 'A person\'s Check again passed, so NEAR AI Cloud\'s models count as private for this chat again.' : request.reason ?? ANSWER_CHECK_REASONS[request.attestation],
     bundleHash,
     ...(mark.length === 0 ? {} : { mark }),
     attestation: request.attestation
