@@ -11,6 +11,7 @@ import type { FloorLocations } from '../domain/gate/floor';
 import type { InputAs, RunsOn, ToolManifest } from '../domain/gate/manifest';
 import type { GateContextName } from '../domain/gate/bundle';
 import { namesStateKeys, protectedWriteReason, STATE_FOLDER_PATH, STATE_KEYS_PATH, stateKeysReason } from '../domain/protectedPaths';
+import { writeAllowedBy } from '../domain/staff/writeLimits';
 import type { RunCheckpoints } from './checkpoints';
 import { unifiedDiff } from './diff';
 import { matchesGlob } from './glob';
@@ -42,6 +43,11 @@ export interface ToolContext {
   pages?: Map<string, string>;
   /** When set, writes outside this workspace-relative folder ask first (research agents write only .planning/). */
   writeScope?: string;
+  /**
+   * When set, Write and Edit refuse (never ask) any path outside these workspace-relative entries: a folder ends in `/`, anything else is one file.
+   * A staff team's red team and release guard get one (src/domain/staff/writeLimits.ts), so a critique or a verdict can never change a plan file.
+   */
+  writeOnly?: readonly string[];
   /** Reports a defense that acted: hidden content removed, a likely injection flagged, an action held or blocked. */
   onSecurity?(event: SecurityEvent): void;
   /** 0.4.23: the agent making the call (its activity id, and a sub-agent's label), so a card it raises in the main chat says who asked. */
@@ -187,6 +193,20 @@ export async function forbiddenPath(requested: string | undefined, context: Tool
   return resolveInWorkspace(context.root, requested, context.readOnlyRoots).then(() => undefined, (error) => (error instanceof StateKeysError ? error.message : undefined));
 }
 
+/**
+ * The refusal for a write outside the agent's write limit (ToolContext.writeOnly), or undefined when the agent has no limit or the path is inside it. The
+ * path is resolved first, so `..`, an absolute path or a link cannot step out of the limit; a path that cannot be resolved is refused.
+ */
+export async function writeOnlyRefusal(requested: string, context: ToolContext): Promise<string | undefined> {
+  const limit = context.writeOnly;
+  if (!limit) return undefined;
+  const allowed = limit.join(', ');
+  const resolved = await resolveInWorkspace(context.root, requested).catch(() => undefined);
+  if (!resolved) return `${requested} is not a path this agent may write. It may write only ${allowed}.`;
+  const relative = path.relative(context.root, resolved).split(path.sep).join('/');
+  return writeAllowedBy(limit, relative) ? undefined : `${requested} is outside what this agent may write (${allowed}). It cannot change any other file, plan files included: report what should change instead.`;
+}
+
 /** Writes that always ask, even after "allow edits for this run": see src/domain/protectedPaths.ts, which the shell guard shares. */
 export async function protectedWrite(requested: string, context: ToolContext): Promise<string | undefined> {
   const resolved = await resolveInWorkspace(context.root, requested).catch(() => undefined);
@@ -293,7 +313,7 @@ export const writeTool: AgentTool<{ path: string; content: string }> = {
   manifest: declareManifest({ tool: 'Write', effects: [{ verb: 'workspaceWrite', paths: [fromArgument('file_path')] }], contexts: INTERACTIVE_AND_UNATTENDED }),
   parse: (raw) => ({ path: str(raw, 'file_path')!, content: typeof raw.content === 'string' ? raw.content : (() => { throw new ToolError('Parameter "content" must be a string.'); })() }),
   title: (input) => `Write ${input.path}`,
-  forbidden: (input, context) => forbiddenPath(input.path, context),
+  forbidden: async (input, context) => (await forbiddenPath(input.path, context)) ?? writeOnlyRefusal(input.path, context),
   sensitive: (input, context) => protectedWrite(input.path, context),
   risky: (input, context) => outOfScopeAfterTaint(input.path, context),
   async preview(input, context) {
@@ -327,7 +347,7 @@ export const editTool: AgentTool<{ path: string; oldString: string; newString: s
     return { path: str(raw, 'file_path')!, oldString, newString, replaceAll: bool(raw, 'replace_all') };
   },
   title: (input) => `Edit ${input.path}`,
-  forbidden: (input, context) => forbiddenPath(input.path, context),
+  forbidden: async (input, context) => (await forbiddenPath(input.path, context)) ?? writeOnlyRefusal(input.path, context),
   sensitive: (input, context) => protectedWrite(input.path, context),
   risky: (input, context) => outOfScopeAfterTaint(input.path, context),
   async preview(input, context) {
