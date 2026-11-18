@@ -15,7 +15,7 @@ import { DEFAULT_TOOLS, parseTeam, renderTeam, slugify, TeamLibrary, teamKnowled
 import { addKnowledge } from '../services/teamKnowledgeStore';
 import type { ActionCapability, ActionPolicyMode } from '../domain/policy';
 import type { Suggestion } from '../agent/teamRefine';
-import { attachTeamStudio, buildStudioContext, CLONE_ICON_NOTE, cloneNameFor, cloneNameProblem, KEPT_WIZARD_TEXT, takenTeamNames, teamNameClash, optimiseTarget, parseStudioMessage, reviewDraft, teamPicker, teamStudioHtml, type KeptWork, type SavedWizard, type StudioContext, type TeamStudioDeps } from '../services/teamStudioPage';
+import { attachTeamStudio, buildStudioContext, CLONE_ICON_NOTE, cloneNameFor, cloneNameProblem, savedTeamName, TEAM_NAME_MAX, KEPT_WIZARD_TEXT, takenTeamNames, teamNameClash, optimiseTarget, parseStudioMessage, reviewDraft, teamPicker, teamStudioHtml, type KeptWork, type SavedWizard, type StudioContext, type TeamStudioDeps } from '../services/teamStudioPage';
 import type { DirectoryInput } from '../services/toolsDirectory';
 import { JPEG, png, SVG, WEBP } from './iconFixtures';
 import { iconVariation, ICON_VARIATIONS, teamIconPrompt, withIconReference } from '../agent/teamIcon';
@@ -4526,4 +4526,98 @@ test('host: the real clone path, a saved team with an icon as the starting point
   assert.equal((await h.library.iconVersions(copy)).length, 0, 'not even in its History');
   assert.deepEqual(await h.library.readIcon(source), icon);
   h.close();
+});
+
+// ---------- PR #90 review, round 2 ----------
+
+test('cloneNameFor: a long name is shortened so "<name> copy N" fits in 80 characters and each number gives another file name', () => {
+  const fileName = (name: string) => slugify(name);
+  for (const source of ['Platform engineering and site reliability operations team for the payments group', 'x'.repeat(80), 'é'.repeat(80), 'Web team']) {
+    const taken = takenTeamNames([{ id: `user:${slugify(source)}`, kind: 'user', name: source }], []);
+    const made: string[] = [];
+    for (let round = 0; round < 6; round += 1) {
+      const name = cloneNameFor(source, taken);
+      assert.ok(name.length <= TEAM_NAME_MAX, `${name.length}: ${name}`);
+      assert.equal(savedTeamName(name), name, 'saved exactly as offered');
+      assert.match(name, / copy(?: \d+)?$/);
+      assert.equal(cloneNameProblem(name, taken), undefined, name);
+      assert.ok(!made.includes(name));
+      if (/[a-z0-9]/i.test(name)) assert.ok(!made.some((other) => fileName(other) === fileName(name)), `a file name of its own: ${name}`);
+      made.push(name);
+      taken.push({ name, slug: slugify(name), by: 'saved' });
+    }
+  }
+  // A long name is cut at a word where it can be.
+  assert.equal(cloneNameFor('Platform engineering and site reliability operations team', []), 'Platform engineering and site copy');
+  assert.equal(cloneNameFor('Web team', []), 'Web team copy', 'a short name is untouched');
+  assert.equal(cloneNameFor('é'.repeat(90), []), `${'é'.repeat(75)} copy`);
+});
+
+test('host: Duplicate and a clone\'s Save check the name exactly as it is saved, so a long name cannot be cut into one another team has', async () => {
+  const h = await harness();
+  const long = 'é'.repeat(TEAM_NAME_MAX);
+  await h.library.create('Web team', teamMarkdown(draft()));
+  await h.library.create(long, teamMarkdown(draft({ name: long })));
+  await h.send({ type: 'ready' });
+  const before = (await h.library.list(undefined)).length;
+  let answer = `${long}ééééé`;
+  let validate: ((value: string) => string | undefined) | undefined;
+  h.deps.ask = async (_prompt, _value, check) => { validate = check; return answer; };
+  await h.send({ type: 'duplicate', id: 'user:web-team' });
+  assert.match(validate!(answer)!, /is already the name of one of your teams/, 'checked while typing on the name as it will be saved');
+  assert.match(last(h, 'error').text, /^Not duplicated: ".+" is already the name of one of your teams\./);
+  assert.equal((await h.library.list(undefined)).length, before, 'nothing was written');
+  // A name that is free once cut is saved, cut.
+  answer = `  ${'ü'.repeat(TEAM_NAME_MAX)}üü  `;
+  await h.send({ type: 'duplicate', id: 'user:web-team' });
+  const names = (await h.library.list(undefined)).map((entry) => entry.team?.name);
+  assert.ok(names.includes('ü'.repeat(TEAM_NAME_MAX)));
+  // A clone's Save: the name with its spaces trimmed, as create saves it.
+  await h.send({ type: 'create', draft: draft({ name: `${long}   ` }), target: 'user', clone: true });
+  assert.match(last(h, 'save-failed').errors[0].message, /is already the name of one of your teams/);
+  h.close();
+});
+
+test('host: a From scratch, AI or open team started after a clone is not taken for a clone, even with the same instructions', async () => {
+  const fresh = async () => {
+    const h = await harness();
+    await h.library.create('Web team', teamMarkdown(draft()));
+    await h.send({ type: 'ready' });
+    await h.send({ type: 'starting-point', id: 'lib:web-team', goal: '', locality: 'cloud' });
+    return { h, members: last(h, 'starting-point').draft.members };
+  };
+  // From scratch: the page clears the members, and its next review says so.
+  {
+    const { h, members } = await fresh();
+    await h.send({ type: 'review', seq: 1, draft: { name: 'Web team', description: 'Builds pages', members: [] } });
+    await h.send({ type: 'review', seq: 2, draft: { name: 'Web team', description: 'Builds pages', members } });
+    assert.deepEqual(last(h, 'review').errors, [], 'not name-checked as a clone');
+    await h.send({ type: 'create', draft: { name: 'Web team', description: 'Builds pages', members }, target: 'user' });
+    assert.ok(existsSync(path.join(h.library.directory, 'web-team-2.md')), 'saved as any new team is');
+    h.close();
+  }
+  // An AI draft, or a team opened in the editor.
+  for (const other of [{ type: 'draft-team', idea: 'A team for web pages' }, { type: 'open', id: 'user:web-team' }]) {
+    const { h, members } = await fresh();
+    await h.send(other);
+    await h.send({ type: 'create', draft: { name: 'Web team', description: 'Builds pages', members }, target: 'user' });
+    assert.ok(existsSync(path.join(h.library.directory, 'web-team-2.md')), other.type);
+    h.close();
+  }
+  // After a clone is saved, the next team starts fresh too.
+  {
+    const { h, members } = await fresh();
+    await h.send({ type: 'create', draft: { name: 'Web team copy', description: 'Builds pages', members }, target: 'user' });
+    assert.ok(existsSync(path.join(h.library.directory, 'web-team-copy.md')));
+    await h.send({ type: 'create', draft: { name: 'Web team', description: 'Builds pages', members }, target: 'user' });
+    assert.ok(existsSync(path.join(h.library.directory, 'web-team-2.md')));
+    h.close();
+  }
+  // While the clone keeps a member of its source, it is still checked.
+  {
+    const { h, members } = await fresh();
+    await h.send({ type: 'create', draft: { name: 'web team', description: 'Builds pages', members: [members[0], { name: 'new', role: '', model: '', tools: null, instructions: 'Something new.' }] }, target: 'user' });
+    assert.match(last(h, 'save-failed').errors[0].message, /already the name of one of your teams/);
+    h.close();
+  }
 });

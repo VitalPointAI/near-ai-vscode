@@ -143,12 +143,35 @@ export function cloneNameProblem(name: string, taken: readonly TakenTeamName[]):
   return `"${clean}" is too close to "${other}", ${whose}: names are compared without capitals, spaces or punctuation. Give the new team a name of its own.`;
 }
 
-/** The name a clone (or a duplicate) starts with: "<the team's name> copy", then "copy 2", "copy 3"... until no team has it. */
+/** The longest name a team is given (the name field's limit); a name is checked as it will be saved, cut to this. */
+export const TEAM_NAME_MAX = 80;
+/** A team name as it is saved: one line, trimmed, at most TEAM_NAME_MAX characters. Checks run on this value, never on what was typed. */
+export function savedTeamName(name: string): string {
+  return name.replace(/[\r\n]+/g, ' ').trim().slice(0, TEAM_NAME_MAX).trim();
+}
+
+/**
+ * The name a clone (or a duplicate) starts with: "<the team's name> copy", then "copy 2", "copy 3"... until no team has it (PR #90 review, round 2). The
+ * team's name is shortened, at a word where it can be, so the whole name fits in TEAM_NAME_MAX characters and so its number still changes the file name
+ * it would be saved under, which keeps only the first 40 characters: without that, every number gave the same file name and the search never ended.
+ */
 export function cloneNameFor(name: string, taken: readonly TakenTeamName[]): string {
-  const base = `${name.replace(/[\r\n]+/g, ' ').trim().slice(0, 70) || 'Team'} copy`;
-  let candidate = base;
-  for (let n = 2; teamNameClash(candidate, taken); n += 1) candidate = `${base} ${n}`;
-  return candidate;
+  const source = savedTeamName(name) || 'Team';
+  const fullSlug = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  const fit = (suffix: string) => {
+    let base = source.slice(0, TEAM_NAME_MAX - suffix.length).trim();
+    // Only a name whose file name would be cut is shortened further; one with no usable letters keeps its own name, told apart by the name itself.
+    while (base.length > 1 && fullSlug(`${base}${suffix}`).length > 40) {
+      const word = base.lastIndexOf(' ');
+      base = (word > 0 && fullSlug(`${base.slice(0, word)}${suffix}`).length <= 40 ? base.slice(0, word) : base.slice(0, -1)).trim();
+    }
+    return `${base || 'Team'}${suffix}`;
+  };
+  for (let n = 1; n < 10_000; n += 1) {
+    const candidate = fit(n === 1 ? ' copy' : ` copy ${n}`);
+    if (!teamNameClash(candidate, taken)) return candidate;
+  }
+  return fit(` copy ${Date.now()}`.slice(0, 20));
 }
 
 /** `base`, or `base 2`, `base 3`... : the first that none of the person's saved teams has as its name or its file name. */
@@ -954,6 +977,8 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
     forgetHistory();
     await load();
     const saved = savedWizard(deps.drafts.get());
+    forgetClone();
+    rememberSavedClone();
     const kept = keptWork(deps.kept?.get());
     // The builder's draft is already the resumable draft: say once that it was kept. An open
     // team's changes stay kept until the user reopens or discards them.
@@ -1126,18 +1151,27 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
 
   /** Saves an open team's draft; undefined when it was not saved (the page was told why). */
   /**
-   * Whether a new team's draft is a clone, worked out here rather than taken from the page (PR #90 review): the page's `clone`, or any member whose
-   * instructions are those of a member this host sent as a starting point (Clone and modify, from a saved team, a built-in or the recommendation), or of a
-   * saved builder draft that was cloned (its path is clone or existing and it started from a team). A page that leaves `clone` out is still checked.
+   * Whether a new team's draft is a clone, worked out here rather than taken from the page (PR #90 review): the page's `clone`, or a draft that still has
+   * a member of the team it was cloned from. `cloneSource` is that team's members (their instructions), and only the current draft's (round 2): the
+   * latest starting point the host sent (Clone and modify, from a saved team, a built-in or the recommendation), or a resumed draft that was cloned. It is
+   * forgotten when another kind of team starts (an AI draft, an open team, a discarded draft), when the team is saved, and when a draft no longer has
+   * any of those members (From scratch clears them), so a later team that reuses the same instructions is not taken for a clone.
    */
-  const clonedMembers = new Set<string>();
+  let cloneSource: Set<string> | undefined;
   const memberKey = (instructions: string) => instructions.replace(/\s+/g, ' ').trim();
-  const rememberClone = (members: ReadonlyArray<{ instructions: string }>) => { for (const member of members) { const key = memberKey(member.instructions); if (key) clonedMembers.add(key); } };
-  const isCloneDraft = (draft: TeamDraft, flag?: true): boolean => {
-    if (flag) return true;
+  const rememberClone = (members: ReadonlyArray<{ instructions: string }>) => { cloneSource = new Set(members.map((member) => memberKey(member.instructions)).filter(Boolean)); };
+  const forgetClone = () => { cloneSource = undefined; };
+  /** A resumed builder draft that was cloned (its path is clone or existing, and it started from a team) is the current draft's source. */
+  const rememberSavedClone = () => {
     const saved = savedWizard(deps.drafts.get());
     if (saved && (saved.path === 'clone' || saved.path === 'existing') && saved.startingPoint && saved.startingPoint !== 'empty') rememberClone(saved.draft.members);
-    return draft.members.some((member) => clonedMembers.has(memberKey(member.instructions)));
+  };
+  const isCloneDraft = (draft: TeamDraft, flag?: true): boolean => {
+    if (flag) return true;
+    if (!cloneSource) return false;
+    if (draft.members.some((member) => cloneSource!.has(memberKey(member.instructions)))) return true;
+    forgetClone();
+    return false;
   };
 
   /**
@@ -1145,7 +1179,8 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
    * be saved under. One rule, here, for the page's inline message and for Save; the page has no naming rules of its own.
    */
   const cloneIssues = (draft: TeamDraft): DraftIssue[] => {
-    const problem = cloneNameProblem(draft.name, takenTeamNames(library.teams, context?.startingPoints ?? []));
+    // The name exactly as create saves it (message.draft.name.trim()), so the check and the file never disagree.
+    const problem = cloneNameProblem(draft.name.replace(/[\r\n]+/g, ' ').trim(), takenTeamNames(library.teams, context?.startingPoints ?? []));
     return problem ? [{ field: 'name', message: problem }] : [];
   };
 
@@ -1273,6 +1308,7 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
         return;
       }
       case 'draft-team': {
+        forgetClone();
         // One model call drafts the team from the person's own words (owner, 2026-11-08). The result goes back as a proposal the person reads first, and
         // only becomes a team when they accept it, so nothing is saved on the strength of one answer. Like Improve with AI, it goes through teamModelCall
         // (the outbound check) and the host's own privacy decision (PR #69 review): private when the person asked, or when the project has a knowledge base.
@@ -1505,6 +1541,7 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
       }
       case 'open': {
         cancelRefine();
+        forgetClone();
         const file = fileFor(message.id);
         if (!file) return;
         try { await sendTeam(message.id, file); } catch (error) { post({ type: 'error', text: `This team file can't be opened in the studio: ${(error as Error).message} Open it as Markdown to fix it.` }); }
@@ -1585,6 +1622,7 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
           created = true;
         }
         await deps.drafts.set(undefined);
+        forgetClone();
         await refreshLibrary();
         const unapprovedNote = unapprovedFrom === undefined ? '' : ` It has members from the imported team "${unapprovedFrom}", which you have not approved, so you are asked before it first runs.`;
         await sendTeam(id, file, `${message.target === 'project' ? `Saved the project team. Run it with /team:project <task>.${message.projectType ? ' AGENTS.md now has this project type\'s guidance.' : ''}` : `Saved "${message.draft.name.trim()}". Run it with /team:${path.basename(file, '.md')} <task>.`}${cloned ? CLONE_ICON_NOTE : ''}${unapprovedNote}`);
@@ -1607,7 +1645,7 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
         post({ type: 'notice', text: 'Draft saved. Pick it up again from Team Studio at any time.' });
         return;
       }
-      case 'discard-draft': await deps.drafts.set(undefined); return;
+      case 'discard-draft': forgetClone(); await deps.drafts.set(undefined); return;
       case 'proposal-done': await deps.proposal?.set(undefined); return;
       case 'watch-live': {
         // The team's own run when it has one going now (the listing's ids only); otherwise the newest run, as before.
@@ -1656,12 +1694,14 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
         if (!file || !team || team.error) return;
         // A copy's name is one no team has, as for Clone and modify (owner, 2026-11-18): offered unique, checked while typing, and checked again here.
         const taken = () => takenTeamNames(library.teams, context?.startingPoints ?? []);
-        const name = (await deps.ask('Name for the copy', cloneNameFor(team.name, taken()), (value) => cloneNameProblem(value, taken())))?.trim();
+        // Checked on the name as it is saved (cut to TEAM_NAME_MAX), so a long name cannot be cut into one another team has (PR #90 review, round 2).
+        const typed = await deps.ask('Name for the copy', cloneNameFor(team.name, taken()), (value) => cloneNameProblem(savedTeamName(value), taken()));
+        const name = savedTeamName(typed ?? '');
         if (!name) return;
         if (input) await listNow();
         const problem = cloneNameProblem(name, taken());
         if (problem) { post({ type: 'error', text: `Not duplicated: ${problem}` }); return; }
-        const copy = await deps.library.duplicate(file, name.slice(0, 80));
+        const copy = await deps.library.duplicate(file, name);
         await moveKeptFor(userKey(copy), undefined);
         await refreshLibrary();
         post({ type: 'notice', text: `Duplicated as "${name}".`, focus: `user:${slugify(path.basename(copy, '.md'))}` });
