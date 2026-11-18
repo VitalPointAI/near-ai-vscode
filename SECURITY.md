@@ -75,11 +75,16 @@ in which an earlier check failed, until **Check again** on that answer passes.
 **Verified private model** needs all of these: the model runs in a TEE on NEAR
 AI Cloud's own endpoint, NEAR AI returned a signature id for the answer, the
 answer's check passed, and your request went over a connection held to the key
-NEAR AI Cloud's attestation names. Requests are held to that key at a level that
-needs an attested cloud (see
-[Classification labels and routing](#classification-labels-and-routing)); at
-other levels the best an answer shows is **Model verified, connection not
-proven**.
+NEAR AI Cloud's attestation names. At a level that needs an attested cloud (see
+[Classification labels and routing](#classification-labels-and-routing)) every
+request is held to that key, and refused if the server presents another. At
+other levels a request to NEAR AI Cloud is held to that key while a fresh proof
+of the connection exists. If the server then presents another key, for example
+behind a proxy that inspects encrypted traffic, the request is sent without the
+key held instead of being refused, its model request record says it fell back
+(and nothing about its content), and the answer's badge shows **Model verified,
+connection not proven**. With no fresh proof the request is sent as before, and
+the best its answer shows is the same.
 
 **When it is checked.** Each cloud answer from a TEE model is checked once,
 automatically, in the background, after it arrives. That costs one signature
@@ -397,7 +402,9 @@ is what that file and the records beside it do in this version.
   provider, the routing tier, the rule that allowed it and the policy's hash,
   each once; a refused request's record also holds the plain reason and the
   label that decided it, which is the policy's default label when nothing
-  raised the label. A request whose route cannot be worked out is refused with
+  raised the label. A request at any-cloud that was to go over the connection
+  held to NEAR AI Cloud's attested key, met another key and was sent without it
+  also holds `connectionFallback: "unpinned"`. A request whose route cannot be worked out is refused with
   a fixed reason and no label. A record of a model request names never the
   content, the endpoint's address or a file path.
 - **Labels and clearances in this version.** **NEAR AI: Set Label** labels a

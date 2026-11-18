@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { AttestationReportCache, NOT_CHECKED_IN_EDITOR, sha256Hex, verifyResponse, type ResponseEvidence, type VerificationResult } from './attestation';
 import { isNearCloudEndpoint, isSecureEndpoint } from '../domain/config';
-import { bindingReason, decideRoute, routeCheckFailed, routingWhileFailedClosed } from '../domain/gate/routing';
+import { bindingReason, decideRoute, isBindingFresh, routeCheckFailed, routingWhileFailedClosed } from '../domain/gate/routing';
 import type { ConnectionBindingFact, RouteDecision, RouteFacts, RouteRule, RoutingTable } from '../domain/gate/routing';
 import { SHIPPED_DEFAULT_LABEL } from '../domain/gate/bundle';
 import type { Label } from '../domain/gate/labels';
@@ -229,6 +229,13 @@ export class RouteRefusedError extends Error {
 /** How many after-answer checks a client keeps, by chat id: the newest 50. */
 export const ANSWER_CHECKS_KEPT = 50;
 
+/** Whether two URLs or hosts name the same host, by the URL parser's lowercase host name; anything that does not parse never matches. */
+function sameHostName(a: string, b: string): boolean {
+  const name = (value: string): string | undefined => { try { return new URL(value.includes('://') ? value : `https://${value}`).hostname.toLowerCase() || undefined; } catch { return undefined; } };
+  const first = name(a);
+  return first !== undefined && first === name(b);
+}
+
 /** A check that threw: unavailable, never failed (D-55). */
 function uncheckable(error: unknown): VerificationResult {
   return { outcome: 'unavailable', summary: `The answer could not be checked (${error instanceof Error ? error.message : 'unknown error'}).`, checks: {}, notChecked: NOT_CHECKED_IN_EDITOR };
@@ -249,6 +256,13 @@ interface RouteCheck {
   readonly connection?: ConnectionBindingFact;
   /** The bound fact the request must be pinned to: set exactly when the request was allowed at attested-cloud to NEAR AI Cloud. */
   readonly pinned?: ConnectionBindingFact;
+  /**
+   * The fresh bound fact an any-cloud request to NEAR AI Cloud is pinned to when it can be (owner, 2026-11-18): a mismatch falls back to an unpinned send
+   * rather than refusing.
+   */
+  readonly optionalPin?: ConnectionBindingFact;
+  /** Writes the request's record once its connection is known (only for an optionally pinned request), naming whether it fell back. Idempotent. */
+  readonly recordDeferred?: (fellBack: boolean) => void;
 }
 
 export const DEFAULT_RESPONSE_TIMEOUT_MS = 60_000;
@@ -1175,21 +1189,31 @@ export class NearAiClient {
       checkFailed = true;
       decision = routeCheckFailed();
     }
-    // GATE-07, D-52: every model request leaves one record, allowed or refused, through the route's sink. A record that cannot be built or kept never changes
-    // the request (D-21).
-    try {
-      route.sink?.record(routeRecordFor(route, decision, facts, model === undefined ? {} : { model }, { mark, defaultLabel, bundleHash, routing, checkFailed }));
-    } catch { /* see above */ }
-    if (!decision.allowed) throw new RouteRefusedError(decision.rule, decision.reason ?? 'Nothing was sent.');
     // An attested-cloud request to NEAR AI Cloud is allowed only through a fresh bound fact (D-50); it is sent over a connection pinned to that fact's key.
-    const pinned = decision.tier === 'attested-cloud' && this.options.route === 'near' && facts.binding?.state === 'bound' ? facts.binding : undefined;
+    const pinned = decision.allowed && decision.tier === 'attested-cloud' && this.options.route === 'near' && facts.binding?.state === 'bound' ? facts.binding : undefined;
+    // Owner, 2026-11-18: an any-cloud request to NEAR AI Cloud's own endpoint also goes over the pinned connection while a fresh proof for this host exists,
+    // so its answer can show Verified private model; on a mismatch it falls back to an unpinned send. With no fresh proof it is sent as before.
+    const optionalPin = decision.allowed && decision.tier === 'any-cloud' && this.options.route === 'near' && facts.nearEndpoint && this.options.binding?.fetchFor !== undefined
+      && isBindingFresh(fact, now) && sameHostName(fact.host, host) ? fact : undefined;
+    // GATE-07, D-52: every model request leaves one record, allowed or refused, through the route's sink. A record that cannot be built or kept never changes
+    // the request (D-21). An optionally pinned request's record waits until its connection is known, so it can say whether it fell back.
+    const write = (fellBack: boolean): void => {
+      try {
+        route.sink?.record(routeRecordFor(route, decision, facts, model === undefined ? {} : { model }, { mark, defaultLabel, bundleHash, routing, checkFailed, ...(fellBack ? { connectionFallback: 'unpinned' as const } : {}) }));
+      } catch { /* see above */ }
+    };
+    let recorded = false;
+    const recordDeferred = (fellBack: boolean): void => { if (!recorded) { recorded = true; write(fellBack); } };
+    if (optionalPin === undefined) recordDeferred(false);
+    if (!decision.allowed) throw new RouteRefusedError(decision.rule, decision.reason ?? 'Nothing was sent.');
     return {
       route,
       decision,
       facts,
       context: { mark, defaultLabel, bundleHash, routing },
       ...(this.options.binding === undefined ? {} : { connection: fact }),
-      ...(pinned === undefined ? {} : { pinned })
+      ...(pinned === undefined ? {} : { pinned }),
+      ...(optionalPin === undefined ? {} : { optionalPin, recordDeferred })
     };
   }
 
@@ -1198,6 +1222,10 @@ export class NearAiClient {
    * A source that cannot give a pinned fetch cannot carry the request at all: refused, never sent over an unpinned connection (CLAS-05).
    */
   private fetchFor(check: RouteCheck | undefined): typeof fetch {
+    if (check?.pinned === undefined && check?.optionalPin !== undefined) {
+      // At any-cloud a source that gives no pinned fetch leaves the request as it was before (unpinned, not proven), never refused.
+      try { return this.options.binding?.fetchFor?.(check.optionalPin) ?? this.fetchFn; } catch { return this.fetchFn; }
+    }
     if (check?.pinned === undefined) return this.fetchFn;
     let pinned: typeof fetch | undefined;
     try { pinned = this.options.binding?.fetchFor?.(check.pinned); } catch { pinned = undefined; }
@@ -1236,19 +1264,32 @@ export class NearAiClient {
 
   private async request(path: string, init: RequestInit, overrides: { maxRetries?: number; model?: string; failFast?: boolean; spendKind?: SpendKind; secret?: string; stream?: boolean } = {}): Promise<Response> {
     const url = `${this.options.baseUrl.replace(/\/$/, '')}${path}`;
+    if (!isSecureEndpoint(url)) throw new NearAiError(0, 'NEAR AI endpoint must use HTTPS; plain HTTP is only allowed for localhost.', false);
+    // CLAS-06: the route is decided once, here, for every content request, before the spend check, before the cooldown probe slot is taken and before the first
+    // byte is sent, whether or not spend tracking is on. A retry below is the same request and is not decided again.
+    const check = needsRouteCheck(path, init.method) ? this.checkRoute(overrides.model) : undefined;
+    const sent = { fellBack: false };
+    try {
+      return await this.send(url, path, init, overrides, check, sent);
+    } finally {
+      // A request pinned at any-cloud is recorded once its connection is known, naming only whether it fell back to an unpinned send (owner, 2026-11-18).
+      check?.recordDeferred?.(sent.fellBack);
+    }
+  }
+
+  /** Sends one content or plain request, after its route check, with the retry, the cooldown slot and the spend ledger. */
+  private async send(url: string, path: string, init: RequestInit, overrides: { maxRetries?: number; model?: string; failFast?: boolean; spendKind?: SpendKind; secret?: string; stream?: boolean }, check: RouteCheck | undefined, sent: { fellBack: boolean }): Promise<Response> {
     // One retry layer: the agent loop backs off between model turns. Here, at most one quick retry,
     // and only for failures that are usually momentary (never for 429 or 503).
     const maxRetries = Math.max(0, Math.min(1, overrides.maxRetries ?? this.options.maxRetries ?? 1));
     const retryBaseDelayMs = Math.max(0, this.options.retryBaseDelayMs ?? 250);
     const random = this.options.random ?? Math.random;
     const responseTimeoutMs = Math.max(1, this.options.responseTimeoutMs ?? DEFAULT_RESPONSE_TIMEOUT_MS);
-    if (!isSecureEndpoint(url)) throw new NearAiError(0, 'NEAR AI endpoint must use HTTPS; plain HTTP is only allowed for localhost.', false);
     const model = overrides.model;
-    // CLAS-06: the route is decided once, here, for every content request, before the spend check, before the cooldown probe slot is taken and before the first
-    // byte is sent, whether or not spend tracking is on. A retry below is the same request and is not decided again.
-    const check = needsRouteCheck(path, init.method) ? this.checkRoute(model) : undefined;
-    const connection = check?.connection;
-    const fetchFn = this.fetchFor(check);
+    let connection = check?.connection;
+    let fetchFn = this.fetchFor(check);
+    // Pinned at any-cloud (owner, 2026-11-18): set while the request still goes over the pinned connection.
+    let optionalPin = check?.optionalPin !== undefined && fetchFn !== this.fetchFn;
     const billable = BILLABLE_PATHS.has(path) && (init.method ?? 'GET') === 'POST' && this.options.spend !== undefined;
     if (billable) {
       // The daily limit is checked before every billable request, whoever sends it.
@@ -1274,8 +1315,22 @@ export class NearAiClient {
           });
         } catch (error) {
           unhook();
+          const notBound = error instanceof ConnectionNotBoundError || (error as { cause?: unknown } | undefined)?.cause instanceof ConnectionNotBoundError;
+          // At any-cloud a pinned connection that presented another key falls back to an unpinned send of the same request (nothing was written over the
+          // pinned one): the host is not bound any more, the record names the fallback, and the usage carries a not-bound fact, so the answer's badge says the
+          // connection was not proven (owner, 2026-11-18).
+          if (check !== undefined && notBound && optionalPin) {
+            try { this.options.binding?.markNotBound(this.options.baseUrl, (error as Error).message); } catch { /* the fact is unknown then, which never counts as bound */ }
+            optionalPin = false;
+            sent.fellBack = true;
+            fetchFn = this.fetchFn;
+            connection = { state: 'not-bound', host: this.options.baseUrl };
+            clearTimeout(timer);
+            attempt -= 1;
+            continue;
+          }
           // The pinned connection presented another key: nothing was written, the host is not bound any more, and the request is refused (CLAS-05).
-          if (check !== undefined && (error instanceof ConnectionNotBoundError || (error as { cause?: unknown } | undefined)?.cause instanceof ConnectionNotBoundError)) throw this.notBound(check, (error as Error).message);
+          if (check !== undefined && notBound) throw this.notBound(check, (error as Error).message);
           // Sent but cancelled or timed out before NEAR answered: NEAR may still have done (and billed) the work.
           if (billable && (init.signal?.aborted || timedOut)) this.charge(path, init, model, overrides.spendKind, undefined, 'aborted');
           if (init.signal?.aborted) throw error;
@@ -1299,6 +1354,7 @@ export class NearAiClient {
           if (model) this.cooling.delete(model);
           if (connection !== undefined) this.connections.set(response, connection);
           if (check?.pinned !== undefined) { this.attestedAnswers.set(response, check.route); this.pinnedResponses.add(response); }
+          if (optionalPin) this.pinnedResponses.add(response);
           if (billable) this.charge(path, init, model, overrides.spendKind, response, 'open');
           // A stream keeps the caller's stop wired to the connection while its body is read, and its
           // reader can close the connection itself when the stream stalls; the reader releases it.

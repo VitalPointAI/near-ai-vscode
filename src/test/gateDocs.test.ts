@@ -593,3 +593,25 @@ test('README describes the badge with its three titles and links to the new sect
   assert.ok(readmeLines.length >= 2);
   for (const line of readmeLines) { assert.ok(!line.includes(EM_DASH), line); assert.doesNotMatch(line, /NEAR organization/); }
 });
+
+// ---- The owner's decision of 2026-11-18 (PR #95): Public requests over the proven connection, with an unpinned fallback; badges on lead answers only ----
+
+test('SECURITY.md, README and CHANGELOG say Public requests go over the proven connection, fall back unpinned on a mismatch with a record, and attested levels still refuse', () => {
+  const badge = flat(sectionOf(SECURITY, BADGE_HEADING));
+  for (const phrase of [
+    'every request is held to that key, and refused if the server presents another.',
+    'At other levels a request to NEAR AI Cloud is held to that key while a fresh proof of the connection exists.',
+    'the request is sent without the key held instead of being refused, its model request record says it fell back (and nothing about its content), and the answer\'s badge shows **Model verified, connection not proven**.',
+    'With no fresh proof the request is sent as before',
+    'The badge is on the lead agent\'s answers only.'
+  ]) assert.ok(badge.includes(flat(phrase)), phrase);
+  assert.ok(flat(policySection).includes('`connectionFallback: "unpinned"`'), 'the record field is named where model request records are described');
+  const readme = flat(README);
+  assert.ok(readme.includes('A **trust badge** under each cloud answer of the lead agent says'));
+  assert.ok(readme.includes('It is on the lead agent\'s answers only; a helper agent\'s answer has none.'));
+  assert.ok(readme.includes('At a level that needs an attested cloud a mismatch refuses the request; at other levels it is sent without the key held and the badge says so.'));
+  const unreleased = flat(CHANGELOG.slice(CHANGELOG.indexOf('## Unreleased'), CHANGELOG.indexOf('\n## ', CHANGELOG.indexOf('## Unreleased') + 5)));
+  assert.ok(unreleased.includes('**Public chats over the proven connection too.**'));
+  assert.ok(unreleased.includes('Levels that need an attested cloud still refuse on a mismatch.'));
+  for (const text of [badge, unreleased]) { assert.ok(!text.includes(EM_DASH)); assert.doesNotMatch(text, /NEAR organization/); }
+});

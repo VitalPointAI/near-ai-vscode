@@ -203,6 +203,8 @@ export interface RouteRecordContext {
   readonly routing: RoutingTable;
   /** True when the route could not be worked out at all: refused with a fixed reason, and no label decided it. */
   readonly checkFailed?: boolean;
+  /** An any-cloud request pinned to the proven connection that met another key and was sent unpinned instead (owner, 2026-11-18). */
+  readonly connectionFallback?: 'unpinned';
 }
 
 /**
@@ -242,16 +244,18 @@ export function routeRecordFor(route: SessionRoute, decision: RouteDecision, fac
     ...(routine || decision.tier === asked ? {} : { tier: decision.tier }),
     ...(decided === undefined ? {} : { label: decided }),
     ...(marked ? { mark: context.mark } : {}),
-    ...(decision.tier === 'attested-cloud' ? { connection: facts.binding?.state ?? 'unknown' } : {})
+    ...(decision.tier === 'attested-cloud' ? { connection: facts.binding?.state ?? 'unknown' } : {}),
+    ...(context.connectionFallback === undefined ? {} : { connectionFallback: context.connectionFallback })
   });
 }
 
-/** The fixed reason of each answer-check record: plain words, never a signing address, a report or a fingerprint. */
 /** Why an answer sent at attested-cloud could not be checked at all (PR #89 review): recorded as unavailable, so no such answer goes unrecorded. */
 export const UNCHECKABLE_ANSWER_REASONS = Object.freeze({
   'no-signature-id': 'NEAR AI returned no signature id for this answer, so it could not be checked; nothing changed.',
   'no-hashes': 'The editor kept no hashes of this answer to check it with, so it could not be checked; nothing changed.'
 } as const);
+
+/** The fixed reason of each answer-check record: plain words, never a signing address, a report or a fingerprint. */
 
 const ANSWER_CHECK_REASONS: Readonly<Record<'verified' | 'failed' | 'unavailable', string>> = Object.freeze({
   verified: 'The answer\'s signature and NEAR AI Cloud\'s attestation were checked after the answer and verified.',

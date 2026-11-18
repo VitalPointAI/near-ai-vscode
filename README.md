@@ -1200,11 +1200,16 @@ copy of Open-GSD to a project that doesn't already have one.
   credentials and private-file paths are held back (you can send a message once
   anyway), personal data asks first, and `tee-only` mode blocks models NEAR
   forwards to other providers.
-- A **trust badge** under each cloud answer says **Verified private model**,
+- A **trust badge** under each cloud answer of the lead agent says **Verified private model**,
   **Model verified, connection not proven** or **Not verified**. It is set only
   from checks that ran: NEAR's signature over the exact request and response, a
   genuine, fresh Intel TDX quote that binds the signing key, and whether the
-  connection was proven to end inside the private enclave. Click it for the
+  connection was proven to end inside the private enclave. It is on the lead
+  agent's answers only; a helper agent's answer has none. A request to NEAR AI
+  Cloud goes over a connection held to its attested key whenever a fresh proof
+  exists. At a level that needs an attested cloud a mismatch refuses the
+  request; at other levels it is sent without the key held and the badge says
+  so. Click it for the
   reasons, Check again and the full attestation. See
   [what it does and doesn't check](SECURITY.md#the-trust-badge-on-each-answer).
 - The chat view only receives display data; credentials and raw context stay
