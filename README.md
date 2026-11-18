@@ -550,7 +550,16 @@ until it runs out aren't shown.
   teams on their reviewer), so client material stays on private models;
   change a member's line to `privacy: any` to relax it. Run one with `/team:<name> <task>`
   or **Manage Agent Teams**; a lead agent delegates to the members as
-  sub-agents, each limited to its own tools. The conversation keeps that team:
+  sub-agents, each limited to its own tools. The lead runs members side by
+  side wherever one does not need another's output, each on its own area
+  (files, modules, or sections) and, when it changes files, in its own git
+  worktree. It then merges their branches one at a time, sorts out conflicts
+  (itself, or by handing one to the member who owns that area), runs the
+  project's checks once after all the merges, and reports which branches
+  merged and which conflicts came up; a member whose part fails does not hold
+  up the others. Team Studio suggests, without blocking a save, giving members
+  their own areas and naming who brings the parts together when a team has
+  neither. The conversation keeps that team:
   later messages in it, and Open-GSD workflows run from it, give the
   specialist work to the team's members, while Open-GSD keeps the project on
   track (planning, checking, verification). Without a `/team` in the

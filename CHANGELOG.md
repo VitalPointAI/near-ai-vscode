@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+- **Teams work side by side, then bring their work together.** A team's lead now gives each member
+  its own area (files, modules, or sections of the deliverable) and says what it must leave alone,
+  starts the members that do not need each other at the same time, and gives each member that
+  changes files its own git worktree. When they finish, the lead merges their branches one at a time,
+  sorts out any conflict itself or hands it to the member who owns that area with both sides, and
+  runs the project's checks once after all the merges. A member whose part fails does not hold up
+  the others, and the lead's summary says which branches merged and which conflicts came up. Runs
+  that work with a team, Open-GSD workflows included, are told the same. The AI team builder now
+  designs teams this way, with a clear step where someone merges the parts and checks the whole,
+  and puts members one after another only where one part needs another's output. The built-in
+  teams and the recommended project team say what each member owns, and **Update Team** offers the
+  new wording. While you edit a team, Team Studio adds a suggestion when no member owns an area of
+  its own or no one brings the parts together; it is advice only, so your existing teams still
+  save and still show Ready.
+
 ## 0.4.31
 
 You can now label files, folders and the project, so that agents cannot read what your clearance
