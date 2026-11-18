@@ -852,6 +852,24 @@ until it runs out aren't shown.
   Memory stays on this machine and refuses secret-looking content. Review,
   correct, retract, export, or reset it with **Manage Project Memory**.
 
+- **Staff products for military staff teams.** A staff section team (a team
+  file with a `staff:` block, for exercise and fictional data only) works on
+  products through three tool groups its members are granted:
+  `mcp:staff-products` (propose a new version, give a gate verdict, submit
+  for a decision, withdraw, status, list, the shared registers, the wargame
+  ledger and the tradecraft lint) and `mcp:guard-scan` (the release-guard's
+  checks for markings, the exercise box, real names, decisions written as
+  made, personal data and J4 numbers without a calculation). Every product
+  follows one path: draft, guard-checked, awaiting decision, then approved or
+  rejected, then released. No agent can approve, reject or release anything:
+  only a named person can, with **NEAR AI: Staff: Approve a Product**,
+  **Reject a Product**, **Release a Product** or **Withdraw a Product**,
+  signed with this device's key. Your name and role are self-declared until
+  verified credentials arrive. **NEAR AI: Staff: Show Products** lists every
+  product, what waits for you, and its history. The exercise box and the
+  real-entity list are yours to set in `.planning/.near-ai/staff-guard.json`
+  and `.planning/staff/real-entities.txt`.
+
 ### Cybersecurity scans
 
 **NEAR AI: Cybersecurity** opens a panel that tests a system you own for

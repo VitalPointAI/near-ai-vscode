@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **Staff products with a person's decision.** Staff section teams get the `staff-products` and
+  `guard-scan` tools: products move from draft through the release-guard's check to a person's
+  decision, recorded in a signed, chained ledger in the project, with the CCIR, RFI, assumptions,
+  annex, synchronization, decision support and targeting registers, a wargame ledger that writes the
+  synchronization matrix and DSM, the J2 tradecraft lint (ICD 203), and the events the Staff Room
+  will draw. Approving, rejecting and releasing are **NEAR AI: Staff:** commands a person runs,
+  signed with this device's key; no agent can do them.
+
 ## 0.4.33
 
 Every answer of the lead agent from a cloud model now shows a trust badge that says what the

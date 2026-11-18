@@ -2,6 +2,7 @@ import { cyberExploitTools } from './cyberExploitTools';
 import { cyberProbes } from './cyberProbes';
 import { imageTool, memoryTools } from './extraTools';
 import { knowledgeTools } from './knowledgeTools';
+import { staffTools } from './staffTools';
 import { gsdTools } from '../gsd/tools';
 import type { GsdServices } from '../gsd/tools';
 import { GRAPHICS_TOOLS } from './graphicsTools';
@@ -67,7 +68,7 @@ export const GSD_TOOL_NAMES: ReadonlySet<string> = new Set(['Skill', 'SlashComma
  */
 export const TOOL_DEFINING_FILES: readonly string[] = [
   'src/agent/tools.ts', 'src/agent/webTools.ts', 'src/agent/graphicsTools.ts', 'src/agent/extraTools.ts', 'src/agent/securityTool.ts',
-  'src/agent/cyberProbes.ts', 'src/agent/cyberExploitTools.ts', 'src/agent/knowledgeTools.ts', 'src/gsd/tools.ts', 'src/mcp/tools.ts'
+  'src/agent/cyberProbes.ts', 'src/agent/cyberExploitTools.ts', 'src/agent/staffTools.ts', 'src/agent/knowledgeTools.ts', 'src/gsd/tools.ts', 'src/mcp/tools.ts'
 ];
 const TOOL_CARRYING_FILES: readonly string[] = [
   'src/agent/toolCatalog.ts', 'src/agent/loop.ts', 'src/agent/gateAdapter.ts', 'src/services/agentSession.ts', 'src/services/toolsDirectory.ts', 'src/services/cyberRun.ts', 'src/services/mcpRegistry.ts'
@@ -93,6 +94,7 @@ export function builtInTools(stubs: CatalogStubs = {}): AgentTool<any>[] {
     securityTool(stubs.security ?? { consented: () => true, scan: async () => undefined }),
     ...cyberProbes({ inScope: () => false }),
     ...cyberExploitTools({ inScope: () => false, engagementId: 'directory', sandboxTier: 'disabled' }),
+    ...staffTools({ host: () => undefined, team: { slug: 'directory', section: 'j2', members: [], sectionLead: 'directory' }, run: 'directory' }),
     ...knowledgeTools({ read: unavailable, add: unavailable }, 'research'),
     ...memoryTools(stubs.memory ?? ({} as ContextGraphMemory), { project: { kind: 'project', id: 'directory' } }, 'directory', 'directory'),
     ...gsdTools(stubs.gsd ?? { home: '', root: '', skills: [], agents: [], ask: async () => [], spawn: async () => '' })

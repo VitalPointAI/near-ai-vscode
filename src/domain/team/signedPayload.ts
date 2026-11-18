@@ -1,5 +1,6 @@
 // One signer and one verifier for every signed thing that is not a team event (TMR-05, D-08, D-10, D-20, D-21). Pure: no I/O, no vscode.
-// Policy bundles (Phase 70), grants (Phase 71) and approval answers (Phase 80) all call signPayload and verifyPayload and add no second signer.
+// Policy bundles (Phase 70), grants (Phase 71), approval answers (Phase 80) and the staff product ledger (design 10, 4.1) all call signPayload and
+// verifyPayload and add no second signer.
 //
 // What is signed: the UTF-8 text of PAYLOAD_DOMAIN, a newline, the purpose and a newline, followed by the canonical JSON of the envelope without sig.
 // That text starts with the letter n. A team event is signed as canonical JSON, which starts with {, so a payload signature can never be an event
@@ -22,7 +23,7 @@ import { SecretLeakError, assertNoSecrets } from './secrets';
 
 export const PAYLOAD_DOMAIN = 'near-ai-vscode/signed-payload/v1';
 export const PAYLOAD_VERSION = 1;
-export const PAYLOAD_PURPOSES = ['policy-bundle', 'grant', 'approval-answer', 'key-record', 'label-map', 'label-declassify'] as const;
+export const PAYLOAD_PURPOSES = ['policy-bundle', 'grant', 'approval-answer', 'key-record', 'label-map', 'label-declassify', 'staff-ledger'] as const;
 export type PayloadPurpose = typeof PAYLOAD_PURPOSES[number];
 export const MAX_PAYLOAD_BYTES = 256 * 1024;
 const PUBLIC_KEY_BYTES = 32;

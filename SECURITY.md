@@ -716,6 +716,33 @@ history first and offers **Undo**.
 API keys are bound to the endpoint they were saved for, in SecretStorage, so
 editing the project's profile file cannot redirect a key.
 
+### Staff products and a person's decisions
+
+Staff section teams record each product's steps in a ledger in the project
+(`.planning/staff/ledger/products.jsonl`). Every entry is signed with this
+device's key and chained to the one before it, so a line added, changed,
+removed or reordered outside NEAR AI breaks the chain, and the products it
+touches read as tampered until a person sets the ledger aside with **NEAR AI:
+Staff: Set Aside the Product Ledger** (the old file is kept, never deleted).
+A product file whose header claims a state the ledger does not hold, or an
+approved or released product whose text changed, also reads as tampered.
+
+Approve, reject, release and withdraw-after-a-decision exist only as VS Code
+commands a person runs and confirms in a dialog. No agent tool offers them,
+and the state machine refuses them from any agent whatever calls it. A
+person's decision names them and their role and is signed with this device's
+key. Until verified credentials arrive, that name and role are self-declared.
+
+The tools record what they do inside the project only and send nothing out.
+guard-scan's checks are deterministic text rules: they catch markings,
+coordinates, listed names and the other patterns they know, and nothing else.
+The release-guard reviews what rules cannot judge, and a person decides.
+The exercise box lives in `.planning/.near-ai/staff-guard.json`, which an agent
+must ask before changing; the real-entity list can also be in
+`.planning/staff/real-entities.txt`, which an agent can write like any project
+file, so review changes to it. Staff templates are for exercise and fictional
+data only: labels are not accreditation.
+
 ## The outbound check
 
 Every chat message passes one check before it leaves VS Code, in this order:

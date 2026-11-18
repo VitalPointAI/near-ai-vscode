@@ -33,6 +33,7 @@ import { registerWebSearchSetup } from './services/webSearchSetup';
 import { registerSpendingLimits } from './services/spendingLimits';
 import { registerSpendTracking } from './services/spendTracking';
 import { registerGate } from './services/gateCommands';
+import { registerStaffCommands } from './services/staffCommands';
 import type { GateHost } from './gate/host';
 import { registerTeamMode, teamModeTestApi } from './services/team/teamCommands';
 import type { TeamModeTestApi } from './services/team/teamCommands';
@@ -130,6 +131,8 @@ export function activate(context: vscode.ExtensionContext): NearAiTestApi | unde
 
   // The one gate starts before anything that could run a tool, and before Team Mode; the chat gives each conversation its runtime from it (GATE-04).
   const gate = registerGate(context);
+  // A person's decisions on staff products (approve, reject, release, withdraw) are these commands only; no agent tool reaches them.
+  registerStaffCommands(context);
   const sidebar = new NearAiPanelViewProvider(context, auth, gate);
   registerAgentActivity(context, sidebar);
   registerTeamLive(context, sidebar);
