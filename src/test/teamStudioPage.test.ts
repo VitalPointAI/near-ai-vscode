@@ -4395,6 +4395,53 @@ test('page: From scratch and an AI draft are not clones: no clone check, no icon
   assert.doesNotMatch(page.text(), /not the icon of the team you copied/);
 });
 
+test('page: every new team shows its default icon on Purpose, its initials follow the typed name, and a clone never shows the source team\'s icon', async () => {
+  const page = await builderPage({ teams: [{ ...WEB_CARD, icon: ICON_URI }] });
+  const preview = () => page.doc.getElementById('icon-preview')!;
+  const letters = () => preview().children.find((node) => node.tagName === 'text')!.textContent;
+  const images = () => page.doc.getElementById('main')!.all().filter((node) => node.tagName === 'img');
+  const hint = () => page.doc.getElementById('icon-preview-hint')!.textContent;
+  // Clone and modify: the copy's name, on the default icon, and the clone's line beside it.
+  page.byLabel('New team')!.click();
+  page.byLabel('Use an existing team')!.click();
+  page.select('lib:web');
+  page.byLabel('Clone Web team and modify it')!.click();
+  page.dispatch({ type: 'starting-point', id: 'lib:web', cloneName: 'Web team copy', icon: ICON_URI, draft: { name: '', description: 'Builds pages', members: [] } });
+  assert.match(page.text(), /Team icon/);
+  assert.equal(preview().tagName, 'svg');
+  assert.ok(preview().classList.contains('team-icon-default') && preview().classList.contains('large'));
+  assert.equal(preview().getAttribute('role'), 'img');
+  assert.equal(preview().getAttribute('aria-label'), 'Default icon for Web team copy');
+  assert.equal(preview().getAttribute('aria-describedby'), 'icon-preview-hint');
+  assert.equal(letters(), 'WC');
+  assert.match(hint(), /starts with the default icon \(its initials on a colour\), not the icon of the team you copied\./);
+  assert.deepEqual(images(), [], 'no picture at all: not the source team\'s icon');
+  assert.equal(page.byLabel('Upload an icon for Web team copy (PNG, JPEG or WebP)'), undefined, 'Upload and Generate stay on the saved team');
+  // Typing the name repaints the preview only: the name field is the same node, so it keeps its focus.
+  const nameField = page.doc.getElementById('f-name')!;
+  nameField.focus();
+  page.type('f-name', 'Shop pages');
+  assert.equal(letters(), 'SP');
+  assert.equal(preview().getAttribute('aria-label'), 'Default icon for Shop pages');
+  assert.equal(page.doc.getElementById('f-name'), nameField);
+  assert.equal(page.doc.activeElement, nameField);
+  assert.deepEqual(images(), []);
+  // From scratch: the default icon too, with the line for a team that was not copied.
+  page.byLabel('Back')!.click();
+  page.byLabel('Back')!.click();
+  page.byLabel('Create a new team')!.click();
+  page.byLabel('From scratch')!.click();
+  assert.equal(preview().tagName, 'svg');
+  assert.equal(preview().getAttribute('aria-describedby'), 'icon-preview-hint');
+  assert.match(hint(), /starts with the default icon \(its initials on a colour\)\. After you save it, upload a picture or generate one on its Purpose tab\./);
+  assert.doesNotMatch(hint(), /team you copied/);
+  page.type('f-name', 'Billing crew');
+  assert.equal(letters(), 'BC');
+  page.type('f-name', 'Ops');
+  assert.equal(letters(), 'O');
+  assert.deepEqual(images(), []);
+});
+
 // ---------- PR #90 review ----------
 
 test('host: a retry after a matching icon goes through the same gate with fresh settings: a spend limit or TEE-only reached since blocks it', async () => {
