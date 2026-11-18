@@ -426,22 +426,26 @@ export const STAFF_SECTIONS: Readonly<Record<StaffSectionId, StaffSection>> = {
 // ---- Analytic standards and restricted publications (design 10, 4.2, 4.4 and 7; WP-SHARED) -----------------------------------------------------------
 
 /**
- * The ICD 203 expressions of likelihood, lowest first: each pair of words and the range of probability it stands for (ICD 203, Analytic Standards, 2 January
- * 2015, section D.6.b.(2)(a); 02 T10). A judgement uses one of these words or its alternative, never another estimative word. NATO/Canadian products use the
- * same table (design 10, 4.4).
+ * The ICD 203 expressions of likelihood, lowest first: the term, the alternative ICD 203 allows, other word forms of the same two (adverbs), and the range
+ * of probability in percent (ICD 203, Analytic Standards, 2 January 2015, amended 2022, section D.6.b.(2)(a); 02 T10). A judgement uses one of these words,
+ * never another estimative word. NATO/Canadian products use the same table (design 10, 4.4). The one copy of the table: the tradecraft lint, the J2
+ * skills and the demo acceptance fixtures all read it.
  */
-export const ICD203_LIKELIHOOD: ReadonlyArray<{ readonly terms: readonly string[]; readonly range: readonly [number, number] }> = [
-  { terms: ['almost no chance', 'remote'], range: [1, 5] },
-  { terms: ['very unlikely', 'highly improbable'], range: [5, 20] },
-  { terms: ['unlikely', 'improbable', 'improbably'], range: [20, 45] },
-  { terms: ['roughly even chance', 'roughly even odds'], range: [45, 55] },
-  { terms: ['likely', 'probable', 'probably'], range: [55, 80] },
-  { terms: ['very likely', 'highly probable'], range: [80, 95] },
-  { terms: ['almost certain', 'almost certainly', 'nearly certain'], range: [95, 99] }
+export const ICD203_LIKELIHOOD: ReadonlyArray<{ readonly term: string; readonly alternative: string; readonly forms: readonly string[]; readonly range: readonly [number, number] }> = [
+  { term: 'almost no chance', alternative: 'remote', forms: [], range: [1, 5] },
+  { term: 'very unlikely', alternative: 'highly improbable', forms: [], range: [5, 20] },
+  { term: 'unlikely', alternative: 'improbable', forms: ['improbably'], range: [20, 45] },
+  { term: 'roughly even chance', alternative: 'roughly even odds', forms: [], range: [45, 55] },
+  { term: 'likely', alternative: 'probable', forms: ['probably'], range: [55, 80] },
+  { term: 'very likely', alternative: 'highly probable', forms: [], range: [80, 95] },
+  { term: 'almost certain', alternative: 'nearly certain', forms: ['almost certainly'], range: [95, 99] }
 ];
 
-/** The ICD 203 confidence levels (ICD 203, section D.6.b.(2)(a); 02 T10). Confidence and likelihood never share a sentence. */
-export const ICD203_CONFIDENCE_LEVELS: readonly string[] = ['high confidence', 'moderate confidence', 'low confidence'];
+/**
+ * Confidence levels for a judgement, said in a sentence of its own, never with a likelihood term (ICD 203, 2015, tradecraft standard 2 and section
+ * D.6.b.(2)(a); the three levels are ATP 2-33.4, 2020, usage; 02 T10). Written in a product as "<level> confidence".
+ */
+export const ICD203_CONFIDENCE_LEVELS: readonly string[] = ['high', 'moderate', 'low'];
 
 /**
  * Estimative words outside the ICD 203 table, which a key judgement must not use because a reader cannot tell what probability they mean (ICD 203, section
@@ -471,7 +475,11 @@ export const SOURCE_RELIABILITY = {
 export type SourceReliability = keyof typeof SOURCE_RELIABILITY;
 export const SOURCE_RELIABILITY_GRADES = Object.keys(SOURCE_RELIABILITY) as readonly SourceReliability[];
 
-/** Information credibility on the NATO Admiralty scale: a grade of the information, assessed separately from the source (AJP-2.1 Edition B; 02 T10, S24). */
+/**
+ * Information credibility on the NATO Admiralty scale: a grade of the information, assessed separately from the source (AJP-2.1 Edition B; 02 T10, S24).
+ * The words for grade 1 differ between the grade tables (the older Canadian text and US field manuals read "confirmed by other sources"): a product
+ * uses its profile's words, IntelligenceTerms.credibilityOne.
+ */
 export const INFORMATION_CREDIBILITY = {
   1: 'Completely credible',
   2: 'Probably true',
@@ -497,8 +505,14 @@ export const INTELLIGENCE_DISCIPLINES = ['OSINT', 'GEOINT', 'HUMINT', 'SIGINT', 
 export type IntelligenceDiscipline = (typeof INTELLIGENCE_DISCIPLINES)[number];
 export const PARTNER_ONLY_DISCIPLINES: readonly IntelligenceDiscipline[] = ['HUMINT', 'SIGINT', 'MASINT', 'CI'];
 
+/** The two adversary COAs every J2 estimate names (JP 2-0 JIPOE step 4; ATP 2-01.3 IPB step 4; design 10, 3.2 and 4.4). */
+export const ADVERSARY_COA_TERMS = { mostLikely: 'MLCOA', mostDangerous: 'MDCOA' } as const;
+
+/** Intelligence requirement terms (JP 2-0; design 10, 3.2): priority intelligence requirement, named area of interest, latest time of value. */
+export const INTELLIGENCE_REQUIREMENT_TERMS = { pir: 'PIR', nai: 'NAI', ltiov: 'Latest time of value' } as const;
+
 /** PIR register headings: every PIR names the decision point it supports and a latest time of value (design 10, 3.2; 02 T9, S15). */
-export const PIR_REGISTER_HEADINGS: readonly string[] = ['Requirement', 'Decision point supported', 'Indicators', 'Latest time of value', 'Status'];
+export const PIR_REGISTER_HEADINGS: readonly string[] = ['Requirement', 'Decision point supported', 'Indicators', INTELLIGENCE_REQUIREMENT_TERMS.ltiov, 'Status'];
 
 /** Collection plan headings and its rule: the J2 recommends, the J3 approves asset allocation (design 10, 3.2; 02 T10, S15). */
 export const COLLECTION_PLAN_HEADINGS: readonly string[] = ['Requirement', 'Indicator', 'NAI', 'Recommended capability', 'Timing', 'Needs J3 approval or partner'];
@@ -522,38 +536,9 @@ export const DTG_MONTHS = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG
  */
 export const STAFF_TEMPLATE_LABELS: readonly string[] = ['org/Public', 'org/Internal', 'nato/NATO Unclassified', 'ca-protected/Protected A'];
 
-// Intelligence vocabulary the J2 products and the demo acceptance fixtures use (design 10, 3.2 and 4.4; WP-DEMO).
-
-/** The ICD 203 likelihood terms in order, with their ranges in percent and the alternative wording ICD 203 allows (02 T10; ICD 203, 2015, para D.6.b.2.a). */
-export const ICD_203_LIKELIHOOD_TERMS: ReadonlyArray<{ readonly term: string; readonly alternative: string; readonly range: readonly [number, number] }> = [
-  { term: 'almost no chance', alternative: 'remote', range: [1, 5] },
-  { term: 'very unlikely', alternative: 'highly improbable', range: [5, 20] },
-  { term: 'unlikely', alternative: 'improbable', range: [20, 45] },
-  { term: 'roughly even chance', alternative: 'roughly even odds', range: [45, 55] },
-  { term: 'likely', alternative: 'probable', range: [55, 80] },
-  { term: 'very likely', alternative: 'highly probable', range: [80, 95] },
-  { term: 'almost certain', alternative: 'nearly certain', range: [95, 99] }
-];
-
-/** Source reliability grades A to F (AJP-2.1 Edition B, the NATO two-character grading; 02 T10). Graded separately from credibility. */
-export const SOURCE_RELIABILITY_GRADES: Readonly<Record<string, string>> = {
-  A: 'Completely reliable', B: 'Usually reliable', C: 'Fairly reliable', D: 'Not usually reliable', E: 'Unreliable', F: 'Reliability cannot be judged'
-};
-
-/** Information credibility grades 1 to 6 (AJP-2.1 Edition B; the older Canadian text reads 1 as "confirmed by other sources", 02 T10). */
-export const INFORMATION_CREDIBILITY_GRADES: Readonly<Record<string, string>> = {
-  1: 'Confirmed by other sources', 2: 'Probably true', 3: 'Possibly true', 4: 'Doubtful', 5: 'Improbable', 6: 'Truth cannot be judged'
-};
-
-/** The two adversary COAs every J2 estimate names (JP 2-0 JIPOE step 4; ATP 2-01.3 IPB step 4; design 10, 3.2 and 4.4). */
-export const ADVERSARY_COA_TERMS = { mostLikely: 'MLCOA', mostDangerous: 'MDCOA' } as const;
-
-/** Intelligence requirement terms (JP 2-0; design 10, 3.2): priority intelligence requirement, named area of interest, latest time of value. */
-export const INTELLIGENCE_REQUIREMENT_TERMS = { pir: 'PIR', nai: 'NAI', ltiov: 'Latest time of value' } as const;
-
 // ---- Intelligence terms (design 10, 3.2, 4.4 and 6.2 skills; research note 02, tables 2, 6 and 10; WP-J2) ----------------------------------------
-// The J2 template and its two skills (icd203-standards, source-grading) read these tables; no other file spells an intelligence process stage, a
-// preparation step, a likelihood term or a grade.
+// The J2 template and its two skills (icd203-standards, source-grading) read these tables, with the likelihood table and the two grading scales above;
+// no other file spells an intelligence process stage, a preparation step, a likelihood term or a grade.
 
 /** The four steps of intelligence preparation, by the name the process uses (design 10, 3.1: JIPOE at joint levels, IPB with OAKOC at tactical level). */
 export interface PreparationSteps {
@@ -657,20 +642,6 @@ export const INTELLIGENCE_TERMS: Readonly<Record<StaffProfileId, IntelligenceTer
   }
 };
 
-/** The ICD 203 likelihood terms, with their alternatives and ranges in percent (ICD 203, 2 January 2015, amended 2022; 02 T10). */
-export const ICD203_LIKELIHOOD: ReadonlyArray<{ readonly term: string; readonly alternative: string; readonly low: number; readonly high: number }> = [
-  { term: 'almost no chance', alternative: 'remote', low: 1, high: 5 },
-  { term: 'very unlikely', alternative: 'highly improbable', low: 5, high: 20 },
-  { term: 'unlikely', alternative: 'improbable', low: 20, high: 45 },
-  { term: 'roughly even chance', alternative: 'roughly even odds', low: 45, high: 55 },
-  { term: 'likely', alternative: 'probable', low: 55, high: 80 },
-  { term: 'very likely', alternative: 'highly probable', low: 80, high: 95 },
-  { term: 'almost certain', alternative: 'nearly certain', low: 95, high: 99 }
-];
-
-/** Confidence levels for a judgement, said in a sentence of its own (ICD 203, 2015, tradecraft standard 2; the three levels are ATP 2-33.4, 2020, usage). */
-export const ICD203_CONFIDENCE_LEVELS: readonly string[] = ['high', 'moderate', 'low'];
-
 /** The five analytic standards (ICD 203, 2015, section D.6.a). */
 export const ICD203_ANALYTIC_STANDARDS: readonly string[] = [
   'Objective', 'Independent of political consideration', 'Timely', 'Based on all available sources of intelligence information', 'Implements and exhibits the analytic tradecraft standards'
@@ -687,25 +658,6 @@ export const ICD203_TRADECRAFT_STANDARDS: readonly string[] = [
   'Explains change to or consistency of analytic judgments',
   'Makes accurate judgments and assessments',
   'Incorporates effective visual information where appropriate'
-];
-
-/** Source reliability grades A to F, graded apart from the information's credibility (AJP-2.1, Edition B; 02 T10). */
-export const SOURCE_RELIABILITY_GRADES: ReadonlyArray<{ readonly grade: string; readonly meaning: string }> = [
-  { grade: 'A', meaning: 'Completely reliable' },
-  { grade: 'B', meaning: 'Usually reliable' },
-  { grade: 'C', meaning: 'Fairly reliable' },
-  { grade: 'D', meaning: 'Not usually reliable' },
-  { grade: 'E', meaning: 'Unreliable' },
-  { grade: 'F', meaning: 'Reliability cannot be judged' }
-];
-
-/** Information credibility grades 2 to 6 (AJP-2.1, Edition B; 02 T10). Grade 1's words differ by profile: IntelligenceTerms.credibilityOne. */
-export const INFORMATION_CREDIBILITY_GRADES: ReadonlyArray<{ readonly grade: string; readonly meaning: string }> = [
-  { grade: '2', meaning: 'Probably true' },
-  { grade: '3', meaning: 'Possibly true' },
-  { grade: '4', meaning: 'Doubtful' },
-  { grade: '5', meaning: 'Improbable' },
-  { grade: '6', meaning: 'Truth cannot be judged' }
 ];
 
 /** The aspects of terrain at tactical level, OAKOC (ATP 2-01.3, 2019, ch. 4; design 10, 3.1). */
@@ -786,7 +738,7 @@ export const COA_TEST_MEANINGS: Readonly<Record<string, string>> = {
 /** The wargame turn and the order adversary COAs are played in. */
 // FM 5-0 (Nov 2024) 5-133 to 5-165 (action, reaction, counteraction); AJP-5 Edition B 3.58 (most likely, then most dangerous).
 export const WARGAME_TURN: readonly string[] = ['Action', 'Reaction', 'Counteraction'];
-export const ADVERSARY_COA_ORDER: readonly string[] = ['Most likely adversary COA (MLCOA)', 'Most dangerous adversary COA (MDCOA)'];
+export const ADVERSARY_COA_ORDER: readonly string[] = [`Most likely adversary COA (${ADVERSARY_COA_TERMS.mostLikely})`, `Most dangerous adversary COA (${ADVERSARY_COA_TERMS.mostDangerous})`];
 
 /** Branches and sequels, kept apart: branches belong to future operations, sequels to the planners. */
 // JP 5-0 (2020) IV-39; JP 3-33 (2018) IX-1 (05 T7).

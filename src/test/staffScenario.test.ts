@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
 import {
-  citationText, gradeText, parseScenario, parseScenarioText, SCENARIO_DIR, SCENARIO_FAILURES, SCENARIO_MAX_FILE, scenarioFiles, scenarioJson
+  citationText, reportGradeText, parseScenario, parseScenarioText, SCENARIO_DIR, SCENARIO_FAILURES, SCENARIO_MAX_FILE, scenarioFiles, scenarioJson
 } from '../domain/staff/scenario';
 import type { Scenario } from '../domain/staff/scenario';
 
@@ -101,8 +101,8 @@ test('scenario files open with the marking and cite reports by id and grade; the
 });
 
 test('grades read as products cite them', () => {
-  assert.equal(gradeText({ grade: { reliability: 'B', credibility: '2' } }), 'B2');
-  assert.equal(gradeText({}), 'ungraded');
+  assert.equal(reportGradeText({ grade: { reliability: 'B', credibility: '2' } }), 'B2');
+  assert.equal(reportGradeText({}), 'ungraded');
   assert.equal(citationText({ id: 'PR-11', grade: { reliability: 'B', credibility: '2' } }), 'PR-11 (B2)');
 });
 

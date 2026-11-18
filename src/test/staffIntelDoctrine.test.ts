@@ -31,18 +31,18 @@ test('the intelligence process follows the profile: six joint categories, the Ar
 
 test('the ICD 203 likelihood scale runs from 1 to 99 percent with no gap, and the standards are five and nine', () => {
   assert.equal(ICD203_LIKELIHOOD.length, 7);
-  assert.equal(ICD203_LIKELIHOOD[0].low, 1);
-  assert.equal(ICD203_LIKELIHOOD[ICD203_LIKELIHOOD.length - 1].high, 99);
-  for (let index = 1; index < ICD203_LIKELIHOOD.length; index += 1) assert.equal(ICD203_LIKELIHOOD[index].low, ICD203_LIKELIHOOD[index - 1].high, 'ranges meet');
-  assert.deepEqual(ICD203_LIKELIHOOD.find((entry) => entry.term === 'likely'), { term: 'likely', alternative: 'probable', low: 55, high: 80 });
+  assert.equal(ICD203_LIKELIHOOD[0].range[0], 1);
+  assert.equal(ICD203_LIKELIHOOD[ICD203_LIKELIHOOD.length - 1].range[1], 99);
+  for (let index = 1; index < ICD203_LIKELIHOOD.length; index += 1) assert.equal(ICD203_LIKELIHOOD[index].range[0], ICD203_LIKELIHOOD[index - 1].range[1], 'ranges meet');
+  assert.deepEqual(ICD203_LIKELIHOOD.find((entry) => entry.term === 'likely'), { term: 'likely', alternative: 'probable', forms: ['probably'], range: [55, 80] });
   assert.equal(ICD203_ANALYTIC_STANDARDS.length, 5);
   assert.equal(ICD203_TRADECRAFT_STANDARDS.length, 9);
   assert.deepEqual(ICD203_CONFIDENCE_LEVELS, ['high', 'moderate', 'low']);
 });
 
 test('reliability (A to F) and credibility (1 to 6) are two scales, and grade 1 reads as the profile\'s grading table says', () => {
-  assert.deepEqual(SOURCE_RELIABILITY_GRADES.map((entry) => entry.grade), ['A', 'B', 'C', 'D', 'E', 'F']);
-  assert.deepEqual(INFORMATION_CREDIBILITY_GRADES.map((entry) => entry.grade), ['2', '3', '4', '5', '6']);
+  assert.deepEqual([...SOURCE_RELIABILITY_GRADES], ['A', 'B', 'C', 'D', 'E', 'F']);
+  assert.deepEqual([...INFORMATION_CREDIBILITY_GRADES], [1, 2, 3, 4, 5, 6]);
   assert.equal(INTELLIGENCE_TERMS['nato-ca'].credibilityOne, 'Completely credible');
   assert.equal(INTELLIGENCE_TERMS['us-joint'].credibilityOne, 'Confirmed by other sources');
 });

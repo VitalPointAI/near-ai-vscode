@@ -28,8 +28,11 @@ export interface TradecraftFinding {
   readonly message: string;
 }
 
-/** One source in the source register (the intel-workbench register, or the `sources` block a product carries). */
-export interface SourceEntry {
+/**
+ * One source as the lint reads it: an entry of the J2 source register (intel.ts SourceEntry, which the intel-workbench keeps), or of the `json
+ * staff-sources` block a product carries.
+ */
+export interface LintSource {
   readonly id: string;
   readonly reliability?: string;
   readonly credibility?: string | number;
@@ -42,7 +45,7 @@ export interface TradecraftInput {
   readonly body: string;
   /** The product's kind: an adversary COA set or an estimate must name both the MLCOA and the MDCOA. */
   readonly kind?: string;
-  readonly sources?: readonly SourceEntry[];
+  readonly sources?: readonly LintSource[];
   /** Rows of the PIR register (or the PIR part of the CCIR register). */
   readonly pirs?: readonly RegisterRow[];
   /** High-value targets and the adversary COAs they must appear in. */
@@ -60,7 +63,7 @@ const CONFIRMATION = /\b(?:confirm(?:s|ed|ing)?|corroborat(?:e|es|ed|ing)|indepe
 const LIST_ITEM = /^\s*(?:[-*]|\d+[.)])\s+\S/;
 
 /** Every ICD 203 term, longest first, so "very likely" is read before "likely" and "unlikely" never counts as "likely". */
-const LIKELIHOOD_TERMS: readonly string[] = ICD203_LIKELIHOOD.flatMap((row) => row.terms).sort((a, b) => b.length - a.length);
+const LIKELIHOOD_TERMS: readonly string[] = ICD203_LIKELIHOOD.flatMap((row) => [row.term, row.alternative, ...row.forms]).sort((a, b) => b.length - a.length);
 
 function wordPattern(term: string): RegExp {
   return new RegExp(`(?<![\\w-])${term.replace(/\s+/g, '\\s+')}(?![\\w-])`, 'i');
@@ -81,7 +84,7 @@ export function likelihoodTermsIn(sentence: string): string[] {
 }
 
 function confidenceIn(sentence: string): string[] {
-  return ICD203_CONFIDENCE_LEVELS.filter((level) => wordPattern(level).test(sentence));
+  return ICD203_CONFIDENCE_LEVELS.map((level) => `${level} confidence`).filter((level) => wordPattern(level).test(sentence));
 }
 
 function nonStandardIn(sentence: string): string[] {
@@ -120,7 +123,7 @@ export function lintTradecraft(input: TradecraftInput): TradecraftFinding[] {
       const terms = likelihoodTermsIn(line);
       const confidence = confidenceIn(line);
       const loose = nonStandardIn(line);
-      if (loose.length) add('non-standard-likelihood', number, `A key judgement uses "${loose.join('", "')}", which is not an ICD 203 term. Use one of: ${ICD203_LIKELIHOOD.map((row) => row.terms[0]).join(', ')}.`);
+      if (loose.length) add('non-standard-likelihood', number, `A key judgement uses "${loose.join('", "')}", which is not an ICD 203 term. Use one of: ${ICD203_LIKELIHOOD.map((row) => row.term).join(', ')}.`);
       else if (!terms.length && !confidence.length) add('judgement-unmarked', number, 'A key judgement says neither how likely (an ICD 203 term) nor how confident. Mark it as a judgement.');
     }
 
@@ -182,16 +185,20 @@ export function tradecraftLintText(findings: readonly TradecraftFinding[], hash:
   ].join('\n');
 }
 
-/** Reads source entries from a JSON value (a list of objects); entries that are not objects with an id are left out. */
-export function sourcesFrom(value: unknown): SourceEntry[] {
+/**
+ * Reads source entries from a JSON value (a list of objects); entries that are not objects with an id are left out. The source register's own field
+ * names, reportedAt and accessedAt, are read as published and accessed.
+ */
+export function sourcesFrom(value: unknown): LintSource[] {
   if (!Array.isArray(value)) return [];
-  const out: SourceEntry[] = [];
+  const out: LintSource[] = [];
   for (const item of value) {
     if (typeof item !== 'object' || item === null || Array.isArray(item)) continue;
     const record = item as Record<string, unknown>;
     if (typeof record.id !== 'string' || record.id.trim() === '') continue;
     const text = (key: string): Record<string, string> => (typeof record[key] === 'string' || typeof record[key] === 'number' ? { [key]: String(record[key]) } : {});
-    out.push({ id: record.id.trim(), ...text('reliability'), ...text('credibility'), ...text('origin'), ...text('published'), ...text('accessed') });
+    const date = (key: string, alias: string): Record<string, string> => { const value = text(key)[key] ?? text(alias)[alias]; return value === undefined ? {} : { [key]: value }; };
+    out.push({ id: record.id.trim(), ...text('reliability'), ...text('credibility'), ...text('origin'), ...date('published', 'reportedAt'), ...date('accessed', 'accessedAt') });
   }
   return out;
 }

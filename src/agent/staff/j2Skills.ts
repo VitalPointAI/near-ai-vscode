@@ -2,8 +2,8 @@
 // template writes to .planning/staff/skills/ so the person can read and edit it; every member that judges or grades reads it. The tables come from
 // doctrine.ts, and the grade words follow the profile (credibility 1 differs between the US and NATO grading tables).
 import {
-  ICD203_ANALYTIC_STANDARDS, ICD203_CONFIDENCE_LEVELS, ICD203_LIKELIHOOD, ICD203_TRADECRAFT_STANDARDS, INFORMATION_CREDIBILITY_GRADES, INTELLIGENCE_TERMS,
-  SOURCE_RELIABILITY_GRADES
+  CONFIRMED_CREDIBILITY, ICD203_ANALYTIC_STANDARDS, ICD203_CONFIDENCE_LEVELS, ICD203_LIKELIHOOD, ICD203_TRADECRAFT_STANDARDS, INFORMATION_CREDIBILITY,
+  INFORMATION_CREDIBILITY_GRADES, INTELLIGENCE_TERMS, SOURCE_RELIABILITY, SOURCE_RELIABILITY_GRADES
 } from '../../domain/staff/doctrine';
 import type { StaffProfileId } from '../../domain/staff/doctrine';
 
@@ -23,7 +23,7 @@ export function icd203Skill(): string {
     '',
     '| Term | Alternative | Range |',
     '|---|---|---|',
-    ...ICD203_LIKELIHOOD.map((entry) => `| ${entry.term} | ${entry.alternative} | ${entry.low} to ${entry.high} percent |`),
+    ...ICD203_LIKELIHOOD.map((entry) => `| ${entry.term} | ${entry.alternative} | ${entry.range[0]} to ${entry.range[1]} percent |`),
     '',
     '## Confidence: a sentence of its own',
     '',
@@ -73,14 +73,14 @@ export function sourceGradingSkill(profile: StaffProfileId): string {
     '',
     '| Grade | Meaning |',
     '|---|---|',
-    ...SOURCE_RELIABILITY_GRADES.map((entry) => `| ${entry.grade} | ${entry.meaning} |`),
+    ...SOURCE_RELIABILITY_GRADES.map((grade) => `| ${grade} | ${SOURCE_RELIABILITY[grade]} |`),
     '',
     '## Credibility of the information',
     '',
     '| Grade | Meaning |',
     '|---|---|',
     `| 1 | ${one} |`,
-    ...INFORMATION_CREDIBILITY_GRADES.map((entry) => `| ${entry.grade} | ${entry.meaning} |`),
+    ...INFORMATION_CREDIBILITY_GRADES.filter((grade) => grade !== CONFIRMED_CREDIBILITY).map((grade) => `| ${grade} | ${INFORMATION_CREDIBILITY[grade]} |`),
     '',
     profile === 'nato-ca'
       ? 'Grade 1 follows AJP-2.1. Older Canadian doctrine reads it as "confirmed by other sources"; under either reading, give grade 1 only when an independent source confirms the item.'

@@ -5,7 +5,7 @@
 // person brings from their own exercise. A scenario is unclassified exercise data only: the reader refuses anything that is not marked fictional,
 // any classification or caveat marking, any name on your organization's real-entity list, and coordinates outside the exercise area. It does not
 // replace the release-guard's scan of products (design 10, 4.2); it keeps the inputs those products are built from clean.
-import { INFORMATION_CREDIBILITY_GRADES, SOURCE_RELIABILITY_GRADES } from './doctrine';
+import { INFORMATION_CREDIBILITY, SOURCE_RELIABILITY } from './doctrine';
 import { checkStaffKeys, childPath, isOneOf, isRecord, ownValue, STAFF_PARSE_FAILURES } from './parse';
 import type { Fields } from './parse';
 
@@ -413,8 +413,8 @@ function readScenario(value: unknown, options: ScenarioOptions): Scenario {
       const gradeFields = record(raw, at, ['reliability', 'credibility']);
       const reliability = ownValue(gradeFields, 'reliability');
       const credibility = ownValue(gradeFields, 'credibility');
-      if (typeof reliability !== 'string' || !Object.prototype.hasOwnProperty.call(SOURCE_RELIABILITY_GRADES, reliability)) refuse('unknown-value', childPath(at, 'reliability'));
-      if (typeof credibility !== 'string' || !Object.prototype.hasOwnProperty.call(INFORMATION_CREDIBILITY_GRADES, credibility)) refuse('unknown-value', childPath(at, 'credibility'));
+      if (typeof reliability !== 'string' || !Object.prototype.hasOwnProperty.call(SOURCE_RELIABILITY, reliability)) refuse('unknown-value', childPath(at, 'reliability'));
+      if (typeof credibility !== 'string' || !Object.prototype.hasOwnProperty.call(INFORMATION_CREDIBILITY, credibility)) refuse('unknown-value', childPath(at, 'credibility'));
       return { reliability, credibility };
     });
     const deception = optional(fields, 'deception', (raw) => prose(raw, childPath(path, 'deception'), walk));
@@ -537,13 +537,13 @@ function readMission(value: unknown, walk: Walk, seen: Set<string>): ScenarioMis
 export const SCENARIO_DIR = '.planning/staff/scenario';
 
 /** A report's grade as products cite it: `B2`, or `ungraded`. */
-export function gradeText(report: Pick<ScenarioReport, 'grade'>): string {
+export function reportGradeText(report: Pick<ScenarioReport, 'grade'>): string {
   return report.grade ? `${report.grade.reliability}${report.grade.credibility}` : 'ungraded';
 }
 
 /** A report as a product cites it: `PR-11 (B2)` or `FR-01 (ungraded)`. */
 export function citationText(report: Pick<ScenarioReport, 'id' | 'grade'>): string {
-  return `${report.id} (${gradeText(report)})`;
+  return `${report.id} (${reportGradeText(report)})`;
 }
 
 function cell(text: string): string {
@@ -641,13 +641,13 @@ export function scenarioFiles(scenario: Scenario): Array<{ readonly path: string
   const reports = [
     '# Report log', '', ...banner,
     'Reliability (A to F) and credibility (1 to 6) are graded separately. `ungraded` means nobody has graded the report yet; grade it before you rely on it.', '',
-    ...table(['Id', 'Received', 'Kind', 'Title', 'Grade', 'Origin'], scenario.reports.map((report) => [report.id, report.received, report.kind, report.title, gradeText(report), report.origin])), '',
+    ...table(['Id', 'Received', 'Kind', 'Title', 'Grade', 'Origin'], scenario.reports.map((report) => [report.id, report.received, report.kind, report.title, reportGradeText(report), report.origin])), '',
     ...scenario.reports.flatMap((report) => [
       `## ${citationText(report)}: ${report.title}`, '',
       `- Received: ${report.received}`,
       `- Source: ${report.source}`,
       `- Origin: ${report.origin}`,
-      `- Grade: ${report.grade ? `${report.grade.reliability} (${SOURCE_RELIABILITY_GRADES[report.grade.reliability]}), ${report.grade.credibility} (${INFORMATION_CREDIBILITY_GRADES[report.grade.credibility]})` : 'ungraded'}`,
+      `- Grade: ${report.grade ? `${report.grade.reliability} (${SOURCE_RELIABILITY[report.grade.reliability as keyof typeof SOURCE_RELIABILITY]}), ${report.grade.credibility} (${INFORMATION_CREDIBILITY[Number(report.grade.credibility) as keyof typeof INFORMATION_CREDIBILITY]})` : 'ungraded'}`,
       ...(report.about.length ? [`- About: ${report.about.join(', ')}`] : []),
       ...(report.deception ? [`- Deception note: ${report.deception}`] : []),
       '', report.text, ''

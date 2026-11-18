@@ -6,13 +6,13 @@
 // process follows). `checkProduct` runs a fixture against a product file and lists every problem, so a demo run can show exactly what a product is
 // missing. Every term comes from doctrine.ts or the resolved profile; the headings come from the design's product outlines (3.2, 3.3).
 import {
-  ADVERSARY_COA_TERMS, ICD_203_LIKELIHOOD_TERMS, INTELLIGENCE_REQUIREMENT_TERMS, STAFF_PROCESSES
+  ADVERSARY_COA_TERMS, ICD203_LIKELIHOOD, INTELLIGENCE_REQUIREMENT_TERMS, PIR_REGISTER_HEADINGS, STAFF_PROCESSES
 } from './doctrine';
 import type { CrosswalkStep, StaffLevel, StaffProfileId, StaffSectionId } from './doctrine';
 import { parseProductFile, STAFF_MARKERS } from './products';
 import type { ProductKind } from './products';
 import { annexLetter, defaultStaffSettings, levelOffer, resolveProfile, retiredSpaceTerms, sectionCode, stepName } from './profiles';
-import { gradeText, SCENARIO_MARKING_PATTERNS } from './scenario';
+import { reportGradeText, SCENARIO_MARKING_PATTERNS } from './scenario';
 import type { ControlKind, Scenario } from './scenario';
 
 /** One required term: the product passes when it contains any of the forms. */
@@ -102,7 +102,7 @@ export function acceptanceFixture(id: AcceptanceProductId, profile: StaffProfile
   const base = { section: entry.section, products: entry.products, kind: entry.kind, profile, level };
   const sectionTerm: RequiredTerm = { label: 'staff code', anyOf: codesFor(profile, level, entry.section) };
   const decisionMarker: RequiredTerm = { label: 'decision marker', anyOf: [STAFF_MARKERS.decisionFor] };
-  const likelihood: RequiredTerm = { label: 'ICD 203 likelihood term', anyOf: ICD_203_LIKELIHOOD_TERMS.flatMap((term) => [term.term, term.alternative]) };
+  const likelihood: RequiredTerm = { label: 'ICD 203 likelihood term', anyOf: ICD203_LIKELIHOOD.flatMap((term) => [term.term, term.alternative]) };
   const otherPreparation = [...new Set(Object.values(STAFF_PROCESSES).map((entry) => entry.intelligencePreparation))].filter((term) => term !== process.intelligencePreparation);
   const commonForbidden = [
     { label: 'decision written as made', pattern: DECISION_AS_MADE },
@@ -147,7 +147,7 @@ export function acceptanceFixture(id: AcceptanceProductId, profile: StaffProfile
       return {
         ...base, title: 'PIR and IR register',
         headings: [],
-        columns: ['Requirement', 'Decision point supported', 'Indicators', INTELLIGENCE_REQUIREMENT_TERMS.ltiov, 'Status'],
+        columns: [...PIR_REGISTER_HEADINGS],
         terms: [
           { label: 'priority intelligence requirement', anyOf: [INTELLIGENCE_REQUIREMENT_TERMS.pir] },
           { label: 'named area of interest', anyOf: [INTELLIGENCE_REQUIREMENT_TERMS.nai] },
@@ -262,8 +262,8 @@ function citationProblems(body: string, rule: CitationRule, scenario: Scenario):
     const mention = new RegExp(`(^|[^A-Za-z0-9-])${escapeRegExp(report.id)}(?![A-Za-z0-9-])(\\s*\\(([^)]{1,20})\\))?`, 'g');
     for (const match of body.matchAll(mention)) {
       const given = match[3]?.trim();
-      if (given === undefined) problems.push({ kind: 'citation', detail: `${report.id} is cited without its grade; write ${report.id} (${gradeText(report)}).` });
-      else if (given !== gradeText(report)) problems.push({ kind: 'grade', detail: `${report.id} is cited as (${given}); the scenario grades it ${gradeText(report)}.` });
+      if (given === undefined) problems.push({ kind: 'citation', detail: `${report.id} is cited without its grade; write ${report.id} (${reportGradeText(report)}).` });
+      else if (given !== reportGradeText(report)) problems.push({ kind: 'grade', detail: `${report.id} is cited as (${given}); the scenario grades it ${reportGradeText(report)}.` });
       else cited.add(report.id);
     }
   }

@@ -279,7 +279,7 @@ test('the project guidance: the rules, the workflow per step, the handoffs, its 
 
 test('the two skills: the ICD 203 scale and the separate-sentence rule; reliability and credibility graded separately, grade 1 per profile', () => {
   const icd = icd203Skill();
-  for (const entry of ICD203_LIKELIHOOD) assert.ok(icd.includes(`| ${entry.term} | ${entry.alternative} | ${entry.low} to ${entry.high} percent |`), entry.term);
+  for (const entry of ICD203_LIKELIHOOD) assert.ok(icd.includes(`| ${entry.term} | ${entry.alternative} | ${entry.range[0]} to ${entry.range[1]} percent |`), entry.term);
   assert.match(icd, /Never put a likelihood term and a confidence level in the same sentence/);
   assert.match(icd, /The five analytic standards[\s\S]*The nine analytic tradecraft standards/);
   const nato = sourceGradingSkill('nato-ca');
