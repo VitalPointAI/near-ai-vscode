@@ -29,6 +29,16 @@
   refused, and an earlier scenario is archived rather than deleted. J2 and J5 demo scripts in your
   staff profile's terms are written beside it, each with the headings, terms and citations its
   products must contain.
+- **J2 intelligence staff team template.** The first military staff section template, written
+  from your project's staff profile (US Joint, US Army or NATO/Canadian) and level: 9 members at
+  strategic level, 12 at operational level, 7 for a brigade and 5 for a battalion. Each member has
+  its doctrinal job, the products it owns with their required headings, a "your output is X, not
+  Y" boundary, what it hands back and to whom, and a rule that it recommends and a named person
+  decides: PIRs, collection allocation and every product's release stay with people. The words
+  follow the profile (JIPOE or IPB, Annex B or Annex D, J-2, J2, G2 or S-2). Two skills come with
+  it, ICD 203 analytic standards and source grading, with reliability and credibility graded
+  separately, and the section's guidance gives the lead its parallel lanes for every planning
+  step. The team is private and uses exercise data only; no member has a persona name or a rank.
 
 ## 0.4.33
 
