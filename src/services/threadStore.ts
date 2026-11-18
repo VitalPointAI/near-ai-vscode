@@ -142,20 +142,29 @@ export function mergeChatLabel(a: ThreadMeta, b: ThreadMeta): ChatLabelState | u
   const rightKeys = new Set(right.lowerings.map(loweringKey).filter((key): key is string => key !== undefined));
   const onlyLeft = left.lowerings.filter((lowering) => { const key = loweringKey(lowering); return key === undefined || !rightKeys.has(key); });
   const onlyRight = right.lowerings.filter((lowering) => { const key = loweringKey(lowering); return key === undefined || !leftKeys.has(key); });
-  const result = (mark: Mark): ChatLabelState => ({ mark: [...mark], ...(lowerings.length > 0 ? { lowerings } : {}) });
+  // Every field of both copies' labels is kept (a later version's included, PR #87 review round 2); only the mark and the lowerings are set here.
+  const aNewer = a.lastUsedAt !== b.lastUsedAt ? a.lastUsedAt > b.lastUsedAt : JSON.stringify(a.label) >= JSON.stringify(b.label);
+  const base = { ...((aNewer ? b.label : a.label) as object), ...((aNewer ? a.label : b.label) as object) } as Record<string, unknown>;
+  const result = (mark: Mark): ChatLabelState => {
+    const { lowerings: _old, ...rest } = base;
+    return { ...rest, mark: [...mark], ...(lowerings.length > 0 ? { lowerings } : {}) } as ChatLabelState;
+  };
   if (onlyLeft.length === 0 && onlyRight.length === 0) return result(joined);
+  // The result of applying lowerings comes only from the verified signed records (PR #87 review round 2): the newest one's signed target, raised only by
+  // what the lowering copy holds above it (a raise made there after the lowering). A stored mark below the target never lowers the chat further, and
+  // what is reported is the same result, so state and record agree by construction.
   const judge = (holder: 'left' | 'right'): Mark | undefined => {
     const own = holder === 'left' ? left : right;
     const other = holder === 'left' ? right : left;
     const otherMeta = holder === 'left' ? b : a;
     const fresh = holder === 'left' ? onlyLeft : onlyRight;
-    let all = true;
-    for (const lowering of fresh) {
-      const verdict: LoweringVerdict = judgeLowering(lowering, { chatId: a.id, otherMark: other.mark, otherLastUsedAt: otherMeta.lastUsedAt });
-      reportLowering(a.id, lowering, verdict);
-      if (!verdict.apply) all = false;
-    }
-    return all ? own.mark : undefined;
+    const verdicts = fresh.map((lowering) => ({ lowering, verdict: judgeLowering(lowering, { chatId: a.id, otherMark: other.mark, otherLastUsedAt: otherMeta.lastUsedAt }) }));
+    const applied = verdicts.filter((each): each is { lowering: unknown; verdict: Extract<LoweringVerdict, { apply: true }> } => each.verdict.apply);
+    const outcome = applied.length === verdicts.length && applied.length > 0
+      ? joinMarks([...applied].sort((x, y) => x.verdict.signedAt.localeCompare(y.verdict.signedAt)).at(-1)!.verdict.to, own.mark)
+      : undefined;
+    for (const each of verdicts) reportLowering(a.id, each.lowering, each.verdict, each.verdict.apply ? outcome : undefined);
+    return outcome;
   };
   // Exactly one copy may bring lowerings the other lacks; when both do, neither copy's lowering can be told to come after the other's raise, so the join wins.
   if (onlyLeft.length > 0 && onlyRight.length > 0) {

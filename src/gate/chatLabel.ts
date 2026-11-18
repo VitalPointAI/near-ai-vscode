@@ -91,7 +91,7 @@ export function judgeChatLowering(envelope: unknown, context: LoweringContext, k
   for (const label of context.otherMark) raised = raiseMark(raised, label, SCALE_PRESETS);
   if (!sameMark(raised, from)) return reject('higher-mark');
   if (context.otherLastUsedAt > verdict.signedAt) return reject('used-after');
-  return { apply: true };
+  return { apply: true, to, signedAt: verdict.signedAt };
 }
 
 /** The sentence a chat shows once when a lowering made on another copy was not applied (it names the Lower command). */

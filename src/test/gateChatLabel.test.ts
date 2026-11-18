@@ -61,6 +61,7 @@ export function meta(id: string, lastUsedAt: string, labelValue?: unknown, extra
 
 const ID = 'conv-label-merge-1';
 const both = (a: ThreadMeta, b: ThreadMeta): [ThreadMeta, ThreadMeta] => [mergeMeta(a, b), mergeMeta(b, a)];
+const keys_ = (mark: readonly Label[]): string[] => keys(mark);
 const markOf = (value: ThreadMeta): string[] => { const read = chatLabelOf(value); return read.kind === 'mark' ? keys(read.mark) : [read.kind]; };
 
 async function chatIn(root: string, store: ThreadStore, posts: Array<Record<string, unknown>> = []): Promise<AgentConversation> {
@@ -414,4 +415,40 @@ test('the gate host records an applied lowering once as label.declassify, a reje
   assert.match(told[0]![1], /NEAR AI: Lower This Chat's Label/);
   assert.deepEqual(takeChatNotices(CHAT), [told[0]![1]], 'the chat shows it once when it is open or next opened');
   assert.deepEqual(takeChatNotices(CHAT), []);
+});
+
+// ---- PR #87 review round 2 ----
+
+test('review 2.1: an applied lowering lands exactly on its signed target, never on a lower stored mark, and what is reported matches the state, in both orders', async () => {
+  const identity = await signerOf();
+  const keys = ACTIVE_FOR(identity.fingerprint);
+  const signed = lowered(identity, [RESTRICTED], [CONFIDENTIAL]);
+  // The lowering copy's stored mark was hand-edited (or left by an old sync) below the signed target.
+  const stale = meta(CHAT, LATER, { mark: [PUBLIC], lowerings: [signed] });
+  const high = meta(CHAT, T0, { mark: [RESTRICTED] });
+  const reported: Array<{ applied: boolean; result?: string[] }> = [];
+  const stopJudge = registerLabelLoweringJudge((lowering, context) => judgeChatLowering(lowering, context, keys));
+  const stopOutcomes = registerLoweringOutcomes((outcome) => reported.push({ applied: outcome.applied, ...(outcome.result === undefined ? {} : { result: keys_(outcome.result) }) }));
+  try {
+    for (const merged of both(stale, high)) assert.deepEqual(markOf(merged), ['org/Confidential'], 'exactly the signed target');
+  } finally {
+    stopJudge();
+    stopOutcomes();
+  }
+  assert.ok(reported.length > 0 && reported.every((each) => each.applied && JSON.stringify(each.result) === JSON.stringify(['org/Confidential'])), JSON.stringify(reported));
+});
+
+test('review 2.3: a merged label keeps fields this version does not know, with or without an applied lowering', async () => {
+  const left = meta(ID, '2026-11-10T00:00:00.000Z', { mark: [CONFIDENTIAL], futureLabelField: 'kept' });
+  const right = meta(ID, '2026-11-12T00:00:00.000Z', { mark: [PUBLIC] });
+  for (const merged of both(left, right)) assert.equal((merged.label as unknown as { futureLabelField?: string }).futureLabelField, 'kept');
+  const identity = await signerOf();
+  const keys = ACTIVE_FOR(identity.fingerprint);
+  const low = meta(CHAT, LATER, { mark: [PUBLIC], lowerings: [lowered(identity, [RESTRICTED], [PUBLIC])], futureLabelField: 'kept' });
+  const high = meta(CHAT, T0, { mark: [RESTRICTED] });
+  const outcome = judged(keys, () => both(low, high));
+  for (const merged of outcome.result) {
+    assert.deepEqual(markOf(merged), ['org/Public']);
+    assert.equal((merged.label as unknown as { futureLabelField?: string }).futureLabelField, 'kept');
+  }
 });

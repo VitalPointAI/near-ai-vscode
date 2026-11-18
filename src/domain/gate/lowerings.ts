@@ -12,8 +12,11 @@ export interface LoweringContext {
   readonly otherLastUsedAt: string;
 }
 
-/** The judge's answer: apply the lowering, or the plain cause it was not applied. */
-export type LoweringVerdict = { readonly apply: true } | { readonly apply: false; readonly cause: string };
+/**
+ * The judge's answer: apply the lowering, with the verified signed target it lowers to (the only source of the result, PR #87 review round 2), or the
+ * plain cause it was not applied.
+ */
+export type LoweringVerdict = { readonly apply: true; readonly to: Mark; readonly signedAt: string } | { readonly apply: false; readonly cause: string };
 
 /** Judges a signed lowering one copy of a chat holds and the other does not (registered by the gate host, src/gate/chatLabel.ts). */
 export type LabelLoweringJudge = (lowering: unknown, context: LoweringContext) => LoweringVerdict;
@@ -27,7 +30,7 @@ export function registerLabelLoweringJudge(judge: LabelLoweringJudge | undefined
 }
 
 /** Told each lowering a merge applied or rejected, with its cause (the gate host records them once per signature per window). */
-export type LoweringOutcomeListener = (outcome: { readonly chatId: string; readonly lowering: unknown; readonly applied: boolean; readonly cause?: string }) => void;
+export type LoweringOutcomeListener = (outcome: { readonly chatId: string; readonly lowering: unknown; readonly applied: boolean; readonly cause?: string; readonly result?: Mark }) => void;
 let loweringOutcomes: LoweringOutcomeListener | undefined;
 
 /** Registers where the merge reports each lowering it judged; returns a function that clears it while it is still this one. */
@@ -37,8 +40,8 @@ export function registerLoweringOutcomes(listener: LoweringOutcomeListener | und
 }
 
 /** Tells the registered listener what a merge did with one lowering. Never throws. */
-export function reportLowering(chatId: string, lowering: unknown, verdict: LoweringVerdict): void {
-  try { loweringOutcomes?.({ chatId, lowering, applied: verdict.apply, ...(verdict.apply ? {} : { cause: verdict.cause }) }); } catch { /* a report never changes a merge */ }
+export function reportLowering(chatId: string, lowering: unknown, verdict: LoweringVerdict, result?: Mark): void {
+  try { loweringOutcomes?.({ chatId, lowering, applied: verdict.apply, ...(verdict.apply ? {} : { cause: verdict.cause }), ...(result === undefined ? {} : { result }) }); } catch { /* a report never changes a merge */ }
 }
 
 /** Judges one lowering with the registered judge; with none, or one that throws, it is rejected (fail closed). */

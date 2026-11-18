@@ -447,7 +447,9 @@ export class GateHost {
       const root = this.projectRootNow() ?? '';
       const payload = (outcome.lowering as { payload?: Partial<ChatLowering> } | null)?.payload;
       if (outcome.applied) {
-        this.recordLabelEvent(root, { event: 'label.declassify', path: `chat ${outcome.chatId}`, ...(payload?.to?.[0] === undefined ? {} : { label: payload.to[0] }), reason: `Lowered on another copy of this chat: ${typeof payload?.reason === 'string' ? payload.reason : 'no reason given'}` });
+        // The record names the label the merge put the chat at (the same result, so record and state agree), not a value read from either copy.
+        if (outcome.result === undefined || outcome.result.length === 0) return;
+        this.recordLabelEvent(root, { event: 'label.declassify', path: `chat ${outcome.chatId}`, label: outcome.result[0]!, mark: outcome.result, reason: `Lowered on another copy of this chat: ${typeof payload?.reason === 'string' ? payload.reason : 'no reason given'}` });
         return;
       }
       const sentence = loweringRejectedText(outcome.cause ?? 'does-not-verify');
