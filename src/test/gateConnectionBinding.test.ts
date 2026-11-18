@@ -423,12 +423,14 @@ test('a Public request whose pinned connection meets another key is sent unpinne
   assert.equal(binding.marked.length, 1, 'the host is no longer bound');
   assert.equal(answer.usage.connectionPinned, undefined);
   assert.equal(answer.usage.connection?.state, 'not-bound');
+  // PR #95 review round 3: the request's record is written at the decision, before anything is sent; a second record for it says it fell back.
   const infer = inferRecords(records);
-  assert.equal(infer.length, 1, 'one record for the request');
-  assert.equal(infer[0]!.unmapped.nearAi.connectionFallback, 'unpinned');
-  assert.equal(infer[0]!.authorizations[0]?.policy.name, 'route.any-cloud');
-  assert.ok(validateDecisionRecord(JSON.parse(JSON.stringify(infer[0]))).ok);
-  const text = JSON.stringify(infer[0]);
+  assert.equal(infer.length, 2, 'the decision record, then the fallback record');
+  assert.equal(infer[0]!.unmapped.nearAi.connectionFallback, undefined);
+  assert.equal(infer[1]!.unmapped.nearAi.connectionFallback, 'unpinned');
+  for (const entry of infer) assert.equal(entry.authorizations[0]?.policy.name, 'route.any-cloud');
+  assert.ok(validateDecisionRecord(JSON.parse(JSON.stringify(infer[1]))).ok);
+  const text = JSON.stringify(infer[1]);
   assert.ok(!text.includes(SERVER_PRINT) && !text.includes('cloud-api.near.ai') && !text.includes('hello'), 'no fingerprint, host or content');
   const badge = await badgeFor(near.client, answer.usage);
   assert.equal(badge.state, 'model-verified');
@@ -437,7 +439,23 @@ test('a Public request whose pinned connection meets another key is sent unpinne
   await withSessionRoute(routeAt(PUBLIC_MARK, records), () => ask(near.client));
   assert.equal(binding.pinnedCalls.length, 1);
   assert.equal(near.content.length, 2);
-  assert.equal(inferRecords(records)[1]!.unmapped.nearAi.connectionFallback, undefined);
+  assert.equal(inferRecords(records)[2]!.unmapped.nearAi.connectionFallback, undefined);
+});
+
+test('PR 95 review round 3: an optionally pinned Public request is recorded at the decision, so a host that dies mid-request still leaves its record', async () => {
+  const binding = new HandSource({ state: 'bound', host: NEAR, checkedAt: Date.now(), fingerprint: SERVER_PRINT }, async () => { throw new TypeError('socket hang up'); });
+  const near = await nearWith(binding);
+  const records: DecisionRecord[] = [];
+  let recordedBeforeSend = false;
+  await withSessionRoute(routeAt(PUBLIC_MARK, records), async () => {
+    const sent = ask(near.client);
+    recordedBeforeSend = inferRecords(records).length === 1;
+    await assert.rejects(sent);
+  });
+  assert.ok(recordedBeforeSend, 'the record was written before anything was sent');
+  assert.equal(binding.pinnedCalls.length, 1, 'it went over the pinned connection');
+  assert.equal(inferRecords(records).length, 1, 'one record, and no fallback record (the key did not mismatch)');
+  assert.equal(inferRecords(records)[0]!.unmapped.nearAi.connectionFallback, undefined);
 });
 
 test('at Confidential a mismatch on the pinned connection still refuses: nothing goes over the normal fetch and nothing falls back', async () => {

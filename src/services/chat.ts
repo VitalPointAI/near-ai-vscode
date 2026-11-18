@@ -10,7 +10,7 @@ import { GSD_COMMANDS } from '../domain/gsdCommands';
 import { AuthService } from './auth';
 import { activeProvider, clientFor, privateRouteFor } from './providerCache';
 import { projectMemoryScope } from '../agent/extraTools';
-import { AGENT_MEMORY_ACTOR, AgentConversation, findSkill, GsdContext, newConversationId, spendAccountOf } from './agentSession';
+import { AGENT_MEMORY_ACTOR, AgentConversation, closeConversation as closeAgentConversation, findSkill, GsdContext, newConversationId, spendAccountOf, trackConversation } from './agentSession';
 import { GsdHost } from '../gsd/host';
 import { findRipgrep } from '../agent/tools';
 import { isEmergencyStopped, onDidChangeEmergencyStop } from './emergencyStop';
@@ -473,7 +473,7 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     tab.closing = true;
     tab.stops += 1;
     tab.agent?.stop();
-    if (!tab.turns && !tab.agent?.running) tab.agent?.dispose();
+    if (!tab.turns && !tab.agent?.running && tab.agent) void closeAgentConversation(tab.agent);
     if (!tabs.length) tabs.push(newTab());
     if (activeId === id) show(tabs[Math.min(index, tabs.length - 1)]);
     else sendSummary(true);
@@ -1063,7 +1063,7 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
       // A turn that ended before taking the files it carried (blocked or failed) puts them back in the composer, never onto a later message.
       if (carried && !carried.taken) for (const attachment of carried.items.flatMap((item) => item.staged)) { state.attachments.set(attachment.id, attachment); postStaged(attachment); }
     }
-    if (tab.closing) { if (!tab.turns && !tab.agent?.running) tab.agent?.dispose(); return; }
+    if (tab.closing) { if (!tab.turns && !tab.agent?.running && tab.agent) void closeAgentConversation(tab.agent); return; }
     // Messages queued for a run that ended before taking them become the next turn, in order.
     if (!turn || tab.turns || tab.agent?.running) return;
     const left = tab.agent?.takeUndelivered() ?? [];
@@ -1083,7 +1083,7 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
   // The "no team yet" card goes away as soon as Team Studio (or anyone) saves the project's team.
   const teamWatch = watchProjectTeam(() => { if (!disposed) void setupNudge.refresh(); });
   const stopNotices = onChatNotice((chatId) => { const tab = tabs.find((each) => each.id === chatId); if (tab !== undefined && chatId === activeId && !disposed) for (const text of takeChatNotices(chatId)) tab.post({ type: 'notice', text }); });
-  panel.onDidDispose(() => { disposed = true; clearChatInView(activeId); stopNotices(); stopAllFollowing(); openTabSources.delete(openTabs); retentionWatch.dispose(); pickupWatch.dispose(); syncWatch.dispose(); for (const tab of tabs) tab.agent?.dispose(); policyWatch.dispose(); tokenWatch.dispose(); windowWatch?.dispose(); teamWatch?.dispose(); state.spendWatch?.dispose(); if (state.spendTimer) clearTimeout(state.spendTimer); }, undefined, context.subscriptions);
+  panel.onDidDispose(() => { disposed = true; clearChatInView(activeId); stopNotices(); stopAllFollowing(); openTabSources.delete(openTabs); retentionWatch.dispose(); pickupWatch.dispose(); syncWatch.dispose(); for (const tab of tabs) if (tab.agent) void closeAgentConversation(tab.agent); policyWatch.dispose(); tokenWatch.dispose(); windowWatch?.dispose(); teamWatch?.dispose(); state.spendWatch?.dispose(); if (state.spendTimer) clearTimeout(state.spendTimer); }, undefined, context.subscriptions);
   // The emergency stop stops every conversation's run; the composer's Stop stops only the one on screen.
   onDidChangeEmergencyStop(async (engaged) => {
     sendPolicyState(panel);
@@ -1300,6 +1300,8 @@ function conversationFor(context: vscode.ExtensionContext, root: string, panel: 
   };
   const home = stateHomeFor(root);
   const conversation = new AgentConversation(root, forward, home.paths.checkpoints, ripgrepPath(), transcripts, sharedActivityFeed());
+  // Closed through closeConversation, and by the window's shutdown if still open, so no badge write outlives it (PR #95 review round 3).
+  trackConversation(conversation);
   conversation.runMarkers = runMarkersFor(context, root);
   // The one gate (GATE-04): every tool call of this conversation, and of its sub-agents, is decided through it.
   conversation.gateHost = gateHost;

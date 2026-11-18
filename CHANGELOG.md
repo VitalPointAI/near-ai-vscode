@@ -28,7 +28,7 @@ proved about it: Verified private model; Model verified, connection not proven; 
   for example) also go over the connection held to NEAR AI Cloud's attested key, so their answers
   from a private model can show Verified private model. If the server presents another key, for
   example behind a proxy that inspects encrypted traffic, such a request is sent without it instead
-  of being refused, its record in the decision log says so, and its badge shows Model verified,
+  of being refused, a second record in the decision log says so, and its badge shows Model verified,
   connection not proven. Levels that need an attested cloud still refuse on a mismatch.
 - **Fixes to the checks after each answer.** An answer at a level that needs an attested cloud that
   cannot be checked at all is still recorded in the decision log, with the reason; Check again on a

@@ -261,8 +261,8 @@ interface RouteCheck {
    * rather than refusing.
    */
   readonly optionalPin?: ConnectionBindingFact;
-  /** Writes the request's record once its connection is known (only for an optionally pinned request), naming whether it fell back. Idempotent. */
-  readonly recordDeferred?: (fellBack: boolean) => void;
+  /** Writes a second record for an optionally pinned request that fell back to an unpinned send (the first was written at the decision). Once only. */
+  readonly recordFallback?: () => void;
 }
 
 export const DEFAULT_RESPONSE_TIMEOUT_MS = 60_000;
@@ -1195,16 +1195,16 @@ export class NearAiClient {
     // so its answer can show Verified private model; on a mismatch it falls back to an unpinned send. With no fresh proof it is sent as before.
     const optionalPin = decision.allowed && decision.tier === 'any-cloud' && this.options.route === 'near' && facts.nearEndpoint && this.options.binding?.fetchFor !== undefined
       && isBindingFresh(fact, now) && sameHostName(fact.host, host) ? fact : undefined;
-    // GATE-07, D-52: every model request leaves one record, allowed or refused, through the route's sink. A record that cannot be built or kept never changes
-    // the request (D-21). An optionally pinned request's record waits until its connection is known, so it can say whether it fell back.
+    // GATE-07, D-52: every model request leaves one record, allowed or refused, through the route's sink, at the decision, before anything is sent, so a host
+    // that dies mid-request still leaves it (PR #95 review round 3). A record that cannot be built or kept never changes the request (D-21).
     const write = (fellBack: boolean): void => {
       try {
         route.sink?.record(routeRecordFor(route, decision, facts, model === undefined ? {} : { model }, { mark, defaultLabel, bundleHash, routing, checkFailed, ...(fellBack ? { connectionFallback: 'unpinned' as const } : {}) }));
       } catch { /* see above */ }
     };
-    let recorded = false;
-    const recordDeferred = (fellBack: boolean): void => { if (!recorded) { recorded = true; write(fellBack); } };
-    if (optionalPin === undefined) recordDeferred(false);
+    write(false);
+    let fellBackRecorded = false;
+    const recordFallback = (): void => { if (!fellBackRecorded) { fellBackRecorded = true; write(true); } };
     if (!decision.allowed) throw new RouteRefusedError(decision.rule, decision.reason ?? 'Nothing was sent.');
     return {
       route,
@@ -1213,7 +1213,7 @@ export class NearAiClient {
       context: { mark, defaultLabel, bundleHash, routing },
       ...(this.options.binding === undefined ? {} : { connection: fact }),
       ...(pinned === undefined ? {} : { pinned }),
-      ...(optionalPin === undefined ? {} : { optionalPin, recordDeferred })
+      ...(optionalPin === undefined ? {} : { optionalPin, recordFallback })
     };
   }
 
@@ -1268,13 +1268,7 @@ export class NearAiClient {
     // CLAS-06: the route is decided once, here, for every content request, before the spend check, before the cooldown probe slot is taken and before the first
     // byte is sent, whether or not spend tracking is on. A retry below is the same request and is not decided again.
     const check = needsRouteCheck(path, init.method) ? this.checkRoute(overrides.model) : undefined;
-    const sent = { fellBack: false };
-    try {
-      return await this.send(url, path, init, overrides, check, sent);
-    } finally {
-      // A request pinned at any-cloud is recorded once its connection is known, naming only whether it fell back to an unpinned send (owner, 2026-11-18).
-      check?.recordDeferred?.(sent.fellBack);
-    }
+    return this.send(url, path, init, overrides, check, { fellBack: false });
   }
 
   /** Sends one content or plain request, after its route check, with the retry, the cooldown slot and the spend ledger. */
@@ -1323,6 +1317,8 @@ export class NearAiClient {
             try { this.options.binding?.markNotBound(this.options.baseUrl, (error as Error).message); } catch { /* the fact is unknown then, which never counts as bound */ }
             optionalPin = false;
             sent.fellBack = true;
+            // The request's record was written at the decision; a second record says it fell back, naming no content, host or key (GATE-07).
+            check.recordFallback?.();
             fetchFn = this.fetchFn;
             connection = { state: 'not-bound', host: this.options.baseUrl };
             clearTimeout(timer);

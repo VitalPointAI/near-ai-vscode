@@ -601,11 +601,13 @@ test('SECURITY.md, README and CHANGELOG say Public requests go over the proven c
   for (const phrase of [
     'every request is held to that key, and refused if the server presents another.',
     'At other levels a request to NEAR AI Cloud is held to that key while a fresh proof of the connection exists.',
-    'the request is sent without the key held instead of being refused, its model request record says it fell back (and nothing about its content), and the answer\'s badge shows **Model verified, connection not proven**.',
+    'the request is sent without the key held instead of being refused, a second model request record for it says it fell back (and nothing about its content), and the answer\'s badge shows **Model verified, connection not proven**.',
     'With no fresh proof the request is sent as before',
     'The badge is on the lead agent\'s answers only.'
   ]) assert.ok(badge.includes(flat(phrase)), phrase);
   assert.ok(flat(policySection).includes('`connectionFallback: "unpinned"`'), 'the record field is named where model request records are described');
+  assert.ok(flat(policySection).includes('Every record is written when the route is decided, before anything is sent.'));
+  assert.ok(flat(policySection).includes('gets a second record holding `connectionFallback: "unpinned"`.'));
   const readme = flat(README);
   assert.ok(readme.includes('A **trust badge** under each cloud answer of the lead agent says'));
   assert.ok(readme.includes('It is on the lead agent\'s answers only; a helper agent\'s answer has none.'));

@@ -267,6 +267,8 @@ interface Cloud {
   readonly signatures: Map<string, number>;
   readonly signatureCount: () => number;
   readonly reportGets: () => number;
+  /** Content requests that went over the pinned fetch the binding source gave (a fetch of its own, distinct from the client's). */
+  readonly pinned: () => number;
   /** What the signature endpoint does now: sign with the gateway key, sign with another key, throw as when offline, or answer only when released. */
   mode: 'valid' | 'bad-signature' | 'offline' | 'hang';
   release: () => void;
@@ -322,11 +324,14 @@ async function cloud(connection: ConnectionBindingFact['state'] | 'none' = 'boun
     return new Response('not found', { status: 404 });
   }) as typeof fetch;
   const fact = (): ConnectionBindingFact => connection === 'bound' ? { state: 'bound', host: NEAR_URL, checkedAt: Date.now(), fingerprint: 'ab'.repeat(32) } : { state: connection as ConnectionBindingFact['state'], host: NEAR_URL, checkedAt: Date.now() };
-  const binding: ConnectionBindingSource | undefined = connection === 'none' ? undefined : { current: fact, refresh: async () => fact(), markNotBound: () => undefined, fetchFor: () => fetchFn };
+  // The pinned fetch is a fetch of its own (PR #95 review round 3), so a request that goes over it can be told from one that does not.
+  let pinnedCalls = 0;
+  const pinnedFetch = (async (input: string | URL | Request, init?: RequestInit) => { pinnedCalls += 1; return fetchFn(input, init); }) as typeof fetch;
+  const binding: ConnectionBindingSource | undefined = connection === 'none' ? undefined : { current: fact, refresh: async () => fact(), markNotBound: () => undefined, fetchFor: () => pinnedFetch };
   const client = new NearAiClient({ baseUrl: NEAR_URL, apiKey: 'test-key', fetchFn, route: 'near', ...(binding ? { binding } : {}), maxRetries: 0, attestationTrust: { trustedRoot: TEST_ROOT } });
   await client.listModels();
   return {
-    client, content, signatures, signatureCount: () => [...signatures.values()].reduce((sum, count) => sum + count, 0), reportGets: () => reports,
+    client, content, signatures, signatureCount: () => [...signatures.values()].reduce((sum, count) => sum + count, 0), reportGets: () => reports, pinned: () => pinnedCalls,
     get mode() { return state.mode; }, set mode(value) { state.mode = value; },
     release: () => released()
   };
@@ -379,14 +384,17 @@ test('a TEE answer at org/Confidential, over the connection pinned to a fresh bo
   assert.equal(chat.timers[0]!.ms, BADGE_CHECK_TIMEOUT_MS);
 });
 
-test('at org/Public a bound fact alone does not prove the connection: the request was not pinned, so Model verified, connection not proven, with the reason', async () => {
+// The owner's decision of 2026-11-18 (PR #95): a Public request also goes over the pinned connection while a fresh proof exists. This test asserted the
+// opposite before; the fake's binding now gives a pinned fetch of its own (PR #95 review round 3), so the pinned path is the one exercised here.
+test('at org/Public with a fresh proof, a request through a real session goes over the pinned connection and its signed answer is Verified private model', async () => {
   const near = await cloud('bound');
   const chat = badgeChat();
   await send(chat, near.client);
   await settle();
+  assert.equal(near.pinned(), 1, 'the content request went over the binding source\'s pinned fetch');
   const last = chat.badges().at(-1)!.badge;
-  assert.equal(last.state, 'model-verified');
-  assert.ok(last.reasons.includes(`${TRUST_BADGE_TEXT.connectionNotProven} ${TRUST_BADGE_TEXT.connection.stale}`), JSON.stringify(last.reasons));
+  assert.equal(last.state, 'verified-private');
+  assert.deepEqual(last.reasons, []);
   assert.equal(near.signatureCount(), 1, 'one signature request for the answer, through the report cache');
 });
 
@@ -440,7 +448,7 @@ test('D-56: a check that never settles shows Not verified, could not be checked 
   await settle();
   const late = chat.badges().at(-1)!;
   assert.equal(late.runId, timedOut.runId);
-  assert.equal(late.badge.state, 'model-verified', 'the late result updates the badge');
+  assert.equal(late.badge.state, 'verified-private', 'the late result updates the badge');
   assert.equal(chat.badges().length, 3);
 });
 
@@ -475,8 +483,8 @@ test('a chat whose check failed earlier: Not verified even when this answer\'s c
   assert.ok(second.badge.reasons.includes(TRUST_BADGE_TEXT.earlierFailed));
   // Check again on the first answer passes now: its badge and the second one's no longer carry the earlier failure.
   const again = await chat.conversation.checkAgain(firstRun);
-  assert.equal(again?.state, 'model-verified');
-  assert.equal(chat.conversation.trustBadge(second.runId)?.state, 'model-verified');
+  assert.equal(again?.state, 'verified-private');
+  assert.equal(chat.conversation.trustBadge(second.runId)?.state, 'verified-private');
 });
 
 test('Check again reruns the check afresh and gives the updated badge for that run id; on the answer that set the stop, a signed result clears the stop', async () => {
@@ -513,8 +521,8 @@ test('edge CLAS-08 concurrency: a check for run A that settles after run B start
   const settledB = chat.badges().filter((entry) => entry.runId === runB);
   assert.equal(settledA.length, 2, 'A: Checking now, then its own result');
   assert.equal(settledB.length, 2, 'B: Checking now, then its own result');
-  assert.equal(settledA.at(-1)!.badge.state, 'model-verified');
-  assert.equal(settledB.at(-1)!.badge.state, 'model-verified');
+  assert.equal(settledA.at(-1)!.badge.state, 'verified-private');
+  assert.equal(settledB.at(-1)!.badge.state, 'verified-private');
 });
 
 test('a sub-agent\'s answer posts no trust badge: only the lead agent\'s answer has one (D-56)', async () => {
@@ -757,17 +765,17 @@ test('plan 27 tracer: a run whose check settles keeps one record, and the reopen
   await conversation.send({ text: 'hello', client: near.client, model: 'tee-model', privacy: PRIVATE, policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES });
   await settle();
   await conversation.trustRecorded();
-  const meta = await waitFor(() => store.meta(conversation.id), (value) => (value?.trust ?? []).some((entry) => entry.state === 'model-verified'));
+  const meta = await waitFor(() => store.meta(conversation.id), (value) => (value?.trust ?? []).some((entry) => entry.state === 'verified-private'));
   assert.equal(meta?.trust?.length, 1, 'one record for the one answer');
   assert.equal(meta!.trust![0]!.key, trustRecordKey('done'));
-  assert.equal(meta!.trust![0]!.state, 'model-verified');
+  assert.equal(meta!.trust![0]!.state, 'verified-private');
   assert.ok(!JSON.stringify(meta!.trust).includes(SIGNING.address.slice(2).toLowerCase()) && !/[0-9a-f]{64}/i.test(JSON.stringify(meta!.trust)), 'no address, no fingerprint');
   // Reopened, the answer carries the badge it settled on, replayed.
   const reopened = new AgentConversation(root, () => undefined, path.join(root, '.ckpt'), undefined, store);
   reopened.gateHost = testGateHost();
   const view = await reopened.restore(conversation.id) as { items: Array<{ kind: string; text?: string; trust?: TrustBadge }> };
   const answer = view.items.find((item) => item.kind === 'assistant' && item.text === 'done');
-  assert.equal(answer?.trust?.state, 'model-verified');
+  assert.equal(answer?.trust?.state, 'verified-private');
   assert.equal(answer?.trust?.replayed, true);
   assert.ok(answer?.trust?.reasons.includes(TRUST_BADGE_TEXT.replayed));
   const page = chatPage();
@@ -776,7 +784,7 @@ test('plan 27 tracer: a run whose check settles keeps one record, and the reopen
   const transcript = page.nodes.get('transcript')!;
   const badges = badgesUnder(transcript);
   assert.equal(badges.length, 1);
-  assert.equal(badges[0]!.getAttribute('data-state'), 'model-verified');
+  assert.equal(badges[0]!.getAttribute('data-state'), 'verified-private');
   badges[0]!.click();
   const shown = textOf(transcript);
   assert.match(shown, /This shows the check made when the answer arrived\./);
@@ -1038,4 +1046,87 @@ test('PR 95 CI: a badge settled when the run ends is saved before send returns, 
   // A conversation used again after close keeps its badges again.
   await conversation.send({ text: 'again', client: plainClient(undefined) as never, model: 'tee-model', privacy: PRIVATE, policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES });
   assert.equal((await store.meta(conversation.id))?.trust?.length, 1);
+});
+
+// ---- PR #95 review round 3 ----
+
+test('review 95.r3.1: after a new chat, an old run id answers neither trustBadge nor Check again, and nothing is written to either thread', async () => {
+  const near = await cloud('bound');
+  const root = mkdtempSync(path.join(tmpdir(), 'near-ai-badge-reset-'));
+  const store = threadStoreFor(root);
+  const conversation = new AgentConversation(root, () => undefined, path.join(root, '.ckpt'), undefined, store);
+  conversation.gateHost = testGateHost();
+  await conversation.send({ text: 'hello', client: near.client, model: 'tee-model', privacy: PRIVATE, policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES });
+  await settle();
+  await conversation.trustRecorded();
+  const oldThread = conversation.id;
+  const oldRun = [...(conversation as unknown as { verifiable: Map<string, unknown> }).verifiable.keys()][0]!;
+  assert.ok(conversation.trustBadge(oldRun) !== undefined);
+  conversation.reset();
+  const newThread = conversation.id;
+  assert.notEqual(newThread, oldThread);
+  let writes = 0;
+  const recordTrust = store.recordTrust.bind(store);
+  store.recordTrust = async (...args: Parameters<ThreadStore['recordTrust']>) => { writes += 1; return recordTrust(...args); };
+  const signaturesBefore = near.signatureCount();
+  assert.equal(conversation.trustBadge(oldRun), undefined);
+  assert.equal(conversation.trustDetails(oldRun), undefined);
+  assert.equal(await conversation.checkAgain(oldRun), undefined);
+  assert.equal(conversation.badgeWithNotice(oldRun, 'x'), undefined);
+  await conversation.trustRecorded();
+  assert.equal(writes, 0, 'nothing written to either thread');
+  assert.equal(near.signatureCount(), signaturesBefore, 'no check was made for the old answer');
+  assert.equal((await store.meta(newThread))?.trust, undefined);
+});
+
+test('review 95.r3.2: the chat panel\'s close path waits for the badge record being written, and the window\'s shutdown closes every chat still open', async () => {
+  const { closeAllConversations, closeConversation, trackConversation } = await import('../services/agentSession');
+  const near = await cloud('bound');
+  near.mode = 'hang';
+  const root = mkdtempSync(path.join(tmpdir(), 'near-ai-badge-shutdown-'));
+  const store = threadStoreFor(root);
+  let started!: () => void;
+  const writing = new Promise<void>((resolve) => { started = resolve; });
+  let finished = false;
+  const recordTrust = store.recordTrust.bind(store);
+  store.recordTrust = async (...args: Parameters<ThreadStore['recordTrust']>) => {
+    finished = false;
+    started();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    await recordTrust(...args);
+    finished = true;
+  };
+  const make = () => { const chat = new AgentConversation(root, () => undefined, path.join(root, '.ckpt'), undefined, store); chat.gateHost = testGateHost(); trackConversation(chat); return chat; };
+  // A tab's conversation whose check settles after the run: its record is being written when the panel closes it.
+  const tab = make();
+  await tab.send({ text: 'hello', client: near.client, model: 'tee-model', privacy: PRIVATE, policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES });
+  near.mode = 'valid';
+  near.release();
+  await writing;
+  assert.equal(finished, false, 'the write is in progress');
+  await closeConversation(tab);
+  assert.equal(finished, true, 'closeConversation returned only after the write finished');
+  // The window's shutdown: a chat still open (another tab) is closed, and shutdown waits for the write it has in progress too.
+  const near2 = await cloud('bound');
+  near2.mode = 'hang';
+  const other = make();
+  await other.send({ text: 'hello', client: near2.client, model: 'tee-model', privacy: PRIVATE, policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES });
+  const writing2 = new Promise<void>((resolve) => { started = resolve; });
+  near2.mode = 'valid';
+  near2.release();
+  await writing2;
+  assert.equal(finished, false, 'the second chat\'s write is in progress');
+  await closeAllConversations();
+  assert.equal(finished, true, 'shutdown returned only after it finished');
+  let writesAfter = 0;
+  store.recordTrust = async () => { writesAfter += 1; };
+  await settle();
+  assert.equal(writesAfter, 0, 'nothing is written after the shutdown');
+  // Every production close path goes through it.
+  const chatSource = readFileSync(path.join(ROOT, 'src', 'services', 'chat.ts'), 'utf8');
+  assert.equal((chatSource.match(/agent\?\.dispose\(\)/g) ?? []).length, 0, 'no chat panel path disposes a conversation without closing it');
+  assert.equal((chatSource.match(/void closeAgentConversation\(tab\.agent\)/g) ?? []).length, 3, 'a closed tab, a tab closing after its run, and a closed panel or view');
+  assert.match(chatSource, /trackConversation\(conversation\)/);
+  const extension = readFileSync(path.join(ROOT, 'src', 'extension.ts'), 'utf8');
+  assert.match(extension, /export async function deactivate\(\): Promise<void> \{[\s\S]*?await closeAllConversations\(\);[\s\S]*?await flushSyncOnClose\(\);/);
 });

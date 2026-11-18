@@ -265,6 +265,33 @@ export const LOWERING_OVERTAKEN_TEXT =
 export const UNREADABLE_CHAT_LABEL_TEXT =
   "This chat's saved label could not be read, so it opens at org/Restricted and its content stays on this computer. If you know it holds nothing that sensitive, use NEAR AI: Lower This Chat's Label.";
 
+/** The chat panel's conversations still open, so the window's shutdown can close them (PR #95 review round 3). */
+const openConversations = new Set<AgentConversation>();
+/** Conversations being closed, until each has written what it was writing. */
+const closingConversations = new Set<Promise<void>>();
+
+/** Registers a conversation of the chat panel, so closeAllConversations reaches it when the window shuts down. */
+export function trackConversation(conversation: AgentConversation): void { openConversations.add(conversation); }
+
+/**
+ * The one way the chat panel closes a conversation (a closed tab, a closed panel or view): nothing more is posted or written for it, and the badge record
+ * it was writing finishes; the window's shutdown waits for that too.
+ */
+export function closeConversation(conversation: AgentConversation): Promise<void> {
+  openConversations.delete(conversation);
+  const done: Promise<void> = conversation.close().catch(() => undefined).finally(() => { closingConversations.delete(done); });
+  closingConversations.add(done);
+  return done;
+}
+
+/** Closes every conversation still open and waits, at most `timeoutMs`, for every one being closed to finish its last write (the window's shutdown). */
+export async function closeAllConversations(timeoutMs = 1_000): Promise<void> {
+  for (const conversation of [...openConversations]) void closeConversation(conversation);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  await Promise.race([Promise.all([...closingConversations]), new Promise<void>((resolve) => { timer = setTimeout(resolve, timeoutMs); timer.unref?.(); })]);
+  if (timer !== undefined) clearTimeout(timer);
+}
+
 /** How many lead answers keep their badge's facts and check result in memory, so Check again and Show full attestation can use them (CLAS-08). */
 export const TRUST_ENTRIES_KEPT = 20;
 /** How many runs' last shown badges are kept: as many answers as the page keeps. */
@@ -1152,6 +1179,7 @@ export class AgentConversation {
    */
   public async close(): Promise<void> {
     this.dispose();
+    openConversations.delete(this);
     await this.trustWrites;
   }
 
@@ -1287,6 +1315,11 @@ export class AgentConversation {
     this.routeFailures = new Map();
     this.badgeFailures = new Map();
     this.droppedBadgeFailures = 0;
+    // Every badge of the old chat goes with it (PR #95 review round 3): its run ids answer neither trustBadge nor Check again, and nothing more is written to
+    // its thread from here. Records already queued for it were for that thread, and are written there as queued.
+    this.verifiable.clear();
+    this.shownBadges.clear();
+    this.trustWriters.clear();
     // The old chat's badge timeouts can post nothing any more.
     for (const handle of this.badgeTimerHandles) this.badgeTimers.clear(handle);
     this.badgeTimerHandles.clear();

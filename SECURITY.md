@@ -81,9 +81,9 @@ request is held to that key, and refused if the server presents another. At
 other levels a request to NEAR AI Cloud is held to that key while a fresh proof
 of the connection exists. If the server then presents another key, for example
 behind a proxy that inspects encrypted traffic, the request is sent without the
-key held instead of being refused, its model request record says it fell back
-(and nothing about its content), and the answer's badge shows **Model verified,
-connection not proven**. With no fresh proof the request is sent as before, and
+key held instead of being refused, a second model request record for it says it
+fell back (and nothing about its content), and the answer's badge shows **Model
+verified, connection not proven**. With no fresh proof the request is sent as before, and
 the best its answer shows is the same.
 
 **When it is checked.** Each cloud answer from a TEE model is checked once,
@@ -402,9 +402,10 @@ is what that file and the records beside it do in this version.
   provider, the routing tier, the rule that allowed it and the policy's hash,
   each once; a refused request's record also holds the plain reason and the
   label that decided it, which is the policy's default label when nothing
-  raised the label. A request at any-cloud that was to go over the connection
+  raised the label. Every record is written when the route is decided, before
+  anything is sent. A request at any-cloud that was to go over the connection
   held to NEAR AI Cloud's attested key, met another key and was sent without it
-  also holds `connectionFallback: "unpinned"`. A request whose route cannot be worked out is refused with
+  gets a second record holding `connectionFallback: "unpinned"`. A request whose route cannot be worked out is refused with
   a fixed reason and no label. A record of a model request names never the
   content, the endpoint's address or a file path.
 - **Labels and clearances in this version.** **NEAR AI: Set Label** labels a
