@@ -59,7 +59,7 @@ export const POLICY_DOCUMENT_URI = `${POLICY_SCHEME}:/NEAR-AI-Policy.txt`;
  * is sent. It replaced POLICY_ROUTING_NOT_LIVE_TEXT (PR 4b) when routing by label went live (plan 24).
  */
 export const POLICY_ROUTING_TEXT =
-  "This version checks the clearances below when an agent reads a labelled file. Each chat's label decides where its content is sent, by the routing tiers below. In this version, levels that need an attested cloud stay on this computer.";
+  "This version checks the clearances below when an agent reads a labelled file. Each chat's label decides where its content is sent, by the routing tiers below. Levels that need an attested cloud go to a private NEAR AI Cloud model only over a connection proven to end inside its private hardware; otherwise they stay on this computer.";
 
 export const RESET_CONFIRM_ACTION = 'Reset Policy';
 export const RESET_TITLE = 'Reset your policy to the default?';

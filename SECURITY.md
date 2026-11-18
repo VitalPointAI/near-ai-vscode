@@ -69,6 +69,13 @@ NEAR's reference verifier (`nearai/nearai-cloud-verifier`) and checks that:
 4. The quote's `report_data` binds the signing address and the fresh nonce, and
    any GPU evidence echoes the nonce.
 
+An answer at a level that needs an attested cloud (see
+[Classification labels and routing](#classification-labels-and-routing)) is
+checked this way automatically, in the background, after it arrives, and the
+result shows under the answer. For these automatic checks a report NEAR AI has
+already verified for the same signing key is reused for up to ten minutes. A
+failed check shows **Check again**, which always fetches a fresh report.
+
 The result names which key signed. **NEAR AI's gateway key** (seen for
 tool-calling responses) proves the exchange passed unaltered through NEAR's
 attested gateway. It does not by itself prove which enclave ran the model,
@@ -317,10 +324,10 @@ is what that file and the records beside it do in this version.
   [Classification labels and routing](#classification-labels-and-routing)); a
   chat that read nothing labelled is at the policy's default label, which may
   go to any model, so on a fresh install nothing changes where requests go. A request the routing does not allow is
-  not sent, and you are told why in plain words. Until NEAR AI can prove that a
-  connection to NEAR AI Cloud ends inside its private hardware, content at a
-  level whose tier needs an attested cloud model stays on this computer for
-  now. Every model request, sent or not, leaves a record in a log of its own,
+  not sent, and you are told why in plain words. Content at a level whose tier
+  needs an attested cloud model goes to NEAR AI Cloud only over a connection
+  proven to end inside its private hardware; otherwise it stays on this
+  computer. Every model request, sent or not, leaves a record in a log of its own,
   `gate/model-requests/` in this extension's storage, beside the decision
   records: it rolls over the same way, is never synced and is never put in your
   project. A routine record holds the time, who asked, the model and its
@@ -414,11 +421,23 @@ A chat that holds labels on several scales goes by the strictest tier among
 them.
 
 **Attested cloud in this version.** Levels whose tier is attested-cloud
-(Internal, Confidential, Protected A and NATO Unclassified by default) need a
-private NEAR AI Cloud model reached over a connection proven to end inside its
-private hardware. This version cannot prove that yet, so content at these
-levels stays on this computer: a local model serves it, and with no local model
-the request is refused. Protected B stays on this computer because no CCCS
+(Internal, Confidential, Protected A and NATO Unclassified by default) may go
+only to a private model on NEAR AI Cloud's own endpoint, and only over a proven
+connection:
+
+Content at a level that needs an attested cloud goes to NEAR AI Cloud only when NEAR AI Cloud's attestation shows that the connection ends inside the private enclave: the enclave's attestation must name the certificate the server presents, and the connection that carries your request must present that certificate. When this cannot be shown, content at those levels stays on this computer, and a request with no model on this computer is refused.
+
+NEAR AI Cloud's attestation names the key of the certificate its endpoint
+serves, so from this release content at these levels can reach a private NEAR
+AI Cloud model again, whenever that check passes. NEAR AI makes the check in
+the background, never while a request waits, and repeats it every few minutes;
+a check older than ten minutes no longer counts. After each such answer, NEAR AI
+also checks the answer's signature and NEAR AI Cloud's attestation (see
+[Checking a response's signature](#checking-a-responses-signature)). If that
+check fails, nothing more at these levels is sent to NEAR AI Cloud from that
+chat until **Check again** under that answer passes; a new chat or a window
+reload also starts without the stop, and the failure stays in the decision log.
+A check that cannot be made, for example offline, changes nothing. Behind a proxy that inspects encrypted traffic, the connection cannot be proven, so content at these levels stays on this computer. Protected B stays on this computer because no CCCS
 Medium assessment of NEAR AI Cloud was found, unless your organization changes
 its policy.
 
@@ -1014,6 +1033,8 @@ messages.
 | An MCP server's and the cybersecurity host tools' effects are their declarations | A server or tool that does more than it declares is not seen |
 | The label file is readable by anyone who can read the project | Do not use a compartment name that is itself secret |
 | The outbound check catches labelled text copied into a network call, not a paraphrase or an encoding | A planned sandbox around the shell |
+| The check of an answer's attestation and signature runs after the answer, so it cannot stop that answer's request; a failed check stops the next ones. | The connection is proven before anything is sent, and each request is pinned to it |
+| The check that a connection ends inside the enclave relies on NEAR AI Cloud's attestation and Intel's root of trust. Like the answer check, it does not check the platform's TCB status, certificate revocation or which code the enclave runs. | Use cloud.near.ai/verify or NEAR's verifier for a full check |
 | Spend limits use NEAR's published prices for estimates; the actual charge arrives from billing after the run | Each run, with all its sub-agents, stops before a model turn once its estimate reaches `nearAi.agent.maxRunCostUsd` (default $5), what is left of `nearAi.dailySpendLimitUsd`, or `nearAi.agent.maxRunTokens`; an agent repeating the same action is nudged and then stopped |
 
 ## How changes reach a release

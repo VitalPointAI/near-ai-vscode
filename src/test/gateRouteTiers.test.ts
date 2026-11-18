@@ -383,6 +383,8 @@ test('a failed check stops attested-cloud for the chat: the next request is refu
   let refused: unknown;
   await sendTo(chat, near.client).catch((error: unknown) => { refused = error; });
   assert.ok(refused instanceof RouteRefusedError && refused.rule === 'route.attestation-failed', String(refused));
+  assert.equal((refused as Error).message, ROUTE_REFUSALS['route.attestation-failed']);
+  assert.match((refused as Error).message, /Use Check again under that answer/);
   assert.equal(near.content.length, 1, 'nothing more was sent');
   const local = await streamingLocal();
   await sendTo(chat, local.client, 'local-model', 'Local · runs on this machine', true);

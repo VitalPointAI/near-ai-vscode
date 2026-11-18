@@ -6,7 +6,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
 import { CLEARANCE_SELF_ASSERTED_TEXT, LABELS_NOT_ACCREDITATION_TEXT, SCALE_PRESETS_CAVEAT_TEXT } from '../domain/gate/labels';
-import { DEFAULT_ROUTING } from '../domain/gate/routing';
+import { CONNECTION_BINDING_TEXT, DEFAULT_ROUTING } from '../domain/gate/routing';
 import { USE_BRANCH_LABELS_ACTION } from '../gate/labelMapStore';
 import { FLOOR_CANNOT_SEE_TEXT, FLOOR_EFFECTS_CANNOT_SEE_TEXT, namesCredentialStore } from '../domain/gate/floor';
 import { classifyCommand, MAX_COMMAND_LENGTH, MAX_NESTING } from '../agent/commandSafety';
@@ -330,7 +330,8 @@ test('SECURITY.md says every model request is checked against the routing tiers 
     'a chat that read nothing labelled is at the policy\'s default label, which may go to any model',
     'on a fresh install nothing changes where requests go',
     'A request the routing does not allow is not sent',
-    'content at a level whose tier needs an attested cloud model stays on this computer for now',
+    // Plan 25 (PR 4d): the interim "stays on this computer for now" became the rule that ships.
+    'Content at a level whose tier needs an attested cloud model goes to NEAR AI Cloud only over a connection proven to end inside its private hardware; otherwise it stays on this computer.',
     `in a log of its own, \`gate/${MODEL_REQUESTS_DIR}/\` in this extension's storage`,
     'rolls over the same way, is never synced and is never put in your project',
     'A routine record holds the time, who asked, the model and its provider, the routing tier, the rule that allowed it and the policy\'s hash',
@@ -433,7 +434,6 @@ test('SECURITY.md\'s labels and routing section carries the scales caveat, the c
   for (const phrase of ['`.planning/.near-ai/labels.json`', 'anyone who can read the project can read its labels', 'A sync never lowers a chat\'s label',
     'Only you lower it, with **NEAR AI: Lower This Chat\'s Label** and a reason that is recorded', 'declassification signed with your device key that they can check',
     'only when it undoes no raise made there', 'In this version your other computers cannot check another computer\'s key yet, in or outside Team Mode', 'a lowering made on one computer is not applied on the others', 'takes the chat\'s label in the label file, never a lower one',
-    'This version cannot prove that yet, so content at these levels stays on this computer',
     'Protected B stays on this computer because no CCCS Medium assessment of NEAR AI Cloud was found, unless your organization changes its policy',
     'unless your organization names another host', 'is refused, whatever the mode']) {
     assert.ok(words.includes(flat(phrase)), phrase);
@@ -506,4 +506,38 @@ test('PR #87 review rounds 2 and 3: SECURITY.md and CHANGELOG say what a written
   assert.ok(changelog.includes('a file already labelled only on a scale the chat\'s label does not hold is left as it is'));
   assert.ok(changelog.includes('A chat starts at its project\'s label (your policy\'s default label when the project has none), so in an unlabelled project a chat that read nothing labelled works as before.'));
   assert.ok(!changelog.includes('A chat that read nothing labelled works as before.'));
+});
+
+// Plan 25 (PR 4d, CLAS-05, CLAS-07, D-55): what the connection and answer checks prove and rely on, word for word with the code.
+test('SECURITY.md carries CONNECTION_BINDING_TEXT after the attested-cloud sentence and before the not-accreditation block, and the interim sentence is gone', () => {
+  const section = sectionOf(SECURITY, LABELS_HEADING);
+  const words = flat(section);
+  const attested = words.indexOf(flat('**Attested cloud in this version.** Levels whose tier is attested-cloud'));
+  const binding = words.indexOf(flat(CONNECTION_BINDING_TEXT));
+  const block = words.indexOf(flat(LABELS_NOT_ACCREDITATION_TEXT));
+  assert.ok(attested >= 0, 'the attested-cloud sentence');
+  assert.ok(binding > attested, 'CONNECTION_BINDING_TEXT word for word, after it');
+  assert.ok(block > binding, 'and before LABELS_NOT_ACCREDITATION_TEXT');
+  assert.equal(flat(SECURITY).includes('This version cannot prove that yet'), false, 'the interim sentence is gone');
+  assert.equal(flat(SECURITY).includes('stays on this computer for now'), false);
+  for (const phrase of [
+    'NEAR AI Cloud\'s attestation names the key of the certificate its endpoint serves, so from this release content at these levels can reach a private NEAR AI Cloud model again, whenever that check passes.',
+    'nothing more at these levels is sent to NEAR AI Cloud from that chat until **Check again** under that answer passes; a new chat or a window reload also starts without the stop, and the failure stays in the decision log.',
+    'A check that cannot be made, for example offline, changes nothing.',
+    'Behind a proxy that inspects encrypted traffic, the connection cannot be proven, so content at these levels stays on this computer.'
+  ]) assert.ok(words.includes(flat(phrase)), phrase);
+  assert.ok(!section.includes(EM_DASH));
+  assert.doesNotMatch(section, /NEAR organization/);
+  assert.doesNotMatch(section, /Phase \d/);
+});
+
+test('Checking a response\'s signature says answers at attested-cloud levels are checked automatically, and Known limitations has both rows', () => {
+  const signature = flat(sectionOf(SECURITY, '### Checking a response\'s signature'));
+  assert.ok(signature.includes(flat('is checked this way automatically, in the background, after it arrives')));
+  assert.ok(signature.includes(flat('A failed check shows **Check again**, which always fetches a fresh report.')));
+  const limits = sectionOf(SECURITY, '## Known limitations');
+  assert.ok(limits.includes('The check of an answer\'s attestation and signature runs after the answer, so it cannot stop that answer\'s request; a failed check stops the next ones.'));
+  assert.ok(limits.includes('The check that a connection ends inside the enclave relies on NEAR AI Cloud\'s attestation and Intel\'s root of trust. Like the answer check, it does not check the platform\'s TCB status, certificate revocation or which code the enclave runs.'));
+  assert.equal(SECURITY.split('relies on NEAR AI Cloud\'s attestation and Intel\'s root of trust').length - 1, 1);
+  assert.ok(!limits.includes(EM_DASH));
 });

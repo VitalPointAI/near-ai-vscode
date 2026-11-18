@@ -260,8 +260,14 @@ export type BindingRefusalCause = 'not-bound' | 'unavailable' | 'unknown';
 export const BINDING_REFUSALS: Readonly<Record<BindingRefusalCause, string>> = Object.freeze({
   'not-bound': 'Nothing was sent. The connection to NEAR AI Cloud could not be proven to end inside its private hardware, so content at this level stays on this computer.',
   unavailable: 'Nothing was sent. The check that the connection to NEAR AI Cloud ends inside its private hardware could not be made, so content at this level stays on this computer.',
-  unknown: 'Nothing was sent. There is no recent proof that the connection to NEAR AI Cloud ends inside its private hardware, so content at this level stays on this computer.'
+  unknown: 'Nothing was sent. There is no recent proof that the connection to NEAR AI Cloud ends inside its private hardware. NEAR AI checks the connection in the background, so try again in a moment; until then, content at this level stays on this computer.'
 });
+
+/**
+ * What the connection check for attested-cloud levels proves (CLAS-05 as the owner amplified it, CLAS-07). SECURITY.md carries it word for word, and a test
+ * keeps the two equal.
+ */
+export const CONNECTION_BINDING_TEXT = 'Content at a level that needs an attested cloud goes to NEAR AI Cloud only when NEAR AI Cloud\'s attestation shows that the connection ends inside the private enclave: the enclave\'s attestation must name the certificate the server presents, and the connection that carries your request must present that certificate. When this cannot be shown, content at those levels stays on this computer, and a request with no model on this computer is refused.';
 
 /** The facts of one request that routing can know before sending, none of them a network call (D-36). */
 export interface RouteFacts {
@@ -314,7 +320,7 @@ export const ROUTE_REFUSALS: Readonly<Record<RefusingRouteRule, string>> = Objec
   'route.no-local-model': 'Nothing was sent. This chat has read content that may only go to a model running on this computer, and the model for this request is not one. Add a local model and run again, or, if what this chat read allows it, use NEAR AI: Lower This Chat\'s Label.',
   'route.local-host-not-local': 'Nothing was sent. Your local runtime points at a host that is not on this computer and that your organization has not named as local, so it cannot count as local. Point the runtime at this computer, ask your organization to name the host as local, or use NEAR AI: Lower This Chat\'s Label if what this chat read allows it.',
   'route.not-tee': 'Nothing was sent. This chat has read content that may only go to a model running in private hardware on NEAR AI Cloud\'s own endpoint, and this model or endpoint is not confirmed to do that. Choose a private model on NEAR AI Cloud or a local model, or use NEAR AI: Lower This Chat\'s Label if what this chat read allows it.',
-  'route.attestation-failed': 'Nothing was sent. The private hardware check on NEAR AI Cloud failed earlier in this session, so its models cannot count as private now. Switch to a local model, or try again in a new session.',
+  'route.attestation-failed': 'Nothing was sent. The private hardware check of an earlier answer in this chat failed, so NEAR AI Cloud\'s models cannot count as private for this chat now. Use Check again under that answer, or switch to a local model.',
   'route.no-session': 'Nothing was sent. This request did not say which route it uses, so no model can be confirmed private. Start the run again from the chat, or choose a local model.',
   'route.connection-not-bound': 'Nothing was sent. Content at this level may go to NEAR AI Cloud only over a connection proven to end inside its private hardware, and this connection is not proven, so it stays on this computer. Choose a local model for this chat, or use NEAR AI: Lower This Chat\'s Label if what it read allows it.'
 });
