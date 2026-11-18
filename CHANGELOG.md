@@ -21,6 +21,14 @@
   for compilation risk, which asks a person and never clears anything. The tools read and write
   only those files and the project's staff settings, reach no network, and accept exercise labels
   only (org/Internal, NATO Unclassified or Protected A at most).
+- **An exercise scenario for staff teams.** **NEAR AI: Load Staff Exercise Scenario** loads
+  Exercise IRON LANTERN, a fictional and unclassified starter scenario (a peninsula, a coast and
+  a strait; friendly and adversary orders of battle; a mission with the higher commander's intent;
+  graded and ungraded reports), or a scenario file of your own, into `.planning/staff/scenario/`.
+  Files with classification markings, names on your real-entity list or stray coordinates are
+  refused, and an earlier scenario is archived rather than deleted. J2 and J5 demo scripts in your
+  staff profile's terms are written beside it, each with the headings, terms and citations its
+  products must contain.
 
 ## 0.4.33
 

@@ -17,3 +17,7 @@ export * from './registers';
 export * from './releaseGuard';
 export * from './tradecraftLint';
 export * from './wargame';
+// WP-DEMO: the scenario reader, acceptance fixtures and demo scripts.
+export * from './scenario';
+export * from './acceptance';
+export * from './demoScripts';

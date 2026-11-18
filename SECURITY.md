@@ -744,6 +744,24 @@ must ask before changing; the real-entity list can also be in
 file, so review changes to it. Staff templates are for exercise and fictional
 data only: labels are not accreditation.
 
+### Exercise scenarios for staff teams
+
+**NEAR AI: Load Staff Exercise Scenario** reads the starter scenario shipped
+with the extension, or a scenario file you pick, and writes it into
+`.planning/staff/scenario/`. Before anything is written, the whole file is
+read strictly: it must be at most 512 KB of JSON in the staff scenario format,
+marked `fictional: true` with an UNCLASSIFIED and EXERCISE marking, with no
+unknown fields and every reference resolved. A scenario is refused if any of
+its text carries a classification or caveat marking (for example SECRET,
+CONFIDENTIAL, NATO RESTRICTED, PROTECTED B, CUI, NOFORN, EYES ONLY or REL TO),
+names an entry on the project's `.planning/staff/real-entities.txt` list, or
+carries coordinates on a fictional grid or outside a declared exercise box. A
+refused file writes nothing. An earlier scenario is moved to
+`.planning/staff/archive/<time>/`, never deleted, and nothing is written when
+a folder on the way is a symbolic link. These checks keep the inputs clean;
+they are not an accreditation, and real operational material belongs on
+accredited systems.
+
 ## The outbound check
 
 Every chat message passes one check before it leaves VS Code, in this order:
