@@ -321,6 +321,8 @@ function registerPolicySurfaces(context: GateActivationContext, host: GateHost, 
 
 export const LOWER_CHAT_LABEL_COMMAND = 'nearAi.label.lowerChat';
 export const NO_CHAT_IN_VIEW_TEXT = "Nothing was changed: open the chat whose label you want to lower in the NEAR AI chat view first.";
+/** Said for a chat in view that has not run yet: it has no label of its own, and its first run starts at the project's label (PR #87 review). */
+export const CHAT_NOT_RUN_TEXT = "Nothing was changed: this chat has not run yet, so it has no label of its own. Its first run starts at the project's label, and a chat is never lowered below its project.";
 export const NOTHING_LOWER_TEXT = "Nothing was changed: this chat's label is already the project's label, and a chat is never lowered below its project.";
 export const LOWERING_NOT_SIGNED_TEXT = "This chat's label was lowered on this computer, but NEAR AI could not sign the lowering, so it will not reach your other computers: they keep the higher label.";
 /** Said with every lowering: other computers cannot check this computer's key yet (owner answer, verified devices come later), so they keep the higher label. */
@@ -372,7 +374,7 @@ export function lowerChoices(mark: Mark, project: Mark, scales: Parameters<typeo
 export async function lowerChatLabel(host: GateHost, chat: ChatInView | undefined = chatInView()): Promise<boolean> {
   const mark = chat?.mark();
   if (chat === undefined || mark === undefined) {
-    void Promise.resolve(vscode.window.showInformationMessage(NO_CHAT_IN_VIEW_TEXT)).catch(() => undefined);
+    void Promise.resolve(vscode.window.showInformationMessage(chat === undefined ? NO_CHAT_IN_VIEW_TEXT : CHAT_NOT_RUN_TEXT)).catch(() => undefined);
     return false;
   }
   await host.state();
@@ -403,7 +405,8 @@ export async function lowerChatLabel(host: GateHost, chat: ChatInView | undefine
   chat.prepareLowering(signed ?? true);
   const before = mark.lowerByPerson(picked.mark, reason);
   if (signed === undefined) void Promise.resolve(vscode.window.showWarningMessage(LOWERING_NOT_SIGNED_TEXT)).catch(() => undefined);
-  host.recordLabelEvent(chat.root, { event: 'label.declassify', path: `chat ${chat.id}`, label: picked.mark[0]!, mark: picked.mark, from: before, reason: `Lowered from ${labelsShown(before)} to ${labelsShown(picked.mark)}: ${reason}` });
+  // The record's label is the strictest label of the new mark, as every label event's is (recordLabelEvent works it out from the mark).
+  host.recordLabelEvent(chat.root, { event: 'label.declassify', path: `chat ${chat.id}`, mark: picked.mark, from: before, reason: `Lowered from ${labelsShown(before)} to ${labelsShown(picked.mark)}: ${reason}` });
   void Promise.resolve(vscode.window.showInformationMessage(`${`This chat's label is now ${labelsShown(picked.mark)}.`} ${LOWERED_HERE_ONLY_TEXT}`)).catch(() => undefined);
   return true;
 }

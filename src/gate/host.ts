@@ -23,7 +23,7 @@ import { SHIPPED_DEFAULT_LABEL } from '../domain/gate/bundle';
 import { labelMapKey, moveLabelEntry, resolveLabel, setLabelEntry } from '../domain/gate/labelMap';
 import { joinLabels, raiseMark, sameMark } from '../domain/gate/dominance';
 import type { Mark } from '../domain/gate/dominance';
-import { DEFAULT_ROUTING, TIER_ORDER, tierForLabel } from '../domain/gate/routing';
+import { DEFAULT_ROUTING, TIER_ORDER, strictestLabelOf, tierForLabel } from '../domain/gate/routing';
 import type { RoutingTable } from '../domain/gate/routing';
 import type { LabelMapPayload } from '../domain/gate/labelMap';
 import { SCALE_PRESETS } from '../domain/gate/labels';
@@ -113,6 +113,11 @@ export interface GateHostOptions {
 
 /** Thrown inside the writer when, under its lock, nothing would rise: nothing is written. */
 const NOTHING_TO_RAISE = 'Nothing was written: no label would rise.';
+/** The most signed lowerings a window remembers having recorded (the oldest forgotten first; one forgotten is at worst recorded again). */
+export const JUDGED_LOWERINGS_KEPT = 1_000;
+/** The most projects, and paths per project, whose refused raises are kept for Sign Again. */
+export const REFUSED_RAISE_PROJECTS = 32;
+export const REFUSED_RAISE_PATHS = 2_000;
 
 /** Said once when a raise a labelled chat's write needs cannot be written automatically. */
 export const LABEL_RAISE_REFUSED_TEXT =
@@ -154,9 +159,12 @@ export class GateHost {
   private readonly toldLabelProblems = new Set<string>();
   /** The key sources signed chat lowerings are checked against (D-58): this install's key history, loaded by refreshLoweringKeys. */
   private loweringKeys: KeyStatusLookup = NO_KNOWN_KEYS;
-  /** Signed lowerings already recorded this window, by signature, so each is recorded and said once. */
+  /** Signed lowerings already recorded this window, by signature, so each is recorded and said once: the newest JUDGED_LOWERINGS_KEPT (PR #87 review). */
   private readonly judgedLowerings = new Set<string>();
-  /** Raises an automatic write could not make (an unverified label file), by project, kept for Sign Again. */
+  /**
+   * Raises an automatic write could not make (an unverified label file), by project, kept for Sign Again: at most REFUSED_RAISE_PROJECTS projects of at most
+   * REFUSED_RAISE_PATHS paths each, each path's labels joined rather than appended, so a long session cannot grow it without bound (PR #87 review).
+   */
   private readonly refusedRaises = new Map<string, Map<string, Label[]>>();
 
   public constructor(private readonly options: GateHostOptions) {}
@@ -344,8 +352,12 @@ export class GateHost {
         rule: event.event,
         ...(event.reason === undefined || event.reason === '' ? {} : { reason: event.reason.slice(0, 500) }),
         bundleHash: this.current.state === 'valid' ? this.current.hash : '',
-        ...(event.label === undefined ? {} : { label: event.label }),
-        // One shape for every label event (PR #87 review round 3): `label` the target, `mark` the chat's mark after the event, `from` the mark before it.
+        // One shape for every label event (PR #87 review round 3): `label` the target, `mark` the chat's mark after the event, `from` the mark before it. With a
+        // mark, the target is always the mark's strictest label, whoever records it (PR #87 review), as label.mark-raised records it.
+        ...((): { label?: Label } => {
+          const target = event.mark !== undefined && event.mark.length > 0 ? strictestLabelOf(event.mark, this.routingNow()) : event.label;
+          return target === undefined ? {} : { label: target };
+        })(),
         ...(event.mark === undefined || event.mark.length === 0 ? {} : { mark: event.mark }),
         ...(event.from === undefined || event.from.length === 0 ? {} : { from: event.from })
       });
@@ -382,14 +394,9 @@ export class GateHost {
       }
       return out;
     };
-    // A cheap look first, at the labels as last read: when nothing would rise, the writer is not asked at all, so a chat at the default mark never touches
-    // labels.json and an unverified map is not reported for nothing. The look decides only whether to ask; what is written is worked out under the lock.
-    const view = await this.labelsFor(root).view(policy.scales);
-    const mightRise = [...proposed].some(([key, mark]) => {
-      const current = view.resolve(key, policy.defaultLabel);
-      return raisedEntryLabel(current.origin === 'default' ? [] : current.mark, mark, policy.scales, routing) !== undefined;
-    });
-    if (!mightRise) return false;
+    // Whether anything rises is decided only under the writer's lock, against the map it reads there (PR #87 review): a view read before the lock may be
+    // stale, so it never decides that nothing rises. When nothing rises there, nothing is written. (A chat at the default mark queues no raises at all.)
+    if (proposed.size === 0) return false;
     try {
       await this.changeLabels(root, (map) => {
         let out = map;
@@ -399,11 +406,19 @@ export class GateHost {
       });
     } catch (error) {
       if (error instanceof LabelMapError && error.message === NOTHING_TO_RAISE) return false;
-      const kept = this.refusedRaises.get(projectLogKey(root)) ?? new Map<string, Label[]>();
-      for (const [relative, mark] of raises) kept.set(relative, [...(kept.get(relative) ?? []), ...mark]);
-      this.refusedRaises.set(projectLogKey(root), kept);
+      this.keepRefusedRaises(projectLogKey(root), raises);
+      // The person is told only when the labels as last read say something would rise; the raises are kept for Sign Again either way, which works them out
+      // under the lock again.
+      let worthTelling = true;
+      try {
+        const view = await this.labelsFor(root).view(policy.scales);
+        worthTelling = [...proposed].some(([key, mark]) => {
+          const current = view.resolve(key, policy.defaultLabel);
+          return raisedEntryLabel(current.origin === 'default' ? [] : current.mark, mark, policy.scales, routing) !== undefined;
+        });
+      } catch { /* a view that cannot be read: tell */ }
       const told = `raise-refused:${projectLogKey(root)}`;
-      if (!this.toldLabelProblems.has(told)) {
+      if (worthTelling && !this.toldLabelProblems.has(told)) {
         this.toldLabelProblems.add(told);
         const message = error instanceof LabelMapError ? `${LABEL_RAISE_REFUSED_TEXT} ${error.message}` : LABEL_RAISE_REFUSED_TEXT;
         try {
@@ -415,6 +430,22 @@ export class GateHost {
     }
     for (const [key, entry] of raised) this.recordLabelEvent(root, { event: 'label.set', path: key, label: entry.label, ...(entry.from.length === 0 ? {} : { from: entry.from }), reason: 'A file a labelled chat wrote took the chat\'s label.' });
     return true;
+  }
+
+  /** Keeps refused raises for Sign Again, bounded: each path's labels joined (never appended), the oldest project and path dropped first. */
+  private keepRefusedRaises(project: string, raises: ReadonlyMap<string, readonly Label[]>): void {
+    const kept = this.refusedRaises.get(project) ?? new Map<string, Label[]>();
+    this.refusedRaises.delete(project);
+    for (const [relative, mark] of raises) {
+      let joined: Mark = kept.get(relative) ?? [];
+      const scales = this.labelPolicy().scales;
+      for (const label of mark) joined = raiseMark(joined, label, scales);
+      kept.delete(relative);
+      kept.set(relative, [...joined]);
+      while (kept.size > REFUSED_RAISE_PATHS) kept.delete(kept.keys().next().value as string);
+    }
+    this.refusedRaises.set(project, kept);
+    while (this.refusedRaises.size > REFUSED_RAISE_PROJECTS) this.refusedRaises.delete(this.refusedRaises.keys().next().value as string);
   }
 
   /**
@@ -447,12 +478,13 @@ export class GateHost {
       const key = `${outcome.chatId}:${typeof sig === 'string' ? sig : JSON.stringify(outcome.lowering ?? null).slice(0, 200)}`;
       if (this.judgedLowerings.has(key)) return;
       this.judgedLowerings.add(key);
+      while (this.judgedLowerings.size > JUDGED_LOWERINGS_KEPT) this.judgedLowerings.delete(this.judgedLowerings.values().next().value as string);
       const root = this.projectRootNow() ?? '';
       const payload = (outcome.lowering as { payload?: Partial<ChatLowering> } | null)?.payload;
       if (outcome.applied) {
         // The record names the label the merge put the chat at (the same result, so record and state agree), not a value read from either copy.
         if (outcome.result === undefined || outcome.result.length === 0) return;
-        this.recordLabelEvent(root, { event: 'label.declassify', path: `chat ${outcome.chatId}`, label: outcome.result[0]!, mark: outcome.result, ...(outcome.from === undefined ? {} : { from: outcome.from }), reason: `Lowered on another copy of this chat: ${typeof payload?.reason === 'string' ? payload.reason : 'no reason given'}` });
+        this.recordLabelEvent(root, { event: 'label.declassify', path: `chat ${outcome.chatId}`, mark: outcome.result, ...(outcome.from === undefined ? {} : { from: outcome.from }), reason: `Lowered on another copy of this chat: ${typeof payload?.reason === 'string' ? payload.reason : 'no reason given'}` });
         return;
       }
       const sentence = loweringRejectedText(outcome.cause ?? 'does-not-verify');

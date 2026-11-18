@@ -223,7 +223,8 @@ test('a chat raised to Restricted by a read, with no local model, is refused wit
 });
 
 test('each refusal at a strict label, and label.network-at-mark, names Lower This Chat\'s Label, and none says to start a new chat', () => {
-  for (const rule of ['route.deny', 'route.no-local-model', 'route.local-host-not-local', 'route.not-tee', 'route.connection-not-bound'] as const) {
+  // PR #87 review: route.attestation-failed and route.no-session name it too, as SECURITY.md says every refusal at a strict label does.
+  for (const rule of ['route.deny', 'route.no-local-model', 'route.local-host-not-local', 'route.not-tee', 'route.connection-not-bound', 'route.attestation-failed', 'route.no-session'] as const) {
     assert.ok(ROUTE_REFUSALS[rule].includes(LOWER), rule);
     assert.ok(!/start a new chat/i.test(ROUTE_REFUSALS[rule]), rule);
   }

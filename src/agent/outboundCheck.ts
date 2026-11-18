@@ -27,11 +27,12 @@ export function outboundWords(text: string): string[] {
   return out;
 }
 
-/** Two 32-bit FNV-1a hashes with different seeds, folded into one safe integer: no string of the text is kept. */
-function hashWords(words: readonly string[]): number {
+/** Two 32-bit FNV-1a hashes with different seeds, folded into one safe integer, over words[start, end): no string of the text is kept. */
+function hashWords(words: readonly string[], start = 0, end = words.length): number {
   let a = 0x811c9dc5;
   let b = 0x01000193 ^ 0x5bd1e995;
-  for (const word of words) {
+  for (let at = start; at < end; at += 1) {
+    const word = words[at]!;
     for (let index = 0; index < word.length; index += 1) {
       const code = word.charCodeAt(index);
       a = Math.imul(a ^ code, 0x01000193) >>> 0;
@@ -102,7 +103,7 @@ export class OutboundFingerprints {
       if (words.length >= SHORT_TEXT_MIN_WORDS) { this.keep(set, hashWords(words)); this.#shortLengths.add(words.length); }
       return;
     }
-    for (let start = 0; start + OUTBOUND_WINDOW_WORDS <= words.length && !this.#full; start += 1) this.keep(set, hashWords(words.slice(start, start + OUTBOUND_WINDOW_WORDS)));
+    for (let start = 0; start + OUTBOUND_WINDOW_WORDS <= words.length && !this.#full; start += 1) this.keep(set, hashWords(words, start, start + OUTBOUND_WINDOW_WORDS));
   }
 
   /**
@@ -114,22 +115,30 @@ export class OutboundFingerprints {
   }
 
   /**
-   * Which fingerprints a payload carries: `labelled` (text read as labelled in this window, a full set or a payload too long to read whole), `earlier` (an
-   * earlier result of a reopened chat only), or undefined.
+   * Which fingerprints a payload carries: `labelled` (text read as labelled in this window, or a full set), `earlier` (an earlier result of a reopened chat
+   * only), `unreadable` (a payload too long to read whole, which counts as a match: fail closed), or undefined. Each string is checked on its own and the whole payload joined in order, so a window split across
+   * two arguments is caught too (PR #87 review). Each text is split into words once; the windows of every size slide over those words.
    */
-  public match(payload: readonly string[]): 'labelled' | 'earlier' | undefined {
+  public match(payload: readonly string[]): 'labelled' | 'earlier' | 'unreadable' | undefined {
     if (this.#full) return 'labelled';
     if (this.#hashes.size === 0 && this.#earlier.size === 0) return undefined;
     let chars = 0;
-    let earlier = false;
-    const sizes = [OUTBOUND_WINDOW_WORDS, ...this.#shortLengths];
+    const lists: string[][] = [];
+    const joined: string[] = [];
     for (const text of payload) {
       chars += text.length;
-      if (chars > MAX_OUTBOUND_PAYLOAD_CHARS) return 'labelled';
+      if (chars > MAX_OUTBOUND_PAYLOAD_CHARS) return 'unreadable';
       const words = outboundWords(text);
+      lists.push(words);
+      for (const word of words) joined.push(word);
+    }
+    if (lists.length > 1) lists.push(joined);
+    const sizes = [OUTBOUND_WINDOW_WORDS, ...this.#shortLengths];
+    let earlier = false;
+    for (const words of lists) {
       for (const size of sizes) {
         for (let start = 0; start + size <= words.length; start += 1) {
-          const hash = hashWords(words.slice(start, start + size));
+          const hash = hashWords(words, start, start + size);
           if (this.#hashes.has(hash)) return 'labelled';
           if (this.#earlier.has(hash)) earlier = true;
         }
@@ -149,14 +158,17 @@ export class OutboundFingerprints {
   }
 }
 
-/** Every string inside a value, in order (object keys included, since an add-on server's arguments can carry text in either). */
-function stringsOf(value: unknown, out: string[], depth = 0): void {
+/**
+ * Every string inside a value: the values in order, then the object keys (an add-on server's arguments can carry text in either). The keys come last so
+ * that consecutive values stay next to each other, where the joined check sees a window split across two arguments.
+ */
+function stringsOf(value: unknown, out: string[], keys: string[], depth = 0): void {
   if (depth > 32) throw new RangeError('The payload is nested too deeply to read.');
   if (typeof value === 'string') { out.push(value); return; }
   if (typeof value === 'number' || typeof value === 'boolean' || value === null || value === undefined) return;
-  if (Array.isArray(value)) { for (const item of value) stringsOf(item, out, depth + 1); return; }
+  if (Array.isArray(value)) { for (const item of value) stringsOf(item, out, keys, depth + 1); return; }
   if (typeof value === 'object') {
-    for (const [key, item] of Object.entries(value as Record<string, unknown>)) { out.push(key); stringsOf(item, out, depth + 1); }
+    for (const [key, item] of Object.entries(value as Record<string, unknown>)) { keys.push(key); stringsOf(item, out, keys, depth + 1); }
     return;
   }
   throw new RangeError('The payload holds a value that cannot be read.');
@@ -177,8 +189,10 @@ function decoded(text: string): string {
  */
 export function outboundPayload(raw: Record<string, unknown>, command?: string): string[] {
   const strings: string[] = [];
-  stringsOf(raw, strings);
+  const keys: string[] = [];
+  stringsOf(raw, strings, keys);
   if (command !== undefined) strings.push(command);
+  strings.push(...keys);
   const out: string[] = [];
   for (const text of strings) {
     out.push(text);

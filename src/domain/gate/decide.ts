@@ -34,7 +34,17 @@ export interface LabelVerdict {
   readonly reason: string;
   /** The label that decided it, for the record; absent when no single label did (a label file that cannot be read). */
   readonly label?: Label;
+  /** For label.outbound-match: which of its refusals this is, so the record tells a real match from a check that could not be made (PR #87 review). */
+  readonly outboundCause?: OutboundCause;
 }
+
+/**
+ * Why label.outbound-match refused (D-60, D-72): text it carries was read as labelled (`match`) or is an earlier result of a reopened chat (`earlier`); the
+ * run has no fingerprint set (`unchecked`); a labelled read is still open (`pending`); the set is full (`full`); the payload cannot be read (`unreadable`);
+ * or the call reads labelled content and may send in the same step (`reads-and-sends`).
+ */
+export const OUTBOUND_CAUSES = Object.freeze(['match', 'earlier', 'unchecked', 'pending', 'full', 'unreadable', 'reads-and-sends'] as const);
+export type OutboundCause = (typeof OUTBOUND_CAUSES)[number];
 
 export interface GateRequest extends FloorInput {
   readonly actor: ActorRef;

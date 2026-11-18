@@ -8,7 +8,7 @@ import test from 'node:test';
 import { DEFAULT_RULES } from '../agent/permissions';
 import type { Label } from '../domain/gate/labels';
 import { providerErrorMessage } from '../services/chatBridge';
-import { AgentConversation, UNREADABLE_CHAT_LABEL_TEXT } from '../services/agentSession';
+import { AgentConversation, LOWERING_OVERTAKEN_TEXT, UNREADABLE_CHAT_LABEL_TEXT } from '../services/agentSession';
 import { RouteRefusedError } from '../services/nearAiClient';
 import { stateHomeFor } from '../services/stateHome';
 import { stateKeysFor } from '../services/stateKeys';
@@ -501,4 +501,94 @@ test('review 5.2: a copy holding one valid and one invalid fresh lowering applie
   assert.equal(records.filter((record) => rule(record) === 'label.declassify').length, 1);
   assert.equal(records.filter((record) => rule(record) === 'label.declassify-rejected').length, 1);
   assert.deepEqual(records.find((record) => rule(record) === 'label.declassify')?.unmapped.nearAi.mark?.map((each) => each.level), ['Public'], 'the record matches the state');
+});
+
+// ---- PR #87 review, last rounds (fixed in PR 4d) ----
+
+test('review 4.1: a verified signed lowering whose target is not below its from-mark, or is below the project\'s label, is not applied', async () => {
+  const identity = await signerOf();
+  const keys = ACTIVE_FOR(identity.fingerprint);
+  // A target equal to (or above) its from-mark is not a lowering, however it verifies.
+  const notLower = judged(keys, () => both(...copies(lowered(identity, [CONFIDENTIAL], [CONFIDENTIAL, label('ca-protected', 'Protected A')]), [CONFIDENTIAL])));
+  assert.deepEqual([...new Set(notLower.outcomes.map((each) => each.cause))], ['not-lower']);
+  // Below the project's label as this computer last ran the chat at: refused; at it: applied.
+  const { noteChatProjectMark } = await import('../domain/gate/lowerings');
+  noteChatProjectMark(CHAT, [label('org', 'Internal')]);
+  try {
+    const below = judged(keys, () => both(...copies(lowered(identity, [RESTRICTED], [PUBLIC]), [RESTRICTED])));
+    for (const merged of below.result) assert.deepEqual(markOf(merged), ['org/Restricted']);
+    assert.deepEqual([...new Set(below.outcomes.map((each) => each.cause))], ['below-project']);
+    const at = judged(keys, () => both(meta(CHAT, LATER, { mark: [label('org', 'Internal')], lowerings: [lowered(identity, [RESTRICTED], [label('org', 'Internal')])] }), meta(CHAT, T0, { mark: [RESTRICTED] })));
+    for (const merged of at.result) assert.deepEqual(markOf(merged), ['org/Internal']);
+  } finally {
+    noteChatProjectMark(CHAT, []);
+  }
+});
+
+test('review 4.2: times are compared as times: a use 500 ms before the signing is not after it, and a time that cannot be read refuses the lowering', async () => {
+  const identity = await signerOf();
+  const keys = ACTIVE_FOR(identity.fingerprint);
+  const signedAt = '2026-11-17T11:00:00.500Z';
+  const lowering = signChatLowering(identity, { chatId: CHAT, from: [RESTRICTED], to: [PUBLIC], reason: 'reviewed', at: signedAt });
+  // As text, "…11:00:00Z" sorts after "…11:00:00.500Z" ('Z' > '.'), which read the earlier use as later. As times it is earlier.
+  const earlierUse = judged(keys, () => both(...copies(lowering, [RESTRICTED], '2026-11-17T11:00:00Z')));
+  for (const merged of earlierUse.result) assert.deepEqual(markOf(merged), ['org/Public']);
+  const unreadable = judged(keys, () => both(...copies(lowering, [RESTRICTED], 'not a time')));
+  for (const merged of unreadable.result) assert.deepEqual(markOf(merged), ['org/Restricted']);
+  assert.deepEqual([...new Set(unreadable.outcomes.map((each) => each.cause))], ['unreadable-time']);
+});
+
+test('review 4.6: the person\'s lowering records the strictest label of the new mark, and a chat in view that has not run yet gets its own sentence', async () => {
+  const root = realpathSync(mkdtempSync(path.join(tmpdir(), 'near-ai-chat-label-strictest-')));
+  const { host, storage } = await labelHost(root);
+  // Lowered to Public on the org scale while Protected B stays: the record's label is Protected B (local-only), not the first label of the mark.
+  const chat = viewOf(root, [RESTRICTED, label('ca-protected', 'Protected B')], 'conv-strictest-1');
+  resetUi();
+  stub.quickPickAnswers.push('org/Public, ca-protected/Protected B');
+  stub.inputAnswers.push('reviewed');
+  assert.equal(await gateCommands.lowerChatLabel(host, chat), true);
+  const record = (await recordsOf(host, storage, root)).find((each) => each.authorizations[0]?.policy.name === 'label.declassify');
+  assert.equal(record?.unmapped.nearAi.label?.level, 'Protected B');
+  resetUi();
+  const notRun: ChatInView = { id: 'conv-not-run-1', root, mark: () => undefined, defaultLabel: () => SHIPPED_DEFAULT_LABEL, prepareLowering: () => undefined };
+  assert.equal(await gateCommands.lowerChatLabel(host, notRun), false);
+  assert.ok(stub.notifications.some((entry) => entry.message === gateCommands.CHAT_NOT_RUN_TEXT));
+  assert.ok(!stub.notifications.some((entry) => entry.message === gateCommands.NO_CHAT_IN_VIEW_TEXT));
+});
+
+test('review 4.7: a lowering saved after a sync raised the stored label above its from-mark keeps the higher label, and the chat is raised and told', async () => {
+  const root = labelledProject();
+  const store = storeFor(root);
+  const posts: Array<Record<string, unknown>> = [];
+  const conversation = await chatIn(root, store, posts);
+  await conversation.send(request([call('r1', 'Read', { file_path: 'conf.md' })]));
+  assert.deepEqual(keys(conversation.mark!.current()), ['org/Confidential']);
+  // A sync raises the stored label to Restricted while the person is choosing.
+  await store.setChatLabel(conversation.id, [RESTRICTED]);
+  conversation.prepareLowering(true);
+  conversation.mark!.lowerByPerson([PUBLIC], 'reviewed');
+  for (let wait = 0; wait < 50 && !posts.some((post) => post.type === 'notice' && post.text === LOWERING_OVERTAKEN_TEXT); wait += 1) await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.deepEqual(markOf((await store.meta(conversation.id))!), ['org/Restricted'], 'the raise is kept');
+  assert.deepEqual(keys(conversation.mark!.current()), ['org/Restricted'], 'the chat is raised to it');
+  assert.ok(posts.some((post) => post.type === 'notice' && post.text === LOWERING_OVERTAKEN_TEXT));
+  // Without a raise meanwhile the lowering is saved as it was made.
+  assert.equal(await store.setChatLabel(conversation.id, [PUBLIC], true, [RESTRICTED]), 'saved');
+  assert.deepEqual(markOf((await store.meta(conversation.id))!), ['org/Public']);
+});
+
+test('review 4.9: an unsigned lowering survives a reload: the reopened chat starts at the lowered label', async () => {
+  const root = labelledProject();
+  const store = storeFor(root);
+  const conversation = await chatIn(root, store);
+  await conversation.send(request([call('r1', 'Read', { file_path: 'docs/plan.md' })]));
+  assert.deepEqual(keys(conversation.mark!.current()), ['org/Restricted']);
+  // This install could not sign the lowering (`true`), so it is kept on this computer only.
+  conversation.prepareLowering(true);
+  conversation.mark!.lowerByPerson([label('org', 'Internal')], 'reviewed');
+  for (let wait = 0; wait < 50 && markOf((await store.meta(conversation.id))!).join() !== 'org/Internal'; wait += 1) await new Promise((resolve) => setTimeout(resolve, 10));
+  const id = conversation.id;
+  // A window reload: a new conversation over a new store on the same project opens the chat again.
+  const reopened = await chatIn(root, storeFor(root));
+  await reopened.restore(id);
+  assert.deepEqual(keys(reopened.mark!.current()), ['org/Internal']);
 });

@@ -27,7 +27,7 @@ import type { LabelVerdict } from '../domain/gate/decide';
 import { SessionMark } from '../domain/gate/dominance';
 import type { Mark } from '../domain/gate/dominance';
 import type { Label } from '../domain/gate/labels';
-import { routingWhileFailedClosed, tierForLabel, tierForMark } from '../domain/gate/routing';
+import { routingWhileFailedClosed, strictestLabelOf, tierForLabel, tierForMark } from '../domain/gate/routing';
 import type { RoutingTable, RoutingTier } from '../domain/gate/routing';
 import { isDefaultMark } from '../gate/sessionMark';
 import type { CommandContext, CommandEffect, PackageScriptsAt } from './commandSafety';
@@ -631,8 +631,9 @@ function recordFor(runtime: GateRuntime, gated: GatedCall, outcome: DecisionOutc
   const capability = gated.effects[0] ?? WIDEST_SHORTHAND('plan')[0] as Capability;
   const folders = { ...(gated.request.workspace === undefined ? {} : { project: gated.request.workspace.root }), ...(runtime.locations?.home === undefined ? {} : { home: runtime.locations.home }) };
   const reason = givenReason === undefined ? undefined : withoutMachinePaths(givenReason, folders);
-  // A refusal for labelled text in the payload names the tool only, never the command or address that carried the text (D-60).
-  const given = rule === 'label.outbound-match' ? { name: shownName(gated.request.tool), type: 'tool' } : gated.resource ?? resourceOf(gated.request.tool, gated.effects, gated.request.command);
+  // A refusal at a mark (labelled text in the payload, or a call that may send at a local-only mark) names the tool only, never the command or address that
+  // could carry labelled words (D-60, PR #87 review).
+  const given = rule === 'label.outbound-match' || rule === 'label.network-at-mark' ? { name: shownName(gated.request.tool), type: 'tool' } : gated.resource ?? resourceOf(gated.request.tool, gated.effects, gated.request.command);
   const resource = { ...given, name: withoutMachinePaths(given.name, folders) };
   return buildDecisionRecord({
     recordId: (runtime.newRecordId ?? randomUUID)(),
@@ -652,6 +653,7 @@ function recordFor(runtime: GateRuntime, gated: GatedCall, outcome: DecisionOutc
     // A refusal for a label names the label that decided it; a failed clearance check is recorded as such (GATE-07).
     ...(rule.startsWith('label.') && gated.request.labelVerdict?.label !== undefined ? { label: gated.request.labelVerdict.label } : {}),
     ...(rule === 'label.dominance' ? { clearanceFailure: true } : {}),
+    ...(rule === 'label.outbound-match' && gated.request.labelVerdict?.outboundCause !== undefined ? { outboundCause: gated.request.labelVerdict.outboundCause } : {}),
     // The session's whole mark while it is above the default label (GATE-07, D-52); at the default label the record says nothing of it.
     ...(gated.mark === undefined ? {} : { mark: gated.mark })
   });
@@ -933,16 +935,7 @@ export function markAboveDefault(runtime: GateRuntime, mark: Mark): boolean {
 
 /** The label of the mark that needs the strictest tier: the one a refusal for the mark names. */
 function strictestLabel(runtime: GateRuntime, mark: Mark): Label | undefined {
-  const { routing } = routingOfRuntime(runtime);
-  const order: Readonly<Record<RoutingTier, number>> = { 'any-cloud': 0, 'attested-cloud': 1, 'local-only': 2, deny: 3 };
-  let best: Label | undefined;
-  let bestTier = -1;
-  for (const label of mark) {
-    let tier: number;
-    try { tier = order[tierForLabel(label, routing)]; } catch { tier = 3; }
-    if (tier > bestTier) { best = label; bestTier = tier; }
-  }
-  return best;
+  return strictestLabelOf(mark, routingOfRuntime(runtime).routing);
 }
 
 /**
@@ -963,23 +956,24 @@ export function markVerdictFor(runtime: GateRuntime, before: Mark | undefined, m
   // A call that itself reads content above any-cloud and may send in the same step: what it reads is not fingerprinted yet, so it is refused (fail closed).
   if (reads.length > 0 && markTierOf(runtime, reads) !== 'any-cloud') {
     const own = strictestLabel(runtime, reads);
-    return { rule: 'label.outbound-match', reason: OUTBOUND_READS_AND_SENDS_TEXT, ...(own === undefined ? {} : { label: own }) };
+    return { rule: 'label.outbound-match', reason: OUTBOUND_READS_AND_SENDS_TEXT, outboundCause: 'reads-and-sends', ...(own === undefined ? {} : { label: own }) };
   }
   // A run with no fingerprint set cannot check what it would send, so at this mark the call is refused (fail closed, PR #87 review).
-  if (outbound === undefined) return { rule: 'label.outbound-match', reason: OUTBOUND_UNCHECKED_TEXT, ...(label === undefined ? {} : { label }) };
+  if (outbound === undefined) return { rule: 'label.outbound-match', reason: OUTBOUND_UNCHECKED_TEXT, outboundCause: 'unchecked', ...(label === undefined ? {} : { label }) };
   // A labelled read is open (begun by the shared hook, not yet fingerprinted): what it read cannot be checked yet, so the call is refused (fail closed).
-  if (outbound.pending > 0) return { rule: 'label.outbound-match', reason: OUTBOUND_UNCHECKED_TEXT, ...(label === undefined ? {} : { label }) };
+  if (outbound.pending > 0) return { rule: 'label.outbound-match', reason: OUTBOUND_UNCHECKED_TEXT, outboundCause: 'pending', ...(label === undefined ? {} : { label }) };
   // Past its bound the set cannot vouch for anything: refused, saying why and what to do (fail closed, owner answer after D-60).
-  if (outbound.full) return { rule: 'label.outbound-match', reason: OUTBOUND_FULL_TEXT, ...(label === undefined ? {} : { label }) };
+  if (outbound.full) return { rule: 'label.outbound-match', reason: OUTBOUND_FULL_TEXT, outboundCause: 'full', ...(label === undefined ? {} : { label }) };
   let texts: readonly string[];
   try {
     texts = payload();
   } catch {
-    return { rule: 'label.outbound-match', reason: OUTBOUND_UNREADABLE_TEXT, ...(label === undefined ? {} : { label }) };
+    return { rule: 'label.outbound-match', reason: OUTBOUND_UNREADABLE_TEXT, outboundCause: 'unreadable', ...(label === undefined ? {} : { label }) };
   }
   const found = outbound.match(texts);
   if (found === undefined) return undefined;
-  return { rule: 'label.outbound-match', reason: found === 'earlier' ? OUTBOUND_EARLIER_TEXT : OUTBOUND_MATCH_TEXT, ...(label === undefined ? {} : { label }) };
+  if (found === 'unreadable') return { rule: 'label.outbound-match', reason: OUTBOUND_UNREADABLE_TEXT, outboundCause: 'unreadable', ...(label === undefined ? {} : { label }) };
+  return { rule: 'label.outbound-match', reason: found === 'earlier' ? OUTBOUND_EARLIER_TEXT : OUTBOUND_MATCH_TEXT, outboundCause: found === 'earlier' ? 'earlier' : 'match', ...(label === undefined ? {} : { label }) };
 }
 
 /** The mark joined with the labels a call reads itself, without changing the run's mark; undefined when there is neither. */

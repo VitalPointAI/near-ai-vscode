@@ -14,9 +14,11 @@ import { OutboundFingerprints } from '../agent/outboundCheck';
 import { SessionMark } from '../domain/gate/dominance';
 import type { Mark } from '../domain/gate/dominance';
 import { SHIPPED_DEFAULT_LABEL } from '../domain/gate/bundle';
+import { SCALE_PRESETS } from '../domain/gate/labels';
 import type { Label } from '../domain/gate/labels';
 import { isDefaultMark } from '../gate/sessionMark';
 import { chatLabelOf } from './threadStore';
+import { noteChatProjectMark } from '../domain/gate/lowerings';
 import type { GateRuntime } from '../domain/gate/decide';
 import { AgentEvent, AgentRun, AgentRunError, ApprovalReply, ApprovalRequest, AWAITING_APPROVAL_PREFIX, DEFAULT_MAX_TURNS, RunInput, RunOutcome, RunResult } from '../agent/loop';
 import { countersOf, runSplitOf } from './activityOverview';
@@ -253,6 +255,10 @@ function privateRefusal(label: string, tier: string | undefined, route: PrivateR
 /** Where a chat whose stored label cannot be read opens: the default scale's highest level, never lower than it was (edge CLAS-04 encoding). */
 export const UNREADABLE_CHAT_LABEL: Label = Object.freeze({ scale: 'org', level: 'Restricted', compartments: [], releasability: [], handling: [] });
 
+/** Said when a lowering was overtaken by a sync that raised the chat's label on another copy meanwhile (PR #87 review). */
+export const LOWERING_OVERTAKEN_TEXT =
+  "This chat's label was raised on another copy while you lowered it here, so it keeps the higher label. Run NEAR AI: Lower This Chat's Label again if what it read now allows it.";
+
 /** Said when a chat's stored label cannot be read. */
 export const UNREADABLE_CHAT_LABEL_TEXT =
   "This chat's saved label could not be read, so it opens at org/Restricted and its content stays on this computer. If you know it holds nothing that sensitive, use NEAR AI: Lower This Chat's Label.";
@@ -278,7 +284,7 @@ export class AgentConversation {
    */
   private chatMark: SessionMark | undefined;
   /** Set by prepareLowering for the one change the person's lowering makes. */
-  private pendingLowering: unknown;
+  private pendingLowering: { readonly lowering: unknown; readonly from?: Mark } | undefined;
   /** Stops saving and showing the current mark's changes (a new chat or a reopened one replaces the mark). */
   private stopMarkListener: (() => void) | undefined;
   /** The policy's default label as the last run read it: the chat's label is shown only above it (D-33). */
@@ -384,6 +390,8 @@ export class AgentConversation {
     } catch { this.defaultLabel = SHIPPED_DEFAULT_LABEL; }
     if (this.chatMark === undefined) this.adoptMark(new SessionMark(projectLabel));
     else this.chatMark.raise(projectLabel, scalesOf(gate));
+    // A merge never applies a signed lowering of this chat below the project's label as this run found it (PR #87 review).
+    noteChatProjectMark(this.conversationId, projectLabel);
     return this.chatMark!;
   }
 
@@ -394,9 +402,9 @@ export class AgentConversation {
     this.chatMark = mark;
     if (mark !== undefined) {
       this.stopMarkListener = mark.onDidChange((next) => {
-        const lowering = this.pendingLowering;
+        const pending = this.pendingLowering;
         this.pendingLowering = undefined;
-        void this.saveLabel(next, lowering);
+        void this.saveLabel(next, pending?.lowering, pending?.from);
         this.showLabel();
       });
       void this.saveLabel(mark.current());
@@ -404,11 +412,20 @@ export class AgentConversation {
     this.showLabel();
   }
 
-  /** Saves the chat's mark in its thread meta, joined with what is stored (a raise), or, with `lowering`, as the person's lowering. Never throws. */
-  private async saveLabel(mark: Mark, lowering?: unknown): Promise<void> {
+  /**
+   * Saves the chat's mark in its thread meta, joined with what is stored (a raise), or, with `lowering`, as the person's lowering from `from`. When a sync
+   * raised the stored mark above `from` meanwhile, the store keeps the higher label (PR #87 review) and the chat is raised to it here too, and says so.
+   * Never throws.
+   */
+  private async saveLabel(mark: Mark, lowering?: unknown, from?: Mark): Promise<void> {
     const store = this.transcripts;
     if (!(store instanceof ThreadStore)) return;
-    await store.setChatLabel(this.conversationId, mark, lowering).catch(() => undefined);
+    const id = this.conversationId;
+    const outcome = await store.setChatLabel(id, mark, lowering, from).catch(() => undefined);
+    if (outcome !== 'raised-meanwhile' || id !== this.conversationId) return;
+    const stored = await store.storedChatMark(id).catch(() => undefined);
+    if (stored !== undefined) this.chatMark?.raise(stored, SCALE_PRESETS);
+    this.post({ type: 'notice', text: LOWERING_OVERTAKEN_TEXT });
   }
 
   /** The chat's label as the page and the status bar show it: the mark's labels while it is above the policy's default label, otherwise nothing. */
@@ -429,7 +446,9 @@ export class AgentConversation {
    * SessionMark.lowerByPerson.
    */
   public prepareLowering(signed: unknown): void {
-    this.pendingLowering = signed;
+    // The mark the person lowers from, so the store can tell a raise that arrived meanwhile from the lowering itself.
+    const from = this.chatMark?.current();
+    this.pendingLowering = { lowering: signed, ...(from === undefined ? {} : { from }) };
   }
 
   /** The policy's default label as this chat last read it. */
@@ -620,7 +639,8 @@ export class AgentConversation {
         // With no gate host (a test) the run is wrapped in the default route, so the call is wrapped either way (PR 4a review).
         const attestation = this.chatAttestation;
         let routeOfRun: SessionRoute | undefined;
-        const onAnswerChecked: AnswerCheckListener = (chatId, result, checked) => { if (routeOfRun) this.answerChecked(runId, routeOfRun, attestation, chatId, result, { ...checked, client: request.client }); };
+        // The client is the only caller, and it passes its full VerificationResult (src/gate names the fields it needs without importing services).
+        const onAnswerChecked: AnswerCheckListener = (chatId, result, checked) => { if (routeOfRun) this.answerChecked(runId, routeOfRun, attestation, chatId, result as VerificationResult, { ...checked, client: request.client }); };
         const runRoute = gate ? sessionRouteFrom(gate, { attestation, markOf: () => mark.current(), onAnswerChecked }) : defaultSessionRoute();
         routeOfRun = runRoute;
         result = await withSpendTag({ kind: 'main', runId, conversationId: this.conversationId, agentId: mainId }, () => withSessionRoute(runRoute, () => run.run(this.messages, abort.signal)));

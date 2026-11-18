@@ -17,7 +17,6 @@ import { buildDecisionRecord } from '../domain/gate/record';
 import type { DecisionRecord } from '../domain/gate/record';
 import { routingWhileFailedClosed, tierForLabel } from '../domain/gate/routing';
 import type { RouteDecision, RouteEventId, RouteFacts, RoutingTable } from '../domain/gate/routing';
-import type { ResponseEvidence, VerificationResult } from '../services/attestation';
 import type { InferTier } from '../domain/gate/vocabulary';
 
 /**
@@ -29,8 +28,21 @@ export interface RouteAttestation {
   closed?: boolean;
 }
 
+/** What an answer check found, as the client's VerificationResult says it (this folder imports nothing from services). */
+export interface AnswerCheckResult {
+  readonly outcome: 'signed' | 'failed' | 'unavailable';
+  readonly summary: string;
+}
+
+/** The hashes an answer check works from (the client's ResponseEvidence): no prompt or answer text. */
+export interface AnswerEvidence {
+  readonly chatId: string;
+  readonly requestHash: string;
+  readonly responseHash: string;
+}
+
 /** What the client tells a route when the check after one of its answers settles: the answer's chat id, the result, and what was checked. */
-export type AnswerCheckListener = (chatId: string, result: VerificationResult, checked: { readonly model: string; readonly evidence: ResponseEvidence }) => void;
+export type AnswerCheckListener = (chatId: string, result: AnswerCheckResult, checked: { readonly model: string; readonly evidence: AnswerEvidence }) => void;
 
 export interface SessionRoute {
   /** The session's mark now. An empty mark means the policy's default label. */
