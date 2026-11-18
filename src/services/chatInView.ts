@@ -4,6 +4,13 @@ import type { SessionMark } from '../domain/gate/dominance';
 import type { Label } from '../domain/gate/labels';
 
 /** What the label surfaces need of the chat on screen. */
+/** Whether a value passed to a command is a ChatInView (the chat page passes its own chat; the Command Palette passes nothing). */
+export function isChatInView(value: unknown): value is ChatInView {
+  const chat = value as Partial<ChatInView> | null | undefined;
+  return typeof chat === 'object' && chat !== null && typeof chat.id === 'string' && typeof chat.root === 'string' && typeof chat.mark === 'function'
+    && typeof chat.defaultLabel === 'function' && typeof chat.prepareLowering === 'function';
+}
+
 export interface ChatInView {
   /** The conversation id. */
   readonly id: string;

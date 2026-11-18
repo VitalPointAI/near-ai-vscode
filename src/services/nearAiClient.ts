@@ -1,13 +1,14 @@
 import { createHash } from 'node:crypto';
-import { sha256Hex, verifyResponse, type ResponseEvidence, type VerificationResult } from './attestation';
+import { AttestationReportCache, NOT_CHECKED_IN_EDITOR, sha256Hex, verifyResponse, type ResponseEvidence, type VerificationResult } from './attestation';
 import { isNearCloudEndpoint, isSecureEndpoint } from '../domain/config';
-import { decideRoute, routeCheckFailed, routingWhileFailedClosed } from '../domain/gate/routing';
+import { bindingReason, decideRoute, routeCheckFailed, routingWhileFailedClosed } from '../domain/gate/routing';
 import type { ConnectionBindingFact, RouteDecision, RouteFacts, RouteRule, RoutingTable } from '../domain/gate/routing';
 import { SHIPPED_DEFAULT_LABEL } from '../domain/gate/bundle';
 import type { Label } from '../domain/gate/labels';
 import type { Mark } from '../domain/gate/dominance';
-import { currentSessionRoute, defaultSessionRoute, routeRecordFor, routingOf } from '../gate/sessionMark';
+import { currentSessionRoute, defaultSessionRoute, routeEventRecordFor, routeRecordFor, routingOf } from '../gate/sessionMark';
 import type { SessionRoute } from '../gate/sessionMark';
+import { ConnectionNotBoundError } from './connectionBinding';
 import type { ConnectionBindingSource } from './connectionBinding';
 import { redactSecrets } from '../domain/redaction';
 import { currentSpendTag, SpendKind, SpendTag, usdToNano } from './spendLedger';
@@ -159,10 +160,15 @@ export interface NearAiClientOptions {
    * that does not say is refused at every level stricter than any-cloud (`route.no-session`).
    */
   route?: 'near' | 'local';
-  /** Says whether the connection to this client's host is proven to end inside private hardware (D-50). No client has one before plan 25. */
+  /**
+   * Says whether the connection to this client's host is proven to end inside private hardware (D-50). The provider factory gives one to a NEAR client on
+   * NEAR AI Cloud's own endpoint (NearConnectionBinding); every other client has none, so attested-cloud levels never go through it.
+   */
   binding?: ConnectionBindingSource;
   /** True when the session can use a local model instead of this client (a hybrid profile's NEAR client), so a refusal names the right fix. */
   localModelAvailable?: boolean;
+  /** For tests: the root the after-answer check trusts instead of Intel's, and the time it checks certificates at. Production leaves it unset. */
+  attestationTrust?: { trustedRoot?: string; now?: () => Date };
 }
 
 /**
@@ -213,6 +219,26 @@ export class RouteRefusedError extends Error {
     super(message);
     this.name = 'RouteRefusedError';
   }
+}
+
+/** How many after-answer checks a client keeps, by chat id: the newest 50. */
+export const ANSWER_CHECKS_KEPT = 50;
+
+/** A bound fact older than this (8 minutes) is checked again in the background, so it is renewed before it stops counting at 10 minutes. */
+export const BINDING_REFRESH_AFTER_MS = 480_000;
+/** A fact that is not bound (no model listed yet, offline, a mismatch) is checked again after this (30 seconds) when a request needs it. */
+export const BINDING_RETRY_AFTER_MS = 30_000;
+
+/** What the route check of one content request found: the decision, the route it was made in, the facts it read, and how to record a later refusal. */
+interface RouteCheck {
+  readonly route: SessionRoute;
+  readonly decision: RouteDecision;
+  readonly facts: RouteFacts;
+  readonly context: { readonly mark: Mark; readonly defaultLabel: Label; readonly bundleHash: string; readonly routing: RoutingTable };
+  /** The binding fact the check read, when the client has a binding source. */
+  readonly connection?: ConnectionBindingFact;
+  /** The bound fact the request must be pinned to: set exactly when the request was allowed at attested-cloud to NEAR AI Cloud. */
+  readonly pinned?: ConnectionBindingFact;
 }
 
 export const DEFAULT_RESPONSE_TIMEOUT_MS = 60_000;
@@ -380,6 +406,14 @@ export class NearAiClient {
   private readonly streams = new WeakMap<Response, { abort: () => void; release: () => void }>();
   /** The binding fact the route check read for each content response, when the client has a binding source; its usage carries it. */
   private readonly connections = new WeakMap<Response, ConnectionBindingFact>();
+  /** The binding refresh running for each host, at most one: a route check that finds the fact missing or old starts one, never waits for it (OFFL-01). */
+  private readonly refreshing = new Map<string, Promise<void>>();
+  /** The route of each response its route check allowed at attested-cloud to NEAR AI Cloud: its answer is checked afterwards (D-36). */
+  private readonly attestedAnswers = new WeakMap<Response, SessionRoute>();
+  /** The check after each attested-cloud answer, by the answer's chat id, the newest ANSWER_CHECKS_KEPT. */
+  private readonly answerChecks = new Map<string, Promise<VerificationResult>>();
+  /** Verified attestation reports by signing address for 10 minutes, used only by the checks after each answer (A3). */
+  private readonly reportCache = new AttestationReportCache(() => this.now());
 
   public constructor(private readonly options: NearAiClientOptions) {
     this.fetchFn = options.fetchFn ?? fetch;
@@ -393,6 +427,42 @@ export class NearAiClient {
 
   /** The key's spend account, when spend tracking is on for this client. */
   public get spend(): SpendSink | undefined { return this.options.spend; }
+
+  /** The source that says whether this client's connection is proven to end inside private hardware, when it has one (D-50). */
+  public get connectionBinding(): ConnectionBindingSource | undefined { return this.options.binding; }
+
+  /** The check after the attested-cloud answer with this chat id, while it is among the newest ANSWER_CHECKS_KEPT; undefined otherwise. */
+  public answerCheck(chatId: string): Promise<VerificationResult> | undefined {
+    return this.answerChecks.get(chatId);
+  }
+
+  /** A private (TEE) model id from this client's cached catalog, or undefined while none is listed. Never fetches. */
+  public cachedTeeModel(): string | undefined {
+    for (const model of this.models.values()) if (model.privacyBoundary === 'tee') return model.id;
+    return undefined;
+  }
+
+  /** An authenticated GET against this client's /v1 base, read as JSON: the request verifyResponse and the binding check go through. Carries no content. */
+  public async getJson(path: string, signal?: AbortSignal): Promise<unknown> {
+    return (await this.request(path, { method: 'GET', ...(signal === undefined ? {} : { signal }) })).json();
+  }
+
+  /**
+   * Starts a binding check of the host in the background when the fact is missing, a bound one is older than BINDING_REFRESH_AFTER_MS, or another state is
+   * older than BINDING_RETRY_AFTER_MS. At most one per host runs; it is never awaited and its failure is swallowed, so no request waits for it (OFFL-01).
+   */
+  public refreshBinding(host: string = this.options.baseUrl, now: number = Date.now()): void {
+    const source = this.options.binding;
+    if (source === undefined || this.refreshing.has(host)) return;
+    let fact: ConnectionBindingFact | undefined;
+    try { fact = source.current(host); } catch { fact = undefined; }
+    const age = fact?.checkedAt === undefined ? Number.POSITIVE_INFINITY : now - fact.checkedAt;
+    if (fact !== undefined && age >= 0 && age < (fact.state === 'bound' ? BINDING_REFRESH_AFTER_MS : BINDING_RETRY_AFTER_MS)) return;
+    let started: Promise<unknown>;
+    try { started = Promise.resolve(source.refresh(host)); } catch { started = Promise.resolve(); }
+    const done = started.then(() => undefined, () => undefined).finally(() => { if (this.refreshing.get(host) === done) this.refreshing.delete(host); });
+    this.refreshing.set(host, done);
+  }
 
   /** True while any model is cooling down after a 429 or 503 (billing calls wait). */
   public rateLimited(): boolean {
@@ -832,11 +902,14 @@ export class NearAiClient {
     }
     const toolCalls: ToolCall[] = calls.filter((call) => call.name).map((call, index) => ({ id: call.id || `call_${index}`, type: 'function', function: { name: call.name, arguments: call.arguments || '{}' } }));
     this.settleCharge(response, 'completed', usage);
+    const evidence: ResponseEvidence | undefined = chatId ? { chatId, requestHash: sha256Hex(requestBody), responseHash: rawResponse.digest('hex') } : undefined;
+    // D-36: an answer sent at attested-cloud is checked afterwards, in the background; nothing here or in the next decision waits for it (OFFL-01).
+    if (evidence !== undefined) this.checkAnswer(response, model, evidence);
     yield {
       type: 'done',
       message: { role: 'assistant', content: text || null, ...(toolCalls.length ? { tool_calls: toolCalls } : {}) },
       finishReason,
-      usage: { ...usage, latencyMs: Date.now() - started, ...(firstTokenAt !== undefined ? { firstTokenMs: firstTokenAt - started } : {}), reasoningChars, answerChars, ...(chatId ? { evidence: { chatId, requestHash: sha256Hex(requestBody), responseHash: rawResponse.digest('hex') } } : {}) }
+      usage: { ...usage, latencyMs: Date.now() - started, ...(firstTokenAt !== undefined ? { firstTokenMs: firstTokenAt - started } : {}), reasoningChars, answerChars, ...(evidence ? { evidence } : {}) }
     };
     } finally {
       // Stopped or broken off before the end: recorded with what arrived, and reconciled by its inference-id.
@@ -844,9 +917,42 @@ export class NearAiClient {
     }
   }
 
+  /**
+   * The check after an answer whose request the route check allowed at attested-cloud to NEAR AI Cloud (D-36, D-55): started here, never awaited. It goes
+   * through the 10-minute report cache. When it settles the route hears it, a failed one stops attested-cloud for the route's chat (unless the chat was
+   * closed), and route.attestation-checked is recorded with verified, failed or unavailable. Anything thrown is unavailable, never failed.
+   */
+  private checkAnswer(response: Response, model: string, evidence: ResponseEvidence): void {
+    const route = this.attestedAnswers.get(response);
+    if (route === undefined) return;
+    this.attestedAnswers.delete(response);
+    const check = verifyResponse(evidence, model, (path) => this.getJson(path), { cache: this.reportCache, ...this.trustOptions() })
+      .catch((error: unknown): VerificationResult => ({ outcome: 'unavailable', summary: `The answer could not be checked (${error instanceof Error ? error.message : 'unknown error'}).`, checks: {}, notChecked: NOT_CHECKED_IN_EDITOR }));
+    this.answerChecks.delete(evidence.chatId);
+    this.answerChecks.set(evidence.chatId, check);
+    while (this.answerChecks.size > ANSWER_CHECKS_KEPT) this.answerChecks.delete(this.answerChecks.keys().next().value as string);
+    void check.then((result) => {
+      const attestation = result.outcome === 'signed' ? 'verified' : result.outcome;
+      if (attestation === 'failed') {
+        try {
+          const state = route.attestation;
+          if (state !== undefined && state.closed !== true) state.failed = true;
+        } catch { /* a state that cannot be set is read as unproven, which never counts as bound */ }
+      }
+      try { route.onAnswerChecked?.(evidence.chatId, result, { model, evidence }); } catch { /* a listener never changes the check */ }
+      try { route.sink?.record(routeEventRecordFor(route, 'route.attestation-checked', { model, attestation })); } catch { /* D-21 */ }
+    });
+  }
+
+  /** The trust the checks use: Intel's root and the system clock, unless a test set `attestationTrust`. */
+  private trustOptions(): { trustedRoot?: string; now?: Date } {
+    const trust = this.options.attestationTrust;
+    return { ...(trust?.trustedRoot === undefined ? {} : { trustedRoot: trust.trustedRoot }), ...(trust?.now === undefined ? {} : { now: trust.now() }) };
+  }
+
   /** Checks NEAR's signature and attestation for a completion this client received. */
-  public async verifyResponse(model: string, evidence: ResponseEvidence, signal?: AbortSignal, trust: { trustedRoot?: string; now?: Date } = {}): Promise<VerificationResult> {
-    return verifyResponse(evidence, model, async (path) => (await this.request(path, { method: 'GET', signal })).json(), trust);
+  public async verifyResponse(model: string, evidence: ResponseEvidence, signal?: AbortSignal, trust: { trustedRoot?: string; now?: Date } = this.trustOptions()): Promise<VerificationResult> {
+    return verifyResponse(evidence, model, (path) => this.getJson(path, signal), trust);
   }
 
   private async *readEvents(response: Response, body: ReadableStream<Uint8Array>, initial: UsageMetadata, signal?: AbortSignal, model?: ModelInfo): AsyncGenerator<ChatStreamEvent> {
@@ -891,6 +997,8 @@ export class NearAiClient {
 
   private rememberModels(models: ModelInfo[]): ModelInfo[] {
     for (const model of models) this.models.set(model.id, model);
+    // A client with a binding source checks its connection as soon as a private model is listed to ask the attestation for (in the background).
+    if (this.options.binding !== undefined && models.some((model) => model.privacyBoundary === 'tee')) this.refreshBinding();
     return models;
   }
 
@@ -974,7 +1082,7 @@ export class NearAiClient {
    * client's route kind, host and endpoint, the model's entry in this client's own cached catalog, the binding fact held in memory, and the clock. No network
    * call is made here (OFFL-01). Throws RouteRefusedError when the route refuses. Returns the binding fact when this client has a binding source.
    */
-  private checkRoute(model: string | undefined): ConnectionBindingFact | undefined {
+  private checkRoute(model: string | undefined): RouteCheck {
     const inSession = currentSessionRoute();
     const route = inSession ?? defaultSessionRoute();
     // Until the route's policy has been read, the record names the failed-closed routing and no policy hash (PR #81 review: a state that cannot be read for
@@ -984,6 +1092,9 @@ export class NearAiClient {
     let bundleHash = '';
     const host = this.options.baseUrl;
     const fact = this.bindingFact(host);
+    const now = clockOf(route);
+    // The decision reads the fact held now; a missing or old one is checked again out of band for the next request (OFFL-01).
+    this.refreshBinding(host, now);
     const attestation = attestationStateOf(route);
     const info = model === undefined ? undefined : this.models.get(model);
     const facts: RouteFacts = {
@@ -994,7 +1105,7 @@ export class NearAiClient {
       attestationFailed: attestation === 'failed',
       // An unproven answer-check state is never proof of a private connection: no binding counts for it (D-50).
       binding: attestation === 'unproven' ? { state: 'unknown', host } : fact,
-      now: clockOf(route),
+      now,
       localModelAvailable: this.options.localModelAvailable === true,
       sessionless: inSession === undefined
     };
@@ -1018,7 +1129,39 @@ export class NearAiClient {
       route.sink?.record(routeRecordFor(route, decision, facts, model === undefined ? {} : { model }, { mark, defaultLabel, bundleHash, routing, checkFailed }));
     } catch { /* see above */ }
     if (!decision.allowed) throw new RouteRefusedError(decision.rule, decision.reason ?? 'Nothing was sent.');
-    return this.options.binding === undefined ? undefined : fact;
+    // An attested-cloud request to NEAR AI Cloud is allowed only through a fresh bound fact (D-50); it is sent over a connection pinned to that fact's key.
+    const pinned = decision.tier === 'attested-cloud' && this.options.route === 'near' && facts.binding?.state === 'bound' ? facts.binding : undefined;
+    return {
+      route,
+      decision,
+      facts,
+      context: { mark, defaultLabel, bundleHash, routing },
+      ...(this.options.binding === undefined ? {} : { connection: fact }),
+      ...(pinned === undefined ? {} : { pinned })
+    };
+  }
+
+  /**
+   * The fetch a content request goes through: the normal one, or for an attested-cloud request to NEAR AI Cloud the source's fetch pinned to the bound key.
+   * A source that cannot give a pinned fetch cannot carry the request at all: refused, never sent over an unpinned connection (CLAS-05).
+   */
+  private fetchFor(check: RouteCheck | undefined): typeof fetch {
+    if (check?.pinned === undefined) return this.fetchFn;
+    let pinned: typeof fetch | undefined;
+    try { pinned = this.options.binding?.fetchFor?.(check.pinned); } catch { pinned = undefined; }
+    if (pinned === undefined) throw this.notBound(check, 'The binding source gives no pinned connection.');
+    return pinned;
+  }
+
+  /** A pinned connection that did not present the attested key: the host is marked not-bound, the refusal is recorded, and nothing was sent. */
+  private notBound(check: RouteCheck, detail: string): RouteRefusedError {
+    try { this.options.binding?.markNotBound(this.options.baseUrl, detail); } catch { /* the fact is unknown then, which never counts as bound */ }
+    const reason = bindingReason('not-bound', 'route.connection-not-bound');
+    const decision: RouteDecision = { allowed: false, tier: check.decision.tier, rule: 'route.connection-not-bound', reason };
+    try {
+      check.route.sink?.record(routeRecordFor(check.route, decision, { ...check.facts, binding: { state: 'not-bound', host: check.facts.host } }, check.facts.model === undefined ? {} : { model: check.facts.model.id }, check.context));
+    } catch { /* a record that cannot be kept never changes the refusal (D-21) */ }
+    return new RouteRefusedError('route.connection-not-bound', reason);
   }
 
   /** The binding fact held in memory for the host. No source, a source that throws, or a fact it does not have is unknown, never bound (D-50). */
@@ -1051,7 +1194,9 @@ export class NearAiClient {
     const model = overrides.model;
     // CLAS-06: the route is decided once, here, for every content request, before the spend check, before the cooldown probe slot is taken and before the first
     // byte is sent, whether or not spend tracking is on. A retry below is the same request and is not decided again.
-    const connection = needsRouteCheck(path, init.method) ? this.checkRoute(model) : undefined;
+    const check = needsRouteCheck(path, init.method) ? this.checkRoute(model) : undefined;
+    const connection = check?.connection;
+    const fetchFn = this.fetchFor(check);
     const billable = BILLABLE_PATHS.has(path) && (init.method ?? 'GET') === 'POST' && this.options.spend !== undefined;
     if (billable) {
       // The daily limit is checked before every billable request, whoever sends it.
@@ -1070,13 +1215,15 @@ export class NearAiClient {
         let timedOut = false;
         const timer = setTimeout(() => { timedOut = true; attemptAbort.abort(); }, responseTimeoutMs);
         try {
-          response = await this.fetchFn(url, {
+          response = await fetchFn(url, {
             ...init,
             signal: attemptAbort.signal,
             headers: { ...(this.options.apiKey ? { authorization: `Bearer ${this.options.apiKey}` } : {}), ...(init.headers ?? {}) }
           });
         } catch (error) {
           unhook();
+          // The pinned connection presented another key: nothing was written, the host is not bound any more, and the request is refused (CLAS-05).
+          if (check !== undefined && (error instanceof ConnectionNotBoundError || (error as { cause?: unknown } | undefined)?.cause instanceof ConnectionNotBoundError)) throw this.notBound(check, (error as Error).message);
           // Sent but cancelled or timed out before NEAR answered: NEAR may still have done (and billed) the work.
           if (billable && (init.signal?.aborted || timedOut)) this.charge(path, init, model, overrides.spendKind, undefined, 'aborted');
           if (init.signal?.aborted) throw error;
@@ -1099,6 +1246,7 @@ export class NearAiClient {
         if (response.ok) {
           if (model) this.cooling.delete(model);
           if (connection !== undefined) this.connections.set(response, connection);
+          if (check?.pinned !== undefined) this.attestedAnswers.set(response, check.route);
           if (billable) this.charge(path, init, model, overrides.spendKind, response, 'open');
           // A stream keeps the caller's stop wired to the connection while its body is read, and its
           // reader can close the connection itself when the stream stalls; the reader releases it.

@@ -1,5 +1,7 @@
 import { OrganizationProfile, ProjectCredentialScope, ResolvedProvider, isProjectCredentialScope, localKeyScope } from '../domain/auth';
+import { isNearCloudEndpoint } from '../domain/config';
 import { AuthService } from './auth';
+import { NearConnectionBinding } from './connectionBinding';
 import { NearAiClient } from './nearAiClient';
 import { spendAccountFor } from './spendAccount';
 
@@ -19,9 +21,18 @@ async function clientsFor(options: CreateNearAiProviderOptions): Promise<{ clien
   // Every billable response of a NEAR AI Cloud key goes to that key's spend ledger; a local runtime bills nothing.
   const spend = profile.provider === 'local' ? undefined : spendAccountFor(profile.baseUrl, apiKey);
   // CLAS-06: each client says which route it is, so the route check judges the client a request really uses. A hybrid profile's NEAR client knows a local
-  // model is there to use instead. No client gets a connection binding source before plan 25, so attested-cloud levels stay on this computer (D-50).
+  // model is there to use instead.
   const hybrid = profile.provider === 'hybrid' && Boolean(profile.localBaseUrl);
-  const client = new NearAiClient({ baseUrl: profile.baseUrl, apiKey, fetchFn, route: profile.provider === 'local' ? 'local' : 'near', ...(hybrid ? { localModelAvailable: true } : {}), ...(spend ? { spend, spendTag: { projectId: scope.projectId } } : {}) });
+  const kind = profile.provider === 'local' ? 'local' : 'near';
+  // CLAS-05 (D-50): only a NEAR client on NEAR AI Cloud's own endpoint gets a binding source, whose GET is this client's own and whose model is a private one
+  // from this client's cached catalog. Every other client has none, so content at attested-cloud levels never goes through it.
+  let client: NearAiClient | undefined;
+  const binding = kind === 'near' && isNearCloudEndpoint(profile.baseUrl)
+    ? new NearConnectionBinding({ get: (path, signal) => client!.getJson(path, signal), teeModel: () => client?.cachedTeeModel() })
+    : undefined;
+  client = new NearAiClient({ baseUrl: profile.baseUrl, apiKey, fetchFn, route: kind, ...(binding ? { binding } : {}), ...(hybrid ? { localModelAvailable: true } : {}), ...(spend ? { spend, spendTag: { projectId: scope.projectId } } : {}) });
+  // The first check starts now, in the background, so a labelled chat rarely meets a connection nobody has checked yet. Nothing waits for it.
+  if (binding) client.refreshBinding();
   if (!hybrid || !profile.localBaseUrl) return { client };
   const localApiKey = await auth.getScopedApiKeyFor(localKeyScope(scope), profile.localBaseUrl) ?? '';
   return { client, localClient: new NearAiClient({ baseUrl: profile.localBaseUrl, apiKey: localApiKey, fetchFn, route: 'local' }) };

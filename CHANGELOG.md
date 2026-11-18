@@ -2,6 +2,41 @@
 
 ## Unreleased
 
+Content at Internal, Confidential and the other levels that need an attested cloud can again use a
+private NEAR AI Cloud model, but only over a connection proven to end inside its private hardware.
+Each such answer is checked afterwards, and a failed check stops that level for the chat until
+**Check again** under that answer passes.
+
+- **Private NEAR AI Cloud models over a proven connection.** NEAR AI Cloud's attestation names the
+  key of the certificate its endpoint serves. NEAR AI checks that in the background, never while a
+  request waits: a fresh attestation report, a genuine Intel quote, and the same key on this
+  computer's own connection. Every request at these levels is then sent over a connection that
+  refuses any other key, before a byte is written. When the check has not passed, the content stays
+  on this computer, and with no model on this computer the request is refused with a sentence that
+  says why and to try again in a moment.
+- **Every such answer is checked afterwards.** The answer's signature and NEAR AI Cloud's
+  attestation are checked in the background after each answer at these levels, tool-call turns and
+  helper agents included, and the result shows under the answer. A report already verified for the
+  same signing key is reused for up to ten minutes. A check that cannot be made, for example
+  offline, changes nothing.
+- **A failed check stops that level for the chat.** Nothing more at these levels goes to NEAR AI
+  Cloud from that chat until **Check again** under the answer passes, which checks it again with a
+  fresh report; a new chat or a window reload also starts without the stop. The failure stays in
+  the decision log, and the refusal names Check again, a local model and **NEAR AI: Lower This
+  Chat's Label**.
+- **Behind a proxy that inspects encrypted traffic** the connection cannot be proven, so content at
+  these levels stays on this computer. SECURITY.md and **NEAR AI: Show Policy** say what these checks
+  prove and what they rely on.
+- **Lower This Chat's Label where you look for it.** Click the chat's label beside the model (or
+  press Enter or Space on it) to lower it. Every refusal that names **NEAR AI: Lower This Chat's
+  Label** now has a button that runs it. Lowering a file's label with **NEAR AI: Set Label** while a
+  chat that read the file is open says that the chat keeps its label, since a chat's label only rises
+  on its own, and offers the same button.
+- **Fixes to chat labels and the outbound check.** A lowering of a chat's label made while a sync
+  raised it on another copy keeps the higher label and says so; a lowering is never applied below
+  the project's label or compared by time as text; the outbound check also catches labelled text
+  split across two arguments; refusal records name the tool, never the command, and say which
+  check refused; and the label events of a lowering name the strictest label of the new label.
 - **Teams work side by side, then bring their work together.** A team's lead now gives each member
   its own area (files, modules, or sections of the deliverable) and says what it must leave alone,
   starts the members that do not need each other at the same time, and gives each member that

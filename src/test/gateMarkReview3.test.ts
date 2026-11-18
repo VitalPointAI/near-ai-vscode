@@ -143,11 +143,16 @@ test('review 3.1: one shared hook raises a mark from content and feeds its finge
   // A mark rises from content only in the shared hook; agentSession raises a chat's mark only by the project's own label at a run's start.
   const raisers = [...text].filter(([, source]) => /\.raise\(/.test(source)).map(([file]) => file).sort();
   assert.deepEqual(raisers, ['agent/gateAdapter.ts', 'services/agentSession.ts']);
+  // The project's label at a run's start, and (PR #87 review) the label a sync stored above a lowering that it overtook: never content.
   const sessionRaises = (text.get('services/agentSession.ts') ?? '').split('\n').filter((line) => /\.raise\(/.test(line));
-  assert.ok(sessionRaises.length === 1 && /projectLabel/.test(sessionRaises[0]!), sessionRaises.join('\n'));
-  // Fingerprints are fed only by the shared hook (settle) or, for a reopened chat, as earlier results.
-  const feeders = [...text].filter(([, source]) => /(outbound|Prints|fingerprints)\??\.(add|settle|open)\(/.test(source)).map(([file]) => file).sort();
-  assert.deepEqual(feeders, ['agent/gateAdapter.ts']);
+  assert.equal(sessionRaises.length, 2, sessionRaises.join('\n'));
+  assert.ok(/raise\(projectLabel,/.test(sessionRaises[0]!), sessionRaises[0]);
+  assert.ok(/raise\(stored,/.test(sessionRaises[1]!), sessionRaises[1]);
+  // Fingerprints are fed only by the shared hook (settle) or, for a reopened chat, as earlier results (addEarlier, only in agentSession's restore).
+  const feeders = [...text].filter(([, source]) => /(outbound|Prints|fingerprints)\??\.(add|addEarlier|settle|open)\(/.test(source)).map(([file]) => file).sort();
+  assert.deepEqual(feeders, ['agent/gateAdapter.ts', 'services/agentSession.ts']);
+  const sessionFeeds = (text.get('services/agentSession.ts') ?? '').split('\n').filter((line) => /(outbound|Prints|fingerprints)\??\.(add|addEarlier|settle|open)\(/.test(line));
+  assert.ok(sessionFeeds.length === 1 && /\.addEarlier\(message\.content\)/.test(sessionFeeds[0]!), sessionFeeds.join('\n'));
   // Every runner that reads content goes through the hook.
   const users = [...text].filter(([, source]) => /beginLabelledRead\(/.test(source)).map(([file]) => file).sort();
   assert.deepEqual(users, ['agent/gateAdapter.ts', 'agent/loop.ts', 'services/cyberRun.ts']);
