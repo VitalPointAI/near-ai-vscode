@@ -1,6 +1,8 @@
-# Draft milestone: Data platform (phases 85 to 101)
+# Draft milestone (adopted 2026-11-18): Data platform (phases 85 to 101)
 
-**Written:** 2026-11-18. **Status:** a proposal for the owner. It does not change `.planning/ROADMAP.md` until the owner accepts it.
+> **Adopted by the owner on 2026-11-18. `.planning/ROADMAP.md` (milestone "Data platform") and `.planning/REQUIREMENTS.md` are now the source of truth.** This file is kept as the record of the draft and is not updated. Changes made on adoption: decision 14 became one-click connection (SPIKE-09 and CONN-01 to CONN-04 added, DATA-14 rewritten); collectors became small signed native packages with zero-config enrolment, and file shares are read from the host (COLL-01 to COLL-06 added, DATA-17 and DATA-20 revised); decision 7's opt-in placeholder got its own requirement (KB-15); training runs only on your organization's own machines or hardware endpoints it controls (FAC-09); SPIKE-01, DSEC-10 and FAC-06 revised; Phases 85, 89, 90 and 91 renamed, and Phase 85 builds the lasting host (L1a). 106 requirements became 119. The relay became its own milestone after this one, and v0.7.0 keeps Phase 68 and Stage 1.
+
+**Written:** 2026-11-18. **Status:** adopted 2026-11-18 (it was a proposal for the owner).
 **Design:** `00-DESIGN.md` in this folder. Sections cited as "D §4.1"; research reports cited as "01 §1.2".
 **Owner decisions it assumes:** the recommendations in D §10.1. Where a phase depends on one, the phase names it.
 

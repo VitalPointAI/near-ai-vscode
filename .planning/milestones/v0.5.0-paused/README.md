@@ -2,6 +2,8 @@
 
 Paused on 2026-10-29: this milestone is moving to a separate project; this repository continues the 0.4.x line.
 
+**2026-11-18:** the owner brought the knowledge base back to this repository, as the viewing layer of the data platform milestone (Phases 85-101 in `.planning/ROADMAP.md`), instead of a separate project. Each phase's disposition is marked in `ROADMAP.md` here and tabled in the main roadmap's data platform section ("What it absorbs from the paused knowledge base"). The Phase 13 code is read with `git show` and ported piece by piece, never merged as a branch.
+
 What is here, as it stood when paused:
 
 - `ROADMAP.md`, `REQUIREMENTS.md`, `STATE.md`: the milestone's roadmap (Phases 13-24), its 55 requirements and its state.

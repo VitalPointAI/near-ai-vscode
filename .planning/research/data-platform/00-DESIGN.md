@@ -3,7 +3,7 @@
 **Written:** 2026-11-18
 **Inputs:** the four research reports in this folder: 01 (connectors, extraction, ETL), 02 (classification, tagging, data-centric security, requests, holds, personal mark), 03 (context graph, search, analytics, knowledge layer), 04 (model factory and opportunity agent). Citations below take the form "01 §1.2".
 **Meets:** the owner's decided requirements of 2026-11-18 (R1 to R11 below).
-**Status:** proposal for the owner. The draft milestone is in `01-DRAFT-MILESTONE.md`.
+**Status:** accepted by the owner on 2026-11-18. Decisions 1 to 13 and the 32 settled-in-design choices as recommended; decision 14 changed to one-click connection; collectors that are simple to install added (section 3.7). The plan of record is now `.planning/ROADMAP.md` (milestone "Data platform", Phases 85 to 101) and `.planning/REQUIREMENTS.md`; the draft milestone `01-DRAFT-MILESTONE.md` is kept as the record of the proposal.
 
 ---
 
@@ -25,23 +25,25 @@
 
 **Where it fits.** A new milestone after Stage 1 (Phases 28, 29, 69 to 74) and before the relay (Stages 2 and 3 move after it). It needs one slice of L1 pulled forward (the host stack and local inference, without Theia or the relay). It absorbs the paused v0.5.0 knowledge base as its viewing layer.
 
-**What we need from you.** 14 decisions (section 10.1). The rest are decided in this design and listed so you can override them (section 10.2).
+**Easy from the start.** Connecting Microsoft 365 is one click: an administrator signs in once and setup creates your organization's own app registration in its own tenant, with a certificate generated on the host. Google Workspace and file shares work the same way. Endpoint collectors are small signed native packages that your organization's device-management tools push and enrol with no setup on each machine, and Microsoft 365, Google Workspace and file shares need no collector at all (section 3.7).
+
+**Owner decisions (2026-11-18).** All 14 decisions of section 10.1 are answered: 1 to 13 as recommended, and 14 changed so that connecting a source is one click from the start. The 32 choices of section 10.2 are accepted.
 
 ### 1.1 Architecture
 
 ```
-                         YOUR ORGANIZATION'S SOURCES (systems of record, unchanged)
-  Microsoft 365 (SharePoint, OneDrive, Exchange)   Google Workspace (Drive, Gmail)   Databases
-          |  delta feeds, labels, ACLs                  |  changes, history, labels      |  CDC
+                YOUR ORGANIZATION'S SOURCES (systems of record, unchanged; each connected in one click)
+  Microsoft 365 (SharePoint, OneDrive, Exchange)   Google Workspace (Drive, Gmail)   Shares, databases
+          |  delta feeds, labels, ACLs                  |  changes, history, labels      |  snapshots, CDC
           v                                             v                                v
  +--------------------------------------------------------------------------------------------+
  |  ALWAYS-ON HOST (appliance, Strix Halo first, GB10 later)                                  |
  |                                                                                            |
- |  Connector runtime --> item ledger + cursors (Postgres) --> work queues                    |
+ |  Connector runtime (one-click setup) --> item ledger + cursors (Postgres) --> work queues  |
  |     ^  (sandboxed, broker-signed requests)       |                                         |
  |     |                                            v                                         |
- |  Endpoint/share   Extraction workers (sandboxed, no network): Tika, Docling, OCR tiers,    |
- |  collector feed   whisper.cpp  --> content-addressed derivatives (encrypted blob store)    |
+ |  Collector feed,  Extraction workers (sandboxed, no network): Tika, Docling, OCR tiers,    |
+ |  share reader     whisper.cpp  --> content-addressed derivatives (encrypted blob store)    |
  |                                                  |                                         |
  |                    Classification: tier 0 rules, tier 1 small models, tier 2 local LLM     |
  |                    --> proposals --> signed policy (gate) --> label (raise only)           |
@@ -50,6 +52,7 @@
  |    items, cards, chunks, vectors, mentions, evidence, links, cases, holds, marks          |
  |  Analytics: DuckLake/DuckDB over label-cell Parquet (query service only)                   |
  |  Hold store (write-once)   Governance log (signed, from paused Phase 13)                   |
+ |  Collector enrolment codes and signed collector updates                                    |
  |                                                  |                                         |
  |  Query service (TypeScript engine + the same gate code): search, graph walk, SQL over      |
  |  views, ask, reports. Gate-signed clearance token per transaction.                         |
@@ -61,10 +64,14 @@
         |                                         |
  +------+-----------------------+      +----------+--------------------------------------------+
  | ENDPOINT COLLECTORS (Rust)   |      | VS CODE EXTENSION (control panel, no data processing) |
- | Windows USN, macOS FSEvents, |      | setup + policy wizards, source catalog and status,    |
- | Linux fanotify, file servers;|      | data map, exception queue, cases and holds, personal  |
- | skip cloud placeholders;     |      | mark, knowledge base views (search, entity, graph,    |
- | personal mark before fetch   |      | timeline, ask, dashboards), factory cards             |
+ | signed native packages (MSI, |      | one-click source connection, setup and policy         |
+ | pkg, deb, rpm) pushed by     |      | wizards, source catalog and status, data map,         |
+ | device management; enrol by  |      | exception queue, cases and holds, personal mark,      |
+ | code; auto-update from host; |      | knowledge base views (search, entity, graph,          |
+ | Windows USN, macOS FSEvents, |      | timeline, ask, dashboards), factory cards             |
+ | Linux fanotify; skip cloud   |      |                                                       |
+ | placeholders; local notice;  |      |                                                       |
+ | personal mark before fetch   |      |                                                       |
  +------------------------------+      +-------------------------------------------------------+
 ```
 
@@ -74,7 +81,7 @@
 
 | # | Owner requirement | Where met |
 |---|---|---|
-| R1 | Autonomous discovery, every form, first sources, easy new sources | §3.2 connectors and collectors; §3.3 extraction; DATA phases 88 to 92 and 100 |
+| R1 | Autonomous discovery, every form, first sources, easy new sources | §3.2 connectors and collectors; §3.3 extraction; §3.7 one-click connection and collector install; DATA phases 88 to 92 and 100 |
 | R2 | Backfill then real-time sync; reorgs flow downstream; reconciliation; status per source | §4.1 source lifecycle; §4.2 item lifecycle; 01 §1 |
 | R3 | Hybrid storage; raw copies only for documented reasons | §5.2 storage rules; decision 10.1-5 |
 | R4 | Full metadata on every item | §5 schema |
@@ -95,7 +102,10 @@
 | Component | Runs on | Responsibility | Source |
 |---|---|---|---|
 | Connector runtime | Host | Runs first-party and manifest connectors under one contract (`RECORD`, `STATE`, `DELETE`, `ACL`, `LOG` messages); per-partition cursors; throttle budgets; live sync pre-empts backfill | 01 §1.2, §5 |
-| Endpoint collector | Each Windows, macOS, Linux machine and file server | Fast enumeration (MFT, directory walk), native change journal with a durable cursor, ACL capture, hashes; skips OS folders and cloud placeholders; honours personal marks before fetching | 01 §4.1, §3.3 point 5 |
+| Endpoint collector | Each Windows, macOS and Linux machine, as a small signed native package (not a container); optional on a file server for faster change detection | Fast enumeration (MFT, directory walk), native change journal with a durable cursor, ACL capture, hashes; skips OS folders and cloud placeholders; honours personal marks before fetching; enrols with a code from device management, updates itself from the host, shows a local notice | 01 §4.1, §3.3 point 5; §3.7 |
+| Connection setup | Host, with one administrator sign-in | One-click connection for Microsoft 365, Google Workspace and file shares: creates your organization's own app registration or service account, a credential generated on the host and held in the broker, admin consent; re-runnable, self-rotating, undone only on the administrator's confirmation | §3.7 |
+| File-share reader | Host | Reads SMB and NFS shares with nothing installed on the file servers; change notifications as hints, snapshot diffs as the feed | 01 §4.2; §3.7 |
+| Collector enrolment and update service | Host | Issues scoped, expiring enrolment codes; binds each enrolled collector to a device credential (Phase 71); serves signed, staged collector updates | §3.7 |
 | Item ledger and cursor store | Host, Postgres | Identity key `(source, item)`, version key, idempotent upserts, cursor advanced in the same transaction as the batch, outbox for side effects | 01 §1.4 |
 | Extraction workers | Host, sandboxed containers with no network | Tika (breadth, forked parsers), Docling (layout, tables), tiered OCR, whisper.cpp; derivative key `(content hash, extractor, version, options)` | 01 §2.2 |
 | Classification workers | Host | Tier 0 rules and detectors; tier 1 span models; tier 2 local LLM only where needed | 02 §1.5 |
@@ -114,11 +124,12 @@
 
 First-party connectors for Microsoft 365, Google Workspace, endpoints and shares, written against vendor APIs on our own small contract; dlt and Debezium Server for databases later (01 Summary). Order of first sources and their feeds: 01 §1.1. Key points:
 
-- **Microsoft 365:** per-drive delta, `Prefer: hierarchicalsharing` so permissions are read only at permission roots (permission reads cost 5 resource units each; 01 §4.3), separate identity sync for users and groups, mailbox delta with immutable ids, Exchange RBAC for Applications to scope mail, `Sites.Selected` where admins refuse tenant-wide scopes.
-- **Google Workspace:** service account with domain-wide delegation, `changes.list` per user and shared drive, Gmail `history.list`. Start the live cursor *before* the backfill so long mailboxes never fall outside the history window (01 §1.2).
-- **Endpoints and shares:** run the collector on the file server where possible; SMB change notifications are hints only, snapshot diffs are the feed (01 §4.2).
+- **Microsoft 365:** connected in one click (§3.7). Per-drive delta, `Prefer: hierarchicalsharing` so permissions are read only at permission roots (permission reads cost 5 resource units each; 01 §4.3), separate identity sync for users and groups, mailbox delta with immutable ids, Exchange RBAC for Applications to scope mail, `Sites.Selected` where admins refuse tenant-wide scopes.
+- **Google Workspace:** connected in one click (§3.7): a service account with domain-wide delegation created in your organization's own Google Cloud, `changes.list` per user and shared drive, Gmail `history.list`. Start the live cursor *before* the backfill so long mailboxes never fall outside the history window (01 §1.2).
+- **File shares:** read from the host over SMB and NFS with nothing installed on the file servers (agentless, owner 2026-11-18); SMB change notifications are hints only, snapshot diffs are the feed (01 §4.2); a collector on a file server is optional, for faster change detection.
+- **Endpoints:** the collector, installed and enrolled through device management (§3.7), for files that live only on a machine.
 - **Notifications:** poll by default (no public endpoint needed); push is an optional low-latency mode (01 §4.3).
-- **Easy new sources:** a source catalog with plain descriptions and exact scopes, one consent step per cloud, a scope picker, an inventory-only dry run first; declarative manifests for REST sources; agent-written connectors run sandboxed with broker-injected credentials and must pass a conformance suite and a person's approval (01 §5).
+- **Easy new sources:** a source catalog with plain descriptions and exact scopes, one-click connection per cloud (§3.7), a scope picker, an inventory-only dry run first; declarative manifests for REST sources; agent-written connectors run sandboxed with broker-injected credentials and must pass a conformance suite and a person's approval (01 §5).
 
 ### 3.3 Extraction (R1)
 
@@ -134,9 +145,31 @@ Evidence rows over the governed store, not a separate graph database (03 Summary
 
 ### 3.6 Model factory and opportunity agent (R9)
 
-LoRA adapters on 4B to 14B Apache-2.0 or MIT bases, Unsloth core plus TRL/PEFT in a pinned container, served by llama.cpp through the existing local and hybrid provider so a specialist appears as a `local` model (04 §2.1 D1 to D5). The trainer is a separate worker on the host, never Python in the extension host (D6). The opportunity agent reads metadata first and content only after an approval whose clearance dominates the data (D7). Dataset and model labels are joins (D8). Deletion is honoured by retraining from the manifest (D10). Training happens only on hardware your organization controls; no training service is used.
+LoRA adapters on 4B to 14B Apache-2.0 or MIT bases, Unsloth core plus TRL/PEFT in a pinned container, served by llama.cpp through the existing local and hybrid provider so a specialist appears as a `local` model (04 §2.1 D1 to D5). The trainer is a separate worker on the host, never Python in the extension host (D6). The opportunity agent reads metadata first and content only after an approval whose clearance dominates the data (D7). Dataset and model labels are joins (D8). Deletion is honoured by retraining from the manifest (D10). Training happens only on your organization's own machines or hardware endpoints it controls, each listed as a training target in the signed policy (owner, 2026-11-18); no training service is used.
 
 **Data-gap planning (R9, added here).** For an approved goal the agent computes the feasibility gates of 04 §7.3. When the *examples* or *labels* gate fails, it writes a data plan instead of a dead end: which catalog facets already hold candidate items (by document type, function, topic, training suitability), which known but unconnected sources might (from discovery and the coverage inventory), how many items are blocked by `no-train`, unknown rights or personal marks (counts only), and the cheapest ways to close the gap (connect a source, ask stewards to confirm rights on a collection, collect accept or edit signals for N more weeks, build a golden set of 50 items, or synthesize from labelled documents). Each option is a proposal card; acquiring data never bypasses rights, marks or labels.
+
+### 3.7 One-click connection and collector install (owner, 2026-11-18)
+
+Decision 14 as the owner changed it ("easy from the start"), and the owner's direction that collectors be super simple to install.
+
+**Connecting a source.**
+- **Microsoft 365.** One-click "Connect Microsoft 365". An administrator signs in once. Setup then creates your organization's own app registration in its own tenant, uploads a certificate generated on the host (the private key never leaves the host and is held in the credential broker), and grants admin consent for exactly the permissions the wizard listed, each with its reason. The administrator's sign-in is used only during setup, held in memory and dropped when setup ends. The app adds its next certificate itself before the current one expires, with no new sign-in. `Sites.Selected` and Exchange RBAC for Applications scoping stay available for administrators who want narrower access (mail is off by default, decision 6).
+- **No shared multi-tenant app.** We do not publish one: its publisher-held credential could reach every customer tenant, so a compromise of ours would become a compromise of every customer. Nothing of ours has to exist in your organization's tenant before setup, and nothing outside your organization can use what setup creates.
+- **Google Workspace.** The same one click: an administrator signs in once; setup creates a project and a service account in your organization's own Google Cloud, enables only the needed APIs, creates the credential on the host and keeps it in the broker (short-lived or keyless where the phase 90 research finds it workable), and authorizes exactly the listed scopes for domain-wide delegation. A step Google allows only in its admin console is one prefilled page that setup opens and then checks.
+- **File shares.** One click too: the host finds the SMB and NFS shares your organization publishes (its directory and DFS namespaces), an administrator picks them and signs in once, setup uses a dedicated read-only account kept in the broker, and the host reads the shares with nothing installed on the file servers.
+- **Every connection** can be re-run (it adds only what is missing), says honestly what a half-finished setup did and did not do, reads nothing until setup is finished, and finishes on re-run without duplicating anything. Disconnect lists what setup created and removes it only after the administrator confirms.
+
+**Installing collectors.**
+- **The host is a container stack**, installed with one command from a signed offline bundle (phase 85).
+- **Endpoint collectors are not containers.** They are small signed native packages: an MSI for Windows, pushed silently by Intune or Group Policy; a signed and notarized pkg for macOS, pushed by Jamf or Intune together with the Full Disk Access profile; .deb and .rpm packages for Linux; and, for a machine without device management, a one-line install that checks the package signature first.
+- **Zero-config enrolment.** Your organization's device-management tools deliver an enrolment code issued by the host (an MSI property, a managed configuration profile, or an install argument). On first start the collector creates its own device key, enrols with the code and receives a device binding credential (Phase 71). Nobody types anything on the machine. Codes are scoped to a device group, limited in number, expiring and revocable, and every new device appears in the source list.
+- **Automatic updates.** Signed updates are served by the host, staged, with rollback; the host refuses collectors below a minimum version. An update never widens what is collected; that takes a policy change.
+- **A local notice** on each machine says in plain words what is collected, what is excluded and who can see it, with Mark as Personal one click away.
+- **Small and removable.** Low CPU, memory and network budgets, paused on battery and metered connections by default. Revoking the device or removing it in device management stops collection at its next contact; uninstalling removes the collector and its local state.
+- **Agentless where possible.** Microsoft 365, Google Workspace and SMB or NFS shares are read from the host with no software on endpoints or file servers. Collectors are needed only for files that live only on endpoints.
+
+Requirements: SPIKE-09, CONN-01 to CONN-04 and COLL-01 to COLL-06 in `.planning/REQUIREMENTS.md` (phases 86, 89, 90 and 91).
 
 ---
 
@@ -312,7 +345,10 @@ Only Apache, MIT, BSD, PostgreSQL, ISC, and LGPL dynamically linked; a licence c
 |---|---|---|---|
 | Connector contract | Our own, shaped like the Singer message protocol | ours | 01 Stack |
 | Microsoft 365 and Google connectors | First-party on the official Graph SDK for Python and Google API clients | MIT, Apache-2.0 | 01 Stack |
-| Endpoint collector | Small Rust agent | ours | 01 Stack |
+| Endpoint collector | Small Rust agent, shipped as signed native packages (§3.7) | ours | 01 Stack |
+| One-click connection | Microsoft Graph application and service principal APIs through one administrator sign-in; Google Cloud Resource Manager, Service Usage and IAM APIs | vendor APIs | §3.7 |
+| Collector packages | MSI, signed and notarized pkg, .deb and .rpm built in our release pipeline (cargo-deb, cargo-generate-rpm, Apple's pkgbuild and notarytool; the MSI build tool is chosen in phase 91 research, with the WiX Toolset's licence and terms to verify). Build tools only: nothing of theirs ships inside the collector | MIT (cargo-deb, cargo-generate-rpm); others to verify | §3.7 |
+| Collector updates | Signed update metadata in the style of The Update Framework, served by the host; the Rust client is chosen in phase 91 research | to verify | §3.7 |
 | Databases | dlt (backfill, cursor columns), Debezium Server (CDC, no Kafka) | Apache-2.0 | 01 §2.1 |
 | Extraction | Apache Tika 4 server; Docling | Apache-2.0; MIT | 01 §2.2 |
 | OCR | Tesseract or PP-OCRv5 on CPU; PaddleOCR-VL 0.9B or granite-docling-258M for hard pages | Apache-2.0 (weights too) | 01 §2.2 |
@@ -345,16 +381,16 @@ Only Apache, MIT, BSD, PostgreSQL, ISC, and LGPL dynamically linked; a licence c
 |---|---|
 | 69 Team Mode reconciliation | Device keys that sign marks, lowerings, overrides, acknowledgments and hold or case decisions; the signed-payload interface (TMR-05) |
 | 70 Gate, manifests, labels | Labels, scales, dominance, join, `SessionMark`, `lowerByPerson`, routing tiers, signed bundle, decision records, label maps, D-22 versioning, D-49 event naming; the platform's tools (`catalog.*`, `dataset.assemble`, `query_data`) declare manifests |
-| 71 Identities and credentials | Verified clearances, compartments and officer roles; delegation that narrows for the opportunity agent and connector agents; two-person signatures |
+| 71 Identities and credentials | Verified clearances, compartments and officer roles; delegation that narrows for the opportunity agent and connector agents; two-person signatures; device binding credentials for enrolled collectors |
 | 72 Execution backends | Sandboxes for extraction workers, agent-written connectors and the trainer; network fences |
-| 73 Credential broker | Holds the Microsoft 365 certificate, Google service account key and database credentials; connectors see only broker-signed requests; secret scanning of tool output |
+| 73 Credential broker | Holds the Microsoft 365 certificate generated on the host, the Google credential, the file-share account and database credentials; connectors see only broker-signed requests; secret scanning of tool output |
 | 74 Run contracts | Caps on cost, time, tool calls for unattended runs: tier 2 classification, LLM extraction, the opportunity agent, training jobs |
 | 28 Secure workflow setup | None (parallel) |
 | 29 CleanUp tool | Never-touch list gains held items and personal existence records; the hold check lives inside the tool |
 
 ### 8.2 On the later milestones
 
-- **L1 (pulled forward in part).** The platform needs the always-on host now: the Compose stack, amd64 images on Strix Halo, ROCm and Vulkan passthrough, the local inference service exposed through the hybrid provider, and an offline start. It does **not** need Theia, the relay or OpenShell. Recommendation: split L1 into "L1a host and local inference" (inside this milestone, phase 85 and the host parts of 88) and "L1b Theia appliance" (stays later). Owner decision 10.1-1.
+- **L1 (pulled forward in part).** The platform needs the always-on host now: the Compose stack, amd64 images on Strix Halo, ROCm and Vulkan passthrough, the local inference service exposed through the hybrid provider, and an offline start. It does **not** need Theia, the relay or OpenShell. Recommendation: split L1 into "L1a host and local inference" (inside this milestone, phase 85 and the host parts of 88) and "L1b Theia appliance" (stays later). Decided: the split (owner, 2026-11-18, decision 10.1-1).
 - **L2:** not needed. Multi-person use works through verified clearances and source ACLs on one host.
 - **L4:** optional later: anchor package manifest roots, hold manifests and governance-log roots (roots only).
 - **L5:** catalog federation between edge and HQ, per-label-cell keys for edge devices (03 open question 6), pooled compute for extraction and training.
@@ -377,6 +413,9 @@ Merged from 01 §7, 02 §11, 03 Risks and 04 §10. Highest first.
 | Malicious files exploit parsers | High | Forked parsers, sandboxed workers with no network, limits (01 §7) |
 | ROCm on gfx1151 freezes the host; training starves serving | High | Pinned containers, memory fraction 0.8, cgroup caps, one heavy job at a time, checkpoints; GB10 for long runs (04 §3.3) |
 | Endpoint collectors hydrate cloud placeholders | High | Detect sync roots and placeholder attributes and skip (01 §3.3) |
+| The administrator's setup sign-in can create apps and grant consent | High (security) | Used only during setup, held in memory and never stored; afterwards the app holds only the listed least permissions; setup shows each step; no app of ours exists in the tenant before or outside it (§3.7) |
+| Collector updates as an attack path onto every machine | High (security) | Updates signed and served only by the host, staged with rollback and a minimum version; the signature is checked before install (§3.7) |
+| A leaked enrolment code enrols an unknown machine | Medium | Codes scoped to a device group and a count, expiring and revocable; every new device visible in the source list; a collector can submit only items from its own machine under its own device credential (§3.7) |
 | Licence contamination | High | CI licence check for code and weights |
 | Over-labelling locks people out | Medium | Impact-ordered queue, "could be lower" batches, lock-out metrics (02 §11.1) |
 | Expectations: OCR, audio and LLM extraction take weeks to months | Medium | Tiering, priority queues, separate backlog display, honest copy (03 §1.2) |
@@ -391,7 +430,9 @@ Merged from 01 §7, 02 §11, 03 Risks and 04 §10. Highest first.
 
 ## 10. Decisions
 
-### 10.1 Decisions for the owner (14)
+### 10.1 Decisions for the owner (14, answered 2026-11-18)
+
+Each decision below carries the owner's answer. Decisions 1 to 13 were accepted as recommended; decision 14 was changed.
 
 **A. Placement and platform**
 
@@ -399,18 +440,22 @@ Merged from 01 §7, 02 §11, 03 Risks and 04 §10. Highest first.
    - Options: (a) split L1 into L1a "host and local inference" now and L1b "Theia appliance" later; (b) build a throwaway host only for the data platform; (c) wait for L1 after the relay.
    - Recommendation: (a).
    - Reason: R11 puts the platform before the relay, but L1 depends on the relay. The host slice does not, and building it once avoids two host stacks.
+   - **Decided (owner, 2026-11-18):** (a), as recommended. L1a is phase 85 and the host parts of phase 88; L1b stays a later milestone.
 2. **Milestone identity.**
    - Options: (a) its own milestone between v0.7.0 Stage 1 and the relay, which then becomes a separate milestone; (b) a stage inside v0.7.0.
    - Recommendation: (a), with phases numbered 85 to 101.
    - Reason: it is larger than all of v0.7.0's relay work, and the relay's own stage gate stays intact.
+   - **Decided (owner, 2026-11-18):** (a), as recommended, with phases 85 to 101. v0.7.0 keeps Phase 68 and Stage 1; the relay stages became their own milestone after this one. Versions are the owner's to set.
 3. **Plaintext on the host.**
    - Options: (a) Postgres in plaintext on an encrypted disk, plus per-item keys for erasable content and an encrypted blob store; (b) keep the paused "no plaintext on disk anywhere" promise, which rules out server-side search.
    - Recommendation: (a), stated plainly in SECURITY.md.
    - Reason: search, RLS and the graph need plaintext in the database (03 §4 row 14, open question 2).
+   - **Decided (owner, 2026-11-18):** (a), as recommended, stated plainly in SECURITY.md.
 4. **Python on the host.**
    - Options: (a) pinned, sandboxed worker containers for extraction, detectors, entity resolution and training; (b) port everything to TypeScript or ONNX in Node.
    - Recommendation: (a).
    - Reason: Docling, Presidio, GLiNER, Splink and the training stack are Python, and porting them would take years. The engine and gate stay TypeScript (03 open question 7).
+   - **Decided (owner, 2026-11-18):** (a), as recommended.
 
 **B. Storage and data handling**
 
@@ -418,10 +463,12 @@ Merged from 01 §7, 02 §11, 03 Risks and 04 §10. Highest first.
    - Options: (a) only the three in §5.2: the capped re-extraction cache, the hold store, and rare approved training snapshots; (b) no cache, always re-fetch; (c) a full raw copy layer.
    - Recommendation: (a), with the cache on by default for scans, images and audio, capped at 10 percent of the host disk and kept for 180 days.
    - Reason: re-fetching a million scans would use most of a day's Microsoft 365 budget, and better OCR models will keep arriving (01 §3.3).
+   - **Decided (owner, 2026-11-18):** (a), as recommended: the cache on by default for scans, images and audio, capped at 10 percent of the host disk and kept for 180 days.
 6. **Mail and personal folders.**
    - Options: (a) off by default. Turning them on needs your organization to confirm in the wizard that a privacy assessment and an employee notice exist. Mail then runs in label-only mode (a card, no content, chunks or vectors). (b) Mail fully indexed from the start.
    - Recommendation: (a).
    - Reason: scanning mail is electronic monitoring under several regimes (02 §11.7). Label-only mode still gives the data map, holds and requests.
+   - **Decided (owner, 2026-11-18):** (a), as recommended.
 
 **C. Visibility and people**
 
@@ -429,10 +476,12 @@ Merged from 01 §7, 02 §11, 03 Risks and 04 §10. Highest first.
    - Options: (a) strict indistinguishability everywhere; (b) your organization may choose, per scale, "existence only" placeholders with a steward and a request-access button, which needs a discovery description that a person approved.
    - Recommendation: (a) by default, with (b) as an opt-in per scale.
    - Reason: titles and counts leak, and an opt-in keeps the strict default for the classified scales (02 §8.8, 03 open question 3).
+   - **Decided (owner, 2026-11-18):** (a) by default, with (b) as an opt-in per scale, as recommended (KB-15).
 8. **Personal mark defaults.**
    - Options for quota, location-only mode and notice delay.
    - Recommendation: allowed in a person's own areas only. Quota of 5 GB and 20,000 items per person. Location-only mode off. Notice at override time, with any delay capped at 90 days and recorded.
    - Reason: the cap bounds abuse, and these defaults are easy to defend as proportionate (02 §10). Counsel should confirm.
+   - **Decided (owner, 2026-11-18):** the recommended defaults, with counsel to confirm them as the recommendation said.
 
 **D. Legal positions (with counsel)**
 
@@ -440,10 +489,12 @@ Merged from 01 §7, 02 §11, 03 Risks and 04 §10. Highest first.
    - Options: (a) retrain from the manifest within a deadline, with the incumbent model taking over if the deadline passes; (b) document why not, case by case; (c) attempt unlearning.
    - Recommendation: (a), with a 30-day default deadline.
    - Reason: unlearning gives no guarantee, while adapters are cheap to retrain (04 §8.3, 02 open question 11).
+   - **Decided (owner, 2026-11-18):** (a), as recommended, with a 30-day default deadline.
 10. **Derivatives as records.**
     - Options: (a) derivatives follow the original's retention class, are searched in requests, and are listed as processing; model weights are never produced; (b) derivatives are transient working copies outside request scope.
     - Recommendation: (a), pending counsel.
     - Reason: the Access to Information Act's definition of a record probably reaches them (02 §9, open question 10).
+    - **Decided (owner, 2026-11-18):** (a), as recommended, pending counsel.
 
 **E. Model factory**
 
@@ -451,23 +502,33 @@ Merged from 01 §7, 02 §11, 03 Risks and 04 §10. Highest first.
     - Options: (a) local teachers only; (b) also attested NEAR AI TEE models, as inference used to write training targets, where the label's routing allows; (c) any cloud model.
     - Recommendation: (b).
     - Reason: R9 forbids third-party *training*. Teacher inference in an attested TEE is the same route your organization already allows for that label. Training itself always runs on your organization's hardware (04 §4).
+    - **Decided (owner, 2026-11-18):** (b), as recommended. Training itself runs only on your organization's own machines or hardware endpoints it controls (FAC-09).
 12. **Going live.**
     - Options: (a) one click approves a specialist up to shadow, and a second click is needed for canary unless policy allows auto-promotion; (b) fully automatic once gates pass; (c) a person at every step.
     - Recommendation: (a), with auto-promotion off by default.
     - Reason: this keeps the one-click promise without letting an unevaluated model answer people (04 D9).
+    - **Decided (owner, 2026-11-18):** (a), as recommended, with auto-promotion off by default.
 13. **First training data.**
     - Options: (a) the first specialist uses chat and run logs only; organization data comes after classification, holds and erasure exist, opt-in per source or collection, signed; (b) organization data from the start.
     - Recommendation: (a).
     - Reason: only items with a known training right are allowed (02 §8.7), and logs are data the extension already protects (04 §9 phase B).
+    - **Decided (owner, 2026-11-18):** (a), as recommended.
 
 **F. Source onboarding**
 
-14. **How your organization registers the Microsoft 365 app.**
-    - Options: (a) a separate app registration for each organization, created by a guided script, with a certificate held in the broker; (b) one multi-tenant app that we publish.
-    - Recommendation: (a).
-    - Reason: it is more sovereign, works offline from our side and fits "data stays on premises". The multi-tenant app could come later for convenience (01 §5).
+14. **How your organization connects Microsoft 365 (changed by the owner: "easy from the start").**
+    - Options weighed: (a) a separate app registration for each organization, created by a guided script, with a certificate held in the broker; (b) one multi-tenant app that we publish.
+    - Recommendation was (a), because it is more sovereign, works offline from our side and fits "data stays on premises", with the multi-tenant app as a later convenience (01 §5).
+    - **Decided (owner, 2026-11-18), changed:** easy from the start, with no manual app registration. A one-click "Connect Microsoft 365": an administrator signs in once. Setup then creates your organization's own app registration in its own tenant, uploads a certificate generated on the host (the private key never leaves the host and is held in the credential broker), and grants admin consent. No shared multi-tenant app that we publish, because its publisher-held credential could reach every customer tenant. Google Workspace gets the same one-click treatment (an automated per-organization setup), as do file shares. Details in §3.7; requirements SPIKE-09 and CONN-01 to CONN-04.
+    - Reason: it keeps what made (a) right (your organization's own app, the credential on your own host, nothing of ours in the tenant) and removes the manual work that made (a) hard; the convenience of (b) is not worth one credential that could reach every customer.
 
-### 10.2 Decided in design: override if you disagree
+**Also decided by the owner on 2026-11-18** (not among the 14):
+- **Collectors are super simple to install.** The host is a container stack; endpoint collectors are small signed native packages pushed by device management, with zero-config enrolment by a code, automatic updates and a local notice with the personal mark; agentless where possible (§3.7; COLL-01 to COLL-06).
+- **Fine-tuning runs only on your organization's own machines or hardware endpoints it controls** (§3.6; FAC-09).
+
+### 10.2 Decided in design (accepted by the owner, 2026-11-18)
+
+The owner accepted all 32 on 2026-11-18. Since then file shares are read from the host with nothing installed on the file servers (§3.7); that changes how row 3's share connector runs, not the choice in row 3.
 
 | # | Decision | Reason | Source |
 |---|---|---|---|
@@ -506,4 +567,4 @@ Merged from 01 §7, 02 §11, 03 Risks and 04 §10. Highest first.
 
 ### 10.3 Questions for spikes, not the owner
 
-ACL fidelity without full control, delta token expiry over multi-day backfills, `immutableId` with delta (phase 86); real throughput of Docling, OCR tiers, whisper.cpp, embeddings and LoRA on Strix Halo under ROCm and Vulkan (phases 85 and 87); Google quota figures and keyless service-account credentials on an on-premises host (phase 90 research); exact ROCm and PyTorch pairing for the host (phase 85); Mosaic and Splink licences (phase 96 research).
+ACL fidelity without full control, delta token expiry over multi-day backfills, `immutableId` with delta (phase 86); real throughput of Docling, OCR tiers, whisper.cpp, embeddings and LoRA on Strix Halo under ROCm and Vulkan (phases 85 and 87); Google quota figures and keyless service-account credentials on an on-premises host (phase 90 research); exact ROCm and PyTorch pairing for the host (phase 85); Mosaic and Splink licences (phase 96 research). Added 2026-11-18: the one-click Microsoft 365 sequence, its public client and certificate self-rotation (phase 86); which Google setup steps have APIs (phase 90 research); enrolment code scoping, code signing and notarization per operating system, the MSI build tool's licence and terms, and the collector update client (phase 91 research).
