@@ -708,6 +708,17 @@ asking: their edits and commands go through the same approval policy as every
 other agent's. That policy is the only limit: nothing confines the red team's
 writes to `.planning/`, and Bash can reach anywhere the policy allows.
 
+**Staff team write limits.** In a team file with a `staff:` block (the military
+staff templates), two members are held to their own files by the extension, not
+only by their instructions: the `red-team` may write only
+`.planning/staff/products/<section>/red-team-critique.md`, and the
+`release-guard` only files under `.planning/staff/guard/`. Write and Edit refuse
+any other path outright (no approval card), after resolving `..`, absolute paths
+and links, so a critique or a verdict can never change a plan file. Such a member
+is also given no tool that could write elsewhere (shell, document and graphics
+makers, MCP tools, starting other agents), even when its `tools:` line lists one.
+Teams without a `staff:` block are unaffected.
+
 **Update Team** rewrites a team file (and, for a project, the extension's own
 block in `AGENTS.md`) only from the **NEAR AI: Update Team…** command or the
 Team Studio button, after a preview and a confirmation, never while a run is in

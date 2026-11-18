@@ -587,5 +587,140 @@ export const TEMPLATE_HISTORY: Record<string, TemplateSnapshot[]> = {
         ]
       }
     }
+  ],
+  'staff-j5-plans': [
+    {
+      version: 1,
+      definition: 'a3fc09cd36a4f3be',
+      guidance: [
+        '1c14ba20f94496a7',
+        '104f6e7f44235e52',
+        '79b43c9f1112b6f0',
+        '7b446749ba24c5ad',
+        '6b40aa98e0664999',
+        '5db0ed25e761dcf3',
+        '9c0c56371208ad8d',
+        '5f7f6b04807a025d',
+        'abac7b07f18501b7',
+        'aa090c2178bfc471',
+        'a8520fdd6bf7a6a5',
+        'bfda4a857e25e98b',
+        '034675283ba5effc',
+        '77c3fefe1381d383',
+        '269fd7376122d11f',
+        '0c1d6f2d1d78c842',
+        '5db1e1c1a0713cf4',
+        'cc555a25a757640c',
+        '8e0489ed369c7ef2',
+        'c97248feeb46ddbd',
+        'e967a09f15455a38',
+        '22794a0bbed59843',
+        '0b434e25778a1ca9',
+        '6b223ade7e03a9ef',
+        'c308c7dc2042fb5c',
+        'c09bddab4b6c935b',
+        '2c5568e08ca8c6f6',
+        '8bf21c9d633c692b',
+        '30a23d4c2a567145',
+        'ca1c25ebf4bd77b2',
+        '5e995f9505afdb7e',
+        '2128d739bd08a370'
+      ],
+      members: {
+        'lead-planner': [
+          '3236c0ea7a9cd222',
+          'ac0abb93ddd45dd2',
+          '71544f3db2a17ed5',
+          '83bb757d07f4819f',
+          'd210fc4d0036c8be',
+          '62d18df77d77e99f',
+          'f326ff60e413f3d5',
+          '99e7d7ddb003a742',
+          'aac5bbd0e16951f2',
+          '77947675feb540e1',
+          '76e6bd00e22caf31',
+          '14e98e1982ae322d',
+          '364c639b0b6d3c77',
+          'd3ab3780486c0256',
+          'e45bd04c4abb3085',
+          '61f95702bfa34a85'
+        ],
+        'policy-planner': [
+          '7674765cd3f74b44',
+          '6fb3fb12a48aa5a6',
+          '7b89d7c139ec5a22',
+          '2449859a3ed01603',
+          'aec29e19749e71c4',
+          'a714d9c7ff32aabf',
+          'cfafae5dae5597f4',
+          '3a547897b38c4161'
+        ],
+        'design-planner': [
+          '86c0431e617fc735',
+          'a86a513a2b977db1',
+          'd5bdfc12df37def2',
+          '6032156b0d0c6b92'
+        ],
+        'coa-cell-a': [
+          '4845b30c2e8a25bd',
+          '2d8eff7b909e329b',
+          '559c2cac03590427'
+        ],
+        'coa-cell-b': [
+          '455d2436bda2a589',
+          '6067897bf51d3b11',
+          'c0d5abf3607ace80'
+        ],
+        'red-cell-seat': [
+          '0f33558477e86842',
+          '8bb35155752b4cb9',
+          '7d1f0478aa840a01',
+          '54193062778c2bb9'
+        ],
+        'red-team': [
+          '6593435d40f827fe',
+          'd1648804aece2743',
+          'e1535324c850b223'
+        ],
+        'component-seat': [
+          '41cfce5a2b5bf396',
+          '23267e7cccb766a7'
+        ],
+        'sustainment-seat': [
+          'ee7ba9d517534ec3',
+          '7a23bc07a9ecd29f',
+          'b7b127654272b524',
+          '92f2847f9ecc7ad5'
+        ],
+        'legal-support': [
+          '0361ffe920ebd32a',
+          'd4a8dff84f08d8a7',
+          '869229dc45209b79'
+        ],
+        'plans-writer': [
+          'bcea2728ac67b520',
+          '62b075b954f39905',
+          '92cb57c9922e0764',
+          'b94b0102e2e2c219',
+          '55f5e652315b3b03'
+        ],
+        'release-guard': [
+          'e0547212317b081d'
+        ],
+        'future-ops-seat': [
+          '1a31148193ca81cc',
+          '40a9607cc570de76',
+          '026ebf8030edcf8b',
+          '558309ed0836d82a'
+        ],
+        'fires-seat': [
+          'c4ae1411ee9874d9',
+          '01be45b49ab56964'
+        ],
+        'convergence-planner': [
+          '7506917d17ed3576'
+        ]
+      }
+    }
   ]
 };
